@@ -295,7 +295,10 @@ export const harnessCaused = (e) => e?.meta?.cause === 'harness' || HARNESS_CAUS
  */
 export const STOP_NOTE = 'a stop, not a failure';
 export const PERSON_CAUSE = /\ba stop, not a failure\b/i;
-export const personCaused = (e) => e?.meta?.cause === 'person' || PERSON_CAUSE.test(String(e?.msg || ''));
+// PU-58 (2.78.0): the honest exit (task impossible) is a report, not a failure: it counts nowhere as a hand-back.
+export const IMPOSSIBLE_NOTE = /(?:^|Handed back [^:]+:\s*)Impossible as written/i;
+export const impossibleExit = (e) => e?.meta?.cause === 'impossible' || IMPOSSIBLE_NOTE.test(String(e?.msg || ''));
+export const personCaused = (e) => e?.meta?.cause === 'person' || PERSON_CAUSE.test(String(e?.msg || '')) || impossibleExit(e);
 
 /**
  * 2.58.3 (N3): the one rule for counting a task's loop. The hand-backs (task.paused) that count, since the task was

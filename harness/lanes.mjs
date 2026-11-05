@@ -55,6 +55,7 @@ import { readHolds } from './task-hold.mjs';
 import { listLocks } from './lock.mjs';
 import { recordAlive } from './proc-identity.mjs';
 import { DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
+import { protectSharedLinks } from './lane-sparse.mjs';
 
 const isSha = (s) => /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(String(s || ''));
 const cleanEnv = (extra = {}) => { const e = { ...process.env, ...extra }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/.test(k)) delete e[k]; return e; };
@@ -370,6 +371,11 @@ export async function refreshLane(root, lane, { by, busyOk = false, tests = true
   // checkout (T-016 mapped to an empty .lanes/reviewer-s1 was refused for main's own board files).
   if (!isLaneWorktree(lane.dir, root)) return refuse(`${path.relative(root, lane.dir).split(path.sep).join('/') || lane.dir} is a leftover folder, not a lane (no git worktree): nothing to refresh; the next agent on ${lane.task || 'the task'} gets a fresh copy`);
   if (!isSha(tip)) return refuse(`${main} has no commit`);
+  // 2.78.0 (B-105): the lane's studio/ and .studio/ are links to main's. Leave them out of the lane's index again before
+  // anything reads its status or merges (a lane that lost that state refused the merge: "commit your changes or stash",
+  // and a merge that went on would write main's live board files through the link).
+  const prot = protectSharedLinks(lane.dir);
+  if (prot.why) return done('red', prot.why, { stage: 'merge', head: out(git(lane.dir, 'rev-parse', 'HEAD')), merged: false });
   const busy = laneBusy(root, lane);
   if (busy.busy && !busyOk) return refuse(`someone is working in it (${busy.why}); --busy-ok merges anyway (a Producer or Director session, a person, or an agent outside the harness)`);
   const gd = out(git(lane.dir, 'rev-parse', '--absolute-git-dir'));
@@ -399,6 +405,10 @@ export async function refreshLane(root, lane, { by, busyOk = false, tests = true
   let merged = false;
   let head = out(git(lane.dir, 'rev-parse', 'HEAD'));
   if (behind > 0) {
+    if (prot.links.length && !prot.sparseOk) {
+      const adds = out(git(lane.dir, 'diff', '--name-only', '--diff-filter=A', 'HEAD', tip, '--', ...prot.links.map((l) => `${l}/`))).split('\n').filter(Boolean);
+      if (adds.length) return done('red', `${main} adds ${adds.slice(0, 3).join(', ')}${adds.length > 3 ? ` +${adds.length - 3}` : ''} under ${prot.links.join(', ')}, which this lane links to the main checkout's and no longer leaves out (its sparse checkout is off); merging would write through the link, so nothing was merged: make a fresh lane copy (npm run lane -- create) for the task`, { stage: 'merge', head, merged: false, restamped });
+    }
     const ident = out(git(lane.dir, 'config', 'user.email')) ? [] : ['-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local'];
     const m = spawnSync('git', [...ident, 'merge', '--no-edit', '-m', `Merge ${main} into ${branch} (lanes refresh by ${String(by).slice(0, 40)})`, tip], { cwd: lane.dir, encoding: 'utf8', env: laneEnv, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
     if (m.status !== 0) {

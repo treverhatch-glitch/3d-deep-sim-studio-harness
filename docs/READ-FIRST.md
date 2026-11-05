@@ -7,6 +7,7 @@ repeat it, so the two can't disagree.
   the repo. Long history? `npm run brief -- <ID>`.
 - Producers (including a new model taking over the role): run `npm run handoff`; it covers the read
   order and more. `studio/MASTER.md` maps every key document.
+- Held-out checks that run only at the merge train, and why you can't read them: `docs/HOLDOUT.md`.
 - Planning a game: `docs/GAME-PLANNING.md`.
 
 Do not scan the whole repo. Start here.

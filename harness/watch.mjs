@@ -169,6 +169,9 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   // 2.58.0 (PU-39): a live but long-silent session gives its task and its slot back (nothing is killed).
   for (const r of releaseStalled({ now, dryRun })) findings.push({ kind: r.skipped ? 'stalled' : 'released', agent: r.agent, task: r.tasks[0], msg: r.msg, producer: false });
   let q = parseNextQueue();
+  // 2.78.0 (PU-60): the waves plan in shadow mode: one waves.shadow event at most every STUDIO_WAVES_MIN minutes. It
+  // only measures (harness/plan-waves.mjs); it never changes which task starts, and a failure here is ignored.
+  if (!dryRun) import('./plan-waves.mjs').then((m) => m.shadowPass({ now, deps: { q } })).catch(() => {});
   // 2.58.0 (P-052): a task in both board files (a `task done` or reopen killed between its two writes) reads once
   // already; one write under the board lock keeps only that copy.
   if (q.duplicates.length) {

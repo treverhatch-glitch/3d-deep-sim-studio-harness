@@ -4,6 +4,37 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.78.0] — 2026-11-05
+Builders that get more tasks right: the dev plan's research items PU-54 to PU-63 (all but PU-61) and the crew's B-105.
+No new approval step. Status per item, what is untested and the upgrade note: docs/RELEASE-2.78.0.md.
+### Builders succeed more often
+- **Load-sensitive tests (PU-56, the crew's M7, P-262).** A test file that fails alone while other verifies run is run
+  again at low load on a quiet machine (`STUDIO_FLAKE_QUIET_WAIT_MIN`, 10) before it counts as `real`; passing there
+  labels it `load-sensitive` (`.studio/load-sensitive.json`), and a train whose only reds are load-sensitive lands.
+- **Lanes refresh after an upgrade (B-105, P-261).** Every lane refresh leaves the lane's `studio/` link out of the
+  merge, so main's live board files are never touched; a builder's verify in a stale lane refreshes it and runs again
+  (`STUDIO_LANE_REFRESHED`) instead of telling the builder to rebase and restamp.
+- **An honest "impossible" exit and canary tasks (PU-58).** `npm run task -- impossible <ID> --why "…"` is a valid
+  outcome, not a failure; `task add … --canary "<why>"` adds an impossible-on-purpose task, counted per model in
+  `.studio/canaries.json`.
+- **Start backoff, a jittered loop, unique agent names (PU-63).** A start refused for the same reason backs off (at most
+  `STUDIO_START_BACKOFF_MAX_MIN`, 30); the loop is jittered (`STUDIO_SUPERVISOR_JITTER`, 0.1); a new name skips
+  leftover lane folders and names just taken.
+- **Futility cap `auto` (PU-62).** The new default: a task type's cap is enforced only when its own shadow data shows it
+  rarely stops a run that would have succeeded (`STUDIO_FUTILITY_AUTO_MIN_SHADOW`, `STUDIO_FUTILITY_AUTO_MAX_LATE`).
+  The routing holdout stays 0 (the owner's deferral), its code path ready.
+### Wrong results stop passing
+- **Held-out checks (PU-54).** Cases outside every checkout (`STUDIO_HOLDOUT_DIR`) that builders can't read; the new
+  required `holdout` gate runs them at the merge train only, and a reused lane verify runs the train-only gates too.
+  No cases: it passes. docs/HOLDOUT.md.
+- **Player journeys (PU-55).** The new required `journey` gate plays scripted journeys through public inputs, with a
+  no-input control and a fresh-process reopen. No journeys: it passes with a WARN. docs/JOURNEYS.md.
+- **Mutation report (PU-57):** `npm run mutants`, report only.
+- **The bench's held-out split (PU-59):** verdicts accept, unproven, compute-bought and reject (`STUDIO_BENCH_NOISE`,
+  `STUDIO_BENCH_COST_MAX`). docs/BENCH.md.
+- **Plan-time waves (PU-60), shadow only:** `node harness/plan-waves.mjs [replay]`; `--scope` on any task.
+- Tests: qa/selftest-278a.mjs to qa/selftest-278h.mjs.
+
 ## [2.77.3] — 2026-11-05
 The crew's patch request from the 48-hour run on 2.77.1 (B-99, B-104 to B-115, M1–M7). Item-by-item status, including
 what 2.77.2 and 2.78.0 already cover: docs/RELEASE-2.77.3.md.

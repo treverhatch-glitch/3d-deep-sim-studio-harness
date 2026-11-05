@@ -208,7 +208,8 @@ import { labelTest, maybeQuarantine, recordTimeoutFlakes, readQuarantine } from 
 const seq = (...r) => { let i = 0; return () => r[i++] || { ok: true }; };
 const alone = labelTest({ check: 'game:unit', file: 'game/demo/tests/panel.e2e.test.mjs', runAlone: seq({ ok: false, text: 'Error: listen EADDRINUSE: address already in use 127.0.0.1:46117\\n FAIL  game/demo/tests/panel.e2e.test.mjs > opens' }) });
 const red = labelTest({ check: 'game:unit', file: 'game/demo/tests/hud.e2e.test.mjs', runAlone: seq({ ok: true }, { ok: true }), redText: 'Error: Port 46200 is already in use\\n FAIL  game/demo/tests/hud.e2e.test.mjs > lays out' });
-const real = labelTest({ check: 'game:unit', file: 'game/demo/tests/x.test.mjs', runAlone: seq({ ok: false, text: ' FAIL  x > adds up' }) });
+// 2.78.0 (PU-56): a file that fails alone is re-run at quiet low load before it is real, so the plain failure fails both runs.
+const real = labelTest({ check: 'game:unit', file: 'game/demo/tests/x.test.mjs', runAlone: seq({ ok: false, text: ' FAIL  x > adds up' }, { ok: false, text: ' FAIL  x > adds up' }) });
 const root = process.cwd();
 fs.mkdirSync(path.join(root, '.studio'), { recursive: true });
 let q = null;

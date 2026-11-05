@@ -330,7 +330,7 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   (at most `STUDIO_FLAKE_MAX_FILES`, 5; once per train) runs ALONE on the same tree, a focused run as a re-check:
   fails → `real`; passes and the file has a test-randomness finding (`harness/test-rng.mjs`) → `seed-flake`; passes,
   and again with one test worker → `load-flake`; passes then fails → `intermittent`. Labels go to
-  `.studio/flakes.jsonl`; they never change what the train does. A test labelled flaky `STUDIO_FLAKE_QUARANTINE_AFTER`
+  `.studio/flakes.jsonl`; they don't change what the train does, except `load-sensitive` (below). A test labelled flaky `STUDIO_FLAKE_QUARANTINE_AFTER`
   (3) times in `STUDIO_FLAKE_WINDOW_DAYS` (7) goes on `studio/quarantine.json` (`{ test, label, since, why, by,
   status, evidence, task }`) as PROPOSED, and ONE fix task is filed. The harness never silences a test on its own
   authority: a proposed entry still runs; the digest and `npm run flakes` list it until a person, an agent under the
@@ -342,6 +342,23 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   quarantined. The list silences a check, so a lane changing it is tier C; a game dev releases an entry (`npm run
   flakes -- release <test> --by <name>`, same rules). Events: `test.quarantine_proposed`, `test.quarantined`
   (confirmed or automatic), `test.quarantine_released`. `STUDIO_FLAKE_TRIAGE=off` turns the triage off.
+  2.78.0 (PU-56): "alone" isn't quiet while other verifies run, so a file that fails alone is no longer `real` at once:
+  it runs again at low load (one test worker) after the machine is quiet (no other `machine:heavy` holder, no other
+  game check in a gate slot, no Unity outside the lock; `harness/flake-quiet.mjs`). Fails there too → `real`. Passes
+  there → `load-sensitive` (it needs a quiet machine; listed in `.studio/load-sensitive.json` as `{ test, check, first,
+  last, count }`; never quarantined). The quiet wait is bounded by `STUDIO_FLAKE_QUIET_WAIT_MIN` (default 10 minutes);
+  a machine that never went quiet leaves it `real`, "unconfirmed under load" (no red is passed without evidence). A
+  train whose red has ONLY `load-sensitive` failing test files (each labelled in that triage) doesn't hand its lanes
+  back for them, like a timeout-flake that passed alone at low load: it lands, the reds are reported
+  (`task.train.load_sensitive`, the log says so).
+  2.78.0 (C2c): the quiet re-run also holds other verifies back, since an alone run isn't alone when another verify
+  starts on the same fixed port: from the start of its quiet wait to the end of its run, the train leaves
+  `.studio/locks/machine-heavy-quiet-hold-<pid>.json` and new heavy work that isn't a landing (builder and lane
+  verifies) waits in the heavy queue, as for M6's train priority (`harness/heavy.mjs markQuietHold`). Bounded by
+  `STUDIO_FLAKE_HOLD_MIN` (default the quiet wait + `STUDIO_FLAKE_WAIT_MIN` + the game check's
+  `STUDIO_GAME_GATE_TIMEOUT_MS`, 30 minutes with the defaults; 0 or off: no hold), released when the re-run ends,
+  ignored and removed once past its bound or when the train's process is gone. Verifies already running are never
+  stopped: the quiet wait waits for them.
   2.77.3 (H2, B-112): each alone-run shows in the train's status (`flake check k of n: <file> alone`) and waits at
   most `STUDIO_FLAKE_WAIT_MIN` (10) minutes for a machine:heavy slot; a run refused as busy, or stopped before any gate
   ran, is "not run" (no label, never `real`) and the triage stops; the triage also stops at the first `real` label (the
@@ -513,6 +530,11 @@ RAM, threads and minutes; `node harness/rig-budget.mjs` shows an `artBake` share
   within the budget). `studio/machine-budget.json` `"maxConcurrent": { "unity": 2 }` or `STUDIO_HEAVY_MAX_<KIND>`
   (`STUDIO_HEAVY_MAX_UNITY`, `STUDIO_HEAVY_MAX_BROWSER_PLAYTEST`; `0` or `off`: no cap) changes it. A job at its cap
   waits: `waiting: 1 unity job already running (max 1)`.
+  2.78.0 (PU-56): `STUDIO_HEAVY_MAX_VERIFY` caps game verifies the same way (`harness/heavy-budget.mjs maxConcurrent`; the
+  train's verify is first in the queue; unset: no cap within the budget). On a PC that also runs Unity gates, 4-6
+  builder verifies at once slow a timing test past its budget (a 2 ms test took 2.2-2.5 ms under load, 0.7-1.1 ms
+  alone): set `STUDIO_HEAVY_MAX_VERIFY=3` there. The flake triager's confirming re-run waits for a quiet machine up
+  to `STUDIO_FLAKE_QUIET_WAIT_MIN` (10) minutes (see the flake triager).
 - A job that doesn't fit waits in a queue (a landing first, then first come) and says why: `waiting for RAM: needs
   8 GB, 3.1 free`. It waits up to `STUDIO_HEAVY_WAIT_MIN` like any wait; a claim bigger than the whole budget runs
   alone. `node harness/heavy.mjs status` shows the budget and each holder's claim.
@@ -589,6 +611,30 @@ template, and with `STUDIO_LANDING_BUILD=off`. `STUDIO_LANDING_CLIP_SECONDS` (15
 clip command, `{seconds}` and `{name}` placeholders), `STUDIO_LANDING_CLIP_TIMEOUT_MIN` (10);
 `STUDIO_LANDING_BUILD_WORKER=off` queues without starting the worker. `node harness/landing-build.mjs status` shows
 what is queued or running.
+
+## Plan-time scope and waves, in shadow mode (2.78.0, PU-60)
+
+The logs showed thousands of `hotspot.overlap` events in a few days. `task add` and `task start` already warn about an
+overlap (`harness/task-overlap.mjs`, `harness/hotspots.mjs`), but nothing schedules by it. `harness/plan-waves.mjs`
+measures what scheduling by it would do. (Not `harness/waves.mjs`: that is the fun-check waves module.) It changes
+nothing: no task is started, held or blocked by it.
+
+- A task may carry a **scope**: the globs of the files it expects to touch. `task add --scope "src/sim/**,docs/A.md"`
+  stores it as `scope` in the task's `task.added` meta (the flag already existed for engine passes; entries with spaces
+  are free text and are ignored). A task without a scope borrows the files its `hotspot.overlap` and `task.overlap`
+  history names.
+- `node harness/plan-waves.mjs [--json]` builds an overlap graph of the **ready** builder tasks and colours it greedily,
+  in queue order, into waves: tasks in one wave do not overlap. It prints the waves, which running lanes (their scope,
+  history and what the lane already changed) overlap which ready tasks, the tasks with neither scope nor history (they
+  overlap nothing), and the **serialized share**: ready tasks forced into wave 2 or later over all ready tasks.
+- The stop rule: if the serialized share is over `STUDIO_WAVES_MAX_SHARE` (0.6), the output and the event say waves
+  would over-serialize the crew, and scheduling by them should not be switched on.
+- Shadow logging: the watcher (`harness/watch.mjs`, each pass) logs a `waves.shadow` event at most every
+  `STUDIO_WAVES_MIN` minutes (30). `STUDIO_WAVES=off` stops it.
+- `node harness/plan-waves.mjs replay --events <events.jsonl> --days 14` reads past `task.start`, `task.done` and
+  `hotspot.overlap` events and reports how many recorded overlaps waves would have avoided (the two tasks' scopes, or
+  overlap history known before that event, overlapped), and roughly how much extra wall time: the task that started
+  second would have waited out the time the two ran together (a task with no done event counts as the median).
 
 ## Summary Format (`studio/done/YYYY-MM-DD-short-title.md`)
 

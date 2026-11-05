@@ -159,9 +159,75 @@ the compare adds a component line:
 
 In every case the owner decides whether to retire the guardrail; the bench changes nothing.
 
+## A held-out split, and the acceptance rule for harness changes (2.78.0, PU-59)
+
+Research on evolved harnesses found that about half of the gains came from overfitting to the cases the harness was
+tuned on, and some more from just spending more compute. So a harness change is judged on two groups of cases, and on
+its cost.
+
+- `npm run bench -- split --by <person> [--held-out-share 0.3]` writes `studio/bench/split.json`:
+  `{ "heldIn": [ids], "heldOut": [ids], "seed": n }`. It is seeded and stable: a case that is already in the file keeps
+  its side, and new cases are ranked by the seed (a hash of seed and id) until the held-out share is filled. Cases
+  that no longer exist drop out. `studio/bench/` is protected, so the command only writes the file and says it needs the
+  owner's signed approval, like any bench case.
+- `npm run bench -- run --split heldIn|heldOut` runs one split (a case not yet in the file is refused). The run records
+  which split it was.
+- Proposers (`retro`, `learn`, `experiment`) read failures from held-in cases only. None of them reads bench results
+  today (checked in 2.78.0), so nothing is filtered; if one ever does, it must read `readSplit().heldIn` and say so in a
+  comment.
+- `npm run bench -- compare <runA> <runB>` prints, when a split file exists, a block per split after the usual
+  comparison: the change in pass@1, pass^k and tokens per pass (tokens of all tries over the passing tries), then a
+  verdict. A is the harness before the change, B after. Only cases present in both runs (and unchanged) count.
+  - **accept**: neither split drops by more than the noise floor, at least one improves by more than it, and tokens per
+    pass rise at most the cost limit.
+  - **compute-bought**: it improves, no split drops, but tokens per pass rose more than the limit.
+  - **reject**: anything else, including a split that was not measured, a drop in either split, or no improvement
+    beyond noise (the change is "within noise").
+  `--json` adds the same numbers under `split`.
+- `--change C-3` attaches the verdict to that change record (`studio/changes/C-3.json`, `bench: { verdict, why, runs,
+  splits }`; see `npm run learn -- change list`). It adds that one field: the change record's own status, verdict and
+  evaluation from the event log are not touched.
+
+Settings: `STUDIO_BENCH_NOISE` (default 0.05) is the noise floor on pass@1 and pass^k; `STUDIO_BENCH_COST_MAX`
+(default 0.15) is the largest rise in tokens per pass that still counts as accept.
+
 ## Not yet
 
 - The runs haven't been tried on Windows. Killing the process tree there uses `taskkill /T /F`.
 - A real-agent run was only rehearsed with a custom tool command, not with a paid model.
 - The bench doesn't pick the cases. The owner and the crew choose the 20-30 tasks, and the owner sets a token budget
   for bench runs.
+
+## Mutation score per gate (`node qa/mutants.mjs`)
+
+A green gate may guard nothing. `qa/mutants.mjs` measures how much each required cartridge gate catches. On a scratch
+copy of the repo (never a lane, never main's files) it plants one small bug at a time in the sim cartridge
+(`cartridges/<name>/`, the active one, default `example-sim`; `qa.mjs` is left alone), runs the cartridge gates on it
+(`run-gates --only`), and records which gates failed. A gate that fails on a bug has *killed* it.
+
+```
+node qa/mutants.mjs [--cartridge <name>] [--max N] [--seed N] [--gates a,b] [--out file]
+node qa/mutants.mjs --compare <older report> [<newer report>]
+```
+
+- **Bugs planted** (plain text edits, seeded, deterministic): flip a comparison (`<` and `>=`), off-by-one in a `for`
+  bound, drop one call statement from the tick function, swap two adjacent statements in the tick, freeze an rng
+  result to a constant, leave one field out of save/serialise (when the cartridge has one), ignore one action type,
+  swap two ids or adjacent constants. The operators are dealt in turn so none crowds out the rest.
+- **Discarded, not counted**: a mutant that does not parse (`node --check`), and one that changes nothing (the same
+  digest of the scenarios, the goldens and a fixed fuzz replay as the original).
+- **Output**: `qa/reports/mutants-<date>.json` and a text summary: each gate's kill rate (killed / mutants it ran on),
+  the mutants no gate killed (file:line and operator), and the run time. A gate that is red on the unmutated
+  cartridge is left out and named. `browser-play` is not in the default set (it needs a browser); name it with `--gates`.
+- **Reading survivors**: a survivor is a spot where the sim can be wrong and every gate stays green, so it is the
+  code no check guards. Either a gate is missing a case (add a scenario, a golden or a regression replay) or the
+  line is dead. Check by hand that the mutant really changes what a player sees before adding a test for it.
+  Surviving `ignore-action` mutants mean no golden or scenario sends that action.
+- **Report only, for now**: it never fails a run and is not a required gate (always exit 0). The sample is small and
+  seeded, so one run's rates are noisy; the plan is to watch it for two weeks, then let a gate's kill rate not drop
+  (like `harness/ratchet.mjs`). `--compare` already prints each gate's rate change, flagging drops; compare runs with
+  the same cartridge, seed and `--max`. It is not wired as a gate.
+
+Settings: `STUDIO_MUTANTS_MAX` (mutants to run, default 40), `STUDIO_MUTANTS_SEED` (order, default 278),
+`STUDIO_MUTANTS_GATES` (gate ids to run; default the required cartridge gates except `browser-play`),
+`STUDIO_MUTANTS_BUDGET_MIN` (stop starting new mutants after this many minutes, default 20).

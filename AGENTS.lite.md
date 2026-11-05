@@ -24,6 +24,7 @@ rules are in `AGENTS.md`; open them only if something here doesn't cover your ca
   If your verify's shell was killed, the run goes on: `npm run verify -- --wait` shows it and its result.
   `node harness/done-check.mjs <ID>` says what is missing.
 - Stopping early: `npm run task -- pause <ID> --agent <you> --note "where you stopped"`.
+- A task that contradicts itself or can't be done without bending a check: `npm run task -- impossible <ID> --why "<what contradicts what>" --agent <you>` instead of changing the check; it isn't counted as a failure.
 
 ## The game's sim (`cartridges/<name>/`)
 

@@ -32,6 +32,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
+import { impossibleExit } from './busy.mjs';
 
 export const FAILURE_LABELS = ['repetition', 'premature-stop', 'no-stop', 'verify-missing', 'verify-wrong', 'spec-ignored', 'env-harness', 'quota', 'lane-conflict', 'unknown'];
 const ts = (e) => Date.parse(e?.ts) || 0;
@@ -154,7 +155,7 @@ export function buildAttempts(events, { now = Date.now() } = {}) {
     const a = open.get(task);
     if (e.type === 'task.done') close(a, ts(e), 'done', e);
     else if (e.type === 'task.forced') close(a, ts(e), 'forced', e);
-    else if (e.type === 'task.paused') close(a, ts(e), 'handed-back', e);
+    else if (e.type === 'task.paused') close(a, ts(e), impossibleExit(e) ? 'impossible' : 'handed-back', e);
     else if (['task.dropped', 'task.shelved'].includes(e.type)) close(a, ts(e), e.type.slice(5), e);
   }
   for (const a of open.values()) { a.end = now; a.outcome = 'open'; attempts.push(a); }
@@ -166,7 +167,7 @@ export function buildAttempts(events, { now = Date.now() } = {}) {
  * whole log sorted by time; `index` (optional, from attemptRows): the same log's session ends by agent.
  */
 export function labelFailure(a, inWin, all, index = null) {
-  if (a.outcome === 'done' || a.outcome === 'open') return null;
+  if (a.outcome === 'done' || a.outcome === 'open' || a.outcome === 'impossible') return null; // PU-58: the honest exit is no failure
   const txt = (e) => `${e?.msg || ''} ${JSON.stringify(e?.meta || {})}`;
   const mine = inWin.filter((e) => e.task === a.task || e.agent === a.agent || e.meta?.target === a.agent);
   const has = (re, types = null) => mine.some((e) => (!types || types.includes(e.type)) && re.test(txt(e)));

@@ -290,9 +290,24 @@ const SABOTAGE = {
     fs.cpSync(path.join(d, 'cartridges/example-sim'), path.join(d, 'cartridges/moss-game'), { recursive: true });
     return { STUDIO_CARTRIDGE: 'moss-game' };
   },
+  // 2.78.0 (PU-54): a held-out case the merged tree fails, in the train's env (the gate skips itself in a lane).
+  holdout: () => {
+    const h = fs.mkdtempSync(path.join(os.tmpdir(), 'sab-holdout-'));
+    fs.writeFileSync(path.join(h, 'sab.json'), JSON.stringify({ id: 'sab', command: 'node -e "process.exit(3)"', expect: { exit: 0 }, note: 'sabotaged' }));
+    return { STUDIO_GATE_PRIORITY: 'landing', STUDIO_HOLDOUT_DIR: h };
+  },
+  // 2.78.0 (PU-55): a journey whose goal holds with no input at all (the tick count), so the no-input control fails.
+  journey: (d) => {
+    const f = path.join(d, 'studio', 'journeys', 'example-sim', 'start-to-win.json');
+    const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    j.goal = { path: 'tick', op: 'gte', value: 1 };
+    fs.writeFileSync(f, JSON.stringify(j, null, 2));
+  },
 };
 // What the failure must mention, so a gate that fails for an unrelated reason does not count.
 const EXPECT = {
+  holdout: /FAIL sab: sabotaged/,
+  journey: /reached without playing/,
   session: /MISSING studio\/CURRENT_TASK\.md/,
   purity: /touched: Math\.random/,
   isolation: /three/,
@@ -4702,6 +4717,78 @@ if (inShard('selftest-2773b')) {
   const dir = copyRepo();
   const { selftest2773B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2773b.mjs')).href);
   await selftest2773B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.0 (PU-56): load-sensitive tests: a red is "real" only if it also fails at quiet low load.
+if (inShard('selftest-278a')) {
+  const dir = copyRepo();
+  const { selftest278A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-278a.mjs')).href);
+  await selftest278A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.0 (PU-58): the honest impossible exit and canary tasks.
+if (inShard('selftest-278b')) {
+  const dir = copyRepo();
+  const { selftest278B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-278b.mjs')).href);
+  await selftest278B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.0 (PU-54): held-out cases builders cannot read, run at the merge train only.
+if (inShard('selftest-278c')) {
+  const dir = copyRepo();
+  const { selftest278C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-278c.mjs')).href);
+  await selftest278C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.0 (PU-55): the player-journey gate (no-input control, fresh-process reopen).
+if (inShard('selftest-278d')) {
+  const dir = copyRepo();
+  const { selftest278D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-278d.mjs')).href);
+  await selftest278D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.0 (PU-57): the mutation report per gate.
+if (inShard('selftest-278e')) {
+  const dir = copyRepo();
+  const { selftest278E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-278e.mjs')).href);
+  await selftest278E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.0 (PU-59, PU-60): the bench's held-out split and acceptance rule; plan-time waves in shadow mode.
+if (inShard('selftest-278f')) {
+  const dir = copyRepo();
+  const { selftest278F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-278f.mjs')).href);
+  await selftest278F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.0 (PU-62, PU-63): the futility cap's auto mode and the routing holdout default; start backoff, loop jitter, unique agent names.
+if (inShard('selftest-278g')) {
+  const dir = copyRepo();
+  const { selftest278G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-278g.mjs')).href);
+  await selftest278G({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.0 (B-105): a lane refresh never writes through the lane's studio/ link; a builder's verify refreshes its own lane.
+if (inShard('selftest-278h')) {
+  const dir = copyRepo();
+  const { selftest278H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-278h.mjs')).href);
+  await selftest278H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.0 (C2c): the flake triager's quiet re-run holds other heavy work (builder and lane verifies) back while it runs.
+if (inShard('selftest-278i')) {
+  const dir = copyRepo();
+  const { selftest278I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-278i.mjs')).href);
+  await selftest278I({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

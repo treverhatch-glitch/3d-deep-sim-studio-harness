@@ -115,6 +115,13 @@ which node can't run, so use the line above there.) The guard finds the studio b
    verify. And the train refreshes a lane whose harness is behind main itself, before its checks (main merged in,
    commits re-stamped, no tests; `harness/train-refresh.mjs`); only a real conflict hands it back.
    `STUDIO_TRAIN_REFRESH=off` turns that off.
+   **2.78.0 (B-105):** a lane copy's `studio/` is a link to the main checkout's (a junction on Windows), and a refresh
+   used to merge main through it ("git merge failed: studio/task-holds.json"). Every refresh (the train's, `npm run
+   lanes -- refresh`, the upgrade's) now marks the lane's `studio/` paths left out of its index first, so main's live
+   board files are never touched; a real conflict elsewhere still stops it with the files named. A builder's verify in a
+   lane behind main on harness files refreshes the lane itself (as `harness`, same merge and re-stamp) and runs again on
+   the new code (`STUDIO_LANE_REFRESHED=1` marks that second run so it never loops); if the refresh can't run it says to
+   hand the task back (`npm run task -- pause`), not to rebase or restamp.
    **Before snapshot (2.73.0):** just before it merges, `--merge` writes `.studio/upgrades/<from>-to-<to>.json`: the
    studio's numbers over the `STUDIO_UPGRADE_SNAPSHOT_DAYS` (3) days before the update (landed per hour, false reds per
    train, tokens per landed change and by task, red verify %, workarounds per day, verify minutes, hand-backs, no-work

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // 2.30g: PreToolUse hook. Reads of generated folders (node_modules, build, dist, .godot, .import) are
 // denied before they cost tokens; the reason names the cheaper lookup. STUDIO_GUARD_PATHS=off disables.
+import path from 'node:path';
+import { holdoutDir, isBuilderSession } from '../../harness/holdout-dir.mjs';
 const DENIED = /(^|[\/\\])(node_modules|build|dist|\.godot|\.import)([\/\\]|$)/;
 const READERS = /^(cat|head|tail|less|more|grep|rg|find|ls|tree|wc|sed|awk|cp|mv|base64|xxd|od|strings|source|\.)$/;
 
@@ -22,7 +24,23 @@ export function targets(tool, input = {}) {
 // by an agent: a key in a transcript is a leaked key, and the owner key would let an agent approve itself.
 const SECRET = /(^|[\/\\])(\.env(\.(?!example$)[\w.-]+)?|\.studio-owner|owner-ed25519\.pem|studio-ed25519\.pem)([\/\\]|$)|(^|[\/\\])\.studio[\/\\]keys([\/\\]|$)/;
 
-export function decide(tool, input) {
+// 2.78.0 (PU-54): the held-out cases (STUDIO_HOLDOUT_DIR, harness/holdout-dir.mjs) are never read by a builder or a lane
+// session; the reviewer, Producer, Director and owner may. This is a path deny: a Bash one-liner in another language can
+// still read the folder, so the real protection is that it lies outside every lane's files (docs/HOLDOUT.md).
+function holdoutHit(tool, input, env, start) {
+  if (!isBuilderSession(start, env)) return null;
+  const dir = holdoutDir(start, env).replace(/\\/g, '/').replace(/\/+$/, '');
+  const low = (x) => String(x).replace(/\\/g, '/').toLowerCase();
+  const d = low(dir);
+  const base = low(path.basename(dir));
+  const named = (t) => { const v = low(t); return v.includes(d) || v.includes(`${base}/`) || v.endsWith(base) || v.includes('studio_holdout_dir'); };
+  if (tool === 'Bash') return named(String(input?.command || '')) ? dir : null;
+  return targets(tool, input).find(named) ? dir : null;
+}
+
+export function decide(tool, input, env = process.env, start = env.CLAUDE_PROJECT_DIR || process.cwd()) {
+  const ho = holdoutHit(tool, input, env, start);
+  if (ho) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'The held-out check cases are hidden from builders on purpose; they run at the merge train and a failure there names only the case id and note. Do not read, list or guess them (docs/HOLDOUT.md).' } };
   const secret = targets(tool, input).find((p) => SECRET.test(p));
   if (secret) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `${secret} holds keys or tokens; agents never read it. If a command needs a setting from it, the launcher passes that setting in the environment (STUDIO_<ROLE>_ENV).` } };
   const hit = targets(tool, input).find((p) => DENIED.test(p));

@@ -67,6 +67,8 @@ export const GATE_FIXES = {
   parity: 'the web game and its engine port disagree on a seed\'s outcome or tick: npm run parity names the seed; replay it on both and fix the side that drifted',
   vision: 'a screenshot scored below the art reference: compare the task\'s proof shots with the reference and fix the look (opt-in check, STUDIO_VISION=1)',
   asset: 'an asset check failed (the [asset-gate] FAIL line names the check and file): node harness/asset-gate.mjs --files <file> shows it alone; fix the asset, never the limits (studio/game.json "assets" is the owner\'s)',
+  journey: 'the player journey (studio/journeys/<game>/<id>.json) failed; the [journey] FAIL line names the kind: goal-not-met (fix the game so the public inputs reach the goal), no-input (the goal is reached without playing: fix the sim or the goal), reopen (state outside the save changes the sim: keep it in the state and the save), non-public-action, bad-journey, broke, tick-budget, command; node qa/journey.mjs prints the Fix for each, and the journey itself is never loosened to pass',
+  holdout: 'a held-out case failed at the merge train (the line names only its id and note; the case itself is hidden from builders): the change passes the visible checks but not the intended behaviour, so make the code do what the task really asks (not just what the visible check prints), and do not try to read or guess the case',
   reviewer: 'a code review in studio/reviews/ lacks model-family and implementer-family, or the reviewer\'s model family matches the implementer\'s: get a cross-family review with npm run review -- <TASK_ID>',
 };
 

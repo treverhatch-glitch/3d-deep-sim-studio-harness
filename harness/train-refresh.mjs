@@ -10,6 +10,9 @@
  * never a rebase; its commits re-stamped through the hooks; a conflict aborted and named), without the targeted tests:
  * the train's full verify runs right after. Only a real conflict (or a failed re-stamp) hands the lane back, with that
  * reason. A lane with uncommitted work is left alone (its agent is at it). STUDIO_TRAIN_REFRESH=off turns it off.
+ *
+ * 2.78.0 (B-105): the merge leaves the lane's studio/ link out (lanes.mjs protectSharedLinks), and a builder's verify
+ * (scripts/run-gates.mjs) calls this too (by: 'harness') instead of telling the builder to rebase and restamp.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,7 +32,7 @@ export function laneHarnessBehind(root, dir) {
  * Refresh a stale lane before its checks. { refreshed, handBack?, why, head? }: refreshed true when main was merged in
  * (the caller reads the lane's head again); handBack with a why when it conflicts or its re-stamp fails.
  */
-export async function refreshStaleLane(root, lane, { log = () => {}, env = process.env } = {}) {
+export async function refreshStaleLane(root, lane, { log = () => {}, env = process.env, by = 'train' } = {}) {
   if (/^(off|0|false|no)$/i.test(String(env.STUDIO_TRAIN_REFRESH || ''))) return { refreshed: false, why: 'STUDIO_TRAIN_REFRESH=off' };
   if (!lane?.dir || !fs.existsSync(lane.dir)) return { refreshed: false, why: 'no lane copy' };
   const n = laneHarnessBehind(root, lane.dir);
@@ -37,7 +40,7 @@ export async function refreshStaleLane(root, lane, { log = () => {}, env = proce
   const { refreshLane } = await import('./lanes.mjs');
   // The train acts here, not the agent that called it (a worker's name would be refused): by "train", in a clean env.
   const clean = { ...env, STUDIO_ROLE: '', STUDIO_LOCK_OWNER: '' };
-  const r = await refreshLane(root, { ...lane }, { by: 'train', busyOk: true, tests: false, env: clean, log });
+  const r = await refreshLane(root, { ...lane }, { by, busyOk: true, tests: false, env: clean, log });
   if (r.status === 'ok') {
     log(`[train] ${lane.task}: its lane copy ran a harness ${n} file(s) behind main; refreshed it first (${r.why})`);
     return { refreshed: true, why: r.why, head: r.head };

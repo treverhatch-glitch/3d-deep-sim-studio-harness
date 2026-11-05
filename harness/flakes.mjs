@@ -10,6 +10,9 @@
  *                (harness/test-rng.mjs findings, 2.67.0); no second run is needed;
  *   load-flake   it passes alone, and again under low load (STUDIO_TEST_WORKERS=1: one test worker);
  *   intermittent it passes alone once, then fails alone under low load (flaky with no named cause).
+ *   load-sensitive (2.78.0, PU-56) it fails alone, then passes alone at low load once the machine is quiet (no other heavy
+ *                job: harness/flake-quiet.mjs; waits up to STUDIO_FLAKE_QUIET_WAIT_MIN, 10). Fails there too: real. Quiet not
+ *                reached in time: real, "unconfirmed under load" (never a pass without evidence). Listed in .studio/load-sensitive.json.
  *   timeout-flake (2.72.0) a game check's timeout-only red whose file passed when the check re-ran it alone at low load
  *                (harness/game-gates.mjs timeoutOnlyRerun, recordTimeoutFlakes below); the check counted green for it.
  *   port-collision (2.77.3, C2/B-108) the run's output shows a test server that couldn't take its port (EADDRINUSE,
@@ -19,6 +22,17 @@
  * 2.77.3 (H2, B-112): the triage ends at the first "real" label (the red is real; the train goes on to name the lane
  * as for any real red, instead of running the other files alone first), and a run refused as busy (no machine:heavy
  * slot within STUDIO_FLAKE_WAIT_MIN, 10) is "not run", never "real"; the triage stops there too.
+ 2.78.0 merged with 2.77.3, the order for one file: it fails alone -> a port collision in that output is
+ * "port-collision" (the quiet wait isn't spent: the cause is named); else the PU-56 quiet low-load re-run (which counts
+ * as an alone-run: it shows in the train's status as "flake check k of n" and waits at most STUDIO_FLAKE_WAIT_MIN for
+ * a slot once the machine is quiet) gives load-sensitive / real / real "unconfirmed under load" (a collision in its own
+ * output is "port-collision"). It passes alone -> a collision in the red run's output is "port-collision", else
+ * seed-flake / load-flake / intermittent. A "not run" from any of these runs: no label, the triage stops.
+ * What the train does with the labels: any "real" -> a real red (the lane is named). Every failing part
+ * load-sensitive -> it lands and reports them (PU-56). Every failing file a port collision, OR a mix of port collisions
+ * and load-sensitive files with at least one collision (portCollisionWait; for the mix every failed gate must have a
+ * file part, as for the load-sensitive excuse) -> nobody is handed back and the lanes wait for the next train, as in
+ * 2.77.3: a collision means that test never really ran on this tree, so it can't land on a load-sensitive excuse.
  * Each label is a line in .studio/flakes.jsonl ({ at, test, check, label, why, train, tree, runs, rng }). A test
  * labelled flaky (any label but "real") STUDIO_FLAKE_QUARANTINE_AFTER (3) times in STUDIO_FLAKE_WINDOW_DAYS (7) goes on
  * the quarantine list studio/quarantine.json ([{ test, label, since, why, by, evidence, task, status }]) as PROPOSED:
@@ -37,6 +51,11 @@
  * own additions are recorded with their evidence (a test.quarantined event) and shown in the daily digest.
  * STUDIO_FLAKE_TRIAGE=off turns the triage off; STUDIO_FLAKE_MAX_FILES (5) caps the files triaged per red run;
  * STUDIO_FLAKE_WAIT_MIN (10, 2.77.3) caps how long one alone-run waits for a machine:heavy slot.
+ * 2.78.0 (C2c): from the start of its quiet wait to the end of its run, the quiet re-run holds new non-landing heavy work
+ * (builder and lane verifies) back in the heavy queue (harness/heavy.mjs markQuietHold), so "alone" stays alone (no
+ * other verify starts on the same fixed port, or loads the machine again); bounded by STUDIO_FLAKE_HOLD_MIN (default
+ * the quiet wait + STUDIO_FLAKE_WAIT_MIN + STUDIO_GAME_GATE_TIMEOUT_MS; 0/off: no hold), released when the run ends,
+ * ignored once its train's process is gone. Running verifies are never stopped: the quiet wait waits for them.
  * Imports only small modules (train.mjs and game-gates.mjs import this one).
  */
 import fs from 'node:fs';
@@ -51,6 +70,9 @@ export const FLAKES_REL = '.studio/flakes.jsonl';
 export const QUARANTINE_REL = 'studio/quarantine.json';
 // 2.72.0 (a): "timeout-flake": a timeout-only red whose files passed when re-run alone at low load (harness/timeout-rerun.mjs).
 export const FLAKY = Object.freeze(['load-flake', 'seed-flake', 'intermittent', 'timeout-flake']);
+// 2.78.0 (PU-56): "load-sensitive": fails alone while other work runs, passes alone at low load on a quiet machine.
+// Not in FLAKY: it is a test that needs a quiet machine, not a flaky one, so it is listed (LOAD_SENSITIVE_REL), never quarantined.
+export const LOAD_SENSITIVE_REL = '.studio/load-sensitive.json';
 const DAY = 86400000;
 const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 const num = (v, d) => (String(v ?? '').trim() !== '' && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : d);
@@ -112,21 +134,54 @@ export function rngFindingsFor(test, facts) {
   return (facts?.items || []).filter((it) => samePath(String(it).replace(/:\d+\s.*$/, ''), test));
 }
 
+/** 2.78.0 (PU-56): minutes a quiet re-run may wait for the machine to be quiet (STUDIO_FLAKE_QUIET_WAIT_MIN, default 10). */
+export const quietWaitMin = (env = process.env) => num(env.STUDIO_FLAKE_QUIET_WAIT_MIN, 10);
 /**
- * Label one failing test file: runAlone({ check, file, lowLoad }) -> { ok, text?, notRun? } runs it alone on the same
- * tree (notRun: refused before it ran, e.g. no machine:heavy slot: no label). redText: the red run's output (2.77.3:
- * a port collision there makes a file that passes alone "port-collision", not a load flake).
- * Returns { label, why, runs: [{ ok, lowLoad }], rng, port? } (label null with notRun when it didn't run).
+ * 2.78.0 (C2c): minutes the quiet re-run may hold other heavy work back (harness/heavy.mjs markQuietHold), from the start
+ * of its quiet wait to the end of its run: STUDIO_FLAKE_HOLD_MIN; default the quiet wait + STUDIO_FLAKE_WAIT_MIN (its
+ * slot wait) + the game check's own timeout (STUDIO_GAME_GATE_TIMEOUT_MS, 600 s); 0 or off: no hold.
  */
-export function labelTest({ check, file, runAlone, rng = null, redText = '' }) {
+export function flakeHoldMin(env = process.env) {
+  const v = String(env.STUDIO_FLAKE_HOLD_MIN ?? '').trim();
+  if (off(v)) return 0;
+  if (v !== '' && Number.isFinite(Number(v)) && Number(v) >= 0) return Number(v);
+  return quietWaitMin(env) + flakeRules(env).waitMin + num(env.STUDIO_GAME_GATE_TIMEOUT_MS, 600000) / 60000;
+}
+
+/**
+ * Label one failing test file: runAlone({ check, file, lowLoad, quiet?, quietWaitMin? }) -> { ok, text?, notRun?, quietUnreached? }
+ * runs it alone on the same tree (notRun: refused before it ran, e.g. no machine:heavy slot: no label). A caller that
+ * supports `quiet` (2.78.0, PU-56) waits (up to quietWaitMin) for a quiet machine first and returns { ok: false,
+ * quietUnreached: true } without running when it never came; one that doesn't ignores the flag. redText: the red run's
+ * output (2.77.3: a port collision there makes a file that passes alone "port-collision", not a load flake).
+ * Merged order (2.78.0 with 2.77.3): fails alone -> a port collision in that output is "port-collision" (no quiet wait:
+ * the cause is named); else the quiet low-load re-run decides load-sensitive / real / real "unconfirmed under load" (a
+ * collision in the quiet run's own output is "port-collision" too). Passes alone -> a collision in the red run's output
+ * is "port-collision", else seed-flake / load-flake / intermittent. A notRun from any run: label null, the triage stops.
+ * Returns { label, why, runs: [{ ok, lowLoad, quiet? }], rng, port? } (label null with notRun when it didn't run).
+ */
+export function labelTest({ check, file, runAlone, rng = null, env = process.env, redText = '' }) {
   const runs = [];
   const first = runAlone({ check, file, lowLoad: false });
   if (first?.notRun) return { label: null, notRun: String(first.notRun).slice(0, 300), why: `not run alone (${String(first.notRun).slice(0, 200)})`, runs, rng: [] };
   runs.push({ ok: Boolean(first?.ok), lowLoad: false });
   if (!first?.ok) {
+    // 2.77.3 (C2): the alone run names its cause (a port already in use): no quiet wait is spent on it.
     const pc = portCollision(first?.text || '', { file });
     if (pc) return { label: 'port-collision', why: portCollisionWhy(pc, { alone: true }), runs, rng: [], port: pc.port };
-    return { label: 'real', why: 'fails when run alone on the same tree', runs, rng: [] };
+    // 2.78.0 (PU-56): "alone" isn't quiet while other verifies run: a red alone is confirmed at quiet low load first.
+    const wait = quietWaitMin(env);
+    const q = runAlone({ check, file, lowLoad: true, quiet: true, quietWaitMin: wait });
+    if (q?.notRun) return { label: null, notRun: String(q.notRun).slice(0, 300), why: `failed alone; the quiet low-load re-run was not run (${String(q.notRun).slice(0, 200)})`, runs, rng: [] };
+    if (q?.quietUnreached) {
+      runs.push({ ok: false, lowLoad: true, quiet: false });
+      return { label: 'real', why: `fails when run alone on the same tree; unconfirmed under load: a quiet machine was not reached within ${wait} min (STUDIO_FLAKE_QUIET_WAIT_MIN), so the failure is treated as real`, runs, rng: [] };
+    }
+    runs.push({ ok: Boolean(q?.ok), lowLoad: true, quiet: true });
+    if (q?.ok) return { label: 'load-sensitive', why: 'fails when run alone while other work runs, passes alone at low load (one test worker) on a quiet machine: it needs a quiet machine (load-sensitive)', runs, rng: [] };
+    const pcQ = portCollision(q?.text || '', { file });
+    if (pcQ) return { label: 'port-collision', why: portCollisionWhy(pcQ, { alone: true }), runs, rng: [], port: pcQ.port };
+    return { label: 'real', why: 'fails when run alone on the same tree, and again at quiet low load', runs, rng: [] };
   }
   const pcRed = portCollision(redText, { file });
   if (pcRed) return { label: 'port-collision', why: portCollisionWhy(pcRed, { alone: false }), runs, rng: [], port: pcRed.port };
@@ -139,16 +194,57 @@ export function labelTest({ check, file, runAlone, rng = null, redText = '' }) {
   return { label: 'intermittent', why: 'passes alone once, then fails alone under low load: flaky with no named cause', runs, rng: [] };
 }
 
+/** 2.78.0 (PU-56): the list of load-sensitive tests, newest data per test: [{ test, check, first, last, count }]. */
+export function readLoadSensitive(root) {
+  const j = readJson(path.join(root, LOAD_SENSITIVE_REL), []);
+  return (Array.isArray(j) ? j : Array.isArray(j?.tests) ? j.tests : []).filter((e) => e && typeof e.test === 'string');
+}
+function noteLoadSensitive(root, row) {
+  const list = readLoadSensitive(root);
+  const e = list.find((x) => x.check === row.check && samePath(x.test, row.test));
+  if (e) { e.last = row.at; e.count = (e.count || 1) + 1; } else list.push({ test: row.test, check: row.check, first: row.at, last: row.at, count: 1 });
+  writeAtomic(path.join(root, LOAD_SENSITIVE_REL), `${JSON.stringify(list, null, 2)}\n`);
+}
+
+/**
+ * Does every failing part of a red carry one of `kinds` in this triage? subs: the red's sub-ids (gate:check:file); gates:
+ * its failed gates; labels: the triage rows. Yes only when every failed gate has a file sub-id and every such file was
+ * labelled with one of `kinds`. Same shape of test as harness/known-red.mjs knownRedCandidate. Returns { ok, tests, why }.
+ */
+function labelledExcuse({ subs = [], gates = [], labels = [] } = {}, kinds, name) {
+  const fileOf = (s) => { const p = String(s || '').split(':'); return p.length >= 2 && /[\\/.]/.test(p[p.length - 1]) ? p.slice(p.length >= 3 ? 2 : 1).join(':').replace(/\\/g, '/') : null; };
+  if (!subs.length) return { ok: false, tests: [], why: 'no failing test named' };
+  const bad = subs.filter((s) => { const f = fileOf(s); return !f || !labels.some((l) => kinds.includes(l.label) && samePath(l.test, f)); });
+  if (bad.length) return { ok: false, tests: [], why: `${bad.slice(0, 3).join(', ')} not ${name}` };
+  const covered = new Set(subs.map((s) => String(s).split(':')[0]));
+  const bare = gates.filter((g) => !covered.has(String(g).split(':')[0]));
+  if (bare.length) return { ok: false, tests: [], why: `${bare.join(', ')} failed with no ${name} part` };
+  return { ok: true, tests: subs, why: '' };
+}
+/** 2.78.0 (PU-56): may a red be excused for load? Only when every failing part is a load-sensitive file (its quiet low-load re-run passed). */
+export const loadSensitiveExcuse = (a = {}) => labelledExcuse(a, ['load-sensitive'], 'load-sensitive');
+/**
+ * 2.78.0 merge with 2.77.3: a red whose every failing part is a port collision or load-sensitive, with at least one port
+ * collision (each file labelled in this triage): nobody is handed back and the lanes wait for the next train, as for a
+ * red only on port collisions (a collision means that check didn't really run, so it never lands).
+ */
+export function collisionWaitExcuse(a = {}) {
+  const r = labelledExcuse(a, ['port-collision', 'load-sensitive'], 'a port collision or load-sensitive');
+  if (r.ok && !(a.labels || []).some((l) => l.label === 'port-collision')) return { ok: false, tests: [], why: 'no port collision' };
+  return r;
+}
+
 /**
  * After a red verify or re-check: label each failing test file (at most STUDIO_FLAKE_MAX_FILES; each once per `seen`
  * set, usually one per train), record the labels, and quarantine a test flaky `after` times in the window.
  * opts: { root, dir (the tree's checkout), text (the red run's output), train, tree, runAlone, seen, now, env, log,
  * emit, rng (test-rng facts; default: scanned in dir) }. Returns { labels: [row], quarantined: [entry] }, and (2.77.3)
  * real (the first file labelled real: the triage stops there), notRun ({ test, why }: a run refused as busy; it stops
- * there too), allPortCollision (every failing file was labelled port-collision). runAlone also gets { k, of }.
+ * there too), allPortCollision (every failing file was labelled port-collision), portCollisionWait (2.78.0: every failing
+ * file was labelled port-collision or load-sensitive, at least one port-collision). runAlone also gets { k, of }.
  */
 export function triageRed({ root, dir = root, text, train = '', tree = '', runAlone, seen = new Set(), now = Date.now(), env = process.env, log = () => {}, emit = emitEvent, rng } = {}) {
-  const out = { labels: [], quarantined: [] }; // 2.77.3: + real (the file red alone), notRun, skipped, allPortCollision
+  const out = { labels: [], quarantined: [] }; // 2.77.3: + real (the file red alone), notRun, skipped, allPortCollision; 2.78.0: portCollisionWait
   if (!triageOn(env) || typeof runAlone !== 'function') return out;
   const f = focusFromLog(text);
   const pairs = [];
@@ -161,7 +257,7 @@ export function triageRed({ root, dir = root, text, train = '', tree = '', runAl
     const { check, file } = todo[k];
     seen.add(`${check}|${file}`);
     let l;
-    try { l = labelTest({ check, file, runAlone: (a) => runAlone({ ...a, k: k + 1, of: todo.length }), rng: facts, redText: text }); } catch (e) { if (e?.stopsTriage) throw e; log(`[flakes] ${file}: not triaged (${e.message})`); continue; }
+    try { l = labelTest({ check, file, runAlone: (a) => runAlone({ ...a, k: k + 1, of: todo.length }), rng: facts, env, redText: text }); } catch (e) { if (e?.stopsTriage) throw e; log(`[flakes] ${file}: not triaged (${e.message})`); continue; }
     if (!l.label) {
       // 2.77.3 (H2): refused before it ran (busy): no label, and the rest would wait the same way.
       out.notRun = { test: normTestPath(file), check, why: l.notRun };
@@ -171,6 +267,7 @@ export function triageRed({ root, dir = root, text, train = '', tree = '', runAl
     }
     const row = { at: new Date(now).toISOString(), test: normTestPath(file), check, label: l.label, why: l.why, train, tree, runs: l.runs, ...(l.rng.length ? { rng: l.rng } : {}), ...(l.port ? { port: l.port } : {}) };
     try { appendFlake(root, row); } catch {}
+    if (row.label === 'load-sensitive') { try { noteLoadSensitive(root, row); } catch {} }
     out.labels.push(row);
     log(`[flakes] ${row.test} (${check}): ${row.label}: ${row.why}`);
     const q = maybeQuarantine(root, row, { now, env, emit });
@@ -185,6 +282,8 @@ export function triageRed({ root, dir = root, text, train = '', tree = '', runAl
   }
   if (!out.real && !out.notRun && pairs.length > rules.maxFiles) log(`[flakes] ${pairs.length - rules.maxFiles} more failing test file(s) not triaged (STUDIO_FLAKE_MAX_FILES ${rules.maxFiles})`);
   out.allPortCollision = out.labels.length > 0 && !out.real && !out.notRun && pairs.length <= todo.length && out.labels.length === pairs.length && out.labels.every((r) => r.label === 'port-collision');
+  // 2.78.0 merge: every failing file is a port collision or load-sensitive, at least one a collision (the lanes wait, see the header).
+  out.portCollisionWait = out.labels.length > 0 && !out.real && !out.notRun && pairs.length <= todo.length && out.labels.length === pairs.length && out.labels.every((r) => r.label === 'port-collision' || r.label === 'load-sensitive') && out.labels.some((r) => r.label === 'port-collision');
   if (out.labels.length) {
     try { emit({ type: 'test.flake_triage', agent: 'train', status: out.labels.some((r) => r.label === 'real') ? 'blocked' : 'warn', msg: `${train ? `train ${train}: ` : ''}failing tests run alone: ${out.labels.map((r) => `${r.test} ${r.label}${r.port ? ` (port ${r.port})` : ''}`).join(', ')}`.slice(0, 600), meta: { train, tree, labels: out.labels.map(({ test, check, label, port }) => ({ test, check, label, ...(port ? { port } : {}) })) } }); } catch {}
   }

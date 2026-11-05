@@ -24,6 +24,7 @@ export const PLAIN = {
   secrets: 'a key or secret-shaped string is in the repo',
   hooks: 'a commit skipped the git hooks (--no-verify)',
   'weakened-tests': 'a test was weakened (assert removed, skipped, looser) without the owner\'s OK',
+  holdout: 'a held-out check (hidden from builders, run at the merge train) failed',
   selftest: 'the harness self-test found a check that no longer bites',
   balance: 'the balance sweep is out of range',
   fun: 'the fun check is below its bar',

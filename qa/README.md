@@ -42,6 +42,9 @@ node qa/vertical-slice.mjs
 npm run soak
 npm run selftest
 
+# Player journeys: play a whole game through public inputs, with a no-input control and a fresh-process reopen (docs/JOURNEYS.md)
+node qa/journey.mjs [--cartridge name]
+
 # Accessibility-first visual check against a local URL
 node qa/visual-check.mjs http://127.0.0.1:5173/?playtest=1
 ```

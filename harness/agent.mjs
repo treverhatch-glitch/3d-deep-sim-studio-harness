@@ -1670,9 +1670,21 @@ export function nextAgentName(role, prefix = '') {
   const key = `${role}-${prefix}`;
   const re = new RegExp(`^${role.replace(/[^a-z0-9-]/gi, '')}-${prefix}(\\d+)$`);
   const seen = sessions().map((x) => Number((String(x.agent).match(re) || [])[1]) || 0);
-  const n = Math.max(Number(counters[key]) || 0, ...seen, 0) + 1;
+  let n = Math.max(Number(counters[key]) || 0, ...seen, 0) + 1;
   fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
-  fs.writeFileSync(f, `${JSON.stringify({ ...counters, [key]: n }, null, 2)}\n`);
+  // 2.78.0 (PU-63): never a name a leftover lane folder (.lanes/<name>) still holds, and never one another launch has just
+  // taken: each name is reserved with an exclusive create (.studio/agent-names/<name>), so two launches in the same second
+  // (two processes reading the same counter) get different names.
+  const dirs = path.join(STUDIO_STATE_DIR, 'agent-names');
+  fs.mkdirSync(dirs, { recursive: true });
+  for (let tries = 0; tries < 1000; tries++, n++) {
+    const name = `${role}-${prefix}${n}`;
+    if (fs.existsSync(path.join(REPO_ROOT, '.lanes', name))) continue;
+    try { fs.writeFileSync(path.join(dirs, name), `${new Date().toISOString()}\n`, { flag: 'wx' }); } catch (err) { if (err.code === 'EEXIST') continue; }
+    break;
+  }
+  const cur = readJson(f) || {};
+  fs.writeFileSync(f, `${JSON.stringify({ ...cur, [key]: Math.max(n, Number(cur[key]) || 0) }, null, 2)}\n`);
   return `${role}-${prefix}${n}`;
 }
 
