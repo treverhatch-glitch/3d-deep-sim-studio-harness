@@ -4792,6 +4792,15 @@ if (inShard('selftest-278i')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.1 (a): B-123, unscoped ready tasks ran one at a time: `task lane` reaches running builders, the Line Producer sets
+// lanes and reports "unscoped", unscoped builders with apart predictions run side by side, shared sim code is stacked.
+if (inShard('selftest-2781a')) {
+  const dir = copyRepo();
+  const { selftest2781A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781a.mjs')).href);
+  await selftest2781A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

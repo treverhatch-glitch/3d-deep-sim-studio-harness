@@ -64,7 +64,7 @@ export const LINE_NOTE_FILE = () => path.join(LINE_DIR(), 'producer-note.md');
 export const SLICE_TITLE = /^Director: next ranked slice\b/i;
 export const PHASE_LABEL = { 1: 'early', 2: 'mid', 3: 'late' };
 export const TIERS = ['cheap', 'mid', 'top'];
-const KIND_ORDER = ['trunk', 'chain', 'park', 'cooldown', 'blocked', 'budget', 'lock', 'busy', 'merge', 'yes', 'held', 'protected', 'lane'];
+const KIND_ORDER = ['trunk', 'chain', 'park', 'cooldown', 'blocked', 'budget', 'lock', 'busy', 'merge', 'yes', 'held', 'protected', 'lane', 'unscoped'];
 const OWNER_KINDS = new Set(['yes', 'park', 'held']);
 const PRI = (p) => { const m = String(p || '').match(/P(\d)/i); return m ? Number(m[1]) : 9; };
 const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
@@ -188,6 +188,8 @@ export function linePlan(f) {
   const readyB = tasks.filter((t) => t.state === 'ready' && t.role === 'builder');
   const blocked = tasks.filter((t) => t.state === 'blocked').map((t) => ({ task: t.id, role: t.role, kind: t.block.kind, why: t.block.why, fix: t.block.fix || '', ...(t.block.mechanical ? { mechanical: true } : {}), ...(t.block.fixed ? { fixed: t.block.fixed } : {}) }));
   for (const b of f.extraBlocked || []) blocked.push(b);
+  // 2.78.1 (B-123): a ready builder task with no lane runs, but alone: it is listed as "unscoped" for the Producer.
+  for (const u of f.lanes?.unscoped || []) blocked.push({ task: u.task, role: 'builder', kind: 'unscoped', why: u.why, fix: u.fix, runsAlone: true });
   blocked.sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || a.task.localeCompare(b.task));
   const kinds = {};
   for (const b of blocked) kinds[b.kind] = (kinds[b.kind] || 0) + 1;
@@ -232,6 +234,7 @@ export function linePlan(f) {
     for (const b of bBlocked) k[b.kind] = (k[b.kind] || 0) + 1;
     reasons.push(`${free} builder slot${free === 1 ? ' is' : 's are'} free but every open builder task is blocked (${Object.entries(k).map(([kk, n]) => `${n} ${kk}`).join(', ')})`);
   }
+  if (target > 1 && f.lanes?.unscoped?.length) reasons.push(`${f.lanes.unscoped.length} ready builder task${f.lanes.unscoped.length === 1 ? ' has' : 's have'} no lane the Line Producer could work out (${f.lanes.unscoped.slice(0, 5).map((u) => u.task).join(', ')}${f.lanes.unscoped.length > 5 ? ' …' : ''}): a builder on one holds the whole game, so no other builder runs beside it; npm run task -- lane <ID> <folders> --by <you>`);
   for (const d of f.dangling || []) reasons.push(`${d.task} waits for ${d.on}, which isn't on the board: the chain can't finish`);
   if (blocked.some((b) => b.kind === 'trunk')) reasons.push('the trunk is red: only fix tasks start until it is green');
   const why = [`pace ${f.pace?.label || '?'} allows ${paceCap} builder${paceCap === 1 ? '' : 's'}`, rigCap === null ? rigWhy : `rig: ${rigWhy}`, `${builders.length} running`, `${readyB.length} ready`, blocked.length ? `${blocked.length} blocked (${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(', ')})` : null].filter(Boolean).join('; ');
@@ -459,6 +462,18 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
       tasks.push({ ...row, state: block ? 'blocked' : 'ready', ...(block ? { block } : {}) });
     }
   }
+  // 2.78.1 (B-123): lanes for unscoped ready builder tasks (the Producer's decision, made by this pass), "unscoped" for
+  // those it can't work out, and phase awareness: a task on shared sim code waits for the open one on the same files.
+  let lanes = null;
+  try {
+    const lp = await import('./lane-plan.mjs');
+    lanes = await lp.lanePass({ tasks, holds, events, root, env, act: fix, by: LINE_AGENT, ...(deps.files ? { files: deps.files } : {}) });
+    if (lanes.changed) holds = th.readHolds();
+    for (const st of lanes.stacked || []) {
+      const t = tasks.find((x) => x.id === st.task);
+      if (t && t.state === 'ready') { t.state = 'blocked'; t.block = { kind: 'chain', why: `waits for ${st.after}: both touch shared sim code (${st.via.slice(0, 3).join(', ')})${st.dry ? ' (the pass would stack it)' : ''}`, fix: `starts when ${st.after} lands (phase awareness: STUDIO_SHARED_SIM)` }; }
+    }
+  } catch (e) { lanes = { error: e.message }; }
   // 2.77.0 (n): model pools (harness/model-pools.mjs), when on: each task's size class, its last failed pool, the model
   // it started on, whether it is protected-heavy; the outcomes file is rebuilt (written only when this pass acts).
   let pools = null;
@@ -509,7 +524,7 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
   if (!remote) {
     try { const rw = await import('./remote-workers.mjs'); remote = { ...(await rw.remoteFacts({ tasks, holds, events, env, root })), remotePlan: rw.remotePlan }; } catch { remote = null; }
   } else if (!remote.remotePlan) { try { remote = { ...remote, remotePlan: (await import('./remote-workers.mjs')).remotePlan }; } catch {} }
-  return { now, tasks, holds, done: doneSet, sessions: live, pace: { maxAgents: pace.maxAgents, perRole: pace.perRole, label: pace.label }, rig, models, remote, share: expansionShare(env), chainMin: Math.max(1, num(env.STUDIO_LINE_CHAIN_MIN, 3)), expansionMin: Math.max(0, num(env.STUDIO_LINE_EXPANSION_MIN, 2)), sliceOpen: sliceOpen ? { id: sliceOpen.id, title: sliceOpen.title } : null, extraBlocked, dangling, fixed, pools, protectedSteps };
+  return { now, tasks, holds, done: doneSet, sessions: live, pace: { maxAgents: pace.maxAgents, perRole: pace.perRole, label: pace.label }, rig, models, remote, share: expansionShare(env), chainMin: Math.max(1, num(env.STUDIO_LINE_CHAIN_MIN, 3)), expansionMin: Math.max(0, num(env.STUDIO_LINE_EXPANSION_MIN, 2)), sliceOpen: sliceOpen ? { id: sliceOpen.id, title: sliceOpen.title } : null, extraBlocked, dangling, fixed, pools, protectedSteps, lanes };
 }
 
 /**
@@ -637,6 +652,7 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
       models: f.pools ? { on: true, why: f.pools.why, pools: Object.fromEntries(Object.entries(f.pools.state).map(([k, v]) => [k, { model: v.model, tool: v.tool, usedPct: v.usedPct, near: v.near, out: v.out }])) } : { on: false },
       protectedSteps: (f.protectedSteps || []).map(({ task, actor, via, hold, why, fix }) => ({ task, actor, via: via || null, hold, why, fix })),
       engines,
+      lanes: f.lanes ? (f.lanes.error ? { error: f.lanes.error } : { mode: f.lanes.mode, set: f.lanes.set, unscoped: f.lanes.unscoped, running: f.lanes.running, stacked: f.lanes.stacked, shared: f.lanes.shared }) : null,
     };
     // One plain line for the Communicator (helper l reads { at, builders: { running, target }, blocked, text }).
     status.text = summaryLine(status);
@@ -797,6 +813,7 @@ export function statusText(s) {
   if (s.blocked?.length) { L.push('Blocked:'); for (const b of s.blocked.slice(0, 12)) L.push(`  ${b.task} [${b.kind}] ${b.why}${b.fix ? ` -> ${b.fix}` : ''}`); if (s.blocked.length > 12) L.push(`  … and ${s.blocked.length - 12} more (npm run line -- status --json)`); }
   if (s.models?.on) L.push(`Model pools (npm run models -- status): ${Object.entries(s.models.pools || {}).map(([k, v]) => `${k} ${v.out ? 'out' : v.near ? `near (${v.usedPct}%)` : `${v.usedPct}%`}`).join(', ')}.`);
   if (s.protectedSteps?.length) L.push(`Protected steps: ${s.protectedSteps.map((p) => `${p.task} -> ${p.actor || 'the owner'}${p.hold ? ' (held)' : ''}`).join('; ')}.`);
+  if (s.lanes && !s.lanes.error) L.push(...laneLinesOf(s.lanes));
   if (s.reasons?.length) L.push(`For the Producer (this plan can't run because): ${s.reasons.join('; ')}.`);
   if (s.fixed?.length) L.push(`Fixed this pass: ${s.fixed.map((a) => a.what).join('; ')}.`);
   if (s.actions?.length) L.push(`Last actions: ${s.actions.slice(-5).map((a) => `${String(a.at).slice(11, 16)} ${a.what}`).join('; ')}.`);
@@ -808,9 +825,20 @@ export function remoteText(r) {
   return `Remote: ${r.out} out${r.queued ? `, ${r.queued} queued for the train` : ''} (0 local CPU until queued; at most ${r.max}); ${r.offer?.length ? `offer: ${r.offer.map((o) => o.task).join(', ')} -> npm run remote -- brief <T-ID> --worker <name> --by <you>` : r.why}${r.leases?.length ? `; leases: ${r.leases.map((l) => `${l.task} ${l.owner} ${l.status} until ${String(l.until).slice(11, 16)} UTC`).join(', ')}` : ''}.`;
 }
 
+/** 2.78.1 (B-123): the lane lines (harness/lane-plan.mjs laneLines' words; inline so the CLI never fails on an import). */
+export function laneLinesOf(l) {
+  const L = [];
+  if (l.set?.length) L.push(`Lanes ${l.set.some((x) => x.dry) ? 'it would set' : 'set'} (for the Producer): ${l.set.map((x) => `${x.task} -> ${x.lane} (from ${(x.from || []).join(', ')})`).join('; ')}.`);
+  if (l.unscoped?.length) L.push(`Unscoped (no lane could be worked out; each holds the whole game): ${l.unscoped.map((u) => u.task).join(', ')} -> npm run task -- lane <ID> <folders> --by <you>.`);
+  if (l.running?.length) L.push(`Running with no lane (holds the whole game until it ends): ${l.running.map((u) => u.task).join(', ')} -> npm run task -- lane <ID> <folders> --by <you>.`);
+  if (l.stacked?.length) L.push(`Stacked on shared sim code (${l.shared?.from || 'shared sim globs'}): ${l.stacked.map((x) => `${x.task} after ${x.after} (${(x.via || []).slice(0, 2).join(', ')})${x.dry ? ', would' : ''}`).join('; ')}.`);
+  return L;
+}
+
 export function whyText(s, id) {
   if (!s || s.error || s.off) return statusText(s);
-  const b = (s.blocked || []).find((x) => x.task === id);
+  const b = (s.blocked || []).find((x) => x.task === id && x.kind !== 'unscoped');
+  const unscoped = (s.blocked || []).find((x) => x.task === id && x.kind === 'unscoped');
   const cb = (s.chainBreakers || []).find((c) => c.task === id);
   const rank = (s.order || []).indexOf(id);
   const route = s.routes?.[id];
@@ -818,6 +846,7 @@ export function whyText(s, id) {
   if (b) L.push(`${id} can't start: [${b.kind}] ${b.why}.${b.fix ? ` Fix: ${b.fix}.` : ''}`);
   else if (rank >= 0) L.push(`${id} is ready: number ${rank + 1} in the Line Producer's order${rank + 1 > Math.max(0, s.builders.target - s.builders.running) ? ` (${s.builders.target - s.builders.running} builder slot(s) free now: ${s.builders.why})` : ''}.`);
   else L.push(`${id} isn't waiting: it is running, done, a person's task, or not on the board.`);
+  if (unscoped) L.push(`It is unscoped: ${unscoped.why}. Fix: ${unscoped.fix}.`);
   if (cb) L.push(`It is a chain-breaker: ${cb.n} task(s) wait on it (${cb.waiting.join(', ')}).`);
   if (route) L.push(`Model: ${route.why}.`);
   return L.join('\n');
