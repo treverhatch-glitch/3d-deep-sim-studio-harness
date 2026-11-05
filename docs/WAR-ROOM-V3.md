@@ -64,8 +64,18 @@ it follows the system's light or dark setting and reduced motion.
 
 ## The Studio floor's rooms
 
-Divisions keep their rooms, and three rooms are for specific assignments (harness/war-room.mjs `roomFor`, by role, name
+Divisions keep their rooms, and four rooms are for specific assignments (harness/war-room.mjs `roomFor`, by role, name
 or track, never a fixed agent name):
+
+- **Planning Room** (2.78.1, g): the Line Producer's own room (role `line-producer`), the whole width of the floor right
+  under Production and taller than the rest, with its plan in plain text on a wall board: Now (running builders, their
+  lane or "whole game", when they started), Next up (the ready queue in the Line Producer's order, each with its lane or
+  "unscoped" in amber, its plan-waves wave and its model), Waiting (tasks stacked with `--after`, on what and why, and
+  the blocked and unscoped ones with the reason) and its last pass (when, the lanes it set, the stacks it added, its
+  status line and blockers, builders running against the target). It reads the HUD's `planning`
+  (harness/planning-room.mjs, from `.studio/line/status.json`, the board, the holds and the events) on the usual poll,
+  says "No plan yet: the Line Producer hasn't run" when there is no plan, and shows an old one with its age. Read-only.
+  On a phone it is full width with the board above the desk. `STUDIO_PLANNING_ROOM=off` removes it (docs/LINE-PRODUCER.md).
 
 - **Rail Yard**: the merge train (agents named or with the role train, train-daemon, merge-captain). Its lanes ride as
   cars through QUEUE, VERIFY and LANDED.

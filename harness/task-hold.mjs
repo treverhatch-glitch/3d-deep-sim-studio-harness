@@ -65,7 +65,7 @@ export function updateHolds(fn) {
   }, { dir: path.join(STUDIO_STATE_DIR, 'locks'), what: 'The task holds (studio/task-holds.json)' });
 }
 /** Merge fields into one task's hold; a null value removes that field. */
-export function setHold(id, patch, { by = 'producer', msg = '' } = {}) {
+export function setHold(id, patch, { by = 'producer', msg = '', meta = null } = {}) {
   const h = updateHolds((all) => {
     const one = { ...(all[id] || {}) };
     for (const [k, v] of Object.entries(patch)) {
@@ -76,7 +76,8 @@ export function setHold(id, patch, { by = 'producer', msg = '' } = {}) {
     else delete all[id];
     return one;
   });
-  if (msg) emitEvent({ type: 'task.hold', agent: by, task: id, msg });
+  // 2.78.1 (g): meta (a stack's { after, via }) rides on the event, so the Planning Room can say why later.
+  if (msg) emitEvent({ type: 'task.hold', agent: by, task: id, msg, ...(meta ? { meta } : {}) });
   return h;
 }
 

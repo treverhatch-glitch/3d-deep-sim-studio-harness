@@ -4838,6 +4838,15 @@ if (inShard('selftest-2781f')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.1 (g): the Planning Room, the Line Producer's own room on the War Room's Studio floor: its plan in the HUD (now,
+// next up with lanes and "unscoped", stacked and blocked with why, the last pass), the empty state, the page.
+if (inShard('selftest-2781g')) {
+  const dir = copyRepo();
+  const { selftest2781G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781g.mjs')).href);
+  await selftest2781G({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {
