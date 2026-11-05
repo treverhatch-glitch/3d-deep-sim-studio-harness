@@ -361,7 +361,7 @@ export async function timeoutOnlyRerun({ g, r, runOnce, log = () => {}, root = R
     (ok ? green : red).push(f);
     log(`[game-gates] ${g.id}: ${f} alone at low load: ${ok ? 'green (timeout-flake)' : `red (${x.status === 0 ? 'passed having run no test' : `exit ${x.status ?? x.signal ?? '?'}`})`}`);
   }
-  if (green.length) recordTimeoutFlakes(root, { check: g.id, files: green, env, log });
+  if (green.length) recordTimeoutFlakes(root, { check: g.id, files: green, text, env, log }); // 2.77.3 (C2): text: a port collision there is named
   if (red.length) log(`[game-gates] ${g.id}: ${red.length} timed-out file(s) red alone too: a real red (${red.join(', ')})`);
   else log(`[game-gates] ${g.id}: every timed-out file passed alone: counted green for those files only (the rest of the check had passed)`);
   return { green, red, allGreen: !red.length };
@@ -649,6 +649,9 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     if (r.timeoutFlake?.length) log(`[game-gates] timeout-flake in ${r.id}: ${JSON.stringify(r.timeoutFlake)}`);
   }
   for (const s of skipped) log(`[game-gates] SKIP ${s.id}: ${s.why}`);
+  // 2.77.3 (C2b, B-108): e2e/browser tests that start a server on a fixed port with strictPort collide when two verifies
+  // run them at once. Advisory only (never a FAIL, no row): run-gates shows these WARN lines even on a passing check.
+  if (game?.root && rows.length && !process.env.STUDIO_GATE_FOCUS) { try { const { fixedPortWarnings } = await import('./test-ports.mjs'); for (const l of fixedPortWarnings(REPO_ROOT, [game.root])) log(l); } catch {} }
   if (!rows.length && !skipped.length) log(`[game-gates] no studio game set${game ? '' : ' (or it is a cartridge)'}; the cartridge gates cover it`);
   const failed = rows.filter((r) => !r.ok && r.required);
   return { ok: failed.length === 0, game: game?.name || null, rows, failed, skipped, scope };

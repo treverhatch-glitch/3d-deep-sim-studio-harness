@@ -4659,6 +4659,16 @@ if (inShard('selftest-2772')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.3 (b): a train idle after a "real" flake verdict, holding train.lock (H2/B-112: the triage ends at the first real
+// label, busy alone-runs are "not run", a stall watch); port collisions as their own label and fixed test ports flagged
+// (C2/B-108); a waiting train gets the next free heavy slot (M6).
+if (inShard('selftest-2773b')) {
+  const dir = copyRepo();
+  const { selftest2773B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2773b.mjs')).href);
+  await selftest2773B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

@@ -74,6 +74,7 @@ import { mainRoot, mainBranch, linkDir, nodeModuleDirs, ignoreLanes, landFastFor
 import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot, selectGates } from './merge-lane.mjs';
 import { recordTrust } from './gate-trust.mjs';
 import { beginTrainLife, reapDeadTrains } from './train-life.mjs';
+import { cancelPath } from './train-watch.mjs';
 import { recreateLaneCopy, infraHandBack, keepRelease, keptRelease, forgetRelease, mixedLane, mayCarry, noteMixed } from './train-lanes.mjs';
 import { readBeta, betaActor, recordBetaUse } from './beta-mode.mjs';
 import { addKnownRed, clearKnownRed, knownRedCandidate, readKnownRed, fileSub } from './known-red.mjs';
@@ -97,10 +98,10 @@ import { trainFocus, failingTestsLine } from './train-focus.mjs';
 import { trainEta, stepsLeft, writeTrainStatus, writeTrainsSummary, quietVerifyMs, capNote, readTrainStatus } from './train-status.mjs';
 import { batchCap, batchSize, pipelineMode, pipelineRoom, pipelineKick, nextBusy, waitForNext, takeNextLock, trainState, judgeTrainA, pickNextLanes, speculativeBaseVerdict, NEXT_BY } from './train-pipeline.mjs';
 import { withFacts } from './handback-facts.mjs';
-import { triageRed, triageOn, fileQuarantineTasks } from './flakes.mjs';
+import { triageRed, triageOn, fileQuarantineTasks, flakeRules } from './flakes.mjs';
 import { subIdsFromLog } from './gate-subids.mjs';
 import { timeoutFlakesFromLog } from './timeout-rerun.mjs';
-import { runGatesWaiting } from './train-busy.mjs';
+import { runGatesWaiting, busyWhy, ranNoCheck } from './train-busy.mjs';
 import { remoteMode, remoteVerify, remoteCheckPattern, localGateIds } from './remote-verify.mjs';
 import { bisectWidth, karySearch, karyCost, focusWorkers, spawnCollect, runGatesWaitingAsync } from './train-parallel.mjs';
 import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFocus, failingTests, tailSignature, tailsExplaining, tailTitle, tailNote, tailWaitWhy, pinDiffLines } from './train-tail.mjs';
@@ -193,7 +194,7 @@ export async function leaveTrain(root, task, { by = '', why = '', env = process.
 // ---- 2.77.1 (B-98): a lane that leaves a running train stops that train ------------------------------------------------
 
 /** .studio/train/<train id>.cancel.json = { tasks, by, why, at }: written by leaveTrain, read by the running train. */
-const cancelFile = (root, id) => path.join(root, TRAIN_DIR, `${id}.cancel.json`);
+const cancelFile = cancelPath; // .studio/train/<id>.cancel.json (2.77.3: the stall watch writes one too, { stall: true })
 export function readCancel(root, id) {
   try { const j = JSON.parse(fs.readFileSync(cancelFile(root, id), 'utf8')); return j && Array.isArray(j.tasks) ? j : null; } catch { return null; }
 }
@@ -208,14 +209,18 @@ function writeCancel(root, id, rec) {
 /** Running trains in this process: id -> () => the tasks still riding it (not handed back, not landed). */
 const activeLanes = new Map();
 class TrainCancelled extends Error {
-  constructor(marker) { super(`${marker.tasks.join(', ')} left the train (by ${marker.by}: ${marker.why})`); this.marker = marker; }
+  constructor(marker) { super(marker.stall ? `the train stalled (${marker.why})` : `${marker.tasks.join(', ')} left the train (by ${marker.by}: ${marker.why})`); this.marker = marker; this.name = 'TrainCancelled'; this.stopsTriage = true; }
 }
-/** Throws TrainCancelled when a lane of train `id` has left it (called before each verify, re-check and round). */
+/**
+ * Throws TrainCancelled when a lane of train `id` has left it (called before each verify, re-check and round, and
+ * 2.77.3 right after each check's run). 2.77.3 (H2): a stall marker (harness/train-watch.mjs) stops the whole train.
+ */
 function checkCancel(root, id) {
   const lanes = activeLanes.get(String(id));
   if (!lanes) return;
   const m = readCancel(root, id);
   if (!m) return;
+  if (m.stall) throw new TrainCancelled({ ...m, tasks: lanes() });
   const left = m.tasks.filter((t) => lanes().includes(t));
   if (left.length) throw new TrainCancelled({ ...m, tasks: left });
 }
@@ -665,6 +670,7 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   log(`[train] ${id}: verify ${n} of tree ${tree.slice(0, 8)} (${changed.length} changed file(s)${all ? ', --all' : ''})`);
   // 2.67.2 (B-50): a run refused before any gate ran (busy) waits and runs again, bounded; it is never read as red.
   const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', ...(all ? ['--all'] : [])], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `verify ${n}` });
+  checkCancel(root, id); // 2.77.3 (H2): a run the stall watch stopped judges nothing
   const recDir = path.join(root, TRAIN_DIR, 'records');
   fs.mkdirSync(recDir, { recursive: true });
   const logFile = path.join(root, TRAIN_DIR, `${id}-verify-${n}.log`);
@@ -692,7 +698,7 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   if (vparts.flakes.length) log(`[train] ${id}: verify ${n}: ${vparts.flakes.length} test file(s) timed out and passed alone at low load (timeout-flake; the lane is not blamed for them): ${vparts.flakes.slice(0, 5).join(', ')}`);
   const res = { ok, rec, gates, detail, why, log: path.relative(root, logFile).split(path.sep).join('/'), ms: Date.now() - t0, ...(ok ? {} : noCheck ? { noCheck: true, busy: busy || null } : {}), ...(trustNote ? { trustNote, closeRec: { ...rec, dirty: false, trustNote } } : {}) };
   if (!res.noCheck) seen.set(tree, res); // a run that judged nothing is not cached: the next ask runs it again
-  if (!ok && !res.noCheck) flakeTriage(sc, { id, tree, text, log }); // 2.69.0 (r)
+  if (!ok && !res.noCheck) { const t = flakeTriage(sc, { id, tree, text, log }); if (t) res.triage = t; } // 2.69.0 (r); 2.77.3: its result
   const j = judged(res);
   if (j.excused?.length) log(`[train] ${id}: red only in ${j.excused.join(', ')}, already red when ${tasks.join(', ')} ${tasks.length === 1 ? 'was' : 'were'} claimed: counts as green, as at task done`);
   return j;
@@ -828,6 +834,7 @@ function recheck(sc, o) {
   if (s.cached) return s.cached;
   const job = { ...s.job, id: o.id };
   const w = runGatesWaiting(() => spawnSync(process.execPath, job.args, { windowsHide: true, ...job.opts }), { log: (m) => o.log(`[train] ${o.id}: ${m}`), label: `re-check ${job.n}` });
+  checkCancel(sc.root, o.id); // 2.77.3 (H2)
   return recheckEnd(sc, o, job, w);
 }
 
@@ -837,6 +844,7 @@ async function recheckAsync(sc, o) {
   if (s.cached) return s.cached;
   const job = { ...s.job, id: o.id };
   const w = await runGatesWaitingAsync(() => spawnCollect(process.execPath, job.args, { cwd: job.opts.cwd, env: job.opts.env }), { log: (m) => o.log(`[train] ${o.id}: ${m}`), label: `re-check ${job.n}` });
+  checkCancel(sc.root, o.id); // 2.77.3 (H2)
   return recheckEnd(sc, o, job, w, { triage: false });
 }
 
@@ -858,7 +866,11 @@ const flakeSeen = new Map();
  * After a red verify or re-check: each failing test file runs ALONE on this same tree (run-gates --only the game's
  * gates, STUDIO_GATE_FOCUS, as a 2.65.3 re-check; the second, low-load run with STUDIO_TEST_WORKERS=1), at most once
  * per train, and is labelled real / seed-flake / load-flake / intermittent in .studio/flakes.jsonl. Labels only: what
- * the train does next is decided as before. Never throws.
+ * the train does next is decided as before. Never throws (but a stall or a lane leaving still stops the train).
+ * 2.77.3 (H2, B-112): each run says so in the train's status ("flake check k of n: <file> alone"), waits at most
+ * STUDIO_FLAKE_WAIT_MIN (10) for a machine:heavy slot (its STUDIO_HEAVY_WAIT_MIN), and a run refused as busy or stopped
+ * before any gate is "not run" (no label), never "real"; the triage ends at the first real label (harness/flakes.mjs).
+ * 2.77.3 (C2): a red whose every failing file is a port collision is not the lanes' (trainBody defers them).
  */
 export function flakeTriage(sc, { id, tree, text, log }) {
   if (!triageOn()) return null;
@@ -869,21 +881,32 @@ export function flakeTriage(sc, { id, tree, text, log }) {
     const base = String(id).replace(/-\d+$/, '');
     if (!flakeSeen.has(base)) flakeSeen.set(base, new Set());
     let n = 0;
-    const runAlone = ({ check, file, lowLoad }) => {
-      checkCancel(root, id); // 2.77.1 (B-98): swallowed by the catch below; the next verify or re-check stops the train
+    const waitMin = flakeRules().waitMin;
+    const runAlone = ({ check, file, lowLoad, k = 1, of = 1 }) => {
+      checkCancel(root, id); // 2.77.1 (B-98); 2.77.3: rethrown below, so the train stops here
       n += 1;
       const owner = `train-${id}-flake`;
       const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off', STUDIO_GATE_FOCUS: JSON.stringify({ [check]: [file] }) };
-      for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[k];
+      for (const x of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[x];
       if (lowLoad) env.STUDIO_TEST_WORKERS = '1';
       env.STUDIO_TIMEOUT_RERUN = 'off'; // 2.72.0 (a): the triager wants the raw answer, not the gate's own timeout re-run
+      // 2.77.3 (H2): a focused run waits at most STUDIO_FLAKE_WAIT_MIN for a machine:heavy slot, then is "not run".
+      const hw = Number(process.env.STUDIO_HEAVY_WAIT_MIN);
+      env.STUDIO_HEAVY_WAIT_MIN = String(Math.min(Number.isFinite(hw) && String(process.env.STUDIO_HEAVY_WAIT_MIN ?? '').trim() !== '' ? hw : 60, waitMin));
+      const line = `flake check ${k} of ${of}: ${file} alone${lowLoad ? ' at low load (one test worker)' : ''}, on tree ${String(tree).slice(0, 8)} (the verify was red; up to ${waitMin} min for a slot, STUDIO_FLAKE_WAIT_MIN)`;
+      writeTrainStatus(root, id, { step: 'flake-check', text: line, eta: null });
+      log(`[train] ${id}: ${line}`);
       const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(',')], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
-      try { fs.mkdirSync(path.join(root, TRAIN_DIR), { recursive: true }); fs.writeFileSync(path.join(root, TRAIN_DIR, `${id}-flake-${n}.log`), `${r.stdout || ''}${r.stderr || ''}`); } catch {}
+      const out2 = `${r.stdout || ''}${r.stderr || ''}`;
+      try { fs.mkdirSync(path.join(root, TRAIN_DIR), { recursive: true }); fs.writeFileSync(path.join(root, TRAIN_DIR, `${id}-flake-${n}.log`), out2); } catch {}
       for (const f of [`${owner}.json`, `${owner}-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
-      return { ok: r.status === 0 };
+      checkCancel(root, id); // 2.77.3 (H2): stopped by the stall watch: judge nothing
+      const busy = r.status !== 0 ? busyWhy(out2) : '';
+      if (r.status !== 0 && (busy || ranNoCheck(out2))) return { ok: false, notRun: busy || `it stopped before any gate ran (${r.status === null ? `signal ${r.signal || '?'}` : `exit ${r.status}`})`, text: out2 };
+      return { ok: r.status === 0, text: out2 };
     };
     return triageRed({ root, dir: sc.dir, text, train: id, tree, runAlone, seen: flakeSeen.get(base), log: (m) => log(`[train] ${id}: ${m}`) });
-  } catch (e) { log(`[train] ${id}: flake triage skipped (${e.message})`); return null; }
+  } catch (e) { if (e instanceof TrainCancelled) throw e; log(`[train] ${id}: flake triage skipped (${e.message})`); return null; }
 }
 
 /** Run the pins' report on the scratch copy's tree: { report } ({ pin: value }) or { error }. Cached by tree. */
@@ -2070,6 +2093,26 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     const h = holdLane(root, lane, { tier, why, ...extra });
     if (h.fresh) ev('held', id, `${lane.task} ${extra.beta ? 'is held for the orchestrator and the Producer (beta mode)' : 'needs the owner'} (tier ${tier}): ${why}. It waits in the queue; ${who} releases it with npm run task -- train release ${lane.task} --by <name>${extra.beta ? '' : ' [--permission "…"]'}`, { task: lane.task, agent: by, to: 'producer', status: 'blocked', meta: { tier, why, ...(extra.beta ? { beta: true } : {}) } });
   };
+  // 2.77.3 (H2, C2): an attempt that ended for no fault of the lane (the train stalled; a port collision): the lane keeps
+  // its place in the queue (queued if it wasn't: a task done's own lane), marked with `key`; a second time at the same
+  // head (another train) it is held for the Producer instead, so it can't loop. Never a hand-back.
+  const keepOrHold = (lane, key, why, what) => {
+    if (dryRun) { defer(lane, why); return 'kept'; }
+    let e = null;
+    try { e = readQueue(root).find((x) => x.task === lane.task) || null; } catch {}
+    const head = lane.head || e?.head || null;
+    if (e?.[key]?.head && head && e[key].head === head && e[key].train !== id) {
+      hold(lane, 'B', `${what} twice with ${lane.task} at ${String(head).slice(0, 8)} (train ${e[key].train}, then ${id}): ${why}; the Producer looks before it trains again`);
+      return 'held';
+    }
+    const mark = { [key]: { train: id, head, at: new Date().toISOString() } };
+    try {
+      if (e) requeue(root, lane, mark);
+      else enqueue(root, { task: lane.task, agent: lane.agent, dir: lane.dir, branch: lane.branch, head, all: Boolean(lane.all), note: `queued again: ${what}`, ...mark });
+    } catch {}
+    defer(lane, why);
+    return 'kept';
+  };
 
   waitActions(root, waits, { id, by, dryRun, res, log, deps });
 
@@ -2273,6 +2316,17 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
           const kr = knownRedTry({ sc, tip, set, built, v, redSub, id, log, res, cache, all, main, root, unionFiles, depInfo, by, text: redText });
           if (kr) { verdict = { built: kr.built, v: { ...v, ok: true, knownRed: kr.subs, closeRec: v.rec ? { ...v.rec, rows: (v.rec.rows || []).map((r) => (!r.ok && v.gates.includes(r.id) ? { ...r, ok: true, knownRed: kr.subs.filter((x) => x.split(':')[0] === r.id) } : r)) } : null } }; break; }
         }
+        // 2.77.3 (C2, B-108): every failing test file failed on a port collision (the flake triage): another verify ran the
+        // same test on the same fixed port. Not the lanes' failure: nobody is handed back, they wait for the next train.
+        if (v.triage?.allPortCollision) {
+          const ports = [...new Set(v.triage.labels.map((r) => r.port).filter(Boolean))];
+          const why = `the verify failed only on port collisions (${v.triage.labels.map((r) => r.test).slice(0, 3).join(', ')}${ports.length ? `; port ${ports.join(', ')}` : ''}): another verify ran the same test on the same fixed port at the same time. Not this lane's failure; it waits for the next train. Give those tests a free port (studio/rules/test-ports.md)`;
+          log(`[train] ${id}: ${why}`);
+          ev('port_collision', id, `${set.map((l) => l.task).join(', ')}: ${why}`.slice(0, 600), { agent: by, to: 'producer', status: 'warn', meta: { lanes: set.map((l) => l.task), ports, tests: v.triage.labels.map((r) => r.test), log: v.log || null } });
+          for (const l of set) keepOrHold(l, 'portCollisionIn', why, 'a train failed only on port collisions');
+          set = [];
+          break;
+        }
         noteTrainRed(root, { id, gates: v.gates }); // 2.73.2 (d, B-75): the streak a fix lane is put first for
         ev('red', id, `the train of ${set.map((l) => l.task).join(', ')} is red (${v.why})${ft.list.length ? `; failing: ${ft.list.slice(0, 3).join('; ')}${ft.list.length + ft.more > 3 ? ` (+${ft.list.length + ft.more - 3} more)` : ''}` : ''}; log ${v.log || '-'}`, { agent: by, status: 'blocked', meta: { lanes: set.map((l) => l.task), gates: v.gates, ...(redSub.length ? { subIds: redSub } : {}), ...(ft.list.length ? { failingTests: ft.list, moreTests: ft.more } : {}), ...(redEta ? { eta: { ms: redEta.ms, text: redEta.text } } : {}) } });
         // 2.67.0 (f): red on exactly the tests a chain failed before the verify (its tail is filed): the whole chain
@@ -2407,12 +2461,27 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     }
   } catch (e) {
     if (!(e instanceof TrainCancelled)) throw e;
-    // 2.77.1 (B-98): ended like a train that lands nothing: lanes kept (queued for the next train), nobody handed back.
-    const stay = ready.map((l) => l.task).filter((t) => !e.marker.tasks.includes(t) && !res.dropped.some((d) => d.task === t) && !res.landed.includes(t));
-    res.cancelled = e.marker;
-    res.message = `Train ${id} stopped: ${e.marker.tasks.join(', ')} left the train (by ${e.marker.by || '?'}: ${e.marker.why || '-'}); no further checks.${stay.length ? ` ${stay.join(', ')} stay queued for the next train (nobody handed back).` : ''}${res.landed.length ? ` ${summary(res)}` : ''}`;
-    log(`[train] ${id}: ${res.message}`);
-    ev('cancelled', id, res.message, { agent: by, status: 'warn', meta: { left: e.marker.tasks, leftBy: e.marker.by || null, why: e.marker.why || null, stay } });
+    if (e.marker.stall) {
+      // 2.77.3 (H2, B-112): the stall watch (harness/train-watch.mjs) stopped this attempt: nothing more lands from it,
+      // nobody is handed back; each lane still riding keeps its place (held for the Producer if it stalled a train before).
+      const riding = ready.filter((l) => !res.dropped.some((d) => d.task === l.task) && !res.landed.includes(l.task));
+      const why = `train ${id} stalled: ${e.marker.why}`;
+      const kept = [];
+      const held = [];
+      for (const l of riding) (keepOrHold(l, 'stalledIn', why, 'a train stalled') === 'held' ? held : kept).push(l.task);
+      res.ok = res.landed.length > 0;
+      res.stalled = { why: e.marker.why, step: e.marker.step || null, at: e.marker.at || null };
+      res.message = `Train ${id} stalled and ended this attempt: ${e.marker.why}. Its running checks were stopped; nobody was handed back.${kept.length ? ` ${kept.join(', ')} keep their place in the train queue.` : ''}${held.length ? ` ${held.join(', ')} stalled a train before at the same head: held for the Producer (npm run task -- train release <ID> --by <name>).` : ''}${res.landed.length ? ` ${summary(res)}` : ''}`;
+      log(`[train] ${id}: ${res.message}`);
+      ev('stall_ended', id, res.message, { agent: by, to: 'producer', status: 'blocked', meta: { why: e.marker.why, step: e.marker.step || null, kept, held } });
+    } else {
+      // 2.77.1 (B-98): ended like a train that lands nothing: lanes kept (queued for the next train), nobody handed back.
+      const stay = ready.map((l) => l.task).filter((t) => !e.marker.tasks.includes(t) && !res.dropped.some((d) => d.task === t) && !res.landed.includes(t));
+      res.cancelled = e.marker;
+      res.message = `Train ${id} stopped: ${e.marker.tasks.join(', ')} left the train (by ${e.marker.by || '?'}: ${e.marker.why || '-'}); no further checks.${stay.length ? ` ${stay.join(', ')} stay queued for the next train (nobody handed back).` : ''}${res.landed.length ? ` ${summary(res)}` : ''}`;
+      log(`[train] ${id}: ${res.message}`);
+      ev('cancelled', id, res.message, { agent: by, status: 'warn', meta: { left: e.marker.tasks, leftBy: e.marker.by || null, why: e.marker.why || null, stay } });
+    }
   } finally {
     activeLanes.delete(String(id));
     for (const l of ready) deps.clearRunning?.(l.task);

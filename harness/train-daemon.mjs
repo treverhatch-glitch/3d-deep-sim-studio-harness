@@ -19,7 +19,9 @@
  *   - the queue has ready lanes by the batch rules that already exist (STUDIO_TRAIN_MIN lanes not held for the owner or
  *     out of trains, or the oldest has waited STUDIO_TRAIN_WAIT_MIN);
  *   - the machine budget has room for a verify claim (harness/heavy-budget.mjs jobClaim('verify') + admit, the same
- *     admission machine:heavy uses; no machine scan: the slot count decides, as there).
+ *     admission machine:heavy uses; no machine scan: the slot count decides, as there). 2.77.3 (M6): when it hasn't,
+ *     the pass leaves the train-wait marker (harness/heavy.mjs markTrainWait), so the next freed slot is kept for the
+ *     train instead of going to a builder's verify (STUDIO_TRAIN_SLOT_PRIORITY_MIN, 15).
  * The train runs in a detached child (`node harness/train-daemon.mjs run`), so the supervisor's pass never waits on it.
  * After the train the child, for each handed-back lane whose task has no running session, makes sure the task is back
  * on the board for a builder with the hand-back facts block: the train's own hand-back (task.mjs pauseTask) normally
@@ -157,6 +159,11 @@ export async function trainDaemonPass({ root = null, env = process.env, now = Da
   if (!('room' in given)) f.room = { ok: true };
   let d = daemonDecision(f);
   if (d.start && !('room' in given)) { f.room = await verifyRoom(root, env); d = daemonDecision(f); }
+  // 2.77.3 (M6): no room only for want of a slot or budget: the train goes first on the next free one (harness/heavy.mjs
+  // markTrainWait; builders' verifies don't take a newly freed slot while it is fresh, STUDIO_TRAIN_SLOT_PRIORITY_MIN).
+  if (!d.start && f.room && !f.room.ok && !dryRun && !('room' in given)) {
+    try { const h = await import('./heavy.mjs'); const w = h.markTrainWait(await h.heavyRoot(), { why: `train daemon: ${f.room.line || 'no room'}`, lanes: (f.queue || []).map((e) => e.task), env }); if (w) d.why = `${d.why}; the train takes the next free slot (builders' verifies wait for it, STUDIO_TRAIN_SLOT_PRIORITY_MIN)`; } catch {}
+  }
   const last = readJson(path.join(root, '.studio', 'train', 'daemon-why.json'));
   if (!d.start) {
     if (!dryRun && f.auto?.on && (f.queue || []).length && last?.why !== d.why) {
