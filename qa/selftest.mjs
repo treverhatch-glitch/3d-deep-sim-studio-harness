@@ -4792,6 +4792,15 @@ if (inShard('selftest-278i')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.1 (b, B-118): agy stream input keyed on "event", stream mode by default with a one-turn safety net and record,
+// a failover in its own lane copy, the progress nudge, and the agy CLI reviewer on a named Gemini model.
+if (inShard('selftest-2781b')) {
+  const dir = copyRepo();
+  const { selftest2781B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781b.mjs')).href);
+  await selftest2781B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

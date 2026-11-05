@@ -82,30 +82,61 @@ tool without a shell, on every OS, so each argument reaches the tool exactly as 
     own `GEMINI.md` keeps it. The agy kickoff carries the same rules.
   - When agy stops on a refused tool, its line (`jetski: … permission … auto-denied`, or a print timeout) is put in the
     hand-back note and the session's end event (`meta.agyStop`), so the reason isn't only in `.studio/agents/<name>.log`.
-  - **A builder's agy session can stay open across turns (2.77.3, C1 / B-99): OFF by default, `STUDIO_AGY_STREAM=1`
-    turns it on.** `agy -p` runs one turn: a Gemini builder that started a command in the background ("… and am waiting
-    for the process to complete") ended its turn and agy exited minutes later with the task unfinished (the GEMINI.md
-    foreground rule was ignored). It stays off until one hand-run session on the crew's PC confirms the input shape:
-    in a studio shell, run `agy --input-format stream-json --output-format stream-json --print-timeout 0 --mode accept-edits --model gemini-4-argon-high`
-    and paste `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Say hello, then run node --version in the foreground."}]}}`
-    as one line. It works when agy answers, prints a `{"type":"result",…}` line (or another turn-end line) at the end of
-    the turn and waits; a second such line starts a second turn; closing its input (Ctrl+Z then Enter on Windows,
-    Ctrl+D elsewhere) ends it. If agy refuses the flags without `-p`, or ends turns with another line, say so before
-    turning it on. With it on, a builder-like session (not reviewer, Producer, Director or liaison) starts as
+  - **A builder's agy session stays open across turns (2.77.3, C1 / B-99; on by default since 2.78.1, B-118).**
+    `agy -p` runs one turn: a Gemini builder that started a command in the background ("… and am waiting for the
+    process to complete") ended its turn and agy exited minutes later with the task unfinished (the GEMINI.md
+    foreground rule was ignored). A builder-like session (not reviewer, Producer, Director or liaison) starts as
     `agy --input-format stream-json --output-format stream-json --print-timeout <STUDIO_AGY_PRINT_TIMEOUT> --mode accept-edits --model <model> [--settings <file>]`,
-    gets the kickoff as the first NDJSON user message on stdin
-    (`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"…"}]}}`), and its stdin stays open.
-    When a turn ends (a `result` event in agy's stream-json output, or another turn-end shape) while the session still
-    holds its task's claim (or its pinned task isn't claimed yet), with no stop asked, the launcher waits
-    `STUDIO_AGY_CONTINUE_WAIT_SEC` (15) so a background command can finish, asks again, and sends a follow-up: check the
-    background command's result in the foreground, then continue to `task done` or `task pause`. At most
-    `STUDIO_AGY_CONTINUE_MAX` (8) follow-ups a session (event `agent.agy_continue`); then, or once the task is done,
-    paused or handed back, it closes stdin and agy exits. Output silent for `STUDIO_AGY_STREAM_IDLE_SEC` (1800; 0 never)
-    with no tool call pending also closes it, and so does no stream-json event at all in the first
-    `STUDIO_AGY_STREAM_FIRST_SEC` (180; an agy that doesn't take the stream flags then runs as one turn). Each step is a `[launcher] agy stream: …` line in the log; an event type
-    the launcher doesn't know is noted once and ignored. `STUDIO_AGY_STREAM` unset or `0` (or `STUDIO_AGY_PROMPT=arg`)
-    keeps the one-turn launch. **Untested on real agy:** the input message shape and which output event ends a turn (the
-    selftest drives a stand-in agy that speaks this shape; harness/agy-stream.mjs).
+    gets the kickoff as the first NDJSON message on stdin, and its stdin stays open. The message is the shape the crew
+    probed on real agy (2.78.1, B-118; 2.77.3 sent `"type":"user"` and agy refused it: "stream input message is missing
+    the "event" field"): `{"event":"user","message":{"role":"user","content":[{"type":"text","text":"…"}]}}`.
+    When a turn ends (a turn-end word such as `result` or `turn_complete` in an output event's `type`, `event` or
+    `kind`) while the session still holds its task's claim (or its pinned task isn't claimed yet), with no stop asked,
+    the launcher waits `STUDIO_AGY_CONTINUE_WAIT_SEC` (15) so a background command can finish, asks again, and sends a
+    follow-up: check the background command's result in the foreground, then continue to `task done` or `task pause`.
+    **Progress nudge (2.78.1):** a stream session with no tool-call event and no file write (the stall check's progress:
+    a write, a commit, a task change, or its own verify running) for `STUDIO_AGY_NUDGE_MIN` (10; 0 = off) minutes while
+    its task is in progress gets the same follow-up without waiting for a turn end (one stream run sat 40 min with no
+    writes). It is kept under two thirds of `STUDIO_STALL_MIN` (15 for a builder), so it comes before the stall end;
+    the stall end still follows if the nudge brings no progress. At most `STUDIO_AGY_CONTINUE_MAX` (8) follow-ups a
+    session, nudges included (event `agent.agy_continue`, `meta.nudge` on a nudge); then, or once the task is done,
+    paused or handed back, the launcher closes stdin and agy exits. Output silent for `STUDIO_AGY_STREAM_IDLE_SEC`
+    (1800; 0 never) with no tool call pending also closes it, and so does no stream-json event at all in the first
+    `STUDIO_AGY_STREAM_FIRST_SEC` (180). Each step is a `[launcher] agy stream: …` line in the log; an event type the
+    launcher doesn't know is noted once and ignored. `STUDIO_AGY_STREAM=0` (or `STUDIO_AGY_PROMPT=arg`) keeps the
+    one-turn launch.
+    **Safety net (2.78.1):** an agy stream session that exits before its first turn ends, with an input-format error in
+    its own output ("missing the … field", "stream input", an unknown or unexpected `--input-format` argument) or with
+    no stream-json event at all, is recorded once in `.studio/agy-stream.json` (the error line, the stream flags, agy's
+    program file, size, time and `--version`; event `agent.agy_stream_off`, to a person) and relaunched at once under
+    the same name in the one-turn mode, in its own lane copy (event `agent.agy_one_turn`). Later agy launches skip the
+    stream mode while that record matches the agy on PATH (the log says so); delete `.studio/agy-stream.json` to try
+    again. A new agy (another program file and another `--version`) clears the record by itself
+    (`agent.agy_stream_retry`). **Untested on real agy:** which output event ends a turn (the crew's full cycle shows
+    the session lived through two verifies; harness/agy-stream.mjs is tolerant, and the selftest drives a stand-in
+    agy that refuses a line without `"event"`).
+  - **A failover works on in its own lane copy (2.78.1, B-118).** `--fallback` (and the one-turn relaunch above) starts
+    the next session under the same name in the copy the ended session used, with its branch, commits and any
+    uncommitted changes (event `lane.reused`; the kickoff says so, and that the hand-back's patch is a copy of those
+    changes). 2.78.0 removed the copy and made a new one: on Windows a copy the dead agy's processes still held stayed
+    behind, looked fresh, and the failover was refused ("no lane copy could be made for builder-agyf9 (… still in
+    use)"). The copy is removed when the last session in the chain ends, as before.
+  - **Gemini first, and Gemini as the cross-family reviewer (2.78.1).** The model routing's built-in defaults
+    (harness/model-pools.mjs `DEFAULT_MODELS`, what `npm run models -- init` writes) already put Gemini first:
+    `routes.small` = gemini-flash, gemini-argon, claude-sonnet, claude-opus; `routes.normal` = gemini-argon,
+    claude-sonnet, claude-opus. A studio's own `studio/models.json` overrides them per list: to put Gemini back first,
+    set those two lists in it (or remove them so the defaults apply); `npm run models -- status` shows what routing
+    picks now and why. The cross-family reviewer (`npm run review -- <ID>` when the router has no keys or fails;
+    harness/review.mjs `reviewerTools`) tries `STUDIO_REVIEWER_TOOL` (+ `STUDIO_REVIEWER_MODEL`), then
+    `STUDIO_REVIEW_TOOLS` in order, then codex, agy, claude, skipping the implementer's family: for a Claude
+    implementer agy is eligible and for a Gemini one claude is. `STUDIO_REVIEW_TOOLS=agy,claude` puts Gemini first
+    for Claude's work (and Claude for Gemini's). The agy reviewer runs `agy --print-timeout 900s --model <Gemini model>`
+    with the review on stdin and no `--mode` (it can't edit): the model is the one asked for when it is Gemini
+    (`agy:<model>` in `STUDIO_REVIEW_TOOLS`), else `STUDIO_TOOL_AGY_MODEL`, else gemini-4-argon-high. Before 2.78.1 it
+    ran `agy -p <review>` with no model, so agy ran its own default (a Claude model) and the review was recorded as
+    "gemini". A reviewer agent session (`STUDIO_REVIEWER_TOOL=agy`) is one session tool for every review: it is cross-
+    family only for work by another family, which the done check (`Approved by a reviewer from another model family`)
+    enforces.
 - The agent's log (`npm run agent -- logs <agent>`) starts with a `[launcher]` line when a Windows tool was started
   as an npm shim or through cmd.exe, or wasn't found on PATH.
 - A custom command (`STUDIO_<ROLE>_CMD`, `STUDIO_AGENT_CMD`, `STUDIO_TOOL_<TOOL>_CMD`) is your own command line and

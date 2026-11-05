@@ -39,7 +39,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { allowedToolsList } from './allowlist.mjs';
-import { fillCommand, localizeCommand, launchPlan, spawnPlan, describePlan, resolveCommand, envValue } from './launch.mjs';
+import { fillCommand, localizeCommand, launchPlan, spawnPlan, spawnAgentSync, describePlan, resolveCommand, envValue } from './launch.mjs';
 import { pinKickoff } from './task-pin.mjs';
 import { agyAllowHint, noteAgyHint, allowCli, agyStudioSettings, AGY_SHELL_RULES, writeAgyLaneRules } from './agy-allow.mjs';
 import path from 'node:path';
@@ -56,11 +56,11 @@ import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
 import { recordDenials } from './denials.mjs';
 import { taskType } from './done-check.mjs';
 import { listLocks, release, claim, renewOwner, tooBroad } from './lock.mjs';
-import { AGY_STREAM_FLAGS, agyStreamOn, agyStreamWanted, userLine, driveAgyStream, taskStillOpen } from './agy-stream.mjs';
+import { AGY_STREAM_FLAGS, agyStreamOn, agyStreamWanted, userLine, driveAgyStream, taskStillOpen, streamFailure, readStreamRecord, writeStreamRecord, streamRecordHolds, STREAM_RECORD } from './agy-stream.mjs';
 import { savePatch } from './wip.mjs';
 import { laneList, readHolds } from './task-hold.mjs';
 import { engineLaunch } from './engine-tracks.mjs';
-import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport } from './worktree.mjs';
+import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport, isLaneWorktree, LANES_DIR } from './worktree.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
 import { sessionLimits, heartbeatCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
@@ -77,7 +77,7 @@ import { recordFollow } from './scorecard.mjs';
 import { untrustedBlock, oneLine } from './untrusted.mjs';
 import { jobDone } from './jobs.mjs';
 import { isNim, providerConcurrency } from './families.mjs';
-import { observe, logTokens, logStall, idleVerdict, readStall, stallEndOf, readLogFrom, resetStall, newestSessionPart } from './stall.mjs';
+import { observe, logTokens, logStall, idleVerdict, readStall, stallEndOf, readLogFrom, resetStall, newestSessionPart, stallLimits } from './stall.mjs';
 import { readPrices, readPriceMultipliers, priceFor, dollarsOf } from './autonomy.mjs';
 import { reloadEnvIfChanged } from './env-reload.mjs';
 import { profileGuard, profileOf } from './profile-guard.mjs';
@@ -298,10 +298,10 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], a
       // -i/--prompt-interactive, or stdin"), so the kickoff goes there and no argument has a space to split.
       // STUDIO_AGY_PROMPT=arg brings back `-p <prompt>` (UNTESTED on real agy: which of the two works for your agy).
       if (/^(arg|argument|p)$/i.test(process.env.STUDIO_AGY_PROMPT || '')) return { argv: ['agy', '-p', prompt, ...tail], promptAt: 2 };
-      // 2.77.3 (C1 / B-99): stream (STUDIO_AGY_STREAM=1, off by default; the launcher asks for it for a builder-like
-      // session, harness/agy-stream.mjs): the
-      // kickoff is the first stream-json user message and stdin stays open, so the launcher can send a follow-up when a
-      // turn ends with the task still in progress. --print-timeout and the other options stay as they are.
+      // 2.77.3 (C1 / B-99): stream (the default since 2.78.1, STUDIO_AGY_STREAM=0 turns it off; the launcher asks for it
+      // for a builder-like session, harness/agy-stream.mjs): the kickoff is the first stream-json user message (keyed on
+      // "event", B-118) and stdin stays open, so the launcher can send a follow-up when a turn ends with the task still in
+      // progress. --print-timeout and the other options stay as they are.
       if (stream && agyStreamOn()) return { argv: ['agy', ...AGY_STREAM_FLAGS, ...tail], stdin: userLine(prompt), stream: 'agy' };
       return { argv: ['agy', ...tail], stdin: prompt };
     }
@@ -971,7 +971,7 @@ function broadLaneRefusal({ agent, role, task, lane, broad }) {
 }
 
 /** Run one agent to the end, with heartbeats. Resolves with the cleanup result. */
-export async function runAgent({ role, agent, tool, model, fallback = [], task = null, lane = null, oneTask = false, division = null, note = '', by = null, refreshes = 0 }) {
+export async function runAgent({ role, agent, tool, model, fallback = [], task = null, lane = null, oneTask = false, division = null, note = '', by = null, refreshes = 0, reuseCopy = null, agyOneTurn = false }) {
   const opts2 = { refreshes };
   // H-1 (2.58.5): a nim session runs a NIM model (--model, STUDIO_NIM_MODEL or the default), never the role's.
   if (tool === 'nim') model = nimModel(model);
@@ -1052,7 +1052,14 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   holdStarting({ agent, role, tool, model, task, lane });
   let copy = null;
   const laneless = !laneWantsCopy(lane) && !rehearsal && lanelessWantsCopy({ role, lane, task });
-  if ((laneWantsCopy(lane) || laneless) && !process.env.STUDIO_MAIN_ROOT) {
+  // 2.78.1 (B-118): a failover (or the one-turn relaunch after a stream failure) under the same name works on in the copy
+  // the ended session used. Making a new one first removed it, and on Windows a copy the dead agy's processes still
+  // held stayed behind, fresh, so it was refused: "no lane copy could be made for builder-agyf9 (… still in use)".
+  const reused = reuseCopy && !rehearsal && !process.env.STUDIO_MAIN_ROOT ? reusableCopy(agent, reuseCopy) : null;
+  if (reused) {
+    copy = reused;
+    emitEvent({ type: 'lane.reused', agent, task: task || undefined, msg: `${agent} works on in its own copy (${LANES_DIR}/${agent}, branch ${reused.branch}): the session before it under this name ended and this one takes over`.slice(0, 400), meta: { dir: `${LANES_DIR}/${agent}`, branch: reused.branch } });
+  } else if ((laneWantsCopy(lane) || laneless) && !process.env.STUDIO_MAIN_ROOT) {
     const c = createLaneCopy(agent, { task, lane });
     // 2.77.1 (H5): a copy that was wanted and could be made here but wasn't (a leftover .lanes/<agent> still in use, a failed
     // worktree add) refuses the start at once. It used to fall through to the shared checkout and the tool started anyway:
@@ -1108,6 +1115,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     + (task ? `\nStart with ${task}: node harness/task.mjs start ${task} --agent ${agent} --model ${model}\n` : '')
     + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
     + (engineLane?.note ? `\n${engineLane.note}\n` : '')
+    + (copy?.reused ? `\nThis copy is the one the last session under your name used (it ended and you take over): its commits and any uncommitted changes are still here. A patch the hand-back names is a copy of those changes: don't apply it again.\n` : '')
     + (copy ? `\nYou work in your own copy of the repo (\`.lanes/${agent}\`, branch \`${copy.branch}\`): other agents' unfinished work can't reach your tests, and yours can't reach theirs. \`studio/\` and \`.studio/\` are shared with everyone. Commit your work as you go; \`task done\` adds your commits to the studio's branch once your checks pass (it rebases first and tells you if anything conflicts). Uncommitted work never leaves your copy.${copy.mixed ? ` MIXED LANE NOT MERGED: ${copy.mixed.line}` : ''}${copy.laneless ? ' Your task has no lane: claim the folders you edit (node harness/lock.mjs claim path:<dir> --owner $STUDIO_LOCK_OWNER) as usual.' : ''}\n` : '')
     + refreshRule({ oneTask, task })
     // 2.77.0 (n, B-92): a session started on a task works only that task (harness/task-pin.mjs; task start/done refuse others).
@@ -1153,7 +1161,15 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (prog.cmd && prog.via !== 'PATH') launchNotes.push(`aider: ${prog.cmd} (${prog.via === 'venv' ? "the studio's .studio/aider-venv" : 'STUDIO_AIDER_CMD'})`);
     if (ignoreFile) launchNotes.push(`aider ignores the harness's folders and the protected paths (${path.relative(REPO_ROOT, ignoreFile).split(path.sep).join('/')})${aider.reads.length ? `; the brief is passed with --read` : ''}`);
   }
-  const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort, addDirs: [...(copy ? laneShareDirs() : []), ...(engineLane?.dir ? [engineLane.dir] : [])], aider, stream: tool === 'agy' && agyStreamWanted({ role }) });
+  // 2.78.1 (B-118): stream mode is the default for a builder-like agy session, unless this is the one-turn relaunch after
+  // a stream failure, or the failure record (.studio/agy-stream.json) still holds for the agy on PATH.
+  let agyStream = !custom && tool === 'agy' && agyStreamWanted({ role }) && !agyOneTurn;
+  if (agyStream) {
+    const held = agyStreamRecordCheck();
+    if (held.holds) { agyStream = false; launchNotes.push(`agy stream mode skipped: .studio/${STREAM_RECORD} records that this agy refused it (${held.rec?.why || 'no reason recorded'}); ${held.why}. Delete .studio/${STREAM_RECORD} to try stream mode again; it is tried again by itself when agy changes.`); }
+  }
+  if (agyOneTurn && tool === 'agy') launchNotes.push('agy one-turn launch: the stream session before this one failed on its input format (see the line above); this session runs as one turn');
+  const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort, addDirs: [...(copy ? laneShareDirs() : []), ...(engineLane?.dir ? [engineLane.dir] : [])], aider, stream: agyStream });
   if (!custom && !cmd) dropStarting(agent);
   if (!custom && !cmd) return { ok: false, message: `No launch command for tool "${tool}". Use --tool claude|codex|agy|cursor|grok|aider|nim, or set STUDIO_${roleKey(role)}_CMD (with {kickoff}, {agent}, {model}).` };
   fs.mkdirSync(AGENTS_DIR, { recursive: true });
@@ -1241,13 +1257,16 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // and sends a follow-up while its task is still in progress (STUDIO_AGY_CONTINUE_MAX, STUDIO_AGY_CONTINUE_WAIT_SEC).
   let agyDriver = null;
   if (cmd?.stream === 'agy' && child.stdin) {
-    fs.writeSync(out, `[launcher] agy stream session: ${AGY_STREAM_FLAGS.join(' ')}; stdin stays open for follow-ups while the task is in progress (STUDIO_AGY_STREAM=1; unset or 0 starts the one-turn launch)\n`);
+    fs.writeSync(out, `[launcher] agy stream session: ${AGY_STREAM_FLAGS.join(' ')}; stdin stays open for follow-ups while the task is in progress (the default; STUDIO_AGY_STREAM=0 starts the one-turn launch)\n`);
     try {
       agyDriver = driveAgyStream({
         agent, child, logFile, from: logStart, firstMessage: cmd.stdin,
         decide: () => taskStillOpen({ agent, role, task, startedAt, locks: listLocks(), events: readRecentEvents(5000), doneIds: parseNextQueue().done.map((t) => t.id), studioStop: readStop(), agentStop: stopMark(agent), refresh: readFlag(agent) }),
         note: (l) => { try { fs.appendFileSync(logFile, `[launcher] ${l}\n`); } catch {} },
-        onContinue: ({ n, task: t, why }) => emitEvent({ type: 'agent.agy_continue', agent, task: t || task || undefined, msg: `${agent}: agy's turn ended with ${t || 'its task'} in progress (${why}); follow-up ${n} sent`.slice(0, 400), meta: { n } }),
+        onContinue: ({ n, task: t, why, nudge }) => emitEvent({ type: 'agent.agy_continue', agent, task: t || task || undefined, msg: `${agent}: ${nudge ? `no tool call or file write for STUDIO_AGY_NUDGE_MIN while ${t || 'its task'} is in progress` : `agy's turn ended with ${t || 'its task'} in progress`} (${why}); follow-up ${n} sent${nudge ? ' as a nudge' : ''}`.slice(0, 400), meta: { n, ...(nudge ? { nudge: true } : {}) } }),
+        // 2.78.1: the progress nudge reads the stall check's progress and stays below its no-progress limit.
+        progressAt: () => Date.parse(readStall(agent)?.lastProgressAt || '') || 0,
+        stallMin: () => stallLimits(role).stallMin,
       });
     } catch (err) {
       fs.writeSync(out, `[launcher] agy stream: couldn't follow the session (${String(err?.message || err).slice(0, 200)}); its input is closed after the kickoff\n`);
@@ -1376,17 +1395,44 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     }
   }
   const atClaim = !copy ? (readJson(sessionFile(agent)) || {}).copy || null : null; // 2.76.0 (B-84): made at task start
+  // 2.78.1 (B-118): an agy stream session that exited before its first turn ended, on an input-format error or with no
+  // stream-json at all: recorded once (.studio/agy-stream.json) and relaunched below in the one-turn mode.
+  let streamFail = null;
+  if (agyDriver) {
+    try {
+      streamFail = streamFailure({ state: agyDriver.state, log, ended: killedBy || stopMark(agent) || (spawnError ? { kind: 'spawn-error' } : null) });
+      if (streamFail.failed) recordStreamFailure({ agent, task, why: streamFail.why, line: streamFail.line, logFile });
+      else streamFail = null;
+    } catch { streamFail = null; }
+  }
   const result = cleanUp(agent, { code, log, usageLog, role, tool: session.tool, model, cmd: session.tool === 'custom' ? custom : null, exit: { signal: exitSignal, killedBy, spawnError, at: exitedAt, ranMs: Date.now() - t0 } });
-  if (copy && !keptCopy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
-  if (atClaim?.branch && fs.existsSync(path.join(REPO_ROOT, atClaim.dir || ''))) removeLaneCopy(agent, { keepBranch: unmerged(atClaim.branch) > 0 });
+  // 2.78.1 (B-118): the copies are removed below, unless the next session under this name (a failover, the one-turn
+  // relaunch) works on in them: ownCopy.
+  const atClaimDir = atClaim?.branch && atClaim.dir ? path.join(REPO_ROOT, atClaim.dir) : null;
+  const ownCopy = copy && fs.existsSync(copy.dir) ? { dir: copy.dir, branch: copy.branch, laneless: Boolean(copy.laneless) } : atClaimDir && fs.existsSync(atClaimDir) ? { dir: atClaimDir, branch: atClaim.branch, laneless: true } : null;
+  const dropCopies = () => {
+    if (copy && !keptCopy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
+    if (atClaimDir && fs.existsSync(atClaimDir)) removeLaneCopy(agent, { keepBranch: unmerged(atClaim.branch) > 0 });
+  };
   for (const p of lanePaths) release(`path:${p}`, agent);
   // Refreshed (2.29.2): the launcher reopens the same task at once in a fresh session that reads the hand-back.
   // The task it handed back, or the task it was started on when it hadn't claimed it yet (and it isn't done).
   const again = result.capped ? result.handed[0]?.task || (task && !parseNextQueue().done.some((t) => t.id === task) ? task : null) : null;
   const maxRefresh = Number(process.env.STUDIO_REFRESH_RELAUNCH ?? 5);
   if (again && !readStop() && (opts2.refreshes || 0) < maxRefresh) {
+    dropCopies();
     emitEvent({ type: 'agent.refresh', agent, task: again, msg: `${agent} refreshed on ${again}; a fresh session continues from studio/handoffs/${again}.md` });
     return runAgent({ role, agent, tool, model, fallback, task: again, lane, oneTask, division, note, by, refreshes: (opts2.refreshes || 0) + 1 });
+  }
+  // 2.78.1 (B-118): the stream session failed on its input format: once, the same agent and model again in the one-turn
+  // mode (before any failover), in its own copy. Its task, if it had one and it isn't done; or, started with none, a
+  // session that finished nothing.
+  if (streamFail && !agyOneTurn && !readStop() && !stopMark(agent)) {
+    const resume = result.handed[0]?.task || (task && !parseNextQueue().done.some((t) => t.id === task) ? task : null);
+    if (resume || (!task && !result.finished?.length)) {
+      emitEvent({ type: 'agent.agy_one_turn', agent, task: resume || undefined, to: 'producer', status: 'warn', msg: `${agent}: ${streamFail.why.slice(0, 240)}; relaunched in the one-turn mode${resume ? ` on ${resume}` : ''}`.slice(0, 500) });
+      return runAgent({ role, agent, tool, model, fallback, task: resume, lane, oneTask, division, note, by, refreshes: opts2.refreshes || 0, reuseCopy: ownCopy, agyOneTurn: true });
+    }
   }
   if (result.bad && !fallback.length && result.troubleKind === 'quota') {
     if (isNim(model, tool) && process.env.STUDIO_NIM_FALLBACK) fallback = [process.env.STUDIO_NIM_FALLBACK];
@@ -1409,10 +1455,80 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     // 2.77.0 (n): a failover keeps the model only within its family: agy gets a Gemini model, claude never a Gemini one.
     if (!fmodel && ftool === 'agy' && !isGeminiModel(model)) model = isGeminiModel(process.env.STUDIO_TOOL_AGY_MODEL) ? String(process.env.STUDIO_TOOL_AGY_MODEL).trim() : AGY_DEFAULT_MODEL;
     else if (!fmodel && ftool !== 'agy' && isGeminiModel(model)) model = String(process.env[`STUDIO_TOOL_${roleKey(ftool)}_MODEL`] || process.env[`STUDIO_${roleKey(role)}_MODEL`] || process.env.STUDIO_AGENT_MODEL || 'unknown').trim();
-    emitEvent({ type: 'agent.failover', agent, to: 'producer', msg: `${agent} failed over to ${ftool}${fmodel ? ` (${fmodel})` : ''}${resume ? ` on ${resume}` : ''}` });
-    return runAgent({ role, agent, tool: ftool, model: fmodel || model, fallback: rest, task: resume, lane, oneTask, division, note, by });
+    emitEvent({ type: 'agent.failover', agent, to: 'producer', msg: `${agent} failed over to ${ftool}${fmodel ? ` (${fmodel})` : ''}${resume ? ` on ${resume}` : ''}${ownCopy ? `, in its own copy (${LANES_DIR}/${agent})` : ''}` });
+    // 2.78.1 (B-118): the failover works on in the ended session's copy (reuseCopy), never a new one under the same name.
+    return runAgent({ role, agent, tool: ftool, model: fmodel || model, fallback: rest, task: resume, lane, oneTask, division, note, by, reuseCopy: ownCopy });
   }
+  dropCopies();
   return { ok: true, code, ...result };
+}
+
+/**
+ * 2.78.1 (B-118): the copy the ended session under this name used, to work on in: { dir, branch, laneless, reused }, or
+ * null when it is gone or isn't this agent's lane worktree (then a new copy is made as usual).
+ */
+function reusableCopy(agent, prev) {
+  try {
+    const dir = path.resolve(REPO_ROOT, String(prev?.dir || ''));
+    const own = path.join(REPO_ROOT, LANES_DIR, agent);
+    const same = process.platform === 'win32' ? dir.toLowerCase() === own.toLowerCase() : dir === own;
+    if (!prev?.dir || !same || !fs.existsSync(dir) || !isLaneWorktree(dir, REPO_ROOT)) return null;
+    const head = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { windowsHide: true, cwd: dir, encoding: 'utf8' });
+    const branch = head.status === 0 ? head.stdout.trim() : prev.branch;
+    if (!branch) return null;
+    return { dir, branch, carried: null, mixed: null, sparse: null, laneless: Boolean(prev.laneless), reused: true };
+  } catch { return null; }
+}
+
+/** 2.78.1: agy's program file on PATH ({ program, size, mtimeMs }), and its --version line (a spawn: asked only when needed). */
+function agyIdent(env = process.env) {
+  try {
+    let program = null;
+    if (process.platform === 'win32') {
+      // An npm shim runs its .js entry (the file an upgrade rewrites); a .exe or .cmd is the file itself.
+      const r = resolveCommand('agy', { env });
+      program = r.mode === 'missing' ? null : r.mode === 'node' ? r.prefix[r.prefix.length - 1] : r.script || r.file;
+    } else {
+      program = String(envValue(env, 'PATH') || '').split(path.delimiter).filter(Boolean).map((d) => path.join(d, 'agy')).find((f) => { try { return fs.statSync(f).isFile(); } catch { return false; } }) || null;
+      if (program) { try { program = fs.realpathSync(program); } catch {} }
+    }
+    if (!program || !fs.existsSync(program)) return null;
+    const st = fs.statSync(program);
+    return { program, size: st.size, mtimeMs: Math.round(st.mtimeMs) };
+  } catch { return null; }
+}
+function agyVersion(env = process.env) {
+  try {
+    const r = spawnAgentSync(['agy', '--version'], { env, encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'pipe'] });
+    const line = `${r.stdout || ''}`.split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+    return r.status === 0 && line ? line.slice(0, 120) : null;
+  } catch { return null; }
+}
+/** 2.78.1: does the stream failure record hold for this agy? { holds, why, rec }. No record: no spawn, no stat. */
+function agyStreamRecordCheck(env = process.env) {
+  const rec = readStreamRecord(STUDIO_STATE_DIR);
+  if (!rec) return { holds: false, why: 'no record', rec: null };
+  const h = streamRecordHolds(rec, { ident: () => agyIdent(env), version: () => agyVersion(env) });
+  try {
+    if (h.refreshed) writeStreamRecord(STUDIO_STATE_DIR, h.refreshed);
+    if (h.changed) {
+      fs.rmSync(path.join(STUDIO_STATE_DIR, STREAM_RECORD), { force: true });
+      emitEvent({ type: 'agent.agy_stream_retry', agent: 'launcher', to: 'producer', msg: `${h.why}: .studio/${STREAM_RECORD} cleared; agy builders try the stream mode again`.slice(0, 400) });
+    }
+  } catch { /* the record is a help */ }
+  return { ...h, rec };
+}
+/** 2.78.1: write the stream failure record once (not again while one holds for this agy). */
+function recordStreamFailure({ agent, task, why, line, logFile }) {
+  const prev = readStreamRecord(STUDIO_STATE_DIR);
+  const note = (l) => { try { fs.appendFileSync(logFile, `[launcher] ${l}\n`); } catch {} };
+  if (prev && streamRecordHolds(prev, { ident: () => agyIdent(), version: () => agyVersion() }).holds) { note(`agy stream: ${why}; already recorded in .studio/${STREAM_RECORD}`); return false; }
+  const ident = agyIdent();
+  const rec = { at: new Date().toISOString(), agent, task: task || null, why: String(why).slice(0, 400), line: line || null, flags: [...AGY_STREAM_FLAGS], agy: { ...(ident || {}), version: agyVersion() }, clear: `delete .studio/${STREAM_RECORD} to try the stream mode again (it is tried again by itself when agy changes)` };
+  writeStreamRecord(STUDIO_STATE_DIR, rec);
+  note(`agy stream: ${why}; recorded in .studio/${STREAM_RECORD}: agy builders start in the one-turn mode until it is deleted or agy changes`);
+  emitEvent({ type: 'agent.agy_stream_off', agent, to: 'human', task: task || undefined, status: 'warn', msg: `${agent}: ${why}. Recorded in .studio/${STREAM_RECORD}: agy builders start in the one-turn mode until it is deleted or agy changes${rec.agy.version ? ` (now ${rec.agy.version})` : ''}`.slice(0, 600), meta: { agy: rec.agy, line: rec.line } });
+  return true;
 }
 
 /**
