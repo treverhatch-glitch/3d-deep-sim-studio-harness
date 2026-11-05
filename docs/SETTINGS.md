@@ -918,7 +918,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_PHASE_DAYS` · default `14` · harness/director.mjs · undocumented
 - `STUDIO_PHONE_SECURE_COOKIE` · no simple default · harness/phone.mjs · [AWAY-AND-ALERTS.md:58](AWAY-AND-ALERTS.md)
 - `STUDIO_PITFALLS_KEEP` · default `40` · harness/pitfalls.mjs, qa/selftest-261f.mjs · [MEMORY.md:72](MEMORY.md)
-- `STUDIO_PLAYTEST_GAME_CHECK` · no simple default · qa/playtest.mjs, qa/selftest-2781f.mjs · [ONBOARDING-A-GAME.md:413](ONBOARDING-A-GAME.md)
+- `STUDIO_PLAYTEST_GAME_CHECK` · no simple default · harness/done-check.mjs, qa/playtest.mjs, qa/selftest-2781f.mjs · [ONBOARDING-A-GAME.md:411](ONBOARDING-A-GAME.md)
 - `STUDIO_PLAY_PORT` · default `4610` · harness/builds.mjs, scripts/new-studio.mjs, scripts/studio-setup.mjs · undocumented
 - `STUDIO_POST_BROWSER_PLAY` · no simple default · harness/agent.mjs, qa/selftest-230j.mjs, qa/selftest-2732f.mjs (+4 more) · undocumented
 - `STUDIO_PYTHON` · no simple default · qa/run-python.mjs · [ROADMAP.md:19](ROADMAP.md)

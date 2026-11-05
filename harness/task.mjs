@@ -643,6 +643,11 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   }
 
   const check = checkDone(target);
+  // 2.78.1 (f, M7): warnings that don't block (a playtest report that played the template, not the studio's game).
+  for (const w of check.warnings || []) {
+    console.warn(`[done] WARN ${w}`);
+    emitEvent({ type: 'task.warn', agent: agent || target.role, task: target.id, status: 'warn', msg: `${target.id}: WARN ${w}`.slice(0, 400) });
+  }
   // 2.38.0: notes that don't block (built but not wired, in warn mode), shown and logged once per done.
   for (const n of check.notes || []) {
     console.warn(`[done] note: ${n} (STUDIO_REACHABILITY=fail makes this a failing check)`);

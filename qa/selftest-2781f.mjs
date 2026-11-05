@@ -9,7 +9,8 @@
  *   rig    a running engine train's RAM counts in the room for builders between its land runs.
  *   push   a chain-breaker queued for the train holds new builder verifies back (bounded).
  *   twins  a landed game task whose files have an engine twin gets one twin task (studio/game.json engines.<x>.twins).
- *   M7     playtest:stage1 stepped the template cartridge, not the studio's game, and passed in ~33 ms.
+ *   M7     playtest:stage1 stepped the template cartridge, not the studio's game, and passed in ~33 ms: it now says what it
+ *          stepped and warns (STUDIO_PLAYTEST_GAME_CHECK warn, the default), or fails (fail); off is 2.78.0.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -256,22 +257,47 @@ console.log(JSON.stringify({ none: none.on, first: first.checked.length, second:
     return [ok, `${JSON.stringify(r).slice(0, 1500)}\n${p.text.slice(-400)}`];
   });
 
-  // ---- M7: stage 1 says what it stepped, and fails on the template when the studio has a game ----
-  await guard('2.78.1 (f, M7): npm run playtest:stage1 in a studio whose game (STUDIO_GAME demo, with its own checks) isn\'t a cartridge fails with QA-STAGE1-NOT-THE-GAME and says it stepped 300 ticks of example-sim, not demo; without a studio game it passes and still names the cartridge and ticks; STUDIO_PLAYTEST_GAME_CHECK=off passes (fails on 2.78.0: it passed on the template, silently)', async () => {
+  // ---- M7: stage 1 says what it stepped; on the template while the studio has a game: warn (default), fail, off ----
+  {
     writeIn(S, 'game/demo/studio.gates.json', `${JSON.stringify({ gates: [{ id: 'unit', command: 'node -e "process.exit(0)"' }] }, null, 2)}\n`);
     // --out: two runs in the same second share a report name (the run id is per second).
-    const run = (extra, out = 'qa/out-2781f.json') => spawnSync(process.execPath, ['qa/playtest.mjs', '--stage', '1', '--quiet', '--out', out], { cwd: S, windowsHide: true, encoding: 'utf8', env: { ...process.env, ...st.env, ...extra }, timeout: 60000 });
-    const g = run({ STUDIO_GAME: 'demo' }, 'qa/out-2781f-game.json');
-    const t = run({ STUDIO_GAME: '' });
-    const o = run({ STUDIO_GAME: 'demo', STUDIO_PLAYTEST_GAME_CHECK: 'off' });
-    const gt = `${g.stdout}${g.stderr}`; const tt = `${t.stdout}${t.stderr}`;
-    let rep = null;
-    try { rep = JSON.parse(fs.readFileSync(path.join(S, 'qa', 'out-2781f-game.json'), 'utf8')); } catch {}
-    if (!rep?.stage1?.findings?.some((y) => y.id === 'QA-STAGE1-NOT-THE-GAME')) rep = null;
-    const ok = g.status === 1 && /stepped \d+ tick\(s\) of cartridge example-sim/.test(gt) && /NOT played/.test(gt) && rep && rep.stage1.ofStudioGame === false && rep.stage1.studioGame === 'demo'
-      && t.status === 0 && /PASS: stepped \d+ tick\(s\) of cartridge example-sim/.test(tt) && o.status === 0;
-    return [ok, `game: ${g.status} ${gt.slice(-400)}\ntemplate: ${t.status} ${tt.slice(-300)}\noff: ${o.status}`];
-  });
+    const run = (extra, out) => spawnSync(process.execPath, ['qa/playtest.mjs', '--stage', '1', '--quiet', '--out', out], { cwd: S, windowsHide: true, encoding: 'utf8', env: { ...process.env, ...st.env, ...extra }, timeout: 60000 });
+    const rep = (out) => { try { return JSON.parse(fs.readFileSync(path.join(S, out), 'utf8')); } catch { return null; } };
+    const txt = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+    await guard('2.78.1 (f, M7): by default (STUDIO_PLAYTEST_GAME_CHECK warn) stage 1 in a studio whose game (STUDIO_GAME demo, with its own checks) isn\'t a cartridge still passes, says it stepped 300 ticks of example-sim and not demo, prints "WARN QA-STAGE1-NOT-THE-GAME: stage 1 played the template, not the studio\'s game", records studioGame, ofStudioGame false and the warning, and task done\'s check for a playtest task shows it as WARN; without a studio game there is no warning (fails on 2.78.0: it passed on the template silently, nothing recorded)', async () => {
+      const w = run({ STUDIO_GAME: 'demo' }, 'qa/out-2781f-warn.json');
+      const t = run({ STUDIO_GAME: '' }, 'qa/out-2781f-none.json');
+      const rw = rep('qa/out-2781f-warn.json'); const rt = rep('qa/out-2781f-none.json');
+      // done-check reads the newest stage 1 report in qa/reports: the one the warn run wrote, put back as the newest.
+      const d = path.join(S, 'qa', 'reports');
+      const newest = path.join(d, 'qa_9999-zz-2781f.json');
+      if (rw) fs.writeFileSync(newest, JSON.stringify(rw));
+      const dc = probe(S, `import { checkDone } from ${u(S, 'harness/done-check.mjs')};
+const r = checkDone({ id: 'T-777', title: 'Playtest: a seeded run of the game', role: 'qa-playtester' }, 0);
+console.log(JSON.stringify({ type: r.type, warnings: r.warnings || [], ok: r.ok }));
+`, { ...st.env, STUDIO_GAME: 'demo' });
+      fs.rmSync(newest, { force: true });
+      const ok = w.status === 0 && /PASS: stepped 300 tick\(s\) of cartridge example-sim/.test(txt(w)) && /the studio's game is demo \(NOT played\)/.test(txt(w))
+        && /WARN QA-STAGE1-NOT-THE-GAME: stage 1 played the template, not the studio's game/.test(txt(w))
+        && rw?.passed === true && rw.stage1.studioGame === 'demo' && rw.stage1.ofStudioGame === false && rw.stage1.gameCheck === 'warn' && rw.stage1.warnings?.[0]?.id === 'QA-STAGE1-NOT-THE-GAME'
+        && t.status === 0 && !/WARN QA-STAGE1/.test(txt(t)) && (rt?.stage1?.warnings || []).length === 0
+        && dc.j?.type === 'playtest' && dc.j.warnings.some((x) => /^QA-STAGE1-NOT-THE-GAME: stage 1 played the template/.test(x));
+      return [ok, `warn: ${w.status} ${txt(w).slice(-500)}\nnone: ${t.status} ${txt(t).slice(-200)}\ndone-check: ${JSON.stringify(dc.j)} ${dc.j ? '' : dc.text.slice(-400)}`];
+    });
+    await guard('2.78.1 (f, M7): STUDIO_PLAYTEST_GAME_CHECK=fail makes it the failure (exit 1, finding QA-STAGE1-NOT-THE-GAME, "NOT played"), off is the 2.78.0 pass with no warning, and a 0-tick stage still fails QA-STAGE1-RAN-NOTHING in the default warn mode (fails on 2.78.0: no fail mode, it passed)', async () => {
+      const f = run({ STUDIO_GAME: 'demo', STUDIO_PLAYTEST_GAME_CHECK: 'fail' }, 'qa/out-2781f-fail.json');
+      const o = run({ STUDIO_GAME: 'demo', STUDIO_PLAYTEST_GAME_CHECK: 'off' }, 'qa/out-2781f-off.json');
+      const z = probe(S, `import { runStage1ProgrammaticQA } from ${u(S, 'qa/playtest.mjs')};
+const r = await runStage1ProgrammaticQA({ seed: 1, ticks: 0.4 });
+console.log(JSON.stringify({ passed: r.passed, ids: r.findings.map((x) => x.id), gameCheck: r.gameCheck }));
+`, { ...st.env, STUDIO_GAME: 'demo' });
+      const rf = rep('qa/out-2781f-fail.json'); const ro = rep('qa/out-2781f-off.json');
+      const ok = f.status === 1 && /NOT played/.test(txt(f)) && rf?.stage1?.findings?.some((x) => x.id === 'QA-STAGE1-NOT-THE-GAME') && rf.stage1.gameCheck === 'fail'
+        && o.status === 0 && !/WARN QA-STAGE1/.test(txt(o)) && (ro?.stage1?.warnings || []).length === 0 && ro?.stage1?.gameCheck === 'off'
+        && z.j?.passed === false && z.j.ids.includes('QA-STAGE1-RAN-NOTHING') && z.j.gameCheck === 'warn';
+      return [ok, `fail: ${f.status} ${txt(f).slice(-300)}\noff: ${o.status} ${txt(o).slice(-200)}\nzero: ${JSON.stringify(z.j)} ${z.j ? '' : z.text.slice(-300)}`];
+    });
+  }
 
   for (const d of made) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 8, retryDelay: 300 }); } catch {} }
 }
