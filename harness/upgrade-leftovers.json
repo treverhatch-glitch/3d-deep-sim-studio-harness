@@ -1,0 +1,8 @@
+{
+  "note": "Workarounds a studio put in its .env that a later harness release made unnecessary. npm run upgrade -- --preflight warns about each one set in the studio's .env once the studio's harness is at that version or newer (harness/upgrade-preflight.mjs, \"before a long run\"). key: the .env key; value: flagged only when set to exactly this (no value: whenever it is set); version: the release that made it unnecessary; why: what that release fixed and what to do.",
+  "leftovers": [
+    { "version": "2.77.3", "key": "STUDIO_STALL_RATIO", "value": "0", "why": "2.77.3 (H1, B-109): the stall check's read-burn ratio no longer counts cache reads and gives no verdict in the first STUDIO_STALL_GRACE_MIN minutes; 0 still turns the whole check off, so a stalled session runs on. Remove the line." },
+    { "version": "2.77.3", "key": "STUDIO_HEAVY_SLOTS", "why": "2.77.3 (M6, C2a): the train gets the next free heavy slot (STUDIO_TRAIN_SLOT_PRIORITY_MIN) and port collisions are named; a fixed slot count overrides the machine budget, so a few slots make verifies queue behind one another (B-117). Remove it unless this PC needs a cap the machine scan can't see." },
+    { "version": "2.78.1", "key": "STUDIO_AGY_STREAM", "value": "0", "why": "2.78.1 (B-118): agy stream mode sends the message shape agy accepts (event: \"user\"); 0 keeps the one-turn launch, whose builders exit mid-task (B-99). Remove the line once the stream hand test passes on this PC." }
+  ]
+}

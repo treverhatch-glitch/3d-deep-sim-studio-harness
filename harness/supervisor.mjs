@@ -807,6 +807,9 @@ async function main(argv) {
     // 2.69.0 (r): the train daemon (harness/train-daemon.mjs, STUDIO_TRAIN_AUTO): a train starts, detached, when lanes
     // are ready and the machine has room for a verify; never two at once, never while halted or winding down.
     if (!r.stop) await boundedStep('train-daemon', () => trainDaemonTick(state, r), { state }).catch(() => {});
+    // 2.78.1: gate runs whose parent is gone, past STUDIO_ORPHAN_GATE_MIN, are ended with their tree (harness/gate-reaper.mjs;
+    // itself throttled to STUDIO_ORPHAN_GATE_SCAN_MIN).
+    await boundedStep('gate-reaper', () => import('./gate-reaper.mjs').then(({ reapOrphanGates }) => reapOrphanGates({ log: (m) => console.error(m) })), { state }).then((g) => { if (g && !g.skipped) state.gateReaper = { at: new Date().toISOString(), ended: (g.ended || []).map((e) => e.pid) }; }).catch(() => {});
     state.passes = (state.passes || 0) + 1; // 2.77.1 (B-102): passes finished since the start, in supervisor.json
     save();
     if (r.stop) finish(r.why[0]);

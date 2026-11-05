@@ -155,6 +155,18 @@
   an ancestor of it (only stale), except on `main` itself, where `origin/main` still names what isn't pushed. A stale
   `origin/main` made the check fail a lane on main's own commits while restamp, on local main, said "nothing to do".
   The check and restamp print `base <ref> <sha>`. What counts as stamped is unchanged.
+- The key-carrying base (2.78.1, B-120): on the main checkout of a studio that doesn't push, the base is `origin/main`,
+  which never got the owner key, so the owner's `npm run approve -- hooks` wrote an approval the hooks check could never
+  verify ("2 commit(s) since origin/main skipped the git hooks"), while the train (base: local `main`) passed. When the
+  base has no owner key, the hooks check verifies the owner's approvals with local `main`'s committed key
+  (`harness/approve.mjs keyFor`), but only when the studio doesn't push there (no `origin/main`, or `origin/main` is an
+  ancestor of `main`) and the base is in `main`'s history; it says so ("verified with main <sha>'s key"). Which commits
+  are judged is unchanged, and a lane copy's base (the studio's branch) keeps its own key. `STUDIO_KEY_BASE=off`: the
+  base's key only.
+- A release's merge commits (2.78.1): `node harness/hook-stamp.mjs grandfather --ref <remote ref>` and `upgrade --merge`
+  list the update's own merge commits too ("Merge 2.77.3 into claude/278"), by sha only (a merge has no patch-id), and
+  only those between the hooks gate's base and the release tip: a merge the studio makes itself is judged as before.
+  `STUDIO_GRANDFATHER_MERGES=off`: non-merge commits only.
 - Goldens in a merge (2.60.1, B-31): `commit-msg` asks for a `Golden-Reason:` when the commit changes `qa/golden/`.
   During a merge (`MERGE_HEAD`), a golden staged exactly as the merged branch has it (same blob and mode, or deleted on
   both) arrived unchanged, with its own commit's reason, and is exempt (`git merge main` in a lane no longer asks);

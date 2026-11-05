@@ -74,6 +74,7 @@ import { mainRoot, mainBranch, linkDir, nodeModuleDirs, ignoreLanes, landFastFor
 import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot, selectGates } from './merge-lane.mjs';
 import { recordTrust } from './gate-trust.mjs';
 import { beginTrainLife, reapDeadTrains } from './train-life.mjs';
+import { processHarness, chainGuard, copyHarnessDrift } from './harness-version.mjs';
 import { cancelPath } from './train-watch.mjs';
 import { recreateLaneCopy, infraHandBack, keepRelease, keptRelease, forgetRelease, mixedLane, mayCarry, noteMixed } from './train-lanes.mjs';
 import { readBeta, betaActor, recordBetaUse } from './beta-mode.mjs';
@@ -1119,6 +1120,29 @@ function deferNoCheck(res, set, defer, { id, log, by, what }) {
 }
 
 /**
+ * 2.78.1 (B-116): a red re-check of main whose copy ran another harness than the studio has now (an update merged
+ * while the train ran), or whose own process did: the check didn't judge main, so it is "not run (harness changed
+ * underneath)" and main is not blamed (no red-main verdict, no known-red listing, nobody handed back): the lanes wait
+ * for the next train, a fresh process. True when that was the case (the lanes are deferred here).
+ * STUDIO_TRAIN_HARNESS_GUARD=off: never (harness/harness-version.mjs copyHarnessDrift).
+ */
+function harnessUnderneath(ctx, logRel) {
+  const { sc, tip, set, id, log, res, by, defer, root } = ctx;
+  let text = '';
+  for (const base of [sc?.dir, root].filter(Boolean)) { try { text = fs.readFileSync(path.resolve(base, String(logRel || '')), 'utf8'); break; } catch {} }
+  const d = copyHarnessDrift({ mainDir: root, copyRev: tip, logText: text.slice(-200000) });
+  if (!d.changed) return false;
+  const what = `not run (harness changed underneath): ${d.why}`;
+  res.ok = false;
+  res.noCheck = { why: what, harness: true };
+  const line = `${id}: the re-check on ${mainBranch(root)} is ${what}. ${mainBranch(root)} is not judged, nothing landed and nobody was handed back; ${set.map((l) => l.task).join(', ')} wait for the next train (a fresh process)`;
+  log(`[train] ${line}`);
+  ev('no_check', id, line.replace(/^[^:]+: /, '').slice(0, 600), { agent: by, to: 'producer', status: 'warn', meta: { lanes: set.map((l) => l.task), harness: true, log: logRel || null } });
+  for (const l of set) defer(l, what);
+  return true;
+}
+
+/**
  * 2.65.3 (B-43): the STUDIO_GATE_FOCUS map for this red train's re-checks (harness/train-focus.mjs trainFocus): the
  * failing game checks and their failing test files, read from the verify log; null (the whole gate, as before) when
  * no failing game gate is among the failing checks or no failing test file is named. The log says which, and why.
@@ -1605,7 +1629,7 @@ async function trainDiskWarning(root, log) {
  */
 async function livedTrain(root, { id, by, dryRun }, fn) {
   if (dryRun) return fn(null);
-  const life = beginTrainLife(root, { id, by });
+  const life = beginTrainLife(root, { id, by, harness: processHarness() });
   try {
     const r = await fn(life);
     life.end(r?.message || '');
@@ -1641,6 +1665,7 @@ export async function runTrain(opts = {}) {
   const id = `${stamp()}-${process.pid}`;
   const by = opts.by || process.env.STUDIO_LOCK_OWNER || 'human';
   const t0 = Date.now();
+  processHarness(); // 2.78.1 (B-122): the harness this process runs, taken as its first train starts
   const stopped = deps.stopped?.();
   if (stopped) return { ok: false, id, message: `The studio is stopped (${stopped}); no train runs until npm run task -- resume.`, landed: [], dropped: [], deferred: [] };
   if (!opts.dryRun) await trainDiskWarning(root, log); // 2.68.0 (m)
@@ -1675,6 +1700,17 @@ export async function runTrain(opts = {}) {
   // 2.65.3 (B-43, c): after an early landing of a green prefix, the lanes deferred behind its culprit (queued) get the
   // next train now, also after a task done's own train (then as a queued train: its riders are in the queue).
   for (let k = 1; locked.more && !opts.dryRun && (!opts.lanes || locked.prefixMore) && k <= 50; k += 1) {
+    // 2.78.1 (B-122): never chain-start a train when the harness changed since this process started (an update merged
+    // meanwhile): its modules would mix the old code with the new. The lanes stay queued for the train daemon, a fresh
+    // process on the new harness.
+    const cg = deps.chainGuard ? deps.chainGuard() : chainGuard();
+    if (!cg.ok) {
+      const line = `${id}: the next train is not started from this process: ${cg.why}; the queued lanes wait for the train daemon (a fresh process; npm run task -- train --by <you> starts one by hand)`;
+      log(`[train] ${line}`);
+      ev('chain_stopped', locked.id || id, line.replace(/^[^:]+: /, ''), { agent: by, to: 'producer', status: 'warn', meta: { was: cg.was || null, now: cg.now || null } });
+      locked.chainStopped = cg.why;
+      break;
+    }
     const next = await one(`${id}-${k}`, opts.lanes ? { lanes: undefined, oneLane: false, rideAlong: false } : {}, Number(process.env.STUDIO_TRAIN_STALE_MIN || 360) * 60000); // 2.77.0 (p): after a speculative train behind it
     if (next?.busy) break;
     trains.push(next.id);
@@ -2344,7 +2380,8 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
         }
         // 2.77.0 (p, P9.6): the tree under verify (head, tree, base, tasks) is what a speculative train builds on.
         writeTrainStatus(root, id, { step: 'verify', text: `verify ${res.verifies + 1}: lanes 1-${set.length}${res.roundWithout.length ? ` (round ${res.round}: without ${res.roundWithout.join(', ')})` : ''}, ${set.map((l) => l.task).join(', ')}`, lanes: ready.length, round: res.round, eta: etaFor(0), head: built.head, tree: built.tree, base: tip, tasks: set.map((l) => l.task) });
-        await pipelineKick(root, { after: id, log, ...(deps.startNext ? { spawn: deps.startNext } : {}) });
+        // 2.78.1 (B-122): no speculative train from a process whose harness changed underneath it.
+        { const cg = deps.chainGuard ? deps.chainGuard() : chainGuard(); if (cg.ok) await pipelineKick(root, { after: id, log, ...(deps.startNext ? { spawn: deps.startNext } : {}) }); else if (!res.kickStopped) { res.kickStopped = true; log(`[train] ${id}: no speculative train behind it: ${cg.why}`); } }
         const v = await verifyRemoteFirst(sc, { id, n: res.verifies + 1, tree: built.tree, changed: changedVs(sc.dir, tip, built.head), all, seen, tasks: set.map((l) => l.task), lanes: set, whole: wholeEquiv(root, tip, settings), log }, { head: built.head, by, deps, res });
         if (!v.cached && !v.reused && !v.remote) { res.verifies += 1; if (v.ms) res.lastVerifyMs = v.ms; }
         if (v.reused) res.reused += 1;
@@ -2424,6 +2461,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
             plan = await redPlan(ctx, { pins: false, bisect: !(oneLane && set.length === 1) });
           }
           if (plan.kind === 'noCheck') { deferNoCheck(res, set, defer, { id, log, by, what: plan.why }); set = []; break; }
+          if (plan.kind === 'redMain' && harnessUnderneath(ctx, plan.log)) { set = []; break; }
           if (plan.kind === 'redMain') {
             listRedMain(root, { id, logRel: plan.log, roots: [sc.dir, root], tree: out(git(root, 'rev-parse', `${tip}^{tree}`)), gates: plan.gates || v.gates }); // 2.77.0 (P9.3)
             res.ok = false;
@@ -2488,6 +2526,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
           const v0 = verifyTree(sc, { id, n: res.verifies + 1, tree: b0.tree, changed: [], all: false, seen, tasks: alone.map(({ l }) => l.task), log });
           if (!v0.cached && !v0.reused) res.verifies += 1;
           if (v0.noCheck) { deferNoCheck(res, set, defer, { id, log, by, what: `the verify of main alone ${v0.why}` }); set = []; break; }
+          if (!v0.ok && harnessUnderneath({ sc, tip, set, id, log, res, by, defer, root }, v0.log)) { set = []; break; }
           if (!v0.ok) {
             listRedMain(root, { id, logRel: v0.log, roots: [sc.dir, root], tree: b0.tree, gates: v0.gates }); // 2.77.0 (P9.3)
             res.ok = false;

@@ -79,6 +79,12 @@ which node can't run, so use the line above there.) The guard finds the studio b
    `lanes-leftover` INFO, "leftover folder (not a lane)", and git is never run in it (B-51: git there answered for the
    main checkout, so main's dirty board read as "unlanded work" once per old folder). `lanes refresh` refuses such a
    folder the same way.
+   2.78.1, "before a long run" (`long-run/…`, WARN only, so the exit code stays the other items'): `.env` lines a later
+   release made unnecessary (`harness/upgrade-leftovers.json`: version, key, value, why; e.g. `STUDIO_STALL_RATIO=0`,
+   `STUDIO_HEAVY_SLOTS`; flagged once the studio's harness is at that version; values never printed), ready builder
+   tasks with no lane (each would hold the whole game), uncommitted changes in `harness/` or `scripts/` (a local patch),
+   and trains or verify runs still running from before the harness last changed. Run it again after the update, before
+   starting a long run.
 1. `npm run task -- drain on --by <you>`, then `npm run task -- drain wait` (no landing mid-update).
 2. **Commit the board first.** `npm run upgrade -- --check` refuses (exit 1) while `studio/NEXT.md`, `studio/DONE.md`,
    `studio/task-holds.json`, `studio/pending-review.json` or `studio/handoffs/` has uncommitted changes, and prints the

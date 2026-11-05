@@ -181,6 +181,34 @@ export function resolveBase(envIn = process.env) {
   return null;
 }
 
+/**
+ * 2.78.1 (B-120): the owner key that approvals are verified with for base `b` (resolveBase's answer): { pub, ref, from }.
+ * The base's own key, as before. On the main checkout of a studio that doesn't push, the base is origin/main, which
+ * never got the owner key (it was committed on main and never pushed), so `npm run approve -- hooks` wrote an approval
+ * the hooks check could never verify ("2 commit(s) since origin/main skipped the git hooks"), while the train, whose
+ * base is the local main, passed. Now, when the base has no key, the key-carrying base is used: the local main's
+ * committed key, but only when the studio doesn't push there, which the harness reads from git itself (there is no
+ * origin/main, or origin/main is an ancestor of main: main is ahead, origin is only stale) and only when the base is in
+ * main's history (so main's key is the key of the history being judged). Which commits are judged is unchanged; only
+ * which key verifies the owner's approvals of them. This is the key a train copy (base: the local main) reads, so
+ * verify, the train and approve agree. A lane copy's base is the studio's branch (decisive), whose own key wins.
+ * STUDIO_KEY_BASE=off: the base's key only (the 2.78.0 way).
+ */
+export function keyFor(b, env = process.env) {
+  if (!b?.base) return { pub: null, ref: null, from: 'none' };
+  const own = ownerPublicKey(b.base);
+  if (own) return { pub: own, ref: b.ref, from: 'base' };
+  if (/^(off|0|false|no)$/i.test(String(env.STUDIO_KEY_BASE || '').trim())) return { pub: null, ref: b.ref, from: 'none' };
+  const sha = (ref) => git(['rev-parse', '-q', '--verify', `${ref}^{commit}`]).stdout.trim();
+  const main = sha('refs/heads/main');
+  if (!/^[0-9a-f]{40}$/.test(main)) return { pub: null, ref: b.ref, from: 'none' };
+  const origin = sha('refs/remotes/origin/main');
+  const noPush = !origin || git(['merge-base', '--is-ancestor', origin, main]).status === 0;
+  if (!noPush || git(['merge-base', '--is-ancestor', b.base, main]).status !== 0) return { pub: null, ref: b.ref, from: 'none' };
+  const pub = ownerPublicKey(main);
+  return pub ? { pub, ref: `main ${main.slice(0, 8)}`, from: 'main' } : { pub: null, ref: b.ref, from: 'none' };
+}
+
 // 2.76.0 (B-93): a text file is hashed with LF line endings, as git stores it: a Windows checkout (core.autocrlf) has CRLF
 // in the working tree, and an approval signed there never matched the check run in a checkout with LF. Binary files
 // (a NUL byte) are hashed as they are.
