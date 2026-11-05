@@ -38,6 +38,11 @@
  *                                                        2.70.0: put left-out paths back into a sparse lane copy, logged
  *                                                        (harness/lane-sparse.mjs)
  *
+ *   npm run lanes -- orphans [<ID>] [--all] [--json]   2.78.1 (e): task commits on lane branches not on main
+ *   npm run lanes -- carry <ID> [--from <lane branch>] --by <you>
+ *                                                        2.78.1 (e): cherry-pick only a task's own commits onto a fresh
+ *                                                        lane (harness/lane-orphans.mjs)
+ *
  * Exit: 0 all fine; 1 a conflict or red; 2 refused or bad usage.
  */
 import fs from 'node:fs';
@@ -454,7 +459,7 @@ export async function refreshLane(root, lane, { by, busyOk = false, tests = true
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   // 2.67.0 (B-47): --help / -h prints usage and never acts.
-  if (argv.includes('--help') || argv.includes('-h')) { console.log('Usage: npm run lanes [-- --json] [--no-stamps] | npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests] [--json] | npm run lanes -- disk [--top N] [--json] | npm run lanes -- widen <path|glob> [...] [--lane <agent>] [--why "…"]'); process.exit(0); }
+  if (argv.includes('--help') || argv.includes('-h')) { console.log('Usage: npm run lanes [-- --json] [--no-stamps] | npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests] [--json] | npm run lanes -- disk [--top N] [--json] | npm run lanes -- widen <path|glob> [...] [--lane <agent>] [--why "…"] | npm run lanes -- orphans [<ID>] [--all] [--json] | npm run lanes -- carry <ID> [--from <lane branch>] --by <you> [--json]'); process.exit(0); }
   const opt = (k) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : null);
   const json = argv.includes('--json');
   const root = mainRoot();
@@ -479,6 +484,22 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (json) console.log(JSON.stringify({ ok: results.every((r) => r.status === 'ok'), results }));
     if (!results.length && !json) console.log('[lanes] no lane copy to refresh');
     process.exit(results.some((r) => r.status === 'conflict' || r.status === 'red') ? 1 : results.some((r) => r.status === 'refused') ? 2 : 0);
+  }
+  // 2.78.1 (e): `lanes orphans` and `lanes carry` (harness/lane-orphans.mjs).
+  if (argv[0] === 'orphans') {
+    const lo = await import('./lane-orphans.mjs');
+    const id = argv[1] && !argv[1].startsWith('--') ? argv[1] : null;
+    const r = lo.findOrphans({ root, task: id, all: argv.includes('--all') });
+    console.log(json ? JSON.stringify(r) : lo.orphansText(r));
+    process.exit(0);
+  }
+  if (argv[0] === 'carry') {
+    const lo = await import('./lane-orphans.mjs');
+    const id = argv[1] && !argv[1].startsWith('--') ? argv[1] : null;
+    const r = await lo.carryTask({ id, from: opt('--from'), by: opt('--by'), root });
+    if (json) console.log(JSON.stringify(r));
+    else console[r.ok ? 'log' : 'error'](`[lanes] ${r.status.toUpperCase()} ${id || ''}: ${r.why}${r.left?.length && r.status === 'carried' ? `\nLeft out (don't name ${id}): ${r.left.slice(0, 8).map((c) => `${c.sha.slice(0, 8)} ${c.subject.slice(0, 60)}`).join('; ')}${r.left.length > 8 ? ` +${r.left.length - 8}` : ''}` : ''}`);
+    process.exit(r.ok ? 0 : r.status === 'conflict' ? 1 : 2);
   }
   // 2.70.0 (w): `lanes disk` (harness/lane-disk.mjs) and `lanes widen` (harness/lane-sparse.mjs).
   if (argv[0] === 'disk') {

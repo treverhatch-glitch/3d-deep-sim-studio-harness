@@ -60,10 +60,10 @@ import { AGY_STREAM_FLAGS, agyStreamOn, agyStreamWanted, userLine, driveAgyStrea
 import { savePatch } from './wip.mjs';
 import { laneList, readHolds } from './task-hold.mjs';
 import { engineLaunch } from './engine-tracks.mjs';
-import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport } from './worktree.mjs';
+import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport, laneLive } from './worktree.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
-import { sessionLimits, heartbeatCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
+import { sessionLimits, heartbeatCheck, newRedCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
 import { agentEnv, nimKeyMissing, nimModel, NIM_DEFAULT_MODEL, agentLikeName } from './agent-env.mjs';
 import { aiderProgram, writeAiderIgnore, excludeAiderFiles } from './aider-launch.mjs';
@@ -75,6 +75,7 @@ import { mapStale, writeMap } from './map.mjs';
 import { pitfallsForPrompt } from './pitfalls.mjs';
 import { recordFollow } from './scorecard.mjs';
 import { untrustedBlock, oneLine } from './untrusted.mjs';
+import { latestFacts } from './handback-facts.mjs';
 import { jobDone } from './jobs.mjs';
 import { isNim, providerConcurrency } from './families.mjs';
 import { observe, logTokens, logStall, idleVerdict, readStall, stallEndOf, readLogFrom, resetStall, newestSessionPart } from './stall.mjs';
@@ -917,8 +918,9 @@ function tailOf(file, bytes = 2 * 1024 * 1024, from = 0) {
 }
 
 /** Refresh context by default (2.29.2): the rule every launched session gets, in a few lines. */
-export function refreshRule({ oneTask = false, task = null } = {}) {
-  const l = sessionLimits();
+export function refreshRule({ oneTask = false, task = null, role = null, model = null } = {}) {
+  // 2.78.1 (e): the role's own refresh point (reviewers and engine-porters earlier; harness/session-cap.mjs contextPoint).
+  const l = sessionLimits(process.env, { role, model });
   const id = task || '<ID>';
   return `\nRefresh context by default: the studio's files are the memory, not this chat.${oneTask ? ' Do this one task, finish it (task done) or hand it back, then stop; a fresh session starts for the next task.' : ''}${l.turns || l.context ? ` At ${l.turns || '∞'} turns or ${l.context ? `${Math.round(l.context / 1000)}k` : '∞'} tokens of context, whichever comes first, refresh: commit, then \`node harness/task.mjs pause ${id} --note "${HANDOFF_TEMPLATE}"\` (under 3k characters) and stop; a fresh session continues from that note.` : ''} Refresh at a natural breakpoint, not every few turns.${l.turns || l.context ? ` Mid-debug with a live repro? \`npm run session -- exception "<repro>"\` lets you go on${l.ceilingTurns ? ` to ${l.ceilingTurns} turns` : ''}; you are flagged and the Director or Producer checks on you every ${l.checkTurns} turns / ${Math.round(l.checkTokens / 1000)}k tokens.` : ''}\n`;
 }
@@ -968,6 +970,59 @@ function broadLaneRefusal({ agent, role, task, lane, broad }) {
     emitEvent({ type: 'launch.skipped', agent, to: 'human', task: task || undefined, status: 'warn', msg: `${agent} (${role}): ${message}`.slice(0, 600), meta: { role, lane: want, broad: broad.map((x) => x.p) } });
   }
   return { ok: false, skipped: true, message };
+}
+
+/**
+ * 2.78.1 (e): a refresh relaunch starts from the hand-off, not from scratch: read it first, and the newest entry's
+ * hand-back facts (lane, commits, last verify, the next command: written by the harness, harness/handback-facts.mjs)
+ * are in the prompt itself. Quoted in the marked block: commit subjects and failing lines are other sessions' text.
+ */
+export function refreshKickoff(task) {
+  let facts = null;
+  try { facts = latestFacts(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'handoffs', `${task}.md`), 'utf8')); } catch { facts = null; }
+  const head = `\nThis is a fresh session after a refresh: read studio/handoffs/${task}.md first; don't redo what it says is done.${facts ? ' Its newest hand-back facts are below: start from them (the lane, the commits already made, the last verify and the next command).' : ''}\n`;
+  return facts ? `${head}\n${untrustedBlock([{ label: `Hand-back facts for ${task}${facts.heading ? ` (${facts.heading})` : ''}, written by the harness from git and the gate logs (commit subjects and failing lines are quoted)`, text: facts.block }])}` : head;
+}
+
+/**
+ * 2.78.1 (e): the launch prompt's two parts, built in one place (runAgent, and the selftest that builds it twice).
+ * `stable` (above the marker) is the same bytes for every session of a role in this studio: it never names the agent,
+ * its model, its task, its lane or the time. Everything per session goes in `volatile`, below the marker.
+ */
+export function sessionPromptParts({ role, agent, model, task = null, lane = null, oneTask = false, refreshes = 0, note = '', by = null, tool = null, custom = null, copy = null, engineLane = null }) {
+  // 2.30g: cache-friendly order. The fixed part (role kickoff, rules, the map tip, pitfalls) comes first
+  // and never names this agent, its model or the time, so every session of a role starts with the same
+  // bytes and Claude reads it from the prompt cache. Everything that changes per session goes last.
+  const { stable: kick, volatile: kickTail } = kickoffParts({ role, agent, model, launched: true, task });
+  const stable = (kick
+    // Cheaper to read (2.26): the map instead of searching, never the long changelog, a short hand-back,
+    // and the rules this game has learned the hard way.
+    // 2.29: a lookup, not a read-first step (Jed's A/B: reading a map, then line ranges, added turns and cost 27% more).
+    + `\nTo find a function, constant or TUNING key, run \`npm run map -- find <name>\`: one call gives the file, the line range and the arguments, so you read only those lines. .studio/MAP.md lists every code file in one line if you need the lay of the land. Every turn re-reads your whole conversation, so fewer, bigger steps cost less than many small ones. Never read CHANGELOG.md; studio/llms.txt lists every command. If you hand work back, keep the note under 20 lines: done, not done, files touched, next step, proof.\n`
+    + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". The War Room shows it with your work in progress.\n`
+    + `\nHarness output is compact in launched sessions: verify prints failures only (each gate's full log is in .studio/gates/out/<gate>.log; open it only when you need it), and \`node harness/task.mjs list\` shows your role's next tasks, not the whole board (--all for everything). Don't cat studio/NEXT.md.\n`
+    + `\nSkills load on demand: .claude/skills/ holds the know-how for Godot, the web build, assets and tests. Claude Code shows you only their names until a task needs one; other tools: open the skill's SKILL.md when your task matches its description.\n`
+    // PU-36 (P-049): studio/PITFALLS.md is written by agents and people: last, in the marked block, never among the rules.
+    // It stays in the stable part (it changes only when a pitfall is added), so the prompt cache still holds.
+    // 2.61: only the lines for all and for this role (a role's prefix is shared by that role only).
+    + pitfallsForPrompt(role));
+  const volatile = `You are ${agent} (role \`${role}\`), running on ${model}. $STUDIO_LOCK_OWNER is ${agent} and $STUDIO_AGENT_MODEL is ${model} in your shell.\n`
+    + kickTail
+    + (task ? `\nStart with ${task}: node harness/task.mjs start ${task} --agent ${agent} --model ${model}\n` : '')
+    + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
+    + (engineLane?.note ? `\n${engineLane.note}\n` : '')
+    + (copy ? `\nYou work in your own copy of the repo (\`.lanes/${agent}\`, branch \`${copy.branch}\`): other agents' unfinished work can't reach your tests, and yours can't reach theirs. \`studio/\` and \`.studio/\` are shared with everyone. Commit your work as you go; \`task done\` adds your commits to the studio's branch once your checks pass (it rebases first and tells you if anything conflicts). Uncommitted work never leaves your copy.${copy.mixed ? ` MIXED LANE NOT MERGED: ${copy.mixed.line}` : ''}${copy.laneless ? ' Your task has no lane: claim the folders you edit (node harness/lock.mjs claim path:<dir> --owner $STUDIO_LOCK_OWNER) as usual.' : ''}\n` : '')
+    + refreshRule({ oneTask, task, role, model })
+    // 2.77.0 (n, B-92): a session started on a task works only that task (harness/task-pin.mjs; task start/done refuse others).
+    + (task ? pinKickoff(task) : '')
+    // 2.76.0 (B-80 part 2): one refused command ends a headless agy session; these rules steer it (and GEMINI.md below).
+    + (tool === 'agy' && !custom ? `\n${AGY_SHELL_RULES.split('\n').slice(2).join('\n')}` : '')
+    // 2.58.0 (PU-36): a refresh relaunch is the launcher's own instruction, so it is said here, not as a note.
+    + (refreshes > 0 && task ? refreshKickoff(task) : '')
+    // PU-36 (P-049): the --note is written by whoever started the session (a person, the Producer, a chat bot), so it
+    // goes in the marked block with its real sender (--by, or "unknown"), never "the Producer" by default.
+    + (note ? `\n${untrustedBlock([{ label: `Note from ${oneLine(by) || 'unknown'} (sent with --note when this session was started)`, text: note }])}` : '');
+  return { stable, volatile };
 }
 
 /** Run one agent to the end, with heartbeats. Resolves with the cleanup result. */
@@ -1062,7 +1117,9 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
       for (const q of held) release(`path:${q}`, agent);
       dropStarting(agent);
       const rel = `.lanes/${agent}`;
-      const message = `Not started: no lane copy could be made for ${agent} (${c.error}). Use another agent name, or remove the leftover copy ${rel} first: git worktree remove --force ${rel} (npm run janitor -- --lanes --yes --by <you> removes stale ones).`;
+      let fresh = null;
+      try { fresh = freshAgentName(role, agent); } catch { fresh = null; }
+      const message = `Not started: no lane copy could be made for ${agent} (${c.error}). Use another agent name${fresh ? ` (${fresh} is free: --agent ${fresh}, or --auto-name)` : ''}, or remove the leftover copy ${rel} first: git worktree remove --force ${rel} (npm run janitor -- --lanes --yes --by <you> removes stale ones).`;
       emitEvent({ type: 'agent.start_refused', agent, to: 'human', task: task || undefined, status: 'warn', msg: message.slice(0, 600), meta: { role, dir: rel, error: c.error } });
       return { ok: false, skipped: true, message };
     }
@@ -1072,6 +1129,14 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // 2.77.0 (u, P5.1): an engine pass whose work lives in the engine's own repo gets a worktree of that repo on its branch
   // (harness/engine-tracks.mjs engineLaunch), named in its prompt and passed to the tool as an extra folder.
   const engineLane = launchEngineLane({ task, agent });
+  if (engineLane?.refuse && !/^(off|0|false|no)$/i.test(process.env.STUDIO_ENGINE_LANE_REQUIRED || '')) {
+    for (const q of held) release(`path:${q}`, agent);
+    if (copy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
+    dropStarting(agent);
+    const message = `Not started: ${agent} would have no code access for ${task}: ${engineLane.refuse}.`;
+    emitEvent({ type: 'agent.start_refused', agent, to: 'human', task: task || undefined, status: 'warn', msg: message.slice(0, 600), meta: { role, engine: true } });
+    return { ok: false, skipped: true, message };
+  }
   // 2.76.0 (B-80 part 2): an agy session reads GEMINI.md in its folder: the shell rules, kept out of the lane's change.
   if (copy && tool === 'agy' && !custom) writeAgyLaneRules(copy.dir, { excludeFile: path.join(REPO_ROOT, '.studio', 'lanes', `${agent}.exclude`) });
   // 2.59.0 (#8): the broad paths left unheld for a copy: held after all (a person kept them wide) or refused when the
@@ -1087,38 +1152,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   } else if (unheld.size) {
     emitEvent({ type: 'lane.unlocked', agent, task: task || undefined, msg: `${agent}: lane ${[...unheld].join(', ')} not held as a session lock (${broad.map((x) => x.why).join('; ')}): ${agent} works in its own copy, and overlaps with other lanes are caught when the lane lands`, meta: { paths: [...unheld] } });
   }
-  // 2.30g: cache-friendly order. The fixed part (role kickoff, rules, the map tip, pitfalls) comes first
-  // and never names this agent, its model or the time, so every session of a role starts with the same
-  // bytes and Claude reads it from the prompt cache. Everything that changes per session goes last.
-  const { stable: kick, volatile: kickTail } = kickoffParts({ role, agent, model, launched: true, task });
-  const stable = (kick
-    // Cheaper to read (2.26): the map instead of searching, never the long changelog, a short hand-back,
-    // and the rules this game has learned the hard way.
-    // 2.29: a lookup, not a read-first step (Jed's A/B: reading a map, then line ranges, added turns and cost 27% more).
-    + `\nTo find a function, constant or TUNING key, run \`npm run map -- find <name>\`: one call gives the file, the line range and the arguments, so you read only those lines. .studio/MAP.md lists every code file in one line if you need the lay of the land. Every turn re-reads your whole conversation, so fewer, bigger steps cost less than many small ones. Never read CHANGELOG.md; studio/llms.txt lists every command. If you hand work back, keep the note under 20 lines: done, not done, files touched, next step, proof.\n`
-    + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". The War Room shows it with your work in progress.\n`
-    + `\nHarness output is compact in launched sessions: verify prints failures only (each gate's full log is in .studio/gates/out/<gate>.log; open it only when you need it), and \`node harness/task.mjs list\` shows your role's next tasks, not the whole board (--all for everything). Don't cat studio/NEXT.md.\n`
-    + `\nSkills load on demand: .claude/skills/ holds the know-how for Godot, the web build, assets and tests. Claude Code shows you only their names until a task needs one; other tools: open the skill's SKILL.md when your task matches its description.\n`
-    // PU-36 (P-049): studio/PITFALLS.md is written by agents and people: last, in the marked block, never among the rules.
-    // It stays in the stable part (it changes only when a pitfall is added), so the prompt cache still holds.
-    // 2.61: only the lines for all and for this role (a role's prefix is shared by that role only).
-    + pitfallsForPrompt(role));
-  const volatile = `You are ${agent} (role \`${role}\`), running on ${model}. $STUDIO_LOCK_OWNER is ${agent} and $STUDIO_AGENT_MODEL is ${model} in your shell.\n`
-    + kickTail
-    + (task ? `\nStart with ${task}: node harness/task.mjs start ${task} --agent ${agent} --model ${model}\n` : '')
-    + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
-    + (engineLane?.note ? `\n${engineLane.note}\n` : '')
-    + (copy ? `\nYou work in your own copy of the repo (\`.lanes/${agent}\`, branch \`${copy.branch}\`): other agents' unfinished work can't reach your tests, and yours can't reach theirs. \`studio/\` and \`.studio/\` are shared with everyone. Commit your work as you go; \`task done\` adds your commits to the studio's branch once your checks pass (it rebases first and tells you if anything conflicts). Uncommitted work never leaves your copy.${copy.mixed ? ` MIXED LANE NOT MERGED: ${copy.mixed.line}` : ''}${copy.laneless ? ' Your task has no lane: claim the folders you edit (node harness/lock.mjs claim path:<dir> --owner $STUDIO_LOCK_OWNER) as usual.' : ''}\n` : '')
-    + refreshRule({ oneTask, task })
-    // 2.77.0 (n, B-92): a session started on a task works only that task (harness/task-pin.mjs; task start/done refuse others).
-    + (task ? pinKickoff(task) : '')
-    // 2.76.0 (B-80 part 2): one refused command ends a headless agy session; these rules steer it (and GEMINI.md below).
-    + (tool === 'agy' && !custom ? `\n${AGY_SHELL_RULES.split('\n').slice(2).join('\n')}` : '')
-    // 2.58.0 (PU-36): a refresh relaunch is the launcher's own instruction, so it is said here, not as a note.
-    + (refreshes > 0 && task ? `\nThis is a fresh session after a refresh: read studio/handoffs/${task}.md first; don't redo what it says is done.\n` : '')
-    // PU-36 (P-049): the --note is written by whoever started the session (a person, the Producer, a chat bot), so it
-    // goes in the marked block with its real sender (--by, or "unknown"), never "the Producer" by default.
-    + (note ? `\n${untrustedBlock([{ label: `Note from ${oneLine(by) || 'unknown'} (sent with --note when this session was started)`, text: note }])}` : '');
+  const { stable, volatile } = sessionPromptParts({ role, agent, model, task, lane, oneTask, refreshes, note, by, tool, custom, copy, engineLane });
   // 2.30q (#8): warn when something session-specific slipped into the stable prefix (it would break the cache).
   { const leaks = volatileLeaks(stable, { agent, model, task }); if (leaks.length) emitEvent({ type: 'prompt.prefix.volatile', agent, to: 'producer', status: 'warn', msg: `${role} prompt prefix carries ${leaks.join(', ')}: every ${role} session misses the prompt cache; move it below the stable marker`, meta: { role, leaks } }); }
   const prompt = layoutPrompt({ stable, volatile });
@@ -1272,7 +1306,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     const wip = wipSummary(agent);
     let progress = null;
     try {
-      progress = heartbeatCheck(agent, { log: tailOf(logFile, undefined, logFrom), model, task });
+      progress = heartbeatCheck(agent, { log: tailOf(logFile, undefined, logFrom), model, task, role });
     } catch {
       // the refresh check is a help, never a blocker
     }
@@ -1306,6 +1340,17 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     }
     // 2.73.2 (B-72): logged once per session (logStall: not again when the watchdog logged it first); this launcher
     // ends its own agent once.
+    // 2.78.1 (e): a builder's verify red on a different cause than its previous red, past half its refresh point: end
+    // this session as a refresh (the flag's endedBy), so a fresh one starts from the hand-back with the failure only.
+    try {
+      const nr = !killedBy ? newRedCheck(agent, { since: Date.parse(startedAt) || 0, context: progress?.context || 0, role, model }) : null;
+      if (nr?.handoff) {
+        killedBy = { kind: 'refresh', why: nr.why, at: new Date().toISOString() };
+        stopChild(child);
+      }
+    } catch {
+      // the new-red check is a help, never a crash
+    }
     if (stall?.stalled && !killedBy) {
       logStall({ ...session, ...s }, stall, { by: 'launcher' });
       killedBy = { kind: 'stall', why: stall.why, stallKind: stall.kind, at: new Date().toISOString() };
@@ -1664,13 +1709,13 @@ function readBudgetLimits() {
  * A name no session has used before, kept across restarts in .studio/agent-names.json, so two
  * different sessions never share a name (run #1: builder-s3 named a dead session and a live one).
  */
-export function nextAgentName(role, prefix = '') {
+export function nextAgentName(role, prefix = '', { after = 0 } = {}) {
   const f = path.join(STUDIO_STATE_DIR, 'agent-names.json');
   const counters = readJson(f) || {};
   const key = `${role}-${prefix}`;
   const re = new RegExp(`^${role.replace(/[^a-z0-9-]/gi, '')}-${prefix}(\\d+)$`);
   const seen = sessions().map((x) => Number((String(x.agent).match(re) || [])[1]) || 0);
-  let n = Math.max(Number(counters[key]) || 0, ...seen, 0) + 1;
+  let n = Math.max(Number(counters[key]) || 0, ...seen, Number(after) || 0, 0) + 1;
   fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
   // 2.78.0 (PU-63): never a name a leftover lane folder (.lanes/<name>) still holds, and never one another launch has just
   // taken: each name is reserved with an exclusive create (.studio/agent-names/<name>), so two launches in the same second
@@ -1686,6 +1731,28 @@ export function nextAgentName(role, prefix = '') {
   const cur = readJson(f) || {};
   fs.writeFileSync(f, `${JSON.stringify({ ...cur, [key]: Math.max(n, Number(cur[key]) || 0) }, null, 2)}\n`);
   return `${role}-${prefix}${n}`;
+}
+
+/**
+ * 2.78.1 (e): why this name can't get a lane copy now ('' when it can): a leftover .lanes/<name> that is still in use
+ * (harness/worktree.mjs laneLive: a process in it, a fresh claim, changed in the last STUDIO_LANE_LIVE_MIN minutes).
+ */
+export function laneNameClash(agent) {
+  const dir = path.join(REPO_ROOT, '.lanes', String(agent || ''));
+  if (!agent || !fs.existsSync(dir)) return '';
+  let l = { live: false };
+  try { l = laneLive(agent); } catch { l = { live: false }; }
+  return l.live ? `the lane copy .lanes/${agent} of an earlier session named ${agent} is still in use (${l.why}).` : '';
+}
+
+/**
+ * 2.78.1 (e): a fresh, unused name like `agent` for this role (nextAgentName's reservation, PU-63): builder-agyf9 →
+ * builder-agyf10 (the same prefix), any other name → <role>-<n>.
+ */
+export function freshAgentName(role, agent) {
+  const r = String(role || '').replace(/[^a-z0-9-]/gi, '');
+  const m = String(agent || '').match(new RegExp(`^${r}-([a-z-]*?)(\\d+)$`, 'i'));
+  return nextAgentName(r, m ? m[1] : '', { after: m ? Number(m[2]) : 0 });
 }
 
 /**
@@ -1839,7 +1906,8 @@ function launchEngineLane({ task, agent }) {
   try {
     const r = engineLaunch({ task, agent });
     if (!r) return null;
-    if (r.error) { emitEvent({ type: 'engine.lane', agent, task, status: 'warn', msg: `${agent}: no engine worktree for ${task}: ${r.error}`.slice(0, 400) }); return { note: `Your task is an engine pass, but its worktree couldn't be made: ${r.error}. Fix that first, or hand it back with a note.` }; }
+    // 2.78.1 (e, B-119): no worktree means no code access: the launch is refused (runAgent), it never runs blind.
+    if (r.error) { emitEvent({ type: 'engine.lane', agent, task, status: 'warn', msg: `${agent}: no engine worktree for ${task}: ${r.error}`.slice(0, 400) }); return { note: `Your task is an engine pass, but its worktree couldn't be made: ${r.error}. Fix that first, or hand it back with a note.`, refuse: r.error }; }
     emitEvent({ type: 'engine.lane', agent, task, msg: `${agent}: ${task} works in ${r.dir.split(path.sep).join('/')} on ${r.branch}${r.created ? ' (new)' : ''}`.slice(0, 400), meta: { dir: r.dir, branch: r.branch, repo: r.repo } });
     return r;
   } catch (e) { return { note: `Your task is an engine pass, but its worktree couldn't be made (${e.message}).` }; }
@@ -1864,6 +1932,22 @@ export function startAgent(opts, { detach = false } = {}) {
     const held = listLocks().find((l) => l.key === `task:${opts.task}` && l.owner !== agent);
     if (busy) return { ok: false, message: `Not started: ${busy.agent} is already on ${opts.task}.` };
     if (held) return { ok: false, message: `Not started: ${held.owner} holds ${opts.task}.` };
+  }
+  // 2.78.1 (e): `agent stop` then a start with the same name: the stopped session's lane copy is still in use (its clean-up
+  // runs on, or it changed minutes ago), and the launch would be refused once the copy is wanted. Say which fresh name to
+  // use, or with --auto-name (STUDIO_AUTO_NAME=on) start under it.
+  {
+    // Only when this session gets a lane copy (a code lane, or a worker with none: worktree.mjs lanelessWantsCopy).
+    const wantsCopy = (opts.lane ? laneWantsCopy(opts.lane) : lanelessWantsCopy({ role, lane: null, task: opts.task })) && !process.env.STUDIO_MAIN_ROOT && process.env.STUDIO_REHEARSAL !== '1';
+    const clash = wantsCopy ? laneNameClash(agent) : '';
+    if (clash) {
+      const auto = Boolean(opts.autoName) || /^(on|1|true|yes)$/i.test(process.env.STUDIO_AUTO_NAME || '');
+      const fresh = freshAgentName(role, agent);
+      if (!auto) return { ok: false, message: `Not started: ${clash} Start it under a fresh name: --agent ${fresh} (or add --auto-name to use one automatically).`, suggest: fresh };
+      emitEvent({ type: 'agent.renamed', agent: fresh, task: opts.task || undefined, msg: `${agent} → ${fresh}: ${clash}`.slice(0, 400), meta: { was: agent } });
+      opts = { ...opts, agent: fresh };
+      return startAgent(opts, { detach });
+    }
   }
   const c = caps(role, Number(opts.extra) || 0);
   if (!c.ok) return { ok: false, message: `Not started: ${c.why}.` };
@@ -2092,7 +2176,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const d = listDivisions().find((x) => x.id === division);
       if (d && !d.active) setDivision(division, true, flag('by') || 'producer');
     }
-    const base = { role: flag('role'), agent: flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), next: argv.includes('--next'), lane: flag('lane'), oneTask: argv.includes('--one-task') || Boolean(flag('loop')), extra: Number(flag('extra')) || 0, division, note: flag('note') || '', by: flag('by') || (cmd === 'hire' ? process.env.STUDIO_LOCK_OWNER || null : null), loop: flag('loop'), approved: argv.includes('--approved'), forceModel: argv.includes('--force-model') };
+    const base = { autoName: argv.includes('--auto-name'), role: flag('role'), agent: flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), next: argv.includes('--next'), lane: flag('lane'), oneTask: argv.includes('--one-task') || Boolean(flag('loop')), extra: Number(flag('extra')) || 0, division, note: flag('note') || '', by: flag('by') || (cmd === 'hire' ? process.env.STUDIO_LOCK_OWNER || null : null), loop: flag('loop'), approved: argv.includes('--approved'), forceModel: argv.includes('--force-model') };
     // A hire runs in the background unless --foreground: tied to the hiring shell, it died with it and its
     // record stayed "running" with its claims held (test #3, engine-porter-1).
     const r = startAgent(base, { detach: argv.includes('--detach') || (cmd === 'hire' && !argv.includes('--foreground')) });

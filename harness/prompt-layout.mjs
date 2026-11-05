@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { outsideUntrusted } from './untrusted.mjs';
 
 const LEDGER_FILE = path.join(STUDIO_STATE_DIR, 'prefix-ledger.jsonl');
 /** Roles whose prefix is reused across sessions far apart: they ask for the 1-hour cache. */
@@ -35,14 +36,20 @@ export function stablize(text, { agent, model }) {
 /**
  * 2.30q (#8): anything session-specific in the stable prefix breaks the prompt cache for every later session of
  * the role. Returns what leaked: the agent's name, its model, a task id, a clock time or date.
+ * 2.78.1 (e): text inside a marked block (studio/PITFALLS.md's lines, written by agents and people) is the same for every
+ * session of the role until the file changes, so a clock time an agent wrote into a pitfall is not a per-session value
+ * (2.78.0 warned "every builder session misses the prompt cache" for it). Each leak names the line it is on.
  */
 export function volatileLeaks(stable, { agent, model, task } = {}) {
   const out = [];
-  const t = String(stable || '');
-  if (agent && agent !== 'unknown' && t.includes(agent)) out.push(`agent name ${agent}`);
-  if (model && model !== 'unknown' && t.includes(model)) out.push(`model ${model}`);
-  if (task && t.includes(task)) out.push(`task ${task}`);
-  if (/\b20\d\d-\d\d-\d\dT\d\d:\d\d/.test(t)) out.push('a timestamp');
+  const t = outsideUntrusted(String(stable || ''));
+  const near = (i) => JSON.stringify(t.slice(Math.max(0, t.lastIndexOf('\n', i) + 1), Math.max(i + 1, t.indexOf('\n', i) === -1 ? t.length : t.indexOf('\n', i))).trim().slice(0, 100));
+  const at = (needle) => { const i = t.indexOf(needle); return i === -1 ? null : near(i); };
+  if (agent && agent !== 'unknown' && t.includes(agent)) out.push(`agent name ${agent} (${at(agent)})`);
+  if (model && model !== 'unknown' && t.includes(model)) out.push(`model ${model} (${at(model)})`);
+  if (task && new RegExp(`\\b${String(task).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(t)) out.push(`task ${task} (${at(task)})`);
+  const ts = t.search(/\b20\d\d-\d\d-\d\dT\d\d:\d\d/);
+  if (ts !== -1) out.push(`a timestamp (${near(ts)})`);
   return out;
 }
 

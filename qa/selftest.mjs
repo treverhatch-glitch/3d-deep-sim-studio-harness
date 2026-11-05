@@ -4792,6 +4792,15 @@ if (inShard('selftest-278i')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.1 (e): the prompt prefix the same for every session of a role, refresh points per role, hand-off facts, a fresh
+// session for a red on a new cause, orphaned lane work (lanes orphans / carry), a fresh name on relaunch, B-119.
+if (inShard('selftest-2781e')) {
+  const dir = copyRepo();
+  const { selftest2781E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781e.mjs')).href);
+  await selftest2781E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

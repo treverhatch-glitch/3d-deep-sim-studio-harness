@@ -73,6 +73,11 @@ npm run task -- add "Pass 11: realism pass on the hangar" --role engine-porter -
   named in the agent's prompt and passed to the tool as an extra folder. Only `git worktree add` runs in the engine
   repo; its other checkouts and the land script's gate worktree are never touched. `STUDIO_ENGINE_LANES=off` turns
   this off.
+  2.78.1 (B-119): a branch can't be checked out twice. When the pass's branch is already checked out in another
+  worktree of the engine repo and that worktree is clean, the pass works there (its note says so). With uncommitted
+  work there, or when it is the land script's own `gateWorktree`, the launch is refused with what to do (commit or
+  stash there, or switch that folder to another branch) instead of starting a session that can't reach the code.
+  `STUDIO_ENGINE_LANE_REQUIRED=off` lets such a session start anyway, as before.
 - **Done check.** A pass in its own repo is judged in that repo:
   - its branch has commits the target lacks, and everything on it is committed;
   - the visual check passes, when the task asks for one;
