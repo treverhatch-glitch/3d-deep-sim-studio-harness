@@ -147,6 +147,8 @@
 - `npm run trick -- propose "<title>" --problem … --trick … --fits … --avoid-if … --proof … | none "<why>" | adopt K-001 --by <p> | park K-001 --why … --by <p> | list` — the dev hacker's trick cards (Dev Hacker Lab, off by default, P3, never blocks; docs/DEV-HACKER.md)
 - Golden changes need a `Golden-Reason:` trailer (commit-msg hook adds `Golden-Diff:`); the War Room asks someone to check them
 - `node scripts/check-module-size.mjs` — modules over 300 lines block parallel lanes (studio/rules/lanes.md)
+- `node scripts/settings-census.mjs [--json] [--env <studio .env>] [--events <events.jsonl>]` — every STUDIO_* setting with default, readers, frozen, first release and whether a studio sets it; lists off-switch, duplicate-family and dead candidates (report only, 2.79)
+- `node scripts/size-report.mjs [--json] [--against <git ref>]` — modules, lines, 15 largest, selftest files and units, docs and settings counts, with the delta against a ref (report only, 2.79)
 - `npm run hud:check [-- --shots <folder>]` — drives the War Room in Chromium (all three views, desktop and phone) on a throwaway copy of the studio; skips without a browser
 - `node qa/playtest.mjs [--stage 1|2] [--cartridge name] [--scenario name] [--seed 1337] [--ticks N] [--url http://127.0.0.1:5173/?playtest=1]`
   Runs Stage 1 programmatic trajectory QA + Stage 2 Playwright accessibility/UISentinel layout QA and writes reports to `qa/reports/`.

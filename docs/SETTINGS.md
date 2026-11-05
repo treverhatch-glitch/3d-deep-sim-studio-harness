@@ -185,11 +185,11 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 
 - `STUDIO_DONE_GAME_GATES` · no simple default · harness/task.mjs, qa/selftest-232.mjs, qa/selftest-2582k.mjs (+8 more) · undocumented
 - `STUDIO_DONE_NOOP` · no simple default · harness/task.mjs, harness/upgrade-smoke.mjs, qa/selftest-230n.mjs (+30 more) · undocumented
-- `STUDIO_DONE_QUEUE` · no simple default · harness/task.mjs, harness/train-detach.mjs, qa/selftest-259a.mjs (+2 more) · [RELEASE-2.78.2.md:11](RELEASE-2.78.2.md)
+- `STUDIO_DONE_QUEUE` · no simple default · harness/task.mjs, harness/train-detach.mjs, qa/selftest-259a.mjs (+3 more) · [RELEASE-2.78.2.md:11](RELEASE-2.78.2.md)
 - `STUDIO_DONE_REUSE_MAX_H` · default `24` · harness/task.mjs, harness/train.mjs · undocumented
 - `STUDIO_DONE_REUSE_VERIFY` · no simple default · harness/merge-lane.mjs, harness/task.mjs, qa/selftest-243.mjs (+16 more) · [DISCORD-CREW.md:177](DISCORD-CREW.md)
 - `STUDIO_DONE_RUNNING_MAX_MIN` · default `90` · harness/agent.mjs, harness/busy.mjs, harness/stall.mjs (+2 more) · [RUN-UNATTENDED.md:169](RUN-UNATTENDED.md)
-- `STUDIO_DONE_SKIP_GAME_NONCODE` · no simple default · harness/done-check.mjs, harness/task.mjs, qa/selftest-243.mjs (+1 more) · [RELEASE-2.78.2.md:32](RELEASE-2.78.2.md)
+- `STUDIO_DONE_SKIP_GAME_NONCODE` · no simple default · harness/done-check.mjs, harness/task.mjs, qa/selftest-243.mjs (+2 more) · [RELEASE-2.78.2.md:32](RELEASE-2.78.2.md)
 - `STUDIO_DONE_UNCOMMITTED` · no simple default · harness/task.mjs, qa/selftest-230m.mjs, qa/selftest-230n.mjs (+11 more) · undocumented
 - `STUDIO_DONE_UNITY_GATE` · no simple default · harness/engine-tracks.mjs, harness/task.mjs, qa/selftest-263j.mjs (+3 more) · [ENGINE-TRACKS.md:118](ENGINE-TRACKS.md)
 
@@ -992,7 +992,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_PHASE_DAYS` · default `14` · harness/director.mjs · undocumented
 - `STUDIO_PHONE_SECURE_COOKIE` · no simple default · harness/phone.mjs · [AWAY-AND-ALERTS.md:58](AWAY-AND-ALERTS.md)
 - `STUDIO_PITFALLS_KEEP` · default `40` · harness/pitfalls.mjs, qa/selftest-261f.mjs · [MEMORY.md:72](MEMORY.md)
-- `STUDIO_PLANNING_ROOM` · no simple default · harness/hud.mjs, harness/planning-room.mjs, qa/selftest-2781g.mjs · [LINE-PRODUCER.md:61](LINE-PRODUCER.md)
+- `STUDIO_PLANNING_ROOM` · no simple default · harness/hud.mjs, harness/planning-room.mjs, qa/selftest-2781g.mjs (+1 more) · [LINE-PRODUCER.md:61](LINE-PRODUCER.md)
 - `STUDIO_PLAYTEST_GAME_CHECK` · no simple default · harness/done-check.mjs, qa/playtest.mjs, qa/selftest-2781f.mjs · [ONBOARDING-A-GAME.md:461](ONBOARDING-A-GAME.md)
 - `STUDIO_PLAY_PORT` · default `4610` · harness/builds.mjs, scripts/new-studio.mjs, scripts/studio-setup.mjs · undocumented
 - `STUDIO_POST_BROWSER_PLAY` · no simple default · harness/agent.mjs, qa/selftest-230j.mjs, qa/selftest-2732f.mjs (+6 more) · undocumented
@@ -1026,7 +1026,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_TAKEOVER` · no simple default · harness/agent.mjs, qa/selftest-258d.mjs, qa/selftest-2601n.mjs (+1 more) · undocumented
 - `STUDIO_TASKS` · no simple default · scripts/hooks/commit-msg · undocumented
 - `STUDIO_TELEGRAM_BOT_TOKEN` · no simple default · harness/alerts.mjs, qa/selftest.mjs · [AWAY-AND-ALERTS.md:45](AWAY-AND-ALERTS.md)
-- `STUDIO_TEMP_SWEEP_MIN` · default `5` · harness/watch.mjs · [WORK-ORGANIZATION.md:538](WORK-ORGANIZATION.md)
+- `STUDIO_TEMP_SWEEP_MIN` · default `5` · harness/watch.mjs, qa/selftest-279a.mjs · [WORK-ORGANIZATION.md:538](WORK-ORGANIZATION.md)
 - `STUDIO_TIMEOUT_RERUN` · no simple default · harness/game-gates.mjs, harness/timeout-rerun.mjs, harness/train.mjs (+3 more) · [WORK-ORGANIZATION.md:470](WORK-ORGANIZATION.md)
 - `STUDIO_TRACK` · default `'web'` · harness/agent.mjs, harness/builds.mjs, harness/event.mjs (+4 more) · undocumented
 - `STUDIO_TWO_GREENS` · no simple default · harness/done-check.mjs, qa/selftest-241.mjs · undocumented
