@@ -82,6 +82,8 @@ export function setHold(id, patch, { by = 'producer', msg = '' } = {}) {
 
 const doneIds = (q) => new Set(q.done.map((t) => t.id));
 const hhmm = (iso) => new Date(iso).toTimeString().slice(0, 5);
+/** 2.77.3 (B-115): a clock time as UTC with the zone named, like every other time the studio prints. */
+export const utcHm = (iso) => `${new Date(iso).toISOString().slice(11, 16)} UTC`;
 
 /**
  * A park with --until ends by itself (Jed's run: tasks parked "until Phase 2" stayed parked 5 h after it
@@ -128,8 +130,36 @@ export function holdRefusal(by, env = process.env, { workerName = WORKER_NAME, d
   return null;
 }
 
+/**
+ * 2.77.3 (H5): who parked a task, as a rank: owner (4) > orchestrator (3) > producer/director (2) > anyone else (1).
+ * A launched session's rank comes from STUDIO_ROLE (a name passed with --by can't raise it); outside a launched session
+ * an agent's name (STUDIO_LOCK_OWNER, else --by) says it: opus-N or orchestrator-N is the orchestrator, producer-N and
+ * director-N those roles, no name at all (a person's terminal) or the owner's proxy is the owner.
+ */
+export function parkRank({ by = '', env = process.env } = {}) {
+  const role = String(env.STUDIO_ROLE || '').trim().toLowerCase();
+  const name = String(env.STUDIO_LOCK_OWNER || by || '').trim().toLowerCase();
+  const byRole = (r) => (r === 'orchestrator' ? 3 : r === 'producer' || r === 'director' ? 2 : 1);
+  if (role) return { rank: byRole(role), role };
+  if (/^(opus|orchestrator)(-|_|\d|$)/.test(name)) return { rank: 3, role: 'orchestrator' };
+  if (/^(producer|director)(-|_|\d|$)/.test(name)) return { rank: 2, role: name.startsWith('d') ? 'director' : 'producer' };
+  if (WORKER_NAME.test(name)) return { rank: 1, role: 'builder' };
+  const person = !String(env.STUDIO_LOCK_OWNER || '').trim() && !['CLAUDECODE', 'AI_AGENT', 'CODEX_SANDBOX', 'GEMINI_CLI'].some((k) => String(env[k] || '').trim());
+  return person ? { rank: 4, role: 'owner' } : { rank: 2, role: 'agent' };
+}
+const RANK_NAME = { 4: 'the owner', 3: 'the orchestrator', 2: 'a producer/director', 1: 'an agent' };
+
+/** A refusal when the park was made by a higher rank than the caller, naming who parked it and why; else null. Old parks (no rank) never refuse. */
+export function unparkRefusal(taskId, { by = '', env = process.env, holds = readHolds() } = {}) {
+  const p = holds[taskId]?.parked;
+  if (!p || !(p.rank > 0)) return null;
+  const me = parkRank({ by, env });
+  if (me.rank >= p.rank) return null;
+  return `Refused: ${taskId} was parked by ${p.by || 'someone'} (${RANK_NAME[p.rank] || 'a higher rank'})${p.why ? `: ${p.why}` : ''}${p.note ? ` [don't unpark until: ${p.note}]` : ''}${p.until ? ` [until ${p.until}]` : ''}. Undoing it takes the same rank or higher (${RANK_NAME[p.rank] || 'a higher rank'}); you are ${RANK_NAME[me.rank]}. Ask ${p.by || 'them'}.`;
+}
+
 /** Why this task can't start now, or null. `q` is parseNextQueue(). */
-export function holdReason(taskId, q, now = Date.now(), holds = readHolds()) {
+export function holdReason(taskId, q, now = Date.now(), holds = readHolds(), role = null) {
   // 2.54.0 (PU-06): a red trunk starts only fix tasks (work in progress carries on).
   if (q && !q.inProgress?.some((t) => t.id === taskId)) {
     const t = [...(q.backlog || [])].find((x) => x.id === taskId);
@@ -156,13 +186,14 @@ export function holdReason(taskId, q, now = Date.now(), holds = readHolds()) {
   const done = doneIds(q);
   if (h.held && !q?.inProgress?.some((x) => x.id === taskId)) return `${heldWords({ via: 'hold', ...h.held })} (npm run task -- unhold ${taskId} --by <name>)`;
   if (h.needsYes) return `an agent-proposed mechanic; it starts when the dev says yes (npm run task -- yes ${taskId} --by <dev>)`;
-  if (h.parked && !parkOver(h.parked.until, done, now)) return `parked by ${h.parked.by}${h.parked.why ? `: ${h.parked.why}` : ''}${h.parked.until ? ` (until ${h.parked.until})` : ''}`;
+  if (h.parked && !parkOver(h.parked.until, done, now)) return `parked by ${h.parked.by}${h.parked.why ? `: ${h.parked.why}` : ''}${h.parked.until ? ` (until ${h.parked.until})` : ''}${h.parked.note ? ` (don't unpark until: ${h.parked.note})` : ''}`;
   // 2.67.0 (f): a chain tail (filed by the merge train) is stacked on the chain it fixes, which waits for it: that
   // --after orders the landing (harness/train-deps.mjs), it doesn't hold the tail's start.
   const waiting = (h.after || []).filter((id) => !done.has(id) && !(h.chainTail?.chain || []).includes(id));
   if (waiting.length) return `waits for ${waiting.join(', ')}`;
   if (h.until && Date.parse(h.until) > now) return `blocked until ${hhmm(h.until)}${h.why ? `: ${h.why}` : ''}`;
-  if (h.cooldownUntil && Date.parse(h.cooldownUntil) > now) return `stopped by ${h.cooldownBy || 'someone'}; can restart after ${hhmm(h.cooldownUntil)}`;
+  // 2.77.3 (B-115): a stop's cooldown keeps the stopped role from restarting at once; another role (a reviewer) can start.
+  if (h.cooldownUntil && Date.parse(h.cooldownUntil) > now && !(role && h.cooldownRole && role !== h.cooldownRole)) return `stopped by ${h.cooldownBy || 'someone'}; can restart after ${utcHm(h.cooldownUntil)}`;
   return null;
 }
 
@@ -269,6 +300,7 @@ export function laneOf(taskId, events = readRecentEvents(20000), holds = readHol
   if (h && 'lane' in h) return h.lane || null;
   const added = events.filter((e) => e.type === 'task.added' && e.task === taskId).pop();
   const meta = added?.meta || {};
+  if (meta.wholeGame) return null; // 2.77.3 (H3): --lane all, on purpose
   if (meta.paths?.length) return laneList(meta.paths).join(',');
   if (meta.lane) return meta.lane;
   const f = gameFolders();
@@ -288,6 +320,32 @@ export function laneOf(taskId, events = readRecentEvents(20000), holds = readHol
   return null;
 }
 
+/**
+ * 2.77.3 (H3): does `task add` insist that a builder's code task names its folders? STUDIO_REQUIRE_LANE=on|warn|off.
+ * 'on' refuses it, 'warn' queues it with a loud warning (the default: a studio's own scripts and tests add builder tasks
+ * without folders), 'off' says nothing.
+ */
+export function laneRequired(env = process.env) {
+  const v = String(env.STUDIO_REQUIRE_LANE || '').toLowerCase();
+  if (/^(on|1|true|yes)$/.test(v)) return 'on';
+  if (/^(off|0|false|no)$/.test(v)) return 'off';
+  return 'warn';
+}
+
+/**
+ * 2.77.3 (H3): the folders a task about to be added likely works in, worked out the way laneOf does it later (studio
+ * paths it names, files its title and brief point at, then --part); '' when nothing says.
+ */
+export function inferLaneAtAdd({ title = '', meta = {} } = {}) {
+  const f = gameFolders();
+  const text = `${title} ${meta.why || ''} ${meta.asked || ''}`;
+  if (meta.part === 'sim') return f.sim || '';
+  if (meta.part === 'renderer') return f.renderer || '';
+  if (process.env.STUDIO_LANE_INFER === 'off' || !f.renderer) return '';
+  const banned = noTouchPaths(f.renderer);
+  return inferPaths(text, f.renderer).filter((p) => !banned.some((b) => p === b || p.startsWith(`${b}/`))).join(',');
+}
+
 /** Two lanes clash when any path of one holds a path of the other (or either is the whole game). */
 const pathsClash = (a, b) => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 export const lanesClash = (a, b) => {
@@ -297,9 +355,9 @@ export const lanesClash = (a, b) => {
 };
 
 /** After `agent stop` / `agent pause`: the task can't restart for a while (default 15 min). */
-export function cooldown(taskId, by, minutes = STOP_COOLDOWN_MIN()) {
+export function cooldown(taskId, by, minutes = STOP_COOLDOWN_MIN(), role = null) {
   if (!taskId || !(minutes > 0)) return null;
   const until = new Date(Date.now() + minutes * 60000).toISOString();
-  setHold(taskId, { cooldownUntil: until, cooldownBy: by });
+  setHold(taskId, { cooldownUntil: until, cooldownBy: by, cooldownRole: role || null });
   return until;
 }

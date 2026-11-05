@@ -39,6 +39,21 @@
  * It is kept in the same file, under "visual" (studio/task-types.json), and an approval is studio/approvals/visual-<ID>.json.
  * ownerVisual() applies exactly the validity rules ownerType() applies (one resolver serves both); harness/verdict-split.mjs
  * honours a valid one before anything else, and a valid owner type that isn't render work outranks the title's words.
+ *
+ * 2.77.3 (B-111): recording and reading agree.
+ *   - The owner key: the base branch's (as the checks read it) or, when that has none, the one committed in the main
+ *     checkout (ownerKey). Before, a main checkout whose origin/main lagged behind the key commit wrote unsigned records
+ *     ("recorded") that a train copy, whose base is the local main, then ignored.
+ *   - Beta mode (harness/beta-mode.mjs; the owner's rule: the owner's key, the owner's proxy and beta mode are all the
+ *     owner's): a beta stand-in's type or visual decision is kept as an approval in the beta format approve.mjs writes
+ *     (studio/approvals/type-<ID>.json or visual-<ID>.json: no signature, studio/beta.json's by/at embedded,
+ *     recordedBy), with or without an owner key. It counts while beta mode is still on with that studio/beta.json, once
+ *     committed with exactly that content by a commit that isn't a worker's (betaRecordOk); logged "as beta" in the
+ *     decisions log. Workers never qualify (betaActor refuses them, and a worker's commit of the file doesn't count).
+ *   - With an owner key, outside beta mode, an unsigned record still doesn't count, so the command refuses it up front
+ *     (exit 1: the owner signs it on the device that holds the key, or turns beta mode on). And after writing, the
+ *     command reads its own record back with the same resolver every check uses: if that says it doesn't count, it
+ *     says so and exits 1 instead of claiming success.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -48,13 +63,15 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 import { canonicalBytes } from './hash.mjs';
 import { mainRoot, inLaneCopy } from './worktree.mjs';
 import { resolveBase, ownerPublicKey, ownerKeyPath, verifyApproval, OWNER_KEY_HOWTO, APPROVALS_REL } from './approve.mjs';
-import { agentOnPermission, permissionText, permittedSetter } from './permission.mjs';
+import { agentOnPermission, permissionText, permittedSetter, WORKER_NAME } from './permission.mjs';
+import { ownerPubAt } from './owner-proxy.mjs';
+import { betaRecordCommitted } from './beta-mode.mjs';
 import { delegationFor, recordUse, embeddedDelegationOk } from './delegation.mjs';
 import { logDecision, asOf } from './decisions-log.mjs';
 
 export const TYPE_RECORD_REL = 'studio/task-types.json';
 export const RETYPABLE = ['change', 'chore', 'bug', 'docs', 'system', 'balance', 'fun', 'playtest', 'study', 'research', 'review', 'direction', 'idea', 'art', 'trick', 'whole'];
-const NOTE = 'Owner reclassifications of task types (npm run task -- type <ID> <type> --by <owner> --why "…"; harness/reclassify.mjs). Written by that command from the owner\'s terminal; an entry set by an agent\'s commit (Studio-Agent trailer) is ignored, and once the studio has an owner key only signed reclassifications (studio/approvals/type-<ID>.json) count.';
+const NOTE = 'Owner reclassifications of task types (npm run task -- type <ID> <type> --by <owner> --why "…"; harness/reclassify.mjs). Written by that command from the owner\'s terminal; an entry set by an agent\'s commit (Studio-Agent trailer) is ignored, and once the studio has an owner key only signed reclassifications (studio/approvals/type-<ID>.json), or ones recorded there in beta mode, count.';
 
 // The agent-name shapes the launcher, fun verdicts and the agy allow-list use, and a "-bot" suffix.
 const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|art-director|liaison|scout|reference-scout|designer|designer-calibrator|balancer|fun-tester|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes|nim|dev-hacker|sound|composer|writer|engine|ui-)\b|(^|[-_])bot(\b|$)/i;
@@ -91,11 +108,17 @@ export function personRefusal(by, env = process.env) {
 }
 
 let keyMemo = null;
-/** The owner's public key as the checks read it (the base branch's), or null: no owner key, records are unsigned. */
+/**
+ * The owner's public key as the checks read it (the base branch's), or, 2.77.3 (B-111), when that has none, the one
+ * committed in the main checkout; null: no owner key, records are unsigned. The writers and every reader use this one
+ * answer, so a record the command accepts is one the checks accept (a main checkout behind its key commit on
+ * origin/main no longer writes unsigned records a train copy then ignores).
+ */
 export function ownerKey() {
   if (keyMemo && Date.now() - keyMemo.at < 30000) return keyMemo.pub;
   let pub = null;
   try { pub = ownerPublicKey(resolveBase()?.base || null); } catch { pub = null; }
+  if (!pub) { try { pub = ownerPubAt(recordRoot()); } catch { pub = null; } }
   keyMemo = { at: Date.now(), pub };
   return pub;
 }
@@ -106,13 +129,28 @@ function readRecord(root = REPO_ROOT) {
 }
 const approvalDirs = () => [...new Set([REPO_ROOT, recordRoot()])].map((root) => ({ root, dir: path.join(root, APPROVALS_REL) }));
 const approvalName = (taskId, prefix = 'type') => `${prefix}-${String(taskId).replace(/[^\w.-]/g, '_')}.json`;
-/** The newest signed reclassification of this task that verifies against the owner key. */
+/**
+ * 2.77.3 (B-111): a beta-mode record (no signature, studio/beta.json's by/at embedded) counts while beta mode is still on
+ * with that file (beta-mode.mjs betaApprovalOk: recordedBy set and not a worker), and only once committed in this
+ * checkout, with exactly this content, by a commit that isn't a worker's (the Studio-Agent trailer): a file dropped in
+ * the folder, or edited after its commit, proves nothing.
+ */
+const betaRecordOk = (root, rel, doc) => !WORKER_NAME.test(String(doc?.approval?.recordedBy || '').trim()) && betaRecordCommitted(root, rel, doc);
+
+/**
+ * The newest approval of this task's decision that counts: signed with the owner key (or the owner proxy's, which
+ * verifyApproval judges), or, 2.77.3 (B-111), recorded in beta mode (betaRecordOk), with or without an owner key.
+ */
 function signedApproval(taskId, pub, kind = 'type') {
   const found = [];
   for (const { root, dir } of approvalDirs()) {
     const full = path.join(dir, approvalName(taskId, kind));
     const doc = readJson(full);
-    if (doc?.approval?.kind === kind && doc.approval.task === taskId && verifyApproval(doc, pub)) found.push({ ...doc, file: path.relative(root, full).split(path.sep).join('/') });
+    if (doc?.approval?.kind !== kind || doc.approval.task !== taskId) continue;
+    const rel = path.relative(root, full).split(path.sep).join('/');
+    const beta = !doc.signature && Boolean(doc.beta);
+    const ok = beta ? betaRecordOk(root, rel, doc) : Boolean(pub) && verifyApproval(doc, pub);
+    if (ok) found.push({ ...doc, file: rel, viaBeta: beta });
   }
   return found.sort((a, b) => String(b.approval.at).localeCompare(String(a.approval.at)))[0] || null;
 }
@@ -185,8 +223,10 @@ function resolveOwnerDecision(taskId, root, kind) {
     return null;
   }
   const pub = ownerKey();
+  // 2.77.3 (B-111): a signed approval, or one recorded in beta mode, decides first (a beta one with or without a key).
+  const a = signedApproval(taskId, pub, kind);
+  if (a?.viaBeta) return { ...K.fromApproval(a.approval), by: a.approval.by, why: a.approval.why, at: a.approval.at, source: 'owner-beta', file: a.file, recordedBy: a.approval.recordedBy, beta: a.beta };
   if (pub) {
-    const a = signedApproval(taskId, pub, kind);
     if (a) return { ...K.fromApproval(a.approval), by: a.approval.by, why: a.approval.why, at: a.approval.at, source: 'owner-signed', file: a.file };
     // 2.67.0: an entry an outside agent recorded under the owner's signed delegation (harness/delegation.mjs) carries the
     // signed delegation; it counts when that signature verifies, covers this action and agent and the entry's time, and
@@ -196,7 +236,7 @@ function resolveOwnerDecision(taskId, root, kind) {
       const setter = setterOf(root, taskId, committed, K.section);
       if (setter && setter.agent && setter.agent === String(committed.recordedBy || '')) return { ...committed, source: 'owner record', onPermission: true, onDelegation: true, commit: setter.sha.slice(0, 8) };
     }
-    return { ignored: `${TYPE_RECORD_REL} or ${APPROVALS_REL}/ names ${taskId}, but this studio has an owner key, so ${K.what} counts only when it is signed with it (the owner runs ${K.set(taskId)} on the device that holds the key)` };
+    return { ignored: `${TYPE_RECORD_REL} or ${APPROVALS_REL}/ names ${taskId}, but this studio has an owner key, so ${K.what} counts only when it is signed with it (the owner runs ${K.set(taskId)} on the device that holds the key) or recorded in beta mode by the owner's stand-in while beta mode is on (npm run beta -- status)` };
   }
   const isGit = git(root, 'rev-parse', '--verify', 'HEAD').status === 0;
   if (!isGit) {
@@ -218,13 +258,16 @@ function resolveOwnerDecision(taskId, root, kind) {
   return { ...committed, source: 'owner record', commit: setter.sha.slice(0, 8), ...(same(work, committed) ? {} : { note: `the working copy of ${TYPE_RECORD_REL} differs from the committed one, which is what counts` }) };
 }
 
+/** 2.77.3 (B-111): words for a decision recorded in beta mode. */
+const betaHow = (o) => `beta mode, recorded by ${o.recordedBy || 'the owner\'s stand-in'}, ${o.file}; counts while beta mode is on (studio/beta.json set by ${o.beta?.by || '?'} at ${String(o.beta?.at || '').slice(0, 16).replace('T', ' ')})`;
+
 /** Words for where an owner type came from, for done and verify output. */
 export function ownerTypeWords(o) {
   if (!o?.type) return '';
   const when = String(o.at || '').slice(0, 10);
   const how = o.source === 'owner-signed'
     ? `owner-signed, ${o.file}`
-    : `owner record in ${TYPE_RECORD_REL}${o.commit ? `, commit ${o.commit}` : ''}${o.permission ? `; recorded by ${o.recordedBy || 'an agent'} on ${o.by}'s permission: "${String(o.permission).slice(0, 160)}"` : ''}; not signed: the studio has no owner key yet`;
+    : o.source === 'owner-beta' ? betaHow(o) : `owner record in ${TYPE_RECORD_REL}${o.commit ? `, commit ${o.commit}` : ''}${o.permission ? `; recorded by ${o.recordedBy || 'an agent'} on ${o.by}'s permission: "${String(o.permission).slice(0, 160)}"` : ''}; not signed: the studio has no owner key yet`;
   return `set by ${o.by}${when ? ` on ${when}` : ''}${o.from ? ` (the title says ${o.from})` : ''} [${how}]: ${o.why}`;
 }
 
@@ -235,8 +278,8 @@ export function ownerTypeWords(o) {
 export function ownerVisualWords(o) {
   if (!o?.visual) return '';
   const when = String(o.at || '').slice(0, 10);
-  const who = o.permission ? `set by ${o.recordedBy || 'an agent'} on ${o.by}'s permission ("${String(o.permission).slice(0, 160)}")` : `set by ${o.by}${when ? ` on ${when}` : ''}`;
-  const how = o.source === 'owner-signed' ? `owner-signed, ${o.file}` : `owner record in ${TYPE_RECORD_REL}${o.commit ? `, commit ${o.commit}` : ''}; not signed: the studio has no owner key yet`;
+  const who = o.source === 'owner-beta' ? `set by ${o.recordedBy || 'the owner\'s stand-in'} for ${o.by} in beta mode${when ? ` on ${when}` : ''}` : o.permission ? `set by ${o.recordedBy || 'an agent'} on ${o.by}'s permission ("${String(o.permission).slice(0, 160)}")` : `set by ${o.by}${when ? ` on ${when}` : ''}`;
+  const how = o.source === 'owner-signed' ? `owner-signed, ${o.file}` : o.source === 'owner-beta' ? betaHow(o) : `owner record in ${TYPE_RECORD_REL}${o.commit ? `, commit ${o.commit}` : ''}; not signed: the studio has no owner key yet`;
   return `visual proof: ${o.visual}, ${who} [${how}]: ${o.why}`;
 }
 
@@ -262,7 +305,7 @@ export function typeRecordLines() {
 
 function sign(approval, pub) {
   const keyFile = ownerKeyPath();
-  if (!fs.existsSync(keyFile)) throw new Error(`This studio has an owner key, so a reclassification must be signed, and there is no owner private key on this machine (${keyFile}). Nothing was written. ${OWNER_KEY_HOWTO}.`);
+  if (!fs.existsSync(keyFile)) throw new Error(`This studio has an owner key, so ${approval.kind === 'visual' ? 'a visual-proof decision' : 'a reclassification'} must be signed, and there is no owner private key on this machine (${keyFile}). Nothing was written. ${OWNER_KEY_HOWTO}.`);
   const signature = crypto.sign(null, Buffer.from(canonicalBytes(approval)), crypto.createPrivateKey(fs.readFileSync(keyFile, 'utf8'))).toString('base64');
   if (!verifyApproval({ approval, signature }, pub)) throw new Error(`The private key at ${keyFile} doesn't match the studio's owner key (${'studio/keys/owner-ed25519.pub.pem'} on the base branch). Nothing was written.`);
   return signature;
@@ -308,7 +351,31 @@ function commitRecord(files, msg, why) {
 /** 2.71.0 (x): one decision-log record per type/visual decision (harness/decisions.mjs). */
 function logDecisionFor(action, taskId, who, entry, { evidence, undo }) {
   const d = who.delegation ? who.delegation : who.onPerm ? { via: who.onPerm.via, permission: who.perm } : { via: 'person' };
-  logDecision({ action, subject: taskId, by: who.delegation ? who.delegation.agent : entry.by, as: asOf(d), why: entry.why, evidence, undo });
+  // 2.77.3 (B-111): a beta stand-in's decision is logged "as beta", like approve.mjs's beta approvals.
+  const beta = Boolean(who.delegation?.beta);
+  logDecision({ action, subject: taskId, by: who.delegation ? who.delegation.agent : entry.by, as: beta ? 'beta' : asOf(d), why: entry.why, evidence: beta ? `beta mode ${who.delegation.agent}: ${evidence}` : evidence, undo });
+}
+
+/**
+ * 2.77.3 (B-111): the shared parts of keeping a type or visual decision.
+ *   unsignedRefusal: with an owner key, a record that would not count is refused before anything is written.
+ *   betaDoc: a beta stand-in's decision as an approval in approve.mjs's beta format.
+ *   readBack: the decision as every check reads it, right after writing it (null when it counts).
+ */
+function unsignedRefusal(pub, who, kind, cmd) {
+  if (!pub || !who.onPerm || who.onPerm.via === 'person' || who.delegation?.signed || who.delegation?.beta) return '';
+  const what = KINDS[kind].what;
+  return `Refused: this studio has an owner key, so ${what} needs the owner's signature; a permission line isn't one, and an unsigned record would be ignored by every check. Nothing was recorded. To get it: the owner runs ${cmd} on the device that holds the key (STUDIO_OWNER_KEY or ~/.studio-owner/), or turns beta mode on (npm run beta -- on --by <owner> --agents <you>) so the owner's stand-ins record it (npm run beta -- status shows whether it is on).`;
+}
+function betaDoc(approval, who) {
+  const d = who.delegation;
+  return { approval: { ...approval, recordedBy: String(d.agent || '').slice(0, 60), via: 'beta mode' }, signature: null, beta: { by: d.doc.by, at: d.doc.at } };
+}
+function readBack(taskId, kind, field) {
+  memo.delete(`${kind}|${taskId}`);
+  let now = null;
+  try { now = resolveOwnerDecision(taskId, recordRoot(), kind); } catch (e) { now = { ignored: e.message }; }
+  return now?.[field] ? null : (now?.ignored || 'no entry was found where the checks read it');
 }
 
 export function reclassify({ task, from, to, by, why, permission = '', commit = true, env = process.env }) {
@@ -325,10 +392,19 @@ export function reclassify({ task, from, to, by, why, permission = '', commit = 
   const entry = { type: target, from, title: task.title, by: String(by).trim(), why: String(why).trim(), at, ...(onPerm ? { permission: perm.slice(0, 500), recordedBy: onPerm.recordedBy } : {}) };
   const files = [TYPE_RECORD_REL];
   const pub = ownerKey();
-  if (pub && onPerm && onPerm.via !== 'person' && !(who.delegation?.signed)) return { ok: false, message: `This studio has an owner key, so a reclassification is signed with it on the owner's device; a permission line isn't a signature. Nothing was recorded. The owner runs: npm run task -- type ${task.id} ${target} --by <name> --why "…"` };
-  if (who.delegation) entry.delegation = pub ? who.delegation.doc : { at: who.delegation.at, by: who.delegation.owner, until: who.delegation.until };
+  const beta = Boolean(who.delegation?.beta);
+  const refused = unsignedRefusal(pub, who, 'type', `npm run task -- type ${task.id} ${target} --by <name> --why "…"`);
+  if (refused) return { ok: false, message: refused };
+  if (who.delegation && !beta) entry.delegation = pub ? who.delegation.doc : { at: who.delegation.at, by: who.delegation.owner, until: who.delegation.until };
+  if (beta) entry.beta = { by: who.delegation.doc.by, at: who.delegation.doc.at };
   const approvalRel = `${APPROVALS_REL}/${approvalName(task.id)}`;
-  if (pub && !auto && !who.delegation) {
+  if (beta && !auto) {
+    // 2.77.3 (B-111): a beta stand-in's reclassification, kept where the checks look first (signedApproval).
+    fs.mkdirSync(path.join(REPO_ROOT, APPROVALS_REL), { recursive: true });
+    fs.writeFileSync(path.join(REPO_ROOT, approvalRel), `${JSON.stringify(betaDoc({ kind: 'type', task: task.id, from, to: target, title: task.title, by: entry.by, why: entry.why, at }, who), null, 2)}\n`);
+    entry.approval = approvalRel;
+    files.push(approvalRel);
+  } else if (pub && !auto && !who.delegation) {
     const approval = { kind: 'type', task: task.id, from, to: target, title: task.title, by: entry.by, why: entry.why, at };
     let signature;
     try { signature = sign(approval, pub); } catch (e) { return { ok: false, message: e.message }; }
@@ -348,17 +424,20 @@ export function reclassify({ task, from, to, by, why, permission = '', commit = 
   fs.writeFileSync(path.join(REPO_ROOT, TYPE_RECORD_REL), `${JSON.stringify(rec, null, 2)}\n`);
   memo.delete(`type|${task.id}`);
   if (who.delegation) recordUse(who.delegation, { action: 'type', task: task.id, detail: auto ? 'back to the title\'s type' : `${from} to ${target}` });
-  emitEvent({ type: 'task.retyped', agent: entry.by, task: task.id, msg: auto ? `${entry.by} put ${task.id} back to its title's type (${from}): ${entry.why}` : `${entry.by} reclassified ${task.id} from ${from} to ${target}${pub ? ' (signed)' : ' (recorded; no owner key yet)'}: ${entry.why}`.slice(0, 400), meta: { from, to: auto ? from : target, signed: Boolean(pub && !auto), at } });
+  emitEvent({ type: 'task.retyped', agent: entry.by, task: task.id, msg: auto ? `${entry.by} put ${task.id} back to its title's type (${from}): ${entry.why}` : `${entry.by} reclassified ${task.id} from ${from} to ${target}${beta ? ` (beta mode, recorded by ${who.delegation.agent})` : pub ? ' (signed)' : ' (recorded; no owner key yet)'}: ${entry.why}`.slice(0, 400), meta: { from, to: auto ? from : target, signed: Boolean(pub && !auto && !beta), ...(beta ? { beta: true, recordedBy: who.delegation.agent } : {}), at } });
   logDecisionFor('type', task.id, who, entry, { evidence: auto ? `back to the title's type (${from})` : `${prevType || from} -> ${target}`, undo: { kind: 'retype', task: task.id, to: prevType || 'auto', text: `npm run task -- type ${task.id} ${prevType || 'auto'} --by <name> --why "…"` } });
   const msg = auto ? `${task.id}: back to the title's type (${from}), by ${entry.by}` : `${task.id}: owner reclassified it from ${from} to ${target} (${entry.by})`;
   const { committed, commitNote } = commit ? commitRecord(files, msg, entry.why) : { committed: false, commitNote: '' };
-  const counts = pub ? 'It counts once the approval file is on the studio\'s main branch.' : 'It counts once committed (from your terminal, not an agent\'s); until the studio has an owner key it is a record, not a signature.';
+  const counts = beta ? 'It counts while beta mode stays on (npm run beta -- status); the use is logged (npm run decisions).' : pub ? 'It counts once the approval file is on the studio\'s main branch.' : 'It counts once committed (from your terminal, not an agent\'s); until the studio has an owner key it is a record, not a signature.';
+  // 2.77.3 (B-111): read it back as the checks do; a record that doesn't count is not reported as done.
+  const notCounted = !auto && committed ? readBack(task.id, 'type', 'type') : null;
+  if (notCounted) return { ok: false, entry, files, committed, message: `${task.id}: the reclassification to "${target}" was written${committed ? ` and committed (${files.join(' and ')})` : ''}, but it does not count: ${notCounted}. done-check, verify and the train still use the title's type (${from}).` };
   return {
     ok: true,
     entry,
     files,
     committed,
-    message: `${auto ? `${task.id} goes back to its title's type (${from}).` : `${task.id} is now a "${target}" task (the title says ${from}), ${pub ? 'signed with the owner key' : 'recorded'} by ${entry.by}: ${entry.why}`} ${committed ? `Committed ${files.join(' and ')}.` : commit ? '' : `Not committed (--no-commit): commit ${files.join(' and ')} yourself.`}${commitNote} ${auto ? '' : counts}`.replace(/\s+/g, ' ').trim(),
+    message: `${auto ? `${task.id} goes back to its title's type (${from}).` : `${task.id} is now a "${target}" task (the title says ${from}), ${beta ? `recorded in beta mode by ${who.delegation.agent} for ${entry.by}` : `${pub ? 'signed with the owner key' : 'recorded'} by ${entry.by}`}: ${entry.why}`} ${committed ? `Committed ${files.join(' and ')}.` : commit ? '' : `Not committed (--no-commit): commit ${files.join(' and ')} yourself.`}${commitNote} ${auto ? '' : counts}`.replace(/\s+/g, ' ').trim(),
   };
 }
 
@@ -380,10 +459,19 @@ export function setVisual({ task, to, by, why, permission = '', commit = true, e
   const entry = { visual: target, title: task.title, by: String(by).trim(), why: String(why).trim(), at, ...(onPerm ? { permission: perm.slice(0, 500), recordedBy: onPerm.recordedBy } : {}) };
   const files = [TYPE_RECORD_REL];
   const pub = ownerKey();
-  if (pub && onPerm && onPerm.via !== 'person' && !(who.delegation?.signed)) return { ok: false, message: `This studio has an owner key, so a visual-proof decision is signed with it on the owner's device; a permission line isn't a signature. Nothing was recorded. The owner runs: npm run task -- visual ${task.id} ${target} --by <name> --why "…"` };
-  if (who.delegation) entry.delegation = pub ? who.delegation.doc : { at: who.delegation.at, by: who.delegation.owner, until: who.delegation.until };
+  const beta = Boolean(who.delegation?.beta);
+  const refused = unsignedRefusal(pub, who, 'visual', `npm run task -- visual ${task.id} ${target} --by <name> --why "…"`);
+  if (refused) return { ok: false, message: refused };
+  if (who.delegation && !beta) entry.delegation = pub ? who.delegation.doc : { at: who.delegation.at, by: who.delegation.owner, until: who.delegation.until };
+  if (beta) entry.beta = { by: who.delegation.doc.by, at: who.delegation.doc.at };
   const approvalRel = `${APPROVALS_REL}/${approvalName(task.id, 'visual')}`;
-  if (pub && !auto && !who.delegation) {
+  if (beta && !auto) {
+    // 2.77.3 (B-111): a beta stand-in's visual-proof decision, kept where the checks look first (signedApproval).
+    fs.mkdirSync(path.join(REPO_ROOT, APPROVALS_REL), { recursive: true });
+    fs.writeFileSync(path.join(REPO_ROOT, approvalRel), `${JSON.stringify(betaDoc({ kind: 'visual', task: task.id, to: target, title: task.title, by: entry.by, why: entry.why, at }, who), null, 2)}\n`);
+    entry.approval = approvalRel;
+    files.push(approvalRel);
+  } else if (pub && !auto && !who.delegation) {
     const approval = { kind: 'visual', task: task.id, to: target, title: task.title, by: entry.by, why: entry.why, at };
     let signature;
     try { signature = sign(approval, pub); } catch (e) { return { ok: false, message: e.message }; }
@@ -405,12 +493,15 @@ export function setVisual({ task, to, by, why, permission = '', commit = true, e
   fs.writeFileSync(path.join(REPO_ROOT, TYPE_RECORD_REL), `${JSON.stringify(rec, null, 2)}\n`);
   memo.delete(`visual|${task.id}`);
   if (who.delegation) recordUse(who.delegation, { action: 'visual', task: task.id, detail: `visual proof ${target}` });
-  const words = auto ? `${entry.by} put ${task.id}'s visual proof back to the detection: ${entry.why}` : `${onPerm ? `${onPerm.recordedBy} on ${entry.by}'s permission` : entry.by} set ${task.id}'s visual proof ${target}${pub ? ' (signed)' : ' (recorded; no owner key yet)'}: ${entry.why}`;
-  emitEvent({ type: 'task.visual_set', agent: onPerm ? onPerm.recordedBy : entry.by, task: task.id, msg: words.slice(0, 400), meta: { to: target, by: entry.by, signed: Boolean(pub && !auto), at, ...(onPerm ? { permission: entry.permission, recordedBy: entry.recordedBy } : {}) } });
+  const words = auto ? `${entry.by} put ${task.id}'s visual proof back to the detection: ${entry.why}` : beta ? `${who.delegation.agent} set ${task.id}'s visual proof ${target} for ${entry.by} in beta mode (${approvalRel}): ${entry.why}` : `${onPerm ? `${onPerm.recordedBy} on ${entry.by}'s permission` : entry.by} set ${task.id}'s visual proof ${target}${pub ? ' (signed)' : ' (recorded; no owner key yet)'}: ${entry.why}`;
+  emitEvent({ type: 'task.visual_set', agent: onPerm ? onPerm.recordedBy : entry.by, task: task.id, msg: words.slice(0, 400), meta: { to: target, by: entry.by, signed: Boolean(pub && !auto && !beta), ...(beta ? { beta: true } : {}), at, ...(onPerm ? { permission: entry.permission, recordedBy: entry.recordedBy } : {}) } });
   logDecisionFor('visual', task.id, who, entry, { evidence: `visual proof ${prevVisual || 'auto'} -> ${target}`, undo: { kind: 'visual', task: task.id, to: prevVisual || 'auto', text: `npm run task -- visual ${task.id} ${prevVisual || 'auto'} --by <name> --why "…"` } });
   const msg = auto ? `${task.id}: visual proof back to the detection, by ${entry.by}` : `${task.id}: owner set visual proof ${target} (${entry.by})`;
   const { committed, commitNote } = commit ? commitRecord(files, msg, entry.why) : { committed: false, commitNote: '' };
-  const counts = pub ? 'It counts once the approval file is on the studio\'s main branch.' : 'It counts once committed (by a person, or by the Producer/Director/outside agent that recorded it on permission; never a worker\'s commit); until the studio has an owner key it is a record, not a signature.';
+  const counts = beta ? 'It counts while beta mode stays on (npm run beta -- status); the use is logged (npm run decisions).' : pub ? 'It counts once the approval file is on the studio\'s main branch.' : 'It counts once committed (by a person, or by the Producer/Director/outside agent that recorded it on permission; never a worker\'s commit); until the studio has an owner key it is a record, not a signature.';
+  // 2.77.3 (B-111): read it back as the checks do; a record that doesn't count is not reported as done.
+  const notCounted = !auto && committed ? readBack(task.id, 'visual', 'visual') : null;
+  if (notCounted) return { ok: false, entry, files, committed, message: `${task.id}: the visual-proof decision (${target}) was written${committed ? ` and committed (${files.join(' and ')})` : ''}, but it does not count: ${notCounted}. done-check and the train still use the detection.` };
   return {
     ok: true,
     entry,

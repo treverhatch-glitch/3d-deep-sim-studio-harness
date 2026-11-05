@@ -92,7 +92,10 @@ export function watchReloadRequests({ by = 'supervisor', intervalMs = 1000 } = {
 }
 
 /** `npm run studio:reload-env`: write the request; wait for a running supervisor's answer. */
-export async function reloadCli({ by = null, waitMs = 15000 } = {}) {
+export async function reloadCli({ by = null, waitMs = null, env = process.env } = {}) {
+  // 2.77.3 (M5): wait for one supervisor pass (STUDIO_SUPERVISOR_SEC, 60) plus a 10 s margin, not a fixed 15 s.
+  const passMs = (Number(env.STUDIO_SUPERVISOR_SEC) > 0 ? Number(env.STUDIO_SUPERVISOR_SEC) : 60) * 1000;
+  if (waitMs == null) waitMs = passMs + 10000;
   const who = String(by || actor() || 'someone').slice(0, 60);
   const id = `${Date.now().toString(36)}-${process.pid}`;
   fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
@@ -101,14 +104,14 @@ export async function reloadCli({ by = null, waitMs = 15000 } = {}) {
   let running = false;
   try { running = Boolean(sup?.pid) && sup.status === 'running' && (await import('./proc-identity.mjs')).pidAlive(sup.pid, sup.identity, { eperm: false }); } catch { running = false; }
   const tail = 'Launchers, the watchdog and the watch pass reload on their next pass (a heartbeat or a watch pass apart).';
-  if (!running) return { code: 0, text: `Asked for a reload (${who}). No supervisor is running here. ${tail} A new process reads .env when it starts.` };
+  if (!running) return { code: 0, text: `Asked for a reload (${who}). The supervisor isn't running here, so the new settings apply when it starts (npm run studio:start). ${tail}` };
   const t0 = Date.now();
   while (Date.now() - t0 < waitMs) {
     const a = readJson(ACK_FILE());
     if (a?.id === id) return { code: 0, text: `The supervisor (pid ${a.pid}) reloaded .env: ${a.line}${a.kept?.length ? `; it kept the value it was started with for ${a.kept.join(', ')} (set in its environment, which wins over .env)` : ''}. ${tail}` };
     await new Promise((r) => setTimeout(r, 250));
   }
-  return { code: 0, text: `Asked for a reload (${who}); the supervisor (pid ${sup.pid}) hasn't answered in ${Math.round(waitMs / 1000)} s: it reloads on its next pass. ${tail}` };
+  return { code: 0, text: `Queued: the supervisor reloads on its next pass (pid ${sup.pid}, asked by ${who}; no answer within one pass, ${Math.round(waitMs / 1000)} s). ${tail}` };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {

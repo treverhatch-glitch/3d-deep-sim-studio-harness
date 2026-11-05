@@ -20,6 +20,8 @@
  *     a queued lane is still queued; a task done's own lane (not queued) is put in the queue once per head (a second
  *     death with the same head goes to the Producer instead). None of this is a hand-back, so it never counts toward
  *     STUDIO_TRAIN_MAX_HANDBACKS.
+ * 2.77.3 (H2, B-112): a second worker watches the status (harness/train-watch.mjs, STUDIO_TRAIN_STALL_MIN, 90): a train
+ * whose status hasn't changed that long while it works has its children stopped and ends its attempt (lanes kept).
  * Trains from before 2.76.0 have no life.json: a status.json that never reached "done" is judged by the process id in
  * the train id (<stamp>-<pid>).
  */
@@ -28,6 +30,7 @@ import path from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { emitEvent } from './event.mjs';
 import { jobDone } from './jobs.mjs';
+import { stallMs, stallGraceMs } from './train-watch.mjs';
 
 const TRAIN_DIR = path.join('.studio', 'train');
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
@@ -93,8 +96,19 @@ export function beginTrainLife(root, { id, by = 'train', beatMs = 30000 } = {}) 
     worker.unref();
     worker.on('error', () => {});
   } catch { try { fs.writeFileSync(beatFile(root, id), String(Date.now())); } catch {} }
+  // 2.77.3 (H2, B-112): the stall watch (harness/train-watch.mjs): a status unchanged for STUDIO_TRAIN_STALL_MIN ends
+  // the attempt (cancel marker, the train's children stopped), so a hang can't hold the train lock indefinitely.
+  let watch = null;
+  const limitMs = stallMs();
+  if (limitMs > 0) {
+    try {
+      watch = new Worker(new URL('./train-watch.mjs', import.meta.url), { workerData: { trainWatch: true, root, id, pid: process.pid, by, limitMs, graceMs: stallGraceMs(), tickMs: Math.max(250, Math.min(30000, Math.round(limitMs / 12))) } });
+      watch.unref();
+      watch.on('error', () => {});
+    } catch { watch = null; }
+  }
   let done = false;
-  const stop = () => { live.delete(id); try { worker?.terminate(); } catch {} removeHandlers(); };
+  const stop = () => { live.delete(id); try { worker?.terminate(); } catch {} try { watch?.terminate(); } catch {} removeHandlers(); };
   const h = {
     id,
     lanes(list) { if (done) return; doc.lanes = (list || []).map(laneRow); writeJson(f, doc); },
@@ -136,7 +150,7 @@ export function judgeTrain(root, id, { now = Date.now(), env = process.env } = {
   if (!life) { try { if (now - fs.statSync(statusFile(root, id)).mtimeMs > 24 * 3600000) return { dead: false, why: 'old' }; } catch { return { dead: false, why: 'no status' }; } }
   const pid = life?.pid || pidOfId(id);
   if (!pid) return { dead: false, why: 'no process id' };
-  if (!pidAlive(pid)) return { dead: true, why: `its process ${pid} is gone` };
+  if (!pidAlive(pid)) return { dead: true, why: `its process ${pid} is gone${life?.stalled ? ` (it had stalled: ${String(life.stalled.why || '').slice(0, 160)})` : ''}` };
   if (!life) return { dead: false, why: 'its process is alive' };
   let beat = 0;
   try { beat = Number(fs.readFileSync(beatFile(root, id), 'utf8')) || 0; } catch {}

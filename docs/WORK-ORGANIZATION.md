@@ -307,6 +307,16 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   queued again, a lane two trains died with at the same head is held for the Producer. None of it is a hand-back.
   A train from before 2.76.0 (a `status.json` only) is judged by the pid in its id when its status changed in the last
   24 h.
+- A train that stalls (2.77.3, H2/B-112, `harness/train-watch.mjs`): a second worker thread watches the train's
+  `status.json`. When it hasn't changed for `STUDIO_TRAIN_STALL_MIN` (90 minutes; `0` or `off`: no watch) while the
+  train works (any step but a speculative train's wait for train A; one of its checks waiting in the machine:heavy
+  queue, a wait `STUDIO_HEAVY_WAIT_MIN` bounds, counts as moving), the worker writes the train's cancel marker
+  (`{ stall: true }`), stops the train's running children (its process tree below the train: `taskkill /T /F` on
+  Windows, SIGTERM then SIGKILL elsewhere) so the blocked check returns, sets the status to `stalled: …` and records
+  `task.train.stalled` (to the Producer) with why. The train ends that attempt at its next step: nothing more lands
+  from it, nobody is handed back, its lanes keep their place in the queue (a lane that stalls a second train at the
+  same head is held for the Producer), and the train lock is released as at any end. If the process still hasn't
+  moved `STUDIO_TRAIN_STALL_GRACE_S` (300) seconds later, the worker ends it and the reaper above records it.
 - Known red on main (2.77.0, P9.3/P9.6, `harness/known-red.mjs`): when a train finds main itself red (its bisection's
   "main itself fails its checks", or a verify of main alone), the failing test files are listed once in
   `.studio/train/known-red.json` with the evidence (train, main's tree, the log; `task.train.known_red`). A later train
@@ -332,6 +342,17 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   quarantined. The list silences a check, so a lane changing it is tier C; a game dev releases an entry (`npm run
   flakes -- release <test> --by <name>`, same rules). Events: `test.quarantine_proposed`, `test.quarantined`
   (confirmed or automatic), `test.quarantine_released`. `STUDIO_FLAKE_TRIAGE=off` turns the triage off.
+  2.77.3 (H2, B-112): each alone-run shows in the train's status (`flake check k of n: <file> alone`) and waits at
+  most `STUDIO_FLAKE_WAIT_MIN` (10) minutes for a machine:heavy slot; a run refused as busy, or stopped before any gate
+  ran, is "not run" (no label, never `real`) and the triage stops; the triage also stops at the first `real` label (the
+  red is real: the train goes on to name the lane as before, instead of running the other files alone first).
+  2.77.3 (C2, B-108): `port-collision`: the run's output shows a test server that couldn't take its port (EADDRINUSE,
+  `Port N is already in use`, `address already in use`, strictPort, Playwright's `… is already used`;
+  `harness/test-ports.mjs`), so another verify ran the same test on the same fixed port. Its why names the port and
+  says to give the test a free port. It is neither `real` nor flaky (never quarantined); a timeout-only re-run with a
+  collision in the check's output is labelled `port-collision` instead of `timeout-flake`. When every failing file of
+  a train's red verify is a port collision, nobody is handed back: the lanes wait for the next train
+  (`task.train.port_collision`; a lane that hits it in a second train at the same head is held for the Producer).
 - Timeout-only reds (2.72.0, `harness/timeout-rerun.mjs`): in any game check (a verify, a train's verify or
   re-check, task done), a red whose ONLY failures are per-test timeouts (vitest "Test timed out in N ms", jest
   "Exceeded timeout of N ms", `node --test` `testTimeoutFailure` / "test timed out after", each in a named file, the
@@ -495,6 +516,12 @@ RAM, threads and minutes; `node harness/rig-budget.mjs` shows an `artBake` share
 - A job that doesn't fit waits in a queue (a landing first, then first come) and says why: `waiting for RAM: needs
   8 GB, 3.1 free`. It waits up to `STUDIO_HEAVY_WAIT_MIN` like any wait; a claim bigger than the whole budget runs
   alone. `node harness/heavy.mjs status` shows the budget and each holder's claim.
+- 2.77.3 (M6): a merge train gets the next free slot. When the train daemon finds no room for a verify, and for 15 s
+  after one of a train's checks gives its slot back, `.studio/locks/machine-heavy-train-wait.json` is left; a waiter
+  that isn't a landing (a builder's verify) doesn't take a newly freed slot while it is fresh (3 x
+  `STUDIO_SUPERVISOR_SEC`, at least 5 min, after the daemon's last look). It holds builders back for at most
+  `STUDIO_TRAIN_SLOT_PRIORITY_MIN` (15; `0` or `off`: no priority), then as long without, then again; a landing that
+  takes a slot clears it.
 - No scan, a scan older than `STUDIO_MACHINE_MAX_AGE_MIN` (15), or `STUDIO_MACHINE_SCAN=off`: one slot and the
   `STUDIO_RAM_FLOOR_GB` floor, as in 2.67.
 - A job killed for memory (Windows 0xC0000017, Node's "JavaScript heap out of memory", exit 137 elsewhere) is queued

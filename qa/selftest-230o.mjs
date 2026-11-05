@@ -32,7 +32,7 @@ console.log(JSON.stringify({
   burn: stallVerdict({ role: 'builder', startedAt: at(0), lastProgressAt: at(4), windowIn: 2000000, windowOut: 11500 }, t0 + 5 * 60000),
   ok: stallVerdict({ role: 'builder', startedAt: at(0), lastProgressAt: at(4), windowIn: 2000000, windowOut: 400000 }, t0 + 5 * 60000),
   custom: stallLimits('builder', { STUDIO_STALL_MIN: '5' }).stallMin,
-}));`);
+}));`, { STUDIO_STALL_GRACE_MIN: '0' }); // 2.77.3: these check the ratio itself; the grace period is checked in selftest-2773e
   report('2.30o: a planning session with no progress for 8 min stalls; a builder gets 15', sv.dir?.stalled && sv.dir.kind === 'no-progress' && !sv.bld?.stalled && sv.bld16?.stalled && sv.custom === 5, JSON.stringify(sv));
   report('2.30o: a planning session past its wall-clock cap ends even while progressing', sv.wall?.stalled && sv.wall.kind === 'wall-clock', JSON.stringify(sv.wall));
   report('2.30o: an extreme input:output ratio with no progress (2M in, 11.5k out) is a read-burn stall; a normal ratio is not', sv.burn?.stalled && sv.burn.kind === 'read-burn' && !sv.ok?.stalled, JSON.stringify([sv.burn, sv.ok]));

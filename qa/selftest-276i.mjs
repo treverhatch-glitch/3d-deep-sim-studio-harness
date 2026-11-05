@@ -107,7 +107,8 @@ setTimeout(() => process.exit(0), Number(secs || 0) * 1000);
   // ---- B-83 b: the stall arithmetic ----
   await guard('2.76.0 (B-83): logTokens counts only the newest Claude session in a log; readLogFrom reads one session\'s part; when the count starts over (fewer tokens than the last observation) the stall window restarts from there, so a real read-burn after it is still caught (fails on 2.75.0: both sessions summed, no readLogFrom, and the old base hid the burn: window negative)', async () => {
     const { S, env } = studio('arith');
-    const r = probe(S, { ...env, STUDIO_STALL_MIN: '60' }, 'arith', `import fs from 'node:fs';
+    // 2.77.3: these check the ratio itself; the grace period is checked in selftest-2773e
+    const r = probe(S, { ...env, STUDIO_STALL_MIN: '60', STUDIO_STALL_GRACE_MIN: '0' }, 'arith', `import fs from 'node:fs';
 const st = await import(${u(S, 'harness/stall.mjs')});
 const two = [${JSON.stringify(JSON.stringify(asst('a', 'a1', { input_tokens: 500000, output_tokens: 10 })))}, ${JSON.stringify(JSON.stringify(asst('b', 'b1', { input_tokens: 1000, output_tokens: 20 })))}].join('\\n');
 const lt = st.logTokens(two);

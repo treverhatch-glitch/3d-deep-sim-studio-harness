@@ -56,6 +56,7 @@ import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
 import { recordDenials } from './denials.mjs';
 import { taskType } from './done-check.mjs';
 import { listLocks, release, claim, renewOwner, tooBroad } from './lock.mjs';
+import { AGY_STREAM_FLAGS, agyStreamOn, agyStreamWanted, userLine, driveAgyStream, taskStillOpen } from './agy-stream.mjs';
 import { savePatch } from './wip.mjs';
 import { laneList, readHolds } from './task-hold.mjs';
 import { engineLaunch } from './engine-tracks.mjs';
@@ -254,7 +255,7 @@ export function agyOptions(model = null, env = process.env) {
  * since 2.58.5 agy); cursor and grok take it as one argument, and a prompt too long for the command line becomes an
  * instruction to read the kickoff file.
  */
-export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], aider = {} }) {
+export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], aider = {}, stream = false }) {
   const m = model && model !== 'unknown' ? model : null;
   // M1 (2.58.3): a session in a lane copy (.lanes/<agent>) reads studio/ and .studio/ through links to the main
   // checkout; Claude Code resolves the link and refuses a target outside its working directory ("outside the allowed
@@ -297,6 +298,11 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], a
       // -i/--prompt-interactive, or stdin"), so the kickoff goes there and no argument has a space to split.
       // STUDIO_AGY_PROMPT=arg brings back `-p <prompt>` (UNTESTED on real agy: which of the two works for your agy).
       if (/^(arg|argument|p)$/i.test(process.env.STUDIO_AGY_PROMPT || '')) return { argv: ['agy', '-p', prompt, ...tail], promptAt: 2 };
+      // 2.77.3 (C1 / B-99): stream (STUDIO_AGY_STREAM=1, off by default; the launcher asks for it for a builder-like
+      // session, harness/agy-stream.mjs): the
+      // kickoff is the first stream-json user message and stdin stays open, so the launcher can send a follow-up when a
+      // turn ends with the task still in progress. --print-timeout and the other options stay as they are.
+      if (stream && agyStreamOn()) return { argv: ['agy', ...AGY_STREAM_FLAGS, ...tail], stdin: userLine(prompt), stream: 'agy' };
       return { argv: ['agy', ...tail], stdin: prompt };
     }
     case 'cursor':
@@ -1147,7 +1153,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (prog.cmd && prog.via !== 'PATH') launchNotes.push(`aider: ${prog.cmd} (${prog.via === 'venv' ? "the studio's .studio/aider-venv" : 'STUDIO_AIDER_CMD'})`);
     if (ignoreFile) launchNotes.push(`aider ignores the harness's folders and the protected paths (${path.relative(REPO_ROOT, ignoreFile).split(path.sep).join('/')})${aider.reads.length ? `; the brief is passed with --read` : ''}`);
   }
-  const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort, addDirs: [...(copy ? laneShareDirs() : []), ...(engineLane?.dir ? [engineLane.dir] : [])], aider });
+  const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort, addDirs: [...(copy ? laneShareDirs() : []), ...(engineLane?.dir ? [engineLane.dir] : [])], aider, stream: tool === 'agy' && agyStreamWanted({ role }) });
   if (!custom && !cmd) dropStarting(agent);
   if (!custom && !cmd) return { ok: false, message: `No launch command for tool "${tool}". Use --tool claude|codex|agy|cursor|grok|aider|nim, or set STUDIO_${roleKey(role)}_CMD (with {kickoff}, {agent}, {model}).` };
   fs.mkdirSync(AGENTS_DIR, { recursive: true });
@@ -1230,11 +1236,27 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // PU-17 (P-039, P-045): when the agent's process started, for a later stop to check the number is still the agent.
   // In-process only (no child process, nothing slow): the spawn time and the program's name; /proc ticks on Linux.
   const identity = { pid: spawnedIdentity(child.pid, custom ? line.split(/\s+/)[0] : plan.file), supervisor: launcherIdentity() };
-  if (cmd?.stdin && child.stdin) {
+  const startedAt = new Date().toISOString();
+  // 2.77.3 (C1 / B-99): an agy stream session keeps its stdin open; harness/agy-stream.mjs reads its turns from the log
+  // and sends a follow-up while its task is still in progress (STUDIO_AGY_CONTINUE_MAX, STUDIO_AGY_CONTINUE_WAIT_SEC).
+  let agyDriver = null;
+  if (cmd?.stream === 'agy' && child.stdin) {
+    fs.writeSync(out, `[launcher] agy stream session: ${AGY_STREAM_FLAGS.join(' ')}; stdin stays open for follow-ups while the task is in progress (STUDIO_AGY_STREAM=1; unset or 0 starts the one-turn launch)\n`);
+    try {
+      agyDriver = driveAgyStream({
+        agent, child, logFile, from: logStart, firstMessage: cmd.stdin,
+        decide: () => taskStillOpen({ agent, role, task, startedAt, locks: listLocks(), events: readRecentEvents(5000), doneIds: parseNextQueue().done.map((t) => t.id), studioStop: readStop(), agentStop: stopMark(agent), refresh: readFlag(agent) }),
+        note: (l) => { try { fs.appendFileSync(logFile, `[launcher] ${l}\n`); } catch {} },
+        onContinue: ({ n, task: t, why }) => emitEvent({ type: 'agent.agy_continue', agent, task: t || task || undefined, msg: `${agent}: agy's turn ended with ${t || 'its task'} in progress (${why}); follow-up ${n} sent`.slice(0, 400), meta: { n } }),
+      });
+    } catch (err) {
+      fs.writeSync(out, `[launcher] agy stream: couldn't follow the session (${String(err?.message || err).slice(0, 200)}); its input is closed after the kickoff\n`);
+      try { child.stdin.end(); } catch {}
+    }
+  } else if (cmd?.stdin && child.stdin) {
     child.stdin.on('error', () => {});
     child.stdin.end(cmd.stdin);
   }
-  const startedAt = new Date().toISOString();
   clearFlag(agent);
   const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, ...(task ? { pinned: task } : {}), lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, logFrom, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
@@ -1321,6 +1343,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     child.on('exit', (c, sig) => { exitSignal = sig || null; exitedAt = new Date().toISOString(); resolve(c ?? 1); });
   });
   clearInterval(beat);
+  if (agyDriver) { try { agyDriver.stop(); } catch {} }
   // 2.73.2 (B-72/B-76): the watchdog's stall end (another process: logStall recorded it) is a stall end here too, so
   // the halt rule doesn't count it as the tool failing; and the record says at once that the agent has exited, so the
   // listing, the HUD and the watch pass see it ending while the clean-up below runs (it can take minutes).
@@ -1682,7 +1705,7 @@ export function pauseAgent(agent, note = '', by = 'war-room-human') {
     pauseTask(t, agent, `${note || `Paused from the War Room; ${agent}'s work so far is ${s.copy ? 'in its copy' : 'in the working tree'}.`}${patch ? ` Saved to ${patch}.` : ''} Paused by ${by} (${STOP_NOTE}).`, { force: true });
   }
   // A paused task doesn't restart straight away under a new name (STUDIO_STOP_COOLDOWN_MIN, default 15).
-  for (const t of tasksOf(agent, s)) cooldown(t, by);
+  for (const t of tasksOf(agent, s)) cooldown(t, by, undefined, s.role || null);
   stopAgent(s, { by, record: 'pause' });
   emitEvent({ type: 'agent.paused', agent, to: 'producer', msg: `${agent} paused${held.length ? `; ${held.join(', ')} back in the queue` : ''}${note ? `: ${note}` : ''}` });
   return { ok: true, handed: held };
@@ -1697,9 +1720,9 @@ export function stopAgentNamed(agent, by = 'war-room-human') {
   const s = sessions().find((x) => x.agent === agent && x.status === 'running');
   if (!s) return { ok: false, message: `${agent || '(no name)'} isn't running.` };
   const tasks = tasksOf(agent, s);
-  const until = tasks.map((t) => cooldown(t, by)).filter(Boolean)[0] || null;
+  const until = tasks.map((t) => cooldown(t, by, undefined, s.role || null)).filter(Boolean)[0] || null;
   const r = stopAgent(s, { by, record: 'stop' });
-  emitEvent({ type: 'agent.stopped', agent: by, to: 'producer', msg: `${by} stopped ${agent}${r.killed ? '' : ` (nothing killed: ${r.why})`}${tasks.length ? `; ${tasks.join(', ')} can restart after ${until ? until.slice(11, 16) : 'now'}` : ''}`, meta: { killed: r.killed, kind: r.kind, target: r.target } });
+  emitEvent({ type: 'agent.stopped', agent: by, to: 'producer', msg: `${by} stopped ${agent}${r.killed ? '' : ` (nothing killed: ${r.why})`}${tasks.length ? `; ${tasks.join(', ')} can restart after ${until ? `${until.slice(11, 16)} UTC` : 'now'}` : ''}`, meta: { killed: r.killed, kind: r.kind, target: r.target } });
   return { ok: true, agent, tasks, until, killed: r.killed, ended: r.ended, kind: r.kind, target: r.target, why: r.why };
 }
 

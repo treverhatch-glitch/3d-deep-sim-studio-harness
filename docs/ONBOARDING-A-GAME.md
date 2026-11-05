@@ -170,6 +170,17 @@ a run) makes it fail; `"off"` turns it off. `setupFiles` defaults to files named
 to the game's folder. It reads text: a seeded call through a helper with another name isn't seen. The manifest is
 protected: adding this needs the owner's approval.
 
+## Test ports (2.77.3)
+
+Never give a browser or e2e test a fixed port with `strictPort` (or Playwright's `reuseExistingServer`): a train's
+verify and a builder's verify (or two trains) run the same file at once, and the second server fails ("Port 46117 is
+already in use", `EADDRINUSE`) or, worse, the test drives the other tree's server. Ask the OS for a free port (listen
+on port 0, or a small helper that does) and pass it to the server and the test; the browser-play `serve` command
+above already gets one through `{port}`. The game gate prints `[game-gates] WARN game:test-ports: <file>:<line> …` for
+each fixed port it finds in the game's e2e/browser tests and test-runner configs (`node harness/test-ports.mjs`;
+advisory, never a failure; `STUDIO_TEST_PORTS=off` hides it), and the flake triager labels such a red
+`port-collision`, not a flake and not the lane's failure. The rule: `studio/rules/test-ports.md`.
+
 ## The state probe (2.72.0)
 
 A golden says the final hash changed, but not when the run first went another way. A probe prints the sim's state
