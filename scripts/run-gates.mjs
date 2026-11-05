@@ -483,6 +483,10 @@ async function gateRowFacts(id, ok, text) {
     const tf = (await import('../harness/timeout-rerun.mjs')).timeoutFlakesFromLog(text);
     if (Object.keys(tf).length) out.timeoutFlakes = tf;
     if (!ok) { const d = (await import('../harness/divergence.mjs')).divergenceFromLog(text); if (d.length) out.divergence = d.slice(0, 5); }
+    // 2.78.2 (f): the game:perf step said "not run (busy)": this record's tree never ran its perf tests, so the merge
+    // train re-runs that step before it reuses the record (harness/train.mjs verifyTree).
+    const pn = String(text || '').match(/^\[game-gates\] WARN game:perf: (not run \(busy\)[^\n]*)/m);
+    if (pn) out.perfNotRun = pn[1].slice(0, 300);
     return out;
   } catch { return {}; }
 }

@@ -84,7 +84,7 @@ import { readBeta, betaActor, recordBetaUse } from './beta-mode.mjs';
 import { addKnownRed, clearKnownRed, knownRedCandidate, readKnownRed, fileSub } from './known-red.mjs';
 import { toolchainProtected } from './test-toolchain.mjs';
 import { fixFirstOrder, noteTrainRed, noteTrainLanded, noteFixTried } from './train-fix-first.mjs';
-import { engineGates, relatedTestsOn, studioGame } from './game-gates.mjs';
+import { engineGates, relatedTestsOn, studioGame, perfTestsOf } from './game-gates.mjs';
 import { readBaseline, judgeRed } from './baseline.mjs';
 import { classifyLane, tierLine } from './tiers.mjs';
 import { recordRound, redSignature } from './round-cap.mjs';
@@ -674,6 +674,39 @@ export function trainOnlyGates(dir) {
   try { const j = JSON.parse(fs.readFileSync(path.join(dir, 'studio', 'gates.json'), 'utf8')); return (j.gates || []).filter((g) => g && g.trainOnly === true && g.id).map((g) => String(g.id)); } catch { return []; }
 }
 
+/**
+ * 2.78.2 (f): a reused verify record whose game:perf step said "not run (busy)" (run-gates marks the game gate's row
+ * "perfNotRun") stood for a tree whose perf tests never ran, and the landing went without them. The train re-runs only
+ * that step on the same tree: run-gates --only <the game gates> with STUDIO_GATE_FOCUS { "game:perf": <the perf globs> }
+ * (game-gates skips every other check; a landing run waits STUDIO_PERF_WAIT_MIN for a quiet machine, holding new
+ * verifies back). Still busy: 2.78.2 (b)'s rule for a busy focused re-check of game:perf, a busy refusal, read by
+ * runGatesWaiting (it waits STUDIO_TRAIN_BUSY_WAIT_MIN, then the train defers its lanes, judging nobody). Returns null
+ * (nothing to re-run), { ok: true }, { ok: false, ... } (red) or { ok: false, noCheck: true, busy }.
+ */
+export function perfRerun(sc, { id, tree, rec, log = () => {} }) {
+  const row = (rec?.rows || []).find((r) => r && r.perfNotRun);
+  if (!row) return null;
+  const globs = perfTestsOf(process.env, sc.dir);
+  if (!globs.length) return null;
+  const root = sc.root;
+  const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: `train-${id}-perf`, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off', STUDIO_GATE_FOCUS: JSON.stringify({ 'game:perf': globs }) };
+  for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[k];
+  const ids = gameGateIds(sc.dir);
+  log(`[train] ${id}: the reused verify of tree ${tree.slice(0, 8)} did not run its perf tests (${String(row.perfNotRun).slice(0, 160)}): running game:perf (${globs.join(', ')}) alone on that tree before it counts`);
+  const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', ids.join(',')], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: 'the game:perf re-run' });
+  for (const f of [`train-${id}-perf.json`, `train-${id}-perf-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
+  let logRel = null;
+  try { const f = path.join(root, TRAIN_DIR, `${id}-perf-${tree.slice(0, 8)}.log`); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); logRel = path.relative(root, f).split(path.sep).join('/'); } catch {}
+  if (r.status === 0) { log(`[train] ${id}: game:perf on tree ${tree.slice(0, 8)}: green`); return { ok: true }; }
+  if (noCheck) {
+    log(`[train] ${id}: game:perf on tree ${tree.slice(0, 8)} did not run (${busy || 'busy'}): the reused verify can't stand without it; busy, not red`);
+    return { ok: false, noCheck: true, busy: busy || null, rec: null, gates: [], detail: [], why: `ran no check (the game:perf re-run: ${busy || 'busy'})`, log: logRel };
+  }
+  const fl = failLines(text);
+  log(`[train] ${id}: game:perf on tree ${tree.slice(0, 8)}: red`);
+  return { ok: false, rec: null, gates: fl.gates.length ? fl.gates : ids, detail: fl.detail, why: `game:perf failed on the reused verify's tree (its perf tests had not run: busy)`, log: logRel };
+}
+
 /** The FAIL lines of a verify's output, for a hand-back note: the gates, and the game checks' own lines. */
 export function failLines(text) {
   const lines = String(text || '').split('\n');
@@ -704,6 +737,9 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
     if (!c.ok) notReused ||= c.why;
     if (c.ok) c.why = c0.why;
     if (c.ok) {
+      // 2.78.2 (f): a noRun ask (the red budget's green prefix) runs nothing, so a record whose game:perf step did not run
+      // (busy) doesn't count there.
+      if (noRun && (rec.rows || []).some((r) => r && r.perfNotRun) && perfTestsOf(process.env, sc.dir).length) { notReused ||= 'its game:perf step did not run (busy), and this ask runs nothing'; continue; }
       // 2.69.0 (p): a train of ONE lane whose integration tree is the lane's verified tree reuses the lane's verify.
       const laneOf = lanes.length === 1 ? lanes[0].task : rec._lane || null;
       if (laneOf) log(`[train] ${id}: reused ${laneOf}'s green verify of tree ${tree.slice(0, 8)} (${c.why}); not run again`);
@@ -724,7 +760,14 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
           return red;
         }
       }
-      const res = { ok: true, reused: true, rec, gates: [], detail: [] };
+      // 2.78.2 (f): a record whose game:perf step said "not run (busy)" never ran the perf tests on this tree: the train
+      // runs that step here (alone, on a quiet machine, bounded by STUDIO_PERF_WAIT_MIN) before it counts the record.
+      const perf = perfRerun(sc, { id, tree, rec, log });
+      if (perf) {
+        if (perf.noCheck) return perf; // still busy: the train's rule for a run that judged nothing (it defers), never cached
+        if (!perf.ok) { seen.set(tree, perf); return perf; }
+      }
+      const res = { ok: true, reused: true, rec, gates: [], detail: [], ...(perf ? { perfRerun: true } : {}) };
       seen.set(tree, res);
       return res;
     }

@@ -4866,6 +4866,16 @@ if (inShard('selftest-2781h')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.2 (f): quarantine "skipped" only once the test config is seen to honour it (list mode), onboarding / preflight
+// FAIL a config that ignores it or a test check with no focus, an inferred focus for an npm script that runs vitest or
+// jest, the game:test-timing advisory, and a train re-running game:perf for a reused verify whose perf step didn't run.
+if (inShard('selftest-2782f')) {
+  const dir = copyRepo();
+  const { selftest2782F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782f.mjs')).href);
+  await selftest2782F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.78.2 (d): a 429 on one Gemini model no longer marks all of agy; an outside review can be recorded; a hand-back that
 // names an owner-only step parks the task for the owner instead of relaunching builders.
 if (inShard('selftest-2782d')) {

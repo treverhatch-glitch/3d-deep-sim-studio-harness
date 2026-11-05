@@ -76,8 +76,13 @@ runs after landing.
 **Faster red merge trains (2.65.3).** When a merge train is red, its re-checks run only the failing test files.
 A test check may declare `"focus": "<command with {files}>"` (for example `"cd game/x && npx vitest run {files}"`);
 `{files}` are the failing files as the runner printed them, quoted, with forward slashes. Without `focus`, a command
-whose last step clearly runs vitest, jest or `node --test` gets the files appended; any other command (`npm test`)
-re-runs whole, and the train's log says why. The manifest is protected: adding `focus` is the owner's change.
+whose last step clearly runs vitest, jest or `node --test` gets the files appended. 2.78.2: a command that runs an npm
+script (`npm test`, `cd game/x && npm test`, or another script it names) whose last step runs vitest or jest gets a
+focus command inferred from it (the command's earlier steps, then `npx vitest run {files}` or `npx jest {files}`, with the script's `--config`),
+logged once as `focus inferred: …` (`STUDIO_FOCUS_INFER=off`: none). Any other command re-runs whole, and the train's
+log says why: without a focus every train re-check re-runs the whole suite, and a timeout-only red "can't be run alone",
+so `npm run onboard -- --check` and `npm run upgrade -- --preflight` FAIL such a test check
+(`game-tests/focus:<check>`). The manifest is protected: adding `focus` is the owner's change.
 
 **Real key presses on the real game (2.45.0).** An adopted web game isn't a cartridge, so `npm run play:browser`
 can't drive it. `npm run play:controls` can: it serves the game, clicks from the title screen to play, presses
@@ -276,8 +281,17 @@ slow tier above. A merge train's verify waits up to `STUDIO_PERF_WAIT_MIN` (10) 
 and lane verifies back meanwhile (running ones finish); a builder's or lane's verify runs the step only if the machine
 is quiet already. Never quiet: `WARN game:perf: not run (busy)`, never red (in a train's focused re-check of game:perf
 it is a busy refusal: the train judges nothing from it). Quiet and red: it fails like any required check and names its
-failing files. A lane verify whose step said "not run (busy)" can still stand for the train's verify of the same tree,
-so that landing goes without the perf tests.
+failing files. A lane verify whose step said "not run (busy)" is marked so in its record (the game gate's row:
+`perfNotRun`): a merge train that reuses it for the same tree first runs just the game:perf step on that tree (a
+focused re-check, alone on a quiet machine, waiting up to `STUDIO_PERF_WAIT_MIN`); still busy there, it is the busy
+refusal above and the train defers its lanes (judging nobody); red, the train treats the tree as red.
+
+**Wall-clock asserts outside the perf tests (2.78.2).** After the game's checks, `[game-gates] WARN game:test-timing:
+<file>:<line> asserts on wall-clock time …` names test files outside the perf globs that assert on an elapsed time
+(`performance.now()`, `Date.now()` or `process.hrtime` differences, or a value computed from one such as an average,
+compared to a bound in `expect(...).toBeLessThan(...)`, `assert(elapsed < 40)` and the like). Taking a time without
+asserting on it is never flagged. Advisory only, never red; `STUDIO_TEST_TIMING=off` hides it; `node
+harness/test-timing.mjs` lists them. Move each one into the perf tests (its file under a `perfTests` glob).
 
 ## The purity ratchet and must-fail canaries (2.72.0)
 
@@ -370,6 +384,18 @@ exclude: [...configDefaults.exclude, ...quarantined],
 ```
 
 A fix task is filed for each; when it lands, a game dev releases the test: `npm run flakes -- release <test> --by <name>`.
+
+2.78.2: game-gates says a quarantined file is "skipped" only once it has checked that the test config honours the
+variable: it runs the runner's list mode (`npx --no vitest list --filesOnly`, or `npx --no jest --listTests`, in the
+check's folder with its `--config`) without the variable and again with it naming the quarantined files, once per test
+config (a hash of the runner command, the config file and package.json; cached in `.studio/test-config-check.json`;
+each list run bounded by `STUDIO_TEST_LIST_TIMEOUT_MS`, 120000). If they are still listed:
+`WARN game:quarantine: quarantine NOT honoured by the game's test config (<file>): N quarantined tests still run`, and
+the check's row counts none of them as skipped. If it can't tell (another runner, list mode failed): "passed to the
+game's runner … not verified". `STUDIO_QUARANTINE_VERIFY=off` skips the check (never "skipped" either).
+`npm run onboard -- --check` and `npm run upgrade -- --preflight` run the same check with the first listed test file
+and FAIL a config that ignores `STUDIO_TEST_QUARANTINE` (`game-tests/quarantine:<check>`), or `STUDIO_TEST_EXCLUDE` when
+perf or slow-tier tests are declared (`game-tests/exclude:<check>`), with the line to add to its `exclude`.
 
 A red whose only failures are per-test timeouts re-runs just those files alone with one test worker (2.72.0; needs a
 `"focus"` command with `{files}`, or a command that clearly runs vitest, jest or `node --test`): green alone counts
