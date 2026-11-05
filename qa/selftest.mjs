@@ -2238,7 +2238,8 @@ if (inShard()) {
     const t2 = add('Lane copy two');
     const t3 = add('Lane copy three');
     g('commit -qam board');
-    const start = (task, agent, script) => run(dir, `node harness/agent.mjs start --role builder --agent ${agent} --task ${task} --lane cartridges/example-sim`, { STUDIO_BUILDER_CMD: `node "${path.join(tmpRoot, script)}" {task} {agent}` });
+    // 2.78.2: these checks are about lane copies with the inline task done (STUDIO_DONE_QUEUE=0); the queued path is checked in selftest-2782a.
+    const start = (task, agent, script) => run(dir, `node harness/agent.mjs start --role builder --agent ${agent} --task ${task} --lane cartridges/example-sim`, { STUDIO_DONE_QUEUE: '0', STUDIO_BUILDER_CMD: `node "${path.join(tmpRoot, script)}" {task} {agent}` });
     start(t1, 'lane-a1', 'lane-agent.mjs');
     const logA = fs.readFileSync(path.join(dir, '.studio/agents/lane-a1.log'), 'utf8');
     const mainLog = g('log --oneline').stdout;
@@ -4863,6 +4864,80 @@ if (inShard('selftest-2781h')) {
   const dir = copyRepo();
   const { selftest2781H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781h.mjs')).href);
   await selftest2781H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.2 (f): quarantine "skipped" only once the test config is seen to honour it (list mode), onboarding / preflight
+// FAIL a config that ignores it or a test check with no focus, an inferred focus for an npm script that runs vitest or
+// jest, the game:test-timing advisory, and a train re-running game:perf for a reused verify whose perf step didn't run.
+if (inShard('selftest-2782f')) {
+  const dir = copyRepo();
+  const { selftest2782F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782f.mjs')).href);
+  await selftest2782F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.2 (g): a train lands its verified tree over main's non-code commits (items 16); engine tracks written "unity",
+// task track refusals, done --train saying why an engine pass isn't queued, the upgrade's engine-track backfill (item 18).
+if (inShard('selftest-2782g')) {
+  const dir = copyRepo();
+  const { selftest2782G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782g.mjs')).href);
+  await selftest2782G({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.2 (d): a 429 on one Gemini model no longer marks all of agy; an outside review can be recorded; a hand-back that
+// names an owner-only step parks the task for the owner instead of relaunching builders.
+if (inShard('selftest-2782d')) {
+  const dir = copyRepo();
+  const { selftest2782D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782d.mjs')).href);
+  await selftest2782D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.2 (c): board moves by agent logs/reviews/quarantine growth, the review Verdict line, the crew breaker's auto-resume,
+// a relaunch starting from the task's earlier lane branch, `lanes carry` skipping applied commits, no game suite for non-code done.
+if (inShard('selftest-2782c')) {
+  const dir = copyRepo();
+  const { selftest2782C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782c.mjs')).href);
+  await selftest2782C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.2 (e): one base and key for every approve kind (B-120 again), keyFor with origin/main's pull-request merges
+// (A-030), a lane copy's approval events in the main checkout's log, engine-porter tracks, region lanes; 7e (an assertion since h).
+if (inShard('selftest-2782e')) {
+  const dir = copyRepo();
+  const { selftest2782E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782e.mjs')).href);
+  await selftest2782E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.2 (b): a red train costs minutes: a check's failing files triaged together, the red chain's time budget
+// (STUDIO_TRAIN_RED_BUDGET_MIN), the game:perf step on a quiet machine, an engine-porter session is not quiet, and the
+// parallel bisect leaves a heavy slot for builders.
+if (inShard('selftest-2782b')) {
+  const dir = copyRepo();
+  const { selftest2782B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782b.mjs')).href);
+  await selftest2782B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.2 (a, W-0090): a merge train outlives whoever started it (task done queues, a detached train lands it; task train
+// from an agent's shell runs detached), and `task train cancel` stops a running train cleanly.
+if (inShard('selftest-2782a')) {
+  const dir = copyRepo();
+  const { selftest2782A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782a.mjs')).href);
+  await selftest2782A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.2 (h): who makes which beta decision (the owner's rule, 2026-11-05: protected decisions are the owner's and the
+// outside agents', STUDIO_PRODUCER_APPROVES the owner's switch), one predicate for every beta record (the 2.79 audit D1.1).
+if (inShard('selftest-2782h')) {
+  const dir = copyRepo();
+  const { selftest2782H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782h.mjs')).href);
+  await selftest2782H({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

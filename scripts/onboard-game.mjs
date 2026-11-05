@@ -16,6 +16,9 @@
  * the studio's game, origin recorded: harness/adopt.mjs); --export turns the studio's changes to it back into a
  * patch for the game's own repo. --sync [--ref <branch>] brings the game repo's new commits in; 2.55.0: with
  * --dry-run it lists them and writes nothing.
+ * 2.78.2 (f): --check checks the studio game's test checks (harness/test-config-check.mjs): a test check with neither a
+ * "focus" command nor a vitest/jest runner the harness can run single files with FAILs, and so does a test config that
+ * doesn't drop the files STUDIO_TEST_QUARANTINE (or STUDIO_TEST_EXCLUDE) names; exit 1 on a FAIL.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,6 +32,14 @@ const opt = (k) => {
   return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null;
 };
 const flag = (k) => args.includes(`--${k}`);
+if (flag('check')) {
+  const { testCheckItems } = await import('../harness/test-config-check.mjs');
+  const { itemLines } = await import('../harness/upgrade-preflight.mjs');
+  const items = await testCheckItems({ root, write: true });
+  if (!items.length) console.log('[onboard check] no studio game with test checks (or it is a cartridge): nothing to check');
+  else for (const l of itemLines('check', items)) console.log(l.replace(/^\[upgrade check\]/, '[onboard check]'));
+  process.exit(items.some((i) => i.status === 'FAIL') ? 1 : 0);
+}
 if (flag('export')) {
   const { exportPatch } = await import('../harness/adopt.mjs');
   const r = exportPatch();

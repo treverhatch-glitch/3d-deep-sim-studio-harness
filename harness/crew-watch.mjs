@@ -18,6 +18,11 @@
  *   - on `npm run crew -- resume <role> --by <name>`: a person, an agent under the owner's delegation for hold, or a
  *     Producer/Director session or an outside agent on a person's direct permission (harness/decider.mjs); never a
  *     worker. The supervisor's next pass picks it up and emits crew.resumed naming who.
+ *   - 2.78.2 (c): by itself, STUDIO_CREW_BREAKER_RESUME_MIN (30; 0 or off: never) minutes after the pause, when the
+ *     evidence that tripped it no longer trips it (the role's window, looked at as of now, is healthy: a pause the
+ *     supervisor slept through, or one whose sessions have aged out), or else ONCE for that cause (the same tasks):
+ *     the window starts again, and if the role trips again on the same cause it stays paused for a decider or real
+ *     progress. Logged as crew.resumed (meta.auto). A landing or new work clears the cause and forgets "once".
  * STUDIO_CREW_WATCH=off turns it off. State: .studio/crew-paused.json (pauses), .studio/crew-resume.json (asks).
  * No model, no tokens. Only event.mjs and token-weight.mjs are imported at load (the supervisor imports this file).
  */
@@ -41,6 +46,8 @@ export function crewLimits(env = process.env) {
     maxSessions: Math.max(1, num(env.STUDIO_CREW_MAX_SESSIONS, 6)),
     windowMs: Math.max(1, num(env.STUDIO_CREW_WINDOW_MIN, 60)) * 60000,
     shortMs: Math.max(1, num(env.STUDIO_CREW_SHORT_SEC, 180)) * 1000,
+    // 2.78.2 (c): minutes a pause lasts before the supervisor resumes the role by itself (0 or off: never).
+    resumeMs: /^(off|false|no)$/i.test(String(env.STUDIO_CREW_BREAKER_RESUME_MIN || '').trim()) ? 0 : Math.max(0, num(env.STUDIO_CREW_BREAKER_RESUME_MIN, 30)) * 60000,
   };
 }
 
@@ -122,7 +129,7 @@ export function crewPass({ events = null, now = Date.now(), env = process.env, w
   for (const [role, ask] of Object.entries(asks)) {
     if (!st.roles[role]) continue;
     const was = st.roles[role];
-    delete st.roles[role]; st.since[role] = now; changed = true;
+    delete st.roles[role]; delete (st.auto ||= {})[role]; st.since[role] = now; changed = true;
     say({ type: 'crew.resumed', agent: String(ask.recordedBy || ask.by || 'unknown').slice(0, 60), to: 'producer', msg: `Launching ${role} again: ${ask.by} asked${ask.recordedBy && ask.recordedBy !== ask.by ? ` (recorded by ${ask.recordedBy}${ask.permission ? ` on their permission: "${String(ask.permission).slice(0, 120)}"` : ''})` : ''}${ask.why ? `: ${ask.why}` : ''} (paused since ${was.at}: ${was.why})`.slice(0, 600), meta: { role, by: ask.by, via: ask.via || null, recordedBy: ask.recordedBy || null, permission: ask.permission || null, why: ask.why || null, pausedAt: was.at } });
   }
   if (Object.keys(asks).length && !dryRun) fs.rmSync(RESUME_FILE(), { force: true });
@@ -134,8 +141,25 @@ export function crewPass({ events = null, now = Date.now(), env = process.env, w
     const fresh = (waitingByRole[role] || []).filter((t) => !(p.waiting || []).includes(t));
     const why = landed ? `${landingsOf(landed).find((t) => (p.tasks || []).includes(t))} landed` : fresh.length ? `new work for it: ${fresh.slice(0, 3).join(', ')}` : '';
     if (!why) continue;
-    delete st.roles[role]; st.since[role] = now; changed = true;
+    delete st.roles[role]; delete (st.auto ||= {})[role]; st.since[role] = now; changed = true;
     say({ type: 'crew.resumed', agent: 'supervisor', to: 'producer', msg: `Launching ${role} again: the cause cleared (${why}); paused since ${p.at}: ${p.why}`.slice(0, 600), meta: { role, by: 'supervisor', cleared: why, pausedAt: p.at } });
+  }
+  // 2.78.2 (c): a pause that has lasted STUDIO_CREW_BREAKER_RESUME_MIN resumes by itself when its evidence no longer
+  // trips (as of now, with no restart of the window), or once per cause (the same tasks); a second trip stays.
+  st.auto ||= {};
+  if (lim.resumeMs > 0) {
+    const raw = crewHealth(ev, { now, env, sinceByRole: {} });
+    for (const [role, p] of Object.entries(st.roles)) {
+      const at = Date.parse(p.at) || 0;
+      if (now - at < lim.resumeMs) continue;
+      const sig = [...(p.tasks || [])].sort().slice(0, 10).join(',');
+      const cleared = !raw[role]?.unhealthy;
+      if (!cleared && st.auto[role] === sig) continue;
+      const how = cleared ? `its evidence no longer trips the breaker (${raw[role]?.sessions ?? 0} sessions, ${raw[role]?.landed ?? 0} landed in the last ${Math.round(lim.windowMs / 60000)} min)` : 'one retry for this cause (if it trips again on the same tasks it stays paused)';
+      if (cleared) delete st.auto[role]; else st.auto[role] = sig;
+      delete st.roles[role]; st.since[role] = now; changed = true;
+      say({ type: 'crew.resumed', agent: 'supervisor', to: 'producer', msg: `Launching ${role} again: paused ${Math.round((now - at) / 60000)} min (STUDIO_CREW_BREAKER_RESUME_MIN=${Math.round(lim.resumeMs / 60000)}), ${how}; was: ${p.why}`.slice(0, 600), meta: { role, by: 'supervisor', auto: true, cleared, pausedAt: p.at } });
+    }
   }
   const health = crewHealth(ev, { now, env, sinceByRole: st.since });
   for (const [role, r] of Object.entries(health)) {

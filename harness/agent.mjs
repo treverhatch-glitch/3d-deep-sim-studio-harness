@@ -58,11 +58,13 @@ import { taskType } from './done-check.mjs';
 import { listLocks, release, claim, renewOwner, tooBroad } from './lock.mjs';
 import { AGY_STREAM_FLAGS, agyStreamOn, agyStreamWanted, userLine, driveAgyStream, taskStillOpen, streamFailure, readStreamRecord, writeStreamRecord, streamRecordHolds, STREAM_RECORD } from './agy-stream.mjs';
 import { savePatch } from './wip.mjs';
-import { laneList, readHolds } from './task-hold.mjs';
+import { laneList, laneEntries, readHolds } from './task-hold.mjs';
+import { regionOnlyFiles } from './lane-regions.mjs';
 import { engineLaunch } from './engine-tracks.mjs';
 import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport, isLaneWorktree, LANES_DIR, laneLive } from './worktree.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
-import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
+import { ownerOnlyStep } from './owner-only.mjs';
+import { markExhausted, quotaKeyFor, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
 import { sessionLimits, heartbeatCheck, newRedCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
 import { agentEnv, nimKeyMissing, nimModel, NIM_DEFAULT_MODEL, agentLikeName } from './agent-env.mjs';
@@ -555,6 +557,17 @@ export function crashFinishable({ code, trouble, reasoningOnly, capped, hasCommi
   return Boolean(hasCommit) && Number.isInteger(code);
 }
 
+/**
+ * 2.78.2 (a): is task `id`'s lane queued for the merge train by this session (its agent, or its lane branch)? The queue
+ * entry stays until the train lands it or hands it back (harness/train.mjs). Never throws.
+ */
+export function trainQueued(id, { agent = null, branch = null, stateDir = STUDIO_STATE_DIR } = {}) {
+  try {
+    const q = JSON.parse(fs.readFileSync(path.join(stateDir, 'train', 'queue.json'), 'utf8'));
+    return Array.isArray(q) && q.some((e) => e?.task === id && ((agent && e.agent === agent) || (branch && e.branch === branch)));
+  } catch { return false; }
+}
+
 /** After an agent exits: record it, and if it died holding work, hand the work back cleanly. */
 /**
  * 2.73.1 (B-66): how a session's process ended, as far as Node can tell: { kind, code, signal, at, by?, why? }.
@@ -725,7 +738,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
     // 2.58.0 (PU-40, P-051): a custom command's limit is saved per program (custom:<program>), the key the launch
     // check (budgetStopFor) matches; as plain "custom" nothing matched it and the next launch hit the limit again.
     const ck = tool === 'custom' ? customKey(cmd ?? (process.env[`STUDIO_${roleKey(role)}_CMD`] || process.env.STUDIO_AGENT_CMD || '')) || 'custom' : null;
-    const who = other || ck || (order.includes(`${tool}:${model}`) ? `${tool}:${model}` : tool);
+    const who = other || ck || (order.includes(`${tool}:${model}`) ? `${tool}:${model}` : quotaKeyFor(tool, model));
     const line = log.split('\n').slice(-30).reverse().find((l) => /reset|try again/i.test(l) && QUOTA_ERROR.test(l) && (toolNamed(l) || who) === who) || quota.line;
     limitMark = { on: who, ...markExhausted(who, line) };
     // The command stopped at a limit its line names another tool for (a wrapper around that tool): hold the command too.
@@ -739,7 +752,11 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   const copyDir = s0.copy?.dir ? path.join(REPO_ROOT, s0.copy.dir) : null;
   const ahead = s0.copy?.branch ? unmerged(s0.copy.branch) : 0;
   const finished = [];
+  const queuedForTrain = [];
   for (const id of tasks) {
+    // 2.78.2 (a, W-0090): its task done queued the lane for the merge train and the session ended, as it should: the
+    // train lands it (task.done) or hands it back (task.paused). No launcher verify, no second done, no hand-back here.
+    if (trainQueued(id, { agent, branch: s0.copy?.branch || null })) { queuedForTrain.push(id); continue; }
     // 2.77.2 (B-107): in its own lane copy, a session's work is exactly the commits its branch has that main doesn't
     // (ahead). The log search below is for a session in the shared checkout only: in a copy it also found main's own
     // commits naming the task (made before the copy was cut), so an empty lane got a 20-minute launcher verify.
@@ -771,7 +788,11 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
       : bad
       ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : reasoningOnly ? 'it replied with reasoning only (no answer, no work): a failed hand-off; the Director routes this task to another model family' : agyCut ? (agyCut === 'denied' ? 'agy ended the session mid-task: one shell command was refused in headless mode (one plain command per call; see GEMINI.md)' : 'agy ended the session mid-task: its agent went idle while a background command (a test run) was still running (run commands in the foreground)') : `exit code ${code}`}.${agySaid}${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${agySaid}${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work ${copyDir ? 'was in its copy and is' : 'is in the tree and'} saved to ${patch}.` : ' No uncommitted work.'}${onBranch} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
-    pauseTask(id, agent, af && !af.ok && af.output ? `${note} Launcher verify: ${af.output.replace(/\n/g, ' ')}` : note, { force: true });
+    // 2.78.2 (d): the harness's own refusal of an owner-only step at the end of the session's output goes into the hand-back,
+    // where pauseTask parks the task for the owner (harness/owner-only.mjs) instead of relaunching a builder on it.
+    const ownerSaid = !stop && !limit ? ownerOnlyStep(String(log).slice(-6000)) : null;
+    const noteOut = ownerSaid ? `${note} Its last output said: "${ownerSaid.phrase}".` : note;
+    pauseTask(id, agent, af && !af.ok && af.output ? `${noteOut} Launcher verify: ${af.output.replace(/\n/g, ' ')}` : noteOut, { force: true });
     if (reasoningOnly) emitEvent({ type: 'agent.reasoning_only', agent, model, task: id, status: 'warn', msg: `${agent} (${model}) replied with reasoning only on ${id}: failed hand-off, the next session goes to another model family`, meta: { role, tool } });
     handed.push({ task: id, patch });
     if (!capped && !limit && !stop) parkIfLooping(id);
@@ -788,7 +809,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
       const gl = spawnSync('git', ['log', `--since=${t0}`, '--grep', oTask, '--format=%h'], { windowsHide: true, cwd, encoding: 'utf8' });
       const commits = gl.status === 0 ? gl.stdout.split('\n').filter(Boolean).length : 0;
       outcome = sessionOutcome({ agent, task: oTask, startedAt: t0, events: readRecentEvents(20000), commits: Math.max(commits, finished.includes(oTask) ? 1 : 0), counts: !stop && !capped && !limit && !trouble && !reasoningOnly });
-      if (outcome && finished.includes(oTask)) outcome = { ...outcome, done: true, noWork: false, stuck: false, why: '' };
+      if (outcome && (finished.includes(oTask) || queuedForTrain.includes(oTask))) outcome = { ...outcome, done: true, noWork: false, stuck: false, why: '', ...(queuedForTrain.includes(oTask) ? { queuedForTrain: true } : {}) };
     }
   } catch { outcome = null; }
   let tok = tokensFrom(log);
@@ -1072,9 +1093,14 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (refused) return refused;
   }
   const unheld = new Set(copyLikely ? broad.map((x) => x.p) : []);
+  // 2.78.2 (item 9): a file the lane names only by regions, and that allows region lanes (harness/lane-regions.mjs), isn't
+  // held as a file lock when the agent works in its own copy: two lanes on regions that don't overlap run side by side
+  // (the supervisor's lanesClash decided that), and the train catches a real conflict. No copy: held as before.
+  let regionFree = new Set();
+  try { if (laneWantsCopy(lane) && !process.env.STUDIO_MAIN_ROOT && worktreeSupport().ok) regionFree = regionOnlyFiles(laneEntries(lane)); } catch { regionFree = new Set(); }
   const held = [];
   for (const p of lanePaths) {
-    if (unheld.has(p)) continue;
+    if (unheld.has(p) || regionFree.has(p)) continue;
     const c = claim(`path:${p}`, agent, 6 * 3600);
     if (c && c.ok === false) {
       for (const q of held) release(`path:${q}`, agent);
@@ -1136,7 +1162,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   // 2.77.0 (u, P5.1): an engine pass whose work lives in the engine's own repo gets a worktree of that repo on its branch
   // (harness/engine-tracks.mjs engineLaunch), named in its prompt and passed to the tool as an extra folder.
-  const engineLane = launchEngineLane({ task, agent });
+  const engineLane = launchEngineLane({ task, agent, role });
   if (engineLane?.refuse && !/^(off|0|false|no)$/i.test(process.env.STUDIO_ENGINE_LANE_REQUIRED || '')) {
     for (const q of held) release(`path:${q}`, agent);
     if (copy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
@@ -1147,6 +1173,20 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   // 2.76.0 (B-80 part 2): an agy session reads GEMINI.md in its folder: the shell rules, kept out of the lane's change.
   if (copy && tool === 'agy' && !custom) writeAgyLaneRules(copy.dir, { excludeFile: path.join(REPO_ROOT, '.studio', 'lanes', `${agent}.exclude`) });
+  // 2.78.2 (item 9): region files left unheld for a copy: held after all when no copy was made.
+  if (regionFree.size && !copy) {
+    for (const p of regionFree) {
+      const c = claim(`path:${p}`, agent, 6 * 3600);
+      if (c && c.ok === false) {
+        for (const q of held) release(`path:${q}`, agent);
+        dropStarting(agent);
+        return { ok: false, message: `Lane ${p} is taken: ${c.message || `claimed by ${c.lock?.owner || 'another agent'}`}` };
+      }
+      held.push(p);
+    }
+  } else if (regionFree.size) {
+    emitEvent({ type: 'lane.unlocked', agent, task: task || undefined, msg: `${agent}: ${[...regionFree].join(', ')} not held as a file lock: its lane names regions of it (${laneEntries(lane).filter((e) => e.includes('#')).slice(0, 4).join(', ')}) and it allows region lanes; ${agent} works in its own copy, and the train catches a real conflict`.slice(0, 500), meta: { paths: [...regionFree], regions: true } });
+  }
   // 2.59.0 (#8): the broad paths left unheld for a copy: held after all (a person kept them wide) or refused when the
   // copy couldn't be made; otherwise say once that they aren't locked.
   if (unheld.size && !copy) {
@@ -2017,10 +2057,10 @@ export function agentLog(agent, tail = 60, { raw = false } = {}) {
  * 2.77.0 (u, P5.1): the engine worktree of a launched engine pass ({ dir, branch, note }), or null. An error becomes the
  * prompt's note and an engine.lane event: the session still starts (its brief says what to fix), never a crash.
  */
-function launchEngineLane({ task, agent }) {
+function launchEngineLane({ task, agent, role = null }) {
   if (!task || /^(off|0|false|no)$/i.test(String(process.env.STUDIO_ENGINE_LANES || ''))) return null;
   try {
-    const r = engineLaunch({ task, agent });
+    const r = engineLaunch({ task, agent, role });
     if (!r) return null;
     // 2.78.1 (e, B-119): no worktree means no code access: the launch is refused (runAgent), it never runs blind.
     if (r.error) { emitEvent({ type: 'engine.lane', agent, task, status: 'warn', msg: `${agent}: no engine worktree for ${task}: ${r.error}`.slice(0, 400) }); return { note: `Your task is an engine pass, but its worktree couldn't be made: ${r.error}. Fix that first, or hand it back with a note.`, refuse: r.error }; }

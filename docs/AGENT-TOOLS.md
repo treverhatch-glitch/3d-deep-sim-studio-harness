@@ -139,7 +139,9 @@ starts under it and logs `agent.renamed`.
     with the review on stdin and no `--mode` (it can't edit): the model is the one asked for when it is Gemini
     (`agy:<model>` in `STUDIO_REVIEW_TOOLS`), else `STUDIO_TOOL_AGY_MODEL`, else gemini-4-argon-high. Before 2.78.1 it
     ran `agy -p <review>` with no model, so agy ran its own default (a Claude model) and the review was recorded as
-    "gemini". A reviewer agent session (`STUDIO_REVIEWER_TOOL=agy`) is one session tool for every review: it is cross-
+    "gemini". Since 2.78.2 the agy reviewer skips a Gemini model that is marked out (`agy:<model>` in
+    .studio/tool-quota.json) and tries the next: the asked-for model, `STUDIO_TOOL_AGY_MODEL`, the default, then
+    `STUDIO_REVIEW_AGY_FALLBACK` (comma list, default gemini-3.8-flash-high); only a tool-wide `agy` mark skips agy. A reviewer agent session (`STUDIO_REVIEWER_TOOL=agy`) is one session tool for every review: it is cross-
     family only for work by another family, which the done check (`Approved by a reviewer from another model family`)
     enforces.
 - The agent's log (`npm run agent -- logs <agent>`) starts with a `[launcher]` line when a Windows tool was started

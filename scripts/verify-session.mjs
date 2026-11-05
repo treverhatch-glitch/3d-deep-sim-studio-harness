@@ -7,17 +7,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { SESSION_REQUIRED } from '../harness/check-reads.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const required = [
-  'AGENTS.md',
-  'studio/CURRENT_TASK.md',
-  'studio/NEXT.md',
-  'studio/memory/failures.md',
-  'docs/READ-FIRST.md',
-  'studio/MASTER.md',
-  'studio/PLAN.md',
-];
+// 2.78.2 (g): the list lives in harness/check-reads.mjs, which the merge train asks too (a delete of one is code).
+const required = SESSION_REQUIRED;
 let failed = 0;
 for (const rel of required) {
   const full = path.join(root, rel);

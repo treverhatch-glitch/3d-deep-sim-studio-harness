@@ -30,6 +30,11 @@
  *                 studio's own harness/task.mjs and task-hold.mjs read the board, when it has them), uncommitted changes
  *                 in harness/ or scripts/ (a local patch), and trains (.studio/train/<id>/life.json) or gate runs
  *                 (.studio/verify-running) still running from before the harness last changed
+ *   game-tests/…  2.78.2 (f): the studio game's test checks (the studio's own harness/test-config-check.mjs, when it has
+ *                 one): FAIL a test check with neither a "focus" command nor a vitest/jest runner the harness can run
+ *                 single files with (every train re-check re-runs the whole suite); FAIL a test config whose list mode
+ *                 still lists a file named in STUDIO_TEST_QUARANTINE (or, with perf / slow-tier tests declared,
+ *                 STUDIO_TEST_EXCLUDE); WARN when that can't be told. Runs the runner's list mode; writes nothing.
  *
  * No harness imports (only node's): an old studio runs this from the ref through the upgrade guard (docs/RELEASE.md).
  * The guard passes its own checkUpgrade / isMainCheckout in. UNTESTED on Windows: `where` for the PATH lookups.
@@ -339,6 +344,16 @@ function checkOldRuns(root) {
   return [item('long-run/runs', 'WARN', `${old.length} still running from before the harness last changed (they run the old code): ${old.slice(0, 6).join('; ')}${old.length > 6 ? ` and ${old.length - 6} more` : ''}`, 'let them finish, or stop them (npm run task -- train cancel, npm run studio:stop); the supervisor and train daemon start fresh ones on the new harness')];
 }
 
+/** 2.78.2 (f): the studio game's test checks (focus command, quarantine / exclude honoured), via the studio's own module. */
+async function checkGameTests(root, env) {
+  const f = path.join(root, 'harness', 'test-config-check.mjs');
+  if (!fs.existsSync(f)) return [];
+  try {
+    const m = await import(pathToFileURL(f).href);
+    return m.testCheckItems ? await m.testCheckItems({ root, env, write: false }) : [];
+  } catch (e) { return [item('game-tests', 'INFO', `the game's test checks were not read (${String(e.message || e).slice(0, 160)})`)]; }
+}
+
 /** 2.78.1: "before a long run": leftovers from earlier workarounds. WARN only, never a FAIL. */
 export async function longRunItems(root) {
   return [...checkLeftoverEnv(root), ...(await checkUnscoped(root)), ...checkHarnessDirty(root), ...checkOldRuns(root)];
@@ -349,7 +364,7 @@ export async function preflight({ root, ref = null, env = process.env, deps = {}
   // The environment wins over .env, except where it is empty (an empty value is no value).
   const e = { ...readDotEnv(root) };
   for (const [k, v] of Object.entries(env)) if (String(v ?? '').trim() !== '' || !(k in e)) e[k] = v;
-  const items = [checkNode(root, ref), checkGit(e), checkCheckout(root, ref, deps), ...checkBoard(root, deps), ...checkOwnerKey(root, e), checkSignatures(root, env), ...(await checkMachine(root, e)), ...checkTools(e), ...checkWebhook(root, e), ...checkDotEnvIdentity(root), ...checkPolicy(root), ...checkLanes(root), ...(await longRunItems(root))];
+  const items = [checkNode(root, ref), checkGit(e), checkCheckout(root, ref, deps), ...checkBoard(root, deps), ...checkOwnerKey(root, e), checkSignatures(root, env), ...(await checkMachine(root, e)), ...checkTools(e), ...checkWebhook(root, e), ...checkDotEnvIdentity(root), ...checkPolicy(root), ...checkLanes(root), ...(await checkGameTests(root, e)), ...(await longRunItems(root))];
   return { ok: !items.some((i) => i.status === 'FAIL'), items, lines: itemLines('preflight', items) };
 }
 

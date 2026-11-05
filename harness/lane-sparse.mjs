@@ -132,7 +132,8 @@ export function taskScope(task, { lane = null, events = null } = {}) {
   const added = task ? ev.filter((e) => e.type === 'task.added' && e.task === task).pop() : null;
   const meta = added?.meta || {};
   const role = meta.role || (String(added?.msg || '').match(/^Queued [A-Z]+-\d+ \[[^\]]*\] \(([a-z-]+)\)/) || [])[1] || null;
-  const list = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).map(norm).filter(Boolean);
+  // 2.78.2 (item 9): a region entry (path/sim.ts#symbol) keeps its whole file.
+  const list = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).map((x) => norm(String(x).split('#')[0])).filter(Boolean);
   const keep = uniq([...list(lane), ...list(meta.paths), ...list(meta.lane)]).filter((p) => !/^(studio|\.studio)(\/|$)/.test(p));
   const track = meta.track || null;
   return { keep, track, role, asset: track === 'asset' || role === 'art' || meta.type === 'asset' };

@@ -41,7 +41,7 @@ export function runCanary(g, { root = REPO_ROOT, env = process.env, focusCommand
   let cmd = g.canary;
   const extra = { STUDIO_CANARY: '1' };
   if (kind === 'fixture') {
-    const fc = focusCommand ? focusCommand(g, [g.canary]) : { why: 'no focus helper' };
+    const fc = focusCommand ? focusCommand(g, [g.canary], { root, env }) : { why: 'no focus helper' };
     if (!fc.cmd) return { id: g.id, status: 'unproven', why: `the fixture ${g.canary} can't be passed to it: ${fc.why}; declare a command canary instead` };
     cmd = fc.cmd;
     extra.STUDIO_CANARY = path.join(root, g.canary);

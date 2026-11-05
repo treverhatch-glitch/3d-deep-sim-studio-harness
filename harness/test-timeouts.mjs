@@ -96,8 +96,9 @@ export function resolveRunner(command, root) {
   return { runner, cwd, text: sp[sp.length - 1].trim(), via: `npm script "${name}"`, npm: true };
 }
 
-const CONFIG_EXT = ['ts', 'mts', 'cts', 'js', 'mjs', 'cjs'];
-function findUp(names, from, stop) {
+export const CONFIG_EXT = ['ts', 'mts', 'cts', 'js', 'mjs', 'cjs'];
+/** The first of these names found from `from` up to `stop` (absolute path), or null. 2.78.2 (f): exported. */
+export function findUp(names, from, stop) {
   let d = from;
   for (;;) {
     for (const n of names) { const f = path.join(d, n); if (fs.existsSync(f)) return f; }
@@ -106,8 +107,8 @@ function findUp(names, from, stop) {
     d = up;
   }
 }
-/** A config flag's value in a runner's command text (-c x, --config x, --config=x). */
-function configFlag(text) {
+/** A config flag's value in a runner's command text (-c x, --config x, --config=x). 2.78.2 (f): exported (train-focus.mjs, test-config-check.mjs). */
+export function configFlag(text) {
   const t = toks(text);
   for (let i = 0; i < t.length; i += 1) {
     if (t[i] === '-c' || t[i] === '--config') return t[i + 1] || null;

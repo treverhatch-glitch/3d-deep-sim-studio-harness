@@ -252,7 +252,11 @@ export function goldenWithoutReason(range) {
 /** Every weakening since the base: { base, findings }. */
 export async function findWeakenings({ env = process.env } = {}) {
   const { changeBase } = await import('./hook-stamp.mjs');
-  const b = await changeBase(env);
+  // 2.78.2 (B-120 again): the base and key every approve kind uses (approve.mjs judgeBase): with the key from local main
+  // (a studio that doesn't push), weakenings are judged since local main, as a lane or train copy judges them.
+  let b = null;
+  try { b = (await import('./approve.mjs')).judgeBase(env, { exact: true }); } catch { b = null; }
+  if (!b) b = await changeBase(env);
   if (!b) return { base: null, findings: [] };
   const names = git(['diff', '--name-status', '-M', '-z', b.base]).stdout.split('\0');
   const pairs = [];
@@ -290,8 +294,9 @@ async function checkWeakeningWith(env) {
   if (falsy(env.STUDIO_WEAKENED_TESTS)) return { ok: true, off: true, enforced: false, findings: [], why: 'off (STUDIO_WEAKENED_TESTS=off): tests are not checked for weakening' };
   const { base: b, findings } = await findWeakenings({ env });
   if (!b) return { ok: true, enforced: false, findings: [], why: 'no base branch to compare with, so no change to check' };
-  const { ownerPublicKey, readApprovals, verifyApproval, OWNER_PUB_REL, OWNER_KEY_HOWTO } = await import('./approve.mjs');
-  const pub = ownerPublicKey(b.base);
+  const { ownerPublicKey, readApprovals, verifyApproval, enforcingKey, OWNER_PUB_REL, OWNER_KEY_HOWTO } = await import('./approve.mjs');
+  // 2.78.2: with the key from local main (judgeBase), enforced only with STUDIO_MAIN_CHECKOUT_ENFORCE=on, as 2.78.1 left it.
+  const pub = b.key ? enforcingKey(b, env) : ownerPublicKey(b.base);
   const enforced = truthy(env.STUDIO_WEAKENED_TESTS) || Boolean(pub);
   let approved = [];
   let open = findings;

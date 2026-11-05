@@ -67,7 +67,8 @@ export function waitingForSlot(root, id) {
   } catch { return false; }
 }
 
-async function stopChildren(pid) {
+/** Stop train process `pid`'s children (its whole tree below it), not the train: { killed, survivors }. 2.78.2 (a): also `train cancel`'s. */
+export async function stopTrainChildren(pid) {
   try {
     const h = await import('./heavy.mjs');
     const r = h.killHolderTree({ pid, tree: { root: pid, groups: [] } }, { self: pid });
@@ -90,7 +91,7 @@ async function fire({ root, id, pid, look, by }) {
     const { emitEvent } = await events;
     emitEvent({ type: 'task.train.stalled', agent: String(by || `train-${id}`).slice(0, 60), to: 'producer', status: 'blocked', msg: `train ${id}: ${text}${tasks.length ? `; lanes ${tasks.join(', ')}` : ''}`.slice(0, 600), meta: { train: id, step: look.step, stepText: look.text, why: look.why, lanes: tasks } });
   } catch {}
-  const k = await stopChildren(pid);
+  const k = await stopTrainChildren(pid);
   writeJson(lifeF, { ...(readJson(lifeF) || life), stalled: { at, step: look.step, text: look.text, why: look.why, killed: k.killed, survivors: k.survivors, ...(k.error ? { error: k.error } : {}) } });
   return { at: Date.now() };
 }

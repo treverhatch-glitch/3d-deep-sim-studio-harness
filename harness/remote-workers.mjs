@@ -247,7 +247,7 @@ export async function briefRemote({ task, worker = 'web', by, env = process.env,
   const L = {
     task, title: f.t.title, worker, owner, remote: rem, branch: branchFor(task, f.t.title), base, main,
     at: new Date(now).toISOString(), until: new Date(now + h * 3600000).toISOString(), leaseH: h,
-    status: 'leased', kind: e.kind, tests: e.tests || [], allow: [...new Set([...String(f.lane || '').split(',').map((x) => x.trim()).filter(Boolean), ...(f.mark?.allow || [])])], by,
+    status: 'leased', kind: e.kind, tests: e.tests || [], allow: [...new Set([...String(f.lane || '').split(',').map((x) => x.split('#')[0].trim()).filter(Boolean), ...(f.mark?.allow || [])])], by,
   };
   let means = ''; let told = ''; let research = null;
   try {

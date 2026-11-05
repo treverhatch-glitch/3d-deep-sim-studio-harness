@@ -13,6 +13,10 @@
  * 1/off: one at a time). No scan (or a machine too busy for a second claim): K = 1, the 2.65.3 search unchanged.
  * A focused re-check runs a few test files: its claim (and its run) uses that many test workers (2..8), not a whole
  * verify's. If the estimate is off, run-gates still waits for its own claim: never two jobs past the budget.
+ * 2.78.2 (b): K also leaves STUDIO_TRAIN_BISECT_SPARE (default 1) of the machine:heavy slots for builders: K is at most
+ * max(1, slots - spare), slots as the heavy lock counts them now (harness/heavy.mjs heavySlotsAt: STUDIO_HEAVY_SLOTS, the
+ * main checkout's .env, else the scan). The crew's bisect took all 3 slots and a builder's verify waited 858 s.
+ * 0 or off: no slot kept back (2.78.1). Slots 0 (the lock off): nothing to keep back.
  * Imports nothing from train.mjs (no cycle); heavy.mjs only dynamically.
  */
 import { spawn } from 'node:child_process';
@@ -28,6 +32,15 @@ export function parallelCap(env = process.env) {
   if (isOff(raw)) return 1;
   const n = Math.floor(Number(raw));
   return Number.isFinite(n) && n >= 1 ? Math.min(n, 16) : 4;
+}
+
+/** 2.78.2 (b): STUDIO_TRAIN_BISECT_SPARE: heavy slots a parallel bisect leaves for builders (default 1; 0/off: none). */
+export function bisectSpare(env = process.env) {
+  const raw = String(env.STUDIO_TRAIN_BISECT_SPARE ?? '').trim();
+  if (raw === '') return 1;
+  if (isOff(raw)) return 0;
+  const n = Math.floor(Number(raw));
+  return Number.isFinite(n) && n >= 0 ? n : 1;
 }
 
 /** Test workers for a focused re-check of nFiles test files: 2..8 (STUDIO_TEST_WORKERS wins). */
@@ -57,9 +70,18 @@ export async function bisectWidth({ root, env = process.env, machine, holders, n
     if (!a.ok || a.alone) { stop = a.line || 'it would run alone'; break; }
     sim.push({ at: Date.now() + 1 + k, claim, pid: 0 });
   }
-  const n = Math.max(1, k);
+  let n = Math.max(1, k);
   const held = live.length ? `, ${live.length} heavy job(s) running` : '';
-  return { k: n, cap, why: `${n} re-check(s) fit the machine budget now${held}${k < cap && stop ? ` (the next: ${stop})` : ''}; cap ${cap} (STUDIO_TRAIN_BISECT_PARALLEL)` };
+  // 2.78.2 (b): leave `spare` heavy slots for builders (the lock's live count, as the waiters see it).
+  let spareWhy = '';
+  const spare = bisectSpare(env);
+  if (spare > 0) {
+    let slotsNow = slots;
+    try { slotsNow = (await import('./heavy.mjs')).heavySlotsAt(root, env, profile); } catch {}
+    const most = Math.max(1, Number(slotsNow) - spare);
+    if (Number(slotsNow) > 0 && n > most) { spareWhy = `; ${n} fit, but ${spare} of the ${slotsNow} machine:heavy slot(s) stay free for builders (STUDIO_TRAIN_BISECT_SPARE): ${most}`; n = most; }
+  }
+  return { k: n, cap, why: `${Math.max(1, k)} re-check(s) fit the machine budget now${held}${k < cap && stop ? ` (the next: ${stop})` : ''}; cap ${cap} (STUDIO_TRAIN_BISECT_PARALLEL)${spareWhy}`, ...(spareWhy ? { spare } : {}) };
 }
 
 /** The K boundary prefixes between a green lo and a red hi (exclusive), split into K+1 parts; all of them when few. */

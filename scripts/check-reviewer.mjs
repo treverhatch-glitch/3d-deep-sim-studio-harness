@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { modelFamily } from '../harness/families.mjs';
+import { REVIEWS_DIR } from '../harness/check-reads.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const dir = path.join(root, 'studio', 'reviews');
+const dir = path.join(root, ...REVIEWS_DIR.split('/')); // 2.78.2 (g): harness/check-reads.mjs, which the merge train asks too
 fs.mkdirSync(dir, { recursive: true });
 const files = fs.readdirSync(dir).filter((f) => f.endsWith('.md') && f.toLowerCase() !== 'readme.md');
 if (!files.length) {

@@ -539,8 +539,10 @@ export async function protectedApprover({ env = process.env } = {}) {
     const { readBeta, betaActor } = await import('./beta-mode.mjs');
     const b = readBeta();
     if (b.on) {
-      for (const a of b.doc.agents || []) { const x = betaActor({ env: { STUDIO_LOCK_OWNER: String(a) } }); if (x.ok) return { who: String(a), via: 'beta mode', note: 'approves without the owner key while beta mode is on' }; }
-      return { who: 'producer', via: 'beta mode (a Producer session)', note: 'a Producer session approves while beta mode is on' };
+      for (const a of b.doc.agents || []) { const x = betaActor({ env: { STUDIO_LOCK_OWNER: String(a) }, kind: 'protected' }); if (x.ok) return { who: String(a), via: 'beta mode', note: 'approves without the owner key while beta mode is on' }; }
+      // 2.78.2 (h): a Producer session approves a protected step only with the owner's switch (permission.mjs mayDecide).
+      const { producerApprovesProtected } = await import('./permission.mjs');
+      if (producerApprovesProtected()) return { who: 'producer', via: 'beta mode (a Producer session)', note: 'a Producer session approves while beta mode is on (STUDIO_PRODUCER_APPROVES=protected)' };
     }
   } catch {}
   try {

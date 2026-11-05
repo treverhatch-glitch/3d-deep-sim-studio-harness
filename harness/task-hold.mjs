@@ -26,6 +26,7 @@ import { isFixTask, trunkState } from './baseline.mjs';
 import { withFileLock, writeAtomic } from './fsafe.mjs';
 import { WORKER_NAME, DECIDER_ROLES } from './permission.mjs';
 import { ownerType } from './reclassify.mjs';
+import { entryPath, hasRegion, listsClash } from './lane-regions.mjs';
 
 export const HOLDS_FILE = path.join(REPO_ROOT, 'studio', 'task-holds.json');
 export const STOP_COOLDOWN_MIN = () => Number(process.env.STUDIO_STOP_COOLDOWN_MIN ?? 15);
@@ -276,9 +277,17 @@ export function gameFolders() {
   return { name, sim: rel(`cartridges/${name}`) || (renderer ? rel(`${renderer}/sim`) : null), renderer };
 }
 
-/** A lane as a list of paths (2.30k): one folder, or several files joined by commas. */
-export const laneList = (lane) => (Array.isArray(lane) ? lane : String(lane || '').split(','))
-  .map((p) => p.trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')).filter(Boolean);
+/**
+ * A lane's entries as written (2.78.2: an entry may name a region of a file, path/sim.ts#symbol or #L120-L340,
+ * harness/lane-regions.mjs). What a lane is stored as (`task lane`, --paths) and what the region-aware checks read.
+ */
+export const laneEntries = (lane) => [...new Set((Array.isArray(lane) ? lane : String(lane || '').split(','))
+  .map((p) => p.trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')).filter(Boolean))];
+/**
+ * A lane as a list of paths (2.30k): one folder, or several files joined by commas. 2.78.2: a region entry counts as
+ * its file here (sparse checkouts, gates, path claims, the drift watch all work on files).
+ */
+export const laneList = (lane) => [...new Set(laneEntries(lane).map(entryPath).filter(Boolean))];
 
 // Words in a title that point at a file whose name doesn't say it (2.30k). Kept short on purpose.
 const HINTS = {
@@ -353,7 +362,7 @@ export function laneOf(taskId, events = readRecentEvents(20000), holds = readHol
   const added = events.filter((e) => e.type === 'task.added' && e.task === taskId).pop();
   const meta = added?.meta || {};
   if (meta.wholeGame) return null; // 2.77.3 (H3): --lane all, on purpose
-  if (meta.paths?.length) return laneList(meta.paths).join(',');
+  if (meta.paths?.length) return laneEntries(meta.paths).join(',');
   if (meta.lane) return meta.lane;
   const f = gameFolders();
   const text = added ? `${String(added.msg || '').replace(/^Queued [^:]+:\s*/, '')} ${meta.why || ''} ${meta.asked || ''}` : '';
@@ -401,6 +410,10 @@ export function inferLaneAtAdd({ title = '', meta = {} } = {}) {
 /** Two lanes clash when any path of one holds a path of the other (or either is the whole game). */
 const pathsClash = (a, b) => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 export const lanesClash = (a, b) => {
+  // 2.78.2 (item 9): regions of one opted-in file don't clash when they don't overlap (harness/lane-regions.mjs).
+  const EA = laneEntries(a);
+  const EB = laneEntries(b);
+  if (hasRegion(EA) || hasRegion(EB)) { try { return listsClash(EA, EB); } catch { /* file-level below */ } }
   const A = laneList(a);
   const B = laneList(b);
   return !A.length || !B.length || A.some((x) => B.some((y) => pathsClash(x, y)));

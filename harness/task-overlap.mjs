@@ -14,7 +14,8 @@
  * Never throws: a failed check is a line, not a refused add.
  */
 import { emitEvent, readRecentEvents } from './event.mjs';
-import { laneOf, laneList, readHolds } from './task-hold.mjs';
+import { laneOf, laneList, laneEntries, readHolds } from './task-hold.mjs';
+import { entriesClash } from './lane-regions.mjs';
 import { lanesInFlight, laneChanges, overlaps } from './hotspots.mjs';
 import { mainRoot } from './worktree.mjs';
 
@@ -106,8 +107,10 @@ export function findOverlaps({ id = null, title = '', role = 'builder', meta = {
     for (const t of open) {
       if (seen.has(t.id)) continue;
       let theirs = [];
-      try { theirs = laneList(laneOf(t.id, evs, hl) || ''); } catch {}
-      const hit = theirs.filter((p) => mine.some((m) => meet(p, m)));
+      try { theirs = laneEntries(laneOf(t.id, evs, hl) || ''); } catch {}
+      // 2.78.2 (item 9): regions of an opted-in file that don't overlap don't meet (harness/lane-regions.mjs).
+      const mineE = laneEntries(declared || '');
+      const hit = theirs.filter((p) => mineE.some((m) => (p.includes('#') || m.includes('#') ? entriesClash(p, m) : meet(p, m))));
       if (!hit.length) continue;
       seen.add(t.id);
       found.push({ kind: 'lane', with: t.id, file: hit[0], text: `${t.id} (${t.where}) works in ${hit.slice(0, 3).join(', ')} too; ${advice(t.id, id, phase)}` });

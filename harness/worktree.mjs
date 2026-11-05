@@ -173,7 +173,11 @@ export function createLaneCopy(agent, { task = null, lane = null, carry = true }
   if (fs.existsSync(dir) && removeLaneCopy(agent, { keepBranch: true, ifIdle: true }).kept) return { error: `${LANES_DIR}/${agent} is still in use; not replacing it` };
   fs.mkdirSync(path.join(root, LANES_DIR), { recursive: true });
   ignoreLanes(root);
-  const add = git(root, 'worktree', 'add', '--no-checkout', '-b', branch, dir, 'HEAD');
+  // 2.78.2 (c): a builder relaunched on a task (under any name) starts from the task's remembered lane branch when it
+  // holds work the studio's branch lacks, not from the studio's branch: the old way merged it in afterwards, and a
+  // conflict with the studio's branch dropped the previous builder's commits. STUDIO_LANE_START_FROM_PREV=off: as before.
+  const startFrom = task && carry ? previousLaneStart(root, task) : null;
+  const add = git(root, 'worktree', 'add', '--no-checkout', '-b', branch, dir, startFrom || 'HEAD');
   if (add.status !== 0) return { error: `git worktree add failed: ${(add.stderr || '').trim().split('\n').pop()}` };
   // 2.70.0 (w): the game's laneExclude (and STUDIO_LANE_EXCLUDE) are left out too, minus the task's declared scope
   // (harness/lane-sparse.mjs); off unless declared.
@@ -209,11 +213,38 @@ export function createLaneCopy(agent, { task = null, lane = null, carry = true }
   // 2.77.0 (o): `npm run lane -- create <T-ID> --from <branch>...` merges the branches it was given instead (carry: false).
   // 2.77.0 (f): a previous lane that carries another open task's commits isn't merged (carryTaskBranchEx).
   const cx = task && carry ? carryTaskBranchEx(task, dir) : { carried: null, mixed: null };
-  const carried = cx.carried;
+  let carried = cx.carried;
+  if (startFrom) {
+    // The previous work is the start; bring the studio's branch in when it applies cleanly (a conflict is left for the
+    // builder or the train: nothing is lost either way).
+    const main = mainBranch(root);
+    let note = '';
+    if (git(dir, 'merge-base', '--is-ancestor', main, 'HEAD').status !== 0) {
+      const m = git(dir, '-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'merge', '--no-edit', main);
+      if (m.status !== 0) { git(dir, 'merge', '--abort'); note = ` ${main} was not merged into it (conflict): merge it before task done`; }
+    }
+    carried = carried || startFrom;
+    try { emitEvent({ type: 'lane.started_from_previous', agent, task, msg: `${agent}'s copy for ${task} starts from ${startFrom}, the task's earlier lane branch, not from ${main}.${note}`.slice(0, 400), meta: { from: startFrom, mainMerged: !note } }); } catch {}
+  }
   if (plan.on) writeSparseRecord(root, agent, { agent, task, at: new Date().toISOString(), exclude: plan.exclude, keep: plan.keep, from: plan.from, patterns: plan.patterns, widened: [] });
   else removeSparseRecord(root, agent);
   emitEvent({ type: 'lane.copy', agent, task, msg: `${agent} works in its own copy (${LANES_DIR}/${agent}, branch ${branch})${carried ? `, with ${carried} merged in` : ''}${plan.on ? `; ${plan.why}` : ''}`.slice(0, 500), ...(plan.on ? { meta: { exclude: plan.exclude, keep: plan.keep } } : {}) });
   return { dir, branch, carried, mixed: cx.mixed, sparse: plan.on ? { exclude: plan.exclude, keep: plan.keep } : null };
+}
+
+/**
+ * 2.78.2 (c): the branch a new copy for `task` starts from: the task's remembered lane branch, when it exists, holds
+ * commits the studio's branch lacks, and isn't a mixed lane (those keep the cherry-pick of the task's own commits).
+ * null: start from the studio's branch.
+ */
+function previousLaneStart(root, task) {
+  try {
+    if (/^(off|0|false|no)$/i.test(String(process.env.STUDIO_LANE_START_FROM_PREV || '').trim())) return null;
+    const prev = readBranches()[task];
+    if (!prev || git(root, 'rev-parse', '--verify', '--quiet', `refs/heads/${prev}`).status !== 0 || unmerged(prev, root) <= 0) return null;
+    if (launcherMixed(root, task, prev)) return null;
+    return prev;
+  } catch { return null; }
 }
 
 /** 2.70.0 (w): the sparse plan for a new lane copy; the 2.29 patterns if it can't be worked out. */

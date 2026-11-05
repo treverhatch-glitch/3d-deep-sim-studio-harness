@@ -163,6 +163,30 @@
   ancestor of `main`) and the base is in `main`'s history; it says so ("verified with main <sha>'s key"). Which commits
   are judged is unchanged, and a lane copy's base (the studio's branch) keeps its own key. `STUDIO_KEY_BASE=off`: the
   base's key only.
+- One base and key for every approve kind (2.78.2, B-120 again): `approve -- protected | tests | force | proposal | hooks`
+  and the checks that read them take their base and key from one place (`harness/approve.mjs judgeBase`, built on
+  `resolveBase` and `keyFor`). When the key comes from local `main` (the base has none), the checks whose enforcement
+  starts with the key (protected files, weakened tests) judge since the key-carrying base too, `git merge-base HEAD
+  main`, the base a lane or train copy uses. Before, `approve -- protected` on the main checkout signed the change set
+  since `origin/main`, which also held main's own protected commits (the key itself), so the train never matched it.
+  The range only shrinks: commits already on `main` aren't judged again. The hooks gate keeps its base. After signing,
+  `approve` says when the approval won't verify with the key the checks read.
+- The owner's switch, `STUDIO_MAIN_CHECKOUT_ENFORCE` (2.78.2, default `off`): where the base has no owner key and the key
+  comes from local `main` (in practice the main checkout of a studio that doesn't push), the protected-files check, the
+  weakened-tests check and `task done --force` stay "not enforced" there, as in 2.78.1: the owner keeps that call. The
+  one base and key above still apply to signing, so an approval made there is the one the train (base: local `main`,
+  with its key) accepts, and the train and lane copies enforce as before. `on`: those three checks enforce on such a
+  checkout too, with `main`'s key, for changes since the key-carrying base. The hooks gate is unchanged by it.
+- The key-carrying base with merges on GitHub (2.78.2, A-030): `origin/main` may hold pull-request merge commits local
+  `main` lacks. `keyFor` no longer asks that `origin/main` be an ancestor of `main`. It takes local `main`'s key when
+  the base shares `main`'s history, none of the base's commits that `main` lacks touches the owner key file, and
+  `origin/main` carries no other owner key (none, or the same one). A base whose side changed the key, or an
+  `origin/main` with a different key, gets none. `STUDIO_KEY_BASE=ancestor`: 2.78.1's rule; `off`: the base's key only.
+- A lane copy's events (2.78.2, item 7c): a folder at `<main>/.lanes/<name>` that is a git worktree of `<main>` writes
+  its events to the main checkout's log (`harness/event.mjs boardRoot`, read from git's own files, never from
+  `STUDIO_MAIN_ROOT`), also when it has no `.studio` link (a copy made by hand). An approval's event names the copy's
+  task (its branch in `.studio/lane-branches.json`), so the Line Producer releases the task it held for that step.
+  `STUDIO_LANE_EVENTS=own`: the copy's own log.
 - A release's merge commits (2.78.1): `node harness/hook-stamp.mjs grandfather --ref <remote ref>` and `upgrade --merge`
   list the update's own merge commits too ("Merge 2.77.3 into claude/278"), by sha only (a merge has no patch-id), and
   only those between the hooks gate's base and the release tip: a merge the studio makes itself is judged as before.
@@ -219,6 +243,41 @@
   conflicts or squashes, and an `--amend -m` later rebased onto a moved base are flagged until re-committed; a weaker
   assert in the same count (`toBe` → `toBeTruthy`), an assert removed with an unrelated one added in the same place, a
   helper that always passes, a special case in the game code instead of the test, and tests outside the names above.
+
+## Who makes which beta decision (2.78.2, h)
+The owner's rule (2026-11-05): every agent that isn't the outside agent keeps the rules. One function decides
+(`harness/permission.mjs mayDecide(kind, actor)`, with that file's `WORKER_NAME`, `DECIDER_ROLES` and the launcher's
+session records as its only lists):
+- Board decisions (task type, visual off, lanes, parks and unparks, stacking, a lane release, a non-protected config
+  change): the owner, an outside agent (the orchestrator: not launched by the harness, so no `STUDIO_ROLE`, no
+  launched session record in `.studio/agents/`, not a launcher-shaped name), and a Producer/Director session. As before.
+- Protected decisions (`approve -- protected | tests | hooks | force | proposal`, and `task -- train config` of a held
+  protected config part): the owner and outside agents only. A Producer/Director session is refused with who to ask
+  ("ask the orchestrator (opus-1) or the owner"). Workers make neither.
+- The owner's switch, `STUDIO_PRODUCER_APPROVES` (default off; `protected` in the main checkout's `.env`: on). On, a
+  Producer/Director session makes protected decisions too. Off by default because the Producer is a launched session
+  whose job is throughput: if it can approve protected changes, a builder can ask it to, and the one check that a person
+  (or the outside agent the owner trusts) looked at a protected change is gone. It is read from the main checkout's
+  `.env` only (`harness/permission.mjs producerApprovesProtected`), where the approval is made and wherever it is
+  checked (a lane copy, a train copy): a session's own environment, or a lane copy's `.env`, never turns it on. Turning
+  it off again stops the Producer's protected approvals made under it from counting. Such records say how they were
+  made (`via: beta producer`, `decides: protected`).
+- One predicate for every beta record (`harness/beta-mode.mjs betaRecordVerdict`): approvals of protected files, weakened
+  tests, hooks and forced dones now count like task types, visual decisions and config proposal approvals already did:
+  only committed exactly as written (in the main checkout for a lane copy's linked `studio/`), under the beta session on
+  now, not from a worker's commit nor recorded by a worker, and made by someone `mayDecide` allows (the role it was
+  recorded under, who recorded it, and the commit's `Studio-Agent` trailers: a launched session's name counts as that
+  session). Before, `verifyApproval` accepted a beta approval nobody committed, so a builder could drop one into
+  `studio/approvals/` (which lane copies share) and pass the protected check, the weakened-tests and hooks gates and
+  `task done --force`. `readApprovals` also lets the real file name win over a `file` key in the JSON.
+- After `approve` in beta mode, commit the approval: it counts from then on (the command says so). A protected
+  approval a Producer/Director session committed before 2.78.2 (no `decides` field) keeps counting until beta mode's
+  session changes (`npm run beta -- off`, then on again); an uncommitted one stops counting now. A lane release a
+  Producer/Director session made no longer applies a held protected config part (unless the switch is on): the part
+  stays held until the orchestrator or the owner runs `npm run task -- train config <ID>`.
+- Not covered: an agent that sets another agent's name (`STUDIO_LOCK_OWNER=opus-1`) or unsets its own to commit as "a
+  person" is impersonating; the record and the decisions log show what it ran. The owner proxy's approvals
+  (`harness/owner-proxy.mjs`) are judged as before.
 
 ## What the gates trust (2.71.1, red-team fixes)
 

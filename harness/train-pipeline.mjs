@@ -36,6 +36,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { machineProfile, slotsFor, budgetState, jobClaim, admit, maxConcurrent, rigKind } from './heavy-budget.mjs';
+import { spawnDetached } from './train-detach.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
@@ -292,6 +293,9 @@ export async function pipelineKick(root, { after, env = process.env, spawn: spaw
 export function spawnNextTrain(root, { after, env = process.env } = {}) {
   const log = path.join(root, '.studio', 'train', 'next.log');
   fs.mkdirSync(path.dirname(log), { recursive: true });
+  // 2.78.2 (a, W-0090): through a launcher that exits at once, so it outlives its starter (harness/train-detach.mjs).
+  const d = spawnDetached({ args: [path.join(HERE, 'train-daemon.mjs'), 'run-next', String(after)], out: log, env: { ...env, STUDIO_LOCK_OWNER: NEXT_BY, STUDIO_MAIN_ROOT: root }, cwd: root });
+  if (d.ok) return { pid: d.pid };
   const fd = fs.openSync(log, 'a');
   const child = spawn(process.execPath, [path.join(HERE, 'train-daemon.mjs'), 'run-next', String(after)], { cwd: root, detached: true, windowsHide: true, stdio: ['ignore', fd, fd], env: { ...env, STUDIO_LOCK_OWNER: NEXT_BY, STUDIO_MAIN_ROOT: root } });
   child.unref();

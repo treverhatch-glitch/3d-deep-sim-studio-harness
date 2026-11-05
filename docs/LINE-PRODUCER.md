@@ -52,6 +52,7 @@ naming who may act for the owner (beta mode's agents; the owner's delegate via `
 | `STUDIO_LINE_PLAN_MAX_SEC` | `300` | The supervisor ignores a status older than this. |
 | `STUDIO_LINE_LANES` | `on` | 2.78.1 (B-123): `on`: the pass sets lanes on unscoped ready builder tasks. `report`: it says what it would set (`lanes.set`, `dry`). `off`: it sets none (unscoped tasks are still reported). |
 | `STUDIO_SHARED_SIM` | (the default list) | 2.78.1: shared sim code for phase awareness, comma-separated globs; `off` stacks nothing. Unset: the game manifest's `"sharedSim"`, else the default (above). |
+| `STUDIO_REGION_FILES` | (none) | 2.78.2 (item 9): files that allow region lanes, comma-separated globs (`off`: none). Unset: the game manifest's `"regionFiles"`, else none. See "Region lanes" below. |
 | `STUDIO_UNSCOPED_PARALLEL` | `on` | 2.78.1 (B-123): the supervisor runs builders with no lane side by side when both have a prediction (a lane, else plan-waves' `--scope` or overlap history) and they don't overlap. `off`: no lane = the whole game, as before. |
 
 | `STUDIO_LINE_CHAIN_HOLD_MIN` | `60` | 2.78.1: minutes from a chain-breaker's queueing that new builder verifies wait for its train (`0`/`off`: no push). |
@@ -127,3 +128,26 @@ it: one `line.protected_routed` event to them per hand-back (the approve command
 `protected` and held from new builders until an approval names it (`approval.protected` / `.proposal`, or a beta or
 proxy approve use) or `STUDIO_LINE_PROTECTED_HOLD_MIN` passes. Without beta mode or a proxy it is only reported: only
 the owner approves.
+
+## Region lanes (2.78.2, item 9)
+
+Lane overlap is file-level: two lanes that both touch one big shared sim file never run side by side, and the shared
+sim stacking above chains them. A file can opt in to **region lanes**: a lane entry then names a region of it,
+`path/sim.ts#symbolName` (a function, method, class or top-level name, as `npm run map -- find` reads them) or
+`path/sim.ts#L120-L340` (lines). Several regions are several entries: `task lane T-12 web/<game>/src/sim/sim.ts#tickFlights,web/<game>/src/sim/sim.ts#tickGates --by <you>`
+(also `task add --paths …` and `--scope`).
+
+- Two lanes on the same opted-in file run side by side when both name regions and the regions don't overlap, read on
+  the main checkout's copy of the file. The same symbol, nested symbols, overlapping lines, a symbol that can't be
+  found, a whole-file entry or a folder that holds the file: they clash, as before. A file that isn't opted in is
+  always file-level, regions or not.
+- The supervisor (`lanesClash`) and the shared sim stacking agree: a region task on an opted-in file is stacked only
+  when its regions overlap the earlier task's. Predictions (plan-waves) stay file-level.
+- A launched builder whose lane names an opted-in file only by regions doesn't hold it as a file lock while it works in
+  its own lane copy (a `lane.unlocked` event says so); with no copy the file is locked as before.
+- Landing is unchanged: the train rebases each lane on main, and a real conflict hands the later lane back.
+- Everything that works on files (sparse checkouts, gates, path claims, the drift watch, remote leases) sees the file.
+
+Off by default. To turn it on for one file, put it in `.env`: `STUDIO_REGION_FILES=web/<game>/src/sim/sim.ts` (or
+`"regionFiles": ["src/sim/sim.ts"]` paths from the repo root in the game's `studio.gates.json`), then give its tasks
+region lanes. `STUDIO_REGION_FILES=off` turns it off again.

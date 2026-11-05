@@ -74,7 +74,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, readRecentEvents } from './event.mjs';
 import { mainRoot, mainBranch, linkDir, nodeModuleDirs, ignoreLanes, landFastForward, forgetLanded, rememberTaskBranch, LANES_DIR } from './worktree.mjs';
-import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot, selectGates } from './merge-lane.mjs';
+import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot, selectGates, ALWAYS_SHARED } from './merge-lane.mjs';
+import { studioCheckReaders } from './check-reads.mjs';
 import { recordTrust } from './gate-trust.mjs';
 import { beginTrainLife, reapDeadTrains } from './train-life.mjs';
 import { processHarness, chainGuard, copyHarnessDrift } from './harness-version.mjs';
@@ -84,13 +85,13 @@ import { readBeta, betaActor, recordBetaUse } from './beta-mode.mjs';
 import { addKnownRed, clearKnownRed, knownRedCandidate, readKnownRed, fileSub } from './known-red.mjs';
 import { toolchainProtected } from './test-toolchain.mjs';
 import { fixFirstOrder, noteTrainRed, noteTrainLanded, noteFixTried } from './train-fix-first.mjs';
-import { engineGates, relatedTestsOn, studioGame } from './game-gates.mjs';
+import { engineGates, relatedTestsOn, studioGame, perfTestsOf } from './game-gates.mjs';
 import { readBaseline, judgeRed } from './baseline.mjs';
 import { classifyLane, tierLine } from './tiers.mjs';
 import { recordRound, redSignature } from './round-cap.mjs';
 import { unverifiedMust, contractHoldWhy, contractOnlyHold, CONTRACT_HOLD } from './contracts.mjs';
 import { laneProposal, configLine, isProposalPath, proposalTargets, proposalRel, parseProposal, protectedGlobsAt, applyLandedConfig as applyLandedConfigWith } from './config-proposal.mjs';
-import { agentOnPermission, permissionText, WORKER_NAME, AGENT_SHELL } from './permission.mjs';
+import { agentOnPermission, permissionText, WORKER_NAME, AGENT_SHELL, mayDecide, actorOf } from './permission.mjs';
 import { agentLikeName, launchedSession } from './agent-env.mjs';
 import { delegationFor, recordUse } from './delegation.mjs';
 import { autonomousReleaseRefusal } from './policy-rules.mjs';
@@ -216,8 +217,47 @@ function writeCancel(root, id, rec) {
 /** Running trains in this process: id -> () => the tasks still riding it (not handed back, not landed). */
 const activeLanes = new Map();
 class TrainCancelled extends Error {
-  constructor(marker) { super(marker.stall ? `the train stalled (${marker.why})` : `${marker.tasks.join(', ')} left the train (by ${marker.by}: ${marker.why})`); this.marker = marker; this.name = 'TrainCancelled'; this.stopsTriage = true; }
+  constructor(marker) { super(marker.stall ? `the train stalled (${marker.why})` : marker.cancel ? `the train was cancelled (by ${marker.by}${marker.why ? `: ${marker.why}` : ''})` : `${marker.tasks.join(', ')} left the train (by ${marker.by}: ${marker.why})`); this.marker = marker; this.name = 'TrainCancelled'; this.stopsTriage = true; }
 }
+// ---- 2.78.2 (b): the red chain's time cap -------------------------------------------------------------------------
+
+/**
+ * STUDIO_TRAIN_RED_BUDGET_MIN (default 30; 0 or off: no cap): minutes a train may spend on a red, from its first red
+ * verify (the flake triage, the bisection, the re-check of main, later rounds' verifies). One red cost the crew 1-2 h
+ * (train 111009: 106 min, nothing landed). Past it the train stops looking: it hands back the NEWEST lane (the most likely
+ * cause), lands the longest prefix of the others that a full verify of its exact tree has already passed (never one that
+ * no full verify passed), and re-queues the rest (task.train.red_budget).
+ */
+export function redBudgetMin(env = process.env) {
+  const v = String(env.STUDIO_TRAIN_RED_BUDGET_MIN ?? '').trim();
+  if (v === '') return 30;
+  if (/^(off|no|false)$/i.test(v)) return 0;
+  return Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 30;
+}
+/** Running trains in this process: id -> { t0, ms, red } (red: the first red verify's summary, for the hand-back). */
+const redClock = new Map();
+class TrainRedBudget extends TrainCancelled {
+  constructor(marker) { super({ tasks: [], ...marker }); this.message = `the red chain ran past its budget (${marker.why})`; this.name = 'TrainRedBudget'; }
+}
+/** The first red verify of a running train starts its clock (once per train; only for a train this process runs). */
+function startRedClock(id, red, env = process.env) {
+  const ms = redBudgetMin(env) * 60000;
+  if (!ms || redClock.has(String(id)) || !activeLanes.has(String(id))) return;
+  redClock.set(String(id), { t0: Date.now(), ms, min: redBudgetMin(env), red });
+}
+/** Minutes of the red budget left (Infinity when no clock runs). */
+function redLeftMin(id) {
+  const c = redClock.get(String(id));
+  return c ? Math.max(0, (c.ms - (Date.now() - c.t0)) / 60000) : Infinity;
+}
+/** Throws TrainRedBudget once the red chain has run past its budget (before each triage run, re-check, round and verify). */
+function checkRedBudget(id) {
+  const c = redClock.get(String(id));
+  if (!c || Date.now() - c.t0 <= c.ms) return;
+  const took = (Date.now() - c.t0) / 60000;
+  throw new TrainRedBudget({ redBudget: true, why: `${took >= 10 ? Math.round(took) : Math.round(took * 10) / 10} min since the first red verify, more than STUDIO_TRAIN_RED_BUDGET_MIN (${c.min})`, red: c.red, minutes: c.min });
+}
+
 /**
  * Throws TrainCancelled when a lane of train `id` has left it (called before each verify, re-check and round, and
  * 2.77.3 right after each check's run). 2.77.3 (H2): a stall marker (harness/train-watch.mjs) stops the whole train.
@@ -227,7 +267,7 @@ function checkCancel(root, id) {
   if (!lanes) return;
   const m = readCancel(root, id);
   if (!m) return;
-  if (m.stall) throw new TrainCancelled({ ...m, tasks: lanes() });
+  if (m.stall || m.cancel) throw new TrainCancelled({ ...m, tasks: lanes() }); // 2.78.2 (a): `train cancel` stops it all
   const left = m.tasks.filter((t) => lanes().includes(t));
   if (left.length) throw new TrainCancelled({ ...m, tasks: left });
 }
@@ -635,6 +675,39 @@ export function trainOnlyGates(dir) {
   try { const j = JSON.parse(fs.readFileSync(path.join(dir, 'studio', 'gates.json'), 'utf8')); return (j.gates || []).filter((g) => g && g.trainOnly === true && g.id).map((g) => String(g.id)); } catch { return []; }
 }
 
+/**
+ * 2.78.2 (f): a reused verify record whose game:perf step said "not run (busy)" (run-gates marks the game gate's row
+ * "perfNotRun") stood for a tree whose perf tests never ran, and the landing went without them. The train re-runs only
+ * that step on the same tree: run-gates --only <the game gates> with STUDIO_GATE_FOCUS { "game:perf": <the perf globs> }
+ * (game-gates skips every other check; a landing run waits STUDIO_PERF_WAIT_MIN for a quiet machine, holding new
+ * verifies back). Still busy: 2.78.2 (b)'s rule for a busy focused re-check of game:perf, a busy refusal, read by
+ * runGatesWaiting (it waits STUDIO_TRAIN_BUSY_WAIT_MIN, then the train defers its lanes, judging nobody). Returns null
+ * (nothing to re-run), { ok: true }, { ok: false, ... } (red) or { ok: false, noCheck: true, busy }.
+ */
+export function perfRerun(sc, { id, tree, rec, log = () => {} }) {
+  const row = (rec?.rows || []).find((r) => r && r.perfNotRun);
+  if (!row) return null;
+  const globs = perfTestsOf(process.env, sc.dir);
+  if (!globs.length) return null;
+  const root = sc.root;
+  const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: `train-${id}-perf`, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off', STUDIO_GATE_FOCUS: JSON.stringify({ 'game:perf': globs }) };
+  for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[k];
+  const ids = gameGateIds(sc.dir);
+  log(`[train] ${id}: the reused verify of tree ${tree.slice(0, 8)} did not run its perf tests (${String(row.perfNotRun).slice(0, 160)}): running game:perf (${globs.join(', ')}) alone on that tree before it counts`);
+  const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', ids.join(',')], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: 'the game:perf re-run' });
+  for (const f of [`train-${id}-perf.json`, `train-${id}-perf-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
+  let logRel = null;
+  try { const f = path.join(root, TRAIN_DIR, `${id}-perf-${tree.slice(0, 8)}.log`); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); logRel = path.relative(root, f).split(path.sep).join('/'); } catch {}
+  if (r.status === 0) { log(`[train] ${id}: game:perf on tree ${tree.slice(0, 8)}: green`); return { ok: true }; }
+  if (noCheck) {
+    log(`[train] ${id}: game:perf on tree ${tree.slice(0, 8)} did not run (${busy || 'busy'}): the reused verify can't stand without it; busy, not red`);
+    return { ok: false, noCheck: true, busy: busy || null, rec: null, gates: [], detail: [], why: `ran no check (the game:perf re-run: ${busy || 'busy'})`, log: logRel };
+  }
+  const fl = failLines(text);
+  log(`[train] ${id}: game:perf on tree ${tree.slice(0, 8)}: red`);
+  return { ok: false, rec: null, gates: fl.gates.length ? fl.gates : ids, detail: fl.detail, why: `game:perf failed on the reused verify's tree (its perf tests had not run: busy)`, log: logRel };
+}
+
 /** The FAIL lines of a verify's output, for a hand-back note: the gates, and the game checks' own lines. */
 export function failLines(text) {
   const lines = String(text || '').split('\n');
@@ -648,7 +721,7 @@ export function failLines(text) {
  * { ok, reused?, cached?, rec, gates, detail, log }. `seen` caches the runs by tree for this train; `tasks` are the
  * lanes in it, whose claim baselines may excuse checks that were already red (excusedRed).
  */
-export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], lanes = [], whole = null, log = () => {} }) {
+export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], lanes = [], whole = null, log = () => {}, noRun = false }) {
   checkCancel(sc.root, id); // 2.77.1 (B-98)
   const judged = (raw) => {
     if (raw.ok || raw.reused || !raw.rec || raw.rec.tree !== tree || (all && raw.rec.scoped)) return raw;
@@ -665,6 +738,9 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
     if (!c.ok) notReused ||= c.why;
     if (c.ok) c.why = c0.why;
     if (c.ok) {
+      // 2.78.2 (f): a noRun ask (the red budget's green prefix) runs nothing, so a record whose game:perf step did not run
+      // (busy) doesn't count there.
+      if (noRun && (rec.rows || []).some((r) => r && r.perfNotRun) && perfTestsOf(process.env, sc.dir).length) { notReused ||= 'its game:perf step did not run (busy), and this ask runs nothing'; continue; }
       // 2.69.0 (p): a train of ONE lane whose integration tree is the lane's verified tree reuses the lane's verify.
       const laneOf = lanes.length === 1 ? lanes[0].task : rec._lane || null;
       if (laneOf) log(`[train] ${id}: reused ${laneOf}'s green verify of tree ${tree.slice(0, 8)} (${c.why}); not run again`);
@@ -685,12 +761,21 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
           return red;
         }
       }
-      const res = { ok: true, reused: true, rec, gates: [], detail: [] };
+      // 2.78.2 (f): a record whose game:perf step said "not run (busy)" never ran the perf tests on this tree: the train
+      // runs that step here (alone, on a quiet machine, bounded by STUDIO_PERF_WAIT_MIN) before it counts the record.
+      const perf = perfRerun(sc, { id, tree, rec, log });
+      if (perf) {
+        if (perf.noCheck) return perf; // still busy: the train's rule for a run that judged nothing (it defers), never cached
+        if (!perf.ok) { seen.set(tree, perf); return perf; }
+      }
+      const res = { ok: true, reused: true, rec, gates: [], detail: [], ...(perf ? { perfRerun: true } : {}) };
       seen.set(tree, res);
       return res;
     }
   }
   if (notReused) log(`[train] ${id}: a verify of tree ${tree.slice(0, 8)} is recorded but can't stand for this one (${notReused})`);
+  // 2.78.2 (b): only asking whether a green full verify of this tree exists (the red budget's green prefix): none.
+  if (noRun) return { ok: false, notVerified: true, rec: null, gates: [], detail: [], why: 'no full verify of this tree has passed', log: null };
   const owner = `train-${id}`;
   const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off' };
   for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[k];
@@ -726,6 +811,7 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   if (vparts.flakes.length) log(`[train] ${id}: verify ${n}: ${vparts.flakes.length} test file(s) timed out and passed alone at low load (timeout-flake; the lane is not blamed for them): ${vparts.flakes.slice(0, 5).join(', ')}`);
   const res = { ok, rec, gates, detail, why, log: path.relative(root, logFile).split(path.sep).join('/'), ms: Date.now() - t0, ...(ok ? {} : noCheck ? { noCheck: true, busy: busy || null } : {}), ...(trustNote ? { trustNote, closeRec: { ...rec, dirty: false, trustNote } } : {}) };
   if (!res.noCheck) seen.set(tree, res); // a run that judged nothing is not cached: the next ask runs it again
+  if (!ok && !res.noCheck) startRedClock(id, { why, gates, log: res.log, tests: failingTestsLine(text).list.slice(0, 5) }); // 2.78.2 (b)
   if (!ok && !res.noCheck) { res.triage = flakeTriage(sc, { id, tree, text, log }); if (!res.triage) delete res.triage; } // 2.69.0 (r); 2.77.3: its result; 2.78.0: the labels decide a load-sensitive excuse
   const j = judged(res);
   if (j.excused?.length) log(`[train] ${id}: red only in ${j.excused.join(', ')}, already red when ${tasks.join(', ')} ${tasks.length === 1 ? 'was' : 'were'} claimed: counts as green, as at task done`);
@@ -858,6 +944,7 @@ function recheckEnd(sc, { cache, res, tree, log = () => {} }, job, { r, text, bu
 }
 
 function recheck(sc, o) {
+  checkRedBudget(o.id); // 2.78.2 (b)
   const s = recheckStart(sc, o);
   if (s.cached) return s.cached;
   const job = { ...s.job, id: o.id };
@@ -910,28 +997,36 @@ export function flakeTriage(sc, { id, tree, text, log }) {
     if (!flakeSeen.has(base)) flakeSeen.set(base, new Set());
     let n = 0;
     const waitMin = flakeRules().waitMin;
-    const runOne = ({ check, file, lowLoad, quiet = false, quietWaitMin = 10, k = 1, of = 1, trusted = false }) => {
+    const runOne = ({ check, file, files = null, lowLoad, quiet = false, quietWaitMin = 10, k = 1, of = 1, trusted = false }) => {
       checkCancel(root, id); // 2.77.1 (B-98); 2.77.3: rethrown below, so the train stops here
+      checkRedBudget(id); // 2.78.2 (b): the red chain's time cap (STUDIO_TRAIN_RED_BUDGET_MIN)
+      // 2.78.2 (b): several failing files of one check in one run (harness/flakes.mjs labelGroup).
+      const list = Array.isArray(files) && files.length ? files : [file];
+      const what = list.length > 1 ? `${list.length} failing files of ${check} together (${list.slice(0, 3).join(', ')}${list.length > 3 ? ', …' : ''})` : list[0];
       // 2.78.0 (PU-56): the confirming re-run of a red alone waits for a quiet machine (no other heavy job), bounded.
       // It is an alone-run like the others: it shows in the status ("flake check k of n") while it waits and runs.
       if (quiet) {
-        const wl = `flake check ${k} of ${of}: ${file} failed alone; waiting up to ${quietWaitMin} min for a quiet machine (STUDIO_FLAKE_QUIET_WAIT_MIN) to run it again at low load, on tree ${String(tree).slice(0, 8)}`;
+        // 2.78.2 (b): never past the red budget: the wait is cut to what is left of it.
+        const leftMin = redLeftMin(id);
+        const waitFor = Math.max(0, Math.min(quietWaitMin, leftMin));
+        const shown = waitFor < quietWaitMin ? Math.round(waitFor * 10) / 10 : quietWaitMin;
+        const wl = `flake check ${k} of ${of}: ${what} failed alone; waiting up to ${shown} min for a quiet machine (STUDIO_FLAKE_QUIET_WAIT_MIN${waitFor < quietWaitMin ? ', cut to the red budget left, STUDIO_TRAIN_RED_BUDGET_MIN' : ''}) to run ${list.length > 1 ? 'them' : 'it'} again at low load, on tree ${String(tree).slice(0, 8)}`;
         writeTrainStatus(root, id, { step: 'flake-check', text: wl, eta: null });
         log(`[train] ${id}: ${wl}`);
-        const q = waitQuiet(root, { waitMin: quietWaitMin, log: (m) => log(`[train] ${id}: ${m}`) });
+        const q = waitQuiet(root, { waitMin: waitFor, log: (m) => log(`[train] ${id}: ${m}`) });
         checkCancel(root, id);
-        if (!q.quiet) { log(`[train] ${id}: no quiet machine within ${quietWaitMin} min (${q.busy.slice(0, 2).join('; ')}): ${file} stays real, unconfirmed under load`); return { ok: false, quietUnreached: true }; }
+        if (!q.quiet) { checkRedBudget(id); log(`[train] ${id}: no quiet machine within ${shown} min (${q.busy.slice(0, 2).join('; ')}): ${what} stay${list.length > 1 ? '' : 's'} real, unconfirmed under load`); return { ok: false, quietUnreached: true }; }
       }
       n += 1;
       const owner = `train-${id}-flake`;
-      const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off', STUDIO_GATE_FOCUS: JSON.stringify({ [check]: [file] }) };
+      const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off', STUDIO_GATE_FOCUS: JSON.stringify({ [check]: list }) };
       for (const x of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[x];
       if (lowLoad) env.STUDIO_TEST_WORKERS = '1';
       env.STUDIO_TIMEOUT_RERUN = 'off'; // 2.72.0 (a): the triager wants the raw answer, not the gate's own timeout re-run
       // 2.77.3 (H2): a focused run waits at most STUDIO_FLAKE_WAIT_MIN for a machine:heavy slot, then is "not run".
       const hw = Number(process.env.STUDIO_HEAVY_WAIT_MIN);
       env.STUDIO_HEAVY_WAIT_MIN = String(Math.min(Number.isFinite(hw) && String(process.env.STUDIO_HEAVY_WAIT_MIN ?? '').trim() !== '' ? hw : 60, waitMin));
-      const line = `flake check ${k} of ${of}: ${quiet ? `${file} again, on a quiet machine at low load (one test worker; it failed alone)` : trusted ? `${file} again, alone at low load (one test worker; it failed alone; a trusted load-sensitive file: no quiet wait, STUDIO_LOAD_SENSITIVE_TRUST)` : `${file} alone${lowLoad ? ' at low load (one test worker)' : ''}`}, on tree ${String(tree).slice(0, 8)} (the verify was red; up to ${waitMin} min for a slot, STUDIO_FLAKE_WAIT_MIN)`;
+      const line = `flake check ${k} of ${of}: ${quiet ? `${what} again, on a quiet machine at low load (one test worker; it failed alone)` : trusted ? `${what} again, alone at low load (one test worker; it failed alone; a trusted load-sensitive file: no quiet wait, STUDIO_LOAD_SENSITIVE_TRUST)` : `${what} alone${lowLoad ? ' at low load (one test worker)' : ''}`}, on tree ${String(tree).slice(0, 8)} (the verify was red; up to ${waitMin} min for a slot, STUDIO_FLAKE_WAIT_MIN)`;
       writeTrainStatus(root, id, { step: 'flake-check', text: line, eta: null });
       log(`[train] ${id}: ${line}`);
       const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(',')], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
@@ -949,11 +1044,12 @@ export function flakeTriage(sc, { id, tree, text, log }) {
     const runAlone = (a) => {
       if (!a.quiet) return runOne(a);
       const holdMin = flakeHoldMin();
-      const held = markQuietHold(root, { ms: holdMin * 60000, owner: `train-${id}-flake`, train: id, file: a.file, why: `the quiet re-run of ${a.file}` });
-      if (held) log(`[train] ${id}: holding new builder and lane verifies back while ${a.file} is re-run on a quiet machine (at most ${Math.round(holdMin * 10) / 10} min, STUDIO_FLAKE_HOLD_MIN; running ones are not stopped)`);
+      const names = Array.isArray(a.files) && a.files.length ? a.files.join(', ') : a.file;
+      const held = markQuietHold(root, { ms: holdMin * 60000, owner: `train-${id}-flake`, train: id, file: names, why: `the quiet re-run of ${names}` });
+      if (held) log(`[train] ${id}: holding new builder and lane verifies back while ${names} ${Array.isArray(a.files) && a.files.length > 1 ? 'are' : 'is'} re-run on a quiet machine (at most ${Math.round(holdMin * 10) / 10} min, STUDIO_FLAKE_HOLD_MIN; running ones are not stopped)`);
       try { return runOne(a); } finally { if (held) clearQuietHold(root); }
     };
-    return triageRed({ root, dir: sc.dir, text, train: id, tree, runAlone, seen: flakeSeen.get(base), log: (m) => log(`[train] ${id}: ${m}`) });
+    return triageRed({ root, dir: sc.dir, text, train: id, tree, runAlone, seen: flakeSeen.get(base), log: (m) => log(`[train] ${id}: ${m}`), together: true });
   } catch (e) { if (e instanceof TrainCancelled) throw e; log(`[train] ${id}: flake triage skipped (${e.message})`); return null; }
 }
 
@@ -1043,6 +1139,7 @@ async function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
     log(`[train] ${id}: the prefix search checks up to ${k} prefixes at once: ${width.why}`);
   }
   const probe = async (pts, round, { lo: a, hi: z, sawRed }) => {
+    checkRedBudget(id); // 2.78.2 (b): before the round, never inside it (its re-checks start together)
     const line = `bisect round ${round}: checking prefix${pts.length === 1 ? '' : 'es'} ${pts.join(', ')} at once (lanes 1-${n}; ${a ? `green through lane ${a}` : `${main} green`}, red at ${z}${sawRed ? '' : ' (the verify)'})${ctx.eta ? `; ${ctx.eta(left(a, z, sawRed)).text}` : ''}`;
     log(`[train] ${id}: ${line}`);
     writeTrainStatus(sc.root, id, { step: 'recheck', text: line, lanes: res.trainLanes || null, round: res.round || 1, eta: ctx.eta ? ctx.eta(left(a, z, sawRed)) : null });
@@ -1195,6 +1292,7 @@ function landPrefixEarly(ctx, k) {
   const pre = set.slice(0, k);
   const after = set.slice(k + 1);
   const names = pre.map((l) => l.task).join(', ');
+  checkRedBudget(id); // 2.78.2 (b)
   const notQueued = after.filter((l) => !l.fromQueue);
   if (notQueued.length) { log(`[train] ${id}: the green prefix (${names}) is not landed early: ${notQueued.map((l) => l.task).join(', ')} after ${culprit.task} is not in the train queue to be picked up again`); return { landed: false }; }
   const b = buildIntegration(sc, tip, pre, { id, unionFiles });
@@ -1420,7 +1518,13 @@ export function applyHeldConfig(root, task, { by = '', permission = '', env = pr
   // 2.77.3 (B-111): in beta mode the owner's stand-in decides a held protected part as the owner would, key or not
   // (config-proposal.mjs betaReleaseOk); logged as a beta use.
   const dgb = String(by || '').trim() ? delegationFor({ action: 'train-config', by, env, root }) : { ok: false };
-  if (dgb.ok && dgb.beta) released = { by: String(dgb.owner || by).trim().slice(0, 60), recordedBy: String(dgb.agent || '').slice(0, 60), beta: true, betaAt: dgb.at };
+  if (dgb.ok && dgb.beta) {
+    // 2.78.2 (h): a protected config part is a protected decision (permission.mjs mayDecide): the owner's and the outside
+    // agents', not a Producer/Director session's unless STUDIO_PRODUCER_APPROVES=protected; never a worker's.
+    const d = mayDecide('train-config', actorOf({ env, root }), { root, agents: dgb.doc?.agents || [] });
+    if (!d.ok) return { ok: false, message: `Refused: ${d.why}. Nothing was applied.` };
+    released = { by: String(dgb.owner || by).trim().slice(0, 60), recordedBy: String(dgb.agent || '').slice(0, 60), beta: true, betaAt: dgb.at, decides: d.cls };
+  }
   else if (String(by || '').trim() && !ownerKey) {
     const refusal = releaseRefusal({ by, permission, env, ownerKey, stateDir: path.join(root, '.studio') });
     if (refusal) return { ok: false, message: `${refusal.replace(/Landing a tier-C lane/, 'Applying a protected config change')} Nothing was applied.` };
@@ -1514,7 +1618,7 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
     // first-divergence report, a person (harness/golden-report.mjs).
     const second = rerecordRefusal(e.held, { by, agent: dg.ok ? dg.agent : '', recordedBy: rec?.recordedBy || '', delegated: dg.ok, beta: Boolean(dg.beta) });
     if (second) return { ok: false, message: `Refused: ${second}. Nothing was released.` };
-    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true, betaAt: dg.at } : {}), ...(ba.ok ? { beta: ba.via, betaAt: ba.doc.at } : {}) };
+    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true, betaAt: dg.at, decides: 'board' } : {}), ...(ba.ok ? { beta: ba.via, betaAt: ba.doc.at, decides: 'board' } : {}) };
     return { ok: true, entry: { ...e } };
   });
   if (!r.ok) return r;
@@ -2112,6 +2216,48 @@ function fixFirst(root, lanes, { id, by, dryRun, log }) {
   return r.lanes;
 }
 
+/**
+ * 2.78.2 (b): the red chain ran past its budget (STUDIO_TRAIN_RED_BUDGET_MIN). The newest lane of the train (the one
+ * queued last: the most likely cause) is handed back with the red's summary; of the others, the longest prefix (in the
+ * train's order) whose exact tree a full verify has already passed (this train's own, or a trusted record that covers
+ * it: verifyTree noRun, which runs no verify) is returned as the verdict to land; the rest keep their place in the queue
+ * (keepOrHold: a second time at the same head they are held for the Producer). No full verify passed: nothing lands.
+ * Logs task.train.red_budget. Returns the verdict ({ built, v }) or null.
+ */
+function redBudgetEnd({ marker, sc, tip, set, id, log, res, seen, by, unionFiles, drop, keepOrHold }) {
+  redClock.delete(String(id));
+  const red = marker.red || {};
+  const redLine = `${red.why || 'the verify was red'}${red.tests?.length ? `; failing: ${red.tests.join('; ')}` : ''}${red.log ? `; log ${red.log}` : ''}`;
+  res.redBudget = { why: marker.why, minutes: marker.minutes ?? null };
+  if (!set.length) {
+    log(`[train] ${id}: the red chain ran past its budget (${marker.why}), with no lane left riding`);
+    ev('red_budget', id, `the red chain ran past its budget (${marker.why}); no lane left riding`, { agent: by, to: 'producer', status: 'warn', meta: { why: marker.why, red: redLine } });
+    return null;
+  }
+  const at = (l) => Date.parse(l.at || '') || 0;
+  let newest = set[set.length - 1];
+  for (const l of set) if (at(l) > at(newest)) newest = l;
+  const rest = set.filter((l) => l !== newest);
+  drop(newest, `the red chain of this train ran past its time budget (${marker.why}) before it found who breaks the checks. ${newest.task} is the newest lane in the train, the most likely cause, so it is handed back${rest.length ? ` (the others: ${rest.map((l) => l.task).join(', ')})` : ''}. The red: ${redLine}. Run npm run verify in your copy: if it is green there, the red may be another lane's or the machine's load; say so in your note and task done again`);
+  let verdict = null;
+  let k = 0;
+  for (let j = rest.length; j >= 1 && !verdict; j -= 1) {
+    const pre = rest.slice(0, j);
+    const b = buildIntegration(sc, tip, pre, { id, unionFiles });
+    if (b.included.length !== j) continue;
+    const v = verifyTree(sc, { id, n: res.verifies + 1, tree: b.tree, changed: changedVs(sc.dir, tip, b.head), all: pre.some((l) => l.all), seen, tasks: pre.map((l) => l.task), lanes: pre, log, noRun: true });
+    if (v.ok) { verdict = { built: b, v }; k = j; if (v.reused) res.reused += 1; }
+  }
+  const landing = rest.slice(0, k).map((l) => l.task);
+  const after = rest.slice(k);
+  const why = `train ${id}'s red chain ran past its budget (${marker.why}); ${newest.task} was handed back${landing.length ? ` and ${landing.join(', ')} land on a green full verify` : ''}; it goes in the next train`;
+  for (const l of after) keepOrHold(l, 'redBudgetIn', why, 'a train ran out of its red budget');
+  const msg = `the red chain ran past its budget (${marker.why}): ${newest.task} (the newest lane, the most likely cause) handed back; ${landing.length ? `${landing.join(', ')} land on a green full verify of their tree` : 'no prefix of the others has a green full verify, so nothing lands'}${after.length ? `; ${after.map((l) => l.task).join(', ')} re-queued` : ''}. The red: ${redLine}`;
+  log(`[train] ${id}: ${msg}`);
+  ev('red_budget', id, msg, { agent: by, to: 'producer', status: 'warn', meta: { why: marker.why, minutes: marker.minutes ?? null, handedBack: newest.task, landing, requeued: after.map((l) => l.task), red: redLine } });
+  return verdict;
+}
+
 async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = false, oneLane = false, rideAlong = false, life = null }) {
   const res = { ok: true, id, landed: [], dropped: [], deferred: [], held: [], tiers: {}, verifies: 0, reused: 0, message: '' };
   sweepScratch(root, log);
@@ -2331,6 +2477,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
         if (sc.error) { res.ok = false; res.message = `The train couldn't make its scratch copy: ${sc.error}`; sc = null; return res; }
       }
       checkCancel(root, id); // 2.77.1 (B-98)
+      redClock.delete(String(id)); // 2.78.2 (b): each attempt's red chain has its own budget
       const seen = new Map();
       // 2.60.0: the game's pins and union files (its manifest, as main has it).
       const settings = await trainManifest(root, tip);
@@ -2400,8 +2547,10 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       const quiet = res.lastVerifyMs ? null : quietVerifyMs(root, settings.gameRoot ? path.basename(settings.gameRoot) : null);
       const etaFor = (rechecks, verifies = 1) => trainEta({ rechecks, verifies, recheckMs: res.recheckMs, verifyMs: res.lastVerifyMs || quiet, quiet: !res.lastVerifyMs && Boolean(quiet) });
       res.roundWithout = [];
+      try {
       for (let round = 0; set.length && round <= ready.length + 1; round += 1) {
         checkCancel(root, id); // 2.77.1 (B-98)
+        checkRedBudget(id); // 2.78.2 (b): a later round's verify is part of the red chain too
         res.round = round + 1;
         if (round > 0) { built = buildInOrder(sc, tip, set, { id, unionFiles }, depInfo); for (const l of built.depWait) defer(l, l.why); }
         // (Round 0's build was handled above; 2.59.0 handled it twice: a deferral logged twice, a hand-back made twice.)
@@ -2583,6 +2732,12 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
         }
         set = good;
       }
+      } catch (e) {
+        // 2.78.2 (b): the red chain ran past STUDIO_TRAIN_RED_BUDGET_MIN: stop looking (see redBudgetEnd).
+        if (!(e instanceof TrainRedBudget)) throw e;
+        verdict = redBudgetEnd({ marker: e.marker, sc, tip, set, id, log, res, seen, by, unionFiles, drop, keepOrHold });
+        set = [];
+      }
       if (!verdict) break;
       // (d) Green: main moves to exactly the verified tree, then each task closes.
       const landed = landTrain(root, sc, main, tip, verdict, { id, by, deps, log, res, unionFiles });
@@ -2611,6 +2766,26 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       res.message = `Train ${id} stalled and ended this attempt: ${e.marker.why}. Its running checks were stopped; nobody was handed back.${kept.length ? ` ${kept.join(', ')} keep their place in the train queue.` : ''}${held.length ? ` ${held.join(', ')} stalled a train before at the same head: held for the Producer (npm run task -- train release <ID> --by <name>).` : ''}${res.landed.length ? ` ${summary(res)}` : ''}`;
       log(`[train] ${id}: ${res.message}`);
       ev('stall_ended', id, res.message, { agent: by, to: 'producer', status: 'blocked', meta: { why: e.marker.why, step: e.marker.step || null, kept, held } });
+    } else if (e.marker.cancel) {
+      // 2.78.2 (a): `npm run task -- train cancel` (harness/train-cancel.mjs): nothing more lands from this attempt, nobody
+      // is handed back, and every lane still riding keeps (or gets) its place in the queue; no hold, no count.
+      const riding = ready.filter((l) => !res.dropped.some((d) => d.task === l.task) && !res.landed.includes(l.task));
+      const kept = [];
+      for (const l of riding) {
+        try {
+          const q = readQueue(root).find((x) => x.task === l.task);
+          if (!q && !dryRun) enqueue(root, { task: l.task, agent: l.agent, dir: l.dir, branch: l.branch, head: l.head, all: Boolean(l.all), note: `queued again: train ${id} was cancelled` });
+        } catch {}
+        defer(l, `train ${id} was cancelled by ${e.marker.by || '?'}${e.marker.why ? ` (${e.marker.why})` : ''}`);
+        kept.push(l.task);
+      }
+      res.ok = res.landed.length > 0;
+      res.cancelled = e.marker;
+      res.more = false;
+      res.prefixMore = false;
+      res.message = `Train ${id} was cancelled by ${e.marker.by || '?'}${e.marker.why ? ` (${e.marker.why})` : ''}: its running checks were stopped and nothing more lands from it; nobody was handed back.${kept.length ? ` ${kept.join(', ')} keep their place in the train queue.` : ''}${res.landed.length ? ` ${summary(res)}` : ''}`;
+      log(`[train] ${id}: ${res.message}`);
+      ev('cancel_ended', id, res.message, { agent: by, to: 'producer', status: 'warn', meta: { by: e.marker.by || null, why: e.marker.why || null, kept } });
     } else {
       // 2.77.1 (B-98): ended like a train that lands nothing: lanes kept (queued for the next train), nobody handed back.
       const stay = ready.map((l) => l.task).filter((t) => !e.marker.tasks.includes(t) && !res.dropped.some((d) => d.task === t) && !res.landed.includes(t));
@@ -2621,11 +2796,12 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     }
   } finally {
     activeLanes.delete(String(id));
+    redClock.delete(String(id)); // 2.78.2 (b)
     for (const l of ready) deps.clearRunning?.(l.task);
     if (sc) removeScratch(sc);
   }
   if (res.landed.length && !dryRun) noteTrainLanded(root); // 2.73.2 (d, B-75): main is green again
-  if (res.batchCut?.length && res.landed.length && queued) res.more = true; // 2.77.0 (p): the next batch runs right after
+  if (res.batchCut?.length && res.landed.length && queued && !res.cancelled?.cancel) res.more = true; // 2.77.0 (p): the next batch runs right after (2.78.2: not after a cancel)
   if (res.ok) res.ok = res.landed.length > 0 || (!res.dropped.length && !res.deferred.length);
   res.message = res.message || summary(res);
   writeTrainStatus(root, id, { step: 'done', text: `done: ${res.message.slice(0, 300)}`, lanes: res.trainLanes || null, round: res.round || 1, eta: null });
@@ -2695,6 +2871,26 @@ export function recheckPaths(file = path.join(path.dirname(fileURLToPath(import.
   try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j.recheckPaths && typeof j.recheckPaths === 'object' ? j.recheckPaths : {}; } catch { return {}; }
 }
 
+/**
+ * 2.78.2 (c): did studio/quarantine.json change only by skipping MORE tests (every test the runner skipped at `tip` is
+ * still skipped at `now`)? A verify that ran a test and was green stays true when later runs skip it, so a quarantine
+ * that only grows can't make the verified tree wrong; a release (or a status turned back to "proposed") means a test
+ * the verify never ran will run, so that still verifies again. STUDIO_TRAIN_QUARANTINE_MOVE=off: every change verifies again.
+ */
+export function quarantineOnlyGrows(root, tip, now, rel = 'studio/quarantine.json', env = process.env) {
+  if (/^(off|0|false|no)$/i.test(String(env.STUDIO_TRAIN_QUARANTINE_MOVE ?? '').trim())) return false;
+  const active = (rev) => {
+    const r = git(root, 'show', `${rev}:${rel}`);
+    if (r.status !== 0) return new Set();
+    let j; try { j = JSON.parse(r.stdout); } catch { return null; }
+    const list = Array.isArray(j) ? j : Array.isArray(j?.tests) ? j.tests : null;
+    if (!list) return null;
+    return new Set(list.filter((e) => e && typeof e.test === 'string' && e.test.trim() && (!e.status || e.status === 'active')).map((e) => e.test.trim().replace(/\\/g, '/')));
+  };
+  const a = active(tip); const b = active(now);
+  return Boolean(a && b && [...a].every((t) => b.has(t)));
+}
+
 export function boardOnlyMove(root, tip, now, list = boardPaths(), { lanes = null, records = taskRecordPaths(), addOnly = addOnlyPaths(), rechecks = recheckPaths() } = {}) {
   if (!list.length) return { ok: false, why: 'no board paths are listed (harness/train-board.json)' };
   if (git(root, 'merge-base', '--is-ancestor', tip, now).status !== 0) return { ok: false, why: `the new ${now.slice(0, 8)} doesn't descend from ${tip.slice(0, 8)}` };
@@ -2710,6 +2906,7 @@ export function boardOnlyMove(root, tip, now, list = boardPaths(), { lanes = nul
     if (!matchAny(f, list) && st === 'A' && matchAny(f, addOnly)) { files.push(f); continue; }
     const rc = Object.entries(rechecks).filter(([g]) => matchAny(f, [g])).flatMap(([, ids]) => (Array.isArray(ids) ? ids.map(String) : []));
     if (!matchAny(f, list) && rc.length) { for (const x of rc) recheck.add(x); files.push(f); continue; }
+    if (!matchAny(f, list) && f === 'studio/quarantine.json' && quarantineOnlyGrows(root, tip, now, f)) { files.push(f); continue; }
     if (!matchAny(f, list)) {
       // 2.67.0 (B-29): a task record (holds, approval cards) counts when no entry it changes is a lane of this train.
       const rec = Array.isArray(lanes) && records[f] ? recordEntriesChanged(root, tip, now, f, records[f]) : null;
@@ -2787,6 +2984,126 @@ function rebuildOverBoardMove(root, sc, { tip, now, built, id, unionFiles }) {
   return { ok: true, built: again, files: move.files, ...(rc.ran.length ? { rechecked: rc.ran } : {}) };
 }
 
+// ---- 2.78.2 (g, item 16): land the verified tree, then main's new non-code commits on top ------------------------
+
+/** STUDIO_TRAIN_LAND_OVER_NONCODE (default on). off: a move of main the board rule can't take verifies again (2.78.1). */
+export const landOverNonCodeOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_TRAIN_LAND_OVER_NONCODE || '').trim());
+
+/**
+ * What the game manifests at `rev` say their checks read: [{ glob, by }] from each game|web/<x>/studio.gates.json (the
+ * required checks' "paths", the "shared" globs, the manifest itself). A manifest that can't be read: every studio file.
+ */
+export function gameReadGlobs(root, rev) {
+  const found = [];
+  for (const top of ['game', 'web']) {
+    const ls = git(root, 'ls-tree', '--name-only', '-z', `${rev}:${top}`);
+    if (ls.status !== 0) continue;
+    for (const d of String(ls.stdout || '').split('\0').filter(Boolean)) {
+      const rel = `${top}/${d}/studio.gates.json`;
+      const r = git(root, 'show', `${rev}:${rel}`);
+      if (r.status !== 0) continue;
+      found.push({ glob: rel, by: `${rel} (the manifest)` });
+      let j = null;
+      try { j = JSON.parse(r.stdout); } catch { found.push({ glob: 'studio/**', by: `${rel} (not readable JSON)` }); continue; }
+      for (const g of Array.isArray(j?.shared) ? j.shared : []) found.push({ glob: String(g), by: `${rel} "shared"` });
+      for (const g of Array.isArray(j?.gates) ? j.gates : []) {
+        if (!g || !g.id || g.required === false || !Array.isArray(g.paths)) continue;
+        for (const p of g.paths) found.push({ glob: String(p), by: `game:${g.id} (its paths)` });
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Who reads this file, by the checks' own rules: [] means no required check does (a "non-code" file); else the reasons.
+ * The train's copy tests every file outside studio/ from its own tree, and the studio's required checks declare no
+ * paths (each reads the whole tree), so any such file is code. studio/ is never tested from the tree (sparse-excluded,
+ * linked to the main checkout's); a studio file is non-code only when it is on the board list and no rule reads it: not
+ * a task record, approval or recheckPaths file, not read by docs, session or reviewer (harness/check-reads.mjs), not in a
+ * game check's "paths" or "shared" globs, not always-shared. ctx: { board, rechecks, records, addOnly, game }.
+ */
+export function nonCodeReaders(file, ctx) {
+  const f = String(file || '').replace(/\\/g, '/');
+  if (!f.startsWith('studio/')) return ['the train tests it from its own tree, and the studio\'s required checks declare no paths (each reads the whole tree)'];
+  const why = [];
+  if (matchAny(f, ALWAYS_SHARED)) why.push('every check (always shared)');
+  if (!matchAny(f, ctx.board || [])) why.push('not on the board list (harness/train-board.json boardPaths)');
+  if ((ctx.records || {})[f]) why.push('a task record (the board rule judges its entries)');
+  if (matchAny(f, ctx.addOnly || [])) why.push('an approval');
+  const rc = Object.entries(ctx.rechecks || {}).filter(([g]) => matchAny(f, [g])).flatMap(([, ids]) => (Array.isArray(ids) ? ids.map(String) : []));
+  if (rc.length) why.push(`read by ${[...new Set(rc)].join(', ')} (recheckPaths)`);
+  for (const id of studioCheckReaders(f)) why.push(`read by ${id}`);
+  for (const g of ctx.game || []) if (matchAny(f, [g.glob])) why.push(`read by ${g.by}`);
+  return why;
+}
+
+/**
+ * Main's new commits tip..now, each judged file by file: { ok, commits: [{ sha, subject, files }], files } when every
+ * file any of them touches (added, changed, deleted or renamed; a merge's against each parent) has no reader, else
+ * { ok: false, why } naming the first file a check reads and why.
+ */
+export function mainNonCodeCommits(root, tip, now, ctx) {
+  if (git(root, 'merge-base', '--is-ancestor', tip, now).status !== 0) return { ok: false, why: `the new ${now.slice(0, 8)} doesn't descend from ${tip.slice(0, 8)}` };
+  const shas = out(git(root, 'rev-list', '--reverse', `${tip}..${now}`)).split('\n').filter(Boolean);
+  if (!shas.length) return { ok: false, why: 'no new commit' };
+  const max = Number(process.env.STUDIO_TRAIN_LAND_OVER_NONCODE_MAX || 200);
+  if (shas.length > max) return { ok: false, why: `${shas.length} new commits (more than STUDIO_TRAIN_LAND_OVER_NONCODE_MAX=${max})` };
+  const commits = [];
+  const all = new Set();
+  for (const sha of shas) {
+    const d = git(root, '-c', 'core.quotePath=false', 'diff-tree', '-r', '-m', '--no-commit-id', '--name-only', '--no-renames', '-z', sha);
+    if (d.status !== 0) return { ok: false, why: `could not read ${sha.slice(0, 8)}` };
+    const files = [...new Set(String(d.stdout || '').split('\0').filter(Boolean))].sort();
+    for (const f of files) {
+      const r = nonCodeReaders(f, ctx);
+      if (r.length) return { ok: false, why: `${sha.slice(0, 8)} touches ${f}: ${r.join('; ')}` };
+      all.add(f);
+    }
+    commits.push({ sha, subject: out(git(root, 'log', '-1', '--format=%s', sha)).slice(0, 120), files });
+  }
+  return { ok: true, commits, files: [...all].sort() };
+}
+
+/**
+ * Main moved after a green verify of the train's tree T, and the board rule (rebuildOverBoardMove) can't take it (a
+ * deleted or renamed board file, a pin-refresh commit, ...). When every new main commit touches only files no check
+ * reads (mainNonCodeCommits): merge main's new commits onto T in the train's copy (`git merge`, hooks on, as the lanes
+ * are merged: parents T, then main) and land that, under the land lock, without a new verify. Checked with git before:
+ * a clean merge (merge-tree) whose tree is T with exactly main's versions of those files; and the one required check
+ * that reads every file, secrets, runs on the new commits themselves (secret-scan --since T). Any doubt: { ok: false,
+ * why }, the copy back at T, and the caller builds and verifies again as before.
+ */
+function landOverNonCode(root, sc, { tip, now, verified, id }) {
+  const ctx = { board: boardPaths(), rechecks: recheckPaths(), records: taskRecordPaths(), addOnly: addOnlyPaths(), game: gameReadGlobs(root, now) };
+  const mv = mainNonCodeCommits(root, tip, now, ctx);
+  if (!mv.ok) return mv;
+  const head = verified.head;
+  const back = () => { git(sc.dir, 'merge', '--abort'); git(sc.dir, 'reset', '-q', '--hard', head); git(sc.dir, 'clean', '-fdq'); };
+  git(sc.dir, 'reset', '-q', '--hard', head); // a refused board rebuild left the copy on main's new tip
+  git(sc.dir, 'clean', '-fdq');
+  if (out(git(root, 'rev-parse', `refs/heads/${sc.branch}^{tree}`)) !== verified.tree) { back(); return { ok: false, why: 'the train branch is not at the verified tree' }; }
+  const mt = git(root, 'merge-tree', '--write-tree', head, now);
+  if (mt.status !== 0) return { ok: false, why: `main's new commits don't merge cleanly onto the verified tree (${out(mt).split('\n')[0].slice(0, 120) || `exit ${mt.status}`})` };
+  const want = out(mt).split('\n')[0].trim();
+  const d = git(root, 'diff-tree', '-r', '--name-only', '--no-renames', '-z', verified.tree, want);
+  if (d.status !== 0) return { ok: false, why: 'could not compare the trees' };
+  const blob = (rev, f) => out(git(root, 'rev-parse', '-q', '--verify', `${rev}:${f}`));
+  const odd = String(d.stdout || '').split('\0').filter(Boolean).find((f) => !mv.files.includes(f) || blob(want, f) !== blob(now, f));
+  if (odd) return { ok: false, why: `the merged tree differs from the verified one in ${odd}, not only by main's version of its non-code files` };
+  const msg = [`train ${id}: land the verified tree ${verified.tree.slice(0, 8)}, then ${mv.commits.length} new commit(s) of main that touch only non-code files`, '', ...mv.commits.slice(0, 20).map((c) => `  ${c.sha.slice(0, 8)} ${c.subject}`), '', `Studio-Train: ${id} over-noncode`].join('\n');
+  const env = { ...process.env };
+  for (const k of ['STUDIO_LOCK_OWNER', 'STUDIO_EXPERIMENT', 'STUDIO_AGENT_MODEL']) delete env[k];
+  const m = spawnSync('git', ['-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'merge', '--no-ff', '--no-edit', '-m', msg, now], { windowsHide: true, cwd: sc.dir, encoding: 'utf8', env, maxBuffer: 16 * 1024 * 1024 });
+  if (m.status !== 0) { back(); return { ok: false, why: `the merge stopped: ${`${m.stdout || ''}${m.stderr || ''}`.trim().split('\n').slice(-2).join(' ').slice(0, 200)}` }; }
+  const merged = out(git(sc.dir, 'rev-parse', 'HEAD'));
+  const tree = out(git(sc.dir, 'rev-parse', 'HEAD^{tree}'));
+  if (tree !== want) { back(); return { ok: false, why: 'the merge commit\'s tree is not the one git predicted' }; }
+  const sec = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'secret-scan.mjs'), '--since', head], { windowsHide: true, cwd: sc.dir, encoding: 'utf8', env: { ...env, STUDIO_MAIN_ROOT: root }, maxBuffer: 16 * 1024 * 1024 });
+  if (sec.status !== 0) { back(); return { ok: false, why: `the secrets check is red on main's new commits (${`${sec.stdout || ''}${sec.stderr || ''}`.trim().split('\n').filter((l) => /FAIL|secret/i.test(l)).slice(-1)[0]?.slice(0, 160) || `exit ${sec.status}`})` }; }
+  return { ok: true, built: { ...verified, head: merged, tree }, commits: mv.commits, files: mv.files, merge: merged };
+}
+
 /**
  * 2.77.0 (P9.1): re-run only the checks `ids` (those the studio has) on the train copy's tree after main moved by files
  * they read. { ok, ran: [ids], why }. Nothing to run: ok.
@@ -2820,22 +3137,32 @@ function landTrain(root, sc, main, tip, { built: verified, v }, { id, by, deps, 
   let out1;
   let built = verified;
   let board = null;
+  let over = null; // 2.78.2 (g): landed over main's non-code commits
   try {
     out1 = withLandLock(root, () => {
       const now = out(git(root, 'rev-parse', `refs/heads/${main}`));
       if (now !== tip) {
         // 2.60.1 (B-29): a board-only commit on main (a task type record, NEXT.md) restarted the whole verify (~9 min).
         const re = rebuildOverBoardMove(root, sc, { tip, now, built: verified, id, unionFiles });
-        if (!re.ok) { log(`[train] ${id}: ${main} moved (${tip.slice(0, 8)} -> ${now.slice(0, 8)}) and the verify can't stand for it: ${re.why}`); return 'moved'; }
-        built = re.built;
-        board = { from: tip, to: now, files: re.files, ...(re.rechecked ? { rechecked: re.rechecked } : {}) };
-        log(`[train] ${id}: ${main} moved by board/record files only (${re.files.join(', ')}); the lanes merged onto it again without a conflict and the tree is the verified tree plus those files: verify reused${re.rechecked ? ` (re-ran only ${re.rechecked.join(', ')}, the checks that read them: green)` : ''}`);
-        ev('board_move', id, `${main} moved ${tip.slice(0, 8)} -> ${now.slice(0, 8)} by board/record files only (${re.files.join(', ')}): verify of ${verified.tree.slice(0, 8)} reused for ${built.tree.slice(0, 8)}`, { agent: by, status: 'ok', meta: board });
+        // 2.78.2 (g, item 16): main's new commits touch only files no check reads: land T, then those commits on top.
+        const lo = re.ok ? null : !landOverNonCodeOn() ? { ok: false, why: 'STUDIO_TRAIN_LAND_OVER_NONCODE=off' } : v?.emptyDiff ? { ok: false, why: 'an empty-diff landing (no verify of its own)' } : landOverNonCode(root, sc, { tip, now, verified, id });
+        if (!re.ok && !lo.ok) { log(`[train] ${id}: ${main} moved (${tip.slice(0, 8)} -> ${now.slice(0, 8)}) and the verify can't stand for it: ${re.why}; nor can the train land over those commits: ${lo.why}`); return 'moved'; }
+        if (lo?.ok) {
+          built = lo.built;
+          over = { from: tip, to: now, merge: lo.merge, files: lo.files, commits: lo.commits.map((c) => ({ sha: c.sha, subject: c.subject, files: c.files })), verifiedTree: verified.tree };
+          log(`[train] ${id}: ${main} moved (${tip.slice(0, 8)} -> ${now.slice(0, 8)}) by ${lo.commits.length} commit(s) that touch only files no check reads (${lo.files.join(', ')}): landing the verified tree ${verified.tree.slice(0, 8)} with them merged on top (${lo.merge.slice(0, 8)}), no new verify`);
+        } else {
+          built = re.built;
+          board = { from: tip, to: now, files: re.files, ...(re.rechecked ? { rechecked: re.rechecked } : {}) };
+          log(`[train] ${id}: ${main} moved by board/record files only (${re.files.join(', ')}); the lanes merged onto it again without a conflict and the tree is the verified tree plus those files: verify reused${re.rechecked ? ` (re-ran only ${re.rechecked.join(', ')}, the checks that read them: green)` : ''}`);
+          ev('board_move', id, `${main} moved ${tip.slice(0, 8)} -> ${now.slice(0, 8)} by board/record files only (${re.files.join(', ')}): verify of ${verified.tree.slice(0, 8)} reused for ${built.tree.slice(0, 8)}`, { agent: by, status: 'ok', meta: board });
+        }
       }
       if (out(git(root, 'rev-parse', `${sc.branch}^{tree}`)) !== built.tree) return { ok: false, message: 'the train branch changed after its verify' };
       const landedFrom = out(git(root, 'rev-parse', `refs/heads/${main}`));
       const ff = landFastForward(root, main, sc.branch, { taskId: `train ${id}` });
       if (!ff.ok) return { ok: false, message: ff.message };
+      if (over) ev('landed_over_noncode', id, `${main} moved ${tip.slice(0, 8)} -> ${over.to.slice(0, 8)} while the train was verified, by ${over.commits.length} commit(s) that touch only files no check reads (${over.files.slice(0, 8).join(', ')}${over.files.length > 8 ? ', …' : ''}): landed the verified tree ${over.verifiedTree.slice(0, 8)} with them merged on top (${over.merge.slice(0, 8)}), no new verify`, { agent: by, status: 'ok', meta: over });
       // 2.65.0 (B-40): each landed lane's config proposal, in a commit right after the landing (Config-From: <task>).
       applyLandedConfig(root, main, built.included.map((l) => ({ task: l.task, base: out(git(root, 'merge-base', landedFrom, l.head)) || landedFrom, released: l.released || null })), { log, by, res, id });
       for (const lane of built.included) {
@@ -2871,14 +3198,15 @@ function landTrain(root, sc, main, tip, { built: verified, v }, { id, by, deps, 
   if (out1 === 'moved') return 'moved';
   if (!out1.ok) { res.ok = false; res.message = `The train's verify was green but ${main} didn't move: ${out1.message}. Nothing was closed; run the train again.`; log(`[train] ${id}: ${res.message}`); return undefined; }
   if (board) res.boardMove = board;
-  ev('landed', id, `${main} moved to ${built.head.slice(0, 8)} (tree ${built.tree.slice(0, 8)}, verified${v.reused ? ' by an earlier record of this tree' : ''}${board ? `; the verify of ${verified.tree.slice(0, 8)} reused across a board-only move of ${main} (${board.files.join(', ')})` : ''}): ${res.landed.slice(from).join(', ')}`, { agent: by, status: 'ok', meta: { head: built.head, tree: built.tree, lanes: res.landed.slice(from), reused: Boolean(v.reused), ...(v.emptyDiff ? { emptyDiff: true } : {}), ...(board ? { boardMove: board, verifiedTree: verified.tree } : {}) } });
+  if (over) res.overNonCode = over;
+  ev('landed', id, `${main} moved to ${built.head.slice(0, 8)} (tree ${built.tree.slice(0, 8)}, verified${v.reused ? ' by an earlier record of this tree' : ''}${board ? `; the verify of ${verified.tree.slice(0, 8)} reused across a board-only move of ${main} (${board.files.join(', ')})` : ''}${over ? `; the verified tree ${verified.tree.slice(0, 8)} with ${over.commits.length} non-code commit(s) of ${main} merged on top` : ''}): ${res.landed.slice(from).join(', ')}`, { agent: by, status: 'ok', meta: { head: built.head, tree: built.tree, lanes: res.landed.slice(from), reused: Boolean(v.reused), ...(v.emptyDiff ? { emptyDiff: true } : {}), ...(board ? { boardMove: board, verifiedTree: verified.tree } : {}), ...(over ? { overNonCode: over, verifiedTree: verified.tree } : {}) } });
   return undefined;
 }
 
-const brief = (res) => ({ landed: res.landed, dropped: res.dropped.map((d) => d.task), deferred: res.deferred.map((d) => d.task), ...(res.held?.length ? { held: res.held.map((h) => h.task) } : {}), ...(res.tiers && Object.keys(res.tiers).length ? { tiers: res.tiers } : {}), verifies: res.verifies, reused: res.reused, ...(res.rechecks ? { rechecks: res.rechecks } : {}), ...(res.pinRefresh ? { pinRefresh: res.pinRefresh.lanes } : {}), ...(res.union ? { union: res.union } : {}), ...(res.boardMove ? { boardMove: res.boardMove.files } : {}), ...(res.config ? { config: res.config } : {}) });
+const brief = (res) => ({ landed: res.landed, dropped: res.dropped.map((d) => d.task), deferred: res.deferred.map((d) => d.task), ...(res.held?.length ? { held: res.held.map((h) => h.task) } : {}), ...(res.tiers && Object.keys(res.tiers).length ? { tiers: res.tiers } : {}), verifies: res.verifies, reused: res.reused, ...(res.rechecks ? { rechecks: res.rechecks } : {}), ...(res.pinRefresh ? { pinRefresh: res.pinRefresh.lanes } : {}), ...(res.union ? { union: res.union } : {}), ...(res.boardMove ? { boardMove: res.boardMove.files } : {}), ...(res.overNonCode ? { overNonCode: res.overNonCode.commits.map((c) => c.sha) } : {}), ...(res.config ? { config: res.config } : {}), ...(res.redBudget ? { redBudget: res.redBudget } : {}) });
 function summary(res) {
   const parts = [];
-  if (res.landed.length) parts.push(`landed ${res.landed.join(', ')} with ${res.verifies} verify run(s)${res.reused ? ` (${res.reused} taken from a green record of the same tree)` : ''}${res.boardMove ? ` (kept across a board-only move of main: ${res.boardMove.files.join(', ')})` : ''}${res.rechecks ? ` and ${res.rechecks} re-check(s) of the failing checks` : ''}${res.pinRefresh ? `, plus one pin-refresh commit for ${res.pinRefresh.lanes.join(', ')} (${res.pinRefresh.report})` : ''}${res.union ? `; union-merged ${res.union.map((u) => `${u.files.join(', ')} for ${u.task}`).join('; ')}` : ''}`);
+  if (res.landed.length) parts.push(`landed ${res.landed.join(', ')} with ${res.verifies} verify run(s)${res.reused ? ` (${res.reused} taken from a green record of the same tree)` : ''}${res.boardMove ? ` (kept across a board-only move of main: ${res.boardMove.files.join(', ')})` : ''}${res.overNonCode ? ` (main's ${res.overNonCode.commits.length} new non-code commit(s) merged on top: ${res.overNonCode.files.slice(0, 5).join(', ')})` : ''}${res.rechecks ? ` and ${res.rechecks} re-check(s) of the failing checks` : ''}${res.pinRefresh ? `, plus one pin-refresh commit for ${res.pinRefresh.lanes.join(', ')} (${res.pinRefresh.report})` : ''}${res.union ? `; union-merged ${res.union.map((u) => `${u.files.join(', ')} for ${u.task}`).join('; ')}` : ''}`);
   if (res.dropped.length) parts.push(`handed back ${res.dropped.map((d) => `${d.task} (${d.why.split('\n')[0]})`).join('; ')}`);
   if (res.deferred.length) parts.push(`waiting for the next train: ${res.deferred.map((d) => `${d.task} (${d.why.split('\n')[0]})`).join('; ')}`);
   if (res.config?.length) parts.push(`config proposals: ${res.config.map((c) => `${c.task} applied ${c.applied.join(', ') || 'nothing'}${c.held.length ? `, HELD for a person: ${c.held.map((h) => h.file).join(', ')} (npm run task -- train config ${c.task})` : ''}`).join('; ')}`);

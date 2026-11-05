@@ -56,6 +56,42 @@ import { visualCheckRows } from './visual-check.mjs';
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
 
+/**
+ * 2.78.2 (c): does a review file approve? Judged by its LAST "Verdict:" line (its own line, case-insensitive; markdown
+ * markers before it are fine): "approve"/"LGTM" approves; "changes requested", "reject" or "blocking" doesn't; anything
+ * else doesn't. So a re-review appended to the first one decides, and a "non-blocking note" doesn't count against it.
+ * A file with no Verdict line keeps the old rule: it names approve/LGTM and none of changes requested/reject/blocking.
+ * STUDIO_REVIEW_VERDICT_LINE=off: always the old rule.
+ */
+export const reviewApproves = (text, env = process.env) => {
+  const t = String(text || '').replace(/\r\n/g, '\n');
+  const old = () => /\b(approve[sd]?|lgtm)\b/i.test(t) && !/\b(request(ed)? changes|changes requested|reject(ed)?|blocking)\b/i.test(t);
+  if (/^(off|0|false|no)$/i.test(String(env.STUDIO_REVIEW_VERDICT_LINE ?? '').trim())) return old();
+  const lines = [...t.matchAll(/^[ \t>*_#-]*verdict[ \t*_]*:[ \t*_]*(.*)$/gim)];
+  if (!lines.length) return old();
+  const v = lines[lines.length - 1][1];
+  if (/\b(request(ed)? changes|changes requested|reject(ed)?|blocking)\b/i.test(v)) return false;
+  return /\b(approve[sd]?|lgtm)\b/i.test(v);
+};
+
+/** 2.78.2 (c): task types that produce notes, reviews and docs, never game code. */
+export const NO_GAME_CODE_TYPES = ['direction', 'review', 'docs', 'idea', 'research', 'study'];
+/**
+ * 2.78.2 (c): may `task done` skip the game's own checks (the whole game test suite)? Yes when the task's type is one of
+ * NO_GAME_CODE_TYPES and every file its lane changes (or claims, or has dirty) is a Markdown file or under studio/,
+ * docs/ or .studio/. Any other file, or a type that can write code, runs them as before: a docs task that also touched
+ * code still runs them. The docs and board checks are separate rows and always run. { skip, why }.
+ * STUDIO_DONE_SKIP_GAME_NONCODE=off: never skip.
+ */
+export function skipGameChecks(type, files, env = process.env) {
+  if (/^(off|0|false|no)$/i.test(String(env.STUDIO_DONE_SKIP_GAME_NONCODE ?? '').trim())) return { skip: false, why: 'STUDIO_DONE_SKIP_GAME_NONCODE=off' };
+  if (!NO_GAME_CODE_TYPES.includes(type)) return { skip: false, why: `a ${type} task can change game code` };
+  const list = [...new Set((files || []).map((f) => String(f).replace(/\\/g, '/').replace(/^\.\//, '')).filter(Boolean))];
+  const code = list.find((f) => !(/\.md$/i.test(f) || /^(studio|docs|\.studio)\//.test(f)));
+  if (code) return { skip: false, why: `it changes ${code}, which isn't a note or doc` };
+  return { skip: true, why: `a ${type} task whose ${list.length} changed file(s) are notes, docs or studio records: no game code to test` };
+}
+
 /** The oldest commit tagged with this task (Studio-Task trailer), or null. */
 function firstTaggedCommit(taskId) {
   const out = git('log', '--reverse', '--format=%H%x09%(trailers:key=Studio-Task,valueonly,separator=%x2C)');
@@ -848,7 +884,7 @@ export function checkDone(task, since = startedAt(task.id)) {
     workAndVerify();
     const implementer = (readRecentEvents(20000).filter((e) => e.type === 'task.start' && e.task === task.id).pop() || {}).model;
     const notes = filesUnder('studio/reviews', (n) => n.endsWith('.md') && n !== 'README.md').map((f) => fs.readFileSync(abs(f), 'utf8')).filter((t) => new RegExp(`\\b${task.id}\\b`).test(t));
-    const approving = notes.filter((t) => /\b(approve[sd]?|lgtm)\b/i.test(t) && !/\b(request(ed)? changes|changes requested|reject(ed)?|blocking)\b/i.test(t));
+    const approving = notes.filter(reviewApproves);
     const cross = approving.filter((t) => {
       const rev = (t.match(/model-family\s*:\s*(\S+)/i) || [])[1];
       const impl = (t.match(/implementer-family\s*:\s*(\S+)/i) || [])[1] || (implementer ? modelFamily(implementer) : null);
