@@ -4,6 +4,31 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.77.3] — 2026-11-05
+The crew's patch request from the 48-hour run on 2.77.1 (B-99, B-104 to B-115, M1–M7). Item-by-item status, including
+what 2.77.2 and 2.78.0 already cover: docs/RELEASE-2.77.3.md.
+- **Beta-mode owner records count (C3 / B-111, P-256).** A beta stand-in's `task type`, `task visual` and config-proposal
+  decisions are beta approvals the checks accept while beta mode is on (committed, never from a worker), logged as beta;
+  every writer and reader uses one owner key. Outside beta mode an unsigned record is refused up front instead of
+  "recorded" and ignored. Test files are never render files. A dropped or worker-committed beta-format approval no
+  longer counts.
+- **Trains don't hang after a "real" verdict (H2 / B-112, P-257):** the flake triage stops at the first real file, each
+  alone-run shows in the status and waits at most `STUDIO_FLAKE_WAIT_MIN`; a stall watch (`STUDIO_TRAIN_STALL_MIN`)
+  ends an attempt whose status stops moving and releases the lock.
+- **Port collisions are named (C2 / B-108, P-258):** a `port-collision` verdict, never real or quarantined; an advisory
+  `game:test-ports` warning for fixed e2e ports; `studio/rules/test-ports.md`. A train waiting for room gets the next
+  heavy slot (M6).
+- **The stall killer ignores cache reads (H1 / B-109, P-259)** and waits `STUDIO_STALL_GRACE_MIN` (15) first.
+- **Gemini builders can stay in session (C1 / B-99): ready, off.** `STUDIO_AGY_STREAM=1` keeps agy's stdin open in
+  stream-json mode and sends a "continue" when a turn ends mid-task. Off until one hand test on the crew's PC.
+- **Board fixes (P-260):** lane-less builder tasks warn (`STUDIO_REQUIRE_LANE=on` refuses) and `task lane` takes several
+  folders (H3); a dependency closed as done counts as landed (H4); parks carry a rank and `--until` note (H5); a stop
+  cooldown is per role and in UTC (M1); `task add` lists every missing flag (M2).
+- **Roles and commands:** a reviewer can't verify and a reviews lock no longer blocks main's commits (M4); owner allow
+  rules for `hooks -- restamp` and `hook-stamp.mjs grandfather` (H6); `reload-env` waits a pass and says "queued"
+  (M5); a playtest stage that ran 0 steps fails (M7).
+- Tests: qa/selftest-2773a.mjs to qa/selftest-2773e.mjs.
+
 ## [2.77.2] — 2026-11-05
 A hotfix from the crew's first hours on 2.77.1 (B-104 to B-107). The rest of that list (B-105 lane refresh after an
 upgrade, B-99 agy's idle exit) goes into 2.78. Status: docs/RELEASE-2.77.2.md.

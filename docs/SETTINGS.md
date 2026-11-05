@@ -235,7 +235,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_FLAKE_MAX_FILES` · no simple default · harness/flakes.mjs, harness/game-gates.mjs · [WORK-ORGANIZATION.md:330](WORK-ORGANIZATION.md)
 - `STUDIO_FLAKE_QUARANTINE_AFTER` · no simple default · harness/flakes.mjs · [WORK-ORGANIZATION.md:333](WORK-ORGANIZATION.md)
 - `STUDIO_FLAKE_TRIAGE` · no simple default · harness/flakes.mjs · [WORK-ORGANIZATION.md:344](WORK-ORGANIZATION.md)
-- `STUDIO_FLAKE_WAIT_MIN` · no simple default · harness/flakes.mjs, harness/train.mjs, qa/selftest-2773b.mjs · [WORK-ORGANIZATION.md:346](WORK-ORGANIZATION.md)
+- `STUDIO_FLAKE_WAIT_MIN` · no simple default · harness/flakes.mjs, harness/train.mjs, qa/selftest-2773b.mjs · [RELEASE-2.77.3.md:21](RELEASE-2.77.3.md)
 - `STUDIO_FLAKE_WINDOW_DAYS` · no simple default · harness/flakes.mjs · [WORK-ORGANIZATION.md:334](WORK-ORGANIZATION.md)
 
 ## FLOW_* (2)
@@ -333,7 +333,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_HEAVY_REAP` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-260d.mjs (+4 more) · undocumented
 - `STUDIO_HEAVY_REEXEC` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-260d.mjs (+1 more) · undocumented
 - `STUDIO_HEAVY_REMIND_MS` · no simple default · harness/heavy.mjs · undocumented
-- `STUDIO_HEAVY_SLOTS` · no simple default · harness/heavy-budget.mjs, harness/heavy.mjs, harness/unity-cache.mjs (+39 more) · [RELEASE.md:198](RELEASE.md)
+- `STUDIO_HEAVY_SLOTS` · no simple default · harness/heavy-budget.mjs, harness/heavy.mjs, harness/unity-cache.mjs (+39 more) · [RELEASE-2.77.3.md:49](RELEASE-2.77.3.md)
 - `STUDIO_HEAVY_STALE_MIN` · no simple default · harness/heavy.mjs · undocumented
 - `STUDIO_HEAVY_STOP_GRACE_MS` · no simple default · harness/heavy.mjs · undocumented
 - `STUDIO_HEAVY_WAIT_MIN` · no simple default · harness/heavy.mjs, harness/train-watch.mjs, harness/train.mjs (+14 more) · [UNITY-TRACK.md:410](UNITY-TRACK.md)
@@ -428,7 +428,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 ## LOCK_* (4)
 
 - `STUDIO_LOCK_MAX_FILES` · default `50` · harness/agent.mjs, harness/lock.mjs, qa/selftest-2585q.mjs · [SECURITY.md:60](SECURITY.md)
-- `STUDIO_LOCK_NOTE_DIRS` · no simple default · harness/lock.mjs, harness/reviewer-scope.mjs, qa/selftest-2773c.mjs · [SECURITY.md:71](SECURITY.md)
+- `STUDIO_LOCK_NOTE_DIRS` · no simple default · harness/lock.mjs, harness/reviewer-scope.mjs, qa/selftest-2773c.mjs · [RELEASE-2.77.3.md:28](RELEASE-2.77.3.md)
 - `STUDIO_LOCK_OWNER` · default `'art-adapter'` (also `'art'`, `'producer'`, `'qa'`, `'canaries'`, `'director'`, `'unknown'`, `'gates'`, `'game-dev'`, `'harness'`, `'heavy'`, `'an agent'`, `'default'`, `'conductor'`, `'liaison'`, `'builder'`, `'slow-tier'`, `'human'`, `'unity-gate'`, `'unity'`, `'upgrade'`, `'outside-agent'`, `'vfx'`, `'launcher'`, `'fuzz'`, `'vision-check'`) · harness/agent-env.mjs, harness/agent.mjs, harness/allowlist.mjs (+220 more) · [AGENT-TOOLS.md:9](AGENT-TOOLS.md)
 - `STUDIO_LOCK_STRICT` · no simple default · harness/lock.mjs, scripts/hooks/pre-commit, qa/selftest-2773c.mjs · undocumented
 
@@ -603,10 +603,10 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 ## STALL_* (8)
 
 - `STUDIO_STALL` · no simple default · harness/bench.mjs, harness/stall.mjs, qa/selftest-2731a.mjs (+4 more) · undocumented
-- `STUDIO_STALL_GRACE_MIN` · no simple default · harness/stall.mjs, qa/selftest-230o.mjs, qa/selftest-276i.mjs (+1 more) · [RUN-UNATTENDED.md:144](RUN-UNATTENDED.md)
+- `STUDIO_STALL_GRACE_MIN` · no simple default · harness/stall.mjs, qa/selftest-230o.mjs, qa/selftest-276i.mjs (+1 more) · [RELEASE-2.77.3.md:20](RELEASE-2.77.3.md)
 - `STUDIO_STALL_MIN` · no simple default · harness/agent.mjs, harness/dotenv.mjs, harness/env-reload.mjs (+7 more) · [RUN-UNATTENDED.md:49](RUN-UNATTENDED.md)
 - `STUDIO_STALL_PLAN_MIN` · no simple default · harness/stall.mjs, qa/selftest-230o.mjs, qa/selftest-2731a.mjs (+3 more) · undocumented
-- `STUDIO_STALL_RATIO` · no simple default · harness/stall.mjs, qa/selftest-276i.mjs, qa/selftest-2773c.mjs (+1 more) · [RUN-UNATTENDED.md:142](RUN-UNATTENDED.md)
+- `STUDIO_STALL_RATIO` · no simple default · harness/stall.mjs, qa/selftest-276i.mjs, qa/selftest-2773c.mjs (+1 more) · [RELEASE-2.77.3.md:20](RELEASE-2.77.3.md)
 - `STUDIO_STALL_RATIO_WINDOW_TOKENS` · no simple default · harness/stall.mjs, qa/selftest-276i.mjs, qa/selftest-2773e.mjs · [RUN-UNATTENDED.md:142](RUN-UNATTENDED.md)
 - `STUDIO_STALL_RELEASE_MIN` · no simple default · harness/watch.mjs, qa/selftest-258d.mjs, qa/selftest-2732f.mjs · [PACE-AND-AGENTS.md:73](PACE-AND-AGENTS.md)
 - `STUDIO_STALL_VERIFY_MAX_MIN` · no simple default · harness/stall.mjs, qa/selftest-2731a.mjs · [RUN-UNATTENDED.md:156](RUN-UNATTENDED.md)
@@ -711,10 +711,10 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_TRAIN_RELATED_FIRST` · no simple default · harness/train.mjs, qa/selftest-269p.mjs · [WORK-ORGANIZATION.md:483](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_RESERVE` · no simple default · harness/heavy-budget.mjs, qa/selftest-276j.mjs, qa/selftest-277p.mjs · [WORK-ORGANIZATION.md:544](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_RIDE_ALONG` · no simple default · harness/task.mjs, qa/selftest-263i.mjs, qa/selftest-265s.mjs (+1 more) · [WORK-ORGANIZATION.md:284](WORK-ORGANIZATION.md)
-- `STUDIO_TRAIN_SLOT_PRIORITY_MIN` · no simple default · harness/heavy.mjs, harness/train-daemon.mjs · [WORK-ORGANIZATION.md:523](WORK-ORGANIZATION.md)
+- `STUDIO_TRAIN_SLOT_PRIORITY_MIN` · no simple default · harness/heavy.mjs, harness/train-daemon.mjs · [RELEASE-2.77.3.md:30](RELEASE-2.77.3.md)
 - `STUDIO_TRAIN_STALE_MIN` · default `360` · harness/heavy-budget.mjs, harness/janitor.mjs, harness/train-daemon.mjs (+3 more) · undocumented
-- `STUDIO_TRAIN_STALL_GRACE_S` · no simple default · harness/train-watch.mjs, qa/selftest-2773b.mjs · [WORK-ORGANIZATION.md:319](WORK-ORGANIZATION.md)
-- `STUDIO_TRAIN_STALL_MIN` · no simple default · harness/train-life.mjs, harness/train-watch.mjs, qa/selftest-2773b.mjs · [WORK-ORGANIZATION.md:311](WORK-ORGANIZATION.md)
+- `STUDIO_TRAIN_STALL_GRACE_S` · no simple default · harness/train-watch.mjs, qa/selftest-2773b.mjs · [RELEASE-2.77.3.md:21](RELEASE-2.77.3.md)
+- `STUDIO_TRAIN_STALL_MIN` · no simple default · harness/train-life.mjs, harness/train-watch.mjs, qa/selftest-2773b.mjs · [RELEASE-2.77.3.md:21](RELEASE-2.77.3.md)
 - `STUDIO_TRAIN_TRIES` · default `3` · harness/train.mjs · undocumented
 - `STUDIO_TRAIN_WAIT_MIN` · default `10` · harness/task.mjs, harness/train-daemon.mjs, harness/train.mjs (+7 more) · [WORK-ORGANIZATION.md:221](WORK-ORGANIZATION.md)
 
@@ -894,7 +894,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_REHEARSAL` · no simple default · harness/agent.mjs, harness/lane-at-claim.mjs, harness/rehearsal.mjs (+15 more) · undocumented
 - `STUDIO_RELEASE_BACKUP_DIR` · no simple default · scripts/release-ship.mjs · [RELEASE.md:13](RELEASE.md)
 - `STUDIO_RENDERER_FILE` · no simple default · harness/visual-proof.mjs, qa/chromium.mjs, qa/selftest-270t.mjs · [BROWSER-PLAY.md:85](BROWSER-PLAY.md)
-- `STUDIO_REQUIRE_LANE` · no simple default · harness/task-hold.mjs, harness/task.mjs, qa/selftest-2773d.mjs · [RUN-UNATTENDED.md:242](RUN-UNATTENDED.md)
+- `STUDIO_REQUIRE_LANE` · no simple default · harness/task-hold.mjs, harness/task.mjs, qa/selftest-2773d.mjs · [RELEASE-2.77.3.md:22](RELEASE-2.77.3.md)
 - `STUDIO_REROUTE_MODELS` · no simple default · harness/agent.mjs, harness/reasoning-only.mjs, qa/selftest-230h.mjs · [DIRECTOR-FLOW.md:94](DIRECTOR-FLOW.md)
 - `STUDIO_RESERVE_RAM_GB` · no simple default · harness/heavy-budget.mjs, qa/selftest-268n.mjs, qa/selftest-269q.mjs (+2 more) · [WORK-ORGANIZATION.md:506](WORK-ORGANIZATION.md)
 - `STUDIO_RESULTS_DIR` · no simple default · harness/health.mjs, harness/kickoff.mjs, harness/run-report.mjs (+4 more) · [TEST-RUN.md:30](TEST-RUN.md)
