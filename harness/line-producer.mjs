@@ -381,7 +381,7 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
     for (const [id, h] of Object.entries(holds)) {
       const patch = {};
       const what = [];
-      if (h.cooldownUntil && Date.parse(h.cooldownUntil) <= now) { patch.cooldownUntil = null; patch.cooldownBy = null; what.push(`a cooldown past due (${String(h.cooldownUntil).slice(0, 16)})`); }
+      if (h.cooldownUntil && Date.parse(h.cooldownUntil) <= now) { patch.cooldownUntil = null; patch.cooldownBy = null; patch.cooldownRole = null; what.push(`a cooldown past due (${String(h.cooldownUntil).slice(0, 16)})`); }
       if (h.until && Date.parse(h.until) <= now) { patch.until = null; what.push(`a block past due (${String(h.until).slice(0, 16)})`); }
       if (h.parked?.until && th.parkOver(h.parked.until, doneSet, now)) { patch.parked = null; what.push(`a park whose --until (${h.parked.until}) has come`); }
       if (!what.length) continue;

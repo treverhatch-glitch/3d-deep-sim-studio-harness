@@ -13,7 +13,7 @@
  * STUDIO_BREAKER=off turns it off.
  */
 import { emitEvent, readRecentEvents } from './event.mjs';
-import { setHold, readHolds } from './task-hold.mjs';
+import { setHold, readHolds, unparkRefusal } from './task-hold.mjs';
 import { harnessCaused, personCaused } from './busy.mjs';
 
 const NOT_A_FAILURE = /\brefresh|session cap|turn ceiling|context (?:is |reached|at)|studio was stopped|paused from the war room|stopped by|out of (?:quota|usage)|usage limit|running low/i;
@@ -78,6 +78,8 @@ export function failingTasks(evs = readRecentEvents(20000)) {
 export function unblockTask(taskId, by = 'human', note = '') {
   const h = readHolds()[taskId];
   if (!h?.parked) return { ok: false, message: `${taskId} isn't parked or tripped; nothing to unblock.` };
+  const refused = unparkRefusal(taskId, { by });
+  if (refused) return { ok: false, message: refused };
   setHold(taskId, { parked: null }, { by, msg: `${by} unblocked ${taskId}${note ? `: ${note}` : ''}` });
   emitEvent({ type: 'task.unblocked', agent: by, task: taskId, msg: `${by} unblocked ${taskId}${h.parked.breaker ? ` (breaker: ${h.parked.reason})` : ''}${note ? `: ${note}` : ''}` });
   return { ok: true, message: `${taskId} can start again${h.parked.breaker ? '; the breaker count starts over' : ''}.` };
