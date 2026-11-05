@@ -14,7 +14,18 @@
  *     run that fails without naming a failing test, or passes having run nothing, runs the whole check instead.
  * A focused re-check is a partial run (--only): it stands for no verify, and landing still needs a full verify of the
  * exact tree. Code only; the game's manifest is protected, the harness only reads "focus".
+ *
+ * 2.78.2 (f): a check with no "focus" whose command runs an npm script (npm test, npm run <script>, after any `cd`
+ * steps) whose last step runs vitest or jest gets one inferred (inferFocus): the command's earlier steps, then
+ * `npx vitest run {files}` / `npx jest {files}` (with the script's --config, if it names one). Without it every train
+ * re-check re-ran the whole game suite (~20 min) and a timeout-only red "can't be run alone" stayed red.
+ * STUDIO_FOCUS_INFER=off: no inference (the whole check runs, as before).
  */
+import { resolveRunner, configFlag } from './test-timeouts.mjs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HARNESS_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
 const FILE_EXT = /\.[A-Za-z0-9]{1,6}$/;
@@ -91,7 +102,7 @@ export function clearRunner(command) {
  * The command that runs a game check (a manifest gate: { id, command, focus? }) on these files only:
  * { cmd, how } or { why } (then the whole check runs, and the log says why).
  */
-export function focusCommand(gate, files = []) {
+export function focusCommand(gate, files = [], opts = {}) {
   const list = (files || []).map((f) => normTestPath(f)).filter(Boolean);
   if (!list.length) return { why: 'the verify named no failing test file for it' };
   const bad = list.find((f) => UNSAFE.test(f));
@@ -99,7 +110,38 @@ export function focusCommand(gate, files = []) {
   if (typeof gate?.focus === 'string' && gate.focus.includes('{files}')) return { cmd: gate.focus.split('{files}').join(list.map(quote).join(' ')), how: 'the manifest\'s "focus" command' };
   const runner = clearRunner(gate?.command);
   if (runner) return { cmd: `${String(gate.command).trimEnd()} ${list.map(quote).join(' ')}`, how: `${runner}, the files appended` };
-  return { why: `its command (${String(gate?.command || '').slice(0, 80)}) doesn't clearly run vitest, jest or node --test as its last step and its manifest entry has no "focus" command with {files}` };
+  // 2.78.2 (f): an npm script whose last step runs vitest or jest: the focus command is inferred.
+  const inf = inferFocus(gate?.command, opts);
+  if (inf.focus) return { cmd: inf.focus.split('{files}').join(list.map(quote).join(' ')), how: `focus inferred: ${inf.focus} (${inf.why}; STUDIO_FOCUS_INFER=off: none)`, inferred: inf.focus };
+  return { why: `its command (${String(gate?.command || '').slice(0, 80)}) doesn't clearly run vitest, jest or node --test as its last step${inf.why ? ` (${inf.why})` : ''} and its manifest entry has no "focus" command with {files}` };
+}
+
+/** 2.78.2 (f): STUDIO_FOCUS_INFER=off turns the inferred focus command off. */
+export const focusInferOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_FOCUS_INFER ?? '').trim());
+
+/**
+ * 2.78.2 (f): the focus command a check's command implies, { focus: '<command with {files}>', runner, why } or
+ * { focus: null, why }. Only for a command whose last step runs an npm script (npm test / npm run <script>, read from the
+ * package.json of the folder its `cd` steps lead to, from `root`) whose own last step runs vitest or jest; a command
+ * that runs the runner itself already takes the files appended (clearRunner). The earlier steps of the command are kept
+ * (a `cd`, an unpack step), then `npx vitest run` / `npx jest`, with the script's --config when it names one.
+ */
+export function inferFocus(command, { root = HARNESS_ROOT, env = process.env } = {}) {
+  if (!focusInferOn(env)) return { focus: null, why: 'STUDIO_FOCUS_INFER=off' };
+  const cmd = String(command || '').trim();
+  if (!cmd || clearRunner(cmd)) return { focus: null, why: '' };
+  let r;
+  try { r = resolveRunner(cmd, root); } catch (e) { return { focus: null, why: String(e.message || e).slice(0, 120) }; }
+  if (!r?.runner) return { focus: null, why: r?.why || 'no runner found' };
+  if (!r.npm || !['vitest', 'jest'].includes(r.runner)) return { focus: null, why: `its npm script runs ${r.runner}, not vitest or jest` };
+  const parts = cmd.split(/&&|\|\||;/);
+  const last = parts[parts.length - 1].trim();
+  const at = cmd.lastIndexOf(last);
+  const before = at > 0 ? cmd.slice(0, at) : '';
+  const cfg = configFlag(r.text);
+  const cfgArg = cfg ? ` --config ${/^[\w./\\:-]+$/.test(cfg) ? cfg : quote(cfg)}` : '';
+  const tail = r.runner === 'vitest' ? `npx vitest run${cfgArg} {files}` : `npx jest${cfgArg} {files}`;
+  return { focus: `${before}${tail}`, runner: r.runner, why: `${r.via} runs ${r.runner}` };
 }
 
 /**
