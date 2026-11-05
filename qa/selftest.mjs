@@ -4686,6 +4686,15 @@ if (inShard('selftest-2773c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.3 (a): beta-mode owner records (task type, task visual, a protected config proposal's release) were accepted, then
+// ignored; an unsigned record with an owner key is refused up front; test files are not render files (B-111).
+if (inShard('selftest-2773a')) {
+  const dir = copyRepo();
+  const { selftest2773A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2773a.mjs')).href);
+  await selftest2773A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

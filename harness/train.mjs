@@ -1319,7 +1319,11 @@ export function applyHeldConfig(root, task, { by = '', permission = '', env = pr
   if (git(root, 'cat-file', '-e', `${tip}:${proposalRel(task)}`).status !== 0) return { ok: false, message: `${main} holds no config proposal for ${task} (${proposalRel(task)}).` };
   const ownerKey = /BEGIN PUBLIC KEY/.test(out(git(root, 'show', `${tip}:studio/keys/owner-ed25519.pub.pem`)));
   let released = null;
-  if (String(by || '').trim() && !ownerKey) {
+  // 2.77.3 (B-111): in beta mode the owner's stand-in decides a held protected part as the owner would, key or not
+  // (config-proposal.mjs betaReleaseOk); logged as a beta use.
+  const dgb = String(by || '').trim() ? delegationFor({ action: 'train-config', by, env, root }) : { ok: false };
+  if (dgb.ok && dgb.beta) released = { by: String(dgb.owner || by).trim().slice(0, 60), recordedBy: String(dgb.agent || '').slice(0, 60), beta: true, betaAt: dgb.at };
+  else if (String(by || '').trim() && !ownerKey) {
     const refusal = releaseRefusal({ by, permission, env, ownerKey, stateDir: path.join(root, '.studio') });
     if (refusal) return { ok: false, message: `${refusal.replace(/Landing a tier-C lane/, 'Applying a protected config change')} Nothing was applied.` };
     const perm = permissionText(permission);
@@ -1329,7 +1333,7 @@ export function applyHeldConfig(root, task, { by = '', permission = '', env = pr
   let r;
   try { r = withLandLock(root, () => applyLandedConfig(root, main, [{ task, released }], { by: released?.recordedBy || released?.by || 'train-config' })[0]); } catch (e) { return { ok: false, message: `could not apply it: ${e.message}` }; }
   if (!r) return { ok: false, message: `${task}'s proposal could not be read.` };
-  if (!r.held.length && released) logDecision({ action: 'config-apply', subject: task, by: released.by, as: asOf({ via: released.recordedBy ? 'outside agent' : 'person', permission }), why: `applied ${task}'s held config proposal`, evidence: proposalRel(task), undo: null, root });
+  if (!r.held.length && released) logDecision({ action: 'config-apply', subject: task, by: released.beta ? released.recordedBy : released.by, as: released.beta ? 'beta' : asOf({ via: released.recordedBy ? 'outside agent' : 'person', permission }), why: `applied ${task}'s held config proposal`, evidence: released.beta ? `beta mode ${released.recordedBy}: ${proposalRel(task)}` : proposalRel(task), undo: null, root });
   return { ok: !r.held.length, message: configLine(task, { ...r, decision: '' }) };
 }
 
@@ -1412,7 +1416,7 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
     // first-divergence report, a person (harness/golden-report.mjs).
     const second = rerecordRefusal(e.held, { by, agent: dg.ok ? dg.agent : '', recordedBy: rec?.recordedBy || '', delegated: dg.ok, beta: Boolean(dg.beta) });
     if (second) return { ok: false, message: `Refused: ${second}. Nothing was released.` };
-    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true } : {}), ...(ba.ok ? { beta: ba.via } : {}) };
+    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true, betaAt: dg.at } : {}), ...(ba.ok ? { beta: ba.via, betaAt: ba.doc.at } : {}) };
     return { ok: true, entry: { ...e } };
   });
   if (!r.ok) return r;
