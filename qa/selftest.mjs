@@ -2238,7 +2238,8 @@ if (inShard()) {
     const t2 = add('Lane copy two');
     const t3 = add('Lane copy three');
     g('commit -qam board');
-    const start = (task, agent, script) => run(dir, `node harness/agent.mjs start --role builder --agent ${agent} --task ${task} --lane cartridges/example-sim`, { STUDIO_BUILDER_CMD: `node "${path.join(tmpRoot, script)}" {task} {agent}` });
+    // 2.78.2: these checks are about lane copies with the inline task done (STUDIO_DONE_QUEUE=0); the queued path is checked in selftest-2782a.
+    const start = (task, agent, script) => run(dir, `node harness/agent.mjs start --role builder --agent ${agent} --task ${task} --lane cartridges/example-sim`, { STUDIO_DONE_QUEUE: '0', STUDIO_BUILDER_CMD: `node "${path.join(tmpRoot, script)}" {task} {agent}` });
     start(t1, 'lane-a1', 'lane-agent.mjs');
     const logA = fs.readFileSync(path.join(dir, '.studio/agents/lane-a1.log'), 'utf8');
     const mainLog = g('log --oneline').stdout;
