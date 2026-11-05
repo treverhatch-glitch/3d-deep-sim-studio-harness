@@ -248,6 +248,7 @@ export function alertsNow(f, { env = process.env, state = {}, passWhy = [] } = {
     if (/^task\.train\.(died|dead|crashed)$/.test(e.type)) add(`train-dead:${id}`, 'fix', `Train ${id} died: ${short(String(e.msg || '').replace(/^train \S+:\s*/, ''), 200)}`);
     else if (e.type === 'task.train.red_main') add('train-red-main', 'fix', `Main is red: ${short(String(e.msg || '').replace(/^train \S+:\s*/, ''), 240)}`);
     else if (e.type === 'task.train.red' && !e.meta?.infra && !e.meta?.infrastructure && !e.meta?.flaky && !/flaky|infrastructure|lane copy (?:is )?missing|crlf|re-?queue/i.test(String(e.msg || ''))) add(`train-red:${id}`, 'fix', `Train ${id} is red on real failures: ${short(String(e.msg || '').replace(/^train \S+:\s*/, ''), 240)}`);
+    else if (e.type === 'task.owner_only') add(`owner-only:${e.task || '?'}`, 'fix', `${e.task || 'A task'} waits for the owner (parked, no builder relaunched): ${short(String(e.msg || '').replace(/^T-\d+ waits for the owner:\s*/, ''), 220)}`);
     else if (e.type === 'session.stall') add(`stall:${e.task || e.meta?.target || '?'}`, 'fix', `Stuck: ${short(e.msg, 240)}`);
     else if (e.type === 'whole.error') add('harness-error:whole', 'fix', `Harness error (the whole-game check): ${short(e.msg, 240)}`);
     else if (e.type === 'supervisor.hub_restart' && e.status === 'warn') add('harness-error:hub', 'fix', `Harness error: ${short(e.msg, 240)}`);

@@ -62,7 +62,8 @@ import { laneList, readHolds } from './task-hold.mjs';
 import { engineLaunch } from './engine-tracks.mjs';
 import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport, isLaneWorktree, LANES_DIR, laneLive } from './worktree.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
-import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
+import { ownerOnlyStep } from './owner-only.mjs';
+import { markExhausted, quotaKeyFor, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
 import { sessionLimits, heartbeatCheck, newRedCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
 import { agentEnv, nimKeyMissing, nimModel, NIM_DEFAULT_MODEL, agentLikeName } from './agent-env.mjs';
@@ -725,7 +726,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
     // 2.58.0 (PU-40, P-051): a custom command's limit is saved per program (custom:<program>), the key the launch
     // check (budgetStopFor) matches; as plain "custom" nothing matched it and the next launch hit the limit again.
     const ck = tool === 'custom' ? customKey(cmd ?? (process.env[`STUDIO_${roleKey(role)}_CMD`] || process.env.STUDIO_AGENT_CMD || '')) || 'custom' : null;
-    const who = other || ck || (order.includes(`${tool}:${model}`) ? `${tool}:${model}` : tool);
+    const who = other || ck || (order.includes(`${tool}:${model}`) ? `${tool}:${model}` : quotaKeyFor(tool, model));
     const line = log.split('\n').slice(-30).reverse().find((l) => /reset|try again/i.test(l) && QUOTA_ERROR.test(l) && (toolNamed(l) || who) === who) || quota.line;
     limitMark = { on: who, ...markExhausted(who, line) };
     // The command stopped at a limit its line names another tool for (a wrapper around that tool): hold the command too.
@@ -771,7 +772,11 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
       : bad
       ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : reasoningOnly ? 'it replied with reasoning only (no answer, no work): a failed hand-off; the Director routes this task to another model family' : agyCut ? (agyCut === 'denied' ? 'agy ended the session mid-task: one shell command was refused in headless mode (one plain command per call; see GEMINI.md)' : 'agy ended the session mid-task: its agent went idle while a background command (a test run) was still running (run commands in the foreground)') : `exit code ${code}`}.${agySaid}${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${agySaid}${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work ${copyDir ? 'was in its copy and is' : 'is in the tree and'} saved to ${patch}.` : ' No uncommitted work.'}${onBranch} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
-    pauseTask(id, agent, af && !af.ok && af.output ? `${note} Launcher verify: ${af.output.replace(/\n/g, ' ')}` : note, { force: true });
+    // 2.78.2 (d): the harness's own refusal of an owner-only step at the end of the session's output goes into the hand-back,
+    // where pauseTask parks the task for the owner (harness/owner-only.mjs) instead of relaunching a builder on it.
+    const ownerSaid = !stop && !limit ? ownerOnlyStep(String(log).slice(-6000)) : null;
+    const noteOut = ownerSaid ? `${note} Its last output said: "${ownerSaid.phrase}".` : note;
+    pauseTask(id, agent, af && !af.ok && af.output ? `${noteOut} Launcher verify: ${af.output.replace(/\n/g, ' ')}` : noteOut, { force: true });
     if (reasoningOnly) emitEvent({ type: 'agent.reasoning_only', agent, model, task: id, status: 'warn', msg: `${agent} (${model}) replied with reasoning only on ${id}: failed hand-off, the next session goes to another model family`, meta: { role, tool } });
     handed.push({ task: id, patch });
     if (!capped && !limit && !stop) parkIfLooping(id);

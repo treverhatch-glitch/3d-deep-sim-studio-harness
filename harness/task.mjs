@@ -31,6 +31,7 @@ import { recordTrust } from './gate-trust.mjs';
 import { isEngineChurn, engineGates, relatedTestsOn } from './game-gates.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
 import { checkBreaker, isFailureNote, reasonKey, unblockTask } from './breaker.mjs';
+import { parkIfOwnerOnly } from './owner-only.mjs';
 import { canaryEnd, isCanary, recordCanary, modelFor } from './canary.mjs';
 import { claimActive, claimOwner } from './busy.mjs';
 import { startSummary, carryForward } from './carry.mjs';
@@ -1249,7 +1250,10 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
   // PU-58: a canary task handed back for a failure (the impossible exit records its own outcome).
   if (!cause && isFailureNote(note)) { try { canaryEnd(target.id, 'handed-back', { agent: who }); } catch { /* a record, never a blocker */ } }
   // 2.30c (#8): a second hand-back for the same reason parks the task with a card; other lanes go on.
-  const tripped = checkBreaker(target.id, note, who);
+  // 2.78.2 (d): a hand-back that names a step only the owner can do waits for the owner (harness/owner-only.mjs), before
+  // the breaker, so a task whose first hand-back says so isn't relaunched for a second one.
+  const ownerPark = cause ? null : parkIfOwnerOnly(target.id, `${given.prose || ''}\n${note || ''}`, { who });
+  const tripped = ownerPark ? ownerPark.why : checkBreaker(target.id, note, who);
   // "blocked by T-12" (or "waits for", "needs T-12 first") in the note: hold the task until T-12 is done,
   // so it isn't picked up again only to be handed back for the same reason (Jed's run).
   const deps = [...String(note || '').matchAll(/\b(?:blocked (?:by|on)|waits? (?:for|on)|needs|after)\s+((?:T-\d+(?:\s*(?:,|and)\s*)?)+)/gi)].flatMap((m) => m[1].match(/T-\d+/g) || []);

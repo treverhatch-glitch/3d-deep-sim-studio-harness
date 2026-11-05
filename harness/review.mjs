@@ -3,6 +3,8 @@
  * harness/review.mjs — a second opinion from a model made by another company, in one command.
  *
  *   npm run review -- <TASK_ID> [--local] [--implementer <model>] [--dry-run] [--router-only]
+ *   npm run review -- record <TASK_ID> --by <reviewer name> --family <xai|deepseek|openai|google|anthropic|…>
+ *                     --file <review.md> [--model <m>] [--implementer <model>] [--no-commit]
  *
  * Gathers the task, its spec (for system tasks) and the diff of every commit tagged with it, sends
  * them to the reviewer chain through the router (--local: only your Ollama model, free and offline),
@@ -28,6 +30,7 @@ import { routeChatCompletion, getRouterMatrix } from './route.mjs';
 import { scrub } from './secrets.mjs';
 import { spawnAgentSync } from './launch.mjs';
 import { contractForReview } from './contracts.mjs';
+import { WORKER_NAME, DECIDER_ROLES } from './permission.mjs';
 
 const DIFF_CAP = 24000;
 const VERDICT_WORDS = /\b(approve[sd]?|lgtm|request(ed)? changes|changes requested|reject(ed)?|blocking)\b/gi;
@@ -158,7 +161,7 @@ export function markTried(taskId) {
 }
 
 export async function cliReview(g, messages, { run = spawnSync } = {}) {
-  const { exhaustedUntil } = await import('./budget.mjs');
+  const { exhaustedUntil, exhaustedFor } = await import('./budget.mjs');
   const text = messages.map((m) => `${m.role === 'system' ? 'Instructions' : 'Review this'}:\n${m.content}`).join('\n\n');
   const tried = [];
   for (const { tool, model } of reviewerTools(g.builder)) {
@@ -167,7 +170,9 @@ export async function cliReview(g, messages, { run = spawnSync } = {}) {
       tried.push(`${tool}: not installed`);
       continue;
     }
-    if (exhaustedUntil(tool)) {
+    // 2.78.2 (d): the tool:model mark first, then the tool's: Argon's 429 no longer skips agy's Flash. A tool-wide mark
+    // (the tool is out for every model) still does.
+    if (exhaustedUntil(tool) || (tool !== 'agy' && model && exhaustedFor(tool, model))) {
       tried.push(`${tool}: out of quota`);
       continue;
     }
@@ -176,6 +181,10 @@ export async function cliReview(g, messages, { run = spawnSync } = {}) {
     // Claude builder's work would have been the same family) and reads the review from stdin (H-2: on Windows agy split
     // a `-p <text>` argument at its spaces); no --mode, so it can't edit. agyReview below.
     const agyRun = tool === 'agy' ? await agyReview(model) : null;
+    if (agyRun?.allOut) {
+      tried.push(`agy: out of quota for ${agyRun.allOut.join(', ')}`);
+      continue;
+    }
     const argv = tool === 'claude' ? ['claude', '-p', '--output-format', 'text', '--disallowedTools', 'Bash,Edit,Write,MultiEdit,NotebookEdit', ...(model ? ['--model', model] : [])]
       : tool === 'codex' ? ['codex', 'exec', '--sandbox', 'read-only', ...(model ? ['-m', model] : []), '-']
       : agyRun ? agyRun.argv
@@ -199,8 +208,8 @@ export async function cliReview(g, messages, { run = spawnSync } = {}) {
     const { limitLine } = await import('./budget.mjs');
     const said = limitLine(r.stderr, r.status === 0 ? '' : r.stdout, r.status ?? 1);
     if (said && run === spawnSync) {
-      const { markExhausted } = await import('./budget.mjs');
-      markExhausted(tool, said);
+      const { markExhausted, quotaKeyFor } = await import('./budget.mjs');
+      markExhausted(quotaKeyFor(tool, agyRun?.model || model), said);
     }
     tried.push(`${tool}: exit ${r.status}${r.stderr ? ` (${String(r.stderr).trim().split('\n').pop().slice(0, 120)})` : ''}`);
   }
@@ -215,14 +224,107 @@ export async function cliReview(g, messages, { run = spawnSync } = {}) {
  */
 export async function agyReview(asked = null, env = process.env) {
   const { agyOptions, isGeminiModel, AGY_DEFAULT_MODEL } = await import('./agent.mjs');
-  const model = [asked, env.STUDIO_TOOL_AGY_MODEL].map((m) => String(m || '').trim()).find((m) => isGeminiModel(m)) || AGY_DEFAULT_MODEL;
+  const { exhaustedFor } = await import('./budget.mjs');
+  // 2.78.2 (d): the first Gemini model not out of quota: the one asked for, STUDIO_TOOL_AGY_MODEL, the agy default, then
+  // STUDIO_REVIEW_AGY_FALLBACK (comma list, default the Flash model in harness/model-pools.mjs). A model marked out
+  // (agy:<model>) is skipped, not the whole tool; allOut names the models when every one is out.
+  const fallback = String(env.STUDIO_REVIEW_AGY_FALLBACK || 'gemini-3.8-flash-high').split(',');
+  const cands = [...new Set([asked, env.STUDIO_TOOL_AGY_MODEL, AGY_DEFAULT_MODEL, ...fallback].map((m) => String(m || '').trim()).filter((m) => isGeminiModel(m)))];
+  const model = cands.find((m) => !exhaustedFor('agy', m)) || null;
+  if (!model) return { argv: null, model: cands[0] || AGY_DEFAULT_MODEL, allOut: cands };
   return { argv: ['agy', ...agyOptions(model, { ...env, STUDIO_AGY_PRINT_TIMEOUT: '900s', STUDIO_AGY_MODE: 'off' })], model };
+}
+
+/**
+ * 2.78.2 (d): who may record a review done outside the harness (a person, grokbot through xAI, a DeepSeek chat): a person,
+ * the orchestrator (an agent outside the harness) or a Producer/Director session; never a worker (a launched builder,
+ * qa, reviewer … session, or a worker's name in --by or STUDIO_LOCK_OWNER): a worker recording its own review would
+ * approve its own work. Returns the refusal, or null.
+ */
+export function recordRefusal(by, env = process.env, { workerName = WORKER_NAME, deciders = DECIDER_ROLES } = {}) {
+  const role = String(env.STUDIO_ROLE || '').trim();
+  const owner = String(env.STUDIO_LOCK_OWNER || '').trim();
+  if (role && !deciders.test(role)) return `Refused: a launched ${role} session can't record a review; a person, the orchestrator, or a Producer or Director session can.`;
+  const worker = [owner].find((n) => n && workerName.test(n));
+  if (worker) return `Refused: ${worker} is a worker agent; a person, the orchestrator, or a Producer or Director session records an outside review.`;
+  return null;
+}
+
+/**
+ * 2.78.2 (d): record a review somebody else did outside the harness (the cross-family reviewer tools were all out: grokbot via
+ * xAI reviewed T-174). The family must differ from the implementer's; the file must carry a verdict (the last
+ * `VERDICT: APPROVE|CHANGES` or `Verdict: approve|request changes` line). Written to studio/reviews/ with the same
+ * header as `npm run review` plus a line naming the outside reviewer, logged, and committed unless noCommit.
+ * Returns { ok, file, verdict } or { ok: false, error }.
+ */
+export function recordOutsideReview(id, { by, family, file, model = null, implementer = null, noCommit = false, env = process.env } = {}) {
+  const no = recordRefusal(by, env);
+  if (no) return { ok: false, error: no };
+  if (!String(by || '').trim()) return { ok: false, error: 'Say who reviewed it: --by <reviewer name>.' };
+  if (!/^[a-z0-9][a-z0-9._-]{1,30}$/i.test(String(family || ''))) return { ok: false, error: 'Say the reviewer\'s model family: --family <xai|deepseek|openai|google|anthropic|…>.' };
+  if (!file) return { ok: false, error: 'Give the review text: --file <review.md>.' };
+  let text;
+  try { text = fs.readFileSync(path.resolve(file), 'utf8').replace(/\r\n/g, '\n'); } catch (e) { return { ok: false, error: `Can't read ${file}: ${e.code || e.message}` }; }
+  const g = gather(id, { implementer });
+  if (g.error) return { ok: false, error: g.error };
+  const fam = modelFamily(String(family).toLowerCase());
+  const impl = modelFamily(g.builder);
+  if (fam === 'unknown') return { ok: false, error: `Unknown family "${family}".` };
+  if (impl !== 'unknown' && fam === impl) return { ok: false, error: `Refused: ${by} (${fam}) is the same family as the builder (${g.builder}, ${impl}); a review from another family is what counts.` };
+  const verdicts = [...text.matchAll(/^[ \t>*_#-]*verdict\**\s*:\**\s*(approve[sd]?|lgtm|changes|request(?:ed)? changes|changes requested|reject(?:ed)?)\b/gim)].map((m) => m[1].toLowerCase());
+  if (!verdicts.length) return { ok: false, error: `${file} has no verdict line: end it with "VERDICT: APPROVE" or "VERDICT: CHANGES".` };
+  const verdict = /^(approve|lgtm)/.test(verdicts.at(-1)) ? 'approve' : 'request changes';
+  // Only the header's verdict line carries verdict words, so the done-check reads one answer.
+  const body = scrub(text.replace(/^[ \t>*_#-]*verdict\**\s*:.*$/gim, '').trim()).text.replace(VERDICT_WORDS, (w) => (/^appro|^lgtm/i.test(w) ? 'OK' : 'asks for changes'));
+  const date = new Date().toISOString().slice(0, 10);
+  const label = String(model || by).replace(/[^a-z0-9.-]+/gi, '-');
+  const abs = path.join(REPO_ROOT, 'studio', 'reviews', `${date}-${id}-outside-${label}.md`);
+  const out = [
+    `model-family: ${fam}`,
+    `implementer-family: ${impl}`,
+    '',
+    `# Review of ${id}: ${g.task.title}`,
+    '',
+    `Outside reviewer: ${by} (${fam}${model ? `, ${model}` : ''}), done outside the harness; recorded by ${String(env.STUDIO_LOCK_OWNER || env.USER || env.USERNAME || 'a person').trim()} with npm run review -- record. Builder: ${g.builder}. Commits: ${g.commits.map((c) => c.hash.slice(0, 7)).join(', ')}.`,
+    '',
+    `Verdict: ${verdict}`,
+    '',
+    '## Reviewer notes',
+    '',
+    body || '(none)',
+    '',
+  ].join('\n');
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, out);
+  const rel = path.relative(REPO_ROOT, abs).split(path.sep).join('/');
+  emitEvent({ type: 'review.recorded', agent: String(env.STUDIO_LOCK_OWNER || 'person'), task: id, to: 'producer', msg: `${id}: a review by ${by} (${fam}, outside the harness) was recorded: ${verdict}`, meta: { by, family: fam, model, verdict, file: rel } });
+  settleOwed(id);
+  let committed = null;
+  if (!noCommit) {
+    const git = (...a) => spawnSync('git', a, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
+    const add = git('add', '--', rel);
+    const c = add.status === 0 ? git('commit', '-m', `Review: ${id} by ${by} (${fam}, outside the harness): ${verdict}`, '--', rel) : add;
+    committed = c.status === 0;
+    if (!committed) return { ok: true, file: rel, verdict, committed: false, warn: `written but not committed: ${String(c.stderr || c.stdout).trim().split('\n').slice(-3).join(' | ')}` };
+  }
+  return { ok: true, file: rel, verdict, committed };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const id = argv.find((a) => /^T-\d+$/.test(a));
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  if (argv[0] === 'record') {
+    const rid = argv.find((a) => /^[A-Z]+-\d+$/.test(a));
+    if (!rid) {
+      console.error('Usage: npm run review -- record <TASK_ID> --by <reviewer name> --family <xai|deepseek|openai|google|anthropic|…> --file <review.md> [--model <m>] [--no-commit]');
+      process.exit(1);
+    }
+    const r = recordOutsideReview(rid, { by: flag('by'), family: flag('family'), file: flag('file'), model: flag('model'), implementer: flag('implementer'), noCommit: argv.includes('--no-commit') });
+    if (!r.ok) { console.error(r.error); process.exit(1); }
+    console.log(`${rid}: ${r.verdict}, recorded from ${flag('by')} (outside the harness). Written to ${r.file}${r.committed ? ' and committed' : r.warn ? `; ${r.warn}` : ''}`);
+    process.exit(r.warn ? 1 : 0);
+  }
   if (!id) {
     console.error('Usage: npm run review -- <TASK_ID> [--local] [--implementer <model>] [--dry-run]');
     process.exit(1);

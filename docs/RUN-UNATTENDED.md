@@ -136,6 +136,18 @@ Scheduler (Windows); `--uninstall` removes it.
   the pace allows). `npm run line -- status`; `STUDIO_LINE_PRODUCER=report|off`.
 - **Only real limit errors count as out of quota** (a 429, "usage limit reached", "credit balance is too
   low"). `STUDIO_QUOTA_SKIP=off` turns quota-skipping off entirely when you watch usage outside the harness.
+- **A usage limit is saved per model for tools with a quota per model (2.78.2).** A 429 on one Gemini model through agy is
+  marked `agy:<model>` in `.studio/tool-quota.json`, not `agy`, so the tool's other models keep running (a launch, the
+  reviewer, the router's pools and the fallback check the `tool:model` mark first, then the tool's). Errors that are
+  really tool-wide (auth, binary missing) and old tool-only marks still mark the whole tool. `STUDIO_QUOTA_MODEL_TOOLS`
+  (default `agy,gemini`; `all`, or `off` for the old tool-wide key) lists the tools that get per-model marks.
+- **A task that waits for the owner (2.78.2).** When a hand-back note, or the end of a session's output, carries the
+  harness's own refusal of a step only the owner can do ("Only the owner can approve these" from the protected check, "needs
+  the owner's signature", "no owner key at", "only the owner approves weakening a test", "exceptions are the owner's call",
+  or the builder's own "owner-only step" / "waits for the owner" / "needs the owner's approval"), harness/owner-only.mjs parks
+  the task with reason `owner-only` at the orchestrator's rank, sends an event to the orchestrator (the Communicator turns it
+  into an alert) and the supervisor starts no builder on it until `npm run task -- unpark <ID> --by <name>` (the orchestrator
+  or the owner). `STUDIO_OWNER_ONLY_PARK=off` turns it off.
 - **The stall watchdog (harness/stall.mjs).** A session with no file write, commit or task change for
   `STUDIO_STALL_MIN` (15) minutes, or past its wall-clock cap (`STUDIO_SESSION_MAX_MIN`, 90; planning roles
   `STUDIO_SESSION_PLAN_MAX_MIN`, 25), is ended and its task handed back (`session.stall`). 2.77.3 (B-109): the

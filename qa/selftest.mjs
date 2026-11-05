@@ -4866,6 +4866,15 @@ if (inShard('selftest-2781h')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.2 (d): a 429 on one Gemini model no longer marks all of agy; an outside review can be recorded; a hand-back that
+// names an owner-only step parks the task for the owner instead of relaunching builders.
+if (inShard('selftest-2782d')) {
+  const dir = copyRepo();
+  const { selftest2782D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782d.mjs')).href);
+  await selftest2782D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

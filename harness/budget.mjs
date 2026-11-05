@@ -244,6 +244,21 @@ export function markExhausted(tool, text = '', now = Date.now()) {
   fs.writeFileSync(QUOTA_FILE, `${JSON.stringify(q, null, 2)}\n`);
   return q[tool];
 }
+/**
+ * 2.78.2 (d): the key a usage-limit stop is saved under. A limit on one model of a tool that keeps a quota per model
+ * (agy runs Gemini models side by side: a 429 on Argon said nothing about Flash) is saved as `tool:model`; any other
+ * stop, and an error that is really tool-wide (auth, binary missing: those callers pass the tool), under the tool.
+ * STUDIO_QUOTA_MODEL_TOOLS lists the tools that get per-model keys (default "agy,gemini"; "all" for every tool, "off"
+ * for none: the tool-wide key as before).
+ */
+export function quotaKeyFor(tool, model = '', env = process.env) {
+  const t = String(tool || '');
+  const m = String(model || '').trim();
+  if (!t || !m || /^(unknown|custom)$/i.test(m) || t.includes(':') || t === 'custom') return t;
+  const list = String(env.STUDIO_QUOTA_MODEL_TOOLS || 'agy,gemini').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+  if (list.includes('off') || list.includes('none')) return t;
+  return list.includes('all') || list.includes(t.toLowerCase()) ? `${t}:${m}` : t;
+}
 export function clearQuota(tool) {
   const q = readJson(QUOTA_FILE, {});
   if (!q[tool]) return false;
@@ -276,7 +291,9 @@ export function cleanQuotaMarks(now = Date.now()) {
   const kept = [];
   for (const [tool, m] of Object.entries(q)) {
     const other = toolNamed(m.line || m.why);
-    const why = Date.parse(m.until) <= now ? 'it had expired' : !m.version ? `it was written by a harness before 2.26 (said: "${String(m.why || '').slice(0, 80)}")` : other && other !== tool ? `the error it quoted was ${other}'s, not ${tool}'s` : null;
+    // 2.78.2 (d): a tool:model mark is its tool's mark (agy:gemini-x quoting agy's error is agy's).
+    const base = tool.startsWith('custom:') ? tool : tool.split(':')[0];
+    const why = Date.parse(m.until) <= now ? 'it had expired' : !m.version ? `it was written by a harness before 2.26 (said: "${String(m.why || '').slice(0, 80)}")` : other && other !== base ? `the error it quoted was ${other}'s, not ${tool}'s` : null;
     if (why) {
       delete q[tool];
       dropped.push({ tool, why });
@@ -318,6 +335,14 @@ export const exhaustedUntil = (tool, now = Date.now()) => {
   return q && Date.parse(q.until) > now ? q.until : null;
 };
 export const quotaMark = (tool) => readJson(QUOTA_FILE, {})[tool] || null;
+/**
+ * 2.78.2 (d): until when this tool's model is out: the `tool:model` mark first, then the tool-wide mark (old marks, and
+ * errors that are really tool-wide, are saved under the tool). Null when neither stands.
+ */
+export const exhaustedFor = (tool, model = '', now = Date.now()) => {
+  const m = String(model || '').trim();
+  return (m && !String(tool).includes(':') ? exhaustedUntil(`${tool}:${m}`, now) : null) || exhaustedUntil(tool, now);
+};
 /** The first tool in the order that isn't out of quota, starting from the preferred one. */
 export function pickTool(preferred, now = Date.now()) {
   const order = [...new Set([preferred, ...(readBudget().order || [])].filter(Boolean))];
