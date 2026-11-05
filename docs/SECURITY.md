@@ -68,6 +68,12 @@
   conflict). A lock in the lane's own name still refuses; `STUDIO_LANE_LOCKS=block` restores the old refusal. The main
   checkout is judged as before. A merge commit is judged only on the files it doesn't take unchanged from the branch
   merged in (its own diff and resolved conflicts), so `git merge main` isn't refused for what main brought.
+- (2.77.3, M4) A note folder (`STUDIO_LOCK_NOTE_DIRS`, default `studio/reviews`; `off` for none) holds one file per
+  note, so a lock there protects nobody's edit: a by-hand claim of the whole folder is refused (claim the one file you
+  write), and another owner's lock on a file in it is a note at commit, not a refusal. A reviewer's lock on
+  `studio/reviews`, held for 90+ min while it ran a verify, refused every main commit that carried a review file. A
+  reviewer session (`STUDIO_ROLE=reviewer`, or an agent named `reviewer-…`) can't run `npm run verify` or the gates at
+  all: it reads the verify record the builder or the train left and writes its review file only.
 - (2.58.5) `task add "<title>" --start --agent <you>` queues a task and claims it in one step (no moment where it waits
   unclaimed for another agent to pick).
 

@@ -4677,6 +4677,15 @@ if (inShard('selftest-2773d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.3 (c): an agy builder's session stays open across turns, with follow-ups while its task is in progress (C1 / B-99);
+// a reviewer reads and writes one review file: no verify, no studio/reviews folder lock (M4).
+if (inShard('selftest-2773c')) {
+  const dir = copyRepo();
+  const { selftest2773C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2773c.mjs')).href);
+  await selftest2773C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {
