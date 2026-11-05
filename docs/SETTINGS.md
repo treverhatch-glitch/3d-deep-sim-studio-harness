@@ -43,7 +43,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 
 - `STUDIO_AUTO_FINISH` · no simple default · harness/agent.mjs, harness/bench.mjs, qa/selftest-2732f.mjs (+4 more) · undocumented
 - `STUDIO_AUTO_NAME` · no simple default · harness/agent.mjs, qa/selftest-2781e.mjs · [AGENT-TOOLS.md:32](AGENT-TOOLS.md)
-- `STUDIO_AUTO_TRICKS` · no simple default · harness/task.mjs, qa/selftest-2585q.mjs, qa/selftest-258b.mjs (+1 more) · [SESSIONS.md:143](SESSIONS.md)
+- `STUDIO_AUTO_TRICKS` · no simple default · harness/task.mjs, qa/selftest-2585q.mjs, qa/selftest-258b.mjs (+1 more) · [SESSIONS.md:144](SESSIONS.md)
 
 ## AWAY_* (2)
 
@@ -76,7 +76,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 ## CACHE_* (2)
 
 - `STUDIO_CACHE_MAX_GB` · no simple default · harness/janitor.mjs, qa/selftest-268o.mjs · [RUN-UNATTENDED.md:288](RUN-UNATTENDED.md)
-- `STUDIO_CACHE_READ_WEIGHT` · no simple default · harness/budget.mjs, harness/task-budget.mjs, harness/token-weight.mjs (+8 more) · [SESSIONS.md:79](SESSIONS.md)
+- `STUDIO_CACHE_READ_WEIGHT` · no simple default · harness/budget.mjs, harness/task-budget.mjs, harness/token-weight.mjs (+8 more) · [SESSIONS.md:80](SESSIONS.md)
 
 ## CHANGE_* (4)
 
@@ -885,7 +885,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_CHARTER` · no simple default · harness/producer-refill.mjs · undocumented
 - `STUDIO_CI_NOTIFY_CMD` · no simple default · harness/ci-watch.mjs, qa/selftest-230h.mjs · [DIRECTOR-FLOW.md:116](DIRECTOR-FLOW.md)
 - `STUDIO_CONTRACT_TIMEOUT_S` · no simple default · harness/contracts.mjs · [CONTRACTS.md:92](CONTRACTS.md)
-- `STUDIO_CURRENT_TASK_FILE` · default `'auto'` · harness/task.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:68](SESSIONS.md)
+- `STUDIO_CURRENT_TASK_FILE` · default `'auto'` · harness/task.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:69](SESSIONS.md)
 - `STUDIO_DAILY_TOKEN_CAP` · no simple default · harness/bench.mjs, harness/budget.mjs, harness/retro.mjs (+8 more) · [AGENT-TOOLS.md:292](AGENT-TOOLS.md)
 - `STUDIO_DECISION_MIN_N` · no simple default · harness/decisions-log.mjs, qa/selftest-271x.mjs · [AUTONOMY.md:404](AUTONOMY.md)
 - `STUDIO_DISK_MIN_FREE_GB` · no simple default · harness/digest.mjs, harness/machine.mjs, harness/upgrade-preflight.mjs (+3 more) · [RELEASE.md:72](RELEASE.md)
