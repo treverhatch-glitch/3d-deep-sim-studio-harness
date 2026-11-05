@@ -69,6 +69,15 @@ unless it says otherwise. 2.78.1 adds no human approval step.
 
 - Everything on Windows (the crew's PC): the live `.env` read, the orphan reaper's process tree, the lane-copy reuse in the exact "still in use" state, the engine worktree checks.
 - agy: which event real agy prints at a turn end (parsing is tolerant), and `agy --version`.
+- Fixed before release (the first push's CI, qa/selftest-2781h.mjs):
+  - A hand-back entry is under 3k with the facts again: the facts block is compact (at most 12 files and 5 commits
+    listed, "and N more", 1600 characters) and the prose is cut to the room it leaves (all platforms).
+  - B-119 on Windows: engine worktree paths are compared by real path, any letter case, and handed back in the
+    studio's spelling (git prints long names; the studio may hold a short name such as `RUNNER~1`). The land script's
+    gate worktree named by another spelling was not recognised before: an agent could have reused it.
+  - Unity gate beside a heavy holder: Windows scans the machine on every heavy wait, so the engine line opened on a
+    4-core runner. The line now also needs the scan to show room for an engine land beside a game job (cores without
+    overcommit, usable RAM); `STUDIO_ENGINE_LINE_ROOM=off` opens it on any fresh scan. Still unchecked on Windows itself.
 
 ## Upgrade note for Patch
 

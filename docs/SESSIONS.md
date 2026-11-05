@@ -26,12 +26,15 @@ The studio's files are the memory, not the chat.
   `STUDIO_ERROR_MEMORY_MAX` (500) signatures. `STUDIO_ERROR_MEMORY=off` turns it off. No model is called.
 - **Hand-back facts (2.66.0).** Every hand-back (`task pause`, the merge train's drop, the watcher, a session that
   ended holding its task) starts with a block the harness writes, not the agent (harness/handback-facts.mjs): the
-  files changed since the task's start commit (`git diff --name-only`, untracked files too, at most 30 named plus a
+  files changed since the task's start commit (`git diff --name-only`, untracked files too, at most 12 named plus a
   count), the newest gate run since the task started with PASS/FAIL per gate, the failure signature (the first
   failing gate and its first failing test line, normalised, with a short `sig` hash), the failing seed when the log
   names one, and the last verify log's path. The gate evidence is, newest first: the log the note names (the train's
   `Full log:`), a refused `task done` (`.studio/handback-facts/<ID>.json`), the holder's own verify record. The
-  note's 20-line cap applies to the prose only; events and the breaker read the prose. The next agent's brief
+  note's 20-line cap applies to the prose only; events and the breaker read the prose. 2.78.1: the whole entry (its
+  heading, the facts and the prose) stays under 3k characters (`HANDBACK_ENTRY_MAX` in harness/task.mjs, 2900): the
+  block is kept to 1600 characters (fewer files and commits listed, at most 5 commits plus "and N more", then shorter
+  lines) and the prose is cut to the room left. The next agent's brief
   (`.studio/briefs/<ID>.md`) shows the newest block first, inside the marked block (file names and log lines come
   from the work), and leaves older blocks out of the notes.
 - **Mid-debug exception.** With a live repro, an agent may keep going to the ceiling:

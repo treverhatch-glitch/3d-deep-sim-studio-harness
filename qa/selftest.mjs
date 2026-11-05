@@ -4857,6 +4857,15 @@ if (inShard('selftest-2781d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.1 (h): the first push's CI failures: a hand-back entry under 3k with the facts, B-119's engine worktree by real
+// path in the studio's spelling (Windows short names), the engine line only where the machine has room for both.
+if (inShard('selftest-2781h')) {
+  const dir = copyRepo();
+  const { selftest2781H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781h.mjs')).href);
+  await selftest2781H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

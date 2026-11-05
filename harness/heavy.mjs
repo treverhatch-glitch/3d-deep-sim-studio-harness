@@ -103,7 +103,7 @@ import { DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { emitEvent } from './event.mjs';
 import { ramCheck } from './ram.mjs';
 import { parseStudioEnv } from './dotenv.mjs';
-import { machineProfile, slotsFor, budgetState, jobClaim, admit, claimOf, describeBudget, oomSignature, maxConcurrent, capGroup, unityMinFreeGb, isUnityKind, scanFreeGb } from './heavy-budget.mjs';
+import { machineProfile, slotsFor, budgetState, jobClaim, admit, claimOf, describeBudget, oomSignature, maxConcurrent, capGroup, unityMinFreeGb, isUnityKind, scanFreeGb, engineLineRoom } from './heavy-budget.mjs';
 
 const PREFIX = 'machine-heavy';
 const SLOT_RE = /^machine-heavy-(\d+)\.lock$/;
@@ -235,9 +235,10 @@ export function heavySlotsAt(root, env = process.env, profile = null) {
 }
 /**
  * 2.78.1 (f, B-117): the engine line: how many engine lands (an engine train's land run, harness/unity-gate.mjs) run at
- * once beside the game's work, STUDIO_ENGINE_SLOTS (default 1; live like the slots), when a machine scan is known (with
- * none an engine land shares the game's slots, and still gives way to the game's train). 0 or off: no engine line, an
- * engine land shares the game's slots and goes as a landing, as in 2.78.0.
+ * once beside the game's work, STUDIO_ENGINE_SLOTS (default 1; live like the slots), when a machine scan is known and
+ * shows room for an engine land beside a game job (heavy-budget.mjs engineLineRoom; with neither an engine land shares
+ * the game's slots, and still gives way to the game's train). 0 or off: no engine line, an engine land shares the
+ * game's slots and goes as a landing, as in 2.78.0.
  */
 export function engineSlotsAt(root, env = process.env) {
   if (off(env.STUDIO_ENGINE_SLOTS) && !isNum(env.STUDIO_ENGINE_SLOTS)) return 0;
@@ -584,13 +585,18 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   // game's train verifies, waits for the train's slot priority (M6) and for a quiet hold (C2c). Its RAM still counts.
   // The line itself needs a machine scan (the RAM budget is what keeps an engine land and game work apart then); with
   // none, the slot count is the only guard, so the land keeps sharing the game's slots (it still gives way to the train).
+  // 2.78.1 (B-117 fix): and the scanned machine must have room for both at full size (heavy-budget.mjs engineLineRoom):
+  // on Windows every heavy wait scans, so "a scan exists" alone opened the line on a 4-core machine beside a live holder.
   const engineSlots = engine ? engineSlotsAt(root, env) : 0;
   const engineYield = Boolean(engine) && engineSlots > 0;
-  const engineLand = engineYield && Boolean(profile);
-  const gameLanding = landing && !engineYield;
   const t0 = Date.now();
+  const baseClaim = givenClaim || jobClaim(kind, { root, env, label, profile, state: budgetState(profile, [], { env }), ramGb, vramGb, gpuOnly });
+  const room = engineYield && profile ? engineLineRoom(profile, baseClaim, { root, env }) : null;
+  const engineLand = Boolean(room?.ok);
+  if (room && !room.ok) log(`[heavy] ${label}: ${room.why}`);
+  const gameLanding = landing && !engineYield;
   const withEngine = (c) => (engineLand && c ? { ...c, engine: String(engine) } : c);
-  const firstClaim = withEngine(givenClaim || jobClaim(kind, { root, env, label, profile, state: budgetState(profile, [], { env }), ramGb, vramGb, gpuOnly }));
+  const firstClaim = withEngine(baseClaim);
   const queueFile = path.join(dir, `${PREFIX}-queue-${process.pid}.wait`);
   try { fs.writeFileSync(queueFile, JSON.stringify({ pid: process.pid, identity: selfIdentity(), at: t0, label, landing, gpuOnly: Boolean(firstClaim.gpuOnly), owner: owner || env.STUDIO_LOCK_OWNER || null, ...(engineLand ? { engine: String(engine) } : {}) })); } catch {} // 2.77.3: owner (a train's stall watch reads it)
   let mine = null;

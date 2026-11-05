@@ -123,7 +123,12 @@ slot, while a game landing waits in the queue, while the train-wait marker (M6) 
 check's quiet re-run, the chain-breaker push). A land that waits too long is refused (never red) and the engine train
 tries again as before. The line needs a fresh machine scan (`npm run machine`; older than `STUDIO_MACHINE_MAX_AGE_MIN`
 counts as none): with none, the slot count is the only guard on the machine, so the land keeps sharing the game's slots
-(it still gives way to the train). `STUDIO_ENGINE_SLOTS=0` or `off`: the 2.78.0 behaviour (a game slot, a landing).
+(it still gives way to the train). The scan must also show room for both at full size: the engine land's claim plus one
+game job (the `heavy` kind's claim, `studio/machine-budget.json` `jobs.heavy`) within the usable RAM (total minus
+`STUDIO_RESERVE_RAM_GB`) and the logical cores with no overcommit; a smaller machine (a 4-core runner: 4 + 2 threads on
+4 cores) keeps sharing the game's slots, and the land says why. On Windows every heavy wait takes a scan of its own
+(for the commit headroom), so a scan alone is not enough. `STUDIO_ENGINE_LINE_ROOM=off` opens the line on any fresh
+scan. `STUDIO_ENGINE_SLOTS=0` or `off`: the 2.78.0 behaviour (a game slot, a landing).
 
 **Room for builders.** A running engine train (its lock live) keeps its land run's RAM (the engine table's `rig.ramGb`,
 written to the lock) off the room for builder sessions between its land runs too (the supervisor's session cap and the

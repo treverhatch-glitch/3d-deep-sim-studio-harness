@@ -440,6 +440,31 @@ export function jobClaim(kind, { root = process.cwd(), env = process.env, label 
 }
 
 /**
+ * 2.78.1 (B-117 fix): does the scanned machine have room for the engine line? An engine land on its own line runs beside
+ * the game's work, so the machine must hold both at full size: the engine land's claim plus one game job (the `heavy`
+ * kind's claim, studio/machine-budget.json jobs.heavy) within the usable RAM (total - STUDIO_RESERVE_RAM_GB) and within
+ * the logical cores with no overcommit. The moment's free figures aren't enough: on Windows every heavy wait takes a
+ * scan of its own (ram.mjs, for the commit headroom), so a 4-core 16 GB machine had a fresh scan and its budget let an
+ * 8 GB, 4-thread Unity land in beside a 4 GB heavy job at the edge of overcommit. No room: the land shares the game's
+ * slots, as with no scan. { ok, why }. STUDIO_ENGINE_LINE_ROOM=off: any fresh scan opens the line (2.78.1 as shipped).
+ */
+export function engineLineRoom(p, engineClaim, { root = process.cwd(), env = process.env } = {}) {
+  if (!p) return { ok: false, why: 'no machine scan' };
+  if (off(env.STUDIO_ENGINE_LINE_ROOM)) return { ok: true, why: 'STUDIO_ENGINE_LINE_ROOM=off' };
+  const game = jobClaim('heavy', { root, env, profile: p });
+  const ram = (Number(engineClaim?.ramGb) || 0) + (Number(game.ramGb) || 0);
+  const threads = (Number(engineClaim?.cpuThreads) || 0) + (Number(game.cpuThreads) || 0);
+  const total = totalRamGb(p);
+  const usable = fin(total) ? r1(Math.max(0, total - reserveGb(p, cfgEnv(root, env).env))) : null;
+  const cores = logicalCores(p);
+  const short = [];
+  if (fin(usable) && ram > usable + 1e-9) short.push(`${r1(ram)} GB of RAM (${usable} GB usable)`);
+  if (threads > cores) short.push(`${threads} threads (${cores} logical cores, no overcommit)`);
+  const what = `an engine land (${r1(Number(engineClaim?.ramGb) || 0)} GB, ${Number(engineClaim?.cpuThreads) || 0} threads) beside a game job (${r1(Number(game.ramGb) || 0)} GB, ${Number(game.cpuThreads) || 0} threads)`;
+  return short.length ? { ok: false, why: `this machine has no room for the engine line: ${what} needs ${short.join(' and ')}; the land shares the game's slots (STUDIO_ENGINE_LINE_ROOM=off opens the line anyway)` } : { ok: true, why: `room for ${what}` };
+}
+
+/**
  * Does `claim` fit now? { ok, area: 'slots'|'ram'|'gpu'|'cpu'|null, line, alone? }. `holders` are the live records,
  * `slots` the holder cap. Without a profile only the slot count decides (2.67).
  */

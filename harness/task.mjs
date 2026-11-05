@@ -40,7 +40,7 @@ import { attachTricks } from './cheatsheet.mjs';
 import { readBaseline, recordBaseline, setTrunk, trunkState, judgeRed } from './baseline.mjs';
 import { recordAlive } from './proc-identity.mjs';
 import { withFileLock, writeAtomic } from './fsafe.mjs';
-import { withFacts, splitFacts, recordGateRefusal } from './handback-facts.mjs';
+import { factsFor, splitFacts, recordGateRefusal } from './handback-facts.mjs';
 import { assetGateApplies, assetGateText, fileAssetHandoff } from './asset-gate.mjs';
 import { reviewsAtDone } from './asset-review.mjs';
 import { checkStamped, stampWrite, watchCommand } from './workaround.mjs';
@@ -1169,6 +1169,12 @@ function holderRunning(owner) {
 }
 /** 2.30c (#4): a hand-back note is at most this many characters (20 lines). */
 export const HANDBACK_MAX = 2400;
+/**
+ * 2.78.1: a whole hand-back entry (its "## <time> · <who>" heading, the harness's facts block and the prose) is at most
+ * this many characters, so it stays under 3k with the facts in front: the prose is cut to what is left.
+ */
+export const HANDBACK_ENTRY_MAX = 2900;
+const HANDBACK_CUT = '(Cut to 20 lines. Keep hand-back notes short: done, not done, files touched, next step, proof.)';
 /** Is `lock` (a claim, or null) the claim `expect` describes: 'none', or { owner, claimedAt }? */
 export function sameClaim(lock, expect) {
   if (expect === 'none' || expect === null) return !lock;
@@ -1219,16 +1225,25 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
   // at most, in a fixed shape (done, not done, files, next step, proof). Longer notes are cut.
   // 2.66.0 (c): facts a caller already put in front (the merge train's drop) aren't prose: kept whole, never cut,
   // and the events, the breaker and the "blocked by" hold read only the prose.
+  // 2.78.1: the 20-line / under-3k cut holds for the whole entry: the facts (compact, harness/handback-facts.mjs) are
+  // built first and the prose is cut to the room they leave.
   const given = splitFacts(note);
-  note = given.prose;
+  const prose = given.prose;
+  // 2.66.0 (c): the harness's own facts (changed files, gates, failure signature, seed, log) go in front of the prose.
+  const facts = given.facts || factsFor(target.id, prose || 'No note left.', { agent: lock.lock?.owner || agent });
+  const heading = `## ${new Date().toISOString()} · ${who}`;
+  const releasedLine = freed.length ? `Released claims: ${freed.join(', ')}` : '';
+  const released = releasedLine.length > 300 ? `${releasedLine.slice(0, 299)}…` : releasedLine;
+  const room = Math.max(0, HANDBACK_ENTRY_MAX - heading.length - 1 - (facts ? facts.length + 1 : 0) - (released ? released.length + 1 : 0));
+  note = prose;
   const capLines = String(note || '').split('\n');
-  if (capLines.length > 20 || String(note || '').length > HANDBACK_MAX) note = `${capLines.slice(0, 20).join('\n').slice(0, 2400)}\n(Cut to 20 lines. Keep hand-back notes short: done, not done, files touched, next step, proof.)`;
-  if (freed.length) note = `${note || 'No note left.'}\nReleased claims: ${freed.join(', ')}`;
+  const proseMax = Math.min(HANDBACK_MAX, room);
+  if (capLines.length > 20 || String(note || '').length > proseMax) note = `${capLines.slice(0, 20).join('\n').slice(0, Math.max(0, Math.min(HANDBACK_MAX, room - HANDBACK_CUT.length - 1)))}\n${HANDBACK_CUT}`;
+  if (released) note = `${note || 'No note left.'}\n${released}`;
   fs.mkdirSync(HANDOFF_DIR, { recursive: true });
   const file = handoffFile(taskId);
   const head = fs.existsSync(file) ? '' : `# Handoff notes for ${target.id}: ${target.title}\n\nNewest last. Read these before you pick the task up.\n`;
-  // 2.66.0 (c): the harness's own facts (changed files, gates, failure signature, seed, log) go in front of the prose.
-  fs.appendFileSync(file, `${head}\n## ${new Date().toISOString()} · ${who}\n${given.facts ? `${given.facts}\n${note || 'No note left.'}` : withFacts(target.id, note || 'No note left.', { agent: lock.lock?.owner || agent })}\n`);
+  fs.appendFileSync(file, `${head}\n${heading}\n${facts ? `${facts}\n` : ''}${note || 'No note left.'}\n`);
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Paused ${target.id}: ${note || 'handed back'}`);
   emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}`, meta: { ...(isFailureNote(note) ? { reasonKey: reasonKey(note) } : {}), ...(cause ? { cause } : {}) } });
   // PU-58: a canary task handed back for a failure (the impossible exit records its own outcome).
