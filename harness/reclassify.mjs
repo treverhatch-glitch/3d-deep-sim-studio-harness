@@ -65,7 +65,7 @@ import { mainRoot, inLaneCopy } from './worktree.mjs';
 import { resolveBase, ownerPublicKey, ownerKeyPath, verifyApproval, OWNER_KEY_HOWTO, APPROVALS_REL } from './approve.mjs';
 import { agentOnPermission, permissionText, permittedSetter, WORKER_NAME } from './permission.mjs';
 import { ownerPubAt } from './owner-proxy.mjs';
-import { betaApprovalOk } from './beta-mode.mjs';
+import { betaRecordCommitted } from './beta-mode.mjs';
 import { delegationFor, recordUse, embeddedDelegationOk } from './delegation.mjs';
 import { logDecision, asOf } from './decisions-log.mjs';
 
@@ -135,19 +135,7 @@ const approvalName = (taskId, prefix = 'type') => `${prefix}-${String(taskId).re
  * checkout, with exactly this content, by a commit that isn't a worker's (the Studio-Agent trailer): a file dropped in
  * the folder, or edited after its commit, proves nothing.
  */
-function betaRecordOk(root, rel, doc) {
-  if (!doc || doc.signature || !doc.beta) return false;
-  if (WORKER_NAME.test(String(doc.approval?.recordedBy || '').trim())) return false;
-  try { if (!betaApprovalOk(doc)) return false; } catch { return false; }
-  const log = git(root, 'log', '-1', '--format=%H%x09%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', 'HEAD', '--', rel);
-  const [sha = '', agent = ''] = String(log.stdout || '').trim().split('\t');
-  if (log.status !== 0 || !/^[0-9a-f]{40}$/.test(sha)) return false;
-  if (agent.trim() && !permittedSetter(agent.trim())) return false;
-  const shown = git(root, 'show', `HEAD:${rel}`);
-  let committed = null;
-  try { committed = JSON.parse(shown.stdout); } catch { return false; }
-  return shown.status === 0 && same(committed, doc);
-}
+const betaRecordOk = (root, rel, doc) => !WORKER_NAME.test(String(doc?.approval?.recordedBy || '').trim()) && betaRecordCommitted(root, rel, doc);
 
 /**
  * The newest approval of this task's decision that counts: signed with the owner key (or the owner proxy's, which

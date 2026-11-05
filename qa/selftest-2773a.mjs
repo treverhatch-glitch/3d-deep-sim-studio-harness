@@ -168,6 +168,48 @@ console.log(JSON.stringify({ relOk: rel.ok, relMsg: String(rel.message || '').sl
       JSON.stringify({ j: r.j, out: out(r).slice(-900) })]);
   }
 
+  // ---- a beta-format config proposal approval counts only as a proper beta record ----
+  {
+    const { S, env } = studio('cfgappr');
+    writeIn(S, 'studio/keys/owner-ed25519.pub.pem', pem());
+    writeIn(S, 'studio/protected.json', `${JSON.stringify({ globs: ['studio/locked-2773a.json'] }, null, 2)}\n`);
+    writeIn(S, 'studio/locked-2773a.json', `${JSON.stringify({ limit: 1 }, null, 2)}\n`);
+    betaOn(S);
+    g(S, 'add', '-A'); g(S, 'commit', '-qm', 'owner key, protected file, beta on', '--no-verify');
+    const r = probe(S, `import fs from 'node:fs'; import path from 'node:path'; import { spawnSync } from 'node:child_process';
+import { landConfig, protectedPart, protectedGlobsAt, proposalRel } from ${u(S, 'harness/config-proposal.mjs')};
+const root = process.cwd();
+const g = (...a) => spawnSync('git', ['-c', 'core.autocrlf=false', ...a], { cwd: root, encoding: 'utf8', windowsHide: true });
+const changes = [{ file: 'studio/locked-2773a.json', set: { limit: 7 } }];
+const part = protectedPart(changes, protectedGlobsAt(root, 'HEAD'));
+fs.mkdirSync(path.join(root, 'studio-proposals'), { recursive: true });
+fs.writeFileSync(path.join(root, proposalRel('T-975')), JSON.stringify({ changes, why: 'raise the limit for the test' }, null, 2) + '\\n');
+g('add', '-A'); g('commit', '-qm', 'T-975 lands its proposal', '--no-verify');
+const beta = JSON.parse(fs.readFileSync(path.join(root, 'studio/beta.json'), 'utf8'));
+const rel = 'studio/approvals/proposal-T-975.json';
+const write = (recordedBy) => { fs.mkdirSync(path.join(root, 'studio/approvals'), { recursive: true }); fs.writeFileSync(path.join(root, rel), JSON.stringify({ approval: { kind: 'proposal', task: 'T-975', change: part.hash, changes: part.changes, by: 'pat', note: 'beta-mode approval of the limit', at: new Date().toISOString(), recordedBy, via: 'beta agent' }, signature: null, beta: { by: beta.by, at: beta.at } }, null, 2) + '\\n'); };
+const ff = (r, main, sha) => { const m = g('merge', '--ff-only', '-q', sha); return { ok: m.status === 0, message: m.stderr }; };
+const land = () => { const x = landConfig(root, { task: 'T-975', main: 'main', ff, by: 'train' }); return { held: x?.held?.length || 0, applied: x?.applied || [], decision: x?.decision || '' }; };
+write('opus-1');
+const dropped = land();
+g('add', rel); g('commit', '-qm', 'approval of T-975', '--no-verify', '--trailer', 'Studio-Agent: builder-s1');
+const byWorkerCommit = land();
+write('builder-s1');
+g('add', rel); g('commit', '-qm', 'approval of T-975 (beta mode)', '--no-verify');
+const recordedByWorker = land();
+write('opus-1');
+const editedAfter = (() => { g('add', rel); g('commit', '-qm', 'approval of T-975 (beta mode)', '--no-verify'); const d = JSON.parse(fs.readFileSync(path.join(root, rel), 'utf8')); d.approval.note = 'edited after its commit'; fs.writeFileSync(path.join(root, rel), JSON.stringify(d, null, 2) + '\\n'); return land(); })();
+g('checkout', '-q', '--', rel);
+const proper = land();
+const locked = JSON.parse(g('show', 'HEAD:studio/locked-2773a.json').stdout);
+console.log(JSON.stringify({ dropped, byWorkerCommit, recordedByWorker, editedAfter, proper, limit: locked.limit }));
+`, env);
+    await guard('2.77.3 (B-111): a beta-format approval of a protected config proposal counts only as a proper beta record (the predicate task types use): dropped uncommitted, committed by a worker (Studio-Agent: builder-s1), recorded by a worker, or edited after its commit, the protected part is held; committed as written by opus-1 under the current beta session, it is applied (limit 7, "beta mode approval") (fails on 2.77.2: the dropped file was accepted and applied at once)', () => [
+      r.j && r.j.dropped.held > 0 && r.j.byWorkerCommit.held > 0 && r.j.recordedByWorker.held > 0 && r.j.editedAfter.held > 0
+        && r.j.proper.held === 0 && r.j.proper.applied.includes('studio/locked-2773a.json') && /beta mode approval/.test(r.j.proper.decision) && r.j.limit === 7,
+      JSON.stringify({ j: r.j, out: out(r).slice(-900) })]);
+  }
+
   // ---- test files are not render files ----
   {
     const { S, env } = studio('render');

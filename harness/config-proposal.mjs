@@ -35,7 +35,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { betaApprovalOk, readBeta } from './beta-mode.mjs';
+import { readBeta, betaRecordCommitted } from './beta-mode.mjs';
 import { proxyApprovalOk } from './owner-proxy.mjs';
 import { spawnSync } from 'node:child_process';
 import { canonicalBytes } from './hash.mjs';
@@ -199,6 +199,9 @@ export const ownerKeyAt = (root, rev) => { const pem = show(root, rev, OWNER_PUB
 export function signedProposal(root, { task, hash, pub }) {
   // 2.77.1 (B-103): beta-mode and owner-proxy approvals count here as they do in every other gate (approve.mjs
   // verifyApproval); before, only the owner key's signature did, so `approve -- proposal` in beta mode was never applied.
+  // 2.77.3 (B-111): a beta one counts only as committed with exactly this content, under the current beta session, not
+  // from a worker's commit nor recorded by a worker (beta-mode.mjs betaRecordCommitted, the predicate task types and
+  // visual decisions use); a dropped or worker-committed file no longer counts.
   if (!hash) return null;
   const dir = path.join(root, 'studio', 'approvals');
   let names = [];
@@ -210,7 +213,7 @@ export function signedProposal(root, { task, hash, pub }) {
     if (a?.kind !== 'proposal' || a.task !== task || a.change !== hash) continue;
     let ok = false;
     let via = 'owner key';
-    if (!doc.signature && doc.beta) { ok = betaApprovalOk(doc, { root }); via = 'beta mode'; }
+    if (!doc.signature && doc.beta) { ok = betaRecordCommitted(root, `studio/approvals/${f}`, doc); via = 'beta mode'; }
     else if (!doc.signature && doc.proxy) { ok = Boolean(pub) && proxyApprovalOk(doc, pub, { root }); via = 'owner proxy'; }
     else if (pub) { try { ok = crypto.verify(null, Buffer.from(canonicalBytes(a)), crypto.createPublicKey(pub), Buffer.from(String(doc.signature), 'base64')); } catch { ok = false; } }
     if (ok) return { file: `studio/approvals/${f}`, by: a.by, note: a.note, via, recordedBy: a.recordedBy || null };

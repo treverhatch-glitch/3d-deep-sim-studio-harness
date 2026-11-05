@@ -267,7 +267,9 @@ the owner proxy's agent) and launched Producer/Director sessions act as the owne
 - 2.77.3 (B-111): a protected config proposal (`studio-proposals/<ID>.json`): the stand-in's `train release <ID>` of the
   lane held for it (the hold names the keys and values) decides the protected part when it lands, as an approval would
   (the release carries `betaAt`, beta.json's time; a release under an older beta session, or by a worker, doesn't);
-  `train config <ID> --by <agent>` applies one held on main the same way.
+  `train config <ID> --by <agent>` applies one held on main the same way. A beta `approve -- proposal` approval counts
+  under the same rule as a beta type or visual record (harness/beta-mode.mjs `betaRecordCommitted`): committed with
+  exactly that content, under the current beta session, not by a worker's commit and not recorded by a worker.
 
 Outside beta mode, with an owner key (the base branch's, or the one committed in the main checkout when the base has
 none), `task type` and `task visual` refuse an unsigned record up front (exit 1, "needs the owner's signature", and how

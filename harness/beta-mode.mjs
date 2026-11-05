@@ -110,6 +110,29 @@ export function betaApprovalOk(doc, { root = null } = {}) {
   return String(cur.doc.at) === String(e.at) && String(cur.doc.by) === String(e.by) && String(doc.approval?.recordedBy || '').trim() !== '' && !WORKER.test(String(doc.approval.recordedBy));
 }
 
+/**
+ * 2.77.3 (B-111): a beta-format record (an approval with no signature and studio/beta.json's by/at) that counts: it is
+ * an approval betaApprovalOk accepts (the current beta session, recordedBy set and not a worker), committed in `root`
+ * with exactly this content (git show HEAD:<rel> equals doc), by a commit that isn't a worker's (its Studio-Agent
+ * trailer). A file dropped in the folder, edited after its commit, or carried in by a worker proves nothing. One
+ * predicate for every beta record: task types and visual decisions (harness/reclassify.mjs) and config proposal
+ * approvals (harness/config-proposal.mjs signedProposal). Never throws.
+ */
+export function betaRecordCommitted(root, rel, doc) {
+  try {
+    if (!doc || doc.signature || !doc.beta) return false;
+    if (!betaApprovalOk(doc, { root: mainCheckout(root) })) return false;
+    const r = String(rel || '').replace(/\\/g, '/');
+    const log = git(root, 'log', '-1', '--format=%H%x09%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', 'HEAD', '--', r);
+    const [sha = '', agent = ''] = String(log.stdout || '').trim().split('\t');
+    if (log.status !== 0 || !/^[0-9a-f]{40}$/.test(sha)) return false;
+    if (agent.trim() && agent.split(',').some((a) => WORKER.test(a.trim()))) return false;
+    const shown = git(root, 'show', `HEAD:${r}`);
+    if (shown.status !== 0) return false;
+    return Buffer.from(canonicalBytes(JSON.parse(shown.stdout))).equals(Buffer.from(canonicalBytes(doc)));
+  } catch { return false; }
+}
+
 /** `beta on|off`. Returns { ok, message, doc? }. */
 export function setBeta({ on, by, agents = '', why = '', permission = '', env = process.env, root = mainCheckout(), commit = true, now = Date.now() } = {}) {
   const who = String(by || '').trim();
