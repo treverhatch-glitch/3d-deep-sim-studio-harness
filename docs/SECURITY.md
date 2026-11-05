@@ -163,6 +163,24 @@
   ancestor of `main`) and the base is in `main`'s history; it says so ("verified with main <sha>'s key"). Which commits
   are judged is unchanged, and a lane copy's base (the studio's branch) keeps its own key. `STUDIO_KEY_BASE=off`: the
   base's key only.
+- One base and key for every approve kind (2.78.2, B-120 again): `approve -- protected | tests | force | proposal | hooks`
+  and the checks that read them take their base and key from one place (`harness/approve.mjs judgeBase`, built on
+  `resolveBase` and `keyFor`). When the key comes from local `main` (the base has none), the checks whose enforcement
+  starts with the key (protected files, weakened tests) judge since the key-carrying base too, `git merge-base HEAD
+  main`, the base a lane or train copy uses. Before, `approve -- protected` on the main checkout signed the change set
+  since `origin/main`, which also held main's own protected commits (the key itself), so the train never matched it.
+  The range only shrinks: commits already on `main` aren't judged again. The hooks gate keeps its base. After signing,
+  `approve` says when the approval won't verify with the key the checks read.
+- The key-carrying base with merges on GitHub (2.78.2, A-030): `origin/main` may hold pull-request merge commits local
+  `main` lacks. `keyFor` no longer asks that `origin/main` be an ancestor of `main`. It takes local `main`'s key when
+  the base shares `main`'s history, none of the base's commits that `main` lacks touches the owner key file, and
+  `origin/main` carries no other owner key (none, or the same one). A base whose side changed the key, or an
+  `origin/main` with a different key, gets none. `STUDIO_KEY_BASE=ancestor`: 2.78.1's rule; `off`: the base's key only.
+- A lane copy's events (2.78.2, item 7c): a folder at `<main>/.lanes/<name>` that is a git worktree of `<main>` writes
+  its events to the main checkout's log (`harness/event.mjs boardRoot`, read from git's own files, never from
+  `STUDIO_MAIN_ROOT`), also when it has no `.studio` link (a copy made by hand). An approval's event names the copy's
+  task (its branch in `.studio/lane-branches.json`), so the Line Producer releases the task it held for that step.
+  `STUDIO_LANE_EVENTS=own`: the copy's own log.
 - A release's merge commits (2.78.1): `node harness/hook-stamp.mjs grandfather --ref <remote ref>` and `upgrade --merge`
   list the update's own merge commits too ("Merge 2.77.3 into claude/278"), by sha only (a merge has no patch-id), and
   only those between the hooks gate's base and the release tip: a merge the studio makes itself is judged as before.

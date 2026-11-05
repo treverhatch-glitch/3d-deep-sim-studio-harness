@@ -39,10 +39,44 @@ export const actor = (explicit = null) => explicit || process.env.STUDIO_AGENT |
 
 export const DEFAULT_EVENTS_FILE = path.join(STUDIO_STATE_DIR, 'events.jsonl');
 
+const realOr = (p) => { try { const r = fs.realpathSync.native(p); return process.platform === 'win32' ? r.toLowerCase() : r; } catch { const r = path.resolve(p); return process.platform === 'win32' ? r.toLowerCase() : r; } };
+const boardMemo = new Map();
+/**
+ * 2.78.2 (item 7c): the checkout whose board this one writes to. REPO_ROOT itself, except in a lane copy: a folder at
+ * <main>/.lanes/<name> that is a git worktree of <main> (its .git file points into <main>/.git/worktrees/). There the
+ * main checkout. Read from the files git keeps, no git process (this runs on every event), and never from
+ * STUDIO_MAIN_ROOT, which a lane's own shell can set (2.71.1, G12).
+ *
+ * Why: a lane copy's .studio/ is a link to main's, so its events always reached main's log, but a copy made by hand
+ * (git worktree add .lanes/<x> <branch>, as the crew rebuilt lanes and opened one to approve its protected step) has
+ * no link: the first event made a .studio/ of its own there, and `approve -- protected` in it wrote approval.protected
+ * to a log nobody reads, so the Line Producer kept holding the task. STUDIO_LANE_EVENTS=own: the copy's own log again.
+ */
+export function boardRoot(root = REPO_ROOT, env = process.env) {
+  if (/^own$/i.test(String(env.STUDIO_LANE_EVENTS || '').trim())) return root;
+  if (boardMemo.has(root)) return boardMemo.get(root);
+  let main = root;
+  try {
+    const m = String(root).replace(/\\/g, '/').match(/^(.*)\/\.lanes\/[^/]+\/?$/);
+    const dotGit = path.join(root, '.git');
+    if (m && fs.statSync(dotGit).isFile()) {
+      const gd = (fs.readFileSync(dotGit, 'utf8').match(/^gitdir:\s*(.+?)\s*$/m) || [])[1];
+      const cand = path.resolve(m[1]);
+      const mainGit = path.join(cand, '.git');
+      if (gd && fs.statSync(mainGit).isDirectory() && realOr(path.dirname(path.resolve(root, gd))) === realOr(path.join(mainGit, 'worktrees'))) main = cand;
+    }
+  } catch { main = root; }
+  boardMemo.set(root, main);
+  return main;
+}
+
 export function getEventPaths() {
+  // 2.78.2 (item 7c): a lane copy's events go to the main checkout's log (boardRoot), also a relative AGENT_EVENTS_FILE
+  // (.env.example's .studio/events.jsonl, which a lane copy's copied .env carries); an absolute one is used as given.
+  const board = boardRoot();
   const primary = process.env.AGENT_EVENTS_FILE
-    ? path.resolve(REPO_ROOT, process.env.AGENT_EVENTS_FILE)
-    : DEFAULT_EVENTS_FILE;
+    ? path.resolve(board, process.env.AGENT_EVENTS_FILE)
+    : board === REPO_ROOT ? DEFAULT_EVENTS_FILE : path.join(board, '.studio', 'events.jsonl');
 
   // Mirror only when explicitly requested. Do not share /tmp across clones.
   const mirrors = [];

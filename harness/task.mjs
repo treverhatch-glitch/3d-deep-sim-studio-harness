@@ -17,7 +17,7 @@ import { summarize as summarizeVerdict, renderDecision } from './verdict-split.m
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
-import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal } from './task-hold.mjs';
+import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal, laneEntries } from './task-hold.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
@@ -1336,9 +1336,9 @@ export function reopenTask(taskId, reason = '', agent = PRODUCER_NAME()) {
  *   - can't touch a crossed-out layer.
  * Any task with --idea needs that idea approved. Warns when the Director hasn't reviewed lately.
  */
-/** 2.77.3 (H3): existing files or folders named in a --scope text (a/b/c.js), used as the lane when none is given. */
+/** 2.77.3 (H3): existing files or folders named in a --scope text (a/b/c.js), used as the lane when none is given. 2.78.2: a region (a/sim.ts#symbol) is kept. */
 function scopePaths(text) {
-  return [...new Set(String(text || '').split(/[\s,;]+/).map((w) => w.replace(/^[`'"(]+|[`'").:]+$/g, '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')).filter((w) => /^[\w.-]+\/[\w./-]*$/.test(w) && !w.includes('..') && fs.existsSync(path.join(REPO_ROOT, w))))];
+  return [...new Set(String(text || '').split(/[\s,;]+/).map((w) => w.replace(/^[`'"(]+|[`'").:]+$/g, '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')).filter((w) => /^[\w.-]+\/[\w./-]*(#[\w$.-]+)?$/.test(w) && !w.includes('..') && fs.existsSync(path.join(REPO_ROOT, w.split('#')[0]))))];
 }
 
 export function gateTask({ title, role = 'builder', meta = {} }) {
@@ -2224,7 +2224,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(`${t.id} is held for landing by ${by}: its claim clock is stopped and no rescue is filed for it until it lands or someone runs npm run task -- unhold ${t.id} --by <name>.${was?.budget ? ' Its budget park is lifted.' : ''}${closed.length ? ` Rescues: ${closed.map((c) => `${c.id} ${c.action === 'closed' ? 'closed' : '(claimed: its claimant was told)'}`).join(', ')}.` : ''}`);
     process.exit(0);
   }
-  if (['block', 'park', 'unpark', 'lane', 'holds'].includes(cmd)) {
+  if (['block', 'park', 'unpark', 'lane', 'holds', 'track'].includes(cmd)) {
     const by = typeof flags.by === 'string' ? flags.by : actor();
     const all = [...q.inProgress, ...q.backlog, ...q.done];
     if (cmd === 'holds') {
@@ -2234,8 +2234,27 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(0);
     }
     if (!arg1 || !all.some((t) => t.id === arg1)) {
-      console.error(`Usage: npm run task -- ${cmd} <TASK_ID> ${cmd === 'block' ? '--until <T-ID|ISO time> ' : cmd === 'lane' ? '<folder|none> ' : ''}--by <name>${cmd === 'park' ? ' --why "…" [--until T-ID|phase:N|time]' : ''}`);
+      console.error(`Usage: npm run task -- ${cmd} <TASK_ID> ${cmd === 'block' ? '--until <T-ID|ISO time> ' : cmd === 'lane' ? '<folder|none> ' : cmd === 'track' ? 'engine:<name> ' : ''}--by <name>${cmd === 'park' ? ' --why "…" [--until T-ID|phase:N|time]' : ''}`);
       process.exit(1);
+    }
+    if (cmd === 'track') {
+      // 2.78.2 (item 7d): an engine pass's track (engine:<name>), for a task added without one (an older engine-porter
+      // task got a plain lane). Decided like a lane: a person, the orchestrator or a Producer/Director session.
+      const want = String(flags._[2] || '').trim();
+      const et = await import('./engine-tracks.mjs');
+      const engine = et.engineOfTrack(want);
+      if (!engine) {
+        const cur = et.engineTask(arg1);
+        console.log(cur ? `${arg1}: ${cur.track}${cur.inferred ? ' (inferred)' : ''}${cur.branch ? `, branch ${cur.branch}` : ''}` : `${arg1} has no engine track. Set one: npm run task -- track ${arg1} engine:<name> --by <you>`);
+        process.exit(want ? 1 : 0);
+      }
+      const trackNo = laneRefusal(by);
+      if (trackNo) { console.error(trackNo.replace(/set a task's lane|sets lanes/g, 'set a task\'s engine track')); process.exit(1); }
+      const rec = et.setEngineTask(arg1, { engine, track: want, inferred: null, setBy: by });
+      emitEvent({ type: 'task.track', agent: by, task: arg1, msg: `${by}: ${arg1} is an engine pass on ${want}`, meta: { track: want } });
+      await logTaskDecision({ action: 'task-track', subject: arg1, by, why: `${arg1} is an engine pass on ${want}`, evidence: 'npm run task -- track', undo: { kind: 'text', text: `npm run task -- track ${arg1} engine:<the earlier engine> --by <you>` } });
+      console.log(`${arg1} is an engine pass on ${rec.track}: its next launch gets that engine's worktree.`);
+      process.exit(0);
     }
     if (cmd === 'park') {
       if (typeof flags.why !== 'string') {
@@ -2275,7 +2294,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       // 2.78.1 (B-123): a person, the orchestrator or a Producer/Director session decides a lane; never a worker.
       const laneNo = laneRefusal(by);
       if (laneNo) { console.error(laneNo); process.exit(1); }
-      const lane = ['none', 'all', '.'].includes(folder) ? null : laneList(folder).join(',') || null;
+      // 2.78.2 (item 9): kept as written, regions too (path/sim.ts#symbol: harness/lane-regions.mjs).
+      const lane = ['none', 'all', '.'].includes(folder) ? null : laneEntries(folder).join(',') || null;
       if (lane && /^(harness|hub|qa|scripts)(\/|$)/.test(lane) && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'))) {
         console.error(`${lane} is harness code, and this clone's harness is frozen.`);
         process.exit(1);
@@ -2442,7 +2462,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         // 2.77.3 (H3): --lane all (or .) is the whole game on purpose; a builder task with no folders is refused (gateTask).
         requireLane: true,
         ...(typeof flags.lane === 'string' && ['all', '.', './'].includes(flags.lane.trim()) ? { wholeGame: true } : typeof flags.lane === 'string' ? { lane: flags.lane.replace(/\/+$/, '') } : {}),
-        ...(typeof flags.paths === 'string' && laneList(flags.paths).length ? { paths: laneList(flags.paths) } : typeof flags.scope === 'string' && typeof flags.lane !== 'string' && scopePaths(flags.scope).length ? { paths: scopePaths(flags.scope) } : {}),
+        ...(typeof flags.paths === 'string' && laneList(flags.paths).length ? { paths: laneEntries(flags.paths) } : typeof flags.scope === 'string' && typeof flags.lane !== 'string' && scopePaths(flags.scope).length ? { paths: scopePaths(flags.scope) } : {}),
         // 2.59.0 (#8): a person keeps a broad lane for a launch in the main checkout: --wide "<why>" (harness/agent.mjs).
         ...(typeof flags.wide === 'string' && (typeof flags.lane === 'string' || typeof flags.paths === 'string') ? { laneWide: { lane: laneList(typeof flags.paths === 'string' && laneList(flags.paths).length ? flags.paths : flags.lane).join(','), why: flags.wide, by: typeof flags.by === 'string' ? flags.by : actor(), ...(process.env.STUDIO_ROLE ? { inSession: true } : {}) } } : {}),
         ...(typeof flags.track === 'string' ? { track: flags.track } : {}),
@@ -2482,7 +2502,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
-  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | impossible <ID> --why "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | holds | note <ID> "<ruling>" --by <name> | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
+  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | impossible <ID> --why "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | track <ID> engine:<name> | holds | note <ID> "<ruling>" --by <name> | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
 }
 
 /**

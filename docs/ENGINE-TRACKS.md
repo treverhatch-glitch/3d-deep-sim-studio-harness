@@ -78,6 +78,13 @@ npm run task -- add "Pass 11: realism pass on the hangar" --role engine-porter -
   work there, or when it is the land script's own `gateWorktree`, the launch is refused with what to do (commit or
   stash there, or switch that folder to another branch) instead of starting a session that can't reach the code.
   `STUDIO_ENGINE_LANE_REQUIRED=off` lets such a session start anyway, as before.
+  2.78.2 (item 7d): an engine-porter task with no engine record (added before 2.77, or without `--track`) got a plain
+  lane copy of the studio. Now, when the studio names exactly one engine in `studio/game.json` `"engines"`, the launch
+  records that track for it (`inferred`, an `engine.track_inferred` event) and the pass gets its engine worktree. With
+  several engines the launch is refused, naming them and the command that sets the track:
+  `npm run task -- track <T-ID> engine:<name> --by <you>` (a person, the orchestrator or a Producer/Director session;
+  never a worker). `npm run task -- track <T-ID>` shows the record. With no engine named, nothing changes (the
+  engine's work lives in the studio). `STUDIO_ENGINE_TRACK_INFER=off`: no inference (a plain lane, the 2.78.1 way).
 - **Done check.** A pass in its own repo is judged in that repo:
   - its branch has commits the target lacks, and everything on it is committed;
   - the visual check passes, when the task asks for one;

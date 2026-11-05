@@ -58,7 +58,8 @@ import { taskType } from './done-check.mjs';
 import { listLocks, release, claim, renewOwner, tooBroad } from './lock.mjs';
 import { AGY_STREAM_FLAGS, agyStreamOn, agyStreamWanted, userLine, driveAgyStream, taskStillOpen, streamFailure, readStreamRecord, writeStreamRecord, streamRecordHolds, STREAM_RECORD } from './agy-stream.mjs';
 import { savePatch } from './wip.mjs';
-import { laneList, readHolds } from './task-hold.mjs';
+import { laneList, laneEntries, readHolds } from './task-hold.mjs';
+import { regionOnlyFiles } from './lane-regions.mjs';
 import { engineLaunch } from './engine-tracks.mjs';
 import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport, isLaneWorktree, LANES_DIR, laneLive } from './worktree.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
@@ -1072,9 +1073,14 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (refused) return refused;
   }
   const unheld = new Set(copyLikely ? broad.map((x) => x.p) : []);
+  // 2.78.2 (item 9): a file the lane names only by regions, and that allows region lanes (harness/lane-regions.mjs), isn't
+  // held as a file lock when the agent works in its own copy: two lanes on regions that don't overlap run side by side
+  // (the supervisor's lanesClash decided that), and the train catches a real conflict. No copy: held as before.
+  let regionFree = new Set();
+  try { if (laneWantsCopy(lane) && !process.env.STUDIO_MAIN_ROOT && worktreeSupport().ok) regionFree = regionOnlyFiles(laneEntries(lane)); } catch { regionFree = new Set(); }
   const held = [];
   for (const p of lanePaths) {
-    if (unheld.has(p)) continue;
+    if (unheld.has(p) || regionFree.has(p)) continue;
     const c = claim(`path:${p}`, agent, 6 * 3600);
     if (c && c.ok === false) {
       for (const q of held) release(`path:${q}`, agent);
@@ -1136,7 +1142,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   // 2.77.0 (u, P5.1): an engine pass whose work lives in the engine's own repo gets a worktree of that repo on its branch
   // (harness/engine-tracks.mjs engineLaunch), named in its prompt and passed to the tool as an extra folder.
-  const engineLane = launchEngineLane({ task, agent });
+  const engineLane = launchEngineLane({ task, agent, role });
   if (engineLane?.refuse && !/^(off|0|false|no)$/i.test(process.env.STUDIO_ENGINE_LANE_REQUIRED || '')) {
     for (const q of held) release(`path:${q}`, agent);
     if (copy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
@@ -1147,6 +1153,20 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   // 2.76.0 (B-80 part 2): an agy session reads GEMINI.md in its folder: the shell rules, kept out of the lane's change.
   if (copy && tool === 'agy' && !custom) writeAgyLaneRules(copy.dir, { excludeFile: path.join(REPO_ROOT, '.studio', 'lanes', `${agent}.exclude`) });
+  // 2.78.2 (item 9): region files left unheld for a copy: held after all when no copy was made.
+  if (regionFree.size && !copy) {
+    for (const p of regionFree) {
+      const c = claim(`path:${p}`, agent, 6 * 3600);
+      if (c && c.ok === false) {
+        for (const q of held) release(`path:${q}`, agent);
+        dropStarting(agent);
+        return { ok: false, message: `Lane ${p} is taken: ${c.message || `claimed by ${c.lock?.owner || 'another agent'}`}` };
+      }
+      held.push(p);
+    }
+  } else if (regionFree.size) {
+    emitEvent({ type: 'lane.unlocked', agent, task: task || undefined, msg: `${agent}: ${[...regionFree].join(', ')} not held as a file lock: its lane names regions of it (${laneEntries(lane).filter((e) => e.includes('#')).slice(0, 4).join(', ')}) and it allows region lanes; ${agent} works in its own copy, and the train catches a real conflict`.slice(0, 500), meta: { paths: [...regionFree], regions: true } });
+  }
   // 2.59.0 (#8): the broad paths left unheld for a copy: held after all (a person kept them wide) or refused when the
   // copy couldn't be made; otherwise say once that they aren't locked.
   if (unheld.size && !copy) {
@@ -2017,10 +2037,10 @@ export function agentLog(agent, tail = 60, { raw = false } = {}) {
  * 2.77.0 (u, P5.1): the engine worktree of a launched engine pass ({ dir, branch, note }), or null. An error becomes the
  * prompt's note and an engine.lane event: the session still starts (its brief says what to fix), never a crash.
  */
-function launchEngineLane({ task, agent }) {
+function launchEngineLane({ task, agent, role = null }) {
   if (!task || /^(off|0|false|no)$/i.test(String(process.env.STUDIO_ENGINE_LANES || ''))) return null;
   try {
-    const r = engineLaunch({ task, agent });
+    const r = engineLaunch({ task, agent, role });
     if (!r) return null;
     // 2.78.1 (e, B-119): no worktree means no code access: the launch is refused (runAgent), it never runs blind.
     if (r.error) { emitEvent({ type: 'engine.lane', agent, task, status: 'warn', msg: `${agent}: no engine worktree for ${task}: ${r.error}`.slice(0, 400) }); return { note: `Your task is an engine pass, but its worktree couldn't be made: ${r.error}. Fix that first, or hand it back with a note.`, refuse: r.error }; }
