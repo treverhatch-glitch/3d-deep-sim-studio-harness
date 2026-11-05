@@ -335,7 +335,19 @@ export function groupSameDeaths(ends, env = process.env) {
 /** 2.77.2 (B-107): the running session of the same role whose lane clashes with group g's, or undefined. A session whose
  * agent has exited (its launcher is handing the work back) works on nothing and clashes with nothing. */
 export function laneClashWith(sameRole, g, clashes) {
-  return (sameRole || []).find((s) => !s.ending && !s.agentExited && clashes(s.lane || null, g.lane || null));
+  return (sameRole || []).find((s) => !s.ending && !s.agentExited && clashes(s.lane || null, g.lane || null, s, g));
+}
+
+/**
+ * 2.78.1 (B-123): the lane a running session works in now. A session's lane was fixed when it was launched, so a
+ * `task lane <ID> …` on its task (a person, the orchestrator or the Producer scoping it later) never reached the
+ * supervisor: a builder launched with no lane kept "working on the whole game" until it ended. The board's `task lane`
+ * record (studio/task-holds.json "lane") wins; else the lane it was launched with.
+ */
+export function currentLane(s, holds = {}) {
+  const h = s?.task ? holds[s.task] : null;
+  if (h && 'lane' in h) return h.lane || null;
+  return s?.lane || null;
 }
 
 export async function supervise(opts, state, now = Date.now()) {
@@ -479,6 +491,13 @@ export async function supervise(opts, state, now = Date.now()) {
   });
   if (held.length) why.push(`held: ${held.slice(0, 4).join('; ')}${held.length > 4 ? ` (+${held.length - 4})` : ''}`);
   const evs = readRecentEvents(20000);
+  // 2.78.1 (B-123): running sessions work in their task's lane as the board says it now (task lane after launch).
+  try { const hl = (await import('./task-hold.mjs')).readHolds(); for (const s of live) s.lane = currentLane(s, hl); } catch { /* the launch lanes stand */ }
+  // 2.78.1 (B-123, 3): builders with no lane side by side when both have a prediction and they don't overlap
+  // (harness/lane-plan.mjs; STUDIO_UNSCOPED_PARALLEL=off: the old rule, no lane = the whole game).
+  let lanePlan = null;
+  let predict = null;
+  try { lanePlan = await import('./lane-plan.mjs'); if (lanePlan.unscopedParallelOn()) predict = lanePlan.predictor(evs); } catch { lanePlan = null; }
   const groups = new Map();
   const floorsConfig = readJson(path.join(REPO_ROOT, 'studio', 'floors.json'));
   const gameCartridge = readJson(path.join(REPO_ROOT, 'studio', 'game.json'))?.cartridge ?? readJson(path.join(REPO_ROOT, 'studio', 'gates.json'))?.cartridge;
@@ -505,7 +524,9 @@ export async function supervise(opts, state, now = Date.now()) {
         lane = `cartridges/${gameCartridge}/floors/phase-${meta.phase}`;
       }
     }
-    const key = `${t.role}|${lane || ''}`;
+    // 2.78.1 (B-123, 3): a laneless task with a prediction is its own group, so two of them can start in one pass.
+    const own = !lane && predict && predict(t.id).length ? `|pred:${t.id}` : '';
+    const key = `${t.role}|${lane || ''}${own}`;
     if (!groups.has(key)) groups.set(key, { role: t.role, lane, tasks: [] });
     groups.get(key).tasks.push(t);
   }
@@ -564,7 +585,7 @@ export async function supervise(opts, state, now = Date.now()) {
     if (codeRole) {
       // 2.77.2 (B-107): a session whose agent has already exited (its launcher is handing its work back) is working on
       // nothing: it no longer holds the whole game, so it doesn't stop every other builder from starting.
-      const clash = laneClashWith(sameRole, g, lanesClash);
+      const clash = laneClashWith(sameRole, g, predict && lanePlan ? (a, b, s, gg) => lanePlan.clashWithPredictions({ sLane: a, gLane: b, sTask: s?.task || null, gTask: gg?.tasks?.[0]?.id || null, clashes: lanesClash, predict }) : lanesClash);
       if (clash) {
         if (sameRole.length) why.push(`${g.role}${g.lane ? ` in ${g.lane}` : ''}: ${clash.agent} is working ${clash.lane ? `in ${clash.lane}` : 'on the whole game (no lane)'}`);
         continue;

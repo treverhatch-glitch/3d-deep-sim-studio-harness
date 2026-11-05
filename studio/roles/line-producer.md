@@ -44,7 +44,11 @@ run because …", with a `line.plan_blocked` event when the reasons change), and
    the Bible's phases (early, mid, late). When that queue runs low it files **one** task for the Director: "Director:
    next ranked slice for phase N". Director: answer it with ranked tasks titled `Research: …` or `Expansion: …`, each
    with `--phase N --size 1-5`.
-6. **Status** for the Communicator and the War Room's Producer office: `.studio/line/status.json` (`npm run line --
+6. **Lanes (2.78.1):** every ready builder task with no lane gets one worked out from its `--scope`, the code paths it
+   names and its predicted files, as the Producer's decision (logged); a task it can't scope is reported `unscoped`
+   in the status and the Producer note. A task on shared sim code (`STUDIO_SHARED_SIM`) waits (`--after`) for the open
+   task on the same shared files instead of running beside it ("Stacked on shared sim code" in `npm run line -- plan`).
+7. **Status** for the Communicator and the War Room's Producer office: `.studio/line/status.json` (`npm run line --
    status`).
 
 ## Beta mode and the owner

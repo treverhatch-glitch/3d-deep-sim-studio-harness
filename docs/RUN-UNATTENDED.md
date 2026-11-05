@@ -242,6 +242,14 @@ isn't a task id, `phase:N` or a time. A park records its rank (owner > orchestra
 its title: `STUDIO_REQUIRE_LANE=on` refuses it, `warn` (the default) queues it with a warning, `off` is silent. Without folders
 it counts as working on the whole game and no other builder runs beside it. `task lane <ID> <folder> [<folder>…]` sets them afterwards.
 
+2.78.1 (B-123): `npm run task -- lane <ID> <folder> [<folder>…] --by <you>` (a person, the orchestrator, or a Producer or
+Director session; a launched worker session is refused) also scopes a task already in progress: from the supervisor's
+next pass its builder counts as working in that lane, not on the whole game (a session's lane used to be fixed at
+launch). The Line Producer's pass sets lanes on unscoped ready builder tasks itself and reports the ones it can't scope
+as `unscoped` (`STUDIO_LINE_LANES`); builders with no lane run side by side when plan-waves predicts files for both and
+they don't overlap (`STUDIO_UNSCOPED_PARALLEL=off` turns that off); a task on shared sim code waits for the open task on
+the same shared files (`STUDIO_SHARED_SIM`). docs/LINE-PRODUCER.md has the details.
+
 ## Crew watchdog, futility cap, wind-down and janitor (2.68.0)
 
 Each supervisor pass (code only, no model) also does three things:

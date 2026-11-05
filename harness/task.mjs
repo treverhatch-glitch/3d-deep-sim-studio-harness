@@ -17,7 +17,7 @@ import { summarize as summarizeVerdict, renderDecision } from './verdict-split.m
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
-import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal } from './task-hold.mjs';
+import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal } from './task-hold.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
@@ -2236,6 +2236,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         console.error(`Usage: npm run task -- lane ${arg1} <folder> [<folder>…] [--by <name>]   (or "all" / "none": the whole game, no other builder runs beside it)`);
         process.exit(1);
       }
+      // 2.78.1 (B-123): a person, the orchestrator or a Producer/Director session decides a lane; never a worker.
+      const laneNo = laneRefusal(by);
+      if (laneNo) { console.error(laneNo); process.exit(1); }
       const lane = ['none', 'all', '.'].includes(folder) ? null : laneList(folder).join(',') || null;
       if (lane && /^(harness|hub|qa|scripts)(\/|$)/.test(lane) && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'))) {
         console.error(`${lane} is harness code, and this clone's harness is frozen.`);
@@ -2245,7 +2248,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const laneWide = lane && typeof flags.wide === 'string' ? { lane, why: flags.wide, by, ...(process.env.STUDIO_ROLE ? { inSession: true } : {}) } : undefined;
       updateHolds((all2) => { all2[arg1] = { ...(all2[arg1] || {}), lane, laneWide }; });
       emitEvent({ type: 'task.lane', agent: by, task: arg1, msg: `${by}: ${arg1} works in ${lane || 'the whole game'}` });
-      console.log(`${arg1} works in ${lane || 'the whole game (no other builder runs beside it)'}.`);
+      await logTaskDecision({ action: 'task-lane', subject: arg1, by, why: `${arg1} works in ${lane || 'the whole game'}`, evidence: 'npm run task -- lane', undo: { kind: 'text', text: `npm run task -- lane ${arg1} <the earlier folders, or "all"> --by <you>` } });
+      // 2.78.1 (B-123): a task already in progress: the supervisor reads its new lane for the running builder too.
+      const running = q.inProgress.some((t) => t.id === arg1);
+      console.log(`${arg1} works in ${lane || 'the whole game (no other builder runs beside it)'}.${running ? ` It is in progress: from the supervisor's next pass its builder counts as working ${lane ? `in ${lane}` : 'on the whole game'}.` : ''}`);
     }
     process.exit(0);
   }

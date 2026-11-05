@@ -131,6 +131,21 @@ export function holdRefusal(by, env = process.env, { workerName = WORKER_NAME, d
 }
 
 /**
+ * 2.78.1 (B-123): who may set a task's lane (`task lane <ID> <folders> --by <name>`): a person, the orchestrator (an agent
+ * outside the harness), a Producer or Director session, or the Line Producer's pass; never a worker (a launched builder,
+ * qa, … session, or a worker's name in --by or STUDIO_LOCK_OWNER): a worker re-scoping its own or another task would
+ * decide which builders run beside it. Returns the refusal, or null.
+ */
+export function laneRefusal(by, env = process.env, { workerName = WORKER_NAME, deciders = DECIDER_ROLES } = {}) {
+  const role = String(env.STUDIO_ROLE || '').trim();
+  const owner = String(env.STUDIO_LOCK_OWNER || '').trim();
+  if (role && !deciders.test(role)) return `Refused: a launched ${role} session can't set a task's lane; a person, the orchestrator, or a Producer or Director session can (npm run task -- lane <ID> <folders> --by <you>). Hand the task back with a note naming the folders instead (npm run task -- pause <ID> --note "…").`;
+  const worker = [owner, String(by || '').trim()].find((n) => n && workerName.test(n));
+  if (worker) return `Refused: ${worker} is a worker agent; a person, the orchestrator, or a Producer or Director session sets lanes.`;
+  return null;
+}
+
+/**
  * 2.77.3 (H5): who parked a task, as a rank: owner (4) > orchestrator (3) > producer/director (2) > anyone else (1).
  * A launched session's rank comes from STUDIO_ROLE (a name passed with --by can't raise it); outside a launched session
  * an agent's name (STUDIO_LOCK_OWNER, else --by) says it: opus-N or orchestrator-N is the orchestrator, producer-N and
