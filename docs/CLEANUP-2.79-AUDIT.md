@@ -573,3 +573,21 @@ name they still set gets the WARN and the replacement's name; `STUDIO_TRAIN=off`
 deliver path is still in use). Event-type counts from the 48 h run (`task.train.landed` vs `lane.merged`,
 `task.train.empty_diff`, `task.train.main_merges_only`, `launch.skipped`, `gate.orphan_ended`,
 `task.train.chain_stopped`) say which paths ran. Everything else can be done now.
+
+---
+
+## 5. Added after 2.78.2 (merged 2026-11-06, `6c878fb`)
+
+What the 2.78.1 and 2.78.2 work showed, for the order above. Step 0 now rebases onto `main` at `6c878fb`, not
+`claude/2781`.
+
+| Finding | Evidence | Goes to |
+|---|---|---|
+| Settings grew 660 → 697 in two releases | the census on 2.78.2 | step 11/12: the cut needs the crew's `.env` names |
+| Every fix adds an off switch (2.78.2 alone: `STUDIO_DONE_QUEUE`, `STUDIO_TRAIN_DETACH`, `STUDIO_FLAKE_TOGETHER`, `STUDIO_REVIEW_VERDICT_LINE`, `STUDIO_OWNER_ONLY_PARK`, `STUDIO_DONE_SKIP_GAME_NONCODE`, `STUDIO_FOCUS_INFER`, `STUDIO_TEST_TIMING`, `STUDIO_TRAIN_LAND_OVER_NONCODE`, …) | `docs/RELEASE-2.78.2.md` | step 11: a switch that stayed on through one crew run is removed in the next cleanup; a new rule for PU-64 |
+| Changing a default pins old tests to the old rule (2.78.2: 259a, 263i, 269r, 2773b, 243, 276g, 2585s, the L2222 block) | the 2.78.2 CI reds, 3 rounds | step 11: when a switch goes, its pins go with it; tests that only pin the old rule are retired |
+| `train.mjs`, `task.mjs`, `agent.mjs` are where parallel work collides | merge conflicts on every 2.78.x part | step 13: split `task.mjs` (handler table) before `train.mjs` |
+| The board list and the check readers disagree (`studio/producer/`, `studio/reviews/` were board paths but the docs check read them) | 2.78.2 item 3 | step 1: the board list is a decision owner; one list, the checks read it |
+| Duplicate owners: 17 process-alive copies, 5 agent-name lists, 21 `.env` parsers | section 1 | steps 4 and 10 (unchanged) |
+| **PID reuse on Windows**: `busy.mjs` `alive()` is a bare `process.kill(pid, 0)`, so a `done-running` marker whose writer exited reads as live when Windows hands its PID to another process (selftest 230q `drain wait` hung 60 min on CI, run on `3d3ddc2`; passed on re-run) | the CI log; `harness/busy.mjs:35` | step 4: `busy.mjs` through `proc-identity.pidAlive` with the recorded start time; the marker records it. Also a `--max` on the test's second `drain wait` |
+| Owner-proxy approvals (orchestrator, grokbot) count when uncommitted; beta approvals must be committed since 2.78.2 | 2.78.2 part (h) | step 3, the next release; **the owner may say leave it out** (he said proxies approve as him) |
