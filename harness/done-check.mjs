@@ -706,6 +706,13 @@ export function checkDone(task, since = startedAt(task.id)) {
   const seen = part === 'renderer' || part === 'both';
   const checks = [];
   const check = (label, ok, why) => checks.push({ label, ok: Boolean(ok), why: ok ? null : why });
+  // 2.78.1 (f, M7): warnings that don't block, shown as "WARN ..." (a playtest stage 1 that played the template cartridge
+  // while the studio's game has its own checks, STUDIO_PLAYTEST_GAME_CHECK=warn, the default).
+  const warnings = [];
+  const stage1Warnings = (reps) => {
+    const newest = (reps || []).filter(({ j }) => j?.stage1).sort((a, b) => mtime(b.f) - mtime(a.f))[0];
+    for (const w of newest?.j?.stage1?.warnings || []) if (w?.id) warnings.push(`${w.id}: ${w.summary || ''}`.slice(0, 500));
+  };
 
   const workAndVerify = (docsOnly = false) => {
     const ch = taskChanges(task.id, since);
@@ -804,6 +811,7 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('Playtest report since the task started', reps.length, 'no playtest report in qa/reports/ since this task started (`npm run playtest:stage1`)');
     const good = reps.filter(({ f, j }) => mtime(f) >= fresh && j.stage1.seed != null && j.stage1.ticksRun != null && isSha256(j.stage1.finalSha256) && (j.passed || j.stage1.failingTick != null));
     check('Report covers the current build with seed, ticks and hash (and the failing tick if it failed)', good.length, 'no report on the current build with a seed, ticks, a hash and (if it failed) the failing tick; run the playtest again');
+    stage1Warnings(good.length ? good : reps);
   }
   // 2.71.0 (y): research is paperwork: its write-up, with a Sources section and at least one link (harness/research.mjs).
   if (type === 'research') {
@@ -836,6 +844,7 @@ export function checkDone(task, since = startedAt(task.id)) {
     const fresh2 = lastGameChange();
     const reps = newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).filter((f) => mtime(f) >= fresh2);
     check('Playtest of the current build', reps.length, 'no playtest report newer than the last game change (npm run playtest:stage1)');
+    stage1Warnings(reps.map((f) => ({ f, j: readJson(f) })).filter(({ j }) => j?.stage1));
     workAndVerify();
     const implementer = (readRecentEvents(20000).filter((e) => e.type === 'task.start' && e.task === task.id).pop() || {}).model;
     const notes = filesUnder('studio/reviews', (n) => n.endsWith('.md') && n !== 'README.md').map((f) => fs.readFileSync(abs(f), 'utf8')).filter((t) => new RegExp(`\\b${task.id}\\b`).test(t));
@@ -921,7 +930,7 @@ export function checkDone(task, since = startedAt(task.id)) {
     notes.push(...k.notes);
   }
   const missing = checks.filter((c) => !c.ok).map((c) => c.why);
-  return { ok: missing.length === 0, type, typeSource: typed.source, typeIgnored: typed.ignored, titleType: typed.titleType, ...(typed.evidence ? { typeEvidence: typed.evidence } : {}), part, since, checks, missing, notes, ...TYPES[type] };
+  return { ok: missing.length === 0, type, typeSource: typed.source, typeIgnored: typed.ignored, titleType: typed.titleType, ...(typed.evidence ? { typeEvidence: typed.evidence } : {}), part, since, checks, missing, notes, ...(warnings.length ? { warnings } : {}), ...TYPES[type] };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -948,6 +957,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (vp) console.log(`  visual result: ${vp.ok ? 'PASS' : 'FAIL'}${vp.why ? ` (${vp.why.slice(0, 300)})` : ''}${(vp.evidence || []).length ? ` [${vp.evidence.join('; ').slice(0, 300)}]` : ''}`);
   } catch { /* no verdict module */ }
   for (const c of res.checks) console.log(`  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`);
+  for (const w of res.warnings || []) console.log(`  WARN ${w}`);
   for (const n of res.notes || []) console.log(`  note: ${n}${/^studio\/contracts\//.test(n) ? '' : ' (STUDIO_REACHABILITY=fail makes this a failing check)'}`);
   console.log(res.ok ? 'Ready to finish.' : 'Not done yet.');
   process.exit(res.ok ? 0 : 1);

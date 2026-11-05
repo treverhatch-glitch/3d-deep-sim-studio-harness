@@ -115,7 +115,42 @@ export function heldForLanding(taskId, { holds = readHolds(), queue = null } = {
   let q = queue;
   if (!q) { try { q = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'train', 'queue.json'), 'utf8')); } catch { q = []; } }
   const e = Array.isArray(q) ? q.find((x) => x?.task === taskId) : null;
-  return e ? { via: 'train', by: e.agent || 'the merge train', why: `queued for the merge train${e.at ? ` since ${String(e.at).slice(0, 16)}` : ''}`, at: e.at || null } : null;
+  if (e) return { via: 'train', by: e.agent || 'the merge train', why: `queued for the merge train${e.at ? ` since ${String(e.at).slice(0, 16)}` : ''}`, at: e.at || null };
+  // 2.78.1 (f, B-121): the supervisor launched a builder on a task that was in a Unity train (its branch in the engine
+  // queue, the train landing it). Every train counts: each engine's queue (.studio/train/<engine>-queue.json) and every
+  // running train's lanes (.studio/locks/train.lock, <engine>-train.lock; a live holder only). Not with a given queue
+  // (a caller asking about the web queue alone).
+  return queue ? null : inAnyTrain(taskId);
+}
+
+/**
+ * 2.78.1 (f, B-121): the train a task is in, other than the web queue: { via: 'train', engine, by, why, at } or null.
+ * Reads .studio/train/<engine>-queue.json and the train locks' "lanes" (a lock whose process is gone doesn't count).
+ * Never throws.
+ */
+export function inAnyTrain(taskId, { stateDir = STUDIO_STATE_DIR } = {}) {
+  const readJ = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+  const alive = (pid) => { if (!pid) return false; try { process.kill(Number(pid), 0); return true; } catch (err) { return err.code === 'EPERM'; } };
+  let names = [];
+  try { names = fs.readdirSync(path.join(stateDir, 'train')); } catch {}
+  for (const n of names.sort()) {
+    const m = n.match(/^([a-z][a-z0-9-]{1,30})-queue\.json$/);
+    if (!m) continue;
+    const q = readJ(path.join(stateDir, 'train', n));
+    const e = Array.isArray(q) ? q.find((x) => x?.task === taskId) : null;
+    if (e) return { via: 'train', engine: m[1], by: e.agent || `the ${m[1]} train`, why: `queued for the ${m[1]} train${e.branch ? ` (branch ${e.branch})` : ''}${e.at ? ` since ${String(e.at).slice(0, 16)}` : ''}`, at: e.at || null };
+  }
+  let locks = [];
+  try { locks = fs.readdirSync(path.join(stateDir, 'locks')); } catch {}
+  for (const n of locks.sort()) {
+    const m = n.match(/^(?:([a-z][a-z0-9-]{1,30})-)?train\.lock$/);
+    if (!m) continue;
+    const h = readJ(path.join(stateDir, 'locks', n));
+    if (!h || !alive(h.pid) || !(Array.isArray(h.lanes) && h.lanes.some((l) => (typeof l === 'string' ? l : l?.task) === taskId))) continue;
+    const which = m[1] ? `the ${m[1]} train` : 'the merge train';
+    return { via: 'train', engine: m[1] || null, by: h.by || which, why: `in ${which}${h.id ? ` ${h.id}` : ''}, which is landing it now`, at: h.at ? new Date(Number(h.at) || Date.parse(h.at)).toISOString() : null };
+  }
+  return null;
 }
 export const heldWords = (h) => (h.via === 'train' ? h.why : `held for landing by ${h.by}${h.why ? `: ${h.why}` : ''}`);
 
@@ -194,6 +229,7 @@ export function holdReason(taskId, q, now = Date.now(), holds = readHolds(), rol
   // session would fork its lane and re-queue it (builder-p77a on T-134). Work in progress (its claim) carries on.
   if (!q?.inProgress?.some((x) => x.id === taskId)) {
     const tq = heldForLanding(taskId, { holds: {} });
+    if (tq?.via === 'train' && tq.engine) return `${tq.why}: it counts as in progress until that train lands it or hands it back (npm run task -- train status --engine ${tq.engine})`;
     if (tq?.via === 'train') return `${tq.why}; it lands with the next train (npm run task -- train leave ${taskId} --by <name> takes it out first)`;
   }
   const h = holds[taskId];

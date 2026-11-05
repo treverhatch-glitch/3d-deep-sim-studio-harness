@@ -16,10 +16,36 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, REPO_ROOT } from '../harness/event.mjs';
-import { cartridgeFromArgv, groupActions, loadCartridge, replay } from '../harness/cartridge.mjs';
+import { cartridgeFromArgv, groupActions, loadCartridge, replay, isTemplateCartridge } from '../harness/cartridge.mjs';
 
 const REPORTS_DIR = path.join(REPO_ROOT, 'qa', 'reports');
 const STAGE1 = 'Stage 1 (cartridge)';
+
+/** 2.78.1 (f, M7): the studio's game when it isn't a cartridge (harness/game-gates.mjs studioGame), with its playtest check's command; else null. */
+async function studioGameOf() {
+  try {
+    const gg = await import('../harness/game-gates.mjs');
+    const g = await gg.studioGame();
+    if (!g?.name) return null;
+    // Only a game with checks of its own: there the verify skips the cartridge gates (playtest among them), so a stage 1
+    // run by hand is the only thing that could pass on the template. A game with none still has the cartridge gates.
+    const own = gg.declaredGates(g);
+    if (!own.length) return null;
+    return { name: g.name, playtest: own.find((x) => /playtest/i.test(x.id))?.command || null };
+  } catch { return null; }
+}
+/** STUDIO_PLAYTEST_GAME_CHECK: warn (default) | fail | off. */
+export function playtestGameMode(env = process.env) {
+  const v = String(env.STUDIO_PLAYTEST_GAME_CHECK ?? '').trim().toLowerCase();
+  if (/^(off|0|false|no)$/.test(v)) return 'off';
+  if (/^(fail|on|1|true|yes|required)$/.test(v)) return 'fail';
+  return 'warn';
+}
+/** One line: what stage 1 stepped (cartridge, ticks, seed, time) and whether that was the studio's game. */
+export function stage1Line(s) {
+  if (!s) return '[playtest] stage 1: not run';
+  return `[playtest] stage 1: ${s.passed ? 'PASS' : 'FAIL'}: stepped ${s.ticksRun ?? 0} tick(s) of cartridge ${s.cartridge || '?'}${s.scenario ? ` (scenario ${s.scenario})` : ''}, seed ${s.seed}, ${s.durationMs ?? '?'} ms${s.studioGame ? `; the studio's game is ${s.studioGame}${s.ofStudioGame === false ? ' (NOT played)' : ''}` : ''}${!s.passed && s.findings?.[0] ? `; ${s.findings[0].id}` : ''}`;
+}
 
 /**
  * Stage 1: play the cartridge tick by tick and stop at the first real failure.
@@ -99,10 +125,29 @@ export async function runStage1ProgrammaticQA({ seed = 1337, ticks, cartridge, s
     }
   }
 
+  // 2.78.1 (f, M7): on a lane, playtest:stage1 "passed" in ~33 ms: with a studio game that isn't a cartridge (a web game
+  // with its own checks) and no --cartridge, stage 1 played the template cartridge (example-sim), not the game. A stage
+  // that stepped none of the studio's game proved nothing about it: it fails, naming what it played and what plays the
+  // game. A real cartridge (one that drives the game's sim) counts. STUDIO_PLAYTEST_GAME_CHECK=off: the 2.78.0 behaviour.
+  // STUDIO_PLAYTEST_GAME_CHECK: warn (default: a warning in the report and the run's output, the stage still passes),
+  // fail (a P0 finding: the stage fails), off (no check, as in 2.78.0). The 0-tick failure above stays a failure.
+  const game = await studioGameOf();
+  const ofGame = !game || !isTemplateCartridge(cart.name) || cart.name === game.name;
+  const gameMode = playtestGameMode();
+  const warnings = [];
+  if (!ofGame && gameMode !== 'off') {
+    const how = `play the game: its own checks (npm run gates -- --only game${game.playtest ? `, or ${game.playtest}` : ''}), or --cartridge <a cartridge that drives ${game.name}'s sim>`;
+    if (gameMode === 'fail') add({ id: 'QA-STAGE1-NOT-THE-GAME', severity: 'P0', summary: `stage 1 stepped ${ticksRun} tick(s) of the template cartridge ${cart.name}, not the studio's game ${game.name}: none of the game was played, so it can't pass (STUDIO_PLAYTEST_GAME_CHECK=fail). To test the game, ${how}`, expected: `ticks of ${game.name}`, actual: `${ticksRun} ticks of ${cart.name}` }, 0);
+    else warnings.push({ id: 'QA-STAGE1-NOT-THE-GAME', summary: `stage 1 played the template, not the studio's game: ${ticksRun} tick(s) of ${cart.name}, none of ${game.name}. This report says nothing about the game; to test it, ${how} (STUDIO_PLAYTEST_GAME_CHECK=fail makes this a failure)` });
+  }
   const failingTick = findings.length ? findings[0].tick ?? null : null;
   return {
     stage: 1,
     cartridge: cart.name,
+    studioGame: game ? game.name : null,
+    ofStudioGame: ofGame,
+    gameCheck: gameMode,
+    warnings,
     adapter: adapter.name,
     scenario: scName,
     seed,
@@ -256,6 +301,8 @@ function formatMarkdownReport(report) {
           `- **Cartridge**: \`${report.stage1.cartridge}\` (adapter \`${report.stage1.adapter}\`)`,
           `- **Scenario**: \`${report.stage1.scenario ?? 'none'}\` · **Seed**: \`${report.stage1.seed}\``,
           `- **Ticks run**: \`${report.stage1.ticksRun}\` · **Outcome**: \`${report.stage1.outcome ?? 'none'}\``,
+          ...(report.stage1.studioGame ? [`- **Studio game**: \`${report.stage1.studioGame}\`${report.stage1.ofStudioGame === false ? ' (NOT played)' : ''}`] : []),
+          ...(report.stage1.warnings || []).map((w) => `- **WARN ${w.id}**: ${w.summary}`),
           `- **Failing tick**: \`${report.stage1.failingTick ?? 'none'}\``,
           `- **State hash (display, FNV-1a 64)**: \`${report.stage1.finalHash}\``,
           `- **State SHA-256 (verification)**: \`${report.stage1.finalSha256}\``,
@@ -350,6 +397,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     msg: `QA ${runId} ${passed ? 'PASSED' : `FAILED at tick ${stage1?.failingTick ?? '?'}`} (${stage1?.cartridge || 'n/a'}, hash=${stage1?.finalHash || 'n/a'}, report=${path.relative(REPO_ROOT, mdFile).replace(/\\/g, '/')})`,
   });
 
+  // 2.78.1 (f, M7): every run says what stage 1 stepped (stderr, so --json readers of stdout are unchanged).
+  if (stage1) console.error(stage1Line(stage1));
+  for (const w of stage1?.warnings || []) console.error(`[playtest] WARN ${w.id}: ${w.summary}`);
   if (args.quiet) console.log(`[playtest] ${passed ? 'PASS' : 'FAIL'} ${path.relative(REPO_ROOT, mdFile)}`);
   else console.log(JSON.stringify(report, null, 2));
   process.exit(passed ? 0 : 1);
