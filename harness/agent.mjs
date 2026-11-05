@@ -555,6 +555,17 @@ export function crashFinishable({ code, trouble, reasoningOnly, capped, hasCommi
   return Boolean(hasCommit) && Number.isInteger(code);
 }
 
+/**
+ * 2.78.2 (a): is task `id`'s lane queued for the merge train by this session (its agent, or its lane branch)? The queue
+ * entry stays until the train lands it or hands it back (harness/train.mjs). Never throws.
+ */
+export function trainQueued(id, { agent = null, branch = null, stateDir = STUDIO_STATE_DIR } = {}) {
+  try {
+    const q = JSON.parse(fs.readFileSync(path.join(stateDir, 'train', 'queue.json'), 'utf8'));
+    return Array.isArray(q) && q.some((e) => e?.task === id && ((agent && e.agent === agent) || (branch && e.branch === branch)));
+  } catch { return false; }
+}
+
 /** After an agent exits: record it, and if it died holding work, hand the work back cleanly. */
 /**
  * 2.73.1 (B-66): how a session's process ended, as far as Node can tell: { kind, code, signal, at, by?, why? }.
@@ -739,7 +750,11 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   const copyDir = s0.copy?.dir ? path.join(REPO_ROOT, s0.copy.dir) : null;
   const ahead = s0.copy?.branch ? unmerged(s0.copy.branch) : 0;
   const finished = [];
+  const queuedForTrain = [];
   for (const id of tasks) {
+    // 2.78.2 (a, W-0090): its task done queued the lane for the merge train and the session ended, as it should: the
+    // train lands it (task.done) or hands it back (task.paused). No launcher verify, no second done, no hand-back here.
+    if (trainQueued(id, { agent, branch: s0.copy?.branch || null })) { queuedForTrain.push(id); continue; }
     // 2.77.2 (B-107): in its own lane copy, a session's work is exactly the commits its branch has that main doesn't
     // (ahead). The log search below is for a session in the shared checkout only: in a copy it also found main's own
     // commits naming the task (made before the copy was cut), so an empty lane got a 20-minute launcher verify.
@@ -788,7 +803,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
       const gl = spawnSync('git', ['log', `--since=${t0}`, '--grep', oTask, '--format=%h'], { windowsHide: true, cwd, encoding: 'utf8' });
       const commits = gl.status === 0 ? gl.stdout.split('\n').filter(Boolean).length : 0;
       outcome = sessionOutcome({ agent, task: oTask, startedAt: t0, events: readRecentEvents(20000), commits: Math.max(commits, finished.includes(oTask) ? 1 : 0), counts: !stop && !capped && !limit && !trouble && !reasoningOnly });
-      if (outcome && finished.includes(oTask)) outcome = { ...outcome, done: true, noWork: false, stuck: false, why: '' };
+      if (outcome && (finished.includes(oTask) || queuedForTrain.includes(oTask))) outcome = { ...outcome, done: true, noWork: false, stuck: false, why: '', ...(queuedForTrain.includes(oTask) ? { queuedForTrain: true } : {}) };
     }
   } catch { outcome = null; }
   let tok = tokensFrom(log);

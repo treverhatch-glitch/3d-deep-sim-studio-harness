@@ -20,7 +20,7 @@ export const TASK_USAGE = {
   pause: `${T} pause <TASK_ID> --agent <owner> --note "where you stopped and what is left"`,
   reopen: `${T} reopen <TASK_ID> --reason "what was wrong" (the task must be done)`,
   done: `${T} done <TASK_ID> --agent <owner> [--check] [--train [--branch <Unity branch>]] [--note "..."] [--force --reason "<10+ chars>"]`,
-  train: `${T} train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <TASK_ID> --by <name> [--permission "…"] | train config <TASK_ID> [--by <name>]`,
+  train: `${T} train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] [--detach | --foreground] | train status | train release <TASK_ID> --by <name> [--permission "…"] | train cancel [<train id>] --by <name> [--why "…"] | train config <TASK_ID> [--by <name>]`,
   unblock: `${T} unblock <TASK_ID> --by <name> [--note "what was fixed"]`,
   game: `${T} game [<name>] --by <name>`,
   note: `${T} note <TASK_ID> "<ruling>" --by <name>`,

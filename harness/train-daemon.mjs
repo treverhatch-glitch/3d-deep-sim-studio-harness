@@ -33,6 +33,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent } from './event.mjs';
+import { spawnDetached } from './train-detach.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
@@ -182,10 +183,16 @@ export async function trainDaemonPass({ root = null, env = process.env, now = Da
   return { started: true, why: d.why, pid, lanes: d.lanes };
 }
 
-/** The detached child: node harness/train-daemon.mjs run (its output in .studio/train/daemon.log). Windows: windowsHide. */
+/**
+ * The detached child: node harness/train-daemon.mjs run (its output in .studio/train/daemon.log). Windows: windowsHide.
+ * 2.78.2 (a, W-0090): started through a launcher that exits at once (harness/train-detach.mjs spawnDetached), so the
+ * train outlives the supervisor that started it (a tree kill of the supervisor doesn't reach it).
+ */
 export function spawnDaemonTrain(root, env = process.env) {
   const log = path.join(root, '.studio', 'train', 'daemon.log');
   fs.mkdirSync(path.dirname(log), { recursive: true });
+  const d = spawnDetached({ args: [path.join(HERE, 'train-daemon.mjs'), 'run'], out: log, env: { ...env, STUDIO_LOCK_OWNER: DAEMON_BY, STUDIO_MAIN_ROOT: root }, cwd: root });
+  if (d.ok) return { pid: d.pid };
   const fd = fs.openSync(log, 'a');
   const child = spawn(process.execPath, [path.join(HERE, 'train-daemon.mjs'), 'run'], { cwd: root, detached: true, windowsHide: true, stdio: ['ignore', fd, fd], env: { ...env, STUDIO_LOCK_OWNER: DAEMON_BY, STUDIO_MAIN_ROOT: root } });
   child.unref();
@@ -236,13 +243,14 @@ export async function boardDeps() {
  * The child's work: one train (runTrain, its own job.done left out), the after-train routing, ONE job.done (kind train,
  * meta.auto). opts: { root, runTrain, deps (for runTrain), board (afterTrain deps), jobDone }.
  */
-export async function runDaemonTrain({ root, env = process.env, runTrain = null, deps = null, board = null, finish = null } = {}) {
+export async function runDaemonTrain({ root, env = process.env, runTrain = null, deps = null, board = null, finish = null, waitMs = 0 } = {}) {
   const t0 = Date.now();
   const tr = await import('./train.mjs');
   let res;
   try {
     if (!runTrain || !deps) { const busyMod = await import('./busy.mjs'); deps ||= (await import('./task.mjs')).trainDeps(busyMod); }
-    res = await (runTrain || tr.runTrain)({ root, by: DAEMON_BY, now: true, quietJob: true, deps, log: (m) => console.error(m) });
+    // 2.78.2 (a): a train a queued task done started (harness/train-detach.mjs kickTrain) waits for a running train first.
+    res = await (runTrain || tr.runTrain)({ root, by: DAEMON_BY, now: true, quietJob: true, deps, log: (m) => console.error(m), ...(waitMs > 0 ? { waitMs } : {}) });
   } catch (e) { res = { ok: false, id: `daemon-${t0}`, message: `the train failed to run: ${e.message}`, landed: [], dropped: [], deferred: [], held: [] }; }
   let routed = { requeued: [], noted: [], ok: [], skipped: [] };
   if (!res.busy && (res.dropped || []).length) { try { routed = afterTrain(res, board || (await boardDeps())); } catch {} }
@@ -290,7 +298,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   if (argv[0] === 'run') {
     try { fs.mkdirSync(path.dirname(DAEMON_FILE(root)), { recursive: true }); const r = readJson(DAEMON_FILE(root)) || {}; fs.writeFileSync(DAEMON_FILE(root), `${JSON.stringify({ ...r, pid: process.pid, at: r.at || new Date().toISOString() })}\n`); } catch {}
-    const { res } = await runDaemonTrain({ root });
+    // 2.78.2 (a): `run --wait <min>` (a train a queued task done started): wait that long for a running train.
+    const wi = argv.indexOf('--wait');
+    const waitMin = wi >= 0 ? Number(argv[wi + 1]) : 0;
+    const { res } = await runDaemonTrain({ root, waitMs: Number.isFinite(waitMin) && waitMin > 0 ? waitMin * 60000 : 0 });
     console.log(res.message || '');
     process.exit(res.ok ? 0 : 1);
   }
