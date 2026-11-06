@@ -32,6 +32,34 @@ export const OWNER_ONLY_PHRASES = [
   { step: 'an owner-only step', rx: /\bowner[- ]only (?:step|change|approval|re-?pin)\b|\bneeds? (?:the )?owner'?s? (?:signature|signed approval|approval|re-?pin|release)\b|\bwaits? for the owner\b|\bonly the owner (?:can|may) (?:approve|sign|re-?pin|change|accept)\b/i },
 ];
 
+/**
+ * 2.79 (d): the structured owner step. The places that write the harness's own refusal (task done's safety checks)
+ * put a code on the task.not_done event (meta.ownerStep); a hand-back that follows carries it (meta.ownerStep on the
+ * task.paused event), and the Line Producer and the model pools read that field, never the words of a note ("the protected
+ * gate now PASSES" is not a protected step).
+ */
+export const OWNER_STEP_PROTECTED = 'protected-file';
+export const OWNER_STEP_CODES = { protected: OWNER_STEP_PROTECTED, 'weakened-tests': 'weakened-test' };
+/** The owner step for the failed safety checks' ids (the first that has one), or null. */
+export const ownerStepOfChecks = (ids = []) => { for (const id of ids) if (OWNER_STEP_CODES[id]) return OWNER_STEP_CODES[id]; return null; };
+/**
+ * The owner step a hand-back of this task carries: the newest harness refusal (task.not_done) since the task's last start,
+ * when it names one and no approval has come since. A later refusal of another kind, or a done that passed, clears it.
+ */
+export function ownerStepForHandBack(taskId, events) {
+  const mine = (events || []).filter((e) => e.task === taskId || (e.type && /^approval\./.test(e.type) && String(e.msg || '').includes(taskId)));
+  let from = -1;
+  mine.forEach((e, i) => { if (e.type === 'task.start') from = i; });
+  const since = mine.slice(from + 1);
+  let refusal = -1;
+  since.forEach((e, i) => { if (e.type === 'task.not_done') refusal = i; });
+  if (refusal < 0) return null;
+  const step = since[refusal].meta?.ownerStep || null;
+  if (!step) return null;
+  if (since.slice(refusal + 1).some((e) => /^approval\.(protected|proposal)$/.test(e.type) || e.type === 'task.done')) return null;
+  return step;
+}
+
 const off = (env = process.env) => /^(off|0|false|no)$/i.test(String(env.STUDIO_OWNER_ONLY_PARK || ''));
 
 /** { step, phrase } for the first owner-only phrase in the text, or null. */

@@ -124,7 +124,7 @@ export async function selftest267F({ dir, run, report, tmpRoot, root }) {
       && !/Not landed by merge train/.test(handBack(C[0].id)) && C.every((l) => !isDone(l.id)) && isDone(O.id)
       && of(ev1, 'task.train.chain_tail', (e) => e.meta?.action === 'deferred').length === 1 && new RegExp(`wait for ${T} \\(not bisected, nobody handed back\\)`).test(log1),
     `${log1.slice(-3500)}\ndeferred=${def1.map((e) => e.msg).join('\n')}`);
-  const lanes1 = run(dir, 'node harness/lanes.mjs --no-stamps', env);
+  const lanes1 = run(dir, 'node harness/lanes.mjs --full --no-stamps', env);
   report('2.67.0 (f, 4): npm run lanes says the chain waits for its tail ("chain <c1>, <c2>, <c3> waits for its tail <T> ... it lands with <T> once <T> is queued") (fails on 2.66.0: no such note)',
     Boolean(T) && new RegExp(`note: chain ${C[0].id}, ${C[1].id}, ${C[2].id} waits for its tail ${T} \\(chain tail, train `).test(out(lanes1)),
     out(lanes1).slice(-1500));

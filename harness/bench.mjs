@@ -569,7 +569,7 @@ async function runTry(root, { c, tryNo, runId, start, copiesRoot, out, without, 
       const line = fillCommand(env.STUDIO_BENCH_AGENT_CMD, { case: c.id, try: String(tryNo), task: taskId, copy });
       r = await runCmd(line, null, { cwd: copy, env: aenv, timeoutMs: limitMs, logFile });
     } else {
-      r = await runCmd(process.execPath, [path.join('harness', 'agent.mjs'), 'start', '--role', c.role || 'builder', '--agent', `builder-bench${tryNo}`, '--task', taskId, '--one-task'], { cwd: copy, env: aenv, timeoutMs: limitMs, logFile });
+      r = await runCmd(process.execPath, [path.join('harness', 'agent.mjs'), 'start', '--attach', '--role', c.role || 'builder', '--agent', `builder-bench${tryNo}`, '--task', taskId, '--one-task'], { cwd: copy, env: aenv, timeoutMs: limitMs, logFile });
     }
     const use = await usageOf(copy, r.out);
     Object.assign(t, { exit: r.code, timedOut: r.timedOut, minutes: round(r.ms / 60000, 2), tokens: use.tokens, turns: use.turns, overCap: use.tokens > Number(c.tokenCap) });

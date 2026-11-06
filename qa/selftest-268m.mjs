@@ -155,7 +155,7 @@ export async function selftest268M({ dir, run, report, tmpRoot }) {
     const want = 'Machine: RAM 26/32 GB (commit 55/60), CPU 32%, GPU 1% (1.8/12 GB), disk 130 GB free';
     const b = run(dir, 'node harness/status.mjs --brief --peek --json', { ...env, STUDIO_TEST_FREEMEM_MB: '5300' });
     let j = null; try { j = JSON.parse(b.stdout.trim().split('\n').pop()); } catch {}
-    const lanes = run(dir, 'node harness/lanes.mjs --no-stamps', env);
+    const lanes = run(dir, 'node harness/lanes.mjs --full --no-stamps', env);
     const snap = probe('snap', "const { buildStudioSnapshot } = await import('./harness/status.mjs'); const s = buildStudioSnapshot(); console.log(JSON.stringify({ m: s.machine }));");
     fs.rmSync(mfile, { force: true });
     const ok = j && j.text.includes(`${want}.`) && j.words < 100 && /PC: 5\.2 GB free/.test(j.text) && out(lanes).includes(want) && snap.m?.line === want && snap.m.ram.commitLimitGb === 60 && snap.m.headroomGb === 5 && snap.m.gpus[0].vramGb === 12;

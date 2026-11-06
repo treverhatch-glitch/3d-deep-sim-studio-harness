@@ -5,7 +5,11 @@
  * The crew's orchestrator (an agent outside the harness) rebuilt the state of every lane by hand eight times in one day
  * and ran about fifteen sub-agents doing the same "merge main, re-stamp, run the lane's tests" recipe. Both are code now.
  *
- *   npm run lanes [-- --json] [--no-stamps]
+ *   npm run lanes [-- --json] [--full] [--no-stamps] [<task|agent|branch>]
+ *       2.79 (d): with no name and no --full the listing is cheap: task, agent, branch, queue, hold, last result and
+ *       whether a session runs, read from git's worktree files and the studio's records (no git process per copy:
+ *       100+ copies took over 2 minutes). Ahead/behind, dirty, hook stamps, conflicts and harness drift are read with
+ *       --full (a progress line goes to stderr) or for the one lane a name picks.
  *       One row per lane copy (.lanes/<agent>) and per lane branch with unlanded work (.studio/lane-branches.json, the
  *       train queue): task, agent, branch, ahead/behind main, hook stamps (harness/hook-stamp.mjs on the lane's own
  *       commits, within STUDIO_LANES_STAMP_MS, 4000 ms in all; past that "not checked"), whether main changed
@@ -32,6 +36,9 @@
  *       Who: a person, a Producer or Director session, or an agent outside the harness (harness/permission.mjs); a
  *       worker never. --busy-ok is theirs too.
  *
+ *   npm run lanes -- prune --idle <hours> [--dry-run] [--by <name>]
+ *                                                        2.79 (d): remove idle lane copies now (the janitor's rule: session ended,
+ *                                                        no queued task, nobody in it, nothing unsaved or unlanded; branch kept)
  *   npm run lanes -- disk [--top N] [--json]            2.70.0: each lane copy's size, the total, what laneExclude saves
  *                                                        (harness/lane-disk.mjs)
  *   npm run lanes -- widen <path|glob> [...] [--lane <agent>] [--why "…"]
@@ -50,7 +57,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, readRecentEvents, STUDIO_STATE_DIR } from './event.mjs';
-import { mainRoot, mainBranch, laneCopies, laneLive, unmerged, isLaneWorktree, LANES_DIR } from './worktree.mjs';
+import { mainRoot, mainBranch, laneCopies, laneLive, unmerged, isLaneWorktree, LANES_DIR, cheapLaneCopies, refSha, mainBranchCheap } from './worktree.mjs';
 import { readQueue, heldNow, pinMoves, trainManifest, readLeft } from './train.mjs';
 import { readTrainStatus, trainStatusLine, capNote } from './train-status.mjs';
 import { chainTailNotes } from './train-tail.mjs';
@@ -113,7 +120,7 @@ const ageText = (ms) => (!Number.isFinite(ms) || ms < 0 ? '?' : ms < 3600000 ? `
  * The lanes: lane copies, lane branches with unlanded work, queued lanes. [{ task, agent, branch, dir, head, queued }].
  * One per branch; a queued lane without a branch name is keyed by its head.
  */
-export function collectLanes(root = mainRoot()) {
+export function collectLanes(root = mainRoot(), { cheap = false, progress = null } = {}) {
   const byKey = new Map();
   const queue = readQueue(root);
   const branchOf = readJson(path.join(root, '.studio', 'lane-branches.json'), {});
@@ -121,7 +128,10 @@ export function collectLanes(root = mainRoot()) {
   let taskOfAgent = new Map();
   try { taskOfAgent = new Map(listLocks().filter((l) => /^task:/.test(l.key)).map((l) => [l.owner, l.key.slice(5)])); } catch {}
   let copies = [];
-  try { copies = laneCopies(root); } catch {}
+  // 2.79 (d): cheap = read git's worktree metadata files, no git process per copy (dirty and unmerged stay unknown).
+  try { copies = cheap ? cheapLaneCopies(root).map((c) => ({ ...c, dirty: null })) : laneCopies(root, { progress }); } catch {}
+  let merged = null;
+  if (cheap) { const r = git(root, 'for-each-ref', `--merged=refs/heads/${mainBranchCheap(root) || mainBranch(root)}`, '--format=%(refname:short)', 'refs/heads'); merged = new Set(out(r).split('\n').filter(Boolean)); }
   for (const c of copies) {
     const s = readJson(path.join(root, '.studio', 'agents', `${c.agent}.json`), null);
     byKey.set(c.branch || `copy:${c.agent}`, { task: taskOfBranch.get(c.branch) || taskOfAgent.get(c.agent) || (s?.task && TASK_ID.test(s.task) ? s.task : null), agent: c.agent, branch: c.branch, dir: c.dir, dirty: c.dirty, copy: true });
@@ -129,7 +139,7 @@ export function collectLanes(root = mainRoot()) {
   for (const [task, branch] of Object.entries(branchOf)) {
     if (!TASK_ID.test(task) || typeof branch !== 'string' || byKey.has(branch)) continue;
     if (!isSha(out(git(root, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`)))) continue;
-    if (unmerged(branch, root) > 0) byKey.set(branch, { task, agent: null, branch, dir: null, dirty: false, copy: false });
+    if (merged ? !merged.has(branch) : unmerged(branch, root) > 0) byKey.set(branch, { task, agent: null, branch, dir: null, dirty: false, copy: false });
   }
   for (const e of queue) {
     if (!e?.task) continue;
@@ -168,16 +178,46 @@ function recordedTier(entry, task, events) {
  * The lane table. Options: stamps (check hook stamps, within budgetMs in all), conflicts (merge-tree predictions).
  * Returns { main, tip, lanes: [...], notes: [] }.
  */
-export async function laneTable(root = mainRoot(), { stamps = true, conflicts = true, budgetMs = Number(process.env.STUDIO_LANES_STAMP_MS) >= 0 && String(process.env.STUDIO_LANES_STAMP_MS || '').trim() !== '' ? Number(process.env.STUDIO_LANES_STAMP_MS) : 4000, now = Date.now() } = {}) {
-  const main = mainBranch(root);
-  const tip = out(git(root, 'rev-parse', `refs/heads/${main}`));
+export async function laneTable(root = mainRoot(), { stamps = true, conflicts = true, budgetMs = Number(process.env.STUDIO_LANES_STAMP_MS) >= 0 && String(process.env.STUDIO_LANES_STAMP_MS || '').trim() !== '' ? Number(process.env.STUDIO_LANES_STAMP_MS) : 4000, now = Date.now(), full = true, only = null, progress = null } = {}) {
+  // 2.79 (d): full = false is the cheap listing (git's metadata files, no git process per copy: task, agent, branch, queue,
+  // hold, last result, session); full rows (ahead/behind, dirty, stamps, conflicts) for every lane, or for the lane `only` names.
+  const main = full || only ? mainBranch(root) : (mainBranchCheap(root) || mainBranch(root));
+  const tip = full || only ? out(git(root, 'rev-parse', `refs/heads/${main}`)) : (refSha(root, `refs/heads/${main}`) || out(git(root, 'rev-parse', `refs/heads/${main}`)));
   const notes = [];
   const holds = readHolds();
   let leftList = null;
   let events = [];
   try { events = readRecentEvents(5000); } catch {}
   const lanes = [];
-  for (const l of collectLanes(root)) {
+  let found = collectLanes(root, { cheap: !full, progress });
+  if (only) {
+    const w = String(only);
+    found = found.filter((l) => l.task === w || l.agent === w || l.branch === w);
+    if (!found.length) notes.push(`no lane named ${w} (a task id, an agent or a branch)`);
+  }
+  const rowFull = full || Boolean(only);
+  let fullDone = 0;
+  for (const l of found) {
+    if (rowFull && !full && l.copy && l.dirty === null) l.dirty = Boolean(out(git(l.dir, 'status', '--porcelain')));
+    if (rowFull && progress && found.length >= 10 && (fullDone++ % 10 === 0)) progress(`checking lane ${fullDone}/${found.length}…`);
+    if (!rowFull) {
+      // The cheap row: everything that is a file read.
+      const q0 = l.queued;
+      const head0 = l.branch ? refSha(root, `refs/heads/${l.branch}`) : (q0?.head || '');
+      const row0 = { task: l.task || null, agent: l.agent || null, branch: l.branch || null, dir: l.dir ? path.relative(root, l.dir).split(path.sep).join('/') : null, head: head0 || null, copy: l.copy, dirty: false, cheap: true };
+      const qAt0 = Date.parse(q0?.at || '');
+      row0.ageMs = Number.isFinite(qAt0) ? now - qAt0 : null;
+      row0.queued = q0 ? { at: q0.at || null, tier: recordedTier(q0, row0.task, events), held: heldNow(q0) ? { tier: q0.held.tier, why: q0.held.why } : null, stale: q0.head !== head0 } : null;
+      const h0 = row0.task ? holds[row0.task]?.held : null;
+      row0.hold = h0 ? { by: h0.by || null, why: h0.why || '', at: h0.at || null } : null;
+      if (row0.queued && h0) row0.queued.out = true;
+      const left0 = row0.task && !row0.queued ? (leftList ||= readLeft(root)).filter((x) => x.task === row0.task).pop() : null;
+      row0.left = left0 ? { by: left0.by, why: left0.why, at: left0.at } : null;
+      row0.last = lastResult(root, l, head0);
+      row0.session = sessionRunning(root, l.agent);
+      lanes.push(row0);
+      continue;
+    }
     const head = out(git(root, 'rev-parse', '--verify', '--quiet', l.branch ? `refs/heads/${l.branch}^{commit}` : `${l.queued?.head}^{commit}`)) || (l.dir ? out(git(l.dir, 'rev-parse', 'HEAD')) : '') || l.queued?.head || '';
     const row = { task: l.task || null, agent: l.agent || null, branch: l.branch || null, dir: l.dir ? path.relative(root, l.dir).split(path.sep).join('/') : null, head: head || null, copy: l.copy, dirty: Boolean(l.dirty) };
     if (!isSha(head) || !isSha(tip)) { row.error = 'its head is not a commit here'; lanes.push(row); continue; }
@@ -206,8 +246,9 @@ export async function laneTable(root = mainRoot(), { stamps = true, conflicts = 
     row.session = sessionRunning(root, l.agent);
     lanes.push(row);
   }
+  if (!rowFull) notes.push('cheap listing: ahead/behind, dirty, hook stamps and conflicts are not read (that is a git process per lane): npm run lanes -- --full, or npm run lanes -- <task|agent|branch> for one lane');
   // Hook stamps: hook-stamp.mjs's own check on each lane's own commits (main's tip..the lane), within one time budget.
-  if (stamps) {
+  if (stamps && rowFull) {
     let check = null;
     try { ({ checkHookStamps: check } = await import('./hook-stamp.mjs')); } catch (e) { notes.push(`hook stamps not checked: ${e.message}`); }
     const t0 = Date.now();
@@ -223,7 +264,7 @@ export async function laneTable(root = mainRoot(), { stamps = true, conflicts = 
     if (skipped) notes.push(`hook stamps: ${skipped} lane(s) not checked within ${budgetMs} ms (STUDIO_LANES_STAMP_MS; npm run hooks -- check in the lane checks one)`);
   }
   // Predicted conflicts: with main (every lane both ahead and behind), and pairwise among queued lanes on shared files.
-  if (conflicts && isSha(tip)) {
+  if (conflicts && rowFull && isSha(tip)) {
     const sup = mergeTreeSupport(root);
     if (sup.ok) {
       // 2.65.1: the same call, union-file exemption and file:line places as the queue's prediction (merge-tree.mjs).
@@ -290,7 +331,7 @@ export function tableText(t) {
     r.task || '-',
     r.agent || '-',
     r.branch || (r.head ? r.head.slice(0, 8) : '-'),
-    r.error ? '?' : `+${r.ahead}/-${r.behind}`,
+    r.error ? '?' : r.cheap ? '-' : `+${r.ahead}/-${r.behind}`,
     stampWord(r.stamps),
     !r.harness ? '-' : r.harness.current ? 'current' : `stale (${r.harness.files})`,
     r.queued ? `yes${r.queued.tier ? ` ${r.queued.tier}` : ''}${r.queued.held ? ' HELD-owner' : ''}${r.queued.out ? ' OUT (held)' : ''}${r.queued.stale ? ' (new commits)' : ''}` : r.left ? `left (by ${r.left.by})` : '-',
@@ -459,10 +500,27 @@ export async function refreshLane(root, lane, { by, busyOk = false, tests = true
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   // 2.67.0 (B-47): --help / -h prints usage and never acts.
-  if (argv.includes('--help') || argv.includes('-h')) { console.log('Usage: npm run lanes [-- --json] [--no-stamps] | npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests] [--json] | npm run lanes -- disk [--top N] [--json] | npm run lanes -- widen <path|glob> [...] [--lane <agent>] [--why "…"] | npm run lanes -- orphans [<ID>] [--all] [--json] | npm run lanes -- carry <ID> [--from <lane branch>] --by <you> [--json]'); process.exit(0); }
+  if (argv.includes('--help') || argv.includes('-h')) { console.log('Usage: npm run lanes [-- --json] [--full] [--no-stamps] [<task|agent|branch>] | npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests] [--json] | npm run lanes -- prune --idle <hours> [--dry-run] | npm run lanes -- disk [--top N] [--json] | npm run lanes -- widen <path|glob> [...] [--lane <agent>] [--why "…"] | npm run lanes -- orphans [<ID>] [--all] [--json] | npm run lanes -- carry <ID> [--from <lane branch>] --by <you> [--json]'); process.exit(0); }
   const opt = (k) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : null);
   const json = argv.includes('--json');
   const root = mainRoot();
+  if (argv[0] === 'prune') {
+    // 2.79 (d): remove the idle lane copies now (the janitor's rule, harness/janitor.mjs pruneIdleLanes): session ended, no queued
+    // task, nobody in it, nothing unsaved or unlanded; the branch stays. --dry-run lists them.
+    const dry = argv.includes('--dry-run');
+    const by = opt('--by') || '';
+    const hrs = opt('--idle');
+    const jn = await import('./janitor.mjs');
+    const hours = hrs === null ? jn.laneIdleHours() : Number(hrs);
+    if (!(hours > 0)) { console.error('Usage: npm run lanes -- prune --idle <hours> [--dry-run] [--by <name>]   (hours > 0; STUDIO_LANE_IDLE_HOURS is the default)'); process.exit(2); }
+    if (!dry) { const why = refreshRefusal({ by }); if (why) { console.error(why); process.exit(2); } }
+    const r = await jn.pruneIdleLanes({ hours, dryRun: dry, root, by: by || 'lanes-prune' });
+    if (json) { console.log(JSON.stringify(r)); process.exit(0); }
+    console.log(`${dry ? 'Would remove' : 'Removed'} ${r.removed.length} idle lane copy(ies) (idle over ${hours} h), ${jn.human(r.freed)} ${dry ? 'would be freed' : 'freed'}; ${r.kept.length} kept.`);
+    for (const x of r.removed) console.log(`  ${dry ? 'would remove' : 'removed'} ${x.path} (${jn.human(x.bytes || 0)}): ${x.why}`);
+    for (const x of r.kept) console.log(`  kept ${x.path}: ${x.why}`);
+    process.exit(0);
+  }
   if (argv[0] === 'refresh') {
     const target = argv[1] && !argv[1].startsWith('--') ? argv[1] : null;
     const allLanes = argv.includes('--all');
@@ -524,8 +582,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     else console.log(r.ok ? (r.added.length ? `[lanes] ${path.basename(dir)} widened: ${r.added.join(' ')} (logged as lane.widened)` : `[lanes] ${path.basename(dir)}: ${r.why}`) : `[lanes] could not widen: ${r.why}`);
     process.exit(r.ok ? 0 : 1);
   }
-  if (argv[0] && !argv[0].startsWith('--')) { console.error('Usage: npm run lanes [-- --json] [--no-stamps] | npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests]'); process.exit(2); }
-  const t = await laneTable(root, { stamps: !argv.includes('--no-stamps') });
+  // 2.79 (d): a bare `npm run lanes` is the cheap listing (no git process per copy); --full reads every lane as before
+  // (progress on stderr), and a name (task id, agent or branch) reads that one lane in full.
+  const named = argv.find((a) => !a.startsWith('--')) || null;
+  const full = argv.includes('--full');
+  const t = await laneTable(root, { stamps: !argv.includes('--no-stamps'), full, only: named, progress: (m) => console.error(`lanes: ${m}`) });
   // 2.68.0 (m): the machine line (harness/machine.mjs: the last scan, or a new one when stale).
   try { const m = await import('./machine.mjs'); const line = m.machineLine(m.readMachine({ root })); if (line) t.machine = line; } catch {}
   console.log(json ? JSON.stringify(t) : tableText(t));

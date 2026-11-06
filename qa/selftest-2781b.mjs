@@ -70,7 +70,7 @@ export async function selftest2781B({ dir, run, report, tmpRoot, root }) {
     const t = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop();
     try { return { ...JSON.parse(t), _err: out(r).slice(-1500) }; } catch { return { _err: out(r).slice(-2500) }; }
   };
-  const startFg = (S, env, args, timeout = 150000) => spawnSync(process.execPath, ['harness/agent.mjs', 'start', ...args], { windowsHide: true, cwd: S, encoding: 'utf8', env: childEnv(env), timeout });
+  const startFg = (S, env, args, timeout = 150000) => spawnSync(process.execPath, ['harness/agent.mjs', 'start', '--attach', ...args], { windowsHide: true, cwd: S, encoding: 'utf8', env: childEnv(env), timeout });
   const rec = (agent, pre = '') => { try { return JSON.parse(fs.readFileSync(path.join(recDir, `${pre}${agent}.json`), 'utf8')); } catch { return null; } };
   const cfgFor = (agent, c) => fs.writeFileSync(path.join(recDir, `${agent}.cfg.json`), JSON.stringify(c));
   const logOf = (S, agent) => { try { return fs.readFileSync(path.join(S, '.studio', 'agents', `${agent}.log`), 'utf8'); } catch { return ''; } };

@@ -21,7 +21,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
+import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
+import { readQueue } from './train.mjs';
 import { parseNextQueue } from './task.mjs';
 import { taskType } from './done-check.mjs';
 import { taggedCommits } from './scorecard.mjs';
@@ -40,11 +41,35 @@ function diffOf(hash) {
   return r.status === 0 ? r.stdout : '';
 }
 
+/**
+ * 2.79 (d): where a task's commits live when the current branch has none (review run from main): the lane branch the
+ * registry (.studio/lane-branches.json) or the train queue names for it, else a branch whose commits carry
+ * "Studio-Task: <ID>". [{ branch, commits }] for the first that has tagged commits, or null.
+ */
+export function taskBranchCommits(taskId, { root = REPO_ROOT } = {}) {
+  const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const names = [];
+  try { const b = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'lane-branches.json'), 'utf8'))[taskId]; if (typeof b === 'string') names.push(b); } catch {}
+  try { for (const e of readQueue(root)) if (e?.task === taskId && e.branch) names.push(e.branch); } catch {}
+  const hit = g('log', '--all', '-n1', '--format=%H', `--grep=Studio-Task: ${taskId}`);
+  if (hit.status === 0 && hit.stdout.trim()) {
+    const own = g('for-each-ref', '--contains', hit.stdout.trim(), '--format=%(refname:short)', 'refs/heads');
+    if (own.status === 0) names.push(...own.stdout.split(/\r?\n/).filter(Boolean));
+  }
+  for (const branch of [...new Set(names)]) {
+    const commits = taggedCommits(3000, branch).filter((c) => c.tasks.includes(taskId));
+    if (commits.length) return { branch, commits };
+  }
+  return null;
+}
+
 export function gather(taskId, { implementer = null } = {}) {
   const q = parseNextQueue();
   const task = [...q.inProgress, ...q.backlog, ...q.done].find((t) => t.id === taskId);
   if (!task) return { error: `No task ${taskId} in studio/NEXT.md` };
-  const commits = taggedCommits().filter((c) => c.tasks.includes(taskId));
+  let commits = taggedCommits().filter((c) => c.tasks.includes(taskId));
+  let onBranch = null;
+  if (!commits.length) { const found = taskBranchCommits(taskId); if (found) { commits = found.commits; onBranch = found.branch; } }
   if (!commits.length) return { error: `No commits tagged Studio-Task: ${taskId} yet. Commit the work first (the commit-msg hook adds the tag when STUDIO_LOCK_OWNER is set).` };
   const started = readRecentEvents(50000).filter((e) => e.task === taskId && e.type === 'task.start' && e.model).at(-1);
   const builder = implementer || started?.model || commits.map((c) => c.model).filter(Boolean).at(-1) || null;
@@ -54,7 +79,7 @@ export function gather(taskId, { implementer = null } = {}) {
   const cut = diff.length > DIFF_CAP;
   diff = scrub(diff.slice(0, DIFF_CAP)).text;
   // 2.62.0 (H): the task's agreed acceptance contract, if any, so the review grades against what done means.
-  return { task, type: taskType(task), builder, commits, specs, diff, cut, contract: contractForReview(taskId) };
+  return { task, type: taskType(task), builder, commits, onBranch, specs, diff, cut, contract: contractForReview(taskId) };
 }
 
 export function prompt(g) {

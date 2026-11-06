@@ -18,6 +18,10 @@
  *     older than STUDIO_JANITOR_TMP_H and whose process is gone; in the system temp folder (STUDIO_JANITOR_TMPDIR);
  *   - cache entries (.studio/unity-cache, .studio/assets/library), oldest first, while the caches are over
  *     STUDIO_CACHE_MAX_GB (20); an entry a Unity run holds (a lock under an hour old) is kept.
+ *   - 2.79 (d): idle lane copies, in the automatic run and by `npm run lanes -- prune --idle <hours> [--dry-run]`: the
+ *     session ended, the task isn't queued, held or parked, nobody works in the copy (no process, claim or recent change),
+ *     no uncommitted change, no commit that isn't on main, and untouched for STUDIO_LANE_IDLE_HOURS (12; 0 or off: never).
+ *     Only the worktree goes; the branch is kept.
  * What it never deletes: a lane copy with commits not on main, uncommitted changes, a running session or a held or
  * parked task; anything outside the studio except a temp folder carrying this studio's marker. Lanes that are merely
  * stale (older than STUDIO_JANITOR_LANE_H, 24 h, or STUDIO_JANITOR_LANDED_H, 6 h, once their work has landed (2.70.0);
@@ -183,13 +187,17 @@ export function janitorPlan({ root = studioRoot(), env = process.env, now = Date
  * Lane copies (not train scratch): each with why it is kept, or a stale proposal. Async: reads the launcher's sessions,
  * the holds and the lane helpers. [{ agent, dir, path, task, bytes, stale, why }].
  */
-export async function laneProposals({ root = studioRoot(), env = process.env, now = Date.now() } = {}) {
+export async function laneProposals({ root = studioRoot(), env = process.env, now = Date.now(), idleMs = null } = {}) {
   const lim = janitorLimits(env);
   const { laneCopies, laneLive } = await import('./worktree.mjs');
   let running = new Set();
   try { running = new Set((await import('./agent.mjs')).sessions().filter((s) => s.running).map((s) => s.agent)); } catch {}
   let holds = {}; try { holds = (await import('./task-hold.mjs')).readHolds(); } catch {}
   const landed = landedLanes(root);
+  // 2.79 (d): a copy whose task waits for a train is kept (the train makes the lane from its branch, but never from a copy
+  // someone removed under it), read through the queue's own reader.
+  let queue = []; try { queue = (await import('./train.mjs')).readQueue(root); } catch {}
+  let locks = []; try { locks = (await import('./lock.mjs')).listLocks(); } catch {}
   const out = [];
   for (const c of laneCopies(root)) {
     const rec = readJson(path.join(root, '.studio', 'agents', `${c.agent}.json`)) || {};
@@ -202,13 +210,48 @@ export async function laneProposals({ root = studioRoot(), env = process.env, no
     else if (c.dirty) why = 'it has uncommitted changes';
     else if (task && holds[task]?.held) why = `its task ${task} is held`;
     else if (task && holds[task]?.parked) why = `its task ${task} is parked`;
+    else if (queue.some((e) => e && ((task && e.task === task) || e.agent === c.agent || (c.branch && e.branch === c.branch)))) why = 'its task is queued for a train';
+    else if (locks.some((l) => l.owner === c.agent && Date.parse(l.expiresAt) > now)) why = `${c.agent} still holds a claim`;
     else { const l = laneLive(c.agent, root); if (l.live) why = `someone is working in it (${l.why})`; }
     const done = !why && (landed.agents.has(c.agent) || (task && landed.tasks.has(task)));
-    const limMs = done ? lim.landedMs : lim.laneMs;
-    if (!why && now - last < limMs) why = `used ${Math.round((now - last) / H)} h ago (under ${done ? `STUDIO_JANITOR_LANDED_H, ${Math.round(limMs / H)} h, its work has landed` : `STUDIO_JANITOR_LANE_H, ${Math.round(limMs / H)} h`})`;
+    const limMs = idleMs !== null ? idleMs : done ? lim.landedMs : lim.laneMs;
+    if (!why && now - last < limMs) why = `used ${Math.round((now - last) / H)} h ago (under ${idleMs !== null ? `the idle limit, ${Math.round(limMs / H)} h` : done ? `STUDIO_JANITOR_LANDED_H, ${Math.round(limMs / H)} h, its work has landed` : `STUDIO_JANITOR_LANE_H, ${Math.round(limMs / H)} h`})`;
     out.push({ agent: c.agent, dir: c.dir, path: relp, task, landed: Boolean(done), bytes: why ? 0 : sizeOf(c.dir), stale: !why, why: why || `stale: ${Math.round((now - last) / H)} h untouched${done ? ', its work has landed' : ''}, nothing unique, clean, nobody in it` });
   }
   return out;
+}
+
+/** STUDIO_LANE_IDLE_HOURS (default 12) in hours; null when it is 0 or off (the janitor then leaves idle copies alone). */
+export function laneIdleHours(env = process.env) {
+  const raw = String(env.STUDIO_LANE_IDLE_HOURS ?? '').trim();
+  if (/^(off|no|false)$/i.test(raw)) return null;
+  const n = num(raw, 12);
+  return n > 0 ? n : null;
+}
+
+/**
+ * 2.79 (d): remove the idle lane copies, now. A copy goes when its session has ended, its task isn't queued for a train
+ * and isn't held or parked, nobody works in it (no process, no claim, no change in the last minutes), it has no
+ * uncommitted change and no commit that isn't on the studio's branch, and nothing touched it for `hours`. Only the
+ * worktree goes: the branch stays. dryRun lists them. Returns { hours, removed, kept, freed, dryRun }.
+ */
+export async function pruneIdleLanes({ hours = laneIdleHours(), dryRun = false, root = studioRoot(), env = process.env, now = Date.now(), emit = emitEvent, by = 'janitor' } = {}) {
+  if (!(hours > 0)) return { hours: null, removed: [], kept: [], freed: 0, dryRun, off: true };
+  const props = await laneProposals({ root, env, now, idleMs: hours * H });
+  const removed = []; const kept = props.filter((l) => !l.stale).map((l) => ({ agent: l.agent, path: l.path, why: l.why }));
+  const { removeLaneCopy } = await import('./worktree.mjs');
+  for (const l of props.filter((x) => x.stale)) {
+    if (dryRun) { removed.push({ agent: l.agent, path: l.path, bytes: l.bytes, why: l.why }); continue; }
+    // Re-check this one copy right before it goes.
+    const again = (await laneProposals({ root, env, now: Date.now(), idleMs: hours * H })).find((x) => x.agent === l.agent);
+    if (!again?.stale) { kept.push({ agent: l.agent, path: l.path, why: again?.why || 'gone' }); continue; }
+    removeLaneCopy(l.agent, { keepBranch: true });
+    if (fs.existsSync(l.dir)) kept.push({ agent: l.agent, path: l.path, why: 'could not remove it' });
+    else removed.push({ agent: l.agent, path: l.path, bytes: l.bytes, why: l.why });
+  }
+  const freed = removed.reduce((n, x) => n + (x.bytes || 0), 0);
+  if (removed.length) emit({ type: 'lanes.pruned', agent: String(by).slice(0, 60), msg: `${dryRun ? 'Would remove' : 'Removed'} ${removed.length} idle lane copy(ies) (idle over ${hours} h, nothing unsaved or unlanded; the branches are kept), ${human(freed)}`, meta: { dryRun, hours, agents: removed.map((x) => x.agent), freedBytes: freed } });
+  return { hours, removed, kept, freed, dryRun };
 }
 
 /**
@@ -287,6 +330,10 @@ export async function runJanitor({ yes = false, lanes = false, by = '', permissi
       }
     }
   }
+  // 2.79 (d): the automatic run (after a train or verify job) also removes idle lane copies: pruneIdleLanes' rule is stricter
+  // than a stale proposal's (nothing unsaved or unlanded, no queued task), and it keeps the branch.
+  let pruned = null;
+  if (auto && yes) { try { pruned = await pruneIdleLanes({ root, env, now, emit, by: 'janitor' }); } catch {} }
   // 2.70.0 (w): what the digest, status --brief and the War Room show (harness/lane-disk.mjs), kept current.
   if (lanes) {
     try { await (await import('./lane-disk.mjs')).recordProposals({ root, env, now, emit: null, props: props.filter((l) => !lanesDeleted.some((x) => x.agent === l.agent)) }); } catch {}
@@ -306,7 +353,7 @@ export async function runJanitor({ yes = false, lanes = false, by = '', permissi
     for (const l of props) L.push(`  ${lanesDeleted.some((x) => x.agent === l.agent) ? 'deleted' : l.stale ? 'proposed' : 'kept'} ${l.path}${l.stale ? ` (${human(l.bytes)})` : ''}: ${l.why}`);
     if (refused) L.push(refused);
   }
-  return { dryRun: !yes, items: plan.items, deleted, freed, lanes: props, lanesDeleted, kept: plan.kept, failed, refused, text: L.join('\n') };
+  return { dryRun: !yes, pruned, items: plan.items, deleted, freed, lanes: props, lanesDeleted, kept: plan.kept, failed, refused, text: L.join('\n') };
 }
 
 /** For the disk monitor: { bytes, gb, line } (lanes not counted: they need a person). */

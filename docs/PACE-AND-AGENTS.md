@@ -58,6 +58,11 @@ npm run agent -- list
 npm run agent -- stop builder-1
 ```
 
+`start` runs the session in the background (like `hire`): it prints the supervisor's pid and the log file
+(`.studio/agents/<name>.log`), and the agent outlives the shell that started it. `--attach` (or `--foreground`)
+keeps the session in this process instead; `STUDIO_AGENT_START_ATTACH=on` does that for every `start` (scripts and
+tests that want to read the session's exit code).
+
 Or the War Room's **Start agent**. Set defaults in `.env`: `STUDIO_AGENT_TOOL` and `STUDIO_AGENT_MODEL`,
 or per role (`STUDIO_BUILDER_TOOL`, `STUDIO_DIRECTOR_MODEL`, …). `STUDIO_<ROLE>_CMD` replaces the whole
 command for tools the launcher doesn't know (Hermes, a script); `{kickoff}`, `{agent}`, `{model}` and

@@ -334,7 +334,7 @@ setTimeout(write, 15000);
     return { ...env, PATH: `${bin}${path.delimiter}${was}`, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', STUDIO_ARGV_OUT: rec, STUDIO_HEARTBEAT_SEC: '1', ...extra };
   };
   // Straight to node, no shell, so the note reaches the harness exactly as written on every OS.
-  const start = (cwd, args, extra) => spawnSync(process.execPath, ['harness/agent.mjs', 'start', ...args], { windowsHide: true, cwd, encoding: 'utf8', env: envWith(extra), timeout: 180000 });
+  const start = (cwd, args, extra) => spawnSync(process.execPath, ['harness/agent.mjs', 'start', '--attach', ...args], { windowsHide: true, cwd, encoding: 'utf8', env: envWith(extra), timeout: 180000 });
   const got = (name) => {
     try {
       return JSON.parse(fs.readFileSync(path.join(rec, `${name}.json`), 'utf8'));

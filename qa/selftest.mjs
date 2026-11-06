@@ -1101,7 +1101,7 @@ if (inShard()) {
   git('add -A');
   git('commit -q -m init --no-verify');
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-003 quota' };
-  const died = run(dir, 'node harness/agent.mjs start --role builder --agent builder-9 --model fake-1', env);
+  const died = run(dir, 'node harness/agent.mjs start --attach --role builder --agent builder-9 --model fake-1', env);
   const q = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
   const patch = path.join(dir, '.studio/wip/T-003-builder-9.patch');
   const ev = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8');
@@ -1110,10 +1110,10 @@ if (inShard()) {
   fs.rmSync(path.join(dir, 'docs/fake'), { recursive: true, force: true });
   // 2.58.0 (PU-40, P-051): the limit above is now kept for this custom command's program, so a relaunch waits for its
   // reset; the rest of this block runs as if that reset had passed.
-  const held = run(dir, 'node harness/agent.mjs start --role builder --agent builder-7 --model fake-1', { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-003 ok' });
+  const held = run(dir, 'node harness/agent.mjs start --attach --role builder --agent builder-7 --model fake-1', { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-003 ok' });
   report('2.58.0 (PU-40): right after a custom command hits its usage limit, the next start of that command waits for the reset', held.status !== 0 && /budget stop/.test(held.stdout + held.stderr) && /custom:fake-agent/.test(held.stdout + held.stderr), held.stdout + held.stderr);
   fs.rmSync(path.join(dir, '.studio/tool-quota.json'), { force: true });
-  const ok = run(dir, 'node harness/agent.mjs start --role builder --agent builder-8 --model fake-1', { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-003 ok' });
+  const ok = run(dir, 'node harness/agent.mjs start --attach --role builder --agent builder-8 --model fake-1', { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-003 ok' });
   report('an agent that finishes ends cleanly and keeps its work', ok.status === 0 && /## DONE[\s\S]*T-003/.test(fs.readFileSync(path.join(dir, 'studio/DONE.md'), 'utf8')), ok.stdout + ok.stderr);
   // Caps: Precise allows one builder; MAX SPEED doubles it.
   const waitEnv = { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-004 wait' };
@@ -1127,7 +1127,7 @@ if (inShard()) {
   const boosted = run(dir, 'node harness/agent.mjs start --role builder --agent builder-2 --model fake-1 --detach', waitEnv);
   report('MAX SPEED raises the caps', boosted.status === 0, boosted.stdout + boosted.stderr);
   run(dir, 'node harness/task.mjs stop --by hatch', env);
-  report('no agent starts while the studio is stopped', run(dir, 'node harness/agent.mjs start --role builder --agent builder-3 --model fake-1', waitEnv).status !== 0);
+  report('no agent starts while the studio is stopped', run(dir, 'node harness/agent.mjs start --attach --role builder --agent builder-3 --model fake-1', waitEnv).status !== 0);
   run(dir, 'node harness/task.mjs resume --by hatch', env);
   for (const a of ['builder-1', 'builder-2']) run(dir, `node harness/agent.mjs stop ${a}`, env);
 }
@@ -1240,12 +1240,12 @@ if (inShard()) {
   const quotaFile = path.join(dir, '.studio/tool-quota.json');
   // Quota: a normal session that mentions rate limits and quota doesn't mark the tool out.
   const tq = id('node harness/task.mjs add "Tidy the HUD labels" --role builder');
-  run(dir, `node harness/agent.mjs start --role builder --agent chat-1 --task ${tq}`, { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} chatty' });
+  run(dir, `node harness/agent.mjs start --attach --role builder --agent chat-1 --task ${tq}`, { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} chatty' });
   report('a normal session that mentions rate limits and quota leaves the tool usable (run #1 idled for an hour)', !fs.existsSync(quotaFile) || !JSON.parse(fs.readFileSync(quotaFile, 'utf8')).claude, fs.existsSync(quotaFile) ? fs.readFileSync(quotaFile, 'utf8') : '');
   fs.writeFileSync(path.join(dir, 'pt.mjs'), "import { providerTrouble as p } from './harness/agent.mjs';\nconst c = [[p('{\"type\":\"result\",\"is_error\":true,\"result\":\"Claude AI usage limit reached|1792600000\"}', 0)?.kind, 'quota'], [p('Error: 429 Too Many Requests', 1)?.kind, 'quota'], [p('read docs about quota exceeded handling\\nexit', 1)?.kind, undefined], [p('{\"type\":\"result\",\"is_error\":false,\"result\":\"fixed the rate limit bug\"}', 0)?.kind, undefined], [p('Invalid API key · Please run /login', 1)?.kind, 'auth']];\nconsole.log(c.every(([a, b]) => a === b), JSON.stringify(c));\n");
   report('only a real limit or auth error counts, read from the end of a failed session or an error result', /^true/.test(run(dir, 'node pt.mjs', env).stdout), run(dir, 'node pt.mjs', env).stdout);
   const tq2 = id('node harness/task.mjs add "Tidy the menu" --role builder');
-  run(dir, `node harness/agent.mjs start --role builder --agent q-1 --task ${tq2}`, { ...env, STUDIO_QUOTA_SKIP: 'off', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quota' });
+  run(dir, `node harness/agent.mjs start --attach --role builder --agent q-1 --task ${tq2}`, { ...env, STUDIO_QUOTA_SKIP: 'off', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quota' });
   report('STUDIO_QUOTA_SKIP=off never skips a tool for quota (usage is watched outside the harness)', !fs.existsSync(quotaFile) || !JSON.parse(fs.readFileSync(quotaFile, 'utf8')).claude);
   // Dependencies and parking.
   const a = id('node harness/task.mjs add "Merge round 15" --role builder');
@@ -1419,7 +1419,7 @@ if (inShard()) {
   };
   // Another tool's limit, printed inside this session, marks that tool, with its real reset.
   const t1 = id('node harness/task.mjs add "Check the lobby" --role builder');
-  run(dir, `node harness/agent.mjs start --role builder --agent ag-1 --task ${t1}`, { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} agyquota' });
+  run(dir, `node harness/agent.mjs start --attach --role builder --agent ag-1 --task ${t1}`, { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} agyquota' });
   const q1 = quota();
   report('agy\'s 429 inside another tool\'s session marks agy, not the session\'s tool (test #2: claude was marked out)', q1.agy && !q1.claude && !q1.custom && Date.parse(q1.agy.until) - Date.now() > 70 * 3600000, JSON.stringify(q1));
   const pr = node('pr.mjs', "import { parseReset } from './harness/budget.mjs';\nconst n = Date.parse('2026-10-21T10:00:00Z');\nconst h = (t) => { const r = parseReset(t, n); return r ? (r - n) / 3600000 : null; };\nconsole.log(JSON.stringify([h('Resets in 80h54m54s.'), h('resets in 3 days'), h('try again in 45 minutes'), h('usage limit reached')]));\n");
@@ -1434,11 +1434,11 @@ if (inShard()) {
   const t2 = id('node harness/task.mjs add "Wire the bellhop sweep" --role builder');
   // STUDIO_BREAKER=off and STUDIO_NO_WORK_EXITS=0: this proves the older 3-in-2-h rule still holds as the fallback (2.30c's
   // breaker trips at 2, 2.67.2's no-work park at 2; their own checks are below and in qa/selftest-2672a.mjs).
-  run(dir, `node harness/agent.mjs start --role builder --agent quit-1 --task ${t2}`, { ...env, STUDIO_BREAKER: 'off', STUDIO_NO_WORK_EXITS: '0', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quit' });
+  run(dir, `node harness/agent.mjs start --attach --role builder --agent quit-1 --task ${t2}`, { ...env, STUDIO_BREAKER: 'off', STUDIO_NO_WORK_EXITS: '0', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quit' });
   const ql = JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout);
   const hf = path.join(dir, `studio/handoffs/${t2}.md`);
   report('a session that ends without task done hands its task back at once, with what it left (test #2: claims sat for an hour)', ql.backlog.some((t) => t.id === t2) && !/quit-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout) && fs.existsSync(hf) && /ended without task done/.test(fs.readFileSync(hf, 'utf8')), JSON.stringify(ql.inProgress) + (fs.existsSync(hf) ? fs.readFileSync(hf, 'utf8') : 'no handoff'));
-  for (const k of [2, 3]) run(dir, `node harness/agent.mjs start --role builder --agent quit-${k} --task ${t2}`, { ...env, STUDIO_BREAKER: 'off', STUDIO_NO_WORK_EXITS: '0', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quit' });
+  for (const k of [2, 3]) run(dir, `node harness/agent.mjs start --attach --role builder --agent quit-${k} --task ${t2}`, { ...env, STUDIO_BREAKER: 'off', STUDIO_NO_WORK_EXITS: '0', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quit' });
   const holds = run(dir, 'node harness/task.mjs holds', env).stdout;
   report('a task handed back three times in two hours is parked, with its last note, and the Producer is told (test #2: T-110 went to 12 sessions)', new RegExp(`${t2}[^\\n]*parked[^\\n]*launcher[^\\n]*handed back 3 times`).test(holds) && /keeps coming back/.test(fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8')), holds);
   // Anyone may hand back a task whose holder's session has ended.
@@ -1450,7 +1450,7 @@ if (inShard()) {
   report('the Producer can hand back a task whose agent has ended, without waiting for the claim to expire', hp.status === 0, hp.stdout + hp.stderr);
   // Never two sessions on one task.
   run(dir, `node harness/lock.mjs claim task:${t3} --owner someone-1`, env);
-  const twice = run(dir, `node harness/agent.mjs start --role builder --agent dup-1 --task ${t3}`, { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok' });
+  const twice = run(dir, `node harness/agent.mjs start --attach --role builder --agent dup-1 --task ${t3}`, { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok' });
   report('an agent is never started on a task someone else holds (test #2: two sessions on T-160)', twice.status !== 0 && /someone-1 holds/.test(twice.stderr), twice.stdout + twice.stderr);
   run(dir, `node harness/lock.mjs release task:${t3} --owner someone-1`, env);
   // Stop all saves each running agent's uncommitted work as a patch before it hands the task back.
@@ -2239,7 +2239,7 @@ if (inShard()) {
     const t3 = add('Lane copy three');
     g('commit -qam board');
     // 2.78.2: these checks are about lane copies with the inline task done (STUDIO_DONE_QUEUE=0); the queued path is checked in selftest-2782a.
-    const start = (task, agent, script) => run(dir, `node harness/agent.mjs start --role builder --agent ${agent} --task ${task} --lane cartridges/example-sim`, { STUDIO_DONE_QUEUE: '0', STUDIO_BUILDER_CMD: `node "${path.join(tmpRoot, script)}" {task} {agent}` });
+    const start = (task, agent, script) => run(dir, `node harness/agent.mjs start --attach --role builder --agent ${agent} --task ${task} --lane cartridges/example-sim`, { STUDIO_DONE_QUEUE: '0', STUDIO_BUILDER_CMD: `node "${path.join(tmpRoot, script)}" {task} {agent}` });
     start(t1, 'lane-a1', 'lane-agent.mjs');
     const logA = fs.readFileSync(path.join(dir, '.studio/agents/lane-a1.log'), 'utf8');
     const mainLog = g('log --oneline').stdout;
@@ -2354,7 +2354,7 @@ const changed = m.modelWarning({ STUDIO_AGENT_MODEL: 'gpt-5' }, []);
 console.log(JSON.stringify({ before: before.show, roles: before.roles.length, after: after.show, acceptedBy: after.accepted?.by, mixed: m.modelWarning(mixed, []).allTop, changed: changed.show, tiers: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gpt-5-mini'].map(m.tierOf) }));`);
   report('top-tier models on every role show the warning; accepting hides it until the models change; a mid-tier builder never shows it', mw.before === true && mw.roles >= 2 && mw.after === false && mw.acceptedBy === 'dev' && mw.mixed === false && mw.changed === true, JSON.stringify(mw));
   report('model tiers: opus and gemini pro top, sonnet and gpt mini mid, haiku and flash cheap', JSON.stringify(mw.tiers) === JSON.stringify(['top', 'mid', 'cheap', 'top', 'cheap', 'mid']), JSON.stringify(mw.tiers));
-  const startTop = run(dir, 'node harness/agent.mjs start --role builder --agent mw-1 --task T-999', { STUDIO_AGENT_MODEL: 'claude-opus-5-5', STUDIO_BUILDER_CMD: 'node -e "process.exit(0)"' });
+  const startTop = run(dir, 'node harness/agent.mjs start --attach --role builder --agent mw-1 --task T-999', { STUDIO_AGENT_MODEL: 'claude-opus-5-5', STUDIO_BUILDER_CMD: 'node -e "process.exit(0)"' });
   report('the warning never blocks: an agent on the top tier still starts', !/Not started/.test(startTop.stdout + startTop.stderr) && fs.existsSync(path.join(dir, '.studio/agents/mw-1.json')), startTop.stdout + startTop.stderr);
   // Cheat sheet: at most 3 matching tricks, attached to the brief.
   const cs = probe(`import * as c from ${u('harness/cheatsheet.mjs')};
@@ -2377,7 +2377,7 @@ console.log(JSON.stringify({ dir: c.matchTricks('queue the next tasks with depen
   const tr = (run(dir, 'node harness/task.mjs add "Refresh me" --role builder --priority P1').stdout.match(/"id": "(T-\d+)"/) || [])[1];
   const fake = path.join(tmpRoot, 'fake-capped.mjs');
   fs.writeFileSync(fake, `import { spawnSync } from 'node:child_process';\nimport fs from 'node:fs';\nconst [task, agent] = process.argv.slice(2);\nspawnSync('node harness/task.mjs start ' + task + ' --agent ' + agent, { shell: true });\nconst n = Number(fs.existsSync('.studio/fake-runs') ? fs.readFileSync('.studio/fake-runs', 'utf8') : 0) + 1;\nfs.writeFileSync('.studio/fake-runs', String(n));\nif (n === 1) { console.log(JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: true, num_turns: 80, usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 9000 } })); process.exit(1); }\nspawnSync('node harness/task.mjs pause ' + task + ' --agent ' + agent + ' --note "second session"', { shell: true });\nconsole.log(JSON.stringify({ type: 'result', subtype: 'success', num_turns: 3, usage: { input_tokens: 1, output_tokens: 1 } }));\n`);
-  const cap = run(dir, `node harness/agent.mjs start --role builder --agent rf-1 --task ${tr} --one-task`, { STUDIO_BUILDER_CMD: `node "${fake}" {task} {agent}`, STUDIO_REFRESH_RELAUNCH: '1', STUDIO_LOOP_HANDBACKS: '1' });
+  const cap = run(dir, `node harness/agent.mjs start --attach --role builder --agent rf-1 --task ${tr} --one-task`, { STUDIO_BUILDER_CMD: `node "${fake}" {task} {agent}`, STUDIO_REFRESH_RELAUNCH: '1', STUDIO_LOOP_HANDBACKS: '1' });
   const evs = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const ends = evs.filter((e) => e.type === 'agent.session.end' && e.agent === 'rf-1');
   const hand = fs.existsSync(path.join(dir, `studio/handoffs/${tr}.md`)) ? fs.readFileSync(path.join(dir, `studio/handoffs/${tr}.md`), 'utf8') : '';
@@ -4981,6 +4981,15 @@ if (inShard('selftest-279f')) {
   const dir = copyRepo();
   const { selftest279F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-279f.mjs')).href);
   await selftest279F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.79 (d): the 2.78.2 crew's harness bugs: agent start in the background, idle lane copies, the cheap lane listing, the
+// protected-step router's structured field, review from main, the divergence reference's folder, the game-check skip by role.
+if (inShard('selftest-279d')) {
+  const dir = copyRepo();
+  const { selftest279D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-279d.mjs')).href);
+  await selftest279D({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

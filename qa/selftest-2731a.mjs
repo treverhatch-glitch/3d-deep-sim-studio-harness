@@ -178,7 +178,7 @@ console.log(JSON.stringify(r));
   await guard('2.73.1 (B-66 b): agent.session.end records how the process ended (meta.exitCause): a session killed by a signal from outside reads kind signal with SIGKILL (Windows: an exit code reads kind exit with that code), and the launcher\'s own kills map to stall/idle/budget, a stop to stopped (fails on 2.73.0: only "exit 1", the signal was dropped)', async () => {
     const { S, env, ev } = studio('cause');
     const win = process.platform === 'win32';
-    const s = spawnSync(process.execPath, ['harness/agent.mjs', 'start', '--role', 'builder', '--agent', 'bu-2731a', '--tool', 'claude', '--model', 'm-1'], { windowsHide: true, cwd: S, encoding: 'utf8', env: { ...process.env, ...env, STUDIO_BUILDER_CMD: win ? 'exit 3' : 'kill -KILL $$' }, timeout: 120000 });
+    const s = spawnSync(process.execPath, ['harness/agent.mjs', 'start', '--attach', '--role', 'builder', '--agent', 'bu-2731a', '--tool', 'claude', '--model', 'm-1'], { windowsHide: true, cwd: S, encoding: 'utf8', env: { ...process.env, ...env, STUDIO_BUILDER_CMD: win ? 'exit 3' : 'kill -KILL $$' }, timeout: 120000 });
     const end = events(ev).filter((e) => e.type === 'agent.session.end' && e.agent === 'bu-2731a').pop();
     const c = end?.meta?.exitCause || null;
     const unit = probe(S, env, 'cause', `import { exitCause } from ${u(S, 'harness/agent.mjs')};
