@@ -5012,6 +5012,15 @@ if (inShard('selftest-2791d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.79.1 (b): the Line Producer never freezes the line behind one blocked task, plans room for engine lands (a bounded,
+// one-at-a-time hold, a floor learned from green runs), and a MAX SPEED boost says when it ends.
+if (inShard('selftest-2791b')) {
+  const dir = copyRepo();
+  const { selftest2791B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2791b.mjs')).href);
+  await selftest2791B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

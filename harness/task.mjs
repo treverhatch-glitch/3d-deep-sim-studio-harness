@@ -2045,6 +2045,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const pre = completeTask(targetId, '', whoAmI(flags), { checkOnly: true, noop: typeof flags['no-op'] === 'string' ? flags['no-op'] : '' });
       if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
       console.log(pre.error ? pre.message : pre.message);
+      // 2.79.1 (3.2): the Line Producer reads this as "a land may be near" for an engine pass (harness/engine-ram.mjs).
+      if (!pre.error) { try { emitEvent({ type: 'task.done_check', agent: whoAmI(flags), task: targetId, msg: `${targetId}: done --check passed` }); } catch {} }
       process.exit(pre.error ? 1 : 0);
     }
     const noopFlag = typeof flags['no-op'] === 'string' ? flags['no-op'] : '';

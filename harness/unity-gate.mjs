@@ -76,6 +76,7 @@ import { acquireHeavy, heavyRoot } from './heavy.mjs';
 import { oomSignature } from './heavy-budget.mjs';
 import { readTrack, logEngine } from './engine.mjs';
 import { infraAbort } from './engine-proof.mjs';
+import { landWaitMin, recordLandPeak } from './engine-ram.mjs';
 import { engineTarget, engineTask, engineFloor, recordDuration, readTune, tunePath } from './engine-tracks.mjs';
 
 export const UNITY_EXIT = { 0: 'pass', 1: 'red', 2: 'conflict', 3: 'refused', 4: 'error' };
@@ -251,7 +252,10 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   // 2.77.0 (u, P5.3): the engine table's job kind, RAM and floor (unity: the "unity" kind and STUDIO_UNITY_MIN_FREE_GB as before).
   const floor = engineFloor(engine, { env });
   // 2.78.1 (f, B-117): engine: the land takes the engine line (STUDIO_ENGINE_SLOTS), not one of the game's slots.
-  const heavyOpts = { log, env, kind: et.heavyKind, engine,...(et.heavyKind === 'unity' ? {} : { ramGb: et.rig.ramGb }), ...(et.heavyKind === 'unity' ? (/tuned/.test(floor.from) ? { minFreeGb: floor.gb } : {}) : floor.gb > 0 ? { minFreeGb: floor.gb } : {}) };
+  // 2.79.1 (3.2): the land waits for RAM as long as the Line Producer's hold makes room for it, else its own shorter wait (STUDIO_ENGINE_LAND_WAIT_MIN).
+  const hroot = await heavyRoot();
+  const landWait = (() => { try { return landWaitMin(hroot, env); } catch { return undefined; } })();
+  const heavyOpts = { log, env, kind: et.heavyKind, engine, ...(landWait && !(env.STUDIO_HEAVY_WAIT_MIN) ? { waitMin: landWait } : {}),...(et.heavyKind === 'unity' ? {} : { ramGb: et.rig.ramGb }), ...(et.heavyKind === 'unity' ? (/tuned|measured/.test(floor.from) ? { minFreeGb: floor.gb } : {}) : floor.gb > 0 ? { minFreeGb: floor.gb } : {}) };
   const landLabel = label || `${engine} land${task ? ` (${task})` : ''}`;
   let lk;
   try {
@@ -263,6 +267,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
     return finish({ status: 'refused', ok: false, code: 3, why: `the machine:heavy lock stayed busy: ${err.message.replace(/^\[heavy\]\s*/, '')}` });
   }
   let r;
+  const landStart = Date.now();
   const tuneEnv = { STUDIO_ENGINE: engine, STUDIO_ENGINE_TUNE: JSON.stringify(tune || {}), STUDIO_ENGINE_TUNE_FILE: tunePath(REPO_ROOT, engine), STUDIO_ENGINE_FLAGS: flags.join(' ') };
   const landOnce = () => spawnSync(cmd, { cwd, shell: true, encoding: 'utf8', env: { ...env, ...tuneEnv, STUDIO_HEAVY_HELD: process.env.STUDIO_HEAVY_HELD || '' }, maxBuffer: 256 * 1024 * 1024, timeout: timeoutMin * 60000, windowsHide: true });
   try {
@@ -271,6 +276,9 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   } finally {
     lk.release();
   }
+  const landEnd = Date.now();
+  // 2.79.1 (3.2): keep what this run took in RAM (the machine monitor's samples while it ran) for the next land's floor.
+  const keepPeak = (status) => { try { recordLandPeak(engine, { root: hroot, startMs: landStart, endMs: landEnd, status }); } catch { /* the table's floor stays */ } };
   // 2.68.0 (n): a run killed for memory (heavy-budget.mjs oomSignature) queues once more for the budget, with a note.
   const oom = !/^(off|0|false|no)$/i.test(String(env.STUDIO_HEAVY_OOM_RETRY || '')) ? oomSignature(r) : '';
   if (oom) {
@@ -295,6 +303,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   if ((m.status === 'red' || (m.status === 'error' && !r.error)) && (infra = landInfra(text, { status: r.status, signal: r.signal, timedOut }))) {
     m = { status: 'not-run', why: `not run (${infra.kind}): ${infra.text}; the land command exited ${r.status ?? r.signal ?? '?'} (${m.status} by its contract), but nothing in its output shows a failing test or a compile error: ${WORDS['not-run']}` };
   } else if (m.status === 'not-run') m = { ...m, why: `not run: ${m.why}` };
+  keepPeak(m.status);
   const tail = text.trimEnd().split('\n').slice(-12).join('\n');
   // 2.79 (e): a red run's failing test names (the train's bisect stops on the batch's signature).
   const failures = m.status === 'red' ? failingTests(text) : [];
