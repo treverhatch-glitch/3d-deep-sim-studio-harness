@@ -87,3 +87,31 @@ export function emitSampled(ev, key = '', { env = process.env, now = Date.now(),
   }
   return undefined;
 }
+
+/**
+ * 2.79.1 (d): write `ev` only when it says something new. State: .studio/emit-seen.json { <key>: { sig, at } }.
+ * Written when `key` has no record, when its `sig` (what the event says, with the numbers that tick every pass left out)
+ * changed, or when the record is older than `repeatMin` minutes (0: never repeat). Used for events a reader needs ONE of
+ * (lock.kept carries a claim's owner on for busy.mjs; task.overlap names files for plan-waves and the next board), where
+ * a counter would hide the fact: they stay real events, one per change instead of one per pass.
+ * STUDIO_TELEMETRY=full (or state that can't be kept) writes every one, as before. Returns true when it wrote the event.
+ */
+export function emitOnChange(ev, key, sig = '', { repeatMin = 0, env = process.env, now = Date.now(), emit = emitEvent } = {}) {
+  if (telemetryFull(env)) { emit(ev); return true; }
+  let write = true;
+  try {
+    withFileLock('emit-seen', () => {
+      const f = path.join(STUDIO_STATE_DIR, 'emit-seen.json');
+      const seen = readJson(f) || {};
+      const cur = seen[key];
+      const s = String(sig);
+      write = !cur || cur.sig !== s || (repeatMin > 0 && now - Date.parse(cur.at) >= repeatMin * 60000);
+      if (!write) return;
+      seen[key] = { sig: s, at: new Date(now).toISOString() };
+      for (const [k, v] of Object.entries(seen)) if (now - Date.parse(v?.at) > 14 * 86400000) delete seen[k];
+      writeAtomic(f, `${JSON.stringify(seen)}\n`);
+    }, { timeoutMs: 1000 });
+  } catch { write = true; }
+  if (write) emit(ev);
+  return write;
+}

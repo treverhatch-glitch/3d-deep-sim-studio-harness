@@ -96,6 +96,7 @@ export async function flowPass({ fill = true, dryRun = false, launcherWhy = null
   // 2.58.5 (H-5): and its claim is made again in the owner's name, so no crew builder's `task start` takes it meanwhile.
   const { taskBusy, keepClaim } = await import('./busy.mjs');
   const busyNow = [];
+  let keptSig = null;
   const evs = r.expired.length ? readRecentEvents(20000) : [];
   for (const id of r.expired) {
     const b = await taskBusy(id, { now, events: evs });
@@ -107,6 +108,7 @@ export async function flowPass({ fill = true, dryRun = false, launcherWhy = null
     r.expired = r.expired.filter((id) => !busyNow.some((b) => b.id === id));
     r.busy = busyNow;
     actions.push(`kept ${busyNow.map((b) => b.id).join(', ')} (busy: ${busyNow.map((b) => b.short || b.why).join('; ')})`);
+    keptSig = `kept ${busyNow.map((b) => `${b.id}:${String(b.short || b.why).replace(/\d+/g, '#')}`).join(', ')}`; // the ticking "N min ago" is not a change
   }
   for (const id of r.expired) {
     if (!dryRun) pauseTask(id, 'director', 'The claim ran out with no running session on it: handed back by the Director\'s flow pass so a free builder can take it.', { force: true });
@@ -128,6 +130,9 @@ export async function flowPass({ fill = true, dryRun = false, launcherWhy = null
     }
   } catch {}
   const out = { ...r, actions, launcherWhy: Array.isArray(launcherWhy) ? launcherWhy.slice(0, 4).join('; ') : launcherWhy || null, autoLaunch: Boolean(mode.autoLaunch) };
+  // 2.79.1 (d): director.flow is written on change only. What counts as a change leaves out the numbers that tick every pass
+  // (a kept task's "active N min ago"); the 30-minute repeat of an unchanged line is gone (the flow file and the brief carry the state).
+  out.sig = actions.map((a) => (a.startsWith('kept ') && keptSig ? keptSig : a)).join('; ');
   if (!dryRun) {
     fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
     fs.writeFileSync(FLOW_FILE(), `${JSON.stringify(out, null, 2)}\n`);
@@ -138,7 +143,7 @@ export async function flowPass({ fill = true, dryRun = false, launcherWhy = null
     }
     if (actions.length) {
       const actionsText = actions.join('; ');
-      if (!prev || prev.actions?.join('; ') !== actionsText || now - Date.parse(prev.at) >= 30 * 60000) {
+      if (!prev || (prev.sig ?? prev.actions?.join('; ')) !== out.sig) {
         emitEvent({ type: 'director.flow', agent: 'director', to: 'producer', msg: `Flow: ${actionsText}`.slice(0, 300) });
       }
     }

@@ -15,6 +15,7 @@ import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, task
 import { splitEolOnly, eolNote } from './eol-only.mjs';
 import { isGameCode } from '../scripts/check-function-size.mjs';
 import { summarize as summarizeVerdict, renderDecision } from './verdict-split.mjs';
+import { visualGate } from './visual-capture.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
@@ -644,8 +645,11 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
 
   // 2.30o: a render task (Godot, graphics, scene ...) needs a passing visual result (before/after captures from
   // fixed cameras, not blank, not near-identical): harness/verdict-split.mjs + harness/visual-proof.mjs.
-  if (!force && process.env.STUDIO_VISUAL_GATE !== 'off') {
-    const track = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta?.track;
+  const vTrack = !force && process.env.STUDIO_VISUAL_GATE !== 'off' ? readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta?.track : null;
+  const vGate = !force && process.env.STUDIO_VISUAL_GATE !== 'off' ? visualGate({ ...target, track: vTrack }) : { on: false, note: '' };
+  if (vGate.note) console.warn(`[done] ${vGate.note}`); // 2.79.1 (d): no capture command here: the gate is off by itself, said once
+  if (vGate.on) {
+    const track = vTrack;
     const vs = summarizeVerdict(target.id, { ...target, track });
     // 2.60.1 (B-38): why it is (not) a render task, and the evidence warning for a non-render title.
     if (vs.renderBy === 'owner' || (vs.renderBy === 'evidence' && vs.renderWhy)) {

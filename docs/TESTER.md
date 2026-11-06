@@ -130,7 +130,9 @@ For each module that is still unreached on the main checkout, the Line Producer 
 If a studio's game has its own build (`studio/game.json` "tester") or its own checks (its `studio.gates.json`, or
 `<sim>/qa.mjs`), the template cartridge's stage-1 playtest no longer runs for each task. The done-check's playtest rows
 and the `playtest` gate say "replaced by the game tester (npm run tester)" instead. A template studio (no game, or a
-cartridge game) keeps the stage-1 playtest as before, and so does `STUDIO_STAGE1_PLAYTEST=on`.
+cartridge game) keeps the stage-1 playtest as before, and so does `STUDIO_STAGE1_PLAYTEST=on`. Where a playtest row is still
+asked (a game with no build or checks of its own yet), a tester run (`qa/reports/tester/<run>/summary.json`) newer than the task
+start and the last change to the game meets it (2.79.1); with `STUDIO_STAGE1_PLAYTEST=on` it does not.
 
 ## Settings
 
@@ -145,4 +147,6 @@ cartridge game) keeps the stage-1 playtest as before, and so does `STUDIO_STAGE1
 | `STUDIO_TESTER_BUILD_TIMEOUT_MIN` | `20` | How long the tester's build may run before the run ends red. |
 | `STUDIO_TESTER_DRIVER_IDLE_MIN` | `20` | How many idle minutes before the background driver closes the browser and exits. |
 | `STUDIO_STAGE1_PLAYTEST` | `auto` | `on`: keep the template cartridge's per-task stage-1 playtest even in a studio whose game has its own build or checks (as in 2.78.2). |
+| `STUDIO_VISUAL_GATE` | (unset) | `off`: a render task needs no visual result. `on`: it always does. Unset: it does, unless the game has its own folder and no capture command (`"visual": { "capture" }` in its `studio.gates.json`, or a Godot project): then the gate is off and `task done` says so (2.79.1). |
+| `STUDIO_HEARTBEAT_EVENT_MIN` | `10` | Minutes between a session's `agent.heartbeat` events (the beat itself, and `lastBeat`, stay every `STUDIO_HEARTBEAT_SEC`); `0`: every beat. |
 | `STUDIO_TESTER_RUN_DIR` | (the run going) | The run folder the driver uses when `--run` isn't given. |

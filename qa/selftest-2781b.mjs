@@ -209,7 +209,7 @@ console.log(JSON.stringify({
   // ---- B-118 end to end: the stand-in refuses a line with no "event" ----
   {
     const { S, ev, env } = studio('e2e');
-    const s1 = startFg(S, { ...env, STUDIO_AGY_STREAM: '1' }, ['--role', 'builder', '--agent', 'builder-agyb1', '--tool', 'agy', ...model]);
+    const s1 = startFg(S, { ...env, STUDIO_AGY_STREAM: '1', STUDIO_TELEMETRY: 'full' /* 2.79.1 (d): agy follow-ups are counted in the session end by default; this check reads each event */ }, ['--role', 'builder', '--agent', 'builder-agyb1', '--tool', 'agy', ...model]);
     const r1 = rec('builder-agyb1');
     const log1 = logOf(S, 'builder-agyb1');
     const kick1 = (() => { try { return fs.readFileSync(path.join(S, '.studio', 'kickoff', 'builder-agyb1.md'), 'utf8'); } catch { return null; } })();
@@ -258,7 +258,7 @@ console.log(JSON.stringify({
     // ---- the progress nudge ----
     cfgFor('builder-agyb6', { quiet: true, lenient: true, maxMs: 25000 });
     const t6 = Date.now();
-    const s6 = startFg(S, { ...env, STUDIO_AGY_STREAM: '1', STUDIO_AGY_NUDGE_MIN: '0.05' }, ['--role', 'builder', '--agent', 'builder-agyb6', '--tool', 'agy', ...model]);
+    const s6 = startFg(S, { ...env, STUDIO_AGY_STREAM: '1', STUDIO_AGY_NUDGE_MIN: '0.05', STUDIO_TELEMETRY: 'full' /* 2.79.1 (d): as for agyb1 */ }, ['--role', 'builder', '--agent', 'builder-agyb6', '--tool', 'agy', ...model]);
     const r6 = rec('builder-agyb6');
     const log6 = logOf(S, 'builder-agyb6');
     const cont6 = events(ev).filter((e) => e.type === 'agent.agy_continue' && e.agent === 'builder-agyb6');

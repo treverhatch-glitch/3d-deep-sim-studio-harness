@@ -48,7 +48,7 @@ import { sizeRuleFor, freeImportLines } from './size-rule.mjs';
 import { contractChecks } from './contracts.mjs';
 import { judgeFiles, manifestSettings, evidenceWords } from './type-evidence.mjs';
 import { activeGame } from './cartridge.mjs';
-import { stage1Replaced } from './tester-config.mjs';
+import { stage1Replaced, studioGameSync } from './tester-config.mjs';
 import { regressionHowTo, regressionMissing } from './regression-howto.mjs';
 import { checkResearch, ensureResearchTemplate } from './research.mjs';
 import { engineTask, engineRepo, engineTarget } from './engine-tracks.mjs';
@@ -538,6 +538,18 @@ function lastGameChange() {
   for (const d of ['cartridges', 'src']) walkSince(d, 0, out);
   return out.reduce((m, f) => Math.max(m, mtime(f)), 0);
 }
+/**
+ * 2.79.1 (d): a game tester run (qa/reports/tester/<id>/summary.json, harness/tester.mjs) newer than `min` and newer than the
+ * last change to the game (the cartridge, or the studio's own game folder). It satisfies a "playtest of the current build"
+ * row where the template's stage-1 playtest would have: it played the real build, which stage 1 does not. [] when none.
+ */
+function testerRunsSince(min) {
+  const out = [];
+  try { const g = studioGameSync(); if (g?.root) walkSince(g.root, 0, out); } catch { /* no game folder */ }
+  // build output (dist/, build/ ...) is written by the build the tester itself runs: not a change to the game
+  const fresh = Math.max(min, lastGameChange(), out.filter((f) => !/(^|\/)(dist|build|out|coverage|test-results|playwright-report)\//.test(f)).reduce((m, f) => Math.max(m, mtime(f)), 0));
+  return newestSince(filesUnder('qa/reports/tester', (n) => n === 'summary.json', true), fresh).filter((f) => { const j = readJson(f); return j && typeof j === 'object' && !Array.isArray(j); });
+}
 /** The record gatesAfter reads (the agent's own full run, else the studio's). */
 export function lastFullRecord() {
   try {
@@ -853,10 +865,13 @@ export function checkDone(task, since = startedAt(task.id)) {
   // 2.79 (t): a studio whose game has its own build or checks doesn't play the template cartridge per task any more: the
   // game tester (harness/tester.mjs) plays the real build on its own schedule. A template studio keeps the stage-1 rows.
   const s1 = stage1Replaced();
+  const s1KeptByOwner = /^STUDIO_STAGE1_PLAYTEST=on/.test(s1.why || ''); // the owner asked for stage 1: a tester run doesn't stand in for it
   if (type === 'playtest' && s1.replaced) check(`Stage-1 playtest: ${s1.words}`, true, '');
-  else if (type === 'playtest') {
+  else if (type === 'playtest' && !s1KeptByOwner && testerRunsSince(since).length) {
+    check(`Playtest of the current build: a game tester run (${testerRunsSince(since)[0]}) is newer than the task start and the last game change`, true, '');
+  } else if (type === 'playtest') {
     const reps = newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).map((f) => ({ f, j: readJson(f) })).filter(({ j }) => j?.stage1);
-    check('Playtest report since the task started', reps.length, 'no playtest report in qa/reports/ since this task started (`npm run playtest:stage1`)');
+    check('Playtest report since the task started', reps.length, 'no playtest report in qa/reports/ since this task started (`npm run playtest:stage1`, or a game tester run: `npm run tester`)');
     const good = reps.filter(({ f, j }) => mtime(f) >= fresh && j.stage1.seed != null && j.stage1.ticksRun != null && isSha256(j.stage1.finalSha256) && (j.passed || j.stage1.failingTick != null));
     check('Report covers the current build with seed, ticks and hash (and the failing tick if it failed)', good.length, 'no report on the current build with a seed, ticks, a hash and (if it failed) the failing tick; run the playtest again');
     stage1Warnings(good.length ? good : reps);
@@ -891,8 +906,10 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('Goldens updated with it', ch.files.some((f) => f.startsWith('qa/golden/')), 'no golden changed: the system changes the game, so regenerate (npm run golden -- --update) and commit the goldens with it');
     const fresh2 = lastGameChange();
     const reps = s1.replaced ? [] : newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).filter((f) => mtime(f) >= fresh2);
+    const tr = s1.replaced || s1KeptByOwner ? [] : testerRunsSince(since);
     if (s1.replaced) check(`Stage-1 playtest of the current build: ${s1.words}`, true, '');
-    else check('Playtest of the current build', reps.length, 'no playtest report newer than the last game change (npm run playtest:stage1)');
+    else if (tr.length) check(`Playtest of the current build: a game tester run (${tr[0]}) is newer than the task start and the last game change`, true, '');
+    else check('Playtest of the current build', reps.length, 'no playtest report newer than the last game change (npm run playtest:stage1, or a game tester run: npm run tester)');
     if (!s1.replaced) stage1Warnings(reps.map((f) => ({ f, j: readJson(f) })).filter(({ j }) => j?.stage1));
     workAndVerify();
     const implementer = (readRecentEvents(20000).filter((e) => e.type === 'task.start' && e.task === task.id).pop() || {}).model;
