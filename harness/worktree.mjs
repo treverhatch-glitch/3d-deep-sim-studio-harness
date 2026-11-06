@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { PROXY_HELD } from './agent-env.mjs';
 import { listLocks } from './lock.mjs';
 import { changedSince, readPass, recordPass, canReuse, withLandLock, landingRecheckEnv } from './merge-lane.mjs';
 import { PLANNING_ROLES } from './planning-roles.mjs';
@@ -203,7 +204,9 @@ export function createLaneCopy(agent, { task = null, lane = null, carry = true }
   }
   for (const rel of nodeModuleDirs(root)) if (!fs.existsSync(path.join(dir, rel))) linkDir(path.join(root, rel), path.join(dir, rel));
   try {
-    if (fs.existsSync(path.join(root, '.env'))) fs.copyFileSync(path.join(root, '.env'), path.join(dir, '.env'));
+    // 2.79.1 (a): without the keys only a harness proxy holds (agent-env.mjs PROXY_HELD: the Vertex key), so a session
+    // (or a program it runs, which loads this .env) never reads them here.
+    if (fs.existsSync(path.join(root, '.env'))) fs.writeFileSync(path.join(dir, '.env'), fs.readFileSync(path.join(root, '.env'), 'utf8').split(/(?<=\n)/).filter((l) => !PROXY_HELD.some((k) => new RegExp(`^\\s*(?:export\\s+)?${k}\\s*=`, 'i').test(l))).join(''));
   } catch {}
   // The links are not changes: keep them out of this copy's git status.
   const exclude = path.join(root, '.studio', 'lanes', `${agent}.exclude`);

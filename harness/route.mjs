@@ -230,7 +230,10 @@ async function callChannel(channel, { messages, temperature = 0.2, maxTokens = 2
       'Content-Type': 'application/json',
       ...(provider.extraHeaders || {}),
     };
-    if (apiKey && provider.protocol !== 'ollama') {
+    // 2.79.1 (a, the crew's local patch folded in): Vertex AI's OpenAI-compatible endpoint takes an API key only as
+    // x-goog-api-key; "Authorization: Bearer <key>" gets 401 ("Expected OAuth 2 access token").
+    if (apiKey && provider.protocol === 'vertex-openai') headers['x-goog-api-key'] = apiKey;
+    else if (apiKey && provider.protocol !== 'ollama') {
       headers.Authorization = `Bearer ${apiKey}`;
     }
 
@@ -258,6 +261,18 @@ async function callChannel(channel, { messages, temperature = 0.2, maxTokens = 2
     const data = JSON.parse(bodyText);
     const msg = data.choices?.[0]?.message || {};
     const choice = msg.content ?? '';
+    // 2.79.1 (a): Vertex spend is measured wherever the key is used: the router's calls go in the proxy's usage log too
+    // (session "router"), with Gemini's thinking counted as output (total - prompt).
+    if (provider.protocol === 'vertex-openai' && data.usage) {
+      try {
+        const vp = await import('./vertex-proxy.mjs');
+        const c = vp.countsOf(data.usage);
+        const m = data.model || provider.model;
+        const f = path.join(path.dirname(STUDIO_STATE_DIR), '.studio', 'vertex-usage.jsonl');
+        fs.mkdirSync(path.dirname(f), { recursive: true });
+        fs.appendFileSync(f, `${JSON.stringify({ ts: new Date().toISOString(), session: 'router', task: null, tool: 'router', model: m, in: c.in, out: c.out, total: c.total, usd: vp.usdOf(path.dirname(STUDIO_STATE_DIR), m, c) })}\n`);
+      } catch { /* measuring, never a blocker */ }
+    }
     return {
       content: choice,
       // 2.30h (3): what the model reasoned, kept apart so a reply with only this counts as failed.

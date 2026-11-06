@@ -5002,6 +5002,15 @@ if (inShard('selftest-279c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.79.1 (a): Vertex AI as a built-in builder tool (the studio's proxy holds the key; usage per session and task), spend
+// budgets per tool or key (measured always, cut at a budget someone allowed set), router providers, owner-defined tools.
+if (inShard('selftest-2791a')) {
+  const dir = copyRepo();
+  const { selftest2791A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2791a.mjs')).href);
+  await selftest2791A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

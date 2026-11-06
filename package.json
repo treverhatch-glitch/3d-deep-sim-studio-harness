@@ -78,6 +78,7 @@
     "crew": "node harness/crew-watch.mjs",
     "janitor": "node harness/janitor.mjs",
     "budget": "node harness/budget.mjs",
+    "tools": "node harness/tool-registry.mjs",
     "tokens": "node harness/tokens.mjs",
     "help": "node harness/help.mjs",
     "division": "node harness/division.mjs",

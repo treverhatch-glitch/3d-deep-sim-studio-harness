@@ -38,26 +38,49 @@ const TOOL_KEYS = {
   cursor: /^CURSOR_/,
   aider: /^OLLAMA_/,
   nim: /(?!)/, // nothing by prefix: nimMapped() below sets OPENAI_API_KEY alone
+  vertex: /(?!)/, // 2.79.1 (a): nothing: the Vertex proxy holds the key; vertexMapped() sets the session tag
 };
+/**
+ * 2.79.1 (a): keys only a harness proxy holds (harness/vertex-proxy.mjs reads VERTEX_API_KEY from the studio's .env itself).
+ * No launched session gets them, not even through STUDIO_AGENT_ENV_PASS or STUDIO_AGENT_ENV=full.
+ */
+export const PROXY_HELD = Object.freeze(['VERTEX_API_KEY']);
 const roleKey = (role) => String(role || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
 
 const FAMILY = [[/^(claude|anthropic)/i, 'claude'], [/^(gpt|o\d|codex|openai)/i, 'codex'], [/^(grok|xai)/i, 'grok'], [/^(gemini|google)/i, 'gemini'], [/^(qwen|llama|ollama|deepseek)/i, 'aider']];
 
 /** The environment a launched agent gets. extra: values the launcher sets for this session. A custom
  * launcher's credentials follow its model's family (a gemini-3.1-pro model gets the GEMINI_ and GOOGLE_ names). */
-export function agentEnv({ tool = null, role = null, model = null, agent = null, extra = {}, env = process.env, notes = null } = {}) {
-  if (/^full$/i.test(env.STUDIO_AGENT_ENV || '')) return keyMapped(nimMapped({ ...env, ...extra }, String(tool || '').toLowerCase(), env), { role, agent, tool: String(tool || '').toLowerCase(), env, notes });
+export function agentEnv({ tool = null, role = null, model = null, agent = null, extra = {}, env = process.env, notes = null, keys = null, proxy = null } = {}) {
+  // 2.79.1 (a): a tool from studio/tools.json (harness/tool-registry.mjs) gets exactly the key names its entry lists (keys),
+  // never another family's by its model; a proxied one (proxy "vertex") gets the session tag like a vertex session.
+  const own = Array.isArray(keys) ? new Set(keys.map(String)) : null;
+  const finish = (o, t) => dropHeld(vertexMapped(keyMapped(nimMapped(o, t, env), { role, agent, tool: t, env, notes }), t === 'vertex' || proxy === 'vertex' ? agent : null));
+  if (/^full$/i.test(env.STUDIO_AGENT_ENV || '')) return finish({ ...env, ...extra }, String(tool || '').toLowerCase());
   const pass = new Set([...String(env.STUDIO_AGENT_ENV_PASS || '').split(','), ...String(env[`STUDIO_${roleKey(role)}_ENV`] || '').split(',')].map((s) => s.trim()).filter(Boolean));
   let t = String(tool || '').toLowerCase();
-  if (!TOOL_KEYS[t] && model) t = (FAMILY.find(([re]) => re.test(String(model))) || [])[1] || t;
-  const toolRe = TOOL_KEYS[t] || null;
+  if (!own && !TOOL_KEYS[t] && model) t = (FAMILY.find(([re]) => re.test(String(model))) || [])[1] || t;
+  const toolRe = own ? { test: (k) => own.has(k) } : TOOL_KEYS[t] || null;
   const out = {};
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined) continue;
     if (NEVER.test(k) && !pass.has(k)) continue;
     if (BASICS.test(k) || STUDIO.test(k) || pass.has(k) || (toolRe && toolRe.test(k))) out[k] = v;
   }
-  return keyMapped(nimMapped({ ...out, ...extra }, t, env), { role, agent, tool: t, env, notes });
+  return finish({ ...out, ...extra }, t);
+}
+const dropHeld = (out) => { for (const k of Object.keys(out)) if (PROXY_HELD.some((h) => h.toUpperCase() === k.toUpperCase())) delete out[k]; return out; };
+/**
+ * 2.79.1 (a): a session on the Vertex proxy: no OPENAI_ or AIDER_OPENAI_ name of the owner's (any letter case, as for nim),
+ * and the session tag (session-<agent>, which the proxy reads as the session's name, never a key) as OPENAI_API_KEY and
+ * AIDER_OPENAI_API_KEY, so a .env aider loads can't put another key in its place. aider also gets it as --openai-api-key.
+ */
+function vertexMapped(out, agent) {
+  if (!agent) return out;
+  for (const k of Object.keys(out)) if (/^(AIDER_)?OPENAI_/i.test(k)) delete out[k];
+  out.OPENAI_API_KEY = `session-${agent}`;
+  out.AIDER_OPENAI_API_KEY = `session-${agent}`;
+  return out;
 }
 
 /**
