@@ -21,7 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { activeCartridge, isTemplateCartridge } from './cartridge.mjs';
-import { queueNotice } from './communicator.mjs';
+import { queueNotice } from './comm-notice.mjs';
 
 export const MODE_FILE = path.join(REPO_ROOT, 'studio', 'mode.json');
 

@@ -397,7 +397,7 @@ export async function notifyRun(root, s, { deps = {} } = {}) {
   if (!fs.existsSync(f)) fs.writeFileSync(f, '# Producer inbox\n\n> Messages from people in the War Room. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
   fs.appendFileSync(f, `- [${new Date().toISOString().slice(0, 16).replace('T', ' ')}] **game tester** (to the Producer, the Director and ${orch}): ${line.replace(/\n+/g, ' ')}\n`);
   emitEvent({ type: 'tester.report', agent: TESTER_AGENT, to: 'producer', status: v.some(([, x]) => x === 'red') ? 'warn' : undefined, msg: line.slice(0, 600), meta: { cc: ['director', orch], run: s.run, verdicts: s.verdicts, report: s.report, bugs: bugs.map((b) => b.task) } });
-  try { (deps.queueNotice || (await import('./communicator.mjs')).queueNotice)({ key: `tester:${s.run}`, kind: 'tester', text: `${line} (for the Producer, the Director and ${orch})`, root }); } catch {}
+  try { (deps.queueNotice || (await import('./comm-notice.mjs')).queueNotice)({ key: `tester:${s.run}`, kind: 'tester', text: `${line} (for the Producer, the Director and ${orch})`, root }); } catch {}
   return line;
 }
 

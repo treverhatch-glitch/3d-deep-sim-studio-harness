@@ -79,4 +79,4 @@ export async function recordEngineShots({ root, engine, tasks, shotsDir, deps = 
   return { pages, before, after };
 }
 
-function defaultNotice(a) { return import('./communicator.mjs').then((m) => m.queueNotice({ ...a, kind: 'engine-shots' })).catch(() => {}); }
+function defaultNotice(a) { return import('./comm-notice.mjs').then((m) => m.queueNotice({ ...a, kind: 'engine-shots' })).catch(() => {}); }

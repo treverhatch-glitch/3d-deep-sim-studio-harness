@@ -27,7 +27,7 @@ import path from 'node:path';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { agentEnv, keymapFor } from './agent-env.mjs';
 import { readUsage } from './vertex.mjs';
-import { queueNotice } from './communicator.mjs';
+import { queueNotice } from './comm-notice.mjs';
 
 export const BUDGETS_REL = '.studio/spend-budgets.json';
 export const PAGE_AT = 0.75;
