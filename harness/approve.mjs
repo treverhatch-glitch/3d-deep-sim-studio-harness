@@ -44,6 +44,7 @@ import { REPO_ROOT, emitEvent, boardRoot } from './event.mjs';
 import { canonicalBytes } from './hash.mjs';
 import { proxyApprovalOk, proxyShell } from './owner-proxy.mjs';
 import { betaActor, betaRecordVerdict } from './beta-mode.mjs';
+import { ownerOnlyAction, ownerOnlyWhy } from './owner-acts.mjs';
 import { matchAny, matchAnyFold } from './merge-lane.mjs';
 import { protectRoot, trustedEnv, mainRootTrust } from './gate-trust.mjs';
 import { TOOLCHAIN_GLOBS, toolchainProtected } from './test-toolchain.mjs';
@@ -423,7 +424,8 @@ function signOrProxy(approval) {
   if (fs.existsSync(ownerKeyPath())) return { approval, signature: sign(approval) };
   // 2.76.0: in beta mode (harness/beta-mode.mjs) the owner's stand-ins approve without the key or per-step words; the
   // approval carries studio/beta.json and counts while beta mode is still on with it. Logged like every owner act.
-  const b = betaActor({ allowLane: true, kind: approval.kind });
+  // 2.79 (c): --by names an outside signer in a shell the harness didn't launch and that names nobody (--by grokbot).
+  const b = betaActor({ allowLane: true, kind: approval.kind, by: approval.by });
   // 2.78.2 (h): a protected decision a Producer/Director session may not make (or a worker) is refused, saying who may.
   if (b.refused) throw new Error(`${b.why} Nothing was written.`);
   if (b.ok) {
@@ -524,6 +526,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const cmd = a[0] || 'show';
   try {
     if (cmd === 'keygen') {
+      // 2.79 (c): keys and credentials stay the owner's own (harness/owner-acts.mjs): beta mode's agents, an outside signer
+      // and the owner proxy are refused, with the reason.
+      {
+        const standIn = (() => { try { const p = proxyShell({ allowLane: true }); if (p.ok) return `${p.doc.agent} (the owner's proxy)`; } catch {} try { const x = betaActor({ allowLane: true, kind: 'board', by }); if (x.ok) return `${x.who} (${x.via})`; } catch {} return ''; })();
+        if (standIn) throw new Error(`${ownerOnlyWhy(ownerOnlyAction('keygen'), standIn)}. Nothing was made`);
+      }
       const keyFile = ownerKeyPath();
       if (fs.existsSync(keyFile) && !a.includes('--force')) throw new Error(`an owner key already exists at ${keyFile} (--force replaces it; old approvals stop verifying)`);
       const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');

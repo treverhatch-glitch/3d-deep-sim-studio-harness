@@ -28,6 +28,7 @@
  *   node harness/task-budget.mjs <TASK_ID> [--json]     what the task has spent, against its limits
  */
 import path from 'node:path';
+import { postAsk } from './ask-post.mjs';
 import { fileURLToPath } from 'node:url';
 import { readRecentEvents, emitEvent } from './event.mjs';
 import { weightedTokens } from './budget.mjs';
@@ -137,7 +138,7 @@ export function stopIfOverBudget(taskId, { by = 'budget', events, now = Date.now
   emitEvent({ type: 'task.budget', agent: by, to: 'producer', task: taskId, status: 'blocked', msg: `${taskId} stopped: ${b.why}`, meta: { spend: b.spend, limits: b.limits } });
   // 2.35.0: a rescue on a different model comes first (the watchdog's next pass files it, harness/rescue.mjs);
   // a person is asked here only when rescues are off.
-  if (/^(off|0|false|no)$/i.test(process.env.STUDIO_RESCUE || '')) emitEvent({ type: 'agent.ask', agent: by, to: 'producer', task: taskId, msg: `Needs you: ${b.why}. It is parked until someone unparks it.` });
+  if (/^(off|0|false|no)$/i.test(process.env.STUDIO_RESCUE || '')) postAsk({ agent: by, to: 'producer', task: taskId, subject: 'parked', msg: `Needs you: ${b.why}. It is parked until someone unparks it.` });
   return why;
 }
 

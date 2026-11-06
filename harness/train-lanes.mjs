@@ -16,6 +16,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { emitEvent } from './event.mjs';
 import { linkDir, nodeModuleDirs, ignoreLanes, LANES_DIR } from './worktree.mjs';
@@ -93,8 +94,63 @@ export function keepRelease(root, task, rel) {
   j[task] = [...(j[task] || []).filter((r) => r.head !== rel.head), rel].slice(-5);
   writeRels(root, j);
 }
-/** The kept release of `task` for `head`, or null. */
-export const keptRelease = (root, task, head) => (head ? (readRels(root)[task] || []).find((r) => r.head === head) || null : null);
+/**
+ * The kept release of `task` for `head`, or null. 2.79 (c): with `tip` (main's tip), also one made at another head whose
+ * lane content is the same now (releaseCovers), carried to this head.
+ */
+export function keptRelease(root, task, head, { tip = null } = {}) {
+  if (!head) return null;
+  const list = readRels(root)[task] || [];
+  const exact = list.find((r) => r.head === head);
+  if (exact || !tip) return exact || null;
+  for (const r of [...list].reverse()) { const c = carriedRelease(root, r, { head, tip }); if (c) return c; }
+  return null;
+}
+
+// ---- 2.79 (c): a release keyed on the lane's own content, not its raw head ----
+//
+// The crew's run (18:50): the train's precheck merged main into a released lane (a new head), and the owner's release
+// was void: a release loop whenever main moved. A release now also records the lane's content: each file the lane changes
+// against its merge-base with main, with that file's blob at the merge-base and at the lane's head. A new head with the
+// same content (a re-queue, a catch-up merge of main that touches none of those files) is still covered; a lane commit
+// that changes one of them, adds another file, or a main change merged into one of them is not (the key differs).
+
+/** The lane's content against main's tip: { key, files, base } or null (unreadable). Never throws. */
+export function laneContent(root, { head, tip }) {
+  try {
+    if (!head || !tip) return null;
+    const base = out(git(root, 'merge-base', tip, head));
+    if (!base) return null;
+    const d = git(root, '-c', 'core.quotePath=false', 'diff', '--name-only', '--no-renames', '-z', base, head);
+    if (d.status !== 0) return null;
+    const files = String(d.stdout || '').split('\0').filter(Boolean).sort();
+    const blobs = (rev) => {
+      const m = new Map();
+      if (!files.length) return m;
+      const r = git(root, '-c', 'core.quotePath=false', 'ls-tree', '-r', '-z', rev, '--', ...files);
+      for (const line of String(r.stdout || '').split('\0').filter(Boolean)) { const tab = line.indexOf('\t'); if (tab > 0) m.set(line.slice(tab + 1), line.slice(0, tab).split(' ')[2]); }
+      return m;
+    };
+    const b = blobs(base); const h = blobs(head);
+    const rows = files.map((f) => [f, b.get(f) || '-', h.get(f) || '-']);
+    return { key: crypto.createHash('sha256').update(JSON.stringify(rows)).digest('hex'), files, base };
+  } catch { return null; }
+}
+/** Does release `rel` (made at rel.head, with rel.content) still cover the lane at `head`? */
+export function releaseCovers(root, rel, { head, tip }) {
+  if (!rel || !head) return false;
+  if (rel.head === head) return true;
+  if (!rel.content?.key || !tip) return false;
+  const c = laneContent(root, { head, tip });
+  return Boolean(c && c.key === rel.content.key);
+}
+/** The release carried to `head` (same content), or null: { ...rel, head, carriedFrom: [older heads] }. */
+export function carriedRelease(root, rel, { head, tip }) {
+  if (!rel) return null;
+  if (rel.head === head) return rel;
+  if (!releaseCovers(root, rel, { head, tip })) return null;
+  return { ...rel, head, carriedFrom: [...new Set([...(rel.carriedFrom || []), rel.head])].slice(-5) };
+}
 /** Forget a kept release (a reverted decision); all of the task's when head is null. */
 export function forgetRelease(root, task, head = null) {
   const j = readRels(root);

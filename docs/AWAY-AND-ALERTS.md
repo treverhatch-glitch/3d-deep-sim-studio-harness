@@ -38,6 +38,17 @@ all probes pass → the wave passes and goes to your review; a probe fails → o
 Other lanes keep building and new gameplay work joins the next wave. `STUDIO_FUN_WAVES=0` (or `wave -- off`)
 restores 2.30b's per-task check. Sim features (J4) are still checked per task.
 
+## Asks are posted once per state change (2.79, c)
+The harness's own asks to the Producer and the orchestrator (`agent.ask` events: "T-xxx is parked: …", "Needs you: …")
+go through `harness/ask-post.mjs`. An ask is (task, subject) and posts once. Asked again while it is open, or coming back
+after it closed within `STUDIO_ASK_DIGEST_HOURS` (default 24) of its last post (the same task parked again for the same
+reason after an unpark), it is counted, not posted: the daily digest lists the open ones with how often each came back,
+and an ask posts again at most once per `STUDIO_ASK_DIGEST_HOURS`. It closes by itself, with one `ask.closed` event,
+when the task is done or no longer in the state it was asked in (the park lifted or replaced); the watchdog's pass
+sweeps them. A formal question (`npm run ask -- "…" --task T-x`) closes the same way when that task is done, and an
+answered one is never open again. The Communicator tags an open question again at most every `STUDIO_ASK_DIGEST_HOURS`.
+Before, every occurrence posted (the crew counted 252 asks against 20 answers in six days).
+
 ## Phone alerts (ntfy or Telegram)
 
 - ntfy: `npm run alerts -- on --channel ntfy --topic <long-random-topic> [--server https://ntfy.sh] --by <you>`;
