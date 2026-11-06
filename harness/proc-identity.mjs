@@ -136,12 +136,22 @@ export function pidAlive(pid, recorded, { eperm = true } = {}) {
  * identity (2.78.2 and older) and a start that can't be read keep the old rule: alive while the number is in use.
  * `starts` is for tests.
  */
-export function liveAs(pid, recorded, { eperm = true, starts = readStarts } = {}) {
+// A live pid's start doesn't change: one OS query per pid per minute (on Windows each query is a PowerShell start, and
+// the supervisor's stall check asks on every pass while a task done runs).
+const LIVE_AS_CACHE_MS = 60_000;
+const liveAsStarts = new Map();
+export function liveAs(pid, recorded, { eperm = true, starts = readStarts, now = Date.now() } = {}) {
   if (!pidAlive(pid, recorded, { eperm })) return false;
   if (!recorded || (!recorded.start && !recorded.proc)) return true;
   if (LINUX && recorded.proc && linuxTicks(pid) !== null) return true; // pidAlive compared the /proc start
+  const key = Number(pid);
   let cur = null;
-  try { cur = starts([Number(pid)]).get(Number(pid)) || null; } catch { cur = null; }
+  const hit = starts === readStarts ? liveAsStarts.get(key) : null;
+  if (hit && now - hit.at < LIVE_AS_CACHE_MS) cur = hit.cur;
+  else {
+    try { cur = starts([key]).get(key) || null; } catch { cur = null; }
+    if (starts === readStarts && cur) liveAsStarts.set(key, { cur, at: now });
+  }
   return sameProcess(recorded, cur) !== false;
 }
 
