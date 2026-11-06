@@ -269,6 +269,17 @@ export function refTemp(root, prefix) {
 }
 
 /**
+ * 2.79.1: the temp folder a build the divergence starts (a game's Vite/esbuild step, its scripts) uses: under the same
+ * <repo>/.studio/tmp, never the OS temp folder (TMP/TEMP/TMPDIR are what os.tmpdir() reads), so those builds find the
+ * repo's node_modules too. The caller removes `tmp` when done.
+ */
+export function tempEnv(tmp) {
+  const t = path.join(tmp, 'tmp');
+  fs.mkdirSync(t, { recursive: true });
+  return { TMP: t, TEMP: t, TMPDIR: t };
+}
+
+/**
  * A cartridge golden (qa/check-golden.mjs) that is red on its sha256: { found, tick, subsystems, field, from, to, ref,
  * reproduces, file, ms } or { error }. opts: { root, file (the golden's file name), rel (its repo path), spec, cart (this
  * tree's), env }.
@@ -278,6 +289,9 @@ export async function goldenDivergence({ root, file, rel, spec, cart, env = proc
   const ref = goldenReference(root, rel, env);
   if (ref.error) return { file, error: ref.error };
   const tmp = refTemp(root, 'studio-div-');
+  // The reference's code loads in this process: anything of it that asks os.tmpdir() gets the repo's folder too.
+  const savedTmp = { TMP: process.env.TMP, TEMP: process.env.TEMP, TMPDIR: process.env.TMPDIR };
+  Object.assign(process.env, tempEnv(tmp));
   try {
     const crel = `cartridges/${cart.name}`;
     if (objType(root, ref.ref, crel) !== 'tree') return { file, ref: ref.ref, error: `the reference ${ref.ref.slice(0, 8)} has no ${crel}` };
@@ -294,6 +308,7 @@ export async function goldenDivergence({ root, file, rel, spec, cart, env = proc
   } catch (e) {
     return { file, error: String(e.message || e).slice(0, 200) };
   } finally {
+    for (const [k, v] of Object.entries(savedTmp)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   }
 }
@@ -375,7 +390,7 @@ export async function gameDivergence({ root, game, conf, gate, env = process.env
   if (ref.error) return { gate, error: ref.error };
   const tmp = refTemp(root, 'studio-divref-');
   const wt = path.join(tmp, 'ref');
-  const runEnv = { ...env, STUDIO_DIVERGENCE: 'trace' };
+  const runEnv = { ...env, STUDIO_DIVERGENCE: 'trace', ...tempEnv(tmp) };
   try {
     const add = git(root, ['worktree', 'add', '--detach', '--quiet', wt, ref.ref]);
     if (add.status !== 0) return { gate, ref: ref.ref, error: `couldn't check out the reference ${ref.ref.slice(0, 8)} (git worktree add: ${String(add.stderr).trim().slice(0, 160)})` };

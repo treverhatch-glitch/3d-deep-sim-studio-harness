@@ -41,6 +41,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { poolPlan } from './api-pool.mjs';
 const poolPlanNow = (usage, live) => poolPlan({ usage, live });
+import { writeAtomic } from './fsafe.mjs';
 import { selfIdentity, pidAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
 
 export const STATUS_FILE = path.join(STUDIO_STATE_DIR, 'supervisor.json');
@@ -785,7 +786,11 @@ async function main(argv) {
   const state = { pid: process.pid, identity: selfIdentity(), status: 'running', startedAt: Date.now(), opts: { ...opts, until: opts.until ? new Date(opts.until).toISOString() : null }, sessions: 0, doneAtStart: parseNextQueue().done.length, hubDown: [] };
   const port = Number(process.env.HUB_PORT || 3847);
   let hub = null;
-  const save = (extra = {}) => fs.writeFileSync(STATUS_FILE, `${JSON.stringify({ ...state, ...extra, startedAt: new Date(state.startedAt).toISOString(), lastLoop: new Date().toISOString(), tasksDone: parseNextQueue().done.length - state.doneAtStart }, null, 2)}\n`);
+  const save = (extra = {}) => writeAtomic(STATUS_FILE, `${JSON.stringify({ ...state, ...extra, startedAt: new Date(state.startedAt).toISOString(), lastLoop: new Date().toISOString(), tasksDone: parseNextQueue().done.length - state.doneAtStart }, null, 2)}\n`);
+  // 2.79.1: this supervisor's own pid, identity and status go to supervisor.json now, before the first full pass (which can
+  // take minutes): studio:status and studio:reload-env right after studio:stop && studio:start read the OLD record
+  // otherwise and said "Not running".
+  try { save(); } catch { /* the first pass writes it */ }
   emitEvent({ type: 'supervisor.start', agent: 'supervisor', to: 'producer', msg: `Supervisor running${opts.until ? ` until ${new Date(opts.until).toTimeString().slice(0, 5)}` : ''}${opts.window ? `, window ${opts.window}` : ''}${opts.budget ? `, budget ${budgetArg}` : ''}${opts.lanes ? `, lanes ${opts.lanes}` : ''}` });
   console.log(`[supervisor] running (pid ${process.pid}). npm run studio:stop to stop; agents finish their current task.`);
   // 2.29.2: --budget 50% paces against the week's tokens; without --weekly it can never trip.
@@ -955,6 +960,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   if (argv[0] === 'stop') {
+    const markStopped = (rec, why) => { try { writeAtomic(STATUS_FILE, `${JSON.stringify({ ...rec, status: 'stopped', stopReason: why }, null, 2)}\n`); } catch { /* the stop file still stops it */ } };
     fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
     fs.writeFileSync(STOP_FILE, new Date().toISOString());
     const s = readStatus();
@@ -962,6 +968,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // now, against the one in supervisor.json. Unreadable, or a status file from before PU-17: signalled only if
     // its last loop is recent; otherwise the number may be another program's by now. Either way the stop file
     // above stops a real supervisor at its next loop.
+    if (s?.pid && s.status === 'running' && !pidExists(s.pid)) markStopped(s, 'studio:stop: its process was already gone');
     if (s?.pid && pidExists(s.pid)) {
       const cur = readStarts([s.pid]).get(Number(s.pid)) || null;
       const same = cur ? sameProcess(s.identity, cur) : null;
@@ -973,6 +980,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         } catch {
           // it will see the stop file
         }
+        // 2.79.1: on Windows SIGTERM ends the process outright, so its own "stopped" write never happens: mark it here.
+        if (s.status === 'running') markStopped(s, 'studio:stop');
       } else if (cur && s.status === 'running') {
         const why = same === false ? `pid ${s.pid} now belongs to another program${cur.cmd ? ` (${cur.cmd})` : ''}` : `pid ${s.pid} is in use but ${cur.error ? `its start time couldn't be read (${cur.error})` : 'supervisor.json has no start time'} and its last loop was ${Number.isFinite(loopAge) ? Math.round(loopAge / 60000) : '?'} min ago, so the number may be another program's`;
         console.log(`Not signalled: ${why}. ${same === false ? 'The supervisor that wrote supervisor.json is gone.' : 'A supervisor that is still running stops at its next loop.'}`);

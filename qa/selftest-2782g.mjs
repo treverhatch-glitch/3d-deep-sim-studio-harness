@@ -172,7 +172,7 @@ console.log(JSON.stringify({ notes: r('studio/notes/x.md'), handoffs: r('studio/
       idA && /read as engine:unity/.test(out(a)) && rec(idA)?.track === 'engine:unity' && rec(idA)?.engine === 'unity',
       `${out(a).slice(-500)}\nrec=${JSON.stringify(rec(idA))}`]);
     // (a) a record a person wrote by hand: { track: "unity" } (the crew's fix that silently didn't work)
-    const b = task(['add', 'Port pass: hangar', '--role', 'engine-porter']);
+    const b = task(['add', 'Port pass: hangar', '--role', 'engine-porter'], { ...env, STUDIO_ENGINE_TRACK_INFER: 'off' }) // 2.79.1: task add now defaults the track; a track-less (pre-2.77) task needs the switch;
     const idB = idOf(b);
     const all = (() => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'engine', 'tasks.json'), 'utf8')); } catch { return {}; } })();
     all[idB] = { track: 'unity' };
@@ -184,7 +184,7 @@ console.log(JSON.stringify({ notes: r('studio/notes/x.md'), handoffs: r('studio/
       j && j.track === 'engine:unity' && j.engine === 'unity' && j.again === 'engine:unity' && rec(idB)?.track === 'engine:unity' && norm.length === 1,
       `${JSON.stringify(j)} ${out(pr).slice(-300)}\nrec=${JSON.stringify(rec(idB))} events=${norm.length}`]);
     // (a) task track: normalize, refuse unknown
-    const c = task(['add', 'Port pass: tower', '--role', 'engine-porter']);
+    const c = task(['add', 'Port pass: tower', '--role', 'engine-porter'], { ...env, STUDIO_ENGINE_TRACK_INFER: 'off' }) // 2.79.1: as above;
     const idC = idOf(c);
     const t1 = task(['track', idC, 'unity', '--by', 'owner']);
     const t2 = task(['track', idC, 'engine:godot', '--by', 'owner']);
@@ -209,7 +209,7 @@ console.log(JSON.stringify({ notes: r('studio/notes/x.md'), handoffs: r('studio/
     const { S, env } = St;
     writeIn(S, 'studio/game.json', `${JSON.stringify({ ...gameJson(S), engines }, null, 2)}\n`);
     initRepo(S);
-    const id = idOf(node(S, ['harness/task.mjs', 'add', `Port pass: ${name}`, '--role', 'engine-porter'], env));
+    const id = idOf(node(S, ['harness/task.mjs', 'add', `Port pass: ${name}`, '--role', 'engine-porter'], { ...env, STUDIO_ENGINE_TRACK_INFER: 'off' })); // 2.79.1: a track-less task, as before task add defaulted the track
     const web = idOf(node(S, ['harness/task.mjs', 'add', `Build: ${name} hud`, '--role', 'builder', '--lane', 'harness'], env));
     g(S, ['add', '-A']); g(S, ['commit', '-qm', 'board', '--no-verify']);
     g(S, ['checkout', '-qb', 'upstream']);

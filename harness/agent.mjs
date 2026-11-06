@@ -62,7 +62,7 @@ import { AGY_STREAM_FLAGS, agyStreamOn, agyStreamWanted, userLine, driveAgyStrea
 import { savePatch } from './wip.mjs';
 import { laneList, laneEntries, readHolds } from './task-hold.mjs';
 import { regionOnlyFiles } from './lane-regions.mjs';
-import { engineLaunch } from './engine-tracks.mjs';
+import { engineLaunch, syncEngineTarget } from './engine-tracks.mjs';
 import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport, isLaneWorktree, LANES_DIR, laneLive } from './worktree.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { ownerOnlyStep } from './owner-only.mjs';
@@ -260,7 +260,7 @@ export function agyOptions(model = null, env = process.env) {
  * since 2.58.5 agy); cursor and grok take it as one argument, and a prompt too long for the command line becomes an
  * instruction to read the kickoff file.
  */
-export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], aider = {}, stream = false }) {
+export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], aider = {}, stream = false, engineDir = null }) {
   const m = model && model !== 'unknown' ? model : null;
   // M1 (2.58.3): a session in a lane copy (.lanes/<agent>) reads studio/ and .studio/ through links to the main
   // checkout; Claude Code resolves the link and refuses a target outside its working directory ("outside the allowed
@@ -278,7 +278,7 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], a
       const bypass = process.env.STUDIO_CLAUDE_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
       // harness/allowlist.mjs: the same list the kickoff prints (2.30c). P-066: each pattern is its own argument after
       // the flag (Claude Code takes a space-separated list), so "Bash(git log *)" never depends on quoting.
-      const allowed = allowedToolsList();
+      const allowed = allowedToolsList({ engineDir }); // 2.79.1: an engine pass may git add / commit in its own worktree
       // 2.29.2: a turn ceiling, so no session runs 126 turns again (the refresh point, 40 turns, is in the kickoff).
       const ceiling = sessionLimits().ceilingTurns;
       return { argv: ['claude', '-p', ...(bypass ? ['--dangerously-skip-permissions'] : ['--permission-mode', 'acceptEdits', '--allowedTools', ...allowed]), ...dirs, '--output-format', 'stream-json', '--verbose', ...(ceiling > 0 ? ['--max-turns', String(ceiling)] : []), ...(m ? ['--model', m] : []), ...(effort ? ['--effort', effort] : [])], stdin: prompt };
@@ -1269,7 +1269,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (held.holds) { agyStream = false; launchNotes.push(`agy stream mode skipped: .studio/${STREAM_RECORD} records that this agy refused it (${held.rec?.why || 'no reason recorded'}); ${held.why}. Delete .studio/${STREAM_RECORD} to try stream mode again; it is tried again by itself when agy changes.`); }
   }
   if (agyOneTurn && tool === 'agy') launchNotes.push('agy one-turn launch: the stream session before this one failed on its input format (see the line above); this session runs as one turn');
-  const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort, addDirs: [...(copy ? laneShareDirs() : []), ...(engineLane?.dir ? [engineLane.dir] : [])], aider, stream: agyStream });
+  const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort, addDirs: [...(copy ? laneShareDirs() : []), ...(engineLane?.dir ? [engineLane.dir] : [])], engineDir: engineLane?.dir || null, aider, stream: agyStream });
   if (!custom && !cmd) dropStarting(agent);
   if (!custom && !cmd) return { ok: false, message: `No launch command for tool "${tool}". Use --tool claude|codex|agy|cursor|grok|aider|nim, or set STUDIO_${roleKey(role)}_CMD (with {kickoff}, {agent}, {model}).` };
   fs.mkdirSync(AGENTS_DIR, { recursive: true });
@@ -2088,7 +2088,7 @@ export function agentLog(agent, tail = 60, { raw = false } = {}) {
  * 2.77.0 (u, P5.1): the engine worktree of a launched engine pass ({ dir, branch, note }), or null. An error becomes the
  * prompt's note and an engine.lane event: the session still starts (its brief says what to fix), never a crash.
  */
-function launchEngineLane({ task, agent, role = null }) {
+export function launchEngineLane({ task, agent, role = null }) {
   if (!task || /^(off|0|false|no)$/i.test(String(process.env.STUDIO_ENGINE_LANES || ''))) return null;
   try {
     const r = engineLaunch({ task, agent, role });
@@ -2096,6 +2096,16 @@ function launchEngineLane({ task, agent, role = null }) {
     // 2.78.1 (e, B-119): no worktree means no code access: the launch is refused (runAgent), it never runs blind.
     if (r.error) { emitEvent({ type: 'engine.lane', agent, task, status: 'warn', msg: `${agent}: no engine worktree for ${task}: ${r.error}`.slice(0, 400) }); return { note: `Your task is an engine pass, but its worktree couldn't be made: ${r.error}. Fix that first, or hand it back with a note.`, refuse: r.error }; }
     emitEvent({ type: 'engine.lane', agent, task, msg: `${agent}: ${task} works in ${r.dir.split(path.sep).join('/')} on ${r.branch}${r.created ? ' (new)' : ''}`.slice(0, 400), meta: { dir: r.dir, branch: r.branch, repo: r.repo } });
+    r.note = `${r.note || ''} You may run git -C ${r.dir.split(path.sep).join('/')} add / commit / status / diff / log there (not push, not checkout of another branch).`.trim();
+    // 2.79.1: the engine's target branch is merged into the pass worktree first; a conflict goes in the brief and an event.
+    try {
+      const sy = syncEngineTarget({ task, dir: r.dir, repo: r.repo });
+      if (sy?.merged || sy?.note) {
+        if (sy.merged) emitEvent({ type: 'engine.target_merged', agent, task, msg: `${task}: ${sy.note}`.slice(0, 400), meta: { dir: r.dir } });
+        else if (!sy.upToDate) emitEvent({ type: 'engine.target_conflict', agent, task, to: 'producer', status: 'warn', msg: `${task}: ${sy.note}`.slice(0, 500), meta: { dir: r.dir, conflicts: sy.conflicts } });
+        r.note = `${r.note || ''}\n${sy.note}`.trim();
+      }
+    } catch { /* the session starts on the worktree as it is */ }
     return r;
   } catch (e) { return { note: `Your task is an engine pass, but its worktree couldn't be made (${e.message}).` }; }
 }

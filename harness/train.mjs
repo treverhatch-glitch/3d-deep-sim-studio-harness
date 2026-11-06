@@ -117,6 +117,7 @@ import { checkStamped, stampWrite } from './workaround.mjs';
 import { gateEnv } from './gate-env.mjs';
 import { refreshStaleLane } from './train-refresh.mjs';
 import { writeAtomic } from './fsafe.mjs';
+import { misplacedTrailers, misplacedTrailerText } from './trailers.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -2431,7 +2432,10 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     const cp = laneProposal(root, { task: lane.task, head: now.head, tip: tip0 });
     if (cp && !cp.ok) { drop(lane, cp.why, { cause: 'conflict' }); continue; }
     if (c.tier === 'C' && !released) { hold({ ...lane, head: now.head, branch: now.branch || lane.branch }, 'C', c.why.join('; '), c.rerecord ? { rerecord: c.rerecord } : {}); continue; }
-    if (c.needs.goldenReason.length) { drop(lane, `it is tier B and moves goldens (${c.needs.goldenReason.slice(0, 3).join(', ')}) with no Golden-Reason trailer on its commits: say why the recorded answers changed (git commit --amend, or a new commit, with -m "Golden-Reason: <why>"), then task done again`); continue; }
+    if (c.needs.goldenReason.length) {
+      const mis = misplacedTrailers(root, tip0, now.head, 'Golden-Reason'); // 2.79.1: the line may be there, but not as a trailer
+      drop(lane, `it is tier B and moves goldens (${c.needs.goldenReason.slice(0, 3).join(', ')}) with no Golden-Reason trailer on its commits: say why the recorded answers changed (git commit --amend, or a new commit, with -m "Golden-Reason: <why>"), then task done again${mis.length ? `. ${misplacedTrailerText(mis, 'Golden-Reason')}` : ''}`); continue;
+    }
     if (c.needs.pinMoves.length) { drop(lane, `it is tier B and changes pinned expectations (${c.needs.pinMoves.slice(0, 3).join(', ')}) with no Pin-Moves trailer on its commits: declare the pins it moves ("Pin-Moves: <pin>"), then task done again`); continue; }
     if (c.tier === 'B' && !released) {
       const n = (deps.handBacks || handBackCount)(lane.task);

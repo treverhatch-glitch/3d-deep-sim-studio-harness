@@ -5002,6 +5002,15 @@ if (inShard('selftest-279c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.79.1 (c): the crew's findings on 2.79.0: the size rule's KB cap, Golden-Reason placement, the divergence's temp folder,
+// studio:status after a restart, engine porters (target merge, git commit), task add defaults, the janitor.
+if (inShard('selftest-2791c')) {
+  const dir = copyRepo();
+  const { selftest2791C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2791c.mjs')).href);
+  await selftest2791C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {
