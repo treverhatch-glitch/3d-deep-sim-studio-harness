@@ -66,7 +66,7 @@ export function snapshotBuild(cart, report = {}) {
   const b = cart.browser || {};
   const sha = (spawnSync('git', ['rev-parse', '--short', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout || '').trim() || null;
   const dirty = Boolean((spawnSync('git', ['status', '--porcelain'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout || '').trim());
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'build-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-build-'));
   const files = [];
   let page;
   if (b.dist) {

@@ -290,6 +290,21 @@ export function isEngineRole(role, { root = REPO_ROOT } = {}) {
   return Object.values(enginesConfig(root)).some((c) => c && typeof c.role === 'string' && c.role.toLowerCase() === r);
 }
 
+/** 2.79.1: the engines this studio configures (studio/game.json "engines"), sorted. */
+export const engineNames = (root = REPO_ROOT) => Object.keys(enginesConfig(root)).filter((n) => ENGINE_NAME_RE.test(n)).sort();
+
+/**
+ * 2.79.1 (task add --role engine-porter with no --track): { track: "engine:<name>" } when the studio configures exactly
+ * one engine, else { error }  (STUDIO_ENGINE_TRACK_INFER=off: { track: null }, no default) listing the engines (several) or saying there is none.
+ */
+export function defaultEngineTrack(root = REPO_ROOT, env = process.env) {
+  if (off(env.STUDIO_ENGINE_TRACK_INFER)) return { track: null }; // the same switch as inferEngineTrack: a plain lane, the 2.78.1 way
+  const names = engineNames(root);
+  if (names.length === 1) return { track: `engine:${names[0]}` };
+  if (!names.length) return { error: 'an engine-porter task needs an engine track, and studio/game.json "engines" names no engine' };
+  return { error: `an engine-porter task needs an engine track, and this studio names ${names.length} engines: add --track ${names.map((n) => `engine:${n}`).join(' | ')}` };
+}
+
 /**
  * 2.78.2 (item 7d): the track of an engine-porter task that has no engine record. With exactly one engine named in
  * studio/game.json "engines" (the owner's), that engine: the record is written (.studio/engine/tasks.json, inferred: true)
@@ -498,6 +513,31 @@ export function engineLaunch({ task, agent = null, role = null, root = mainRoot(
   if (add.status !== 0) return { error: `git worktree add in ${repo} failed: ${String(add.stderr || '').trim().split('\n').pop()} (a branch checked out in another folder can't be checked out twice: work there, or move it)` };
   if (!rec.branch) setEngineTask(task, { branch }, { root });
   return { dir, branch, repo, created: !has, note: note(!has) };
+}
+
+/**
+ * 2.79.1: before an engine pass's session starts, the engine's target branch (engines.<x>.target, e.g. unity/main) is
+ * merged into its pass worktree, no fast-forward (a merge commit, as the train merges lanes). A pass whose worktree
+ * lacked the target's newer changes ran two empty sessions and was parked. On a conflict the merge is aborted and the
+ * conflicting files are returned for the porter's brief and an event; the session then starts on the unmerged
+ * worktree. { merged, upToDate, conflicts, note } | null (nothing to merge: no target, or the ref isn't there).
+ */
+export function syncEngineTarget({ task, dir, repo = null, root = mainRoot() } = {}) {
+  const rec = engineTask(task, { root });
+  const t = rec ? engineTarget(rec.engine, { root }) : null;
+  const target = t?.cfg?.target;
+  if (!target || !dir || !fs.existsSync(path.join(dir, '.git'))) return null;
+  const g = (...a) => spawnSync('git', a, { cwd: dir, encoding: 'utf8', windowsHide: true });
+  const ref = ['', 'refs/heads/', 'refs/remotes/'].map((p) => `${p}${target}`).find((r) => g('rev-parse', '--verify', '--quiet', `${r}^{commit}`).status === 0);
+  if (!ref) return null;
+  if (g('merge-base', '--is-ancestor', ref, 'HEAD').status === 0) return { merged: false, upToDate: true, conflicts: [], note: '' };
+  const who = g('config', 'user.name').stdout.trim() ? [] : ['-c', 'user.name=studio-launcher', '-c', 'user.email=studio-launcher@example.invalid'];
+  const m = g(...who, 'merge', '--no-ff', '--no-edit', '-m', `Merge ${target} into ${rec.branch || task} (engine pass ${task})`, ref);
+  if (m.status === 0) return { merged: true, upToDate: false, conflicts: [], note: `${target} was merged into your worktree before this session (a merge commit), so you start with its newer changes.` };
+  const conflicts = g('diff', '--name-only', '--diff-filter=U').stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  g('merge', '--abort');
+  const files = conflicts.slice(0, 12).join(', ') || 'none named';
+  return { merged: false, upToDate: false, conflicts, note: `Merging ${target} into your worktree failed${conflicts.length ? ` with conflicts in ${files}${conflicts.length > 12 ? ` +${conflicts.length - 12}` : ''}` : `: ${String(m.stderr || m.stdout || '').trim().split('\n').pop().slice(0, 160)}`}; the merge was aborted and your worktree is as it was. Start by running git -C ${dir.split(path.sep).join('/')} merge ${target} and resolving ${conflicts.length ? 'those files' : 'what it reports'}, then commit.` };
 }
 
 // ---- the CLI --------------------------------------------------------------------------------------------------------

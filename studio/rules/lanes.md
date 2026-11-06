@@ -43,7 +43,7 @@ Parallel work is capped by file layout. One 900-line renderer file means one ren
 - 2.60.0: the game's check manifest (`game/<name>/studio.gates.json`, protected: the owner approves it once) may say
   `"sizeRule": { "exempt": ["src/game/modules.ts"], "importLinesFree": true }`. Paths are relative to the manifest's
   folder (or repo-relative). An exempt file may grow, up to a hard cap (`"exemptMaxLines"`, default 800 lines, and
-  60 KB); its functions keep their limit. With `importLinesFree`, added lines that are only imports or re-exports
+  `"exemptMaxKb"`, default 60 KB); its functions keep their limit. With `importLinesFree`, added lines that are only imports or re-exports
   (`import … from '…'`, `export … from '…'`, `export * from '…'`, a multi-line import block) don't count as growth in
   any file of the game. The rule is read from the manifest as committed on the studio's main branch: a task's own
   edit of it, or a `sizeRule` anywhere else, is ignored (the refusal says so). JS/TS imports only.
