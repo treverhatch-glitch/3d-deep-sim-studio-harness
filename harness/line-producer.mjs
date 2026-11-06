@@ -40,6 +40,10 @@
  *      STUDIO_ENGINE_TRAIN_MAX_WAIT_MIN (120). It runs `task train --engine <x>` detached; the train itself still takes
  *      machine:heavy with the RAM floor, and an infrastructure abort stays NOT RUN (2.73.2). STUDIO_ENGINE_TRAIN_AUTO=off
  *      (or engines.<x>.trainAuto false) leaves starting it to a person.
+ *   i. 2.79 (t): the game tester (testerPass, harness/tester.mjs): starts a run when STUDIO_TESTER_EVERY_HOURS (24) AND
+ *      STUDIO_TESTER_MIN_LANDINGS (10) game landings passed since the last one, or on `npm run tester -- now`, only while
+ *      the rig isn't starved and a gate slot is free; no slot, no hold. A landed module nothing imports gets one "Wire
+ *      <module> into the game" task (STUDIO_TESTER_WIRE_TASKS).
  * It writes .studio/line/status.json (lineStatus(): what the Communicator posts and the supervisor reads for its order).
  *
  * STUDIO_LINE_PRODUCER: on (default) | report (status only: no fixes, no task filed, the supervisor ignores the plan) |
@@ -642,6 +646,9 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
     try { chainPush = await chainBreakerPush({ chainBreakers: p.chainBreakers, now, env, act: acting, deps: { ...(deps.root ? { root: deps.root } : {}), ...(deps.trainQueue ? { trainQueue: deps.trainQueue } : {}), ...(deps.heavy ? { heavy: deps.heavy } : {}) } }); } catch (e) { chainPush = { on: false, holding: false, why: `error: ${e.message}` }; }
     let twins = null;
     try { twins = await twinPass({ now, env, act: acting, deps: { ...(deps.root ? { root: deps.root } : {}), ...(deps.events ? { events: deps.events } : {}), ...(deps.queue ? { queue: deps.queue } : {}), ...(deps.engines ? { engines: deps.engines } : {}), ...(deps.filesOf ? { filesOf: deps.filesOf } : {}), ...(deps.addTask ? { addTask: deps.addTask } : {}) } }); } catch (e) { twins = { on: false, checked: [], why: `error: ${e.message}` }; }
+    // 2.79 (t): the game tester's schedule (harness/tester.mjs), and wire-it tasks for landed modules nothing imports.
+    let tester = null;
+    try { tester = await testerPass({ now, env, act: acting, rig: f.rig, deps }); } catch (e) { tester = { state: 'error', why: e.message }; }
     const status = {
       at: new Date(now).toISOString(),
       mode,
@@ -664,6 +671,7 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
       lanes: f.lanes ? (f.lanes.error ? { error: f.lanes.error } : { mode: f.lanes.mode, set: f.lanes.set, unscoped: f.lanes.unscoped, running: f.lanes.running, stacked: f.lanes.stacked, shared: f.lanes.shared }) : null,
       chainPush,
       twins,
+      tester,
     };
     // One plain line for the Communicator (helper l reads { at, builders: { running, target }, blocked, text }).
     status.text = summaryLine(status);
@@ -689,7 +697,29 @@ export function summaryLine(s) {
     s.chainPush?.holding ? `holding new builder verifies for chain-breaker ${s.chainPush.task}` : null,
     ...(s.twins?.checked || []).filter((r) => r.need).map((r) => `${r.engine} twin ${r.added || '(to add)'} for ${r.task}`),
     ...(s.engines || []).filter((e) => e.queued || e.running).map((e) => `${e.engine} train: ${e.running ? 'running' : e.started ? 'started' : `${e.queued} queued, waits (${e.why})`}`),
+    s.tester?.line || null,
   ].filter(Boolean).join('; ');
+}
+
+// ---- 2.79 (t): the game tester (harness/tester.mjs) ------------------------------------------------------------------
+
+/**
+ * The Line Producer owns the game tester's schedule: each pass advances the run that is going (build, then the agent,
+ * then the report) or starts one that is due (STUDIO_TESTER_EVERY_HOURS AND STUDIO_TESTER_MIN_LANDINGS, or `npm run
+ * tester -- now`) when the rig isn't starved and a gate slot is free; it never takes a slot or holds anything. Then the
+ * wire-it pass: a landed module nothing in the game imports gets one "Wire <module> into the game" task.
+ * deps.tester: the tester's own deps (selftests). act false: what it would do.
+ */
+export async function testerPass({ now = Date.now(), env = process.env, act = true, rig = null, deps = {} } = {}) {
+  const t = await import('./tester.mjs');
+  let root = deps.root || null;
+  if (!root) root = (await import('./worktree.mjs')).mainRoot();
+  const td = deps.tester || {};
+  const run = await t.testerPass({ root, now, env, act, rig, deps: td });
+  let wire = null;
+  try { wire = await t.wirePass({ root, now, env, act, deps: { filesOf: (id) => landedFiles(root, id), ...td } }); } catch (e) { wire = { on: false, added: [], why: `error: ${e.message}` }; }
+  const line = [run.line || null, wire?.added?.length ? `wire tasks ${wire.added.map((a) => a.task || '(to add)').join(', ')}` : null].filter(Boolean).join('; ') || null;
+  return { ...run, wire, line };
 }
 
 // ---- 2.78.1 (f): the chain-breaker push ----------------------------------------------------------------------------

@@ -11,6 +11,10 @@ preferredChain:
 
 # Role: `playtester` (Closed-Loop Seed Replay & Accessibility QA Agent)
 
+> 2.79: playing the real build is the game tester's job (`studio/roles/qa-playtester.md`, `docs/TESTER.md`). This card
+> covers the seeded, state-first replay of a cartridge; where the two overlap (a bug's repro, the accessibility tree), a
+> tester bug carries the step and `node qa/tester-drive.mjs replay` as its repro.
+
 ## Mission
 Drive the simulation deterministically via `?playtest=1` (`window.__sim` or `qa/browser.adapter.mjs`), verify accessibility trees first, and record exact `{ seed, tick, description }` replays whenever an invariant fails.
 

@@ -91,6 +91,9 @@ export function writeDirectorBrief(reasons = []) {
     L.push('## Where the game is', `- ${b.answers.title || '(untitled)'}: ${b.signed ? `signed; Phase ${b.phase.open} (${PHASE_NAMES[b.phase.open]}) is open` : 'not signed (pre-production)'}`, `- Kept layers: ${c.kept.join(', ') || 'none'}`, `- Crossed out: ${c.crossed.join(', ') || 'none'}`, '');
   }
   L.push('## Finished since your last review', ...(finished.length ? finished.map((e) => `- ${e.task}: ${e.msg}`) : ['- Nothing.']), '');
+  // 2.79 (t): the game tester's last report (harness/tester.mjs): what is and isn't in the game, by the Bible.
+  const tr = readRecentEvents(20000).filter((e) => e.type === 'tester.report').pop();
+  if (tr) L.push('## The game tester\'s last run', `- ${tr.msg}`, '- Read its report for which Bible features are in the game, broken or missing; it holds nothing up, it informs your next slice.', '');
   L.push('## Drift report (free, from scripts)', ...(drift.items.length ? drift.items.map((i) => `- ${i.msg}`) : ['- Nothing drifting.']), '');
   // 2.61 (the learning edge): confirmed causes and repeated lessons shape how the next work is cut, not only workers' prompts.
   const constraints = constraintsBlock({ for: 'director' });
