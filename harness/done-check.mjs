@@ -76,20 +76,27 @@ export const reviewApproves = (text, env = process.env) => {
 
 /** 2.78.2 (c): task types that produce notes, reviews and docs, never game code. */
 export const NO_GAME_CODE_TYPES = ['direction', 'review', 'docs', 'idea', 'research', 'study'];
+/** 2.79 (d): roles whose tasks write notes, reviews and plans, never game code (a title like "Fix …" doesn't change that). */
+export const NO_GAME_CODE_ROLES = ['director', 'reviewer'];
 /**
  * 2.78.2 (c): may `task done` skip the game's own checks (the whole game test suite)? Yes when the task's type is one of
  * NO_GAME_CODE_TYPES and every file its lane changes (or claims, or has dirty) is a Markdown file or under studio/,
  * docs/ or .studio/. Any other file, or a type that can write code, runs them as before: a docs task that also touched
  * code still runs them. The docs and board checks are separate rows and always run. { skip, why }.
+ * 2.79 (d): a Director's or reviewer's task (NO_GAME_CODE_ROLES) is judged the same way when its title typed it "bug" or
+ * "change" and no owner reclassified it: its files decide.
  * STUDIO_DONE_SKIP_GAME_NONCODE=off: never skip.
  */
-export function skipGameChecks(type, files, env = process.env) {
+export function skipGameChecks(type, files, env = process.env, { role = null, ownerTyped = false } = {}) {
   if (/^(off|0|false|no)$/i.test(String(env.STUDIO_DONE_SKIP_GAME_NONCODE ?? '').trim())) return { skip: false, why: 'STUDIO_DONE_SKIP_GAME_NONCODE=off' };
-  if (!NO_GAME_CODE_TYPES.includes(type)) return { skip: false, why: `a ${type} task can change game code` };
+  // 2.79 (d): a Director's or reviewer's task whose title typed it "bug" or "change" (no type set) is still that role's: the
+  // rule is its files, as for a typed one. An owner's reclassification (ownerTyped) is taken as said.
+  const byRole = !ownerTyped && NO_GAME_CODE_ROLES.includes(String(role || '').toLowerCase());
+  if (!byRole && !NO_GAME_CODE_TYPES.includes(type)) return { skip: false, why: `a ${type} task can change game code` };
   const list = [...new Set((files || []).map((f) => String(f).replace(/\\/g, '/').replace(/^\.\//, '')).filter(Boolean))];
   const code = list.find((f) => !(/\.md$/i.test(f) || /^(studio|docs|\.studio)\//.test(f)));
   if (code) return { skip: false, why: `it changes ${code}, which isn't a note or doc` };
-  return { skip: true, why: `a ${type} task whose ${list.length} changed file(s) are notes, docs or studio records: no game code to test` };
+  return { skip: true, why: `a ${NO_GAME_CODE_TYPES.includes(type) ? type : `${role}`} task whose ${list.length} changed file(s) are notes, docs or studio records: no game code to test` };
 }
 
 /** The oldest commit tagged with this task (Studio-Task trailer), or null. */

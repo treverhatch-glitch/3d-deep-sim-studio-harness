@@ -126,7 +126,7 @@ export async function selftest2782E({ dir, report, tmpRoot, root }) {
     g(S, 'add', '-A'); g(S, 'commit', '-qm', 'owner key', '--no-verify');
     const e = { ...env, AGENT_EVENTS_FILE: '' };
     writeIn(S, '.studio/lane-branches.json', `${JSON.stringify({ 'T-777': 'lane/t777' }, null, 2)}\n`);
-    const paused = probe(S, `const ev = await import(${u(S, 'harness/event.mjs')}); ev.emitEvent({ type: 'task.paused', agent: 'builder-1', task: 'T-777', msg: 'Handed back T-777: the controls check is a protected file; only the owner approves it' }); console.log(JSON.stringify({ ok: true }));`, e);
+    const paused = probe(S, `const ev = await import(${u(S, 'harness/event.mjs')}); ev.emitEvent({ type: 'task.paused', agent: 'builder-1', task: 'T-777', msg: 'Handed back T-777: the controls check is a protected file; only the owner approves it', meta: { ownerStep: 'protected-file' } }); // 2.79 (d): routed on the structured field console.log(JSON.stringify({ ok: true }));`, e);
     const L = path.join(S, '.lanes', 'approver');
     const add = g(S, 'worktree', 'add', '-q', '-b', 'lane/t777', L);
     touch(L, 'the lane re-pins the controls check');

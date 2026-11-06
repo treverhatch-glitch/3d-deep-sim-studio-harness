@@ -70,7 +70,7 @@ fs.writeFileSync(path.join(${JSON.stringify(rec)}, tool + '-' + (e.STUDIO_LOCK_O
   const tasks = { m1: add('Lane add-dir'), m2: add('Laneless builder'), m2s: add('Laneless shared'), m2p: add('Producer laneless', 'producer'), m2c: add('Laneless custom'), m1p: add('Producer plain', 'producer') };
   g('add -A');
   g('commit -qm board');
-  const start = (args, env = {}) => run(repo, `node harness/agent.mjs start ${args}`, { ...QUIET, ...withBin, ...env });
+  const start = (args, env = {}) => run(repo, `node harness/agent.mjs start --attach ${args}`, { ...QUIET, ...withBin, ...env });
   const mainStudio = [real(path.join(repo, 'studio')), real(path.join(repo, '.studio'))];
   const addDirsOf = (argv = []) => argv.flatMap((a, i) => (a === '--add-dir' ? [argv[i + 1]] : []));
   const inCopy = (r, agent) => Boolean(r) && real(r.cwd) === real(path.join(repo, '.lanes', agent));
@@ -162,7 +162,7 @@ console.log(JSON.stringify({
 
     // End to end: the launcher with a fake aider; the key reaches the child's environment and nowhere else.
     const nimTask = (run(dir, 'node harness/task.mjs add "Nim run" --role builder --priority P1', QUIET).stdout.match(/"id": "(T-\d+)"/) || [])[1];
-    const s = run(dir, `node harness/agent.mjs start --role builder --agent nim-1 --task ${nimTask} --tool nim --model meta/llama-x`, { ...QUIET, ...withBin, NVIDIA_API_KEY: FAKE_KEY, STUDIO_WORKTREES: 'off' });
+    const s = run(dir, `node harness/agent.mjs start --attach --role builder --agent nim-1 --task ${nimTask} --tool nim --model meta/llama-x`, { ...QUIET, ...withBin, NVIDIA_API_KEY: FAKE_KEY, STUDIO_WORKTREES: 'off' });
     const r = recOf('aider', 'nim-1');
     const places = { argv: JSON.stringify(r?.argv || []), stdout: out(s) };
     for (const rel of ['.studio/agents/nim-1.log', '.studio/agents/nim-1.json', '.studio/events.jsonl', '.studio/kickoff/nim-1.md']) { try { places[rel] = fs.readFileSync(path.join(dir, rel), 'utf8'); } catch { places[rel] = ''; } }
@@ -173,14 +173,14 @@ console.log(JSON.stringify({
 
     // Refusals: no key (aider present), no aider (key present). Nothing starts; the message says what to do.
     const noKeyTask = (run(dir, 'node harness/task.mjs add "Nim no key" --role builder --priority P1', QUIET).stdout.match(/"id": "(T-\d+)"/) || [])[1];
-    const k = run(dir, `node harness/agent.mjs start --role builder --agent nim-nokey --task ${noKeyTask} --tool nim --model meta/llama-x`, { ...QUIET, ...withBin, NVIDIA_API_KEY: '', NVIDIA_API_KEY_2: '', STUDIO_WORKTREES: 'off' });
+    const k = run(dir, `node harness/agent.mjs start --attach --role builder --agent nim-nokey --task ${noKeyTask} --tool nim --model meta/llama-x`, { ...QUIET, ...withBin, NVIDIA_API_KEY: '', NVIDIA_API_KEY_2: '', STUDIO_WORKTREES: 'off' });
     const nodeOnly = path.join(tmpRoot, 'bin-2583m-node');
     fs.mkdirSync(nodeOnly, { recursive: true });
     try { fs.symlinkSync(process.execPath, path.join(nodeOnly, process.platform === 'win32' ? 'node.exe' : 'node')); } catch {}
     const pre = probe(dir, `import { toolPreflight } from ${u(dir, 'harness/agent.mjs')};
 console.log(JSON.stringify({ msg: toolPreflight('nim', { PATH: ${JSON.stringify(nodeOnly)}, OPENAI_API_KEY: 'x' }), ok: toolPreflight('nim', { PATH: ${JSON.stringify(bin)}, OPENAI_API_KEY: 'x' }), other: toolPreflight('claude', { PATH: '' }) }));`);
     const noAiderTask = (run(dir, 'node harness/task.mjs add "Nim no aider" --role builder --priority P1', QUIET).stdout.match(/"id": "(T-\d+)"/) || [])[1];
-    const a = run(dir, `node harness/agent.mjs start --role builder --agent nim-noaider --task ${noAiderTask} --tool nim --model meta/llama-x`, { ...QUIET, PATH: `${nodeOnly}${path.delimiter}${process.env.PATH || ''}`, NVIDIA_API_KEY: FAKE_KEY, STUDIO_WORKTREES: 'off' });
+    const a = run(dir, `node harness/agent.mjs start --attach --role builder --agent nim-noaider --task ${noAiderTask} --tool nim --model meta/llama-x`, { ...QUIET, PATH: `${nodeOnly}${path.delimiter}${process.env.PATH || ''}`, NVIDIA_API_KEY: FAKE_KEY, STUDIO_WORKTREES: 'off' });
     const aiderElsewhere = String(process.env.PATH || '').split(path.delimiter).some((d) => fs.existsSync(path.join(d, process.platform === 'win32' ? 'aider.exe' : 'aider')));
     report('M4: without NVIDIA_API_KEY a nim start is refused with "NVIDIA_API_KEY is not set" and aider never runs; without aider on PATH it says "install aider (pip install aider-chat) — needs the owner\'s OK" (no crash, no stack trace)',
       k.status !== 0 && /NVIDIA_API_KEY is not set/.test(out(k)) && !recOf('aider', 'nim-nokey') && /install aider \(pip install aider-chat\) — needs the owner's OK/.test(pre.msg || '') && pre.ok === null && pre.other === null

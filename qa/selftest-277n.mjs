@@ -81,7 +81,7 @@ export async function selftest277N({ dir, run, report, tmpRoot, root }) {
   const node = (S, env, args, timeout = 120000) => spawnSync(process.execPath, args, { windowsHide: true, cwd: S, encoding: 'utf8', env: childEnv(env), timeout });
   const json = (r) => { try { return JSON.parse(String(r.stdout || '').trim()); } catch { return null; } };
   const readRec = (S, agent) => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'agents', `${agent}.json`), 'utf8')); } catch { return null; } };
-  const startFg = (S, env, args, timeout = 120000) => node(S, env, ['harness/agent.mjs', 'start', ...args], timeout);
+  const startFg = (S, env, args, timeout = 120000) => node(S, env, ['harness/agent.mjs', 'start', '--attach', ...args], timeout);
   const addTask = (S, env, title) => (out(node(S, env, ['harness/task.mjs', 'add', title, '--role', 'builder', '--priority', 'P1'])).match(/"id": "(T-\d+)"/) || [])[1];
   const fwd = (p) => p.replace(/\\/g, '/');
   const cmdLine = (...args) => `node ${args.map((a) => JSON.stringify(fwd(String(a)))).join(' ')}`;
@@ -160,7 +160,7 @@ const busy = Array.from({ length: 52 }, (_, i) => ev(i, { type: 'agent.session.s
 const failing = [];
 for (let i = 0; i < 4; i++) { const a = 'f' + i, t = 'T-9' + i; failing.push(ev(i * 10, { type: 'agent.session.start', agent: a, task: t, model: 'gemini-3.8-flash-high' }), ev(i * 10 + 1, { type: 'task.paused', agent: a, task: t, msg: 'Handed back ' + t + ': tests still red' }), ev(i * 10 + 2, { type: 'agent.session.end', agent: a, task: t, model: 'gemini-3.8-flash-high', meta: {} })); }
 failing.push(ev(50, { type: 'agent.session.start', agent: 'f9', task: 'T-99', model: 'gemini-3.8-flash-high' }), ev(51, { type: 'agent.session.end', agent: 'f9', task: 'T-99', model: 'gemini-3.8-flash-high', meta: {} }), ev(52, { type: 'task.done', agent: 'f9', task: 'T-99' }));
-const prot = [ev(1, { type: 'agent.session.start', agent: 'p1', task: 'T-80', model: 'gemini-4-argon-high' }), ev(2, { type: 'task.paused', agent: 'p1', task: 'T-80', msg: 'Handed back T-80: it needs a protected file changed (studio/gates.json); only the owner approves it' }), ev(3, { type: 'agent.session.end', agent: 'p1', task: 'T-80', model: 'gemini-4-argon-high', meta: {} })];
+const prot = [ev(1, { type: 'agent.session.start', agent: 'p1', task: 'T-80', model: 'gemini-4-argon-high' }), ev(2, { type: 'task.paused', agent: 'p1', task: 'T-80', msg: 'Handed back T-80: it needs a protected file changed (studio/gates.json); only the owner approves it', meta: { ownerStep: 'protected-file' } }), ev(3, { type: 'agent.session.end', agent: 'p1', task: 'T-80', model: 'gemini-4-argon-high', meta: {} })];
 const res = {
   small: pick({ size: 'small' }).pool, normal: pick({ size: 'normal' }).pool, hard: pick({ size: 'hard' }).pool, cb: pick({ size: 'small', chainBreaker: true }).pool,
   gemFail: pick({ size: 'normal', failed: 1, lastFailedPool: 'gemini-argon' }).pool, twice: pick({ size: 'normal', failed: 2, lastFailedPool: 'claude-sonnet' }).pool,
@@ -219,7 +219,7 @@ console.log(JSON.stringify({ routes: s.routes, models: s.models, starts: starts.
     { type: 'task.added', agent: 'producer', task: 'T-005', msg: 'q', meta: { size: 3 } },
     { type: 'agent.session.start', agent: 'builder-agy5', task: 'T-005', model: 'gemini-4-argon-high', msg: 's', meta: { role: 'builder', tool: 'agy' } },
     { type: 'task.start', agent: 'builder-agy5', task: 'T-005', model: 'gemini-4-argon-high', msg: 'start' },
-    { type: 'task.paused', agent: 'builder-agy5', task: 'T-005', msg: 'Handed back T-005: all gates green except the protected step: it changes a protected file (studio/gates.json); only the owner approves it' },
+    { type: 'task.paused', agent: 'builder-agy5', task: 'T-005', msg: 'Handed back T-005: all gates green except the protected step: it changes a protected file (studio/gates.json); only the owner approves it', meta: { ownerStep: 'protected-file' } }, // 2.79 (d): the hand-back carries the harness's own refusal code; the router no longer reads the note's words
     { type: 'agent.session.end', agent: 'builder-agy5', task: 'T-005', model: 'gemini-4-argon-high', msg: 'e', meta: { role: 'builder', tool: 'agy', reason: 'finished without task done' } },
   ];
   await guard('2.77.0 (n, Priority 8): in beta mode a protected step a Gemini builder handed back is routed to the beta agent (one line.protected_routed event to it, not repeated on the next pass), the task is held from new builders (blocked "protected", supervisorPlan().hold) until an approval names it; without beta mode or a proxy it is reported only (no event, no hold) (fails on 2.76.0: the task was left handed back)', async () => {

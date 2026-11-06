@@ -72,7 +72,7 @@ export async function selftest265P({ dir, run, report, tmpRoot }) {
     { task: B.id, agent: B.agent, dir: B.dir, branch: g(B.dir, ['symbolic-ref', '--short', 'HEAD']).stdout.trim(), head: B.head, at, held: { tier: 'C', why: 'harness code', head: B.head, at } },
   ], null, 2)}\n`);
   const hold = run(dir, `node harness/task.mjs hold ${A.id} --by conductor --why "waits for the chain"`, outside);
-  const lanesJson = () => { const r = run(dir, 'node harness/lanes.mjs --json', env); try { return { r, t: JSON.parse(r.stdout.trim().split('\n').pop()) }; } catch { return { r, t: null }; } };
+  const lanesJson = () => { const r = run(dir, 'node harness/lanes.mjs --json --full', env); try { return { r, t: JSON.parse(r.stdout.trim().split('\n').pop()) }; } catch { return { r, t: null }; } };
 
   await guard('2.65.0 (conductor, lanes): `npm run lanes -- --json` lists every lane copy with its task, ahead/behind main, hook stamps ok, harness stale (main changed scripts/), queued (held for the owner, tier C), the conductor\'s hold, Pin-Moves, merge-tree conflicts with main (lane c) and between queued lanes on the same line (a and b), and an age, in a few seconds (fails on 2.64.0: no harness/lanes.mjs)', () => {
     const t0 = Date.now();
@@ -86,7 +86,7 @@ export async function selftest265P({ dir, run, report, tmpRoot }) {
       && a.conflicts.some((x) => x.with === B.id && x.files.includes('game/demo/shared.txt')) && b.conflicts.some((x) => x.with === A.id)
       && c.conflicts.some((x) => x.with === 'main' && x.files.includes('game/demo/main.txt')) && !a.conflicts.some((x) => x.with === 'main')
       && d.conflicts.length === 0 && !d.queued && a.ageMs >= 0 && ms < 15000;
-    const text = run(dir, 'node harness/lanes.mjs', env);
+    const text = run(dir, 'node harness/lanes.mjs --full', env);
     return [ok && /TASK\s+AGENT\s+BRANCH/.test(text.stdout) && text.stdout.includes(A.id) && /HELD-owner/.test(text.stdout), `lanes ${A.log}${B.log} hold=${out(hold)}\nms=${ms}\n${out(r).slice(-2500)}\n${text.stdout}`];
   });
 

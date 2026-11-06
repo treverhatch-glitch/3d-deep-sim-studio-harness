@@ -222,7 +222,7 @@ console.log(JSON.stringify({
   fs.mkdirSync(path.dirname(lockF), { recursive: true });
   fs.writeFileSync(lockF, JSON.stringify({ pid: process.pid, at: Date.now(), id: 'fake-2653a', by: 'tester' }));
   write(dir, '.studio/train/fake-2653a/status.json', JSON.stringify({ train: 'fake-2653a', at: new Date().toISOString(), step: 'recheck', text: 're-check 3 of about 5: lanes 1-9; green through lane 2 (T-1), red at 9; is the break in lanes 3-5?', lanes: 9, round: 1, eta: { ms: 1500000, text: 'ETA ~25 min (3 re-check(s) x 5 min + 1 verify x 10 min)' } }));
-  const o9 = run(dir, 'node harness/lanes.mjs --no-stamps', env);
+  const o9 = run(dir, 'node harness/lanes.mjs --full --no-stamps', env);
   const o9b = run(dir, 'node harness/status.mjs --brief --peek', env);
   try { fs.rmSync(lockF, { force: true }); } catch {}
   report('2.65.3 (B-43, b, c, d): while a train runs, npm run lanes shows "Train <id> (9 lanes): re-check 3 of about 5 ... is the break in lanes 3-5?; ETA ~25 min" and a note that STUDIO_TRAIN_MAX caps a train of more than 6 lanes; status --brief has a short "Train" line with the ETA (fails on 2.65.2: neither shows the train)',

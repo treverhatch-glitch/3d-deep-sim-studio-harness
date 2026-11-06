@@ -104,7 +104,7 @@ console.log(JSON.stringify({
   // POSIX: the venv's bin/aider; Windows: a .cmd stand-in named by STUDIO_AIDER_CMD (a real venv has Scripts/aider.exe).
   const venvAider = process.platform === 'win32' ? makeAider(path.join(tmpRoot, 'win-aider-2601n', 'aider.cmd')) : makeAider(path.join(repo, '.studio', 'aider-venv', 'bin', 'aider'));
   const viaVenv = process.platform === 'win32' ? { STUDIO_AIDER_CMD: venvAider } : {};
-  const start = (args, env = {}) => run(repo, `node harness/agent.mjs start ${args}`, { ...QUIET, ...noAider, ...viaVenv, NVIDIA_API_KEY: FAKE_KEY, STUDIO_NIM_CHECK: 'off', ...env });
+  const start = (args, env = {}) => run(repo, `node harness/agent.mjs start --attach ${args}`, { ...QUIET, ...noAider, ...viaVenv, NVIDIA_API_KEY: FAKE_KEY, STUDIO_NIM_CHECK: 'off', ...env });
   const logOf = (agent) => { try { return fs.readFileSync(path.join(repo, '.studio', 'agents', `${agent}.log`), 'utf8'); } catch { return ''; } };
   const eventsOf = (agent, type) => { try { return fs.readFileSync(path.join(repo, '.studio', 'events.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.agent === agent && (!type || e.type === type)); } catch { return []; } };
   const leakedFor = (agent, extra = {}) => {

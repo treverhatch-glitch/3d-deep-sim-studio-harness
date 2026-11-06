@@ -42,13 +42,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
+import { OWNER_STEP_PROTECTED } from './owner-only.mjs';
 
 export const MODELS_REL = 'studio/models.json';
 export const ROUTING_DIR = () => path.join(STUDIO_STATE_DIR, 'routing');
 export const OUTCOMES_FILE = () => path.join(ROUTING_DIR(), 'outcomes.json');
 export const AGY_QUOTA_FILE = () => path.join(ROUTING_DIR(), 'agy-quota.json');
 export const SIZE_CLASSES = ['small', 'normal', 'hard'];
-export const PROTECTED_RX = /protected (?:file|step|part|change|approval|gate|config)s?|studio\/protected\.json|only the owner approves|protected-check|owner's signed approval/i;
 const H = 3600000;
 const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const num = (v, d) => { const n = Number(v); return v !== null && v !== undefined && String(v).trim() !== '' && Number.isFinite(n) ? n : d; };
@@ -249,7 +249,7 @@ export function buildOutcomes(events, { cfg, prev = [], sizeOf = () => 'normal',
       sessions.push({ agent: e.agent, start: s.start, end: ts(e), model: e.model || s.model, tool: e.meta?.tool || s.tool, task: String(task), reason: String(e.meta?.reason || ''), handed: (e.meta?.handed || []).map((h) => h?.task).filter(Boolean) });
     } else if (e.type === 'task.done' || e.type === 'lane.merged') { if (e.task) add(landings, String(e.task), ts(e)); }
     else if (e.type === 'task.train.landed') { for (const t of e.meta?.lanes || [e.task]) if (t) add(landings, String(typeof t === 'object' ? t.task : t), ts(e)); }
-    else if (e.type === 'task.paused' && e.task) add(pauses, String(e.task), { at: ts(e), agent: e.agent, msg: String(e.msg || '') });
+    else if (e.type === 'task.paused' && e.task) add(pauses, String(e.task), { at: ts(e), agent: e.agent, msg: String(e.msg || ''), ownerStep: e.meta?.ownerStep || null });
   }
   const byTask = new Map();
   for (const s of sessions) add(byTask, s.task, s);
@@ -263,7 +263,7 @@ export function buildOutcomes(events, { cfg, prev = [], sizeOf = () => 'normal',
       const notCounted = /usage limit|stopped by|paused by|refreshed|budget stop/i.test(s.reason);
       const handed = Boolean(p) || s.handed.includes(task) || next !== Infinity;
       const result = landed ? 'landed' : notCounted ? 'other' : handed ? 'handed' : 'open';
-      const prot = !landed && Boolean(p && PROTECTED_RX.test(p.msg));
+      const prot = !landed && Boolean(p && p.ownerStep === OWNER_STEP_PROTECTED);
       const pool = poolOf(s.model, cfg);
       rows.push({ key: `${s.agent}|${new Date(s.start).toISOString()}`, agent: s.agent, task, model: s.model, tool: s.tool, pool, size: sizeOf(task), start: new Date(s.start).toISOString(), end: new Date(s.end).toISOString(), result, protected: prot, why: landed ? 'its task landed after this session (and before the next on it)' : notCounted ? `not counted (${s.reason.slice(0, 80)})` : p ? `handed back: ${p.msg.replace(/^Handed back \S+: /, '').slice(0, 160)}` : handed ? 'another session took the task over' : 'ended; nothing landed or handed back yet' });
     });

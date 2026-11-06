@@ -66,7 +66,7 @@ export function rehearse({ tasks = 1, env = process.env, log = console.log } = {
     const agent = `builder-rehearsal-${Date.now().toString(36)}-${i + 1}`;
     stats.started++;
     log(`[rehearsal] ${agent} takes ${task.id}: ${task.title}`);
-    const r = spawnSync(process.execPath, ['harness/agent.mjs', 'start', '--role', 'builder', '--agent', agent, '--task', task.id, '--model', 'rehearsal'], {
+    const r = spawnSync(process.execPath, ['harness/agent.mjs', 'start', '--attach', '--role', 'builder', '--agent', agent, '--task', task.id, '--model', 'rehearsal'], {
       windowsHide: true, cwd: REPO_ROOT,
       encoding: 'utf8',
       env: { ...env, STUDIO_REHEARSAL: '1', STUDIO_HEARTBEAT_SEC: env.STUDIO_HEARTBEAT_SEC || '1' },

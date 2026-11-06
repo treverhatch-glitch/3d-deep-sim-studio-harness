@@ -138,7 +138,7 @@ fs.writeFileSync(path.join(${JSON.stringify(rec)}, (e.STUDIO_LOCK_OWNER || 'x') 
 `);
     const recOf = (agent) => { try { return JSON.parse(fs.readFileSync(path.join(rec, `${agent}.json`), 'utf8')); } catch { return null; } };
     const id = (run(dir, 'node harness/task.mjs add "Keymap probe" --role builder --priority P1', QUIET).stdout.match(/"id": "(T-\d+)"/) || [])[1];
-    const s = run(dir, `node harness/agent.mjs start --role builder --agent km-1 --task ${id} --tool claude --model m-1`, { ...QUIET, STUDIO_WORKTREES: 'off', STUDIO_BUILDER_CMD: `node "${fake}" {agent}`, ANTHROPIC_API_KEY: '', ANTHROPIC_API_KEY_LANE: FAKE_LANE_KEY, STUDIO_KEYMAP_BUILDER: 'ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_LANE' });
+    const s = run(dir, `node harness/agent.mjs start --attach --role builder --agent km-1 --task ${id} --tool claude --model m-1`, { ...QUIET, STUDIO_WORKTREES: 'off', STUDIO_BUILDER_CMD: `node "${fake}" {agent}`, ANTHROPIC_API_KEY: '', ANTHROPIC_API_KEY_LANE: FAKE_LANE_KEY, STUDIO_KEYMAP_BUILDER: 'ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_LANE' });
     const r = recOf('km-1');
     const log = readText(path.join(dir, '.studio', 'agents', 'km-1.log'));
     const where = { log, events: readText(path.join(dir, '.studio', 'events.jsonl')), record: readText(path.join(dir, '.studio', 'agents', 'km-1.json')), kickoff: readText(path.join(dir, '.studio', 'kickoff', 'km-1.md')), stdout: out(s) };
@@ -165,7 +165,7 @@ fs.writeFileSync(path.join(${JSON.stringify(rec)}, (e.STUDIO_LOCK_OWNER || 'x') 
     const fake = path.join(tmpRoot, 'fake-agent-259e.cjs');
     const recOf = (agent) => { try { return JSON.parse(fs.readFileSync(path.join(tmpRoot, 'rec-259e', `${agent}.json`), 'utf8')); } catch { return null; } };
     const add = (title, extra = '') => (run(repo, `node harness/task.mjs add "${title}" --role builder --priority P1 ${extra}`, QUIET).stdout.match(/"id": "(T-\d+)"/) || [])[1];
-    const start = (agent, id, lane, env = {}) => run(repo, `node harness/agent.mjs start --role builder --agent ${agent} --task ${id} --lane ${lane} --tool claude --model m-1`, { ...QUIET, STUDIO_BUILDER_CMD: `node "${fake}" {agent}`, ...env });
+    const start = (agent, id, lane, env = {}) => run(repo, `node harness/agent.mjs start --attach --role builder --agent ${agent} --task ${id} --lane ${lane} --tool claude --model m-1`, { ...QUIET, STUDIO_BUILDER_CMD: `node "${fake}" {agent}`, ...env });
     const evs = () => readText(path.join(repo, '.studio', 'events.jsonl')).split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } });
     const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
 

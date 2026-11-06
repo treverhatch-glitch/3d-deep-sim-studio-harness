@@ -55,6 +55,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { OWNER_STEP_PROTECTED } from './owner-only.mjs';
 
 export const LINE_AGENT = 'line-producer';
 export const LINE_DIR = () => path.join(STUDIO_STATE_DIR, 'line');
@@ -561,7 +562,6 @@ export async function protectedApprover({ env = process.env } = {}) {
  * or .proposal, or a beta/proxy approve-protected use, after the hand-back). No approver: reported only.
  */
 export async function protectedRoutes({ tasks, events, now = Date.now(), env = process.env, act = true } = {}) {
-  const { PROTECTED_RX } = await import('./model-pools.mjs');
   const holdMs = Math.max(0, num(env.STUDIO_LINE_PROTECTED_HOLD_MIN, 120)) * 60000;
   const out = [];
   let approver;
@@ -570,7 +570,8 @@ export async function protectedRoutes({ tasks, events, now = Date.now(), env = p
     const mine = events.filter((e) => e.task === t.id || (e.type && /^approval\.|^delegation\.used$/.test(e.type) && String(e.msg || '').includes(t.id)));
     const lastStart = mine.filter((e) => e.type === 'task.start' || e.type === 'agent.session.start').pop();
     const pause = mine.filter((e) => e.type === 'task.paused' && (!lastStart || Date.parse(e.ts) >= Date.parse(lastStart.ts))).pop();
-    if (!pause || !PROTECTED_RX.test(String(pause.msg || ''))) continue;
+    // 2.79 (d): the hand-back's structured field (meta.ownerStep, from the harness's own refusal), not the words of its note.
+    if (!pause || pause.meta?.ownerStep !== OWNER_STEP_PROTECTED) continue;
     const at = Date.parse(pause.ts);
     const approved = mine.some((e) => Date.parse(e.ts) > at && (/^approval\.(protected|proposal)$/.test(e.type) || (e.type === 'delegation.used' && /approve-(protected|proposal)/.test(String(e.meta?.action || '')))));
     if (approved) continue;

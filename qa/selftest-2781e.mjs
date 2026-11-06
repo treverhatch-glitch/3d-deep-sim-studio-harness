@@ -225,8 +225,8 @@ console.log(JSON.stringify({ first, second, endedBy: flag?.endedBy || null, same
     fs.mkdirSync(path.join(S, '.lanes', 'builder-agyf9'), { recursive: true });
     writeIn(S, '.lanes/builder-agyf9/left.txt', 'the stopped session\'s copy\n');
     const E = { ...env, STUDIO_BUILDER_CMD: `"${process.execPath}" -e "process.exit(0)"`, STUDIO_LANELESS: '' };
-    const plain = node(S, ['harness/agent.mjs', 'start', '--role', 'builder', '--agent', 'builder-agyf9', '--tool', 'claude', '--model', 'm'], E);
-    const auto = node(S, ['harness/agent.mjs', 'start', '--role', 'builder', '--agent', 'builder-agyf9', '--tool', 'claude', '--model', 'm', '--auto-name'], E);
+    const plain = node(S, ['harness/agent.mjs', 'start', '--attach', '--role', 'builder', '--agent', 'builder-agyf9', '--tool', 'claude', '--model', 'm'], E);
+    const auto = node(S, ['harness/agent.mjs', 'start', '--attach', '--role', 'builder', '--agent', 'builder-agyf9', '--tool', 'claude', '--model', 'm', '--auto-name'], E);
     const evs = textIn(S, '.studio/events-2781e.jsonl');
     await guard('2.78.1 (e, names): `agent start --agent builder-agyf9` while .lanes/builder-agyf9 is still in use is refused up front with a fresh name to use (builder-agyf10, from PU-63\'s nextAgentName); with --auto-name the session starts under that name (agent.renamed logged) (fails on 2.78.0: no suggestion, and --auto-name was ignored)', () => [
       plain.status !== 0 && /still in use/.test(out(plain)) && /--agent builder-agyf10/.test(out(plain)) && auto.status === 0 && /"type":"agent\.renamed"/.test(evs) && /builder-agyf9 → builder-agyf1\d/.test(evs) && /builder-agyf1\d started/.test(evs),

@@ -31,7 +31,7 @@ import { recordTrust } from './gate-trust.mjs';
 import { isEngineChurn, engineGates, relatedTestsOn } from './game-gates.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
 import { checkBreaker, isFailureNote, reasonKey, unblockTask } from './breaker.mjs';
-import { parkIfOwnerOnly } from './owner-only.mjs';
+import { parkIfOwnerOnly, ownerStepOfChecks, ownerStepForHandBack } from './owner-only.mjs';
 import { canaryEnd, isCanary, recordCanary, modelFor } from './canary.mjs';
 import { claimActive, claimOwner } from './busy.mjs';
 import { startSummary, carryForward } from './carry.mjs';
@@ -787,7 +787,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       if (/^(off|0|false|no)$/i.test(String(process.env[name] || ''))) emitEvent({ type: 'safety.off', agent: agent || target.role, task: target.id, msg: `${target.id} closed with the ${id} check off (${name}=off)` });
     }
     if (failed.length) {
-      emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: the ${failed.map((f) => f.id).join(' and ')} check failed` });
+      // 2.79 (d): the refusal's own code (meta.ownerStep) is what a later hand-back is routed on, never the words of its note.
+      { const ownerStep = ownerStepOfChecks(failed.map((f) => f.id)); emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: the ${failed.map((f) => f.id).join(' and ')} check failed`, meta: { refusal: failed.map((f) => f.id), ...(ownerStep ? { ownerStep } : {}) } }); }
       const how = Object.fromEntries(SAFETY.map(([id, , , h]) => [id, h]));
       return { error: 'safety', failed, message: `${target.id} is not done: ${failed.map((f) => `the ${f.id} check fails (node ${f.rel}):\n${f.why.split('\n').map((l) => `  ${l}`).join('\n')}\n  Fix: ${how[f.id]}.`).join('\n')}\nThese run at every task done, forced or not.` };
     }
@@ -813,7 +814,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       const dirty0 = st0.status === 0 ? String(st0.stdout || '').split('\0').filter((x) => x.length > 3).map((x) => x.slice(3)) : ['?'];
       const claimed0 = (lock.locked ? lock.lock.owner : agent) ? listLocks().filter((l) => l.owner === (lock.locked ? lock.lock.owner : agent) && l.key.startsWith('path:')).map((l) => l.key.slice(5)) : [];
       const own = (() => { try { return taskChanges(target.id, startedAt(target.id)).files; } catch { return ['?']; } })();
-      const r0 = skipGameChecks(check.type, [...(ld0?.changed || []), ...dirty0, ...claimed0, ...own]);
+      const r0 = skipGameChecks(check.type, [...(ld0?.changed || []), ...dirty0, ...claimed0, ...own], process.env, { role: target.role, ownerTyped: Boolean(typeOf(target).owner) });
       return r0.skip ? r0 : null;
     } catch { return null; }
   })();
@@ -1254,7 +1255,7 @@ export function sameClaim(lock, expect) {
  * repo), it used to hand back a task an agent had just re-claimed, releasing that fresh claim, and a third agent
  * then started the same task.
  */
-export function pauseTask(taskId, agent = null, note = '', { force = false, expect, cause } = {}) {
+export function pauseTask(taskId, agent = null, note = '', { force = false, expect, cause, ownerStep } = {}) {
   let lock = lockStatus(`task:${taskId}`);
   // Anyone may hand back a task whose holder's session has ended (test #2: dead agents' tasks sat
   // claimed for up to an hour, and the Producer had to wait for the claim to expire).
@@ -1311,7 +1312,10 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
   const head = fs.existsSync(file) ? '' : `# Handoff notes for ${target.id}: ${target.title}\n\nNewest last. Read these before you pick the task up.\n`;
   fs.appendFileSync(file, `${head}\n${heading}\n${facts ? `${facts}\n` : ''}${note || 'No note left.'}\n`);
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Paused ${target.id}: ${note || 'handed back'}`);
-  emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}`, meta: { ...(isFailureNote(note) ? { reasonKey: reasonKey(note) } : {}), ...(cause ? { cause } : {}) } });
+  // 2.79 (d): the owner step this hand-back waits on, from the harness's own refusal (not from the note's words).
+  let ownerStepNow = ownerStep || null;
+  if (!ownerStepNow && !cause) { try { ownerStepNow = ownerStepForHandBack(target.id, readRecentEvents(20000)); } catch { /* a hint, never a blocker */ } }
+  emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}`, meta: { ...(isFailureNote(note) ? { reasonKey: reasonKey(note) } : {}), ...(cause ? { cause } : {}), ...(ownerStepNow ? { ownerStep: ownerStepNow } : {}) } });
   // PU-58: a canary task handed back for a failure (the impossible exit records its own outcome).
   if (!cause && isFailureNote(note)) { try { canaryEnd(target.id, 'handed-back', { agent: who }); } catch { /* a record, never a blocker */ } }
   // 2.30c (#8): a second hand-back for the same reason parks the task with a card; other lanes go on.
