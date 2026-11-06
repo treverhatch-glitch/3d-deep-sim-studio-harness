@@ -13,7 +13,8 @@
  *   node harness/verdict-split.mjs set <TASK> <part> pass|fail [--why "..."] [--evidence "a|b"]
  *   node harness/verdict-split.mjs show <TASK> [--json]
  *   node harness/verdict-split.mjs gate <TASK> [--title "..."]   exit 1 when the task can't finish
- * STUDIO_VISUAL_GATE=off turns the render-task requirement off.
+ * STUDIO_VISUAL_GATE=off turns the render-task requirement off; unset, it is off by itself when the game has no capture command
+ * (2.79.1, visualGate in harness/visual-capture.mjs); =on keeps it.
  *
  * 2.60.1 (B-38): what makes a task a render task, in order (renderDecision):
  *   1. the owner's visual-proof decision (npm run task -- visual <ID> off|on, harness/reclassify.mjs), when valid;
@@ -32,7 +33,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
-import { captureHint } from './visual-capture.mjs';
+import { captureHint, visualGate } from './visual-capture.mjs';
 import { ownerType, ownerVisual, ownerVisualWords } from './reclassify.mjs';
 import { taskChanges, startedAt } from './done-check.mjs';
 import { activeGame } from './cartridge.mjs';
@@ -152,7 +153,7 @@ export function summarize(task, t = {}, v = readVerdict(task)) {
   const render = d.render;
   const blocks = [];
   if (failed.length) blocks.push(`failed: ${failed.map((p) => `${p}${v.parts[p].why ? ` (${v.parts[p].why.slice(0, 160)})` : ''}`).join(', ')}`);
-  if (render && process.env.STUDIO_VISUAL_GATE !== 'off' && v.parts.visual?.ok !== true) blocks.push(v.parts.visual ? 'the visual result failed' : `a render task needs a visual result: ${captureHint(task, t)}`);
+  if (render && visualGate(t).on && v.parts.visual?.ok !== true) blocks.push(v.parts.visual ? 'the visual result failed' : `a render task needs a visual result: ${captureHint(task, t)}`);
   return { task, render, renderWhy: d.why, renderBy: d.by, ...(d.warn ? { warn: d.warn } : {}), ...(d.ignored ? { ignored: d.ignored } : {}), passed, failed, unchecked, ok: blocks.length === 0, why: blocks.join('; ') };
 }
 

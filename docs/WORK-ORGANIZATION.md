@@ -220,7 +220,6 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   Event `task.train.landed_over_noncode` (the commits, the files, the merge); the `landed` event says so too. Any
   doubt (a file some check reads, a conflict, a different tree, a red secrets scan, more than
   `STUDIO_TRAIN_LAND_OVER_NONCODE_MAX` (200) commits): built and verified again, as before.
-  `STUDIO_TRAIN_LAND_OVER_NONCODE=off` turns it off (2.78.1).
 - Conflict prediction at queue time (2.65.0, B-34, `harness/train-predict.mjs`): `task done <ID> --train` runs
   `git merge-tree --write-tree --name-only` (no index, no files touched) of the lane against main and against main +
   each lane already queued. A conflict with main refuses the queue, naming file:line ("merge main into the lane",
@@ -601,7 +600,7 @@ each verify against a main that is about to move, so the trains are pipelined in
   `.studio/` is its own (not the link) is searched too.
 - **Prechecked lanes first.** In a multi-lane train, a lane whose own tree on main's tip (merge-tree of tip and its head)
   has a green recorded verify goes first (`prechecked first: ...` in the log; the rest keep their order, `--after`
-  order still wins). `STUDIO_TRAIN_GREEN_FIRST=off` keeps queue order.
+  order still wins).
 - **Related tests first on the combined tree.** Before the full verify of a multi-lane train, each lane's related tests
   (the game's `related` command on the lane's own changed files, the same machinery as `STUDIO_GATE_RELATED`, with
   `STUDIO_GATE_RELATED_ONLY=on` so checks without one don't run) run on the combined tree in the scratch copy. A lane
@@ -791,4 +790,4 @@ nothing: no task is started, held or blocked by it.
   `studio/reviews/`, `studio/handoffs/` and `studio/notes/` (agent-written).
 - **Non-code tasks skip the game suite at done.** A direction, review, docs, idea, research or study task whose changed
   files are all Markdown or under `studio/`, `docs/` or `.studio/` doesn't run the game's own checks at `task done`;
-  the board and docs checks still do. `STUDIO_DONE_SKIP_GAME_NONCODE=off`: run them.
+  the board and docs checks still do.

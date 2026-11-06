@@ -26,7 +26,7 @@ play:
 
 A lever in every War Room view (and `npm run mode -- boost on|off --by <name> [--hours 4]`). On top
 of any pace: twice the agents (up to 12), agents start automatically, the Director checks in about
-four times as often and the Producer every hour. Going faster without the leads looking more often is
+four times as often and the Producer every hour. `--until <HH:MM UTC|ISO>` ends it at a time and `--until off` keeps it until turned off; when it runs out the studio says so once (a Studio Status line and `mode.boost_expired`, with the agent target it fell back to). Going faster without the leads looking more often is
 how studios drift; the lever does both. Agents start on their own only with auto-start on (below).
 
 ## Auto-start (off by default)

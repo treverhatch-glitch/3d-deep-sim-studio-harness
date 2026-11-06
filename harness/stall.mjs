@@ -312,9 +312,8 @@ export function stallEndOf(agent, startedAt) {
  *                     carries commits tagged Studio-Task: <that task>): its own work now depends on unlanded work
  * STUDIO_DRIFT=off turns them off. State: .studio/drift/<agent>.json.
  */
-export const DRIFT_SIGNALS = ['gate-loop', 'verify-no-diff', 'out-of-scope', 'no-heartbeat', 'borrowed-commits'];
 // Files the harness writes for any task (the board, hand-offs, notes), and regression replays: never "out of scope".
-export const DRIFT_SCOPE_ALWAYS = ['studio/NEXT.md', 'studio/DONE.md', 'studio/CURRENT_TASK.md', 'studio/handoffs', 'studio/notes', 'studio/daily', 'studio/logs', 'studio/producer', 'qa/regressions'];
+const DRIFT_SCOPE_ALWAYS = ['studio/NEXT.md', 'studio/DONE.md', 'studio/CURRENT_TASK.md', 'studio/handoffs', 'studio/notes', 'studio/daily', 'studio/logs', 'studio/producer', 'qa/regressions'];
 const DRIFT_DIR = path.join(STUDIO_STATE_DIR, 'drift');
 const driftFile = (agent) => path.join(DRIFT_DIR, `${String(agent).replace(/[^\w.-]/g, '_')}.json`);
 export function readDrift(agent) {

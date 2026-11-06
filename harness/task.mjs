@@ -15,6 +15,7 @@ import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, task
 import { splitEolOnly, eolNote } from './eol-only.mjs';
 import { isGameCode } from '../scripts/check-function-size.mjs';
 import { summarize as summarizeVerdict, renderDecision } from './verdict-split.mjs';
+import { visualGate } from './visual-capture.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
@@ -24,7 +25,9 @@ import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
 import { laneConfigWarning } from './lane-studio.mjs';
 import { overlapCheck } from './task-overlap.mjs';
-import { engineTask as engineTaskOf, engineRepo, engineTarget, engineOfTrack, engineTrainVerdict as engineTrainVerdictOf, readTrack } from './engine-tracks.mjs';
+import { engineTask as engineTaskOf, engineRepo, engineTarget, engineOfTrack, engineTrainVerdict as engineTrainVerdictOf, readTrack, defaultEngineTrack } from './engine-tracks.mjs';
+import { misplacedTrailers, misplacedTrailerText } from './trailers.mjs';
+import { inferLaneFromText } from './lane-infer.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, carryTaskBranchEx, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf } from './worktree.mjs';
 import { laneConfigBefore } from './config-proposal.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
@@ -601,6 +604,21 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     if (idx !== -1) [target] = q.backlog.splice(idx, 1);
   }
   if (!target) return null;
+  // 2.79.1: a "Golden-Reason:" line git doesn't read as a trailer (right under the subject, mid-body) is refused here,
+  // before the train hands the lane back for "no Golden-Reason trailer" (harness/trailers.mjs; the train uses it too).
+  if (!force) {
+    try {
+      const lane = inLaneCopy();
+      const start = lane ? mainBranchOf(mainRoot()) : taskBase(target.id);
+      const found = start ? misplacedTrailers(REPO_ROOT, start, 'HEAD', 'Golden-Reason') : [];
+      if (found.length) {
+        const why = misplacedTrailerText(found, 'Golden-Reason');
+        emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${why}`.slice(0, 600) });
+        return { error: 'trailer-misplaced', message: `${target.id} is not done: ${why}` };
+      }
+    } catch { /* a check that can't run never blocks */ }
+  }
+
   // 2.77.0 (u): an engine pass whose work lives in the engine's own repo: the studio-repo checks (no code changed, the
   // game's checks) don't judge it; its done check looks at its branch there and its engine's land run is its verify.
   const extEngine = (() => { try { const r = engineTaskOf(target.id); return r && engineRepo(r.engine) ? r : null; } catch { return null; } })();
@@ -644,8 +662,11 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
 
   // 2.30o: a render task (Godot, graphics, scene ...) needs a passing visual result (before/after captures from
   // fixed cameras, not blank, not near-identical): harness/verdict-split.mjs + harness/visual-proof.mjs.
-  if (!force && process.env.STUDIO_VISUAL_GATE !== 'off') {
-    const track = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta?.track;
+  const vTrack = !force && process.env.STUDIO_VISUAL_GATE !== 'off' ? readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta?.track : null;
+  const vGate = !force && process.env.STUDIO_VISUAL_GATE !== 'off' ? visualGate({ ...target, track: vTrack }) : { on: false, note: '' };
+  if (vGate.note) console.warn(`[done] ${vGate.note}`); // 2.79.1 (d): no capture command here: the gate is off by itself, said once
+  if (vGate.on) {
+    const track = vTrack;
     const vs = summarizeVerdict(target.id, { ...target, track });
     // 2.60.1 (B-38): why it is (not) a render task, and the evidence warning for a non-render title.
     if (vs.renderBy === 'owner' || (vs.renderBy === 'evidence' && vs.renderWhy)) {
@@ -819,7 +840,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       return r0.skip ? r0 : null;
     } catch { return null; }
   })();
-  if (noGame) console.log(`[task done] the game's checks are not run: ${noGame.why} (STUDIO_DONE_SKIP_GAME_NONCODE=off runs them)`);
+  if (noGame) console.log(`[task done] the game's checks are not run: ${noGame.why}`);
   if (!force && !extEngine && !noGame && process.env.STUDIO_DONE_GAME_GATES !== 'skip') {
     const owner = lock.locked ? lock.lock.owner : agent;
     const claimed = owner ? listLocks().filter((l) => l.owner === owner && l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean) : [];
@@ -2041,6 +2062,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const pre = completeTask(targetId, '', whoAmI(flags), { checkOnly: true, noop: typeof flags['no-op'] === 'string' ? flags['no-op'] : '' });
       if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
       console.log(pre.error ? pre.message : pre.message);
+      // 2.79.1 (3.2): the Line Producer reads this as "a land may be near" for an engine pass (harness/engine-ram.mjs).
+      if (!pre.error) { try { emitEvent({ type: 'task.done_check', agent: whoAmI(flags), task: targetId, msg: `${targetId}: done --check passed` }); } catch {} }
       process.exit(pre.error ? 1 : 0);
     }
     const noopFlag = typeof flags['no-op'] === 'string' ? flags['no-op'] : '';
@@ -2553,9 +2576,22 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error('Only the Producer, Director, planner or a person adds a canary task: --agent <name>.');
       process.exit(1);
     }
+    // 2.79.1: an engine-porter task with no --track gets the studio's only engine (else it is refused with the list): without
+    // a track it got a game lane (T-350). A builder task naming files that exist gets their folder as its lane, said out loud.
+    const roleFlag = flags.role || 'builder';
+    if (roleFlag === 'engine-porter' && typeof flags.track !== 'string') {
+      const dt = defaultEngineTrack(mainRoot());
+      if (dt.error) { console.error(`Not queued. ${dt.error}.`); process.exit(1); }
+      if (dt.track) flags.track = dt.track;
+      if (dt.track) console.log(`--track not given: an engine-porter task goes on ${dt.track}, the studio's only engine.`);
+    }
+    if (roleFlag === 'builder' && typeof flags.lane !== 'string' && typeof flags.paths !== 'string' && !(typeof flags.scope === 'string' && scopePaths(flags.scope).length)) {
+      const inf = inferLaneFromText([title, flags.description, flags.desc, flags.why].filter((x) => typeof x === 'string').join(' '), mainRoot());
+      if (inf) { flags.lane = inf.lane; console.log(`--lane not given: inferred ${inf.lane} from ${inf.from.join(', ')} named in the title (change it: task lane <ID> <folder>).`); }
+    }
     const created = addTask({
       title: `${prefix}${title}`,
-      role: flags.role || 'builder',
+      role: roleFlag,
       priority: flags.priority || 'P1',
       agent: typeof flags.agent === 'string' ? flags.agent : actor(),
       ...(startFor ? { startFor, model: typeof flags.model === 'string' ? flags.model : null } : {}),

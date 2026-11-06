@@ -34,7 +34,6 @@ import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { impossibleExit } from './busy.mjs';
 
-export const FAILURE_LABELS = ['repetition', 'premature-stop', 'no-stop', 'verify-missing', 'verify-wrong', 'spec-ignored', 'env-harness', 'quota', 'lane-conflict', 'unknown'];
 const ts = (e) => Date.parse(e?.ts) || 0;
 const min = (ms) => Math.round((ms / 60000) * 10) / 10;
 const family = (model) => {
@@ -219,8 +218,12 @@ export function attemptRows(events = readRecentEvents(200000), { now = Date.now(
     const heartbeats = own.some((e) => e.type === 'agent.heartbeat');
     let stalled = 0;
     if (heartbeats) {
+      // 2.79.1 (d): the launcher writes the heartbeat event every STUDIO_HEARTBEAT_EVENT_MIN (10) minutes now, and says so in
+      // meta.everyMin; a gap is a stall when it is over 2.5 beats (5 min at the old 2-minute beat, 25 at the 10-minute one).
+      const every = own.reduce((m, e) => (e.type === 'agent.heartbeat' ? Math.max(m, Number(e.meta?.everyMin) || 2) : m), 2);
+      const gap = Math.max(5, every * 2.5) * 60000;
       const beats = own.map(ts).concat([a.start, a.end]).sort((x, y) => x - y);
-      for (let i = 1; i < beats.length; i++) if (beats[i] - beats[i - 1] > 5 * 60000) stalled += beats[i] - beats[i - 1];
+      for (let i = 1; i < beats.length; i++) if (beats[i] - beats[i - 1] > gap) stalled += beats[i] - beats[i - 1];
     }
     for (const e of inWin.filter((x) => x.type === 'session.stall' && (x.meta?.target === a.agent))) {
       const m = String(e.msg || '').match(/for (\d+) min/);

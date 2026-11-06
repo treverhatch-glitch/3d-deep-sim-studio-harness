@@ -5002,6 +5002,52 @@ if (inShard('selftest-279c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.79.1 (d): a small trim of the event volume: hourly summaries or counters for futility.shadow and skill.follow, lock.kept /
+// director.flow / task.overlap on change, agy follow-ups counted in the session end, the heartbeat event every 10 min, a tester
+// run for the playtest row, the visual gate off without a capture command.
+if (inShard('selftest-2791d')) {
+  const dir = copyRepo();
+  const { selftest2791D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2791d.mjs')).href);
+  await selftest2791D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.79.1 (b): the Line Producer never freezes the line behind one blocked task, plans room for engine lands (a bounded,
+// one-at-a-time hold, a floor learned from green runs), and a MAX SPEED boost says when it ends.
+if (inShard('selftest-2791b')) {
+  const dir = copyRepo();
+  const { selftest2791B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2791b.mjs')).href);
+  await selftest2791B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.79.1 (e): the cut: nine old switches removed (a .env that still sets one is flagged unknown, and setting one changes
+// nothing), and the dead exports of the 2.79 audit.
+if (inShard('selftest-2791e')) {
+  const dir = copyRepo();
+  const { selftest2791E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2791e.mjs')).href);
+  await selftest2791E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.79.1 (c): the crew's findings on 2.79.0: the size rule's KB cap, Golden-Reason placement, the divergence's temp folder,
+// studio:status after a restart, engine porters (target merge, git commit), task add defaults, the janitor.
+if (inShard('selftest-2791c')) {
+  const dir = copyRepo();
+  const { selftest2791C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2791c.mjs')).href);
+  await selftest2791C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.79.1 (a): Vertex AI as a built-in builder tool (the studio's proxy holds the key; usage per session and task), spend
+// budgets per tool or key (measured always, cut at a budget someone allowed set), router providers, owner-defined tools.
+if (inShard('selftest-2791a')) {
+  const dir = copyRepo();
+  const { selftest2791A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2791a.mjs')).href);
+  await selftest2791A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

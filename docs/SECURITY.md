@@ -65,7 +65,7 @@
   `npm run task -- lane <ID> <folder> --wide "<why>" --by <name>` (not an agent's name, not from a launched session).
 - (2.58.5) In a lane copy (`.lanes/<name>`) another agent's path lock is a note at commit, not a refusal: that agent
   edits its own copy, and overlapping edits are caught when the lane lands (task done rebases and stops on a
-  conflict). A lock in the lane's own name still refuses; `STUDIO_LANE_LOCKS=block` restores the old refusal. The main
+  conflict). A lock in the lane's own name still refuses. The main
   checkout is judged as before. A merge commit is judged only on the files it doesn't take unchanged from the branch
   merged in (its own diff and resolved conflicts), so `git merge main` isn't refused for what main brought.
 - (2.77.3, M4) A note folder (`STUDIO_LOCK_NOTE_DIRS`, default `studio/reviews`; `off` for none) holds one file per

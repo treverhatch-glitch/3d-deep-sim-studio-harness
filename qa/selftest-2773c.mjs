@@ -179,7 +179,7 @@ console.log(JSON.stringify({
   // ---- C1 / B-99: end to end with the stand-in agy on PATH ----
   {
     const { S, ev, env } = studio('c1-e2e');
-    const s1 = startFg(S, env, ['--role', 'builder', '--agent', 'builder-agyc1', '--tool', 'agy', ...model]);
+    const s1 = startFg(S, { ...env, STUDIO_TELEMETRY: 'full' /* 2.79.1 (d): agy follow-ups are counted in the session end by default; this check reads each event */ }, ['--role', 'builder', '--agent', 'builder-agyc1', '--tool', 'agy', ...model]);
     const r1 = rec('builder-agyc1');
     const log1 = logOf(S, 'builder-agyc1');
     const cont = events(ev).filter((e) => e.type === 'agent.agy_continue' && e.agent === 'builder-agyc1');

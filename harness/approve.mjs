@@ -69,6 +69,8 @@ export const DEFAULT_PROTECTED = [
   'studio/policy.json',
   // 2.73.0 (f): the outside overseer's stage (harness/overseer.mjs): an agent can't raise its own stage.
   'studio/overseer.json',
+  // 2.79.1 (a): the owner's tools (harness/tool-registry.mjs): what the harness launches, with which keys; owner-only.
+  'studio/tools.json',
   // 2.71.1 (A01b/A01d/A03): the gate runners and what they load, so a lane can't neuter the check that judges it
   // (harness/gate-trust.mjs and harness/test-toolchain.mjs decide what the gates trust, so they are here too).
   'scripts/run-gates.mjs', 'harness/gate-spawn.mjs', 'harness/game-gates.mjs', 'harness/silent-green.mjs', 'harness/cartridge.mjs',
@@ -330,7 +332,15 @@ function committedByAgent(rel) {
   if (r.status !== 0 || !line) return null;
   return String(line.split('\t')[1] || '').trim();
 }
+/**
+ * 2.79.1 (a): an approval whose files include an owner-only file (studio/tools.json: defining a tool is the owner's own
+ * act, harness/owner-acts.mjs "tools") counts only with the owner key's signature: never beta mode's or the owner proxy's
+ * record, whoever made it. The act it names, or null.
+ */
+export const OWNER_ONLY_FILES = Object.freeze({ 'studio/tools.json': 'tools' });
+export const ownerOnlyFileIn = (approval) => (approval?.files || []).map((f) => String(f?.path || '').replace(/\\/g, '/')).find((f) => OWNER_ONLY_FILES[f]) || null;
 export function verifyApproval(doc, publicPem) {
+  if (!doc?.signature && ownerOnlyFileIn(doc?.approval)) return false;
   // 2.73.1 (B-67): an approval the owner's proxy made (no signature; the owner-signed proxy grant embedded) counts while
   // that grant is still the one on file and the owner's yes is recorded (harness/owner-proxy.mjs).
   // A committed proxy approval also has to be the proxy's own commit (the commit-msg hook's Studio-Agent trailer: the
@@ -422,6 +432,9 @@ let proxyPermission = '';
  */
 function signOrProxy(approval) {
   if (fs.existsSync(ownerKeyPath())) return { approval, signature: sign(approval) };
+  // 2.79.1 (a): a change to an owner-only file (studio/tools.json) is approved with the owner key only: beta mode's agents,
+  // an outside signer and the owner proxy are refused, with the reason, and nothing is written.
+  { const own = ownerOnlyFileIn(approval); if (own) throw new Error(`${ownerOnlyWhy(ownerOnlyAction(OWNER_ONLY_FILES[own]))}: ${own} changes only with an approval signed by the owner key, on the owner's own device. Nothing was written.`); }
   // 2.76.0: in beta mode (harness/beta-mode.mjs) the owner's stand-ins approve without the key or per-step words; the
   // approval carries studio/beta.json and counts while beta mode is still on with it. Logged like every owner act.
   // 2.79 (c): --by names an outside signer in a shell the harness didn't launch and that names nobody (--by grokbot).

@@ -24,7 +24,17 @@ export const ALLOWED = [
 ];
 /** Claude Code's --allowedTools patterns, one per argument (P-066: the launcher passes each as its own argument, so no
  * shell or quoting can split "Bash(git log *)" at its space). */
-export const allowedToolsList = () => ALLOWED.map(([, p]) => `Bash(${p})`);
+/**
+ * 2.79.1: an engine pass works in a worktree of the engine's repo that is not its working folder, so it runs git there
+ * as `git -C <that folder> …`. Those forms are allowed for that one folder: status, diff, log, add and commit (and
+ * nothing else: no push, no checkout or switch of another branch, no reset).
+ */
+export const engineGitVerbs = ['status', 'diff', 'log', 'add', 'commit'];
+export const engineGitPatterns = (dir) => {
+  const d = String(dir || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  return d ? engineGitVerbs.flatMap((v) => [`git -C ${d} ${v}`, `git -C ${d} ${v} *`]) : [];
+};
+export const allowedToolsList = ({ engineDir = null } = {}) => [...ALLOWED.map(([, p]) => `Bash(${p})`), ...engineGitPatterns(engineDir).map((p) => `Bash(${p})`)];
 /** The same list as one comma-separated value (the printed launch line, for a person's shell). */
 export const allowedTools = () => allowedToolsList().join(',');
 /** The kickoff's paragraph: exactly what runs without a prompt, and what doesn't. */

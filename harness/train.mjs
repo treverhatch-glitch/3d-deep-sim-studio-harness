@@ -117,6 +117,7 @@ import { checkStamped, stampWrite } from './workaround.mjs';
 import { gateEnv } from './gate-env.mjs';
 import { refreshStaleLane } from './train-refresh.mjs';
 import { writeAtomic } from './fsafe.mjs';
+import { misplacedTrailers, misplacedTrailerText } from './trailers.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -662,7 +663,7 @@ function recordedVerifies(root, { tree = null, lanes = [] } = {}) {
  * each with greenTree set when it has one.
  */
 export function greenFirst(root, tip, lanes, { id = '', log = () => {}, whole = null } = {}) {
-  if (lanes.length < 2 || /^(off|0|false|no)$/i.test(process.env.STUDIO_TRAIN_GREEN_FIRST || '')) return lanes;
+  if (lanes.length < 2) return lanes;
   const marked = lanes.map((l) => {
     const m = git(root, 'merge-tree', '--write-tree', tip, l.head);
     const tree = m.status === 0 ? out(m).split('\n')[0].trim() : '';
@@ -2059,7 +2060,7 @@ function sweepScratch(root, log) {
  * Chain lanes whose tail (filed by an earlier train, the chain deferred for it) is open on the board and not in this
  * train: they wait, before anything is spent on them ([{ lane, kind: 'tail', key, why }], as laneWaits).
  */
-export function chainTailWaits(root, lanes, deps = {}) {
+function chainTailWaits(root, lanes, deps = {}) {
   if (!chainTailOn()) return [];
   const recs = readTails(root).filter((r) => r.waiting && r.tail);
   if (!recs.length) return [];
@@ -2431,7 +2432,10 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     const cp = laneProposal(root, { task: lane.task, head: now.head, tip: tip0 });
     if (cp && !cp.ok) { drop(lane, cp.why, { cause: 'conflict' }); continue; }
     if (c.tier === 'C' && !released) { hold({ ...lane, head: now.head, branch: now.branch || lane.branch }, 'C', c.why.join('; '), c.rerecord ? { rerecord: c.rerecord } : {}); continue; }
-    if (c.needs.goldenReason.length) { drop(lane, `it is tier B and moves goldens (${c.needs.goldenReason.slice(0, 3).join(', ')}) with no Golden-Reason trailer on its commits: say why the recorded answers changed (git commit --amend, or a new commit, with -m "Golden-Reason: <why>"), then task done again`); continue; }
+    if (c.needs.goldenReason.length) {
+      const mis = misplacedTrailers(root, tip0, now.head, 'Golden-Reason'); // 2.79.1: the line may be there, but not as a trailer
+      drop(lane, `it is tier B and moves goldens (${c.needs.goldenReason.slice(0, 3).join(', ')}) with no Golden-Reason trailer on its commits: say why the recorded answers changed (git commit --amend, or a new commit, with -m "Golden-Reason: <why>"), then task done again${mis.length ? `. ${misplacedTrailerText(mis, 'Golden-Reason')}` : ''}`); continue;
+    }
     if (c.needs.pinMoves.length) { drop(lane, `it is tier B and changes pinned expectations (${c.needs.pinMoves.slice(0, 3).join(', ')}) with no Pin-Moves trailer on its commits: declare the pins it moves ("Pin-Moves: <pin>"), then task done again`); continue; }
     if (c.tier === 'B' && !released) {
       const n = (deps.handBacks || handBackCount)(lane.task);
@@ -3008,9 +3012,6 @@ function rebuildOverBoardMove(root, sc, { tip, now, built, id, unionFiles }) {
 
 // ---- 2.78.2 (g, item 16): land the verified tree, then main's new non-code commits on top ------------------------
 
-/** STUDIO_TRAIN_LAND_OVER_NONCODE (default on). off: a move of main the board rule can't take verifies again (2.78.1). */
-export const landOverNonCodeOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_TRAIN_LAND_OVER_NONCODE || '').trim());
-
 /**
  * What the game manifests at `rev` say their checks read: [{ glob, by }] from each game|web/<x>/studio.gates.json (the
  * required checks' "paths", the "shared" globs, the manifest itself). A manifest that can't be read: every studio file.
@@ -3167,7 +3168,7 @@ function landTrain(root, sc, main, tip, { built: verified, v }, { id, by, deps, 
         // 2.60.1 (B-29): a board-only commit on main (a task type record, NEXT.md) restarted the whole verify (~9 min).
         const re = rebuildOverBoardMove(root, sc, { tip, now, built: verified, id, unionFiles });
         // 2.78.2 (g, item 16): main's new commits touch only files no check reads: land T, then those commits on top.
-        const lo = re.ok ? null : !landOverNonCodeOn() ? { ok: false, why: 'STUDIO_TRAIN_LAND_OVER_NONCODE=off' } : v?.emptyDiff ? { ok: false, why: 'an empty-diff landing (no verify of its own)' } : landOverNonCode(root, sc, { tip, now, verified, id });
+        const lo = re.ok ? null : v?.emptyDiff ? { ok: false, why: 'an empty-diff landing (no verify of its own)' } : landOverNonCode(root, sc, { tip, now, verified, id });
         if (!re.ok && !lo.ok) { log(`[train] ${id}: ${main} moved (${tip.slice(0, 8)} -> ${now.slice(0, 8)}) and the verify can't stand for it: ${re.why}; nor can the train land over those commits: ${lo.why}`); return 'moved'; }
         if (lo?.ok) {
           built = lo.built;
@@ -3428,11 +3429,6 @@ async function nextBody({ root, log, deps, id, by, after, a0, lock, life }) {
   status('done', `done: ${res.message.slice(0, 300)}`, { lanes: names.length || null });
   ev('done', id, res.message, { agent: by, status: res.landed.length ? 'ok' : 'warn', meta: { ...brief(res), speculative: true, after, base } });
   return res;
-}
-
-/** The lane copy this process runs in, as a train lane: { dir, branch, head } (task done's one-lane train). */
-export function thisLane(dir) {
-  return { dir, branch: out(git(dir, 'symbolic-ref', '--short', 'HEAD')), head: out(git(dir, 'rev-parse', 'HEAD')) };
 }
 
 /** 2.72.0 (b): a lane the train handed back is one red round of its task (harness/round-cap.mjs), signed by its reason. */

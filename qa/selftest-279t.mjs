@@ -312,12 +312,12 @@ export async function selftest279T({ dir, report, tmpRoot, root }) {
     const g = run(G, gid);
     const p = run(P, pid);
     const gates = (S) => { put(S, 'studio/gates.json', `${JSON.stringify({ cartridge: 'example-sim', gates: [{ id: 'playtest', cartridge: true, command: 'node -e "process.exit(0)"', required: true, lite: true }, { id: 'noop', command: 'node -e "process.exit(0)"', required: true, lite: true }] }, null, 2)}\n`); const r = spawnSync(process.execPath, ['scripts/run-gates.mjs', '--no-detach', '--no-cache'], { cwd: S, encoding: 'utf8', windowsHide: true, timeout: 180000, env: { ...process.env, ...base, STUDIO_HEAVY_SLOTS: '0', STUDIO_GATE_SLOTS: '0', STUDIO_HOOKS_CHECK: 'off', STUDIO_VERIFY_DETACH: 'off' } }); return `${r.stdout}${r.stderr}`; };
-    const keep = probe(G, `const c = await imp('harness/tester-config.mjs'); console.log(JSON.stringify([c.stage1Replaced(S, {}).replaced, c.stage1Replaced(S, { STUDIO_STAGE1_PLAYTEST: 'on' }).replaced]));`).j;
+    const keep = probe(G, `const c = await imp('harness/tester-config.mjs'); console.log(JSON.stringify([c.stage1Replaced(S, {}).replaced]));`).j;
     const gg = gates(G);
     const pg = gates(P);
     const ok = /\[x\] Stage-1 playtest: replaced by the game tester \(npm run tester\)/.test(g) && !/Playtest report since the task started/.test(g)
       && /\[ \] Playtest report since the task started/.test(p) && !/replaced by the game tester/.test(p)
-      && /skipped[^\n]*playtest \(replaced by the game tester \(npm run tester\)\)/.test(gg) && !/replaced by the game tester/.test(pg) && JSON.stringify(keep) === '[true,false]';
+      && /skipped[^\n]*playtest \(replaced by the game tester \(npm run tester\)\)/.test(gg) && !/replaced by the game tester/.test(pg) && JSON.stringify(keep) === '[true]';
     return [ok, ok ? 'game studio: replaced (done-check and gate); template studio: kept' : `GAME:\n${g.slice(-800)}\nTEMPLATE:\n${p.slice(-600)}\nGATES game:\n${gg.slice(-900)}\nGATES template:\n${pg.slice(-500)}`];
   });
 

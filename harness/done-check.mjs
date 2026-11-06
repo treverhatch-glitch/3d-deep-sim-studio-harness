@@ -18,7 +18,7 @@
  * config (no game logic: harness/type-evidence.mjs, the sim paths of harness/tiers.mjs and the game's manifest) is
  * judged a "change" task (no regression replay), said as "type: change (evidence: …)" and logged once as a
  * task.type.evidence event (evidenceType). An owner or permission record always outranks the evidence; a change in
- * a sim path keeps "bug" and its replay. STUDIO_TYPE_EVIDENCE=off: the title decides, as before.
+ * a sim path keeps "bug" and its replay.
  * 2.77.0 (u, P5.1/P5.5): an engine pass whose work lives in the engine's own repo (harness/engine-tracks.mjs engineRepo)
  * is judged there (engineWorkChecks): commits on its branch that the engine's target lacks; the engine's land run (the
  * gate or its train) stands for the studio's verify, so the studio-repo rows (changes, verify, size, reach) don't apply.
@@ -48,7 +48,7 @@ import { sizeRuleFor, freeImportLines } from './size-rule.mjs';
 import { contractChecks } from './contracts.mjs';
 import { judgeFiles, manifestSettings, evidenceWords } from './type-evidence.mjs';
 import { activeGame } from './cartridge.mjs';
-import { stage1Replaced } from './tester-config.mjs';
+import { stage1Replaced, studioGameSync } from './tester-config.mjs';
 import { regressionHowTo, regressionMissing } from './regression-howto.mjs';
 import { checkResearch, ensureResearchTemplate } from './research.mjs';
 import { engineTask, engineRepo, engineTarget } from './engine-tracks.mjs';
@@ -62,12 +62,10 @@ export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'ta
  * markers before it are fine): "approve"/"LGTM" approves; "changes requested", "reject" or "blocking" doesn't; anything
  * else doesn't. So a re-review appended to the first one decides, and a "non-blocking note" doesn't count against it.
  * A file with no Verdict line keeps the old rule: it names approve/LGTM and none of changes requested/reject/blocking.
- * STUDIO_REVIEW_VERDICT_LINE=off: always the old rule.
  */
-export const reviewApproves = (text, env = process.env) => {
+export const reviewApproves = (text) => {
   const t = String(text || '').replace(/\r\n/g, '\n');
   const old = () => /\b(approve[sd]?|lgtm)\b/i.test(t) && !/\b(request(ed)? changes|changes requested|reject(ed)?|blocking)\b/i.test(t);
-  if (/^(off|0|false|no)$/i.test(String(env.STUDIO_REVIEW_VERDICT_LINE ?? '').trim())) return old();
   const lines = [...t.matchAll(/^[ \t>*_#-]*verdict[ \t*_]*:[ \t*_]*(.*)$/gim)];
   if (!lines.length) return old();
   const v = lines[lines.length - 1][1];
@@ -86,10 +84,8 @@ export const NO_GAME_CODE_ROLES = ['director', 'reviewer'];
  * code still runs them. The docs and board checks are separate rows and always run. { skip, why }.
  * 2.79 (d): a Director's or reviewer's task (NO_GAME_CODE_ROLES) is judged the same way when its title typed it "bug" or
  * "change" and no owner reclassified it: its files decide.
- * STUDIO_DONE_SKIP_GAME_NONCODE=off: never skip.
  */
 export function skipGameChecks(type, files, env = process.env, { role = null, ownerTyped = false } = {}) {
-  if (/^(off|0|false|no)$/i.test(String(env.STUDIO_DONE_SKIP_GAME_NONCODE ?? '').trim())) return { skip: false, why: 'STUDIO_DONE_SKIP_GAME_NONCODE=off' };
   // 2.79 (d): a Director's or reviewer's task whose title typed it "bug" or "change" (no type set) is still that role's: the
   // rule is its files, as for a typed one. An owner's reclassification (ownerTyped) is taken as said.
   const byRole = !ownerTyped && NO_GAME_CODE_ROLES.includes(String(role || '').toLowerCase());
@@ -231,7 +227,7 @@ export function typeOf(task) {
  * one task.type.evidence event per task and file set (emit: false skips it). ch: taskChanges() when the caller has it.
  */
 export function evidenceType(task, typed = typeOf(task), { since = null, ch = null, emit = true, env = process.env } = {}) {
-  if (/^off$/i.test(String(env.STUDIO_TYPE_EVIDENCE || '')) || !task?.id || typed.owner || typed.type !== 'bug') return null;
+  if (!task?.id || typed.owner || typed.type !== 'bug') return null;
   let changes = ch;
   try { changes ||= taskChanges(task.id, since ?? startedAt(task.id)); } catch { return null; }
   if (!changes?.commits?.length || !changes.files?.length) return null;
@@ -538,6 +534,18 @@ function lastGameChange() {
   for (const d of ['cartridges', 'src']) walkSince(d, 0, out);
   return out.reduce((m, f) => Math.max(m, mtime(f)), 0);
 }
+/**
+ * 2.79.1 (d): a game tester run (qa/reports/tester/<id>/summary.json, harness/tester.mjs) newer than `min` and newer than the
+ * last change to the game (the cartridge, or the studio's own game folder). It satisfies a "playtest of the current build"
+ * row where the template's stage-1 playtest would have: it played the real build, which stage 1 does not. [] when none.
+ */
+function testerRunsSince(min) {
+  const out = [];
+  try { const g = studioGameSync(); if (g?.root) walkSince(g.root, 0, out); } catch { /* no game folder */ }
+  // build output (dist/, build/ ...) is written by the build the tester itself runs: not a change to the game
+  const fresh = Math.max(min, lastGameChange(), out.filter((f) => !/(^|\/)(dist|build|out|coverage|test-results|playwright-report)\//.test(f)).reduce((m, f) => Math.max(m, mtime(f)), 0));
+  return newestSince(filesUnder('qa/reports/tester', (n) => n === 'summary.json', true), fresh).filter((f) => { const j = readJson(f); return j && typeof j === 'object' && !Array.isArray(j); });
+}
 /** The record gatesAfter reads (the agent's own full run, else the studio's). */
 export function lastFullRecord() {
   try {
@@ -646,13 +654,6 @@ export function gatesAfter(at, files = null, taskId = null, ch = null) {
   return `the last verify failed: ${fresh.map((f) => (f.failures?.length ? `${f.id} (new since claim: ${f.failures.slice(0, 3).join('; ')}${f.failures.length > 3 ? ` and ${f.failures.length - 3} more` : ''})` : f.id)).join(', ')}`;
 }
 
-/** 2.54.0 (PU-06): the red checks excused because they were already red when the task was claimed. */
-export function excusedRed(taskId) {
-  const base = taskId ? readBaseline(taskId) : null;
-  const run = lastFullRecord();
-  if (!base || !run?.rows) return [];
-  return judgeRed(run.rows, base).excused;
-}
 const readJson = (rel) => {
   try {
     return JSON.parse(fs.readFileSync(abs(rel), 'utf8'));
@@ -854,9 +855,11 @@ export function checkDone(task, since = startedAt(task.id)) {
   // game tester (harness/tester.mjs) plays the real build on its own schedule. A template studio keeps the stage-1 rows.
   const s1 = stage1Replaced();
   if (type === 'playtest' && s1.replaced) check(`Stage-1 playtest: ${s1.words}`, true, '');
-  else if (type === 'playtest') {
+  else if (type === 'playtest' && testerRunsSince(since).length) {
+    check(`Playtest of the current build: a game tester run (${testerRunsSince(since)[0]}) is newer than the task start and the last game change`, true, '');
+  } else if (type === 'playtest') {
     const reps = newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).map((f) => ({ f, j: readJson(f) })).filter(({ j }) => j?.stage1);
-    check('Playtest report since the task started', reps.length, 'no playtest report in qa/reports/ since this task started (`npm run playtest:stage1`)');
+    check('Playtest report since the task started', reps.length, 'no playtest report in qa/reports/ since this task started (`npm run playtest:stage1`, or a game tester run: `npm run tester`)');
     const good = reps.filter(({ f, j }) => mtime(f) >= fresh && j.stage1.seed != null && j.stage1.ticksRun != null && isSha256(j.stage1.finalSha256) && (j.passed || j.stage1.failingTick != null));
     check('Report covers the current build with seed, ticks and hash (and the failing tick if it failed)', good.length, 'no report on the current build with a seed, ticks, a hash and (if it failed) the failing tick; run the playtest again');
     stage1Warnings(good.length ? good : reps);
@@ -891,8 +894,10 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('Goldens updated with it', ch.files.some((f) => f.startsWith('qa/golden/')), 'no golden changed: the system changes the game, so regenerate (npm run golden -- --update) and commit the goldens with it');
     const fresh2 = lastGameChange();
     const reps = s1.replaced ? [] : newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).filter((f) => mtime(f) >= fresh2);
+    const tr = s1.replaced ? [] : testerRunsSince(since);
     if (s1.replaced) check(`Stage-1 playtest of the current build: ${s1.words}`, true, '');
-    else check('Playtest of the current build', reps.length, 'no playtest report newer than the last game change (npm run playtest:stage1)');
+    else if (tr.length) check(`Playtest of the current build: a game tester run (${tr[0]}) is newer than the task start and the last game change`, true, '');
+    else check('Playtest of the current build', reps.length, 'no playtest report newer than the last game change (npm run playtest:stage1, or a game tester run: npm run tester)');
     if (!s1.replaced) stage1Warnings(reps.map((f) => ({ f, j: readJson(f) })).filter(({ j }) => j?.stage1));
     workAndVerify();
     const implementer = (readRecentEvents(20000).filter((e) => e.type === 'task.start' && e.task === task.id).pop() || {}).model;

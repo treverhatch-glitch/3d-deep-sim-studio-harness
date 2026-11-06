@@ -20,8 +20,13 @@
  *     STUDIO_CACHE_MAX_GB (20); an entry a Unity run holds (a lock under an hour old) is kept.
  *   - 2.79 (d): idle lane copies, in the automatic run and by `npm run lanes -- prune --idle <hours> [--dry-run]`: the
  *     session ended, the task isn't queued, held or parked, nobody works in the copy (no process, claim or recent change),
- *     no uncommitted change, no commit that isn't on main, and untouched for STUDIO_LANE_IDLE_HOURS (12; 0 or off: never).
+ *     no uncommitted change, no commit that isn't on main, and untouched for STUDIO_LANE_IDLE_HOURS (4; 0 or off: never).
  *     Only the worktree goes; the branch is kept.
+ *   - 2.79.1: an engine pass's worktree (.lanes/engine/<task>) once its pass has landed (the engine train's landed event
+ *     names the task), when it is clean and no session is on the task; the branch stays. Orphan temp copies in the system
+ *     temp folder: only folders whose name starts with a prefix the harness makes (studio-build-) or one the studio lists
+ *     in STUDIO_JANITOR_TEMP_PREFIXES (comma list, e.g. a game's own play-copy prefix), older than STUDIO_JANITOR_ORPHAN_H
+ *     (2) hours by their newest file, whose owner process (the marker's pid, else the pid in the name) is gone.
  * What it never deletes: a lane copy with commits not on main, uncommitted changes, a running session or a held or
  * parked task; anything outside the studio except a temp folder carrying this studio's marker. Lanes that are merely
  * stale (older than STUDIO_JANITOR_LANE_H, 24 h, or STUDIO_JANITOR_LANDED_H, 6 h, once their work has landed (2.70.0);
@@ -47,6 +52,8 @@ const num = (v, d) => (v === undefined || v === null || String(v).trim() === '' 
 const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
 export const MARKER = '.studio-temp.json';
+/** 2.79.1: name prefixes of the temp copies the harness itself makes in the system temp folder (builds.mjs snapshotBuild). */
+export const HARNESS_TEMP_PREFIXES = ['studio-build-'];
 const gb = (b) => Math.round((b / 1024 ** 3) * 100) / 100;
 export const human = (b) => (b >= 1024 ** 3 ? `${gb(b)} GB` : b >= 1024 ** 2 ? `${Math.round(b / 1024 ** 2)} MB` : `${Math.round(b / 1024)} KB`);
 
@@ -65,6 +72,8 @@ export function janitorLimits(env = process.env) {
     keepLogs: Math.max(0, Math.round(num(env.STUDIO_JANITOR_KEEP_LOGS, 40))),
     logsBytes: Math.max(0, num(env.STUDIO_JANITOR_LOGS_MB, 200)) * 1024 ** 2,
     cacheBytes: Math.max(0, num(env.STUDIO_CACHE_MAX_GB, 20)) * 1024 ** 3,
+    orphanMs: Math.max(0, num(env.STUDIO_JANITOR_ORPHAN_H, 2)) * H,
+    tempPrefixes: [...HARNESS_TEMP_PREFIXES, ...String(env.STUDIO_JANITOR_TEMP_PREFIXES || '').split(',').map((x) => x.trim()).filter((x) => x.length >= 3)],
     tmpDir: env.STUDIO_JANITOR_TMPDIR ? path.resolve(env.STUDIO_JANITOR_TMPDIR) : os.tmpdir(),
   };
 }
@@ -83,6 +92,17 @@ export function sizeOf(p, maxEntries = 200000) {
   return n;
 }
 const mtime = (p) => { try { return fs.statSync(p).mtimeMs; } catch { return 0; } };
+/** The newest mtime of a folder, its direct children and their children (shallow: a play copy's files). */
+function newestMtime(dir, depth = 2) {
+  let t = mtime(dir);
+  if (depth <= 0) return t;
+  let names = []; try { names = fs.readdirSync(dir, { withFileTypes: true }); } catch { return t; }
+  for (const e of names) {
+    const p = path.join(dir, e.name);
+    t = Math.max(t, e.isDirectory() && !e.isSymbolicLink() ? newestMtime(p, depth - 1) : mtime(p));
+  }
+  return t;
+}
 /** Same folder? Real paths (a temp folder reached through a link, as on macOS), else resolved paths. */
 const samePath = (a, b) => { try { return fs.realpathSync(a) === fs.realpathSync(b); } catch { return path.resolve(String(a)) === path.resolve(String(b)); } };
 const pidAlive = (pid) => { if (!Number(pid)) return false; try { process.kill(Number(pid), 0); return true; } catch (e) { return e.code === 'EPERM'; } };
@@ -160,6 +180,20 @@ export function janitorPlan({ root = studioRoot(), env = process.env, now = Date
     if (pidAlive(m.pid) && m.pid !== process.pid) { kept.push({ path: d, why: `its process ${m.pid} is still running` }); continue; }
     items.push({ kind: 'test-temp', path: d, abs: true, bytes: sizeOf(d), why: `a temp folder the harness made (${m.by || 'harness'}), ${Math.round(age / H)} h old` });
   }
+  // 2.79.1: orphan temp copies (a play or build copy whose run died): the harness's own prefixes and the studio's listed
+  // ones, old by their newest file, and no live owner (the marker's pid, else the pid after the prefix in the name).
+  for (const d of tdirs) {
+    const name = path.basename(d);
+    const pre = lim.tempPrefixes.find((x) => name.startsWith(x));
+    if (!pre || fs.existsSync(path.join(d, MARKER))) continue;
+    let st; try { st = fs.lstatSync(d); } catch { continue; }
+    if (st.isSymbolicLink()) continue;
+    const newest = newestMtime(d);
+    if (now - newest < lim.orphanMs) continue;
+    const pid = Number((name.slice(pre.length).match(/^(\d{2,})(?:[-_.]|$)/) || [])[1]) || 0;
+    if (pid && pid !== process.pid && pidAlive(pid)) { kept.push({ path: d, why: `its process ${pid} is still running` }); continue; }
+    items.push({ kind: 'temp-orphan', path: d, abs: true, bytes: sizeOf(d), why: `an orphan temp copy (${pre}…), untouched for ${Math.round((now - newest) / H)} h, no owner process` });
+  }
   // Caches over the budget, oldest first.
   const entries = [];
   const ucache = path.join(root, '.studio', 'unity-cache');
@@ -221,11 +255,11 @@ export async function laneProposals({ root = studioRoot(), env = process.env, no
   return out;
 }
 
-/** STUDIO_LANE_IDLE_HOURS (default 12) in hours; null when it is 0 or off (the janitor then leaves idle copies alone). */
+/** STUDIO_LANE_IDLE_HOURS (default 4; 12 before 2.79.1: ~25 copies piled up in 4 h) in hours; null when it is 0 or off (the janitor then leaves idle copies alone). */
 export function laneIdleHours(env = process.env) {
   const raw = String(env.STUDIO_LANE_IDLE_HOURS ?? '').trim();
   if (/^(off|no|false)$/i.test(raw)) return null;
-  const n = num(raw, 12);
+  const n = num(raw, 4);
   return n > 0 ? n : null;
 }
 
@@ -254,6 +288,57 @@ export async function pruneIdleLanes({ hours = laneIdleHours(), dryRun = false, 
   return { hours, removed, kept, freed, dryRun };
 }
 
+/** The tasks an engine train has landed: task.train.<engine>.landed events name them in meta.lanes. */
+export function engineLandedTasks(root) {
+  const tasks = new Set();
+  try {
+    const text = fs.readFileSync(getEventPaths().primary, 'utf8');
+    for (const l of text.slice(-8 * 1024 * 1024).split('\n')) {
+      if (!l.includes('.landed"') || !l.includes('task.train.')) continue;
+      try { const e = JSON.parse(l); if (/^task\.train\.[a-z][a-z0-9-]*\.landed$/.test(e.type)) for (const t of e.meta?.lanes || []) tasks.add(String(t)); } catch {}
+    }
+  } catch {}
+  return tasks;
+}
+
+/**
+ * 2.79.1: remove the worktree of an engine pass (.lanes/engine/<task>) once its pass has landed (the engine train's
+ * landed event names the task): it holds a full engine checkout (3 x 3.2 GB piled up on the crew's PC). Kept when it has
+ * uncommitted changes or a session is on the task. Only the worktree goes (git worktree remove, from the engine repo):
+ * the branch stays. { removed: [{ task, path, bytes }], kept: [{ task, path, why }] }.
+ */
+export async function pruneEnginePasses({ root = studioRoot(), dryRun = false, emit = emitEvent, by = 'janitor' } = {}) {
+  const removed = []; const kept = [];
+  const base = path.join(root, '.lanes', 'engine');
+  let names = []; try { names = fs.readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); } catch {}
+  if (!names.length) return { removed, kept };
+  const landed = engineLandedTasks(root);
+  let running = new Set();
+  try { running = new Set((await import('./agent.mjs')).sessions().filter((x) => x.running && x.task).map((x) => x.task)); } catch {}
+  for (const task of names) {
+    const dir = path.join(base, task);
+    const rel = path.relative(root, dir).split(path.sep).join('/');
+    if (!landed.has(task)) { kept.push({ task, path: rel, why: 'its pass has not landed' }); continue; }
+    if (running.has(task)) { kept.push({ task, path: rel, why: 'a session is on its task' }); continue; }
+    if (!fs.existsSync(path.join(dir, '.git'))) { kept.push({ task, path: rel, why: 'not a git worktree' }); continue; }
+    const st = git(dir, 'status', '--porcelain');
+    if (st.status !== 0 || (st.stdout || '').trim()) { kept.push({ task, path: rel, why: 'it has uncommitted changes' }); continue; }
+    const wl = git(dir, 'worktree', 'list', '--porcelain');
+    const repo = (String(wl.stdout || '').match(/^worktree (.+)$/m) || [])[1]?.trim();
+    if (!repo || samePath(repo, dir)) { kept.push({ task, path: rel, why: 'its engine repo could not be found' }); continue; }
+    const bytes = dryRun ? sizeOf(dir) : 0;
+    if (dryRun) { removed.push({ task, path: rel, bytes }); continue; }
+    const size = sizeOf(dir);
+    git(repo, 'worktree', 'remove', '--force', dir);
+    if (fs.existsSync(dir)) { try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }); } catch {} }
+    git(repo, 'worktree', 'prune');
+    if (fs.existsSync(dir)) kept.push({ task, path: rel, why: 'could not remove it' });
+    else removed.push({ task, path: rel, bytes: size });
+  }
+  if (removed.length) emit({ type: 'janitor.engine_pass', agent: String(by).slice(0, 60), msg: `${dryRun ? 'Would remove' : 'Removed'} ${removed.length} engine pass worktree(s) whose pass has landed (${removed.map((x) => x.task).join(', ')}), ${human(removed.reduce((n, x) => n + (x.bytes || 0), 0))}; the branches are kept`.slice(0, 400), meta: { dryRun, tasks: removed.map((x) => x.task) } });
+  return { removed, kept };
+}
+
 /**
  * 2.70.0 (w): lanes whose work has landed: { tasks, agents } from studio/DONE.md (tasks marked done) and lane.merged
  * events (the agent that landed, the task).
@@ -271,12 +356,17 @@ export function landedLanes(root) {
   return { tasks, agents };
 }
 
-function removeItem(root, it) {
+function removeItem(root, it, env = process.env) {
   const p = it.abs ? it.path : path.join(root, it.path);
   if (it.kind === 'test-temp') {
     // Inside the system temp folder only, a real folder (not a link), with this studio's marker.
     const m = readJson(path.join(p, MARKER));
     if (!m || !m.studio || !samePath(String(m.studio), root) || fs.lstatSync(p).isSymbolicLink()) return false;
+  }
+  if (it.kind === 'temp-orphan') {
+    // A real folder (not a link) directly in the system temp folder, still carrying one of the allowed prefixes.
+    const lim = janitorLimits(env);
+    if (fs.lstatSync(p).isSymbolicLink() || !lim.tempPrefixes.some((x) => path.basename(p).startsWith(x))) return false;
   }
   fs.rmSync(p, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
   return !fs.existsSync(p);
@@ -300,7 +390,7 @@ export async function runJanitor({ yes = false, lanes = false, by = '', permissi
           if (w.dirty || w.unique) { failed.push({ ...it, why: 'it has work now' }); continue; }
           (await import('./train.mjs')).removeScratch({ dir, branch: it.branch, name: it.name, root });
           if (fs.existsSync(dir)) { failed.push({ ...it, why: 'could not remove it' }); continue; }
-        } else if (!removeItem(root, it)) { failed.push({ ...it, why: 'could not remove it' }); continue; }
+        } else if (!removeItem(root, it, env)) { failed.push({ ...it, why: 'could not remove it' }); continue; }
         deleted.push(it);
       } catch (err) { failed.push({ ...it, why: err.message }); }
     }
@@ -332,6 +422,8 @@ export async function runJanitor({ yes = false, lanes = false, by = '', permissi
   }
   // 2.79 (d): the automatic run (after a train or verify job) also removes idle lane copies: pruneIdleLanes' rule is stricter
   // than a stale proposal's (nothing unsaved or unlanded, no queued task), and it keeps the branch.
+  let enginePasses = null;
+  if (yes) { try { enginePasses = await pruneEnginePasses({ root, emit, by: auto ? 'janitor' : by || 'janitor' }); } catch {} }
   let pruned = null;
   if (auto && yes) { try { pruned = await pruneIdleLanes({ root, env, now, emit, by: 'janitor' }); } catch {} }
   // 2.70.0 (w): what the digest, status --brief and the War Room show (harness/lane-disk.mjs), kept current.
@@ -353,7 +445,7 @@ export async function runJanitor({ yes = false, lanes = false, by = '', permissi
     for (const l of props) L.push(`  ${lanesDeleted.some((x) => x.agent === l.agent) ? 'deleted' : l.stale ? 'proposed' : 'kept'} ${l.path}${l.stale ? ` (${human(l.bytes)})` : ''}: ${l.why}`);
     if (refused) L.push(refused);
   }
-  return { dryRun: !yes, pruned, items: plan.items, deleted, freed, lanes: props, lanesDeleted, kept: plan.kept, failed, refused, text: L.join('\n') };
+  return { dryRun: !yes, pruned, enginePasses, items: plan.items, deleted, freed, lanes: props, lanesDeleted, kept: plan.kept, failed, refused, text: L.join('\n') };
 }
 
 /** For the disk monitor: { bytes, gb, line } (lanes not counted: they need a person). */

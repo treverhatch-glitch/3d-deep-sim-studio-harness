@@ -4,7 +4,7 @@
  *
  *   npm run mode                                 show the mode and what it sets
  *   npm run mode -- set precise|budget|fast|prototype|extreme --by <name> [--why "…"]
- *   npm run mode -- boost on|off --by <name> [--hours 4]   the MAX SPEED lever (also in every War Room view)
+ *   npm run mode -- boost on|off --by <name> [--hours 4 | --until HH:MM|ISO|off]   the MAX SPEED lever (also in every War Room view)
  *   npm run mode -- scope lite|full --by <name>  Lite: 6 gates in everyday verify and AGENTS.lite.md for agents
  *   npm run mode -- autostart on|off --by <name>  may the watcher and the HUB start agents on their own (off by default)
  *
@@ -21,6 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { activeCartridge, isTemplateCartridge } from './cartridge.mjs';
+import { queueNotice } from './comm-notice.mjs';
 
 export const MODE_FILE = path.join(REPO_ROOT, 'studio', 'mode.json');
 
@@ -123,6 +124,24 @@ export function setAutostart(on, by) {
   return { ok: true, mode: effectiveMode(m) };
 }
 
+/**
+ * 2.79.1 (3.10): a boost that ran out said nothing, and the studio dropped from 8 agents to 4 mid-run. Once per boost:
+ * a mode.boost_expired event and one Studio Status line (the Communicator's queueNotice) with the agent target it fell
+ * back to. Called from the supervisor's loop. deps.queueNotice, deps.emit: selftests. Returns the line or null.
+ */
+export function boostExpiryPass({ now = Date.now(), deps = {} } = {}) {
+  const m = readMode();
+  const b = m.boost;
+  if (!b?.on || !b.until || Date.parse(b.until) > now || b.expiredNotified) return null;
+  m.boost = { ...b, expiredNotified: new Date(now).toISOString() };
+  save(m);
+  const e = effectiveMode(m, now);
+  const line = `MAX SPEED expired (it was set to end at ${b.until.slice(0, 16).replace('T', ' ')} UTC by ${b.by}): the studio is back to ${e.label}, up to ${e.maxAgents} agents (builders ${e.perRole.builder}). To keep going: npm run mode -- boost on --by <name> --until <HH:MM UTC> (or --until off).`;
+  try { (deps.emit || emitEvent)({ type: 'mode.boost_expired', agent: 'supervisor', to: 'producer', msg: line, meta: { until: b.until, by: b.by, maxAgents: e.maxAgents, mode: e.id } }); } catch {}
+  try { (deps.queueNotice || queueNotice)({ key: `boost-expired:${b.until}`, kind: 'mode', text: line }); } catch {}
+  return line;
+}
+
 /** The numbers everything else reads: the chosen mode, with the MAX SPEED lever applied. */
 export function effectiveMode(m = readMode(), now = Date.now()) {
   const id = MODES[m.mode] ? m.mode : DEFAULT_MODE;
@@ -136,7 +155,72 @@ export function effectiveMode(m = readMode(), now = Date.now()) {
     eff.directorEveryHours = Math.max(2, Math.round(base.directorEveryHours / 4));
     eff.producerEveryHours = 1;
   }
+  // 2.79.1 (4): an engine push: that engine's porters may use every builder slot (engine-porter's own cap follows the builders').
+  const push = enginePushOf(m, now);
+  eff.enginePush = push ? { engine: push.engine, until: push.until || null, by: push.by || null } : null;
+  if (push) eff.perRole['engine-porter'] = Math.max(eff.perRole['engine-porter'] ?? 1, eff.perRole.builder ?? 1);
   return eff;
+}
+
+/**
+ * 2.79.1 (4): ENGINE PUSH, a board decision: the engine of choice (Godot, Unity, …) gets the builder slots first and the
+ * machine's priority (the Line Producer's engine hold starts at once and has no time limit; the engine line gets 2 slots
+ * if the RAM allows); the game's tasks get what is left. Nothing is cancelled. studio/mode.json "enginePush":
+ * { on, engine, by, at, until }.
+ */
+export const enginePushOf = (m = readMode(), now = Date.now()) => (m.enginePush?.on && m.enginePush.engine && (!m.enginePush.until || Date.parse(m.enginePush.until) > now) ? m.enginePush : null);
+
+/** Who may switch it: a person, the orchestrator/proxy, outside signers, a Producer/Director session; never a worker. null = allowed, else why not. */
+export async function enginePushRefusal(by, { env = process.env, root = REPO_ROOT } = {}) {
+  const pm = await import('./permission.mjs');
+  const actor = pm.actorOf({ env, root });
+  const byWorker = !pm.permittedSetter(by) || pm.mayDecide('board', actor, { root }).ok === false;
+  return byWorker ? `${by || 'this session'} is a worker: an engine push is a board decision (the owner, the orchestrator, a Producer or Director session). Hand it to them: npm run task -- pause <ID> --note "…"` : null;
+}
+
+/** The engine to push when --engine is left out: the studio's only engine with a land command, else null (say which). */
+export async function onlyEngine(root = REPO_ROOT) {
+  try {
+    const et = await import('./engine-tracks.mjs');
+    const names = et.engineTargets({ root }).map((t) => t.name);
+    return names.length === 1 ? names[0] : null;
+  } catch { return null; }
+}
+
+const noteLine = (text, key) => { try { queueNotice({ key, kind: 'mode', text }); } catch { /* best effort */ } };
+
+export function setEnginePush(on, by, { engine = null, until = undefined, deps = {} } = {}) {
+  if (!by) return { ok: false, message: 'Say who switched it: --by <name>.' };
+  const m = readMode();
+  const at = new Date().toISOString();
+  let untilIso = null;
+  if (on) {
+    if (!engine || !/^[a-z][a-z0-9-]{1,30}$/.test(String(engine))) return { ok: false, message: 'Say which engine: --engine <name> (more than one engine is set up, or none was found).' };
+    if (until !== undefined && until !== null) { const u = parseBoostUntil(until); if (!u.ok) return u; untilIso = u.until; }
+    m.enginePush = { on: true, engine: String(engine), by, at, until: untilIso };
+  } else {
+    m.enginePush = { on: false, engine: m.enginePush?.engine || null, by, at };
+  }
+  m.history = [...(m.history || []), { enginePush: Boolean(on), engine: m.enginePush.engine, by, until: untilIso, at }].slice(-50);
+  save(m);
+  const e = effectiveMode(m);
+  const line = on ? `ENGINE PUSH on (${by}): ${engine} gets the builder slots first and the machine's priority${untilIso ? ` until ${untilIso.slice(0, 16).replace('T', ' ')} UTC` : ', until turned off'}; the game's tasks get what is left, nothing is cancelled` : `ENGINE PUSH off (${by}): back to the normal split`;
+  (deps.emit || emitEvent)({ type: 'mode.engine_push', agent: by, to: 'producer', msg: line, meta: { on: Boolean(on), engine: m.enginePush.engine, until: untilIso, by } });
+  (deps.queueNotice || ((a) => noteLine(a.text, a.key)))({ key: `engine-push:${at}`, kind: 'mode', text: line });
+  return { ok: true, mode: e };
+}
+
+/** An engine push that ran out says so once (event + Studio Status line). Called from the supervisor's loop. */
+export function enginePushExpiryPass({ now = Date.now(), deps = {} } = {}) {
+  const m = readMode();
+  const p = m.enginePush;
+  if (!p?.on || !p.until || Date.parse(p.until) > now || p.expiredNotified) return null;
+  m.enginePush = { ...p, expiredNotified: new Date(now).toISOString() };
+  save(m);
+  const line = `ENGINE PUSH for ${p.engine} expired (it was set to end at ${p.until.slice(0, 16).replace('T', ' ')} UTC by ${p.by}): the builder slots and the machine go back to the normal split. To keep going: npm run mode -- engine-push --engine ${p.engine} --until <HH:MM UTC> --by <name>.`;
+  try { (deps.emit || emitEvent)({ type: 'mode.engine_push', agent: 'supervisor', to: 'producer', msg: line, meta: { on: false, expired: true, engine: p.engine, until: p.until, by: p.by } }); } catch {}
+  try { (deps.queueNotice || ((a) => noteLine(a.text, a.key)))({ key: `engine-push-expired:${p.until}`, kind: 'mode', text: line }); } catch {}
+  return line;
 }
 
 export function setMode(id, by, why = '') {
@@ -151,14 +235,38 @@ export function setMode(id, by, why = '') {
   return { ok: true, mode: effectiveMode(m) };
 }
 
-export function setBoost(on, by, hours = null) {
+/**
+ * 2.79.1 (3.10): `--until <time>` for the boost: an ISO time, or HH:MM (UTC, today, else tomorrow), or "off" (no end:
+ * boost until it is turned off). Returns { ok, until: ISO | null } or { ok: false, message }.
+ */
+export function parseBoostUntil(v, now = Date.now()) {
+  const t = String(v ?? '').trim();
+  if (!t || /^(off|never|none)$/i.test(t)) return { ok: true, until: null };
+  const hm = t.match(/^(\d{1,2}):(\d{2})$/);
+  let ms = NaN;
+  if (hm) {
+    const d = new Date(now);
+    d.setUTCHours(Number(hm[1]), Number(hm[2]), 0, 0);
+    ms = d.getTime() <= now ? d.getTime() + 86400000 : d.getTime();
+  } else ms = Date.parse(t);
+  if (!Number.isFinite(ms) || ms <= now) return { ok: false, message: `--until takes a future time (HH:MM in UTC, or an ISO time) or "off" (boost until turned off); got "${t}".` };
+  return { ok: true, until: new Date(ms).toISOString() };
+}
+
+export function setBoost(on, by, hours = null, until = undefined) {
   if (!by) return { ok: false, message: 'Say who pulled the lever: --by <name>.' };
+  let untilIso = hours ? new Date(Date.now() + Number(hours) * 3600000).toISOString() : null;
+  if (on && until !== undefined && until !== null) {
+    const u = parseBoostUntil(until);
+    if (!u.ok) return u;
+    untilIso = u.until;
+  }
   const m = readMode();
-  m.boost = on ? { on: true, by, at: new Date().toISOString(), until: hours ? new Date(Date.now() + Number(hours) * 3600000).toISOString() : null } : { on: false, by, at: new Date().toISOString() };
+  m.boost = on ? { on: true, by, at: new Date().toISOString(), until: untilIso } : { on: false, by, at: new Date().toISOString() };
   m.history = [...(m.history || []), { boost: on, by, hours: hours || null, at: new Date().toISOString() }].slice(-50);
   save(m);
   const e = effectiveMode(m);
-  emitEvent({ type: on ? 'mode.boost_on' : 'mode.boost_off', agent: by, to: 'producer', msg: on ? `MAX SPEED on (${by}${hours ? `, for ${hours} h` : ''}): up to ${e.maxAgents} agents, watcher starts agents, Director every ${e.directorEveryHours} h, Producer check-in every hour` : `MAX SPEED off (${by}); back to ${e.label}` });
+  emitEvent({ type: on ? 'mode.boost_on' : 'mode.boost_off', agent: by, to: 'producer', msg: on ? `MAX SPEED on (${by}${untilIso ? `, until ${untilIso.slice(0, 16).replace('T', ' ')} UTC` : ', until turned off'}): up to ${e.maxAgents} agents, watcher starts agents, Director every ${e.directorEveryHours} h, Producer check-in every hour` : `MAX SPEED off (${by}); back to ${e.label}` });
   return { ok: true, mode: e };
 }
 
@@ -188,7 +296,7 @@ export function setScope(id, by) {
 }
 
 export function describeMode(e = effectiveMode()) {
-  return `${e.label}${e.chosen ? '' : ' (default; the game dev hasn\'t chosen yet: npm run mode -- set …)'}${e.boost ? `, MAX SPEED on${e.boostUntil ? ` until ${e.boostUntil.slice(11, 16)} UTC` : ''}` : ''}: up to ${e.maxAgents} agents (builders ${e.perRole.builder}), reviews on ${e.review === 'every-build' ? 'every build task' : 'whole systems'}, ${e.autoLaunch && e.autostart ? 'the watcher starts agents' : 'agents started by hand or npm run agent'}, Director every ${e.directorEveryHours} h, Producer every ${e.producerEveryHours} h. ${e.autostart ? `Auto-start is on${e.autostartBy ? ` (${e.autostartBy})` : ''}: the watcher and the HUB may start agents on their own (npm run mode -- autostart off --by <name> stops that).` : `Auto-start is off: nothing starts on its own${e.autoLaunch ? ', although this pace would' : ''} (npm run mode -- autostart on --by <name> turns it on).`}`;
+  return `${e.enginePush ? `ENGINE PUSH ${e.enginePush.engine}${e.enginePush.until ? ` until ${e.enginePush.until.slice(11, 16)} UTC` : ''}, ` : ''}${e.label}${e.chosen ? '' : ' (default; the game dev hasn\'t chosen yet: npm run mode -- set …)'}${e.boost ? `, MAX SPEED on${e.boostUntil ? ` until ${e.boostUntil.slice(11, 16)} UTC` : ''}` : ''}: up to ${e.maxAgents} agents (builders ${e.perRole.builder}), reviews on ${e.review === 'every-build' ? 'every build task' : 'whole systems'}, ${e.autoLaunch && e.autostart ? 'the watcher starts agents' : 'agents started by hand or npm run agent'}, Director every ${e.directorEveryHours} h, Producer every ${e.producerEveryHours} h. ${e.autostart ? `Auto-start is on${e.autostartBy ? ` (${e.autostartBy})` : ''}: the watcher and the HUB may start agents on their own (npm run mode -- autostart off --by <name> stops that).` : `Auto-start is off: nothing starts on its own${e.autoLaunch ? ', although this pace would' : ''} (npm run mode -- autostart on --by <name> turns it on).`}`;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -203,7 +311,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   };
   if (argv[0] === 'set') done(setMode(argv[1], flag('by'), flag('why') || ''));
-  if (argv[0] === 'boost') done(setBoost(argv[1] !== 'off', flag('by'), flag('hours')));
+  if (argv[0] === 'boost') done(setBoost(argv[1] !== 'off', flag('by'), flag('hours'), flag('until') === null ? undefined : flag('until')));
+  if (argv[0] === 'engine-push') {
+    const rest = argv.slice(1);
+    const off = rest[0] === 'off';
+    const by = flag('by');
+    const no = await enginePushRefusal(by);
+    if (no) { console.error(no); process.exit(1); }
+    if (!off && !by && !rest.length) { const p = enginePushOf(); console.log(p ? `Engine push is on: ${p.engine}${p.until ? ` until ${p.until.slice(0, 16).replace('T', ' ')} UTC` : ' until turned off'} (${p.by}).` : 'Engine push is off. npm run mode -- engine-push [--engine <name>] [--until <HH:MM UTC>|off] --by <name>'); process.exit(0); }
+    const engine = off ? null : flag('engine') || (await onlyEngine());
+    done(setEnginePush(!off, by, { engine, until: off ? undefined : flag('until') === null ? undefined : flag('until') }));
+  }
   if (argv[0] === 'autostart') {
     if (!['on', 'off'].includes(argv[1])) {
       console.log(autostartOn() ? 'Auto-start is on: the watcher and the HUB may start agents on their own.' : `Auto-start is off: ${AUTOSTART_OFF.replace(/^auto-start is off, so /, '')}.`);
@@ -228,5 +346,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   console.log(`Scope: ${SCOPES[scopeOf()]}`);
   console.log('\nModes:');
   for (const [id, m] of Object.entries(MODES)) console.log(`  ${id.padEnd(8)} ${m.label}: ${m.pitch}`);
-  console.log('\nChange: npm run mode -- set <mode> --by <name>   MAX SPEED: npm run mode -- boost on|off --by <name> [--hours 4]   Scope: npm run mode -- scope lite|full --by <name>   Auto-start: npm run mode -- autostart on|off --by <name>');
+  console.log('\nChange: npm run mode -- set <mode> --by <name>   MAX SPEED: npm run mode -- boost on|off --by <name> [--hours 4 | --until <HH:MM UTC>|off]   Engine push: npm run mode -- engine-push [off] [--engine <name>] [--until <HH:MM UTC>|off] --by <name>   Scope: npm run mode -- scope lite|full --by <name>   Auto-start: npm run mode -- autostart on|off --by <name>');
 }

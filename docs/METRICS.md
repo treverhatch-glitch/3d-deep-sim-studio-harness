@@ -72,9 +72,21 @@ per gate in `studio/gates.json`: runs (the verifies it was in scope for: a lite 
 Diagnostics nobody reads one event at a time are counted, not logged one by one: `gate.timeout_scaled`, `machine.sample`
 and `prompt.prefix.volatile` keep a counter in `.studio/telemetry/<type>.json` and write one `<type>.summary` event per
 hour (`STUDIO_TELEMETRY_HOUR_MIN`, 60) with the count, the top keys and the last one's facts. `STUDIO_TELEMETRY=full`
-writes every occurrence again, for debugging. Types a reader needs per event stay as they are: `hotspot.overlap` and
-`task.overlap` (plan-waves, next-board), `skill.follow` (scorecard), `watch.report` (retro), `agent.heartbeat`
-(metrics), `trigger.would_drop` and `thread.would_route` (the threads shadow report).
+writes every occurrence again, for debugging.
+
+2.79.1 trims more (the crew's 2.79.0 run: `agent.heartbeat` was 26% of 3,349 events in 7.75 h), switching each reader first:
+
+| Type | Now | Reader |
+|---|---|---|
+| `futility.shadow` | hourly `futility.shadow.summary`; every one stays in `.studio/futility-log.jsonl` | the auto mode reads that file |
+| `skill.follow` | per-model counter `.studio/skill-follow.json` + hourly `skill.follow.summary` | the scorecard sums the counter (and older per-session events) |
+| `lock.kept`, `director.flow` "kept ..." | written on change (`.studio/emit-seen.json`; lock.kept again after 6 h; no 30-minute repeat) | busy.mjs reads `lock.kept` to carry a claim's owner |
+| `task.overlap` | once per task and set of overlaps | next-board, plan-waves |
+| `agent.agy_continue` | counted in the session end (`meta.followUps`, `nudges`) | none |
+| `agent.heartbeat` | one event per session every `STUDIO_HEARTBEAT_EVENT_MIN` (10) minutes; the launcher still renews the claim and writes `lastBeat` every beat | metrics' stall gap follows `meta.everyMin` (a stall is a gap over 2.5 beats) |
+
+`STUDIO_TELEMETRY=full` writes all of these per event again. Types still one event each: `hotspot.overlap` (plan-waves),
+`watch.report` (retro), `trigger.would_drop` and `thread.would_route` (the threads shadow report).
 
 ## The autonomy scorecard (2.64.0)
 

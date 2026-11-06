@@ -5,11 +5,11 @@
  * same joined line of the one big file, and every landing conflicted with every other lane. A game may now declare, in
  * its check manifest (<game root>/studio.gates.json; studio/gates.json for the whole studio):
  *
- *   "sizeRule": { "exempt": ["src/game/modules.ts"], "importLinesFree": true, "exemptMaxLines": 800 }
+ *   "sizeRule": { "exempt": ["src/game/modules.ts"], "importLinesFree": true, "exemptMaxLines": 800, "exemptMaxKb": 60 }
  *
  *   exempt           files (relative to the manifest's folder, or repo-relative; globs as in "paths") that skip the
  *                    no-growth rule. They still have a hard cap: exemptMaxLines (default twice the file limit, 800) and
- *                    twice the KB limit, so a barrel can't become the next crammed file. Functions in them keep their limit.
+ *                    exemptMaxKb (default twice the KB limit), so a barrel can't become the next crammed file. Functions in them keep their limit.
  *   importLinesFree  added lines that are only an import or re-export (import … from '…', import '…', export … from '…',
  *                    export * from '…', several on one line, or a whole multi-line import block) don't count as growth,
  *                    net of import lines removed, in any file the manifest covers. Any other added line still does.
@@ -46,7 +46,8 @@ const cleanRule = (raw) => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const exempt = Array.isArray(raw.exempt) ? raw.exempt.map(String).map((s) => s.trim().replace(/\\/g, '/').replace(/^\.\//, '')).filter(Boolean) : [];
   const max = Number(raw.exemptMaxLines);
-  return { exempt, importLinesFree: raw.importLinesFree === true, exemptMaxLines: Number.isFinite(max) && max > 0 ? Math.floor(max) : null };
+  const maxKb = Number(raw.exemptMaxKb);
+  return { exempt, importLinesFree: raw.importLinesFree === true, exemptMaxLines: Number.isFinite(max) && max > 0 ? Math.floor(max) : null, exemptMaxKb: Number.isFinite(maxKb) && maxKb > 0 ? maxKb : null };
 };
 
 /**
@@ -81,7 +82,7 @@ export function sizeRuleFor(file, ref, limits, cache = new Map()) {
     if (!res.exempt && committed.exempt.some(inScope)) {
       res.exempt = true;
       res.source = m.rel;
-      res.cap = { lines: committed.exemptMaxLines || limits.lines * 2, kb: limits.kb * 2 };
+      res.cap = { lines: committed.exemptMaxLines || limits.lines * 2, kb: committed.exemptMaxKb || limits.kb * 2 };
     }
   }
   return res;

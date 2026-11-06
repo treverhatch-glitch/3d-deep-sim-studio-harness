@@ -154,7 +154,7 @@ fs.mkdirSync(AGENTS_DIR, { recursive: true });
 fs.writeFileSync(AGENTS_DIR + '/fc-1.json', JSON.stringify({ agent: 'fc-1', role: 'builder', tool: 'claude', model: 'model-c', status: 'running', startedAt: new Date().toISOString() }));
 cleanUp('fc-1', { code: 0, log: 'Read studio/skills/zz-proof.md then check-regressions and npm run verify', role: 'builder', tool: 'claude', model: 'model-c' });
 const e = readRecentEvents(0).filter((x) => x.type === 'skill.follow' && x.agent === 'fc-1').pop();
-console.log(JSON.stringify({ e: e ? { model: e.model, skills: e.meta.skills } : null }));`, learnEnv('ev-261e-follow.jsonl'));
+console.log(JSON.stringify({ e: e ? { model: e.model, skills: e.meta.skills } : null }));`, { ...learnEnv('ev-261e-follow.jsonl'), STUDIO_TELEMETRY: 'full' /* 2.79.1 (d): skill.follow is counted + an hourly summary by default; this reads the per-session event */ });
   report('2.61e: a launched session\'s end (agent.mjs cleanUp) writes one skill.follow event with what it was given and followed',
     hook.e?.model === 'model-c' && hook.e.skills?.[0]?.skill === 'studio/skills/zz-proof.md' && hook.e.skills[0].loaded === true && hook.e.skills[0].followed === true,
     JSON.stringify(hook).slice(0, 1200));

@@ -475,10 +475,6 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   }
 }
 
-/** 2.77.0 (u, P5.6): the same train for any engine target. */
-export const runEngineTrain = (opts = {}) => runUnityTrain(opts);
-export const queueEngineTask = (root, opts = {}) => queueUnityTask(root, opts);
-
 function summary(res) {
   const parts = [];
   if (res.landed.length) parts.push(`landed ${res.landed.join(', ')} with ${res.runs} ${labelOf(res.engine || 'unity')} land run(s)`);

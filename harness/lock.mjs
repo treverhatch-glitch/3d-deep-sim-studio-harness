@@ -426,7 +426,7 @@ export function commitTasks({ owner = process.env.STUDIO_LOCK_OWNER || '', subje
  * refusal: that agent edits its own copy, so the two can't collide here, and overlapping edits are caught when the
  * lane lands (task done rebases onto the studio's branch and stops on a conflict). Only a lock held in this lane's own
  * name still refuses. On 2.58.3 builder-s45's path:<game>/src/game and builder-s51's path:<game>/src refused unrelated
- * lane commits for an hour. STUDIO_LANE_LOCKS=block restores the refusal. The main checkout is judged as before.
+ * lane commits for an hour. The main checkout is judged as before.
  */
 export function checkStaged(owner, { strict = process.env.STUDIO_LOCK_STRICT === '1', files, lane = laneCopyName(), env = process.env } = {}) {
   const picked = files ? { files, merge: 0 } : stagedForLocks();
@@ -434,7 +434,6 @@ export function checkStaged(owner, { strict = process.env.STUDIO_LOCK_STRICT ===
   const locks = listLocks();
   const problems = [];
   const warnings = [];
-  const laneBlocks = /^(block|on|1|true|yes)$/i.test(String(env.STUDIO_LANE_LOCKS || ''));
   for (const file of staged) {
     const lock = coveringLock(file, locks);
     if (lock && lock.owner !== owner) {
@@ -443,7 +442,7 @@ export function checkStaged(owner, { strict = process.env.STUDIO_LOCK_STRICT ===
       // undo anybody's edit, so another owner's lock there is a note, not a refusal (a reviewer's lock on studio/reviews
       // refused every main commit that carried a review file for 90+ min).
       if (inNoteDir(file, env)) warnings.push(`${line}: a note folder (one file per note), so the commit goes ahead`);
-      else if (lane && !laneBlocks && lock.owner !== lane) warnings.push(`${line}: this is lane copy ${lane}, so it is checked when the lane lands`);
+      else if (lane && lock.owner !== lane) warnings.push(`${line}: this is lane copy ${lane}, so it is checked when the lane lands`);
       else problems.push(line);
     } else if (!lock && strict) problems.push(`${file} has no lock. Run: node harness/lock.mjs claim path:${file} --owner ${owner || '<you>'}`);
   }

@@ -22,9 +22,10 @@ const family = (id) => String(id).replace(/^models\//, '').split(/[-:/.]/).filte
 
 async function listModels(p, key) {
   const base = p.baseUrl.replace(/\/$/, '');
-  const headers = p.protocol === 'anthropic' ? { 'x-api-key': key, 'anthropic-version': '2023-06-01' } : p.protocol === 'ollama' ? {} : { Authorization: `Bearer ${key}`, ...(p.extraHeaders || {}) };
+  // 2.79.1 (a): Vertex's OpenAI-compatible endpoint takes the key as x-goog-api-key (route.mjs does the same).
+  const headers = p.protocol === 'anthropic' ? { 'x-api-key': key, 'anthropic-version': '2023-06-01' } : p.protocol === 'ollama' ? {} : p.protocol === 'vertex-openai' ? { 'x-goog-api-key': key } : { Authorization: `Bearer ${key}`, ...(p.extraHeaders || {}) };
   const res = await fetch(`${base}/models${p.protocol === 'anthropic' ? '?limit=1000' : ''}`, { headers, signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) { const e = new Error(`HTTP ${res.status}`); e.status = res.status; throw e; }
   const data = await res.json();
   return (data.data || data.models || []).map((m) => String(m.id || m.name || '').replace(/^models\//, '')).filter(Boolean);
 }
@@ -49,6 +50,8 @@ export async function checkModels({ dryRun = false } = {}) {
       const near = ok ? [] : ids.filter((i) => family(i) === family(want)).sort().reverse().slice(0, 5);
       rows.push({ id: p.id, model: p.model, status: ok ? 'ok' : 'missing', note: ok ? `${ids.length} models served` : `not served. Close matches: ${near.join(', ') || 'none; see the provider docs'}` });
     } catch (err) {
+      // 2.79.1 (a): Vertex's OpenAI-compatible endpoint serves no model list: a 404 there is "listed: n/a", not an error.
+      if (p.protocol === 'vertex-openai' && err.status === 404) { rows.push({ id: p.id, model: p.model, status: 'n/a', note: 'listed: n/a (this endpoint has no model list: GET /models answers 404; the model is checked when it is used)' }); continue; }
       rows.push({ id: p.id, model: p.model, status: p.protocol === 'ollama' ? 'not-running' : 'error', note: p.protocol === 'ollama' ? 'Ollama is not running on this machine' : err.message });
     }
   }

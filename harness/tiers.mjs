@@ -94,7 +94,7 @@ export const DEFAULT_TIER_RULES = [
   { id: 'assets', tier: 'A', paths: ['assets/**', '**/assets/**', '**/*.png', '**/*.jpg', '**/*.jpeg', '**/*.webp', '**/*.svg', '**/*.glb', '**/*.gltf', '**/*.ogg', '**/*.wav', '**/*.mp3'], why: 'an asset' },
   { id: 'ui', tier: 'A', paths: ['**/ui/**', '**/hud/**', '**/*.css'], from: 'ui', why: 'UI outside the sim paths' },
 ];
-export const DEFAULT_TIER = { tier: 'B', why: 'no tier rule names it (unclassified code)' };
+const DEFAULT_TIER = { tier: 'B', why: 'no tier rule names it (unclassified code)' };
 
 const strs = (a) => (Array.isArray(a) ? a.map((x) => String(x).trim()).filter(Boolean) : []);
 

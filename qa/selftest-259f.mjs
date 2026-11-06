@@ -13,7 +13,7 @@ import { pathToFileURL } from 'node:url';
 
 export async function selftest259F({ dir, run, report }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_LOCK_OWNER: 'v259f', STUDIO_GAME: '' };
+  const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_LOCK_OWNER: 'v259f', STUDIO_GAME: '', STUDIO_VISUAL_GATE: 'on' /* 2.79.1 (d): unset, the gate is off for a game with no capture command; this check is about its hint */ };
   const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
   let n = 0;
   const probe = (code) => {

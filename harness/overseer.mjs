@@ -43,7 +43,7 @@ export const STAGES = [
   { stage: 3, name: 'own releases', allows: 'merges its own non-gate harness releases' },
 ];
 export const ALWAYS_OWNER = 'gates, protected files and money';
-export const DEFAULT_CRITERIA = Object.freeze({
+const DEFAULT_CRITERIA = Object.freeze({
   1: { minDaysAtStage: 7, minWorkaroundsLogged: 10, maxProtectedAttempts: 0 },
   2: { minDaysAtStage: 7, minAcceptedRepros: 5, maxProtectedAttempts: 0 },
   3: { minDaysAtStage: 14, minMergedPrs: 10, maxRevertRate: 0.1, maxProtectedAttempts: 0 },

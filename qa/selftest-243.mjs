@@ -92,10 +92,11 @@ console.log(JSON.stringify({ titles: added.map((t) => t.title), one: one.id, two
   // 5. task done reuses this agent's own green verify on the exact commit (opt-in); otherwise it runs the game's
   // checks (here they fail: the adopted game's packages aren't installed).
   if (j.one) {
-    // 2.78.2: a docs task with only notes changed now skips the game's checks; this check is about reusing a verify.
-    const denv = { ...env, STUDIO_LOCK_OWNER: 'builder-r', STUDIO_VISUAL_GATE: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_SKIP_GAME_NONCODE: 'off' };
+    // 2.78.2: a docs task with only notes changed skips the game's checks; this check is about reusing a verify, so the task also changes a non-doc file (2.79.1 (e): was a skip-switch pin).
+    const denv = { ...env, STUDIO_LOCK_OWNER: 'builder-r', STUDIO_VISUAL_GATE: 'off', STUDIO_DONE_NOOP: 'allow' };
     run(dir, `node harness/task.mjs start ${j.one} --agent builder-r`, denv);
     fs.appendFileSync(path.join(dir, 'game/my-game/docs/VISION.md'), '\nHarbour lights at dusk.\n');
+    fs.writeFileSync(path.join(dir, 'game/my-game/lights.txt'), 'dusk\n');
     g(dir, 'add', '-A', 'game');
     g(dir, 'commit', '-qm', `lights\n\nStudio-Task: ${j.one}`, '--no-verify');
     const head = g(dir, 'rev-parse', 'HEAD').stdout.trim();

@@ -28,6 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { readRecentEvents, emitEvent } from './event.mjs';
+import { emitOnChange } from './telemetry.mjs';
 import { updateHolds } from './task-hold.mjs';
 import { LIMIT_STOP } from './budget.mjs';
 import { claim as claimLock, status as lockStatus } from './lock.mjs';
@@ -259,7 +260,10 @@ export function keepClaim(task, owner, { by = 'harness', why = '' } = {}) {
     if (lockStatus(`task:${task}`).locked) return false;
     const r = claimLock(`task:${task}`, owner);
     if (!r?.ok || r.reused) return false;
-    emitEvent({ type: 'lock.kept', agent: by, task, msg: `Kept ${task}'s claim for ${owner}${why ? `: ${why}` : ''}`.slice(0, 300), meta: { owner, cause: 'harness' } });
+    // 2.79.1 (d): the claim is made again every time it runs out (while the owner works), but the event says it once per task,
+    // owner and reason (digits left out: "active 7 min ago" ticks), and again after 6 h (claimOwner reads it from the log).
+    emitOnChange({ type: 'lock.kept', agent: by, task, msg: `Kept ${task}'s claim for ${owner}${why ? `: ${why}` : ''}`.slice(0, 300), meta: { owner, cause: 'harness' } },
+      `lock.kept|${task}`, `${owner}|${by}|${String(why).replace(/\d+/g, '#')}`, { repeatMin: 360 });
     return true;
   } catch { return false; }
 }

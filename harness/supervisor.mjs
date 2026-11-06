@@ -41,6 +41,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { poolPlan } from './api-pool.mjs';
 const poolPlanNow = (usage, live) => poolPlan({ usage, live });
+import { writeAtomic } from './fsafe.mjs';
 import { selfIdentity, pidAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
 
 export const STATUS_FILE = path.join(STUDIO_STATE_DIR, 'supervisor.json');
@@ -414,6 +415,18 @@ export async function supervise(opts, state, now = Date.now()) {
   }
   // Budget: tokens since the supervisor started, or a share of the plan's week (studio/budget.json).
   const st = budgetStatus(now);
+  // 2.79.1 (a): spend budgets (harness/spend-budget.mjs): 75% pages the orchestrator, 100% cuts new sessions on that tool or key.
+  if (!opts.watcher && !opts.dryRun) { try { (await import('./spend-budget.mjs')).spendPass({ now }); } catch { /* measuring, never a crash */ } }
+  // 2.79.1 (a): Vertex (harness/vertex.mjs) can take builders: configured in the studio's .env, aider found, not cut by a
+  // spend budget. It goes before the paid API pool when the plan's budget is high, and takes STUDIO_VERTEX_SHARE otherwise.
+  let vertexReady = { ok: false, why: '' };
+  try {
+    // Not agent.mjs's preflight: the launcher runs this pass itself (the watcher's deps), and can't import itself again.
+    const r0 = (await import('./vertex.mjs')).vertexReady();
+    const pre = r0.ok ? '' : r0.why;
+    const cut = pre ? '' : (await import('./spend-budget.mjs')).cutFor(['vertex', 'VERTEX_API_KEY']);
+    vertexReady = pre ? { ok: false, why: pre } : cut ? { ok: false, why: cut, cut } : { ok: true, why: '' };
+  } catch { vertexReady = { ok: false, why: '' }; }
   let poolUsage = null; // set when the plan's budget is high (2.79 f)
   // 2.79 (f): STUDIO_API_POOL builders (harness/api-pool.mjs) start while the plan's budget is high: the two places this pass
   // would start nothing (the wind-down above, every tool over its target below) let the pool's builders through instead.
@@ -424,7 +437,7 @@ export async function supervise(opts, state, now = Date.now()) {
     const { winddownPass } = await import('./winddown.mjs');
     const { readHolds } = await import('./task-hold.mjs');
     const wd = winddownPass({ now, rows: st, dryRun: opts.dryRun, lists: () => ({ live: sessions().filter((s) => s.running).map((s) => ({ agent: s.agent, role: s.role, task: s.task })), queued: (parseNextQueue().backlog || []).map((t) => ({ id: t.id, role: t.role, title: t.title })), held: Object.entries(readHolds()).filter(([, h]) => h?.held).map(([id, h]) => ({ id, why: h.held.why || 'held' })) }) });
-    if (wd.active) { poolUsage = { winddown: true, why: wd.why }; if (!apiPoolOn(poolUsage)) return { started: [], why: [wd.why], winddown: true }; }
+    if (wd.active) { poolUsage = { winddown: true, why: wd.why }; if (!apiPoolOn(poolUsage) && !vertexReady.ok) return { started: [], why: [wd.why], winddown: true }; }
   } catch { /* the wind-down is a guard, never a crash */ }
   const { weightedTokens } = await import('./budget.mjs');
   const spentHere = Math.round(readRecentEvents(50000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= state.startedAt).reduce((n, e) => n + weightedTokens(e), 0));
@@ -434,7 +447,7 @@ export async function supervise(opts, state, now = Date.now()) {
   if (opts.budget?.share && known.length && known.every((t) => t.pct >= opts.budget.share)) return { stop: true, started: [], why: [`the plan reached ${Math.round(opts.budget.share * 100)}% of the week`] };
   const over = known.length && known.every((t) => t.verdict === 'over');
   const under = known.some((t) => t.verdict === 'under');
-  if (over) { poolUsage ||= { over: true, why: 'every tool is over its target for this point in the week' }; if (!apiPoolOn(poolUsage)) return { started: [], why: ['every tool is over its target for this point in the week: slowing down'] }; }
+  if (over) { poolUsage ||= { over: true, why: 'every tool is over its target for this point in the week' }; if (!apiPoolOn(poolUsage) && !vertexReady.ok) return { started: [], why: ['every tool is over its target for this point in the week: slowing down'] }; }
   const mode = effectiveMode();
   const extra = opts.budget && under ? 2 : 0;
   const live = sessions().filter((s) => s.running);
@@ -477,7 +490,8 @@ export async function supervise(opts, state, now = Date.now()) {
   let room = ramCap.cap - live.length;
   // 2.79 (f): the plan's budget is high: only the API pool's builders start (their names, up to the pool's size).
   const poolMode = poolUsage ? poolPlanNow(poolUsage, live) : null;
-  if (poolMode) { room = Math.min(room, poolMode.free.length); why.push(`${poolUsage.why}: ${poolMode.why}`); }
+  // 2.79.1 (a): Vertex goes before the pool, so with Vertex ready the pool's size doesn't cap the builders that may start.
+  if (poolMode) { if (!vertexReady.ok) room = Math.min(room, poolMode.free.length); why.push(`${poolUsage.why}: ${vertexReady.ok ? 'Vertex first, then ' : ''}${poolMode.why}`); }
   if (room <= 0) return { started: [], why: [ramCap.cap < configured ? `${live.length} agent${live.length === 1 ? '' : 's'} running; no more start: ${ramCap.why}` : `${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
   if (ramCap.cap < configured) why.push(`at most ${ramCap.cap} session${ramCap.cap === 1 ? '' : 's'} now: ${ramCap.why}`);
   // Waiting work, grouped by role and lane.
@@ -641,7 +655,15 @@ export async function supervise(opts, state, now = Date.now()) {
       why.push(`${g.role}: its command is out of quota until ${customOut} (npm run budget)`);
       continue;
     }
-    if (!custom && !tool) {
+    // 2.79.1 (a): the route and whether this builder starts on Vertex (harness/vertex.mjs vertexPick): instead of a Claude
+    // session, before the paid API pool when the plan's budget is high (or every tool is out), else within its share.
+    const lr = line ? line.routeFor(g, { tool, preferred, custom, live, outUntil: (await import('./budget.mjs')).exhaustedUntil }) : {};
+    let vx = null;
+    if (vertexReady.ok && g.role === 'builder' && !custom && ['claude', null, undefined].includes(lr.tool || tool)) {
+      const pick = (await import('./vertex.mjs')).vertexPick({ role: g.role, taskId: g.tasks[0]?.id, tier: lr.tier || null, live, cap: ramCap.cap, high: Boolean(poolMode) || !tool, events: evs, ready: vertexReady });
+      if (pick.tool) vx = pick; else if (pick.skip && (poolMode || !tool)) why.push(`${g.tasks[0]?.id}: ${pick.skip}`);
+    }
+    if (!custom && !tool && !vx) {
       why.push(`${g.role}: every tool is out of quota (npm run budget)`);
       continue;
     }
@@ -653,7 +675,7 @@ export async function supervise(opts, state, now = Date.now()) {
       ramNote(ram, now);
       break;
     }
-    const agent = poolMode ? poolMode.free.shift() : nextAgentName(g.role, opts.prefix || 's');
+    const agent = !vx && poolMode ? poolMode.free.shift() : nextAgentName(g.role, opts.prefix || 's');
     if (!agent) break;
     state.names = [...(state.names || []), agent].slice(-200);
     // 2.30l: one builder per task. Two passes at once (the watcher and the Director flow) both started
@@ -669,14 +691,14 @@ export async function supervise(opts, state, now = Date.now()) {
       why.push(`${taskId} is being started by ${launch.lock?.owner || 'another pass'}`);
       continue;
     }
-    const lr = line ? line.routeFor(g, { tool, preferred, custom, live, outUntil: (await import('./budget.mjs')).exhaustedUntil }) : {};
-    const r = startAgent({ role: g.role, agent, tool: lr.tool || tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra, ...(lr.model ? { model: lr.model } : {}) }, { detach: true });
-    if (r.ok && lr.model) emitEvent({ type: 'model.routed', agent: 'line-producer', task: taskId, msg: `${taskId}: starts on ${lr.model}${lr.tool ? ` (${lr.tool})` : ''} (${lr.tier} ${lr.tool ? 'task' : 'tier'}, the Line Producer): ${lr.why}`.slice(0, 400), meta: { task: taskId, arm: 'line-producer', tier: lr.tier, model: lr.model, ...(lr.tool ? { tool: lr.tool } : {}), failed: lr.failed || 0 } });
+    const r = startAgent({ role: g.role, agent, tool: vx ? 'vertex' : lr.tool || tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra, ...(vx ? { model: vx.model } : lr.model ? { model: lr.model } : {}) }, { detach: true });
+    if (r.ok && vx) emitEvent({ type: 'model.routed', agent: 'supervisor', task: taskId, msg: `${taskId}: starts on ${vx.model} (vertex): ${vx.why}`.slice(0, 400), meta: { task: taskId, arm: 'vertex', tier: vx.size, model: vx.model, tool: 'vertex' } });
+    else if (r.ok && lr.model) emitEvent({ type: 'model.routed', agent: 'line-producer', task: taskId, msg: `${taskId}: starts on ${lr.model}${lr.tool ? ` (${lr.tool})` : ''} (${lr.tier} ${lr.tool ? 'task' : 'tier'}, the Line Producer): ${lr.why}`.slice(0, 400), meta: { task: taskId, arm: 'line-producer', tier: lr.tier, model: lr.model, ...(lr.tool ? { tool: lr.tool } : {}), failed: lr.failed || 0 } });
     if (r.ok) {
-      if (poolMode) emitEvent({ type: 'supervisor.api_pool', agent: 'supervisor', task: taskId, msg: `${agent} starts on ${taskId} billed to its API key: ${poolUsage.why}`, meta: { agent, reason: poolUsage.over ? 'over-target' : 'winddown' } });
-      started.push(`${agent} on ${g.tasks[0].id}${g.lane ? ` in ${g.lane}` : ''}${tool && tool !== preferred ? ` (${tool}: ${preferred} is out of quota)` : ''}`);
+      if (poolMode && !vx) emitEvent({ type: 'supervisor.api_pool', agent: 'supervisor', task: taskId, msg: `${agent} starts on ${taskId} billed to its API key: ${poolUsage.why}`, meta: { agent, reason: poolUsage.over ? 'over-target' : 'winddown' } });
+      started.push(`${agent} on ${g.tasks[0].id}${g.lane ? ` in ${g.lane}` : ''}${vx ? ` (vertex, ${vx.model})` : tool && tool !== preferred ? ` (${tool}: ${preferred} is out of quota)` : ''}`);
       // Count it at once, so the next group in this pass sees it (a lane taken, or the whole game).
-      live.push({ agent, role: g.role, lane: g.lane || null, task: taskId, running: true });
+      live.push({ agent, role: g.role, lane: g.lane || null, task: taskId, running: true, tool: vx ? 'vertex' : lr.tool || tool });
       if (g.role === 'producer') (await import('./producer-wake.mjs')).producerLaunched(now);
       room -= 1;
     } else {
@@ -785,7 +807,11 @@ async function main(argv) {
   const state = { pid: process.pid, identity: selfIdentity(), status: 'running', startedAt: Date.now(), opts: { ...opts, until: opts.until ? new Date(opts.until).toISOString() : null }, sessions: 0, doneAtStart: parseNextQueue().done.length, hubDown: [] };
   const port = Number(process.env.HUB_PORT || 3847);
   let hub = null;
-  const save = (extra = {}) => fs.writeFileSync(STATUS_FILE, `${JSON.stringify({ ...state, ...extra, startedAt: new Date(state.startedAt).toISOString(), lastLoop: new Date().toISOString(), tasksDone: parseNextQueue().done.length - state.doneAtStart }, null, 2)}\n`);
+  const save = (extra = {}) => writeAtomic(STATUS_FILE, `${JSON.stringify({ ...state, ...extra, startedAt: new Date(state.startedAt).toISOString(), lastLoop: new Date().toISOString(), tasksDone: parseNextQueue().done.length - state.doneAtStart }, null, 2)}\n`);
+  // 2.79.1: this supervisor's own pid, identity and status go to supervisor.json now, before the first full pass (which can
+  // take minutes): studio:status and studio:reload-env right after studio:stop && studio:start read the OLD record
+  // otherwise and said "Not running".
+  try { save(); } catch { /* the first pass writes it */ }
   emitEvent({ type: 'supervisor.start', agent: 'supervisor', to: 'producer', msg: `Supervisor running${opts.until ? ` until ${new Date(opts.until).toTimeString().slice(0, 5)}` : ''}${opts.window ? `, window ${opts.window}` : ''}${opts.budget ? `, budget ${budgetArg}` : ''}${opts.lanes ? `, lanes ${opts.lanes}` : ''}` });
   console.log(`[supervisor] running (pid ${process.pid}). npm run studio:stop to stop; agents finish their current task.`);
   // 2.29.2: --budget 50% paces against the week's tokens; without --weekly it can never trip.
@@ -822,6 +848,8 @@ async function main(argv) {
     // 2.76.0 (k): the Line Producer's pass (harness/line-producer.mjs): mechanical unblocks, the order, the routes, the
     // rig's builder cap, .studio/line/status.json; supervise() below follows the plan. Code only, never a crash.
     await boundedStep('line-producer', () => import('./line-producer.mjs').then(({ lineProducerPass }) => lineProducerPass({})), { state }).then((lp) => { if (lp && !lp.off) state.line = { at: lp.at, mode: lp.mode, builders: lp.builders ? { running: lp.builders.running, target: lp.builders.target } : null, blocked: lp.blocked?.length || 0, error: lp.error || undefined }; }).catch(() => {});
+    // 2.79.1 (3.10): a MAX SPEED boost that ran out says so once (event + Studio Status line).
+    try { const mm = await import('./mode.mjs'); mm.boostExpiryPass({}); mm.enginePushExpiryPass({}); } catch {}
     // 2-4. Work.
     const r = await boundedStep('supervise', () => supervise(opts, state), { state, ms: num(process.env.STUDIO_SUPERVISOR_STEP_SEC, 300) * 2000, fallback: () => ({ started: [], why: ['the launch step was still running; see supervisor.step_timeout'] }) }).catch((err) => ({ started: [], why: [`error: ${err.message}`] }));
     state.sessions += r.started.length;
@@ -955,6 +983,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   if (argv[0] === 'stop') {
+    const markStopped = (rec, why) => { try { writeAtomic(STATUS_FILE, `${JSON.stringify({ ...rec, status: 'stopped', stopReason: why }, null, 2)}\n`); } catch { /* the stop file still stops it */ } };
     fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
     fs.writeFileSync(STOP_FILE, new Date().toISOString());
     const s = readStatus();
@@ -962,6 +991,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // now, against the one in supervisor.json. Unreadable, or a status file from before PU-17: signalled only if
     // its last loop is recent; otherwise the number may be another program's by now. Either way the stop file
     // above stops a real supervisor at its next loop.
+    if (s?.pid && s.status === 'running' && !pidExists(s.pid)) markStopped(s, 'studio:stop: its process was already gone');
     if (s?.pid && pidExists(s.pid)) {
       const cur = readStarts([s.pid]).get(Number(s.pid)) || null;
       const same = cur ? sameProcess(s.identity, cur) : null;
@@ -973,6 +1003,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         } catch {
           // it will see the stop file
         }
+        // 2.79.1: on Windows SIGTERM ends the process outright, so its own "stopped" write never happens: mark it here.
+        if (s.status === 'running') markStopped(s, 'studio:stop');
       } else if (cur && s.status === 'running') {
         const why = same === false ? `pid ${s.pid} now belongs to another program${cur.cmd ? ` (${cur.cmd})` : ''}` : `pid ${s.pid} is in use but ${cur.error ? `its start time couldn't be read (${cur.error})` : 'supervisor.json has no start time'} and its last loop was ${Number.isFinite(loopAge) ? Math.round(loopAge / 60000) : '?'} min ago, so the number may be another program's`;
         console.log(`Not signalled: ${why}. ${same === false ? 'The supervisor that wrote supervisor.json is gone.' : 'A supervisor that is still running stops at its next loop.'}`);
@@ -984,6 +1016,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         }
       }
     }
+    // 2.79.1 (a): the studio's Vertex proxy (harness/vertex.mjs) stops with the studio; a vertex session started later starts it again.
+    try { const px = await (await import('./vertex.mjs')).stopProxy(); if (px.stopped) console.log(`Stopped the studio's Vertex proxy (pid ${px.pid}).`); } catch { /* nothing to stop */ }
     console.log('Supervisor stopping. Agents that are running finish their task; nothing new starts.');
     process.exit(0);
   }
@@ -1004,8 +1038,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const yesWaitText = async () => { try { const w = await (await import('./yes-wait.mjs')).readYesWaiting(); return w.count ? `; ${w.line}: npm run task -- yes <id> --by <dev>${w.beta.on ? ` (${w.beta.words})` : ''}` : ''; } catch { return ''; } };
     const s = readStatus();
     // 2.77.0 (p, P9.6): the merge train(s) now: the running one and the speculative one behind it.
+    // 2.79.1 (4): " ENGINE PUSH: unity until 18:00 UTC." for studio:status, or ''.
+    const pushNow = async () => { try { const p = (await import('./mode.mjs')).enginePushOf(); return p ? ` ENGINE PUSH: ${p.engine}${p.until ? ` until ${p.until.slice(11, 16)} UTC` : ' until turned off'} (${p.by}); its porters and lands go first.` : ''; } catch { return ''; } };
     const trainsNow = async () => { try { const ts = await import('./train-status.mjs'); const t = ts.readTrainStatus((await import('./worktree.mjs')).mainRoot()); return t ? `\n${ts.trainsText(t)}` : ''; } catch { return ''; } };
-    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.opts?.until ? ` until ${s.opts.until}` : ''}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${await yesWaitText()}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}${await import('./hub-keeper.mjs').then((m) => m.hubKeepLine(s), () => '')}${await trainsNow()}` : `The supervisor has not run here yet: npm run studio:start${await trainsNow()}`);
+    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.opts?.until ? ` until ${s.opts.until}` : ''}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${await yesWaitText()}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}${await import('./hub-keeper.mjs').then((m) => m.hubKeepLine(s), () => '')}${await trainsNow()}${await pushNow()}` : `The supervisor has not run here yet: npm run studio:start${await trainsNow()}${await pushNow()}`);
     process.exit(0);
   }
   if (argv.includes('--install') || argv.includes('--uninstall')) {

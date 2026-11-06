@@ -149,7 +149,7 @@ Scheduler (Windows); `--uninstall` removes it.
   or the builder's own "owner-only step" / "waits for the owner" / "needs the owner's approval"), harness/owner-only.mjs parks
   the task with reason `owner-only` at the orchestrator's rank, sends an event to the orchestrator (the Communicator turns it
   into an alert) and the supervisor starts no builder on it until `npm run task -- unpark <ID> --by <name>` (the orchestrator
-  or the owner). `STUDIO_OWNER_ONLY_PARK=off` turns it off.
+  or the owner).
 - **The stall watchdog (harness/stall.mjs).** A session with no file write, commit or task change for
   `STUDIO_STALL_MIN` (15) minutes, or past its wall-clock cap (`STUDIO_SESSION_MAX_MIN`, 90; planning roles
   `STUDIO_SESSION_PLAN_MAX_MIN`, 25), is ended and its task handed back (`session.stall`). 2.77.3 (B-109): the
@@ -330,8 +330,15 @@ as above). One `janitor.run` event. After each train or verify job it runs `--ye
 `STUDIO_JANITOR_EVERY_MIN` (30) minutes (never lanes); `STUDIO_JANITOR=off` turns that off. `janitorEstimate()` gives a
 disk-low warning its "the janitor can free N GB" line.
 
+**Landed engine passes and orphan temp copies (2.79.1).** The janitor (`--yes`) also removes an engine pass's worktree
+(`.lanes/engine/<task>`, a full engine checkout) once the engine train's `landed` event names its task, when it is clean
+and no session is on the task (`janitor.engine_pass` event; the branch stays). In the system temp folder it removes orphan
+copies: folders whose name starts with a prefix the harness makes (`studio-build-`) or one the studio lists in
+`STUDIO_JANITOR_TEMP_PREFIXES` (comma list; a game's own play-copy prefix goes here), untouched for `STUDIO_JANITOR_ORPHAN_H`
+(2) hours by their newest file, with no live owner process (the marker's pid, else the pid in the name).
+
 **Idle lane copies (2.79).** The automatic janitor run also removes the worktree of a lane copy that has been idle for
-`STUDIO_LANE_IDLE_HOURS` (12; 0 or `off`: never): its session ended, its task isn't queued for a train (read through the
+`STUDIO_LANE_IDLE_HOURS` (4 since 2.79.1, 12 before; 0 or `off`: never): its session ended, its task isn't queued for a train (read through the
 train queue's reader), held or parked, nobody works in it (no process, no live claim, no recent change), it has no
 uncommitted change and no commit that isn't on main. Only the worktree goes; the branch is kept (the train or the next
 session makes the copy again from it). `npm run lanes -- prune --idle <hours> [--dry-run] [--by <name>]` applies the same

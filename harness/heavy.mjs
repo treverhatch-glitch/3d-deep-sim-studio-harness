@@ -102,6 +102,7 @@ import { selfIdentity, spawnedIdentity, pidAlive, processGroup, listProcesses, s
 import { DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { emitEvent } from './event.mjs';
 import { ramCheck } from './ram.mjs';
+import { pushSlots } from './engine-ram.mjs';
 import { parseStudioEnv } from './dotenv.mjs';
 import { machineProfile, slotsFor, budgetState, jobClaim, admit, claimOf, describeBudget, oomSignature, maxConcurrent, capGroup, unityMinFreeGb, isUnityKind, scanFreeGb, engineLineRoom } from './heavy-budget.mjs';
 
@@ -192,7 +193,7 @@ export function clearQuietHold(root, tag = '') { try { fs.rmSync(quietHoldFile(r
  * The live hold (the newest), else null. A marker past its bound (until) or whose process is gone (pid and start
  * identity, as for a holder) is removed: a train that died never blocks heavy work.
  */
-export function quietHolding(root, { now = Date.now() } = {}) {
+export function quietHolding(root, { now = Date.now(), skipTags = [] } = {}) {
   let live = null;
   try {
     const dir = heavyDir(root);
@@ -201,6 +202,7 @@ export function quietHolding(root, { now = Date.now() } = {}) {
       const f = path.join(dir, nm);
       const h = readJson(f);
       if (!h || !(now < Number(h.until || 0)) || holderGone(h)) { try { fs.rmSync(f, { force: true }); } catch {} continue; }
+      if (h.tag && skipTags.includes(h.tag)) continue; // 2.79.1: the engine land ignores the hold made for it
       if (!live || Number(h.at || 0) > Number(live.at || 0)) live = h;
     }
   } catch {}
@@ -243,7 +245,8 @@ export function heavySlotsAt(root, env = process.env, profile = null) {
 export function engineSlotsAt(root, env = process.env) {
   if (off(env.STUDIO_ENGINE_SLOTS) && !isNum(env.STUDIO_ENGINE_SLOTS)) return 0;
   const c = liveCount(root, 'STUDIO_ENGINE_SLOTS', env);
-  return c.value === null ? 1 : Math.max(0, Math.floor(c.value));
+  const base = c.value === null ? 1 : Math.max(0, Math.floor(c.value));
+  try { return pushSlots(base, root, env); } catch { return base; } // 2.79.1 (4): an engine push, 2 slots if the RAM allows
 }
 /** A live game merge train's verify holding a slot now (a landing verify that isn't an engine land), or null. */
 const gameTrainVerifying = (holders) => holders.find((h) => h && h.landing && claimOf(h).kind === 'verify' && !claimOf(h).engine) || null;
@@ -648,7 +651,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
       // 2.77.3 (M6): a merge train waiting for a slot goes ahead of every waiter that isn't a landing (CPU class).
       if (!gameLanding && !(profile && claim.gpuOnly)) { const tw = trainWaiting(root, { env }); if (tw) ahead.push({ pid: tw.pid || 0, label: `a merge train waiting for the next free slot${tw.why ? ` (${tw.why.slice(0, 120)})` : ''}; STUDIO_TRAIN_SLOT_PRIORITY_MIN`, landing: true, train: true }); }
       // 2.78.0 (C2c): a flake triager's quiet re-run is running: nothing but a landing starts (any class: quiet means quiet).
-      if (!gameLanding) { const qh = quietHolding(root); if (qh) ahead.push({ pid: qh.pid || 0, label: `${qh.tag ? `${qh.why || 'a quiet hold'}${qh.owner ? ` (${qh.owner})` : ''}` : `a flake check's quiet re-run${qh.file ? ` of ${qh.file}` : ''}${qh.owner ? ` by ${qh.owner}` : ''}`} holds new heavy work back until it ends (at most until ${new Date(Number(qh.until)).toISOString().slice(11, 19)} UTC, STUDIO_FLAKE_HOLD_MIN)`, landing: true, hold: true }); }
+      if (!gameLanding) { const qh = quietHolding(root, engine ? { skipTags: ['engine-land'] } : {}); if (qh) ahead.push({ pid: qh.pid || 0, label: `${qh.tag ? `${qh.why || 'a quiet hold'}${qh.owner ? ` (${qh.owner})` : ''}` : `a flake check's quiet re-run${qh.file ? ` of ${qh.file}` : ''}${qh.owner ? ` by ${qh.owner}` : ''}`} holds new heavy work back until it ends (at most until ${new Date(Number(qh.until)).toISOString().slice(11, 19)} UTC, STUDIO_FLAKE_HOLD_MIN)`, landing: true, hold: true }); }
       adm = ahead.length ? { ok: false, area: 'queue', line: '' } : admit(claim, state, { slots: n, holders, kindMax: maxConcurrent(claim.kind, { root, env }), groupMax: maxConcurrent(capGroup(claim.kind), { root, env }), engineSlots });
       floor = floorCfg.gb > 0 ? floorFree(floorCfg.gb, { env, freemem, profile }) : { low: false };
       if (adm.ok && !ram.low && !floor.low) {

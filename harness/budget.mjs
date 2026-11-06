@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { spawnAgentSync } from './launch.mjs';
 import { cacheReadWeight, weightedTokens } from './token-weight.mjs';
+import { cutFor } from './spend-budget.mjs';
 
 export const BUDGET_FILE = path.join(REPO_ROOT, 'studio', 'budget.json');
 export const QUOTA_FILE = path.join(STUDIO_STATE_DIR, 'tool-quota.json');
@@ -347,7 +348,8 @@ export const exhaustedFor = (tool, model = '', now = Date.now()) => {
 export function pickTool(preferred, now = Date.now()) {
   const order = [...new Set([preferred, ...(readBudget().order || [])].filter(Boolean))];
   // 2.30o: an entry may be tool or tool:model; it is out when either it or its tool is marked.
-  return order.find((t) => !exhaustedUntil(t, now) && !(t.includes(':') && exhaustedUntil(t.split(':')[0], now))) || null;
+  // 2.79.1 (a): a tool whose spend budget cut it (harness/spend-budget.mjs) is passed over like one out of quota.
+  return order.find((t) => !exhaustedUntil(t, now) && !(t.includes(':') && exhaustedUntil(t.split(':')[0], now)) && !cutFor([t.split(':')[0]])) || null;
 }
 
 /**
@@ -396,7 +398,10 @@ export function customKey(cmd = '') {
  * gemini) or a word of its launch command, or a .studio/credit.json meter for one of those is at its guard.
  * Returns { stopped, by, until, why } (stopped false when nothing applies).
  */
-export function budgetStopFor({ tool = '', model = '', cmd = '' } = {}, now = Date.now(), env = process.env) {
+export function budgetStopFor({ tool = '', model = '', cmd = '', keys = [] } = {}, now = Date.now(), env = process.env) {
+  // 2.79.1 (a): a spend budget at 100% (harness/spend-budget.mjs) cuts new sessions on its tool or key: a money cap someone
+  // allowed set, so STUDIO_BUDGET_STOP=off doesn't lift it (raise or resume the budget).
+  { const cut = cutFor([tool, ...(keys || [])]); if (cut) return { stopped: true, by: 'spend budget', until: null, why: cut }; }
   if (/^(off|0|false|no)$/i.test(env.STUDIO_BUDGET_STOP || '')) return { stopped: false };
   const names = new Set();
   const add = (x) => { const v = String(x || '').toLowerCase().trim(); if (v && v !== 'unknown' && v !== 'custom') names.add(v); };
@@ -478,6 +483,14 @@ export function importCcusage({ run = spawnSync, now = Date.now() } = {}) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  // 2.79.1 (a): spend budgets per tool or key (harness/spend-budget.mjs): set <name> <usd> | clear <name> | resume <name>,
+  // each with --by <who> --why "<the owner's order>". `set <tool> --weekly …` and `clear <tool>` without --by are as before.
+  const spendCmd = (argv[0] === 'set' && /^\$?\d+(\.\d+)?$/.test(String(argv[2] || ''))) || argv[0] === 'resume' || (argv[0] === 'clear' && flag('by') && (await import('./spend-budget.mjs')).readBudgets().budgets[argv[1]]);
+  if (spendCmd) {
+    const r = await (await import('./spend-budget.mjs')).budgetCommand(argv[0], { name: argv[1], usd: argv[2], by: flag('by'), why: flag('why'), since: flag('since') });
+    (r.ok ? console.log : console.error)(r.text);
+    process.exit(r.ok ? 0 : 1);
+  }
   if (argv[0] === 'set') {
     const b = readBudget();
     const t = argv[1];
@@ -518,4 +531,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   console.log(cap ? `Daily cap: ${cap.toLocaleString()} tokens (input + output + cache reads at ${cacheReadWeight()}x); STUDIO_DAILY_TOKEN_CAP changes it, off turns it off.` : 'Daily cap: off (STUDIO_DAILY_TOKEN_CAP=off).');
   console.log(st.length ? st.map((s) => s.text).join('\n') : 'No tool has reported usage yet. Agents started with npm run agent or npm run studio:start report it.');
   console.log(`Order when a tool runs out: ${(readBudget().order || []).join(' → ')}`);
+  // 2.79.1 (a): spend in dollars per tool and key (Vertex's live usage log too), and each spend budget (none by default).
+  try { const sb = await import('./spend-budget.mjs'); await sb.spendPass(); for (const l of await sb.spendLines()) console.log(l); } catch (e) { console.log(`Spend: couldn't be read (${e.message})`); }
 }

@@ -229,7 +229,9 @@ process.exit(Number(process.env.UNITY_STUB_CODE ?? 0));
       // task done on a Unity-track task runs it ({task} filled in; this copy has no git branch to fill {branch}).
       fs.writeFileSync(gameJson, JSON.stringify({ ...(gameBefore ? JSON.parse(gameBefore) : {}), engines: { unity: { land: `node "${stub}" {task}` } } }, null, 2));
       const denv = { STUDIO_DONE_GAME_GATES: 'skip', STUDIO_VISUAL_GATE: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_UNCOMMITTED: 'allow', STUDIO_REACHABILITY: 'off', STUDIO_HOOKS_CHECK: 'off', STUDIO_WEAKENED_TESTS: 'off' };
-      const add = (title, track) => (run(dir, `node harness/task.mjs add "${title}" --role engine-porter${track ? ` --track ${track}` : ''}`, { ...base, ...denv }).stdout.match(/"id":\s*"(T-\d+)"/) || [])[1];
+      // 2.79.1 (c): an engine-porter task with no --track now takes the only engine's track; the "off the Unity track"
+      // task here is the old plain-lane kind, so it is added the 2.78.1 way (STUDIO_ENGINE_TRACK_INFER=off).
+      const add = (title, track) => (run(dir, `node harness/task.mjs add "${title}" --role engine-porter${track ? ` --track ${track}` : ''}`, { ...base, ...denv, ...(track ? {} : { STUDIO_ENGINE_TRACK_INFER: 'off' }) }).stdout.match(/"id":\s*"(T-\d+)"/) || [])[1];
       const tu = add('Plan the Unity port of the dock rules', 'engine:unity');
       const tw = add('Plan the web dock tooltip copy', null);
       run(dir, `node harness/task.mjs start ${tu} --agent porter-259d`, { ...base, ...denv });

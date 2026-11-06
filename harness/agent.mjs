@@ -47,7 +47,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
-import { emitSampled } from './telemetry.mjs';
+import { emitSampled, telemetryFull } from './telemetry.mjs';
 import { escalationFor } from './model-tiers.mjs';
 import { launchRoute } from './routing.mjs';
 import { sessionReasoningOnly, rerouteFor } from './reasoning-only.mjs';
@@ -62,7 +62,7 @@ import { AGY_STREAM_FLAGS, agyStreamOn, agyStreamWanted, userLine, driveAgyStrea
 import { savePatch } from './wip.mjs';
 import { laneList, laneEntries, readHolds } from './task-hold.mjs';
 import { regionOnlyFiles } from './lane-regions.mjs';
-import { engineLaunch } from './engine-tracks.mjs';
+import { engineLaunch, syncEngineTarget } from './engine-tracks.mjs';
 import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport, isLaneWorktree, LANES_DIR, laneLive } from './worktree.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { ownerOnlyStep } from './owner-only.mjs';
@@ -93,10 +93,28 @@ import { sessionOutcome, parkIfNoWork } from './session-outcome.mjs';
 import { writeAtomic } from './fsafe.mjs';
 import { selfIdentity, spawnedIdentity, pidAlive, recordAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
 import { gateEnv } from './gate-env.mjs';
+import { vertexModel, vertexConfigured, ensureProxy, proxyBase, sessionKey, sessionUsage } from './vertex.mjs';
+import { registeredTool, registryPrice } from './tool-registry.mjs';
+import { spendPass, sessionKeyNames } from './spend-budget.mjs';
 
 export const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
 const WIP_DIR = path.join(STUDIO_STATE_DIR, 'wip');
 const HEARTBEAT_MS = Number(process.env.STUDIO_HEARTBEAT_SEC || 120) * 1000;
+// 2.79.1 (d): the heartbeat still renews the claim and writes lastBeat into the session record every beat (what the War Room,
+// `agent list` and the stall watch read); the agent.heartbeat EVENT is written once per STUDIO_HEARTBEAT_EVENT_MIN (10)
+// minutes per session (it was 26% of the crew's events). 0 or STUDIO_TELEMETRY=full: one per beat, as before.
+export const heartbeatEventMs = (env = process.env) => {
+  const v = env.STUDIO_HEARTBEAT_EVENT_MIN;
+  const m = v === undefined || v === '' || !Number.isFinite(Number(v)) ? 10 : Math.max(0, Number(v));
+  return telemetryFull(env) ? 0 : m * 60000;
+};
+/** Is the next agent.heartbeat event due? `last` is when this session wrote its previous one (0: none yet). */
+export const heartbeatDue = (last, now = Date.now(), env = process.env) => !last || now - last >= heartbeatEventMs(env) - 1000;
+/** One agy follow-up (the launcher's onContinue): an event each only with STUDIO_TELEMETRY=full; the session end counts them (followUps). */
+export function agyContinueEvent(agent, task, { n, task: t, why, nudge }, env = process.env, emit = emitEvent) {
+  if (!telemetryFull(env)) return null;
+  return emit({ type: 'agent.agy_continue', agent, task: t || task || undefined, msg: `${agent}: ${nudge ? `no tool call or file write for STUDIO_AGY_NUDGE_MIN while ${t || 'its task'} is in progress` : `agy's turn ended with ${t || 'its task'} in progress`} (${why}); follow-up ${n} sent${nudge ? ' as a nudge' : ''}`.slice(0, 400), meta: { n, ...(nudge ? { nudge: true } : {}) } });
+}
 // Only a real limit or auth error counts (run #1: a normal end_turn and selftest output that mentioned
 // "quota" marked tools out and idled the studio for an hour). Read the end of a failed session, or a
 // final result object that says it is an error; never the agent's whole transcript.
@@ -186,9 +204,11 @@ export function onPath(name, env = process.env, platform = process.platform) {
  * (harness/aider-launch.mjs aiderProgram, which the launched argv uses too).
  */
 export function toolPreflight(tool, env = process.env, platform = process.platform) {
-  if (tool !== 'nim' && tool !== 'aider') return null;
+  if (tool !== 'nim' && tool !== 'aider' && tool !== 'vertex') return null;
   const prog = aiderProgram({ env, platform, onPath });
   if (!prog.cmd) return prog.why;
+  // 2.79.1 (a): vertex needs the key and the project in the studio's .env (the proxy reads them there; names only here).
+  if (tool === 'vertex') { const c = vertexConfigured(); if (!c.ok) return `${c.why}: add them to the studio's .env (the session never gets the key; the studio's Vertex proxy sends it)`; }
   if (tool === 'nim' && nimKeyMissing(env)) return 'NVIDIA_API_KEY is not set: add your NVIDIA NIM key to .env (the agent gets it as OPENAI_API_KEY; it is never printed)';
   return null;
 }
@@ -260,7 +280,7 @@ export function agyOptions(model = null, env = process.env) {
  * since 2.58.5 agy); cursor and grok take it as one argument, and a prompt too long for the command line becomes an
  * instruction to read the kickoff file.
  */
-export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], aider = {}, stream = false }) {
+export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], aider = {}, stream = false, engineDir = null, agent = null }) {
   const m = model && model !== 'unknown' ? model : null;
   // M1 (2.58.3): a session in a lane copy (.lanes/<agent>) reads studio/ and .studio/ through links to the main
   // checkout; Claude Code resolves the link and refuses a target outside its working directory ("outside the allowed
@@ -278,7 +298,7 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], a
       const bypass = process.env.STUDIO_CLAUDE_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
       // harness/allowlist.mjs: the same list the kickoff prints (2.30c). P-066: each pattern is its own argument after
       // the flag (Claude Code takes a space-separated list), so "Bash(git log *)" never depends on quoting.
-      const allowed = allowedToolsList();
+      const allowed = allowedToolsList({ engineDir }); // 2.79.1: an engine pass may git add / commit in its own worktree
       // 2.29.2: a turn ceiling, so no session runs 126 turns again (the refresh point, 40 turns, is in the kickoff).
       const ceiling = sessionLimits().ceilingTurns;
       return { argv: ['claude', '-p', ...(bypass ? ['--dangerously-skip-permissions'] : ['--permission-mode', 'acceptEdits', '--allowedTools', ...allowed]), ...dirs, '--output-format', 'stream-json', '--verbose', ...(ceiling > 0 ? ['--max-turns', String(ceiling)] : []), ...(m ? ['--model', m] : []), ...(effort ? ['--effort', effort] : [])], stdin: prompt };
@@ -325,6 +345,12 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], a
       // for NIM (aider's own commits skipped the studio's hooks and task flow; the crew set AIDER_AUTO_COMMITS=false).
       // 2.60.1: B-18 the resolved aider; B-20/B-21 aiderTail (no pretty output, ignore file, the brief as --read).
       return { argv: [aider.program || 'aider', '--model', `openai/${nimModel(m)}`, '--openai-api-base', NIM_API_BASE, '--message-file', file, '--yes-always', '--no-auto-commits', ...aiderTail(aider)] };
+    case 'vertex':
+      // 2.79.1 (a): aider (as for nim) on the studio's Vertex proxy (harness/vertex-proxy.mjs, 127.0.0.1): its key is the
+      // session tag session-<agent>, which the proxy reads as the session's name and never forwards; the Vertex key stays
+      // in the proxy. A model is google/<model> (vertexModel: never a role's Claude model). No streaming: the proxy reads
+      // each answer's usage for the session's spend.
+      return { argv: [aider.program || 'aider', '--model', `openai/${vertexModel(m)}`, '--openai-api-base', proxyBase(), '--openai-api-key', sessionKey(agent), '--message-file', file, '--yes-always', '--no-auto-commits', '--no-stream', '--no-show-model-warnings', ...aiderTail(aider)] };
     default:
       return null;
   }
@@ -697,7 +723,7 @@ export function agyCutShort({ tool, code, log }) {
   return null;
 }
 
-export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, model, cmd = null, exit = {} }) {
+export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, model, cmd = null, exit = {}, followUps = 0, nudges = 0 }) {
   // 2.76.0 (B-80): an agy session's real reason (its jetski / permission line) goes into its hand-back and its end.
   const agyLine = tool === 'agy' ? agyStopLine(usageLog ?? log) : null;
   const agySaid = agyLine ? ` agy said: "${agyLine}".` : '';
@@ -837,6 +863,18 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   }
   const modelReported = agyUse?.model && agyUse.model !== model ? agyUse.model : null;
   if (modelReported) model = modelReported;
+  // 2.79.1 (a): a session on the Vertex proxy: its usage and dollars are the proxy's lines for its session tag since it
+  // started (prompt in, total - prompt out: Gemini's thinking is billed), so the task's tokens and estimated dollars are
+  // recorded like the Claude API lane's (npm run tokens -- --by task; npm run budget).
+  let vertexUse = null;
+  if (tool === 'vertex' || s0.proxy === 'vertex') {
+    try { vertexUse = sessionUsage(agent, { since: Date.parse(s0.startedAt) || 0 }); } catch { vertexUse = null; }
+    if (vertexUse?.requests) { tok = { ...tok, tokensIn: vertexUse.tokensIn, tokensOut: vertexUse.tokensOut, cacheRead: 0, costUsd: vertexUse.costUsd }; costEstimated = true; }
+  }
+  // 2.79.1 (a): an owner-defined tool with its own price table (studio/tools.json "prices").
+  if (tok.costUsd === null && (tok.tokensIn || tok.tokensOut)) {
+    try { const row = registryPrice(registeredTool(tool), model); if (row) { tok = { ...tok, costUsd: Math.round((((Number(tok.tokensIn) || 0) * (Number(row.in) || 0)) + ((Number(tok.tokensOut) || 0) * (Number(row.out) || 0))) / 1e6 * 10000) / 10000 }; costEstimated = true; } } catch {}
+  }
   if (tok.costUsd === null && (tok.tokensIn || tok.tokensOut || tok.cacheRead)) {
     const est = estimateCost(tok, { model, tool, role });
     if (est !== null) { tok = { ...tok, costUsd: est }; costEstimated = true; }
@@ -848,7 +886,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   // 2.73.2 (B-72): recorded once: a stop's endAsDead (or the watch pass) may have recorded this session's end already.
   const firstEnd = claimSessionEnd(agent, s0.startedAt, 'launcher');
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
-  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
+  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(followUps ? { followUps, ...(nudges ? { nudges } : {}) } : {}), ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(Array.isArray(s0.keys) && s0.keys.length ? { keys: s0.keys } : {}), ...(vertexUse?.requests ? { usageFrom: 'vertex-proxy', requests: vertexUse.requests } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
   if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
     try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => postAsk({ agent: 'launcher', to: 'producer', task: outcome.task, subject: 'parked', msg: m }) }); } catch { /* the park is a help, never a crash */ }
   }
@@ -955,7 +993,12 @@ export function refreshRule({ oneTask = false, task = null, role = null, model =
  */
 export function launchStop({ role, tool, model, agent = null, task = null }, now = Date.now()) {
   const cmd = toolCmd(tool) || process.env[`STUDIO_${roleKey(role)}_CMD`] || (tool === 'custom' ? process.env.STUDIO_AGENT_CMD || '' : '');
-  const st = budgetStopFor({ tool, model, cmd }, now);
+  // 2.79.1 (a): the key names this session would bill (names only) and a fresh look at their spend budgets (75% page, 100%
+  // cut: harness/spend-budget.mjs), so a session isn't started on a tool or key that just reached its budget.
+  let keys = [];
+  try { const reg = registeredTool(tool); keys = sessionKeyNames({ tool, role, agent, keys: reg && cmd === reg.command ? reg.keyEnv : null, proxy: reg?.proxy || null }); } catch { keys = []; }
+  try { spendPass({ names: [tool, ...keys] }); } catch { /* measuring, never a blocker */ }
+  const st = budgetStopFor({ tool, model, cmd, keys }, now);
   if (!st.stopped) return null;
   const f = path.join(STUDIO_STATE_DIR, 'launch-skips.json');
   let seen = {};
@@ -1078,6 +1121,10 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const opts2 = { refreshes };
   // H-1 (2.58.5): a nim session runs a NIM model (--model, STUDIO_NIM_MODEL or the default), never the role's.
   if (tool === 'nim') model = nimModel(model);
+  // 2.79.1 (a): a vertex session runs a Gemini model on Vertex (vertexModel), never the role's Claude model.
+  if (tool === 'vertex') model = vertexModel(model);
+  // 2.79.1 (a): an owner-defined tool (studio/tools.json) runs only the roles its entry allows.
+  { const reg = registeredTool(tool); if (reg && !process.env[`STUDIO_TOOL_${roleKey(tool)}_CMD`] && !reg.roles.includes(String(role).toLowerCase())) return { ok: false, skipped: true, message: `Not started: ${tool} (studio/tools.json) runs ${reg.roles.join(', ')} sessions, not ${role}.` }; }
   // 2.30q (#7): every start path (first start, refresh relaunch, failover) checks the budget stop first.
   { const st = launchStop({ role, tool, model, agent, task }); if (st) return { ok: false, skipped: true, message: `Not started: budget stop (${st.why}).` }; }
   // 2.31.0: a task that used its own budget (harness/task-budget.mjs) gets no new session, refresh or failover.
@@ -1140,7 +1187,12 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // 2.30o: a tool in the budget order may carry its own launch command (hermes, gemini, grokbot ...):
   // STUDIO_TOOL_<TOOL>_CMD. It wins over the role's command, so a takeover changes the program too.
   const viaTool = toolCmd(tool);
-  let custom = viaTool || process.env[`STUDIO_${roleKey(role)}_CMD`] || (tool === 'custom' ? process.env.STUDIO_AGENT_CMD : null);
+  // 2.79.1 (a): the built-in vertex tool always runs aider on the studio's Vertex proxy: a role's command or the crew's
+  // STUDIO_TOOL_VERTEX_CMD stand-in (which sent its own key) is not used for it, and the log says so.
+  const reg = viaTool ? registeredTool(tool) : null;
+  const regRun = Boolean(reg && viaTool === reg.command);
+  const shadowed = tool === 'vertex' ? ['STUDIO_TOOL_VERTEX_CMD', `STUDIO_${roleKey(role)}_CMD`].filter((k) => process.env[k]) : [];
+  let custom = tool === 'vertex' ? null : viaTool || process.env[`STUDIO_${roleKey(role)}_CMD`] || (tool === 'custom' ? process.env.STUDIO_AGENT_CMD : null);
   let rehearsal = false;
   if (process.env.STUDIO_REHEARSAL === '1' && !custom) {
     custom = `node harness/rehearsal-agent.mjs {agent} {task} ok`;
@@ -1249,7 +1301,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // 2.60.1, aider sessions (nim, aider): B-18 the aider to start (STUDIO_AIDER_CMD, .studio/aider-venv, PATH; the
   // preflight below says why when there is none); B-20 the agent's .aiderignore and the task's brief as --read; in a
   // lane copy aider's own .aider* files are kept out of the lane's change.
-  const aiderRun = !custom && (tool === 'nim' || tool === 'aider');
+  const aiderRun = !custom && (tool === 'nim' || tool === 'aider' || tool === 'vertex');
   let aider = {};
   if (aiderRun) {
     const prog = aiderProgram({ env: process.env, onPath });
@@ -1269,9 +1321,14 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (held.holds) { agyStream = false; launchNotes.push(`agy stream mode skipped: .studio/${STREAM_RECORD} records that this agy refused it (${held.rec?.why || 'no reason recorded'}); ${held.why}. Delete .studio/${STREAM_RECORD} to try stream mode again; it is tried again by itself when agy changes.`); }
   }
   if (agyOneTurn && tool === 'agy') launchNotes.push('agy one-turn launch: the stream session before this one failed on its input format (see the line above); this session runs as one turn');
-  const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort, addDirs: [...(copy ? laneShareDirs() : []), ...(engineLane?.dir ? [engineLane.dir] : [])], aider, stream: agyStream });
+  const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort, addDirs: [...(copy ? laneShareDirs() : []), ...(engineLane?.dir ? [engineLane.dir] : [])], engineDir: engineLane?.dir || null, aider, stream: agyStream, agent });
   if (!custom && !cmd) dropStarting(agent);
-  if (!custom && !cmd) return { ok: false, message: `No launch command for tool "${tool}". Use --tool claude|codex|agy|cursor|grok|aider|nim, or set STUDIO_${roleKey(role)}_CMD (with {kickoff}, {agent}, {model}).` };
+  if (!custom && !cmd) {
+    // 2.79.1 (a): a name studio/tools.json lists but that doesn't count (not the owner's) says why.
+    let regWhy = '';
+    try { const r = (await import('./tool-registry.mjs')).readRegistry(); if ((r.listed || []).includes(String(tool).toLowerCase()) && !r.trusted) regWhy = ` studio/tools.json lists ${tool}, but it doesn't count: ${r.why}.`; } catch {}
+    return { ok: false, message: `No launch command for tool "${tool}".${regWhy} Use --tool claude|codex|agy|cursor|grok|aider|nim|vertex, a tool the owner defined in studio/tools.json (npm run tools), or set STUDIO_${roleKey(role)}_CMD (with {kickoff}, {agent}, {model}).` };
+  }
   fs.mkdirSync(AGENTS_DIR, { recursive: true });
   const logFile = path.join(AGENTS_DIR, `${agent}.log`);
   const out = fs.openSync(logFile, 'a');
@@ -1288,12 +1345,17 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // B-18 (2.60.1): a custom command for --tool nim (STUDIO_TOOL_NIM_CMD, the old venv workaround, or a role's command)
   // keeps nim's environment: the NIM key as OPENAI_API_KEY and AIDER_OPENAI_API_KEY (as a 'custom' tool it had no key).
   const nimCustom = Boolean(custom) && tool === 'nim' && !rehearsal;
-  const env = agentEnv({ tool: custom && !nimCustom ? 'custom' : tool, role, model, agent, notes: keyNotes, extra: { STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}), STUDIO_TASK_PIN: task || '' } });
+  // 2.79.1 (a): an owner-defined tool's session sees only its entry's key names (keyEnv); a proxied one gets the session tag.
+  const viaProxy = (tool === 'vertex' && !custom) || (regRun && reg.proxy === 'vertex');
+  const env = agentEnv({ tool: custom && !nimCustom && !regRun ? 'custom' : tool, role, model, agent, notes: keyNotes, ...(regRun ? { keys: reg.keyEnv, proxy: reg.proxy } : {}), extra: { STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}), STUDIO_TASK_PIN: task || '' } });
   for (const n of launchNotes) fs.writeSync(out, `[launcher] ${n}\n`);
+  if (shadowed.length) fs.writeSync(out, `[launcher] ${shadowed.join(' and ')} ${shadowed.length === 1 ? 'is' : 'are'} not used for --tool vertex: the built-in vertex tool runs aider on the studio's Vertex proxy (remove STUDIO_TOOL_VERTEX_CMD from .env)\n`);
+  if (regRun) fs.writeSync(out, `[launcher] ${tool} is an owner-defined tool (studio/tools.json, ${reg.provider}): its session sees ${reg.keyEnv.length ? reg.keyEnv.join(', ') : 'no key'} of the keys (names only)${reg.proxy ? `, and goes through the studio's ${reg.proxy} proxy` : ''}\n`);
+  if (viaProxy) fs.writeSync(out, `[launcher] Vertex: through the studio's proxy ${proxyBase()} as ${sessionKey(agent)} (the session never gets VERTEX_API_KEY; usage per request in .studio/vertex-usage.jsonl)\n`);
   if (nimCustom) fs.writeSync(out, `[launcher] the custom command for --tool nim gets nim's environment: the NIM key as OPENAI_API_KEY and AIDER_OPENAI_API_KEY (value not shown)\n`);
   // B-37 (2.60.1): Python holds its output in a buffer when stdout is a file, so an aider that died left nothing in the
   // log; unbuffered, and UTF-8 (a Windows code page can't print every character aider prints).
-  if (aiderRun || nimCustom) {
+  if (aiderRun || nimCustom || regRun) {
     env.PYTHONUNBUFFERED ||= '1';
     env.PYTHONIOENCODING ||= 'utf-8';
   }
@@ -1319,13 +1381,20 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // for it). A custom command is the user's own line for the shell; the values filled into it are quoted for that shell.
   let line = null;
   let plan = null;
+  // 2.79.1 (a): the studio's Vertex proxy, started now when it isn't listening (detached; npm run studio:stop stops it).
+  let proxyErr = null;
+  if (viaProxy && !rehearsal) {
+    const pre = tool === 'vertex' ? toolPreflight(tool, env) : (vertexConfigured().ok ? null : vertexConfigured().why);
+    if (!pre) { try { const px = await ensureProxy(); if (!px.ok) proxyErr = `the studio's Vertex proxy: ${px.why}`; else if (px.started) fs.writeSync(out, `[launcher] started the studio's Vertex proxy on 127.0.0.1:${px.port} (pid ${px.pid})\n`); } catch (e) { proxyErr = `the studio's Vertex proxy couldn't start: ${e.message}`; } } else proxyErr = pre;
+  }
   try {
+    if (proxyErr) throw new Error(proxyErr);
     if (custom) {
       if (nimCustom && nimKeyMissing(env)) throw new Error('NVIDIA_API_KEY is not set: add your NVIDIA NIM key to .env (the agent gets it as OPENAI_API_KEY; it is never printed)');
       // H-9: in a copy, a script the line names that isn't committed is run from the main checkout (absolute path).
       const loc = copy ? localizeCommand(custom, { from: REPO_ROOT, to: copy.dir }) : { template: custom, values: {}, moved: [] };
       if (loc.moved.length) fs.writeSync(out, `[launcher] not in this agent's copy, run from the main checkout: ${loc.moved.join(', ')}\n`);
-      line = fillCommand(loc.template, { kickoff: file, agent, model, role, task: task || '', mainRoot: REPO_ROOT, addDirs: copy ? laneShareDirs().flatMap((d) => ['--add-dir', d]) : [], ...loc.values });
+      line = fillCommand(loc.template, { kickoff: file, agent, model, role, task: task || '', mainRoot: REPO_ROOT, addDirs: copy ? laneShareDirs().flatMap((d) => ['--add-dir', d]) : [], ...(viaProxy ? { proxyBase: proxyBase(), sessionKey: sessionKey(agent) } : {}), ...loc.values });
     }
     else if (toolPreflight(tool, env)) throw new Error(toolPreflight(tool, env));
     else plan = launchPlan(cmd.argv, { env, cwd, promptAt: cmd.promptAt, promptFile: file });
@@ -1363,7 +1432,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
         agent, child, logFile, from: logStart, firstMessage: cmd.stdin,
         decide: () => taskStillOpen({ agent, role, task, startedAt, locks: listLocks(), events: readRecentEvents(5000), doneIds: parseNextQueue().done.map((t) => t.id), studioStop: readStop(), agentStop: stopMark(agent), refresh: readFlag(agent) }),
         note: (l) => { try { fs.appendFileSync(logFile, `[launcher] ${l}\n`); } catch {} },
-        onContinue: ({ n, task: t, why, nudge }) => emitEvent({ type: 'agent.agy_continue', agent, task: t || task || undefined, msg: `${agent}: ${nudge ? `no tool call or file write for STUDIO_AGY_NUDGE_MIN while ${t || 'its task'} is in progress` : `agy's turn ended with ${t || 'its task'} in progress`} (${why}); follow-up ${n} sent${nudge ? ' as a nudge' : ''}`.slice(0, 400), meta: { n, ...(nudge ? { nudge: true } : {}) } }),
+        onContinue: (c) => agyContinueEvent(agent, task, c),
         // 2.78.1: the progress nudge reads the stall check's progress and stays below its no-progress limit.
         progressAt: () => Date.parse(readStall(agent)?.lastProgressAt || '') || 0,
         stallMin: () => stallLimits(role).stallMin,
@@ -1377,12 +1446,16 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     child.stdin.end(cmd.stdin);
   }
   clearFlag(agent);
-  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, ...(task ? { pinned: task } : {}), lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, logFrom, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
+  // 2.79.1 (a): proxy (the Vertex proxy serves only running sessions it names) and keys (the key names it bills, for spend).
+  let billKeys = [];
+  try { billKeys = sessionKeyNames({ tool, role, agent, keys: regRun ? reg.keyEnv : null, proxy: viaProxy ? 'vertex' : null }); } catch {}
+  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, ...(viaProxy ? { proxy: 'vertex' } : {}), keys: billKeys, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, ...(task ? { pinned: task } : {}), lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, logFrom, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
   resetStall(agent); // 2.76.0 (B-83): the last session's stall record never judges this one
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane } });
   // 2.73.1 (B-66): when this launcher ends the agent itself (stall, idle, budget), so the end records why.
   let killedBy = null;
+  let lastBeatEvent = 0;
   const beat = setInterval(() => {
     // 2.73.2 (B-74): limits changed in .env since this launcher started (STUDIO_STALL_MIN, ...) apply from this beat.
     reloadEnvIfChanged({ by: `launcher ${agent}` });
@@ -1458,7 +1531,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     }
     // 2.64.0: route what happened since the last beat to the tasks' inboxes (harness/threads.mjs; shadow mode logs only).
     try { sweepThreads({ lockMs: 1000 }); } catch { /* routing is a help, never a crash */ }
-    emitEvent({ type: 'agent.heartbeat', agent, model, status: 'running', msg: `${agent} alive${wip ? `: ${wip}` : ''}${s.now ? ` (now: ${s.now})` : ''}` });
+    const evMs = heartbeatEventMs();
+    if (heartbeatDue(lastBeatEvent)) {
+      lastBeatEvent = Date.now();
+      emitEvent({ type: 'agent.heartbeat', agent, model, status: 'running', msg: `${agent} alive${wip ? `: ${wip}` : ''}${s.now ? ` (now: ${s.now})` : ''}`, meta: { everyMin: Math.max(HEARTBEAT_MS, evMs) / 60000 } });
+    }
   }, HEARTBEAT_MS);
   let exitSignal = null;
   let spawnError = null;
@@ -1516,7 +1593,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
       else streamFail = null;
     } catch { streamFail = null; }
   }
-  const result = cleanUp(agent, { code, log, usageLog, role, tool: session.tool, model, cmd: session.tool === 'custom' ? custom : null, exit: { signal: exitSignal, killedBy, spawnError, at: exitedAt, ranMs: Date.now() - t0 } });
+  const result = cleanUp(agent, { code, log, usageLog, role, tool: session.tool, model, followUps: agyDriver?.state?.continues || 0, nudges: agyDriver?.state?.nudges || 0, cmd: session.tool === 'custom' ? custom : null, exit: { signal: exitSignal, killedBy, spawnError, at: exitedAt, ranMs: Date.now() - t0 } });
   // 2.78.1 (B-118): the copies are removed below, unless the next session under this name (a failover, the one-turn
   // relaunch) works on in them: ownCopy.
   const atClaimDir = atClaim?.branch && atClaim.dir ? path.join(REPO_ROOT, atClaim.dir) : null;
@@ -2088,7 +2165,7 @@ export function agentLog(agent, tail = 60, { raw = false } = {}) {
  * 2.77.0 (u, P5.1): the engine worktree of a launched engine pass ({ dir, branch, note }), or null. An error becomes the
  * prompt's note and an engine.lane event: the session still starts (its brief says what to fix), never a crash.
  */
-function launchEngineLane({ task, agent, role = null }) {
+export function launchEngineLane({ task, agent, role = null }) {
   if (!task || /^(off|0|false|no)$/i.test(String(process.env.STUDIO_ENGINE_LANES || ''))) return null;
   try {
     const r = engineLaunch({ task, agent, role });
@@ -2096,6 +2173,16 @@ function launchEngineLane({ task, agent, role = null }) {
     // 2.78.1 (e, B-119): no worktree means no code access: the launch is refused (runAgent), it never runs blind.
     if (r.error) { emitEvent({ type: 'engine.lane', agent, task, status: 'warn', msg: `${agent}: no engine worktree for ${task}: ${r.error}`.slice(0, 400) }); return { note: `Your task is an engine pass, but its worktree couldn't be made: ${r.error}. Fix that first, or hand it back with a note.`, refuse: r.error }; }
     emitEvent({ type: 'engine.lane', agent, task, msg: `${agent}: ${task} works in ${r.dir.split(path.sep).join('/')} on ${r.branch}${r.created ? ' (new)' : ''}`.slice(0, 400), meta: { dir: r.dir, branch: r.branch, repo: r.repo } });
+    r.note = `${r.note || ''} You may run git -C ${r.dir.split(path.sep).join('/')} add / commit / status / diff / log there (not push, not checkout of another branch).`.trim();
+    // 2.79.1: the engine's target branch is merged into the pass worktree first; a conflict goes in the brief and an event.
+    try {
+      const sy = syncEngineTarget({ task, dir: r.dir, repo: r.repo });
+      if (sy?.merged || sy?.note) {
+        if (sy.merged) emitEvent({ type: 'engine.target_merged', agent, task, msg: `${task}: ${sy.note}`.slice(0, 400), meta: { dir: r.dir } });
+        else if (!sy.upToDate) emitEvent({ type: 'engine.target_conflict', agent, task, to: 'producer', status: 'warn', msg: `${task}: ${sy.note}`.slice(0, 500), meta: { dir: r.dir, conflicts: sy.conflicts } });
+        r.note = `${r.note || ''}\n${sy.note}`.trim();
+      }
+    } catch { /* the session starts on the worktree as it is */ }
     return r;
   } catch (e) { return { note: `Your task is an engine pass, but its worktree couldn't be made (${e.message}).` }; }
 }
@@ -2241,6 +2328,14 @@ export function startAgent(opts, { detach = false } = {}) {
   }
   // H-1 (2.58.5): a nim session never inherits the role's (or a rescue's, escalation's, reroute's) non-NIM model.
   if (tool === 'nim') model = nimModel(model);
+  // 2.79.1 (a): vertex runs a Gemini model on Vertex; an owner-defined tool its entry's first model unless --model names one,
+  // and only the roles its entry allows (said before anything starts, so the orchestrator sees it at once).
+  if (tool === 'vertex') model = vertexModel(model);
+  {
+    const reg = process.env[`STUDIO_TOOL_${roleKey(tool)}_CMD`] ? null : registeredTool(tool);
+    if (reg && !reg.roles.includes(String(role).toLowerCase())) return { ok: false, message: `Not started: ${tool} (studio/tools.json) runs ${reg.roles.join(', ')} sessions, not ${role}.` };
+    if (reg && !opts.model && reg.models.length && !reg.models.includes(model)) model = reg.models[0];
+  }
   if (tool === 'codex' && model === 'unknown' && !process.env[`STUDIO_${roleKey(role)}_CMD`]) return { ok: false, message: 'Codex needs a model (--model, or STUDIO_AGENT_MODEL / STUDIO_<ROLE>_MODEL): its default is refused on ChatGPT logins.' };
   // 2.30i: NIM's free tier serves one session at a time (Marina: parallel NIM sessions all got 429).
   if (isNim(model, tool)) {

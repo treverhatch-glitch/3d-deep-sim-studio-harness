@@ -2,7 +2,8 @@
  * harness/owner-acts.mjs — 2.79 (c): the one list of what stays the owner's own, always.
  *
  * The owner's words (2026-11-06): "make it so Patch can sign off on everything and not need me", with these left out:
- * real money, deleting data, keys and credentials, publishing outside the PC, and turning beta mode off. Beta mode
+ * real money, deleting data, keys and credentials, publishing outside the PC, and turning beta mode off (2.79.1: and
+ * defining the tools the harness launches, studio/tools.json). Beta mode
  * (harness/beta-mode.mjs), the owner proxy (harness/owner-proxy.mjs), an outside signer and every launched session are
  * refused these, with the reason; only a person's own terminal does them. This file is that list and nothing else (no
  * imports), so permission.mjs, beta-mode.mjs, owner-proxy.mjs, delegation.mjs and ask.mjs all read the same one.
@@ -20,6 +21,10 @@ export const OWNER_ONLY = Object.freeze([
     rx: /\b(api[- ]?keys?|access tokens?|auth tokens?|credentials?|passwords?|secrets?|private keys?|owner key|ssh keys?|keymap|webhook (?:url|secret))\b/i }),
   Object.freeze({ act: 'publish', what: 'publishing outside the PC', actions: ['publish', 'deploy'],
     rx: /\b(publish(?:es|ed|ing)?|deploy(?:s|ed|ing)? (?:to|on) (?:the )?(?:web|internet|store|production|public|server)|release (?:it |the game )?(?:to|on) (?:the )?(?:store|public|steam|itch)|upload(?:s|ed|ing)? (?:it |the build )?to (?:steam|itch|the store|the web|a server))\b/i }),
+  // 2.79.1 (a): defining or changing a tool the harness launches (studio/tools.json: its command, key names, models,
+  // prices, roles), like keys and money. Launching a registered tool and setting spend budgets are not on this list.
+  Object.freeze({ act: 'tools', what: 'defining or changing an owner tool (studio/tools.json: its command, keys, models or prices)', actions: ['tools', 'tool-define', 'define-tool'],
+    rx: /\bstudio\/tools\.json\b|\b(?:defin|regist)(?:e|es|ed|er|ers|ing) (?:a |an |the )?(?:new )?(?:owner[- ])?tool\b|\btool registry\b/i }),
   Object.freeze({ act: 'beta-off', what: 'turning beta mode off', actions: ['beta-off'],
     rx: /\bbeta(?: mode)? off\b|\bturn(?:s|ing)? (?:off beta|beta(?: mode)? off)\b|\bend(?:s|ing)? beta mode\b/i }),
 ]);

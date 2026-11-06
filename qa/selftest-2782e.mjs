@@ -164,8 +164,8 @@ export async function selftest2782E({ dir, report, tmpRoot, root }) {
         && plain.j && plain.j.r === null
         && /npm run task -- track T-219 engine:<godot\|unity>/.test(String(two.j?.r?.error || '')) && !two.j?.rec,
       JSON.stringify({ one: one.j || out(one).slice(-300), plain: plain.j || out(plain).slice(-200), two: two.j || out(two).slice(-300), worker: out(worker).slice(-200) })]);
-    // The command: a person sets it, a worker can't.
-    const id = (node(S, ['harness/task.mjs', 'add', 'Port the gates scene', '--role', 'engine-porter'], env).stdout.match(/"id":\s*"([A-Z]+-\d+)"/) || [])[1];
+    // The command: a person sets it, a worker can't. (2.79.1: the add is pinned to the old no-default-track behaviour.)
+    const id = (node(S, ['harness/task.mjs', 'add', 'Port the gates scene', '--role', 'engine-porter'], { ...env, STUDIO_ENGINE_TRACK_INFER: 'off' }).stdout.match(/"id":\s*"([A-Z]+-\d+)"/) || [])[1];
     const byWorker = id ? node(S, ['harness/task.mjs', 'track', id, 'engine:godot', '--by', 'builder-3'], { ...env, STUDIO_LOCK_OWNER: 'builder-3' }) : { status: -1 };
     const byPerson = id ? node(S, ['harness/task.mjs', 'track', id, 'engine:godot', '--by', 'pat'], env) : { status: -1 };
     const rec = probe(S, `const et = await import(${u(S, 'harness/engine-tracks.mjs')}); console.log(JSON.stringify({ rec: et.engineTask(${JSON.stringify(id || '')}, { root: process.cwd(), events: [] }) }));`, env);

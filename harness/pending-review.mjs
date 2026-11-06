@@ -25,7 +25,6 @@ export function readPending() {
 }
 const save = (p) => { fs.mkdirSync(path.dirname(PENDING_FILE), { recursive: true }); fs.writeFileSync(PENDING_FILE, `${JSON.stringify(p, null, 2)}\n`); };
 export const listPending = () => readPending().items.filter((i) => !i.closed);
-export const isPending = (id) => listPending().some((i) => i.task === id);
 
 export function openPending({ task, title, by, model, reason, missing, type, patch }) {
   const p = readPending();

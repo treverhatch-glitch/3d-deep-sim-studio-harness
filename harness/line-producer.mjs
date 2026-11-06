@@ -191,6 +191,9 @@ export function linePlan(f) {
   if (rig.known) {
     if (rig.cpuHold) { rigCap = builders.length; rigWhy = `CPU ${Math.round(rig.cpuBusy * 100)}% busy (STUDIO_LINE_CPU_BUSY_PCT ${rig.cpuBusyPct}): no new builder until it drops`; } else if (Number.isFinite(rig.byRam)) { rigCap = rig.byRam; rigWhy = rig.why || `RAM room for ${rig.byRam}`; }
   }
+  // 2.79.1 (3.2): while an engine land waits for RAM, the builder cap steps down one at a time (engine-ram.mjs); none is stopped.
+  // It goes through rigCap, which the supervisor holds new builders by.
+  if (Number.isFinite(f.engineHold?.cap) && (rigCap === null || f.engineHold.cap < rigCap)) { rigCap = Math.max(0, f.engineHold.cap); rigWhy = `an engine land waits for RAM: builder cap stepped down to ${rigCap} (${f.engineHold.why})`; }
   const target = rigCap === null ? paceCap : Math.min(paceCap, rigCap);
   const readyB = tasks.filter((t) => t.state === 'ready' && t.role === 'builder');
   const blocked = tasks.filter((t) => t.state === 'blocked').map((t) => ({ task: t.id, role: t.role, kind: t.block.kind, why: t.block.why, fix: t.block.fix || '', ...(t.block.mechanical ? { mechanical: true } : {}), ...(t.block.fixed ? { fixed: t.block.fixed } : {}) }));
@@ -219,6 +222,8 @@ export function linePlan(f) {
   const boardIdx = new Map(tasks.map((t, i) => [t.id, i]));
   const order = [];
   const take = (t) => { if (t && !order.includes(t.id)) order.push(t.id); };
+  // 2.79.1 (4): an engine push: the pushed engine's ready porters go first (up to every builder slot), the game's work after.
+  if (f.enginePush?.engine) for (const t of ready) if (t.role === 'engine-porter' && String(t.meta?.track || '').replace(/^engine:/, '') === f.enginePush.engine) take(t);
   for (const c of cbs) take(ready.find((t) => t.id === c.task));
   const expNeed = Math.max(0, slots - runningExp.length);
   if (expNeed) {
@@ -226,6 +231,16 @@ export function linePlan(f) {
     ready.filter((t) => exp.includes(t)).sort((a, b) => phaseRank(a) - phaseRank(b) || PRI(a.priority) - PRI(b.priority) || boardIdx.get(a.id) - boardIdx.get(b.id)).slice(0, expNeed).forEach(take);
   }
   ready.slice().sort((a, b) => PRI(a.priority) - PRI(b.priority) || boardIdx.get(a.id) - boardIdx.get(b.id)).forEach(take);
+  // 2.79.1 (3.1): a blocked item blocks only what depends on it. A lane-less ready task holds the whole game, so no other builder
+  // would run beside it (the freeze: 10 ready, 1 running): it is skipped while other work can run, and the Producer is asked
+  // once to scope it. With nothing else to run it may still go alone.
+  const orderBeforeSkip = order.slice(); // remote workers have their own copies: a lane-less task is fine there
+  const skip = [];
+  if (target > 1 && f.lanes?.unscoped?.length) {
+    const unscoped = new Set(f.lanes.unscoped.map((u) => u.task));
+    const otherWork = builders.length > 0 || ready.some((t) => t.role === 'builder' && !unscoped.has(t.id));
+    if (otherWork) for (const id of unscoped) { skip.push(id); const i = order.indexOf(id); if (i >= 0) order.splice(i, 1); }
+  }
   const routes = {};
   for (const t of tasks.filter((x) => x.state !== 'blocked' || cbSet.has(x.id))) routes[t.id] = f.pools ? poolRoute(t, { chainBreaker: cbSet.has(t.id), pools: f.pools }) : routeTask(t, { meta: t.meta || {}, type: t.type, chainBreaker: cbSet.has(t.id), failed: t.failed || 0, started: Boolean(t.started), models: f.models || {} });
   // Plans that can't run: for the Producer.
@@ -247,11 +262,12 @@ export function linePlan(f) {
   const why = [`pace ${f.pace?.label || '?'} allows ${paceCap} builder${paceCap === 1 ? '' : 's'}`, rigCap === null ? rigWhy : `rig: ${rigWhy}`, `${builders.length} running`, `${readyB.length} ready`, blocked.length ? `${blocked.length} blocked (${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(', ')})` : null].filter(Boolean).join('; ');
   // 2.77.0 (o): remote (cloud) workers: remote-eligible ready tasks offered when the local builders are at their target.
   let remote = null;
-  if (f.remote && f.remote.remotePlan) remote = f.remote.remotePlan(f.remote, { order, target, running: builders.length, roleOf: (id) => byTask.get(id)?.role });
+  if (f.remote && f.remote.remotePlan) remote = f.remote.remotePlan(f.remote, { order: orderBeforeSkip, target, running: builders.length, roleOf: (id) => byTask.get(id)?.role });
   return {
     builders: { running: builders.length, target, paceCap, rigCap, ready: readyB.length, why },
     ...(remote ? { remote } : {}),
     order,
+    skip,
     routes,
     blocked,
     chainBreakers: cbs.map((c) => ({ ...c, state: byTask.get(c.task)?.state || 'unknown', ...(byTask.get(c.task)?.block ? { why: byTask.get(c.task).block.why } : {}) })),
@@ -623,8 +639,18 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
   if (mode === 'off') return { mode, off: true, why: 'STUDIO_LINE_PRODUCER=off' };
   try {
     const f = await gatherFacts({ now, dryRun, env, deps });
-    const p = linePlan(f);
     const acting = !dryRun && mode === 'on';
+    // 2.77.0 (u, P5.2/P5.3): engine trains in quiet windows. 2.79.1 (3.2): and the room an engine land needs (before the plan:
+    // its builder-target step-down is part of it).
+    let engines = [];
+    try { engines = await enginePass({ now, env, dryRun: !acting, rig: f.rig, deps }); } catch (e) { engines = [{ error: e.message }]; }
+    // 2.79.1 (4): an engine push (npm run mode -- engine-push): that engine's porters first, the machine's priority for its lands.
+    let enginePush = null;
+    try { const pm = await import('./mode.mjs'); const ep = pm.enginePushOf(pm.readMode(), now); enginePush = ep ? { engine: ep.engine, until: ep.until || null, by: ep.by || null } : null; } catch { enginePush = null; }
+    f.enginePush = enginePush;
+    let engineHold = null;
+    try { engineHold = await engineRoomPass({ now, env, act: acting, f, deps }); } catch (e) { engineHold = { hold: false, why: `error: ${e.message}` }; }
+    const p = linePlan({ ...f, engineHold });
     let slice = null;
     if (p.expansion.askSlice && acting) {
       const ph = p.expansion.askSlice;
@@ -641,9 +667,9 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
     // background fetch of remote/* starts when one is due, and a changed offer is one remote.offer event.
     let remotePass = null;
     if (acting && p.remote?.on) { try { remotePass = await (await import('./remote-workers.mjs')).remotePass({ env, now, plan: p.remote, ...(deps.spawnFetch ? { spawnFetch: deps.spawnFetch } : {}), ...(deps.root ? { root: deps.root } : {}) }); } catch {} }
-    // 2.77.0 (u, P5.2/P5.3): engine trains in quiet windows.
-    let engines = [];
-    try { engines = await enginePass({ now, env, dryRun: !acting, rig: f.rig, deps }); } catch (e) { engines = [{ error: e.message }]; }
+    // 2.79.1 (3.1): a blocked item is paged once and the rest runs.
+    let paged = [];
+    if (acting) { try { paged = pagePlanBlockers({ p, f, now, deps }); } catch { paged = []; } }
     // 2.78.1 (f): the chain-breaker push (a quiet hold while a chain-breaker waits for the train) and engine twins.
     let chainPush = null;
     try { chainPush = await chainBreakerPush({ chainBreakers: p.chainBreakers, now, env, act: acting, deps: { ...(deps.root ? { root: deps.root } : {}), ...(deps.trainQueue ? { trainQueue: deps.trainQueue } : {}), ...(deps.heavy ? { heavy: deps.heavy } : {}) } }); } catch (e) { chainPush = { on: false, holding: false, why: `error: ${e.message}` }; }
@@ -673,6 +699,10 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
       engines,
       lanes: f.lanes ? (f.lanes.error ? { error: f.lanes.error } : { mode: f.lanes.mode, set: f.lanes.set, unscoped: f.lanes.unscoped, running: f.lanes.running, stacked: f.lanes.stacked, shared: f.lanes.shared }) : null,
       chainPush,
+      engineHold: engineHold ? { hold: Boolean(engineHold.hold), why: engineHold.why, cap: engineHold.cap ?? null, land: engineHold.land?.engine || null, until: engineHold.until ? new Date(engineHold.until).toISOString() : null } : null,
+      skip: p.skip,
+      enginePush,
+      paged,
       twins,
       tester,
     };
@@ -698,6 +728,9 @@ export function summaryLine(s) {
     s.fixed?.length ? `fixed ${s.fixed.length}` : null,
     s.reasons?.length ? 'a Producer note is open' : null,
     s.chainPush?.holding ? `holding new builder verifies for chain-breaker ${s.chainPush.task}` : null,
+    s.enginePush ? `ENGINE PUSH ${s.enginePush.engine}${s.enginePush.until ? ` until ${s.enginePush.until.slice(11, 16)} UTC` : ''}: its porters first, the game gets what is left` : null,
+    s.engineHold?.hold ? `holding new verifies for the ${s.engineHold.land} land: ${s.engineHold.why}` : null,
+    s.skip?.length ? `skipping lane-less ${s.skip.join(', ')}` : null,
     ...(s.twins?.checked || []).filter((r) => r.need).map((r) => `${r.engine} twin ${r.added || '(to add)'} for ${r.task}`),
     ...(s.engines || []).filter((e) => e.queued || e.running).map((e) => `${e.engine} train: ${e.running ? 'running' : e.started ? 'started' : `${e.queued} queued, waits (${e.why})`}`),
     s.tester?.line || null,
@@ -725,6 +758,66 @@ export async function testerPass({ now = Date.now(), env = process.env, act = tr
   return { ...run, wire, line };
 }
 
+// ---- 2.79.1 (3.1): page once, keep going --------------------------------------------------------------------------
+
+const PAGED_FILE = () => path.join(LINE_DIR(), 'paged.json');
+/**
+ * A blocker is told once: a parked/owner-only chain-breaker pages the orchestrator (line.blocker_paged, per task and cause),
+ * lane-less ready tasks ask the Producer to scope them (line.scope_asked, per task). The plan keeps running meanwhile.
+ * Returns the keys paged now.
+ */
+export function pagePlanBlockers({ p, f, now = Date.now(), deps = {} } = {}) {
+  const seen = readJson(PAGED_FILE(), {}) || {};
+  const emit = deps.emit || emitEvent;
+  const out = [];
+  const once = (key, ev) => { if (seen[key]) return; seen[key] = new Date(now).toISOString(); out.push(key); try { emit({ agent: LINE_AGENT, ...ev }); } catch {} };
+  const byTask = new Map((f.tasks || []).map((t) => [t.id, t]));
+  for (const c of p.chainBreakers || []) {
+    const t = byTask.get(c.task);
+    if (t?.state !== 'blocked' || !OWNER_KINDS.has(t.block?.kind)) continue;
+    once(`blocker:${c.task}:${t.block.kind}`, { type: 'line.blocker_paged', to: 'orchestrator', status: 'warn', task: c.task, msg: `Line Producer: chain-breaker ${c.task} (${c.n} task${c.n === 1 ? '' : 's'} wait on it) can't start: ${t.block.why}. ${t.block.fix ? `Fix: ${t.block.fix}. ` : ''}Everything that doesn't wait on it keeps running; this is said once.`.slice(0, 600), meta: { kind: t.block.kind, waiting: c.waiting } });
+  }
+  const un = (f.lanes?.unscoped || []).filter((u) => (p.skip || []).includes(u.task));
+  if (un.length) {
+    const fresh = un.filter((u) => !seen[`scope:${u.task}`]);
+    if (fresh.length) {
+      for (const u of fresh) seen[`scope:${u.task}`] = new Date(now).toISOString();
+      out.push(...fresh.map((u) => `scope:${u.task}`));
+      try { emit({ agent: LINE_AGENT, type: 'line.scope_asked', to: 'producer', status: 'warn', msg: `Line Producer: ${fresh.map((u) => u.task).join(', ')} ${fresh.length === 1 ? 'has' : 'have'} no lane, so ${fresh.length === 1 ? 'it is' : 'they are'} skipped while other builders can run (a lane-less builder holds the whole game). Scope ${fresh.length === 1 ? 'it' : 'them'}: npm run task -- lane <ID> <folders> --by <you>. Asked once.`.slice(0, 600), meta: { tasks: fresh.map((u) => u.task) } }); } catch {}
+    }
+  }
+  if (out.length) {
+    const keep = Object.entries(seen).sort((a, b) => String(b[1]).localeCompare(String(a[1]))).slice(0, 500);
+    try { fs.mkdirSync(LINE_DIR(), { recursive: true }); writeAtomic(PAGED_FILE(), `${JSON.stringify(Object.fromEntries(keep))}\n`); } catch {}
+  }
+  return out;
+}
+
+// ---- 2.79.1 (3.2): room for an engine land -------------------------------------------------------------------------------
+
+/**
+ * The Line Producer's half of engine-ram.mjs: which engine land is queued or near, the free RAM now, who holds the heavy
+ * slots; then hold new verifies, step the builder target down, or release (engineHoldPlan). "Near": an in-progress
+ * engine-porter task whose porter ran `task done --check` in the last STUDIO_ENGINE_NEAR_MIN (30) minutes.
+ */
+export async function engineRoomPass({ now = Date.now(), env = process.env, act = true, f, deps = {} } = {}) {
+  const er = await import('./engine-ram.mjs');
+  const et = await import('./engine-tracks.mjs');
+  const ut = await import('./unity-train.mjs');
+  const { mainRoot } = await import('./worktree.mjs');
+  const root = deps.root || mainRoot();
+  const targets = deps.engineTargets || et.engineTargets({ root }).filter((t) => t.land);
+  if (!targets.length) return { hold: false, why: 'no engine target with a land command' };
+  const nearMs = Math.max(1, num(env.STUDIO_ENGINE_NEAR_MIN, 30)) * 60000;
+  const events = deps.events || readRecentEvents(5000);
+  const porters = (f.tasks || []).filter((t) => t.role === 'engine-porter' && t.state === 'running');
+  const near = (engine) => porters.some((t) => String(t.meta?.track || '').replace(/^engine:/, '') === engine && events.some((e) => e.type === 'task.done_check' && e.task === t.id && now - Date.parse(e.ts) < nearMs));
+  let freeGb = Number.isFinite(deps.freeGb) ? deps.freeGb : Number.isFinite(f.rig?.freeRamGb) ? f.rig.freeRamGb : null;
+  if (!Number.isFinite(freeGb) && deps.freeGb === undefined) { try { freeGb = (await import('./ram.mjs')).ramCheck({}, env).freeGb; } catch { freeGb = null; } }
+  const builders = (f.sessions || []).filter((s) => s.running && s.role === 'builder').length;
+  return er.engineHoldPass({ now, env, act, builders, owner: LINE_AGENT, deps: { root, targets, near, freeGb, push: deps.push ?? f.enginePush?.engine ?? null, ...(deps.holders ? { holders: deps.holders } : {}), ...(deps.heavy ? { heavy: deps.heavy } : {}), readQueue: deps.readQueue || ((e) => ut.readUnityQueue(root, e)), needGb: deps.needGb || ((e) => et.engineFloor(e, { env, root }).gb), emit: deps.emit || ((ev) => { try { emitEvent(ev); } catch {} }) } });
+}
+
 // ---- 2.78.1 (f): the chain-breaker push ----------------------------------------------------------------------------
 
 /** STUDIO_LINE_CHAIN_HOLD_MIN: minutes from a chain-breaker's queueing that new builder verifies are held back (60; 0/off: none). */
@@ -733,6 +826,8 @@ export function chainHoldMin(env = process.env) {
   if (/^(off|no|false)$/i.test(v)) return 0;
   return Math.max(0, num(v, 60));
 }
+/** 2.79.1 (3.1): STUDIO_LINE_HOLD_MAX_MIN: no Line Producer hold on builder verifies lasts longer than this (20). */
+export const lineHoldMaxMin = (env = process.env) => Math.max(0, num(env.STUDIO_LINE_HOLD_MAX_MIN, 20));
 export const CHAIN_HOLD_TAG = 'chain-breaker';
 /**
  * T-173, a chain-breaker, waited 4 h behind load for its train. While a chain-breaker (linePlan's chainBreakers) is
@@ -750,20 +845,28 @@ export async function chainBreakerPush({ chainBreakers = [], now = Date.now(), e
   if (!root) { try { root = await h.heavyRoot(); } catch { root = null; } }
   if (!root) return { on: false, holding: false, why: 'no studio root' };
   const clear = () => { if (act) { try { h.clearQuietHold(root, CHAIN_HOLD_TAG); } catch {} } };
-  const min = chainHoldMin(env);
+  const min = Math.min(chainHoldMin(env), lineHoldMaxMin(env) || Infinity);
   if (!(min > 0)) { clear(); return { on: false, holding: false, why: 'STUDIO_LINE_CHAIN_HOLD_MIN=0: no chain-breaker push' }; }
   const cbs = new Map((chainBreakers || []).map((c) => [c.task, c]));
   const q = deps.trainQueue || readJson(path.join(root, '.studio', 'train', 'queue.json'), []) || [];
   const queued = (Array.isArray(q) ? q : []).filter((e) => e?.task && cbs.has(e.task) && !(e.held && !(e.released && e.released.head === e.head)));
   const atOf = (e) => { const t = typeof e.at === 'number' ? e.at : Date.parse(e.at); return Number.isFinite(t) ? t : now; };
   const live = queued.map((e) => ({ e, until: atOf(e) + min * 60000 })).filter((x) => x.until > now).sort((a, b) => b.until - a.until);
+  // 2.79.1 (3.1): the hold is for the wait BEFORE the train starts. A train running the chain-breaker's lane needs no
+  // builder verify hold (it stayed on for ~30 min while the train ran and froze the builders' verifies).
+  let trainRunning = false;
+  if (queued.length) { try { trainRunning = deps.trainRunning !== undefined ? Boolean(deps.trainRunning) : Boolean((await import('./train-daemon.mjs')).trainLockHeld(root, env, now)); } catch { trainRunning = false; } }
+  if (queued.length && trainRunning) {
+    clear();
+    return { on: true, holding: false, why: `the merge train is running chain-breaker ${queued.map((e) => e.task).join(', ')}: no builder verify hold while its train runs` };
+  }
   if (!live.length) {
     clear();
-    return { on: true, holding: false, why: queued.length ? `chain-breaker ${queued.map((e) => e.task).join(', ')} has been queued for more than ${min} min (STUDIO_LINE_CHAIN_HOLD_MIN): no more hold for it` : 'no chain-breaker queued for the merge train' };
+    return { on: true, holding: false, why: queued.length ? `chain-breaker ${queued.map((e) => e.task).join(', ')} has been queued for more than ${min} min (STUDIO_LINE_CHAIN_HOLD_MIN, STUDIO_LINE_HOLD_MAX_MIN): no more hold for it` : 'no chain-breaker queued for the merge train' };
   }
   const { e, until } = live[0];
   const n = cbs.get(e.task)?.n || 0;
-  const why = `chain-breaker ${e.task} (${n} task${n === 1 ? '' : 's'} wait on it) is queued for the merge train: new builder verifies wait so its train gets a quiet machine (at most ${min} min from its queueing, STUDIO_LINE_CHAIN_HOLD_MIN)`;
+  const why = `chain-breaker ${e.task} (${n} task${n === 1 ? '' : 's'} wait on it) is queued for the merge train: new builder verifies wait so its train gets a quiet machine (at most ${min} min from its queueing, STUDIO_LINE_CHAIN_HOLD_MIN / STUDIO_LINE_HOLD_MAX_MIN; it ends when its train starts)`;
   if (act) {
     const rec = h.markQuietHold(root, { ms: until - now, tag: CHAIN_HOLD_TAG, owner: LINE_AGENT, task: e.task, why, now });
     if (rec && !deps.quiet) {
@@ -1007,11 +1110,13 @@ export function supervisorPlan({ now = Date.now(), env = process.env } = {}) {
   const s = readLineStatus();
   if (!s || s.mode !== 'on' || s.error || s.dryRun || !Array.isArray(s.order)) return null;
   if (now - Date.parse(s.at) > num(env.STUDIO_LINE_PLAN_MAX_SEC, 300) * 1000) return null;
-  return { order: new Map(s.order.map((id, i) => [id, i])), routes: s.routes || {}, hold: new Map((s.protectedSteps || []).filter((p) => p.hold).map((p) => [p.task, p.why])), rigCap: Number.isFinite(s.builders?.rigCap) ? s.builders.rigCap : null, rigWhy: s.builders?.why || '', cbs: new Set((s.chainBreakers || []).map((c) => c.task)) };
+  return { order: new Map(s.order.map((id, i) => [id, i])), routes: s.routes || {}, hold: new Map((s.protectedSteps || []).filter((p) => p.hold).map((p) => [p.task, p.why])), rigCap: Number.isFinite(s.builders?.rigCap) ? s.builders.rigCap : null, rigWhy: s.builders?.why || '', cbs: new Set((s.chainBreakers || []).map((c) => c.task)), skip: new Set(Array.isArray(s.skip) ? s.skip : []) };
 }
 /** Sort the supervisor's groups (and each group's tasks) by the plan's order; tasks not in it keep their place after. */
 export function orderGroups(groups, plan) {
   if (!plan) return groups;
+  // 2.79.1 (3.1): tasks the plan skips (no lane, other work can run) are not started this pass; a group with nothing left drops out.
+  if (plan.skip?.size) groups = groups.map((g) => (g.tasks.some((t) => plan.skip.has(t.id)) ? { ...g, tasks: g.tasks.filter((t) => !plan.skip.has(t.id)) } : g)).filter((g) => g.tasks.length);
   const rank = (id) => (plan.order.has(id) ? plan.order.get(id) : 1e6);
   for (const g of groups) g.tasks = g.tasks.map((t, i) => ({ t, i })).sort((a, b) => rank(a.t.id) - rank(b.t.id) || a.i - b.i).map((x) => x.t);
   return groups.map((g, i) => ({ g, i })).sort((a, b) => (a.g.role === 'dev-hacker') - (b.g.role === 'dev-hacker') || rank(a.g.tasks[0]?.id) - rank(b.g.tasks[0]?.id) || a.i - b.i).map((x) => x.g);

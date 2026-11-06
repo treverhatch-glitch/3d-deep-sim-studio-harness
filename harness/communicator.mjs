@@ -52,7 +52,6 @@ import { digestHours as askDigestHours } from './ask-post.mjs';
 
 export const CONFIG_REL = 'studio/communicator.json';
 export const ROLES = ['orchestrator', 'keys', 'owner'];
-export const OWNER_KINDS = new Set(['decision', 'disaster']);
 export const DEFAULT_USERNAME = 'Studio Status';
 const RETRY_MS = 5 * 60000;
 const LOW_BUILDERS_MS = 10 * 60000;
@@ -457,11 +456,7 @@ export function pendingNotices(root = REPO_ROOT, st = {}, now = Date.now()) {
   for (const l of lines.slice(-200)) { try { const n = JSON.parse(l); if (n?.key && n.text && !sent.has(n.key) && now - (Date.parse(n.at) || 0) < 86400000 && !out.some((x) => x.key === n.key)) out.push(n); } catch {} }
   return out.slice(-20);
 }
-export function queueNotice({ key, text, kind = 'notice', root = REPO_ROOT } = {}) {
-  const f = path.join(root, '.studio', 'comm', 'notices.jsonl');
-  fs.mkdirSync(path.dirname(f), { recursive: true });
-  fs.appendFileSync(f, `${JSON.stringify({ key: key || `${kind}:${Date.now()}`, kind, text: String(text || '').slice(0, 1000), at: new Date().toISOString() })}\n`);
-}
+export { queueNotice } from './comm-notice.mjs';
 
 /** `comm -- status`: the set-up and the state, nothing secret. */
 export function commStatus({ env = process.env, root = REPO_ROOT, now = Date.now() } = {}) {
