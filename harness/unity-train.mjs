@@ -55,11 +55,8 @@ import { withLandLock } from './merge-lane.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
 import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, taskBranch } from './unity-gate.mjs';
 import { engineTarget, engineFiles } from './engine-tracks.mjs';
-<<<<<<< HEAD
 import { recordEngineShots } from './engine-shots.mjs';
-=======
 import { writeAtomic } from './fsafe.mjs';
->>>>>>> claude/279-b
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
