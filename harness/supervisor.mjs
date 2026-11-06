@@ -659,6 +659,12 @@ export async function supervise(opts, state, now = Date.now()) {
     // session, before the paid API pool when the plan's budget is high (or every tool is out), else within its share.
     const lr = line ? line.routeFor(g, { tool, preferred, custom, live, outUntil: (await import('./budget.mjs')).exhaustedUntil }) : {};
     let vx = null;
+    // 2.79.2: a route that keeps a task on Vertex (it started there) goes through the same check as a new pick: the share,
+    // the budget cut and earlier Vertex failures. If Vertex may not take it now, it starts on the plan's tool instead.
+    if (lr.tool === 'vertex') {
+      const keep = vertexReady.ok && g.role === 'builder' && !custom ? (await import('./vertex.mjs')).vertexPick({ role: g.role, taskId: g.tasks[0]?.id, tier: lr.tier || null, live, cap: ramCap.cap, high: Boolean(poolMode) || !tool, events: evs, ready: vertexReady }) : { skip: vertexReady.why || 'vertex is not ready' };
+      if (keep.skip) { why.push(`${g.tasks[0]?.id}: not kept on Vertex (${keep.skip})`); lr.tool = null; lr.model = null; }
+    }
     if (vertexReady.ok && g.role === 'builder' && !custom && ['claude', null, undefined].includes(lr.tool || tool)) {
       const pick = (await import('./vertex.mjs')).vertexPick({ role: g.role, taskId: g.tasks[0]?.id, tier: lr.tier || null, live, cap: ramCap.cap, high: Boolean(poolMode) || !tool, events: evs, ready: vertexReady });
       if (pick.tool) vx = pick; else if (pick.skip && (poolMode || !tool)) why.push(`${g.tasks[0]?.id}: ${pick.skip}`);

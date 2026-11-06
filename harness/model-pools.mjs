@@ -313,7 +313,8 @@ export function pickPool(ctx, { cfg, state = {}, rates = {}, recentProt = {} }) 
   const size = ctx.chainBreaker ? 'hard' : SIZE_CLASSES.includes(ctx.size) ? ctx.size : 'normal';
   const failed = Math.max(0, Number(ctx.failed) || 0);
   const stickyPool = ctx.startedOn?.model ? poolOf(ctx.startedOn.model, cfg) : null;
-  if (ctx.startedOn?.model && !failed && !(ctx.protectedHeavy && stickyPool && recentProt[stickyPool]) && !(stickyPool && state[stickyPool]?.out)) return { pool: poolOf(ctx.startedOn.model, cfg), tool: ctx.startedOn.tool || null, model: ctx.startedOn.model, size, why: `it already started on ${ctx.startedOn.model}: it keeps that model until it lands or fails`, skipped: [] };
+  // 2.79.2: a task that started on Vertex isn't kept there by this rule: the supervisor picks Vertex per start (share, budget).
+  if (ctx.startedOn?.model && ctx.startedOn.tool !== 'vertex' && !failed && !(ctx.protectedHeavy && stickyPool && recentProt[stickyPool]) && !(stickyPool && state[stickyPool]?.out)) return { pool: poolOf(ctx.startedOn.model, cfg), tool: ctx.startedOn.tool || null, model: ctx.startedOn.model, size, why: `it already started on ${ctx.startedOn.model}: it keeps that model until it lands or fails`, skipped: [] };
   const geminiFailed = failed > 0 && ctx.lastFailedPool && isGeminiPool(ctx.lastFailedPool, cfg);
   const listName = failed >= 2 || (failed > 0 && !geminiFailed) ? 'twice' : failed > 0 ? size : null;
   const chain = (listName ? cfg.escalate?.[listName] : cfg.routes?.[size]) || [];

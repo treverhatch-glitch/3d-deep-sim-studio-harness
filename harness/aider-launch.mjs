@@ -82,12 +82,14 @@ export function aiderIgnoreLines(root = REPO_ROOT) {
   return [...new Set([...AIDER_IGNORE_BASE, ...anchored])];
 }
 
-/** Write .studio/aider/<agent>.aiderignore (the main checkout's .studio/) and return its path. */
-export function writeAiderIgnore(agent, { env = process.env } = {}) {
+/** Write .studio/aider/<agent>.aiderignore (the main checkout's .studio/) and return its path. first: lines that go before. */
+export function writeAiderIgnore(agent, { env = process.env, first = [] } = {}) {
   const dir = path.join(stateDirOf(env), 'aider');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${String(agent).replace(/[^\w.-]/g, '_')}.aiderignore`);
-  const lines = aiderIgnoreLines(mainRootOf(env));
+  // 2.79.2 (a): first: a driven session's lane whitelist and its large files (harness/aider-protocol.mjs laneIgnoreLines),
+  // before the harness's own lines, so a lane can never re-include a harness folder.
+  const lines = [...(first || []), ...aiderIgnoreLines(mainRootOf(env))];
   fs.writeFileSync(file, `# Written by the launcher for ${agent} (harness/aider-launch.mjs): aider never adds or edits these.\n${lines.join('\n')}\n`);
   return file;
 }

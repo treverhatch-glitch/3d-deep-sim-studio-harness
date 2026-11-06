@@ -4,6 +4,17 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.79.2] — 2026-11-07
+Vertex builders that work (P-285). On 2.79.1 every Vertex builder ended "no work: it never claimed its task" after
+438k–520k-token requests ($5.84, nothing landed), and `STUDIO_VERTEX_SHARE=0` didn't stop them. Details:
+docs/RELEASE-2.79.2.md.
+- **The launcher runs the builder protocol around aider** (nim, aider, vertex, owner aider tools): claims the task, gives
+  aider a short edit brief and the lane's files, then commits, checks and queues the lane or hands the task back with
+  the reason. `STUDIO_AIDER_PROTOCOL=off` restores the old launch.
+- **Small requests.** The repo map covers only the lane; large files are ignored unless the lane names them; a request
+  over `STUDIO_VERTEX_MAX_PROMPT_TOKENS` (150,000) stops the session and hands its task back.
+- **`STUDIO_VERTEX_SHARE=0` holds** on every start path (high plan budget, the router's "keeps that model").
+
 ## [2.79.1] — 2026-11-06
 The crew's request after a good day on 2.79.0 (Vertex as a builder tool, owner tools, the day's fixes, a small trim), with
 the owner's changes: budgets set on his orders with no built-in cap, an engine push mode, and fat cut where safe.

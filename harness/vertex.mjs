@@ -15,6 +15,7 @@
  *   STUDIO_VERTEX_HARD_MODEL            a hard task's model: size 4-5 or a chain-breaker (google/gemini-3.1-pro-preview)
  *   STUDIO_VERTEX_SHARE                 the share of builder slots Vertex may take while the plan has headroom (0.5)
  *   STUDIO_VERTEX_PROXY_PORT            the proxy's port (8787)
+ *   STUDIO_VERTEX_MAX_PROMPT_TOKENS     a request over this many prompt tokens stops its session (150000; 0 = no cap)
  *   STUDIO_VERTEX_BASE_URL              the OpenAI-compatible base (default: the global endpoint of VERTEX_PROJECT_ID); https,
  *                                       or http on 127.0.0.1/localhost only; read from the .env file only
  * Spend is always logged and reported (npm run budget, npm run tokens -- --by task); a cap is a budget someone allowed sets
@@ -122,6 +123,20 @@ export function readUsage({ root = studioRoot(), since = 0 } = {}) {
   }
   return out;
 }
+/**
+ * 2.79.2 (a): STUDIO_VERTEX_MAX_PROMPT_TOKENS (150000): a vertex request over this many prompt tokens means the session's
+ * context is out of hand (the crew's sessions sent 438k-520k per request, $0.22-0.40 each). The proxy answers that
+ * session's next request with 403, and the launcher stops it and hands its task back (cause prompt-cap). 0 = no cap.
+ */
+export const VERTEX_MAX_PROMPT_DEFAULT = 150000;
+export const promptCap = (env = process.env) => { const n = Math.round(num(env.STUDIO_VERTEX_MAX_PROMPT_TOKENS, VERTEX_MAX_PROMPT_DEFAULT)); return n >= 0 ? n : VERTEX_MAX_PROMPT_DEFAULT; };
+/** The session's first proxy request over the cap since it started: { over: true, in, cap, why } or { over: false }. */
+export function overPromptCap(agent, { root = studioRoot(), since = 0, cap = promptCap() } = {}) {
+  if (!(cap > 0)) return { over: false };
+  const hit = readUsage({ root, since }).find((u) => u.session === String(agent || '') && (Number(u.in) || 0) > cap);
+  return hit ? { over: true, in: Number(hit.in), cap, why: `a request sent ${Number(hit.in).toLocaleString('en-US')} prompt tokens, over STUDIO_VERTEX_MAX_PROMPT_TOKENS=${cap.toLocaleString('en-US')} (its context is too big: repo map or large files)` } : { over: false };
+}
+
 /** What one session used through the proxy since its start: { requests, tokensIn, tokensOut, costUsd, models }. */
 export function sessionUsage(agent, { root = studioRoot(), since = 0 } = {}) {
   const tag = String(agent || '');
@@ -223,8 +238,11 @@ export function vertexPick({ role, taskId, tier = null, live = [], cap = 0, high
   const size = sizeOfTask(taskId, { tier, events: ev });
   const model = vertexModelFor(size, env);
   const running = live.filter((s) => s && s.running !== false && s.tool === 'vertex').length;
-  if (high) return { tool: 'vertex', model, size, why: `the plan's budget is high: Vertex (${model}, ${size} task) before the paid API pool` };
   const share = vertexShare(env);
+  // 2.79.2: STUDIO_VERTEX_SHARE=0 means the supervisor starts no Vertex builder, in every mode (on 2.79.1 a high plan
+  // budget skipped the share, so =0 didn't hold).
+  if (share <= 0) return { skip: 'vertex is off for the supervisor (STUDIO_VERTEX_SHARE=0)' };
+  if (high) return { tool: 'vertex', model, size, why: `the plan's budget is high: Vertex (${model}, ${size} task) before the paid API pool` };
   const allowed = share > 0 ? Math.max(1, Math.floor(share * Math.max(0, cap))) : 0;
   if (running >= allowed) return { skip: `vertex has its share (${running} of ${allowed} builder slot${allowed === 1 ? '' : 's'}, STUDIO_VERTEX_SHARE=${share})` };
   return { tool: 'vertex', model, size, why: `Vertex's share of builder slots (${running + 1} of ${allowed}, STUDIO_VERTEX_SHARE=${share}): ${model} for a ${size} task` };

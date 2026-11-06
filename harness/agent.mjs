@@ -60,7 +60,7 @@ import { taskType } from './done-check.mjs';
 import { listLocks, release, claim, renewOwner, tooBroad } from './lock.mjs';
 import { AGY_STREAM_FLAGS, agyStreamOn, agyStreamWanted, userLine, driveAgyStream, taskStillOpen, streamFailure, readStreamRecord, writeStreamRecord, streamRecordHolds, STREAM_RECORD } from './agy-stream.mjs';
 import { savePatch } from './wip.mjs';
-import { laneList, laneEntries, readHolds } from './task-hold.mjs';
+import { laneList, laneEntries, readHolds, laneOf } from './task-hold.mjs';
 import { regionOnlyFiles } from './lane-regions.mjs';
 import { engineLaunch, syncEngineTarget } from './engine-tracks.mjs';
 import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport, isLaneWorktree, LANES_DIR, laneLive } from './worktree.mjs';
@@ -71,6 +71,7 @@ import { sessionLimits, heartbeatCheck, newRedCheck, readFlag, clearFlag, HANDOF
 import { stopIfOverBudget } from './task-budget.mjs';
 import { agentEnv, nimKeyMissing, nimModel, NIM_DEFAULT_MODEL, agentLikeName } from './agent-env.mjs';
 import { aiderProgram, writeAiderIgnore, excludeAiderFiles } from './aider-launch.mjs';
+import { aiderDriven, laneFiles, laneIgnoreLines, editBrief, claimTask, finishAiderTask } from './aider-protocol.mjs';
 import { pickNimModel, stubFetchFrom } from './nim-check.mjs';
 import { AIDER_SESSION } from './models.config.mjs';
 import { rescueOf, rescueModelFor } from './rescue.mjs';
@@ -93,7 +94,7 @@ import { sessionOutcome, parkIfNoWork } from './session-outcome.mjs';
 import { writeAtomic } from './fsafe.mjs';
 import { selfIdentity, spawnedIdentity, pidAlive, recordAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
 import { gateEnv } from './gate-env.mjs';
-import { vertexModel, vertexConfigured, ensureProxy, proxyBase, sessionKey, sessionUsage } from './vertex.mjs';
+import { vertexModel, vertexConfigured, ensureProxy, proxyBase, sessionKey, sessionUsage, overPromptCap } from './vertex.mjs';
 import { registeredTool, registryPrice } from './tool-registry.mjs';
 import { spendPass, sessionKeyNames } from './spend-budget.mjs';
 
@@ -220,13 +221,15 @@ export function toolPreflight(tool, env = process.env, platform = process.platfo
  * harness's folders and the protected paths are never added to its chat or edited. --read <brief>: the task's brief,
  * read-only. --map-tokens / --map-refresh (models.config.mjs AIDER_SESSION; STUDIO_AIDER_MAP_TOKENS,
  * STUDIO_AIDER_MAP_REFRESH): a bounded repo map. --subtree-only is not used: a session's folder is the repo root.
+ * 2.79.2 (a): --file <path> for each of a driven session's lane files (harness/aider-protocol.mjs), so aider starts with
+ * them in its chat instead of adding whatever its message names.
  */
-export function aiderTail({ ignoreFile = null, reads = [], env = process.env } = {}) {
+export function aiderTail({ ignoreFile = null, reads = [], files = [], env = process.env } = {}) {
   const mt = String(env.STUDIO_AIDER_MAP_TOKENS ?? '').trim();
   const tokens = /^\d+$/.test(mt) ? mt : String(AIDER_SESSION.mapTokens);
   const refresh = String(env.STUDIO_AIDER_MAP_REFRESH || '').trim() || AIDER_SESSION.mapRefresh;
   return ['--no-pretty', '--no-fancy-input', '--no-gitignore', '--map-tokens', tokens, ...(refresh && /^(auto|always|files|manual)$/.test(refresh) ? ['--map-refresh', refresh] : []),
-    ...(ignoreFile ? ['--aiderignore', ignoreFile] : []), ...(reads || []).filter(Boolean).flatMap((r) => ['--read', r])];
+    ...(ignoreFile ? ['--aiderignore', ignoreFile] : []), ...(reads || []).filter(Boolean).flatMap((r) => ['--read', r]), ...(files || []).filter(Boolean).flatMap((f) => ['--file', f])];
 }
 
 /** H-2: the settings file as agy's argument. A path with a space (C:\\Users\\Jo Ann\\…) would split as the prompt did, so
@@ -723,7 +726,7 @@ export function agyCutShort({ tool, code, log }) {
   return null;
 }
 
-export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, model, cmd = null, exit = {}, followUps = 0, nudges = 0 }) {
+export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, model, cmd = null, exit = {}, followUps = 0, nudges = 0, aider = null }) {
   // 2.76.0 (B-80): an agy session's real reason (its jetski / permission line) goes into its hand-back and its end.
   const agyLine = tool === 'agy' ? agyStopLine(usageLog ?? log) : null;
   const agySaid = agyLine ? ` agy said: "${agyLine}".` : '';
@@ -748,7 +751,9 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   // Windows) or a signal, but that's a stop, not a crash: no failover, no "error", and the supervisor's halt, the
   // loop park, the breaker and the tier-up don't count it. stopAgent wrote who before it killed (stopMark).
   const stop = !capped ? stopMark(agent) : null;
-  const bad = !capped && !stop && (code !== 0 || Boolean(trouble) || reasoningOnly || agyCut);
+  // 2.79.2 (a): a driven aider session whose work the launcher committed, checked and queued (or closed) did its job,
+  // whatever aider's own exit code: no failover, no failure count.
+  const bad = !capped && !stop && (code !== 0 || Boolean(trouble) || reasoningOnly || agyCut) && !(aider && ['queued', 'done'].includes(aider.result));
   // PU-19 (P-042): the session stopped at a usage limit: its own, or for a custom command (no tool name of its
   // own) the one its line names. That's waiting for the reset, not a failure: the tool is marked out until
   // then (below), and the hand-back says "usage limit", so the breaker, the loop park, the model escalation
@@ -825,6 +830,12 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
     handed.push({ task: id, patch });
     if (!capped && !limit && !stop) parkIfLooping(id);
   }
+  // 2.79.2 (a): the launcher handed the task of a driven aider session back itself (harness/aider-protocol.mjs): it counts as
+  // this session's hand-back (vertexFailures, the plan's route) like any other.
+  if (aider?.result === 'handed' && s0.task && !handed.some((h) => h.task === s0.task)) {
+    handed.push({ task: s0.task, patch: null, cause: aider.cause });
+    try { parkIfLooping(s0.task); } catch { /* a help, never a crash */ }
+  }
   for (const l of listLocks().filter((x) => x.owner === agent)) release(l.key, agent);
   // 2.67.2: what this session did for its task (claimed, commits, done) and, with no work, why: recorded on
   // agent.session.end (meta.outcome); after STUDIO_NO_WORK_EXITS such exits in a row the task is parked, not relaunched.
@@ -838,6 +849,8 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
       const commits = gl.status === 0 ? gl.stdout.split('\n').filter(Boolean).length : 0;
       outcome = sessionOutcome({ agent, task: oTask, startedAt: t0, events: readRecentEvents(20000), commits: Math.max(commits, finished.includes(oTask) ? 1 : 0), counts: !stop && !capped && !limit && !trouble && !reasoningOnly });
       if (outcome && (finished.includes(oTask) || queuedForTrain.includes(oTask))) outcome = { ...outcome, done: true, noWork: false, stuck: false, why: '', ...(queuedForTrain.includes(oTask) ? { queuedForTrain: true } : {}) };
+      // 2.79.2 (a): a driven aider session's own account (claimed by the launcher; what aider changed; why it went back).
+      else if (outcome && aider && aider.result !== 'queued' && aider.result !== 'done') outcome = { ...outcome, why: `the launcher claimed ${oTask} for aider; ${aider.line}` };
     }
   } catch { outcome = null; }
   let tok = tokensFrom(log);
@@ -885,8 +898,8 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   const cause = exitCause({ code, exit, stop });
   // 2.73.2 (B-72): recorded once: a stop's endAsDead (or the watch pass) may have recorded this session's end already.
   const firstEnd = claimSessionEnd(agent, s0.startedAt, 'launcher');
-  const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
-  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(followUps ? { followUps, ...(nudges ? { nudges } : {}) } : {}), ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(Array.isArray(s0.keys) && s0.keys.length ? { keys: s0.keys } : {}), ...(vertexUse?.requests ? { usageFrom: 'vertex-proxy', requests: vertexUse.requests } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
+  const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : cause.kind === 'prompt-cap' ? `exit ${code}, ended by the launcher (prompt-cap: ${cause.why})` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget', 'prompt-cap'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
+  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${aider?.line && !outcome?.why ? `; aider: ${aider.line}` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(aider ? { aider } : {}), ...(followUps ? { followUps, ...(nudges ? { nudges } : {}) } : {}), ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(Array.isArray(s0.keys) && s0.keys.length ? { keys: s0.keys } : {}), ...(vertexUse?.requests ? { usageFrom: 'vertex-proxy', requests: vertexUse.requests } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
   if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
     try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => postAsk({ agent: 'launcher', to: 'producer', task: outcome.task, subject: 'parked', msg: m }) }); } catch { /* the park is a help, never a crash */ }
   }
@@ -1302,16 +1315,32 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // preflight below says why when there is none); B-20 the agent's .aiderignore and the task's brief as --read; in a
   // lane copy aider's own .aider* files are kept out of the lane's change.
   const aiderRun = !custom && (tool === 'nim' || tool === 'aider' || tool === 'vertex');
+  // 2.79.2 (a): a builder on aider (these tools, or an owner tool whose command starts aider) in its own copy: the launcher
+  // claims the task, gives aider a short edit brief (editFile) and the lane's files, and commits, checks and queues (or
+  // hands back) after it exits (harness/aider-protocol.mjs). aider can't run the harness's commands itself.
+  const driven = aiderDriven({ tool, custom, rehearsal, regCommand: regRun ? reg.command : null, role, task, copy });
   let aider = {};
-  if (aiderRun) {
+  let driveLane = [];
+  const editFile = driven.on ? path.join(STUDIO_STATE_DIR, 'kickoff', `${agent}.aider.md`) : null;
+  if (driven.on) {
+    let laneNow = lane;
+    if (!laneNow) { try { laneNow = laneOf(task); } catch { laneNow = null; } }
+    driveLane = laneList(laneNow || '');
+  }
+  if (aiderRun || driven.on) {
     const prog = aiderProgram({ env: process.env, onPath });
     let ignoreFile = null;
-    try { ignoreFile = writeAiderIgnore(agent); } catch {}
+    let first = [];
+    if (driven.on) { try { first = laneIgnoreLines({ cwd: copy.dir, lanePaths: driveLane }); } catch { first = []; } }
+    try { ignoreFile = writeAiderIgnore(agent, { first }); } catch {}
     if (copy) excludeAiderFiles(agent);
     const brief = task ? path.join(STUDIO_STATE_DIR, 'briefs', `${task}.md`) : null;
-    aider = { program: prog.cmd || 'aider', ignoreFile, reads: brief && fs.existsSync(brief) ? [brief] : [] };
+    const files = driven.on ? laneFiles({ cwd: copy.dir, lanePaths: driveLane }) : [];
+    aider = { program: prog.cmd || 'aider', ignoreFile, reads: !driven.on && brief && fs.existsSync(brief) ? [brief] : [], files };
     if (prog.cmd && prog.via !== 'PATH') launchNotes.push(`aider: ${prog.cmd} (${prog.via === 'venv' ? "the studio's .studio/aider-venv" : 'STUDIO_AIDER_CMD'})`);
     if (ignoreFile) launchNotes.push(`aider ignores the harness's folders and the protected paths (${path.relative(REPO_ROOT, ignoreFile).split(path.sep).join('/')})${aider.reads.length ? `; the brief is passed with --read` : ''}`);
+    if (driven.on) launchNotes.push(`aider protocol: the launcher claims ${task}, aider gets a short edit brief (.studio/kickoff/${agent}.aider.md)${files.length ? ` and ${files.join(', ')} with --file` : ''}${driveLane.length ? `; its repo map covers the lane only (${driveLane.join(', ')})` : ''}; ${first.filter((l) => !l.startsWith('!') && !l.endsWith('*')).length} tracked file(s) over STUDIO_AIDER_MAX_FILE_KB left out; after it exits the launcher commits, checks and queues the lane, or hands the task back`);
+    else if (aiderRun && role === 'builder' && task) launchNotes.push(`aider protocol not used: ${driven.why}`);
   }
   // 2.78.1 (B-118): stream mode is the default for a builder-like agy session, unless this is the one-turn relaunch after
   // a stream failure, or the failure record (.studio/agy-stream.json) still holds for the agy on PATH.
@@ -1321,7 +1350,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (held.holds) { agyStream = false; launchNotes.push(`agy stream mode skipped: .studio/${STREAM_RECORD} records that this agy refused it (${held.rec?.why || 'no reason recorded'}); ${held.why}. Delete .studio/${STREAM_RECORD} to try stream mode again; it is tried again by itself when agy changes.`); }
   }
   if (agyOneTurn && tool === 'agy') launchNotes.push('agy one-turn launch: the stream session before this one failed on its input format (see the line above); this session runs as one turn');
-  const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort, addDirs: [...(copy ? laneShareDirs() : []), ...(engineLane?.dir ? [engineLane.dir] : [])], engineDir: engineLane?.dir || null, aider, stream: agyStream, agent });
+  const cmd = custom ? null : toolCommand(tool, { model, file: editFile || file, prompt, effort, addDirs: [...(copy ? laneShareDirs() : []), ...(engineLane?.dir ? [engineLane.dir] : [])], engineDir: engineLane?.dir || null, aider, stream: agyStream, agent });
   if (!custom && !cmd) dropStarting(agent);
   if (!custom && !cmd) {
     // 2.79.1 (a): a name studio/tools.json lists but that doesn't count (not the owner's) says why.
@@ -1394,10 +1423,23 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
       // H-9: in a copy, a script the line names that isn't committed is run from the main checkout (absolute path).
       const loc = copy ? localizeCommand(custom, { from: REPO_ROOT, to: copy.dir }) : { template: custom, values: {}, moved: [] };
       if (loc.moved.length) fs.writeSync(out, `[launcher] not in this agent's copy, run from the main checkout: ${loc.moved.join(', ')}\n`);
-      line = fillCommand(loc.template, { kickoff: file, agent, model, role, task: task || '', mainRoot: REPO_ROOT, addDirs: copy ? laneShareDirs().flatMap((d) => ['--add-dir', d]) : [], ...(viaProxy ? { proxyBase: proxyBase(), sessionKey: sessionKey(agent) } : {}), ...loc.values });
+      // 2.79.2 (a): an owner tool that runs aider gets the edit brief as {kickoff}, and {aiderArgs}: the launcher's aider
+      // options (bounded map, ignore file, the lane's files) for its line to use.
+      line = fillCommand(loc.template, { kickoff: editFile || file, agent, model, role, task: task || '', mainRoot: REPO_ROOT, addDirs: copy ? laneShareDirs().flatMap((d) => ['--add-dir', d]) : [], ...(viaProxy ? { proxyBase: proxyBase(), sessionKey: sessionKey(agent) } : {}), ...(driven.on ? { aiderArgs: aiderTail(aider) } : {}), ...loc.values });
     }
     else if (toolPreflight(tool, env)) throw new Error(toolPreflight(tool, env));
-    else plan = launchPlan(cmd.argv, { env, cwd, promptAt: cmd.promptAt, promptFile: file });
+    else plan = launchPlan(cmd.argv, { env, cwd, promptAt: cmd.promptAt, promptFile: editFile || file });
+    // 2.79.2 (a): the claim, as a builder's own task start does it (in its copy), only once nothing else can stop the start.
+    if (driven.on) {
+      const c = claimTask({ agent, task, model, cwd, env });
+      if (!c.ok) throw new Error(`${task} could not be claimed for aider (task start refused): ${c.out}`);
+      fs.writeSync(out, `[launcher] aider protocol: claimed ${task} for ${agent} (task start in its copy)\n`);
+      let briefText = '';
+      try { briefText = fs.readFileSync(path.join(STUDIO_STATE_DIR, 'briefs', `${task}.md`), 'utf8'); } catch {}
+      let title = '';
+      try { title = parseNextQueue().inProgress.find((t) => t.id === task)?.title || ''; } catch {}
+      fs.writeFileSync(editFile, editBrief({ task, title, brief: briefText, lanePaths: driveLane, files: aider.files || [] }));
+    }
   } catch (err) {
     // Nothing started (a value cmd.exe can't carry, a command line too long): say why, give back the lane and the copy.
     fs.writeSync(out, `\n[launcher] could not start: ${err.message}\n`);
@@ -1509,6 +1551,10 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     } catch {
       // the new-red check is a help, never a crash
     }
+    // 2.79.2 (a): a request over STUDIO_VERTEX_MAX_PROMPT_TOKENS ends the session (the proxy already refuses its next one).
+    if (viaProxy && !killedBy) {
+      try { const pc = overPromptCap(agent, { since: Date.parse(startedAt) || 0 }); if (pc.over) { killedBy = { kind: 'prompt-cap', why: pc.why, at: new Date().toISOString() }; stopChild(child); } } catch { /* a guard, never a crash */ }
+    }
     if (stall?.stalled && !killedBy) {
       logStall({ ...session, ...s }, stall, { by: 'launcher' });
       killedBy = { kind: 'stall', why: stall.why, stallKind: stall.kind, at: new Date().toISOString() };
@@ -1551,6 +1597,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   });
   clearInterval(beat);
   if (agyDriver) { try { agyDriver.stop(); } catch {} }
+  // 2.79.2 (a): aider may exit on the proxy's refusal before a heartbeat saw the oversized request: the same stop.
+  if (viaProxy && !killedBy) { try { const pc = overPromptCap(agent, { since: Date.parse(startedAt) || 0 }); if (pc.over) killedBy = { kind: 'prompt-cap', why: pc.why, at: new Date().toISOString() }; } catch {} }
   // 2.73.2 (B-72/B-76): the watchdog's stall end (another process: logStall recorded it) is a stall end here too, so
   // the halt rule doesn't count it as the tool failing; and the record says at once that the agent has exited, so the
   // listing, the HUD and the watch pass see it ending while the clean-up below runs (it can take minutes).
@@ -1593,7 +1641,25 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
       else streamFail = null;
     } catch { streamFail = null; }
   }
-  const result = cleanUp(agent, { code, log, usageLog, role, tool: session.tool, model, followUps: agyDriver?.state?.continues || 0, nudges: agyDriver?.state?.nudges || 0, cmd: session.tool === 'custom' ? custom : null, exit: { signal: exitSignal, killedBy, spawnError, at: exitedAt, ranMs: Date.now() - t0 } });
+  // 2.79.2 (a): the protocol's second half for a driven aider session that ended by itself (or at the prompt cap): commit,
+  // check, task done (queues the lane), or a hand-back with the reason. Other ends (a stop, a stall) keep cleanUp's path.
+  let aiderDone = null;
+  if (driven.on && !spawnError && !stopMark(agent) && (!killedBy || killedBy.kind === 'prompt-cap')) {
+    try {
+      let title = '';
+      try { title = parseNextQueue().inProgress.find((t) => t.id === task)?.title || ''; } catch {}
+      const held = listLocks().some((l) => l.key === `task:${task}` && l.owner === agent);
+      if (held) {
+        aiderDone = finishAiderTask({ agent, task, title, tool: session.tool, model, cwd, env, branch: copy.branch, aiderOutput: readLogFrom(logFile, logStart, 256 * 1024), exitCode: code, stopped: killedBy, secrets: [env.OPENAI_API_KEY, env.AIDER_OPENAI_API_KEY],
+          pause: (t, a, n, o) => pauseTask(t, a, n, { force: true, handBackCause: o?.cause }), queued: (t) => trainQueued(t, { agent, branch: copy.branch }) });
+        if (aiderDone.result === 'handed' && unmerged(copy.branch) > 0) rememberTaskBranch(task, copy.branch);
+      } else aiderDone = { claimed: true, changed: [], committed: null, check: null, result: 'released', cause: null, line: `${task} was no longer held by ${agent} when aider exited: nothing committed` };
+      try { fs.appendFileSync(logFile, `[launcher] aider protocol: ${aiderDone.line}\n`); } catch {}
+    } catch (err) {
+      aiderDone = { claimed: true, result: 'error', line: `the launcher's commit and check after aider failed: ${String(err?.message || err).slice(0, 200)}` };
+    }
+  }
+  const result = cleanUp(agent, { code, log, usageLog, role, tool: session.tool, model, aider: aiderDone, followUps: agyDriver?.state?.continues || 0, nudges: agyDriver?.state?.nudges || 0, cmd: session.tool === 'custom' ? custom : null, exit: { signal: exitSignal, killedBy, spawnError, at: exitedAt, ranMs: Date.now() - t0 } });
   // 2.78.1 (B-118): the copies are removed below, unless the next session under this name (a failover, the one-turn
   // relaunch) works on in them: ownCopy.
   const atClaimDir = atClaim?.branch && atClaim.dir ? path.join(REPO_ROOT, atClaim.dir) : null;
