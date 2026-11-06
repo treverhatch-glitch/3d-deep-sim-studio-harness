@@ -213,8 +213,10 @@ console.log(JSON.stringify({ note: r.note }));`, env);
 const r = ag.launchEngineLane({ task: ${JSON.stringify(id)}, agent: 'porter-1', role: 'engine-porter' });
 console.log(JSON.stringify({ note: r.note }));`, env);
       const mergeHead = fs.existsSync(path.join(g(wt, 'rev-parse', '--absolute-git-dir').stdout.trim(), 'MERGE_HEAD'));
-      // Tracked files only: the launcher's own untracked files (a Windows junction, a brief) aren't the merge's doing.
-      const statusOut = g(wt, 'status', '--porcelain', '--untracked-files=no').stdout.trim();
+      // Tracked files only: the launcher's own untracked files (a Windows junction, a brief) aren't the merge's doing. Line
+      // endings aside: the harness's git (the runner's core.autocrlf=true on Windows) restores files with CRLF, while this
+      // helper reads with core.autocrlf=false, so a plain status shows " M" for an unchanged file.
+      const statusOut = g(wt, 'diff', '--ignore-cr-at-eol', '--name-status', 'HEAD').stdout.trim();
       const clean = !statusOut;
       const evs = st.evs();
       await guard('2.79.1 (c, 3.7): before an engine-porter session the engine\'s target branch is merged (no fast-forward) into the pass worktree; on a conflict the merge is aborted, the worktree left as it was, and the conflicting files are named in the porter\'s brief and an engine.target_conflict event (fails on 2.79.0: the worktree kept the old base, two sessions ran empty and the pass was parked)', () => [
