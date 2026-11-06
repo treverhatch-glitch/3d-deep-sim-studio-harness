@@ -35,8 +35,9 @@ import { taskType, TYPES } from './done-check.mjs';
 const NOT_CODE = /^(\.studio\/|studio\/|qa\/(reports|regressions)\/|docs\/)/;
 
 /** Commits with their Studio-Task / Studio-Model trailers and the files they touched (newest last). */
-export function taggedCommits(limit = 3000) {
-  const r = spawnSync('git', ['log', `-n${limit}`, '--reverse', '--format=%x1e%H%x09%ct%x09%(trailers:key=Studio-Task,valueonly,separator=%x2C)%x09%(trailers:key=Studio-Model,valueonly,separator=%x2C)%x09%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', '--name-only'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
+export function taggedCommits(limit = 3000, ref = null) {
+  // 2.79 (d): ref = another branch's history (review finds a task's lane branch from main); default: the current one.
+  const r = spawnSync('git', ['log', ...(ref ? [ref] : []), `-n${limit}`, '--reverse', '--format=%x1e%H%x09%ct%x09%(trailers:key=Studio-Task,valueonly,separator=%x2C)%x09%(trailers:key=Studio-Model,valueonly,separator=%x2C)%x09%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', '--name-only'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
   if (r.status !== 0) return [];
   return r.stdout.split('\x1e').slice(1).map((block) => {
     const [head, ...names] = block.trim().split('\n');

@@ -34,12 +34,17 @@
  *      remote-eligible ready tasks are offered to remote (cloud) workers (status "remote", `line -- plan`); with
  *      STUDIO_REMOTE=on the pass also ends leases that ran out and starts a background fetch of remote/* when due.
  *   h. 2.77.0 (u, P5.2/P5.3): each engine train (harness/unity-train.mjs, any engine target of harness/engine-tracks.mjs)
- *      with branches queued is started in a quiet window (enginePass/engineWindow): no web train running (train >
+ *      with branches queued is started when its engine slot is free (2.79: STUDIO_ENGINE_SLOTS; game trains neither block it nor
+ *      are blocked by it), or, for "window": "quiet" / STUDIO_ENGINE_WINDOW=quiet / the line off, in a quiet window (enginePass/engineWindow): no web train running (train >
  *      builder verifies > engine > soaks), no other job of the same heavy kind, free RAM at or over the engine's floor,
  *      CPU under STUDIO_ENGINE_QUIET_CPU_PCT (75), and no web lane queued unless the engine queue waited
  *      STUDIO_ENGINE_TRAIN_MAX_WAIT_MIN (120). It runs `task train --engine <x>` detached; the train itself still takes
  *      machine:heavy with the RAM floor, and an infrastructure abort stays NOT RUN (2.73.2). STUDIO_ENGINE_TRAIN_AUTO=off
  *      (or engines.<x>.trainAuto false) leaves starting it to a person.
+ *   i. 2.79 (t): the game tester (testerPass, harness/tester.mjs): starts a run when STUDIO_TESTER_EVERY_HOURS (24) AND
+ *      STUDIO_TESTER_MIN_LANDINGS (10) game landings passed since the last one, or on `npm run tester -- now`, only while
+ *      the rig isn't starved and a gate slot is free; no slot, no hold. A landed module nothing imports gets one "Wire
+ *      <module> into the game" task (STUDIO_TESTER_WIRE_TASKS).
  * It writes .studio/line/status.json (lineStatus(): what the Communicator posts and the supervisor reads for its order).
  *
  * STUDIO_LINE_PRODUCER: on (default) | report (status only: no fixes, no task filed, the supervisor ignores the plan) |
@@ -55,6 +60,8 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { writeAtomic } from './fsafe.mjs';
+import { OWNER_STEP_PROTECTED } from './owner-only.mjs';
 
 export const LINE_AGENT = 'line-producer';
 export const LINE_DIR = () => path.join(STUDIO_STATE_DIR, 'line');
@@ -561,7 +568,6 @@ export async function protectedApprover({ env = process.env } = {}) {
  * or .proposal, or a beta/proxy approve-protected use, after the hand-back). No approver: reported only.
  */
 export async function protectedRoutes({ tasks, events, now = Date.now(), env = process.env, act = true } = {}) {
-  const { PROTECTED_RX } = await import('./model-pools.mjs');
   const holdMs = Math.max(0, num(env.STUDIO_LINE_PROTECTED_HOLD_MIN, 120)) * 60000;
   const out = [];
   let approver;
@@ -570,7 +576,8 @@ export async function protectedRoutes({ tasks, events, now = Date.now(), env = p
     const mine = events.filter((e) => e.task === t.id || (e.type && /^approval\.|^delegation\.used$/.test(e.type) && String(e.msg || '').includes(t.id)));
     const lastStart = mine.filter((e) => e.type === 'task.start' || e.type === 'agent.session.start').pop();
     const pause = mine.filter((e) => e.type === 'task.paused' && (!lastStart || Date.parse(e.ts) >= Date.parse(lastStart.ts))).pop();
-    if (!pause || !PROTECTED_RX.test(String(pause.msg || ''))) continue;
+    // 2.79 (d): the hand-back's structured field (meta.ownerStep, from the harness's own refusal), not the words of its note.
+    if (!pause || pause.meta?.ownerStep !== OWNER_STEP_PROTECTED) continue;
     const at = Date.parse(pause.ts);
     const approved = mine.some((e) => Date.parse(e.ts) > at && (/^approval\.(protected|proposal)$/.test(e.type) || (e.type === 'delegation.used' && /approve-(protected|proposal)/.test(String(e.meta?.action || '')))));
     if (approved) continue;
@@ -642,6 +649,9 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
     try { chainPush = await chainBreakerPush({ chainBreakers: p.chainBreakers, now, env, act: acting, deps: { ...(deps.root ? { root: deps.root } : {}), ...(deps.trainQueue ? { trainQueue: deps.trainQueue } : {}), ...(deps.heavy ? { heavy: deps.heavy } : {}) } }); } catch (e) { chainPush = { on: false, holding: false, why: `error: ${e.message}` }; }
     let twins = null;
     try { twins = await twinPass({ now, env, act: acting, deps: { ...(deps.root ? { root: deps.root } : {}), ...(deps.events ? { events: deps.events } : {}), ...(deps.queue ? { queue: deps.queue } : {}), ...(deps.engines ? { engines: deps.engines } : {}), ...(deps.filesOf ? { filesOf: deps.filesOf } : {}), ...(deps.addTask ? { addTask: deps.addTask } : {}) } }); } catch (e) { twins = { on: false, checked: [], why: `error: ${e.message}` }; }
+    // 2.79 (t): the game tester's schedule (harness/tester.mjs), and wire-it tasks for landed modules nothing imports.
+    let tester = null;
+    try { tester = await testerPass({ now, env, act: acting, rig: f.rig, deps }); } catch (e) { tester = { state: 'error', why: e.message }; }
     const status = {
       at: new Date(now).toISOString(),
       mode,
@@ -664,10 +674,11 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
       lanes: f.lanes ? (f.lanes.error ? { error: f.lanes.error } : { mode: f.lanes.mode, set: f.lanes.set, unscoped: f.lanes.unscoped, running: f.lanes.running, stacked: f.lanes.stacked, shared: f.lanes.shared }) : null,
       chainPush,
       twins,
+      tester,
     };
     // One plain line for the Communicator (helper l reads { at, builders: { running, target }, blocked, text }).
     status.text = summaryLine(status);
-    if (!dryRun) { try { fs.mkdirSync(LINE_DIR(), { recursive: true }); const tmp = `${LINE_STATUS_FILE()}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(status, null, 2)}\n`); fs.renameSync(tmp, LINE_STATUS_FILE()); } catch {} }
+    if (!dryRun) { try { fs.mkdirSync(LINE_DIR(), { recursive: true }); writeAtomic(LINE_STATUS_FILE(), `${JSON.stringify(status, null, 2)}\n`); } catch {} }
     void note;
     return status;
   } catch (e) { return { mode, error: e.message, at: new Date(now).toISOString() }; }
@@ -689,7 +700,29 @@ export function summaryLine(s) {
     s.chainPush?.holding ? `holding new builder verifies for chain-breaker ${s.chainPush.task}` : null,
     ...(s.twins?.checked || []).filter((r) => r.need).map((r) => `${r.engine} twin ${r.added || '(to add)'} for ${r.task}`),
     ...(s.engines || []).filter((e) => e.queued || e.running).map((e) => `${e.engine} train: ${e.running ? 'running' : e.started ? 'started' : `${e.queued} queued, waits (${e.why})`}`),
+    s.tester?.line || null,
   ].filter(Boolean).join('; ');
+}
+
+// ---- 2.79 (t): the game tester (harness/tester.mjs) ------------------------------------------------------------------
+
+/**
+ * The Line Producer owns the game tester's schedule: each pass advances the run that is going (build, then the agent,
+ * then the report) or starts one that is due (STUDIO_TESTER_EVERY_HOURS AND STUDIO_TESTER_MIN_LANDINGS, or `npm run
+ * tester -- now`) when the rig isn't starved and a gate slot is free; it never takes a slot or holds anything. Then the
+ * wire-it pass: a landed module nothing in the game imports gets one "Wire <module> into the game" task.
+ * deps.tester: the tester's own deps (selftests). act false: what it would do.
+ */
+export async function testerPass({ now = Date.now(), env = process.env, act = true, rig = null, deps = {} } = {}) {
+  const t = await import('./tester.mjs');
+  let root = deps.root || null;
+  if (!root) root = (await import('./worktree.mjs')).mainRoot();
+  const td = deps.tester || {};
+  const run = await t.testerPass({ root, now, env, act, rig, deps: td });
+  let wire = null;
+  try { wire = await t.wirePass({ root, now, env, act, deps: { filesOf: (id) => landedFiles(root, id), ...td } }); } catch (e) { wire = { on: false, added: [], why: `error: ${e.message}` }; }
+  const line = [run.line || null, wire?.added?.length ? `wire tasks ${wire.added.map((a) => a.task || '(to add)').join(', ')}` : null].filter(Boolean).join('; ') || null;
+  return { ...run, wire, line };
 }
 
 // ---- 2.78.1 (f): the chain-breaker push ----------------------------------------------------------------------------
@@ -803,7 +836,7 @@ export async function twinPass({ now = Date.now(), env = process.env, act = true
   if (!cfgs.length) return { on: false, checked: [], why: 'no engine twins listed (studio/game.json engines.<name>.twins: the game paths that have an engine twin)' };
   const f = path.join(LINE_DIR(), 'twins.json');
   const st = readJson(f, null);
-  const save = (s) => { if (!act) return; try { fs.mkdirSync(LINE_DIR(), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(s, null, 2)}\n`); fs.renameSync(tmp, f); } catch {} };
+  const save = (s) => { if (!act) return; try { fs.mkdirSync(LINE_DIR(), { recursive: true }); writeAtomic(f, `${JSON.stringify(s, null, 2)}\n`); } catch {} };
   if (!st || !st.since) { save({ since: new Date(now).toISOString(), seen: {} }); return { on: true, checked: [], why: 'first look: game tasks that land from now on are checked for engine twins' }; }
   const seen = st.seen && typeof st.seen === 'object' ? st.seen : {};
   const events = deps.events || readRecentEvents(20000);
@@ -866,6 +899,15 @@ export function engineWindow(f, env = process.env) {
   if (!f.queued) return { start: false, wait: false, why: `no ${L} branch queued` };
   if (f.running) return { start: false, wait: false, why: `the ${L} train is running` };
   if (f.startedRecently) return { start: false, wait: false, why: `started it ${f.startedRecently} min ago` };
+  // 2.79 (e): the engine's own slot (STUDIO_ENGINE_SLOTS, heavy.mjs engineSlotsAt): the train starts when that slot is free,
+  // whatever the game's trains and verifies are doing (they never take it, and the land never takes one of theirs), and
+  // never needs `train auto off`. Free RAM and CPU are the land's own heavy wait (it queues for its RAM, never starves a
+  // game job). The quiet window below is kept for an engine that wants a quiet machine ("window": "quiet" in its engine
+  // config, or STUDIO_ENGINE_WINDOW=quiet) and when the engine line is off (STUDIO_ENGINE_SLOTS=off).
+  if (f.engineSlots > 0 && f.window !== 'quiet' && !/^quiet$/i.test(String(env.STUDIO_ENGINE_WINDOW || ''))) {
+    if (!f.slotFree) return no(`the ${L} slot is taken (${(f.engineHolders || []).slice(0, 2).join(', ') || 'another engine land'}; STUDIO_ENGINE_SLOTS ${f.engineSlots})`);
+    return { start: true, wait: false, why: `the ${L} slot is free (STUDIO_ENGINE_SLOTS ${f.engineSlots}): game trains and verifies don't take it${f.webTrain ? ' (a web train is running beside it)' : ''}; one land run ~${f.expectedMin ?? '?'} min` };
+  }
   if (f.webTrain) return no('the web train is running (its verify goes first: train > builder verifies > engine > soaks)');
   const sameKind = (f.heavy || []).filter((h) => (f.heavyKind === 'unity' ? /unity/i.test(`${h.kind || ''}`) : false) || /\btrain\b/i.test(`${h.kind || ''}`));
   if (sameKind.length) return no(`machine:heavy holds ${sameKind.map((h) => h.label || h.kind).slice(0, 2).join(', ')}`);
@@ -911,6 +953,15 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     const last = starts[t.name];
     const since = last ? Math.round((now - Date.parse(last.at)) / 60000) : null;
     const f = { engine: t.name, label: t.label, heavyKind: t.heavyKind, queued: q.length, oldestAt: q[0]?.at || null, running: Boolean(running), startedRecently: since !== null && since < num(env.STUDIO_ENGINE_TRAIN_COOLDOWN_MIN, 3) ? Math.max(0, since) : 0, auto: autoOn && t.trainAuto, webTrain, webQueued: webQ.length, heavy, freeGb: Number.isFinite(rb?.freeGb) ? rb.freeGb : Number.isFinite(rig?.freeRamGb) ? rig.freeRamGb : null, floorGb: floor.gb, floorFrom: floor.from, cpuBusy, expectedMin: exp.minutes, now };
+    // 2.79 (e): the engine slot: how many engine lands hold machine:heavy now against STUDIO_ENGINE_SLOTS.
+    try {
+      const hv = await import('./heavy.mjs');
+      f.engineSlots = hv.engineSlotsAt(root, env);
+      const mine = hv.heavyHolders(root, { env }).filter((h) => h?.claim?.engine);
+      f.engineHolders = mine.map((h) => h.label || 'an engine land');
+      f.slotFree = mine.length < f.engineSlots;
+    } catch { f.engineSlots = 0; }
+    f.window = t.cfg?.window === 'quiet' ? 'quiet' : 'slot';
     const w = engineWindow(f, env);
     const row = { engine: t.name, queued: q.length, running: Boolean(running), expectedMin: exp.minutes, expectedFrom: exp.from, floorGb: floor.gb, start: w.start, why: w.why };
     if (w.start && acting) {

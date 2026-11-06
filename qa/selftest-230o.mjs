@@ -174,12 +174,12 @@ console.log(JSON.stringify({ a: idleVerdict({ role: 'builder', startedAt: at(0),
   report('2.30o: a session holding no task for 5 min exits; one that holds a task, or a role left out of STUDIO_IDLE_EXIT_ROLES, does not', iv.a?.exit === true && iv.b?.exit === false && iv.c?.exit === false && iv.d?.exit === false, JSON.stringify(iv));
   w('zz-sleep.mjs', 'setTimeout(() => {}, 60000);\n');
   const t0 = Date.now();
-  const idle = run(dir, 'node harness/agent.mjs start --role builder --agent builder-idle --tool custom --model m', { ...base, STUDIO_AGENT_CMD: 'node zz-sleep.mjs', STUDIO_HEARTBEAT_SEC: '1', STUDIO_IDLE_EXIT_MIN: '0.05' });
+  const idle = run(dir, 'node harness/agent.mjs start --attach --role builder --agent builder-idle --tool custom --model m', { ...base, STUDIO_AGENT_CMD: 'node zz-sleep.mjs', STUDIO_HEARTBEAT_SEC: '1', STUDIO_IDLE_EXIT_MIN: '0.05' });
   const secs = (Date.now() - t0) / 1000;
   const evi = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8');
   report('2.30o: the launcher ends an idle session itself (agent.idle_exit) and frees its slot, long before the work would end', /"type":"agent.idle_exit"[^\n]*builder-idle|builder-idle[^\n]*"type":"agent.idle_exit"/.test(evi) && secs < 40, `${secs}s ${out(idle).slice(-800)}`);
   const t1 = Date.now();
-  run(dir, 'node harness/agent.mjs start --role director --agent director-stall --tool custom --model m', { ...base, STUDIO_AGENT_CMD: 'node zz-sleep.mjs', STUDIO_HEARTBEAT_SEC: '1', STUDIO_STALL_PLAN_MIN: '0.05' });
+  run(dir, 'node harness/agent.mjs start --attach --role director --agent director-stall --tool custom --model m', { ...base, STUDIO_AGENT_CMD: 'node zz-sleep.mjs', STUDIO_HEARTBEAT_SEC: '1', STUDIO_STALL_PLAN_MIN: '0.05' });
   const evs2 = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8');
   report('2.30o: the launcher ends a Director session that makes no progress (session.stall) and logs why', /"type":"session.stall"[^\n]*director-stall|director-stall[^\n]*"type":"session.stall"/.test(evs2) && (Date.now() - t1) / 1000 < 40, evs2.split('\n').filter((l) => /director-stall/.test(l)).slice(-3).join(' '));
 
@@ -192,7 +192,7 @@ console.log(JSON.stringify({ five: providerTrouble(five, 1)?.kind, two: provider
   fs.rmSync(path.join(dir, '.studio/tool-quota.json'), { force: true });
   w('zz-out.mjs', "console.error('Error: credits refused for this key'); process.exit(1);\n");
   w('zz-ok.mjs', "process.exit(0);\n");
-  const to = run(dir, 'node harness/agent.mjs start --role qa-playtester --agent qa-zzto --tool zzalpha --model m1', { ...base, STUDIO_TOOL_ZZALPHA_CMD: 'node zz-out.mjs', STUDIO_TOOL_ZZBETA_CMD: 'node zz-ok.mjs', STUDIO_HEARTBEAT_SEC: '1' });
+  const to = run(dir, 'node harness/agent.mjs start --attach --role qa-playtester --agent qa-zzto --tool zzalpha --model m1', { ...base, STUDIO_TOOL_ZZALPHA_CMD: 'node zz-out.mjs', STUDIO_TOOL_ZZBETA_CMD: 'node zz-ok.mjs', STUDIO_HEARTBEAT_SEC: '1' });
   const evt = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8');
   const qm = (() => { try { return JSON.parse(fs.readFileSync(path.join(dir, '.studio/tool-quota.json'), 'utf8')); } catch { return {}; } })();
   report('2.30o: a session on any tool that runs out is marked out and the next tool in the order takes over at once (no hardcoded tool names)', Boolean(qm.zzalpha) && /qa-zzto ran out on zzalpha[^"]*: zzbeta takes over/.test(evt) && /failed over to zzbeta/.test(evt), `${out(to).slice(-600)} ${JSON.stringify(qm)} ${evt.split('\n').filter((l) => /qa-zzto/.test(l)).slice(-4).join(' ')}`);

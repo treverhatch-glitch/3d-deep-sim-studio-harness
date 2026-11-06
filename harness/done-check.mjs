@@ -48,6 +48,7 @@ import { sizeRuleFor, freeImportLines } from './size-rule.mjs';
 import { contractChecks } from './contracts.mjs';
 import { judgeFiles, manifestSettings, evidenceWords } from './type-evidence.mjs';
 import { activeGame } from './cartridge.mjs';
+import { stage1Replaced } from './tester-config.mjs';
 import { regressionHowTo, regressionMissing } from './regression-howto.mjs';
 import { checkResearch, ensureResearchTemplate } from './research.mjs';
 import { engineTask, engineRepo, engineTarget } from './engine-tracks.mjs';
@@ -76,20 +77,27 @@ export const reviewApproves = (text, env = process.env) => {
 
 /** 2.78.2 (c): task types that produce notes, reviews and docs, never game code. */
 export const NO_GAME_CODE_TYPES = ['direction', 'review', 'docs', 'idea', 'research', 'study'];
+/** 2.79 (d): roles whose tasks write notes, reviews and plans, never game code (a title like "Fix …" doesn't change that). */
+export const NO_GAME_CODE_ROLES = ['director', 'reviewer'];
 /**
  * 2.78.2 (c): may `task done` skip the game's own checks (the whole game test suite)? Yes when the task's type is one of
  * NO_GAME_CODE_TYPES and every file its lane changes (or claims, or has dirty) is a Markdown file or under studio/,
  * docs/ or .studio/. Any other file, or a type that can write code, runs them as before: a docs task that also touched
  * code still runs them. The docs and board checks are separate rows and always run. { skip, why }.
+ * 2.79 (d): a Director's or reviewer's task (NO_GAME_CODE_ROLES) is judged the same way when its title typed it "bug" or
+ * "change" and no owner reclassified it: its files decide.
  * STUDIO_DONE_SKIP_GAME_NONCODE=off: never skip.
  */
-export function skipGameChecks(type, files, env = process.env) {
+export function skipGameChecks(type, files, env = process.env, { role = null, ownerTyped = false } = {}) {
   if (/^(off|0|false|no)$/i.test(String(env.STUDIO_DONE_SKIP_GAME_NONCODE ?? '').trim())) return { skip: false, why: 'STUDIO_DONE_SKIP_GAME_NONCODE=off' };
-  if (!NO_GAME_CODE_TYPES.includes(type)) return { skip: false, why: `a ${type} task can change game code` };
+  // 2.79 (d): a Director's or reviewer's task whose title typed it "bug" or "change" (no type set) is still that role's: the
+  // rule is its files, as for a typed one. An owner's reclassification (ownerTyped) is taken as said.
+  const byRole = !ownerTyped && NO_GAME_CODE_ROLES.includes(String(role || '').toLowerCase());
+  if (!byRole && !NO_GAME_CODE_TYPES.includes(type)) return { skip: false, why: `a ${type} task can change game code` };
   const list = [...new Set((files || []).map((f) => String(f).replace(/\\/g, '/').replace(/^\.\//, '')).filter(Boolean))];
   const code = list.find((f) => !(/\.md$/i.test(f) || /^(studio|docs|\.studio)\//.test(f)));
   if (code) return { skip: false, why: `it changes ${code}, which isn't a note or doc` };
-  return { skip: true, why: `a ${type} task whose ${list.length} changed file(s) are notes, docs or studio records: no game code to test` };
+  return { skip: true, why: `a ${NO_GAME_CODE_TYPES.includes(type) ? type : `${role}`} task whose ${list.length} changed file(s) are notes, docs or studio records: no game code to test` };
 }
 
 /** The oldest commit tagged with this task (Studio-Task trailer), or null. */
@@ -842,7 +850,11 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('Fun report since the task started', mtime('studio/fun/latest.md') >= since, 'no fun report since this task started (`npm run fun`)');
     check('Fun report is newer than the last game change', mtime('studio/fun/latest.md') >= fresh, 'the game changed after the fun report; run `npm run fun` again');
   }
-  if (type === 'playtest') {
+  // 2.79 (t): a studio whose game has its own build or checks doesn't play the template cartridge per task any more: the
+  // game tester (harness/tester.mjs) plays the real build on its own schedule. A template studio keeps the stage-1 rows.
+  const s1 = stage1Replaced();
+  if (type === 'playtest' && s1.replaced) check(`Stage-1 playtest: ${s1.words}`, true, '');
+  else if (type === 'playtest') {
     const reps = newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).map((f) => ({ f, j: readJson(f) })).filter(({ j }) => j?.stage1);
     check('Playtest report since the task started', reps.length, 'no playtest report in qa/reports/ since this task started (`npm run playtest:stage1`)');
     const good = reps.filter(({ f, j }) => mtime(f) >= fresh && j.stage1.seed != null && j.stage1.ticksRun != null && isSha256(j.stage1.finalSha256) && (j.passed || j.stage1.failingTick != null));
@@ -878,9 +890,10 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('A scenario for it in the game\'s qa.mjs', ch.files.some((f) => /^cartridges\/[^/]+\/qa\.mjs$/.test(f) || /^(web|game)\/[^/]+\/sim\/qa\.mjs$/.test(f)), 'qa.mjs wasn\'t changed: add a scenario that exercises the system (cartridges/<game>/qa.mjs, or web/<game>/sim/qa.mjs)');
     check('Goldens updated with it', ch.files.some((f) => f.startsWith('qa/golden/')), 'no golden changed: the system changes the game, so regenerate (npm run golden -- --update) and commit the goldens with it');
     const fresh2 = lastGameChange();
-    const reps = newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).filter((f) => mtime(f) >= fresh2);
-    check('Playtest of the current build', reps.length, 'no playtest report newer than the last game change (npm run playtest:stage1)');
-    stage1Warnings(reps.map((f) => ({ f, j: readJson(f) })).filter(({ j }) => j?.stage1));
+    const reps = s1.replaced ? [] : newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).filter((f) => mtime(f) >= fresh2);
+    if (s1.replaced) check(`Stage-1 playtest of the current build: ${s1.words}`, true, '');
+    else check('Playtest of the current build', reps.length, 'no playtest report newer than the last game change (npm run playtest:stage1)');
+    if (!s1.replaced) stage1Warnings(reps.map((f) => ({ f, j: readJson(f) })).filter(({ j }) => j?.stage1));
     workAndVerify();
     const implementer = (readRecentEvents(20000).filter((e) => e.type === 'task.start' && e.task === task.id).pop() || {}).model;
     const notes = filesUnder('studio/reviews', (n) => n.endsWith('.md') && n !== 'README.md').map((f) => fs.readFileSync(abs(f), 'utf8')).filter((t) => new RegExp(`\\b${task.id}\\b`).test(t));

@@ -69,7 +69,7 @@ export async function selftest276I({ dir, run, report, tmpRoot, root }) {
     try { return { ...JSON.parse(t), _err: `${out(r)}`.slice(-1500) }; } catch { return { _err: `${out(r).slice(-2500)}` }; }
   };
   const readRec = (S, agent) => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'agents', `${agent}.json`), 'utf8')); } catch { return null; } };
-  const startFg = (S, env, args, timeout = 120000) => spawnSync(process.execPath, ['harness/agent.mjs', 'start', ...args], { windowsHide: true, cwd: S, encoding: 'utf8', env: childEnv(env), timeout });
+  const startFg = (S, env, args, timeout = 120000) => spawnSync(process.execPath, ['harness/agent.mjs', 'start', '--attach', ...args], { windowsHide: true, cwd: S, encoding: 'utf8', env: childEnv(env), timeout });
   const addTask = (S, env, title) => (out(spawnSync(process.execPath, ['harness/task.mjs', 'add', title, '--role', 'builder', '--priority', 'P1'], { windowsHide: true, cwd: S, encoding: 'utf8', env: childEnv(env) })).match(/"id": "(T-\d+)"/) || [])[1];
   const fwd = (p) => p.replace(/\\/g, '/');
   // A stand-in agent: prints the stream-json lines given in a file, records its cwd, then sleeps `secs` seconds.

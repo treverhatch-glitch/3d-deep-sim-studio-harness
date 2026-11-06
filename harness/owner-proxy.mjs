@@ -19,7 +19,7 @@
  * another delegation. `npm run delegate -- revoke` (anyone) ends it at once: proxy approvals count only while the grant
  * that made them is still the one on file, so revoking also voids approvals not yet landed.
  *
- * This module has no harness imports beyond hash.mjs and event.mjs on purpose: permission.mjs, approve.mjs and
+ * This module has no harness imports beyond hash.mjs, event.mjs and owner-acts.mjs (a list, no imports) on purpose: permission.mjs, approve.mjs and
  * delegation.mjs all use it, and they import each other.
  */
 import fs from 'node:fs';
@@ -28,13 +28,17 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { canonicalBytes } from './hash.mjs';
 import { REPO_ROOT } from './event.mjs';
+import { OWNER_ONLY_ACTIONS } from './owner-acts.mjs';
 
 export const DELEGATION_REL = 'studio/delegation.json';
 export const OWNER_PUB_REL = 'studio/keys/owner-ed25519.pub.pem';
 export const PROXY_MAX_DAYS = 366;
 export const PROXY_DEFAULT_DAYS = 30;
-/** What a proxy never covers, by action name. The harness spends no money; this keeps it explicit. */
-export const PROXY_NEVER = ['money', 'spend', 'payment'];
+/**
+ * What a proxy never covers, by action name: 2.79 (c), the owner's own acts (harness/owner-acts.mjs, the one list: real
+ * money, deleting data, keys and credentials, publishing outside the PC, turning beta mode off).
+ */
+export const PROXY_NEVER = OWNER_ONLY_ACTIONS;
 export const GRANT_FIELDS = ['agent', 'actions', 'until', 'by', 'at', 'why'];
 const WORKER = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|art|artist|art-director|designer|designer-calibrator|balancer|fun-tester|scout|reference-scout|engine-porter|dev-hacker|planner|liaison)(-|_|\d|$)/i;
 

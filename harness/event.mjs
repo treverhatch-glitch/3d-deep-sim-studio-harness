@@ -20,7 +20,19 @@ import { loadStudioEnvAtStart } from './dotenv.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, '..');
-export const STUDIO_STATE_DIR = path.join(REPO_ROOT, '.studio');
+// 2.79 (b): in a lane copy (<main>/.lanes/<name>) whose .studio is a link to main's, or is missing, the state dir is main's:
+// a process that outlives its copy then never makes .lanes/<name>/.studio again. Anywhere else REPO_ROOT/.studio.
+export const STUDIO_STATE_DIR = (() => {
+  const own = path.join(REPO_ROOT, '.studio');
+  if (/^own$/i.test(String(process.env.STUDIO_LANE_EVENTS || '').trim())) return own; // 2.78.2 (e): the copy's own log
+  try {
+    const m = REPO_ROOT.replace(/\\/g, '/').match(/^(.*)\/\.lanes\/[^/]+$/);
+    if (!m || !fs.statSync(path.join(m[1], '.git')).isDirectory()) return own;
+    let linked = false;
+    try { linked = fs.lstatSync(own).isSymbolicLink(); } catch (e) { if (e.code === 'ENOENT') linked = true; }
+    return linked ? path.join(path.resolve(m[1]), '.studio') : own;
+  } catch { return own; }
+})();
 
 // Studio settings from .env (STUDIO_*, HUB_*, AGENT_*, PLAYTEST_*), so every command sees the same
 // backup folder, Producer name and caps, not only the HUB. Keys are read only by the router.
@@ -59,7 +71,12 @@ export function boardRoot(root = REPO_ROOT, env = process.env) {
   try {
     const m = String(root).replace(/\\/g, '/').match(/^(.*)\/\.lanes\/[^/]+\/?$/);
     const dotGit = path.join(root, '.git');
-    if (m && fs.statSync(dotGit).isFile()) {
+    // 2.79 (b): a lane folder whose .git is gone (the copy was removed while a process still ran from it, or a leftover
+    // folder) still belongs to <main> by its path: nothing may make .lanes/<name>/.studio.
+    let gone = false;
+    if (m) { try { fs.statSync(dotGit); } catch (e) { gone = e.code === 'ENOENT'; } }
+    if (gone && fs.statSync(path.join(path.resolve(m[1]), '.git')).isDirectory()) main = path.resolve(m[1]);
+    else if (m && fs.statSync(dotGit).isFile()) {
       const gd = (fs.readFileSync(dotGit, 'utf8').match(/^gitdir:\s*(.+?)\s*$/m) || [])[1];
       const cand = path.resolve(m[1]);
       const mainGit = path.join(cand, '.git');

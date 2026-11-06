@@ -26,6 +26,7 @@
  * its open rescues are closed with a note (closeRescuesFor; the watchdog's pass also sweeps any it missed).
  */
 import fs from 'node:fs';
+import { postAsk } from './ask-post.mjs';
 import path from 'node:path';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { modelFamily } from './families.mjs';
@@ -82,7 +83,7 @@ export function shelve(taskId, why, { now = Date.now() } = {}) {
   const reason = `shelved: ${why}. The studio carries on without it; see studio/rescues/${taskId}.md`;
   setHold(taskId, { parked: { by: 'rescue', why: reason, shelved: true, budget: true, rescue: 'shelved', at: new Date(now).toISOString() } }, { by: 'rescue', msg: `${taskId} ${reason}` });
   emitEvent({ type: 'task.shelved', agent: 'rescue', to: 'producer', task: taskId, msg: `${taskId} ${reason}` });
-  emitEvent({ type: 'agent.ask', agent: 'rescue', to: 'producer', task: taskId, msg: `Needs you (not urgent, nothing waits on it): ${taskId} ${reason}` });
+  postAsk({ agent: 'rescue', to: 'producer', task: taskId, subject: 'parked', msg: `Needs you (not urgent, nothing waits on it): ${taskId} ${reason}` });
   return { shelved: reason };
 }
 
@@ -135,7 +136,7 @@ export function applyRescue(rescueTask, { by = 'rescue' } = {}) {
     emitEvent({ type: 'task.rescue.done', agent: by, task: stuck, to: 'producer', msg: `${stuck} split by rescue ${rescueTask.id}`, meta: { decision: 'split', rescue: rescueTask.id } });
   } else {
     setHold(stuck, { parked: { by: 'rescue', why: `rescue ${rescueTask.id} needs a person: ${r?.diagnosis ? r.diagnosis.split('\n')[0].slice(0, 200) : 'see the rescue report'}`, rescue: 'person', at: new Date().toISOString() } }, { by, msg: `${stuck} waits for a person (rescue ${rescueTask.id})` });
-    emitEvent({ type: 'agent.ask', agent: by, to: 'producer', task: stuck, msg: `Needs you: rescue ${rescueTask.id} says a person must decide ${stuck}. ${r?.diagnosis ? r.diagnosis.split('\n')[0].slice(0, 300) : ''} (studio/rescues/${stuck}.md)` });
+    postAsk({ agent: by, to: 'producer', task: stuck, subject: 'parked', msg: `Needs you: rescue ${rescueTask.id} says a person must decide ${stuck}. ${r?.diagnosis ? r.diagnosis.split('\n')[0].slice(0, 300) : ''} (studio/rescues/${stuck}.md)` });
     emitEvent({ type: 'task.rescue.done', agent: by, task: stuck, msg: `${stuck}: rescue ${rescueTask.id} asks for a person`, meta: { decision: 'needs-person', rescue: rescueTask.id } });
   }
   return r?.decision || 'needs-person';
@@ -193,7 +194,7 @@ export async function rescuePass({ now = Date.now(), env = process.env, launcher
     if (r.id) actions.push({ kind: 'rescue', task: id, msg: `queued rescue step ${r.level} ${r.id} for ${id}${r.model ? ` on ${r.model}` : ''}` });
     else if (r.shelved) actions.push({ kind: 'shelve', task: id, msg: `${id} ${r.shelved}` });
     else {
-      emitEvent({ type: 'agent.ask', agent: 'watchdog', to: 'producer', task: id, msg: `Needs you: ${String(h.parked.why || '').split('. ')[0]}; ${r.person}.` });
+      postAsk({ agent: 'watchdog', to: 'producer', task: id, subject: 'parked', msg: `Needs you: ${String(h.parked.why || '').split('. ')[0]}; ${r.person}.` });
       actions.push({ kind: 'ask', task: id, msg: `asked a person about ${id}: ${r.person}` });
     }
   }

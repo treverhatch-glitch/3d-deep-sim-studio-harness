@@ -4,6 +4,7 @@
  */
 
 import fs from 'node:fs';
+import { postAsk } from './ask-post.mjs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +32,7 @@ import { recordTrust } from './gate-trust.mjs';
 import { isEngineChurn, engineGates, relatedTestsOn } from './game-gates.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
 import { checkBreaker, isFailureNote, reasonKey, unblockTask } from './breaker.mjs';
-import { parkIfOwnerOnly } from './owner-only.mjs';
+import { parkIfOwnerOnly, ownerStepOfChecks, ownerStepForHandBack } from './owner-only.mjs';
 import { canaryEnd, isCanary, recordCanary, modelFor } from './canary.mjs';
 import { claimActive, claimOwner } from './busy.mjs';
 import { startSummary, carryForward } from './carry.mjs';
@@ -787,7 +788,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       if (/^(off|0|false|no)$/i.test(String(process.env[name] || ''))) emitEvent({ type: 'safety.off', agent: agent || target.role, task: target.id, msg: `${target.id} closed with the ${id} check off (${name}=off)` });
     }
     if (failed.length) {
-      emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: the ${failed.map((f) => f.id).join(' and ')} check failed` });
+      // 2.79 (d): the refusal's own code (meta.ownerStep) is what a later hand-back is routed on, never the words of its note.
+      { const ownerStep = ownerStepOfChecks(failed.map((f) => f.id)); emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: the ${failed.map((f) => f.id).join(' and ')} check failed`, meta: { refusal: failed.map((f) => f.id), ...(ownerStep ? { ownerStep } : {}) } }); }
       const how = Object.fromEntries(SAFETY.map(([id, , , h]) => [id, h]));
       return { error: 'safety', failed, message: `${target.id} is not done: ${failed.map((f) => `the ${f.id} check fails (node ${f.rel}):\n${f.why.split('\n').map((l) => `  ${l}`).join('\n')}\n  Fix: ${how[f.id]}.`).join('\n')}\nThese run at every task done, forced or not.` };
     }
@@ -813,7 +815,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       const dirty0 = st0.status === 0 ? String(st0.stdout || '').split('\0').filter((x) => x.length > 3).map((x) => x.slice(3)) : ['?'];
       const claimed0 = (lock.locked ? lock.lock.owner : agent) ? listLocks().filter((l) => l.owner === (lock.locked ? lock.lock.owner : agent) && l.key.startsWith('path:')).map((l) => l.key.slice(5)) : [];
       const own = (() => { try { return taskChanges(target.id, startedAt(target.id)).files; } catch { return ['?']; } })();
-      const r0 = skipGameChecks(check.type, [...(ld0?.changed || []), ...dirty0, ...claimed0, ...own]);
+      const r0 = skipGameChecks(check.type, [...(ld0?.changed || []), ...dirty0, ...claimed0, ...own], process.env, { role: target.role, ownerTyped: Boolean(typeOf(target).owner) });
       return r0.skip ? r0 : null;
     } catch { return null; }
   })();
@@ -887,6 +889,19 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
 
   // 2.72.0 (b): the game's checks passed: fixed purity hits leave the baseline (a commit of that file only) before it lands.
   if (!force) shrinkAtDone({ root: REPO_ROOT, task: target.id, agent });
+
+  // 2.79 (e): an engine-porter task runs its engine's quickCheck (studio/game.json engines.<x>.quickCheck, npm run engine --
+  // check) in its lane copy and is refused on red: the porter's own check, like a builder's game checks. Not configured: nothing.
+  if (!force && !checkOnly) {
+    const qe = (() => { try { const r = extEngine || engineTaskOf(target.id); return r?.engine || null; } catch { return null; } })();
+    if (qe && (target.role === 'engine-porter' || extEngine) && typeof engineTarget(qe)?.cfg?.quickCheck === 'string' && engineTarget(qe).cfg.quickCheck.trim()) {
+      const qc = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'engine-check.mjs'), '--json', '--engine', qe, '--task', target.id], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+      let c = null;
+      try { c = JSON.parse((qc.stdout || '').trim().split('\n').pop()); } catch {}
+      if (!c) return { error: 'engine-check', message: `${target.id} is not done: the ${qe} quick check didn't report (${`${qc.stderr || ''}${qc.stdout || ''}`.trim().slice(-300) || `exit ${qc.status}`}). npm run engine -- check --task ${target.id} runs it.` };
+      if (c.status !== 'pass' && c.status !== 'skipped') return { error: 'engine-check', message: `${target.id} is not done: ${c.why}${c.tail ? `\n${c.tail.split('\n').map((l) => `  ${l}`).join('\n')}` : ''}\nFix it, run npm run engine -- check --task ${target.id}, then done again.` };
+    }
+  }
 
   // 2.63.0: task done --train on a Unity-track task: every check above passed; the Unity merge train
   // (harness/unity-train.mjs) lands its branch with others on one land run and closes it then. Nothing is closed here.
@@ -1193,7 +1208,7 @@ export function trainDeps(busyMod, { forDone = false } = {}) {
       const t = closeTrainTask(lane.task, lane.agent, { train: ctx.train, head: ctx.head, laneHead: lane.head, record: ctx.record, note: lane.note || '', repo: ctx.repo || null, target: ctx.target || null });
       return t?.error ? { ok: false, message: t.message } : t ? { ok: true, target: t } : { ok: false, message: `${lane.task} is not on the board` };
     },
-    handBack: (lane, note) => pauseTask(lane.task, lane.agent, note, { force: true }),
+    handBack: (lane, note, o = {}) => pauseTask(lane.task, lane.agent, note, { force: true, handBackCause: o.cause }),
     stopped: () => { const s = readStop(); return s ? `by ${s.by}${s.reason ? `: ${s.reason}` : ''}` : null; },
     // 2.65.0 (3.3): which tasks are open and done on the board, for the train's --after ordering.
     taskStates: () => { const q = parseNextQueue(); return { open: new Set([...q.inProgress, ...q.backlog].map((t) => t.id)), done: new Set(q.done.map((t) => t.id)) }; },
@@ -1254,7 +1269,7 @@ export function sameClaim(lock, expect) {
  * repo), it used to hand back a task an agent had just re-claimed, releasing that fresh claim, and a third agent
  * then started the same task.
  */
-export function pauseTask(taskId, agent = null, note = '', { force = false, expect, cause } = {}) {
+export function pauseTask(taskId, agent = null, note = '', { force = false, expect, cause, handBackCause, ownerStep } = {}) {
   let lock = lockStatus(`task:${taskId}`);
   // Anyone may hand back a task whose holder's session has ended (test #2: dead agents' tasks sat
   // claimed for up to an hour, and the Producer had to wait for the claim to expire).
@@ -1311,7 +1326,10 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
   const head = fs.existsSync(file) ? '' : `# Handoff notes for ${target.id}: ${target.title}\n\nNewest last. Read these before you pick the task up.\n`;
   fs.appendFileSync(file, `${head}\n${heading}\n${facts ? `${facts}\n` : ''}${note || 'No note left.'}\n`);
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Paused ${target.id}: ${note || 'handed back'}`);
-  emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}`, meta: { ...(isFailureNote(note) ? { reasonKey: reasonKey(note) } : {}), ...(cause ? { cause } : {}) } });
+  // 2.79 (d): the owner step this hand-back waits on, from the harness's own refusal (not from the note's words).
+  let ownerStepNow = ownerStep || null;
+  if (!ownerStepNow && !cause) { try { ownerStepNow = ownerStepForHandBack(target.id, readRecentEvents(20000)); } catch { /* a hint, never a blocker */ } }
+  emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}`, meta: { ...(isFailureNote(note) ? { reasonKey: reasonKey(note) } : {}), ...(cause ? { cause } : {}), ...(handBackCause ? { handBackCause } : {}), ...(ownerStepNow ? { ownerStep: ownerStepNow } : {}) } });
   // PU-58: a canary task handed back for a failure (the impossible exit records its own outcome).
   if (!cause && isFailureNote(note)) { try { canaryEnd(target.id, 'handed-back', { agent: who }); } catch { /* a record, never a blocker */ } }
   // 2.30c (#8): a second hand-back for the same reason parks the task with a card; other lanes go on.
@@ -1945,7 +1963,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const heldWhy = `impossible as written (reported by ${who}): ${why}`.slice(0, 400);
     setHold(targetId, { parked: { by: 'producer', why: heldWhy, at: new Date().toISOString(), impossible: true } }, { by: who, msg: `${targetId} held for the Producer: ${heldWhy}`.slice(0, 500) });
     emitEvent({ type: 'task.impossible', agent: who, to: 'producer', task: targetId, model, status: 'blocked', msg: `${targetId} is impossible as written (${who}): ${why}`.slice(0, 600), meta: { why, model } });
-    emitEvent({ type: 'agent.ask', agent: who, to: 'producer', task: targetId, msg: `${targetId} can't be done as written: ${why}. It is released and held for you; fix the task, then npm run task -- unpark ${targetId} --by <name>.`.slice(0, 600) });
+    postAsk({ agent: who, to: 'producer', task: targetId, subject: 'parked', msg: `${targetId} can't be done as written: ${why}. It is released and held for you; fix the task, then npm run task -- unpark ${targetId} --by <name>.`.slice(0, 600) });
     try { canaryEnd(targetId, 'honest', { agent: who, model }); } catch { /* a record, never a blocker */ }
     console.log(`${targetId} released as impossible and held for the Producer. Not a failure. Pick another task: npm run task -- next.`);
     process.exit(0);

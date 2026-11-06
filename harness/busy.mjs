@@ -31,8 +31,10 @@ import { readRecentEvents, emitEvent } from './event.mjs';
 import { updateHolds } from './task-hold.mjs';
 import { LIMIT_STOP } from './budget.mjs';
 import { claim as claimLock, status as lockStatus } from './lock.mjs';
+import { selfIdentity, liveAs } from './proc-identity.mjs';
 
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+// 2.79 (b): a record that carries the writer's start identity is judged by it (proc-identity.mjs liveAs): a reused pid is not alive.
+const alive = (pid, identity = null) => liveAs(Number(pid), identity);
 const read = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 
 async function stateDir() {
@@ -46,18 +48,18 @@ const safe = (id) => String(id).replace(/[^\w.-]/g, '_');
 export async function markDoneRunning(task, agent, { dir } = {}) {
   const d = doneDir(dir || (await stateDir()));
   fs.mkdirSync(d, { recursive: true });
-  fs.writeFileSync(path.join(d, `${safe(task)}.json`), JSON.stringify({ task, agent: agent || null, pid: process.pid, at: new Date().toISOString() }));
+  fs.writeFileSync(path.join(d, `${safe(task)}.json`), JSON.stringify({ task, agent: agent || null, pid: process.pid, identity: selfIdentity(), at: new Date().toISOString() }));
 }
 export async function clearDoneRunning(task, { dir } = {}) {
   const f = path.join(doneDir(dir || (await stateDir())), `${safe(task)}.json`);
-  try { const r = read(f, null); if (!r || r.pid === process.pid || !alive(r.pid)) fs.rmSync(f, { force: true }); } catch {}
+  try { const r = read(f, null); if (!r || r.pid === process.pid || !alive(r.pid, r.identity)) fs.rmSync(f, { force: true }); } catch {}
 }
 /** The running done for a task, or null (a dead pid or a record older than STUDIO_DONE_RUNNING_MAX_MIN, 90, is stale). */
 export function doneRunning(task, { dir, now = Date.now(), env = process.env } = {}) {
   const r = read(path.join(doneDir(dir), `${safe(task)}.json`), null);
   if (!r) return null;
   const max = Number(env.STUDIO_DONE_RUNNING_MAX_MIN ?? 90) * 60000;
-  if (!alive(r.pid) || now - Date.parse(r.at) > max) return null;
+  if (!alive(r.pid, r.identity) || now - Date.parse(r.at) > max) return null;
   return r;
 }
 

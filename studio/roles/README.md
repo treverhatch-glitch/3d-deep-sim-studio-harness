@@ -6,7 +6,7 @@
 | Line Producer | line-producer.md | Harness code on the supervisor's loop: orders launches, routes models, watches the rig, unblocks, reports up |
 | Builder | builder.md | Implements cartridge and harness changes |
 | Playtester | playtester.md | Seed/tick replay and bug reports |
-| QA Playtester | qa-playtester.md | Stage 1 state checks and stage 2 visual checks |
+| Game Tester | qa-playtester.md | Plays the real build in a browser on the Line Producer's schedule; reports what is and isn't in the game (docs/TESTER.md) |
 | Designer Calibrator | designer-calibrator.md | Tuning tables and invariants |
 | Balancer | balancer.md | Sweeps costs and writes studio/balance/latest.md |
 | Fun Tester | fun-tester.md | Scores proxies and requires human review |

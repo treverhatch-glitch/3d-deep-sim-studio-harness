@@ -112,7 +112,7 @@ if (tool === 'agy') {
   g('commit -qm board');
   // The studio's .env as the template leaves it: an empty OPENAI_API_KEY= line (a lane copy gets a copy of it).
   fs.writeFileSync(path.join(repo, '.env'), '# from .env.example\nOPENAI_API_KEY=\n');
-  const start = (root, args, env = {}) => run(root, `node harness/agent.mjs start ${args}`, { ...QUIET, ...withBin, ...env });
+  const start = (root, args, env = {}) => run(root, `node harness/agent.mjs start --attach ${args}`, { ...QUIET, ...withBin, ...env });
   const mainStudio = [real(path.join(repo, 'studio')), real(path.join(repo, '.studio'))];
   const inCopy = (r, agent) => Boolean(r) && real(r.cwd) === real(path.join(repo, '.lanes', agent));
 

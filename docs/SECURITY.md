@@ -279,6 +279,49 @@ session records as its only lists):
   person" is impersonating; the record and the decisions log show what it ran. The owner proxy's approvals
   (`harness/owner-proxy.mjs`) are judged as before.
 
+## The orchestrator signs for the owner in beta mode (2.79, c)
+The owner (2026-11-06): "make it so Patch can sign off on everything and not need me", and earlier "Grokbot and Patch
+can approve as me" and "That's okay that's why it is beta mode". The 2.78.2 (h) table above stays; in beta mode the
+orchestrator (beta mode's named agent, or the owner proxy's agent: whoever `studio/beta.json` or `studio/delegation.json`
+names, never a name in the code) now does everything the owner does in the harness except the owner's own acts, so the
+owner never types `--by <owner>`. Every use is logged as before (the decisions log, an event naming the actor).
+
+| Who | Board decisions (types, lanes, parks, a lane release) | Protected decisions (protected files, weakened tests, hooks, forced dones, protected config) | Asks | Release tier B / C holds | Second signer on a re-recorded golden | The owner's own acts |
+|---|---|---|---|---|---|---|
+| The owner (their own terminal) | yes | yes | every kind | yes | yes (not on a lane they authored) | yes |
+| The orchestrator / owner proxy, in beta mode | yes | yes | every kind but the owner's own acts | yes | yes, also on a lane whose only commits by it are merges of main | no |
+| An outside signer (`STUDIO_OUTSIDE_SIGNERS`, e.g. grokbot), in beta mode | yes | yes | every kind but the owner's own acts | yes | yes (same rule) | no |
+| A Producer/Director session, in beta mode | yes | only with `STUDIO_PRODUCER_APPROVES=protected` | board asks; protected-file asks only with that switch | yes | yes (not its own lane) | no |
+| A worker session (builder, reviewer, tester, any launched non-planning role) | no | no | none, whatever `--by` says | no | no | no |
+
+- The owner's own acts (`harness/owner-acts.mjs`, the one list): real money, deleting data, keys and credentials,
+  publishing outside the PC, turning beta mode off. Refused to the orchestrator, the proxy, an outside signer and every
+  launched session with the reason ("… stays the owner's own"): an ask whose question names one, `approve -- keygen`,
+  a delegated action of that name (`delegationFor`; the proxy's and beta mode's never-lists are this list), and
+  `beta -- off` (before, anyone could turn beta mode off). Only a person's own terminal does them.
+- Asks (`npm run ask -- answer A-x … --by <orchestrator>`): every kind, protected-file and budget asks included. The
+  orchestrator's chat shell may name itself with `--by` when it sets no `STUDIO_LOCK_OWNER` (a shell the harness didn't
+  launch: no `STUDIO_ROLE`). The answer is recorded as the owner's, with `recordedBy`, `via` and the ask's kind, an
+  `ask.answered` event whose agent is the orchestrator, and an `ask-answer` decisions-log entry. Its shell typing the
+  owner's name is still recorded as its answer. A worker session can't answer, under any `--by` (before, `--by <owner>`
+  from a builder counted as the owner's answer).
+- Outside signers: `STUDIO_OUTSIDE_SIGNERS` (comma-separated names; default none) in the main checkout's `.env` only, the
+  owner's file, like `STUDIO_PRODUCER_APPROVES`: a session's or a lane copy's environment never adds one, and a
+  worker-shaped name is never one. While beta mode is on each listed agent acts as beta mode's named agents do and signs
+  as itself (`--by grokbot`, recorded `recordedBy: grokbot`), from its own shell (`STUDIO_LOCK_OWNER=grokbot`) or one that
+  names nobody.
+- Releases (`harness/train-lanes.mjs laneContent`): a release also records the lane's content, each file it changes
+  against its merge-base with main with that file's blob there and at the lane's head. A new head with the same content
+  (a re-queue, the train's catch-up merge of main that touches none of those files) keeps the release, carried to the new
+  head in the queue and in `.studio/train/releases.json` (`carriedFrom` lists the older heads). A lane commit that changes
+  a released file, adds a file, or a main change merged into one of them voids it, as before. Before, a release was
+  keyed on the raw head, so every catch-up merge voided it (the crew's release loop).
+- Goldens (`harness/golden-report.mjs laneAuthors`): a merge whose every parent but the first is in main's history (a
+  lane refresh, a catch-up) is nobody's authorship, nor is a commit main already has; a merge that brings in another
+  branch's commits still counts. So the orchestrator is the second signer on a lane where it only refreshed from main.
+- Not covered: a name the harness can't tell from a person's (an unlisted agent typing `--by grokbot` from an unmarked
+  shell is recorded as a person named grokbot, as before); an agent that sets another agent's name is impersonating.
+
 ## What the gates trust (2.71.1, red-team fixes)
 
 - Gate runners are protected (A01b/A01d/A03): `scripts/run-gates.mjs`, `harness/gate-spawn.mjs`, `harness/game-gates.mjs`,

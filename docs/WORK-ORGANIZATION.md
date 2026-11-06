@@ -318,6 +318,12 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   output). A lone `task done` in a lane copy takes the lanes already queued (not held, not run-alone) along in its
   one verify; only its own lane's result is its answer (a rider that fails is handed back as in any train).
   `STUDIO_TRAIN_RIDE_ALONG=off` turns that off.
+- 2.79 (b): `train auto off` (`.studio/train/auto.json`) stops every automatic game-train start through one reader
+  (`trainAuto` in `train-daemon.mjs`): the daemon's pass, a queued `task done`'s kick (`train-detach.mjs`) and the speculative
+  train (`train-pipeline.mjs`). A person's own `npm run task -- train` still runs; engine trains are separate.
+  A queued lane's copy is kept when its session ends (`agent.mjs` `queuedCopy`), a lane folder with no `.git` is moved to
+  `.studio/lane-leftovers/` and made again, and hand-backs tagged `meta.handBackCause: infra` don't count toward
+  `STUDIO_TRAIN_MAX_HANDBACKS`.
 - The train daemon (2.69.0, `harness/train-daemon.mjs`): while a supervisor runs (`STUDIO_TRAIN_AUTO`, default on),
   each pass starts a train on its own, in a detached child (`.studio/train/daemon.json`, its log `daemon.log`), when
   lanes are ready by the batching rules above (`STUDIO_TRAIN_MIN` lanes not held, or the oldest waited
@@ -391,7 +397,6 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   the reds are reported (`task.train.known_red`, `meta.action` excused; its tasks close on that judgement); green there,
   the entries clear and the red is the lanes' as before. A green landing that changed a listed test's file clears it too.
   A test a lane changed is never excused. `npm run task -- train status` and the War Room's train card show the count.
-  `STUDIO_TRAIN_KNOWN_RED=off` turns it off.
 - The flake triager (2.69.0, `harness/flakes.mjs`): when a train's verify or re-check is red, each failing test file
   (at most `STUDIO_FLAKE_MAX_FILES`, 5; once per train) runs ALONE on the same tree, a focused run as a re-check:
   fails → `real`; passes and the file has a test-randomness finding (`harness/test-rng.mjs`) → `seed-flake`; passes,
@@ -496,8 +501,7 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - `studio/` in a lane copy is the main checkout's (a link, 2.60.1, B-40): only the board commands (`npm run task`,
   lock, proof ...) write there, and a lane's commits can never carry studio config. A config change (`studio/*.json`,
   `studio/bible/*.json`, keys, approvals, presets) goes to the owner or the Producer on main: hand the task back with
-  a note naming it. A Claude Code hook (`.claude/hooks/lane-studio-guard.mjs`) refuses such an edit in a lane copy
-  (`STUDIO_LANE_STUDIO_GUARD=off` turns it off), and task done in a lane warns, naming the files, when main's studio
+  a note naming it. A Claude Code hook (`.claude/hooks/lane-studio-guard.mjs`) refuses such an edit in a lane copy, and task done in a lane warns, naming the files, when main's studio
   config changed uncommitted while the task was worked.
 - Config proposals (2.65.0, B-40): the sanctioned route for a lane's studio config change. The lane commits
   `studio-proposals/<ID>.json`, `{ "changes": [ { "file": "studio/<name>.json", "set": { "<a.b or /a/b>": <value> } } ],
@@ -630,7 +634,9 @@ RAM, threads and minutes; `node harness/rig-budget.mjs` shows an `artBake` share
   RAM, whichever is more) and the claims of jobs started since the scan. **GPU**: the largest GPU's free VRAM less
   `STUDIO_GPU_RESERVE_GB` (2.5 when it drives the display). **CPU**: claimed threads stay within
   `STUDIO_CPU_OVERCOMMIT` (1.5) times the cores. **Slots**: at most `STUDIO_HEAVY_SLOTS` jobs (default computed from
-  the scan, 1 to 6). A GPU-only job takes no slot or CPU share, so it runs beside a verify (2.70.0: the GPU area
+  the scan, 1 to 6: one per 10 GB of total RAM, a quarter of the logical cores, whichever is fewer; 2.79: a 32 GB, 28-thread
+  PC gets 3 with nothing set, it got 6). `STUDIO_TRAIN_PIPELINE` stays `auto` by default: it already starts a second train verify only
+  when this budget has room for it, so a small PC doesn't pipeline. A GPU-only job takes no slot or CPU share, so it runs beside a verify (2.70.0: the GPU area
   below). 2.78.1 (B-117): the slot count is the machine's, not each process's: every waiter also reads the main
   checkout's `.env` on each look, and with both set the lower of the two wins, so lowering `STUDIO_HEAVY_SLOTS` in
   `.env` reaches builder sessions already running (each used to admit by the value it was started with: 4-5 verifies
@@ -722,8 +728,8 @@ and `clip.recorded` events with the landed tasks. `npm run status -- --brief` an
 ("Playable build <id> (T-1, T-2); clip <file>"). At most one is queued: a newer landing replaces a queued one (its
 tasks added). Skipped when the game has no browser build (`browser.page` / `browser.dist` in its qa.mjs) or is the
 template, and with `STUDIO_LANDING_BUILD=off`. `STUDIO_LANDING_CLIP_SECONDS` (15), `STUDIO_LANDING_CLIP_CMD` (the
-clip command, `{seconds}` and `{name}` placeholders), `STUDIO_LANDING_CLIP_TIMEOUT_MIN` (10);
-`STUDIO_LANDING_BUILD_WORKER=off` queues without starting the worker. `node harness/landing-build.mjs status` shows
+clip command, `{seconds}` and `{name}` placeholders), `STUDIO_LANDING_CLIP_TIMEOUT_MIN` (10).
+`node harness/landing-build.mjs status` shows
 what is queued or running.
 
 ## Plan-time scope and waves, in shadow mode (2.78.0, PU-60)

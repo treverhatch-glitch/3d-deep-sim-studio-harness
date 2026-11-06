@@ -16,7 +16,7 @@
  *                                  strictPort (or Playwright's reuseExistingServer, which drives whatever already
  *                                  listens there): [{ file, line, port, text }]. Advisory only: the game gate prints
  *                                  them as `[game-gates] WARN game:test-ports: …` (shown even when the check passes);
- *                                  it never fails a check. STUDIO_TEST_PORTS=off turns the scan off.
+ *                                  it never fails a check.
  *
  * The rule (studio/rules/test-ports.md): a test asks the OS for a free port (listen on port 0, or a helper that does)
  * and passes it on; a fixed port is fine only for a server no two runs ever start at once.
@@ -29,8 +29,6 @@ import { fileURLToPath } from 'node:url';
 import { isTestPath, isTestConfig } from './test-weakening.mjs';
 
 const toPosix = (p) => String(p).replace(/\\/g, '/');
-const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
-export const testPortsOn = (env = process.env) => !off(env.STUDIO_TEST_PORTS);
 
 // One regex per message shape; the port is the first group that matched.
 const COLLISION = [
@@ -135,14 +133,13 @@ export function fixedPortFindings(root, dirs = ['.'], { maxFiles = 4000 } = {}) 
 }
 
 /** The advisory lines for a game folder (the game gate prints them), or []. */
-export function fixedPortWarnings(root, dirs, env = process.env) {
-  if (!testPortsOn(env)) return [];
+export function fixedPortWarnings(root, dirs) {
   const f = fixedPortFindings(root, dirs);
   if (!f.length) return [];
   const files = [...new Set(f.map((x) => x.file))];
   return [
     ...f.slice(0, 8).map((x) => `[game-gates] WARN game:test-ports: ${x.file}:${x.line} starts a test server on the fixed port ${x.port} (${x.text}); two verifies running it at once collide ("port in use", or the test drives the other tree's server)`),
-    `[game-gates] WARN game:test-ports: ${f.length} fixed test port(s) in ${files.length} file(s): give each run a free port (listen on port 0, or a helper that finds one) and pass it to the server and the test (studio/rules/test-ports.md); advisory only, STUDIO_TEST_PORTS=off hides it`,
+    `[game-gates] WARN game:test-ports: ${f.length} fixed test port(s) in ${files.length} file(s): give each run a free port (listen on port 0, or a helper that finds one) and pass it to the server and the test (studio/rules/test-ports.md); advisory only`,
   ];
 }
 

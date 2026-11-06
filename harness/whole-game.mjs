@@ -57,9 +57,9 @@ export function wholeDue({ root = mainRoot(), env = process.env } = {}) {
   return { sha };
 }
 
-/** The clean copy at `sha` (made once, then moved): { dir } or { error }. */
-export function wholeCopy(sha, root = mainRoot()) {
-  const dir = path.join(root, '.studio', 'whole-wt');
+/** The clean copy at `sha` (made once, then moved): { dir } or { error }. 2.79 (t): `name` its folder (the game tester's own). */
+export function wholeCopy(sha, root = mainRoot(), { name = 'whole-wt', exclude = 'whole-game' } = {}) {
+  const dir = path.join(root, '.studio', name);
   if (!fs.existsSync(path.join(dir, '.git'))) {
     git(root, 'worktree', 'prune');
     const add = git(root, 'worktree', 'add', '--no-checkout', '--detach', dir, sha);
@@ -68,10 +68,10 @@ export function wholeCopy(sha, root = mainRoot()) {
       const r = git(dir, ...s);
       if (r.status !== 0) return { error: `git ${s.slice(0, 2).join(' ')} failed: ${(r.stderr || '').trim().split('\n').pop()}` };
     }
-    const exclude = path.join(root, '.studio', 'lanes', 'whole-game.exclude');
-    fs.mkdirSync(path.dirname(exclude), { recursive: true });
-    fs.writeFileSync(exclude, ['/studio', '/.studio', '/.env', 'node_modules', ''].join('\n'));
-    git(dir, 'config', '--worktree', 'core.excludesFile', exclude);
+    const excludeFile = path.join(root, '.studio', 'lanes', `${exclude}.exclude`);
+    fs.mkdirSync(path.dirname(excludeFile), { recursive: true });
+    fs.writeFileSync(excludeFile, ['/studio', '/.studio', '/.env', 'node_modules', ''].join('\n'));
+    git(dir, 'config', '--worktree', 'core.excludesFile', excludeFile);
   }
   // Exactly that commit, nothing left over from the last run (the links are ignored, so clean keeps them).
   for (const s of [['checkout', '-q', '--detach', '-f', sha], ['reset', '-q', '--hard', sha], ['clean', '-fdq']]) {

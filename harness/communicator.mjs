@@ -31,7 +31,7 @@
  *                 budget; a policy proposal) and disasters (disk under STUDIO_COMM_DISK_GB 30, STUDIO_COMM_CRASHES 3 crashes
  *                 in an hour, everything blocked over STUDIO_COMM_BLOCKED_MIN 60). A disaster tags the orchestrator too.
  * Rules: one alert at most once per STUDIO_COMM_DEDUP_MIN (30); one still open is tagged again at most every
- * STUDIO_COMM_REPEAT_MIN (120; disasters every DEDUP_MIN); a pass's alerts go in one post (with the status when it is
+ * STUDIO_COMM_REPEAT_MIN (120; disasters every DEDUP_MIN; 2.79 (c): an open question at most every STUDIO_ASK_DIGEST_HOURS, 24); a pass's alerts go in one post (with the status when it is
  * due); an alert the orchestrator can fix never tags the owner; STUDIO_COMM_QUIET "23:00-07:00" (local time) holds
  * owner-only alerts that aren't disasters until it ends. Alerts that closed are named once ("Cleared: …").
  *
@@ -48,6 +48,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { loadDotEnv } from './dotenv.mjs';
 import { webhookFrom, maskWebhook, scrub, formatFor, postOnce, DISCORD_MAX } from './report-post.mjs';
+import { digestHours as askDigestHours } from './ask-post.mjs';
 
 export const CONFIG_REL = 'studio/communicator.json';
 export const ROLES = ['orchestrator', 'keys', 'owner'];
@@ -392,7 +393,10 @@ export async function communicatorPass({ now = Date.now(), dryRun = false, env =
     for (const a of open) {
       const who = routeAlert(a);
       const last = st.sent[a.key];
-      const gap = a.kind === 'disaster' ? s.dedupMin : Math.max(s.dedupMin, last?.cleared === false ? s.repeatMin : s.dedupMin);
+      // 2.79 (c): an open question (ask:A-…) is tagged again at most once per STUDIO_ASK_DIGEST_HOURS (24), not every
+      // STUDIO_COMM_REPEAT_MIN: one alert when it opens, then the daily digest (harness/ask-post.mjs).
+      const repeat = a.key.startsWith('ask:') ? Math.max(s.repeatMin, askDigestHours(env) * 60) : s.repeatMin;
+      const gap = a.kind === 'disaster' ? s.dedupMin : Math.max(s.dedupMin, last?.cleared === false ? repeat : s.dedupMin);
       if (last && now - (Date.parse(last.at) || 0) < gap * 60000) continue;
       if (quietNow && a.kind !== 'disaster' && who.length === 1 && who[0] === 'owner') { held.push(a.key); continue; }
       due.push(a);

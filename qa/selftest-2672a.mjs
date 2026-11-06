@@ -133,7 +133,7 @@ console.log(JSON.stringify({ ok: r.ok, redMain: Boolean(r.redMain), noCheck: r.n
       const dry = probeQ(`for (const l of ${JSON.stringify([lb, lc].map(({ task, agent, dir: d, head, branch }) => ({ task, agent, dir: d, head, branch, prechecked: true })))}) enqueue(process.cwd(), l);
 const r = await runTrain({ by: 'tester', now: true, dryRun: true, deps: {}, log: () => {} });
 console.log(JSON.stringify({ message: r.message, deferred: r.deferred, queue: readQueue(process.cwd()).map((e) => e.task) }));`);
-      const lanesJ = (() => { try { return JSON.parse(run(dir, 'node harness/lanes.mjs --json --no-stamps', env).stdout); } catch { return {}; } })();
+      const lanesJ = (() => { try { return JSON.parse(run(dir, 'node harness/lanes.mjs --json --full --no-stamps', env).stdout); } catch { return {}; } })();
       const rowB = (lanesJ.lanes || []).find((r) => r.task === lb.task);
       const status = run(dir, 'node harness/task.mjs train status', env);
       guard('2.67.2 hold: a task held for landing (task hold) stays out of a queued train: deferred with the hold\'s reason, still queued; npm run lanes marks it out (queued.out) and train status says OUT OF TRAINS (2.67.1: T-146 held "for landing" still ran in train 15\'s tree)', () => [
@@ -144,7 +144,7 @@ console.log(JSON.stringify({ message: r.message, deferred: r.deferred, queue: re
       const left = run(dir, `node harness/task.mjs train leave ${lc.task} --by conductor --why "lands after the art pass"`, env);
       const q2 = probeQ('console.log(JSON.stringify({ queue: readQueue(process.cwd()).map((e) => e.task) }));');
       const rec = readJson(path.join(dir, '.studio', 'train', 'left.json')) || [];
-      const lanesJ2 = (() => { try { return JSON.parse(run(dir, 'node harness/lanes.mjs --json --no-stamps', env).stdout); } catch { return {}; } })();
+      const lanesJ2 = (() => { try { return JSON.parse(run(dir, 'node harness/lanes.mjs --json --full --no-stamps', env).stdout); } catch { return {}; } })();
       const rowC = (lanesJ2.lanes || []).find((r) => r.task === lc.task || r.agent === 'lane-c');
       guard('2.67.2 hold: npm run task -- train leave <ID> --by --why takes a lane out of the queue on purpose, recorded (.studio/train/left.json, task.train.left, who and why); a worker is refused; npm run lanes shows who took it out (2.67.1: no such command; the crew called dequeue() by hand)', () => [
         worker.status === 1 && /worker/.test(out(worker)) && left.status === 0 && !q2.queue?.includes(lc.task) && q2.queue?.includes(lb.task)

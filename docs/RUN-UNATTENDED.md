@@ -58,6 +58,8 @@ inherits the supervisor's; `STUDIO_ENV_FROM_FILE` is the internal note of which 
 follows the file; a line removed from `.env` gives that setting its default back. Identity settings (`STUDIO_LOCK_OWNER`,
 `STUDIO_ROLE`, `STUDIO_AGENT`, `STUDIO_MAIN_ROOT`) are never taken from `.env`. Read once at start, so a restart is still
 needed: `STUDIO_SUPERVISOR_SEC`, `STUDIO_HEARTBEAT_SEC`, `HUB_PORT`.
+`studio:reload-env` (2.79) also lists the `STUDIO_*` names the `.env` sets (names only, never values) and marks any the
+harness no longer reads (not in `docs/SETTINGS.md`) as "unknown (removed or misspelled)".
 
 2.77.1 (B-102): a pass never stops the loop. The loop is set before the first pass, passes never overlap, and each step of
 a pass (the hub, the Line Producer, the launch step, the Director's flow, the machine scan, the Communicator, the
@@ -327,6 +329,14 @@ them) are listed with `npm run janitor -- --lanes` and deleted only with `--lane
 as above). One `janitor.run` event. After each train or verify job it runs `--yes` by itself, at most every
 `STUDIO_JANITOR_EVERY_MIN` (30) minutes (never lanes); `STUDIO_JANITOR=off` turns that off. `janitorEstimate()` gives a
 disk-low warning its "the janitor can free N GB" line.
+
+**Idle lane copies (2.79).** The automatic janitor run also removes the worktree of a lane copy that has been idle for
+`STUDIO_LANE_IDLE_HOURS` (12; 0 or `off`: never): its session ended, its task isn't queued for a train (read through the
+train queue's reader), held or parked, nobody works in it (no process, no live claim, no recent change), it has no
+uncommitted change and no commit that isn't on main. Only the worktree goes; the branch is kept (the train or the next
+session makes the copy again from it). `npm run lanes -- prune --idle <hours> [--dry-run] [--by <name>]` applies the same
+rule now and prints what it removed and the disk freed (`lanes.pruned` event). `npm run lanes` with no arguments is a
+cheap listing (no git process per copy); `--full` or a task/agent/branch name reads ahead/behind, dirty and stamps.
 
 **Stale-lane proposals surfaced (2.70.0).** A lane copy whose work has landed (its task is done in `studio/DONE.md`,
 or a `lane.merged` event names it) is stale after `STUDIO_JANITOR_LANDED_H` (6) hours instead of 24. The supervisor

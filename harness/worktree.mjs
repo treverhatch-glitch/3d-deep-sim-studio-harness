@@ -731,14 +731,84 @@ export function leftoverLaneFolders(root = mainRoot()) {
 }
 
 /** Lane copies on disk, for the War Room and preflight. 2.73.1 (B-51): registered worktrees only (leftoverLaneFolders). */
-export function laneCopies(root = mainRoot()) {
+export function laneCopies(root = mainRoot(), { progress = null } = {}) {
   const d = path.join(root, LANES_DIR);
   if (!fs.existsSync(d)) return [];
   const wt = laneWorktrees(root);
   // 2.59.0: a merge train's scratch copy (.lanes/_train-<id>, harness/train.mjs) is no agent's: the train removes it.
-  return fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('_train-') && wt.has(path.join(d, e.name))).map((e) => {
+  const names = fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('_train-') && wt.has(path.join(d, e.name)));
+  let n = 0;
+  return names.map((e) => {
+    // 2.79 (d): three git processes per copy: say so while a hundred of them take minutes.
+    if (progress && (n++ % 10 === 0)) progress(`reading lane copies ${n}/${names.length}…`);
     const dir = path.join(d, e.name);
     const branch = git(dir, 'symbolic-ref', '--short', 'HEAD').stdout?.trim() || null;
     return { agent: e.name, dir, branch, unmerged: branch ? unmerged(branch, root) : 0, dirty: Boolean((git(dir, 'status', '--porcelain').stdout || '').trim()) };
   });
+}
+
+// ---- 2.79 (d): the cheap lane listing: git's own metadata files, no git process per copy ------------------------
+
+/** The repository's common git dir (<root>/.git, or what a `.git` file in a linked checkout points at), or null. */
+function commonGitDir(root) {
+  const g = path.join(root, '.git');
+  let st; try { st = fs.statSync(g); } catch { return null; }
+  if (st.isDirectory()) return g;
+  try {
+    const m = fs.readFileSync(g, 'utf8').match(/^gitdir:\s*(.+?)\s*$/m);
+    if (!m) return null;
+    const gd = path.resolve(root, m[1]);
+    let cd = '';
+    try { cd = fs.readFileSync(path.join(gd, 'commondir'), 'utf8').trim(); } catch {}
+    return cd ? path.resolve(gd, cd) : gd;
+  } catch { return null; }
+}
+
+/** A ref's commit, read from the loose ref file or packed-refs (no git process), or ''. */
+export function refSha(root, ref) {
+  const cg = commonGitDir(root);
+  if (!cg) return '';
+  try { const s = fs.readFileSync(path.join(cg, ...ref.split('/')), 'utf8').trim(); if (/^[0-9a-f]{40,64}$/.test(s)) return s; } catch {}
+  try {
+    for (const l of fs.readFileSync(path.join(cg, 'packed-refs'), 'utf8').split(/\r?\n/)) {
+      const m = l.match(/^([0-9a-f]{40,64}) (.+)$/);
+      if (m && m[2] === ref) return m[1];
+    }
+  } catch {}
+  return '';
+}
+
+/** The studio branch's name from the main checkout's HEAD file, or ''. */
+export function mainBranchCheap(root = mainRoot()) {
+  try { const m = fs.readFileSync(path.join(root, '.git'), 'utf8').match(/^gitdir:\s*(.+?)\s*$/m); const head = m ? path.join(path.resolve(root, m[1]), 'HEAD') : path.join(root, '.git', 'HEAD'); return (fs.readFileSync(head, 'utf8').match(/^ref:\s*refs\/heads\/(.+?)\s*$/m) || [])[1] || ''; } catch { return ''; }
+}
+
+/**
+ * Lane copies from <git dir>/worktrees/<id>/{gitdir,HEAD} and the folders under .lanes (no git process per copy):
+ * [{ agent, dir, branch, head }]. Train scratch copies and folders that are not registered worktrees are left out,
+ * as laneCopies does. Ahead and dirty are not known here (that is what costs a process each).
+ */
+export function cheapLaneCopies(root = mainRoot()) {
+  const d = path.join(root, LANES_DIR);
+  const cg = commonGitDir(root);
+  if (!cg || !fs.existsSync(d)) return [];
+  const norm = (p) => { let r = path.resolve(p); try { r = fs.realpathSync.native(r); } catch {} return process.platform === 'win32' ? r.toLowerCase() : r; };
+  const byDir = new Map();
+  let ids = []; try { ids = fs.readdirSync(path.join(cg, 'worktrees')); } catch {}
+  for (const id of ids) {
+    try {
+      const gd = fs.readFileSync(path.join(cg, 'worktrees', id, 'gitdir'), 'utf8').trim();
+      const ref = (fs.readFileSync(path.join(cg, 'worktrees', id, 'HEAD'), 'utf8').match(/^ref:\s*refs\/heads\/(.+?)\s*$/m) || [])[1] || null;
+      byDir.set(norm(path.dirname(gd)), { branch: ref, headFile: fs.readFileSync(path.join(cg, 'worktrees', id, 'HEAD'), 'utf8').trim() });
+    } catch {}
+  }
+  const out = [];
+  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    if (!e.isDirectory() || e.name.startsWith('_train-')) continue;
+    const dir = path.join(d, e.name);
+    const w = byDir.get(norm(dir));
+    if (!w || !fs.existsSync(path.join(dir, '.git'))) continue;
+    out.push({ agent: e.name, dir, branch: w.branch, head: w.branch ? refSha(root, `refs/heads/${w.branch}`) : (/^[0-9a-f]{40,64}$/.test(w.headFile) ? w.headFile : '') });
+  }
+  return out;
 }

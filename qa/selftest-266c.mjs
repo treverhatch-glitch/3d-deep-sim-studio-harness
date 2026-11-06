@@ -141,10 +141,10 @@ console.log(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok', n
 console.log(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok', num_turns: 3, usage: { input_tokens: 5, output_tokens: 10 }, ...(withField ? { permission_denials: second } : {}) }));
 `);
   const denialsFile = path.join(dir, '.studio', 'denials.jsonl');
-  const s1 = run(dir, 'node harness/agent.mjs start --role builder --agent bu-266c --tool claude --model m-1', { ...env, STUDIO_BUILDER_CMD: `node "${fake}" denials` });
+  const s1 = run(dir, 'node harness/agent.mjs start --attach --role builder --agent bu-266c --tool claude --model m-1', { ...env, STUDIO_BUILDER_CMD: `node "${fake}" denials` });
   const rows1 = (() => { try { return fs.readFileSync(denialsFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } })();
   const raw1 = (() => { try { return fs.readFileSync(denialsFile, 'utf8'); } catch { return ''; } })();
-  const s2 = run(dir, 'node harness/agent.mjs start --role builder --agent bu2-266c --tool claude --model m-1', { ...env, STUDIO_BUILDER_CMD: `node "${fake}" none` });
+  const s2 = run(dir, 'node harness/agent.mjs start --attach --role builder --agent bu2-266c --tool claude --model m-1', { ...env, STUDIO_BUILDER_CMD: `node "${fake}" none` });
   const raw2 = (() => { try { return fs.readFileSync(denialsFile, 'utf8'); } catch { return ''; } })();
   report('2.66.0 (c, 3): at session end the launcher harvests permission_denials from every result line (4 unique by tool_use_id) into .studio/denials.jsonl with agent, role, tool, key and why; keys, tokens and passwords are redacted (no sk-ant-, ghp_ or hunter2pass on disk); a session whose result lines lack the field records nothing (fails on 2.65.2: nothing harvested)',
     s1.status === 0 && s2.status === 0 && rows1.length === 4 && rows1.every((r) => r.agent === 'bu-266c' && r.role === 'builder' && r.tool && r.key && r.why && r.command.length <= 200)

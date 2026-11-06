@@ -72,6 +72,14 @@ export async function needsPerson({ now = Date.now(), root = REPO_ROOT, events =
     const open = openAsks();
     if (open.length) out.push({ kind: 'bible', line: `${open.length} open question${open.length === 1 ? '' : 's'} for you${open[0]?.question ? `, first: "${String(open[0].question).slice(0, 80)}"` : ''} (npm run ask)` });
   });
+  // 2.79 (c): the harness's own asks still open (harness/ask-post.mjs): posted once, then listed here once a day instead of
+  // posted again, with how often each came back.
+  await tryAdd(async () => {
+    const ap = await import('./ask-post.mjs');
+    try { const { parseNextQueue } = await import('./task.mjs'); const done = new Set(parseNextQueue().done.map((t) => t.id)); ap.closeStaleAsks({ done: (t) => done.has(t), now }); } catch {}
+    const open = ap.openPostedAsks();
+    if (open.length) out.push({ kind: 'ask', line: `${open.length} open ask${open.length === 1 ? '' : 's'} from the harness (each posted once; repeats are counted here): ${open.slice(0, 3).map((x) => `${String(x.msg).slice(0, 90)}${x.repeats ? ` (again ${x.repeats}x)` : ''}`).join('; ')}${open.length > 3 ? ' …' : ''}` });
+  });
   // Money: a tool over its weekly target.
   await tryAdd(async () => {
     const { budgetStatus } = await import('./budget.mjs');

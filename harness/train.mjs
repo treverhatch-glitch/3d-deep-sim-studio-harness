@@ -80,7 +80,7 @@ import { recordTrust } from './gate-trust.mjs';
 import { beginTrainLife, reapDeadTrains } from './train-life.mjs';
 import { processHarness, chainGuard, copyHarnessDrift } from './harness-version.mjs';
 import { cancelPath } from './train-watch.mjs';
-import { recreateLaneCopy, infraHandBack, keepRelease, keptRelease, forgetRelease, mixedLane, mayCarry, noteMixed } from './train-lanes.mjs';
+import { recreateLaneCopy, ownWorktree, infraHandBack, INFRA_HANDBACK, keepRelease, keptRelease, forgetRelease, mixedLane, mayCarry, noteMixed, laneContent, carriedRelease } from './train-lanes.mjs';
 import { readBeta, betaActor, recordBetaUse } from './beta-mode.mjs';
 import { addKnownRed, clearKnownRed, knownRedCandidate, readKnownRed, fileSub } from './known-red.mjs';
 import { toolchainProtected } from './test-toolchain.mjs';
@@ -116,6 +116,7 @@ import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFo
 import { checkStamped, stampWrite } from './workaround.mjs';
 import { gateEnv } from './gate-env.mjs';
 import { refreshStaleLane } from './train-refresh.mjs';
+import { writeAtomic } from './fsafe.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -134,11 +135,11 @@ export function readQueue(root = mainRoot()) {
 function writeQueue(root, q) {
   const f = queueFile(root);
   fs.mkdirSync(path.dirname(f), { recursive: true });
-  const tmp = `${f}.${process.pid}.tmp`;
   const text = `${JSON.stringify(q, null, 2)}\n`;
   try { stampWrite(f, text, { root }); } catch { /* 2.71.0 (z): the write goes ahead unstamped */ }
-  fs.writeFileSync(tmp, text);
-  fs.renameSync(tmp, f);
+  // 2.79 (b): with the retries Windows needs when another process has the file open (fsafe.mjs writeAtomic): a bare rename
+  // died with EPERM while a reader had queue.json open.
+  writeAtomic(f, text);
 }
 // 2.71.0 (z): the queue changed by hand since the harness last wrote it is a detected workaround (harness/workaround.mjs).
 const withQueue = (root, fn) => withLandLock(root, () => { try { checkStamped(queueFile(root), { root }); } catch { /* evidence only */ } const q = readQueue(root); const r = fn(q); writeQueue(root, q); return r; }, { name: 'train-queue', waitMs: 30000 });
@@ -149,7 +150,14 @@ export function enqueue(root, entry) {
     const i = q.findIndex((e) => e.task === entry.task);
     const rec = { ...entry, at: new Date().toISOString() };
     // 2.63.0: a hold for the owner, and a person's release of it, stay with the entry while its head is the same.
-    if (i >= 0) { const was = q[i]; q.splice(i, 1, { ...rec, ...(was.head === rec.head ? { ...(was.held ? { held: was.held } : {}), ...(was.released ? { released: was.released } : {}) } : {}), at: was.at }); }
+    // 2.79 (c): or while the lane's content is the same (a catch-up merge of main that touches none of the released
+    // files, train-lanes.mjs carriedRelease): the release is carried to the new head, with its hold.
+    if (i >= 0) {
+      const was = q[i];
+      const carried = was.released && was.head !== rec.head ? carriedRelease(root, was.released, { head: rec.head, tip: mainTip(root) }) : null;
+      const keep = was.head === rec.head || Boolean(carried);
+      q.splice(i, 1, { ...rec, ...(keep ? { ...(was.held ? { held: was.held } : {}), ...(was.released ? { released: carried || was.released } : {}) } : {}), at: was.at });
+    }
     else q.push(rec);
     return rec;
   });
@@ -1460,7 +1468,7 @@ export async function laneTier(root, { head, task = null, agent = null, dir = nu
   contractTier(root, task, c);
   // 2.73.0 (g, A13): a re-recorded golden (rule golden-rerecord) carries the harness's first-divergence report, shown in
   // the hold; its release needs a second signer (harness/golden-report.mjs).
-  rerecordTier(root, c, { base, head, agent, dirs: dir ? [dir] : [] });
+  rerecordTier(root, c, { base, head, agent, dirs: dir ? [dir] : [], tip: t });
   return c;
 }
 
@@ -1542,11 +1550,15 @@ export function applyHeldConfig(root, task, { by = '', permission = '', env = pr
 /** How many times a task was handed back for a failure (task.paused with a reason key, as harness/breaker.mjs counts). */
 // 2.76.0: infrastructure hand-backs (a missing lane copy, a CRLF/hash mismatch, a re-queue, a dead train, a timeout-only
 // red already re-run, a mixed lane: harness/train-lanes.mjs infraHandBack) never count.
+// 2.79 (b): a hand-back the train tagged (meta.handBackCause) counts only when the lane's own check failed or it
+// conflicted ('red', 'conflict'); an untagged one (an agent's own, or from 2.78.2) keeps the rule above.
+const countsAsHandBack = (e) => (e.meta?.handBackCause ? /^(red|conflict)$/.test(e.meta.handBackCause) : !infraHandBack(e));
 export function handBackCount(task) {
-  return readRecentEvents(20000).filter((e) => e.type === 'task.paused' && e.task === task && (e.meta?.reasonKey || /Not landed by merge train/.test(String(e.msg || ''))) && !infraHandBack(e)).length;
+  return readRecentEvents(20000).filter((e) => e.type === 'task.paused' && e.task === task && (e.meta?.reasonKey || /Not landed by merge train/.test(String(e.msg || ''))) && countsAsHandBack(e)).length;
 }
 export const maxHandBacks = (env = process.env) => (Number(env.STUDIO_TRAIN_MAX_HANDBACKS) >= 0 && String(env.STUDIO_TRAIN_MAX_HANDBACKS || '').trim() !== '' ? Number(env.STUDIO_TRAIN_MAX_HANDBACKS) : 3);
 
+const mainTip = (root) => out(git(root, 'rev-parse', '--verify', '--quiet', `refs/heads/${mainBranch(root)}`)) || null;
 /** A queue entry waiting for the owner: held, and not released for the head it is at. */
 export const heldNow = (e) => Boolean(e?.held) && !(e.released && e.released.head === e.head);
 /** A release that covers this head. */
@@ -1559,7 +1571,8 @@ export function holdLane(root, lane, { tier, why, rerecord = null, beta = false 
     if (!e) { e = { task: lane.task, agent: lane.agent, dir: lane.dir, branch: lane.branch, head: lane.head, all: Boolean(lane.all), note: lane.note || '', at: new Date().toISOString() }; q.push(e); }
     const fresh = !e.held || e.held.head !== lane.head || e.held.why !== why;
     Object.assign(e, { head: lane.head, branch: lane.branch || e.branch, dir: lane.dir || e.dir, held: { tier, why, head: lane.head, at: fresh ? new Date().toISOString() : e.held.at, ...(rerecord ? { rerecord } : {}), ...(beta ? { beta: true } : {}) } });
-    if (e.released && e.released.head !== lane.head) delete e.released;
+    // 2.79 (c): a release made at another head still covers a lane whose content is the same (carried to this head).
+    if (e.released && e.released.head !== lane.head) { const c = carriedRelease(root, e.released, { head: lane.head, tip: mainTip(root) }); if (c) e.released = c; else delete e.released; }
     return { entry: { ...e }, fresh };
   });
 }
@@ -1618,7 +1631,9 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
     // first-divergence report, a person (harness/golden-report.mjs).
     const second = rerecordRefusal(e.held, { by, agent: dg.ok ? dg.agent : '', recordedBy: rec?.recordedBy || '', delegated: dg.ok, beta: Boolean(dg.beta) });
     if (second) return { ok: false, message: `Refused: ${second}. Nothing was released.` };
-    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true, betaAt: dg.at, decides: 'board' } : {}), ...(ba.ok ? { beta: ba.via, betaAt: ba.doc.at, decides: 'board' } : {}) };
+    // 2.79 (c): the lane's content at release (train-lanes.mjs laneContent), so a new head with the same content keeps it.
+    const content = laneContent(root, { head: e.head, tip: mainTip(root) });
+    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, ...(content ? { content: { key: content.key, files: content.files.slice(0, 200) } } : {}), tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true, betaAt: dg.at, decides: 'board' } : {}), ...(ba.ok ? { beta: ba.via, betaAt: ba.doc.at, decides: 'board' } : {}) };
     return { ok: true, entry: { ...e } };
   });
   if (!r.ok) return r;
@@ -1689,6 +1704,9 @@ const ev = (type, id, msg, extra = {}) => emitEvent({ type: `task.train.${type}`
 /** Read a queue entry's lane copy as it is now: { dir, branch, head } or { error }. */
 export function laneNow(lane) {
   if (!lane.dir || !fs.existsSync(lane.dir)) return { error: `its lane copy ${lane.dir || '(none)'} is gone` };
+  // 2.79 (b): a folder with no .git of its own is not a copy: git there names the main checkout's branch ("its copy is on
+  // main now"). It counts as missing (the train moves it aside and makes the copy again from the lane's branch).
+  if (!ownWorktree(lane.dir)) return { error: `its lane copy ${lane.dir} is not a git checkout (a leftover folder with no .git)`, leftover: true };
   const head = out(git(lane.dir, 'rev-parse', 'HEAD'));
   const branch = out(git(lane.dir, 'symbolic-ref', '--short', 'HEAD'));
   if (!head) return { error: `its lane copy ${lane.dir} is not a git checkout` };
@@ -1927,7 +1945,7 @@ function waitActions(root, waits, { id, by, dryRun, res, log, deps = {} }) {
       ev('dropped', id, `${lane.task} handed back: ${why}`, { task: lane.task, agent: by, to: lane.agent, status: 'blocked', meta: { deps: true } });
       if (!lane.own) {
         try { if (lane.branch) rememberTaskBranch(lane.task, lane.branch); } catch {}
-        try { deps.handBack?.(lane, `Not landed by merge train ${id}: ${why}`); } catch (e) { log(`[train] ${id}: could not hand ${lane.task} back: ${e.message}`); }
+        try { deps.handBack?.(lane, `Not landed by merge train ${id}: ${why}`, { cause: /\b(EPERM|EBUSY)\b/.test(String(why)) ? 'infra' : 'red' }); } catch (e) { log(`[train] ${id}: could not hand ${lane.task} back: ${e.message}`); }
       }
       continue;
     }
@@ -2306,18 +2324,21 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   if (!lanes.length) { res.message = res.held.length ? `No lane can land now: ${res.held.map((h) => `${h.task} needs the owner (tier ${h.tier})`).join('; ')}.` : 'No lane is waiting to land (the train queue is empty: task done <ID> --train adds one).'; return res; }
   ev('start', id, `${lanes.length} lane(s): ${lanes.map((l) => l.task).join(', ')}${dryRun ? ' (dry run)' : ''}`, { agent: by, meta: { lanes: lanes.map((l) => l.task), dryRun, ...(lanes.some((l) => l.rider) ? { riders: lanes.filter((l) => l.rider).map((l) => l.task) } : {}) } });
   (await import('./hotspots.mjs')).trainStart(root, lanes, log, id); // 2.60.0 (helper b): lines two lanes change, in the start log
-  const drop = (lane, why, { handBack = true, infra = false } = {}) => {
+  const drop = (lane, why, { handBack = true, infra = false, cause = null } = {}) => {
+    // 2.79 (b): why the lane left, as a field the hand-back cap counts by (handBackCount): 'red' (its own check failed),
+    // 'conflict', or 'infra' (the harness or the machine: a copy made again, a dead train, EPERM). Never read from prose.
+    const why0 = cause || (infra || /\b(EPERM|EBUSY)\b/.test(String(why)) || INFRA_HANDBACK.test(String(why)) ? 'infra' : 'red');
     res.dropped.push({ task: lane.task, why });
     if (dryRun) return;
     if (queued || lane.fromQueue) dequeue(root, lane.task);
-    ev('dropped', id, `${lane.task} handed back: ${why}`, { task: lane.task, agent: by, to: lane.agent, status: 'blocked', ...(infra ? { meta: { infra: true } } : {}) });
+    ev('dropped', id, `${lane.task} handed back: ${why}`, { task: lane.task, agent: by, to: lane.agent, status: 'blocked', ...(why0 === 'infra' ? { meta: { infra: true } } : {}) });
     if (handBack && !lane.own) {
       try { if (lane.branch) rememberTaskBranch(lane.task, lane.branch); } catch {}
       // 2.72.0 (b): a train red is a round of the lane's task (harness/round-cap.mjs); red twice in a row on one failure adds
       // the cap's summary and its restart-from-the-spec note to the hand-back.
       let capNoteText = '';
       try { const rc = trainRound(lane, why); if (rc?.capped) capNoteText = `\n${rc.note}`; } catch {}
-      try { deps.handBack?.(lane, withFacts(lane.task, `Not landed by merge train ${id}: ${why}${capNoteText}`, { agent: lane.agent, dir: lane.dir, root, withNext: false })); } catch (e) { log(`[train] ${id}: could not hand ${lane.task} back: ${e.message}`); }
+      try { deps.handBack?.(lane, withFacts(lane.task, `Not landed by merge train ${id}: ${why}${capNoteText}`, { agent: lane.agent, dir: lane.dir, root, withNext: false }), { cause: why0 }); } catch (e) { log(`[train] ${id}: could not hand ${lane.task} back: ${e.message}`); }
     }
   };
   const defer = (lane, why) => { res.deferred.push({ task: lane.task, why }); if (!dryRun) ev('deferred', id, `${lane.task} waits for the next train: ${why}`, { task: lane.task, agent: by, to: lane.agent, status: 'warn' }); };
@@ -2363,7 +2384,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     if (lane.rider && !ready.some((l) => l.own)) continue;
     let now = laneNow(lane);
     // 2.76.0 (W-0081): a copy that is gone is made again from its branch, not handed back.
-    if (now.error && lane.dir && !fs.existsSync(lane.dir)) {
+    if (now.error && lane.dir && (!fs.existsSync(lane.dir) || now.leftover)) {
       if (dryRun) log(`[train] ${id}: ${lane.task}: ${now.error}; a train would make it again from ${lane.branch || 'its branch'}`);
       else {
         const rc = recreateLaneCopy(root, lane, { log: (m) => log(m.replace('[train] ', `[train] ${id}: `)) });
@@ -2386,7 +2407,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     // (harness/train-refresh.mjs), not handed back by its hooks check; only a real conflict hands it back.
     if (!dryRun) {
       const rf = await (deps.refreshStale || refreshStaleLane)(root, { ...lane, head: now.head }, { log });
-      if (rf.handBack) { drop(lane, rf.why); continue; }
+      if (rf.handBack) { drop(lane, rf.why, { cause: 'conflict' }); continue; }
       if (rf.refreshed) { now = laneNow(lane); if (now.error) { drop(lane, now.error, { handBack: false }); continue; } }
     }
     // 2.63.0: the lane's blast-radius tier, from its own diff (code, never a model's confidence).
@@ -2394,8 +2415,12 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     const entry = queueNow.find((e) => e.task === lane.task);
     // 2.76.0: a release kept for this task and head (.studio/train/releases.json) counts too: an infrastructure hand-back
     // (lane copy missing, a re-queue, a dead train) that took the entry out of the queue never voids it.
-    const kept = releasedFor(entry, now.head) ? null : keptRelease(root, lane.task, now.head);
-    if (kept && entry) entry.released = kept;
+    // 2.79 (c): a release made at an older head whose lane content is the same now (a catch-up merge of main, a re-queue)
+    // is carried to this head, in the queue entry and in the kept releases, instead of voided.
+    const carriedNow = entry?.released && !releasedFor(entry, now.head) ? carriedRelease(root, entry.released, { head: now.head, tip: tip0 }) : null;
+    if (carriedNow && entry) { entry.released = carriedNow; if (!dryRun) { try { requeue(root, { task: lane.task }, { released: carriedNow }); keepRelease(root, lane.task, carriedNow); } catch {} log(`[train] ${id}: ${lane.task}: ${carriedNow.by}'s release at ${String(carriedNow.carriedFrom.at(-1)).slice(0, 8)} still covers ${String(now.head).slice(0, 8)} (the lane's own changes are the same)`); } }
+    const kept = releasedFor(entry, now.head) ? null : keptRelease(root, lane.task, now.head, { tip: tip0 });
+    if (kept && entry) { entry.released = kept; if (kept.carriedFrom && !dryRun) { try { requeue(root, { task: lane.task }, { released: kept }); keepRelease(root, lane.task, kept); } catch {} } }
     const released = releasedFor(entry, now.head) || Boolean(kept);
     const relBy = (entry?.released || kept)?.by;
     res.tiers[lane.task] = c.tier;
@@ -2404,7 +2429,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     if (!dryRun) ev('tier', id, `${lane.task} ${tierLine(c)}${released ? ` (released by ${relBy})` : ''}`, { task: lane.task, agent: by, meta: { tier: c.tier, why: c.why, rules: c.rules, runAlone: c.runAlone.yes ? c.runAlone.why : null, released: released ? relBy : null } });
     // 2.65.0 (B-40): a config proposal that can't be applied, or conflicts with main's value now, is handed back first.
     const cp = laneProposal(root, { task: lane.task, head: now.head, tip: tip0 });
-    if (cp && !cp.ok) { drop(lane, cp.why); continue; }
+    if (cp && !cp.ok) { drop(lane, cp.why, { cause: 'conflict' }); continue; }
     if (c.tier === 'C' && !released) { hold({ ...lane, head: now.head, branch: now.branch || lane.branch }, 'C', c.why.join('; '), c.rerecord ? { rerecord: c.rerecord } : {}); continue; }
     if (c.needs.goldenReason.length) { drop(lane, `it is tier B and moves goldens (${c.needs.goldenReason.slice(0, 3).join(', ')}) with no Golden-Reason trailer on its commits: say why the recorded answers changed (git commit --amend, or a new commit, with -m "Golden-Reason: <why>"), then task done again`); continue; }
     if (c.needs.pinMoves.length) { drop(lane, `it is tier B and changes pinned expectations (${c.needs.pinMoves.slice(0, 3).join(', ')}) with no Pin-Moves trailer on its commits: declare the pins it moves ("Pin-Moves: <pin>"), then task done again`); continue; }
@@ -2811,11 +2836,8 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
 
 // ---- 2.77.0 (P9.3/P9.6): tests known red on main -----------------------------------------------------------------
 
-const knownRedOn = () => !/^(off|0|false|no)$/i.test(process.env.STUDIO_TRAIN_KNOWN_RED || '');
-
 /** A verify of main alone was red: list its failing test files as known red on main (harness/known-red.mjs). */
 function listRedMain(root, { id, logRel, roots, tree, gates }) {
-  if (!knownRedOn()) return;
   try {
     const text = logRel ? fs.readFileSync(path.join(root, logRel), 'utf8') : '';
     const subs = trainVerifyParts(text, false, roots).subIds;
@@ -2829,7 +2851,7 @@ function listRedMain(root, { id, logRel, roots, tree, gates }) {
  * null (the red is the lanes'). Anything else: null. The scratch copy is back at the train's tree when it returns.
  */
 function knownRedTry({ sc, tip, set, built, v, redSub, id, log, res, cache, all, main, root, unionFiles, depInfo, by, text }) {
-  if (!knownRedOn() || !readKnownRed(root).length) return null;
+  if (!readKnownRed(root).length) return null;
   const changed = changedVs(sc.dir, tip, built.head);
   const cand = knownRedCandidate(root, { redGates: v.gates, subs: redSub, changed });
   if (!cand.ok) { log(`[train] ${id}: known red on ${main}: not excused (${cand.why})`); return null; }

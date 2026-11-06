@@ -124,7 +124,7 @@ export function recordFollowedExit(env = process.env) {
 /**
  * After a queued task done: make sure a train will run. A supervisor running with the train daemon on: its next pass
  * starts it (by the batch and machine-room rules). Otherwise one train starts now, detached (train-daemon.mjs run
- * --wait <min>), and waits for a running train first. Returns { how: 'daemon'|'spawned'|'failed', pid?, line }.
+ * --wait <min>), and waits for a running train first. Returns { how: 'daemon'|'spawned'|'off'|'failed', pid?, line }.
  * deps (tests): { supervisor(root) -> record|null, auto(root, env) -> { on, why }, trainOn(env), spawn(opts) }.
  */
 export async function kickTrain(root, { by = '', env = process.env, waitMin = 120, deps = {} } = {}) {
@@ -138,6 +138,9 @@ export async function kickTrain(root, { by = '', env = process.env, waitMin = 12
     const sec = Number(env.STUDIO_SUPERVISOR_SEC || 60);
     return { how: 'daemon', line: `The train daemon starts the train at the supervisor's next pass (every ${sec} s), when lanes are ready and the machine has room for a verify.` };
   }
+  // 2.79 (b): `train auto off` (or STUDIO_TRAIN_AUTO=off) is honoured here too: a queued task done doesn't start a train
+  // behind the person's back (2.78.2 started one at 23:46 after the switch was set at 22:49). The lane waits in the queue.
+  if (!auto.on) return { how: 'off', line: `No train was started: ${auto.why}. The lane waits in the queue until a person runs one (npm run task -- train --by <you>) or turns the daemon on.` };
   const why = !sup ? 'no supervisor is running' : !auto.on ? auto.why : 'STUDIO_TRAIN is off';
   const log = path.join(root, '.studio', 'train', 'daemon.log');
   const { daemonEnv } = await import('./boot.mjs');

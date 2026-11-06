@@ -21,6 +21,9 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { proxyShell } from './owner-proxy.mjs';
 import { betaActor } from './beta-mode.mjs';
+import { ownerOnlyTopic, ownerOnlyWhy } from './owner-acts.mjs';
+import { selfNamingShell, DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
+import { logDecision } from './decisions-log.mjs';
 
 export const ASKS_DIR = path.join(REPO_ROOT, 'studio', 'asks');
 const LOG = path.join(REPO_ROOT, 'studio', 'decisions', 'decided-without-you.md');
@@ -54,7 +57,7 @@ export function parseDuration(s) {
   return n * ({ m: 60000, min: 60000, h: 3600000, d: 86400000 }[(m[2] || 'h').toLowerCase()]);
 }
 
-export function ask({ question, options = [], def = null, timeout = null, why = '', by = process.env.STUDIO_LOCK_OWNER || process.env.STUDIO_PRODUCER_NAME || 'producer', action = null }) {
+export function ask({ question, options = [], def = null, timeout = null, why = '', by = process.env.STUDIO_LOCK_OWNER || process.env.STUDIO_PRODUCER_NAME || 'producer', action = null, task = null }) {
   const q = String(question || '').trim();
   if (!q) return { ok: false, message: 'Ask something: npm run ask -- "<question>" --options "a,b" --default a --timeout 4h' };
   const opts = (Array.isArray(options) ? options : String(options).split(',')).map((o) => o.trim()).filter(Boolean);
@@ -69,24 +72,72 @@ export function ask({ question, options = [], def = null, timeout = null, why = 
     deadline = new Date(Date.now() + ms).toISOString();
   }
   const n = allAsks().length + 1;
-  const a = write({ id: `A-${String(n).padStart(3, '0')}`, question: q.slice(0, 500), options: opts, default: def, why: String(why).slice(0, 500), by, at: new Date().toISOString(), deadline, protected: protectedTopic, status: 'open', ...(action ? { action } : {}) });
+  const a = write({ id: `A-${String(n).padStart(3, '0')}`, question: q.slice(0, 500), options: opts, default: def, why: String(why).slice(0, 500), by, at: new Date().toISOString(), deadline, protected: protectedTopic, status: 'open', ...(action ? { action } : {}), ...(/^[A-Z]+-\d+$/.test(String(task || '')) ? { task: String(task) } : {}) });
   emitEvent({ type: 'ask.open', agent: by, to: 'human', msg: `${a.id} for the game dev: ${a.question}${deadline ? ` (if no answer by ${deadline.slice(11, 16)} UTC: "${def}")` : ''}` });
   return { ok: true, ask: a, note: protectedTopic && timeout ? 'This is about signing, pillars, money or deleting, so it waits for a person: no deadline.' : null };
 }
 
-/** The owner's stand-in in this shell: the owner proxy, or a beta-mode actor. { owner, agent, via } or null. */
-function ownerStandIn(env = process.env) {
-  try { const p = proxyShell({ env }); if (p.ok) return { owner: String(p.doc.by), agent: String(p.doc.agent), via: 'owner proxy' }; } catch {}
-  try { const b = betaActor({ env }); if (b.ok) return { owner: String(b.doc.by), agent: String(b.who), via: 'beta mode' }; } catch {}
+/**
+ * 2.79 (c): what kind of decision answering this ask is (permission.mjs mayDecide's kinds): an owner-only act's name
+ * (harness/owner-acts.mjs: money, delete, credentials, publish, beta-off), 'protected' when it is about a protected file,
+ * gate, test, hook or approval, else 'board' (a budget, a hire, a plan …).
+ */
+const PROTECTED_ASK = /\bprotected\b|\bre-?pin|\bgolden|\bweaken|\bhooks?\b|\bgates?\b|\bapprov(?:e|al)\b|qa\.mjs|controls list|--force\b/i;
+export function askKind(a) {
+  const own = ownerOnlyTopic(a?.question, a?.why);
+  if (own) return own.act;
+  return PROTECTED_ASK.test(`${a?.question || ''}\n${a?.why || ''}`) ? 'protected' : 'board';
+}
+
+/**
+ * The owner's stand-in in this shell: the owner proxy, or a beta-mode actor (beta mode's named agents, an outside signer,
+ * a Producer/Director session), for this kind of decision. { owner, agent, via } | { refused } | null. `by` names the
+ * agent in a shell the harness didn't launch and that names nobody (2.79 (c): --by grokbot, --by opus-1).
+ */
+function ownerStandIn(env = process.env, { by = '', kind = 'board' } = {}) {
+  const said = selfNamingShell(env) && by ? { ...env, STUDIO_LOCK_OWNER: String(by).trim() } : env;
+  try { const p = proxyShell({ env: said }); if (p.ok) return kind === 'board' || kind === 'protected' ? { owner: String(p.doc.by), agent: String(p.doc.agent), via: 'owner proxy' } : { refused: `${p.doc.agent} is the owner's proxy` }; } catch {}
+  try {
+    const b = betaActor({ env, by, kind });
+    if (b.ok) return { owner: String(b.doc.by), agent: String(b.who), via: 'beta mode' };
+    if (b.refused) return { refused: b.why };
+  } catch {}
   return null;
 }
+/** The worker this shell is ('' if none): a launched session of a non-deciding role, or a worker-shaped STUDIO_LOCK_OWNER. */
+const workerShell = (env = process.env) => {
+  const role = String(env.STUDIO_ROLE || '').trim();
+  const me = String(env.STUDIO_LOCK_OWNER || '').trim();
+  if (role && !DECIDER_ROLES.test(role)) return `a launched ${role} session${me ? ` (${me})` : ''}`;
+  return me && WORKER_NAME.test(me) ? `${me} (a worker agent)` : '';
+};
+/** Is this answer an agent's (a launched session, an agent's shell, an agent's name)? Owner-only asks refuse them all. */
+const agentAnswer = (by, env = process.env) => isAgent(by) || Boolean(String(env.STUDIO_ROLE || '').trim()) || Boolean(String(env.STUDIO_LOCK_OWNER || '').trim());
 
 function resolve(id, status, answer, by, extra = {}) {
   const a = read(path.join(ASKS_DIR, `${id}.json`));
   if (!a) return { ok: false, message: `No question ${id}` };
-  // 2.76.0 (B-86): the owner proxy's shell and, in beta mode, the owner's stand-ins answer for the owner (recorded).
-  if (by && isAgent(by) && status !== 'decided') { const s = ownerStandIn(); if (s && s.agent.toLowerCase() === String(by).toLowerCase()) { extra = { ...extra, recordedBy: by, via: s.via }; by = s.owner; } }
-  if (!by || (isAgent(by) && status !== 'decided')) return { ok: false, message: 'A person answers: --by <your name>. Agents ask; they don\'t answer for the game dev.' };
+  // 2.79 (c): what stays the owner's own (real money, deleting data, keys and credentials, publishing outside the PC,
+  // turning beta mode off: harness/owner-acts.mjs) is answered by a person only, never a stand-in or any agent's shell.
+  const kind = askKind(a);
+  const own = status !== 'decided' ? ownerOnlyTopic(a.question, a.why) : null;
+  const standInName = () => { const x = ownerStandIn(process.env, { by, kind: 'board' }); return Boolean(x?.agent) && [String(by), String(process.env.STUDIO_LOCK_OWNER || '')].some((n) => n.trim().toLowerCase() === x.agent.toLowerCase()); };
+  if (own && by && (agentAnswer(by) || standInName())) return { ok: false, message: `Refused: ${a.id} is about ${own.what}, which ${ownerOnlyWhy(own, String(process.env.STUDIO_LOCK_OWNER || '').trim() || by)}.` };
+  // 2.76.0 (B-86), 2.79 (c): the owner proxy's shell and, in beta mode, the owner's stand-ins (the orchestrator, an outside
+  // signer, a Producer/Director session for what it may decide) answer for the owner, every kind of ask; recorded.
+  if (by && status !== 'decided') {
+    const s = ownerStandIn(process.env, { by, kind });
+    // A stand-in refused this kind (a Producer session and a protected-file ask) is refused under any --by, its own or a person's.
+    if (s?.refused && agentAnswer(by)) return { ok: false, message: s.refused };
+    const shell = String(process.env.STUDIO_LOCK_OWNER || '').trim();
+    if (s?.agent && s.agent.toLowerCase() === String(by).toLowerCase()) { extra = { ...extra, recordedBy: s.agent, via: s.via, kind }; by = s.owner; }
+    // The stand-in's own shell typing the owner's name: still recorded as the stand-in's (not a person's) answer.
+    else if (s?.agent && shell && s.agent.toLowerCase() === shell.toLowerCase() && s.owner.toLowerCase() === String(by).toLowerCase()) extra = { ...extra, recordedBy: s.agent, via: s.via, kind };
+  }
+  // 2.79 (c): a worker session (builder, reviewer, tester … : a launched session of a worker role, or a worker's name) never
+  // answers, whatever name it types after --by: it was taken for a person's answer before.
+  if (status !== 'decided' && !extra.recordedBy && workerShell()) return { ok: false, message: `Refused: ${workerShell()} answers no asks for the game dev, under any --by. Hand the task back (npm run task -- pause <ID> --note "…") and let the orchestrator or the owner answer.` };
+  if (!by || (isAgent(by) && status !== 'decided')) return { ok: false, message: 'A person answers: --by <your name>. Agents ask; they don\'t answer for the game dev. In beta mode the orchestrator (or an outside signer the owner lists) answers with --by <its name>.' };
   if (status !== 'decided' && by === a.by) return { ok: false, message: `${by} asked ${id}; the game dev answers it.` };
   if (!String(answer || '').trim()) return { ok: false, message: 'Give the answer.' };
   return { ok: true, a: write({ ...a, ...extra, status, answer: String(answer).slice(0, 1000), answeredBy: by, answeredAt: new Date().toISOString() }) };
@@ -114,7 +165,12 @@ export async function runAskAction(a, by) {
 export function answer(id, ans, by) {
   const r = resolve(id, 'answered', ans, by);
   if (!r.ok) return r;
-  if (r.a.status === 'answered') emitEvent({ type: 'ask.answered', agent: by, to: r.a.by, msg: `${id} answered by ${by}: ${r.a.answer} (${r.a.question})` });
+  if (r.a.status === 'answered') {
+    const rec = r.a.recordedBy;
+    emitEvent({ type: 'ask.answered', agent: rec || r.a.answeredBy || by, to: r.a.by, msg: `${id} answered by ${r.a.answeredBy || by}${rec ? ` (recorded by ${rec}, ${r.a.via})` : ''}: ${r.a.answer} (${r.a.question})`.slice(0, 600), meta: { ask: id, by: r.a.answeredBy || by, ...(rec ? { recordedBy: rec, via: r.a.via, kind: r.a.kind } : {}) } });
+    // 2.79 (c): a stand-in's answer goes in the decisions log, like its releases and approvals.
+    if (rec) { try { logDecision({ action: 'ask-answer', subject: id, by: rec, as: r.a.via === 'owner proxy' ? 'outside agent' : 'beta', why: `answered "${String(r.a.answer).slice(0, 120)}" for ${r.a.answeredBy}`, evidence: `${r.a.via} ${rec}: ${String(r.a.question).slice(0, 160)}` }); } catch {} }
+  }
   return { ok: true, ask: r.a };
 }
 
@@ -173,5 +229,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(list.length ? list.map((a) => `${a.id} [${a.status}] ${a.question}${a.options.length ? ` (${a.options.join(' / ')})` : ''}${a.status === 'open' && a.deadline ? `; default "${a.default}" at ${a.deadline.slice(0, 16)}` : ''}${a.answer ? ` -> ${a.answer}` : ''}`).join('\n') : 'No questions yet.');
     process.exit(0);
   }
-  out(ask({ question: pos[0], options: flag('options') || [], def: flag('default'), timeout: flag('timeout'), why: flag('why') || '', by: flag('by') || undefined }), (r) => `${r.ask.id} asked${r.ask.deadline ? `; if nobody answers by ${r.ask.deadline.slice(0, 16)} UTC the default "${r.ask.default}" applies (logged)` : '; it waits for a person'}.${r.note ? ` ${r.note}` : ''}`);
+  out(ask({ question: pos[0], options: flag('options') || [], def: flag('default'), timeout: flag('timeout'), why: flag('why') || '', by: flag('by') || undefined, task: flag('task') }), (r) => `${r.ask.id} asked${r.ask.deadline ? `; if nobody answers by ${r.ask.deadline.slice(0, 16)} UTC the default "${r.ask.default}" applies (logged)` : '; it waits for a person'}.${r.note ? ` ${r.note}` : ''}`);
 }

@@ -18,6 +18,9 @@ file a task for the web team.
    same tick as the web game. A mismatch is a bug in the port until proven otherwise.
 3. `npm run engine:gate` before `task done`: the project imports, the tests pass, and the smoke run
    ends with no script error.
+   2.79: when the studio configures a quick check for your engine (`engines.<x>.quickCheck`, e.g. a compile of the sim and
+   test assemblies without the editor), run `npm run engine -- check --task <ID>` before `task done`: it runs in your
+   lane copy, one at a time on the machine (it waits with a status line), and `task done` runs it again and refuses on red.
    Unity: the editor's batch runs take the machine:heavy lock (`node harness/unity.mjs gate|build` do it
    themselves; anything else goes through `node harness/heavy.mjs run --label <what> -- <command>`).
 4. Build scenes in code where you can, so every change is a readable diff. Keep binary files (models,

@@ -149,13 +149,13 @@ process.exit(1);
   const tb = add('Polish the ferry labels');
   for (const n of [1, 2, 3]) {
     run(dir, 'node harness/budget.mjs clear claude', base);
-    run(dir, `node harness/agent.mjs start --role rnd --agent lim-${n} --tool claude --task ${tb}`, env1);
+    run(dir, `node harness/agent.mjs start --attach --role rnd --agent lim-${n} --tool claude --task ${tb}`, env1);
   }
   const tc = add('Polish the quay labels');
   const failCmd = fake('.probe-pu19-failing.mjs', 'Error: build failed: 3 type errors');
   for (const n of [1, 2]) {
     run(dir, 'node harness/budget.mjs clear claude', base);
-    run(dir, `node harness/agent.mjs start --role rnd --agent ctl-${n} --tool claude --task ${tc}`, { ...env1, STUDIO_TOOL_CLAUDE_CMD: failCmd });
+    run(dir, `node harness/agent.mjs start --attach --role rnd --agent ctl-${n} --tool claude --task ${tc}`, { ...env1, STUDIO_TOOL_CLAUDE_CMD: failCmd });
   }
   const counts = probe('counts', `import { escalationFor } from ${u('harness/model-tiers.mjs')};
 import { supervise } from ${u('harness/supervisor.mjs')};

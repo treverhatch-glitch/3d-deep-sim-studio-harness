@@ -183,7 +183,7 @@ already in use", `EADDRINUSE`) or, worse, the test drives the other tree's serve
 on port 0, or a small helper that does) and pass it to the server and the test; the browser-play `serve` command
 above already gets one through `{port}`. The game gate prints `[game-gates] WARN game:test-ports: <file>:<line> …` for
 each fixed port it finds in the game's e2e/browser tests and test-runner configs (`node harness/test-ports.mjs`;
-advisory, never a failure; `STUDIO_TEST_PORTS=off` hides it), and the flake triager labels such a red
+advisory, never a failure), and the flake triager labels such a red
 `port-collision`, not a flake and not the lane's failure. The rule: `studio/rules/test-ports.md`.
 
 ## The state probe (2.72.0)

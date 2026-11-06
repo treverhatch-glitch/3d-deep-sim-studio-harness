@@ -35,8 +35,8 @@ export async function selftest2652A({ dir, run, report, tmpRoot }) {
 console.log(JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 5, cache_creation_input_tokens: 3000, cache_read_input_tokens: 0, output_tokens: 10 } } }));
 console.log(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok', num_turns: 2, total_cost_usd: 0.25, usage: { input_tokens: 5, cache_creation_input_tokens: 3000, cache_read_input_tokens: 9000, output_tokens: 10, ...(split ? { cache_creation: { ephemeral_5m_input_tokens: 1000, ephemeral_1h_input_tokens: 2000 } } : {}) } }));
 `);
-  const s1 = run(dir, 'node harness/agent.mjs start --role producer --agent pr-2652a --tool claude --model m-1', { ...base, STUDIO_PRODUCER_CMD: `node "${fake}" split` });
-  const s2 = run(dir, 'node harness/agent.mjs start --role builder --agent bu-2652a --tool claude --model m-1', { ...base, STUDIO_BUILDER_CMD: `node "${fake}" nosplit` });
+  const s1 = run(dir, 'node harness/agent.mjs start --attach --role producer --agent pr-2652a --tool claude --model m-1', { ...base, STUDIO_PRODUCER_CMD: `node "${fake}" split` });
+  const s2 = run(dir, 'node harness/agent.mjs start --attach --role builder --agent bu-2652a --tool claude --model m-1', { ...base, STUDIO_BUILDER_CMD: `node "${fake}" nosplit` });
   const endOf = (agent) => evs().filter((e) => e.type === 'agent.session.end' && e.agent === agent).pop()?.meta || null;
   const m1 = endOf('pr-2652a'); const m2 = endOf('bu-2652a');
   report('2.65.2 (a, 1): a session end records its cache writes, their 5-minute / 1-hour split when Claude\'s result usage gives one (cache_creation), and the TTL the launcher asked for (1h for a Producer, 5m for a builder); the reported cost stays recorded',

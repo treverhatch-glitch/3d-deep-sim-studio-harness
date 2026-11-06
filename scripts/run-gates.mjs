@@ -25,13 +25,15 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { get, set, del, getKey } from '../harness/gate-cache.mjs';
 import { writeAtomic, withFileLock, pidAlive } from '../harness/fsafe.mjs';
-import { selfIdentity, pidAlive as idAlive } from '../harness/proc-identity.mjs';
+import { selfIdentity, liveAs as idAlive } from '../harness/proc-identity.mjs';
 import { applyGateEnv, nodeModulesDrift, porcelainZ } from '../harness/gate-env.mjs';
 import { createFence, fenceLine } from '../harness/gate-output.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cfg = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8'));
 const argv = process.argv.slice(2);
+// 2.79 (f): `npm run gates -- stats [--days 7] [--json]`: per gate, runs / times red / last red (harness/gate-stats.mjs). Reads events only.
+if (argv[0] === 'stats') process.exit(await (await import('../harness/gate-stats.mjs')).gateStatsCli(argv.slice(1), { root: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..') }));
 // 2.71.1 (B, S03/T06/G10/G16): the gates and everything they start run without code-loading NODE_OPTIONS (or npm's
 // node-options), with git pointed only at this checkout and replace refs ignored (harness/gate-env.mjs). Done in place
 // before anything is spawned, so every git call (whichever helper makes it) and every child inherits it. A preload
@@ -152,8 +154,13 @@ const EVERY_CARTRIDGE_GATES = new Set(['purity', 'isolation', 'golden', 'golden-
 const { listCartridges, isTemplateCartridge } = await import('../harness/cartridge.mjs');
 const realCartridges = listCartridges().filter((n) => !isTemplateCartridge(n));
 const keepForCartridges = (g) => realCartridges.length > 0 && EVERY_CARTRIDGE_GATES.has(g.id);
+// 2.79 (t): a game with its own build or checks has the game tester (npm run tester) play its real build; the template
+// cartridge's stage-1 playtest says nothing about it and is skipped (a template studio keeps it).
+const { stage1Replaced } = await import('../harness/tester-config.mjs');
+const stage1 = stage1Replaced();
 const gates = all.filter((g) => {
   if (only) return only.has(g.id);
+  if (g.id === 'playtest' && g.cartridge && stage1.replaced) return skipped.push(`playtest (${stage1.words})`), false;
   if (gameOwnsGates && g.cartridge && !keepForCartridges(g)) return skipped.push(`${g.id} (cartridge; ${sg.name} runs its own)`), false;
   if (argv.includes('--required-only') && g.required === false) return false;
   if (isFastTier && !LITE.has(g.id)) return false;
@@ -434,7 +441,7 @@ try {
 // 2.34.0: every verify is an event (how long, scoped or not, what failed), for the harness health report.
 try {
   const { emitEvent } = await import('../harness/event.mjs');
-  emitEvent({ type: 'gates.run', agent: process.env.STUDIO_LOCK_OWNER || null, msg: `verify: ${rows.filter((r) => r.ok).length}/${rows.length} passed in ${Math.round((Date.now() - runStarted) / 1000)} s${changedFiles?.length ? ` (scoped to ${changedFiles.length} file(s))` : ''}`, meta: { ms: Date.now() - runStarted, scoped: Boolean(changedFiles?.length), partial: Boolean(only) || isFastTier, ran: rows.length, failed: rows.filter((r) => !r.ok && r.required).map((r) => r.id), ...gatesRunFacts(rows), gameMs: rows.find((r) => r.id === 'game')?.ms ?? null, ...(changedByVerify?.length ? { changedByVerify } : {}) } });
+  emitEvent({ type: 'gates.run', agent: process.env.STUDIO_LOCK_OWNER || null, msg: `verify: ${rows.filter((r) => r.ok).length}/${rows.length} passed in ${Math.round((Date.now() - runStarted) / 1000)} s${changedFiles?.length ? ` (scoped to ${changedFiles.length} file(s))` : ''}`, meta: { ms: Date.now() - runStarted, scoped: Boolean(changedFiles?.length), partial: Boolean(only) || isFastTier, ran: rows.length, failed: rows.filter((r) => !r.ok && r.required).map((r) => r.id), ...gatesRunFacts(rows), gameMs: rows.find((r) => r.id === 'game')?.ms ?? null, gateMs: Object.fromEntries(rows.filter((r) => !r.cached && Number.isFinite(r.ms)).map((r) => [r.id, r.ms])), ...(changedByVerify?.length ? { changedByVerify } : {}) } });
   // 2.65.0: a full verify also ends with the uniform job.done (harness/jobs.mjs), which `npm run events -- wait` matches.
   if (!only && !isFastTier) {
     const failedIds = rows.filter((r) => !r.ok && r.required).map((r) => r.id);

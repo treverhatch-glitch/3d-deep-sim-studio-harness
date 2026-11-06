@@ -84,6 +84,31 @@ export function producerApprovesProtected(root = process.cwd()) {
   try { return /^protected$/i.test(String(parseStudioEnv(fs.readFileSync(path.join(main, '.env'), 'utf8')).STUDIO_PRODUCER_APPROVES || '').trim()); } catch { return false; }
 }
 
+// ---- 2.79 (c): what stays the owner's own, and outside signers ----
+export { OWNER_ONLY, OWNER_ONLY_ACTIONS, ownerOnlyAction, ownerOnlyTopic, ownerOnlyWhy } from './owner-acts.mjs';
+
+/**
+ * The outside agents the owner lets sign as themselves while beta mode is on (the owner's words, 2026-11-06: "Grokbot and
+ * Patch can approve as me"): STUDIO_OUTSIDE_SIGNERS (comma-separated names) in the main checkout's .env only, the owner's
+ * file, like STUDIO_PRODUCER_APPROVES: a session's own environment or a lane copy's .env never adds one. A worker-shaped
+ * name is never one. beta-mode.mjs adds these to beta mode's named agents.
+ */
+export function outsideSigners(root = process.cwd()) {
+  let main = root;
+  try { main = mainCheckout(root); } catch { /* root as given */ }
+  let raw = '';
+  try { raw = String(parseStudioEnv(fs.readFileSync(path.join(main, '.env'), 'utf8')).STUDIO_OUTSIDE_SIGNERS || ''); } catch { return []; }
+  return [...new Set(raw.split(/[,\s]+/).map((x) => x.trim()).filter((x) => /^[\w.-]{1,60}$/.test(x) && !WORKER_NAME.test(x)))];
+}
+
+/**
+ * May this shell name itself with --by? Only one the harness didn't launch (no STUDIO_ROLE: every launched session,
+ * worker or not, has it) and that names nobody else (no STUDIO_LOCK_OWNER). actorOf already judges such a shell "outside
+ * the harness"; 2.79 (c): an outside agent that runs commands there (grokbot on the owner's PC, the orchestrator's chat
+ * shell) is then the beta agent its --by names, if beta mode names it, and nobody else.
+ */
+export const selfNamingShell = (env = process.env) => !String(env.STUDIO_ROLE || '').trim() && !String(env.STUDIO_LOCK_OWNER || '').trim();
+
 const readJsonQuiet = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 /**
  * The role a launched session ran under ('' when the name isn't one): its session record (.studio/agents/<name>.json,

@@ -25,6 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { writeAtomic } from './fsafe.mjs';
+import { postAsk, closeStaleAsks } from './ask-post.mjs';
 import { reloadEnvIfChanged } from './env-reload.mjs';
 
 export const WATCHDOG_FILE = path.join(STUDIO_STATE_DIR, 'watchdog.json');
@@ -121,7 +122,7 @@ export async function rescueClock(now = Date.now(), { file = path.join(STUDIO_ST
     const told = st.told && st.why === launcher.why;
     st = { ...st, pausedAt: new Date(now).toISOString(), why: launcher.why, told: told || waiting.length > 0 };
     if (waiting.length && !told) {
-      emitEvent({ type: 'agent.ask', agent: 'watchdog', to: 'producer', status: 'warn', msg: `Rescue ${waiting.join(', ')} waiting: ${launcher.why}. Its pick-up clock is stopped until agents can start again (npm run studio:start, or the War Room's "Fixed it: try again").`.slice(0, 400), meta: { rescues: waiting, why: launcher.why } });
+      postAsk({ agent: 'watchdog', to: 'producer', subject: `rescue-wait:${waiting.join(',')}:${launcher.why}`.slice(0, 240), status: 'warn', now, msg: `Rescue ${waiting.join(', ')} waiting: ${launcher.why}. Its pick-up clock is stopped until agents can start again (npm run studio:start, or the War Room's "Fixed it: try again").`.slice(0, 400), meta: { rescues: waiting, why: launcher.why } });
       actions.push({ kind: 'rescue-wait', msg: `rescues waiting (${launcher.why}): ${waiting.join(', ')}; their pick-up clock is stopped` });
     }
   } else if (st.told) st = { ...st, told: false };
@@ -133,6 +134,8 @@ export async function rescueClock(now = Date.now(), { file = path.join(STUDIO_ST
 export async function watchdogPass(now = Date.now(), { events = readRecentEvents(5000), lim = null } = {}) {
   // 2.73.2 (B-74): settings changed in .env since the last pass (the stall limits, the idle stop) apply from this pass.
   reloadEnvIfChanged({ by: 'watchdog' });
+  // 2.79 (c): harness asks whose subject is over (the task done, its park lifted or replaced) close now, once each.
+  try { const { parseNextQueue } = await import('./task.mjs'); const done = new Set(parseNextQueue().done.map((t) => t.id)); closeStaleAsks({ done: (t) => done.has(t), now }); } catch { /* a help, never a blocker */ }
   lim ||= watchdogLimits();
   const w = readWatchdog();
   // 2.30o: always on while a studio has an active game (STUDIO_WATCHDOG=off is the only way out), so

@@ -155,7 +155,7 @@ process.exit(0);
     write(S, '.studio/locks/train.lock', JSON.stringify({ pid: process.pid, at: Date.now(), id: 'web-277u', by: 'train' }));
     const lp = (env = {}) => probe(S, 'lp', `const lp = await import(${mod(S, 'line-producer.mjs')});
 const rows = await lp.enginePass({ deps: { rigBudget: async () => ({ running: [], freeGb: 20 }), machine: { cpu: { busy: 0.1 } } } });
-console.log(JSON.stringify({ rows }));`, env);
+console.log(JSON.stringify({ rows }));`, { STUDIO_ENGINE_WINDOW: 'quiet', ...env }); // 2.79 (e): this check is about the quiet window, no longer the default (the engine slot is)
     const waiting = lp();
     const stillQueued = (readJson(path.join(S, '.studio', 'train', 'unity-queue.json')) || []).length === 1 && !fs.existsSync(path.join(S, '.studio', 'locks', 'unity-train.lock'));
     fs.rmSync(path.join(S, '.studio', 'locks', 'train.lock'), { force: true });

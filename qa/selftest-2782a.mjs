@@ -147,13 +147,14 @@ export async function selftest2782A({ dir, report, tmpRoot, root }) {
 const spawned = [];
 const deps = { supervisor: () => ({ pid: process.pid }), auto: () => ({ on: true }), trainOn: () => true, spawn: (o) => { spawned.push(o.args.slice(1)); return { ok: true, pid: 4242 }; } };
 const withSup = await kickTrain(process.cwd(), { by: 'bld-k', waitMin: 7, deps });
+// 2.79 (b, the crew's request 2.3): train auto off now starts nothing from the kick (it used to start one train anyway).
 const autoOff = await kickTrain(process.cwd(), { by: 'bld-k', waitMin: 7, deps: { ...deps, auto: () => ({ on: false, why: 'train auto is off' }) } });
 const noSup = await kickTrain(process.cwd(), { by: 'bld-k', waitMin: 7, deps: { ...deps, supervisor: () => null } });
 console.log(JSON.stringify({ withSup, autoOff, noSup, spawned }));
 `, env);
       const j = r.j || {};
-      await guard('2.78.2 (a): after a queued task done, a running supervisor with the train daemon on starts the train (nothing spawned); with train auto off or no supervisor ONE train starts detached (train-daemon.mjs run --wait <STUDIO_TRAIN_LOCK_WAIT_MIN>) (fails on 2.78.1: harness/train-detach.mjs is missing)', () => [
-        j.withSup?.how === 'daemon' && j.autoOff?.how === 'spawned' && j.noSup?.how === 'spawned' && j.spawned?.length === 2 && j.spawned.every((x) => x[0] === 'run' && x[1] === '--wait' && x[2] === '7'),
+      await guard('2.78.2 (a): after a queued task done, a running supervisor with the train daemon on starts the train (nothing spawned); with no supervisor ONE train starts detached (train-daemon.mjs run --wait <STUDIO_TRAIN_LOCK_WAIT_MIN>); with train auto off none starts (2.79) (fails on 2.78.1: harness/train-detach.mjs is missing)', () => [
+        j.withSup?.how === 'daemon' && j.autoOff?.how === 'off' && j.noSup?.how === 'spawned' && j.spawned?.length === 1 && j.spawned.every((x) => x[0] === 'run' && x[1] === '--wait' && x[2] === '7'),
         out(r).slice(-1500)]);
     }
 

@@ -23,9 +23,10 @@ export async function selftest2584B({ dir, run, report }) {
 
   fs.cpSync(path.join(dir, 'cartridges', '_template'), path.join(dir, 'cartridges', 'zzcart'), { recursive: true });
   const after = run(dir, 'node scripts/run-gates.mjs --tier fast --no-cache', env);
+  // 2.79 (a): a game studio's playtest is now skipped as "replaced by the game tester".
   report('2.58.4: with a real cartridge beside it, the cartridge gates that check every cartridge run (purity, isolation, golden, regressions); playtest, which tests the default cartridge, stays skipped',
     /its cartridge \(zzcart\) gets the cartridge gates/.test(out(after)) && /\[gates\] (PASS|FAIL) purity\b/.test(out(after)) && /\[gates\] (PASS|FAIL) golden\b/.test(out(after)) && /\[gates\] (PASS|FAIL) regressions\b/.test(out(after))
-      && /playtest \(cartridge; zz-owner runs its own\)/.test(out(after)) && !/\[gates\] (PASS|FAIL) playtest\b/.test(out(after)), out(after).slice(-3000));
+      && /playtest \((cartridge; zz-owner runs its own|replaced by the game tester)/.test(out(after)) && !/\[gates\] (PASS|FAIL) playtest\b/.test(out(after)), out(after).slice(-3000));
 
   // A slow cartridge: about the same work every tick, far over 1 ms.
   w('cartridges/zzslow/index.mjs', `export function createInitialState() { return { tick: 0, n: 0 }; }

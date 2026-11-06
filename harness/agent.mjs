@@ -36,6 +36,7 @@
  * or STUDIO_AGENT_TOOL / STUDIO_AGENT_MODEL (.env). Output goes to .studio/agents/<agent>.log.
  */
 import fs from 'node:fs';
+import { postAsk } from './ask-post.mjs';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { allowedToolsList } from './allowlist.mjs';
@@ -46,6 +47,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { emitSampled } from './telemetry.mjs';
 import { escalationFor } from './model-tiers.mjs';
 import { launchRoute } from './routing.mjs';
 import { sessionReasoningOnly, rerouteFor } from './reasoning-only.mjs';
@@ -848,7 +850,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
   if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
   if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
-    try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task: outcome.task, msg: m }) }); } catch { /* the park is a help, never a crash */ }
+    try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => postAsk({ agent: 'launcher', to: 'producer', task: outcome.task, subject: 'parked', msg: m }) }); } catch { /* the park is a help, never a crash */ }
   }
   jobDone({ kind: 'session', id: agent, agent, task: s0.task || tasks[0] || null, code: code ?? null, result: stop ? (stop.kind === 'pause' ? 'paused' : 'stopped') : bad ? 'fail' : 'pass', ms: Date.parse(s0.startedAt) ? Date.now() - Date.parse(s0.startedAt) : null, tail: reason, log: s0.log || null, extra: { role: role || null, handed: handed.map((h) => h.task) } });
   // 2.61.0: which skills and pitfall lines this session was given, and whether its log shows it used them (telemetry only).
@@ -918,7 +920,7 @@ export function parkIfLooping(id, now = Date.now()) {
   const last = String(since[since.length - 1].msg || '').replace(/^Handed back [^:]+:\s*/, '').slice(0, 200);
   const why = `handed back ${since.length} times in 2 h without being done; the last note: "${last}". Fix the blocker, then npm run task -- unpark ${id} --by <name>`;
   if (!parkOnce(id, { by: 'launcher', why, at: new Date(now).toISOString() }, { by: 'launcher', msg: `Parked ${id}: ${why}` })) return null;
-  emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task: id, msg: `${id} keeps coming back (${since.length} hand-backs in 2 h), so it's parked. Last note: "${last}"` });
+  postAsk({ agent: 'launcher', to: 'producer', task: id, subject: 'parked', msg: `${id} keeps coming back (${since.length} hand-backs in 2 h), so it's parked. Last note: "${last}"` });
   return why;
 }
 
@@ -1048,6 +1050,30 @@ export function sessionPromptParts({ role, agent, model, task = null, lane = nul
 }
 
 /** Run one agent to the end, with heartbeats. Resolves with the cleanup result. */
+/**
+ * 2.79 (b): the queue entry (game train, or any engine train's queue) that still needs this agent's lane copy, or null.
+ * Read through the trains' own readers (readQueue in train.mjs; readUnityQueue in unity-train.mjs for every
+ * <engine>-queue.json): an entry names the copy by dir, or by the agent that queued it.
+ */
+export async function queuedCopy(agent, dirs = [], root = REPO_ROOT) {
+  const same = (a, b) => path.resolve(root, String(a)) === path.resolve(root, String(b));
+  const mine = (e) => e && ((e.agent && e.agent === agent) || (e.dir && dirs.some((d) => d && same(e.dir, d))));
+  try {
+    const { readQueue } = await import('./train.mjs');
+    const g = readQueue(root).find(mine);
+    if (g) return { task: g.task, train: 'merge' };
+  } catch { /* a queue that can't be read keeps nothing alive */ }
+  try {
+    const { readUnityQueue } = await import('./unity-train.mjs');
+    for (const f of fs.readdirSync(path.join(root, '.studio', 'train'))) {
+      const m = f.match(/^(.+)-queue\.json$/);
+      const u = m && readUnityQueue(root, m[1]).find(mine);
+      if (u) return { task: u.task, train: m[1] };
+    }
+  } catch { /* none */ }
+  return null;
+}
+
 export async function runAgent({ role, agent, tool, model, fallback = [], task = null, lane = null, oneTask = false, division = null, note = '', by = null, refreshes = 0, reuseCopy = null, agyOneTurn = false }) {
   const opts2 = { refreshes };
   // H-1 (2.58.5): a nim session runs a NIM model (--model, STUDIO_NIM_MODEL or the default), never the role's.
@@ -1202,7 +1228,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   const { stable, volatile } = sessionPromptParts({ role, agent, model, task, lane, oneTask, refreshes, note, by, tool, custom, copy, engineLane });
   // 2.30q (#8): warn when something session-specific slipped into the stable prefix (it would break the cache).
-  { const leaks = volatileLeaks(stable, { agent, model, task }); if (leaks.length) emitEvent({ type: 'prompt.prefix.volatile', agent, to: 'producer', status: 'warn', msg: `${role} prompt prefix carries ${leaks.join(', ')}: every ${role} session misses the prompt cache; move it below the stable marker`, meta: { role, leaks } }); }
+  { const leaks = volatileLeaks(stable, { agent, model, task }); if (leaks.length) emitSampled({ type: 'prompt.prefix.volatile', agent, to: 'producer', status: 'warn', msg: `${role} prompt prefix carries ${leaks.join(', ')}: every ${role} session misses the prompt cache; move it below the stable marker`, meta: { role, leaks } }, `${role}: ${leaks.join(',')}`); }
   const prompt = layoutPrompt({ stable, volatile });
   let prefix = null;
   try {
@@ -1495,7 +1521,12 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // relaunch) works on in them: ownCopy.
   const atClaimDir = atClaim?.branch && atClaim.dir ? path.join(REPO_ROOT, atClaim.dir) : null;
   const ownCopy = copy && fs.existsSync(copy.dir) ? { dir: copy.dir, branch: copy.branch, laneless: Boolean(copy.laneless) } : atClaimDir && fs.existsSync(atClaimDir) ? { dir: atClaimDir, branch: atClaim.branch, laneless: true } : null;
-  const dropCopies = () => {
+  // 2.79 (b): a copy whose task waits in a train's queue is left for the train (it checks and lands it from that copy) and
+  // the janitor (it removes it once the task has landed). task done queues and the session ends seconds later: removing
+  // the copy then made the train find a lane folder with no .git (the 2.78.2 hand-backs "its copy is on main now").
+  const dropCopies = async () => {
+    const queued = await queuedCopy(agent, [copy?.dir, atClaimDir]);
+    if (queued) { emitEvent({ type: 'lane.kept', agent, task: queued.task, msg: `Kept ${agent}'s lane copy: ${queued.task} waits in the ${queued.train} train queue` }); return; }
     if (copy && !keptCopy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
     if (atClaimDir && fs.existsSync(atClaimDir)) removeLaneCopy(agent, { keepBranch: unmerged(atClaim.branch) > 0 });
   };
@@ -1505,7 +1536,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const again = result.capped ? result.handed[0]?.task || (task && !parseNextQueue().done.some((t) => t.id === task) ? task : null) : null;
   const maxRefresh = Number(process.env.STUDIO_REFRESH_RELAUNCH ?? 5);
   if (again && !readStop() && (opts2.refreshes || 0) < maxRefresh) {
-    dropCopies();
+    await dropCopies();
     emitEvent({ type: 'agent.refresh', agent, task: again, msg: `${agent} refreshed on ${again}; a fresh session continues from studio/handoffs/${again}.md` });
     return runAgent({ role, agent, tool, model, fallback, task: again, lane, oneTask, division, note, by, refreshes: (opts2.refreshes || 0) + 1 });
   }
@@ -1544,7 +1575,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     // 2.78.1 (B-118): the failover works on in the ended session's copy (reuseCopy), never a new one under the same name.
     return runAgent({ role, agent, tool: ftool, model: fmodel || model, fallback: rest, task: resume, lane, oneTask, division, note, by, reuseCopy: ownCopy });
   }
-  dropCopies();
+  await dropCopies();
   return { ok: true, code, ...result };
 }
 
@@ -2231,7 +2262,7 @@ export function startAgent(opts, { detach = false } = {}) {
   if (opts.next && !opts.task) opts = { ...opts, task: nextFor({ role }, parseNextQueue()).task?.id || null };
   if (detach) {
     // A supervisor process of its own, so the agent outlives this command (the HUB and the watcher use this).
-    const args = [fileURLToPath(import.meta.url), 'start', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : []), ...(opts.forceModel || (tool === 'agy' && !isGeminiModel(model)) ? ['--force-model'] : [])];
+    const args = [fileURLToPath(import.meta.url), 'start', '--attach', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : []), ...(opts.forceModel || (tool === 'agy' && !isGeminiModel(model)) ? ['--force-model'] : [])];
     // 2.77.0 (n, B-92): the launcher is not the pinned session that may have started it (its agent gets its own pin).
     const sup = spawn(process.execPath, args, { windowsHide: true, cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: { ...process.env, STUDIO_TASK_PIN: '' } });
     sup.unref();
@@ -2332,10 +2363,22 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const d = listDivisions().find((x) => x.id === division);
       if (d && !d.active) setDivision(division, true, flag('by') || 'producer');
     }
-    const base = { autoName: argv.includes('--auto-name'), role: flag('role'), agent: flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), next: argv.includes('--next'), lane: flag('lane'), oneTask: argv.includes('--one-task') || Boolean(flag('loop')), extra: Number(flag('extra')) || 0, division, note: flag('note') || '', by: flag('by') || (cmd === 'hire' ? process.env.STUDIO_LOCK_OWNER || null : null), loop: flag('loop'), approved: argv.includes('--approved'), forceModel: argv.includes('--force-model') };
+    // 2.79 (f): `--pool api` starts one builder of STUDIO_API_POOL (billed to its mapped API key) by hand (harness/api-pool.mjs).
+    let poolAgent = null;
+    if (flag('pool')) {
+      if (String(flag('pool')).toLowerCase() !== 'api') { console.error('--pool takes "api" (the builders named in STUDIO_API_POOL)'); process.exit(1); }
+      const pm = (await import('./api-pool.mjs')).pickManual({ live: sessions() });
+      if (!pm.name) { console.error(`No API-pool builder to start: ${pm.why}`); process.exit(1); }
+      poolAgent = pm.name;
+    }
+    const base = { autoName: argv.includes('--auto-name'), role: poolAgent ? 'builder' : flag('role'), agent: poolAgent || flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), next: argv.includes('--next'), lane: flag('lane'), oneTask: argv.includes('--one-task') || Boolean(flag('loop')), extra: Number(flag('extra')) || 0, division, note: flag('note') || '', by: flag('by') || (cmd === 'hire' ? process.env.STUDIO_LOCK_OWNER || null : null), loop: flag('loop'), approved: argv.includes('--approved'), forceModel: argv.includes('--force-model') };
     // A hire runs in the background unless --foreground: tied to the hiring shell, it died with it and its
     // record stayed "running" with its claims held (test #3, engine-porter-1).
-    const r = startAgent(base, { detach: argv.includes('--detach') || (cmd === 'hire' && !argv.includes('--foreground')) });
+    // 2.79 (d): `start` runs in the background too: tied to the starter's shell, a builder died when the command that
+    // started it returned (builder-api2 after 12 min, builder-api3 after 1). --attach (or --foreground, for
+    // a script or a test that wants the session in this process) keeps it here.
+    const attach = argv.includes('--attach') || argv.includes('--foreground');
+    const r = startAgent(base, { detach: argv.includes('--detach') || !attach });
     if (!r.ok) {
       if (r.needsApproval) {
         const { ask } = await import('./ask.mjs');
@@ -2351,7 +2394,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // (one line, and an event at most hourly for launches nobody watches) when the harness list isn't there. Never blocks.
     if (r.tool === 'agy') { const h = agyAllowHint(); if (h) { console.log(h); noteAgyHint(h, { agent: r.agent }); } }
     if (r.detached) {
-      console.log(`${r.agent} started in the background (${r.tool}, ${r.model}). Output: .studio/agents/${r.agent}.log. npm run agent -- list`);
+      console.log(`${r.agent} started in the background (${r.tool}, ${r.model}), pid ${r.supervisor}. Output: .studio/agents/${r.agent}.log. npm run agent -- list (--attach keeps it in this shell)`);
       process.exit(0);
     }
     let res = await r.run;

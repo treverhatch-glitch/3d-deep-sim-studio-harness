@@ -27,7 +27,6 @@
  * Results are events (golden.divergence) and are read back from a log by divergenceFromLog (hand-back facts, gates.run).
  */
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -259,6 +258,17 @@ function emit(r, extra = {}) {
 }
 
 /**
+ * 2.79 (d): the reference is built under <repo>/.studio/tmp, not the system temp folder: a build there (Vite, a game's own
+ * scripts) finds no node_modules above it and failed on the crew's Windows PC ("Cannot find module C:\\Users\\…\\Temp…").
+ * Under the repo, node's resolution walks up to the repo's own node_modules. Removed by the caller when done.
+ */
+export function refTemp(root, prefix) {
+  const base = path.join(root, '.studio', 'tmp');
+  fs.mkdirSync(base, { recursive: true });
+  return fs.mkdtempSync(path.join(base, prefix));
+}
+
+/**
  * A cartridge golden (qa/check-golden.mjs) that is red on its sha256: { found, tick, subsystems, field, from, to, ref,
  * reproduces, file, ms } or { error }. opts: { root, file (the golden's file name), rel (its repo path), spec, cart (this
  * tree's), env }.
@@ -267,7 +277,7 @@ export async function goldenDivergence({ root, file, rel, spec, cart, env = proc
   const t0 = Date.now();
   const ref = goldenReference(root, rel, env);
   if (ref.error) return { file, error: ref.error };
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-div-'));
+  const tmp = refTemp(root, 'studio-div-');
   try {
     const crel = `cartridges/${cart.name}`;
     if (objType(root, ref.ref, crel) !== 'tree') return { file, ref: ref.ref, error: `the reference ${ref.ref.slice(0, 8)} has no ${crel}` };
@@ -355,7 +365,7 @@ export function gameReference(root, conf, env = process.env) {
 
 /**
  * The generic contract: a game check that failed and whose manifest declares "divergence". Runs the command on this
- * tree and on the reference commit (a detached worktree in the temp folder) and compares. Returns the result (with
+ * tree and on the reference commit (a detached worktree under .studio/tmp) and compares. Returns the result (with
  * { gate }) or { error }. Never throws.
  */
 export async function gameDivergence({ root, game, conf, gate, env = process.env, timeoutMs = Number(env.STUDIO_DIVERGENCE_TIMEOUT_MS || 600000) }) {
@@ -363,7 +373,7 @@ export async function gameDivergence({ root, game, conf, gate, env = process.env
   if (!conf || typeof conf.command !== 'string' || !conf.command.trim()) return { gate, error: 'the manifest\'s "divergence" has no "command"' };
   const ref = gameReference(root, conf, env);
   if (ref.error) return { gate, error: ref.error };
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-divref-'));
+  const tmp = refTemp(root, 'studio-divref-');
   const wt = path.join(tmp, 'ref');
   const runEnv = { ...env, STUDIO_DIVERGENCE: 'trace' };
   try {
