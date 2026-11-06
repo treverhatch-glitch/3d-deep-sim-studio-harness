@@ -992,7 +992,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_VERTEX_MAX_PROMPT_TOKENS` · no simple default · harness/agent.mjs, harness/vertex-proxy.mjs, harness/vertex.mjs (+2 more) · [AGENT-TOOLS.md:379](AGENT-TOOLS.md)
 - `STUDIO_VERTEX_MODEL` · no simple default · harness/vertex.mjs · [AGENT-TOOLS.md:366](AGENT-TOOLS.md)
 - `STUDIO_VERTEX_PROXY_PORT` · no simple default · harness/vertex-proxy.mjs, harness/vertex.mjs, qa/selftest-2791a.mjs (+1 more) · [AGENT-TOOLS.md:351](AGENT-TOOLS.md)
-- `STUDIO_VERTEX_SHARE` · no simple default · harness/supervisor.mjs, harness/vertex.mjs, qa/selftest-2791a.mjs · [AGENT-TOOLS.md:372](AGENT-TOOLS.md)
+- `STUDIO_VERTEX_SHARE` · no simple default · harness/supervisor.mjs, harness/vertex.mjs, qa/selftest-2791a.mjs (+1 more) · [AGENT-TOOLS.md:372](AGENT-TOOLS.md)
 
 ## VISION_* (5)
 

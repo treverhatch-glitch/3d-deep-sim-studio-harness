@@ -1465,3 +1465,7 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-284 — a Golden-Reason line under the subject wasn't a trailer · fixed in 2.79.1
 - **Evidence:** T-322 handed back 3 times "no Golden-Reason trailer" while the builder had written the line.
 - **Fix:** `task done` reads trailers the way git does and says exactly where the line goes. qa/selftest-2791c.mjs.
+
+### P-285 — Vertex builders spent money and did no work · fixed in 2.79.2
+- **Evidence:** 8 Vertex builder sessions on 2026-11-06, each "no work on T-xxx: it never claimed T-xxx", 1–3 requests of 438k–520k prompt tokens, $5.84; `STUDIO_VERTEX_SHARE=0` set at 17:56 and two more started at 18:04.
+- **Fix:** the launcher runs the task protocol around one-shot aider; lane-only context with a prompt cap; the share holds on every start path. qa/selftest-2792a.mjs, qa/selftest-2792b.mjs.
