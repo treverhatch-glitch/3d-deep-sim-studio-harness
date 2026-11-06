@@ -19,8 +19,8 @@
  * which skills it was given (named in its kickoff, plus its task's skill, whose steps its brief carries) and which
  * pitfall lines (studio/PITFALLS.md lines in its kickoff), whether its log shows it opened each skill (loaded), and
  * whether the log shows each skill's required steps (followed: the skill's optional `evidence:` front matter,
- * studio/skills/README.md; no evidence list: unknown). One skill.follow event per session; the scorecard shows the
- * rates per model.
+ * studio/skills/README.md; no evidence list: unknown). Counted per model in .studio/skill-follow.json (2.79.1; one
+ * hourly skill.follow.summary event, STUDIO_TELEMETRY=full: one event per session); the scorecard shows the rates per model.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,6 +28,8 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
+import { emitSampled, telemetryFull } from './telemetry.mjs';
+import { withFileLock, writeAtomic } from './fsafe.mjs';
 import { parseNextQueue } from './task.mjs';
 import { impossibleExit } from './busy.mjs';
 import { taskType, TYPES } from './done-check.mjs';
@@ -241,27 +243,61 @@ export function recordFollow({ agent, model = null, role = null, task = null, lo
   const pitfallLines = read(path.join(REPO_ROOT, 'studio', 'PITFALLS.md')).split('\n').filter((l) => /^- /.test(l)).map((l) => l.slice(2).trim());
   const f = followFromSession({ kickoff, log, taskSkill, pitfallLines });
   const n = (k, v) => f.skills.filter((s) => s[k] === v).length;
-  emitEvent({ type: 'skill.follow', agent, model, task: task || null, msg: `${agent}: ${f.skills.length} skill(s) given, ${n('loaded', true)} opened, ${n('followed', true)} followed, ${n('followed', null)} unknown; ${f.pitfalls.length} pitfall line(s) given`, meta: { role, ...f } });
+  // 2.79.1 (d): the per-model numbers the scorecard shows live in a counter (.studio/skill-follow.json); the event is one hourly
+  // skill.follow.summary (STUDIO_TELEMETRY=full: one per session, as before).
+  countFollow(model, f);
+  const msg = `${agent}: ${f.skills.length} skill(s) given, ${n('loaded', true)} opened, ${n('followed', true)} followed, ${n('followed', null)} unknown; ${f.pitfalls.length} pitfall line(s) given`;
+  if (telemetryFull()) emitEvent({ type: 'skill.follow', agent, model, task: task || null, msg, meta: { role, ...f } });
+  else emitSampled({ type: 'skill.follow', agent, model, task: task || null, msg, meta: { role, skills: f.skills.length, pitfalls: f.pitfalls.length } }, model || 'unknown');
   return f;
 }
 
-/** Per model, from skill.follow events: skills given, and the share loaded / followed / unknown. */
+const FOLLOW_FILE = () => path.join(STUDIO_STATE_DIR, 'skill-follow.json');
+const emptyFollow = () => ({ sessions: 0, given: 0, loaded: 0, followed: 0, notFollowed: 0, unknown: 0, pitfalls: 0 });
+function addFollow(r, skills, pitfalls) {
+  r.sessions += 1;
+  for (const s of skills || []) {
+    r.given += 1;
+    if (s.loaded) r.loaded += 1;
+    if (s.followed === true) r.followed += 1;
+    else if (s.followed === false) r.notFollowed += 1;
+    else r.unknown += 1;
+  }
+  r.pitfalls += (pitfalls || []).length;
+}
+/** 2.79.1 (d): add one session's follow numbers to the per-model counter. Telemetry: never throws. */
+function countFollow(model, f) {
+  try {
+    withFileLock('skill-follow', () => {
+      let c = null;
+      try { c = JSON.parse(fs.readFileSync(FOLLOW_FILE(), 'utf8')); } catch { c = null; }
+      if (!c || typeof c !== 'object' || !c.models) c = { since: new Date().toISOString(), models: {} };
+      const key = model || 'unknown';
+      c.models[key] = c.models[key] || emptyFollow();
+      addFollow(c.models[key], f.skills, f.pitfalls);
+      writeAtomic(FOLLOW_FILE(), `${JSON.stringify(c)}\n`);
+    }, { timeoutMs: 1000 });
+  } catch { /* a counter, never a blocker */ }
+}
+
+/**
+ * Per model: skills given, and the share loaded / followed / unknown. From the counter (.studio/skill-follow.json, since 2.79.1)
+ * plus the per-session skill.follow events written before the counter began (or never counted: an older log).
+ */
 export function followRates(events = readRecentEvents(20000)) {
   const rows = new Map();
+  let counter = null;
+  try { counter = JSON.parse(fs.readFileSync(FOLLOW_FILE(), 'utf8')); } catch { counter = null; }
+  const since = counter?.models && Date.parse(counter.since) ? Date.parse(counter.since) : Infinity;
+  const row = (key) => { const r = rows.get(key) || { model: key, ...emptyFollow() }; rows.set(key, r); return r; };
+  for (const [key, c] of Object.entries(counter?.models || {})) {
+    const r = row(key);
+    for (const k of Object.keys(emptyFollow())) r[k] += Number(c[k]) || 0;
+  }
   for (const e of events) {
-    if (e.type !== 'skill.follow') continue;
-    const key = e.model || 'unknown';
-    const r = rows.get(key) || { model: key, sessions: 0, given: 0, loaded: 0, followed: 0, notFollowed: 0, unknown: 0, pitfalls: 0 };
-    r.sessions += 1;
-    for (const s of e.meta?.skills || []) {
-      r.given += 1;
-      if (s.loaded) r.loaded += 1;
-      if (s.followed === true) r.followed += 1;
-      else if (s.followed === false) r.notFollowed += 1;
-      else r.unknown += 1;
-    }
-    r.pitfalls += (e.meta?.pitfalls || []).length;
-    rows.set(key, r);
+    if (e.type !== 'skill.follow' || !Array.isArray(e.meta?.skills)) continue; // a sampled summary's meta has no skills list
+    if (Date.parse(e.ts) >= since) continue; // already in the counter
+    addFollow(row(e.model || 'unknown'), e.meta.skills, e.meta.pitfalls);
   }
   const rate = (a, b) => (b ? Math.round((a / b) * 100) / 100 : null);
   return [...rows.values()].map((r) => ({ ...r, loadedRate: rate(r.loaded, r.given), followedRate: rate(r.followed, r.followed + r.notFollowed), unknownRate: rate(r.unknown, r.given), pitfallsPerSession: rate(r.pitfalls, r.sessions) })).sort((a, b) => a.model.localeCompare(b.model));

@@ -47,7 +47,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
-import { emitSampled } from './telemetry.mjs';
+import { emitSampled, telemetryFull } from './telemetry.mjs';
 import { escalationFor } from './model-tiers.mjs';
 import { launchRoute } from './routing.mjs';
 import { sessionReasoningOnly, rerouteFor } from './reasoning-only.mjs';
@@ -97,6 +97,21 @@ import { gateEnv } from './gate-env.mjs';
 export const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
 const WIP_DIR = path.join(STUDIO_STATE_DIR, 'wip');
 const HEARTBEAT_MS = Number(process.env.STUDIO_HEARTBEAT_SEC || 120) * 1000;
+// 2.79.1 (d): the heartbeat still renews the claim and writes lastBeat into the session record every beat (what the War Room,
+// `agent list` and the stall watch read); the agent.heartbeat EVENT is written once per STUDIO_HEARTBEAT_EVENT_MIN (10)
+// minutes per session (it was 26% of the crew's events). 0 or STUDIO_TELEMETRY=full: one per beat, as before.
+export const heartbeatEventMs = (env = process.env) => {
+  const v = env.STUDIO_HEARTBEAT_EVENT_MIN;
+  const m = v === undefined || v === '' || !Number.isFinite(Number(v)) ? 10 : Math.max(0, Number(v));
+  return telemetryFull(env) ? 0 : m * 60000;
+};
+/** Is the next agent.heartbeat event due? `last` is when this session wrote its previous one (0: none yet). */
+export const heartbeatDue = (last, now = Date.now(), env = process.env) => !last || now - last >= heartbeatEventMs(env) - 1000;
+/** One agy follow-up (the launcher's onContinue): an event each only with STUDIO_TELEMETRY=full; the session end counts them (followUps). */
+export function agyContinueEvent(agent, task, { n, task: t, why, nudge }, env = process.env, emit = emitEvent) {
+  if (!telemetryFull(env)) return null;
+  return emit({ type: 'agent.agy_continue', agent, task: t || task || undefined, msg: `${agent}: ${nudge ? `no tool call or file write for STUDIO_AGY_NUDGE_MIN while ${t || 'its task'} is in progress` : `agy's turn ended with ${t || 'its task'} in progress`} (${why}); follow-up ${n} sent${nudge ? ' as a nudge' : ''}`.slice(0, 400), meta: { n, ...(nudge ? { nudge: true } : {}) } });
+}
 // Only a real limit or auth error counts (run #1: a normal end_turn and selftest output that mentioned
 // "quota" marked tools out and idled the studio for an hour). Read the end of a failed session, or a
 // final result object that says it is an error; never the agent's whole transcript.
@@ -697,7 +712,7 @@ export function agyCutShort({ tool, code, log }) {
   return null;
 }
 
-export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, model, cmd = null, exit = {} }) {
+export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, model, cmd = null, exit = {}, followUps = 0, nudges = 0 }) {
   // 2.76.0 (B-80): an agy session's real reason (its jetski / permission line) goes into its hand-back and its end.
   const agyLine = tool === 'agy' ? agyStopLine(usageLog ?? log) : null;
   const agySaid = agyLine ? ` agy said: "${agyLine}".` : '';
@@ -848,7 +863,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   // 2.73.2 (B-72): recorded once: a stop's endAsDead (or the watch pass) may have recorded this session's end already.
   const firstEnd = claimSessionEnd(agent, s0.startedAt, 'launcher');
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
-  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
+  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(followUps ? { followUps, ...(nudges ? { nudges } : {}) } : {}), ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
   if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
     try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => postAsk({ agent: 'launcher', to: 'producer', task: outcome.task, subject: 'parked', msg: m }) }); } catch { /* the park is a help, never a crash */ }
   }
@@ -1363,7 +1378,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
         agent, child, logFile, from: logStart, firstMessage: cmd.stdin,
         decide: () => taskStillOpen({ agent, role, task, startedAt, locks: listLocks(), events: readRecentEvents(5000), doneIds: parseNextQueue().done.map((t) => t.id), studioStop: readStop(), agentStop: stopMark(agent), refresh: readFlag(agent) }),
         note: (l) => { try { fs.appendFileSync(logFile, `[launcher] ${l}\n`); } catch {} },
-        onContinue: ({ n, task: t, why, nudge }) => emitEvent({ type: 'agent.agy_continue', agent, task: t || task || undefined, msg: `${agent}: ${nudge ? `no tool call or file write for STUDIO_AGY_NUDGE_MIN while ${t || 'its task'} is in progress` : `agy's turn ended with ${t || 'its task'} in progress`} (${why}); follow-up ${n} sent${nudge ? ' as a nudge' : ''}`.slice(0, 400), meta: { n, ...(nudge ? { nudge: true } : {}) } }),
+        onContinue: (c) => agyContinueEvent(agent, task, c),
         // 2.78.1: the progress nudge reads the stall check's progress and stays below its no-progress limit.
         progressAt: () => Date.parse(readStall(agent)?.lastProgressAt || '') || 0,
         stallMin: () => stallLimits(role).stallMin,
@@ -1383,6 +1398,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane } });
   // 2.73.1 (B-66): when this launcher ends the agent itself (stall, idle, budget), so the end records why.
   let killedBy = null;
+  let lastBeatEvent = 0;
   const beat = setInterval(() => {
     // 2.73.2 (B-74): limits changed in .env since this launcher started (STUDIO_STALL_MIN, ...) apply from this beat.
     reloadEnvIfChanged({ by: `launcher ${agent}` });
@@ -1458,7 +1474,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     }
     // 2.64.0: route what happened since the last beat to the tasks' inboxes (harness/threads.mjs; shadow mode logs only).
     try { sweepThreads({ lockMs: 1000 }); } catch { /* routing is a help, never a crash */ }
-    emitEvent({ type: 'agent.heartbeat', agent, model, status: 'running', msg: `${agent} alive${wip ? `: ${wip}` : ''}${s.now ? ` (now: ${s.now})` : ''}` });
+    const evMs = heartbeatEventMs();
+    if (heartbeatDue(lastBeatEvent)) {
+      lastBeatEvent = Date.now();
+      emitEvent({ type: 'agent.heartbeat', agent, model, status: 'running', msg: `${agent} alive${wip ? `: ${wip}` : ''}${s.now ? ` (now: ${s.now})` : ''}`, meta: { everyMin: Math.max(HEARTBEAT_MS, evMs) / 60000 } });
+    }
   }, HEARTBEAT_MS);
   let exitSignal = null;
   let spawnError = null;
@@ -1516,7 +1536,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
       else streamFail = null;
     } catch { streamFail = null; }
   }
-  const result = cleanUp(agent, { code, log, usageLog, role, tool: session.tool, model, cmd: session.tool === 'custom' ? custom : null, exit: { signal: exitSignal, killedBy, spawnError, at: exitedAt, ranMs: Date.now() - t0 } });
+  const result = cleanUp(agent, { code, log, usageLog, role, tool: session.tool, model, followUps: agyDriver?.state?.continues || 0, nudges: agyDriver?.state?.nudges || 0, cmd: session.tool === 'custom' ? custom : null, exit: { signal: exitSignal, killedBy, spawnError, at: exitedAt, ranMs: Date.now() - t0 } });
   // 2.78.1 (B-118): the copies are removed below, unless the next session under this name (a failover, the one-turn
   // relaunch) works on in them: ownCopy.
   const atClaimDir = atClaim?.branch && atClaim.dir ? path.join(REPO_ROOT, atClaim.dir) : null;

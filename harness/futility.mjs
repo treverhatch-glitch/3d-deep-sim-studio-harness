@@ -14,7 +14,8 @@
  *                     STUDIO_FUTILITY_AUTO_MAX_LATE (0.10) of the sessions the cap would have stopped went on to succeed
  *                     anyway (their task was done by the end); without that data the type stays in shadow. Each type that
  *                     switches on emits one futility.auto_on event;
- *   shadow            only the Check event; when the session ends, futility.shadow logs what the cap would have saved
+ *   shadow            only the Check event; when the session ends, futility.shadow (one hourly futility.shadow.summary since
+ *                     2.79.1; STUDIO_TELEMETRY=full: one each) logs what the cap would have saved
  *                     (its tokens and minutes after the check) and whether it would have cut a good run short
  *                     (.studio/futility-log.jsonl too), so the owner can judge the cap on real data;
  *   on                also hands the task back (the launcher's pause: the diff is saved and the lane copy kept, never
@@ -26,6 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { weightedTokens, cacheReadWeight } from './token-weight.mjs';
+import { emitSampled } from './telemetry.mjs';
 
 const STATE = () => path.join(STUDIO_STATE_DIR, 'futility.json');
 export const FUTILITY_LOG = () => path.join(STUDIO_STATE_DIR, 'futility-log.jsonl');
@@ -197,7 +199,8 @@ export function futilityPass({ sessions = [], events = [], now = Date.now(), env
     const rec = { at: new Date(now).toISOString(), agent, task: f.task, type: f.type, kind: f.kind, mode: f.mode, savedTokens: saved, savedMin: minutes, finalTokens: Math.round(final), cutGoodRun: good, taskDone };
     const e = { type: 'futility.shadow', agent: 'supervisor', to: 'producer', task: f.task, status: good ? 'warn' : 'ok', msg: `${agent} on ${f.task} ended after its futility check: a cap would have saved ${saved.toLocaleString('en-US')} tokens and ${minutes} min${good ? ', but it landed its task: the cap would have cut a good run short' : ' (it landed nothing)'}.`, meta: rec };
     if (!dryRun) {
-      emit(e);
+      // 2.79.1 (d): nobody reads these one by one (the record below is what the auto mode reads): one hourly futility.shadow.summary.
+      emitSampled(e, good ? 'cut a good run' : 'landed nothing', { env, now, emit });
       try { fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true }); fs.appendFileSync(FUTILITY_LOG(), `${JSON.stringify(rec)}\n`); } catch {}
     }
     delete st.flagged[agent]; changed = true;

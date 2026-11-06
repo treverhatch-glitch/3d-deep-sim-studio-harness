@@ -13,7 +13,8 @@
  * STUDIO_OVERLAP=block (then add and start refuse while an overlap stands); STUDIO_OVERLAP=off skips the check.
  * Never throws: a failed check is a line, not a refused add.
  */
-import { emitEvent, readRecentEvents } from './event.mjs';
+import { readRecentEvents } from './event.mjs';
+import { emitOnChange } from './telemetry.mjs';
 import { laneOf, laneList, laneEntries, readHolds } from './task-hold.mjs';
 import { entriesClash } from './lane-regions.mjs';
 import { lanesInFlight, laneChanges, overlaps } from './hotspots.mjs';
@@ -140,11 +141,15 @@ export function overlapCheck({ id = null, title = '', role = 'builder', meta = {
   if (res.found.length) {
     if (block) lines.push(`[overlap] STUDIO_OVERLAP=block: ${phase === 'add' ? 'not queued' : 'not started'}. Stack it (--after), split the scope, or ask a person to change STUDIO_OVERLAP.`);
     try {
-      emitEvent({
+      // 2.79.1 (d): once per task and set of overlaps: `task add`, every `task start` and every restart named the same files
+      // again (109 of the crew's 3,349 events in 7.75 h). A new file or a new task it overlaps is a change and is written.
+      // The readers (next board: who overlaps; plan-waves: which files) need one event per fact, not one per start.
+      const sig = res.found.slice(0, 12).map((f) => `${f.kind}:${f.with || ''}:${f.file || ''}`).sort().join('|');
+      emitOnChange({
         type: 'task.overlap', agent: agent || undefined, task: id || undefined, to: 'producer', status: block ? 'blocked' : 'warn',
         msg: `${phase === 'add' ? `adding "${String(title).slice(0, 80)}"` : `starting ${id}`}: ${res.found.map((f) => f.text).join(' | ')}`.slice(0, 600),
         meta: { phase, mode, block, lane: res.lane, title: String(title).slice(0, 200), with: [...new Set(res.found.map((f) => f.with))], items: res.found.slice(0, 12).map(({ kind, with: w, file, lines: l }) => ({ kind, with: w, file: file || null, lines: l || null })) },
-      });
+      }, `task.overlap|${id || `title:${String(title).replace(/^\w+:\s*/, '').trim().toLowerCase().slice(0, 120)}`}`, `${block}|${sig}`);
     } catch { /* the record is a help, never a blocker */ }
   }
   return { mode, found: res.found, block, lines, lane: res.lane };

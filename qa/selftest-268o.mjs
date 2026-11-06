@@ -140,7 +140,7 @@ console.log(JSON.stringify({ checks: r.checks.length, paused, mode: r.mode }));`
       JSON.stringify({ p, chk }).slice(0, 2000)]);
     const again = pass({}, sess);
     addEv([{ ts: iso(Date.now() + 5), type: 'agent.session.end', agent: 'builder-f1', tokensIn: 90000, tokensOut: 1000, meta: { role: 'builder', tool: 'claude', outcome: { task: 'T-900', done: false, commits: 0, noWork: true } } }]);
-    const endPass = mod({});
+    const endPass = mod({ STUDIO_TELEMETRY: 'full' }); // 2.79.1 (d): futility.shadow is an hourly summary by default; this check reads the per-session event
     const sh = evs().filter((e) => e.type === 'futility.shadow').pop();
     const logged = (() => { try { return fs.readFileSync(path.join(dir, '.studio', 'futility-log.jsonl'), 'utf8'); } catch { return ''; } })();
     await guard('268o futility: once per session; its end logs what a cap would have saved (tokens, minutes, a good run cut short or not)', () => [
