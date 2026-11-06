@@ -443,7 +443,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_LANE_EVENTS` · no simple default · harness/event.mjs, qa/selftest-2782e.mjs, qa/selftest-2782h.mjs (+1 more) · [SECURITY.md:189](SECURITY.md)
 - `STUDIO_LANE_EXCLUDE` · no simple default · harness/lane-sparse.mjs, harness/worktree.mjs, qa/selftest-270w.mjs · [CONDUCTOR.md:184](CONDUCTOR.md)
 - `STUDIO_LANE_HARNESS` · no simple default · harness/hook-stamp.mjs, scripts/run-gates.mjs, qa/selftest-259b.mjs (+3 more) · [RELEASE.md:206](RELEASE.md)
-- `STUDIO_LANE_IDLE_HOURS` · no simple default · harness/janitor.mjs, harness/lanes.mjs, qa/selftest-279d.mjs · [RUN-UNATTENDED.md:334](RUN-UNATTENDED.md)
+- `STUDIO_LANE_IDLE_HOURS` · no simple default · harness/janitor.mjs, harness/lanes.mjs, qa/selftest-279d.mjs · [RELEASE-2.79.0.md:34](RELEASE-2.79.0.md)
 - `STUDIO_LANE_INFER` · no simple default · harness/task-hold.mjs, qa/selftest-2585q.mjs, qa/selftest-258b.mjs (+14 more) · undocumented
 - `STUDIO_LANE_LIVE_MIN` · default `20` · harness/agent.mjs, harness/lanes.mjs, harness/upgrade-smoke.mjs (+28 more) · [CONDUCTOR.md:48](CONDUCTOR.md)
 - `STUDIO_LANE_LOCKS` · no simple default · harness/lock.mjs, qa/selftest-2585q.mjs, qa/selftest-259b.mjs · [CLEANUP-2.79-AUDIT.md:421](CLEANUP-2.79-AUDIT.md)
@@ -764,12 +764,12 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_TESTER` · no simple default · harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:60](LINE-PRODUCER.md)
 - `STUDIO_TESTER_*` · no simple default · harness/tester.mjs · [LINE-PRODUCER.md:60](LINE-PRODUCER.md)
 - `STUDIO_TESTER_BUILD_TIMEOUT_MIN` · no simple default · harness/tester.mjs · [TESTER.md:145](TESTER.md)
-- `STUDIO_TESTER_COMPARE_EVERY` · no simple default · harness/tester.mjs, qa/selftest-279t.mjs · [TESTER.md:73](TESTER.md)
+- `STUDIO_TESTER_COMPARE_EVERY` · no simple default · harness/tester.mjs, qa/selftest-279t.mjs · [RELEASE-2.79.0.md:16](RELEASE-2.79.0.md)
 - `STUDIO_TESTER_DRIVER_IDLE_MIN` · default `20` · qa/tester-drive.mjs · [TESTER.md:118](TESTER.md)
 - `STUDIO_TESTER_EVERY_HOURS` · no simple default · harness/line-producer.mjs, harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:30](LINE-PRODUCER.md)
 - `STUDIO_TESTER_MIN_LANDINGS` · no simple default · harness/line-producer.mjs, harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:30](LINE-PRODUCER.md)
 - `STUDIO_TESTER_RUN_DIR` · no simple default · qa/tester-drive.mjs · [TESTER.md:148](TESTER.md)
-- `STUDIO_TESTER_TOOLS` · no simple default · harness/tester.mjs, qa/selftest-279t.mjs · [TESTER.md:77](TESTER.md)
+- `STUDIO_TESTER_TOOLS` · no simple default · harness/tester.mjs, qa/selftest-279t.mjs · [RELEASE-2.79.0.md:20](RELEASE-2.79.0.md)
 - `STUDIO_TESTER_WIRE_TASKS` · no simple default · harness/line-producer.mjs, harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:30](LINE-PRODUCER.md)
 
 ## THREADS_* (3)
@@ -823,7 +823,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_TRAIN_LAND_PREFIX` · no simple default · harness/train.mjs, qa/selftest-260a.mjs, qa/selftest-2653a.mjs (+4 more) · [WORK-ORGANIZATION.md:123](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_LOCK_WAIT_MIN` · no simple default · harness/task.mjs, harness/train-detach.mjs, qa/selftest-263i.mjs (+2 more) · [WORK-ORGANIZATION.md:256](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_MAX` · default `0` · harness/brief-status.mjs, harness/lanes.mjs, harness/train-pipeline.mjs (+12 more) · [WORK-ORGANIZATION.md:122](WORK-ORGANIZATION.md)
-- `STUDIO_TRAIN_MAX_HANDBACKS` · no simple default · harness/tiers.mjs, harness/train-lanes.mjs, harness/train-life.mjs (+14 more) · [WORK-ORGANIZATION.md:283](WORK-ORGANIZATION.md)
+- `STUDIO_TRAIN_MAX_HANDBACKS` · no simple default · harness/tiers.mjs, harness/train-lanes.mjs, harness/train-life.mjs (+14 more) · [RELEASE-2.79.0.md:28](RELEASE-2.79.0.md)
 - `STUDIO_TRAIN_MIN` · default `1` · harness/train-daemon.mjs, harness/train.mjs, qa/selftest-263i.mjs (+10 more) · [WORK-ORGANIZATION.md:313](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_MIXED` · no simple default · harness/train.mjs, harness/worktree.mjs, qa/selftest-277f.mjs · [WORK-ORGANIZATION.md:295](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_PIPELINE` · no simple default · harness/train-pipeline.mjs, qa/selftest-2653a.mjs, qa/selftest-269q.mjs (+9 more) · [PATCH-2-CROSSCHECK.md:51](PATCH-2-CROSSCHECK.md)
@@ -1019,7 +1019,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_NODE` · no simple default · harness/supervisor.mjs · undocumented
 - `STUDIO_OFF` · no simple default · harness/self-triage.mjs · undocumented
 - `STUDIO_ON_BEHALF` · no simple default · harness/event.mjs, harness/train.mjs, qa/selftest-276i.mjs · [DIRECTOR-FLOW.md:64](DIRECTOR-FLOW.md)
-- `STUDIO_OUTSIDE_SIGNERS` · no simple default · harness/beta-mode.mjs, harness/permission.mjs, qa/selftest-279c.mjs · [SECURITY.md:293](SECURITY.md)
+- `STUDIO_OUTSIDE_SIGNERS` · no simple default · harness/beta-mode.mjs, harness/permission.mjs, qa/selftest-279c.mjs · [RELEASE-2.79.0.md:51](RELEASE-2.79.0.md)
 - `STUDIO_OVERLAP` · no simple default · harness/task-overlap.mjs, harness/task.mjs, qa/selftest-269s.mjs (+11 more) · [CONDUCTOR.md:164](CONDUCTOR.md)
 - `STUDIO_PARITY_SEEDS` · no simple default · qa/parity.mjs, qa/selftest-250.mjs · [UNITY-TRACK.md:63](UNITY-TRACK.md)
 - `STUDIO_PHASE_DAYS` · default `14` · harness/director.mjs · undocumented
