@@ -19,10 +19,21 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { readBudget, markExhausted, quotaMark, pickTool, usedSince, weekStart } from './budget.mjs';
+import { registeredTool } from './tool-registry.mjs';
 
 const read = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const key = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
-export const toolCmd = (tool, env = process.env) => env[`STUDIO_TOOL_${key(tool)}_CMD`] || null;
+/**
+ * A tool's own launch command: STUDIO_TOOL_<TOOL>_CMD (as before), else 2.79.1 (a) an owner-defined tool's command
+ * (studio/tools.json as it counts, harness/tool-registry.mjs). The built-in vertex tool takes none: it runs aider on the
+ * studio's Vertex proxy (STUDIO_TOOL_VERTEX_CMD was the crew's local stand-in for it; the launcher says it is ignored).
+ */
+export const toolCmd = (tool, env = process.env) => {
+  if (String(tool || '').toLowerCase() === 'vertex') return null;
+  const own = env[`STUDIO_TOOL_${key(tool)}_CMD`];
+  if (own) return own;
+  try { return registeredTool(tool)?.command || null; } catch { return null; }
+};
 
 /** Share of each tool's guard used (null when nothing guards it). */
 export function guardShare(tool, { env = process.env, now = Date.now(), events } = {}) {

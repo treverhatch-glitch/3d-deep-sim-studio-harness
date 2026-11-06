@@ -4,6 +4,8 @@
  *
  *   npm run tokens [-- --since 5h|24h|today|all] [--by agent|role|model|tool|task] [--json]
  *
+ * 2.79.1 (a): each row shows its dollars (reported, or estimated at the price table: a Vertex session's from the proxy's
+ * usage log), so a task's tokens and dollars read the same for the Claude API lane and Vertex.
  * 2.71.1 (B): --by task groups by the task each session end names (the launcher records it since 2.71.1; older ends
  * and sessions with no task are "(no task)"), so the tokens a landed change took can be read per task.
  *
@@ -98,7 +100,7 @@ export function formatTotals(t, by = 'role') {
   L.push(`  ${t.total.sessions} sessions ended, ${t.total.measured} reported usage. In ${M(t.total.tokensIn)}, out ${M(t.total.tokensOut)}, cache reads ${M(t.total.cacheRead)}${t.total.costUsd ? `, $${t.total.costUsd.toFixed(2)} at API prices as the tool reported it (a subscription isn't billed this)` : ''}.`);
   if (t.total.measured) L.push(`  Cache reads per measured session: ${M(t.total.cacheRead / t.total.measured)}. Per task done: ${t.total.tasksDone ? M(t.total.cacheRead / t.total.tasksDone) : 'no task done'}.${t.total.withTurns ? ` Turns per session: ${Math.round(t.total.turns / t.total.withTurns)}${t.total.tasksDone ? `, per task done: ${Math.round(t.total.turns / t.total.tasksDone)}` : ''}.` : ''}`);
   L.push('', `  By ${by}:`);
-  for (const r of rows) L.push(`  ${r.name.padEnd(24)} ${String(r.sessions).padStart(3)} sessions  in ${M(r.tokensIn).padStart(6)}  out ${M(r.tokensOut).padStart(6)}  cache reads ${M(r.cacheRead).padStart(6)}${r.measured ? `  (${M(r.cacheRead / r.measured)}/session)` : ''}${r.withTurns ? `  ${Math.round(r.turns / r.withTurns)} turns/session` : ''}${r.measured < r.sessions ? `  ${r.sessions - r.measured} not measured` : ''}`);
+  for (const r of rows) L.push(`  ${r.name.padEnd(24)} ${String(r.sessions).padStart(3)} sessions  in ${M(r.tokensIn).padStart(6)}  out ${M(r.tokensOut).padStart(6)}  cache reads ${M(r.cacheRead).padStart(6)}${r.measured ? `  (${M(r.cacheRead / r.measured)}/session)` : ''}${r.withTurns ? `  ${Math.round(r.turns / r.withTurns)} turns/session` : ''}${r.costUsd ? `  $${r.costUsd.toFixed(r.costUsd < 1 ? 4 : 2)}` : ''}${r.measured < r.sessions ? `  ${r.sessions - r.measured} not measured` : ''}`);
   if (!rows.length) L.push('  No session has ended in this window.');
   const un = Object.entries(t.untracked);
   L.push('', un.length ? `  Not measured: ${un.map(([tool, n]) => `${n} ${tool} session${n === 1 ? '' : 's'}`).join(', ')} (the tool reported no usage).` : '  Every session in this window reported its usage.');

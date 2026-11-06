@@ -42,12 +42,41 @@ export const COOLDOWN_DEFAULTS = {
   requestTimeoutMs: 60_000, // Per-channel timeout before failing over
 };
 
+/** 2.79.1 (a): the Vertex OpenAI-compatible base for the router (the same rule as harness/vertex.mjs vertexUpstream). */
+function vertexBase(env = process.env) {
+  const set = String(env.STUDIO_VERTEX_BASE_URL || '').trim().replace(/\/+$/, '');
+  if (set && (/^https:\/\//i.test(set) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/i.test(set))) return set;
+  return `https://aiplatform.googleapis.com/v1/projects/${encodeURIComponent(env.VERTEX_PROJECT_ID || 'unset')}/locations/global/endpoints/openapi`;
+}
+
 /**
  * Provider endpoint registry.
  * Almost all providers expose an OpenAI-compatible `/chat/completions` endpoint;
  * Anthropic uses its native `/v1/messages` format (handled transparently by `route.mjs`).
  */
 export const PROVIDERS = {
+  // 2.79.1 (a, the crew's local patch folded in): Vertex AI's OpenAI-compatible endpoint on the owner's project credit
+  // (VERTEX_API_KEY, VERTEX_PROJECT_ID; location global: the key works only there). The key goes as x-goog-api-key
+  // (protocol vertex-openai, harness/route.mjs). Model and base are getters: .env is loaded after this module is imported.
+  // STUDIO_VERTEX_BASE_URL replaces the base (https, or http on 127.0.0.1), as for the studio's Vertex proxy.
+  'vertex-ai-pro': {
+    id: 'vertex-ai-pro',
+    label: 'Vertex Gemini Pro (project credit; set GEMINI_PRO_MODEL)',
+    tier: 'credit',
+    protocol: 'vertex-openai',
+    get model() { return `google/${String(process.env.GEMINI_PRO_MODEL || 'gemini-3.1-pro-preview').replace(/^google\//, '')}`; },
+    envKeys: ['VERTEX_API_KEY'],
+    get baseUrl() { return vertexBase(); },
+  },
+  'vertex-ai-flash': {
+    id: 'vertex-ai-flash',
+    label: 'Vertex Gemini Flash (project credit; set GEMINI_FLASH_MODEL)',
+    tier: 'credit',
+    protocol: 'vertex-openai',
+    get model() { return `google/${String(process.env.GEMINI_FLASH_MODEL || 'gemini-3-flash-preview').replace(/^google\//, '')}`; },
+    envKeys: ['VERTEX_API_KEY'],
+    get baseUrl() { return vertexBase(); },
+  },
   'vertex-gemini-pro': {
     id: 'vertex-gemini-pro',
     label: 'Gemini Pro (set GEMINI_PRO_MODEL)',
@@ -150,6 +179,7 @@ export const PROVIDERS = {
  */
 export const PRODUCER_PRESET_CHAINS = {
   auto: [
+    'vertex-ai-pro',
     'vertex-gemini-pro',
     'xai-grok',
     'nvidia-nemotron-ultra',
@@ -161,6 +191,7 @@ export const PRODUCER_PRESET_CHAINS = {
   ],
   grok: [
     'xai-grok',
+    'vertex-ai-pro',
     'vertex-gemini-pro',
     'nvidia-nemotron-ultra',
     'groq-llama-70b',
@@ -168,6 +199,7 @@ export const PRODUCER_PRESET_CHAINS = {
     'ollama-local',
   ],
   gemini: [
+    'vertex-ai-pro',
     'vertex-gemini-pro',
     'vertex-gemini-flash',
     'nvidia-nemotron-ultra',
@@ -176,6 +208,7 @@ export const PRODUCER_PRESET_CHAINS = {
   ],
   claude: [
     'anthropic-claude',
+    'vertex-ai-pro',
     'vertex-gemini-pro',
     'nvidia-nemotron-ultra',
     'groq-llama-70b',
@@ -183,6 +216,7 @@ export const PRODUCER_PRESET_CHAINS = {
   ],
   openai: [
     'openai-gpt',
+    'vertex-ai-pro',
     'vertex-gemini-pro',
     'nvidia-nemotron-ultra',
     'groq-llama-70b',
@@ -190,6 +224,7 @@ export const PRODUCER_PRESET_CHAINS = {
   ],
   ollama: [
     'ollama-local',
+    'vertex-ai-flash',
     'vertex-gemini-flash',
     'nvidia-glm-flash',
     'groq-llama-70b',
@@ -204,6 +239,7 @@ export const PRODUCER_PRESET_CHAINS = {
 export const ROLE_CHAINS = {
   producer: PRODUCER_PRESET_CHAINS[process.env.STUDIO_PRODUCER_PRESET || 'auto'] || PRODUCER_PRESET_CHAINS.auto,
   'designer-calibrator': [
+    'vertex-ai-pro',
     'vertex-gemini-pro',
     'nvidia-nemotron-ultra',
     'groq-llama-70b',
@@ -213,6 +249,7 @@ export const ROLE_CHAINS = {
     'ollama-local',
   ],
   builder: [
+    'vertex-ai-pro',
     'vertex-gemini-pro',
     'nvidia-nemotron-ultra',
     'nvidia-glm-flash',
@@ -223,6 +260,7 @@ export const ROLE_CHAINS = {
     'ollama-local',
   ],
   'qa-playtester': [
+    'vertex-ai-flash',
     'vertex-gemini-flash',
     'nvidia-glm-flash',
     'groq-llama-70b',
@@ -230,6 +268,7 @@ export const ROLE_CHAINS = {
     'ollama-local',
   ],
   reviewer: [
+    'vertex-ai-pro',
     'vertex-gemini-pro',
     'nvidia-nemotron-ultra',
     'xai-grok',
@@ -239,6 +278,7 @@ export const ROLE_CHAINS = {
     'ollama-local',
   ],
   default: [
+    'vertex-ai-flash',
     'vertex-gemini-flash',
     'nvidia-glm-flash',
     'groq-llama-70b',

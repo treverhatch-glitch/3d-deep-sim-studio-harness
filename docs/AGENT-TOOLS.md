@@ -18,6 +18,7 @@ agent's task, lock and event commands, and its commits, carry its name and model
 | Antigravity CLI | `agy --print-timeout 5400s --mode accept-edits --model <model> < prompt.md` (the launcher's form since 2.76.0; `agy -p "<prompt>"` in Google's docs) | workspace files: always; shell commands: only those its `settings.json` allows (see [agy's allow-rules](#agys-allow-rules-the-owner-enrols-them-once)) | Antigravity key (`AV_API_KEY` in the migration guides) | Replaced Gemini CLI for personal Google accounts on June 18, 2026. Paid Gemini API keys and Code Assist Standard/Enterprise can still use `gemini`. agy exits early unless it has `--print-timeout`, so the launcher adds it |
 | Aider + Ollama | `aider --model ollama_chat/<model> --message-file prompt.md` | `--yes` | none (local) | One instruction, then exits: give it one small task. Ollama's default 2k context silently drops text: start it with `OLLAMA_CONTEXT_LENGTH=32768 ollama serve` |
 | Aider + NVIDIA NIM (`--tool nim`) | `aider --model openai/<model> --openai-api-base https://integrate.api.nvidia.com/v1 --message-file prompt.md` | `--yes-always` (and `--no-auto-commits`) | `NVIDIA_API_KEY` (the agent gets it as `OPENAI_API_KEY` and `AIDER_OPENAI_API_KEY`) | See [NIM as a worker](#nim-as-a-worker-tool-nim) |
+| Aider + Vertex AI (`--tool vertex`, 2.79.1) | `aider --model openai/google/<model> --openai-api-base http://127.0.0.1:8787/v1 --openai-api-key session-<agent> --message-file prompt.md` | `--yes-always` (and `--no-auto-commits`) | `VERTEX_API_KEY` and `VERTEX_PROJECT_ID` in `.env`: only the studio's proxy reads them, never the session | See [Vertex AI as a builder](#vertex-ai-as-a-builder-tool-vertex-2791) |
 
 Free tiers change often and sources disagree (for example on Gemini's daily request limits), so check
 your own account's quota page rather than trusting a number in a doc, this one included.
@@ -311,6 +312,154 @@ A name with no `STUDIO_KEYMAP_AGENT_<NAME>` entry would bill the plan, so it is 
 pool starts builders; their lanes still go to the train. The spend guard and the daily token cap apply to the pool as to
 any session. `npm run agent -- start --pool api [--task T-12]` starts one pool builder by hand, whatever the budget. A
 tool that is out of quota through a provider limit (a 429 mark) still holds every session on that tool, pool or not.
+
+## Vertex AI as a builder (`--tool vertex`, 2.79.1)
+
+Vertex carries builder work on the owner's Google Cloud credit, so Claude usage goes down. In `.env`, nothing else is
+needed:
+
+```bash
+VERTEX_API_KEY=<the key>          # works on aiplatform.googleapis.com, location global, only
+VERTEX_PROJECT_ID=<the project id>
+```
+
+```bash
+npm run agent -- start --role builder --tool vertex --task T-12 [--model google/gemini-3.1-pro-preview]
+```
+
+- What runs: the studio's aider (the same one `--tool nim` finds: `STUDIO_AIDER_CMD`, `.studio/aider-venv`, PATH) on
+  the studio's Vertex proxy (`harness/vertex-proxy.mjs`, `127.0.0.1:STUDIO_VERTEX_PROXY_PORT`, default 8787), with the
+  same lane copy, checks and train path as any builder. argv: `aider --model openai/google/<model> --openai-api-base
+  http://127.0.0.1:8787/v1 --openai-api-key session-<agent> --message-file <kickoff> --yes-always --no-auto-commits
+  --no-stream --no-show-model-warnings`, then the aider flags above.
+- The key never reaches the session. The proxy reads `VERTEX_API_KEY` and `VERTEX_PROJECT_ID` from the main checkout's
+  `.env` on every request and sends the key to Vertex's OpenAI-compatible endpoint
+  (`https://aiplatform.googleapis.com/v1/projects/<project>/locations/global/endpoints/openapi`) as `x-goog-api-key`
+  (Vertex answers 401 to a Bearer key). The session's environment has no `VERTEX_API_KEY` (not even through
+  `STUDIO_AGENT_ENV_PASS` or `STUDIO_AGENT_ENV=full`), its lane copy's `.env` has no `VERTEX_API_KEY` line, and aider's
+  own key is the session tag `session-<agent>`: the proxy reads it as the session's name, never forwards it, and
+  serves only a running session on the proxy (401/403 otherwise). Renaming the key in `.env` pauses Vertex at once
+  (503 "Vertex is paused or not configured"). The key is never logged or printed.
+- The proxy starts on demand (detached, no window, `.studio/vertex-proxy.json`, log `.studio/vertex-proxy.log`) when a
+  vertex session starts and it isn't listening, and `npm run studio:stop` stops it. A port held by another program
+  (an older local proxy) is named: stop it, or set `STUDIO_VERTEX_PROXY_PORT`.
+- Models: `--model` (a bare name gets `google/`), else `STUDIO_VERTEX_MODEL` (default `google/gemini-3-flash-preview`);
+  a vertex session never runs the role's Claude model. Hard tasks (size 4-5, a chain-breaker, the Line Producer's hard
+  tier) run `STUDIO_VERTEX_HARD_MODEL` (default `google/gemini-3.1-pro-preview`) when the supervisor picks Vertex.
+  Live on the crew's key (2026-11-06): gemini-3.1-pro-preview, gemini-3-flash-preview, gemini-2.5-pro, gemini-2.5-flash,
+  gemini-2.5-flash-image.
+- The supervisor and the Line Producer: a builder that would start on Claude starts on Vertex instead, up to
+  `STUDIO_VERTEX_SHARE` of the builder slots (default 0.5) while the plan has headroom; when the plan's budget is high
+  (every tool over its weekly target, or the wind-down) Vertex goes first, before the paid API pool
+  (`STUDIO_API_POOL`), and takes any free slot. Agy (Gemini plan) routes are left as they are. A task handed back on
+  Vertex since it last landed goes to the plan's route (Claude). Why 0.5 by default: half the builders move off the
+  Claude plan at once, which is the owner's aim, while the other half keeps the plan's proven builders on the board so
+  the two can be compared (`npm run models -- status`, landed vs handed back) before the share goes up; 1 sends every
+  Claude builder to Vertex, 0 keeps Vertex for high-budget times and `agent start --tool vertex`.
+- Spend: each answer's usage goes to `.studio/vertex-usage.jsonl` ({ ts, session, task, tool, model, in = prompt_tokens,
+  out = total_tokens - prompt_tokens (Gemini's thinking is billed), total, usd }); a session's tokens and estimated
+  dollars land on its `agent.session.end` (`npm run tokens -- --by task`, the same place as the Claude API lane's), and
+  `npm run budget` shows Vertex spend. Prices are in `studio/prices.json` (3.1 Pro $2 / $12, 3 Flash $0.50 / $3 per 1M,
+  third-party listings; 2.5 Pro and Flash from Google's list as the harness knew it: all unverified, check Google's page).
+  There is no cap unless someone sets one (next section). The router's own Vertex calls (`vertex-ai-pro`,
+  `vertex-ai-flash`) are logged there too, as session `router`.
+- The router (`harness/route.mjs`): providers `vertex-ai-pro` and `vertex-ai-flash` (protocol `vertex-openai`, the key as
+  `x-goog-api-key`; `GEMINI_PRO_MODEL`, `GEMINI_FLASH_MODEL`) come first in every chain, before `vertex-gemini-*`.
+  `npm run models:check` shows them as "listed: n/a": the endpoint serves no model list (GET /models is 404).
+- `STUDIO_VERTEX_BASE_URL` replaces the endpoint (https, or http on 127.0.0.1 only; read from `.env`), for a regional
+  endpoint if Google opens one to the key, or a local test server.
+
+## Spend budgets per tool or key (2.79.1)
+
+The owner's rule: spend is always measured and reported, and a budget is a setting placed on an API key or a tool so it
+is monitored and cut before it over-charges, set and changed on the owner's orders. There is none by default.
+
+```bash
+npm run budget                                                        # spend per tool and key, every budget
+npm run budget -- set vertex 200 --by opus-1 --why "Hatch: cap our Vertex spend at $200"   [--since all|now|<ISO>]
+npm run budget -- set ANTHROPIC_API_KEY_LANE 50 --by opus-1 --why "Hatch: $50 a week on the lane key"
+npm run budget -- resume vertex --by opus-1 --why "Hatch: carry on today"
+npm run budget -- clear vertex --by opus-1 --why "Hatch: measure only"
+```
+
+- A name is a tool (`vertex`, `claude`, a tool in `studio/tools.json`) or a key name (`VERTEX_API_KEY`,
+  `ANTHROPIC_API_KEY_LANE`, …). A tool's spend is its sessions' dollars; a key's is the dollars of every session that
+  billed it (each session records the key names it got, after `STUDIO_KEYMAP_…`, names only); Vertex's comes live from
+  the proxy's usage log. A new budget counts from when it is set (`--since all` counts everything).
+- At 75%: one page to the orchestrator (`budget.warn`) and one Studio Status line. At 100%: new sessions on that tool or
+  key are refused with one line naming the budget and how to raise or resume it (`budget.cut`, said once); the
+  supervisor passes over a cut tool to the next one (Vertex: the plan or the API pool). Running sessions finish. A cut
+  holds until someone allowed raises the budget (`set`) or resumes it (counting starts again from then).
+- Kept in `.studio/spend-budgets.json`, with its history (who, when, old -> new, why: the order carried out).
+- Who: the owner, and the orchestrator, the owner's proxy or an outside signer acting on the owner's (or the harness
+  user's) order, which `--why` records. A Producer or Director session only with `STUDIO_PRODUCER_APPROVES=protected`;
+  never a worker or a lane copy. Setting a budget is not an owner-only act.
+
+## How an owner adds a provider: Vertex, DeepSeek, NIM, OpenRouter… (`studio/tools.json`, 2.79.1)
+
+Any provider with a coding agent the owner trusts becomes a harness tool by an entry in `studio/tools.json`. A
+registered tool is launched like the built-in ones: `npm run agent -- start --tool <name>` (the orchestrator may run it
+without the owner typing anything), the supervisor and the Line Producer (through `STUDIO_<ROLE>_TOOL`, the budget order
+in `studio/budget.json`, quota marks and takeovers), the same lane copy, checks and train, an environment with only its
+own key names, and spend through the same budget code (`npm run budget -- set <name> <usd> …`).
+
+```json
+{
+  "tools": [
+    {
+      "name": "deepseek",
+      "command": "\"{mainRoot}/.studio/aider-venv/Scripts/aider.exe\" --model deepseek/{model} --message-file {kickoff} --yes-always --no-auto-commits --no-pretty --no-fancy-input --no-gitignore",
+      "provider": "DeepSeek",
+      "keyEnv": ["DEEPSEEK_API_KEY"],
+      "models": ["deepseek-chat"],
+      "prices": { "deepseek-chat": { "in": 0.27, "out": 1.1 } },
+      "roles": ["builder"]
+    },
+    {
+      "name": "my-openai-compatible",
+      "command": "\"{mainRoot}/.studio/aider-venv/Scripts/aider.exe\" --model openai/{model} --openai-api-base https://llm.example.com/v1 --message-file {kickoff} --yes-always --no-auto-commits --no-pretty --no-fancy-input --no-gitignore",
+      "provider": "Any OpenAI-compatible endpoint",
+      "keyEnv": ["OPENAI_API_KEY"],
+      "models": ["the-model-id"],
+      "prices": { "the-model-id": { "in": 1, "out": 4 } },
+      "roles": ["builder"]
+    },
+    {
+      "name": "vertex-pro",
+      "command": "\"{mainRoot}/.studio/aider-venv/Scripts/aider.exe\" --model openai/google/{model} --openai-api-base {proxyBase} --openai-api-key {sessionKey} --message-file {kickoff} --yes-always --no-auto-commits --no-stream",
+      "provider": "Vertex AI through the studio's proxy",
+      "keyEnv": [],
+      "models": ["gemini-3.1-pro-preview"],
+      "prices": "studio/prices.json",
+      "roles": ["builder", "reviewer"],
+      "proxy": "vertex"
+    }
+  ]
+}
+```
+
+(The studio's venv aider is `.studio/aider-venv/Scripts/aider.exe` on Windows, `.studio/aider-venv/bin/aider` elsewhere.)
+
+- Fields: `name` (lower case, not a built-in tool's), `command` (the placeholders of `STUDIO_TOOL_<NAME>_CMD`:
+  `{kickoff}`, `{agent}`, `{model}`, `{role}`, `{task}`, `{mainRoot}`, `{addDirs}`; with `"proxy": "vertex"` also
+  `{proxyBase}` and `{sessionKey}`), `provider` (a label), `keyEnv` (the only key names its sessions see: put the
+  provider's key in `.env` under that name; aider reads `DEEPSEEK_API_KEY` for `deepseek/` models, `OPENROUTER_API_KEY`
+  for `openrouter/`, and `OPENAI_API_KEY` for an `openai/` model on any OpenAI-compatible base, as in the second example;
+  when `OPENAI_API_KEY` already holds another provider's key, give this provider's key that name for these sessions only
+  with a key mapping for their agents, `STUDIO_KEYMAP_AGENT_<NAME>=OPENAI_API_KEY:MYPROVIDER_API_KEY`), `models` (the first is its default), `prices` (USD per 1M tokens, or
+  `"studio/prices.json"`), `roles` (default `builder`), `proxy` (optional, `"vertex"`: its traffic goes through the
+  studio's Vertex proxy, which holds the key; it never sees `VERTEX_API_KEY`).
+- Defining or changing a tool (its command, keys, models, prices, roles) is the owner's own act, like keys and money
+  (`harness/owner-acts.mjs`): the file is protected (`studio/protected.json`), and an approval of it made in beta mode,
+  by the owner proxy or by an outside signer is refused. What counts is the file as committed on the main checkout:
+  with an owner key, only when an approval signed with that key (`npm run approve -- protected`, on the owner's own
+  device) records exactly its contents; with no owner key yet, only when the commit that set it is a person's (no
+  `Studio-Agent` trailer), a speed bump until the key exists. The orchestrator may launch registered tools and set
+  budgets; it may not define tools. A worker does neither. `npm run tools` lists what counts and why not.
+- `STUDIO_TOOL_<NAME>_CMD` in `.env` works as before and wins over an entry of the same name (its session is a
+  `custom` one, with `STUDIO_<ROLE>_ENV` for its keys). The built-in `vertex` takes no `STUDIO_TOOL_VERTEX_CMD`: the
+  crew's local stand-in for it is ignored, and the log says so.
+
 
 ## Scoped agents (`.claude/agents/`)
 
