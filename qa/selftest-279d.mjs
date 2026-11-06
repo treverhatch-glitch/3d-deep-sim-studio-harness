@@ -296,10 +296,12 @@ export async function selftest279D({ dir, report, tmpRoot, root }) {
       const seen = (() => { try { return fs.readFileSync(where, 'utf8').split('\n').filter(Boolean); } catch { return []; } })();
       const real = (p) => { try { return fs.realpathSync.native(p); } catch { return p; } };
       const under = path.join(real(S), '.studio', 'tmp');
+      // The reference folder is gone by now, so realpath can't expand a Windows short name (RUNNER~1): compare both spellings.
+      const norm = (p) => (process.platform === 'win32' ? String(p).toLowerCase() : String(p));
       const refDir = seen.find((l) => real(l) !== real(S));
       const leftovers = (() => { try { return fs.readdirSync(path.join(S, '.studio', 'tmp')).filter((x) => /^studio-div/.test(x)); } catch { return []; } })();
       await guard('2.79 (d, 2.12): the divergence reference is checked out and run under <repo>/.studio/tmp (where node finds the repo\'s node_modules), not the system temp folder, and the folder is removed afterwards (fails on 2.78.2: mkdtemp in os.tmpdir(), where a build finds no node_modules)', () => [
-        r.status === 0 && Boolean(refDir) && real(refDir).startsWith(under + path.sep) && leftovers.length === 0,
+        r.status === 0 && Boolean(refDir) && [under, path.join(S, '.studio', 'tmp')].some((b) => norm(real(refDir)).startsWith(norm(b) + path.sep)) && leftovers.length === 0,
         JSON.stringify({ seen, under, leftovers, r: out(r).slice(-300) })]);
     }
 
