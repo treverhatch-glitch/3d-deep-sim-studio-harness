@@ -397,7 +397,6 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   the reds are reported (`task.train.known_red`, `meta.action` excused; its tasks close on that judgement); green there,
   the entries clear and the red is the lanes' as before. A green landing that changed a listed test's file clears it too.
   A test a lane changed is never excused. `npm run task -- train status` and the War Room's train card show the count.
-  `STUDIO_TRAIN_KNOWN_RED=off` turns it off.
 - The flake triager (2.69.0, `harness/flakes.mjs`): when a train's verify or re-check is red, each failing test file
   (at most `STUDIO_FLAKE_MAX_FILES`, 5; once per train) runs ALONE on the same tree, a focused run as a re-check:
   fails → `real`; passes and the file has a test-randomness finding (`harness/test-rng.mjs`) → `seed-flake`; passes,
@@ -502,8 +501,7 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - `studio/` in a lane copy is the main checkout's (a link, 2.60.1, B-40): only the board commands (`npm run task`,
   lock, proof ...) write there, and a lane's commits can never carry studio config. A config change (`studio/*.json`,
   `studio/bible/*.json`, keys, approvals, presets) goes to the owner or the Producer on main: hand the task back with
-  a note naming it. A Claude Code hook (`.claude/hooks/lane-studio-guard.mjs`) refuses such an edit in a lane copy
-  (`STUDIO_LANE_STUDIO_GUARD=off` turns it off), and task done in a lane warns, naming the files, when main's studio
+  a note naming it. A Claude Code hook (`.claude/hooks/lane-studio-guard.mjs`) refuses such an edit in a lane copy, and task done in a lane warns, naming the files, when main's studio
   config changed uncommitted while the task was worked.
 - Config proposals (2.65.0, B-40): the sanctioned route for a lane's studio config change. The lane commits
   `studio-proposals/<ID>.json`, `{ "changes": [ { "file": "studio/<name>.json", "set": { "<a.b or /a/b>": <value> } } ],
@@ -730,8 +728,8 @@ and `clip.recorded` events with the landed tasks. `npm run status -- --brief` an
 ("Playable build <id> (T-1, T-2); clip <file>"). At most one is queued: a newer landing replaces a queued one (its
 tasks added). Skipped when the game has no browser build (`browser.page` / `browser.dist` in its qa.mjs) or is the
 template, and with `STUDIO_LANDING_BUILD=off`. `STUDIO_LANDING_CLIP_SECONDS` (15), `STUDIO_LANDING_CLIP_CMD` (the
-clip command, `{seconds}` and `{name}` placeholders), `STUDIO_LANDING_CLIP_TIMEOUT_MIN` (10);
-`STUDIO_LANDING_BUILD_WORKER=off` queues without starting the worker. `node harness/landing-build.mjs status` shows
+clip command, `{seconds}` and `{name}` placeholders), `STUDIO_LANDING_CLIP_TIMEOUT_MIN` (10).
+`node harness/landing-build.mjs status` shows
 what is queued or running.
 
 ## Plan-time scope and waves, in shadow mode (2.78.0, PU-60)

@@ -72,7 +72,7 @@ export function spawnWorker(root, { env = process.env } = {}) {
 
 /**
  * Queue the playable build + clip for a landing: { queued, replaced?, worker?, skipped?, why, line }. Never throws.
- * opts.spawn replaces the worker start (tests); STUDIO_LANDING_BUILD_WORKER=off queues without starting one.
+ * opts.spawn replaces the worker start (tests).
  */
 export async function queueLandingBuild({ root, train = null, tasks = [], head = null, env = process.env, log = () => {}, spawn: start = spawnWorker } = {}) {
   try {
@@ -86,7 +86,7 @@ export async function queueLandingBuild({ root, train = null, tasks = [], head =
     fs.writeFileSync(pendingFile(root), `${JSON.stringify(job, null, 2)}\n`);
     const running = await workerAlive(root);
     let pid = running?.pid || null;
-    if (!running && !off(env.STUDIO_LANDING_BUILD_WORKER)) pid = start(root, { env });
+    if (!running) pid = start(root, { env });
     const line = `playable build + clip queued for ${all.join(', ') || 'the landing'} (low priority, never holds the train${prev ? `; replaced the queued one for ${(prev.tasks || []).join(', ') || prev.train}` : ''}${running ? `; after the one running (pid ${running.pid})` : ''}; STUDIO_LANDING_BUILD=off turns it off)`;
     log(line);
     return { queued: true, replaced: Boolean(prev), worker: pid, why: '', line, tasks: all };

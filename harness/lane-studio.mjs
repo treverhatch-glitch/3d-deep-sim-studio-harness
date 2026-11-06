@@ -61,7 +61,6 @@ export function studioRel(file, ctx) {
 /** The PreToolUse decision for an edit tool, or null. */
 export function decideEdit(tool, input = {}, { env = process.env, dir } = {}) {
   if (!/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(String(tool || ''))) return null;
-  if (/^(off|0|false|no)$/i.test(String(env.STUDIO_LANE_STUDIO_GUARD || ''))) return null;
   const ctx = laneContext({ env, ...(dir ? { dir } : {}) });
   if (!ctx.lane) return null;
   const rel = studioRel(input.file_path || input.notebook_path || input.path, ctx);

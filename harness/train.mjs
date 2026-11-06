@@ -2821,11 +2821,8 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
 
 // ---- 2.77.0 (P9.3/P9.6): tests known red on main -----------------------------------------------------------------
 
-const knownRedOn = () => !/^(off|0|false|no)$/i.test(process.env.STUDIO_TRAIN_KNOWN_RED || '');
-
 /** A verify of main alone was red: list its failing test files as known red on main (harness/known-red.mjs). */
 function listRedMain(root, { id, logRel, roots, tree, gates }) {
-  if (!knownRedOn()) return;
   try {
     const text = logRel ? fs.readFileSync(path.join(root, logRel), 'utf8') : '';
     const subs = trainVerifyParts(text, false, roots).subIds;
@@ -2839,7 +2836,7 @@ function listRedMain(root, { id, logRel, roots, tree, gates }) {
  * null (the red is the lanes'). Anything else: null. The scratch copy is back at the train's tree when it returns.
  */
 function knownRedTry({ sc, tip, set, built, v, redSub, id, log, res, cache, all, main, root, unionFiles, depInfo, by, text }) {
-  if (!knownRedOn() || !readKnownRed(root).length) return null;
+  if (!readKnownRed(root).length) return null;
   const changed = changedVs(sc.dir, tip, built.head);
   const cand = knownRedCandidate(root, { redGates: v.gates, subs: redSub, changed });
   if (!cand.ok) { log(`[train] ${id}: known red on ${main}: not excused (${cand.why})`); return null; }
