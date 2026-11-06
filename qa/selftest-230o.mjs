@@ -19,7 +19,8 @@ export async function selftest230o({ dir, run, report, tmpRoot }) {
     try { return JSON.parse(r.stdout.trim().split('\n').pop()); } catch { return { error: out(r) }; }
   };
   const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
-  const base = { STUDIO_LOCK_OWNER: 'builder-o1', STUDIO_DONE_UNCOMMITTED: 'allow', STUDIO_DONE_NOOP: 'allow', STUDIO_REFILL_WAKE: 'off', STUDIO_WATCHDOG_LAUNCH: 'off', STUDIO_GAMEDEV_WAKE_DIRECTOR: 'off', STUDIO_DEV_CYCLE_WAKE: 'off' };
+  // 2.79.1 (d): the visual gate turns itself off for a game with no capture command; these checks are about the gate itself.
+  const base = { STUDIO_VISUAL_GATE: 'on', STUDIO_LOCK_OWNER: 'builder-o1', STUDIO_DONE_UNCOMMITTED: 'allow', STUDIO_DONE_NOOP: 'allow', STUDIO_REFILL_WAKE: 'off', STUDIO_WATCHDOG_LAUNCH: 'off', STUDIO_GAMEDEV_WAKE_DIRECTOR: 'off', STUDIO_DEV_CYCLE_WAKE: 'off' };
 
   // 1. Stall check and wall-clock cap.
   const sv = probe(`import { stallVerdict, stallLimits } from ${u('harness/stall.mjs')};
@@ -79,7 +80,7 @@ console.log(JSON.stringify({ rt: rt.width === 64 && rt.rgba[4 * 70] === scene.rg
   const vs = probe(`import { summarize, isRenderTask, setPart } from ${u('harness/verdict-split.mjs')};
 setPart('T-950', 'build', { ok: true }); setPart('T-950', 'logic', { ok: true });
 console.log(JSON.stringify({ r1: isRenderTask({ title: 'Godot: palms and beach' }), r2: isRenderTask({ title: 'Loan interest formula' }), r3: isRenderTask({ title: 'x', track: 'engine:godot' }),
-  s: summarize('T-950', { title: 'Godot: palms and beach' }), l: summarize('T-950', { title: 'Loan interest formula' }) }));`);
+  s: summarize('T-950', { title: 'Godot: palms and beach' }), l: summarize('T-950', { title: 'Loan interest formula' }) }));`, base);
   report('2.30o: render tasks are recognised by title or the Godot track; logic tasks are not', vs.r1 === true && vs.r2 === false && vs.r3 === true, JSON.stringify(vs));
   report('2.30o: the split verdict lists unchecked parts and blocks a render task without a visual result, not a logic task', vs.s?.ok === false && vs.s.unchecked.includes('visual') && vs.s.unchecked.includes('runtime') && vs.l?.ok === true, JSON.stringify([vs.s, vs.l]));
   const add = run(dir, 'node harness/task.mjs add "Godot: palm trees along the beach" --role builder --origin dev --asked "test"', base);
