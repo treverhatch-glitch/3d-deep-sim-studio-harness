@@ -57,6 +57,8 @@ naming who may act for the owner (beta mode's agents; the owner's delegate via `
 | `STUDIO_UNSCOPED_PARALLEL` | `on` | 2.78.1 (B-123): the supervisor runs builders with no lane side by side when both have a prediction (a lane, else plan-waves' `--scope` or overlap history) and they don't overlap. `off`: no lane = the whole game, as before. |
 
 | `STUDIO_LINE_CHAIN_HOLD_MIN` | `60` | 2.78.1: minutes from a chain-breaker's queueing that new builder verifies wait for its train (`0`/`off`: no push). |
+| `STUDIO_LINE_HOLD_MAX_MIN` | `20` | 2.79.1: no Line Producer hold on builder verifies lasts longer than this. The chain-breaker hold also ends when its merge train starts running it, and a blocked plan item never stops the rest of the line: a parked chain-breaker pages the orchestrator once (`line.blocker_paged`), lane-less ready tasks are skipped while other work can run and the Producer is asked once to scope them (`line.scope_asked`). |
+| `STUDIO_ENGINE_HOLD_MAX_MIN` | `30` | 2.79.1: how long the Line holds new verifies for a queued or near engine land (`0`: no hold). Then `line.engine_hold_expired` (free RAM, the floor, the holders); it comes back at the next natural gap. Docs: ENGINE-TRACKS.md "Room for an engine land". |
 | `STUDIO_TESTER` | `on` | 2.79: `off`: the Line starts no scheduled game tester run (`npm run tester -- now` still works). The other `STUDIO_TESTER_*` settings: docs/TESTER.md. |
 | `STUDIO_TESTER_WIRE_TASKS` | `on` | 2.79: `off`: no "Wire <module> into the game" task for a landed module nothing imports. |
 | `STUDIO_LINE_TWINS` | `on` | 2.78.1: `off`: no engine twin tasks (`studio/game.json` `engines.<name>.twins` lists the game paths that have one). |

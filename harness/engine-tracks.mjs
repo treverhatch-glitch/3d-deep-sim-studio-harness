@@ -34,6 +34,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
+import { learnedNeed } from './engine-ram.mjs';
 
 const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(tmp, f); };
@@ -379,6 +380,8 @@ export function engineFloor(engine, { env = process.env, root = mainRoot() } = {
   if (raw !== undefined && String(raw).trim() !== '') return off(raw) ? { gb: 0, from: `${t.floor.env}=${raw} (the owner's setting)` } : { gb: num(raw, t.floor.gb), from: `${t.floor.env} (the owner's setting)` };
   const tuned = readTune(engine, root).values['ram-floor'];
   if (Number.isFinite(Number(tuned)) && t.tune.includes('ram-floor')) return { gb: Number(tuned), from: `the ${t.label} lane's tuned ram-floor (studio/engine/${engine}-tune.json)` };
+  // 2.79.1 (3.2): the RAM the last green land runs really took (engine-ram.mjs), plus a margin, once there are enough of them.
+  try { const l = learnedNeed(engine, { root, env }); if (l) return { gb: l.gb, from: l.from }; } catch { /* the table's */ }
   return { gb: t.floor.gb, from: `the engine table (${t.label}: ${t.floor.gb} GB)` };
 }
 

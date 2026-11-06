@@ -165,6 +165,26 @@ game job (the `heavy` kind's claim, `studio/machine-budget.json` `jobs.heavy`) w
 (for the commit headroom), so a scan alone is not enough. `STUDIO_ENGINE_LINE_ROOM=off` opens the line on any fresh
 scan. `STUDIO_ENGINE_SLOTS=0` or `off`: the 2.78.0 behaviour (a game slot, a landing).
 
+**Room for an engine land (2.79.1).** No RAM is reserved for a land that isn't queued. While a land is queued, or near (an
+engine-porter task's porter ran `task done --check` in the last `STUDIO_ENGINE_NEAR_MIN` (30) minutes), and doesn't hold its
+slot yet, the Line Producer holds new heavy starts back (a quiet hold tagged `engine-land`; builders keep coding, running
+verifies finish, the land ignores the hold) until the land holds its slot, then releases it at once. If the running
+verifies are expected to finish soon (elapsed against `STUDIO_ENGINE_VERIFY_TYPICAL_MIN`, 10; within `STUDIO_ENGINE_WAIT_SOON_MIN`,
+5) it waits for that gap; if not and free RAM is still short, the builder cap steps down one at a time every
+`STUDIO_ENGINE_SCALE_STEP_MIN` (3) minutes (none is stopped). Bounded by `STUDIO_ENGINE_HOLD_MAX_MIN` (30): then released,
+the land stays queued and `line.engine_hold_expired` says why. The land's own RAM wait is `STUDIO_ENGINE_LAND_WAIT_MIN` (20),
+or the hold's time plus 5 min while the Line is making room. The RAM a land needs is the engine table's floor until
+`STUDIO_ENGINE_RAM_RUNS` (3) green runs have recorded their peak (`.studio/engine-ram.json`, from the machine monitor's
+samples); then the highest of the last 5 green peaks plus `STUDIO_ENGINE_RAM_MARGIN_GB` (1.5), never under
+`STUDIO_ENGINE_RAM_MIN_GB` (4). The owner's `STUDIO_UNITY_MIN_FREE_GB` and the lane's tuned `ram-floor` still win.
+
+**Engine push (2.79.1).** `npm run mode -- engine-push [--engine <name>] [--until <HH:MM UTC>|off] --by <who>` (and `engine-push off`)
+puts one engine first: its ready porters head the plan and may use every builder slot, the game's tasks get what is left;
+the engine hold starts as soon as a land is queued and has no time limit; the engine line gets 2 slots
+(`STUDIO_ENGINE_PUSH_MIN_TOTAL_GB`, 24: the RAM both need) instead of `STUDIO_ENGINE_SLOTS`'s 1. Nothing is cancelled. A board
+decision: the owner, the orchestrator, a Producer or Director session; never a worker. On, off and expiry post one Studio Status
+line and a `mode.engine_push` event; `studio:status` and the Line's status show it. State: `studio/mode.json` `enginePush`.
+
 **Room for builders.** A running engine train (its lock live) keeps its land run's RAM (the engine table's `rig.ramGb`,
 written to the lock) off the room for builder sessions between its land runs too (the supervisor's session cap and the
 Line Producer's rig; `heavy-budget.mjs` `engineTrainReserve`). While a land holds its slot its claim counts instead,
