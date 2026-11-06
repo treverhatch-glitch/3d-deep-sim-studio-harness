@@ -31,10 +31,11 @@ import { Worker } from 'node:worker_threads';
 import { emitEvent } from './event.mjs';
 import { jobDone } from './jobs.mjs';
 import { stallMs, stallGraceMs } from './train-watch.mjs';
+import { writeAtomic } from './fsafe.mjs';
 
 const TRAIN_DIR = path.join('.studio', 'train');
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-const writeJson = (f, j) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); const t = `${f}.${process.pid}.tmp`; fs.writeFileSync(t, `${JSON.stringify(j, null, 2)}\n`); fs.renameSync(t, f); } catch {} };
+const writeJson = (f, j) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); writeAtomic(f, `${JSON.stringify(j, null, 2)}\n`); } catch {} };
 export const pidAlive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 export const lifeFile = (root, id) => path.join(root, TRAIN_DIR, String(id), 'life.json');
 const beatFile = (root, id) => path.join(root, TRAIN_DIR, String(id), 'beat');

@@ -268,6 +268,9 @@ export async function pipelineKick(root, { after, env = process.env, spawn: spaw
   try {
     const mode = pipelineMode(env);
     if (mode === 'off') return { started: false, why: 'STUDIO_TRAIN_PIPELINE=off' };
+    // 2.79 (b): a speculative train is a train start: `train auto off` stops it too (the one reader, train-daemon.mjs trainAuto).
+    const auto = (await import('./train-daemon.mjs')).trainAuto(root, env);
+    if (!auto.on) return { started: false, why: auto.why };
     const next = readNextLock(root, { env });
     const lock = readTrainLock(root, { env });
     const id = after || lock?.id;

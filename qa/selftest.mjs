@@ -4949,6 +4949,15 @@ if (inShard('selftest-279a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.79 (b): the 2.78.2 train and lane-copy regressions: queued lanes keep their copy, no .studio in a removed copy,
+// leftover folders made again, infra hand-backs not counted, train auto off honoured, queue write retries, reused pids.
+if (inShard('selftest-279b')) {
+  const dir = copyRepo();
+  const { selftest279B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-279b.mjs')).href);
+  await selftest279B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

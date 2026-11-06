@@ -318,6 +318,13 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   output). A lone `task done` in a lane copy takes the lanes already queued (not held, not run-alone) along in its
   one verify; only its own lane's result is its answer (a rider that fails is handed back as in any train).
   `STUDIO_TRAIN_RIDE_ALONG=off` turns that off.
+- 2.79 (b): `train auto off` (`.studio/train/auto.json`) stops every automatic game-train start through one reader
+  (`trainAuto` in `train-daemon.mjs`): the daemon's pass, a queued `task done`'s kick (`train-detach.mjs`) and the speculative
+  train (`train-pipeline.mjs`). A person's own `npm run task -- train` still runs; engine trains are separate.
+  `STUDIO_TRAIN_KICK_AUTO_OFF=1` keeps the 2.78.2 rule (the kick starts one train anyway); only a selftest pins it.
+  A queued lane's copy is kept when its session ends (`agent.mjs` `queuedCopy`), a lane folder with no `.git` is moved to
+  `.studio/lane-leftovers/` and made again, and hand-backs tagged `meta.handBackCause: infra` don't count toward
+  `STUDIO_TRAIN_MAX_HANDBACKS`.
 - The train daemon (2.69.0, `harness/train-daemon.mjs`): while a supervisor runs (`STUDIO_TRAIN_AUTO`, default on),
   each pass starts a train on its own, in a detached child (`.studio/train/daemon.json`, its log `daemon.log`), when
   lanes are ready by the batching rules above (`STUDIO_TRAIN_MIN` lanes not held, or the oldest waited

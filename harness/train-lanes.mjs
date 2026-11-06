@@ -19,6 +19,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { emitEvent } from './event.mjs';
 import { linkDir, nodeModuleDirs, ignoreLanes, LANES_DIR } from './worktree.mjs';
+import { writeAtomic } from './fsafe.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -26,6 +27,18 @@ const real = (p) => { try { return fs.realpathSync.native(p); } catch { return p
 const norm = (p) => (process.platform === 'win32' ? String(p).toLowerCase() : String(p));
 
 // ---- W-0081: a missing lane copy, made again from its branch ----
+
+/**
+ * 2.79 (b): true when `dir` is its own git worktree (git's top level there is the folder itself). A folder with no .git
+ * (a leftover: something wrote .studio/ into a removed copy) gets main's top level from git, so it never counts.
+ */
+export function ownWorktree(dir) {
+  try {
+    if (!dir || !fs.existsSync(dir)) return false;
+    const top = out(git(dir, 'rev-parse', '--show-toplevel'));
+    return Boolean(top) && norm(real(top)) === norm(real(dir));
+  } catch { return false; }
+}
 
 /**
  * Make `lane`'s copy again at lane.dir from lane.branch. { ok, dir, branch, head, why }. Never throws.
@@ -38,7 +51,15 @@ export function recreateLaneCopy(root, lane, { log = () => {} } = {}) {
     const dir = path.resolve(lane.dir);
     const parent = real(path.dirname(dir));
     if (norm(parent) !== norm(lanes) || path.basename(dir).startsWith('_train-')) return no(`${lane.dir} is not a lane copy folder (${LANES_DIR}/<name>)`);
-    if (fs.existsSync(dir)) return no(`${lane.dir} exists`);
+    // 2.79 (b): a folder that is not its own worktree (no .git) counts as missing: moved aside, not deleted, then made again.
+    if (fs.existsSync(dir)) {
+      if (ownWorktree(dir)) return no(`${lane.dir} exists`);
+      const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
+      const left = path.join(root, '.studio', 'lane-leftovers', `${path.basename(dir)}-${stamp}`);
+      try { fs.mkdirSync(path.dirname(left), { recursive: true }); fs.renameSync(dir, left); }
+      catch (e) { return no(`${lane.dir} is a leftover folder (no git worktree) and could not be moved aside (${e.code || e.message})`); }
+      log(`[train] ${lane.task}: ${LANES_DIR}/${path.basename(dir)} had no .git (not a worktree); moved to ${path.relative(root, left).split(path.sep).join('/')}`);
+    }
     const ref = `refs/heads/${lane.branch}`;
     const tip = out(git(root, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`));
     if (!tip) return no(`its branch ${lane.branch} is gone too`);
@@ -85,7 +106,7 @@ export const infraHandBack = (e) => Boolean(e?.meta?.infra) || INFRA_HANDBACK.te
 
 const relFile = (root) => path.join(root, '.studio', 'train', 'releases.json');
 const readRels = (root) => { try { const j = JSON.parse(fs.readFileSync(relFile(root), 'utf8')); return j && typeof j === 'object' ? j : {}; } catch { return {}; } };
-const writeRels = (root, j) => { try { const f = relFile(root); fs.mkdirSync(path.dirname(f), { recursive: true }); const t = `${f}.${process.pid}.tmp`; fs.writeFileSync(t, `${JSON.stringify(j, null, 2)}\n`); fs.renameSync(t, f); } catch {} };
+const writeRels = (root, j) => { try { const f = relFile(root); fs.mkdirSync(path.dirname(f), { recursive: true }); writeAtomic(f, `${JSON.stringify(j, null, 2)}\n`); } catch {} };
 /** Keep a release by task and head (the newest 5 per task). */
 export function keepRelease(root, task, rel) {
   if (!task || !rel?.head) return;

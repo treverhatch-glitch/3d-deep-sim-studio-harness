@@ -1048,6 +1048,30 @@ export function sessionPromptParts({ role, agent, model, task = null, lane = nul
 }
 
 /** Run one agent to the end, with heartbeats. Resolves with the cleanup result. */
+/**
+ * 2.79 (b): the queue entry (game train, or any engine train's queue) that still needs this agent's lane copy, or null.
+ * Read through the trains' own readers (readQueue in train.mjs; readUnityQueue in unity-train.mjs for every
+ * <engine>-queue.json): an entry names the copy by dir, or by the agent that queued it.
+ */
+export async function queuedCopy(agent, dirs = [], root = REPO_ROOT) {
+  const same = (a, b) => path.resolve(root, String(a)) === path.resolve(root, String(b));
+  const mine = (e) => e && ((e.agent && e.agent === agent) || (e.dir && dirs.some((d) => d && same(e.dir, d))));
+  try {
+    const { readQueue } = await import('./train.mjs');
+    const g = readQueue(root).find(mine);
+    if (g) return { task: g.task, train: 'merge' };
+  } catch { /* a queue that can't be read keeps nothing alive */ }
+  try {
+    const { readUnityQueue } = await import('./unity-train.mjs');
+    for (const f of fs.readdirSync(path.join(root, '.studio', 'train'))) {
+      const m = f.match(/^(.+)-queue\.json$/);
+      const u = m && readUnityQueue(root, m[1]).find(mine);
+      if (u) return { task: u.task, train: m[1] };
+    }
+  } catch { /* none */ }
+  return null;
+}
+
 export async function runAgent({ role, agent, tool, model, fallback = [], task = null, lane = null, oneTask = false, division = null, note = '', by = null, refreshes = 0, reuseCopy = null, agyOneTurn = false }) {
   const opts2 = { refreshes };
   // H-1 (2.58.5): a nim session runs a NIM model (--model, STUDIO_NIM_MODEL or the default), never the role's.
@@ -1495,7 +1519,12 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // relaunch) works on in them: ownCopy.
   const atClaimDir = atClaim?.branch && atClaim.dir ? path.join(REPO_ROOT, atClaim.dir) : null;
   const ownCopy = copy && fs.existsSync(copy.dir) ? { dir: copy.dir, branch: copy.branch, laneless: Boolean(copy.laneless) } : atClaimDir && fs.existsSync(atClaimDir) ? { dir: atClaimDir, branch: atClaim.branch, laneless: true } : null;
-  const dropCopies = () => {
+  // 2.79 (b): a copy whose task waits in a train's queue is left for the train (it checks and lands it from that copy) and
+  // the janitor (it removes it once the task has landed). task done queues and the session ends seconds later: removing
+  // the copy then made the train find a lane folder with no .git (the 2.78.2 hand-backs "its copy is on main now").
+  const dropCopies = async () => {
+    const queued = await queuedCopy(agent, [copy?.dir, atClaimDir]);
+    if (queued) { emitEvent({ type: 'lane.kept', agent, task: queued.task, msg: `Kept ${agent}'s lane copy: ${queued.task} waits in the ${queued.train} train queue` }); return; }
     if (copy && !keptCopy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
     if (atClaimDir && fs.existsSync(atClaimDir)) removeLaneCopy(agent, { keepBranch: unmerged(atClaim.branch) > 0 });
   };
@@ -1505,7 +1534,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const again = result.capped ? result.handed[0]?.task || (task && !parseNextQueue().done.some((t) => t.id === task) ? task : null) : null;
   const maxRefresh = Number(process.env.STUDIO_REFRESH_RELAUNCH ?? 5);
   if (again && !readStop() && (opts2.refreshes || 0) < maxRefresh) {
-    dropCopies();
+    await dropCopies();
     emitEvent({ type: 'agent.refresh', agent, task: again, msg: `${agent} refreshed on ${again}; a fresh session continues from studio/handoffs/${again}.md` });
     return runAgent({ role, agent, tool, model, fallback, task: again, lane, oneTask, division, note, by, refreshes: (opts2.refreshes || 0) + 1 });
   }
@@ -1544,7 +1573,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     // 2.78.1 (B-118): the failover works on in the ended session's copy (reuseCopy), never a new one under the same name.
     return runAgent({ role, agent, tool: ftool, model: fmodel || model, fallback: rest, task: resume, lane, oneTask, division, note, by, reuseCopy: ownCopy });
   }
-  dropCopies();
+  await dropCopies();
   return { ok: true, code, ...result };
 }
 

@@ -147,7 +147,8 @@ export async function selftest2782A({ dir, report, tmpRoot, root }) {
 const spawned = [];
 const deps = { supervisor: () => ({ pid: process.pid }), auto: () => ({ on: true }), trainOn: () => true, spawn: (o) => { spawned.push(o.args.slice(1)); return { ok: true, pid: 4242 }; } };
 const withSup = await kickTrain(process.cwd(), { by: 'bld-k', waitMin: 7, deps });
-const autoOff = await kickTrain(process.cwd(), { by: 'bld-k', waitMin: 7, deps: { ...deps, auto: () => ({ on: false, why: 'train auto is off' }) } });
+// 2.79 (b): train auto off now starts nothing; this check pins the 2.78.2 rule (STUDIO_TRAIN_KICK_AUTO_OFF=1).
+const autoOff = await kickTrain(process.cwd(), { by: 'bld-k', waitMin: 7, env: { ...process.env, STUDIO_TRAIN_KICK_AUTO_OFF: '1' }, deps: { ...deps, auto: () => ({ on: false, why: 'train auto is off' }) } });
 const noSup = await kickTrain(process.cwd(), { by: 'bld-k', waitMin: 7, deps: { ...deps, supervisor: () => null } });
 console.log(JSON.stringify({ withSup, autoOff, noSup, spawned }));
 `, env);

@@ -234,7 +234,7 @@ console.log(JSON.stringify({ clean: volatileLeaks(k.stable, { agent: 'builder-au
 console.log(JSON.stringify((await runningDones()).map((x) => x.task)));`, base);
   const dWait = run(dir, 'node harness/task.mjs drain wait --max 0.01', { ...base, STUDIO_DRAIN_POLL_MS: '100' });
   fs.rmSync(path.join(dir, '.studio', 'done-running', 'T-920.json'), { force: true });
-  const dWait2 = run(dir, 'node harness/task.mjs drain wait', base);
+  const dWait2 = run(dir, 'node harness/task.mjs drain wait --max 5', base);
   const dOff = run(dir, 'node harness/task.mjs drain off --by selftest', base);
   const dSt2 = run(dir, 'node harness/task.mjs drain status', base);
   report('2.30q drain: drain wait blocks while a done is running and returns when none is; drain off resumes', JSON.stringify(wt) === '["T-920"]' && dWait.status === 1 && dWait2.status === 0 && dOff.status === 0 && dSt2.status === 0, `${JSON.stringify(wt)} ${out(dWait)} ${out(dWait2)}`);

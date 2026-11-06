@@ -1193,7 +1193,7 @@ export function trainDeps(busyMod, { forDone = false } = {}) {
       const t = closeTrainTask(lane.task, lane.agent, { train: ctx.train, head: ctx.head, laneHead: lane.head, record: ctx.record, note: lane.note || '', repo: ctx.repo || null, target: ctx.target || null });
       return t?.error ? { ok: false, message: t.message } : t ? { ok: true, target: t } : { ok: false, message: `${lane.task} is not on the board` };
     },
-    handBack: (lane, note) => pauseTask(lane.task, lane.agent, note, { force: true }),
+    handBack: (lane, note, o = {}) => pauseTask(lane.task, lane.agent, note, { force: true, handBackCause: o.cause }),
     stopped: () => { const s = readStop(); return s ? `by ${s.by}${s.reason ? `: ${s.reason}` : ''}` : null; },
     // 2.65.0 (3.3): which tasks are open and done on the board, for the train's --after ordering.
     taskStates: () => { const q = parseNextQueue(); return { open: new Set([...q.inProgress, ...q.backlog].map((t) => t.id)), done: new Set(q.done.map((t) => t.id)) }; },
@@ -1254,7 +1254,7 @@ export function sameClaim(lock, expect) {
  * repo), it used to hand back a task an agent had just re-claimed, releasing that fresh claim, and a third agent
  * then started the same task.
  */
-export function pauseTask(taskId, agent = null, note = '', { force = false, expect, cause } = {}) {
+export function pauseTask(taskId, agent = null, note = '', { force = false, expect, cause, handBackCause } = {}) {
   let lock = lockStatus(`task:${taskId}`);
   // Anyone may hand back a task whose holder's session has ended (test #2: dead agents' tasks sat
   // claimed for up to an hour, and the Producer had to wait for the claim to expire).
@@ -1311,7 +1311,7 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
   const head = fs.existsSync(file) ? '' : `# Handoff notes for ${target.id}: ${target.title}\n\nNewest last. Read these before you pick the task up.\n`;
   fs.appendFileSync(file, `${head}\n${heading}\n${facts ? `${facts}\n` : ''}${note || 'No note left.'}\n`);
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Paused ${target.id}: ${note || 'handed back'}`);
-  emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}`, meta: { ...(isFailureNote(note) ? { reasonKey: reasonKey(note) } : {}), ...(cause ? { cause } : {}) } });
+  emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}`, meta: { ...(isFailureNote(note) ? { reasonKey: reasonKey(note) } : {}), ...(cause ? { cause } : {}), ...(handBackCause ? { handBackCause } : {}) } });
   // PU-58: a canary task handed back for a failure (the impossible exit records its own outcome).
   if (!cause && isFailureNote(note)) { try { canaryEnd(target.id, 'handed-back', { agent: who }); } catch { /* a record, never a blocker */ } }
   // 2.30c (#8): a second hand-back for the same reason parks the task with a card; other lanes go on.
