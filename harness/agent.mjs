@@ -2375,9 +2375,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // A hire runs in the background unless --foreground: tied to the hiring shell, it died with it and its
     // record stayed "running" with its claims held (test #3, engine-porter-1).
     // 2.79 (d): `start` runs in the background too: tied to the starter's shell, a builder died when the command that
-    // started it returned (builder-api2 after 12 min, builder-api3 after 1). --attach (or --foreground, or
-    // STUDIO_AGENT_START_ATTACH=on for a script or a test that wants the session in this process) keeps it here.
-    const attach = argv.includes('--attach') || argv.includes('--foreground') || /^(on|1|true|yes)$/i.test(String(process.env.STUDIO_AGENT_START_ATTACH || ''));
+    // started it returned (builder-api2 after 12 min, builder-api3 after 1). --attach (or --foreground, for
+    // a script or a test that wants the session in this process) keeps it here.
+    const attach = argv.includes('--attach') || argv.includes('--foreground');
     const r = startAgent(base, { detach: argv.includes('--detach') || !attach });
     if (!r.ok) {
       if (r.needsApproval) {

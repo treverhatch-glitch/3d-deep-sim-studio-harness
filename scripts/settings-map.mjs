@@ -35,6 +35,15 @@ const LIT = String.raw`(-?\d[\d_.]*(?:e\d+)?|'[^'\n]*'|"[^"\n]*"|true|false)`;
 const DEFAULT_AFTER = [new RegExp(String.raw`^\s*\)?\s*(?:\?\?|\|\|)\s*${LIT}`), new RegExp(String.raw`^'\s*,\s*${LIT}\s*\)`)];
 export const MAP_FILE = 'docs/SETTINGS.md';
 export const BASELINE_FILE = 'docs/settings-baseline.json';
+export const TOP_FILE = 'scripts/settings-top.json';
+
+/** 2.79 (g): scripts/settings-top.json: { top: [names], passedToCommands: [{ name, note }] } (empty lists when missing). */
+export function topLists(root = ROOT) {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(root, TOP_FILE), 'utf8'));
+    return { top: Array.isArray(j.top) ? j.top.map(String) : [], passed: Array.isArray(j.passedToCommands) ? j.passedToCommands.map((p) => ({ name: String(p.name), note: String(p.note || '') })) : [] };
+  } catch { return { top: [], passed: [] }; }
+}
 
 const rel = (root, f) => path.relative(root, f).split(path.sep).join('/');
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
@@ -107,6 +116,8 @@ function docFor(name, docs) {
 /** The map: [{ name, display, group, default, files, doc }] sorted by name. */
 export function settingsMap(root = ROOT) {
   const code = scanCode(root);
+  // 2.79 (g): names the harness passes INTO a command's environment are not settings: not counted, not listed with them.
+  for (const p of topLists(root).passed) code.delete(p.name);
   const docs = scanDocs(root);
   const rows = [...code.entries()].map(([name, e]) => {
     const defs = e.defaults.length ? e.defaults : e.testDefaults;
@@ -119,7 +130,8 @@ export function settingsMap(root = ROOT) {
 }
 
 /** docs/SETTINGS.md's text for a map. Deterministic (no date), so a rerun with no change writes the same bytes. */
-export function renderMap(rows) {
+export function renderMap(rows, root = ROOT) {
+  const { top, passed } = topLists(root);
   const undocumented = rows.filter((r) => !r.doc).length;
   const groups = new Map();
   for (const r of rows) { if (!groups.has(r.group)) groups.set(r.group, []); groups.get(r.group).push(r); }
@@ -136,15 +148,28 @@ export function renderMap(rows) {
     'To document one: describe it (what it does, its default) on the docs/ page for its area, then rerun this script.',
     '',
   ];
+  const line = (r) => {
+    const def = r.default === null ? 'no simple default' : `default \`${r.default}\`${r.otherDefaults.length ? ` (also \`${r.otherDefaults.join('`, `')}\`)` : ''}`;
+    const where = r.files.slice(0, 3).join(', ') + (r.files.length > 3 ? ` (+${r.files.length - 3} more)` : '');
+    let doc = 'undocumented';
+    if (r.doc) { const [file, ln] = r.doc.split(':'); doc = `[${file.replace(/^docs\//, '')}:${ln}](${file.replace(/^docs\//, '')})`; }
+    return `- \`${r.display}\` · ${def} · ${where} · ${doc}`;
+  };
+  if (top.length) {
+    const byName = new Map(rows.map((r) => [r.name, r]));
+    lines.push(`## Settings you're likely to change (${top.length})`, '', 'Read this list first: the names a real crew sets in its `.env`, and the main schedule, slot, model and tester knobs. Everything else keeps its default.', '');
+    for (const n of top) lines.push(byName.has(n) ? line(byName.get(n)) : `- \`${n}\` · set per role or built at run time (see the full list below)`);
+    lines.push('');
+  }
+  if (passed.length) {
+    lines.push(`## Passed to your commands (${passed.length}; not settings)`, '', 'The harness sets these in the environment of a command it runs for you (a game script, an engine port command). You do not set them, and they are not in the counts.', '');
+    for (const p of passed) lines.push(`- \`${p.name}\` · ${p.note}`);
+    lines.push('');
+  }
+  if (top.length || passed.length) lines.push('## All settings, grouped by first word', '');
   for (const g of order) {
     lines.push(`## ${g === 'OTHER' ? 'Other' : `${g}_*`} (${groups.get(g).length})`, '');
-    for (const r of groups.get(g)) {
-      const def = r.default === null ? 'no simple default' : `default \`${r.default}\`${r.otherDefaults.length ? ` (also \`${r.otherDefaults.join('`, `')}\`)` : ''}`;
-      const where = r.files.slice(0, 3).join(', ') + (r.files.length > 3 ? ` (+${r.files.length - 3} more)` : '');
-      let doc = 'undocumented';
-      if (r.doc) { const [file, line] = r.doc.split(':'); doc = `[${file.replace(/^docs\//, '')}:${line}](${file.replace(/^docs\//, '')})`; }
-      lines.push(`- \`${r.display}\` · ${def} · ${where} · ${doc}`);
-    }
+    for (const r of groups.get(g)) lines.push(line(r));
     lines.push('');
   }
   return lines.join('\n');
@@ -173,7 +198,7 @@ export function checkSettings(root = ROOT) {
   const missing = rows.filter((r) => !r.doc && !base.has(r.name)).map((r) => ({ name: r.display, files: r.files }));
   const used = new Map(rows.map((r) => [r.name, r]));
   const prunable = [...base].filter((n) => !used.has(n) || used.get(n).doc).sort();
-  const stale = read(path.join(root, MAP_FILE)) !== renderMap(rows);
+  const stale = read(path.join(root, MAP_FILE)) !== renderMap(rows, root);
   // The baseline only shrinks: names added to it since the main branch's copy fail the check (a new setting is
   // documented instead of frozen). No main branch or no baseline there (a fresh clone, CI's shallow checkout): skipped.
   const was = baselineAt(root, process.env.STUDIO_SETTINGS_BASE_REF || mainRef());

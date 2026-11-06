@@ -1,0 +1,26 @@
+{
+  "note": "Hand-kept lists for docs/SETTINGS.md (node scripts/settings-map.mjs). top: the settings a studio is likely to change, shown first (the names a real crew's .env sets, plus the main schedule, slot, model and tester knobs; a name ending in _ is a family). passedToCommands: names the harness sets in the environment of a command it runs for you (a game's own script, an engine port's command); they are not settings, so they are not counted or listed with them.",
+  "top": [
+    "STUDIO_AGENT", "STUDIO_AGENT_CMD", "STUDIO_AGENT_MODEL", "STUDIO_AGENT_TOOL", "STUDIO_AGENT_ENV_PASS",
+    "STUDIO_PRODUCER_NAME", "STUDIO_PRODUCER_PRESET", "STUDIO_PRODUCER_MODEL", "STUDIO_PRODUCER_TOOL", "STUDIO_PRODUCER_CMD",
+    "STUDIO_BUILDER_MODEL", "STUDIO_BUILDER_TOOL", "STUDIO_BUILDER_CMD",
+    "STUDIO_DIRECTOR_MODEL", "STUDIO_DIRECTOR_TOOL",
+    "STUDIO_TIER_TOP_MODEL", "STUDIO_TIER_MID_MODEL", "STUDIO_TIER_CHEAP_MODEL", "STUDIO_MODEL_ROUTING", "STUDIO_REVIEW_TOOLS",
+    "STUDIO_KEYMAP_", "STUDIO_NIM_FALLBACK", "STUDIO_NIM_MAX_SESSIONS", "STUDIO_CODEX_BYPASS",
+    "STUDIO_GATE_SLOTS", "STUDIO_HEAVY_SLOTS", "STUDIO_TEST_WORKERS", "STUDIO_THREADS", "STUDIO_ENGINE_TRAIN_AUTO",
+    "STUDIO_SESSION_TURNS", "STUDIO_SESSION_CEILING_TURNS", "STUDIO_SESSION_CONTEXT", "STUDIO_SESSION_MAX_MIN",
+    "STUDIO_STALL_MIN", "STUDIO_STALL_PLAN_MIN", "STUDIO_TASK_MAX_MIN", "STUDIO_TASK_MAX_SESSIONS", "STUDIO_TASK_MAX_TOKENS", "STUDIO_TASK_BUDGET",
+    "STUDIO_CHECK_TOKENS", "STUDIO_CHECK_TURNS", "STUDIO_DAILY_TOKEN_CAP", "STUDIO_CACHE_READ_WEIGHT", "STUDIO_USAGE_FILE",
+    "STUDIO_WATCHDOG", "STUDIO_WATCHDOG_IDLE_HOURS", "STUDIO_WATCH_INTERVAL", "STUDIO_TRAIN", "STUDIO_TRAIN_PIPELINE", "STUDIO_RUN_T0",
+    "STUDIO_TESTER", "STUDIO_TESTER_EVERY_HOURS", "STUDIO_TESTER_MIN_LANDINGS", "STUDIO_TESTER_TOOLS",
+    "STUDIO_BACKUP_DIR", "STUDIO_BACKUP_KEEP", "STUDIO_BACKUP_MEDIA", "STUDIO_EVENTS_MAX_MB", "STUDIO_COMM_WEBHOOK",
+    "STUDIO_REFERENCE_DIR", "STUDIO_RESULTS_DIR", "STUDIO_GAME", "STUDIO_LOCK_OWNER", "STUDIO_MAIN_ROOT"
+  ],
+  "passedToCommands": [
+    { "name": "STUDIO_LANE_COMMIT", "note": "the lane's commit, for an engine port's preLand command" },
+    { "name": "STUDIO_LANE_DIR", "note": "the throwaway checkout of the engine repo the preLand command runs in" },
+    { "name": "STUDIO_ENGINE_REPO", "note": "the engine repo's folder, for the preLand command" },
+    { "name": "STUDIO_ENGINE_LANE_DIR", "note": "the porter's lane folder, for an engine's quickCheck command" },
+    { "name": "STUDIO_TESTER_RUN_DIR", "note": "the tester run folder, for the driver the tester runs (qa/tester-drive.mjs reads it when --run is not given)" }
+  ]
+}

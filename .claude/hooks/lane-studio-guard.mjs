@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 2.60.1 (B-40): PreToolUse hook. In a lane copy (.lanes/<agent>) studio/ is a link to the main checkout's, so an edit
 // to studio config there lands straight in main. Edit/Write/MultiEdit/NotebookEdit of studio config are denied in a
-// lane copy; the reason names the sanctioned route (harness/lane-studio.mjs). STUDIO_LANE_STUDIO_GUARD=off disables.
+// lane copy; the reason names the sanctioned route (harness/lane-studio.mjs).
 import { decideEdit } from '../../harness/lane-studio.mjs';
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split(/[\/\\]/).pop())) {
