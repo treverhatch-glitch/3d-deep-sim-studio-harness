@@ -5048,6 +5048,15 @@ if (inShard('selftest-2791a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.79.2 (a): the launcher runs the builder protocol around aider (claim, a short edit brief and the lane's files, commit,
+// check, queue or hand back), and a Vertex request over STUDIO_VERTEX_MAX_PROMPT_TOKENS stops its session.
+if (inShard('selftest-2792a')) {
+  const dir = copyRepo();
+  const { selftest2792A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2792a.mjs')).href);
+  await selftest2792A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {
