@@ -213,12 +213,14 @@ console.log(JSON.stringify({ note: r.note }));`, env);
 const r = ag.launchEngineLane({ task: ${JSON.stringify(id)}, agent: 'porter-1', role: 'engine-porter' });
 console.log(JSON.stringify({ note: r.note }));`, env);
       const mergeHead = fs.existsSync(path.join(g(wt, 'rev-parse', '--absolute-git-dir').stdout.trim(), 'MERGE_HEAD'));
-      const clean = !g(wt, 'status', '--porcelain').stdout.trim();
+      // Tracked files only: the launcher's own untracked files (a Windows junction, a brief) aren't the merge's doing.
+      const statusOut = g(wt, 'status', '--porcelain', '--untracked-files=no').stdout.trim();
+      const clean = !statusOut;
       const evs = st.evs();
       await guard('2.79.1 (c, 3.7): before an engine-porter session the engine\'s target branch is merged (no fast-forward) into the pass worktree; on a conflict the merge is aborted, the worktree left as it was, and the conflicting files are named in the porter\'s brief and an engine.target_conflict event (fails on 2.79.0: the worktree kept the old base, two sessions ran empty and the pass was parked)', () => [
         p1.j?.dir && hasB && /Merge unity\/main/.test(merges) && evs.some((e) => e.type === 'engine.target_merged')
           && /conflicts in Rules\/a\.txt/.test(p3.j?.note || '') && !mergeHead && clean && evs.some((e) => e.type === 'engine.target_conflict' && (e.meta?.conflicts || []).includes('Rules/a.txt')),
-        JSON.stringify({ p1: p1.j, p2: p2.j, merges, hasB, p3: p3.j, mergeHead, clean, ev: evs.filter((e) => /^engine\./.test(e.type)).map((e) => e.type), err: out(p3).slice(-300) })]);
+        JSON.stringify({ p1: p1.j, p2: p2.j, merges, hasB, p3: p3.j, mergeHead, clean, statusOut, ev: evs.filter((e) => /^engine\./.test(e.type)).map((e) => e.type), err: out(p3).slice(-300) })]);
 
       const al = probe(S, `import { toolCommand } from ${u(S, 'harness/agent.mjs')};
 import { allowedToolsList } from ${u(S, 'harness/allowlist.mjs')};
