@@ -4976,6 +4976,14 @@ if (inShard('selftest-279t')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.79 (f): measuring and trimming: gate stats, hourly telemetry summaries, reload-env names, RAM-aware heavy slots, the API-key builder pool, owner-only re-ends.
+if (inShard('selftest-279f')) {
+  const dir = copyRepo();
+  const { selftest279F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-279f.mjs')).href);
+  await selftest279F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

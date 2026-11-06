@@ -39,6 +39,8 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { poolPlan } from './api-pool.mjs';
+const poolPlanNow = (usage, live) => poolPlan({ usage, live });
 import { selfIdentity, pidAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
 
 export const STATUS_FILE = path.join(STUDIO_STATE_DIR, 'supervisor.json');
@@ -412,13 +414,17 @@ export async function supervise(opts, state, now = Date.now()) {
   }
   // Budget: tokens since the supervisor started, or a share of the plan's week (studio/budget.json).
   const st = budgetStatus(now);
+  let poolUsage = null; // set when the plan's budget is high (2.79 f)
+  // 2.79 (f): STUDIO_API_POOL builders (harness/api-pool.mjs) start while the plan's budget is high: the two places this pass
+  // would start nothing (the wind-down above, every tool over its target below) let the pool's builders through instead.
+  const apiPoolOn = (usage) => { try { return Boolean(process.env.STUDIO_API_POOL) && poolPlanNow(usage, sessions().filter((s) => s.running)).free.length > 0; } catch { return false; } };
   // 2.68.0: usage wind-down (harness/winddown.mjs): at STUDIO_USAGE_WINDDOWN_PCT start nothing new, let the running
   // sessions finish, write .studio/restart-log.md; resume (and link the log) when the usage resets.
   try {
     const { winddownPass } = await import('./winddown.mjs');
     const { readHolds } = await import('./task-hold.mjs');
     const wd = winddownPass({ now, rows: st, dryRun: opts.dryRun, lists: () => ({ live: sessions().filter((s) => s.running).map((s) => ({ agent: s.agent, role: s.role, task: s.task })), queued: (parseNextQueue().backlog || []).map((t) => ({ id: t.id, role: t.role, title: t.title })), held: Object.entries(readHolds()).filter(([, h]) => h?.held).map(([id, h]) => ({ id, why: h.held.why || 'held' })) }) });
-    if (wd.active) return { started: [], why: [wd.why], winddown: true };
+    if (wd.active) { poolUsage = { winddown: true, why: wd.why }; if (!apiPoolOn(poolUsage)) return { started: [], why: [wd.why], winddown: true }; }
   } catch { /* the wind-down is a guard, never a crash */ }
   const { weightedTokens } = await import('./budget.mjs');
   const spentHere = Math.round(readRecentEvents(50000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= state.startedAt).reduce((n, e) => n + weightedTokens(e), 0));
@@ -428,7 +434,7 @@ export async function supervise(opts, state, now = Date.now()) {
   if (opts.budget?.share && known.length && known.every((t) => t.pct >= opts.budget.share)) return { stop: true, started: [], why: [`the plan reached ${Math.round(opts.budget.share * 100)}% of the week`] };
   const over = known.length && known.every((t) => t.verdict === 'over');
   const under = known.some((t) => t.verdict === 'under');
-  if (over) return { started: [], why: ['every tool is over its target for this point in the week: slowing down'] };
+  if (over) { poolUsage ||= { over: true, why: 'every tool is over its target for this point in the week' }; if (!apiPoolOn(poolUsage)) return { started: [], why: ['every tool is over its target for this point in the week: slowing down'] }; }
   const mode = effectiveMode();
   const extra = opts.budget && under ? 2 : 0;
   const live = sessions().filter((s) => s.running);
@@ -469,6 +475,9 @@ export async function supervise(opts, state, now = Date.now()) {
     try { await (await import('./lane-disk.mjs')).lanesPass({ now, inline: Boolean(opts.deps?.lanesInline) }); } catch { /* a report, never a crash */ }
   }
   let room = ramCap.cap - live.length;
+  // 2.79 (f): the plan's budget is high: only the API pool's builders start (their names, up to the pool's size).
+  const poolMode = poolUsage ? poolPlanNow(poolUsage, live) : null;
+  if (poolMode) { room = Math.min(room, poolMode.free.length); why.push(`${poolUsage.why}: ${poolMode.why}`); }
   if (room <= 0) return { started: [], why: [ramCap.cap < configured ? `${live.length} agent${live.length === 1 ? '' : 's'} running; no more start: ${ramCap.why}` : `${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
   if (ramCap.cap < configured) why.push(`at most ${ramCap.cap} session${ramCap.cap === 1 ? '' : 's'} now: ${ramCap.why}`);
   // Waiting work, grouped by role and lane.
@@ -570,6 +579,7 @@ export async function supervise(opts, state, now = Date.now()) {
   if (line) ordered = line.orderGroups(ordered);
   for (const g of ordered) {
     if (room <= 0) break;
+    if (poolMode && g.role !== 'builder') continue; // the pool is builders only; other roles wait for headroom
     if (crewPaused[g.role]) {
       why.push(`${g.role}: paused by the crew watchdog (${String(crewPaused[g.role].why || '').slice(0, 120)}; npm run crew -- resume ${g.role} --by <name>)`);
       continue;
@@ -643,7 +653,8 @@ export async function supervise(opts, state, now = Date.now()) {
       ramNote(ram, now);
       break;
     }
-    const agent = nextAgentName(g.role, opts.prefix || 's');
+    const agent = poolMode ? poolMode.free.shift() : nextAgentName(g.role, opts.prefix || 's');
+    if (!agent) break;
     state.names = [...(state.names || []), agent].slice(-200);
     // 2.30l: one builder per task. Two passes at once (the watcher and the Director flow) both started
     // T-025 at 17:13:02. A launch lock (one atomic file per task) and the live sessions decide who starts it.
@@ -662,6 +673,7 @@ export async function supervise(opts, state, now = Date.now()) {
     const r = startAgent({ role: g.role, agent, tool: lr.tool || tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra, ...(lr.model ? { model: lr.model } : {}) }, { detach: true });
     if (r.ok && lr.model) emitEvent({ type: 'model.routed', agent: 'line-producer', task: taskId, msg: `${taskId}: starts on ${lr.model}${lr.tool ? ` (${lr.tool})` : ''} (${lr.tier} ${lr.tool ? 'task' : 'tier'}, the Line Producer): ${lr.why}`.slice(0, 400), meta: { task: taskId, arm: 'line-producer', tier: lr.tier, model: lr.model, ...(lr.tool ? { tool: lr.tool } : {}), failed: lr.failed || 0 } });
     if (r.ok) {
+      if (poolMode) emitEvent({ type: 'supervisor.api_pool', agent: 'supervisor', task: taskId, msg: `${agent} starts on ${taskId} billed to its API key: ${poolUsage.why}`, meta: { agent, reason: poolUsage.over ? 'over-target' : 'winddown' } });
       started.push(`${agent} on ${g.tasks[0].id}${g.lane ? ` in ${g.lane}` : ''}${tool && tool !== preferred ? ` (${tool}: ${preferred} is out of quota)` : ''}`);
       // Count it at once, so the next group in this pass sees it (a lane taken, or the whole game).
       live.push({ agent, role: g.role, lane: g.lane || null, task: taskId, running: true });
@@ -819,6 +831,8 @@ async function main(argv) {
     await boundedStep('director-flow', () => import('./director-flow.mjs').then(({ flowPass }) => flowPass({ fill: false, launcherWhy: r.why, throttleMs: 55000 })), { state }).catch(() => {});
     // 2.68.0 (m): the resource monitor: a machine scan every STUDIO_MACHINE_SAMPLE_S into machine.sample (harness/machine.mjs).
     await boundedStep('machine', () => import('./machine.mjs').then(({ sampleMachine }) => sampleMachine({ emit: emitEvent })), { state }).catch(() => {});
+    // 2.79 (f): the hourly summaries of the diagnostics counted instead of logged one by one (harness/telemetry.mjs).
+    await boundedStep('telemetry', () => import('./telemetry.mjs').then(({ flushTelemetry }) => flushTelemetry({ emit: emitEvent })), { state }).catch(() => {});
     // 2.76.0 (l): the Communicator (harness/communicator.mjs): the 30-minute status post and the alerts that tag who must
     // act. After the machine scan (it reads that scan) and before a stop ends the loop (so a stop file is reported).
     await boundedStep('communicator', () => import('./communicator.mjs').then(({ communicatorPass }) => communicatorPass({ passWhy: r.why })), { state }).catch(() => {});

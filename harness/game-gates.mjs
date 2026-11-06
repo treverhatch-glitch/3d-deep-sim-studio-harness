@@ -73,6 +73,7 @@ import { judgePass } from './silent-green.mjs';
 import { pinMode, checkGodotVersions } from './godot-version.mjs';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
+import { emitSampled } from './telemetry.mjs';
 import { selectGates, scopeOf, withGateSlot, matchAny, ALWAYS_SHARED } from './merge-lane.mjs';
 import { normMode } from './det-math.mjs';
 import { testRngMode } from './test-rng.mjs';
@@ -544,7 +545,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       // 2.65.1 (B-17): the probe's reading, every time (a timeout that isn't scaled says so, and why).
       console.error(loadReading(cmdLabel, timing, baseTimeout));
       if (changedT) console.error(`[game-gates] ${cmdLabel}: timeout ${Math.round(timing.ms / 1000)} s (${timingWhy(timing)}; STUDIO_GAME_GATE_TIMEOUT_SCALE=off keeps ${Math.round(baseTimeout / 1000)} s)`);
-      if (changedT) emitEvent({ type: 'gate.timeout_scaled', agent: process.env.STUDIO_LOCK_OWNER || 'gates', msg: `${cmdLabel}: timeout ${Math.round(timing.ms / 1000)} s (${timingWhy(timing)})`.slice(0, 400), meta: { gate: cmdLabel, timeoutMs: timing.ms, baseMs: baseTimeout, factor: timing.factor, ...(timing.floor ? { floorFromMs: timing.floor.lastMs } : {}) } });
+      if (changedT) emitSampled({ type: 'gate.timeout_scaled', agent: process.env.STUDIO_LOCK_OWNER || 'gates', msg: `${cmdLabel}: timeout ${Math.round(timing.ms / 1000)} s (${timingWhy(timing)})`.slice(0, 400), meta: { gate: cmdLabel, timeoutMs: timing.ms, baseMs: baseTimeout, factor: timing.factor, ...(timing.floor ? { floorFromMs: timing.floor.lastMs } : {}) } }, cmdLabel);
       let runEnv = env;
       if (slow) {
         testScale = testTimeoutScale(timing.factor, slow, env);

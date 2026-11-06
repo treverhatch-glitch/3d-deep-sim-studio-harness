@@ -32,6 +32,8 @@ import { createFence, fenceLine } from '../harness/gate-output.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cfg = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8'));
 const argv = process.argv.slice(2);
+// 2.79 (f): `npm run gates -- stats [--days 7] [--json]`: per gate, runs / times red / last red (harness/gate-stats.mjs). Reads events only.
+if (argv[0] === 'stats') process.exit(await (await import('../harness/gate-stats.mjs')).gateStatsCli(argv.slice(1), { root: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..') }));
 // 2.71.1 (B, S03/T06/G10/G16): the gates and everything they start run without code-loading NODE_OPTIONS (or npm's
 // node-options), with git pointed only at this checkout and replace refs ignored (harness/gate-env.mjs). Done in place
 // before anything is spawned, so every git call (whichever helper makes it) and every child inherits it. A preload
@@ -439,7 +441,7 @@ try {
 // 2.34.0: every verify is an event (how long, scoped or not, what failed), for the harness health report.
 try {
   const { emitEvent } = await import('../harness/event.mjs');
-  emitEvent({ type: 'gates.run', agent: process.env.STUDIO_LOCK_OWNER || null, msg: `verify: ${rows.filter((r) => r.ok).length}/${rows.length} passed in ${Math.round((Date.now() - runStarted) / 1000)} s${changedFiles?.length ? ` (scoped to ${changedFiles.length} file(s))` : ''}`, meta: { ms: Date.now() - runStarted, scoped: Boolean(changedFiles?.length), partial: Boolean(only) || isFastTier, ran: rows.length, failed: rows.filter((r) => !r.ok && r.required).map((r) => r.id), ...gatesRunFacts(rows), gameMs: rows.find((r) => r.id === 'game')?.ms ?? null, ...(changedByVerify?.length ? { changedByVerify } : {}) } });
+  emitEvent({ type: 'gates.run', agent: process.env.STUDIO_LOCK_OWNER || null, msg: `verify: ${rows.filter((r) => r.ok).length}/${rows.length} passed in ${Math.round((Date.now() - runStarted) / 1000)} s${changedFiles?.length ? ` (scoped to ${changedFiles.length} file(s))` : ''}`, meta: { ms: Date.now() - runStarted, scoped: Boolean(changedFiles?.length), partial: Boolean(only) || isFastTier, ran: rows.length, failed: rows.filter((r) => !r.ok && r.required).map((r) => r.id), ...gatesRunFacts(rows), gameMs: rows.find((r) => r.id === 'game')?.ms ?? null, gateMs: Object.fromEntries(rows.filter((r) => !r.cached && Number.isFinite(r.ms)).map((r) => [r.id, r.ms])), ...(changedByVerify?.length ? { changedByVerify } : {}) } });
   // 2.65.0: a full verify also ends with the uniform job.done (harness/jobs.mjs), which `npm run events -- wait` matches.
   if (!only && !isFastTier) {
     const failedIds = rows.filter((r) => !r.ok && r.required).map((r) => r.id);

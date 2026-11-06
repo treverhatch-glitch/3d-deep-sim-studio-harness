@@ -25,7 +25,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { STUDIO_STATE_DIR, emitEvent, actor } from './event.mjs';
+import { STUDIO_STATE_DIR, REPO_ROOT, emitEvent, actor } from './event.mjs';
 import { parseStudioEnv, envFileSig, envFileState, syncStudioEnv, writeFromFileNote, looksSecret } from './dotenv.mjs';
 
 export const REQUEST_FILE = () => path.join(STUDIO_STATE_DIR, 'env-reload.json');
@@ -114,10 +114,37 @@ export async function reloadCli({ by = null, waitMs = null, env = process.env } 
   return { code: 0, text: `Queued: the supervisor reloads on its next pass (pid ${sup.pid}, asked by ${who}; no answer within one pass, ${Math.round(waitMs / 1000)} s). ${tail}` };
 }
 
+/**
+ * 2.79 (f): the STUDIO_* names a .env sets (names only, never values) and which of them the harness no longer reads.
+ * "Read" = the settings map (docs/SETTINGS.md, generated from the code: a name ending in _ or * is a family), else a
+ * scan of the code when the map is missing. { names, unknown, known: false when no map or code could be found }.
+ */
+export function envNameReport({ root = REPO_ROOT, file = path.join(root, '.env') } = {}) {
+  let text = '';
+  try { text = fs.readFileSync(file, 'utf8'); } catch { text = ''; }
+  const names = [...new Set([...text.replace(/\r/g, '').matchAll(/^\s*(?:export\s+)?(STUDIO_[A-Za-z0-9_]+)\s*=/gm)].map((m) => m[1].toUpperCase()))].sort();
+  let mapText = '';
+  try { mapText = fs.readFileSync(path.join(root, 'docs', 'SETTINGS.md'), 'utf8'); } catch { mapText = ''; }
+  const known = new Set([...mapText.matchAll(/^- `(STUDIO_[A-Z0-9_*]+)`/gm)].map((m) => m[1]));
+  const families = [...known].filter((k) => k.endsWith('*')).map((k) => k.slice(0, -1));
+  const readable = known.size > 0;
+  const unknown = readable ? names.filter((n) => !known.has(n) && !families.some((f) => n.startsWith(f))) : [];
+  return { names, unknown, known: readable };
+}
+/** The text `npm run studio:reload-env` prints after the reload line. */
+export function envNameText(r) {
+  if (!r.names.length) return 'The .env sets no STUDIO_* names.';
+  const lines = [`The .env sets ${r.names.length} STUDIO_* names (names only, no values):`, ...r.names.map((n) => `  ${n}${r.unknown.includes(n) ? '   unknown (removed or misspelled)' : ''}`)];
+  if (!r.known) lines.push('(docs/SETTINGS.md not found: could not check which names the harness still reads.)');
+  else if (r.unknown.length) lines.push(`${r.unknown.length} name${r.unknown.length === 1 ? '' : 's'} the harness no longer reads: remove or fix ${r.unknown.length === 1 ? 'it' : 'them'} in .env.`);
+  return lines.join('\n');
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const argv = process.argv.slice(2);
   const i = argv.indexOf('--by');
   const r = await reloadCli({ by: i >= 0 ? argv[i + 1] : null });
   console.log(r.text);
+  try { console.log(envNameText(envNameReport())); } catch {}
   process.exit(r.code);
 }

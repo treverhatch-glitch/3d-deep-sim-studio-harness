@@ -58,6 +58,8 @@ inherits the supervisor's; `STUDIO_ENV_FROM_FILE` is the internal note of which 
 follows the file; a line removed from `.env` gives that setting its default back. Identity settings (`STUDIO_LOCK_OWNER`,
 `STUDIO_ROLE`, `STUDIO_AGENT`, `STUDIO_MAIN_ROOT`) are never taken from `.env`. Read once at start, so a restart is still
 needed: `STUDIO_SUPERVISOR_SEC`, `STUDIO_HEARTBEAT_SEC`, `HUB_PORT`.
+`studio:reload-env` (2.79) also lists the `STUDIO_*` names the `.env` sets (names only, never values) and marks any the
+harness no longer reads (not in `docs/SETTINGS.md`) as "unknown (removed or misspelled)".
 
 2.77.1 (B-102): a pass never stops the loop. The loop is set before the first pass, passes never overlap, and each step of
 a pass (the hub, the Line Producer, the launch step, the Director's flow, the machine scan, the Communicator, the

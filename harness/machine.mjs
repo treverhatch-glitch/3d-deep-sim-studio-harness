@@ -436,7 +436,7 @@ export async function sampleMachine({ root = MACHINE_ROOT, env = process.env, no
   const s = compactSample(p);
   appendHistory(root, s, env);
   const send = emit || (await import('./event.mjs')).emitEvent;
-  try { send({ type: 'machine.sample', agent: 'supervisor', msg: machineLine(p), meta: s }); } catch {}
+  try { (await import('./telemetry.mjs')).emitSampled({ type: 'machine.sample', agent: 'supervisor', msg: machineLine(p), meta: s }, 'sample', { now, emit: send, env }); } catch {}
   const disk = diskBudget({ root, env, profile: p });
   if (disk.low) {
     const st = readJson(diskStateFile(root)) || {};
