@@ -53,7 +53,6 @@ export const DEFAULT_AUTONOMOUS_ACTIONS = [...AUTONOMOUS_ELIGIBLE];
 export const NEVER_AUTONOMOUS = ['protected-files', 'gates', 'policy', 'money', 'deletes', 'visibility', 'keys'];
 export const NEVER_WORDS = 'protected files, gates and the policy file, money, deletes (janitor-lanes, any rm), visibility and keys';
 export const DEFAULT_REVIEW_H = 72;
-export const DEFAULT_POLICY = Object.freeze({ autonomous: Object.freeze({ allowed: false, agent: null, actions: DEFAULT_AUTONOMOUS_ACTIONS, reviewWithinH: DEFAULT_REVIEW_H }), never: [], notes: [] });
 /** A policy "never" word and the decision actions it rules out (for any agent: delegation and autonomous mode). */
 export const NEVER_ACTIONS = { 'delete-lanes': ['janitor-lanes'], deletes: ['janitor-lanes'], 'janitor-lanes': ['janitor-lanes'], 'upgrade-auto': ['upgrade-auto'], upgrades: ['upgrade-auto'] };
 /**

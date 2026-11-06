@@ -381,7 +381,7 @@ export function checkStamped(file, { text = undefined, root = REPO_ROOT, now = D
 }
 
 /** Every stamped record checked once: [records]. */
-export function checkAllStamps({ root = REPO_ROOT, now = Date.now(), env = process.env } = {}) {
+function checkAllStamps({ root = REPO_ROOT, now = Date.now(), env = process.env } = {}) {
   const dir = path.join(root, '.studio', 'write-stamps');
   let names = [];
   try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.json')); } catch { return []; }
@@ -398,7 +398,7 @@ export function checkAllStamps({ root = REPO_ROOT, now = Date.now(), env = proce
 // ---- detection: the event log (supervisor restarts, killed launchers) ---------------------------------------------
 
 const STOP_BY_HAND = /Supervisor stopped \((stopped by hand|stopped by the system|studio:stop was asked)\)/;
-export function detectFromEvents(events, { now = Date.now(), env = process.env } = {}) {
+function detectFromEvents(events, { now = Date.now(), env = process.env } = {}) {
   if (off(env)) return [];
   const { restartMs } = settings(env);
   const ts = (e) => Date.parse(e?.ts) || 0;

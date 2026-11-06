@@ -271,7 +271,6 @@ export async function cli(argv) {
   (r.ok ? console.log : console.error)(`[visual] ${r.ok ? '' : 'not recorded: '}${r.why || r.text}`);
   return r.ok ? 0 : 1;
 }
-export const VISUAL_CHECK_COMMANDS = new Set(['shots', 'asset', 'looked', 'review', 'send', 'status']);
 void REPO_ROOT;
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) process.exit(await cli(process.argv.slice(2)));

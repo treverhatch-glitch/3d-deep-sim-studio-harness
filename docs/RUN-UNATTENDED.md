@@ -149,7 +149,7 @@ Scheduler (Windows); `--uninstall` removes it.
   or the builder's own "owner-only step" / "waits for the owner" / "needs the owner's approval"), harness/owner-only.mjs parks
   the task with reason `owner-only` at the orchestrator's rank, sends an event to the orchestrator (the Communicator turns it
   into an alert) and the supervisor starts no builder on it until `npm run task -- unpark <ID> --by <name>` (the orchestrator
-  or the owner). `STUDIO_OWNER_ONLY_PARK=off` turns it off.
+  or the owner).
 - **The stall watchdog (harness/stall.mjs).** A session with no file write, commit or task change for
   `STUDIO_STALL_MIN` (15) minutes, or past its wall-clock cap (`STUDIO_SESSION_MAX_MIN`, 90; planning roles
   `STUDIO_SESSION_PLAN_MAX_MIN`, 25), is ended and its task handed back (`session.stall`). 2.77.3 (B-109): the

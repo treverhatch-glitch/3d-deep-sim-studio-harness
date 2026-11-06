@@ -119,6 +119,11 @@ export async function reloadCli({ by = null, waitMs = null, env = process.env } 
  * "Read" = the settings map (docs/SETTINGS.md, generated from the code: a name ending in _ or * is a family), else a
  * scan of the code when the map is missing. { names, unknown, known: false when no map or code could be found }.
  */
+/**
+ * 2.79.1 (e): switches removed from the harness, as the part after STUDIO_ (written so the settings map doesn't read them
+ * as settings). A .env that still sets one is flagged unknown even when a family wildcard in the map would cover it.
+ */
+export const REMOVED_SETTINGS = ['LANE_LOCKS', 'TYPE_EVIDENCE', 'UNITY_PLAYMODE_RETRY', 'TRAIN_GREEN_FIRST', 'STAGE1_PLAYTEST', 'REVIEW_VERDICT_LINE', 'DONE_SKIP_GAME_NONCODE', 'TRAIN_LAND_OVER_NONCODE', 'OWNER_ONLY_PARK'].map((k) => `STUDIO_${k}`);
 export function envNameReport({ root = REPO_ROOT, file = path.join(root, '.env') } = {}) {
   let text = '';
   try { text = fs.readFileSync(file, 'utf8'); } catch { text = ''; }
@@ -128,7 +133,7 @@ export function envNameReport({ root = REPO_ROOT, file = path.join(root, '.env')
   const known = new Set([...mapText.matchAll(/^- `(STUDIO_[A-Z0-9_*]+)`/gm)].map((m) => m[1]));
   const families = [...known].filter((k) => k.endsWith('*')).map((k) => k.slice(0, -1));
   const readable = known.size > 0;
-  const unknown = readable ? names.filter((n) => !known.has(n) && !families.some((f) => n.startsWith(f))) : [];
+  const unknown = readable ? names.filter((n) => REMOVED_SETTINGS.includes(n) || (!known.has(n) && !families.some((f) => n.startsWith(f)))) : [];
   return { names, unknown, known: readable };
 }
 /** The text `npm run studio:reload-env` prints after the reload line. */

@@ -164,7 +164,6 @@ stops from a fixed list, and sends one daily digest instead of approval pings.
   (harness/type-evidence.mjs). Any file in the game's sim paths (`game|web/<g>/sim`, `cartridges/`, the manifest's
   `simPaths`, `pins.files`, `irreversible`, `shared`, `registry`), a golden, a deleted test, the studio's own code or
   other code keeps the bug and its replay. An owner's `npm run task -- type <ID> bug` outranks the evidence.
-  `STUDIO_TYPE_EVIDENCE=off` lets the title decide.
 - **Self-triage** (harness/self-triage.mjs, the list in harness/self-triage.json; `node harness/self-triage.mjs status`).
   The watchdog runs it on every pass; the supervisor and the game checks ask it when they stop. Each fix is one
   `selftriage.<fix>` event and runs at most once per cause per `onceHours` (6); a cause that comes back, and any cause

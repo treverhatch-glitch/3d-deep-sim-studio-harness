@@ -238,8 +238,6 @@ export function findSecrets(text, { path = '', glued = false } = {}) {
   return out;
 }
 
-export const hasSecret = (text) => findSecrets(text).length > 0;
-
 /**
  * Replace every secret the scan would report (and private key blocks, and provider shapes inside base64 runs)
  * with [removed]; returns { text, hits }. A named secret keeps its name: `JWT_SECRET=[removed]`.

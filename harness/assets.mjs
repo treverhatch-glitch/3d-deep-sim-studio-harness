@@ -30,7 +30,6 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { addRef } from './refs.mjs';
 
-export const ASSETS_DIR = path.join(REPO_ROOT, 'assets');
 export const MANIFEST = path.join(REPO_ROOT, 'studio', 'assets', 'manifest.json');
 const AGENTISH = /^(producer|director|liaison|builder|rnd|planner|reviewer|watch|agent|claude|codex|cursor|grok|gemini)(-|$)/i;
 

@@ -52,7 +52,6 @@ import { digestHours as askDigestHours } from './ask-post.mjs';
 
 export const CONFIG_REL = 'studio/communicator.json';
 export const ROLES = ['orchestrator', 'keys', 'owner'];
-export const OWNER_KINDS = new Set(['decision', 'disaster']);
 export const DEFAULT_USERNAME = 'Studio Status';
 const RETRY_MS = 5 * 60000;
 const LOW_BUILDERS_MS = 10 * 60000;

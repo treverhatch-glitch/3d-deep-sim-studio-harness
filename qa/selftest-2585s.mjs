@@ -61,7 +61,8 @@ console.log(JSON.stringify({
   const id = (out(run(dir, 'node harness/task.mjs add "Docs: the demo readme says how to play" --role builder --priority P1', env)).match(/"id": "(T-\d+)"/) || [])[1];
   run(dir, `node harness/task.mjs start ${id} --agent bld-s1`, as('bld-s1'));
   fs.appendFileSync(path.join(dir, 'game/demo/README.md'), '\nClick to start.\n');
-  g('add', 'game/demo/README.md'); g('commit', '-qm', `readme\n\nStudio-Task: ${id}`, '--no-verify');
+  write('game/demo/play.txt', 'click\n');
+  g('add', 'game/demo/README.md', 'game/demo/play.txt'); g('commit', '-qm', `readme\n\nStudio-Task: ${id}`, '--no-verify');
   // An untracked file the verify ran beside (verify's clean tree counts tracked files only): task done must not trust it.
   write('scratch-2585s.txt', 'not committed\n');
   const v = run(dir, 'node scripts/run-gates.mjs', as('bld-s1'));
@@ -71,9 +72,9 @@ console.log(JSON.stringify({
   report('2.58.5 (H-3): a verify record names the tree it tested (HEAD^{tree} at the start) and the paths that scoped its game gate',
     v.status === 0 && rec?.tree === tree && rec.dirty === false && Array.isArray(rec.gatePaths), `${out(v).slice(-1200)}\n${JSON.stringify(rec)?.slice(0, 600)}`);
 
-  // 2.78.2: a docs task that changes only a README now skips the game's checks (STUDIO_DONE_SKIP_GAME_NONCODE, checked in
-  // selftest-2782c); this check is about reusing a verify, so it pins the old rule.
-  const done = (extra = {}) => run(dir, `node harness/task.mjs done ${id} --agent bld-s1`, as('bld-s1', { FAKE_LOAD_FAIL: '1', STUDIO_DONE_SKIP_GAME_NONCODE: 'off', ...extra }));
+  // 2.78.2: a docs task that changes only a README skips the game's checks (checked in selftest-2782c); this check is about
+  // reusing a verify, so the task also changes a non-doc file (2.79.1 (e): was a DONE_SKIP_GAME_NONCODE=off pin (removed switch)).
+  const done = (extra = {}) => run(dir, `node harness/task.mjs done ${id} --agent bld-s1`, as('bld-s1', { FAKE_LOAD_FAIL: '1', ...extra }));
   // Refusals first (each leaves the task open): an untracked file, the switch off, a record whose tree isn't its commit's.
   const untracked = done();
   fs.rmSync(path.join(dir, 'scratch-2585s.txt'), { force: true });

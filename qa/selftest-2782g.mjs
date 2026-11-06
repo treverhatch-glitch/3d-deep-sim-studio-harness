@@ -3,7 +3,7 @@
  *   - Item 16: a train with a green verify of tree T, when main moved meanwhile by commits that touch only files no
  *     check reads (a deleted note, a new handoff: the board rule refuses a delete), lands T and merges those commits on
  *     top (ONE verify, task.train.landed_over_noncode naming the commits). A move by a file a check reads (a docs-read
- *     board file), or STUDIO_TRAIN_LAND_OVER_NONCODE=off, still verifies again. nonCodeReaders: the rule, file by file.
+ *     board file) still verifies again. nonCodeReaders: the rule, file by file.
  *   - Item 18: a track written "unity" (a configured engine without engine:) reads as engine:unity (task add, a record,
  *     task track); task track refuses an engine the studio doesn't configure and a non-track; `task done --train` on an
  *     engine pass it can't queue says why; `upgrade --merge` backfills open engine-porter tasks' tracks (one engine) or
@@ -125,7 +125,7 @@ export async function selftest2782G({ dir, run, report, tmpRoot, root }) {
       return [ok, `lane ${a.ok} ${a.log.slice(-400)}\nruns=${runs() - r0}\n${out(t).slice(-1800)}\nover=${JSON.stringify(lo?.meta)}\nlanded=${landed?.msg}\nparents=${parents.join(',')} move=${moveCommit}`];
     });
 
-    await guard('2.78.2 (g, item 16, guard): main moved during the verify by a commit that deletes a board file the docs check reads (studio/memory/*.md): the train builds and verifies again (2 verify runs, "moved", no landed_over_noncode); and with STUDIO_TRAIN_LAND_OVER_NONCODE=off a deleted run log verifies again too (fails on 2.78.1: it verified again too, but its refusal named neither the check that reads the file ("read by docs") nor the setting; the guard keeps the new rule from widening)', () => {
+    await guard('2.78.2 (g, item 16, guard): main moved during the verify by a commit that deletes a board file the docs check reads (studio/memory/*.md): the train builds and verifies again (2 verify runs, "moved", no landed_over_noncode) (fails on 2.78.1: it verified again too, but its refusal didn\'t name the check that reads the file ("read by docs"); the guard keeps the new rule from widening)', () => {
       const before = evs().filter((e) => e.type === 'task.train.landed_over_noncode').length;
       const movedBefore = evs().filter((e) => e.type === 'task.train.moved').length;
       const b = lane('bld-b', 'Docs: note b', 'game/demo/notes/b.md', '# B\n');
@@ -133,15 +133,11 @@ export async function selftest2782G({ dir, run, report, tmpRoot, root }) {
       const r0 = runs();
       const t = train();
       const runsB = runs() - r0;
-      const c = lane('bld-c', 'Docs: note c', 'game/demo/notes/c.md', '# C\n');
-      fs.writeFileSync(moveSpec, JSON.stringify({ message: 'orchestrator: rotate the older run log', remove: ['studio/notes/older-run-log.md'] }));
-      const r1 = runs();
-      const t2 = train({ STUDIO_TRAIN_LAND_OVER_NONCODE: 'off' });
-      const runsC = runs() - r1;
-      const ok = b.ok && c.ok && t.status === 0 && t2.status === 0 && runsB === 2 && runsC === 2 && mainHas('game/demo/notes/b.md') && mainHas('game/demo/notes/c.md')
-        && evs().filter((e) => e.type === 'task.train.landed_over_noncode').length === before && evs().filter((e) => e.type === 'task.train.moved').length === movedBefore + 2
-        && /read by docs/.test(out(t)) && /STUDIO_TRAIN_LAND_OVER_NONCODE=off/.test(out(t2));
-      return [ok, `b ${b.ok} c ${c.ok} runsB=${runsB} runsC=${runsC}\n${out(t).slice(-1200)}\n---\n${out(t2).slice(-800)}`];
+      // (2.79.1 (e): the TRAIN_LAND_OVER_NONCODE=off run (removed switch) of a deleted run log is gone with the switch.)
+      const ok = b.ok && t.status === 0 && runsB === 2 && mainHas('game/demo/notes/b.md')
+        && evs().filter((e) => e.type === 'task.train.landed_over_noncode').length === before && evs().filter((e) => e.type === 'task.train.moved').length === movedBefore + 1
+        && /read by docs/.test(out(t));
+      return [ok, `b ${b.ok} runsB=${runsB}\n${out(t).slice(-1200)}`];
     });
 
     // The rule, file by file (no train): what a check reads is code.

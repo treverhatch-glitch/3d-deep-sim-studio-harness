@@ -21,12 +21,6 @@ export function isReasoningOnly({ content = '', reasoning = '', tokensOut = 0 } 
   return Boolean(String(reasoning || '').trim()) || inline || Number(tokensOut) > 0;
 }
 
-/** Families to try next: the chain's order, without the family that just failed. */
-export function otherFamilies(failedModel, chainModels) {
-  const bad = modelFamily(failedModel);
-  return chainModels.filter((m) => modelFamily(m) !== bad);
-}
-
 /**
  * A launched session's log (Claude stream-json or Codex JSON lines): did it end with an empty result
  * after spending output tokens? Then nothing usable came back.

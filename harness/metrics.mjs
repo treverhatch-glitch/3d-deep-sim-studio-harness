@@ -34,7 +34,6 @@ import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { impossibleExit } from './busy.mjs';
 
-export const FAILURE_LABELS = ['repetition', 'premature-stop', 'no-stop', 'verify-missing', 'verify-wrong', 'spec-ignored', 'env-harness', 'quota', 'lane-conflict', 'unknown'];
 const ts = (e) => Date.parse(e?.ts) || 0;
 const min = (ms) => Math.round((ms / 60000) * 10) / 10;
 const family = (model) => {

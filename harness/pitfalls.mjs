@@ -98,10 +98,6 @@ function savePitfalls(st) {
   fs.writeFileSync(PITFALLS_STATE, `${JSON.stringify(st, null, 2)}\n`);
 }
 
-/** The accepted lines as the file shows them ("[builder] text (by, date)"), as before 2.61. */
-export function readPitfalls() {
-  return loadPitfalls().lines.map(render);
-}
 export const readPitfallLines = () => loadPitfalls().lines;
 export const listPitfallProposals = () => readJson().proposals.filter((p) => p.status === 'open');
 

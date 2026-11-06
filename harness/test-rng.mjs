@@ -44,7 +44,6 @@ const DEFAULT_ROOT = path.resolve(HERE, '..');
 const CODE_EXT = /\.(m?[jt]sx?|c[jt]s)$/i;
 const SETUP_NAME = /(^|[._-])setup([._-]|$)|^setupTests?\./i;
 const UNSEEDED_ARG = /\bMath\s*\.\s*random\b|\bDate\s*\.\s*now\b|\bperformance\s*\.\s*now\b|\bcrypto\s*\.\s*(getRandomValues|randomUUID|randomInt)\b/;
-export const KINDS = Object.freeze(['shared-random', 'unseeded-game']);
 
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const toPosix = (p) => String(p).replace(/\\/g, '/');

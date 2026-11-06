@@ -290,7 +290,7 @@ A Unity editor run takes 6-7 GB, so it shares the `machine:heavy` lock with full
      as green: the gate prints a WARN naming the tests, adds a record to `.studio/unity-flakes.jsonl` (tests, both
      results, both logs in `.studio/gates/out/unity-PlayMode-try1.log` and `-try2.log`), and the day's digest gets a
      line. Two failures are red. Edit Mode, compile errors, a missing results file and licence problems are never
-     retried. `STUDIO_UNITY_PLAYMODE_RETRY=off` turns retries off.
+     retried.
 
 The land gate (`harness/unity-gate.mjs`) runs the land script as before: the script merges `{branch}` in its own
 worktree, so the harness has no checkout of that branch to run code-only steps on. Its land script can run its own

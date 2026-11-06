@@ -372,7 +372,6 @@ export function runCodeOnly(dir, { log = console.log, root = REPO_ROOT, env = pr
 
 // 2.67.1 (k): a failed Play Mode run is retried once when its tests ran and failed (never a compile error, a missing
 // results file, a licence problem or Edit Mode).
-const retryOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_UNITY_PLAYMODE_RETRY || ''));
 const compileErrors = (log) => /error CS\d+/.test(String(log || ''));
 export const retryablePlayMode = (r) => Boolean(r && !r.ok && !r.busy && r.platform === 'PlayMode' && r.results && r.results.failed > 0 && !compileErrors(r.log) && !r.problems.some((x) => /licence/.test(x)));
 const saveLog = (name, text) => {
@@ -831,10 +830,10 @@ export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.
         log(`[gate] NOT RUN ${platform}: ${r.notRun.text.replace(`${platform}: `, '')} (not a failure of the work)`);
         break;
       }
-      if (retryablePlayMode(r) && retryOn(env)) {
+      if (retryablePlayMode(r)) {
         const first = r;
         const logs = [saveLog(`unity-${platform}-try1.log`, first.log)];
-        log(`[gate] FAIL ${platform}: ${first.results.failed}/${first.results.total} failed; retrying once (a Play Mode failure gets one retry; STUDIO_UNITY_PLAYMODE_RETRY=off turns it off)`);
+        log(`[gate] FAIL ${platform}: ${first.results.failed}/${first.results.total} failed; retrying once (a Play Mode failure gets one retry)`);
         r = runPlatform(dir, platform, opts, { split, log });
         logs.push(saveLog(`unity-${platform}-try2.log`, r.log));
         const tests = first.results.failures.map((f) => f.name);

@@ -120,7 +120,7 @@ export async function needsPerson({ now = Date.now(), root = REPO_ROOT, events =
  * 2.66.0 (npm run fuzz): fuzz findings of the last 24 h. Suggested ones (the shadow week) need a person to file or
  * ignore them: [{ kind: 'fuzz', line }]. Filed ones are only counted (fuzzFiledLine).
  */
-export function fuzzSuggestions(ev, now = Date.now()) {
+function fuzzSuggestions(ev, now = Date.now()) {
   const recent = ev.filter((e) => e.type === 'fuzz.finding' && e.meta?.mode === 'suggest' && (Date.parse(e.ts) || 0) >= now - DAY);
   if (!recent.length) return [];
   const ids = [...new Set(recent.map((e) => e.meta?.id).filter(Boolean))];

@@ -22,7 +22,7 @@ export async function selftest2782D({ dir, report, tmpRoot, root }) {
   const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
   const readIn = (cwd, rel) => { try { return JSON.parse(fs.readFileSync(path.join(cwd, rel), 'utf8')); } catch { return null; } };
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_WATCHDOG: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_TASK_BASE: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', GITHUB_BASE_REF: '', STUDIO_QUOTA_SKIP: '', STUDIO_QUOTA_MODEL_TOOLS: '', STUDIO_OWNER_ONLY_PARK: '', STUDIO_REVIEWER_TOOL: '', STUDIO_REVIEW_TOOLS: '', STUDIO_TOOL_AGY_MODEL: '', STUDIO_REVIEW_AGY_FALLBACK: '', STUDIO_BUDGET_STOP: '' };
+  const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_WATCHDOG: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_TASK_BASE: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', GITHUB_BASE_REF: '', STUDIO_QUOTA_SKIP: '', STUDIO_QUOTA_MODEL_TOOLS: '', STUDIO_REVIEWER_TOOL: '', STUDIO_REVIEW_TOOLS: '', STUDIO_TOOL_AGY_MODEL: '', STUDIO_REVIEW_AGY_FALLBACK: '', STUDIO_BUDGET_STOP: '' };
   let n = 0;
   const made = [];
   const studio = (name) => {
