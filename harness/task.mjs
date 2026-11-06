@@ -888,6 +888,19 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   // 2.72.0 (b): the game's checks passed: fixed purity hits leave the baseline (a commit of that file only) before it lands.
   if (!force) shrinkAtDone({ root: REPO_ROOT, task: target.id, agent });
 
+  // 2.79 (e): an engine-porter task runs its engine's quickCheck (studio/game.json engines.<x>.quickCheck, npm run engine --
+  // check) in its lane copy and is refused on red: the porter's own check, like a builder's game checks. Not configured: nothing.
+  if (!force && !checkOnly) {
+    const qe = (() => { try { const r = extEngine || engineTaskOf(target.id); return r?.engine || null; } catch { return null; } })();
+    if (qe && (target.role === 'engine-porter' || extEngine) && typeof engineTarget(qe)?.cfg?.quickCheck === 'string' && engineTarget(qe).cfg.quickCheck.trim()) {
+      const qc = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'engine-check.mjs'), '--json', '--engine', qe, '--task', target.id], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+      let c = null;
+      try { c = JSON.parse((qc.stdout || '').trim().split('\n').pop()); } catch {}
+      if (!c) return { error: 'engine-check', message: `${target.id} is not done: the ${qe} quick check didn't report (${`${qc.stderr || ''}${qc.stdout || ''}`.trim().slice(-300) || `exit ${qc.status}`}). npm run engine -- check --task ${target.id} runs it.` };
+      if (c.status !== 'pass' && c.status !== 'skipped') return { error: 'engine-check', message: `${target.id} is not done: ${c.why}${c.tail ? `\n${c.tail.split('\n').map((l) => `  ${l}`).join('\n')}` : ''}\nFix it, run npm run engine -- check --task ${target.id}, then done again.` };
+    }
+  }
+
   // 2.63.0: task done --train on a Unity-track task: every check above passed; the Unity merge train
   // (harness/unity-train.mjs) lands its branch with others on one land run and closes it then. Nothing is closed here.
   if (unityTrainCheck) return force ? { error: 'train-force', message: 'A forced done never goes through the Unity train.' } : { unityReady: true, id: target.id, type: check.type };

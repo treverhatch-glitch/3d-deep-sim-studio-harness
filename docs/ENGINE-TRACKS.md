@@ -123,9 +123,18 @@ Engine trains run beside the web train and beside each other. They compete only 
 `npm run task -- train --engine <name>` still starts one by hand, and `npm run line -- status --json` shows the
 `engines` rows: queued, running, expected minutes, and why each one waits.
 
-## Quiet windows and the rig budget (P5.3)
+## The engine slot, and the quiet window (P5.3, 2.79)
 
-The owner's order is train > builder verifies > Unity/art > soaks. An engine train starts only when all of these hold:
+The owner's order is train > builder verifies > Unity/art > soaks. **2.79:** an engine train starts when the engine's
+own slot is free (`STUDIO_ENGINE_SLOTS`, default 1; see "The engine line" below): game trains and verifies never take
+that slot and the engine land never takes a game slot, so an engine train neither waits behind a game train nor needs
+`train auto off` to get the machine, and game trains don't wait behind it. Free RAM is the land's own heavy wait (it
+queues for its RAM and never starves a game job). The Line Producer's `engines` rows say "the <engine> slot is free" or
+which engine land holds it.
+
+The older quiet window (2.77.0) is kept for an engine that wants a quiet machine: `"window": "quiet"` in its engine
+config, or `STUDIO_ENGINE_WINDOW=quiet`, and whenever the engine line is off (`STUDIO_ENGINE_SLOTS=0` or `off`). Then
+the train starts only when all of these hold:
 
 - no web train is running (its lock is held);
 - no other job of the same heavy kind is running (for Unity, another Unity job);
@@ -250,3 +259,20 @@ to `.studio/comm/notices.jsonl`, is posted in the Communicator's next pass, and 
 - Plain `task done` (no `--train`) still runs the land gate in the foreground, outside the quiet-window schedule.
 - Nothing has been run against a real Unity or Godot editor: the selftest uses a made-up engine repo and a stand-in
   editor command.
+
+## Engine config keys added in 2.79
+
+All live in `studio/game.json` `engines.<x>`, beside `land`. Each is optional; absent means nothing happens.
+
+| Key | What it does |
+| --- | --- |
+| `"preLand": "<command>"` | Run once per lane before the long land run, in a throwaway checkout of the engine repo at the lane's commit (never the land script's own worktree), with `STUDIO_LANE_COMMIT`, `STUDIO_LANE_DIR` and `STUDIO_ENGINE_REPO` set (`preLandTimeoutMin`, default 10). A non-zero exit refuses that lane BEFORE the land run: it is handed back with the command's last 8 output lines, with `cause: precheck` on the event and the hand-back (not a red land run). A command that can't run defers the lane (nobody blamed). Example, generic: `"preLand": "<your pin check>"`, a script in the engine repo that compares the lane's pinned bundle id (read from the lane's own pin file in `STUDIO_LANE_DIR`) with the one the land would use, and exits 1 printing both ids when they differ. |
+| `"quickCheck": "<command>"` | The porter's own check, e.g. a compile of the sim and test assemblies without the editor. `npm run engine -- check [--engine unity] [--task <ID>]` runs it in the porter's lane copy (`.lanes/engine/<ID>`), one at a time per engine on the machine (the quick check command sees `STUDIO_ENGINE_LANE_DIR` (the lane copy it runs in) and `STUDIO_ENGINE`; lock `engine-check:<engine>`, a holder that is gone or older than `STUDIO_ENGINE_CHECK_STALE_MIN` (120) is taken over; a waiting check prints a status line; `STUDIO_ENGINE_CHECK_WAIT_MIN`, default 20). `task done` of an engine-porter task runs it and refuses on red. `quickCheckTimeoutMin` (30). |
+| `"shots": "<folder>"` | Folder of PNGs the engine's play-mode tests write (relative to the land command's folder, or absolute). After a green land: the new shots go to `studio/proof/<task>/engine-after/`, the previous green land's (kept in `.studio/engine-shots/<engine>/last/`) to `engine-before/`, a side-by-side page `qa/reports/engine-compare/<task>.html` (before \| after per file name) is written, `last/` is updated, and one Studio Status line with the page path is queued through the Communicator. No shots, nothing happens. |
+| `"window": "quiet"` | Keep the quiet-window start (see above) for this engine instead of the engine slot. |
+
+**Bisect on the batch's failure signature (2.79).** When a batch's land run is red, its failing test names are read from
+the run's output (NUnit result tags, `Failed : X`, `Failed X [12 ms]`, `[  FAILED  ] X`). The bisect then narrows
+through the subsets whose failures are the same names or a subset of them, and stops after `STUDIO_ENGINE_BISECT_MAX`
+runs (default 3), handing back the lanes still in the red range instead of re-running every remaining subset. If no
+names can be read, the bisect is the full search it was.

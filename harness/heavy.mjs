@@ -592,7 +592,10 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   const t0 = Date.now();
   const baseClaim = givenClaim || jobClaim(kind, { root, env, label, profile, state: budgetState(profile, [], { env }), ramGb, vramGb, gpuOnly });
   const room = engineYield && profile ? engineLineRoom(profile, baseClaim, { root, env }) : null;
-  const engineLand = Boolean(room?.ok);
+  // 2.79 (e): with no machine scan, an owner who SET STUDIO_ENGINE_SLOTS (env or .env) asked for the engine's own slot:
+  // the land takes it (a game verify never does, the land never takes a game slot). Unset: shares the game's slots as before.
+  const explicitLine = engineYield && !profile && isNum(liveCount(root, 'STUDIO_ENGINE_SLOTS', env).value);
+  const engineLand = Boolean(room?.ok) || explicitLine;
   if (room && !room.ok) log(`[heavy] ${label}: ${room.why}`);
   const gameLanding = landing && !engineYield;
   const withEngine = (c) => (engineLand && c ? { ...c, engine: String(engine) } : c);
