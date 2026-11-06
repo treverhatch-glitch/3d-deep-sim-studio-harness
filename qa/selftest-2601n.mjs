@@ -222,7 +222,8 @@ console.log(JSON.stringify({ nim, ol, lines: aiderIgnoreLines(), kn: launchLine(
   else {
     fs.mkdirSync(path.join(repo, '.studio', 'briefs'), { recursive: true });
     fs.writeFileSync(path.join(repo, '.studio', 'briefs', `${tasks.lane}.md`), `# ${tasks.lane}\nmade-up brief\n`);
-    const s = start(`--role builder --agent n-lane --task ${tasks.lane} --tool nim --model org/model-a`, { STUDIO_FAKE_AIDER_HISTORY: '1', STUDIO_AIDER_MAP_TOKENS: '0' });
+    // 2.79.2 (a): pinned to the 2.79.1 launch (the brief as --read): a builder in a copy now gets the launcher's aider protocol.
+    const s = start(`--role builder --agent n-lane --task ${tasks.lane} --tool nim --model org/model-a`, { STUDIO_FAKE_AIDER_HISTORY: '1', STUDIO_AIDER_MAP_TOKENS: '0', STUDIO_AIDER_PROTOCOL: 'off' });
     const r = recOf('n-lane');
     const argv = r?.argv || [];
     const ignoreFile = argv[argv.indexOf('--aiderignore') + 1];

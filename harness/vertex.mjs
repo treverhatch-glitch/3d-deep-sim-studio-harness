@@ -15,6 +15,7 @@
  *   STUDIO_VERTEX_HARD_MODEL            a hard task's model: size 4-5 or a chain-breaker (google/gemini-3.1-pro-preview)
  *   STUDIO_VERTEX_SHARE                 the share of builder slots Vertex may take while the plan has headroom (0.5)
  *   STUDIO_VERTEX_PROXY_PORT            the proxy's port (8787)
+ *   STUDIO_VERTEX_MAX_PROMPT_TOKENS     a request over this many prompt tokens stops its session (150000; 0 = no cap)
  *   STUDIO_VERTEX_BASE_URL              the OpenAI-compatible base (default: the global endpoint of VERTEX_PROJECT_ID); https,
  *                                       or http on 127.0.0.1/localhost only; read from the .env file only
  * Spend is always logged and reported (npm run budget, npm run tokens -- --by task); a cap is a budget someone allowed sets
@@ -122,6 +123,20 @@ export function readUsage({ root = studioRoot(), since = 0 } = {}) {
   }
   return out;
 }
+/**
+ * 2.79.2 (a): STUDIO_VERTEX_MAX_PROMPT_TOKENS (150000): a vertex request over this many prompt tokens means the session's
+ * context is out of hand (the crew's sessions sent 438k-520k per request, $0.22-0.40 each). The proxy answers that
+ * session's next request with 403, and the launcher stops it and hands its task back (cause prompt-cap). 0 = no cap.
+ */
+export const VERTEX_MAX_PROMPT_DEFAULT = 150000;
+export const promptCap = (env = process.env) => { const n = Math.round(num(env.STUDIO_VERTEX_MAX_PROMPT_TOKENS, VERTEX_MAX_PROMPT_DEFAULT)); return n >= 0 ? n : VERTEX_MAX_PROMPT_DEFAULT; };
+/** The session's first proxy request over the cap since it started: { over: true, in, cap, why } or { over: false }. */
+export function overPromptCap(agent, { root = studioRoot(), since = 0, cap = promptCap() } = {}) {
+  if (!(cap > 0)) return { over: false };
+  const hit = readUsage({ root, since }).find((u) => u.session === String(agent || '') && (Number(u.in) || 0) > cap);
+  return hit ? { over: true, in: Number(hit.in), cap, why: `a request sent ${Number(hit.in).toLocaleString('en-US')} prompt tokens, over STUDIO_VERTEX_MAX_PROMPT_TOKENS=${cap.toLocaleString('en-US')} (its context is too big: repo map or large files)` } : { over: false };
+}
+
 /** What one session used through the proxy since its start: { requests, tokensIn, tokensOut, costUsd, models }. */
 export function sessionUsage(agent, { root = studioRoot(), since = 0 } = {}) {
   const tag = String(agent || '');

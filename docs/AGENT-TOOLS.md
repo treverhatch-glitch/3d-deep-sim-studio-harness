@@ -276,6 +276,26 @@ npm run agent -- start --role builder --agent nim-1 --tool nim --model <nim mode
   (`STUDIO_FAILED_TAIL_LINES`) go to `.studio/agents/<agent>.failed-<time>.log`, and its lane copy is kept for a look
   (`STUDIO_KEEP_FAILED_LANE=off` removes it as before); the log and an `agent.failed_evidence` event say where. Python
   output is unbuffered (`PYTHONUNBUFFERED=1`, `PYTHONIOENCODING=utf-8`), so a crash still leaves its last lines.
+- The launcher runs the builder protocol around aider (2.79.2, `harness/aider-protocol.mjs`). aider is one-shot and
+  doesn't reliably run shell commands, so a builder on aider (`--tool nim`, `aider`, `vertex`, or an owner tool in
+  `studio/tools.json` whose command starts `aider`) on a task, in its own lane copy, no longer runs `task start` /
+  `task done` itself:
+  - before aider starts, the launcher claims the task (`node harness/task.mjs start <ID> --agent <agent>` in the copy;
+    refused: not started, with the reason);
+  - aider's `--message-file` is a short edit brief (`.studio/kickoff/<agent>.aider.md`: the task, the lane's paths, the
+    rules for edits, the brief's "what / done means / steps / never" without harness commands), not the kickoff; no
+    `--read` brief;
+  - the lane's files go in with `--file`; the agent's `.aiderignore` starts with a whitelist of the lane (so the repo
+    map covers the lane only) and lists every tracked file over `STUDIO_AIDER_MAX_FILE_KB` (default 200) that the lane
+    doesn't name; the map stays capped by `STUDIO_AIDER_MAP_TOKENS`;
+  - after aider exits, the launcher commits its changes on the lane branch (`Studio-Task` / `Studio-Agent` trailers,
+    hooks on), runs `task done --check`, then `task done` (in a copy: queued for the merge train). No change, a refused
+    commit, a failed check or a refused done hands the task back (`task.paused` with `handBackCause` `no-change` or
+    `red`) with aider's last lines and the reason, so the plan's route takes it next (`vertexFailures`, model pools);
+  - `agent.session.end` says which (`meta.aider`: claimed, files changed, commit, check, queued or handed back).
+  An owner tool that runs aider gets the edit brief as `{kickoff}` and the launcher's aider options as `{aiderArgs}`.
+  Other roles, a task-less session, and the shared checkout (no lane copy) start aider as before.
+  `STUDIO_AIDER_PROTOCOL=off` brings back the 2.79.1 launch.
 
 ## One key per agent or role (`STUDIO_KEYMAP_…`, 2.59.0)
 
@@ -356,6 +376,10 @@ npm run agent -- start --role builder --tool vertex --task T-12 [--model google/
   Claude plan at once, which is the owner's aim, while the other half keeps the plan's proven builders on the board so
   the two can be compared (`npm run models -- status`, landed vs handed back) before the share goes up; 1 sends every
   Claude builder to Vertex, 0 keeps Vertex for high-budget times and `agent start --tool vertex`.
+- A request over `STUDIO_VERTEX_MAX_PROMPT_TOKENS` prompt tokens (default 150000; 0 = no cap; 2.79.2) means the
+  session's context is out of hand: the proxy answers that session's next request 403 (not forwarded), the launcher
+  stops it (at its next heartbeat, or when aider exits) and hands its task back (`handBackCause` `prompt-cap`, its
+  edits not committed), and `agent.session.end` says so. One oversized request is the most such a session spends.
 - Spend: each answer's usage goes to `.studio/vertex-usage.jsonl` ({ ts, session, task, tool, model, in = prompt_tokens,
   out = total_tokens - prompt_tokens (Gemini's thinking is billed), total, usd }); a session's tokens and estimated
   dollars land on its `agent.session.end` (`npm run tokens -- --by task`, the same place as the Claude API lane's), and

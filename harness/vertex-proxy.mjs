@@ -16,13 +16,15 @@
  *   - The upstream status and body come back as they are; each answer's usage is appended to .studio/vertex-usage.jsonl as
  *     { ts, session, task, tool, model, in: prompt_tokens, out: total_tokens - prompt_tokens (Gemini's thinking tokens are
  *     billed as output), total, usd (at studio/prices.json) }. The key is never logged, printed or written anywhere.
+ *   - 2.79.2 (a): once a session's request was over STUDIO_VERTEX_MAX_PROMPT_TOKENS (150000), its next request is 403 (not
+ *     forwarded); the launcher stops the session.
  *   - Anything that goes wrong in the proxy is 502, with the key scrubbed from the message.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { readEnvFile, vertexUpstream, vertexId, HEALTH_PATH, USAGE_REL, VERTEX_KEY_ENV, VERTEX_PROJECT_ENV, VERTEX_PORT_DEFAULT } from './vertex.mjs';
+import { readEnvFile, vertexUpstream, vertexId, overPromptCap, promptCap, HEALTH_PATH, USAGE_REL, VERTEX_KEY_ENV, VERTEX_PROJECT_ENV, VERTEX_PORT_DEFAULT } from './vertex.mjs';
 import { priceFor } from './autonomy.mjs';
 
 const TAG = /^session-([A-Za-z0-9][A-Za-z0-9._-]{0,79})$/;
@@ -78,6 +80,10 @@ export function createVertexProxy({ root, fetchImpl = globalThis.fetch } = {}) {
         const vals = readEnvFile(path.join(root, '.env'));
         key = String(vals[VERTEX_KEY_ENV] || '').trim();
         const up = vertexUpstream(vals);
+        // 2.79.2 (a): a session that already sent a request over STUDIO_VERTEX_MAX_PROMPT_TOKENS gets no more (its launcher
+        // stops it and hands its task back): one oversized request is the most it spends.
+        const capped = overPromptCap(agent, { root, since: Date.parse(rec.startedAt || '') || 0, cap: promptCap({ ...process.env, ...vals }) });
+        if (capped.over) return send(res, 403, { error: { message: `${agent} is stopped by the studio: ${capped.why}` } });
         if (!key || !up.base) return send(res, 503, { error: { message: `Vertex is paused or not configured: ${!key ? `${VERTEX_KEY_ENV} is not set` : up.why} in the studio's .env` } });
         let body = Buffer.concat(chunks);
         let model = null;
