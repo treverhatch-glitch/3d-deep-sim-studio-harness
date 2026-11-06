@@ -60,6 +60,22 @@ the whole-game check finishing red does the same. While it's red only fix tasks 
 Fix/Bug/Hotfix/Repair/Revert, a `[fix]` or `[bug]` tag, or a whole-game red task. `npm run task -- trunk green
 --by <name>` ends it; `npm run task -- trunk` shows the state.
 
+## Gate stats (2.79)
+
+`npm run gates -- stats [--days 7] [--json]` counts, from the `gates.run` events of the last N days (full verifies only),
+per gate in `studio/gates.json`: runs (the verifies it was in scope for: a lite studio counts the `lite` gates), times red
+(`meta.failed`), the last red date, its average time (`meta.gateMs`, recorded since 2.79) and "never red in N days".
+`harness-health --morning` prints the same table. It measures only; it switches nothing off.
+
+## Telemetry (2.79)
+
+Diagnostics nobody reads one event at a time are counted, not logged one by one: `gate.timeout_scaled`, `machine.sample`
+and `prompt.prefix.volatile` keep a counter in `.studio/telemetry/<type>.json` and write one `<type>.summary` event per
+hour (`STUDIO_TELEMETRY_HOUR_MIN`, 60) with the count, the top keys and the last one's facts. `STUDIO_TELEMETRY=full`
+writes every occurrence again, for debugging. Types a reader needs per event stay as they are: `hotspot.overlap` and
+`task.overlap` (plan-waves, next-board), `skill.follow` (scorecard), `watch.report` (retro), `agent.heartbeat`
+(metrics), `trigger.would_drop` and `thread.would_route` (the threads shadow report).
+
 ## The autonomy scorecard (2.64.0)
 
 `npm run autonomy` rolls these attempts and the rest of the log up into how much the studio needs a person: hours

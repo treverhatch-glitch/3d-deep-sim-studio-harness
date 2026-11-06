@@ -630,7 +630,9 @@ RAM, threads and minutes; `node harness/rig-budget.mjs` shows an `artBake` share
   RAM, whichever is more) and the claims of jobs started since the scan. **GPU**: the largest GPU's free VRAM less
   `STUDIO_GPU_RESERVE_GB` (2.5 when it drives the display). **CPU**: claimed threads stay within
   `STUDIO_CPU_OVERCOMMIT` (1.5) times the cores. **Slots**: at most `STUDIO_HEAVY_SLOTS` jobs (default computed from
-  the scan, 1 to 6). A GPU-only job takes no slot or CPU share, so it runs beside a verify (2.70.0: the GPU area
+  the scan, 1 to 6: one per 10 GB of total RAM, a quarter of the logical cores, whichever is fewer; 2.79: a 32 GB, 28-thread
+  PC gets 3 with nothing set, it got 6). `STUDIO_TRAIN_PIPELINE` stays `auto` by default: it already starts a second train verify only
+  when this budget has room for it, so a small PC doesn't pipeline. A GPU-only job takes no slot or CPU share, so it runs beside a verify (2.70.0: the GPU area
   below). 2.78.1 (B-117): the slot count is the machine's, not each process's: every waiter also reads the main
   checkout's `.env` on each look, and with both set the lower of the two wins, so lowering `STUDIO_HEAVY_SLOTS` in
   `.env` reaches builder sessions already running (each used to admit by the value it was started with: 4-5 verifies

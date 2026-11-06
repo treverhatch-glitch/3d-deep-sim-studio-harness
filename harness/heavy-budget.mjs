@@ -17,8 +17,8 @@
  *   GPU  the largest GPU's free VRAM minus STUDIO_GPU_RESERVE_GB (2.5 when it drives the display; 0 for a GPU the scan
  *        marks display: false), minus GPU claims the same way. No GPU in the scan: GPU claims aren't held back.
  *   CPU  the threads every non-GPU-only holder claims stay within STUDIO_CPU_OVERCOMMIT (1.5) x logical cores.
- *   slots  at most STUDIO_HEAVY_SLOTS holders (default computed: min((RAM - reserve) / 4, cores / 4), 1..6; 1 with no
- *        scan). A GPU-only claim (Blender preview, a GPU playtest) uses the GPU area and no slot or CPU share, so it
+ *   slots  at most STUDIO_HEAVY_SLOTS holders (default computed: min(total RAM / 10 GB, cores / 4), 1..6, since 2.79;
+ *        was (RAM - reserve) / 4; 1 with no scan). A GPU-only claim (Blender preview, a GPU playtest) uses the GPU area and no slot or CPU share, so it
  *        runs beside a CPU verify.
  * A claim bigger than its whole area can never fit: it runs alone (no other holder in that area) rather than waiting
  * for ever. Test hook: STUDIO_TEST_MACHINE (a profile as JSON, a path to one, or "none" for a failed scan).
@@ -205,12 +205,16 @@ export function mainGpu(p) {
 }
 export const gpuReserveGb = (g, env = process.env) => Math.max(0, num(env.STUDIO_GPU_RESERVE_GB, g && g.display === false ? 0 : 2.5));
 
-/** STUDIO_HEAVY_SLOTS, else computed from the scan; 1 with no scan (2.67). 0 turns the lock off. */
+/**
+ * STUDIO_HEAVY_SLOTS, else computed from the scan; 1 with no scan (2.67). 0 turns the lock off.
+ * 2.79 (f): by RAM about one slot per 10 GB of total RAM (a 32 GB, 28-thread PC gets 3; it got 6 and the crew set 3 by
+ * hand), a quarter of the logical cores, at least 1, at most 6. Before 2.79 it was one per 4 GB beyond the reserve.
+ */
 export function slotsFor(p, env = process.env) {
   if (env.STUDIO_HEAVY_SLOTS !== undefined && env.STUDIO_HEAVY_SLOTS !== '' && Number.isFinite(Number(env.STUDIO_HEAVY_SLOTS))) return Number(env.STUDIO_HEAVY_SLOTS);
   if (!p) return 1;
   const t = totalRamGb(p);
-  const byRam = t ? Math.floor((t - reserveGb(p, env)) / 4) : 1;
+  const byRam = t ? Math.floor(t / 10) : 1;
   return Math.min(6, Math.max(1, Math.min(byRam, Math.floor(logicalCores(p) / 4))));
 }
 

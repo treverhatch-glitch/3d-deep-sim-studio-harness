@@ -132,7 +132,7 @@ export async function selftest268M({ dir, run, report, tmpRoot }) {
     fs.rmSync(hist, { force: true });
     fs.rmSync(path.join(dir, '.studio', 'machine-disk.json'), { force: true });
     const ev = [];
-    const e2 = { STUDIO_MACHINE_SAMPLE_S: '300', STUDIO_MACHINE_HISTORY_KB: '4', STUDIO_DISK_MIN_FREE_GB: '200' };
+    const e2 = { STUDIO_TELEMETRY: 'full', /* 2.79 (f): machine.sample is one hourly summary by default; this check counts every sample */ STUDIO_MACHINE_SAMPLE_S: '300', STUDIO_MACHINE_HISTORY_KB: '4', STUDIO_DISK_MIN_FREE_GB: '200' };
     const opts = { root: dir, env: e2, platform: 'win32', run: stubRun({ 'powershell.exe': WIN_JSON, 'nvidia-smi': NV }), statfs: statfs130, cpus: idleCpus, wait: () => {}, emit: (e) => ev.push(e), janitor: () => ({ gb: 4.2 }) };
     const t0 = Date.now();
     const first = await m.sampleMachine({ ...opts, now: t0 });

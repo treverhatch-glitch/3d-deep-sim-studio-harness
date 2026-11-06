@@ -207,8 +207,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   const n = a.includes('--morning') ? await needsYou(events, { since }) : null;
-  const text = renderHealth(h) + (n ? renderNeeds(n) : '');
-  if (a.includes('--json')) console.log(JSON.stringify(n ? { ...h, ...n } : h));
+  // 2.79 (f): the morning report also says how often each gate was red in the last 7 days (harness/gate-stats.mjs; measurement only).
+  let gs = null;
+  if (n) {
+    try {
+      const { gateStats, renderGateStats } = await import('./gate-stats.mjs');
+      const { readMode, scopeOf } = await import('./mode.mjs');
+      const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+      const gates = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8')).gates || [];
+      gs = gateStats(events, gates, { scope: scopeOf(readMode()), days: 7 });
+      gs.text = renderGateStats(gs);
+    } catch {}
+  }
+  const text = renderHealth(h) + (n ? renderNeeds(n) : '') + (gs ? `\n${gs.text}` : '');
+  if (a.includes('--json')) console.log(JSON.stringify(n ? { ...h, ...n, ...(gs ? { gateStats: { ...gs, text: undefined } } : {}) } : h));
   else process.stdout.write(text);
   const dir = flag('--write') || (a.includes('--write') ? process.env.STUDIO_RESULTS_DIR : null);
   if (dir) {

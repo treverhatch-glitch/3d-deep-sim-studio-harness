@@ -299,6 +299,19 @@ STUDIO_KEYMAP_AGENT_BUILDER_S3=ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_S3   # builde
 - Inside a launched session (an agent hiring an agent) a mapping counts only as written in the studio's `.env`; one set
   in the session's own shell is refused.
 
+### An API-key builder pool (`STUDIO_API_POOL`, 2.79)
+
+`STUDIO_API_POOL=builder-api2,builder-api3` names builders that bill an API key, each mapped with
+`STUDIO_KEYMAP_AGENT_BUILDER_API2=ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_LANE`, `STUDIO_KEYMAP_AGENT_BUILDER_API3=…` and so on. When the plan's budget is high, the
+supervisor starts builders under these names instead of waiting for headroom, up to the pool's size and the pace, RAM
+and Line Producer caps. "High" is the signal the supervisor already reads: every tool with a known weekly budget is over
+its target for this point in the week (`npm run budget`), or the usage wind-down is on (`STUDIO_USAGE_WINDDOWN_PCT`,
+which also counts a tool that is out of quota). With headroom, plan builders start as before and the pool stays idle.
+A name with no `STUDIO_KEYMAP_AGENT_<NAME>` entry would bill the plan, so it is ignored. During a wind-down only the
+pool starts builders; their lanes still go to the train. The spend guard and the daily token cap apply to the pool as to
+any session. `npm run agent -- start --pool api [--task T-12]` starts one pool builder by hand, whatever the budget. A
+tool that is out of quota through a provider limit (a 429 mark) still holds every session on that tool, pool or not.
+
 ## Scoped agents (`.claude/agents/`)
 
 Claude Code reads three agent definitions from `.claude/agents/`, so a session can hand work to the cheapest model that

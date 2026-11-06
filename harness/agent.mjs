@@ -46,6 +46,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { emitSampled } from './telemetry.mjs';
 import { escalationFor } from './model-tiers.mjs';
 import { launchRoute } from './routing.mjs';
 import { sessionReasoningOnly, rerouteFor } from './reasoning-only.mjs';
@@ -1202,7 +1203,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   const { stable, volatile } = sessionPromptParts({ role, agent, model, task, lane, oneTask, refreshes, note, by, tool, custom, copy, engineLane });
   // 2.30q (#8): warn when something session-specific slipped into the stable prefix (it would break the cache).
-  { const leaks = volatileLeaks(stable, { agent, model, task }); if (leaks.length) emitEvent({ type: 'prompt.prefix.volatile', agent, to: 'producer', status: 'warn', msg: `${role} prompt prefix carries ${leaks.join(', ')}: every ${role} session misses the prompt cache; move it below the stable marker`, meta: { role, leaks } }); }
+  { const leaks = volatileLeaks(stable, { agent, model, task }); if (leaks.length) emitSampled({ type: 'prompt.prefix.volatile', agent, to: 'producer', status: 'warn', msg: `${role} prompt prefix carries ${leaks.join(', ')}: every ${role} session misses the prompt cache; move it below the stable marker`, meta: { role, leaks } }, `${role}: ${leaks.join(',')}`); }
   const prompt = layoutPrompt({ stable, volatile });
   let prefix = null;
   try {
@@ -2332,7 +2333,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const d = listDivisions().find((x) => x.id === division);
       if (d && !d.active) setDivision(division, true, flag('by') || 'producer');
     }
-    const base = { autoName: argv.includes('--auto-name'), role: flag('role'), agent: flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), next: argv.includes('--next'), lane: flag('lane'), oneTask: argv.includes('--one-task') || Boolean(flag('loop')), extra: Number(flag('extra')) || 0, division, note: flag('note') || '', by: flag('by') || (cmd === 'hire' ? process.env.STUDIO_LOCK_OWNER || null : null), loop: flag('loop'), approved: argv.includes('--approved'), forceModel: argv.includes('--force-model') };
+    // 2.79 (f): `--pool api` starts one builder of STUDIO_API_POOL (billed to its mapped API key) by hand (harness/api-pool.mjs).
+    let poolAgent = null;
+    if (flag('pool')) {
+      if (String(flag('pool')).toLowerCase() !== 'api') { console.error('--pool takes "api" (the builders named in STUDIO_API_POOL)'); process.exit(1); }
+      const pm = (await import('./api-pool.mjs')).pickManual({ live: sessions() });
+      if (!pm.name) { console.error(`No API-pool builder to start: ${pm.why}`); process.exit(1); }
+      poolAgent = pm.name;
+    }
+    const base = { autoName: argv.includes('--auto-name'), role: poolAgent ? 'builder' : flag('role'), agent: poolAgent || flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), next: argv.includes('--next'), lane: flag('lane'), oneTask: argv.includes('--one-task') || Boolean(flag('loop')), extra: Number(flag('extra')) || 0, division, note: flag('note') || '', by: flag('by') || (cmd === 'hire' ? process.env.STUDIO_LOCK_OWNER || null : null), loop: flag('loop'), approved: argv.includes('--approved'), forceModel: argv.includes('--force-model') };
     // A hire runs in the background unless --foreground: tied to the hiring shell, it died with it and its
     // record stayed "running" with its claims held (test #3, engine-porter-1).
     const r = startAgent(base, { detach: argv.includes('--detach') || (cmd === 'hire' && !argv.includes('--foreground')) });
