@@ -4,6 +4,7 @@
  */
 
 import fs from 'node:fs';
+import { postAsk } from './ask-post.mjs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1962,7 +1963,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const heldWhy = `impossible as written (reported by ${who}): ${why}`.slice(0, 400);
     setHold(targetId, { parked: { by: 'producer', why: heldWhy, at: new Date().toISOString(), impossible: true } }, { by: who, msg: `${targetId} held for the Producer: ${heldWhy}`.slice(0, 500) });
     emitEvent({ type: 'task.impossible', agent: who, to: 'producer', task: targetId, model, status: 'blocked', msg: `${targetId} is impossible as written (${who}): ${why}`.slice(0, 600), meta: { why, model } });
-    emitEvent({ type: 'agent.ask', agent: who, to: 'producer', task: targetId, msg: `${targetId} can't be done as written: ${why}. It is released and held for you; fix the task, then npm run task -- unpark ${targetId} --by <name>.`.slice(0, 600) });
+    postAsk({ agent: who, to: 'producer', task: targetId, subject: 'parked', msg: `${targetId} can't be done as written: ${why}. It is released and held for you; fix the task, then npm run task -- unpark ${targetId} --by <name>.`.slice(0, 600) });
     try { canaryEnd(targetId, 'honest', { agent: who, model }); } catch { /* a record, never a blocker */ }
     console.log(`${targetId} released as impossible and held for the Producer. Not a failure. Pick another task: npm run task -- next.`);
     process.exit(0);

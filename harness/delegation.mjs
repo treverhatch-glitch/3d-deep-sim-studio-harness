@@ -42,7 +42,8 @@ import { agentLikeName, launchedSession } from './agent-env.mjs';
 import { autonomousFor, policyNeverWhy, embeddedAutonomyOk } from './policy-rules.mjs';
 import { logDecision } from './decisions-log.mjs';
 import { grantBody, isProxyGrant, PROXY_MAX_DAYS, PROXY_DEFAULT_DAYS, PROXY_NEVER } from './owner-proxy.mjs';
-import { betaActor, BETA_NEVER, recordBetaUse } from './beta-mode.mjs';
+import { betaActor, BETA_NEVER, recordBetaUse, readBeta } from './beta-mode.mjs';
+const readBetaOn = (root) => readBeta({ root }).on;
 
 export const DELEGATION_REL = 'studio/delegation.json';
 /**
@@ -176,10 +177,12 @@ function betaFor({ action, by, env, root }) {
   const who = String(by || '').trim();
   if (!who) return null;
   let a = null;
-  try { a = betaActor({ env, from: root }); } catch { return null; }
+  // 2.79 (c): an owner-only act is refused first, whoever asks (harness/owner-acts.mjs); --by names the agent in a shell
+  // the harness didn't launch and that names nobody (an outside signer: --by grokbot).
+  if (BETA_NEVER.includes(String(action || '').toLowerCase())) { try { if (readBetaOn(root)) return { ok: false, why: `no delegation applies: beta mode never covers ${action}` }; } catch {} return null; }
+  try { a = betaActor({ env, from: root, by: who }); } catch { return null; }
   if (!a?.ok) return null;
-  if (BETA_NEVER.includes(String(action || '').toLowerCase())) return { ok: false, why: `no delegation applies: beta mode never covers ${action}` };
-  const me = String(env.STUDIO_LOCK_OWNER || '').trim();
+  const me = String(env.STUDIO_LOCK_OWNER || '').trim() || String(a.who || '');
   const owner = String(a.doc.by || '');
   if (!(same(who, a.who) || same(who, me) || same(who, owner))) return null;
   recordBetaUse(a, { action });

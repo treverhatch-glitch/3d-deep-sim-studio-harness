@@ -108,12 +108,24 @@ export function reportLine(r) {
   return `no first-divergence report for ${r.rel}: ${r.why}; only a person releases it`;
 }
 
-/** The names that count as the lane's author: its agent and the Studio-Agent trailers of its own commits. */
-export function laneAuthors(root, base, head, agent = null) {
+/**
+ * The names that count as the lane's author: its agent and the Studio-Agent trailers of its own commits. 2.79 (c): a merge
+ * of main into the lane (a lane refresh, the train's catch-up: every parent but the first is in main's history, `tip`) is
+ * nobody's authorship, nor is a commit main already has; so the orchestrator whose only commits on a lane are lane-refresh
+ * merges can be its second signer. A merge that brings in commits main hasn't (another branch) still counts.
+ */
+export function laneAuthors(root, base, head, agent = null, { tip = null } = {}) {
   const names = new Set();
   if (String(agent || '').trim()) names.add(String(agent).trim());
-  const r = git(root, ['log', '--format=%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', `${base}..${head}`]);
-  for (const l of out(r).split('\n')) for (const n of l.split(',')) if (n.trim()) names.add(n.trim());
+  const main = tip || out(git(root, ['rev-parse', '--verify', '--quiet', 'refs/heads/main'])) || out(git(root, ['rev-parse', '--verify', '--quiet', 'refs/heads/master']));
+  const r = git(root, ['log', '--format=%x1e%H %P%x09%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', `${base}..${head}`, ...(main ? [`^${main}`] : [])]);
+  const inMain = (sha) => Boolean(main) && git(root, ['merge-base', '--is-ancestor', sha, main]).status === 0;
+  for (const block of out(r).split('\x1e').filter((b) => b.trim())) {
+    const [shas = '', tags = ''] = block.replace(/\n+$/, '').split('\t');
+    const parents = shas.trim().split(/\s+/).slice(1);
+    if (parents.length > 1 && parents.slice(1).every(inMain)) continue; // a merge of main: no one's authorship
+    for (const n of tags.split(',')) if (n.trim()) names.add(n.trim());
+  }
   return [...names].slice(0, 12);
 }
 
@@ -122,7 +134,7 @@ export function laneAuthors(root, base, head, agent = null) {
  * with its report. Adds c.rerecord = { reports: [{ rel, ok, entry, why }], authors } and one line per golden to c.why.
  * Changes c in place. Never throws.
  */
-export function rerecordTier(root, c, { base, head, agent = null, dirs = [] } = {}) {
+export function rerecordTier(root, c, { base, head, agent = null, dirs = [], tip = null } = {}) {
   try {
     const files = (c?.files || []).filter((f) => f.tier === 'C' && (f.rules || []).includes('golden-rerecord'));
     if (!files.length || c.tier !== 'C') return c;
@@ -134,7 +146,7 @@ export function rerecordTier(root, c, { base, head, agent = null, dirs = [] } = 
       const r = blob ? findGoldenReport(studios, f.path, blob, { answer: typeof answer === 'string' ? answer : null }) : { ok: false, entry: null, why: `${f.path} is not in main where the lane branched` };
       return { rel: f.path, ...r };
     });
-    c.rerecord = { reports, authors: laneAuthors(root, base, head, agent) };
+    c.rerecord = { reports, authors: laneAuthors(root, base, head, agent, { tip }) };
     c.why = [...c.why, ...reports.map(reportLine)];
   } catch { /* the rule's hold stands without the report lines */ }
   return c;

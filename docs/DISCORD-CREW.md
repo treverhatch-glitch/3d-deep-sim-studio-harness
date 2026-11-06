@@ -142,7 +142,7 @@ supervisor runs it once per pass.
   `STUDIO_COMM_CRASHES` (3) crashes in an hour, everything blocked (no agent, no train, a blocker, the supervisor
   running) over `STUDIO_COMM_BLOCKED_MIN` (60).
 - **Rules**: one alert at most once per `STUDIO_COMM_DEDUP_MIN` (30); one still open is tagged again every
-  `STUDIO_COMM_REPEAT_MIN` (120; disasters every 30); a pass's alerts go in one post, with the status when it is due;
+  `STUDIO_COMM_REPEAT_MIN` (120; disasters every 30; 2.79 (c): an open question at most every `STUDIO_ASK_DIGEST_HOURS`, 24, then the daily digest); a pass's alerts go in one post, with the status when it is due;
   closed alerts are named once ("Cleared: …"); `STUDIO_COMM_QUIET=23:00-07:00` (local time) holds owner-only alerts that
   aren't disasters until it ends. A failed post is tried again after 5 minutes.
 - **One identity**: the webhook's username ("Studio Status"), plain text in parts of at most 2000 characters cut at line

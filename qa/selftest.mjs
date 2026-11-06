@@ -4993,6 +4993,15 @@ if (inShard('selftest-279d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.79 (c): the orchestrator signs for the owner in beta mode (asks of every kind, releases that survive a catch-up merge,
+// second signer on goldens, outside signers), what stays the owner's own, and asks posted once per state change.
+if (inShard('selftest-279c')) {
+  const dir = copyRepo();
+  const { selftest279C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-279c.mjs')).href);
+  await selftest279C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

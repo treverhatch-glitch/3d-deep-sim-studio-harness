@@ -80,7 +80,7 @@ import { recordTrust } from './gate-trust.mjs';
 import { beginTrainLife, reapDeadTrains } from './train-life.mjs';
 import { processHarness, chainGuard, copyHarnessDrift } from './harness-version.mjs';
 import { cancelPath } from './train-watch.mjs';
-import { recreateLaneCopy, ownWorktree, infraHandBack, INFRA_HANDBACK, keepRelease, keptRelease, forgetRelease, mixedLane, mayCarry, noteMixed } from './train-lanes.mjs';
+import { recreateLaneCopy, ownWorktree, infraHandBack, INFRA_HANDBACK, keepRelease, keptRelease, forgetRelease, mixedLane, mayCarry, noteMixed, laneContent, carriedRelease } from './train-lanes.mjs';
 import { readBeta, betaActor, recordBetaUse } from './beta-mode.mjs';
 import { addKnownRed, clearKnownRed, knownRedCandidate, readKnownRed, fileSub } from './known-red.mjs';
 import { toolchainProtected } from './test-toolchain.mjs';
@@ -150,7 +150,14 @@ export function enqueue(root, entry) {
     const i = q.findIndex((e) => e.task === entry.task);
     const rec = { ...entry, at: new Date().toISOString() };
     // 2.63.0: a hold for the owner, and a person's release of it, stay with the entry while its head is the same.
-    if (i >= 0) { const was = q[i]; q.splice(i, 1, { ...rec, ...(was.head === rec.head ? { ...(was.held ? { held: was.held } : {}), ...(was.released ? { released: was.released } : {}) } : {}), at: was.at }); }
+    // 2.79 (c): or while the lane's content is the same (a catch-up merge of main that touches none of the released
+    // files, train-lanes.mjs carriedRelease): the release is carried to the new head, with its hold.
+    if (i >= 0) {
+      const was = q[i];
+      const carried = was.released && was.head !== rec.head ? carriedRelease(root, was.released, { head: rec.head, tip: mainTip(root) }) : null;
+      const keep = was.head === rec.head || Boolean(carried);
+      q.splice(i, 1, { ...rec, ...(keep ? { ...(was.held ? { held: was.held } : {}), ...(was.released ? { released: carried || was.released } : {}) } : {}), at: was.at });
+    }
     else q.push(rec);
     return rec;
   });
@@ -1461,7 +1468,7 @@ export async function laneTier(root, { head, task = null, agent = null, dir = nu
   contractTier(root, task, c);
   // 2.73.0 (g, A13): a re-recorded golden (rule golden-rerecord) carries the harness's first-divergence report, shown in
   // the hold; its release needs a second signer (harness/golden-report.mjs).
-  rerecordTier(root, c, { base, head, agent, dirs: dir ? [dir] : [] });
+  rerecordTier(root, c, { base, head, agent, dirs: dir ? [dir] : [], tip: t });
   return c;
 }
 
@@ -1551,6 +1558,7 @@ export function handBackCount(task) {
 }
 export const maxHandBacks = (env = process.env) => (Number(env.STUDIO_TRAIN_MAX_HANDBACKS) >= 0 && String(env.STUDIO_TRAIN_MAX_HANDBACKS || '').trim() !== '' ? Number(env.STUDIO_TRAIN_MAX_HANDBACKS) : 3);
 
+const mainTip = (root) => out(git(root, 'rev-parse', '--verify', '--quiet', `refs/heads/${mainBranch(root)}`)) || null;
 /** A queue entry waiting for the owner: held, and not released for the head it is at. */
 export const heldNow = (e) => Boolean(e?.held) && !(e.released && e.released.head === e.head);
 /** A release that covers this head. */
@@ -1563,7 +1571,8 @@ export function holdLane(root, lane, { tier, why, rerecord = null, beta = false 
     if (!e) { e = { task: lane.task, agent: lane.agent, dir: lane.dir, branch: lane.branch, head: lane.head, all: Boolean(lane.all), note: lane.note || '', at: new Date().toISOString() }; q.push(e); }
     const fresh = !e.held || e.held.head !== lane.head || e.held.why !== why;
     Object.assign(e, { head: lane.head, branch: lane.branch || e.branch, dir: lane.dir || e.dir, held: { tier, why, head: lane.head, at: fresh ? new Date().toISOString() : e.held.at, ...(rerecord ? { rerecord } : {}), ...(beta ? { beta: true } : {}) } });
-    if (e.released && e.released.head !== lane.head) delete e.released;
+    // 2.79 (c): a release made at another head still covers a lane whose content is the same (carried to this head).
+    if (e.released && e.released.head !== lane.head) { const c = carriedRelease(root, e.released, { head: lane.head, tip: mainTip(root) }); if (c) e.released = c; else delete e.released; }
     return { entry: { ...e }, fresh };
   });
 }
@@ -1622,7 +1631,9 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
     // first-divergence report, a person (harness/golden-report.mjs).
     const second = rerecordRefusal(e.held, { by, agent: dg.ok ? dg.agent : '', recordedBy: rec?.recordedBy || '', delegated: dg.ok, beta: Boolean(dg.beta) });
     if (second) return { ok: false, message: `Refused: ${second}. Nothing was released.` };
-    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true, betaAt: dg.at, decides: 'board' } : {}), ...(ba.ok ? { beta: ba.via, betaAt: ba.doc.at, decides: 'board' } : {}) };
+    // 2.79 (c): the lane's content at release (train-lanes.mjs laneContent), so a new head with the same content keeps it.
+    const content = laneContent(root, { head: e.head, tip: mainTip(root) });
+    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, ...(content ? { content: { key: content.key, files: content.files.slice(0, 200) } } : {}), tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true, betaAt: dg.at, decides: 'board' } : {}), ...(ba.ok ? { beta: ba.via, betaAt: ba.doc.at, decides: 'board' } : {}) };
     return { ok: true, entry: { ...e } };
   });
   if (!r.ok) return r;
@@ -2404,8 +2415,12 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     const entry = queueNow.find((e) => e.task === lane.task);
     // 2.76.0: a release kept for this task and head (.studio/train/releases.json) counts too: an infrastructure hand-back
     // (lane copy missing, a re-queue, a dead train) that took the entry out of the queue never voids it.
-    const kept = releasedFor(entry, now.head) ? null : keptRelease(root, lane.task, now.head);
-    if (kept && entry) entry.released = kept;
+    // 2.79 (c): a release made at an older head whose lane content is the same now (a catch-up merge of main, a re-queue)
+    // is carried to this head, in the queue entry and in the kept releases, instead of voided.
+    const carriedNow = entry?.released && !releasedFor(entry, now.head) ? carriedRelease(root, entry.released, { head: now.head, tip: tip0 }) : null;
+    if (carriedNow && entry) { entry.released = carriedNow; if (!dryRun) { try { requeue(root, { task: lane.task }, { released: carriedNow }); keepRelease(root, lane.task, carriedNow); } catch {} log(`[train] ${id}: ${lane.task}: ${carriedNow.by}'s release at ${String(carriedNow.carriedFrom.at(-1)).slice(0, 8)} still covers ${String(now.head).slice(0, 8)} (the lane's own changes are the same)`); } }
+    const kept = releasedFor(entry, now.head) ? null : keptRelease(root, lane.task, now.head, { tip: tip0 });
+    if (kept && entry) { entry.released = kept; if (kept.carriedFrom && !dryRun) { try { requeue(root, { task: lane.task }, { released: kept }); keepRelease(root, lane.task, kept); } catch {} } }
     const released = releasedFor(entry, now.head) || Boolean(kept);
     const relBy = (entry?.released || kept)?.by;
     res.tiers[lane.task] = c.tier;
