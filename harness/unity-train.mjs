@@ -55,6 +55,7 @@ import { withLandLock } from './merge-lane.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
 import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, taskBranch } from './unity-gate.mjs';
 import { engineTarget, engineFiles } from './engine-tracks.mjs';
+import { recordEngineShots } from './engine-shots.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -110,6 +111,31 @@ export function unityTrainSettings(root = REPO_ROOT, engine = 'unity') {
 
 const headOf = (repo, branch) => out(git(repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`));
 const isAncestor = (repo, a, b) => git(repo, 'merge-base', '--is-ancestor', a, b).status === 0;
+
+/**
+ * 2.79 (e): the engine config's "preLand" command for one lane, before the long land run: run in a throwaway checkout of
+ * the engine repo at the lane's commit (never the land script's own worktree), with STUDIO_LANE_COMMIT, STUDIO_LANE_DIR
+ * and STUDIO_ENGINE_REPO set. { ok: true } | { ok: false, why } (the command exited non-zero: its last lines) |
+ * { error } (could not be run: nobody is blamed).
+ */
+export function runPreLand(s, lane, { root, id, env = process.env, log = () => {} } = {}) {
+  const cmd = typeof s.cfg?.preLand === 'string' ? s.cfg.preLand.trim() : '';
+  if (!cmd) return { ok: true, skipped: true };
+  const dir = path.join(root, '.studio', 'tmp', `preland-${String(id).replace(/[^A-Za-z0-9._-]/g, '_')}-${String(lane.task).replace(/[^A-Za-z0-9._-]/g, '_')}`);
+  fs.mkdirSync(path.dirname(dir), { recursive: true });
+  const cleanup = () => { git(s.repo, 'worktree', 'remove', '--force', dir); try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} git(s.repo, 'worktree', 'prune'); };
+  cleanup();
+  const add = git(s.repo, 'worktree', 'add', '--detach', dir, lane.head);
+  if (add.status !== 0) return { error: `could not check ${short(lane.head)} out for the pre-land check: ${String(add.stderr || '').trim().split('\n').pop()}` };
+  try {
+    log(`[unity-train] ${id}: pre-land check for ${lane.task} (${lane.branch} at ${short(lane.head)}): ${cmd}`);
+    const r = spawnSync(cmd, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout: Math.max(1, num(s.cfg.preLandTimeoutMin, 10)) * 60000, env: { ...env, STUDIO_LANE_COMMIT: lane.head, STUDIO_LANE_DIR: dir, STUDIO_ENGINE_REPO: s.repo } });
+    if (r.error) return { error: `the pre-land command could not run: ${r.error.code || r.error.message}` };
+    if (r.status === 0) return { ok: true };
+    const lines = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd().split('\n').slice(-8).join('\n');
+    return { ok: false, why: `the pre-land check (engines.${s.engine || 'unity'}.preLand) exited ${r.status ?? r.signal ?? '?'}${lines ? `:\n${lines.split('\n').map((x) => `  ${x}`).join('\n')}` : ''}` };
+  } finally { cleanup(); }
+}
 
 // ---- the queue ----------------------------------------------------------------------------------------
 
@@ -274,12 +300,12 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   update({ lanes: lanes.map((l) => l.task), now: 'checking the branches' });
   ev('start', id, `${lanes.length} branch(es): ${lanes.map((l) => `${l.task} (${l.branch})`).join(', ')}${dryRun ? ' (dry run)' : ''}`, { agent: by, meta: { lanes: lanes.map((l) => l.task), dryRun } });
 
-  const drop = (lane, why, { handBack = true } = {}) => {
-    res.dropped.push({ task: lane.task, why });
+  const drop = (lane, why, { handBack = true, cause = null } = {}) => {
+    res.dropped.push({ task: lane.task, why, ...(cause ? { cause } : {}) });
     if (dryRun) return;
     try { dequeueUnity(root, lane.task, engine); } catch {}
-    ev('dropped', id, `${lane.task} handed back: ${why.split('\n')[0]}`, { task: lane.task, agent: by, to: lane.agent, status: 'blocked' });
-    if (handBack) { try { deps.handBack?.(lane, `Not landed by ${L} train ${id}: ${why}`); } catch (e) { log(`[unity-train] ${id}: could not hand ${lane.task} back: ${e.message}`); } }
+    ev('dropped', id, `${lane.task} handed back: ${why.split('\n')[0]}`, { task: lane.task, agent: by, to: lane.agent, status: 'blocked', ...(cause ? { meta: { cause } } : {}) });
+    if (handBack) { try { deps.handBack?.(lane, `Not landed by ${L} train ${id}: ${why}`, cause ? { cause } : undefined); } catch (e) { log(`[unity-train] ${id}: could not hand ${lane.task} back: ${e.message}`); } }
   };
   const defer = (lane, why) => { res.deferred.push({ task: lane.task, why }); if (!dryRun) ev('deferred', id, `${lane.task} waits for the next ${L} train: ${why.split('\n')[0]}`, { task: lane.task, agent: by, to: lane.agent, status: 'warn' }); };
 
@@ -301,6 +327,18 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   for (const l of pre.already) drop(l, `${l.branch} is already in ${target}; task done ${l.task} closes it`, { handBack: false });
   let set = pre.included;
   if (dryRun) { res.message = `Dry run: ${set.length} branch(es) would land on ONE ${L} land run (${set.map((l) => l.task).join(', ') || 'none'}) on ${target} at ${short(tip0)}${s.many ? ' (the land command takes the list)' : set.length > 1 ? ` (through one integration branch, ${UNITY_REF_PREFIX}${id})` : ''}; ${summary(res)}`; return finish(); }
+  // 2.79 (e): the engine's per-lane pre-land check (engines.<x>.preLand), before the long land run: a lane that fails it is
+  // handed back with cause 'precheck' (not a red land run); a check that can't run defers the lane (nobody is blamed).
+  if (typeof s.cfg.preLand === 'string' && s.cfg.preLand.trim()) {
+    const kept = [];
+    for (const l of set) {
+      const pl = runPreLand(s, l, { root, id, env, log });
+      if (pl.ok) kept.push(l);
+      else if (pl.error) defer(l, `${pl.error}; the next ${L} train tries again`);
+      else drop(l, `refused before the land run: ${pl.why}\nFix it on ${l.branch}, then task done ${l.task} --train again.`, { cause: 'precheck' });
+    }
+    set = kept;
+  }
   for (const l of set) deps.markRunning?.(l.task, l.agent);
   const retries = Math.max(0, num(env.STUDIO_UNITY_TRAIN_RETRIES ?? s.cfg.trainRetries, 2));
   const retryMs = Math.max(0, num(env.STUDIO_UNITY_TRAIN_RETRY_MIN ?? s.cfg.trainRetryMin, 10) * 60000);
@@ -344,12 +382,18 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     }
     return r;
   };
+  const shotJobs = [];
   const close = (group, r) => {
     for (const lane of group) {
       const c = deps.close ? deps.close(lane, { train: id, head: r.newTip, repo, target }) : { ok: true };
       if (c?.ok === false) { ev('close_failed', id, `${lane.task} landed but couldn't be closed: ${c.message}`, { task: lane.task, agent: by, to: 'producer', status: 'warn' }); res.unclosed = [...(res.unclosed || []), { task: lane.task, why: c.message }]; }
       try { dequeueUnity(root, lane.task, engine); } catch {}
       res.landed.push(lane.task);
+    }
+    // 2.79 (e): before/after pictures of a green land (engines.<x>.shots); no shots: nothing happens.
+    if (typeof s.cfg.shots === 'string' && s.cfg.shots.trim() && !dryRun) {
+      const base = s.cfg.cwd ? path.resolve(root, s.cfg.cwd) : s.folder;
+      try { shotJobs.push(recordEngineShots({ root, engine, tasks: group.map((l) => l.task), shotsDir: path.resolve(base, s.cfg.shots), deps: deps.shots || {} }).then((x) => { if (x) log(`[unity-train] ${id}: before/after shots: ${x.pages.join(', ')}`); }).catch((e) => log(`[unity-train] ${id}: before/after shots failed: ${e.message}`))); } catch (e) { log(`[unity-train] ${id}: before/after shots failed: ${e.message}`); }
     }
     ev('landed', id, `${target} moved to ${short(r.newTip)} on one land run: ${group.map((l) => l.task).join(', ')}`, { agent: by, status: 'ok', meta: { head: r.newTip, lanes: group.map((l) => l.task) } });
   };
@@ -374,16 +418,26 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       if (r.lane) { drop(r.lane, r.lane.why); remaining = remaining.filter((l) => l.task !== r.lane.task); continue; }
       if (remaining.length === 1) { drop(remaining[0], `${blame(r)}\nFix it on ${remaining[0].branch}, then task done ${remaining[0].task} --train again.`); break; }
       // Prefix bisection: the smallest k with target + the first k branches not green. Green prefixes land.
+      // 2.79 (e): the batch's failure signature (the failing test names the red run printed). A red subset whose failures
+      // are the same names or a subset of them reproduces the batch's failure, so the culprit is in it: the search narrows
+      // there and stops after STUDIO_ENGINE_BISECT_MAX runs (3), handing back the lanes still in the red range, instead of
+      // re-running every subset (25-30 min each). No readable names: today's full search.
+      const sig = Array.isArray(r.failures) && r.failures.length ? new Set(r.failures) : null;
+      const bisectMax = Math.max(1, Math.floor(num(env.STUDIO_ENGINE_BISECT_MAX, 3)));
+      let bisectRuns = 0;
+      let capped = false;
       let lo = 0;
       let hi = remaining.length;
       let bad = r;
       const steps = [{ n: hi, status: r.status }];
       let held = false;
       while (hi - lo > 1) {
+        if (sig && bisectRuns >= bisectMax) { capped = true; break; }
         const mid = Math.floor((lo + hi) / 2);
         const part = remaining.slice(lo, mid);
         const rm = await landGroup(part, `bisect ${remaining.slice(0, mid).map((l) => l.task).join('+')}`);
-        steps.push({ n: mid, status: rm.status });
+        bisectRuns += 1;
+        steps.push({ n: mid, status: rm.status, ...(rm.failures?.length ? { failures: rm.failures.length } : {}), ...(sig && rm.failures?.length && rm.failures.every((n) => sig.has(n)) ? { signature: true } : {}) });
         if (rm.status === 'pass') { close(part, rm); lo = mid; continue; }
         if (rm.status !== 'red' && rm.status !== 'conflict') { hold(remaining.slice(lo), rm); held = true; break; }
         if (rm.lane) { bad = rm; hi = remaining.findIndex((l) => l.task === rm.lane.task) + 1 || mid; break; }
@@ -391,6 +445,14 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         bad = rm;
       }
       if (held) break;
+      if (capped) {
+        const group = remaining.slice(lo, hi);
+        const before = remaining.slice(0, lo).map((l) => l.task);
+        ev('bisect', id, `${steps.map((st) => `${target} + ${remaining.slice(0, st.n).map((l) => l.task).join(' + ')}: ${st.status}${st.signature ? ' (the batch\'s failures)' : ''}`).join(', ')}; stopped after ${bisectRuns} bisect run(s) (STUDIO_ENGINE_BISECT_MAX): ${group.map((l) => l.task).join(', ')} still fail${before.length ? `, ${before.join(' + ')} landed green` : ''}`, { agent: by, meta: { steps, culprits: group.map((l) => l.task), capped: true } });
+        for (const g of group) drop(g, `${blame(bad)}\nThe ${L} train's bisect stopped after ${bisectRuns} run(s) (STUDIO_ENGINE_BISECT_MAX ${bisectMax}): ${target} + ${[...before, ...group.map((l) => l.task)].join(' + ')} still shows the batch's failures (${[...sig].slice(0, 5).join(', ')}${sig.size > 5 ? ', ...' : ''}), so one of ${group.map((l) => l.branch).join(', ')} breaks it${before.length ? `; ${target} + ${before.join(' + ')} landed green` : ''}. Fix it on its branch (merge ${target} in first), then task done <ID> --train again.`);
+        remaining = remaining.slice(hi);
+        continue;
+      }
       const culprit = remaining[hi - 1];
       const before = remaining.slice(0, hi - 1).map((l) => l.task);
       ev('bisect', id, `${steps.map((st) => `${target} + ${remaining.slice(0, st.n).map((l) => l.task).join(' + ')}: ${st.status}`).join(', ')}; first not green with ${culprit.task}`, { agent: by, meta: { steps, culprit: culprit.task } });
@@ -399,6 +461,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     }
   } finally {
     for (const l of set) deps.clearRunning?.(l.task);
+    await Promise.all(shotJobs);
   }
   if (res.ok) res.ok = res.landed.length > 0 || (!res.dropped.length && !res.deferred.length);
   return finish();

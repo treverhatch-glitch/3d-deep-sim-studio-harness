@@ -4949,6 +4949,15 @@ if (inShard('selftest-279a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.79 (e): the engine port's land: per-lane preLand, the bisect's failure signature, the porter's quick check, the engine
+// slot beside game trains, before/after pictures (harness side, any engine).
+if (inShard('selftest-279e')) {
+  const dir = copyRepo();
+  const { selftest279E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-279e.mjs')).href);
+  await selftest279E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

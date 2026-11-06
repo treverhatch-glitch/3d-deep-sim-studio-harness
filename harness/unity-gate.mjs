@@ -149,6 +149,26 @@ const STATUSES = new Set(['pass', 'red', 'conflict', 'refused', 'error', 'not-ru
 // 2.73.2 (e, B-73): signs in a land command's output that the work's own tests or compile failed (then a red stays red).
 const WORK_FAILED = /<test-case\b[^>]*\bresult="Failed"|\b[1-9]\d* (?:test\(s\)|tests?) failed\b|\[gate\] FAIL\b|\[engine-gate\] FAIL (?:test-failed|compile-error)\b|\bTest(?:Run)? ?Failed\b/i;
 /**
+ * 2.79 (e): the names of the tests a land run's output says failed, sorted and unique ([] when none can be read).
+ * Reads the formats the engines' runners print: an NUnit results tag (<test-case ... fullname="X" ... result="Failed">),
+ * the console runner's "Failed : X", dotnet test's "  Failed X [12 ms]" and a "[  FAILED  ] X" line. CRLF is normalized first.
+ */
+export function failingTests(text) {
+  const names = new Set();
+  const t = String(text || '').replace(/\r\n?/g, '\n');
+  for (const m of t.matchAll(/<test-case\b[^>]*>/g)) {
+    if (!/\bresult="Failed"/.test(m[0])) continue;
+    const n = (/\bfullname="([^"]+)"/.exec(m[0]) || /\bname="([^"]+)"/.exec(m[0]))?.[1];
+    if (n) names.add(n);
+  }
+  for (const l of t.split('\n')) {
+    const x = /^\s*(?:\d+\)\s+)?Failed\s*:\s*(\S.*?)\s*$/.exec(l) || /^\s*Failed\s+([\w.<>,()+`-]+)(?:\s*\[.*)?\s*$/.exec(l) || /^\s*\[\s*FAILED\s*\]\s+(\S.*?)\s*$/.exec(l);
+    if (x) names.add(x[1]);
+  }
+  return [...names].sort();
+}
+
+/**
  * 2.73.2 (e, B-73): was a red or error land run an infrastructure abort? { kind, text } or null. The output shows out of
  * memory (or exit 0xC0000017), no licence, the editor or the script ended from outside, or "Aborting batchmode", and
  * shows no failing test and no compile error (harness/engine-proof.mjs infraAbort). A timeout is never one here.
@@ -276,7 +296,9 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
     m = { status: 'not-run', why: `not run (${infra.kind}): ${infra.text}; the land command exited ${r.status ?? r.signal ?? '?'} (${m.status} by its contract), but nothing in its output shows a failing test or a compile error: ${WORDS['not-run']}` };
   } else if (m.status === 'not-run') m = { ...m, why: `not run: ${m.why}` };
   const tail = text.trimEnd().split('\n').slice(-12).join('\n');
-  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(infra ? { infra } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
+  // 2.79 (e): a red run's failing test names (the train's bisect stops on the batch's signature).
+  const failures = m.status === 'red' ? failingTests(text) : [];
+  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
 
   function finish(res) {
     const full = { ...res, engine, ms: Date.now() - t0, ...(task ? { task } : {}), ...(br ? { branch: br } : {}), ...(many ? { branches: many } : {}), at: new Date().toISOString() };

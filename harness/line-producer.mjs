@@ -34,7 +34,8 @@
  *      remote-eligible ready tasks are offered to remote (cloud) workers (status "remote", `line -- plan`); with
  *      STUDIO_REMOTE=on the pass also ends leases that ran out and starts a background fetch of remote/* when due.
  *   h. 2.77.0 (u, P5.2/P5.3): each engine train (harness/unity-train.mjs, any engine target of harness/engine-tracks.mjs)
- *      with branches queued is started in a quiet window (enginePass/engineWindow): no web train running (train >
+ *      with branches queued is started when its engine slot is free (2.79: STUDIO_ENGINE_SLOTS; game trains neither block it nor
+ *      are blocked by it), or, for "window": "quiet" / STUDIO_ENGINE_WINDOW=quiet / the line off, in a quiet window (enginePass/engineWindow): no web train running (train >
  *      builder verifies > engine > soaks), no other job of the same heavy kind, free RAM at or over the engine's floor,
  *      CPU under STUDIO_ENGINE_QUIET_CPU_PCT (75), and no web lane queued unless the engine queue waited
  *      STUDIO_ENGINE_TRAIN_MAX_WAIT_MIN (120). It runs `task train --engine <x>` detached; the train itself still takes
@@ -866,6 +867,15 @@ export function engineWindow(f, env = process.env) {
   if (!f.queued) return { start: false, wait: false, why: `no ${L} branch queued` };
   if (f.running) return { start: false, wait: false, why: `the ${L} train is running` };
   if (f.startedRecently) return { start: false, wait: false, why: `started it ${f.startedRecently} min ago` };
+  // 2.79 (e): the engine's own slot (STUDIO_ENGINE_SLOTS, heavy.mjs engineSlotsAt): the train starts when that slot is free,
+  // whatever the game's trains and verifies are doing (they never take it, and the land never takes one of theirs), and
+  // never needs `train auto off`. Free RAM and CPU are the land's own heavy wait (it queues for its RAM, never starves a
+  // game job). The quiet window below is kept for an engine that wants a quiet machine ("window": "quiet" in its engine
+  // config, or STUDIO_ENGINE_WINDOW=quiet) and when the engine line is off (STUDIO_ENGINE_SLOTS=off).
+  if (f.engineSlots > 0 && f.window !== 'quiet' && !/^quiet$/i.test(String(env.STUDIO_ENGINE_WINDOW || ''))) {
+    if (!f.slotFree) return no(`the ${L} slot is taken (${(f.engineHolders || []).slice(0, 2).join(', ') || 'another engine land'}; STUDIO_ENGINE_SLOTS ${f.engineSlots})`);
+    return { start: true, wait: false, why: `the ${L} slot is free (STUDIO_ENGINE_SLOTS ${f.engineSlots}): game trains and verifies don't take it${f.webTrain ? ' (a web train is running beside it)' : ''}; one land run ~${f.expectedMin ?? '?'} min` };
+  }
   if (f.webTrain) return no('the web train is running (its verify goes first: train > builder verifies > engine > soaks)');
   const sameKind = (f.heavy || []).filter((h) => (f.heavyKind === 'unity' ? /unity/i.test(`${h.kind || ''}`) : false) || /\btrain\b/i.test(`${h.kind || ''}`));
   if (sameKind.length) return no(`machine:heavy holds ${sameKind.map((h) => h.label || h.kind).slice(0, 2).join(', ')}`);
@@ -911,6 +921,15 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     const last = starts[t.name];
     const since = last ? Math.round((now - Date.parse(last.at)) / 60000) : null;
     const f = { engine: t.name, label: t.label, heavyKind: t.heavyKind, queued: q.length, oldestAt: q[0]?.at || null, running: Boolean(running), startedRecently: since !== null && since < num(env.STUDIO_ENGINE_TRAIN_COOLDOWN_MIN, 3) ? Math.max(0, since) : 0, auto: autoOn && t.trainAuto, webTrain, webQueued: webQ.length, heavy, freeGb: Number.isFinite(rb?.freeGb) ? rb.freeGb : Number.isFinite(rig?.freeRamGb) ? rig.freeRamGb : null, floorGb: floor.gb, floorFrom: floor.from, cpuBusy, expectedMin: exp.minutes, now };
+    // 2.79 (e): the engine slot: how many engine lands hold machine:heavy now against STUDIO_ENGINE_SLOTS.
+    try {
+      const hv = await import('./heavy.mjs');
+      f.engineSlots = hv.engineSlotsAt(root, env);
+      const mine = hv.heavyHolders(root, { env }).filter((h) => h?.claim?.engine);
+      f.engineHolders = mine.map((h) => h.label || 'an engine land');
+      f.slotFree = mine.length < f.engineSlots;
+    } catch { f.engineSlots = 0; }
+    f.window = t.cfg?.window === 'quiet' ? 'quiet' : 'slot';
     const w = engineWindow(f, env);
     const row = { engine: t.name, queued: q.length, running: Boolean(running), expectedMin: exp.minutes, expectedFrom: exp.from, floorGb: floor.gb, start: w.start, why: w.why };
     if (w.start && acting) {
