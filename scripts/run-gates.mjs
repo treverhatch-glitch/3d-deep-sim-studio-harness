@@ -25,7 +25,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { get, set, del, getKey } from '../harness/gate-cache.mjs';
 import { writeAtomic, withFileLock, pidAlive } from '../harness/fsafe.mjs';
-import { selfIdentity, pidAlive as idAlive } from '../harness/proc-identity.mjs';
+import { selfIdentity, liveAs as idAlive } from '../harness/proc-identity.mjs';
 import { applyGateEnv, nodeModulesDrift, porcelainZ } from '../harness/gate-env.mjs';
 import { createFence, fenceLine } from '../harness/gate-output.mjs';
 

@@ -56,6 +56,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { writeAtomic } from './fsafe.mjs';
 
 export const LINE_AGENT = 'line-producer';
 export const LINE_DIR = () => path.join(STUDIO_STATE_DIR, 'line');
@@ -668,7 +669,7 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
     };
     // One plain line for the Communicator (helper l reads { at, builders: { running, target }, blocked, text }).
     status.text = summaryLine(status);
-    if (!dryRun) { try { fs.mkdirSync(LINE_DIR(), { recursive: true }); const tmp = `${LINE_STATUS_FILE()}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(status, null, 2)}\n`); fs.renameSync(tmp, LINE_STATUS_FILE()); } catch {} }
+    if (!dryRun) { try { fs.mkdirSync(LINE_DIR(), { recursive: true }); writeAtomic(LINE_STATUS_FILE(), `${JSON.stringify(status, null, 2)}\n`); } catch {} }
     void note;
     return status;
   } catch (e) { return { mode, error: e.message, at: new Date(now).toISOString() }; }
@@ -804,7 +805,7 @@ export async function twinPass({ now = Date.now(), env = process.env, act = true
   if (!cfgs.length) return { on: false, checked: [], why: 'no engine twins listed (studio/game.json engines.<name>.twins: the game paths that have an engine twin)' };
   const f = path.join(LINE_DIR(), 'twins.json');
   const st = readJson(f, null);
-  const save = (s) => { if (!act) return; try { fs.mkdirSync(LINE_DIR(), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(s, null, 2)}\n`); fs.renameSync(tmp, f); } catch {} };
+  const save = (s) => { if (!act) return; try { fs.mkdirSync(LINE_DIR(), { recursive: true }); writeAtomic(f, `${JSON.stringify(s, null, 2)}\n`); } catch {} };
   if (!st || !st.since) { save({ since: new Date(now).toISOString(), seen: {} }); return { on: true, checked: [], why: 'first look: game tasks that land from now on are checked for engine twins' }; }
   const seen = st.seen && typeof st.seen === 'object' ? st.seen : {};
   const events = deps.events || readRecentEvents(20000);

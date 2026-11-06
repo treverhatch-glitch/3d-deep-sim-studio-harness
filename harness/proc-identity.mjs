@@ -128,6 +128,23 @@ export function pidAlive(pid, recorded, { eperm = true } = {}) {
   return true;
 }
 
+/**
+ * 2.79 (b): is the process a record names still the one that wrote it? pidAlive, then (only when the record carries a
+ * start identity) one OS query for the pid's start (readStarts) against the recorded one (sameProcess): Windows and
+ * macOS reuse process numbers, and pidAlive alone there says "a number in use is alive" (a done-running marker or a gate
+ * run's record whose pid became another program's kept a drain and a verify waiting for an hour). A record without
+ * identity (2.78.2 and older) and a start that can't be read keep the old rule: alive while the number is in use.
+ * `starts` is for tests.
+ */
+export function liveAs(pid, recorded, { eperm = true, starts = readStarts } = {}) {
+  if (!pidAlive(pid, recorded, { eperm })) return false;
+  if (!recorded || (!recorded.start && !recorded.proc)) return true;
+  if (LINUX && recorded.proc && linuxTicks(pid) !== null) return true; // pidAlive compared the /proc start
+  let cur = null;
+  try { cur = starts([Number(pid)]).get(Number(pid)) || null; } catch { cur = null; }
+  return sameProcess(recorded, cur) !== false;
+}
+
 /** Is a launcher session record's process alive (listing check)? Its launcher when it has one, else the agent. */
 export function recordAlive(s) {
   if (!s) return false;

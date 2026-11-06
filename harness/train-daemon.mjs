@@ -34,6 +34,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent } from './event.mjs';
 import { spawnDetached } from './train-detach.mjs';
+import { writeAtomic } from './fsafe.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
@@ -66,7 +67,7 @@ export async function setTrainAuto(root, { on, by, why = '', permission = '', en
   const f = AUTO_FILE(root);
   fs.mkdirSync(path.dirname(f), { recursive: true });
   const rec = { off: !on, by: d.by, why: String(why || '').slice(0, 300), at: new Date().toISOString(), via: d.via, ...(d.via !== 'person' ? { recordedBy: d.recordedBy, permission: d.permission || null } : {}) };
-  fs.writeFileSync(f, `${JSON.stringify(rec, null, 2)}\n`);
+  writeAtomic(f, `${JSON.stringify(rec, null, 2)}\n`);
   try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'train-auto', subject: 'train daemon', by: d.by, as: dm.asOf(d), why: rec.why || (on ? 'train daemon on' : 'train daemon off'), evidence: on ? 'on' : 'off', undo: { kind: 'train-auto', on: !on, text: `npm run task -- train auto ${on ? 'off' : 'on'} --by <name>` }, root }); } catch {}
   emit({ type: on ? 'task.train.auto_on' : 'task.train.auto_off', agent: String(d.recordedBy || d.by).slice(0, 60), to: 'producer', msg: `${d.by} turned the train daemon ${on ? 'on' : 'off'}${d.via !== 'person' ? ` (recorded by ${d.recordedBy})` : ''}${rec.why ? `: ${rec.why}` : ''}`.slice(0, 600), meta: rec });
   return { ok: true, message: on ? `The train daemon is on: the supervisor starts a train when lanes are ready and the machine has room${off(env.STUDIO_TRAIN_AUTO) ? ' (but STUDIO_TRAIN_AUTO is off in this environment)' : ''}.` : 'The train daemon is off: trains run only by hand (npm run task -- train) until train auto on.' };
@@ -178,7 +179,7 @@ export async function trainDaemonPass({ root = null, env = process.env, now = Da
   const pid = child?.pid || null;
   try { fs.rmSync(path.join(root, '.studio', 'train', 'daemon-why.json'), { force: true }); } catch {}
   fs.mkdirSync(path.dirname(DAEMON_FILE(root)), { recursive: true });
-  fs.writeFileSync(DAEMON_FILE(root), `${JSON.stringify({ pid, at: new Date(now).toISOString(), lanes: d.lanes })}\n`);
+  writeAtomic(DAEMON_FILE(root), `${JSON.stringify({ pid, at: new Date(now).toISOString(), lanes: d.lanes })}\n`);
   emit({ type: 'task.train.auto_start', agent: DAEMON_BY, status: 'ok', msg: `train daemon: started a train for ${d.lanes.join(', ')}: ${d.why}`.slice(0, 600), meta: { pid, lanes: d.lanes, why: d.why } });
   return { started: true, why: d.why, pid, lanes: d.lanes };
 }

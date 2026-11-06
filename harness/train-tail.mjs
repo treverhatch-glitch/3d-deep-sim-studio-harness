@@ -28,6 +28,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { focusFromLog, focusCommand, normTestPath } from './train-focus.mjs';
 import { boardStates } from './train-deps.mjs';
+import { writeAtomic } from './fsafe.mjs';
 
 /** STUDIO_TRAIN_CHAIN_TAIL (default on): off keeps 2.66.0 (no proactive check, no tail, a red chain bisects). */
 export const chainTailOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_TRAIN_CHAIN_TAIL || '').trim());
@@ -46,9 +47,7 @@ export function updateTails(root, fn) {
   const f = tailsFile(root);
   try {
     fs.mkdirSync(path.dirname(f), { recursive: true });
-    const tmp = `${f}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, `${JSON.stringify(list, null, 2)}\n`);
-    fs.renameSync(tmp, f);
+    writeAtomic(f, `${JSON.stringify(list, null, 2)}\n`);
   } catch {}
   return r;
 }

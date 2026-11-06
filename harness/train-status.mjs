@@ -18,6 +18,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { writeAtomic } from './fsafe.mjs';
 
 const statusFile = (root, id) => path.join(root, '.studio', 'train', String(id), 'status.json');
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
@@ -64,9 +65,7 @@ export function writeTrainStatus(root, id, s) {
   try {
     const f = statusFile(root, id);
     fs.mkdirSync(path.dirname(f), { recursive: true });
-    const tmp = `${f}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, `${JSON.stringify({ train: id, at: new Date().toISOString(), ...s }, null, 2)}\n`);
-    fs.renameSync(tmp, f);
+    writeAtomic(f, `${JSON.stringify({ train: id, at: new Date().toISOString(), ...s }, null, 2)}\n`);
   } catch {}
   writeTrainsSummary(root);
 }
@@ -100,9 +99,7 @@ export function writeTrainsSummary(root) {
     const cur = readTrainStatus(root);
     const f = summaryFile(root);
     fs.mkdirSync(path.dirname(f), { recursive: true });
-    const tmp = `${f}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, `${JSON.stringify({ ...(cur || { train: null, step: null, next: null }), written: new Date().toISOString() }, null, 2)}\n`);
-    fs.renameSync(tmp, f);
+    writeAtomic(f, `${JSON.stringify({ ...(cur || { train: null, step: null, next: null }), written: new Date().toISOString() }, null, 2)}\n`);
   } catch {}
 }
 
