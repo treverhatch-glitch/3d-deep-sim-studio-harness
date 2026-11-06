@@ -132,7 +132,7 @@ const pretty = (d) => (String(d).length > 16 ? `${String(d).slice(0, 16)}…` : 
  * The verdict (pure): { ok, line, notes: [] }. cfg; now: the digests this checkout printed; main: mainSide();
  * local: this checkout's baseline file ({ ticks } or null); ref: main's name.
  */
-export function judgeProbe({ cfg, now, main, local, ref = 'main' }) {
+function judgeProbe({ cfg, now, main, local, ref = 'main' }) {
   const notes = [];
   if (!main.refOk) return { ok: true, line: `no ${ref} branch to compare with (STUDIO_STATE_PROBE_BASE names one): ${cfg.ticks.length} tick(s) probed, nothing compared`, notes };
   if (!main.baseline || main.baseline.invalid || typeof main.baseline.ticks !== 'object' || !main.baseline.ticks) {

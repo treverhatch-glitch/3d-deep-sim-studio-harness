@@ -99,10 +99,10 @@ const lastRejects = 'Verdict: approve\\n\\n## Second look\\nVerdict: CHANGES REQ
 const noLine = 'I approve this.';
 const noLineBlocking = 'I approve this, but one blocking point remains.';
 const md = '**Verdict:** approve';
-console.log(JSON.stringify({ first: reviewApproves(first), both: reviewApproves(both), nonBlocking: reviewApproves(nonBlocking), crlf: reviewApproves(crlf), lastRejects: reviewApproves(lastRejects), noLine: reviewApproves(noLine), noLineBlocking: reviewApproves(noLineBlocking), md: reviewApproves(md), off: reviewApproves(both, { STUDIO_REVIEW_VERDICT_LINE: 'off' }) }));`, env);
+console.log(JSON.stringify({ first: reviewApproves(first), both: reviewApproves(both), nonBlocking: reviewApproves(nonBlocking), crlf: reviewApproves(crlf), lastRejects: reviewApproves(lastRejects), noLine: reviewApproves(noLine), noLineBlocking: reviewApproves(noLineBlocking), md: reviewApproves(md) }));`, env); // 2.79.1 (e): the REVIEW_VERDICT_LINE=off result (removed switch) is gone with the switch
     const j = p.j || {};
-    await guard('2.78.2 (c, item 5): a review file is judged by its last "Verdict:" line: an appended re-review that approves counts, so does "non-blocking" in the text, CRLF and "**Verdict:** approve"; a last line of "changes requested" doesn\'t; no Verdict line keeps the old rule; STUDIO_REVIEW_VERDICT_LINE=off is the old rule (fails on 2.78.1: the whole file was dropped when it said "changes requested", "reject" or "blocking" anywhere; no reviewApproves)', () => [
-      j.first === false && j.both === true && j.nonBlocking === true && j.crlf === true && j.lastRejects === false && j.noLine === true && j.noLineBlocking === false && j.md === true && j.off === false,
+    await guard('2.78.2 (c, item 5): a review file is judged by its last "Verdict:" line: an appended re-review that approves counts, so does "non-blocking" in the text, CRLF and "**Verdict:** approve"; a last line of "changes requested" doesn\'t; no Verdict line keeps the old rule (fails on 2.78.1: the whole file was dropped when it said "changes requested", "reject" or "blocking" anywhere; no reviewApproves)', () => [
+      j.first === false && j.both === true && j.nonBlocking === true && j.crlf === true && j.lastRejects === false && j.noLine === true && j.noLineBlocking === false && j.md === true,
       p.j ? JSON.stringify(j) : out(p).slice(-500)]);
   }
 
@@ -219,11 +219,10 @@ console.log(JSON.stringify({
   directionCode: s('direction', ['studio/bible/reviews/x.md', 'game/toy/src/sim.ts']),
   change: s('change', ['docs/A.md']),
   docsWithScript: s('docs', ['docs/A.md', 'scripts/x.mjs']),
-  off: s('direction', ['studio/NEXT.md'], { STUDIO_DONE_SKIP_GAME_NONCODE: 'off' }),
 }));`, env);
     const j = p.j || {};
-    await guard('2.78.2 (c, item 12): done skips the game checks for a direction, review or docs task whose changed files are all notes, docs or studio records; any other file, a code type, or STUDIO_DONE_SKIP_GAME_NONCODE=off runs them (fails on 2.78.1: no skipGameChecks, task done always ran the game suite)', () => [
-      j.direction === true && j.review === true && j.docs === true && j.directionCode === false && j.change === false && j.docsWithScript === false && j.off === false,
+    await guard('2.78.2 (c, item 12): done skips the game checks for a direction, review or docs task whose changed files are all notes, docs or studio records; any other file, a code type, runs them (fails on 2.78.1: no skipGameChecks, task done always ran the game suite)', () => [
+      j.direction === true && j.review === true && j.docs === true && j.directionCode === false && j.change === false && j.docsWithScript === false,
       p.j ? JSON.stringify(j) : out(p).slice(-500)]);
 
     // the real thing: task done on a direction task in a studio whose game suite would fail, with only a review file changed

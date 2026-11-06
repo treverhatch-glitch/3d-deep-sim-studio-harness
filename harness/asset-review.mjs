@@ -74,8 +74,6 @@ export const REVIEW_DEFAULTS = {
   upWarnRatio: 1.5,
   bgTolerance: 48,
 };
-/** The hard findings (each an asset-gate failure with its own Fix line). */
-export const PREVIEW_CHECKS = ['preview-blank', 'preview-black', 'preview-white', 'preview-magenta', 'preview-clipped', 'preview-small'];
 
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const writeJson = (f, j) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${JSON.stringify(j, null, 2)}\n`); };
@@ -338,7 +336,7 @@ const taskAdded = (evs, id) => evs.filter((e) => e.type === 'task.added' && e.ta
 const roleOf = (ev) => (String(ev?.msg || '').match(/^Queued [A-Z]+-\d+ \[\w+\] \(([\w-]+)\)/) || [])[1] || null;
 
 /** The workers who made the asset: the asset task's claimants, the agent running done, and the row's madeBy. */
-export function makersOf({ task, agent = null, rows = [], evs = null } = {}) {
+function makersOf({ task, agent = null, rows = [], evs = null } = {}) {
   const ev = evs || readRecentEvents(20000);
   const set = new Set();
   for (const e of ev) if (e.task === task && e.type === 'task.start' && e.agent) set.add(String(e.agent));

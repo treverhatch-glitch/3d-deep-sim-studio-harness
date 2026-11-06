@@ -130,7 +130,7 @@ For each module that is still unreached on the main checkout, the Line Producer 
 If a studio's game has its own build (`studio/game.json` "tester") or its own checks (its `studio.gates.json`, or
 `<sim>/qa.mjs`), the template cartridge's stage-1 playtest no longer runs for each task. The done-check's playtest rows
 and the `playtest` gate say "replaced by the game tester (npm run tester)" instead. A template studio (no game, or a
-cartridge game) keeps the stage-1 playtest as before, and so does `STUDIO_STAGE1_PLAYTEST=on`.
+cartridge game) keeps the stage-1 playtest as before.
 
 ## Settings
 
@@ -144,5 +144,4 @@ cartridge game) keeps the stage-1 playtest as before, and so does `STUDIO_STAGE1
 | `STUDIO_TESTER_WIRE_TASKS` | `on` | `off`: no "Wire <module> into the game" tasks. |
 | `STUDIO_TESTER_BUILD_TIMEOUT_MIN` | `20` | How long the tester's build may run before the run ends red. |
 | `STUDIO_TESTER_DRIVER_IDLE_MIN` | `20` | How many idle minutes before the background driver closes the browser and exits. |
-| `STUDIO_STAGE1_PLAYTEST` | `auto` | `on`: keep the template cartridge's per-task stage-1 playtest even in a studio whose game has its own build or checks (as in 2.78.2). |
 | `STUDIO_TESTER_RUN_DIR` | (the run going) | The run folder the driver uses when `--run` isn't given. |

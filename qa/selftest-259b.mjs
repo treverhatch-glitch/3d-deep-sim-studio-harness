@@ -18,7 +18,7 @@ export async function selftest259B({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '',
     GITHUB_BASE_REF: '', GITHUB_EVENT_NAME: '', GITHUB_SHA: '', STUDIO_HOOKS_CHECK: '', STUDIO_LOCK_OWNER: '', STUDIO_LANE_HARNESS: '', STUDIO_HOOKS_RESTAMP: '',
-    STUDIO_LANE_LOCKS: '', STUDIO_MAIN_COMMIT: '', STUDIO_WORKTREES: '', STUDIO_AGENT_MODEL: '', STUDIO_EXPERIMENT: '', AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-259b.jsonl') };
+    STUDIO_MAIN_COMMIT: '', STUDIO_WORKTREES: '', STUDIO_AGENT_MODEL: '', STUDIO_EXPERIMENT: '', AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-259b.jsonl') };
   const gIn = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const g = (...a) => gIn(dir, ...a);
   const write = (root, rel, text) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); };
@@ -171,15 +171,14 @@ export async function selftest259B({ dir, run, report, tmpRoot }) {
   oldStamp(lane);
   edit(dir, A, 'export const v1 = 1;', 'export const v1 = 10;');
   commitIn(dir, 'main edits v1', onMain);
-  run(dir, `node harness/lock.mjs claim path:${A} --owner opus-9`, env);
+  // 2.79.1 (e): the refusal used to come from a lane-lock set to block (LANE_LOCKS, a removed switch); strict locks refuse a file with no lock the same way.
   const mainBefore2 = sha(dir);
-  const d2 = run(lane, `node -e "import('./harness/worktree.mjs').then((m) => console.log(JSON.stringify(m.deliver('T-001', { runChecks: false }))))"`, { ...env, ...inLane, STUDIO_LANE_LOCKS: 'block' });
+  const d2 = run(lane, `node -e "import('./harness/worktree.mjs').then((m) => console.log(JSON.stringify(m.deliver('T-001', { runChecks: false }))))"`, { ...env, ...inLane, STUDIO_LOCK_STRICT: '1' });
   const d2j = json(d2);
   const backups = gIn(lane, 'branch', '--list', 'backup/*').stdout.trim().split('\n').filter(Boolean);
-  report('2.59.0 (H-13): when the hooks refuse a commit task done re-commits after its rebase (a file locked by another agent, lane locks set to block), nothing lands and the lane keeps its rebased commits; no stamp is written by hand (old: landed with the stale stamp)',
-    d2j.ok === false && /hooks/.test(d2j.message || '') && sha(dir) === mainBefore2 && /locked by opus-9/.test(d2j.message || '') && backups.length === 1,
+  report('2.59.0 (H-13): when the hooks refuse a commit task done re-commits after its rebase (a file the strict lock check refuses), nothing lands and the lane keeps its rebased commits; no stamp is written by hand (old: landed with the stale stamp)',
+    d2j.ok === false && /hooks/.test(d2j.message || '') && sha(dir) === mainBefore2 && /has no lock/.test(d2j.message || '') && backups.length === 1,
     JSON.stringify({ d2: d2j, out: out(d2).slice(-1200), backups }).slice(0, 2500));
-  run(dir, `node harness/lock.mjs release path:${A} --owner opus-9`, env);
 
   // A commit that skipped the hooks before the rebase is not re-committed by task done (no laundering).
   gIn(lane, 'reset', '-q', '--hard', 'main');

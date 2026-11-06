@@ -13,7 +13,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export async function selftest2585Q({ dir, run, report, tmpRoot }) {
-  const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_AGENT_TOOL: '', STUDIO_BUILDER_TOOL: '', STUDIO_BUILDER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_WATCHDOG_LAUNCH: 'off', STUDIO_AUTO_TRICKS: '0', STUDIO_LANE_INFER: 'off', STUDIO_FLOW_IDLE_MIN: '999', STUDIO_LOCK_OWNER: '', STUDIO_LANE_LOCKS: '' };
+  const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_AGENT_TOOL: '', STUDIO_BUILDER_TOOL: '', STUDIO_BUILDER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_WATCHDOG_LAUNCH: 'off', STUDIO_AUTO_TRICKS: '0', STUDIO_LANE_INFER: 'off', STUDIO_FLOW_IDLE_MIN: '999', STUDIO_LOCK_OWNER: '' };
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
   const minAgo = (m) => new Date(Date.now() - m * 60000).toISOString();
@@ -187,7 +187,7 @@ console.log(JSON.stringify({ tb: where(tb), tg: where(tg), owner: status('task:'
     fs.writeFileSync(path.join(ln, 'game', 'qten', 'f1.txt'), 'lane edit\n');
     git(ln, 'add game/qten/f1.txt');
     const inLane = run(ln, 'node harness/lock.mjs check-staged --owner opus-q', { ...base, ...env });
-    const blockEnv = run(ln, 'node harness/lock.mjs check-staged --owner opus-q', { ...base, ...env, STUDIO_LANE_LOCKS: 'block' });
+    // (2.79.1 (e): the LANE_LOCKS=block (removed switch) check is gone with the switch.)
     fs.writeFileSync(path.join(g, 'game', 'qten', 'f2.txt'), 'main edit\n');
     git(g, 'add game/qten/f2.txt');
     const inMain = run(g, 'node harness/lock.mjs check-staged --owner opus-q', { ...base, ...env });
@@ -197,9 +197,9 @@ console.log(JSON.stringify({ tb: where(tb), tg: where(tg), owner: status('task:'
     run(g, 'node harness/lock.mjs claim path:game/qten/f1.txt --owner lane-q10', { ...base, ...env });
     const ownLane = run(ln, 'node harness/lock.mjs check-staged --owner opus-q', { ...base, ...env });
     git(ln, 'reset -q');
-    guard('H-10: in a lane copy another agent\'s folder lock is a note, not a refusal ("checked when the lane lands"); the main checkout still refuses, a lock in the lane\'s own name still refuses, and STUDIO_LANE_LOCKS=block restores the refusal (evidence: builder-s45 held path:<game>/src/game and lane commits touching the sim were refused)', () => [
-      JSON.parse(claimed.stdout || '{}').ok === true && inLane.status === 0 && /checked when the lane lands/.test(out(inLane)) && inMain.status !== 0 && /builder-q45/.test(out(inMain)) && blockEnv.status !== 0 && ownLane.status !== 0 && /lane-q10/.test(out(ownLane)),
-      JSON.stringify({ inLane: out(inLane).slice(-400), inMain: out(inMain).slice(-300), blockEnv: out(blockEnv).slice(-200), ownLane: out(ownLane).slice(-300) })]);
+    guard('H-10: in a lane copy another agent\'s folder lock is a note, not a refusal ("checked when the lane lands"); the main checkout still refuses, a lock in the lane\'s own name still refuses, (evidence: builder-s45 held path:<game>/src/game and lane commits touching the sim were refused)', () => [
+      JSON.parse(claimed.stdout || '{}').ok === true && inLane.status === 0 && /checked when the lane lands/.test(out(inLane)) && inMain.status !== 0 && /builder-q45/.test(out(inMain)) && ownLane.status !== 0 && /lane-q10/.test(out(ownLane)),
+      JSON.stringify({ inLane: out(inLane).slice(-400), inMain: out(inMain).slice(-300), ownLane: out(ownLane).slice(-300) })]);
     const big = run(g, 'node harness/lock.mjs claim path:game/qten/big --owner builder-q51', { ...base, ...env });
     const root = run(g, 'node harness/lock.mjs claim path:game/qten --owner builder-q52', { ...base, ...env });
     const src = run(g, 'node harness/lock.mjs claim path:game/qten/src --owner builder-q53', { ...base, ...env });

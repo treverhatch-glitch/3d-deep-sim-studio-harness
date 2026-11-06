@@ -19,7 +19,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR } from './event.mjs';
 import { envValue } from './launch.mjs';
 
 /** The harness's own folders and files, which an aider session never adds to its chat or edits (AGENTS.lite.md "Never"). */
-export const AIDER_IGNORE_BASE = ['/harness/', '/hub/', '/scripts/', '/tools/', '/studio/', '/qa/*.mjs', '/.env', '/.env.*', '/.lanes/'];
+const AIDER_IGNORE_BASE = ['/harness/', '/hub/', '/scripts/', '/tools/', '/studio/', '/qa/*.mjs', '/.env', '/.env.*', '/.lanes/'];
 
 const mainRootOf = (env) => (String(env.STUDIO_MAIN_ROOT || '').trim() ? path.resolve(env.STUDIO_MAIN_ROOT) : REPO_ROOT);
 const stateDirOf = (env) => (String(env.STUDIO_MAIN_ROOT || '').trim() ? path.join(path.resolve(env.STUDIO_MAIN_ROOT), '.studio') : STUDIO_STATE_DIR);

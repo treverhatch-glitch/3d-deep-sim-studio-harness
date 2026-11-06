@@ -90,20 +90,6 @@ function recordRefresh(root, key, rec) {
   } catch {}
 }
 
-/** Does this git have `git merge-tree --write-tree` (2.38)? (harness/merge-tree.mjs, shared with the queue's prediction) */
-export function mergeTreeSupported() {
-  return mergeTreeSupport(mainRoot()).ok;
-}
-/**
- * Files two commits would conflict in (merge-tree touches no index and no files): [] when they merge clean, null when
- * git couldn't tell. 2.65.1: harness/merge-tree.mjs's call; files listed in unionFiles don't count (the train merges
- * them with git's union driver), as at queue time.
- */
-export function conflictFiles(root, a, b, { unionFiles = [] } = {}) {
-  const m = mergeTree(root, a, b, { unionFiles });
-  return m.error ? null : m.files;
-}
-
 /** A launched session for this agent that is running (its record says so and its process is alive). */
 export function sessionRunning(root, agent) {
   if (!agent) return null;

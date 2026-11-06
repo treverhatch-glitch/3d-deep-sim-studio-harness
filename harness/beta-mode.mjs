@@ -80,7 +80,6 @@ export function readBeta({ root = mainCheckout(), now = Date.now() } = {}) {
   void now;
   return { on: true, doc, signed, commit: sha.slice(0, 8), setBy: committer || 'a person', why: '' };
 }
-export const betaOn = (opts) => readBeta(opts).on;
 export const betaWords = (doc) => `beta mode: set by ${doc.by} at ${short(doc.at)} (${BETA_REL}${doc.why ? `: ${String(doc.why).slice(0, 120)}` : ''})`;
 
 /**

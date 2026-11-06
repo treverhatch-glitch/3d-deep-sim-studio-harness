@@ -116,12 +116,6 @@ export function recordLaneDisk({ root = studioMain(), env = process.env, now = D
   return r;
 }
 
-/** The lanes' total from the last report (cheap), or null. */
-export function lanesTotalGb(root = studioMain()) {
-  const j = readJson(DISK_FILE(root));
-  return Number.isFinite(j?.totalGb) ? j.totalGb : null;
-}
-
 /** Record the janitor's lane proposals (dry run) and emit janitor.lanes_proposed when there are stale ones. */
 export async function recordProposals({ root = studioMain(), env = process.env, now = Date.now(), emit = emitEvent, props = null } = {}) {
   const list = props || await (await import('./janitor.mjs')).laneProposals({ root, env, now });

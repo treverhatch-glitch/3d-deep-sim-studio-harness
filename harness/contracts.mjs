@@ -414,7 +414,7 @@ export function contractFindings({ base, root = REPO_ROOT, git, env = process.en
 }
 
 /** The rules for one contract file: B at the base, C now, setter(pred) finds who made pred true. Pure but for setter. */
-export function judgeContract(rel, B0, C, setter, env = process.env) {
+function judgeContract(rel, B0, C, setter, env = process.env) {
   const out = [];
   const f = (kind, text, detail) => out.push(finding(kind, rel, text, detail));
   const B = B0?.invalid ? null : B0;

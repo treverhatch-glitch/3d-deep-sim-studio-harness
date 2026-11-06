@@ -212,7 +212,7 @@ export function writeLearned(l = buildLearned()) {
 }
 
 /** Every file that holds what the studio learned or decided. */
-export function learningFiles() {
+function learningFiles() {
   const files = ['studio/memory/failures.md', 'studio/memory/LEARNED.md', 'studio/data-consent.json', 'studio/harness-notes/NOTES.md', 'studio/producer/LOG.md', 'studio/producer/INBOX.md', 'studio/PLAN.md', 'studio/VISION_LOCK.md', 'studio/bible/BIBLE.md', 'studio/bible/bible.json', 'studio/bible/NOT-DOING.md', 'studio/bible/STORYBOARD.md'];
   for (const dir of ['studio/memory/retros', 'studio/decisions', 'studio/bible/reviews', 'studio/bible/ideas', 'studio/meetings', 'studio/reviews', 'studio/references', 'studio/experiments']) {
     const full = path.join(REPO_ROOT, dir);

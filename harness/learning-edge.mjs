@@ -178,7 +178,7 @@ export function acceptedRetroSuggestions() {
 }
 
 /** K, the line budget and the half-life, from the environment. */
-export function constraintSettings(env = process.env) {
+function constraintSettings(env = process.env) {
   const num = (v, d, min, max) => {
     const n = Number(v);
     return Number.isFinite(n) && v !== '' && v != null ? Math.min(max, Math.max(min, Math.round(n))) : d;
@@ -253,9 +253,6 @@ export function pendingLine(c) {
   const ids = p.slice(0, 8).map((x) => `failures.md#${String(x.id).replace(/[^\w.-]/g, '').slice(0, 40)}${x.edited ? ' (edited since accepted)' : ''}`);
   return `${p.length} lesson${p.length === 1 ? '' : 's'} not yet accepted for planning (their text stays out of this brief): ${ids.join(', ')}${p.length > 8 ? ', …' : ''}. A person accepts one with: npm run lessons -- accept <id> --by <person> --why "…".`;
 }
-
-/** For JSON consumers (handoff --json): the ranked items without the block. */
-export const constraintsData = (opts = {}) => buildConstraints(opts);
 
 // npm run lessons -- list | accept <id> --by <person> --why "…" [--permission "…"]
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

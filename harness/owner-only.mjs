@@ -9,7 +9,7 @@
  * can't), an event goes to the orchestrator (to: orchestrator; the Communicator turns it into an alert), and the
  * supervisor (which reads parks through holdReason) starts no builder on it until it is unparked.
  *
- * STUDIO_OWNER_ONLY_PARK=off turns it off. Nothing here lets a worker approve anything: it only stops the retries.
+ * Nothing here lets a worker approve anything: it only stops the retries.
  */
 import { emitEvent } from './event.mjs';
 import { setHold, readHolds } from './task-hold.mjs';
@@ -60,8 +60,6 @@ export function ownerStepForHandBack(taskId, events) {
   return step;
 }
 
-const off = (env = process.env) => /^(off|0|false|no)$/i.test(String(env.STUDIO_OWNER_ONLY_PARK || ''));
-
 /** { step, phrase } for the first owner-only phrase in the text, or null. */
 export function ownerOnlyStep(text = '') {
   const t = String(text || '').replace(/\r\n/g, '\n');
@@ -76,11 +74,11 @@ export function ownerOnlyStep(text = '') {
 export const parkedOwnerOnly = (taskId, holds = readHolds()) => Boolean(holds[taskId]?.parked?.ownerOnly);
 
 /**
- * Park the task for the owner and page the orchestrator. Returns { parked, step, phrase, why } or null (off, no phrase, or
+ * Park the task for the owner and page the orchestrator. Returns { parked, step, phrase, why } or null (no phrase, or
  * the task is parked already: a park by a person or the breaker stays as it is).
  */
-export function parkIfOwnerOnly(taskId, note, { who = 'launcher', env = process.env, now = Date.now() } = {}) {
-  if (off(env) || !taskId) return null;
+export function parkIfOwnerOnly(taskId, note, { who = 'launcher', now = Date.now() } = {}) {
+  if (!taskId) return null;
   const hit = ownerOnlyStep(note);
   if (!hit) return null;
   if (readHolds()[taskId]?.parked) return null;

@@ -38,7 +38,7 @@ import { globRe } from './merge-lane.mjs';
 /** The patterns every lane copy has had since 2.29: everything but the shared studio/ and .studio/ links. */
 export const BASE_SPARSE = ['/*', '!/studio/', '!/.studio/'];
 /** Never left out of a lane: the harness that runs its checks, the package files, the shared links. */
-export const NEVER_EXCLUDED = ['harness/x.mjs', 'scripts/x.mjs', 'qa/x.mjs', 'hub/x.mjs', 'tools/x.mjs', 'package.json', 'package-lock.json', 'node_modules/x', 'studio/x', '.studio/x'];
+const NEVER_EXCLUDED = ['harness/x.mjs', 'scripts/x.mjs', 'qa/x.mjs', 'hub/x.mjs', 'tools/x.mjs', 'package.json', 'package-lock.json', 'node_modules/x', 'studio/x', '.studio/x'];
 /** What the harness's own folders are, for checks with no list of their own. */
 export const HARNESS_CODE = ['harness/**', 'scripts/**', 'qa/**', 'hub/**', 'tools/**', 'engine/**', 'cartridges/**', 'skills/**', 'web/**', '*'];
 /**

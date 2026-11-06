@@ -3,7 +3,7 @@
  *   (a) a warm Library cache: a fresh copy gets the cached Library (no re-import), keyed by Unity version and packages,
  *       copied (never linked), and never shared by two runs at once (a held key lock: cold run, no save);
  *   (b) a Play Mode test failure gets one retry: a pass on retry is green with a flake record (and a digest line);
- *       fail-fail is red; a compile error and Edit Mode are never retried; STUDIO_UNITY_PLAYMODE_RETRY=off;
+ *       fail-fail is red; a compile error and Edit Mode are never retried;
  *   (c) code-only steps (studio/game.json engines.unity.codeOnly) run without machine:heavy while another holder has
  *       it, the editor step waits for it, and a code-only failure stops before waiting for the editor.
  */
@@ -21,7 +21,7 @@ export async function selftest2671K({ dir, run, report, tmpRoot }) {
   const until = (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms && !fn()) nap(50); return fn(); };
   const guard = (name, fn) => { try { const [ok, detail] = fn(); report(name, ok, detail); } catch (e) { report(name, false, e.stack || String(e)); } };
   const events = path.join(dir, '.studio', 'events-2671k.jsonl');
-  const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_HEAVY_SLOTS: '1', STUDIO_HEAVY_HELD: '', STUDIO_HEAVY_POLL_MS: '100', STUDIO_HEAVY_WAIT_MIN: '0.5', STUDIO_HEAVY_REAP: '', STUDIO_GATE_PRIORITY: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_RAM_FLOOR_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_TEST_LOADAVG: '0', STUDIO_UNITY: '', STUDIO_UNITY_PIN: '', STUDIO_UNITY_LIBRARY_CACHE: '', STUDIO_UNITY_LIBRARY_BASE: '', STUDIO_UNITY_LIBRARY_CACHE_KEEP: '', STUDIO_UNITY_PLAYMODE_RETRY: '', STUDIO_UNITY_CODE_ONLY: '', STUDIO_DOTNET: '', STUDIO_WORKTREES: '', npm_lifecycle_event: '', AGENT_EVENTS_FILE: events };
+  const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_HEAVY_SLOTS: '1', STUDIO_HEAVY_HELD: '', STUDIO_HEAVY_POLL_MS: '100', STUDIO_HEAVY_WAIT_MIN: '0.5', STUDIO_HEAVY_REAP: '', STUDIO_GATE_PRIORITY: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_RAM_FLOOR_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_TEST_LOADAVG: '0', STUDIO_UNITY: '', STUDIO_UNITY_PIN: '', STUDIO_UNITY_LIBRARY_CACHE: '', STUDIO_UNITY_LIBRARY_BASE: '', STUDIO_UNITY_LIBRARY_CACHE_KEEP: '', STUDIO_UNITY_CODE_ONLY: '', STUDIO_DOTNET: '', STUDIO_WORKTREES: '', npm_lifecycle_event: '', AGENT_EVENTS_FILE: events };
   const T = path.join(tmpRoot, `k2671-${process.pid}`);
   fs.mkdirSync(T, { recursive: true });
   const kids = [];
@@ -200,12 +200,10 @@ else fs.writeFileSync(at('-testResults'), '<test-run total="2" passed="2" failed
       reset(); plan('EditMode', ['fail', 'pass']);
       const em = gate(p);
       const emRuns = seen().filter((x) => x.what === 'tests-EditMode').length;
-      reset(); plan('PlayMode', ['fail', 'pass']);
-      const off = gate(p, { STUDIO_UNITY_PLAYMODE_RETRY: 'off' });
-      const offRuns = seen().filter((x) => x.what === 'tests-PlayMode').length;
-      guard('2.67.1 (k)(b): the retry is only for a Play Mode test failure: fail-fail is red after exactly two runs (no flake record), a compile error runs once and is red, an Edit Mode failure runs once and is red, and STUDIO_UNITY_PLAYMODE_RETRY=off runs once (2.67.0: never a second run)', () => [
-        ff.status === 1 && ffRuns === 2 && /again on retry: red/.test(out(ff)) && ce.status === 1 && ceRuns === 1 && /compile errors/.test(out(ce)) && em.status === 1 && emRuns === 1 && off.status === 1 && offRuns === 1 && flakeLines() === before,
-        JSON.stringify({ ffRuns, ceRuns, emRuns, offRuns, ff: out(ff).slice(-500), ce: out(ce).slice(-300) })]);
+      // (2.79.1 (e): the the PLAYMODE_RETRY=off (removed switch) run is gone with the switch.)
+      guard('2.67.1 (k)(b): the retry is only for a Play Mode test failure: fail-fail is red after exactly two runs (no flake record), a compile error runs once and is red, an Edit Mode failure runs once and is red', () => [
+        ff.status === 1 && ffRuns === 2 && /again on retry: red/.test(out(ff)) && ce.status === 1 && ceRuns === 1 && /compile errors/.test(out(ce)) && em.status === 1 && emRuns === 1 && flakeLines() === before,
+        JSON.stringify({ ffRuns, ceRuns, emRuns, ff: out(ff).slice(-500), ce: out(ce).slice(-300) })]);
     }
 
     // ---------- (c) code-only steps while the editor is busy ----------

@@ -819,7 +819,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       return r0.skip ? r0 : null;
     } catch { return null; }
   })();
-  if (noGame) console.log(`[task done] the game's checks are not run: ${noGame.why} (STUDIO_DONE_SKIP_GAME_NONCODE=off runs them)`);
+  if (noGame) console.log(`[task done] the game's checks are not run: ${noGame.why}`);
   if (!force && !extEngine && !noGame && process.env.STUDIO_DONE_GAME_GATES !== 'skip') {
     const owner = lock.locked ? lock.lock.owner : agent;
     const claimed = owner ? listLocks().filter((l) => l.owner === owner && l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean) : [];

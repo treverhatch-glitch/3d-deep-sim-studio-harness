@@ -5002,6 +5002,15 @@ if (inShard('selftest-279c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.79.1 (e): the cut: nine old switches removed (a .env that still sets one is flagged unknown, and setting one changes
+// nothing), and the dead exports of the 2.79 audit.
+if (inShard('selftest-2791e')) {
+  const dir = copyRepo();
+  const { selftest2791E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2791e.mjs')).href);
+  await selftest2791E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

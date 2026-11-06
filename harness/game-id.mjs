@@ -77,14 +77,6 @@ export function ensureGameId(name, { parent = null, by = 'harness', title = null
   return meta;
 }
 
-/** A copy of a game becomes a new game: a new ID, with the old one as its parent. */
-export function reidentify(name, { by = 'harness' } = {}) {
-  const old = readGameIdentity(name);
-  if (!old) return ensureGameId(name, { by });
-  fs.writeFileSync(metaFile(name), `${JSON.stringify({ ...old, id: mintGameId(), created: new Date().toISOString(), parent: old.id }, null, 2)}\n`);
-  return readGameIdentity(name);
-}
-
 /** The ID a recording should carry, and whether a recording's own gameId belongs to this cartridge. */
 export function gameIdFor(name) {
   return readGameIdentity(name)?.id || null;
@@ -93,15 +85,6 @@ export function checkRecordingId(spec, name) {
   const mine = gameIdFor(name);
   if (!spec.gameId || !mine) return { ok: true, missing: Boolean(mine && !spec.gameId) };
   return spec.gameId === mine ? { ok: true } : { ok: false, message: `recorded for game ${spec.gameId}, but cartridges/${name} is ${mine}: results from another game (a copy or a second studio). Re-record with npm run golden -- --update if this game really changed hands.` };
-}
-
-let cached;
-/** This studio's game ID, for events (read once per process). */
-export function currentGameId() {
-  if (cached !== undefined) return cached;
-  const name = activeCartridge().name;
-  cached = !name || isTemplateCartridge(name) ? null : gameIdFor(name);
-  return cached;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

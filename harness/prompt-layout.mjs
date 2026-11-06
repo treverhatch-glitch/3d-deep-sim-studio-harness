@@ -25,14 +25,6 @@ export function layoutPrompt({ stable, volatile }) {
   return `${stable}\n${STABLE_MARKER}\n\n## This session\n\n${volatile}`;
 }
 
-/** Replaces session-specific names with placeholders to make the prefix byte-identical. */
-export function stablize(text, { agent, model }) {
-  let stableText = text;
-  if (agent && agent !== 'unknown') stableText = stableText.replaceAll(agent, '$STUDIO_LOCK_OWNER');
-  if (model && model !== 'unknown') stableText = stableText.replaceAll(model, '$STUDIO_AGENT_MODEL');
-  return stableText;
-}
-
 /**
  * 2.30q (#8): anything session-specific in the stable prefix breaks the prompt cache for every later session of
  * the role. Returns what leaked: the agent's name, its model, a task id, a clock time or date.

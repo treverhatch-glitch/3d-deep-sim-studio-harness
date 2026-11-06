@@ -10,7 +10,7 @@
  * stage1Replaced(): a studio whose game has its own build (game.json "tester".build or .url) or its own checks (its
  * studio.gates.json, or <sim>/qa.mjs|playtest.mjs|golden.mjs) no longer runs the template cartridge's stage-1 playtest
  * per task: the done-check's playtest rows and the "playtest" gate say "replaced by the game tester (npm run tester)".
- * A template studio (no game, or the game is a cartridge) keeps it as before; so does STUDIO_STAGE1_PLAYTEST=on.
+ * A template studio (no game, or the game is a cartridge) keeps it as before.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -52,10 +52,8 @@ export function studioGameSync(root = REPO_ROOT) {
 
 /**
  * Does the template cartridge's stage-1 playtest give way to the game tester here? { replaced, why }.
- * STUDIO_STAGE1_PLAYTEST=on keeps the per-task stage 1 in a game studio too (as in 2.78.2); auto (default): as above.
  */
 export function stage1Replaced(root = REPO_ROOT, env = process.env) {
-  if (/^(on|1|true|yes|keep)$/i.test(String(env.STUDIO_STAGE1_PLAYTEST || '').trim())) return { replaced: false, why: 'STUDIO_STAGE1_PLAYTEST=on keeps the per-task stage-1 playtest', words: REPLACED_WORDS };
   const t = gameTesterConfig(root);
   const sg = studioGameSync(root);
   if (t && (t.build || t.url || t.dist)) return { replaced: true, why: `the game declares its own build (${t.source})`, words: REPLACED_WORDS };

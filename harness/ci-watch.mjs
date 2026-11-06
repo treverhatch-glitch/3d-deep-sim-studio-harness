@@ -28,14 +28,6 @@ export const CI_FILE = () => path.join(STUDIO_STATE_DIR, 'ci-watch.json');
 const gh = (args) => (process.env.STUDIO_GH ? spawnSync(`${process.env.STUDIO_GH} ${args.map((a) => `"${a}"`).join(' ')}`, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', shell: true }) : spawnSync('gh', args, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', shell: process.platform === 'win32' }));
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-export function readCiWatch() {
-  try {
-    return JSON.parse(fs.readFileSync(CI_FILE(), 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
 /** What to do with the runs seen so far: wait, rerun (once), green, red. Pure. */
 export function ciDecision(runs, { rerunDone = false } = {}) {
   if (!runs.length || runs.some((r) => r.status !== 'completed')) return 'wait';
