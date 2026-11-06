@@ -119,6 +119,7 @@
     "overseer": "node harness/overseer.mjs",
     "beta": "node harness/beta-mode.mjs",
     "line": "node harness/line-producer.mjs",
+    "tester": "node harness/tester.mjs",
     "models": "node harness/model-pools.mjs",
     "remote": "node harness/remote-workers.mjs",
     "lane": "node harness/lane-create.mjs",

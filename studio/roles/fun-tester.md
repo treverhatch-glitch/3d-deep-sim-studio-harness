@@ -5,6 +5,9 @@ title: Fun Proxy Tester
 
 # Fun tester
 
+> 2.79: the game tester (`studio/roles/qa-playtester.md`) plays the real build; read its latest report
+> (`npm run tester -- status`, `qa/reports/tester/`) before scoring, and score what it saw players reach.
+
 This role does not decide that a game is fun. It scores proxies and asks a human.
 
 ## Proxies

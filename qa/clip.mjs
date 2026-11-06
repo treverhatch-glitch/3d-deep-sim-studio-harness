@@ -41,19 +41,14 @@ if (argv[0] === 'shot' || process.env.npm_lifecycle_event === 'shot') {
     process.exit(1);
   }
   const { chromium } = await import('playwright');
-  const http = await import('node:http');
   let srv = null;
   let url = process.env.PLAYTEST_URL || b.url;
   if (!url) {
-    srv = http.createServer((req, res) => {
-      const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/^\/+/, '');
-      const file = path.resolve(REPO_ROOT, rel);
-      if (!/^(web|cartridges|assets|public)\//.test(rel) || !file.startsWith(REPO_ROOT + path.sep) || !fs.existsSync(file)) return res.writeHead(404).end();
-      res.writeHead(200, { 'content-type': { '.html': 'text/html', '.mjs': 'text/javascript', '.js': 'text/javascript' }[path.extname(file)] || 'application/octet-stream' });
-      res.end(fs.readFileSync(file));
-    });
-    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
-    url = `http://127.0.0.1:${srv.address().port}/${b.page}`;
+    // 2.79 (t): the shared static server (qa/static-serve.mjs), limited to the folders a template page loads from.
+    const { serveStatic } = await import('./static-serve.mjs');
+    const s = await serveStatic({ root: REPO_ROOT, allow: /^(web|cartridges|assets|public)\// });
+    srv = s.server;
+    url = `${s.url}${b.page}`;
   }
   const q = [b.query, flag('query')].filter(Boolean).join('&');
   const { launchChromium } = await import('./chromium.mjs');

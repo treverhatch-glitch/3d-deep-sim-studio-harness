@@ -4967,6 +4967,15 @@ if (inShard('selftest-279b')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.79 (t): the game tester on the Line Producer's schedule (harness/tester.mjs, qa/tester-drive.mjs), never a slot or a
+// hold; its report, bug tasks and notices; wire-it tasks; the stage-1 playtest it replaces in a game studio.
+if (inShard('selftest-279t')) {
+  const dir = copyRepo();
+  const { selftest279T } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-279t.mjs')).href);
+  await selftest279T({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

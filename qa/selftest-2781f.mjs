@@ -275,7 +275,7 @@ console.log(JSON.stringify({ none: none.on, first: first.checked.length, second:
       const dc = probe(S, `import { checkDone } from ${u(S, 'harness/done-check.mjs')};
 const r = checkDone({ id: 'T-777', title: 'Playtest: a seeded run of the game', role: 'qa-playtester' }, 0);
 console.log(JSON.stringify({ type: r.type, warnings: r.warnings || [], ok: r.ok }));
-`, { ...st.env, STUDIO_GAME: 'demo' });
+`, { ...st.env, STUDIO_GAME: 'demo', STUDIO_STAGE1_PLAYTEST: 'on' }); // 2.79 (t): a game studio's playtest task no longer reads stage 1 (the game tester replaces it); this pins the 2.78.1 warning path
       fs.rmSync(newest, { force: true });
       const ok = w.status === 0 && /PASS: stepped 300 tick\(s\) of cartridge example-sim/.test(txt(w)) && /the studio's game is demo \(NOT played\)/.test(txt(w))
         && /WARN QA-STAGE1-NOT-THE-GAME: stage 1 played the template, not the studio's game/.test(txt(w))

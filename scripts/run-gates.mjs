@@ -152,8 +152,13 @@ const EVERY_CARTRIDGE_GATES = new Set(['purity', 'isolation', 'golden', 'golden-
 const { listCartridges, isTemplateCartridge } = await import('../harness/cartridge.mjs');
 const realCartridges = listCartridges().filter((n) => !isTemplateCartridge(n));
 const keepForCartridges = (g) => realCartridges.length > 0 && EVERY_CARTRIDGE_GATES.has(g.id);
+// 2.79 (t): a game with its own build or checks has the game tester (npm run tester) play its real build; the template
+// cartridge's stage-1 playtest says nothing about it and is skipped (a template studio keeps it).
+const { stage1Replaced } = await import('../harness/tester-config.mjs');
+const stage1 = stage1Replaced();
 const gates = all.filter((g) => {
   if (only) return only.has(g.id);
+  if (g.id === 'playtest' && g.cartridge && stage1.replaced) return skipped.push(`playtest (${stage1.words})`), false;
   if (gameOwnsGates && g.cartridge && !keepForCartridges(g)) return skipped.push(`${g.id} (cartridge; ${sg.name} runs its own)`), false;
   if (argv.includes('--required-only') && g.required === false) return false;
   if (isFastTier && !LITE.has(g.id)) return false;

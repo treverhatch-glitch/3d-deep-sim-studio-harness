@@ -48,6 +48,7 @@ import { sizeRuleFor, freeImportLines } from './size-rule.mjs';
 import { contractChecks } from './contracts.mjs';
 import { judgeFiles, manifestSettings, evidenceWords } from './type-evidence.mjs';
 import { activeGame } from './cartridge.mjs';
+import { stage1Replaced } from './tester-config.mjs';
 import { regressionHowTo, regressionMissing } from './regression-howto.mjs';
 import { checkResearch, ensureResearchTemplate } from './research.mjs';
 import { engineTask, engineRepo, engineTarget } from './engine-tracks.mjs';
@@ -842,7 +843,11 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('Fun report since the task started', mtime('studio/fun/latest.md') >= since, 'no fun report since this task started (`npm run fun`)');
     check('Fun report is newer than the last game change', mtime('studio/fun/latest.md') >= fresh, 'the game changed after the fun report; run `npm run fun` again');
   }
-  if (type === 'playtest') {
+  // 2.79 (t): a studio whose game has its own build or checks doesn't play the template cartridge per task any more: the
+  // game tester (harness/tester.mjs) plays the real build on its own schedule. A template studio keeps the stage-1 rows.
+  const s1 = stage1Replaced();
+  if (type === 'playtest' && s1.replaced) check(`Stage-1 playtest: ${s1.words}`, true, '');
+  else if (type === 'playtest') {
     const reps = newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).map((f) => ({ f, j: readJson(f) })).filter(({ j }) => j?.stage1);
     check('Playtest report since the task started', reps.length, 'no playtest report in qa/reports/ since this task started (`npm run playtest:stage1`)');
     const good = reps.filter(({ f, j }) => mtime(f) >= fresh && j.stage1.seed != null && j.stage1.ticksRun != null && isSha256(j.stage1.finalSha256) && (j.passed || j.stage1.failingTick != null));
@@ -878,9 +883,10 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('A scenario for it in the game\'s qa.mjs', ch.files.some((f) => /^cartridges\/[^/]+\/qa\.mjs$/.test(f) || /^(web|game)\/[^/]+\/sim\/qa\.mjs$/.test(f)), 'qa.mjs wasn\'t changed: add a scenario that exercises the system (cartridges/<game>/qa.mjs, or web/<game>/sim/qa.mjs)');
     check('Goldens updated with it', ch.files.some((f) => f.startsWith('qa/golden/')), 'no golden changed: the system changes the game, so regenerate (npm run golden -- --update) and commit the goldens with it');
     const fresh2 = lastGameChange();
-    const reps = newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).filter((f) => mtime(f) >= fresh2);
-    check('Playtest of the current build', reps.length, 'no playtest report newer than the last game change (npm run playtest:stage1)');
-    stage1Warnings(reps.map((f) => ({ f, j: readJson(f) })).filter(({ j }) => j?.stage1));
+    const reps = s1.replaced ? [] : newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).filter((f) => mtime(f) >= fresh2);
+    if (s1.replaced) check(`Stage-1 playtest of the current build: ${s1.words}`, true, '');
+    else check('Playtest of the current build', reps.length, 'no playtest report newer than the last game change (npm run playtest:stage1)');
+    if (!s1.replaced) stage1Warnings(reps.map((f) => ({ f, j: readJson(f) })).filter(({ j }) => j?.stage1));
     workAndVerify();
     const implementer = (readRecentEvents(20000).filter((e) => e.type === 'task.start' && e.task === task.id).pop() || {}).model;
     const notes = filesUnder('studio/reviews', (n) => n.endsWith('.md') && n !== 'README.md').map((f) => fs.readFileSync(abs(f), 'utf8')).filter((t) => new RegExp(`\\b${task.id}\\b`).test(t));
