@@ -139,8 +139,9 @@ if (process.argv[2] === 'queue') {
       const id1 = (out(t1).match(/"id":\s*"(T-\d+)"/) || [])[1];
       const id2 = (out(t2).match(/"id":\s*"(T-\d+)"/) || [])[1];
       const cmd = (mode) => `"${process.execPath}" "${cmdFile}" ${mode}`;
-      const s1 = node(S, ['harness/agent.mjs', 'start', '--role', 'builder', '--agent', 'bld-sq', '--tool', 'custom', '--model', 'm', '--task', id1, '--lane', 'game/demo'], { ...env, STUDIO_AGENT_CMD: cmd('queue') }, 120000);
-      const s2 = node(S, ['harness/agent.mjs', 'start', '--role', 'builder', '--agent', 'bld-sf', '--tool', 'custom', '--model', 'm', '--task', id2, '--lane', 'game/demo'], { ...env, STUDIO_AGENT_CMD: cmd('none') }, 120000);
+      // 2.79 (d): agent start detaches by default; these sessions run in the foreground so the check sees their end.
+      const s1 = node(S, ['harness/agent.mjs', 'start', '--attach', '--role', 'builder', '--agent', 'bld-sq', '--tool', 'custom', '--model', 'm', '--task', id1, '--lane', 'game/demo'], { ...env, STUDIO_AGENT_CMD: cmd('queue') }, 120000);
+      const s2 = node(S, ['harness/agent.mjs', 'start', '--attach', '--role', 'builder', '--agent', 'bld-sf', '--tool', 'custom', '--model', 'm', '--task', id2, '--lane', 'game/demo'], { ...env, STUDIO_AGENT_CMD: cmd('none') }, 120000);
       const evText = textIn(S, '.studio/events.jsonl');
       await guard('2.79 (b, item 1a): a lane copy whose task waits in a train queue (the game queue, or an engine queue) is kept when its session ends (lane.kept names the queue); an unqueued copy is removed as before (fails on 2.78.2: dropCopies removes every copy, queued or not)', async () => [
         r1.j?.keep?.task === q.id && r1.j.keep.train === 'merge' && r1.j.free === null && r1.j.engine?.task === 'T-99' && r1.j.engine.train === 'unity'

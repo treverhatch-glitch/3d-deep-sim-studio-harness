@@ -24,6 +24,7 @@ export const REPO_ROOT = path.resolve(__dirname, '..');
 // a process that outlives its copy then never makes .lanes/<name>/.studio again. Anywhere else REPO_ROOT/.studio.
 export const STUDIO_STATE_DIR = (() => {
   const own = path.join(REPO_ROOT, '.studio');
+  if (/^own$/i.test(String(process.env.STUDIO_LANE_EVENTS || '').trim())) return own; // 2.78.2 (e): the copy's own log
   try {
     const m = REPO_ROOT.replace(/\\/g, '/').match(/^(.*)\/\.lanes\/[^/]+$/);
     if (!m || !fs.statSync(path.join(m[1], '.git')).isDirectory()) return own;
