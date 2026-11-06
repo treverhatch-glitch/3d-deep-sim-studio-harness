@@ -4,6 +4,33 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.79.0] — 2026-11-06
+The crew's request after ~8 h on 2.78.2 (a game tester that plays the game, the 2.78.2 bugs, the orchestrator signs for
+the owner, cut the fat), with the owner's changes to the tester. Item-by-item status and Patch's upgrade note:
+docs/RELEASE-2.79.0.md.
+- **A game tester that plays the game (P-274).** `qa-playtester` is plugged in: the Line Producer starts an agent session
+  that builds the game, plays it in Chromium (`qa/tester-drive.mjs`, every action logged and replayable), varies the
+  start mode, play style and goal, checks each Game Bible feature (working / broken / missing), and files P1 bug tasks
+  with screenshots. At most once per 24 h and 10 game landings, or `npm run tester -- now`; it takes no slot and holds
+  nothing. The template stage-1 playtest is replaced by it in game studios. docs/TESTER.md.
+- **Queued lanes keep their copy (P-275).** Session end keeps a copy whose task is queued; a process outliving its copy
+  writes to the main studio; a lane folder with no `.git` is moved aside and made again; infra hand-backs don't count
+  toward the hand-back limit.
+- **Train and lane fixes.** `train auto off` stops every automatic game train (P-276); train state writes retry on
+  Windows file locks; `agent start` detaches by default; the janitor clears idle copies (`lanes -- prune --idle`);
+  `npm run lanes` is fast; routing reads the harness's own refusal, not the word "protected" (P-277); `review` finds the
+  task's branch; the divergence report builds inside the repo; a reused PID no longer reads as a live record (P-278).
+- **The orchestrator signs for the owner (P-279).** In beta mode the orchestrator answers every ask, releases B/C holds and
+  second-signs goldens; outside signers (`STUDIO_OUTSIDE_SIGNERS`) sign as themselves; releases survive the train's
+  catch-up merge of main; the owner's own acts (`harness/owner-acts.mjs`) stay the owner's. Asks post once and close
+  themselves (P-280).
+- **Engine work.** A per-lane `"preLand"` check before the long land, a bisect that stops at the failure signature,
+  `npm run engine -- check` for porters, engine trains on their own slot, before/after screenshots of a green land.
+- **Less fat.** `npm run gates -- stats`; hourly summaries for three noisy event types; RAM-aware heavy slots (3 on a
+  32 GB PC); an API-key builder pool (`STUDIO_API_POOL`); `studio:reload-env` lists the set names. Settings 697 → 715
+  (about 28 added for the new features, 10 removed); gates 37 → 37. `docs/SETTINGS.md` opens with the 64 settings a
+  studio is likely to change.
+
 ## [2.78.2] — 2026-11-06
 The crew's train-speed request from the first run on 2.78.1 (items 1–18) and the owner's decision on who may approve
 what. Item-by-item status and Patch's upgrade note: docs/RELEASE-2.78.2.md.

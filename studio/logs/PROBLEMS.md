@@ -1421,3 +1421,31 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-273 — an uncommitted beta approval passed the protected check · fixed in 2.78.2
 - **Evidence:** the 2.79 cleanup audit (D1.1), reproduced: a beta-format approval dropped into `studio/approvals/` and never committed turned `approve show` from NEEDS APPROVAL to OK.
 - **Fix:** one predicate for every beta record (committed, in the main checkout, current session, no worker), and the owner's role split for protected decisions. qa/selftest-2782h.mjs.
+
+### P-274 — every task landed green while the game's first minutes were broken · fixed in 2.79.0
+- **Evidence:** the orchestrator's first real browser playtest found the start broken (no layout, a false critical alert, an unservable first goal, no landing in 4 min, frozen money, "undefined" text) behind ~40 green tasks; the per-task stage-1 playtest played the template cartridge; 8 landed modules were never called.
+- **Fix:** the game tester (qa-playtester, plugged into the Line Producer), wire-it tasks, the template playtest replaced in game studios. qa/selftest-279t.mjs.
+
+### P-275 — queued lanes lost their copy at session end (2.78.2 regression) · fixed in 2.79.0
+- **Evidence:** T-295, T-307, T-271 (x4, then held at the hand-back limit), T-319 handed back "its copy is on main now": the copy was removed while queued and a still-running process recreated `.lanes/<agent>/.studio` without `.git`.
+- **Fix:** queued copies are kept, path-based board root, folder-without-.git counts as missing and is made again, infra hand-backs don't count. qa/selftest-279b.mjs.
+
+### P-276 — `train auto off` didn't stop a train · fixed in 2.79.0
+- **Evidence:** auto off at 22:49; a game train with a chain-breaker lane started at 23:46 beside an engine land.
+- **Fix:** one reader for the switch, honoured by the queued-done kick and the speculative train. qa/selftest-279b.mjs.
+
+### P-277 — a passing note with the word "protected" re-held a task · fixed in 2.79.0
+- **Evidence:** T-174's hand-back "protected gate now PASSES" was routed as a protected step again.
+- **Fix:** routing reads `meta.ownerStep`, set by the harness's own refusal. qa/selftest-279d.mjs.
+
+### P-278 — a reused PID read as a live record · fixed in 2.79.0
+- **Evidence:** a stale gate-run record's PID belonged to an unrelated program; CI's drain test hung 60 min on a done-running marker whose PID was reused.
+- **Fix:** records keep the writer's start identity (`proc-identity.liveAs`). qa/selftest-279b.mjs.
+
+### P-279 — the owner had to sign by hand in beta mode · fixed in 2.79.0
+- **Evidence:** T-174 released three times (each catch-up merge of main voided the release), T-145 waited on the owner, asks A-031..A-038 needed `--by hatch`.
+- **Fix:** the orchestrator answers asks, releases B/C holds, second-signs goldens; releases keyed on lane content; outside signers; one owner-only list. qa/selftest-279c.mjs.
+
+### P-280 — asks reposted after they were acted on · fixed in 2.79.0
+- **Evidence:** 252 `agent.ask` events against 20 `ask.answered` in six days, most "T-xxx is parked: 2 sessions in a row ended with no work".
+- **Fix:** one post per task and subject, `ask.closed` when the task moves on, repeats only in the daily digest. qa/selftest-279c.mjs.

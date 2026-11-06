@@ -68,7 +68,7 @@ Engine records (backfill, "why it didn't queue") were done in 2.78.2.
 
 | Item | What changed |
 |---|---|
-| Settings | SETTINGS_LINE |
+| Settings | 697 on 2.78.2 → 715 (`node scripts/settings-census.mjs --summary`). 2.79 adds about 28 for its new features (tester, engine slot and checks, telemetry, API pool, ask digest, outside signers, idle lanes) and removes 10: the old switches `STUDIO_TEST_PORTS`, `STUDIO_LANE_STUDIO_GUARD`, `STUDIO_LANDING_BUILD_WORKER`, `STUDIO_TRAIN_KNOWN_RED` (their default behaviour stays), `STUDIO_AGENT_START_ATTACH` (`--attach` covers it), and five names the harness passes into a game's commands, now listed under "Passed to your commands" instead of counted. `docs/SETTINGS.md` opens with the 64 settings a studio is likely to change (the crew's `.env` names plus the main knobs); agents read that first. A bigger cut needs old tests of removed behaviour retired: it goes with the module split (docs/CLEANUP-2.79-AUDIT.md). |
 | Gates | `npm run gates -- stats [--days 7]`: runs, reds, last red, average time per gate (also in `harness-health --morning`). Over the crew's 690 verifies: game 314 reds, hooks 39, regressions 26, protected 23, godot-unit 5, secrets 5, golden 4, docs 4, purity 1; never red: isolation, playtest, weakened-tests, content-schema, holdout, journey. Only the template playtest is replaced (by the tester); the never-red anti-cheat gates (weakened-tests, holdout) stay: a gate that catches nothing because nobody tries is still doing its job. 37 gates before and after. |
 | Stage-1 playtest | replaced by the tester in game studios (section 1) |
 | Sign-off loops | section 3 |
