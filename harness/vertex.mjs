@@ -223,8 +223,11 @@ export function vertexPick({ role, taskId, tier = null, live = [], cap = 0, high
   const size = sizeOfTask(taskId, { tier, events: ev });
   const model = vertexModelFor(size, env);
   const running = live.filter((s) => s && s.running !== false && s.tool === 'vertex').length;
-  if (high) return { tool: 'vertex', model, size, why: `the plan's budget is high: Vertex (${model}, ${size} task) before the paid API pool` };
   const share = vertexShare(env);
+  // 2.79.2: STUDIO_VERTEX_SHARE=0 means the supervisor starts no Vertex builder, in every mode (on 2.79.1 a high plan
+  // budget skipped the share, so =0 didn't hold).
+  if (share <= 0) return { skip: 'vertex is off for the supervisor (STUDIO_VERTEX_SHARE=0)' };
+  if (high) return { tool: 'vertex', model, size, why: `the plan's budget is high: Vertex (${model}, ${size} task) before the paid API pool` };
   const allowed = share > 0 ? Math.max(1, Math.floor(share * Math.max(0, cap))) : 0;
   if (running >= allowed) return { skip: `vertex has its share (${running} of ${allowed} builder slot${allowed === 1 ? '' : 's'}, STUDIO_VERTEX_SHARE=${share})` };
   return { tool: 'vertex', model, size, why: `Vertex's share of builder slots (${running + 1} of ${allowed}, STUDIO_VERTEX_SHARE=${share}): ${model} for a ${size} task` };

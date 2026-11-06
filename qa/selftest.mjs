@@ -5029,6 +5029,12 @@ if (inShard('selftest-2791e')) {
   await selftest2791E({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
+if (inShard('selftest-2792b')) {
+  const dir = copyRepo();
+  const { selftest2792B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2792b.mjs')).href);
+  await selftest2792B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
 
 // 2.79.1 (c): the crew's findings on 2.79.0: the size rule's KB cap, Golden-Reason placement, the divergence's temp folder,
 // studio:status after a restart, engine porters (target merge, git commit), task add defaults, the janitor.
