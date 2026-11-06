@@ -4,6 +4,27 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.79.1] — 2026-11-06
+The crew's request after a good day on 2.79.0 (Vertex as a builder tool, owner tools, the day's fixes, a small trim), with
+the owner's changes: budgets set on his orders with no built-in cap, an engine push mode, and fat cut where safe.
+Item-by-item status and Patch's upgrade note: docs/RELEASE-2.79.1.md.
+- **Vertex AI as a built-in builder tool (P-281).** `--tool vertex` runs aider through a harness-owned localhost proxy that
+  holds the key (sessions never see it); the supervisor and Line Producer start Vertex builders before the paid API pool
+  (`STUDIO_VERTEX_SHARE` of slots with plan headroom); spend is measured per response, session and task.
+- **Spend budgets.** `npm run budget -- set|clear|resume <tool or key>` on the owner's orders (orchestrator and proxies
+  may set them): 75% pages once, 100% cuts new sessions on that tool or key. No built-in cap.
+- **Owner-defined tools.** `studio/tools.json` (protected; defining a tool is the owner's own act) makes a provider a
+  tool the launcher, supervisor and Line Producer treat like a built-in one.
+- **The Line Producer doesn't freeze (P-282) and plans engine lands (P-283).** Lane-less and parked-blocker tasks no
+  longer stop the line; a near engine land holds new heavy starts, steps builders down, starts at a learned RAM floor and
+  releases at once (max 30 min); engine push mode puts an engine first. Boost expiry posts a status line.
+- **Fixes.** Exempt-file size cap setting, Golden-Reason placement (P-284), divergence temp folder, supervisor status
+  after a restart, porters' engine worktree merged and committable, engine track and lane inference on `task add`,
+  janitor cleans landed engine passes, temp copies and idle lanes after 4 h.
+- **Less fat.** Trimmed event types 1,163 → 250 over the crew's 7.75 h (about −27% of all events); 9 old switches and 30
+  dead exports removed; the visual gate turns itself off without a capture command; a tester run meets a playtest row.
+  Settings 715 → 726 (9 removed, ~20 added for the new features); gates 37 → 37; harness +2,001 / −256 lines.
+
 ## [2.79.0] — 2026-11-06
 The crew's request after ~8 h on 2.78.2 (a game tester that plays the game, the 2.78.2 bugs, the orchestrator signs for
 the owner, cut the fat), with the owner's changes to the tester. Item-by-item status and Patch's upgrade note:

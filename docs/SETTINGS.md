@@ -493,7 +493,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_JANITOR_LANE_H` · no simple default · harness/janitor.mjs, qa/selftest-268o.mjs, qa/selftest-270w.mjs · [RUN-UNATTENDED.md:327](RUN-UNATTENDED.md)
 - `STUDIO_JANITOR_LOGS_MB` · no simple default · harness/janitor.mjs · [RUN-UNATTENDED.md:323](RUN-UNATTENDED.md)
 - `STUDIO_JANITOR_ORPHAN_H` · no simple default · harness/janitor.mjs · [RUN-UNATTENDED.md:337](RUN-UNATTENDED.md)
-- `STUDIO_JANITOR_TEMP_PREFIXES` · no simple default · harness/janitor.mjs, qa/selftest-2791c.mjs · [RUN-UNATTENDED.md:337](RUN-UNATTENDED.md)
+- `STUDIO_JANITOR_TEMP_PREFIXES` · no simple default · harness/janitor.mjs, qa/selftest-2791c.mjs · [RELEASE-2.79.1.md:53](RELEASE-2.79.1.md)
 - `STUDIO_JANITOR_TMPDIR` · no simple default · harness/janitor.mjs, qa/selftest-268o.mjs, qa/selftest-2791c.mjs · [RUN-UNATTENDED.md:324](RUN-UNATTENDED.md)
 - `STUDIO_JANITOR_TMP_H` · no simple default · harness/janitor.mjs · [RUN-UNATTENDED.md:322](RUN-UNATTENDED.md)
 
@@ -1004,7 +1004,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_VISUAL_BLANK_STD` · no simple default · harness/visual-proof.mjs · undocumented
 - `STUDIO_VISUAL_CAPTURE_TIMEOUT_MS` · no simple default · harness/visual-proof.mjs · undocumented
 - `STUDIO_VISUAL_DIFF_MIN` · no simple default · harness/visual-proof.mjs, qa/selftest-265s.mjs · undocumented
-- `STUDIO_VISUAL_GATE` · no simple default · harness/bench.mjs, harness/task.mjs, harness/upgrade-smoke.mjs (+80 more) · [TESTER.md:149](TESTER.md)
+- `STUDIO_VISUAL_GATE` · no simple default · harness/bench.mjs, harness/task.mjs, harness/upgrade-smoke.mjs (+80 more) · [RELEASE-2.79.1.md:61](RELEASE-2.79.1.md)
 - `STUDIO_VISUAL_MIN_OPAQUE` · no simple default · harness/visual-proof.mjs · undocumented
 - `STUDIO_VISUAL_NOISE` · no simple default · harness/visual-proof.mjs, qa/selftest-265s.mjs · [CLEANUP-2.79-AUDIT.md:440](CLEANUP-2.79-AUDIT.md)
 - `STUDIO_VISUAL_NOISE_CAP` · no simple default · harness/visual-proof.mjs, qa/selftest-265s.mjs · [RELEASE.md:216](RELEASE.md)

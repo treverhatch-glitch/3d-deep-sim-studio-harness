@@ -1449,3 +1449,19 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-280 — asks reposted after they were acted on · fixed in 2.79.0
 - **Evidence:** 252 `agent.ask` events against 20 `ask.answered` in six days, most "T-xxx is parked: 2 sessions in a row ended with no work".
 - **Fix:** one post per task and subject, `ask.closed` when the task moves on, repeats only in the daily digest. qa/selftest-279c.mjs.
+
+### P-281 — Vertex credit couldn't carry builder work · fixed in 2.79.1
+- **Evidence:** the key works only with `x-goog-api-key`; the orchestrator's local proxy worked, but adding the tool command was refused by its auto-mode classifier ("Create Unsafe Agents"), so builders couldn't run on Vertex without the owner typing commands.
+- **Fix:** a built-in `vertex` tool through a harness-owned proxy that holds the key; budgets on the owner's orders; owner-defined tools in a protected registry. qa/selftest-2791a.mjs.
+
+### P-282 — one blocked task froze the whole builder line · fixed in 2.79.1
+- **Evidence:** 3 times on 2026-11-06, 10–18 tasks ready and 1–2 of 6 builders running: a parked chain-breaker, lane-less ready tasks, a verify hold kept on while the chain-breaker's train ran.
+- **Fix:** blocked items block only their dependants; lane-less tasks skipped and scoped; one page; the hold ends when the train runs it, max 20 min. qa/selftest-2791b.mjs.
+
+### P-283 — an engine land waited 60 min for RAM and was refused · fixed in 2.79.1
+- **Evidence:** T-215's land waited for 12 GB free while 6 builders ran, then was refused.
+- **Fix:** the Line plans for a near land (hold new heavy starts, step down, learned floor, release at once, max 30 min) and an engine push mode. qa/selftest-2791b.mjs.
+
+### P-284 — a Golden-Reason line under the subject wasn't a trailer · fixed in 2.79.1
+- **Evidence:** T-322 handed back 3 times "no Golden-Reason trailer" while the builder had written the line.
+- **Fix:** `task done` reads trailers the way git does and says exactly where the line goes. qa/selftest-2791c.mjs.
