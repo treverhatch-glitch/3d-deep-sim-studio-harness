@@ -8,7 +8,8 @@
  *                   (case-insensitive; `230h` matches the block that imports qa/selftest-230h.mjs)
  *   --changed [ref] run the units affected by the files changed since `ref` (default: the merge base with
  *                   origin/main, else HEAD~1), committed or not: a unit whose block mentions a changed file (its
- *                   path or basename) or one of its direct importers, a unit whose block has a diff hunk, every
+ *                   path or basename) or a test file that names it (with --deep: also one hop through the modules
+ *                   that import it), a unit whose block has a diff hunk, every
  *                   unit when a shared file changed (package.json, studio/gates.json, the fixture, the runner's
  *                   preamble)
  *
@@ -66,8 +67,15 @@ export function diffHunks(diff) {
   return out;
 }
 
+/** Does `text` name `name` as a whole file name? (2.81: `ask.mjs` is not a mention inside `task.mjs`.) */
+export function mentions(text, name) {
+  const s = String(text); const n = String(name);
+  for (let i = s.indexOf(n); i >= 0; i = s.indexOf(n, i + 1)) if (i === 0 || !/[\w-]/.test(s[i - 1])) return true;
+  return false;
+}
+
 /** Files that mention a changed file's basename (one hop), so a unit testing the importer's command still runs. */
-export function importersOf(root, files, dirs = ['harness', 'scripts', 'qa', 'hub', 'tools']) {
+export function importersOf(root, files, dirs = ['harness', 'scripts', 'qa', 'tools']) {
   const bases = [...new Set(files.map((f) => path.basename(f)).filter((b) => !GENERIC.has(b) && /\.(mjs|js|cjs|json|py)$/.test(b)))];
   if (!bases.length) return [];
   const out = new Set();
@@ -82,7 +90,7 @@ export function importersOf(root, files, dirs = ['harness', 'scripts', 'qa', 'hu
       if (files.includes(rel)) continue;
       let s = '';
       try { s = fs.readFileSync(p, 'utf8'); } catch { continue; }
-      if (bases.some((b) => s.includes(b))) out.add(rel);
+      if (bases.some((b) => mentions(s, b))) out.add(rel);
     }
   };
   for (const d of dirs) walk(path.join(root, d));
@@ -113,7 +121,7 @@ export function changeNames(files) {
 export function affectedByChange(unit, text, names, hunks = [], block = null) {
   if (block && hunks.some((h) => h.from <= block.end && h.to >= (block.start || block.line))) return true;
   const low = String(text || '');
-  return (names || []).some((n) => low.includes(n));
+  return (names || []).some((n) => mentions(low, n));
 }
 
 /** The changed files since `ref` (committed and not) plus untracked ones; also the runner's own hunks. */
@@ -136,7 +144,7 @@ export function changedFiles(root, ref = null) {
  * The selection for a run: { kind, describe, runs(unit) }. `source` is the runner's text; `extraText(unit)` adds
  * what the block cannot show (a sabotage unit's gate command). `firstUnitLine` is where the runner's preamble ends.
  */
-export function buildSelection(root, { only = null, changed = null, source, extraText = () => '' } = {}) {
+export function buildSelection(root, { only = null, changed = null, deep = false, source, extraText = () => '' } = {}) {
   const blocks = unitBlocks(source);
   const text = (u) => `${u.label || ''}\n${blockText(source, blocks, u.line)}\n${extraText(u) || ''}`;
   if (only !== null) {
@@ -148,7 +156,10 @@ export function buildSelection(root, { only = null, changed = null, source, extr
   const shared = ch.files.filter((f) => SHARED.some((s) => (s.endsWith('/') ? f.startsWith(s) : f === s)));
   const preamble = ch.hunks.some((h) => h.from < firstUnit);
   const all = shared.length > 0 || preamble;
-  const importers = all ? [] : importersOf(root, ch.files);
+  // 2.81: by default only the test files that name a changed file count (a change to harness/lock.mjs: 9 units); --deep
+  // also follows one hop through the harness modules that import it (98 units), which is most of the corpus for a
+  // widely used module. The full run on CI is the net either way.
+  const importers = all ? [] : importersOf(root, ch.files, deep ? undefined : ['qa']);
   const names = changeNames([...ch.files, ...importers]);
   const why = all ? `${shared[0] || 'the runner preamble'} changed: every unit runs` : `${ch.files.length} changed file(s), ${importers.length} importer(s)`;
   return {

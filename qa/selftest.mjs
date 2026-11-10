@@ -208,7 +208,7 @@ let SELECT = null;
 if (ONLY_ARG !== null || CHANGED_ARG !== null) {
   const { buildSelection } = await import('../harness/selftest-select.mjs');
   SELECT = buildSelection(root, {
-    only: ONLY_ARG, changed: CHANGED_ARG, source: fs.readFileSync(fileURLToPath(import.meta.url), 'utf8'),
+    only: ONLY_ARG, changed: CHANGED_ARG, deep: process.argv.includes('--deep'), source: fs.readFileSync(fileURLToPath(import.meta.url), 'utf8'),
     extraText: (u) => (u.label.startsWith('sabotage:') ? `${gates.find((g) => g.id === u.label.slice(9))?.command || ''} ${String(SABOTAGE[u.label.slice(9)] || '')}` : ''),
   });
   if (SELECT.kind === 'changed' && JOBS_ARG === null) console.log(`[selftest] ${SELECT.describe}${SELECT.all ? '' : `: ${SELECT.files.slice(0, 12).join(', ')}${SELECT.files.length > 12 ? ', …' : ''}`}`);

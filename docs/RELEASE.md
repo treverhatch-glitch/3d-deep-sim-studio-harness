@@ -32,7 +32,7 @@ never write a verify record. Locally, `npm run release` still runs the whole sel
 
 **Running part of the self-test.** During work run `npm run selftest:changed` (minutes): `--changed [ref]` runs the units
 that the files changed since `ref` touch (default: the merge base with origin/main, else HEAD~1; uncommitted files count):
-a unit whose block names a changed file or a direct importer of it, and every unit when a shared file changed (package.json,
+a unit whose test file names a changed file (`--deep` also follows one hop through the modules that import it), and every unit when a shared file changed (package.json,
 studio/gates.json, qa/fixtures/); `--only a,b` runs named units (a label, `L1234`, a group, or a name the block mentions),
 and a selection that matches nothing fails and says it is not the whole self-test. Before a merge the full self-test runs on
 CI in shards (Linux and Windows), so a missed selection never lands; `npm run selftest:fast` (`--jobs 4`) runs the shards side
