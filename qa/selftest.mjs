@@ -32,7 +32,7 @@ delete process.env.STUDIO_TASK_PIN;
 // The self-test never reads the live studio: every copy starts from the template's board and an
 // empty pre-production state (qa/fixtures/studio/), whatever game this checkout is building.
 const FIXTURE = path.join(root, 'qa', 'fixtures', 'studio');
-const LIVE_STATE = ['studio/bible/bible.json', 'studio/bible/BIBLE.md', 'studio/bible/NOT-DOING.md', 'studio/bible/REFERENCES.md', 'studio/bible/STORYBOARD.md', 'studio/bible/ideas', 'studio/bible/systems', 'studio/signed', 'studio/data-consent.json', 'studio/mode.json', 'studio/game.json', 'studio/asks', 'studio/art', 'studio/divisions.json', 'studio/task-holds.json', 'studio/budget.json', 'studio/tricks', 'studio/playtest', 'studio/proof', 'studio/assets', 'studio/decisions/divisions.md', 'studio/intake-answers.json', 'studio/PITFALLS.md', 'studio/PITFALLS-ARCHIVE.md'];
+const LIVE_STATE = ['studio/bible/bible.json', 'studio/bible/BIBLE.md', 'studio/bible/NOT-DOING.md', 'studio/bible/REFERENCES.md', 'studio/bible/STORYBOARD.md', 'studio/bible/ideas', 'studio/bible/systems', 'studio/signed', 'studio/data-consent.json', 'studio/mode.json', 'studio/game.json', 'studio/asks', 'studio/art', 'studio/divisions.json', 'studio/task-holds.json', 'studio/budget.json', 'studio/playtest', 'studio/proof', 'studio/assets', 'studio/decisions/divisions.md', 'studio/intake-answers.json', 'studio/PITFALLS.md', 'studio/PITFALLS-ARCHIVE.md'];
 // A game's own folders. In a studio building a game, the copy takes these from the harness release this
 // clone last merged (git merge-base HEAD origin/main), never from the live game: run #1's selftest
 // failed on a real studio because its divisions, references, assets, goldens and logs leaked in.
@@ -121,7 +121,7 @@ function copyRepo() {
   });
   if (tpl.dir) fs.cpSync(tpl.dir, dest, { recursive: true });
   for (const rel of LIVE_STATE) fs.rmSync(path.join(dest, rel), { recursive: true, force: true });
-  for (const dir of ['studio/reviews', 'studio/bible/reviews', 'studio/experiments']) {
+  for (const dir of ['studio/reviews', 'studio/bible/reviews']) {
     const d = path.join(dest, dir);
     if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) if (f.toLowerCase() !== 'readme.md') fs.rmSync(path.join(d, f), { recursive: true, force: true });
   }
@@ -706,40 +706,6 @@ if (inShard()) {
   report('studio:reset starts an unsigned Bible, so build work waits for the intake', after.status !== 0 && /pre-production/.test(after.stderr) && /npm run intake/.test(queue()), after.stderr);
 }
 
-// Experiments: tagged commits can be kept, or taken back out in part or in full, leaving other work alone.
-if (inShard()) {
-  const dir = copyRepo();
-  const git = (cmd, env = {}) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`, env);
-  git('init -q');
-  git('add -A');
-  git('commit -q -m init --no-verify');
-  run(dir, 'node scripts/install-hooks.mjs');
-  run(dir, 'node harness/experiment.mjs start "Glowing moss at night" --by hatch');
-  const X = { STUDIO_EXPERIMENT: 'X-001' };
-  edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}\n// night glow\n`);
-  fs.writeFileSync(path.join(dir, 'cartridges/example-sim/glow.txt'), 'glow\n');
-  git('add -A');
-  git('commit -q -m "night glow"', X);
-  edit(dir, 'cartridges/example-sim/index.mjs', (s) => `${s}\n// unrelated work\n`);
-  git('commit -qam "unrelated"');
-  const tagged = run(dir, 'git log --format=%B -n 2').stdout;
-  report('commits made with STUDIO_EXPERIMENT carry the experiment trailer, others don\'t', (tagged.match(/Studio-Experiment: X-001/g) || []).length === 1, tagged);
-  const part = run(dir, 'node harness/experiment.mjs drop X-001 --by hatch --only cartridges/example-sim/glow.txt');
-  report('dropping part of an experiment takes out only that part', part.status === 0 && !fs.existsSync(path.join(dir, 'cartridges/example-sim/glow.txt')) && /night glow/.test(fs.readFileSync(path.join(dir, 'cartridges/example-sim/qa.mjs'), 'utf8')), part.stdout + part.stderr);
-  const full = run(dir, 'node harness/experiment.mjs drop X-001 --by hatch');
-  const qa = fs.readFileSync(path.join(dir, 'cartridges/example-sim/qa.mjs'), 'utf8');
-  const idx = fs.readFileSync(path.join(dir, 'cartridges/example-sim/index.mjs'), 'utf8');
-  const rec = JSON.parse(fs.readFileSync(path.join(dir, 'studio/experiments/X-001.json'), 'utf8'));
-  report('dropping the rest takes it all out and leaves other work in place', full.status === 0 && !/night glow/.test(qa) && /unrelated work/.test(idx) && rec.status === 'dropped', full.stdout + full.stderr);
-  run(dir, 'node harness/experiment.mjs start "Snails redraw paths" --by hatch');
-  const t = run(dir, 'node harness/experiment.mjs task X-002 "snail trail prototype"').stdout.match(/T-\d+/)[0];
-  run(dir, `node harness/task.mjs start ${t} --agent builder-x`);
-  edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}// snail trail\n`);
-  git('commit -qam "snail trail"', { STUDIO_LOCK_OWNER: 'builder-x' });
-  report('work on an experiment\'s task is tagged with the experiment', /Studio-Experiment: X-002/.test(run(dir, 'git log -1 --format=%B').stdout), run(dir, 'git log -1 --format=%B').stdout);
-  report('keeping an experiment records the decision', run(dir, 'node harness/experiment.mjs keep X-002 --by hatch').status === 0 && JSON.parse(fs.readFileSync(path.join(dir, 'studio/experiments/X-002.json'), 'utf8')).status === 'kept');
-}
-
 // The learning loop: the same failure on two days is flagged, with the lesson that didn't stick.
 if (inShard()) {
   const dir = copyRepo();
@@ -1112,30 +1078,13 @@ if (inShard()) {
   report('npm run budget shows tokens used against the week\'s target', /codex: [\d,]+ tokens in the last 5 h, [\d,]+ this week, cache reads counted at [\d.]+x \([\d,]+ read\) \(\d+% of 1,000; target \d+% by now/.test(run(dir, 'node harness/budget.mjs', env).stdout), run(dir, 'node harness/budget.mjs', env).stdout);
 }
 
-// Hiring into departments, and the dev hacker: trick cards that reach the Producer without holding anything up.
+// Hiring into departments: role cards for the department roles, a division that opens with a reason.
 if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1' };
-  report('the dev hacker and the missing department roles have role cards', ['dev-hacker', 'sound-designer', 'composer', 'artist', 'art-director'].every((r) => fs.existsSync(path.join(dir, `studio/roles/${r}.md`))));
-  const op = run(dir, 'node harness/division.mjs open hacks --reason "the game hitches between floors" --by hatch', env);
-  report('a division opens with a reason, logged', op.status === 0 && /Dev Hacker Lab is open/.test(op.stdout) && /opened Dev Hacker Lab: the game hitches/.test(fs.readFileSync(path.join(dir, 'studio/decisions/divisions.md'), 'utf8')), op.stdout + op.stderr);
-  run(dir, 'node harness/watch.mjs', env);
-  spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},500)'], { windowsHide: true });
-  run(dir, 'node harness/watch.mjs', env);
-  const q1 = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
-  report('with the lab open, the watcher queues one low-priority trick hunt for the dev hacker', (q1.match(/\[P3\] \(`dev-hacker`\) — Trick hunt:/g) || []).length === 1, q1.split('\n').filter((l) => /Trick/.test(l)).join('\n'));
-  const hunt = (q1.match(/\*\*(T-\d+)\*\* \[P3\] \(`dev-hacker`\)/) || [])[1];
-  report('a trick card must say when not to use it', /--avoid-if/.test(run(dir, 'node harness/tricks.mjs propose "Elevator hides the load" --problem "F3 hitches" --trick "load during the ride" --fits "a building" --proof "frame time"', env).stderr));
-  run(dir, `node harness/task.mjs start ${hunt} --agent dev-hacker-1`, env);
-  run(dir, 'node harness/tricks.mjs propose "Elevator ride hides the next floor loading" --problem "F3 hitches 400 ms when its models load" --trick "Start loading floor N+1 when the doors close; open them when it is ready" --fits "Every level is a floor of one building; the ride is already in the fiction" --avoid-if "levels are not separated by a ride, or loads are already under a frame" --proof "longest frame on a floor change, browser check, before vs after" --by dev-hacker-1', env);
-  const hdone = run(dir, `node harness/task.mjs done ${hunt} --agent dev-hacker-1`, env);
-  report('a trick hunt is done when a card is written', hdone.status === 0, hdone.stdout + hdone.stderr);
-  run(dir, 'node harness/watch.mjs', env);
-  const q2 = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
-  report('new trick cards reach the Producer in one batch', /\(`producer`\) — Tricks: 1 new from the dev hacker \(K-001\)/.test(q2), q2.split('\n').filter((l) => /Trick/.test(l)).join('\n'));
-  const ad = run(dir, 'node harness/tricks.mjs adopt K-001 --by prod-1', env);
-  report('the Producer adopts a card: build work that names the trick and how to prove it', ad.status === 0 && /Build trick K-001: Elevator ride hides the next floor loading \(prove it: longest frame/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), ad.stdout + ad.stderr);
-  report('a hunt that finds nothing is a fine result', run(dir, 'node harness/tricks.mjs none "frame times are flat; nothing measured to fix"', env).status === 0 && /nothing worth doing now/.test(fs.readFileSync(path.join(dir, 'studio/tricks/HUNTS.md'), 'utf8')));
+  report('the missing department roles have role cards', ['sound-designer', 'composer', 'artist', 'art-director'].every((r) => fs.existsSync(path.join(dir, `studio/roles/${r}.md`))));
+  const op = run(dir, 'node harness/division.mjs open devlog --reason "the game needs a devlog" --by hatch', env);
+  report('a division opens with a reason, logged', op.status === 0 && /Devlog is open/.test(op.stdout) && /opened Devlog: the game needs a devlog/.test(fs.readFileSync(path.join(dir, 'studio/decisions/divisions.md'), 'utf8')), op.stdout + op.stderr);
   // Hiring: into a division, seated there whatever its name; paused hands the task back.
   const tid = JSON.parse(run(dir, 'node harness/task.mjs add "Footstep sounds for floor one" --role sound-designer', env).stdout).id;
   const henv = { ...env, STUDIO_SOUND_DESIGNER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' };
@@ -1865,13 +1814,13 @@ if (inShard()) {
   fs.mkdirSync(path.join(setup, 'studio/roles'), { recursive: true });
   fs.mkdirSync(path.join(setup, 'harness'), { recursive: true });
   fs.writeFileSync(path.join(setup, 'studio/roles/level-designer.md'), '# level-designer\n');
-  fs.writeFileSync(path.join(setup, 'studio/divisions.json'), JSON.stringify({ divisions: [{ id: 'hacks', active: true }] }));
+  fs.writeFileSync(path.join(setup, 'studio/divisions.json'), JSON.stringify({ divisions: [{ id: 'devlog', active: true }] }));
   fs.writeFileSync(path.join(setup, 'settings.env'), 'STUDIO_AGENT_TOOL=claude\nSTUDIO_FAKE_TOKEN=do-not-copy\nHUB_PORT=9999\n');
   fs.writeFileSync(path.join(setup, 'harness/evil.mjs'), 'process.exit(1)\n');
   const third = path.join(tmpRoot, `third-studio-${n}`);
   const ns3 = run(dir, `node scripts/new-studio.mjs --name "Tin Moon" --dir "${third}" --from local --no-install --setup "${setup}"`, env);
   const env3 = fs.existsSync(path.join(third, '.env')) ? fs.readFileSync(path.join(third, '.env'), 'utf8') : '';
-  report('a third game gets the next free port, and a plugged-in setup brings roles, departments and settings but never keys or harness code', ns3.status === 0 && /^STUDIO_PLAY_PORT=4612$/m.test(env3) && !/9999/.test(env3) && /STUDIO_AGENT_TOOL=claude/.test(env3) && !/do-not-copy/.test(env3) && fs.existsSync(path.join(third, 'studio/roles/level-designer.md')) && !fs.existsSync(path.join(third, 'harness/evil.mjs')) && /hacks/.test(fs.readFileSync(path.join(third, 'studio/divisions.json'), 'utf8')), ns3.stdout + ns3.stderr + env3);
+  report('a third game gets the next free port, and a plugged-in setup brings roles, departments and settings but never keys or harness code', ns3.status === 0 && /^STUDIO_PLAY_PORT=4612$/m.test(env3) && !/9999/.test(env3) && /STUDIO_AGENT_TOOL=claude/.test(env3) && !/do-not-copy/.test(env3) && fs.existsSync(path.join(third, 'studio/roles/level-designer.md')) && !fs.existsSync(path.join(third, 'harness/evil.mjs')) && /devlog/.test(fs.readFileSync(path.join(third, 'studio/divisions.json'), 'utf8')), ns3.stdout + ns3.stderr + env3);
   const saved = path.join(tmpRoot, `saved-setup-${n}`);
   const sv = run(third, `node scripts/new-studio.mjs --save-setup "${saved}"`, env);
   report('a studio saves its setup to reuse for the next game, without its keys', sv.status === 0 && fs.existsSync(path.join(saved, 'studio/roles/level-designer.md')) && !/do-not-copy/.test(fs.existsSync(path.join(saved, 'settings.env')) ? fs.readFileSync(path.join(saved, 'settings.env'), 'utf8') : ''), sv.stdout + sv.stderr);

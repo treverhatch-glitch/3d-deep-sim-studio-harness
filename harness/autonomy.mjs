@@ -639,7 +639,7 @@ export function localDays(from, now, zone) {
  * an outside agent is neither the harness, a worker, a launched Producer/Director session, nor a person acting alone.
  */
 const LAUNCHED_DECIDER = /^(producer|director)(-|_|\d|$)/i;
-const WORKER_RE = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|art|artist|art-director|designer|designer-calibrator|balancer|fun-tester|scout|reference-scout|engine-porter|dev-hacker|planner)(-|_|\d|$)/i;
+const WORKER_RE = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|art|artist|art-director|designer|designer-calibrator|balancer|fun-tester|scout|reference-scout|engine-porter|planner)(-|_|\d|$)/i;
 export function orchestratorKind(e) {
   const t = String(e?.type || '');
   if (t === 'conductor.note' || t === 'task.train.released' || t === 'supervisor.halt_cleared' || t.startsWith('lanes.refresh.')) return t === 'lanes.refresh.refused' ? null : 'planned';

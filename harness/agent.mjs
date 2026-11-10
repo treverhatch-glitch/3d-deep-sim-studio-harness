@@ -2030,7 +2030,7 @@ export function sayNow(agent, text) {
   return { ok: true };
 }
 
-const isAgentName = (by) => /^(prod|producer|director|builder|rnd|qa|reviewer|planner|art|agent|watch|supervisor|dev-hacker|codex|claude|gemini|agy|grok|cursor|aider|hermes)\b/i.test(String(by || '')) || by === process.env.STUDIO_LOCK_OWNER;
+const isAgentName = (by) => /^(prod|producer|director|builder|rnd|qa|reviewer|planner|art|agent|watch|supervisor|codex|claude|gemini|agy|grok|cursor|aider|hermes)\b/i.test(String(by || '')) || by === process.env.STUDIO_LOCK_OWNER;
 function readBudgetLimits() {
   try {
     return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'budget.json'), 'utf8'));

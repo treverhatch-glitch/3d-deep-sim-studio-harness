@@ -30,7 +30,7 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 
 export const VERDICTS = path.join(REPO_ROOT, 'studio', 'playtest', 'verdicts.json');
 // The same agent-name shapes the launcher uses for hiring: agents never give a fun verdict.
-const AGENTISH = /^(prod|producer|director|builder|rnd|qa|reviewer|planner|art|agent|watch|supervisor|dev-hacker|codex|claude|gemini|agy|grok|cursor|aider|hermes|sound|composer|artist|ui-|writer|engine)\b/i;
+const AGENTISH = /^(prod|producer|director|builder|rnd|qa|reviewer|planner|art|agent|watch|supervisor|codex|claude|gemini|agy|grok|cursor|aider|hermes|sound|composer|artist|ui-|writer|engine)\b/i;
 export const isPerson = (by) => Boolean(by) && !AGENTISH.test(String(by)) && by !== process.env.STUDIO_LOCK_OWNER;
 
 export function readVerdicts() {

@@ -142,7 +142,7 @@ export function heldBack(args) {
  * opus-bot), a name a launched session used (.studio/agents/<name>.json), or one the launcher hands out
  * (.studio/agent-names.json counters: builder-s<n>). Empty counts as an agent's (nobody said who).
  */
-export const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|scout|designer|balancer|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes|nim|dev-hacker|sound|composer|writer)\b/i;
+export const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|scout|designer|balancer|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes|nim|sound|composer|writer)\b/i;
 export function agentLikeName(name, { stateDir = path.join(HARNESS_ROOT, '.studio') } = {}) {
   const who = String(name || '').trim();
   if (!who || AGENTISH.test(who)) return true;

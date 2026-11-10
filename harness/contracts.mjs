@@ -64,7 +64,7 @@ const TASK_ID = /^[A-Z]+-\d+$/;
 const DECIDER_AGENT = /^(prod|producer|director)(-|_|\d|$)/i;
 const REVIEWER_AGENT = /^reviewer(-|_|\d|$)/i;
 // The agent-name shapes a person's name must not have (as harness/reclassify.mjs isAgentName, without its file probe).
-const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|art-director|scout|reference-scout|designer|designer-calibrator|balancer|fun-tester|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes|nim|dev-hacker|sound|composer|writer|engine|ui-)\b|(^|[-_])bot(\b|$)/i;
+const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|art-director|scout|reference-scout|designer|designer-calibrator|balancer|fun-tester|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes|nim|sound|composer|writer|engine|ui-)\b|(^|[-_])bot(\b|$)/i;
 const timeoutMs = () => (Number(process.env.STUDIO_CONTRACT_TIMEOUT_S) > 0 ? Number(process.env.STUDIO_CONTRACT_TIMEOUT_S) : 600) * 1000;
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 const canon = (v) => (Array.isArray(v) ? `[${v.map(canon).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(',')}}` : JSON.stringify(v ?? null));

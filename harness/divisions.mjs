@@ -32,7 +32,6 @@ export const DEFAULT_DIVISIONS = [
   { id: 'devlog', name: 'Devlog', roles: ['devlogger'] },
   // 2.74.0: Engine Bay: engine workers (a Unity, Godot or other engine track's sessions) and their own train.
   { id: 'engine', name: 'Engine Bay', roles: ['engine-porter', 'engine-worker'] },
-  { id: 'hacks', name: 'Dev Hacker Lab', roles: ['dev-hacker'] },
 ];
 
 export function listDivisions() {

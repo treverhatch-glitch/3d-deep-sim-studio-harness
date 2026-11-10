@@ -11,7 +11,7 @@ and the supervisor backs up once a day.
 | Lessons, LEARNED.md, harness notes and the overseer's evaluations | `studio/memory/`, `studio/harness-notes/` |
 | The Game Bible, NOT-DOING, storyboard, Director reviews, ideas | `studio/bible/` |
 | Plan, vision, decisions, meetings, reviews, Producer log and inbox | `studio/` |
-| Reference notes and the experiment registry (not the media) | `studio/references/`, `studio/experiments/` |
+| Reference notes (not the media) | `studio/references/` |
 | The data-sharing answer | `studio/data-consent.json` |
 | Event log, task briefs, last gate run (their only copy off the machine) | `.studio/` |
 | The newest 50 playtest reports and 20 screenshots (5 MB cap each) | `qa/reports/` |

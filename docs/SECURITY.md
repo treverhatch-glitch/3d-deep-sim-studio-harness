@@ -76,7 +76,7 @@
 - No laundering: amending a commit made without the hooks gets no stamp (the hooks only saw the amendment), and no
   commit is stamped while HEAD is such a commit, until it is re-committed or the owner approves it.
 - Exempt: commits made before the stamping hooks existed, and harness commits made without hooks that say so
-  (`Studio-Harness: experiment-drop` with its `Studio-Experiment-Drop` trailer). CI's own merge commit of a pull request
+  (`Studio-Harness: config-from` with its `Config-From` trailer). CI's own merge commit of a pull request
   isn't judged; the PR head is.
 - An unmerged harness branch (2.60.0, #4): the harness's own commits on a branch not yet on the base branch (a release
   commit carries no stamp) fail the gate in a studio that took that branch. When the owner has said to take it, a

@@ -150,19 +150,3 @@ proper terms from a lawyer. **Reference only:** it goes to the reference library
 `assets` gate fails when a file in `assets/` has no record or changed since, or when game code points
 at the reference library.
 
-## 9. Experiments: try it, keep it, or take it back out
-
-```bash
-npm run experiment -- start "Glowing moss at night"     # X-001
-npm run experiment -- task X-001 "night glow prototype"  # work inside it
-npm run experiment -- drop X-001 --by hatch --only cartridges/my-game/glow.mjs   # take back part
-npm run experiment -- drop X-001 --by hatch               # or all of it
-npm run experiment -- keep X-001 --by hatch
-```
-
-Every commit for an experiment carries a `Studio-Experiment: X-001` trailer (its tasks add it, or
-set `STUDIO_EXPERIMENT=X-001`), so `drop` finds exactly what to remove even after other work landed
-on top. Dropping adds commits that undo it, which is safe while other agents share the checkout; a
-part that later work changed is refused rather than guessed. Inside the game, keep a prototype behind
-a switch in TUNING (`experiments: { X001: true }`). Commits made with `--no-verify` skip the hook and
-aren't tagged.

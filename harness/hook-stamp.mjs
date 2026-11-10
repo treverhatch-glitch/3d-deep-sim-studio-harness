@@ -83,7 +83,7 @@ const ROOT = protectRoot(path.resolve(HERE, '..')) || path.resolve(HERE, '..'); 
 export const TRAILER = 'Studio-Hooks';
 export const HARNESS_TRAILER = 'Studio-Harness';
 /** Commits the harness itself makes without the hooks: the kind, and a trailer such a commit always carries too. */
-export const HARNESS_KINDS = { 'experiment-drop': /^Studio-Experiment-Drop:\s*\S/m, 'config-from': /^Config-From:\s*\S/m };
+export const HARNESS_KINDS = { 'config-from': /^Config-From:\s*\S/m };
 /**
  * 2.65.0 (B-40): what a harness commit of each kind may change. A config-from commit (harness/config-proposal.mjs, made
  * on main right after a lane landed) changes only top-level studio/*.json and studio-proposals/*.json, one parent: any
