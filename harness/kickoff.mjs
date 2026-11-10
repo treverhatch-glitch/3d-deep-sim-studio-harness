@@ -24,6 +24,8 @@ import { constraintsBlock } from './learning-edge.mjs';
 import { ensureRoleBrief } from './role-brief.mjs';
 import { latestFacts } from './handback-facts.mjs';
 import { pendingReds, seenLinesFor } from './error-memory.mjs';
+import { nativeBrief } from './native.mjs';
+const NATIVE_ROLES = new Set(['producer', 'director', 'builder', 'engine-porter', 'line-producer']);
 
 /**
  * Headless launch lines per agent tool, checked against each tool's docs (see docs/AGENT-TOOLS.md).
@@ -99,6 +101,8 @@ export function kickoffParts(opts, { named = false } = {}) {
   // ran npm run verify in the background and then asked the done-check about a run that hadn't finished).
   if (opts.launched) text = text.replace(/Set up once in your shell: `export STUDIO_LOCK_OWNER=(\S+) STUDIO_AGENT_MODEL=(\S+)( STUDIO_PRODUCER_NAME=\S+)?`/, (_, a, m, p) => `The launcher already set STUDIO_LOCK_OWNER and STUDIO_AGENT_MODEL${p ? ' and STUDIO_PRODUCER_NAME' : ''} for you; don't set them again.`);
   if (scopeOf(readMode()) === 'lite') text = text.replace('Read `AGENTS.md`', 'Read `AGENTS.lite.md`');
+  // 2.82: a native-engine studio says so to the roles that plan and build (stable: it changes only with studio/game.json).
+  if (NATIVE_ROLES.has(String(opts.role || '').toLowerCase())) { const nb = nativeBrief(); if (nb) text = `${text.replace(/\n+$/, '')}\n\n${nb}\n`; }
   // 2.71.0 (y): a saved builder brief generated from the studio's rule files (harness/role-brief.mjs; refreshed here when
   // a source changed or it was edited) is read first; the AGENTS file stays the whole text. No saved brief: as before.
   if (String(opts.role || '').toLowerCase() === 'builder') {

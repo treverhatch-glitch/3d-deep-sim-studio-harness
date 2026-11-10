@@ -277,6 +277,14 @@ Every review, and `npm run visual -- send <T>`, queues one path line for the own
 to `.studio/comm/notices.jsonl`, is posted in the Communicator's next pass, and tags nobody. `npm run visual -- status
 <T>` shows where the check stands.
 
+## The rules check, the stage report and native mode (2.82)
+
+Before the long land run the train runs the engine's cheap rules check on the batch as it would land, and hands back
+the lane that turns it red (cause `rules`) without a land run. A land command can report what each of its stages took
+(`STUDIO_LAND_RESULT`), which the scorecard's engine block shows. A studio whose game is the engine build is native:
+builder tasks go on the engine track and the web presentation and porting steps are off. All three are in
+[NATIVE-ENGINE.md](NATIVE-ENGINE.md).
+
 ## Not done yet (follow-ups)
 
 - A custom launch command (`STUDIO_<ROLE>_CMD`) doesn't get the engine worktree in `{addDirs}` yet; the built-in

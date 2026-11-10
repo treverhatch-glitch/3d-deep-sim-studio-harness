@@ -181,6 +181,32 @@ export function landInfra(text, { status = null, signal = null, timedOut = false
 }
 
 /**
+ * 2.82: what each stage of a land run took. A land command may say so in the file the harness names in
+ * STUDIO_LAND_RESULT (JSON: { "stages" | "gates": { "<name>": { "status": "pass", "seconds": 510 } } }, or a list of
+ * { name, status, seconds }), or in its output, one line per stage: `[land-stage] <name> <status> <seconds>`.
+ * [{ name, status, seconds }] in the order given ([] when it says nothing): the stages go on the engine.land event, so
+ * the scorecard can show where a land's minutes go and which stage fails first.
+ */
+export function landStages(file, text = '') {
+  const clean = (name, status, seconds) => {
+    const n = String(name || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, 24);
+    const sec = Number(seconds);
+    if (!n) return null;
+    return { name: n, status: String(status || '').trim().toLowerCase().replace(/[^a-z-]/g, '').slice(0, 12) || 'unknown', seconds: Number.isFinite(sec) && sec >= 0 ? Math.round(sec) : null };
+  };
+  let rows = [];
+  try {
+    const j = file && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) : null;
+    const g = Array.isArray(j) ? j : j && typeof j === 'object' ? j.stages || j.gates : null;
+    if (Array.isArray(g)) rows = g.map((x) => clean(x?.name, x?.status, x?.seconds ?? x?.durationSec));
+    else if (g && typeof g === 'object') rows = Object.entries(g).map(([k, v]) => clean(k, v?.status, v?.seconds ?? v?.durationSec));
+  } catch { rows = []; }
+  rows = rows.filter(Boolean);
+  if (!rows.length) for (const m of String(text || '').matchAll(/^\[land-stage\]\s+(\S+)\s+(\S+)(?:\s+([0-9.]+))?\s*$/gm)) rows.push(clean(m[1], m[2], m[3]));
+  return rows.filter(Boolean).slice(0, 12);
+}
+
+/**
  * Map a land command's exit to a result. 2.60.1 (B-41): `exits` (studio/game.json engines.unity.exits) is the land
  * script's own contract and replaces the default one; a code it doesn't list is an error naming the code.
  */
@@ -268,7 +294,22 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   }
   let r;
   const landStart = Date.now();
-  const tuneEnv = { STUDIO_ENGINE: engine, STUDIO_ENGINE_TUNE: JSON.stringify(tune || {}), STUDIO_ENGINE_TUNE_FILE: tunePath(REPO_ROOT, engine), STUDIO_ENGINE_FLAGS: flags.join(' ') };
+  // 2.82: the land command may write its stages' results there (landStages above).
+  const stageFile = path.join(REPO_ROOT, '.studio', 'gates', `${engine}-land-stages.json`);
+  try { fs.mkdirSync(path.dirname(stageFile), { recursive: true }); fs.rmSync(stageFile, { force: true }); } catch { /* an old file is only ever read after a run that wrote it again */ }
+  const tuneEnv = { STUDIO_ENGINE: engine, STUDIO_ENGINE_TUNE: JSON.stringify(tune || {}), STUDIO_ENGINE_TUNE_FILE: tunePath(REPO_ROOT, engine), STUDIO_ENGINE_FLAGS: flags.join(' '), STUDIO_LAND_RESULT: stageFile };
+  // 2.82: for a Unity land script: which Edit Mode assemblies the editor still has to run after its .NET tests passed
+  // (harness/unity.mjs editModePlan on the land's own checkout; "SKIP": none). The script decides whether to use it.
+  if (engine === 'unity' && !/^(off|0|false|no)$/i.test(String(env.STUDIO_UNITY_EDITMODE_PLAN || ''))) {
+    try {
+      const proj = [cfg.gateWorktree ? path.resolve(REPO_ROOT, cfg.gateWorktree) : null, folder, cwd].find((d) => d && fs.existsSync(path.join(d, 'Assets')));
+      if (proj) {
+        const plan = (await import('./unity.mjs')).editModePlan(proj);
+        if (plan.skip) tuneEnv.STUDIO_UNITY_EDITMODE_ARGS = 'SKIP';
+        else if (plan.args.length) tuneEnv.STUDIO_UNITY_EDITMODE_ARGS = plan.args.join(' ');
+      }
+    } catch { /* a help for the script, never a condition of the land run */ }
+  }
   const landOnce = () => spawnSync(cmd, { cwd, shell: true, encoding: 'utf8', env: { ...env, ...tuneEnv, STUDIO_HEAVY_HELD: process.env.STUDIO_HEAVY_HELD || '' }, maxBuffer: 256 * 1024 * 1024, timeout: timeoutMin * 60000, windowsHide: true });
   try {
     log(`[unity-gate] running the studio's ${L} land command${task ? ` for ${task}` : ''}${many ? ` (branches ${many.join(' ')})` : br ? ` (branch ${br})` : ''} in ${path.relative(REPO_ROOT, cwd) || '.'}; up to ${timeoutMin} min`);
@@ -307,14 +348,15 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   const tail = text.trimEnd().split('\n').slice(-12).join('\n');
   // 2.79 (e): a red run's failing test names (the train's bisect stops on the batch's signature).
   const failures = m.status === 'red' ? failingTests(text) : [];
-  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
+  const stages = (() => { try { return landStages(stageFile, text); } catch { return []; } })();
+  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), ...(stages.length ? { stages } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
 
   function finish(res) {
     const full = { ...res, engine, ms: Date.now() - t0, ...(task ? { task } : {}), ...(br ? { branch: br } : {}), ...(many ? { branches: many } : {}), at: new Date().toISOString() };
     try { fs.mkdirSync(path.join(REPO_ROOT, '.studio', 'gates'), { recursive: true }); fs.writeFileSync(path.join(REPO_ROOT, '.studio', 'gates', et.files.gateLast), JSON.stringify({ ...full, engine }, null, 2)); } catch {}
     // 2.77.0 (u, P5.3): a run that ran to the end keeps its length for the Line Producer's schedule.
     if (['pass', 'red', 'conflict'].includes(full.status)) { try { recordDuration(engine, { kind: 'land', ms: full.ms, status: full.status }); } catch {} }
-    try { emitEvent({ type: 'engine.land', agent: env.STUDIO_LOCK_OWNER || 'gates', task: task && !String(task).includes(',') ? task : undefined, track: `engine:${engine}`, status: full.ok ? 'ok' : full.status === 'refused' || full.status === 'not-run' ? 'warn' : 'blocked', msg: `${L} land${task ? ` for ${task}` : ''}: ${full.status} (${full.why})`.slice(0, 400), meta: { engine, status: full.status, code: full.code ?? null, ms: full.ms, ...(full.infra ? { infra: full.infra.kind } : {}), ...(many ? { branches: many } : {}), ...(String(task || '').includes(',') ? { tasks: String(task).split(',') } : {}) } }); } catch {}
+    try { emitEvent({ type: 'engine.land', agent: env.STUDIO_LOCK_OWNER || 'gates', task: task && !String(task).includes(',') ? task : undefined, track: `engine:${engine}`, status: full.ok ? 'ok' : full.status === 'refused' || full.status === 'not-run' ? 'warn' : 'blocked', msg: `${L} land${task ? ` for ${task}` : ''}: ${full.status} (${full.why})`.slice(0, 400), meta: { engine, status: full.status, code: full.code ?? null, ms: full.ms, ...(full.infra ? { infra: full.infra.kind } : {}), ...(full.stages ? { stages: full.stages } : {}), ...(many ? { branches: many } : {}), ...(String(task || '').includes(',') ? { tasks: String(task).split(',') } : {}) } }); } catch {}
     // 2.65.0: the uniform job.done (harness/jobs.mjs) beside engine.land.
     if (full.status !== 'skipped') jobDone({ kind: `${engine}-gate`, id: task || br || null, code: full.code ?? null, result: full.status, ms: full.ms, tail: full.tail || full.why || '', log: full.log || null, task: task && !String(task).includes(',') ? task : null, agent: env.STUDIO_LOCK_OWNER || 'gates' });
     try { logEngine(`${engine} land${task ? ` ${task}` : ''}: ${full.status === 'not-run' ? `not run${full.infra ? ` (${full.infra.kind})` : ''}` : full.status}${full.code !== null && full.code !== undefined ? ` (exit ${full.code})` : ''}`, env.STUDIO_LOCK_OWNER || undefined); } catch {}

@@ -5054,6 +5054,14 @@ if (inShard('selftest-281a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.82: native-engine mode, the rules check before the land run, land stages, the engine flow on the scorecard.
+if (inShard('selftest-282a')) {
+  const dir = copyRepo();
+  const { selftest282A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-282a.mjs')).href);
+  await selftest282A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

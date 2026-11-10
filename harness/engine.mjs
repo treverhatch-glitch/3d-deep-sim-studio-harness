@@ -176,6 +176,8 @@ export const portSources = (t) => (Array.isArray(t?.portSource) && t.portSource.
 /** One port task per web commit not yet ported (duplicates are skipped by the queue). */
 export async function queueDrift({ by = actor() } = {}) {
   const t = readTrack();
+  // 2.82: a native-engine studio has no port: a feature is built once, in the engine.
+  { const ne = (await import('./native.mjs')).nativeEngine(); if (ne) return { ok: false, message: `This studio is native ${ne}: features are built once, in the engine, so there are no port tasks to queue from web commits (node harness/native.mjs says why it is native).` }; }
   const d = portDrift(t);
   if (!d.pinned) return { ok: false, message: 'The port is not pinned yet: npm run engine -- port --from <sha> (the web commit the port matches now).' };
   const { addTask } = await import('./task.mjs');
@@ -293,6 +295,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const r = await linkEngine(argv[1], argv[2], { by: flag('by') || actor(), build: flag('build'), web: flag('web'), source: flag('source') });
     console[r.ok ? 'log' : 'error'](r.ok ? `Linked: ${r.track.label} port in ${r.track.folder} (its own repo). Gate: ${r.track.gate}. Parity: ${r.track.parity.command}${r.track.parity.web ? ` against ${r.track.parity.web}` : ''}. Build: ${r.track.buildTarget || 'default'}${r.track.webExport ? '' : ', no browser export'}.` : r.message);
     process.exit(r.ok ? 0 : 1);
+  }
+  // 2.82: the engine's rules check (harness/engine-rules.mjs) and native-engine mode (harness/native.mjs).
+  if (argv[0] === 'rules' || argv[0] === 'native') {
+    const mod = argv[0] === 'rules' ? 'engine-rules.mjs' : 'native.mjs';
+    const r = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), mod), ...argv.slice(1)], { stdio: 'inherit', windowsHide: true, cwd: process.cwd() });
+    process.exit(r.status ?? 1);
   }
   if (argv[0] === 'start') {
     const r = await startEngine(argv[1], { by: flag('by') || actor() });

@@ -484,6 +484,19 @@ of the Unity repo. The full pattern, the same for any engine, is in [ENGINE-TRAC
 - **Self-tuning:** `npm run engine -- tune unity <quality-level|volume|lod-bias|batch-flags|ram-floor> <value> --by
   <you> --why "…"`, logged in the decisions log.
 
+## Rules first, and Edit Mode once (2.82)
+
+The crew's first 64 land runs passed 18 times; 24 of the 45 failures were in the .NET rule tests, and a passing run
+spent a median 53 of its 92 minutes in Edit Mode re-running those same tests. Since 2.82:
+
+- The Unity train runs the rules check (`dotnet test tools/SimTests` by default, or `engines.unity.rules`) on the batch
+  before the land run, and hands back the lane that breaks it. See [NATIVE-ENGINE.md](NATIVE-ENGINE.md).
+- A land script gets `STUDIO_UNITY_EDITMODE_ARGS` (which Edit Mode assemblies the editor still has to run after the
+  .NET tests passed), `STUDIO_RULES_GREEN=1` when the harness ran the rules green on exactly this batch, and
+  `STUDIO_LAND_RESULT` (where to write what each stage took).
+- Keep the rules' maths in plain C# with no engine types: compiled rule tests take seconds. Rules that run through an
+  interpreter inside .NET take minutes, and every land run pays for it twice.
+
 ## Settings
 
 In `.env`:
