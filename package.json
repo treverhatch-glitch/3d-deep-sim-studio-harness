@@ -10,7 +10,6 @@
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "seed:events": "node scripts/seed-demo-events.mjs",
-    "daily:summary": "node scripts/daily-summary.mjs",
     "hub": "node hub/server.mjs",
     "agents": "node harness/agents.mjs",
     "route": "node harness/route.mjs",
@@ -138,7 +137,6 @@
     "check:purity": "node scripts/check-sim-purity.mjs",
     "check:isolation": "node scripts/check-sim-isolation.mjs",
     "event:sh": "node scripts/append-event.mjs",
-    "display:start": "node scripts/start-agent-display.mjs",
     "session:start": "node scripts/session-start.mjs",
     "session:precompact": "node scripts/pre-compact.mjs",
     "setup:token-savers": "node scripts/setup-token-savers.mjs",

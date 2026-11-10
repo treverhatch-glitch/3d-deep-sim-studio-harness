@@ -158,9 +158,10 @@ const unmet = (r) => { const l = `${r?.stdout || ''}${r?.stderr || ''}`.split(/\
 const tail = (r, n = 6) => `${r?.stdout || ''}${r?.stderr || ''}`.trim().split(/\r?\n/).filter((l) => l.trim()).slice(-n).join(' | ').slice(0, 900);
 
 /** Claim the task the way a builder does, in its copy: { ok, out }. run: spawnSync's shape (tests). */
-export function claimTask({ agent, task, model = null, cwd, env, run = spawnSync, timeoutMs = 120000 }) {
+export function claimTask({ agent, task, model = null, cwd, env, run = spawnSync, timeoutMs = Number(process.env.STUDIO_AIDER_CLAIM_TIMEOUT_MS) || 480000 }) {
   const r = run(process.execPath, [path.join(cwd, 'harness', 'task.mjs'), 'start', task, '--agent', agent, ...(model ? ['--model', model] : [])], { windowsHide: true, cwd, env, encoding: 'utf8', timeout: timeoutMs });
-  return { ok: r.status === 0, out: tail(r, 4) || `exit ${r.status ?? r.signal ?? '?'}` };
+  const timedOut = r.error?.code === 'ETIMEDOUT';
+  return { ok: r.status === 0, out: timedOut ? `claim step timed out after ${Math.round(timeoutMs / 1000)} s` : (tail(r, 4) || `exit ${r.status ?? r.signal ?? '?'}`) };
 }
 
 /** Files changed in the copy (tracked changes and new files, git's own ignores applied). */

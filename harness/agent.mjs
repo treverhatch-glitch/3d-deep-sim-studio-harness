@@ -1432,7 +1432,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     // 2.79.2 (a): the claim, as a builder's own task start does it (in its copy), only once nothing else can stop the start.
     if (driven.on) {
       const c = claimTask({ agent, task, model, cwd, env });
-      if (!c.ok) throw new Error(`${task} could not be claimed for aider (task start refused): ${c.out}`);
+      if (!c.ok) {
+        // The start may have recorded the claim before it hung or failed (a kill left tasks claimed with no agent): hand it back, only if it is this agent's.
+        if (listLocks().some((l) => l.key === `task:${task}` && l.owner === agent)) { try { pauseTask(task, agent, `${agent}: ${c.out}; the launcher released the claim.`, { force: true }); } catch { /* the launch error below still says it */ } }
+        throw new Error(`${task} could not be claimed for aider (task start refused): ${c.out}`);
+      }
       fs.writeSync(out, `[launcher] aider protocol: claimed ${task} for ${agent} (task start in its copy)\n`);
       let briefText = '';
       try { briefText = fs.readFileSync(path.join(STUDIO_STATE_DIR, 'briefs', `${task}.md`), 'utf8'); } catch {}
