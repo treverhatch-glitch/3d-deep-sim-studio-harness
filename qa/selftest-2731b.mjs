@@ -8,9 +8,8 @@
  *            not a lane with main's dirty files as its "unlanded work"; laneCopies leaves it out; lanes refresh refuses it
  *            without running git in it
  *   boot     `studio:boot --check` reports and changes nothing; the sweep clears dead-pid lock/status files with one
- *            event each and leaves live ones, claims and lanes alone; the hub is started detached once (a second boot
- *            sees it running) without the shell's identity; the supervisor only when none runs, with --foreground and the
- *            passed options; the Windows npm.cmd hint; --shortcut writes the Desktop file
+ *            event each and leaves live ones, claims and lanes alone (2.80: no hub to start any more); the supervisor only
+ *            when none runs, with --foreground and the passed options (--no-hub accepted and not passed on); the Windows npm.cmd hint; --shortcut writes the Desktop file
  * Each check fails on 2.73.0 (the loaders took identity from .env, the preflight counted leftover folders, no boot).
  */
 import fs from 'node:fs';
@@ -120,9 +119,8 @@ export async function selftest2731B({ dir, report, tmpRoot, root }) {
   // ---- boot (B-69) ----
   {
     const { S, ev } = studio('boot');
-    const port = await freePort();
-    const E = { AGENT_EVENTS_FILE: ev, HUB_PORT: String(port) };
-    fs.writeFileSync(path.join(S, '.env'), `HUB_PORT=${port}\nSTUDIO_LOCK_OWNER=opus-1\n`);
+    const E = { AGENT_EVENTS_FILE: ev };
+    fs.writeFileSync(path.join(S, '.env'), 'STUDIO_BACKUP_KEEP=60\nSTUDIO_LOCK_OWNER=opus-1\n');
     const locks = path.join(S, '.studio', 'locks');
     fs.mkdirSync(locks, { recursive: true });
     fs.mkdirSync(path.join(S, '.studio', 'verify-running'), { recursive: true });
@@ -136,34 +134,23 @@ export async function selftest2731B({ dir, report, tmpRoot, root }) {
     fs.mkdirSync(path.join(S, '.lanes', 'builder-s9'), { recursive: true });
     fs.writeFileSync(path.join(S, '.lanes', 'builder-s9', 'work.txt'), 'keep\n');
     const exists = (rel) => fs.existsSync(path.join(S, rel));
-    let hubPid = null;
-    try {
-      await guard('2.73.1 (B-69): `studio:boot --check` reports (the dead-pid train lock "would clear", hub and supervisor down, the .env identity WARN with its Fix, the leftover folder) and changes nothing: no file cleared, nothing started (fails on 2.73.0: no harness/boot.mjs)', () => {
-        const pkg = JSON.parse(fs.readFileSync(path.join(S, 'package.json'), 'utf8'));
-        const r = node(S, ['harness/boot.mjs', '--check'], E);
-        const t = out(r);
-        return [pkg.scripts?.['studio:boot'] === 'node harness/boot.mjs' && r.status === 0 && /\.studio\/locks\/train\.lock would clear \(pid \d+ is gone \(train-2731b\)\)/.test(t) && /hub\s+down/.test(t) && /supervisor\s+down/.test(t) && /WARN dotenv-identity: \.env sets STUDIO_LOCK_OWNER \(line 2\)/.test(t) && /Fix: remove line 2 from \.env/.test(t) && /builder-s9/.test(t) && exists('.studio/locks/train.lock') && JSON.parse(fs.readFileSync(path.join(S, '.studio/supervisor.json'), 'utf8')).status === 'running' && !exists('.studio/logs') && !events(ev).some((e) => /^boot\./.test(e.type)), t];
-      });
-      await guard('2.73.1 (B-69): `studio:boot` clears the dead-pid train lock and full-verify record, marks the dead supervisor stopped (one boot.stale_cleared event each), keeps a live lock, a claim and the lane folder; starts the hub detached once without the shell\'s STUDIO_LOCK_OWNER, logging to .studio/logs/hub.log, and a second boot sees it running (fails on 2.73.0: no boot)', async () => {
-        const r = node(S, ['harness/boot.mjs', '--no-supervisor', '--json'], { ...E, STUDIO_LOCK_OWNER: 'opus-1' });
-        const j = lastJson(r);
-        hubPid = j?.daemons?.hub?.pid || null;
-        const health = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(3000) }).then((x) => x.ok, () => false);
-        let hubEnv = '';
-        try { hubEnv = fs.readFileSync(`/proc/${hubPid}/environ`, 'utf8'); } catch {}
-        const envOk = process.platform !== 'linux' || (hubEnv && !/(^|\0)STUDIO_LOCK_OWNER=/.test(hubEnv) && /(^|\0)HUB_PORT=/.test(hubEnv));
-        const cleared = events(ev).filter((e) => e.type === 'boot.stale_cleared').map((e) => e.meta?.file).sort();
-        const r2 = node(S, ['harness/boot.mjs', '--no-supervisor', '--json'], E);
-        const j2 = lastJson(r2);
-        const starts = events(ev).filter((e) => e.type === 'boot.started' && e.meta?.what === 'hub').length;
-        const sup = JSON.parse(fs.readFileSync(path.join(S, '.studio/supervisor.json'), 'utf8'));
-        return [r.status === 0 && j?.daemons?.hub?.state === 'started' && health && envOk && JSON.stringify(cleared) === JSON.stringify(['.studio/supervisor.json', '.studio/locks/train.lock', '.studio/verify-running/full.json'].sort())
-          && !exists('.studio/locks/train.lock') && !exists('.studio/verify-running/full.json') && exists('.studio/locks/land.lock') && exists('.studio/locks/task-T-001.abcd.lock') && exists('.lanes/builder-s9/work.txt')
-          && sup.status === 'stopped' && /studio:boot/.test(sup.stopReason) && exists('.studio/logs/hub.log') && j2?.daemons?.hub?.state === 'running' && starts === 1 && j2?.swept?.length === 1 && j2.swept[0].action === 'kept', `${out(r)}\n${out(r2)}\nhubEnv ok: ${envOk}; cleared ${cleared}; starts ${starts}`];
-      });
-    } finally {
-      if (hubPid) { try { process.kill(hubPid, 'SIGTERM'); } catch {} }
-    }
+    await guard('2.73.1 (B-69): `studio:boot --check` reports (the dead-pid train lock "would clear", the supervisor down, the .env identity WARN with its Fix, the leftover folder) and changes nothing: no file cleared, nothing started (fails on 2.73.0: no harness/boot.mjs)', () => {
+      const pkg = JSON.parse(fs.readFileSync(path.join(S, 'package.json'), 'utf8'));
+      const r = node(S, ['harness/boot.mjs', '--check'], E);
+      const t = out(r);
+      return [pkg.scripts?.['studio:boot'] === 'node harness/boot.mjs' && r.status === 0 && /\.studio\/locks\/train\.lock would clear \(pid \d+ is gone \(train-2731b\)\)/.test(t) && !/^\s*hub\s/m.test(t) && /supervisor\s+down/.test(t) && /WARN dotenv-identity: \.env sets STUDIO_LOCK_OWNER \(line 2\)/.test(t) && /Fix: remove line 2 from \.env/.test(t) && /builder-s9/.test(t) && exists('.studio/locks/train.lock') && JSON.parse(fs.readFileSync(path.join(S, '.studio/supervisor.json'), 'utf8')).status === 'running' && !exists('.studio/logs') && !events(ev).some((e) => /^boot\./.test(e.type)), t];
+    });
+    await guard('2.73.1 (B-69): `studio:boot` clears the dead-pid train lock and full-verify record, marks the dead supervisor stopped (one boot.stale_cleared event each), keeps a live lock, a claim and the lane folder; a second boot finds nothing more to clear (fails on 2.73.0: no boot; 2.80: there is no hub to start)', async () => {
+      const r = node(S, ['harness/boot.mjs', '--no-supervisor', '--json'], { ...E, STUDIO_LOCK_OWNER: 'opus-1' });
+      const j = lastJson(r);
+      const cleared = events(ev).filter((e) => e.type === 'boot.stale_cleared').map((e) => e.meta?.file).sort();
+      const r2 = node(S, ['harness/boot.mjs', '--no-supervisor', '--json'], E);
+      const j2 = lastJson(r2);
+      const sup = JSON.parse(fs.readFileSync(path.join(S, '.studio/supervisor.json'), 'utf8'));
+      return [r.status === 0 && j && !('hub' in (j.daemons || {})) && JSON.stringify(cleared) === JSON.stringify(['.studio/supervisor.json', '.studio/locks/train.lock', '.studio/verify-running/full.json'].sort())
+        && !exists('.studio/locks/train.lock') && !exists('.studio/verify-running/full.json') && exists('.studio/locks/land.lock') && exists('.studio/locks/task-T-001.abcd.lock') && exists('.lanes/builder-s9/work.txt')
+        && sup.status === 'stopped' && /studio:boot/.test(sup.stopReason) && r2.status === 0 && j2?.swept?.length === 1 && j2.swept[0].action === 'kept', `${out(r)}\n${out(r2)}\ncleared ${cleared}`];
+    });
     await guard('2.73.1 (B-69): the supervisor starts only when none runs: once with harness/supervisor.mjs --foreground and the passed --until, hidden in .studio/logs/supervisor.log, without the session identity; a live supervisor is left alone (fails on 2.73.0: no boot)', async () => {
       const sjson = path.join(S, '.studio', 'supervisor.json');
       fs.writeFileSync(sjson, JSON.stringify({ pid: DEAD, status: 'stopped' }));
@@ -175,7 +162,7 @@ export async function selftest2731B({ dir, report, tmpRoot, root }) {
       const a = A.j.d; const c = C.j.d; const calls = [...A.j.calls, ...C.j.calls];
       const src = fs.readFileSync(path.join(S, 'harness', 'boot.mjs'), 'utf8');
       const spawnLine = (src.match(/spawn\(process\.execPath[^\n]*/) || [''])[0];
-      return [a.supervisor.state === 'started' && calls.length === 1 && calls[0].script === 'harness/supervisor.mjs' && JSON.stringify(calls[0].args) === JSON.stringify(['--until', '46h', '--no-hub', '--foreground']) && calls[0].log === 'supervisor.log' && calls[0].owner === null && calls[0].role === null
+      return [a.supervisor.state === 'started' && calls.length === 1 && calls[0].script === 'harness/supervisor.mjs' && JSON.stringify(calls[0].args) === JSON.stringify(['--until', '46h', '--foreground']) && a.hubGone === true && calls[0].log === 'supervisor.log' && calls[0].owner === null && calls[0].role === null
         && c.supervisor.state === 'running' && c.supervisor.pid === process.pid && /detached: true/.test(spawnLine) && /windowsHide: true/.test(spawnLine), JSON.stringify({ a, c, calls, spawnLine })];
     });
     await guard('2.73.1 (B-69): on Windows the preflight says to type npm.cmd when PowerShell blocks npm.ps1, and --shortcut writes a Desktop .cmd that runs `npm.cmd run studio:boot` in the studio folder (a .sh elsewhere) and prints its path (fails on 2.73.0: no boot)', async () => {

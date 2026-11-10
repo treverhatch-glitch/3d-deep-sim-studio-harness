@@ -157,18 +157,16 @@ console.log(JSON.stringify({ win, tol: START_TOLERANCE_MS, plus1: sameProcess({ 
       until(() => locksOf('launch-b').some((k) => k === `task:${idB}`), 10000 * SLOW);
       const rec = readRec('launch-b');
       // Listings: agent list, studio:status, and a probe for sessions(), task.mjs's holder check (a non-owner's
-      // hand-back is refused while the holder runs) and the HUD.
+      // hand-back is refused while the holder runs).
       const t1 = Date.now();
       const list = run(dir, 'node harness/agent.mjs list', slowEnv);
       run(dir, 'node harness/supervisor.mjs status', slowEnv);
       const f = path.join(dir, '.probe-pu17-list.mjs');
       fs.writeFileSync(f, `import { sessions } from ${JSON.stringify(pathToFileURL(path.join(dir, 'harness/agent.mjs')).href)};
 import { pauseTask } from ${JSON.stringify(pathToFileURL(path.join(dir, 'harness/task.mjs')).href)};
-import { buildHudState } from ${JSON.stringify(pathToFileURL(path.join(dir, 'harness/hud.mjs')).href)};
 const running = sessions().find((s) => s.agent === 'launch-b')?.running;
 const handBack = pauseTask(${JSON.stringify(idB)}, 'producer-x', 'probe: is the holder running?');
-const hud = buildHudState();
-console.log(JSON.stringify({ running, refused: handBack?.error || null, hudAgents: (hud.agents || []).length }));`);
+console.log(JSON.stringify({ running, refused: handBack?.error || null }));`);
       const probe = run(dir, `node ${path.basename(f)}`, slowEnv);
       const listMs = Date.now() - t1;
       let pr = {};
@@ -177,7 +175,7 @@ console.log(JSON.stringify({ running, refused: handBack?.error || null, hudAgent
       const st = stopAndWait('launch-b', slowEnv);
       const after = reads();
       const agentGone = until(() => pidGone(rec?.pid), 10000 * SLOW);
-      report(`PU-17 (P-045): with the reader slowed by ${delay} ms, a launch and the listings (agent list, studio:status, sessions(), the task holder check, the HUD) never call it, and the launch is no slower (${slow.ms} ms against ${fast.ms} ms with no delay)`,
+      report(`PU-17 (P-045): with the reader slowed by ${delay} ms, a launch and the listings (agent list, studio:status, sessions(), the task holder check) never call it, and the launch is no slower (${slow.ms} ms against ${fast.ms} ms with no delay)`,
         fast.ok && slow.ok && before === 0 && pr.running === true && pr.refused === 'locked' && slow.ms < fast.ms + Math.round(delay * 2 / 3) && /launch-b/.test(list.stdout),
         `fast=${JSON.stringify({ ms: fast.ms, ok: fast.ok })} slow=${JSON.stringify({ ms: slow.ms, ok: slow.ok })} reads=${before} listMs=${listMs} probe=${JSON.stringify(pr)}\n${out(slow.r)}\n${out(probe).slice(-800)}`);
       report('PU-17: a launched session records the spawn time of the agent and of its launcher, and agent stop reads the OS exactly once, finds the same process and ends it; the launcher hands the task back',

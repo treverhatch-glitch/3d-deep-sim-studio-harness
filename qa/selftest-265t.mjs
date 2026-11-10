@@ -7,8 +7,7 @@
  *   2. Self-triage: a supervisor halt for a tool not on PATH is fixed (the tool marked out, the next tool takes over,
  *      the halt cleared by "self-triage") once per cause per window, then left for a person; unknown causes and custom
  *      commands stay halted; a dead heavy holder's orphans are killed and its slot freed; a game check that timed out
- *      under load runs once more at the cap (not without load, not twice); rescues of landed tasks are closed; a hub
- *      that stopped answering is started again when no supervisor runs.
+ *      under load runs once more at the cap (not without load, not twice); rescues of landed tasks are closed.
  *   3. `npm run digest` writes studio/digest/<date>.md (under 200 words) with what needs a person, the scorecard line
  *      and what self-triage did, and one event; nothing waiting: one line; the watchdog's daily run at the hour.
  *   4. `npm run autonomy -- level` sets the level for a person, a Producer session, or an outside agent on permission;
@@ -150,7 +149,7 @@ console.log(JSON.stringify({ a, killed, slot, left: procs.length }));`);
   report('2.65.0 (self-triage, rerun-timeout): a timeout with no load measured (factor 1) is not re-run: it fails as before',
     g3.status !== 0 && /timed out after 2 s/.test(out(g3)) && !/once more at the cap/.test(out(g3)) && events().filter((e) => e.type === 'selftriage.rerun-timeout').length === 1, out(g3).slice(-1200));
 
-  // ---- 2d. rescues of a landed task, and the hub ----
+  // ---- 2d. rescues of a landed task (2.80: the hub's restart-hub fix went with the hub) ----
   const tLanded = add('Port the toy menu');
   task(`start ${tLanded} --agent hatch`);
   const landedDone = task(`done ${tLanded} --agent hatch --force --reason "landed by hand in this test"`);
@@ -162,19 +161,9 @@ const a = await rescueSweep();
 const q = parseNextQueue();
 console.log(JSON.stringify({ a, open: [...q.backlog, ...q.inProgress].map((t) => t.id) }));`);
   const swEv = events().filter((e) => e.type === 'selftriage.close-rescues');
-  const hub = probe('hub', `import { hubPass } from ${u('harness/self-triage.mjs')};
-let up = true; const spawned = [];
-const deps = { hubUp: async () => up, spawnHub: () => { spawned.push(1); return 4242; }, supervisorAlive: false };
-const a0 = await hubPass(deps);
-up = false;
-const a1 = await hubPass(deps);
-const a2 = await hubPass(deps);
-const a3 = await hubPass({ ...deps, supervisorAlive: true });
-console.log(JSON.stringify({ a0, a1, a2, a3, spawned: spawned.length }));`);
-  report('2.65.0 (self-triage, close-rescues and restart-hub): the rescue of a task that landed is closed with one selftriage.close-rescues event; a hub that answered and then stopped is started again once (selftriage.restart-hub), not twice in the window',
-    !sweep.open?.includes(tRescue) && sweep.a?.some((x) => x.task === tRescue) && swEv.length === 1 && swEv[0].meta?.stuck === tLanded
-      && hub.a0?.length === 0 && hub.a1?.length === 1 && hub.a2?.length === 0 && hub.spawned === 1 && events().filter((e) => e.type === 'selftriage.restart-hub').length === 1,
-    `${out(landedDone).slice(-600)}\n${JSON.stringify({ sweep, swEv, hub }).slice(0, 2000)}`);
+  report('2.65.0 (self-triage, close-rescues): the rescue of a task that landed is closed with one selftriage.close-rescues event',
+    !sweep.open?.includes(tRescue) && sweep.a?.some((x) => x.task === tRescue) && swEv.length === 1 && swEv[0].meta?.stuck === tLanded,
+    `${out(landedDone).slice(-600)}\n${JSON.stringify({ sweep, swEv }).slice(0, 2000)}`);
   const wdSrc = fs.readFileSync(path.join(dir, 'harness', 'watchdog.mjs'), 'utf8');
   report('2.65.0 (self-triage): the watchdog\'s pass runs the self-triage list before the rescue ladder, and the daily digest', /selfTriagePass/.test(wdSrc) && wdSrc.indexOf('selfTriagePass') < wdSrc.indexOf('rescuePass') && /digestIfDue/.test(wdSrc), '');
 

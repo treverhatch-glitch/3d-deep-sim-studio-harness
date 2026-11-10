@@ -202,13 +202,6 @@ console.log(JSON.stringify({ d: idleVerdict({ role: 'director', startedAt: new D
   report('2.30o: idle exit applies to any role by default (STUDIO_IDLE_EXIT_MIN=0 turns it off)', iv2.d?.exit === true && iv2.off?.exit === false, JSON.stringify(iv2));
   const gl0 = run(dir, 'node harness/watchdog.mjs loop 180 --once', { ...base, STUDIO_GAME: '' });
   report('2.30o: the stand-alone game-dev loop is off with no active game', /\[gamedev\] off/.test(out(gl0)), out(gl0));
-  run(dir, 'node harness/away.mjs on --by zz', base);
-  const aw = probe(`import { gamedevPass } from ${u('harness/gamedev-loop.mjs')}; import { parseNextQueue } from ${u('harness/task.mjs')};
-const before = [...parseNextQueue().backlog, ...parseNextQueue().inProgress].filter((t) => t.role === 'builder').length;
-await gamedevPass(Date.now() + 86400000);
-console.log(JSON.stringify({ before, after: [...parseNextQueue().backlog, ...parseNextQueue().inProgress].filter((t) => t.role === 'builder').length }));`, { ...base, STUDIO_GAME: 'zz-lay', STUDIO_GAMEDEV_SKIP: 'stall,landing,tiers,review,launch,cycle', STUDIO_REFILL_AHEAD: '3' });
-  run(dir, 'node harness/away.mjs back --by zz', base);
-  report('2.30o: away mode means more autonomy: the refill keeps 6 builder tasks open instead of 4', aw.after >= 6 || (aw.after > aw.before && aw.after >= 5), JSON.stringify(aw));
 
   // 8c. The standing development cycle: thin-brief expansion, an always-extending ladder, a brief.
   const dc = probe(`import { bibleGaps, cyclePass, ladderEnds } from ${u('harness/dev-cycle.mjs')}; import { parseNextQueue } from ${u('harness/task.mjs')};

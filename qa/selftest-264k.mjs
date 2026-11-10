@@ -225,10 +225,5 @@ console.log(JSON.stringify({ raised, v, v2, pass1, checks: all.filter((e) => e.t
     Array.isArray(dr.checks) && dr.stops === 0 && /setDriftAdvisor/.test(fs.readFileSync(path.join(dir, 'harness', 'stall.mjs'), 'utf8')) && /STUDIO_DRIFT_ADVISOR/.test(fs.readFileSync(path.join(dir, 'harness', 'stall.mjs'), 'utf8')),
     JSON.stringify(dr).slice(0, 2000));
 
-  // The War Room: a read-only data endpoint and the Ops card.
-  const srv = fs.readFileSync(path.join(dir, 'hub', 'server.mjs'), 'utf8');
-  const ui = fs.readFileSync(path.join(dir, 'hub', 'v3', 'index.html'), 'utf8');
-  report('2.64.0 (autonomy): the War Room Ops view has an Autonomy card fed by GET /api/autonomy',
-    /\/api\/autonomy' && req\.method === 'GET'/.test(srv) && /autonomyCard\(\)/.test(srv) && /id="o-autonomy"/.test(ui) && /fetch\('\/api\/autonomy'/.test(ui), '');
   for (const f of fs.readdirSync(dir).filter((x) => x.startsWith('.probe-264k-'))) fs.rmSync(path.join(dir, f), { force: true });
 }

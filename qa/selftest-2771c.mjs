@@ -1,6 +1,6 @@
 /**
  * qa/selftest-2771c.mjs — 2.77.1 (helper c): three small issues from the crew's Windows PC.
- *   M1 (B-101)  the War Room machine tile divided ALL used RAM by the running sessions ("10.2 GB per session, room for 0
+ *   M1 (B-101)  (2.80: gone with the War Room) the War Room machine tile divided ALL used RAM by the running sessions ("10.2 GB per session, room for 0
  *               more, Limit: RAM" at 20.4 GB used and 2 sessions), counting the OS, browsers and Unity editors. Now
  *               (used now - used at the last idle sample) / sessions, "average incl. other apps" without a baseline,
  *               room-for-N from the scheduler's own per-session figure (STUDIO_SESSION_RAM_GB, 0.6), the sample's age.
@@ -63,41 +63,7 @@ export async function selftest2771C({ dir, run, report, tmpRoot, root }) {
   const u = (S, p) => JSON.stringify(pathToFileURL(path.join(S, p)).href);
   const want = (k) => !process.env.ONLY_2771C || process.env.ONLY_2771C.split(',').includes(k);
 
-  // ---- M1: the machine tile ----
-  const m1Code = (S) => `import fs from 'node:fs'; import path from 'node:path';
-import { machineTiles } from ${u(S, 'harness/war-room.mjs')};
-const root = process.cwd();
-const now = Date.parse('2026-11-05T12:00:00.000Z');
-const at = (minAgo) => new Date(now - minAgo * 60000).toISOString();
-const put = (usedGb, minAgo) => { fs.mkdirSync(path.join(root, '.studio'), { recursive: true }); fs.writeFileSync(path.join(root, '.studio', 'machine.json'), JSON.stringify({ at: at(minAgo), os: 'win32', ram: { totalGb: 32, freeGb: Math.round((32 - usedGb) * 10) / 10 }, cpu: { busy: 0.3 }, gpus: [], disk: { freeGb: 100 } })); };
-const base = process.env.M1_MODE === 'nobase' ? null : (put(8, 12), machineTiles({ root, sessions: 0, env: process.env, now }));
-put(20.4, 3);
-const t = machineTiles({ root, sessions: 2, env: process.env, now });
-console.log(JSON.stringify({ base: base && base.ram, t }));
-`;
-  if (want('m1')) await guard('2.77.1 (B-101): with an idle sample as baseline the tile shows (used now - baseline) / sessions ("per session": 20.4 GB used, 8 GB idle, 2 sessions = 6.2 GB), the sample age ("sampled 3 min ago") and the baseline (fails on 2.77.0: 10.2 GB "per session", no age, no baseline)', async () => {
-    const { S, env } = studio('m1a');
-    const r = probe(S, env, 'm1a', m1Code(S));
-    const t = r.t || {};
-    const ok = t.ram?.usedGb === 20.4 && t.ram.perSessionGb === 6.2 && t.ram.perSessionLabel === 'per session' && t.ram.baselineGb === 8 && t.sampleAgeMin === 3 && t.sampleAgeText === 'sampled 3 min ago';
-    return [ok, JSON.stringify(r).slice(0, 1500)];
-  });
-  if (want('m1')) await guard('2.77.1 (B-101): without a baseline the figure is labelled "average incl. other apps" (10.2 GB = 20.4 / 2), never "per session" (fails on 2.77.0: no label at all)', async () => {
-    const { S, env } = studio('m1b');
-    const r = probe(S, { ...env, M1_MODE: 'nobase' }, 'm1b', m1Code(S));
-    const t = r.t || {};
-    return [t.ram?.perSessionGb === 10.2 && t.ram.perSessionLabel === 'average incl. other apps' && t.ram.baselineGb === null && t.sampleAgeText === 'sampled 3 min ago', JSON.stringify(r).slice(0, 1500)];
-  });
-  if (want('m1')) await guard('2.77.1 (B-101): room for N more is the scheduler\'s rule (free - 3 GB floor) / STUDIO_SESSION_RAM_GB (0.6 default, as heavy-budget.mjs sessionCap): 11.6 GB free = 14 more, no "Limit: RAM"; with 2 GB a session = 4 more (fails on 2.77.0: "room for 0", Limit: RAM, from 10.2 GB per session)', async () => {
-    const { S, env } = studio('m1c');
-    const a = probe(S, env, 'm1c', m1Code(S)).t || {};
-    const { S: S2, env: env2 } = studio('m1d');
-    const b = probe(S2, { ...env2, STUDIO_SESSION_RAM_GB: '2' }, 'm1d', m1Code(S2)).t || {};
-    // the same figure sessionCap uses
-    const hb = probe(S, env, 'm1e', `import { sessionRamGb } from ${u(S, 'harness/heavy-budget.mjs')}; console.log(JSON.stringify({ per: sessionRamGb({ env: process.env, root: process.cwd() }) }));`);
-    const ok = a.ram?.roomForMore === 14 && a.limit === null && a.ram.schedulerPerSessionGb === 0.6 && hb.per === 0.6 && b.ram?.roomForMore === 4 && b.ram.schedulerPerSessionGb === 2;
-    return [ok, JSON.stringify({ a: a.ram, alimit: a.limit, b: b.ram, hb })];
-  });
+  // 2.80: M1 (the War Room's machine tile) went with the War Room.
 
   // ---- M4: the post CLIs exit by exitCode, not process.exit ----
   const cliRun = async (S, script, args, env) => {

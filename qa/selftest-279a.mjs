@@ -36,11 +36,11 @@ export async function selftest279A({ dir, report, tmpRoot, root }) {
   await guard('census-known', async () => {
     const { census } = await imp('scripts/settings-census.mjs');
     const c = census(dir);
-    const hud = c.items.find((i) => i.name === 'STUDIO_PLANNING_ROOM');
+    const hud = c.items.find((i) => i.name === 'STUDIO_GAMEDEV_AUTOLAUNCH'); // 2.80: STUDIO_PLANNING_ROOM's reader (hud.mjs) is gone
     const def = c.items.find((i) => i.name === 'STUDIO_TEMP_SWEEP_MIN');
     const r = spawnSync(process.execPath, ['scripts/settings-census.mjs'], { windowsHide: true, cwd: dir, encoding: 'utf8' });
     const last = String(r.stdout || '').trim().split('\n').pop();
-    const ok = hud?.readers.includes('harness/hud.mjs') && hud.modules === hud.readers.length && def?.default === '5' && def.modules >= 1 && c.total > 400
+    const ok = hud?.readers.includes('harness/gamedev-loop.mjs') && hud.modules === hud.readers.length && def?.default === '5' && def.modules >= 1 && c.total > 400
       && c.families.some((f) => f.suffix === '_WAIT_MIN') && new RegExp(`^SUMMARY: ${c.total} settings, ${c.dead.length} dead, ${c.offSwitches.length} off-switch candidates, ${c.families.length} duplicate families`).test(last);
     return [ok, `hud ${JSON.stringify(hud?.readers)} temp-sweep default ${def?.default} total ${c.total} | ${last} | ${String(r.stderr).slice(-300)}`];
   });

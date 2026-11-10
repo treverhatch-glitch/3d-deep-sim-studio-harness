@@ -200,8 +200,5 @@ console.log(JSON.stringify({ retried, calls, v1, fell, v2, warned: warned.length
   report('2.57.0 (PU-16): writeAtomic retries a refused rename (EPERM/EBUSY, as on Windows) and succeeds; if it stays refused it writes in place with a warning; other errors are not retried (stand-in rename: real Windows untested here)',
     win.retried === 'renamed' && win.calls === 3 && win.v1 === 'new-1' && win.fell === 'direct' && win.v2 === 'new-2' && win.warned === 1 && win.other === 'ENOENT' && win.temps?.length === 0, JSON.stringify(win).slice(0, 1200));
 
-  const hubSrc = fs.readFileSync(path.join(dir, 'hub', 'server.mjs'), 'utf8');
-  report('2.57.0 (PU-16): the hub re-watches a state file after it is replaced whole (a watch ends with the old file)', /function watchState\(/.test(hubSrc) && /ev !== 'rename'/.test(hubSrc), '');
-
   for (const f of fs.readdirSync(dir).filter((x) => x.startsWith('.probe-pu16-'))) fs.rmSync(path.join(dir, f), { force: true });
 }

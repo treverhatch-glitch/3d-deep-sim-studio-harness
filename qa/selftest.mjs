@@ -260,7 +260,6 @@ const SABOTAGE = {
   playtest: (d) => edit(d, SIM, plantInvariant(37)),
   soak: (d) => edit(d, SIM, plantInvariant(150)),
   'tick-budget': () => ({ TICK_BUDGET_MS_PER_TICK: '0.0000001' }),
-  'hub-smoke': (d) => edit(d, 'hub/server.mjs', (s) => s.replace('return tokenMatches(headerToken(req)) || phoneWrite(req);', 'return true;')),
   reviewer: (d) => fs.writeFileSync(path.join(d, 'studio/reviews/2026-10-20-T-001.md'), 'Review of T-001. Verdict: approve.\n'),
   assets: (d) => {
     fs.mkdirSync(path.join(d, 'assets'), { recursive: true });
@@ -319,7 +318,6 @@ const EXPECT = {
   playtest: /\[playtest\] FAIL/,
   soak: /PLANTED/,
   'tick-budget': /ms\/tick >/,
-  'hub-smoke': /FAIL write without token is refused/,
   reviewer: /needs model-family and implementer-family/,
   assets: /stray\.glb has no record/,
   'browser-play': /a real game needs the browser check/,
@@ -474,7 +472,7 @@ if (inShard()) {
   report('--force writes a task.forced event addressed to the Producer', /"type":"task\.forced"[^\n]*"to":"producer"/.test(events));
 }
 
-// The Producer handoff reflects the studio's real state, and meetings leave notes, tasks and a log entry.
+// The Producer handoff reflects the studio's real state (2.80: meetings went with the War Room).
 if (inShard()) {
   const dir = copyRepo();
   run(dir, 'node harness/lock.mjs claim path:cartridges/example-sim --owner alice-1');
@@ -486,16 +484,6 @@ if (inShard()) {
   report('handoff briefing builds from files', brief.status === 0 && fs.existsSync(path.join(dir, '.studio/briefs/producer.md')), `${brief.stdout}${brief.stderr}`);
   report('handoff shows the plan, the newest log note and decisions', note.status === 0 && /## The plan/.test(out) && /Chose spawnCost 400/.test(out) && /ADR-0001/.test(out), out);
   report('handoff puts the forced check first and names who holds what', /## Needs you first[\s\S]*Check forced done T-003/.test(out) && /alice-1: path:cartridges\/example-sim/.test(out), out);
-
-  const start = run(dir, 'node harness/meeting.mjs start "Spawn pacing" --with builder,qa-playtester');
-  report('meeting starts and a second one is refused while it runs', start.status === 0 && run(dir, 'node harness/meeting.mjs start "Other" --with builder').status !== 0, `${start.stdout}${start.stderr}`);
-  run(dir, 'node harness/meeting.mjs say "Wins land at tick 298" --agent qa-playtester');
-  const end = run(dir, 'node harness/meeting.mjs end --decision "Keep spawnCost at 400" --action "Playtest: seeds 1-20|qa-playtester|P2"');
-  const notes = fs.readdirSync(path.join(dir, 'studio/meetings')).filter((f) => f !== 'README.md').map((f) => fs.readFileSync(path.join(dir, 'studio/meetings', f), 'utf8')).join('');
-  const queue = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
-  const log = fs.readFileSync(path.join(dir, 'studio/producer/LOG.md'), 'utf8');
-  report('meeting notes keep remarks, decisions and actions', end.status === 0 && /qa-playtester\*\*: Wins land/.test(notes) && /Keep spawnCost at 400/.test(notes) && /Playtest: seeds 1-20/.test(notes), `${end.stdout}${end.stderr}\n${notes}`);
-  report('meeting actions become tasks and the outcome reaches the Producer log', /\(`qa-playtester`\) — Playtest: seeds 1-20/.test(queue) && /Meeting "Spawn pacing"/.test(log), `${queue}\n${log}`);
 }
 
 // Workers who stop hand back with a note; the watcher requeues abandoned work and pings the Producer once.
@@ -1170,10 +1158,10 @@ if (inShard()) {
   const hire = run(dir, `node harness/agent.mjs hire --role sound-designer --agent zed-1 --division sound --task ${tid} --by hatch --note "keep it subtle" --detach`, henv);
   const t0 = Date.now();
   while (Date.now() - t0 < 8000 * SLOW && !/zed-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)'], { windowsHide: true });
-  fs.writeFileSync(path.join(dir, 'hudjson.mjs'), "import { buildHudState } from './harness/hud.mjs';\nconsole.log(JSON.stringify(buildHudState()));\n");
-  const hud = JSON.parse(run(dir, 'node hudjson.mjs', env).stdout || '{}');
-  const zed = (hud.agents || []).find((a) => a.name === 'zed-1');
-  report('an agent hired into a division sits in that room, and the room opens', hire.status === 0 && zed?.room === 'sound' && (hud.divisions || []).find((d) => d.id === 'sound')?.active === true && /Note from hatch[^\n]*:\n\| keep it subtle/.test(fs.readFileSync(path.join(dir, '.studio/kickoff/zed-1.md'), 'utf8')), hire.stdout + hire.stderr + JSON.stringify(zed));
+  // 2.80: the seat in the War Room's room went with it; the division still opens (harness/divisions.mjs).
+  fs.writeFileSync(path.join(dir, 'divjson.mjs'), "import { listDivisions } from './harness/divisions.mjs';\nconsole.log(JSON.stringify({ divisions: listDivisions() }));\n");
+  const hud = JSON.parse(run(dir, 'node divjson.mjs', env).stdout || '{}');
+  report('an agent hired into a division opens that division and gets the hiring note', hire.status === 0 && (hud.divisions || []).find((d) => d.id === 'sound')?.active === true && /Note from hatch[^\n]*:\n\| keep it subtle/.test(fs.readFileSync(path.join(dir, '.studio/kickoff/zed-1.md'), 'utf8')), hire.stdout + hire.stderr + JSON.stringify(hud.divisions));
   const pz = run(dir, 'node harness/agent.mjs pause zed-1 --note "wrong floor"', env);
   report('pausing an agent hands its task back with the note', pz.status === 0 && new RegExp(`## BACKLOG[\\s\\S]*${tid}`).test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), pz.stdout + pz.stderr);
   report('npm run agent -- logs shows an agent\'s output', run(dir, 'node harness/agent.mjs logs zed-1', env).status === 0);
@@ -1272,7 +1260,6 @@ if (inShard()) {
   run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(8)} --foreground`, { ...env, STUDIO_RND_CMD: 'node -e "process.exit(127)"' });
   const sup = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8'));
   const rndRuns = fs.readdirSync(path.join(dir, '.studio/agents')).filter((f) => /^rnd-s\d+\.json$/.test(f)).length;
-  fs.writeFileSync(path.join(dir, 'hudjson.mjs'), "import { buildHudState } from './harness/hud.mjs';\nconsole.log(JSON.stringify(buildHudState()));\n");
   report('after two sessions in a row end with exit 127, the supervisor stops starting and says why (run #1 looped)', sup.halted?.code === 127 && /wasn't found/.test(sup.halted.why) && rndRuns === 2, JSON.stringify(sup.halted) + ` runs=${rndRuns}`);
   // Install: the login job gets this terminal's PATH and HOME, and the node on the PATH.
   fs.writeFileSync(path.join(dir, 'plist.mjs'), "import { launchdPlist } from './harness/supervisor.mjs';\nconsole.log(launchdPlist({ label: 'com.studio.x', node: '/usr/local/bin/node', args: ['s.mjs', '--foreground'], env: { PATH: '/Users/j/.local/bin:/usr/bin', HOME: '/Users/j' } }));\n");
@@ -1599,15 +1586,16 @@ if (inShard()) {
   fs.writeFileSync(path.join(vb, 'index.html'), '<script type="module" src="/assets/index-abc.js"></script>\n');
   fs.writeFileSync(path.join(vb, 'assets/index-abc.js'), 'console.log("a bundled game");\n');
   const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`], { windowsHide: true });
+  // 2.80: the hub's Arcade is gone; npm run play (harness/builds.mjs) serves the build the same way.
   const hport = 3900 + Math.floor(Math.random() * 90);
-  const hubP = spawn(process.execPath, ['hub/server.mjs'], { windowsHide: true, cwd: dir, env: { ...CLEAN_ENV, HUB_PORT: String(hport), HUB_TOKEN: 'selftest-token' }, stdio: 'ignore' });
+  const playP = spawn(process.execPath, ['harness/builds.mjs', '--build', '209901010000-vite', '--port', String(hport)], { windowsHide: true, cwd: dir, env: { ...CLEAN_ENV }, stdio: 'ignore' });
   const get = (p) => spawnSync(process.execPath, ['-e', `fetch('http://127.0.0.1:${hport}${p}').then(async (r) => console.log(r.status, (await r.text()).slice(0, 40))).catch((e) => console.log('ERR', e.message))`], { windowsHide: true, encoding: 'utf8' }).stdout.trim();
   const th = Date.now();
-  while (Date.now() - th < 10000 * SLOW && /^ERR/.test(get('/health'))) pause(300);
-  const page = get('/play/209901010000-vite/index.html');
+  while (Date.now() - th < 10000 * SLOW && /^ERR/.test(get('/index.html'))) pause(300);
+  const page = get('/index.html');
   const asset = get('/assets/index-abc.js');
-  hubP.kill();
-  report('the Arcade plays a bundled build whose files load from the root (/assets/…), not only from /play/<id>/', /^200/.test(page) && /^200 console\.log\("a bundled game"\)/.test(asset), `${page} | ${asset}`);
+  playP.kill();
+  report('npm run play serves a bundled build whose files load from the root (/assets/…)', /^200/.test(page) && /^200 console\.log\("a bundled game"\)/.test(asset), `${page} | ${asset}`);
   // The real thing, when a Godot is installed: the template's port matches the web game, and its gate passes.
   const godot = process.env.STUDIO_GODOT || (spawnSync(process.platform === 'win32' ? 'where' : 'which', ['godot'], { windowsHide: true }).status === 0 ? 'godot' : null);
   if (godot) {
@@ -1689,10 +1677,11 @@ if (inShard()) {
   const noWords = run(dir, 'node harness/art.mjs changes D-003 --by hatch', env);
   const ch = run(dir, 'node harness/art.mjs changes D-003 "taller, with a lid" --by hatch', env);
   report('asking for changes needs your words, then gives the art department a task', noWords.status !== 0 && ch.status === 0 && /\(`art`\) — Art: round 2 of #3 Prop 2: taller, with a lid/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), noWords.stderr + ch.stdout + ch.stderr + fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8').split('\n').filter((l) => /Art:/.test(l)).join('\n'));
-  fs.writeFileSync(path.join(dir, 'hudjson.mjs'), "import { buildHudState } from './harness/hud.mjs';\nconsole.log(JSON.stringify(buildHudState()));\n");
-  const hud = JSON.parse(run(dir, 'node hudjson.mjs', env).stdout || '{}');
-  report('the art division is on by default, and designs waiting show under Needs you', hud.divisions?.find((d) => d.id === 'art')?.active === true && (hud.signals?.needsYou || []).some((x) => /designs waiting in the Asset studio \(#4 Prop 3/.test(x)), JSON.stringify(hud.signals));
-  // War Room actions start the right agent when a tool is set, and say what happens next either way.
+  // 2.80: the War Room's "Needs you" card for waiting designs went with it; the division default stays (harness/divisions.mjs).
+  fs.writeFileSync(path.join(dir, 'divjson.mjs'), "import { listDivisions } from './harness/divisions.mjs';\nconsole.log(JSON.stringify({ divisions: listDivisions() }));\n");
+  const hud = JSON.parse(run(dir, 'node divjson.mjs', env).stdout || '{}');
+  report('the art division is on by default', hud.divisions?.find((d) => d.id === 'art')?.active === true, JSON.stringify(hud.divisions));
+  // A wake-up starts the right agent when a tool is set, and says what happens next either way.
   fs.writeFileSync(path.join(dir, 'wake.mjs'), "import { wake } from './harness/agent.mjs';\nconsole.log(JSON.stringify(wake(process.argv[2], { task: process.argv[3] || null })));\n");
   const none = JSON.parse(run(dir, 'node wake.mjs rnd T-001', env).stdout);
   report('with no tool set, a wake-up says the task waits and how to start an agent', none.started === false && /No tool is set to start R&D/.test(none.next), none.next);
@@ -1703,26 +1692,6 @@ if (inShard()) {
   const again = JSON.parse(run(dir, 'node wake.mjs rnd T-001', wenv).stdout);
   report('a pitch or message starts the role\'s agent, and a second one finds it already running', up.started === true && /R&D is starting now as rnd-1/.test(up.next) && again.started === false && /is running/.test(again.next), `${up.next} | ${again.next}`);
   run(dir, 'node harness/agent.mjs stop rnd-1', env);
-  // The Liaison chat on a cheap model: a brief is drafted and read back; a correction changes it.
-  const fake = path.join(dir, 'fake-liaison.mjs');
-  fs.writeFileSync(fake, `import http from 'node:http';
-let n = 0;
-const replies = ['What should the player see first?', 'BRIEF {"kind":"idea","title":"Fireflies at dusk","summary":"Fireflies light the garden at dusk.","detail":""}', 'BRIEF {"kind":"idea","title":"Fireflies at dusk, only in summer","summary":"Fireflies light the garden at dusk in summer.","detail":""}'];
-const s = http.createServer((req, res) => { req.resume(); req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ model: 'fake-cheap', choices: [{ message: { content: replies[Math.min(n++, 2)] } }], usage: { prompt_tokens: 5, completion_tokens: 5 } })); }); });
-s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
-  const server = spawn(process.execPath, [fake], { windowsHide: true, stdio: ['ignore', 'pipe', 'inherit'] });
-  const port = await new Promise((r) => server.stdout.once('data', (d) => r(String(d).trim())));
-  fs.writeFileSync(path.join(dir, 'chat.mjs'), "import { chatTurn } from './harness/liaison.mjs';\nconst out = [];\nlet m = [{ role: 'user', content: 'fireflies please' }];\nlet r = await chatTurn({ messages: m, from: 'hatch' }); out.push(r);\nm = [...m, { role: 'assistant', content: r.reply }, { role: 'user', content: 'the garden, at dusk' }];\nr = await chatTurn({ messages: m, from: 'hatch' }); out.push(r);\nm = [...m, { role: 'assistant', content: r.reply }, { role: 'user', content: 'only in summer' }];\nout.push(await chatTurn({ messages: m, from: 'hatch', pending: r.brief }));\nconsole.log(JSON.stringify(out));\n");
-  const chat = await runAsync(dir, 'node chat.mjs', { ...env, OLLAMA_BASE_URL: `http://127.0.0.1:${port}/v1`, STUDIO_PREPARE_CHAIN: 'ollama-local' });
-  server.kill();
-  let turns = [];
-  try {
-    turns = JSON.parse(chat.stdout.trim().split('\n').pop());
-  } catch {
-    // reported below
-  }
-  report('the Liaison chat asks, then reads a brief back; a correction changes the same brief', turns.length === 3 && !turns[0].brief && /What should the player see first/.test(turns[0].reply) && turns[1].brief === turns[2].brief && /only in summer/.test(turns[2].reply) && /fireflies please/.test(fs.readFileSync(path.join(dir, 'studio/liaison/chat.md'), 'utf8')), chat.stdout + chat.stderr);
-  report('nothing reaches the queue until the dev confirms the brief', !/Fireflies/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')));
 }
 
 // The Asset studio: rounds without waiting, thumbs up moves a file to assets/approved/ and queues its
@@ -1898,16 +1867,7 @@ if (inShard()) {
   report('accepting a cause closes its check task, and later tasks forced for it don\'t ask again', acc.status === 0 && !/- \[ \][^\n]*Check forced done/.test(q2) && /\[x\][^\n]*Check forced done/.test(q2), acc.stdout + acc.stderr + q2);
   run(dir, 'node harness/notes.mjs add --kind bad "the agy line exits early"', { ...env, STUDIO_LOCK_OWNER: 'art-1' });
   report('a note is credited to the agent that wrote it, not the Producer', /· art-1\] the agy line exits early/.test(fs.readFileSync(path.join(dir, 'studio/harness-notes/NOTES.md'), 'utf8')));
-  run(dir, 'node harness/event.mjs --type task.progress --agent audio-1 --msg "menu music"', env);
-  run(dir, 'node harness/event.mjs --type task.paused --agent builder-3 --msg "Handed back: usage limit, resets 06:12"', env);
-  fs.writeFileSync(path.join(dir, 'hudjson.mjs'), "import { buildHudState } from './harness/hud.mjs';\nconsole.log(JSON.stringify(buildHudState()));\n");
-  const hud = JSON.parse(run(dir, 'node hudjson.mjs', env).stdout || '{}');
-  const audio = (hud.agents || []).find((x) => x.name === 'audio-1');
-  const sound = (hud.divisions || []).find((d) => d.id === 'sound');
-  report('an agent named for its work sits in its room, and the room opens for it', audio?.room === 'sound' && sound?.active === true && sound?.autoOn === true, JSON.stringify({ audio, sound }));
-  const b3 = (hud.agents || []).find((x) => x.name === 'builder-3');
-  report('an agent out of quota shows when it resets, and isn\'t listed as stalled', b3?.status === 'out-of-quota' && b3?.quotaUntil === '06:12' && !(hud.signals?.stalled || []).some((x) => /builder-3/.test(x)), JSON.stringify(b3));
-  report('tokens nobody measured say "not tracked" instead of 0', hud.tokens?.tracked === false && /not tracked/.test(hud.tokens?.why || ''), JSON.stringify(hud.tokens));
+  // 2.80: the War Room's seats, quota badges and token card went with it (they were the HUD's state).
   // A second game: its own studio in a sibling folder, never a folder made by hand.
   const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
   git('init -q');
@@ -1915,7 +1875,7 @@ if (inShard()) {
   git('commit -q -m init --no-verify');
   const second = path.join(tmpRoot, `second-studio-${n}`);
   const ns = run(dir, `node scripts/new-studio.mjs --name "Moss Garden" --dir "${second}" --from local --no-install`, env);
-  report('npm run new-studio makes a second studio next to this one, with its own War Room port and a fresh board', ns.status === 0 && /HUB_PORT=3848/.test(fs.readFileSync(path.join(second, '.env'), 'utf8')) && /Moss Garden/.test(fs.readFileSync(path.join(second, 'studio/NEXT.md'), 'utf8')) && fs.existsSync(path.join(second, 'START-HERE.md')), ns.stdout + ns.stderr);
+  report('npm run new-studio makes a second studio next to this one, with its own play port and a fresh board', ns.status === 0 && /^STUDIO_PLAY_PORT=4611$/m.test(fs.readFileSync(path.join(second, '.env'), 'utf8')) && !/^HUB_PORT=/m.test(fs.readFileSync(path.join(second, '.env'), 'utf8')) && /Moss Garden/.test(fs.readFileSync(path.join(second, 'studio/NEXT.md'), 'utf8')) && fs.existsSync(path.join(second, 'START-HERE.md')), ns.stdout + ns.stderr);
   // A setup plugged in by the game dev or an agent: its roles, departments and settings, never keys or harness code.
   const setup = path.join(tmpRoot, `setup-${n}`);
   fs.mkdirSync(path.join(setup, 'studio/roles'), { recursive: true });
@@ -1927,7 +1887,7 @@ if (inShard()) {
   const third = path.join(tmpRoot, `third-studio-${n}`);
   const ns3 = run(dir, `node scripts/new-studio.mjs --name "Tin Moon" --dir "${third}" --from local --no-install --setup "${setup}"`, env);
   const env3 = fs.existsSync(path.join(third, '.env')) ? fs.readFileSync(path.join(third, '.env'), 'utf8') : '';
-  report('a third game gets the next free port, and a plugged-in setup brings roles, departments and settings but never keys or harness code', ns3.status === 0 && /^HUB_PORT=3849$/m.test(env3) && !/9999/.test(env3) && /STUDIO_AGENT_TOOL=claude/.test(env3) && !/do-not-copy/.test(env3) && fs.existsSync(path.join(third, 'studio/roles/level-designer.md')) && !fs.existsSync(path.join(third, 'harness/evil.mjs')) && /hacks/.test(fs.readFileSync(path.join(third, 'studio/divisions.json'), 'utf8')), ns3.stdout + ns3.stderr + env3);
+  report('a third game gets the next free port, and a plugged-in setup brings roles, departments and settings but never keys or harness code', ns3.status === 0 && /^STUDIO_PLAY_PORT=4612$/m.test(env3) && !/9999/.test(env3) && /STUDIO_AGENT_TOOL=claude/.test(env3) && !/do-not-copy/.test(env3) && fs.existsSync(path.join(third, 'studio/roles/level-designer.md')) && !fs.existsSync(path.join(third, 'harness/evil.mjs')) && /hacks/.test(fs.readFileSync(path.join(third, 'studio/divisions.json'), 'utf8')), ns3.stdout + ns3.stderr + env3);
   const saved = path.join(tmpRoot, `saved-setup-${n}`);
   const sv = run(third, `node scripts/new-studio.mjs --save-setup "${saved}"`, env);
   report('a studio saves its setup to reuse for the next game, without its keys', sv.status === 0 && fs.existsSync(path.join(saved, 'studio/roles/level-designer.md')) && !/do-not-copy/.test(fs.existsSync(path.join(saved, 'settings.env')) ? fs.readFileSync(path.join(saved, 'settings.env'), 'utf8') : ''), sv.stdout + sv.stderr);
@@ -2131,10 +2091,9 @@ if (inShard()) {
     t = JSON.parse(tk.stdout);
   } catch {}
   report('npm run tokens sums what sessions reported and lists the ones that reported nothing', t.total?.cacheRead === 50000 && t.total?.tokensIn === 1000 && t.total?.turns === 12 && t.untracked?.agy === 1 && t.byRole?.find((r) => r.name === 'builder')?.tasksDone === 1, tk.stdout + tk.stderr);
-  const hud = JSON.parse(run(dir, `node -e "import('./harness/hud.mjs').then(m=>console.log(JSON.stringify(m.buildHudState().tokenUse)))"`).stdout || '{}');
-  report('the War Room gets the measured totals for the last 5 h', hud.last5h?.total?.cacheRead === 50000, JSON.stringify(hud).slice(0, 300));
-  const noFake = ['hub/server.mjs', 'scripts/pre-compact.mjs', 'scripts/append-event.mjs', 'scripts/seed-demo-events.mjs'].filter((f) => /248,500|tokensSaved: \d|--tokens-saved \d|--saved \d/.test(fs.readFileSync(path.join(dir, f), 'utf8')));
-  report('no made-up token numbers are left in the War Room or the scripts', noFake.length === 0, noFake.join(', '));
+  // 2.80: the War Room's 5 h token card went with it; npm run tokens (above) is where the totals are read.
+  const noFake = ['scripts/pre-compact.mjs', 'scripts/append-event.mjs'].filter((f) => /248,500|tokensSaved: \d|--tokens-saved \d|--saved \d/.test(fs.readFileSync(path.join(dir, f), 'utf8')));
+  report('no made-up token numbers are left in the scripts', noFake.length === 0, noFake.join(', '));
 
   // Lite scope: 6 gates, AGENTS.lite.md, ten commands.
   run(dir, 'node harness/mode.mjs scope lite --by hatch');
@@ -2348,11 +2307,6 @@ console.log(JSON.stringify({ dir: c.matchTricks('queue the next tasks with depen
   const hand = fs.existsSync(path.join(dir, `studio/handoffs/${tr}.md`)) ? fs.readFileSync(path.join(dir, `studio/handoffs/${tr}.md`), 'utf8') : '';
   report('a session that reaches the turn ceiling hands off: no failure, a refresh note, and a fresh session on the same task at once', ends.length === 2 && ends[0].status === 'ok' && ends[0].meta?.refreshed === true && /refreshed/.test(hand) && evs.some((e) => e.type === 'agent.refresh' && e.task === tr) && fs.readFileSync(path.join(dir, '.studio/fake-runs'), 'utf8') === '2', JSON.stringify(ends).slice(0, 1500) + cap.stdout + cap.stderr + hand);
   report('a refresh hand-back never parks the task as looping', !evs.some((e) => e.type === 'task.hold' && e.task === tr && /Parked/.test(e.msg || '')), JSON.stringify(evs.filter((e) => e.task === tr).map((e) => e.type)));
-  // The War Room reads all of it.
-  const hud = probe(`import { buildHudState } from ${u('harness/hud.mjs')};
-const s = buildHudState();
-console.log(JSON.stringify({ meter: s.meter, sc: s.sessionCap?.limits, rows: s.sessionCap?.sessions?.length, mw: typeof s.modelWarning?.show, cs: Object.keys(s.cheatsheet || {}) }));`, { STUDIO_AGENT_MODEL: 'claude-opus-5-5' });
-  report('the War Room state has the budget meter (per model, cache reads), the sessions against the refresh point, the model warning and the attached tricks', hud.meter?.cap === 50000000 && hud.meter?.byModel?.length >= 1 && hud.sc?.turns === 40 && hud.rows >= 1 && hud.mw === 'boolean' && hud.cs?.includes(tid), JSON.stringify(hud).slice(0, 1500));
 }
 
 // 2.30a: intent cards and task origin, the dev's yes, phase override, owned waits, phrase scope checks,
@@ -2458,20 +2412,7 @@ console.log(JSON.stringify({ off, still, on, parked: readHolds()['${t3.id}']?.pa
   fs.writeFileSync(path.join(dir, 'cc-fake.json'), fake);
   const ccOn = run(dir, 'node harness/budget.mjs ccusage', { STUDIO_CCUSAGE_CMD: 'node -e "process.stdout.write(require(\'fs\').readFileSync(\'cc-fake.json\', \'utf8\'))"' });
   report('ccusage feeds the token ledger only when its plugin is on: daily tokens, cache reads and the model', ccOff.status !== 0 && ccOn.status === 0 && /9,160 tokens .*cache reads 9,000.*claude-opus-5-5/.test(ccOn.stdout) && fs.existsSync(path.join(dir, '.studio', 'ccusage.json')), ccOff.stderr + ccOn.stdout + ccOn.stderr);
-  // J10 and J8 in the War Room state: the status line, owners, and what changed per build.
-  fs.mkdirSync(path.join(dir, '.studio', 'builds', 'b1'), { recursive: true });
-  run(dir, `node harness/task.mjs add "Study the dock" --type study --infra`);
-  const hs = probe(`import { buildHudState } from ${u('harness/hud.mjs')};
-import { emitEvent } from ${u('harness/event.mjs')};
-import fs from 'node:fs';
-emitEvent({ type: 'task.done', agent: 'b', task: 'T-900', msg: 'Completed T-900: Boats dock at the pier' });
-fs.writeFileSync('.studio/builds/b1/build.json', JSON.stringify({ id: 'b1', at: new Date(Date.now() + 1000).toISOString(), page: 'index.html' }));
-run();
-function run() {
-  const s = buildHudState();
-  console.log(JSON.stringify({ line: s.status.line, you: s.status.waitingOnYou, origin: s.queue.backlog.map((t) => t.origin), changes: s.builds[0]?.changes, wd: s.watchdog.on }));
-}`);
-  report('the War Room status line says building now, waiting on you and tokens today; tasks carry their origin; a build lists what changed', /^Building now: .* · Waiting on you: .* · Tokens today: /.test(hs.line || '') && hs.origin?.includes('agent-proposed') && hs.changes?.[0]?.task === 'T-900' && /Boats dock/.test(hs.changes[0].title) && hs.wd === true, JSON.stringify(hs).slice(0, 1200));
+  // 2.80: J10 and J8 (the War Room's status line and per-build changes) went with the War Room.
 }
 
 // 2.30b: real-input fun probes (J1), sim features shown in the build (J4), the asset scout (G7). Each in a copy.
@@ -2617,7 +2558,6 @@ if (inShard()) {
 import { readHolds } from ${u('harness/task-hold.mjs')};
 import { readRecentEvents } from ${u('harness/event.mjs')};
 import { unblockTask } from ${u('harness/breaker.mjs')};
-import { buildHudState } from ${u('harness/hud.mjs')};
 const cycle = (id, note) => { startTask(id, 'b-2'); return pauseTask(id, 'b-2', note, { force: true }); };
 const r1 = cycle('T-004', 'refreshed: reached the 40-turn refresh point');
 const r2 = cycle('T-004', 'refreshed: reached the 40-turn refresh point');
@@ -2626,13 +2566,12 @@ const d2 = cycle('T-005', 'tick-budget failed on soak seed 4');
 const s1 = cycle('T-002', 'verify failed: golden mismatch in cartridges/example-sim (run 3)');
 const s2 = cycle('T-002', 'verify failed: golden mismatch in cartridges/example-sim (run 4)');
 const holds = readHolds();
-const card = buildHudState().needs.find((n) => n.task === 'T-002' && n.action?.type === 'unblock');
 const other = nextFor({}, parseNextQueue()).task?.id;
 const blockedStart = startTask('T-002', 'b-3');
 const ub = unblockTask('T-002', 'dev');
 const after = readHolds()['T-002'];
-console.log(JSON.stringify({ refreshParked: Boolean(holds['T-004']?.parked), diffParked: Boolean(holds['T-005']?.parked), sameParked: holds['T-002']?.parked?.breaker, s2: s2.parked || null, ev: readRecentEvents(500).some((e) => e.type === 'task.breaker' && e.task === 'T-002'), card: Boolean(card), other, blocked: blockedStart?.error, ub: ub.ok, after: after?.parked || null }));`);
-  report('#8: a second hand-back for the same reason parks the task with that reason and a War Room card with Unblock; different reasons and refreshes never trip it', bp.sameParked === true && /circuit breaker/.test(bp.s2 || '') && bp.ev && bp.card && bp.refreshParked === false && bp.diffParked === false, JSON.stringify(bp));
+console.log(JSON.stringify({ refreshParked: Boolean(holds['T-004']?.parked), diffParked: Boolean(holds['T-005']?.parked), sameParked: holds['T-002']?.parked?.breaker, s2: s2.parked || null, ev: readRecentEvents(500).some((e) => e.type === 'task.breaker' && e.task === 'T-002'), other, blocked: blockedStart?.error, ub: ub.ok, after: after?.parked || null }));`);
+  report('#8: a second hand-back for the same reason parks the task with that reason (a task.breaker event); different reasons and refreshes never trip it', bp.sameParked === true && /circuit breaker/.test(bp.s2 || '') && bp.ev && bp.refreshParked === false && bp.diffParked === false, JSON.stringify(bp));
   report('#8: other work keeps going while a task is tripped, and task unblock clears it', bp.other && bp.other !== 'T-002' && bp.blocked === 'held' && bp.ub === true && bp.after === null, JSON.stringify(bp));
   const ubCli = run(dir, 'node harness/task.mjs unblock T-001 --by dev');
   report('#8: task unblock on a task that is not parked says so', ubCli.status === 1 && /nothing to unblock/.test(ubCli.stderr), ubCli.stderr);
@@ -2711,7 +2650,7 @@ console.log(JSON.stringify({ done: o.done.length, noDone: o.noDone.map((s) => s.
 }
 
 // 2.30d: forced work pending review, the size cap and split, the proposed list, model escalation, tricks on add,
-// fun checks in waves, away mode and its review, phone alerts, phone login, the watchdog's kennel. Each in a copy.
+// fun checks in waves, phone alerts (2.80: away mode, phone login and the kennel went with the War Room). Each in a copy.
 if (inShard()) {
   const dir = copyRepo();
   const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
@@ -2795,31 +2734,6 @@ fs.rmSync('qa/reports/browser_9100.json'); fs.rmSync('qa/reports/browser_9200.js
 console.log(JSON.stringify({ checks, ready: ready.wave?.id, next: next.id, noPlay: noPlay.result, failed: { r: failed.result, fix: failed.wave?.fixTask, failing: failed.wave?.failing }, passed: passed.result }));`, { STUDIO_ROLE: 'producer' });
   report('2.30d #6 waves: in wave mode a gameplay task\'s done check names its wave instead of running the probes per task', wv.checks?.length === 1 && wv.checks[0].ok && /joins wave W-1/.test(wv.checks[0].label), JSON.stringify(wv.checks || wv));
   report('2.30d waves: a batch-ready wave is checked once; a new wave opens for work that keeps closing; a failing play gives one linked fix task; a passing play passes the wave', wv.ready === 'W-1' && wv.next === 'W-2' && wv.noPlay === 'no-play' && wv.failed?.r === 'failed' && /^T-\d+$/.test(wv.failed.fix || '') && /not camera-relative/.test(wv.failed.failing?.[0] || '') && wv.passed === 'passed' && new RegExp(`Fix wave W-1`).test(queue()), JSON.stringify(wv));
-  // Away mode: the Director and Producer decide while the dev is away; the dev confirms, sends back or comments.
-  run(dir, 'node harness/task.mjs add "Tune the ferry timetable" --type docs --infra');
-  const ta = idOf('Tune the ferry timetable');
-  fs.mkdirSync(path.join(dir, 'qa', 'reports', 'shots'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'qa', 'reports', 'shots', 'pier.png'), 'png');
-  const aw = probe(`import * as A from ${u('harness/away.mjs')};
-import { emitEvent } from ${u('harness/event.mjs')};
-import { completeTask } from ${u('harness/task.mjs')};
-import fs from 'node:fs';
-A.goAway('trever', { note: 'sleeping' });
-await new Promise((r) => setTimeout(r, 15));
-emitEvent({ type: 'task.added', agent: 'producer-1', task: 'T-777', msg: 'Queued T-777: Night lights on the pier', meta: { shot: 'qa/reports/shots/pier.png' } });
-emitEvent({ type: 'task.added', agent: 'builder-1', task: 'T-778', msg: 'not a decision' });
-completeTask('${ta}', '', 'producer-1', { force: true, reason: 'fixture', acceptedBy: 'selftest' });
-emitEvent({ type: 'decision.made', agent: 'director-1', msg: 'Ferries before trains', meta: { clip: 'qa/reports/clips/ferry.webm' } });
-const back = A.comeBack('trever');
-const items = A.listReview();
-const pick = (re) => items.find((i) => re.test(i.title));
-const great = await A.verdict(pick(/Night lights/).id, { by: 'trever', verdict: 'great' });
-const redo = await A.verdict(pick(/${ta}/).id, { by: 'trever', verdict: 'redo', comment: 'wrong ferry times' });
-let noComment = null; try { await A.verdict(pick(/Ferries/).id, { by: 'trever', verdict: 'comment' }); } catch (e) { noComment = e.message; }
-await A.verdict(pick(/Ferries/).id, { by: 'trever', verdict: 'comment', comment: 'keep one train line' });
-console.log(JSON.stringify({ n: back.items.length, types: items.map((i) => i.type), media: pick(/Night lights/).media, clip: pick(/Ferries/).media, left: A.listReview().length, learned: A.learnedSummary(), noComment, md: fs.readFileSync('studio/memory/decisions-learned.md', 'utf8') }));`);
-  report('2.30d away: on return every Director/Producer decision made while away is listed with its pictures or clip (worker chatter is not)', aw.n >= 3 && !aw.types?.includes(undefined) && aw.media?.[0]?.kind === 'image' && aw.clip?.[0]?.kind === 'clip' && !JSON.stringify(aw).includes('not a decision'), JSON.stringify(aw).slice(0, 1500));
-  report('2.30d away: ✅ marks it great, ❌ reopens the work, a comment needs words and goes to the workers; the verdicts are kept for the Director and Producer to learn from', aw.left === aw.n - 3 && aw.learned?.great === 1 && aw.learned.redo === 1 && aw.learned.comment === 1 && aw.learned.byDecider?.['producer-1']?.great === 1 && /comment/.test(aw.noComment || '') && /\[redo\]/.test(aw.md || '') && new RegExp(`\\[ \\] \\*\\*${ta}\\*\\*`).test(queue()) && ev().filter((e) => e.type === 'away.verdict').length === 3, JSON.stringify(aw).slice(0, 1500));
   // Phone alerts: opt-in, no key in a file or the log, the first pass never floods, a real event is sent once.
   const al = probe(`import * as A from ${u('harness/alerts.mjs')};
 import { emitEvent, readRecentEvents } from ${u('harness/event.mjs')};
@@ -2836,33 +2750,7 @@ const third = await A.alertPass({ fetchImpl, cfg: A.readAlerts() });
 const dry = await A.sendAlert({ type: 'studio.stopped', msg: 'x' }, { cfg: { on: true, channel: 'telegram', chatId: '42' }, env: { STUDIO_TELEGRAM_BOT_TOKEN: '123:SECRET-TOKEN' }, dryRun: true });
 console.log(JSON.stringify({ off, noChat: noChat.ok, first, second, third, calls, dry: dry.request?.url, file: fs.readFileSync('.studio/alerts.json', 'utf8'), log: readRecentEvents(200).some((e) => JSON.stringify(e).includes('SECRET-TOKEN')) }));`, { STUDIO_TELEGRAM_BOT_TOKEN: '' });
   report('2.30d alerts: off by default; turning on never floods; a stop is sent once by ntfy; a Telegram key never reaches a file, the log or a dry run', al.off?.sent === 0 && al.noChat === false && al.first?.sent === 0 && al.second?.sent === 1 && al.third?.sent === 0 && al.calls?.length === 1 && al.calls[0].url === 'https://ntfy.example/studio-x7q2' && /\*\*\*/.test(al.dry || '') && !/SECRET/.test(al.dry || '') && !/token/i.test(al.file || '') && al.log === false, JSON.stringify(al).slice(0, 1200));
-  // Phone access: off by default; a one-time code, rate-limited; the session cookie reads, writes need its CSRF value.
-  const ph = probe(`import * as P from ${u('harness/phone.mjs')};
-import fs from 'node:fs';
-const offLogin = P.login('ABCDEFGH', { ip: '10.0.0.9' });
-const on = P.phoneOn('trever');
-const bad = []; for (let i = 0; i < 6; i++) bad.push(P.login('WRONG123', { ip: '10.0.0.5' }));
-const locked = P.login(on.code, { ip: '10.0.0.5' });
-const ok = P.login(on.code.toLowerCase(), { ip: '10.0.0.6', ua: 'phone' });
-const reuse = P.login(on.code, { ip: '10.0.0.7' });
-const read = P.checkSession(ok.sid);
-const writeNo = P.checkSession(ok.sid, { write: true });
-const writeBad = P.checkSession(ok.sid, { write: true, csrf: 'nope' });
-const writeOk = P.checkSession(ok.sid, { write: true, csrf: ok.csrf });
-const files = ['phone', 'sessions'].map((f) => fs.readFileSync('.studio/phone/' + f + '.json', 'utf8')).join('');
-P.phoneOff('trever');
-const afterOff = P.checkSession(ok.sid);
-console.log(JSON.stringify({ offLogin: offLogin.ok, code: /^[2-9A-HJKMNP-Z]{8}$/.test(on.code), bad5: bad[4].retryAfterSec === undefined && bad[5].retryAfterSec > 0, locked: locked.ok, ok: ok.ok, reuse: reuse.ok, read: read.ok, writeNo: writeNo.ok, writeBad: writeBad.ok, writeOk: writeOk.ok, leaked: files.includes(ok.sid) || files.includes(ok.csrf) || files.includes(on.code), afterOff: afterOff.ok, cookie: P.sessionCookie('x', new Date(Date.now() + 1000)) }));`);
-  report('2.30d phone: off by default; a one-time code logs one phone in; 5 wrong codes lock that address; writes need the session\'s CSRF value; no code, session or CSRF value is stored in clear; off ends every session', ph.offLogin === false && ph.code && ph.bad5 && ph.locked === false && ph.ok && ph.reuse === false && ph.read && ph.writeNo === false && ph.writeBad === false && ph.writeOk && ph.leaked === false && ph.afterOff === false && /HttpOnly; SameSite=Strict/.test(ph.cookie || ''), JSON.stringify(ph));
-  const srv = fs.readFileSync(path.join(dir, 'hub', 'server.mjs'), 'utf8');
-  report('2.30d phone: the hub serves /phone only while phone access is on, and a phone write needs the cookie plus X-Phone-CSRF', /url\.pathname === '\/phone' && req\.method === 'GET'[\s\S]{0,80}readPhone\(\)\.on/.test(srv) && /x-phone-csrf/.test(srv) && /return tokenMatches\(headerToken\(req\)\) \|\| phoneWrite\(req\);/.test(srv), '');
-  // The watchdog is a dog in its own room of the studio floor: asleep when off, patrolling when on.
-  const html = fs.readFileSync(path.join(dir, 'hub', 'v3', 'index.html'), 'utf8');
-  report('2.30d: the watchdog has its own kennel room on the studio floor and a dog that sleeps when off and patrols when on', /id: 'kennel'/.test(html) && /function renderDog/.test(html) && /classList\.toggle\('asleep', !on\)/.test(html) && /setInterval\(step/.test(html) && /id="away" class="skin"/.test(html), '');
-  const hs = probe(`import { buildHudState } from ${u('harness/hud.mjs')};
-const s = buildHudState();
-console.log(JSON.stringify({ away: s.away && Array.isArray(s.away.review), pending: Array.isArray(s.pendingReview), waves: s.waves?.on, alerts: s.alerts?.on, phone: s.phone?.on }));`);
-  report('2.30d: the War Room state carries away mode and its review, pending forced work, proposals, waves, alerts and phone', hs.away && hs.pending && hs.waves === true && hs.alerts === true && hs.phone === false, JSON.stringify(hs));
+  // 2.80: away mode, phone access, the kennel and the War Room state went with the War Room.
 }
 
 // 2.30e: the art scout widened (palettes, kinds) and the art agent's adapt step (recolour, resize, LODs, mesh fixes).
@@ -3694,15 +3582,6 @@ if (inShard('selftest-2582k')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// P-044: the War Room browser checks wait for the page state instead of reading it once, and the Stop/Pause
-// checks can be repeated on their own (qa/selftest-2582j.mjs).
-if (inShard('selftest-2582j')) {
-  const dir = copyRepo();
-  const { selftest2582J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2582j.mjs')).href);
-  await selftest2582J({ dir, run, report, tmpRoot });
-  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
-}
-
 // 2.58.3 (M1-M5): Claude in a lane copy gets --add-dir for studio/ and .studio/; a code-writing role on a laneless
 // task gets its own copy; agy's rules go to .studio/agy-settings.json (agy --settings); a nim tool (aider on NVIDIA
 // NIM, key mapped, never printed); the kickoff says one command per Bash call (qa/selftest-2583m.mjs).
@@ -3967,7 +3846,7 @@ if (inShard('selftest-264k')) {
 
 // 2.64.0 (l): thread subscription and pass-through with the trigger table, shadow mode first: a CI failure or a red
 // train reaches the task's inbox (on) or is only logged (shadow), no thread goes to the Producer, ignore drops, links
-// refuse workers, the hook tells the session, hub /api/inbox takes a task key, nothing creates a task
+// refuse workers, the hook tells the session, nothing creates a task
 // (qa/selftest-264l.mjs).
 if (inShard('selftest-264l')) {
   const dir = copyRepo();
@@ -4493,16 +4372,6 @@ if (inShard('selftest-2732f')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.74.0 (w): the War Room refresh: pairing a browser (one-time code, HttpOnly cookie, paired writes act as the person),
-// Act buttons that run the CLI's own code (studio:resume, hold, delegate revoke), B-70 (a throwing handler no longer ends
-// the hub, every exit logged, the supervisor's keeper with backoff), the page's version, the deck's panels and the rooms.
-if (inShard('selftest-274w')) {
-  const dir = copyRepo();
-  const { selftest274W } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-274w.mjs')).href);
-  await selftest274W({ dir, run, report, tmpRoot, root });
-  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
-}
-
 // 2.73.2 (d, B-71, B-75): per-test timeouts scaled for the test workers (--testTimeout / --hookTimeout / --test-timeout,
 // never below the game's own), and a lane that changes the config of the check main is stuck red on trains alone and
 // first (qa/selftest-2732d.mjs).
@@ -4510,15 +4379,6 @@ if (inShard('selftest-2732d')) {
   const dir = copyRepo();
   const { selftest2732D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2732d.mjs')).href);
   await selftest2732D({ dir, run, report, tmpRoot, root });
-  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
-}
-
-// 2.75.0 (h): the War Room's visual redo: one tab bar on every view, the design tokens (light and dark, no web fonts),
-// the Studio floor's name plates, its state badges and key, and agents leaving the floor when their session ends.
-if (inShard('selftest-275h')) {
-  const dir = copyRepo();
-  const { selftest275H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-275h.mjs')).href);
-  await selftest275H({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

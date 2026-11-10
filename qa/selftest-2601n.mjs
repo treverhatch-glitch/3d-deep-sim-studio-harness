@@ -206,11 +206,11 @@ console.log(JSON.stringify({ nim, ol, lines: aiderIgnoreLines(), kn: launchLine(
     const ign = path.join(tmpRoot, 'ign-2601n');
     fs.writeFileSync(ign, `${(t.lines || []).join('\n')}\n`);
     const ci = (rel) => run(repo, `git -c core.excludesFile=${JSON.stringify(ign)} check-ignore --no-index -q ${JSON.stringify(rel)}`).status === 0;
-    const must = ['harness/task.mjs', 'harness/lock.mjs', 'studio/NEXT.md', 'hub/server.mjs', 'scripts/run-gates.mjs', 'tools/x.mjs', 'qa/selftest.mjs', 'studio/protected.json', 'cartridges/demo/qa.mjs', 'qa/regressions/r1.json', '.github/workflows/ci.yml', 'game/demo/tools/controls.gd'];
+    const must = ['harness/task.mjs', 'harness/lock.mjs', 'studio/NEXT.md', 'scripts/run-gates.mjs', 'tools/x.mjs', 'qa/selftest.mjs', 'studio/protected.json', 'cartridges/demo/qa.mjs', 'qa/regressions/r1.json', '.github/workflows/ci.yml', 'game/demo/tools/controls.gd'];
     const mustNot = ['game/demo/tools/build-atlas.mjs', 'game/demo/src/main.ts', 'qa/golden/demo.json', 'cartridges/demo/index.mjs', 'web/demo/harness/x.ts'];
     const wrongIn = must.filter((p) => !ci(p));
     const wrongOut = mustNot.filter((p) => ci(p));
-    report('B-20 (crew: aider added task.mjs, lock.mjs, NEXT.md to its chat) and B-21 (prompt-toolkit warnings under Git Bash): the nim argv has --aiderignore <file> and --read <brief>, both aider tools have --no-pretty --no-fancy-input --no-gitignore and a bounded --map-tokens; the ignore patterns (checked with git\'s matcher) cover harness/, hub/, scripts/, tools/, studio/, qa/*.mjs and the protected paths, anchored at the root so a game\'s own tools/ and goldens stay editable; the kickoff\'s launch lines carry the flags',
+    report('B-20 (crew: aider added task.mjs, lock.mjs, NEXT.md to its chat) and B-21 (prompt-toolkit warnings under Git Bash): the nim argv has --aiderignore <file> and --read <brief>, both aider tools have --no-pretty --no-fancy-input --no-gitignore and a bounded --map-tokens; the ignore patterns (checked with git\'s matcher) cover harness/, scripts/, tools/, studio/, qa/*.mjs and the protected paths, anchored at the root so a game\'s own tools/ and goldens stay editable; the kickoff\'s launch lines carry the flags',
       t.nim?.[0] === '/venv/bin/aider' && at(t.nim, '--aiderignore') === '/s/a.aiderignore' && at(t.nim, '--read') === '/s/briefs/T-1.md'
         && ['--no-pretty', '--no-fancy-input', '--no-gitignore'].every((f) => tail(t.nim, f) && tail(t.ol, f)) && /^\d+$/.test(at(t.ol, '--map-tokens') || '') && !tail(t.off, '--aiderignore')
         && !wrongIn.length && !wrongOut.length && /--no-pretty --no-fancy-input/.test(t.kn || '') && /--no-pretty --no-fancy-input/.test(t.ka || ''),

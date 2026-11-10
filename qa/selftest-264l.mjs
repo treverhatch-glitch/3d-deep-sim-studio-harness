@@ -1,14 +1,11 @@
 /**
  * qa/selftest-264l.mjs — 2.64.0 (l): thread subscription, pass-through and the trigger table, shadow mode first
- * (harness/threads.mjs, studio/triggers.json, the per-task inbox, the inbox-notice hook, hub /api/inbox's task key).
+ * (harness/threads.mjs, studio/triggers.json, the per-task inbox, the inbox-notice hook; 2.80: the hub's /api/inbox check went with the hub).
  * Made-up studio: the example board's T-001..T-005, made-up shas, branches and train ids.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import http from 'node:http';
-import net from 'node:net';
-import crypto from 'node:crypto';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 export async function selftest264L({ dir, run, report, tmpRoot }) {
@@ -172,34 +169,6 @@ console.log(JSON.stringify({ vol: k.volatile, stable: k.stable.includes('inbox h
     restore();
     report('2.64.0 (l): a bot\'s post on a linked Discord message lands in that task\'s inbox (discord live); a worker can\'t post',
       /in T-002's inbox/.test(out(p)) && /discord · opus-bot: the menu flickers on resize · ref 123456789012/.test(inbox('T-002')) && pw.status === 1, `${out(p)}${out(pw)}\n${inbox('T-002')}`);
-  }
-
-  // 7. The War Room's /api/inbox takes a task key (auth unchanged): on and hub live -> the task's inbox.
-  {
-    fresh();
-    const restore = setTriggers((t) => { t.live = ['ci', 'train', 'hub']; });
-    const port = await new Promise((resolve) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
-    const token = crypto.randomBytes(24).toString('hex');
-    const child = spawn(process.execPath, [path.join(dir, 'hub', 'server.mjs')], { windowsHide: true, cwd: dir, env: { ...process.env, ...base, HUB_PORT: String(port), HUB_HOST: '127.0.0.1', HUB_TOKEN: token, HUB_ALLOWED_HOSTS: '', STUDIO_WATCH_INTERVAL: '0', STUDIO_THREADS: 'on', AGENT_EVENTS_FILE: evFile('hub') }, stdio: ['ignore', 'pipe', 'pipe'] });
-    let log = '';
-    child.stdout.on('data', (d) => (log += d)); child.stderr.on('data', (d) => (log += d));
-    const req = (body, headers = {}) => new Promise((resolve) => {
-      const r = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/api/inbox', headers: { host: `127.0.0.1:${port}`, 'content-type': 'application/json', ...headers } }, (res) => { let b = ''; res.on('data', (d) => (b += d)); res.on('end', () => resolve({ status: res.statusCode, body: b })); });
-      r.on('error', () => resolve({ status: 0, body: '' }));
-      r.end(JSON.stringify(body));
-    });
-    let up = false;
-    for (let i = 0; i < 80 && !up; i++) { await new Promise((r) => setTimeout(r, 150)); up = (await req({ msg: '' }, { 'x-hub-token': token })).status === 400; }
-    const noTok = await req({ task: 'T-002', msg: 'hi' });
-    const toTask = await req({ task: 'T-002', msg: 'try the slower spawn rate first', by: 'dev' }, { 'x-hub-token': token });
-    const unknown = await req({ task: 'T-999', msg: 'what about the other one', by: 'dev' }, { 'x-hub-token': token });
-    child.kill();
-    await new Promise((r) => setTimeout(r, 200));
-    restore();
-    const p = producerInbox();
-    report('2.64.0 (l): hub /api/inbox with a task key puts the message in that task\'s inbox (threads on, hub live) and not the Producer\'s; an unknown task reaches the Producer as before; no token is still 401',
-      up && noTok.status === 401 && toTask.status === 201 && /"routed":\["T-002"\]/.test(toTask.body) && /dev: try the slower spawn rate first/.test(inbox('T-002')) && !/slower spawn/.test(p) && unknown.status === 201 && /what about the other one/.test(p) && !inbox('T-999'),
-      `up ${up} ${noTok.status} ${toTask.status} ${toTask.body} ${unknown.status} ${unknown.body}\n${p}\n${log.slice(-800)}`);
   }
 
   // 8. Pass-through never creates a task or edits the board; the heartbeat sweeps.
