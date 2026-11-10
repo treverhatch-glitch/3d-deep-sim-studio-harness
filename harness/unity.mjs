@@ -246,12 +246,14 @@ export function judgeRun(platform, resultsFile, log, status, { unhandled: countU
   const add = (kind, text, shown = text) => { proof.push({ kind, text: `${platform}: ${text}` }); if (shown) problems.push(shown); };
   const sigs = logSignatures(log, 'unity');
   if (sigs.some((x) => x.kind === 'licence')) add('licence', sigs.find((x) => x.kind === 'licence').text, 'the editor has no active licence on this machine (activate one in Unity Hub; CI needs the UNITY_LICENSE secret)');
+  let noFile = false;
   const fresh = startedAt ? freshFile(resultsFile, startedAt) : { ok: true };
   let res = parseNUnit(read(resultsFile));
   if (res && !fresh.ok) {
     add('stale-results', `the results file ${path.basename(resultsFile)} was not written by this run (${fresh.why}): an earlier run's results don't stand for this one`);
     res = null;
   } else if (!res) {
+    noFile = true;
     const ce = /error CS\d+/.test(log) ? `; compile errors: ${[...new Set(log.match(/[^\s]+\.cs\(\d+,\d+\): error CS\d+:[^\n]*/g) || [])].slice(0, 4).join(' | ')}` : '';
     add('no-results', `no test results written (exit ${status})`, `${platform}: no test results written (exit ${status})${ce}`);
     if (ce) proof.push({ kind: 'compile-error', text: `${platform}: ${sigs.find((x) => x.kind === 'compile-error')?.text || 'compile errors'}` });
@@ -272,7 +274,10 @@ export function judgeRun(platform, resultsFile, log, status, { unhandled: countU
   if (ab) add('aborted', ab.text, `${platform}: ${ab.text}`);
   // 2.73.2 (e, B-73): an infrastructure abort (out of memory, killed, no licence, couldn't start, aborted before any
   // results) is NOT RUN: nothing was tested. Never when the log shows a compile error or a test failed (those stay FAIL).
-  const infra = infraAbort({ log, status, signal, spawnError, results: res, timedOut: signal === 'timeout', engine: 'unity' });
+  // 2.80 (f, patch #28): no results file at all (the editor died under RAM pressure) is the environment's, never the lane's
+  // (a compile error in the log or our own timeout stays a FAIL: infraAbort returns null for those only when they show).
+  const infra = infraAbort({ log, status, signal, spawnError, results: res, timedOut: signal === 'timeout', engine: 'unity' })
+    || (noFile && signal !== 'timeout' && !/error CS\d+/.test(log) ? { kind: 'no-results', text: `the editor wrote no test results (exit ${status ?? signal ?? '?'}): it died or was killed before the tests finished` } : null);
   if (infra) {
     const text = `${platform}: ${infra.text}`;
     return { ok: false, notRun: { kind: infra.kind, text }, platform, results: res, problems: [`${platform}: not run (${infra.kind}): ${infra.text}`], proof: [{ kind: infra.kind, text, notRun: true }], log };
