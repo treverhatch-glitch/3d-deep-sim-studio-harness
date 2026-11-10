@@ -74,7 +74,7 @@ jobs:
           python-version: '3.13'
       - run: npm ci --no-audit --no-fund
       - name: Self-test shard ${{ matrix.shard }}/4
-        run: node qa/selftest.mjs --shard ${{ matrix.shard }}/4
+        run: node qa/selftest.mjs --shard ${{ matrix.shard }}/4 --timing
 
   # The engine track's Godot template, with a real Godot: its port matches the web game seed by seed,
   # and its headless gate passes.

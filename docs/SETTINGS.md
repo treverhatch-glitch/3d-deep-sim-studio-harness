@@ -416,7 +416,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## HARNESS_* (3)
 
-- `STUDIO_HARNESS_REF` · no simple default · harness/hook-stamp.mjs, harness/upgrade-smoke.mjs, harness/upgrade-watch.mjs (+10 more) · [RELEASE.md:45](RELEASE.md)
+- `STUDIO_HARNESS_REF` · no simple default · harness/hook-stamp.mjs, harness/upgrade-smoke.mjs, harness/upgrade-watch.mjs (+10 more) · [RELEASE.md:57](RELEASE.md)
 - `STUDIO_HARNESS_REF_TIMEOUT_MS` · default `'3000'` · harness/hook-stamp.mjs, harness/lane-orphans.mjs, harness/lanes.mjs · undocumented
 - `STUDIO_HARNESS_SCOUT` · no simple default · harness/harness-scout.mjs, harness/supervisor.mjs, harness/upgrade-smoke.mjs (+1 more) · [AUTONOMY.md:473](AUTONOMY.md)
 
@@ -513,17 +513,17 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_LANE_APPROVAL_SCAN` · default `200` · harness/lane-approvals.mjs · [SECURITY.md:223](SECURITY.md)
 - `STUDIO_LANE_EVENTS` · no simple default · harness/event.mjs, qa/selftest-2782e.mjs, qa/selftest-2782h.mjs (+1 more) · [SECURITY.md:177](SECURITY.md)
 - `STUDIO_LANE_EXCLUDE` · no simple default · harness/lane-sparse.mjs, harness/worktree.mjs, qa/selftest-270w.mjs · [CONDUCTOR.md:184](CONDUCTOR.md)
-- `STUDIO_LANE_HARNESS` · no simple default · harness/hook-stamp.mjs, scripts/run-gates.mjs, qa/selftest-259b.mjs (+3 more) · [RELEASE.md:200](RELEASE.md)
+- `STUDIO_LANE_HARNESS` · no simple default · harness/hook-stamp.mjs, scripts/run-gates.mjs, qa/selftest-259b.mjs (+3 more) · [RELEASE.md:212](RELEASE.md)
 - `STUDIO_LANE_IDLE_HOURS` · no simple default · harness/janitor.mjs, harness/lanes.mjs, qa/selftest-2791c.mjs (+1 more) · [RELEASE-2.79.0.md:34](RELEASE-2.79.0.md)
 - `STUDIO_LANE_INFER` · no simple default · harness/task-hold.mjs, qa/selftest-2585q.mjs, qa/selftest-258b.mjs (+15 more) · undocumented
 - `STUDIO_LANE_LIVE_MIN` · default `20` · harness/agent.mjs, harness/lanes.mjs, harness/upgrade-smoke.mjs (+29 more) · [CONDUCTOR.md:48](CONDUCTOR.md)
-- `STUDIO_LANE_REFRESHED` · no simple default · scripts/run-gates.mjs, qa/selftest-278h.mjs · [RELEASE.md:123](RELEASE.md)
+- `STUDIO_LANE_REFRESHED` · no simple default · scripts/run-gates.mjs, qa/selftest-278h.mjs · [RELEASE.md:135](RELEASE.md)
 - `STUDIO_LANE_START_FROM_PREV` · no simple default · harness/worktree.mjs · [WORK-ORGANIZATION.md:784](WORK-ORGANIZATION.md)
 
 ## LANES_* (3)
 
 - `STUDIO_LANES_MAX_GB` · no simple default · harness/lane-disk.mjs, qa/selftest-270w.mjs · [CONDUCTOR.md:199](CONDUCTOR.md)
-- `STUDIO_LANES_REFRESH_TEST_S` · default `600` · harness/lanes.mjs, qa/selftest-276i.mjs · [RELEASE.md:114](RELEASE.md)
+- `STUDIO_LANES_REFRESH_TEST_S` · default `600` · harness/lanes.mjs, qa/selftest-276i.mjs · [RELEASE.md:126](RELEASE.md)
 - `STUDIO_LANES_STAMP_MS` · no simple default · harness/lanes.mjs · [CONDUCTOR.md:26](CONDUCTOR.md)
 
 ## LINE_* (13)
@@ -560,7 +560,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## MAIN_* (3)
 
 - `STUDIO_MAIN_CHECKOUT_ENFORCE` · no simple default · harness/approve.mjs, harness/test-weakening.mjs, qa/selftest-2782e.mjs (+2 more) · [RELEASE-2.78.2.md:22](RELEASE-2.78.2.md)
-- `STUDIO_MAIN_COMMIT` · no simple default · harness/adopt.mjs, scripts/hooks/pre-commit, qa/selftest-259b.mjs (+8 more) · [RELEASE.md:90](RELEASE.md)
+- `STUDIO_MAIN_COMMIT` · no simple default · harness/adopt.mjs, scripts/hooks/pre-commit, qa/selftest-259b.mjs (+8 more) · [RELEASE.md:102](RELEASE.md)
 - `STUDIO_MAIN_ROOT` · no simple default · harness/agent-env.mjs, harness/agent.mjs, harness/aider-launch.mjs (+159 more) · [AGENT-TOOLS.md:157](AGENT-TOOLS.md)
 
 ## NIM_* (7)
@@ -595,8 +595,8 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## PREFLIGHT_* (2)
 
-- `STUDIO_PREFLIGHT_MIN_GIT` · no simple default · harness/upgrade-preflight.mjs · [RELEASE.md:63](RELEASE.md)
-- `STUDIO_PREFLIGHT_MIN_RAM_GB` · no simple default · harness/upgrade-preflight.mjs, qa/selftest-2731b.mjs, qa/selftest-273f.mjs · [RELEASE.md:67](RELEASE.md)
+- `STUDIO_PREFLIGHT_MIN_GIT` · no simple default · harness/upgrade-preflight.mjs · [RELEASE.md:75](RELEASE.md)
+- `STUDIO_PREFLIGHT_MIN_RAM_GB` · no simple default · harness/upgrade-preflight.mjs, qa/selftest-2731b.mjs, qa/selftest-273f.mjs · [RELEASE.md:79](RELEASE.md)
 
 ## PREPARE_* (3)
 
@@ -617,11 +617,11 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 - `STUDIO_PRODUCER_APPROVES` · no simple default · harness/beta-mode.mjs, harness/config-proposal.mjs, harness/line-producer.mjs (+7 more) · [AGENT-TOOLS.md:428](AGENT-TOOLS.md)
 - `STUDIO_PRODUCER_CMD` · no simple default · harness/watch.mjs, qa/selftest-230q.mjs, qa/selftest-2583m.mjs (+13 more) · [PACE-AND-AGENTS.md:44](PACE-AND-AGENTS.md)
-- `STUDIO_PRODUCER_MIN_MIN` · default `15` · harness/producer-wake.mjs · [RELEASE.md:246](RELEASE.md)
+- `STUDIO_PRODUCER_MIN_MIN` · default `15` · harness/producer-wake.mjs · [RELEASE.md:258](RELEASE.md)
 - `STUDIO_PRODUCER_NAME` · default `'producer'` (also `'producer-1'`) · harness/art.mjs, harness/ask.mjs, harness/bible.mjs (+31 more) · [STRESS-TEST.md:37](STRESS-TEST.md)
 - `STUDIO_PRODUCER_PRESET` · default `'auto'` (also `'grok-bot'`) · harness/models.config.mjs, harness/status.mjs · undocumented
 - `STUDIO_PRODUCER_TOOL` · no simple default · harness/watch.mjs, qa/selftest-230q.mjs · [PACE-AND-AGENTS.md:44](PACE-AND-AGENTS.md)
-- `STUDIO_PRODUCER_WAKE` · no simple default · harness/producer-wake.mjs · [RELEASE.md:246](RELEASE.md)
+- `STUDIO_PRODUCER_WAKE` · no simple default · harness/producer-wake.mjs · [RELEASE.md:258](RELEASE.md)
 
 ## PROFILE_* (2)
 
@@ -646,7 +646,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## RAM_* (2)
 
-- `STUDIO_RAM_FLOOR_GB` · no simple default · harness/heavy-budget.mjs, harness/heavy.mjs, harness/ram.mjs (+38 more) · [RELEASE.md:206](RELEASE.md)
+- `STUDIO_RAM_FLOOR_GB` · no simple default · harness/heavy-budget.mjs, harness/heavy.mjs, harness/ram.mjs (+38 more) · [RELEASE.md:218](RELEASE.md)
 - `STUDIO_RAM_NOTE_MIN` · default `15` · harness/supervisor.mjs · undocumented
 
 ## REFERENCE_* (2)
@@ -884,7 +884,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_TRAIN_PREDICT` · no simple default · harness/train-predict.mjs, qa/selftest-260b.mjs, qa/selftest-2651a.mjs (+2 more) · [WORK-ORGANIZATION.md:229](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_QUARANTINE_MOVE` · no simple default · harness/train.mjs · [WORK-ORGANIZATION.md:790](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_RED_BUDGET_MIN` · no simple default · harness/flakes.mjs, harness/train.mjs, qa/selftest-2782b.mjs (+1 more) · [RELEASE-2.78.2.md:12](RELEASE-2.78.2.md)
-- `STUDIO_TRAIN_REFRESH` · no simple default · harness/train-refresh.mjs, qa/selftest-276i.mjs, qa/selftest-278h.mjs · [RELEASE.md:117](RELEASE.md)
+- `STUDIO_TRAIN_REFRESH` · no simple default · harness/train-refresh.mjs, qa/selftest-276i.mjs, qa/selftest-278h.mjs · [RELEASE.md:129](RELEASE.md)
 - `STUDIO_TRAIN_RELATED_FIRST` · no simple default · harness/train.mjs, qa/selftest-269p.mjs · [WORK-ORGANIZATION.md:610](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_RESERVE` · no simple default · harness/heavy-budget.mjs, qa/selftest-276j.mjs, qa/selftest-277p.mjs · [CLEANUP-2.79-AUDIT.md:427](CLEANUP-2.79-AUDIT.md)
 - `STUDIO_TRAIN_RIDE_ALONG` · no simple default · harness/task.mjs, qa/selftest-263i.mjs, qa/selftest-265s.mjs (+1 more) · [WORK-ORGANIZATION.md:319](WORK-ORGANIZATION.md)
@@ -926,15 +926,15 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## UPGRADE_* (9)
 
-- `STUDIO_UPGRADE_FETCH_MS` · default `60000` · harness/upgrade-watch.mjs, qa/selftest-269s.mjs · [RELEASE.md:167](RELEASE.md)
+- `STUDIO_UPGRADE_FETCH_MS` · default `60000` · harness/upgrade-watch.mjs, qa/selftest-269s.mjs · [RELEASE.md:179](RELEASE.md)
 - `STUDIO_UPGRADE_MERGE` · no simple default · harness/upgrade-guard.mjs, scripts/hooks/pre-commit, qa/selftest-260c.mjs · [SECURITY.md:123](SECURITY.md)
 - `STUDIO_UPGRADE_MSG` · no simple default · harness/upgrade-guard.mjs · undocumented
 - `STUDIO_UPGRADE_REFRESH` · no simple default · harness/upgrade-guard.mjs, harness/upgrade-smoke.mjs, qa/selftest-267h.mjs (+5 more) · [CLEANUP-2.79-AUDIT.md:432](CLEANUP-2.79-AUDIT.md)
-- `STUDIO_UPGRADE_REFRESH_WAIT_S` · default `120` · harness/upgrade-guard.mjs, qa/selftest-276i.mjs · [RELEASE.md:111](RELEASE.md)
-- `STUDIO_UPGRADE_REVERT` · no simple default · harness/upgrade-guard.mjs, scripts/hooks/pre-commit · [RELEASE.md:144](RELEASE.md)
-- `STUDIO_UPGRADE_SNAPSHOT_DAYS` · no simple default · harness/upgrade-baseline.mjs, qa/selftest-273f.mjs · [RELEASE.md:126](RELEASE.md)
-- `STUDIO_UPGRADE_WATCH_MIN` · default `60` · harness/supervisor.mjs, harness/upgrade-smoke.mjs, harness/upgrade-watch.mjs (+12 more) · [RELEASE.md:166](RELEASE.md)
-- `STUDIO_UPGRADE_WINDOW` · default `'unset (report only)'` · harness/upgrade-guard.mjs, harness/upgrade-watch.mjs, qa/selftest-269s.mjs · [RELEASE.md:177](RELEASE.md)
+- `STUDIO_UPGRADE_REFRESH_WAIT_S` · default `120` · harness/upgrade-guard.mjs, qa/selftest-276i.mjs · [RELEASE.md:123](RELEASE.md)
+- `STUDIO_UPGRADE_REVERT` · no simple default · harness/upgrade-guard.mjs, scripts/hooks/pre-commit · [RELEASE.md:156](RELEASE.md)
+- `STUDIO_UPGRADE_SNAPSHOT_DAYS` · no simple default · harness/upgrade-baseline.mjs, qa/selftest-273f.mjs · [RELEASE.md:138](RELEASE.md)
+- `STUDIO_UPGRADE_WATCH_MIN` · default `60` · harness/supervisor.mjs, harness/upgrade-smoke.mjs, harness/upgrade-watch.mjs (+12 more) · [RELEASE.md:178](RELEASE.md)
+- `STUDIO_UPGRADE_WINDOW` · default `'unset (report only)'` · harness/upgrade-guard.mjs, harness/upgrade-watch.mjs, qa/selftest-269s.mjs · [RELEASE.md:189](RELEASE.md)
 
 ## USAGE_* (2)
 
@@ -981,8 +981,8 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_VISUAL_GATE` · no simple default · harness/task.mjs, harness/upgrade-smoke.mjs, harness/verdict-split.mjs (+81 more) · [RELEASE-2.79.1.md:61](RELEASE-2.79.1.md)
 - `STUDIO_VISUAL_MIN_OPAQUE` · no simple default · harness/visual-proof.mjs · undocumented
 - `STUDIO_VISUAL_NOISE` · no simple default · harness/visual-proof.mjs, qa/selftest-265s.mjs · [CLEANUP-2.79-AUDIT.md:440](CLEANUP-2.79-AUDIT.md)
-- `STUDIO_VISUAL_NOISE_CAP` · no simple default · harness/visual-proof.mjs, qa/selftest-265s.mjs · [RELEASE.md:210](RELEASE.md)
-- `STUDIO_VISUAL_NOISE_K` · no simple default · harness/visual-proof.mjs, qa/selftest-265s.mjs · [RELEASE.md:210](RELEASE.md)
+- `STUDIO_VISUAL_NOISE_CAP` · no simple default · harness/visual-proof.mjs, qa/selftest-265s.mjs · [RELEASE.md:222](RELEASE.md)
+- `STUDIO_VISUAL_NOISE_K` · no simple default · harness/visual-proof.mjs, qa/selftest-265s.mjs · [RELEASE.md:222](RELEASE.md)
 - `STUDIO_VISUAL_STRICT` · no simple default · harness/verdict-split.mjs, qa/selftest-2601q.mjs · undocumented
 
 ## WATCHDOG_* (6)
@@ -1041,7 +1041,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_CURRENT_TASK_FILE` · default `'auto'` · harness/task.mjs, qa/selftest-2781e.mjs · [RELEASE-2.78.1.md:20](RELEASE-2.78.1.md)
 - `STUDIO_DAILY_TOKEN_CAP` · no simple default · harness/budget.mjs, harness/retro.mjs, harness/route.mjs (+8 more) · [AGENT-TOOLS.md:520](AGENT-TOOLS.md)
 - `STUDIO_DECISION_MIN_N` · no simple default · harness/decisions-log.mjs, qa/selftest-271x.mjs · [AUTONOMY.md:401](AUTONOMY.md)
-- `STUDIO_DISK_MIN_FREE_GB` · no simple default · harness/digest.mjs, harness/machine.mjs, harness/upgrade-preflight.mjs (+3 more) · [RELEASE.md:66](RELEASE.md)
+- `STUDIO_DISK_MIN_FREE_GB` · no simple default · harness/digest.mjs, harness/machine.mjs, harness/upgrade-preflight.mjs (+3 more) · [RELEASE.md:78](RELEASE.md)
 - `STUDIO_DOTNET` · default `'dotnet'` · harness/unity.mjs, scripts/check-unity-template.mjs, qa/selftest-2671k.mjs (+3 more) · [UNITY-TRACK.md:494](UNITY-TRACK.md)
 - `STUDIO_ENV_FROM_FILE` · no simple default · harness/dotenv.mjs, harness/env-reload.mjs, harness/event.mjs (+8 more) · [RUN-UNATTENDED.md:57](RUN-UNATTENDED.md)
 - `STUDIO_EXPERIMENT` · no simple default · harness/experiment.mjs, harness/train.mjs, scripts/hooks/commit-msg (+7 more) · [GAME-BIBLE.md:182](GAME-BIBLE.md)
@@ -1101,14 +1101,14 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_REROUTE_MODELS` · no simple default · harness/agent.mjs, harness/reasoning-only.mjs, qa/selftest-230h.mjs · [DIRECTOR-FLOW.md:94](DIRECTOR-FLOW.md)
 - `STUDIO_RESERVE_RAM_GB` · no simple default · harness/heavy-budget.mjs, qa/selftest-268n.mjs, qa/selftest-269q.mjs (+3 more) · [ENGINE-TRACKS.md:163](ENGINE-TRACKS.md)
 - `STUDIO_RESULTS_DIR` · no simple default · harness/health.mjs, harness/kickoff.mjs, harness/run-report.mjs (+4 more) · [TEST-RUN.md:30](TEST-RUN.md)
-- `STUDIO_RESUME_BY` · no simple default · harness/supervisor.mjs, qa/selftest-2591.mjs, qa/selftest-259e.mjs (+2 more) · [RELEASE.md:206](RELEASE.md)
+- `STUDIO_RESUME_BY` · no simple default · harness/supervisor.mjs, qa/selftest-2591.mjs, qa/selftest-259e.mjs (+2 more) · [RELEASE.md:218](RELEASE.md)
 - `STUDIO_RIG_SHARE` · no simple default · harness/heavy-budget.mjs, harness/rig-budget.mjs, qa/selftest-276j.mjs · [CLEANUP-2.79-AUDIT.md:426](CLEANUP-2.79-AUDIT.md)
 - `STUDIO_ROLE` · no simple default · harness/agent-env.mjs, harness/agent.mjs, harness/agy-allow.mjs (+144 more) · [AUTONOMY.md:214](AUTONOMY.md)
 - `STUDIO_ROUND_CAP` · no simple default · harness/round-cap.mjs, scripts/run-gates.mjs, qa/selftest-272b.mjs · [WORK-ORGANIZATION.md:70](WORK-ORGANIZATION.md)
 - `STUDIO_SCENARIO_TIMEOUT_MS` · default `60000` · harness/floors.mjs, harness/verdict.mjs, qa/check-phase-scenarios.mjs (+1 more) · undocumented
 - `STUDIO_SELFTEST_SLOW` · no simple default · qa/selftest-2583n.mjs, qa/selftest-258d.mjs, qa/selftest-259d.mjs (+10 more) · [CLEANUP-2.79-AUDIT.md:396](CLEANUP-2.79-AUDIT.md)
 - `STUDIO_SELF_TRIAGE` · no simple default · harness/self-triage.mjs, qa/selftest-2651a.mjs, qa/selftest-265t.mjs (+2 more) · [AUTONOMY.md:169](AUTONOMY.md)
-- `STUDIO_SETTINGS_BASE_REF` · no simple default · scripts/settings-map.mjs, qa/selftest-266e.mjs · [RELEASE.md:252](RELEASE.md)
+- `STUDIO_SETTINGS_BASE_REF` · no simple default · scripts/settings-map.mjs, qa/selftest-266e.mjs · [RELEASE.md:264](RELEASE.md)
 - `STUDIO_SILENT_GREEN` · default `'warn'` · harness/game-gates.mjs, harness/silent-green.mjs, qa/selftest-236.mjs (+3 more) · [DISCORD-CREW.md:181](DISCORD-CREW.md)
 - `STUDIO_SKETCHFAB_KEY` · no simple default · harness/asset-need.mjs, qa/selftest-2671l.mjs · [ART-PIPELINE.md:42](ART-PIPELINE.md)
 - `STUDIO_SKIP_LOG_MIN` · default `10` · harness/agent.mjs · [CLEANUP-2.79-AUDIT.md:411](CLEANUP-2.79-AUDIT.md)

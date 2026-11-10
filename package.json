@@ -148,6 +148,8 @@
     "hooks:install": "node scripts/install-hooks.mjs",
     "session:report": "node harness/session-report.mjs",
     "selftest": "node qa/selftest.mjs",
+    "selftest:changed": "node qa/selftest.mjs --changed",
+    "selftest:fast": "node qa/selftest.mjs --jobs 4",
     "visual": "node harness/visual-proof.mjs",
     "verdict:split": "node harness/verdict-split.mjs",
     "layout": "node harness/layout-gate.mjs",
