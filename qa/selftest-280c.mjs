@@ -154,7 +154,7 @@ export async function selftest280C({ dir, report, tmpRoot }) {
     const old = new Date(Date.now() - 3600000).toISOString();
     const facts = (queue) => ({ auto: { on: true }, trainOn: true, halted: null, drain: null, winddown: null, stopped: null, lock: null, next: null, running: null, queue, heldNow: () => false, heldOut: () => false, rules: { min: 1, waitMin: 0 }, room: { ok: true } });
     const pass = async (queue, evs, spawned) => td.trainDaemonPass({ root: S, env: { STUDIO_TRAIN_AUTO: 'on' }, spawnTrain: () => { spawned.push(1); return { pid: null }; }, emit: (e) => evs.push(e), ...facts(queue) });
-    await guard('2.80 (c) #25: after a train found main itself red, the daemon starts no train while main\'s head is unchanged (one task.train.auto_waiting naming it, not repeated), starts again once main\'s head moves, and starts at once when a queued lane changes the stuck check\'s configuration (fix-first runs it alone) (fails on 2.79.2: it started the same lanes again at once)', async () => {
+    await guard('2.80 (c) #25: after a train found main itself red, the daemon starts no train while main\'s head is unchanged (one task.train.auto_waiting naming it, not repeated), starts again once main\'s head moves, and starts at once when a lane is queued since (it may be the fix) (fails on 2.79.2: it started the same lanes again at once)', async () => {
       const evs = []; const spawned = [];
       const q = [{ task: 'T-901', agent: 'builder-a', at: old, dir: path.join(S, 'no-such-copy') }];
       const a = await pass(q, evs, spawned);
@@ -164,9 +164,14 @@ export async function selftest280C({ dir, report, tmpRoot }) {
       try { fs.rmSync(path.join(S, '.studio', 'train', 'daemon.json'), { force: true }); } catch {}
       commit(S, 'game/src/b.js', 'export const b = 2;\n');
       const d = await pass(q, evs, spawned);
+      // A lane that is new in the queue (no check config in it: fix-first doesn't know it) may be the fix: no wait on it.
+      fs.writeFileSync(path.join(S, '.studio', 'train', 'red-streak.json'), JSON.stringify({ trains: [{ id: 'red-2', at: new Date().toISOString(), gates: ['docs'], redMain: true }], tried: {} }));
+      try { fs.rmSync(path.join(S, '.studio', 'train', 'daemon.json'), { force: true }); } catch {}
+      const e1 = await pass(q, evs, spawned);
+      const e2 = await pass([...q, { task: 'T-903', agent: 'builder-c', at: old, dir: path.join(S, 'no-such-copy-2') }], evs, spawned);
       const waits = evs.filter((e) => e.type === 'task.train.auto_waiting');
-      const ok = a.started === false && /main is red at/.test(a.why) && b.started === false && waits.length === 1 && c.started === true && d.started === true && spawned.length === 2;
-      return [ok, JSON.stringify({ a, b, c, d, waits: waits.map((e) => e.msg), spawned: spawned.length })];
+      const ok = a.started === false && /main is red at/.test(a.why) && b.started === false && c.started === true && d.started === true && e1.started === false && e2.started === true && waits.length === 2 && spawned.length === 3;
+      return [ok, JSON.stringify({ a, b, c, d, e1, e2, waits: waits.map((e) => e.msg), spawned: spawned.length })];
     });
   }
 

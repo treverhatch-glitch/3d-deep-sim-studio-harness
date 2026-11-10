@@ -148,20 +148,24 @@ export async function daemonFacts(root, { env = process.env, now = Date.now(), h
 /**
  * 2.80 (c), Patch #25: after a train found main itself red, the daemon started the same lanes again at once, ~30 min each
  * to find main red again (6 times in a day). While the last train's verdict (.studio/train/red-streak.json) is "main is
- * red" and main's head is the one the daemon first saw after it, it waits (the reason, or null to go on): unless a queued
- * lane fixes the stuck check (train-fix-first.mjs: the train runs that lane alone and first). `npm run task -- train` runs.
+ * red" and main's head and the queued lanes (each task and its head) are the ones the daemon first saw after it, it waits
+ * (the reason, or null to go on): a new or changed lane may be the fix, so it never waits on one. `npm run task -- train` runs.
  */
 export async function redMainWait(root, queue = [], { env = process.env, now = Date.now(), git = (args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true }) } = {}) {
   const last = (readJson(path.join(root, '.studio', 'train', 'red-streak.json'))?.trains || []).at(-1);
   if (!last?.redMain) return null;
   const tip = String(git(['rev-parse', `refs/heads/${(await import('./worktree.mjs')).mainBranch(root)}`]).stdout || '').trim();
   const f = path.join(root, '.studio', 'train', 'red-main-head.json');
-  let seen = readJson(f);
-  if (seen?.train !== last.id) { seen = { train: last.id, head: tip, at: new Date(now).toISOString() }; writeAtomic(f, `${JSON.stringify(seen)}\n`); }
-  if (!tip || seen.head !== tip) return null;
   const tr = await import('./train.mjs');
-  const fix = (await import('./train-fix-first.mjs')).fixFirstOrder(root, queue || [], { tip, env, headOf: (l) => tr.laneNow(l).head || null }).fix;
-  return fix ? null : `main is red at ${tip.slice(0, 8)} (train ${last.id} found ${last.gates.join(', ') || 'its checks'} red on main itself) and no queued lane fixes it: no train until main changes or a fix lane is queued (npm run task -- train runs one anyway)`;
+  const headOf = (l) => tr.laneNow(l).head || null;
+  // The queue as it stood when the daemon first saw the verdict: a lane queued since, or one with new commits, may be the
+  // fix (whatever check it is for), so the wait is only for the SAME lanes on the same main.
+  const lanes = (queue || []).map((l) => `${l.task}@${headOf(l) || ''}`).sort().join(',');
+  let seen = readJson(f);
+  if (seen?.train !== last.id) { seen = { train: last.id, head: tip, lanes, at: new Date(now).toISOString() }; writeAtomic(f, `${JSON.stringify(seen)}\n`); }
+  if (!tip || seen.head !== tip || seen.lanes !== lanes) return null;
+  const fix = (await import('./train-fix-first.mjs')).fixFirstOrder(root, queue || [], { tip, env, headOf }).fix;
+  return fix ? null : `main is red at ${tip.slice(0, 8)} (train ${last.id} found ${last.gates.join(', ') || 'its checks'} red on main itself) and the queue is the same lanes: no train until main changes or a lane is queued or changed (npm run task -- train runs one anyway)`;
 }
 
 /**
