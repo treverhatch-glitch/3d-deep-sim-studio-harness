@@ -4,8 +4,7 @@ A running task can now receive follow-ups. A red CI run on its commit, its lane 
 train, or a message tied to it lands in **that task's inbox** instead of only in the event log or the next
 session's hand-off notes. Anything that matches no task goes to the Producer's inbox, the same as before.
 
-Shadow mode is the default. It logs where each event *would* go and delivers nothing. Switch it on
-(for CI and merge-train events first) only after you've checked a sample of what shadow mode logged.
+Threads are off by default. Switch them on (`STUDIO_THREADS=on`: CI and merge-train events first).
 
 ## The pieces
 
@@ -58,8 +57,8 @@ candidate; Discord and GitHub respond only for listed senders (below), else cand
 
 A `discord` or `github` event responds only when its author id is listed as `owner` or `trusted` (GitHub logins
 compare without case). Any other author's event, another bot's, or one with no `--author` is **at most a
-candidate**, never respond, live or in shadow mode (the `thread.would_route` / `thread.routed` event and the post's
-output say so; the shadow report shows the sender). The shipped lists are empty, so every Discord and GitHub post
+candidate**, never respond (the `thread.routed` event and the post's
+output say so). The shipped lists are empty, so every Discord and GitHub post
 is a candidate until the owner adds ids; the shipped policy for both is `respond` for that reason. The harness
 can't verify a Discord or GitHub identity itself: the bot passes the author id it got from Discord or GitHub
 (`--author`), and the harness applies the owner's lists to it. The table is protected, so only the owner changes
@@ -75,14 +74,12 @@ live queue. Gates, the train, locks and protected files are unchanged.
 
 `STUDIO_THREADS` (or `"mode"` in the table) can be set to:
 
-- `shadow` (the default): logs `thread.would_route` and `trigger.would_drop` events and delivers nothing.
-- `on`: routes the sources listed in `"live"` (`ci` and `train` by default). The other sources stay in shadow
+- `on`: routes the sources listed in `"live"` (`ci` and `train` by default). The other sources are left alone
   until you add them to the list.
-- `off`: does nothing.
+- `off` (the default): does nothing.
 
-To check shadow mode, run `npm run thread -- shadow-report --sample 50`. It prints the counts and an even sample
-across the period. For each line, check whether the task is right, or whether it should have gone to the
-Producer or been dropped. The plan's bar for turning it on: at least 95% of the sample routed correctly.
+2.80 removed the shadow mode (the `thread.would_route` and `trigger.would_drop` events, `thread -- shadow-report`).
+A `shadow` value, in `STUDIO_THREADS` or `"mode"`, now behaves as `off`.
 
 ## Commands
 
@@ -94,7 +91,6 @@ npm run thread -- inbox T-123 [--peek]           # read a task's inbox (marks it
 npm run thread -- link discord:<id> T-123 --by <name>
 npm run thread -- unlink discord:<id> --by <name>
 npm run thread -- post <key> "<text>" --source discord|github|hub --by <name> [--ref <id>] [--author <sender id>]
-npm run thread -- shadow-report [--sample 50]
 ```
 
 `link`, `unlink` and `post` accept a Producer or Director session, an agent outside the harness (a chat bot)

@@ -85,8 +85,8 @@ writes every occurrence again, for debugging.
 | `agent.agy_continue` | counted in the session end (`meta.followUps`, `nudges`) | none |
 | `agent.heartbeat` | one event per session every `STUDIO_HEARTBEAT_EVENT_MIN` (10) minutes; the launcher still renews the claim and writes `lastBeat` every beat | metrics' stall gap follows `meta.everyMin` (a stall is a gap over 2.5 beats) |
 
-`STUDIO_TELEMETRY=full` writes all of these per event again. Types still one event each: `hotspot.overlap` (plan-waves),
-`watch.report` (retro), `trigger.would_drop` and `thread.would_route` (the threads shadow report).
+`STUDIO_TELEMETRY=full` writes all of these per event again. Types still real events: `hotspot.overlap` (plan-waves; 2.80: one per file and set of lanes), `watch.report` (retro; 2.80: when
+the words change, and at most hourly).
 
 ## The autonomy scorecard (2.64.0)
 

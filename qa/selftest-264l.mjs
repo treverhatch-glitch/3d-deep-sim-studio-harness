@@ -63,22 +63,16 @@ process.exit(1);`);
   const gh = `node "${fakeGh}"`;
   const SHA = 'ab12cd34'.repeat(5);
 
-  // 1. A CI failure on a lane's sha: shadow logs where it would go; on puts it in that task's inbox.
+  // 1. A CI failure on a lane's sha: on puts it in that task's inbox.
   {
-    fresh();
-    emit('ci-s', [{ type: 'task.train.queued', agent: 'builder-s1', task: 'T-003', msg: 'T-003 is checked and waits', meta: { head: SHA, branch: 'lane/builder-s1-1' } }]);
-    const r = run(dir, `node harness/ci-watch.mjs --sha ${SHA} --poll-sec 0`, { ...base, AGENT_EVENTS_FILE: evFile('ci-s'), STUDIO_GH: gh, STUDIO_THREADS: 'shadow' });
-    const ev = events('ci-s');
-    const would = ev.find((e) => e.type === 'thread.would_route');
-    const shadowOk = r.status === 1 && !inbox('T-003') && would?.meta?.to === 'task' && would.meta.tasks?.join() === 'T-003' && would.meta.type === 'ci.failed' && !ev.some((e) => e.type === 'thread.routed');
     fresh();
     fs.rmSync(path.join(dir, 'gh-264l.json'), { force: true });
     emit('ci-on', [{ type: 'task.train.queued', agent: 'builder-s1', task: 'T-003', msg: 'T-003 is checked and waits', meta: { head: SHA, branch: 'lane/builder-s1-1' } }]);
     const r2 = run(dir, `node harness/ci-watch.mjs --sha ${SHA} --poll-sec 0`, { ...base, AGENT_EVENTS_FILE: evFile('ci-on'), STUDIO_GH: gh, STUDIO_THREADS: 'on' });
     const ev2 = events('ci-on');
     const onOk = r2.status === 1 && /· ci · CI red on ab12cd3/.test(inbox('T-003')) && ev2.some((e) => e.type === 'thread.routed' && e.meta?.tasks?.join() === 'T-003') && !ev2.some((e) => e.type === 'thread.would_route');
-    report('2.64.0 (l): a CI failure on a lane\'s sha (task.train.queued) routes to that task\'s inbox with STUDIO_THREADS=on, and with shadow (the default) only logs thread.would_route (no inbox written)',
-      shadowOk && onOk, `shadow ${shadowOk} on ${onOk}\n${out(r)}${out(r2)}\nT-003 inbox: ${inbox('T-003')}\n${JSON.stringify(would || null).slice(0, 400)}`);
+    report('2.64.0 (l): a CI failure on a lane\'s sha (task.train.queued) routes to that task\'s inbox with STUDIO_THREADS=on',
+      onOk, `on ${onOk}\n${out(r2)}\nT-003 inbox: ${inbox('T-003')}`);
   }
 
   // 2. A red train and a lane handed back: in the lanes' inboxes; the session holding the task hears at its next tool call.
@@ -137,7 +131,7 @@ console.log(JSON.stringify({ vol: k.volatile, stable: k.stable.includes('inbox h
       /\*\*ci\*\* \(no thread\): CI red on 99aa001/.test(p) && /\*\*train\*\* \(thread task:T-000 \(T-000 is done\)\)/.test(p) && ev.filter((e) => e.type === 'thread.to_producer').length === 2 && !inboxes, `${p}\n${inboxes}`);
   }
 
-  // 4. A source set to ignore is dropped (on: nothing delivered; shadow: trigger.would_drop).
+  // 4. A source set to ignore is dropped (on: nothing delivered; nothing logged for it with threads off).
   {
     fresh();
     const restore = setTriggers((t) => { t.live = ['ci', 'train', 'github']; t.sources.github = { policy: 'ignore' }; });
@@ -150,8 +144,8 @@ console.log(JSON.stringify({ vol: k.volatile, stable: k.stable.includes('inbox h
     thread('ign2', 'sweep');
     const ev2 = events('ign2');
     restore();
-    report('2.64.0 (l): an event from a source (or type) set to ignore is dropped: nothing in any inbox or the Producer\'s; shadow mode logs trigger.would_drop for it',
-      dropped && ev2.filter((e) => e.type === 'trigger.would_drop').length === 2 && !ev2.some((e) => e.type === 'thread.would_route'), `${out(r)}\n${JSON.stringify(ev2.map((e) => e.type))}`);
+    report('2.64.0 (l): an event from a source (or type) set to ignore is dropped: nothing in any inbox or the Producer\'s',
+      dropped && !ev2.some((e) => /^(trigger\.would_drop|thread\.would_route)$/.test(e.type)), `${out(r)}\n${JSON.stringify(ev2.map((e) => e.type))}`);
   }
 
   // 5. Linking: a bot or the Producer may tie a Discord message to a task; a worker never.
@@ -178,28 +172,6 @@ console.log(JSON.stringify({ vol: k.volatile, stable: k.stable.includes('inbox h
     restore();
     report('2.64.0 (l): a bot\'s post on a linked Discord message lands in that task\'s inbox (discord live); a worker can\'t post',
       /in T-002's inbox/.test(out(p)) && /discord · opus-bot: the menu flickers on resize · ref 123456789012/.test(inbox('T-002')) && pw.status === 1, `${out(p)}${out(pw)}\n${inbox('T-002')}`);
-  }
-
-  // 6. shadow-report: counts and an even sample for the owner.
-  {
-    fresh();
-    emit('rep', [{ type: 'agent.info', msg: 'before' }]);
-    thread('rep', 'sweep');
-    const TR = '20261101-111111-7';
-    emit('rep', [
-      { type: 'task.train.start', agent: 'train', msg: 'start', meta: { train: TR, lanes: ['T-001'] } },
-      { type: 'task.train.red', agent: 'train', msg: `train ${TR}: red`, meta: { train: TR } },
-      { type: 'task.train.dropped', agent: 'train', task: 'T-001', msg: `train ${TR}: T-001 handed back`, meta: { train: TR } },
-      { type: 'ci.failed', agent: 'ci-watch', msg: 'CI red on 5555555', meta: { sha: '5555555' } },
-    ]);
-    thread('rep', 'sweep');
-    const r = thread('rep', 'shadow-report --sample 2 --json');
-    let j = {};
-    try { j = JSON.parse(r.stdout.trim().split('\n').pop()); } catch {}
-    const txt = thread('rep', 'shadow-report --sample 3');
-    report('2.64.0 (l): npm run thread -- shadow-report prints the shadow decisions\' counts and a sample of the asked size (task, Producer or drop, with the key)',
-      j.total === 4 && j.sample?.length === 2 && j.counts?.['train to task'] === 2 && j.counts?.['ci to producer'] === 1 && j.counts?.['train drop'] === 1 && /Sample of 3/.test(out(txt)) && /-> T-001 \[train:/.test(out(txt)) && !inbox('T-001'),
-      `${out(r).slice(0, 800)}\n${out(txt).slice(0, 800)}`);
   }
 
   // 7. The War Room's /api/inbox takes a task key (auth unchanged): on and hub live -> the task's inbox.

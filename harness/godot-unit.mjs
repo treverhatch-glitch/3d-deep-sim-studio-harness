@@ -34,11 +34,10 @@ export function readConfig() {
 }
 
 export function shouldRun(cfg, changedFiles) {
+  // 2.80 (d, C15): no Godot project in this studio is N/A, said first (it never gets as far as looking for a Godot binary).
+  const projectPath = path.join(REPO_ROOT, cfg.project || 'game/godot');
+  if (!fs.existsSync(path.join(projectPath, 'project.godot'))) return { run: false, reason: 'N/A: no Godot project in this studio' };
   if (!cfg.enabled) return { run: false, reason: 'disabled in studio/godot-unit.json' };
-  const projectPath = path.join(REPO_ROOT, cfg.project);
-  if (!fs.existsSync(projectPath) || !fs.existsSync(path.join(projectPath, 'project.godot'))) {
-    return { run: false, reason: `project path '${cfg.project}' not found` };
-  }
   if (!runnerFor(projectPath)) {
     return { run: false, reason: `addons/gdUnit4/runtest.sh not found. Install gdUnit4 ${cfg.gdunit} from https://github.com/MikeSchulze/gdUnit4` };
   }
