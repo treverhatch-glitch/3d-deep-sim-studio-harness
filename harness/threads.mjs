@@ -12,7 +12,7 @@
  *
  * The index (.studio/threads.json) maps exact keys to tasks. It is built by code from the events the studio
  * already writes: a task id, its lane branch (.studio/lane-branches.json, task.train.queued), the commits a lane
- * queued or a train landed (sha), a merge train's id and its lanes (task.train.start), a Liaison brief (B-), an ask
+ * queued or a train landed (sha), a merge train's id and its lanes (task.train.start), an old confirmed brief (B-), an ask
  * (A-), an away item (AW-), a fun-check wave (W-), a closed-loop bug (BUG-), and, registered by a bot with
  * `link`, a Discord message id or a PR/issue number. Nothing is guessed: no similar titles, no fuzzy matches.
  *

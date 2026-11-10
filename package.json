@@ -37,7 +37,6 @@
     "bible": "node harness/bible.mjs",
     "director": "node harness/director.mjs",
     "idea": "node harness/ideas.mjs",
-    "liaison": "node harness/liaison.mjs",
     "experiment": "node harness/experiment.mjs",
     "ref": "node harness/refs.mjs",
     "asset": "node harness/assets.mjs",

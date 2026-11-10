@@ -13,7 +13,6 @@ in a chat.
 | `studio/bible/reviews/` | The Director's dated reviews: verdict, what it checked, next tasks. | The Director |
 | `studio/bible/ideas/` | The Idea Board: captured, shaped, placed, decided, scheduled. | `npm run idea` |
 | `studio/memory/LEARNED.md` | What keeps happening, lessons that didn't stick, suggestions never handled. Generated daily. | `npm run learn` |
-| `studio/liaison/` | Briefs from conversations with the game dev, and whether they confirmed. | The Liaison |
 | `studio/experiments/` | Tracked experiments: open, kept or dropped. | `npm run experiment` |
 | `studio/references/LIBRARY.md` | The reference library: games, features, timestamps, what to take and avoid. | `npm run ref` |
 | `studio/assets/manifest.json` | Every shipped asset and who stated they may use it. | `npm run asset` (a person) |

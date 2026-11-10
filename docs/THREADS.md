@@ -23,7 +23,7 @@ Threads are off by default. Switch them on (`STUDIO_THREADS=on`: CI and merge-tr
 | `branch:lane/<agent>-<stamp>` | `.studio/lane-branches.json`, `task.train.queued`, `lane.copy` |
 | `sha:<40 hex>` | the head a lane queued (`task.train.queued`), the commit a train landed (`task.train.landed`) or refreshed pins in, and the `Studio-Task` trailer of the commit CI ran on |
 | `train:<id>` | a merge train's lanes (`task.train.start`) |
-| `brief:B-001` | the Producer task a confirmed Liaison brief made (`task.added` meta.brief) |
+| `brief:B-001` | the Producer task an old confirmed brief made (`task.added` meta.brief) |
 | `ask:A-001` | the task its asker holds when the answer comes (`ask.open`), or the Producer task of a reversal |
 | `away:AW-3` | the task an away item is about (`away.verdict`) |
 | `wave:W-2` | the tasks in a fun-check wave (`wave.joined`) |

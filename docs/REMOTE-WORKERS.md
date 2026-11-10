@@ -13,7 +13,7 @@ the work (`docs/LINE-PRODUCER.md`).
 | Research, design and docs tasks | The merge train and its full verify (`npm run task -- train`) |
 | Code tasks that run their own tests (`npm run remote -- mark <T-ID> --test "<cmd>"`) | The board (`studio/NEXT.md`), claims and locks (`.studio/locks`), every `.studio/` state file |
 | | Unity (Windows, the GPU and the licence) and other engine checks that need this machine |
-| | A person's task and the planning roles (Producer, Director, planner, liaison) |
+| | A person's task and the planning roles (Producer, Director, planner) |
 
 A remote branch never lands by itself. Its commits run on the PC only inside the train's verify, as any lane's do, and
 a branch that changes the harness's own code (harness/, scripts/, hub/, tools/, qa/*.mjs, package.json) is not queued

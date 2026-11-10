@@ -1213,7 +1213,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   // M2 (2.58.3, crew P-039): a code-writing role on a task with no lane gets its own copy too (no path claims), so its
   // staged or half-done files never sit in the main checkout where they block every other task's `task done`.
-  // Producer, Director, planner and liaison stay in the main checkout; STUDIO_LANELESS=shared turns it off.
+  // Producer, Director and planner stay in the main checkout; STUDIO_LANELESS=shared turns it off.
   // H-9 (2.58.5): a custom command too (STUDIO_<ROLE>_CMD, STUDIO_TOOL_<TOOL>_CMD, STUDIO_AGENT_CMD): 2.58.3 left it in
   // the main checkout, and a wrapper session staged game code there that the pre-commit hook refused. It runs in the
   // copy (cwd), with STUDIO_MAIN_ROOT set, and its line may use {mainRoot} and {addDirs} (the --add-dir pair the
@@ -2030,7 +2030,7 @@ export function sayNow(agent, text) {
   return { ok: true };
 }
 
-const isAgentName = (by) => /^(prod|producer|director|builder|rnd|qa|reviewer|planner|art|liaison|agent|watch|supervisor|dev-hacker|codex|claude|gemini|agy|grok|cursor|aider|hermes)\b/i.test(String(by || '')) || by === process.env.STUDIO_LOCK_OWNER;
+const isAgentName = (by) => /^(prod|producer|director|builder|rnd|qa|reviewer|planner|art|agent|watch|supervisor|dev-hacker|codex|claude|gemini|agy|grok|cursor|aider|hermes)\b/i.test(String(by || '')) || by === process.env.STUDIO_LOCK_OWNER;
 function readBudgetLimits() {
   try {
     return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'budget.json'), 'utf8'));
@@ -2497,7 +2497,7 @@ export async function fillAgents({ byDirector = false, autonomous = false } = {}
  * cycle): it starts nothing while auto-start is off (npm run mode -- autostart on --by <name>).
  */
 export function wake(role, { task = null, why = '', auto = false } = {}) {
-  const label = { rnd: 'R&D', producer: 'the Producer', director: 'the Director', art: 'the art department', builder: 'a builder', liaison: 'the Liaison' }[role] || role;
+  const label = { rnd: 'R&D', producer: 'the Producer', director: 'the Director', art: 'the art department', builder: 'a builder' }[role] || role;
   // 2.80: every wake comes from the supervisor's passes (the War Room, whose clicks woke agents too, is gone).
   const from = 'supervisor';
   const busy = sessions().find((s) => s.role === role && s.running);
@@ -2516,7 +2516,7 @@ export function wake(role, { task = null, why = '', auto = false } = {}) {
 }
 
 /** Which roles can start without a person (for preflight and the War Room). */
-export function launchableRoles(roles = ['producer', 'director', 'builder', 'qa-playtester', 'rnd', 'planner', 'art', 'reviewer', 'liaison']) {
+export function launchableRoles(roles = ['producer', 'director', 'builder', 'qa-playtester', 'rnd', 'planner', 'art', 'reviewer']) {
   return roles.filter((r) => process.env[`STUDIO_${roleKey(r)}_CMD`] || process.env[`STUDIO_${roleKey(r)}_TOOL`] || process.env.STUDIO_AGENT_TOOL || (r === 'director' && process.env.STUDIO_DIRECTOR_CMD));
 }
 

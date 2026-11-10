@@ -5,7 +5,7 @@
  *
  *   npm run verdict -- yes|not-yet --by <person> [--build <id>] [--note "…"]
  *   npm run verdict -- yes --by jed --quote "<their words>" --source "<where they said it>" --relayed-by <agent>
- *                                           a person's verdict given in chat, relayed by the lead or Liaison
+ *                                           a person's verdict given in chat, relayed by the lead
  *   npm run verdict                         the verdicts so far
  *
  * Both runs so far went green on every gate while the game was wrong for the person playing it
@@ -30,7 +30,7 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 
 export const VERDICTS = path.join(REPO_ROOT, 'studio', 'playtest', 'verdicts.json');
 // The same agent-name shapes the launcher uses for hiring: agents never give a fun verdict.
-const AGENTISH = /^(prod|producer|director|builder|rnd|qa|reviewer|planner|art|liaison|agent|watch|supervisor|dev-hacker|codex|claude|gemini|agy|grok|cursor|aider|hermes|sound|composer|artist|ui-|writer|engine)\b/i;
+const AGENTISH = /^(prod|producer|director|builder|rnd|qa|reviewer|planner|art|agent|watch|supervisor|dev-hacker|codex|claude|gemini|agy|grok|cursor|aider|hermes|sound|composer|artist|ui-|writer|engine)\b/i;
 export const isPerson = (by) => Boolean(by) && !AGENTISH.test(String(by)) && by !== process.env.STUDIO_LOCK_OWNER;
 
 export function readVerdicts() {

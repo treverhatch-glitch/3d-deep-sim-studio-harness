@@ -8,7 +8,7 @@
  *   npm run intake -- --ask < answers.txt   ask without a terminal (one answer per line; for scripts and tests)
  *   npm run intake -- --followups            follow-up questions about the phases and each kept or explore layer
  *   npm run intake -- --followups --model    also let a cheap model write extra questions from your answers (checked)
- *   npm run intake -- --followups --json     the unanswered follow-ups as JSON (for a UI or the Liaison)
+ *   npm run intake -- --followups --json     the unanswered follow-ups as JSON (for a UI or the Producer)
  *   npm run intake -- --followups --answers f.json   answers as { "<key>": "<answer>" }
  *
  * Answers file: { "answers": { "title": "…", "playLength": "demo", "pillars": ["name: rules out"],

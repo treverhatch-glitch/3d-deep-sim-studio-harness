@@ -740,26 +740,6 @@ if (inShard()) {
   report('keeping an experiment records the decision', run(dir, 'node harness/experiment.mjs keep X-002 --by hatch').status === 0 && JSON.parse(fs.readFileSync(path.join(dir, 'studio/experiments/X-002.json'), 'utf8')).status === 'kept');
 }
 
-// The Liaison: nothing moves until the game dev confirms; then it reaches the Producer and the Director.
-if (inShard()) {
-  const dir = copyRepo();
-  const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_LOCK_OWNER: 'liaison-1' };
-  run(dir, 'node harness/intake.mjs --answers studio/templates/intake-example.json', env);
-  run(dir, 'node harness/bible.mjs sign --by hatch', env);
-  const d = run(dir, 'node harness/liaison.mjs draft --kind idea --title "Night tide" --summary "At night the moss glows and visitors rate higher" --from hatch', env);
-  report('a draft is read back to the game dev and asks to push it on', /Shall I push it on\?/.test(d.stdout) && /Night tide/.test(d.stdout), d.stdout);
-  report('nothing reaches the Idea Board before the game dev confirms', !fs.existsSync(path.join(dir, 'studio/bible/ideas/I-001.json')));
-  report('an agent can\'t confirm for the game dev', run(dir, 'node harness/liaison.mjs confirm B-001 --by liaison-1', env).status !== 0);
-  const c = run(dir, 'node harness/liaison.mjs confirm B-001 --by hatch --quote "yes push it"', env);
-  const idea = JSON.parse(fs.readFileSync(path.join(dir, 'studio/bible/ideas/I-001.json'), 'utf8'));
-  const q = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
-  report('a confirmed idea is labelled dev-confirmed, goes straight to R&D, and pings the Director', c.status === 0 && idea.source === 'dev-confirmed' && /\(`rnd`\) — Idea: shape I-001/.test(q) && /\(`director`\) — Director review: New dev-confirmed idea I-001/.test(q), c.stdout + c.stderr + q);
-  run(dir, 'node harness/liaison.mjs draft --kind direction --title "Slower rain" --summary "Rain takes twice as long" --from hatch', env);
-  run(dir, 'node harness/liaison.mjs confirm B-002 --by hatch', env);
-  const q2 = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
-  report('a confirmed direction becomes a Producer task and joins the Director\'s open review', /\(`producer`\) — Plan: turn the game dev's direction into tasks: Slower rain/.test(q2) && (q2.match(/Director review/g) || []).length === 1, q2);
-}
-
 // The learning loop: the same failure on two days is flagged, with the lesson that didn't stick.
 if (inShard()) {
   const dir = copyRepo();
@@ -2618,7 +2598,7 @@ console.log(JSON.stringify({ a, b, c, d }));`);
   const ka = probe(`import { kickoff } from ${u('harness/kickoff.mjs')};
 import { toolCommand } from ${u('harness/agent.mjs')};
 import { ALLOWED, allowedTools } from ${u('harness/allowlist.mjs')};
-const k = ['builder', 'producer', 'director', 'liaison'].map((role) => kickoff({ role, agent: role + '-1', model: 'm' }));
+const k = ['builder', 'producer', 'director'].map((role) => kickoff({ role, agent: role + '-1', model: 'm' }));
 const c = toolCommand('claude', { model: 'm', prompt: 'x' });
 // P-066: the launcher passes each pattern as its own argument after --allowedTools (no quoting can split them).
 console.log(JSON.stringify({ all: k.every((t) => /You may run, without asking: \`node\`, \`npm\`/.test(t) && ALLOWED.every(([n]) => t.includes('\`' + n + '\`'))), same: c.argv.slice(c.argv.indexOf('--allowedTools') + 1, c.argv.indexOf('--allowedTools') + 1 + ALLOWED.length).join(',') === allowedTools(), n: ALLOWED.length }));`);

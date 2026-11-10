@@ -29,7 +29,7 @@ Windows, macOS, Linux or a cloud server.
 | M6 | A real start | Intake questions, Game Bible, three phases, layers kept or crossed out, R&D and storyboards; build tasks wait for a signed Bible | done (2.8.0) |
 | M7 | Director on duty | Pinged daily and before new tasks; reviews in `studio/bible/reviews/`; free drift report | done (2.8.0) |
 | M7b | Idea Board | Ideas go captured, shaped, placed, approved, then scheduled; nothing unapproved becomes build work | done (2.8.0) |
-| M8 | The game dev's seat | New or existing game; follow-up questions; a kept reference library; assets with a recorded statement of use; the Liaison's confirmed briefs to Producer and Director; labelled ideas; experiments you can keep or take back; a stronger learning loop with backups | done (2.9.0) |
+| M8 | The game dev's seat | New or existing game; follow-up questions; a kept reference library; assets with a recorded statement of use; labelled ideas; experiments you can keep or take back; a stronger learning loop with backups | done (2.9.0) |
 | M8b | Agent identity and the game's voice | Richer role cards, lessons per role, player personas for playtests, a voice and tone guide in the Bible | done (2.11.0) |
 | M8c | Verifiable results and data | SHA-256 goldens and regressions (2.10.0); signed result manifests and opt-in trajectory export (2.11.0) | done (2.11.0) |
 | M9 | Deeper skills, stricter slices | Full bug loop, `system` skill, required cross-family review, measured renderer budget | done (2.12.0) |

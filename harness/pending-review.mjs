@@ -14,7 +14,7 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 import { modelFamily } from './families.mjs';
 
 export const PENDING_FILE = path.join(REPO_ROOT, 'studio', 'pending-review.json');
-const ROLE_NAME = /^(builder|qa|qa-playtester|art|reviewer|rnd|liaison|engine-porter|producer|director|planner|watchdog)(-|\d|$)/i;
+const ROLE_NAME = /^(builder|qa|qa-playtester|art|reviewer|rnd|engine-porter|producer|director|planner|watchdog)(-|\d|$)/i;
 
 export function readPending() {
   try {

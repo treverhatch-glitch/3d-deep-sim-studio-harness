@@ -69,9 +69,9 @@ export const laneWantsCopy = (lane) => Boolean(lane) && !/^(studio|\.studio)(\/|
 
 /**
  * M2 (2.58.3, crew P-039): roles that work on the board, not the game's code, and so stay in the main checkout when
- * their task has no lane (the planning roles of harness/stall.mjs, plus the liaison and a person).
+ * their task has no lane (the planning roles of harness/stall.mjs, plus a person).
  */
-export const MAIN_CHECKOUT_ROLES = new Set([...PLANNING_ROLES, 'liaison', 'human']);
+export const MAIN_CHECKOUT_ROLES = new Set([...PLANNING_ROLES, 'human']);
 /**
  * A session on a task with no lane gets its own copy too when its role writes code (builder, rnd, art, qa-playtester,
  * reviewer, …): builders on laneless tasks left staged test files in the main checkout and blocked six other tasks'

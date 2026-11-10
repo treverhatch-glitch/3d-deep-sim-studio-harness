@@ -33,8 +33,7 @@ Start with a demo, then grow it phase by phase.
 for each phase and for every layer you kept or are exploring ("How many tiers does the tech tree
 have, and what does the first unlock solve?"). They never need a model. Add `--model` and a cheap or
 local model writes a few more from your own answers; a script drops any that repeat, run long, or
-touch a crossed-out layer. Answer any time: `npm run intake -- --followups`, or in
-conversation with the Liaison. Answers land in `BIBLE.md` under "Details".
+touch a crossed-out layer. Answer any time: `npm run intake -- --followups`, or tell the Producer. Answers land in `BIBLE.md` under "Details".
 
 **The game's voice.** One intake question (how the game talks, in a few words) and three
 follow-ups (a line for winning, a line for failing, words it must never use) make a voice guide in
@@ -122,24 +121,7 @@ Ideas never go straight to builders.
 6. **Scheduled**: the Producer makes the build tasks with `--idea I-001`; `task add` refuses an idea
    that isn't approved.
 
-## 7. The Liaison: talk to the studio any time
-
-The Liaison (role `liaison`, `npm run kickoff -- --role liaison --agent liaison-1 --tool claude`) is
-the agent the game dev talks to. It asks until it understands, sorts what it heard into an idea, a
-direction, an asset or a question, reads it back in plain words and asks "Shall I push it on?". Only
-a clear yes moves it:
-
-| Kind | Where it goes |
-| --- | --- |
-| idea | The Idea Board, labelled "dev, confirmed", straight to R&D, and the Director is pinged |
-| direction | A Producer task to turn it into work, and the Director checks it against the Bible |
-| asset | A Producer task to record it (owned or reference only) |
-| question | A Producer task to answer you |
-
-Nothing running stops. Commands: `npm run liaison -- draft | change | confirm | drop | list`.
-Ideas on the board carry where they came from: dev confirmed, dev pitched, agent, playtest.
-
-## 8. References: keep what you design from
+## 7. References: keep what you design from
 
 ```bash
 npm run ref -- add <link or file> --game "A Short Hike" --feature "climbing stamina" --at 0:42 --take "…" --avoid "…"
@@ -154,7 +136,7 @@ A link to a web page (a YouTube video, a store page) is kept as a link with its 
 clip with the site's own download or offline feature, or record it yourself, and `attach` it. Check a
 source's terms before downloading from it. References are never shipped.
 
-## 9. Your own assets
+## 8. Your own assets
 
 ```bash
 npm run asset -- add boat.glb --use game --owner "Hatch" --licence "own work" --by hatch
@@ -168,7 +150,7 @@ proper terms from a lawyer. **Reference only:** it goes to the reference library
 `assets` gate fails when a file in `assets/` has no record or changed since, or when game code points
 at the reference library.
 
-## 10. Experiments: try it, keep it, or take it back out
+## 9. Experiments: try it, keep it, or take it back out
 
 ```bash
 npm run experiment -- start "Glowing moss at night"     # X-001

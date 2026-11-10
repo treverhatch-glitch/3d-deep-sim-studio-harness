@@ -155,24 +155,6 @@ function kickoffText({ role, agent, model = 'unknown' }) {
   const roleFile = `studio/roles/${role}.md`;
   const hasRole = fs.existsSync(path.join(REPO_ROOT, roleFile));
   const env = `export STUDIO_LOCK_OWNER=${agent} STUDIO_AGENT_MODEL=${model}`;
-  if (role === 'liaison') {
-    return `You are ${agent}, the Liaison of a game studio that runs on this repo: the agent the game dev talks to. You run on ${model}.
-
-Set up once in your shell: \`${env}\`
-
-Read \`${roleFile}\`, \`studio/skills/liaison.md\`, \`studio/bible/BIBLE.md\` and \`studio/bible/NOT-DOING.md\`, and run \`npm run handoff\` once. Don't scan the repo.
-
-${allowedNote()}
-
-Then talk with the game dev. For each thing they bring:
-1. Ask short questions until you understand it well enough to explain it to a builder.
-2. \`npm run liaison -- draft --kind idea|direction|asset|question --title "…" --summary "…" --from <their name>\`.
-3. Read back what it prints and ask "Shall I push it on?". Corrections: \`liaison -- change\`. Changed their mind: \`liaison -- drop\`.
-4. Only on a clear yes: \`npm run liaison -- confirm <B-id> --by <their name> --quote "<their words>"\`. It goes to the Producer and the Director; the studio keeps running.
-
-Never: confirm on a maybe, promise it will be built, assign work, or edit the game.
-`;
-  }
   // 2.79 (t): the game tester (harness/tester.mjs starts it through the launcher for a run, never by hand).
   if (role === 'qa-playtester') {
     return `You are ${agent}, the game tester of a game studio that runs on this repo. You run on ${model}.
