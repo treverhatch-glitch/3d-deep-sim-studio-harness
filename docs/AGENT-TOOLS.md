@@ -296,6 +296,9 @@ npm run agent -- start --role builder --agent nim-1 --tool nim --model <nim mode
   An owner tool that runs aider gets the edit brief as `{kickoff}` and the launcher's aider options as `{aiderArgs}`.
   Other roles, a task-less session, and the shared checkout (no lane copy) start aider as before.
   `STUDIO_AIDER_PROTOCOL=off` brings back the 2.79.1 launch.
+  The launcher's claim step (`task start` in the copy) waits `STUDIO_AIDER_CLAIM_TIMEOUT_MS` (default 480000, 8 min; was 120000). When it
+  times out or fails after the claim was recorded, the launcher hands the claim back (`task.paused`, the note says "claim step timed out after N s"
+  or the failure), so no task stays claimed with no agent.
 
 ## One key per agent or role (`STUDIO_KEYMAP_…`, 2.59.0)
 
@@ -310,7 +313,7 @@ STUDIO_KEYMAP_AGENT_BUILDER_S3=ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_S3   # builde
 - Format: `TARGET:SOURCE[,TARGET:SOURCE]`; the agent's name in capitals with `-` as `_`. For the same TARGET the agent's
   mapping wins over the role's. Only that child's environment changes; the `STUDIO_KEYMAP_` settings aren't passed on.
 - Both names must be key names: capitals ending in `_API_KEY` or `_TOKEN`, with an optional suffix (`_LANE`, `_2`).
-  Never `STUDIO_…`, `HUB_…` (`HUB_TOKEN` writes to the War Room) or the owner key. Anything else is refused, and the
+  Never `STUDIO_…`, `HUB_…` (a 2.79 `.env` may still hold `HUB_TOKEN`) or the owner key. Anything else is refused, and the
   launch goes on without that entry.
 - A SOURCE that isn't set leaves TARGET unset for that session (the agent doesn't quietly fall back to the shared key).
   With `--tool nim`, a mapping for `OPENAI_API_KEY` also sets `AIDER_OPENAI_API_KEY`.
@@ -332,6 +335,12 @@ A name with no `STUDIO_KEYMAP_AGENT_<NAME>` entry would bill the plan, so it is 
 pool starts builders; their lanes still go to the train. The spend guard and the daily token cap apply to the pool as to
 any session. `npm run agent -- start --pool api [--task T-12]` starts one pool builder by hand, whatever the budget. A
 tool that is out of quota through a provider limit (a 429 mark) still holds every session on that tool, pool or not.
+
+`STUDIO_BUILDER_ORDER` (2.80; unset: the choice above, unchanged) is the owner's order for filling a builder slot, e.g.
+`STUDIO_BUILDER_ORDER=api,vertex,plan`: `api` (a free `STUDIO_API_POOL` name), `vertex` (Vertex, below: its budget cut,
+prompt and failure rules and `STUDIO_VERTEX_SHARE=0` still apply; its share cap applies only when `vertex` comes after
+`plan`) and `plan` (the plan's tool, not while the plan's budget is high). The supervisor takes the first kind that can
+start now and skips the others (pool names all running, Vertex cut or off, the plan high); a kind left out is never used.
 
 ## Vertex AI as a builder (`--tool vertex`, 2.79.1)
 

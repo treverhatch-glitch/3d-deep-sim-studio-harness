@@ -4,7 +4,7 @@
  *
  *   npm run agent -- start --role builder --agent builder-1 --tool claude|codex|agy|cursor|grok|aider|nim|custom --model <model> [--force-model]
  *                       [--fallback codex:gpt-6-sol,claude:claude-sonnet-5-5] [--task T-012] [--lane <folder>] [--one-task] [--detach]
- *   npm run agent -- now "<what I'm doing>"   an agent's one-line status, shown with its heartbeat in the War Room
+ *   npm run agent -- now "<what I'm doing>"   an agent's one-line status, sent with its heartbeat (event log)
  *   npm run agent -- hire --role <role> [--division sound] [--task T-012 | --next] [--lane <folder>] [--note "…"]
  *                        [--loop until-empty|N] [--by <producer or person>] [--open] [--foreground]   the same as start, as a hire
  *                        (in the background unless --foreground):
@@ -1078,7 +1078,7 @@ export function sessionPromptParts({ role, agent, model, task = null, lane = nul
     // and the rules this game has learned the hard way.
     // 2.29: a lookup, not a read-first step (Jed's A/B: reading a map, then line ranges, added turns and cost 27% more).
     + `\nTo find a function, constant or TUNING key, run \`npm run map -- find <name>\`: one call gives the file, the line range and the arguments, so you read only those lines. .studio/MAP.md lists every code file in one line if you need the lay of the land. Every turn re-reads your whole conversation, so fewer, bigger steps cost less than many small ones. Never read CHANGELOG.md; studio/llms.txt lists every command. If you hand work back, keep the note under 20 lines: done, not done, files touched, next step, proof.\n`
-    + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". The War Room shows it with your work in progress.\n`
+    + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". It goes out with your heartbeat and work in progress.\n`
     + `\nHarness output is compact in launched sessions: verify prints failures only (each gate's full log is in .studio/gates/out/<gate>.log; open it only when you need it), and \`node harness/task.mjs list\` shows your role's next tasks, not the whole board (--all for everything). Don't cat studio/NEXT.md.\n`
     + `\nSkills load on demand: .claude/skills/ holds the know-how for Godot, the web build, assets and tests. Claude Code shows you only their names until a task needs one; other tools: open the skill's SKILL.md when your task matches its description.\n`
     // PU-36 (P-049): studio/PITFALLS.md is written by agents and people: last, in the marked block, never among the rules.
@@ -1432,7 +1432,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     // 2.79.2 (a): the claim, as a builder's own task start does it (in its copy), only once nothing else can stop the start.
     if (driven.on) {
       const c = claimTask({ agent, task, model, cwd, env });
-      if (!c.ok) throw new Error(`${task} could not be claimed for aider (task start refused): ${c.out}`);
+      if (!c.ok) {
+        // The start may have recorded the claim before it hung or failed (a kill left tasks claimed with no agent): hand it back, only if it is this agent's.
+        if (listLocks().some((l) => l.key === `task:${task}` && l.owner === agent)) { try { pauseTask(task, agent, `${agent}: ${c.out}; the launcher released the claim.`, { force: true }); } catch { /* the launch error below still says it */ } }
+        throw new Error(`${task} could not be claimed for aider (task start refused): ${c.out}`);
+      }
       fs.writeSync(out, `[launcher] aider protocol: claimed ${task} for ${agent} (task start in its copy)\n`);
       let briefText = '';
       try { briefText = fs.readFileSync(path.join(STUDIO_STATE_DIR, 'briefs', `${task}.md`), 'utf8'); } catch {}
@@ -2016,7 +2020,7 @@ export function wipSummary(agent) {
   return rows.length ? `${rows.length} file${rows.length === 1 ? '' : 's'} changed +${add}/−${del}${paths.length ? '' : ' (whole tree)'} (${top.join(', ')})${verify}` : `no uncommitted changes${verify}`;
 }
 
-/** An agent says what it is doing now; the War Room shows it next to its heartbeat. */
+/** An agent says what it is doing now; its heartbeat event carries it. */
 export function sayNow(agent, text) {
   const t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 160);
   if (!agent || !t) return { ok: false, message: 'npm run agent -- now "<what you are doing>" (with STUDIO_LOCK_OWNER set)' };
@@ -2312,6 +2316,13 @@ export function startAgent(opts, { detach = false } = {}) {
   if (tool === 'agy' && !opts.model && !opts.orderModel) model = String(process.env.STUDIO_TOOL_AGY_MODEL || '').trim() || AGY_DEFAULT_MODEL;
   // 2.30q (#7): the budget stop is checked after the takeover picked a tool; with every tool out, nothing starts.
   { const st = launchStop({ role, tool, model, agent, task: opts.task || null }); if (st) return { ok: false, skipped: true, message: `Not started: budget stop (${st.why}).` }; }
+  // 2.80 (d, A2): a builder on aider with no task skipped the 2.79.2 protocol (claim, lane files) and aider's repo map sent
+  // 441k-token prompts: refuse before anything is spent.
+  if (role === 'builder' && !opts.task && process.env.STUDIO_REHEARSAL !== '1') {
+    const via = tool === 'vertex' ? null : toolCmd(tool); const rg = via ? registeredTool(tool) : null;
+    if (aiderDriven({ tool, custom: via || (tool === 'vertex' ? null : process.env[`STUDIO_${roleKey(role)}_CMD`]) || null, regCommand: rg && via === rg.command ? rg.command : null, role, task: 'T', copy: {} }).on)
+      return { ok: false, skipped: true, message: `Not started: ${agent} is a builder on ${tool} (aider) with no task, and aider needs its task claimed by the launcher: pass --task <ID>.` };
+  }
   // 2.30o: profile check before launch: a planning role never shares a builder's profile; per-profile limits.
   {
     const profile = profileOf(role, toolCmd(tool) || process.env[`STUDIO_${roleKey(role)}_CMD`] || (tool === 'custom' ? process.env.STUDIO_AGENT_CMD : ''));
@@ -2422,7 +2433,7 @@ export function startAgent(opts, { detach = false } = {}) {
   }
   if (opts.next && !opts.task) opts = { ...opts, task: nextFor({ role }, parseNextQueue()).task?.id || null };
   if (detach) {
-    // A supervisor process of its own, so the agent outlives this command (the HUB and the watcher use this).
+    // A supervisor process of its own, so the agent outlives this command (the supervisor and the watcher use this).
     const args = [fileURLToPath(import.meta.url), 'start', '--attach', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : []), ...(opts.forceModel || (tool === 'agy' && !isGeminiModel(model)) ? ['--force-model'] : [])];
     // 2.77.0 (n, B-92): the launcher is not the pinned session that may have started it (its agent gets its own pin).
     const sup = spawn(process.execPath, args, { windowsHide: true, cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: { ...process.env, STUDIO_TASK_PIN: '' } });
@@ -2463,7 +2474,7 @@ export async function fillAgents({ byDirector = false, autonomous = false } = {}
     }
     return { started: [], why: `${mode.label} doesn't start agents on its own` };
   }
-  // 2.58.0 (crew report): starting agents from the watcher, the HUB's loops and the Director's flow is opt-in, one
+  // 2.58.0 (crew report): starting agents from the watcher, the supervisor's passes and the Director's flow is opt-in, one
   // switch off by default (npm run mode -- autostart on --by <name>); away mode and MAX SPEED don't override it.
   if (!mode.autostart) return { started: [], autostartOff: true, why: AUTOSTART_OFF };
   if (readStop()) return { started: [], why: 'the studio is stopped' };
@@ -2479,27 +2490,28 @@ export async function fillAgents({ byDirector = false, autonomous = false } = {}
 }
 
 /**
- * A person did something in the War Room that an agent should act on now (a pitch, a message, a
- * confirmed brief, a design to change). Start that role's agent if none is running and the caps
+ * Something happened that an agent should act on now (a milestone closed, the queue ran low). Start that role's agent if none is running and the caps
  * allow it, even in paces that don't start agents on their own: a person asked. Returns `next`,
  * one plain sentence saying what happens now.
- * 2.58.0: `auto: true` is a wake-up nobody asked for (the HUB's game-dev loop, the queue refill, the development
+ * 2.58.0: `auto: true` is a wake-up nobody asked for (the game-dev loop, the queue refill, the development
  * cycle): it starts nothing while auto-start is off (npm run mode -- autostart on --by <name>).
  */
 export function wake(role, { task = null, why = '', auto = false } = {}) {
   const label = { rnd: 'R&D', producer: 'the Producer', director: 'the Director', art: 'the art department', builder: 'a builder', liaison: 'the Liaison' }[role] || role;
+  // 2.80: every wake comes from the supervisor's passes (the War Room, whose clicks woke agents too, is gone).
+  const from = 'supervisor';
   const busy = sessions().find((s) => s.role === role && s.running);
   if (busy) return { started: false, next: `${label} (${busy.agent}) is running and picks ${task || 'it'} up from the queue${busy.task ? ` after ${busy.task}` : ''}.` };
   if (auto && !effectiveMode().autostart) return { started: false, autostartOff: true, next: `${task ? `Queued as ${task} for ${label}. ` : ''}${label} wasn't started: ${AUTOSTART_OFF}.` };
   if (!launchableRoles([role]).length) {
     const msg = `No tool is set to start ${label}: set STUDIO_AGENT_TOOL (or STUDIO_${roleKey(role)}_TOOL) in .env, or start it in Ops`;
     const lastAlert = readRecentEvents(2000).filter((e) => e.type === 'agent.no_tool' && e.msg === msg).pop();
-    if (!lastAlert || Date.now() - Date.parse(lastAlert.ts) > 3600000) emitEvent({ type: 'agent.no_tool', agent: 'war-room', to: 'human', status: 'warn', msg });
+    if (!lastAlert || Date.now() - Date.parse(lastAlert.ts) > 3600000) emitEvent({ type: 'agent.no_tool', agent: from, to: 'human', status: 'warn', msg });
     return { started: false, next: `${task ? `Queued as ${task} for ${label}. ` : `Saved for ${label}. `}No tool is set to start ${label} on its own (STUDIO_AGENT_TOOL or STUDIO_${roleKey(role)}_TOOL in .env), so it waits until someone starts that agent (Start agent in Ops, or npm run agent).` };
   }
   const r = startAgent({ role, agent: nextAgentName(role), task }, { detach: true });
   if (!r.ok) return { started: false, next: `${task ? `Queued as ${task}. ` : ''}${label} didn't start: ${r.message.replace(/^Not started: /, '')} It starts when a slot frees.` };
-  emitEvent({ type: 'agent.wake', agent: 'war-room', to: role, task, msg: `Started ${r.agent} (${label})${why ? ` for ${why}` : ''}` });
+  emitEvent({ type: 'agent.wake', agent: from, to: role, task, msg: `Started ${r.agent} (${label})${why ? ` for ${why}` : ''}` });
   return { started: true, agent: r.agent, next: `${label} is starting now as ${r.agent} (${r.tool}${r.model !== 'unknown' ? `, ${r.model}` : ''})${task ? ` on ${task}` : ''}. Watch it in Ops.` };
 }
 
@@ -2629,5 +2641,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (others.list.length) console.log('  Agents outside the launcher keep no heartbeat and don\'t see Stop all until they next run a harness command. Prefer npm run agent -- hire.');
   const mode = effectiveMode();
   console.log(`\nMode: ${mode.label}${mode.boost ? ' + MAX SPEED' : ''}, up to ${mode.maxAgents} agents. Roles that can start on their own: ${launchableRoles().join(', ') || 'none (set STUDIO_AGENT_TOOL or STUDIO_<ROLE>_TOOL in .env)'}.`);
-  console.log(mode.autostart ? 'Auto-start is on: the watcher and the HUB may start agents on their own (npm run mode -- autostart off --by <name>).' : `Auto-start is off: ${AUTOSTART_OFF.replace(/^auto-start is off, so /, '')}.`);
+  console.log(mode.autostart ? 'Auto-start is on: the watcher and the supervisor may start agents on their own (npm run mode -- autostart off --by <name>).' : `Auto-start is off: ${AUTOSTART_OFF.replace(/^auto-start is off, so /, '')}.`);
 }

@@ -681,7 +681,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     }
   }
 
-  const check = checkDone(target);
+  const check = checkDone(target, undefined, { noop: noop && String(noop).trim().length >= 10 });
   // 2.78.1 (f, M7): warnings that don't block (a playtest report that played the template, not the studio's game).
   for (const w of check.warnings || []) {
     console.warn(`[done] WARN ${w}`);

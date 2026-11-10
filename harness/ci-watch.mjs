@@ -105,7 +105,7 @@ export function watchCi({ sha, timeoutMin = 60, pollSec = 30 } = {}) {
   const red = rec.state === 'red' || rec.state === 'timed out';
   const ev = emitEvent({ type: red ? 'ci.failed' : 'ci.green', agent: 'ci-watch', to: 'producer', status: red ? 'error' : 'ok', msg: rec.summary, meta: { sha, failing } });
   // 2.64.0: pass-through (harness/threads.mjs). The result goes to the task whose lane or landing made this commit, or
-  // to the Producer; in shadow mode (the default) it is only logged as thread.would_route. Never blocks the watch.
+  // to the Producer; with threads off (the default) nothing is routed. Never blocks the watch.
   try { rec.routed = routeNow(ev); save(); } catch {}
   if (red && process.env.STUDIO_CI_NOTIFY_CMD) {
     const n = spawnSync(process.env.STUDIO_CI_NOTIFY_CMD, { windowsHide: true, cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: 30000, env: { ...process.env, CI_SHA: sha, CI_STATE: rec.state, CI_SUMMARY: rec.summary } });

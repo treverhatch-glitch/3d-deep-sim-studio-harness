@@ -48,7 +48,7 @@ run because …", with a `line.plan_blocked` event when the reasons change), and
    names and its predicted files, as the Producer's decision (logged); a task it can't scope is reported `unscoped`
    in the status and the Producer note. A task on shared sim code (`STUDIO_SHARED_SIM`) waits (`--after`) for the open
    task on the same shared files instead of running beside it ("Stacked on shared sim code" in `npm run line -- plan`).
-7. **Status** for the Communicator and the War Room's Producer office: `.studio/line/status.json` (`npm run line --
+7. **Status** for the Communicator and studio:status: `.studio/line/status.json` (`npm run line --
    status`).
 
 ## Beta mode and the owner

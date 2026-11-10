@@ -6,6 +6,7 @@
  *   npm run ask -- answer A-001 "<option or words>" --by <name>
  *   npm run ask -- reverse A-001 "<option or words>" --by <name>   undo a decision made without you
  *   npm run ask -- list [--open]
+ *   npm run ask -- show A-001 | help
  *
  * A question shows under "Needs you" in every War Room view and in the Game plan, where the game dev
  * answers with one click. If nobody answers by the deadline, the default is applied: it is logged as
@@ -224,6 +225,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(d.length ? `Decided by default: ${d.join(', ')}` : 'Nothing past its deadline.');
     process.exit(0);
   }
+  // 2.80 (d, A10): `show <id>` and `help` are read-only; a lone lowercase word is a mistyped subcommand, not a question.
+  const usage = 'Usage: npm run ask -- "<question>" --options "a,b" --default a --timeout 4h [--why "…"] | show <id> | list [--open] | answer <id> "<answer>" --by <name> | reverse <id> "<answer>" --by <name> | expire | help';
+  if (argv.includes('--help') || argv.includes('-h') || pos[0] === 'help') { console.log(usage); process.exit(0); }
+  if (pos[0] === 'show') {
+    const a = allAsks().find((x) => x.id === String(pos[1] || '').toUpperCase());
+    if (!a) { console.error(`No question ${pos[1] || ''}. ${usage}`); process.exit(1); }
+    console.log(JSON.stringify(a, null, 2));
+    process.exit(0);
+  }
+  if (pos.length === 1 && /^[a-z][a-z-]*$/.test(pos[0]) && pos[0] !== 'list') { console.error(`"${pos[0]}" is not a subcommand, and one word is not a question. ${usage}`); process.exit(1); }
   if (pos[0] === 'list' || !pos.length) {
     const list = argv.includes('--open') ? openAsks() : allAsks();
     console.log(list.length ? list.map((a) => `${a.id} [${a.status}] ${a.question}${a.options.length ? ` (${a.options.join(' / ')})` : ''}${a.status === 'open' && a.deadline ? `; default "${a.default}" at ${a.deadline.slice(0, 16)}` : ''}${a.answer ? ` -> ${a.answer}` : ''}`).join('\n') : 'No questions yet.');

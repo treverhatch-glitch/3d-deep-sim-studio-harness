@@ -30,10 +30,10 @@ art agent makes a file ──propose──▶ assets/staging/<pack>/   #4 "Yello
   reference library, never shipped) or "Use this in the game" (the dev's own model or art: recorded as
   theirs in `assets/own/`). Both are listed in `studio/art/references.json` for the art department.
 
-## The Asset studio (War Room view 4)
+## The Asset studio
 
-Waiting for you · In the works · Approved · References, each card with its picture (3D files spin in
-a viewer), number, round, maker, licence, the dev's last words and earlier rounds. Or from a terminal:
+Waiting for you · In the works · Approved · References: every asset with its number, round, maker, licence, the
+dev's last words and earlier rounds (2.80: from the terminal; the War Room's view is gone):
 
 ```bash
 npm run art                                   # every asset, its round and status

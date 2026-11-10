@@ -282,7 +282,7 @@ const tail = c.argv.slice(i + 1);
 const list = tail.slice(0, tail.findIndex((a) => a.startsWith('--')));
 const p = { agy: toolCommand('agy', { model: 'm', prompt: 'P R' }), cursor: toolCommand('cursor', { model: 'm', prompt: 'P R' }), grok: toolCommand('grok', { model: 'm', prompt: 'P R' }) };
 console.log(JSON.stringify({ list, want: ALLOWED.map(([, q]) => 'Bash(' + q + ')'), stdin: c.stdin, bypass: c.argv.includes('--dangerously-skip-permissions'), at: Object.fromEntries(Object.entries(p).map(([k, v]) => [k, v.promptAt === undefined ? 'stdin:' + v.stdin : v.argv[v.promptAt]])) }));`);
-    report('P-066: toolCommand gives Claude Code each allowed-tools pattern as its own argument (no permission bypass), its prompt on stdin, and says where cursor\'s and grok\'s one-argument prompt is (agy\'s goes on stdin since 2.58.5, H-2)', same(t.list, t.want) && t.list?.length === 15 && t.stdin === 'x' && t.bypass === false && t.at?.agy === 'stdin:P R' && t.at?.cursor === 'P R' && t.at?.grok === 'P R', JSON.stringify(t).slice(0, 1500));
+    report('P-066: toolCommand gives Claude Code each allowed-tools pattern as its own argument (no permission bypass), its prompt on stdin, and says where cursor\'s and grok\'s one-argument prompt is (agy\'s goes on stdin since 2.58.5, H-2)', same(t.list, t.want) && t.list?.length === 16 && t.stdin === 'x' && t.bypass === false && t.at?.agy === 'stdin:P R' && t.at?.cursor === 'P R' && t.at?.grok === 'P R', JSON.stringify(t).slice(0, 1500));
   }
 
   // ---------- end to end: `agent start` with stand-in programs first on PATH ----------
@@ -359,7 +359,7 @@ console.log(JSON.stringify({ want: ALLOWED.map(([, q]) => 'Bash(' + q + ')') }))
     const tail = i >= 0 ? g.argv.slice(i + 1) : [];
     const list = tail.slice(0, Math.max(0, tail.findIndex((a) => a.startsWith('--'))));
     report('P-066 (crew P-036) end to end: `agent start --tool claude` with claude first on PATH (an npm .cmd shim on Windows): every allowed-tools pattern arrives as its own argument with its spaces and parentheses intact ("Bash(git log *)"), no permission bypass, and the prompt with the note arrives on stdin unchanged',
-      allowed.length === 15 && same(list, allowed) && list.includes('Bash(git log *)') && !g.argv.includes('--dangerously-skip-permissions') && g.argv[0] === '-p' && g.stdin.includes(NOTE),
+      allowed.length === 16 && same(list, allowed) && list.includes('Bash(git log *)') && !g.argv.includes('--dangerously-skip-permissions') && g.argv[0] === '-p' && g.stdin.includes(NOTE),
       `${JSON.stringify(g?.argv || null)}\n${out(s).slice(-800)}\n${logOf(dir, 'h259-claude').slice(-800)}`);
   }
   {

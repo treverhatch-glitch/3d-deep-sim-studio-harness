@@ -309,7 +309,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(1);
     }
   } else if (cmd === 'loop') {
-    // 2.30o: the game-dev loop without the hub (the hub runs it itself every STUDIO_GAMEDEV_INTERVAL s).
+    // 2.30o: the game-dev loop without the supervisor (2.80: the supervisor runs it every STUDIO_GAMEDEV_INTERVAL s).
     const every = Number(argv[1] || 180);
     const once = async () => {
       const r = await watchdogPass();

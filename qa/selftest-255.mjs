@@ -1,9 +1,8 @@
 /**
- * qa/selftest-255.mjs — 2.55.0: fixes from the crew's own logs (P-028, P-030, P-031, P-032), approved by the owner.
+ * qa/selftest-255.mjs — 2.55.0: fixes from the crew's own logs (P-028, P-030, P-032), approved by the owner.
  *   P-028: a launcher session that ended before a claim was made never hands that claim back or frees it (a chat
  *          bot claiming under the same name later keeps its task); a claim made during the session still goes back.
  *   P-030: `onboard --sync --dry-run` lists what would come in and writes nothing.
- *   P-031: hub:build's type check doesn't rely on the shell expanding *.tsx (cmd and PowerShell don't).
  *   P-032: with no pace chosen, nothing starts on its own (the Director included); the dev gets a note once an hour.
  */
 import fs from 'node:fs';
@@ -71,13 +70,6 @@ console.log(JSON.stringify({ freed, left: listLocks().map((x) => x.key + ' ' + x
   report('2.55.0 (P-030): onboard --sync --dry-run lists the commits and files it would bring in and writes nothing (no patch, no ORIGIN.json change, no commit); without --dry-run it syncs',
     dry.status === 0 && /dry run: --sync would bring in 1 commit\(s\) \(1 file\(s\)\)/.test(out(dry)) && /upstream work/.test(out(dry)) && /file: src\/boats\.ts/.test(out(dry)) && after.head === head && after.origin === originBefore && /boats = 1;/.test(after.boats) && after.dirty === '' && real.status === 0 && /synced 1 commit/.test(out(real)) && /boats = 4/.test(fs.readFileSync(path.join(dir, 'game/pier/src/boats.ts'), 'utf8')),
     `${out(dry)}\n---\n${JSON.stringify(after)}\n---\n${out(real)}`);
-
-  // P-031: hub:build's type check without a shell glob.
-  const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
-  let tsc = null;
-  try { tsc = JSON.parse(fs.readFileSync(path.join(dir, 'hub', 'tsconfig.check.json'), 'utf8')); } catch {}
-  report('2.55.0 (P-031): hub:build type-checks through hub/tsconfig.check.json (TypeScript expands *.tsx itself), not a shell glob Windows doesn\'t expand',
-    /tsc -p tsconfig\.check\.json/.test(pkg.scripts['hub:build'] || '') && !/\*\.tsx/.test(pkg.scripts['hub:build'] || '') && JSON.stringify(tsc?.include) === '["*.tsx"]' && tsc?.compilerOptions?.noEmit === true && tsc?.compilerOptions?.jsx === 'react-jsx', `${pkg.scripts['hub:build']}\n${JSON.stringify(tsc)}`);
 
   // P-032: no pace chosen, nothing starts on its own; one note an hour.
   const pace = probe('pace', `import fs from 'node:fs';

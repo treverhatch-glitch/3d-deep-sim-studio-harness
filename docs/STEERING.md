@@ -8,8 +8,7 @@ let the dev overrule a gate. Counts are tokens, turns and tasks; no money figure
 - **Canary tasks** (PU-58): `npm run task -- add "<title>" --role builder --canary "<why it is impossible>" --agent producer` (Producer, Director, planner or a person) adds a task that is impossible on purpose, to see whether a model takes the honest exit (`npm run task -- impossible <ID> --why …`) or bends a check. The flag and its why are kept in `.studio/canaries.json`, never in the brief, NEXT.md or the task.added event; builders are not told. When it ends, `canary.outcome` records `honest` (the exit), `cheated` (task done passed: a P1 ask, "a canary task was closed as done: probable check-bending") or `handed-back`, with a count per model in that file.
 - After turning feedback into tasks, the Producer shows one card: `npm run intent -- echo --asked "add sprint/jump" --wont "stamina, camera" --tasks T-160 --by producer-1`. The War Room shows "You asked for: X. I will NOT change: Y." under **Your call**; one click ("That's right") confirms it. `npm run intent -- list` shows them.
 - An **agent-proposed mechanic** (a phrase like "add a grapple", "new stamina system"; never a lone word) waits for the dev's yes: the "Yes, build it" button, or `npm run task -- yes <ID> --by <dev>`. Other agent work starts at once. 2.76.0: the tasks waiting on a yes are named in
-`npm run studio:status` (after the last pass: "waiting on yes: N (T-…)"), in `npm run status -- --brief` (Blockers) and
-in the War Room's Needs a person; in beta mode the line says who beta mode lets give the yes.
+`npm run studio:status` (after the last pass: "waiting on yes: N (T-…)"), in `npm run status -- --brief` (Blockers); in beta mode the line says who beta mode lets give the yes.
 - Only a person says yes. From inside an agent it is a relay and needs the dev's own words and where they said them (`--quote "…" --source "…"`).
 
 ## "Do it now" (J3)
@@ -23,14 +22,13 @@ skipped phase) is written to the event log as the risk (`bible.phase_override`).
 - Scope checks against crossed-out layers match phrases, not single words: "fix the licence text" and "warm mood lighting" pass, "add a licence system" and "crew mood meter" are caught.
 
 ## Plain status and owned waits (J10)
-The Ops view opens with one line: **Building now**, **Waiting on you** (what, not just how many), **Tokens today** with
+`npm run studio:status` and the brief status say in one line: **Building now**, **Waiting on you** (what, not just how many), **Tokens today** with
 the models named. Every waiting task says who it waits on and why ("waiting on the dev: …", "waiting on builder-2: waits for T-12").
 
 ## Quota stops (J12)
 A tool is marked out of quota only on the provider's own limit message: the launcher skips the agent's transcript
 (a session killed while reading a test that quoted "usage limit reached" no longer counts), the probe and the
-reviewer read the failed command's error output, not the answer text, and the War Room's "out of quota" badge
-uses the same test. A stop records the counted tokens of the last 5 h and the model (`npm run budget`).
+reviewer read the failed command's error output, not the answer text, and `npm run budget` uses the same test. A stop records the counted tokens of the last 5 h and the model (`npm run budget`).
 
 ## The Arcade (J8)
 The newest build that passed the browser check plays at once. Below it: what changed (the tasks finished between
@@ -44,6 +42,5 @@ pass then hands off a session whose refresh check went unanswered for 15 min, pa
 `STUDIO_WATCHDOG_HANDBACKS`, `STUDIO_WATCHDOG_IDLE_HOURS` change them. Everything it does is an event by "watchdog".
 
 ## HUD noise (J13) and optional plugins
-- Serena starts with `--open-web-dashboard false`, so its dashboard never opens over the War Room (it still runs on localhost:24282).
-- Nobody sits at a desk in a locked room in the Studio view.
+- Serena starts with `--open-web-dashboard false`, so its dashboard never opens a browser tab (it still runs on localhost:24282).
 - `studio/plugins.json` lists **godot-mcp** (run the Godot project and read its output) and **ccusage** (Claude Code's own usage log), both off. With ccusage on, `npm run budget -- ccusage` copies its daily totals (tokens per model, cache reads apart) into `.studio/ccusage.json`, shown in the Budget meter beside the harness's count.

@@ -1,7 +1,7 @@
 # The Game Bible, phases, layers, the Director and the Idea Board
 
 How a game starts in this studio, and how it stays the game it set out to be. Every piece is a
-file (`studio/bible/`) and a HUB endpoint, so a friendlier front end can drive the same flow later.
+file (`studio/bible/`) and a CLI, so a friendlier front end can drive the same flow later.
 
 ## 1. Intake: what is this game?
 
@@ -33,7 +33,7 @@ Start with a demo, then grow it phase by phase.
 for each phase and for every layer you kept or are exploring ("How many tiers does the tech tree
 have, and what does the first unlock solve?"). They never need a model. Add `--model` and a cheap or
 local model writes a few more from your own answers; a script drops any that repeat, run long, or
-touch a crossed-out layer. Answer any time: `npm run intake -- --followups`, the Game plan view, or in
+touch a crossed-out layer. Answer any time: `npm run intake -- --followups`, or in
 conversation with the Liaison. Answers land in `BIBLE.md` under "Details".
 
 **The game's voice.** One intake question (how the game talks, in a few words) and three
@@ -81,7 +81,7 @@ it is so the studio builds what the game needs and nothing else.
 
 Intake queues, once: a reference study, a storyboard of all three phases, an R&D study per
 "explore" layer, and a sign-off task for the person. Until a person signs
-(`npm run bible -- sign --by <name>`, or the War Room), build tasks wait. Allowed meanwhile:
+(`npm run bible -- sign --by <name>`), build tasks wait. Allowed meanwhile:
 studies, docs, throwaway prototypes (`--prototype`) and tooling that isn't game content (`--infra`).
 
 After signing, every build task needs `--phase` and `--serves pillar:<name>` or
@@ -91,7 +91,7 @@ After signing, every build task needs `--phase` and `--serves pillar:<name>` or
 
 The Director (role `director`) guards the Bible; the Producer still creates and assigns every task.
 
-- **Pinged** daily by the HUB, by the Producer before it generates tasks
+- **Pinged** daily by the supervisor, by the Producer before it generates tasks
   (`npm run director -- ping --reason "…"`; `task add` warns if it hasn't), when an idea is placed,
   and on phase changes.
 - **A ping** queues one `Director review` task (later pings add their reason to it), writes
@@ -109,7 +109,7 @@ The Director (role `director`) guards the Bible; the Producer still creates and 
 
 Ideas never go straight to builders.
 
-1. **Captured**: anyone pitches one (`npm run idea -- add "…"`, or the War Room's Game plan view).
+1. **Captured**: anyone pitches one (`npm run idea -- add "…"`).
 2. The watcher's regular pass gives the Producer one "Ideas: N new" task. The Producer routes each to
    R&D: `npm run idea -- route I-001`.
 3. **Shaped**: R&D works it out (what the player does, phase, layer, cost, conflicts):
@@ -184,24 +184,3 @@ on top. Dropping adds commits that undo it, which is safe while other agents sha
 part that later work changed is refused rather than guessed. Inside the game, keep a prototype behind
 a switch in TUNING (`experiments: { X001: true }`). Commits made with `--no-verify` skip the hook and
 aren't tagged.
-
-## 11. In the War Room
-
-The **Game plan** view shows the three phases side by side with the layers that enter each, the
-crossed-out layers, approved ideas pinned where they land, the Idea Board with source labels and
-"new" marks, follow-up questions to answer, experiments and the reference library, a box to pitch an
-idea, and the Director's latest verdict with the drift report. It reads files only (no AI). The Ops
-view has a box to message the Producer; messages land in `studio/producer/INBOX.md` and its briefing.
-
-## HUB endpoints (for a future front end)
-
-| Endpoint | What |
-| --- | --- |
-| `GET /api/bible` | The Bible, its check, suggestions, drift, the latest review, ideas, and the question and layer catalogs |
-| `POST /api/intake` | Apply answers (`{ answers, layers }`), the same shape as `--answers` |
-| `POST /api/bible/sign` | A person signs (`{ by }`) |
-| `GET /api/ideas`, `POST /api/ideas` | List ideas; pitch one (`{ title, detail, by }`) |
-| `POST /api/inbox` | Message the Producer (`{ msg, by }`) |
-| `POST /api/followups` | Answer follow-up questions (`{ answers: { "<key>": "…" }, by }`) |
-
-Writes need the HUB token header, like every other write.

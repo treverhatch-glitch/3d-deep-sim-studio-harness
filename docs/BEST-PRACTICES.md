@@ -43,7 +43,7 @@ standing with GitHub and model providers, and they keep a many-agent team fast a
 - **Write lessons down.** After a fix, add a replay to `qa/regressions/` and four lines to
   `studio/memory/failures.md`, so every model learns it next session.
 - **Say which model is working.** Set `STUDIO_AGENT_MODEL` (or `task start --model`) once per
-  agent; every event carries it, and both War Room views show it at the agent's desk.
+  agent; every event carries it, and `npm run agent -- list` shows it.
 - **One checkout.** Run every agent in the same checkout rather than separate git worktrees, so they
   share one queue and one set of locks. Launch lines per tool: `docs/AGENT-TOOLS.md`.
 
@@ -55,7 +55,7 @@ standing with GitHub and model providers, and they keep a many-agent team fast a
   "where I stopped, what is left"` puts the task at the top of the queue with a note in
   `studio/handoffs/<ID>.md`. The next agent, from any tool or provider, sees the note when it starts
   the task. Same idea as the Producer's handoff, one level down.
-- **If it stops without a word, the watcher notices.** The HUB runs it every 5 minutes and
+- **If it stops without a word, the watcher notices.** The supervisor runs it every 5 minutes and
   `npm run session:start` runs it once; `npm run watch` runs it by hand. It is a script,
   not a model, so it costs nothing. It requeues work whose claim expired, with a note naming the last
   agent, and flags agents that hold a task but have gone quiet.
@@ -68,7 +68,7 @@ standing with GitHub and model providers, and they keep a many-agent team fast a
   agent's half-finished diff into a handoff note.
 - **One ping, not a stream.** The watcher gives the Producer one `Watch:` task at a time with a
   count, and doesn't add another until that one is done. Forced "done"s do the same with
-  `Check forced done`. Everything else goes to the event log and the War Room, which cost no tokens to
+  `Check forced done`. Everything else goes to the event log, which costs no tokens to
   read.
 - **The ladder:** script (free, mechanical fixes) → cheap model (summaries, triage) → Producer (what
   to do next, who does it) → you (design, balance, money, anything you can't undo).
@@ -76,7 +76,7 @@ standing with GitHub and model providers, and they keep a many-agent team fast a
 ## Letting the studio improve itself
 
 - **Everything leaves a note.** Agents' work, refusals, hand-backs, meetings and bugs all land in
-  files. Once a day the HUB writes a retro (`studio/memory/retros/`) that turns repeating patterns
+  files. Once a day the supervisor writes a retro (`studio/memory/retros/`) that turns repeating patterns
   into suggestions: which skill to tighten, which tasks are too big, which model to route away from.
   It is a script; it costs nothing.
 - **The Producer decides what sticks.** Suggestions show up in the briefing. The Producer accepts or
@@ -88,8 +88,8 @@ standing with GitHub and model providers, and they keep a many-agent team fast a
 ## Before a test with real API keys
 
 See `docs/STRESS-TEST.md`. In short: run it in a private copy, set `STUDIO_DAILY_TOKEN_CAP` first,
-start from `npm run studio:reset`, check models with `npm run models:check`, and keep the HUB open
-so the watcher and retros run.
+start from `npm run studio:reset`, check models with `npm run models:check`, and keep the supervisor
+running (`npm run studio:start`) so the watcher and retros run.
 
 ## Starting a game
 

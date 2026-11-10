@@ -21,15 +21,13 @@
  *                  onceHours (budget.mjs's quota file, so pickTool takes the next) and the halt is cleared as
  *                  `npm run studio:resume` clears it, by "self-triage" with the cause. A custom command (STUDIO_<ROLE>_CMD)
  *                  has no other tool: it stays halted.
- *   restart-hub    the War Room hub stopped answering (it answered on an earlier pass) while no supervisor runs (a
- *                  running supervisor restarts the hub itself): start it again.
  *   close-rescues  rescue tasks of a task that has landed are closed (task done does it on landing; this is the sweep).
  * Only static imports of event.mjs and fsafe.mjs: supervisor.mjs, game-gates.mjs and watchdog.mjs import this module,
  * and everything else is imported inside the functions (no import cycle with a CLI that uses top-level await).
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { writeAtomic } from './fsafe.mjs';
@@ -206,51 +204,6 @@ export async function reapPass({ root = null, now = Date.now(), env = process.en
   return actions;
 }
 
-// ---- restart-hub ----
-
-const defaultHubUp = (port) => fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) }).then((r) => r.ok, () => false);
-const defaultSpawnHub = (root) => {
-  const log = fs.openSync(path.join(root, '.studio', 'hub.log'), 'a');
-  const p = spawn(process.execPath, [path.join(root, 'hub', 'server.mjs')], { cwd: root, stdio: ['ignore', log, log], env: process.env, detached: process.platform !== 'win32', windowsHide: true });
-  p.unref();
-  return p.pid;
-};
-
-/** The hub: remember it answered; when it stops answering and no supervisor runs, start it again (once per window). */
-export async function hubPass({ root = REPO_ROOT, now = Date.now(), env = process.env, hubUp = defaultHubUp, spawnHub = defaultSpawnHub, supervisorAlive = null } = {}) {
-  const cfg = readTriage(env);
-  if (!fixOn('restart-hub', cfg)) return [];
-  const port = Number(env.HUB_PORT || 3847);
-  const f = stateFile(root);
-  const up = await hubUp(port);
-  const st = readJson(f) || {};
-  if (up) {
-    st.hubSeenAt = new Date(now).toISOString();
-    try { fs.mkdirSync(path.dirname(f), { recursive: true }); writeAtomic(f, `${JSON.stringify(st, null, 2)}\n`, { fsync: false }); } catch {}
-    return [];
-  }
-  const seen = Date.parse(st.hubSeenAt || '') || 0;
-  if (!seen || now - seen > 86400000) return []; // never up here (nobody runs a hub), or long ago: not a stop
-  let sup = supervisorAlive;
-  if (sup === null) {
-    try {
-      const { readStatus } = await import('./supervisor.mjs');
-      const { pidAlive } = await import('./proc-identity.mjs');
-      const s = readStatus();
-      sup = Boolean(s?.status === 'running' && s.pid && pidAlive(s.pid, s.identity, { eperm: false }));
-    } catch { sup = false; }
-  }
-  if (sup) return []; // the supervisor restarts the hub itself (its step 1)
-  const cause = `hub-down:${port}`;
-  const may = mayApply('restart-hub', cause, { root, now, cfg });
-  if (!may.ok) { declineFix('restart-hub', cause, may.why, { root, now, cfg }); return []; }
-  let pid = null;
-  try { pid = spawnHub(root); } catch (e) { declineFix('restart-hub', cause, `couldn't start it: ${String(e.message || e).slice(0, 120)}`, { root, now, cfg }); return []; }
-  const msg = `the War Room hub (port ${port}) stopped answering (last seen ${new Date(seen).toISOString().slice(11, 16)} UTC) and no supervisor runs: started it again${pid ? ` (pid ${pid})` : ''}`;
-  recordFix('restart-hub', cause, { root, now, msg, meta: { port, pid } });
-  return [{ kind: 'selftriage', msg: `self-triage: ${msg}` }];
-}
-
 // ---- close-rescues ----
 
 /** Rescue tasks of tasks that have landed: closed (the sweep behind task done's own close). */
@@ -273,7 +226,7 @@ export async function rescueSweep({ now = Date.now(), env = process.env } = {}) 
 
 // ---- the pass (the watchdog runs it) ----
 
-/** One pass over the list: a halted supervisor, orphaned heavy trees, the hub, landed lanes' rescues. Never throws. */
+/** One pass over the list: a halted supervisor, orphaned heavy trees, landed lanes' rescues. Never throws. */
 export async function selfTriagePass({ now = Date.now(), env = process.env, deps = {} } = {}) {
   const cfg = readTriage(env);
   if (cfg.allOff) return [];
@@ -287,7 +240,6 @@ export async function selfTriagePass({ now = Date.now(), env = process.env, deps
     return r.fixed ? [{ kind: 'selftriage', msg: `self-triage cleared the supervisor's halt: ${r.why}` }] : [];
   });
   await step('reap', () => reapPass({ now, env, ...(deps.reap || {}) }));
-  await step('hub', () => hubPass({ now, env, ...(deps.hub || {}) }));
   await step('rescues', () => rescueSweep({ now, env }));
   return actions;
 }

@@ -9,8 +9,8 @@
  * or by flushTelemetry() (the supervisor's pass calls it), so a quiet type still reports.
  *
  * Only types NOTHING reads per event are routed here (see docs/METRICS.md "Telemetry"): hotspot.overlap, task.overlap,
- * skill.follow, watch.report, agent.heartbeat, trigger.would_drop and thread.would_route are read by plan-waves,
- * next-board, scorecard, retro, metrics and the threads shadow report, so they stay one event each.
+ * skill.follow, watch.report and agent.heartbeat are read by plan-waves,
+ * next-board, scorecard, retro and metrics, so they stay one event each.
  *
  * STUDIO_TELEMETRY=full writes the per-event lines again (for debugging), and the counter files are left alone.
  */

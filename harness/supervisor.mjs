@@ -3,7 +3,7 @@
  * harness/supervisor.mjs — keep the studio running without anyone at the keyboard.
  *
  *   npm run studio:start [-- --until 23:00 | --until 8h] [--window 09:00-23:00] [--budget 50% | --budget 3000000]
- *                        [--lanes auto] [--no-hub] [--foreground]   (runs on its own unless --foreground)
+ *                        [--lanes auto] [--foreground]   (runs on its own unless --foreground; --hub/--no-hub: ignored, no hub since 2.80)
  *   npm run studio:start -- --install [same options]    start it at login (launchd, systemd --user, Task Scheduler)
  *   npm run studio:start -- --uninstall
  *   npm run studio:stop                                  stop the supervisor (agents finish their task)
@@ -14,7 +14,6 @@
  *                                                        2.73.1: move a running supervisor's end time, no restart
  *
  * Every minute it:
- *   1. keeps the War Room hub up (restarts it, and logs how long it was down);
  *   2. stops starting work outside the time window, past --until, past the budget, or while "Stop all" is on;
  *   3. starts agents for waiting work, one task per session: for each role (and lane) with waiting
  *      tasks and no agent on it, within the pace's caps, it starts a fresh agent on the next task. When
@@ -39,7 +38,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
-import { poolPlan } from './api-pool.mjs';
+import { poolPlan, builderOrder, builderKind } from './api-pool.mjs';
 const poolPlanNow = (usage, live) => poolPlan({ usage, live });
 import { writeAtomic } from './fsafe.mjs';
 import { selfIdentity, pidAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
@@ -126,7 +125,7 @@ const readJson = (f, d = null) => {
   }
 };
 export const readStatus = () => readJson(STATUS_FILE);
-/** "Try again" on a halted supervisor: the War Room (hub) or `npm run studio:resume` writes it; the next pass reads it. */
+/** "Try again" on a halted supervisor: `npm run studio:resume` writes it (a plain-text file is the retired War Room's); the next pass reads it. */
 const RESUME = path.join(STUDIO_STATE_DIR, 'supervisor-resume');
 function readResume() {
   let text = '';
@@ -385,7 +384,7 @@ export async function supervise(opts, state, now = Date.now()) {
     if (!state.halted) { try { await checkBadEnds(opts, state, now); } catch { /* the stop stands */ } }
     return { stop: true, started: [], why: [`the time is up (${new Date(opts.until).toTimeString().slice(0, 5)})`] };
   }
-  if (readStop()) return { started: [], why: ['"Stop all agents" is on in the War Room'] };
+  if (readStop()) return { started: [], why: ['"Stop all agents" is on (npm run task -- resume)'] };
   if (opts.window && !inWindow(opts.window, now)) return { started: [], why: [`outside the window ${opts.window}`] };
   // Two sessions in a row ending the same bad way (exit 127: the tool isn't on PATH) means starting
   // more won't help: stop starting, and ask a person once (Needs you). "Try again" clears it.
@@ -437,7 +436,7 @@ export async function supervise(opts, state, now = Date.now()) {
     const { winddownPass } = await import('./winddown.mjs');
     const { readHolds } = await import('./task-hold.mjs');
     const wd = winddownPass({ now, rows: st, dryRun: opts.dryRun, lists: () => ({ live: sessions().filter((s) => s.running).map((s) => ({ agent: s.agent, role: s.role, task: s.task })), queued: (parseNextQueue().backlog || []).map((t) => ({ id: t.id, role: t.role, title: t.title })), held: Object.entries(readHolds()).filter(([, h]) => h?.held).map(([id, h]) => ({ id, why: h.held.why || 'held' })) }) });
-    if (wd.active) { poolUsage = { winddown: true, why: wd.why }; if (!apiPoolOn(poolUsage) && !vertexReady.ok) return { started: [], why: [wd.why], winddown: true }; }
+    if (wd.active) { poolUsage = { winddown: true, why: wd.why }; if (wd.state?.manual || (!apiPoolOn(poolUsage) && !vertexReady.ok)) return { started: [], why: [wd.why], winddown: true }; } // 2.80 (c) #14: a manual one starts nothing, paid builders included
   } catch { /* the wind-down is a guard, never a crash */ }
   const { weightedTokens } = await import('./budget.mjs');
   const spentHere = Math.round(readRecentEvents(50000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= state.startedAt).reduce((n, e) => n + weightedTokens(e), 0));
@@ -490,6 +489,10 @@ export async function supervise(opts, state, now = Date.now()) {
   let room = ramCap.cap - live.length;
   // 2.79 (f): the plan's budget is high: only the API pool's builders start (their names, up to the pool's size).
   const poolMode = poolUsage ? poolPlanNow(poolUsage, live) : null;
+  // 2.80 (c), Patch #18: an owner-set builder order (STUDIO_BUILDER_ORDER; unset: the choice below as before).
+  const bOrder = builderOrder();
+  const poolFree = bOrder?.includes('api') ? poolMode?.free || poolPlan({ usage: { over: true }, live }).free : [];
+  const vxFirst = Boolean(bOrder?.includes('vertex') && !(bOrder.indexOf('plan') >= 0 && bOrder.indexOf('plan') < bOrder.indexOf('vertex')));
   // 2.79.1 (a): Vertex goes before the pool, so with Vertex ready the pool's size doesn't cap the builders that may start.
   if (poolMode) { if (!vertexReady.ok) room = Math.min(room, poolMode.free.length); why.push(`${poolUsage.why}: ${vertexReady.ok ? 'Vertex first, then ' : ''}${poolMode.why}`); }
   if (room <= 0) return { started: [], why: [ramCap.cap < configured ? `${live.length} agent${live.length === 1 ? '' : 's'} running; no more start: ${ramCap.why}` : `${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
@@ -662,13 +665,16 @@ export async function supervise(opts, state, now = Date.now()) {
     // 2.79.2: a route that keeps a task on Vertex (it started there) goes through the same check as a new pick: the share,
     // the budget cut and earlier Vertex failures. If Vertex may not take it now, it starts on the plan's tool instead.
     if (lr.tool === 'vertex') {
-      const keep = vertexReady.ok && g.role === 'builder' && !custom ? (await import('./vertex.mjs')).vertexPick({ role: g.role, taskId: g.tasks[0]?.id, tier: lr.tier || null, live, cap: ramCap.cap, high: Boolean(poolMode) || !tool, events: evs, ready: vertexReady }) : { skip: vertexReady.why || 'vertex is not ready' };
+      const keep = vertexReady.ok && g.role === 'builder' && !custom ? (await import('./vertex.mjs')).vertexPick({ role: g.role, taskId: g.tasks[0]?.id, tier: lr.tier || null, live, cap: ramCap.cap, high: Boolean(poolMode) || !tool || vxFirst, events: evs, ready: vertexReady }) : { skip: vertexReady.why || 'vertex is not ready' };
       if (keep.skip) { why.push(`${g.tasks[0]?.id}: not kept on Vertex (${keep.skip})`); lr.tool = null; lr.model = null; }
     }
     if (vertexReady.ok && g.role === 'builder' && !custom && ['claude', null, undefined].includes(lr.tool || tool)) {
-      const pick = (await import('./vertex.mjs')).vertexPick({ role: g.role, taskId: g.tasks[0]?.id, tier: lr.tier || null, live, cap: ramCap.cap, high: Boolean(poolMode) || !tool, events: evs, ready: vertexReady });
+      const pick = (await import('./vertex.mjs')).vertexPick({ role: g.role, taskId: g.tasks[0]?.id, tier: lr.tier || null, live, cap: ramCap.cap, high: Boolean(poolMode) || !tool || vxFirst, events: evs, ready: vertexReady });
       if (pick.tool) vx = pick; else if (pick.skip && (poolMode || !tool)) why.push(`${g.tasks[0]?.id}: ${pick.skip}`);
     }
+    const kind = bOrder && g.role === 'builder' && !custom ? builderKind(bOrder, { api: Boolean(tool) && poolFree.length > 0, vertex: Boolean(vx) || lr.tool === 'vertex', plan: Boolean(tool) && !poolMode }) : null;
+    if (kind !== null && kind !== 'vertex') { vx = null; if (lr.tool === 'vertex') { lr.tool = null; lr.model = null; } }
+    if (bOrder && g.role === 'builder' && !custom && !kind) { why.push(`${g.tasks[0]?.id}: no builder in STUDIO_BUILDER_ORDER (${bOrder.join(',')}) can start now`); continue; }
     if (!custom && !tool && !vx) {
       why.push(`${g.role}: every tool is out of quota (npm run budget)`);
       continue;
@@ -681,7 +687,7 @@ export async function supervise(opts, state, now = Date.now()) {
       ramNote(ram, now);
       break;
     }
-    const agent = !vx && poolMode ? poolMode.free.shift() : nextAgentName(g.role, opts.prefix || 's');
+    const agent = kind ? (kind === 'api' ? poolFree.shift() : nextAgentName(g.role, opts.prefix || 's')) : !vx && poolMode ? poolMode.free.shift() : nextAgentName(g.role, opts.prefix || 's');
     if (!agent) break;
     state.names = [...(state.names || []), agent].slice(-200);
     // 2.30l: one builder per task. Two passes at once (the watcher and the Director flow) both started
@@ -701,7 +707,7 @@ export async function supervise(opts, state, now = Date.now()) {
     if (r.ok && vx) emitEvent({ type: 'model.routed', agent: 'supervisor', task: taskId, msg: `${taskId}: starts on ${vx.model} (vertex): ${vx.why}`.slice(0, 400), meta: { task: taskId, arm: 'vertex', tier: vx.size, model: vx.model, tool: 'vertex' } });
     else if (r.ok && lr.model) emitEvent({ type: 'model.routed', agent: 'line-producer', task: taskId, msg: `${taskId}: starts on ${lr.model}${lr.tool ? ` (${lr.tool})` : ''} (${lr.tier} ${lr.tool ? 'task' : 'tier'}, the Line Producer): ${lr.why}`.slice(0, 400), meta: { task: taskId, arm: 'line-producer', tier: lr.tier, model: lr.model, ...(lr.tool ? { tool: lr.tool } : {}), failed: lr.failed || 0 } });
     if (r.ok) {
-      if (poolMode && !vx) emitEvent({ type: 'supervisor.api_pool', agent: 'supervisor', task: taskId, msg: `${agent} starts on ${taskId} billed to its API key: ${poolUsage.why}`, meta: { agent, reason: poolUsage.over ? 'over-target' : 'winddown' } });
+      if (kind ? kind === 'api' : poolMode && !vx) emitEvent({ type: 'supervisor.api_pool', agent: 'supervisor', task: taskId, msg: `${agent} starts on ${taskId} billed to its API key: ${poolUsage?.why || `STUDIO_BUILDER_ORDER=${bOrder}`}`, meta: { agent, reason: !poolUsage ? 'builder-order' : poolUsage.over ? 'over-target' : 'winddown' } });
       started.push(`${agent} on ${g.tasks[0].id}${g.lane ? ` in ${g.lane}` : ''}${vx ? ` (vertex, ${vx.model})` : tool && tool !== preferred ? ` (${tool}: ${preferred} is out of quota)` : ''}`);
       // Count it at once, so the next group in this pass sees it (a lane taken, or the whole game).
       live.push({ agent, role: g.role, lane: g.lane || null, task: taskId, running: true, tool: vx ? 'vertex' : lr.tool || tool });
@@ -783,15 +789,6 @@ function ramNote(ram, now) {
   emitEvent({ type: 'supervisor.ram_low', agent: 'supervisor', to: 'producer', status: 'warn', msg: `Not starting agents: ${ram.why}`, meta: { freeGb: ram.freeGb, floorGb: ram.floorGb } });
 }
 
-/** 2.74.0 (B-70): one keeper pass for the hub (harness/hub-keeper.mjs); returns the hub child to keep. Never throws. */
-async function keepHubUp(state, port, child) {
-  try {
-    const { keepHub } = await import('./hub-keeper.mjs');
-    // 2.77.1 (B-102): bounded like every step of a pass; still pending, the pass goes on with the hub child it had.
-    return await boundedStep('hub', async () => (await keepHub({ state, port, child, loopMs: LOOP_MS })).child, { state, fallback: child });
-  } catch { return child; }
-}
-
 async function main(argv) {
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
   const budgetArg = flag('budget');
@@ -800,8 +797,9 @@ async function main(argv) {
     window: flag('window'),
     budget: budgetArg ? (/%$/.test(budgetArg) ? { share: Number(budgetArg.slice(0, -1)) / 100 } : { tokens: Number(budgetArg) }) : null,
     lanes: flag('lanes'),
-    hub: !argv.includes('--no-hub'),
   };
+  // 2.80: the hub is gone; a start script that still passes --hub/--no-hub keeps working.
+  if (argv.includes('--hub') || argv.includes('--no-hub')) console.log('[supervisor] --hub/--no-hub ignored: there is no hub since 2.80 (npm run studio:status shows the studio).');
   fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
   const prev = readStatus();
   if (prev?.pid && prev.pid !== process.pid && alive(prev) && prev.status === 'running') {
@@ -810,9 +808,7 @@ async function main(argv) {
   }
   fs.rmSync(STOP_FILE, { force: true });
   const { parseNextQueue } = await import('./task.mjs');
-  const state = { pid: process.pid, identity: selfIdentity(), status: 'running', startedAt: Date.now(), opts: { ...opts, until: opts.until ? new Date(opts.until).toISOString() : null }, sessions: 0, doneAtStart: parseNextQueue().done.length, hubDown: [] };
-  const port = Number(process.env.HUB_PORT || 3847);
-  let hub = null;
+  const state = { pid: process.pid, identity: selfIdentity(), status: 'running', startedAt: Date.now(), opts: { ...opts, until: opts.until ? new Date(opts.until).toISOString() : null }, sessions: 0, doneAtStart: parseNextQueue().done.length };
   const save = (extra = {}) => writeAtomic(STATUS_FILE, `${JSON.stringify({ ...state, ...extra, startedAt: new Date(state.startedAt).toISOString(), lastLoop: new Date().toISOString(), tasksDone: parseNextQueue().done.length - state.doneAtStart }, null, 2)}\n`);
   // 2.79.1: this supervisor's own pid, identity and status go to supervisor.json now, before the first full pass (which can
   // take minutes): studio:status and studio:reload-env right after studio:stop && studio:start read the OLD record
@@ -837,7 +833,6 @@ async function main(argv) {
     // 2.30c (G6): at --until, a one-page overnight summary (studio/daily/overnight-<date>.md).
     const summary = opts.until ? import('./overnight.mjs').then(({ writeOvernight }) => writeOvernight({ from: state.startedAt })).catch(() => {}) : Promise.resolve();
     summary.finally(() => {
-      hub?.kill();
       setTimeout(() => process.exit(0), 300);
     });
   };
@@ -849,8 +844,6 @@ async function main(argv) {
   const tick = async () => {
     if (stopping) return;
     reloadEnvIfChanged({ by: 'supervisor', ack: true });
-    // 1. The hub: up, or restart it (with backoff) and remember how long it was down and why (2.74.0, harness/hub-keeper.mjs).
-    if (opts.hub) hub = await keepHubUp(state, port, hub);
     // 2.76.0 (k): the Line Producer's pass (harness/line-producer.mjs): mechanical unblocks, the order, the routes, the
     // rig's builder cap, .studio/line/status.json; supervise() below follows the plan. Code only, never a crash.
     await boundedStep('line-producer', () => import('./line-producer.mjs').then(({ lineProducerPass }) => lineProducerPass({})), { state }).then((lp) => { if (lp && !lp.off) state.line = { at: lp.at, mode: lp.mode, builders: lp.builders ? { running: lp.builders.running, target: lp.builders.target } : null, blocked: lp.blocked?.length || 0, error: lp.error || undefined }; }).catch(() => {});
@@ -870,6 +863,9 @@ async function main(argv) {
     // 2.76.0 (l): the Communicator (harness/communicator.mjs): the 30-minute status post and the alerts that tag who must
     // act. After the machine scan (it reads that scan) and before a stop ends the loop (so a stop file is reported).
     await boundedStep('communicator', () => import('./communicator.mjs').then(({ communicatorPass }) => communicatorPass({ passWhy: r.why })), { state }).catch(() => {});
+    // 2.80 (b1): the timed passes the hub ran (watch, retro, learn, run report, daily ping; the watchdog): harness/studio-passes.mjs,
+    // one bounded step per group, first one interval after the start. state.timed: each group's last run.
+    await import('./studio-passes.mjs').then(({ timedPasses }) => timedPasses({ since: state.startedAt, last: (state.timed ||= {}), dryRun: opts.dryRun, deps: { step: (label, fn) => boundedStep(label, fn, { state }) } })).catch((err) => console.error(`[supervisor] timed passes: ${err?.message || err}`));
     // 2.71.0 (z): the self-repair loop's pass (harness/workaround.mjs): hand-edited records, supervisor restarts, killed
     // launchers, harness tasks and their "maybe fixed" marks. Itself throttled to STUDIO_WORKAROUND_SCAN_MIN (10).
     await boundedStep('workaround', () => import('./workaround.mjs').then(({ workaroundPass }) => workaroundPass({})), { state }).catch(() => {});
@@ -1047,7 +1043,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.79.1 (4): " ENGINE PUSH: unity until 18:00 UTC." for studio:status, or ''.
     const pushNow = async () => { try { const p = (await import('./mode.mjs')).enginePushOf(); return p ? ` ENGINE PUSH: ${p.engine}${p.until ? ` until ${p.until.slice(11, 16)} UTC` : ' until turned off'} (${p.by}); its porters and lands go first.` : ''; } catch { return ''; } };
     const trainsNow = async () => { try { const ts = await import('./train-status.mjs'); const t = ts.readTrainStatus((await import('./worktree.mjs')).mainRoot()); return t ? `\n${ts.trainsText(t)}` : ''; } catch { return ''; } };
-    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.opts?.until ? ` until ${s.opts.until}` : ''}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${await yesWaitText()}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}${await import('./hub-keeper.mjs').then((m) => m.hubKeepLine(s), () => '')}${await trainsNow()}${await pushNow()}` : `The supervisor has not run here yet: npm run studio:start${await trainsNow()}${await pushNow()}`);
+    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.opts?.until ? ` until ${s.opts.until}` : ''}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${await yesWaitText()}${await trainsNow()}${await pushNow()}` : `The supervisor has not run here yet: npm run studio:start${await trainsNow()}${await pushNow()}`);
     process.exit(0);
   }
   if (argv.includes('--install') || argv.includes('--uninstall')) {

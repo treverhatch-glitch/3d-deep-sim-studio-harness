@@ -22,7 +22,7 @@ export const DEFAULT_STYLES = ['cautious', 'greedy', 'ignore-staff', 'max-speed'
 export const DEFAULT_GOALS = ['reach the first milestone', 'survive 10 minutes', 'reach the first failure state'];
 export const DEFAULT_AREAS = ['first minutes', 'core loop', 'economy', 'HUD and panels', 'save and load'];
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8').replace(/^\uFEFF/, '')); } catch { return null; } };
 const list = (v) => (Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x.trim() : x && typeof x === 'object' && typeof x.name === 'string' ? x : null)).filter(Boolean) : []);
 
 /** studio/game.json, or {}. */

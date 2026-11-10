@@ -51,7 +51,6 @@ function walk(dir, re, out = []) {
 
 // 1. Syntax
 const js = ['harness', 'qa', 'scripts', 'cartridges', 'tools'].flatMap((d) => walk(path.join(root, d), /\.(mjs|js)$/));
-js.push(path.join(root, 'hub', 'server.mjs'), path.join(root, 'hub', 'server.js'));
 const bad = js.filter((f) => run(process.execPath, ['--check', f]).status !== 0);
 step(`syntax: ${js.length} JS module(s)`, bad.length === 0, bad.map((f) => `  ${path.relative(root, f)}`).join('\n'));
 const py = ['tools', 'qa'].flatMap((d) => walk(path.join(root, d), /\.py$/));

@@ -12,11 +12,11 @@ npm run new-studio -- --save-setup ../my-setup                # save this studio
 What the command does:
 1. Clones the harness into `../tin-moon`, or the folder you give with `--dir`.
 2. Copies this studio's `.env`, so the keys stay on this machine.
-3. Picks the first War Room port no sibling studio uses (3848, 3849, …), and a matching `npm run play` port.
+3. Picks the first `npm run play` port no sibling studio uses (4611, 4612, …).
 4. Installs, starts a fresh board with the name, and freezes the harness.
 5. Writes `START-HERE.md`.
 
-Several studios run at once, each with its own War Room window, agents and supervisor.
+Several studios run at once, each with its own agents and supervisor.
 `npm run studio:start -- --install` registers each folder separately.
 
 ## Setups
@@ -34,7 +34,7 @@ A setup is a folder with the reusable parts of a studio, laid out like the studi
 What a setup never carries:
 - **Keys, tokens or passwords.** Lines that look like one are dropped and named.
 - **Ports.** Each studio picks its own.
-- **Harness code.** Anything under harness/, hub/, qa/ or scripts/ is skipped.
+- **Harness code.** Anything under harness/, qa/ or scripts/ is skipped.
 - **A game's progress.** The board, events and the Bible stay with their game.
 
 Applying a setup to a studio that already exists: `node scripts/studio-setup.mjs apply <folder>`.
@@ -50,4 +50,4 @@ second confirmation does anything:
 3. The studio starts again at the intake: `npm run intake`.
 
 On the command line: `npm run studio:restart` shows what would go; `npm run studio:restart -- --by <name> --yes --yes` does it.
-Undo: `git checkout <tag> -- .` (the tag name is in the event log and the War Room message).
+Undo: `git checkout <tag> -- .` (the tag name is in the event log and the command's output).

@@ -8,10 +8,10 @@ in a chat.
 
 | Document | What it holds | Who updates it |
 | --- | --- | --- |
-| `studio/bible/BIBLE.md` | The Game Bible: pitch, play length, pillars, Phase 1/2/3, layers kept or crossed out, approved ideas. Written from `bible.json`. | Intake, `npm run bible`, the Director, the War Room (a person signs) |
+| `studio/bible/BIBLE.md` | The Game Bible: pitch, play length, pillars, Phase 1/2/3, layers kept or crossed out, approved ideas. Written from `bible.json`. | Intake, `npm run bible`, the Director, a person signs (`npm run bible -- sign`) |
 | `studio/bible/NOT-DOING.md` | Crossed-out layers and what the game must never be. Agents never build these. | Written from `bible.json`; only a person brings a layer back |
 | `studio/bible/reviews/` | The Director's dated reviews: verdict, what it checked, next tasks. | The Director |
-| `studio/bible/ideas/` | The Idea Board: captured, shaped, placed, decided, scheduled. | `npm run idea` and the War Room |
+| `studio/bible/ideas/` | The Idea Board: captured, shaped, placed, decided, scheduled. | `npm run idea` |
 | `studio/memory/LEARNED.md` | What keeps happening, lessons that didn't stick, suggestions never handled. Generated daily. | `npm run learn` |
 | `studio/liaison/` | Briefs from conversations with the game dev, and whether they confirmed. | The Liaison |
 | `studio/experiments/` | Tracked experiments: open, kept or dropped. | `npm run experiment` |
@@ -23,15 +23,14 @@ in a chat.
 | `studio/game/GAME.md` | The game's fact sheet: pitch, state, pillars, engine, run commands, what agents must not touch. Written by `npm run onboard`. | A person fills in the top; rescans refresh the rest |
 | `studio/PLAN.md` | The master plan: goal, where we are now, milestones, risks. | Producer, when the phase or a milestone changes |
 | `studio/producer/LOG.md` | The Producer's notebook: what changed, why, what's next. Newest first. | Producer, every session (`node harness/handoff.mjs note "…"`) |
-| `studio/producer/INBOX.md` | Messages to the Producer from people in the War Room. | The War Room's message box |
+| `studio/producer/INBOX.md` | Messages to the Producer from people and the harness's passes. | People; the harness's passes |
 | `studio/decisions/` | Decision records: the question, the options, what was chosen and why. | Whoever proposes; a person approves |
 | `studio/NEXT.md` | The task queue. | `node harness/task.mjs` |
 | `studio/CURRENT_TASK.md` | The checkpoint for the task in progress. | `node harness/task.mjs` |
 | `studio/memory/failures.md` | Lessons from fixed bugs, four bullets each. | Whoever fixes a bug |
-| `studio/meetings/` | Notes from Producer meetings: who came, what was decided, tasks made. | `node harness/meeting.mjs` |
 | `studio/handoffs/` | Notes on tasks an agent handed back (out of usage, swapped, stuck). | `node harness/task.mjs pause`, the watcher |
 | `studio/harness-notes/NOTES.md` | About the harness itself: what worked, what didn't, workarounds, upgrade ideas. Kept across projects. | Producer (`npm run notes -- add …`) |
-| `studio/memory/retros/` | Daily retrospectives: what went wrong and suggestions for the Producer to accept or reject. | `harness/retro.mjs` (the HUB writes one a day) |
+| `studio/memory/retros/` | Daily retrospectives: what went wrong and suggestions for the Producer to accept or reject. | `harness/retro.mjs` (the supervisor writes one a day) |
 
 ## Look up when needed
 

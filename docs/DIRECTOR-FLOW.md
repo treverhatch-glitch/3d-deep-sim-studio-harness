@@ -46,8 +46,8 @@ export default async ({ cartridge, runScenario }) => {
 
 ## 2. The Director keeps the builders working (`npm run director -- flow`)
 
-The Director owns the flow. A flow pass runs every minute: in the War Room hub's loop (`STUDIO_FLOW_INTERVAL`,
-default 60 s, off when `STUDIO_WATCH_INTERVAL=0`) and in the supervisor's loop. Each pass:
+The Director owns the flow. A flow pass runs every minute in the supervisor's loop (2.80: the hub's own flow timer is gone; the
+supervisor is the launcher, so its pass doesn't fill slots itself: its launch step does). Each pass:
 
 0. frees the locks of agents whose process is gone (agents with a launcher session record only; never a person's);
 1. hands back a claim that ran out: a task in progress that nobody holds and that has no running session. Not
@@ -72,7 +72,7 @@ default 60 s, off when `STUDIO_WATCH_INTERVAL=0`) and in the supervisor's loop. 
    pace that doesn't start agents on its own (Precise, Budget) gets an alert instead, and nothing starts while
    auto-start is off (the default; `npm run mode -- autostart on --by <name>`, docs/PACE-AND-AGENTS.md);
 4. sends back missing design-fidelity mechanics;
-5. writes `.studio/director-flow.json`, which feeds the War Room's **Director** card (Ops). The card shows the
+5. writes `.studio/director-flow.json`, which records the
    state (flowing, refilling, starved, full or empty), builders in use against slots, how many tasks are ready
    and held, what the pass did, and why nothing started.
 

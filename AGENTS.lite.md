@@ -36,7 +36,7 @@ rules are in `AGENTS.md`; open them only if something here doesn't cover your ca
 
 ## Never
 
-- Never edit `harness/`, `hub/`, `scripts/`, `tools/` or `qa/*.mjs` to make a check pass. Game tools go in `game/<name>/tools/`.
+- Never edit `harness/`, `scripts/`, `tools/` or `qa/*.mjs` to make a check pass. Game tools go in `game/<name>/tools/`.
 - Protected files (`studio/protected.json`: scenarios' expected outcomes, regressions, the Bible's controls list, gates, the game's check settings in `studio/game.json` and `game|web/*/studio.gates.json`) change only with the owner's signed approval. If your task needs one changed, hand it back with a note saying which and why; never sign, force or work around it.
   - An approval the protected check passes counts, whoever recorded it: the owner's key, the owner's proxy and beta mode
     are all the owner's (`npm run beta -- status` shows which is on). The check judges approvals, not you: never hand a

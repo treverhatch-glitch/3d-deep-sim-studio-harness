@@ -4,7 +4,7 @@ Every token number the harness shows is one a tool reported. Nothing is estimate
 
 - **Measured:** `agent.session.end` events carry what the tool reported when its session ended (Claude Code's
   result usage, Codex's turn totals, or a plain usage line): input, output and cache reads. `npm run tokens`
-  and the War Room's "Tokens used" panel sum them by role, model, agent or tool, for the last 5 hours, today or
+  sums them by role, model, agent or tool, for the last 5 hours, today or
   the whole log. The run report's "Tokens by role" table uses the same events.
 - **Per task (2.71.1):** every `agent.session.end` the launcher writes names the session's task (the task it was
   started on, else its one task lock, else its last `task start`), so `npm run tokens -- --by task` sums tokens per task
@@ -23,5 +23,3 @@ Every token number the harness shows is one a tool reported. Nothing is estimate
   and read from the end, until it has N; it reads at most twice `STUDIO_EVENTS_MAX_MB` of them. A reader of the
   whole log (N = 0: `health`, new task IDs) still reads only the current file. Rolled files are never deleted by
   the harness; remove old ones by hand if disk space matters.
-- `npm run seed:events` adds a few demo events to an empty log so a fresh War Room isn't blank. They are
-  marked `[demo]` and carry no token numbers; it refuses to run on a log that already has events.

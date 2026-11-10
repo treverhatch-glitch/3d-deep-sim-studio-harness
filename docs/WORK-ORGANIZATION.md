@@ -395,7 +395,7 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   files none of its lanes change, it re-runs just those files on main's tip alone: still red there, the train lands and
   the reds are reported (`task.train.known_red`, `meta.action` excused; its tasks close on that judgement); green there,
   the entries clear and the red is the lanes' as before. A green landing that changed a listed test's file clears it too.
-  A test a lane changed is never excused. `npm run task -- train status` and the War Room's train card show the count.
+  A test a lane changed is never excused. `npm run task -- train status` shows the count.
 - The flake triager (2.69.0, `harness/flakes.mjs`): when a train's verify or re-check is red, each failing test file
   (at most `STUDIO_FLAKE_MAX_FILES`, 5; once per train) runs ALONE on the same tree, a focused run as a re-check:
   fails → `real`; passes and the file has a test-randomness finding (`harness/test-rng.mjs`) → `seed-flake`; passes,
@@ -482,7 +482,8 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - Held lanes (2.60.1, B-39): `npm run task -- hold <ID> --by <name> --why "…"` (a person, a Producer or Director
   session, or an agent outside the harness such as a merge conductor; workers are refused) marks a lane that waits to
   land on purpose, e.g. in a hand-built merge chain; `task unhold <ID> --by <name>` ends it. While a lane is held or
-  queued for the train its claim clock (`STUDIO_TASK_MAX_MIN`) doesn't run (2.77.0, P9.2: and a queued task is not
+  queued for the train its claim clock (`STUDIO_TASK_MAX_MIN`, 240; the task's other limits, `STUDIO_TASK_MAX_SESSIONS` 6 and
+  `STUDIO_TASK_MAX_TOKENS` 10M weighted tokens, still count) doesn't run (2.77.0, P9.2: and a queued task is not
   offered or startable: `task next`, the supervisor's pick and `task start` skip a waiting one, "queued for the merge
   train"; an in-progress one stays its lane agent's, another agent's `task start` is refused unless `--force`), no rescue is filed or escalated for it,
   its rescue tasks can't start, and holding it lifts a budget park and closes its waiting rescues. When a task lands

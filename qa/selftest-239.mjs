@@ -1,7 +1,7 @@
 /**
  * qa/selftest-239.mjs — the 2.39.0 checks: what a control must change, said in the Game Bible
  * (harness/control-effects.mjs). The real-browser proof is scripts/check-control-effects.mjs (CI's
- * war-room-browser job).
+ * browser-checks job).
  */
 import fs from 'node:fs';
 import path from 'node:path';

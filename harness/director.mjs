@@ -16,7 +16,7 @@
  * per STUDIO_DIRECTOR_COOLDOWN_MIN (default 60) and under the spend cap. If not, the Producer and the
  * person are told a Director is needed.
  *
- * Pinged: daily by the HUB, by the Producer before it generates tasks, on a phase change, and when
+ * Pinged: daily by the supervisor, by the Producer before it generates tasks, on a phase change, and when
  * an idea is placed and waits for a decision. The Director reviews and edits the Bible; the Producer
  * still creates and assigns every task.
  */
@@ -147,13 +147,13 @@ export function pingDirector({ reason = 'Routine check', from = process.env.STUD
   const reasons = [...new Set([...earlier, reason])];
   const brief = writeDirectorBrief(reasons);
   emitEvent({ type: 'director.ping', agent: from, to: 'director', task: task.id, msg: `Director pinged by ${from}: ${reason}`, meta: { reason, daily } });
-  // 2.58.0: the routine (daily) ping comes from the watcher or the HUB: it starts a Director only with auto-start on.
+  // 2.58.0: the routine (daily) ping comes from the watcher or the supervisor: it starts a Director only with auto-start on.
   const start = daily && !effectiveMode().autostart ? { started: false, why: AUTOSTART_OFF } : maybeStartDirector();
   if (!start.started && start.why === 'STUDIO_DIRECTOR_CMD is not set') emitEvent({ type: 'director.needed', agent: 'director', to: 'producer', task: task.id, msg: `A Director is needed for ${task.id}. Start one: npm run kickoff -- --role director --agent director-1 --tool <tool>, or set STUDIO_DIRECTOR_CMD so pings start it.` });
   return { ok: true, task: task.id, brief, start };
 }
 
-/** Once a day, if there is a Bible. Called by the HUB with the watcher. */
+/** Once a day, if there is a Bible. Called by the supervisor with the watcher (harness/studio-passes.mjs). */
 /** The Director's routine check: daily by default, more often in faster modes and with MAX SPEED. */
 export function dailyPingIfDue() {
   if (!readBible()) return null;

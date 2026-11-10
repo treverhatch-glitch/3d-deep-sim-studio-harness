@@ -4,9 +4,9 @@
  *
  *   npm run mode                                 show the mode and what it sets
  *   npm run mode -- set precise|budget|fast|prototype|extreme --by <name> [--why "…"]
- *   npm run mode -- boost on|off --by <name> [--hours 4 | --until HH:MM|ISO|off]   the MAX SPEED lever (also in every War Room view)
+ *   npm run mode -- boost on|off --by <name> [--hours 4 | --until HH:MM|ISO|off]   the MAX SPEED lever
  *   npm run mode -- scope lite|full --by <name>  Lite: 6 gates in everyday verify and AGENTS.lite.md for agents
- *   npm run mode -- autostart on|off --by <name>  may the watcher and the HUB start agents on their own (off by default)
+ *   npm run mode -- autostart on|off --by <name>  may the watcher and the supervisor start agents on their own (off by default)
  *
  * The mode (studio/mode.json) sets how many agents may run at once, which work needs a review from
  * another model family, whether the watcher starts agents on its own, how often the Director and the
@@ -105,12 +105,12 @@ function save(m) {
 
 /**
  * 2.58.0 (crew report): auto-start is one explicit switch, off by default, recorded in studio/mode.json like the
- * pace, MAX SPEED and the scope (who, when). Off, the watcher, the HUB's loops and the Director's flow start no
+ * pace, MAX SPEED and the scope (who, when). Off, the watcher, the supervisor's passes and the Director's flow start no
  * agent on their own, whatever the pace, MAX SPEED or away mode say: the Producer check-in still pings and logs.
- * Starting an agent by hand (npm run agent -- start / hire, the War Room's Start agent) and the supervisor
+ * Starting an agent by hand (npm run agent -- start / hire) and the supervisor
  * (npm run studio:start, itself started by hand) don't depend on it.
  */
-export const AUTOSTART_OFF = 'auto-start is off, so nothing starts on its own. Turn it on with npm run mode -- autostart on --by <name>, or start agents by hand (npm run agent -- start, or Start agent in the War Room)';
+export const AUTOSTART_OFF = 'auto-start is off, so nothing starts on its own. Turn it on with npm run mode -- autostart on --by <name>, or start agents by hand (npm run agent -- start)';
 export const autostartOn = (m = readMode()) => Boolean(m.autostart?.on);
 
 export function setAutostart(on, by) {
@@ -120,7 +120,7 @@ export function setAutostart(on, by) {
   m.autostart = { on: Boolean(on), by, at };
   m.history = [...(m.history || []), { autostart: Boolean(on), by, at }].slice(-50);
   save(m);
-  emitEvent({ type: on ? 'mode.autostart_on' : 'mode.autostart_off', agent: by, to: 'producer', msg: on ? `Auto-start on (${by}): the watcher and the HUB start agents on their own, within the pace's caps` : `Auto-start off (${by}): nothing starts on its own; agents start by hand` });
+  emitEvent({ type: on ? 'mode.autostart_on' : 'mode.autostart_off', agent: by, to: 'producer', msg: on ? `Auto-start on (${by}): the watcher and the supervisor start agents on their own, within the pace's caps` : `Auto-start off (${by}): nothing starts on its own; agents start by hand` });
   return { ok: true, mode: effectiveMode(m) };
 }
 
@@ -296,7 +296,7 @@ export function setScope(id, by) {
 }
 
 export function describeMode(e = effectiveMode()) {
-  return `${e.enginePush ? `ENGINE PUSH ${e.enginePush.engine}${e.enginePush.until ? ` until ${e.enginePush.until.slice(11, 16)} UTC` : ''}, ` : ''}${e.label}${e.chosen ? '' : ' (default; the game dev hasn\'t chosen yet: npm run mode -- set …)'}${e.boost ? `, MAX SPEED on${e.boostUntil ? ` until ${e.boostUntil.slice(11, 16)} UTC` : ''}` : ''}: up to ${e.maxAgents} agents (builders ${e.perRole.builder}), reviews on ${e.review === 'every-build' ? 'every build task' : 'whole systems'}, ${e.autoLaunch && e.autostart ? 'the watcher starts agents' : 'agents started by hand or npm run agent'}, Director every ${e.directorEveryHours} h, Producer every ${e.producerEveryHours} h. ${e.autostart ? `Auto-start is on${e.autostartBy ? ` (${e.autostartBy})` : ''}: the watcher and the HUB may start agents on their own (npm run mode -- autostart off --by <name> stops that).` : `Auto-start is off: nothing starts on its own${e.autoLaunch ? ', although this pace would' : ''} (npm run mode -- autostart on --by <name> turns it on).`}`;
+  return `${e.enginePush ? `ENGINE PUSH ${e.enginePush.engine}${e.enginePush.until ? ` until ${e.enginePush.until.slice(11, 16)} UTC` : ''}, ` : ''}${e.label}${e.chosen ? '' : ' (default; the game dev hasn\'t chosen yet: npm run mode -- set …)'}${e.boost ? `, MAX SPEED on${e.boostUntil ? ` until ${e.boostUntil.slice(11, 16)} UTC` : ''}` : ''}: up to ${e.maxAgents} agents (builders ${e.perRole.builder}), reviews on ${e.review === 'every-build' ? 'every build task' : 'whole systems'}, ${e.autoLaunch && e.autostart ? 'the watcher starts agents' : 'agents started by hand or npm run agent'}, Director every ${e.directorEveryHours} h, Producer every ${e.producerEveryHours} h. ${e.autostart ? `Auto-start is on${e.autostartBy ? ` (${e.autostartBy})` : ''}: the watcher and the supervisor may start agents on their own (npm run mode -- autostart off --by <name> stops that).` : `Auto-start is off: nothing starts on its own${e.autoLaunch ? ', although this pace would' : ''} (npm run mode -- autostart on --by <name> turns it on).`}`;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -324,7 +324,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   if (argv[0] === 'autostart') {
     if (!['on', 'off'].includes(argv[1])) {
-      console.log(autostartOn() ? 'Auto-start is on: the watcher and the HUB may start agents on their own.' : `Auto-start is off: ${AUTOSTART_OFF.replace(/^auto-start is off, so /, '')}.`);
+      console.log(autostartOn() ? 'Auto-start is on: the watcher and the supervisor may start agents on their own.' : `Auto-start is off: ${AUTOSTART_OFF.replace(/^auto-start is off, so /, '')}.`);
       process.exit(argv[1] && !argv[1].startsWith('--') ? 1 : 0);
     }
     done(setAutostart(argv[1] === 'on', flag('by')));

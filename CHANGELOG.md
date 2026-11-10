@@ -4,6 +4,31 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.80.0] — 2026-11-10
+The trim (the owner's order; HARNESS_TRIM_BRIEF_2026-11-10). 2.79.2 stays, leaner: 211 files, +2,013 / −19,710 lines (net −17,697) against 2.79.2;
+tracked lines 175,491 → 157,794, `harness/` modules 319 → 310, npm scripts 179 → 165, settings 729 → 712, literal event
+types 477 → 438, gates 37 → 35. Details, what was kept and what waits: docs/RELEASE-2.80.0.md.
+- **The War Room and the hub server are gone** (`hub/`, `war-room.mjs`, `hud.mjs`, `planning-room.mjs`, `phone.mjs`,
+  `away.mjs`, `hub-keeper.mjs`, `meeting.mjs`, `qa/hud-check.mjs`, `qa/hub-smoke.mjs`, the `hud` and `hub-smoke` gates,
+  the React leftovers). Nobody opened it in the audited week; the studio is read through Studio Status and the CLI.
+  `--hub` / `--no-hub` are accepted and ignored.
+- **The hub's timed jobs run in the supervisor** (`harness/studio-passes.mjs`): watch pass, retro, learn, run report,
+  the Director's daily ping (`STUDIO_WATCH_INTERVAL`), the watchdog (`STUDIO_GAMEDEV_INTERVAL`); one failing pass no
+  longer skips the rest.
+- **Also cut:** trajectory export, the logic library, the mutation report, the replay bench, the threads shadow mode,
+  six dead scripts, the `budget.stop` alert kind.
+- **Fixes:** a stale machine scan no longer gives 2 test workers and false-red trains (N1); a dead session's lock is
+  taken over and `lock release --owner` is honoured or refused out loud (#24); a manual wind-down starts nothing, a usage
+  one follows the current setting, an agent's needs `--until` (#14); the train daemon waits on a red main with the same
+  lanes (#25); a Unity run with no results file is NOT RUN (#28); aider builders need a task (A2) and their claim waits
+  480 s (A1); `ask -- show/help` (A10); dry-run trains (A7); the landing build of an adopted game (N3); a quarantined
+  test runs in the lane that changes it (N4); `--no-op` closes a chore (N6); `studio/game.json` with a byte-order mark
+  (N11); `test-golden.py` and `kind: test` regressions (N12); `task done` says it is replaying (N14); the self-test on
+  a big game (R3-6); `godot-unit` N/A (C15).
+- **New, each for a finding:** `STUDIO_BUILDER_ORDER` (#18), `STUDIO_AIDER_CLAIM_TIMEOUT_MS`, `studio:winddown --until`,
+  `ask -- show`, the events `lock.taken_over` and `lock.released_for`.
+- **Less noise:** `hotspot.overlap` and `watch.report` only on change; `check-docs` skips dated records.
+
 ## [2.79.2] — 2026-11-07
 Vertex builders that work (P-285). On 2.79.1 every Vertex builder ended "no work: it never claimed its task" after
 438k–520k-token requests ($5.84, nothing landed), and `STUDIO_VERTEX_SHARE=0` didn't stop them. Details:

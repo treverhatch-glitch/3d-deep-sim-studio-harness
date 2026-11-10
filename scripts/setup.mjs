@@ -4,13 +4,11 @@
  *
  * 1. Creates `.studio/`, `.studio/briefs/`, `studio/memory/`, `studio/daily/`,
  *    `studio/done/`, and `qa/reports/`.
- * 2. Initializes `.studio/events.jsonl` and verifies `.studio/usage.json` &
- *    `.studio/war-room.config.json`.
+ * 2. Initializes `.studio/events.jsonl` and verifies `.studio/usage.json`.
  * 3. Copies `.env.example` to `.env` if `.env` does not exist yet.
  * 4. Prints a clean readiness summary at 0% LLM token cost.
  */
 
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
@@ -39,11 +37,8 @@ for (const rel of dirs) {
 const envFile = path.join(rootDir, '.env');
 const envExample = path.join(rootDir, '.env.example');
 if (!fs.existsSync(envFile) && fs.existsSync(envExample)) {
-  // Fresh .env with a random HUB_TOKEN, so the War Room never runs on the public placeholder.
-  const token = crypto.randomBytes(24).toString('hex');
-  const text = fs.readFileSync(envExample, 'utf8').replace(/^HUB_TOKEN=.*$/m, `HUB_TOKEN=${token}`);
-  fs.writeFileSync(envFile, text, { mode: 0o600 });
-  console.log('[setup] wrote .env with a random HUB_TOKEN (gitignored). Open the War Room at http://127.0.0.1:3847/?token=<that value>');
+  fs.writeFileSync(envFile, fs.readFileSync(envExample, 'utf8'), { mode: 0o600 });
+  console.log('[setup] wrote .env from .env.example (gitignored).');
 }
 
 // Install the pre-commit hook (secret scan + lock check + sim gates)
@@ -109,7 +104,7 @@ console.log(` Env Configuration : .env (${fs.existsSync(envFile) ? 'Present (git
 console.log('--------------------------------------------------------------------');
 console.log(' Next Commands:');
 console.log('   npm run handoff                    # Producer briefing: plan, queue, health, what needs you');
-console.log('   npm run hub                        # War Room on :3847 (Studio view: /v3?skin=tycoon); runs the watcher');
+console.log('   npm run studio:status              # Is the studio running, and what needs you');
 console.log('   npm run onboard -- --path <game> --name "<name>"   # Bring an existing game in');
 console.log('   npm run verify                     # Every gate');
 console.log('   npm run brief -- <ID> [--model]     # 300-word brief for a strong model (cheap model drafts, script checks)');

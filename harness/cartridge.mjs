@@ -36,10 +36,23 @@ export function listCartridges() {
 
 /** The game this studio is building: studio/game.json, written by new-game (never frozen in a test run). */
 export const GAME_FILE = path.join(REPO_ROOT, 'studio', 'game.json');
+/**
+ * 2.80 (d, N11): studio/game.json as an object ({} when there is none). A UTF-8 byte-order mark (a Windows editor's save)
+ * is skipped; a file that exists and still doesn't parse is said once, loudly: the studio was silently run as the template.
+ */
+let gameFileWarned = false;
+export function readGameFile(file = GAME_FILE) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return {}; }
+  try { return JSON.parse(text.replace(/^\uFEFF/, '')) || {}; } catch (err) {
+    if (!gameFileWarned) { gameFileWarned = true; console.error(`[game] studio/game.json can't be read as JSON (${err.message}): the studio's game, engines and checks in it are ignored until it is fixed.`); }
+    return {};
+  }
+}
 export function activeCartridge() {
   if (process.env.STUDIO_CARTRIDGE) return { name: process.env.STUDIO_CARTRIDGE, from: 'STUDIO_CARTRIDGE' };
   try {
-    const g = JSON.parse(fs.readFileSync(GAME_FILE, 'utf8'));
+    const g = readGameFile();
     if (g.cartridge) return { name: g.cartridge, from: 'studio/game.json' };
   } catch {
     // no game file yet
@@ -61,7 +74,7 @@ export function activeCartridge() {
 export function activeGame() {
   if (process.env.STUDIO_GAME) return { name: process.env.STUDIO_GAME, from: 'STUDIO_GAME' };
   try {
-    const g = JSON.parse(fs.readFileSync(GAME_FILE, 'utf8'));
+    const g = readGameFile();
     if (g.game) return { name: g.game, from: 'studio/game.json game' };
   } catch {
     // no game file yet
@@ -73,7 +86,7 @@ export function activeGame() {
 export function setActiveGame(name) {
   let g = {};
   try {
-    g = JSON.parse(fs.readFileSync(GAME_FILE, 'utf8'));
+    g = readGameFile();
   } catch {}
   g.game = name;
   fs.mkdirSync(path.dirname(GAME_FILE), { recursive: true });
@@ -85,7 +98,7 @@ export const isTemplateCartridge = (name) => !name || name === 'example-sim' || 
 export function defaultCartridgeName() {
   if (process.env.STUDIO_CARTRIDGE) return process.env.STUDIO_CARTRIDGE;
   try {
-    const g = JSON.parse(fs.readFileSync(GAME_FILE, 'utf8'));
+    const g = readGameFile();
     if (g.cartridge) return g.cartridge;
   } catch {
     // no game file yet

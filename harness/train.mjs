@@ -2491,7 +2491,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
 
   const main = mainBranch(root);
   life?.lanes(ready); // 2.76.0 (B-88): a death from here on keeps these lanes moving
-  writeTrainStatus(root, id, { step: 'build', text: `building main + ${ready.map((l) => l.task).join(', ')}`, lanes: ready.length, eta: null });
+  if (!dryRun) writeTrainStatus(root, id, { step: 'build', text: `building main + ${ready.map((l) => l.task).join(', ')}`, lanes: ready.length, eta: null });
   for (const l of ready) deps.markRunning?.(l.task, l.agent);
   // 2.65.3 (B-43): the running train's step, for npm run lanes and status --brief; a long train is told about the cap.
   res.trainLanes = ready.length;

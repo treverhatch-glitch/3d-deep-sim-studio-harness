@@ -14,8 +14,8 @@ It is not a game engine. You bring the game; the harness keeps many agents from 
   locked by someone else and staged secrets. `npm run verify` runs every gate; `npm run release` is the
   one command before a merge.
 - **A closed QA loop that records and escalates.** It never edits code.
-- **A zero-token War Room.** A local page that tails the event log. Writes and the live socket need a
-  token; it refuses to listen beyond localhost without one.
+- **Status without a dashboard.** `npm run studio:status`, `npm run digest` and Studio Status posts read the event
+  log and the board; nothing listens on a port.
 
 No game ships in this repo except the example cartridge (`cartridges/example-sim`). Each game lives in
 its own repo or private copy and plugs in as a cartridge (`npm run new-game`) or through onboarding
@@ -24,11 +24,11 @@ its own repo or private copy and plugs in as a cartridge (`npm run new-game`) or
 ## Start
 
 ```bash
-npm run setup                 # .env with a random HUB_TOKEN, git hooks, .studio/ state
+npm run setup                 # .env, git hooks, .studio/ state
 npm run verify                # every gate in studio/gates.json
 npm run new-game my-game      # your own cartridge, with real goldens, passing on day one
 npm run playtest -- --cartridge my-game
-npm run hub                   # War Room on http://127.0.0.1:3847/?token=<HUB_TOKEN from .env>
+npm run studio:status         # is the studio running, and what needs you
 npm run release               # syntax, required gates, closed-loop proof, read-only gates, changelog
 ```
 
@@ -63,7 +63,6 @@ contains no keys; `node scripts/secret-scan.mjs` checks exactly what git would p
 | `vertical-slice` | a game's `start-to-win` scenario does not win, is not deterministic, or drifts from its golden |
 | `playtest` | the cartridge throws, freezes, breaks an invariant, drifts on save/load, or replays differently |
 | `soak`, `tick-budget` | many seeds expose a failure, or a tick costs more than 1 ms |
-| `hub-smoke` | the War Room accepts a write or socket without the token, a foreign Host, or a placeholder token |
 | `secrets` | a key-shaped string would be committed |
 | `selftest` | any required gate cannot be shown to fail when its rule is broken |
 
@@ -133,12 +132,12 @@ Some test runners exit 0 when no test ran (GUT prints "Nothing was run"; vitest 
 
 ## The attending game dev is optional (2.30o)
 
-The harness must run without anyone watching. While a studio has an active game, the hub runs the
-game-dev loop every few minutes (`STUDIO_GAMEDEV_INTERVAL`, 180 s; without the hub: `npm run gamedev`;
+The harness must run without anyone watching. While a studio has an active game, the supervisor runs the
+game-dev loop every few minutes (`STUDIO_GAMEDEV_INTERVAL`, 180 s; without the supervisor: `npm run gamedev`;
 `STUDIO_WATCHDOG=off` opts out): stalled sessions end, a low queue is refilled from unmet charter exit
 criteria, met milestones close, idle builder slots fill, landings are checked (layout, visual), a tool at
 its quota or spend guard hands over to the next in the budget order, and the Director/Producer
-development cycle keeps planning forward. Away mode means more autonomy, not just review logging.
+development cycle keeps planning forward.
 
 Expected role of an attending game dev (a person or an agent): **optional**. Their input adds tasks or
 reprioritises them, approves assumptions the Director marked, and judges whether it is fun. Nothing in
@@ -151,11 +150,10 @@ production waits for them; if it does, that is a harness defect.
 | `AGENTS.md` | Rules every agent follows (Claude, Cursor, Codex, Gemini, Grok, people) |
 | `cartridges/` | Game sims and the contract ([cartridges/README.md](cartridges/README.md)) |
 | `harness/` | Loader, replay, closed loop, tasks, locks, events, model router |
-| `qa/` | Playtest, goldens, regressions, slice, soak, HUB smoke test, self-test |
+| `qa/` | Playtest, goldens, regressions, slice, soak, self-test |
 | `scripts/` | Gates, setup, new-game, release, balance and fun sweeps, hooks |
 | `studio/` | Queue, current task, roles, rules, decisions, memory, balance and fun notes |
-| `hub/` | The War Room server and pages |
-| `docs/` | Longer guides: routing, Blender, porting, War Room, security |
+| `docs/` | Longer guides: routing, Blender, porting, security |
 
 Model routing (`harness/route.mjs`) fails over between local, free-tier and paid providers using keys
 from `.env`. Token-saver tools (rtk, qmd, serena) are optional: `npm run setup:token-savers`.
@@ -164,6 +162,5 @@ Recommended habits for GitHub, model providers and multi-agent teams: [docs/BEST
 Plugging in Claude Code, Codex, Cursor, Grok, Antigravity or Aider: [docs/AGENT-TOOLS.md](docs/AGENT-TOOLS.md).
 How a game starts (intake, phases, layers) and stays on course (Director, Idea Board): [docs/GAME-BIBLE.md](docs/GAME-BIBLE.md).
 What's next for the harness, and how each known gap gets fixed: [docs/ROADMAP.md](docs/ROADMAP.md).
-Measuring whether a harness change (or a guardrail) helps, with real agents on past tasks: [docs/BENCH.md](docs/BENCH.md) (`npm run bench`, owner-run).
 
 Proprietary. Copyright (c) 2026 Trever Max Hatch, all rights reserved. See LICENSE.

@@ -576,10 +576,16 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       // 2.78.2 (f): "skipped" only once verified: the runner's list mode drops them with the variable set
       // (harness/test-config-check.mjs verifySkip, once per test config); a config that ignores it is a WARN, and those
       // tests are not counted as skipped (the row's "quarantine").
-      const quarantined = quarantineEnvValue(REPO_ROOT);
+      // 2.80 (f, N4/N13): a quarantined file this lane changed is not skipped in its run (the fix is proven in its own lane).
+      const qAll = quarantineEnvValue(REPO_ROOT) ? JSON.parse(quarantineEnvValue(REPO_ROOT)) : [];
+      const qFiles = qAll.filter((t) => {
+        const hit = changedHere.some((c) => c === t || c.endsWith(`/${t}`));
+        if (hit) console.error(`[game-gates] ${cmdLabel}: running ${t}: this lane changes it (quarantined)`);
+        return !hit;
+      });
+      const quarantined = qFiles.length ? JSON.stringify(qFiles) : '';
       if (quarantined) {
         runEnv = { ...runEnv, STUDIO_TEST_QUARANTINE: quarantined };
-        const qFiles = JSON.parse(quarantined);
         const qs = quarantineState(curGate, qFiles);
         const n = qFiles.length;
         if (qs.state === 'honoured') console.error(`[game-gates] ${cmdLabel}: ${n} quarantined test file(s) skipped by the game's runner (STUDIO_TEST_QUARANTINE; verified: ${qs.why}${qs.cached ? ', cached for this test config' : ''}; npm run flakes)`);

@@ -12,9 +12,6 @@ cd my-3d-sim-game
 
 # Creates .studio/, copies .env.example -> .env, and verifies .studio/events.jsonl
 npm run setup
-
-# Optional: seed realistic demo events so the War Room lights up immediately
-node scripts/seed-demo-events.mjs
 ```
 
 ---
@@ -38,11 +35,9 @@ Edit `.env` (gitignored). The harness follows a strict **cost-saving priority or
 
 ---
 
-## Step 4: Launch the Mission Control War Room
+## Step 4: See the studio
 
 ```bash
-npm run hub
-# -> Open http://127.0.0.1:3847/?token=<HUB_TOKEN from .env>
+npm run studio:status   # running or not, the last pass, what needs you
+npm run task -- board   # the queue and who holds what
 ```
-
-Use the **⚙ Gear** button in the top-right of the **Agent Eyes** panel to paste your local game URL (`http://localhost:5173/?playtest=1`), `noVNC` stream URL (`http://localhost:6080/vnc.html`), or screenshot stream without touching code.

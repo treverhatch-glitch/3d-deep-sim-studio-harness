@@ -3,7 +3,8 @@
  * harness/boot.mjs — 2.73.1 (B-69): one command to bring the studio up after a restart ("the long boot up": 2.5 h of the
  * owner's time on 2026-11-03).
  *
- *   npm run studio:boot [-- --until 46h] [--window 09:00-23:00] [--budget 50%] [--lanes auto] [--no-hub] [--no-supervisor]
+ *   npm run studio:boot [-- --until 46h] [--window 09:00-23:00] [--budget 50%] [--lanes auto] [--no-supervisor]
+ *                                         (--hub/--no-hub: accepted and ignored, there is no hub since 2.80)
  *   npm run studio:boot -- --check        report only: nothing is cleared or started
  *   npm run studio:boot -- --shortcut     also write a Desktop file that runs `npm.cmd run studio:boot` here (Windows .cmd;
  *                                         elsewhere a .sh); prints its path
@@ -12,20 +13,19 @@
  * Steps:
  *   1. preflight-lite: node against package.json engines, npm on the PATH (npm.cmd on Windows, with the hint that a
  *      PowerShell execution policy blocking npm.ps1 is passed by typing npm.cmd), the .env: no session identity in it
- *      (B-60, harness/dotenv.mjs), a War Room token long enough for the buttons (never printed);
+ *      (B-60, harness/dotenv.mjs);
  *   2. the stale sweep: train.lock, land.lock, unity-train.lock, verify-running/full.json and train/daemon.json whose
  *      recorded process is gone are removed, and a supervisor.json still saying "running" for a gone process is marked
  *      stopped; one boot.stale_cleared event names each. Live, unreadable or pid-less files are left. Lane copies, claims,
  *      logs and work are never touched;
- *   3. the hub, then the supervisor, each started only when not already running (the hub: /health answers on HUB_PORT;
- *      the supervisor: supervisor.json running with a live process that is still that supervisor, not another program
- *      holding a reused pid: supervisorAlive, 2.77.1 M5), detached and hidden (windowsHide), output in
- *      .studio/logs/hub.log and .studio/logs/supervisor.log. The train daemon runs inside each supervisor pass
+ *   3. the supervisor, started only when not already running (supervisor.json running with a live process that is still
+ *      that supervisor, not another program holding a reused pid: supervisorAlive, 2.77.1 M5), detached and hidden
+ *      (windowsHide), output in .studio/logs/supervisor.log. The train daemon runs inside each supervisor pass
  *      (harness/train-daemon.mjs), so it is up when the supervisor is; its switch is reported. The daemons get this
  *      shell's environment minus the session identity (STUDIO_LOCK_OWNER, STUDIO_ROLE, STUDIO_AGENT, STUDIO_MAIN_ROOT):
  *      they are the studio's, not an agent's;
  *   4. one status card: crew sessions, train, halts, what needs a person, outside agents seen lately (event log), lane
- *      copies and leftover folders in .lanes/ (B-51, listed, never removed), and the War Room address (no token).
+ *      copies and leftover folders in .lanes/ (B-51, listed, never removed).
  * Restarting outside orchestrators (chat sessions the harness doesn't launch) is not done here.
  * UNTESTED on Windows: detached + windowsHide starts (same options as studio:start), `where npm.cmd`, the Desktop path
  * (%USERPROFILE%\Desktop, else %OneDrive%\Desktop) and the .cmd file.
@@ -41,7 +41,6 @@ import { pidAlive, readStarts, sameProcess } from './proc-identity.mjs';
 import { which, versionAtLeast } from './upgrade-preflight.mjs';
 
 const BY = 'studio-boot';
-const HUB_WAIT_MS = 20000;
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return undefined; } };
 const rel = (root, f) => path.relative(root, f).split(path.sep).join('/');
 const item = (id, status, detail, fix = '') => ({ id, status, detail, ...(fix ? { fix } : {}) });
@@ -57,16 +56,14 @@ export function preflightLite({ root = REPO_ROOT, env = process.env, platform = 
   if (platform === 'win32') out.push(item('powershell', 'INFO', 'in PowerShell, "npm.ps1 cannot be loaded because running scripts is disabled" means the execution policy blocks npm.ps1: type npm.cmd instead (npm.cmd run studio:boot), or use the Desktop shortcut (npm.cmd run studio:boot -- --shortcut)'));
   let text = '';
   try { text = fs.readFileSync(path.join(root, '.env'), 'utf8'); } catch {}
-  if (!text) out.push(item('dotenv', 'INFO', 'no .env: the defaults hold (npm run setup makes one with a War Room token)'));
+  if (!text) out.push(item('dotenv', 'INFO', 'no .env: the defaults hold (npm run setup makes one)'));
   const hits = identityLines(text);
   if (hits.length) {
     const lines = hits.map((h) => h.line).join(', ');
     out.push(item('dotenv-identity', 'WARN', `.env sets ${[...new Set(hits.map((h) => h.key))].join(', ')} (line${hits.length === 1 ? '' : 's'} ${lines}): identity settings belong to a session, not the studio's .env; the harness ignores them there`, `remove line${hits.length === 1 ? '' : 's'} ${lines} from .env (the launcher sets these for each agent session)`));
   }
-  const tok = String(env.HUB_TOKEN || '').trim();
-  if (text && (tok.length < 24 || /change-me/.test(tok))) out.push(item('hub-token', 'WARN', 'HUB_TOKEN is unset, short or a placeholder: the War Room is read-only (its buttons are refused)', 'npm run setup (writes a fresh HUB_TOKEN to .env), then open the War Room link the hub prints'));
   const shell = SESSION_IDENTITY_KEYS.filter((k) => String(env[k] || '').trim());
-  if (shell.length) out.push(item('shell-identity', 'INFO', `this shell carries ${shell.map((k) => (k === 'STUDIO_MAIN_ROOT' ? k : `${k}=${String(env[k]).trim().slice(0, 40)}`)).join(', ')}: not passed to the hub and supervisor (they are the studio's, not a session's)`));
+  if (shell.length) out.push(item('shell-identity', 'INFO', `this shell carries ${shell.map((k) => (k === 'STUDIO_MAIN_ROOT' ? k : `${k}=${String(env[k]).trim().slice(0, 40)}`)).join(', ')}: not passed to the supervisor (it is the studio's, not a session's)`));
   return out;
 }
 
@@ -110,10 +107,6 @@ export function staleSweep({ root = REPO_ROOT, dry = false, emit = emitEvent, al
   return out;
 }
 
-export const hubPort = (env = process.env) => Number(env.HUB_PORT || 3847);
-export function hubUp(port) {
-  return fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) }).then((r) => r.ok, () => false);
-}
 /**
  * Is the supervisor that supervisor.json describes really running? 2.77.1 (M5). The cheap test (the pid exists; on Linux
  * its /proc start matches) can't tell on Windows and macOS: the OS reuses pids, so a killed supervisor's number held by
@@ -164,29 +157,15 @@ export function startDetached(root, script, args, logName, env) {
 export function supervisorArgs(argv) {
   const out = [];
   for (const k of ['--until', '--window', '--budget', '--lanes']) { const i = argv.indexOf(k); if (i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--')) out.push(k, argv[i + 1]); }
-  if (argv.includes('--no-hub')) out.push('--no-hub');
   return out;
 }
 
-/** Step 3: { hub: { state, pid?, why? }, supervisor: { state, pid?, why? } }. check: report only. */
-export async function startDaemons({ root = REPO_ROOT, env = process.env, argv = [], check = false, up = hubUp, start = startDetached, alive = pidAlive, starts = readStarts, waitMs = HUB_WAIT_MS, emit = emitEvent } = {}) {
-  const port = hubPort(env);
-  const res = { port };
+/** Step 3: { supervisor: { state, pid?, why? }, hubGone? }. check: report only. */
+export async function startDaemons({ root = REPO_ROOT, env = process.env, argv = [], check = false, start = startDetached, alive = pidAlive, starts = readStarts, emit = emitEvent } = {}) {
+  const res = {};
   const denv = daemonEnv(env);
-  if (argv.includes('--no-hub')) res.hub = { state: 'skipped', why: '--no-hub' };
-  else if (await up(port)) res.hub = { state: 'running', why: `answers on port ${port}` };
-  else if (check) res.hub = { state: 'down', why: `nothing answers on port ${port}` };
-  else {
-    let pid = null;
-    try { pid = start(root, 'hub/server.mjs', [], 'hub.log', denv); } catch (e) { res.hub = { state: 'failed', why: String(e.message || e).slice(0, 200) }; }
-    if (!res.hub) {
-      const until = Date.now() + waitMs;
-      let ok = false;
-      while (!ok && Date.now() < until) { await new Promise((r) => setTimeout(r, 300)); ok = await up(port); }
-      res.hub = ok ? { state: 'started', pid } : { state: 'failed', pid, why: `started (pid ${pid}) but /health didn't answer within ${Math.round(waitMs / 1000)} s: see .studio/logs/hub.log` };
-      try { emit({ type: ok ? 'boot.started' : 'boot.start_failed', agent: BY, status: ok ? 'ok' : 'warn', msg: `studio:boot ${ok ? 'started' : 'could not confirm'} the War Room hub (pid ${pid}, port ${port})`, meta: { what: 'hub', pid, port } }); } catch {}
-    }
-  }
+  // 2.80: the hub is gone; a start script that still passes --hub/--no-hub keeps working (one note on the card).
+  if (argv.includes('--hub') || argv.includes('--no-hub')) res.hubGone = true;
   const sup = runningSupervisor(root, alive, { starts, env });
   if (argv.includes('--no-supervisor')) res.supervisor = { state: 'skipped', why: '--no-supervisor' };
   else if (sup) res.supervisor = { state: 'running', pid: sup.pid, why: `since ${String(sup.startedAt || '').slice(0, 16).replace('T', ' ')}` };
@@ -218,9 +197,9 @@ export async function outsideAgents({ root = REPO_ROOT, now = Date.now(), events
   return [...last.entries()].sort((x, y) => y[1] - x[1]).map(([agent, t]) => ({ agent, ageMin: Math.max(0, Math.round((now - t) / 60000)) }));
 }
 
-/** Step 4's facts: { crew, train, halt, needs, outside, lanes, leftovers, url }. Every source is optional. */
+/** Step 4's facts: { crew, train, halt, needs, outside, lanes, leftovers }. Every source is optional. */
 export async function cardFacts({ root = REPO_ROOT, env = process.env, now = Date.now() } = {}) {
-  const f = { crew: [], train: null, trainAuto: null, queue: { lanes: 0, held: 0 }, halt: null, needs: [], outside: [], lanes: 0, leftovers: [], url: `http://localhost:${hubPort(env)}/` };
+  const f = { crew: [], train: null, trainAuto: null, queue: { lanes: 0, held: 0 }, halt: null, needs: [], outside: [], lanes: 0, leftovers: [] };
   const tryIt = async (fn) => { try { await fn(); } catch { /* a source that can't be read is left out */ } };
   await tryIt(async () => { f.crew = (await import('./agent.mjs')).sessions().filter((s) => s.running).map((s) => ({ agent: s.agent, task: s.task || null, role: s.role || null })); });
   await tryIt(async () => { const ts = await import('./train-status.mjs'); f.train = ts.trainStatusLine(ts.readTrainStatus(root)) || null; });
@@ -240,7 +219,7 @@ export function cardLines({ name, version, pre, swept, daemons, facts, check }) 
   for (const i of pre.filter((x) => x.status !== 'PASS')) { L.push(`    ${i.status.padEnd(4)} ${i.id}: ${i.detail}`); if (i.fix) L.push(`         Fix: ${i.fix}`); }
   L.push(`  stale       ${swept.length ? swept.map((s) => `${s.file} ${s.action} (${s.why})`).join('; ') : 'nothing stale'}`);
   const d = (x) => (!x ? '?' : `${x.state}${x.pid ? ` (pid ${x.pid})` : ''}${x.why ? `: ${x.why}` : ''}`);
-  L.push(`  hub         ${d(daemons.hub)}${daemons.hub?.state === 'started' ? ', log .studio/logs/hub.log' : ''}`);
+  if (daemons.hubGone) L.push('  hub         --hub/--no-hub ignored: there is no hub since 2.80 (this card and npm run studio:status show the studio)');
   L.push(`  supervisor  ${d(daemons.supervisor)}${daemons.supervisor?.state === 'started' ? ', log .studio/logs/supervisor.log' : daemons.supervisor?.state === 'down' ? ' (npm run studio:boot starts it)' : ''}`);
   L.push(`  train       daemon ${facts.trainAuto || '?'} · ${facts.train || 'no train running'} · queue ${facts.queue.lanes} lane(s)${facts.queue.held ? `, ${facts.queue.held} held for a person` : ''}`);
   L.push(`  crew        ${facts.crew.length ? `${facts.crew.length} session(s) running: ${facts.crew.slice(0, 8).map((c) => `${c.agent}${c.task ? ` (${c.task})` : ''}`).join(', ')}${facts.crew.length > 8 ? ' …' : ''}` : 'no sessions running'}`);
@@ -250,7 +229,6 @@ export function cardLines({ name, version, pre, swept, daemons, facts, check }) 
   if (facts.needs.length > 6) L.push(`    … and ${facts.needs.length - 6} more (npm run digest)`);
   if (facts.outside.length) L.push(`  outside     agents with no launcher session, last seen: ${facts.outside.slice(0, 6).map((o) => `${o.agent} ${o.ageMin} min ago${o.ageMin > 30 ? ' (quiet)' : ''}`).join(', ')}`);
   L.push(`  lanes       ${facts.lanes} lane cop${facts.lanes === 1 ? 'y' : 'ies'}${facts.leftovers.length ? ` · ${facts.leftovers.length} leftover folder(s) in .lanes/ (not lanes, left alone): ${facts.leftovers.slice(0, 6).join(', ')}${facts.leftovers.length > 6 ? ' …' : ''}` : ''}`);
-  L.push(`  War Room    ${facts.url}${daemons.hub?.state === 'started' || daemons.hub?.state === 'running' ? '' : ' (not answering)'} (the buttons need the link with your token: the hub prints it in .studio/logs/hub.log)`);
   return L;
 }
 
@@ -269,11 +247,11 @@ export function writeShortcut({ root = REPO_ROOT, env = process.env, platform = 
   if (platform === 'win32') {
     const file = path.join(desk, `Studio boot (${name}).cmd`);
     const dir = root.replace(/%/g, '%%');
-    fs.writeFileSync(file, `@echo off\r\nrem Made by npm run studio:boot -- --shortcut: brings the studio up (hub, supervisor) and shows its status card.\r\ncd /d "${dir}"\r\ncall npm.cmd run studio:boot\r\npause\r\n`);
+    fs.writeFileSync(file, `@echo off\r\nrem Made by npm run studio:boot -- --shortcut: brings the studio up (the supervisor) and shows its status card.\r\ncd /d "${dir}"\r\ncall npm.cmd run studio:boot\r\npause\r\n`);
     return { ok: true, file };
   }
   const file = path.join(desk, `studio-boot-${name}.sh`);
-  fs.writeFileSync(file, `#!/bin/sh\n# Made by npm run studio:boot -- --shortcut: brings the studio up (hub, supervisor) and shows its status card.\ncd '${root.replace(/'/g, "'\\''")}' && npm run studio:boot\n`, { mode: 0o755 });
+  fs.writeFileSync(file, `#!/bin/sh\n# Made by npm run studio:boot -- --shortcut: brings the studio up (the supervisor) and shows its status card.\ncd '${root.replace(/'/g, "'\\''")}' && npm run studio:boot\n`, { mode: 0o755 });
   return { ok: true, file };
 }
 
@@ -287,7 +265,7 @@ export async function boot({ root = REPO_ROOT, env = process.env, argv = [], now
   const pkg = readJson(path.join(root, 'package.json')) || {};
   const lines = cardLines({ name: path.basename(root), version: pkg.version || '?', pre, swept, daemons, facts, check });
   if (shortcut) lines.push(shortcut.ok ? `  shortcut    ${shortcut.file}` : `  shortcut    not written: ${shortcut.why}`);
-  const failed = [daemons.hub, daemons.supervisor].some((x) => x?.state === 'failed') || pre.some((i) => i.status === 'FAIL');
+  const failed = [daemons.supervisor].some((x) => x?.state === 'failed') || pre.some((i) => i.status === 'FAIL');
   return { ok: !failed, check, pre, swept, daemons, facts, shortcut, lines };
 }
 

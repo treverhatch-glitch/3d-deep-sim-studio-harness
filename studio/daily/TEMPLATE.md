@@ -1,6 +1,6 @@
 # Daily Summary — YYYY-MM-DD
 
-> Generate with `npm run daily:summary` (runs on any OS).
+> Written at the end of the day.
 
 ## 1. What Happened
 - 

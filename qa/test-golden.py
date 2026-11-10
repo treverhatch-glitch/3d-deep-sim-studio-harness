@@ -45,6 +45,8 @@ def main() -> int:
     failed = check_vectors()
     for file in files:
         spec = json.loads(file.read_text(encoding="utf-8"))
+        if spec.get("kind") == "test":  # 2.80 (f): a seeded game unit test has no replay to hash (qa/check-regressions.mjs runs it)
+            continue
         digest = str(spec.get("sha256", ""))
         display = str(spec.get("hash", ""))
         if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):

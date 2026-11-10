@@ -110,12 +110,10 @@ console.log('{}');`);
   addTask('Autostart probe task');
   const auto = (name) => probe(name, `import { fillAgents, wake, sessions } from ${u('harness/agent.mjs')};
 import { producerCheckinIfDue } from ${u('harness/watch.mjs')};
-import { buildHudState } from ${u('harness/hud.mjs')};
 const fill = await fillAgents();
 const checkin = producerCheckinIfDue(Date.now(), []);
 const w = wake('producer', { why: 'the queue is low', auto: true });
-const hud = buildHudState();
-console.log(JSON.stringify({ fill, checkin, w, live: sessions().filter((s) => s.running).map((s) => s.agent), hudMode: { autostart: hud.mode?.autostart, text: hud.mode?.text }, producer: hud.status?.producer }));`, aenv);
+console.log(JSON.stringify({ fill, checkin, w, live: sessions().filter((s) => s.running).map((s) => s.agent) }));`, aenv);
   const evBefore = events().length;
   const off = auto('off');
   const startedWhileOff = events().slice(evBefore).filter((e) => e.type === 'agent.session.start' || e.type === 'agent.auto_start' || e.type === 'agent.wake').length;
@@ -133,13 +131,12 @@ console.log(JSON.stringify(await fillAgents()));`, aenv);
     checkinPings: off.checkin?.pinged === true && off.checkin?.started === null && /auto-start is off/.test(off.checkin?.why || ''),
     wakeOff: off.w?.started === false && /auto-start is off/.test(off.w?.next || ''),
     nothingStarted: startedWhileOff === 0 && (off.live || []).length === 0,
-    hudSays: off.hudMode?.autostart === false && /Auto-start is off/.test(off.hudMode?.text || '') && /autostart on --by/.test(off.hudMode?.text || '') && /auto-start is off/.test(off.producer?.why || ''),
     cliSays: /Auto-start is off/.test(list.stdout) && /Auto-start is off/.test(modeOut),
     byHand: hand.status === 0 && events().some((e) => e.type === 'agent.session.start' && e.agent === 'hand-1'),
     switchOn: on.status === 0 && modeJson.autostart?.on === true && modeJson.autostart?.by === 'tester' && (modeJson.history || []).some((h) => h.autostart === true && h.by === 'tester'),
     fillOn: (fillOn.started || []).length >= 1,
   };
-  report('2.58.0 (crew report): auto-start is off by default: the watcher\'s fill, the Producer check-in (which still pings) and an automatic wake-up start nothing and say how to turn it on, as do the HUD, agent list and npm run mode; a start by hand still works; npm run mode -- autostart on --by <name> (recorded in studio/mode.json) lets the watcher start agents',
+  report('2.58.0 (crew report): auto-start is off by default: the watcher\'s fill, the Producer check-in (which still pings) and an automatic wake-up start nothing and say how to turn it on, as do the agent list and npm run mode; a start by hand still works; npm run mode -- autostart on --by <name> (recorded in studio/mode.json) lets the watcher start agents',
     Object.values(as).every(Boolean), `${JSON.stringify(as)}\n${JSON.stringify(off).slice(0, 1500)}\n${JSON.stringify(fillOn).slice(0, 400)}\n${out(hand).slice(-300)}`);
   // The watcher pass below must not start anything: back to the default.
   run(dir, 'node harness/mode.mjs autostart off --by tester');

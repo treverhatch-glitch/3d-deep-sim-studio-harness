@@ -25,6 +25,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent } from './event.mjs';
+import { emitOnChange } from './telemetry.mjs';
 import { mainRoot, mainBranch, laneCopies } from './worktree.mjs';
 import { listLocks } from './lock.mjs';
 import { withLandLock } from './merge-lane.mjs';
@@ -195,7 +196,8 @@ export function postOverlaps(root, found, { by = 'harness', where = '' } = {}) {
   });
   for (const o of fresh) {
     inbox(root, overlapText(o));
-    emitEvent({ type: 'hotspot.overlap', agent: by, to: 'producer', status: 'warn', msg: `${overlapText(o)}${where ? ` (seen at ${where})` : ''}`.slice(0, 600), meta: { file: o.file, line: o.line, lanes: o.lanes } });
+    // 2.80 (d): one event per file and set of lanes, not per line it moved to (6,525 in a week); plan-waves reads the files and lanes.
+    emitOnChange({ type: 'hotspot.overlap', agent: by, to: 'producer', status: 'warn', msg: `${overlapText(o)}${where ? ` (seen at ${where})` : ''}`.slice(0, 600), meta: { file: o.file, line: o.line, lanes: o.lanes } }, `hotspot.overlap|${o.file}|${[...o.lanes].sort().join(',')}`);
   }
   return fresh;
 }
