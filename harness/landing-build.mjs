@@ -86,6 +86,8 @@ export function spawnWorker(root, { env = process.env } = {}) {
 export async function queueLandingBuild({ root, train = null, tasks = [], head = null, env = process.env, log = () => {}, spawn: start = spawnWorker } = {}) {
   try {
     if (landingBuildOff(env)) return { queued: false, skipped: true, why: 'STUDIO_LANDING_BUILD=off', line: '' };
+    // 2.82: a native-engine studio's playable build is the engine's (npm run engine:build), never the web build.
+    { const ne = (await import('./native.mjs')).nativeEngine(root, env); if (ne) return { queued: false, skipped: true, why: `native ${ne}: the playable build is the engine's`, line: '' }; }
     const g = await gameBrowserBuild(root, { env });
     if (!g.ok) { const line = `playable build + clip skipped: ${g.why}`; log(line); return { queued: false, skipped: true, why: g.why, line }; }
     fs.mkdirSync(lbDir(root), { recursive: true });

@@ -231,7 +231,8 @@ export function linePlan(f) {
   const order = [];
   const take = (t) => { if (t && !order.includes(t.id)) order.push(t.id); };
   // 2.79.1 (4): an engine push: the pushed engine's ready porters go first (up to every builder slot), the game's work after.
-  if (f.enginePush?.engine) for (const t of ready) if (t.role === 'engine-porter' && String(t.meta?.track || '').replace(/^engine:/, '') === f.enginePush.engine) take(t);
+  // 2.82: a builder task on that engine's track counts too (a native studio's builders work in the engine).
+  if (f.enginePush?.engine) for (const t of ready) if ((t.role === 'engine-porter' || t.role === 'builder') && String(t.meta?.track || '').replace(/^engine:/, '') === f.enginePush.engine) take(t);
   for (const c of cbs) take(ready.find((t) => t.id === c.task));
   const expNeed = Math.max(0, slots - runningExp.length);
   if (expNeed) {
@@ -758,6 +759,9 @@ export async function testerPass({ now = Date.now(), env = process.env, act = tr
   const t = await import('./tester.mjs');
   let root = deps.root || null;
   if (!root) root = (await import('./worktree.mjs')).mainRoot();
+  // 2.82: a native-engine studio's game is not its web build: no scheduled tester run on it, no wire-it pass over its imports.
+  const ne = (await import('./native.mjs')).nativeEngine(root, env);
+  if (ne) return { state: 'off', why: `native ${ne}: the game tester's schedule plays the web build, which is not the game here (npm run tester -- now runs one on demand)`, line: '' };
   const td = deps.tester || {};
   const run = await t.testerPass({ root, now, env, act, rig, deps: td });
   let wire = null;
@@ -945,6 +949,8 @@ export async function twinPass({ now = Date.now(), env = process.env, act = true
     cfgs = twinConfigs(deps.engines || et.enginesConfig(root), (n) => { try { return et.engineTarget(n, { root })?.label || n; } catch { return n; } });
   } catch { cfgs = []; }
   if (!cfgs.length) return { on: false, checked: [], why: 'no engine twins listed (studio/game.json engines.<name>.twins: the game paths that have an engine twin)' };
+  // 2.82: a native-engine studio builds a feature once, in the engine: a web task has no twin to add.
+  { const ne = (await import('./native.mjs')).nativeEngine(root, env); if (ne) return { on: false, checked: [], why: `native ${ne}: features are built once, in the engine, so there are no twins of web tasks` }; }
   const f = path.join(LINE_DIR(), 'twins.json');
   const st = readJson(f, null);
   const save = (s) => { if (!act) return; try { fs.mkdirSync(LINE_DIR(), { recursive: true }); writeAtomic(f, `${JSON.stringify(s, null, 2)}\n`); } catch {} };

@@ -277,6 +277,14 @@ Every review, and `npm run visual -- send <T>`, queues one path line for the own
 to `.studio/comm/notices.jsonl`, is posted in the Communicator's next pass, and tags nobody. `npm run visual -- status
 <T>` shows where the check stands.
 
+## The rules check, the stage report and native mode (2.82)
+
+Before the long land run the train runs the engine's cheap rules check on the batch as it would land, and hands back
+the lane that turns it red (cause `rules`) without a land run. A land command can report what each of its stages took
+(`STUDIO_LAND_RESULT`), which the scorecard's engine block shows. A studio whose game is the engine build is native:
+builder tasks go on the engine track and the web presentation and porting steps are off. All three are in
+[NATIVE-ENGINE.md](NATIVE-ENGINE.md).
+
 ## Not done yet (follow-ups)
 
 - A custom launch command (`STUDIO_<ROLE>_CMD`) doesn't get the engine worktree in `{addDirs}` yet; the built-in
@@ -293,7 +301,7 @@ All live in `studio/game.json` `engines.<x>`, beside `land`. Each is optional; a
 | Key | What it does |
 | --- | --- |
 | `"preLand": "<command>"` | Run once per lane before the long land run, in a throwaway checkout of the engine repo at the lane's commit (never the land script's own worktree), with `STUDIO_LANE_COMMIT`, `STUDIO_LANE_DIR` and `STUDIO_ENGINE_REPO` set (`preLandTimeoutMin`, default 10). A non-zero exit refuses that lane BEFORE the land run: it is handed back with the command's last 8 output lines, with `cause: precheck` on the event and the hand-back (not a red land run). A command that can't run defers the lane (nobody blamed). Example, generic: `"preLand": "<your pin check>"`, a script in the engine repo that compares the lane's pinned bundle id (read from the lane's own pin file in `STUDIO_LANE_DIR`) with the one the land would use, and exits 1 printing both ids when they differ. |
-| `"quickCheck": "<command>"` | The porter's own check, e.g. a compile of the sim and test assemblies without the editor. `npm run engine -- check [--engine unity] [--task <ID>]` runs it in the porter's lane copy (`.lanes/engine/<ID>`), one at a time per engine on the machine (the quick check command sees `STUDIO_ENGINE_LANE_DIR` (the lane copy it runs in) and `STUDIO_ENGINE`; lock `engine-check:<engine>`, a holder that is gone or older than `STUDIO_ENGINE_CHECK_STALE_MIN` (120) is taken over; a waiting check prints a status line; `STUDIO_ENGINE_CHECK_WAIT_MIN`, default 20). `task done` of an engine-porter task runs it and refuses on red. `quickCheckTimeoutMin` (30). |
+| `"quickCheck": "<command>"` | The porter's own check, e.g. a compile of the sim and test assemblies without the editor. `npm run engine -- check [--engine unity] [--task <ID>]` runs it in the porter's lane copy (`.lanes/engine/<ID>`), one at a time per engine on the machine (the quick check command sees `STUDIO_ENGINE_LANE_DIR` (the lane copy it runs in) and `STUDIO_ENGINE`; lock `engine-check:<engine>`, a holder that is gone or older than `STUDIO_ENGINE_CHECK_STALE_MIN` (120) is taken over; a waiting check prints a status line; `STUDIO_ENGINE_CHECK_WAIT_MIN`, default 20). `task done` of an engine-porter task runs it and refuses on red. `quickCheckTimeoutMin` (30). With no `quickCheck` but the owner's own `"rules"` command (2.82), `task done` runs no check, and `npm run engine -- check` by hand is the rules check itself on the lane's committed work as it would land on the target: in a throwaway checkout with the rules' `inputs` copied in (never in the lane's folder), and only after the same check passed on the target; whenever it can't judge the lane it is skipped and the train's check of the batch decides. For a check at `task done`, set `quickCheck` to a compile. |
 | `"shots": "<folder>"` | Folder of PNGs the engine's play-mode tests write (relative to the land command's folder, or absolute). After a green land: the new shots go to `studio/proof/<task>/engine-after/`, the previous green land's (kept in `.studio/engine-shots/<engine>/last/`) to `engine-before/`, a side-by-side page `qa/reports/engine-compare/<task>.html` (before \| after per file name) is written, `last/` is updated, and one Studio Status line with the page path is queued through the Communicator. No shots, nothing happens. |
 | `"window": "quiet"` | Keep the quiet-window start (see above) for this engine instead of the engine slot. |
 

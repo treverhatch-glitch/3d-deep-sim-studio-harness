@@ -1163,7 +1163,9 @@ if (inShard()) {
   let lanes = [];
   while (Date.now() - t0 < 8000 * SLOW && lanes.length < 2) {
     spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},400)'], { windowsHide: true });
-    lanes = fs.readdirSync(path.join(dir, '.studio/locks')).map((f) => fs.readFileSync(path.join(dir, '.studio/locks', f), 'utf8')).filter((x) => /path:docs\/lane-[ab]/.test(x));
+    // A lock is written through a temp file that is gone a moment later: a file that vanished between the listing and the
+    // read is read as empty (2.82: this crashed the unit once in CI with ENOENT on a .tmp file).
+    lanes = fs.readdirSync(path.join(dir, '.studio/locks')).map((f) => { try { return fs.readFileSync(path.join(dir, '.studio/locks', f), 'utf8'); } catch { return ''; } }).filter((x) => /path:docs\/lane-[ab]/.test(x));
   }
   report('with --lanes auto, each lane gets its own agent holding that folder', lanes.length === 2, lanes.join('\n'));
   await new Promise((r) => child.on('exit', r));
@@ -5057,6 +5059,14 @@ if (inShard('selftest-281a')) {
   const dir = copyRepo();
   const { selftest281A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281a.mjs')).href);
   await selftest281A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.82: native-engine mode, the rules check before the land run, land stages, the engine flow on the scorecard.
+if (inShard('selftest-282a')) {
+  const dir = copyRepo();
+  const { selftest282A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-282a.mjs')).href);
+  await selftest282A({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

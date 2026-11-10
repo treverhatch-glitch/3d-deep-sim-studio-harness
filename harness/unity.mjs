@@ -566,6 +566,40 @@ export function dotnetCoversEditMode(dir, sources = testSources(dir)) {
   return { ok: true, files: files.length, why: `tools/SimTests compiles all ${files.length} Edit Mode test file(s)` };
 }
 
+/**
+ * 2.82: which Edit Mode test assemblies the editor still has to run after the .NET rules tests passed. The crew's land
+ * runs spent a median 53 minutes in Edit Mode re-running the rule tests .NET had just run; only the assemblies .NET
+ * doesn't compile (art and editor checks) need the editor. { assemblies: [{ name, files, covered }], covered: [name],
+ * uncovered: [name], args: [..] , why }: `args` is what a land script adds to its Edit Mode start (the Unity Test
+ * Framework's -assemblyNames list; [] when the editor has to run everything, ['-skip'] is never given: with nothing
+ * uncovered `skip` is true and the script can leave Edit Mode out). UNVERIFIED on a real editor from the harness's side:
+ * a land script that uses it should keep one full Edit Mode run a day (docs/UNITY-TRACK.md).
+ */
+export function editModePlan(dir) {
+  const assets = path.join(dir, 'Assets');
+  const cache = new Map();
+  const byAsm = new Map();
+  for (const f of walkFiles(assets, '.cs')) {
+    const a = owningAsmdef(f, assets, cache);
+    if (!a || !isTestAsmdef(a.json) || !isEditorOnly(a.json)) continue;
+    const name = typeof a.json?.name === 'string' && a.json.name ? a.json.name : path.basename(a.file, '.asmdef');
+    if (!byAsm.has(name)) byAsm.set(name, []);
+    byAsm.get(name).push(f);
+  }
+  const g = dotnetCompileGlobs(dir);
+  const fwd = (f) => path.resolve(f).split(path.sep).join('/');
+  const compiled = (f) => g.include.some((re) => re.test(fwd(f))) && !g.remove.some((re) => re.test(fwd(f)));
+  const assemblies = [...byAsm.entries()].map(([name, files]) => ({ name, files: files.length, covered: g.include.length > 0 && files.every(compiled) })).sort((a, b) => a.name.localeCompare(b.name));
+  const covered = assemblies.filter((a) => a.covered).map((a) => a.name);
+  const uncovered = assemblies.filter((a) => !a.covered).map((a) => a.name);
+  const plain = uncovered.every((n) => /^[A-Za-z0-9_.-]+$/.test(n));
+  if (!assemblies.length) return { assemblies, covered, uncovered, args: [], skip: false, why: 'no Edit Mode test assembly found under Assets/: the editor runs what it finds' };
+  if (!covered.length) return { assemblies, covered, uncovered, args: [], skip: false, why: `the .NET test project compiles none of the ${assemblies.length} Edit Mode test assembl${assemblies.length === 1 ? 'y' : 'ies'} whole: the editor runs them all` };
+  if (!uncovered.length) return { assemblies, covered, uncovered, args: [], skip: true, why: `the .NET test project compiles every Edit Mode test assembly (${covered.join(', ')}): after it passes, the editor has no Edit Mode test left to run` };
+  if (!plain) return { assemblies, covered, uncovered, args: [], skip: false, why: 'an assembly name has characters that are not put on a command line: the editor runs them all' };
+  return { assemblies, covered, uncovered, args: ['-assemblyNames', uncovered.join(';')], skip: false, why: `after the .NET tests pass, the editor runs ${uncovered.join(', ')} only; ${covered.join(', ')} ran in .NET` };
+}
+
 // What the editor and the gate write inside a project: never a change to its tree.
 const OUTPUT_PATHS = /^(?:Library|Temp|Logs|obj|UserSettings|Build|Builds|MemoryCaptures|StudioHarnessTemp)(?:\/|$)|^TestResults-[^/]*\.xml$|^Assets\/StudioHarnessTemp(?:\.meta|\/|$)|^Library\.(?:seed|tmp|old)-/;
 
@@ -946,6 +980,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     try { (await import('./jobs.mjs')).jobDone({ kind: 'unity-build', id: `${r.target || flag('target') || 'build'} ${folder}`, code: r.ok ? 0 : r.busy ? 3 : 1, result: r.ok ? 'pass' : r.busy ? 'busy' : 'fail', ms: Date.now() - t0, tail: (r.problems || []).join(' | '), log: r.out || null }); } catch {}
     if (!r.ok) fail(r.problems, r.busy ? 3 : 1);
     console.log(`[unity] PASS ${r.target} build: ${r.out}${r.target === 'WebGL' ? ' (the Arcade\'s engine tab plays it; or serve the folder and open index.html)' : ''}`);
+  } else if (cmd === 'editmode-plan') {
+    // 2.82: for a land script: which Edit Mode assemblies the editor still runs after the .NET tests passed.
+    const p = editModePlan(dir);
+    if (process.argv.includes('--json')) console.log(JSON.stringify(p));
+    else if (process.argv.includes('--args')) console.log(p.skip ? 'SKIP' : p.args.map((a) => (/[\s;]/.test(a) ? `"${a}"` : a)).join(' '));
+    else console.log(`[unity] Edit Mode after a green .NET run: ${p.why}${p.args.length ? `\n[unity] add to the editor's Edit Mode start: ${p.args.map((a) => (/[\s;]/.test(a) ? `"${a}"` : a)).join(' ')}` : ''}`);
   } else if (cmd === 'accelerator') {
     // 2.70.0 (u): is the Unity Accelerator (STUDIO_UNITY_ACCELERATOR) answering, and the editor arguments it adds.
     const a = accelerator(dir);

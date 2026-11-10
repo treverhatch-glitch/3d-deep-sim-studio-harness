@@ -95,6 +95,126 @@ export function countRest(events, { from, now, machine = [] } = {}) {
   return out;
 }
 
+/**
+ * 2.82: the engine's flow, beside the fifteen measures (it is one engine's queue, not the whole studio). events: sorted,
+ * inside the window. { runs, landedLanes, passPct, refusedPct, minutesPerLanded, redMinutesPct, passMedianMin, redMedianMin,
+ * waitMin, stages: [{ name, medianMin, runs, failedFirst }], rules: { checks, runs, minutes, refused } } or null (no land run).
+ *   minutesPerLanded  every land-run minute (pass, red, refused waits) divided by the lanes that landed: what one landed
+ *                     engine task costs the machine
+ *   redMinutesPct     the share of those minutes spent in runs that ended red or in a conflict
+ *   stages            from the land command's own stage report (unity-gate.mjs landStages), when it gives one
+ *   rules             the rules check before the land run (engine-rules.mjs): lanes it refused never cost a land run
+ */
+export function engineFlow(events) {
+  const lands = events.filter((e) => e.type === 'engine.land' && e.meta?.status);
+  if (!lands.length) return null;
+  const min = (e) => (Number(e.meta?.ms) || 0) / 60000;
+  const by = (s) => lands.filter((e) => s.includes(e.meta.status));
+  const total = lands.reduce((n, e) => n + min(e), 0);
+  const landedLanes = events.filter((e) => /^task\.train\.\w+\.landed$/.test(e.type)).reduce((n, e) => n + (Array.isArray(e.meta?.lanes) ? e.meta.lanes.length : 1), 0) || by(['pass']).length;
+  const stageMap = new Map();
+  for (const e of lands) {
+    const st = Array.isArray(e.meta.stages) ? e.meta.stages : [];
+    const firstBad = st.find((x) => !['pass', 'skipped', 'ok'].includes(x.status));
+    for (const x of st) {
+      const row = stageMap.get(x.name) || { name: x.name, secs: [], failedFirst: 0 };
+      if (Number.isFinite(x.seconds)) row.secs.push(x.seconds / 60);
+      if (firstBad && firstBad.name === x.name && ['red', 'conflict'].includes(e.meta.status)) row.failedFirst += 1;
+      stageMap.set(x.name, row);
+    }
+  }
+  const rules = events.filter((e) => e.type === 'engine.rules');
+  return {
+    runs: lands.length,
+    landedLanes,
+    passPct: pct(by(['pass']).length, lands.length),
+    refusedPct: pct(by(['refused', 'not-run']).length, lands.length),
+    minutesPerLanded: landedLanes ? r1(total / landedLanes) : null,
+    redMinutesPct: total > 0 ? r1((100 * by(['red', 'conflict']).reduce((n, e) => n + min(e), 0)) / total) : null,
+    passMedianMin: r1(quantile(by(['pass']).map(min), 0.5)),
+    redMedianMin: r1(quantile(by(['red', 'conflict']).map(min), 0.5)),
+    waitMin: r1(by(['refused', 'not-run']).reduce((n, e) => n + min(e), 0)),
+    waitedForRam: by(['refused', 'not-run']).filter((e) => e.meta.infra === 'ram-floor' || /free RAM|waiting for RAM|out of memory/i.test(String(e.msg || ''))).length,
+    totalMin: r1(total),
+    stages: [...stageMap.values()].map((r) => ({ name: r.name, medianMin: r1(quantile(r.secs, 0.5)), runs: r.secs.length, failedFirst: r.failedFirst })),
+    rules: { checks: rules.length, runs: rules.reduce((n, e) => n + (Number(e.meta?.runs) || 0), 0), minutes: r1(rules.reduce((n, e) => n + (Number(e.meta?.ms) || 0), 0) / 60000), refused: rules.reduce((n, e) => n + (Array.isArray(e.meta?.dropped) ? e.meta.dropped.length : 0), 0) },
+  };
+}
+
+/**
+ * 2.82: does the landed work follow the owner's design? events: sorted, the whole log up to the window's end (a task's
+ * `task.added` may be older than the window); from: the window's start. A done task is traced when it says what it
+ * serves (a Bible pillar or a kept layer: task add --serves), comes from an approved idea, was asked for by the owner
+ * (origin dev-asked), or fixes, wires or rescues a task that is traced. { done, tracedPct, devAskedPct, agentProposedPct,
+ * byServes: [{ serves, done }], untraced } or null (nothing done in the window). It measures the link, not the quality:
+ * a pillar with no landed work, or a rising untraced share, is the Director's and the owner's signal.
+ */
+export function visionFlow(events, { from = 0 } = {}) {
+  const added = new Map();
+  for (const e of events) if (e.type === 'task.added' && e.task) added.set(e.task, e.meta || {});
+  const done = [...new Set(events.filter((e) => e.type === 'task.done' && e.task && at(e) >= from).map((e) => e.task))];
+  if (!done.length) return null;
+  const parentOf = (m) => m.causedBy || m.wireOf || m.rescueOf || m.fixOf || null;
+  const servesOf = (id, depth = 0) => {
+    const m = added.get(id);
+    if (!m) return null;
+    if (m.serves) return String(m.serves);
+    if (m.idea) return `idea:${m.idea}`;
+    const p = parentOf(m);
+    return p && depth < 4 && p !== id ? servesOf(String(p), depth + 1) : null;
+  };
+  const norm = (s) => String(s).toLowerCase().replace(/[\s_]+/g, '-');
+  const by = new Map();
+  let traced = 0;
+  let dev = 0;
+  let agent = 0;
+  let known = 0;
+  for (const id of done) {
+    const m = added.get(id);
+    if (!m) continue;
+    known += 1;
+    const sv = servesOf(id);
+    const asked = m.origin === 'dev-asked';
+    if (asked) dev += 1; else if (m.origin === 'agent-proposed') agent += 1;
+    if (sv || asked) traced += 1;
+    if (sv) by.set(norm(sv), (by.get(norm(sv)) || 0) + 1);
+  }
+  if (!known) return null;
+  return {
+    done: known,
+    tracedPct: pct(traced, known),
+    devAskedPct: pct(dev, known),
+    agentProposedPct: pct(agent, known),
+    untraced: known - traced,
+    byServes: [...by.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 12).map(([serves, n]) => ({ serves, done: n })),
+  };
+}
+
+/** The vision block as printed lines ([] when nothing was done). prev: an earlier record's vision block. */
+export function visionText(v, prev = null) {
+  if (!v) return [];
+  const was = (k) => (prev && Number.isFinite(prev[k]) ? ` (was ${prev[k]}%)` : '');
+  return [
+    `Design link: ${v.tracedPct}% of ${v.done} done task(s) trace to a pillar, a kept layer, an approved idea or the owner's own ask${was('tracedPct')}; ${v.untraced} do not`,
+    `  Asked for by the owner: ${v.devAskedPct}%${was('devAskedPct')}; proposed by agents: ${v.agentProposedPct}%${was('agentProposedPct')}`,
+    v.byServes.length ? `  Done work by what it serves: ${v.byServes.map((r) => `${r.serves} ${r.done}`).join(', ')}` : '  No done task says what it serves (task add --serves pillar:<name>)',
+  ];
+}
+
+/** The engine flow as printed lines ([] when there was no land run). prev: an earlier record's engine block. */
+export function engineText(en, prev = null) {
+  if (!en) return [];
+  const was = (k, unit = '') => (prev && Number.isFinite(prev[k]) ? ` (was ${prev[k]}${unit})` : '');
+  const L = [`Engine flow: ${en.runs} land run(s), ${en.landedLanes} lane(s) landed, ${en.totalMin} machine minute(s)`];
+  L.push(`  Land-run minutes per landed lane: ${en.minutesPerLanded ?? 'n/a'}${was('minutesPerLanded')}`);
+  L.push(`  Land runs that passed: ${en.passPct ?? 'n/a'}%${was('passPct', '%')}; refused or not run: ${en.refusedPct ?? 'n/a'}%${was('refusedPct', '%')} (${en.waitMin} min waiting; ${en.waitedForRam} of them for free memory)`);
+  L.push(`  Minutes spent in red runs: ${en.redMinutesPct ?? 'n/a'}%${was('redMinutesPct', '%')}; a passing run takes ${en.passMedianMin ?? 'n/a'} min (median)${was('passMedianMin', ' min')}, a red one ${en.redMedianMin ?? 'n/a'} min`);
+  if (en.stages.length) L.push(`  Stages (median minutes; red runs that failed there first): ${en.stages.map((s) => `${s.name} ${s.medianMin ?? 'n/a'} (${s.failedFirst})`).join(', ')}`);
+  else L.push('  Stages: the land command reports none (STUDIO_LAND_RESULT, docs/NATIVE-ENGINE.md)');
+  L.push(en.rules.checks ? `  Rules check before the land run: ${en.rules.checks} batch(es), ${en.rules.runs} run(s), ${en.rules.minutes} min; ${en.rules.refused} lane(s) refused before they cost a land run` : '  Rules check before the land run: none ran');
+  return L;
+}
+
 /** The scorecard: { window, values: { id: number|null }, notes: { id: text }, measures }. */
 export async function roundScore({ events = null, machine = null, now = null, days = 7, root = REPO_ROOT } = {}) {
   const all = (events || readRecentEvents(400000)).slice().sort((a, b) => at(a) - at(b));
@@ -132,14 +252,14 @@ export async function roundScore({ events = null, machine = null, now = null, da
     landedPerDay: `${rest.doneCount} done in ${r1(supDays)} supervisor day(s)`,
     escapedPct: `${card.escaped} of ${card.landed}`,
   };
-  return { window: { from: new Date(from).toISOString(), to: new Date(end).toISOString(), days, events: inWin.length }, values, notes, measures: MEASURES.map(([id, label, unit, better, target]) => ({ id, label, unit, better, target })) };
+  return { window: { from: new Date(from).toISOString(), to: new Date(end).toISOString(), days, events: inWin.length }, values, notes, measures: MEASURES.map(([id, label, unit, better, target]) => ({ id, label, unit, better, target })), engine: engineFlow(inWin), vision: visionFlow(all.filter((e) => at(e) <= end), { from }) };
 }
 
 /** Does this value meet its target? null when there is no value. */
 export const meets = (better, target, v) => (v === null || v === undefined ? null : better === 'up' ? v >= target : v <= target);
 
 /** The printed table; `prev` (an earlier record's values) adds the change since then. */
-export function scoreText(score, prev = null) {
+export function scoreText(score, prev = null, prevEngine = null, prevVision = null) {
   const L = [`Round score, ${score.window.from.slice(0, 10)} to ${score.window.to.slice(0, 10)} (${score.window.days} d, ${score.window.events} events)`];
   let met = 0;
   let known = 0;
@@ -152,6 +272,8 @@ export function scoreText(score, prev = null) {
     L.push(`  ${ok === null ? 'n/a ' : ok ? 'ok  ' : 'MISS'} ${m.label}: ${v === null ? 'n/a' : `${m.unit === '$' ? '$' : ''}${v}${m.unit === '$' ? '' : m.unit}`}${delta}; target ${m.better === 'up' ? 'at least' : 'at most'} ${m.unit === '$' ? '$' : ''}${m.target}${m.unit === '$' ? '' : m.unit}${score.notes[m.id] ? `. ${score.notes[m.id]}` : ''}`);
   }
   L.push(`${met} of ${known} measured targets met${known < score.measures.length ? ` (${score.measures.length - known} not measurable in this window)` : ''}.`);
+  L.push(...engineText(score.engine, prevEngine));
+  L.push(...visionText(score.vision, prevVision));
   return L.join('\n');
 }
 
@@ -177,6 +299,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     fs.mkdirSync(SCORES_DIR, { recursive: true });
     fs.writeFileSync(path.join(SCORES_DIR, `${label}.json`), `${JSON.stringify({ label, note: flag('note') || '', recordedAt: new Date().toISOString(), ...score }, null, 2)}\n`);
   }
-  if (argv.includes('--json')) console.log(JSON.stringify({ ...score, previous: prev ? { label: prev.label, values: prev.values } : null }));
-  else console.log(`${scoreText(score, prev?.values)}${prev ? `\nCompared with "${prev.label}" (${String(prev.window?.to).slice(0, 10)}).` : ''}${label ? `\nRecorded as studio/scores/${label}.json.` : ''}`);
+  if (argv.includes('--json')) console.log(JSON.stringify({ ...score, previous: prev ? { label: prev.label, values: prev.values, engine: prev.engine || null, vision: prev.vision || null } : null }));
+  else console.log(`${scoreText(score, prev?.values, prev?.engine || null, prev?.vision || null)}${prev ? `\nCompared with "${prev.label}" (${String(prev.window?.to).slice(0, 10)}).` : ''}${label ? `\nRecorded as studio/scores/${label}.json.` : ''}`);
 }

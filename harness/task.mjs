@@ -28,6 +28,9 @@ import { savePatch } from './wip.mjs';
 import { laneConfigWarning } from './lane-studio.mjs';
 import { overlapCheck } from './task-overlap.mjs';
 import { engineTask as engineTaskOf, engineRepo, engineTarget, engineOfTrack, engineTrainVerdict as engineTrainVerdictOf, readTrack, defaultEngineTrack } from './engine-tracks.mjs';
+import { nativeEngine } from './native.mjs';
+/** Task types that are studio work, not a change to the game (they never get the native engine's track by default). */
+const NON_CHANGE_TYPES = new Set(['chore', 'study', 'research', 'review', 'docs', 'idea', 'playtest']);
 import { misplacedTrailers, misplacedTrailerText } from './trailers.mjs';
 import { inferLaneFromText } from './lane-infer.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, carryTaskBranchEx, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf } from './worktree.mjs';
@@ -2631,6 +2634,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       if (dt.error) { console.error(`Not queued. ${dt.error}.`); process.exit(1); }
       if (dt.track) flags.track = dt.track;
       if (dt.track) console.log(`--track not given: an engine-porter task goes on ${dt.track}, the studio's only engine.`);
+    }
+    // 2.82: in a native-engine studio (harness/native.mjs) a builder's change goes on the engine track unless it says
+    // otherwise (--track web: the web rules a studio is still moving out of; a lane, paths or a non-change type: studio work).
+    if (roleFlag === 'builder' && typeof flags.track !== 'string' && typeof flags.lane !== 'string' && typeof flags.paths !== 'string' && !NON_CHANGE_TYPES.has(String(flags.type || '').toLowerCase()) && !/^(plan|document|write up|review|research|study)\b/i.test(title)) {
+      const ne = nativeEngine(mainRoot());
+      if (ne) { flags.track = `engine:${ne}`; console.log(`--track not given: this studio is native ${ne}, so a builder task goes on engine:${ne} (web rules still being moved: --track web).`); }
     }
     if (roleFlag === 'builder' && typeof flags.lane !== 'string' && typeof flags.paths !== 'string' && !(typeof flags.scope === 'string' && scopePaths(flags.scope).length)) {
       const inf = inferLaneFromText([title, flags.description, flags.desc, flags.why].filter((x) => typeof x === 'string').join(' '), mainRoot());

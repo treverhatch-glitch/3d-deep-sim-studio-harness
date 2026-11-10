@@ -1506,3 +1506,26 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** 2.80 fixed `studio/game.json` saved with a byte-order mark for the cartridge reader and the tester's config (N11); the other readers of the same file (engine tracks, the Unity gate, the asset gate, perf tests and more) and the state-file readers still read such a file as missing.
 - **Fix:** one `readJson` in harness/fsafe.mjs (skips the mark), one `pidAlive` (19 copies), one `.env` reader in harness/dotenv.mjs. qa/selftest-281a.mjs.
 
+### P-295 — engine failures that need no editor were found by hour-long land runs · fixed in 2.82.0
+- **Evidence:** the crew's 64 Unity land runs: 24 of 45 failures were in the .NET rule tests, each found under the engine's slot and narrowed with more land runs; 320 land-run minutes per landed lane.
+- **Fix:** the rules check on the batch before the land run, narrowed with the cheap check (harness/engine-rules.mjs); a check red on the target judges nobody. qa/selftest-282a.mjs.
+
+### P-296 — the harness could not see where a land run's time went · fixed in 2.82.0
+- **Evidence:** the land script's own records showed Edit Mode at 53 of 92 minutes, re-running tests .NET had run; the harness's events held one number per run.
+- **Fix:** STUDIO_LAND_RESULT (the land's stages on engine.land), STUDIO_UNITY_EDITMODE_ARGS (what the editor still has to run), the engine flow on the scorecard. qa/selftest-282a.mjs.
+
+### P-297 — a studio whose game is the engine build still paid for the web path · fixed in 2.82.0
+- **Evidence:** builder tasks got web lanes by default, the tester played the web build on a schedule, a web build was queued after every landing and web tasks grew engine twins, in a studio that ships the engine build.
+- **Fix:** native-engine mode (harness/native.mjs, docs/NATIVE-ENGINE.md). qa/selftest-282a.mjs.
+
+### P-298 — the attempt ledger recorded no main tip on Windows · fixed in 2.82.0 (found by 2.81.0's checks)
+- **Evidence:** windows-selftest: 7 attempt-ledger checks failed; git prints the long path with forward slashes and the temp folder was the 8.3 short name, so "the same checkout" compared unequal.
+- **Fix:** harness/attempts.mjs gitTip compares native real paths, case-folded on Windows.
+
+### P-299 — the rules check's kept result did not know its git-ignored inputs · fixed in 2.82.0 (before release)
+- **Evidence:** found while answering the owner's train-split question (studio/notes/TRAIN-SPLIT-2026-11.md): the crew's land records name two different hashes of the git-ignored rules pack on two days, and 11 of 14 rule-test failures at landing were that pack disagreeing with a branch's recorded results. The rules check kept its result per tree and command, so the same tree with another pack got the old answer, and the land run was told the rules were green.
+- **Fix:** harness/engine-rules.mjs `inputsPrint`: the inputs' content is part of a kept result's key; harness/unity-train.mjs looks at the inputs again before the land run and withholds STUDIO_RULES_GREEN when they changed. qa/selftest-282a.mjs (two checks).
+
+### P-300 — the porter's own check ran the rules command where its inputs were not · fixed in 2.82.0 (before release)
+- **Evidence:** 2.82's fold ("with no quickCheck, the owner's rules command is the porter's check too") ran the command in the lane's folder when a porter ran `npm run engine -- check`. The crew's engine lanes are worktrees under `.lanes/engine/` with no copy of the git-ignored rules pack, so a good lane would read red, with no check of the target first. (`task done` was never affected: it runs an engine check only when `quickCheck` is set.) Found on the day the crew took 2.82 early.
+- **Fix:** harness/engine-check.mjs `rulesAsQuickCheck`: the rules check (engine-rules.mjs) on the lane's HEAD chained on the target, skipped whenever it cannot judge. docs: for a check at `task done`, set `quickCheck` to a compile. qa/selftest-282a.mjs.

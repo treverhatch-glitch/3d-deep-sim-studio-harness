@@ -60,3 +60,14 @@ harness 2.56 to 2.79.2 with an outside overseer.
 | 15 | Escapes | 1.1% (4 of 358) | ≤ 5% |
 
 One target of fifteen met. The round's work is judged by the next record against this one.
+
+## The engine flow and the design link (2.82)
+
+Two blocks print under the fifteen measures and are kept in a record (`engine`, `vision`). They are not counted in
+the fifteen: one is a single engine's queue, the other a link, and neither has a target yet. What each line counts is
+in [NATIVE-ENGINE.md](NATIVE-ENGINE.md).
+
+Baseline from the same log: 67 land runs, 11 lanes landed, 320.3 land-run minutes per landed lane, 16.4% of land runs
+passed, 25.4% refused or not run (495.4 minutes waiting), 53% of the minutes in red runs, a passing run 101 minutes
+(median). Design link: 57.3% of 358 done tasks trace to a pillar, a kept layer, an approved idea or the owner's ask;
+7.8% were asked for by the owner and 92.2% proposed by agents.
