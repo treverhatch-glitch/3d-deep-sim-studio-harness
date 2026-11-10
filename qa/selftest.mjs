@@ -4934,6 +4934,14 @@ if (inShard('selftest-281b2')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.81 (b3), from the R2 trial: a structured exitCause on every train verify (harness/verify-cause.mjs).
+if (inShard('selftest-281b3')) {
+  const dir = copyRepo();
+  const { selftest281B3 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281b3.mjs')).href);
+  await selftest281B3({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

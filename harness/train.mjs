@@ -110,6 +110,7 @@ import { markQuietHold, clearQuietHold } from './heavy.mjs';
 import { subIdsFromLog } from './gate-subids.mjs';
 import { timeoutFlakesFromLog } from './timeout-rerun.mjs';
 import { runGatesWaiting, busyWhy, ranNoCheck } from './train-busy.mjs';
+import { exitCause } from './verify-cause.mjs';
 import { remoteMode, remoteVerify, remoteCheckPattern, localGateIds } from './remote-verify.mjs';
 import { bisectWidth, karySearch, karyCost, focusWorkers, spawnCollect, runGatesWaitingAsync } from './train-parallel.mjs';
 import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFocus, failingTests, tailSignature, tailsExplaining, tailTitle, tailNote, tailWaitWhy, pinDiffLines } from './train-tail.mjs';
@@ -816,9 +817,10 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   const { gates, detail } = failLines(text);
   const why = ok ? '' : noCheck ? `ran no check (${busy || `exit ${r.status} before any gate ran`})` : r.status !== 0 ? `failed: ${gates.join(', ') || `exit ${r.status}`}` : !rec ? 'wrote no verify record' : rec.tree !== tree ? `tested tree ${String(rec.tree).slice(0, 8)}, not ${tree.slice(0, 8)}` : 'its record is not a clean full verify';
   const vparts = trainVerifyParts(text, ok, [sc.dir, root]); // 2.72.0 (a)
-  emitEvent({ type: 'task.train.verify', agent: owner, status: ok ? 'ok' : 'blocked', msg: `train ${id}: verify ${n} of ${tree.slice(0, 8)} ${ok ? 'green' : why} in ${Math.round((Date.now() - t0) / 1000)} s${vparts.flakes.length ? ` (timeout-flake, green for those files only: ${vparts.flakes.slice(0, 3).join(', ')})` : ''}`, meta: { train: id, tree, ok, gates, ms: Date.now() - t0, ...(vparts.subIds.length ? { subIds: vparts.subIds } : {}), ...(vparts.flakes.length ? { timeoutFlakes: vparts.flakes } : {}) } });
+  const cause = exitCause({ ok, r, rec, tree, gates, busy, noCheck, text }); // 2.81 (b3): a structured verdict (harness/verify-cause.mjs)
+  emitEvent({ type: 'task.train.verify', agent: owner, status: ok ? 'ok' : 'blocked', msg: `train ${id}: verify ${n} of ${tree.slice(0, 8)} ${ok ? 'green' : why} in ${Math.round((Date.now() - t0) / 1000)} s${vparts.flakes.length ? ` (timeout-flake, green for those files only: ${vparts.flakes.slice(0, 3).join(', ')})` : ''}`, meta: { train: id, tree, ok, gates, exitCause: cause, exit: r.status ?? null, ms: Date.now() - t0, ...(vparts.subIds.length ? { subIds: vparts.subIds } : {}), ...(vparts.flakes.length ? { timeoutFlakes: vparts.flakes } : {}) } });
   if (vparts.flakes.length) log(`[train] ${id}: verify ${n}: ${vparts.flakes.length} test file(s) timed out and passed alone at low load (timeout-flake; the lane is not blamed for them): ${vparts.flakes.slice(0, 5).join(', ')}`);
-  const res = { ok, rec, gates, detail, why, log: path.relative(root, logFile).split(path.sep).join('/'), ms: Date.now() - t0, ...(ok ? {} : noCheck ? { noCheck: true, busy: busy || null } : {}), ...(trustNote ? { trustNote, closeRec: { ...rec, dirty: false, trustNote } } : {}) };
+  const res = { ok, rec, gates, detail, why, exitCause: cause, log: path.relative(root, logFile).split(path.sep).join('/'), ms: Date.now() - t0, ...(ok ? {} : noCheck ? { noCheck: true, busy: busy || null } : {}), ...(trustNote ? { trustNote, closeRec: { ...rec, dirty: false, trustNote } } : {}) };
   if (!res.noCheck) seen.set(tree, res); // a run that judged nothing is not cached: the next ask runs it again
   if (!ok && !res.noCheck) startRedClock(id, { why, gates, log: res.log, tests: failingTestsLine(text).list.slice(0, 5) }); // 2.78.2 (b)
   if (!ok && !res.noCheck) { res.triage = flakeTriage(sc, { id, tree, text, log }); if (!res.triage) delete res.triage; } // 2.69.0 (r); 2.77.3: its result; 2.78.0: the labels decide a load-sensitive excuse
