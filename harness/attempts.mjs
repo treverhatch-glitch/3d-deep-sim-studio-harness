@@ -50,7 +50,10 @@ export function gitTip(root = mainRoot()) {
     if (r.status !== 0) return null;
     const [top, sha] = String(r.stdout || '').trim().split(/\r?\n/);
     if (!/^[0-9a-f]{40}$/.test(sha || '') || !top) return null;
-    if (fs.realpathSync(top) !== fs.realpathSync(root)) return null;
+    // The same folder in two spellings is one folder: git prints forward slashes and the long name, a Windows temp path
+    // can be the 8.3 short name (RUNNER~1), and the drive letter's case varies. The native realpath resolves all three.
+    const canon = (p) => { let r; try { r = fs.realpathSync.native(p); } catch { r = path.resolve(p); } return process.platform === 'win32' ? r.toLowerCase() : r; };
+    if (canon(top) !== canon(root)) return null;
     return sha;
   } catch { return null; }
 }
