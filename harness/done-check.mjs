@@ -731,7 +731,7 @@ export function engineWorkChecks(task) {
 }
 const ENGINE_WORK_TYPES = new Set(['change', 'chore', 'bug', 'system', 'whole', 'docs']);
 
-export function checkDone(task, since = startedAt(task.id)) {
+export function checkDone(task, since = startedAt(task.id), { noop = false } = {}) {
   // 2.77.0 (u): an engine pass in its own repo is judged there; the engine's land run is its verify.
   const ew = (() => { try { return engineWorkChecks(task); } catch { return null; } })();
   if (ew && ENGINE_WORK_TYPES.has(typeOf(task).type)) {
@@ -775,7 +775,8 @@ export function checkDone(task, since = startedAt(task.id)) {
   };
 
   // 2.58.0: a chore closes like a change, without the gameplay, reach and screenshot checks below.
-  if (type === 'change' || type === 'chore') workAndVerify();
+  // 2.80 (f, N6): a chore closed --no-op (with its reason) has no change to verify: it skips exactly those two items.
+  if (type === 'change' || (type === 'chore' && !noop)) workAndVerify();
   if (type === 'change' || type === 'bug') gameplayChecks(task, part, since, check);
   // 2.38.0: built but not wired. Game code this task changed that nothing in the game reaches from its entry
   // points (harness/reachability.mjs). A note by default; STUDIO_REACHABILITY=fail makes it a failing check.
@@ -815,6 +816,7 @@ export function checkDone(task, since = startedAt(task.id)) {
     if (part !== 'renderer' && fix !== undefined && regs.length) {
       if (!fix) check('Regression fails on the code before the fix', false, `no commit tagged Studio-Task: ${task.id} yet; commit the fix (with STUDIO_LOCK_OWNER set, the hook adds the tag), then this check replays the regression on the commit before it`);
       else {
+        console.error(`[done-check] replaying ${regs.length} regression(s) on the commit before the fix (${fix.slice(0, 8)}^): this can take minutes`);
         const results = regs.map(({ f }) => failsBefore(abs(f), `${fix}^`));
         const good = results.find((r) => r.ok);
         check('Regression fails on the code before the fix', good, results.map((r) => r.why).join('; '));
