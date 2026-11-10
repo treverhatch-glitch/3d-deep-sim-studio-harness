@@ -4914,6 +4914,16 @@ if (inShard('selftest-280f')) {
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.81 (b1), from the R2 trial: the attempt ledger (.studio/attempts/<task>.json) and one eligibility verdict: a task handed
+// back for a blocker that has not changed (same reason key, main tip and open blockers) is offered last (record, the
+// default) or refused (STUDIO_ATTEMPTS=refuse); next and the supervisor stop offering what start refuses.
+if (inShard('selftest-281b1')) {
+  const dir = copyRepo();
+  const { selftest281B1 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281b1.mjs')).href);
+  await selftest281B1({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

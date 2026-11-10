@@ -52,6 +52,7 @@ import { checkStamped, stampWrite, watchCommand } from './workaround.mjs';
 import { gateEnv } from './gate-env.mjs';
 import { shrinkAtDone } from './ratchet.mjs';
 import { capRefusal } from './round-cap.mjs';
+import { eligibility, recordAttempt, clearAttempts, sameBlocker } from './attempts.mjs';
 import { pinRefusal } from './task-pin.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
@@ -403,8 +404,11 @@ export function nextFor({ role = null, agent = null } = {}, q = parseNextQueue()
   let evs = null;
   const open = q.backlog
     .map((t, i) => [t, i])
-    .filter(([t]) => !lockStatus(`task:${t.id}`).locked && (!role || t.role === role || !t.role) && !holdReason(t.id, q, Date.now(), undefined, role || process.env.STUDIO_ROLE || null) && !liveOwner(t.id, agent, (evs ||= readRecentEvents(20000)), { waiting: true }))
-    .sort((a, b) => (PRI[a[0].priority] ?? 9) - (PRI[b[0].priority] ?? 9) || a[1] - b[1]);
+    // 2.81 (b1): one verdict (harness/attempts.mjs eligibility: the holds, the budget, the round cap), so next stops
+    // offering what start refuses; a task whose last failed hand-back met a blocker that has not changed is offered last.
+    .filter(([t]) => !lockStatus(`task:${t.id}`).locked && (!role || t.role === role || !t.role) && !eligibility(t.id, { q, agent, role: role || process.env.STUDIO_ROLE || null, events: (evs ||= readRecentEvents(20000)) }) && !liveOwner(t.id, agent, (evs ||= readRecentEvents(20000)), { waiting: true }))
+    .map(([t, i]) => [t, i, (() => { try { return sameBlocker(t.id, { done: new Set((q.done || []).map((x) => x.id)) }).same ? 1 : 0; } catch { return 0; } })()])
+    .sort((a, b) => a[2] - b[2] || (PRI[a[0].priority] ?? 9) - (PRI[b[0].priority] ?? 9) || a[1] - b[1]);
   return { task: open[0]?.[0] || null, held: false };
 }
 
@@ -1008,6 +1012,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
 
   const nextActive = q.inProgress[0] || null;
   syncCurrentTaskCheckpoint(nextActive, `Completed ${target.id}${note ? `: ${note}` : ''}`);
+  clearAttempts(target.id); // 2.81 (b1): a finished task has nothing to hold back (harness/attempts.mjs)
   emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title}` });
   try { canaryEnd(target.id, 'cheated', { agent: agent || target.role }); } catch { /* a record, never a blocker */ }
   assetHandoffAfterLanding(target.id, agent); // 2.67.1 (j)
@@ -1143,6 +1148,7 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
   clearPass(root, taskId);
   if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Completed ${target.id}${note ? `: ${note}` : ''}`);
+  clearAttempts(target.id);
   emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title} (merge train ${train})`, meta: { train } });
   try { canaryEnd(target.id, 'cheated', { agent: agent || target.role }); } catch { /* a record, never a blocker */ }
   assetHandoffAfterLanding(target.id, agent); // 2.67.1 (j)
@@ -1363,6 +1369,13 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
   const deps = [...String(note || '').matchAll(/\b(?:blocked (?:by|on)|waits? (?:for|on)|needs|after)\s+((?:T-\d+(?:\s*(?:,|and)\s*)?)+)/gi)].flatMap((m) => m[1].match(/T-\d+/g) || []);
   const open = deps.filter((d) => d !== target.id && !q.done.some((t) => t.id === d) && [...q.inProgress, ...q.backlog].some((t) => t.id === d));
   if (open.length) setHold(target.id, { after: [...new Set([...(readHolds()[target.id]?.after || []), ...open])] }, { by: who, msg: `${target.id} waits for ${open.join(', ')} (from ${who}'s hand-back note)` });
+  // 2.81 (b1): the attempt ledger (harness/attempts.mjs): a failure or owner-only hand-back, never one the harness or a
+  // person caused (`cause`; isFailureNote already leaves harnessCaused/personCaused notes out).
+  if (!cause && (ownerPark || isFailureNote(note))) {
+    const doneNow = new Set(q.done.map((t) => t.id));
+    const blockers = [...new Set([...open, ...(readHolds()[target.id]?.after || [])])].filter((id) => !doneNow.has(id));
+    recordAttempt(target.id, { agent: who, endLabel: ownerPark ? 'owner-only' : tripped ? 'breaker' : /^Round cap\b/.test(String(note || '').trim()) ? 'cap' : 'hand-back', reasonKey: reasonKey(note), blockers, ownerOnly: Boolean(ownerPark) });
+  }
   return { ...target, handoffFile: path.relative(REPO_ROOT, file), waitsFor: open, ...(tripped ? { parked: tripped } : {}) };
 }
 
@@ -2405,6 +2418,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const refusedUnpark = unparkRefusal(arg1, { by });
       if (refusedUnpark) { console.error(refusedUnpark); process.exit(1); }
       setHold(arg1, { parked: null }, { by, msg: `${by} unparked ${arg1}` });
+      clearAttempts(arg1); // 2.81 (b1): whoever unparks decided it can run again
       console.log(`${arg1} can start again.`);
     } else if (cmd === 'block') {
       const u = typeof flags.until === 'string' ? flags.until : '';

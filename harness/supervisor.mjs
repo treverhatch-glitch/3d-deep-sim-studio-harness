@@ -363,7 +363,8 @@ export async function supervise(opts, state, now = Date.now()) {
   }
   // The watcher passes the launcher's functions in: agent.mjs run as a command can't import itself again.
   const { sessions, startAgent, launchableRoles, nextAgentName } = opts.deps || (await import('./agent.mjs'));
-  const { holdReason, laneOf, lanesClash, laneList } = await import('./task-hold.mjs');
+  const { laneOf, lanesClash, laneList } = await import('./task-hold.mjs');
+  const { eligibility, sameBlocker } = await import('./attempts.mjs');
   const { effectiveMode } = await import('./mode.mjs');
   const { budgetStatus, pickTool, quotaMark, probeTool, exhaustedUntil, customKey } = await import('./budget.mjs');
   const { status: lockStatus } = await import('./lock.mjs');
@@ -507,7 +508,8 @@ export async function supervise(opts, state, now = Date.now()) {
   let claimEvents = null;
   const waiting = q.backlog.filter((t) => {
     if (!t.role || t.role === 'human' || lockStatus(`task:${t.id}`).locked) return false;
-    let h = holdReason(t.id, q, now, undefined, t.role);
+    // 2.81 (b1): one verdict (harness/attempts.mjs): the holds, the same-blocker clause, the budget and the round cap.
+    let h = eligibility(t.id, { q, now, role: t.role, events: (claimEvents ||= readRecentEvents(20000)) })?.why;
     if (!h) {
       const a = claimActive(t.id, { root: mainRoot(), now, events: (claimEvents ||= readRecentEvents(20000)), orphaned: true });
       if (a.busy) h = `waits for ${a.owner}: ${a.why}`;
@@ -589,7 +591,16 @@ export async function supervise(opts, state, now = Date.now()) {
   const started = [];
   let ram = null;
   // Most urgent first; the dev hacker only gets a slot nobody else needs (it never holds anything up).
-  let ordered = [...groups.values()].sort((a, b) => (a.role === 'dev-hacker') - (b.role === 'dev-hacker') || String(a.tasks[0].priority).localeCompare(String(b.tasks[0].priority)));
+  // 2.81 (b1, STUDIO_ATTEMPTS=record): a task whose last failed hand-back met a blocker that has not changed (same reason,
+  // main's tip, what it waits for) goes after every other eligible one: last in its group, its group last when it is all such.
+  const doneIds = new Set((q.done || []).map((x) => x.id));
+  const same = (t) => { try { return sameBlocker(t.id, { done: doneIds }).same; } catch { return false; } };
+  const allSame = new Map();
+  for (const g of groups.values()) {
+    g.tasks = [...g.tasks.filter((t) => !same(t)), ...g.tasks.filter((t) => same(t))];
+    allSame.set(g, same(g.tasks[0]));
+  }
+  let ordered = [...groups.values()].sort((a, b) => allSame.get(a) - allSame.get(b) || (a.role === 'dev-hacker') - (b.role === 'dev-hacker') || String(a.tasks[0].priority).localeCompare(String(b.tasks[0].priority)));
   // 2.76.0 (k): the Line Producer's plan (harness/line-producer.mjs, STUDIO_LINE_PRODUCER): its order, model routes and
   // the rig's builder cap. Within the pace's caps only: it reorders and can hold builders back, never adds one.
   const line = await linePlanNow(now);
