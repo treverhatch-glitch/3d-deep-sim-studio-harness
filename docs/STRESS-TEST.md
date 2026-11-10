@@ -21,7 +21,7 @@ To pull later harness updates into the private copy: `git remote add upstream <p
 ## 2. Set it up
 
 ```bash
-npm ci && npm run setup                 # writes .env with a HUB token
+npm ci && npm run setup                 # writes .env
 npm run studio:reset -- --name "Mini Farm" --yes
 npm run hooks:install                   # pre-commit refuses secrets and other agents' locked files
 npm run intake                          # the game: play length (start with a demo), phases, layers
@@ -36,7 +36,7 @@ In `.env` (gitignored; `node scripts/secret-scan.mjs` checks what git would publ
 | `STUDIO_DAILY_TOKEN_CAP` | **Set this first.** Calls past it are refused and the Producer is told |
 | `STUDIO_PRODUCER_NAME` | So script events and your Producer agent show as one person |
 | `STUDIO_WATCH_INTERVAL` | 300 is fine; lower it to see hand-offs sooner during the test |
-| `STUDIO_BACKUP_DIR` | A Google Drive, Dropbox or OneDrive folder on your computer, shared with no one. The HUB backs up the studio's memory there daily, storing only what changed (`npm run learn -- backup` any time; `docs/BACKUPS.md`) |
+| `STUDIO_BACKUP_DIR` | A Google Drive, Dropbox or OneDrive folder on your computer, shared with no one. The supervisor backs up the studio's memory there daily, storing only what changed (`npm run learn -- backup` any time; `docs/BACKUPS.md`) |
 | `STUDIO_BACKUP_KEEP` | Daily backups kept, plus the first of each month (default 60) |
 | `STUDIO_BACKUP_MEDIA` | Newest screenshots kept in backups (default 20; 0 for none) |
 | `STUDIO_REFERENCE_DIR` | Where the reference library keeps media; a synced folder keeps it reachable |
@@ -70,9 +70,8 @@ whenever you have an idea, a change, a reference or an asset; the studio keeps r
 
 ## 3. Run it
 
-- `npm run hub`, then open `http://localhost:3847/?token=<HUB_TOKEN>`. The watcher and the daily
-  retro run inside the HUB. Keep it on a second screen; switch to the Studio view to watch. Click
-  any agent to see its task, its done checklist and who assigned it.
+- `npm run studio:start`: the supervisor runs the watcher and the daily retro. `npm run studio:status` and
+  `npm run task -- board` show who does what; `npm run agent -- list` each agent's task.
 - The Producer starts with `npm run handoff` and works the queue; workers follow `studio/skills/`.
 - Let agents hit real limits: hand-backs, the spend cap, provider failover and the watcher are part
   of what is being tested.
@@ -87,7 +86,7 @@ whenever you have an idea, a change, a reference or an asset; the studio keeps r
 | Where did agents stall, run out or get refused? | `studio/handoffs/`, `npm run watch`, the retro |
 | What did the harness do well or badly? | `npm run notes -- list` (the overseer's evaluations included), then `npm run notes -- export` to bring it upstream |
 | What keeps happening, and did lessons stick? | `npm run learn` (`studio/memory/LEARNED.md`); the backups in `STUDIO_BACKUP_DIR` |
-| What did it cost? | Tokens per provider in the War Room's "Model calls today", `.studio/runs/` |
+| What did it cost? | Tokens per provider: `npm run tokens`, `npm run ledger`, `.studio/runs/` |
 
 Keep the private copy's notes. The lessons that are about the harness rather than your game are worth
 bringing back to the public repo as a pull request from a person, without the game's code, keys or data.

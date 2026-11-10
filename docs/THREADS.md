@@ -64,8 +64,8 @@ can't verify a Discord or GitHub identity itself: the bot passes the author id i
 (`--author`), and the harness applies the owner's lists to it. The table is protected, so only the owner changes
 the lists.
 
-Sources: `ci` (ci-watch), `train` (`task.train.*`), `hub` (the War Room's `/api/inbox` with a task, ask
-answers, away verdicts), and `discord` and `github` (`npm run thread -- post`).
+Sources: `ci` (ci-watch), `train` (`task.train.*`), `hub` (ask answers, and before 2.80 the War Room's
+`/api/inbox` and away verdicts), and `discord` and `github` (`npm run thread -- post`).
 
 **Pass-through never adds a task and never edits the board.** The Producer is still the only writer to the
 live queue. Gates, the train, locks and protected files are unchanged.
@@ -98,9 +98,6 @@ or a person. They never accept a worker: not a builder, QA or other launched wor
 worker's name in `--by` or `STUDIO_LOCK_OWNER` (the `harness/permission.mjs` rules). `link` takes only
 `discord:`, `pr:` and `issue:` keys, and only to an open task. Code builds the other keys.
 
-The War Room's `POST /api/inbox` takes an optional `task` (or `thread` key). If threads are on and `hub` is
-live, a message for an open task goes into that task's inbox. Otherwise it reaches the Producer exactly as
-before. The hub token rule is unchanged.
 
 ## When it runs, and what reaches a running session
 

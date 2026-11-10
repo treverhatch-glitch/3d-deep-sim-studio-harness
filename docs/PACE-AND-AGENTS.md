@@ -2,7 +2,7 @@
 
 ## Pace
 
-The game dev chooses how fast the studio works, at intake, in the War Room's Game plan view, or with
+The game dev chooses how fast the studio works, at intake or with
 `npm run mode -- set <mode> --by <name>`. Every change is logged in `studio/mode.json`.
 
 | Pace | Agents at once | Reviews from another model family | Starts agents itself (with auto-start on) | Director / Producer check-ins |
@@ -24,7 +24,7 @@ play:
 
 ## MAX SPEED
 
-A lever in every War Room view (and `npm run mode -- boost on|off --by <name> [--hours 4]`). On top
+A lever: `npm run mode -- boost on|off --by <name> [--hours 4]`. On top
 of any pace: twice the agents (up to 12), agents start automatically, the Director checks in about
 four times as often and the Producer every hour. `--until <HH:MM UTC|ISO>` ends it at a time and `--until off` keeps it until turned off; when it runs out the studio says so once (a Studio Status line and `mode.boost_expired`, with the agent target it fell back to). Going faster without the leads looking more often is
 how studios drift; the lever does both. Agents start on their own only with auto-start on (below).
@@ -32,22 +32,22 @@ how studios drift; the lever does both. Agents start on their own only with auto
 ## Auto-start (off by default)
 
 ```bash
-npm run mode -- autostart on --by <name>     # the watcher and the HUB may start agents on their own
+npm run mode -- autostart on --by <name>     # the watcher and the supervisor's passes may start agents on their own
 npm run mode -- autostart off --by <name>    # back to the default: nothing starts on its own
 npm run mode -- autostart                    # which it is
 ```
 
-One switch, recorded in `studio/mode.json` with who flipped it (2.58.0, from a crew report: the HUB kept
-starting Producer sessions nobody asked for). Off, whatever the pace, MAX SPEED or away mode say:
+One switch, recorded in `studio/mode.json` with who flipped it (2.58.0, from a crew report: the hub, since
+retired, kept starting Producer sessions nobody asked for). Off, whatever the pace or MAX SPEED say:
 - the watcher's fill (`npm run agent -- fill`, the Director's flow, the game-dev loop's launch step) starts no agent;
 - the Producer check-in still pings and logs ("No Producer session was started: auto-start is off …"), but
   starts no Producer, even with `STUDIO_PRODUCER_CMD` or `STUDIO_PRODUCER_TOOL` set;
-- the HUB's own wake-ups (queue refill, development cycle, a closed milestone, the game-dev review) and the
+- the supervisor's own wake-ups (queue refill, development cycle, a closed milestone, the game-dev review) and the
   routine Director ping start no one;
-- the War Room's Pace chip, `npm run mode` and `npm run agent -- list` say auto-start is off and how to turn it on.
+- `npm run mode` and `npm run agent -- list` say auto-start is off and how to turn it on.
 
-Starting an agent by hand is unaffected: `npm run agent -- start` or `hire`, the War Room's Start agent,
-a person's action in the War Room that wakes a role, and the supervisor (`npm run studio:start`, which you
+Starting an agent by hand is unaffected: `npm run agent -- start` or `hire`,
+and the supervisor (`npm run studio:start`, which you
 start yourself to run the studio unattended).
 
 ## Starting agents
@@ -62,7 +62,7 @@ npm run agent -- stop builder-1
 (`.studio/agents/<name>.log`), and the agent outlives the shell that started it. `--attach` (or `--foreground`)
 keeps the session in this process instead (scripts and tests that want to read the session's exit code).
 
-Or the War Room's **Start agent**. Set defaults in `.env`: `STUDIO_AGENT_TOOL` and `STUDIO_AGENT_MODEL`,
+Set defaults in `.env`: `STUDIO_AGENT_TOOL` and `STUDIO_AGENT_MODEL`,
 or per role (`STUDIO_BUILDER_TOOL`, `STUDIO_DIRECTOR_MODEL`, …). `STUDIO_<ROLE>_CMD` replaces the whole
 command for tools the launcher doesn't know (Hermes, a script); `{kickoff}`, `{agent}`, `{model}` and
 `{role}` are filled in, quoted for your shell.
@@ -73,7 +73,7 @@ The launcher:
   macOS and Linux (see "How agents are launched on Windows" in docs/AGENT-TOOLS.md; agy gets
   `--print-timeout 900s` and a closed stdin; in a frozen clone Codex can run without its sandbox with
   `STUDIO_CODEX_BYPASS=1`, and agy without its prompts with `STUDIO_AGY_BYPASS=1`);
-- sends a heartbeat every 2 minutes; the War Room shows "Agent stalled" when it stops. A session whose
+- sends a heartbeat every 2 minutes; `npm run agent -- list` shows "stalled" when it stops. A session whose
   process is still alive but whose heartbeat is older than `STUDIO_STALL_RELEASE_MIN` (30 min; 0 turns it off)
   is freed by the watcher: its uncommitted work is saved to `.studio/wip/`, its task goes back to the queue with
   a note, its claims are released and the session is marked ended ("stalled"), so its slot is free. Nothing is
@@ -91,7 +91,7 @@ The launcher:
   start time can't be read, a recent heartbeat decides as before. A stop while an agent is still starting stops
   its launcher.
 
-In fast paces and with MAX SPEED, the watcher (run by the HUB) starts agents for waiting tasks itself, once
+In fast paces and with MAX SPEED, the watcher (run by the supervisor) starts agents for waiting tasks itself, once
 auto-start is on (`npm run mode -- autostart on --by <name>`).
 
 A `--note` reaches the agent's prompt inside the block marked "written by agents or people", labelled with its
@@ -100,7 +100,7 @@ sender (`--by`, or "unknown"); see docs/SECURITY.md.
 ## Hiring into departments
 
 The Producer runs the studio. It opens departments, writes tasks, and hires agents into them. The game dev
-can do the same from the War Room. The Director doesn't hire: it files corrections, and the Producer
+can do the same with the same commands. The Director doesn't hire: it files corrections, and the Producer
 acts on them.
 
 ```bash
@@ -115,17 +115,15 @@ npm run agent -- logs audio-1                        # its output so far
 
 - `hire` is `start` with a department. The agent is named for you (`sound-designer-2`) unless you give `--agent`.
   `--next` takes the top waiting task for its role.
-  - `--division` seats the agent in that room whatever its name, and `--open` opens the room if it's locked.
+  - `--division` puts the agent in that department whatever its name, and `--open` opens it if it's closed.
   - `--note` goes into its prompt as "Note from producer-1: …".
   - `--loop` keeps it taking tasks until the queue is empty, or for N tasks.
 - Opening or closing a department needs a reason. Reasons are logged in `studio/decisions/divisions.md`.
-- In the War Room, every open room has a **+ Hire** button. It hires the room's first role on the next waiting
-  task, and the desk appears within seconds. Agents started from the War Room have a **Pause** button in Ops.
 - **The Producer's limit:** it hires on its own up to `producerMayHireUpTo` running agents (in `studio/budget.json`;
   the default is 4). Past that, the hire becomes a "Needs you" question. Saying yes starts the agent.
 - **Refused:**
   - a hire by the Director;
-  - in a frozen clone, a lane inside `harness/`, `hub/`, `qa/` or `scripts/`;
+  - in a frozen clone, a lane inside `harness/`, `qa/` or `scripts/`;
   - any hire past the pace's caps, while the studio is stopped, or once the daily token cap is spent.
 - **Departments and their roles.** Always on:
   - Producer
@@ -150,35 +148,12 @@ npm run agent -- logs audio-1                        # its output so far
 - The run report's **Staffing** section lists who was hired, by whom, into which room, how long they worked, and their tokens.
 - In a frozen clone, `STUDIO_CLAUDE_BYPASS=1` lets claude agents run without permission prompts.
 
-## War Room actions reach agents
-
-What the game dev does in the War Room starts the agent that should act on it, if a tool is set for
-that role and the pace's caps allow it (a person asked, so this works in every pace):
-
-| In the War Room | Goes to | Starts |
-| --- | --- | --- |
-| Pitch an idea | the Idea Board, straight to R&D | an R&D agent |
-| Message the Producer | the Producer's inbox | the Producer, if none is running |
-| Answer follow-up questions | the Game Bible | the Director |
-| Say yes to a Liaison brief | R&D (an idea) or the Producer | that agent |
-| Ask for changes to a design | an art task with your words | the art department |
-
-Each answer says what happens next in one line: who has it, whether an agent started, or what to set
-so one can (`STUDIO_AGENT_TOOL` or `STUDIO_<ROLE>_TOOL`).
-
-## The Liaison chat
-
-The Game plan view has a chat with the Liaison, on a cheap model through the router (Ollama or a free
-key; the daily token cap applies). It asks until it understands, then reads back a brief: an idea, a
-direction, an asset or a question. Nothing is sent until you press **Yes, send it**; correcting it in
-the chat changes the same brief. The conversation is kept in `studio/liaison/chat.md`.
-
 ## Questions with a deadline
 
 ```bash
 npm run ask -- "Which floor first?" --options "Cubicle,Food court" --default Cubicle --timeout 4h --why "it teaches the controls"
 ```
 
-The question shows under **Needs you** and in the Game plan, answered with one click. If nobody answers
+The question shows under **Needs you** (`npm run digest`, Studio Status) and is answered with `npm run ask -- answer`. If nobody answers
 in time, the default applies, logged in `studio/decisions/decided-without-you.md` and the run report;
 the dev can reverse it. Signing, pillars, money and deleting never get a deadline.

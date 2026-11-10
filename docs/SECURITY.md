@@ -1,24 +1,12 @@
 # Security Notes
 
 ## Hub
-- Default bind is `127.0.0.1` (see `HUB_HOST` in `.env`). `npm run setup` writes a random `HUB_TOKEN` to `.env`.
-- Writes need the token in `X-Hub-Token` or `Authorization: Bearer`; a cookie or query string never authorizes a write.
-  2.74.0, one exception: a browser paired with `npm run hub -- pair --by <name>` (hub/pair.mjs; docs/WAR-ROOM-V3.md). Its
-  HttpOnly, SameSite=Strict cookie writes only from this machine (a loopback address), with the `X-Hub-Paired` header a
-  cross-site form can't send, and from a loopback origin; what it does is done `--by` the paired person. `pair` is refused
-  in an agent's shell and for an agent's name; the code works once for `STUDIO_HUB_PAIR_CODE_MIN` (10) minutes; only the
-  token's sha256 is kept, in `.studio/hub-pairs.json`; a pairing lapses after `STUDIO_HUB_PAIR_DAYS` (30) days unused;
-  `npm run hub -- unpair --by <name>` (or "Forget this browser") ends it. The hub no longer prints `HUB_TOKEN` in its link.
-- The WebSocket needs the token (`/ws?token=`) and a same-origin page.
-- Placeholder tokens (`change-me…`) and tokens shorter than 24 characters never authorize anything.
-- On a loopback bind, requests whose Host header is not localhost are refused (DNS rebinding). Add names with `HUB_ALLOWED_HOSTS`.
-- A non-loopback bind (`HUB_HOST=0.0.0.0`) refuses to start without a strong token, and then every read needs the token too.
-  Prefer `127.0.0.1` plus Tailscale serve or SSH forwarding for phone access.
-- `qa/hub-smoke.mjs` (a required gate) starts the real server and checks every rule above.
-- Open CORS is disabled.
+- 2.80: there is no hub any more: no local web server, no `HUB_TOKEN`, nothing listening. The studio is read through the
+  CLI (`npm run studio:status`, `npm run task -- board`, `npm run digest`) and Studio Status posts (harness/communicator.mjs).
+  An old `.env` may still hold `HUB_TOKEN`; launched agents never see it (below).
 
 ## Text written by agents or people
-- Task titles, hand-off notes (`studio/handoffs/`), review and meeting notes, lessons, event messages, `--note` text and
+- Task titles, hand-off notes (`studio/handoffs/`), review notes, lessons, event messages, `--note` text and
   `studio/PITFALLS.md` are written by agents or people: in a public repo or a Discord-driven crew, by anyone who can file a
   task or post a note. Since 2.58.0 the prepared brief (`npm run brief`), the focus brief (`.studio/briefs/<ID>.md`) and the
   launch prompt carry them only inside a block marked `----- BEGIN: written by agents or people -----` …

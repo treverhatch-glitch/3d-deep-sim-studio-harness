@@ -20,7 +20,7 @@ From the next push, every GitHub-hosted job is skipped and the one `self-hosted`
 order:
 - protected files
 - `npm run release` (every required gate and the self-test)
-- the War Room and controls in Chromium
+- the game's controls in Chromium
 - the Unity template on .NET
 
 ## Good to know

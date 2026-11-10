@@ -1,12 +1,11 @@
 # Specification vs. Repository Checklist (`docs/COMPARISON.md`)
 
-All components from the 17-Repository Audit, Master Specification, and Workflow UI HUB plan are implemented and enabled by default:
+All components from the 17-Repository Audit and Master Specification are implemented and enabled by default (2.80: the Workflow UI HUB / War Room was cut; the CLI shows the studio):
 
 | Component | Status | Implementation |
 |------|--------|------|
-| **Visual HUB (War Room)** | **Default** | React Flow 4-Quadrant War Room (`hub/WarRoom.tsx` + `docs/WAR-ROOM.md`) with Live Agent View (`noVNC` / screenshot / preview), Subscription Usage Panel (`.studio/usage.json`), and zero-build HTML fallback (`hub/index.html`). |
-| **Event Log** | **Default** | `.studio/events.jsonl` (written by `node scripts/append-event.mjs` and `harness/event.mjs`, mirrored to `/tmp/agent-events.jsonl`, streamed by `hub/server.mjs`). |
-| **Subscription Usage Panel** | **Default** | Reads `.studio/usage.json` (`/usage` & `/api/usage`) to display Grok Bot, Vertex AI $300 credit, NVIDIA NIM, Groq, and RTK/QMD savings. |
+| **Event Log** | **Default** | `.studio/events.jsonl` (written by `node scripts/append-event.mjs` and `harness/event.mjs`, mirrored to `/tmp/agent-events.jsonl`, read by `npm run studio:status`, the digest and the run report). |
+| **Subscription Usage Panel** | **Default** | `.studio/usage.json`, read by `npm run status`, tracks Grok Bot, Vertex AI $300 credit, NVIDIA NIM, Groq, and RTK/QMD savings. |
 | **Blender & 3D Asset Bridge** | **Default** | Headless `bpy` generator (`tools/blender/generate_glb.py` + `docs/BLENDER.md`) + `mlolson/blender-orchestrator` wired in `.mcp.json`. |
 | **Sim Isolation & Boundary** | **Default** | `scripts/check-sim-isolation.mjs` + `scripts/check-sim-purity.mjs` enforcing `studio/rules/graphics-sim-boundary.md` and `studio/rules/sim-isolation.md`. |
 | **Work Organization** | **Default** | `docs/WORK-ORGANIZATION.md`, `docs/DAILY-SUMMARY.md`, `studio/done/`, `studio/daily/TEMPLATE.md`, `studio/daily/videos/`. |

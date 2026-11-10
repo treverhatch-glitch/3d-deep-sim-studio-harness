@@ -8,11 +8,11 @@ Every coding agent **MUST** follow these operating rules.
 
 ## 0. One game per studio: starting a game
 
-- This clone is one studio for one game. Its Game Bible, board, locks and War Room belong to that game.
+- This clone is one studio for one game. Its Game Bible, board and locks belong to that game.
 - Asked to start a **new** game? Don't make a folder by hand or build it outside the harness. In an
   empty clone, run `npm run studio:reset -- --name "<game>" --yes`, then `npm run intake`.
 - Asked to start **another** game next to this one? Run `npm run new-studio -- --name "<game>"`. It
-  makes a second studio in a sibling folder (its own .env and War Room port). Then work there, from
+  makes a second studio in a sibling folder (its own .env and play port). Then work there, from
   its START-HERE.md.
 - Assets, art and code made outside the harness still come in through it: `npm run art -- propose`
   or `npm run asset`. Nothing goes into the game unrecorded.
@@ -154,7 +154,7 @@ game-dev loop every few minutes (`STUDIO_GAMEDEV_INTERVAL`, 180 s; without the s
 `STUDIO_WATCHDOG=off` opts out): stalled sessions end, a low queue is refilled from unmet charter exit
 criteria, met milestones close, idle builder slots fill, landings are checked (layout, visual), a tool at
 its quota or spend guard hands over to the next in the budget order, and the Director/Producer
-development cycle keeps planning forward. Away mode means more autonomy, not just review logging.
+development cycle keeps planning forward.
 
 Expected role of an attending game dev (a person or an agent): **optional**. Their input adds tasks or
 reprioritises them, approves assumptions the Director marked, and judges whether it is fun. Nothing in

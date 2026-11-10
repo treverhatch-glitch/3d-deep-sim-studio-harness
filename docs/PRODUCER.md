@@ -47,15 +47,11 @@ The Producer is the most expensive seat, so only decisions should reach it:
 | The router (automatic) | A provider or key runs out mid-call: fails over to the next one |
 | The watcher (`npm run watch`, a script) | Claims that expired: work goes back to the queue with a note. Silent agents, unclaimed handed-back work and provider outages: one `Watch:` task for you |
 | The agent itself | Handing a task back with `task pause --note` when it runs out or is swapped |
-| You, the Producer | `Watch:` and `Check forced done` tasks, meetings, the plan, who does what next |
+| You, the Producer | `Watch:` and `Check forced done` tasks, the plan, who does what next |
 | The person | Design, balance, money, releases, anything that can't be undone |
 
-## Meetings
+## Decisions that need several roles
 
-`node harness/meeting.mjs start "<topic>" --with builder,qa-playtester,designer-calibrator`
-gathers several agents at once (role names work; they resolve to whoever is doing that role).
-`say "<text>" --agent <name>` records remarks, and `end --decision "…" --action "title|role|P2"`
-writes the decisions, turns actions into tasks and adds the outcome to the Producer log. Notes go
-to `studio/meetings/`. In the War Room's Studio view everyone walks to a table in the meeting room
-and goes back to their desks when it ends.
+Ask each role (`node harness/event.mjs --type agent.ask --agent <you> --to <role> --msg "…"`) and record what was
+decided and why with `node harness/handoff.mjs note "what, why, next"`. (2.80: meetings went with the War Room.)
 

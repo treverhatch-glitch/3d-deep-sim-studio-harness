@@ -313,7 +313,7 @@ STUDIO_KEYMAP_AGENT_BUILDER_S3=ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_S3   # builde
 - Format: `TARGET:SOURCE[,TARGET:SOURCE]`; the agent's name in capitals with `-` as `_`. For the same TARGET the agent's
   mapping wins over the role's. Only that child's environment changes; the `STUDIO_KEYMAP_` settings aren't passed on.
 - Both names must be key names: capitals ending in `_API_KEY` or `_TOKEN`, with an optional suffix (`_LANE`, `_2`).
-  Never `STUDIO_…`, `HUB_…` (`HUB_TOKEN` writes to the War Room) or the owner key. Anything else is refused, and the
+  Never `STUDIO_…`, `HUB_…` (a 2.79 `.env` may still hold `HUB_TOKEN`) or the owner key. Anything else is refused, and the
   launch goes on without that entry.
 - A SOURCE that isn't set leaves TARGET unset for that session (the agent doesn't quietly fall back to the shared key).
   With `--tool nim`, a mapping for `OPENAI_API_KEY` also sets `AIDER_OPENAI_API_KEY`.

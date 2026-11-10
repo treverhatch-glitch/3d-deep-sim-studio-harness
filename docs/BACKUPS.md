@@ -2,7 +2,7 @@
 
 `npm run learn -- backup` copies everything the studio has learned and decided to a folder you
 choose. Point `STUDIO_BACKUP_DIR` at a folder that Google Drive for desktop, Dropbox or OneDrive syncs,
-and the HUB backs up once a day.
+and the supervisor backs up once a day.
 
 ## What goes in
 
@@ -28,7 +28,7 @@ Not kept: game code and assets (that's what git is for), downloaded reference vi
   objects/ab/<sha256>.gz  each distinct file content once, gzipped
 ```
 
-A file that didn't change costs nothing on the next backup. The HUB keeps the newest 60 daily
+A file that didn't change costs nothing on the next backup. The harness keeps the newest 60 daily
 backups plus the first of each month (`STUDIO_BACKUP_KEEP`) and deletes content nothing points to.
 Text compresses to roughly a tenth. The example studio's whole backup is about 230 KB; a busy
 project with months of events and the screenshot cap stays in the tens of megabytes.

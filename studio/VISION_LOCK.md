@@ -10,7 +10,7 @@
    - `SimState` is 100% JSON-serializable (`JSON.stringify` / `JSON.parse`) so saves never lose active entities and replays are deterministic.
 2. **Thin-Context & Zero-Token Observability**:
    - Never rely on long chat histories as memory. All durable state lives in `studio/CURRENT_TASK.md`, `studio/NEXT.md`, `studio/llms.txt`, and `studio/decisions/`.
-   - All live status updates flow passively through `.studio/events.jsonl` (and `/tmp/agent-events.jsonl`) into the Zero-Token Workflow UI HUB (`hub/server.mjs`).
+   - All live status updates flow passively through `.studio/events.jsonl` (and `/tmp/agent-events.jsonl`) read by `npm run studio:status`, the digest and Studio Status posts.
 3. **Two-Stage Programmatic + Visual QA**:
    - Bugs are caught first by driving the game's programmatic API (`?playtest=1` / `window.__sim` / `qa/sim.adapter.mjs`), then verified visually with Playwright MCP accessibility trees, screenshots, and UISentinel layout checks.
 4. **Open-Ended Multi-Model Sovereignty**:

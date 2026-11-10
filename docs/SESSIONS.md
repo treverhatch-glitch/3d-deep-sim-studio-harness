@@ -79,7 +79,7 @@ report per-turn usage, so for them only the kickoff rule and the task boundary a
 
 Cache reads were 97% of the tokens in that run, and the meter ignored them: it saw 4.66M against
 100M+, so `--budget 95%` could never trip. Now `npm run budget`, the supervisor's `--budget`, the
-daily cap and the War Room's **Budget meter** count input (with cache writes) + output + cache reads at
+daily cap and `npm run budget` count input (with cache writes) + output + cache reads at
 a weight: `STUDIO_CACHE_READ_WEIGHT` or `cacheReadWeight` in `studio/budget.json`, default 0.1. Each
 tool's line names the models behind its counts: tokenizers differ by model family (roughly 10–30%), so
 compare tokens within a model.
@@ -110,7 +110,7 @@ Nothing is enforced. The suggestion (`.env.example`, `npm run models:check`):
 | reviewer | another model family |
 
 When every role is set to the top tier (or, with nothing set, every session in the last day ran on
-it), the War Room shows a warning on every view: "Overpowered models on every task may not be efficient
+it), `npm run models:check` shows a warning: "Overpowered models on every task may not be efficient
 and can weaken cross-family checks." The game dev clicks **I accept** (or runs
 `npm run models:check -- --accept-top-tier <name>`); it stays hidden until the models change.
 
@@ -128,16 +128,6 @@ The sheet has a **director section** for planning, splitting, assigning and chec
 Producer consult it when planning or queueing: `npm run cheatsheet -- match "<plan>" --for director`.
 Those lines are never attached to a builder's task. The Director refreshes the sheet weekly from the
 scout and keeps it under 150 lines.
-
-## In the War Room (Ops view)
-
-- **Budget meter:** today's counted tokens against the daily cap, and per model: sessions, in, out,
-  cache reads, counted.
-- **Sessions and context:** each launched session's turns and context against the refresh point, with
-  the model; ok / refresh due / mid-debug flagged, checks owed and done; Continue and Hand off buttons.
-- **Signals (every view):** the top-tier warning with its I accept button, and "Check an agent" when a
-  check is owed.
-- **Queue:** the cheat sheet tricks attached to each open task, marked pre-approved, with who approved them and the trick ids.
 
 ## Since 2.29.2
 

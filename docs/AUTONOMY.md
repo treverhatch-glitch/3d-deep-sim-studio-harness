@@ -12,8 +12,7 @@ npm run autonomy -- --now 2026-11-08T00:00:00Z     # the window ending then (sco
 npm run autonomy -- --since 2026-11-01T00:00:00Z   # 2.66.0: the window from then to now
 ```
 
-The same line is at the top of the overnight page (`npm run overnight`), and the War Room's Ops view has an
-Autonomy card (read from `GET /api/autonomy`, cached 5 minutes on the hub).
+The same line is at the top of the overnight page (`npm run overnight`).
 
 | Measure | How it is counted |
 | --- | --- |
@@ -83,7 +82,7 @@ change, or not scored while a side has too little data.
 
 ### Tokens that do work (2.66.0)
 
-`npm run autonomy` ends its details with a short **Tokens** block (`--json`: `card.tokenWork`; the War Room card shows
+`npm run autonomy` ends its details with a short **Tokens** block (`--json`: `card.tokenWork`, with
 the effective-token line). `--since <ISO time>` scores the window from then to now (or to `--now`).
 
 - **Kept.** A landed change is kept when, within `keepDays` (`STUDIO_KEEP_DAYS`, else `"keepDays"` in
@@ -178,7 +177,6 @@ stops from a fixed list, and sends one daily digest instead of approval pings.
   - `switch-tool`: two sessions ended with exit 127/9009 (the tool isn't on PATH) and another tool of the budget order is
     on PATH: the missing one is marked out for the window, the halt is cleared as `studio:resume` does, by "self-triage".
     A custom command has no other tool and stays halted.
-  - `restart-hub`: the hub stopped answering while no supervisor runs: started again.
   - `close-rescues`: rescue tasks of a task that has landed are closed (the sweep behind task done's own close).
   A halt cleared by self-triage is not a person's intervention on the scorecard.
 - **The daily digest** (`npm run digest`, harness/digest.mjs): `studio/digest/<date>.md` and one `digest.written`
@@ -279,7 +277,7 @@ and exit 1 if it doesn't count.
 `isRenderTestFile`) are never render files, even under the game's `visualPaths`: editing `panel.e2e.test.ts` doesn't
 make a task need a visual result.
 
-Every use is logged (`delegation.used` events, the decision log, the daily digest, the War Room's Owner proxy panel), so
+Every use is logged (`delegation.used` events, the decision log, the daily digest), so
 the owner reviews afterwards instead of approving before. Never: money, deletes, worker sessions or workers' names
 (builders, reviewers, QA …), a lane copy acting as the owner (except approving that lane's own change). The game's tests,
 the train's full verify and the weakened-tests and hooks gates stay on. `npm run beta -- off` brings the owner gates back
@@ -372,7 +370,7 @@ and no permission words. Each is recorded `as: "autonomous"` and goes on a **rev
 - **Review:** a person (or an agent on a person's direct permission), never the agent that decided. `revert` runs the
   record's undo: unhold or hold again, the type or visual proof back, the dev's yes taken back, a quarantine released, an
   asset review reopened, a released lane held again; a lane that already landed gets a revert task instead.
-- **Shown:** the War Room snapshot (`decisions`: count, oldest, overdue) and the digest line (decisions per day,
+- **Shown:** `npm run status -- --json` (`decisions`: count, oldest, overdue) and the digest line (decisions per day,
   approved vs reverted and the revert rate, time saved). Past `reviewWithinH` (72) they go under "Needs you".
 - **Audits (2.73.0, harness/audit.mjs).** A fixed share of hands-free landings and autonomous decisions is picked
   for an after-the-fact review by someone who didn't do the work: `"audit": { "rate": 0.1 }` in the policy; with no

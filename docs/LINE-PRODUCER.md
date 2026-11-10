@@ -63,27 +63,7 @@ naming who may act for the owner (beta mode's agents; the owner's delegate via `
 | `STUDIO_TESTER_WIRE_TASKS` | `on` | 2.79: `off`: no "Wire <module> into the game" task for a landed module nothing imports. |
 | `STUDIO_LINE_TWINS` | `on` | 2.78.1: `off`: no engine twin tasks (`studio/game.json` `engines.<name>.twins` lists the game paths that have one). |
 
-| `STUDIO_PLANNING_ROOM` | `on` | 2.78.1 (g): the Line Producer's Planning Room on the War Room's Studio floor (below). `off`: no room; the Line Producer sits in the Production room as before. |
 | `STUDIO_LINE_PROTECTED_HOLD_MIN` | `120` | How long a task whose protected step was routed to an approver is held from new builders (or until an approval names it). |
-
-## The Planning Room in the War Room (2.78.1, g)
-
-The owner asked for the Line Producer's own room in the Studio view, "big … so it shows the line producer's plans
-plainly and clearly". The **Planning Room** is a room of its own (harness/war-room.mjs `roomFor` seats the role there; the
-page draws the room from the HUD's `planning`, beside the Rail Yard and Watchtower) that takes the whole width of the
-Studio floor, sits right under the Production room and is taller than the others; the role `line-producer` (its
-desk, and any session started in that role, even one hired into Production) sits there. Its wall board shows the plan
-in plain text, read from the harness's own files by `harness/planning-room.mjs` (the HUD's `planning` in `/api/hud`, on
-the War Room's usual poll; nothing estimated, a field that isn't on file is left out): **Now**, the running builders
-(task, title, lane or "whole game", who, model, when it started: the board, the launcher's sessions, `task.start`);
-**Next up**, the ready queue in this pass's order (`.studio/line/status.json` "order") with each task's lane, "unscoped"
-in the warning color, its wave from plan-waves' last `waves.shadow` event and its model route; **Waiting**, tasks
-stacked with `--after` (on what, and why: "shared sim code: <file>" from the pass's stack, which its `task.hold` event
-now carries as `meta.via`, else the hold's own words) and the pass's blocked and unscoped tasks with the reason and the
-fix; **Last pass**, when, the lanes it set, the stacks it added, its fixes, its one-line status, its Producer-note
-blockers, builders running against the target and its recent decisions. With no status on file it says "No plan yet:
-the Line Producer hasn't run"; a plan older than `STUDIO_LINE_PLAN_MAX_SEC`, or with the supervisor down, is shown with
-its age as "Last plan". The room has no buttons. `STUDIO_PLANNING_ROOM=off` takes it away.
 
 ## Model pools: quota-aware routing that prefers Gemini (2.77.0)
 

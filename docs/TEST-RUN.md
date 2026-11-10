@@ -13,7 +13,7 @@ synced-folder app.
 git clone https://github.com/treverhatch-glitch/3d-deep-sim-studio-harness.git my-test-run
 cd my-test-run
 npm install
-npm run setup                                  # .env with a fresh HUB token
+npm run setup                                  # .env from .env.example
 npm run preflight -- --fix                     # hooks on, harness frozen, git push off
 npm run studio:reset -- --name "<game name>" --yes   # a fresh studio for this game
 ```
@@ -41,7 +41,7 @@ Run `npm run preflight` again. It should say READY.
 ## 3. Run it
 
 ```bash
-npm run hub                                    # the War Room: http://localhost:3847
+npm run studio:start                           # the supervisor (npm run studio:status shows it)
 npm run kickoff -- --role producer --agent producer-1 --model <model>
 ```
 
@@ -52,8 +52,8 @@ then work is queued. Each worker gets its own kickoff:
 
 While it runs:
 
-- The HUB writes `REPORT.md` and a snapshot to the results folder every hour, and backs up daily.
-- **Stop all agents** in the War Room (or `npm run task -- stop --by <name>`) holds every new start.
+- The supervisor writes `REPORT.md` and a snapshot to the results folder every hour, and backs up daily.
+- `npm run task -- stop --by <name>` holds every new start.
 - Harness problems go in notes (`npm run notes -- add --kind bad "..."`), not in harness code.
 - System tasks need a review from a model made by another company. With only one company's models,
   run Ollama locally (`ollama pull qwen2.5-coder:14b`) and `npm run review -- <ID> --local`.
