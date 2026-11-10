@@ -1139,16 +1139,8 @@ if (inShard()) {
   // per session take seconds on Windows, and this checks the supervisor's sequence, not lanes; the lanes part below
   // still uses copies). The fake agent commits in a copy anyway (qa/fixtures/agents/fake-agent.mjs).
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1', STUDIO_LANELESS: 'shared', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok' };
-  for (const t of ['Tidy the credits', 'Tidy the HUD', 'Tidy the menu', 'Tidy the end screen']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
-  // 2.81.0: this checks the supervisor's sequence (a fresh agent per task, one after another, a stop at its time), not
-  // the machine's speed. One session is timed first and the supervisor gets room for three of them, never less than
-  // before: on a loaded Windows runner one session passed 10 s and two no longer fitted the fixed window (the check
-  // failed there on and off since 2.79).
-  const calStart = Date.now();
-  run(dir, 'node harness/agent.mjs start --attach --role builder --agent builder-cal --model fake-1', env);
-  const oneSession = (Date.now() - calStart) / 1000;
-  const window = Math.max(Math.ceil(9 * SLOW), Math.ceil(oneSession * 3) + 3);
-  const sup = run(dir, `node harness/supervisor.mjs --no-hub --until ${window}s --foreground`, env);
+  for (const t of ['Tidy the HUD', 'Tidy the menu', 'Tidy the end screen']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
+  const sup = run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(9)} --foreground`, env);
   const st = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8'));
   report('the supervisor starts a fresh agent per task, one after another, and stops at its time', st.status === 'stopped' && /time is up/.test(st.stopReason) && st.sessions >= 2 && st.tasksDone >= 2, sup.stdout + sup.stderr + JSON.stringify(st));
   report('npm run studio:status says what it did', /sessions started: \d+; tasks done: \d+/i.test(run(dir, 'node harness/supervisor.mjs status', env).stdout));
