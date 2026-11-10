@@ -5063,6 +5063,15 @@ if (inShard('selftest-2792a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.80 (d): small fixes from the crew's trials (aider start with no task, ask subcommands, BOM in game.json, landing build,
+// board-only paths, dry-run status, godot-unit N/A, telemetry noise).
+if (inShard('selftest-280d')) {
+  const dir = copyRepo();
+  const { selftest280D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-280d.mjs')).href);
+  await selftest280D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

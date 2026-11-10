@@ -2312,6 +2312,13 @@ export function startAgent(opts, { detach = false } = {}) {
   if (tool === 'agy' && !opts.model && !opts.orderModel) model = String(process.env.STUDIO_TOOL_AGY_MODEL || '').trim() || AGY_DEFAULT_MODEL;
   // 2.30q (#7): the budget stop is checked after the takeover picked a tool; with every tool out, nothing starts.
   { const st = launchStop({ role, tool, model, agent, task: opts.task || null }); if (st) return { ok: false, skipped: true, message: `Not started: budget stop (${st.why}).` }; }
+  // 2.80 (d, A2): a builder on aider with no task skipped the 2.79.2 protocol (claim, lane files) and aider's repo map sent
+  // 441k-token prompts: refuse before anything is spent.
+  if (role === 'builder' && !opts.task && process.env.STUDIO_REHEARSAL !== '1') {
+    const via = tool === 'vertex' ? null : toolCmd(tool); const rg = via ? registeredTool(tool) : null;
+    if (aiderDriven({ tool, custom: via || (tool === 'vertex' ? null : process.env[`STUDIO_${roleKey(role)}_CMD`]) || null, regCommand: rg && via === rg.command ? rg.command : null, role, task: 'T', copy: {} }).on)
+      return { ok: false, skipped: true, message: `Not started: ${agent} is a builder on ${tool} (aider) with no task, and aider needs its task claimed by the launcher: pass --task <ID>.` };
+  }
   // 2.30o: profile check before launch: a planning role never shares a builder's profile; per-profile limits.
   {
     const profile = profileOf(role, toolCmd(tool) || process.env[`STUDIO_${roleKey(role)}_CMD`] || (tool === 'custom' ? process.env.STUDIO_AGENT_CMD : ''));
