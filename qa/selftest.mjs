@@ -85,7 +85,11 @@ function templateTree() {
     if (building) console.log('[selftest] note: no origin/main to read the template from; using this checkout with its game state removed.');
     return (TEMPLATE = { dir: null });
   }
-  const files = String(git(['ls-tree', '-r', '--name-only', rev, '--', ...GAME_OWNED]).stdout || '').split('\n').filter(Boolean);
+  // 2.80 (f, R3-6): the adopted game's files (game/, assets/, its web/<name>/) are never read into the buffer: a 1.1 GB game
+  // overran it. The harness release ships none of them, so the template loses nothing.
+  const gameDir = (() => { try { const g = fs.readFileSync(path.join(root, 'studio', 'game.json'), 'utf8'); const name = String(JSON.parse(g).game || ''); return /^[\w.-]+$/.test(name) ? `web/${name}/` : ''; } catch { return ''; } })();
+  const files = String(git(['ls-tree', '-r', '--name-only', rev, '--', ...GAME_OWNED]).stdout || '').split('\n').filter(Boolean)
+    .filter((f) => !/^(game|assets)\//.test(f) && !(gameDir && f.startsWith(gameDir)));
   const out = git(['cat-file', '--batch'], files.map((f) => `${rev}:${f}`).join('\n') + '\n').stdout;
   const dir = path.join(tmpRoot, 'template');
   let at = 0;
@@ -5040,6 +5044,14 @@ if (inShard('selftest-280c')) {
 if (inShard('selftest-280b')) {
   const { selftest280B } = await import(pathToFileURL(path.join(root, 'qa', 'selftest-280b.mjs')).href);
   await selftest280B({ dir: root, run, report, tmpRoot, root });
+}
+
+// 2.80 (f): the trial's small fixes (qa/selftest-280f.mjs).
+if (inShard('selftest-280f')) {
+  const dir = copyRepo();
+  const { selftest280F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-280f.mjs')).href);
+  await selftest280F({ dir, run, report, tmpRoot, root });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
