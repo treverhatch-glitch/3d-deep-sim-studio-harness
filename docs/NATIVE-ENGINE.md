@@ -80,7 +80,9 @@ seconds once the rules are compiled code. So the engine train runs them first, o
 - A red batch is narrowed with the same cheap check: the first prefix that is red names its last lane. That lane is
   handed back with cause `rules`, the failing test names and the command's last lines, and the rest is checked again.
   `STUDIO_ENGINE_RULES_MAX_RUNS` (12) bounds the runs for one batch; past it the lanes left go to the land run unjudged.
-- Results are kept per tree and command in `.studio/engine/<engine>-rules.json`: a tree is run once.
+- Results are kept per tree, command and inputs in `.studio/engine/<engine>-rules.json`: a tree is run once. The
+  `inputs` are not in the tree, so their content is part of what a kept result is valid for; the train also looks at
+  them again right before the land run and leaves `STUDIO_RULES_GREEN` out when they changed since the check.
   `STUDIO_ENGINE_RULES_TIMEOUT_MIN` overrides the time limit.
 - Each batch writes one `engine.rules` event (runs, minutes, lanes kept and refused).
 

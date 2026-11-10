@@ -15,7 +15,8 @@
  *
  * It judges a batch only after it has passed on the target itself in the same kind of checkout (the calibration): a
  * check that is red on the landed target (a missing input, a missing SDK) blames nobody and is skipped with the reason.
- * Results are kept per tree and command (.studio/engine/<x>-rules.json), so a tree is run once.
+ * Results are kept per tree, command and inputs (.studio/engine/<x>-rules.json), so a tree is run once. The inputs are
+ * not in the tree, so their content is part of the key (inputsPrint): a kept result never answers for other inputs.
  *
  *   node harness/engine-rules.mjs [--engine unity] [--ref <branch|commit>] [--json]     run it on one commit
  *   node harness/engine-rules.mjs show [--engine unity]                                 the command and where it comes from
@@ -64,6 +65,27 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
   return { command: withSdk(d.test), inputs, timeoutMin, source: `the ${engine} default (${ref} has ${d.has})` };
 }
 
+/**
+ * A fingerprint of the git-ignored inputs as they lie in the folders they are copied from ('' with no inputs). They are
+ * not in the commit's tree, so a kept result is only valid for the same inputs, and so is STUDIO_RULES_GREEN.
+ */
+export function inputsPrint(cfg, from = []) {
+  if (!cfg?.inputs?.length) return '';
+  const h = crypto.createHash('sha1');
+  const walk = (p, name) => {
+    let st; try { st = fs.statSync(p); } catch { h.update(`${name}\0gone\n`); return; }
+    if (st.isDirectory()) { for (const e of fs.readdirSync(p).sort()) walk(path.join(p, e), `${name}/${e}`); return; }
+    h.update(`${name}\0${st.size}\0`);
+    // Content for anything of ordinary size; a very large file is told apart by its size and time.
+    if (st.size <= 64 * 1024 * 1024) { try { h.update(fs.readFileSync(p)); } catch { h.update('unreadable'); } } else h.update(String(Math.floor(st.mtimeMs)));
+  };
+  for (const rel of cfg.inputs) {
+    const src = from.map((f) => path.join(f, rel)).find((p) => fs.existsSync(p));
+    if (src) walk(src, rel); else h.update(`${rel}\0missing\n`);
+  }
+  return h.digest('hex').slice(0, 12);
+}
+
 const cmdKey = (c) => crypto.createHash('sha1').update(`${c.command}\n${c.inputs.join('\n')}`).digest('hex').slice(0, 12);
 const readCache = (root, engine) => { const j = readJson(rulesFile(root, engine), null); return j && typeof j === 'object' && j.trees && typeof j.trees === 'object' ? j : { trees: {}, runs: [] }; };
 function keep(root, engine, key, rec) {
@@ -93,7 +115,8 @@ export function rulesMinutes(root, engine) {
 export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], root = mainRoot(), id = 'rules', env = process.env, log = () => {}, useCache = true } = {}) {
   const tree = out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}^{tree}`));
   if (!tree) return { status: 'error', why: `${short(sha)} is not a commit of the ${engine} repo`, ms: 0 };
-  const key = `${tree}|${cmdKey(cfg)}`;
+  const print = inputsPrint(cfg, from);
+  const key = `${tree}|${cmdKey(cfg)}${print ? `|${print}` : ''}`;
   if (useCache) {
     const hit = readCache(root, engine).trees[key];
     if (hit && ['pass', 'red'].includes(hit.status)) return { ...hit, cached: true };
@@ -132,13 +155,14 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], root =
 /**
  * The batch check before a land run. lanes: the train's lanes in order ({ task, branch, head }); chain(tip, lanes) ->
  * { head } | { error } builds the commit the batch would land as (unity-train.mjs chainOnTarget). Returns
- * { ran, skipped?, why, kept: [lane], dropped: [{ lane, why, failures }], runs, ms, green?: <commit the kept lanes passed as> }.
+ * { ran, skipped?, why, kept: [lane], dropped: [{ lane, why, failures }], runs, ms, green?: <commit the kept lanes passed as>,
+ * inputs: <inputsPrint when the check began> }.
  * A red batch is narrowed with the same cheap check: the first prefix that is red names its last lane, which is dropped;
  * the rest is checked again. STUDIO_ENGINE_RULES_MAX_RUNS (12) bounds the runs of one batch: past it the lanes left go
  * to the land run unjudged.
  */
 export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt } = {}) {
-  const res = { ran: false, kept: lanes.slice(), dropped: [], runs: 0, ms: 0, why: '' };
+  const res = { ran: false, kept: lanes.slice(), dropped: [], runs: 0, ms: 0, why: '', inputs: inputsPrint(cfg, from) };
   if (!cfg) return { ...res, skipped: true, why: 'no rules check is configured' };
   if (!lanes.length) return { ...res, skipped: true, why: 'no lane to check' };
   const maxRuns = Math.max(2, Math.floor(num(env.STUDIO_ENGINE_RULES_MAX_RUNS, 12)));

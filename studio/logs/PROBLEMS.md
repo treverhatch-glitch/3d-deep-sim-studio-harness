@@ -1522,3 +1522,6 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** windows-selftest: 7 attempt-ledger checks failed; git prints the long path with forward slashes and the temp folder was the 8.3 short name, so "the same checkout" compared unequal.
 - **Fix:** harness/attempts.mjs gitTip compares native real paths, case-folded on Windows.
 
+### P-299 — the rules check's kept result did not know its git-ignored inputs · fixed in 2.82.0 (before release)
+- **Evidence:** found while answering the owner's train-split question (studio/notes/TRAIN-SPLIT-2026-11.md): the crew's land records name two different hashes of the git-ignored rules pack on two days, and 11 of 14 rule-test failures at landing were that pack disagreeing with a branch's recorded results. The rules check kept its result per tree and command, so the same tree with another pack got the old answer, and the land run was told the rules were green.
+- **Fix:** harness/engine-rules.mjs `inputsPrint`: the inputs' content is part of a kept result's key; harness/unity-train.mjs looks at the inputs again before the land run and withholds STUDIO_RULES_GREEN when they changed. qa/selftest-282a.mjs (two checks).

@@ -32,8 +32,16 @@ were found by hour-long land runs, and the editor spent most of its time repeati
 | One role file for engine work | In a native studio a builder on the engine track is pointed at the engine porter's role file, and a builder task on the pushed engine's track heads the Line Producer's plan like a porter's. One cheap-check setting: with no `quickCheck`, the owner's `rules` command is the porter's check too. | `harness/native.mjs`, `harness/line-producer.mjs`, `harness/engine-check.mjs` |
 
 Also in this release, from the last checks of 2.81.0 on Windows: the attempt ledger compared the checkout's path in a
-way Windows spells differently (short names, slashes, case) and recorded no main tip; and the supervisor's sequence
-test, red on and off on Windows since 2.79, now times one session and gives the supervisor room for three.
+way Windows spells differently (short names, slashes, case) and recorded no main tip. (The supervisor's sequence
+test, red on and off on Windows since 2.79, was fixed in 2.81.0 itself: it keeps the timed jobs and machine probes out
+of its loop, as `--no-hub` did before 2.80.)
+
+**Fixed before release (P-299).** The rules check kept its result per tree and command, but the git-ignored inputs it
+copies in were not part of that key. The crew's records show that input (the packed rules) changing between land
+runs, so a kept "green" could have answered for inputs it never saw. Now the inputs' content is part of what a kept
+result is valid for, and the train looks at them again right before the land run and leaves `STUDIO_RULES_GREEN` out
+when they changed. Found while answering the owner's question about splitting the train
+(studio/notes/TRAIN-SPLIT-2026-11.md).
 
 ## 3. The scorecard: before, and what "after" can honestly say
 
@@ -76,13 +84,13 @@ is used by two self-tests.
 
 ## 5. Size
 
-2.82.0 against 2.81.0: 26 files, +1,551 / −54 lines (net +1,497). This round adds and cuts nothing of size: harness
-code +570 / −11 (two new modules, `native.mjs` 93 and `engine-rules.mjs` 210, and the scorecard's two blocks), the
-self-test +333, docs and records +645 / −40.
+2.82.0 against 2.81.0: 27 files, +1,860 / −55 lines (net +1,805). This round adds and cuts nothing of size: harness
+code +595 / −11 (two new modules, `native.mjs` 93 and `engine-rules.mjs` 234, and the scorecard's two blocks), the
+self-test +366 / −1, docs, notes and records +899 / −43.
 
 | | 2.79.2 | 2.80.0 | 2.81.0 | 2.82.0 |
 |---|---|---|---|---|
-| Tracked lines | 175,491 | 157,794 | 159,485 | 160,982 |
+| Tracked lines | 175,491 | 157,794 | 159,485 | 161,290 |
 | `harness/` modules | 319 | 310 | 314 | 316 |
 | npm scripts | 179 | 165 | 165 | 165 |
 | `STUDIO_*` settings | 729 | 712 | 716 | 726 |

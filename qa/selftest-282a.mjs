@@ -149,6 +149,36 @@ console.log(JSON.stringify({ status: a.status, cached: a.cached === true, failur
     await guard('2.82 rules check, kept results: a tree is run once (the first lane\'s commit was judged while the batch was narrowed, so asking again answers from .studio/engine/unity-rules.json without a run); the batch of three took 5 runs (the target, the batch, two prefixes, the batch without the culprit)', () => [
       again.status === 'pass' && again.cached === true && rulesRuns() - before === E2runs && E2runs === 5 && again.inputs.join() === 'Private~',
       JSON.stringify({ again, E2runs })]);
+    // The inputs are not in the tree: with another private input the kept result no longer answers.
+    write(E.GW, 'Private~/key.txt', 'k2\n');
+    const b2 = rulesRuns();
+    const changed = probe(`import { rulesConfig, runRulesAt } from ${u('harness/engine-rules.mjs')};
+const cfg = rulesConfig('unity', { root: process.cwd(), repo: ${JSON.stringify(fwd(E.R))}, ref: 'port/main' });
+const a = runRulesAt({ engine: 'unity', repo: ${JSON.stringify(fwd(E.R))}, sha: ${JSON.stringify(E.heads['feat/a'])}, cfg, from: [${JSON.stringify(fwd(E.GW))}], root: process.cwd(), id: 't' });
+console.log(JSON.stringify({ status: a.status, cached: a.cached === true, failures: a.failures || [], source: cfg.source, inputs: cfg.inputs }));`);
+    await guard('2.82 rules check, kept results and inputs: the git-ignored inputs are part of what a kept result is valid for, so after the private input changed the same tree is run again instead of answered from the kept result (fails before this fix: the result was kept per tree and command only, and a changed input got yesterday\'s answer)', () => [
+      changed.status === 'pass' && changed.cached === false && rulesRuns() - b2 === 1,
+      JSON.stringify({ changed, ran: rulesRuns() - b2 })]);
+  }
+  {
+    // The inputs change between the rules check and the land run: the land run is not told the rules are green.
+    resetState();
+    const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' } });
+    write(E.GW, 'Private~/key.txt', 'k\n');
+    const moving = path.join(T, 'rules-moving.mjs');
+    fs.writeFileSync(moving, `import fs from 'node:fs';
+if (!fs.existsSync('Private~/key.txt')) { console.log('Failed : Rules.NeedsItsPrivateInput'); process.exit(1); }
+if (fs.existsSync('a.txt')) fs.appendFileSync(process.argv[2], 'repacked\\n'); // someone re-packs the input while the batch is checked
+console.log('Passed!');
+`);
+    const ctl = path.join(T, 'ctl-moving');
+    setEngines({ unity: cfgFor(E, ctl, { rules: { test: `node "${fwd(moving)}" "${fwd(path.join(E.GW, 'Private~', 'key.txt'))}"`, inputs: ['Private~'] } }) });
+    queue(E, [['T-921', 'feat/a']]);
+    const r = probe(TRAIN);
+    const runs = runsOf(ctl);
+    await guard('2.82 rules check, inputs that moved: the private input changed after the batch was checked green, so the land run is NOT told the rules are green (no STUDIO_RULES_GREEN: a land script that trusts the flag runs its own rule tests on the inputs it really has); the lane still lands', () => [
+      r.landed?.join() === 'T-921' && r.rules?.ran === true && !r.dropped?.length && runs.length === 1 && runs[0].rulesGreen === '',
+      JSON.stringify({ r, runs }).slice(0, 1500)]);
   }
   {
     // The calibration: the check is red on the target itself (its input is named nowhere), so it judges nobody.

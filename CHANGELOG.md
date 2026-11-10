@@ -7,7 +7,7 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 ## [2.82.0] — 2026-11-10
 Native engine (the owner's "Round 2.82"). The crew's 64 Unity land runs passed 18 times; a passing run took 92 minutes,
 53 of them re-running in Edit Mode the rule tests .NET had just run, and 24 of the 45 failures were in tests that need
-no editor. 26 files, +1,551 / −54 lines (net +1,497) against 2.81.0. Details: docs/RELEASE-2.82.0.md, docs/NATIVE-ENGINE.md.
+no editor. 27 files, +1,860 / −55 lines (net +1,805) against 2.81.0. Details: docs/RELEASE-2.82.0.md, docs/NATIVE-ENGINE.md.
 - **Native-engine mode** (`harness/native.mjs`, `npm run engine -- native`): a studio whose game is the engine build
   builds a feature once. Builder tasks go on the engine track; the web tester schedule, the web landing build, engine
   twins and the port queue are off; the planning kickoffs say so. `"native": "<engine>"` in `studio/game.json`.
@@ -21,8 +21,11 @@ no editor. 26 files, +1,551 / −54 lines (net +1,497) against 2.81.0. Details: 
   `studio/scores/2026-11-08-engine-baseline.json`.
 - **Folded:** the porter's quick check falls back to the owner's `rules` command; one role file for engine work in a
   native studio.
-- **Fixed (from 2.81.0's Windows checks):** the attempt ledger's path comparison on Windows; the supervisor's sequence
-  test measures one session for its window.
+- **Fixed (from 2.81.0's Windows checks):** the attempt ledger's path comparison on Windows.
+- **Fixed before release (P-299):** a kept rules result is valid for its git-ignored inputs too (`inputsPrint`), and
+  the land run is not told the rules are green when those inputs changed after the check.
+- **A note, nothing built:** studio/notes/TRAIN-SPLIT-2026-11.md answers whether the Unity train should be split into
+  stages, from the crew's 65 land runs.
 
 ## [2.81.0] — 2026-11-10
 Grade, measure, cut again (the owner's "Round 2.81"). Verdict: 5 of 10, a working production line that is not yet an

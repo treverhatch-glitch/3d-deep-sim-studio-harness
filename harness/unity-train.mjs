@@ -57,7 +57,7 @@ import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, ta
 import { engineTarget, engineFiles } from './engine-tracks.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
-import { rulesConfig, rulesGate } from './engine-rules.mjs';
+import { rulesConfig, rulesGate, inputsPrint } from './engine-rules.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -342,7 +342,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   }
   // 2.82: the rules check on the batch as it would land (harness/engine-rules.mjs), before the long land run. A lane that
   // turns the batch red is handed back with cause 'rules' and its failing tests; a check that is red on the target itself
-  // judges nobody. The land run then gets STUDIO_RULES_GREEN=1 while it lands exactly the checked batch on the checked target.
+  // judges nobody. The land run then gets STUDIO_RULES_GREEN=1 while it lands exactly the checked batch on the checked target
+  // with the checked inputs (the git-ignored files the tests read are looked at again right before the land run).
   let rulesGreen = null;
   {
     const rc = (() => { try { return rulesConfig(engine, { root, env, repo, ref: target }); } catch { return null; } })();
@@ -354,7 +355,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       for (const d of rg.dropped) drop(d.lane, `refused before the land run: ${d.why}\nFix it on ${d.lane.branch} (merge ${target} in first), then task done ${d.lane.task} --train again.`, { cause: 'rules' });
       set = rg.kept;
       res.rules = { ran: rg.ran, runs: rg.runs, ms: rg.ms, dropped: rg.dropped.map((d) => d.lane.task), ...(rg.skipped ? { skipped: rg.why } : {}) };
-      if (rg.green) rulesGreen = { tip: tip0, tasks: set.map((l) => l.task).join(',') };
+      if (rg.green) rulesGreen = { tip: tip0, tasks: set.map((l) => l.task).join(','), same: () => { try { return inputsPrint(rc, from) === (rg.inputs ?? inputsPrint(rc, from)); } catch { return false; } } };
     }
   }
   for (const l of set) deps.markRunning?.(l.task, l.agent);
@@ -382,7 +383,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       for (let a = 0; ; a += 1) {
         update({ now: `${what}: ${group.map((l) => l.task).join(', ')}${a ? ` (try ${a + 1})` : ''}`, runs: res.runs + 1 });
         log(`[unity-train] ${id}: ${what}: land ${group.map((l) => `${l.task} (${l.branch})`).join(', ')} on ${target} at ${short(tip)}${ref ? ` through ${ref}` : ''}`);
-        const checked = rulesGreen && rulesGreen.tip === tip && rulesGreen.tasks === group.map((l) => l.task).join(',');
+        const checked = rulesGreen && rulesGreen.tip === tip && rulesGreen.tasks === group.map((l) => l.task).join(',') && rulesGreen.same();
         r = await (deps.land || runUnityGate)({ engine, ...arg, task: group.map((l) => l.task).join(','), label: `${engine} train ${id} (${group.map((l) => l.task).join(', ')})`, env: { ...env, STUDIO_GATE_PRIORITY: 'landing', ...(checked ? { STUDIO_RULES_GREEN: '1' } : {}) }, log });
         res.runs += 1;
         if ((r.status !== 'refused' && r.status !== 'not-run') || a >= retries) break;

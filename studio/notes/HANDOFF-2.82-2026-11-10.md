@@ -11,6 +11,11 @@ green online checks.
 - Nothing on the crew's PC was changed by the harness work. It was read: the land script and its 64 result records,
   the landing logs, the studio's settings.
 
+- Later the same day: the owner asked whether the Unity train should be split into stages. The answer, from the
+  crew's records, is studio/notes/TRAIN-SPLIT-2026-11.md (nothing built, one sketch for the next round). It found a gap
+  in this round's rules check (P-299: kept results did not know their git-ignored inputs), fixed before merge.
+- The crew was running again on 2026-11-10 (a land run and a verify that afternoon), still on 2.79.2.
+
 ## Decisions made on judgment (change them if the next score says so)
 
 1. **Native mode is explicit for any studio with a web game.** Inference covers only a studio with one engine and no
