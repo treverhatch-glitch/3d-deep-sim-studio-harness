@@ -32,7 +32,6 @@ export const DEFAULT_DIVISIONS = [
   { id: 'devlog', name: 'Devlog', roles: ['devlogger'] },
   // 2.74.0: Engine Bay: engine workers (a Unity, Godot or other engine track's sessions) and their own train.
   { id: 'engine', name: 'Engine Bay', roles: ['engine-porter', 'engine-worker'] },
-  { id: 'hacks', name: 'Dev Hacker Lab', roles: ['dev-hacker'] },
 ];
 
 export function listDivisions() {
@@ -46,7 +45,7 @@ export function listDivisions() {
 }
 
 /** Switch a division on or off from the War Room: writes studio/divisions.json with every division listed. */
-export function setDivision(id, on, by = 'war-room-human') {
+export function setDivision(id, on, by = 'owner') {
   const list = listDivisions().map(({ autoOn, ...d }) => ({ ...d }));
   const d = list.find((x) => x.id === id);
   if (!d) return { ok: false, message: `No division ${id}` };

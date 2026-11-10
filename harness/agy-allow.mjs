@@ -201,7 +201,7 @@ export function noteAgyHint(hint, { agent = null } = {}) {
 }
 
 // Names agents go by (as in harness/ask.mjs), so an agent can't put its own name to the owner's approval.
-const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|liaison|scout|designer|balancer|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes|dev-hacker)\b/i;
+const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|scout|designer|balancer|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes)\b/i;
 
 /**
  * Merge the harness's rules into agy's settings. Returns { ok, code, lines, file, added, backup }.

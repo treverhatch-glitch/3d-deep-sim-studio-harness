@@ -28,7 +28,7 @@ const step = (idea, stage, by, note = '') => ({ ...idea, stage, history: [...(id
 
 /** Where an idea came from, shown as a label on the board. Dev-confirmed ideas are routed first. */
 export const SOURCES = { 'dev-confirmed': 'dev, confirmed', 'dev-pitched': 'dev, pitched', agent: 'agent', playtest: 'playtest' };
-const AGENTISH = /^(producer|director|liaison|builder|rnd|planner|reviewer|watch|agent|qa|claude|codex|cursor|grok|gemini)(-|$)/i;
+const AGENTISH = /^(producer|director|builder|rnd|planner|reviewer|watch|agent|qa|claude|codex|cursor|grok|gemini)(-|$)/i;
 
 export function addIdea({ title, detail = '', by = 'game-dev', source = null, brief = null }) {
   if (!String(title || '').trim()) return { ok: false, message: 'An idea needs a title.' };

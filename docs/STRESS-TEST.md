@@ -65,8 +65,7 @@ well as building the game:
 > each session, score it 1 to 5 with what worked, what didn't and what to change. Read `npm run learn`
 > each session and act on the top item. Never delete earlier notes; add newer ones.
 
-Start a Liaison too (`npm run kickoff -- --role liaison --agent liaison-1 --tool …`) and talk to it
-whenever you have an idea, a change, a reference or an asset; the studio keeps running.
+Tell the Producer whenever you have an idea, a change, a reference or an asset (`npm run ask`); the studio keeps running.
 
 ## 3. Run it
 

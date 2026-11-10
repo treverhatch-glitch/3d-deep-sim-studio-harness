@@ -149,8 +149,6 @@ const PREFIX = [
   [/^director review\b/i, 'direction'],
   [/^idea\b/i, 'idea'],
   [/^art\b/i, 'art'],
-  [/^trick hunt\b/i, 'trick'],
-  [/^tricks:/i, 'none'],
   [/^(plan|sign the game bible|ideas:)\b/i, 'none'],
 ];
 const BY_ROLE = {
@@ -166,11 +164,9 @@ const BY_ROLE = {
   reviewer: 'review',
   'reference-scout': 'study',
   director: 'direction',
-  liaison: 'none',
   rnd: 'idea',
   planner: 'idea',
   art: 'art',
-  'dev-hacker': 'trick',
   artist: 'art',
   'art-director': 'art',
 };
@@ -190,7 +186,6 @@ export const TYPES = {
   system: { skill: 'studio/skills/system.md', means: 'a spec with a hand-off in studio/bible/systems/, the sim change with a scenario in qa.mjs and updated goldens, a playtest of the current build, a green verify after the last change, and an approving review from another model family' },
   idea: { skill: 'studio/skills/ideas.md', means: 'the idea named in the title moved to its next stage (shaped, placed, or decided) since the task started' },
   art: { skill: 'studio/skills/art.md', means: 'designs proposed for the game dev since the task started (npm run art -- propose); approving them is the dev\'s call, not part of done' },
-  trick: { skill: 'studio/skills/dev-hacker.md', means: 'a trick card proposed since the task started (npm run trick -- propose), or a note that nothing is worth doing now (npm run trick -- none "why")' },
   whole: { skill: null, means: 'a fix committed for this task, then a full verify of the whole game (npm run verify -- --all), not one scoped to the files you changed, green after your last change' },
   rescue: { skill: 'studio/skills/rescue.md', means: 'studio/rescues/<the stuck task>.md written since the rescue started, with a Diagnosis of 40+ words and one Decision: retry, split (smaller tasks naming the stuck task are queued) or needs-person' },
   none: { skill: null, means: 'nothing to check (coordination work)' },
@@ -300,7 +295,7 @@ const newestSince = (files, since) => files.filter((f) => mtime(f) >= since);
 // 2.73.0: the harness's own records (the harness-task queue a forced done adds to, 2.71.0 z; pending reviews and holds)
 // are no task's change: another task's forced done wrote HARNESS-TASKS.md and it counted as this task's edit.
 const BOOKKEEPING = /^(package-lock\.json$|\.studio\/|studio\/(task-types\.json$|HARNESS-TASKS\.md$|pending-review\.json$|task-holds\.json$|NEXT\.md|CURRENT_TASK\.md|handoffs\/|meetings\/|producer\/|game\/|memory\/retros\/|harness-notes\/|proof\/)|qa\/reports\/)/;
-const WORK_DIRS = ['cartridges', 'src', 'harness', 'hub', 'qa', 'scripts', 'tools', 'docs', 'studio'];
+const WORK_DIRS = ['cartridges', 'src', 'harness', 'qa', 'scripts', 'tools', 'docs', 'studio'];
 const git = (...args) => {
   const r = spawnSync('git', args, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
   return r.status === 0 ? r.stdout : null;
@@ -933,12 +928,6 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
     const m = task.title.match(/\b(\w+) placeholder assets?\b/i);
     const want = m ? { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 }[m[1].toLowerCase()] || Number(m[1]) || 0 : 0;
     if (want) check(`${want} placeholder assets among them`, mine.filter((d) => d.kind === 'asset').length >= want, `${mine.filter((d) => d.kind === 'asset').length} of ${want} placeholder assets proposed`);
-  }
-  if (type === 'trick') {
-    const dir = abs('studio/tricks');
-    const cards = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /^K-\d+\.json$/.test(f)).map((f) => readJson(`studio/tricks/${f}`)).filter((t) => t && Date.parse(t.at) >= since) : [];
-    const none = mtime('studio/tricks/HUNTS.md') >= since;
-    check('A trick card, or a note that nothing is worth doing now', cards.length || none, 'no trick card since this task started: npm run trick -- propose "…" --problem … --trick … --fits … --avoid-if … --proof …, or npm run trick -- none "<why>"');
   }
   if (type === 'idea') {
     const id = (task.title.match(/\bI-\d+\b/) || [])[0];

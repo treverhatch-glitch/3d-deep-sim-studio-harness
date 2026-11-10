@@ -588,8 +588,8 @@ export async function supervise(opts, state, now = Date.now()) {
   }
   const started = [];
   let ram = null;
-  // Most urgent first; the dev hacker only gets a slot nobody else needs (it never holds anything up).
-  let ordered = [...groups.values()].sort((a, b) => (a.role === 'dev-hacker') - (b.role === 'dev-hacker') || String(a.tasks[0].priority).localeCompare(String(b.tasks[0].priority)));
+  // Most urgent first.
+  let ordered = [...groups.values()].sort((a, b) => String(a.tasks[0].priority).localeCompare(String(b.tasks[0].priority)));
   // 2.76.0 (k): the Line Producer's plan (harness/line-producer.mjs, STUDIO_LINE_PRODUCER): its order, model routes and
   // the rig's builder cap. Within the pace's caps only: it reorders and can hold builders back, never adds one.
   const line = await linePlanNow(now);

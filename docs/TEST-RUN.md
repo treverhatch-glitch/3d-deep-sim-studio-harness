@@ -18,7 +18,7 @@ npm run preflight -- --fix                     # hooks on, harness frozen, git p
 npm run studio:reset -- --name "<game name>" --yes   # a fresh studio for this game
 ```
 
-`--fix` freezes the harness (commits to `harness/`, `hub/`, `scripts/`, `tools/`, the `qa/` scripts
+`--fix` freezes the harness (commits to `harness/`, `scripts/`, `tools/`, the `qa/` scripts
 and `studio/gates.json` are refused) and turns off `git push` for this clone, so nothing reaches the
 public repo. Game work (`cartridges/`, `studio/`, `qa/golden/`, `src/`, assets) commits as normal.
 

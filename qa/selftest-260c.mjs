@@ -27,7 +27,7 @@ export async function selftest260C({ dir, run, report, tmpRoot }) {
   const env = {
     ...ident, STUDIO_ROLE: '', STUDIO_LOCK_OWNER: '', STUDIO_AGENT: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '',
     STUDIO_MAIN_COMMIT: '', STUDIO_UPGRADE_MERGE: '', STUDIO_HARNESS_REF: '', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
-    STUDIO_HOOKS_CHECK: '', STUDIO_LANE_HARNESS: '', GITHUB_BASE_REF: '', GITHUB_EVENT_NAME: '', AGENT_EVENTS_FILE: '', STUDIO_EXPERIMENT: '', STUDIO_AGENT_MODEL: '',
+    STUDIO_HOOKS_CHECK: '', STUDIO_LANE_HARNESS: '', GITHUB_BASE_REF: '', GITHUB_EVENT_NAME: '', AGENT_EVENTS_FILE: '', STUDIO_AGENT_MODEL: '',
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', GIT_TERMINAL_PROMPT: '0',
   };
   const g = (cwd, args, e = {}) => run(cwd, `git -c core.autocrlf=false ${args}`, { ...env, ...e });

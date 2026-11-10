@@ -180,7 +180,7 @@ function writeState(root, s) {
 function inbox(root, text) {
   const f = path.join(root, 'studio', 'producer', 'INBOX.md');
   fs.mkdirSync(path.dirname(f), { recursive: true });
-  if (!fs.existsSync(f)) fs.writeFileSync(f, '# Producer inbox\n\n> Messages from people in the War Room. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
+  if (!fs.existsSync(f)) fs.writeFileSync(f, '# Producer inbox\n\n> Messages from people. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
   fs.appendFileSync(f, `- [${new Date().toISOString().slice(0, 16).replace('T', ' ')}] **harness**: ${text.replace(/\n+/g, ' ')}\n`);
 }
 

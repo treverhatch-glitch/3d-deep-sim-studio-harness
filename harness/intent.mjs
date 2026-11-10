@@ -4,7 +4,7 @@
  * "do it now" (J3).
  *
  *   npm run intent -- echo --asked "add sprint" --wont "jump, stamina" --tasks T-160,T-161 --by producer
- *   npm run intent -- confirm E-001 --by <dev>        one click in the War Room does the same
+ *   npm run intent -- confirm E-001 --by <dev>        the dev confirms a card
  *   npm run intent -- list
  *   npm run task -- yes T-161 --by <dev>             an agent-proposed mechanic may start
  *
@@ -37,9 +37,9 @@ export function originOf({ origin, agent, asked } = {}) {
  * Who may speak for the dev: a person's name; from inside an agent it is a relay, so it needs the dev's
  * own words and where they said them (the same rule as a fun verdict).
  */
-export function devSays(by, { quote = '', source = '', viaWarRoom = false } = {}) {
+export function devSays(by, { quote = '', source = '' } = {}) {
   if (!isPerson(by)) return { ok: false, message: `${by || 'Nobody'} looks like an agent. Only the dev says yes here (--by <your name>).` };
-  const inAgent = !viaWarRoom && Boolean(process.env.STUDIO_ROLE || process.env.STUDIO_LOCK_OWNER);
+  const inAgent = Boolean(process.env.STUDIO_ROLE || process.env.STUDIO_LOCK_OWNER);
   if (inAgent && (String(quote).trim().length < 4 || !String(source).trim())) return { ok: false, message: `Relayed from an agent: give ${by}'s own words and where they said them (--quote "…" --source "<channel, time or link>").` };
   return { ok: true, relayedBy: inAgent ? process.env.STUDIO_LOCK_OWNER || 'an agent' : null };
 }
@@ -103,5 +103,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.error(r.message);
     process.exit(1);
   }
-  console.log(cmd === 'echo' ? `${r.echo.id}: You asked for: ${r.echo.asked}.${r.echo.wont ? ` I will NOT change: ${r.echo.wont}.` : ''} It waits on the dev's one click (War Room, Ops) or: npm run intent -- confirm ${r.echo.id} --by <dev>` : `${argv[1]} confirmed.`);
+  console.log(cmd === 'echo' ? `${r.echo.id}: You asked for: ${r.echo.asked}.${r.echo.wont ? ` I will NOT change: ${r.echo.wont}.` : ''} It waits on the dev's yes: npm run intent -- confirm ${r.echo.id} --by <dev>` : `${argv[1]} confirmed.`);
 }

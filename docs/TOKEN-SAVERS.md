@@ -11,7 +11,7 @@ The Director and Producer ask Claude Code for the 1-hour cache (`ENABLE_PROMPT_C
 
 A launched session's SessionStart hook now prints one fixed line, because its old output (the current task, the queue) was added to the context before the kickoff and changed on every launch.
 
-**Check it:** each launch writes the prefix hash to `.studio/prefix-ledger.jsonl`; a changed prefix for a role emits `prompt.prefix.changed`. `npm run prefix` prints each role's stability. Each `agent.session.end` now carries `cacheWrite`, `cacheHitRate` and `prefixHash` from Claude's own usage lines, and the War Room's Tokens panel shows the 24 h hit rate.
+**Check it:** each launch writes the prefix hash to `.studio/prefix-ledger.jsonl`; a changed prefix for a role emits `prompt.prefix.changed`. `npm run prefix` prints each role's stability. Each `agent.session.end` now carries `cacheWrite`, `cacheHitRate` and `prefixHash` from Claude's own usage lines.
 
 ## 2. Old tool results in long sessions
 The harness starts Claude only through the Claude Code CLI (`claude -p --output-format stream-json`); it never calls the Messages API itself. Anthropic's server-side context editing (clearing old tool results) is an API option, so the harness cannot switch it on. What it does instead:

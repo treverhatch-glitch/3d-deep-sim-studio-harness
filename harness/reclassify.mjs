@@ -70,11 +70,11 @@ import { delegationFor, recordUse, embeddedDelegationOk } from './delegation.mjs
 import { logDecision, asOf } from './decisions-log.mjs';
 
 export const TYPE_RECORD_REL = 'studio/task-types.json';
-export const RETYPABLE = ['change', 'chore', 'bug', 'docs', 'system', 'balance', 'fun', 'playtest', 'study', 'research', 'review', 'direction', 'idea', 'art', 'trick', 'whole'];
+export const RETYPABLE = ['change', 'chore', 'bug', 'docs', 'system', 'balance', 'fun', 'playtest', 'study', 'research', 'review', 'direction', 'idea', 'art', 'whole'];
 const NOTE = 'Owner reclassifications of task types (npm run task -- type <ID> <type> --by <owner> --why "…"; harness/reclassify.mjs). Written by that command from the owner\'s terminal; an entry set by an agent\'s commit (Studio-Agent trailer) is ignored, and once the studio has an owner key only signed reclassifications (studio/approvals/type-<ID>.json), or ones recorded there in beta mode, count.';
 
 // The agent-name shapes the launcher, fun verdicts and the agy allow-list use, and a "-bot" suffix.
-const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|art-director|liaison|scout|reference-scout|designer|designer-calibrator|balancer|fun-tester|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes|nim|dev-hacker|sound|composer|writer|engine|ui-)\b|(^|[-_])bot(\b|$)/i;
+const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|art-director|scout|reference-scout|designer|designer-calibrator|balancer|fun-tester|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes|nim|sound|composer|writer|engine|ui-)\b|(^|[-_])bot(\b|$)/i;
 const AGENT_SHELL = ['CLAUDECODE', 'AI_AGENT', 'CODEX_SANDBOX', 'GEMINI_CLI'];
 const git = (root, ...args) => spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };

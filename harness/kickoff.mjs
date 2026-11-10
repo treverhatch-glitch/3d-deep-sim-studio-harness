@@ -155,24 +155,6 @@ function kickoffText({ role, agent, model = 'unknown' }) {
   const roleFile = `studio/roles/${role}.md`;
   const hasRole = fs.existsSync(path.join(REPO_ROOT, roleFile));
   const env = `export STUDIO_LOCK_OWNER=${agent} STUDIO_AGENT_MODEL=${model}`;
-  if (role === 'liaison') {
-    return `You are ${agent}, the Liaison of a game studio that runs on this repo: the agent the game dev talks to. You run on ${model}.
-
-Set up once in your shell: \`${env}\`
-
-Read \`${roleFile}\`, \`studio/skills/liaison.md\`, \`studio/bible/BIBLE.md\` and \`studio/bible/NOT-DOING.md\`, and run \`npm run handoff\` once. Don't scan the repo.
-
-${allowedNote()}
-
-Then talk with the game dev. For each thing they bring:
-1. Ask short questions until you understand it well enough to explain it to a builder.
-2. \`npm run liaison -- draft --kind idea|direction|asset|question --title "…" --summary "…" --from <their name>\`.
-3. Read back what it prints and ask "Shall I push it on?". Corrections: \`liaison -- change\`. Changed their mind: \`liaison -- drop\`.
-4. Only on a clear yes: \`npm run liaison -- confirm <B-id> --by <their name> --quote "<their words>"\`. It goes to the Producer and the Director; the studio keeps running.
-
-Never: confirm on a maybe, promise it will be built, assign work, or edit the game.
-`;
-  }
   // 2.79 (t): the game tester (harness/tester.mjs starts it through the launcher for a run, never by hand).
   if (role === 'qa-playtester') {
     return `You are ${agent}, the game tester of a game studio that runs on this repo. You run on ${model}.
@@ -236,7 +218,7 @@ Your job is decisions, not code:
 9. In a test run, the supervisor writes the run report hourly when STUDIO_RESULTS_DIR is set; write one yourself after each milestone (\`npm run run-report\`) and a final one at the end (\`npm run run-report -- --final\`). If a person stops the studio (\`task start\` refuses), stop assigning and wait.
 10. Pace: \`npm run mode\` says how fast the game dev wants the studio to go (agents at once, reviews, how often you check in). Start agents within it: \`npm run agent -- start --role <role> --agent <name> --tool <tool> --model <model>\`; the launcher hands back a dead agent's work. With MAX SPEED on, check in every hour and keep the queue fed.
 11. Ask the game dev instead of guessing: \`npm run ask -- "<question>" --options "a,b" --default a --timeout 4h --why "…"\`. If nobody answers in time your default applies and is logged for them to review. Never put signing, pillars, money or deleting on a timer.
-12. Running the studio unattended, phases, the art department, staffing, the lab, the cheat sheet, session checks, waiting work and lanes, and the Prototype sprint pace (your items 12 to 20) are in the \`producer-playbook\` skill (\`.claude/skills/producer-playbook/SKILL.md\`). Load it when you plan, staff or queue; it is not needed for a quick check-in. Before you plan or queue, always run \`npm run cheatsheet -- match "<plan>" --for director\`.
+12. Running the studio unattended, phases, the art department, staffing, the cheat sheet, session checks, waiting work and lanes, and the Prototype sprint pace (your items 12 to 19) are in the \`producer-playbook\` skill (\`.claude/skills/producer-playbook/SKILL.md\`). Load it when you plan, staff or queue; it is not needed for a quick check-in. Before you plan or queue, always run \`npm run cheatsheet -- match "<plan>" --for director\`.
 
 21. The dev's words are the spec. When you turn their feedback into tasks, add them with \`--origin dev --asked "<their words>"\`, then show the dev one card: \`npm run intent -- echo --asked "<what they asked>" --wont "<what you will not change>" --tasks <IDs> --by ${agent}\`. Anything you or an agent thought of is agent-proposed (the default); an agent-proposed mechanic waits for the dev's yes (\`npm run task -- yes <ID> --by <dev>\`), other work starts at once. Steer the queue with \`npm run task -- drop <ID> --why "…"\` and \`npm run task -- reorder <ID> --to top\`, never by editing NEXT.md. When the dev says "do it now" about a phase, they open it themselves (War Room, "Your call") or you relay it: \`npm run bible -- phase open <n> --now "<their words>" --by <dev> --source "<where they said it>"\`. The risk is logged.
 22. 2.30d: only you, the Director and the planner add to the live queue; other roles' adds wait on \`npm run task -- proposed\` with a reason. Promote them in batches: \`npm run task -- promote P-3,P-4 --by ${agent}\` (or \`--all\`, \`--drop P-5\`). Builder tasks are size 3 at most: \`--size 4|5\` queues a planner split first. Forced work is "done (pending)": \`npm run task -- pending\`; a person or a reviewer from another model family closes it (\`task review <ID> --close|--reopen --by <name> --model <m>\`). Gameplay work joins the open fun wave; mark it ready when the batch is in a good state (\`npm run wave -- ready --by ${agent}\`) and keep other lanes building. While the dev is away you decide.

@@ -40,21 +40,11 @@ import { writeAtomic, sweepTempsDeep } from './fsafe.mjs';
 import { doneRunning, claimActive, keepClaim } from './busy.mjs';
 import { mainRoot } from './worktree.mjs';
 import { collectIdeas } from './ideas.mjs';
-import { trickPass } from './tricks.mjs';
-import { listDivisions } from './divisions.mjs';
 import { sessions, fillAgents, startAgent, markGone, saveWorkOf, AGENTS_DIR } from './agent.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { expireAsks } from './ask.mjs';
 import { expireDesigns } from './art.mjs';
 import { reloadEnvIfChanged } from './env-reload.mjs';
-
-const readGatesLast = () => {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'gates-last.json'), 'utf8'));
-  } catch {
-    return null;
-  }
-};
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -339,8 +329,6 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   const ideas = dryRun ? null : collectIdeas();
   // A game made before 2.25 gets its ID here, without anyone asking.
   if (!dryRun) import('./game-id.mjs').then(({ ensureGameId }) => import('./cartridge.mjs').then(({ activeCartridge }) => ensureGameId(activeCartridge().name, { by: 'watch' }))).catch(() => {});
-  // The dev hacker's cards reach the Producer in one batch; hunts are queued only while its lab is open.
-  if (!dryRun) trickPass({ queue: parseNextQueue(), divisions: listDivisions(), gates: readGatesLast() }).catch(() => {});
   // The mode decides whether agents start on their own, and how often the Producer checks in.
   const decided = dryRun ? [] : expireAsks(now);
   // Designs left waiting past the pace's limit: the Producer approves them provisionally (logged).

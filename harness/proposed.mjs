@@ -19,7 +19,7 @@ export const DECIDERS = ['director', 'producer', 'planner', 'human'];
 export const SIZE_CAP = 3;
 export const PROPOSED_FILE = path.join(REPO_ROOT, 'studio', 'proposed.json');
 // Launcher agent names start with their role (builder-3, qa-playtester-1); people's names don't. The watcher
-// (a script) and the liaison (it relays the dev's own words) queue directly.
+// (a script) queues directly.
 const ROLE_NAME = /^(builder|qa|qa-playtester|art|art-lead|reviewer|rnd|engine-porter|sound|ui|narrative|localization|release)(-|\d|$)/i;
 const DECIDER_NAME = /(^|-)(director|producer|planner)(-|\d|$)/i;
 

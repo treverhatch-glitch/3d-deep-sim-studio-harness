@@ -1213,7 +1213,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   // M2 (2.58.3, crew P-039): a code-writing role on a task with no lane gets its own copy too (no path claims), so its
   // staged or half-done files never sit in the main checkout where they block every other task's `task done`.
-  // Producer, Director, planner and liaison stay in the main checkout; STUDIO_LANELESS=shared turns it off.
+  // Producer, Director and planner stay in the main checkout; STUDIO_LANELESS=shared turns it off.
   // H-9 (2.58.5): a custom command too (STUDIO_<ROLE>_CMD, STUDIO_TOOL_<TOOL>_CMD, STUDIO_AGENT_CMD): 2.58.3 left it in
   // the main checkout, and a wrapper session staged game code there that the pre-commit hook refused. It runs in the
   // copy (cwd), with STUDIO_MAIN_ROOT set, and its line may use {mainRoot} and {addDirs} (the --add-dir pair the
@@ -2030,7 +2030,7 @@ export function sayNow(agent, text) {
   return { ok: true };
 }
 
-const isAgentName = (by) => /^(prod|producer|director|builder|rnd|qa|reviewer|planner|art|liaison|agent|watch|supervisor|dev-hacker|codex|claude|gemini|agy|grok|cursor|aider|hermes)\b/i.test(String(by || '')) || by === process.env.STUDIO_LOCK_OWNER;
+const isAgentName = (by) => /^(prod|producer|director|builder|rnd|qa|reviewer|planner|art|agent|watch|supervisor|codex|claude|gemini|agy|grok|cursor|aider|hermes)\b/i.test(String(by || '')) || by === process.env.STUDIO_LOCK_OWNER;
 function readBudgetLimits() {
   try {
     return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'budget.json'), 'utf8'));
@@ -2107,7 +2107,7 @@ export function saveWorkOf(agent, task, mine, s = readJson(sessionFile(agent))) 
 const tasksOf = (agent, s) => [...new Set([...listLocks().filter((l) => l.owner === agent && l.key.startsWith('task:')).map((l) => l.key.slice(5)), ...(s?.task ? [s.task] : [])])];
 
 /** Pause an agent: its task goes back to the queue with a note (and its claims), then the process ends. */
-export function pauseAgent(agent, note = '', by = 'war-room-human') {
+export function pauseAgent(agent, note = '', by = 'owner') {
   const s = sessions().find((x) => x.agent === agent && x.running);
   if (!s) return { ok: false, message: `${agent} isn't running.` };
   const mine = listLocks().filter((l) => l.owner === agent);
@@ -2129,7 +2129,7 @@ export function pauseAgent(agent, note = '', by = 'war-room-human') {
  * still marked running whose process is gone, or whose number another program has now, is ended here (work handed
  * back, claims freed) without killing anything, instead of "isn't running".
  */
-export function stopAgentNamed(agent, by = 'war-room-human') {
+export function stopAgentNamed(agent, by = 'owner') {
   const s = sessions().find((x) => x.agent === agent && x.status === 'running');
   if (!s) return { ok: false, message: `${agent || '(no name)'} isn't running.` };
   const tasks = tasksOf(agent, s);
@@ -2140,7 +2140,7 @@ export function stopAgentNamed(agent, by = 'war-room-human') {
 }
 
 /** "Stop all": every running launcher session hands its task back with a note and ends. */
-export function stopAllAgents(by = 'war-room-human', reason = '') {
+export function stopAllAgents(by = 'owner', reason = '') {
   const stopped = [];
   const list = sessions().filter((x) => x.running);
   // PU-17: one OS query for every session's start time, not one per session.
@@ -2423,7 +2423,7 @@ export function startAgent(opts, { detach = false } = {}) {
   // The Director watches for drift and files corrections; the Producer decides staffing.
   if (opts.by && /^director\b/i.test(String(opts.by))) return { ok: false, message: 'The Director does not hire: file a correction task for the Producer instead.' };
   // A frozen clone (a test run) keeps agents out of the harness itself.
-  if (opts.lane && fs.existsSync(path.join(REPO_ROOT, '.studio', 'harness-frozen')) && /^(\.\/)?(harness|hub|qa|scripts)(\/|$)/.test(String(opts.lane).replace(/\\/g, '/'))) return { ok: false, message: `Not started: ${opts.lane} is harness code, and this clone's harness is frozen.` };
+  if (opts.lane && fs.existsSync(path.join(REPO_ROOT, '.studio', 'harness-frozen')) && /^(\.\/)?(harness|qa|scripts)(\/|$)/.test(String(opts.lane).replace(/\\/g, '/'))) return { ok: false, message: `Not started: ${opts.lane} is harness code, and this clone's harness is frozen.` };
   // The Producer hires on its own up to a limit (studio/budget.json producerMayHireUpTo, default 4);
   // past it, the hire becomes a question for the game dev (Needs you), started when they say yes.
   if (opts.by && isAgentName(opts.by) && !opts.approved) {
@@ -2497,7 +2497,7 @@ export async function fillAgents({ byDirector = false, autonomous = false } = {}
  * cycle): it starts nothing while auto-start is off (npm run mode -- autostart on --by <name>).
  */
 export function wake(role, { task = null, why = '', auto = false } = {}) {
-  const label = { rnd: 'R&D', producer: 'the Producer', director: 'the Director', art: 'the art department', builder: 'a builder', liaison: 'the Liaison' }[role] || role;
+  const label = { rnd: 'R&D', producer: 'the Producer', director: 'the Director', art: 'the art department', builder: 'a builder' }[role] || role;
   // 2.80: every wake comes from the supervisor's passes (the War Room, whose clicks woke agents too, is gone).
   const from = 'supervisor';
   const busy = sessions().find((s) => s.role === role && s.running);
@@ -2516,7 +2516,7 @@ export function wake(role, { task = null, why = '', auto = false } = {}) {
 }
 
 /** Which roles can start without a person (for preflight and the War Room). */
-export function launchableRoles(roles = ['producer', 'director', 'builder', 'qa-playtester', 'rnd', 'planner', 'art', 'reviewer', 'liaison']) {
+export function launchableRoles(roles = ['producer', 'director', 'builder', 'qa-playtester', 'rnd', 'planner', 'art', 'reviewer']) {
   return roles.filter((r) => process.env[`STUDIO_${roleKey(r)}_CMD`] || process.env[`STUDIO_${roleKey(r)}_TOOL`] || process.env.STUDIO_AGENT_TOOL || (r === 'director' && process.env.STUDIO_DIRECTOR_CMD));
 }
 

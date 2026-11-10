@@ -155,7 +155,7 @@ function withMutex(fn) {
 }
 
 /** Top-level folders: claiming one blocks every other agent, so it needs a stated reason. */
-export const WIDE_PATHS = new Set(['', 'studio', 'qa', 'cartridges', 'src', 'game', 'harness', 'hub', 'scripts', 'docs', 'tools', 'assets', 'public']);
+export const WIDE_PATHS = new Set(['', 'studio', 'qa', 'cartridges', 'src', 'game', 'harness', 'scripts', 'docs', 'tools', 'assets', 'public']);
 
 /**
  * 2.58.5 (H-10): a folder too broad to claim by hand without --wide: a game's root or source root (game|web|engine/<name>,

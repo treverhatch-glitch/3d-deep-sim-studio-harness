@@ -27,7 +27,7 @@
  * field"). The crew probed {"event":"user","message":{"role":"user","content":[…]}} on real agy and a Gemini builder then
  * ran a full cycle; userLine sends exactly that shape. ON BY DEFAULT since 2.78.1 (it is verified on the crew's PC):
  * STUDIO_AGY_STREAM=0 keeps the 2.58.5 launch (prompt on stdin, closed at once, one turn), and so does
- * STUDIO_AGY_PROMPT=arg (-p <prompt>). Roles whose session is one turn by design (reviewer, Producer, Director, liaison:
+ * STUDIO_AGY_PROMPT=arg (-p <prompt>). Roles whose session is one turn by design (reviewer, Producer, Director:
  * ONE_TURN_ROLES) keep that launch as well: the crew's Gemini reviewer worked on it.
  * The safety net (2.78.1): an agy session that exits before its first turn ends, with an input-format error in its own
  * output or no stream-json event at all (streamFailure), is recorded once in .studio/agy-stream.json (agy's program,
@@ -46,7 +46,7 @@ import path from 'node:path';
 
 export const AGY_STREAM_FLAGS = Object.freeze(['--input-format', 'stream-json', '--output-format', 'stream-json']);
 /** Roles whose session is one turn by design: they never get a follow-up and keep the one-turn launch. */
-export const ONE_TURN_ROLES = /^(reviewer|producer|director|liaison)$/i;
+export const ONE_TURN_ROLES = /^(reviewer|producer|director)$/i;
 
 const num = (v, d, { min = 0 } = {}) => (v === undefined || v === null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? d : Math.max(min, Number(v)));
 

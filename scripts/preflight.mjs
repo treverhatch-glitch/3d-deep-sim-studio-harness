@@ -54,7 +54,7 @@ function harnessFiles() {
       } else if (e.isFile() && FROZEN_RE.test(r)) out.push(r);
     }
   };
-  for (const top of ['harness', 'hub', 'scripts', 'tools', '.github', 'qa']) if (fs.existsSync(path.join(REPO_ROOT, top))) walk(top);
+  for (const top of ['harness', 'scripts', 'tools', '.github', 'qa']) if (fs.existsSync(path.join(REPO_ROOT, top))) walk(top);
   for (const f of ['studio/gates.json', 'AGENTS.md', 'AGENTS.lite.md', 'package.json']) if (fs.existsSync(path.join(REPO_ROOT, f))) out.push(f);
   return out.sort();
 }

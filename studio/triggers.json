@@ -15,7 +15,6 @@
         "task.train.flaky": "candidate"
       }
     },
-    "hub": { "policy": "candidate" },
     "discord": { "policy": "respond" },
     "github": { "policy": "respond" }
   },

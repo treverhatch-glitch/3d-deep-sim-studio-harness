@@ -18,7 +18,7 @@ export async function selftest259B({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '',
     GITHUB_BASE_REF: '', GITHUB_EVENT_NAME: '', GITHUB_SHA: '', STUDIO_HOOKS_CHECK: '', STUDIO_LOCK_OWNER: '', STUDIO_LANE_HARNESS: '', STUDIO_HOOKS_RESTAMP: '',
-    STUDIO_MAIN_COMMIT: '', STUDIO_WORKTREES: '', STUDIO_AGENT_MODEL: '', STUDIO_EXPERIMENT: '', AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-259b.jsonl') };
+    STUDIO_MAIN_COMMIT: '', STUDIO_WORKTREES: '', STUDIO_AGENT_MODEL: '', AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-259b.jsonl') };
   const gIn = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const g = (...a) => gIn(dir, ...a);
   const write = (root, rel, text) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); };

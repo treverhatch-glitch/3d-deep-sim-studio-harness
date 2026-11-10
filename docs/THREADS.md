@@ -23,7 +23,7 @@ Threads are off by default. Switch them on (`STUDIO_THREADS=on`: CI and merge-tr
 | `branch:lane/<agent>-<stamp>` | `.studio/lane-branches.json`, `task.train.queued`, `lane.copy` |
 | `sha:<40 hex>` | the head a lane queued (`task.train.queued`), the commit a train landed (`task.train.landed`) or refreshed pins in, and the `Studio-Task` trailer of the commit CI ran on |
 | `train:<id>` | a merge train's lanes (`task.train.start`) |
-| `brief:B-001` | the Producer task a confirmed Liaison brief made (`task.added` meta.brief) |
+| `brief:B-001` | the Producer task an old confirmed brief made (`task.added` meta.brief) |
 | `ask:A-001` | the task its asker holds when the answer comes (`ask.open`), or the Producer task of a reversal |
 | `away:AW-3` | the task an away item is about (`away.verdict`) |
 | `wave:W-2` | the tasks in a fun-check wave (`wave.joined`) |
@@ -46,8 +46,7 @@ With either `respond` or `candidate`, an event that matches no task goes to the 
 `studio/producer/INBOX.md`, which the Producer reads at its next start. Entries under `types` override the
 source's policy for a single event type. Defaults: a CI failure responds and a CI green is ignored. For the
 train, a dropped or partial lane responds, while a red train, a deferred lane, a red `main` and a flaky
-train are candidates. Every other train event (start, verify, pins, landed, done) is ignored. Hub is a
-candidate; Discord and GitHub respond only for listed senders (below), else candidate.
+train are candidates. Every other train event (start, verify, pins, landed, done) is ignored. Discord and GitHub respond only for listed senders (below), else candidate.
 
 ### Who may make a post respond (`"senders"`, 2.65.0)
 
@@ -64,8 +63,8 @@ can't verify a Discord or GitHub identity itself: the bot passes the author id i
 (`--author`), and the harness applies the owner's lists to it. The table is protected, so only the owner changes
 the lists.
 
-Sources: `ci` (ci-watch), `train` (`task.train.*`), `hub` (ask answers, and before 2.80 the War Room's
-`/api/inbox` and away verdicts), and `discord` and `github` (`npm run thread -- post`).
+Sources: `ci` (ci-watch), `train` (`task.train.*`), and `discord` and `github` (`npm run thread -- post`).
+(A `hub` source, the War Room's, is gone since 2.81; an old `triggers.json` that lists it is read without it.)
 
 **Pass-through never adds a task and never edits the board.** The Producer is still the only writer to the
 live queue. Gates, the train, locks and protected files are unchanged.
@@ -90,7 +89,7 @@ npm run thread -- resolve <key>                  # which task a key belongs to
 npm run thread -- inbox T-123 [--peek]           # read a task's inbox (marks it read)
 npm run thread -- link discord:<id> T-123 --by <name>
 npm run thread -- unlink discord:<id> --by <name>
-npm run thread -- post <key> "<text>" --source discord|github|hub --by <name> [--ref <id>] [--author <sender id>]
+npm run thread -- post <key> "<text>" --source discord|github --by <name> [--ref <id>] [--author <sender id>]
 ```
 
 `link`, `unlink` and `post` accept a Producer or Director session, an agent outside the harness (a chat bot)

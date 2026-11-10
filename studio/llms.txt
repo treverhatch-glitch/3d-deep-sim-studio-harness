@@ -22,10 +22,6 @@
   The Idea Board: captured, shaped (R&D), placed (planner, pings the Director), decided, scheduled (`task add --idea`). The watcher hands new ideas to the Producer.
 - `npm run intake -- --followups [--model | --json | --answers f.json]`
   Follow-up questions per phase and per kept or explore layer (a fixed bank; `--model` adds checked ones from a cheap model).
-- `npm run liaison -- draft --kind idea|direction|asset|question --title … --summary … | change | confirm <B-id> --by <dev> | drop | list`
-  The Liaison turns a conversation into a brief, reads it back, and only on the dev's yes sends it to the Producer and the Director.
-- `npm run experiment -- start "…" | task X-001 "…" | keep X-001 --by <name> | drop X-001 --by <name> [--only paths] | list`
-  Tracked experiments: commits tagged `Studio-Experiment`, taken back out in full or in part with undo commits.
 - `npm run ref -- add <url|file> --game … --feature … [--at 1:23] | attach R-001 <file> | frames R-001 | list`
   The reference library (media kept in `references/` or `STUDIO_REFERENCE_DIR`, index in `studio/references/`). Never shipped.
 - `npm run asset -- add <file> --use game --owner … --licence … --by <person>` · `--use reference`
@@ -101,7 +97,7 @@
 - `npm run tokens [-- --since 5h|24h|today|all] [--by role|model|agent|tool] [--json]` — measured token use from each session's own report; sessions whose tool reported nothing are listed as not measured
 - `npm run map -- find <name> [--harness]` — where a function, constant or TUNING key is, with its arguments and line range, in one call (a real parse); prefer it to reading the map and then the file
 - `node scripts/check-function-size.mjs` — game functions over 80 lines and files over 400 lines or 30 KB (STUDIO_FN_MAX_LINES, STUDIO_FILE_MAX_LINES, STUDIO_FILE_MAX_KB); a task can't finish if it made one bigger
-- Lane copies (2.29): an agent the launcher starts with a code lane works in `.lanes/<agent>/` on its own branch (studio/ and .studio/ shared); `task done` there rebases and adds its commits to the studio's branch; git 2.42+, STUDIO_WORKTREES=off to share one checkout. 2.58.3: a code-writing role (not producer, director, planner, liaison) on a task with no lane gets a copy too (STUDIO_LANELESS=shared: the old shared checkout); Claude (and Codex) in a copy get `--add-dir` for the main checkout's studio/ and .studio/
+- Lane copies (2.29): an agent the launcher starts with a code lane works in `.lanes/<agent>/` on its own branch (studio/ and .studio/ shared); `task done` there rebases and adds its commits to the studio's branch; git 2.42+, STUDIO_WORKTREES=off to share one checkout. 2.58.3: a code-writing role (not producer, director, planner) on a task with no lane gets a copy too (STUDIO_LANELESS=shared: the old shared checkout); Claude (and Codex) in a copy get `--add-dir` for the main checkout's studio/ and .studio/
 - `npm run lane -- create <T-ID> [--from <branch>...] [--agent <name>] [--allow-mixed]` — a proper lane copy for a task from chosen branches, merged in order (studio/ linked to main; another open task's commits refused); `npm run remote -- mark|brief|fetch|release|status` — remote (cloud) workers: a lease for remote-<name>, its branch remote/<T-ID>-… fetched into the normal train (docs/REMOTE-WORKERS.md)
 - `npm run help [-- --all]` — the everyday commands on one screen (Lite: ten)
 - `npm run verify [-- --deep | --full]` — everyday verify skips the harness self-checks (selftest); --deep runs them (release and CI do); --full runs every gate in Lite scope
@@ -136,7 +132,6 @@
 - `npm run bible -- phase open <n> --now "<the dev's words>" --by <dev>` — the dev's "do it now": opens the phase at once, risk logged (docs/STEERING.md)
 - `npm run watchdog -- on|off --by <name> | status` — the opt-in overnight watchdog, off by default (docs/STEERING.md)
 - `npm run budget -- ccusage` — with the ccusage plugin on, copy Claude Code's own daily usage into the ledger (docs/STEERING.md)
-- `npm run trick -- propose "<title>" --problem … --trick … --fits … --avoid-if … --proof … | none "<why>" | adopt K-001 --by <p> | park K-001 --why … --by <p> | list` — the dev hacker's trick cards (Dev Hacker Lab, off by default, P3, never blocks; docs/DEV-HACKER.md)
 - Golden changes need a `Golden-Reason:` trailer (commit-msg hook adds `Golden-Diff:`)
 - `node scripts/check-module-size.mjs` — modules over 300 lines block parallel lanes (studio/rules/lanes.md)
 - `node scripts/settings-census.mjs [--json] [--env <studio .env>] [--events <events.jsonl>]` — every STUDIO_* setting with default, readers, frozen, first release and whether a studio sets it; lists off-switch, duplicate-family and dead candidates (report only, 2.79)

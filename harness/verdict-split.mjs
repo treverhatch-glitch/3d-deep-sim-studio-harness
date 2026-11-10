@@ -118,7 +118,7 @@ export function renderDecision(t = {}, { env = process.env } = {}) {
   const out = (render, by, why, extra = {}) => ({ render, by, why, ...(ignored ? { ignored } : {}), ...extra });
   if (/^(off|no)$/i.test(String(t.visual ?? ''))) return out(false, 'board', 'the board says visual: off');
   // Only build work renders: an art, design or planning task proposing placeholders is not gated here.
-  if (t.role && !/^(builder|engine-porter|dev-hacker)$/.test(t.role)) return out(false, 'role', `a ${t.role} task`);
+  if (t.role && !/^(builder|engine-porter)$/.test(t.role)) return out(false, 'role', `a ${t.role} task`);
   if (t.visual === true || /^(on|yes|true)$/i.test(String(t.visual ?? ''))) return out(true, 'board', 'the board says visual: on');
   if (/engine:godot/i.test(String(t.track || ''))) return out(true, 'track', 'a godot engine task');
   if (/^(visual|art|render)$/i.test(String(t.type || ''))) return out(true, 'type', `a ${t.type} task`);

@@ -510,7 +510,7 @@ export function buildIntegration(sc, tip, lanes, { id, unionFiles = [] }) {
   const deferred = [];
   const conflictMain = [];
   const env = { ...process.env };
-  for (const k of ['STUDIO_LOCK_OWNER', 'STUDIO_EXPERIMENT', 'STUDIO_AGENT_MODEL']) delete env[k];
+  for (const k of ['STUDIO_LOCK_OWNER', 'STUDIO_AGENT_MODEL']) delete env[k];
   for (const lane of lanes) {
     const before = out(git(dir, 'rev-parse', 'HEAD'));
     const base = out(git(root, 'merge-base', tip, lane.head));
@@ -904,7 +904,7 @@ function localSafetyGates(sc, { id, n, tree, all, tasks = [], log }, ids, games)
 export const bisectMode = (env = process.env) => (/^alone$/i.test(String(env.STUDIO_TRAIN_BISECT || '')) ? 'alone' : 'prefix');
 const stable = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x)) ?? 'undefined';
 const short = (v) => { const t = stable(v); return t.length > 60 ? `${t.slice(0, 57)}...` : t; };
-const mergeEnv = () => { const env = { ...process.env }; for (const k of ['STUDIO_LOCK_OWNER', 'STUDIO_EXPERIMENT', 'STUDIO_AGENT_MODEL']) delete env[k]; return env; };
+const mergeEnv = () => { const env = { ...process.env }; for (const k of ['STUDIO_LOCK_OWNER', 'STUDIO_AGENT_MODEL']) delete env[k]; return env; };
 
 /**
  * Re-run ONLY these studio gates on the scratch copy's tree (run-gates --only, a partial run that stands for no
@@ -3116,7 +3116,7 @@ function landOverNonCode(root, sc, { tip, now, verified, id }) {
   if (odd) return { ok: false, why: `the merged tree differs from the verified one in ${odd}, not only by main's version of its non-code files` };
   const msg = [`train ${id}: land the verified tree ${verified.tree.slice(0, 8)}, then ${mv.commits.length} new commit(s) of main that touch only non-code files`, '', ...mv.commits.slice(0, 20).map((c) => `  ${c.sha.slice(0, 8)} ${c.subject}`), '', `Studio-Train: ${id} over-noncode`].join('\n');
   const env = { ...process.env };
-  for (const k of ['STUDIO_LOCK_OWNER', 'STUDIO_EXPERIMENT', 'STUDIO_AGENT_MODEL']) delete env[k];
+  for (const k of ['STUDIO_LOCK_OWNER', 'STUDIO_AGENT_MODEL']) delete env[k];
   const m = spawnSync('git', ['-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'merge', '--no-ff', '--no-edit', '-m', msg, now], { windowsHide: true, cwd: sc.dir, encoding: 'utf8', env, maxBuffer: 16 * 1024 * 1024 });
   if (m.status !== 0) { back(); return { ok: false, why: `the merge stopped: ${`${m.stdout || ''}${m.stderr || ''}`.trim().split('\n').slice(-2).join(' ').slice(0, 200)}` }; }
   const merged = out(git(sc.dir, 'rev-parse', 'HEAD'));
