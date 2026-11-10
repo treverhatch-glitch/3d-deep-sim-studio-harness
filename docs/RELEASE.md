@@ -3,23 +3,17 @@
 One command does what used to be done by hand for every release:
 
 ```bash
-npm run release -- 2.30.0-c --notes notes.md --title "short output, breakers, the Producer on events" --shots ./hud-shots
+npm run release -- 2.30.0-c --notes notes.md --title "short output, breakers, the Producer on events"
 ```
 
 1. Checks you are on `main`, in step with `origin/main` (fetched), and that the version is new.
 2. Bumps `package.json` and `package-lock.json`, and writes the CHANGELOG entry from `--notes` (unless one is already there).
 3. Makes **one** squashed commit of the working tree on top of `origin/main`. No branches.
-4. Clones that commit fresh, installs, and runs `verify --deep` there (every required gate, including the self-test and the War Room smoke test), then the War Room browser check (`qa/hud-check.mjs`, screenshots with `--shots`).
+4. Clones that commit fresh, installs, and runs `verify --deep` there (every required gate, including the self-test).
 5. Bundles `origin/main` as it was (before this release) into the backup folder (`--backup-dir`, `STUDIO_RELEASE_BACKUP_DIR`, default `../backups`) and verifies the bundle.
 6. Pushes to `main`. Never forced: if main moved, it stops and you rebase.
 7. Waits for CI on that commit. A failed job is re-run once (known flaky timing checks); both results are reported.
 8. Reports failing steps first, "not run" apart from "pass". Saved to `.studio/release-last.json`; the clone's verify log is `.studio/release-verify.log`.
-
-**The War Room browser check** (`node qa/hud-check.mjs`, also CI's `war-room-browser` job) waits for each state it
-checks (up to 15 s, 30 s on Windows; `HUD_WAIT_MS` changes it) and, on a time-out, prints what the page showed;
-Stop and Pause must show an empty list that holds through a page refresh. To test a timing fix, run the agent checks
-alone many times: `node qa/hud-check.mjs --only stop-pause --repeat 30` (pass count and seconds per round at the end;
-`HUD_TRACE=1` prints each press and wait).
 
 Any red step before the push undoes the commit and leaves the work uncommitted; nothing is pushed. `--dry-run` stops before the push. Without the `gh` CLI, CI is reported as "not checked", never as green.
 
@@ -248,7 +242,7 @@ record keeps the permission and who recorded it. Builders and other worker agent
 ## What 2.30c changed for agents
 
 - **Short output.** `task start` prints the brief's path and a 10-line summary; its JSON carries `carryForward` (the newest hand-off notes, at most 3k characters) instead of the whole history (`studio/handoffs/<ID>.md` keeps it). `npm run handoff` prints at most 3k characters; `npm run handoff -- --full` prints all of it (always saved to `.studio/briefs/producer.md`).
-- **Circuit breakers.** A second hand-back for the same reason parks the task with that reason and a War Room card. Refreshes and stops never count. Other tasks keep starting. `npm run task -- unblock <ID> --by <name>` (or Unblock on the card) clears it. `STUDIO_BREAKER=off` turns it off.
+- **Circuit breakers.** A second hand-back for the same reason parks the task with that reason (a task.breaker event). Refreshes and stops never count. Other tasks keep starting. `npm run task -- unblock <ID> --by <name>` (or Unblock on the card) clears it. `STUDIO_BREAKER=off` turns it off.
 - **The Producer on events.** The supervisor and the watcher start a Producer session only after a task is done, forced or tripped, or a card or ask appears; at most once per 15 min (`STUDIO_PRODUCER_MIN_MIN`) unless urgent; the wait doubles while nothing changes (up to 4 h). A person starting it from the War Room is never held back. `STUDIO_PRODUCER_WAKE=always` turns this off.
 - **Dependency-aware handout.** The supervisor skips a task whose `--after` prerequisite is done but still on an unmerged lane branch, or whose folder another agent holds, tries the next one, and marks it "waiting on X" in the queue.
 - **DONE.md.** Finished tasks move to `studio/DONE.md`; `studio/NEXT.md` keeps only open work. An older NEXT.md's DONE section still counts and moves on the next write.

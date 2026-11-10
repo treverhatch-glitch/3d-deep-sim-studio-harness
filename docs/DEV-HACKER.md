@@ -11,8 +11,7 @@ Some examples:
 
 It works beside the studio, never in its way:
 
-- **It's optional.** The lab is off by default. Open it with `npm run division -- open hacks --reason "…" --by <name>`,
-  or with a click on the locked room in the Studio view.
+- **It's optional.** The lab is off by default. Open it with `npm run division -- open hacks --reason "…" --by <name>`.
 - **It never blocks.** Its hunts are P3, nothing depends on them, and it holds no game-file locks outside
   its own experiment. If it does nothing, nothing changes.
 - **It doesn't take orders.** The Director and the Producer keep their flow. The dev hacker sends cards to the
@@ -55,7 +54,6 @@ npm run trick -- list
   (`npm run experiment`) and names it with `--experiment`. The Producer keeps it or drops it.
 - An adopted card queues "Build trick K-001: … (prove it: …)" for a builder, with `part: renderer`.
   It is infra work unless the Producer gives it a phase.
-- The War Room's Game plan shows the cards in "The dev hacker's tricks".
 
 ## Is it worth having?
 

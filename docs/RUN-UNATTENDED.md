@@ -1,6 +1,6 @@
 # Running the studio unattended
 
-Run #1 stopped at 07:09 with 36 tasks queued: the laptop restarted, the War Room died, and nothing
+Run #1 stopped at 07:09 with 36 tasks queued: the laptop restarted, the studio's processes died, and nothing
 started again until someone asked. The supervisor fixes that.
 
 ## Start it
@@ -15,13 +15,13 @@ npm run studio:boot -- --shortcut      # also put a "Studio boot" file on the De
 ```
 
 It checks node, npm (on Windows it says to type `npm.cmd` when the execution policy blocks `npm.ps1`) and `.env` (no
-session identity in it, a War Room token for the buttons); clears lock and status files whose process is gone
+session identity in it); clears lock and status files whose process is gone
 (`train.lock`, `land.lock`, `unity-train.lock`, `verify-running/full.json`, `train/daemon.json`, a "running"
-`supervisor.json`), one `boot.stale_cleared` event each, never a lane copy or anyone's work; starts the hub and then
-the supervisor, each only when it isn't running already, detached and hidden, with output in `.studio/logs/`; the train
+`supervisor.json`), one `boot.stale_cleared` event each, never a lane copy or anyone's work; starts
+the supervisor only when it isn't running already, detached and hidden, with output in `.studio/logs/`; the train
 daemon runs inside the supervisor's pass. Then one card: crew sessions, the train, halts, what needs you, outside agents
-seen lately, lane copies and leftover folders in `.lanes/`, and the War Room address (the link with your token is in
-`.studio/logs/hub.log`). Chat-based orchestrators outside the harness are not restarted. The hub and supervisor never
+seen lately, and lane copies and leftover folders in `.lanes/`. 2.80: there is no hub to start; `--hub`/`--no-hub` are
+accepted and ignored with one line. Chat-based orchestrators outside the harness are not restarted. The supervisor never
 get the shell's `STUDIO_LOCK_OWNER`, `STUDIO_ROLE`, `STUDIO_AGENT` or `STUDIO_MAIN_ROOT`.
 
 ```bash
@@ -57,12 +57,12 @@ environment) still wins over `.env`; a value that came from `.env`, in the proce
 inherits the supervisor's; `STUDIO_ENV_FROM_FILE` is the internal note of which names those are, never their values),
 follows the file; a line removed from `.env` gives that setting its default back. Identity settings (`STUDIO_LOCK_OWNER`,
 `STUDIO_ROLE`, `STUDIO_AGENT`, `STUDIO_MAIN_ROOT`) are never taken from `.env`. Read once at start, so a restart is still
-needed: `STUDIO_SUPERVISOR_SEC`, `STUDIO_HEARTBEAT_SEC`, `HUB_PORT`.
+needed: `STUDIO_SUPERVISOR_SEC`, `STUDIO_HEARTBEAT_SEC`.
 `studio:reload-env` (2.79) also lists the `STUDIO_*` names the `.env` sets (names only, never values) and marks any the
 harness no longer reads (not in `docs/SETTINGS.md`) as "unknown (removed or misspelled)".
 
 2.77.1 (B-102): a pass never stops the loop. The loop is set before the first pass, passes never overlap, and each step of
-a pass (the hub, the Line Producer, the launch step, the Director's flow, the machine scan, the Communicator, the
+a pass (the Line Producer, the launch step, the Director's flow, the machine scan, the Communicator, the
 workaround pass, the train daemon) is bounded: a step still running after `STUDIO_SUPERVISOR_STEP_SEC` (300; the launch
 step twice that) is reported as `supervisor.step_timeout` and the pass goes on without it. A whole pass still running after
 `STUDIO_SUPERVISOR_STUCK_MIN` (15) minutes is reported once as `supervisor.pass_stuck`. `.studio/supervisor.json` counts
@@ -74,13 +74,12 @@ every `STUDIO_WATCH_INTERVAL` seconds (300; 0 turns them all off) the watch pass
 report and the Director's daily ping, and every `STUDIO_GAMEDEV_INTERVAL` seconds (180; 0 turns it off) the game-dev
 watchdog pass. Each group first runs one full interval after the supervisor started (a short run never runs them), never in a dry run;
 one bounded step per group, and a pass that throws is logged without stopping the others. `.studio/supervisor.json`
-keeps each group's last run (`timed`). Wakes these passes cause are logged from `supervisor` (a person's click in
-the War Room still from `war-room`).
+keeps each group's last run (`timed`). Wakes these passes cause are logged from `supervisor`.
 
-Every minute it keeps the War Room hub up (and logs how long it was down; 2.74.0: harness/hub-keeper.mjs, below), then starts a fresh agent
+Every minute it starts a fresh agent
 for the next waiting task of each role, one task per session, within the pace's caps. When a session
 ends, the next minute starts the next. It starts nothing while "Stop all agents" is on, outside the
-window, past `--until`, or past the budget. The Ops view shows "Running unattended", and the run
+window, past `--until`, or past the budget. `npm run studio:status` shows it, and the run
 report has a section for it. `--install` uses launchd (macOS), systemd --user (Linux) or Task
 Scheduler (Windows); `--uninstall` removes it.
 
@@ -96,21 +95,12 @@ Scheduler (Windows); `--uninstall` removes it.
   fails soft (null + reason). It writes `.studio/machine.json`; `STUDIO_MACHINE_SCAN=off` turns it all off. The
   supervisor samples it every `STUDIO_MACHINE_SAMPLE_S` (300) into a `machine.sample` event and
   `.studio/machine-history.jsonl` (kept under `STUDIO_MACHINE_HISTORY_KB`, 256). `status --brief`, `npm run lanes`
-  and the War Room's `/api/state` (`machine`) show "Machine: RAM 26/32 GB (commit 55/60), CPU 32%, GPU 1% (1.8/12 GB),
+  show "Machine: RAM 26/32 GB (commit 55/60), CPU 32%, GPU 1% (1.8/12 GB),
   disk 130 GB free". On Windows the memory floor uses the smaller of free memory and commit headroom.
   **Disk budget:** under `STUDIO_DISK_MIN_FREE_GB` (default max(20, 5% of the disk)) the supervisor emits
   `machine.disk_low` (at most every 6 h), the daily digest has a line, and `task start` and the train warn, naming
   what the temp-file janitor can free when it is installed.
 
-- **The hub keeper (2.74.0, B-70).** The hub counts as up when `/health` answers within 5 s (it was 2 s, so a busy hub
-  building a big page was logged as down). A hub process of the supervisor's that is still there but silent is left
-  alone for `STUDIO_HUB_HANG_MIN` (5) minutes, then ended and restarted; a hub someone else started (the pid in
-  `.studio/hub.json`, alive) is never touched. A dead hub is started again (hidden on Windows) at most once per
-  backoff step (30 s, 1, 2, 4, 8, then every 10 minutes; the steps start over after 10 minutes up), each restart a
-  `supervisor.hub_restart` event with its cause. The cause is the hub's own line in `.studio/logs/hub-exit.log`: the hub
-  writes one on every exit (a signal, an uncaught error, `port … is in use`), on an error it survived (a request whose
-  handler threw now answers 500 instead of ending the hub), and when building `/api/hud` took over 2 s.
-  `npm run studio:status` ends with "Hub last restarted 12:05 UTC (<cause>); 3 restarts this run."
 - **It runs on its own.** `studio:start` detaches by default, so it outlives the terminal or agent shell that
   started it (run #1: every agent died when the host shell restarted). Its output goes to `.studio/supervisor.log`.
 - **Install from a terminal where the agent tool works.** The login job gets that terminal's PATH and HOME
@@ -118,8 +108,7 @@ Scheduler (Windows); `--uninstall` removes it.
   Run #1 looped on exit 127 because launchd's PATH had no `~/.local/bin`.
 - **Two identical failures stop it.** When two sessions in a row end with the same exit code (127: tool not
   found), the supervisor stops starting agents and shows one "Needs you" card with the reason. Fix the
-  cause, then press "Fixed it: try again" (2.74.0: in a paired browser it runs this same command as the paired person
-  and shows its answer, docs/WAR-ROOM-V3.md), or from a terminal (2.59.0, no hub token needed):
+  cause, then run, from a terminal (2.59.0):
   `npm run studio:resume -- --by <your name> [--why "what you fixed"]`. It prints the halt it cleared, and the next
   pass's `supervisor.resumed` event names who asked (`meta.by`, `meta.why`). Not halted: it says so and does nothing.
   A person decides to retry after repeated failures, so it refuses inside a launched agent session (`STUDIO_ROLE` set)
@@ -189,10 +178,10 @@ Scheduler (Windows); `--uninstall` removes it.
   or a process id now used by something else, is never killed). End it by hand if it is stuck. A pass right
   after the machine slept (the watcher's own last pass as old) frees nothing and checks again next pass.
 - **The supervisor doesn't need auto-start.** `studio:start` is you choosing to run the studio, so it starts
-  agents whatever `npm run mode -- autostart` says; the switch is for the watcher and the HUB starting
+  agents whatever `npm run mode -- autostart` says; the switch is for the watcher and the supervisor's passes starting
   agents on their own (docs/PACE-AND-AGENTS.md).
 - **Launched agents inherit your MCP servers.** Jed's Serena server opened its dashboard tab for every
-  `claude -p` session and hid the War Room. Turn that off in the server's own settings
+  `claude -p` session. Turn that off in the server's own settings
   (Serena: `web_dashboard_open_on_launch: false` in `~/.serena/serena_config.yml`).
 
 It needs a tool to start agents with: `STUDIO_AGENT_TOOL` (and `STUDIO_AGENT_MODEL`) in `.env`, or per
@@ -357,7 +346,7 @@ cheap listing (no git process per copy); `--full` or a task/agent/branch name re
 or a `lane.merged` event names it) is stale after `STUDIO_JANITOR_LANDED_H` (6) hours instead of 24. The supervisor
 runs the janitor's lane proposals as a dry run (it never deletes) at most every `STUDIO_JANITOR_LANES_MIN` (360)
 minutes (`off` or 0: never), in a detached child (`harness/lane-disk.mjs`), with the lane disk report; the digest,
-`status --brief` and the War Room snapshot (`staleLanes`) then show "N stale lane copies (X GB) proposed: npm run
+`status --brief` and `npm run status -- --json` (`staleLanes`) then show "N stale lane copies (X GB) proposed: npm run
 janitor -- --lanes --yes --by <name>" (one `janitor.lanes_proposed` event). Deleting stays a decider's action: a
 person, a Producer/Director session or outside agent on a person's permission, or an agent under the owner's
 delegation for `janitor-lanes` (`npm run delegate -- grant <agent> --actions janitor-lanes …`; a `hold` delegation no

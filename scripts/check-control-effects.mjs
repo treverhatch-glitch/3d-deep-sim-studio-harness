@@ -2,7 +2,7 @@
 /**
  * scripts/check-control-effects.mjs — 2.39.0 proof, in a real browser: a Buy button that does nothing, with
  * the game's own test gamed (`expect: () => true`), passes the controls check without the Game Bible's
- * effect and fails with it. Runs in CI's war-room-browser job (it needs Chromium); skips (exit 0) without it.
+ * effect and fails with it. Runs in CI's browser-checks job (it needs Chromium); skips (exit 0) without it.
  *
  *   node scripts/check-control-effects.mjs
  */
@@ -49,7 +49,7 @@ for (const c of j.controls) delete c.effect;
 fs.writeFileSync(bible, JSON.stringify(j, null, 2));
 const pa = run(a, 'node qa/browser-play.mjs');
 if (/\[browser-play\] SKIP/.test(out(pa))) {
-  console.log('[effects] skipped: no Chromium here (CI runs this in the war-room-browser job)');
+  console.log('[effects] skipped: no Chromium here (CI runs this in the browser-checks job)');
   process.exit(0);
 }
 const ca = run(a, 'node qa/controls-check.mjs');

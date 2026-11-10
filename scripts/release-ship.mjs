@@ -11,8 +11,7 @@
  *      the CHANGELOG already has one for this version);
  *   3. makes ONE squashed commit of the whole working tree on top of origin/main (local only);
  *   4. clones that commit fresh into a temp folder, installs, and runs verify --deep there (every
- *      required gate, including the self-test and the War Room smoke test) and the War Room browser
- *      check (qa/hud-check.mjs, screenshots with --shots <dir>);
+ *      required gate, including the self-test);
  *   5. bundles origin/main (the state before this release) into the backup folder, and checks the bundle;
  *   6. pushes the commit to main (never forced: a moved main is refused, and you rebase);
  *   7. waits for CI on that commit; a failed job is re-run once (known flaky timing checks) and both
@@ -35,7 +34,7 @@ const has = (k) => argv.includes(`--${k}`);
 const dry = has('dry-run');
 const sh = (cmd, args, opts = {}) => spawnSync(cmd, args, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...opts });
 const git = (...a) => sh('git', a);
-const report = { version, steps: [], tests: {}, sha: null, ci: null, backup: null, shots: null };
+const report = { version, steps: [], tests: {}, sha: null, ci: null, backup: null };
 const step = (label, ok, detail = '', state = ok ? 'pass' : 'fail') => {
   report.steps.push({ label, state, detail });
   console.log(`[ship] ${state.toUpperCase().padEnd(7)} ${label}${detail ? ` — ${detail}` : ''}`);
@@ -58,7 +57,7 @@ function finish(code) {
 }
 
 if (!/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(version || '')) {
-  console.error('Usage: npm run release -- <version, e.g. 2.30.0-c> [--notes notes.md] [--title "…"] [--backup-dir <dir>] [--shots <dir>] [--dry-run] [--no-ci]');
+  console.error('Usage: npm run release -- <version, e.g. 2.30.0-c> [--notes notes.md] [--title "…"] [--backup-dir <dir>] [--dry-run] [--no-ci]');
   process.exit(1);
 }
 
@@ -123,17 +122,6 @@ if (ok) {
   const gates = [...out.matchAll(/^\[gates\] (PASS|FAIL|WARN) (\S+)$/gm)].map((m) => [m[1], m[2]]);
   report.tests = { selftestPass: passN, selftestFail: failN, selftestFailing: fails, gatesPass: gates.filter((g) => g[0] === 'PASS').length, gatesFail: gates.filter((g) => g[0] === 'FAIL').map((g) => g[1]), minutes: Math.round((Date.now() - t0) / 60000) };
   ok = step('verify --deep in the fresh clone', v.status === 0, `${report.tests.gatesPass} gates passed${report.tests.gatesFail.length ? `, failing: ${report.tests.gatesFail.join(', ')}` : ''}; self-test ${passN} passed, ${failN} failed${fails.length ? ` (${fails.slice(0, 3).join(' | ')})` : ''}; log .studio/release-verify.log`);
-}
-if (ok) {
-  const shots = flag('shots');
-  const h = inTmp(process.execPath, ['qa/hud-check.mjs', ...(shots ? ['--shots', path.resolve(shots)] : [])]);
-  const out = `${h.stdout}${h.stderr}`;
-  const skipped = /\[hud\] SKIP/.test(out);
-  report.tests.hudPass = (out.match(/^\[hud\] PASS /gm) || []).length;
-  report.tests.hudFail = (out.match(/^\[hud\] FAIL /gm) || []).length;
-  report.shots = shots ? path.resolve(shots) : null;
-  if (skipped) step('War Room browser check', true, out.split('\n').find((l) => /SKIP/.test(l)), 'not run');
-  else ok = step('War Room browser check', h.status === 0, `${report.tests.hudPass} passed, ${report.tests.hudFail} failed${shots ? `; screenshots in ${path.resolve(shots)}` : ''}`);
 }
 fs.rmSync(tmp, { recursive: true, force: true });
 if (!ok) {

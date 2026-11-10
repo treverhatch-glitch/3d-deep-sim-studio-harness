@@ -145,19 +145,15 @@ console.log(JSON.stringify(b));`, { STUDIO_TEST_MACHINE: machine });
     const env = { AGENT_EVENTS_FILE: path.join(S, '.studio', 'events-276j.jsonl'), STUDIO_MAIN_ROOT: S, STUDIO_TEST_FREEMEM_MB: '8000', STUDIO_MACHINE_SCAN: 'off' };
     const sup = run(S, 'node harness/supervisor.mjs status', { ...base, ...env });
     const brief = run(S, 'node harness/status.mjs --brief --peek', { ...base, ...env });
-    const hud = probe(S, 'hud', `const { buildHudState } = await import(${JSON.stringify(pathToFileURL(path.join(S, 'harness', 'hud.mjs')).href)});
-const s = buildHudState();
-console.log(JSON.stringify({ needs: s.needs.map((n) => n.msg) }));`, env);
     // Beta mode on (set by a person, naming the crew's orchestrator): the line says who may give the yes.
     write(S, 'studio/beta.json', `${JSON.stringify({ on: true, by: 'owner', at: '2026-11-04T06:00:00.000Z', why: 'beta', agents: ['opus-1'], roles: ['producer', 'director'] }, null, 2)}\n`);
     g(S, 'add', '-A'); g(S, 'commit', '-qm', 'beta on', '--no-verify');
     const supBeta = run(S, 'node harness/supervisor.mjs status', { ...base, ...env });
-    await guard('276j B-87: two agent-proposed tasks waiting on the dev\'s yes are named in studio:status after the last pass ("nothing started; waiting on yes: 2 (T-166, T-167)"), in status --brief\'s Blockers and in the War Room\'s Needs a person; with beta mode on the status line says opus-1 and the planning roles may say yes (fails on 2.75.0: "nothing started" and nothing else)', () => {
+    await guard('276j B-87: two agent-proposed tasks waiting on the dev\'s yes are named in studio:status after the last pass ("nothing started; waiting on yes: 2 (T-166, T-167)"), and in status --brief\'s Blockers; with beta mode on the status line says opus-1 and the planning roles may say yes (fails on 2.75.0: "nothing started" and nothing else)', () => {
       const ok = /Last pass: nothing started; waiting on yes: 2 \(T-166, T-167\): npm run task -- yes <id> --by <dev>/.test(out(sup)) && !/beta mode is on/.test(out(sup))
         && /Blockers: [^\n]*waiting on yes \(2\): T-166, T-167/.test(out(brief))
-        && (hud.needs || []).some((m) => /^waiting on yes: 2 \(T-166, T-167\): agent-proposed tasks start only after a yes \(npm run task -- yes T-166 --by <you>\)/.test(m))
         && /waiting on yes: 2 \(T-166, T-167\)[^\n]*beta mode is on: opus-1, a producer session, a director session may say yes/.test(out(supBeta));
-      return [ok, JSON.stringify({ sup: out(sup).slice(-800), brief: out(brief).slice(-800), hud, beta: out(supBeta).slice(-800) }).slice(0, 3200)];
+      return [ok, JSON.stringify({ sup: out(sup).slice(-800), brief: out(brief).slice(-800), beta: out(supBeta).slice(-800) }).slice(0, 3200)];
     });
     fs.rmSync(S, { recursive: true, force: true });
   }

@@ -87,10 +87,9 @@ export async function selftest280B({ dir, report }) {
       JSON.stringify({ off: off.calls, noGd: noGd.calls, dry: dry.calls, defaults: defaults.calls })];
   });
 
-  await guard('2.80 (b1): hub/server.mjs no longer schedules the watch, retro, learn, run report, daily ping, watchdog or flow passes, and the supervisor calls timedPasses from its loop with its start time and dry run (fails on 2.79.2: the hub ran them on setInterval timers)', () => {
-    const hub = fs.readFileSync(path.join(dir, 'hub', 'server.mjs'), 'utf8');
+  await guard('2.80 (b1, b2): there is no hub/ directory left to schedule the watch, retro, learn, run report, daily ping, watchdog or flow passes, and the supervisor calls timedPasses from its loop with its start time and dry run (fails on 2.79.2: the hub ran them on setInterval timers)', () => {
     const sup = fs.readFileSync(path.join(dir, 'harness', 'supervisor.mjs'), 'utf8');
-    const hubRuns = /\b(watchPass|retroIfDue|learnIfDue|runReportIfDue|dailyPingIfDue|watchdogPass|flowPass)\b/.test(hub) || /STUDIO_(WATCH|GAMEDEV|FLOW)_INTERVAL/.test(hub);
+    const hubRuns = fs.existsSync(path.join(dir, 'hub'));
     const tick = sup.slice(sup.indexOf('const tick = async () => {'), sup.indexOf('const loop = async () => {'));
     const call = /import\('\.\/studio-passes\.mjs'\)\.then\(\(\{ timedPasses \}\) => timedPasses\(\{ since: state\.startedAt, [^\n]*dryRun: opts\.dryRun[^\n]*boundedStep\(label, fn, \{ state \}\)/.test(tick);
     const flows = (tick.match(/flowPass\(/g) || []).length;

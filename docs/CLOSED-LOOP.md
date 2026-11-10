@@ -28,7 +28,7 @@ npm run learn -- change eval
 
 `--signature` is a failure signature: the `sig-…` id `npm run learn` prints under "Keeps happening", or
 `"<event type>: <message>"` (grouped the same way), or a bare message. After `STUDIO_CHANGE_EVAL_TASKS` finished tasks
-(default 20) or `STUDIO_CHANGE_EVAL_DAYS` days (default 7), `npm run learn` (and the HUB's daily pass) compares how often
+(default 20) or `STUDIO_CHANGE_EVAL_DAYS` days (default 7), `npm run learn` (and the supervisor's daily pass) compares how often
 tasks of each type hit those signatures before and after the change. A type counts only with `STUDIO_CHANGE_MIN_SAMPLE`
 finished tasks on each side (default 5); otherwise the record says "not enough data" and keeps watching. A rise of
 `STUDIO_CHANGE_MARGIN` (default 0.1) in any counted type is **regressed**, an equal drop in one is **kept**, anything else

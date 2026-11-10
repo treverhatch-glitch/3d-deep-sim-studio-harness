@@ -14,7 +14,7 @@ Jed's run: keep it in web until playtests show it plays the way the dev imagined
 1. The Producer proposes it: `npm run engine -- propose godot --by <producer> --why "…"`. It refuses while
    Phase 1 isn't proven.
 2. The game dev gets a "Needs you" question with the expected usage and the trade-offs, and answers yes in
-   the War Room (or `npm run ask -- answer <id> yes --by <name>`).
+   `npm run ask -- answer <id> yes --by <name>`.
 3. A yes runs `npm run engine -- start godot`:
    - `engine/<game>/` is created (for Godot, from `engine/_godot/`, a worked port of the template game);
    - `engine/<game>/engine.json` records the engine, the gate, the parity and capture commands and the game's ID;
@@ -61,13 +61,6 @@ merge train" there.
 Shared: the Game Bible, the phase exits, the sim's numbers (`TUNING`), the game ID. Separate: the code,
 the department and its agents, the gate, and the recordings (hashes differ by engine; parity compares
 results, not hashes). A mechanic is proven in web first, then ported.
-
-## In the War Room
-
-The Arcade shows the engine build next to the web build: "Play it here" puts its web export
-(`engine.json` `webExport`, for Godot `engine/<game>/export/web/index.html`) in the same screen, and its
-last frame is a click away. Export Godot for the web without thread support so it plays inside the
-Arcade's frame; a Godot web export needs its export templates installed on that machine.
 
 ## Following how it is made
 

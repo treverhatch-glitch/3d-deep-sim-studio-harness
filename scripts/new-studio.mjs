@@ -3,14 +3,15 @@
  * scripts/new-studio.mjs — start another game next to this one, inside the harness.
  *
  *   npm run new-studio -- --name "Moss Garden" [--dir ../moss-garden] [--port 3848] [--from origin|local] [--no-install]
+ *   (--port: the studio's slot, its play port is 4610 + slot - 3847; the next free one by default)
  *
- * One studio is one clone: its Game Bible, task board, locks, agents and War Room belong to one game.
+ * One studio is one clone: its Game Bible, task board, locks and agents belong to one game.
  * A second game started in a new folder by hand runs without any of that (run #1: a side-by-side game
  * "started" and never used the harness). This makes the second studio properly:
  *   1. clones the harness next to this folder (from GitHub, or from this clone with --from local);
- *   2. copies this studio's .env (keys and settings stay on this machine) with its own War Room port;
+ *   2. copies this studio's .env (keys and settings stay on this machine) with its own play port (npm run play);
  *   3. installs, runs setup, makes it safe (preflight --fix), and starts a fresh studio with the name;
- *   4. writes START-HERE.md in it with the exact next commands (intake, the Producer's kickoff, the hub).
+ *   4. writes START-HERE.md in it with the exact next commands (intake, the Producer's kickoff, the supervisor).
  * Nothing in this studio changes.
  */
 import fs from 'node:fs';
@@ -65,27 +66,32 @@ if (cloned.status !== 0) {
   process.exit(1);
 }
 
-// 2. Settings: this studio's .env with its own War Room port and the game's own results folder note.
+// 2. Settings: this studio's .env with its own play port and the game's own results folder note.
 const envFile = path.join(ROOT, '.env');
-// The first War Room port no studio next to this one uses, so a third and fourth game don't clash.
+// Each studio next to this one has a slot (3847, 3848, …) and its play port is 4610 + (slot - 3847), so a third and
+// fourth game don't clash. 2.80: the slot was the War Room's port (HUB_PORT); a studio made before 2.80 still has that
+// line, a later one only its STUDIO_PLAY_PORT, so both are read and every studio keeps the port it had.
 const portOf = (folder) => {
   try {
-    return Number((fs.readFileSync(path.join(folder, '.env'), 'utf8').match(/^HUB_PORT=(\d+)/m) || [])[1]) || null;
+    const text = fs.readFileSync(path.join(folder, '.env'), 'utf8');
+    const hub = Number((text.match(/^HUB_PORT=(\d+)/m) || [])[1]) || null;
+    const play = Number((text.match(/^STUDIO_PLAY_PORT=(\d+)/m) || [])[1]) || null;
+    return hub || (play ? play - 4610 + 3847 : null);
   } catch {
     return null;
   }
 };
-const used = new Set([portOf(ROOT) || Number(process.env.HUB_PORT || 3847), ...fs.readdirSync(path.dirname(ROOT)).map((d) => portOf(path.join(path.dirname(ROOT), d))).filter(Boolean)]);
+const used = new Set([portOf(ROOT) || 3847, ...fs.readdirSync(path.dirname(ROOT)).map((d) => portOf(path.join(path.dirname(ROOT), d))).filter(Boolean)]);
 let port = Number(flag('port') || 0);
 if (!port) for (port = Math.max(...used, 3847) + 1; used.has(port); port += 1);
 let env = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : fs.existsSync(path.join(dir, '.env.example')) ? fs.readFileSync(path.join(dir, '.env.example'), 'utf8') : '';
-env = /^HUB_PORT=.*$/m.test(env) ? env.replace(/^HUB_PORT=.*$/m, `HUB_PORT=${port}`) : `${env.replace(/\s*$/, '\n')}HUB_PORT=${port}\n`;
-// Its own port for npm run play too, so both games can be played at once.
+env = `${env.replace(/^HUB_PORT=.*(\r?\n|$)/m, '').replace(/\s*$/, '\n')}`;
+// Its own port for npm run play, so both games can be played at once.
 const playPort = 4610 + (port - 3847);
 env = /^STUDIO_PLAY_PORT=.*$/m.test(env) ? env.replace(/^STUDIO_PLAY_PORT=.*$/m, `STUDIO_PLAY_PORT=${playPort}`) : `${env}STUDIO_PLAY_PORT=${playPort}\n`;
 env += `# ${name}: a separate studio. Point STUDIO_RESULTS_DIR and STUDIO_BACKUP_DIR at this game's own folders.\n`;
 fs.writeFileSync(path.join(dir, '.env'), env);
-step(`.env copied${fs.existsSync(envFile) ? ' from this studio' : ' from .env.example'}; War Room port ${port}`);
+step(`.env copied${fs.existsSync(envFile) ? ' from this studio' : ' from .env.example'}; play port ${playPort}`);
 
 // 3. Install, set up, make safe, fresh studio.
 if (!argv.includes('--no-install')) {
@@ -120,17 +126,15 @@ if (!argv.includes('--no-install')) sh(process.execPath, ['scripts/preflight.mjs
 // 4. Where to go next.
 const start = `# ${name}: start here
 
-This folder is its own studio (its own Game Bible, board, agents and War Room), made with
+This folder is its own studio (its own Game Bible, board and agents), made with
 \`npm run new-studio\` from ${path.basename(ROOT)}. Work on ${name} happens here, never in the other folder.
 
 1. \`npm run preflight\` until it says READY.
-2. \`npm run hub\` and open the link it prints (War Room on port ${port}).
-3. ${intakeDone ? 'The intake was filled from the setup: read studio/bible/BIBLE.md with the game dev, finish it with `npm run intake`, and sign it.' : '`npm run intake` with the game dev: the idea, the pace, the play length.'}
-4. The Producer: \`npm run kickoff -- --role producer --agent producer-1 --model <model>\`, and follow it. It opens departments and hires (\`npm run agent -- hire …\`).
-5. Or hire from the War Room: "+ Hire" in any open room.
-6. Unattended: \`npm run studio:start -- --until 23:00\`. Each studio runs its own supervisor; \`--install\` registers this folder separately.
+2. ${intakeDone ? 'The intake was filled from the setup: read studio/bible/BIBLE.md with the game dev, finish it with `npm run intake`, and sign it.' : '`npm run intake` with the game dev: the idea, the pace, the play length.'}
+3. The Producer: \`npm run kickoff -- --role producer --agent producer-1 --model <model>\`, and follow it. It opens departments and hires (\`npm run agent -- hire …\`).
+4. Unattended: \`npm run studio:start -- --until 23:00\`. Each studio runs its own supervisor; \`--install\` registers this folder separately.
 
-Both studios run at once: this one's War Room is on port ${port} and its Arcade build server (\`npm run play\`) on ${playPort}.
+Both studios run at once: this one's Arcade build server (\`npm run play\`) is on ${playPort}; \`npm run studio:status\` shows it.
 `;
 fs.writeFileSync(path.join(dir, 'START-HERE.md'), start);
 console.log(`\n[new-studio] Ready: ${dir}\n\n${start}`);

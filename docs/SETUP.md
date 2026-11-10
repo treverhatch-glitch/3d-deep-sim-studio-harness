@@ -24,12 +24,10 @@ node harness/route.mjs --status
 node harness/route.mjs --role builder --dry-run
 ```
 
-## 4. Zero-Token War Room HUB (`hub/server.mjs`)
+## 4. Bring the studio up and see it
 
 ```bash
-npm run studio:boot     # hub + supervisor + status card in one go (docs/RUN-UNATTENDED.md); npm.cmd on Windows
-node hub/server.mjs
-# Open http://localhost:3847 (or http://localhost:4177)
+npm run studio:boot     # the supervisor + a status card in one go (docs/RUN-UNATTENDED.md); npm.cmd on Windows
+npm run studio:status   # is it running, the last pass, what needs you
 ```
-Reads `.studio/events.jsonl` and `.studio/usage.json` with **0% LLM token usage**.
-To use its buttons, pair your browser once: `npm run hub -- pair --by <your name>` (docs/WAR-ROOM-V3.md).
+Reads `.studio/events.jsonl` and the board with **0% LLM token usage**.

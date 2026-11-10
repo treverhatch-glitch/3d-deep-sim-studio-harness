@@ -49,7 +49,7 @@ export function buildOvernight({ from, to = Date.now(), events = readRecentEvent
 
 export function renderOvernight(o) {
   const L = [`# Overnight summary, ${hm(o.from)} to ${hm(o.to)} (${day(o.to)}, local time)`, ''];
-  // 2.64.0: one line from the autonomy scorecard (npm run autonomy), not a heading, so the War Room's head lines stay.
+  // 2.64.0: one line from the autonomy scorecard (npm run autonomy), not a heading (the head lines stay short).
   if (o.autonomy) L.push(o.autonomy, '');
   L.push(`## Tasks done: ${o.done.length}`, ...(o.done.length ? o.done.slice(0, 12).map((d) => `- ${d.task} (${d.agent}): ${String(d.msg).replace(/^Completed [^:]+:\s*/, '').slice(0, 90)}`) : ['- None.']), ...(o.done.length > 12 ? [`- … and ${o.done.length - 12} more (studio/DONE.md)`] : []), '');
   L.push(`## Tokens per finished task: ${o.perDone === null ? 'no task finished' : `${M(o.perDone)} counted tokens`}`, ...o.byModel.map((m) => `- ${m.model}: ${m.sessions} session${m.sessions === 1 ? '' : 's'}, ${M(m.tokens)} counted tokens`), `- Total: ${M(o.total)} counted tokens (in + out + cache reads at their weight) over ${o.sessions} session${o.sessions === 1 ? '' : 's'}`, '');
@@ -65,8 +65,9 @@ export function renderOvernight(o) {
 export async function writeOvernight({ from, to = Date.now() } = {}) {
   let cards = [];
   try {
-    const { buildHudState } = await import('./hud.mjs');
-    cards = buildHudState().signals?.needsYou || [];
+    // 2.80: the War Room's "needs you" list is gone; the digest's (the same list Studio Status posts) takes its place.
+    const { needsPerson } = await import('./digest.mjs');
+    cards = (await needsPerson({ now: to })).map((n) => n.line).slice(0, 12);
   } catch {}
   const o = buildOvernight({ from, to, openCards: cards });
   try {

@@ -9,7 +9,7 @@ skills say how a kind of work gets finished. Each file has four parts: **When**,
 `node harness/done-check.mjs <ID>`. The checks read content, not just file times: a review must name
 what it reviews and give a verdict, a bug needs a pinned regression that fails on the code before the fix and a lesson, a system needs a
 spec with a hand-off, a scenario, goldens, a playtest and an approval from another model family, a build needs real
-changes and a verify after the last one. The War Room shows the same checklist when you click an agent.
+changes and a verify after the last one.
 
 **Which verify counts (2.58.0).** Only a full `npm run verify` of the commit you are on (HEAD), run on a clean
 tree: commit first, then verify, then `task done`. A verify of an older commit, one run with uncommitted changes,
@@ -93,10 +93,10 @@ a case-insensitive substring. A session "followed" the skill when its log shows 
 skill counts as "unknown". "Loaded" means the log opened the skill's file or the task brief that carries its steps.
 
 **Stopping early.** Any skill: if you run out of usage or are swapped, `task pause <ID> --note "…"`
-hands the task back with a note the next agent sees. The watcher (run by the HUB every 5 minutes and
+hands the task back with a note the next agent sees. The watcher (run by the supervisor every 5 minutes and
 at session start) catches agents that stop without a word.
 
 **Forcing.** `task done <ID> --force` finishes a task whose check failed. It is never silent: it
-writes a `task.forced` event, the War Room flags it, and the Producer gets a P1
+writes a `task.forced` event and the Producer gets a P1
 `Check forced done <ID>` task naming what was skipped. The Producer runs that check (or orders
 someone to) and either accepts the work or reopens it.

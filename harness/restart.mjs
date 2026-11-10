@@ -4,17 +4,14 @@
  * go, and the studio starts fresh at the intake. The harness, your roles, departments, budget and pace stay.
  *
  *   npm run studio:restart                         show what would go
- *   npm run studio:restart -- --by <name> --yes --yes   do it (two yeses, like the War Room's two warnings)
+ *   npm run studio:restart -- --by <name> --yes --yes   do it (two yeses)
  *   [--name "<new game name>"]
  *
  * Nothing is lost for good: before anything is removed, the whole working tree (committed or not) is
  * saved as a git tag, archive/<game>-<time>, without moving your branch. Undo: git checkout <tag> -- .
- * The War Room asks twice (two warnings back to back) and the server needs both: the first press gets
- * a ticket, the second spends it within two minutes.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
@@ -83,28 +80,10 @@ export function snapshot(label) {
   }
 }
 
-// Two presses: the first gets a ticket, the second spends it (within two minutes).
-const TICKET = path.join(STUDIO_STATE_DIR, 'restart-ticket.json');
-export function restartTicket(by) {
-  const t = { id: crypto.randomBytes(8).toString('hex'), by, at: Date.now() };
-  fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
-  fs.writeFileSync(TICKET, JSON.stringify(t));
-  return { ...t, plan: restartPlan() };
-}
-function spendTicket(id) {
-  try {
-    const t = JSON.parse(fs.readFileSync(TICKET, 'utf8'));
-    fs.rmSync(TICKET, { force: true });
-    return t.id === id && Date.now() - t.at < 2 * 60000;
-  } catch {
-    return false;
-  }
-}
-
-/** Do it. `ticket` (War Room) or `confirmed: 2` (CLI with --yes --yes) is required. */
-export async function restartStudio({ by, ticket = null, confirmed = 0, name = null }) {
+/** Do it. `confirmed: 2` (CLI with --yes --yes) is required. */
+export async function restartStudio({ by, confirmed = 0, name = null }) {
   if (!by) return { ok: false, message: 'Say who is restarting the studio (--by <name>).' };
-  if (!(confirmed >= 2 || (ticket && spendTicket(ticket)))) return { ok: false, message: 'A restart needs two confirmations (the War Room asks twice; on the command line, --yes --yes).' };
+  if (!(confirmed >= 2)) return { ok: false, message: 'A restart needs two confirmations: --yes --yes.' };
   const plan = restartPlan();
   // 1. Stop everything, so nothing writes while the game goes.
   const { setStop, clearStop } = await import('./task.mjs');

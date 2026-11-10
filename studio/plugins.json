@@ -33,7 +33,7 @@
       "repo": "https://github.com/oraios/serena",
       "license": "MIT",
       "division": "core",
-      "what": "Symbol-level code lookup and edits over LSP for large codebases. Its dashboard stays closed (--open-web-dashboard false) so it never opens over the War Room; it still runs on localhost:24282.",
+      "what": "Symbol-level code lookup and edits over LSP for large codebases. Its dashboard stays closed (--open-web-dashboard false) so it never opens a browser tab; it still runs on localhost:24282.",
       "install": "uv (https://docs.astral.sh/uv/)",
       "mcp": {
         "command": "uvx",

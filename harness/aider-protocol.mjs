@@ -137,7 +137,7 @@ export function editBrief({ task, title = '', brief = '', lanePaths = [], files 
     '## Rules for edits',
     '- The game\'s sim (cartridges/<name>/): no DOM, window, WebGL or three; fixed ticks; seeded RNG only (no Math.random, no Date.now); state is plain JSON.',
     '- Keep tunable numbers in the game\'s config or data files, not in logic.',
-    '- Never edit the studio\'s own folders (harness/, hub/, scripts/, tools/, studio/, qa/*.mjs) or protected files (scenarios\' expected outcomes, regressions, gates); never weaken a test.',
+    '- Never edit the studio\'s own folders (harness/, scripts/, tools/, studio/, qa/*.mjs) or protected files (scenarios\' expected outcomes, regressions, gates); never weaken a test.',
     '- Never write keys or tokens into any file.',
     '- If the task can\'t be done by editing these files, change nothing and say why in one line.',
   ];

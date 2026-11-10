@@ -8,7 +8,7 @@
  * B-20: what aider may see. aider offers to add every repo file a message names ("Add file to the chat?"), and
  * --yes-always says yes, so the kickoff's `node harness/task.mjs …` lines pulled harness files into its chat. A
  * per-agent ignore file (.studio/aider/<agent>.aiderignore, passed with --aiderignore) leaves out the harness's folders
- * (harness/, hub/, scripts/, tools/, studio/, qa/*.mjs) and every protected path in studio/protected.json: aider neither
+ * (harness/, scripts/, tools/, studio/, qa/*.mjs) and every protected path in studio/protected.json: aider neither
  * offers nor edits a file that matches. It lives in .studio/ (git-ignored, and excluded in a lane copy), so it never
  * becomes part of a lane's change. Patterns are anchored at the repo root (`/tools/`, not `tools/`), so a game's own
  * game/<name>/tools/ stays editable.
@@ -19,7 +19,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR } from './event.mjs';
 import { envValue } from './launch.mjs';
 
 /** The harness's own folders and files, which an aider session never adds to its chat or edits (AGENTS.lite.md "Never"). */
-const AIDER_IGNORE_BASE = ['/harness/', '/hub/', '/scripts/', '/tools/', '/studio/', '/qa/*.mjs', '/.env', '/.env.*', '/.lanes/'];
+const AIDER_IGNORE_BASE = ['/harness/', '/scripts/', '/tools/', '/studio/', '/qa/*.mjs', '/.env', '/.env.*', '/.lanes/'];
 
 const mainRootOf = (env) => (String(env.STUDIO_MAIN_ROOT || '').trim() ? path.resolve(env.STUDIO_MAIN_ROOT) : REPO_ROOT);
 const stateDirOf = (env) => (String(env.STUDIO_MAIN_ROOT || '').trim() ? path.join(path.resolve(env.STUDIO_MAIN_ROOT), '.studio') : STUDIO_STATE_DIR);

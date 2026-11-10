@@ -5,7 +5,7 @@
  *   burst (one-shot, ends empty) and ring (loop, seamless) pass;
  *   linger never ends; jumpy jumps where its loop wraps; wide spills past the stage; strobe flashes 5 times a
  *   second; noisy uses unseeded randomness; empty draws nothing.
- * Runs in CI's war-room-browser job (it needs Chromium); skips (exit 0) without it.
+ * Runs in CI's browser-checks job (it needs Chromium); skips (exit 0) without it.
  *
  *   node scripts/check-vfx.mjs
  */

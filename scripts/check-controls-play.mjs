@@ -4,7 +4,7 @@
  * web game that isn't a cartridge (no window.__sim), clicks through its title screen, presses each control
  * from the Game Bible, and checks the effect. A live key and a live button pass; a key wired to nothing fails;
  * a `to` effect already true before the press fails (the press proved nothing); the server is gone after;
- * qa/controls-check.mjs accepts the report for the web track. Runs in CI's war-room-browser job (it needs
+ * qa/controls-check.mjs accepts the report for the web track. Runs in CI's browser-checks job (it needs
  * Chromium); skips (exit 0) without it.
  *
  *   node scripts/check-controls-play.mjs

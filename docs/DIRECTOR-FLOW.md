@@ -72,7 +72,7 @@ supervisor is the launcher, so its pass doesn't fill slots itself: its launch st
    pace that doesn't start agents on its own (Precise, Budget) gets an alert instead, and nothing starts while
    auto-start is off (the default; `npm run mode -- autostart on --by <name>`, docs/PACE-AND-AGENTS.md);
 4. sends back missing design-fidelity mechanics;
-5. writes `.studio/director-flow.json`, which feeds the War Room's **Director** card (Ops). The card shows the
+5. writes `.studio/director-flow.json`, which records the
    state (flowing, refilling, starved, full or empty), builders in use against slots, how many tasks are ready
    and held, what the pass did, and why nothing started.
 

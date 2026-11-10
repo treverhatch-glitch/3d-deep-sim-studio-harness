@@ -17,7 +17,7 @@
  *   direction  a Producer task to turn it into work, and a Director ping to check it against the Bible
  *   asset      a Producer task to record it (`npm run asset -- add`, owned or reference only)
  *   question   a Producer task to answer the game dev
- * Briefs live in studio/liaison/B-001.json, so a chat panel in the War Room can use the same steps.
+ * Briefs live in studio/liaison/B-001.json.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -107,69 +107,6 @@ export function confirmBrief(id, { by, quote = '' }) {
   writeBrief(b);
   emitEvent({ type: 'liaison.confirmed', agent: b.liaison, to: 'producer', msg: `${by} confirmed ${b.id} (${b.kind}): ${b.title}${out.idea ? ` -> ${out.idea}` : ''}${out.producer ? `, ${out.producer}` : ''}${out.director ? `, Director ${out.director}` : ''}` });
   return { ok: true, brief: b, routed: out };
-}
-
-/**
- * One turn of the War Room's Liaison chat, on a cheap model through the router (spend cap applies).
- * The model asks until it understands, then answers with a BRIEF line; that becomes a draft read back
- * to the game dev, who confirms with a button (confirmBrief). The transcript is kept in
- * studio/liaison/chat.md so the Producer and the Director can see what was said.
- */
-export function isClassifierReply(text) {
-  text = String(text || '').trim();
-  if (!text || /^safe$/i.test(text) || /^unsafe$/i.test(text)) return true;
-  return /^\s*(user\s*safety|safety|content\s*safety)\s*[:=]\s*(safe|unsafe)\b/i.test(text);
-}
-
-export async function chatTurn({ messages = [], from = 'game-dev', pending = null }) {
-  const turns = (Array.isArray(messages) ? messages : []).filter((m) => m && ['user', 'assistant'].includes(m.role) && String(m.content || '').trim()).slice(-12).map((m) => ({ role: m.role, content: String(m.content).slice(0, 1500) }));
-  if (!turns.length || turns[turns.length - 1].role !== 'user') return { ok: false, message: 'Say something first.' };
-  const { readBible } = await import('./bible.mjs');
-  const { routeChatCompletion } = await import('./route.mjs');
-  const { cheapChain } = await import('./prepare-brief.mjs');
-  const b = readBible();
-  const game = b ? `The game: ${b.answers?.title || '(untitled)'}. ${b.answers?.fantasy || ''} Pillars: ${(b.pillars || []).map((p) => p.name).join(', ') || 'none yet'}. Crossed out: ${Object.entries(b.layers || {}).filter(([, v]) => v.answer === 'no').map(([k]) => k).join(', ') || 'nothing'}.` : 'There is no Game Bible yet.';
-  const system = `You are the Liaison of a small game studio, talking with the game's developer in the studio's control room. ${game}
-Your job: understand what they want and turn it into one brief for the studio. Ask one short, plain question at a time until you could explain it to a builder. Don't promise dates, don't design it yourself, don't say it's done.
-When you understand, reply with exactly one line and nothing else:
-BRIEF {"kind":"idea|direction|asset|question","title":"<under 80 chars, their words>","summary":"<2-3 sentences>","detail":"<anything specific they said>"}
-idea = something new for the game; direction = change how the studio works or what it focuses on; asset = a file they own or want used; question = they want an answer from the studio.`;
-  const res = await routeChatCompletion({ role: 'liaison', customChain: cheapChain(), maxTokens: 400, temperature: 0.3, messages: [{ role: 'system', content: system }, ...turns] });
-  const log = path.join(LIAISON_DIR, 'chat.md');
-  fs.mkdirSync(LIAISON_DIR, { recursive: true });
-  if (!fs.existsSync(log)) fs.writeFileSync(log, '# Liaison chat (War Room)\n\n> What the game dev and the Liaison said in the War Room. Nothing here is work until the dev confirms a brief.\n');
-  fs.appendFileSync(log, `\n- ${now().slice(0, 16).replace('T', ' ')} **${from}**: ${turns[turns.length - 1].content.replace(/\n+/g, ' ')}\n`);
-  if (!res.ok) {
-    const why = res.capped ? 'the daily spend cap is reached' : 'no cheap model answered (Ollama, or a free key like NVIDIA or Groq in .env)';
-    return { ok: true, reply: `I can't chat right now: ${why}. Send it as a pitch or a message to the Producer instead; both still reach the studio.`, offline: true };
-  }
-  const text = String(res.content || '').trim();
-  if (isClassifierReply(text)) {
-    const r = "The Liaison's model gave no real answer (a safety-check reply). Try again, or send it as a pitch or a message to the Producer.";
-    fs.appendFileSync(log, `- ${now().slice(0, 16).replace('T', ' ')} **liaison**: (classifier output blocked)\n`);
-    return { ok: true, reply: r, offline: true };
-  }
-  const m = text.match(/BRIEF\s*(\{[\s\S]*\})/);
-  if (m) {
-    let j = null;
-    try {
-      j = JSON.parse(m[1]);
-    } catch {
-      // fall through to a plain reply
-    }
-    if (j) {
-      // The dev corrected a brief that's still waiting: change that one instead of drafting another.
-      const open = pending ? readBrief(pending) : null;
-      const r = open && open.stage === 'read-back' ? changeBrief(pending, { title: j.title, summary: j.summary, detail: j.detail || '' }, 'liaison-chat') : draftBrief({ kind: KINDS.includes(j.kind) ? j.kind : 'idea', title: j.title, summary: j.summary, detail: j.detail || '', from, liaison: 'liaison-chat' });
-      if (r.ok) {
-        fs.appendFileSync(log, `- ${now().slice(0, 16).replace('T', ' ')} **liaison**: drafted ${r.brief.id} and read it back.\n`);
-        return { ok: true, reply: r.readBack, brief: r.brief.id, model: res.model || null };
-      }
-    }
-  }
-  const reply = text.replace(/BRIEF\s*\{[\s\S]*$/, '').trim().slice(0, 1500) || 'Tell me a bit more?';
-  fs.appendFileSync(log, `- ${now().slice(0, 16).replace('T', ' ')} **liaison**: ${reply.replace(/\n+/g, ' ')}\n`);
-  return { ok: true, reply, model: res.model || null };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

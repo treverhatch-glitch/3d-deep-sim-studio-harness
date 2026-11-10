@@ -319,7 +319,7 @@ export function loopHandBacks(task, events, { since = 0 } = {}) {
 
 /**
  * 2.58.3 (N3): park a task once. The holds are read again and written under their lock (task-hold.mjs updateHolds),
- * so two passes at the same moment (the supervisor's, the watcher's, the hub's) park it once, and only the pass that
+ * so two passes at the same moment (the supervisor's, the watcher's) park it once, and only the pass that
  * parked it emits the task.hold event. Returns true when this call parked it.
  */
 export function parkOnce(task, parked, { by = 'watchdog', msg = '' } = {}) {

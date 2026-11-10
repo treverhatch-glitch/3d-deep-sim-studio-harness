@@ -13,7 +13,7 @@ commit. An unchanged build isn't saved twice; the last 6 are kept.
 npm run play                 # serve the newest saved build: http://127.0.0.1:4610/
 npm run play -- --lan        # also on phones on the same Wi-Fi (prints the address)
 npm run play -- list         # saved builds; play an older one with --build <id>
-# The root (and the War Room's /play/<id>/) redirects to the page in its own folder, so its ./main.mjs loads.
+# The root redirects to the page in its own folder, so its ./main.mjs loads.
 ```
 
 2.70.0: a build is also saved, with a short clip, after every merge-train landing (`harness/landing-build.mjs`,
@@ -24,20 +24,13 @@ A bundled game (Vite and the like) declares `browser.dist` and `browser.build` i
 harness runs the build and saves `dist/`. A plain page declares `browser.page` (`web/<game>/`), and the
 saved build holds that folder, the cartridge and `assets/approved/`.
 
-## The Arcade (War Room view 5)
+## Is it fun?
 
-**Is it fun?** Under the game are two buttons, "Yes, it's fun" and "Not yet". They record a person's
-verdict on the build being played (`studio/playtest/verdicts.json`; also `npm run verdict -- yes|not-yet
---by <name>`). A yes is what lets the current phase close (docs/GAME-BIBLE.md, Phases); a "not yet" goes
-to the Producer with the note in the box.
+2.80: the War Room's Arcade view is gone; `npm run play` serves the build. `npm run verdict -- yes|not-yet --by <name>`
+records a person's verdict on the build (`studio/playtest/verdicts.json`). A yes is what lets the current phase close (docs/GAME-BIBLE.md, Phases); a "not yet" goes
+to the Producer with its note (`--note "…"`).
 
-- **Play the last good build** in the page, while the agents keep working. Older builds are one click
-  away for comparing. The game runs in a sandboxed frame, so game code can't reach the War Room.
-- **Notes while playing**, saved with the build you played in `studio/playtest/NOTES.md`: a note for the
-  Producer (inbox), a bug (queued for a builder, who starts if a tool is set), or an idea (Idea Board, to R&D).
+- **Play the last good build** with `npm run play` while the agents keep working; `--build <id>` for an older one.
 - **Clips**: `npm run clip [-- --seconds 20] [--task T-012] [--name floor-3]` plays the real build with
   real input and saves an mp4 (ffmpeg) to `qa/reports/clips/`; with `--task` it is kept in
   `studio/proof/<task>/`. `npm run shot [-- --query "floor=3"]` saves one screenshot of the real build.
-- **The dungeon**, read-only: each floor is a phase of the game, each room a task. Cleared rooms drop
-  loot, lit rooms show the agent working there, slimes are open bugs and a crowned one is a P0 boss.
-  Walk it with the arrow keys or a click; your XP is the points of work done. It changes nothing.

@@ -3,12 +3,10 @@
  * harness/event.mjs — Zero-Token Passive Event Logger
  *
  * Appends structured single-line JSON events to:
- *   1. `.studio/events.jsonl` (repo-local run ledger for the HUB & status script)
+ *   1. `.studio/events.jsonl` (repo-local run ledger for the status, digest and run reports)
  *   2. `/tmp/agent-events.jsonl` (or OS temp dir mirror for external watchers)
  *
- * Costs 0% LLM tokens. The Workflow UI HUB (`hub/server.mjs`) tails this file
- * over SSE/WebSocket so humans can watch live agent activity on desktop or
- * mobile without interrupting running agents.
+ * Costs 0% LLM tokens.
  */
 
 import fs from 'node:fs';
@@ -35,7 +33,7 @@ export const STUDIO_STATE_DIR = (() => {
 })();
 
 // Studio settings from .env (STUDIO_*, HUB_*, AGENT_*, PLAYTEST_*), so every command sees the same
-// backup folder, Producer name and caps, not only the HUB. Keys are read only by the router.
+// backup folder, Producer name and caps, not only the supervisor. Keys are read only by the router.
 // A value already in the environment wins.
 // 2.73.1 (B-60): who a shell is (STUDIO_LOCK_OWNER, STUDIO_ROLE, ...) is never taken from the shared .env: a warning
 // names the line instead (harness/dotenv.mjs). The last non-empty line for a name wins, so a value added at the bottom
@@ -112,7 +110,7 @@ export function getEventPaths() {
 let gameIdCache;
 let gameIdAt = 0;
 function studioGameId() {
-  // Re-read once a minute: a long-running hub sees a game made after it started.
+  // Re-read once a minute: a long-running supervisor sees a game made after it started.
   if (gameIdCache !== undefined && Date.now() - gameIdAt < 60000) return gameIdCache;
   gameIdAt = Date.now();
   gameIdCache = null;
