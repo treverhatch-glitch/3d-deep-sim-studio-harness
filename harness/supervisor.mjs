@@ -870,6 +870,9 @@ async function main(argv) {
     // 2.76.0 (l): the Communicator (harness/communicator.mjs): the 30-minute status post and the alerts that tag who must
     // act. After the machine scan (it reads that scan) and before a stop ends the loop (so a stop file is reported).
     await boundedStep('communicator', () => import('./communicator.mjs').then(({ communicatorPass }) => communicatorPass({ passWhy: r.why })), { state }).catch(() => {});
+    // 2.80 (b1): the timed passes the hub ran (watch, retro, learn, run report, daily ping; the watchdog): harness/studio-passes.mjs,
+    // one bounded step per group, first one interval after the start. state.timed: each group's last run.
+    await import('./studio-passes.mjs').then(({ timedPasses }) => timedPasses({ since: state.startedAt, last: (state.timed ||= {}), dryRun: opts.dryRun, deps: { step: (label, fn) => boundedStep(label, fn, { state }) } })).catch((err) => console.error(`[supervisor] timed passes: ${err?.message || err}`));
     // 2.71.0 (z): the self-repair loop's pass (harness/workaround.mjs): hand-edited records, supervisor restarts, killed
     // launchers, harness tasks and their "maybe fixed" marks. Itself throttled to STUDIO_WORKAROUND_SCAN_MIN (10).
     await boundedStep('workaround', () => import('./workaround.mjs').then(({ workaroundPass }) => workaroundPass({})), { state }).catch(() => {});

@@ -5063,6 +5063,12 @@ if (inShard('selftest-2792a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.80 (b1): the hub's timed passes (watch, retro, learn, run report, daily ping; the watchdog) run in the supervisor's loop.
+if (inShard('selftest-280b')) {
+  const { selftest280B } = await import(pathToFileURL(path.join(root, 'qa', 'selftest-280b.mjs')).href);
+  await selftest280B({ dir: root, run, report, tmpRoot, root });
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {
