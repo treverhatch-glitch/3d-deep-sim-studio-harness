@@ -32,6 +32,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
+import { emitOnChange } from './telemetry.mjs';
 import { parseNextQueue, writeNextQueue, pauseTask, addTask, readTaskHandoff, withBoard, releaseLeakedClaim, claimLeakGraceMs, boardChangedAt } from './task.mjs';
 import { holdReason } from './task-hold.mjs';
 import { listLocks, release, sweepBrokenLocks } from './lock.mjs';
@@ -315,7 +316,9 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
     pinged = addTask({ agent: 'watch', title: `Watch: ${counts.map(([k, n]) => `${n} ${words[k]}`).join(', ')} (run npm run watch for details)`, role: 'producer', priority: 'P1' });
     emitEvent({ type: 'watch.alert', agent: 'watch', to: 'producer', task: pinged.id, msg: forProducer.map((f) => f.msg).join('; ').slice(0, 300) });
   } else if (findings.length && !dryRun) {
-    emitEvent({ type: 'watch.report', agent: 'watch', msg: findings.map((f) => f.msg).join('; ').slice(0, 300) });
+    // 2.80 (d): a finding that stands is said again at most hourly (2,179 in a week); retro needs that it was seen and its words.
+    const wmsg = findings.map((f) => f.msg).join('; ').slice(0, 300);
+    emitOnChange({ type: 'watch.report', agent: 'watch', msg: wmsg }, 'watch.report', wmsg.replace(/\d+/g, '#'), { repeatMin: 60 });
   }
   // A Watch task nobody has started, whose findings have all cleared: close it, so no Producer session
   // is spent confirming "all quiet" (test #2, T-197).

@@ -126,9 +126,9 @@ console.log(JSON.stringify({ types: ev.map((e) => e.type), n: ev.filter((e) => e
       m.j && m.j.n === 0 && m.j.types.filter((t) => t === 'machine.sample.summary').length === 1 && m.j.sum >= 12 && m.j.full === 4,
       JSON.stringify({ j: m.j, out: out(m).slice(-500) })]);
     const srcs = ['harness/game-gates.mjs', 'harness/agent.mjs'].map((f) => fs.readFileSync(path.join(S, f), 'utf8')).join('\n');
-    await guard('2.79 (f): gate.timeout_scaled and prompt.prefix.volatile go through emitSampled; the types a reader needs per event (hotspot.overlap, task.overlap, skill.follow, watch.report, agent.heartbeat, trigger.would_drop, thread.would_route) are still emitted one by one (fails on 2.78.2: both were emitEvent)', () => {
-      const keep = [['hotspots', 'hotspot.overlap'], ['task-overlap', 'task.overlap'], ['scorecard', 'skill.follow'], ['watch', 'watch.report'], ['threads', 'trigger.would_drop'], ['threads', 'thread.would_route']]
-        .every(([f, t]) => new RegExp(`emitEvent\\(\\{ type: '${t.replace('.', '\\.')}'`).test(fs.readFileSync(path.join(S, 'harness', `${f}.mjs`), 'utf8')) || /type: '(task\.overlap)'/.test(fs.readFileSync(path.join(S, 'harness', `${f}.mjs`), 'utf8')));
+    await guard('2.79 (f): gate.timeout_scaled and prompt.prefix.volatile go through emitSampled; the types a reader needs per event (hotspot.overlap, task.overlap, skill.follow, watch.report, agent.heartbeat) are still emitted as real events (2.80: hotspot.overlap and watch.report once per change, through emitOnChange) (fails on 2.78.2: both were emitEvent)', () => {
+      const keep = [['hotspots', 'hotspot.overlap'], ['task-overlap', 'task.overlap'], ['scorecard', 'skill.follow'], ['watch', 'watch.report']]
+        .every(([f, t]) => new RegExp(`(emitEvent|emitOnChange)\\(\\{ type: '${t.replace('.', '\\.')}'`).test(fs.readFileSync(path.join(S, 'harness', `${f}.mjs`), 'utf8')) || /type: '(task\.overlap)'/.test(fs.readFileSync(path.join(S, 'harness', `${f}.mjs`), 'utf8')));
       return [/emitSampled\(\{ type: 'gate\.timeout_scaled'/.test(srcs) && /emitSampled\(\{ type: 'prompt\.prefix\.volatile'/.test(srcs) && /emitEvent\(\{ type: 'agent\.heartbeat'/.test(srcs) && keep, 'sources'];
     });
     void ev;

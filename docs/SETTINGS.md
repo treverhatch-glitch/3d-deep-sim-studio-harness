@@ -38,7 +38,7 @@ Read this list first: the names a real crew sets in its `.env`, and the main sch
 - `STUDIO_GATE_SLOTS` · default `2` · harness/heavy.mjs, harness/merge-lane.mjs, harness/overseer-repro.mjs (+149 more) · undocumented
 - `STUDIO_HEAVY_SLOTS` · no simple default · harness/heavy-budget.mjs, harness/heavy.mjs, harness/train-parallel.mjs (+57 more) · [CLEANUP-2.79-AUDIT.md:216](CLEANUP-2.79-AUDIT.md)
 - `STUDIO_TEST_WORKERS` · default `'-'` · harness/flakes.mjs, harness/game-gates.mjs, harness/heavy-budget.mjs (+14 more) · [ONBOARDING-A-GAME.md:334](ONBOARDING-A-GAME.md)
-- `STUDIO_THREADS` · no simple default · harness/threads.mjs, qa/selftest-264l.mjs, qa/selftest-265r.mjs (+9 more) · [DIRECTOR-FLOW.md:119](DIRECTOR-FLOW.md)
+- `STUDIO_THREADS` · no simple default · harness/threads.mjs, qa/selftest-264l.mjs, qa/selftest-265r.mjs (+10 more) · [DIRECTOR-FLOW.md:119](DIRECTOR-FLOW.md)
 - `STUDIO_ENGINE_TRAIN_AUTO` · no simple default · harness/line-producer.mjs, qa/selftest-2791b.mjs · [CLEANUP-2.79-AUDIT.md:439](CLEANUP-2.79-AUDIT.md)
 - `STUDIO_SESSION_TURNS` · no simple default · harness/bench.mjs, harness/session-cap.mjs · [SESSIONS.md:46](SESSIONS.md)
 - `STUDIO_SESSION_CEILING_TURNS` · no simple default · harness/session-cap.mjs, qa/selftest.mjs · [SESSIONS.md:46](SESSIONS.md)
@@ -72,7 +72,7 @@ Read this list first: the names a real crew sets in its `.env`, and the main sch
 - `STUDIO_COMM_WEBHOOK` · no simple default · harness/agent-env.mjs, harness/communicator.mjs, qa/selftest-276l.mjs (+2 more) · [DISCORD-CREW.md:150](DISCORD-CREW.md)
 - `STUDIO_REFERENCE_DIR` · default `'references'` · harness/refs.mjs, scripts/check-assets.mjs, qa/selftest.mjs · [BACKUPS.md:20](BACKUPS.md)
 - `STUDIO_RESULTS_DIR` · no simple default · harness/health.mjs, harness/kickoff.mjs, harness/run-report.mjs (+4 more) · [TEST-RUN.md:30](TEST-RUN.md)
-- `STUDIO_GAME` · no simple default · harness/cartridge.mjs, harness/cheatsheet.mjs, harness/game-gates.mjs (+91 more) · undocumented
+- `STUDIO_GAME` · no simple default · harness/cartridge.mjs, harness/cheatsheet.mjs, harness/game-gates.mjs (+92 more) · undocumented
 - `STUDIO_LOCK_OWNER` · default `'art-adapter'` (also `'art'`, `'producer'`, `'qa'`, `'canaries'`, `'director'`, `'unknown'`, `'gates'`, `'game-dev'`, `'harness'`, `'heavy'`, `'an agent'`, `'default'`, `'conductor'`, `'liaison'`, `'builder'`, `'person'`, `'slow-tier'`, `'human'`, `'a person'`, `'unity-gate'`, `'unity'`, `'upgrade'`, `'outside-agent'`, `'vfx'`, `'launcher'`, `'fuzz'`, `'vision-check'`) · harness/agent-env.mjs, harness/agent.mjs, harness/aider-protocol.mjs (+258 more) · [AGENT-TOOLS.md:9](AGENT-TOOLS.md)
 - `STUDIO_MAIN_ROOT` · no simple default · harness/agent-env.mjs, harness/agent.mjs, harness/aider-launch.mjs (+162 more) · [AGENT-TOOLS.md:157](AGENT-TOOLS.md)
 
@@ -374,7 +374,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## GAME_* (7)
 
-- `STUDIO_GAME` · no simple default · harness/cartridge.mjs, harness/cheatsheet.mjs, harness/game-gates.mjs (+91 more) · undocumented
+- `STUDIO_GAME` · no simple default · harness/cartridge.mjs, harness/cheatsheet.mjs, harness/game-gates.mjs (+92 more) · undocumented
 - `STUDIO_GAME_GATE_CI` · no simple default · harness/game-gates.mjs, harness/train.mjs, qa/selftest-258f.mjs (+7 more) · [ONBOARDING-A-GAME.md:41](ONBOARDING-A-GAME.md)
 - `STUDIO_GAME_GATE_RETRY` · no simple default · harness/game-gates.mjs, qa/selftest-244.mjs, qa/selftest-260a.mjs (+11 more) · [DISCORD-CREW.md:179](DISCORD-CREW.md)
 - `STUDIO_GAME_GATE_TIMEOUT_FLOOR` · no simple default · harness/game-gates.mjs, harness/heavy.mjs, qa/selftest-259d.mjs (+3 more) · undocumented
@@ -820,7 +820,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## TELEMETRY_* (2)
 
-- `STUDIO_TELEMETRY` · no simple default · harness/agent.mjs, harness/futility.mjs, harness/scorecard.mjs (+8 more) · [METRICS.md:74](METRICS.md)
+- `STUDIO_TELEMETRY` · no simple default · harness/agent.mjs, harness/futility.mjs, harness/scorecard.mjs (+9 more) · [METRICS.md:74](METRICS.md)
 - `STUDIO_TELEMETRY_HOUR_MIN` · no simple default · harness/telemetry.mjs · [METRICS.md:74](METRICS.md)
 
 ## TEST_* (18)
@@ -858,7 +858,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## THREADS_* (3)
 
-- `STUDIO_THREADS` · no simple default · harness/threads.mjs, qa/selftest-264l.mjs, qa/selftest-265r.mjs (+9 more) · [DIRECTOR-FLOW.md:119](DIRECTOR-FLOW.md)
+- `STUDIO_THREADS` · no simple default · harness/threads.mjs, qa/selftest-264l.mjs, qa/selftest-265r.mjs (+10 more) · [DIRECTOR-FLOW.md:119](DIRECTOR-FLOW.md)
 - `STUDIO_THREADS_LOCK_MS` · default `5000` · harness/threads.mjs · undocumented
 - `STUDIO_THREADS_SWEEP_N` · default `5000` · harness/threads.mjs · undocumented
 
@@ -1062,7 +1062,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_BUDGET_STOP` · no simple default · harness/budget.mjs, qa/selftest-230q.mjs, qa/selftest-2782d.mjs · undocumented
 - `STUDIO_CANARY` · no simple default · harness/canaries.mjs · [ONBOARDING-A-GAME.md:320](ONBOARDING-A-GAME.md)
 - `STUDIO_CARRY_SKIP_APPLIED` · no simple default · harness/lane-orphans.mjs · [WORK-ORGANIZATION.md:785](WORK-ORGANIZATION.md)
-- `STUDIO_CARTRIDGE` · no simple default · harness/cartridge.mjs, harness/gate-cache.mjs, harness/landing-build.mjs (+17 more) · undocumented
+- `STUDIO_CARTRIDGE` · no simple default · harness/cartridge.mjs, harness/gate-cache.mjs, harness/landing-build.mjs (+18 more) · undocumented
 - `STUDIO_CCUSAGE_CMD` · no simple default · harness/budget.mjs, qa/selftest.mjs · undocumented
 - `STUDIO_CHARTER` · no simple default · harness/producer-refill.mjs · undocumented
 - `STUDIO_CI_NOTIFY_CMD` · no simple default · harness/ci-watch.mjs, qa/selftest-230h.mjs · [DIRECTOR-FLOW.md:116](DIRECTOR-FLOW.md)

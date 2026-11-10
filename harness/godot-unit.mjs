@@ -123,7 +123,7 @@ export function runGodotUnit({ changedOnly = false } = {}) {
 
   const check = shouldRun(cfg, changedFiles);
   if (!check.run) {
-    console.log(`[godot-unit] ${/^N\/A/.test(check.reason) ? '' : 'skipped: '}${check.reason}`);
+    console.log(`[godot-unit] skipped: ${check.reason}`);
     return { ok: true, skipped: true, reason: check.reason };
   }
 

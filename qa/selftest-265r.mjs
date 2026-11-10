@@ -7,7 +7,7 @@
  *      whose dependency hasn't landed waits, one depending on a dropped task or one not on the board is handed back.
  *   3. Drift: a session listed running with no heartbeat ever; a lane holding another open task's unlanded commits.
  *   4. Triggers: studio/triggers.json "senders": a discord/github post responds only for an owner or trusted author
- *      id; anyone else's (or no id) is at most a candidate, in shadow mode too; the shipped lists are empty.
+ *      id; anyone else's (or no id) is at most a candidate; the shipped lists are empty.
  * Made-up studio ("demo"), made-up ids. Each check fails on 2.64.0.
  */
 import fs from 'node:fs';
@@ -216,7 +216,7 @@ console.log(JSON.stringify({ raised }));
   const post = (tag, author, source = 'discord', extra = {}) => {
     const before = evs().length;
     const r = thread(`post discord:123456789012 "note ${tag}" --source ${source} --by relay-bot${author ? ` --author ${author}` : ''}`, extra);
-    const e = evs().slice(before).find((x) => (x.type === 'thread.routed' || x.type === 'thread.would_route') && x.meta?.type === 'inbound.message');
+    const e = evs().slice(before).find((x) => x.type === 'thread.routed' && x.meta?.type === 'inbound.message');
     return { r, e, meta: e?.meta || {} };
   };
   const own = post('owner', '111111111111');
@@ -224,15 +224,15 @@ console.log(JSON.stringify({ raised }));
   const other = post('other', '333333333333');
   const none = post('none', null);
   const gh = post('gh', 'Dana-Owner', 'github');
-  const sh = post('shadow', '333333333333', 'discord', { STUDIO_THREADS: 'shadow' });
-  fs.writeFileSync(trigFile, JSON.stringify(shipped, null, 2));
+  // 2.80: a source that isn't live is left alone (no shadow log), so discord is made live to see what the shipped senders say.
+  fs.writeFileSync(trigFile, JSON.stringify({ ...shipped, live: ['ci', 'train', 'discord'] }, null, 2));
   const dflt = post('default', '111111111111', 'discord', { STUDIO_THREADS: 'on' });
-  report('2.65.0 (triggers): with "senders" in studio/triggers.json a discord post responds only for an owner or trusted author id (a GitHub login without case); another id or none is at most a candidate and says so; in shadow mode the would-route is logged as a candidate (fails on 2.64.0: no sender policy)',
+  fs.writeFileSync(trigFile, JSON.stringify(shipped, null, 2));
+  report('2.65.0 (triggers): with "senders" in studio/triggers.json a discord post responds only for an owner or trusted author id (a GitHub login without case); another id or none is at most a candidate and says so; (fails on 2.64.0: no sender policy)',
     link.status === 0 && own.meta.policy === 'respond' && own.meta.sender === 'owner' && tru.meta.policy === 'respond' && tru.meta.sender === 'trusted'
       && other.meta.policy === 'candidate' && other.meta.capped === true && other.meta.sender === 'untrusted' && /at most a candidate/.test(out(other.r))
-      && none.meta.policy === 'candidate' && none.meta.sender === 'unknown' && gh.meta.policy === 'respond' && gh.meta.sender === 'owner'
-      && sh.e?.type === 'thread.would_route' && sh.meta.policy === 'candidate' && /at most a candidate/.test(sh.e?.msg || ''),
-    `${out(link)}\n${JSON.stringify([own, tru, other, none, gh, sh].map((x) => ({ m: x.meta, msg: x.e?.msg, o: out(x.r).slice(-200) })), null, 1).slice(0, 3000)}`);
+      && none.meta.policy === 'candidate' && none.meta.sender === 'unknown' && gh.meta.policy === 'respond' && gh.meta.sender === 'owner',
+    `${out(link)}\n${JSON.stringify([own, tru, other, none, gh].map((x) => ({ m: x.meta, msg: x.e?.msg, o: out(x.r).slice(-200) })), null, 1).slice(0, 3000)}`);
   report('2.65.0 (triggers): the shipped table lists "senders" with empty owner and trusted lists, so every discord and github post is a candidate until the owner adds ids (fails on 2.64.0: no senders)',
     Array.isArray(shipped.senders?.discord?.owner) && !shipped.senders.discord.owner.length && Array.isArray(shipped.senders?.discord?.trusted) && Array.isArray(shipped.senders?.github?.owner) && !shipped.senders.github.owner.length
       && dflt.meta.policy === 'candidate' && dflt.meta.sender === 'untrusted',

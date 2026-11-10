@@ -97,6 +97,36 @@ console.log('R ' + JSON.stringify({ ok: g.ok, why: g.why, name: g.name, browser:
     let disabled;
     try { disabled = gu.shouldRun({ enabled: false, project: 'game/t280d-gd' }, null); } finally { fs.rmSync(pd, { recursive: true, force: true }); try { fs.rmdirSync(path.join(dir, 'game')); } catch {} }
     return [none.run === false && /^N\/A: no Godot project in this studio$/.test(none.reason) && bare.run === false && /^N\/A/.test(bare.reason) && /disabled/.test(disabled.reason)
-      && (hasProject || (r.code === 0 && /\] N\/A: no Godot project in this studio/.test(r.out))), JSON.stringify({ none, bare, disabled, code: r.code, out: r.out.slice(0, 200) })];
+      && (hasProject || (r.code === 0 && /N\/A: no Godot project in this studio/.test(r.out))), JSON.stringify({ none, bare, disabled, code: r.code, out: r.out.slice(0, 200) })];
+  });
+
+  await guard('2.80 (d) #8a: threads have no shadow mode: a source that is not live, and a "shadow" mode (STUDIO_THREADS or the table), route nothing and write no would_route / would_drop event; live sources still route; the shadow report is gone (fails on 2.79.2: both events were emitted for every event)', async () => {
+    const th = await import(u('harness/threads.mjs'));
+    const e = { id: 'e1', ts: new Date().toISOString(), type: 'ci.failed', msg: 'CI red on abc', meta: { sha: 'abcdef1' } };
+    const d = { id: 'e2', ts: e.ts, type: 'inbound.message', msg: 'x', meta: { source: 'discord', thread: 'task:T-1' } };
+    const base = { idx: { keys: {} }, board: null, triggers: th.readTriggers() };
+    const sh = th.routeEvent(e, { ...base, mode: 'shadow' });
+    const notLive = th.routeEvent(d, { ...base, mode: 'on', triggers: { ...base.triggers, live: ['ci', 'train'] } });
+    const src = fs.readFileSync(path.join(dir, 'harness', 'threads.mjs'), 'utf8');
+    return [sh.action === 'none' && notLive.action === 'none' && th.threadsMode({ STUDIO_THREADS: 'shadow' }, { mode: 'on' }) === 'off' && th.threadsMode({}, { mode: 'shadow' }) === 'off' && th.threadsMode({ STUDIO_THREADS: 'on' }, { mode: 'off' }) === 'on'
+      && !/would_route|would_drop/.test(src.replace(/\/\/.*|\/\*[\s\S]*?\*\//g, '')) && th.shadowReport === undefined, JSON.stringify({ sh, notLive })];
+  });
+
+  await guard('2.80 (d) #8b: hotspot.overlap is one event per file and set of lanes, not one per line the overlap moved to; another lane set writes again (fails on 2.79.2: one event per line)', async () => {
+    const root = fs.mkdtempSync(path.join(tmpRoot, 'hs280d-'));
+    const evf = path.join(root, 'events.jsonl');
+    const r = probe(`import { postOverlaps } from ${JSON.stringify(u('harness/hotspots.mjs'))};
+const o = (line, lanes) => [{ file: 'src/a-' + ${JSON.stringify(path.basename(root))} + '.ts', line, lanes }];
+postOverlaps(${JSON.stringify(root)}, o(10, ['T-1', 'T-2']));
+postOverlaps(${JSON.stringify(root)}, o(40, ['T-2', 'T-1']));
+postOverlaps(${JSON.stringify(root)}, o(40, ['T-1', 'T-3']));
+console.log('done');`, { AGENT_EVENTS_FILE: evf, STUDIO_TELEMETRY: '' });
+    const n = fs.existsSync(evf) ? fs.readFileSync(evf, 'utf8').split('\n').filter((l) => /"hotspot\.overlap"/.test(l)).length : -1;
+    return [/done/.test(r.out) && n === 2, JSON.stringify({ n, out: r.out.slice(-300) })];
+  });
+
+  await guard('2.80 (d) #8c: a watch.report that says the same again goes through emitOnChange (hourly at most; digits in the words do not make it new), so a standing finding is not one event per pass (fails on 2.79.2: emitEvent on every pass)', async () => {
+    const src = fs.readFileSync(path.join(dir, 'harness', 'watch.mjs'), 'utf8').replace(/\r\n/g, '\n');
+    return [/emitOnChange\(\{ type: 'watch\.report'[^\n]*repeatMin: 60/.test(src) && !/emitEvent\(\{ type: 'watch\.report'/.test(src), 'watch.mjs'];
   });
 }

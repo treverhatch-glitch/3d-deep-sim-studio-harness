@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * harness/threads.mjs — 2.64.0: thread subscription, pass-through and the trigger table (shadow mode first).
+ * harness/threads.mjs — 2.64.0: thread subscription, pass-through and the trigger table.
  *
  *   npm run thread -- status                              mode, live sources, keys, last sweep
  *   npm run thread -- sweep                               index and route the events since the last sweep
@@ -9,7 +9,6 @@
  *   npm run thread -- link <key> <ID> --by <name>         a bot ties a Discord message or a PR/issue to a task
  *   npm run thread -- unlink <key> --by <name>
  *   npm run thread -- post <key> "<text>" --source discord|github|hub --by <name> [--ref <id>] [--author <sender id>]
- *   npm run thread -- shadow-report [--sample 50]         what shadow mode would have routed, for the owner to check
  *
  * The index (.studio/threads.json) maps exact keys to tasks. It is built by code from the events the studio
  * already writes: a task id, its lane branch (.studio/lane-branches.json, task.train.queued), the commits a lane
@@ -27,11 +26,11 @@
  *
  * 2.65.0, "senders" in studio/triggers.json: a discord or github event responds only when its author id (--author, the id
  * the bot got from Discord or GitHub; the harness can't verify it) is listed as owner or trusted; any other author's
- * event, or one with no author, is at most a candidate (logged as such in shadow mode). Empty lists: all candidates.
+ * event, or one with no author, is at most a candidate . Empty lists: all candidates.
  *
- * STUDIO_THREADS (or "mode" in studio/triggers.json): shadow (default) logs thread.would_route and
- * trigger.would_drop events only; on routes for the sources listed in "live" (ci and train by default; the others
- * stay in shadow until listed); off does nothing.
+ * STUDIO_THREADS (or "mode" in studio/triggers.json): on routes the sources listed in "live" (ci and train by default;
+ * the others are left alone until listed); off does nothing. 2.80: the shadow mode (would_route / would_drop events,
+ * the shadow report) is gone: "shadow", the old default, now behaves as off.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -143,13 +142,12 @@ export function senderClass(e, triggers = readTriggers()) {
   return 'untrusted';
 }
 
-/** off | shadow | on: STUDIO_THREADS first, then studio/triggers.json, else shadow. */
+/** off | on: STUDIO_THREADS first, then studio/triggers.json, else off ("shadow" is off since 2.80). */
 export function threadsMode(env = process.env, triggers = readTriggers()) {
   const v = String(env.STUDIO_THREADS || '').trim().toLowerCase();
-  if (['off', '0', 'false', 'no'].includes(v)) return 'off';
+  if (['off', '0', 'false', 'no', 'shadow'].includes(v)) return 'off';
   if (['on', '1', 'true', 'yes'].includes(v)) return 'on';
-  if (v === 'shadow') return 'shadow';
-  return triggers.mode;
+  return triggers.mode === 'shadow' ? 'off' : triggers.mode;
 }
 
 /** Which source an event comes from, or null (not a trigger: never routed). */
@@ -337,26 +335,24 @@ function deliverToProducer(line) {
 }
 
 /**
- * Decide and (when live) act on one event. Returns { action, source, policy, to, tasks, key, live } where action is
- * none | would_route | routed | would_drop | dropped. Never adds a task, never writes the board.
+ * Decide and act on one event of a live source. Returns { action, source, policy, to, tasks, key } where action is
+ * none | routed | dropped. Never adds a task, never writes the board.
  */
 export function routeEvent(e, { idx, mode = threadsMode(), triggers = readTriggers(), board = boardState(), quietDrops = true, producer = true } = {}) {
   const source = sourceOf(e);
-  if (!source || mode === 'off') return { action: 'none' };
+  if (!source || mode !== 'on' || !triggers.live.includes(source)) return { action: 'none' };
   let policy = policyFor(source, e.type, triggers);
   // 2.65.0: a Discord or GitHub event responds only for an admitted sender (studio/triggers.json "senders"); anyone
-  // else's is at most a candidate (never respond), in shadow mode and live alike.
+  // else's is at most a candidate (never respond), 
   const sender = senderClass(e, triggers);
   const admitted = sender === 'owner' || sender === 'trusted';
   const capped = sender !== null && !admitted && policy === 'respond';
   if (capped) policy = 'candidate';
-  const live = mode === 'on' && triggers.live.includes(source);
-  const base = { event: e.id, type: e.type, source, policy, live, ...(sender !== null ? { sender, author: String(e.meta?.author ?? '').slice(0, 64) || null, ...(capped ? { capped: true } : {}) } : {}) };
+  const base = { event: e.id, type: e.type, source, policy, ...(sender !== null ? { sender, author: String(e.meta?.author ?? '').slice(0, 64) || null, ...(capped ? { capped: true } : {}) } : {}) };
   const capNote = capped ? ` (sender ${sender === 'unknown' ? 'not given' : `${base.author} not in senders`}: at most a candidate)` : '';
   if (policy === 'ignore') {
-    if (!live) emitEvent({ type: 'trigger.would_drop', agent: 'threads', msg: `would drop ${e.type} (${source}: ignore)`, meta: base });
-    else if (!quietDrops) emitEvent({ type: 'trigger.dropped', agent: 'threads', msg: `dropped ${e.type} (${source}: ignore)`, meta: base });
-    return { action: live ? 'dropped' : 'would_drop', source, policy };
+    if (!quietDrops) emitEvent({ type: 'trigger.dropped', agent: 'threads', msg: `dropped ${e.type} (${source}: ignore)`, meta: base });
+    return { action: 'dropped', source, policy };
   }
   const hit = resolveKeys(idx, keysOf(e), { board });
   const open = (hit?.tasks || []).filter((t) => !board || !board.done.has(t));
@@ -364,10 +360,6 @@ export function routeEvent(e, { idx, mode = threadsMode(), triggers = readTrigge
   const why = hit && !open.length ? ` (${hit.tasks.join(', ')} ${hit.tasks.length > 1 ? 'are' : 'is'} done)` : '';
   const ref = e.meta?.ref || hit?.key || keysOf(e)[0] || '';
   const out = { ...base, to, tasks: open, key: hit?.key || null };
-  if (!live) {
-    emitEvent({ type: 'thread.would_route', agent: 'threads', task: open[0] || null, to: to === 'task' ? null : 'producer', msg: `would route ${e.type} to ${to === 'task' ? `${open.join(', ')}'s inbox` : `the Producer${hit ? why : ' (no thread)'}`} as ${policy}${capNote}: ${oneLine(e.msg, 160)}`, meta: out });
-    return { action: 'would_route', ...out };
-  }
   if (to === 'task') {
     const told = open.map((id) => deliverToTask(id, lineOf(e, source, ref), { notice: policy === 'respond' })).filter(Boolean);
     emitEvent({ type: 'thread.routed', agent: 'threads', task: open[0], msg: `${e.type} routed to ${open.join(', ')}'s inbox${told.length ? ` (${told.join(', ')} told at the next tool call)` : ''}${capNote}`, meta: { ...out, told } });
@@ -530,21 +522,6 @@ export function inboxForBrief(id, { max = 10, sweep = true } = {}) {
   return { lines: lines.slice(-max), total: lines.length, unread: unreadCount(id), file: `studio/handoffs/${id}.inbox.md` };
 }
 
-/** What shadow mode would have routed: counts per source and action, and a sample to check by hand. */
-export function shadowReport({ sample = 50, events = readRecentEvents(50000) } = {}) {
-  const shadow = events.filter((e) => e.type === 'thread.would_route' || e.type === 'trigger.would_drop');
-  const counts = {};
-  for (const e of shadow) {
-    const k = `${e.meta?.source || '?'} ${e.type === 'trigger.would_drop' ? 'drop' : e.meta?.to === 'task' ? 'to task' : 'to producer'}`;
-    counts[k] = (counts[k] || 0) + 1;
-  }
-  // An even spread over the whole period (every k-th), newest last, so one busy hour can't fill the sample.
-  const n = Math.max(0, Math.min(Number(sample) || 0, shadow.length));
-  const step = n ? shadow.length / n : 1;
-  const picked = n ? Array.from({ length: n }, (_, i) => shadow[Math.min(shadow.length - 1, Math.floor(i * step))]) : [];
-  return { total: shadow.length, counts, sample: picked.map((e) => ({ ts: e.ts, source: e.meta?.source, type: e.meta?.type, to: e.type === 'trigger.would_drop' ? 'drop' : e.meta?.to, tasks: e.meta?.tasks || [], key: e.meta?.key || null, event: e.meta?.event, ...(e.meta?.sender ? { sender: e.meta.sender, policy: e.meta.policy } : {}), msg: e.msg })) };
-}
-
 // ---- CLI --------------------------------------------------------------------------------------------------------
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -558,7 +535,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const t = readTriggers();
     const idx = readThreads();
     const mode = threadsMode(process.env, t);
-    console.log(`[thread] mode ${mode}${mode === 'on' ? ` (live: ${t.live.join(', ') || 'none'}; others in shadow)` : ''}; ${Object.keys(idx.keys).length} key(s); last sweep ${idx.updatedAt || 'never'}`);
+    console.log(`[thread] mode ${mode}${mode === 'on' ? ` (live: ${t.live.join(', ') || 'none'}; the other sources are left alone)` : ''}; ${Object.keys(idx.keys).length} key(s); last sweep ${idx.updatedAt || 'never'}`);
     for (const s of SOURCES) console.log(`  ${s.padEnd(8)} ${t.sources[s].policy}${Object.keys(t.sources[s].types).length ? ` (${Object.entries(t.sources[s].types).map(([k, v]) => `${k}: ${v}`).join(', ')})` : ''}${t.senders[s] ? `; respond only for listed senders (owner ${t.senders[s].owner.length}, trusted ${t.senders[s].trusted.length}); anyone else: candidate` : ''}`);
   } else if (cmd === 'sweep') {
     const r = sweepThreads();
@@ -583,15 +560,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   } else if (cmd === 'post') {
     const r = postInbound({ source: flag('source') || 'discord', key: pos[1], text: pos.slice(2).join(' '), by, ref: flag('ref'), author: flag('author') });
     if (!r.ok) fail(r.message);
-    const where = (r.capped ? `sender ${r.author || '(not given)'} is not in studio/triggers.json "senders" for ${r.source}: at most a candidate; ` : '') + (r.action === 'routed' ? (r.to === 'task' ? `in ${r.tasks.join(', ')}'s inbox` : "in the Producer's inbox") : r.action === 'would_route' ? `shadow mode: logged where it would go (${r.to === 'task' ? r.tasks.join(', ') : 'the Producer'}); nothing delivered` : r.action === 'dropped' || r.action === 'would_drop' ? `dropped (${r.source}: ignore)` : 'threads are off');
+    const where = (r.capped ? `sender ${r.author || '(not given)'} is not in studio/triggers.json "senders" for ${r.source}: at most a candidate; ` : '') + (r.action === 'routed' ? (r.to === 'task' ? `in ${r.tasks.join(', ')}'s inbox` : "in the Producer's inbox") : r.action === 'dropped' ? `dropped (${r.source}: ignore)` : 'threads are off');
     console.log(`[thread] ${where}`);
-  } else if (cmd === 'shadow-report') {
-    const r = shadowReport({ sample: Number(flag('sample') || 50) });
-    if (argv.includes('--json')) { console.log(JSON.stringify(r)); process.exit(0); }
-    console.log(`[thread] shadow mode: ${r.total} decision(s): ${Object.entries(r.counts).map(([k, v]) => `${k} ${v}`).join(', ') || 'none yet'}`);
-    console.log(`Sample of ${r.sample.length} (spread over the period). Check each: is the task right, or should it have gone to the Producer or been dropped?`);
-    for (const s of r.sample) console.log(`- ${stamp(s.ts)} ${s.source} ${s.type} -> ${s.to === 'task' ? s.tasks.join(', ') : s.to}${s.key ? ` [${s.key}]` : ''}${s.sender ? ` (sender ${s.sender}: ${s.policy})` : ''} · ${oneLine(s.msg, 160)}`);
   } else {
-    fail('Usage: npm run thread -- status | sweep | resolve <key> | inbox <ID> [--peek] | link <key> <ID> --by <name> | unlink <key> --by <name> | post <key> "<text>" --source discord|github|hub --by <name> [--ref <id>] [--author <sender id>] | shadow-report [--sample 50]');
+    fail('Usage: npm run thread -- status | sweep | resolve <key> | inbox <ID> [--peek] | link <key> <ID> --by <name> | unlink <key> --by <name> | post <key> "<text>" --source discord|github|hub --by <name> [--ref <id>] [--author <sender id>]');
   }
 }
