@@ -28,6 +28,7 @@
     "overnight": "node harness/overnight.mjs",
     "watch": "node harness/watch.mjs",
     "scorecard": "node harness/scorecard.mjs",
+    "score": "node harness/score.mjs",
     "retro": "node harness/retro.mjs",
     "focus": "node harness/focus.mjs",
     "kickoff": "node harness/kickoff.mjs",
