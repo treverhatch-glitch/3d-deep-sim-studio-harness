@@ -1,0 +1,229 @@
+{
+  "label": "2026-11-08-engine-baseline",
+  "note": "The same log as 2026-11-08-baseline, with the two blocks 2.82 added: the engine flow and the design link. Pillar and layer names are left out of this record (they are the studio's own).",
+  "recordedAt": "2026-11-10T00:00:00.000Z",
+  "window": {
+    "from": "2026-10-31T10:05:00.000Z",
+    "to": "2026-11-08T14:53:00.000Z",
+    "days": 8.2,
+    "events": 55044
+  },
+  "values": {
+    "handsFreePct": 29.6,
+    "hoursBetweenInterventions": 2.38,
+    "overseerStepsPerLanded": 1.58,
+    "costPerLandedUsd": 2.44,
+    "coordinationSpendPct": 53.6,
+    "firstClaimDonePct": 55.2,
+    "harnessHandBackPct": 15.1,
+    "laneDropPct": 29.3,
+    "fullVerifyP50Min": 10.3,
+    "leadTimeP50H": 3,
+    "landedPerDay": 49.6,
+    "rigIdlePct": 58.4,
+    "engineLandPassPct": 16.4,
+    "stallsPerDay": 31.1,
+    "escapedPct": 1.1
+  },
+  "notes": {
+    "coordinationSpendPct": "$874.5 reported by 1619 session(s)",
+    "firstClaimDonePct": "2.3 claims per done task",
+    "laneDropPct": "183 train(s): 193 lane(s) landed, 80 dropped; 11 found main red",
+    "fullVerifyP50Min": "p90 22.6 min, 359 run(s)",
+    "leadTimeP50H": "p90 21.7 h, 359 task(s)",
+    "rigIdlePct": "mean CPU 27.5%, over 90% in 3% of 1199 sample(s)",
+    "engineLandPassPct": "67 land run(s); queue wait p90 9.4 h (median 0.9 h)",
+    "stallsPerDay": "117 stalled session(s), 26 dead train(s), 3 halt(s), 79 session(s) whose process was gone",
+    "handsFreePct": "106 of 358 landed",
+    "hoursBetweenInterventions": "73 unplanned in 173.87 supervisor hour(s)",
+    "overseerStepsPerLanded": "567 step(s) by an outside agent",
+    "costPerLandedUsd": "629k tokens per landed task",
+    "harnessHandBackPct": "775 of 1028 attempt(s) were handed back in all",
+    "landedPerDay": "359 done in 7.2 supervisor day(s)",
+    "escapedPct": "4 of 358"
+  },
+  "measures": [
+    {
+      "id": "handsFreePct",
+      "label": "Landed with no person or overseer step",
+      "unit": "%",
+      "better": "up",
+      "target": 80
+    },
+    {
+      "id": "hoursBetweenInterventions",
+      "label": "Supervisor hours per unplanned intervention",
+      "unit": "h",
+      "better": "up",
+      "target": 8
+    },
+    {
+      "id": "overseerStepsPerLanded",
+      "label": "Outside-overseer steps per landed task",
+      "unit": "",
+      "better": "down",
+      "target": 0.2
+    },
+    {
+      "id": "costPerLandedUsd",
+      "label": "Cost per landed task",
+      "unit": "$",
+      "better": "down",
+      "target": 1.5
+    },
+    {
+      "id": "coordinationSpendPct",
+      "label": "Spend on Producer and Director sessions",
+      "unit": "%",
+      "better": "down",
+      "target": 25
+    },
+    {
+      "id": "firstClaimDonePct",
+      "label": "Done tasks finished on their first claim",
+      "unit": "%",
+      "better": "up",
+      "target": 75
+    },
+    {
+      "id": "harnessHandBackPct",
+      "label": "Attempts handed back for a harness or machine cause",
+      "unit": "%",
+      "better": "down",
+      "target": 5
+    },
+    {
+      "id": "laneDropPct",
+      "label": "Lanes a merge train dropped",
+      "unit": "%",
+      "better": "down",
+      "target": 10
+    },
+    {
+      "id": "fullVerifyP50Min",
+      "label": "Full verify, median (p90 in the note)",
+      "unit": "min",
+      "better": "down",
+      "target": 8
+    },
+    {
+      "id": "leadTimeP50H",
+      "label": "Task added to done, median (p90 in the note)",
+      "unit": "h",
+      "better": "down",
+      "target": 2
+    },
+    {
+      "id": "landedPerDay",
+      "label": "Tasks done per supervisor day",
+      "unit": "",
+      "better": "up",
+      "target": 60
+    },
+    {
+      "id": "rigIdlePct",
+      "label": "Machine samples under 25% CPU while the supervisor ran",
+      "unit": "%",
+      "better": "down",
+      "target": 30
+    },
+    {
+      "id": "engineLandPassPct",
+      "label": "Engine land runs that passed (queue wait p90 in the note)",
+      "unit": "%",
+      "better": "up",
+      "target": 60
+    },
+    {
+      "id": "stallsPerDay",
+      "label": "Stalls, dead trains, halts and lost sessions per day",
+      "unit": "",
+      "better": "down",
+      "target": 5
+    },
+    {
+      "id": "escapedPct",
+      "label": "Landed, then reopened or the cause of a bug within 7 days",
+      "unit": "%",
+      "better": "down",
+      "target": 5
+    }
+  ],
+  "engine": {
+    "runs": 67,
+    "landedLanes": 11,
+    "passPct": 16.4,
+    "refusedPct": 25.4,
+    "minutesPerLanded": 320.3,
+    "redMinutesPct": 53,
+    "passMedianMin": 101,
+    "redMedianMin": 27.4,
+    "waitMin": 495.4,
+    "waitedForRam": 16,
+    "totalMin": 3523.7,
+    "stages": [],
+    "rules": {
+      "checks": 0,
+      "runs": 0,
+      "minutes": 0,
+      "refused": 0
+    }
+  },
+  "vision": {
+    "done": 358,
+    "tracedPct": 57.3,
+    "devAskedPct": 7.8,
+    "agentProposedPct": 92.2,
+    "untraced": 153,
+    "byServes": [
+      {
+        "serves": "pillar-1",
+        "done": 48
+      },
+      {
+        "serves": "pillar-2",
+        "done": 45
+      },
+      {
+        "serves": "layer-3",
+        "done": 26
+      },
+      {
+        "serves": "layer-4",
+        "done": 16
+      },
+      {
+        "serves": "pillar-5",
+        "done": 12
+      },
+      {
+        "serves": "layer-6",
+        "done": 9
+      },
+      {
+        "serves": "layer-7",
+        "done": 8
+      },
+      {
+        "serves": "pillar-8",
+        "done": 7
+      },
+      {
+        "serves": "layer-9",
+        "done": 5
+      },
+      {
+        "serves": "pillar-10",
+        "done": 4
+      },
+      {
+        "serves": "layer-11",
+        "done": 3
+      },
+      {
+        "serves": "layer-12",
+        "done": 3
+      }
+    ]
+  }
+}

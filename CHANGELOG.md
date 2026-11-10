@@ -4,6 +4,26 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.82.0] — 2026-11-10
+Native engine (the owner's "Round 2.82"). The crew's 64 Unity land runs passed 18 times; a passing run took 92 minutes,
+53 of them re-running in Edit Mode the rule tests .NET had just run, and 24 of the 45 failures were in tests that need
+no editor. @@LINES@@ Details: docs/RELEASE-2.82.0.md, docs/NATIVE-ENGINE.md.
+- **Native-engine mode** (`harness/native.mjs`, `npm run engine -- native`): a studio whose game is the engine build
+  builds a feature once. Builder tasks go on the engine track; the web tester schedule, the web landing build, engine
+  twins and the port queue are off; the planning kickoffs say so. `"native": "<engine>"` in `studio/game.json`.
+- **The rules check before the land run** (`harness/engine-rules.mjs`, `npm run engine -- rules`): the cheap rules
+  tests run on the batch first; the lane that breaks them is handed back (cause `rules`) without a land run; a check
+  that is red on the target judges nobody. Unity default: `dotnet test tools/SimTests`.
+- **Land stages** (`STUDIO_LAND_RESULT`) on the `engine.land` event; **Edit Mode once** (`STUDIO_UNITY_EDITMODE_ARGS`,
+  `node harness/unity.mjs editmode-plan`); `STUDIO_RULES_GREEN` for a land script.
+- **Scorecard:** the engine flow (land-run minutes per landed lane, red and refused shares, stages, the rules check's
+  catches) and the design link (done work that traces to a pillar, a layer, an idea or the owner's ask). Baseline:
+  `studio/scores/2026-11-08-engine-baseline.json`.
+- **Folded:** the porter's quick check falls back to the owner's `rules` command; one role file for engine work in a
+  native studio.
+- **Fixed (from 2.81.0's Windows checks):** the attempt ledger's path comparison on Windows; the supervisor's sequence
+  test measures one session for its window.
+
 ## [2.81.0] — 2026-11-10
 Grade, measure, cut again (the owner's "Round 2.81"). Verdict: 5 of 10, a working production line that is not yet an
 autonomous one (studio/notes/VERDICT-2.81-2026-11-10.md). 250 files, +3,498 / −1,818 lines (net +1,680) against 2.80.0; with 2.80.0, 397 files, +5,373 / −21,388 lines (net −16,015)

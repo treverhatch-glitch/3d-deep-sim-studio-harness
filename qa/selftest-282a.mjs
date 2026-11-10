@@ -88,7 +88,7 @@ export async function selftest282A({ dir, root, run, report, tmpRoot }) {
   fs.writeFileSync(landStub, `import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 const [gw, ctl, ...srcs] = process.argv.slice(2);
-fs.appendFileSync(ctl + '-runs.jsonl', JSON.stringify({ srcs, rulesGreen: process.env.STUDIO_RULES_GREEN || '', result: Boolean(process.env.STUDIO_LAND_RESULT) }) + '\\n');
+fs.appendFileSync(ctl + '-runs.jsonl', JSON.stringify({ srcs, rulesGreen: process.env.STUDIO_RULES_GREEN || '', result: Boolean(process.env.STUDIO_LAND_RESULT), editArgs: process.env.STUDIO_UNITY_EDITMODE_ARGS || '' }) + '\\n');
 if (process.env.STUDIO_LAND_RESULT) fs.writeFileSync(process.env.STUDIO_LAND_RESULT, JSON.stringify({ gates: { merge: { status: 'pass' }, rules: { status: 'pass', seconds: 12 }, edit: { status: 'pass', seconds: 95 }, play: { status: 'pass', seconds: 300 } } }));
 const git = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8', windowsHide: true });
 for (const s of srcs) { const m = git(gw, 'merge', '--no-ff', '-m', 'land ' + s, 'refs/heads/' + s); if (m.status !== 0) { git(gw, 'merge', '--abort'); console.log('conflict ' + s); process.exit(2); } }
@@ -116,7 +116,12 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: 
   // ================= 1. the rules check before the land run =================
   {
     resetState();
-    const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/b': { 'rules-bad.txt': 'x\n' }, 'feat/c': { 'c.txt': 'c\n' } });
+    const asm = (name) => JSON.stringify({ name, includePlatforms: ['Editor'], defineConstraints: ['UNITY_INCLUDE_TESTS'] });
+    const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/b': { 'rules-bad.txt': 'x\n' }, 'feat/c': { 'c.txt': 'c\n' } }, { shared: {
+      'Assets/Tests/EditMode/Rules.Tests.asmdef': asm('Game.Rules.Tests'), 'Assets/Tests/EditMode/FeesTests.cs': 'class FeesTests {}\n',
+      'Assets/Tests/EditModeArt/Art.Tests.asmdef': asm('Game.Art.Tests'), 'Assets/Tests/EditModeArt/ArtTests.cs': 'class ArtTests {}\n',
+      'tools/SimTests/SimTests.csproj': '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><Compile Include="../../Assets/Tests/EditMode/**/*.cs" /></ItemGroup></Project>\n',
+    } });
     write(E.GW, 'Private~/key.txt', 'k\n'); // a git-ignored input the tests read: it lives in the land script's worktree only
     const ctl = path.join(T, 'ctl-rules');
     setEngines({ unity: cfgFor(E, ctl, { rules: { test: `node "${fwd(rulesStub)}"`, inputs: ['Private~'] } }) });
@@ -132,8 +137,8 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: 
         && r.handed?.some((h) => h.task === 'T-902' && h.extra?.cause === 'rules') && r.rules?.ran === true && r.rules.dropped?.join() === 'T-902' && evRules?.meta?.dropped?.join() === 'T-902' && evRules.meta.kept?.join() === 'T-901,T-903'
         && !fs.existsSync(path.join(E.R, 'Private~')) && !(() => { try { return fs.readdirSync(path.join(S, '.studio', 'tmp')); } catch { return []; } })().some((n) => n.startsWith('rules-')),
       JSON.stringify({ r, runs, evRules: evRules?.meta }).slice(0, 2800)]);
-    await guard('2.82 land stages: the land command wrote what each stage took where the harness asked (STUDIO_LAND_RESULT), and the stages are on the engine.land event in its order (merge, rules 12 s, edit 95 s, play 300 s)', () => [
-      runs[0]?.result === true && evLand?.meta?.stages?.map((s) => `${s.name}:${s.status}:${s.seconds}`).join() === 'merge:pass:null,rules:pass:12,edit:pass:95,play:pass:300',
+    await guard('2.82 land stages: the land command wrote what each stage took where the harness asked (STUDIO_LAND_RESULT), and the stages are on the engine.land event in its order (merge, rules 12 s, edit 95 s, play 300 s); a Unity land is also told which Edit Mode assemblies the editor still has to run after the .NET tests (STUDIO_UNITY_EDITMODE_ARGS: the art tests only)', () => [
+      runs[0]?.result === true && runs[0].editArgs === '-assemblyNames Game.Art.Tests' && evLand?.meta?.stages?.map((s) => `${s.name}:${s.status}:${s.seconds}`).join() === 'merge:pass:null,rules:pass:12,edit:pass:95,play:pass:300',
       JSON.stringify(evLand?.meta || null)]);
     // The same trees again: the kept results answer, nothing runs twice.
     const E2runs = rulesRuns() - before;

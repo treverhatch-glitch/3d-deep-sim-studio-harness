@@ -58,8 +58,12 @@ export function withEngineCheckLock(root, engine, fn, { waitMs = 20 * 60000, pol
  */
 export function runEngineQuickCheck({ engine = 'unity', root = mainRoot(), task = null, dir = null, env = process.env, log = () => {} } = {}) {
   const t = engineTarget(engine, { root });
-  const cmd = typeof t?.cfg?.quickCheck === 'string' ? t.cfg.quickCheck.trim() : '';
-  if (!cmd) return { status: 'skipped', why: `no quickCheck is configured for ${engine} (studio/game.json "engines": { "${engine}": { "quickCheck": "<command>" } })` };
+  // 2.82: one cheap-check setting serves both: with no quickCheck, the owner's own rules command (engines.<x>.rules, never
+  // the default) is the porter's check too. The train's rules check runs it again on the batch (harness/engine-rules.mjs).
+  const own = t?.cfg?.rules;
+  const rulesCmd = typeof own === 'string' ? own.trim() : own && typeof own === 'object' && typeof own.test === 'string' ? own.test.trim() : '';
+  const cmd = typeof t?.cfg?.quickCheck === 'string' && t.cfg.quickCheck.trim() ? t.cfg.quickCheck.trim() : rulesCmd;
+  if (!cmd) return { status: 'skipped', why: `no quickCheck is configured for ${engine} (studio/game.json "engines": { "${engine}": { "quickCheck": "<command>" } }, or "rules": the same command the train checks a batch with)` };
   let cwd = dir ? path.resolve(dir) : task ? path.join(root, '.lanes', 'engine', String(task)) : process.cwd();
   if (!fs.existsSync(cwd)) cwd = process.cwd();
   const waitMin = num(env.STUDIO_ENGINE_CHECK_WAIT_MIN, 20);
