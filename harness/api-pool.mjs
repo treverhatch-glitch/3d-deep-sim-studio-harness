@@ -50,6 +50,17 @@ export function poolPlan({ usage = {}, live = [], env = process.env } = {}) {
   return { on: true, high, free: high ? free : [], all: names, ignored, why };
 }
 
+/**
+ * 2.80 (c), Patch #18: STUDIO_BUILDER_ORDER (e.g. api,vertex,plan): the order the supervisor fills a builder slot in, among
+ * api (STUDIO_API_POOL), vertex (vertex.mjs vertexPick) and plan (the plan's tool). null when unset (today's choice).
+ */
+export function builderOrder(env = process.env) {
+  const o = [...new Set(String(env.STUDIO_BUILDER_ORDER || '').toLowerCase().split(/[\s,]+/).filter((k) => ['api', 'vertex', 'plan'].includes(k)))];
+  return o.length ? o : null;
+}
+/** The first kind in `order` that can start now (can: { api, vertex, plan } booleans), or null. */
+export const builderKind = (order, can) => order.find((k) => can[k]) || null;
+
 /** The pool name `agent start --pool api` takes by hand: the first one not running, or null with a reason. */
 export function pickManual({ live = [], env = process.env } = {}) {
   const p = poolPlan({ usage: { over: true }, live, env });

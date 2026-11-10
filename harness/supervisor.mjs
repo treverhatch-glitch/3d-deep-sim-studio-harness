@@ -39,7 +39,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
-import { poolPlan } from './api-pool.mjs';
+import { poolPlan, builderOrder, builderKind } from './api-pool.mjs';
 const poolPlanNow = (usage, live) => poolPlan({ usage, live });
 import { writeAtomic } from './fsafe.mjs';
 import { selfIdentity, pidAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
@@ -490,6 +490,10 @@ export async function supervise(opts, state, now = Date.now()) {
   let room = ramCap.cap - live.length;
   // 2.79 (f): the plan's budget is high: only the API pool's builders start (their names, up to the pool's size).
   const poolMode = poolUsage ? poolPlanNow(poolUsage, live) : null;
+  // 2.80 (c), Patch #18: an owner-set builder order (STUDIO_BUILDER_ORDER; unset: the choice below as before).
+  const bOrder = builderOrder();
+  const poolFree = bOrder?.includes('api') ? poolMode?.free || poolPlan({ usage: { over: true }, live }).free : [];
+  const vxFirst = Boolean(bOrder?.includes('vertex') && !(bOrder.indexOf('plan') >= 0 && bOrder.indexOf('plan') < bOrder.indexOf('vertex')));
   // 2.79.1 (a): Vertex goes before the pool, so with Vertex ready the pool's size doesn't cap the builders that may start.
   if (poolMode) { if (!vertexReady.ok) room = Math.min(room, poolMode.free.length); why.push(`${poolUsage.why}: ${vertexReady.ok ? 'Vertex first, then ' : ''}${poolMode.why}`); }
   if (room <= 0) return { started: [], why: [ramCap.cap < configured ? `${live.length} agent${live.length === 1 ? '' : 's'} running; no more start: ${ramCap.why}` : `${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
@@ -662,13 +666,16 @@ export async function supervise(opts, state, now = Date.now()) {
     // 2.79.2: a route that keeps a task on Vertex (it started there) goes through the same check as a new pick: the share,
     // the budget cut and earlier Vertex failures. If Vertex may not take it now, it starts on the plan's tool instead.
     if (lr.tool === 'vertex') {
-      const keep = vertexReady.ok && g.role === 'builder' && !custom ? (await import('./vertex.mjs')).vertexPick({ role: g.role, taskId: g.tasks[0]?.id, tier: lr.tier || null, live, cap: ramCap.cap, high: Boolean(poolMode) || !tool, events: evs, ready: vertexReady }) : { skip: vertexReady.why || 'vertex is not ready' };
+      const keep = vertexReady.ok && g.role === 'builder' && !custom ? (await import('./vertex.mjs')).vertexPick({ role: g.role, taskId: g.tasks[0]?.id, tier: lr.tier || null, live, cap: ramCap.cap, high: Boolean(poolMode) || !tool || vxFirst, events: evs, ready: vertexReady }) : { skip: vertexReady.why || 'vertex is not ready' };
       if (keep.skip) { why.push(`${g.tasks[0]?.id}: not kept on Vertex (${keep.skip})`); lr.tool = null; lr.model = null; }
     }
     if (vertexReady.ok && g.role === 'builder' && !custom && ['claude', null, undefined].includes(lr.tool || tool)) {
-      const pick = (await import('./vertex.mjs')).vertexPick({ role: g.role, taskId: g.tasks[0]?.id, tier: lr.tier || null, live, cap: ramCap.cap, high: Boolean(poolMode) || !tool, events: evs, ready: vertexReady });
+      const pick = (await import('./vertex.mjs')).vertexPick({ role: g.role, taskId: g.tasks[0]?.id, tier: lr.tier || null, live, cap: ramCap.cap, high: Boolean(poolMode) || !tool || vxFirst, events: evs, ready: vertexReady });
       if (pick.tool) vx = pick; else if (pick.skip && (poolMode || !tool)) why.push(`${g.tasks[0]?.id}: ${pick.skip}`);
     }
+    const kind = bOrder && g.role === 'builder' && !custom ? builderKind(bOrder, { api: Boolean(tool) && poolFree.length > 0, vertex: Boolean(vx) || lr.tool === 'vertex', plan: Boolean(tool) && !poolMode }) : null;
+    if (kind !== null && kind !== 'vertex') { vx = null; if (lr.tool === 'vertex') { lr.tool = null; lr.model = null; } }
+    if (bOrder && g.role === 'builder' && !custom && !kind) { why.push(`${g.tasks[0]?.id}: no builder in STUDIO_BUILDER_ORDER (${bOrder.join(',')}) can start now`); continue; }
     if (!custom && !tool && !vx) {
       why.push(`${g.role}: every tool is out of quota (npm run budget)`);
       continue;
@@ -681,7 +688,7 @@ export async function supervise(opts, state, now = Date.now()) {
       ramNote(ram, now);
       break;
     }
-    const agent = !vx && poolMode ? poolMode.free.shift() : nextAgentName(g.role, opts.prefix || 's');
+    const agent = kind ? (kind === 'api' ? poolFree.shift() : nextAgentName(g.role, opts.prefix || 's')) : !vx && poolMode ? poolMode.free.shift() : nextAgentName(g.role, opts.prefix || 's');
     if (!agent) break;
     state.names = [...(state.names || []), agent].slice(-200);
     // 2.30l: one builder per task. Two passes at once (the watcher and the Director flow) both started
@@ -701,7 +708,7 @@ export async function supervise(opts, state, now = Date.now()) {
     if (r.ok && vx) emitEvent({ type: 'model.routed', agent: 'supervisor', task: taskId, msg: `${taskId}: starts on ${vx.model} (vertex): ${vx.why}`.slice(0, 400), meta: { task: taskId, arm: 'vertex', tier: vx.size, model: vx.model, tool: 'vertex' } });
     else if (r.ok && lr.model) emitEvent({ type: 'model.routed', agent: 'line-producer', task: taskId, msg: `${taskId}: starts on ${lr.model}${lr.tool ? ` (${lr.tool})` : ''} (${lr.tier} ${lr.tool ? 'task' : 'tier'}, the Line Producer): ${lr.why}`.slice(0, 400), meta: { task: taskId, arm: 'line-producer', tier: lr.tier, model: lr.model, ...(lr.tool ? { tool: lr.tool } : {}), failed: lr.failed || 0 } });
     if (r.ok) {
-      if (poolMode && !vx) emitEvent({ type: 'supervisor.api_pool', agent: 'supervisor', task: taskId, msg: `${agent} starts on ${taskId} billed to its API key: ${poolUsage.why}`, meta: { agent, reason: poolUsage.over ? 'over-target' : 'winddown' } });
+      if (kind ? kind === 'api' : poolMode && !vx) emitEvent({ type: 'supervisor.api_pool', agent: 'supervisor', task: taskId, msg: `${agent} starts on ${taskId} billed to its API key: ${poolUsage?.why || `STUDIO_BUILDER_ORDER=${bOrder}`}`, meta: { agent, reason: !poolUsage ? 'builder-order' : poolUsage.over ? 'over-target' : 'winddown' } });
       started.push(`${agent} on ${g.tasks[0].id}${g.lane ? ` in ${g.lane}` : ''}${vx ? ` (vertex, ${vx.model})` : tool && tool !== preferred ? ` (${tool}: ${preferred} is out of quota)` : ''}`);
       // Count it at once, so the next group in this pass sees it (a lane taken, or the whole game).
       live.push({ agent, role: g.role, lane: g.lane || null, task: taskId, running: true, tool: vx ? 'vertex' : lr.tool || tool });

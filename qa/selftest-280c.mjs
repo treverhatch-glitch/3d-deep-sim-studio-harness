@@ -13,6 +13,9 @@
  *
  * Patch #25 (P1): after task.train.red_main the train daemon started the same lanes again at once (~30 min each, 6 times in
  * a day) while the fix was in progress. It now waits while main is red at the same head, unless a queued lane fixes it.
+ *
+ * Patch #18 (P2): the owner asked twice for a builder order; the orchestrator hand-started paid builders every tick.
+ * STUDIO_BUILDER_ORDER (api, vertex, plan) is the order the supervisor fills a builder slot in; unset, nothing changes.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -160,6 +163,26 @@ export async function selftest280C({ dir, report, tmpRoot }) {
       const waits = evs.filter((e) => e.type === 'task.train.auto_waiting');
       const ok = a.started === false && /main is red at/.test(a.why) && b.started === false && waits.length === 1 && c.started === true && d.started === true && spawned.length === 2;
       return [ok, JSON.stringify({ a, b, c, d, waits: waits.map((e) => e.msg), spawned: spawned.length })];
+    });
+  }
+
+  // ---- Patch #18: STUDIO_BUILDER_ORDER ----
+  {
+    const ap = await import(u('harness/api-pool.mjs'));
+    await guard('2.80 (c) #18: STUDIO_BUILDER_ORDER is read as an order of api, vertex and plan (unknown words dropped, unset: null = today\'s choice), and the first kind that can start wins: api when a pool name is free, else vertex, else plan; none can: null (fails on 2.79.2: no builder order anywhere)', () => {
+      const o = ap.builderOrder?.({ STUDIO_BUILDER_ORDER: 'API, vertex,foo,plan,api' });
+      const k = (can) => ap.builderKind(o, can);
+      const ok = JSON.stringify(o) === '["api","vertex","plan"]' && ap.builderOrder({}) === null && ap.builderOrder({ STUDIO_BUILDER_ORDER: 'nope' }) === null
+        && k({ api: true, vertex: true, plan: true }) === 'api' && k({ api: false, vertex: true, plan: true }) === 'vertex' && k({ api: false, vertex: false, plan: true }) === 'plan' && k({}) === null
+        && ap.builderKind(['plan', 'vertex'], { api: true, vertex: true, plan: true }) === 'plan';
+      return [ok, JSON.stringify({ o, has: typeof ap.builderOrder })];
+    });
+    await guard('2.80 (c) #18: the supervisor fills a builder slot by that order (builderKind over a free pool name, a Vertex pick and the plan\'s tool), takes a pool name only for api, skips Vertex\'s share only when vertex comes before plan, and with the order unset keeps the 2.79.2 choice (fails on 2.79.2: no builder order anywhere)', () => {
+      const sup = fs.readFileSync(path.join(dir, 'harness', 'supervisor.mjs'), 'utf8').replace(/\r\n/g, '\n');
+      const ok = /const bOrder = builderOrder\(\);/.test(sup) && /builderKind\(bOrder, \{ api: Boolean\(tool\) && poolFree\.length > 0, vertex: Boolean\(vx\) \|\| lr\.tool === 'vertex', plan: Boolean\(tool\) && !poolMode \}\)/.test(sup)
+        && /const agent = kind \? \(kind === 'api' \? poolFree\.shift\(\) : nextAgentName\(g\.role, opts\.prefix \|\| 's'\)\) : !vx && poolMode \? poolMode\.free\.shift\(\) : nextAgentName/.test(sup)
+        && (sup.match(/high: Boolean\(poolMode\) \|\| !tool \|\| vxFirst/g) || []).length === 2;
+      return [ok, 'supervisor.mjs has no builder-order choice'];
     });
   }
 }
