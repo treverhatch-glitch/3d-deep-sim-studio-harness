@@ -555,7 +555,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_MACHINE_MAX_AGE_MIN` · no simple default · harness/heavy-budget.mjs, qa/selftest-280c.mjs · [ENGINE-TRACKS.md:159](ENGINE-TRACKS.md)
 - `STUDIO_MACHINE_PROBE_TIMEOUT_MS` · no simple default · harness/machine.mjs · [RUN-UNATTENDED.md:94](RUN-UNATTENDED.md)
 - `STUDIO_MACHINE_SAMPLE_S` · no simple default · harness/brief-status.mjs, harness/heavy.mjs, harness/machine.mjs (+4 more) · [RUN-UNATTENDED.md:96](RUN-UNATTENDED.md)
-- `STUDIO_MACHINE_SCAN` · no simple default · harness/heavy-budget.mjs, harness/machine.mjs, harness/ram.mjs (+41 more) · [RUN-UNATTENDED.md:95](RUN-UNATTENDED.md)
+- `STUDIO_MACHINE_SCAN` · no simple default · harness/heavy-budget.mjs, harness/machine.mjs, harness/ram.mjs (+42 more) · [RUN-UNATTENDED.md:95](RUN-UNATTENDED.md)
 
 ## MAIN_* (3)
 
@@ -1086,7 +1086,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_PITFALLS_KEEP` · default `40` · harness/pitfalls.mjs, qa/selftest-261f.mjs · [MEMORY.md:72](MEMORY.md)
 - `STUDIO_PLANNING_ROOM` · no simple default · qa/selftest-2781g.mjs, qa/selftest-279a.mjs · [RELEASE-2.78.1.md:49](RELEASE-2.78.1.md)
 - `STUDIO_PLAYTEST_GAME_CHECK` · no simple default · harness/done-check.mjs, qa/playtest.mjs, qa/selftest-2781f.mjs · [ONBOARDING-A-GAME.md:461](ONBOARDING-A-GAME.md)
-- `STUDIO_PLAY_PORT` · default `4610` · harness/builds.mjs, scripts/new-studio.mjs, scripts/studio-setup.mjs (+1 more) · [RELEASE-2.80.0.md:83](RELEASE-2.80.0.md)
+- `STUDIO_PLAY_PORT` · default `4610` · harness/builds.mjs, scripts/new-studio.mjs, scripts/studio-setup.mjs (+1 more) · [RELEASE-2.80.0.md:85](RELEASE-2.80.0.md)
 - `STUDIO_POST_BROWSER_PLAY` · no simple default · harness/agent.mjs, qa/selftest-230j.mjs, qa/selftest-2732f.mjs (+7 more) · undocumented
 - `STUDIO_PYTHON` · no simple default · qa/run-python.mjs · [ROADMAP.md:19](ROADMAP.md)
 - `STUDIO_QUARANTINE_VERIFY` · no simple default · harness/test-config-check.mjs, qa/selftest-2782f.mjs · [ONBOARDING-A-GAME.md:395](ONBOARDING-A-GAME.md)
