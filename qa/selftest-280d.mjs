@@ -51,4 +51,30 @@ console.log('R ' + JSON.stringify({ ok: r.ok, message: r.message }));`;
     return [Boolean(id) && mid === before + 1 && after === mid && show.code === 0 && /Is the sky blue/.test(show.out) && [help, h1, h2].every((x) => x.code === 0 && /Usage:/.test(x.out))
       && junk.code !== 0 && /Usage:/.test(junk.out) && none.code !== 0, JSON.stringify({ id, before, mid, after, show: show.code, help: help.code, junk: junk.code, none: none.code, junkOut: junk.out.slice(0, 120) })];
   });
+
+  await guard('2.80 (d) #4: the landing build of a studio whose game.json adopts a game builds that game\'s declared tester build (dist), says so honestly when it declares none, and never calls it the template (fails on 2.79.2: "the game is the template cartridge (example-sim)")', async () => {
+    const gf = path.join(dir, 'studio', 'game.json');
+    const had = fs.existsSync(gf) ? fs.readFileSync(gf, 'utf8') : null;
+    const gdir = path.join(dir, 'game', 't280d');
+    const madeGame = !fs.existsSync(gdir);
+    fs.mkdirSync(path.join(gdir, 'dist'), { recursive: true });
+    try {
+      const run = (doc) => {
+        fs.mkdirSync(path.dirname(gf), { recursive: true });
+        fs.writeFileSync(gf, JSON.stringify(doc));
+        const r = probe(`import { gameBrowserBuild } from ${JSON.stringify(u('harness/landing-build.mjs'))};
+const g = await gameBrowserBuild(${JSON.stringify(dir)}, { env: {} });
+console.log('R ' + JSON.stringify({ ok: g.ok, why: g.why, name: g.name, browser: g.cart?.browser }));`, { STUDIO_CARTRIDGE: '', STUDIO_GAME: '' });
+        return JSON.parse((r.out.split('\n').find((l) => l.startsWith('R ')) || 'R {"why":"no output"}').slice(2));
+      };
+      const withBuild = run({ game: 't280d', tester: { build: 'npm run build', dist: 'game/t280d/dist' } });
+      const none = run({ game: 't280d' });
+      return [withBuild.ok === true && withBuild.name === 't280d' && withBuild.browser?.dist === 'game/t280d/dist' && withBuild.browser?.build === 'npm run build'
+        && none.ok === false && /declares no build/.test(none.why) && !/template/.test(none.why), JSON.stringify({ withBuild, none })];
+    } finally {
+      if (had === null) fs.rmSync(gf, { force: true }); else fs.writeFileSync(gf, had);
+      if (madeGame) fs.rmSync(gdir, { recursive: true, force: true });
+      try { fs.rmdirSync(path.join(dir, 'game')); } catch {}
+    }
+  });
 }

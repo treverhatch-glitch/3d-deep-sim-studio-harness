@@ -14,6 +14,7 @@
  *     added: the newer main has both); one already running finishes, then the worker takes the queued one.
  *   - The job takes machine:heavy as kind build-clip (heavy-budget.mjs): the GPU area when the scan shows a GPU and the
  *     browser runs with GPU flags (STUDIO_BROWSER_GPU), else a slot like any job; one browser playtest at a time.
+ *   - An adopted game (studio/game.json "game") is built from its "tester" { build, dist }; skipped when it declares none.
  *   - Skipped (with a log line) when the game has no browser build (its cartridge declares no browser.page or
  *     browser.dist), for the template cartridge, and with STUDIO_LANDING_BUILD=off.
  *   - STUDIO_LANDING_CLIP_SECONDS (15) sets the clip length; STUDIO_LANDING_CLIP_CMD replaces the clip command
@@ -39,6 +40,14 @@ export const landingBuildOff = (env = process.env) => off(env.STUDIO_LANDING_BUI
 /** The game's browser build: { ok, why, name }. ok false: nothing to build (no browser build, template, no game). */
 export async function gameBrowserBuild(root, { env = process.env } = {}) {
   try {
+    // 2.80 (d, N3): a studio that adopted a game of its own builds what the game declares (studio/game.json "tester", the
+    // config the tester reads), not the template cartridge's page; no declared build is said so.
+    const sg = env.STUDIO_CARTRIDGE ? null : (await import('./tester-config.mjs')).studioGameSync(root);
+    if (sg) {
+      const t = (await import('./tester-config.mjs')).gameTesterConfig(root);
+      if (!t?.dist) return { ok: false, why: `${sg.name} declares no build to snapshot (studio/game.json "tester": { "build", "dist" })`, name: sg.name };
+      return { ok: true, why: '', name: sg.name, cart: { name: sg.name, browser: { dist: t.dist, build: t.build, distPage: t.page } } };
+    }
     const c = await import('./cartridge.mjs');
     const name = env.STUDIO_CARTRIDGE || c.defaultCartridgeName();
     if (!name) return { ok: false, why: 'no game cartridge' };
