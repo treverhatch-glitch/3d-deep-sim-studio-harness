@@ -1138,7 +1138,13 @@ if (inShard()) {
   // 2.58.5: laneless tasks keep the shared checkout here, as custom commands did before H-9 (a lane copy and a landing
   // per session take seconds on Windows, and this checks the supervisor's sequence, not lanes; the lanes part below
   // still uses copies). The fake agent commits in a copy anyway (qa/fixtures/agents/fake-agent.mjs).
-  const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1', STUDIO_LANELESS: 'shared', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok' };
+  // 2.81.0: until 2.80 `--no-hub` kept the hub's timed jobs (the watch pass, the watchdog) out of this run; they now
+  // run inside the supervisor's loop whatever the flag says, and on a Windows runner they and the machine probes
+  // (a process listing, a scan) made each pass slow enough that two sessions no longer fitted the window (red on and
+  // off since 2.79, most runs since 2.80). This checks the supervisor's sequence: those jobs and probes are switched
+  // off here, as the newer tests do, and the window and the assertions are unchanged.
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1', STUDIO_LANELESS: 'shared', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok',
+    STUDIO_WATCH_INTERVAL: '0', STUDIO_WATCHDOG: 'off', STUDIO_MACHINE_SCAN: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_CPU_PROBE: 'off' };
   for (const t of ['Tidy the HUD', 'Tidy the menu', 'Tidy the end screen']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
   const sup = run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(9)} --foreground`, env);
   const st = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8'));
