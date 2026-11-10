@@ -70,8 +70,8 @@ the finished passes (`passes`). Before 2.77.1 the first pass could wait on itsel
 such as the Communicator's needs-a-person list) and Node exited with code 13 ("unsettled top-level await").
 
 2.80 (b1): the timed passes the War Room hub used to run are steps of the supervisor's pass (harness/studio-passes.mjs):
-every `STUDIO_WATCH_INTERVAL` seconds (300; 0 turns them all off) the watch pass, the retro, the learn pass, the run
-report and the Director's daily ping, and every `STUDIO_GAMEDEV_INTERVAL` seconds (180; 0 turns it off) the game-dev
+every `STUDIO_WATCH_INTERVAL` seconds (300) the watch pass, the retro, the learn pass, the run
+report and the Director's daily ping (2.81: 0 turns off the watch pass only; the others are then checked every 300 s), and every `STUDIO_GAMEDEV_INTERVAL` seconds (180; 0 turns it off) the game-dev
 watchdog pass. Each group first runs one full interval after the supervisor started (a short run never runs them), never in a dry run;
 one bounded step per group, and a pass that throws is logged without stopping the others. `.studio/supervisor.json`
 keeps each group's last run (`timed`). Wakes these passes cause are logged from `supervisor`.

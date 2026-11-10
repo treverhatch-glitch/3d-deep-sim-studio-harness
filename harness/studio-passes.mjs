@@ -2,9 +2,13 @@
  * harness/studio-passes.mjs — 2.80 (b1): the studio's timed passes, run by the supervisor's loop.
  *
  * Until 2.79.2 the War Room hub ran these on its own timers. The hub goes in 2.80, so the supervisor runs them:
- *   - "watch", every STUDIO_WATCH_INTERVAL s (300; 0 turns both groups off): the watch pass (harness/watch.mjs), the
- *     retro, the learn pass, the run report and the Director's daily ping (each *IfDue keeps its own due date);
+ *   - "watch", every STUDIO_WATCH_INTERVAL s (300): the watch pass (harness/watch.mjs), the retro, the learn pass, the
+ *     run report and the Director's daily ping (each *IfDue keeps its own due date);
  *   - "gamedev", every STUDIO_GAMEDEV_INTERVAL s (180; 0 turns it off): the watchdog pass (harness/watchdog.mjs).
+ * 2.81: STUDIO_WATCH_INTERVAL=0 turns off the watch pass only. In the hub it also switched off the watchdog and the
+ * retro, learn pass and run report (an accident of how the hub's timers were nested): the watchdog ends stalled
+ * sessions and files rescues, and the others are how the studio learns and is measured, so quieting the watcher no
+ * longer stops them; with the watch pass off they are checked every 300 s.
  * A group first runs one full interval after the supervisor started (short runs never run them), never in a dry run.
  * Each pass has its own try/catch: one that throws is logged and the others still run.
  * The flow pass is not here: the supervisor's own loop runs it (fill: false, it is the launcher).
@@ -18,8 +22,9 @@
 export async function timedPasses({ now = Date.now(), since = now, last = {}, env = process.env, dryRun = false, deps = {} } = {}) {
   const ran = [];
   if (dryRun) return { ran, last };
-  const watchEvery = Number(env.STUDIO_WATCH_INTERVAL ?? 300);
-  if (!(watchEvery > 0)) return { ran, last };
+  const watchSet = Number(env.STUDIO_WATCH_INTERVAL ?? 300);
+  const watchOn = watchSet > 0;
+  const watchEvery = watchOn ? watchSet : 300;
   const gamedevEvery = Number(env.STUDIO_GAMEDEV_INTERVAL ?? 180);
   const log = deps.log || console.log;
   const warn = deps.warn || console.error;
@@ -33,7 +38,7 @@ export async function timedPasses({ now = Date.now(), since = now, last = {}, en
     ran.push('watch');
     const pick = async (name, mod) => deps[name] || (await import(mod))[name];
     await step('timed-watch', async () => {
-      await one('watch', async () => {
+      if (watchOn) await one('watch', async () => {
         const r = (await pick('watchPass', './watch.mjs'))();
         if (r?.findings?.length) log(`[watch] ${r.findings.map((f) => f.msg).join(' | ')}`);
       });

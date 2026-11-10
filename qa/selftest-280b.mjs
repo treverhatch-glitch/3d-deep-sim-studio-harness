@@ -72,7 +72,7 @@ export async function selftest280B({ dir, report }) {
       JSON.stringify({ calls: f.calls, lines: f.lines })];
   });
 
-  await guard('2.80 (b1): STUDIO_WATCH_INTERVAL=0 runs none, STUDIO_GAMEDEV_INTERVAL=0 skips only the watchdog, a dry run runs none (fails on 2.79.2: no timedPasses)', async () => {
+  await guard('2.80 (b1), 2.81: STUDIO_WATCH_INTERVAL=0 skips only the watch pass (the retro, learn pass, run report, daily ping and the watchdog still run: 2.80.0 ran none of them), STUDIO_GAMEDEV_INTERVAL=0 skips only the watchdog, a dry run runs none (fails on 2.79.2: no timedPasses)', async () => {
     const timedPasses = await load();
     const late = t0 + 3600000;
     const off = fakes();
@@ -83,7 +83,7 @@ export async function selftest280B({ dir, report }) {
     await timedPasses({ now: late, since: t0, last: {}, env, dryRun: true, deps: dry.deps });
     const defaults = fakes();
     await timedPasses({ now: t0 + 299000, since: t0, last: {}, env: {}, deps: defaults.deps });
-    return [off.calls.length === 0 && noGd.calls.join(',') === WATCH.join(',') && dry.calls.length === 0 && defaults.calls.join(',') === 'watchdogPass',
+    return [off.calls.join(',') === [...WATCH.filter((n) => n !== 'watchPass'), 'watchdogPass'].join(',') && noGd.calls.join(',') === WATCH.join(',') && dry.calls.length === 0 && defaults.calls.join(',') === 'watchdogPass',
       JSON.stringify({ off: off.calls, noGd: noGd.calls, dry: dry.calls, defaults: defaults.calls })];
   });
 
