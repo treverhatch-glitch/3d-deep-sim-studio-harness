@@ -1372,7 +1372,7 @@ if (inShard()) {
   report('tasks and notes carry a version tag (web or engine:<name>)', added?.meta?.track === 'engine:godot' && /· engine:godot\] the Godot import is slow/.test(fs.readFileSync(path.join(dir, 'studio/harness-notes/NOTES.md'), 'utf8')), JSON.stringify(added?.meta));
   // The Prototype sprint pace.
   run(dir, 'node harness/mode.mjs set prototype --by hatch', env);
-  report('the Prototype sprint pace: several builders in lanes, the watcher starts them, the Director at phase end', /Prototype sprint/.test(run(dir, 'node harness/mode.mjs', env).stdout) && /20\. In the Prototype sprint pace/.test(fs.readFileSync(path.join(dir, '.claude/skills/producer-playbook/SKILL.md'), 'utf8')) && /producer-playbook/.test(run(dir, 'node harness/kickoff.mjs --role producer --agent prod-1 --model m', env).stdout));
+  report('the Prototype sprint pace: several builders in lanes, the watcher starts them, the Director at phase end', /Prototype sprint/.test(run(dir, 'node harness/mode.mjs', env).stdout) && /19\. In the Prototype sprint pace/.test(fs.readFileSync(path.join(dir, '.claude/skills/producer-playbook/SKILL.md'), 'utf8')) && /producer-playbook/.test(run(dir, 'node harness/kickoff.mjs --role producer --agent prod-1 --model m', env).stdout));
 }
 
 // 2.26: from test #2 (Next Floor on 2.24 and 2.25) and the token work: another tool's limit is that tool's,
