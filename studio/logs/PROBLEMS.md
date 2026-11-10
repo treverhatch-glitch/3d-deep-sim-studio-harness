@@ -1489,3 +1489,15 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-290 — the War Room was the largest part nobody used · cut in 2.80.0
 - **Evidence:** the crew's 7-day audit: no page opened, 0 events from any panel, the `hud` gate never ran; hub, pages, their modules and tests were about 17,000 lines, and the watcher, retro, learn pass and watchdog only ran while the hub was up.
 - **Fix:** the timed passes moved into the supervisor (`harness/studio-passes.mjs`, qa/selftest-280b.mjs); the hub, the pages and what only they used are deleted. docs/RELEASE-2.80.0.md.
+
+### P-291 — nobody could say how well the studio runs, round over round · measured from 2.81.0
+- **Evidence:** the crew's 8.2 days read for the first time as one card: 29.6% of 358 landings hands-free, 567 overseer steps, 53.6% of $874.50 on Producer and Director sessions, 55.2% done on the first claim, 16.4% of 67 engine land runs passed, the machine under 25% CPU in 58.4% of samples.
+- **Fix:** `npm run score` (harness/score.mjs, docs/SCORECARD.md), fifteen fixed measures with targets and `--record`; baseline studio/scores/2026-11-08-baseline.json. qa/selftest-281a.mjs.
+
+### P-292 — tasks were relaunched against a blocker that had not changed · fixed in 2.81.0 (record mode)
+- **Evidence:** 772 of 1,023 attempts ended in a hand-back; 2.3 claims per done task; the Fable trial counted 244 sessions and 52.8 h on strictly unsuccessful relaunches.
+- **Fix:** the attempt ledger: a same-blocker task is offered last by `task next` and the supervisor (`STUDIO_ATTEMPTS=record`; `refuse` holds it). qa/selftest-281b1.mjs.
+
+### P-293 — the overseer's role was spread over five files, and 2.80 refused its lock release · fixed in 2.81.0
+- **Evidence:** the crew's orchestrator took 567 board steps in 8 days with no single statement of what it may do; 2.80's `lock release --owner` accepted only STUDIO_OUTSIDE_SIGNERS, and the orchestrator is the owner's proxy.
+- **Fix:** `npm run overseer -- role | can | pass`, docs/OVERSEER.md; the proxy and beta mode's agents may release another's lock. qa/selftest-281a.mjs.

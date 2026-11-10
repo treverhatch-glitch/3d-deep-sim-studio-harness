@@ -38,7 +38,18 @@ samples; 16.4% of engine land runs passed; 31.1 stalls or losses per day; 1.1% e
 
 ## 4. Ported from the Fable 5.1 round-2 trial
 
-@@PORT@@
+| Fix | What it does | Default | Changed from the trial |
+|---|---|---|---|
+| Attempt ledger and one eligibility verdict (`harness/attempts.mjs`) | Every failed hand-back is recorded with its reason, main's tip and what the task waits for. A task whose blocker has not changed is offered after every other eligible one by `task next` and the supervisor; `eligibility()` is the one answer `next`, `start` and the supervisor share, so `next` stops offering what `start` refuses. Aimed at measures 6 and 7 (55% first-claim, 75% of attempts handed back). | `STUDIO_ATTEMPTS=record` (nothing is refused); `refuse` and `off` exist | The supervisor now really puts same-blocker tasks last (the trial only said so) |
+| Said-vs-did at `task done` (`harness/said-vs-did.mjs`) | `task done --claim "<command> => <last line>"` re-runs the command from an allowlist and compares; a mismatch refuses the done with the label `claim` and emits `review.verdict`. A command outside the list is "unverifiable", never green. | Optional: no claim, judged as before | Claims can't write (`--update`, `--fix` and the like are unverifiable); the allowlist fits this tree |
+| Anchors (`harness/anchors.mjs`, docs/ANCHORS.md) | `studio/references/anchors.json` records what a known outside game does (behaviour, numbers, pacing, with provenance); `task add --anchors` cites them, the brief prints their acceptance lines, done records met / unmet / unknown. | Unknown warns and is never green; unmet fails only with `STUDIO_ANCHORS=fail` | The doc says twice what anchors are not: material to copy |
+| Verify cause (`harness/verify-cause.mjs`) | Every train verify carries a structured cause (green, fail, exit, signal, timeout, busy, no-check, no-record, tree-mismatch, not-clean) in `task.train.verify`. 37 of the crew's red verifies named no gate. | Always on | The toolchain-keyed proof reuse was left out (the brief's call) |
+| Timely "process gone" (`harness/gone-check.mjs`) | A dead session's end event carries when it died (`meta.endedAt`, from its last heartbeat) and when that was noticed; the hours in `metrics`, the run report and the model pools use the first. The gone pass also runs from the supervisor's pass and from `task next` / `start`, so a claim isn't held for hours by a session that vanished (79 in the crew's week). | `STUDIO_GONE_CHECK_S` 60, `STUDIO_GONE_GRACE_S` 120 | Uses this tree's process identity, which works on Windows |
+| Prompt-cap preflight | A launch through the Vertex proxy whose assembled prompt files exceed the prompt cap is refused before the proxy starts (`agent.start_refused`). | With the cap | The no-task refusal was already in 2.80 |
+
+Not ported: the toolchain key on verify records, the rig decision and turn-taking code (section 3, planned), the
+event-type catalogue (section 8), the trial's cuts that 2.80 had not made and the crew's data doesn't support.
+New tests: `qa/selftest-281b1.mjs` to `281b4.mjs` (44 checks).
 
 ## 5. Cut
 
@@ -111,7 +122,21 @@ harness change names the scorecard measure it moves.
 
 ## 9. Size
 
-@@SIZE@@
+2.81.0 against 2.80.0: 176 files, +3,235 / −1,602 lines (net +1,633). This round adds more than it removes: the cuts took about 1,600 lines; the
+scorecard, the overseer's role, the test runner's options and the ported fixes with their tests added about 3,100.
+2.80.0 and 2.81.0 together, against 2.79.2: 335 files, +5,119 / −21,181 lines (net −16,062).
+
+| | 2.79.2 | 2.80.0 | 2.81.0 |
+|---|---|---|---|
+| Tracked lines | 175,491 | 157,794 | 159,370 |
+| `harness/` modules | 319 | 310 | 314 |
+| npm scripts | 179 | 165 | 165 |
+| `STUDIO_*` settings | 729 | 712 | 716 |
+| Literal event types | 477 | 438 | 430 |
+| Gates | 37 | 35 | 35 |
+| `train.mjs` / `task.mjs` / `agent.mjs` | 3,438 / 2,660 / 2,633 | 3,438 / 2,660 / 2,645 | 3,440 / 2,708 / 2,665 |
+
+The three large files grew by 2, 48 and 20 lines for the ported fixes' wiring.
 
 ## Untested
 

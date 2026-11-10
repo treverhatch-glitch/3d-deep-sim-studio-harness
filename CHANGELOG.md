@@ -4,6 +4,28 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.81.0] — 2026-11-10
+Grade, measure, cut again (the owner's "Round 2.81"). Verdict: 5 of 10, a working production line that is not yet an
+autonomous one (studio/notes/VERDICT-2.81-2026-11-10.md). 176 files, +3,235 / −1,602 lines (net +1,633) against 2.80.0; with 2.80.0, 335 files, +5,119 / −21,181 lines (net −16,062)
+against 2.79.2. Details: docs/RELEASE-2.81.0.md.
+- **The round scorecard:** `npm run score`, fifteen fixed measures from a studio's logs, `--record` to compare rounds
+  (docs/SCORECARD.md). Baseline from the crew's 8.2 days: 1 of 15 targets met.
+- **The outside overseer's official role:** `npm run overseer -- role | can <action> | pass` (docs/OVERSEER.md): does,
+  signs, human-only; a script's verdict from the studio's own grants. `lock release --owner` also for the owner's
+  proxy and beta mode's agents.
+- **Faster tests:** the self-test takes `--only`, `--changed [ref]` (`--deep`), `--jobs`, `--timing`, `--balance`;
+  `npm run selftest:changed`, `selftest:fast`.
+- **Ported from the Fable 5.1 round-2 trial:** the attempt ledger and one eligibility verdict (`STUDIO_ATTEMPTS`),
+  said-vs-did at `task done` (`--claim`), anchors for reference games (docs/ANCHORS.md), a structured cause on every
+  train verify, timely "process gone" with `endedAt`, a prompt-cap launch preflight.
+- **Engine first by default:** a studio's only engine gets the push unless someone turned it off.
+- **Cut:** the liaison role; `experiment.mjs`, the Dev Hacker flow and the commit-msg hook's experiment lines; the War
+  Room config and its reader, `gate-progress.mjs`, the last hub leftovers; readers of events nothing emits.
+- **Decided:** `STUDIO_WATCH_INTERVAL=0` turns off the watch pass only. `STUDIO_BUILDER_ORDER` is tested in real
+  supervisor passes.
+- **Prompts pruned:** no read-less lines, no token budget for the agent to manage, a reason on every absolute rule
+  (originals: tag `prompts-before-2.81`).
+
 ## [2.80.0] — 2026-11-10
 The trim (the owner's order; HARNESS_TRIM_BRIEF_2026-11-10). 2.79.2 stays, leaner: 211 files, +2,013 / −19,710 lines (net −17,697) against 2.79.2;
 tracked lines 175,491 → 157,794, `harness/` modules 319 → 310, npm scripts 179 → 165, settings 729 → 712, literal event

@@ -407,8 +407,8 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## GONE_* (2)
 
-- `STUDIO_GONE_CHECK_S` · default `'60'` · harness/gone-check.mjs, harness/supervisor.mjs, harness/task.mjs (+1 more) · [RUN-UNATTENDED.md:258](RUN-UNATTENDED.md)
-- `STUDIO_GONE_GRACE_S` · default `120` · harness/agent.mjs, qa/selftest-281b4.mjs · [RUN-UNATTENDED.md:260](RUN-UNATTENDED.md)
+- `STUDIO_GONE_CHECK_S` · default `'60'` · harness/gone-check.mjs, harness/supervisor.mjs, harness/task.mjs (+1 more) · [RELEASE-2.81.0.md:47](RELEASE-2.81.0.md)
+- `STUDIO_GONE_GRACE_S` · default `120` · harness/agent.mjs, qa/selftest-281b4.mjs · [RELEASE-2.81.0.md:47](RELEASE-2.81.0.md)
 
 ## GPU_* (2)
 
@@ -1030,7 +1030,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_ARGV_OUT` · no simple default · qa/selftest-259h.mjs · undocumented
 - `STUDIO_ASK_DIGEST_HOURS` · no simple default · harness/ask-post.mjs, harness/communicator.mjs, qa/selftest-279c.mjs · [AWAY-AND-ALERTS.md:32](AWAY-AND-ALERTS.md)
 - `STUDIO_ATOMIC_RETRIES` · no simple default · harness/fsafe.mjs · undocumented
-- `STUDIO_ATTEMPTS` · no simple default · harness/attempts.mjs, harness/supervisor.mjs, qa/selftest-281b1.mjs (+1 more) · [RUN-UNATTENDED.md:246](RUN-UNATTENDED.md)
+- `STUDIO_ATTEMPTS` · no simple default · harness/attempts.mjs, harness/supervisor.mjs, qa/selftest-281b1.mjs (+1 more) · [RELEASE-2.81.0.md:43](RELEASE-2.81.0.md)
 - `STUDIO_AUTONOMY_CACHE_S` · default `300` · harness/autonomy.mjs, qa/selftest-2652a.mjs, qa/selftest-266a.mjs · undocumented
 - `STUDIO_BLENDER_THREADS` · no simple default · harness/blender-job.mjs, qa/selftest-270t.mjs · [BLENDER.md:127](BLENDER.md)
 - `STUDIO_BOARD_LOCK_WAIT_MS` · default `15000` · harness/task.mjs · undocumented
