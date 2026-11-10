@@ -4935,6 +4935,44 @@ if (inShard('selftest-280f')) {
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.81 (b1), from the R2 trial: the attempt ledger (.studio/attempts/<task>.json) and one eligibility verdict: a task handed
+// back for a blocker that has not changed (same reason key, main tip and open blockers) is offered last (record, the
+// default) or refused (STUDIO_ATTEMPTS=refuse); next and the supervisor stop offering what start refuses.
+if (inShard('selftest-281b1')) {
+  const dir = copyRepo();
+  const { selftest281B1 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281b1.mjs')).href);
+  await selftest281B1({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.81 (b2), from the R2 trial: the game-agnostic anchor spec (task add --anchors, the brief, per-anchor met|unmet|unknown
+// at done) and said-vs-did (task done --claim "<command> => <last line>" re-run; file claims diffed; review.verdict on a
+// mismatch; no claim: judged as before).
+if (inShard('selftest-281b2')) {
+  const dir = copyRepo();
+  const { selftest281B2 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281b2.mjs')).href);
+  await selftest281B2({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.81 (b3), from the R2 trial: a structured exitCause on every train verify (harness/verify-cause.mjs).
+if (inShard('selftest-281b3')) {
+  const dir = copyRepo();
+  const { selftest281B3 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281b3.mjs')).href);
+  await selftest281B3({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.81 (b4), from the R2 trial: a gone process is ended by the supervisor pass and task next/start too (endedAt = last
+// beat + grace, detectedAt = now; liveness stays PID + start time), and a proxy launch over the prompt cap is refused
+// before the proxy starts.
+if (inShard('selftest-281b4')) {
+  const dir = copyRepo();
+  const { selftest281B4 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281b4.mjs')).href);
+  await selftest281B4({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

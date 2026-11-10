@@ -94,7 +94,7 @@ import { sessionOutcome, parkIfNoWork } from './session-outcome.mjs';
 import { writeAtomic } from './fsafe.mjs';
 import { selfIdentity, spawnedIdentity, pidAlive, recordAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
 import { gateEnv } from './gate-env.mjs';
-import { vertexModel, vertexConfigured, ensureProxy, proxyBase, sessionKey, sessionUsage, overPromptCap } from './vertex.mjs';
+import { vertexModel, vertexConfigured, ensureProxy, proxyBase, sessionKey, sessionUsage, overPromptCap, promptCap } from './vertex.mjs';
 import { registeredTool, registryPrice } from './tool-registry.mjs';
 import { spendPass, sessionKeyNames } from './spend-budget.mjs';
 
@@ -481,9 +481,14 @@ export function markGone() {
   for (const s of sessions()) {
     if (s.status !== 'running' || s.running) continue;
     const at = new Date().toISOString();
+    // 2.81 (b4): the end event's ts is the detection time; meta.endedAt is the death estimate: the last heartbeat (else
+    // the start) + STUDIO_GONE_GRACE_S (120) seconds, capped at the detection time. Session-hours readers prefer it.
+    const graceS = Number(process.env.STUDIO_GONE_GRACE_S ?? 120);
+    const lastSeen = Date.parse(s.lastBeat || '') || Date.parse(s.startedAt || '') || null;
+    const endedAt = lastSeen === null ? at : new Date(Math.min(Date.now(), lastSeen + (Number.isFinite(graceS) && graceS >= 0 ? graceS : 120) * 1000)).toISOString();
     fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...s, running: undefined, stalled: undefined, beatAgeMin: undefined, ending: undefined, status: 'ended', endedAt: at, reason: 'its process is gone (killed, crashed or the machine restarted)' }, null, 2));
     // 2.73.2 (B-72): one agent.session.end per session (claimSessionEnd), whichever pass or launcher records it.
-    if (claimSessionEnd(s.agent, s.startedAt, 'watch')) emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, task: sessionTask(s) || claimedSince(s.agent, s.startedAt) || undefined, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone', startedAt: s.startedAt || undefined, bootAt: new Date(Date.now() - os.uptime() * 1000).toISOString() } }); // 2.71.0 (z): times for harness/workaround.mjs
+    if (claimSessionEnd(s.agent, s.startedAt, 'watch')) emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, task: sessionTask(s) || claimedSince(s.agent, s.startedAt) || undefined, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone', endedAt, detectedAt: at, startedAt: s.startedAt || undefined, bootAt: new Date(Date.now() - os.uptime() * 1000).toISOString() } }); // 2.71.0 (z): times for harness/workaround.mjs
     // 2.65.0: the uniform job.done (harness/jobs.mjs) beside agent.session.end.
     jobDone({ kind: 'session', id: s.agent, agent: s.agent, task: s.task || null, result: 'gone', ms: Date.parse(s.startedAt) ? Date.now() - Date.parse(s.startedAt) : null, tail: `its process is gone (last heartbeat ${s.lastBeat || 'never'})`, log: s.log || null, extra: { role: s.role || null } });
     // Its own copy: save what's uncommitted, keep unmerged commits on their branch, remove the copy.
@@ -1412,7 +1417,22 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   let plan = null;
   // 2.79.1 (a): the studio's Vertex proxy, started now when it isn't listening (detached; npm run studio:stop stops it).
   let proxyErr = null;
-  if (viaProxy && !rehearsal) {
+  // 2.81 (b4, from the R2 trial's P7): a proxy launch whose assembled prompt files are over the proxy's prompt cap
+  // (STUDIO_VERTEX_MAX_PROMPT_TOKENS, bytes / 4) is refused before the proxy starts or any request is billed. Counted: a
+  // driven aider session's brief and lane files (its edit brief is made from them); any other launch, its kickoff file
+  // and the brief passed with --read. aider's own repo map is built inside aider and is not counted.
+  if (viaProxy && !rehearsal && promptCap() > 0) {
+    const sizeOf = (p) => { try { return fs.statSync(p).size; } catch { return 0; } };
+    const promptBytes = driven.on
+      ? sizeOf(path.join(STUDIO_STATE_DIR, 'briefs', `${task}.md`)) + (aider.files || []).reduce((n, f) => n + sizeOf(path.isAbsolute(f) ? f : path.join(cwd, f)), 0)
+      : sizeOf(file) + (aider.reads || []).reduce((n, f) => n + sizeOf(f), 0);
+    const estimate = Math.ceil(promptBytes / 4);
+    if (estimate > promptCap()) {
+      proxyErr = `the launch's prompt is about ${estimate.toLocaleString('en-US')} tokens (${promptBytes.toLocaleString('en-US')} bytes / 4), over the prompt cap of ${promptCap().toLocaleString('en-US')} (STUDIO_VERTEX_MAX_PROMPT_TOKENS): trim the brief or the lane's files, or raise the cap`;
+      emitEvent({ type: 'agent.start_refused', agent, to: 'human', task: task || undefined, status: 'warn', msg: `${agent} not started: ${proxyErr}`.slice(0, 600), meta: { role, tool, preflight: true, promptBytes, cap: promptCap() } });
+    }
+  }
+  if (viaProxy && !rehearsal && !proxyErr) {
     const pre = tool === 'vertex' ? toolPreflight(tool, env) : (vertexConfigured().ok ? null : vertexConfigured().why);
     if (!pre) { try { const px = await ensureProxy(); if (!px.ok) proxyErr = `the studio's Vertex proxy: ${px.why}`; else if (px.started) fs.writeSync(out, `[launcher] started the studio's Vertex proxy on 127.0.0.1:${px.port} (pid ${px.pid})\n`); } catch (e) { proxyErr = `the studio's Vertex proxy couldn't start: ${e.message}`; } } else proxyErr = pre;
   }

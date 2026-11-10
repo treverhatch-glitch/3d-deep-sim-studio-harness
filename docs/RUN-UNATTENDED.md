@@ -241,6 +241,27 @@ run task -- unpark <ID> --by <name>` resets the count. A bug task's brief and it
 regression exactly: `qa/regressions/<ID>.json`, its fields, `node qa/check-regressions.mjs --update` and
 `node qa/fails-before.mjs qa/regressions/<ID>.json "<fix>^"` (`harness/regression-howto.mjs`).
 
+**Attempt ledger** (2.81, `harness/attempts.mjs`): every failed or owner-only hand-back is recorded in
+`.studio/attempts/<ID>.json` (its reason, main's tip, what it waits for, and a signature of those three). While the
+signature of the current facts equals the last attempt's, a new session would meet the same wall. `STUDIO_ATTEMPTS`
+says what happens then: `record` (the default) writes the ledger, and `task next` and the supervisor offer that task after
+every other eligible one; nothing is refused (the loop park, the breaker, the tier-up and the usage-limit stop keep their
+own counts). `refuse` also refuses it in `task next`, `task start`, the supervisor and the Line Producer: "same blocker as
+attempt <n> (<reason>): main unchanged since <sha> and nothing it waits for landed". `off` writes and reads nothing. A
+commit on main, a landed dependency, `npm run task -- unblock <ID> --by <name>` (even with no park), `unpark` or a done
+clears it; a hand-back the harness or a person caused (claim ran out, a stop, a refresh, a session cap) is never recorded,
+and the ledger never releases a lock or a claim. `task next` and the supervisor's pick also ask the same budget and round-cap
+questions `task start` asks (`eligibility()`), so they stop offering a task that `start` would refuse.
+
+**A dead session ends in time** (2.81, `harness/gone-check.mjs`): a launched session whose process is gone (PID plus its
+start-time identity, `harness/proc-identity.mjs`; never the heartbeat alone) is ended by the supervisor's pass and by
+`task next` / `task start` too, not only by the watch pass, at most once per `STUDIO_GONE_CHECK_S` (60 seconds; `off`
+turns these extra passes off; the stamp is `.studio/gone-check.json`). Its `agent.session.end` keeps the detection time
+as `ts` and `meta.detectedAt`, and carries `meta.endedAt`: the last heartbeat (else the start) plus `STUDIO_GONE_GRACE_S`
+(120 seconds), never later than the detection. Session hours (`harness/model-pools.mjs`, `harness/run-report.mjs`, and
+`harness/metrics.mjs` for an attempt closed by its agent's session end) read `meta.endedAt`, so a session that died hours
+before anyone noticed no longer counts those hours.
+
 `npm run agent -- stop <name>` (and Pause) keep that task from restarting for 15 minutes
 (`STUDIO_STOP_COOLDOWN_MIN`). "Stop all" also stops running agents and hands their tasks back. The cooldown (2.77.3)
 holds only the stopped role: a stopped builder's task can't restart as a builder for 15 minutes, but a reviewer can start;
