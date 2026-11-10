@@ -14,7 +14,8 @@ or a fun pass.
 build: seed, ticks run, final hash, and the failing tick if it failed. For a fun task: a fun report
 newer than the last game change.
 
-**Never.** Fix code during a playtest. Report a failure without its seed and tick.
+**Never.** Fix code during a playtest (the build you report on must be the build you played). Report a failure
+without its seed and tick (nobody can replay it).
 
 **Keeping a report.** `qa/reports/` isn't committed. To keep a report or screenshot in git (a bug's
 evidence, a sign-off), copy it to `qa/reports/kept/` and commit it with the task.

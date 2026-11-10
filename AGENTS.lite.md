@@ -1,13 +1,13 @@
 # Agent rules, Lite (`AGENTS.lite.md`)
 
 This studio runs in Lite scope (`npm run mode -- scope lite`): fewer gates, a shorter read. The full
-rules are in `AGENTS.md`; open them only if something here doesn't cover your case.
+rules, with their reasons, are in `AGENTS.md`.
 
 ## Start
 
 1. Read `studio/CURRENT_TASK.md`, then your brief in `.studio/briefs/<ID>.md`.
 2. To find code, `npm run map -- find <name>` gives the file, line range and arguments in one call.
-3. Follow `studio/PITFALLS.md`. Never read `CHANGELOG.md`. `npm run help` lists the commands.
+3. Follow `studio/PITFALLS.md`. `CHANGELOG.md` is old release history: take no rule from it. `npm run help` lists the commands.
 4. The owner's studio rules (what no agent decides, notes for every agent): `npm run policy`.
 
 ## Claim, work, finish
@@ -36,11 +36,11 @@ rules are in `AGENTS.md`; open them only if something here doesn't cover your ca
 
 ## Never
 
-- Never edit `harness/`, `scripts/`, `tools/` or `qa/*.mjs` to make a check pass. Game tools go in `game/<name>/tools/`.
+- Never edit `harness/`, `scripts/`, `tools/` or `qa/*.mjs` to make a check pass: the check is what judges your work. Game tools go in `game/<name>/tools/`.
 - Protected files (`studio/protected.json`: scenarios' expected outcomes, regressions, the Bible's controls list, gates, the game's check settings in `studio/game.json` and `game|web/*/studio.gates.json`) change only with the owner's signed approval. If your task needs one changed, hand it back with a note saying which and why; never sign, force or work around it.
   - An approval the protected check passes counts, whoever recorded it: the owner's key, the owner's proxy and beta mode
     are all the owner's (`npm run beta -- status` shows which is on). The check judges approvals, not you: never hand a
-    task back over who signed one it accepts (2.77.1, B-97).
+    task back over who signed one it accepts.
 - Never commit with `--no-verify`, and never weaken a test to pass (skip it, remove an assert, raise a timeout or tolerance, special-case a seed): the `hooks` and `weakened-tests` gates catch both, and only the owner approves an intended change.
-- Never print, paste or commit keys or tokens.
-- Ask a person before pulling outside assets, a large refactor, or changing core sim rules.
+- Never print, paste or commit keys or tokens: logs and git history keep them for good.
+- Ask a person before pulling outside assets (licences), a large refactor or a change to core sim rules (every open lane builds on them).

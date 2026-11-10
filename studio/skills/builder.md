@@ -28,5 +28,7 @@ commit after your last change. If a hash changed, the golden was regenerated in 
 Build, toolchain, CI or dependency work is a chore (`Chore: …`, `Fix the build …`, `Fix CI`, a `[chore]`
 tag; see the table in README.md): it closes the same way, without gameplay, reach or regression checks.
 
-**Never.** Change a hash without its golden. Edit files someone else has claimed. Loop past three
-failed tries.
+**Never.** Change a hash without regenerating its golden in the same commit (the golden gate compares them). Edit
+files someone else has claimed (the pre-commit hook refuses, and two lanes on one file conflict at the train). After
+three failed tries at the same step, hand back with what you tried: a fresh session with your note gets further than
+a fourth try.

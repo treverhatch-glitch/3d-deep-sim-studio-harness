@@ -9,4 +9,5 @@
 
 **Done means.** A changed `.md` file, and a full `npm run verify` after it.
 
-**Never.** Paste keys, tokens or private URLs into docs. Turn advice into rules nobody asked for.
+**Never.** Paste keys, tokens or private URLs into docs (git history keeps them). Turn advice into rules nobody asked
+for (every rule is something each later agent has to obey without knowing why).

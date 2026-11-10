@@ -1,6 +1,6 @@
 # Distilled Failure & Fix Memory (`studio/memory/failures.md`)
 
-> **Rule (Hermes Agent Pattern)**: Keep raw logs in `.studio/events.jsonl` and `qa/reports/` (append-only). After ANY bug is fixed and verified, append a concise 4-bullet distilled note below. Future tasks and `node harness/prepare-brief.mjs` read **only** these distilled notes—never raw log dumps.
+> **Rule (Hermes Agent Pattern)**: Keep raw logs in `.studio/events.jsonl` and `qa/reports/` (append-only). After ANY bug is fixed and verified, append a concise 4-bullet distilled note below. Future tasks and `node harness/prepare-brief.mjs` start from these distilled notes; the raw logs stay available for the detail.
 
 ---
 
