@@ -129,4 +129,23 @@ console.log('done');`, { AGENT_EVENTS_FILE: evf, STUDIO_TELEMETRY: '' });
     const src = fs.readFileSync(path.join(dir, 'harness', 'watch.mjs'), 'utf8').replace(/\r\n/g, '\n');
     return [/emitOnChange\(\{ type: 'watch\.report'[^\n]*repeatMin: 60/.test(src) && !/emitEvent\(\{ type: 'watch\.report'/.test(src), 'watch.mjs'];
   });
+
+  await guard('2.80 (d) #3: studio/game.json saved with a byte-order mark is still read (the studio\'s game, not the template), and a game file that can\'t be parsed is said in one loud line naming it (fails on 2.79.2: both fell back to the template without a word)', async () => {
+    const gf = path.join(dir, 'studio', 'game.json');
+    const had = fs.existsSync(gf) ? fs.readFileSync(gf) : null;
+    const src = `import { activeGame } from ${JSON.stringify(u('harness/cartridge.mjs'))};
+import { readGameJson } from ${JSON.stringify(u('harness/tester-config.mjs'))};
+console.log('R ' + JSON.stringify({ game: activeGame(), tester: readGameJson().game || null }));`;
+    try {
+      fs.writeFileSync(gf, `﻿${JSON.stringify({ game: 'bom-game' })}\n`);
+      const bom = probe(src, { STUDIO_GAME: '', STUDIO_CARTRIDGE: '' });
+      const j = JSON.parse((bom.out.split('\n').find((l) => l.startsWith('R ')) || 'R {}').slice(2));
+      fs.writeFileSync(gf, '{ "game": "broken-game", \n');
+      const bad = probe(src, { STUDIO_GAME: '', STUDIO_CARTRIDGE: '' });
+      const said = bad.out.split('\n').filter((l) => /studio\/game\.json can't be read as JSON/.test(l)).length;
+      return [j.game?.name === 'bom-game' && j.tester === 'bom-game' && said === 1, JSON.stringify({ j, said, bad: bad.out.slice(-500) })];
+    } finally {
+      if (had) fs.writeFileSync(gf, had); else fs.rmSync(gf, { force: true });
+    }
+  });
 }

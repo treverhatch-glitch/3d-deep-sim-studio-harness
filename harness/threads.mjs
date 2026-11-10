@@ -26,7 +26,7 @@
  *
  * 2.65.0, "senders" in studio/triggers.json: a discord or github event responds only when its author id (--author, the id
  * the bot got from Discord or GitHub; the harness can't verify it) is listed as owner or trusted; any other author's
- * event, or one with no author, is at most a candidate . Empty lists: all candidates.
+ * event, or one with no author, is at most a candidate. Empty lists: all candidates.
  *
  * STUDIO_THREADS (or "mode" in studio/triggers.json): on routes the sources listed in "live" (ci and train by default;
  * the others are left alone until listed); off does nothing. 2.80: the shadow mode (would_route / would_drop events,
@@ -343,7 +343,7 @@ export function routeEvent(e, { idx, mode = threadsMode(), triggers = readTrigge
   if (!source || mode !== 'on' || !triggers.live.includes(source)) return { action: 'none' };
   let policy = policyFor(source, e.type, triggers);
   // 2.65.0: a Discord or GitHub event responds only for an admitted sender (studio/triggers.json "senders"); anyone
-  // else's is at most a candidate (never respond), 
+  // else's is at most a candidate (never respond).
   const sender = senderClass(e, triggers);
   const admitted = sender === 'owner' || sender === 'trusted';
   const capped = sender !== null && !admitted && policy === 'respond';
