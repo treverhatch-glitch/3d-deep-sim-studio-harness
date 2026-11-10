@@ -1256,7 +1256,7 @@
           <select id="o-size" aria-label="Size, 1 easy to 5 big"><option value="">size</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
           <input id="o-cause" placeholder="caused by T-…" aria-label="For a bug: the task whose work caused it" size="9">
           <button>Add task</button></form>
-        <div class="act-row"><input id="o-note" placeholder="Note for pause, reopen or sign-off" aria-label="Note for the next action"> <button id="o-watch" type="button">Run the watcher</button> <button type="button" data-sign="balance">Sign off balance</button> <button type="button" data-sign="fun">Sign off fun</button></div>
+        <div class="act-row"><input id="o-note" placeholder="Note for pause, reopen or sign-off" aria-label="Note for the next action"> <button type="button" data-sign="balance">Sign off balance</button> <button type="button" data-sign="fun">Sign off fun</button></div>
         <div class="act-row danger-row"><span class="note">Danger zone:</span> <button id="o-stopbtn" type="button" class="stop">Stop all agents</button> <button id="o-restart" type="button" class="stop restart" title="Saved as a git tag first; asks twice">Throw it all away and restart</button></div>
         <form id="o-agentform" class="act-row"><select id="o-arole" aria-label="Role for the new agent"><option>builder</option><option>qa-playtester</option><option>rnd</option><option>art</option><option>director</option><option>producer</option><option>reviewer</option><option>planner</option><option>liaison</option></select>
           <select id="o-atool" aria-label="Agent tool"><option value="">tool from .env</option><option>claude</option><option>codex</option><option>agy</option><option>cursor</option><option>grok</option><option>aider</option><option>nim</option><option>custom</option></select>
@@ -1711,10 +1711,6 @@
       return `Queued ${r.id}: ${r.title}. ${on ? `${on.agent} picks it up after its current task.` : m.autoLaunch && m.autostart ? `The watcher starts a ${body.role} agent for it on its next pass (within ${m.label}'s caps).` : `It waits until a ${body.role} agent starts: Start agent below${m.autoLaunch ? ' (auto-start is off: npm run mode -- autostart on)' : ', or choose a faster pace'}.`}`;
     });
   });
-  $('o-watch').addEventListener('click', () => act('Watcher', async () => {
-    const r = await post('/api/watch', {});
-    return r.findings.length ? `Watcher: ${r.findings.map((f) => f.msg).join('; ')}` : 'Watcher: all quiet.';
-  }));
   document.querySelectorAll('[data-sign]').forEach((b) => b.addEventListener('click', () => act(`Sign off ${b.dataset.sign}`, async () => {
     const r = await post('/api/human/decision', { kind: b.dataset.sign, note: $('o-note').value.trim() || `Signed off by ${actor()}` });
     return `Signed off: ${r.file}`;

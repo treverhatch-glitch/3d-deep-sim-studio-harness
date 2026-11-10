@@ -5033,6 +5033,13 @@ if (inShard('selftest-280c')) {
   const { selftest280C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-280c.mjs')).href);
   await selftest280C({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.80 (b1): the hub's timed passes (watch, retro, learn, run report, daily ping; the watchdog) run in the supervisor's loop.
+if (inShard('selftest-280b')) {
+  const { selftest280B } = await import(pathToFileURL(path.join(root, 'qa', 'selftest-280b.mjs')).href);
+  await selftest280B({ dir: root, run, report, tmpRoot, root });
 }
 
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy

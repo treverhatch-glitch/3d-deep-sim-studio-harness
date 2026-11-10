@@ -47,11 +47,7 @@ import { buildHudState, buildAgentDetail, setDivision, listDivisions } from '../
 import { warRoomState } from '../harness/war-room.mjs';
 import { acceptCause } from '../harness/causes.mjs';
 import { serveBuildFile, buildPagePath } from '../harness/builds.mjs';
-import { watchPass } from '../harness/watch.mjs';
-import { retroIfDue } from '../harness/retro.mjs';
-import { dailyPingIfDue, driftReport } from '../harness/director.mjs';
-import { learnIfDue } from '../harness/learn.mjs';
-import { runReportIfDue } from '../harness/run-report.mjs';
+import { driftReport } from '../harness/director.mjs';
 import { setMode, setBoost, describeMode } from '../harness/mode.mjs';
 import { startAgent, stopAgentNamed, stopAllAgents, pauseAgent, sessions as agentSessions, wake } from '../harness/agent.mjs';
 import { readDesigns, readArtRefs, approve as approveDesign, changes as changeDesign, feedback as artFeedback, addArtReference, IMAGE as ART_IMAGE, MODEL as ART_MODEL } from '../harness/art.mjs';
@@ -672,7 +668,7 @@ export function createHubServer() {
 
     const writePaths = new Set([
       '/api/tasks', '/api/task', '/api/events', '/api/event', '/api/usage', '/usage',
-      '/api/config', '/api/frame', '/api/macro', '/api/brief', '/api/human/decision', '/api/watch'
+      '/api/config', '/api/frame', '/api/macro', '/api/brief', '/api/human/decision'
     ]);
     // Every write needs the token header (the list above is kept for reference; new endpoints are covered too).
     if (req.method === 'POST' && (writePaths.has(url.pathname) || url.pathname.startsWith('/api/')) && !isWriteAuthorized(req)) {
@@ -1210,10 +1206,6 @@ export function createHubServer() {
       return sendJson(res, 200, { ok: true, ...briefRes });
     }
 
-    if (url.pathname === '/api/watch' && req.method === 'POST') {
-      return sendJson(res, 200, { ok: true, ...watchPass() });
-    }
-
     if (url.pathname === '/api/agent' && req.method === 'GET') {
       const detail = buildAgentDetail(String(url.searchParams.get('name') || ''));
       return detail ? sendJson(res, 200, detail) : sendJson(res, 404, { error: 'no such agent' });
@@ -1601,42 +1593,9 @@ export function startHubCli() {
     console.log(` Subscription Usage File       : ${path.relative(REPO_ROOT, USAGE_FILE)}`);
     console.log(` War Room Config File          : ${path.relative(REPO_ROOT, WAR_ROOM_CONFIG_FILE)}`);
     console.log(` LLM Token Cost                : 0% (Passive local WebSocket + SSE)`);
-    console.log(` Watcher                       : ${WATCH_EVERY > 0 ? `every ${WATCH_EVERY}s (STUDIO_WATCH_INTERVAL=0 turns it off)` : 'off'}`);
+    console.log(` Watcher                       : run by the supervisor (npm run studio:start), not the hub`);
     console.log('====================================================================');
   });
-  // While the HUB is up, the watcher runs on its own: a script pass, no model, no tokens.
-  const WATCH_EVERY = Number(process.env.STUDIO_WATCH_INTERVAL ?? 300);
-  if (WATCH_EVERY > 0) {
-    const pass = () => {
-      try {
-        const r = watchPass();
-        if (r.findings.length) console.log(`[watch] ${r.findings.map((f) => f.msg).join(' | ')}`);
-        const retro = retroIfDue();
-        if (retro) console.log(`[retro] wrote ${retro.file}: ${retro.suggestions.length} suggestion(s)`);
-        const learned = learnIfDue();
-        if (learned) console.log(`[learn] rewrote ${learned.file}${learned.backup ? `; backed up to ${learned.backup}` : ''}`);
-        const report = runReportIfDue();
-        if (report?.ok) console.log(`[run-report] updated ${report.dest}`);
-        const dir = dailyPingIfDue();
-        if (dir) console.log(`[director] daily ping: ${dir.task}${dir.start?.started ? ' (Director started)' : ''}`);
-      } catch (err) {
-        console.error(`[watch] ${err.message}`);
-      }
-    };
-    setTimeout(pass, 5000).unref();
-    setInterval(pass, WATCH_EVERY * 1000).unref();
-    // 2.30o: the game-dev loop (the watchdog pass) on its own clock while a game is active: always on,
-    // STUDIO_WATCHDOG=off or STUDIO_GAMEDEV_INTERVAL=0 opts out. Production never waits for someone to run --loop.
-    const GAMEDEV_EVERY = Number(process.env.STUDIO_GAMEDEV_INTERVAL ?? 180);
-    if (GAMEDEV_EVERY > 0) {
-      const gd = () => import('../harness/watchdog.mjs').then(({ watchdogPass }) => watchdogPass()).then((r) => { if (r.on && r.actions.length) console.log(`[gamedev] ${r.actions.map((a) => a.msg).join(' | ')}`); }).catch((err) => console.error(`[gamedev] ${err.message}`));
-      setTimeout(gd, 15000).unref();
-      setInterval(gd, GAMEDEV_EVERY * 1000).unref();
-    }
-    // 2.30h (2): the Director's flow pass, every minute: expired claims back, idle builder slots refilled.
-    const FLOW_EVERY = Number(process.env.STUDIO_FLOW_INTERVAL ?? 60);
-    if (FLOW_EVERY > 0) setInterval(() => import('../harness/director-flow.mjs').then(({ flowPass }) => flowPass({ throttleMs: (FLOW_EVERY - 5) * 1000 })).catch((err) => console.error(`[flow] ${err.message}`)), FLOW_EVERY * 1000).unref();
-  }
   return server;
 }
 
