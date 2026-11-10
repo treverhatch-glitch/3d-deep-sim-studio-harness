@@ -79,7 +79,9 @@ Removed with the code they tested: `qa/selftest-262g.mjs` (bench), `278e.mjs` (m
 check in `255`, the trajectory checks of the data-consent unit, the threads shadow checks in `264l` / `265r`, and the
 War Room panel checks inside `230j`, `230o`, `239`, `245`, `258d`, `2601n`, `264k`, `265t`, `2731b`, `276j`, `2771c`,
 `277w`, `2781g`, `pu16`, `pu17`. Changed because the behaviour changed on purpose: `268n` case 4 (a 3-hour-old machine
-scan now means "scan again", so the case switches the scan off), the allowlist's entry count (15 to 16), `279a`'s sample
+scan now means "scan again", so the case switches the scan off), `2601m` B-35 (the free-memory floor is the no-scan
+path, so it switches the scan off too), the allowlist's entry count (15 to 16; `2585r`: 32 rules for the other agent
+tool, 8 extras), `279a`'s sample
 setting, the boot and new-studio checks (no hub; `STUDIO_PLAY_PORT`).
 
 Coverage of kept code that was lost: `threads.postInbound` for `source: 'hub'` (nothing posts as `hub` now; Discord
