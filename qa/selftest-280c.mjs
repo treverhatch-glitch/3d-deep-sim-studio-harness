@@ -10,6 +10,9 @@
  *
  * Patch #14 / R3-7 (P1): a manual wind-down ("everything off") still started API-pool and Vertex builders; a usage
  * wind-down outlived removing STUDIO_USAGE_WINDDOWN_PCT; an agent's `winddown --now` had no end only a person could --off.
+ *
+ * Patch #25 (P1): after task.train.red_main the train daemon started the same lanes again at once (~30 min each, 6 times in
+ * a day) while the fix was in progress. It now waits while main is red at the same head, unless a queued lane fixes it.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -128,6 +131,35 @@ export async function selftest280C({ dir, report, tmpRoot }) {
       const ok = bare.status === 1 && /--until <time>/.test(bare.out) && timed.status === 0 && st?.manual === true && Date.parse(st.until) === Date.parse(until)
         && before.j?.active === true && after.j?.resumed === true && person.status === 0;
       return [ok, JSON.stringify({ bare, timed, st, before, after, person })];
+    });
+  }
+
+  // ---- Patch #25: no daemon trains on a red main ----
+  {
+    const td = await import(u('harness/train-daemon.mjs'));
+    const S = scratch('red');
+    const L = path.join(scratch('redlane'), 'copy');
+    const g = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, env: { ...clean, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' } });
+    const commit = (cwd, file, text) => { fs.mkdirSync(path.dirname(path.join(cwd, file)), { recursive: true }); fs.writeFileSync(path.join(cwd, file), text); g(cwd, 'add', '-A'); g(cwd, 'commit', '-q', '-m', file); };
+    g(S, 'init', '-q', '-b', 'main'); fs.writeFileSync(path.join(S, '.gitignore'), '.studio/\n'); commit(S, 'game/src/a.js', 'export const a = 1;\n');
+    fs.mkdirSync(path.join(S, '.studio', 'train'), { recursive: true });
+    fs.writeFileSync(path.join(S, '.studio', 'train', 'red-streak.json'), JSON.stringify({ trains: [{ id: 'red-1', at: new Date().toISOString(), gates: ['game'], redMain: true }], tried: {} }));
+    const old = new Date(Date.now() - 3600000).toISOString();
+    const facts = (queue) => ({ auto: { on: true }, trainOn: true, halted: null, drain: null, winddown: null, stopped: null, lock: null, next: null, running: null, queue, heldNow: () => false, heldOut: () => false, rules: { min: 1, waitMin: 0 }, room: { ok: true } });
+    const pass = async (queue, evs, spawned) => td.trainDaemonPass({ root: S, env: { STUDIO_TRAIN_AUTO: 'on' }, spawnTrain: () => { spawned.push(1); return { pid: null }; }, emit: (e) => evs.push(e), ...facts(queue) });
+    await guard('2.80 (c) #25: after a train found main itself red, the daemon starts no train while main\'s head is unchanged (one task.train.auto_waiting naming it, not repeated), starts again once main\'s head moves, and starts at once when a queued lane changes the stuck check\'s configuration (fix-first runs it alone) (fails on 2.79.2: it started the same lanes again at once)', async () => {
+      const evs = []; const spawned = [];
+      const q = [{ task: 'T-901', agent: 'builder-a', at: old, dir: path.join(S, 'no-such-copy') }];
+      const a = await pass(q, evs, spawned);
+      const b = await pass(q, evs, spawned);
+      g(path.dirname(L), 'clone', '-q', S, 'copy'); g(L, 'checkout', '-q', '-b', 'lane-fix'); commit(L, 'game/vitest.config.mjs', 'export default { test: { testTimeout: 20000 } };\n'); g(S, 'fetch', '-q', L, 'lane-fix:lane-fix');
+      const c = await pass([...q, { task: 'T-902', agent: 'builder-b', at: old, dir: L }], evs, spawned);
+      try { fs.rmSync(path.join(S, '.studio', 'train', 'daemon.json'), { force: true }); } catch {}
+      commit(S, 'game/src/b.js', 'export const b = 2;\n');
+      const d = await pass(q, evs, spawned);
+      const waits = evs.filter((e) => e.type === 'task.train.auto_waiting');
+      const ok = a.started === false && /main is red at/.test(a.why) && b.started === false && waits.length === 1 && c.started === true && d.started === true && spawned.length === 2;
+      return [ok, JSON.stringify({ a, b, c, d, waits: waits.map((e) => e.msg), spawned: spawned.length })];
     });
   }
 }
