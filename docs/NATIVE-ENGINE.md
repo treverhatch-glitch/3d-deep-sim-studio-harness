@@ -85,6 +85,11 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   them again right before the land run and leaves `STUDIO_RULES_GREEN` out when they changed since the check.
   `STUDIO_ENGINE_RULES_TIMEOUT_MIN` overrides the time limit.
 - Each batch writes one `engine.rules` event (runs, minutes, lanes kept and refused).
+- **A lane's own check.** `task done` runs an engine check only when `"quickCheck"` is set: set it to a compile (for
+  Unity `dotnet build tools/SimTests`), which takes seconds and stops a lane that does not compile outside the editor;
+  the tests then run once, on the batch. With `"rules"` set and no `"quickCheck"`, a porter's `npm run engine -- check`
+  by hand is this same rules check on the lane's committed work as it would land (throwaway checkout, inputs copied
+  in, the target first), never the bare command in the lane's own folder, where the inputs are not.
 
 ```bash
 npm run engine -- rules show                  # the command and where it comes from

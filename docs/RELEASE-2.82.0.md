@@ -43,6 +43,12 @@ result is valid for, and the train looks at them again right before the land run
 when they changed. Found while answering the owner's question about splitting the train
 (studio/notes/TRAIN-SPLIT-2026-11.md).
 
+**Fixed before release (P-300).** With the owner's `rules` command and no `quickCheck`, a porter's `npm run engine --
+check` ran that command in the lane's own folder. The rules' git-ignored inputs are not there, so a good lane could
+read red. It is now the rules check itself on the lane's commit as it would land: a throwaway checkout, the inputs
+copied in, the target checked first, skipped when it cannot judge. `task done` is unchanged: it runs an engine check
+only when `quickCheck` is set, so a studio that sets `quickCheck` runs the same code as before this fix.
+
 ## 3. The scorecard: before, and what "after" can honestly say
 
 The fifteen measures are unchanged from the 2.81 baseline (this round ran no crew). The two new blocks, counted on the
@@ -84,13 +90,13 @@ is used by two self-tests.
 
 ## 5. Size
 
-2.82.0 against 2.81.0: 27 files, +1,860 / −55 lines (net +1,805). This round adds and cuts nothing of size: harness
-code +595 / −11 (two new modules, `native.mjs` 93 and `engine-rules.mjs` 234, and the scorecard's two blocks), the
-self-test +366 / −1, docs, notes and records +899 / −43.
+2.82.0 against 2.81.0: 27 files, +1,951 / −58 lines (net +1,893). This round adds and cuts nothing of size: harness
+code +637 / −11 (two new modules, `native.mjs` 93 and `engine-rules.mjs` 234, and the scorecard's two blocks), the
+self-test +391 / −1, docs, notes and records +923 / −46.
 
 | | 2.79.2 | 2.80.0 | 2.81.0 | 2.82.0 |
 |---|---|---|---|---|
-| Tracked lines | 175,491 | 157,794 | 159,485 | 161,290 |
+| Tracked lines | 175,491 | 157,794 | 159,485 | 161,378 |
 | `harness/` modules | 319 | 310 | 314 | 316 |
 | npm scripts | 179 | 165 | 165 | 165 |
 | `STUDIO_*` settings | 729 | 712 | 716 | 726 |

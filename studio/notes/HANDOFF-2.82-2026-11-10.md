@@ -14,6 +14,9 @@ green online checks.
 - Later the same day: the owner asked whether the Unity train should be split into stages. The answer, from the
   crew's records, is studio/notes/TRAIN-SPLIT-2026-11.md (nothing built, one sketch for the next round). It found a gap
   in this round's rules check (P-299: kept results did not know their git-ignored inputs), fixed before merge.
+- The crew took `claude/282` early that evening (at `df60f51`). One commit followed it: P-300, `npm run engine -- check`
+  with `rules` and no `quickCheck` (harness/engine-check.mjs). `task done` is unchanged, and a studio that sets
+  `quickCheck` runs the same code path as before and need not pull again for it.
 - The crew was running again on 2026-11-10 (a land run and a verify that afternoon), still on 2.79.2.
 
 ## Decisions made on judgment (change them if the next score says so)

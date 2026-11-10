@@ -181,6 +181,31 @@ console.log('Passed!');
       JSON.stringify({ r, runs }).slice(0, 1500)]);
   }
   {
+    // The porter's own check (npm run engine -- check), with the owner's rules command and no quickCheck: the rules check on the lane's
+    // commit as it would land, in a throwaway checkout with the inputs, never in the lane's folder.
+    resetState();
+    const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/b': { 'rules-bad.txt': 'x\n' } });
+    write(E.GW, 'Private~/key.txt', 'k\n');
+    const laneA = path.join(T, 'lane-a'); const laneB = path.join(T, 'lane-b');
+    g(E.R, 'worktree', 'add', '-q', laneA, 'feat/a'); g(E.R, 'worktree', 'add', '-q', laneB, 'feat/b');
+    const ctl = path.join(T, 'ctl-qc');
+    const QC = (dir) => `import { runEngineQuickCheck } from ${u('harness/engine-check.mjs')};
+const r = runEngineQuickCheck({ engine: 'unity', root: process.cwd(), task: 'T-931', dir: ${JSON.stringify(fwd(dir))} });
+console.log(JSON.stringify({ status: r.status, why: r.why, tail: r.tail || '' }));`;
+    setEngines({ unity: cfgFor(E, ctl, { rules: { test: `node "${fwd(rulesStub)}"`, inputs: ['Private~'] } }) });
+    const a = probe(QC(laneA));
+    const b = probe(QC(laneB));
+    setEngines({ unity: cfgFor(E, ctl, { rules: `node "${fwd(rulesStub)}"` }) }); // no inputs named: red on the target itself
+    const c = probe(QC(laneB));
+    setEngines({ unity: cfgFor(E, ctl, { quickCheck: 'node -e "process.exit(0)"', rules: `node "${fwd(rulesStub)}"` }) });
+    const d = probe(QC(laneB));
+    await guard('2.82 porter\'s check with the owner\'s rules command and no quickCheck: it is the rules check on the lane\'s commit as it would land (throwaway checkout, the private input copied in, nothing written into the lane): a good lane passes though its own folder has no private input, the lane that breaks a rule is red with the failing test and "green without it", a check that is red on the target itself judges nothing (skipped), and a configured quickCheck still wins (fails before this fix: the command ran in the lane\'s folder without its inputs, so the good lane read red)', () => [
+      a.status === 'pass' && b.status === 'red' && /Rules\.Economy\.FeesAddUp/.test(b.why) && /green on port\/main without it/.test(b.why) && c.status === 'skipped' && /judges no lane/.test(c.why) && d.status === 'pass' && /quick check passed/.test(d.why)
+        && !fs.existsSync(path.join(laneA, 'Private~')) && !fs.existsSync(path.join(laneB, 'Private~')),
+      JSON.stringify({ a, b, c, d }).slice(0, 2400)]);
+    g(E.R, 'worktree', 'remove', '--force', laneA); g(E.R, 'worktree', 'remove', '--force', laneB);
+  }
+  {
     // The calibration: the check is red on the target itself (its input is named nowhere), so it judges nobody.
     resetState();
     const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/b': { 'rules-bad.txt': 'x\n' } });
