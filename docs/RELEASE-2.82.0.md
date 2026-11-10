@@ -76,13 +76,13 @@ is used by two self-tests.
 
 ## 5. Size
 
-2.82.0 against 2.81.0: 26 files, +1,540 / −54 lines (net +1,486). This round adds and cuts nothing of size: harness
+2.82.0 against 2.81.0: 26 files, +1,551 / −54 lines (net +1,497). This round adds and cuts nothing of size: harness
 code +570 / −11 (two new modules, `native.mjs` 93 and `engine-rules.mjs` 210, and the scorecard's two blocks), the
-self-test +333, docs and records +634 / −40.
+self-test +333, docs and records +645 / −40.
 
 | | 2.79.2 | 2.80.0 | 2.81.0 | 2.82.0 |
 |---|---|---|---|---|
-| Tracked lines | 175,491 | 157,794 | 159,487 | 160,971 |
+| Tracked lines | 175,491 | 157,794 | 159,485 | 160,982 |
 | `harness/` modules | 319 | 310 | 314 | 316 |
 | npm scripts | 179 | 165 | 165 | 165 |
 | `STUDIO_*` settings | 729 | 712 | 716 | 726 |
