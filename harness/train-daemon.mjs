@@ -99,7 +99,8 @@ export async function verifyRoom(root, env = process.env) {
 
 /**
  * The decision, from facts (pure): { start, why, lanes }. facts: { auto, trainOn, halted, winddown, stopped, lock,
- * running, queue: [entry], heldOut(task) -> bool, heldNow(entry) -> bool, rules: { min, waitMin }, room: { ok, line },
+ * running, redMain (why main being red waits, Patch #25), queue: [entry], heldOut(task) -> bool, heldNow(entry) -> bool,
+ * rules: { min, waitMin }, room: { ok, line },
  * now }.
  */
 export function daemonDecision(f) {
@@ -114,6 +115,7 @@ export function daemonDecision(f) {
   // 2.77.0 (p, P9.6): a speculative train that lands on main now (its train A ended) goes first.
   if (f.next) return no(`the speculative train ${f.next.id || '?'} (after ${f.next.after || '?'}) lands first`);
   if (f.running) return no(`the daemon's train is still running (pid ${f.running.pid})`);
+  if (f.redMain) return no(f.redMain);
   const ready = (f.queue || []).filter((e) => !(f.heldNow || (() => false))(e) && !(f.heldOut || (() => false))(e.task));
   if (!ready.length) return no((f.queue || []).length ? 'every queued lane waits for the owner or is held out of trains' : 'no lane is queued');
   const rules = f.rules || { min: 1, waitMin: 10 };
@@ -130,7 +132,7 @@ export async function daemonFacts(root, { env = process.env, now = Date.now(), h
   const tr = await import('./train.mjs');
   const facts = { now, auto: trainAuto(root, env), trainOn: tr.trainOn(env), halted: halted ? String(halted.why || halted) : null, haltScope: halted && typeof halted === 'object' ? halted.scope || null : null, ...given };
   if (!('drain' in given)) { try { const d = await (await import('./busy.mjs')).readDrain(); facts.drain = d?.on ? `by ${d.by || '?'}${d.why ? `: ${d.why}` : ''}` : null; } catch { facts.drain = null; } }
-  if (!('winddown' in given)) { try { const w = (await import('./winddown.mjs')).readWinddown(); facts.winddown = w ? w.why || `since ${w.at}` : null; } catch { facts.winddown = null; } }
+  if (!('winddown' in given)) { try { const wm = await import('./winddown.mjs'); const w = wm.readWinddown(); facts.winddown = w && !wm.winddownOver(w, { env, now }) ? w.why || `since ${w.at}` : null; } catch { facts.winddown = null; } }
   if (!('stopped' in given)) { try { const s = (await import('./task.mjs')).readStop(); facts.stopped = s ? `by ${s.by}` : null; } catch { facts.stopped = null; } }
   if (!('lock' in given)) facts.lock = trainLockHeld(root, env, now);
   if (!('next' in given)) { try { const pl = await import('./train-pipeline.mjs'); const wt = await import('./worktree.mjs'); const tip = String(spawnSync('git', ['rev-parse', `refs/heads/${wt.mainBranch(root)}`], { cwd: root, encoding: 'utf8', windowsHide: true }).stdout || '').trim() || null; facts.next = pl.nextBusy(root, { env, now, tip }); } catch { facts.next = null; } }
@@ -139,7 +141,31 @@ export async function daemonFacts(root, { env = process.env, now = Date.now(), h
   if (!('heldNow' in given)) facts.heldNow = tr.heldNow;
   if (!('heldOut' in given)) facts.heldOut = (task) => Boolean(tr.taskHoldOf(root, task));
   if (!('rules' in given)) facts.rules = tr.batchRules(env);
+  if (!('redMain' in given)) { try { facts.redMain = await redMainWait(root, facts.queue, { env, now }); } catch { facts.redMain = null; } }
   return facts;
+}
+
+/**
+ * 2.80 (c), Patch #25: after a train found main itself red, the daemon started the same lanes again at once, ~30 min each
+ * to find main red again (6 times in a day). While the last train's verdict (.studio/train/red-streak.json) is "main is
+ * red" and main's head and the queued lanes (each task and its head) are the ones the daemon first saw after it, it waits
+ * (the reason, or null to go on): a new or changed lane may be the fix, so it never waits on one. `npm run task -- train` runs.
+ */
+export async function redMainWait(root, queue = [], { env = process.env, now = Date.now(), git = (args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true }) } = {}) {
+  const last = (readJson(path.join(root, '.studio', 'train', 'red-streak.json'))?.trains || []).at(-1);
+  if (!last?.redMain) return null;
+  const tip = String(git(['rev-parse', `refs/heads/${(await import('./worktree.mjs')).mainBranch(root)}`]).stdout || '').trim();
+  const f = path.join(root, '.studio', 'train', 'red-main-head.json');
+  const tr = await import('./train.mjs');
+  const headOf = (l) => tr.laneNow(l).head || null;
+  // The queue as it stood when the daemon first saw the verdict: a lane queued since, or one with new commits, may be the
+  // fix (whatever check it is for), so the wait is only for the SAME lanes on the same main.
+  const lanes = (queue || []).map((l) => `${l.task}@${headOf(l) || ''}`).sort().join(',');
+  let seen = readJson(f);
+  if (seen?.train !== last.id) { seen = { train: last.id, head: tip, lanes, at: new Date(now).toISOString() }; writeAtomic(f, `${JSON.stringify(seen)}\n`); }
+  if (!tip || seen.head !== tip || seen.lanes !== lanes) return null;
+  const fix = (await import('./train-fix-first.mjs')).fixFirstOrder(root, queue || [], { tip, env, headOf }).fix;
+  return fix ? null : `main is red at ${tip.slice(0, 8)} (train ${last.id} found ${last.gates.join(', ') || 'its checks'} red on main itself) and the queue is the same lanes: no train until main changes or a lane is queued or changed (npm run task -- train runs one anyway)`;
 }
 
 /**

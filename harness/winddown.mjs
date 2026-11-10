@@ -3,7 +3,7 @@
  * harness/winddown.mjs — 2.68.0: usage wind-down. Stop starting work before the plan runs out, not at the wall.
  *
  *   npm run studio:winddown                       is the studio winding down, and why
- *   npm run studio:winddown -- --now --by <name> [--why "…"]   wind down now, on demand
+ *   npm run studio:winddown -- --now --by <name> [--until <time>] [--why "…"]   wind down now, on demand (an agent: --until)
  *   npm run studio:winddown -- --off --by <name> [--permission "…"]   end a wind-down before the reset
  *
  * STUDIO_USAGE_WINDDOWN_PCT (unset: off), e.g. 90. The usage figure is the one the harness already tracks
@@ -13,7 +13,8 @@
  * queued and held, and the next steps) and emits studio.winddown. When the usage resets (the figure falls back under
  * the setting, or a wind-down asked with --now reaches the soonest reset), the supervisor resumes on its own and its
  * studio.winddown_resumed event links the restart log.
- * Who: --now, anyone but a worker (it only stops new starts); --off, a person, an agent under the owner's delegation for
+ * Who: --now, anyone but a worker (it only stops new starts; 2.80 (c), #14: an agent must say --until <time>, when it ends
+ * by itself, since only a person may --off); --off, a person, an agent under the owner's delegation for
  * hold, or a Producer/Director session or outside agent on a person's permission (harness/decider.mjs).
  * State: .studio/winddown.json. Only event.mjs is imported at load (the supervisor imports this file).
  */
@@ -72,6 +73,17 @@ function begin({ now, why, figure, threshold, manual = false, by = null, until =
 }
 
 /**
+ * 2.80 (c), #14: is this wind-down over? One asked with --now at its --until (or the soonest reset it knew of); an
+ * automatic one when STUDIO_USAGE_WINDDOWN_PCT is now unset (the setting is read each pass, never the one it started at)
+ * or, given the usage figure, when it is back under the setting.
+ */
+export function winddownOver(st, { env = process.env, now = Date.now(), figure } = {}) {
+  if (st.manual) return st.until ? now >= Date.parse(st.until) : false;
+  const threshold = winddownPct(env);
+  return threshold === null || (figure !== undefined && (!figure || figure.pct * 100 < threshold));
+}
+
+/**
  * The supervisor's pass. rows: budgetStatus(now); lists: { live, queued, held } (or a function giving it, called only
  * when a wind-down starts) for the restart log. Returns { active, why, state }.
  */
@@ -80,9 +92,7 @@ export function winddownPass({ now = Date.now(), env = process.env, rows = [], l
   const st = readWinddown();
   const figure = usageFigure(rows, now);
   if (st) {
-    // An automatic wind-down ends when the figure is back under the setting it started at (the week rolled over, or
-    // the quota mark expired); one asked with --now at the soonest reset it knew of.
-    const reset = st.manual ? (st.until ? now >= Date.parse(st.until) : false) : (!figure || figure.pct * 100 < (st.threshold || threshold || 100));
+    const reset = winddownOver(st, { env, now, figure });
     if (!reset) return { active: true, why: `winding down since ${st.at.slice(11, 16)} UTC: ${st.why} (restart log ${st.file})`, state: st };
     if (!dryRun) {
       fs.rmSync(WINDDOWN_FILE(), { force: true });
@@ -108,10 +118,14 @@ async function studioLists() {
 }
 
 /** `--now`: wind down on demand (until the soonest known reset; --off ends it). */
-export async function winddownNow({ by, why = '', env = process.env, now = Date.now(), rows = null, lists = null } = {}) {
+export async function winddownNow({ by, why = '', until = null, env = process.env, now = Date.now(), rows = null, lists = null } = {}) {
   const who = String(by || '').trim();
-  if (!who) return { code: 1, text: 'Say who asks: npm run studio:winddown -- --now --by <name> [--why "…"]' };
-  const { WORKER_NAME } = await import('./permission.mjs');
+  const usage = 'npm run studio:winddown -- --now --by <name> [--until <time>] [--why "…"]';
+  if (!who) return { code: 1, text: `Say who asks: ${usage}` };
+  const { WORKER_NAME, AGENT_SHELL } = await import('./permission.mjs');
+  const end = until ? Date.parse(until) : null;
+  if (until && !(end > now)) return { code: 1, text: `--until ${until} is not a time in the future: ${usage}` };
+  if (!until && (String(env.STUDIO_ROLE || env.STUDIO_LOCK_OWNER || '').trim() || AGENT_SHELL.some((k) => String(env[k] || '').trim()))) return { code: 1, text: `Refused: an agent winds the studio down only until a time it names, since only a person may --off: ${usage}` };
   const role = String(env.STUDIO_ROLE || '').trim();
   const worker = [String(env.STUDIO_LOCK_OWNER || '').trim(), who].find((n) => n && WORKER_NAME.test(n)) || (role && !/^(producer|director)$/i.test(role) ? `a launched ${role} session` : null);
   if (worker) return { code: 1, text: `Refused: ${worker} is a worker; a person, the Producer or Director, or an outside agent winds the studio down.` };
@@ -119,7 +133,7 @@ export async function winddownNow({ by, why = '', env = process.env, now = Date.
   let r = rows;
   if (!r) { try { r = (await import('./budget.mjs')).budgetStatus(now); } catch { r = []; } }
   const figure = usageFigure(r, now);
-  const resets = (r || []).map((x) => (x.exhaustedUntil && Date.parse(x.exhaustedUntil) > now ? x.exhaustedUntil : x.resets)).filter((x) => x && Date.parse(x) > now).sort()[0] || null;
+  const resets = end ? new Date(end).toISOString() : (r || []).map((x) => (x.exhaustedUntil && Date.parse(x.exhaustedUntil) > now ? x.exhaustedUntil : x.resets)).filter((x) => x && Date.parse(x) > now).sort()[0] || null;
   const l = lists || (await studioLists());
   const s = begin({ now, why: `asked by ${who}${why ? `: ${String(why).slice(0, 200)}` : ''}${figure ? ` (usage ${Math.round(figure.pct * 100)}%, ${figure.tool})` : ''}`, figure, threshold: winddownPct(env), manual: true, by: who, until: resets, ...l });
   return { code: 0, text: `Winding down: no new sessions; ${l.live.length} running finish their task. Restart log: ${s.file}. ${resets ? `Resumes at ${resets}` : 'No reset time known: resume with npm run studio:winddown -- --off --by <name>'}.` };
@@ -142,10 +156,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const argv = process.argv.slice(2);
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
   let r;
-  if (argv.includes('--now')) r = await winddownNow({ by: flag('by'), why: flag('why') || '' });
+  if (argv.includes('--now')) r = await winddownNow({ by: flag('by'), why: flag('why') || '', until: flag('until') });
   else if (argv.includes('--off')) r = await winddownOff({ by: flag('by'), permission: flag('permission') || '' });
-  else if (!argv.length) { const st = readWinddown(); r = { code: 0, text: st ? `Winding down since ${st.at}: ${st.why}. Restart log: ${st.file}.` : `Not winding down (STUDIO_USAGE_WINDDOWN_PCT ${winddownPct() === null ? 'unset: off' : `${winddownPct()}%`}).` }; }
-  else r = { code: 2, text: 'Usage: npm run studio:winddown [-- --now --by <name> [--why "…"] | --off --by <name> [--permission "…"]]' };
+  else if (!argv.length) { const st = readWinddown(); r = { code: 0, text: st && !winddownOver(st) ? `Winding down since ${st.at}: ${st.why}. Restart log: ${st.file}.` : `Not winding down (STUDIO_USAGE_WINDDOWN_PCT ${winddownPct() === null ? 'unset: off' : `${winddownPct()}%`}).` }; }
+  else r = { code: 2, text: 'Usage: npm run studio:winddown [-- --now --by <name> [--until <time>] [--why "…"] | --off --by <name> [--permission "…"]]' };
   (r.code ? console.error : console.log)(r.text);
   process.exit(r.code);
 }

@@ -5026,6 +5026,15 @@ if (inShard('selftest-280d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.80 (c): the fixes the trim can't deliver: an inline machine scan when the stored one is stale (N1), sessionless
+// locks (#24), the manual wind-down (#14), no trains on a red main (#25), the owner's builder order (#18).
+if (inShard('selftest-280c')) {
+  const dir = copyRepo();
+  const { selftest280C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-280c.mjs')).href);
+  await selftest280C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

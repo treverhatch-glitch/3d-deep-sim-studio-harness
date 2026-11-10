@@ -27,6 +27,7 @@ import { recordAlive } from './proc-identity.mjs';
 import { createExclusive, moveAside, onFsafeWarning, sweepTemps, withFileLock, writeAtomic } from './fsafe.mjs';
 import { watchCommand } from './workaround.mjs';
 import { inNoteDir } from './reviewer-scope.mjs';
+import { actorOf, outsideSigners } from './permission.mjs';
 
 // 2.58.0 (PU-43): fsafe's warnings (a state file written in place because another program held it open) are logged
 // as events too, not only printed to a console nobody may read. Every command that changes studio state loads this.
@@ -202,12 +203,14 @@ function claimUnlocked(k, owner, ttlSec, again = false) {
     // compared without regard to case (game/Branding and game/branding were both granted; on Windows that is one
     // folder held by two agents).
     const at = foldPath(k.slice(5));
+    let took = null;
     const overlap = listLocks().find((l) => {
       if (!l.key.startsWith('path:') || l.owner === check.owner) return false;
       const other = foldPath(l.key.slice(5));
-      return other === '' || at === '' || at === other || at.startsWith(`${other}/`) || other.startsWith(`${at}/`);
+      return (other === '' || at === '' || at === other || at.startsWith(`${other}/`) || other.startsWith(`${at}/`)) && !(takeOver(l, owner) && (took = l.owner));
     });
     if (overlap) return { ok: false, reason: 'claimed', lock: overlap };
+    if (took) { const r = claimUnlocked(k, owner, ttlSec, again); return r.ok ? { ...r, message: `took over an expired lock of ${took} (no live session)` } : r; }
   }
   const file = lockPath(k);
   const now = Date.now();
@@ -217,6 +220,7 @@ function claimUnlocked(k, owner, ttlSec, again = false) {
   const seen = inspectLock(file);
   if (seen.lock && !seen.expired) {
     if (seen.lock.owner === check.owner) return { ok: true, lock: seen.lock, reused: true };
+    if (!again && takeOver(seen.lock, owner, file, seen.raw)) { const r = claimUnlocked(k, owner, ttlSec, true); return r.ok ? { ...r, message: `took over an expired lock of ${seen.lock.owner} (no live session)` } : r; }
     return { ok: false, reason: 'claimed', lock: seen.lock };
   }
   // P-037: an unreadable lock file (an agent killed between creating and writing it, under an older harness) used
@@ -228,6 +232,19 @@ function claimUnlocked(k, owner, ttlSec, again = false) {
   } else if (seen.expired) moveAside(file, null, seen.raw);
   if (again) return { ok: false, reason: 'busy', lock: null, message: `${k} is changing hands right now; try again in a moment.` };
   return claimUnlocked(k, owner, ttlSec, true);
+}
+
+/**
+ * 2.80 (c), Patch #24 / R3-14: a path or task lock whose owner's launched session is over (holderGone: its record says
+ * ended, or its process is gone) counts as expired for a taker; a P0 "fix main" waited an hour for one. An owner with no
+ * session record (a person, the orchestrator) is never taken over this way. Moves the lock aside; true when it did.
+ */
+function takeOver(lock, taker, file = lockPath(lock.key), raw = undefined) {
+  if (!/^(path|task):/.test(lock.key) || holderGone(lock) !== true) return false;
+  if (raw === undefined) { const seen = inspectLock(file); if (!seen.lock || seen.lock.owner !== lock.owner) return false; raw = seen.raw; }
+  if (!moveAside(file, null, raw)) return false;
+  emitEvent({ type: 'lock.taken_over', agent: taker, status: 'warn', target: lock.key, msg: `took over an expired lock of ${lock.owner} (no live session)`, meta: { owner: lock.owner, claimedAt: lock.claimedAt || null } });
+  return true;
 }
 
 export function release(key, owner, { caller = null } = {}) {
@@ -477,7 +494,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(1);
   }
   if (cmd === 'claim') out(claim(maybeKey, owner, Number(flag('--ttl') || 3600), { wide: flag('--wide') || null, byHand: true }));
-  if (cmd === 'release') out(release(maybeKey, owner, { caller: holderOf() }));
+  if (cmd === 'release') {
+    // 2.80 (c), Patch #24: `--owner X` naming someone else acts for X when the caller is a person (no STUDIO_LOCK_OWNER),
+    // a Producer/Director session or an outside agent the owner named (STUDIO_OUTSIDE_SIGNERS, the main checkout's .env);
+    // anyone else (a worker, an agent naming itself) is refused naming that rule (K01: naming the holder is not enough).
+    const actor = actorOf({ root: REPO_ROOT });
+    const named = Boolean(flag('--owner')) && flag('--owner') !== actor.name;
+    const may = named && (actor.tier === 'decider' || (actor.tier === 'outside' && (!actor.name || outsideSigners(REPO_ROOT).includes(actor.name))));
+    const res = release(maybeKey, owner, { caller: may ? null : named ? { ...holderOf(), as: actor.name || `a ${actor.role || 'worker'} session` } : holderOf() });
+    if (named && !may && !res.ok && res.reason === 'not-holder') res.message = `lock release --owner ${owner}: only a person, a Producer/Director session or an outside agent the owner named (STUDIO_OUTSIDE_SIGNERS) releases another's lock. ${res.message}`;
+    if (may && res.released) emitEvent({ type: 'lock.released_for', agent: actor.name || 'owner', target: normalizeKey(maybeKey), msg: `released ${owner}'s lock` });
+    out(res);
+  }
   if (cmd === 'status') out(status(maybeKey), true);
   void rest;
   process.exit(1);

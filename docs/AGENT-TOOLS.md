@@ -336,6 +336,12 @@ pool starts builders; their lanes still go to the train. The spend guard and the
 any session. `npm run agent -- start --pool api [--task T-12]` starts one pool builder by hand, whatever the budget. A
 tool that is out of quota through a provider limit (a 429 mark) still holds every session on that tool, pool or not.
 
+`STUDIO_BUILDER_ORDER` (2.80; unset: the choice above, unchanged) is the owner's order for filling a builder slot, e.g.
+`STUDIO_BUILDER_ORDER=api,vertex,plan`: `api` (a free `STUDIO_API_POOL` name), `vertex` (Vertex, below: its budget cut,
+prompt and failure rules and `STUDIO_VERTEX_SHARE=0` still apply; its share cap applies only when `vertex` comes after
+`plan`) and `plan` (the plan's tool, not while the plan's budget is high). The supervisor takes the first kind that can
+start now and skips the others (pool names all running, Vertex cut or off, the plan high); a kind left out is never used.
+
 ## Vertex AI as a builder (`--tool vertex`, 2.79.1)
 
 Vertex carries builder work on the owner's Google Cloud credit, so Claude usage goes down. In `.env`, nothing else is
