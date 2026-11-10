@@ -251,7 +251,6 @@ export function alertsNow(f, { env = process.env, state = {}, passWhy = [] } = {
     else if (e.type === 'task.owner_only') add(`owner-only:${e.task || '?'}`, 'fix', `${e.task || 'A task'} waits for the owner (parked, no builder relaunched): ${short(String(e.msg || '').replace(/^T-\d+ waits for the owner:\s*/, ''), 220)}`);
     else if (e.type === 'session.stall') add(`stall:${e.task || e.meta?.target || '?'}`, 'fix', `Stuck: ${short(e.msg, 240)}`);
     else if (e.type === 'whole.error') add('harness-error:whole', 'fix', `Harness error (the whole-game check): ${short(e.msg, 240)}`);
-    else if (e.type === 'supervisor.hub_restart' && e.status === 'warn') add('harness-error:hub', 'fix', `Harness error: ${short(e.msg, 240)}`);
   }
   const err = (passWhy || []).find((w) => /^error:/i.test(String(w)));
   if (err) add('harness-error:supervisor', 'fix', `Harness error: the supervisor's pass failed (${short(String(err).replace(/^error:\s*/i, ''), 200)}). npm run studio:status`);
@@ -286,7 +285,7 @@ export function alertsNow(f, { env = process.env, state = {}, passWhy = [] } = {
   }
   // Disasters.
   if (Number.isFinite(f.diskFreeGb) && s.diskGb > 0 && f.diskFreeGb < s.diskGb) add('disk-low', 'disaster', `Disk low: ${f.diskFreeGb} GB free (under ${s.diskGb} GB). npm run janitor frees old lane copies.`);
-  const hour = f.events.filter((e) => (Date.parse(e.ts) || 0) > f.now - 3600000 && (e.type === 'supervisor.hub_restart' || e.type === 'supervisor.halted' || e.type === 'harness.crash' || /^task\.train\.(died|dead|crashed)$/.test(e.type)));
+  const hour = f.events.filter((e) => (Date.parse(e.ts) || 0) > f.now - 3600000 && (e.type === 'supervisor.halted' || /^task\.train\.(died|dead|crashed)$/.test(e.type)));
   if (hour.length >= s.crashes) add('crashes', 'disaster', `Repeated crashes: ${hour.length} in the last hour (${cut([...new Set(hour.map((e) => e.type.replace(/^supervisor\.|^task\./, '')))], 4)}).`);
   const trainRunning = Boolean(f.train) || Boolean(f.trainLock && !f.trainLock.dead);
   f.blockedNow = f.supRunning && f.workers.length === 0 && !trainRunning && (f.blockers.length > 0 || f.stopFiles.length > 0);
