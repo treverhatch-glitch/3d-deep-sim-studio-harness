@@ -35,10 +35,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const SPEC_DIR = (root = REPO_ROOT) => path.join(root, 'studio', 'vfx');
 export const OUT_DIR = (id) => path.join(STUDIO_STATE_DIR, 'vfx', id);
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 /** A starter spec: every field a person or agent fills in before building the effect. */
 export function starterSpec(id, { kind = 'one-shot', ms = 400 } = {}) {

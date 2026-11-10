@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { mainRoot, linkDir, nodeModuleDirs } from './worktree.mjs';
 import { gateEnv } from './gate-env.mjs';
+import { pidAlive as alive } from './fsafe.mjs';
 
 export const WHOLE_TITLE = 'Whole-game check red';
 export const WHOLE_RE = /^Whole-game check red\b/i;
@@ -44,7 +45,6 @@ function writeWhole(patch, root = mainRoot()) {
   fs.writeFileSync(stateFile(root), `${JSON.stringify(s, null, 2)}\n`);
   return s;
 }
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 /** The studio branch's commit, when the check hasn't seen it and no run is going: { sha } or null. */
 export function wholeDue({ root = mainRoot(), env = process.env } = {}) {

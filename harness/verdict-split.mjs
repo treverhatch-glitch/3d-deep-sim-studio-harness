@@ -39,6 +39,7 @@ import { taskChanges, startedAt } from './done-check.mjs';
 import { activeGame } from './cartridge.mjs';
 import { parseNextQueue } from './task.mjs';
 import { isTestPath } from './test-weakening.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const PARTS = ['build', 'logic', 'runtime', 'visual', 'viewport'];
 const file = (task) => path.join(STUDIO_STATE_DIR, 'proof', task, 'verdict.json');
@@ -69,7 +70,6 @@ export function isRenderTask(t = {}) {
 
 // Owner types that say the work is not a render change (bug, whole and art keep the detection).
 export const NOT_RENDER_TYPES = ['change', 'chore', 'docs', 'system', 'balance', 'fun', 'playtest', 'study', 'research', 'review', 'direction', 'idea', 'trick'];
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 /** The game's render paths (globs) and the strict switch: studio/game.json, else the game's studio.gates.json. */
 export function renderPaths(root = REPO_ROOT, env = process.env) {
   const g = readJson(path.join(root, 'studio', 'game.json')) || {};

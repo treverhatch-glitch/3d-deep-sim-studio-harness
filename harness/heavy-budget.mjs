@@ -34,12 +34,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readMachine } from './machine.mjs';
+import { pidAlive as aliveP, readJson } from './fsafe.mjs';
 
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const off = (v) => /^(off|0|false|no)$/i.test(String(v || ''));
 const r1 = (x) => Math.round(x * 10) / 10;
 const fin = (x) => typeof x === 'number' && Number.isFinite(x);
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 /** Default claims per job kind; studio/machine-budget.json "jobs": { "<kind>": { ramGb, cpuThreads, vramGb, gpuOnly } } overrides. */
 export const JOB_KINDS = {
@@ -338,7 +338,6 @@ export function rigKind(rec) {
 /** The jobs a budget state counts, from holder records: [{ kind, workers, threads, gpuOnly, label, pid, at }]. */
 export const rigJobs = (holders = []) => holders.map((h) => { const c = claimOf(h); return { kind: rigKind(h), workers: Number(c.workers) > 0 ? Number(c.workers) : null, threads: Number(c.cpuThreads) || 0, gpuOnly: Boolean(c.gpuOnly), ramGb: Number(c.ramGb) || 0, label: c.label || h.label || null, pid: h.pid || null, at: h.at || null, owner: h.owner || null }; });
 
-const aliveP = (pid) => { if (!pid) return false; try { process.kill(Number(pid), 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 /**
  * The train's verify that is coming (to keep its share free): [{ kind: 'train', why }] or []. A train lock held by a live
  * process whose verify isn't running yet, or lanes in the train queue not held for a person while the supervisor runs

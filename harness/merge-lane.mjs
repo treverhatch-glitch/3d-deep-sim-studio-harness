@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { busyCode } from './fsafe.mjs';
+import { busyCode, pidAlive as alive } from './fsafe.mjs';
 
 export const ALWAYS_SHARED = ['harness/**', 'scripts/**', 'studio/gates.json', 'package.json', 'package-lock.json'];
 
@@ -195,7 +195,6 @@ export function landingRecheckEnv(root, taskId, rec, { preHead, incoming }) {
 // ---- the short land lock -------------------------------------------------------------------------
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 
 /**
  * Run fn while holding <root>/.studio/locks/land.lock: only the final rebase check, the fast-forward and

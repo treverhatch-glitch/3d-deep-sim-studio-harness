@@ -42,6 +42,7 @@ import { OWNER_PUB_REL, ownerKeyPath, verifyApproval, OWNER_KEY_HOWTO } from './
 import { WORKER_NAME } from './permission.mjs';
 import { agentLikeName } from './agent-env.mjs';
 import { DEFAULT_TIER_RULES } from './tiers.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const POLICY_REL = 'studio/policy.json';
 export const PROPOSAL_REL = '.studio/policy-proposal.json';
@@ -64,7 +65,6 @@ export const NEVER_RELEASE_RULES = ['protected', 'harness', 'test-deleted', 'gol
 
 const git = (root, ...args) => spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
 const short = (iso) => String(iso || '').slice(0, 16).replace('T', ' ');
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const strs = (a) => (Array.isArray(a) ? a.map((x) => String(x).trim()).filter(Boolean) : []);
 export const policyBody = (d) => { const { signature, ...rest } = d || {}; return rest; };
 

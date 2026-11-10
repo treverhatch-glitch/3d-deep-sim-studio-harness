@@ -17,13 +17,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { STUDIO_STATE_DIR } from './event.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const MEMORY_FILE = 'error-memory.jsonl';
 const PENDING_FILE = 'error-memory-pending.json';
 const BOOKKEEPING = /^(studio|\.studio|\.lanes|node_modules|qa\/reports)(\/|$)/;
 const off = (env = process.env) => /^(off|0|false|no)$/i.test(String(env.STUDIO_ERROR_MEMORY || '').trim());
 export const memoryMax = (env = process.env) => (Number(env.STUDIO_ERROR_MEMORY_MAX) > 0 ? Math.floor(Number(env.STUDIO_ERROR_MEMORY_MAX)) : 500);
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
 
 /** Every remembered fix, oldest first (one per signature key). */

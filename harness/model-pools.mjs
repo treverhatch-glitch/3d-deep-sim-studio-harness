@@ -43,6 +43,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { OWNER_STEP_PROTECTED } from './owner-only.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const MODELS_REL = 'studio/models.json';
 export const ROUTING_DIR = () => path.join(STUDIO_STATE_DIR, 'routing');
@@ -50,7 +51,6 @@ export const OUTCOMES_FILE = () => path.join(ROUTING_DIR(), 'outcomes.json');
 export const AGY_QUOTA_FILE = () => path.join(ROUTING_DIR(), 'agy-quota.json');
 export const SIZE_CLASSES = ['small', 'normal', 'hard'];
 const H = 3600000;
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const num = (v, d) => { const n = Number(v); return v !== null && v !== undefined && String(v).trim() !== '' && Number.isFinite(n) ? n : d; };
 const ts = (e) => Date.parse(e?.ts) || 0;
 

@@ -18,11 +18,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
-import { writeAtomic } from './fsafe.mjs';
+import { writeAtomic, readJson } from './fsafe.mjs';
 
 const BASE_DIR = () => path.join(STUDIO_STATE_DIR, 'baseline');
 const TRUNK_FILE = () => path.join(STUDIO_STATE_DIR, 'trunk.json');
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const ANSI = /\u001b\[[0-9;]*m/g;
 
 /** Failing test names from a check's output (Vitest, Jest, Node test, pytest, gdUnit-style lines). */

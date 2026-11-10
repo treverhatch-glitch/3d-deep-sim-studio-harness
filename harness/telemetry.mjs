@@ -17,13 +17,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { STUDIO_STATE_DIR, emitEvent } from './event.mjs';
-import { withFileLock, writeAtomic } from './fsafe.mjs';
+import { withFileLock, writeAtomic, readJson } from './fsafe.mjs';
 
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 export const telemetryFull = (env = process.env) => String(env.STUDIO_TELEMETRY || '').trim().toLowerCase() === 'full';
 const dirOf = () => path.join(STUDIO_STATE_DIR, 'telemetry');
 const fileOf = (type) => path.join(dirOf(), `${type.replace(/[^\w.-]/g, '_')}.json`);
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const TOP = 10;
 
 function summaryEvent(type, c, now) {

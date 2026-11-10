@@ -8,8 +8,8 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { mainRoot } from './worktree.mjs';
 import { POLICY_REL, PROPOSAL_REL, AUTONOMOUS_ELIGIBLE, DEFAULT_REVIEW_H, NEVER_WORDS, readPolicy, policyText, setAutonomous, confirmProposal, declineProposal } from './policy-rules.mjs';
+import { readJson } from './fsafe.mjs';
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 export const USAGE = `Usage: npm run policy [-- --json]                          the rules in force, and whether ${POLICY_REL} counts
        npm run policy -- autonomous on --agent <name> [--actions ${AUTONOMOUS_ELIGIBLE.join(',')}] [--review-h ${DEFAULT_REVIEW_H}] --by <owner> [--why "…"] [--no-commit]

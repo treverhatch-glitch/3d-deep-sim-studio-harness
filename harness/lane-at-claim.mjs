@@ -21,8 +21,8 @@ import { spawnSync } from 'node:child_process';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { inLaneCopy, mainRoot, MAIN_CHECKOUT_ROLES, laneWantsCopy, lanelessWantsCopy, worktreeSupport, createLaneCopy, carryTaskBranchEx, LANES_DIR } from './worktree.mjs';
 import { laneOf } from './task-hold.mjs';
+import { readJson } from './fsafe.mjs';
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const isWorktree = (dir) => { try { return fs.existsSync(path.join(dir, '.git')) && spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir, encoding: 'utf8', windowsHide: true }).stdout.trim() === 'true'; } catch { return false; } };
 
 /**

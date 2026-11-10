@@ -117,13 +117,12 @@ import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFo
 import { checkStamped, stampWrite } from './workaround.mjs';
 import { gateEnv } from './gate-env.mjs';
 import { refreshStaleLane } from './train-refresh.mjs';
-import { writeAtomic } from './fsafe.mjs';
+import { writeAtomic, pidAlive as alive } from './fsafe.mjs';
 import { misplacedTrailers, misplacedTrailerText } from './trailers.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 
 export const TRAIN_DIR = path.join('.studio', 'train');
 export const trainOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_TRAIN || ''));

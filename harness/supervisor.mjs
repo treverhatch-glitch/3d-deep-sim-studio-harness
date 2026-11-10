@@ -40,7 +40,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { poolPlan, builderOrder, builderKind } from './api-pool.mjs';
 const poolPlanNow = (usage, live) => poolPlan({ usage, live });
-import { writeAtomic } from './fsafe.mjs';
+import { writeAtomic, readJson } from './fsafe.mjs';
 import { selfIdentity, pidAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
 
 export const STATUS_FILE = path.join(STUDIO_STATE_DIR, 'supervisor.json');
@@ -117,13 +117,6 @@ export function ingestRefusals(state, events, sigOf, now = Date.now(), env = pro
  */
 export const supervisorJitter = (env = process.env) => Math.min(0.5, Math.max(0, num(env.STUDIO_SUPERVISOR_JITTER, 0.1)));
 export const jitteredDelay = (baseMs, frac = supervisorJitter(), rnd = Math.random) => Math.max(1, Math.round(baseMs * (1 + (rnd() * 2 - 1) * frac)));
-const readJson = (f, d = null) => {
-  try {
-    return JSON.parse(fs.readFileSync(f, 'utf8'));
-  } catch {
-    return d;
-  }
-};
 export const readStatus = () => readJson(STATUS_FILE);
 /** "Try again" on a halted supervisor: `npm run studio:resume` writes it (a plain-text file is the retired War Room's); the next pass reads it. */
 const RESUME = path.join(STUDIO_STATE_DIR, 'supervisor-resume');

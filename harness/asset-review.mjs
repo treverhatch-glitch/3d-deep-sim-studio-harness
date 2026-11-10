@@ -57,6 +57,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { decodePng } from './png.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const REVIEW_CONFIG_REL = 'studio/asset-review.json';
 export const REVIEWS_DIR_REL = '.studio/asset-reviews';
@@ -75,7 +76,6 @@ export const REVIEW_DEFAULTS = {
   bgTolerance: 48,
 };
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const writeJson = (f, j) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${JSON.stringify(j, null, 2)}\n`); };
 const slash = (p) => String(p).split(path.sep).join('/').replace(/^\.\//, '');
 const pct = (x) => `${Math.round(x * 1000) / 10}%`;

@@ -49,6 +49,7 @@ import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { loadDotEnv } from './dotenv.mjs';
 import { webhookFrom, maskWebhook, scrub, formatFor, postOnce, DISCORD_MAX } from './report-post.mjs';
 import { digestHours as askDigestHours } from './ask-post.mjs';
+import { pidAlive as alive, readJson } from './fsafe.mjs';
 
 export const CONFIG_REL = 'studio/communicator.json';
 export const ROLES = ['orchestrator', 'keys', 'owner'];
@@ -58,13 +59,11 @@ const LOW_BUILDERS_MS = 10 * 60000;
 const LINE_FRESH_MS = 10 * 60000;
 const ID_RE = /^\d{5,25}$/;
 const stateFile = (root) => path.join(root, '.studio', 'comm', 'state.json');
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const writeJson = (f, v) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); const t = `${f}.${process.pid}.tmp`; fs.writeFileSync(t, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(t, f); } catch {} };
 const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const mins = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); return m < 90 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
 const cut = (ids, k = 6) => (ids.length <= k ? ids.join(', ') : `${ids.slice(0, k).join(', ')} +${ids.length - k} more`);
 const short = (s, n = 160) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
-const alive = (pid) => { try { process.kill(Number(pid), 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 /** Harness data put into a post can't ping anyone: no raw mentions, no @everyone/@here. */
 const quiet = (s) => String(s ?? '').replace(/<@[!&]?(\d+)>/g, '@$1').replace(/<!(channel|here|everyone)>/g, '!$1').replace(/@(everyone|here)\b/g, '@​$1');
 

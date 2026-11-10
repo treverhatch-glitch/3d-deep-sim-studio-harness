@@ -31,7 +31,7 @@ samples; 16.4% of engine land runs passed; 31.1 stalls or losses per day; 1.1% e
 |---|---|---|---|
 | Faster tests | The self-test is about 280 units and an hour in one process; the wait an agent feels is the whole run for a one-module change. | `--only`, `--changed [ref]` (the tests that name a changed file; `--deep` adds one hop through importers), `--jobs n`, `--timing`, `--balance` (shards by recorded time); `npm run selftest:changed`, `selftest:fast` (ported from the Fable trial, then narrowed: a change to one module selects 7 to 42 units, not 150). | Commit a timing file from a CI `--timing` run and switch CI to `--balance`; reuse one verified tree in the four slowest units; lower configured waits in the five timeout units (Fable R1 6.1 #1, #2). |
 | The overseer's official role | The rules existed in five files and nobody could ask "may I?" beforehand. A model proposes, a script decides. | `npm run overseer -- role | can <action> | pass`; docs/OVERSEER.md (does / signs / human-only, the loop, model and effort plan); `lock release --owner` for the owner's stand-ins. | The loop runner that wakes on events and writes proposals (Fable R1 section 9, item 1): after a week of the pass facts being used by hand. |
-| The Line Producer and the rig | The rig idles because work is serialised (lane overlaps, a builder cap of 2), not because resources are guarded too tightly; and heavy jobs still collide. CPU share is the wrong lever: the measure is heavy work waiting while resources were free. | Measure 12 (idle share) and 14 (stalls) in the scorecard; engine first (below). | Port the trial's `rig.decision` event and turn-taking between an engine land and a game verify (RIDS a and c), add a Windows process-memory sampler, then let the Line raise the builder count when the rig is idle and non-overlapping work is ready. One more week of data first. |
+| The Line Producer and the rig | The rig idles because work is serialised (lane overlaps, a builder cap of 2), not because resources are guarded too tightly; and heavy jobs still collide. CPU share is the wrong lever: the measure is heavy work waiting while resources were free. | Measure 12 (idle share) and 14 (stalls) in the scorecard; engine first (below); the Line's plan and its one-line summary now say when the machine is idle (CPU under 25%, RAM room for more builders than the pace allows) while the pace is the limit and ready builder work waits, and how many more it could carry. It starts none: the pace is the owner's spend decision (`npm run mode`). | Port the trial's `rig.decision` event and turn-taking between an engine land and a game verify (RIDS a and c), add a Windows process-memory sampler. Whether the Line may raise the builder count by itself is the owner's call after a week of the new note. |
 | Unity first | Engine work is the longest and worst queue (16.4% of land runs passed, p90 wait 9.4 h). Priority is cheap; speed needs fewer red lands. | Engine first by default: a studio's only engine gets the push (porters head the plan, the land hold has no time limit, two engine slots when the RAM allows) unless someone turned it off. | A porter's quick check before it queues (the config exists: `engines.<x>.quickCheck`), a warm editor kept between lands, test scenes sized to the change: game-side work for the engine track, measured by measure 13. |
 | Reference games | Cross-checking a feature against a known game needs a record of what that game does and a check that the task addressed it. | Anchors (ported, section 4): `studio/references/anchors.json`, `task add --anchors`, acceptance lines in the brief, met / unmet / unknown at done. They record behaviour, numbers and pacing as a yardstick, never material. | Filling the anchors for the game's first slice is the Director's and the reference scout's work. |
 | Toward full autonomy | Fewer roles and less text to obey. | Liaison and Dev Hacker retired (section 5); prompts pruned (section 7). | The remaining never-launched creative roles stay: a game at the goal's level needs art, sound and narrative. |
@@ -74,7 +74,7 @@ the rehearsal pair (138) moved to `qa/fixtures`; idea and floor side-flows with 
 | `STUDIO_BUILDER_ORDER` untested live | Tested in real supervisor passes with stand-in starts: `api,plan` with plan headroom starts the pool builder, `plan,api` and no order start a plan builder, a busy pool falls to the plan, `plan` alone starts nothing while the plan is over its target, a pool name with no key mapping never starts (`qa/selftest-279f.mjs`). |
 | `STUDIO_WATCH_INTERVAL=0` | Decided: it turns off the watch pass only. In the hub (and 2.80.0) it also stopped the watchdog, retro, learn pass and run report. |
 | Tests for N4, N6, N12 | They exist since 2.80 (`qa/selftest-280f.mjs`: the quarantined file a lane changes, `--no-op` on a chore, `test-golden.py` and `kind: test`); nothing to add. |
-| Duplicate helpers | One fold this round: the push record is read by one function for the engine line and the Line Producer. The larger folds (one process-alive helper, one `.env` parser, one `studio/game.json` reader) stay first on the next list. |
+| Duplicate helpers | Folded: 71 copies of "read a JSON file quietly" into `readJson` in `harness/fsafe.mjs`, which also skips a byte-order mark (so every reader of `studio/game.json` and of the state files gets the 2.80 fix, not only the three that had it; nine places that parsed `studio/game.json` themselves use it too); 19 copies of "is this process running" into `pidAlive` in the same file; three `.env` parsers and the router's own loader into `harness/dotenv.mjs` (`readEnvFile`, `loadDotEnv`); the engine-push record reader. Left on purpose: `upgrade-preflight.mjs` keeps its own copies (it must run with nothing else of the harness), and 19 JSON readers of a different shape (relative paths, ones that throw). |
 | The art pipeline | Kept (section 5). |
 | Port 3847 on the owner's PC | Nothing in the studio or the crew's harness copy names `127.0.0.1:3847` or `localhost:3847`; `HUB_PORT=3847` is still in the studio's `.env` and is no longer read. |
 | `lock release --owner` and the proxy | 2.80 accepted only `STUDIO_OUTSIDE_SIGNERS`; the crew's orchestrator is the owner's proxy. Now also the proxy and beta mode's agents. |
@@ -123,27 +123,28 @@ harness change names the scorecard measure it moves.
 
 ## 9. Size
 
-2.81.0 against 2.80.0: 176 files, +3,235 / −1,602 lines (net +1,633). This round adds more than it removes: the cuts took about 1,600 lines; the
-scorecard, the overseer's role, the test runner's options and the ported fixes with their tests added about 3,100.
-2.80.0 and 2.81.0 together, against 2.79.2: 335 files, +5,119 / −21,181 lines (net −16,062).
+2.81.0 against 2.80.0: 250 files, +3,498 / −1,818 lines (net +1,680). This round adds more than it removes: the cuts and folds took about 1,800 lines; the
+scorecard, the overseer's role, the test runner's options and the ported fixes with their tests added about 3,500.
+2.80.0 and 2.81.0 together, against 2.79.2: 397 files, +5,373 / −21,388 lines (net −16,015).
 
 | | 2.79.2 | 2.80.0 | 2.81.0 |
 |---|---|---|---|
-| Tracked lines | 175,491 | 157,794 | 159,370 |
+| Tracked lines | 175,491 | 157,794 | 159,476 |
 | `harness/` modules | 319 | 310 | 314 |
 | npm scripts | 179 | 165 | 165 |
 | `STUDIO_*` settings | 729 | 712 | 716 |
 | Literal event types | 477 | 438 | 430 |
 | Gates | 37 | 35 | 35 |
-| `train.mjs` / `task.mjs` / `agent.mjs` | 3,438 / 2,660 / 2,633 | 3,438 / 2,660 / 2,645 | 3,440 / 2,708 / 2,665 |
+| `train.mjs` / `task.mjs` / `agent.mjs` | 3,438 / 2,660 / 2,633 | 3,438 / 2,660 / 2,645 | 3,439 / 2,708 / 2,665 |
 
-The three large files grew by 2, 48 and 20 lines for the ported fixes' wiring.
+The three large files grew by 1, 48 and 20 lines for the ported fixes' wiring.
 
 ## Untested
 
 - Everything on the crew's Windows PC, and every ported feature in a live studio.
 - The session prompt without its token numbers, as a cost change.
 - Engine first by default with a real Unity editor.
+- The folded helpers on Windows beyond the pull request's checks (a `.env` or a JSON state file with unusual content on the crew's PC).
 - `--jobs` over the whole corpus (the build machine has 2 cores); `--balance` in CI (no timing file is committed yet).
 
 ## Upgrade note

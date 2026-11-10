@@ -41,6 +41,7 @@ import { divergenceFromLog, divergenceText } from './divergence.mjs';
 import { timeoutFlakesFromLog } from './timeout-rerun.mjs';
 import { seenBefore, seenLine } from './error-memory.mjs';
 import { laneOf } from './task-hold.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const FACTS_HEAD = 'Hand-back facts (written by the harness from git and the gate logs; the note after them is the agent\'s or the train\'s):';
 export const FACTS_END = 'End of hand-back facts.';
@@ -56,7 +57,6 @@ const SUBJECT_MAX = 72;
 const REFUSALS_DIR = () => path.join(STUDIO_STATE_DIR, 'handback-facts');
 const BOOKKEEPING = /^(studio|\.studio|\.lanes|node_modules|qa\/reports)(\/|$)/;
 const slash = (p) => String(p || '').split(path.sep).join('/');
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const readText = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
 const mtime = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
 const git = (cwd, ...a) => spawnSync('git', a, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });

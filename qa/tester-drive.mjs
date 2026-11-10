@@ -28,11 +28,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { pidAlive as alive, readJson } from '../harness/fsafe.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const ACTING = new Set(['open', 'click', 'key', 'drag', 'wait', 'shot']);
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const xy = (v) => { const m = String(v || '').match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/); return m ? { x: Number(m[1]), y: Number(m[2]) } : null; };
 const safeName = (n) => String(n || 'shot').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'shot';
 
@@ -170,7 +170,6 @@ async function daemon(args) {
 
 // ---- the client --------------------------------------------------------------------------------------------------
 
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 function post(port, body, ms = 180000) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);

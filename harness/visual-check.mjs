@@ -44,8 +44,8 @@ function checkVisualProof(task, root) {
   try { return JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch { return { ok: false, why: `the visual proof's pixel check didn't report (${String(r.stderr || '').trim().split('\n').pop() || `exit ${r.status}`})` }; }
 }
 import { engineTask, engineTarget } from './engine-tracks.mjs';
+import { readJson } from './fsafe.mjs';
 
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(tmp, f); };
 const sha = (f) => { try { return crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex'); } catch { return null; } };
 const rel = (root, f) => path.relative(root, f).split(path.sep).join('/');

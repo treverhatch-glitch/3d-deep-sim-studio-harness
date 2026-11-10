@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { appendLine } from './fsafe.mjs';
+import { appendLine, readJson } from './fsafe.mjs';
 import { loadStudioEnvAtStart } from './dotenv.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -115,7 +115,7 @@ function studioGameId() {
   gameIdAt = Date.now();
   gameIdCache = null;
   try {
-    const g = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'game.json'), 'utf8')).cartridge;
+    const g = readJson(path.join(REPO_ROOT, 'studio', 'game.json'), {}).cartridge;
     if (g) gameIdCache = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'cartridges', g, 'cartridge.json'), 'utf8')).id || null;
   } catch {
     // no game yet, or one made before 2.25

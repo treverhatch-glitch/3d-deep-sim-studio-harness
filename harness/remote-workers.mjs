@@ -48,6 +48,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, readRecentEvents } from './event.mjs';
 import { mainRoot, mainBranch, MAIN_CHECKOUT_ROLES, removeLaneCopy, LANES_DIR } from './worktree.mjs';
+import { pidAlive as alive, readJson } from './fsafe.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TASK_ID = /^[A-Z]+-\d+$/;
@@ -62,11 +63,9 @@ export const NEVER = [/^studio\//, /^\.studio\//, /^\.lanes\//, /^\.env($|\.)/, 
 export const HARNESS_CODE = /^(harness|scripts|tools|\.claude|\.githooks)\/|^qa\/[^/]+\.mjs$|^package(-lock)?\.json$/;
 const DOCS_TYPES = new Set(['research', 'study', 'idea', 'docs', 'design']);
 const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const cleanEnv = (extra = {}) => { const e = { ...process.env, ...extra }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/.test(k)) delete e[k]; return e; };
 const git = (cwd, args, opts = {}) => spawnSync('git', args, { cwd, encoding: 'utf8', env: cleanEnv(), maxBuffer: 64 * 1024 * 1024, windowsHide: true, ...opts });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
-const alive = (pid) => { if (!pid) return false; try { process.kill(Number(pid), 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 
 // ---- settings --------------------------------------------------------------------------------------------------------
 

@@ -29,7 +29,7 @@ Read this list first: the names a real crew sets in its `.env`, and the main sch
 - `STUDIO_TIER_TOP_MODEL` · no simple default · harness/model-tiers.mjs, harness/rescue.mjs, qa/selftest-235.mjs (+6 more) · undocumented
 - `STUDIO_TIER_MID_MODEL` · no simple default · qa/selftest-273e.mjs, qa/selftest-276k.mjs, qa/selftest-277n.mjs (+3 more) · undocumented
 - `STUDIO_TIER_CHEAP_MODEL` · no simple default · qa/selftest-273e.mjs, qa/selftest-276k.mjs, qa/selftest-277n.mjs (+2 more) · [AUTONOMY.md:390](AUTONOMY.md)
-- `STUDIO_MODEL_ROUTING` · no simple default · harness/model-pools.mjs, qa/selftest-277n.mjs, qa/selftest-2781a.mjs (+1 more) · [LINE-PRODUCER.md:101](LINE-PRODUCER.md)
+- `STUDIO_MODEL_ROUTING` · no simple default · harness/model-pools.mjs, qa/selftest-277n.mjs, qa/selftest-2781a.mjs (+1 more) · [LINE-PRODUCER.md:102](LINE-PRODUCER.md)
 - `STUDIO_REVIEW_TOOLS` · no simple default · harness/review.mjs, qa/selftest-2781b.mjs, qa/selftest-2782d.mjs · [AGENT-TOOLS.md:137](AGENT-TOOLS.md)
 - `STUDIO_KEYMAP_*` · no simple default · harness/agent-env.mjs, harness/agent.mjs, qa/selftest-259e.mjs · [AGENT-TOOLS.md:303](AGENT-TOOLS.md)
 - `STUDIO_NIM_FALLBACK` · no simple default · harness/agent.mjs, qa/selftest-230i.mjs, qa/selftest-2601n.mjs · undocumented
@@ -61,9 +61,9 @@ Read this list first: the names a real crew sets in its `.env`, and the main sch
 - `STUDIO_TRAIN` · no simple default · harness/done-check.mjs, harness/heavy-budget.mjs, harness/task.mjs (+34 more) · [CLEANUP-2.79-AUDIT.md:420](CLEANUP-2.79-AUDIT.md)
 - `STUDIO_TRAIN_PIPELINE` · no simple default · harness/train-pipeline.mjs, qa/selftest-2653a.mjs, qa/selftest-269q.mjs (+9 more) · [PATCH-2-CROSSCHECK.md:51](PATCH-2-CROSSCHECK.md)
 - `STUDIO_RUN_T0` · set per role or built at run time (see the full list below)
-- `STUDIO_TESTER` · no simple default · harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:62](LINE-PRODUCER.md)
-- `STUDIO_TESTER_EVERY_HOURS` · no simple default · harness/line-producer.mjs, harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:30](LINE-PRODUCER.md)
-- `STUDIO_TESTER_MIN_LANDINGS` · no simple default · harness/line-producer.mjs, harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:30](LINE-PRODUCER.md)
+- `STUDIO_TESTER` · no simple default · harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:63](LINE-PRODUCER.md)
+- `STUDIO_TESTER_EVERY_HOURS` · no simple default · harness/line-producer.mjs, harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:31](LINE-PRODUCER.md)
+- `STUDIO_TESTER_MIN_LANDINGS` · no simple default · harness/line-producer.mjs, harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:31](LINE-PRODUCER.md)
 - `STUDIO_TESTER_TOOLS` · no simple default · harness/tester.mjs, qa/selftest-279t.mjs · [RELEASE-2.79.0.md:20](RELEASE-2.79.0.md)
 - `STUDIO_BACKUP_DIR` · no simple default · harness/kickoff.mjs, harness/learn.mjs, scripts/new-studio.mjs (+2 more) · [BACKUPS.md:4](BACKUPS.md)
 - `STUDIO_BACKUP_KEEP` · default `60` · harness/learn.mjs, qa/selftest-2731b.mjs · [BACKUPS.md:32](BACKUPS.md)
@@ -109,8 +109,8 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_AGY_NUDGE_MIN` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, qa/selftest-2781b.mjs · [AGENT-TOOLS.md:104](AGENT-TOOLS.md)
 - `STUDIO_AGY_PRINT_TIMEOUT` · no simple default · harness/agent.mjs, harness/review.mjs, qa/selftest-276i.mjs (+3 more) · [AGENT-TOOLS.md:65](AGENT-TOOLS.md)
 - `STUDIO_AGY_PROMPT` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, harness/budget.mjs (+6 more) · [AGENT-TOOLS.md:62](AGENT-TOOLS.md)
-- `STUDIO_AGY_QUOTA_CMD` · no simple default · harness/model-pools.mjs, qa/selftest-277n.mjs · [LINE-PRODUCER.md:95](LINE-PRODUCER.md)
-- `STUDIO_AGY_QUOTA_SEC` · no simple default · harness/model-pools.mjs, qa/selftest-277n.mjs · [LINE-PRODUCER.md:96](LINE-PRODUCER.md)
+- `STUDIO_AGY_QUOTA_CMD` · no simple default · harness/model-pools.mjs, qa/selftest-277n.mjs · [LINE-PRODUCER.md:96](LINE-PRODUCER.md)
+- `STUDIO_AGY_QUOTA_SEC` · no simple default · harness/model-pools.mjs, qa/selftest-277n.mjs · [LINE-PRODUCER.md:97](LINE-PRODUCER.md)
 - `STUDIO_AGY_STREAM` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, qa/selftest-2773c.mjs (+2 more) · [AGENT-TOOLS.md:112](AGENT-TOOLS.md)
 - `STUDIO_AGY_STREAM_FIRST_SEC` · no simple default · harness/agy-stream.mjs, qa/selftest-2773c.mjs, qa/selftest-2781b.mjs · [AGENT-TOOLS.md:111](AGENT-TOOLS.md)
 - `STUDIO_AGY_STREAM_IDLE_SEC` · no simple default · harness/agy-stream.mjs, qa/selftest-2773c.mjs, qa/selftest-2781b.mjs · [AGENT-TOOLS.md:109](AGENT-TOOLS.md)
@@ -422,7 +422,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## HARNESS_* (3)
 
-- `STUDIO_HARNESS_REF` · no simple default · harness/hook-stamp.mjs, harness/upgrade-smoke.mjs, harness/upgrade-watch.mjs (+10 more) · [RELEASE.md:57](RELEASE.md)
+- `STUDIO_HARNESS_REF` · no simple default · harness/hook-stamp.mjs, harness/upgrade-smoke.mjs, harness/upgrade-watch.mjs (+11 more) · [RELEASE.md:57](RELEASE.md)
 - `STUDIO_HARNESS_REF_TIMEOUT_MS` · default `'3000'` · harness/hook-stamp.mjs, harness/lane-orphans.mjs, harness/lanes.mjs · undocumented
 - `STUDIO_HARNESS_SCOUT` · no simple default · harness/harness-scout.mjs, harness/supervisor.mjs, harness/upgrade-smoke.mjs (+1 more) · [AUTONOMY.md:473](AUTONOMY.md)
 
@@ -497,7 +497,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_KEYMAP_AGENT_BUILDER_S3` · no simple default · harness/agent-env.mjs · [AGENT-TOOLS.md:310](AGENT-TOOLS.md)
 - `STUDIO_KEYMAP_AGENT_KM_1` · no simple default · qa/selftest-259e.mjs · undocumented
 - `STUDIO_KEYMAP_AGENT_KM_7` · no simple default · qa/selftest-259e.mjs · undocumented
-- `STUDIO_KEYMAP_BUILDER` · no simple default · qa/selftest-259e.mjs · [AGENT-TOOLS.md:309](AGENT-TOOLS.md)
+- `STUDIO_KEYMAP_BUILDER` · no simple default · qa/selftest-259e.mjs, qa/selftest-281a.mjs · [AGENT-TOOLS.md:309](AGENT-TOOLS.md)
 
 ## LAND_* (5)
 
@@ -535,18 +535,18 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## LINE_* (13)
 
 - `STUDIO_LINE_BUILDER_GB` · no simple default · harness/line-producer.mjs, qa/selftest-276k.mjs · [LINE-PRODUCER.md:16](LINE-PRODUCER.md)
-- `STUDIO_LINE_CHAIN_HOLD_MIN` · no simple default · harness/line-producer.mjs, qa/selftest-2781f.mjs, qa/selftest-2791b.mjs · [LINE-PRODUCER.md:28](LINE-PRODUCER.md)
-- `STUDIO_LINE_CHAIN_MIN` · no simple default · harness/line-producer.mjs, qa/selftest-276k.mjs, qa/selftest-277n.mjs (+2 more) · [LINE-PRODUCER.md:19](LINE-PRODUCER.md)
+- `STUDIO_LINE_CHAIN_HOLD_MIN` · no simple default · harness/line-producer.mjs, qa/selftest-2781f.mjs, qa/selftest-2791b.mjs · [LINE-PRODUCER.md:29](LINE-PRODUCER.md)
+- `STUDIO_LINE_CHAIN_MIN` · no simple default · harness/line-producer.mjs, qa/selftest-276k.mjs, qa/selftest-277n.mjs (+2 more) · [LINE-PRODUCER.md:20](LINE-PRODUCER.md)
 - `STUDIO_LINE_CPU_BUSY_PCT` · no simple default · harness/line-producer.mjs, harness/tester.mjs, qa/selftest-276k.mjs · [LINE-PRODUCER.md:16](LINE-PRODUCER.md)
-- `STUDIO_LINE_EXPANSION_MIN` · no simple default · harness/line-producer.mjs, qa/selftest-276k.mjs · [LINE-PRODUCER.md:21](LINE-PRODUCER.md)
-- `STUDIO_LINE_EXPANSION_SHARE` · no simple default · harness/line-producer.mjs, qa/selftest-276k.mjs, qa/selftest-277n.mjs (+3 more) · [LINE-PRODUCER.md:21](LINE-PRODUCER.md)
-- `STUDIO_LINE_HOLD_MAX_MIN` · no simple default · harness/line-producer.mjs, qa/selftest-2791b.mjs · [LINE-PRODUCER.md:60](LINE-PRODUCER.md)
-- `STUDIO_LINE_LANES` · no simple default · harness/lane-plan.mjs, qa/selftest-2781a.mjs, qa/selftest-2781g.mjs (+1 more) · [LINE-PRODUCER.md:22](LINE-PRODUCER.md)
-- `STUDIO_LINE_PLAN_MAX_SEC` · no simple default · harness/line-producer.mjs, qa/selftest-276k.mjs, qa/selftest-277n.mjs (+3 more) · [LINE-PRODUCER.md:53](LINE-PRODUCER.md)
-- `STUDIO_LINE_PRODUCER` · no simple default · harness/line-producer.mjs, harness/supervisor.mjs, qa/selftest-276k.mjs (+11 more) · [LINE-PRODUCER.md:46](LINE-PRODUCER.md)
-- `STUDIO_LINE_PROTECTED_HOLD_MIN` · no simple default · harness/line-producer.mjs, qa/selftest-277n.mjs · [LINE-PRODUCER.md:66](LINE-PRODUCER.md)
-- `STUDIO_LINE_RIG` · no simple default · harness/line-producer.mjs, qa/selftest-276k.mjs, qa/selftest-277n.mjs (+4 more) · [LINE-PRODUCER.md:52](LINE-PRODUCER.md)
-- `STUDIO_LINE_TWINS` · no simple default · harness/line-producer.mjs · [LINE-PRODUCER.md:29](LINE-PRODUCER.md)
+- `STUDIO_LINE_EXPANSION_MIN` · no simple default · harness/line-producer.mjs, qa/selftest-276k.mjs · [LINE-PRODUCER.md:22](LINE-PRODUCER.md)
+- `STUDIO_LINE_EXPANSION_SHARE` · no simple default · harness/line-producer.mjs, qa/selftest-276k.mjs, qa/selftest-277n.mjs (+3 more) · [LINE-PRODUCER.md:22](LINE-PRODUCER.md)
+- `STUDIO_LINE_HOLD_MAX_MIN` · no simple default · harness/line-producer.mjs, qa/selftest-2791b.mjs · [LINE-PRODUCER.md:61](LINE-PRODUCER.md)
+- `STUDIO_LINE_LANES` · no simple default · harness/lane-plan.mjs, qa/selftest-2781a.mjs, qa/selftest-2781g.mjs (+1 more) · [LINE-PRODUCER.md:23](LINE-PRODUCER.md)
+- `STUDIO_LINE_PLAN_MAX_SEC` · no simple default · harness/line-producer.mjs, qa/selftest-276k.mjs, qa/selftest-277n.mjs (+3 more) · [LINE-PRODUCER.md:54](LINE-PRODUCER.md)
+- `STUDIO_LINE_PRODUCER` · no simple default · harness/line-producer.mjs, harness/supervisor.mjs, qa/selftest-276k.mjs (+11 more) · [LINE-PRODUCER.md:47](LINE-PRODUCER.md)
+- `STUDIO_LINE_PROTECTED_HOLD_MIN` · no simple default · harness/line-producer.mjs, qa/selftest-277n.mjs · [LINE-PRODUCER.md:67](LINE-PRODUCER.md)
+- `STUDIO_LINE_RIG` · no simple default · harness/line-producer.mjs, qa/selftest-276k.mjs, qa/selftest-277n.mjs (+4 more) · [LINE-PRODUCER.md:53](LINE-PRODUCER.md)
+- `STUDIO_LINE_TWINS` · no simple default · harness/line-producer.mjs · [LINE-PRODUCER.md:30](LINE-PRODUCER.md)
 
 ## LOCK_* (4)
 
@@ -675,11 +675,11 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## REMOTE_* (7)
 
-- `STUDIO_REMOTE` · no simple default · harness/line-producer.mjs, harness/remote-workers.mjs, qa/selftest-277o.mjs · [LINE-PRODUCER.md:25](LINE-PRODUCER.md)
-- `STUDIO_REMOTE_FETCH_MIN` · no simple default · harness/remote-workers.mjs, qa/selftest-277o.mjs · [LINE-PRODUCER.md:25](LINE-PRODUCER.md)
+- `STUDIO_REMOTE` · no simple default · harness/line-producer.mjs, harness/remote-workers.mjs, qa/selftest-277o.mjs · [LINE-PRODUCER.md:26](LINE-PRODUCER.md)
+- `STUDIO_REMOTE_FETCH_MIN` · no simple default · harness/remote-workers.mjs, qa/selftest-277o.mjs · [LINE-PRODUCER.md:26](LINE-PRODUCER.md)
 - `STUDIO_REMOTE_FETCH_TIMEOUT_S` · no simple default · harness/remote-workers.mjs · [REMOTE-WORKERS.md:90](REMOTE-WORKERS.md)
 - `STUDIO_REMOTE_LEASE_H` · no simple default · harness/remote-workers.mjs, harness/task-budget.mjs, qa/selftest-277o.mjs · [REMOTE-WORKERS.md:45](REMOTE-WORKERS.md)
-- `STUDIO_REMOTE_MAX` · no simple default · harness/remote-workers.mjs, qa/selftest-277o.mjs · [LINE-PRODUCER.md:25](LINE-PRODUCER.md)
+- `STUDIO_REMOTE_MAX` · no simple default · harness/remote-workers.mjs, qa/selftest-277o.mjs · [LINE-PRODUCER.md:26](LINE-PRODUCER.md)
 - `STUDIO_REMOTE_NAME` · no simple default · harness/remote-workers.mjs, qa/selftest-277o.mjs · [REMOTE-WORKERS.md:30](REMOTE-WORKERS.md)
 - `STUDIO_REMOTE_QUEUE_TIMEOUT_S` · no simple default · harness/remote-workers.mjs · [REMOTE-WORKERS.md:91](REMOTE-WORKERS.md)
 
@@ -739,7 +739,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## SHARED_* (2)
 
 - `STUDIO_SHARED_PROFILES` · no simple default · harness/profile-guard.mjs, qa/selftest-230o.mjs, qa/selftest-2583p.mjs · undocumented
-- `STUDIO_SHARED_SIM` · no simple default · harness/lane-plan.mjs, harness/line-producer.mjs, qa/selftest-2781a.mjs (+3 more) · [LINE-PRODUCER.md:23](LINE-PRODUCER.md)
+- `STUDIO_SHARED_SIM` · no simple default · harness/lane-plan.mjs, harness/line-producer.mjs, qa/selftest-2781a.mjs (+3 more) · [LINE-PRODUCER.md:24](LINE-PRODUCER.md)
 
 ## SLOW_* (5)
 
@@ -823,15 +823,15 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## TESTER_* (9)
 
-- `STUDIO_TESTER` · no simple default · harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:62](LINE-PRODUCER.md)
-- `STUDIO_TESTER_*` · no simple default · harness/tester.mjs · [LINE-PRODUCER.md:62](LINE-PRODUCER.md)
+- `STUDIO_TESTER` · no simple default · harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:63](LINE-PRODUCER.md)
+- `STUDIO_TESTER_*` · no simple default · harness/tester.mjs · [LINE-PRODUCER.md:63](LINE-PRODUCER.md)
 - `STUDIO_TESTER_BUILD_TIMEOUT_MIN` · no simple default · harness/tester.mjs · [TESTER.md:147](TESTER.md)
 - `STUDIO_TESTER_COMPARE_EVERY` · no simple default · harness/tester.mjs, qa/selftest-279t.mjs · [RELEASE-2.79.0.md:16](RELEASE-2.79.0.md)
 - `STUDIO_TESTER_DRIVER_IDLE_MIN` · default `20` · qa/tester-drive.mjs · [TESTER.md:118](TESTER.md)
-- `STUDIO_TESTER_EVERY_HOURS` · no simple default · harness/line-producer.mjs, harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:30](LINE-PRODUCER.md)
-- `STUDIO_TESTER_MIN_LANDINGS` · no simple default · harness/line-producer.mjs, harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:30](LINE-PRODUCER.md)
+- `STUDIO_TESTER_EVERY_HOURS` · no simple default · harness/line-producer.mjs, harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:31](LINE-PRODUCER.md)
+- `STUDIO_TESTER_MIN_LANDINGS` · no simple default · harness/line-producer.mjs, harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:31](LINE-PRODUCER.md)
 - `STUDIO_TESTER_TOOLS` · no simple default · harness/tester.mjs, qa/selftest-279t.mjs · [RELEASE-2.79.0.md:20](RELEASE-2.79.0.md)
-- `STUDIO_TESTER_WIRE_TASKS` · no simple default · harness/line-producer.mjs, harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:30](LINE-PRODUCER.md)
+- `STUDIO_TESTER_WIRE_TASKS` · no simple default · harness/line-producer.mjs, harness/tester.mjs, qa/selftest-279t.mjs · [LINE-PRODUCER.md:31](LINE-PRODUCER.md)
 
 ## THREADS_* (3)
 
@@ -1081,7 +1081,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_LONG_CACHE` · no simple default · harness/agent.mjs, qa/selftest-2652a.mjs · [TOKEN-SAVERS.md:10](TOKEN-SAVERS.md)
 - `STUDIO_LOOP_HANDBACKS` · default `3` · harness/agent.mjs, harness/session-outcome.mjs, qa/selftest.mjs · undocumented
 - `STUDIO_MODE` · no simple default · qa/selftest-255.mjs · undocumented
-- `STUDIO_MODEL_ROUTING` · no simple default · harness/model-pools.mjs, qa/selftest-277n.mjs, qa/selftest-2781a.mjs (+1 more) · [LINE-PRODUCER.md:101](LINE-PRODUCER.md)
+- `STUDIO_MODEL_ROUTING` · no simple default · harness/model-pools.mjs, qa/selftest-277n.mjs, qa/selftest-2781a.mjs (+1 more) · [LINE-PRODUCER.md:102](LINE-PRODUCER.md)
 - `STUDIO_MSG_FILE` · no simple default · scripts/hooks/commit-msg · undocumented
 - `STUDIO_NODE` · no simple default · harness/supervisor.mjs · undocumented
 - `STUDIO_OFF` · no simple default · harness/self-triage.mjs · undocumented
@@ -1101,7 +1101,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_QUIET_BUSY_ROLES` · no simple default · harness/flake-quiet.mjs, qa/selftest-2782b.mjs · [WORK-ORGANIZATION.md:657](WORK-ORGANIZATION.md)
 - `STUDIO_REACHABILITY` · default `'warn'` · harness/done-check.mjs, harness/reachability.mjs, harness/task.mjs (+52 more) · [DISCORD-CREW.md:176](DISCORD-CREW.md)
 - `STUDIO_RECORDS` · no simple default · harness/lane-studio.mjs · undocumented
-- `STUDIO_REGION_FILES` · no simple default · harness/lane-regions.mjs, qa/selftest-2782e.mjs · [LINE-PRODUCER.md:56](LINE-PRODUCER.md)
+- `STUDIO_REGION_FILES` · no simple default · harness/lane-regions.mjs, qa/selftest-2782e.mjs · [LINE-PRODUCER.md:57](LINE-PRODUCER.md)
 - `STUDIO_REHEARSAL` · no simple default · harness/agent.mjs, harness/lane-at-claim.mjs, harness/rehearsal.mjs (+20 more) · undocumented
 - `STUDIO_RELEASE_BACKUP_DIR` · no simple default · scripts/release-ship.mjs · [RELEASE.md:13](RELEASE.md)
 - `STUDIO_RENDERER_FILE` · no simple default · harness/visual-proof.mjs, qa/chromium.mjs, qa/selftest-270t.mjs · [BROWSER-PLAY.md:85](BROWSER-PLAY.md)

@@ -54,6 +54,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { agentOnPermission, permissionText, permittedSetter, WORKER_NAME, AGENT_SHELL } from './permission.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const CONTRACTS_REL = 'studio/contracts';
 export const contractRel = (id) => `${CONTRACTS_REL}/${id}.json`;
@@ -112,7 +113,7 @@ export function requiredTypes(root = REPO_ROOT) {
   try { const main = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { windowsHide: true, cwd: root, encoding: 'utf8' }).stdout.trim(); if (main && path.basename(main) === '.git') roots.push(path.dirname(main)); } catch { /* not git */ }
   const out = new Set();
   for (const r of roots) {
-    try { const req = JSON.parse(fs.readFileSync(path.join(r, 'studio', 'game.json'), 'utf8'))?.contracts?.required; if (Array.isArray(req)) for (const t of req) out.add(String(t).toLowerCase()); } catch { /* no manifest */ }
+    try { const req = readJson(path.join(r, 'studio', 'game.json'))?.contracts?.required; if (Array.isArray(req)) for (const t of req) out.add(String(t).toLowerCase()); } catch { /* no manifest */ }
   }
   return [...out];
 }

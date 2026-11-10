@@ -28,6 +28,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { REPO_ROOT } from '../harness/event.mjs';
 import { canonicalJson } from '../harness/hash.mjs';
+import { readJson } from '../harness/fsafe.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const OPS = new Set(['eq', 'gte', 'lte', 'truthy']);
@@ -101,7 +102,6 @@ export function validateJourney(j) {
   return bad;
 }
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 /** Is this action one of the cartridge's public controls? */
 export function isPublicAction(cart, name, args = {}, bible = null) {

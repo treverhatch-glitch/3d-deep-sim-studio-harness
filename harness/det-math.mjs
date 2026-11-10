@@ -23,6 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT } from './event.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const INEXACT = Object.freeze(['sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh', 'exp', 'expm1', 'log', 'log1p', 'log2', 'log10', 'pow', 'hypot', 'cbrt']);
 const INEXACT_SET = new Set(INEXACT);
@@ -41,7 +42,6 @@ export function normMode(v, fallback = 'warn') {
   return MODES.includes(s) ? { mode: s, bad: null } : { mode: 'warn', bad: String(v) };
 }
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const toPosix = (p) => String(p).replace(/\\/g, '/');
 const relOf = (root, f) => toPosix(path.relative(root, f));
 

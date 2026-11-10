@@ -18,11 +18,9 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { writeAtomic } from './fsafe.mjs';
+import { writeAtomic, pidAlive as alive, readJson } from './fsafe.mjs';
 
 const statusFile = (root, id) => path.join(root, '.studio', 'train', String(id), 'status.json');
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 
 /** Seconds or minutes, in words: "40 s", "12 min", "1 h 5 min". */
 export function durText(ms) {

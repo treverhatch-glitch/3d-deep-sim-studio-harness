@@ -34,6 +34,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { globRe } from './merge-lane.mjs';
+import { readJson } from './fsafe.mjs';
 
 /** The patterns every lane copy has had since 2.29: everything but the shared studio/ and .studio/ links. */
 export const BASE_SPARSE = ['/*', '!/studio/', '!/.studio/'];
@@ -58,7 +59,6 @@ const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', ma
 const off = (v) => /^(off|0|false|no)$/i.test(String(v || '').trim());
 const norm = (p) => String(p || '').trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '').replace(/\/+$/, '');
 const hasWild = (g) => /[*?[]/.test(g);
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const uniq = (a) => [...new Set(a)];
 
 /** The main checkout (a lane copy at <main>/.lanes/<x> names it), without importing worktree.mjs. */

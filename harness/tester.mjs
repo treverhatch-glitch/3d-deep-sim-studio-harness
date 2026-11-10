@@ -45,6 +45,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { gameTesterConfig, DEFAULT_STYLES, DEFAULT_GOALS, DEFAULT_AREAS } from './tester-config.mjs';
+import { pidAlive as alive, readJson } from './fsafe.mjs';
 
 export const TESTER_AGENT = 'game-tester';
 export const TESTER_ROLE = 'qa-playtester';
@@ -52,7 +53,6 @@ export const STATUSES = ['working', 'broken', 'missing', 'not-reached'];
 export const VERDICTS = ['green', 'amber', 'red'];
 const OFF = /^(off|0|false|no)$/i;
 const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(tmp, f); };
 const rel = (root, f) => path.relative(root, f).split(path.sep).join('/');
 const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', windowsHide: true });
@@ -242,7 +242,6 @@ function takeLock(root, id, { stale = false } = {}) {
   try { const fd = fs.openSync(lockFile(root), 'wx'); fs.writeSync(fd, JSON.stringify({ pid: process.pid, run: id, at: new Date().toISOString() })); fs.closeSync(fd); return true; } catch { return false; }
 }
 const dropLock = (root) => { try { fs.rmSync(lockFile(root), { force: true }); } catch {} };
-const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 
 /** Start a run: the plan, the brief, the build (a child process; inline: here, waiting). Returns the run record. */
 export async function startRun({ root, env = process.env, now = Date.now(), by = 'line-producer', seed = null, inline = false, deps = {} } = {}) {

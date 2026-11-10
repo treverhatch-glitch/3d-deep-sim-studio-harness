@@ -1501,3 +1501,8 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-293 — the overseer's role was spread over five files, and 2.80 refused its lock release · fixed in 2.81.0
 - **Evidence:** the crew's orchestrator took 567 board steps in 8 days with no single statement of what it may do; 2.80's `lock release --owner` accepted only STUDIO_OUTSIDE_SIGNERS, and the orchestrator is the owner's proxy.
 - **Fix:** `npm run overseer -- role | can | pass`, docs/OVERSEER.md; the proxy and beta mode's agents may release another's lock. qa/selftest-281a.mjs.
+
+### P-294 — 71 private copies of "read a JSON file", and almost none skipped a byte-order mark · fixed in 2.81.0
+- **Evidence:** 2.80 fixed `studio/game.json` saved with a byte-order mark for the cartridge reader and the tester's config (N11); the other readers of the same file (engine tracks, the Unity gate, the asset gate, perf tests and more) and the state-file readers still read such a file as missing.
+- **Fix:** one `readJson` in harness/fsafe.mjs (skips the mark), one `pidAlive` (19 copies), one `.env` reader in harness/dotenv.mjs. qa/selftest-281a.mjs.
+

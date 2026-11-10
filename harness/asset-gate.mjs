@@ -66,6 +66,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { agentOnPermission } from './permission.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const MODEL_EXT = ['.glb', '.gltf', '.fbx', '.obj', '.blend', '.dae', '.usd', '.usdz'];
 export const IMAGE_EXT = ['.png', '.jpg', '.jpeg', '.webp', '.tga', '.ktx2', '.exr', '.hdr'];
@@ -94,7 +95,6 @@ export const ASSET_DEFAULTS = {
 /** 2.67.1 (j): where the asset ("make") task's brief template lives (a stable path other tools copy it from). */
 export const ASSET_BRIEF_TEMPLATE = 'studio/templates/asset-brief.md';
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const slash = (p) => String(p).split(path.sep).join('/').replace(/^\.\//, '');
 
 /** The game's asset settings (studio/game.json "assets") merged over the defaults; declared = the block exists. */

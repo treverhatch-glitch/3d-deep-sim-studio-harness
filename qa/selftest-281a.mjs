@@ -158,6 +158,70 @@ export async function selftest281A({ dir, run, report, tmpRoot }) {
     });
   }
 
+  // ---- the Line Producer says when the machine has room the pace doesn't use ----
+  await guard('2.81 rig room: with the pace as the limit (2 of 2 builders running), 3 ready builder tasks and an idle machine (10% CPU, RAM room for 6), the plan says it could carry 3 more and the summary line says the pace is the limit; it raises nothing (target stays 2). No note when the CPU is at 40%, when RAM has room only for the pace, when nothing is ready, when a builder slot is still free, or while an engine land holds the builders', async () => {
+    const lp = await import(u('harness/line-producer.mjs'));
+    const t = (id, state) => ({ id, title: id, role: 'builder', priority: 'P2', meta: {}, state });
+    const facts = (over = {}) => ({
+      now: Date.parse('2026-03-03T12:00:00Z'), tasks: [t('T-1', 'running'), t('T-2', 'running'), t('T-3', 'ready'), t('T-4', 'ready'), t('T-5', 'ready')], holds: {}, done: new Set(),
+      sessions: [{ role: 'builder', task: 'T-1', running: true }, { role: 'builder', task: 'T-2', running: true }],
+      pace: { maxAgents: 4, perRole: { builder: 2 }, label: 'Test pace' }, rig: { known: true, byRam: 6, cpuBusy: 0.1, cpuBusyPct: 90, cpuHold: false, why: 'RAM room for 6' }, models: {}, ...over,
+    });
+    const idle = lp.linePlan(facts());
+    const line = lp.summaryLine(idle);
+    const busy = lp.linePlan(facts({ rig: { known: true, byRam: 6, cpuBusy: 0.4, cpuBusyPct: 90, cpuHold: false } }));
+    const tight = lp.linePlan(facts({ rig: { known: true, byRam: 2, cpuBusy: 0.1, cpuBusyPct: 90, cpuHold: false } }));
+    const idleBoard = lp.linePlan(facts({ tasks: [t('T-1', 'running'), t('T-2', 'running')] }));
+    const freeSlot = lp.linePlan(facts({ sessions: [{ role: 'builder', task: 'T-1', running: true }] }));
+    const held = lp.linePlan(facts({ engineHold: { cap: 2, why: 'a land waits' } }));
+    const unknown = lp.linePlan(facts({ rig: { known: false } }));
+    return [idle.builders.room?.extra === 3 && idle.builders.room.cpuPct === 10 && idle.builders.target === 2 && /idle at 10% CPU with room for 3 more and 3 ready: the pace is the limit/.test(line)
+      && !busy.builders.room && !tight.builders.room && !idleBoard.builders.room && !freeSlot.builders.room && !held.builders.room && !unknown.builders.room && !/idle at/.test(lp.summaryLine(busy)) && lp.RIG_IDLE_PCT === 25,
+    JSON.stringify({ idle: idle.builders, line, busy: busy.builders.room, tight: tight.builders.room, idleBoard: idleBoard.builders.room, freeSlot: freeSlot.builders.room, held: held.builders.room })];
+  });
+
+  // ---- one helper each: read a JSON file, is a process running, read a .env ----
+  {
+    const R = path.join(tmpRoot, `281a-folds-${process.pid}`);
+    fs.mkdirSync(path.join(R, 'studio'), { recursive: true });
+    made.push(R);
+    const BOM = '﻿';
+    await guard('2.81 folds: one quiet JSON reader (a file saved with a byte-order mark reads as what it says, a missing or broken one gives the fallback), and the readers of studio/game.json that parsed it themselves use it (perf tests, the engine list, the Unity settings); one "is this process running" check (a number or a numeric string; 0, a negative, text, nothing: no)', async () => {
+      const fsafe = await import(u('harness/fsafe.mjs'));
+      fs.writeFileSync(path.join(R, 'studio', 'game.json'), `${BOM}${JSON.stringify({ game: 'demo', perfTests: ['perf/*.test.mjs'], engines: { unity: { allowEmpty: ['PlayMode'], folder: 'engine/demo' } } })}`);
+      fs.writeFileSync(path.join(R, 'broken.json'), '{ not json');
+      const j = { bom: fsafe.readJson(path.join(R, 'studio', 'game.json'))?.game, none: fsafe.readJson(path.join(R, 'nope.json')), dflt: fsafe.readJson(path.join(R, 'nope.json'), 7), broken: fsafe.readJson(path.join(R, 'broken.json'), 'x') };
+      const gg = await import(u('harness/game-gates.mjs'));
+      const unity = await import(u('harness/unity.mjs'));
+      const er = await import(u('harness/engine-ram.mjs'));
+      const used = { perf: gg.perfTestsOf({}, R), empty: unity.unityAllowEmpty('PlayMode', { root: R }), edit: unity.unityAllowEmpty('EditMode', { root: R }), engine: er.defaultPushEngine(R) };
+      const alive = [process.pid, String(process.pid), 0, -1, 'x', '', null, undefined, true].map((p) => fsafe.pidAlive(p));
+      const pi = await import(u('harness/proc-identity.mjs'));
+      const tl = await import(u('harness/train-life.mjs'));
+      const same = pi.pidExists === fsafe.pidAlive && tl.pidAlive === fsafe.pidAlive;
+      return [j.bom === 'demo' && j.none === null && j.dflt === 7 && j.broken === 'x' && used.perf.join() === 'perf/*.test.mjs' && used.empty === true && used.edit === false && used.engine === 'unity'
+        && alive.join() === 'true,true,false,false,false,false,false,false,false' && same,
+      JSON.stringify({ j, used, alive, same })];
+    });
+    await guard('2.81 folds: one .env reader (every name, quotes stripped, the last non-empty line wins, `export` allowed) behind the key maps, the declared harness ref and the Vertex settings; the router loads .env through the shared loader (a value already set wins, an empty line sets nothing, an identity line never)', async () => {
+      const dotenv = await import(u('harness/dotenv.mjs'));
+      const file = path.join(R, '.env');
+      fs.writeFileSync(file, ['# a comment', 'STUDIO_HARNESS_REF="v2.81.0"', 'export STUDIO_KEYMAP_BUILDER = ANTHROPIC_API_KEY<POOL_KEY_2', 'STUDIO_KEYMAP_BUILDER=', "OTHER_NAME='two words'", 'EMPTY_ONE=', 'STUDIO_LOCK_OWNER=someone', 'SET_ALREADY=file', ''].join('\r\n'));
+      const all = dotenv.readEnvFile(file);
+      const vertex = await import(u('harness/vertex.mjs'));
+      const hs = await import(u('harness/hook-stamp.mjs'));
+      const ref = hs.declaredHarnessRef({}, R);
+      const env = { SET_ALREADY: 'shell' };
+      const loaded = dotenv.loadDotEnv(file, env, { skipEmpty: true });
+      const plain = {}; dotenv.loadDotEnv(file, plain);
+      return [all.STUDIO_HARNESS_REF === 'v2.81.0' && all.STUDIO_KEYMAP_BUILDER === 'ANTHROPIC_API_KEY<POOL_KEY_2' && all.OTHER_NAME === 'two words' && all.EMPTY_ONE === '' && dotenv.readEnvFile(path.join(R, 'none.env')).X === undefined
+        && vertex.readEnvFile === dotenv.readEnvFile && ref === 'v2.81.0'
+        && env.SET_ALREADY === 'shell' && env.OTHER_NAME === 'two words' && !('EMPTY_ONE' in env) && !('STUDIO_LOCK_OWNER' in env) && env.STUDIO_KEYMAP_BUILDER === 'ANTHROPIC_API_KEY<POOL_KEY_2' && !loaded.includes('SET_ALREADY')
+        && plain.EMPTY_ONE === '' && !('STUDIO_LOCK_OWNER' in plain),
+      JSON.stringify({ names: Object.keys(all), ref, env: Object.keys(env), loaded, plain: Object.keys(plain) })];
+    });
+  }
+
   for (const d of made) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 4, retryDelay: 200 }); } catch { /* best effort */ } }
   try { fs.rmSync(key, { force: true }); } catch { /* none */ }
 }

@@ -23,30 +23,15 @@ import { modelFamily } from './families.mjs';
 import { PROVIDERS, COOLDOWN_DEFAULTS, getChainForRole } from './models.config.mjs';
 import { emitEvent, readRecentEvents, STUDIO_STATE_DIR, REPO_ROOT } from './event.mjs';
 import { dailyCap } from './budget.mjs';
-import { isSessionIdentity, warnIdentityOnce } from './dotenv.mjs';
+import { loadDotEnv as loadEnvFile } from './dotenv.mjs';
 
 const COOLDOWN_FILE = path.join(STUDIO_STATE_DIR, 'cooldowns.json');
 const RUNS_DIR = path.join(STUDIO_STATE_DIR, 'runs');
 
 /** Load `.env` if present (zero external dotenv dependency). */
 export function loadDotEnv() {
-  const envPath = path.join(REPO_ROOT, '.env');
-  if (!fs.existsSync(envPath)) return;
-  const text = fs.readFileSync(envPath, 'utf8');
-  warnIdentityOnce(envPath, text); // 2.73.1 (B-60): identity settings are a session's, never the shared .env's
-  const lines = text.split(/\r?\n/);
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eq = trimmed.indexOf('=');
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    if (isSessionIdentity(key.replace(/^export\s+/, ''))) continue;
-    const val = trimmed.slice(eq + 1).trim().replace(/^['"]|['"]$/g, '');
-    if (key && val !== '' && process.env[key] === undefined) {
-      process.env[key] = val;
-    }
-  }
+  // dotenv.mjs's loader (it warns about identity lines and skips them); an empty `NAME=` line sets nothing here.
+  loadEnvFile(path.join(REPO_ROOT, '.env'), process.env, { skipEmpty: true });
 }
 
 export function readCooldowns() {

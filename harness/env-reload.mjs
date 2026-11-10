@@ -27,11 +27,11 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { STUDIO_STATE_DIR, REPO_ROOT, emitEvent, actor } from './event.mjs';
 import { parseStudioEnv, envFileSig, envFileState, syncStudioEnv, writeFromFileNote, looksSecret } from './dotenv.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const REQUEST_FILE = () => path.join(STUDIO_STATE_DIR, 'env-reload.json');
 export const ACK_FILE = () => path.join(STUDIO_STATE_DIR, 'env-reload-ack.json');
 const LOGGED_FILE = () => path.join(STUDIO_STATE_DIR, 'env-reloaded.json');
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 /** A change for the log: the value, or null for a key that looks secret. */
 const shown = (key, v) => (looksSecret(key) || v === undefined ? null : String(v).slice(0, 80));

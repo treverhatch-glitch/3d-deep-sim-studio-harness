@@ -38,6 +38,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scrub, normMode } from './det-math.mjs';
 import { isTestPath } from './test-weakening.mjs';
+import { readJson } from './fsafe.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(HERE, '..');
@@ -45,7 +46,6 @@ const CODE_EXT = /\.(m?[jt]sx?|c[jt]s)$/i;
 const SETUP_NAME = /(^|[._-])setup([._-]|$)|^setupTests?\./i;
 const UNSEEDED_ARG = /\bMath\s*\.\s*random\b|\bDate\s*\.\s*now\b|\bperformance\s*\.\s*now\b|\bcrypto\s*\.\s*(getRandomValues|randomUUID|randomInt)\b/;
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const toPosix = (p) => String(p).replace(/\\/g, '/');
 const list = (v) => (Array.isArray(v) ? v : v === undefined || v === null || v === '' ? [] : [v]).map(String).filter(Boolean);
 

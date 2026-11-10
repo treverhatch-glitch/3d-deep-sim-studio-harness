@@ -28,9 +28,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { readJson } from './fsafe.mjs';
 
 const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const r1 = (x) => Math.round(x * 10) / 10;
 const tsOf = (v) => (typeof v === 'number' ? v : Date.parse(v));
 

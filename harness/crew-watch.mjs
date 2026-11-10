@@ -31,10 +31,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { weightedTokens } from './token-weight.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const PAUSED_FILE = () => path.join(STUDIO_STATE_DIR, 'crew-paused.json');
 export const RESUME_FILE = () => path.join(STUDIO_STATE_DIR, 'crew-resume.json');
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(tmp, f); };
 const num = (v, d) => (v === undefined || v === null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const ts = (e) => Date.parse(e?.ts) || 0;

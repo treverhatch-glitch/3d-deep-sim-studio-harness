@@ -26,6 +26,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { launchedSession } from './agent-env.mjs';
 import { AGENT_SHELL } from './permission.mjs';
+import { pidAlive as numberInUse } from './fsafe.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
@@ -49,8 +50,7 @@ export function detachTrain(flags = {}, env = process.env) {
 }
 
 export const pidAlive = (pid) => {
-  if (!pid) return false;
-  try { process.kill(pid, 0); } catch (e) { if (e.code !== 'EPERM') return false; }
+  if (!numberInUse(pid)) return false;
   // A zombie (ended, not yet reaped by a parent that never waits) is gone for us.
   try { if (/\)\s+Z\s/.test(fs.readFileSync(`/proc/${pid}/stat`, 'utf8'))) return false; } catch {}
   return true;

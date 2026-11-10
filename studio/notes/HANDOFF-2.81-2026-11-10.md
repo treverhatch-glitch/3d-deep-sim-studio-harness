@@ -33,9 +33,11 @@ The owner's order: "Round 2.81: grade, upgrade, and cut the harness", with the a
 
 1. The owner's OK for pull request #81 (2.80.0) and the one for 2.81.0; then Patch upgrades (both release notes).
 2. A week of the crew on 2.81 with the overseer in its written role; `npm run score -- --record 2.81-week1`.
-3. The rig: port the trial's `rig.decision` event and engine/verify turn-taking; a Windows process-memory sampler.
+3. The rig: port the trial's `rig.decision` event and engine/verify turn-taking; a Windows process-memory sampler. The
+   Line now says when the machine has room the pace doesn't use; whether it may raise the count itself is the owner's call.
 4. Engine lands: a porter's quick check before it queues; why 39 of 67 land runs were red (read the land logs).
-5. The folds: one process-alive helper, one `.env` parser, one `studio/game.json` reader.
+5. The folds are done (`readJson` and `pidAlive` in `harness/fsafe.mjs`, the `.env` reader in `harness/dotenv.mjs`); 19
+   JSON readers of other shapes and `upgrade-preflight.mjs`'s own copies are left.
 6. CI: commit a timing file from a `--timing` run and switch the shards to `--balance`.
 7. The cut candidates listed in docs/RELEASE-2.81.0.md section 5, and the Fable ideas not adopted (section 8).
 8. The same prompt prune for the crew's own `studio/PITFALLS.md` and notes (on the PC, with Patch).

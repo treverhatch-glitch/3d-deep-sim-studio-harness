@@ -28,6 +28,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { pidAlive as pidExists } from './fsafe.mjs';
 
 const STUB = process.env.STUDIO_PROC_IDENTITY_STUB || '';
 // The cheap /proc checks at launch and in listings. Off under the stub, so a Linux run takes the Windows path.
@@ -69,15 +70,7 @@ function linuxTicks(pid) {
 const procTag = (ticks) => `linux:${ticks}@${bootId()}`;
 
 /** Is a process with this number running at all (whoever it is)? */
-export function pidExists(pid) {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === 'EPERM';
-  }
-}
+export { pidExists };
 
 // ---- launch: in-process only ----
 

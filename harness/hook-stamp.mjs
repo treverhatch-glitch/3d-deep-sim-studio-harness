@@ -77,6 +77,7 @@ import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { protectRoot } from './gate-trust.mjs';
+import { readEnvFile } from './dotenv.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = protectRoot(path.resolve(HERE, '..')) || path.resolve(HERE, '..'); // 2.71.1 (A16): never in a lane copy
@@ -484,14 +485,8 @@ function headToJudge(env) {
 export function declaredHarnessRef(env = process.env, root = ROOT) {
   if (String(env.STUDIO_HARNESS_REF || '').trim()) return String(env.STUDIO_HARNESS_REF).trim();
   const main = String(env.STUDIO_MAIN_ROOT || '').trim() ? path.resolve(env.STUDIO_MAIN_ROOT) : root;
-  let found = '';
   for (const dir of [...new Set([root, main])]) {
-    let text = '';
-    try { text = fs.readFileSync(path.join(dir, '.env'), 'utf8'); } catch { continue; }
-    for (const line of text.split(/\r?\n/)) {
-      const m = line.match(/^\s*(?:export\s+)?STUDIO_HARNESS_REF\s*=\s*(.*?)\s*$/);
-      if (m && m[1].replace(/^['"]|['"]$/g, '')) found = m[1].replace(/^['"]|['"]$/g, '');
-    }
+    const found = readEnvFile(path.join(dir, '.env')).STUDIO_HARNESS_REF || '';
     if (found) return found;
   }
   return '';

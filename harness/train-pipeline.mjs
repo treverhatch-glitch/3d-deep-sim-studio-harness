@@ -37,11 +37,10 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { machineProfile, slotsFor, budgetState, jobClaim, admit, maxConcurrent, rigKind } from './heavy-budget.mjs';
 import { spawnDetached } from './train-detach.mjs';
+import { pidAlive as alive, readJson } from './fsafe.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-const alive = (pid) => { if (!pid) return false; try { process.kill(Number(pid), 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 export const NEXT_BY = 'train-next';
 export const nextLockFile = (root) => path.join(root, '.studio', 'locks', 'train-next.lock');
 const trainLockFile = (root) => path.join(root, '.studio', 'locks', 'train.lock');

@@ -17,9 +17,9 @@ import path from 'node:path';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { holdReason, laneOf, readHolds } from './task-hold.mjs';
 import { handoutBlock } from './handout.mjs';
+import { readJson } from './fsafe.mjs';
 
 const STATE = () => path.join(STUDIO_STATE_DIR, 'queue-depth.json');
-const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 
 /** The target: STUDIO_QUEUE_DEPTH (a number, or off: null), else the session cap given. */
 export function depthTarget(cap, env = process.env) {

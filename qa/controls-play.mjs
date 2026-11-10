@@ -36,9 +36,9 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT } from '../harness/event.mjs';
 import { bibleControls, checkEffects, effectsOf } from '../harness/control-effects.mjs';
 import { launchChromium } from './chromium.mjs';
+import { readJson } from '../harness/fsafe.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 export function manifestFile(gameRoot, root = REPO_ROOT) {
   return path.join(root, gameRoot, 'studio.browser.json');

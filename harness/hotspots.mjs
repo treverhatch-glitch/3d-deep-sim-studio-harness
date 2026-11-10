@@ -29,6 +29,7 @@ import { emitOnChange } from './telemetry.mjs';
 import { mainRoot, mainBranch, laneCopies } from './worktree.mjs';
 import { listLocks } from './lock.mjs';
 import { withLandLock } from './merge-lane.mjs';
+import { readJson } from './fsafe.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -93,7 +94,6 @@ export function clusters(places) {
 
 // ---- the lanes in flight ----------------------------------------------------------------------------
 
-const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 
 /** The queued and in-flight lanes: [{ label, task, agent, branch, head }], one per branch (or head). */
 export function lanesInFlight(root = mainRoot()) {

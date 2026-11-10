@@ -23,7 +23,7 @@ import path from 'node:path';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { activeGame, isTemplateCartridge } from './cartridge.mjs';
 import { isFixTask, trunkState } from './baseline.mjs';
-import { withFileLock, writeAtomic } from './fsafe.mjs';
+import { withFileLock, writeAtomic, pidAlive } from './fsafe.mjs';
 import { WORKER_NAME, DECIDER_ROLES } from './permission.mjs';
 import { ownerType } from './reclassify.mjs';
 import { entryPath, hasRegion, listsClash } from './lane-regions.mjs';
@@ -133,7 +133,7 @@ export function heldForLanding(taskId, { holds = readHolds(), queue = null } = {
  */
 export function inAnyTrain(taskId, { stateDir = STUDIO_STATE_DIR } = {}) {
   const readJ = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const alive = (pid) => { if (!pid) return false; try { process.kill(Number(pid), 0); return true; } catch (err) { return err.code === 'EPERM'; } };
+  const alive = pidAlive;
   let names = [];
   try { names = fs.readdirSync(path.join(stateDir, 'train')); } catch {}
   for (const n of names.sort()) {

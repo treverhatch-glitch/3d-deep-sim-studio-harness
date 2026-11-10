@@ -68,12 +68,12 @@ import { listLocks } from './lock.mjs';
 import { recordAlive } from './proc-identity.mjs';
 import { DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { protectSharedLinks } from './lane-sparse.mjs';
+import { readJson } from './fsafe.mjs';
 
 const isSha = (s) => /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(String(s || ''));
 const cleanEnv = (extra = {}) => { const e = { ...process.env, ...extra }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/.test(k)) delete e[k]; return e; };
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', env: cleanEnv(), maxBuffer: 64 * 1024 * 1024, windowsHide: true });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
-const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const TASK_ID = /^[A-Z]+-\d+$/;
 
 export const REFRESH_FILE = (root = mainRoot()) => path.join(root, '.studio', 'lanes', 'refresh.json');

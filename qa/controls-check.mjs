@@ -24,11 +24,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT } from '../harness/event.mjs';
+import { readJson } from '../harness/fsafe.mjs';
 
 const REPORTS = path.join(REPO_ROOT, 'qa', 'reports');
 const BIBLE = path.join(REPO_ROOT, 'studio', 'bible', 'controls.json');
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 /** The newest result file for a track: { file, results: Map(id -> { ok, why }) } or null. */
 export function trackResults(track, dir = REPORTS) {

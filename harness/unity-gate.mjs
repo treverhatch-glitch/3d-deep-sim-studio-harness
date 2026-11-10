@@ -78,6 +78,7 @@ import { readTrack, logEngine } from './engine.mjs';
 import { infraAbort } from './engine-proof.mjs';
 import { landWaitMin, recordLandPeak } from './engine-ram.mjs';
 import { engineTarget, engineTask, engineFloor, recordDuration, readTune, tunePath } from './engine-tracks.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const UNITY_EXIT = { 0: 'pass', 1: 'red', 2: 'conflict', 3: 'refused', 4: 'error' };
 const WORDS = {
@@ -88,7 +89,6 @@ const WORDS = {
   error: 'failed to run',
   'not-run': 'did not run to the end for a reason outside the work (an infrastructure abort): not a failure of the work; try again later',
 };
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 /** The studio's Unity land settings (studio/game.json engines.unity), or null when no land command is set. */
 export function unityConfig(root = REPO_ROOT, engine = 'unity') {

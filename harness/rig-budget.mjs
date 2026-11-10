@@ -27,9 +27,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as hb from './heavy-budget.mjs';
+import { pidAlive as alive, readJson } from './fsafe.mjs';
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-const alive = (pid) => { if (!pid) return false; try { process.kill(Number(pid), 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 const iso = (t) => { const ms = typeof t === 'number' ? t : Date.parse(t); return Number.isFinite(ms) ? new Date(ms).toISOString() : null; };
 const median = (xs) => { const s = xs.filter((x) => Number.isFinite(x) && x > 0).sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null; };
 /** The job.done kind whose durations stand for a rig kind's ETA. */

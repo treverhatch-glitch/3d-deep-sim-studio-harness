@@ -34,12 +34,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent } from './event.mjs';
 import { spawnDetached } from './train-detach.mjs';
-import { writeAtomic } from './fsafe.mjs';
+import { writeAtomic, pidAlive as alive, readJson } from './fsafe.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
-const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 export const AUTO_FILE = (root) => path.join(root, '.studio', 'train', 'auto.json');
 export const DAEMON_FILE = (root) => path.join(root, '.studio', 'train', 'daemon.json');
 export const DAEMON_LAST = (root) => path.join(root, '.studio', 'train', 'daemon-last.json');

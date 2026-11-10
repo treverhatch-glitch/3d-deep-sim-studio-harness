@@ -86,6 +86,7 @@ import { quarantineEnvValue } from './flakes.mjs';
 import { gateEnv, applyGateEnv } from './gate-env.mjs';
 import { clearRunner } from './train-focus.mjs';
 import { verifySkip, listPlan, skipFix } from './test-config-check.mjs';
+import { readJson } from './fsafe.mjs';
 
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
 
@@ -183,7 +184,7 @@ export function perfTestsOf(env = process.env, root = REPO_ROOT) {
   const split = (v) => String(v).split(',').map((x) => x.trim()).filter(Boolean);
   if (env.STUDIO_PERF_TESTS !== undefined && String(env.STUDIO_PERF_TESTS).trim() !== '') return /^(off|0|false|no)$/i.test(String(env.STUDIO_PERF_TESTS).trim()) ? [] : split(env.STUDIO_PERF_TESTS);
   try {
-    const v = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'game.json'), 'utf8')).perfTests;
+    const v = readJson(path.join(root, 'studio', 'game.json'), {}).perfTests;
     if (Array.isArray(v)) return v.filter((x) => typeof x === 'string').flatMap(split);
     if (typeof v === 'string') return split(v);
   } catch {}

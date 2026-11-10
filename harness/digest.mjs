@@ -32,11 +32,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const DIGEST_DIR_REL = 'studio/digest';
 export const MAX_WORDS = 200;
 const DAY = 86400000;
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const words = (s) => (String(s).match(/\S+/g) || []).length;
 /** The local date, YYYY-MM-DD. */
 export const localDate = (now = Date.now()) => { const d = new Date(now); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };

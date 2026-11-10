@@ -23,6 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { listProcesses, processArgs } from './proc-identity.mjs';
+import { readJson } from './fsafe.mjs';
 
 const num = (v, d) => (v !== undefined && v !== null && String(v).trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 const off = (v) => /^(off|false|no)$/i.test(String(v ?? '').trim());
@@ -36,7 +37,6 @@ const scanMs = (env) => Math.max(0, num(env.STUDIO_ORPHAN_GATE_SCAN_MIN, 10)) * 
 const RUN_GATES = /(^|[\s"'\\/])run-gates\.mjs(?=$|[\s"'])/;
 const REAPERS = /^(init|systemd|launchd|tini|dumb-init|s6-svscan|runit)$/i;
 const WRAPPERS = /^(cmd|sh|bash|dash|zsh|ash|pwsh|powershell|npm|npx|conhost)(\.exe|\.cmd)?$/i;
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 /** The verify host's record still runs it: { live, why }. */
 function hostRecordLive(args, pid, { env, now }) {

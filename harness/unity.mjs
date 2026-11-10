@@ -44,6 +44,7 @@ import { withHeavy } from './heavy.mjs';
 import { JOB_KINDS } from './heavy-budget.mjs';
 import { seedLibrary, saveLibrary, cacheLine } from './unity-cache.mjs';
 import { runNonce, freshFile, logSignatures, exitAgrees, proofLine, kindsOf, infraAbort, notRunLine } from './engine-proof.mjs';
+import { readJson } from './fsafe.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
@@ -231,7 +232,7 @@ function removeOldResults(dir, stem) {
  */
 export function unityAllowEmpty(platform, { root = REPO_ROOT } = {}) {
   let v = null;
-  try { v = JSON.parse(read(path.join(root, 'studio', 'game.json')) || '{}')?.engines?.unity?.allowEmpty; } catch { v = null; }
+  v = readJson(path.join(root, 'studio', 'game.json'))?.engines?.unity?.allowEmpty ?? null;
   return v === true || (Array.isArray(v) && v.map(String).includes(platform));
 }
 
@@ -333,7 +334,7 @@ export function build(dir, target = 'windows', { out = null, release = false, en
 export function codeOnlySteps(dir, { root = REPO_ROOT, env = process.env } = {}) {
   if (/^(off|0|false|no)$/i.test(String(env.STUDIO_UNITY_CODE_ONLY || ''))) return [];
   let cfg = {};
-  try { cfg = JSON.parse(read(path.join(root, 'studio', 'game.json')) || '{}')?.engines?.unity || {}; } catch { cfg = {}; }
+  cfg = readJson(path.join(root, 'studio', 'game.json'))?.engines?.unity || {};
   const c = cfg.codeOnly;
   if (c === false || (Array.isArray(c) && !c.length)) return [];
   const cmds = (typeof c === 'string' ? [c] : Array.isArray(c) ? c : []).filter((x) => typeof x === 'string' && x.trim());

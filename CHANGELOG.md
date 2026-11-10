@@ -6,7 +6,7 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ## [2.81.0] — 2026-11-10
 Grade, measure, cut again (the owner's "Round 2.81"). Verdict: 5 of 10, a working production line that is not yet an
-autonomous one (studio/notes/VERDICT-2.81-2026-11-10.md). 176 files, +3,235 / −1,602 lines (net +1,633) against 2.80.0; with 2.80.0, 335 files, +5,119 / −21,181 lines (net −16,062)
+autonomous one (studio/notes/VERDICT-2.81-2026-11-10.md). 250 files, +3,498 / −1,818 lines (net +1,680) against 2.80.0; with 2.80.0, 397 files, +5,373 / −21,388 lines (net −16,015)
 against 2.79.2. Details: docs/RELEASE-2.81.0.md.
 - **The round scorecard:** `npm run score`, fifteen fixed measures from a studio's logs, `--record` to compare rounds
   (docs/SCORECARD.md). Baseline from the crew's 8.2 days: 1 of 15 targets met.
@@ -21,6 +21,10 @@ against 2.79.2. Details: docs/RELEASE-2.81.0.md.
 - **Engine first by default:** a studio's only engine gets the push unless someone turned it off.
 - **Cut:** the liaison role; `experiment.mjs`, the Dev Hacker flow and the commit-msg hook's experiment lines; the War
   Room config and its reader, `gate-progress.mjs`, the last hub leftovers; readers of events nothing emits.
+- **Duplicate helpers folded:** one `readJson` (71 copies; it skips a byte-order mark), one `pidAlive` (19 copies), one
+  `.env` reader and loader (four copies).
+- **The Line Producer says when the machine has room the pace doesn't use** (idle CPU, RAM room, ready work waiting);
+  it starts nothing by itself.
 - **Decided:** `STUDIO_WATCH_INTERVAL=0` turns off the watch pass only. `STUDIO_BUILDER_ORDER` is tested in real
   supervisor passes.
 - **Prompts pruned:** no read-less lines, no token budget for the agent to manage, a reason on every absolute rule

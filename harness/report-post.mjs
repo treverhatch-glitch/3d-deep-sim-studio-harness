@@ -31,12 +31,12 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { loadDotEnv } from './dotenv.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const WHATS = ['status', 'next', 'digest'];
 export const DISCORD_MAX = 2000;
 export const RETRY_MAX_MS = 30000;
 const STATE = (root) => path.join(root, '.studio', 'report-post.json');
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const writeJson = (f, v) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${JSON.stringify(v, null, 2)}\n`); } catch {} };
 
 /** The webhook: { url, source: 'env' | '.env' }, { bad: true } for a value that isn't an http(s) URL, or null. */

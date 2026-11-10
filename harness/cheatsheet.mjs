@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const CHEATSHEET_FILE = path.join(REPO_ROOT, 'studio', 'CHEATSHEET.md');
 export const ATTACH_DIR = path.join(STUDIO_STATE_DIR, 'cheatsheet');
@@ -64,7 +65,7 @@ const words = (s) => String(s || '').toLowerCase().split(/[^a-z0-9.]+/).filter((
 export const ENGINE_TAGS = ['godot', 'unity', 'unreal'];
 export function gameEngines(root = REPO_ROOT) {
   let name = process.env.STUDIO_GAME || null;
-  if (!name) try { name = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'game.json'), 'utf8')).game || null; } catch {}
+  if (!name) try { name = readJson(path.join(root, 'studio', 'game.json'), {}).game || null; } catch {}
   if (!name) return null;
   const out = new Set();
   try { const t = JSON.parse(fs.readFileSync(path.join(root, 'engine', name, 'engine.json'), 'utf8')); if (t.engine) out.add(String(t.engine).toLowerCase()); } catch {}

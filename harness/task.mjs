@@ -46,7 +46,7 @@ import { isDecider, propose, SIZE_CAP } from './proposed.mjs';
 import { attachTricks } from './cheatsheet.mjs';
 import { readBaseline, recordBaseline, setTrunk, trunkState, judgeRed } from './baseline.mjs';
 import { recordAlive } from './proc-identity.mjs';
-import { withFileLock, writeAtomic } from './fsafe.mjs';
+import { withFileLock, writeAtomic, readJson } from './fsafe.mjs';
 import { factsFor, splitFacts, recordGateRefusal } from './handback-facts.mjs';
 import { assetGateApplies, assetGateText, fileAssetHandoff } from './asset-gate.mjs';
 import { reviewsAtDone } from './asset-review.mjs';
@@ -1686,7 +1686,7 @@ function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUC
 const fromRescueMeta = (meta) => meta?.origin === 'rescue' || meta?.rescueSplit;
 
 /** 2.77.0 (u): the engine targets the studio names (for train status). */
-function engineTargetsQuiet() { try { return Object.keys(JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'game.json'), 'utf8'))?.engines || {}).filter((n) => /^[a-z][a-z0-9-]{1,30}$/.test(n)); } catch { return []; } }
+function engineTargetsQuiet() { try { return Object.keys(readJson(path.join(REPO_ROOT, 'studio', 'game.json'))?.engines || {}).filter((n) => /^[a-z][a-z0-9-]{1,30}$/.test(n)); } catch { return []; } }
 
 /** 2.77.0 (u, P5.1): the engine record of a task added on an engine track (harness/engine-tracks.mjs). Never throws. */
 function recordEngineTaskAtAdd(id, meta = {}) {
