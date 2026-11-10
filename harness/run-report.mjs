@@ -144,7 +144,7 @@ export function renderRunReport(r) {
       return null;
     }
   })();
-  L.push('## The supervisor', '', ...(sup ? [`- ${sup.status === 'running' ? 'Running' : 'Stopped'} since ${sup.startedAt}${sup.stopReason ? `; stopped: ${sup.stopReason}` : ''}`, `- Sessions started: ${sup.sessions}; tasks done: ${sup.tasksDone}; tokens reported: ${(sup.tokens || 0).toLocaleString()}`, ...(sup.hubDown?.length ? sup.hubDown.map((d) => `- The War Room hub was down from ${d.from} to ${d.to}`) : ['- The War Room hub stayed up.'])] : ['- Not used (npm run studio:start keeps the studio running unattended).']), '');
+  L.push('## The supervisor', '', ...(sup ? [`- ${sup.status === 'running' ? 'Running' : 'Stopped'} since ${sup.startedAt}${sup.stopReason ? `; stopped: ${sup.stopReason}` : ''}`, `- Sessions started: ${sup.sessions}; tasks done: ${sup.tasksDone}; tokens reported: ${(sup.tokens || 0).toLocaleString()}`] : ['- Not used (npm run studio:start keeps the studio running unattended).']), '');
   // Staffing: who was hired, by whom, into which division, how long, what it used.
   const ev = readRecentEvents(50000);
   const starts = ev.filter((e) => e.type === 'agent.session.start');

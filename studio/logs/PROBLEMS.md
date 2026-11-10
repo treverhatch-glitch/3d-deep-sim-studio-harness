@@ -1469,3 +1469,23 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-285 — Vertex builders spent money and did no work · fixed in 2.79.2
 - **Evidence:** 8 Vertex builder sessions on 2026-11-06, each "no work on T-xxx: it never claimed T-xxx", 1–3 requests of 438k–520k prompt tokens, $5.84; `STUDIO_VERTEX_SHARE=0` set at 17:56 and two more started at 18:04.
 - **Fix:** the launcher runs the task protocol around one-shot aider; lane-only context with a prompt cap; the share holds on every start path. qa/selftest-2792a.mjs, qa/selftest-2792b.mjs.
+
+### P-286 — a stale machine scan made a good train red · fixed in 2.80.0
+- **Evidence:** the trial studio, supervisor off > 15 min: `.studio/machine.json` too old, the job claim fell back to 2 test workers, the game's tests blew the 600 s gate timeout; a train with 3 good lanes ran 35 min, 4 re-checks, landed nothing. After `npm run machine` the same lanes landed in 8.5 min (N1).
+- **Fix:** a missing or stale scan is taken again at the claim and stored; the 2-worker fallback is only for a scan that is off or fails. qa/selftest-280c.mjs.
+
+### P-287 — a lock outlived its owner's session · fixed in 2.80.0
+- **Evidence:** a P0 "fix main" waited 1 h for a path lock whose owner had no live session; `lock release --owner X` ignored `--owner` (Patch #24, R3-14).
+- **Fix:** the next claimer takes over a path or task lock of an ended launched session (`lock.taken_over`); `--owner` acts for X for a person, a Producer/Director or a named outside agent, and is refused out loud otherwise. qa/selftest-280c.mjs.
+
+### P-288 — "everything off" still started paid builders · fixed in 2.80.0
+- **Evidence:** during a manual wind-down the supervisor went on when the API pool or Vertex was ready; a usage wind-down outlived its removed setting; an agent could start one that only a person could end (Patch #14, R3-7).
+- **Fix:** a manual wind-down returns before the pool and Vertex; the setting is read every pass; an agent's `--now` needs `--until`. qa/selftest-280c.mjs.
+
+### P-289 — the train daemon re-ran the same lanes on a red main · fixed in 2.80.0
+- **Evidence:** after `task.train.red_main` the daemon started the same 7 lanes again at once, about 30 min each, 6 times in one day (Patch #25).
+- **Fix:** it waits while main's head and the queued lanes are unchanged; a moved main, a new or changed lane, or a train started by hand runs. qa/selftest-280c.mjs.
+
+### P-290 — the War Room was the largest part nobody used · cut in 2.80.0
+- **Evidence:** the crew's 7-day audit: no page opened, 0 events from any panel, the `hud` gate never ran; hub, pages, their modules and tests were about 17,000 lines, and the watcher, retro, learn pass and watchdog only ran while the hub was up.
+- **Fix:** the timed passes moved into the supervisor (`harness/studio-passes.mjs`, qa/selftest-280b.mjs); the hub, the pages and what only they used are deleted. docs/RELEASE-2.80.0.md.
