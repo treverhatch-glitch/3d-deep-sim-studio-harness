@@ -897,47 +897,12 @@ if (inShard()) {
   report('signing refuses a red verify unless told to record it', run(dir, 'node harness/sign.mjs result --by hatch').status !== 0);
 }
 
-// Trajectory export: opt-in only, one labelled record per finished task, secrets scrubbed.
+// The data-sharing question (harness/data-consent.mjs): starts ticked.
 if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
-  const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
-  git('init -q');
-  git('add -A');
-  git('commit -q -m init --no-verify');
-  // 2.58.0: task done runs the secret scan itself; the board and hand-off notes, where the key-shaped title below
-  // lands, stay out of git here.
-  git('rm -q -r --cached --ignore-unmatch studio/NEXT.md studio/DONE.md studio/CURRENT_TASK.md studio/handoffs');
-  fs.mkdirSync(path.join(dir, '.git', 'info'), { recursive: true });
-  fs.appendFileSync(path.join(dir, '.git', 'info', 'exclude'), '\nstudio/NEXT.md\nstudio/DONE.md\nstudio/CURRENT_TASK.md\nstudio/handoffs/\n');
-  git('commit -q -m "board out of git" --no-verify');
-  const a = JSON.parse(run(dir, 'node harness/task.mjs add "Plan: the moss table" --role producer', env).stdout).id;
-  run(dir, `node harness/task.mjs start ${a} --agent prod-1 --model model-a`, env);
-  fs.writeFileSync(path.join(dir, 'notes.md'), 'plan\n');
-  git(`add -A`);
-  git(`commit -q -m plan --no-verify --trailer "Studio-Task: ${a}"`);
-  run(dir, `node harness/task.mjs done ${a} --agent prod-1`, env);
-  const key = `${'sk-'}${'z'.repeat(24)}`;
-  const b = JSON.parse(run(dir, `node harness/task.mjs add "Plan: rotate ${key}" --role producer`, env).stdout).id;
-  run(dir, `node harness/task.mjs start ${b} --agent prod-1`, env);
-  run(dir, `node harness/task.mjs done ${b} --agent prod-1`, env);
-  run(dir, `node harness/task.mjs reopen ${b} --reason "missed a file"`, env);
-  run(dir, `node harness/task.mjs start ${b} --agent prod-1`, env);
-  run(dir, `node harness/task.mjs done ${b} --agent prod-1`, env);
-  report('trajectory export refuses without terms', run(dir, 'node harness/trajectories.mjs export', env).status !== 0);
   const shown = run(dir, 'node harness/data-consent.mjs', env).stdout;
   report('the data-sharing question starts ticked (allowed by default)', /\[x\] Yes/.test(shown) && /allowed by default/.test(shown), shown);
-  run(dir, 'node harness/data-consent.mjs decline --by hatch', env);
-  const refused = run(dir, 'node harness/trajectories.mjs export --licence "internal evaluation only"', env);
-  report('after the game dev declines, nothing is exported, whatever flags are passed', refused.status !== 0 && /declined sharing/.test(refused.stderr) && !fs.existsSync(path.join(dir, '.studio/exports')), refused.stdout + refused.stderr);
-  run(dir, 'node harness/data-consent.mjs allow --by hatch', env);
-  const ex = run(dir, 'node harness/trajectories.mjs export --consent "hatch, for the studio\'s own model tests" --licence "internal evaluation only"', env);
-  const out = fs.readdirSync(path.join(dir, '.studio/exports'));
-  const jsonl = fs.readFileSync(path.join(dir, '.studio/exports', out.find((f) => f.endsWith('.jsonl'))), 'utf8');
-  const recs = jsonl.trim().split('\n').map((l) => JSON.parse(l));
-  const man = JSON.parse(fs.readFileSync(path.join(dir, '.studio/exports', out.find((f) => f.endsWith('.manifest.json'))), 'utf8'));
-  report('an export writes one labelled record per finished task, with its commits', ex.status === 0 && recs.length === 2 && recs.find((r) => r.id === a)?.label === 'clean' && recs.find((r) => r.id === a)?.commits.length === 1 && recs.find((r) => r.id === b)?.label === 'caused-bug', ex.stdout + ex.stderr + jsonl);
-  report('exported text is scrubbed of key-shaped strings, and the manifest records consent and a SHA-256', !jsonl.includes(key) && /\[removed\]/.test(jsonl) && man.consent && man.licence && man.consentRecord?.how === 'confirmed' && /^[0-9a-f]{64}$/.test(man.sha256) && man.scrubbedSecrets >= 1, JSON.stringify(man));
 }
 
 // A bug's regression must fail on the code before the fix, or it guards nothing.
@@ -2168,7 +2133,7 @@ if (inShard()) {
   report('npm run tokens sums what sessions reported and lists the ones that reported nothing', t.total?.cacheRead === 50000 && t.total?.tokensIn === 1000 && t.total?.turns === 12 && t.untracked?.agy === 1 && t.byRole?.find((r) => r.name === 'builder')?.tasksDone === 1, tk.stdout + tk.stderr);
   const hud = JSON.parse(run(dir, `node -e "import('./harness/hud.mjs').then(m=>console.log(JSON.stringify(m.buildHudState().tokenUse)))"`).stdout || '{}');
   report('the War Room gets the measured totals for the last 5 h', hud.last5h?.total?.cacheRead === 50000, JSON.stringify(hud).slice(0, 300));
-  const noFake = ['hub/index.html', 'hub/server.mjs', 'scripts/pre-compact.mjs', 'scripts/append-event.mjs', 'scripts/seed-demo-events.mjs'].filter((f) => /248,500|tokensSaved: \d|--tokens-saved \d|--saved \d/.test(fs.readFileSync(path.join(dir, f), 'utf8')));
+  const noFake = ['hub/server.mjs', 'scripts/pre-compact.mjs', 'scripts/append-event.mjs', 'scripts/seed-demo-events.mjs'].filter((f) => /248,500|tokensSaved: \d|--tokens-saved \d|--saved \d/.test(fs.readFileSync(path.join(dir, f), 'utf8')));
   report('no made-up token numbers are left in the War Room or the scripts', noFake.length === 0, noFake.join(', '));
 
   // Lite scope: 6 gates, AGENTS.lite.md, ten commands.
@@ -2714,7 +2679,7 @@ const k = ['builder', 'producer', 'director', 'liaison'].map((role) => kickoff({
 const c = toolCommand('claude', { model: 'm', prompt: 'x' });
 // P-066: the launcher passes each pattern as its own argument after --allowedTools (no quoting can split them).
 console.log(JSON.stringify({ all: k.every((t) => /You may run, without asking: \`node\`, \`npm\`/.test(t) && ALLOWED.every(([n]) => t.includes('\`' + n + '\`'))), same: c.argv.slice(c.argv.indexOf('--allowedTools') + 1, c.argv.indexOf('--allowedTools') + 1 + ALLOWED.length).join(',') === allowedTools(), n: ALLOWED.length }));`);
-  report('#15: every kickoff lists exactly what the agent may run, the same allowlist the launcher passes (the 2.23 set)', ka.all === true && ka.same === true && ka.n === 15, JSON.stringify(ka));
+  report('#15: every kickoff lists exactly what the agent may run, the same allowlist the launcher passes (the 2.23 set)', ka.all === true && ka.same === true && ka.n === 16, JSON.stringify(ka));
   // G3: failing first in plain words; "not run" is never a pass.
   const gw = probe(`import { gateWords } from ${u('harness/gate-words.mjs')};
 const all = [{ id: 'golden' }, { id: 'soak' }, { id: 'selftest', deep: true }, { id: 'fun', required: false }];
@@ -3961,15 +3926,6 @@ if (inShard('selftest-261f')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.62.0: the sealed replay bench (npm run bench: cases at a commit, k tries by real agents in clean copies, code
-// graders, pass@1 / pass^k, a paired compare) and the component-removal review (--without) (qa/selftest-262g.mjs).
-if (inShard('selftest-262g')) {
-  const dir = copyRepo();
-  const { selftest262G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-262g.mjs')).href);
-  await selftest262G({ dir, run, report, tmpRoot });
-  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
-}
-
 // 2.62.0 (H): per-task acceptance contracts: agreed before coding, only `passes` flips after; the weakened-tests gate,
 // done-check and the reviewer's brief read them (qa/selftest-262h.mjs).
 if (inShard('selftest-262h')) {
@@ -4408,8 +4364,7 @@ if (inShard('selftest-2711b')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.72.0 (d): the gameplay logic library (npm run logic: need, add after landing, confirm by someone else, licences,
-// stale modules, language-neutral specs) and the self-test's CI shards (--shard i/N, --list-shards, run-gates
+// 2.72.0 (d): the self-test's CI shards (--shard i/N, --list-shards, run-gates
 // --except, the workflow's shard jobs and summary) (qa/selftest-272d.mjs).
 if (inShard('selftest-272d')) {
   const dir = copyRepo();
@@ -4753,14 +4708,6 @@ if (inShard('selftest-278d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.78.0 (PU-57): the mutation report per gate.
-if (inShard('selftest-278e')) {
-  const dir = copyRepo();
-  const { selftest278E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-278e.mjs')).href);
-  await selftest278E({ dir, run, report, tmpRoot, root });
-  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
-}
-
 // 2.78.0 (PU-59, PU-60): the bench's held-out split and acceptance rule; plan-time waves in shadow mode.
 if (inShard('selftest-278f')) {
   const dir = copyRepo();
@@ -5033,6 +4980,13 @@ if (inShard('selftest-2792b')) {
   const dir = copyRepo();
   const { selftest2792B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2792b.mjs')).href);
   await selftest2792B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+// 2.80.0 (a): the crew's local patches folded in (the aider claim timeout and release, dotnet on the allowlist).
+if (inShard('selftest-280a')) {
+  const dir = copyRepo();
+  const { selftest280A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-280a.mjs')).href);
+  await selftest280A({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

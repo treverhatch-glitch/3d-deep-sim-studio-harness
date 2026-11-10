@@ -130,7 +130,7 @@ Tricks attached to your brief as pre-approved (`studio/CHEATSHEET.md`, by the Di
 - Seeded RNG only.
 - JSON-serializable state only.
 - Run `npm run verify` before calling work done. The purity gate also plays every cartridge with randomness, clock, timers and DOM trapped.
-- Snapshot state before risky changes (`node scripts/snapshot-state.mjs`).
+- Snapshot state before risky changes (commit it, or `git stash push -u -m <tag>`).
 
 ---
 

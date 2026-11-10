@@ -22,7 +22,6 @@ const SKIP_DIRS = new Set(DOCS_SKIP_DIRS);
 const SKIP_FILES = new Set(DOCS_SKIP_FILES);
 const SKIP_PREFIXES = DOCS_SKIP_PREFIXES;
 const scripts = new Set(Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).scripts || {}));
-const hubScripts = fs.existsSync(path.join(root, 'hub', 'package.json')) ? new Set(Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'hub', 'package.json'), 'utf8')).scripts || {})) : new Set();
 
 const files = [];
 (function walk(dir) {
@@ -57,13 +56,13 @@ const scriptsIn = (dir) => {
 for (const rel of files.filter((f) => !SKIP_FILES.has(f))) {
   const text = fs.readFileSync(path.join(root, rel), 'utf8');
   const pkg = pkgDirFor(rel);
-  const own = pkg && pkg !== 'hub';
+  const own = Boolean(pkg);
   const sink = own ? notes : problems;
   text.split(/\r?\n/).forEach((line, i) => {
     for (const m0 of line.matchAll(/\bnpm run ([a-z][\w:.-]*)/g)) {
       // "npm run asset." at the end of a sentence names the asset script (run #1: a Producer log line broke preflight).
       const m = [m0[0], m0[1].replace(/[.:-]+$/, '')];
-      const known = own ? scriptsIn(pkg).has(m[1]) : scripts.has(m[1]) || hubScripts.has(m[1]);
+      const known = own ? scriptsIn(pkg).has(m[1]) : scripts.has(m[1]);
       if (!known) sink.push(`${rel}:${i + 1} npm run ${m[1]} (no such script in ${own ? `${pkg}/` : ''}package.json)`);
     }
     for (const m of line.matchAll(/\b(?:node|bash)\s+((?:\.\/)?(?:harness|scripts|qa|hub|tools|cartridges)\/[\w./-]+\.(?:mjs|js|sh|py))/g)) {

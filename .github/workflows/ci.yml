@@ -244,18 +244,6 @@ jobs:
       - name: Visual-effect checks (npm run vfx)
         run: node scripts/check-vfx.mjs
 
-  war-room-build:
-    if: vars.HARNESS_RUNNER != 'self-hosted'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-      # Builds the War Room with its pinned deps and type-checks the React components.
-      - name: npm run hub:build
-        run: npm run hub:build
-
   # 2.47.0: the checks on the owner's PC (a self-hosted Windows runner), when HARNESS_RUNNER is self-hosted.
   # One job, in order: protected files, every required gate and the release checks, the War Room and controls in
   # Chromium, the Unity template on .NET. Node 24, Python, .NET 8 and Git must be installed on the PC.

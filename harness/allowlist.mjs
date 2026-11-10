@@ -3,7 +3,7 @@
  *
  * One list, used twice: the launcher passes it to Claude Code (--allowedTools), and every kickoff
  * prints it, so an agent knows up front instead of finding out by a refused command. The list is the
- * one 2.23 set (node, npm, npx, ffmpeg, blender, read-only git plus add/commit, ls, mkdir, cp, mv).
+ * one 2.23 set (node, npm, npx, ffmpeg, blender, dotnet since 2.80, read-only git plus add/commit, ls, mkdir, cp, mv).
  */
 export const ALLOWED = [
   ['node', 'node *'],
@@ -11,6 +11,7 @@ export const ALLOWED = [
   ['npx', 'npx *'],
   ['ffmpeg', 'ffmpeg *'],
   ['blender', 'blender *'],
+  ['dotnet', 'dotnet *'], // 2.80.0: a Unity studio's .NET sim tests (the crew carried this as a local patch)
   ['git status', 'git status*'],
   ['git diff', 'git diff *'],
   ['git add', 'git add *'],

@@ -231,24 +231,12 @@ export function evaluateChanges({ events = readRecentEvents(0), now = Date.now()
   return results;
 }
 
-/**
- * 2.78.0 (PU-59): attach a bench verdict (npm run bench -- compare <A> <B> --change <id>) to a change record, as `bench`.
- * Only adds that one field: status, verdict and lastEval (the event-log evaluation above) are not touched.
- */
-export function attachBench(id, bench, { at = new Date().toISOString() } = {}) {
-  const f = fileOf(String(id || ''));
-  const rec = /^C-\d+$/.test(String(id || '')) ? readJson(f) : null;
-  if (!rec) return { ok: false, message: `No change record ${id} (npm run learn -- change list).` };
-  writeJson(f, { ...rec, bench: { ...bench, at } });
-  return { ok: true, message: `Attached the bench verdict "${bench.verdict}" to ${id}.` };
-}
-
 /** One line per record, for LEARNED.md and the upgrade notes. */
 export function changeLine(c) {
   const v = c.verdict || c.lastEval;
   const types = (v?.byType || []).filter((t) => t.eligible).map(describeType).join('; ');
   const state = c.status === 'watching' ? (c.lastEval ? `watching (last check: ${c.lastEval.verdict}, ${c.lastEval.afterTasks} tasks after)` : 'watching') : c.status;
-  return `${c.id} [${c.kind}] ${c.title}: ${state}${types ? ` (${types})` : ''}${c.proposal ? `; revert asked in ${c.proposal}` : ''}${c.bench ? `; bench: ${c.bench.verdict}` : ''}`;
+  return `${c.id} [${c.kind}] ${c.title}: ${state}${types ? ` (${types})` : ''}${c.proposal ? `; revert asked in ${c.proposal}` : ''}`;
 }
 
 /** The lesson → check ladder's ledger: one task per signature, ever (studio/changes/ladder.json, committed). */

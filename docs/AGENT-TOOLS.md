@@ -296,6 +296,9 @@ npm run agent -- start --role builder --agent nim-1 --tool nim --model <nim mode
   An owner tool that runs aider gets the edit brief as `{kickoff}` and the launcher's aider options as `{aiderArgs}`.
   Other roles, a task-less session, and the shared checkout (no lane copy) start aider as before.
   `STUDIO_AIDER_PROTOCOL=off` brings back the 2.79.1 launch.
+  The launcher's claim step (`task start` in the copy) waits `STUDIO_AIDER_CLAIM_TIMEOUT_MS` (default 480000, 8 min; was 120000). When it
+  times out or fails after the claim was recorded, the launcher hands the claim back (`task.paused`, the note says "claim step timed out after N s"
+  or the failure), so no task stays claimed with no agent.
 
 ## One key per agent or role (`STUDIO_KEYMAP_…`, 2.59.0)
 
