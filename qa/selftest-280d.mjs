@@ -77,4 +77,11 @@ console.log('R ' + JSON.stringify({ ok: g.ok, why: g.why, name: g.name, browser:
       try { fs.rmdirSync(path.join(dir, 'game')); } catch {}
     }
   });
+
+  await guard('2.80 (d) #6: a dry-run train writes no "build" status (it ends before a verify and never writes "done", so the watcher called it died); a real train still does (fails on 2.79.2: the build status was written for a dry run too)', async () => {
+    const src = fs.readFileSync(path.join(dir, 'harness', 'train.mjs'), 'utf8').replace(/\r\n/g, '\n');
+    const line = src.split('\n').find((l) => l.includes("writeTrainStatus(root, id, { step: 'build'")) || '';
+    const dry = src.indexOf('if (dryRun) {\n        res.message = `Dry run:');
+    return [/^\s*if \(!dryRun\) writeTrainStatus\(/.test(line) && dry > 0 && src.indexOf(line) < dry, line.slice(0, 200)];
+  });
 }
