@@ -1,7 +1,7 @@
 /**
  * qa/selftest-245.mjs — the 2.45.0 checks that need no browser: the starter studio.browser.json onboarding
  * writes for a web game, how a control is pressed, the `to` effect, and the web track reading a
- * controls-play report. The real-browser proof is scripts/check-controls-play.mjs (CI's war-room-browser job).
+ * controls-play report. The real-browser proof is scripts/check-controls-play.mjs (CI's browser-checks job).
  */
 import fs from 'node:fs';
 import path from 'node:path';

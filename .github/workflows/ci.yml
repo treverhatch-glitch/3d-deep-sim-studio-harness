@@ -49,7 +49,7 @@ jobs:
         run: node scripts/release.mjs --except selftest
       - name: Optional gates (report only)
         if: always()
-        run: node scripts/run-gates.mjs --only balance,fun,renderer-budget,hud
+        run: node scripts/run-gates.mjs --only balance,fun,renderer-budget
 
   # 2.72.0 (d): the self-test in 4 parallel shards per Node version (`--shard i/4` runs every 4th unit of
   # qa/selftest.mjs in file order; units that must stay together share a group). `node qa/selftest.mjs --list-shards 4`
@@ -215,8 +215,8 @@ jobs:
             if [ "$r" != "success" ]; then echo "::error::a release-gate job or self-test shard did not pass ($RESULTS)"; exit 1; fi
           done
 
-  # Drives the War Room in Chromium: all three views, desktop and phone, every button.
-  war-room-browser:
+  # 2.80: the game's checks in Chromium (the War Room browser check, which this job was named for, is gone).
+  browser-checks:
     if: vars.HARNESS_RUNNER != 'self-hosted'
     runs-on: ubuntu-latest
     steps:
@@ -229,8 +229,6 @@ jobs:
           python-version: '3.13'
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - name: npm run hud:check
-        run: node qa/hud-check.mjs
       # Plays the example game in Chromium with real key presses and checks the screen matches the sim.
       - name: npm run play:browser
         run: node qa/browser-play.mjs
@@ -245,7 +243,7 @@ jobs:
         run: node scripts/check-vfx.mjs
 
   # 2.47.0: the checks on the owner's PC (a self-hosted Windows runner), when HARNESS_RUNNER is self-hosted.
-  # One job, in order: protected files, every required gate and the release checks, the War Room and controls in
+  # One job, in order: protected files, every required gate and the release checks, the game's controls in
   # Chromium, the Unity template on .NET. Node 24, Python, .NET 8 and Git must be installed on the PC.
   self-hosted:
     if: vars.HARNESS_RUNNER == 'self-hosted'
@@ -270,10 +268,9 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: npm run release (every required gate, the self-test, the release checks)
         run: node scripts/release.mjs
-      - name: War Room and controls in Chromium
+      - name: Controls in Chromium
         run: |
           npx playwright install chromium
-          node qa/hud-check.mjs
           node qa/browser-play.mjs
           node scripts/check-control-effects.mjs
           node scripts/check-controls-play.mjs

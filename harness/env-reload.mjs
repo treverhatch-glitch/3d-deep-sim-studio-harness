@@ -123,7 +123,9 @@ export async function reloadCli({ by = null, waitMs = null, env = process.env } 
  * 2.79.1 (e): switches removed from the harness, as the part after STUDIO_ (written so the settings map doesn't read them
  * as settings). A .env that still sets one is flagged unknown even when a family wildcard in the map would cover it.
  */
-export const REMOVED_SETTINGS = ['LANE_LOCKS', 'TYPE_EVIDENCE', 'UNITY_PLAYMODE_RETRY', 'TRAIN_GREEN_FIRST', 'STAGE1_PLAYTEST', 'REVIEW_VERDICT_LINE', 'DONE_SKIP_GAME_NONCODE', 'TRAIN_LAND_OVER_NONCODE', 'OWNER_ONLY_PARK'].map((k) => `STUDIO_${k}`);
+export const REMOVED_SETTINGS = ['LANE_LOCKS', 'TYPE_EVIDENCE', 'UNITY_PLAYMODE_RETRY', 'TRAIN_GREEN_FIRST', 'STAGE1_PLAYTEST', 'REVIEW_VERDICT_LINE', 'DONE_SKIP_GAME_NONCODE', 'TRAIN_LAND_OVER_NONCODE', 'OWNER_ONLY_PARK',
+  // 2.80 (b2): read only by the hub and the War Room modules, which are gone.
+  'HUB_HANG_MIN', 'HUB_PAIR_CODE_MIN', 'HUB_PAIR_DAYS', 'PHONE_SECURE_COOKIE', 'AWAY_REFILL_MIN', 'AWAY_REVIEW_MIN', 'FLOOR_IDLE_MIN', 'PLANNING_ROOM', 'FLOW_INTERVAL'].map((k) => `STUDIO_${k}`);
 export function envNameReport({ root = REPO_ROOT, file = path.join(root, '.env') } = {}) {
   let text = '';
   try { text = fs.readFileSync(file, 'utf8'); } catch { text = ''; }
