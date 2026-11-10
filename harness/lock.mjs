@@ -155,7 +155,7 @@ function withMutex(fn) {
 }
 
 /** Top-level folders: claiming one blocks every other agent, so it needs a stated reason. */
-export const WIDE_PATHS = new Set(['', 'studio', 'qa', 'cartridges', 'src', 'game', 'harness', 'hub', 'scripts', 'docs', 'tools', 'assets', 'public']);
+export const WIDE_PATHS = new Set(['', 'studio', 'qa', 'cartridges', 'src', 'game', 'harness', 'scripts', 'docs', 'tools', 'assets', 'public']);
 
 /**
  * 2.58.5 (H-10): a folder too broad to claim by hand without --wide: a game's root or source root (game|web|engine/<name>,
@@ -496,13 +496,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'claim') out(claim(maybeKey, owner, Number(flag('--ttl') || 3600), { wide: flag('--wide') || null, byHand: true }));
   if (cmd === 'release') {
     // 2.80 (c), Patch #24: `--owner X` naming someone else acts for X when the caller is a person (no STUDIO_LOCK_OWNER),
-    // a Producer/Director session or an outside agent the owner named (STUDIO_OUTSIDE_SIGNERS, the main checkout's .env);
+    // a Producer/Director session or an outside agent the owner named (the owner proxy, beta mode, STUDIO_OUTSIDE_SIGNERS);
     // anyone else (a worker, an agent naming itself) is refused naming that rule (K01: naming the holder is not enough).
     const actor = actorOf({ root: REPO_ROOT });
     const named = Boolean(flag('--owner')) && flag('--owner') !== actor.name;
-    const may = named && (actor.tier === 'decider' || (actor.tier === 'outside' && (!actor.name || outsideSigners(REPO_ROOT).includes(actor.name))));
+    // 2.81: also the owner's stand-ins by the studio's own grants (the owner proxy, an agent beta mode names): the crew's
+    // orchestrator is the proxy, not an outside signer, and 2.80 refused it.
+    let standIn = false;
+    if (named && actor.tier === 'outside' && actor.name) { try { standIn = (await import('./owner-proxy.mjs')).proxyShell({ from: REPO_ROOT }).ok || (await import('./beta-mode.mjs')).betaActor({ from: REPO_ROOT, kind: 'hold' }).ok; } catch { standIn = false; } }
+    const may = named && (actor.tier === 'decider' || (actor.tier === 'outside' && (!actor.name || standIn || outsideSigners(REPO_ROOT).includes(actor.name))));
     const res = release(maybeKey, owner, { caller: may ? null : named ? { ...holderOf(), as: actor.name || `a ${actor.role || 'worker'} session` } : holderOf() });
-    if (named && !may && !res.ok && res.reason === 'not-holder') res.message = `lock release --owner ${owner}: only a person, a Producer/Director session or an outside agent the owner named (STUDIO_OUTSIDE_SIGNERS) releases another's lock. ${res.message}`;
+    if (named && !may && !res.ok && res.reason === 'not-holder') res.message = `lock release --owner ${owner}: only a person, a Producer/Director session or an outside agent the owner named (STUDIO_OUTSIDE_SIGNERS), the owner's proxy or an agent beta mode names releases another's lock. ${res.message}`;
     if (may && res.released) emitEvent({ type: 'lock.released_for', agent: actor.name || 'owner', target: normalizeKey(maybeKey), msg: `released ${owner}'s lock` });
     out(res);
   }

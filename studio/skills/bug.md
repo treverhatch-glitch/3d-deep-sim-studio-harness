@@ -51,6 +51,7 @@ hand it back and ask the owner. Only the owner reclassifies it, in their own ter
 recorded in `studio/task-types.json` and committed, or signed once the studio has an owner key; the done and verify
 output show it.
 
-**Never.** Close a bug with no seed that reproduces it (and a tick, for a replay). Retitle a task, or run
-`task type`, to change its type yourself. Delete or re-pin a regression to make
-the gate pass. Commit the fix with `--no-verify` (it loses the tag the check needs).
+**Never.** Close a bug with no seed that reproduces it (and a tick, for a replay): without one nobody can tell it is
+fixed. Retitle a task, or run `task type`, to change its type yourself (the type decides which checks apply; the
+Producer or the owner sets it). Delete or re-pin a regression to make the gate pass (the regression is the proof the
+bug stays fixed). Commit the fix with `--no-verify` (it loses the tag the check needs).

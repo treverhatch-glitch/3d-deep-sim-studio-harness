@@ -60,7 +60,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
-import { writeAtomic } from './fsafe.mjs';
+import { writeAtomic, readJson } from './fsafe.mjs';
 import { OWNER_STEP_PROTECTED } from './owner-only.mjs';
 
 export const LINE_AGENT = 'line-producer';
@@ -75,7 +75,6 @@ const KIND_ORDER = ['trunk', 'chain', 'park', 'cooldown', 'blocked', 'budget', '
 const OWNER_KINDS = new Set(['yes', 'park', 'held']);
 const PRI = (p) => { const m = String(p || '').match(/P(\d)/i); return m ? Number(m[1]) : 9; };
 const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const hhmm = (ms) => new Date(ms).toTimeString().slice(0, 5);
 
 /** on | report | off (STUDIO_LINE_PRODUCER, default on). */
@@ -177,6 +176,8 @@ const pickPoolFn = (pools) => pools.pickPool || pickPoolImpl;
  * [{ role, task, running }], pace: { maxAgents, perRole, label }, rig: { known, byRam, cpuBusy, cpuHold, why },
  * models, share, chainMin, expansionMin, sliceOpen: { id, title } | null, extraBlocked: [] }.
  */
+/** Under this CPU share the machine counts as idle (the scorecard's rig measure counts samples under the same line). */
+export const RIG_IDLE_PCT = 25;
 export function linePlan(f) {
   const tasks = f.tasks || [];
   const live = (f.sessions || []).filter((s) => s.running);
@@ -196,6 +197,13 @@ export function linePlan(f) {
   if (Number.isFinite(f.engineHold?.cap) && (rigCap === null || f.engineHold.cap < rigCap)) { rigCap = Math.max(0, f.engineHold.cap); rigWhy = `an engine land waits for RAM: builder cap stepped down to ${rigCap} (${f.engineHold.why})`; }
   const target = rigCap === null ? paceCap : Math.min(paceCap, rigCap);
   const readyB = tasks.filter((t) => t.state === 'ready' && t.role === 'builder');
+  // 2.81: the other direction. The rig only ever lowers the builder count; when the pace is the limit, ready builder work
+  // waits and the machine is idle (CPU under RIG_IDLE_PCT, RAM room for more builders than the pace allows), the plan
+  // says how many more it could carry. It starts none: the pace is the owner's spend decision (npm run mode).
+  let room = null;
+  if (rig.known && !rig.cpuHold && !f.engineHold && Number.isFinite(rig.cpuBusy) && rig.cpuBusy * 100 < RIG_IDLE_PCT && Number.isFinite(rig.byRam) && rig.byRam > paceCap && builders.length >= paceCap && readyB.length) {
+    room = { extra: Math.min(rig.byRam - paceCap, readyB.length), cpuPct: Math.round(rig.cpuBusy * 100), byRam: rig.byRam, waiting: readyB.length };
+  }
   const blocked = tasks.filter((t) => t.state === 'blocked').map((t) => ({ task: t.id, role: t.role, kind: t.block.kind, why: t.block.why, fix: t.block.fix || '', ...(t.block.mechanical ? { mechanical: true } : {}), ...(t.block.fixed ? { fixed: t.block.fixed } : {}) }));
   for (const b of f.extraBlocked || []) blocked.push(b);
   // 2.78.1 (B-123): a ready builder task with no lane runs, but alone: it is listed as "unscoped" for the Producer.
@@ -264,7 +272,7 @@ export function linePlan(f) {
   let remote = null;
   if (f.remote && f.remote.remotePlan) remote = f.remote.remotePlan(f.remote, { order: orderBeforeSkip, target, running: builders.length, roleOf: (id) => byTask.get(id)?.role });
   return {
-    builders: { running: builders.length, target, paceCap, rigCap, ready: readyB.length, why },
+    builders: { running: builders.length, target, paceCap, rigCap, ready: readyB.length, why, ...(room ? { room } : {}) },
     ...(remote ? { remote } : {}),
     order,
     skip,
@@ -720,7 +728,7 @@ export function summaryLine(s) {
   for (const b of s.blocked || []) kinds[b.kind] = (kinds[b.kind] || 0) + 1;
   const cb = (s.chainBreakers || [])[0];
   return [
-    `Line: ${s.builders?.running ?? 0}/${s.builders?.target ?? 0} builders${s.builders?.rigCap !== null && s.builders?.rigCap !== undefined && s.builders.rigCap < (s.builders.paceCap ?? Infinity) ? ` (the rig carries ${s.builders.rigCap})` : ''}`,
+    `Line: ${s.builders?.running ?? 0}/${s.builders?.target ?? 0} builders${s.builders?.rigCap !== null && s.builders?.rigCap !== undefined && s.builders.rigCap < (s.builders.paceCap ?? Infinity) ? ` (the rig carries ${s.builders.rigCap})` : ''}${s.builders?.room ? ` (the machine is idle at ${s.builders.room.cpuPct}% CPU with room for ${s.builders.room.extra} more and ${s.builders.room.waiting} ready: the pace is the limit, npm run mode)` : ''}`,
     s.blocked?.length ? `${s.blocked.length} blocked (${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(', ')})` : 'nothing blocked',
     cb ? `chain-breaker ${cb.task} (${cb.n} wait${cb.state === 'blocked' ? ', blocked' : ''})` : null,
     s.expansion?.slots ? `expansion ${s.expansion.running}/${s.expansion.slots}` : null,

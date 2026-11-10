@@ -343,9 +343,9 @@ export function openPhase(b, n, { by, force = null } = {}) {
  * opens the gate at once, even past an unfinished exit list, and writes the risk to the event log. Only a
  * person; from inside an agent it is a relay with the dev's words and where they said them.
  */
-export async function openPhaseNow(b, n, { by, words = '', source = '', viaWarRoom = false } = {}) {
+export async function openPhaseNow(b, n, { by, words = '', source = '' } = {}) {
   const { devSays } = await import('./intent.mjs');
-  const who = devSays(by, { quote: words, source, viaWarRoom });
+  const who = devSays(by, { quote: words, source });
   if (!who.ok) return who;
   if (!String(words).trim()) return { ok: false, message: 'Give the dev\'s words, e.g. --now "start Phase 2 now".' };
   n = Number(n);

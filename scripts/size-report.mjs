@@ -4,7 +4,7 @@
  *
  *   node scripts/size-report.mjs [--json] [--against <git ref>]
  *
- * Modules and lines in harness/, scripts/, hub/ (code files, recursive), the 15 largest harness modules, qa/ selftest
+ * Modules and lines in harness/, scripts/ (code files, recursive), the 15 largest harness modules, qa/ selftest
  * files (qa/selftest*.mjs) and lines, test units (`node qa/selftest.mjs --list-shards 1000`), docs/ pages, and the
  * STUDIO_* settings count (scripts/settings-map.mjs's scan). With --against, the same numbers at that ref (read with
  * `git archive`, nothing checked out) and the delta per number. No test is run; about a second.
@@ -53,14 +53,12 @@ export function testUnits(root) {
 export function measure(root = ROOT) {
   const harness = area(root, 'harness');
   const scripts = area(root, 'scripts');
-  const hub = area(root, 'hub');
   let qaFiles = [];
   try { qaFiles = fs.readdirSync(path.join(root, 'qa')).filter((n) => /^selftest.*\.mjs$/.test(n)).map((n) => ({ file: `qa/${n}`, lines: lineCount(path.join(root, 'qa', n)) })); } catch {}
   const docs = walk(path.join(root, 'docs'), (n) => n.endsWith('.md')).length;
   return {
     harness: { modules: harness.length, lines: sum(harness), largest: [...harness].sort((a, b) => b.lines - a.lines || (a.file < b.file ? -1 : 1)).slice(0, 15) },
     scripts: { modules: scripts.length, lines: sum(scripts) },
-    hub: { modules: hub.length, lines: sum(hub) },
     qa: { selftestFiles: qaFiles.length, selftestLines: sum(qaFiles) },
     testUnits: testUnits(root),
     docs,
@@ -83,7 +81,7 @@ export function measureAt(ref, root = ROOT) {
   } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
 }
 
-const FLAT = [['harness modules', (m) => m.harness.modules], ['harness lines', (m) => m.harness.lines], ['scripts modules', (m) => m.scripts.modules], ['scripts lines', (m) => m.scripts.lines], ['hub modules', (m) => m.hub.modules], ['hub lines', (m) => m.hub.lines], ['qa selftest files', (m) => m.qa.selftestFiles], ['qa selftest lines', (m) => m.qa.selftestLines], ['test units', (m) => m.testUnits], ['docs pages', (m) => m.docs], ['STUDIO_* settings', (m) => m.settings]];
+const FLAT = [['harness modules', (m) => m.harness.modules], ['harness lines', (m) => m.harness.lines], ['scripts modules', (m) => m.scripts.modules], ['scripts lines', (m) => m.scripts.lines], ['qa selftest files', (m) => m.qa.selftestFiles], ['qa selftest lines', (m) => m.qa.selftestLines], ['test units', (m) => m.testUnits], ['docs pages', (m) => m.docs], ['STUDIO_* settings', (m) => m.settings]];
 export function deltas(now, was) {
   return FLAT.map(([label, f]) => ({ label, now: f(now), was: f(was), delta: f(now) === null || f(was) === null ? null : f(now) - f(was) }));
 }

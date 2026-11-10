@@ -22,7 +22,7 @@ export function gatesInScope(gates, scope = 'full') {
   const hasLite = gates.some((g) => 'lite' in g);
   const LITE = hasLite ? new Set(gates.filter((g) => g.lite).map((g) => g.id)) : new Set(['purity', 'isolation', 'golden', 'regressions', 'playtest', 'secrets']);
   const hasDeep = gates.some((g) => 'deep' in g);
-  const DEEP = hasDeep ? new Set(gates.filter((g) => g.deep).map((g) => g.id)) : new Set(['selftest', 'hub-smoke', 'hud']);
+  const DEEP = hasDeep ? new Set(gates.filter((g) => g.deep).map((g) => g.id)) : new Set(['selftest']);
   return gates.filter((g) => (scope === 'lite' ? LITE.has(g.id) : !DEEP.has(g.id)));
 }
 

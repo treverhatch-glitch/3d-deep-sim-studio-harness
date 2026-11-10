@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT } from './event.mjs';
+import { readJson } from './fsafe.mjs';
 
 const DAY = 86400000;
 export const RESEARCH_TITLE = /^research\b/i;
@@ -22,7 +23,7 @@ export const RESEARCH_TITLE = /^research\b/i;
 /** Where a task's write-up lives (relative, forward slashes). */
 export function researchRel(id, root = REPO_ROOT) {
   let game = process.env.STUDIO_GAME || null;
-  if (!game) { try { game = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'game.json'), 'utf8')).game || null; } catch { game = null; } }
+  if (!game) { try { game = readJson(path.join(root, 'studio', 'game.json'), {}).game || null; } catch { game = null; } }
   const safe = String(game || '').replace(/[^\w.-]/g, '');
   if (safe) for (const base of [`game/${safe}/docs`, `web/${safe}/docs`]) if (fs.existsSync(path.join(root, base))) return `${base}/research/${id}.md`;
   return `docs/research/${id}.md`;

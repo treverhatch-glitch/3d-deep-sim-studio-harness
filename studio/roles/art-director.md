@@ -19,4 +19,4 @@ with `npm run art -- say "#4 …"` like anyone else; the dev approves). Follow `
 "role"): an asset whose previews passed the automatic checks still needs someone to look. Open
 `.studio/asset-reviews/<name>.md`, look at each preview image it lists, answer its four questions (scale against the
 reference, style match, orientation, obvious defects), then `npm run asset -- review <name> --pass --by <you>` or
-`--fail "<what the maker should change>" --by <you>`, and `npm run task -- done <ID>`. Never review an asset you made.
+`--fail "<what the maker should change>" --by <you>`, and `npm run task -- done <ID>`. Don't review an asset you made: the review is the second pair of eyes.

@@ -44,9 +44,9 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
 import { pidAlive, selfIdentity } from './proc-identity.mjs';
+import { readJson } from './fsafe.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const slug = (s) => String(s || '').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'project';
 const span = (ms) => (ms < 120000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60000)} min`);

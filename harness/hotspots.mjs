@@ -29,6 +29,7 @@ import { emitOnChange } from './telemetry.mjs';
 import { mainRoot, mainBranch, laneCopies } from './worktree.mjs';
 import { listLocks } from './lock.mjs';
 import { withLandLock } from './merge-lane.mjs';
+import { readJson } from './fsafe.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -93,7 +94,6 @@ export function clusters(places) {
 
 // ---- the lanes in flight ----------------------------------------------------------------------------
 
-const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 
 /** The queued and in-flight lanes: [{ label, task, agent, branch, head }], one per branch (or head). */
 export function lanesInFlight(root = mainRoot()) {
@@ -180,7 +180,7 @@ function writeState(root, s) {
 function inbox(root, text) {
   const f = path.join(root, 'studio', 'producer', 'INBOX.md');
   fs.mkdirSync(path.dirname(f), { recursive: true });
-  if (!fs.existsSync(f)) fs.writeFileSync(f, '# Producer inbox\n\n> Messages from people in the War Room. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
+  if (!fs.existsSync(f)) fs.writeFileSync(f, '# Producer inbox\n\n> Messages from people. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
   fs.appendFileSync(f, `- [${new Date().toISOString().slice(0, 16).replace('T', ' ')}] **harness**: ${text.replace(/\n+/g, ' ')}\n`);
 }
 

@@ -24,7 +24,6 @@ const DEFAULT_SCRIPT = {
   planner: ['Planning.', 'Thinking.', 'I have a plan.'],
   reviewer: ['I will review this.', 'Checking now.', 'Looks good.'],
   rnd: ['Experimenting.', 'Researching.', 'Let me try something.'],
-  liaison: ['I will pass this on.', 'Noted.', 'Forwarding.'],
 };
 
 let script = DEFAULT_SCRIPT;

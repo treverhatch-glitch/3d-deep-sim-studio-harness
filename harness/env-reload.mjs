@@ -27,11 +27,11 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { STUDIO_STATE_DIR, REPO_ROOT, emitEvent, actor } from './event.mjs';
 import { parseStudioEnv, envFileSig, envFileState, syncStudioEnv, writeFromFileNote, looksSecret } from './dotenv.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const REQUEST_FILE = () => path.join(STUDIO_STATE_DIR, 'env-reload.json');
 export const ACK_FILE = () => path.join(STUDIO_STATE_DIR, 'env-reload-ack.json');
 const LOGGED_FILE = () => path.join(STUDIO_STATE_DIR, 'env-reloaded.json');
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 /** A change for the log: the value, or null for a key that looks secret. */
 const shown = (key, v) => (looksSecret(key) || v === undefined ? null : String(v).slice(0, 80));
@@ -125,7 +125,9 @@ export async function reloadCli({ by = null, waitMs = null, env = process.env } 
  */
 export const REMOVED_SETTINGS = ['LANE_LOCKS', 'TYPE_EVIDENCE', 'UNITY_PLAYMODE_RETRY', 'TRAIN_GREEN_FIRST', 'STAGE1_PLAYTEST', 'REVIEW_VERDICT_LINE', 'DONE_SKIP_GAME_NONCODE', 'TRAIN_LAND_OVER_NONCODE', 'OWNER_ONLY_PARK',
   // 2.80 (b2): read only by the hub and the War Room modules, which are gone.
-  'HUB_HANG_MIN', 'HUB_PAIR_CODE_MIN', 'HUB_PAIR_DAYS', 'PHONE_SECURE_COOKIE', 'AWAY_REFILL_MIN', 'AWAY_REVIEW_MIN', 'FLOOR_IDLE_MIN', 'PLANNING_ROOM', 'FLOW_INTERVAL'].map((k) => `STUDIO_${k}`);
+  'HUB_HANG_MIN', 'HUB_PAIR_CODE_MIN', 'HUB_PAIR_DAYS', 'PHONE_SECURE_COOKIE', 'AWAY_REFILL_MIN', 'AWAY_REVIEW_MIN', 'FLOOR_IDLE_MIN', 'PLANNING_ROOM', 'FLOW_INTERVAL',
+  // 2.81: the Liaison role is gone, and with it the settings that started it.
+  'LIAISON_TOOL', 'LIAISON_CMD', 'LIAISON_MODEL'].map((k) => `STUDIO_${k}`);
 export function envNameReport({ root = REPO_ROOT, file = path.join(root, '.env') } = {}) {
   let text = '';
   try { text = fs.readFileSync(file, 'utf8'); } catch { text = ''; }

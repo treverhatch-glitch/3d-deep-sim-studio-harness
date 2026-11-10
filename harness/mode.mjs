@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { activeCartridge, isTemplateCartridge } from './cartridge.mjs';
 import { queueNotice } from './comm-notice.mjs';
+import { defaultPushEngine, pushRecordEngine } from './engine-ram.mjs';
 
 export const MODE_FILE = path.join(REPO_ROOT, 'studio', 'mode.json');
 
@@ -168,7 +169,14 @@ export function effectiveMode(m = readMode(), now = Date.now()) {
  * if the RAM allows); the game's tasks get what is left. Nothing is cancelled. studio/mode.json "enginePush":
  * { on, engine, by, at, until }.
  */
-export const enginePushOf = (m = readMode(), now = Date.now()) => (m.enginePush?.on && m.enginePush.engine && (!m.enginePush.until || Date.parse(m.enginePush.until) > now) ? m.enginePush : null);
+export const enginePushOf = (m = readMode(), now = Date.now(), root = REPO_ROOT) => {
+  const e = pushRecordEngine(m.enginePush, now);
+  if (e) return m.enginePush;
+  if (e === null) return null;
+  // 2.81: nobody decided: the studio's only engine goes first by default (harness/engine-ram.mjs defaultPushEngine).
+  const d = defaultPushEngine(root);
+  return d ? { on: true, engine: d, by: 'default (the studio\'s only engine goes first; npm run mode -- engine-push off)', at: null, until: null, auto: true } : null;
+};
 
 /** Who may switch it: a person, the orchestrator/proxy, outside signers, a Producer/Director session; never a worker. null = allowed, else why not. */
 export async function enginePushRefusal(by, { env = process.env, root = REPO_ROOT } = {}) {
@@ -217,7 +225,7 @@ export function enginePushExpiryPass({ now = Date.now(), deps = {} } = {}) {
   if (!p?.on || !p.until || Date.parse(p.until) > now || p.expiredNotified) return null;
   m.enginePush = { ...p, expiredNotified: new Date(now).toISOString() };
   save(m);
-  const line = `ENGINE PUSH for ${p.engine} expired (it was set to end at ${p.until.slice(0, 16).replace('T', ' ')} UTC by ${p.by}): the builder slots and the machine go back to the normal split. To keep going: npm run mode -- engine-push --engine ${p.engine} --until <HH:MM UTC> --by <name>.`;
+  const line = `ENGINE PUSH for ${p.engine} expired (it was set to end at ${p.until.slice(0, 16).replace('T', ' ')} UTC by ${p.by}): the builder slots and the machine go back to the studio's default (its only engine first, when it has exactly one; else the normal split). To keep going: npm run mode -- engine-push --engine ${p.engine} --until <HH:MM UTC> --by <name>.`;
   try { (deps.emit || emitEvent)({ type: 'mode.engine_push', agent: 'supervisor', to: 'producer', msg: line, meta: { on: false, expired: true, engine: p.engine, until: p.until, by: p.by } }); } catch {}
   try { (deps.queueNotice || ((a) => noteLine(a.text, a.key)))({ key: `engine-push-expired:${p.until}`, kind: 'mode', text: line }); } catch {}
   return line;

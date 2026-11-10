@@ -31,7 +31,7 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 import { addRef } from './refs.mjs';
 
 export const MANIFEST = path.join(REPO_ROOT, 'studio', 'assets', 'manifest.json');
-const AGENTISH = /^(producer|director|liaison|builder|rnd|planner|reviewer|watch|agent|claude|codex|cursor|grok|gemini)(-|$)/i;
+const AGENTISH = /^(producer|director|builder|rnd|planner|reviewer|watch|agent|claude|codex|cursor|grok|gemini)(-|$)/i;
 
 export const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 export function readManifest() {

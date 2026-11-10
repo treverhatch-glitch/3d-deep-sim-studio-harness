@@ -49,6 +49,7 @@ import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { loadDotEnv } from './dotenv.mjs';
 import { webhookFrom, maskWebhook, scrub, formatFor, postOnce, DISCORD_MAX } from './report-post.mjs';
 import { digestHours as askDigestHours } from './ask-post.mjs';
+import { pidAlive as alive, readJson } from './fsafe.mjs';
 
 export const CONFIG_REL = 'studio/communicator.json';
 export const ROLES = ['orchestrator', 'keys', 'owner'];
@@ -58,13 +59,11 @@ const LOW_BUILDERS_MS = 10 * 60000;
 const LINE_FRESH_MS = 10 * 60000;
 const ID_RE = /^\d{5,25}$/;
 const stateFile = (root) => path.join(root, '.studio', 'comm', 'state.json');
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const writeJson = (f, v) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); const t = `${f}.${process.pid}.tmp`; fs.writeFileSync(t, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(t, f); } catch {} };
 const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const mins = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); return m < 90 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
 const cut = (ids, k = 6) => (ids.length <= k ? ids.join(', ') : `${ids.slice(0, k).join(', ')} +${ids.length - k} more`);
 const short = (s, n = 160) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
-const alive = (pid) => { try { process.kill(Number(pid), 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 /** Harness data put into a post can't ping anyone: no raw mentions, no @everyone/@here. */
 const quiet = (s) => String(s ?? '').replace(/<@[!&]?(\d+)>/g, '@$1').replace(/<!(channel|here|everyone)>/g, '!$1').replace(/@(everyone|here)\b/g, '@​$1');
 
@@ -251,7 +250,6 @@ export function alertsNow(f, { env = process.env, state = {}, passWhy = [] } = {
     else if (e.type === 'task.owner_only') add(`owner-only:${e.task || '?'}`, 'fix', `${e.task || 'A task'} waits for the owner (parked, no builder relaunched): ${short(String(e.msg || '').replace(/^T-\d+ waits for the owner:\s*/, ''), 220)}`);
     else if (e.type === 'session.stall') add(`stall:${e.task || e.meta?.target || '?'}`, 'fix', `Stuck: ${short(e.msg, 240)}`);
     else if (e.type === 'whole.error') add('harness-error:whole', 'fix', `Harness error (the whole-game check): ${short(e.msg, 240)}`);
-    else if (e.type === 'supervisor.hub_restart' && e.status === 'warn') add('harness-error:hub', 'fix', `Harness error: ${short(e.msg, 240)}`);
   }
   const err = (passWhy || []).find((w) => /^error:/i.test(String(w)));
   if (err) add('harness-error:supervisor', 'fix', `Harness error: the supervisor's pass failed (${short(String(err).replace(/^error:\s*/i, ''), 200)}). npm run studio:status`);
@@ -286,7 +284,7 @@ export function alertsNow(f, { env = process.env, state = {}, passWhy = [] } = {
   }
   // Disasters.
   if (Number.isFinite(f.diskFreeGb) && s.diskGb > 0 && f.diskFreeGb < s.diskGb) add('disk-low', 'disaster', `Disk low: ${f.diskFreeGb} GB free (under ${s.diskGb} GB). npm run janitor frees old lane copies.`);
-  const hour = f.events.filter((e) => (Date.parse(e.ts) || 0) > f.now - 3600000 && (e.type === 'supervisor.hub_restart' || e.type === 'supervisor.halted' || e.type === 'harness.crash' || /^task\.train\.(died|dead|crashed)$/.test(e.type)));
+  const hour = f.events.filter((e) => (Date.parse(e.ts) || 0) > f.now - 3600000 && (e.type === 'supervisor.halted' || /^task\.train\.(died|dead|crashed)$/.test(e.type)));
   if (hour.length >= s.crashes) add('crashes', 'disaster', `Repeated crashes: ${hour.length} in the last hour (${cut([...new Set(hour.map((e) => e.type.replace(/^supervisor\.|^task\./, '')))], 4)}).`);
   const trainRunning = Boolean(f.train) || Boolean(f.trainLock && !f.trainLock.dead);
   f.blockedNow = f.supRunning && f.workers.length === 0 && !trainRunning && (f.blockers.length > 0 || f.stopFiles.length > 0);

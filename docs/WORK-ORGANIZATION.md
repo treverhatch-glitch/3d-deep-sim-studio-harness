@@ -103,6 +103,9 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   checkout runs, or `machine:heavy` stayed held past its wait) is busy, never red: the train waits and runs it again
   (`STUDIO_TRAIN_BUSY_WAIT_MIN`, 20 minutes in all, logged each time), then defers its lanes for the next train
   (`task.train.no_check`); it never hands anyone back or concludes that main is red from it (`harness/train-busy.mjs`).
+  Every train verify's `task.train.verify` event (`meta.exitCause`, `meta.exit`) and result name how it ended (2.81,
+  `harness/verify-cause.mjs`): `green`, `fail` (gate ids known), `exit` (red with no gate id), `signal`, `timeout`,
+  `busy`, `no-check`, `no-record`, `tree-mismatch` or `not-clean`.
   Each checkout has its own "full verify running" record (`.studio/verify-running/full.json` in the main checkout,
   `full.<hash>.json` in a lane or train copy), so a lane's verify no longer refuses the train's or another lane's. Otherwise the lane that turns the first prefix red is handed back (back in the queue, its claim freed,
   a hand-back note with the failing checks, the prefix and the log), whether it fails alone or only together with
@@ -265,7 +268,7 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   its head) and its own commits' trailers, by code, never by a model's confidence. The tier and why are printed by
   `task done --train`, in the train log and in a `task.train.tier` event.
   - **C, needs the owner** (a closed lane, not a threshold): a protected file (`studio/protected.json` at main's tip
-    plus the shipped list), `harness/`, `hub/`, `scripts/`, `qa/*.mjs`, a deleted test, golden or regression file, a
+    plus the shipped list), `harness/`, `scripts/`, `qa/*.mjs`, a deleted test, golden or regression file, a
     file the game declares `irreversible`, an upgrade merge (`Upgrade-Ref:`); 2.71.1: a golden or snapshot the lane
     re-records with its own `Golden-Reason:` (rule `golden-rerecord`: a person, a delegation or autonomous review releases
     it; the game's manifest may set it to B; 2.73.0: the hold shows the harness's first-divergence report, the releaser
@@ -588,8 +591,8 @@ each verify against a main that is about to move, so the trains are pipelined in
   <A>'s tree`; `studio:status` prints the same two lines; `npm run lanes` and `status --brief` add `; next: ...`.
   `readTrainStatus()` (harness/train-status.mjs) keeps its fields (train, step, text, eta, lanes, round, by, since) and
   adds `next` (the speculative train's own status: train, step, text, eta, lanes, after, base, tasks, speculative: true;
-  null when none); every status write also refreshes `.studio/train/status.json`, a snapshot of it. The War Room's web
-  train adds `next` ({ id, step, text, after, base, lanes, laneCount, eta } or null). B has its own life record
+  null when none); every status write also refreshes `.studio/train/status.json`, a snapshot of it. The status snapshot
+  adds `next` ({ id, step, text, after, base, lanes, laneCount, eta } or null). B has its own life record
   (B-88): a dead B is found by the reaper and its `train-next.lock` freed.
 
 ## Less repeated work in the merge train (2.69.0)

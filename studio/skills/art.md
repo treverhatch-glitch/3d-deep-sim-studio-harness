@@ -27,5 +27,6 @@ Check `npm run art` for feedback on assets you made: the last words on each roun
 **Done means.** Designs proposed since the task started: a style sheet if the task asks for one, and
 as many assets as it names. Approval is the dev's (or the Producer's) and comes after.
 
-**Never.** Load `assets/staging/` from game code (the assets gate fails). Ship anything from
-`references/`. Approve your own work. Vendor an asset tool into the repo (`docs/EXTERNAL-TOOLS.md`).
+**Never.** Load `assets/staging/` from game code (the assets gate fails: staged art isn't approved yet). Ship anything
+from `references/` (it is other people's work, kept to study). Approve your own work (the approval is the second pair
+of eyes). Vendor an asset tool into the repo (`docs/EXTERNAL-TOOLS.md`: tools stay installable, not copied).

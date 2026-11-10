@@ -91,7 +91,7 @@ starts under it and logs `agent.renamed`.
   - **A builder's agy session stays open across turns (2.77.3, C1 / B-99; on by default since 2.78.1, B-118).**
     `agy -p` runs one turn: a Gemini builder that started a command in the background ("… and am waiting for the
     process to complete") ended its turn and agy exited minutes later with the task unfinished (the GEMINI.md
-    foreground rule was ignored). A builder-like session (not reviewer, Producer, Director or liaison) starts as
+    foreground rule was ignored). A builder-like session (not reviewer, Producer or Director) starts as
     `agy --input-format stream-json --output-format stream-json --print-timeout <STUDIO_AGY_PRINT_TIMEOUT> --mode accept-edits --model <model> [--settings <file>]`,
     gets the kickoff as the first NDJSON message on stdin, and its stdin stays open. The message is the shape the crew
     probed on real agy (2.78.1, B-118; 2.77.3 sent `"type":"user"` and agy refused it: "stream input message is missing
@@ -265,7 +265,7 @@ npm run agent -- start --role builder --agent nim-1 --tool nim --model <nim mode
   `.studio/nim-models.json` for 24 h (`STUDIO_NIM_CHECK_HOURS`; delete the file to check again now);
   `STUDIO_NIM_CHECK=off` turns the check off. `npm run models:check` checks the same models.
 - What aider sees (2.60.1, B-20, B-21, B-37; `--tool aider` too): `--aiderignore .studio/aider/<agent>.aiderignore`
-  (harness/, hub/, scripts/, tools/, studio/, qa/*.mjs and every path in `studio/protected.json`, anchored at the repo
+  (harness/, scripts/, tools/, studio/, qa/*.mjs and every path in `studio/protected.json`, anchored at the repo
   root, so a game's own `tools/` stays editable): aider never adds those to its chat or edits them, even when the
   kickoff names `harness/task.mjs`. The task's brief goes in with `--read` when it exists. `--no-pretty
   --no-fancy-input` (stdout is a log file), `--no-gitignore` (aider would add `.aider*` to the tracked `.gitignore`;
@@ -389,6 +389,10 @@ npm run agent -- start --role builder --tool vertex --task T-12 [--model google/
   session's context is out of hand: the proxy answers that session's next request 403 (not forwarded), the launcher
   stops it (at its next heartbeat, or when aider exits) and hands its task back (`handBackCause` `prompt-cap`, its
   edits not committed), and `agent.session.end` says so. One oversized request is the most such a session spends.
+- 2.81: a launch through the proxy whose assembled prompt files are already over that cap (bytes / 4: a driven aider
+  session's brief and lane files, otherwise its kickoff file and the brief passed with `--read`; aider's repo map is not
+  counted) is refused before the proxy starts or any request is sent: `agent.start_refused` with `meta.preflight`,
+  `promptBytes` and `cap`.
 - Spend: each answer's usage goes to `.studio/vertex-usage.jsonl` ({ ts, session, task, tool, model, in = prompt_tokens,
   out = total_tokens - prompt_tokens (Gemini's thinking is billed), total, usd }); a session's tokens and estimated
   dollars land on its `agent.session.end` (`npm run tokens -- --by task`, the same place as the Claude API lane's), and
@@ -507,7 +511,7 @@ judgement; hands mechanical follow-ups to the fixer). Each file's frontmatter na
 - **Let the launcher make the copies.** Don't use a tool's own worktree mode (`claude -w`): the studio's queue,
   locks and events live in this checkout's `studio/` and `.studio/`. The launcher's lane copies (`.lanes/<agent>`)
   link those back. A code lane gets a copy, and since 2.58.3 so does a code-writing role (anyone but the Producer,
-  Director, planner and liaison) on a task with no lane: its staged files then can't block other tasks' `task done`
+  Director and planner) on a task with no lane: its staged files then can't block other tasks' `task done`
   in the main checkout. 2.76.0 (B-84): so does such a session started with no task at all, and a code-writing session
   that still claims a task from the main checkout (one an older launcher started) gets its copy at `task start`
   (`harness/lane-at-claim.mjs`: `.lanes/<agent>`, the task's earlier work merged in, recorded on its session; the output

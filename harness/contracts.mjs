@@ -54,6 +54,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { agentOnPermission, permissionText, permittedSetter, WORKER_NAME, AGENT_SHELL } from './permission.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const CONTRACTS_REL = 'studio/contracts';
 export const contractRel = (id) => `${CONTRACTS_REL}/${id}.json`;
@@ -64,7 +65,7 @@ const TASK_ID = /^[A-Z]+-\d+$/;
 const DECIDER_AGENT = /^(prod|producer|director)(-|_|\d|$)/i;
 const REVIEWER_AGENT = /^reviewer(-|_|\d|$)/i;
 // The agent-name shapes a person's name must not have (as harness/reclassify.mjs isAgentName, without its file probe).
-const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|art-director|liaison|scout|reference-scout|designer|designer-calibrator|balancer|fun-tester|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes|nim|dev-hacker|sound|composer|writer|engine|ui-)\b|(^|[-_])bot(\b|$)/i;
+const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|art-director|scout|reference-scout|designer|designer-calibrator|balancer|fun-tester|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes|nim|sound|composer|writer|engine|ui-)\b|(^|[-_])bot(\b|$)/i;
 const timeoutMs = () => (Number(process.env.STUDIO_CONTRACT_TIMEOUT_S) > 0 ? Number(process.env.STUDIO_CONTRACT_TIMEOUT_S) : 600) * 1000;
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 const canon = (v) => (Array.isArray(v) ? `[${v.map(canon).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(',')}}` : JSON.stringify(v ?? null));
@@ -112,7 +113,7 @@ export function requiredTypes(root = REPO_ROOT) {
   try { const main = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { windowsHide: true, cwd: root, encoding: 'utf8' }).stdout.trim(); if (main && path.basename(main) === '.git') roots.push(path.dirname(main)); } catch { /* not git */ }
   const out = new Set();
   for (const r of roots) {
-    try { const req = JSON.parse(fs.readFileSync(path.join(r, 'studio', 'game.json'), 'utf8'))?.contracts?.required; if (Array.isArray(req)) for (const t of req) out.add(String(t).toLowerCase()); } catch { /* no manifest */ }
+    try { const req = readJson(path.join(r, 'studio', 'game.json'))?.contracts?.required; if (Array.isArray(req)) for (const t of req) out.add(String(t).toLowerCase()); } catch { /* no manifest */ }
   }
   return [...out];
 }

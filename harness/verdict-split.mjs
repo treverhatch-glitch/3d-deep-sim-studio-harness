@@ -39,6 +39,7 @@ import { taskChanges, startedAt } from './done-check.mjs';
 import { activeGame } from './cartridge.mjs';
 import { parseNextQueue } from './task.mjs';
 import { isTestPath } from './test-weakening.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const PARTS = ['build', 'logic', 'runtime', 'visual', 'viewport'];
 const file = (task) => path.join(STUDIO_STATE_DIR, 'proof', task, 'verdict.json');
@@ -69,7 +70,6 @@ export function isRenderTask(t = {}) {
 
 // Owner types that say the work is not a render change (bug, whole and art keep the detection).
 export const NOT_RENDER_TYPES = ['change', 'chore', 'docs', 'system', 'balance', 'fun', 'playtest', 'study', 'research', 'review', 'direction', 'idea', 'trick'];
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 /** The game's render paths (globs) and the strict switch: studio/game.json, else the game's studio.gates.json. */
 export function renderPaths(root = REPO_ROOT, env = process.env) {
   const g = readJson(path.join(root, 'studio', 'game.json')) || {};
@@ -118,7 +118,7 @@ export function renderDecision(t = {}, { env = process.env } = {}) {
   const out = (render, by, why, extra = {}) => ({ render, by, why, ...(ignored ? { ignored } : {}), ...extra });
   if (/^(off|no)$/i.test(String(t.visual ?? ''))) return out(false, 'board', 'the board says visual: off');
   // Only build work renders: an art, design or planning task proposing placeholders is not gated here.
-  if (t.role && !/^(builder|engine-porter|dev-hacker)$/.test(t.role)) return out(false, 'role', `a ${t.role} task`);
+  if (t.role && !/^(builder|engine-porter)$/.test(t.role)) return out(false, 'role', `a ${t.role} task`);
   if (t.visual === true || /^(on|yes|true)$/i.test(String(t.visual ?? ''))) return out(true, 'board', 'the board says visual: on');
   if (/engine:godot/i.test(String(t.track || ''))) return out(true, 'track', 'a godot engine task');
   if (/^(visual|art|render)$/i.test(String(t.type || ''))) return out(true, 'type', `a ${t.type} task`);

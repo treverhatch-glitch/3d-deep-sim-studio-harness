@@ -30,12 +30,11 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
-import { writeAtomic } from './fsafe.mjs';
+import { writeAtomic, readJson } from './fsafe.mjs';
 
 export const SELF_TRIAGE_REL = 'harness/self-triage.json';
 export const SELF = 'self-triage';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const off = (v) => /^(off|0|false|no)$/i.test(String(v || ''));
 const stateFile = (root) => path.join(root, '.studio', 'self-triage.json');

@@ -1,7 +1,7 @@
 # 3D Deep-Sim Studio Engine & Harness Compact API Sheet (`studio/llms.txt`)
 #
-# Borrowed from the VibeGame `llms.txt` pattern: Agents MUST read this compact
-# API sheet instead of scanning full engine/harness source files.
+# The command sheet: every command as it is now, one line each. Open it when you need a
+# command; read a command's source when the line isn't enough.
 
 ## 1. Studio Harness CLI Commands
 - `node harness/agents.mjs [list | show <id> | create <id> <Title> | json]`
@@ -22,10 +22,6 @@
   The Idea Board: captured, shaped (R&D), placed (planner, pings the Director), decided, scheduled (`task add --idea`). The watcher hands new ideas to the Producer.
 - `npm run intake -- --followups [--model | --json | --answers f.json]`
   Follow-up questions per phase and per kept or explore layer (a fixed bank; `--model` adds checked ones from a cheap model).
-- `npm run liaison -- draft --kind idea|direction|asset|question --title … --summary … | change | confirm <B-id> --by <dev> | drop | list`
-  The Liaison turns a conversation into a brief, reads it back, and only on the dev's yes sends it to the Producer and the Director.
-- `npm run experiment -- start "…" | task X-001 "…" | keep X-001 --by <name> | drop X-001 --by <name> [--only paths] | list`
-  Tracked experiments: commits tagged `Studio-Experiment`, taken back out in full or in part with undo commits.
 - `npm run ref -- add <url|file> --game … --feature … [--at 1:23] | attach R-001 <file> | frames R-001 | list`
   The reference library (media kept in `references/` or `STUDIO_REFERENCE_DIR`, index in `studio/references/`). Never shipped.
 - `npm run asset -- add <file> --use game --owner … --licence … --by <person>` · `--use reference`
@@ -101,7 +97,7 @@
 - `npm run tokens [-- --since 5h|24h|today|all] [--by role|model|agent|tool] [--json]` — measured token use from each session's own report; sessions whose tool reported nothing are listed as not measured
 - `npm run map -- find <name> [--harness]` — where a function, constant or TUNING key is, with its arguments and line range, in one call (a real parse); prefer it to reading the map and then the file
 - `node scripts/check-function-size.mjs` — game functions over 80 lines and files over 400 lines or 30 KB (STUDIO_FN_MAX_LINES, STUDIO_FILE_MAX_LINES, STUDIO_FILE_MAX_KB); a task can't finish if it made one bigger
-- Lane copies (2.29): an agent the launcher starts with a code lane works in `.lanes/<agent>/` on its own branch (studio/ and .studio/ shared); `task done` there rebases and adds its commits to the studio's branch; git 2.42+, STUDIO_WORKTREES=off to share one checkout. 2.58.3: a code-writing role (not producer, director, planner, liaison) on a task with no lane gets a copy too (STUDIO_LANELESS=shared: the old shared checkout); Claude (and Codex) in a copy get `--add-dir` for the main checkout's studio/ and .studio/
+- Lane copies (2.29): an agent the launcher starts with a code lane works in `.lanes/<agent>/` on its own branch (studio/ and .studio/ shared); `task done` there rebases and adds its commits to the studio's branch; git 2.42+, STUDIO_WORKTREES=off to share one checkout. 2.58.3: a code-writing role (not producer, director, planner) on a task with no lane gets a copy too (STUDIO_LANELESS=shared: the old shared checkout); Claude (and Codex) in a copy get `--add-dir` for the main checkout's studio/ and .studio/
 - `npm run lane -- create <T-ID> [--from <branch>...] [--agent <name>] [--allow-mixed]` — a proper lane copy for a task from chosen branches, merged in order (studio/ linked to main; another open task's commits refused); `npm run remote -- mark|brief|fetch|release|status` — remote (cloud) workers: a lease for remote-<name>, its branch remote/<T-ID>-… fetched into the normal train (docs/REMOTE-WORKERS.md)
 - `npm run help [-- --all]` — the everyday commands on one screen (Lite: ten)
 - `npm run verify [-- --deep | --full]` — everyday verify skips the harness self-checks (selftest); --deep runs them (release and CI do); --full runs every gate in Lite scope
@@ -136,7 +132,6 @@
 - `npm run bible -- phase open <n> --now "<the dev's words>" --by <dev>` — the dev's "do it now": opens the phase at once, risk logged (docs/STEERING.md)
 - `npm run watchdog -- on|off --by <name> | status` — the opt-in overnight watchdog, off by default (docs/STEERING.md)
 - `npm run budget -- ccusage` — with the ccusage plugin on, copy Claude Code's own daily usage into the ledger (docs/STEERING.md)
-- `npm run trick -- propose "<title>" --problem … --trick … --fits … --avoid-if … --proof … | none "<why>" | adopt K-001 --by <p> | park K-001 --why … --by <p> | list` — the dev hacker's trick cards (Dev Hacker Lab, off by default, P3, never blocks; docs/DEV-HACKER.md)
 - Golden changes need a `Golden-Reason:` trailer (commit-msg hook adds `Golden-Diff:`)
 - `node scripts/check-module-size.mjs` — modules over 300 lines block parallel lanes (studio/rules/lanes.md)
 - `node scripts/settings-census.mjs [--json] [--env <studio .env>] [--events <events.jsonl>]` — every STUDIO_* setting with default, readers, frozen, first release and whether a studio sets it; lists off-switch, duplicate-family and dead candidates (report only, 2.79)
@@ -162,7 +157,7 @@
 - `npm run golden -- --update` — after an intended sim change; commit hashes with the change
 - `npm run balance` / `npm run fun` — sweep `TUNING` (studio/balance/sweep.json) / fun proxies
 - `node harness/lock.mjs claim path:<dir> --owner <unique>` · `node harness/task.mjs start <ID> --agent <unique>`
-- 2.26 token savers: `npm run map [-- --check]` — .studio/MAP.md, every code file in one line (what it is, exports, lane); agents read it before searching (the launcher refreshes it). `npm run pitfall -- "never …" [--by <name>] [--scope <role>] | proposed | accept|reject <PP-n> --by <name> | remove <n> | evict` — studio/PITFALLS.md, one-line rules every agent's prompt carries, scoped by role (a "didn't work" note that reads as a rule is added too; 2.61: an agent's line waits for the Producer or a person, the least useful line is evicted past the budget, never one tied to a regression or an accepted cause). Never read CHANGELOG.md; hand-back notes are cut to 20 lines
+- 2.26 token savers: `npm run map [-- --check]` — .studio/MAP.md, every code file in one line (what it is, exports, lane); agents read it before searching (the launcher refreshes it). `npm run pitfall -- "never …" [--by <name>] [--scope <role>] | proposed | accept|reject <PP-n> --by <name> | remove <n> | evict` — studio/PITFALLS.md, one-line rules every agent's prompt carries, scoped by role (a "didn't work" note that reads as a rule is added too; 2.61: an agent's line waits for the Producer or a person, the least useful line is evicted past the budget, never one tied to a regression or an accepted cause). CHANGELOG.md is release history (behaviour that later changed): take no rule from it; hand-back notes are cut to 20 lines
 - `npm run agent -- logs <name> [--raw]` — a Claude session as a conversation (claude runs with stream-json, so the log keeps every message and tool call); session-end events carry tokens in, out and cache reads from the tool's own final report
 - Launcher (2.26): one launcher — the watcher's auto-start does nothing while the supervisor runs, and otherwise uses the supervisor's picker (lanes, holds, -auto- names); never two sessions on one task; a session that ends without task done hands its task back at once; a task handed back 3 times in 2 h is parked for the Producer (STUDIO_LOOP_HANDBACKS); anyone may hand back a task whose agent has ended
 - Reviews nobody could do are owed (studio/reviews/OWED.json) and retried by the watcher when the reviewer resets. `npm run balance -- --cartridge <game> --knob <TUNING key> --values a,b,c`. browser-play: a loss with the screen matching the sim passes with a note (browser.mustWin to fail it), inputs saved as a trace for replay --trace; `input` may return `{ move: [x, y] }`

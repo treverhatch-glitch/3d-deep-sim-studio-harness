@@ -35,6 +35,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { readJson } from './fsafe.mjs';
 
 export const MACHINE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const machineFile = (root = MACHINE_ROOT) => path.join(root, '.studio', 'machine.json');
@@ -292,7 +293,6 @@ export function scanMachine({ root = MACHINE_ROOT, env = process.env, platform =
   return p;
 }
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 function writeAtomic(file, text) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;

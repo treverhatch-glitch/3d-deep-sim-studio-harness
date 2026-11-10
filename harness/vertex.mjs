@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { aiderProgram } from './aider-launch.mjs';
 import { resolveCommand } from './launch.mjs';
+import { readEnvFile } from './dotenv.mjs';
 
 export const VERTEX_DEFAULT_MODEL = 'google/gemini-3-flash-preview';
 export const VERTEX_HARD_MODEL = 'google/gemini-3.1-pro-preview';
@@ -45,19 +46,7 @@ const HARNESS = path.dirname(fileURLToPath(import.meta.url));
 export const studioRoot = () => path.dirname(STUDIO_STATE_DIR);
 const num = (v, d) => { const n = Number(v); return v !== undefined && v !== null && String(v).trim() !== '' && Number.isFinite(n) ? n : d; };
 
-/** Every NAME=value line of a .env file (all names, unlike dotenv.mjs's settings reader). Values stay in memory only. */
-export function readEnvFile(file) {
-  const out = {};
-  let text = '';
-  try { text = fs.readFileSync(file, 'utf8'); } catch { return out; }
-  for (const line of text.split(/\r?\n/)) {
-    const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
-    if (!m) continue;
-    const v = m[2].replace(/^(['"])(.*)\1$/, '$2');
-    if (v !== '' || !(m[1] in out)) out[m[1]] = v;
-  }
-  return out;
-}
+export { readEnvFile };
 export const mainEnv = (root = studioRoot()) => readEnvFile(path.join(root, '.env'));
 
 /** { ok, why }: the key and the project are set in the main checkout's .env (names only in the reason). */

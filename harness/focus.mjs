@@ -25,6 +25,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { parseNextQueue, readTaskHandoff } from './task.mjs';
 import { listLocks } from './lock.mjs';
 import { checkDone } from './done-check.mjs';
+import { anchorBriefLines } from './anchors.mjs';
 import { DEFAULT_SIZE } from './scorecard.mjs';
 import { readAttached } from './cheatsheet.mjs';
 import { HANDOFF_MAX } from './session-cap.mjs';
@@ -54,6 +55,7 @@ export function buildFocus(taskId, agent = null) {
   const added = events.find((e) => e.type === 'task.added' && e.task === taskId);
   const size = added?.meta?.size || DEFAULT_SIZE[check.type] || 2;
   const causedBy = added?.meta?.causedBy || null;
+  const anchors = Array.isArray(added?.meta?.anchors) ? added.meta.anchors.map(String) : [];
   const locks = listLocks();
   const mine = agent ? locks.filter((l) => l.owner === agent) : [];
   const others = locks.filter((l) => l.owner !== agent && l.key.startsWith('path:'));
@@ -106,7 +108,7 @@ export function buildFocus(taskId, agent = null) {
   const preparedRel = `.studio/briefs/${taskId}.prepared.md`;
   const prepared = fs.existsSync(path.join(REPO_ROOT, preparedRel)) ? preparedRel : null;
   const historyWords = events.filter((e) => e.task === taskId && e.msg).reduce((n, e) => n + String(e.msg).split(/\s+/).length, 0);
-  return { task, check, skill, size, causedBy, handoff: readTaskHandoff(taskId), tricks: readAttached(taskId)?.tricks || [], tricksBy: readAttached(taskId)?.preapproved?.approvedBy || null, mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice, verdictNotes: safe(() => notesForBrief({ id: task.id, title: task.title, role: task.role })), godotFailures: safe(() => godotFailuresForBrief()), inbox: safe(() => inboxForBrief(task.id)) || null, conductor: safe(() => conductorForBrief(task.id)) || null };
+  return { task, check, skill, size, causedBy, anchors, handoff: readTaskHandoff(taskId), tricks: readAttached(taskId)?.tricks || [], tricksBy: readAttached(taskId)?.preapproved?.approvedBy || null, mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice, verdictNotes: safe(() => notesForBrief({ id: task.id, title: task.title, role: task.role })), godotFailures: safe(() => godotFailuresForBrief()), inbox: safe(() => inboxForBrief(task.id)) || null, conductor: safe(() => conductorForBrief(task.id)) || null };
 }
 
 export function renderVoice(v) {
@@ -144,6 +146,9 @@ export function renderFocus(f) {
   if (f.inbox) L.push('', '## Inbox', `${f.inbox.total} follow-up(s) routed to this task (${f.inbox.unread} unread), quoted in the marked block above. Read them before you start: \`npm run thread -- inbox ${f.task.id}\`. New ones arrive while you work; a Claude Code session is told at its next tool call.`);
   if (f.identity) L.push('', `## Who you are (studio/roles/${f.task.role}.md)`, f.identity);
   L.push('', '## Done means', `${f.check.means}.${f.check.ok ? ' (Already true; confirm before you finish.)' : ''}`);
+  // 2.81 (b2): the anchors the task cites (task add --anchors): the reference's behaviours, numbers and acceptance
+  // lines, and how the deliverable proves them (harness/anchors.mjs). Unknown evidence is said, never assumed.
+  if (f.anchors?.length) L.push('', '## Anchors this task must match (studio/references/anchors.json)', ...anchorBriefLines(f.anchors), 'An anchor whose evidence is unknown or needs a reference is reported as unknown at done: it is never green, so say what you assumed in your hand-back note.');
   // 2.67.2: a bug task's regression, exactly (the path, the fields, the pin and fails-before commands), as task done asks.
   if (f.check.type === 'bug') L.push('', '## The regression this bug needs', ...regressionHowTo(f.task.id).map((x) => `- ${x}`));
   if (f.roleRefusals?.length) L.push('', `## Where \`${f.task.role}\` agents get refused most`, ...f.roleRefusals.map((r) => `- ${r.n}x: ${r.why}`), 'Do these before you run done.');

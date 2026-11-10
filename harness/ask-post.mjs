@@ -21,12 +21,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { emitEvent, boardRoot } from './event.mjs';
-import { writeAtomic, withFileLock } from './fsafe.mjs';
+import { writeAtomic, withFileLock, readJson } from './fsafe.mjs';
 
 const H = 3600000;
 const root = () => { try { return boardRoot(); } catch { return process.cwd(); } };
 export const postedFile = (r = root()) => path.join(r, '.studio', 'asks-posted.json');
-const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 /** STUDIO_ASK_DIGEST_HOURS (24): how often an open (or recurring) ask is posted again at most. */
 export const digestHours = (env = process.env) => { const v = String(env.STUDIO_ASK_DIGEST_HOURS ?? '').trim(); const n = Number(v); return v !== '' && Number.isFinite(n) && n >= 0 ? n : 24; };
 

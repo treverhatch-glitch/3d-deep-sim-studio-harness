@@ -30,6 +30,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { readJson } from './fsafe.mjs';
 
 /** NODE_OPTIONS flags a gate's children keep: memory, warning, certificate-store and DNS settings that load no code. */
 export const SAFE_NODE_OPTIONS = /^--(?:max[-_]old[-_]space[-_]size|max[-_]semi[-_]space[-_]size)=\d+$|^--(?:no-warnings|no-deprecation|enable-source-maps|experimental-vm-modules|use-openssl-ca|use-bundled-ca|use-system-ca)$|^--dns-result-order=(?:ipv4first|ipv6first|verbatim)$/;
@@ -128,7 +129,6 @@ export function gitRedirectsWhy(r) {
   return `this checkout's git folder has ${parts.join(' and ')}: git would show other commits or files than the ones committed, in every lane copy of it`;
 }
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 /**
  * Why node_modules in `dir` doesn't match its package-lock.json, or null (no package-lock.json, no node_modules, or

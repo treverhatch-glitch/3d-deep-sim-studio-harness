@@ -232,10 +232,24 @@ export function moveAside(file, dest, raw) {
   return true;
 }
 
+/**
+ * A JSON file as a value, or `d` when it is missing or doesn't parse. The harness's one quiet reader (2.81 folded 71
+ * copies into it). A UTF-8 byte-order mark (a Windows editor's save) is skipped, so a file saved that way reads as
+ * what it says instead of as missing.
+ */
+export function readJson(f, d = null) {
+  try { return JSON.parse(fs.readFileSync(f, 'utf8').replace(/^\uFEFF/, '')); } catch { return d; }
+}
+
+/**
+ * Is a process with this number running? The harness's one cheap check (2.81 folded 19 copies into it): a number or
+ * a numeric string; a process we may not signal (EPERM) counts as running. Who the process is: proc-identity.mjs.
+ */
 export function pidAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
+  const n = typeof pid === 'string' && pid.trim() !== '' ? Number(pid) : pid;
+  if (!Number.isInteger(n) || n <= 0) return false;
   try {
-    process.kill(pid, 0);
+    process.kill(n, 0);
     return true;
   } catch (err) {
     return err.code === 'EPERM';

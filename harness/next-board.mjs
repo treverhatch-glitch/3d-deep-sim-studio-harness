@@ -20,10 +20,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents } from './event.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const NEXT_BOARD_MAX_WORDS = 149;
 const PRI = { P0: 0, P1: 1, P2: 2, P3: 3 };
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 export const wordCount = (s) => String(s || '').split(/\s+/).filter(Boolean).length;
 const short = (s, n) => { const w = String(s || '').replace(/\s+/g, ' ').trim().split(' '); return w.length <= n ? w.join(' ') : `${w.slice(0, n).join(' ')}…`; };
 

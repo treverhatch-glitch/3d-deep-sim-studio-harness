@@ -1,8 +1,8 @@
 # 3D Deep Simulation & AI Game Studio — Agent Operating Rules (`AGENTS.md`)
 
-This repository is a generalized, external-context & multi-agent studio harness designed to scale a 3D simulation game beyond 100,000+ lines of TypeScript without losing architectural direction or exhausting LLM token quotas.
-
-Every coding agent **MUST** follow these operating rules.
+This repository is a studio harness: it runs a crew of AI agents that build a deep simulation game. These are the
+operating rules for every agent in the studio. Each says when it applies and why; where a rule and your task seem to
+pull apart, the reason tells you which way to go.
 
 ---
 
@@ -17,9 +17,10 @@ Every coding agent **MUST** follow these operating rules.
 - Assets, art and code made outside the harness still come in through it: `npm run art -- propose`
   or `npm run asset`. Nothing goes into the game unrecorded.
 
-## 1. Thin-Context First: Read Order on Session Start
+## 1. Where to start
 
-Do **NOT** scan the entire repository. Load state in this order:
+Start from the task, not from the repository: these files, in this order, tell you what the studio is doing and what
+you are asked to do. Then read whatever the task needs, as deeply as it needs:
 
 1. `studio/CURRENT_TASK.md` (Producers: run `npm run handoff` instead; it covers this list and more)
 2. `studio/NEXT.md` (or `node harness/task.mjs next`)
@@ -28,17 +29,18 @@ Do **NOT** scan the entire repository. Load state in this order:
 5. `studio/bible/BIBLE.md` and `NOT-DOING.md` (the game, its open phase, and what is never built)
 6. `studio/VISION_LOCK.md`, `studio/PLAN.md` and `studio/decisions/` (`studio/MASTER.md` maps every key document)
 
-To find a function, constant or key, run `npm run map -- find <name>` (one call: file, line range, arguments); `.studio/MAP.md` lists every code file in one line. Follow `studio/PITFALLS.md`: rules this game learned the hard way. Never read `CHANGELOG.md`; `studio/llms.txt` lists every command. The owner's studio rules (autonomous mode, what no agent decides, notes for every agent): `npm run policy`.
+To find a function, constant or key, run `npm run map -- find <name>` (one call: file, line range, arguments); `.studio/MAP.md` lists every code file in one line. Follow `studio/PITFALLS.md`: rules this game learned the hard way. `CHANGELOG.md` is the harness's release history: it describes behaviour later releases changed, so take no rule or command from it; `studio/llms.txt` lists every command as it is now. The owner's studio rules (autonomous mode, what no agent decides, notes for every agent): `npm run policy`.
 
 See also `docs/READ-FIRST.md`.
 
 ---
 
-## 2. Preferred Model Cost Order & Prepare Then Escalate
+## 2. Models and briefs
 
-1. Local model first, then free tiers, then paid.
-2. For long history or escalated bugs, run `npm run brief -- <ID> --model` (a cheap or local model drafts a 300-word brief and a script checks it) and give the strong model only `.studio/briefs/<ID>.prepared.md`.
-3. Skip prepare for already-short tasks.
+1. Which model runs a task is decided by the harness's routing and the owner's budget order, not by the agent on it.
+2. A task with a long history (an escalated bug, many hand-backs) reads better from a prepared brief:
+   `npm run brief -- <ID> --model` drafts one and a script checks it (`.studio/briefs/<ID>.prepared.md`). It is a
+   starting point: open the history itself whenever the brief doesn't answer your question.
 
 See `docs/ROUTING.md`.
 
@@ -64,7 +66,7 @@ See `docs/ROUTING.md`.
 Logging `editing` is not enough. Use the lock helper.
 
 ### Before starting work
-0. New agent? Get your opening prompt: `npm run kickoff -- --role <role> --agent <unique-name> --model <model>`. `task start` writes your one-page brief to `.studio/briefs/<ID>.md`; read it instead of scanning the repo.
+0. New agent? Get your opening prompt: `npm run kickoff -- --role <role> --agent <unique-name> --model <model>`. `task start` writes your one-page brief to `.studio/briefs/<ID>.md`; read it first: it names what the task touches and what done means.
 1. Use a unique owner name per running agent (`cursor-win2`, `claude-a`). Shared names such as `cursor`, `claude` or `builder` are refused.
    Export it once: `export STUDIO_LOCK_OWNER=cursor-win2`.
 2. Claim the task: `node harness/task.mjs start <ID> --agent cursor-win2` (refuses work another agent claimed).
@@ -102,28 +104,31 @@ Logging `editing` is not enough. Use the lock helper.
 
 ## 5. Human Approval Gate
 
-Require explicit human or Producer approval before:
-- Pulling external assets
-- Large refactors
-- Changing core simulation rules
+Get a person's or the Producer's approval before these three, because each changes what every other lane builds on
+or brings in something the studio then has to answer for:
+- Pulling external assets (their licence and source must be recorded)
+- Large refactors (every open lane conflicts with them)
+- Changing core simulation rules (goldens, balance and the Bible all move)
 
 An approval the protected check (`qa/protected-check.mjs`) passes counts, whoever recorded it: the owner's key, the owner's
-proxy and beta mode are all the owner's (`npm run beta -- status`). The check judges approvals, not you: never hand a task
-back over who signed one it accepts (2.77.1, B-97).
+proxy and beta mode are all the owner's (`npm run beta -- status`). The check judges approvals, not you: don't hand a task
+back over who signed one it accepts.
 
 Tricks attached to your brief as pre-approved (`studio/CHEATSHEET.md`, by the Director or Producer when the task was handed out) are approved for that task; use them without asking. Anything else still needs approval.
 
 ---
 
-## 6. Token-Saver & Assets
+## 6. Usage numbers and assets
 
-- Use compressed lookups instead of full-file dumps when possible.
-- Token numbers are what each tool reported when its session ended (`npm run tokens`). Savings are not measured unless rtk reports them (`docs/TELEMETRY.md`).
-- Use Blender headless generation or blender-orchestrator for assets.
+- Token numbers are what each tool reported when its session ended (`npm run tokens`).
+- 3D assets come from headless Blender or blender-orchestrator (`docs/BLENDER-ORCHESTRATOR.md`), so they can be
+  rebuilt from a script.
 
 ---
 
 ## 7. Sim Purity
+
+The sim must replay identically from a seed: that is what lets a change be checked without a person playing it.
 
 - No DOM, `window`, WebGL, or `three` inside simulation logic.
 - Fixed timestep only.
@@ -147,7 +152,7 @@ Not rules, but they keep accounts in good standing and the team fast: commit loc
 stay in your own repos, use fine-grained tokens, use only keys you are entitled to (extra free accounts break most providers' terms), tools before freehand.
 See `docs/BEST-PRACTICES.md`.
 
-## 10. The attending game dev is optional (2.30o)
+## 10. The attending game dev is optional
 
 The harness must run without anyone watching. While a studio has an active game, the supervisor runs the
 game-dev loop every few minutes (`STUDIO_GAMEDEV_INTERVAL`, 180 s; without the supervisor: `npm run gamedev`;

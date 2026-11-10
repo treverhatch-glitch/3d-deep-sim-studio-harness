@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { emitEvent } from './event.mjs';
+import { pidAlive as alive } from './fsafe.mjs';
 
 const stateFile = (root) => path.join(root, '.studio', 'slow-tier.json');
 const OFF = /^(off|0|false|no|never)$/i;
@@ -36,7 +37,6 @@ export function slowHour(env = process.env) {
   return v !== '' && Number.isInteger(n) && n >= 0 && n <= 23 ? n : 3;
 }
 const localDate = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-const alive = (pid) => { try { process.kill(Number(pid), 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 
 /** Is the daily slow run due now? { due, why }. Once per local day, from STUDIO_SLOW_HOUR on, never two at once. */
 export function slowTierDue(root, { now = Date.now(), env = process.env, declared = true } = {}) {

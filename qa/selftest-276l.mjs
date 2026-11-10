@@ -182,12 +182,12 @@ http.createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; })
     fresh();
     write('.studio/supervisor.json', { status: 'running', pid: process.pid, startedAt: iso(T - 3600000) });
     write('.studio/crew-paused.json', { roles: { builder: { at: iso(T), why: 'x' } } });
-    for (const m of [3, 2, 1]) addEvent({ ts: iso(T - m * 60000), type: 'supervisor.hub_restart', status: 'warn', msg: 'Restarting the War Room hub (exit 1)' });
+    for (const m of [3, 2, 1]) addEvent({ ts: iso(T - m * 60000), type: 'task.train.died', status: 'warn', msg: 'train 2026-x died (its process is gone)' }); // 2.81: was three hub restarts; the hub is gone
     const z1 = pass(T);
     const zc1 = posts().map((p) => p.content).join('\n');
     const z2 = pass(T + 61 * 60000);
     const zc2 = posts().map((p) => p.content).join('\n');
-    await guard('276l disasters: 3 hub restarts in an hour tag the owner and the orchestrator at once; no agent and no train with a blocker for over STUDIO_COMM_BLOCKED_MIN (supervisor running) tags them too, not before; without a supervisor it never does (fails on 2.75.0)', () => [
+    await guard('276l disasters: 3 crashes in an hour (dead trains, halts) tag the owner and the orchestrator at once; no agent and no train with a blocker for over STUDIO_COMM_BLOCKED_MIN (supervisor running) tags them too, not before; without a supervisor it never does (fails on 2.75.0)', () => [
       z1.posted === true && /<@333333333333> <@111111111111> Repeated crashes: 3 in the last hour/.test(zc1) && !/Everything is blocked/.test(zc1) && /<@333333333333> <@111111111111> Everything is blocked for 61 min/.test(zc2)
         && !/Everything is blocked/.test(c7),
       `${zc1.slice(0, 600)}\n---\n${zc2.slice(-900)}`]);

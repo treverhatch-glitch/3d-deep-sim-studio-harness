@@ -54,7 +54,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, actor, emitEvent, readRecentEvents } from './event.mjs';
-import { appendLine, withFileLock, writeAtomic } from './fsafe.mjs';
+import { appendLine, withFileLock, writeAtomic, readJson } from './fsafe.mjs';
 import { scrub, findSecrets } from './secrets.mjs';
 import { DAY, signatureOf, workaroundStats, workaroundTrend } from './workaround-stats.mjs';
 
@@ -66,7 +66,6 @@ const STATE_FILE = () => path.join(STUDIO_STATE_DIR, 'workaround-state.json');
 const LOCK_DIR = () => path.join(STUDIO_STATE_DIR, 'locks');
 const num = (v, d) => (v !== undefined && v !== null && String(v).trim() !== '' && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : d);
 const off = (env = process.env) => /^(off|0|false|no)$/i.test(String(env.STUDIO_WORKAROUND_DETECT || ''));
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const iso = (ms) => new Date(ms).toISOString();
 const sha = (text) => crypto.createHash('sha256').update(String(text)).digest('hex').slice(0, 24);
 export const settings = (env = process.env) => ({

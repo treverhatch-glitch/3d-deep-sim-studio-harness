@@ -28,10 +28,10 @@ import path from 'node:path';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { weightedTokens, cacheReadWeight } from './token-weight.mjs';
 import { emitSampled } from './telemetry.mjs';
+import { readJson } from './fsafe.mjs';
 
 const STATE = () => path.join(STUDIO_STATE_DIR, 'futility.json');
 export const FUTILITY_LOG = () => path.join(STUDIO_STATE_DIR, 'futility-log.jsonl');
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const ts = (e) => Date.parse(e?.ts) || 0;
 const num = (v, d) => (v === undefined || v === null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 

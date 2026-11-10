@@ -5,7 +5,7 @@
  * changes, sorted by how costly a wrong change is to undo:
  *
  *   C  never lands by itself (a closed lane, not a threshold): protected files (studio/protected.json at main's tip and
- *      the shipped list), harness code (harness/, hub/, scripts/, qa/*.mjs), a deleted test or regression file, files
+ *      the shipped list), harness code (harness/, scripts/, qa/*.mjs), a deleted test or regression file, files
  *      the game declares irreversible (save/schema formats: manifest "irreversible"), an upgrade merge (Upgrade-Ref:
  *      trailer). Held in the train queue as "needs the owner" until a person releases it (train release).
  *   B  deterministic checks plus history: sim/behaviour (the game's sim paths, goldens, declared pin moves), shared
@@ -60,7 +60,7 @@ export const higher = (a, b) => (rank(b) > rank(a) ? b : a);
  */
 export const DEFAULT_TIER_RULES = [
   { id: 'protected', tier: 'C', locked: true, kind: 'protected', why: 'a protected file (studio/protected.json and the shipped list): only the owner approves it' },
-  { id: 'harness', tier: 'C', locked: true, paths: ['harness/**', 'hub/**', 'scripts/**', 'qa/*.mjs'], why: 'the studio\'s own code and checks (harness/, hub/, scripts/, qa/*.mjs)' },
+  { id: 'harness', tier: 'C', locked: true, paths: ['harness/**', 'scripts/**', 'qa/*.mjs'], why: 'the studio\'s own code and checks (harness/, scripts/, qa/*.mjs)' },
   { id: 'test-deleted', tier: 'C', locked: true, kind: 'test', status: 'D', why: 'it deletes a test' },
   { id: 'golden-deleted', tier: 'C', locked: true, kind: 'golden', status: 'D', why: 'it deletes a golden or snapshot' },
   { id: 'regression-deleted', tier: 'C', locked: true, paths: ['qa/regressions/**'], status: 'D', why: 'it deletes a regression replay' },

@@ -67,6 +67,24 @@ export function parseStudioEnv(text) {
   }
   return found;
 }
+/**
+ * Every NAME=value line of a .env text (all names, keys included, unlike the settings reader above): quotes stripped,
+ * the last non-empty line for a name wins. Values stay in memory only. 2.81 folded three copies into this one, and the router's loader into loadDotEnv below.
+ */
+export function parseEnvText(text) {
+  const out = {};
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!m) continue;
+    const v = m[2].replace(/^(['"])(.*)\1$/, '$2');
+    if (v !== '' || !(m[1] in out)) out[m[1]] = v;
+  }
+  return out;
+}
+/** parseEnvText of a file; {} when it can't be read. */
+export function readEnvFile(file) {
+  try { return parseEnvText(fs.readFileSync(file, 'utf8')); } catch { return {}; }
+}
 export const valueHash = (v) => crypto.createHash('sha1').update(String(v)).digest('hex').slice(0, 10);
 /** The file's version for "did it change": mtime and size, or null when there is no file. */
 export function envFileSig(file) {
@@ -130,7 +148,8 @@ export function loadStudioEnvAtStart(file, env = process.env) {
   return marks;
 }
 
-export function loadDotEnv(file, env = process.env) {
+/** Load a .env into env: a value already there wins, identity keys never. skipEmpty: a `NAME=` line sets nothing. */
+export function loadDotEnv(file, env = process.env, { skipEmpty = false } = {}) {
   if (!fs.existsSync(file)) return [];
   const loaded = [];
   const text = fs.readFileSync(file, 'utf8');
@@ -138,13 +157,13 @@ export function loadDotEnv(file, env = process.env) {
   for (const line of text.split('\n')) {
     const t = line.trim();
     if (!t || t.startsWith('#')) continue;
-    const m = t.match(/^(?:export\s+)?([a-zA-Z_][a-zA-Z0-9_]*)=(.*)$/);
+    const m = t.match(/^(?:export\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*=(.*)$/);
     if (!m) continue;
     const key = m[1];
     if (isSessionIdentity(key)) continue;
     let val = m[2].trim();
     if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1, -1);
-    if (env[key] === undefined) {
+    if (env[key] === undefined && !(skipEmpty && val === '')) {
       env[key] = val;
       loaded.push(key);
     }

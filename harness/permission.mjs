@@ -22,7 +22,7 @@ import { betaActor } from './beta-mode.mjs';
 // Launched sessions that may act on a person's permission.
 export const DECIDER_ROLES = /^(producer|director)$/i;
 // Worker agents: never, with or without permission (names as the launcher hands them out: builder-s3, qa-playtester-s2).
-export const WORKER_NAME = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|art|artist|art-director|designer|designer-calibrator|balancer|fun-tester|scout|reference-scout|engine-porter|dev-hacker|planner|liaison)(-|_|\d|$)/i;
+export const WORKER_NAME = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|art|artist|art-director|designer|designer-calibrator|balancer|fun-tester|scout|reference-scout|engine-porter|planner)(-|_|\d|$)/i;
 // A coding agent's own shell (outside the harness).
 export const AGENT_SHELL = ['CLAUDECODE', 'AI_AGENT', 'CODEX_SANDBOX', 'GEMINI_CLI'];
 

@@ -19,9 +19,9 @@ import { fileURLToPath } from 'node:url';
 import { mainRoot } from './worktree.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
 import { engineTarget, engineTask } from './engine-tracks.mjs';
+import { readJson } from './fsafe.mjs';
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 
 export const checkLockFile = (root, engine) => path.join(root, '.studio', 'locks', `engine-check-${engine}.lock`);

@@ -20,7 +20,7 @@ Every architectural change follows:
 ## Operating Checklist
 1. On session start, run `npm run handoff` and read it before you assign work. New to the studio? Read `studio/MASTER.md` first.
 2. Decompose features or P0/P1 bug fixes into atomic tasks in `studio/NEXT.md` assigned to `designer-calibrator`, `builder`, `qa-playtester`, `reviewer`, or any custom specialist in `studio/roles/`.
-3. Never allow simulation logic to leak into DOM/Three.js (`studio/rules/sim-purity.md`).
+3. Keep simulation logic out of DOM/Three.js code (`studio/rules/sim-purity.md`): the sim has to run headless and replay from a seed.
 4. Emit passive events (`node harness/event.mjs --agent producer ...`) so studio:status and the digest reflect live orchestration at 0% token cost.
 5. `Check forced done <ID>` tasks come first: someone closed work with `--force`. Run the skipped check (`node harness/done-check.mjs <ID>` names it) or order someone to, then accept the work or reopen it.
 6. Order studies like any task (`--type study`): another game's layout, or a bug hunt through our own build (`docs/GAME-STUDY.md`).
@@ -34,7 +34,7 @@ Every architectural change follows:
     (`npm run line -- status`); deciding what changes is yours.
 13. When the harness itself helps or gets in the way, write it in `studio/harness-notes/NOTES.md` (`npm run notes -- add --kind well|bad|workaround|upgrade "…"`). Known workarounds show in your briefing; these notes carry over to the next project.
 
-## Who you are (2.30o: you own continuous development)
+## Who you are: you own continuous development
 
 You run the studio and you own where the game goes next. A plan is never finished: when the queue
 runs low, a milestone closes or the development cycle pings you (`.studio/briefs/dev-cycle.md`), you

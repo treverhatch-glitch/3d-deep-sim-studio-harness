@@ -23,10 +23,11 @@ import path from 'node:path';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { activeGame, isTemplateCartridge } from './cartridge.mjs';
 import { isFixTask, trunkState } from './baseline.mjs';
-import { withFileLock, writeAtomic } from './fsafe.mjs';
+import { withFileLock, writeAtomic, pidAlive } from './fsafe.mjs';
 import { WORKER_NAME, DECIDER_ROLES } from './permission.mjs';
 import { ownerType } from './reclassify.mjs';
 import { entryPath, hasRegion, listsClash } from './lane-regions.mjs';
+import { sameBlocker, attemptsRefuse } from './attempts.mjs'; // a cycle (attempts.mjs reads the holds): only called at run time
 
 export const HOLDS_FILE = path.join(REPO_ROOT, 'studio', 'task-holds.json');
 export const STOP_COOLDOWN_MIN = () => Number(process.env.STUDIO_STOP_COOLDOWN_MIN ?? 15);
@@ -132,7 +133,7 @@ export function heldForLanding(taskId, { holds = readHolds(), queue = null } = {
  */
 export function inAnyTrain(taskId, { stateDir = STUDIO_STATE_DIR } = {}) {
   const readJ = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const alive = (pid) => { if (!pid) return false; try { process.kill(Number(pid), 0); return true; } catch (err) { return err.code === 'EPERM'; } };
+  const alive = pidAlive;
   let names = [];
   try { names = fs.readdirSync(path.join(stateDir, 'train')); } catch {}
   for (const n of names.sort()) {
@@ -234,8 +235,18 @@ export function holdReason(taskId, q, now = Date.now(), holds = readHolds(), rol
     if (tq?.via === 'train' && tq.engine) return `${tq.why}: it counts as in progress until that train lands it or hands it back (npm run task -- train status --engine ${tq.engine})`;
     if (tq?.via === 'train') return `${tq.why}; it lands with the next train (npm run task -- train leave ${taskId} --by <name> takes it out first)`;
   }
+  // 2.81 (b1): the attempt ledger (harness/attempts.mjs): the last failed hand-back's signature (reason, main's tip,
+  // what it waits for) is the same as the current facts' one, so a new session would meet the same wall. Last in order:
+  // a park, a wait or a hold names itself first. Work in progress (its claim) carries on.
+  const sameWall = () => {
+    if (!attemptsRefuse() || q?.inProgress?.some((x) => x.id === taskId)) return null; // record mode: offered last, never refused
+    try {
+      const s = sameBlocker(taskId, { holds, done: q ? doneIds(q) : new Set() });
+      return s.same ? `same blocker as attempt ${s.n} (${s.reasonKey || 'no reason'}): main unchanged since ${String(s.mainTip || '').slice(0, 7)} and nothing it waits for landed; fix it or npm run task -- unblock ${taskId} --by <name>` : null;
+    } catch { return null; }
+  };
   const h = holds[taskId];
-  if (!h) return null;
+  if (!h) return sameWall();
   const done = doneIds(q);
   if (h.held && !q?.inProgress?.some((x) => x.id === taskId)) return `${heldWords({ via: 'hold', ...h.held })} (npm run task -- unhold ${taskId} --by <name>)`;
   if (h.needsYes) return `an agent-proposed mechanic; it starts when the dev says yes (npm run task -- yes ${taskId} --by <dev>)`;
@@ -247,7 +258,7 @@ export function holdReason(taskId, q, now = Date.now(), holds = readHolds(), rol
   if (h.until && Date.parse(h.until) > now) return `blocked until ${hhmm(h.until)}${h.why ? `: ${h.why}` : ''}`;
   // 2.77.3 (B-115): a stop's cooldown keeps the stopped role from restarting at once; another role (a reviewer) can start.
   if (h.cooldownUntil && Date.parse(h.cooldownUntil) > now && !(role && h.cooldownRole && role !== h.cooldownRole)) return `stopped by ${h.cooldownBy || 'someone'}; can restart after ${utcHm(h.cooldownUntil)}`;
-  return null;
+  return sameWall();
 }
 
 /**

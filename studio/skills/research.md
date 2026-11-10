@@ -18,5 +18,6 @@ an engine feature behaves, what a tool or service costs, what other games did. Q
 **Done means.** The write-up exists and its Sources section holds at least one link. The digest lists finished
 research with its file and recommendation. No verify: research changes no game code.
 
-**Never.** Present an unverified claim as a finding. Paste keys, private links or paid content into the write-up.
-Copy another game's code, art, audio or text into the repo.
+**Never.** Present an unverified claim as a finding (say what you checked and what you only read). Paste keys, private
+links or paid content into the write-up. Copy another game's code, art, audio or text into the repo: research records
+what other games do, as a yardstick for our own design.

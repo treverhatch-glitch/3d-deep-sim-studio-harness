@@ -23,6 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readEnvFile } from './dotenv.mjs';
 
 const HARNESS_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASICS = /^(PATH|Path|PATHEXT|HOME|USER|USERNAME|LOGNAME|SHELL|TERM|COLORTERM|LANG|LANGUAGE|LC_[A-Z]+|TZ|TMP|TEMP|TMPDIR|PWD|SystemRoot|SystemDrive|ComSpec|WINDIR|windir|OS|PROCESSOR_ARCHITECTURE|NUMBER_OF_PROCESSORS|APPDATA|LOCALAPPDATA|USERPROFILE|HOMEDRIVE|HOMEPATH|ProgramFiles|ProgramFiles\(x86\)|ProgramData|CommonProgramFiles|PUBLIC|XDG_[A-Z_]+|DISPLAY|WAYLAND_DISPLAY|DBUS_SESSION_BUS_ADDRESS|HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy|ALL_PROXY|SSL_CERT_FILE|SSL_CERT_DIR|NODE_EXTRA_CA_CERTS|REQUESTS_CA_BUNDLE|CI|GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)|EDITOR|VISUAL)$/;
@@ -142,7 +143,7 @@ export function heldBack(args) {
  * opus-bot), a name a launched session used (.studio/agents/<name>.json), or one the launcher hands out
  * (.studio/agent-names.json counters: builder-s<n>). Empty counts as an agent's (nobody said who).
  */
-export const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|liaison|scout|designer|balancer|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes|nim|dev-hacker|sound|composer|writer)\b/i;
+export const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|scout|designer|balancer|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes|nim|sound|composer|writer)\b/i;
 export function agentLikeName(name, { stateDir = path.join(HARNESS_ROOT, '.studio') } = {}) {
   const who = String(name || '').trim();
   if (!who || AGENTISH.test(who)) return true;
@@ -189,16 +190,7 @@ const shownIn = (env) => (x) => {
 /** The STUDIO_KEYMAP_ lines of the studio's .env (the main checkout's): the last non-empty one for a name wins. */
 function keymapsInDotEnv(env) {
   const root = String(env.STUDIO_MAIN_ROOT || '').trim() ? path.resolve(env.STUDIO_MAIN_ROOT) : HARNESS_ROOT;
-  const found = {};
-  let text = '';
-  try { text = fs.readFileSync(path.join(root, '.env'), 'utf8'); } catch { return found; }
-  for (const line of text.split(/\r?\n/)) {
-    const m = line.match(/^\s*(?:export\s+)?(STUDIO_KEYMAP_[A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
-    if (!m) continue;
-    const v = m[2].replace(/^['"]|['"]$/g, '');
-    if (v !== '' || !(m[1] in found)) found[m[1]] = v;
-  }
-  return found;
+  return Object.fromEntries(Object.entries(readEnvFile(path.join(root, '.env'))).filter(([k]) => /^STUDIO_KEYMAP_[A-Z0-9_]+$/.test(k)));
 }
 
 /** The mapping for one child: { pairs: [{ target, source, from }], refused: [line] } (names only). */

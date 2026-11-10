@@ -22,11 +22,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const WINDDOWN_FILE = () => path.join(STUDIO_STATE_DIR, 'winddown.json');
 export const RESTART_LOG = () => path.join(STUDIO_STATE_DIR, 'restart-log.md');
 export const RESTART_LOG_REL = '.studio/restart-log.md';
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 
 /** STUDIO_USAGE_WINDDOWN_PCT as a percent (1-100), or null (off). */
 export function winddownPct(env = process.env) {

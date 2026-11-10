@@ -32,7 +32,7 @@ delete process.env.STUDIO_TASK_PIN;
 // The self-test never reads the live studio: every copy starts from the template's board and an
 // empty pre-production state (qa/fixtures/studio/), whatever game this checkout is building.
 const FIXTURE = path.join(root, 'qa', 'fixtures', 'studio');
-const LIVE_STATE = ['studio/bible/bible.json', 'studio/bible/BIBLE.md', 'studio/bible/NOT-DOING.md', 'studio/bible/REFERENCES.md', 'studio/bible/STORYBOARD.md', 'studio/bible/ideas', 'studio/bible/systems', 'studio/signed', 'studio/data-consent.json', 'studio/mode.json', 'studio/game.json', 'studio/asks', 'studio/art', 'studio/divisions.json', 'studio/task-holds.json', 'studio/budget.json', 'studio/tricks', 'studio/playtest', 'studio/proof', 'studio/assets', 'studio/decisions/divisions.md', 'studio/intake-answers.json', 'studio/PITFALLS.md', 'studio/PITFALLS-ARCHIVE.md'];
+const LIVE_STATE = ['studio/bible/bible.json', 'studio/bible/BIBLE.md', 'studio/bible/NOT-DOING.md', 'studio/bible/REFERENCES.md', 'studio/bible/STORYBOARD.md', 'studio/bible/ideas', 'studio/bible/systems', 'studio/signed', 'studio/data-consent.json', 'studio/mode.json', 'studio/game.json', 'studio/asks', 'studio/art', 'studio/divisions.json', 'studio/task-holds.json', 'studio/budget.json', 'studio/playtest', 'studio/proof', 'studio/assets', 'studio/decisions/divisions.md', 'studio/intake-answers.json', 'studio/PITFALLS.md', 'studio/PITFALLS-ARCHIVE.md'];
 // A game's own folders. In a studio building a game, the copy takes these from the harness release this
 // clone last merged (git merge-base HEAD origin/main), never from the live game: run #1's selftest
 // failed on a real studio because its divisions, references, assets, goldens and logs leaked in.
@@ -121,7 +121,7 @@ function copyRepo() {
   });
   if (tpl.dir) fs.cpSync(tpl.dir, dest, { recursive: true });
   for (const rel of LIVE_STATE) fs.rmSync(path.join(dest, rel), { recursive: true, force: true });
-  for (const dir of ['studio/reviews', 'studio/bible/reviews', 'studio/experiments']) {
+  for (const dir of ['studio/reviews', 'studio/bible/reviews']) {
     const d = path.join(dest, dir);
     if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) if (f.toLowerCase() !== 'readme.md') fs.rmSync(path.join(d, f), { recursive: true, force: true });
   }
@@ -140,11 +140,14 @@ const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readF
 const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
   // 2.73.0 (g): the copies' verify keys (harness/verify-key.mjs) live in the self-test's temp folder, never in the user's home.
   STUDIO_VERIFY_KEY_DIR: path.join(tmpRoot, 'verify-keys') };
-const run = (dir, cmd, env = {}) => spawnSync(cmd, { windowsHide: true, cwd: dir, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
+// Per-unit counters for --timing (harness/selftest-timing.mjs): subprocesses started and checks reported.
+const count = (what) => { if (unitNow) unitNow.u[what] = (unitNow.u[what] || 0) + 1; };
+const run = (dir, cmd, env = {}) => { count('spawns'); return spawnSync(cmd, { windowsHide: true, cwd: dir, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } }); };
 const plantInvariant = (tick) => (s) =>
   s.replace('  if (state.won && state.lost)', `  if (state.tick === ${tick}) findings.push({ id: 'PLANTED', severity: 'P0', summary: 'planted at tick ${tick}' });\n  if (state.won && state.lost)`);
 const runAsync = (dir, cmd, env = {}) =>
   new Promise((resolve) => {
+    count('spawns');
     const c = spawn(cmd, { windowsHide: true, cwd: dir, shell: true, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
     let stdout = '';
     let stderr = '';
@@ -154,6 +157,7 @@ const runAsync = (dir, cmd, env = {}) =>
   });
 const report = (label, ok, detail = '') => {
   if (strayCheck(label)) return;
+  count('asserts');
   console.log(`[selftest] ${ok ? 'PASS' : 'FAIL'} ${label}${ok || !detail ? '' : `\n${detail.slice(-600)}`}`);
   if (!ok) failed += 1;
 };
@@ -164,7 +168,8 @@ const report = (label, ok, detail = '') => {
 // changes, so the shards' union is the whole self-test. `--list-shards N` runs no check: it prints the units and
 // their shard as JSON, plus any check that ran outside a unit ("strays": a new block without the guard), and exits 1
 // when there is one. A new block starts with `if (inShard()) {` (or `if (inShard('<label>', '<group>')) {`).
-// Each shard runs on its own CI runner; shards are balanced by count, not time (each shard prints its slowest units).
+// Each shard runs on its own CI runner; shards are balanced by count unless `--balance [file]` gives each unit's
+// recorded time (harness/selftest-timing.mjs); each shard prints its slowest units.
 const SELFTEST_ARGS = process.argv.slice(2);
 const argValue = (name) => {
   const i = SELFTEST_ARGS.findIndex((a) => a === name || a.startsWith(`${name}=`));
@@ -173,7 +178,81 @@ const argValue = (name) => {
 };
 let SHARD = null;
 let LIST_SHARDS = null;
+// `--timing [file]`: per-unit ms, spawns and asserts, written when the run ends (harness/selftest-timing.mjs).
+const TIMING_ARG = argValue('--timing');
+const TIMING_FILE = TIMING_ARG === null ? null : path.resolve(root, TIMING_ARG && !TIMING_ARG.startsWith('--') ? TIMING_ARG : path.join('.studio', 'selftest-timing.json'));
+// Phase B2: `--only a,b` and `--changed [ref]` run a selection of units (harness/selftest-select.mjs); `--jobs N` runs
+// the N shards of this run as N child processes (an 8-core box runs the self-test in a quarter of the time). The
+// full, one-process run stays the default and is what `npm run verify` and CI's shards do.
+const ONLY_ARG = argValue('--only');
+const CHANGED_ARG = argValue('--changed');
+const JOBS_ARG = argValue('--jobs');
+
 parseShardArgs();
+// `--balance [file]` with --shard or --list-shards: shards by recorded unit time (balanceShards in
+// harness/selftest-timing.mjs) instead of by count; the file is `.studio/selftest-timing.json` (what `--timing`
+// writes) or a committed `qa/selftest-timing.json`; units it has no time for count as the median.
+const BALANCE_ARG = argValue('--balance');
+let BALANCED = null;
+if (BALANCE_ARG !== null && (SHARD || LIST_SHARDS)) {
+  const given = BALANCE_ARG && !BALANCE_ARG.startsWith('--') ? path.resolve(root, BALANCE_ARG) : [path.join(root, 'qa', 'selftest-timing.json'), path.join(root, '.studio', 'selftest-timing.json')].find((f) => fs.existsSync(f));
+  let rows = [];
+  try { rows = JSON.parse(fs.readFileSync(given, 'utf8')).units || []; } catch { console.error(`[selftest] --balance: no readable timing file (${given || 'none found'}); shards are by count`); }
+  if (rows.length) {
+    const n = LIST_SHARDS || SHARD.n;
+    const listed = JSON.parse(spawnSync(process.execPath, [fileURLToPath(import.meta.url), `--list-shards=${n}`], { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout || '{"units":[]}');
+    BALANCED = (await import('../harness/selftest-timing.mjs')).balanceShards(listed.units, rows, n);
+  }
+}
+let SELECT = null;
+if (ONLY_ARG !== null || CHANGED_ARG !== null) {
+  const { buildSelection } = await import('../harness/selftest-select.mjs');
+  SELECT = buildSelection(root, {
+    only: ONLY_ARG, changed: CHANGED_ARG, deep: process.argv.includes('--deep'), source: fs.readFileSync(fileURLToPath(import.meta.url), 'utf8'),
+    extraText: (u) => (u.label.startsWith('sabotage:') ? `${gates.find((g) => g.id === u.label.slice(9))?.command || ''} ${String(SABOTAGE[u.label.slice(9)] || '')}` : ''),
+  });
+  if (SELECT.kind === 'changed' && JOBS_ARG === null) console.log(`[selftest] ${SELECT.describe}${SELECT.all ? '' : `: ${SELECT.files.slice(0, 12).join(', ')}${SELECT.files.length > 12 ? ', …' : ''}`}`);
+}
+if (JOBS_ARG !== null && !LIST_SHARDS) {
+  const jobs = JOBS_ARG === '' || JOBS_ARG === 'auto' || JOBS_ARG.startsWith('--') ? Math.max(1, Math.min(4, Math.floor(os.cpus().length / 2))) : Number(JOBS_ARG);
+  if (!(Number.isInteger(jobs) && jobs >= 1 && jobs <= 16) || SHARD) {
+    console.error(`[selftest] --jobs N with 1 <= N <= 16 (or auto), not with --shard; got "${JOBS_ARG}"${SHARD ? ' and --shard' : ''}`);
+    process.exit(2);
+  }
+  process.exit(await runJobs(jobs));
+}
+/** `--jobs N`: this file N times with `--shard i/N`, the output line-prefixed, the timing merged. Returns the exit code. */
+async function runJobs(jobs) {
+  const pass = [];
+  if (ONLY_ARG !== null) pass.push(`--only=${ONLY_ARG}`);
+  if (CHANGED_ARG !== null) pass.push(`--changed=${CHANGED_ARG}`);
+  if (BALANCE_ARG !== null) pass.push(`--balance=${BALANCE_ARG}`);
+  const timingFiles = [];
+  const t0 = Date.now();
+  const children = Array.from({ length: jobs }, (_, k) => new Promise((resolve) => {
+    const i = k + 1;
+    const args = [fileURLToPath(import.meta.url), `--shard=${i}/${jobs}`, ...pass];
+    if (TIMING_FILE) { timingFiles.push(path.join(tmpRoot, `timing-${i}.json`)); args.push(`--timing=${timingFiles[k]}`); }
+    const c = spawn(process.execPath, args, { windowsHide: true, cwd: root, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const tag = (stream, out) => { let buf = ''; stream.on('data', (d) => { buf += d; let nl; while ((nl = buf.indexOf('\n')) >= 0) { out.write(`[${i}/${jobs}] ${buf.slice(0, nl)}\n`); buf = buf.slice(nl + 1); } }); stream.on('end', () => { if (buf) out.write(`[${i}/${jobs}] ${buf}\n`); }); };
+    tag(c.stdout, process.stdout);
+    tag(c.stderr, process.stderr);
+    c.on('close', (status) => resolve({ i, status }));
+  }));
+  const results = await Promise.all(children);
+  if (TIMING_FILE) {
+    const { timingReport, timingLines, writeTimingReport } = await import('../harness/selftest-timing.mjs');
+    const units = timingFiles.flatMap((f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')).units || []; } catch { return []; } });
+    const rep = { ...timingReport(units, { shard: null, complete: true }), jobs, wallMs: Date.now() - t0 };
+    const wrote = writeTimingReport(TIMING_FILE, rep);
+    for (const l of timingLines(rep, 20)) console.log(l);
+    console.log(`[selftest] timing ${wrote ? `written to ${path.relative(root, wrote)}` : `could not be written to ${TIMING_FILE}`} (${jobs} jobs, ${Math.round((Date.now() - t0) / 1000)} s wall)`);
+  }
+  try { fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+  const red = results.filter((r) => r.status !== 0).map((r) => `${r.i}/${jobs}`);
+  console.log(red.length ? `[selftest] ${red.length} of ${jobs} job(s) failed: ${red.join(', ')} (${Math.round((Date.now() - t0) / 1000)} s wall)` : `[selftest] ok — ${jobs} jobs, every shard passed (${Math.round((Date.now() - t0) / 1000)} s wall)`);
+  return red.length ? 1 : 0;
+}
 function parseShardArgs() {
   const sh = argValue('--shard');
   const ls = argValue('--list-shards');
@@ -193,9 +272,21 @@ const UNITS = [];
 const SHARD_OF = new Map();
 const STRAYS = [];
 let unitNow = null;
+let SKIPPED = 0; // units --only/--changed left out of this run (in this shard)
+let timingMod = null;
 function endUnit() {
-  if (unitNow) unitNow.u.ms = Date.now() - unitNow.t0;
+  if (unitNow) {
+    unitNow.u.ms = Date.now() - unitNow.t0;
+    flushTiming(false); // after every unit, so a killed run still leaves the units it finished
+  }
   unitNow = null;
+}
+/** Write the timing report (the units that ran so far); `complete` once the run ended. Never throws. */
+async function flushTiming(complete) {
+  if (!TIMING_FILE || LIST_SHARDS) return null;
+  timingMod ||= await import('../harness/selftest-timing.mjs');
+  const rep = timingMod.timingReport(UNITS, { shard: SHARD, complete });
+  return { rep, wrote: timingMod.writeTimingReport(TIMING_FILE, rep) };
 }
 /** Does this unit run here? Called once per unit, in file order, by every run (so the numbering never depends on the shard). */
 function inShard(label = null, group = null) {
@@ -203,11 +294,12 @@ function inShard(label = null, group = null) {
   const line = Number((String(new Error().stack).split('\n')[2] || '').match(/:(\d+):\d+\)?\s*$/)?.[1]) || null;
   const n = LIST_SHARDS || SHARD?.n || 1;
   const key = group ? `group:${group}` : `unit:${UNITS.length}`;
-  if (!SHARD_OF.has(key)) SHARD_OF.set(key, (SHARD_OF.size % n) + 1);
+  if (!SHARD_OF.has(key)) SHARD_OF.set(key, BALANCED?.get(label || `L${line}`) ?? (SHARD_OF.size % n) + 1);
   const u = { label: label || `L${line}`, ...(group ? { group } : {}), shard: SHARD_OF.get(key), line };
   UNITS.push(u);
   if (LIST_SHARDS) return false;
-  const runs = !SHARD || u.shard === SHARD.i;
+  let runs = !SHARD || u.shard === SHARD.i;
+  if (runs && SELECT && !SELECT.runs(u)) { runs = false; u.skipped = true; SKIPPED += 1; }
   if (runs) unitNow = { u, t0: Date.now() };
   return runs;
 }
@@ -706,60 +798,6 @@ if (inShard()) {
   report('studio:reset starts an unsigned Bible, so build work waits for the intake', after.status !== 0 && /pre-production/.test(after.stderr) && /npm run intake/.test(queue()), after.stderr);
 }
 
-// Experiments: tagged commits can be kept, or taken back out in part or in full, leaving other work alone.
-if (inShard()) {
-  const dir = copyRepo();
-  const git = (cmd, env = {}) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`, env);
-  git('init -q');
-  git('add -A');
-  git('commit -q -m init --no-verify');
-  run(dir, 'node scripts/install-hooks.mjs');
-  run(dir, 'node harness/experiment.mjs start "Glowing moss at night" --by hatch');
-  const X = { STUDIO_EXPERIMENT: 'X-001' };
-  edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}\n// night glow\n`);
-  fs.writeFileSync(path.join(dir, 'cartridges/example-sim/glow.txt'), 'glow\n');
-  git('add -A');
-  git('commit -q -m "night glow"', X);
-  edit(dir, 'cartridges/example-sim/index.mjs', (s) => `${s}\n// unrelated work\n`);
-  git('commit -qam "unrelated"');
-  const tagged = run(dir, 'git log --format=%B -n 2').stdout;
-  report('commits made with STUDIO_EXPERIMENT carry the experiment trailer, others don\'t', (tagged.match(/Studio-Experiment: X-001/g) || []).length === 1, tagged);
-  const part = run(dir, 'node harness/experiment.mjs drop X-001 --by hatch --only cartridges/example-sim/glow.txt');
-  report('dropping part of an experiment takes out only that part', part.status === 0 && !fs.existsSync(path.join(dir, 'cartridges/example-sim/glow.txt')) && /night glow/.test(fs.readFileSync(path.join(dir, 'cartridges/example-sim/qa.mjs'), 'utf8')), part.stdout + part.stderr);
-  const full = run(dir, 'node harness/experiment.mjs drop X-001 --by hatch');
-  const qa = fs.readFileSync(path.join(dir, 'cartridges/example-sim/qa.mjs'), 'utf8');
-  const idx = fs.readFileSync(path.join(dir, 'cartridges/example-sim/index.mjs'), 'utf8');
-  const rec = JSON.parse(fs.readFileSync(path.join(dir, 'studio/experiments/X-001.json'), 'utf8'));
-  report('dropping the rest takes it all out and leaves other work in place', full.status === 0 && !/night glow/.test(qa) && /unrelated work/.test(idx) && rec.status === 'dropped', full.stdout + full.stderr);
-  run(dir, 'node harness/experiment.mjs start "Snails redraw paths" --by hatch');
-  const t = run(dir, 'node harness/experiment.mjs task X-002 "snail trail prototype"').stdout.match(/T-\d+/)[0];
-  run(dir, `node harness/task.mjs start ${t} --agent builder-x`);
-  edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}// snail trail\n`);
-  git('commit -qam "snail trail"', { STUDIO_LOCK_OWNER: 'builder-x' });
-  report('work on an experiment\'s task is tagged with the experiment', /Studio-Experiment: X-002/.test(run(dir, 'git log -1 --format=%B').stdout), run(dir, 'git log -1 --format=%B').stdout);
-  report('keeping an experiment records the decision', run(dir, 'node harness/experiment.mjs keep X-002 --by hatch').status === 0 && JSON.parse(fs.readFileSync(path.join(dir, 'studio/experiments/X-002.json'), 'utf8')).status === 'kept');
-}
-
-// The Liaison: nothing moves until the game dev confirms; then it reaches the Producer and the Director.
-if (inShard()) {
-  const dir = copyRepo();
-  const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_LOCK_OWNER: 'liaison-1' };
-  run(dir, 'node harness/intake.mjs --answers studio/templates/intake-example.json', env);
-  run(dir, 'node harness/bible.mjs sign --by hatch', env);
-  const d = run(dir, 'node harness/liaison.mjs draft --kind idea --title "Night tide" --summary "At night the moss glows and visitors rate higher" --from hatch', env);
-  report('a draft is read back to the game dev and asks to push it on', /Shall I push it on\?/.test(d.stdout) && /Night tide/.test(d.stdout), d.stdout);
-  report('nothing reaches the Idea Board before the game dev confirms', !fs.existsSync(path.join(dir, 'studio/bible/ideas/I-001.json')));
-  report('an agent can\'t confirm for the game dev', run(dir, 'node harness/liaison.mjs confirm B-001 --by liaison-1', env).status !== 0);
-  const c = run(dir, 'node harness/liaison.mjs confirm B-001 --by hatch --quote "yes push it"', env);
-  const idea = JSON.parse(fs.readFileSync(path.join(dir, 'studio/bible/ideas/I-001.json'), 'utf8'));
-  const q = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
-  report('a confirmed idea is labelled dev-confirmed, goes straight to R&D, and pings the Director', c.status === 0 && idea.source === 'dev-confirmed' && /\(`rnd`\) — Idea: shape I-001/.test(q) && /\(`director`\) — Director review: New dev-confirmed idea I-001/.test(q), c.stdout + c.stderr + q);
-  run(dir, 'node harness/liaison.mjs draft --kind direction --title "Slower rain" --summary "Rain takes twice as long" --from hatch', env);
-  run(dir, 'node harness/liaison.mjs confirm B-002 --by hatch', env);
-  const q2 = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
-  report('a confirmed direction becomes a Producer task and joins the Director\'s open review', /\(`producer`\) — Plan: turn the game dev's direction into tasks: Slower rain/.test(q2) && (q2.match(/Director review/g) || []).length === 1, q2);
-}
-
 // The learning loop: the same failure on two days is flagged, with the lesson that didn't stick.
 if (inShard()) {
   const dir = copyRepo();
@@ -1100,7 +1138,13 @@ if (inShard()) {
   // 2.58.5: laneless tasks keep the shared checkout here, as custom commands did before H-9 (a lane copy and a landing
   // per session take seconds on Windows, and this checks the supervisor's sequence, not lanes; the lanes part below
   // still uses copies). The fake agent commits in a copy anyway (qa/fixtures/agents/fake-agent.mjs).
-  const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1', STUDIO_LANELESS: 'shared', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok' };
+  // 2.81.0: until 2.80 `--no-hub` kept the hub's timed jobs (the watch pass, the watchdog) out of this run; they now
+  // run inside the supervisor's loop whatever the flag says, and on a Windows runner they and the machine probes
+  // (a process listing, a scan) made each pass slow enough that two sessions no longer fitted the window (red on and
+  // off since 2.79, most runs since 2.80). This checks the supervisor's sequence: those jobs and probes are switched
+  // off here, as the newer tests do, and the window and the assertions are unchanged.
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1', STUDIO_LANELESS: 'shared', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok',
+    STUDIO_WATCH_INTERVAL: '0', STUDIO_WATCHDOG: 'off', STUDIO_MACHINE_SCAN: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_CPU_PROBE: 'off' };
   for (const t of ['Tidy the HUD', 'Tidy the menu', 'Tidy the end screen']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
   const sup = run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(9)} --foreground`, env);
   const st = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8'));
@@ -1132,30 +1176,13 @@ if (inShard()) {
   report('npm run budget shows tokens used against the week\'s target', /codex: [\d,]+ tokens in the last 5 h, [\d,]+ this week, cache reads counted at [\d.]+x \([\d,]+ read\) \(\d+% of 1,000; target \d+% by now/.test(run(dir, 'node harness/budget.mjs', env).stdout), run(dir, 'node harness/budget.mjs', env).stdout);
 }
 
-// Hiring into departments, and the dev hacker: trick cards that reach the Producer without holding anything up.
+// Hiring into departments: role cards for the department roles, a division that opens with a reason.
 if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1' };
-  report('the dev hacker and the missing department roles have role cards', ['dev-hacker', 'sound-designer', 'composer', 'artist', 'art-director'].every((r) => fs.existsSync(path.join(dir, `studio/roles/${r}.md`))));
-  const op = run(dir, 'node harness/division.mjs open hacks --reason "the game hitches between floors" --by hatch', env);
-  report('a division opens with a reason, logged', op.status === 0 && /Dev Hacker Lab is open/.test(op.stdout) && /opened Dev Hacker Lab: the game hitches/.test(fs.readFileSync(path.join(dir, 'studio/decisions/divisions.md'), 'utf8')), op.stdout + op.stderr);
-  run(dir, 'node harness/watch.mjs', env);
-  spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},500)'], { windowsHide: true });
-  run(dir, 'node harness/watch.mjs', env);
-  const q1 = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
-  report('with the lab open, the watcher queues one low-priority trick hunt for the dev hacker', (q1.match(/\[P3\] \(`dev-hacker`\) — Trick hunt:/g) || []).length === 1, q1.split('\n').filter((l) => /Trick/.test(l)).join('\n'));
-  const hunt = (q1.match(/\*\*(T-\d+)\*\* \[P3\] \(`dev-hacker`\)/) || [])[1];
-  report('a trick card must say when not to use it', /--avoid-if/.test(run(dir, 'node harness/tricks.mjs propose "Elevator hides the load" --problem "F3 hitches" --trick "load during the ride" --fits "a building" --proof "frame time"', env).stderr));
-  run(dir, `node harness/task.mjs start ${hunt} --agent dev-hacker-1`, env);
-  run(dir, 'node harness/tricks.mjs propose "Elevator ride hides the next floor loading" --problem "F3 hitches 400 ms when its models load" --trick "Start loading floor N+1 when the doors close; open them when it is ready" --fits "Every level is a floor of one building; the ride is already in the fiction" --avoid-if "levels are not separated by a ride, or loads are already under a frame" --proof "longest frame on a floor change, browser check, before vs after" --by dev-hacker-1', env);
-  const hdone = run(dir, `node harness/task.mjs done ${hunt} --agent dev-hacker-1`, env);
-  report('a trick hunt is done when a card is written', hdone.status === 0, hdone.stdout + hdone.stderr);
-  run(dir, 'node harness/watch.mjs', env);
-  const q2 = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
-  report('new trick cards reach the Producer in one batch', /\(`producer`\) — Tricks: 1 new from the dev hacker \(K-001\)/.test(q2), q2.split('\n').filter((l) => /Trick/.test(l)).join('\n'));
-  const ad = run(dir, 'node harness/tricks.mjs adopt K-001 --by prod-1', env);
-  report('the Producer adopts a card: build work that names the trick and how to prove it', ad.status === 0 && /Build trick K-001: Elevator ride hides the next floor loading \(prove it: longest frame/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), ad.stdout + ad.stderr);
-  report('a hunt that finds nothing is a fine result', run(dir, 'node harness/tricks.mjs none "frame times are flat; nothing measured to fix"', env).status === 0 && /nothing worth doing now/.test(fs.readFileSync(path.join(dir, 'studio/tricks/HUNTS.md'), 'utf8')));
+  report('the missing department roles have role cards', ['sound-designer', 'composer', 'artist', 'art-director'].every((r) => fs.existsSync(path.join(dir, `studio/roles/${r}.md`))));
+  const op = run(dir, 'node harness/division.mjs open devlog --reason "the game needs a devlog" --by hatch', env);
+  report('a division opens with a reason, logged', op.status === 0 && /Devlog is open/.test(op.stdout) && /opened Devlog: the game needs a devlog/.test(fs.readFileSync(path.join(dir, 'studio/decisions/divisions.md'), 'utf8')), op.stdout + op.stderr);
   // Hiring: into a division, seated there whatever its name; paused hands the task back.
   const tid = JSON.parse(run(dir, 'node harness/task.mjs add "Footstep sounds for floor one" --role sound-designer', env).stdout).id;
   const henv = { ...env, STUDIO_SOUND_DESIGNER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' };
@@ -1351,7 +1378,7 @@ if (inShard()) {
   report('tasks and notes carry a version tag (web or engine:<name>)', added?.meta?.track === 'engine:godot' && /· engine:godot\] the Godot import is slow/.test(fs.readFileSync(path.join(dir, 'studio/harness-notes/NOTES.md'), 'utf8')), JSON.stringify(added?.meta));
   // The Prototype sprint pace.
   run(dir, 'node harness/mode.mjs set prototype --by hatch', env);
-  report('the Prototype sprint pace: several builders in lanes, the watcher starts them, the Director at phase end', /Prototype sprint/.test(run(dir, 'node harness/mode.mjs', env).stdout) && /20\. In the Prototype sprint pace/.test(fs.readFileSync(path.join(dir, '.claude/skills/producer-playbook/SKILL.md'), 'utf8')) && /producer-playbook/.test(run(dir, 'node harness/kickoff.mjs --role producer --agent prod-1 --model m', env).stdout));
+  report('the Prototype sprint pace: several builders in lanes, the watcher starts them, the Director at phase end', /Prototype sprint/.test(run(dir, 'node harness/mode.mjs', env).stdout) && /19\. In the Prototype sprint pace/.test(fs.readFileSync(path.join(dir, '.claude/skills/producer-playbook/SKILL.md'), 'utf8')) && /producer-playbook/.test(run(dir, 'node harness/kickoff.mjs --role producer --agent prod-1 --model m', env).stdout));
 }
 
 // 2.26: from test #2 (Next Floor on 2.24 and 2.25) and the token work: another tool's limit is that tool's,
@@ -1885,13 +1912,13 @@ if (inShard()) {
   fs.mkdirSync(path.join(setup, 'studio/roles'), { recursive: true });
   fs.mkdirSync(path.join(setup, 'harness'), { recursive: true });
   fs.writeFileSync(path.join(setup, 'studio/roles/level-designer.md'), '# level-designer\n');
-  fs.writeFileSync(path.join(setup, 'studio/divisions.json'), JSON.stringify({ divisions: [{ id: 'hacks', active: true }] }));
+  fs.writeFileSync(path.join(setup, 'studio/divisions.json'), JSON.stringify({ divisions: [{ id: 'devlog', active: true }] }));
   fs.writeFileSync(path.join(setup, 'settings.env'), 'STUDIO_AGENT_TOOL=claude\nSTUDIO_FAKE_TOKEN=do-not-copy\nHUB_PORT=9999\n');
   fs.writeFileSync(path.join(setup, 'harness/evil.mjs'), 'process.exit(1)\n');
   const third = path.join(tmpRoot, `third-studio-${n}`);
   const ns3 = run(dir, `node scripts/new-studio.mjs --name "Tin Moon" --dir "${third}" --from local --no-install --setup "${setup}"`, env);
   const env3 = fs.existsSync(path.join(third, '.env')) ? fs.readFileSync(path.join(third, '.env'), 'utf8') : '';
-  report('a third game gets the next free port, and a plugged-in setup brings roles, departments and settings but never keys or harness code', ns3.status === 0 && /^STUDIO_PLAY_PORT=4612$/m.test(env3) && !/9999/.test(env3) && /STUDIO_AGENT_TOOL=claude/.test(env3) && !/do-not-copy/.test(env3) && fs.existsSync(path.join(third, 'studio/roles/level-designer.md')) && !fs.existsSync(path.join(third, 'harness/evil.mjs')) && /hacks/.test(fs.readFileSync(path.join(third, 'studio/divisions.json'), 'utf8')), ns3.stdout + ns3.stderr + env3);
+  report('a third game gets the next free port, and a plugged-in setup brings roles, departments and settings but never keys or harness code', ns3.status === 0 && /^STUDIO_PLAY_PORT=4612$/m.test(env3) && !/9999/.test(env3) && /STUDIO_AGENT_TOOL=claude/.test(env3) && !/do-not-copy/.test(env3) && fs.existsSync(path.join(third, 'studio/roles/level-designer.md')) && !fs.existsSync(path.join(third, 'harness/evil.mjs')) && /devlog/.test(fs.readFileSync(path.join(third, 'studio/divisions.json'), 'utf8')), ns3.stdout + ns3.stderr + env3);
   const saved = path.join(tmpRoot, `saved-setup-${n}`);
   const sv = run(third, `node scripts/new-studio.mjs --save-setup "${saved}"`, env);
   report('a studio saves its setup to reuse for the next game, without its keys', sv.status === 0 && fs.existsSync(path.join(saved, 'studio/roles/level-designer.md')) && !/do-not-copy/.test(fs.existsSync(path.join(saved, 'settings.env')) ? fs.readFileSync(path.join(saved, 'settings.env'), 'utf8') : ''), sv.stdout + sv.stderr);
@@ -2258,7 +2285,7 @@ console.log(JSON.stringify(toolCommand('claude', { model: 'claude-sonnet-5-5', p
   const rule = probe(`import { refreshRule } from ${u('harness/agent.mjs')};
 import { kickoff } from ${u('harness/kickoff.mjs')};
 console.log(JSON.stringify({ rule: refreshRule({ oneTask: true, task: 'T-9' }), prod: kickoff({ role: 'producer', agent: 'producer-1', model: 'm' }), dir: kickoff({ role: 'director', agent: 'director-1', model: 'm' }) }));`);
-  report('the kickoff gives launched sessions the refresh rule: one task, 40 turns / 120k, the hand-back template, the exception', /one task/.test(rule.rule || '') && /40 turns or 120k/.test(rule.rule || '') && /task\.mjs pause T-9 --note "Done:/.test(rule.rule || '') && /session -- exception/.test(rule.rule || ''), String(rule.rule || JSON.stringify(rule)));
+  report('the kickoff gives launched sessions the hand-on rule: one task, the files are the memory, the launcher ends a session at the ceiling (80 turns), the hand-back template, the exception; 2.81: no token budget for the agent to manage (the limits are the launcher\'s)', /one task/.test(rule.rule || '') && /files are the memory/.test(rule.rule || '') && /ends a session at 80 turns/.test(rule.rule || '') && !/tokens of context|k tokens/.test(rule.rule || '') && /task\.mjs pause T-9 --note "Done:/.test(rule.rule || '') && /session -- exception/.test(rule.rule || ''), String(rule.rule || JSON.stringify(rule)));
   report('the Producer attaches cheat sheet tricks before handing out a task, and the Director checks the sheet for the next work', /producer-playbook/.test(rule.prod || '') && /cheatsheet -- attach <ID>/.test(fs.readFileSync(path.join(dir, '.claude/skills/producer-playbook/SKILL.md'), 'utf8')) && /cheatsheet -- match/.test(rule.dir || ''), '');
   // Budget: cache reads count, weighted; the daily cap has a default.
   const bud = probe(`import * as b from ${u('harness/budget.mjs')};
@@ -2618,7 +2645,7 @@ console.log(JSON.stringify({ a, b, c, d }));`);
   const ka = probe(`import { kickoff } from ${u('harness/kickoff.mjs')};
 import { toolCommand } from ${u('harness/agent.mjs')};
 import { ALLOWED, allowedTools } from ${u('harness/allowlist.mjs')};
-const k = ['builder', 'producer', 'director', 'liaison'].map((role) => kickoff({ role, agent: role + '-1', model: 'm' }));
+const k = ['builder', 'producer', 'director'].map((role) => kickoff({ role, agent: role + '-1', model: 'm' }));
 const c = toolCommand('claude', { model: 'm', prompt: 'x' });
 // P-066: the launcher passes each pattern as its own argument after --allowedTools (no quoting can split them).
 console.log(JSON.stringify({ all: k.every((t) => /You may run, without asking: \`node\`, \`npm\`/.test(t) && ALLOWED.every(([n]) => t.includes('\`' + n + '\`'))), same: c.argv.slice(c.argv.indexOf('--allowedTools') + 1, c.argv.indexOf('--allowedTools') + 1 + ALLOWED.length).join(',') === allowedTools(), n: ALLOWED.length }));`);
@@ -4914,6 +4941,44 @@ if (inShard('selftest-280f')) {
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.81 (b1), from the R2 trial: the attempt ledger (.studio/attempts/<task>.json) and one eligibility verdict: a task handed
+// back for a blocker that has not changed (same reason key, main tip and open blockers) is offered last (record, the
+// default) or refused (STUDIO_ATTEMPTS=refuse); next and the supervisor stop offering what start refuses.
+if (inShard('selftest-281b1')) {
+  const dir = copyRepo();
+  const { selftest281B1 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281b1.mjs')).href);
+  await selftest281B1({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.81 (b2), from the R2 trial: the game-agnostic anchor spec (task add --anchors, the brief, per-anchor met|unmet|unknown
+// at done) and said-vs-did (task done --claim "<command> => <last line>" re-run; file claims diffed; review.verdict on a
+// mismatch; no claim: judged as before).
+if (inShard('selftest-281b2')) {
+  const dir = copyRepo();
+  const { selftest281B2 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281b2.mjs')).href);
+  await selftest281B2({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.81 (b3), from the R2 trial: a structured exitCause on every train verify (harness/verify-cause.mjs).
+if (inShard('selftest-281b3')) {
+  const dir = copyRepo();
+  const { selftest281B3 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281b3.mjs')).href);
+  await selftest281B3({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.81 (b4), from the R2 trial: a gone process is ended by the supervisor pass and task next/start too (endedAt = last
+// beat + grace, detectedAt = now; liveness stays PID + start time), and a proxy launch over the prompt cap is refused
+// before the proxy starts.
+if (inShard('selftest-281b4')) {
+  const dir = copyRepo();
+  const { selftest281B4 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281b4.mjs')).href);
+  await selftest281B4({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {
@@ -4949,15 +5014,6 @@ if (inShard('selftest-277f')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.77.0 (w): the War Room as a field terminal: a verify's real progress (harness/gate-progress.mjs, written by run-gates)
-// on the running train, the cut hub pages (/legacy, the React sources, /human), dark always with a light screen by hand.
-if (inShard('selftest-277w')) {
-  const dir = copyRepo();
-  const { selftest277W } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277w.mjs')).href);
-  await selftest277W({ dir, run, report, tmpRoot, root });
-  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
-}
-
 // 2.77.0 (u): engine passes inside the harness (P5.1-P5.6, P9.7): an engine pass in its own repo queues for its engine
 // train, the Line Producer starts that train in a quiet window, the land run is a recorded heavy job, the lane tunes its
 // listed settings, the visual check (shots, reference photos, the builder looked, a review by someone else), any engine.
@@ -4988,7 +5044,28 @@ if (inShard('new-game')) {
   }
 }
 
+// 2.81 (c): the runner's speed options (--only, --changed, --jobs, --timing) and --balance (qa/selftest-281c.mjs).
+if (inShard('selftest-281c')) {
+  const dir = copyRepo();
+  const { selftest281C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281c.mjs')).href);
+  await selftest281C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+// 2.81 (a): the round scorecard (npm run score), the overseer's official role (npm run overseer -- role | can | pass),
+// lock release by the owner's stand-ins, engine first by default.
+if (inShard('selftest-281a')) {
+  const dir = copyRepo();
+  const { selftest281A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281a.mjs')).href);
+  await selftest281A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
+if (TIMING_FILE && !LIST_SHARDS) {
+  const t = await flushTiming(true);
+  for (const l of timingMod.timingLines(t.rep, 20)) console.log(l);
+  console.log(`[selftest] timing ${t.wrote ? `written to ${path.relative(root, t.wrote)}` : `could not be written to ${TIMING_FILE}`}`);
+}
 try {
   fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 });
 } catch (err) {
@@ -5009,8 +5086,16 @@ if (SHARD) {
     failed += 1;
   }
 }
+if (SELECT) {
+  const ran = UNITS.filter((u) => u.ms !== undefined).length;
+  console.log(`[selftest] ${SELECT.describe}: ran ${ran} unit(s), left out ${SKIPPED}${SHARD ? ` (shard ${SHARD.i}/${SHARD.n})` : ''}; a selection is not a full self-test`);
+  if (!ran && !SHARD) {
+    console.error(`[selftest] ${SELECT.describe} matched no unit: nothing was checked, which is not a pass (--list-shards 1 prints the labels)`);
+    failed += 1;
+  }
+}
 if (failed) {
   console.error(`[selftest] ${failed} check(s) failed`);
   process.exit(1);
 }
-console.log(SHARD ? `[selftest] ok — shard ${SHARD.i}/${SHARD.n} passed (the other shards run the rest of the self-test)` : '[selftest] ok — every required gate was shown to fail when broken');
+console.log(SELECT ? `[selftest] ok — the selected units passed (${SELECT.kind === 'only' ? '--only' : '--changed'}; not the whole self-test)` : SHARD ? `[selftest] ok — shard ${SHARD.i}/${SHARD.n} passed (the other shards run the rest of the self-test)` : '[selftest] ok — every required gate was shown to fail when broken');

@@ -79,6 +79,7 @@ import { emitEvent } from './event.mjs';
 import { focusFromLog, normTestPath } from './train-focus.mjs';
 import { testRngFacts, gameFolder } from './test-rng.mjs';
 import { portCollision, portCollisionWhy } from './test-ports.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const FLAKES_REL = '.studio/flakes.jsonl';
 export const QUARANTINE_REL = 'studio/quarantine.json';
@@ -90,7 +91,6 @@ export const LOAD_SENSITIVE_REL = '.studio/load-sensitive.json';
 const DAY = 86400000;
 const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 const num = (v, d) => (String(v ?? '').trim() !== '' && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : d);
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const writeAtomic = (f, text) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const t = `${f}.${process.pid}.tmp`; fs.writeFileSync(t, text); fs.renameSync(t, f); };
 
 export const triageOn = (env = process.env) => !off(env.STUDIO_FLAKE_TRIAGE);

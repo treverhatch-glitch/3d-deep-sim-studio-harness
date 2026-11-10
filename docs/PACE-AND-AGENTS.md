@@ -37,7 +37,7 @@ npm run mode -- autostart off --by <name>    # back to the default: nothing star
 npm run mode -- autostart                    # which it is
 ```
 
-One switch, recorded in `studio/mode.json` with who flipped it (2.58.0, from a crew report: the hub, since
+One switch, recorded in `studio/mode.json` with who flipped it (2.58.0, from a crew report: the old hub, since
 retired, kept starting Producer sessions nobody asked for). Off, whatever the pace or MAX SPEED say:
 - the watcher's fill (`npm run agent -- fill`, the Director's flow, the game-dev loop's launch step) starts no agent;
 - the Producer check-in still pings and logs ("No Producer session was started: auto-start is off …"), but
@@ -144,7 +144,6 @@ npm run agent -- logs audio-1                        # its output so far
   - Release & Store: release-manager
   - Devlog: devlogger
   - Engine Bay: engine-porter, engine-worker (and any session on an engine track)
-  - Dev Hacker Lab: dev-hacker (docs/DEV-HACKER.md)
 - The run report's **Staffing** section lists who was hired, by whom, into which room, how long they worked, and their tokens.
 - In a frozen clone, `STUDIO_CLAUDE_BYPASS=1` lets claude agents run without permission prompts.
 

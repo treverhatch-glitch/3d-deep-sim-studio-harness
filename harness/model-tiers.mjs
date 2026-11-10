@@ -67,7 +67,7 @@ export function readAccepted() {
 }
 
 /** The game dev clicked "I accept": recorded with who, when and for which models; a different set asks again. */
-export function acceptModelWarning(by = 'war-room-human', env = process.env) {
+export function acceptModelWarning(by = 'owner', env = process.env) {
   const w = modelWarning(env);
   const rec = { signature: w.signature, by: String(by).slice(0, 60), at: new Date().toISOString(), text: WARNING_TEXT };
   fs.mkdirSync(path.dirname(ACCEPT_FILE), { recursive: true });

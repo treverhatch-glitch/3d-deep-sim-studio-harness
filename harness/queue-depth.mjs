@@ -17,9 +17,9 @@ import path from 'node:path';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { holdReason, laneOf, readHolds } from './task-hold.mjs';
 import { handoutBlock } from './handout.mjs';
+import { readJson } from './fsafe.mjs';
 
 const STATE = () => path.join(STUDIO_STATE_DIR, 'queue-depth.json');
-const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 
 /** The target: STUDIO_QUEUE_DEPTH (a number, or off: null), else the session cap given. */
 export function depthTarget(cap, env = process.env) {
@@ -57,7 +57,7 @@ export const blockedText = (blocked) => blocked.slice(0, 6).map((b) => `${b.area
 function inbox(text) {
   const f = path.join(REPO_ROOT, 'studio', 'producer', 'INBOX.md');
   fs.mkdirSync(path.dirname(f), { recursive: true });
-  if (!fs.existsSync(f)) fs.writeFileSync(f, '# Producer inbox\n\n> Messages from people in the War Room. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
+  if (!fs.existsSync(f)) fs.writeFileSync(f, '# Producer inbox\n\n> Messages from people. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
   fs.appendFileSync(f, `- [${new Date().toISOString().slice(0, 16).replace('T', ' ')}] **harness**: ${text.replace(/\n+/g, ' ')}\n`);
 }
 

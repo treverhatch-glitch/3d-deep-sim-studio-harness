@@ -192,6 +192,35 @@ console.log(JSON.stringify({ started: r.started, why: r.why, starts }));
       const both = sup(pool, { running: ['builder-api2', 'builder-api3'] });
       return [oneBusy.j && both.j && both.j.starts.length === 0 && oneBusy.j.starts.length === 1 && oneBusy.j.starts[0].agent === 'builder-api3', JSON.stringify({ oneBusy: oneBusy.j, both: both.j })];
     });
+    // 2.81: STUDIO_BUILDER_ORDER in a real supervisor pass (2.80 tested its functions and the source text only). Builders
+    // only, so the pass reaches the builder task whatever else is on the board.
+    {
+      const supB = (extraEnv, { over = false, running = [] } = {}) => {
+        writeIn(S, '.studio/events-279f.jsonl', over ? `${JSON.stringify({ ts: iso(now), type: 'agent.session.end', agent: 'builder-s1', tokensIn: 900000, tokensOut: 0, meta: { tool: 'claude' } })}\n` : '');
+        fs.rmSync(path.join(S, '.studio', 'locks'), { recursive: true, force: true }); // the pass before left its launch lock (the stand-in start never ends)
+        return probe(S, `import { supervise } from ${u(S, 'harness/supervisor.mjs')};
+const starts = [];
+const running = ${JSON.stringify(running)};
+const deps = { sessions: () => running.map((a) => ({ agent: a, role: 'builder', running: true, task: 'T-0', lane: 'cartridges/elsewhere' })), startAgent: (o) => { starts.push({ agent: o.agent, role: o.role }); return { ok: true }; }, launchableRoles: (r) => r.filter((x) => x === 'builder'), nextAgentName: (role, p) => p + role + '-' + (starts.length + 1) };
+const r = await supervise({ watcher: true, dryRun: true, prefix: 'plan', deps }, { startedAt: Date.now(), names: [] });
+console.log(JSON.stringify({ why: r.why, starts }));
+`, { ...env, STUDIO_AGENT_TOOL: 'claude', ...extraEnv });
+      };
+      const b = (r) => (r.j?.starts || []).filter((x) => x.role === 'builder').map((x) => x.agent);
+      const apiFirst = supB({ ...pool, STUDIO_BUILDER_ORDER: 'api,plan' });
+      const planFirst = supB({ ...pool, STUDIO_BUILDER_ORDER: 'plan,api' });
+      const unset = supB({ ...pool });
+      const apiBusy = supB({ STUDIO_API_POOL: 'builder-api2', STUDIO_KEYMAP_AGENT_BUILDER_API2: pool.STUDIO_KEYMAP_AGENT_BUILDER_API2, STUDIO_BUILDER_ORDER: 'api,plan' }, { running: ['builder-api2'] });
+      const planOnlyOver = supB({ ...pool, STUDIO_BUILDER_ORDER: 'plan' }, { over: true });
+      const noMap = supB({ STUDIO_API_POOL: 'builder-api2', STUDIO_KEYMAP_AGENT_BUILDER_API2: '', STUDIO_BUILDER_ORDER: 'api' });
+      await guard('2.81: a supervisor pass with STUDIO_BUILDER_ORDER=api,plan and plan headroom starts the pool builder (builder-api2); plan,api, or no order, starts a plan builder; with the one pool name busy api,plan falls to a plan builder; an order of plan alone starts no builder while the plan is over its target (the pool is not in the order), saying so; a pool name with no key mapping is never started (fails on 2.79.2: no builder order; with headroom the pool was never used)', () => [
+        b(apiFirst)[0] === 'builder-api2'
+          && b(planFirst).length === 1 && !/api/.test(b(planFirst)[0]) && b(unset).length === 1 && !/api/.test(b(unset)[0])
+          && b(apiBusy).length === 1 && !/api/.test(b(apiBusy)[0])
+          && b(planOnlyOver).length === 0 && (planOnlyOver.j?.why || []).some((w) => /STUDIO_BUILDER_ORDER|over its target/.test(w))
+          && b(noMap).length === 0,
+        JSON.stringify({ apiFirst: b(apiFirst), planFirst: b(planFirst), unset: b(unset), apiBusy: b(apiBusy), planOnlyOver: b(planOnlyOver), planOnlyWhy: (planOnlyOver.j?.why || []).slice(0, 4), noMap: b(noMap), planFirstWhy: planFirst.j?.why, unsetWhy: unset.j?.why }).slice(0, 2400)]);
+    }
     // The usage wind-down is the other "plan budget high" signal: it starts nothing new, except pool builders.
     {
       const W = studio('pool-wd', { git: true });

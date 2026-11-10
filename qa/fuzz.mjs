@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, readRecentEvents } from '../harness/event.mjs';
 import { groupActions, listCartridges, loadCartridge } from '../harness/cartridge.mjs';
 import { sha256 } from '../harness/hash.mjs';
-import { writeAtomic } from '../harness/fsafe.mjs';
+import { writeAtomic, readJson } from '../harness/fsafe.mjs';
 
 export const CONFIG_REL = 'studio/fuzz.json';
 export const IGNORE_REL = 'studio/fuzz.ignore.json';
@@ -41,7 +41,6 @@ export const FUZZ_DIR_REL = '.studio/fuzz';
 export const SHADOW_DAYS = 7;
 export const DEFAULTS = Object.freeze({ mode: 'suggest', seeds: 20, ticks: 500, saveEvery: 50, rate: 0.25, shrinkBudget: 2000 });
 const DAY = 86400000;
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const posInt = (...vals) => { for (const v of vals) { if (v === undefined || v === null || v === '') continue; const n = Number(v); if (Number.isFinite(n) && n >= 0) return Math.floor(n); } return 0; };
 const rel = (root, f) => path.relative(root, f).replace(/\\/g, '/');
 

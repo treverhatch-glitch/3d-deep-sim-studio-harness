@@ -9,6 +9,13 @@
  *       repro-rejected, pr-merged, pr-reverted, protected-attempt. A person's (or an agent's on a person's direct
  *       permission, as `upgrade --merge` takes it); never the overseer itself.
  *
+ *   npm run overseer -- role [--by <agent>]            2.81: the overseer's official role as this studio stands: what it
+ *       does, what it signs as the owner (and under which grant), what stays human-only. docs/OVERSEER.md.
+ *   npm run overseer -- can <action> [--by <agent>]    one verdict, by script: yes / ask / human-only, with the rule.
+ *       The model proposes an action; this (and the command's own check, which uses the same rules) decides.
+ *   npm run overseer -- pass [--hours 24] [--json]     the facts for one pass of the overseer's loop: blockers, tasks
+ *       claimed again and again, repeated workarounds, stalls and reds, each with the kind of attention it needs.
+ *
  * Stages (studio/overseer.json, PROTECTED: the owner changes it, with a signed approval like any protected file):
  *   0 reporter     logs workarounds (npm run workaround -- log)
  *   1 repro tests  also writes failing reproduction tests as harness PRs (npm run workaround -- repro <H-id>)
@@ -170,14 +177,120 @@ export async function recordOutcome({ kind, subject, by, note = '', permission =
   return r ? { ok: true, code: 0, text: `Recorded ${r.id}: overseer-${kind} ${r.subject} by ${r.by}.` } : { ok: false, code: 1, text: 'Not recorded: the decision log could not be written.' };
 }
 
+// ---- 2.81: the outside overseer's official role (docs/OVERSEER.md). One table; the verdicts come from the rules the
+// commands themselves use (owner-acts.mjs, delegation.mjs delegationFor: delegation, owner proxy, beta mode, policy). ----
+
+/** What only a person does, beyond the owner's own list (harness/owner-acts.mjs): { act, what, where }. */
+export const HUMAN_ONLY = Object.freeze([
+  { act: 'merge-main', names: ['merge-main', 'harness-merge'], what: 'merging a harness release into its main branch', where: "the owner's rule: nothing merges to main without the owner's OK" },
+  { act: 'grant', names: ['grant', 'delegate', 'proxy', 'beta-on', 'outside-signer'], what: 'granting, widening or extending a delegation, the owner proxy, beta mode or an outside signer', where: 'harness/delegation.mjs ownerShellRefusal; STUDIO_OUTSIDE_SIGNERS is read from the owner\'s .env only' },
+  { act: 'stage', names: ['stage', 'overseer-stage', 'self-record'], what: 'raising the overseer\'s own stage, or recording an outcome about its own work', where: 'studio/overseer.json is protected and read as committed; recordOutcome refuses the overseer' },
+  { act: 'tier-c', names: ['tier-c', 'tier-c-release'], what: 'releasing a tier-C lane in a studio with an owner key', where: 'harness/train.mjs releaseRefusal: a permission line is not a signature' },
+  { act: 'main-commit', names: ['main-commit', 'main-commit-override'], what: 'committing in the main checkout past the pre-commit guard (STUDIO_MAIN_COMMIT=allow)', where: 'scripts/hooks/pre-commit' },
+  { act: 'no-verify', names: ['no-verify', 'skip-hooks'], what: 'committing with --no-verify, or weakening a test to pass', where: 'the hooks and weakened-tests gates; only an approval of the intended change passes them' },
+  { act: 'winddown-off', names: ['winddown-off'], what: 'ending a wind-down early (an agent\'s own wind-down ends at the time it named)', where: 'harness/winddown.mjs' },
+  { act: 'policy', names: ['policy', 'autonomous-mode'], what: 'confirming autonomous mode or changing the studio policy and its Never list', where: 'harness/policy.mjs: the owner confirms (npm run policy -- confirm)' },
+]);
+
+/** What the overseer does without signing anything, and what it signs as the owner (each by the command's own check). */
+export const OVERSEER_DOES = Object.freeze(['queue order and priority', 'adding, splitting, parking and unparking tasks', 'briefs, pitfalls and notes', 'a task\'s lane, type and visual check', 'starting and stopping agents', 'a wind-down with an end time', 'spend budgets on the owner\'s order', 'engine push mode and boost', 'releasing a held lane (tier A or B)', 'answering an ask that is not about money, deletes, keys, publishing or tools', 'logging workarounds']);
+export const OVERSEER_SIGNS = Object.freeze(['protected', 'tests', 'hooks', 'force', 'proposal', 'train-config']);
+const HARNESS_STAGE = Object.freeze({ 'workaround-log': 0, 'repro-test': 1, 'harness-fix': 2, 'harness-release': 3 });
+
+/**
+ * May `by` do `action` now? { verdict: 'yes' | 'ask' | 'human-only', why, via }. A script's answer from the studio's
+ * files: the owner's own list, the human-only list above, the overseer's stage for harness work, else whatever grant
+ * covers the action today (a delegation, the owner proxy, beta mode, autonomous mode; the studio policy's Never).
+ */
+export async function overseerCan(action, { by = null, root = REPO_ROOT, env = process.env } = {}) {
+  const a = String(action || '').trim().toLowerCase();
+  const o = readOverseer(root);
+  const who = String(by || o.agent || env.STUDIO_LOCK_OWNER || '').trim();
+  if (!a) return { verdict: 'ask', why: 'say which action', via: null };
+  const { ownerOnlyAction, ownerOnlyWhy } = await import('./owner-acts.mjs');
+  const own = ownerOnlyAction(a);
+  if (own) return { verdict: 'human-only', why: ownerOnlyWhy(own, who), via: 'harness/owner-acts.mjs' };
+  const h = HUMAN_ONLY.find((x) => x.names.includes(a));
+  if (h) return { verdict: 'human-only', why: `${h.what} stays with a person (${h.where})`, via: h.act };
+  if (a in HARNESS_STAGE) {
+    const need = HARNESS_STAGE[a];
+    return o.stage >= need ? { verdict: 'yes', why: `stage ${o.stage} (${STAGES[o.stage].name}) allows it; gates, protected files and money stay the owner's`, via: `stage ${o.stage}` }
+      : { verdict: 'ask', why: `it needs stage ${need} (${STAGES[need].name}); the studio's overseer is at stage ${o.stage}. The owner sets the stage (${OVERSEER_REL})`, via: `stage ${o.stage}` };
+  }
+  if (!who) return { verdict: 'ask', why: 'say who acts: --by <agent>', via: null };
+  const { delegationFor } = await import('./delegation.mjs');
+  const d = delegationFor({ action: a, by: who, env: { ...env, STUDIO_LOCK_OWNER: who, STUDIO_ROLE: '' }, root, lane: false });
+  if (d.ok) return { verdict: 'yes', why: `${who} acts as the owner here: ${d.words || d.via || 'a standing grant'}; it is recorded for the owner's review`, via: d.autonomous ? 'autonomous mode' : d.via || 'grant' };
+  return { verdict: 'ask', why: `no standing grant lets ${who} do "${a}"${d.why ? ` (${d.why})` : ''}: the owner's direct permission (--permission "<their words>") or a grant covers it`, via: null };
+}
+
+/** The role card: stage, grants in force, what it does, signs and never does. */
+export async function overseerRole({ by = null, root = REPO_ROOT, env = process.env } = {}) {
+  const o = readOverseer(root);
+  const who = String(by || o.agent || '').trim() || null;
+  const signs = [];
+  for (const k of OVERSEER_SIGNS) signs.push({ action: k, ...(await overseerCan(k, { by: who, root, env })) });
+  const { OWNER_ONLY } = await import('./owner-acts.mjs');
+  return { agent: who, stage: o.stage, stageName: STAGES[o.stage].name, harness: STAGES.slice(0, o.stage + 1).map((s) => s.allows), does: [...OVERSEER_DOES], signs, humanOnly: [...OWNER_ONLY.map((x) => x.what), ...HUMAN_ONLY.map((x) => x.what)] };
+}
+export function roleText(r) {
+  const L = [`Overseer role: ${r.agent || '(no overseer named in studio/overseer.json; pass --by <agent>)'}, stage ${r.stage} (${r.stageName}).`];
+  L.push(`  Does, as itself: ${r.does.join('; ')}.`);
+  L.push(`  On the harness: ${r.harness.join('; ')}.`);
+  L.push('  Signs as the owner (recorded, reviewed by the owner afterwards):');
+  for (const s of r.signs) L.push(`    ${s.verdict === 'yes' ? 'yes' : 'ask'}  ${s.action}: ${s.why}`);
+  L.push(`  Human-only, whatever the grant: ${r.humanOnly.join('; ')}.`);
+  return L.join('\n');
+}
+
+/**
+ * The facts for one pass of the overseer's loop, over the last `hours`: what needs it, each with the kind of attention
+ * (routine: a board step; planning: rewrite or split the work; review: read evidence before deciding). No model.
+ */
+export async function overseerPass({ root = REPO_ROOT, now = Date.now(), hours = 24, events = null, records = null } = {}) {
+  const from = now - hours * 3600000;
+  const ev = (events || readRecentEvents(200000)).filter((e) => { const t = Date.parse(e.ts) || 0; return t >= from && t <= now; });
+  const T = (type) => ev.filter((e) => e.type === type);
+  const items = [];
+  const claims = {};
+  for (const e of T('task.start')) claims[e.task] = (claims[e.task] || 0) + 1;
+  const done = new Set(T('task.done').map((e) => e.task));
+  const again = Object.entries(claims).filter(([id, n]) => n >= 3 && !done.has(id)).sort((x, y) => y[1] - x[1]);
+  if (again.length) items.push({ kind: 'planning', what: `${again.length} task(s) claimed 3 or more times and not done`, detail: again.slice(0, 8).map(([id, n]) => `${id} (${n})`).join(', '), next: 'read each task\'s last hand-back note; split it, rewrite its brief or park it with the blocker named' });
+  let recs = records;
+  if (!recs) { try { recs = (await import('./workaround.mjs')).readRecords({ since: now - 7 * DAY }); } catch { recs = []; } }
+  const bySig = {};
+  for (const r of recs) { const k = r.sig || r.signature || r.what; (bySig[k] ||= { n: 0, what: r.signature || r.what }).n += 1; }
+  const repeated = Object.values(bySig).filter((x) => x.n >= 3).sort((x, y) => y.n - x.n);
+  if (repeated.length) items.push({ kind: 'review', what: `${repeated.length} workaround(s) repeated 3 or more times in 7 days`, detail: repeated.slice(0, 6).map((x) => `${x.n}x ${String(x.what).slice(0, 80)}`).join(' | '), next: 'each is a harness gap: npm run workaround -- tasks lists them; write the failing repro (stage 1) instead of working around it again' });
+  const stalls = T('session.stall').length + T('task.train.died').length;
+  if (stalls) items.push({ kind: 'routine', what: `${stalls} stall(s) or dead train(s)`, detail: `${T('session.stall').length} session(s) ended for a stall, ${T('task.train.died').length} train(s) died`, next: 'npm run studio:status; a task that stalls twice goes to planning' });
+  const reds = T('task.train.red').length + T('task.train.red_main').length;
+  if (reds) items.push({ kind: T('task.train.red_main').length ? 'review' : 'routine', what: `${reds} red train verify(s)${T('task.train.red_main').length ? `, ${T('task.train.red_main').length} with main itself red` : ''}`, detail: '', next: 'a red main is fixed before anything else lands: a fix task with its lane, queued alone' });
+  const halts = T('supervisor.halted').length;
+  if (halts) items.push({ kind: 'review', what: `${halts} supervisor halt(s)`, detail: T('supervisor.halted').map((e) => String(e.msg || '').slice(0, 120)).slice(-2).join(' | '), next: 'npm run studio:resume once the cause in the halt message is dealt with' });
+  const asks = T('ask.open').length - T('ask.answered').length - T('ask.closed').length;
+  if (asks > 0) items.push({ kind: 'routine', what: `${asks} ask(s) opened and not answered in the window`, detail: '', next: 'npm run ask -- list --open; answer what the role allows, leave the owner-only ones to the owner' });
+  return { window: { from: new Date(from).toISOString(), to: new Date(now).toISOString(), hours }, landed: done.size, items };
+}
+export const passText = (p) => [`Overseer pass, last ${p.window.hours} h: ${p.landed} task(s) done; ${p.items.length ? `${p.items.length} thing(s) need the overseer` : 'nothing needs the overseer'}.`, ...p.items.map((i) => `  [${i.kind}] ${i.what}${i.detail ? `: ${i.detail}` : ''}. Next: ${i.next}.`)].join('\n');
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const flag = (k) => { const i = argv.indexOf(`--${k}`); return i >= 0 && argv[i + 1] !== undefined && !String(argv[i + 1]).startsWith('--') ? argv[i + 1] : null; };
   if (argv.includes('--help') || argv.includes('-h')) {
     console.log(['Usage: npm run overseer [-- --json]   the stage the owner set and whether the next stage\'s criteria hold (a suggestion)',
+      '       npm run overseer -- role [--by <agent>] | can <action> [--by <agent>] | pass [--hours 24]   (docs/OVERSEER.md)',
       `       npm run overseer -- record ${RECORD_KINDS.join('|')} <subject> --by <person> [--note "…"] [--permission "…"]`].join('\n'));
     process.exit(0);
   }
+  if (argv[0] === 'role') { const r = await overseerRole({ by: flag('by') }); console.log(argv.includes('--json') ? JSON.stringify(r, null, 2) : roleText(r)); process.exit(0); }
+  if (argv[0] === 'can') {
+    const r = await overseerCan(argv[1] && !argv[1].startsWith('--') ? argv[1] : '', { by: flag('by') });
+    console.log(argv.includes('--json') ? JSON.stringify(r) : `${r.verdict}: ${r.why}`);
+    process.exit(r.verdict === 'yes' ? 0 : r.verdict === 'human-only' ? 3 : 1);
+  }
+  if (argv[0] === 'pass') { const p = await overseerPass({ hours: Number(flag('hours')) > 0 ? Number(flag('hours')) : 24 }); console.log(argv.includes('--json') ? JSON.stringify(p, null, 2) : passText(p)); process.exit(0); }
   if (argv[0] === 'record') {
     const r = await recordOutcome({ kind: argv[1], subject: argv[2] && !argv[2].startsWith('--') ? argv[2] : '', by: flag('by'), note: flag('note') || '', permission: flag('permission') || '' });
     (r.ok ? console.log : console.error)(r.text);

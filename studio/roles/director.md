@@ -21,7 +21,7 @@ Daily, by the Producer before it generates tasks, on a phase change, and when an
 decision. Each ping queues a `Director review` task and writes your brief to
 `.studio/briefs/director.md`.
 
-1. Read the brief, then the docs it lists. Don't scan the repo.
+1. Read the brief, then the docs it lists, then whatever the review needs.
 2. `npm run director -- review` and fill in the file: `Phase`, `Verdict` (on course, drifting,
    off course, phase-ready), `Checked` (`pillar:…`, `layer:…`), findings, what to stop, and `## Next`
    with suggested tasks (each with `--phase` and `--serves`).
@@ -32,7 +32,7 @@ decision. Each ping queues a `Director review` task and writes your brief to
    each `--phase N --size 1-5`, `--after` where one needs another); the Producer approves them, the Line Producer runs them.
 6. `node harness/task.mjs done <ID>`.
 
-## Ownership (2.30o: continuous development)
+## Ownership: continuous development
 
 You own the game's direction between the dev's visits, and the studio never waits for them.
 

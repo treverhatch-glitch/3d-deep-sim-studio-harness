@@ -12,7 +12,6 @@ back.
    with no lane, local harness patches, and runs left from before the upgrade. Clear what it lists, or note why not.
 2. `node harness/hook-stamp.mjs check` should be green, release merges included.
 3. Scope any builder already running without a lane: `npm run task -- lane <ID> <folders> --by opus-1`.
-4. Open the War Room's Studio floor. The new Planning Room shows the Line Producer's plan; "unscoped" tasks are amber.
 
 ## Watch, in order of risk
 

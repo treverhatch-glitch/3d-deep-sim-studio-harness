@@ -45,6 +45,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { gameTesterConfig, DEFAULT_STYLES, DEFAULT_GOALS, DEFAULT_AREAS } from './tester-config.mjs';
+import { pidAlive as alive, readJson } from './fsafe.mjs';
 
 export const TESTER_AGENT = 'game-tester';
 export const TESTER_ROLE = 'qa-playtester';
@@ -52,7 +53,6 @@ export const STATUSES = ['working', 'broken', 'missing', 'not-reached'];
 export const VERDICTS = ['green', 'amber', 'red'];
 const OFF = /^(off|0|false|no)$/i;
 const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(tmp, f); };
 const rel = (root, f) => path.relative(root, f).split(path.sep).join('/');
 const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', windowsHide: true });
@@ -242,7 +242,6 @@ function takeLock(root, id, { stale = false } = {}) {
   try { const fd = fs.openSync(lockFile(root), 'wx'); fs.writeSync(fd, JSON.stringify({ pid: process.pid, run: id, at: new Date().toISOString() })); fs.closeSync(fd); return true; } catch { return false; }
 }
 const dropLock = (root) => { try { fs.rmSync(lockFile(root), { force: true }); } catch {} };
-const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 
 /** Start a run: the plan, the brief, the build (a child process; inline: here, waiting). Returns the run record. */
 export async function startRun({ root, env = process.env, now = Date.now(), by = 'line-producer', seed = null, inline = false, deps = {} } = {}) {
@@ -394,7 +393,7 @@ export async function notifyRun(root, s, { deps = {} } = {}) {
   const line = `Game tester run ${s.run} (${s.tool || 'agent'}): ${v.length ? v.map(([a, x]) => `${a} ${x}`).join(', ') : 'no verdicts'}; ${bugs.length} bug${bugs.length === 1 ? '' : 's'}${bugs.length ? ` (${bugs.map((b) => `${b.task}${b.duplicate ? ' (open already)' : ''}`).join(', ')})` : ''}; Bible: ${counts || 'not graded'}. Report: ${s.report}`;
   const f = path.join(root, 'studio', 'producer', 'INBOX.md');
   fs.mkdirSync(path.dirname(f), { recursive: true });
-  if (!fs.existsSync(f)) fs.writeFileSync(f, '# Producer inbox\n\n> Messages from people in the War Room. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
+  if (!fs.existsSync(f)) fs.writeFileSync(f, '# Producer inbox\n\n> Messages from people. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
   fs.appendFileSync(f, `- [${new Date().toISOString().slice(0, 16).replace('T', ' ')}] **game tester** (to the Producer, the Director and ${orch}): ${line.replace(/\n+/g, ' ')}\n`);
   emitEvent({ type: 'tester.report', agent: TESTER_AGENT, to: 'producer', status: v.some(([, x]) => x === 'red') ? 'warn' : undefined, msg: line.slice(0, 600), meta: { cc: ['director', orch], run: s.run, verdicts: s.verdicts, report: s.report, bugs: bugs.map((b) => b.task) } });
   try { (deps.queueNotice || (await import('./comm-notice.mjs')).queueNotice)({ key: `tester:${s.run}`, kind: 'tester', text: `${line} (for the Producer, the Director and ${orch})`, root }); } catch {}

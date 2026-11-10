@@ -105,12 +105,12 @@ import { ramCheck } from './ram.mjs';
 import { pushSlots } from './engine-ram.mjs';
 import { parseStudioEnv } from './dotenv.mjs';
 import { machineProfile, slotsFor, budgetState, jobClaim, admit, claimOf, describeBudget, oomSignature, maxConcurrent, capGroup, unityMinFreeGb, isUnityKind, scanFreeGb, engineLineRoom } from './heavy-budget.mjs';
+import { readJson } from './fsafe.mjs';
 
 const PREFIX = 'machine-heavy';
 const SLOT_RE = /^machine-heavy-(\d+)\.lock$/;
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const mins = (ms) => Math.max(0, Math.round(ms / 60000));
 const span = (ms) => (ms < 120000 ? `${Math.round(ms / 1000)} s` : `${mins(ms)} min`);
 

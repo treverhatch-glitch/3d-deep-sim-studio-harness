@@ -11,7 +11,7 @@ hub/dist/
 .env.*
 !.env.example
 
-# runtime state written by the harness (keep README.md, usage.json, and war-room.config.json templates)
+# runtime state written by the harness (keep README.md and usage.json templates)
 .studio/*
 # A state file mid-replace (harness/fsafe.mjs writes .<name>.<pid>-<id>.tmp beside it, then renames it over)
 .*.tmp
@@ -19,7 +19,6 @@ hub/dist/
 .lanes/
 !.studio/README.md
 !.studio/usage.json
-!.studio/war-room.config.json
 
 # QA output (keep the folder, not the runs)
 qa/reports/*

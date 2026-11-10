@@ -110,19 +110,19 @@ import { markQuietHold, clearQuietHold } from './heavy.mjs';
 import { subIdsFromLog } from './gate-subids.mjs';
 import { timeoutFlakesFromLog } from './timeout-rerun.mjs';
 import { runGatesWaiting, busyWhy, ranNoCheck } from './train-busy.mjs';
+import { exitCause } from './verify-cause.mjs';
 import { remoteMode, remoteVerify, remoteCheckPattern, localGateIds } from './remote-verify.mjs';
 import { bisectWidth, karySearch, karyCost, focusWorkers, spawnCollect, runGatesWaitingAsync } from './train-parallel.mjs';
 import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFocus, failingTests, tailSignature, tailsExplaining, tailTitle, tailNote, tailWaitWhy, pinDiffLines } from './train-tail.mjs';
 import { checkStamped, stampWrite } from './workaround.mjs';
 import { gateEnv } from './gate-env.mjs';
 import { refreshStaleLane } from './train-refresh.mjs';
-import { writeAtomic } from './fsafe.mjs';
+import { writeAtomic, pidAlive as alive } from './fsafe.mjs';
 import { misplacedTrailers, misplacedTrailerText } from './trailers.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 
 export const TRAIN_DIR = path.join('.studio', 'train');
 export const trainOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_TRAIN || ''));
@@ -510,7 +510,7 @@ export function buildIntegration(sc, tip, lanes, { id, unionFiles = [] }) {
   const deferred = [];
   const conflictMain = [];
   const env = { ...process.env };
-  for (const k of ['STUDIO_LOCK_OWNER', 'STUDIO_EXPERIMENT', 'STUDIO_AGENT_MODEL']) delete env[k];
+  for (const k of ['STUDIO_LOCK_OWNER', 'STUDIO_AGENT_MODEL']) delete env[k];
   for (const lane of lanes) {
     const before = out(git(dir, 'rev-parse', 'HEAD'));
     const base = out(git(root, 'merge-base', tip, lane.head));
@@ -816,9 +816,10 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   const { gates, detail } = failLines(text);
   const why = ok ? '' : noCheck ? `ran no check (${busy || `exit ${r.status} before any gate ran`})` : r.status !== 0 ? `failed: ${gates.join(', ') || `exit ${r.status}`}` : !rec ? 'wrote no verify record' : rec.tree !== tree ? `tested tree ${String(rec.tree).slice(0, 8)}, not ${tree.slice(0, 8)}` : 'its record is not a clean full verify';
   const vparts = trainVerifyParts(text, ok, [sc.dir, root]); // 2.72.0 (a)
-  emitEvent({ type: 'task.train.verify', agent: owner, status: ok ? 'ok' : 'blocked', msg: `train ${id}: verify ${n} of ${tree.slice(0, 8)} ${ok ? 'green' : why} in ${Math.round((Date.now() - t0) / 1000)} s${vparts.flakes.length ? ` (timeout-flake, green for those files only: ${vparts.flakes.slice(0, 3).join(', ')})` : ''}`, meta: { train: id, tree, ok, gates, ms: Date.now() - t0, ...(vparts.subIds.length ? { subIds: vparts.subIds } : {}), ...(vparts.flakes.length ? { timeoutFlakes: vparts.flakes } : {}) } });
+  const cause = exitCause({ ok, r, rec, tree, gates, busy, noCheck, text }); // 2.81 (b3): a structured verdict (harness/verify-cause.mjs)
+  emitEvent({ type: 'task.train.verify', agent: owner, status: ok ? 'ok' : 'blocked', msg: `train ${id}: verify ${n} of ${tree.slice(0, 8)} ${ok ? 'green' : why} in ${Math.round((Date.now() - t0) / 1000)} s${vparts.flakes.length ? ` (timeout-flake, green for those files only: ${vparts.flakes.slice(0, 3).join(', ')})` : ''}`, meta: { train: id, tree, ok, gates, exitCause: cause, exit: r.status ?? null, ms: Date.now() - t0, ...(vparts.subIds.length ? { subIds: vparts.subIds } : {}), ...(vparts.flakes.length ? { timeoutFlakes: vparts.flakes } : {}) } });
   if (vparts.flakes.length) log(`[train] ${id}: verify ${n}: ${vparts.flakes.length} test file(s) timed out and passed alone at low load (timeout-flake; the lane is not blamed for them): ${vparts.flakes.slice(0, 5).join(', ')}`);
-  const res = { ok, rec, gates, detail, why, log: path.relative(root, logFile).split(path.sep).join('/'), ms: Date.now() - t0, ...(ok ? {} : noCheck ? { noCheck: true, busy: busy || null } : {}), ...(trustNote ? { trustNote, closeRec: { ...rec, dirty: false, trustNote } } : {}) };
+  const res = { ok, rec, gates, detail, why, exitCause: cause, log: path.relative(root, logFile).split(path.sep).join('/'), ms: Date.now() - t0, ...(ok ? {} : noCheck ? { noCheck: true, busy: busy || null } : {}), ...(trustNote ? { trustNote, closeRec: { ...rec, dirty: false, trustNote } } : {}) };
   if (!res.noCheck) seen.set(tree, res); // a run that judged nothing is not cached: the next ask runs it again
   if (!ok && !res.noCheck) startRedClock(id, { why, gates, log: res.log, tests: failingTestsLine(text).list.slice(0, 5) }); // 2.78.2 (b)
   if (!ok && !res.noCheck) { res.triage = flakeTriage(sc, { id, tree, text, log }); if (!res.triage) delete res.triage; } // 2.69.0 (r); 2.77.3: its result; 2.78.0: the labels decide a load-sensitive excuse
@@ -904,7 +905,7 @@ function localSafetyGates(sc, { id, n, tree, all, tasks = [], log }, ids, games)
 export const bisectMode = (env = process.env) => (/^alone$/i.test(String(env.STUDIO_TRAIN_BISECT || '')) ? 'alone' : 'prefix');
 const stable = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x)) ?? 'undefined';
 const short = (v) => { const t = stable(v); return t.length > 60 ? `${t.slice(0, 57)}...` : t; };
-const mergeEnv = () => { const env = { ...process.env }; for (const k of ['STUDIO_LOCK_OWNER', 'STUDIO_EXPERIMENT', 'STUDIO_AGENT_MODEL']) delete env[k]; return env; };
+const mergeEnv = () => { const env = { ...process.env }; for (const k of ['STUDIO_LOCK_OWNER', 'STUDIO_AGENT_MODEL']) delete env[k]; return env; };
 
 /**
  * Re-run ONLY these studio gates on the scratch copy's tree (run-gates --only, a partial run that stands for no
@@ -3116,7 +3117,7 @@ function landOverNonCode(root, sc, { tip, now, verified, id }) {
   if (odd) return { ok: false, why: `the merged tree differs from the verified one in ${odd}, not only by main's version of its non-code files` };
   const msg = [`train ${id}: land the verified tree ${verified.tree.slice(0, 8)}, then ${mv.commits.length} new commit(s) of main that touch only non-code files`, '', ...mv.commits.slice(0, 20).map((c) => `  ${c.sha.slice(0, 8)} ${c.subject}`), '', `Studio-Train: ${id} over-noncode`].join('\n');
   const env = { ...process.env };
-  for (const k of ['STUDIO_LOCK_OWNER', 'STUDIO_EXPERIMENT', 'STUDIO_AGENT_MODEL']) delete env[k];
+  for (const k of ['STUDIO_LOCK_OWNER', 'STUDIO_AGENT_MODEL']) delete env[k];
   const m = spawnSync('git', ['-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'merge', '--no-ff', '--no-edit', '-m', msg, now], { windowsHide: true, cwd: sc.dir, encoding: 'utf8', env, maxBuffer: 16 * 1024 * 1024 });
   if (m.status !== 0) { back(); return { ok: false, why: `the merge stopped: ${`${m.stdout || ''}${m.stderr || ''}`.trim().split('\n').slice(-2).join(' ').slice(0, 200)}` }; }
   const merged = out(git(sc.dir, 'rev-parse', 'HEAD'));

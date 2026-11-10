@@ -16,8 +16,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT } from './event.mjs';
+import { readJson } from './fsafe.mjs';
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const cut = (ids, k = 6) => (ids.length <= k ? ids.join(', ') : `${ids.slice(0, k).join(', ')} +${ids.length - k} more`);
 
 /** Open tasks (in progress or waiting) whose hold says they wait for the dev's yes, in board order. */

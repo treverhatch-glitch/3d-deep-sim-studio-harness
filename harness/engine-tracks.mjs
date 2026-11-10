@@ -35,8 +35,8 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
 import { learnedNeed } from './engine-ram.mjs';
+import { readJson } from './fsafe.mjs';
 
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(tmp, f); };
 const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
 const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());

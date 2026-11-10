@@ -134,13 +134,13 @@ export async function selftest2582K({ dir, run, report, tmpRoot, root }) {
     `${h4a._out.slice(-500)}\n${mergeMsg}\n${h4b._out.slice(-500)}`);
 
   // H5: harness commits are exempt only when marked with a known kind (and its companion trailer).
-  write('game/demo/src/d.mjs', 'export const d = 1;\n');
-  commit('Drop X-001: try d\n\nStudio-Experiment-Drop: X-001\nStudio-Harness: experiment-drop', '--no-verify');
+  write('studio/d.json', '{"d":1}\n');
+  commit('Config from T-001\n\nConfig-From: T-001\nStudio-Harness: config-from', '--no-verify');
   const h5a = hooks();
   write('game/demo/src/e.mjs', 'export const e = 1;\n');
   commit('board update\n\nStudio-Harness: board', '--no-verify');
   const h5b = hooks();
-  report('2.58.2 (PU-29): a harness commit made without hooks passes only when marked (Studio-Harness: experiment-drop with its Studio-Experiment-Drop trailer); an unknown kind is flagged like any other',
+  report('2.58.2 (PU-29): a harness commit made without hooks passes only when marked (Studio-Harness: config-from with its Config-From trailer); an unknown kind is flagged like any other',
     h5a.status === 0 && h5a.exempt >= 1 && h5b.status !== 0 && h5b.open?.length === 1 && /isn't a commit the harness makes/.test(h5b.open?.[0]?.why), `${h5a._out.slice(-500)}\n${h5b._out.slice(-700)}`);
 
   // H6: the owner's approval lets a commit through; an agent's own key doesn't; the next commit is stamped again.

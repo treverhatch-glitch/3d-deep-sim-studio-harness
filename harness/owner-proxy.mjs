@@ -40,7 +40,7 @@ export const PROXY_DEFAULT_DAYS = 30;
  */
 export const PROXY_NEVER = OWNER_ONLY_ACTIONS;
 export const GRANT_FIELDS = ['agent', 'actions', 'until', 'by', 'at', 'why'];
-const WORKER = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|art|artist|art-director|designer|designer-calibrator|balancer|fun-tester|scout|reference-scout|engine-porter|dev-hacker|planner|liaison)(-|_|\d|$)/i;
+const WORKER = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|art|artist|art-director|designer|designer-calibrator|balancer|fun-tester|scout|reference-scout|engine-porter|planner)(-|_|\d|$)/i;
 
 /** The signed part of a delegation: the 2.67 fields, plus `proxy: true` only on a proxy grant (old signatures stay valid). */
 export function grantBody(d) {

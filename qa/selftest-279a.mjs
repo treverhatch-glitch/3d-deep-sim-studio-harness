@@ -75,7 +75,7 @@ export async function selftest279A({ dir, report, tmpRoot, root }) {
     const p = measure(planted);
     const ok = m.harness.modules === dh.modules && m.harness.lines === dh.lines && m.scripts.modules === ds.modules && m.scripts.lines === ds.lines && m.qa.selftestFiles === dq && m.testUnits === units && m.harness.largest.length === 15
       && m.harness.largest.every((f, i, a) => i === 0 || a[i - 1].lines >= f.lines)
-      && p.harness.modules === 2 && p.harness.lines === 5 && p.scripts.lines === 1 && p.settings === 2 && p.hub.modules === 0;
+      && p.harness.modules === 2 && p.harness.lines === 5 && p.scripts.lines === 1 && p.settings === 2;
     return [ok, JSON.stringify({ harness: [m.harness.modules, m.harness.lines, dh], scripts: [m.scripts.modules, m.scripts.lines, ds], qa: [m.qa.selftestFiles, dq], units: [m.testUnits, units], planted: { h: p.harness.modules, hl: p.harness.lines, sl: p.scripts.lines, s: p.settings } })];
   });
 

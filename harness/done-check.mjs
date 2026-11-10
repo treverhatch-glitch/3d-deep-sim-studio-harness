@@ -53,6 +53,7 @@ import { regressionHowTo, regressionMissing } from './regression-howto.mjs';
 import { checkResearch, ensureResearchTemplate } from './research.mjs';
 import { engineTask, engineRepo, engineTarget } from './engine-tracks.mjs';
 import { visualCheckRows } from './visual-check.mjs';
+import { anchorCheckRows } from './anchors.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -149,8 +150,6 @@ const PREFIX = [
   [/^director review\b/i, 'direction'],
   [/^idea\b/i, 'idea'],
   [/^art\b/i, 'art'],
-  [/^trick hunt\b/i, 'trick'],
-  [/^tricks:/i, 'none'],
   [/^(plan|sign the game bible|ideas:)\b/i, 'none'],
 ];
 const BY_ROLE = {
@@ -166,11 +165,9 @@ const BY_ROLE = {
   reviewer: 'review',
   'reference-scout': 'study',
   director: 'direction',
-  liaison: 'none',
   rnd: 'idea',
   planner: 'idea',
   art: 'art',
-  'dev-hacker': 'trick',
   artist: 'art',
   'art-director': 'art',
 };
@@ -190,7 +187,6 @@ export const TYPES = {
   system: { skill: 'studio/skills/system.md', means: 'a spec with a hand-off in studio/bible/systems/, the sim change with a scenario in qa.mjs and updated goldens, a playtest of the current build, a green verify after the last change, and an approving review from another model family' },
   idea: { skill: 'studio/skills/ideas.md', means: 'the idea named in the title moved to its next stage (shaped, placed, or decided) since the task started' },
   art: { skill: 'studio/skills/art.md', means: 'designs proposed for the game dev since the task started (npm run art -- propose); approving them is the dev\'s call, not part of done' },
-  trick: { skill: 'studio/skills/dev-hacker.md', means: 'a trick card proposed since the task started (npm run trick -- propose), or a note that nothing is worth doing now (npm run trick -- none "why")' },
   whole: { skill: null, means: 'a fix committed for this task, then a full verify of the whole game (npm run verify -- --all), not one scoped to the files you changed, green after your last change' },
   rescue: { skill: 'studio/skills/rescue.md', means: 'studio/rescues/<the stuck task>.md written since the rescue started, with a Diagnosis of 40+ words and one Decision: retry, split (smaller tasks naming the stuck task are queued) or needs-person' },
   none: { skill: null, means: 'nothing to check (coordination work)' },
@@ -300,7 +296,7 @@ const newestSince = (files, since) => files.filter((f) => mtime(f) >= since);
 // 2.73.0: the harness's own records (the harness-task queue a forced done adds to, 2.71.0 z; pending reviews and holds)
 // are no task's change: another task's forced done wrote HARNESS-TASKS.md and it counted as this task's edit.
 const BOOKKEEPING = /^(package-lock\.json$|\.studio\/|studio\/(task-types\.json$|HARNESS-TASKS\.md$|pending-review\.json$|task-holds\.json$|NEXT\.md|CURRENT_TASK\.md|handoffs\/|meetings\/|producer\/|game\/|memory\/retros\/|harness-notes\/|proof\/)|qa\/reports\/)/;
-const WORK_DIRS = ['cartridges', 'src', 'harness', 'hub', 'qa', 'scripts', 'tools', 'docs', 'studio'];
+const WORK_DIRS = ['cartridges', 'src', 'harness', 'qa', 'scripts', 'tools', 'docs', 'studio'];
 const git = (...args) => {
   const r = spawnSync('git', args, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
   return r.status === 0 ? r.stdout : null;
@@ -934,12 +930,6 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
     const want = m ? { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 }[m[1].toLowerCase()] || Number(m[1]) || 0 : 0;
     if (want) check(`${want} placeholder assets among them`, mine.filter((d) => d.kind === 'asset').length >= want, `${mine.filter((d) => d.kind === 'asset').length} of ${want} placeholder assets proposed`);
   }
-  if (type === 'trick') {
-    const dir = abs('studio/tricks');
-    const cards = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /^K-\d+\.json$/.test(f)).map((f) => readJson(`studio/tricks/${f}`)).filter((t) => t && Date.parse(t.at) >= since) : [];
-    const none = mtime('studio/tricks/HUNTS.md') >= since;
-    check('A trick card, or a note that nothing is worth doing now', cards.length || none, 'no trick card since this task started: npm run trick -- propose "…" --problem … --trick … --fits … --avoid-if … --proof …, or npm run trick -- none "<why>"');
-  }
   if (type === 'idea') {
     const id = (task.title.match(/\bI-\d+\b/) || [])[0];
     const idea = id ? readIdea(id) : null;
@@ -976,6 +966,15 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
   }
   // 2.77.0 (u, P5.5): a task added with --visual-check or --refs needs the visual check (harness/visual-check.mjs).
   try { for (const r of visualCheckRows(task.id)) check(r.label, r.ok, r.why); } catch { /* not readable: no rows */ }
+  // 2.81 (b2): the anchors the task cites (task add --anchors): met | unmet | unknown from the deliverable, never the
+  // note (harness/anchors.mjs). Unknown is a warning and never green; unmet fails only under STUDIO_ANCHORS=fail.
+  let anchors = null;
+  try {
+    const ar = anchorCheckRows(task.id, { since });
+    for (const r of ar.checks) check(r.label, r.ok, r.why);
+    warnings.push(...ar.warnings);
+    if (ar.rows.length) anchors = ar.summary;
+  } catch { /* no anchors readable: no rows */ }
   // 2.62.0 (H): an agreed acceptance contract (studio/contracts/<ID>.json, harness/contracts.mjs) needs every
   // criterion in force passing; no contract, no change (unless studio/game.json "contracts.required" names the type).
   {
@@ -986,7 +985,7 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
     notes.push(...k.notes);
   }
   const missing = checks.filter((c) => !c.ok).map((c) => c.why);
-  return { ok: missing.length === 0, type, typeSource: typed.source, typeIgnored: typed.ignored, titleType: typed.titleType, ...(typed.evidence ? { typeEvidence: typed.evidence } : {}), part, since, checks, missing, notes, ...(warnings.length ? { warnings } : {}), ...TYPES[type] };
+  return { ok: missing.length === 0, type, typeSource: typed.source, typeIgnored: typed.ignored, titleType: typed.titleType, ...(typed.evidence ? { typeEvidence: typed.evidence } : {}), part, since, checks, missing, notes, ...(warnings.length ? { warnings } : {}), ...(anchors ? { anchors } : {}), ...TYPES[type] };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -1014,6 +1013,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   } catch { /* no verdict module */ }
   for (const c of res.checks) console.log(`  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`);
   for (const w of res.warnings || []) console.log(`  WARN ${w}`);
+  if (res.anchors) console.log(`  anchors: ${Object.entries(res.anchors).map(([k, v]) => `${k} ${v}`).join(', ')} (unknown is never green)`);
   for (const n of res.notes || []) console.log(`  note: ${n}${/^studio\/contracts\//.test(n) ? '' : ' (STUDIO_REACHABILITY=fail makes this a failing check)'}`);
   console.log(res.ok ? 'Ready to finish.' : 'Not done yet.');
   process.exit(res.ok ? 0 : 1);

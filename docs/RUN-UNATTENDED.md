@@ -70,8 +70,8 @@ the finished passes (`passes`). Before 2.77.1 the first pass could wait on itsel
 such as the Communicator's needs-a-person list) and Node exited with code 13 ("unsettled top-level await").
 
 2.80 (b1): the timed passes the War Room hub used to run are steps of the supervisor's pass (harness/studio-passes.mjs):
-every `STUDIO_WATCH_INTERVAL` seconds (300; 0 turns them all off) the watch pass, the retro, the learn pass, the run
-report and the Director's daily ping, and every `STUDIO_GAMEDEV_INTERVAL` seconds (180; 0 turns it off) the game-dev
+every `STUDIO_WATCH_INTERVAL` seconds (300) the watch pass, the retro, the learn pass, the run
+report and the Director's daily ping (2.81: 0 turns off the watch pass only; the others are then checked every 300 s), and every `STUDIO_GAMEDEV_INTERVAL` seconds (180; 0 turns it off) the game-dev
 watchdog pass. Each group first runs one full interval after the supervisor started (a short run never runs them), never in a dry run;
 one bounded step per group, and a pass that throws is logged without stopping the others. `.studio/supervisor.json`
 keeps each group's last run (`timed`). Wakes these passes cause are logged from `supervisor`.
@@ -240,6 +240,27 @@ don't count) the launcher parks the task with that reason and tells the Producer
 run task -- unpark <ID> --by <name>` resets the count. A bug task's brief and its done-check refusal name the
 regression exactly: `qa/regressions/<ID>.json`, its fields, `node qa/check-regressions.mjs --update` and
 `node qa/fails-before.mjs qa/regressions/<ID>.json "<fix>^"` (`harness/regression-howto.mjs`).
+
+**Attempt ledger** (2.81, `harness/attempts.mjs`): every failed or owner-only hand-back is recorded in
+`.studio/attempts/<ID>.json` (its reason, main's tip, what it waits for, and a signature of those three). While the
+signature of the current facts equals the last attempt's, a new session would meet the same wall. `STUDIO_ATTEMPTS`
+says what happens then: `record` (the default) writes the ledger, and `task next` and the supervisor offer that task after
+every other eligible one; nothing is refused (the loop park, the breaker, the tier-up and the usage-limit stop keep their
+own counts). `refuse` also refuses it in `task next`, `task start`, the supervisor and the Line Producer: "same blocker as
+attempt <n> (<reason>): main unchanged since <sha> and nothing it waits for landed". `off` writes and reads nothing. A
+commit on main, a landed dependency, `npm run task -- unblock <ID> --by <name>` (even with no park), `unpark` or a done
+clears it; a hand-back the harness or a person caused (claim ran out, a stop, a refresh, a session cap) is never recorded,
+and the ledger never releases a lock or a claim. `task next` and the supervisor's pick also ask the same budget and round-cap
+questions `task start` asks (`eligibility()`), so they stop offering a task that `start` would refuse.
+
+**A dead session ends in time** (2.81, `harness/gone-check.mjs`): a launched session whose process is gone (PID plus its
+start-time identity, `harness/proc-identity.mjs`; never the heartbeat alone) is ended by the supervisor's pass and by
+`task next` / `task start` too, not only by the watch pass, at most once per `STUDIO_GONE_CHECK_S` (60 seconds; `off`
+turns these extra passes off; the stamp is `.studio/gone-check.json`). Its `agent.session.end` keeps the detection time
+as `ts` and `meta.detectedAt`, and carries `meta.endedAt`: the last heartbeat (else the start) plus `STUDIO_GONE_GRACE_S`
+(120 seconds), never later than the detection. Session hours (`harness/model-pools.mjs`, `harness/run-report.mjs`, and
+`harness/metrics.mjs` for an attempt closed by its agent's session end) read `meta.endedAt`, so a session that died hours
+before anyone noticed no longer counts those hours.
 
 `npm run agent -- stop <name>` (and Pause) keep that task from restarting for 15 minutes
 (`STUDIO_STOP_COOLDOWN_MIN`). "Stop all" also stops running agents and hands their tasks back. The cooldown (2.77.3)

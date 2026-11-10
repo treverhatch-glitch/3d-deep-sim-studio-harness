@@ -8,7 +8,7 @@
  *   What is left out   the game manifest's "laneExclude": ["<glob>", ...] (<game>/studio.gates.json, read as committed
  *                      in the main checkout: the manifest is protected) plus STUDIO_LANE_EXCLUDE (comma-separated
  *                      globs; =off turns lane exclusions off). Globs are repo-relative (** any depth, * one segment).
- *                      Off unless one of them names a glob. The harness's own folders (harness/, scripts/, qa/, hub/,
+ *                      Off unless one of them names a glob. The harness's own folders (harness/, scripts/, qa/,
  *                      tools/), package files and the manifest itself are never left out.
  *   What a task keeps  every path of its declared scope (its lane: task add --paths/--lane, `task lane`, the studio
  *                      paths it names), re-included after the exclusions; a task on the asset track (or an art task)
@@ -34,13 +34,14 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { globRe } from './merge-lane.mjs';
+import { readJson } from './fsafe.mjs';
 
 /** The patterns every lane copy has had since 2.29: everything but the shared studio/ and .studio/ links. */
 export const BASE_SPARSE = ['/*', '!/studio/', '!/.studio/'];
 /** Never left out of a lane: the harness that runs its checks, the package files, the shared links. */
-const NEVER_EXCLUDED = ['harness/x.mjs', 'scripts/x.mjs', 'qa/x.mjs', 'hub/x.mjs', 'tools/x.mjs', 'package.json', 'package-lock.json', 'node_modules/x', 'studio/x', '.studio/x'];
+const NEVER_EXCLUDED = ['harness/x.mjs', 'scripts/x.mjs', 'qa/x.mjs', 'tools/x.mjs', 'package.json', 'package-lock.json', 'node_modules/x', 'studio/x', '.studio/x'];
 /** What the harness's own folders are, for checks with no list of their own. */
-export const HARNESS_CODE = ['harness/**', 'scripts/**', 'qa/**', 'hub/**', 'tools/**', 'engine/**', 'cartridges/**', 'skills/**', 'web/**', '*'];
+export const HARNESS_CODE = ['harness/**', 'scripts/**', 'qa/**', 'tools/**', 'engine/**', 'cartridges/**', 'skills/**', 'web/**', '*'];
 /**
  * What each harness check reads beyond its own folders (studio/gates.json ids). A check not named here reads
  * HARNESS_CODE; "**" means the whole tree. secrets: the lane's commits are read from git, and a left-out file can't
@@ -58,7 +59,6 @@ const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', ma
 const off = (v) => /^(off|0|false|no)$/i.test(String(v || '').trim());
 const norm = (p) => String(p || '').trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '').replace(/\/+$/, '');
 const hasWild = (g) => /[*?[]/.test(g);
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const uniq = (a) => [...new Set(a)];
 
 /** The main checkout (a lane copy at <main>/.lanes/<x> names it), without importing worktree.mjs. */

@@ -10,9 +10,11 @@ safeguard below is cheap and doesn't slow a build: caps hand off instead of stop
 
 The studio's files are the memory, not the chat.
 
-- A launched session does one task, or refreshes at **40 turns or 120k tokens of context**, whichever
-  comes first: it commits, hands back with `node harness/task.mjs pause <ID> --note "Done: … | Failed/tried: … | Next step: … | Standing rules: … | Files: …"`
-  (under 3k characters), and stops. A fresh session continues the same task from that note.
+- A launched session does one task. The refresh point (**40 turns or 120k tokens of context**, whichever comes
+  first) is the launcher's and the watcher's measure, not a budget the agent is told to keep (2.81: the prompt no
+  longer carries the numbers; in the crew's week 4% of sessions passed the point). The prompt says how to hand a
+  long task on: commit, `node harness/task.mjs pause <ID> --note "Done: … | Failed/tried: … | Next step: … | Standing rules: … | Files: …"`,
+  and stop; a fresh session continues the same task from that note.
 - Claude Code sessions get `--max-turns 80` (the ceiling). A session that reaches it is a refresh, not
   a failure: the launcher saves the work, hands the task back with a note and starts a fresh session on
   it at once (up to `STUDIO_REFRESH_RELAUNCH`, default 5, in a row). No failover, no cooldown, and it

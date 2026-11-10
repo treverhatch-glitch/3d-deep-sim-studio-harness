@@ -28,9 +28,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { readJson } from './fsafe.mjs';
 
 const off = (v) => /^(off|0|false|no)$/i.test(String(v || ''));
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 export const lbDir = (root) => path.join(root, '.studio', 'landing-build');
 const pendingFile = (root) => path.join(lbDir(root), 'pending.json');

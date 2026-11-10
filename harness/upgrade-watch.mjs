@@ -36,11 +36,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { emitEvent } from './event.mjs';
+import { pidAlive, readJson } from './fsafe.mjs';
 
 export const UPGRADE_REL = 'studio/upgrade.json';
 const git = (root, args, opts = {}) => spawnSync('git', ['-c', 'core.quotePath=false', ...args], { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, ...opts });
 const out1 = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
-const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const stateFile = (root) => path.join(root, '.studio', 'upgrade-watch.json');
 // upgrade-guard.mjs as its CLI passes itself in (a module whose top-level await is still running can't import itself back).
 const loadGuard = async (g) => g || import('./upgrade-guard.mjs');
@@ -137,7 +137,6 @@ export function inUpgradeWindow(win, now = Date.now()) {
   return a <= b ? t >= a && t < b : t >= a || t < b;
 }
 
-const pidAlive = (pid) => { try { process.kill(Number(pid), 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 
 /** Why an upgrade must wait now, or '': a train, heavy work (a verify), or agent sessions running. */
 export async function busyNow(root, env = process.env) {

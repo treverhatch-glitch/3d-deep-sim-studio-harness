@@ -21,7 +21,7 @@
  *       fetches remote/* from STUDIO_REMOTE_NAME (origin) and, for each branch with a live lease whose last commit says
  *       "Studio-Remote: done": every commit of its own carries "Studio-Task: <T-ID>" (no other task's), it touches only
  *       allowed paths (never studio/, .studio/, .lanes/, .env or node_modules; within the task's lane and --allow
- *       paths when it has any), and not the harness's own code (harness/, scripts/, hub/, tools/, qa/*.mjs,
+ *       paths when it has any), and not the harness's own code (harness/, scripts/, tools/, qa/*.mjs,
  *       package.json: that would run on this PC at once; a person queues it by hand after reading it). Then a lane copy
  *       is made for it (harness/lane-create.mjs: studio/ linked to main), its commits re-stamped through the local
  *       hooks when needed (harness/lanes.mjs refreshLane), and `task done <T-ID> --train` queues it for the NORMAL
@@ -48,6 +48,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, readRecentEvents } from './event.mjs';
 import { mainRoot, mainBranch, MAIN_CHECKOUT_ROLES, removeLaneCopy, LANES_DIR } from './worktree.mjs';
+import { pidAlive as alive, readJson } from './fsafe.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TASK_ID = /^[A-Z]+-\d+$/;
@@ -59,14 +60,12 @@ export const isRemoteOwner = (o) => typeof o === 'string' && (o.startsWith(OWNER
 export const BRANCH_PREFIX = 'remote/';
 export const ACTIVE = new Set(['leased', 'working', 'refused', 'needs-review', 'queued']);
 export const NEVER = [/^studio\//, /^\.studio\//, /^\.lanes\//, /^\.env($|\.)/, /(^|\/)node_modules(\/|$)/, /^\.git\//];
-export const HARNESS_CODE = /^(harness|scripts|hub|tools|\.claude|\.githooks)\/|^qa\/[^/]+\.mjs$|^package(-lock)?\.json$/;
+export const HARNESS_CODE = /^(harness|scripts|tools|\.claude|\.githooks)\/|^qa\/[^/]+\.mjs$|^package(-lock)?\.json$/;
 const DOCS_TYPES = new Set(['research', 'study', 'idea', 'docs', 'design']);
 const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const cleanEnv = (extra = {}) => { const e = { ...process.env, ...extra }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/.test(k)) delete e[k]; return e; };
 const git = (cwd, args, opts = {}) => spawnSync('git', args, { cwd, encoding: 'utf8', env: cleanEnv(), maxBuffer: 64 * 1024 * 1024, windowsHide: true, ...opts });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
-const alive = (pid) => { if (!pid) return false; try { process.kill(Number(pid), 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 
 // ---- settings --------------------------------------------------------------------------------------------------------
 
@@ -210,7 +209,7 @@ export function briefText(L, { title = '', means = '', told = '', priority = '',
     '## Never',
     '- Never touch `studio/` (the board, the Bible, approvals), `.studio/` (claims, events, state), `.lanes/`, `.env` or `node_modules/`: they are the studio PC\'s, and a branch that changes them is refused.',
     `- ${L.allow.length ? `Change files only under: ${L.allow.map((p) => `\`${p}\``).join(', ')}.` : 'Change only what the task needs.'} A config change for \`studio/*.json\` goes in \`studio-proposals/${L.task}.json\` instead (\`{ "changes": [ { "file": "studio/<name>.json", "set": { "<a.b>": <value> } } ], "why": "…" }\`).`,
-    '- A change to the harness\'s own code (harness/, scripts/, hub/, tools/, qa/*.mjs, package.json) is not queued by itself: a person reads it first. Protected files (studio/protected.json) make the lane wait for a person\'s release.',
+    '- A change to the harness\'s own code (harness/, scripts/, tools/, qa/*.mjs, package.json) is not queued by itself: a person reads it first. Protected files (studio/protected.json) make the lane wait for a person\'s release.',
     '- No Unity work, no outside assets without asking, never print or commit keys or tokens, never weaken a test to pass.',
     '',
     `(Written by harness/remote-workers.mjs for ${L.owner} at ${L.at}.)`,

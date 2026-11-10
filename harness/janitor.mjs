@@ -46,10 +46,10 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, getEventPaths } from './event.mjs';
+import { pidAlive, readJson } from './fsafe.mjs';
 
 const H = 3600000;
 const num = (v, d) => (v === undefined || v === null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? d : Number(v));
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
 export const MARKER = '.studio-temp.json';
 /** 2.79.1: name prefixes of the temp copies the harness itself makes in the system temp folder (builds.mjs snapshotBuild). */
@@ -105,7 +105,6 @@ function newestMtime(dir, depth = 2) {
 }
 /** Same folder? Real paths (a temp folder reached through a link, as on macOS), else resolved paths. */
 const samePath = (a, b) => { try { return fs.realpathSync(a) === fs.realpathSync(b); } catch { return path.resolve(String(a)) === path.resolve(String(b)); } };
-const pidAlive = (pid) => { if (!Number(pid)) return false; try { process.kill(Number(pid), 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 
 /** Mark a temp folder the harness made (for tests), so the janitor may remove it once it is old and its process gone. */
 export function markTemp(dir, { root = studioRoot(), by = 'harness' } = {}) {

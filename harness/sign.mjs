@@ -29,6 +29,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { canonicalBytes } from './hash.mjs';
+import { readJson } from './fsafe.mjs';
 
 const PRIVATE = path.join(STUDIO_STATE_DIR, 'keys', 'studio-ed25519.pem');
 const PUBLIC = path.join(REPO_ROOT, 'studio', 'keys', 'studio-ed25519.pub.pem');
@@ -126,7 +127,7 @@ export function buildManifest({ by, note = '' }) {
     kind: 'studio.result',
     gameId: (() => {
       try {
-        const g = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'game.json'), 'utf8')).cartridge;
+        const g = readJson(path.join(REPO_ROOT, 'studio', 'game.json'), {}).cartridge;
         return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'cartridges', g, 'cartridge.json'), 'utf8')).id || null;
       } catch {
         return null;

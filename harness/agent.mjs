@@ -94,7 +94,7 @@ import { sessionOutcome, parkIfNoWork } from './session-outcome.mjs';
 import { writeAtomic } from './fsafe.mjs';
 import { selfIdentity, spawnedIdentity, pidAlive, recordAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
 import { gateEnv } from './gate-env.mjs';
-import { vertexModel, vertexConfigured, ensureProxy, proxyBase, sessionKey, sessionUsage, overPromptCap } from './vertex.mjs';
+import { vertexModel, vertexConfigured, ensureProxy, proxyBase, sessionKey, sessionUsage, overPromptCap, promptCap } from './vertex.mjs';
 import { registeredTool, registryPrice } from './tool-registry.mjs';
 import { spendPass, sessionKeyNames } from './spend-budget.mjs';
 
@@ -481,9 +481,14 @@ export function markGone() {
   for (const s of sessions()) {
     if (s.status !== 'running' || s.running) continue;
     const at = new Date().toISOString();
+    // 2.81 (b4): the end event's ts is the detection time; meta.endedAt is the death estimate: the last heartbeat (else
+    // the start) + STUDIO_GONE_GRACE_S (120) seconds, capped at the detection time. Session-hours readers prefer it.
+    const graceS = Number(process.env.STUDIO_GONE_GRACE_S ?? 120);
+    const lastSeen = Date.parse(s.lastBeat || '') || Date.parse(s.startedAt || '') || null;
+    const endedAt = lastSeen === null ? at : new Date(Math.min(Date.now(), lastSeen + (Number.isFinite(graceS) && graceS >= 0 ? graceS : 120) * 1000)).toISOString();
     fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...s, running: undefined, stalled: undefined, beatAgeMin: undefined, ending: undefined, status: 'ended', endedAt: at, reason: 'its process is gone (killed, crashed or the machine restarted)' }, null, 2));
     // 2.73.2 (B-72): one agent.session.end per session (claimSessionEnd), whichever pass or launcher records it.
-    if (claimSessionEnd(s.agent, s.startedAt, 'watch')) emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, task: sessionTask(s) || claimedSince(s.agent, s.startedAt) || undefined, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone', startedAt: s.startedAt || undefined, bootAt: new Date(Date.now() - os.uptime() * 1000).toISOString() } }); // 2.71.0 (z): times for harness/workaround.mjs
+    if (claimSessionEnd(s.agent, s.startedAt, 'watch')) emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, task: sessionTask(s) || claimedSince(s.agent, s.startedAt) || undefined, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone', endedAt, detectedAt: at, startedAt: s.startedAt || undefined, bootAt: new Date(Date.now() - os.uptime() * 1000).toISOString() } }); // 2.71.0 (z): times for harness/workaround.mjs
     // 2.65.0: the uniform job.done (harness/jobs.mjs) beside agent.session.end.
     jobDone({ kind: 'session', id: s.agent, agent: s.agent, task: s.task || null, result: 'gone', ms: Date.parse(s.startedAt) ? Date.now() - Date.parse(s.startedAt) : null, tail: `its process is gone (last heartbeat ${s.lastBeat || 'never'})`, log: s.log || null, extra: { role: s.role || null } });
     // Its own copy: save what's uncommitted, keep unmerged commits on their branch, remove the copy.
@@ -996,7 +1001,7 @@ export function refreshRule({ oneTask = false, task = null, role = null, model =
   // 2.78.1 (e): the role's own refresh point (reviewers and engine-porters earlier; harness/session-cap.mjs contextPoint).
   const l = sessionLimits(process.env, { role, model });
   const id = task || '<ID>';
-  return `\nRefresh context by default: the studio's files are the memory, not this chat.${oneTask ? ' Do this one task, finish it (task done) or hand it back, then stop; a fresh session starts for the next task.' : ''}${l.turns || l.context ? ` At ${l.turns || '∞'} turns or ${l.context ? `${Math.round(l.context / 1000)}k` : '∞'} tokens of context, whichever comes first, refresh: commit, then \`node harness/task.mjs pause ${id} --note "${HANDOFF_TEMPLATE}"\` (under 3k characters) and stop; a fresh session continues from that note.` : ''} Refresh at a natural breakpoint, not every few turns.${l.turns || l.context ? ` Mid-debug with a live repro? \`npm run session -- exception "<repro>"\` lets you go on${l.ceilingTurns ? ` to ${l.ceilingTurns} turns` : ''}; you are flagged and the Director or Producer checks on you every ${l.checkTurns} turns / ${Math.round(l.checkTokens / 1000)}k tokens.` : ''}\n`;
+  return `\nThe studio's files are the memory, not this chat: commit as you go, so the work survives the session.${oneTask ? ' Do this one task, finish it (task done) or hand it back, then stop; a fresh session starts for the next task.' : ''}${l.ceilingTurns ? ` The launcher ends a session at ${l.ceilingTurns} turns and a fresh one continues from your commits and your last note, so a long task is best handed on at a natural breakpoint: commit, then \`node harness/task.mjs pause ${id} --note "${HANDOFF_TEMPLATE}"\` and stop.` : ` Handing a task on: commit, then \`node harness/task.mjs pause ${id} --note "${HANDOFF_TEMPLATE}"\` and stop; a fresh session continues from that note.`} Mid-debug with a live repro you don't want to lose? \`npm run session -- exception "<repro>"\` tells the Director and Producer you are staying on it; they may check in.\n`;
 }
 
 /**
@@ -1077,9 +1082,9 @@ export function sessionPromptParts({ role, agent, model, task = null, lane = nul
     // Cheaper to read (2.26): the map instead of searching, never the long changelog, a short hand-back,
     // and the rules this game has learned the hard way.
     // 2.29: a lookup, not a read-first step (Jed's A/B: reading a map, then line ranges, added turns and cost 27% more).
-    + `\nTo find a function, constant or TUNING key, run \`npm run map -- find <name>\`: one call gives the file, the line range and the arguments, so you read only those lines. .studio/MAP.md lists every code file in one line if you need the lay of the land. Every turn re-reads your whole conversation, so fewer, bigger steps cost less than many small ones. Never read CHANGELOG.md; studio/llms.txt lists every command. If you hand work back, keep the note under 20 lines: done, not done, files touched, next step, proof.\n`
+    + `\nTo find a function, constant or TUNING key, run \`npm run map -- find <name>\`: one call gives the file, the line range and the arguments, so you land on the right lines at once. .studio/MAP.md lists every code file in one line if you need the lay of the land. CHANGELOG.md is the harness's release history (behaviour that later changed): take no rule from it; studio/llms.txt lists every command as it is now. If you hand work back, the note says: done, not done, files touched, next step, proof (a note is cut at 20 lines when it is shown to the next agent).\n`
     + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". It goes out with your heartbeat and work in progress.\n`
-    + `\nHarness output is compact in launched sessions: verify prints failures only (each gate's full log is in .studio/gates/out/<gate>.log; open it only when you need it), and \`node harness/task.mjs list\` shows your role's next tasks, not the whole board (--all for everything). Don't cat studio/NEXT.md.\n`
+    + `\nHarness output is compact in launched sessions: verify prints failures only (each gate's full log is in .studio/gates/out/<gate>.log), and \`node harness/task.mjs list\` shows your role's next tasks, not the whole board (--all for everything; studio/NEXT.md is the whole board as a file).\n`
     + `\nSkills load on demand: .claude/skills/ holds the know-how for Godot, the web build, assets and tests. Claude Code shows you only their names until a task needs one; other tools: open the skill's SKILL.md when your task matches its description.\n`
     // PU-36 (P-049): studio/PITFALLS.md is written by agents and people: last, in the marked block, never among the rules.
     // It stays in the stable part (it changes only when a pitfall is added), so the prompt cache still holds.
@@ -1213,7 +1218,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   // M2 (2.58.3, crew P-039): a code-writing role on a task with no lane gets its own copy too (no path claims), so its
   // staged or half-done files never sit in the main checkout where they block every other task's `task done`.
-  // Producer, Director, planner and liaison stay in the main checkout; STUDIO_LANELESS=shared turns it off.
+  // Producer, Director and planner stay in the main checkout; STUDIO_LANELESS=shared turns it off.
   // H-9 (2.58.5): a custom command too (STUDIO_<ROLE>_CMD, STUDIO_TOOL_<TOOL>_CMD, STUDIO_AGENT_CMD): 2.58.3 left it in
   // the main checkout, and a wrapper session staged game code there that the pre-commit hook refused. It runs in the
   // copy (cwd), with STUDIO_MAIN_ROOT set, and its line may use {mainRoot} and {addDirs} (the --add-dir pair the
@@ -1412,7 +1417,22 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   let plan = null;
   // 2.79.1 (a): the studio's Vertex proxy, started now when it isn't listening (detached; npm run studio:stop stops it).
   let proxyErr = null;
-  if (viaProxy && !rehearsal) {
+  // 2.81 (b4, from the R2 trial's P7): a proxy launch whose assembled prompt files are over the proxy's prompt cap
+  // (STUDIO_VERTEX_MAX_PROMPT_TOKENS, bytes / 4) is refused before the proxy starts or any request is billed. Counted: a
+  // driven aider session's brief and lane files (its edit brief is made from them); any other launch, its kickoff file
+  // and the brief passed with --read. aider's own repo map is built inside aider and is not counted.
+  if (viaProxy && !rehearsal && promptCap() > 0) {
+    const sizeOf = (p) => { try { return fs.statSync(p).size; } catch { return 0; } };
+    const promptBytes = driven.on
+      ? sizeOf(path.join(STUDIO_STATE_DIR, 'briefs', `${task}.md`)) + (aider.files || []).reduce((n, f) => n + sizeOf(path.isAbsolute(f) ? f : path.join(cwd, f)), 0)
+      : sizeOf(file) + (aider.reads || []).reduce((n, f) => n + sizeOf(f), 0);
+    const estimate = Math.ceil(promptBytes / 4);
+    if (estimate > promptCap()) {
+      proxyErr = `the launch's prompt is about ${estimate.toLocaleString('en-US')} tokens (${promptBytes.toLocaleString('en-US')} bytes / 4), over the prompt cap of ${promptCap().toLocaleString('en-US')} (STUDIO_VERTEX_MAX_PROMPT_TOKENS): trim the brief or the lane's files, or raise the cap`;
+      emitEvent({ type: 'agent.start_refused', agent, to: 'human', task: task || undefined, status: 'warn', msg: `${agent} not started: ${proxyErr}`.slice(0, 600), meta: { role, tool, preflight: true, promptBytes, cap: promptCap() } });
+    }
+  }
+  if (viaProxy && !rehearsal && !proxyErr) {
     const pre = tool === 'vertex' ? toolPreflight(tool, env) : (vertexConfigured().ok ? null : vertexConfigured().why);
     if (!pre) { try { const px = await ensureProxy(); if (!px.ok) proxyErr = `the studio's Vertex proxy: ${px.why}`; else if (px.started) fs.writeSync(out, `[launcher] started the studio's Vertex proxy on 127.0.0.1:${px.port} (pid ${px.pid})\n`); } catch (e) { proxyErr = `the studio's Vertex proxy couldn't start: ${e.message}`; } } else proxyErr = pre;
   }
@@ -2030,7 +2050,7 @@ export function sayNow(agent, text) {
   return { ok: true };
 }
 
-const isAgentName = (by) => /^(prod|producer|director|builder|rnd|qa|reviewer|planner|art|liaison|agent|watch|supervisor|dev-hacker|codex|claude|gemini|agy|grok|cursor|aider|hermes)\b/i.test(String(by || '')) || by === process.env.STUDIO_LOCK_OWNER;
+const isAgentName = (by) => /^(prod|producer|director|builder|rnd|qa|reviewer|planner|art|agent|watch|supervisor|codex|claude|gemini|agy|grok|cursor|aider|hermes)\b/i.test(String(by || '')) || by === process.env.STUDIO_LOCK_OWNER;
 function readBudgetLimits() {
   try {
     return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'budget.json'), 'utf8'));
@@ -2107,7 +2127,7 @@ export function saveWorkOf(agent, task, mine, s = readJson(sessionFile(agent))) 
 const tasksOf = (agent, s) => [...new Set([...listLocks().filter((l) => l.owner === agent && l.key.startsWith('task:')).map((l) => l.key.slice(5)), ...(s?.task ? [s.task] : [])])];
 
 /** Pause an agent: its task goes back to the queue with a note (and its claims), then the process ends. */
-export function pauseAgent(agent, note = '', by = 'war-room-human') {
+export function pauseAgent(agent, note = '', by = 'owner') {
   const s = sessions().find((x) => x.agent === agent && x.running);
   if (!s) return { ok: false, message: `${agent} isn't running.` };
   const mine = listLocks().filter((l) => l.owner === agent);
@@ -2129,7 +2149,7 @@ export function pauseAgent(agent, note = '', by = 'war-room-human') {
  * still marked running whose process is gone, or whose number another program has now, is ended here (work handed
  * back, claims freed) without killing anything, instead of "isn't running".
  */
-export function stopAgentNamed(agent, by = 'war-room-human') {
+export function stopAgentNamed(agent, by = 'owner') {
   const s = sessions().find((x) => x.agent === agent && x.status === 'running');
   if (!s) return { ok: false, message: `${agent || '(no name)'} isn't running.` };
   const tasks = tasksOf(agent, s);
@@ -2140,7 +2160,7 @@ export function stopAgentNamed(agent, by = 'war-room-human') {
 }
 
 /** "Stop all": every running launcher session hands its task back with a note and ends. */
-export function stopAllAgents(by = 'war-room-human', reason = '') {
+export function stopAllAgents(by = 'owner', reason = '') {
   const stopped = [];
   const list = sessions().filter((x) => x.running);
   // PU-17: one OS query for every session's start time, not one per session.
@@ -2423,7 +2443,7 @@ export function startAgent(opts, { detach = false } = {}) {
   // The Director watches for drift and files corrections; the Producer decides staffing.
   if (opts.by && /^director\b/i.test(String(opts.by))) return { ok: false, message: 'The Director does not hire: file a correction task for the Producer instead.' };
   // A frozen clone (a test run) keeps agents out of the harness itself.
-  if (opts.lane && fs.existsSync(path.join(REPO_ROOT, '.studio', 'harness-frozen')) && /^(\.\/)?(harness|hub|qa|scripts)(\/|$)/.test(String(opts.lane).replace(/\\/g, '/'))) return { ok: false, message: `Not started: ${opts.lane} is harness code, and this clone's harness is frozen.` };
+  if (opts.lane && fs.existsSync(path.join(REPO_ROOT, '.studio', 'harness-frozen')) && /^(\.\/)?(harness|qa|scripts)(\/|$)/.test(String(opts.lane).replace(/\\/g, '/'))) return { ok: false, message: `Not started: ${opts.lane} is harness code, and this clone's harness is frozen.` };
   // The Producer hires on its own up to a limit (studio/budget.json producerMayHireUpTo, default 4);
   // past it, the hire becomes a question for the game dev (Needs you), started when they say yes.
   if (opts.by && isAgentName(opts.by) && !opts.approved) {
@@ -2497,7 +2517,7 @@ export async function fillAgents({ byDirector = false, autonomous = false } = {}
  * cycle): it starts nothing while auto-start is off (npm run mode -- autostart on --by <name>).
  */
 export function wake(role, { task = null, why = '', auto = false } = {}) {
-  const label = { rnd: 'R&D', producer: 'the Producer', director: 'the Director', art: 'the art department', builder: 'a builder', liaison: 'the Liaison' }[role] || role;
+  const label = { rnd: 'R&D', producer: 'the Producer', director: 'the Director', art: 'the art department', builder: 'a builder' }[role] || role;
   // 2.80: every wake comes from the supervisor's passes (the War Room, whose clicks woke agents too, is gone).
   const from = 'supervisor';
   const busy = sessions().find((s) => s.role === role && s.running);
@@ -2516,7 +2536,7 @@ export function wake(role, { task = null, why = '', auto = false } = {}) {
 }
 
 /** Which roles can start without a person (for preflight and the War Room). */
-export function launchableRoles(roles = ['producer', 'director', 'builder', 'qa-playtester', 'rnd', 'planner', 'art', 'reviewer', 'liaison']) {
+export function launchableRoles(roles = ['producer', 'director', 'builder', 'qa-playtester', 'rnd', 'planner', 'art', 'reviewer']) {
   return roles.filter((r) => process.env[`STUDIO_${roleKey(r)}_CMD`] || process.env[`STUDIO_${roleKey(r)}_TOOL`] || process.env.STUDIO_AGENT_TOOL || (r === 'director' && process.env.STUDIO_DIRECTOR_CMD));
 }
 

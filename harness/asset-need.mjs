@@ -26,6 +26,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, actor } from './event.mjs';
 import { readManifest, writeManifest, entryFor, MANIFEST, sha256 } from './assets.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const NEEDS_DIR = path.join(STUDIO_STATE_DIR, 'assets', 'needs');
 export const LIBRARY_CACHE_DIR = path.join(STUDIO_STATE_DIR, 'assets', 'library');
@@ -34,7 +35,6 @@ const MODEL_EXT = ['.glb', '.gltf', '.fbx', '.obj', '.blend'];
 const INDEX_EXT = [...MODEL_EXT, '.png', '.jpg', '.jpeg', '.webp', '.tga', '.wav', '.ogg', '.mp3', '.flac'];
 const STOP = new Set(['a', 'an', 'the', 'of', 'for', 'with', 'and', 'in', 'on', 'to', 'asset', 'model']);
 
-const readJson = (f, dflt = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return dflt; } };
 const writeJson = (f, j) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${JSON.stringify(j, null, 2)}\n`); };
 const now = () => new Date().toISOString();
 const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'asset';

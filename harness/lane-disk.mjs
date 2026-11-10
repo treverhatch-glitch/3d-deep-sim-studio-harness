@@ -24,11 +24,11 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { laneExcludeConfig, laneSparseState, studioMain } from './lane-sparse.mjs';
 import { globRe } from './merge-lane.mjs';
+import { readJson } from './fsafe.mjs';
 
 const GB = 1024 ** 3;
 const num = (v, d) => (v === undefined || v === null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const r2 = (x) => Math.round(x * 100) / 100;
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, windowsHide: true });
 export const human = (b) => (b >= GB ? `${r2(b / GB)} GB` : b >= 1024 ** 2 ? `${Math.round(b / 1024 ** 2)} MB` : `${Math.round(b / 1024)} KB`);
 export const DISK_FILE = (root) => path.join(root, '.studio', 'lanes', 'disk.json');

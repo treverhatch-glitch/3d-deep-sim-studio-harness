@@ -31,10 +31,10 @@ import path from 'node:path';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { recordAlive } from './proc-identity.mjs';
 import { readTrainStatus, trainStatusLine } from './train-status.mjs';
+import { readJson } from './fsafe.mjs';
 
 export const BRIEF_MAX_WORDS = 99;
 export const BRIEF_MARK = () => path.join(STUDIO_STATE_DIR, 'brief-status.json');
-const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const hhmm = (ms) => new Date(ms).toISOString().slice(11, 16);
 export const wordCount = (s) => String(s || '').split(/\s+/).filter(Boolean).length;
 
