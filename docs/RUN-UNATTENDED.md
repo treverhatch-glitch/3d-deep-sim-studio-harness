@@ -69,6 +69,14 @@ step twice that) is reported as `supervisor.step_timeout` and the pass goes on w
 the finished passes (`passes`). Before 2.77.1 the first pass could wait on itself (a pass that imports supervisor.mjs back,
 such as the Communicator's needs-a-person list) and Node exited with code 13 ("unsettled top-level await").
 
+2.80 (b1): the timed passes the War Room hub used to run are steps of the supervisor's pass (harness/studio-passes.mjs):
+every `STUDIO_WATCH_INTERVAL` seconds (300; 0 turns them all off) the watch pass, the retro, the learn pass, the run
+report and the Director's daily ping, and every `STUDIO_GAMEDEV_INTERVAL` seconds (180; 0 turns it off) the game-dev
+watchdog pass. Each group first runs one full interval after the supervisor started (a short run never runs them), never in a dry run;
+one bounded step per group, and a pass that throws is logged without stopping the others. `.studio/supervisor.json`
+keeps each group's last run (`timed`). Wakes these passes cause are logged from `supervisor` (a person's click in
+the War Room still from `war-room`).
+
 Every minute it keeps the War Room hub up (and logs how long it was down; 2.74.0: harness/hub-keeper.mjs, below), then starts a fresh agent
 for the next waiting task of each role, one task per session, within the pace's caps. When a session
 ends, the next minute starts the next. It starts nothing while "Stop all agents" is on, outside the

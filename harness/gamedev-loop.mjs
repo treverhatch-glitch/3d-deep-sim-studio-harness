@@ -17,7 +17,7 @@
  *           wakes a cheap reviewer session to judge the captures against the charter
  * Away mode (npm run away -- on) means more autonomy, not just review logging: the refill keeps 6 open
  * (STUDIO_AWAY_REFILL_MIN), builders start whatever the pace, and the review runs every 30 min.
- * Without the hub: node harness/watchdog.mjs loop 180 (npm run gamedev) runs the pass on its own.
+ * Without the supervisor (2.80: it runs the pass every STUDIO_GAMEDEV_INTERVAL s): node harness/watchdog.mjs loop 180 (npm run gamedev) runs the pass on its own.
  * Steps are skipped one by one with STUDIO_GAMEDEV_SKIP=stall,refill,milestones,launch,landing,tiers,review,cycle.
  * State: .studio/gamedev.json. Every action is an event from "watchdog".
  */

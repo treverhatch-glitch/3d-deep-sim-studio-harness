@@ -133,8 +133,8 @@ Some test runners exit 0 when no test ran (GUT prints "Nothing was run"; vitest 
 
 ## The attending game dev is optional (2.30o)
 
-The harness must run without anyone watching. While a studio has an active game, the hub runs the
-game-dev loop every few minutes (`STUDIO_GAMEDEV_INTERVAL`, 180 s; without the hub: `npm run gamedev`;
+The harness must run without anyone watching. While a studio has an active game, the supervisor runs the
+game-dev loop every few minutes (`STUDIO_GAMEDEV_INTERVAL`, 180 s; without the supervisor: `npm run gamedev`;
 `STUDIO_WATCHDOG=off` opts out): stalled sessions end, a low queue is refilled from unmet charter exit
 criteria, met milestones close, idle builder slots fill, landings are checked (layout, visual), a tool at
 its quota or spend guard hands over to the next in the budget order, and the Director/Producer

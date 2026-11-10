@@ -2488,18 +2488,21 @@ export async function fillAgents({ byDirector = false, autonomous = false } = {}
  */
 export function wake(role, { task = null, why = '', auto = false } = {}) {
   const label = { rnd: 'R&D', producer: 'the Producer', director: 'the Director', art: 'the art department', builder: 'a builder', liaison: 'the Liaison' }[role] || role;
+  // 2.80 (b1): who woke it: a wake nobody asked for (auto) comes from the supervisor's timed passes now the hub's timers
+  // are gone; a person's click in the War Room keeps its label.
+  const from = auto ? 'supervisor' : 'war-room';
   const busy = sessions().find((s) => s.role === role && s.running);
   if (busy) return { started: false, next: `${label} (${busy.agent}) is running and picks ${task || 'it'} up from the queue${busy.task ? ` after ${busy.task}` : ''}.` };
   if (auto && !effectiveMode().autostart) return { started: false, autostartOff: true, next: `${task ? `Queued as ${task} for ${label}. ` : ''}${label} wasn't started: ${AUTOSTART_OFF}.` };
   if (!launchableRoles([role]).length) {
     const msg = `No tool is set to start ${label}: set STUDIO_AGENT_TOOL (or STUDIO_${roleKey(role)}_TOOL) in .env, or start it in Ops`;
     const lastAlert = readRecentEvents(2000).filter((e) => e.type === 'agent.no_tool' && e.msg === msg).pop();
-    if (!lastAlert || Date.now() - Date.parse(lastAlert.ts) > 3600000) emitEvent({ type: 'agent.no_tool', agent: 'war-room', to: 'human', status: 'warn', msg });
+    if (!lastAlert || Date.now() - Date.parse(lastAlert.ts) > 3600000) emitEvent({ type: 'agent.no_tool', agent: from, to: 'human', status: 'warn', msg });
     return { started: false, next: `${task ? `Queued as ${task} for ${label}. ` : `Saved for ${label}. `}No tool is set to start ${label} on its own (STUDIO_AGENT_TOOL or STUDIO_${roleKey(role)}_TOOL in .env), so it waits until someone starts that agent (Start agent in Ops, or npm run agent).` };
   }
   const r = startAgent({ role, agent: nextAgentName(role), task }, { detach: true });
   if (!r.ok) return { started: false, next: `${task ? `Queued as ${task}. ` : ''}${label} didn't start: ${r.message.replace(/^Not started: /, '')} It starts when a slot frees.` };
-  emitEvent({ type: 'agent.wake', agent: 'war-room', to: role, task, msg: `Started ${r.agent} (${label})${why ? ` for ${why}` : ''}` });
+  emitEvent({ type: 'agent.wake', agent: from, to: role, task, msg: `Started ${r.agent} (${label})${why ? ` for ${why}` : ''}` });
   return { started: true, agent: r.agent, next: `${label} is starting now as ${r.agent} (${r.tool}${r.model !== 'unknown' ? `, ${r.model}` : ''})${task ? ` on ${task}` : ''}. Watch it in Ops.` };
 }
 

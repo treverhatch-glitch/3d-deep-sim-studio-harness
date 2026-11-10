@@ -153,7 +153,7 @@ export function pingDirector({ reason = 'Routine check', from = process.env.STUD
   return { ok: true, task: task.id, brief, start };
 }
 
-/** Once a day, if there is a Bible. Called by the HUB with the watcher. */
+/** Once a day, if there is a Bible. Called by the supervisor with the watcher (harness/studio-passes.mjs). */
 /** The Director's routine check: daily by default, more often in faster modes and with MAX SPEED. */
 export function dailyPingIfDue() {
   if (!readBible()) return null;

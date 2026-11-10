@@ -4,8 +4,8 @@
  *
  *   npm run director -- flow [--json] [--no-fill]
  *
- * The Director owns the flow: every pass (the supervisor's loop and the War Room's hub, at most once a
- * minute) it looks at the whole board and the running sessions and
+ * The Director owns the flow: every pass (the supervisor's loop, at most once a minute;
+ * npm run director -- flow by hand) it looks at the whole board and the running sessions and
  *   1. hands back claims that ran out (in progress, nobody holds it, no running session on it); a task whose owner
  *      is still at work (harness/busy.mjs) is kept and its claim made again in the owner's name (2.58.5, H-5),
  *   2. counts idle builder slots against ready work across the whole backlog (every role, not one lane),
