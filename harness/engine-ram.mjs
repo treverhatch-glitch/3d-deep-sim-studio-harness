@@ -37,10 +37,24 @@ const tsOf = (v) => (typeof v === 'number' ? v : Date.parse(v));
 export const ramFile = (root) => path.join(root, '.studio', 'engine-ram.json');
 export const holdStateFile = (root) => path.join(root, '.studio', 'line', 'engine-hold.json');
 export const ENGINE_HOLD_TAG = 'engine-land';
+/**
+ * 2.81: engine first by default. Engine work is the longest and costliest queue (the crew's week: 16% of 67 land runs
+ * passed, a queued port waited up to 9.4 h), so a studio with exactly one engine in studio/game.json gives it the push
+ * unless someone said otherwise: `npm run mode -- engine-push off` keeps it off, a timed push that ended falls back here.
+ */
+export function defaultPushEngine(root) {
+  const names = Object.keys(readJson(path.join(root, 'studio', 'game.json'), null)?.engines || {}).filter((n) => /^[a-z][a-z0-9-]{1,30}$/.test(n));
+  return names.length === 1 ? names[0] : null;
+}
+/** The push record's verdict: an engine name (pushed), null (explicitly off), or undefined (nobody decided: the default applies). */
+export function pushRecordEngine(p, now = Date.now()) {
+  if (p?.on && p.engine && (!p.until || Date.parse(p.until) > now)) return String(p.engine);
+  return p && p.on === false ? null : undefined;
+}
 /** studio/mode.json "enginePush" (harness/mode.mjs): the engine being pushed now, or null. Read here so heavy.mjs needs no mode.mjs. */
 export function pushEngine(root, now = Date.now()) {
-  const p = readJson(path.join(root, 'studio', 'mode.json'), null)?.enginePush;
-  return p?.on && p.engine && (!p.until || Date.parse(p.until) > now) ? String(p.engine) : null;
+  const e = pushRecordEngine(readJson(path.join(root, 'studio', 'mode.json'), null)?.enginePush, now);
+  return e === undefined ? defaultPushEngine(root) : e;
 }
 /**
  * 2.79.1 (4): an engine push gives the engine line at least 2 slots (a land and a porter's quick check) when the machine

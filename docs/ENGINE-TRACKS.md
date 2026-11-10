@@ -178,6 +178,12 @@ or the hold's time plus 5 min while the Line is making room. The RAM a land need
 samples); then the highest of the last 5 green peaks plus `STUDIO_ENGINE_RAM_MARGIN_GB` (1.5), never under
 `STUDIO_ENGINE_RAM_MIN_GB` (4). The owner's `STUDIO_UNITY_MIN_FREE_GB` and the lane's tuned `ram-floor` still win.
 
+**Engine first by default (2.81).** A studio with exactly one engine in `studio/game.json` gives that engine the push
+below without anyone switching it on: engine work is the longest and costliest queue (in the crew's first week 16% of 67
+land runs passed and a queued port waited up to 9.4 h for its train). `npm run mode -- engine-push off --by <who>` turns
+it off and it stays off; an explicit push (another engine, or with an end time) wins; a timed push that ended falls back
+to this default. A studio with no engine or several has no default.
+
 **Engine push (2.79.1).** `npm run mode -- engine-push [--engine <name>] [--until <HH:MM UTC>|off] --by <who>` (and `engine-push off`)
 puts one engine first: its ready porters head the plan and may use every builder slot, the game's tasks get what is left;
 the engine hold starts as soon as a land is queued and has no time limit; the engine line gets 2 slots
