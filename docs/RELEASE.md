@@ -30,6 +30,18 @@ block starts with `if (inShard()) {` (or `if (inShard('<label>', '<group>')) {` 
 A one-unit shard (`--list-shards <units>` gives its number) runs one block alone. `--except` runs are partial: they
 never write a verify record. Locally, `npm run release` still runs the whole self-test in one process.
 
+**Running part of the self-test.** During work run `npm run selftest:changed` (minutes): `--changed [ref]` runs the units
+that the files changed since `ref` touch (default: the merge base with origin/main, else HEAD~1; uncommitted files count):
+a unit whose block names a changed file or a direct importer of it, and every unit when a shared file changed (package.json,
+studio/gates.json, qa/fixtures/); `--only a,b` runs named units (a label, `L1234`, a group, or a name the block mentions),
+and a selection that matches nothing fails and says it is not the whole self-test. Before a merge the full self-test runs on
+CI in shards (Linux and Windows), so a missed selection never lands; `npm run selftest:fast` (`--jobs 4`) runs the shards side
+by side as child processes on a big machine, and `--timing [file]` prints the 20 slowest units and writes every unit's ms,
+subprocesses and checks to `.studio/selftest-timing.json` after each unit (a killed run keeps it). `--balance [file]` with
+`--shard` or `--list-shards` splits the units by those recorded times (greedy, longest first; a unit with no time counts as
+the median; a group stays together) instead of by count; the file is `qa/selftest-timing.json` when committed, else
+`.studio/selftest-timing.json`.
+
 **Batching (owner's rule, 2026-11-01):** approved upgrades can and should ship together in one release and one PR,
 each with its own commit and its own selftest file. Still required: a backup branch of `main` first, the full
 selftest, and green online checks before the merge.

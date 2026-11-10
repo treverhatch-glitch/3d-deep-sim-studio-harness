@@ -140,11 +140,14 @@ const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readF
 const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
   // 2.73.0 (g): the copies' verify keys (harness/verify-key.mjs) live in the self-test's temp folder, never in the user's home.
   STUDIO_VERIFY_KEY_DIR: path.join(tmpRoot, 'verify-keys') };
-const run = (dir, cmd, env = {}) => spawnSync(cmd, { windowsHide: true, cwd: dir, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
+// Per-unit counters for --timing (harness/selftest-timing.mjs): subprocesses started and checks reported.
+const count = (what) => { if (unitNow) unitNow.u[what] = (unitNow.u[what] || 0) + 1; };
+const run = (dir, cmd, env = {}) => { count('spawns'); return spawnSync(cmd, { windowsHide: true, cwd: dir, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } }); };
 const plantInvariant = (tick) => (s) =>
   s.replace('  if (state.won && state.lost)', `  if (state.tick === ${tick}) findings.push({ id: 'PLANTED', severity: 'P0', summary: 'planted at tick ${tick}' });\n  if (state.won && state.lost)`);
 const runAsync = (dir, cmd, env = {}) =>
   new Promise((resolve) => {
+    count('spawns');
     const c = spawn(cmd, { windowsHide: true, cwd: dir, shell: true, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
     let stdout = '';
     let stderr = '';
@@ -154,6 +157,7 @@ const runAsync = (dir, cmd, env = {}) =>
   });
 const report = (label, ok, detail = '') => {
   if (strayCheck(label)) return;
+  count('asserts');
   console.log(`[selftest] ${ok ? 'PASS' : 'FAIL'} ${label}${ok || !detail ? '' : `\n${detail.slice(-600)}`}`);
   if (!ok) failed += 1;
 };
@@ -164,7 +168,8 @@ const report = (label, ok, detail = '') => {
 // changes, so the shards' union is the whole self-test. `--list-shards N` runs no check: it prints the units and
 // their shard as JSON, plus any check that ran outside a unit ("strays": a new block without the guard), and exits 1
 // when there is one. A new block starts with `if (inShard()) {` (or `if (inShard('<label>', '<group>')) {`).
-// Each shard runs on its own CI runner; shards are balanced by count, not time (each shard prints its slowest units).
+// Each shard runs on its own CI runner; shards are balanced by count unless `--balance [file]` gives each unit's
+// recorded time (harness/selftest-timing.mjs); each shard prints its slowest units.
 const SELFTEST_ARGS = process.argv.slice(2);
 const argValue = (name) => {
   const i = SELFTEST_ARGS.findIndex((a) => a === name || a.startsWith(`${name}=`));
@@ -173,7 +178,81 @@ const argValue = (name) => {
 };
 let SHARD = null;
 let LIST_SHARDS = null;
+// `--timing [file]`: per-unit ms, spawns and asserts, written when the run ends (harness/selftest-timing.mjs).
+const TIMING_ARG = argValue('--timing');
+const TIMING_FILE = TIMING_ARG === null ? null : path.resolve(root, TIMING_ARG && !TIMING_ARG.startsWith('--') ? TIMING_ARG : path.join('.studio', 'selftest-timing.json'));
+// Phase B2: `--only a,b` and `--changed [ref]` run a selection of units (harness/selftest-select.mjs); `--jobs N` runs
+// the N shards of this run as N child processes (an 8-core box runs the self-test in a quarter of the time). The
+// full, one-process run stays the default and is what `npm run verify` and CI's shards do.
+const ONLY_ARG = argValue('--only');
+const CHANGED_ARG = argValue('--changed');
+const JOBS_ARG = argValue('--jobs');
+
 parseShardArgs();
+// `--balance [file]` with --shard or --list-shards: shards by recorded unit time (balanceShards in
+// harness/selftest-timing.mjs) instead of by count; the file is `.studio/selftest-timing.json` (what `--timing`
+// writes) or a committed `qa/selftest-timing.json`; units it has no time for count as the median.
+const BALANCE_ARG = argValue('--balance');
+let BALANCED = null;
+if (BALANCE_ARG !== null && (SHARD || LIST_SHARDS)) {
+  const given = BALANCE_ARG && !BALANCE_ARG.startsWith('--') ? path.resolve(root, BALANCE_ARG) : [path.join(root, 'qa', 'selftest-timing.json'), path.join(root, '.studio', 'selftest-timing.json')].find((f) => fs.existsSync(f));
+  let rows = [];
+  try { rows = JSON.parse(fs.readFileSync(given, 'utf8')).units || []; } catch { console.error(`[selftest] --balance: no readable timing file (${given || 'none found'}); shards are by count`); }
+  if (rows.length) {
+    const n = LIST_SHARDS || SHARD.n;
+    const listed = JSON.parse(spawnSync(process.execPath, [fileURLToPath(import.meta.url), `--list-shards=${n}`], { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout || '{"units":[]}');
+    BALANCED = (await import('../harness/selftest-timing.mjs')).balanceShards(listed.units, rows, n);
+  }
+}
+let SELECT = null;
+if (ONLY_ARG !== null || CHANGED_ARG !== null) {
+  const { buildSelection } = await import('../harness/selftest-select.mjs');
+  SELECT = buildSelection(root, {
+    only: ONLY_ARG, changed: CHANGED_ARG, source: fs.readFileSync(fileURLToPath(import.meta.url), 'utf8'),
+    extraText: (u) => (u.label.startsWith('sabotage:') ? `${gates.find((g) => g.id === u.label.slice(9))?.command || ''} ${String(SABOTAGE[u.label.slice(9)] || '')}` : ''),
+  });
+  if (SELECT.kind === 'changed' && JOBS_ARG === null) console.log(`[selftest] ${SELECT.describe}${SELECT.all ? '' : `: ${SELECT.files.slice(0, 12).join(', ')}${SELECT.files.length > 12 ? ', …' : ''}`}`);
+}
+if (JOBS_ARG !== null && !LIST_SHARDS) {
+  const jobs = JOBS_ARG === '' || JOBS_ARG === 'auto' || JOBS_ARG.startsWith('--') ? Math.max(1, Math.min(4, Math.floor(os.cpus().length / 2))) : Number(JOBS_ARG);
+  if (!(Number.isInteger(jobs) && jobs >= 1 && jobs <= 16) || SHARD) {
+    console.error(`[selftest] --jobs N with 1 <= N <= 16 (or auto), not with --shard; got "${JOBS_ARG}"${SHARD ? ' and --shard' : ''}`);
+    process.exit(2);
+  }
+  process.exit(await runJobs(jobs));
+}
+/** `--jobs N`: this file N times with `--shard i/N`, the output line-prefixed, the timing merged. Returns the exit code. */
+async function runJobs(jobs) {
+  const pass = [];
+  if (ONLY_ARG !== null) pass.push(`--only=${ONLY_ARG}`);
+  if (CHANGED_ARG !== null) pass.push(`--changed=${CHANGED_ARG}`);
+  if (BALANCE_ARG !== null) pass.push(`--balance=${BALANCE_ARG}`);
+  const timingFiles = [];
+  const t0 = Date.now();
+  const children = Array.from({ length: jobs }, (_, k) => new Promise((resolve) => {
+    const i = k + 1;
+    const args = [fileURLToPath(import.meta.url), `--shard=${i}/${jobs}`, ...pass];
+    if (TIMING_FILE) { timingFiles.push(path.join(tmpRoot, `timing-${i}.json`)); args.push(`--timing=${timingFiles[k]}`); }
+    const c = spawn(process.execPath, args, { windowsHide: true, cwd: root, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const tag = (stream, out) => { let buf = ''; stream.on('data', (d) => { buf += d; let nl; while ((nl = buf.indexOf('\n')) >= 0) { out.write(`[${i}/${jobs}] ${buf.slice(0, nl)}\n`); buf = buf.slice(nl + 1); } }); stream.on('end', () => { if (buf) out.write(`[${i}/${jobs}] ${buf}\n`); }); };
+    tag(c.stdout, process.stdout);
+    tag(c.stderr, process.stderr);
+    c.on('close', (status) => resolve({ i, status }));
+  }));
+  const results = await Promise.all(children);
+  if (TIMING_FILE) {
+    const { timingReport, timingLines, writeTimingReport } = await import('../harness/selftest-timing.mjs');
+    const units = timingFiles.flatMap((f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')).units || []; } catch { return []; } });
+    const rep = { ...timingReport(units, { shard: null, complete: true }), jobs, wallMs: Date.now() - t0 };
+    const wrote = writeTimingReport(TIMING_FILE, rep);
+    for (const l of timingLines(rep, 20)) console.log(l);
+    console.log(`[selftest] timing ${wrote ? `written to ${path.relative(root, wrote)}` : `could not be written to ${TIMING_FILE}`} (${jobs} jobs, ${Math.round((Date.now() - t0) / 1000)} s wall)`);
+  }
+  try { fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+  const red = results.filter((r) => r.status !== 0).map((r) => `${r.i}/${jobs}`);
+  console.log(red.length ? `[selftest] ${red.length} of ${jobs} job(s) failed: ${red.join(', ')} (${Math.round((Date.now() - t0) / 1000)} s wall)` : `[selftest] ok — ${jobs} jobs, every shard passed (${Math.round((Date.now() - t0) / 1000)} s wall)`);
+  return red.length ? 1 : 0;
+}
 function parseShardArgs() {
   const sh = argValue('--shard');
   const ls = argValue('--list-shards');
@@ -193,9 +272,21 @@ const UNITS = [];
 const SHARD_OF = new Map();
 const STRAYS = [];
 let unitNow = null;
+let SKIPPED = 0; // units --only/--changed left out of this run (in this shard)
+let timingMod = null;
 function endUnit() {
-  if (unitNow) unitNow.u.ms = Date.now() - unitNow.t0;
+  if (unitNow) {
+    unitNow.u.ms = Date.now() - unitNow.t0;
+    flushTiming(false); // after every unit, so a killed run still leaves the units it finished
+  }
   unitNow = null;
+}
+/** Write the timing report (the units that ran so far); `complete` once the run ended. Never throws. */
+async function flushTiming(complete) {
+  if (!TIMING_FILE || LIST_SHARDS) return null;
+  timingMod ||= await import('../harness/selftest-timing.mjs');
+  const rep = timingMod.timingReport(UNITS, { shard: SHARD, complete });
+  return { rep, wrote: timingMod.writeTimingReport(TIMING_FILE, rep) };
 }
 /** Does this unit run here? Called once per unit, in file order, by every run (so the numbering never depends on the shard). */
 function inShard(label = null, group = null) {
@@ -203,11 +294,12 @@ function inShard(label = null, group = null) {
   const line = Number((String(new Error().stack).split('\n')[2] || '').match(/:(\d+):\d+\)?\s*$/)?.[1]) || null;
   const n = LIST_SHARDS || SHARD?.n || 1;
   const key = group ? `group:${group}` : `unit:${UNITS.length}`;
-  if (!SHARD_OF.has(key)) SHARD_OF.set(key, (SHARD_OF.size % n) + 1);
+  if (!SHARD_OF.has(key)) SHARD_OF.set(key, BALANCED?.get(label || `L${line}`) ?? (SHARD_OF.size % n) + 1);
   const u = { label: label || `L${line}`, ...(group ? { group } : {}), shard: SHARD_OF.get(key), line };
   UNITS.push(u);
   if (LIST_SHARDS) return false;
-  const runs = !SHARD || u.shard === SHARD.i;
+  let runs = !SHARD || u.shard === SHARD.i;
+  if (runs && SELECT && !SELECT.runs(u)) { runs = false; u.skipped = true; SKIPPED += 1; }
   if (runs) unitNow = { u, t0: Date.now() };
   return runs;
 }
@@ -4908,7 +5000,20 @@ if (inShard('new-game')) {
   }
 }
 
+// 2.81 (c): the runner's speed options (--only, --changed, --jobs, --timing) and --balance (qa/selftest-281c.mjs).
+if (inShard('selftest-281c')) {
+  const dir = copyRepo();
+  const { selftest281C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281c.mjs')).href);
+  await selftest281C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
+if (TIMING_FILE && !LIST_SHARDS) {
+  const t = await flushTiming(true);
+  for (const l of timingMod.timingLines(t.rep, 20)) console.log(l);
+  console.log(`[selftest] timing ${t.wrote ? `written to ${path.relative(root, t.wrote)}` : `could not be written to ${TIMING_FILE}`}`);
+}
 try {
   fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 });
 } catch (err) {
@@ -4929,8 +5034,16 @@ if (SHARD) {
     failed += 1;
   }
 }
+if (SELECT) {
+  const ran = UNITS.filter((u) => u.ms !== undefined).length;
+  console.log(`[selftest] ${SELECT.describe}: ran ${ran} unit(s), left out ${SKIPPED}${SHARD ? ` (shard ${SHARD.i}/${SHARD.n})` : ''}; a selection is not a full self-test`);
+  if (!ran && !SHARD) {
+    console.error(`[selftest] ${SELECT.describe} matched no unit: nothing was checked, which is not a pass (--list-shards 1 prints the labels)`);
+    failed += 1;
+  }
+}
 if (failed) {
   console.error(`[selftest] ${failed} check(s) failed`);
   process.exit(1);
 }
-console.log(SHARD ? `[selftest] ok — shard ${SHARD.i}/${SHARD.n} passed (the other shards run the rest of the self-test)` : '[selftest] ok — every required gate was shown to fail when broken');
+console.log(SELECT ? `[selftest] ok — the selected units passed (${SELECT.kind === 'only' ? '--only' : '--changed'}; not the whole self-test)` : SHARD ? `[selftest] ok — shard ${SHARD.i}/${SHARD.n} passed (the other shards run the rest of the self-test)` : '[selftest] ok — every required gate was shown to fail when broken');
