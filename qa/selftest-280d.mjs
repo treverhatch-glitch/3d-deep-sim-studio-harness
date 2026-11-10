@@ -36,4 +36,19 @@ console.log('R ' + JSON.stringify({ ok: r.ok, message: r.message }));`;
     });
     return [rows.every((x) => x.ok === false && /--task/.test(x.msg || '') && /no task/.test(x.msg || '')), JSON.stringify(rows)];
   });
+
+  await guard('2.80 (d) #2: `ask show <id>` and `ask help` / --help / -h are read-only, and a lone lowercase word prints the usage and exits non-zero instead of filing an ask (fails on 2.79.2: they each filed an ask titled "show"/"help")', async () => {
+    const asks = path.join(dir, 'studio', 'asks');
+    const count = () => (fs.existsSync(asks) ? fs.readdirSync(asks).length : 0);
+    const before = count();
+    const r = (...a) => node(['harness/ask.mjs', ...a]);
+    const filed = r('Is the sky blue?', '--by', 'qa-t');
+    const id = (filed.out.match(/A-\d+/) || [''])[0];
+    const mid = count();
+    const show = r('show', id), help = r('help'), h1 = r('--help'), h2 = r('-h'), junk = r('foo'), none = r('show', 'A-9999');
+    const after = count();
+    try { if (id) fs.rmSync(path.join(asks, `${id}.json`), { force: true }); } catch {}
+    return [Boolean(id) && mid === before + 1 && after === mid && show.code === 0 && /Is the sky blue/.test(show.out) && [help, h1, h2].every((x) => x.code === 0 && /Usage:/.test(x.out))
+      && junk.code !== 0 && /Usage:/.test(junk.out) && none.code !== 0, JSON.stringify({ id, before, mid, after, show: show.code, help: help.code, junk: junk.code, none: none.code, junkOut: junk.out.slice(0, 120) })];
+  });
 }
