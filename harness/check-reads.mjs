@@ -10,8 +10,12 @@
 export const DOCS_SKIP_DIRS = ['node_modules', '.git', '.studio', '.lanes', 'dist', 'harness-notes', 'retros', 'daily', 'reviews', 'research', 'meetings', 'handoffs'];
 /** check-docs: free text people and agents write (test #2: a Producer note ending "npm run verify:" turned the docs gate red). */
 export const DOCS_SKIP_FILES = ['CHANGELOG.md', 'docs/ROADMAP.md', 'studio/producer/LOG.md', 'studio/producer/INBOX.md', 'studio/PITFALLS.md', 'studio/PITFALLS-ARCHIVE.md', 'studio/HARNESS-TASKS.md'];
-/** 2.78.2 (c): agent-written logs, reviews, handoffs and notes are free text too: check-docs never reads them. */
-export const DOCS_SKIP_PREFIXES = ['studio/producer/', 'studio/reviews/', 'studio/handoffs/', 'studio/notes/'];
+/**
+ * 2.78.2 (c): agent-written logs, reviews, handoffs and notes are free text too: check-docs never reads them.
+ * 2.80.0: nor the dated records (studio/logs/, each release's notes): they name the commands of their day, and a cut
+ * would otherwise mean rewriting history.
+ */
+export const DOCS_SKIP_PREFIXES = ['studio/producer/', 'studio/reviews/', 'studio/handoffs/', 'studio/notes/', 'studio/logs/', 'docs/RELEASE-'];
 /** verify-session: files that must exist (a delete turns it red). */
 export const SESSION_REQUIRED = ['AGENTS.md', 'studio/CURRENT_TASK.md', 'studio/NEXT.md', 'studio/memory/failures.md', 'docs/READ-FIRST.md', 'studio/MASTER.md', 'studio/PLAN.md'];
 /** check-reviewer: the review files it judges (each reviewer's model family against the implementer's). */

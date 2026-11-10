@@ -23,7 +23,7 @@ hashed differently in Node and Python. The example game had neither, so no golde
 | Tier | Function | Size | Use it for | Don't use it for |
 | --- | --- | --- | --- | --- |
 | Display | `hash64()` (FNV-1a 64) | 16 hex | The HUD, playtest reports, a quick "did the state change?" inside a cartridge or a browser | Anything another party has to trust |
-| Verification | `sha256()` (SHA-256) | 64 hex | Golden files, regressions, the slice, soak, balance sweeps, playtest determinism, exported trajectories, anything shared, sold or rewarded | Code inside a cartridge (it needs `node:crypto`) |
+| Verification | `sha256()` (SHA-256) | 64 hex | Golden files, regressions, the slice, soak, balance sweeps, playtest determinism, anything shared, sold or rewarded | Code inside a cartridge (it needs `node:crypto`) |
 
 Every check that asserts determinism compares SHA-256. Scenario goldens also pin `actionsSha256`, the
 SHA-256 of every action the scenario's policy took, so a run that reaches the same end state a

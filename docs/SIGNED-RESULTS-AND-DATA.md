@@ -34,7 +34,7 @@ proves this code produces what was signed, not just that someone signed it, even
 your key's fingerprint (`npm run sign -- fingerprint`) somewhere you control, so others can tell your
 signatures from anyone else's.
 
-## Training and evaluation data (`npm run trajectories`)
+## Training and evaluation data (`npm run data`)
 
 Every finished task leaves a full record: the brief, the commits, whether the checks passed, the
 review, and any bug later traced back to it. That is the kind of data used to evaluate models and to
@@ -42,24 +42,13 @@ train them with automatic pass/fail grading.
 
 ```bash
 npm run data                                # the sharing question and the current answer
-npm run trajectories -- preview
-npm run trajectories -- export --licence "<terms>" [--consent "<who agrees>"] [--with-briefs] [--with-diffs]
 ```
 
 - **Allowed unless declined.** Intake and the Game plan view ask the game dev whether the studio's
   records may be shared with AI research partners. The box starts ticked; unticking it, or
-  `npm run data -- decline --by <name>`, stops every export. Each change is kept with who and when
-  (`studio/data-consent.json`), and every manifest records the answer it relied on: `default` (left
-  ticked), `confirmed` (a deliberate yes) or `declined`. Terms (`--licence`) are always needed.
-- **Scrubbed.** Every text field is cleaned of key-shaped strings with the secret scan's patterns.
-- **Labelled.** `clean` (done first time, nothing came back), `needed-fixes` (refused, forced or
-  reviewed with changes), `caused-bug` (reopened, or a bug traced back to it).
-- **Local.** Files go to `.studio/exports/` (never committed), with a manifest holding the SHA-256.
-- **Diffs, if you choose.** `--with-diffs` adds each commit's patch (studio records and lock files
-  left out, 20,000 characters at most, scrubbed). Diffs are the most useful part for training and
-  the most sensitive: they are your game's code.
-- **Providers named.** Each record lists the model families whose work is in it, and the manifest
-  counts them and repeats the warning below.
+  `npm run data -- decline --by <name>`, stops any sharing of the records. Each change is kept with who and when
+  (`studio/data-consent.json`), and the answer is `default` (left ticked), `confirmed` (a deliberate yes) or
+  `declined`. The trajectory export that used it was cut in 2.80.0.
 
 ### Collect now, decide later
 

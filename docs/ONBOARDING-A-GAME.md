@@ -86,7 +86,7 @@ so `npm run onboard -- --check` and `npm run upgrade -- --preflight` FAIL such a
 
 **Real key presses on the real game (2.45.0).** An adopted web game isn't a cartridge, so `npm run play:browser`
 can't drive it. `npm run play:controls` can: it serves the game, clicks from the title screen to play, presses
-every control in the Game Bible and checks what each must change. Adopting a Vite (or Next, or `npm run dev`)
+every control in the Game Bible and checks what each must change. Adopting a Vite (or Next, or any game with a `dev` script)
 game writes a starter `game/<slug>/studio.browser.json`; fill it in once:
 
 ```json
