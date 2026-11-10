@@ -84,4 +84,19 @@ console.log('R ' + JSON.stringify({ ok: g.ok, why: g.why, name: g.name, browser:
     const dry = src.indexOf('if (dryRun) {\n        res.message = `Dry run:');
     return [/^\s*if \(!dryRun\) writeTrainStatus\(/.test(line) && dry > 0 && src.indexOf(line) < dry, line.slice(0, 200)];
   });
+
+  await guard('2.80 (d) #7: the godot-unit gate of a studio with no Godot project prints "N/A: no Godot project in this studio" and passes even when the config is enabled and no Godot binary exists; a project that exists is still judged by the config (fails on 2.79.2: an enabled config with no project said "project path ... not found" and one that got further failed on the missing binary)', async () => {
+    const gu = await import(u('harness/godot-unit.mjs'));
+    const none = gu.shouldRun({ enabled: true, project: 'game/t280d-none', godot: '4.7.2' }, null);
+    const bare = gu.shouldRun({ enabled: true }, null);
+    const r = node(['harness/godot-unit.mjs', '--changed'], { env: { GODOT_BIN: '' } });
+    const hasProject = fs.existsSync(path.join(dir, 'game', 'godot', 'project.godot'));
+    const pd = path.join(dir, 'game', 't280d-gd');
+    fs.mkdirSync(pd, { recursive: true });
+    fs.writeFileSync(path.join(pd, 'project.godot'), '');
+    let disabled;
+    try { disabled = gu.shouldRun({ enabled: false, project: 'game/t280d-gd' }, null); } finally { fs.rmSync(pd, { recursive: true, force: true }); try { fs.rmdirSync(path.join(dir, 'game')); } catch {} }
+    return [none.run === false && /^N\/A: no Godot project in this studio$/.test(none.reason) && bare.run === false && /^N\/A/.test(bare.reason) && /disabled/.test(disabled.reason)
+      && (hasProject || (r.code === 0 && /\] N\/A: no Godot project in this studio/.test(r.out))), JSON.stringify({ none, bare, disabled, code: r.code, out: r.out.slice(0, 200) })];
+  });
 }
