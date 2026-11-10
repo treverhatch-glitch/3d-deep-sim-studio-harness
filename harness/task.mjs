@@ -1813,6 +1813,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   // 2.71.0 (z): --force and a refused command re-run again and again are detected workarounds (harness/workaround.mjs).
   try { watchCommand('task', process.argv.slice(2), { agent: (typeof flags.agent === 'string' && flags.agent) || (typeof flags.by === 'string' && flags.by) || whoAmI({}, REPO_ROOT, { ...process.env, STUDIO_LOCK_OWNER: '' }) || process.env.STUDIO_LOCK_OWNER || null }); } catch { /* evidence only */ }
   const [cmd = 'next', arg1] = flags._;
+  // 2.81 (b4): end sessions whose process is gone, at most once per STUDIO_GONE_CHECK_S (harness/gone-check.mjs). A child
+  // process: agent.mjs imports this file, so importing it from here (as the main module) would wait on itself.
+  if (cmd === 'next' || cmd === 'start') { try { const gc = await import('./gone-check.mjs'); if (gc.goneDue()) spawnSync(process.execPath, [fileURLToPath(new URL('./gone-check.mjs', import.meta.url))], { windowsHide: true, stdio: 'ignore', timeout: 60000 }); } catch { /* a check, never a crash */ } }
   const q = parseNextQueue();
 
   if (cmd === 'next') {

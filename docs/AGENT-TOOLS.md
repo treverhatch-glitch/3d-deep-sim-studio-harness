@@ -389,6 +389,10 @@ npm run agent -- start --role builder --tool vertex --task T-12 [--model google/
   session's context is out of hand: the proxy answers that session's next request 403 (not forwarded), the launcher
   stops it (at its next heartbeat, or when aider exits) and hands its task back (`handBackCause` `prompt-cap`, its
   edits not committed), and `agent.session.end` says so. One oversized request is the most such a session spends.
+- 2.81: a launch through the proxy whose assembled prompt files are already over that cap (bytes / 4: a driven aider
+  session's brief and lane files, otherwise its kickoff file and the brief passed with `--read`; aider's repo map is not
+  counted) is refused before the proxy starts or any request is sent: `agent.start_refused` with `meta.preflight`,
+  `promptBytes` and `cap`.
 - Spend: each answer's usage goes to `.studio/vertex-usage.jsonl` ({ ts, session, task, tool, model, in = prompt_tokens,
   out = total_tokens - prompt_tokens (Gemini's thinking is billed), total, usd }); a session's tokens and estimated
   dollars land on its `agent.session.end` (`npm run tokens -- --by task`, the same place as the Claude API lane's), and

@@ -4942,6 +4942,16 @@ if (inShard('selftest-281b3')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.81 (b4), from the R2 trial: a gone process is ended by the supervisor pass and task next/start too (endedAt = last
+// beat + grace, detectedAt = now; liveness stays PID + start time), and a proxy launch over the prompt cap is refused
+// before the proxy starts.
+if (inShard('selftest-281b4')) {
+  const dir = copyRepo();
+  const { selftest281B4 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281b4.mjs')).href);
+  await selftest281B4({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

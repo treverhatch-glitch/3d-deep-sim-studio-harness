@@ -399,6 +399,8 @@ export async function supervise(opts, state, now = Date.now()) {
   }
   if (state.halted) return { started: [], why: [`halted: ${state.halted.why}`] };
   if (await checkBadEnds(opts, state, now)) return { started: [], why: [`halted: ${state.halted.why}`] };
+  // 2.81 (b4): end sessions whose process is gone (the watcher does this itself), at most once per STUDIO_GONE_CHECK_S.
+  if (!opts.watcher && !opts.dryRun) { try { await (await import('./gone-check.mjs')).goneCheck(); } catch { /* a check, never a crash */ } }
   // 2.68.0: the futility cap (harness/futility.mjs): a running session past the p90 of its type's good runs raises a
   // Check (shadow mode by default; STUDIO_FUTILITY=on hands it back, its diff kept).
   if (!opts.watcher) {

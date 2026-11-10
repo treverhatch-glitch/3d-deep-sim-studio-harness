@@ -253,6 +253,15 @@ clears it; a hand-back the harness or a person caused (claim ran out, a stop, a 
 and the ledger never releases a lock or a claim. `task next` and the supervisor's pick also ask the same budget and round-cap
 questions `task start` asks (`eligibility()`), so they stop offering a task that `start` would refuse.
 
+**A dead session ends in time** (2.81, `harness/gone-check.mjs`): a launched session whose process is gone (PID plus its
+start-time identity, `harness/proc-identity.mjs`; never the heartbeat alone) is ended by the supervisor's pass and by
+`task next` / `task start` too, not only by the watch pass, at most once per `STUDIO_GONE_CHECK_S` (60 seconds; `off`
+turns these extra passes off; the stamp is `.studio/gone-check.json`). Its `agent.session.end` keeps the detection time
+as `ts` and `meta.detectedAt`, and carries `meta.endedAt`: the last heartbeat (else the start) plus `STUDIO_GONE_GRACE_S`
+(120 seconds), never later than the detection. Session hours (`harness/model-pools.mjs`, `harness/run-report.mjs`, and
+`harness/metrics.mjs` for an attempt closed by its agent's session end) read `meta.endedAt`, so a session that died hours
+before anyone noticed no longer counts those hours.
+
 `npm run agent -- stop <name>` (and Pause) keep that task from restarting for 15 minutes
 (`STUDIO_STOP_COOLDOWN_MIN`). "Stop all" also stops running agents and hands their tasks back. The cooldown (2.77.3)
 holds only the stopped role: a stopped builder's task can't restart as a builder for 15 minutes, but a reviewer can start;

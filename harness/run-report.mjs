@@ -155,7 +155,7 @@ export function renderRunReport(r) {
     s.sessions += 1;
     const end = ends.find((x) => x.agent === e.agent && x.ts >= e.ts);
     if (end) {
-      s.ms += Date.parse(end.ts) - Date.parse(e.ts);
+      s.ms += (Date.parse(end.meta?.endedAt || '') || Date.parse(end.ts)) - Date.parse(e.ts); // P4: meta.endedAt when present
       s.tokens += (Number(end.tokensIn) || 0) + (Number(end.tokensOut) || 0);
     }
     staff.set(e.agent, s);
