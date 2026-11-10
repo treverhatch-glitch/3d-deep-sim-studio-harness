@@ -7,7 +7,7 @@
  *
  * When most tasks are forced past the same failing check (run #1: 32 of 57 past one red gate), a
  * "Needs you" list with one card per task teaches everyone to ignore it. Instead a forced task
- * joins the open check task for its cause, the War Room shows one card per cause, and a person can
+ * joins the open check task for its cause, `npm run causes` lists one group per cause, and a person can
  * accept a cause once: its check tasks close, and later tasks forced for the same cause are logged
  * without asking again. A different cause still raises a new card.
  */

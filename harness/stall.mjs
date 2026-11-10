@@ -271,7 +271,7 @@ export function idleVerdict({ role, startedAt, idleSince }, now = Date.now(), en
 }
 
 /**
- * Log a stall once per session. 2.73.2 (B-72): the launcher's heartbeat and the watchdog's pass (the hub's, every few
+ * Log a stall once per session. 2.73.2 (B-72): the launcher's heartbeat and the watchdog's pass (the supervisor's, every few
  * minutes) both end a stalled session; the watchdog's guard read the listing's "stalled" (a heartbeat-age flag, not
  * this verdict), so "Ended builder-s122" was logged and the kill tried on every pass, 4 times in 6 minutes. The first
  * caller records the end in the session's stall state (ended: { at, by, kind, why }, for this startedAt) and logs it;

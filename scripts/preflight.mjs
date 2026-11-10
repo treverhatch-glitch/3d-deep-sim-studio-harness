@@ -4,7 +4,7 @@
  *
  *   npm run preflight                 check only
  *   npm run preflight -- --fix        also: install the hooks, freeze the harness, turn off pushing,
- *                                     make .env from the example with a strong HUB token
+ *                                     make .env from the example
  *   npm run preflight -- --quick      skip running the gates
  *
  * A test run builds a game in a clone and leaves the harness itself unchanged, so the results say
@@ -144,20 +144,15 @@ export function preflight() {
     }
   }
 
-  // .env and the HUB token.
-  if (!fs.existsSync(ENV) && FIX) {
-    const example = fs.readFileSync(path.join(REPO_ROOT, '.env.example'), 'utf8');
-    fs.writeFileSync(ENV, example.replace(/^HUB_TOKEN=.*$/m, `HUB_TOKEN=${crypto.randomBytes(24).toString('hex')}`));
-  }
+  // .env.
+  if (!fs.existsSync(ENV) && FIX) fs.writeFileSync(ENV, fs.readFileSync(path.join(REPO_ROOT, '.env.example'), 'utf8'));
   const envText = fs.existsSync(ENV) ? fs.readFileSync(ENV, 'utf8') : '';
   const fromFile = (k) => [...envText.matchAll(new RegExp(`^${k}=(.*)$`, 'gm'))].map((m) => m[1].trim().replace(/^['"]|['"]$/g, '')).filter(Boolean).at(-1) || '';
   const envVal = (k) => (process.env[k] || fromFile(k)).trim();
-  row(envText ? 'ok' : 'fail', '.env exists', envText ? '' : 'run with --fix (copies .env.example with a fresh HUB token)');
+  row(envText ? 'ok' : 'fail', '.env exists', envText ? '' : 'run with --fix (copies .env.example)');
   // 2.73.1 (B-60): who a shell is comes from its session, never from the shared .env (the harness ignores these there).
   const idLines = identityLines(envText);
   if (idLines.length) row('warn', `.env sets ${[...new Set(idLines.map((h) => h.key))].join(', ')} (ignored: identity settings belong to a session, not the studio's .env)`, `remove line${idLines.length === 1 ? '' : 's'} ${idLines.map((h) => h.line).join(', ')} from .env`);
-  const token = envVal('HUB_TOKEN');
-  row(token.length >= 24 && !/change-me/.test(token) ? 'ok' : 'warn', 'HUB token is strong (War Room buttons work)', token.length >= 24 ? '' : 'npm run setup, or set HUB_TOKEN to 24+ random characters');
   const producer = envVal('STUDIO_PRODUCER_NAME');
   row(producer ? 'ok' : 'warn', `Producer name${producer ? `: ${producer}` : ''}`, producer ? '' : 'set STUDIO_PRODUCER_NAME in .env (the name the Producer agent uses)');
 
@@ -207,7 +202,7 @@ export function preflight() {
   const mode = effectiveMode();
   row(mode.chosen ? 'ok' : 'warn', `Pace: ${describeMode(mode)}`, mode.chosen ? '' : 'the game dev picks one at intake, in the Game plan view, or npm run mode -- set <mode> --by <name>');
   const auto = launchableRoles();
-  row(auto.length || !mode.autoLaunch ? 'ok' : 'warn', auto.length ? `Agents that can start on their own: ${auto.join(', ')}` : 'No agent can start on its own', auto.length ? '' : mode.autoLaunch ? 'this pace starts agents automatically: set STUDIO_AGENT_TOOL and STUDIO_AGENT_MODEL (or per role, STUDIO_BUILDER_TOOL …) in .env' : 'fine: start agents by hand, from the War Room, or npm run agent -- start');
+  row(auto.length || !mode.autoLaunch ? 'ok' : 'warn', auto.length ? `Agents that can start on their own: ${auto.join(', ')}` : 'No agent can start on its own', auto.length ? '' : mode.autoLaunch ? 'this pace starts agents automatically: set STUDIO_AGENT_TOOL and STUDIO_AGENT_MODEL (or per role, STUDIO_BUILDER_TOOL …) in .env' : 'fine: start agents by hand: npm run agent -- start');
 
   // Tools.
   const py = findPython();

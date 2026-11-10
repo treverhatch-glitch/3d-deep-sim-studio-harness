@@ -107,22 +107,6 @@ export function readWarRoomConfig() {
   };
 }
 
-export function writeWarRoomConfig(patch) {
-  fs.mkdirSync(path.dirname(WAR_ROOM_CONFIG_FILE), { recursive: true });
-  const current = readWarRoomConfig();
-  const merged = {
-    ...current,
-    ...patch,
-    theme: { ...(current.theme || {}), ...(patch.theme || {}) },
-    viewport: { ...(current.viewport || {}), ...(patch.viewport || {}) },
-    terminal: { ...(current.terminal || {}), ...(patch.terminal || {}) },
-    layout: { ...(current.layout || {}), ...(patch.layout || {}) },
-    updatedAt: new Date().toISOString(),
-  };
-  fs.writeFileSync(WAR_ROOM_CONFIG_FILE, JSON.stringify(merged, null, 2) + '\n', 'utf8');
-  return merged;
-}
-
 export function findLatestQaScreenshot() {
   const reportsDir = path.join(REPO_ROOT, 'qa', 'reports');
   if (!fs.existsSync(reportsDir)) return null;
@@ -134,7 +118,7 @@ export function findLatestQaScreenshot() {
       mtime: fs.statSync(path.join(reportsDir, f)).mtimeMs,
     }))
     .sort((a, b) => b.mtime - a.mtime);
-  return pngs[0] ? `/api/latest-screenshot?f=${encodeURIComponent(pngs[0].name)}` : null;
+  return pngs[0] ? `qa/reports/${pngs[0].name}` : null; // 2.80: the file (the hub's /api/latest-screenshot is gone)
 }
 
 export function readContextHealth() {
@@ -313,7 +297,7 @@ export function buildStudioSnapshot() {
       estimatedDollarsPreserved: Number(usage?.tokenSavers?.estimatedDollarsPreserved || 0),
     },
     recentEvents: events.slice(-40).reverse(),
-    machine: machineCardSafe(), // 2.68.0 (m): the last machine scan for the War Room (never scans here)
+    machine: machineCardSafe(), // 2.68.0 (m): the last machine scan (never scans here)
     staleLanes: staleLanesCardSafe(), // 2.70.0 (w): the janitor's last stale-lane proposals and the lane disk report
     decisions: decisionsCardSafe(), // 2.71.0 (x): autonomous decisions waiting for review (count, oldest, overdue)
   };

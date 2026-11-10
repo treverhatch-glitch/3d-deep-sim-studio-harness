@@ -15,8 +15,6 @@
  *   (f)     every STUDIO_REVIEW_MIN (60) a zero-token game-dev review compares the newest captures with the last
  *           review's and files quality tasks (e.g. "scene unchanged"); with STUDIO_REVIEWER_TOOL set it also
  *           wakes a cheap reviewer session to judge the captures against the charter
- * Away mode (npm run away -- on) means more autonomy, not just review logging: the refill keeps 6 open
- * (STUDIO_AWAY_REFILL_MIN), builders start whatever the pace, and the review runs every 30 min.
  * Without the supervisor (2.80: it runs the pass every STUDIO_GAMEDEV_INTERVAL s): node harness/watchdog.mjs loop 180 (npm run gamedev) runs the pass on its own.
  * Steps are skipped one by one with STUDIO_GAMEDEV_SKIP=stall,refill,milestones,launch,landing,tiers,review,cycle.
  * State: .studio/gamedev.json. Every action is an event from "watchdog".
@@ -70,9 +68,6 @@ export function mayFile(st, key, now = Date.now(), env = process.env) {
 
 export async function gamedevPass(now = Date.now(), { events = readRecentEvents(5000) } = {}) {
   const st = read(FILE(), {});
-  // 2.30o: away mode means more autonomy: a deeper queue, launches whatever the pace, more frequent reviews.
-  let away = false;
-  try { away = Boolean((await import('./away.mjs')).readAway().on); } catch {}
   const last = st.lastPass || 0;
   const actions = [];
   const { fileTask, refillPass, milestones, closeMilestone } = await import('./producer-refill.mjs');
@@ -137,7 +132,7 @@ export async function gamedevPass(now = Date.now(), { events = readRecentEvents(
   }
 
   if (!skip('refill')) {
-    try { const r = await refillPass(away ? { min: Number(process.env.STUDIO_AWAY_REFILL_MIN ?? 6) } : {}); if (r.refilled.length) actions.push({ kind: 'refill', msg: `queue low: added ${r.refilled.length} task(s) from unmet goals` }); } catch (e) { actions.push({ kind: 'error', msg: `refill step: ${e.message}` }); }
+    try { const r = await refillPass({}); if (r.refilled.length) actions.push({ kind: 'refill', msg: `queue low: added ${r.refilled.length} task(s) from unmet goals` }); } catch (e) { actions.push({ kind: 'error', msg: `refill step: ${e.message}` }); }
   }
 
   if (!skip('cycle')) {
@@ -150,10 +145,10 @@ export async function gamedevPass(now = Date.now(), { events = readRecentEvents(
   }
 
   if (!skip('launch') && process.env.STUDIO_WATCHDOG_LAUNCH !== 'off') {
-    try { const r = await (await import('./agent.mjs')).fillAgents({ byDirector: true, autonomous: away || process.env.STUDIO_GAMEDEV_AUTOLAUNCH === 'on' }); if (r.started?.length) actions.push({ kind: 'launch', msg: `started ${r.started.join(', ')}` }); } catch (e) { actions.push({ kind: 'error', msg: `launch step: ${e.message}` }); }
+    try { const r = await (await import('./agent.mjs')).fillAgents({ byDirector: true, autonomous: process.env.STUDIO_GAMEDEV_AUTOLAUNCH === 'on' }); if (r.started?.length) actions.push({ kind: 'launch', msg: `started ${r.started.join(', ')}` }); } catch (e) { actions.push({ kind: 'error', msg: `launch step: ${e.message}` }); }
   }
 
-  const reviewEvery = Number(away ? process.env.STUDIO_AWAY_REVIEW_MIN ?? 30 : process.env.STUDIO_REVIEW_MIN ?? 60) * 60000;
+  const reviewEvery = Number(process.env.STUDIO_REVIEW_MIN ?? 60) * 60000;
   if (!skip('review') && reviewEvery > 0 && now - (st.lastReview || 0) >= reviewEvery) {
     const { decodePng } = await import('./png.mjs');
     const { imageDiff, imageStats, visualLimits } = await import('./visual-proof.mjs');
