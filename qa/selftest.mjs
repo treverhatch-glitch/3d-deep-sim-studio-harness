@@ -4924,6 +4924,16 @@ if (inShard('selftest-281b1')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.81 (b2), from the R2 trial: the game-agnostic anchor spec (task add --anchors, the brief, per-anchor met|unmet|unknown
+// at done) and said-vs-did (task done --claim "<command> => <last line>" re-run; file claims diffed; review.verdict on a
+// mismatch; no claim: judged as before).
+if (inShard('selftest-281b2')) {
+  const dir = copyRepo();
+  const { selftest281B2 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-281b2.mjs')).href);
+  await selftest281B2({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

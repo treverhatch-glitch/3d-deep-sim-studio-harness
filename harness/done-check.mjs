@@ -53,6 +53,7 @@ import { regressionHowTo, regressionMissing } from './regression-howto.mjs';
 import { checkResearch, ensureResearchTemplate } from './research.mjs';
 import { engineTask, engineRepo, engineTarget } from './engine-tracks.mjs';
 import { visualCheckRows } from './visual-check.mjs';
+import { anchorCheckRows } from './anchors.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -976,6 +977,15 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
   }
   // 2.77.0 (u, P5.5): a task added with --visual-check or --refs needs the visual check (harness/visual-check.mjs).
   try { for (const r of visualCheckRows(task.id)) check(r.label, r.ok, r.why); } catch { /* not readable: no rows */ }
+  // 2.81 (b2): the anchors the task cites (task add --anchors): met | unmet | unknown from the deliverable, never the
+  // note (harness/anchors.mjs). Unknown is a warning and never green; unmet fails only under STUDIO_ANCHORS=fail.
+  let anchors = null;
+  try {
+    const ar = anchorCheckRows(task.id, { since });
+    for (const r of ar.checks) check(r.label, r.ok, r.why);
+    warnings.push(...ar.warnings);
+    if (ar.rows.length) anchors = ar.summary;
+  } catch { /* no anchors readable: no rows */ }
   // 2.62.0 (H): an agreed acceptance contract (studio/contracts/<ID>.json, harness/contracts.mjs) needs every
   // criterion in force passing; no contract, no change (unless studio/game.json "contracts.required" names the type).
   {
@@ -986,7 +996,7 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
     notes.push(...k.notes);
   }
   const missing = checks.filter((c) => !c.ok).map((c) => c.why);
-  return { ok: missing.length === 0, type, typeSource: typed.source, typeIgnored: typed.ignored, titleType: typed.titleType, ...(typed.evidence ? { typeEvidence: typed.evidence } : {}), part, since, checks, missing, notes, ...(warnings.length ? { warnings } : {}), ...TYPES[type] };
+  return { ok: missing.length === 0, type, typeSource: typed.source, typeIgnored: typed.ignored, titleType: typed.titleType, ...(typed.evidence ? { typeEvidence: typed.evidence } : {}), part, since, checks, missing, notes, ...(warnings.length ? { warnings } : {}), ...(anchors ? { anchors } : {}), ...TYPES[type] };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -1014,6 +1024,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   } catch { /* no verdict module */ }
   for (const c of res.checks) console.log(`  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`);
   for (const w of res.warnings || []) console.log(`  WARN ${w}`);
+  if (res.anchors) console.log(`  anchors: ${Object.entries(res.anchors).map(([k, v]) => `${k} ${v}`).join(', ')} (unknown is never green)`);
   for (const n of res.notes || []) console.log(`  note: ${n}${/^studio\/contracts\//.test(n) ? '' : ' (STUDIO_REACHABILITY=fail makes this a failing check)'}`);
   console.log(res.ok ? 'Ready to finish.' : 'Not done yet.');
   process.exit(res.ok ? 0 : 1);

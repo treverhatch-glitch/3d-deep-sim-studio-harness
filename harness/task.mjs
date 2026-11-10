@@ -12,6 +12,8 @@ import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from 
 import { claim, release, status as lockStatus, listLocks, SHARED_OWNERS } from './lock.mjs';
 import { ensureResearchTemplate, researchRel } from './research.mjs';
 import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType, skipGameChecks } from './done-check.mjs';
+import { judgeClaims, recordClaimVerdict, claimLines } from './said-vs-did.mjs';
+import { validateAnchorIds, readAnchors } from './anchors.mjs';
 import { splitEolOnly, eolNote } from './eol-only.mjs';
 import { isGameCode } from '../scripts/check-function-size.mjs';
 import { summarize as summarizeVerdict, renderDecision } from './verdict-split.mjs';
@@ -583,7 +585,7 @@ const CODE_TYPES = ['change', 'chore', 'bug', 'system', 'whole', 'balance', 'fun
  * (harness/done-check.mjs). force skips both; a skipped check is logged and the Producer gets a
  * P1 task to run it.
  */
-export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '', noop = '', checkOnly = false, trainCheck = false, unityTrainCheck = false } = {}) {
+export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '', noop = '', checkOnly = false, trainCheck = false, unityTrainCheck = false, claims = [] } = {}) {
   // 2.59.0: trainCheck runs every check task done runs before the game's checks (board, done-check, the committed lane
   // copy, protected files, secrets, hooks, weakened tests) and stops there: nothing is closed or landed. The merge train
   // (harness/train.mjs) lands the lane after ONE full verify of main + the lanes, which stands for the game's checks and
@@ -686,6 +688,21 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   }
 
   const check = checkDone(target, undefined, { noop: noop && String(noop).trim().length >= 10 });
+  // 2.81 (b2): said-vs-did (harness/said-vs-did.mjs), only when the builder makes a claim (--claim "<command> => <last
+  // line>"; none: judged as before). The note's file claims are diffed against the task's commits and edits; the command
+  // is re-run on the closing path only (--check and the train's lane check skip the re-run: the train's verify follows).
+  // A mismatch is review.verdict {claim-mismatch} and the label `claim`.
+  if (!force && claims.length) {
+    let judged = null;
+    try { judged = judgeClaims(target.id, { claims, note, base: taskBase(target.id) || null, rerun: !checkOnly && !trainCheck && !unityTrainCheck && !/^(off|0|false|no)$/i.test(String(process.env.STUDIO_CLAIMS || '')) }); } catch { judged = null; }
+    if (judged && !judged.ok) {
+      if (!checkOnly) recordClaimVerdict(target.id, judged, { agent: agent || target.role });
+      emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: claim: ${judged.mismatches[0]}`.slice(0, 600) });
+      return { error: 'claim', claims: judged, message: [`${target.id} is not done: what the note says does not match what the harness sees.`, ...claimLines(judged), 'Fix the work or the note (the claim is checked again at the next done); a claim the harness cannot re-run is listed with "?" and never counts as green.'].join('\n') };
+    }
+    if (judged?.unverifiable?.length) for (const u of judged.unverifiable) console.warn(`[done] claim not verifiable: ${u}`);
+    if (judged) check.claims = judged.results.map((r) => ({ cmd: r.cmd || null, verdict: r.verdict }));
+  }
   // 2.78.1 (f, M7): warnings that don't block (a playtest report that played the template, not the studio's game).
   for (const w of check.warnings || []) {
     console.warn(`[done] WARN ${w}`);
@@ -1013,7 +1030,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   const nextActive = q.inProgress[0] || null;
   syncCurrentTaskCheckpoint(nextActive, `Completed ${target.id}${note ? `: ${note}` : ''}`);
   clearAttempts(target.id); // 2.81 (b1): a finished task has nothing to hold back (harness/attempts.mjs)
-  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title}` });
+  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title}`, ...(check.anchors || check.claims ? { meta: { ...(check.anchors ? { anchors: check.anchors } : {}), ...(check.claims ? { claims: check.claims } : {}) } } : {}) });
   try { canaryEnd(target.id, 'cheated', { agent: agent || target.role }); } catch { /* a record, never a blocker */ }
   assetHandoffAfterLanding(target.id, agent); // 2.67.1 (j)
   // 2.35.0: a finished rescue acts on its decision (retry unparks the stuck task, split keeps it parked, needs-person asks).
@@ -1762,7 +1779,9 @@ function parseFlags(argv) {
       const k = a.slice(2);
       const next = argv[i + 1];
       if (next !== undefined && !next.startsWith('--')) {
-        flags[k] = next;
+        // 2.81 (b2): --claim repeats ("<command> => <last line>" each); every other flag keeps its last value.
+        if (k === 'claim') flags[k] = [...(Array.isArray(flags[k]) ? flags[k] : []), next];
+        else flags[k] = next;
         i++;
       } else {
         flags[k] = true;
@@ -2069,10 +2088,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.30q (#8): --usage <model>:<in>/<out> (comma-separated for several models): a builder launched outside
     // the harness reports its own tokens; the ledger shows them as untracked (self-reported).
     if (flags.usage !== undefined) { const u = reportUsage(targetId, whoAmI(flags), flags.usage); if (u.error) { console.error(u.error); process.exit(1); } }
+    // 2.81 (b2): --claim "<command> => <last line>" (repeatable): re-run and compared at done (harness/said-vs-did.mjs).
+    const claimFlags = Array.isArray(flags.claim) ? flags.claim : typeof flags.claim === 'string' ? [flags.claim] : [];
     // 2.30q (#6): while done runs (gates, landing: often 10+ min), the task counts as busy for the
     // Director's flow pass, the stall check and the watchdog (harness/busy.mjs).
     if (flags.check) {
-      const pre = completeTask(targetId, '', whoAmI(flags), { checkOnly: true, noop: typeof flags['no-op'] === 'string' ? flags['no-op'] : '' });
+      const pre = completeTask(targetId, typeof flags.note === 'string' ? flags.note : '', whoAmI(flags), { checkOnly: true, noop: typeof flags['no-op'] === 'string' ? flags['no-op'] : '', claims: claimFlags });
       if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
       console.log(pre.error ? pre.message : pre.message);
       // 2.79.1 (3.2): the Line Producer reads this as "a land may be near" for an engine pass (harness/engine-ram.mjs).
@@ -2161,7 +2182,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       }
       if (done) { /* refused above */ } else
       if (viaTrain) {
-        const pre = completeTask(targetId, '', whoAmI(flags), { trainCheck: true, noop: noopFlag });
+        const pre = completeTask(targetId, typeof flags.note === 'string' ? flags.note : '', whoAmI(flags), { trainCheck: true, noop: noopFlag, claims: claimFlags });
         if (!pre || pre.error) done = pre;
         else {
           const { runTrain } = await import('./train.mjs');
@@ -2185,7 +2206,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
           }
         }
       } else {
-        done = completeTask(targetId, flags.note || '', whoAmI(flags), { force: Boolean(flags.force), reason: typeof flags.reason === 'string' ? flags.reason : '', acceptedBy: typeof flags['accepted-by'] === 'string' ? flags['accepted-by'] : '', noop: noopFlag });
+        done = completeTask(targetId, flags.note || '', whoAmI(flags), { force: Boolean(flags.force), reason: typeof flags.reason === 'string' ? flags.reason : '', acceptedBy: typeof flags['accepted-by'] === 'string' ? flags['accepted-by'] : '', noop: noopFlag, claims: claimFlags });
       }
     } finally {
       await busyMod.clearDoneRunning(targetId).catch(() => {});
@@ -2572,6 +2593,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(1);
     }
     // 2.77.0 (u, P5.5): reference photos are files the studio provides; the harness never downloads one.
+    // 2.81 (b2): --anchors A1,A2.F1 cites the anchor spec (studio/references/anchors.json, harness/anchors.mjs); an
+    // unknown id is refused; a builder task with none, when the studio has anchors, gets a note (never a refusal).
+    const anchorIds = (() => {
+      if (typeof flags.anchors !== 'string' || !flags.anchors.trim()) return [];
+      const v = validateAnchorIds(flags.anchors);
+      if (!v.ok) { console.error(`--anchors: ${[...v.unknown.map((id) => `no anchor ${id} in studio/references/anchors.json (node harness/anchors.mjs list)`), ...v.problems].join('; ')}. Nothing was queued.`); process.exit(1); }
+      return v.ids;
+    })();
+    if (!anchorIds.length && (flags.role || 'builder') === 'builder' && !type && readAnchors().length) console.error('note: this studio has an anchor spec (node harness/anchors.mjs list) and this task cites none (--anchors A1,…); its done check records no anchor verdict.');
     if (typeof flags.refs === 'string') {
       const bad = flags.refs.split(',').map((x) => x.trim()).filter((x) => /^[a-z][a-z0-9+.-]*:\/\//i.test(x));
       if (bad.length) { console.error(`--refs takes local paths to reference photos the studio provides (a file, or the assets reference folder), not links: ${bad.join(', ')}. The harness never downloads photos; save it under assets/reference/ first.`); process.exit(1); }
@@ -2631,6 +2661,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ...(typeof flags.scope === 'string' ? { scope: flags.scope.slice(0, 600) } : {}),
         ...(flags['visual-check'] ? { visualCheck: true } : {}),
         ...(typeof flags.refs === 'string' && flags.refs.trim() ? { refs: flags.refs.split(',').map((x) => x.trim()).filter(Boolean) } : {}),
+        ...(anchorIds.length ? { anchors: anchorIds } : {}),
         ...(typeof flags.after === 'string' ? { after: flags.after.split(/[,\s]+/).filter((x) => /^[A-Z]+-\d+$/.test(x)) } : {}),
         ...(flags.prototype ? { prototype: true } : {}),
         ...(flags.infra ? { infra: true } : {}),
