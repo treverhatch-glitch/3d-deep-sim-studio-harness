@@ -1,7 +1,8 @@
 /**
  * harness/heavy-budget.mjs — 2.68.0 (n): the machine:heavy lock as a budgeted pool, test workers and agent sessions
- * sized to the machine, and the out-of-memory retry. No harness imports at load (heavy.mjs, game-gates.mjs and the
- * supervisor all import it; the supervisor's CLI uses top-level await, so nothing here may import it back).
+ * sized to the machine, and the out-of-memory retry. No harness imports at load but machine.mjs, a leaf (heavy.mjs,
+ * game-gates.mjs and the supervisor all import this; the supervisor's CLI uses top-level await, so nothing here may
+ * import it back).
  *
  * The machine profile is helper m's scan (harness/machine.mjs readMachine(), written to <studio>/.studio/machine.json):
  *   { os, cores: { logical, performance, efficiency }, ram: { totalGb, freeGb, commitUsedGb, commitLimitGb },
@@ -32,6 +33,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { readMachine } from './machine.mjs';
 
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const off = (v) => /^(off|0|false|no)$/i.test(String(v || ''));
@@ -150,8 +152,10 @@ export function unityMinFreeGb({ env = process.env, profile = null, totalGb = nu
 const toMs = (at) => (fin(at) ? at : Number.isFinite(Date.parse(at)) ? Date.parse(at) : NaN);
 
 /**
- * The machine profile admission uses (sync, never scans): opts.machine (an object, null, or a function giving one),
- * else STUDIO_TEST_MACHINE, else <root>/.studio/machine.json when fresh. null = no scan (2.67 behaviour).
+ * The machine profile admission uses (sync): opts.machine (an object, null, or a function giving one), else
+ * STUDIO_TEST_MACHINE, else <root>/.studio/machine.json when younger than STUDIO_MACHINE_MAX_AGE_MIN (15), else a scan
+ * taken now and written there for the next caller (2.80 (c), N1: a stale file gave null, 2 test workers and false reds
+ * while the supervisor was off). null = no scan (off, STUDIO_TEST_MACHINE=none, or the scan failed: 2.67 behaviour).
  */
 export function machineProfile(root, { env = process.env, machine, now = Date.now() } = {}) {
   if (machine !== undefined) return typeof machine === 'function' ? machine() || null : machine || null;
@@ -161,12 +165,7 @@ export function machineProfile(root, { env = process.env, machine, now = Date.no
     if (/^(none|fail|null)$/i.test(t)) return null;
     try { return JSON.parse(t); } catch { return readJson(t); }
   }
-  const p = readJson(path.join(root, '.studio', 'machine.json'));
-  if (!p || typeof p !== 'object') return null;
-  const at = toMs(p.at);
-  const maxAge = num(env.STUDIO_MACHINE_MAX_AGE_MIN, 15) * 60000;
-  if (!Number.isFinite(at) || now - at > maxAge) return null;
-  return p;
+  return readMachine({ root, env, now, maxAgeMs: num(env.STUDIO_MACHINE_MAX_AGE_MIN, 15) * 60000 });
 }
 
 /** studio/machine-budget.json (optional): { "jobs": { kind: {...} }, "reserveRamGb", "gpuReserveGb", "sessionRamGb", "workerGb" }. */

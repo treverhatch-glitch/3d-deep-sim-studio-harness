@@ -72,10 +72,10 @@ console.log(JSON.stringify({ got, logs }));`;
     const failed = probe(takes([{ label: 'job one', kind: 'blender-preview' }, { label: 'job two', kind: 'blender-preview' }]), { STUDIO_TEST_MACHINE: 'none' });
     clearLocks();
     write('.studio/machine.json', JSON.stringify({ ...JSON.parse(machine()), at: new Date(Date.now() - 3 * 3600000).toISOString() }));
-    const old = probe(takes([{ label: 'job one', kind: 'heavy', ramGb: 1 }, { label: 'job two', kind: 'heavy', ramGb: 1 }]), {});
+    const old = probe(takes([{ label: 'job one', kind: 'heavy', ramGb: 1 }, { label: 'job two', kind: 'heavy', ramGb: 1 }]), { STUDIO_MACHINE_SCAN: 'off' });
     const st = run(dir, 'node harness/heavy.mjs status', { ...base, STUDIO_TEST_MACHINE: 'none' });
     fs.rmSync(path.join(dir, '.studio', 'machine.json'), { force: true });
-    guard('2.68.0 (n): with no machine scan (STUDIO_TEST_MACHINE=none, or a .studio/machine.json 3 h old) machine:heavy has one slot as in 2.67 (even GPU-only jobs wait), and heavy status says "no machine scan: 1 slot, as before" (2.67.2: no budget line)', () => [
+    guard('2.68.0 (n): with no machine scan (STUDIO_TEST_MACHINE=none, or STUDIO_MACHINE_SCAN=off beside a .studio/machine.json 3 h old; 2.80 (c) N1: a stale file alone is rescanned now) machine:heavy has one slot as in 2.67 (even GPU-only jobs wait), and heavy status says "no machine scan: 1 slot, as before" (2.67.2: no budget line)', () => [
       failed.got?.[0]?.ok && failed.got?.[1]?.ok === false && (failed.logs || []).some((l) => /waits for the machine:heavy lock \(1 slot, STUDIO_HEAVY_SLOTS\)/.test(l))
         && old.got?.[0]?.ok && old.got?.[1]?.ok === false && st.status === 0 && /budget: no machine scan: 1 slot, as before/.test(out(st)),
       JSON.stringify({ failed, old, st: out(st).slice(-600) }).slice(0, 2500)]);
