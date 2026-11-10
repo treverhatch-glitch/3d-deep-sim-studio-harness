@@ -24,7 +24,7 @@ against 2.79.2. Details: docs/RELEASE-2.81.0.md.
 - **Decided:** `STUDIO_WATCH_INTERVAL=0` turns off the watch pass only. `STUDIO_BUILDER_ORDER` is tested in real
   supervisor passes.
 - **Prompts pruned:** no read-less lines, no token budget for the agent to manage, a reason on every absolute rule
-  (originals: tag `prompts-before-2.81`).
+  (originals: branch `claude/prompts-before-2.81`).
 
 ## [2.80.0] — 2026-11-10
 The trim (the owner's order; HARNESS_TRIM_BRIEF_2026-11-10). 2.79.2 stays, leaner: 211 files, +2,013 / −19,710 lines (net −17,697) against 2.79.2;

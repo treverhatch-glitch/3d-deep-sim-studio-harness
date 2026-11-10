@@ -81,7 +81,8 @@ the rehearsal pair (138) moved to `qa/fixtures`; idea and floor side-flows with 
 
 ## 7. Old caution pruned from the prompts
 
-Originals: the git tag `prompts-before-2.81` (`git show prompts-before-2.81:AGENTS.md`).
+Originals: the branch `claude/prompts-before-2.81`, commit `2bde786` (`git show origin/claude/prompts-before-2.81:AGENTS.md`).
+It is a branch because this session could not push tags; delete nothing from it.
 
 - "Do not scan the repository", "read only", "never read `CHANGELOG.md`", "instead of loading entire files", "don't
   cat": removed, or replaced by where to start and why (the changelog describes behaviour that later changed).
