@@ -15,5 +15,6 @@ own build.
 **Done means.** A `study.md` under `studio/research/` written after the task started, at least 120
 words.
 
-**Never.** Copy the studied game's code, art, audio or text into the repo. Study builds you don't
-have a right to examine.
+**Never.** Copy the studied game's code, art, audio or text into the repo: a study records what the game does
+(behaviour, numbers, pacing) so ours can be measured against it, never its material. Study builds you don't have a
+right to examine.

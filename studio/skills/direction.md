@@ -14,4 +14,5 @@
 **Done means.** A dated review since the task started that names the phase, what it checked, a
 verdict and next tasks.
 
-**Never.** Change a signed pillar or bring back a crossed-out layer. Assign tasks yourself.
+**Never.** Change a signed pillar or bring back a crossed-out layer (those are the game dev's decisions, signed).
+Assign tasks yourself (the Producer owns the queue; you tell it what the work should serve).

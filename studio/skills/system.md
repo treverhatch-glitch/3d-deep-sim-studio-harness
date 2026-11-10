@@ -21,4 +21,5 @@ visitors), prove it, and hand it off.
 current build, a green verify after the last change, and an approving review from another model family
 (the review note carries `model-family:` and `implementer-family:` lines).
 
-**Never.** Build a system the Bible crossed out. Ship it without an invariant. Review it yourself.
+**Never.** Build a system the Bible crossed out (the game dev ruled it out). Ship it without an invariant (the
+invariant is how a later change that breaks it gets caught). Review it yourself.
