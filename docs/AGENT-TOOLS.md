@@ -265,7 +265,7 @@ npm run agent -- start --role builder --agent nim-1 --tool nim --model <nim mode
   `.studio/nim-models.json` for 24 h (`STUDIO_NIM_CHECK_HOURS`; delete the file to check again now);
   `STUDIO_NIM_CHECK=off` turns the check off. `npm run models:check` checks the same models.
 - What aider sees (2.60.1, B-20, B-21, B-37; `--tool aider` too): `--aiderignore .studio/aider/<agent>.aiderignore`
-  (harness/, hub/, scripts/, tools/, studio/, qa/*.mjs and every path in `studio/protected.json`, anchored at the repo
+  (harness/, scripts/, tools/, studio/, qa/*.mjs and every path in `studio/protected.json`, anchored at the repo
   root, so a game's own `tools/` stays editable): aider never adds those to its chat or edits them, even when the
   kickoff names `harness/task.mjs`. The task's brief goes in with `--read` when it exists. `--no-pretty
   --no-fancy-input` (stdout is a log file), `--no-gitignore` (aider would add `.aider*` to the tracked `.gitignore`;

@@ -45,7 +45,7 @@ export function listDivisions() {
 }
 
 /** Switch a division on or off from the War Room: writes studio/divisions.json with every division listed. */
-export function setDivision(id, on, by = 'war-room-human') {
+export function setDivision(id, on, by = 'owner') {
   const list = listDivisions().map(({ autoOn, ...d }) => ({ ...d }));
   const d = list.find((x) => x.id === id);
   if (!d) return { ok: false, message: `No division ${id}` };

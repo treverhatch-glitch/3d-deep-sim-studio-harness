@@ -137,7 +137,7 @@ const useCache = !(argv.includes('--no-cache') || process.env.STUDIO_GATE_CACHE 
 
 const all = cfg.gates || [];
 const runStarted = Date.now();
-const DEEP = all.some((g) => 'deep' in g) ? new Set(all.filter((g) => g.deep).map((g) => g.id)) : new Set(['selftest', 'hub-smoke', 'hud']);
+const DEEP = all.some((g) => 'deep' in g) ? new Set(all.filter((g) => g.deep).map((g) => g.id)) : new Set(['selftest']);
 const LITE = all.some((g) => 'lite' in g) ? new Set(all.filter((g) => g.lite).map((g) => g.id)) : new Set(['purity', 'isolation', 'golden', 'regressions', 'playtest', 'secrets']);
 const { readMode, scopeOf } = await import('../harness/mode.mjs');
 const scope = argv.includes('--full') || deep ? 'full' : scopeOf(readMode());
@@ -285,7 +285,7 @@ const trust = await import('../harness/gate-trust.mjs');
 // 2.76.0 (B-85): ignored files the checks' own commands wrote in an earlier verify of this checkout (unchanged since), and
 // those a "generated" glob names (studio/gates.json, the game's studio.gates.json), are output, not hidden inputs; so is an
 // ignored folder holding only harmless files. Untracked files, root runner files and config-like names still count.
-const readPaths = [...(sg?.root ? [sg.root] : []), 'cartridges', 'qa', 'harness', 'scripts', 'engine', 'hub'];
+const readPaths = [...(sg?.root ? [sg.root] : []), 'cartridges', 'qa', 'harness', 'scripts', 'engine'];
 const studioDirOf = path.join(root, '.studio');
 const genBefore = trust.readGenerated(studioDirOf, root);
 const ignoredBefore = trust.ignoredSnapshot(root, readPaths);
@@ -303,22 +303,16 @@ const compact = /^(on|1|true|yes)$/i.test(process.env.STUDIO_COMPACT_OUTPUT || '
 // 2.58.0 (F2): the tracked files as they are before any gate runs, to name the ones this verify changes.
 const trackedBefore = trackedSnapshot();
 let firstRed = null;
-// 2.77.0: the live progress of this run, for the War Room's loading bar (harness/gate-progress.mjs): written in the
-// checkout's .studio/ (a lane or train copy's is the main checkout's), as STUDIO_LOCK_OWNER (the train's is train-<id>).
-const gp = await import('../harness/gate-progress.mjs');
-const progress = gp.startProgress({ stateDir: path.join(root, '.studio'), owner: process.env.STUDIO_LOCK_OWNER || null, gates: gates.map((g) => g.id) });
 for (const gate of gates) {
-  progress.started(gate.id);
   const cacheable = gate.cache !== false && (gate.lite || gate.cache === true);
   let key;
   // Only the in-session fast tier reads the cache; everyday verify, --deep and the merge tier always run.
-  // 2.30h (#6): a gate with cacheDeep (the HUD check) also reuses its last pass in a --deep run; the merge tier still always runs it.
+  // 2.30h (#6): a gate with cacheDeep also reuses its last pass in a --deep run; the merge tier still always runs it.
   if (useCache && cacheable && !focusRun && (isFastTier || (gate.cacheDeep && !isMergeTier))) {
     key = getKey(gate);
     const cached = get(gate, key);
     if (cached) {
       rows.push({ id: gate.id, ok: true, required: gate.required !== false, ms: cached.ms || 0, cached: true, cartridge: active.name });
-      progress.finished(gate.id, { ms: cached.ms || 0, ok: true, cached: true });
       console.log(`[gates] PASS ${gate.id} (cached ${key.slice(0, 8)}: command and files unchanged since its last pass)`);
       cachedCount++;
       continue;
@@ -362,7 +356,6 @@ for (const gate of gates) {
   const notRunLine = !ok && res.status === 3 ? (fenced.text.match(/^\[(?:engine|unity|engine-gate|heavy)\] NOT RUN\b[^\n]*/m) || [])[0] : null;
   const notRun = notRunLine ? notRunLine.replace(/^\[[\w-]+\] NOT RUN\s*/, '').replace(/^[^:]*:\s*not run:\s*/, '').slice(0, 300) : null;
   rows.push({ id: gate.id, ok, required, ms, cached: false, cartridge: active.name, ...facts, ...(notRun ? { notRun } : {}) });
-  progress.finished(gate.id, { ms, ok });
   if (!ok && required && !firstRed && !notRun) firstRed = { id: gate.id, text: fenced.text }; // 2.72.0 (b): the round cap's signature
   console.log(notRun ? `[gates] NOT RUN ${gate.id}: not run: ${notRun}` : `[gates] ${ok ? 'PASS' : required ? 'FAIL' : 'WARN'} ${gate.id}`);
   if (facts.sub?.length && !(facts.sub.length === 1 && facts.sub[0] === gate.id)) console.log(`[gates] ${gate.id} failed in: ${facts.sub.slice(0, 8).join(', ')}${facts.sub.length > 8 ? ` (+${facts.sub.length - 8} more)` : ''}`);
@@ -374,9 +367,6 @@ for (const gate of gates) {
   }
 }
 
-// 2.77.0: the run is over for the bar; its passing gate times join the history the next ETA comes from.
-progress.end();
-gp.recordGateTimes(path.join(root, '.studio'), rows);
 // 2.30c (G3): failing first, in plain words; "not run" apart from "pass".
 {
   const { gateWords } = await import('../harness/gate-words.mjs');

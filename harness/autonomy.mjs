@@ -564,7 +564,7 @@ export function openHaltOf(events, { now = Date.now(), running = null, staleH = 
   const cause = String(h.event?.msg || '').replace(/^Supervisor stopped starting agents:\s*/i, '').slice(0, 300) || 'no cause recorded';
   const zn = typeof zone === 'string' && zone ? zone : (zone || studioZone()).zone;
   const clear = supervisorRunning
-    ? 'fix the cause, then npm run studio:resume -- --by <your name> [--why "what you fixed"] (or "Fixed it: try again" in the War Room)'
+    ? 'fix the cause, then npm run studio:resume -- --by <your name> [--why "what you fixed"]'
     : stale
       ? `its supervisor isn't running and it is older than STUDIO_HALT_STALE_H (${staleH} h): npm run studio:resume -- --by <your name> --why "stale halt" clears it (an outside agent adds --permission "<the person's words>")`
       : `its supervisor isn't running, so nothing waits on it; a new npm run studio:start starts unhalted, and npm run studio:resume clears it once it is ${staleH} h old`;

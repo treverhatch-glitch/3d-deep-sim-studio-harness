@@ -8,7 +8,7 @@
  *   npm run thread -- inbox <ID> [--peek]                 a task's inbox (studio/handoffs/<ID>.inbox.md)
  *   npm run thread -- link <key> <ID> --by <name>         a bot ties a Discord message or a PR/issue to a task
  *   npm run thread -- unlink <key> --by <name>
- *   npm run thread -- post <key> "<text>" --source discord|github|hub --by <name> [--ref <id>] [--author <sender id>]
+ *   npm run thread -- post <key> "<text>" --source discord|github --by <name> [--ref <id>] [--author <sender id>]
  *
  * The index (.studio/threads.json) maps exact keys to tasks. It is built by code from the events the studio
  * already writes: a task id, its lane branch (.studio/lane-branches.json, task.train.queued), the commits a lane
@@ -16,7 +16,7 @@
  * (A-), an away item (AW-), a fun-check wave (W-), a closed-loop bug (BUG-), and, registered by a bot with
  * `link`, a Discord message id or a PR/issue number. Nothing is guessed: no similar titles, no fuzzy matches.
  *
- * studio/triggers.json sets, per source (ci, train, hub, discord, github), a policy applied by code:
+ * studio/triggers.json sets, per source (ci, train, discord, github), a policy applied by code:
  *   respond    a match goes to the task's inbox, and the session holding the task is told at its next tool call;
  *   candidate  a match goes to the task's inbox (read in the brief and with `inbox`), no notice;
  *   ignore     dropped.
@@ -50,7 +50,7 @@ export const NOTICE_DIR = () => path.join(STUDIO_STATE_DIR, 'inbox-notice');
 export const noticeFile = (owner) => path.join(NOTICE_DIR(), `${String(owner).replace(/[^\w.-]/g, '_')}.json`);
 const PRODUCER_INBOX = () => path.join(REPO_ROOT, 'studio', 'producer', 'INBOX.md');
 
-export const SOURCES = ['ci', 'train', 'hub', 'discord', 'github'];
+export const SOURCES = ['ci', 'train', 'discord', 'github'];
 export const POLICIES = ['respond', 'candidate', 'ignore'];
 export const DEFAULT_TRIGGERS = {
   mode: 'shadow',
@@ -58,7 +58,6 @@ export const DEFAULT_TRIGGERS = {
   sources: {
     ci: { policy: 'respond', types: { 'ci.green': 'ignore' } },
     train: { policy: 'ignore', types: { 'task.train.dropped': 'respond', 'task.train.partial': 'respond', 'task.train.deferred': 'candidate', 'task.train.red': 'candidate', 'task.train.red_main': 'candidate', 'task.train.flaky': 'candidate' } },
-    hub: { policy: 'candidate' },
     // 2.65.0: respond only for an admitted sender (senders below); with the lists empty every post is a candidate.
     discord: { policy: 'respond' },
     github: { policy: 'respond' },
@@ -156,7 +155,6 @@ export function sourceOf(e) {
   if (t.startsWith('ci.')) return 'ci';
   if (t.startsWith('task.train.')) return 'train';
   if (t === 'inbound.message') return SOURCES.includes(e.meta?.source) ? e.meta.source : null;
-  if (t === 'human.message' || t === 'ask.answered' || t === 'away.verdict') return 'hub';
   return null;
 }
 
@@ -330,7 +328,7 @@ function deliverToTask(id, line, { notice }) {
 function deliverToProducer(line) {
   const f = PRODUCER_INBOX();
   fs.mkdirSync(path.dirname(f), { recursive: true });
-  try { fs.writeFileSync(f, '# Producer inbox\n\n> Messages from people in the War Room. The Producer reads new ones in its briefing (`npm run handoff`).\n\n', { flag: 'wx' }); } catch {}
+  try { fs.writeFileSync(f, '# Producer inbox\n\n> Messages from people. The Producer reads new ones in its briefing (`npm run handoff`).\n\n', { flag: 'wx' }); } catch {}
   appendLine(f, line);
 }
 
@@ -482,12 +480,12 @@ export function unlinkKey(rawKey, { by, env = process.env } = {}) {
 }
 
 /**
- * An inbound message for a thread (a chat bot, a GitHub relay, the War Room's /api/inbox with a task): one
+ * An inbound message for a thread (a chat bot, a GitHub relay): one
  * inbound.message event, routed now. Returns the routing result: { action, to, tasks, ... }.
  */
 export function postInbound({ source, key, text, by, ref = null, author = null, env = process.env, producer = true } = {}) {
   if (!SOURCES.includes(source)) return { ok: false, message: `--source is one of ${SOURCES.join(', ')}` };
-  const may = source === 'hub' ? { ok: Boolean(by), why: 'say who' } : mayTouchThreads({ by, env });
+  const may = mayTouchThreads({ by, env });
   if (!may.ok) return { ok: false, message: may.why };
   const k = normalizeKey(key);
   if (!k) return { ok: false, message: `"${key}" isn't a key (a task id, a lane branch, a sha, discord:<id>, pr:<n> ...)` };
@@ -563,6 +561,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const where = (r.capped ? `sender ${r.author || '(not given)'} is not in studio/triggers.json "senders" for ${r.source}: at most a candidate; ` : '') + (r.action === 'routed' ? (r.to === 'task' ? `in ${r.tasks.join(', ')}'s inbox` : "in the Producer's inbox") : r.action === 'dropped' ? `dropped (${r.source}: ignore)` : 'threads are off');
     console.log(`[thread] ${where}`);
   } else {
-    fail('Usage: npm run thread -- status | sweep | resolve <key> | inbox <ID> [--peek] | link <key> <ID> --by <name> | unlink <key> --by <name> | post <key> "<text>" --source discord|github|hub --by <name> [--ref <id>] [--author <sender id>]');
+    fail('Usage: npm run thread -- status | sweep | resolve <key> | inbox <ID> [--peek] | link <key> <ID> --by <name> | unlink <key> --by <name> | post <key> "<text>" --source discord|github --by <name> [--ref <id>] [--author <sender id>]');
   }
 }

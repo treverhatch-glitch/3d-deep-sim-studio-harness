@@ -41,10 +41,10 @@ export function readVerdicts() {
   }
 }
 
-export async function addVerdict({ by, fun, build = null, note = '', quote = '', source = '', relayedBy = null, viaWarRoom = false }) {
+export async function addVerdict({ by, fun, build = null, note = '', quote = '', source = '', relayedBy = null }) {
   if (!isPerson(by)) return { ok: false, message: `${by || 'Nobody'} looks like an agent. A fun verdict comes from a person who played the build (--by <your name>).` };
   // From inside an agent session, a verdict is always a relay: the person's words and where they said them.
-  const inAgent = !viaWarRoom && Boolean(process.env.STUDIO_ROLE || (process.env.STUDIO_LOCK_OWNER && !isPerson(process.env.STUDIO_LOCK_OWNER)));
+  const inAgent = Boolean(process.env.STUDIO_ROLE || (process.env.STUDIO_LOCK_OWNER && !isPerson(process.env.STUDIO_LOCK_OWNER)));
   const relay = relayedBy || (inAgent ? process.env.STUDIO_LOCK_OWNER || 'an agent' : null);
   if (relay) {
     const q = String(quote || '').replace(/\s+/g, ' ').trim();
@@ -67,7 +67,7 @@ export async function addVerdict({ by, fun, build = null, note = '', quote = '',
   if (fun === 'not-yet') {
     const inbox = path.join(REPO_ROOT, 'studio', 'producer', 'INBOX.md');
     fs.mkdirSync(path.dirname(inbox), { recursive: true });
-    if (!fs.existsSync(inbox)) fs.writeFileSync(inbox, '# Producer inbox\n\n> Messages from people in the War Room. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
+    if (!fs.existsSync(inbox)) fs.writeFileSync(inbox, '# Producer inbox\n\n> Messages from people. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
     fs.appendFileSync(inbox, `- [${v.at.slice(0, 16).replace('T', ' ')}] **${by}** played build ${b.id}: not fun yet${v.note ? `: ${v.note}` : ''}\n`);
   }
   emitEvent({ type: 'playtest.verdict', agent: by, to: relay ? 'human' : 'producer', msg: `${by} played build ${b.id}${phase ? ` (Phase ${phase})` : ''}: ${fun === 'yes' ? 'yes, it\'s fun' : 'not fun yet'}${v.note ? `: ${v.note}` : ''}${relay ? ` (relayed by ${relay} from ${v.relayed.source}: "${v.relayed.quote.slice(0, 120)}"; ${by}, if that's wrong, record not-yet in the Arcade)` : ''}` });

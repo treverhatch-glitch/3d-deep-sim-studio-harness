@@ -378,13 +378,13 @@ export function readStop() {
   } catch { /* torn or empty */ }
   return { by: 'unknown', reason: 'the stop file .studio/STOP.json is there but unreadable (half-written?), so the studio counts as stopped', at: null, unreadable: true };
 }
-export function setStop(by = 'war-room-human', reason = '') {
+export function setStop(by = 'owner', reason = '') {
   const s = { by, reason: String(reason || '').slice(0, 300), at: new Date().toISOString() };
   writeAtomic(STOP_FILE, `${JSON.stringify(s, null, 2)}\n`);
   emitEvent({ type: 'studio.stopped', agent: by, to: 'producer', status: 'blocked', msg: `Studio stopped by ${by}${s.reason ? `: ${s.reason}` : ''}. No new tasks start until it resumes.` });
   return s;
 }
-export function clearStop(by = 'war-room-human') {
+export function clearStop(by = 'owner') {
   const was = readStop();
   fs.rmSync(STOP_FILE, { force: true });
   if (was) emitEvent({ type: 'studio.resumed', agent: by, to: 'producer', msg: `Studio resumed by ${by}` });

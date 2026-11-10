@@ -23,7 +23,7 @@ export const MAP_JSON = path.join(STUDIO_STATE_DIR, 'MAP.json');
 const CODE = /\.(mjs|js|cjs|ts|tsx|jsx|py|gd|cs|gdshader|html|css)$/i;
 const SKIP_DIR = new Set(['node_modules', '.git', '.studio', '.lanes', 'dist', 'build', '__pycache__', 'reports', 'golden', 'regressions', 'fixtures', '.godot', 'export', 'assets']);
 // Where code lives: the harness, and the game (cartridges/, game/, web/, engine/).
-const ROOTS = ['harness', 'hub', 'qa', 'scripts', 'tools', 'cartridges', 'game', 'web', 'engine', 'src'];
+const ROOTS = ['harness', 'qa', 'scripts', 'tools', 'cartridges', 'game', 'web', 'engine', 'src'];
 
 function walk(rel, out) {
   const full = path.join(REPO_ROOT, rel);
@@ -112,7 +112,7 @@ export function mapStale() {
 export async function findName(query, { harness = false } = {}) {
   const { indexFile, codeFiles } = await import('./codeindex.mjs');
   const q = String(query || '').toLowerCase();
-  const roots = harness ? ROOTS : ROOTS.filter((r) => !['harness', 'hub', 'qa', 'scripts', 'tools'].includes(r));
+  const roots = harness ? ROOTS : ROOTS.filter((r) => !['harness', 'qa', 'scripts', 'tools'].includes(r));
   const hits = [];
   for (const f of codeFiles(REPO_ROOT, roots)) {
     const text = fs.readFileSync(path.join(REPO_ROOT, f), 'utf8');

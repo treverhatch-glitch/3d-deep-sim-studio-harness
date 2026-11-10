@@ -37,7 +37,7 @@ npm run mode -- autostart off --by <name>    # back to the default: nothing star
 npm run mode -- autostart                    # which it is
 ```
 
-One switch, recorded in `studio/mode.json` with who flipped it (2.58.0, from a crew report: the hub, since
+One switch, recorded in `studio/mode.json` with who flipped it (2.58.0, from a crew report: the old hub, since
 retired, kept starting Producer sessions nobody asked for). Off, whatever the pace or MAX SPEED say:
 - the watcher's fill (`npm run agent -- fill`, the Director's flow, the game-dev loop's launch step) starts no agent;
 - the Producer check-in still pings and logs ("No Producer session was started: auto-start is off …"), but

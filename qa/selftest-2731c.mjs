@@ -34,7 +34,7 @@ export const VISIBLE = [
   { file: 'harness/visual-proof.mjs', call: "spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, env: rv.env })", why: 'the game\'s own visual capture command (its game config\'s capture line) may render in a real window' },
 ];
 
-const SCAN_DIRS = ['harness', 'hub', 'scripts', 'tools', path.join('qa', 'fixtures'), path.join('.claude', 'hooks')];
+const SCAN_DIRS = ['harness', 'scripts', 'tools', path.join('qa', 'fixtures'), path.join('.claude', 'hooks')];
 
 /** The JS files the check reads, relative to root (forward slashes). */
 export function scanFiles(root) {

@@ -2,7 +2,7 @@
 /**
  * harness/status.mjs — Zero-Token Studio Status Snapshot
  *
- * Reads `.studio/events.jsonl`, `.studio/usage.json`, `.studio/war-room.config.json`,
+ * Reads `.studio/events.jsonl`, `.studio/usage.json`,
  * `.studio/cooldowns.json`, `studio/NEXT.md`, `studio/CURRENT_TASK.md`,
  * `studio/VISION_LOCK.md`, `studio/llms.txt`, `studio/done/`, and `studio/roles/`
  * locally without calling any LLM.
@@ -24,9 +24,6 @@ export const USAGE_FILE = process.env.STUDIO_USAGE_FILE
   ? path.resolve(REPO_ROOT, process.env.STUDIO_USAGE_FILE)
   : path.join(STUDIO_STATE_DIR, 'usage.json');
 
-export const WAR_ROOM_CONFIG_FILE = process.env.WAR_ROOM_CONFIG_FILE
-  ? path.resolve(REPO_ROOT, process.env.WAR_ROOM_CONFIG_FILE)
-  : path.join(STUDIO_STATE_DIR, 'war-room.config.json');
 
 export function readSubscriptionUsage() {
   try {
@@ -63,48 +60,6 @@ export function writeSubscriptionUsage(nextUsage) {
   };
   fs.writeFileSync(USAGE_FILE, JSON.stringify(merged, null, 2) + '\n', 'utf8');
   return merged;
-}
-
-export function readWarRoomConfig() {
-  try {
-    if (fs.existsSync(WAR_ROOM_CONFIG_FILE)) {
-      return JSON.parse(fs.readFileSync(WAR_ROOM_CONFIG_FILE, 'utf8'));
-    }
-  } catch {
-    // fallback below
-  }
-  return {
-    updatedAt: new Date().toISOString(),
-    theme: {
-      crtScanlines: true,
-      glassBlurPx: 12,
-      accentColor: '#00F0FF',
-      secondaryAccent: '#0EA5E9',
-      backgroundColor: '#06080E',
-    },
-    producerPreset: process.env.STUDIO_PRODUCER_PRESET || 'grok-bot',
-    viewport: {
-      activeSource: 'cdp',
-      novncUrl: process.env.NOVNC_URL || 'http://localhost:6080/vnc.html?autoconnect=true&resize=scale',
-      novncWsUrl: 'ws://localhost:6080/websockify',
-      webrtcUrl: 'http://localhost:8889/agent-stream',
-      hmrUrl: process.env.PLAYTEST_URL || 'http://localhost:5173/?playtest=1',
-      showUisentinelOverlay: true,
-      showSimTelemetryOverlay: true,
-      manualControlEnabled: false,
-      targetFps: 30,
-    },
-    terminal: {
-      activeTab: 'events',
-      readOnlyShell: true,
-      roleFilter: 'ALL',
-      regexFilter: '',
-    },
-    layout: {
-      leftColumnWidthPct: 54,
-      topRowHeightPct: 58,
-    },
-  };
 }
 
 export function findLatestQaScreenshot() {
@@ -172,7 +127,6 @@ export function buildStudioSnapshot() {
   const rawRoles = loadAllRoles();
   const presets = loadPresets();
   const usage = readSubscriptionUsage();
-  const warRoomConfig = readWarRoomConfig();
   const contextHealth = readContextHealth();
   const doneArchive = readDoneArchive();
 
@@ -271,7 +225,7 @@ export function buildStudioSnapshot() {
   return {
     generatedAt: new Date().toISOString(),
     llmTokensUsedForStatus: 0,
-    producerPreset: warRoomConfig.producerPreset || process.env.STUDIO_PRODUCER_PRESET || 'grok-bot',
+    producerPreset: process.env.STUDIO_PRODUCER_PRESET || 'grok-bot',
     rolesCount: roles.length,
     roles,
     presets,
@@ -280,14 +234,7 @@ export function buildStudioSnapshot() {
     contextHealth,
     router,
     usage,
-    warRoomConfig,
-    liveView: {
-      latestScreenshot: findLatestQaScreenshot(),
-      novncUrl: warRoomConfig.viewport?.novncUrl || process.env.NOVNC_URL || 'http://127.0.0.1:6080/vnc.html',
-      novncWsUrl: warRoomConfig.viewport?.novncWsUrl || 'ws://127.0.0.1:6080/websockify',
-      webrtcUrl: warRoomConfig.viewport?.webrtcUrl || 'http://127.0.0.1:8889/agent-stream',
-      playtestUrl: warRoomConfig.viewport?.hmrUrl || process.env.PLAYTEST_URL || 'http://127.0.0.1:5173/?playtest=1',
-    },
+    liveView: { latestScreenshot: findLatestQaScreenshot() },
     telemetry: {
       totalEvents: events.length,
       ...totals,

@@ -46,8 +46,7 @@ With either `respond` or `candidate`, an event that matches no task goes to the 
 `studio/producer/INBOX.md`, which the Producer reads at its next start. Entries under `types` override the
 source's policy for a single event type. Defaults: a CI failure responds and a CI green is ignored. For the
 train, a dropped or partial lane responds, while a red train, a deferred lane, a red `main` and a flaky
-train are candidates. Every other train event (start, verify, pins, landed, done) is ignored. Hub is a
-candidate; Discord and GitHub respond only for listed senders (below), else candidate.
+train are candidates. Every other train event (start, verify, pins, landed, done) is ignored. Discord and GitHub respond only for listed senders (below), else candidate.
 
 ### Who may make a post respond (`"senders"`, 2.65.0)
 
@@ -64,8 +63,8 @@ can't verify a Discord or GitHub identity itself: the bot passes the author id i
 (`--author`), and the harness applies the owner's lists to it. The table is protected, so only the owner changes
 the lists.
 
-Sources: `ci` (ci-watch), `train` (`task.train.*`), `hub` (ask answers, and before 2.80 the War Room's
-`/api/inbox` and away verdicts), and `discord` and `github` (`npm run thread -- post`).
+Sources: `ci` (ci-watch), `train` (`task.train.*`), and `discord` and `github` (`npm run thread -- post`).
+(A `hub` source, the War Room's, is gone since 2.81; an old `triggers.json` that lists it is read without it.)
 
 **Pass-through never adds a task and never edits the board.** The Producer is still the only writer to the
 live queue. Gates, the train, locks and protected files are unchanged.
@@ -90,7 +89,7 @@ npm run thread -- resolve <key>                  # which task a key belongs to
 npm run thread -- inbox T-123 [--peek]           # read a task's inbox (marks it read)
 npm run thread -- link discord:<id> T-123 --by <name>
 npm run thread -- unlink discord:<id> --by <name>
-npm run thread -- post <key> "<text>" --source discord|github|hub --by <name> [--ref <id>] [--author <sender id>]
+npm run thread -- post <key> "<text>" --source discord|github --by <name> [--ref <id>] [--author <sender id>]
 ```
 
 `link`, `unlink` and `post` accept a Producer or Director session, an agent outside the harness (a chat bot)

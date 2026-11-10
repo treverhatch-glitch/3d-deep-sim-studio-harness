@@ -9,7 +9,7 @@
  * task.type.evidence event. A file is game logic, so the task stays a bug and still needs its replay, when it is:
  *   - in the game's sim paths: harness/tiers.mjs's "sim" rule (game/<g>/sim, web/<g>/sim, cartridges/) plus the game
  *     manifest's "simPaths", "pins.files", "irreversible", "shared" and "registry" globs (<game>/studio.gates.json);
- *   - a golden or snapshot (behaviour), a deleted test, or the studio's own code (harness/, hub/, scripts/, qa/*.mjs);
+ *   - a golden or snapshot (behaviour), a deleted test, or the studio's own code (harness/, scripts/, qa/*.mjs);
  *   - anything else that isn't a test (harness/test-weakening.mjs isTestPath), a doc (*.md, docs/) or a config file
  *     (json/yaml/toml/ini settings, *.config.*, dotfile settings; package files are shared code, not config).
  * An owner or permission record (harness/reclassify.mjs) always outranks the evidence; no commits yet: the title
@@ -30,7 +30,7 @@ const PACKAGE_RX = /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn
 export function fileKind(f) {
   const p = String(f).replace(/\\/g, '/');
   if (isGoldenPath(p) || PACKAGE_RX.test(p)) return null;
-  if (/^(harness|hub|scripts)\//.test(p) || /^qa\/[^/]+\.mjs$/.test(p)) return null;
+  if (/^(harness|scripts)\//.test(p) || /^qa\/[^/]+\.mjs$/.test(p)) return null;
   if (isTestConfig(p)) return 'config';
   if (isTestPath(p)) return 'test';
   if (/\.md$/i.test(p) || /^docs\//.test(p)) return 'docs';

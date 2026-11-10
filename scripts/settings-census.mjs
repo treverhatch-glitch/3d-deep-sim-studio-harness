@@ -6,7 +6,7 @@
  *   node scripts/settings-census.mjs [--json] [--env <studio .env>] [--events <events.jsonl>]
  *
  * Per setting: its default and its files (scripts/settings-map.mjs's scan, reused, not re-parsed), the modules that
- * read it (harness/, scripts/, hub/, qa/*.mjs, not qa/selftest*), how many, whether docs/settings-baseline.json
+ * read it (harness/, scripts/, qa/*.mjs, not qa/selftest*), how many, whether docs/settings-baseline.json
  * freezes it (undocumented since 2.66.0), the first release whose CHANGELOG.md section or docs/RELEASE-<v>.md mentions
  * it, and with --env / --events whether that studio sets it (a key in the .env, or any mention in the events file).
  * Candidates: (a) off switches for a fix, added two or more releases ago (name or its docs line says off / restores

@@ -14,7 +14,7 @@
  *   intake-answers.json                                                    answers for `npm run intake --answers`
  *   settings.env                                                           STUDIO_*, HUB_*, AGENT_*, PLAYTEST_* lines
  * Never in a setup: keys, tokens or passwords (lines that look like one are dropped and named), the
- * harness itself (harness/, hub/, qa/, scripts/), or a game's progress (the board, events, locks).
+ * harness itself (harness/, qa/, scripts/), or a game's progress (the board, events, locks).
  * `this` (or --save-setup) takes the current studio's roles, skills, presets, rules, departments,
  * budget and pace, and never its game, its Bible or its .env.
  */

@@ -77,7 +77,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (process.argv.includes('--accept-top-tier')) {
     const by = process.argv[process.argv.indexOf('--accept-top-tier') + 1] || 'human';
     acceptModelWarning(by);
-    console.log(`Accepted by ${by}. The War Room's warning stays hidden until the models change.`);
+    console.log(`Accepted by ${by}. The warning stays hidden until the models change.`);
     process.exit(0);
   }
   // Per-role tiers (2.29.2): a strong suggestion, never enforced.
@@ -88,7 +88,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     for (const r of w.roles) console.log(`  ${r.role.padEnd(14)} ${String(r.model).padEnd(28)} ${r.tier.padEnd(7)} suggested: ${r.suggested}`);
     console.log(`  Tiers: top ${TIER_EXAMPLES.top}; mid ${TIER_EXAMPLES.mid}; cheap ${TIER_EXAMPLES.cheap}.`);
   }
-  if (w.allTop) console.log(`\nWarning: the top tier on every role. ${w.text}${w.accepted ? ` (accepted by ${w.accepted.by})` : ' Accept it in the War Room, or: npm run models:check -- --accept-top-tier <your name>'}\n`);
+  if (w.allTop) console.log(`\nWarning: the top tier on every role. ${w.text}${w.accepted ? ` (accepted by ${w.accepted.by})` : ' Accept it with: npm run models:check -- --accept-top-tier <your name>'}\n`);
   const rows = await checkModels({ dryRun: process.argv.includes('--dry-run') });
   for (const r of rows) console.log(`${r.status.padEnd(12)} ${r.id.padEnd(22)} ${String(r.model).padEnd(42)} ${r.note}`);
   const missing = rows.filter((r) => r.status === 'missing');

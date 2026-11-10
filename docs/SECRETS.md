@@ -12,7 +12,7 @@ This repository is a **public open-source template**. It must remain **100% free
 2. **Never Hardcode Keys in Scripts or Configs**:
    - Always read keys from `process.env.<KEY_NAME>` inside `harness/models.config.mjs` and `harness/route.mjs`.
 3. **Keep `.studio/usage.json` Safe to Share**:
-   - `.studio/usage.json` tracks numeric quota usage (`used`, `limit`, `resetAt`) and provider display names—never store API tokens inside `.studio/usage.json` or `.studio/war-room.config.json`.
+   - `.studio/usage.json` tracks numeric quota usage (`used`, `limit`, `resetAt`) and provider display names—never store API tokens inside `.studio/usage.json`.
 
 ---
 

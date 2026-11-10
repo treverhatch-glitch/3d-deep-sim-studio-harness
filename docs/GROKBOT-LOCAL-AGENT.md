@@ -12,7 +12,7 @@ Upstream: **https://github.com/robbin/grokbot-local-agent**
 - **Thin Executive Producer**: Grok Bot only schedules, triages `studio/NEXT.md`, and reviews → matches our `producer` role (`studio/presets/grok-producer.md`).
 - **Quota Sovereignty**: Heavy coding, bulk refactors, and Stage-1/Stage-2 QA runs execute on another model's API keys (`harness/route.mjs`: Vertex Gemini credits, free NVIDIA NIM GLM 5.3 Flash / Nemotron, Groq, or local Ollama).
 - **Disk-Backed State + Webhook Wakeup**: Solves the *"bot went to sleep and never heard the result"* problem without polling chat and burning the 30k–80k+ token check-in tax.
-- **Zero-Token HUB Compatibility**: Their `~/.pi/tasks/<id>/events.jsonl` stream mirrors directly into `.studio/events.jsonl` so `hub/WarRoom.tsx` lights up automatically.
+- **Zero-Token Status Compatibility**: Their `~/.pi/tasks/<id>/events.jsonl` stream mirrors directly into `.studio/events.jsonl` so `npm run studio:status` and the Studio Status posts show it.
 
 ---
 
@@ -21,7 +21,7 @@ Upstream: **https://github.com/robbin/grokbot-local-agent**
 | `grokbot-local-agent` | This Studio Template |
 |---------------------|--------------|
 | `pi-task` state in `~/.pi/tasks/<id>/` | Source of truth for delegated background work |
-| `events.jsonl` inside the task folder | Mirror or append lines via `node scripts/append-event.mjs` into `.studio/events.jsonl` so the HUB displays live nodes |
+| `events.jsonl` inside the task folder | Mirror or append lines via `node scripts/append-event.mjs` into `.studio/events.jsonl` so `npm run studio:status` shows it |
 | On-completion webhook (`PI_NOTIFY_URL`) | Grok Bot routine reads result, updates `studio/CURRENT_TASK.md`, writes `studio/done/` summary |
 | `--owner <agent-id>` | Use `--owner grok-producer` so tasks stay tied to the Executive Producer |
 

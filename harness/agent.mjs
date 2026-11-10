@@ -2107,7 +2107,7 @@ export function saveWorkOf(agent, task, mine, s = readJson(sessionFile(agent))) 
 const tasksOf = (agent, s) => [...new Set([...listLocks().filter((l) => l.owner === agent && l.key.startsWith('task:')).map((l) => l.key.slice(5)), ...(s?.task ? [s.task] : [])])];
 
 /** Pause an agent: its task goes back to the queue with a note (and its claims), then the process ends. */
-export function pauseAgent(agent, note = '', by = 'war-room-human') {
+export function pauseAgent(agent, note = '', by = 'owner') {
   const s = sessions().find((x) => x.agent === agent && x.running);
   if (!s) return { ok: false, message: `${agent} isn't running.` };
   const mine = listLocks().filter((l) => l.owner === agent);
@@ -2129,7 +2129,7 @@ export function pauseAgent(agent, note = '', by = 'war-room-human') {
  * still marked running whose process is gone, or whose number another program has now, is ended here (work handed
  * back, claims freed) without killing anything, instead of "isn't running".
  */
-export function stopAgentNamed(agent, by = 'war-room-human') {
+export function stopAgentNamed(agent, by = 'owner') {
   const s = sessions().find((x) => x.agent === agent && x.status === 'running');
   if (!s) return { ok: false, message: `${agent || '(no name)'} isn't running.` };
   const tasks = tasksOf(agent, s);
@@ -2140,7 +2140,7 @@ export function stopAgentNamed(agent, by = 'war-room-human') {
 }
 
 /** "Stop all": every running launcher session hands its task back with a note and ends. */
-export function stopAllAgents(by = 'war-room-human', reason = '') {
+export function stopAllAgents(by = 'owner', reason = '') {
   const stopped = [];
   const list = sessions().filter((x) => x.running);
   // PU-17: one OS query for every session's start time, not one per session.
@@ -2423,7 +2423,7 @@ export function startAgent(opts, { detach = false } = {}) {
   // The Director watches for drift and files corrections; the Producer decides staffing.
   if (opts.by && /^director\b/i.test(String(opts.by))) return { ok: false, message: 'The Director does not hire: file a correction task for the Producer instead.' };
   // A frozen clone (a test run) keeps agents out of the harness itself.
-  if (opts.lane && fs.existsSync(path.join(REPO_ROOT, '.studio', 'harness-frozen')) && /^(\.\/)?(harness|hub|qa|scripts)(\/|$)/.test(String(opts.lane).replace(/\\/g, '/'))) return { ok: false, message: `Not started: ${opts.lane} is harness code, and this clone's harness is frozen.` };
+  if (opts.lane && fs.existsSync(path.join(REPO_ROOT, '.studio', 'harness-frozen')) && /^(\.\/)?(harness|qa|scripts)(\/|$)/.test(String(opts.lane).replace(/\\/g, '/'))) return { ok: false, message: `Not started: ${opts.lane} is harness code, and this clone's harness is frozen.` };
   // The Producer hires on its own up to a limit (studio/budget.json producerMayHireUpTo, default 4);
   // past it, the hire becomes a question for the game dev (Needs you), started when they say yes.
   if (opts.by && isAgentName(opts.by) && !opts.approved) {

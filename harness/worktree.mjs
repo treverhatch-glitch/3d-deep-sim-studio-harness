@@ -140,12 +140,11 @@ export function linkDir(target, link) {
   }
 }
 
-/** node_modules folders worth linking: the root's, hub/'s, and one level into game/, web/, engine/. */
+/** node_modules folders worth linking: the root's, and one level into game/, web/, engine/. */
 export function nodeModuleDirs(root) {
   const out = [];
   const add = (rel) => fs.existsSync(path.join(root, rel, 'node_modules')) && out.push(path.join(rel, 'node_modules'));
   add('');
-  add('hub');
   for (const top of ['game', 'web', 'engine']) {
     const d = path.join(root, top);
     if (!fs.existsSync(d)) continue;

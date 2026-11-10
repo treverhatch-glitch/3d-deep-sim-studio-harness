@@ -99,7 +99,7 @@
   otherwise). `STUDIO_VERIFY_PRELOADED` carries that note from a verify to its detached run. node_modules that don't match
   package-lock.json (versions, missing or extra packages, a plain file in `.bin` on macOS and Linux) get one WARN line.
 - Console windows on Windows (2.73.1, B-59): every process the harness starts passes `windowsHide: true` (harness/,
-  hub/, scripts/, tools/, qa/, the hooks; qa/selftest-2731c.mjs fails on a call without it). Only the engine and visual
+  scripts/, tools/, qa/, the hooks; qa/selftest-2731c.mjs fails on a call without it). Only the engine and visual
   capture runs, which render frames in a real window, are left visible. So a `NODE_OPTIONS=--require <file>` preload
   that forces windowsHide is no longer needed, and it is exactly what the scrub above drops from gate children (and
   WARNs about in run-gates' own process). After taking 2.73.1, remove it wherever it was set and start the studio again
@@ -337,7 +337,7 @@ owner never types `--by <owner>`. Every use is logged as before (the decisions l
   (`.studio/gates/runs/<id>.json`, the record's digest). Task done and the train reuse a record only when its run log
   matches (a hand-written or edited record says why it isn't reused). A verify started beside untracked files, or
   ignored ones outside build and dependency output (`node_modules`, `dist`, `build`, `coverage`, `.vite`, …), under the
-  game, `cartridges/`, `qa/`, `harness/`, `scripts/`, `engine/`, `hub/` or a runner config at the root, records
+  game, `cartridges/`, `qa/`, `harness/`, `scripts/`, `engine/` or a runner config at the root, records
   `dirty: true` and the files (`hidden`), and is never reused.
   2.76.0 (B-85): files the game's own build and test scripts write are output, not hidden inputs: `.vite-cache` and
   `.tsbuild` count as build output; a wholly ignored folder is judged by the files in it (one holding only `*.tsbuildinfo`
