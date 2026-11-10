@@ -97,7 +97,7 @@ export async function briefFacts({ root = REPO_ROOT, since = null, now = Date.no
   // 2.70.0 (v): assets waiting for a review of their previews (.studio/asset-reviews/), oldest first.
   try { const rv = (await import('./asset-review.mjs')).pendingReviews(root); if (rv.length) blockers.push({ kind: 'asset-review', ids: rv.map((r) => r.asset), text: 'asset reviews (oldest first)' }); } catch {}
   const wd = readJson(path.join(root, '.studio', 'winddown.json'));
-  if (wd?.at) blockers.push({ kind: 'winddown', text: `winding down${wd.pct !== null && wd.pct !== undefined ? ` (usage ${Math.round(wd.pct)}%)` : ''}` });
+  if (wd?.at && !(await import('./winddown.mjs')).winddownOver(wd, { env, now })) blockers.push({ kind: 'winddown', text: `winding down${wd.pct !== null && wd.pct !== undefined ? ` (usage ${Math.round(wd.pct)}%)` : ''}` });
   // PC.
   const test = env.STUDIO_TEST_FREEMEM_MB;
   const freeGb = Math.round(((test !== undefined && test !== '' ? Number(test) * 1024 * 1024 : os.freemem()) / 1024 ** 3) * 10) / 10;

@@ -7,6 +7,9 @@
  *
  * Patch #24 / R3-14 (P1): a lock whose owner's session had ended could be taken by nobody until it expired (a P0 "fix
  * main" waited an hour), and `lock release <key> --owner X` from the orchestrator was refused by its STUDIO_LOCK_OWNER.
+ *
+ * Patch #14 / R3-7 (P1): a manual wind-down ("everything off") still started API-pool and Vertex builders; a usage
+ * wind-down outlived removing STUDIO_USAGE_WINDDOWN_PCT; an agent's `winddown --now` had no end only a person could --off.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -46,18 +49,25 @@ export async function selftest280C({ dir, report, tmpRoot }) {
     });
   }
 
-  // ---- Patch #24: sessionless locks and lock release --owner ----
-  {
-    const S = scratch('locks');
+  // A scratch studio holding a copy of harness/: its CLIs run with a clean env (no agent markers, no STUDIO_*).
+  const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|CLAUDECODE$|AI_AGENT$|CODEX_SANDBOX$|GEMINI_CLI$|AGENT_EVENTS_FILE$)/.test(k)));
+  const studio = (tag) => {
+    const S = scratch(tag);
     fs.cpSync(path.join(dir, 'harness'), path.join(S, 'harness'), { recursive: true });
     fs.copyFileSync(path.join(dir, 'package.json'), path.join(S, 'package.json'));
-    const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|CLAUDECODE$|AI_AGENT$|CODEX_SANDBOX$|GEMINI_CLI$|AGENT_EVENTS_FILE$)/.test(k)));
-    const events = path.join(S, '.studio', 'events-280c.jsonl');
-    const lock = (args, env = {}) => {
-      const r = spawnSync(process.execPath, [path.join(S, 'harness', 'lock.mjs'), ...args], { cwd: S, encoding: 'utf8', windowsHide: true, env: { ...clean, AGENT_EVENTS_FILE: events, STUDIO_MAIN_ROOT: S, ...env } });
+    const events = path.join(S, '.studio', `events-280c-${tag}.jsonl`);
+    const node = (args, env = {}) => {
+      const r = spawnSync(process.execPath, args, { cwd: S, encoding: 'utf8', windowsHide: true, env: { ...clean, AGENT_EVENTS_FILE: events, STUDIO_MAIN_ROOT: S, ...env } });
       let j = null; try { j = JSON.parse(r.stdout); } catch {}
-      return { status: r.status, j, out: `${r.stdout}${r.stderr}`.slice(-800) };
+      return { status: r.status, j, out: `${r.stdout}${r.stderr}`.replace(/\r\n/g, '\n').slice(-800) };
     };
+    return { S, events, node };
+  };
+
+  // ---- Patch #24: sessionless locks and lock release --owner ----
+  {
+    const { S, events, node } = studio('locks');
+    const lock = (args, env = {}) => node([path.join(S, 'harness', 'lock.mjs'), ...args], env);
     const as = (who, role = '') => ({ STUDIO_LOCK_OWNER: who, STUDIO_ROLE: role });
     lock(['claim', 'task:T-801', '--owner', 'builder-gone'], as('builder-gone', 'builder'));
     lock(['claim', 'path:game/sys/a.js', '--owner', 'builder-gone'], as('builder-gone', 'builder'));
@@ -83,6 +93,41 @@ export async function selftest280C({ dir, report, tmpRoot }) {
       const ok = orch.status === 0 && orch.j?.released === true && worker.status === 1 && /only a person, the orchestrator or a Producer\/Director session/.test(worker.j?.message || '')
         && JSON.stringify(still.j || {}).includes('hatch');
       return [ok, JSON.stringify({ orch, worker, still })];
+    });
+  }
+
+  // ---- Patch #14 / R3-7: the wind-down ----
+  {
+    await guard('2.80 (c) #14: a manual wind-down ("everything off", winddown.json manual) returns before the API-pool / Vertex check, so it starts no paid builders; the usage wind-down keeps letting them through (fails on 2.79.2: the pass went on whenever apiPoolOn() or vertexReady.ok)', () => {
+      const sup = fs.readFileSync(path.join(dir, 'harness', 'supervisor.mjs'), 'utf8').replace(/\r\n/g, '\n');
+      const line = sup.split('\n').find((l) => /if \(wd\.active\)/.test(l)) || '';
+      return [/wd\.state\?\.manual \|\| \(!apiPoolOn\(poolUsage\) && !vertexReady\.ok\)\) return \{ started: \[\]/.test(line), line.slice(0, 400) || 'no wd.active line'];
+    });
+    const { S, node } = studio('wd');
+    const wdFile = path.join(S, '.studio', 'winddown.json');
+    const cli = (args, env = {}) => node([path.join(S, 'harness', 'winddown.mjs'), ...args], env);
+    const pass = (env, now) => node(['--input-type=module', '-e', `import { winddownPass } from ${JSON.stringify(pathToFileURL(path.join(S, 'harness', 'winddown.mjs')).href)}; console.log(JSON.stringify(winddownPass({ now: ${now}, env: process.env, rows: [{ tool: 'claude', pct: 0.95, weekly: true }] })));`], env);
+    await guard('2.80 (c) #14: a usage wind-down that started at STUDIO_USAGE_WINDDOWN_PCT=90 ends on the next pass once the setting is removed (usage still 95%), and `studio:winddown` stops saying "Winding down" for it; with the setting still there it keeps going (fails on 2.79.2: it kept the threshold it started with)', () => {
+      fs.writeFileSync(wdFile, JSON.stringify({ at: new Date(Date.now() - 600000).toISOString(), why: 'usage 95%', pct: 95, threshold: 90, tool: 'claude', resets: null, manual: false, by: null, until: null, file: '.studio/restart-log.md' }));
+      const kept = pass({ STUDIO_USAGE_WINDDOWN_PCT: '90' }, Date.now());
+      const said = cli([], {});
+      const ended = pass({}, Date.now());
+      const ok = kept.j?.active === true && /^Not winding down/.test(said.out) && ended.j?.resumed === true && !fs.existsSync(wdFile);
+      return [ok, JSON.stringify({ kept, said, ended })];
+    });
+    await guard('2.80 (c) #14: an agent\'s `winddown --now` without --until is refused with the usage line; with --until <time> it winds down until then and the pass ends it by itself at that time; a person\'s --now needs no --until (fails on 2.79.2: an agent wound down with no end only a person could --off)', () => {
+      fs.rmSync(wdFile, { force: true });
+      const agent = { CLAUDECODE: '1' };
+      const bare = cli(['--now', '--by', 'opus-1'], agent);
+      const until = new Date(Date.now() + 3600000).toISOString();
+      const timed = cli(['--now', '--by', 'opus-1', '--until', until], agent);
+      const st = (() => { try { return JSON.parse(fs.readFileSync(wdFile, 'utf8')); } catch { return null; } })();
+      const before = pass({}, Date.now() + 1800000);
+      const after = pass({}, Date.now() + 3700000);
+      const person = cli(['--now', '--by', 'hatch'], {});
+      const ok = bare.status === 1 && /--until <time>/.test(bare.out) && timed.status === 0 && st?.manual === true && Date.parse(st.until) === Date.parse(until)
+        && before.j?.active === true && after.j?.resumed === true && person.status === 0;
+      return [ok, JSON.stringify({ bare, timed, st, before, after, person })];
     });
   }
 }

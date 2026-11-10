@@ -130,7 +130,7 @@ export async function daemonFacts(root, { env = process.env, now = Date.now(), h
   const tr = await import('./train.mjs');
   const facts = { now, auto: trainAuto(root, env), trainOn: tr.trainOn(env), halted: halted ? String(halted.why || halted) : null, haltScope: halted && typeof halted === 'object' ? halted.scope || null : null, ...given };
   if (!('drain' in given)) { try { const d = await (await import('./busy.mjs')).readDrain(); facts.drain = d?.on ? `by ${d.by || '?'}${d.why ? `: ${d.why}` : ''}` : null; } catch { facts.drain = null; } }
-  if (!('winddown' in given)) { try { const w = (await import('./winddown.mjs')).readWinddown(); facts.winddown = w ? w.why || `since ${w.at}` : null; } catch { facts.winddown = null; } }
+  if (!('winddown' in given)) { try { const wm = await import('./winddown.mjs'); const w = wm.readWinddown(); facts.winddown = w && !wm.winddownOver(w, { env, now }) ? w.why || `since ${w.at}` : null; } catch { facts.winddown = null; } }
   if (!('stopped' in given)) { try { const s = (await import('./task.mjs')).readStop(); facts.stopped = s ? `by ${s.by}` : null; } catch { facts.stopped = null; } }
   if (!('lock' in given)) facts.lock = trainLockHeld(root, env, now);
   if (!('next' in given)) { try { const pl = await import('./train-pipeline.mjs'); const wt = await import('./worktree.mjs'); const tip = String(spawnSync('git', ['rev-parse', `refs/heads/${wt.mainBranch(root)}`], { cwd: root, encoding: 'utf8', windowsHide: true }).stdout || '').trim() || null; facts.next = pl.nextBusy(root, { env, now, tip }); } catch { facts.next = null; } }

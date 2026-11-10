@@ -437,7 +437,7 @@ export async function supervise(opts, state, now = Date.now()) {
     const { winddownPass } = await import('./winddown.mjs');
     const { readHolds } = await import('./task-hold.mjs');
     const wd = winddownPass({ now, rows: st, dryRun: opts.dryRun, lists: () => ({ live: sessions().filter((s) => s.running).map((s) => ({ agent: s.agent, role: s.role, task: s.task })), queued: (parseNextQueue().backlog || []).map((t) => ({ id: t.id, role: t.role, title: t.title })), held: Object.entries(readHolds()).filter(([, h]) => h?.held).map(([id, h]) => ({ id, why: h.held.why || 'held' })) }) });
-    if (wd.active) { poolUsage = { winddown: true, why: wd.why }; if (!apiPoolOn(poolUsage) && !vertexReady.ok) return { started: [], why: [wd.why], winddown: true }; }
+    if (wd.active) { poolUsage = { winddown: true, why: wd.why }; if (wd.state?.manual || (!apiPoolOn(poolUsage) && !vertexReady.ok)) return { started: [], why: [wd.why], winddown: true }; } // 2.80 (c) #14: a manual one starts nothing, paid builders included
   } catch { /* the wind-down is a guard, never a crash */ }
   const { weightedTokens } = await import('./budget.mjs');
   const spentHere = Math.round(readRecentEvents(50000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= state.startedAt).reduce((n, e) => n + weightedTokens(e), 0));
