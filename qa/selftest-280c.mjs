@@ -74,6 +74,8 @@ export async function selftest280C({ dir, report, tmpRoot }) {
   {
     const { S, events, node } = studio('locks');
     const lock = (args, env = {}) => node([path.join(S, 'harness', 'lock.mjs'), ...args], env);
+    spawnSync('git', ['init', '-q'], { cwd: S, windowsHide: true });
+    fs.writeFileSync(path.join(S, '.env'), 'STUDIO_OUTSIDE_SIGNERS=opus-1\n');
     const as = (who, role = '') => ({ STUDIO_LOCK_OWNER: who, STUDIO_ROLE: role });
     lock(['claim', 'task:T-801', '--owner', 'builder-gone'], as('builder-gone', 'builder'));
     lock(['claim', 'path:game/sys/a.js', '--owner', 'builder-gone'], as('builder-gone', 'builder'));
@@ -92,13 +94,15 @@ export async function selftest280C({ dir, report, tmpRoot }) {
     });
     lock(['claim', 'task:T-803', '--owner', 'hatch'], as('hatch'));
     lock(['claim', 'task:T-804', '--owner', 'hatch'], as('hatch'));
-    await guard('2.80 (c) #24: `lock release <key> --owner hatch` from the orchestrator\'s shell (STUDIO_LOCK_OWNER=opus-1, not launched) releases hatch\'s lock; from a worker session it is refused, naming the rule (only a person, the orchestrator or a Producer/Director session) (fails on 2.79.2: the orchestrator was refused as "someone else (STUDIO_LOCK_OWNER=opus-1)")', () => {
+    await guard('2.80 (c) #24: `lock release <key> --owner hatch` from the orchestrator\'s shell (STUDIO_LOCK_OWNER=opus-1, an outside agent the owner named in STUDIO_OUTSIDE_SIGNERS) releases hatch\'s lock; from a worker session, or an agent the owner didn\'t name, it is refused naming the rule (fails on 2.79.2: the orchestrator was refused as "someone else (STUDIO_LOCK_OWNER=opus-1)")', () => {
       const orch = lock(['release', 'task:T-803', '--owner', 'hatch'], as('opus-1'));
       const worker = lock(['release', 'task:T-804', '--owner', 'hatch'], as('builder-new', 'builder'));
+      const other = lock(['release', 'task:T-804', '--owner', 'hatch'], as('bob-1'));
       const still = lock(['status', 'task:T-804']);
-      const ok = orch.status === 0 && orch.j?.released === true && worker.status === 1 && /only a person, the orchestrator or a Producer\/Director session/.test(worker.j?.message || '')
+      const rule = /only a person, a Producer\/Director session or an outside agent the owner named \(STUDIO_OUTSIDE_SIGNERS\)/;
+      const ok = orch.status === 0 && orch.j?.released === true && worker.status === 1 && rule.test(worker.j?.message || '') && other.status === 1 && rule.test(other.j?.message || '')
         && JSON.stringify(still.j || {}).includes('hatch');
-      return [ok, JSON.stringify({ orch, worker, still })];
+      return [ok, JSON.stringify({ orch, worker, other, still })];
     });
   }
 

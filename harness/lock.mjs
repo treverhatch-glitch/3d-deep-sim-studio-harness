@@ -27,7 +27,7 @@ import { recordAlive } from './proc-identity.mjs';
 import { createExclusive, moveAside, onFsafeWarning, sweepTemps, withFileLock, writeAtomic } from './fsafe.mjs';
 import { watchCommand } from './workaround.mjs';
 import { inNoteDir } from './reviewer-scope.mjs';
-import { actorOf, mayDecide } from './permission.mjs';
+import { actorOf, outsideSigners } from './permission.mjs';
 
 // 2.58.0 (PU-43): fsafe's warnings (a state file written in place because another program held it open) are logged
 // as events too, not only printed to a console nobody may read. Every command that changes studio state loads this.
@@ -495,13 +495,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   if (cmd === 'claim') out(claim(maybeKey, owner, Number(flag('--ttl') || 3600), { wide: flag('--wide') || null, byHand: true }));
   if (cmd === 'release') {
-    // 2.80 (c), Patch #24: `--owner X` naming someone else acts for X when the caller may make board decisions (a person,
-    // the orchestrator, a Producer/Director session: permission.mjs mayDecide); a worker is refused, naming the rule.
+    // 2.80 (c), Patch #24: `--owner X` naming someone else acts for X when the caller is a person (no STUDIO_LOCK_OWNER),
+    // a Producer/Director session or an outside agent the owner named (STUDIO_OUTSIDE_SIGNERS, the main checkout's .env);
+    // anyone else (a worker, an agent naming itself) is refused naming that rule (K01: naming the holder is not enough).
     const actor = actorOf({ root: REPO_ROOT });
-    const may = flag('--owner') && flag('--owner') !== actor.name ? mayDecide('board', actor, { root: REPO_ROOT }) : null;
-    const res = release(maybeKey, owner, { caller: may?.ok ? null : may ? { ...holderOf(), as: actor.name || `a ${actor.role || 'worker'} session` } : holderOf() });
-    if (may && !res.ok && res.reason === 'not-holder') res.message = `lock release --owner ${owner}: only a person, the orchestrator or a Producer/Director session releases another's lock (${may.why}). ${res.message}`;
-    if (may?.ok && res.released) emitEvent({ type: 'lock.released_for', agent: actor.name || 'owner', target: res.key || normalizeKey(maybeKey), msg: `released ${owner}'s lock` });
+    const named = Boolean(flag('--owner')) && flag('--owner') !== actor.name;
+    const may = named && (actor.tier === 'decider' || (actor.tier === 'outside' && (!actor.name || outsideSigners(REPO_ROOT).includes(actor.name))));
+    const res = release(maybeKey, owner, { caller: may ? null : named ? { ...holderOf(), as: actor.name || `a ${actor.role || 'worker'} session` } : holderOf() });
+    if (named && !may && !res.ok && res.reason === 'not-holder') res.message = `lock release --owner ${owner}: only a person, a Producer/Director session or an outside agent the owner named (STUDIO_OUTSIDE_SIGNERS) releases another's lock. ${res.message}`;
+    if (may && res.released) emitEvent({ type: 'lock.released_for', agent: actor.name || 'owner', target: normalizeKey(maybeKey), msg: `released ${owner}'s lock` });
     out(res);
   }
   if (cmd === 'status') out(status(maybeKey), true);
