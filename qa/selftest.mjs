@@ -5078,6 +5078,14 @@ if (inShard('selftest-283a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.83 (h): the disk an engine's work leaves behind (harness/engine-clean.mjs).
+if (inShard('selftest-283h')) {
+  const dir = copyRepo();
+  const { selftest283H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283h.mjs')).href);
+  await selftest283H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
