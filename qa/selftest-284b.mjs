@@ -37,7 +37,7 @@ export async function selftest284B({ dir, report, tmpRoot }) {
   const MODELS = path.join(S, 'studio', 'models.json');
   const setFiles = ({ dotenv = null, models = null } = {}) => {
     fs.rmSync(ENVF, { force: true }); fs.rmSync(MODELS, { force: true });
-    if (dotenv !== null) fs.writeFileSync(ENVF, `PROVIDER_API_KEY=${SECRET}\nSTUDIO_SOMETHING_TOKEN=${SECRET}\n${dotenv}\n`);
+    if (dotenv !== null) fs.writeFileSync(ENVF, `PROVIDER_API_KEY=${SECRET}\nOTHER_SERVICE_TOKEN=${SECRET}\n${dotenv}\n`);
     if (models !== null) fs.writeFileSync(MODELS, JSON.stringify(models));
   };
   const TWO = 'STUDIO_AGENT_MODEL=claude-opus-5-5\nSTUDIO_RESCUE_MODELS=gpt-5-codex';
@@ -118,7 +118,7 @@ export async function selftest284B({ dir, report, tmpRoot }) {
     const probeFile = path.join(tmpRoot, `probe-284b-${process.pid}.mjs`);
     fs.writeFileSync(probeFile, `import { configuredFamilies, configuredSources, sameFamilyRefusal } from ${u('harness/review-family.mjs')};
 const root = ${JSON.stringify(S)};
-const env = { STUDIO_X_MODEL: 'grok-4' };
+const env = { STUDIO_RESCUE_MODEL: 'grok-4' };
 const c = configuredFamilies({ root, env });
 console.log(JSON.stringify({ c, s: configuredSources({ root, env }), why: sameFamilyRefusal('claude-opus-5-5', env, { root }) }));`);
     const r = cli(blank, [probeFile]);

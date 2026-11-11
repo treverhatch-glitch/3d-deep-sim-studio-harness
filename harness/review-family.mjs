@@ -83,7 +83,7 @@ function modelsFileModels(root) {
     const n = String(v.model || '').trim();
     if (n && !/[,]/.test(n)) names.push(n);
   }
-  return configuredModels({ STUDIO_FILE_MODELS: names.join(',') });
+  return configuredModels({ STUDIO_RESCUE_MODELS: names.join(',') });
 }
 
 /**
