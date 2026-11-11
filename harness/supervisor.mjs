@@ -483,9 +483,13 @@ export async function supervise(opts, state, now = Date.now()) {
     try { await (await import('./lane-disk.mjs')).lanesPass({ now, inline: Boolean(opts.deps?.lanesInline) }); } catch { /* a report, never a crash */ }
   }
   // 2.83: a short planning session (producer, director, line-producer) doesn't take a builder slot: it is left out of the
-  // count the cap is held against (a Producer wake sat in a slot a builder could have had). It still obeys its own
-  // per-role cap and the RAM floor below; there is no separate total-agents cap.
+  // count the pace's cap is held against (a Producer wake sat in a slot a builder could have had). It still obeys its own
+  // per-role cap and the RAM limit, which counts every session.
   let room = builderRoom(ramCap.cap, live);
+  // The RAM limit counts every session, planning ones too: what the pace's count leaves out, memory does not.
+  const ramAll = (await sessionCapNow(configured + 16)).cap;
+  let ramRoom = ramAll - live.length;
+  room = Math.min(room, ramRoom);
   // 2.79 (f): the plan's budget is high: only the API pool's builders start (their names, up to the pool's size).
   const poolMode = poolUsage ? poolPlanNow(poolUsage, live) : null;
   // 2.80 (c), Patch #18: an owner-set builder order (STUDIO_BUILDER_ORDER; unset: the choice below as before).
@@ -494,7 +498,7 @@ export async function supervise(opts, state, now = Date.now()) {
   const vxFirst = Boolean(bOrder?.includes('vertex') && !(bOrder.indexOf('plan') >= 0 && bOrder.indexOf('plan') < bOrder.indexOf('vertex')));
   // 2.79.1 (a): Vertex goes before the pool, so with Vertex ready the pool's size doesn't cap the builders that may start.
   if (poolMode) { if (!vertexReady.ok) room = Math.min(room, poolMode.free.length); why.push(`${poolUsage.why}: ${vertexReady.ok ? 'Vertex first, then ' : ''}${poolMode.why}`); }
-  if (room <= 0 && !parseNextQueue().backlog.some((t) => isPlanningRole(t.role))) return { started: [], why: [ramCap.cap < configured ? `${live.length} agent${live.length === 1 ? '' : 's'} running; no more start: ${ramCap.why}` : `${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
+  if (ramRoom <= 0 || (room <= 0 && !parseNextQueue().backlog.some((t) => isPlanningRole(t.role)))) return { started: [], why: [ramCap.cap < configured ? `${live.length} agent${live.length === 1 ? '' : 's'} running; no more start: ${ramCap.why}` : `${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
   if (ramCap.cap < configured) why.push(`at most ${ramCap.cap} session${ramCap.cap === 1 ? '' : 's'} now: ${ramCap.why}`);
   // Waiting work, grouped by role and lane.
   const q = parseNextQueue();
@@ -605,7 +609,7 @@ export async function supervise(opts, state, now = Date.now()) {
   if (line) ordered = line.orderGroups(ordered);
   for (const g of ordered) {
     const planning = isPlanningRole(g.role);
-    if (room <= 0 && !planning) continue;
+    if (ramRoom <= 0 || (room <= 0 && !planning)) continue;
     if (poolMode && g.role !== 'builder') continue; // the pool is builders only; other roles wait for headroom
     if (crewPaused[g.role]) {
       why.push(`${g.role}: paused by the crew watchdog (${String(crewPaused[g.role].why || '').slice(0, 120)}; npm run crew -- resume ${g.role} --by <name>)`);
@@ -722,6 +726,7 @@ export async function supervise(opts, state, now = Date.now()) {
       // Count it at once, so the next group in this pass sees it (a lane taken, or the whole game).
       live.push({ agent, role: g.role, lane: g.lane || null, task: taskId, running: true, tool: vx ? 'vertex' : lr.tool || tool });
       if (g.role === 'producer') (await import('./producer-wake.mjs')).producerLaunched(now);
+      ramRoom -= 1;
       if (!planning) room -= 1;
     } else {
       why.push(`${g.role}: ${r.message}`);
