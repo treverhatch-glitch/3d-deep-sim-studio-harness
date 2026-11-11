@@ -231,6 +231,7 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   reason) until that task has landed or left the queue. Conflicts only in the manifest's `unionFiles` count as none.
   Event `task.train.predicted_conflict`. Git older than 2.38, or `STUDIO_TRAIN_PREDICT=off`: no prediction (the
   queue says so) and the line-overlap warning stays the only hint.
+- `npm run task -- after <ID> <T-x>[,<T-y>] | --remove <T-x> | --set <T-x>,<T-y> | --clear` (2.83) edits a task's `--after` list in `studio/task-holds.json` and prints it; `task add --after` and `task after` refuse an id that is on neither NEXT.md nor DONE.md.
 - Dependencies (2.65.0, feedback 3.3, `harness/train-deps.mjs`): the train reads `--after` / `task block --until
   T-x` (`studio/task-holds.json`), which before only gated a start. A lane whose dependency is done, or queued in the
   same train, goes, and within a train lanes merge in dependency order; if that dependency drops out of the train,
@@ -308,6 +309,7 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
     `task train status` (2.67.2). `npm run task -- train leave <ID> --by <name> --why "…"` takes a queued lane out of the
     queue on purpose (who may: as for `task hold`; recorded in `.studio/train/left.json` and `task.train.left`; `npm run
     lanes` shows `left (by …)`); `task done <ID> --train` queues it again.
+  - `npm run task -- train dequeue <ID> [--engine <name>] [--by <name>]` (2.83) takes a lane out of the game's (or that engine's) train queue and hands the task back so it can start again; a lane in a train that runs right now is refused. A word that is not a train subcommand prints the usage (exit 2) and starts no train; `train status --engine <name>` lists the running batch and the waiting queue separately.
   - **A, contained**: docs, added tests, the game's tools folders, assets, UI outside the sim paths. The normal verify.
   The rules are a table in `harness/tiers.mjs`; a game extends or changes them only through its protected manifest
   ("tiers", docs/ONBOARDING-A-GAME.md), and never lowers a tier-C rule.

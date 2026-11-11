@@ -12,7 +12,8 @@
  *
  * What native mode changes (each place says so once, in its own output):
  *   task add          a builder task with no --track goes on engine:<engine> (--track web keeps a web task, for the web
- *                     rules a studio is still moving out of)
+ *                     rules a studio is still moving out of); one that names web code (a path under the web game's
+ *                     folder, a .ts/.tsx/.js/.mjs file) goes on the web track instead (webCodeNamed, 2.83)
  *   the Line Producer no game-tester runs on the web build, no engine twins of web tasks
  *   the game's train  no playable web build and clip after a landing
  *   engine drift      no port tasks from web commits (npm run engine -- drift --queue says why)
@@ -71,6 +72,33 @@ export function nativeVerdict(root = REPO_ROOT, env = process.env) {
 
 /** The native engine's name, or null. */
 export const nativeEngine = (root = REPO_ROOT, env = process.env) => { try { const v = nativeVerdict(root, env); return v.native ? v.engine : null; } catch { return null; } };
+
+/**
+ * 2.83: does the text of a new builder task (title, --scope, --paths, --lane) name web code, in a native studio? A path under
+ * the web game's folder (game/<game>/, web/<game>/, cartridges/<game>/, <game> from studio/game.json "game") or a file
+ * ending in .ts, .tsx, .js or .mjs is web code: a rules bug there was routed to the engine track (T-rules). Pure: text and
+ * the studio root in, { web, why } out; not a native studio: { web: false }. A bare "Node.js" is a product name, not a file.
+ */
+export function webCodeNamed(text, root = REPO_ROOT, env = process.env) {
+  const none = { web: false, why: '' };
+  const t = String(text ?? '');
+  if (!t.trim()) return none;
+  let v;
+  try { v = nativeVerdict(root, env); } catch { return none; }
+  if (!v.native) return none;
+  const g = readJson(path.join(root, 'studio', 'game.json')) || {};
+  const game = typeof g.game === 'string' ? g.game.trim() : '';
+  if (game) {
+    const esc = game.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const m = t.replace(/\\/g, '/').match(new RegExp(`(?:^|[^\\w./-])(?:\\./)?((?:game|web|cartridges)/${esc}(?:/[^\\s"'\`,;)]*)?)`, 'i'));
+    if (m) return { web: true, why: `${m[1]} is the web game's folder` };
+  }
+  for (const m of t.matchAll(/(?:^|[^\w.-])([\w@./-]*[\w-]\.(?:tsx|ts|mjs|js))(?![\w-])/gi)) {
+    if (/^(node|next|vue|react|three|d3|express)\.js$/i.test(m[1])) continue;
+    return { web: true, why: `${m[1]} is a web file` };
+  }
+  return none;
+}
 
 /** The lines a kickoff carries in a native studio ('' otherwise). */
 export function nativeBrief(root = REPO_ROOT, env = process.env) {

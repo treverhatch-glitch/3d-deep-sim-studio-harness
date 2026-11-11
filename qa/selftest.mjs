@@ -5102,6 +5102,14 @@ if (inShard('selftest-283f')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.83 (d): the task CLI's missing commands, driven through the real CLI in a studio copy.
+if (inShard('selftest-283d')) {
+  const dir = copyRepo();
+  const { selftest283D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283d.mjs')).href);
+  await selftest283D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

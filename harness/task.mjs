@@ -28,12 +28,12 @@ import { savePatch } from './wip.mjs';
 import { laneConfigWarning } from './lane-studio.mjs';
 import { overlapCheck } from './task-overlap.mjs';
 import { engineTask as engineTaskOf, engineRepo, engineTarget, engineOfTrack, engineTrainVerdict as engineTrainVerdictOf, readTrack, defaultEngineTrack } from './engine-tracks.mjs';
-import { nativeEngine } from './native.mjs';
+import { nativeEngine, webCodeNamed } from './native.mjs';
 /** Task types that are studio work, not a change to the game (they never get the native engine's track by default). */
 const NON_CHANGE_TYPES = new Set(['chore', 'study', 'research', 'review', 'docs', 'idea', 'playtest']);
 import { misplacedTrailers, misplacedTrailerText } from './trailers.mjs';
 import { inferLaneFromText } from './lane-infer.mjs';
-import { inLaneCopy, catchUp, carryTaskBranch, carryTaskBranchEx, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf } from './worktree.mjs';
+import { inLaneCopy, catchUp, carryTaskBranch, carryTaskBranchEx, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf, taskOnBoard } from './worktree.mjs';
 import { laneConfigBefore } from './config-proposal.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
 import { recordTrust } from './gate-trust.mjs';
@@ -1399,6 +1399,15 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
   return { ...target, handoffFile: path.relative(REPO_ROOT, file), waitsFor: open, ...(tripped ? { parked: tripped } : {}) };
 }
 
+/**
+ * 2.83: why a task id given to --after (task add, task after) can't be waited for, or '' when all are on the board
+ * (studio/NEXT.md or DONE.md: the same test as a lane copy's, harness/worktree.mjs taskOnBoard). A board that can't be read refuses nothing.
+ */
+export function unknownAfter(ids) {
+  const bad = ids.filter((id) => !/^[A-Z]+-\d+$/.test(id) || taskOnBoard(id) === false);
+  return bad.length ? `${bad.join(', ')} ${bad.length > 1 ? 'are' : 'is'} not a task id on the board (studio/NEXT.md, studio/DONE.md): a task can't wait for it. Check the id (npm run task -- list).` : '';
+}
+
 export const PRODUCER_NAME = () => process.env.STUDIO_PRODUCER_NAME || 'producer';
 
 /**
@@ -2232,6 +2241,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
 
   // 2.59.0: the merge train (harness/train.mjs): land the queued lanes on one full verify.
   if (cmd === 'train') {
+    // 2.83: a word that is not a train subcommand starts nothing (`train log --engine unity` and a mistyped word started a
+    // real train): usage, exit 2. A train starts with `train`, `train run` or `train --engine <name>`.
+    if ((arg1 && !['run', 'status', 'release', 'leave', 'dequeue', 'auto', 'config', 'cancel'].includes(arg1)) || (typeof flags.unity === 'string' && flags.unity !== 'status')) {
+      console.error(`"${arg1 || flags.unity}" is not a train subcommand, so no train was started. Usage: npm run task -- train [run] [--engine <name>] | train status [--engine <name>] | train release <ID> | train leave <ID> --by <name> --why "…" | train dequeue <ID> [--engine <name>] --by <name> | train cancel | train config <ID> | train auto [on|off]`);
+      process.exit(2);
+    }
     const tr = await import('./train.mjs');
     // 2.78.2 (a, W-0090): from an agent's shell the train runs detached (it outlives the shell) and this command follows
     // it (harness/train-detach.mjs; STUDIO_TRAIN_DETACH auto|on|off, --detach / --foreground).
@@ -2243,7 +2258,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.63.0: the Unity merge train (harness/unity-train.mjs): `train --unity` (or --track engine:unity).
     // 2.77.0 (u, P5.6): `train --engine <name>` (or --track engine:<name>) for any engine target; --unity is --engine unity.
     const trainEng = typeof flags.engine === 'string' ? flags.engine : flags.unity ? 'unity' : engineOfTrack(flags.track);
-    if (trainEng) {
+    // 2.83: only a plain train (or its status) is an engine train: `train leave|dequeue … --engine x` is that subcommand, not a run.
+    if (trainEng && (!arg1 || arg1 === 'run' || arg1 === 'status')) {
       const ut = await import('./unity-train.mjs');
       if (arg1 === 'status' || flags.unity === 'status' || flags.status) { console.log(ut.unityStatusText(mainRoot(), { engine: trainEng })); process.exit(0); }
       const busyMod = await import('./busy.mjs');
@@ -2259,6 +2275,28 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       { const um = await import('./unity-train.mjs'); const names = new Set(['unity', ...engineTargetsQuiet()]); for (const e of names) { const ut = um.unityStatusText(mainRoot(), { quiet: true, engine: e }); if (ut) console.log(ut); } } // 2.63.0: the Unity train; 2.77.0: every engine's
       // 2.77.0 (p, P9.6): the running train and the speculative one behind it, with their steps.
       try { const ts = await import('./train-status.mjs'); const rs = ts.readTrainStatus(mainRoot()); if (rs) console.log(ts.trainsText(rs)); } catch {}
+      process.exit(0);
+    }
+    // 2.83: `train dequeue <ID> [--engine <name>]` takes a lane out of the queue (the game's, or that engine's) and hands the
+    // task back, as the train does when it drops a lane. A lane in a train that runs right now is refused.
+    if (arg1 === 'dequeue') {
+      const tid = flags._[2];
+      const by = typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human';
+      if (!tid) { console.error('Usage: npm run task -- train dequeue <TASK_ID> [--engine <name>] [--by <name>]'); process.exit(1); }
+      const eng = typeof flags.engine === 'string' ? flags.engine : flags.unity ? 'unity' : null;
+      const ut = eng ? await import('./unity-train.mjs') : null;
+      const queue = eng ? ut.readUnityQueue(mainRoot(), eng) : tr.readQueue(mainRoot());
+      const entry = queue.find((e) => e.task === tid);
+      const which = eng ? `the ${eng} train queue` : 'the train queue';
+      if (!entry) { console.error(`${tid} is not in ${which}; nothing was changed (npm run task -- train status${eng ? ` --engine ${eng}` : ''} lists it).`); process.exit(1); }
+      const running = eng ? (ut.runningUnityTrain(mainRoot(), eng)?.lanes || []).includes(tid) : Boolean((await import('./train-status.mjs')).readTrainStatus(mainRoot())?.train);
+      if (running) { console.error(`${tid} is in a train that is running right now; it was not taken out. Wait for the train, or stop it: npm run task -- train cancel --by <name>${eng ? '' : `, or train leave ${tid} --by <name> --why "…" (the train stops before its next check)`}.`); process.exit(1); }
+      if (eng) ut.dequeueUnity(mainRoot(), tid, eng); else tr.dequeue(mainRoot(), tid);
+      emitEvent({ type: 'task.train.dequeued', agent: by, task: tid, to: entry.agent || undefined, status: 'warn', msg: `${tid} was taken out of ${which} by ${by}`, meta: { head: entry.head || null, branch: entry.branch || null, ...(eng ? { engine: eng } : {}) } });
+      // The train hands a lane back (pauseTask: the task goes back to the open list and its claim is released), so it can be started again.
+      let back = null;
+      try { back = pauseTask(tid, entry.agent || null, `Taken out of ${which} by ${by}; nothing failed. Start it again and queue it with task done ${tid} --train.`, { force: true, cause: 'person' }); } catch { back = null; }
+      console.log(`${tid} is out of ${which}${back && !back.error ? ' and handed back: it can be started again' : ''}.`);
       process.exit(0);
     }
     // 2.63.0: a person (or an agent with a person's direct permission; never a worker) releases a lane held for the owner.
@@ -2350,6 +2388,34 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
+  // 2.83: a task's --after list (studio/task-holds.json): add ids, --remove some, --set a new list, --clear it.
+  if (cmd === 'after') {
+    const by = typeof flags.by === 'string' ? flags.by : actor();
+    const ids = (v) => (typeof v === 'string' ? v.split(/[,\s]+/).filter(Boolean) : []);
+    const t = [...q.inProgress, ...q.backlog, ...q.done].find((x) => x.id === arg1);
+    if (!t) {
+      console.error(`${arg1 ? `${arg1} is not a task on the board.` : 'Say which task.'} Usage: npm run task -- after <TASK_ID> <T-x>[,<T-y>] | --remove <T-x>[,<T-y>] | --set <T-x>[,<T-y>] | --clear [--by <name>]`);
+      process.exit(1);
+    }
+    const cur = readHolds()[t.id]?.after || [];
+    let next;
+    let what;
+    if (flags.clear) { next = []; what = 'cleared its list'; }
+    else if (flags.remove !== undefined) { const drop = ids(flags.remove); next = cur.filter((x) => !drop.includes(x)); what = `removed ${drop.join(', ') || 'nothing'}`; }
+    else {
+      const given = flags.set !== undefined ? ids(flags.set) : flags._.slice(2).flatMap(ids);
+      if (!given.length && flags.set === undefined) { console.error(`Say what it waits for: npm run task -- after ${t.id} <T-x>[,<T-y>] | --remove <T-x> | --set <T-x>,<T-y> | --clear`); process.exit(1); }
+      const bad = unknownAfter(given);
+      if (bad) { console.error(`${t.id}'s list is unchanged. ${bad}`); process.exit(1); }
+      if (given.includes(t.id)) { console.error(`${t.id}'s list is unchanged: a task can't wait for itself.`); process.exit(1); }
+      next = flags.set !== undefined ? [...new Set(given)] : [...new Set([...cur, ...given])];
+      what = flags.set !== undefined ? 'replaced its list' : `added ${given.join(', ')}`;
+    }
+    setHold(t.id, { after: next.length ? next : null }, { by, msg: `${by}: ${t.id} ${what}; it now ${next.length ? `waits for ${next.join(', ')}` : 'waits for no task'}` });
+    console.log(next.length ? `${t.id} now waits for: ${next.join(', ')}.` : `${t.id} now waits for no task.`);
+    process.exit(0);
+  }
+
   if (cmd === 'hold' || cmd === 'unhold') {
     const t = [...q.inProgress, ...q.backlog].find((x) => x.id === arg1);
     const by = typeof flags.by === 'string' ? flags.by.trim() : '';
@@ -2403,6 +2469,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       // task got a plain lane). Decided like a lane: a person, the orchestrator or a Producer/Director session.
       const asked = String(flags._[2] || '').trim();
       const et = await import('./engine-tracks.mjs');
+      // 2.83: `track <ID> web` sets a task back to the web track (a rules bug that went to an engine track).
+      if (asked.toLowerCase() === 'web') {
+        const webNo = laneRefusal(by);
+        if (webNo) { console.error(webNo.replace(/set a task's lane|sets lanes/g, 'set a task\'s track')); process.exit(1); }
+        const was = et.engineTask(arg1)?.track || et.rawTrack(arg1) || 'none';
+        et.setEngineTask(arg1, { engine: null, track: 'web', inferred: null, normalized: null, setBy: by });
+        emitEvent({ type: 'task.track', agent: by, task: arg1, msg: `${by}: ${arg1} is on the web track (was ${was})`, meta: { track: 'web', was } });
+        await logTaskDecision({ action: 'task-track', subject: arg1, by, why: `${arg1} is on the web track (was ${was})`, evidence: 'npm run task -- track', undo: { kind: 'text', text: `npm run task -- track ${arg1} ${was === 'none' ? 'engine:<name>' : was} --by <you>` } });
+        console.log(`${arg1} is on the web track (was ${was}): it is not an engine pass any more.`);
+        process.exit(0);
+      }
       if (!asked) {
         const cur = et.engineTask(arg1);
         console.log(cur ? `${arg1}: ${cur.track}${cur.inferred ? ' (inferred)' : ''}${cur.branch ? `, branch ${cur.branch}` : ''}` : `${arg1} has no engine track. Set one: npm run task -- track ${arg1} engine:<name> --by <you>`);
@@ -2637,6 +2714,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     // 2.82: in a native-engine studio (harness/native.mjs) a builder's change goes on the engine track unless it says
     // otherwise (--track web: the web rules a studio is still moving out of; a lane, paths or a non-change type: studio work).
+    // 2.83: a rules bug in web code (a path under the web game's folder, a .ts/.js file) is a web task, not an engine pass.
+    if (roleFlag === 'builder' && typeof flags.track !== 'string' && !NON_CHANGE_TYPES.has(String(flags.type || '').toLowerCase())) {
+      const wc = webCodeNamed([title, flags.scope, flags.paths, flags.lane].filter((x) => typeof x === 'string').join(' '), mainRoot());
+      if (wc.web) { flags.track = 'web'; console.log(`--track not given: this task names web code (${wc.why}): web track; --track engine:${nativeEngine(mainRoot())} to override.`); }
+    }
     if (roleFlag === 'builder' && typeof flags.track !== 'string' && typeof flags.lane !== 'string' && typeof flags.paths !== 'string' && !NON_CHANGE_TYPES.has(String(flags.type || '').toLowerCase()) && !/^(plan|document|write up|review|research|study)\b/i.test(title)) {
       const ne = nativeEngine(mainRoot());
       if (ne) { flags.track = `engine:${ne}`; console.log(`--track not given: this studio is native ${ne}, so a builder task goes on engine:${ne} (web rules still being moved: --track web).`); }
@@ -2644,6 +2726,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (roleFlag === 'builder' && typeof flags.lane !== 'string' && typeof flags.paths !== 'string' && !(typeof flags.scope === 'string' && scopePaths(flags.scope).length)) {
       const inf = inferLaneFromText([title, flags.description, flags.desc, flags.why].filter((x) => typeof x === 'string').join(' '), mainRoot());
       if (inf) { flags.lane = inf.lane; console.log(`--lane not given: inferred ${inf.lane} from ${inf.from.join(', ')} named in the title (change it: task lane <ID> <folder>).`); }
+    }
+    // 2.83: --after names tasks that are on the board (open or done): a pin behind an id that does not exist can never finish.
+    if (typeof flags.after === 'string') {
+      const bad = unknownAfter(flags.after.split(/[,\s]+/).filter(Boolean));
+      if (bad) { console.error(`Not queued. ${bad}`); process.exit(1); }
     }
     const created = addTask({
       title: `${prefix}${title}`,
@@ -2704,7 +2791,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
-  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | impossible <ID> --why "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | track <ID> engine:<name> | holds | note <ID> "<ruling>" --by <name> | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
+  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | impossible <ID> --why "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | track <ID> engine:<name>|web | after <ID> <T-x>|--remove|--set|--clear | holds | note <ID> "<ruling>" --by <name> | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
 }
 
 /**

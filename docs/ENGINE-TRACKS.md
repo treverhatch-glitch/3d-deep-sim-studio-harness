@@ -83,7 +83,7 @@ npm run task -- add "Pass 11: realism pass on the hangar" --role engine-porter -
   records that track for it (`inferred`, an `engine.track_inferred` event) and the pass gets its engine worktree. With
   several engines the launch is refused, naming them and the command that sets the track:
   `npm run task -- track <T-ID> engine:<name> --by <you>` (a person, the orchestrator or a Producer/Director session;
-  never a worker). `npm run task -- track <T-ID>` shows the record. With no engine named, nothing changes (the
+  never a worker). `npm run task -- track <T-ID>` shows the record.  `npm run task -- track <T-ID> web --by <you>` (2.83) sets a task back to the web track. With no engine named, nothing changes (the
   engine's work lives in the studio). `STUDIO_ENGINE_TRACK_INFER=off`: no inference (a plain lane, the 2.78.1 way).
   2.78.2 (item 18): a track written without `engine:` (`"unity"`: `task add --track unity`, a record set by hand, an old
   `task.added` event) silently made the task no engine pass, so `task done --train` didn't queue it. Now a bare name
