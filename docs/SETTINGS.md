@@ -807,7 +807,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## TELEMETRY_* (2)
 
-- `STUDIO_TELEMETRY` · no simple default · harness/agent.mjs, harness/futility.mjs, harness/scorecard.mjs (+9 more) · [METRICS.md:74](METRICS.md)
+- `STUDIO_TELEMETRY` · no simple default · harness/agent.mjs, harness/futility.mjs, harness/scorecard.mjs (+10 more) · [METRICS.md:74](METRICS.md)
 - `STUDIO_TELEMETRY_HOUR_MIN` · no simple default · harness/telemetry.mjs · [METRICS.md:74](METRICS.md)
 
 ## TEST_* (18)
