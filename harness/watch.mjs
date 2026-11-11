@@ -45,6 +45,7 @@ import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { expireAsks } from './ask.mjs';
 import { expireDesigns } from './art.mjs';
 import { reloadEnvIfChanged } from './env-reload.mjs';
+import { producerWakeBackoff } from './line-producer.mjs';
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -300,7 +301,9 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   const forProducer = findings.filter((f) => f.producer);
   const open = [...q.inProgress, ...q.backlog].find((t) => /^Watch:/.test(t.title));
   let pinged = null;
-  if (forProducer.length && !open && !dryRun) {
+  // 2.83: the "N stalled" Watch task wakes the Producer; while the only blocker is a running train or a chain gate it waits (one per STUDIO_PRODUCER_BLOCKED_WAKE_MIN).
+  const wakeBack = forProducer.length && !open && !dryRun ? producerWakeBackoff({ now, kind: 'stalled' }) : { skip: false };
+  if (forProducer.length && !open && !dryRun && !wakeBack.skip) {
     const counts = ['stalled', 'waiting', 'exhausted'].map((k) => [k, forProducer.filter((f) => f.kind === k).length]).filter(([, n]) => n);
     const words = { stalled: 'stalled', waiting: 'waiting for an agent', exhausted: 'provider outage' };
     pinged = addTask({ agent: 'watch', title: `Watch: ${counts.map(([k, n]) => `${n} ${words[k]}`).join(', ')} (run npm run watch for details)`, role: 'producer', priority: 'P1' });
