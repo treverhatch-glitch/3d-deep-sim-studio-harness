@@ -277,14 +277,11 @@ console.log(JSON.stringify({ text: renderFacts(buildFacts('T-990', { dir: proces
       return [ok, `${out(r1).slice(-300)}\n${out(r2).slice(-300)}\n${out(red)}\ns1=${s1.status} ${out(s1).slice(-600)}\ns2=${s2.status} ${out(s2).slice(-600)}`];
     });
 
-    await guard('2.67.0 (B-38): the hand-off\'s open bugs follow the owner type (the "Add …" task the owner made a bug is listed, the "Fix …" task made docs is not), and the token norms group a retyped task under its owner type (fails on 2.66.0: title and queued type won)', () => {
+    await guard('2.67.0 (B-38): the hand-off\'s open bugs follow the owner type (the "Add …" task the owner made a bug is listed, the "Fix …" task made docs is not). (2.83: the token norms half went with the token norms module.) (fails on 2.66.0: title and queued type won)', () => {
       const p = probe(dirD, 'bugs', `import { buildHandoff } from ${u(dirD, 'harness/handoff.mjs')};
-import { tokenNorms } from ${u(dirD, 'harness/token-norms.mjs')};
 const h = buildHandoff();
-const ev = [{ type: 'task.added', task: 'T-950', meta: { type: 'bug' } }, { type: 'task.retyped', task: 'T-950', meta: { from: 'bug', to: 'docs' } }];
-for (let i = 0; i < 5; i++) ev.push({ type: 'agent.session.end', agent: 'b' + i, task: 'T-950', tokensIn: 100 + i, tokensOut: 10 });
-console.log(JSON.stringify({ bugs: h.bugs.map((t) => t.id), norms: Object.keys(tokenNorms({ events: ev })) }));\n`, env);
-      const ok = Array.isArray(p.bugs) && p.bugs.includes(tAdd) && !p.bugs.includes(tFix) && JSON.stringify(p.norms) === '["docs"]';
+console.log(JSON.stringify({ bugs: h.bugs.map((t) => t.id) }));\n`, env);
+      const ok = Array.isArray(p.bugs) && p.bugs.includes(tAdd) && !p.bugs.includes(tFix);
       return [ok, JSON.stringify(p).slice(-2000)];
     });
 

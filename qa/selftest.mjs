@@ -2890,47 +2890,16 @@ if (inShard()) {
   const min = run(dir, 'node harness/asset-scout.mjs find crate --kind any --min-quality 6 --fetch fake-sources.mjs');
   report('2.30e G7: --min-quality drops hits under the bar and says how many were left out', min.status === 0 && /Crate Good/.test(min.stdout) && !/Crate Bad/.test(min.stdout) && /below --min-quality 6 left out/.test(min.stdout), min.stdout + min.stderr);
   const vis = run(dir, 'node harness/asset-scout.mjs find crate --kind model --vision --fetch fake-sources.mjs', { STUDIO_VISION_URL: 'http://vision.test/v1', STUDIO_VISION_MODEL: 'fake-vision-1' });
-  const led = run(dir, 'node harness/ledger.mjs --by model');
-  report('2.30e G7: the vision judge (STUDIO_VISION_URL) is averaged into the score, and its tokens land in the token ledger under its model', vis.status === 0 && /vision 2\/10 \(fake-vision-1\)/.test(vis.stdout) && q('Crate Good', vis.stdout) < q('Crate Good') && /fake-vision-1\s+2 calls\s+in\s+1k/.test(led.stdout), vis.stdout + vis.stderr + led.stdout);
+  // 2.83: the token ledger module was cut; the vision judge's tokens are checked in the log it writes (studio/ledger/scout-vision.jsonl).
+  const visLog = (() => { try { return fs.readFileSync(path.join(dir, 'studio', 'ledger', 'scout-vision.jsonl'), 'utf8'); } catch { return ''; } })();
+  report('2.30e G7: the vision judge (STUDIO_VISION_URL) is averaged into the score, and its tokens are logged under its model', vis.status === 0 && /vision 2\/10 \(fake-vision-1\)/.test(vis.stdout) && q('Crate Good', vis.stdout) < q('Crate Good') && /"model":"fake-vision-1"/.test(visLog), vis.stdout + vis.stderr + visLog);
   const pulled = run(dir, `node harness/asset-scout.mjs pull fake-sources.mjs --licence CC0 --source https://polyhaven.com/a/crate_good --title "Crate Good" --quality ${q('Crate Good')}`);
   const entry = JSON.parse(fs.readFileSync(path.join(dir, 'studio/assets/manifest.json'), 'utf8')).assets.find((a) => a.title === 'Crate Good');
   report('2.30e G7: a pulled asset keeps its quality score in the asset ledger', pulled.status === 0 && entry?.quality === q('Crate Good'), pulled.stdout + pulled.stderr + JSON.stringify(entry));
 }
 
-// 2.30e: token ledger and gate cache.
+// 2.30e: gate cache. (2.83: the token ledger's checks went with the token ledger module; npm run tokens and npm run score give its numbers.)
 if (inShard()) {
-  const dir = copyRepo();
-  const eventsPath = path.join(dir, '.studio', 'events.jsonl');
-  fs.mkdirSync(path.dirname(eventsPath), { recursive: true });
-  const ledgerLogPath = path.join(dir, 'studio', 'ledger', 'proxy.jsonl');
-  fs.mkdirSync(path.dirname(ledgerLogPath), { recursive: true });
-
-  const now = Date.now();
-  const ts = (offset) => new Date(now - offset).toISOString();
-
-  const events = [
-    { ts: ts(3600e3), type: 'agent.session.start', agent: 'agent-1', task: 'T-001' },
-    { ts: ts(3100e3), type: 'task.done', agent: 'agent-1', task: 'T-001' },
-    { ts: ts(3000e3), type: 'agent.session.end', agent: 'agent-1', model: 'claude-3-opus', tokensIn: 100, tokensOut: 200, meta: { tool: 'anthropic', turns: 10 } },
-    { ts: ts(2000e3), type: 'agent.session.start', agent: 'agent-2', task: 'T-002' },
-    { ts: ts(1000e3), type: 'agent.session.end', agent: 'agent-2', model: 'claude-3-sonnet', tokensIn: 50, tokensOut: 50, meta: { tool: 'anthropic', turns: 5 } },
-    { ts: ts(500e3), type: 'route.success', provider: 'openrouter-free', model: 'some-free-model', agent: 'agent-3', meta: { chars: 1000 } },
-  ];
-  fs.writeFileSync(eventsPath, events.map(JSON.stringify).join('\n') + '\n');
-  fs.writeFileSync(ledgerLogPath, JSON.stringify({ at: ts(400e3), agent: 'agent-4', role: 'executor', model: 'gemini-1.5-pro', tokensIn: 1000, tokensOut: 1000 }) + '\n');
-
-  const res = run(dir, 'node harness/ledger.mjs');
-  report('2.30e: ledger: noDonePct is 50% for 2 sessions, 1 done; 300 tokens for the finished task', /No-done sessions: 50%/.test(res.stdout) && /Tokens per finished task: 300\b/.test(res.stdout), res.stdout + res.stderr);
-  report('2.30e: ledger: every token count names its model (single model by name, mixed totals as shares, per group)', /Tokens per finished task: 300 \(claude-3-opus\)/.test(res.stdout) && /Measured: .*\(mixed: gemini-1\.5-pro \d+%, claude-3-opus \d+%/.test(res.stdout) && /Estimated: .*\(some-free-model est\.\)/.test(res.stdout) && /google .*\[gemini-1\.5-pro\]/.test(res.stdout), res.stdout + res.stderr);
-  {
-    const mod = await import(pathToFileURL(path.join(dir, 'harness/ledger.mjs')).href);
-    const mix = mod.modelMix([{ model: 'unknown', tokensIn: 1, tokensOut: 0 }, { tokensIn: 1, tokensOut: 0 }]);
-    report('2.30e: ledger: a session with no model reads "model not recorded", never "unknown"', mix === 'model not recorded', mix);
-  }
-  report('2.30e: ledger: free provider call is estimated', /openrouter-free .*\(1 est\. calls, out 250\)/.test(res.stdout), res.stdout + res.stderr);
-  report('2.30e: ledger: proxy log is counted under google', /google\s+1 calls\s+in\s+1k\s+out\s+1k/.test(res.stdout), res.stdout + res.stderr);
-  report('2.30e: ledger: output contains no cost figures', !/\$|cost/i.test(res.stdout), res.stdout + res.stderr);
-
   const dir2 = copyRepo();
   const cmd = 'node scripts/run-gates.mjs --tier fast --only purity';
   const res1 = run(dir2, cmd);
@@ -2947,7 +2916,7 @@ if (inShard()) {
   run(dir3, 'node scripts/run-gates.mjs --tier fast --only purity'); // prime cache
   const resMerge = run(dir3, 'node scripts/run-gates.mjs --tier merge --only purity');
   report('2.30e: gate-cache: merge tier ignores cache', resMerge.status === 0 && /PASS purity/.test(resMerge.stdout) && !/\(cached/.test(resMerge.stdout), `${resMerge.stdout}${resMerge.stderr}`);
-  for (const d of [dir, dir2, dir3]) fs.rmSync(d, { recursive: true, force: true });
+  for (const d of [dir2, dir3]) fs.rmSync(d, { recursive: true, force: true });
 }
 
 // 2.30e: rehearsal mode (R6) runs the real launcher on board tasks with no model; F15 vision check is opt-in.
@@ -3171,15 +3140,6 @@ console.log(JSON.stringify({ same: a.stable === b.stable, named: /claude-a|codex
     fs.rmSync(path.join(dir, 'stop-gate-probe.txt'), { force: true });
     report('2.30g: the stop gate is fast-only: a hanging check is skipped within its few-second budget and never blocks', s2.status === 0 && !/"block"/.test(s2.stdout) && took < 8000, JSON.stringify({ took, out: s2.stdout.slice(0, 300) }));
   }
-  const tn = probe(`import { tokenNorms, outliers } from ${u('harness/token-norms.mjs')};
-const ev = [];
-const add = (agent, task, type, tin) => { ev.push({ type: 'task.added', task, meta: { type } }); ev.push({ type: 'agent.session.start', agent, task, meta: { role: 'builder' } }); ev.push({ type: 'agent.session.end', agent, task, tokensIn: tin, tokensOut: 0, meta: {} }); };
-for (let i = 0; i < 6; i++) add('d' + i, 'D' + i, 'docs', 1000 + i * 10);
-for (let i = 0; i < 6; i++) add('g' + i, 'G' + i, 'godot-3d', 50000 + i * 1000);
-add('d9', 'D9', 'docs', 9000);
-add('g9', 'G9', 'godot-3d', 60000);
-console.log(JSON.stringify({ norms: tokenNorms({ events: ev }), out: outliers({ events: ev }) }));`);
-  report('2.30g: token norms are per task type: a 9k docs task is flagged, a 60k Godot 3D task is not', tn.out?.length === 1 && tn.out[0].task === 'D9' && tn.norms?.['godot-3d']?.n === 7, JSON.stringify(tn).slice(0, 600));
   const vn = probe(`import { addVerdictNote, notesForBrief } from ${u('harness/verdict-notes.mjs')};
 addVerdictNote({ by: 'hatch', verdict: '❌', on: null, comment: 'ships all follow the same path, boats look narrow' });
 addVerdictNote({ by: 'hatch', verdict: '✅', on: 'T-7', comment: 'upkeep finally drains money' });
@@ -5131,6 +5091,13 @@ if (inShard('selftest-283b')) {
   const dir = copyRepo();
   const { selftest283B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283b.mjs')).href);
   await selftest283B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+// 2.83 (i): scorecard CPU from summaries, the progress line, the studio's own command list, the two cut modules.
+if (inShard('selftest-283i')) {
+  const dir = copyRepo();
+  const { selftest283I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283i.mjs')).href);
+  await selftest283I({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

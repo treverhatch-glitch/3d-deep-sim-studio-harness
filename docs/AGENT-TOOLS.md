@@ -166,6 +166,15 @@ Before this (P-066, crew report P-036), Windows ran the built-in tools with `she
 argument at its spaces, so Claude Code lost its allowed-tools list (each command waited for a yes and the agent
 quit after a few turns) and agy stopped at `unexpected argument`.
 
+## Adding to the command list (2.83)
+
+The built-in list is in `harness/allowlist.mjs` (`ALLOWED`). A studio adds its own without editing the harness: a file
+`studio/allowlist.json`, an array of `[label, pattern]` string pairs, for example
+`[["tool", "C:/Tools/bin/tool.exe *"]]`. At most 50 entries, each pattern at most 300 characters and on one line. The
+entries are appended to the built-in list for Claude agents' `--allowedTools`, the kickoff's list of what may run and the
+denial report's "on the list" check (`allowed(root)` in `harness/allowlist.mjs`). A file that is not valid JSON, or not an
+array, is ignored; a bad pair is skipped; nothing crashes. agy's enrolment (below) stays on the owner's approved set.
+
 ## agy's allow-rules: the owner enrols them once
 
 Claude agents get the harness's command list (`harness/allowlist.mjs`: node, npm, npx, ffmpeg, blender, read-only

@@ -22,7 +22,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR } from './event.mjs';
 import { scrub } from './secrets.mjs';
-import { ALLOWED } from './allowlist.mjs';
+import { allowed } from './allowlist.mjs';
 import { appendLine } from './fsafe.mjs';
 
 export const DENIALS_FILE = () => path.join(STUDIO_STATE_DIR, 'denials.jsonl');
@@ -75,7 +75,7 @@ export function redact(text) {
 }
 
 const globToRe = (g) => new RegExp(`^${g.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
-const ALLOWED_RES = ALLOWED.map(([, p]) => globToRe(p));
+const allowedRes = () => allowed().map(([, p]) => globToRe(p)); // 2.83: with the studio's own entries (studio/allowlist.json)
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'shell', 'Shell']);
 const TWO_WORDS = new Set(['git', 'node', 'npx', 'python', 'python3', 'py', 'cargo', 'go', 'dotnet', 'godot', 'docker', 'gh', 'pip', 'pip3', 'unity']);
 
@@ -100,7 +100,7 @@ export function describe(tool, input = {}) {
     else if (TWO_WORDS.has(prog) && words[1] && !words[1].startsWith('-')) head = `${prog} ${words[1]}`;
     head = redact(head).slice(0, 60);
     // The launcher's list is Bash patterns only (allowlist.mjs): another shell tool is never on it.
-    const onList = tool === 'Bash' && ALLOWED_RES.some((re) => re.test(first));
+    const onList = tool === 'Bash' && allowedRes().some((re) => re.test(first));
     const why = chained ? 'chained (one command per call)' : prefixed ? 'prefixed (VAR=x or cd … first)' : variable ? 'uses a variable ($…)' : onList ? 'on the list, refused anyway (a hook or a rule)' : 'not on the list';
     return { command, key: `${tool}(${head} *)`, why, candidate: !chained && !prefixed && !variable && !onList };
   }
