@@ -5101,6 +5101,14 @@ if (inShard('selftest-283i')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.83: the owner-only list tells the game's own money from real money, and code removed in a
+if (inShard('selftest-283j')) {
+  const dir = copyRepo();
+  const { selftest283J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283j.mjs')).href);
+  await selftest283J({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

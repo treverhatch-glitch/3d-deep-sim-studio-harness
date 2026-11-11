@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { proxyShell } from './owner-proxy.mjs';
 import { betaActor } from './beta-mode.mjs';
-import { ownerOnlyTopic, ownerOnlyWhy } from './owner-acts.mjs';
+import { ownerOnlyTopic, ownerOnlyWhy, ownerOnlyReadAs } from './owner-acts.mjs';
 import { selfNamingShell, DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { logDecision } from './decisions-log.mjs';
 
@@ -141,6 +141,9 @@ function resolve(id, status, answer, by, extra = {}) {
   if (!by || (isAgent(by) && status !== 'decided')) return { ok: false, message: 'A person answers: --by <your name>. Agents ask; they don\'t answer for the game dev. In beta mode the orchestrator (or an outside signer the owner lists) answers with --by <its name>.' };
   if (status !== 'decided' && by === a.by) return { ok: false, message: `${by} asked ${id}; the game dev answers it.` };
   if (!String(answer || '').trim()) return { ok: false, message: 'Give the answer.' };
+  // 2.83: a stand-in's answer to an ask whose money or delete words were read as the game's own money or code removed
+  // in a lane says so on the record (harness/owner-acts.mjs), so the owner can check every such reading.
+  if (extra.recordedBy) { const readAs = ownerOnlyReadAs(a.question, a.why); if (readAs.length) extra = { ...extra, readAs }; }
   return { ok: true, a: write({ ...a, ...extra, status, answer: String(answer).slice(0, 1000), answeredBy: by, answeredAt: new Date().toISOString() }) };
 }
 
