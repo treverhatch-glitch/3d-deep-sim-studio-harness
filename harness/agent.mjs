@@ -62,7 +62,7 @@ import { AGY_STREAM_FLAGS, agyStreamOn, agyStreamWanted, userLine, driveAgyStrea
 import { savePatch } from './wip.mjs';
 import { laneList, laneEntries, readHolds, laneOf } from './task-hold.mjs';
 import { regionOnlyFiles } from './lane-regions.mjs';
-import { engineLaunch, syncEngineTarget, engineWork } from './engine-tracks.mjs';
+import { engineLaunch, syncEngineTarget, engineWork, targetMergeCommand } from './engine-tracks.mjs';
 import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport, isLaneWorktree, LANES_DIR, laneLive } from './worktree.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { ownerOnlyStep } from './owner-only.mjs';
@@ -93,7 +93,7 @@ import { pickTool, readBudget, budgetStopFor } from './budget.mjs';
 import { STOP_NOTE, loopHandBacks, parkOnce } from './busy.mjs';
 import { sessionOutcome, parkIfNoWork } from './session-outcome.mjs';
 import { PLANNING_OUTCOME_ROLES, boardEventsBy } from './wake-gate.mjs';
-import { startRefusal } from './attempts.mjs';
+import { startRefusal, sameBlocker, recordAttempt } from './attempts.mjs';
 import { writeAtomic } from './fsafe.mjs';
 import { selfIdentity, spawnedIdentity, pidAlive, recordAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
 import { gateEnv } from './gate-env.mjs';
@@ -800,7 +800,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   // "committed nothing" although their work was committed in the engine repo, and their tasks were parked for it.
   const engineOf = {};
   for (const id of new Set([...tasks, ...(s0.task ? [s0.task] : [])])) { try { const w = engineWork(id, { since: s0.startedAt || null }); if (w) engineOf[id] = { ...w, train: (() => { try { const h = inAnyTrain(id); return h?.engine ? h : null; } catch { return null; } })() }; } catch { /* the studio's own account stands */ } }
-  const engineLine = (id) => { const w = engineOf[id]; if (!w?.dir) return ''; const d = w.dirty || []; return ` Its ${w.engine} worktree ${w.dir.split(path.sep).join('/')} (${w.branch || 'no branch'}): ${w.commits} commit(s) this session, ${d.length ? `${d.length} uncommitted file(s) left there (${d.slice(0, 3).join(', ')}${d.length > 3 ? ` +${d.length - 3}` : ''}): commit or discard them before task done` : 'nothing uncommitted'}.`; };
+  const engineLine = (id) => { const w = engineOf[id]; if (!w?.dir) return ''; const d = w.dirty || []; return ` Its ${w.engine} worktree ${w.dir.split(path.sep).join('/')} (${w.branch || 'no branch'}): ${w.commits} commit(s) this session, ${d.length ? `${d.length} uncommitted file(s) left there (${d.slice(0, 3).join(', ')}${d.length > 3 ? ` +${d.length - 3}` : ''}): commit or discard them before task done` : 'nothing uncommitted'}${w.phantomNote ? ` (${w.phantomNote})` : ''}.`; };
   for (const id of tasks) {
     if (engineOf[id]?.train) { queuedForTrain.push(id); continue; }
     // 2.78.2 (a, W-0090): its task done queued the lane for the merge train and the session ended, as it should: the
@@ -1277,6 +1277,15 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // 2.77.0 (u, P5.1): an engine pass whose work lives in the engine's own repo gets a worktree of that repo on its branch
   // (harness/engine-tracks.mjs engineLaunch), named in its prompt and passed to the tool as an extra folder.
   const engineLane = launchEngineLane({ task, agent, role });
+  // 2.84 (m): the same target-merge conflict as the last session met, with nothing new committed: parked, no session.
+  if (engineLane?.parked) {
+    for (const q of held) release(`path:${q}`, agent);
+    if (copy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
+    dropStarting(agent);
+    const message = `Not started: ${task} is parked: ${engineLane.parked}.`;
+    emitEvent({ type: 'agent.start.refused', agent, to: 'producer', task, status: 'warn', msg: message.slice(0, 600), meta: { role, kind: 'merge-conflict' } });
+    return { ok: false, skipped: true, refused: 'merge-conflict', message };
+  }
   if (engineLane?.refuse && !/^(off|0|false|no)$/i.test(process.env.STUDIO_ENGINE_LANE_REQUIRED || '')) {
     for (const q of held) release(`path:${q}`, agent);
     if (copy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
@@ -2287,12 +2296,43 @@ export function launchEngineLane({ task, agent, role = null }) {
       const sy = syncEngineTarget({ task, dir: r.dir, repo: r.repo });
       if (sy?.merged || sy?.note) {
         if (sy.merged) emitEvent({ type: 'engine.target_merged', agent, task, msg: `${task}: ${sy.note}`.slice(0, 400), meta: { dir: r.dir } });
-        else if (!sy.upToDate) emitEvent({ type: 'engine.target_conflict', agent, task, to: 'producer', status: 'warn', msg: `${task}: ${sy.note}`.slice(0, 500), meta: { dir: r.dir, conflicts: sy.conflicts } });
+        else if (!sy.upToDate) {
+          emitEvent({ type: 'engine.target_conflict', agent, task, to: 'producer', status: 'warn', msg: `${task}: ${sy.note}`.slice(0, 500), meta: { dir: r.dir, conflicts: sy.conflicts, command: targetMergeCommand(task) } });
+          // 2.84 (m): the same conflict as at the previous launch, and no commit in the worktree since: the session before
+          // this one met it and left nothing new, so another would too. Parked once for the Producer, with the files
+          // (the attempt ledger's sameBlocker: the reason is the conflicted file set, the "tip" the worktree's HEAD).
+          const parked = sy.conflicts?.length ? sameMergeConflict({ task, agent, dir: r.dir, conflicts: sy.conflicts }) : null;
+          if (parked) return { ...r, parked: parked.why, note: `${task} is parked: ${parked.why}` };
+        }
         r.note = `${r.note || ''}\n${sy.note}`.trim();
       }
     } catch { /* the session starts on the worktree as it is */ }
     return r;
   } catch (e) { return { note: `Your task is an engine pass, but its worktree couldn't be made (${e.message}).` }; }
+}
+
+/**
+ * 2.84 (m): a launch whose target merge conflicts. The conflict is recorded in the attempt ledger (reasonKey: the sorted
+ * conflicted files; tip: the engine worktree's HEAD). When the last such record has the same files and the same HEAD
+ * (the previous session ended with no new commit) and nothing was cleared since, the task is parked once (parkOnce) with
+ * the files named, the Producer is asked, and { why } is returned so no session starts. Else the record is written and null
+ * is returned. STUDIO_ATTEMPTS=off: never parks. Never throws.
+ */
+export function sameMergeConflict({ task, agent = 'launcher', dir, conflicts = [] }) {
+  try {
+    const files = [...new Set(conflicts)].sort();
+    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8', windowsHide: true }).stdout.trim();
+    if (!files.length || !/^[0-9a-f]{40,64}$/.test(head)) return null;
+    const reasonKey = `engine-target-merge:${files.join(',')}`;
+    const s = sameBlocker(task, { reasonKey, mainTip: head, holds: {}, done: new Set() });
+    if (!s.same) { recordAttempt(task, { agent, endLabel: 'merge-conflict', reasonKey, blockers: [], ownerOnly: false, mainTip: head, laneHead: head }); return null; }
+    const shown = files.slice(0, 8).join(', ') + (files.length > 8 ? ` +${files.length - 8}` : '');
+    const why = `the engine target merge conflicts again in ${shown} and the session before this one ended with no new commit in the worktree; resolve it (${targetMergeCommand(task)}, then --continue), then npm run task -- unpark ${task} --by <name>`;
+    if (parkOnce(task, { by: 'launcher', why, at: new Date().toISOString() }, { by: 'launcher', msg: `Parked ${task}: ${why}` })) {
+      postAsk({ agent: 'launcher', to: 'producer', task, subject: 'parked', msg: `${task}: merging the engine target into its worktree conflicts again in ${shown}, and the last session left no new commit, so no new session is started. Resolve it with ${targetMergeCommand(task)} (it leaves the conflict in ${dir.split(path.sep).join('/')}), then unpark the task.` });
+    }
+    return { why };
+  } catch { return null; }
 }
 
 export function startAgent(opts, { detach = false } = {}) {

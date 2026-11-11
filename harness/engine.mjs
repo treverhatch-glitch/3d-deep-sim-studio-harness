@@ -5,6 +5,8 @@
  *
  *   npm run engine                                   the options, and the track if there is one
  *   npm run engine -- targets [--json]                every engine target: land command, queue, rig cost (2.77.0)
+ *   npm run engine -- merge <ID> [--continue|--abort] merge the engine's target into the task's own engine worktree;
+ *                                                    a conflict is left there to resolve (2.84, engine-tracks.mjs)
  *   npm run engine -- tune <engine> [<key> <value>] --by <you> --why "…"   the lane's own settings (2.77.0, P5.4)
  *   npm run engine -- propose godot|unity|unreal --by <producer> [--why "…"]
  *                                                    a "Needs you" question for the game dev (Phase 1 must be proven)
@@ -285,6 +287,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   // 2.77.0 (u, P5.4/P5.6): the engine lane's own settings, and every engine target (harness/engine-tune.mjs, engine-tracks.mjs).
   if (argv[0] === 'tune') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'engine-tune.mjs'), ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
   if (argv[0] === 'targets') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'engine-tracks.mjs'), 'list', ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
+  // 2.84 (m): merge the engine's target into a task's own engine worktree, leaving a conflict there to resolve (engine-tracks.mjs).
+  if (argv[0] === 'merge') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'engine-tracks.mjs'), 'merge', ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
   if (argv[0] === 'check') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'engine-check.mjs'), ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
   if (argv[0] === 'propose') {
     const r = await proposeEngine(argv[1], { by: flag('by') || actor(), why: flag('why') || '' });

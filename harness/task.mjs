@@ -14,7 +14,7 @@ import { ensureResearchTemplate, researchRel } from './research.mjs';
 import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType, skipGameChecks } from './done-check.mjs';
 import { judgeClaims, recordClaimVerdict, claimLines } from './said-vs-did.mjs';
 import { validateAnchorIds, readAnchors } from './anchors.mjs';
-import { splitEolOnly, eolNote } from './eol-only.mjs';
+import { splitEolOnly, eolNote, splitPhantom, phantomNote } from './eol-only.mjs';
 import { isGameCode } from '../scripts/check-function-size.mjs';
 import { summarize as summarizeVerdict, renderDecision } from './verdict-split.mjs';
 import { visualGate } from './visual-capture.mjs';
@@ -764,7 +764,10 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       const lines = st.status === 0 ? st.stdout.split('\n').filter(Boolean).filter((l) => !isEngineChurn(l.slice(3))) : [];
       // 2.58.3 (O3, crew P-035): a tracked file whose only difference is line endings (a test snapshot rewritten on
       // Windows) isn't uncommitted work: named in a note, never a refusal. Content changes, new and deleted files still are.
-      const { real, eol } = splitEolOnly(REPO_ROOT, lines);
+      const { real: real0, eol } = splitEolOnly(REPO_ROOT, lines);
+      // 2.84 (m): a file git reports as modified whose bytes are the committed blob (a filter rule) is no work: one note.
+      const { real, phantom } = splitPhantom(REPO_ROOT, real0);
+      if (phantom.length) console.warn(`[done] note: ${phantomNote(phantom)}`);
       if (eol.length) {
         console.warn(`[done] note: ${eolNote(eol)}`);
         if (!checkOnly) emitEvent({ type: 'task.eol_ignored', agent: agent || target.role, task: target.id, status: 'warn', msg: `${target.id}: ${eolNote(eol)}`.slice(0, 400), meta: { files: eol.slice(0, 20) } });
@@ -794,7 +797,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   // 2.59.0: the train lands committed work only, from a lane copy (the same refusal deliver makes, made up front).
   if (trainCheck) {
     if (!inLaneCopy()) return { error: 'not-lane', message: `${target.id}: the merge train lands lane copies; in the main checkout task done closes the task directly.` };
-    const { dirty, eol } = laneDirty(REPO_ROOT);
+    const { dirty, eol, phantom } = laneDirty(REPO_ROOT);
+    if (phantom?.length) console.warn(`[task done] note: ${phantomNote(phantom)}`);
     if (eol.length) console.warn(`[task done] note: ${eolNote(eol)}`);
     if (dirty.length) return { error: 'uncommitted', dirty, message: `Commit your work first: ${dirty.length} uncommitted file(s) in your copy (${dirty.slice(0, 3).map((l) => l.slice(3)).join(', ')}). Only committed work reaches the studio. Then run task done again.` };
   }

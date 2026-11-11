@@ -97,8 +97,21 @@ npm run task -- add "Pass 11: realism pass on the hangar" --role engine-porter -
   prints each one; with several engines configured it lists them for a person with the `task track` command, and an
   engine-porter whose track names no engine is listed too. By hand: `node harness/engine-tracks.mjs backfill
   [--dry-run] --by <you>`.
+  2.84: the engine's target is merged into the pass worktree before each session (2.79.1); on a conflict that merge is
+  aborted, so the session starts from a clean tree, and its note and the `engine.target_conflict` event give
+  `npm run engine -- merge <T-ID>`, which a session may run (`git merge` is not on its allowlist, so no session can merge
+  a lane into the target). The command works only in the task's own engine worktree (from its engine record; never the
+  land script's `gateWorktree`), and an agent caller must hold the task's claim (a session launched for another task is
+  refused; a person's shell may run it). A clean merge is committed at once; a conflict is LEFT in the worktree with
+  each file named: edit it (small conflicts in project files usually want both sides kept), `git -C <dir> add <file>`,
+  then `npm run engine -- merge <T-ID> --continue` (refused while `<<<<<<<`/`>>>>>>>` lines or unmerged paths remain).
+  `--abort` puts the worktree back. Events: `engine.target_merge` (`started`, `conflict`, `done`, `aborted`). A launch
+  that meets the same conflicted files as the previous launch, with no new commit in the worktree since, starts no
+  session: the task is parked once for the Producer with the files named (the attempt ledger's same-blocker rule).
 - **Done check.** A pass in its own repo is judged in that repo:
-  - its branch has commits the target lacks, and everything on it is committed;
+  - its branch has commits the target lacks, and everything on it is committed (2.84: a file git reports as modified
+    whose bytes equal the committed blob, as a `.gitattributes` filter or Git LFS rule on a plain blob makes it, is not
+    counted, and the row says it was ignored; the same rule holds in a lane copy's check and the session's account);
   - the visual check passes, when the task asks for one;
   - the engine's land run stands for the studio's verify. The studio's game checks don't judge it.
   `task done <ID> --train [--branch <b>]` queues the pass for its engine train. Plain `task done` runs the land gate

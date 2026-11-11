@@ -70,7 +70,7 @@ export function readAttempts(taskId) {
 export const lastAttempt = (taskId) => readAttempts(taskId).attempts.at(-1) || null;
 
 /**
- * Append one attempt. fields: { agent, endLabel ('hand-back'|'owner-only'|'claim-expired'|'done'|'breaker'|'cap'),
+ * Append one attempt. fields: { agent, endLabel ('hand-back'|'owner-only'|'claim-expired'|'done'|'breaker'|'cap'|'merge-conflict' (2.84)),
  * reasonKey, blockers, ownerOnly, mainTip?, laneHead? }. Returns the attempt, or null when the ledger is off.
  */
 export function recordAttempt(taskId, fields = {}) {
@@ -110,12 +110,21 @@ export const hasActiveAttempt = (taskId) => { const a = lastAttempt(taskId); ret
 
 /**
  * The last recorded failure attempt's signature against the signature of the current facts.
- * nowFacts: { mainTip?, holds?, done? (Set of done ids) }. Returns { same, n, since, mainTip, reasonKey }.
+ * nowFacts: { mainTip?, holds?, done? (Set of done ids), reasonKey? (2.84) }. Returns { same, n, since, mainTip, reasonKey }.
  */
 export function sameBlocker(taskId, nowFacts = {}) {
   const no = { same: false, n: 0, since: null };
   if (attemptsOff()) return no;
-  const last = lastAttempt(taskId);
+  // 2.84 (m): nowFacts.reasonKey: judge the last attempt recorded for THAT reason (a launch's merge conflict), not only the
+  // very last one (the session's own hand-back comes after it), as long as no cleared or done attempt follows it.
+  const last = nowFacts.reasonKey !== undefined ? (() => {
+    const all = readAttempts(taskId).attempts;
+    for (let i = all.length - 1; i >= 0; i -= 1) {
+      if (all[i].cleared || all[i].endLabel === 'done') return null;
+      if (all[i].reasonKey === nowFacts.reasonKey) return all[i];
+    }
+    return null;
+  })() : lastAttempt(taskId);
   if (!last || last.cleared || last.endLabel === 'done' || !last.mainTip) return no;
   const tip = nowFacts.mainTip !== undefined ? nowFacts.mainTip : gitTip(mainRoot());
   if (!tip) return { ...no, n: last.n, since: last.at };
