@@ -57,7 +57,7 @@ import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, ta
 import { engineTarget, engineFiles, engineTask } from './engine-tracks.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
-import { rulesConfig, rulesGate, inputsPrint, shareInputs } from './engine-rules.mjs';
+import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection } from './engine-rules.mjs';
 import { removeLandedLane, pruneBuilds, buildsConfig } from './engine-clean.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -512,11 +512,15 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   const retries = Math.max(0, num(env.STUDIO_UNITY_TRAIN_RETRIES ?? s.cfg.trainRetries, 2));
   const retryMs = Math.max(0, num(env.STUDIO_UNITY_TRAIN_RETRY_MIN ?? s.cfg.trainRetryMin, 10) * 60000);
 
-  /** One land run of `group` on the target as it is now (refused runs tried again). The gate's result, checked. */
-  const landGroup = async (group, what) => {
+  /**
+   * One land run of `group` on the target as it is now (refused runs tried again). The gate's result, checked.
+   * 2.84: opts.play: the Play Mode selection to reuse (the retry of a red play stage runs with the same filter).
+   */
+  const landGroup = async (group, what, opts = {}) => {
     const tip = headOf(repo, target);
     let arg;
     let ref = null;
+    let merged = null;
     if (s.many) arg = { branches: group.map((l) => l.branch) };
     else if (group.length === 1) arg = { branch: group[0].branch };
     else {
@@ -525,9 +529,19 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       const bad = [...c.conflictTarget, ...c.deferred][0];
       if (bad) return { status: 'conflict', why: bad.why, lane: bad };
       ref = `${UNITY_REF_PREFIX}${id}`;
+      merged = c.head;
       if (git(repo, 'update-ref', `refs/heads/${ref}`, c.head, '').status !== 0) return { status: 'error', why: `could not make the integration branch ${ref}` };
       arg = { branch: ref };
     }
+    // 2.84: the batch's changed paths against the target (the same list the rules focus uses: the batch as it would
+    // land, diffed with the target), for the Play Mode focus. Null when git can't tell: then the play stage runs in full.
+    const batchPaths = () => {
+      try {
+        let head = merged;
+        if (!head) { const c = chainOnTarget(repo, tip, group, id, engine); head = c.error ? null : c.head; }
+        return head ? changedPaths(repo, tip, head) : null;
+      } catch { return null; }
+    };
     let r = null;
     try {
       for (let a = 0; ; a += 1) {
@@ -539,7 +553,18 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         // editor; this run is the one that would see a difference between the two runtimes.
         const fullWhy = fullLandDue(root, engine, s.cfg, env, Date.now(), { start: !dryRun });
         if (fullWhy) log(`[unity-train] ${id}: a full land run (${fullWhy}): the land command is not told the rules are green and gets no Edit Mode plan`);
-        r = await (deps.land || runUnityGate)({ engine, ...arg, task: group.map((l) => l.task).join(','), label: `${engine} train ${id} (${group.map((l) => l.task).join(', ')})`, env: { ...env, STUDIO_GATE_PRIORITY: 'landing', ...(fullWhy ? { STUDIO_LAND_FULL: '1' } : checked ? { STUDIO_RULES_GREEN: '1', STUDIO_RULES_MODE: rulesGreen.mode } : {}) }, log });
+        // 2.84: the Play Mode focus (engines.<x>.play.focus): a hint the land script may use. Never on a full land run;
+        // a retry of a red play stage gets the selection of the run it repeats.
+        const play = fullWhy ? { mode: 'full', filter: '', why: fullWhy } : opts.play || playSelection({ changed: batchPaths(), cfg: s.cfg, full: false });
+        if (play.refused) log(`[unity-train] ${id}: play focus: ${play.why}; the play stage runs in full`);
+        else if (play.mode === 'focus') log(`[unity-train] ${id}: play focus: ${play.why} (${play.filter})`);
+        const playEnv = { STUDIO_PLAY_MODE: play.mode, ...(play.mode === 'focus' ? { STUDIO_PLAY_FILTER: play.filter, ...(engine === 'unity' ? { STUDIO_UNITY_PLAYMODE_ARGS: `-testFilter "${play.filter}"` } : {}) } : {}) };
+        const landEnv = { ...env, STUDIO_GATE_PRIORITY: 'landing', ...(fullWhy ? { STUDIO_LAND_FULL: '1' } : checked ? { STUDIO_RULES_GREEN: '1', STUDIO_RULES_MODE: rulesGreen.mode } : {}), ...playEnv };
+        if (play.mode !== 'focus') { delete landEnv.STUDIO_PLAY_FILTER; delete landEnv.STUDIO_UNITY_PLAYMODE_ARGS; }
+        r = await (deps.land || runUnityGate)({ engine, ...arg, task: group.map((l) => l.task).join(','), label: `${engine} train ${id} (${group.map((l) => l.task).join(', ')})`, env: landEnv, log });
+        r = { ...r, play };
+        res.playMode = play.mode;
+        res.playFilter = play.filter;
         res.runs += 1;
         if (fullWhy) { res.fullLand = (res.fullLand || 0) + 1; if (r.status === 'pass') { try { fs.mkdirSync(path.dirname(fullLandFile(root, engine)), { recursive: true }); writeJson(fullLandFile(root, engine), { at: new Date().toISOString(), id }); } catch { /* it is due again next time */ } } }
         if ((r.status !== 'refused' && r.status !== 'not-run') || a >= retries) break;
@@ -605,7 +630,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       if (stage0 && !retried && again.includes(String(stage0).toLowerCase())) {
         retried = true;
         ev('retry', id, `red in ${stage0} (${(r.failures || []).slice(0, 3).join(', ') || 'no test named'}): one more run of ${remaining.map((l) => l.task).join(', ')} before anyone is blamed`, { agent: by, meta: { stage: stage0, failures: (r.failures || []).slice(0, 10) } });
-        const r2 = await landGroup(remaining, `land run again (red in ${stage0})`);
+        // 2.84: the same Play Mode filter as the red run (a different filter would be a different check).
+        const r2 = await landGroup(remaining, `land run again (red in ${stage0})`, { play: r.play || null });
         if (r2.status === 'pass') {
           res.flaky = [...(res.flaky || []), { stage: stage0, failures: (r.failures || []).slice(0, 10) }];
           ev('flaky', id, `the same batch passed on the second run: ${stage0} failed the first time (${(r.failures || []).slice(0, 3).join(', ') || 'no test named'}); nobody is handed back. A test that fails under load is the game's to fix`, { agent: by, to: 'producer', status: 'warn', meta: { stage: stage0, failures: (r.failures || []).slice(0, 10), lanes: remaining.map((l) => l.task) } });

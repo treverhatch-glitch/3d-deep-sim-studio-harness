@@ -146,6 +146,17 @@ the train starts only when all of these hold:
 The Line Producer doesn't start the same engine's train again within `STUDIO_ENGINE_TRAIN_COOLDOWN_MIN` (3) minutes.
 `STUDIO_ENGINE_TRAIN_AUTO=off`, or `"trainAuto": false` for one engine, leaves starting it to a person.
 
+**A batch window (2.84).** A land run takes 22 to 40 minutes whatever the number of branches in it, so a train that
+starts with one branch while more are minutes away spends a whole run on one task. `"batchMin": 4, "batchWaitMin": 12`
+in an engine's config makes the Line Producer's automatic start wait while fewer than `batchMin` branches are queued,
+the oldest has waited less than `batchWaitMin` minutes, and at least one running session works on a task of that
+engine whose branch is not queued yet (no such session: nothing is coming, it starts at once). `STUDIO_ENGINE_BATCH_MIN`
+overrides `batchMin` (default 1: start as soon as one branch waits) and `STUDIO_ENGINE_BATCH_WAIT_MIN` overrides
+`batchWaitMin` (default 0: never wait); the game train's `STUDIO_TRAIN_MIN` and `STUDIO_TRAIN_WAIT_MIN` work the same way.
+A branch that lands alone at the head of the queue never waits, and one behind others does not count toward
+`batchMin`. A person's `npm run task -- train --engine <x>` always starts at once. The start of a wait is one
+`task.train.<engine>.batch_wait` event (the numbers in its meta); `npm run score` prints "Branches per land run".
+
 The land run itself still takes `machine:heavy` as that engine's job kind, with its RAM and its free-RAM floor.
 
 **The engine line (2.78.1, B-117).** A Unity land (8 GB, 2 GB VRAM) used to take one of the game's `STUDIO_HEAVY_SLOTS`

@@ -1193,6 +1193,46 @@ export function engineWindow(f, env = process.env) {
 }
 
 const ENGINE_STARTS = () => path.join(LINE_DIR(), 'engine-trains.json');
+const ENGINE_BATCH = () => path.join(LINE_DIR(), 'engine-batch.json');
+
+/**
+ * 2.84: the engine train's batch window, in the game train's words (STUDIO_TRAIN_MIN / STUDIO_TRAIN_WAIT_MIN):
+ * engines.<x>.batchMin (1: start as soon as one branch waits) and engines.<x>.batchWaitMin (0: never wait), over them
+ * STUDIO_ENGINE_BATCH_MIN and STUDIO_ENGINE_BATCH_WAIT_MIN. { min, waitMin }.
+ */
+export function engineBatchRules(cfg = {}, env = process.env) {
+  const pick = (k, v, d) => { for (const x of [env[k], v]) { const t = String(x ?? '').trim(); if (t !== '' && Number.isFinite(Number(t)) && Number(t) >= 0) return Number(t); } return d; };
+  return { min: Math.max(1, Math.floor(pick('STUDIO_ENGINE_BATCH_MIN', cfg?.batchMin, 1))), waitMin: pick('STUDIO_ENGINE_BATCH_WAIT_MIN', cfg?.batchWaitMin, 0) };
+}
+
+/**
+ * 2.84: should the automatic start of engine <x>'s train wait for more branches? Pure. f: { engine, label, queue:
+ * [{ task, at, alone? }] (in queue order), rules: { min, waitMin }, working: [task ids of running sessions on this
+ * engine's track whose branch is not queued], now }. { wait, why, counted, waitedMin, left }. It waits only while
+ * (a) fewer than min branches are queued (a branch that lands alone behind others does not count), (b) the oldest has
+ * waited less than waitMin minutes, and (c) a session is still working on one of the engine's tasks (else nothing is
+ * coming). A branch that lands alone at the head never waits: it rides alone anyway. A land run takes 22 to 40
+ * minutes whatever its size, so a few minutes' wait for a fuller batch buys landed tasks per run.
+ */
+export function engineBatchWait(f) {
+  const L = f.label || f.engine;
+  const q = Array.isArray(f.queue) ? f.queue : [];
+  const rules = f.rules || { min: 1, waitMin: 0 };
+  const now = f.now ?? Date.now();
+  const counted = q.filter((e) => !e?.alone).length;
+  const oldest = Math.min(...q.map((e) => Date.parse(e?.at) || now), now);
+  const waitedMin = Math.max(0, (now - oldest) / 60000);
+  const base = { wait: false, counted, waitedMin: Math.round(waitedMin * 10) / 10, left: 0 };
+  if (!q.length) return { ...base, why: `no ${L} branch queued` };
+  if (q[0]?.alone) return { ...base, why: `${q[0].task} lands alone at the head of the ${L} queue: no batch to wait for` };
+  if (rules.min <= 1 || rules.waitMin <= 0) return { ...base, why: 'no batch window (batchMin 1 or batchWaitMin 0)' };
+  if (counted >= rules.min) return { ...base, why: `${counted} of ${rules.min} ${L} branches queued: the batch is full` };
+  if (waitedMin >= rules.waitMin) return { ...base, why: `the oldest ${L} branch has waited ${Math.round(waitedMin)} min, the batch window's ${rules.waitMin}: starting with ${counted} of ${rules.min}` };
+  const working = Array.isArray(f.working) ? f.working : [];
+  if (!working.length) return { ...base, why: `${counted} of ${rules.min} ${L} branches queued, and no session is working on a ${L} task: nothing more is coming` };
+  const left = Math.max(1, Math.ceil(rules.waitMin - waitedMin));
+  return { ...base, wait: true, left, why: `waiting up to ${rules.waitMin} min for more ${L} branches: ${counted} of ${rules.min} queued, the oldest for ${Math.round(waitedMin)} min, ${working.length} session${working.length === 1 ? '' : 's'} still working on ${L} tasks (${working.slice(0, 4).join(', ')}); ${left} min left` };
+}
 
 /**
  * One look at every engine train: [{ engine, queued, running, expectedMin, floorGb, start, why, started? }]. Starts the
@@ -1217,6 +1257,15 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
   if (deps.webTrain !== undefined) webTrain = deps.webTrain;
   const webQ = (readJson(path.join(root, '.studio', 'train', 'queue.json'), []) || []).filter((e) => e?.task && !(e.held && !(e.released && e.released.head === e.head)));
   const starts = readJson(ENGINE_STARTS(), {}) || {};
+  // 2.84: the batch window: the running sessions (who may still queue a branch) and the waits already announced.
+  let liveSessions = null;
+  const sessionsNow = async () => {
+    if (liveSessions) return liveSessions;
+    try { liveSessions = (deps.sessions ? await deps.sessions() : (await import('./agent.mjs')).sessions()).filter((x) => x && x.running && x.task); } catch { liveSessions = []; }
+    return liveSessions;
+  };
+  const batchState = readJson(ENGINE_BATCH(), {}) || {};
+  let batchChanged = false;
   const autoOn = !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_TRAIN_AUTO ?? ''));
   const acting = !dryRun && lineMode(env) === 'on';
   const out = [];
@@ -1238,7 +1287,34 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     } catch { f.engineSlots = 0; }
     f.window = t.cfg?.window === 'quiet' ? 'quiet' : 'slot';
     const w = engineWindow(f, env);
-    const row = { engine: t.name, queued: q.length, running: Boolean(running), expectedMin: exp.minutes, expectedFrom: exp.from, floorGb: floor.gb, start: w.start, why: w.why };
+    // 2.84: the batch window, only for this automatic start (a person's `task train --engine <x>` starts at once).
+    const br = engineBatchRules(t.cfg, env);
+    let batchWaiting = false;
+    if (w.start && br.min > 1 && br.waitMin > 0) {
+      const queuedTasks = new Set(q.map((e) => e.task));
+      const working = [];
+      if (!q[0]?.alone) {
+        for (const x of await sessionsNow()) {
+          if (queuedTasks.has(x.task) || working.includes(x.task)) continue;
+          let rec = null;
+          try { rec = deps.engineTask ? deps.engineTask(x.task) : et.engineTask(x.task, { root, env }); } catch { rec = null; }
+          if (rec?.engine === t.name) working.push(x.task);
+        }
+      }
+      const bw = engineBatchWait({ engine: t.name, label: t.label, queue: q, rules: br, working, now });
+      if (bw.wait) {
+        w.start = false; w.wait = true; w.why = bw.why; batchWaiting = true;
+        const prev = batchState[t.name];
+        if (!prev || prev.oldestAt !== (q[0]?.at || null)) {
+          if (acting) {
+            batchState[t.name] = { since: new Date(now).toISOString(), oldestAt: q[0]?.at || null };
+            batchChanged = true;
+            try { emitEvent({ type: `task.train.${t.name}.batch_wait`, agent: LINE_AGENT, track: `engine:${t.name}`, msg: `Line Producer: ${bw.why}`.slice(0, 500), meta: { engine: t.name, queued: q.length, counted: bw.counted, batchMin: br.min, batchWaitMin: br.waitMin, waitedMin: bw.waitedMin, working: working.slice(0, 10), tasks: q.map((e) => e.task) } }); } catch {}
+          }
+        }
+      } else if (batchState[t.name]) { delete batchState[t.name]; batchChanged = true; }
+    } else if (batchState[t.name] && !w.wait) { delete batchState[t.name]; batchChanged = true; }
+    const row = { engine: t.name, queued: q.length, running: Boolean(running), expectedMin: exp.minutes, expectedFrom: exp.from, floorGb: floor.gb, start: w.start, why: w.why, ...(batchWaiting ? { batchWait: true } : {}) };
     if (w.start && acting) {
       try {
         const r = deps.startTrain ? await deps.startTrain(t.name) : startEngineTrain(root, t.name, env);
@@ -1252,6 +1328,7 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     }
     out.push(row);
   }
+  if (batchChanged && acting) { try { fs.mkdirSync(LINE_DIR(), { recursive: true }); fs.writeFileSync(ENGINE_BATCH(), `${JSON.stringify(batchState, null, 2)}\n`); } catch { /* a second event at worst */ } }
   return out;
 }
 
