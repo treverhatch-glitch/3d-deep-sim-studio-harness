@@ -202,6 +202,36 @@ export function visionFlow(events, { from = 0 } = {}) {
   };
 }
 
+/**
+ * 2.84: planning sessions (Producer, Director) that changed nothing on the board, and the planning wakes the gate skipped
+ * (harness/wake-gate.mjs). A session's count is its agent.session.end meta.outcome.boardEvents; an older one without it is
+ * counted from the log (its agent's board events since its start). { sessions, nothing, usd, usdNothing, skipped }.
+ * Not one of the fifteen measures: printed under them, kept in --record.
+ */
+export async function planningFlow(events) {
+  const { BOARD_EVENT_TYPES, PLANNING_OUTCOME_ROLES } = await import('./wake-gate.mjs');
+  const board = new Set(BOARD_EVENT_TYPES);
+  const startOf = new Map();
+  const counted = new Map();
+  let sessions = 0; let nothing = 0; let usd = 0; let usdNothing = 0;
+  for (const e of events) {
+    if (e.type === 'agent.session.start') { startOf.set(e.agent, at(e)); counted.set(e.agent, 0); continue; }
+    if (board.has(e.type) && counted.has(e.agent)) counted.set(e.agent, counted.get(e.agent) + 1);
+    if (e.type !== 'agent.session.end' || !PLANNING_OUTCOME_ROLES.includes(String(e.meta?.role || ''))) continue;
+    const n = Number(e.meta?.outcome?.boardEvents);
+    const changed = Number.isFinite(n) ? n : (counted.get(e.agent) || 0);
+    const cost = Number(e.meta?.costUsd) || 0;
+    sessions += 1; usd += cost;
+    if (!changed) { nothing += 1; usdNothing += cost; }
+    counted.delete(e.agent); startOf.delete(e.agent);
+  }
+  const skipped = events.filter((e) => e.type === 'agent.wake.skipped').length;
+  return { sessions, nothing, usd: Math.round(usd * 100) / 100, usdNothing: Math.round(usdNothing * 100) / 100, skipped };
+}
+
+/** The planning lines (2.84). */
+export const planningText = (p) => (p ? [`Planning sessions that changed nothing: ${p.nothing} of ${p.sessions} ($${p.usdNothing.toFixed(2)} of $${p.usd.toFixed(2)})`, `Planning wakes skipped: ${p.skipped}`] : []);
+
 /** The vision block as printed lines ([] when nothing was done). prev: an earlier record's vision block. */
 export function visionText(v, prev = null) {
   if (!v) return [];
@@ -288,7 +318,7 @@ export async function roundScore({ events = null, machine = null, now = null, da
     landedPerDay: `${rest.doneCount} done in ${r1(supDays)} supervisor day(s)`,
     escapedPct: `${card.escaped} of ${card.landed}`,
   };
-  return { window: { from: new Date(from).toISOString(), to: new Date(end).toISOString(), days, events: inWin.length }, values, notes, measures: MEASURES.map(([id, label, unit, better, target]) => ({ id, label, unit, better, target })), engine: engineFlow(inWin), vision: visionFlow(all.filter((e) => at(e) <= end), { from }), progress: engineProgress(root, { timeoutMs: progressTimeoutMs }) };
+  return { window: { from: new Date(from).toISOString(), to: new Date(end).toISOString(), days, events: inWin.length }, values, notes, measures: MEASURES.map(([id, label, unit, better, target]) => ({ id, label, unit, better, target })), engine: engineFlow(inWin), planning: await planningFlow(inWin), vision: visionFlow(all.filter((e) => at(e) <= end), { from }), progress: engineProgress(root, { timeoutMs: progressTimeoutMs }) };
 }
 
 /** Does this value meet its target? null when there is no value. */
@@ -308,6 +338,7 @@ export function scoreText(score, prev = null, prevEngine = null, prevVision = nu
     L.push(`  ${ok === null ? 'n/a ' : ok ? 'ok  ' : 'MISS'} ${m.label}: ${v === null ? 'n/a' : `${m.unit === '$' ? '$' : ''}${v}${m.unit === '$' ? '' : m.unit}`}${delta}; target ${m.better === 'up' ? 'at least' : 'at most'} ${m.unit === '$' ? '$' : ''}${m.target}${m.unit === '$' ? '' : m.unit}${score.notes[m.id] ? `. ${score.notes[m.id]}` : ''}`);
   }
   L.push(`${met} of ${known} measured targets met${known < score.measures.length ? ` (${score.measures.length - known} not measurable in this window)` : ''}.`);
+  L.push(...planningText(score.planning));
   L.push(...engineText(score.engine, prevEngine));
   L.push(...(score.progress || []).map((p) => (p.line ? `Progress (${p.engine}): ${p.line}` : `Progress (${p.engine}): not available (${p.why})`)));
   L.push(...visionText(score.vision, prevVision));

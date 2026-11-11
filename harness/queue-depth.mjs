@@ -10,6 +10,8 @@
  * and holds so it plans work elsewhere. It never adds a task itself. One ask per STUDIO_QUEUE_DEPTH_ASK_MIN (30)
  * minutes while the shortfall lasts (a bigger shortfall asks again at once).
  *
+ * 2.84: the wake also asks harness/wake-gate.mjs (same situation after a session that changed nothing: skipped).
+ *
  * Imports only event.mjs, task-hold.mjs and handout.mjs: the supervisor loads it with a dynamic import.
  */
 import fs from 'node:fs';
@@ -73,6 +75,8 @@ export async function queueDepthPass({ q, cap, now = Date.now(), dryRun = false,
   const st = readJson(STATE(), {});
   if (short <= 0) {
     if (st.short && !dryRun) { try { fs.writeFileSync(STATE(), `${JSON.stringify({ short: 0, at: null }, null, 2)}\n`); } catch {} }
+    // 2.84 (a2): the queue reached its target: a queue-depth back-off ends when it falls short again.
+    if (!dryRun) { try { (await import('./wake-gate.mjs')).markQueueFull(now); } catch {} }
     return { target, ready: r.ready, short: 0, asked: false, blocked: r.blocked, why: `${r.ready.length} builder task(s) ready, target ${target}` };
   }
   const recent = st.at && now - Date.parse(st.at) < askEveryMs(env) && short <= (st.short || 0);
@@ -87,8 +91,23 @@ export async function queueDepthPass({ q, cap, now = Date.now(), dryRun = false,
     // 2.83: while the only blocker is a running train or a chain gate, a wake can do nothing: at most one per STUDIO_PRODUCER_BLOCKED_WAKE_MIN.
     let back = { skip: false };
     try { back = (await import('./line-producer.mjs')).producerWakeBackoff({ now, env, kind: 'queue-below-target', ...(deps.lineStatus !== undefined ? { status: deps.lineStatus } : {}) }); } catch {}
+    // 2.84: the same situation as the last wake, whose session changed nothing on the board: skipped, up to
+    // STUDIO_WAKE_SAME_MAX_H hours (harness/wake-gate.mjs).
+    let gate = { skip: false };
+    let fp = null;
+    if (!back.skip) {
+      try {
+        const wg = await import('./wake-gate.mjs');
+        fp = wg.queueFingerprint({ ready: r.ready, target, blocked: r.blocked, open: [...(q.backlog || []), ...(q.inProgress || [])].map((t) => t.id) });
+        gate = wg.gateWake({ kind: 'queue-depth', role: 'producer', fp, now, env, baseMs: askEveryMs(env), ...(deps.wakeEvents ? { events: deps.wakeEvents } : {}) });
+      } catch {}
+    }
     if (back.skip) woke = { skipped: true, why: back.why };
-    else try { woke = await wake(`the queue is below its depth target (${r.ready.length} ready, target ${target}): plan builder tasks outside the blocked areas; never re-list done work`); } catch {}
+    else if (gate.skip) woke = { skipped: true, why: gate.why, gate: '2.84' };
+    else {
+      try { woke = await wake(`the queue is below its depth target (${r.ready.length} ready, target ${target}): plan builder tasks outside the blocked areas; never re-list done work`); } catch {}
+      if (fp && (woke?.started || woke?.agent)) { try { (await import('./wake-gate.mjs')).recordWake({ kind: 'queue-depth', role: 'producer', fp, agent: woke.agent || null, now }); } catch {} }
+    }
   }
   try { fs.mkdirSync(path.dirname(STATE()), { recursive: true }); fs.writeFileSync(STATE(), `${JSON.stringify({ short, at: new Date(now).toISOString() }, null, 2)}\n`); } catch {}
   return { target, ready: r.ready, short, asked: true, woke, blocked: r.blocked, why: msg };
