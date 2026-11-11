@@ -79,6 +79,7 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
       smoke: typeof f.smoke === 'string' ? f.smoke.trim() : '',
       join: typeof f.join === 'string' && f.join ? f.join : '|',
       fullEveryHours: Math.max(0, num(f.fullEveryHours, 24)),
+      ignore: ignoreList(f.ignore),
     } : null;
   const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), focus: focus?.map.length ? focus : null, share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean) };
   const test = typeof r === 'string' ? r.trim() : typeof o.test === 'string' ? o.test.trim() : '';
@@ -250,16 +251,47 @@ export function changedPaths(repo, a, b) {
 export function rulesSelection({ changed = [], cfg, full = false, fullWhy = '' } = {}) {
   const paths = cfg?.paths || [];
   const under = (p) => !paths.length || paths.some((x) => p === x || p.startsWith(`${x}/`));
-  const ch = changed == null ? null : [...new Set(changed.map((p) => String(p || '').replace(/\\/g, '/')).filter(Boolean))].filter(under);
-  const fullSel = (why, extra = {}) => ({ mode: 'full', filter: '', command: cfg.command, changed: ch || [], why, ...extra });
-  if (ch && paths.length && !ch.length) return fullSel('nothing under rules.paths changed: the target\'s kept result answers', { unchanged: true });
+  const ch0 = changed == null ? null : [...new Set(changed.map((p) => String(p || '').replace(/\\/g, '/')).filter(Boolean))].filter(under);
+  // 2.84 (m): paths matching rules.focus.ignore cannot affect the rules tests (Play Mode tests, UI files): left out
+  // before the "does every path map?" test, so they no longer force the full command on the whole batch.
+  const ig = cfg?.focus && ch0 ? ignoreSplit(ch0, cfg.focus.ignore) : { kept: ch0, ignored: [], bad: [] };
+  const ch = ig.kept;
+  const more = { ...(ig.ignored.length ? { ignored: ig.ignored } : {}), ...(ig.bad.length ? { ignoreBad: ig.bad } : {}) };
+  const fullSel = (why, extra = {}) => ({ mode: 'full', filter: '', command: cfg.command, changed: ch || [], why, ...more, ...extra });
+  if (ch && paths.length && !ch0.length) return fullSel('nothing under rules.paths changed: the target\'s kept result answers', { unchanged: true });
   if (!cfg?.focus) return fullSel('no rules.focus');
+  // Only ignored paths changed: nothing the rules tests read. The smoke filter alone (focus), or with no smoke the
+  // answer for "nothing under rules.paths changed": the target's kept result.
+  if (ch && ch0.length && !ch.length) {
+    if (!cfg.focus.smoke) return fullSel(`every changed path matches rules.focus.ignore (${ig.ignored.length}): the target's kept result answers`, { unchanged: true });
+    if (!full) return { mode: 'focus', filter: cfg.focus.smoke, command: cfg.focus.test.split('{filter}').join(cfg.focus.smoke), changed: ch, why: `every changed path matches rules.focus.ignore (${ig.ignored.length}): the smoke filter alone`, ...more };
+  }
   if (full) return fullSel(fullWhy || 'a full run was asked for');
   if (!ch) return fullSel('the batch\'s changed paths are not known');
   if (!ch.length) return fullSel('the batch changes no path');
   const ff = focusFilters({ changed: ch, map: cfg.focus.map, smoke: cfg.focus.smoke, join: cfg.focus.join });
   if (!ff.ok) return fullSel(`${ff.unmatched} matches no rules.focus.map entry`);
-  return { mode: 'focus', filter: ff.filter, command: cfg.focus.test.split('{filter}').join(ff.filter), changed: ch, why: `${ch.length} changed path(s), all mapped by rules.focus` };
+  return { mode: 'focus', filter: ff.filter, command: cfg.focus.test.split('{filter}').join(ff.filter), changed: ch, why: `${ch.length} changed path(s), all mapped by rules.focus${ig.ignored.length ? ` (${ig.ignored.length} more left out by rules.focus.ignore)` : ''}`, ...more };
+}
+
+/**
+ * 2.84 (m): rules.focus.ignore / play.focus.ignore: a list of regex strings (non-strings dropped). Kept as given; an
+ * invalid one is skipped where it is used (ignoreSplit names it) and never crashes a run.
+ */
+export function ignoreList(v) {
+  return (Array.isArray(v) ? v : []).filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim());
+}
+
+/** 2.84 (m): split changed paths by an ignore list: { kept, ignored, bad (the patterns that are not a valid regex) }. */
+export function ignoreSplit(changed = [], ignore = []) {
+  const res = [];
+  const bad = [];
+  for (const p of ignore || []) { try { res.push(new RegExp(p)); } catch { bad.push(p); } }
+  if (!res.length) return { kept: changed.slice(), ignored: [], bad };
+  const kept = [];
+  const ignored = [];
+  for (const p of changed) (res.some((re) => re.test(p)) ? ignored : kept).push(p);
+  return { kept, ignored, bad };
 }
 
 /**
@@ -299,7 +331,7 @@ export function playFocusConfig(cfg = {}) {
   if (!f || typeof f !== 'object' || !Array.isArray(f.map)) return null;
   const map = f.map.filter((m) => m && typeof m.match === 'string' && typeof m.filter === 'string').map((m) => ({ match: m.match, filter: m.filter }));
   if (!map.length) return null;
-  return { map, smoke: typeof f.smoke === 'string' ? f.smoke.trim() : '', join: typeof f.join === 'string' && f.join ? f.join : ';' };
+  return { map, smoke: typeof f.smoke === 'string' ? f.smoke.trim() : '', join: typeof f.join === 'string' && f.join ? f.join : ';', ignore: ignoreList(f.ignore) };
 }
 
 /** 2.84: the characters a Play Mode filter may hold; anything else and the play stage runs in full (it reaches a command line). */
@@ -317,13 +349,22 @@ export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = 
   if (!pf) return fullSel('no play.focus');
   if (full) return fullSel(fullWhy || 'a full land run');
   if (!changed) return fullSel('the batch\'s changed paths are not known');
-  const ch = [...new Set(changed.map((p) => String(p || '').replace(/\\/g, '/')).filter(Boolean))];
-  if (!ch.length) return fullSel('the batch changes no path');
+  const ch0 = [...new Set(changed.map((p) => String(p || '').replace(/\\/g, '/')).filter(Boolean))];
+  if (!ch0.length) return fullSel('the batch changes no path');
+  // 2.84 (m): play.focus.ignore, as rules.focus.ignore: those paths are left out before the mapping. Only ignored paths
+  // changed: the smoke filter alone, or with no smoke the full stage (the Play Mode stage has no kept result).
+  const ig = ignoreSplit(ch0, pf.ignore);
+  const ch = ig.kept;
+  const bad = ig.bad.length ? { ignoreBad: ig.bad } : {};
+  if (!ch.length) {
+    if (pf.smoke && PLAY_FILTER_SAFE.test(pf.smoke)) return { mode: 'focus', filter: pf.smoke, why: `every changed path matches play.focus.ignore (${ig.ignored.length}): the smoke filter alone`, ignored: ig.ignored, ...bad };
+    return fullSel(`every changed path matches play.focus.ignore (${ig.ignored.length}) and there is no smoke filter`, { ignored: ig.ignored, ...bad });
+  }
   const ff = focusFilters({ changed: ch, map: pf.map, smoke: pf.smoke, join: pf.join });
-  if (!ff.ok) return fullSel(`${ff.unmatched} matches no play.focus.map entry`);
-  if (!ff.filter) return fullSel('the filter is empty');
-  if (!PLAY_FILTER_SAFE.test(ff.filter)) return fullSel(`refused the filter "${ff.filter.slice(0, 120)}": only letters, digits, space and _ . ; | ~ = ! ( ) * - may reach the land command`, { refused: true });
-  return { mode: 'focus', filter: ff.filter, why: `${ch.length} changed path(s), all mapped by play.focus` };
+  if (!ff.ok) return fullSel(`${ff.unmatched} matches no play.focus.map entry`, bad);
+  if (!ff.filter) return fullSel('the filter is empty', bad);
+  if (!PLAY_FILTER_SAFE.test(ff.filter)) return fullSel(`refused the filter "${ff.filter.slice(0, 120)}": only letters, digits, space and _ . ; | ~ = ! ( ) * - may reach the land command`, { refused: true, ...bad });
+  return { mode: 'focus', filter: ff.filter, why: `${ch.length} changed path(s), all mapped by play.focus${ig.ignored.length ? ` (${ig.ignored.length} more left out by play.focus.ignore)` : ''}`, ...bad };
 }
 
 /** 2.83: is a full run due (rules.focus.fullEveryHours since the last full pass, STUDIO_ENGINE_RULES_FULL, --full)? '' or why. */
@@ -437,6 +478,8 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
   res.mode = sel.mode;
   res.filter = sel.filter.slice(0, 300);
   if (cfg.focus || sel.unchanged) log(`[engine-rules] ${engine}: ${sel.mode} run: ${sel.why}${sel.filter ? ` (${res.filter})` : ''}`);
+  // 2.84 (m): an ignore pattern that is not a valid regex is skipped, and said.
+  for (const b of sel.ignoreBad || []) log(`[engine-rules] ${engine}: rules.focus.ignore pattern ${JSON.stringify(b).slice(0, 120)} is not a valid regex; skipped`);
   const at = (sha) => { const r = run({ engine, repo, sha, cfg, from, extraFrom, sel, root, id, env, log, useCache }); if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; } return r; };
   // The calibration: the landed target must be green in the same kind of checkout (2.83: the same command), or the check judges nobody.
   const base = at(tip);
@@ -502,6 +545,8 @@ async function cli(argv) {
     // Variable names only: their values may be private.
     console.log(`[engine-rules] env: ${vars.join(', ') || 'none'}; paths: ${cfg.paths.join(', ') || 'the whole tree'}; large files: ${cfg.lfs ? 'checked out' : 'skipped'}; share: ${cfg.share.join(', ') || 'none'}`);
     console.log(`[engine-rules] focus: ${cfg.focus ? `${cfg.focus.test} with ${cfg.focus.map.length} map entr${cfg.focus.map.length === 1 ? 'y' : 'ies'}${cfg.focus.smoke ? `, smoke ${cfg.focus.smoke}` : ''}; a full run every ${cfg.focus.fullEveryHours} h (last full pass: ${readCache(root, engine).lastFullAt || 'none'})` : 'off (every run is the full command)'}`);
+    // 2.84 (m): the paths left out before the mapping, each pattern checked.
+    if (cfg.focus) console.log(`[engine-rules] ignore: ${cfg.focus.ignore.length ? cfg.focus.ignore.map((p) => { try { new RegExp(p); return p; } catch { return `${p} (not a valid regex: skipped)`; } }).join(', ') : 'none'}`);
     return 0;
   }
   const sha = out(git(s.repo, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`));
@@ -509,6 +554,7 @@ async function cli(argv) {
   const tip = out(git(s.repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${s.target}^{commit}`));
   const due = fullDue(root, engine, cfg, { full: argv.includes('--full') });
   const sel = rulesSelection({ changed: tip ? changedPaths(s.repo, tip, sha) : null, cfg, full: Boolean(due), fullWhy: due });
+  for (const b of sel.ignoreBad || []) console.error(`[engine-rules] ${engine}: rules.focus.ignore pattern ${JSON.stringify(b).slice(0, 120)} is not a valid regex; skipped`);
   const res = runRulesAt({ engine, repo: s.repo, sha, cfg, sel, from: [s.folder, s.repo].filter(Boolean), root, id: 'cli', log: (m) => console.error(m), useCache: !argv.includes('--fresh') });
   if (argv.includes('--json')) console.log(JSON.stringify({ ...res, mode: sel.mode, filter: sel.filter.slice(0, 300) }));
   else {

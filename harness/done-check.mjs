@@ -44,7 +44,7 @@ import { wavesOn, waveFor, nextWaveId, joinWave } from './waves.mjs';
 import { reachMode, unreached } from './reachability.mjs';
 import { judgeRed, readBaseline } from './baseline.mjs';
 import { inLaneCopy, mainRoot } from './worktree.mjs';
-import { isEolOnlyLine } from './eol-only.mjs';
+import { isEolOnlyLine, splitPhantom, phantomNote } from './eol-only.mjs';
 import { sizeRuleFor, freeImportLines } from './size-rule.mjs';
 import { contractChecks } from './contracts.mjs';
 import { judgeFiles, manifestSettings, evidenceWords } from './type-evidence.mjs';
@@ -720,9 +720,12 @@ export function engineWorkChecks(task) {
     const head = g('rev-parse', '--verify', '--quiet', `refs/heads/${br}^{commit}`).stdout.trim();
     const base = target ? g('rev-parse', '--verify', '--quiet', `refs/heads/${target}^{commit}`).stdout.trim() : '';
     ahead = head && base ? Number(g('rev-list', '--count', `${base}..${head}`).stdout.trim()) || 0 : head ? 1 : 0;
-    const dirtyIn = (() => { const wt = g('worktree', 'list', '--porcelain').stdout.split('\n\n').map((b) => ({ dir: (b.match(/^worktree (.+)$/m) || [])[1], br: (b.match(/^branch refs\/heads\/(.+)$/m) || [])[1] })).find((w) => w.br === br && w.dir); if (!wt) return []; return g('-C', wt.dir, 'status', '--porcelain').stdout.split('\n').filter(Boolean).filter((l) => !/(^|\/)(Library|Temp|Logs|obj|UserSettings|\.godot)\//.test(l.slice(3))); })();
+    // 2.84 (m): files git reports as modified whose bytes are the committed blob (a filter rule, Git LFS) are left out
+    // and named once in the row's label (eol-only.mjs splitPhantom).
+    let phantom = [];
+    const dirtyIn = (() => { const wt = g('worktree', 'list', '--porcelain').stdout.split('\n\n').map((b) => ({ dir: (b.match(/^worktree (.+)$/m) || [])[1], br: (b.match(/^branch refs\/heads\/(.+)$/m) || [])[1] })).find((w) => w.br === br && w.dir); if (!wt) return []; const lines = g('-C', wt.dir, 'status', '--porcelain').stdout.split('\n').filter(Boolean).filter((l) => !/(^|\/)(Library|Temp|Logs|obj|UserSettings|\.godot)\//.test(l.slice(3))); const ph = splitPhantom(wt.dir, lines); phantom = ph.phantom; return ph.real; })();
     rows.push({ label: `Commits on ${br} in the ${t.label} repo that ${target || 'its target'} doesn't have`, ok: Boolean(head) && ahead > 0, why: !head ? `the ${t.label} repo (${repo}) has no branch ${br}` : `${br} has no commits that ${target} lacks: commit the pass's work on ${br}` });
-    rows.push({ label: `Everything on ${br} is committed`, ok: !dirtyIn.length, why: `${dirtyIn.length} uncommitted file(s) in ${br}'s worktree (${dirtyIn.slice(0, 3).map((l) => l.slice(3)).join(', ')}): commit them first (only committed work lands)` });
+    rows.push({ label: `Everything on ${br} is committed${phantom.length ? ` (${phantomNote(phantom)})` : ''}`, ok: !dirtyIn.length, why: `${dirtyIn.length} uncommitted file(s) in ${br}'s worktree (${dirtyIn.slice(0, 3).map((l) => l.slice(3)).join(', ')}): commit them first (only committed work lands)` });
   }
   return { engine: rec.engine, label: t.label, repo, branch: br, target, ahead, rows };
 }

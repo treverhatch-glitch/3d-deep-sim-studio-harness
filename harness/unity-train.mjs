@@ -54,7 +54,7 @@ import { mainRoot } from './worktree.mjs';
 import { withLandLock } from './merge-lane.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
 import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, taskBranch } from './unity-gate.mjs';
-import { engineTarget, engineFiles, engineTask } from './engine-tracks.mjs';
+import { engineTarget, engineFiles, engineTask, targetMergeCommand } from './engine-tracks.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection } from './engine-rules.mjs';
@@ -381,7 +381,7 @@ export function chainOnTarget(repo, base, lanes, id, engine = 'unity') {
     const files = conflictFiles(mt.stdout);
     const alone = tip === base ? mt : git(repo, 'merge-tree', '--write-tree', base, lane.head);
     if (alone.status === 0) res.deferred.push({ ...lane, files, why: `it conflicts with ${res.included.map((l) => `${l.task} (${l.branch})`).join(', ') || 'the branches before it'} in this train${files.length ? ` in ${files.slice(0, 5).join(', ')}` : ''}; it goes in the next ${labelOf(engine)} train` });
-    else res.conflictTarget.push({ ...lane, files: conflictFiles(alone.stdout), why: `it conflicts with the target${conflictFiles(alone.stdout).length ? ` in ${conflictFiles(alone.stdout).slice(0, 5).join(', ')}` : ''}: merge the target into it, resolve the conflicts, commit, then task done --train again` });
+    else res.conflictTarget.push({ ...lane, files: conflictFiles(alone.stdout), why: `it conflicts with the target${conflictFiles(alone.stdout).length ? ` in ${conflictFiles(alone.stdout).slice(0, 5).join(', ')}` : ''}: bring the target into it with ${targetMergeCommand(lane.task)} (it leaves the conflicts in the task's worktree to resolve; small conflicts in project files usually want both sides kept), then task done --train again` });
   }
   return { ...res, head: tip };
 }
@@ -502,7 +502,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       const extraFrom = set.map((l) => path.join(root, '.lanes', 'engine', String(l.task))).filter((d) => fs.existsSync(d));
       const rg = (deps.rulesGate || rulesGate)({ engine, repo, tip: tip0, lanes: set, cfg: rc, from, extraFrom, root, id, env, log, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine) });
       log(`[unity-train] ${id}: rules check: ${rg.why}${rg.runs ? ` (${rg.runs} run(s), ${Math.round(rg.ms / 1000)} s)` : ''}`);
-      for (const d of rg.dropped) drop(d.lane, `refused before the land run: ${d.why}\nFix it on ${d.lane.branch} (merge ${target} in first), then task done ${d.lane.task} --train again.`, { cause: 'rules' });
+      for (const d of rg.dropped) drop(d.lane, `refused before the land run: ${d.why}\nFix it on ${d.lane.branch} (bring ${target} in first: ${targetMergeCommand(d.lane.task)}), then task done ${d.lane.task} --train again.`, { cause: 'rules' });
       set = rg.kept;
       res.rules = { ran: rg.ran, runs: rg.runs, ms: rg.ms, dropped: rg.dropped.map((d) => d.lane.task), ...(rg.skipped ? { skipped: rg.why } : {}), ...(rg.mode ? { mode: rg.mode } : {}), ...(rg.filter ? { filter: rg.filter } : {}) };
       if (rg.green) rulesGreen = { tip: tip0, tasks: set.map((l) => l.task).join(','), mode: rg.mode || 'full', same: () => { try { return inputsPrint(rc, [...from, ...extraFrom]) === (rg.inputs ?? inputsPrint(rc, [...from, ...extraFrom])); } catch { return false; } } };
@@ -556,6 +556,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         // 2.84: the Play Mode focus (engines.<x>.play.focus): a hint the land script may use. Never on a full land run;
         // a retry of a red play stage gets the selection of the run it repeats.
         const play = fullWhy ? { mode: 'full', filter: '', why: fullWhy } : opts.play || playSelection({ changed: batchPaths(), cfg: s.cfg, full: false });
+        for (const b of play.ignoreBad || []) log(`[unity-train] ${id}: play.focus.ignore pattern ${JSON.stringify(b).slice(0, 120)} is not a valid regex; skipped`);
         if (play.refused) log(`[unity-train] ${id}: play focus: ${play.why}; the play stage runs in full`);
         else if (play.mode === 'focus') log(`[unity-train] ${id}: play focus: ${play.why} (${play.filter})`);
         const playEnv = { STUDIO_PLAY_MODE: play.mode, ...(play.mode === 'focus' ? { STUDIO_PLAY_FILTER: play.filter, ...(engine === 'unity' ? { STUDIO_UNITY_PLAYMODE_ARGS: `-testFilter "${play.filter}"` } : {}) } : {}) };
@@ -664,7 +665,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
           const rr = await landGroup(rest, `without ${sp.lane.task}`);
           if (rr.status === 'pass') {
             close(rest, rr);
-            drop(sp.lane, `${blame(r)}\nBlame by evidence: the batch was red on ${sp.tests.length ? sp.tests.slice(0, 5).join(', ') : 'a compile error'}, ${sp.lane.branch} is the only branch that changes ${what}, and the batch without it landed green (${rest.map((l) => l.task).join(', ')}). Fix it on ${sp.lane.branch} (merge ${target} in first), then task done ${sp.lane.task} --train again.`, { cause: 'evidence' });
+            drop(sp.lane, `${blame(r)}\nBlame by evidence: the batch was red on ${sp.tests.length ? sp.tests.slice(0, 5).join(', ') : 'a compile error'}, ${sp.lane.branch} is the only branch that changes ${what}, and the batch without it landed green (${rest.map((l) => l.task).join(', ')}). Fix it on ${sp.lane.branch} (bring ${target} in first: ${targetMergeCommand(sp.lane.task)}), then task done ${sp.lane.task} --train again.`, { cause: 'evidence' });
             remaining = []; break;
           }
           if (rr.status !== 'red' && rr.status !== 'conflict') { hold(remaining, rr); break; }
@@ -706,7 +707,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         const group = remaining.slice(lo, hi);
         const before = remaining.slice(0, lo).map((l) => l.task);
         ev('bisect', id, `${steps.map((st) => `${target} + ${remaining.slice(0, st.n).map((l) => l.task).join(' + ')}: ${st.status}${st.signature ? ' (the batch\'s failures)' : ''}`).join(', ')}; stopped after ${bisectRuns} bisect run(s) (STUDIO_ENGINE_BISECT_MAX): ${group.map((l) => l.task).join(', ')} still fail${before.length ? `, ${before.join(' + ')} landed green` : ''}`, { agent: by, meta: { steps, culprits: group.map((l) => l.task), capped: true } });
-        for (const g of group) drop(g, `${blame(bad)}\nThe ${L} train's bisect stopped after ${bisectRuns} run(s) (STUDIO_ENGINE_BISECT_MAX ${bisectMax}): ${target} + ${[...before, ...group.map((l) => l.task)].join(' + ')} still shows the batch's failures (${[...sig].slice(0, 5).join(', ')}${sig.size > 5 ? ', ...' : ''}), so one of ${group.map((l) => l.branch).join(', ')} breaks it${before.length ? `; ${target} + ${before.join(' + ')} landed green` : ''}. Fix it on its branch (merge ${target} in first), then task done <ID> --train again.`);
+        for (const g of group) drop(g, `${blame(bad)}\nThe ${L} train's bisect stopped after ${bisectRuns} run(s) (STUDIO_ENGINE_BISECT_MAX ${bisectMax}): ${target} + ${[...before, ...group.map((l) => l.task)].join(' + ')} still shows the batch's failures (${[...sig].slice(0, 5).join(', ')}${sig.size > 5 ? ', ...' : ''}), so one of ${group.map((l) => l.branch).join(', ')} breaks it${before.length ? `; ${target} + ${before.join(' + ')} landed green` : ''}. Fix it on its branch (bring ${target} in first: ${targetMergeCommand(g.task)}), then task done ${g.task} --train again.`);
         remaining = remaining.slice(hi);
         continue;
       }
@@ -726,7 +727,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       }
       const before = remaining.slice(0, hi - 1).map((l) => l.task);
       ev('bisect', id, `${steps.map((st) => `${target} + ${remaining.slice(0, st.n).map((l) => l.task).join(' + ')}: ${st.status}`).join(', ')}; first not green with ${culprit.task}`, { agent: by, meta: { steps, culprit: culprit.task } });
-      drop(culprit, `${blame(bad)}\nThe ${L} train's prefix bisection: ${target} + ${[...before, culprit.task].join(' + ')} is ${bad.status}${before.length ? `, ${target} + ${before.join(' + ')} landed green` : ''}; so ${culprit.branch} breaks it${before.length ? ' (alone, or together with the branches before it)' : ''}. Fix it on ${culprit.branch} (merge ${target} in first), then task done ${culprit.task} --train again.`);
+      drop(culprit, `${blame(bad)}\nThe ${L} train's prefix bisection: ${target} + ${[...before, culprit.task].join(' + ')} is ${bad.status}${before.length ? `, ${target} + ${before.join(' + ')} landed green` : ''}; so ${culprit.branch} breaks it${before.length ? ' (alone, or together with the branches before it)' : ''}. Fix it on ${culprit.branch} (bring ${target} in first: ${targetMergeCommand(culprit.task)}), then task done ${culprit.task} --train again.`);
       remaining = remaining.slice(hi);
     }
   } finally {

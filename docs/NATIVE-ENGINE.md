@@ -126,6 +126,13 @@ half as much machine time as the land runs. Five settings, all optional, in the 
   `STUDIO_ENGINE_RULES_FULL=1` forces a full run. **A focus-mode green is weaker than a full one**: a change in one
   system can break another system's test, which a focused run does not run; the full run every `fullEveryHours` is
   the backstop, and a land script that reads `STUDIO_RULES_MODE` can run the full tests itself after a focused green.
+- `focus.ignore` (2.84): a list of regexes; a changed path matching any of them is left out before the "does every
+  path map?" test (Play Mode tests, UI files: what the rules tests cannot read), so it no longer forces the full
+  command on the whole batch. When only ignored paths changed, the batch runs `smoke` alone (focus), or with no `smoke`
+  the target's kept result answers (as when nothing under `paths` changed). A pattern that is not a valid regex is
+  skipped with a log line; `rules show` lists the patterns. `play.focus.ignore` does the same for the Play Mode focus
+  (only ignored paths: `smoke` alone, or a full play stage). **An ignore pattern that is too wide hides a real change
+  from the rules check**: a rules file it matches lands without its tests being run, so match folders, not suffixes.
 
 **Play Mode focus (2.84).** The Play Mode stage became the longest stage of a land (20 to 40 minutes). The same idea,
 as a hint the land script may use: `engines.<x>.play.focus`.

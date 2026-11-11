@@ -36,6 +36,7 @@ import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
 import { learnedNeed } from './engine-ram.mjs';
 import { readJson } from './fsafe.mjs';
+import { splitPhantom, phantomNote } from './eol-only.mjs';
 
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(tmp, f); };
 const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
@@ -521,6 +522,144 @@ export function engineLaunch({ task, agent = null, role = null, root = mainRoot(
 }
 
 /**
+ * 2.84 (m): the engine target merge a session can run itself. At launch the harness merges the engine's target into the
+ * task's engine worktree and, on a conflict, aborts (a session starts from a clean tree). The note used to say "run git
+ * -C <dir> merge <target>", but a launched session may not run `git merge` (harness/allowlist.mjs: only add, commit,
+ * status, diff, log, show), so three sessions in a row on each of three tasks handed back "the merge needs a person".
+ * `git merge` stays off the allowlist (a session must not merge lanes into the target); this command merges the TARGET
+ * into the task's OWN engine worktree, found from the task's engine record, and nothing else:
+ *   npm run engine -- merge <ID>             merge (no fast-forward, no commit); clean: committed at once with the launch
+ *                                            merge's message; a conflict is LEFT in the worktree with each file named
+ *   npm run engine -- merge <ID> --continue  refused while a conflicted file still holds <<<<<<< or >>>>>>> lines or git
+ *                                            still lists unmerged paths; else git commit --no-edit
+ *   npm run engine -- merge <ID> --abort     git merge --abort
+ * A caller that works as an agent (STUDIO_AGENT, or STUDIO_LOCK_OWNER as a launched session has) must hold the task's
+ * claim; a launched session pinned to another task is refused. A shell with neither is a person's and may run it.
+ * Events: engine.target_merge with meta.step started | conflict (meta.files) | done | aborted.
+ */
+export const targetMergeCommand = (task) => `npm run engine -- merge ${task}`;
+export const targetMergeMessage = (target, rec, task) => `Merge ${target} into ${rec?.branch || task} (engine pass ${task})`;
+const BOTH_SIDES = 'Small conflicts in project files (a project file, an asmdef, a package list) usually want both sides kept.';
+const mergeStateFile = (root, task) => path.join(root, '.studio', 'engine', `merge-${String(task).replace(/[^A-Za-z0-9._-]/g, '_')}.json`);
+const MARKER = /^(<{7}|>{7})(\s|$)/m;
+
+/** The task's own engine worktree (the launch's, else the worktree holding its branch), or { error }. */
+export function engineTaskDir(task, { root = mainRoot(), engine = null } = {}) {
+  const rec = engineTask(task, { root });
+  if (!rec) return { error: `${task} is not an engine task (no engine record): there is no engine worktree to merge into` };
+  if (engine && engine !== rec.engine) return { error: `${task} is a ${rec.engine} task, not ${engine}` };
+  const repo = engineRepo(rec.engine, { root });
+  if (!repo) return { error: `the ${rec.engine} work of ${task} is not in a repo of its own (engines.${rec.engine}.cwd): nothing to merge here` };
+  const t = engineTarget(rec.engine, { root });
+  const target = t?.cfg?.target;
+  if (!target) return { error: `engines.${rec.engine}.target is not set in studio/game.json: there is no target branch to merge` };
+  const own = path.join(root, '.lanes', 'engine', String(task));
+  const dir = fs.existsSync(path.join(own, '.git')) ? own : (rec.branch ? worktreeOn(repo, rec.branch) : null);
+  if (!dir || !fs.existsSync(dir)) return { error: `${task} has no engine worktree yet (it is made when a session is launched on the task): nothing to merge into` };
+  // The land script's own worktree is never an agent's, and nothing but the task's branch is merged into.
+  const gw = t.cfg.gateWorktree ? path.resolve(root, t.cfg.gateWorktree) : null;
+  if (gw && samePath(dir, gw)) return { error: `${dir.split(path.sep).join('/')} is the land script's own worktree (engines.${rec.engine}.gateWorktree): refused` };
+  const cur = spawnSync('git', ['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: dir, encoding: 'utf8', windowsHide: true }).stdout.trim();
+  if (rec.branch && cur !== rec.branch) return { error: `${dir.split(path.sep).join('/')} is on ${cur || 'a detached HEAD'}, not ${task}'s branch ${rec.branch}: refused` };
+  return { rec, repo, dir, target, label: t.label, branch: rec.branch || cur };
+}
+
+/** Why this caller may not merge for `task` ('' when it may). A person's shell (no agent identity) may. */
+export async function targetMergeRefusal(task, { env = process.env } = {}) {
+  const me = String(env.STUDIO_AGENT || env.STUDIO_LOCK_OWNER || '').trim();
+  const pin = String(env.STUDIO_TASK_PIN || '').trim();
+  if (pin && pin !== String(task)) return `this session was launched for ${pin}, not ${task}: a session merges only into its own task's worktree`;
+  if (!me) return '';
+  let holder = null;
+  try { const { listLocks } = await import('./lock.mjs'); holder = listLocks().find((l) => l.key === `task:${task}`)?.owner || null; } catch { holder = null; }
+  if (holder === me) return '';
+  return holder ? `${task} is claimed by ${holder}, not ${me}: only the agent holding a task's claim (or a person) merges into its worktree` : `${me} does not hold ${task}'s claim (npm run task -- start ${task} --agent ${me} first), and only the agent holding it (or a person) merges into its worktree`;
+}
+
+/**
+ * The command. mode: 'merge' | 'continue' | 'abort'. { ok, code (0 done or nothing to do, 1 refused, 2 conflict left),
+ * lines, files?, step }. Never throws.
+ */
+export async function engineTargetMerge(task, { mode = 'merge', engine = null, root = mainRoot(), env = process.env } = {}) {
+  const fail = (line, extra = {}) => ({ ok: false, code: 1, lines: [line], ...extra });
+  try {
+    if (!task || !/^[A-Za-z]+-\d+$/.test(String(task))) return fail(`Usage: ${targetMergeCommand('<TASK_ID>')} [--engine <x>] [--continue | --abort]`);
+    const who = await targetMergeRefusal(task, { env });
+    if (who) return fail(`Not merged: ${who}.`);
+    const w = engineTaskDir(task, { root, engine });
+    if (w.error) return fail(`Not merged: ${w.error}.`);
+    const { dir, target, rec, branch } = w;
+    const shown = dir.split(path.sep).join('/');
+    const g = (...a) => spawnSync('git', a, { cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+    const ident = g('config', 'user.name').stdout.trim() ? [] : ['-c', 'user.name=studio-launcher', '-c', 'user.email=studio-launcher@example.invalid'];
+    const agent = String(env.STUDIO_AGENT || env.STUDIO_LOCK_OWNER || '').trim() || 'person';
+    const ev = (step, msg, meta = {}) => { try { emitEvent({ type: 'engine.target_merge', agent, task, ...(step === 'conflict' ? { to: 'producer', status: 'warn' } : {}), msg: `${task}: ${msg}`.slice(0, 500), meta: { step, dir: shown, target, ...meta } }); } catch { /* the merge stands without its event */ } };
+    const merging = () => g('rev-parse', '-q', '--verify', 'MERGE_HEAD').status === 0;
+    const unmerged = () => g('-c', 'core.quotepath=off', 'diff', '--name-only', '--diff-filter=U').stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+    const state = mergeStateFile(root, task);
+    const readState = () => { const j = readJson(state, null); return j && Array.isArray(j.files) ? j : { files: [] }; };
+    const dropState = () => { try { fs.rmSync(state, { force: true }); } catch { /* a record */ } };
+    const withMarkers = (files) => files.filter((f) => { try { return MARKER.test(fs.readFileSync(path.join(dir, f), 'utf8')); } catch { return false; } });
+    const fileLines = (files) => files.slice(0, 40).map((f) => `  ${f}: edit it to keep both sides where both are needed (and remove the <<<<<<< ======= >>>>>>> lines), then git -C ${shown} add ${f}, then ${targetMergeCommand(task)} --continue`);
+
+    if (mode === 'abort') {
+      if (!merging()) { dropState(); return { ok: true, code: 0, step: 'none', lines: [`No merge is in progress in ${shown}: nothing to abort.`] }; }
+      const a = g('merge', '--abort');
+      if (a.status !== 0) return fail(`git merge --abort failed in ${shown}: ${String(a.stderr || a.stdout).trim().split('\n').pop()}`);
+      dropState();
+      ev('aborted', `the merge of ${target} into ${branch} was aborted; the worktree is as it was before it`);
+      return { ok: true, code: 0, step: 'aborted', lines: [`Aborted: ${shown} is back where it was before the merge of ${target}.`] };
+    }
+    if (mode === 'continue') {
+      if (!merging()) { dropState(); return fail(`No merge is in progress in ${shown}: start one with ${targetMergeCommand(task)}.`); }
+      const open = unmerged();
+      const marked = withMarkers([...new Set([...readState().files, ...open])]);
+      if (open.length || marked.length) {
+        const lines = [`Not committed: the merge of ${target} still has ${open.length ? `${open.length} unmerged path(s) (${open.slice(0, 8).join(', ')})` : ''}${open.length && marked.length ? ' and ' : ''}${marked.length ? `conflict markers in ${marked.slice(0, 8).join(', ')}` : ''}.`, ...fileLines([...new Set([...marked, ...open])]), BOTH_SIDES];
+        return { ok: false, code: 2, step: 'conflict', files: [...new Set([...marked, ...open])], lines };
+      }
+      const c = g(...ident, 'commit', '--no-edit');
+      if (c.status !== 0) return fail(`git commit --no-edit failed in ${shown}: ${String(c.stderr || c.stdout).trim().split('\n').pop()}`);
+      dropState();
+      const sha = g('rev-parse', '--short', 'HEAD').stdout.trim();
+      ev('done', `${target} was merged into ${branch} (${sha}) after the conflicts were resolved`);
+      return { ok: true, code: 0, step: 'done', lines: [`Merged: ${target} is in ${branch} (merge commit ${sha}). Go on with the task.`] };
+    }
+
+    // A plain merge.
+    if (merging()) {
+      const open = unmerged();
+      return { ok: false, code: 2, step: 'conflict', files: open, lines: [`A merge is already in progress in ${shown}${open.length ? ` with ${open.length} unmerged path(s)` : ''}.`, ...fileLines(open), `Or put it back: ${targetMergeCommand(task)} --abort.`] };
+    }
+    const ref = ['', 'refs/heads/', 'refs/remotes/'].map((p) => `${p}${target}`).find((r) => g('rev-parse', '--verify', '--quiet', `${r}^{commit}`).status === 0);
+    if (!ref) return fail(`Not merged: ${target} is not a branch the ${rec.engine} repo has.`);
+    if (g('merge-base', '--is-ancestor', ref, 'HEAD').status === 0) return { ok: true, code: 0, step: 'up-to-date', lines: [`${branch} already has everything on ${target}: nothing to merge.`] };
+    // Staged or modified tracked files would be mixed into the merge commit: they are committed (or set aside) first.
+    const tracked = g('status', '--porcelain', '--untracked-files=no').stdout.split('\n').filter((l) => l.trim());
+    const dirty = splitPhantom(dir, tracked).real;
+    if (dirty.length) return fail(`Not merged: ${dirty.length} uncommitted file(s) in ${shown} (${dirty.slice(0, 3).map((l) => l.slice(3)).join(', ')}): commit them first (git -C ${shown} add <file>, then git -C ${shown} commit -m "..."), then run this again.`);
+    ev('started', `merging ${target} into ${branch} in ${shown}`);
+    const m = g(...ident, 'merge', '--no-ff', '--no-commit', '-m', targetMergeMessage(target, rec, task), ref);
+    if (m.status === 0 && merging()) {
+      const c = g(...ident, 'commit', '--no-edit');
+      if (c.status !== 0) return fail(`The merge of ${target} was clean but git commit failed in ${shown}: ${String(c.stderr || c.stdout).trim().split('\n').pop()} (finish it with ${targetMergeCommand(task)} --continue)`);
+      const sha = g('rev-parse', '--short', 'HEAD').stdout.trim();
+      ev('done', `${target} was merged into ${branch} (${sha}), no conflict`);
+      return { ok: true, code: 0, step: 'done', lines: [`Merged: ${target} is in ${branch} (merge commit ${sha}), no conflict. Go on with the task.`] };
+    }
+    const files = unmerged();
+    if (!files.length) {
+      const why = String(m.stderr || m.stdout || '').trim().split('\n').filter(Boolean).slice(-2).join(' ').slice(0, 300);
+      if (merging()) g('merge', '--abort');
+      return fail(`Not merged: git merge of ${target} failed in ${shown} without a conflict to resolve (${why || `exit ${m.status}`}); the worktree is as it was.`);
+    }
+    try { fs.mkdirSync(path.dirname(state), { recursive: true }); fs.writeFileSync(state, `${JSON.stringify({ task, target, dir: shown, files, at: new Date().toISOString() }, null, 2)}\n`); } catch { /* --continue still reads git's unmerged list */ }
+    ev('conflict', `merging ${target} into ${branch} left ${files.length} conflicted file(s): ${files.slice(0, 8).join(', ')}`, { files: files.slice(0, 40) });
+    return { ok: false, code: 2, step: 'conflict', files, lines: [`Merging ${target} into ${branch} left ${files.length} conflicted file(s) in ${shown}; the merge stays open there for you to resolve:`, ...fileLines(files), BOTH_SIDES, `To put the worktree back instead: ${targetMergeCommand(task)} --abort.`] };
+  } catch (e) { return fail(`Not merged: ${e.message}`); }
+}
+
+/**
  * 2.79.1: before an engine pass's session starts, the engine's target branch (engines.<x>.target, e.g. unity/main) is
  * merged into its pass worktree, no fast-forward (a merge commit, as the train merges lanes). A pass whose worktree
  * lacked the target's newer changes ran two empty sessions and was parked. On a conflict the merge is aborted and the
@@ -537,12 +676,12 @@ export function syncEngineTarget({ task, dir, repo = null, root = mainRoot() } =
   if (!ref) return null;
   if (g('merge-base', '--is-ancestor', ref, 'HEAD').status === 0) return { merged: false, upToDate: true, conflicts: [], note: '' };
   const who = g('config', 'user.name').stdout.trim() ? [] : ['-c', 'user.name=studio-launcher', '-c', 'user.email=studio-launcher@example.invalid'];
-  const m = g(...who, 'merge', '--no-ff', '--no-edit', '-m', `Merge ${target} into ${rec.branch || task} (engine pass ${task})`, ref);
+  const m = g(...who, 'merge', '--no-ff', '--no-edit', '-m', targetMergeMessage(target, rec, task), ref);
   if (m.status === 0) return { merged: true, upToDate: false, conflicts: [], note: `${target} was merged into your worktree before this session (a merge commit), so you start with its newer changes.` };
   const conflicts = g('diff', '--name-only', '--diff-filter=U').stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
   g('merge', '--abort');
   const files = conflicts.slice(0, 12).join(', ') || 'none named';
-  return { merged: false, upToDate: false, conflicts, note: `Merging ${target} into your worktree failed${conflicts.length ? ` with conflicts in ${files}${conflicts.length > 12 ? ` +${conflicts.length - 12}` : ''}` : `: ${String(m.stderr || m.stdout || '').trim().split('\n').pop().slice(0, 160)}`}; the merge was aborted and your worktree is as it was. Start by running git -C ${dir.split(path.sep).join('/')} merge ${target} and resolving ${conflicts.length ? 'those files' : 'what it reports'}, then commit.` };
+  return { merged: false, upToDate: false, conflicts, note: `Merging ${target} into your worktree failed${conflicts.length ? ` with conflicts in ${files}${conflicts.length > 12 ? ` +${conflicts.length - 12}` : ''}` : `: ${String(m.stderr || m.stdout || '').trim().split('\n').pop().slice(0, 160)}`}; the merge was aborted and your worktree is as it was. Start by running ${targetMergeCommand(task)}: it merges ${target} into your worktree and leaves ${conflicts.length ? 'those files' : 'what it reports'} for you to resolve (then git add each, then ${targetMergeCommand(task)} --continue). ${BOTH_SIDES}` };
 }
 
 // ---- the CLI --------------------------------------------------------------------------------------------------------
@@ -559,6 +698,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (json) console.log(JSON.stringify({ changed: r.changed, ambiguous: r.ambiguous, unknown: r.unknown, engines: r.engines }));
     else console.log(r.lines.length ? r.lines.join('\n') : '[upgrade] engine tracks: nothing to backfill (every open engine-porter task has its track)');
     process.exit(0);
+  }
+  // 2.84 (m): npm run engine -- merge <ID> [--engine x] [--continue | --abort] (engineTargetMerge above).
+  if (argv[0] === 'merge') {
+    const i = argv.indexOf('--engine');
+    const r = await engineTargetMerge(argv[1], { mode: argv.includes('--abort') ? 'abort' : argv.includes('--continue') ? 'continue' : 'merge', engine: i >= 0 ? argv[i + 1] || null : null, root });
+    if (json) console.log(JSON.stringify({ ok: r.ok, step: r.step || null, files: r.files || [], lines: r.lines }));
+    else (r.ok ? console.log : console.error)(r.lines.join('\n'));
+    process.exit(r.code);
   }
   if (argv[0] === 'task') {
     const r = engineTask(argv[1], { root });
@@ -600,8 +747,10 @@ export function engineWork(taskId, { since = null, root = mainRoot() } = {}) {
     const log = g('log', ...(since ? [`--since=${since}`] : ['-n', '50']), '--no-merges', '--format=%h', range);
     const commits = log.status === 0 ? log.stdout.split('\n').filter(Boolean).length : 0;
     const st = g('status', '--porcelain');
-    const dirty = st.status === 0 ? st.stdout.split('\n').filter((l) => l.trim()).map((l) => l.slice(3).trim()) : [];
+    // 2.84 (m): a file git reports as modified whose bytes are the committed blob (a filter rule) is not a leftover.
+    const ph = splitPhantom(dir, st.status === 0 ? st.stdout.split('\n').filter((l) => l.trim()) : []);
+    const dirty = ph.real.map((l) => l.slice(3).trim());
     const branch = g('symbolic-ref', '--short', '-q', 'HEAD').stdout.trim() || rec.branch || null;
-    return { dir, branch, repo, commits, dirty, engine: rec.engine };
+    return { dir, branch, repo, commits, dirty, phantom: ph.phantom, ...(ph.phantom.length ? { phantomNote: phantomNote(ph.phantom) } : {}), engine: rec.engine };
   } catch { return null; }
 }

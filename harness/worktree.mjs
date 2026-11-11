@@ -28,7 +28,7 @@ import { PROXY_HELD } from './agent-env.mjs';
 import { listLocks } from './lock.mjs';
 import { changedSince, readPass, recordPass, canReuse, withLandLock, landingRecheckEnv } from './merge-lane.mjs';
 import { PLANNING_ROLES } from './planning-roles.mjs';
-import { splitEolOnly, eolNote } from './eol-only.mjs';
+import { splitEolOnly, eolNote, splitPhantom, phantomNote } from './eol-only.mjs';
 import { mixedLane, mayCarry } from './train-lanes.mjs';
 import { boardStates, readDeps } from './train-deps.mjs';
 import { lanePlan, writeRecord as writeSparseRecord, removeRecord as removeSparseRecord, widenStrays } from './lane-sparse.mjs';
@@ -494,13 +494,16 @@ export function laneDiff() {
  * 2.31.0: no trim() before slice(3) (it ate the first letter of the first path: "odot/..."), and engine cache files
  * (.godot/, *.import, *.uid) that every headless Godot run rewrites don't count. 2.58.3 (O3, crew P-035): a tracked
  * file that differs only in line endings isn't uncommitted work (deliver sets it aside with the engine cache).
- * 2.59.0: shared with the merge train's lane check (harness/train.mjs).
+ * 2.59.0: shared with the merge train's lane check (harness/train.mjs). 2.84 (m): phantom files (eol-only.mjs splitPhantom)
+ * are left out too and returned as `phantom` (paths), for the caller's one note.
  */
 export function laneDirty(dir = REPO_ROOT) {
   const dirtyAll = (git(dir, 'status', '--porcelain').stdout || '').split('\n').filter((l) => l.length > 3)
     .filter((l) => !/(^|\/)\.godot\/|\.import$|\.(uid|tmp)$|(^|\/)\.import\//.test(l.slice(3).replace(/^"|"$/g, '')));
   const { real, eol } = splitEolOnly(dir, dirtyAll);
-  return { dirty: real, eol };
+  // 2.84 (m): a file git reports as modified whose bytes are the committed blob (a filter rule, Git LFS) is no work.
+  const ph = splitPhantom(dir, real);
+  return { dirty: ph.real, eol, phantom: ph.phantom };
 }
 
 /** A task's lane branch (and the earlier agents' branches it carried) are in the studio's branch now: forget them. */
@@ -528,7 +531,8 @@ export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
   const main = mainBranch(root);
   // 2.70.0 (w): files written into paths a sparse lane left out are hidden from git; widen over them first.
   try { widenStrays({ dir: REPO_ROOT, root, log: (m) => console.warn(m) }); } catch {}
-  const { dirty, eol } = laneDirty(REPO_ROOT);
+  const { dirty, eol, phantom } = laneDirty(REPO_ROOT);
+  if (phantom.length) console.warn(`[task done] note: ${phantomNote(phantom)}`);
   if (eol.length) {
     console.warn(`[task done] note: ${eolNote(eol)}`);
     emitEvent({ type: 'task.eol_ignored', agent: process.env.STUDIO_LOCK_OWNER || null, task: taskId, status: 'warn', msg: `${taskId}: ${eolNote(eol)}`.slice(0, 400) });
