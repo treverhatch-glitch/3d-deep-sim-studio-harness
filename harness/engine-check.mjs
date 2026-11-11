@@ -15,6 +15,9 @@
  * checkout with the rules' git-ignored inputs copied in, never in the lane's folder (the inputs are not there), and only
  * after the same check passed on the target (a check that is red on the target judges no lane). `task done` runs a check
  * only when quickCheck is set: a studio sets it to a compile and leaves the tests to the train's check of the batch.
+ * 2.83: a task whose lane folder is gone is checked on its recorded engine branch, in a throwaway checkout (large files
+ * not smudged), removed after; with no recorded branch it is skipped with the missing lane named. Never in the studio
+ * repo's folder: a quick check run there came out falsely red ("Project file does not exist", B-125).
  * Exit: 0 pass (or nothing configured: skipped), 1 red, 3 busy (the wait ran out).
  */
 import fs from 'node:fs';
@@ -25,8 +28,9 @@ import { mainRoot } from './worktree.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
 import { engineTarget, engineTask } from './engine-tracks.mjs';
 import { readJson } from './fsafe.mjs';
-import { rulesConfig, runRulesAt } from './engine-rules.mjs';
-import { unityTrainSettings, chainOnTarget } from './unity-train.mjs';
+import { rulesConfig, runRulesAt, rulesCheckout, removeCheckout } from './engine-rules.mjs';
+import { unityTrainSettings, chainOnTarget, unityRepo } from './unity-train.mjs';
+import { taskBranch } from './unity-gate.mjs';
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
@@ -72,21 +76,42 @@ export function runEngineQuickCheck({ engine = 'unity', root = mainRoot(), task 
   const quick = typeof t?.cfg?.quickCheck === 'string' && t.cfg.quickCheck.trim() ? t.cfg.quickCheck.trim() : '';
   const cmd = quick || rulesCmd;
   if (!cmd) return { status: 'skipped', why: `no quickCheck is configured for ${engine} (studio/game.json "engines": { "${engine}": { "quickCheck": "<command>" } }, or "rules": the same command the train checks a batch with)` };
+  // 2.83: where it runs. A missing --dir or lane folder no longer falls back to the current folder (B-125).
+  const fwd = (p) => String(p).split(path.sep).join('/');
   let cwd = dir ? path.resolve(dir) : task ? path.join(root, '.lanes', 'engine', String(task)) : process.cwd();
-  if (!fs.existsSync(cwd)) cwd = process.cwd();
+  let onBranch = null; // { repo, branch, head }: the task's recorded engine branch, when its lane folder is gone
+  if (!fs.existsSync(cwd)) {
+    const where = dir ? `the folder ${fwd(dir)} does not exist` : `the lane .lanes/engine/${task} does not exist`;
+    if (dir) return { status: 'skipped', why: `the ${engine} quick check judged nothing: ${where}` };
+    onBranch = recordedBranch({ engine, root, task, t });
+    if (onBranch.why) return { status: 'skipped', why: `the ${engine} quick check judged nothing: ${where}, and ${onBranch.why}` };
+    cwd = null;
+    log(`[engine-check] ${engine}: ${where}; checking ${task}'s branch ${onBranch.branch} at ${onBranch.head.slice(0, 10)} instead`);
+  }
   const waitMin = num(env.STUDIO_ENGINE_CHECK_WAIT_MIN, 20);
   if (!quick) {
-    const got = withEngineCheckLock(root, engine, () => rulesAsQuickCheck({ engine, root, cwd, task, env, log }), { waitMs: waitMin * 60000, log, env });
+    const got = withEngineCheckLock(root, engine, () => rulesAsQuickCheck({ engine, root, cwd, task, env, log, onBranch }), { waitMs: waitMin * 60000, log, env });
     if (got.busy) return { status: 'busy', why: `another ${engine} check held the machine's check lock (${got.busy.by || '?'}, pid ${got.busy.pid || '?'}) for the whole ${waitMin} min wait (STUDIO_ENGINE_CHECK_WAIT_MIN): run it again later` };
     return got.value;
   }
   const got = withEngineCheckLock(root, engine, () => {
-    const t0 = Date.now();
-    log(`[engine-check] ${engine}: ${cmd} (in ${cwd})`);
-    const r = spawnSync(cmd, { shell: true, cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: num(t.cfg.quickCheckTimeoutMin, 30) * 60000, env: { ...env, STUDIO_ENGINE: engine, STUDIO_ENGINE_LANE_DIR: cwd } });
-    return { r, ms: Date.now() - t0 };
+    let at = cwd;
+    if (onBranch) {
+      at = path.join(root, '.studio', 'tmp', `check-${String(task).replace(/[^A-Za-z0-9._-]/g, '_')}`);
+      fs.mkdirSync(path.dirname(at), { recursive: true });
+      removeCheckout(onBranch.repo, at);
+      const co = rulesCheckout({ repo: onBranch.repo, sha: onBranch.head, dir: at, cfg: {}, env, log, engine });
+      if (!co.ok) return { error: `could not check ${onBranch.branch} out for the quick check: ${co.why}` };
+    }
+    try {
+      const t0 = Date.now();
+      log(`[engine-check] ${engine}: ${cmd} (in ${fwd(at)}${onBranch ? `, a throwaway checkout of ${onBranch.branch}` : ''})`);
+      const r = spawnSync(cmd, { shell: true, cwd: at, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: num(t.cfg.quickCheckTimeoutMin, 30) * 60000, env: { ...env, STUDIO_ENGINE: engine, STUDIO_ENGINE_LANE_DIR: at } });
+      return { r, ms: Date.now() - t0 };
+    } finally { if (onBranch) removeCheckout(onBranch.repo, at); }
   }, { waitMs: waitMin * 60000, log, env });
   if (got.busy) return { status: 'busy', why: `another ${engine} check held the machine's check lock (${got.busy.by || '?'}, pid ${got.busy.pid || '?'}) for the whole ${waitMin} min wait (STUDIO_ENGINE_CHECK_WAIT_MIN): run it again later` };
+  if (got.value.error) return { status: 'skipped', why: `the ${engine} quick check judged nothing: ${got.value.error}` };
   const { r, ms } = got.value;
   const text = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd();
   const tail = text.split('\n').slice(-12).join('\n');
@@ -96,28 +121,47 @@ export function runEngineQuickCheck({ engine = 'unity', root = mainRoot(), task 
 }
 
 /**
+ * 2.83: the engine branch recorded for a task (its engine task record, else its task.unity_branch / task.added event) and
+ * the engine repo that has it: { repo, branch, head } or { why }.
+ */
+function recordedBranch({ engine, root, task, t }) {
+  let branch = null;
+  try { branch = taskBranch(task); } catch {}
+  if (!branch) return { why: `${task} has no recorded ${engine} branch (task done <ID> --train --branch <engine branch> records one; or work in the lane)` };
+  let repo = null;
+  try { const s = unityTrainSettings(root, engine); if (s && !s.error) repo = s.repo; } catch {}
+  if (!repo) { try { repo = unityRepo(t?.cfg, root, engine); } catch {} }
+  if (!repo) return { why: `the ${engine} repo was not found to check ${task}'s branch ${branch} out` };
+  const r = spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`], { cwd: repo, encoding: 'utf8', windowsHide: true });
+  const head = r.status === 0 ? String(r.stdout || '').trim() : '';
+  if (!head) return { why: `the ${engine} repo has no branch ${branch} (recorded for ${task})` };
+  return { repo, branch, head };
+}
+
+/**
  * The owner's rules command as the porter's check: the rules check (engine-rules.mjs) on the lane's HEAD as it would land
  * on the target. 'skipped' whenever it could not judge the lane (not the engine repo, a conflict, a target that is red
  * itself, a check that could not run): the train's check of the batch decides then, as it does anyway.
  */
-function rulesAsQuickCheck({ engine, root, cwd, task, env, log }) {
+function rulesAsQuickCheck({ engine, root, cwd, task, env, log, onBranch = null }) {
   const g = (dir, ...a) => { const r = spawnSync('git', a, { cwd: dir, encoding: 'utf8', windowsHide: true }); return r.status === 0 ? String(r.stdout || '').trim() : ''; };
   const skip = (why) => ({ status: 'skipped', why: `the ${engine} rules check judged nothing here: ${why}; the train checks the batch before the land run` });
   let s; try { s = unityTrainSettings(root, engine); } catch (e) { return skip(e.message); }
   if (!s || s.error) return skip(s?.message || 'no engine repo');
   const cfg = rulesConfig(engine, { root, env, repo: s.repo, ref: s.target });
   if (!cfg) return skip('the rules check is off');
-  const head = g(cwd, 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}');
-  if (!head || !g(s.repo, 'rev-parse', '--verify', '--quiet', `${head}^{commit}`)) return skip(`${cwd} is not a checkout of the ${engine} repo`);
+  // 2.83: with the lane folder gone, the task's recorded branch is the lane's committed work.
+  const head = onBranch ? onBranch.head : g(cwd, 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}');
+  if (!head || !g(s.repo, 'rev-parse', '--verify', '--quiet', `${head}^{commit}`)) return skip(`${onBranch ? `${onBranch.branch} is not a branch of` : `${cwd} is not a checkout of`} the ${engine} repo`);
   const tip = g(s.repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${s.target}^{commit}`);
   if (!tip) return skip(`the ${engine} repo has no ${s.target}`);
   const from = [...new Set([s.folder, s.cfg.gateWorktree ? path.resolve(root, s.cfg.gateWorktree) : null, s.cfg.cwd ? path.resolve(root, s.cfg.cwd) : null, s.repo].filter(Boolean))];
   const id = `check-${task || 'lane'}`;
   const base = runRulesAt({ engine, repo: s.repo, sha: tip, cfg, from, root, id, env, log });
   if (base.status !== 'pass') return skip(`it is ${base.status === 'red' ? 'red' : 'not runnable'} on ${s.target} itself (${base.why}${base.failures?.length ? `: ${base.failures.slice(0, 3).join(', ')}` : ''}), so it judges no lane`);
-  const c = chainOnTarget(s.repo, tip, [{ task: task || 'lane', branch: g(cwd, 'rev-parse', '--abbrev-ref', 'HEAD') || head.slice(0, 10), head }], id, engine);
+  const c = chainOnTarget(s.repo, tip, [{ task: task || 'lane', branch: onBranch ? onBranch.branch : g(cwd, 'rev-parse', '--abbrev-ref', 'HEAD') || head.slice(0, 10), head }], id, engine);
   if (c.error || !c.head || !c.included?.length) return skip(c.error || (c.already?.length ? `this work is already in ${s.target}` : `the lane does not merge onto ${s.target} cleanly (merge ${s.target} into it first)`));
-  const dirty = g(cwd, 'status', '--porcelain', '--untracked-files=no') ? ' (uncommitted changes in the lane are not part of it)' : '';
+  const dirty = onBranch ? '' : g(cwd, 'status', '--porcelain', '--untracked-files=no') ? ' (uncommitted changes in the lane are not part of it)' : '';
   const r = runRulesAt({ engine, repo: s.repo, sha: c.head, cfg, from, root, id, env, log });
   if (r.status === 'pass') return { status: 'pass', why: `the ${engine} rules check passed on this lane's commit as it would land on ${s.target}${r.cached ? ' (kept result)' : ` (${Math.round((r.ms || 0) / 1000)} s)`}${dirty}`, ms: r.ms || 0 };
   if (r.status !== 'red') return skip(r.why);

@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
 import { emitOnChange } from './telemetry.mjs';
 import { parseNextQueue, writeNextQueue, pauseTask, addTask, readTaskHandoff, withBoard, releaseLeakedClaim, claimLeakGraceMs, boardChangedAt } from './task.mjs';
-import { holdReason } from './task-hold.mjs';
+import { holdReason, inAnyTrain } from './task-hold.mjs';
 import { listLocks, release, sweepBrokenLocks } from './lock.mjs';
 import { writeAtomic, sweepTempsDeep } from './fsafe.mjs';
 import { doneRunning, claimActive, keepClaim } from './busy.mjs';
@@ -45,6 +45,7 @@ import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { expireAsks } from './ask.mjs';
 import { expireDesigns } from './art.mjs';
 import { reloadEnvIfChanged } from './env-reload.mjs';
+import { producerWakeBackoff } from './line-producer.mjs';
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -143,6 +144,20 @@ export function releaseStalled({ now = Date.now(), dryRun = false, events = read
   return out;
 }
 
+/**
+ * 2.83: is task `id`'s lane queued for the game merge train (.studio/train/queue.json), queued for an engine train
+ * (<engine>-queue.json), or in a train that is running now (its lock's batch)? A builder whose task is done and waiting in
+ * a train is silent on purpose: it was called "stalled" at least 5 times in one run (98 min queued), each time filing a
+ * "Watch: 1 stalled" task for the Producer. Never throws.
+ */
+export function laneInTrain(id, { stateDir = STUDIO_STATE_DIR } = {}) {
+  try {
+    const q = JSON.parse(fs.readFileSync(path.join(stateDir, 'train', 'queue.json'), 'utf8'));
+    if (Array.isArray(q) && q.some((e) => e?.task === id)) return true;
+  } catch { /* no game queue */ }
+  try { return Boolean(inAnyTrain(id, { stateDir })); } catch { return false; }
+}
+
 export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) {
   // 2.73.2 (B-74): settings changed in .env since the last pass apply from this pass (harness/env-reload.mjs).
   if (!dryRun) reloadEnvIfChanged({ by: 'watch' });
@@ -230,6 +245,10 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
     // A launcher heartbeat counts as being heard from, even if the agent is quiet in the log.
     const lastHeard = Math.max(heard.get(lock.owner) || 0, session?.running && session.lastBeat ? Date.parse(session.lastBeat) : 0);
     if (now - lastHeard > stallMin * 60000) {
+      // 2.83: a lane waiting in (or landing through) a train is silent on purpose, not stalled.
+      let trainDir = STUDIO_STATE_DIR;
+      try { trainDir = path.join(mainRoot(), '.studio'); } catch { /* this checkout's own */ }
+      if (laneInTrain(t.id, { stateDir: trainDir })) continue;
       findings.push({ kind: 'stalled', task: t.id, agent: lock.owner, msg: `${lock.owner} holds ${t.id} but has been silent ${lastHeard ? `for ${ago(lastHeard)}` : 'since it claimed it'}`, producer: true });
     }
   }
@@ -300,7 +319,9 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   const forProducer = findings.filter((f) => f.producer);
   const open = [...q.inProgress, ...q.backlog].find((t) => /^Watch:/.test(t.title));
   let pinged = null;
-  if (forProducer.length && !open && !dryRun) {
+  // 2.83: the "N stalled" Watch task wakes the Producer; while the only blocker is a running train or a chain gate it waits (one per STUDIO_PRODUCER_BLOCKED_WAKE_MIN).
+  const wakeBack = forProducer.length && !open && !dryRun ? producerWakeBackoff({ now, kind: 'stalled' }) : { skip: false };
+  if (forProducer.length && !open && !dryRun && !wakeBack.skip) {
     const counts = ['stalled', 'waiting', 'exhausted'].map((k) => [k, forProducer.filter((f) => f.kind === k).length]).filter(([, n]) => n);
     const words = { stalled: 'stalled', waiting: 'waiting for an agent', exhausted: 'provider outage' };
     pinged = addTask({ agent: 'watch', title: `Watch: ${counts.map(([k, n]) => `${n} ${words[k]}`).join(', ')} (run npm run watch for details)`, role: 'producer', priority: 'P1' });

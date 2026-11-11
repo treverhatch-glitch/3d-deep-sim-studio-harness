@@ -501,10 +501,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (!(hours > 0)) { console.error('Usage: npm run lanes -- prune --idle <hours> [--dry-run] [--by <name>]   (hours > 0; STUDIO_LANE_IDLE_HOURS is the default)'); process.exit(2); }
     if (!dry) { const why = refreshRefusal({ by }); if (why) { console.error(why); process.exit(2); } }
     const r = await jn.pruneIdleLanes({ hours, dryRun: dry, root, by: by || 'lanes-prune' });
-    if (json) { console.log(JSON.stringify(r)); process.exit(0); }
+    // 2.83 (h): the engine lanes (.lanes/engine/<task>, worktrees of the engine repo) whose work already landed on the target.
+    const ec = await import('./engine-clean.mjs');
+    const eng = ec.pruneAllEngineLanes({ root, dryRun: dry });
+    if (json) { console.log(JSON.stringify({ ...r, engineLanes: eng })); process.exit(0); }
     console.log(`${dry ? 'Would remove' : 'Removed'} ${r.removed.length} idle lane copy(ies) (idle over ${hours} h), ${jn.human(r.freed)} ${dry ? 'would be freed' : 'freed'}; ${r.kept.length} kept.`);
     for (const x of r.removed) console.log(`  ${dry ? 'would remove' : 'removed'} ${x.path} (${jn.human(x.bytes || 0)}): ${x.why}`);
     for (const x of r.kept) console.log(`  kept ${x.path}: ${x.why}`);
+    for (const x of eng) console.log(`  engine lane ${x.removed ? 'removed' : x.would ? 'would remove' : 'kept'} ${String(x.dir).split(path.sep).join('/')}: ${x.why}`);
     process.exit(0);
   }
   if (argv[0] === 'refresh') {

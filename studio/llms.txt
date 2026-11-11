@@ -80,7 +80,7 @@
 - `npm run review -- <ID> [--local] [--implementer <model>]` — a model from another company reviews the task's tagged commits (--local: your Ollama model, free); writes the review with both family lines and one verdict
 - `npm run task -- next [--role r --agent a]` — your most urgent task for your role, or the one you hold; `npm run task -- show <ID>` — lane, owner, meta, hand-off notes, history, checklist
 - `npm run task -- done <ID> --force --reason "…" --accepted-by <person>` — a forced done a person accepted is logged without a follow-up task
-- `npm run task -- done <ID> --usage <model>:<in>/<out>` — (2.30q) a builder launched outside the harness (e.g. a Grok builder) reports its own tokens; `npm run ledger` lists them as untracked (self-reported). Also on `pause`.
+- `npm run task -- done <ID> --usage <model>:<in>/<out>` — (2.30q) a builder launched outside the harness (e.g. a Grok builder) reports its own tokens; they are written as `usage.reported` events in the event log. Also on `pause`.
 - `npm run task -- drain on|off --by <name>` / `drain wait` / `drain status` — (2.30q) pause new task done landings (running ones finish); status exits 3 while on: check it before task done in wait scripts
 - `npm run task -- list --mine` / `--all` — (2.30q) only your role's next tasks (the default in launched sessions) or the whole board
 - `node harness/task-budget.mjs <ID>` — (2.31.0) what a task has spent (sessions, claimed minutes, tokens) against its budget; over budget it is parked, `npm run task -- unpark <ID> --by <name>` resets it
@@ -166,6 +166,5 @@
 
 ## Token savers (2.30g)
 - npm run prefix: how stable each role's prompt prefix is (cache-friendly kickoff)
-- npm run token-norms: each task type's normal token use and the sessions far above it (flags only)
 - npm run verdict-note -- add|list: verdicts kept as notes for briefs (context, not rules)
 - npm run godot-unit [-- --changed]: gdUnit4 headless tests, opt-in in studio/godot-unit.json

@@ -44,6 +44,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { OWNER_STEP_PROTECTED } from './owner-only.mjs';
 import { readJson } from './fsafe.mjs';
+import { endNotAFailure } from './busy.mjs';
 
 export const MODELS_REL = 'studio/models.json';
 export const ROUTING_DIR = () => path.join(STUDIO_STATE_DIR, 'routing');
@@ -77,6 +78,8 @@ export const DEFAULT_MODELS = {
   nearPct: 85,
   success: { last: 6, floor: 0.34, minSamples: 3 },
   protectedHours: 24,
+  // 2.83: the roles a pool route applies to; any other role keeps its own role model.
+  routeRoles: ['builder', 'engine-porter'],
 };
 
 /** The config in force: DEFAULT_MODELS with studio/models.json over it (pools merged per name, lists replaced). */
@@ -95,6 +98,7 @@ export function readModels({ root = REPO_ROOT } = {}) {
     }
     if (own.nearPct !== undefined) d.nearPct = num(own.nearPct, d.nearPct);
     if (own.success && typeof own.success === 'object') d.success = { ...d.success, ...own.success };
+    if (Array.isArray(own.routeRoles)) d.routeRoles = own.routeRoles.map(String);
     if (own.protectedHours !== undefined) d.protectedHours = num(own.protectedHours, d.protectedHours);
   }
   for (const list of [...Object.values(d.routes), ...Object.values(d.escalate)]) for (const p of list) if (!d.pools[p]) errors.push(`a route names pool "${p}", which isn't in pools`);
@@ -246,7 +250,7 @@ export function buildOutcomes(events, { cfg, prev = [], sizeOf = () => 'normal',
       open.delete(e.agent);
       const task = e.task || s.task;
       if (!task) continue;
-      sessions.push({ agent: e.agent, start: s.start, end: Math.max(s.start, Date.parse(e.meta?.endedAt || '') || ts(e)), model: e.model || s.model, tool: e.meta?.tool || s.tool, task: String(task), reason: String(e.meta?.reason || ''), handed: (e.meta?.handed || []).map((h) => h?.task).filter(Boolean) });
+      sessions.push({ agent: e.agent, start: s.start, end: Math.max(s.start, Date.parse(e.meta?.endedAt || '') || ts(e)), model: e.model || s.model, tool: e.meta?.tool || s.tool, task: String(task), reason: String(e.meta?.reason || ''), handed: (e.meta?.handed || []).map((h) => h?.task).filter(Boolean), notFailure: endNotAFailure(e) });
     } else if (e.type === 'task.done' || e.type === 'lane.merged') { if (e.task) add(landings, String(e.task), ts(e)); }
     else if (e.type === 'task.train.landed') { for (const t of e.meta?.lanes || [e.task]) if (t) add(landings, String(typeof t === 'object' ? t.task : t), ts(e)); }
     else if (e.type === 'task.paused' && e.task) add(pauses, String(e.task), { at: ts(e), agent: e.agent, msg: String(e.msg || ''), ownerStep: e.meta?.ownerStep || null });
@@ -260,7 +264,7 @@ export function buildOutcomes(events, { cfg, prev = [], sizeOf = () => 'normal',
       const next = list[i + 1]?.start ?? Infinity;
       const landed = (landings.get(task) || []).some((L) => L >= s.start && L < next);
       const p = (pauses.get(task) || []).filter((x) => x.at >= s.start && x.at < next && (x.agent === s.agent || x.at <= s.end + 120000)).pop();
-      const notCounted = /usage limit|stopped by|paused by|refreshed|budget stop/i.test(s.reason);
+      const notCounted = s.notFailure || /usage limit|stopped by|paused by|refreshed|budget stop/i.test(s.reason);
       const handed = Boolean(p) || s.handed.includes(task) || next !== Infinity;
       const result = landed ? 'landed' : notCounted ? 'other' : handed ? 'handed' : 'open';
       const prot = !landed && Boolean(p && p.ownerStep === OWNER_STEP_PROTECTED);

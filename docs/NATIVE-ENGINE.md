@@ -43,6 +43,7 @@ nothing is inferred.
 
 | Where | In a native studio |
 | --- | --- |
+| `task add` (web code, 2.83) | A builder task with no `--track` whose title, `--scope`, `--paths` or `--lane` names a path under the web game folder (`game/<game>/`, `web/<game>/`, `cartridges/<game>/`) or a `.ts`, `.tsx`, `.js` or `.mjs` file goes on the web track, and says so (`webCodeNamed` in `harness/native.mjs`); `--track engine:<x>` overrides. |
 | `task add` | A builder task with no `--track` goes on `engine:<engine>`, and says so. `--track web` keeps a web task (the web rules a studio is still moving out of). A task with a lane, paths, or a type that is studio work (docs, chore, study, research, review, idea, playtest) gets no track. |
 | The Line Producer | No scheduled game-tester run on the web build (`npm run tester -- now` still runs one on demand), and no engine twins of web tasks. |
 | The game's train | No playable web build and clip after a landing: the playable build is the engine's (`npm run engine:build`). |
@@ -90,11 +91,97 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   the tests then run once, on the batch. With `"rules"` set and no `"quickCheck"`, a porter's `npm run engine -- check`
   by hand is this same rules check on the lane's committed work as it would land (throwaway checkout, inputs copied
   in, the target first), never the bare command in the lane's own folder, where the inputs are not.
+  2.83: when the task's lane folder (`.lanes/engine/<task>`) is gone, the check runs on the task's recorded engine
+  branch in a throwaway checkout, removed after; with no recorded branch it is skipped and names the missing lane. It
+  never runs in the studio repo's own folder.
+
+**Making it cheaper (2.83).** A crew's rules runs grew from 12 to 60+ minutes as the game added test data, and took
+half as much machine time as the land runs. Five settings, all optional, in the same `"rules"` object:
+
+```json
+{ "rules": { "test": "dotnet test tools/SimTests", "inputs": ["Rules~"],
+  "env": { "SIM_DATA": "Rules~/data" }, "paths": ["Assets/Sim", "Assets/Tests/EditMode", "tools/SimTests"],
+  "lfs": false, "share": ["Rules~/blobs"],
+  "focus": { "test": "dotnet test tools/SimTests --filter \"{filter}\"",
+             "map": [ { "match": "^Assets/Sim/([A-Za-z]+)/", "filter": "Category=$1" } ],
+             "smoke": "Category=Smoke", "join": "|", "fullEveryHours": 24 } } }
+```
+
+- `env`: variables (strings) for the command, over the process's own and under the harness's `STUDIO_RULES_*`.
+  `rules show` prints their names only. A changed value is a new kept-result key.
+- Large files: the throwaway checkout skips Git LFS smudging (`GIT_LFS_SKIP_SMUDGE=1`) unless `"lfs": true`.
+- `paths`: the repo folders or files the rule tests compile or read. Only those are checked out (a sparse checkout; a
+  full one, said in the log, if that fails), and a kept result's key is those paths' git ids instead of the whole
+  tree: a batch that changes nothing under them gets the target's kept result without a run.
+- `inputs` are merged over every folder they are copied from: each file comes from the first folder that has it and
+  never overwrites one already there, and the inputs' fingerprint is of that merged view. The train may add the
+  lanes' own folders after the regular ones (`extraFrom`); `share` lists folders of content-addressed input files a
+  lane adds, which `shareInputs` copies (missing files only, nothing overwritten or deleted) where the next check finds them.
+- `focus`: when every path a batch changes (under `paths`, when set) matches a `map` entry, the batch runs
+  `focus.test` with `{filter}` replaced by the matching entries' filters (`$1`..`$9` are the regex groups; a group
+  with anything but letters, digits, `.`, `_` or `-` counts as unmatched) plus `smoke`, joined by `join`. Otherwise,
+  and whenever the last full pass on the target is older than `fullEveryHours`, it runs the full `test`. The target's
+  calibration and the narrowing of a red batch use the batch's same command. The command gets
+  `STUDIO_RULES_MODE=focus` or `full`; the `engine.rules` event and the train's result say the mode and the filter.
+  `STUDIO_ENGINE_RULES_FULL=1` forces a full run. **A focus-mode green is weaker than a full one**: a change in one
+  system can break another system's test, which a focused run does not run; the full run every `fullEveryHours` is
+  the backstop, and a land script that reads `STUDIO_RULES_MODE` can run the full tests itself after a focused green.
 
 ```bash
-npm run engine -- rules show                  # the command and where it comes from
-npm run engine -- rules --ref unity/my-branch # run it on one branch or commit (a porter's own check)
+npm run engine -- rules show                         # the command, where it comes from, env names, paths, focus
+npm run engine -- rules --ref unity/my-branch        # run it on one branch or commit (a porter's own check)
+npm run engine -- rules --ref unity/my-branch --full # the full command even when focus would apply
+npm run engine -- rules --ref unity/my-branch --fresh # ignore kept results
 ```
+
+## The engine train from 2.83: who lands with whom, and who is blamed
+
+Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mjs`, `qa/selftest-283b.mjs`).
+
+- **A branch that lands alone.** `npm run task -- done <ID> --train --alone`, or `npm run task -- alone <ID> on|off`
+  at any time before it lands. The train takes the lanes queued before it as one batch, then gives the marked branch a
+  land run of its own. Use it for a switch-over (the step that makes the engine's own code the live one): a red run then
+  names one change.
+- **One more run before blame.** When the first red stage of a land run is one that fails under load, the same batch
+  is run once more before anyone is searched for. Which stages: `engines.<x>.retryStages` (a list) or
+  `STUDIO_ENGINE_RETRY_STAGES=play,build`; Unity's default is `play`; `off` turns it off. A batch that passes the
+  second time lands, and the run is recorded as flaky (`task.train.unity.flaky`, with the stage and the failing test).
+- **Blame by evidence.** After a red run the failing test's name is read from the land's output and its class is
+  looked up in what each lane changes. When exactly one lane touches it, the batch is run without that lane: green, and
+  the rest lands on that one run while the lane is handed back with the evidence (cause `evidence`); red, and the
+  search by land runs goes on as before. A compile error names no test: then the file the compiler names
+  (`Assets/Tests/Foo.cs(12,5): error CS0117`) is the evidence, and the one lane that changes it is run without.
+  `STUDIO_ENGINE_BLAME_EVIDENCE=off` turns it off.
+- **No blame by elimination.** A lane that the search by land runs leaves over ("everything before it was green") is
+  run by itself before it is handed back. If it passes, it lands and nobody is handed back.
+- **Handed back means out.** A lane the train hands back leaves the train's record at once, so `task start` on its
+  fix works while the train is still landing the rest.
+- **A full land run once a day.** Every `engines.<x>.fullLandHours` hours (default 24, `STUDIO_ENGINE_FULL_LAND_HOURS`,
+  `off` for never) one land run gets `STUDIO_LAND_FULL=1` and none of the shortcuts: no `STUDIO_RULES_GREEN`, no
+  `STUDIO_UNITY_EDITMODE_ARGS`. A land script that skips work on those variables should run everything when it sees
+  `STUDIO_LAND_FULL=1`. The time of the last full run that passed is kept in `.studio/engine/<engine>-full-land.json`;
+  with no record the clock starts at the first train, so the first full run comes that many hours later.
+- **The owner's own Edit Mode arguments.** `engines.unity.editModeArgs` (a string, for example
+  `-testCategory "!Slow"`) is passed as `STUDIO_UNITY_EDITMODE_ARGS` in place of the harness's plan. Not on a full run.
+- **The land script that runs.** When the land command names a script inside another worktree of the engine repo and
+  that copy differs from the target branch's, the train says so (`task.train.unity.land_script`): a landed change to
+  the script changes nothing until that copy is updated.
+
+Around the train:
+
+- **Two repositories, one task.** When the merge train lands a task's studio half while its engine branch still has
+  commits the engine's target lacks, the task stays open (`task.half_landed`) and the branch is queued for the engine
+  train. It closes when that lands.
+- **Shared input files.** `engines.<x>.rules.share` (a list of folders, for example `["Rules~/packs"]`): files a lane
+  adds there, named by their content, are copied into the engine folder when the lane is queued, so the rules check
+  and the land run find them. Existing files are never overwritten.
+- **Cleanup.** A landed lane's engine worktree (`.lanes/engine/<task>`) is removed (`STUDIO_ENGINE_LANE_CLEAN=off`
+  keeps it; a worktree with uncommitted files is always kept). `engines.<x>.builds` = `{ "dir": "<absolute folder>",
+  "keep": 3, "pattern": "gate-*" }` keeps the newest build folders and writes `LATEST.txt` with the newest one's
+  path (`STUDIO_ENGINE_KEEP_BUILDS`; docs/ENGINE-TRACKS.md has the rules it refuses by). `npm run lanes -- prune` covers engine lanes; `node harness/engine-clean.mjs lanes|builds`
+  runs either by hand.
+- `node harness/unity-train.mjs queue --task <ID> [--engine x] [--branch b] [--alone]` queues a branch without closing
+  a task; `npm run task -- train dequeue <ID>` takes one out.
 
 ## The land's stage report
 

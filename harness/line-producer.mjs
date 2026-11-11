@@ -62,6 +62,7 @@ import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { OWNER_STEP_PROTECTED } from './owner-only.mjs';
+import { postAsk } from './ask-post.mjs';
 
 export const LINE_AGENT = 'line-producer';
 export const LINE_DIR = () => path.join(STUDIO_STATE_DIR, 'line');
@@ -266,8 +267,20 @@ export function linePlan(f) {
     reasons.push(`${free} builder slot${free === 1 ? ' is' : 's are'} free but every open builder task is blocked (${Object.entries(k).map(([kk, n]) => `${n} ${kk}`).join(', ')})`);
   }
   if (target > 1 && f.lanes?.unscoped?.length) reasons.push(`${f.lanes.unscoped.length} ready builder task${f.lanes.unscoped.length === 1 ? ' has' : 's have'} no lane the Line Producer could work out (${f.lanes.unscoped.slice(0, 5).map((u) => u.task).join(', ')}${f.lanes.unscoped.length > 5 ? ' …' : ''}): a builder on one holds the whole game, so no other builder runs beside it; npm run task -- lane <ID> <folders> --by <you>`);
-  for (const d of f.dangling || []) reasons.push(`${d.task} waits for ${d.on}, which isn't on the board: the chain can't finish`);
+  // 2.83: a dependency on a task that is on no list holds only that task (it is not startable); it is a reason the plan
+  // "can't run" only when nothing else can run. The Producer is asked once per (task, missing id): see askDangling.
+  const dangling = (f.dangling || []).filter((d) => !(f.done || new Set()).has(d.on));
+  const otherWork = tasks.some((t) => t.state === 'running' || t.state === 'ready');
+  if (!otherWork) for (const d of dangling) reasons.push(`${d.task} waits for ${d.on}, which isn't on the board: the chain can't finish`);
   if (blocked.some((b) => b.kind === 'trunk')) reasons.push('the trunk is red: only fix tasks start until it is green');
+  // 2.83: what gates the line: for each chain-breaker, the builder tasks that wait only on it, and where it is.
+  const gates = cbs.map((c) => {
+    const g = byTask.get(c.task);
+    const waiters = c.waiting.filter((id) => { const w = byTask.get(id); return w && w.role === 'builder' && w.state === 'blocked' && w.block?.kind === 'chain'; });
+    const train = (f.inTrain || {})[c.task] || (/train/i.test(g?.block?.why || '') ? (/unity/i.test(g.block.why) ? 'a Unity train' : 'the merge train') : null);
+    const where = train ? `in ${train}` : g?.state === 'running' ? 'in progress' : g?.state === 'blocked' ? (g.block.kind === 'park' ? 'parked' : `blocked (${g.block.kind})`) : 'ready but not started';
+    return { task: c.task, n: waiters.length, where, inTrain: Boolean(train), waiting: waiters.slice(0, 8) };
+  }).filter((g) => g.n > 0).sort((a, b) => b.n - a.n || a.task.localeCompare(b.task));
   const why = [`pace ${f.pace?.label || '?'} allows ${paceCap} builder${paceCap === 1 ? '' : 's'}`, rigCap === null ? rigWhy : `rig: ${rigWhy}`, `${builders.length} running`, `${readyB.length} ready`, blocked.length ? `${blocked.length} blocked (${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(', ')})` : null].filter(Boolean).join('; ');
   // 2.77.0 (o): remote (cloud) workers: remote-eligible ready tasks offered when the local builders are at their target.
   let remote = null;
@@ -279,6 +292,8 @@ export function linePlan(f) {
     skip,
     routes,
     blocked,
+    gates,
+    dangling,
     chainBreakers: cbs.map((c) => ({ ...c, state: byTask.get(c.task)?.state || 'unknown', ...(byTask.get(c.task)?.block ? { why: byTask.get(c.task).block.why } : {}) })),
     expansion: { share: Math.round(share * 1000) / 1000, slots, running: runningExp.length, open: exp.length, byPhase, lowPhase: Number(lowPhase), askSlice, sliceOpen: f.sliceOpen ? f.sliceOpen.id : null },
     reasons,
@@ -441,6 +456,14 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
       }
     }
   } catch { /* the train hands it back as before */ }
+  // 2.83: which tasks sit in a train's queue (the merge train, or an engine train such as the Unity one), for "where is the gate".
+  const inTrain = {};
+  try {
+    const mq = deps.trainQueue || readJson(path.join(root, '.studio', 'train', 'queue.json'), []);
+    for (const e of Array.isArray(mq) ? mq : []) if (e?.task) inTrain[e.task] = 'the merge train';
+    const uq = deps.unityQueue || readJson(path.join(root, '.studio', 'train', 'unity-queue.json'), []);
+    for (const e of Array.isArray(uq) ? uq : []) if (e?.task) inTrain[e.task] = 'a Unity train';
+  } catch { /* "where" falls back to the task's own state */ }
   const live = (deps.sessions || (await import('./agent.mjs')).sessions()).map((s) => ({ agent: s.agent, role: s.role, task: s.task || null, running: Boolean(s.running), model: s.model || null }));
   const locks = deps.locks || lock.listLocks();
   const { claimActive } = await import('./busy.mjs');
@@ -558,7 +581,7 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
   if (!remote) {
     try { const rw = await import('./remote-workers.mjs'); remote = { ...(await rw.remoteFacts({ tasks, holds, events, env, root })), remotePlan: rw.remotePlan }; } catch { remote = null; }
   } else if (!remote.remotePlan) { try { remote = { ...remote, remotePlan: (await import('./remote-workers.mjs')).remotePlan }; } catch {} }
-  return { now, tasks, holds, done: doneSet, sessions: live, pace: { maxAgents: pace.maxAgents, perRole: pace.perRole, label: pace.label }, rig, models, remote, share: expansionShare(env), chainMin: Math.max(1, num(env.STUDIO_LINE_CHAIN_MIN, 3)), expansionMin: Math.max(0, num(env.STUDIO_LINE_EXPANSION_MIN, 2)), sliceOpen: sliceOpen ? { id: sliceOpen.id, title: sliceOpen.title } : null, extraBlocked, dangling, fixed, pools, protectedSteps, lanes };
+  return { now, tasks, holds, done: doneSet, sessions: live, pace: { maxAgents: pace.maxAgents, perRole: pace.perRole, label: pace.label }, rig, models, remote, share: expansionShare(env), chainMin: Math.max(1, num(env.STUDIO_LINE_CHAIN_MIN, 3)), expansionMin: Math.max(0, num(env.STUDIO_LINE_EXPANSION_MIN, 2)), sliceOpen: sliceOpen ? { id: sliceOpen.id, title: sliceOpen.title } : null, extraBlocked, dangling, inTrain, fixed, pools, protectedSteps, lanes };
 }
 
 /**
@@ -622,6 +645,120 @@ export async function protectedRoutes({ tasks, events, now = Date.now(), env = p
   return out;
 }
 
+// ---- 2.83: planner state, the chain gate, dangling asks, the Producer wake back-off -------------------------------------
+
+export const LINE_STATE_FILE = () => path.join(LINE_DIR(), 'state.json');
+export const readLineState = () => { const j = readJson(LINE_STATE_FILE(), {}); return j && typeof j === 'object' ? j : {}; };
+export function writeLineState(st) { try { fs.mkdirSync(LINE_DIR(), { recursive: true }); writeAtomic(LINE_STATE_FILE(), `${JSON.stringify(st, null, 1)}\n`); } catch { /* the next pass tries again */ } }
+export const chainGateN = (env = process.env) => Math.max(0, num(env.STUDIO_CHAIN_GATE_N, 3));
+export const chainGateMin = (env = process.env) => Math.max(0, num(env.STUDIO_CHAIN_GATE_MIN, 60));
+export const producerBlockedWakeMin = (env = process.env) => Math.max(0, num(env.STUDIO_PRODUCER_BLOCKED_WAKE_MIN, 60));
+export const CHAIN_GATE_REPEAT_MIN = 120;
+export const PLAN_BLOCKED_REPEAT_MIN = 30;
+export const WAKE_SKIP_EVERY_MIN = 30;
+const hm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+
+/**
+ * One task gating more than STUDIO_CHAIN_GATE_N builder tasks for more than STUDIO_CHAIN_GATE_MIN minutes. Pure: `gates`
+ * are the plan's (task, n, where, waiting), `gateState` is { <task>: { since, lastEmit } } from the last pass. Returns
+ * { gateState, active: [{ ...gate, since }], fire: [the same, to be said now] }. It repeats at most every 120 minutes.
+ */
+export function chainGateStep({ gates = [], gateState = {}, now = Date.now(), env = process.env } = {}) {
+  const N = chainGateN(env);
+  const next = {};
+  const active = [];
+  const fire = [];
+  for (const g of gates) {
+    if (!(g.n > N)) continue;
+    const prev = gateState[g.task] || {};
+    const rec = { since: Number.isFinite(prev.since) ? prev.since : now, lastEmit: Number.isFinite(prev.lastEmit) ? prev.lastEmit : null };
+    const old = now - rec.since >= chainGateMin(env) * 60000;
+    if (old && (rec.lastEmit === null || now - rec.lastEmit >= CHAIN_GATE_REPEAT_MIN * 60000)) { rec.lastEmit = now; fire.push({ ...g, since: rec.since }); }
+    next[g.task] = rec;
+    if (old) active.push({ ...g, since: rec.since });
+  }
+  return { gateState: next, active, fire };
+}
+
+/** The one plain line a chain gate event carries. */
+export const chainGateText = (g, now = Date.now()) => `Line Producer: ${g.task} gates ${g.n} builder task${g.n === 1 ? '' : 's'} (${g.waiting.slice(0, 5).join(', ')}${g.n > 5 ? ' …' : ''}) since ${hm(g.since)} (${Math.round((now - g.since) / 60000)} min); it is ${g.where}. Split off the parts that do not need it, or remove the dependency: npm run task -- after <ID> --remove ${g.task}`;
+
+/**
+ * The planner's own reason, in one line, for the alerts (communicator's builders-low) and for the wake back-off:
+ * { lead, blocker }. lead: "all ready work waits on T-548, which is in a Unity train since 10:26 (5 tasks); 42 parked, 2 held".
+ * blocker: { key, text } when everything startable waits on a task in a train, or a chain gate stands; else null.
+ */
+export function planLead(p, { gateState = {}, active = [] } = {}) {
+  const g = (p.gates || [])[0];
+  const kinds = {};
+  for (const b of p.blocked || []) kinds[b.kind] = (kinds[b.kind] || 0) + 1;
+  const counts = ['park', 'held'].filter((k) => kinds[k]).map((k) => `${kinds[k]} ${k === 'park' ? 'parked' : 'held'}`);
+  const readyNone = !(p.builders?.ready > 0);
+  let head = null;
+  let blocker = null;
+  if (g && readyNone) {
+    const since = gateState[g.task]?.since;
+    head = `all ready work waits on ${g.task}, which is ${g.where}${since ? ` since ${hm(since)}` : ''} (${g.n} task${g.n === 1 ? '' : 's'})`;
+    if (g.inTrain || active.some((a) => a.task === g.task)) blocker = { key: `${g.task}|${g.where}`, text: head };
+  } else if ((p.reasons || [])[0]) head = String(p.reasons[0]).slice(0, 200);
+  const lead = head ? [head, ...(counts.length ? [counts.join(', ')] : [])].join('; ') : '';
+  return { lead, blocker };
+}
+
+/** Ask the Producer, once per (task, missing id), about a dependency that is on no list. State: state.json "asked". */
+export function askDangling({ dangling = [], state, now = Date.now(), deps = {} } = {}) {
+  const asked = state.asked && typeof state.asked === 'object' ? state.asked : {};
+  const live = new Set(dangling.map((d) => `${d.task}|${d.on}`));
+  for (const k of Object.keys(asked)) if (!live.has(k)) delete asked[k];
+  const out = [];
+  const post = deps.postAsk || postAsk;
+  for (const d of dangling) {
+    const k = `${d.task}|${d.on}`;
+    if (asked[k]) continue;
+    asked[k] = new Date(now).toISOString();
+    out.push(k);
+    try { post({ agent: LINE_AGENT, to: 'producer', task: d.task, subject: `dangling:${d.on}`, status: 'warn', now, msg: `Needs you: ${d.task} waits for ${d.on}, which is on neither the open board nor the done list, so it can never start. The rest of the plan runs. Fix: npm run task -- after ${d.task} --remove ${d.on}`, meta: { task: d.task, missing: d.on }, ...(deps.emit ? { emit: deps.emit } : {}), ...(deps.askRoot ? { r: deps.askRoot } : {}) }); } catch { /* asked again next pass */ }
+  }
+  state.asked = asked;
+  return out;
+}
+
+/**
+ * Should a plan_blocked event go out for this reason text? When the text changed, or the last one is over 30 minutes old.
+ * Pure over state.blocked { key, at }; returns { emit, state }.
+ */
+export function planBlockedDue(key, state, now = Date.now()) {
+  const b = state.blocked || {};
+  const emit = b.key !== key || !Number.isFinite(b.at) || now - b.at >= PLAN_BLOCKED_REPEAT_MIN * 60000;
+  return emit ? { emit: true, blocked: { key, at: now } } : { emit: false, blocked: b };
+}
+
+/**
+ * 2.83: the Producer's wake while the only blocker is a running train or a chain gate. The first wake goes as today; then
+ * one per STUDIO_PRODUCER_BLOCKED_WAKE_MIN minutes while the same blocker stands; the back-off ends when it changes or
+ * lands. Reads the last status (its `blocker`), keeps { key, lastWake, lastSkip } in state.json "wake". Emits one
+ * agent.wake.skipped at most every 30 minutes. Returns { skip, why }. Never throws.
+ */
+export function producerWakeBackoff({ now = Date.now(), env = process.env, kind = 'wake', status = undefined, emit = emitEvent } = {}) {
+  try {
+    const min = producerBlockedWakeMin(env);
+    const s = status === undefined ? readLineStatus() : status;
+    const at = Date.parse(s?.at || '');
+    const b = s?.blocker && Number.isFinite(at) && now - at <= 15 * 60000 ? s.blocker : null;
+    const st = readLineState();
+    if (!b || min <= 0) { if (st.wake) { delete st.wake; writeLineState(st); } return { skip: false, why: b ? 'back-off is off' : 'no train or chain-gate blocker stands' }; }
+    const w = st.wake || {};
+    if (w.key !== b.key) { st.wake = { key: b.key, lastWake: now }; writeLineState(st); return { skip: false, why: 'first wake for this blocker' }; }
+    if (now - w.lastWake >= min * 60000) { st.wake = { ...w, lastWake: now }; writeLineState(st); return { skip: false, why: `${min} min since the last wake` }; }
+    const why = `the only blocker is ${b.text}; the Producer was woken ${Math.round((now - w.lastWake) / 60000)} min ago and is woken at most every ${min} min while it stands`;
+    if (!Number.isFinite(w.lastSkip) || now - w.lastSkip >= WAKE_SKIP_EVERY_MIN * 60000) {
+      st.wake = { ...w, lastSkip: now }; writeLineState(st);
+      try { emit({ type: 'agent.wake.skipped', agent: LINE_AGENT, to: 'producer', msg: `Producer wake skipped (${kind}): ${why}`.slice(0, 400), meta: { kind, blocker: b.key } }); } catch {}
+    }
+    return { skip: true, why };
+  } catch (e) { return { skip: false, why: `error: ${e.message}` }; }
+}
+
 /** The Producer note: one file, rewritten when its reasons change, and one line.plan_blocked event per change. */
 function writeNote(reasons, { now = Date.now() } = {}) {
   const f = LINE_NOTE_FILE();
@@ -635,7 +772,13 @@ function writeNote(reasons, { now = Date.now() } = {}) {
   if (Buffer.from(key).toString('base64') === prevKey) return { file: f, changed: false };
   fs.mkdirSync(LINE_DIR(), { recursive: true });
   fs.writeFileSync(f, `# Line Producer: this plan can't run because …\n\n> Written by harness/line-producer.mjs at ${new Date(now).toISOString()}. The Line Producer never changes direction:\n> the Producer (with the Director for the plan) decides. This note is rewritten when its reasons change and removed\n> when the plan can run. <!-- reasons: ${Buffer.from(key).toString('base64')} -->\n\n${reasons.map((r) => `- ${r}`).join('\n')}\n`);
-  try { emitEvent({ type: 'line.plan_blocked', agent: LINE_AGENT, to: 'producer', status: 'warn', msg: `Line Producer: this plan can't run because ${reasons.join('; ')}`.slice(0, 600), meta: { reasons, note: '.studio/line/producer-note.md' } }); } catch {}
+  // 2.83: said when the reason text changes (ids and counts included), else at most once per 30 minutes (166 in 26 h before).
+  const st = readLineState();
+  const due = planBlockedDue(key, st, now);
+  if (due.emit) {
+    st.blocked = due.blocked; writeLineState(st);
+    try { emitEvent({ type: 'line.plan_blocked', agent: LINE_AGENT, to: 'producer', status: 'warn', msg: `Line Producer: this plan can't run because ${reasons.join('; ')}`.slice(0, 600), meta: { reasons, note: '.studio/line/producer-note.md' } }); } catch {}
+  }
   return { file: f, changed: true };
 }
 
@@ -672,6 +815,17 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
     }
     let note = null;
     if (acting) { try { note = writeNote(p.reasons, { now }); } catch {} }
+    // 2.83: the chain gate (one task gating many), the dangling asks, and the planner's own one-line reason.
+    let lineState = readLineState();
+    const gateStep = chainGateStep({ gates: p.gates, gateState: lineState.gates || {}, now, env });
+    let danglingAsked = [];
+    if (acting) {
+      for (const g of gateStep.fire) { try { emitEvent({ type: 'line.chain_gate', agent: LINE_AGENT, to: 'producer', status: 'warn', task: g.task, msg: chainGateText(g, now).slice(0, 600), meta: { task: g.task, n: g.n, waiting: g.waiting, where: g.where, since: new Date(g.since).toISOString() } }); } catch {} }
+      danglingAsked = askDangling({ dangling: p.dangling, state: lineState, now, deps: deps.askDeps || {} });
+    }
+    lineState.gates = gateStep.gateState;
+    if (acting) writeLineState(lineState);
+    const leadInfo = planLead(p, { gateState: lineState.gates, active: gateStep.active });
     // 2.77.0 (o): STUDIO_REMOTE=on: leases that ran out end (the claim released, the task back on the board), a
     // background fetch of remote/* starts when one is due, and a changed offer is one remote.offer event.
     let remotePass = null;
@@ -712,6 +866,10 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
       skip: p.skip,
       enginePush,
       paged,
+      lead: leadInfo.lead,
+      blocker: leadInfo.blocker,
+      chainGates: gateStep.active.map((g) => ({ task: g.task, n: g.n, where: g.where, since: new Date(g.since).toISOString() })),
+      danglingAsked,
       twins,
       tester,
     };

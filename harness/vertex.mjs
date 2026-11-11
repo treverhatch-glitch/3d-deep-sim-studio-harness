@@ -14,6 +14,7 @@
  *   STUDIO_VERTEX_MODEL                 a normal builder task's model (google/gemini-3-flash-preview)
  *   STUDIO_VERTEX_HARD_MODEL            a hard task's model: size 4-5 or a chain-breaker (google/gemini-3.1-pro-preview)
  *   STUDIO_VERTEX_SHARE                 the share of builder slots Vertex may take while the plan has headroom (0.5)
+ *   STUDIO_VERTEX_ENGINE                on: an engine-track task may run on Vertex too (off by default: aider can't open the engine repo's worktree)
  *   STUDIO_VERTEX_PROXY_PORT            the proxy's port (8787)
  *   STUDIO_VERTEX_MAX_PROMPT_TOKENS     a request over this many prompt tokens stops its session (150000; 0 = no cap)
  *   STUDIO_VERTEX_BASE_URL              the OpenAI-compatible base (default: the global endpoint of VERTEX_PROJECT_ID); https,
@@ -28,6 +29,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { aiderProgram } from './aider-launch.mjs';
+import { endNotAFailure } from './busy.mjs';
+import { engineTask } from './engine-tracks.mjs';
 import { resolveCommand } from './launch.mjs';
 import { readEnvFile } from './dotenv.mjs';
 
@@ -206,7 +209,7 @@ export function vertexFailures(taskId, events) {
   for (const e of events) {
     if (e.task !== taskId) continue;
     if (e.type === 'task.done' || e.type === 'lane.merged' || e.type === 'task.train.landed') n = 0;
-    else if (e.type === 'agent.session.end' && (e.meta?.tool === 'vertex') && (e.meta?.handed || []).some((h) => h?.task === taskId)) n += 1;
+    else if (e.type === 'agent.session.end' && (e.meta?.tool === 'vertex') && !endNotAFailure(e) && (e.meta?.handed || []).some((h) => h?.task === taskId)) n += 1;
   }
   return n;
 }
@@ -217,12 +220,19 @@ export function vertexFailures(taskId, events) {
  *   the paid API pool and takes any free slot; otherwise it takes at most STUDIO_VERTEX_SHARE of the builder slots (cap).
  *   cut: the spend budget's cut for vertex (harness/spend-budget.mjs), a reason or ''. ready: { ok, why } (configured, aider).
  */
-export function vertexPick({ role, taskId, tier = null, live = [], cap = 0, high = false, env = process.env, events = null, ready = null, cut = '' } = {}) {
+export function vertexPick({ role, taskId, tier = null, live = [], cap = 0, high = false, env = process.env, events = null, ready = null, cut = '', root = null } = {}) {
   if (role !== 'builder') return { skip: 'only builders run on Vertex' };
   const r = ready || vertexConfigured();
   if (!r.ok) return { skip: `vertex: ${r.why}` };
   if (cut) return { skip: `vertex: ${cut}` };
   const ev = events || readRecentEvents(20000);
+  // 2.83: an engine-track task's work lives in a separate engine repo worktree, which the driven-aider protocol doesn't
+  // open: the session ended in a minute with "aider changed no file". Not on Vertex unless STUDIO_VERTEX_ENGINE=on.
+  if (taskId && !/^(on|1|true|yes)$/i.test(String(env.STUDIO_VERTEX_ENGINE || '').trim())) {
+    let eng = null;
+    try { eng = engineTask(taskId, { events: ev, env, ...(root ? { root } : {}) }); } catch { /* unreadable: treat as a web task */ }
+    if (eng?.engine) return { skip: `vertex: ${taskId} is on the engine track (${eng.track || `engine:${eng.engine}`}): its work is in the engine repo worktree, which the driven aider session doesn't open (STUDIO_VERTEX_ENGINE=on allows it)` };
+  }
   if (taskId && vertexFailures(taskId, ev) > 0) return { skip: `vertex: ${taskId} was handed back on Vertex since it last landed: the plan's route takes it` };
   const size = sizeOfTask(taskId, { tier, events: ev });
   const model = vertexModelFor(size, env);

@@ -85,7 +85,7 @@ Tell the Producer whenever you have an idea, a change, a reference or an asset (
 | Where did agents stall, run out or get refused? | `studio/handoffs/`, `npm run watch`, the retro |
 | What did the harness do well or badly? | `npm run notes -- list` (the overseer's evaluations included), then `npm run notes -- export` to bring it upstream |
 | What keeps happening, and did lessons stick? | `npm run learn` (`studio/memory/LEARNED.md`); the backups in `STUDIO_BACKUP_DIR` |
-| What did it cost? | Tokens per provider: `npm run tokens`, `npm run ledger`, `.studio/runs/` |
+| What did it cost? | Tokens per provider: `npm run tokens`, `npm run score`, `.studio/runs/` |
 
 Keep the private copy's notes. The lessons that are about the harness rather than your game are worth
 bringing back to the public repo as a pull request from a person, without the game's code, keys or data.

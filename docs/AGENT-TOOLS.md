@@ -166,6 +166,18 @@ Before this (P-066, crew report P-036), Windows ran the built-in tools with `she
 argument at its spaces, so Claude Code lost its allowed-tools list (each command waited for a yes and the agent
 quit after a few turns) and agy stopped at `unexpected argument`.
 
+## Adding to the command list (2.83)
+
+The built-in list is in `harness/allowlist.mjs` (`ALLOWED`). A studio adds its own without editing the harness: a file
+`studio/allowlist.json`, an array of `[label, pattern]` string pairs, for example
+`[["tool", "C:/Tools/bin/tool.exe *"]]`. At most 50 entries, each pattern at most 300 characters and on one line. The
+entries are appended to the built-in list for Claude agents' `--allowedTools`, the kickoff's list of what may run and the
+denial report's "on the list" check (`allowed(root)` in `harness/allowlist.mjs`). A file that is not valid JSON, or not an
+array, is ignored; a bad pair is skipped; nothing crashes. agy's enrolment (below) stays on the owner's approved set.
+The file is protected (`studio/protected.json`): it changes only with the owner's signed approval, so a lane cannot
+widen what agents may run. A pattern must name its command: one that starts with a wildcard (fewer than 3 characters
+before the first `*`) is skipped.
+
 ## agy's allow-rules: the owner enrols them once
 
 Claude agents get the harness's command list (`harness/allowlist.mjs`: node, npm, npx, ffmpeg, blender, read-only
@@ -381,7 +393,7 @@ npm run agent -- start --role builder --tool vertex --task T-12 [--model google/
   `STUDIO_VERTEX_SHARE` of the builder slots (default 0.5) while the plan has headroom; when the plan's budget is high
   (every tool over its weekly target, or the wind-down) Vertex goes first, before the paid API pool
   (`STUDIO_API_POOL`), and takes any free slot. Agy (Gemini plan) routes are left as they are. A task handed back on
-  Vertex since it last landed goes to the plan's route (Claude). Why 0.5 by default: half the builders move off the
+  Vertex since it last landed goes to the plan's route (Claude). 2.83: an engine-track task never goes to Vertex (its work lives in the engine repo worktree, which the driven aider session doesn't open, so the session ended with "aider changed no file"); `STUDIO_VERTEX_ENGINE=on` allows it. Why 0.5 by default: half the builders move off the
   Claude plan at once, which is the owner's aim, while the other half keeps the plan's proven builders on the board so
   the two can be compared (`npm run models -- status`, landed vs handed back) before the share goes up; 1 sends every
   Claude builder to Vertex, 0 keeps Vertex for high-budget times and `agent start --tool vertex`.

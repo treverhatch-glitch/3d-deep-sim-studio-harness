@@ -170,6 +170,20 @@ export function failingTests(text) {
 }
 
 /**
+ * 2.83: the source files a land run's output names in compiler errors ("Assets/Tests/Foo.cs(12,5): error CS0117: …"),
+ * with forward slashes, unique, 20 at most. A compile error names no test; the file it names is the evidence instead.
+ */
+export function compileErrorFiles(text) {
+  const files = new Set();
+  for (const l of String(text || '').replace(/\r\n?/g, '\n').split('\n')) {
+    const m = /^\s*(?:\[[^\]]*\]\s*)?((?:[A-Za-z]:)?[^\s():*?"<>|][^():*?"<>|\n]*\.[A-Za-z0-9]{1,8})\(\d+,\d+\):\s*error\b/.exec(l);
+    if (m) files.add(m[1].trim().replace(/\\/g, '/'));
+    if (files.size >= 20) break;
+  }
+  return [...files];
+}
+
+/**
  * 2.73.2 (e, B-73): was a red or error land run an infrastructure abort? { kind, text } or null. The output shows out of
  * memory (or exit 0xC0000017), no licence, the editor or the script ended from outside, or "Aborting batchmode", and
  * shows no failing test and no compile error (harness/engine-proof.mjs infraAbort). A timeout is never one here.
@@ -300,7 +314,13 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   const tuneEnv = { STUDIO_ENGINE: engine, STUDIO_ENGINE_TUNE: JSON.stringify(tune || {}), STUDIO_ENGINE_TUNE_FILE: tunePath(REPO_ROOT, engine), STUDIO_ENGINE_FLAGS: flags.join(' '), STUDIO_LAND_RESULT: stageFile };
   // 2.82: for a Unity land script: which Edit Mode assemblies the editor still has to run after its .NET tests passed
   // (harness/unity.mjs editModePlan on the land's own checkout; "SKIP": none). The script decides whether to use it.
-  if (engine === 'unity' && !/^(off|0|false|no)$/i.test(String(env.STUDIO_UNITY_EDITMODE_PLAN || ''))) {
+  // 2.83: a full land run (STUDIO_LAND_FULL=1, set by the engine train once a day) gets no plan: the editor runs every
+  // Edit Mode test. And the owner may give the arguments outright (engines.unity.editModeArgs, e.g. `-testCategory
+  // "!Slow"`): tests that are compiled outside the editor too can still behave differently on the editor's runtime, so a
+  // studio keeps its fast ported-rules tests in Edit Mode and leaves out only a category it names.
+  if (engine === 'unity' && env.STUDIO_LAND_FULL === '1') { /* no plan on a full run */ }
+  else if (engine === 'unity' && typeof cfg.editModeArgs === 'string' && cfg.editModeArgs.trim()) tuneEnv.STUDIO_UNITY_EDITMODE_ARGS = cfg.editModeArgs.trim();
+  else if (engine === 'unity' && !/^(off|0|false|no)$/i.test(String(env.STUDIO_UNITY_EDITMODE_PLAN || ''))) {
     try {
       const proj = [cfg.gateWorktree ? path.resolve(REPO_ROOT, cfg.gateWorktree) : null, folder, cwd].find((d) => d && fs.existsSync(path.join(d, 'Assets')));
       if (proj) {
@@ -348,8 +368,9 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   const tail = text.trimEnd().split('\n').slice(-12).join('\n');
   // 2.79 (e): a red run's failing test names (the train's bisect stops on the batch's signature).
   const failures = m.status === 'red' ? failingTests(text) : [];
+  const errorFiles = m.status === 'red' ? compileErrorFiles(text) : [];
   const stages = (() => { try { return landStages(stageFile, text); } catch { return []; } })();
-  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), ...(stages.length ? { stages } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
+  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), ...(errorFiles.length ? { errorFiles } : {}), ...(stages.length ? { stages } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
 
   function finish(res) {
     const full = { ...res, engine, ms: Date.now() - t0, ...(task ? { task } : {}), ...(br ? { branch: br } : {}), ...(many ? { branches: many } : {}), at: new Date().toISOString() };

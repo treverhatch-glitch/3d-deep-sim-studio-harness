@@ -28,7 +28,7 @@ Claude Code's own auto-compaction still applies inside a session.
 - `stop-gate.mjs` (Stop): a launched agent with changed files outside `studio/` can't end its turn until the fast (lite) gates pass. It never runs in a person's session and never loops. `STUDIO_STOP_GATE=off`. Fast-only: the hook has a hard budget of 6 s (`STUDIO_STOP_GATE_MS`, capped at 8 s; Claude's hook timeout is 10 s). Checks that don't finish in time are skipped, never blocking, so it can't slow an agent down; the full gates still run at hand-off.
 
 ## 5. Token norms per task type
-`npm run token-norms` learns each task type's normal use (median and spread of in + out + a tenth of cache reads, from 5 sessions up) and lists sessions far above their own type's normal. A 3D task in Godot is compared with other 3D tasks, never with a docs fix. It is a flag on the HUD only: nothing is capped or stopped.
+A task type's normal token use and the sessions far above it (2.83: the separate `token-norms` command was cut): `npm run tokens` has the per-session numbers and `npm run score` the cost per landed task.
 
 ## 6. Verdict notes
 A playtest verdict with words (`npm run verdict`) is also saved to `studio/memory/verdict-notes.jsonl`; `npm run verdict-note -- add --verdict ❌ --on T-12 --by <you> --comment "…"` adds one by hand. A task's brief shows up to 3 related notes under "Notes from the dev's verdicts (context, not rules)".

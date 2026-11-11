@@ -83,7 +83,7 @@ npm run task -- add "Pass 11: realism pass on the hangar" --role engine-porter -
   records that track for it (`inferred`, an `engine.track_inferred` event) and the pass gets its engine worktree. With
   several engines the launch is refused, naming them and the command that sets the track:
   `npm run task -- track <T-ID> engine:<name> --by <you>` (a person, the orchestrator or a Producer/Director session;
-  never a worker). `npm run task -- track <T-ID>` shows the record. With no engine named, nothing changes (the
+  never a worker). `npm run task -- track <T-ID>` shows the record.  `npm run task -- track <T-ID> web --by <you>` (2.83) sets a task back to the web track. With no engine named, nothing changes (the
   engine's work lives in the studio). `STUDIO_ENGINE_TRACK_INFER=off`: no inference (a plain lane, the 2.78.1 way).
   2.78.2 (item 18): a track written without `engine:` (`"unity"`: `task add --track unity`, a record set by hand, an old
   `task.added` event) silently made the task no engine pass, so `task done --train` didn't queue it. Now a bare name
@@ -310,3 +310,5 @@ the run's output (NUnit result tags, `Failed : X`, `Failed X [12 ms]`, `[  FAILE
 through the subsets whose failures are the same names or a subset of them, and stops after `STUDIO_ENGINE_BISECT_MAX`
 runs (default 3), handing back the lanes still in the red range instead of re-running every remaining subset. If no
 names can be read, the bisect is the full search it was.
+
+**Cleaning up after landings (2.83).** `npm run lanes -- prune` also removes engine lane folders (`.lanes/engine/<task>`) whose commit is already on the engine's target branch and that hold nothing unsaved (no changed tracked files, no untracked files that are not git-ignored), one line per lane, with `--dry-run` respected; it uses plain `git worktree remove` (never forced), so git itself keeps a folder it will not release, and a lane sitting on the target's own tip is kept until the target moves on. `engines.<x>.builds` (owner's file) is `{ "dir": "<absolute folder>", "keep": 3, "pattern": "gate-*" }`: `node harness/engine-clean.mjs builds [--engine x] [--dry-run]` keeps the newest `keep` build folders matching `pattern` (newest by name, direct children only, never links), removes the rest, and writes `LATEST.txt` with the newest one's path; it refuses a relative folder, a filesystem root, the home folder, the studio or its parents, and a pattern with fewer than 3 literal characters before the first `*`. `STUDIO_ENGINE_KEEP_BUILDS` overrides `keep` (`0` or `off`: no pruning). `node harness/engine-clean.mjs lanes` runs the lane part alone.

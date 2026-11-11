@@ -4,7 +4,7 @@
  *
  *   npm run mode                                 show the mode and what it sets
  *   npm run mode -- set precise|budget|fast|prototype|extreme --by <name> [--why "…"]
- *   npm run mode -- boost on|off --by <name> [--hours 4 | --until HH:MM|ISO|off]   the MAX SPEED lever
+ *   npm run mode -- boost on|off --by <name> [--hours 4 | --until HH:MM|ISO|off] [--builders-only]   the MAX SPEED lever
  *   npm run mode -- scope lite|full --by <name>  Lite: 6 gates in everyday verify and AGENTS.lite.md for agents
  *   npm run mode -- autostart on|off --by <name>  may the watcher and the supervisor start agents on their own (off by default)
  *
@@ -148,13 +148,16 @@ export function effectiveMode(m = readMode(), now = Date.now()) {
   const id = MODES[m.mode] ? m.mode : DEFAULT_MODE;
   const base = MODES[id];
   const boost = m.boost?.on && (!m.boost.until || Date.parse(m.boost.until) > now) ? m.boost : null;
-  const eff = { id, chosen: Boolean(MODES[m.mode]), ...base, perRole: { ...base.perRole }, boost: Boolean(boost), boostUntil: boost?.until || null, boostBy: boost?.by || null, autostart: autostartOn(m), autostartBy: m.autostart?.by || null };
+  const eff = { id, chosen: Boolean(MODES[m.mode]), ...base, perRole: { ...base.perRole }, boost: Boolean(boost), boostBuildersOnly: Boolean(boost?.buildersOnly), boostUntil: boost?.until || null, boostBy: boost?.by || null, autostart: autostartOn(m), autostartBy: m.autostart?.by || null };
   if (boost) {
     eff.maxAgents = Math.min(12, Math.max(4, base.maxAgents * 2));
     for (const k of Object.keys(eff.perRole)) eff.perRole[k] = Math.min(6, Math.max(2, eff.perRole[k] * 2));
     eff.autoLaunch = true;
-    eff.directorEveryHours = Math.max(2, Math.round(base.directorEveryHours / 4));
-    eff.producerEveryHours = 1;
+    // 2.83: a builders-only boost raises the caps and leaves the Director's and Producer's cadence as the mode has it.
+    if (!boost.buildersOnly) {
+      eff.directorEveryHours = Math.max(2, Math.round(base.directorEveryHours / 4));
+      eff.producerEveryHours = 1;
+    }
   }
   // 2.79.1 (4): an engine push: that engine's porters may use every builder slot (engine-porter's own cap follows the builders').
   const push = enginePushOf(m, now);
@@ -261,7 +264,7 @@ export function parseBoostUntil(v, now = Date.now()) {
   return { ok: true, until: new Date(ms).toISOString() };
 }
 
-export function setBoost(on, by, hours = null, until = undefined) {
+export function setBoost(on, by, hours = null, until = undefined, buildersOnly = false) {
   if (!by) return { ok: false, message: 'Say who pulled the lever: --by <name>.' };
   let untilIso = hours ? new Date(Date.now() + Number(hours) * 3600000).toISOString() : null;
   if (on && until !== undefined && until !== null) {
@@ -270,11 +273,11 @@ export function setBoost(on, by, hours = null, until = undefined) {
     untilIso = u.until;
   }
   const m = readMode();
-  m.boost = on ? { on: true, by, at: new Date().toISOString(), until: untilIso } : { on: false, by, at: new Date().toISOString() };
+  m.boost = on ? { on: true, by, at: new Date().toISOString(), until: untilIso, ...(buildersOnly ? { buildersOnly: true } : {}) } : { on: false, by, at: new Date().toISOString() };
   m.history = [...(m.history || []), { boost: on, by, hours: hours || null, at: new Date().toISOString() }].slice(-50);
   save(m);
   const e = effectiveMode(m);
-  emitEvent({ type: on ? 'mode.boost_on' : 'mode.boost_off', agent: by, to: 'producer', msg: on ? `MAX SPEED on (${by}${untilIso ? `, until ${untilIso.slice(0, 16).replace('T', ' ')} UTC` : ', until turned off'}): up to ${e.maxAgents} agents, watcher starts agents, Director every ${e.directorEveryHours} h, Producer check-in every hour` : `MAX SPEED off (${by}); back to ${e.label}` });
+  emitEvent({ type: on ? 'mode.boost_on' : 'mode.boost_off', agent: by, to: 'producer', msg: on ? `MAX SPEED on (${by}${untilIso ? `, until ${untilIso.slice(0, 16).replace('T', ' ')} UTC` : ', until turned off'}): up to ${e.maxAgents} agents, watcher starts agents, ${e.boostBuildersOnly ? `builders only: Director every ${e.directorEveryHours} h and Producer every ${e.producerEveryHours} h as before` : `Director every ${e.directorEveryHours} h, Producer check-in every hour`}` : `MAX SPEED off (${by}); back to ${e.label}` });
   return { ok: true, mode: e };
 }
 
@@ -304,7 +307,7 @@ export function setScope(id, by) {
 }
 
 export function describeMode(e = effectiveMode()) {
-  return `${e.enginePush ? `ENGINE PUSH ${e.enginePush.engine}${e.enginePush.until ? ` until ${e.enginePush.until.slice(11, 16)} UTC` : ''}, ` : ''}${e.label}${e.chosen ? '' : ' (default; the game dev hasn\'t chosen yet: npm run mode -- set …)'}${e.boost ? `, MAX SPEED on${e.boostUntil ? ` until ${e.boostUntil.slice(11, 16)} UTC` : ''}` : ''}: up to ${e.maxAgents} agents (builders ${e.perRole.builder}), reviews on ${e.review === 'every-build' ? 'every build task' : 'whole systems'}, ${e.autoLaunch && e.autostart ? 'the watcher starts agents' : 'agents started by hand or npm run agent'}, Director every ${e.directorEveryHours} h, Producer every ${e.producerEveryHours} h. ${e.autostart ? `Auto-start is on${e.autostartBy ? ` (${e.autostartBy})` : ''}: the watcher and the supervisor may start agents on their own (npm run mode -- autostart off --by <name> stops that).` : `Auto-start is off: nothing starts on its own${e.autoLaunch ? ', although this pace would' : ''} (npm run mode -- autostart on --by <name> turns it on).`}`;
+  return `${e.enginePush ? `ENGINE PUSH ${e.enginePush.engine}${e.enginePush.until ? ` until ${e.enginePush.until.slice(11, 16)} UTC` : ''}, ` : ''}${e.label}${e.chosen ? '' : ' (default; the game dev hasn\'t chosen yet: npm run mode -- set …)'}${e.boost ? `, MAX SPEED on${e.boostBuildersOnly ? ' (builders only: planning cadence unchanged)' : ''}${e.boostUntil ? ` until ${e.boostUntil.slice(11, 16)} UTC` : ''}` : ''}: up to ${e.maxAgents} agents (builders ${e.perRole.builder}), reviews on ${e.review === 'every-build' ? 'every build task' : 'whole systems'}, ${e.autoLaunch && e.autostart ? 'the watcher starts agents' : 'agents started by hand or npm run agent'}, Director every ${e.directorEveryHours} h, Producer every ${e.producerEveryHours} h. ${e.autostart ? `Auto-start is on${e.autostartBy ? ` (${e.autostartBy})` : ''}: the watcher and the supervisor may start agents on their own (npm run mode -- autostart off --by <name> stops that).` : `Auto-start is off: nothing starts on its own${e.autoLaunch ? ', although this pace would' : ''} (npm run mode -- autostart on --by <name> turns it on).`}`;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -319,7 +322,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   };
   if (argv[0] === 'set') done(setMode(argv[1], flag('by'), flag('why') || ''));
-  if (argv[0] === 'boost') done(setBoost(argv[1] !== 'off', flag('by'), flag('hours'), flag('until') === null ? undefined : flag('until')));
+  if (argv[0] === 'boost') done(setBoost(argv[1] !== 'off', flag('by'), flag('hours'), flag('until') === null ? undefined : flag('until'), argv.includes('--builders-only')));
   if (argv[0] === 'engine-push') {
     const rest = argv.slice(1);
     const off = rest[0] === 'off';
@@ -354,5 +357,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   console.log(`Scope: ${SCOPES[scopeOf()]}`);
   console.log('\nModes:');
   for (const [id, m] of Object.entries(MODES)) console.log(`  ${id.padEnd(8)} ${m.label}: ${m.pitch}`);
-  console.log('\nChange: npm run mode -- set <mode> --by <name>   MAX SPEED: npm run mode -- boost on|off --by <name> [--hours 4 | --until <HH:MM UTC>|off]   Engine push: npm run mode -- engine-push [off] [--engine <name>] [--until <HH:MM UTC>|off] --by <name>   Scope: npm run mode -- scope lite|full --by <name>   Auto-start: npm run mode -- autostart on|off --by <name>');
+  console.log('\nChange: npm run mode -- set <mode> --by <name>   MAX SPEED: npm run mode -- boost on|off --by <name> [--hours 4 | --until <HH:MM UTC>|off] [--builders-only]   Engine push: npm run mode -- engine-push [off] [--engine <name>] [--until <HH:MM UTC>|off] --by <name>   Scope: npm run mode -- scope lite|full --by <name>   Auto-start: npm run mode -- autostart on|off --by <name>');
 }

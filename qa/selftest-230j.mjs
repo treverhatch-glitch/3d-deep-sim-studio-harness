@@ -33,14 +33,13 @@ console.log(JSON.stringify({ a, b, c, d }));`);
   report('2.30j: a cheat-sheet tip needs two tag hits (or one hit on a narrow entry, or an explicit tag), so one loose word no longer attaches it', JSON.stringify(ch) === JSON.stringify({ a: ['C-2'], b: [], c: ['C-1'], d: ['C-3'] }), JSON.stringify(ch));
 
   const led = probe(`const { reportSession } = await import(${u('harness/session-report.mjs')});
-const { ledgerMetrics } = await import(${u('harness/ledger.mjs')});
+const { readRecentEvents } = await import(${u('harness/event.mjs')});
 const bad = reportSession({ phase: 'end', agent: 'x', model: 'unknown' });
 reportSession({ phase: 'start', agent: 'runner-b1', model: 'gemini-3.1-pro-preview', role: 'builder', tool: 'script', task: 'T-9' });
 reportSession({ phase: 'end', agent: 'runner-b1', model: 'gemini-3.1-pro-preview', role: 'builder', tool: 'script', tokensIn: 1200, tokensOut: '300' });
-const m = ledgerMetrics({ logs: [] });
-const rows = JSON.stringify(m);
+const rows = JSON.stringify(readRecentEvents(1000)); // 2.83: the ledger is cut; the session events carry the model and tokens
 console.log(JSON.stringify({ bad: bad.ok, seen: rows.includes('gemini-3.1-pro-preview') && rows.includes('1200') }));`);
-  report('2.30j: a session started outside the hub reports start/end with its model and tokens and shows in the ledger; no model, no report', led.bad === false && led.seen === true, JSON.stringify(led));
+  report('2.30j: a session started outside the hub reports start/end with its model and tokens and shows in the event log; no model, no report', led.bad === false && led.seen === true, JSON.stringify(led));
 
 
   const agent = read('harness/agent.mjs');

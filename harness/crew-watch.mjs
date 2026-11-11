@@ -62,7 +62,7 @@ export function crewHealth(events, { now = Date.now(), env = process.env, sinceB
   const roleOf = new Map(); // agent -> role (from its starts)
   const startOf = new Map(); // agent -> latest start time
   const out = {};
-  const row = (role) => (out[role] ||= { sessions: 0, ended: 0, noCommit: 0, shortExits: 0, tokens: 0, landed: 0, tokensPerLanded: null, tasks: [], landedTasks: [], whys: [], agents: [], unhealthy: false, why: '' });
+  const row = (role) => (out[role] ||= { sessions: 0, ended: 0, noCommit: 0, shortExits: 0, tokens: 0, landed: 0, queued: 0, tokensPerLanded: null, tasks: [], landedTasks: [], whys: [], agents: [], unhealthy: false, why: '' });
   const sorted = [...events].sort((a, b) => ts(a) - ts(b));
   const from = (role) => Math.max(now - lim.windowMs, Number(sinceByRole[role]) || 0);
   for (const e of sorted) {
@@ -83,6 +83,9 @@ export function crewHealth(events, { now = Date.now(), env = process.env, sinceB
       r.ended += 1;
       r.tokens += weight(e);
       const o = e.meta?.outcome;
+      // 2.83: a session whose task done queued its lane for a train did its job; the landing comes when the train runs
+      // (an engine land takes most of an hour, so "0 landed in 60 min" tripped the breaker on productive builders).
+      if (o?.queuedForTrain) r.queued += 1;
       if (o && !o.done && !o.commits && o.counts !== false) { r.noCommit += 1; if (o.why && r.whys.length < 3) r.whys.push(`${e.agent}: ${o.why}`); }
       if (o?.task && !r.tasks.includes(o.task)) r.tasks.push(o.task);
       const st = startOf.get(e.agent);
@@ -103,7 +106,7 @@ export function crewHealth(events, { now = Date.now(), env = process.env, sinceB
   for (const r of Object.values(out)) {
     r.tokens = Math.round(r.tokens);
     r.tokensPerLanded = r.landed ? Math.round(r.tokens / r.landed) : null;
-    r.unhealthy = r.sessions > lim.maxSessions && r.landed === 0;
+    r.unhealthy = r.sessions > lim.maxSessions && r.landed === 0 && r.queued === 0;
     if (r.unhealthy) r.why = `${r.sessions} sessions in ${Math.round(lim.windowMs / 60000)} min and 0 landed (STUDIO_CREW_MAX_SESSIONS=${lim.maxSessions}): ${r.noCommit} with no commit, ${r.shortExits} short exit${r.shortExits === 1 ? '' : 's'} (under ${Math.round(lim.shortMs / 1000)} s), ${r.tokens.toLocaleString('en-US')} tokens for nothing landed`;
   }
   return out;

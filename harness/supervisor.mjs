@@ -482,7 +482,14 @@ export async function supervise(opts, state, now = Date.now()) {
   if (!opts.watcher) {
     try { await (await import('./lane-disk.mjs')).lanesPass({ now, inline: Boolean(opts.deps?.lanesInline) }); } catch { /* a report, never a crash */ }
   }
-  let room = ramCap.cap - live.length;
+  // 2.83: a short planning session (producer, director, line-producer) doesn't take a builder slot: it is left out of the
+  // count the pace's cap is held against (a Producer wake sat in a slot a builder could have had). It still obeys its own
+  // per-role cap and the RAM limit, which counts every session.
+  let room = builderRoom(ramCap.cap, live);
+  // The RAM limit counts every session, planning ones too: what the pace's count leaves out, memory does not.
+  const ramAll = (await sessionCapNow(configured + 16)).cap;
+  let ramRoom = ramAll - live.length;
+  room = Math.min(room, ramRoom);
   // 2.79 (f): the plan's budget is high: only the API pool's builders start (their names, up to the pool's size).
   const poolMode = poolUsage ? poolPlanNow(poolUsage, live) : null;
   // 2.80 (c), Patch #18: an owner-set builder order (STUDIO_BUILDER_ORDER; unset: the choice below as before).
@@ -491,7 +498,7 @@ export async function supervise(opts, state, now = Date.now()) {
   const vxFirst = Boolean(bOrder?.includes('vertex') && !(bOrder.indexOf('plan') >= 0 && bOrder.indexOf('plan') < bOrder.indexOf('vertex')));
   // 2.79.1 (a): Vertex goes before the pool, so with Vertex ready the pool's size doesn't cap the builders that may start.
   if (poolMode) { if (!vertexReady.ok) room = Math.min(room, poolMode.free.length); why.push(`${poolUsage.why}: ${vertexReady.ok ? 'Vertex first, then ' : ''}${poolMode.why}`); }
-  if (room <= 0) return { started: [], why: [ramCap.cap < configured ? `${live.length} agent${live.length === 1 ? '' : 's'} running; no more start: ${ramCap.why}` : `${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
+  if (ramRoom <= 0 || (room <= 0 && !parseNextQueue().backlog.some((t) => isPlanningRole(t.role)))) return { started: [], why: [ramCap.cap < configured ? `${live.length} agent${live.length === 1 ? '' : 's'} running; no more start: ${ramCap.why}` : `${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
   if (ramCap.cap < configured) why.push(`at most ${ramCap.cap} session${ramCap.cap === 1 ? '' : 's'} now: ${ramCap.why}`);
   // Waiting work, grouped by role and lane.
   const q = parseNextQueue();
@@ -601,7 +608,8 @@ export async function supervise(opts, state, now = Date.now()) {
   const line = await linePlanNow(now);
   if (line) ordered = line.orderGroups(ordered);
   for (const g of ordered) {
-    if (room <= 0) break;
+    const planning = isPlanningRole(g.role);
+    if (ramRoom <= 0 || (room <= 0 && !planning)) continue;
     if (poolMode && g.role !== 'builder') continue; // the pool is builders only; other roles wait for headroom
     if (crewPaused[g.role]) {
       why.push(`${g.role}: paused by the crew watchdog (${String(crewPaused[g.role].why || '').slice(0, 120)}; npm run crew -- resume ${g.role} --by <name>)`);
@@ -718,7 +726,8 @@ export async function supervise(opts, state, now = Date.now()) {
       // Count it at once, so the next group in this pass sees it (a lane taken, or the whole game).
       live.push({ agent, role: g.role, lane: g.lane || null, task: taskId, running: true, tool: vx ? 'vertex' : lr.tool || tool });
       if (g.role === 'producer') (await import('./producer-wake.mjs')).producerLaunched(now);
-      room -= 1;
+      ramRoom -= 1;
+      if (!planning) room -= 1;
     } else {
       why.push(`${g.role}: ${r.message}`);
       try { noteStartRefusal(state, taskId, `start_agent ${r.message}`, sigOf(taskId), now); saveBackoff(); } catch { /* best effort */ }
@@ -742,16 +751,34 @@ export async function trainDaemonTick(state, r = {}, opts = {}) {
   } catch (err) { state.train = { at: new Date().toISOString(), started: false, why: `error: ${err.message}` }; return { started: false, why: err.message }; }
 }
 
+/** 2.83: roles whose short sessions don't take a builder slot under the cap. */
+export const PLANNING_ROLES = ['producer', 'director', 'line-producer'];
+export const isPlanningRole = (role) => PLANNING_ROLES.includes(String(role || ''));
+/** 2.83: free session slots under the cap for a builder: running sessions of the planning roles are not counted. */
+export const builderRoom = (cap, live = []) => cap - live.filter((s) => s && s.running !== false && !isPlanningRole(s.role)).length;
+
+/**
+ * 2.83 (B-126): may a model-pool route (plan.routes[id]) apply to this role? Only the roles studio/models.json names in
+ * "routeRoles" (default builder and engine-porter): the Director, Producer and reviewers keep their own role model.
+ */
+export const DEFAULT_ROUTE_ROLES = ['builder', 'engine-porter'];
+export function routeAppliesToRole(role, models = null) {
+  const list = Array.isArray(models?.routeRoles) ? models.routeRoles.map(String) : DEFAULT_ROUTE_ROLES;
+  return list.includes(String(role || ''));
+}
+
 /**
  * 2.76.0 (k): the Line Producer's plan for this pass, or null (off, report, stale, unreadable). orderGroups(groups) sorts
  * by its order; routeFor(group, …) gives { model, tier, why } for the group's first task (only on the preferred tool,
  * never for a custom command) holdFor(group, live) says why a builder waits when the rig's builder cap is reached. Never throws.
  */
-async function linePlanNow(now) {
+export async function linePlanNow(now, { plan: planIn = null, models = null } = {}) {
   try {
     const lp = await import('./line-producer.mjs');
-    const plan = lp.supervisorPlan({ now });
+    const plan = planIn || lp.supervisorPlan({ now });
     if (!plan) return null;
+    let routeCfg = null;
+    try { routeCfg = models || (await import('./model-pools.mjs')).readModels(); } catch { routeCfg = null; }
     return {
       orderGroups: (groups) => lp.orderGroups(groups, plan),
       // 2.77.0 (u, P5.1): an engine pass's session (engine-porter) counts against the rig's cap with the builders.
@@ -760,6 +787,7 @@ async function linePlanNow(now) {
         const id = g.tasks[0]?.id;
         const r = plan.routes[id];
         if (!r?.model || custom) return {};
+        if (!routeAppliesToRole(g.role, routeCfg)) return {};
         // 2.77.0 (n): a model-pool route names its tool too (agy for Gemini, claude for Claude): it is taken unless that
         // tool is marked out of quota now (the pool's own limits were weighed when the route was made).
         if (r.tool) return outUntil && (outUntil(r.tool) || outUntil(`${r.tool}:${r.model}`)) ? {} : { tool: r.tool, model: r.model, tier: r.tier, why: r.why };

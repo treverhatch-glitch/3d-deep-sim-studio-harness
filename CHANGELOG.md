@@ -4,6 +4,45 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.83.0] — 2026-11-11
+Flow (the owner's "next harness upgrade", with the overseer's notes from 26 hours on 2.82). 2.82 fixed the engine's
+land run (65% of runs passed against 18%; 30 land minutes per landed lane against 290) and the records then showed
+where the time went instead: sessions scored "no work" in the wrong repository (89 session ends, 25 parks), a plan
+that reported itself blocked 166 times for two causes, a rules check that ran everything every time (514 minutes),
+and a train that blamed by elimination. 72 files, +4,078 / −823 lines (net +3,255) against 2.82.0. Details: docs/RELEASE-2.83.0.md.
+- **A session is accounted where its work is** (`harness/engine-tracks.mjs` `engineWork`, `harness/agent.mjs`): an
+  engine task's commits and unsaved files are counted in its engine worktree; a task in the engine train is "queued",
+  not "no work"; the crew breaker counts queued work.
+- **The engine train** (`harness/unity-train.mjs`): a branch that lands alone (`task alone <ID> on`, `task done
+  --train --alone`); one more run before blame when a load-sensitive stage is red; blame by evidence (the failing
+  test's class, or the file a compiler error names, in the lanes' changes); a lane found by elimination is run by itself first; a handed-back lane leaves
+  the train at once; a full land run once a day (`STUDIO_LAND_FULL=1`); `engines.unity.editModeArgs`; a warning when
+  the land command runs another copy of its script; a task whose engine half has not landed stays open.
+- **A cheaper rules check** (`harness/engine-rules.mjs`): `rules.env`, `rules.paths` (sparse checkout, no LFS
+  download), `rules.focus` (only the touched systems' tests plus a smoke set; the full command every
+  `fullEveryHours`), inputs merged from every lane in the batch, `rules.share`. `npm run engine -- rules` no longer
+  hangs (it exited 13 on 2.82), and the porter's check never runs in the studio repo.
+- **The planner** (`harness/line-producer.mjs`): a dangling `--after` asks once; `line.chain_gate` when one task gates
+  3 or more builder tasks for an hour; the builders-low alert leads with the reason; the Producer is not woken again
+  for the same blocker within an hour.
+- **Models and slots**: `routeRoles` in `studio/models.json` (pool routes apply to builders and porters only); a
+  refresh, stop or usage limit is not a route failure; planning sessions don't take builder slots; no engine tasks on
+  Vertex; `npm run mode -- boost on --builders-only`.
+- **The board**: `task after <ID> --remove|--set|--clear`; unknown `--after` ids refused; `task train dequeue <ID>`;
+  an unknown `task train <word>` starts nothing; train status shows the running batch and the queue; `task track <ID>
+  web`; in a native studio a task that names web code goes to the web track.
+- **Watching**: no "stalled" for a lane in a train; the same unchanged-shots review is retried once a day; a review
+  falls back to the same model family when no other is available (and says so); the idle stop and claim minutes skip
+  downtime; a dead session's claim is handed back after 30 minutes.
+- **The owner-only list** (`harness/owner-acts.mjs`): the game's own money is not real money, and code removed in a
+  lane is not deleted data; anything that names real spending or data stays the owner's.
+- **Cleanup**: landed engine worktrees are removed; `engines.<x>.builds` keeps the newest builds
+  (`harness/engine-clean.mjs`); `lanes prune` covers engine lanes.
+- **Scorecard**: the CPU measure reads the hourly summaries; `engines.<x>.progress` prints a progress line;
+  `studio/allowlist.json` adds a studio's own commands.
+- **Cut**: `harness/token-norms.mjs` and `harness/ledger.mjs` (382 lines; nothing imported them, no run on record)
+  with their two npm scripts and their checks.
+
 ## [2.82.0] — 2026-11-10
 Native engine (the owner's "Round 2.82"). The crew's 64 Unity land runs passed 18 times; a passing run took 92 minutes,
 53 of them re-running in Edit Mode the rule tests .NET had just run, and 24 of the 45 failures were in tests that need

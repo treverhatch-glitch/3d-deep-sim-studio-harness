@@ -188,18 +188,16 @@ console.log(JSON.stringify({ a: [a.ok, a.skipped], b: [b.ok, b.skipped], c: [c.o
   // ---- #8: usage self-report and the untracked ledger bucket ----
   const us = probe(`import { parseUsage, reportUsage } from ${u('harness/task.mjs')};
 import { emitEvent, readRecentEvents } from ${u('harness/event.mjs')};
-import { ledgerMetrics } from ${u('harness/ledger.mjs')};
 const p = [parseUsage('grok-4:180k/12k'), parseUsage('grok-4-fast:1.2M/30000,gemini-3-flash-preview:900/100'), parseUsage('grok-4:abc/1'), parseUsage('')];
 reportUsage('T-910', 'grokbot-3', 'grok-4:180k/12k');
 emitEvent({ type: 'task.done', agent: 'grokbot-3', task: 'T-910', msg: 'done' });
 emitEvent({ type: 'task.done', agent: 'grokbot-5', task: 'T-911', msg: 'done' });
 emitEvent({ type: 'agent.session.end', agent: 'builder-1', model: 'gemini-3.1-pro-preview', tokensIn: 400000, tokensOut: 9000, msg: 'end' });
-const m = ledgerMetrics({ events: readRecentEvents(1000), now: Date.now(), logs: [] });
-console.log(JSON.stringify({ p0: p[0].list, p1: p[1].list?.map((x) => x.tokensIn), bad: Boolean(p[2].error && p[3].error), rows: m.rows.filter((r) => r.untracked).map((r) => [r.model, r.tokensIn, r.tokensOut]), u: m.untracked }));`, base);
+const rep = readRecentEvents(1000).filter((e) => e.type === 'usage.reported').map((e) => [e.model, e.tokensIn, e.tokensOut]);
+console.log(JSON.stringify({ p0: p[0].list, p1: p[1].list?.map((x) => x.tokensIn), bad: Boolean(p[2].error && p[3].error), rep }));`, base);
   report('2.30q #8: --usage parses <model>:<in>/<out> (k/M, several models) and refuses a malformed value', JSON.stringify(us.p0) === '[{"model":"grok-4","tokensIn":180000,"tokensOut":12000}]' && JSON.stringify(us.p1) === '[1200000,900]' && us.bad === true, JSON.stringify(us));
-  report('2.30q #8: self-reported usage lands in the untracked bucket; a done with no usage at all is counted and named', JSON.stringify(us.rows) === '[["grok-4",180000,12000]]' && us.u?.reported === 1 && us.u.unreportedDone === 1 && us.u.unreportedAgents?.[0] === 'grokbot-5', JSON.stringify(us));
-  const led = run(dir, 'node harness/ledger.mjs', base);
-  report('2.30q #8: npm run ledger shows the untracked line with the model and the unreported done', /Untracked \(outside the harness, self-reported\): 1 reports, in 180k, out 12k \(grok-4\); 1 task\(s\) done with no usage at all \(grokbot-5\)/.test(led.stdout), led.stdout.slice(0, 900));
+  // 2.83: the untracked bucket and `npm run ledger` went with the token ledger module; the event the report writes is what stays checked.
+  report('2.30q #8: self-reported usage is written as a usage.reported event with its model and tokens', JSON.stringify(us.rep) === '[["grok-4",180000,12000]]', JSON.stringify(us));
 
   // task done --usage through the CLI (bad value: nothing closed, nothing logged).
   const bad = run(dir, 'node harness/task.mjs done T-001 --agent builder-q1 --usage grok-4', base);

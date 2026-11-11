@@ -55,7 +55,7 @@ export function setWatchdog(on, by) {
  * Planning sessions (Producer, Director, any session that never held a task) don't count: they don't
  * finish tasks by design (P-023).
  */
-export function idleStopReason(now, { events = [], lim = watchdogLimits(), w = {}, auto = false } = {}) {
+export function idleStopReason(now, { events = [], lim = watchdogLimits(), w = {}, auto = false, supervisorStartedAt = 0 } = {}) {
   if (!(lim.idleHours > 0)) return null;
   const win = now - lim.idleHours * 3600000;
   const ts = (e) => Date.parse(e.ts) || 0;
@@ -63,7 +63,11 @@ export function idleStopReason(now, { events = [], lim = watchdogLimits(), w = {
   const studioStart = events.length && events.length < 5000 ? Math.min(...events.map(ts).filter(Boolean)) : 0;
   const switchedOn = !auto ? Date.parse(w.at || '') || 0 : 0;
   const resumed = Math.max(0, ...events.filter((e) => e.type === 'studio.resumed').map(ts));
-  const since = Math.max(studioStart, switchedOn, resumed);
+  // 2.83: nor before the supervisor's own (re)start. Time the studio was off (a restart after a 4 h outage) is not idle
+  // time: "no task finished in 4 h" stopped the studio 3 min after a restart. The newest supervisor.start event ends
+  // the last period with no supervisor; the running supervisor's recorded start covers a log that no longer holds it.
+  const supStart = Math.max(Number(supervisorStartedAt) || 0, ...events.filter((e) => e.type === 'supervisor.start').map(ts));
+  const since = Math.max(studioStart, switchedOn, resumed, supStart);
   if (since > win) return null;
   const inWin = events.filter((e) => ts(e) >= win);
   if (inWin.some((e) => e.type === 'task.done')) return null;
@@ -75,7 +79,9 @@ export function idleStopReason(now, { events = [], lim = watchdogLimits(), w = {
 async function idleStop(now, { events, lim, w, auto }) {
   const { readStop, setStop } = await import('./task.mjs');
   if (readStop()) return null;
-  const r = idleStopReason(now, { events, lim, w, auto });
+  let supervisorStartedAt = 0;
+  try { const { readStatus } = await import('./supervisor.mjs'); const sup = readStatus(); if (sup?.status === 'running') supervisorStartedAt = Date.parse(sup.startedAt || '') || 0; } catch { /* the events carry it too */ }
+  const r = idleStopReason(now, { events, lim, w, auto, supervisorStartedAt });
   if (!r) return null;
   setStop('watchdog', `no task finished in ${r.hours} h while ${r.ran} task sessions ran`);
   return { kind: 'stop', msg: `stopped the studio: ${r.ran} task sessions, no task finished in ${r.hours} h` };
