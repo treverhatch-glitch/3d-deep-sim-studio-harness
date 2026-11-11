@@ -31,7 +31,9 @@ function summaryEvent(type, c, now) {
   return {
     type: `${type}.summary`, agent: c.agent || 'telemetry',
     msg: `${type}: ${c.count} in ${Math.max(1, Math.round((now - Date.parse(c.since)) / 60000))} min${topText ? ` (${topText})` : ''}${c.last?.msg ? `; last: ${String(c.last.msg).slice(0, 160)}` : ''}`.slice(0, 400),
-    meta: { count: c.count, since: c.since, until: new Date(now).toISOString(), top: Object.fromEntries(top), ...(c.last?.meta ? { last: c.last.meta } : {}) },
+    // 2.83: a type whose events carry a numeric `cpu` (machine.sample) also summarises it: how many, the mean, how many
+    // under 25 and over 90, so the scorecard can count them without the single samples (harness/score.mjs).
+    meta: { count: c.count, since: c.since, until: new Date(now).toISOString(), top: Object.fromEntries(top), ...(c.cpuN > 0 ? { cpu: { n: c.cpuN, mean: Math.round((c.cpuSum / c.cpuN) * 10) / 10, under25: c.cpuUnder25 || 0, over90: c.cpuOver90 || 0 } } : {}), ...(c.last?.meta ? { last: c.last.meta } : {}) },
   };
 }
 
@@ -74,6 +76,8 @@ export function emitSampled(ev, key = '', { env = process.env, now = Date.now(),
       const k = String(key || 'all').slice(0, 80);
       c.keys[k] = (c.keys[k] || 0) + 1;
       c.agent = ev.agent || c.agent;
+      const cpu = ev.meta?.cpu;
+      if (typeof cpu === 'number' && Number.isFinite(cpu)) { c.cpuN = (c.cpuN || 0) + 1; c.cpuSum = (c.cpuSum || 0) + cpu; if (cpu < 25) c.cpuUnder25 = (c.cpuUnder25 || 0) + 1; if (cpu > 90) c.cpuOver90 = (c.cpuOver90 || 0) + 1; }
       c.last = { msg: ev.msg || '', meta: ev.meta || null, at: new Date(now).toISOString() };
       if (now - Date.parse(c.since) >= num(env.STUDIO_TELEMETRY_HOUR_MIN, 60) * 60000) {
         due = summaryEvent(type, c, now);

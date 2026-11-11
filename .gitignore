@@ -61,3 +61,11 @@ studio/memory/LEARNED.md
 engine/*/.godot/
 engine/*/captures/
 engine/*/export/
+
+# private reference study material: never commit
+studio/research/**/*.png
+studio/research/**/*.jpg
+studio/research/**/*.mp4
+studio/research/**/*.webm
+studio/research/**/*.mkv
+studio/research/**/*.vtt

@@ -71,3 +71,15 @@ Baseline from the same log: 67 land runs, 11 lanes landed, 320.3 land-run minute
 passed, 25.4% refused or not run (495.4 minutes waiting), 53% of the minutes in red runs, a passing run 101 minutes
 (median). Design link: 57.3% of 358 done tasks trace to a pillar, a kept layer, an approved idea or the owner's ask;
 7.8% were asked for by the owner and 92.2% proposed by agents.
+
+## A studio's own progress number (2.83)
+
+`studio/game.json` `engines.<x>.progress` is a command (a string). `npm run score` runs it in the engine's folder
+(`engines.<x>.cwd`, else the studio root), for 30 seconds at most, and prints the first non-empty line of its output
+(clipped to 200 characters) under the engine block as `Progress (<x>): <line>`. `--record` keeps it in the record as
+`progress`. A command that fails, prints nothing or is too slow prints `Progress (<x>): not available (<why>)`; it never
+fails the score.
+
+Measure 12 (machine samples under 25% CPU) reads the single samples when the log has them and otherwise the hourly
+`machine.sample.summary` events, weighted by each summary's sample count (`meta.cpu`: n, mean, under25, over90). A
+summary written before 2.83 has no `meta.cpu`: it is skipped and the note says how many were.

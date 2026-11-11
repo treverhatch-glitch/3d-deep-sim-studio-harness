@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 
 const DAY = 86400000;
@@ -77,9 +78,20 @@ export function countRest(events, { from, now, machine = [] } = {}) {
   out.leadTimeP50H = r1(quantile(lead, 0.5));
   out.notes.leadTimeP50H = lead.length ? `p90 ${r1(quantile(lead, 0.9))} h, ${lead.length} task(s)` : '';
   // The rig: samples while the supervisor ran (it takes them).
-  const samples = (machine.length ? machine.map((m) => ({ t: Date.parse(m.at), cpu: m.cpu })) : T('machine.sample').map((e) => ({ t: at(e), cpu: e.meta?.cpu }))).filter((s) => s.t >= from && s.t <= now && Number.isFinite(s.cpu));
-  out.rigIdlePct = pct(samples.filter((s) => s.cpu < 25).length, samples.length);
-  out.notes.rigIdlePct = samples.length ? `mean CPU ${r1(samples.reduce((n, s) => n + s.cpu, 0) / samples.length)}%, over 90% in ${pct(samples.filter((s) => s.cpu > 90).length, samples.length)}% of ${samples.length} sample(s)` : 'no machine samples';
+  const single = (machine.length ? machine.map((m) => ({ t: Date.parse(m.at), cpu: m.cpu })) : T('machine.sample').map((e) => ({ t: at(e), cpu: e.meta?.cpu }))).filter((s) => s.t >= from && s.t <= now && Number.isFinite(s.cpu));
+  if (single.length) {
+    out.rigIdlePct = pct(single.filter((s) => s.cpu < 25).length, single.length);
+    out.notes.rigIdlePct = `mean CPU ${r1(single.reduce((n, s) => n + s.cpu, 0) / single.length)}%, over 90% in ${pct(single.filter((s) => s.cpu > 90).length, single.length)}% of ${single.length} sample(s)`;
+  } else {
+    // 2.83: since 2.80 the supervisor folds the samples into hourly machine.sample.summary events (harness/telemetry.mjs);
+    // each carries meta.cpu { n, mean, under25, over90 }. Weighted by n. An older summary has no meta.cpu: skipped, and said.
+    const sums = T('machine.sample.summary').filter((e) => { const t = Date.parse(e.meta?.until) || at(e); return t >= from && t <= now; });
+    const ok = sums.filter((e) => e.meta?.cpu && e.meta.cpu.n > 0 && Number.isFinite(e.meta.cpu.under25) && Number.isFinite(e.meta.cpu.mean));
+    const n = ok.reduce((a, e) => a + e.meta.cpu.n, 0);
+    const skipped = sums.length - ok.length;
+    out.rigIdlePct = pct(ok.reduce((a, e) => a + e.meta.cpu.under25, 0), n);
+    out.notes.rigIdlePct = n ? `from ${ok.length} hourly summar${ok.length === 1 ? 'y' : 'ies'}: mean CPU ${r1(ok.reduce((a, e) => a + e.meta.cpu.mean * e.meta.cpu.n, 0) / n)}%, over 90% in ${pct(ok.reduce((a, e) => a + (e.meta.cpu.over90 || 0), 0), n)}% of ${n} sample(s)${skipped ? `; ${skipped} older summar${skipped === 1 ? 'y' : 'ies'} without CPU counts skipped` : ''}` : sums.length ? `no CPU counts in ${sums.length} older summar${sums.length === 1 ? 'y' : 'ies'} (skipped)` : 'no machine samples';
+  }
   // Engine lands (Unity, Godot): runs that passed, and how long a queued task waited for its train.
   const lands = T('engine.land');
   out.engineLandPassPct = pct(lands.filter((e) => e.meta?.status === 'pass').length, lands.length);
@@ -215,8 +227,32 @@ export function engineText(en, prev = null) {
   return L;
 }
 
+/**
+ * 2.83: a studio's own progress number. studio/game.json engines.<x>.progress is a command; it runs in the engine's folder
+ * (engines.<x>.cwd, else the studio root), 30 s at most, and its first non-empty output line (200 characters at most) is
+ * kept. Returns [{ engine, line }] or [{ engine, line: null, why }]; never throws, never fails the score.
+ */
+export function engineProgress(root = REPO_ROOT, { timeoutMs = 30000 } = {}) {
+  let engines = {};
+  try { engines = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'game.json'), 'utf8').replace(/^\uFEFF/, ''))?.engines || {}; } catch { return []; }
+  const out = [];
+  for (const [engine, cfg] of Object.entries(engines)) {
+    const cmd = typeof cfg?.progress === 'string' ? cfg.progress.trim() : '';
+    if (!cmd) continue;
+    try {
+      const cwd = typeof cfg.cwd === 'string' && cfg.cwd ? path.resolve(root, cfg.cwd) : root;
+      const r = spawnSync(cmd, { shell: true, cwd, encoding: 'utf8', windowsHide: true, timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024 });
+      if (r.error) { out.push({ engine, line: null, why: r.error.code === 'ETIMEDOUT' ? `timed out after ${Math.round(timeoutMs / 1000)} s` : String(r.error.message || r.error).slice(0, 120) }); continue; }
+      if (r.status !== 0) { out.push({ engine, line: null, why: `exit ${r.status ?? r.signal ?? '?'}` }); continue; }
+      const line = String(r.stdout || '').split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+      out.push(line ? { engine, line: line.slice(0, 200) } : { engine, line: null, why: 'no output' });
+    } catch (err) { out.push({ engine, line: null, why: String(err?.message || err).slice(0, 120) }); }
+  }
+  return out;
+}
+
 /** The scorecard: { window, values: { id: number|null }, notes: { id: text }, measures }. */
-export async function roundScore({ events = null, machine = null, now = null, days = 7, root = REPO_ROOT } = {}) {
+export async function roundScore({ events = null, machine = null, now = null, days = 7, root = REPO_ROOT, progressTimeoutMs = 30000 } = {}) {
   const all = (events || readRecentEvents(400000)).slice().sort((a, b) => at(a) - at(b));
   const end = now ?? (events && all.length ? at(all.at(-1)) : Date.now());
   const from = end - days * DAY;
@@ -252,7 +288,7 @@ export async function roundScore({ events = null, machine = null, now = null, da
     landedPerDay: `${rest.doneCount} done in ${r1(supDays)} supervisor day(s)`,
     escapedPct: `${card.escaped} of ${card.landed}`,
   };
-  return { window: { from: new Date(from).toISOString(), to: new Date(end).toISOString(), days, events: inWin.length }, values, notes, measures: MEASURES.map(([id, label, unit, better, target]) => ({ id, label, unit, better, target })), engine: engineFlow(inWin), vision: visionFlow(all.filter((e) => at(e) <= end), { from }) };
+  return { window: { from: new Date(from).toISOString(), to: new Date(end).toISOString(), days, events: inWin.length }, values, notes, measures: MEASURES.map(([id, label, unit, better, target]) => ({ id, label, unit, better, target })), engine: engineFlow(inWin), vision: visionFlow(all.filter((e) => at(e) <= end), { from }), progress: engineProgress(root, { timeoutMs: progressTimeoutMs }) };
 }
 
 /** Does this value meet its target? null when there is no value. */
@@ -273,6 +309,7 @@ export function scoreText(score, prev = null, prevEngine = null, prevVision = nu
   }
   L.push(`${met} of ${known} measured targets met${known < score.measures.length ? ` (${score.measures.length - known} not measurable in this window)` : ''}.`);
   L.push(...engineText(score.engine, prevEngine));
+  L.push(...(score.progress || []).map((p) => (p.line ? `Progress (${p.engine}): ${p.line}` : `Progress (${p.engine}): not available (${p.why})`)));
   L.push(...visionText(score.vision, prevVision));
   return L.join('\n');
 }
