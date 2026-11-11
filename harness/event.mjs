@@ -366,3 +366,26 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(JSON.stringify(evt));
   }
 }
+
+// 2.84: which commands a studio actually runs, so a feature nobody uses can be found by evidence instead of by guess.
+// When a harness/ or scripts/ file is run as a command, an empty marker file .studio/usage/<YYYY-MM>/<script>~<word>
+// is made once a month (<word>: the first argument when it is a plain subcommand word, else "_"). No argument values,
+// no environment, nothing appended: a few hundred empty files a month at most. `npm run usage` reads them
+// (scripts/usage.mjs). STUDIO_USAGE_MARKS=off turns it off; a folder that is not a studio (.studio missing) is left alone.
+export function markCommandRun(argv = process.argv, { root = REPO_ROOT, stateDir = STUDIO_STATE_DIR, env = process.env, now = new Date() } = {}) {
+  try {
+    if (/^(off|0|false|no)$/i.test(String(env.STUDIO_USAGE_MARKS || ''))) return null;
+    const entry = argv[1] ? path.resolve(argv[1]) : '';
+    const rel = entry ? path.relative(root, entry).split(path.sep).join('/') : '';
+    const m = /^(harness|scripts)\/([A-Za-z0-9._-]+)\.mjs$/.exec(rel);
+    if (!m || !fs.existsSync(stateDir)) return null;
+    const word = /^[a-z][a-z0-9:-]{0,30}$/.test(String(argv[2] || '')) ? argv[2].replace(/:/g, '-') : '_';
+    const dir = path.join(stateDir, 'usage', now.toISOString().slice(0, 7));
+    const file = path.join(dir, `${m[1]}-${m[2]}~${word}`);
+    if (fs.existsSync(file)) return file;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.closeSync(fs.openSync(file, 'a'));
+    return file;
+  } catch { return null; }
+}
+markCommandRun();
