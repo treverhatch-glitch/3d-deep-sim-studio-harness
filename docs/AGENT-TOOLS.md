@@ -381,7 +381,7 @@ npm run agent -- start --role builder --tool vertex --task T-12 [--model google/
   `STUDIO_VERTEX_SHARE` of the builder slots (default 0.5) while the plan has headroom; when the plan's budget is high
   (every tool over its weekly target, or the wind-down) Vertex goes first, before the paid API pool
   (`STUDIO_API_POOL`), and takes any free slot. Agy (Gemini plan) routes are left as they are. A task handed back on
-  Vertex since it last landed goes to the plan's route (Claude). Why 0.5 by default: half the builders move off the
+  Vertex since it last landed goes to the plan's route (Claude). 2.83: an engine-track task never goes to Vertex (its work lives in the engine repo worktree, which the driven aider session doesn't open, so the session ended with "aider changed no file"); `STUDIO_VERTEX_ENGINE=on` allows it. Why 0.5 by default: half the builders move off the
   Claude plan at once, which is the owner's aim, while the other half keeps the plan's proven builders on the board so
   the two can be compared (`npm run models -- status`, landed vs handed back) before the share goes up; 1 sends every
   Claude builder to Vertex, 0 keeps Vertex for high-budget times and `agent start --tool vertex`.

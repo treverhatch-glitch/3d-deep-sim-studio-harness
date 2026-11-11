@@ -5070,6 +5070,15 @@ if (inShard('selftest-282a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.83 (e): which roles a pool route applies to, refresh hand-offs and route failures, planning sessions and builder slots,
+// engine-track tasks and Vertex, boost --builders-only.
+if (inShard('selftest-283e')) {
+  const dir = copyRepo();
+  const { selftest283E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283e.mjs')).href);
+  await selftest283E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
