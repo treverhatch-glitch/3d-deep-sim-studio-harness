@@ -10,7 +10,33 @@ overseer may propose anything; whether it happens is decided by the command's ow
 npm run overseer -- role --by <agent>          the role as this studio stands today (grants in force, stage)
 npm run overseer -- can <action> --by <agent>  yes / ask / human-only, with the rule that decided (exit 0 / 1 / 3)
 npm run overseer -- pass [--hours 24]          the facts for one pass of the loop, each with the attention it needs
+npm run overseer -- sheet [--json]             everything waiting on a person or the overseer, each with its command
 npm run overseer                               the stage for harness work and the next stage's criteria
+```
+
+## The sheet: what waits right now (`npm run overseer -- sheet`)
+
+One page instead of reading six commands. It reads state and changes nothing. A line says how many items wait on a
+person and how many on the overseer; then the sections, in this order, each left out when empty: asks waiting (the
+owner-only ones first: those need the person), tasks held or parked (grouped by why), train holds, the engine train
+(branches handed back with their cause, half-landed tasks, a land-script warning, flaky retries), chains (one task
+gating many), dangling waits, dead ends (handed back 3 or more times in 24 h). Each item says what, since when, why, and
+the command that resolves it. A studio with nothing waiting prints "Nothing waits". `--json` gives the same as data.
+
+```
+2 items wait on a person, 3 on the overseer (2026-11-11 09:30 UTC)
+
+Asks waiting
+ Owner only: these need the person:
+  - A-004: Buy the paid asset pack?, 2 h 10 min: owner only: spending real money
+      → npm run ask -- answer A-004 "<answer>" --by <you>
+Tasks held or parked
+ Parked by the watchdog:
+  - T-210 Door rules, 1 h 5 min: parked by watchdog: handed back 3 times in 2 h
+      → npm run task -- unpark T-210 --by <you>
+Dangling waits
+  - T-300 waits for T-299: T-299 is on neither the open board nor the done list, so T-300 can never start
+      → npm run task -- after T-300 --remove T-299
 ```
 
 ## What it does, as itself

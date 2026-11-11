@@ -5108,6 +5108,12 @@ if (inShard('selftest-283j')) {
   await selftest283J({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
+if (inShard('selftest-284c')) {
+  const dir = copyRepo();
+  const { selftest284C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284c.mjs')).href);
+  await selftest284C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
 
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
