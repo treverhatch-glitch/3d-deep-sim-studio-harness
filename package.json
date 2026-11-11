@@ -124,6 +124,7 @@
     "qa:visual": "node qa/visual-check.mjs",
     "check:purity": "node scripts/check-sim-purity.mjs",
     "check:isolation": "node scripts/check-sim-isolation.mjs",
+    "check:tla": "node scripts/check-top-level-await.mjs",
     "event:sh": "node scripts/append-event.mjs",
     "session:start": "node scripts/session-start.mjs",
     "session:precompact": "node scripts/pre-compact.mjs",

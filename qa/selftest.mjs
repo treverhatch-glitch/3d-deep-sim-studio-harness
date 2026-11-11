@@ -5115,6 +5115,13 @@ if (inShard('selftest-284g')) {
   await selftest284G({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
+// 2.84 (i): the check for the import cycle through a top-level await that ends a command with exit 13.
+if (inShard('selftest-284i')) {
+  const dir = copyRepo();
+  const { selftest284I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284i.mjs')).href);
+  await selftest284I({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
 if (inShard('selftest-284c')) {
   const dir = copyRepo();
   const { selftest284C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284c.mjs')).href);
