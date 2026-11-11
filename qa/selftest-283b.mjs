@@ -97,6 +97,7 @@ const red = (stage, test) => { git(gw, 'reset', '-q', '--hard', before); stages(
 for (const s of srcs) { const m = git(gw, 'merge', '--no-ff', '-m', 'land ' + s, 'refs/heads/' + s); if (m.status !== 0) { git(gw, 'merge', '--abort'); git(gw, 'reset', '-q', '--hard', before); console.log('conflict ' + s); process.exit(2); } }
 let fl = null; try { fl = fs.readFileSync(ctl + '-flaky', 'utf8').trim().split(' '); } catch {}
 if (fl && Number(fl[0]) > 0) { fs.writeFileSync(ctl + '-flaky', [Number(fl[0]) - 1, fl[1], fl[2]].join(' ')); red(fl[1], fl[2]); }
+if (fs.existsSync(path.join(gw, 'compile-bad.txt'))) { const line = fs.readFileSync(path.join(gw, 'compile-bad.txt'), 'utf8').trim(); git(gw, 'reset', '-q', '--hard', before); stages('edit'); console.log(line); console.log('[engine-gate] FAIL compile-error'); process.exit(1); }
 for (const st of ['edit', 'play']) { const f = path.join(gw, st + '-bad.txt'); if (fs.existsSync(f)) red(st, fs.readFileSync(f, 'utf8').trim()); }
 stages(null);
 console.log('landed ' + srcs.join(' '));
@@ -169,6 +170,24 @@ console.log(JSON.stringify({ ok: r.ok, message: r.message, entry: readUnityQueue
     await guard('2.83 blame by evidence: a batch of three is red on a test whose class only B\'s branch changes; the train runs the batch without B, lands A and C on that one run, and hands B back with the evidence (2 land runs, cause "evidence") (fails before this fix: a search by land runs: three or more runs, and the first lanes landed only after them)', () => [
       r.landed?.slice().sort().join() === 'T-821,T-823' && r.dropped?.length === 1 && d.task === 'T-822' && d.cause === 'evidence' && /Blame by evidence/.test(d.why) && /FeesPanelTests\.cs/.test(d.why) && r.runs === 2 && runs.length === 2 && /feat\/a|unity-train/.test(runs[1].srcs.join()) && r.handed?.length === 1,
       JSON.stringify({ r, runs }).slice(0, 2500)]);
+  }
+
+  // ---- 3b. blame by evidence, a compile error ----
+  {
+    resetState();
+    const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/b': { 'Assets/Tests/EditMode/Sim/BrokenTests.cs': 'class BrokenTests { }\n', 'compile-bad.txt': 'Assets\\Tests\\EditMode\\Sim\\BrokenTests.cs(12,5): error CS0117: \'Rules\' does not contain a definition for \'Gone\'\n' }, 'feat/c': { 'c.txt': 'c\n' } });
+    const ctl = path.join(T, 'ctl-compile');
+    setEngines({ unity: cfgFor(E, ctl) });
+    queue(E, [['T-825', 'feat/a'], ['T-826', 'feat/b'], ['T-827', 'feat/c']]);
+    const r = probe(TRAIN, noFull);
+    const runs = runsOf(ctl);
+    const d = (r.dropped || [])[0];
+    const files = probe(`import { compileErrorFiles } from ${u('harness/unity-gate.mjs')};
+console.log(JSON.stringify({ f: compileErrorFiles('Assets\\\\A\\\\B.cs(12,5): error CS0117: x\\r\\n  C:/w/Assets/C D/E.cs(1,2): error CS1002: ; expected\\nwarning only.cs(3,4): warning CS0168\\nno error here\\n[unity] Assets/F.cs(9,9): error CS0103: y') }));`);
+    await guard('2.83 blame by evidence, a compile error: a batch of three is red on a compiler error that names a file only B\'s branch changes (no test is named); the train runs the batch without B, lands A and C on that one run, and hands B back with the file named (2 land runs, cause "evidence"); the files are read from error lines only, with either slash (fails before this fix: a compile error named no test, so the search by land runs ran)', () => [
+      r.landed?.slice().sort().join() === 'T-825,T-827' && r.dropped?.length === 1 && d.task === 'T-826' && d.cause === 'evidence' && /a compile error/.test(d.why) && /BrokenTests\.cs/.test(d.why) && r.runs === 2 && runs.length === 2
+        && files.f?.join('|') === 'Assets/A/B.cs|C:/w/Assets/C D/E.cs|Assets/F.cs',
+      JSON.stringify({ r, runs, files }).slice(0, 2500)]);
   }
 
   // ---- 4. no blame by elimination ----

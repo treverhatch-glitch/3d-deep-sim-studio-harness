@@ -15,7 +15,7 @@ and a train that blamed by elimination. 72 files, +4,078 / −823 lines (net +3,
   not "no work"; the crew breaker counts queued work.
 - **The engine train** (`harness/unity-train.mjs`): a branch that lands alone (`task alone <ID> on`, `task done
   --train --alone`); one more run before blame when a load-sensitive stage is red; blame by evidence (the failing
-  test's class in the lanes' changes); a lane found by elimination is run by itself first; a handed-back lane leaves
+  test's class, or the file a compiler error names, in the lanes' changes); a lane found by elimination is run by itself first; a handed-back lane leaves
   the train at once; a full land run once a day (`STUDIO_LAND_FULL=1`); `engines.unity.editModeArgs`; a warning when
   the land command runs another copy of its script; a task whose engine half has not landed stays open.
 - **A cheaper rules check** (`harness/engine-rules.mjs`): `rules.env`, `rules.paths` (sparse checkout, no LFS

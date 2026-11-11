@@ -122,7 +122,7 @@ console.log(JSON.stringify(pruneBuilds({ ...a, root: process.cwd() })));`);
     b2.kept?.join() === 'gate-20261105,gate-20261102' && fs.existsSync(path.join(B, 'gate-20261102')) && !fs.existsSync(path.join(B, 'gate-20261104')) && fs.readFileSync(path.join(B, 'LATEST.txt'), 'utf8') === `${path.join(B, 'gate-20261102')}\n`, JSON.stringify({ b2, names: names() })]);
   mkBuilds();
   const before = JSON.stringify(names());
-  const refusals = [['a relative dir', { dir: path.relative(process.cwd(), B), keep: 1 }], ['the studio root', { dir: S, keep: 1 }], ['a pattern of only "*"', { dir: B, keep: 1, pattern: '*' }], ['a pattern with 2 literal characters', { dir: B, keep: 1, pattern: 'ga*' }], ['a filesystem root', { dir: path.parse(S).root, keep: 1 }], ['a parent of the studio', { dir: path.dirname(S), keep: 1 }]];
+  const refusals = [['a relative dir', { dir: path.relative(S, B) || 'builds', keep: 1 }], ['the studio root', { dir: S, keep: 1 }], ['a pattern of only "*"', { dir: B, keep: 1, pattern: '*' }], ['a pattern with 2 literal characters', { dir: B, keep: 1, pattern: 'ga*' }], ['a filesystem root', { dir: path.parse(S).root, keep: 1 }], ['a parent of the studio', { dir: path.dirname(S), keep: 1 }]];
   const got = refusals.map(([n, a]) => [n, call(a)]);
   await guard('2.83 builds: refuses and touches nothing for a relative dir, the studio root, a parent of it, a filesystem root, and a pattern like "*" or "ga*" (fails before this fix: no such function)', () => [
     got.every(([, r]) => r.refused && !r.removed?.length) && JSON.stringify(names()) === before && !fs.existsSync(path.join(B, 'LATEST.txt')) && fs.existsSync(path.join(S, 'studio')), JSON.stringify(got)]);

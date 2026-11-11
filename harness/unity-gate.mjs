@@ -170,6 +170,20 @@ export function failingTests(text) {
 }
 
 /**
+ * 2.83: the source files a land run's output names in compiler errors ("Assets/Tests/Foo.cs(12,5): error CS0117: …"),
+ * with forward slashes, unique, 20 at most. A compile error names no test; the file it names is the evidence instead.
+ */
+export function compileErrorFiles(text) {
+  const files = new Set();
+  for (const l of String(text || '').replace(/\r\n?/g, '\n').split('\n')) {
+    const m = /^\s*(?:\[[^\]]*\]\s*)?((?:[A-Za-z]:)?[^\s():*?"<>|][^():*?"<>|\n]*\.[A-Za-z0-9]{1,8})\(\d+,\d+\):\s*error\b/.exec(l);
+    if (m) files.add(m[1].trim().replace(/\\/g, '/'));
+    if (files.size >= 20) break;
+  }
+  return [...files];
+}
+
+/**
  * 2.73.2 (e, B-73): was a red or error land run an infrastructure abort? { kind, text } or null. The output shows out of
  * memory (or exit 0xC0000017), no licence, the editor or the script ended from outside, or "Aborting batchmode", and
  * shows no failing test and no compile error (harness/engine-proof.mjs infraAbort). A timeout is never one here.
@@ -354,8 +368,9 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   const tail = text.trimEnd().split('\n').slice(-12).join('\n');
   // 2.79 (e): a red run's failing test names (the train's bisect stops on the batch's signature).
   const failures = m.status === 'red' ? failingTests(text) : [];
+  const errorFiles = m.status === 'red' ? compileErrorFiles(text) : [];
   const stages = (() => { try { return landStages(stageFile, text); } catch { return []; } })();
-  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), ...(stages.length ? { stages } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
+  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), ...(errorFiles.length ? { errorFiles } : {}), ...(stages.length ? { stages } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
 
   function finish(res) {
     const full = { ...res, engine, ms: Date.now() - t0, ...(task ? { task } : {}), ...(br ? { branch: br } : {}), ...(many ? { branches: many } : {}), at: new Date().toISOString() };

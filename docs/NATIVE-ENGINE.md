@@ -149,7 +149,9 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
 - **Blame by evidence.** After a red run the failing test's name is read from the land's output and its class is
   looked up in what each lane changes. When exactly one lane touches it, the batch is run without that lane: green, and
   the rest lands on that one run while the lane is handed back with the evidence (cause `evidence`); red, and the
-  search by land runs goes on as before. `STUDIO_ENGINE_BLAME_EVIDENCE=off` turns it off.
+  search by land runs goes on as before. A compile error names no test: then the file the compiler names
+  (`Assets/Tests/Foo.cs(12,5): error CS0117`) is the evidence, and the one lane that changes it is run without.
+  `STUDIO_ENGINE_BLAME_EVIDENCE=off` turns it off.
 - **No blame by elimination.** A lane that the search by land runs leaves over ("everything before it was green") is
   run by itself before it is handed back. If it passes, it lands and nobody is handed back.
 - **Handed back means out.** A lane the train hands back leaves the train's record at once, so `task start` on its

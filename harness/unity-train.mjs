@@ -222,6 +222,22 @@ export function retryStagesOf(cfg = {}, env = process.env, engine = 'unity') {
  * Reads refs only (git diff, git grep on the lane's head). A lane with too many changed files, or a test name with no
  * usable class, yields no evidence: the caller then searches as before.
  */
+/**
+ * 2.83: which lanes change a file the compiler named in an error? [{ lane, tests: [], files: [paths] }]. A named file is
+ * matched to a changed path when one ends with the other (a compiler may print a relative or an absolute path).
+ */
+export function suspectsByFiles({ repo, tip, lanes = [], files = [] } = {}) {
+  const named = files.slice(0, 20).map((f) => String(f).replace(/\\/g, '/').replace(/^\.\//, '')).filter((f) => f.includes('.'));
+  if (!named.length) return [];
+  const found = [];
+  for (const lane of lanes) {
+    const changed = out(git(repo, 'diff', '--name-only', '--no-renames', `${tip}...${lane.head}`)).split('\n').filter(Boolean);
+    if (!changed.length || changed.length > 300) continue;
+    const hit = changed.filter((c) => named.some((n) => n === c || n.endsWith(`/${c}`) || c.endsWith(`/${n}`)));
+    if (hit.length) found.push({ lane, tests: [], files: hit.slice(0, 6) });
+  }
+  return found;
+}
 export function suspectsOf({ repo, tip, lanes = [], failures = [] } = {}) {
   const tokens = new Map();
   for (const f of failures.slice(0, 20)) {
@@ -602,17 +618,27 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       // 2.83: blame by evidence, before any search by land runs. When the failing tests are named and exactly one lane
       // of the batch changes a file naming their classes, the batch is run without that lane: green lands the rest on
       // one run and hands that lane back with the evidence; red means the evidence was wrong and the search goes on.
-      if (r.status === 'red' && remaining.length > 1 && Array.isArray(r.failures) && r.failures.length && !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_BLAME_EVIDENCE || ''))) {
-        let sus = [];
-        try { sus = suspectsOf({ repo, tip: headOf(repo, target), lanes: remaining, failures: r.failures }); } catch { sus = []; }
-        if (sus.length === 1 && sus[0].tests.length === Math.min(r.failures.length, 20)) {
-          const sp = sus[0];
+      // A compile error names no test: then the file the compiler names is the evidence, and the lane that changes it.
+      const namedTests = Array.isArray(r.failures) ? r.failures : [];
+      const namedFiles = Array.isArray(r.errorFiles) ? r.errorFiles : [];
+      if (r.status === 'red' && remaining.length > 1 && (namedTests.length || namedFiles.length) && !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_BLAME_EVIDENCE || ''))) {
+        let sp = null; let what = '';
+        try {
+          const tipNow = headOf(repo, target);
+          const byFile = namedFiles.length ? suspectsByFiles({ repo, tip: tipNow, lanes: remaining, files: namedFiles }) : [];
+          if (byFile.length === 1) { sp = byFile[0]; what = `the file(s) the compiler names (${sp.files.slice(0, 3).join(', ')})`; }
+          else if (!byFile.length && namedTests.length) {
+            const sus = suspectsOf({ repo, tip: tipNow, lanes: remaining, failures: namedTests });
+            if (sus.length === 1 && sus[0].tests.length === Math.min(namedTests.length, 20)) { sp = sus[0]; what = `files naming the failing test(s) (${sp.tests.slice(0, 3).join(', ')}: ${sp.files.slice(0, 3).join(', ')})`; }
+          }
+        } catch { sp = null; }
+        if (sp) {
           const rest = remaining.filter((l) => l.task !== sp.lane.task);
-          ev('evidence', id, `${sp.lane.task} is the only branch that changes files naming the failing test(s) (${sp.tests.slice(0, 3).join(', ')}: ${sp.files.slice(0, 3).join(', ')}): running ${rest.map((l) => l.task).join(', ')} without it`, { agent: by, meta: { suspect: sp.lane.task, tests: sp.tests.slice(0, 10), files: sp.files } });
+          ev('evidence', id, `${sp.lane.task} is the only branch that changes ${what}: running ${rest.map((l) => l.task).join(', ')} without it`, { agent: by, meta: { suspect: sp.lane.task, tests: sp.tests.slice(0, 10), files: sp.files } });
           const rr = await landGroup(rest, `without ${sp.lane.task}`);
           if (rr.status === 'pass') {
             close(rest, rr);
-            drop(sp.lane, `${blame(r)}\nBlame by evidence: the batch was red on ${sp.tests.slice(0, 5).join(', ')}, which ${sp.lane.branch} changes (${sp.files.slice(0, 4).join(', ')}), and the batch without it landed green (${rest.map((l) => l.task).join(', ')}). Fix it on ${sp.lane.branch} (merge ${target} in first), then task done ${sp.lane.task} --train again.`, { cause: 'evidence' });
+            drop(sp.lane, `${blame(r)}\nBlame by evidence: the batch was red on ${sp.tests.length ? sp.tests.slice(0, 5).join(', ') : 'a compile error'}, ${sp.lane.branch} is the only branch that changes ${what}, and the batch without it landed green (${rest.map((l) => l.task).join(', ')}). Fix it on ${sp.lane.branch} (merge ${target} in first), then task done ${sp.lane.task} --train again.`, { cause: 'evidence' });
             remaining = []; break;
           }
           if (rr.status !== 'red' && rr.status !== 'conflict') { hold(remaining, rr); break; }
