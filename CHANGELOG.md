@@ -4,6 +4,29 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.84.0] — 2026-11-12
+Less waste (the owner's order: keep what moves the studio forward, cut what costs tokens). The first release that
+shrinks the repository: tracked lines 164,633 → 161,027, the documents an agent or a maintainer reads 1,672 KB → 1,040 KB.
+Details: docs/RELEASE-2.84.0.md.
+- **Planning wakes that change nothing** (`harness/wake-gate.mjs`): after a regular cycle or a queue-depth session that
+  changed nothing on the board, that role's next one waits twice as long, up to `STUDIO_CYCLE_QUIET_MAX_H` (12) and
+  `STUDIO_WAKE_SAME_MAX_H` (6); a person's answer, an owner order or a phase change ends the wait. On a crew's 26-hour
+  log: 66 of 113 planning wakes skipped, about $43 of $70. `meta.outcome.boardEvents` on a planning session's end; two
+  scorecard lines. A session is not started on a task whose `task start` would be refused (`agent.start.refused`).
+- **The same-family review switch** (`npm run review -- same-family on|off|auto`, `studio/review.json`): the owner or
+  the overseer decides whether a review by the implementer's own model family counts. Which families a studio has is
+  read from the main checkout's files, never from a session's environment.
+- **The overseer's sheet** (`npm run overseer -- sheet`): everything waiting on a person or the overseer, with the
+  reason and the command for each. Reads only.
+- **A real Unity editor in the online checks** (`scripts/unity-real.mjs`, job `engine-unity-real`): the Edit Mode
+  arguments the harness plans, a failing test's name and a compile error's file, checked against a real editor's
+  output. The test runner is pinned to v4.3.2. UNTESTED until the repository's Unity sign-in secrets work.
+- **Which commands a studio runs** (`npm run commands-run`): an empty marker per command and month, so a feature is
+  cut on evidence.
+- **Cut:** eleven old release notes, three old handoff notes, the 2.79 audit write-up; the changelog, the problems log
+  and the proposals log keep their newest entries in full and one line for each older one; README 18 KB → 4 KB;
+  docs/SECURITY.md 46 KB → 17 KB with every rule kept. One pattern for a board line (`harness/board-line.mjs`).
+
 ## [2.83.0] — 2026-11-11
 Flow (the owner's "next harness upgrade", with the overseer's notes from 26 hours on 2.82). 2.82 fixed the engine's
 land run (65% of runs passed against 18%; 30 land minutes per landed lane against 290) and the records then showed
@@ -46,7 +69,7 @@ and a train that blamed by elimination. 72 files, +4,078 / −823 lines (net +3,
 ## [2.82.0] — 2026-11-10
 Native engine (the owner's "Round 2.82"). The crew's 64 Unity land runs passed 18 times; a passing run took 92 minutes,
 53 of them re-running in Edit Mode the rule tests .NET had just run, and 24 of the 45 failures were in tests that need
-no editor. 27 files, +1,951 / −58 lines (net +1,893) against 2.81.0. Details: docs/RELEASE-2.82.0.md, docs/NATIVE-ENGINE.md.
+no editor. 27 files, +1,951 / −58 lines (net +1,893) against 2.81.0. Details: docs/NATIVE-ENGINE.md (the release notes of 2.82.0 are in git history).
 - **Native-engine mode** (`harness/native.mjs`, `npm run engine -- native`): a studio whose game is the engine build
   builds a feature once. Builder tasks go on the engine track; the web tester schedule, the web landing build, engine
   twins and the port queue are off; the planning kickoffs say so. `"native": "<engine>"` in `studio/game.json`.
@@ -95,35 +118,9 @@ against 2.79.2. Details: the release notes of 2.81.0 (in git history: git log -p
 - **Prompts pruned:** no read-less lines, no token budget for the agent to manage, a reason on every absolute rule
   (originals: branch `claude/prompts-before-2.81`).
 
-## [2.80.0] — 2026-11-10
-The trim (the owner's order; HARNESS_TRIM_BRIEF_2026-11-10). 2.79.2 stays, leaner: 211 files, +2,013 / −19,710 lines (net −17,697) against 2.79.2;
-tracked lines 175,491 → 157,794, `harness/` modules 319 → 310, npm scripts 179 → 165, settings 729 → 712, literal event
-types 477 → 438, gates 37 → 35. Details, what was kept and what waits: the release notes of 2.80.0 (in git history: git log -p -- docs/RELEASE-2.80.0.md).
-- **The War Room and the hub server are gone** (`hub/`, `war-room.mjs`, `hud.mjs`, `planning-room.mjs`, `phone.mjs`,
-  `away.mjs`, `hub-keeper.mjs`, `meeting.mjs`, `qa/hud-check.mjs`, `qa/hub-smoke.mjs`, the `hud` and `hub-smoke` gates,
-  the React leftovers). Nobody opened it in the audited week; the studio is read through Studio Status and the CLI.
-  `--hub` / `--no-hub` are accepted and ignored.
-- **The hub's timed jobs run in the supervisor** (`harness/studio-passes.mjs`): watch pass, retro, learn, run report,
-  the Director's daily ping (`STUDIO_WATCH_INTERVAL`), the watchdog (`STUDIO_GAMEDEV_INTERVAL`); one failing pass no
-  longer skips the rest.
-- **Also cut:** trajectory export, the logic library, the mutation report, the replay bench, the threads shadow mode,
-  six dead scripts, the `budget.stop` alert kind.
-- **Fixes:** a stale machine scan no longer gives 2 test workers and false-red trains (N1); a dead session's lock is
-  taken over and `lock release --owner` is honoured or refused out loud (#24); a manual wind-down starts nothing, a usage
-  one follows the current setting, an agent's needs `--until` (#14); the train daemon waits on a red main with the same
-  lanes (#25); a Unity run with no results file is NOT RUN (#28); aider builders need a task (A2) and their claim waits
-  480 s (A1); `ask -- show/help` (A10); dry-run trains (A7); the landing build of an adopted game (N3); a quarantined
-  test runs in the lane that changes it (N4); `--no-op` closes a chore (N6); `studio/game.json` with a byte-order mark
-  (N11); `test-golden.py` and `kind: test` regressions (N12); `task done` says it is replaying (N14); the self-test on
-  a big game (R3-6); `godot-unit` N/A (C15).
-- **New, each for a finding:** `STUDIO_BUILDER_ORDER` (#18), `STUDIO_AIDER_CLAIM_TIMEOUT_MS`, `studio:winddown --until`,
-  `ask -- show`, the events `lock.taken_over` and `lock.released_for`.
-- **Less noise:** `hotspot.overlap` and `watch.report` only on change; `check-docs` skips dated records.
-
----
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.80.0** (2026-11-10): the trim: the hub and other unused parts cut, tracked lines 175,491 to 157,794, the timed passes moved into the supervisor.
 - **2.79.2** (2026-11-07): Fixes Vertex builders that ended "no work" after huge requests, and the STUDIO_VERTEX_SHARE=0 off switch that did not stop them.
 - **2.79.1** (2026-11-06): The crew's request after a good day on 2.79.0: Vertex as a builder tool, owner-set spend budgets, an engine push mode, and fat cut.
 - **2.79.0** (2026-11-06): The crew's request after 2.78.2: a game tester that plays the game, the 2.78.2 bugs, the orchestrator signing for the owner, and less fat.

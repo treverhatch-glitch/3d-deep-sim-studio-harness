@@ -232,6 +232,22 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 - **Evidence:** "stalled" for lanes waiting in a train; 37 refusals of the same unchanged-shots review; the idle stop counted the hours the supervisor was off; a dead session's claim held its task.
 - **Fix:** harness/watch.mjs `laneInTrain`, harness/gamedev-loop.mjs, harness/review-family.mjs, harness/watchdog.mjs, `deadClaimOwner`. qa/selftest-283g.mjs.
 
+### P-314 — planning sessions were started on a timer, whatever the last one did · fixed in 2.84.0
+- **Evidence:** a crew's 26 hours: the Director's 33 regular cycles cost $38.83 and left one board change; the Producer's 80 timer and queue wakes cost $31 for 17 tasks.
+- **Fix:** harness/wake-gate.mjs: the wait doubles after a session that changed nothing, up to a ceiling; a person's answer, an owner order or a phase change ends it. qa/selftest-284a.mjs.
+
+### P-315 — a session could make the same-family review fallback apply to itself · fixed in 2.84.0
+- **Evidence:** 2.83's check read which model families are configured from the calling process's environment.
+- **Fix:** harness/review-family.mjs reads the main checkout's files; the environment can add a family, never remove one. qa/selftest-284b.mjs.
+
+### P-316 — the documents cost more to read than the code they describe · fixed in 2.84.0
+- **Evidence:** CHANGELOG.md 304 KB, thirteen release notes 131 KB, this file 149 KB, docs/SECURITY.md 46 KB.
+- **Fix:** the newest entries in full, one line for each older one, the rest in git history.
+
+### P-317 — the Unity test runner's floating tag cannot activate a Personal licence · worked around in 2.84.0
+- **Evidence:** the repository's first real editor run: `game-ci/unity-test-runner@v4` (a rewrite since v4.4.0) ended with "Code 400 … TimeStamp validation failed".
+- **Fix:** pinned to v4.3.2 in .github/workflows/ci.yml.
+
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
 - **P-001** (reopened on purpose 2026-10-31: Hatch made the harness and hatchfield-game public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist
