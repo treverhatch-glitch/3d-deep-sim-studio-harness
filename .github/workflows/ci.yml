@@ -112,6 +112,9 @@ jobs:
   # 2.46.0: the Unity editor's own run (Edit Mode and Play Mode, the controls test) on the template. It needs a
   # Unity licence: add the UNITY_LICENSE, UNITY_EMAIL and UNITY_PASSWORD secrets (docs/UNITY-TRACK.md). Until
   # then it says so and passes.
+  # 2.84: pinned to v4.3.2. The floating v4 tag moved to a rewrite (v4.4.0) whose licence-file activation fails for a
+  # Personal licence ("Code 400 ... TimeStamp validation failed": this repository's first real run, 2026-11-11);
+  # v4.3.2 is the older activation path.
   engine-unity-editor:
     if: vars.HARNESS_RUNNER != 'self-hosted'
     runs-on: ubuntu-latest
@@ -125,11 +128,70 @@ jobs:
         run: echo "::notice::No UNITY_LICENSE secret, so the Unity editor tests were skipped (docs/UNITY-TRACK.md)"
       - uses: actions/checkout@v7
         if: env.UNITY_LICENSE != ''
-      - uses: game-ci/unity-test-runner@v4
+      - uses: game-ci/unity-test-runner@v4.3.2
         if: env.UNITY_LICENSE != ''
         with:
           projectPath: engine/_unity
           testMode: all
+
+  # 2.84: the harness's own Unity readers against a real editor's output (scripts/unity-real.mjs): the Edit Mode
+  # arguments the harness plans, a failing test's name, a compile error's file. Three small copies of the template,
+  # one editor run each. Needs the licence secrets; a pull request from a fork gets none, says so and passes.
+  engine-unity-real:
+    if: vars.HARNESS_RUNNER != 'self-hosted'
+    runs-on: ubuntu-latest
+    env:
+      UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+      UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+    steps:
+      - name: No Unity licence here
+        if: env.UNITY_LICENSE == ''
+        run: echo "::notice::No UNITY_LICENSE secret (none is set, or this is a pull request from a fork), so the real-editor checks were skipped (docs/UNITY-TRACK.md)"
+      - uses: actions/checkout@v7
+        if: env.UNITY_LICENSE != ''
+      - uses: actions/setup-node@v7
+        if: env.UNITY_LICENSE != ''
+        with:
+          node-version: '24'
+      - name: Three copies of the template, each with a test assembly .NET does not compile
+        id: prep
+        if: env.UNITY_LICENSE != ''
+        run: node scripts/unity-real.mjs prepare
+      - name: "plan: Edit Mode with the harness's own arguments"
+        uses: game-ci/unity-test-runner@v4.3.2
+        if: env.UNITY_LICENSE != ''
+        continue-on-error: true
+        with:
+          projectPath: .unity-real/plan
+          testMode: editmode
+          artifactsPath: .unity-real/out/plan
+          customParameters: ${{ steps.prep.outputs.plan_args }}
+      - name: "red: one test fails on purpose"
+        uses: game-ci/unity-test-runner@v4.3.2
+        if: env.UNITY_LICENSE != ''
+        continue-on-error: true
+        with:
+          projectPath: .unity-real/red
+          testMode: editmode
+          artifactsPath: .unity-real/out/red
+      - name: "broken: one file does not compile"
+        uses: game-ci/unity-test-runner@v4.3.2
+        if: env.UNITY_LICENSE != ''
+        continue-on-error: true
+        with:
+          projectPath: .unity-real/broken
+          testMode: editmode
+          artifactsPath: .unity-real/out/broken
+      - name: The harness's readers against what the editor wrote
+        if: env.UNITY_LICENSE != ''
+        run: node scripts/unity-real.mjs check
+      - uses: actions/upload-artifact@v4
+        if: always() && env.UNITY_LICENSE != ''
+        with:
+          name: unity-real
+          path: .unity-real/out
+          if-no-files-found: warn
 
   # 2.46.0: a playable build of the Unity template on every change to main, as a downloadable artifact.
   # 2.48.0: a Windows .exe (the Unity track's default), built on Linux with GameCI. Needs the licence secrets.
