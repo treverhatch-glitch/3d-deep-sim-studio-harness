@@ -46,7 +46,7 @@ So 2.82 did what it was for, and the cost moved elsewhere:
 | Watching | No "stalled" for a lane in a train; one try a day for the same unchanged-shots review; same-family review fallback, marked on the review; the idle stop and claim minutes skip downtime; a dead session's claim handed back after `STUDIO_DEAD_CLAIM_MIN` (30). | `harness/watch.mjs`, `harness/gamedev-loop.mjs`, `harness/review-family.mjs`, `harness/watchdog.mjs`, `harness/task-budget.mjs` | `qa/selftest-283g.mjs` |
 | Cleanup | Landed engine worktrees removed; `engines.<x>.builds` keeps the newest builds and a `latest` pointer; `lanes prune` covers engine lanes. | `harness/engine-clean.mjs`, `harness/lanes.mjs` | `qa/selftest-283h.mjs` |
 | Owner-only list | The game's own money is not "real money"; code removed in a lane is not "deleting data"; a stand-in's answer records the reading. | `harness/owner-acts.mjs`, `harness/ask.mjs` | `qa/selftest-283j.mjs` (7) |
-| Scorecard | CPU measure from the hourly summaries; `engines.<x>.progress` (a command whose two lines are printed under the engine block); `studio/allowlist.json`. | `harness/score.mjs`, `harness/telemetry.mjs`, `harness/allowlist.mjs` | `qa/selftest-283i.mjs` (6) |
+| Scorecard | CPU measure from the hourly summaries; `engines.<x>.progress` (a command whose first output line is printed under the engine block); `studio/allowlist.json`. | `harness/score.mjs`, `harness/telemetry.mjs`, `harness/allowlist.mjs` | `qa/selftest-283i.mjs` (6) |
 
 The overseer's local patches on 2.82 are all in this release (the rules command line, `routeRoles` for the pool-route
 patch, the studio's own command list for the Blender path, the research-media lines in `.gitignore`), so a studio

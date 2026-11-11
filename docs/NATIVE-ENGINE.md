@@ -173,9 +173,9 @@ Around the train:
   adds there, named by their content, are copied into the engine folder when the lane is queued, so the rules check
   and the land run find them. Existing files are never overwritten.
 - **Cleanup.** A landed lane's engine worktree (`.lanes/engine/<task>`) is removed (`STUDIO_ENGINE_LANE_CLEAN=off`
-  keeps it; a worktree with uncommitted files is always kept). `engines.<x>.builds` = `{ "dir": "...", "keep": 5,
-  "pattern": "...", "latest": "latest.txt" }` keeps the newest builds and writes the newest one's name to `latest`
-  (`STUDIO_ENGINE_KEEP_BUILDS`). `npm run lanes -- prune` covers engine lanes; `node harness/engine-clean.mjs lanes|builds`
+  keeps it; a worktree with uncommitted files is always kept). `engines.<x>.builds` = `{ "dir": "<absolute folder>",
+  "keep": 3, "pattern": "gate-*" }` keeps the newest build folders and writes `LATEST.txt` with the newest one's
+  path (`STUDIO_ENGINE_KEEP_BUILDS`; docs/ENGINE-TRACKS.md has the rules it refuses by). `npm run lanes -- prune` covers engine lanes; `node harness/engine-clean.mjs lanes|builds`
   runs either by hand.
 - `node harness/unity-train.mjs queue --task <ID> [--engine x] [--branch b] [--alone]` queues a branch without closing
   a task; `npm run task -- train dequeue <ID>` takes one out.
