@@ -1,7 +1,9 @@
-# Autonomy: the scorecard, the drift checks, hands-off by default, the self-repair loop and the overseer's stages (2.64.0 to 2.73.0)
+# Autonomy: the scorecard, levels, hands-off defaults, delegation and beta mode, the decision log, self-repair, the overseer and drift checks
 
-Two scripts that measure how much the studio needs a person, and notice a session going round in circles. Both
-read files and the event log only: no model, no tokens. Neither changes how the studio runs.
+How much the studio needs a person, and what the harness may decide without one. The scorecard and the drift checks read files and
+the event log only (no model, no tokens) and change nothing about how the studio runs. Older wording is in git history
+(`git log -p -- docs/AUTONOMY.md`); a tag such as (2.73.0) says which release added a feature. Who may do what and what stays the owner's:
+`docs/SECURITY.md`.
 
 ## The scorecard (`npm run autonomy`)
 
@@ -9,440 +11,315 @@ read files and the event log only: no model, no tokens. Neither changes how the 
 npm run autonomy                                   # the last 7 days: one line, details, daily buckets, the L3 bar
 npm run autonomy -- --days 14 --json               # another window, as JSON
 npm run autonomy -- --now 2026-11-08T00:00:00Z     # the window ending then (score an older week)
-npm run autonomy -- --since 2026-11-01T00:00:00Z   # 2.66.0: the window from then to now
+npm run autonomy -- --since 2026-11-01T00:00:00Z   # the window from then to now
 ```
 
 The same line is at the top of the overnight page (`npm run overnight`).
 
 | Measure | How it is counted |
 | --- | --- |
-| Hours between interventions | supervisor running time (`supervisor.start` to `supervisor.stop`, halted time taken out) divided by the unplanned person interventions; the longest stretch between two is shown too. An unclosed run ends at the log's last event |
+| Hours between interventions | supervisor running time (halted time taken out) over unplanned person interventions; the longest stretch is shown too |
 | Unplanned interventions | a person: resuming a halted supervisor, forcing a task done (or accepting a forced one), stopping an agent, reopening, dropping, reordering, unblocking or unparking a task, stopping the studio, retyping a task, an away card sent back with "redo" |
 | Planned reviews | counted apart: away "great"/"comment", fun verdicts, intent confirmations, the dev's yes, Bible signing, approvals |
-| Hands-free land rate | landed tasks (task done, a train landing, a lane merge) not forced, with no person event on the task between the claim that led to the landing and the landing. A person running the train counts on every lane it landed |
+| Hands-free land rate | landed tasks (task done, train landing, lane merge) not forced, with no person event on the task between the claim and the landing; a person running the train counts on every lane it landed |
 | Forced-done rate | landed tasks forced past a check |
-| Reopen/escape rate | landed tasks reopened, or named by a bug added `--caused-by`, within 7 days of landing |
+| Reopen/escape rate | landed tasks reopened, or named by a bug added `--caused-by`, within 7 days |
 | Hand-backs by label | attempts that didn't end done, by the failure labels in `docs/METRICS.md` |
-| Halt wait | minutes from `supervisor.halted` to `supervisor.resumed` (an open halt counts up to now). 2.67.0: a halt also ends at `supervisor.halt_cleared`, `supervisor.stop` or a new `supervisor.start` (a halt lives in the supervisor's own state); the card names an open one (who, when, cause, its age) and how to clear it (see below) |
-| Gate catches | merge-train reds and done-check refusals, per landed task: the gates catching it, not the agents improving |
+| Halt wait | minutes from `supervisor.halted` to `supervisor.resumed`; a halt also ends at `supervisor.halt_cleared`, `supervisor.stop` or a new `supervisor.start`; the card names an open one (who, when, cause, age) |
+| Gate catches | merge-train reds and done-check refusals per landed task |
 | Your verdicts | away cards marked great / redo / comment; Redo rate = redo over all three |
-| Tokens per landed task | session tokens in the window (counted as the overnight page counts them) over landed tasks |
-| Cost per landed task (2.65) | the tokens per landed task, and the same for the window before (the trend). Dollars only with a price table, `studio/prices.json` (`{ "models": { "<model or tool>": { "in": 3, "out": 15, "cacheRead": 0.3 } } }`, USD per million tokens). 2.67.0: the file ships with family rows (`opus`, `sonnet`, `haiku`: a full model id such as `claude-opus-4-5` is priced by the family it names, after its own row and its tool's) and a `"checked"` stamp; the card says "prices from studio/prices.json, checked <date>", and stays in tokens (saying why) while no session in the window has a model it can price. The shipped prices are placeholders (`"checked": "UNVERIFIED"`): compare them with the provider's price page, fix any that differ (add a row under a full model id for a model that costs more than its family) and set `"checked"` to that date. 2.65.2: cache writes (inside `tokensIn`) are priced by TTL, 1.25x input for 5-minute writes and 2x for 1-hour ones (the split from Claude's usage, else the TTL the launcher asked for); a model with no `cacheRead` price reads at 0.1x input; the file's top-level `"multipliers": { "cacheWrite5m": 1.25, "cacheWrite1h": 2, "cacheRead": 0.1 }` changes them. A session whose tool reported its cost (`meta.costUsd`) counts at that cost. Tokens are counted as the budget meter counts them, whoever calls the scorecard |
-| Person round-trips per landed task (2.65) | a person's planned and unplanned interventions over landed tasks |
-| Orchestrator interventions (2.65) | `conductor.note` events (an outside orchestrator's rulings in a task's record), by who wrote them. 2.67.0: also the orchestrator's other steps: train releases it recorded, `lanes refresh`, holds, a stale halt cleared and any person-only step it recorded (who: `meta.recordedBy`, else the event's agent, when that is an agent outside the harness: not the harness's own scripts, a worker, a launched Producer/Director session or a person acting alone). Planned: notes, releases, refreshes, halt clears and the card's planned types; unplanned: holds and the card's unplanned types |
-| Outside work (2.67) | sessions recorded with `npm run usage` (`meta.outside`): counted in the tokens, the cost and the budget like any session, and shown apart with their share |
+| Tokens / cost per landed task | session tokens in the window over landed tasks, and the window before (the trend). Dollars only with `studio/prices.json` (below) |
+| Person round-trips per landed task | a person's planned and unplanned interventions over landed tasks |
+| Orchestrator interventions | `conductor.note` events by who wrote them, plus the orchestrator's other steps (train releases, `lanes refresh`, holds, stale halt clears, person-only steps it recorded). Planned: notes, releases, refreshes, halt clears; unplanned: holds |
+| Outside work | sessions recorded with `npm run usage` (`meta.outside`): counted in tokens, cost and budget like any session, and shown apart with their share |
 
-### Outside work, risk tiers, stale halts and local days (2.67.0)
+**Prices** (`studio/prices.json`): `{ "models": { "<model or tool>": { "in": 3, "out": 15, "cacheRead": 0.3 } } }`, USD per million
+tokens; it ships family rows (`opus`, `sonnet`, `haiku`; a full model id is priced by its own row, its tool's, then the family it
+names) and a `"checked"` stamp, `UNVERIFIED` until the owner compares the placeholders with the provider's page and sets the date. The
+card stays in tokens (saying why) while no session in the window has a model it can price. Cache writes are priced by TTL, 1.25x
+input for 5-minute and 2x for 1-hour writes; a model with no `cacheRead` price reads at 0.1x input; the top-level `"multipliers": {
+"cacheWrite5m": 1.25, "cacheWrite1h": 2, "cacheRead": 0.1 }` changes them. A session whose tool reported its cost (`meta.costUsd`)
+counts at that cost.
+
+**Who is a person**: `isPerson` in `harness/verdict.mjs`, `isAgentName` in `harness/reclassify.mjs` (agent name shapes, a `-bot` suffix,
+launched session names), and the harness's own scripts (watchdog, train, supervisor) are not. A decision an agent recorded on a
+person's direct permission (`--by <person> --permission "…"`, `meta.permission`, `meta.recordedBy`) is the person's intervention.
+
+### Outside work, risk tiers, stale halts, local days
 
 ```bash
 npm run usage -- add --agent opus-bot --tokens-in 120000 --tokens-out 8000 --cache-read 900000 --cache-write 40000 --why "integrated train 14"
 npm run usage -- import <a Claude Code session .jsonl, or the folder of a project's sessions> --agent opus-bot
 ```
 
-- **Outside work.** An orchestrator outside the harness (a Claude Code session and its subagents) records its usage:
-  `add` appends one `agent.session.end` marked `meta.outside` (`--cost-usd`, `--task`, `--model`, `--tool` optional;
-  cache writes go into `tokensIn` as the launcher records them). `import` reads Claude Code transcripts (a folder is
-  walked, `subagents/` files included) and records each session per model once: a key (session id, plus the agent id
-  for a subagent file, and the model) already imported with the same last message id is skipped, one that grew since
-  is recorded for the growth only. Only usage numbers, ids, model names and times are read; no message text is kept or
-  printed. A launched worker session is refused (its launcher already counts it). The crew's first card (2026-11-02)
-  showed 13M tokens over 7 days while about 50 orchestrator subagents went uncounted: this is what closes that gap.
-- **Risk tiers.** The train records a lane's tier on its own `task.train.tier` event (2.63), not on the landing, so
-  `tierCUnsigned` read n/a. A landed task's tier is now its latest tier event since its previous landing (or the
-  landing's own `meta.tier`); a tier-C landing counts as signed when the tier event names a release or a
-  `task.train.released` came between. The bar shows the A / B / C counts.
-- **Stale halts.** A halt left open by a supervisor that is gone (it crashed, the PC restarted) kept "still waiting"
-  counting. The card names it and says how to clear it. `npm run studio:resume -- --by <name>` (a person; or a
-  Producer/Director session or an outside agent with `--permission "<the person's words>"`, never a worker) clears a
-  halt older than `STUDIO_HALT_STALE_H` hours (default 24) whose supervisor isn't running: one
-  `supervisor.halt_cleared` event (a planned review on the card), and the card stops counting it. A younger one is
-  left alone (nothing waits on it; a new supervisor starts unhalted).
-- **Local days.** With `STUDIO_TZ` (an IANA zone, e.g. `Asia/Bangkok`) the daily rows are that zone's calendar days,
-  each with its UTC span, and the landing times in `--json` (`tasks[].landedLocal`) are local, with `landedUtcDate`
-  when the UTC date differs. Without it the days stay UTC (as before) and the card names this computer's zone as a
-  hint; `TZ` alone doesn't switch them, so a replay scores the same days on every computer.
+- **Outside work**: an orchestrator outside the harness records its usage. `add` appends one `agent.session.end` marked `meta.outside`
+  (`--cost-usd`, `--task`, `--model`, `--tool` optional; cache writes go into `tokensIn`). `import` reads Claude Code transcripts (a
+  folder is walked, `subagents/` included) and records each session per model once (an already imported key is skipped; one that grew
+  records only the growth). Only usage numbers, ids, model names and times are read. A launched worker session is refused.
+- **Risk tiers**: a landed task's tier is its latest `task.train.tier` event since its previous landing (or the landing's `meta.tier`);
+  a tier-C landing counts as signed when that event names a release or a `task.train.released` came between. The bar shows A / B / C counts.
+- **Stale halts**: `npm run studio:resume -- --by <name>` (a person; or a Producer/Director session or an outside agent with
+  `--permission "<the person's words>"`, never a worker) clears a halt older than `STUDIO_HALT_STALE_H` hours (default 24) whose
+  supervisor isn't running (`supervisor.halt_cleared`, a planned review); a younger one is left alone.
+- **Local days**: with `STUDIO_TZ` (an IANA zone, e.g. `Asia/Bangkok`) the daily rows are that zone's days (with their UTC span;
+  `tasks[].landedLocal`, `landedUtcDate` in `--json`). Without it days stay UTC; `TZ` alone doesn't switch them.
 
 ### Release impact (2.68.0)
 
-`npm run autonomy -- impact [--release <version>] [--days 3] [--json]` (`harness/impact.mjs`) finds when each harness
-version reached the studio (an `upgrade.merged` event, an `Upgrade-Versions` trailer on the upgrade merge, or a
-`package.json` version bump on the first-parent line) and compares the same measures over the days before and after
-it: landed per hour, train verify minutes p50/p90, red verify %, hand-backs per landed, tokens per kept change, owner
-round-trips per landed and no-work sessions. A measure with fewer than `STUDIO_IMPACT_MIN_N` (30) items on either side
-reads "not enough data"; within 10% is "same". The verdict is better / worse / mixed by the measures judged, and the
-daily digest names the latest upgrade's verdict once one measure has enough data.
-
-2.73.0: when `npm run upgrade -- --merge` left a before snapshot for that release (`.studio/upgrades/<from>-to-<to>.json`,
-docs/RELEASE.md), its numbers are the before side (marked `*`): the studio as it was at the moment of the update, not
-recomputed later from a log that has rolled over. False reds per train (red train verifies whose tree verified green
-later, or whose flake triage labelled every failing test other than "real"), tokens per landed change (also by task, from
-sessions that name their task) and workarounds per day are compared too, apart from the verdict. A release's
-predictions (`npm run release -- predict`, `docs/releases/<version>.json`) are scored: hit or miss with the measured
-change, or not scored while a side has too little data.
+`npm run autonomy -- impact [--release <version>] [--days 3] [--json]` (`harness/impact.mjs`) finds when each harness version reached
+the studio (an `upgrade.merged` event, an `Upgrade-Versions` trailer, or a `package.json` version bump) and compares the days before and
+after: landed per hour, train verify minutes p50/p90, red verify %, hand-backs per landed, tokens per kept change, owner round-trips per
+landed, no-work sessions. Fewer than `STUDIO_IMPACT_MIN_N` (30) items on either side reads "not enough data"; within 10% is "same". The
+verdict is better / worse / mixed, and the daily digest names the latest upgrade's. When `npm run upgrade -- --merge` left a before
+snapshot (`.studio/upgrades/<from>-to-<to>.json`, `docs/RELEASE.md`) its numbers are the before side (marked `*`). False reds per train,
+tokens per landed change and workarounds per day are compared apart from the verdict. A release's predictions (`npm run release --
+predict`, `docs/releases/<version>.json`) are scored hit or miss, or not scored with too little data.
 
 ### Tokens that do work (2.66.0)
 
-`npm run autonomy` ends its details with a short **Tokens** block (`--json`: `card.tokenWork`, with
-the effective-token line). `--since <ISO time>` scores the window from then to now (or to `--now`).
+The details end with a **Tokens** block (`--json`: `card.tokenWork`).
 
-- **Kept.** A landed change is kept when, within `keepDays` (`STUDIO_KEEP_DAYS`, else `"keepDays"` in
-  `studio/autonomy.json`, default 7) of its landing, it was not reopened, not reverted (a later commit
-  `Revert "…<task>…"` on the checked-out branch, or a merge-train hand-back of the same task after it landed) and not
-  redone (a task added naming it: `--caused-by`, `meta.redoOf` / `meta.fixes`, or "redo of T-…" / "fixes T-…" in its
-  title). A landing younger than `keepDays` with none of these yet is **pending**: reported apart, counted neither way.
-- **Which session paid for what.** Each `agent.session.end` in the window is shared among the task attempts it held
-  (an attempt belongs to its agent's first session end at or after its claim, shared by wall time, as
-  `docs/METRICS.md` shares tokens). An attempt counts for the landing it led to (a landing after its claim and before
-  the task's next claim); one with no landing is **handed back**, or **dropped** when the task was dropped or shelved
-  after it; a session that held no attempt (Producer, Director, reviews) is **no task**. A hand-back is judged with its
-  task: it stays pending while the landing that followed it is pending, or, with no landing yet, for `keepDays` after
-  it (otherwise a young window would count failures at once and successes `keepDays` later).
-- **Effective-token ratio** = weighted tokens of kept attempts / all judged weighted tokens (all minus pending). By
-  dollars too when they are known (a price table, or every session reporting its cost).
-- **Cost per kept change** = judged weighted tokens and dollars / kept landings in the window; also per task type (the
-  type done-check gives), without the no-task sessions.
-- **Waste split**: reopened, reverted or redone, handed back, dropped, no task: tokens and dollars each.
-- **Minimum sample.** A rate on fewer than `"minSample"` items (default 30: sessions for the token ratio and the
-  waste shares, judged landings for the keep rate) prints "not enough data (n=…)" with its Wilson 95% interval, never a
-  bare percentage. The token ratio's interval counts each session as one item (an approximation: sessions differ in
-  size).
-
-**Who is a person.** The harness's own rules: `harness/verdict.mjs` `isPerson`, `harness/reclassify.mjs`
-`isAgentName` (agent name shapes, a `-bot` suffix, launched session names), and the harness's own scripts
-(watchdog, train, supervisor). A decision an agent recorded on a person's direct permission (2.59.1:
-`--by <person> --permission "…"`, logged with `meta.permission` and `meta.recordedBy`) is the **person's**
-intervention: the person decided; the agent only typed it. The card lists how many came that way.
+- **Kept**: a landed change is kept when, within `keepDays` (`STUDIO_KEEP_DAYS`, else `"keepDays"` in `studio/autonomy.json`, default 7)
+  of landing, it was not reopened, reverted (a later `Revert "…<task>…"` commit, or a train hand-back of the task) or redone (a task
+  naming it: `--caused-by`, `meta.redoOf` / `meta.fixes`, or "redo of T-…" / "fixes T-…" in its title). Younger than `keepDays` with
+  none of these: **pending**, counted neither way.
+- **Which session paid for what**: each `agent.session.end` is shared among the task attempts it held (by wall time, as `docs/METRICS.md`).
+  An attempt counts for the landing it led to; one with none is **handed back**, or **dropped** when the task was dropped or shelved; a
+  session with no attempt is **no task**. A hand-back stays pending while the following landing is pending, or for `keepDays` after it.
+- **Effective-token ratio** = weighted tokens of kept attempts / all judged (all minus pending), by dollars too when known. **Cost per
+  kept change** = judged tokens and dollars / kept landings, also per task type. **Waste split**: reopened/reverted/redone, handed back,
+  dropped, no task.
+- **Minimum sample**: a rate on fewer than `"minSample"` items (default 30) prints "not enough data (n=…)" with its Wilson 95% interval.
 
 ## Levels and the L3 bar (`studio/autonomy.json`)
 
-The file holds the level the owner set (`"level": "L2"`) and the bar for L3. Defaults:
+The file holds the level the owner set (`"level": "L2"`) and the bar for L3 (`l3`, `days`):
 
 | Bar | Default |
 | --- | --- |
-| days | 7 (the window; the log must reach back that far) |
+| days | 7 (the log must reach back that far) |
 | `hoursBetweenInterventions` | more than 8 |
-| `minLanded` | at least 10 landed tasks (so a quiet week can't qualify) |
+| `minLanded` | at least 10 landed tasks |
 | `handsFreeLandRate` | at least 0.8 |
 | `reopenRate` | at most 0.05 |
-| `redoRate` | at most 0.1 (the owner's Redo verdicts and failed audits over verdicts plus audits; n/a with none) |
-| `tierCUnsigned` | 0 tier-C landings without a signature (n/a until landings carry a risk tier) |
-| `confidence` | 0.9 (2.73.0; top level of the file, not under `l3`) |
+| `redoRate` | at most 0.1 (the owner's Redo verdicts and failed audits over verdicts plus audits) |
+| `tierCUnsigned` | 0 tier-C landings without a signature |
+| `confidence` | 0.9 (top level of the file, not under `l3`) |
 
-**Confidence bounds (2.73.0).** Point estimates let a handful of lucky landings suggest L3, so a promotion reads each
-rate at its one-sided Wilson bound at `"confidence"` (default 0.9; else `STUDIO_L3_CONFIDENCE`, which applies only
-when the file sets none): the hands-free rate's LOWER bound must reach its bar, the reopen and redo rates' UPPER
-bounds must stay at or under theirs. The CLI and the card show both and what would clear it, e.g.
-`hands-free 0.86 (lower bound 0.70 at 90%, n=14): not yet; about 67 more landings at this rate would clear it`, or
-"at this rate it never clears" when the rate itself is on the wrong side. With no reopen the reopen bound needs about
-32 landings to fall under 5%. Demotion stays on point estimates (fast to step down, slow to step up). The owner sets
-`"confidence": 0` in studio/autonomy.json for the old point-estimate verdicts.
-
-- **Promotion is only a suggestion.** When every bar holds and the studio is below L3, the card and the CLI say
-  "suggest L3 (your call)". Nothing moves until the owner sets `"level": "L3"` in the file.
-- **Demotion is suggested on its own.** When the level is L3 and any bar fails, the card names the failing bars
-  and suggests going back to L2. The owner changes the file.
-- **Who sets the level.** The owner's rule (2026-11-01): a person, a Producer or Director session, or an agent
-  outside the harness (on the owner's word) may change `"level"` and the bar; workers never (in a lane copy studio/ is
-  main's and a hook refuses edits to studio config). The file is deliberately not in the protected list; a studio
-  that wants owner-signed changes only adds `studio/autonomy.json` to `studio/protected.json`.
-
-**Setting the level (2.65.0).** `npm run autonomy -- level <L1|L2|L3|L4> --by <name> [--why "…"] [--permission "…"]`
-writes `"level"` (and `"levelSet"`: who, when, why, from) and one `autonomy.level` event. A person in their own
-terminal and a launched Producer or Director session may run it; an agent outside the harness needs the person's
-words or a link (`--permission`, as in harness/permission.mjs); a worker never. The level is set once; agents then make
-every decision it allows, and the scorecard only suggests a change.
+- **Confidence bounds** (2.73.0): promotion reads each rate at its one-sided Wilson bound at `"confidence"` (else `STUDIO_L3_CONFIDENCE`,
+  applied only when the file sets none): the hands-free rate's LOWER bound must reach its bar, the reopen and redo rates' UPPER bounds must
+  stay at or under theirs. The card shows both and what would clear it. Demotion stays on point estimates. `"confidence": 0` gives the old
+  point-estimate verdicts.
+- **Promotion is only a suggestion** ("suggest L3 (your call)"); nothing moves until the owner sets `"level": "L3"`. **Demotion** is
+  suggested on its own when the level is L3 and any bar fails.
+- **Who sets the level**: a person, a Producer or Director session, or an agent outside the harness on the owner's word; never a
+  worker. The file is deliberately not protected; a studio wanting owner-signed changes adds `studio/autonomy.json` to
+  `studio/protected.json`.
+- `npm run autonomy -- level <L1|L2|L3|L4> --by <name> [--why "…"] [--permission "…"]` (2.65.0) writes `"level"` and `"levelSet"` and one
+  `autonomy.level` event. A person and a launched Producer or Director session may run it; an agent outside the harness needs
+  `--permission` (`harness/permission.mjs`); a worker never.
 
 ## Hands-off by default (2.65.0)
 
-Fewer human steps, not easier ones: the harness decides routine questions from evidence and logs why, fixes routine
-stops from a fixed list, and sends one daily digest instead of approval pings.
+The harness decides routine questions from evidence and logs why, fixes routine stops from a fixed list, and sends one daily digest.
 
-- **The type from the diff.** A task whose title (or role) makes it a "bug" but whose commits change only tests, docs
-  or config is judged a "change" by done-check: no regression replay is asked, the output says
-  `type: change (evidence: only tests/config changed: …)` and one `task.type.evidence` event records it
-  (harness/type-evidence.mjs). Any file in the game's sim paths (`game|web/<g>/sim`, `cartridges/`, the manifest's
-  `simPaths`, `pins.files`, `irreversible`, `shared`, `registry`), a golden, a deleted test, the studio's own code or
-  other code keeps the bug and its replay. An owner's `npm run task -- type <ID> bug` outranks the evidence.
-- **Self-triage** (harness/self-triage.mjs, the list in harness/self-triage.json; `node harness/self-triage.mjs status`).
-  The watchdog runs it on every pass; the supervisor and the game checks ask it when they stop. Each fix is one
-  `selftriage.<fix>` event and runs at most once per cause per `onceHours` (6); a cause that comes back, and any cause
-  not on the list, still stops for a person (`selftriage.declined` says why). `STUDIO_SELF_TRIAGE=off` turns it off.
-  - `reap-orphans`: a machine:heavy holder whose root died with its tree still running: the leftovers are killed and
-    the slot freed.
-  - `rerun-timeout`: a game check that timed out under load (load factor above 1), or (2.65.1) with no quiet passing run
-    recorded for it yet while the floor is on ("no quiet run recorded yet"), runs once more at the cap
-    (`STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR` x the base), never longer. A pass of that re-run at load factor 1 is the
-    check's quiet run (its floor); under load it is only its last passing run, which stands in for the floor until a
-    quiet run is recorded.
-  - `switch-tool`: two sessions ended with exit 127/9009 (the tool isn't on PATH) and another tool of the budget order is
-    on PATH: the missing one is marked out for the window, the halt is cleared as `studio:resume` does, by "self-triage".
-    A custom command has no other tool and stays halted.
-  - `close-rescues`: rescue tasks of a task that has landed are closed (the sweep behind task done's own close).
-  A halt cleared by self-triage is not a person's intervention on the scorecard.
-- **The daily digest** (`npm run digest`, harness/digest.mjs): `studio/digest/<date>.md` and one `digest.written`
-  event, written by the watchdog once a day at or after `STUDIO_DIGEST_HOUR` (9, local time; `STUDIO_DIGEST=off`
-  stops the daily run). Under 200 words, only what needs a person: lanes held for a person's release (tier C) and
-  protected files changed without approval, an unsigned Bible and open questions, spend over the weekly target, a halt
-  self-triage can't fix, fuzz findings suggested in the last 24 h (2.66.0, `npm run fuzz`'s shadow week); then (2.66.0)
-  the top 5 allowlist candidates from the blocked-command log, the scorecard line, what self-triage fixed and how many
-  fuzz bug tasks were filed; (2.71.0) research finished in the last 24 h, with its write-up. Nothing waiting: one line
-  says so. `npm run report -- post --what digest` sends it to the owner's webhook (docs/DISCORD-CREW.md).
-- **Fuzz bugs** (`npm run fuzz`, qa/fuzz.mjs, 2.66.0; cartridges/README.md, "Fuzz"): suggestions for the first week
-  (`autoFileAfter` in `studio/fuzz.json`), then one bug task per new finding id, filed by the script, never twice.
-  Each run plays `STUDIO_FUZZ_SEEDS` seeds (20) of `STUDIO_FUZZ_TICKS` ticks (500) per cartridge (or `seeds`/`ticks` in
-  `studio/fuzz.json`). An entry in `studio/fuzz.ignore.json` silences a finding, so a lane that adds one (directly or
-  by a config proposal) is tier C: a game dev releases it, or an outside agent records their permission. The same holds
-  for `studio/quarantine.json` (2.69.0) and `studio/asset-review.json` (2.70.0: the asset preview checks' thresholds).
-- **The blocked-command log (2.66.0)** (`npm run denials [-- --days 7] [--json]`, harness/denials.mjs). At session
-  end the launcher reads Claude Code's `permission_denials` from every `{"type":"result"}` line of the session's log
-  (the crew's logs carry the field on every result line) into `.studio/denials.jsonl`: task, agent, role, tool, a
-  redacted command summary (keys, tokens, passwords, `Authorization` headers, `NAME_TOKEN=…`, `--password …`,
-  `user:pass@` removed; at most 200 characters), a group key (`Bash(git push *)`, `Read(dir/**)`) and why it was
-  refused (not on the list; chained, prefixed or using a variable; on the list but refused by a hook or a rule). A
-  result line without the field records nothing. `npm run denials` shows the top commands and the count per task.
-  Only plain commands off the list are **candidates**. Nothing ever adds them to `.claude/settings*.json`,
-  `harness/allowlist.mjs` or `--allowedTools`: a person reads them and decides.
+- **The type from the diff**: a "bug" whose commits change only tests, docs or config is judged a "change" by done-check (no regression
+  replay; `task.type.evidence`, `harness/type-evidence.mjs`). Any file in the game's sim paths (`game|web/<g>/sim`, `cartridges/`, the
+  manifest's `simPaths`, `pins.files`, `irreversible`, `shared`, `registry`), a golden, a deleted test, the studio's own code or other
+  code keeps the bug and its replay. `npm run task -- type <ID> bug` outranks the evidence.
+- **Self-triage** (`harness/self-triage.mjs`, list in `harness/self-triage.json`; `node harness/self-triage.mjs status`): the watchdog runs
+  it every pass; the supervisor and game checks ask it when they stop. Each fix is one `selftriage.<fix>` event, at most once per cause
+  per `onceHours` (6); a cause that returns, or is not on the list, still stops for a person (`selftriage.declined`).
+  `STUDIO_SELF_TRIAGE=off` turns it off. Fixes: `reap-orphans` (a `machine:heavy` holder whose root died: leftovers killed, slot freed);
+  `rerun-timeout` (a game check that timed out under load, or has no quiet passing run yet while the floor is on, re-runs once at
+  `STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR` x the base, never longer); `switch-tool` (two sessions ended with exit 127/9009 and another tool of
+  the budget order is on PATH: the missing one is marked out for the window and the halt cleared; a custom command stays halted);
+  `close-rescues` (rescues of a landed task). A halt cleared by self-triage is not a person's intervention.
+- **The daily digest** (`npm run digest`, `harness/digest.mjs`): `studio/digest/<date>.md` and a `digest.written` event, written by the
+  watchdog once a day at or after `STUDIO_DIGEST_HOUR` (9, local; `STUDIO_DIGEST=off` stops it). Under 200 words, only what needs a
+  person: lanes held for release (tier C), protected files changed without approval, an unsigned Bible and open questions, spend over
+  the weekly target, a halt self-triage can't fix, fuzz findings; then the top 5 allowlist candidates, the scorecard line, what
+  self-triage fixed, fuzz bug tasks filed, finished research. `npm run report -- post --what digest` sends it to the owner's webhook
+  (`docs/DISCORD-CREW.md`). It ends with a `## Beta mode` section (see below).
+- **Fuzz bugs** (`npm run fuzz`, `qa/fuzz.mjs`; `cartridges/README.md`, "Fuzz"): suggestions for the first week (`autoFileAfter` in
+  `studio/fuzz.json`), then one bug task per new finding id, never twice. Each run plays `STUDIO_FUZZ_SEEDS` seeds (20) of
+  `STUDIO_FUZZ_TICKS` ticks (500) per cartridge (or `seeds`/`ticks` in `studio/fuzz.json`). An entry in `studio/fuzz.ignore.json`
+  silences a finding, so a lane adding one (directly or by a config proposal) is tier C; the same holds for `studio/quarantine.json` and
+  `studio/asset-review.json` (the asset preview thresholds).
+- **The blocked-command log** (`npm run denials [-- --days 7] [--json]`, `harness/denials.mjs`): at session end the launcher reads Claude
+  Code's `permission_denials` into `.studio/denials.jsonl` (task, agent, role, tool, a redacted command of at most 200 characters, a
+  group key, why refused). Only plain commands off the list are candidates. Nothing ever adds them to `.claude/settings*.json`,
+  `harness/allowlist.mjs` or `--allowedTools`: a person decides.
 
-## The owner's standing delegation to an outside agent (2.67.0)
+## Delegation to an outside agent
 
-An outside agent (the crew's orchestrator, a Claude Code session on the owner's PC) can run a short list of owner
-actions without the owner's words for each one, for a time the owner sets (harness/delegation.mjs):
+An outside agent (the crew's orchestrator) can run a short list of owner actions for a time the owner sets (`harness/delegation.mjs`):
 
-    npm run delegate -- grant opus-bot --actions train-release,type,yes,hold --hours 12 --by <owner> [--why "…"]
-    npm run delegate -- list | revoke
+```bash
+npm run delegate -- grant opus-bot --actions train-release,type,yes,hold --hours 12 --by <owner> [--why "…"]
+npm run delegate -- list | revoke
+```
 
-- **Who grants:** the owner, once, in their own terminal. Refused in a launched session (`STUDIO_ROLE`), a lane copy,
-  a coding agent's shell (`CLAUDECODE`, `AI_AGENT`, `CODEX_SANDBOX`, `GEMINI_CLI`), with `STUDIO_AGENT` or an agent's
-  name in `STUDIO_LOCK_OWNER`, or an agent's name in `--by`. The grant writes and commits `studio/delegation.json`
-  (`{ agent, actions, until, by, at, why }`), which is on the shipped protected list: a lane that writes it is tier C,
-  so an agent can't grant itself one. It counts as committed in the main checkout: with an owner key only with a valid
-  signature by that key (the grant signs it where the private key is; a changed file is ignored); without one only when
-  the commit that set it isn't an agent's (no `Studio-Agent` trailer).
-- **What it covers:** `train-release`, `type`, `visual`, `yes`, `hold` (hold and unhold), `upgrade-auto` (2.69.0: the
-  auto-upgrade switch, `npm run upgrade -- watch auto on`, recorded for the owner), `asset-review` (2.70.0: answering
-  an asset's preview review, `npm run asset -- review`, docs/BLENDER.md), at most 72 hours. The named
-  agent runs them with `--by <agent>` and no `--permission`; each use is recorded for the owner by the agent "under
-  delegation <at> by <owner>" (the release, the task-types entry, the yes relay, the hold) plus one `delegation.used`
-  event, and the daily digest counts them. Never covered: `npm run approve` (signing protected files, tests, hooks,
-  force), gates or the protected list, money; workers, launched builder sessions and lane copies.
-- **Claude Code's permission prompt, set up once by the owner:** `npm run delegate -- claude-settings` prints narrow
-  allow rules for exactly the delegated commands (`Bash(npm run task -- train release:*)`,
-  `Bash(node harness/task.mjs train release:*)` and the same for type, yes, hold and unhold); `--write` (the owner's
-  terminal only) merges them into the studio's `.claude/settings.json` `permissions.allow`. It never writes a broad
-  rule (no `Bash(*)`, no `npm run *`) and never touches deny rules. The rules only skip the prompt; the harness still
-  refuses anyone but the delegated agent, and everything once the delegation ends. **Revoke:** `npm run delegate --
-  revoke` (anyone may: it only takes power away), then `npm run delegate -- claude-settings --remove --write`.
-- `--help` / `-h` on any `npm run task --` subcommand, and on `delegate`, `lanes`, `fuzz` and `denials`, prints usage
-  and never acts (B-47: `task train --help` used to run a train).
+- **Who grants**: the owner, once, in their own terminal; refused in a launched session (`STUDIO_ROLE`), a lane copy, a coding agent's
+  shell (`CLAUDECODE`, `AI_AGENT`, `CODEX_SANDBOX`, `GEMINI_CLI`), with `STUDIO_AGENT` or an agent's name in `STUDIO_LOCK_OWNER`, or an
+  agent's name in `--by`. It writes and commits `studio/delegation.json` (`{ agent, actions, until, by, at, why }`), on the shipped
+  protected list (a lane writing it is tier C). It counts as committed in the main checkout: with an owner key only with a valid signature
+  by that key; without one only when the commit isn't an agent's (no `Studio-Agent` trailer).
+- **Covers**: `train-release`, `type`, `visual`, `yes`, `hold` (and unhold), `upgrade-auto` (`npm run upgrade -- watch auto on`),
+  `asset-review` (`npm run asset -- review`, `docs/BLENDER.md`), at most 72 hours. The agent runs them with `--by <agent>` and no
+  `--permission`; each use is recorded for the owner "under delegation <at> by <owner>" plus a `delegation.used` event, and the digest
+  counts them. Never covered: `npm run approve`, gates or the protected list, money; workers, launched builder sessions, lane copies.
+- **Claude Code's permission prompt**: `npm run delegate -- claude-settings` prints narrow allow rules for exactly the delegated commands
+  (`Bash(npm run task -- train release:*)` and the like); `--write` (the owner's terminal only) merges them into the studio's
+  `.claude/settings.json` `permissions.allow`; never a broad rule, never deny rules. The harness still refuses anyone but the delegated
+  agent. **Revoke**: `npm run delegate -- revoke` (anyone may), then `npm run delegate -- claude-settings --remove --write`.
+- `--help` / `-h` on any `npm run task --` subcommand, and on `delegate`, `lanes`, `fuzz` and `denials`, prints usage and never acts.
 
 ### Beta mode (2.76.0): the owner's gates off while the harness is built
 
-The owner's request (2026-11-04): "we are still in beta for the harness build and these [permission] things really slow
-us down ... allow [the orchestrator] to have the same permissions to get tasks done as i would have." One switch
-(harness/beta-mode.mjs), set once:
+One switch (`harness/beta-mode.mjs`), set once:
 
-    npm run beta -- on --by <owner> [--agents opus-1] [--why "…"]     the owner's terminal (signed where the key is), or
-                                                                     the owner proxy's shell with --permission "<the owner's yes>"
-    npm run beta -- off --by <name>                                  anyone may: it only takes power away
-    npm run beta -- status [--json]
+```bash
+npm run beta -- on --by <owner> [--agents opus-1] [--why "…"]   # the owner's terminal (signed where the key is), or the owner proxy's shell with --permission "<the owner's yes>"
+npm run beta -- off --by <name>                                  # anyone may: it only takes power away
+npm run beta -- status [--json]
+```
 
-`studio/beta.json` (protected, read as committed in the main checkout). While it is on, the named outside agents (and
-the owner proxy's agent) and launched Producer/Director sessions act as the owner, with `--by <their name>` or
-`--by <the owner>`, no owner key and no per-step `--permission`:
+`studio/beta.json` is protected and read as committed in the main checkout. While it is on, the named outside agents (and the owner
+proxy's agent) and launched Producer/Director sessions act as the owner, with `--by <their name>` or `--by <the owner>`, no owner key and
+no per-step `--permission`, for:
 
-- every owner action (`delegationFor`: releases including tier C and golden re-records without a report, types, yes,
-  holds, unparks, resumes, janitor, upgrade switches, …) and every "a person's direct permission" command;
-- approvals (`npm run approve -- protected|tests|hooks|force`): an approval with no signature that carries beta.json; it
-  counts while beta mode is still on with that file, and only from a commit that isn't a worker's;
-- answering owner asks (`npm run ask -- answer <A-ID> <answer> --by <agent>`, recorded as the owner's answer with
-  `recordedBy`);
-- 2.77.3 (B-111): task types and visual-proof decisions (`npm run task -- type|visual <ID> … --by <agent>`): kept as a
-  beta-format approval (`studio/approvals/type-<ID>.json` / `visual-<ID>.json`, no signature, beta.json's by/at,
-  `recordedBy`) and committed, also with an owner key; done-check, verify and the train count it while beta mode is
-  still on with that file, only as committed (same content) and only from a commit that isn't a worker's. Logged "as
-  beta" in the decision log;
-- 2.77.3 (B-111): a protected config proposal (`studio-proposals/<ID>.json`): the stand-in's `train release <ID>` of the
-  lane held for it (the hold names the keys and values) decides the protected part when it lands, as an approval would
-  (the release carries `betaAt`, beta.json's time; a release under an older beta session, or by a worker, doesn't);
-  `train config <ID> --by <agent>` applies one held on main the same way. A beta `approve -- proposal` approval counts
-  under the same rule as a beta type or visual record (harness/beta-mode.mjs `betaRecordCommitted`): committed with
-  exactly that content, under the current beta session, not by a worker's commit and not recorded by a worker.
+- every owner action (`delegationFor`: releases including tier C and golden re-records without a report, types, yes, holds, unparks,
+  resumes, janitor, upgrade switches, …) and every "a person's direct permission" command;
+- approvals (`npm run approve -- protected|tests|hooks|force`): an unsigned approval that carries beta.json; it counts while beta mode is
+  on with that file, from a commit that isn't a worker's;
+- owner asks (`npm run ask -- answer <A-ID> <answer> --by <agent>`, recorded as the owner's with `recordedBy`);
+- task types and visual proofs (`npm run task -- type|visual <ID> … --by <agent>`): kept as a beta-format approval
+  (`studio/approvals/type-<ID>.json` / `visual-<ID>.json`) and committed, also with an owner key; counted only as committed (same
+  content) under the current beta session, from a commit that isn't a worker's (`betaRecordCommitted`);
+- a protected config proposal (`studio-proposals/<ID>.json`): the stand-in's `train release <ID>` of the held lane decides the protected
+  part (the release carries `betaAt`; one under an older beta session or by a worker doesn't); `train config <ID> --by <agent>` applies
+  one held on main; a beta `approve -- proposal` counts under the same rule.
 
-Outside beta mode, with an owner key (the base branch's, or the one committed in the main checkout when the base has
-none), `task type` and `task visual` refuse an unsigned record up front (exit 1, "needs the owner's signature", and how
-to get it) rather than record one every check would ignore; after writing, they read their record back as the checks do
-and exit 1 if it doesn't count.
+Outside beta mode, with an owner key, `task type` and `task visual` refuse an unsigned record up front (exit 1, "needs the owner's
+signature") and read their record back as the checks do. Test files (`*.test.*`, `*.spec.*`, `*.e2e.*`, `tests/`, `e2e/`;
+`isRenderTestFile` in `harness/verdict-split.mjs`) are never render files, even under the game's `visualPaths`.
 
-2.77.3 (B-111): test files (`*.test.*`, `*.spec.*`, `*.e2e.*`, `tests/`, `e2e/` …; harness/verdict-split.mjs
-`isRenderTestFile`) are never render files, even under the game's `visualPaths`: editing `panel.e2e.test.ts` doesn't
-make a task need a visual result.
+Every use is logged (`delegation.used`, the decision log, the digest). Never: money, deletes, worker sessions or workers' names, a lane
+copy acting as the owner (except approving that lane's own change). The game's tests, the train's full verify and the weakened-tests and
+hooks gates stay on. `npm run beta -- off` brings the owner gates back at once; approvals made in beta that haven't landed stop counting.
+The daily digest's `## Beta mode` section (24 hours; whether beta is on and who set it, who turned it on or off, each use as one line, at
+most 30 with a count of the rest) is left out when beta is off and nothing was used, and is outside the 200 words.
 
-Every use is logged (`delegation.used` events, the decision log, the daily digest), so
-the owner reviews afterwards instead of approving before. Never: money, deletes, worker sessions or workers' names
-(builders, reviewers, QA …), a lane copy acting as the owner (except approving that lane's own change). The game's tests,
-the train's full verify and the weakened-tests and hooks gates stay on. `npm run beta -- off` brings the owner gates back
-at once; approvals made in beta that haven't landed stop counting.
+The orchestrator's Claude Code session may run in another folder: `npm run delegate -- claude-settings --owner --dir <its folder> --write`
+writes prefix rules for exactly the owner's commands (npm and npm.cmd forms; they include `agent -- stop`, `agent -- pause`, `task --
+park`, `task -- block`, `task -- unblock`, `task -- pause`, `beta -- on`, `beta -- off`). Protected text files are hashed with LF endings, so
+an approval signed on a CRLF checkout matches the check anywhere.
 
-2.77.0: the daily digest (`npm run digest`) ends with a `## Beta mode` section for its 24 hours: whether beta is on
-(who set it and when), who turned it on or off and when (the `beta.on` / `beta.off` events and the decisions log), and
-each use as one line (who, action, subject, why: the `delegation.used` events with `meta.beta`, written by
-`recordBetaUse`), at most 30 lines with a count of the rest. It is left out when beta is off and nothing was used, and it
-is not counted in the digest's 200 words.
+### The standing owner proxy (2.73.1)
 
-The orchestrator's own Claude Code session may run in another folder than the studio: write the owner's command rules
-there once with `npm run delegate -- claude-settings --owner --dir <its folder> --write` (B-95; prefix rules for exactly
-those commands, npm and npm.cmd forms, never a broad rule).
-The list includes (2.77.0) `agent -- stop`, `agent -- pause`, `task -- park`, `task -- block`, `task -- unblock`, `task -- pause`, `beta -- on` and `beta -- off`.
+`npm run delegate -- proxy opus-1 --by <owner> [--days 30] [--why "…"]` (once, by the owner, where the key is; up to a year,
+`harness/owner-proxy.mjs`) writes and commits `studio/delegation.json` as `{ agent, actions: ["*"], proxy: true, until, by, at, why }`,
+signed with the owner key when there is one (the owner's own terminal only). While it counts, in the proxy's own shell
+(`STUDIO_LOCK_OWNER=opus-1`; not a launched session or a worker's name):
 
-Protected text files are hashed with LF line endings (B-93): an approval signed on a Windows checkout (CRLF) matches the
-check in any checkout.
+- **Every owner action** works with `--by opus-1` or `--by <owner>`, and every "a person's direct permission" command with `--by
+  <owner>` and no `--permission` (the grant's words are recorded).
+- **Approvals without the private key**: `npm run approve -- protected|tests|hooks|force … --by <owner> --permission "<the owner's yes:
+  their words or a link>"` (refused under 10 characters) writes an unsigned approval carrying the signed grant and the yes. It counts
+  while that grant is the one on file in the main checkout, inside its window, made by the grant's agent, and, once committed, only in
+  a commit that is the proxy's own or a person's. This covers gates and the protected list too. Each use is a `delegation.used` event and
+  a decision-log line.
+- **Never**: money, worker sessions, a lane copy (except to approve a lane's own change), granting itself another delegation.
+- **Ending it**: `npm run delegate -- revoke --by <name>` (anyone may); approvals it made that haven't landed stop counting; the owner's
+  signature is needed again as before.
 
-### The standing owner proxy (2.73.1, B-67)
-
-The owner's request (2026-11-03): "make Opus be able to do everything if I say yes via discord". One grant makes one
-outside agent the owner's proxy for up to a year (harness/owner-proxy.mjs):
-
-    npm run delegate -- proxy opus-1 --by <owner> [--days 30] [--why "…"]      once, by the owner, where the key is
-
-It writes and commits `studio/delegation.json` as `{ agent, actions: ["*"], proxy: true, until, by, at, why }`, signed
-with the owner key when the studio has one (the same rules as a grant: the owner's own terminal only). While it counts,
-in the proxy's own shell (`STUDIO_LOCK_OWNER=opus-1`; not a launched session, not a worker's name):
-
-- **Every owner action:** `delegationFor` covers any action (release, type, yes, hold, resume, unpark, janitor, upgrade
-  switches …) with `--by opus-1` or `--by <owner>`; every command that takes "a person's direct permission" works with
-  `--by <owner>` and no `--permission` (the grant's words are recorded instead, harness/permission.mjs).
-- **Approvals without the private key:** `npm run approve -- protected|tests|hooks|force … --by <owner> --permission
-  "<the owner's yes: their words or a link to the message>"` writes an approval with no signature that carries the
-  signed grant and the owner's yes (refused without the yes, 10+ characters). It counts while that same grant is the one
-  on file in the main checkout, inside its window, made by the grant's agent, and, once committed, only in a commit
-  that is the proxy's own or a person's (the `Studio-Agent` trailer): a builder's lane can't carry one in. This covers
-  gates and the protected list too: the owner asked for everything. Each use is a `delegation.used` event and a line in
-  the decision log (`npm run decisions`).
-- **Never:** money (the harness spends none), worker sessions, a lane copy (except to approve a lane's own change),
-  granting itself another delegation.
-- **Ending it:** `npm run delegate -- revoke --by <name>` (anyone may). Approvals the proxy made that haven't landed
-  stop counting at once; what already landed stays. The owner turns the full rules back on by revoking: the protected
-  files, gates and approvals then need the owner's signature again, as before.
-
-What this trades away: an approval is the proxy's word that the owner said yes, not the owner's signature. The harness
-can't read Discord; the yes is kept in the record for the owner to check, and any agent able to set
-`STUDIO_LOCK_OWNER=opus-1` in its own shell could act as the proxy. Revoke when that matters (more agents, more
-machines, outside contributors).
+What this trades away: an approval is the proxy's word that the owner said yes. The harness can't read Discord, and any agent able to set
+`STUDIO_LOCK_OWNER=opus-1` in its own shell could act as the proxy. Revoke when that matters (more agents, machines, outside contributors).
 
 ## The decision log, the studio policy and autonomous mode (2.71.0)
 
-**One decision log.** Every decision the harness leaves to the owner or a game dev writes one record to
-`.studio/decisions.jsonl` (the main checkout's) and one `decision` event, where it is decided: train release, task
-type and visual proof, the dev's yes, hold and unhold, an asset review, a quarantine confirm or release, deleting stale
-lanes, train auto, upgrade auto, crew resume, ending a wind-down, studio resume, a held config proposal, the autonomy
-level, a delegation grant or revoke, and autonomous mode itself. A record is `{ id, at, action, subject, by, as, why,
-evidence, undo }`; `as` is `person`, `agent` (a decision an agent may take under its own name, such as a hold),
-`delegation <grant time>`, `autonomous` or `permission "<the person's words>"`; `undo` says how to revert it (or null).
-The older records (task-types.json, the train queue's release, the hold file) stay as they were: the log points at
-them, and a revert run from it never logs a second decision.
+**One decision log**: every decision left to the owner or a game dev writes one record to `.studio/decisions.jsonl` (the main
+checkout's) and one `decision` event: train release, task type and visual proof, the dev's yes, hold and unhold, an asset review, a
+quarantine confirm or release, deleting stale lanes, train auto, upgrade auto, crew resume, ending a wind-down, studio resume, a held
+config proposal, the autonomy level, a delegation grant or revoke, and autonomous mode itself. A record is `{ id, at, action, subject,
+by, as, why, evidence, undo }`; `as` is `person`, `agent`, `delegation <grant time>`, `autonomous` or `permission "<the person's words>"`;
+`undo` says how to revert it (or null).
 
-    npm run decisions [-- --since 24h|7d|<ISO>] [--by <name>] [--action <a>] [--json]
+```bash
+npm run decisions [-- --since 24h|7d|<ISO>] [--by <name>] [--action <a>] [--json]
+```
 
-**The studio policy** (`studio/policy.json`, protected; `npm run policy` prints it): the owner's plain rules,
-`{ "autonomous": { "allowed", "agent", "actions", "reviewWithinH" }, "never": [...], "notes": [...] }`, and (2.73.0)
-`"audit"` and `"routing"` (below). No file means
-today's behaviour. It counts like the delegation: committed in the main checkout, signed when the studio has an owner
-key, otherwise only when the commit that set it isn't an agent's. `notes` are shown to every agent; a `never` word
-(`delete-lanes`, `upgrade-auto`, or an action's name) rules that action out for any agent, a delegated one included.
+**The studio policy** (`studio/policy.json`, protected; `npm run policy` prints it): `{ "autonomous": { "allowed", "agent", "actions",
+"reviewWithinH" }, "never": [...], "notes": [...] }`, plus `"audit"` and `"routing"` (below). No file means today's behaviour. It counts
+like the delegation (committed in the main checkout, signed with an owner key, else a commit that isn't an agent's). `notes` are shown to
+every agent; a `never` word (`delete-lanes`, `upgrade-auto`, or an action's name) rules that action out for any agent, a delegated one
+included.
 
-**Autonomous mode** (opt-in per studio): while the policy allows it, the named overseer agent takes the listed
-game-dev decisions (default `train-release, type, yes, hold, visual, asset-review, quarantine`) with `--by <agent>`
-and no permission words. Each is recorded `as: "autonomous"` and goes on a **review list** that never blocks work.
+**Autonomous mode** (opt-in): while the policy allows it, the named overseer agent takes the listed game-dev decisions (default
+`train-release, type, yes, hold, visual, asset-review, quarantine`) with `--by <agent>` and no permission words; each is recorded `as:
+"autonomous"` and goes on a **review list** that never blocks work.
 
-    npm run policy -- autonomous on --agent <name> [--actions …] [--review-h 72] --by <owner>   the owner's terminal
-    npm run autonomy -- mode autonomous on --agent <name> --by <game dev>   a proposal; the owner runs: npm run policy -- confirm --by <owner>
-    npm run autonomy -- mode autonomous off --by <name>                    pauses it at once (anyone but a worker)
-    npm run decisions -- review                                            the pending autonomous decisions, oldest first
-    npm run decisions -- approve <id> --by <you> | revert <id> --by <you> [--why "…"] | edit <id> --note "…" --by <you>
-    npm run decisions -- stats [--days 14]
+```bash
+npm run policy -- autonomous on --agent <name> [--actions …] [--review-h 72] --by <owner>   # the owner's terminal
+npm run autonomy -- mode autonomous on --agent <name> --by <game dev>   # a proposal; the owner runs: npm run policy -- confirm --by <owner>
+npm run autonomy -- mode autonomous off --by <name>                    # pauses it at once (anyone but a worker)
+npm run decisions -- review                                            # the pending autonomous decisions, oldest first
+npm run decisions -- approve <id> --by <you> | revert <id> --by <you> [--why "…"] | edit <id> --note "…" --by <you>
+npm run decisions -- stats [--days 14]
+```
 
-- **Never autonomous, whatever the file says:** protected files, gates (harness code, check silencers, deleted tests)
-  and the policy file, money, deletes (`janitor-lanes`, any rm), visibility, keys. A train release in autonomous mode is
-  refused for a lane held by any shipped tier-C rule; a lane held only after too many hand-backs, or by a game's own
-  rule, may be released.
-- **Never self-granted:** `policy autonomous on` and `policy confirm` refuse agents' shells, lanes and launched
-  sessions; a policy.json an agent committed doesn't count; a worker can't propose.
-- **Review:** a person (or an agent on a person's direct permission), never the agent that decided. `revert` runs the
-  record's undo: unhold or hold again, the type or visual proof back, the dev's yes taken back, a quarantine released, an
-  asset review reopened, a released lane held again; a lane that already landed gets a revert task instead.
-- **Shown:** `npm run status -- --json` (`decisions`: count, oldest, overdue) and the digest line (decisions per day,
-  approved vs reverted and the revert rate, time saved). Past `reviewWithinH` (72) they go under "Needs you".
-- **Audits (2.73.0, harness/audit.mjs).** A fixed share of hands-free landings and autonomous decisions is picked
-  for an after-the-fact review by someone who didn't do the work: `"audit": { "rate": 0.1 }` in the policy; with no
-  rate, 0.1 while autonomous mode is on, else 0. The draw is seeded, never random: sha256 of `studio-audit|<seed>` read
-  as a fraction under the rate, the seed being the decision id or, for a landing, the task id (landing events carry no
-  commit, and a retry keeps the task id, so retrying can't draw again; `npm run decisions -- audit-draw <id>` shows
-  any draw). Picked items are listed by `npm run decisions -- review` (marked `[audit]`) and in the digest, and never
-  block work. `npm run decisions -- audit <AU-id> pass|fail --by <name> [--note "…"]` records one (a fail needs a note):
-  a person or an agent on a person's permission, never an agent that claimed, ran or landed the task, nor the deciding
-  agent. Approving an audited decision passes its audit; reverting or editing it fails it. Each verdict is an `audit`
-  record in the log and an `audit.verdict` event; a failed audit counts as a Redo in the redo rate and the L3 bar.
-- **Cheap-first routing (2.73.0, harness/routing.mjs).** `"routing": { "cheapFirst": ["chore",
-  "docs", "test"], "tiers": { "cheap": "<model>", "mid": "<model>", "top": "<model>" }, "models": [...], "holdout": 0.1 }`.
-  When the launcher picks a writer's model (no `--model`), a task whose type, track or role is listed starts on the
-  cheapest tier the policy names a model for and goes one tier up per red round (a failed hand-back, as the 2.30d
-  tier-up counts them), capped at the top listed. Only models the policy lists are picked (`STUDIO_TIER_<TIER>_MODEL`,
-  e.g. `STUDIO_TIER_CHEAP_MODEL`, counts only when the policy lists that model); the model never changes mid-task (a
-  task already started on another model keeps it, and the tier only moves at a new session after a red round); a
-  routed task skips the 2.30d tier-up and the reasoning-only reroute. Each routed start is a `model.routed` event.
-  `npm run autonomy -- routing [--days 14] [--json]` shows, per task type and tier, sessions, landings (credited to
-  the last session before each), the success rate and tokens per landed change, from session ends. The holdout (a
-  seeded share of matching tasks sent to the default tier, to measure the difference) stays 0 unless the policy sets
-  `"holdout"`: the owner deferred it until API credit is available, because the share it sends to the default tier costs
-  more. Without a comparison group, cheap-first's savings can't be told apart from easier tasks, so `"holdout": 0.1` is
-  the suggested share once it's affordable; with routing off nothing changes.
-- **Time saved** per action is the median owner wait for that action over the last 14 days from events (held to
-  released, an agent's proposal to the dev's yes, a review request to its answer, a proposed quarantine to its
-  confirm) less the autonomous decision's own wait; under `STUDIO_DECISION_MIN_N` (10) waits it says "not enough data".
+- **Never autonomous**: protected files, gates (harness code, check silencers, deleted tests) and the policy file, money, deletes
+  (`janitor-lanes`, any rm), visibility, keys. A train release in autonomous mode is refused for a lane held by any shipped tier-C rule; a
+  lane held only after too many hand-backs, or by a game's own rule, may be released. **Never self-granted**: `policy autonomous on` and
+  `policy confirm` refuse agents' shells, lanes and launched sessions; a policy.json an agent committed doesn't count; a worker can't propose.
+- **Review**: a person (or an agent on a person's permission), never the deciding agent. `revert` runs the record's undo (unhold or hold
+  again, the type or visual proof back, the dev's yes taken back, a quarantine released, an asset review reopened, a released lane held
+  again); a lane that already landed gets a revert task. Shown in `npm run status -- --json` (`decisions`: count, oldest, overdue) and
+  the digest; past `reviewWithinH` (72) they go under "Needs you".
+- **Audits** (2.73.0, `harness/audit.mjs`): a fixed share of hands-free landings and autonomous decisions is picked for after-the-fact
+  review by someone who didn't do the work: `"audit": { "rate": 0.1 }` (no rate: 0.1 while autonomous mode is on, else 0). The draw is
+  seeded (sha256 of `studio-audit|<seed>`, the seed the decision id or the landing's task id; `npm run decisions -- audit-draw <id>`
+  shows any draw). Picked items show in `npm run decisions -- review` (`[audit]`) and the digest. `npm run decisions -- audit <AU-id>
+  pass|fail --by <name> [--note "…"]` (a fail needs a note): a person or an agent on a person's permission, never one that claimed, ran
+  or landed the task or decided it. Approving an audited decision passes it; reverting or editing fails it; a failed audit counts as a
+  Redo in the redo rate and the L3 bar (`audit.verdict` event).
+- **Cheap-first routing** (2.73.0, `harness/routing.mjs`): `"routing": { "cheapFirst": ["chore", "docs", "test"], "tiers": { "cheap":
+  "<model>", "mid": "<model>", "top": "<model>" }, "models": [...], "holdout": 0.1 }`. When the launcher picks a writer's model (no
+  `--model`), a task whose type, track or role is listed starts on the cheapest tier the policy names a model for and goes one tier up
+  per red round, capped at the top listed. Only models the policy lists are picked (`STUDIO_TIER_<TIER>_MODEL`, e.g.
+  `STUDIO_TIER_CHEAP_MODEL`, counts only when the policy lists that model); the model never changes mid-task; a routed task skips the
+  2.30d tier-up and the reasoning-only reroute (`model.routed`). `npm run autonomy -- routing [--days 14] [--json]` shows per task type and
+  tier the sessions, landings, success rate and tokens per landed change. `"holdout"` (a seeded share sent to the default tier, to
+  measure) stays 0 unless set; 0.1 is suggested once API credit allows.
+- **Time saved** per action is the median owner wait over the last 14 days less the autonomous decision's own wait; under
+  `STUDIO_DECISION_MIN_N` (10) waits: "not enough data".
 
 ## The self-repair loop: workarounds and harness tasks (2.71.0)
 
-Every time an agent or a person has to work around the harness, it is recorded, and repeats open one task for whoever
-maintains the harness (`harness/workaround.mjs`). The loop the overseer used to run in a notes file, kept by the harness.
+Every workaround of the harness is recorded, and repeats open one task for the harness maintainer (`harness/workaround.mjs`).
 
-- **Log one by hand:** `npm run workaround -- log "<what I had to do>" --why "<what the harness did wrong>" [--cmd
-  "<command>"] [--by <agent>]`. It goes to `.studio/workarounds.jsonl` and a `harness.workaround` event, with a
-  signature: the harness command involved (`npm run studio:stop` reads as `supervisor stop`) plus the "what" without
-  ids, hashes and numbers, so the same trouble on another task groups with it. Text is cleaned with the secret
-  scanner's patterns first.
-- **Detected ones** (`detected: true`, with their evidence; only cheap, certain signals):
-  - a hand edit of a harness-owned record: the harness stamps what it writes to the board (`studio/NEXT.md`,
-    `studio/DONE.md`) and the train queue (`.studio/train/queue.json`) in `.studio/write-stamps/`; a later file with
-    other content and a later time was changed outside the harness (found at the next harness write or scan). A file
-    equal to git's HEAD copy (a pull, a merge) or changed after an upgrade or restart was logged is not counted;
-  - `--force` on a `task` or `lock` command (a rehearsal's scripted one is not);
-  - the same `task` or `lock` command (same subcommand and ids) run `STUDIO_WORKAROUND_RETRIES` (3) times within
-    `STUDIO_WORKAROUND_RETRY_MIN` (10) minutes by the same agent, every earlier run having failed (read-only commands
-    and `task done --check` don't count);
-  - the supervisor stopped by hand and started again within `STUDIO_WORKAROUND_RESTART_MIN` (5) minutes, unless an
-    upgrade landed in between;
-  - an agent session whose launcher vanished with no stop asked through the harness while the machine stayed up.
-  Left out as noisy: a tool process ending by a signal (an out-of-memory kill looks the same) and records the harness
-  writes from many places without stamps. `STUDIO_WORKAROUND_DETECT=off` turns detection off.
-- **Harness tasks:** a signature seen twice, or once with `--why`, opens ONE task (deduped by signature) in
-  `studio/HARNESS-TASKS.md`, with the occurrences, evidence and commands. A separate queue for the harness maintainer:
-  never on `studio/NEXT.md`, never for game builders. `npm run workaround -- list | tasks [--all] | close <H-id> --by
-  <name> --note "…"` (a builder session can't close one; a closed task seen again reopens). The supervisor runs the
-  detection pass every `STUDIO_WORKAROUND_SCAN_MIN` (10) minutes (`npm run workaround -- scan` runs it now). When a
-  harness upgrade lands (as the impact report finds it, or the version changing) and a task's signature doesn't occur
-  for `STUDIO_WORKAROUND_FIXED_DAYS` (7) days after it, the task is marked "maybe fixed in <version>".
-- **Measured:** the daily digest's "Workarounds:" line (in 24 h, per day over 7 days, the top 5 signatures, the trend
-  after the latest upgrade, open harness tasks) and `npm run autonomy -- impact` (per day before and after the upgrade,
-  the top signatures after it and the trend after each recent upgrade: fewer workarounds means the upgrade worked).
-- **Export:** `npm run workaround -- export [--since 7d]` writes `.studio/exports/harness-workarounds-<date>.md`, one file
-  the owner can read and send to the harness maintainer (anything matching the secret scanner's patterns removed).
+- **Log by hand**: `npm run workaround -- log "<what I had to do>" --why "<what the harness did wrong>" [--cmd "<command>"] [--by <agent>]`
+  goes to `.studio/workarounds.jsonl` and a `harness.workaround` event, with a signature (the harness command plus the "what" without ids,
+  hashes and numbers). Text is cleaned with the secret scanner's patterns.
+- **Detected** (`detected: true`, with evidence; cheap, certain signals only): a hand edit of a harness-owned record (the board and
+  `.studio/train/queue.json` are stamped in `.studio/write-stamps/`; a file equal to git's HEAD copy or changed after an upgrade or restart
+  doesn't count); `--force` on a `task` or `lock` command; the same `task` or `lock` command failing `STUDIO_WORKAROUND_RETRIES` (3) times
+  within `STUDIO_WORKAROUND_RETRY_MIN` (10) minutes by one agent (read-only commands and `task done --check` don't count); the supervisor
+  stopped and started again within `STUDIO_WORKAROUND_RESTART_MIN` (5) minutes without an upgrade between; an agent session whose launcher
+  vanished with no stop asked. `STUDIO_WORKAROUND_DETECT=off` turns detection off.
+- **Harness tasks**: a signature seen twice, or once with `--why`, opens ONE task (deduped) in `studio/HARNESS-TASKS.md`: a separate queue,
+  never `studio/NEXT.md`, never for game builders. `npm run workaround -- list | tasks [--all] | close <H-id> --by <name> --note "…"` (a
+  builder can't close one; a closed task seen again reopens). The supervisor scans every `STUDIO_WORKAROUND_SCAN_MIN` (10) minutes
+  (`npm run workaround -- scan` now). A task whose signature doesn't occur for `STUDIO_WORKAROUND_FIXED_DAYS` (7) days after an upgrade is
+  marked "maybe fixed in <version>".
+- **Measured**: the digest's "Workarounds:" line and `npm run autonomy -- impact`. **Export**: `npm run workaround -- export [--since 7d]`
+  writes `.studio/exports/harness-workarounds-<date>.md` (secret patterns removed).
 
 ## The overseer's stages, repro PRs and the weekly harness scout (2.73.0)
 
-The owner's plan for an outside overseer agent (the crew's orchestrator), in stages it earns. `studio/overseer.json`
-holds the stage the owner set (0-3), the overseer's name (`agent`), who set it and when (`setBy`, `setAt`) and each
-stage's entry criteria. It is protected (`studio/protected.json`): it changes only with the owner's signed approval, and
-the harness reads it as committed (an uncommitted edit is shown and ignored).
+`studio/overseer.json` (protected; read as committed) holds the stage the owner set (0-3), the overseer's `agent`, `setBy`, `setAt` and each
+stage's entry criteria.
 
 | Stage | The overseer also... |
 |---|---|
@@ -453,48 +330,35 @@ the harness reads it as committed (an uncommitted edit is shown and ignored).
 
 Gates, protected files and money stay the owner's at every stage.
 
-- `npm run overseer [-- --json]` shows the stage, what it allows, the evidence since the stage was set and whether the
-  next stage's criteria hold: workarounds it logged, accepted repro PRs (distinct `Repro-Of: <H-id>` trailers on commits
-  with `Overseer-By: <agent>` that reached the studio through an update), merged PRs (commits with `Overseer-By`), the
-  revert rate (those commits reverted) and protected-file attempts (its events and workaround records about protected
-  files). A suggestion only: the owner changes the stage. Outcomes the harness can't see (a repro accepted or rejected
-  on the harness repo, a PR merged or reverted there, a protected-file attempt) a person records with `npm run overseer
-  -- record <repro-accepted|repro-rejected|pr-merged|pr-reverted|protected-attempt> <subject> --by <person>` (the
-  decision log; never the overseer itself). Default criteria: stage 1 after 7 days and 10 workarounds logged, stage 2
-  after 7 days and 5 accepted repros, stage 3 after 14 days, 10 merged PRs and a revert rate of 0.1 or less; no
-  protected-file attempt for any.
-- `npm run workaround -- repro <H-id> --by <agent> --harness-repo <dir> [--base <ref>] [--commit]` (stage 1 and up for an
-  agent; a person at any stage; never a builder session) scaffolds a failing-test PR branch for the harness from a
-  harness task, in a SEPARATE clone of the harness repo (never the studio, its lane copies or its installed harness):
-  branch `repro/<h-id>-<sig>`, `qa/selftest-repro-<h-id>.mjs` in the selftest style (the evidence in its header, a
-  made-up studio, one check per recorded command of a safe shape, or a TODO check that fails) staged, and the PR body
-  with the evidence, a checklist and the `Repro-Of` / `Repro-Signature` / `Overseer-By` trailers in the clone's
-  `.studio/repro/<H-id>-PR.md`. `--commit` commits it with those trailers. Nothing is pushed.
-- **The weekly harness scout:** with `STUDIO_HARNESS_SCOUT=on` (off by default: the owner turns it on), the supervisor
-  files one research task (`--type research`, role rnd) on `STUDIO_SCOUT_DAY` (monday by default; a day name or 0-6, in
-  `STUDIO_TZ`, else UTC), once a week and never while the last one is open: "Research: weekly harness scout (week of
-  <date>)". Its write-up template asks for new harness and agent-tooling ideas from the past week, each with its sources,
-  the claim, whether it is measured or a vendor claim, and which scorecard number it could move (the studio's numbers
-  at filing time are in it). Paperwork only: the harness makes no network call.
+- `npm run overseer [-- --json]` shows the stage, the evidence since it was set and whether the next stage's criteria hold (workarounds
+  logged, accepted repro PRs with `Repro-Of: <H-id>` and `Overseer-By: <agent>` trailers, merged PRs, revert rate, protected-file
+  attempts). A suggestion only. A person records outcomes the harness can't see: `npm run overseer -- record
+  <repro-accepted|repro-rejected|pr-merged|pr-reverted|protected-attempt> <subject> --by <person>` (never the overseer). Default criteria:
+  stage 1 after 7 days and 10 workarounds, stage 2 after 7 days and 5 accepted repros, stage 3 after 14 days, 10 merged PRs and a revert
+  rate of 0.1 or less; no protected-file attempt for any.
+- `npm run workaround -- repro <H-id> --by <agent> --harness-repo <dir> [--base <ref>] [--commit]` (stage 1 and up for an agent; a person at
+  any stage; never a builder) scaffolds a failing-test PR branch `repro/<h-id>-<sig>` in a SEPARATE clone of the harness repo (never the
+  studio): `qa/selftest-repro-<h-id>.mjs` and the PR body in the clone's `.studio/repro/<H-id>-PR.md` with the `Repro-Of` /
+  `Repro-Signature` / `Overseer-By` trailers. `--commit` commits it; nothing is pushed.
+- **The weekly harness scout**: with `STUDIO_HARNESS_SCOUT=on` (off by default) the supervisor files one research task (`--type
+  research`, role rnd) on `STUDIO_SCOUT_DAY` (monday by default; a day name or 0-6, in `STUDIO_TZ`, else UTC), once a week and never
+  while the last is open: "Research: weekly harness scout (week of <date>)". Paperwork only: the harness makes no network call.
 
 ## Drift checks (Check cards to the Producer)
 
-Each observation of a running session (the launcher's heartbeat, and the watch pass for a session whose
-heartbeat stopped) runs these deterministic checks in `harness/stall.mjs` (`driftCheck`):
+Each observation of a running session (the launcher's heartbeat; the watch pass if it stopped) runs these deterministic checks
+(`driftCheck` in `harness/stall.mjs`):
 
 | Signal | When |
 | --- | --- |
-| `gate-loop` | the same gate failed with the same signature (its id plus its output, numbers and ids taken out) `STUDIO_DRIFT_SAME_FAIL` (3) times in the session's own verify runs |
-| `verify-no-diff` | `STUDIO_DRIFT_SAME_DIFF` (2) verify runs in a row with no change to its working copy since the one before. A file dated after a verify, or rewritten by one, counts as unknown, never as unchanged |
-| `out-of-scope` | a file it changed (uncommitted, or committed under its own `Studio-Agent` trailer) outside its task's lane and its path claims. Harness-written files (the board, hand-offs, notes, regressions) and `STUDIO_DRIFT_SCOPE_ALLOW` paths are fine. A session with no lane and no claim (the whole game) isn't judged |
-| `no-heartbeat` (2.65.0) | a session the launcher lists running has never sent a heartbeat `STUDIO_DRIFT_NOHEARTBEAT_MIN` (5) minutes after it started: its tool may never have started (not on PATH, a crash at launch) |
-| `borrowed-commits` (2.65.0) | its lane holds commits of another **open** task's unlanded lane: shared with that task's lane branch (`.studio/lane-branches.json`) or queued head and not on its own first-parent line (it merged that lane wholesale), or tagged `Studio-Task: <that task>` (a cherry-pick). Its own work now depends on unlanded work: land that task first (`--after`) or take the commits out |
+| `gate-loop` | the same gate failed with the same signature `STUDIO_DRIFT_SAME_FAIL` (3) times in the session's own verify runs |
+| `verify-no-diff` | `STUDIO_DRIFT_SAME_DIFF` (2) verify runs in a row with no change to its working copy (a file dated after a verify, or rewritten by one, counts as unknown) |
+| `out-of-scope` | a file it changed outside its task's lane and path claims (harness-written files and `STUDIO_DRIFT_SCOPE_ALLOW` paths are fine; a session with no lane and no claim isn't judged) |
+| `no-heartbeat` (2.65.0) | a running session has never sent a heartbeat `STUDIO_DRIFT_NOHEARTBEAT_MIN` (5) minutes after it started |
+| `borrowed-commits` (2.65.0) | its lane holds commits of another **open** task's unlanded lane (shared with its lane branch or queued head, or tagged `Studio-Task: <that task>`): land that task first (`--after`) or take the commits out |
 
-Each signal is raised **once per session** as a `drift.check` event to the Producer, with the task and the
-details. A Check never stops, kills, hands back, parks or edits anything: the Producer (or a person) looks, then
-nudges, re-scopes or hands the task back. `npm run watchdog -- drift` lists the Checks of running sessions;
-`node harness/stall.mjs check` shows them with the stall state. `STUDIO_DRIFT=off` turns the checks off.
-
-There is no model judge: research on long-running agents found a model-based progress monitor hurt structured
-tasks. `setDriftAdvisor(fn)` is a hook for an optional advisory note, used only with `STUDIO_DRIFT_ADVISOR=on`;
-it can add a note to a Check already raised, never raise, stop or clear one. It is off and unset by default.
+Each signal is raised once per session as a `drift.check` event to the Producer. A Check never stops, kills, hands back, parks or edits
+anything: the Producer (or a person) looks, then nudges, re-scopes or hands the task back. `npm run watchdog -- drift` lists the Checks of
+running sessions; `node harness/stall.mjs check` shows them with the stall state. `STUDIO_DRIFT=off` turns the checks off. There is no model
+judge; `setDriftAdvisor(fn)` is a hook for an optional advisory note, used only with `STUDIO_DRIFT_ADVISOR=on` (off by default): it can add
+a note to a Check already raised, never raise, stop or clear one.
