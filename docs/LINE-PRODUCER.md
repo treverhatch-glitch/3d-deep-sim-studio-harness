@@ -141,3 +141,7 @@ sim stacking above chains them. A file can opt in to **region lanes**: a lane en
 Off by default. To turn it on for one file, put it in `.env`: `STUDIO_REGION_FILES=web/<game>/src/sim/sim.ts` (or
 `"regionFiles": ["src/sim/sim.ts"]` paths from the repo root in the game's `studio.gates.json`), then give its tasks
 region lanes. `STUDIO_REGION_FILES=off` turns it off again.
+
+## Settings that no longer do anything
+
+`STUDIO_PLANNING_ROOM` switched off the War Room's Planning Room page. The War Room went in 2.80.0, so nothing reads it now; setting it changes nothing.
