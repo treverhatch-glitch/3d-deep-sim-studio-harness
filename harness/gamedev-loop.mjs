@@ -20,6 +20,7 @@
  * State: .studio/gamedev.json. Every action is an event from "watchdog".
  */
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { STUDIO_STATE_DIR, REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 
@@ -167,9 +168,21 @@ export async function gamedevPass(now = Date.now(), { events = readRecentEvents(
       } catch {}
     }
     // One task for every unchanged camera in this pass, at most once an hour (2.30q).
-    if (unchanged.length && mayFile(st, 'review:unchanged', now)) {
-      const r = await fileTask(`review:unchanged:${Math.floor(now / 86400000)}`, `Game-dev review: ${unchanged.join(', ')} unchanged since the last review; make a visible improvement from the next unmet charter goal`);
-      if (r.id && !r.skipped) actions.push({ kind: 'review', msg: `filed ${r.id}: ${unchanged.length} view(s) unchanged (${unchanged.join(', ')})` });
+    // 2.83: and at most one try a day for the same set of unchanged shots. The board refused this task (a build task
+    // with no phase or serves) 37 times in 26 h, every ~40 min, because the set stayed the same. The set's hash is kept
+    // in this loop's own state; filed, duplicate or refused all count as the attempt. One quiet telemetry line a day.
+    if (unchanged.length) {
+      const day = Math.floor(now / 86400000);
+      const setKey = createHash('sha1').update([...unchanged].sort().join('|')).digest('hex').slice(0, 16);
+      st.reviewSets = Object.fromEntries(Object.entries(st.reviewSets || {}).filter(([, v]) => v?.day >= day - 1));
+      if (!st.reviewSets[setKey] || st.reviewSets[setKey].day !== day) {
+        if (mayFile(st, 'review:unchanged', now)) {
+          const r = await fileTask(`review:unchanged:${day}`, `Game-dev review: ${unchanged.join(', ')} unchanged since the last review; make a visible improvement from the next unmet charter goal`);
+          st.reviewSets[setKey] = { day, at: now, outcome: r.id && !r.skipped ? 'filed' : r.id ? 'duplicate' : 'refused' };
+          if (r.id && !r.skipped) actions.push({ kind: 'review', msg: `filed ${r.id}: ${unchanged.length} view(s) unchanged (${unchanged.join(', ')})` });
+          else if (!r.id) { try { (await import('./telemetry.mjs')).emitOnChange({ type: 'gamedev.review_refused', agent: 'watchdog', status: 'warn', msg: `Game-dev review for ${unchanged.length} unchanged view(s) not queued; not tried again for this set today: ${String(r.why || '').slice(0, 160)}` }, `gamedev.review_refused|${day}`, setKey, { repeatMin: 1440 }); } catch {} }
+        }
+      }
     }
     if (process.env.STUDIO_REVIEWER_TOOL) { try { (await import('./agent.mjs')).wake('reviewer', { why: 'game-dev review: compare the newest captures in .studio/proof/*/visual/after and .studio/review with studio/bible/CHARTER.md and file quality tasks', auto: true }); } catch {} }
     st.lastReview = now;

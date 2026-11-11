@@ -5110,6 +5110,14 @@ if (inShard('selftest-283d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.83 (g): five false alarms and loops a crew hit in a 26-hour run.
+if (inShard('selftest-283g')) {
+  const dir = copyRepo();
+  const { selftest283G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283g.mjs')).href);
+  await selftest283G({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

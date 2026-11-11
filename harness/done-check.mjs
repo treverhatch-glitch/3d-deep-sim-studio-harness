@@ -36,6 +36,7 @@ import { failsBefore, regressionKind } from '../qa/fails-before.mjs';
 import { ownerType, ownerTypeWords } from './reclassify.mjs';
 import { renderDecision, readVerdict } from './verdict-split.mjs';
 import { modelFamily } from './families.mjs';
+import { sameFamilyAccepted } from './review-family.mjs';
 import { proofStatus } from './proof.mjs';
 import { listLocks, coveringLock } from './lock.mjs';
 import { overLimits, isGameCode, LIMITS } from '../scripts/check-function-size.mjs';
@@ -904,6 +905,8 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
     const cross = approving.filter((t) => {
       const rev = (t.match(/model-family\s*:\s*(\S+)/i) || [])[1];
       const impl = (t.match(/implementer-family\s*:\s*(\S+)/i) || [])[1] || (implementer ? modelFamily(implementer) : null);
+      // 2.83: the same-family line counts only while no other family is configured (harness/review-family.mjs).
+      if (rev && impl && modelFamily(rev) === modelFamily(impl) && sameFamilyAccepted(t, impl)) return true;
       return rev && impl && modelFamily(rev) !== modelFamily(impl) && modelFamily(rev) !== 'unknown';
     });
     check('Approved by a reviewer from another model family', cross.length, approving.length ? 'the approving review is from the same model family as the builder (or has no model-family line)' : `no review in studio/reviews/ names ${task.id} and approves it (with "model-family:" and "implementer-family:" lines)`);
