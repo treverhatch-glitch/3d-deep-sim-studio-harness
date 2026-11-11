@@ -5070,6 +5070,14 @@ if (inShard('selftest-282a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.83: an engine task's session is accounted where its work is (the engine worktree), and a lane queued for a train is progress.
+if (inShard('selftest-283a')) {
+  const dir = copyRepo();
+  const { selftest283A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283a.mjs')).href);
+  await selftest283A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

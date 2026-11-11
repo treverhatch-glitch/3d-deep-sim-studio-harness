@@ -62,7 +62,7 @@ import { AGY_STREAM_FLAGS, agyStreamOn, agyStreamWanted, userLine, driveAgyStrea
 import { savePatch } from './wip.mjs';
 import { laneList, laneEntries, readHolds, laneOf } from './task-hold.mjs';
 import { regionOnlyFiles } from './lane-regions.mjs';
-import { engineLaunch, syncEngineTarget } from './engine-tracks.mjs';
+import { engineLaunch, syncEngineTarget, engineWork } from './engine-tracks.mjs';
 import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport, isLaneWorktree, LANES_DIR, laneLive } from './worktree.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { ownerOnlyStep } from './owner-only.mjs';
@@ -75,7 +75,7 @@ import { aiderDriven, laneFiles, laneIgnoreLines, editBrief, claimTask, finishAi
 import { pickNimModel, stubFetchFrom } from './nim-check.mjs';
 import { AIDER_SESSION } from './models.config.mjs';
 import { rescueOf, rescueModelFor } from './rescue.mjs';
-import { cooldown } from './task-hold.mjs';
+import { cooldown, inAnyTrain } from './task-hold.mjs';
 import { mapStale, writeMap } from './map.mjs';
 import { pitfallsForPrompt } from './pitfalls.mjs';
 import { recordFollow } from './scorecard.mjs';
@@ -791,7 +791,15 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   const ahead = s0.copy?.branch ? unmerged(s0.copy.branch) : 0;
   const finished = [];
   const queuedForTrain = [];
+  // 2.83: an engine task's work is in its engine worktree (another repository), not in the studio's lane copy. Its
+  // commits and leftovers are read there, and a task whose branch waits in (or is being landed by) an engine train is
+  // left to that train, like a lane queued for the merge train. Before, 89 of a crew's 227 sessions were recorded as
+  // "committed nothing" although their work was committed in the engine repo, and their tasks were parked for it.
+  const engineOf = {};
+  for (const id of new Set([...tasks, ...(s0.task ? [s0.task] : [])])) { try { const w = engineWork(id, { since: s0.startedAt || null }); if (w) engineOf[id] = { ...w, train: (() => { try { const h = inAnyTrain(id); return h?.engine ? h : null; } catch { return null; } })() }; } catch { /* the studio's own account stands */ } }
+  const engineLine = (id) => { const w = engineOf[id]; if (!w?.dir) return ''; const d = w.dirty || []; return ` Its ${w.engine} worktree ${w.dir.split(path.sep).join('/')} (${w.branch || 'no branch'}): ${w.commits} commit(s) this session, ${d.length ? `${d.length} uncommitted file(s) left there (${d.slice(0, 3).join(', ')}${d.length > 3 ? ` +${d.length - 3}` : ''}): commit or discard them before task done` : 'nothing uncommitted'}.`; };
   for (const id of tasks) {
+    if (engineOf[id]?.train) { queuedForTrain.push(id); continue; }
     // 2.78.2 (a, W-0090): its task done queued the lane for the merge train and the session ended, as it should: the
     // train lands it (task.done) or hands it back (task.paused). No launcher verify, no second done, no hand-back here.
     if (trainQueued(id, { agent, branch: s0.copy?.branch || null })) { queuedForTrain.push(id); continue; }
@@ -814,7 +822,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
     }
     const patch = savePatch(agent, id, copyDir ? [] : mine.map((l) => l.key), copyDir && fs.existsSync(copyDir) ? { cwd: copyDir } : {});
     if (ahead) rememberTaskBranch(id, s0.copy.branch);
-    const onBranch = ahead ? ` ${ahead} commit(s) not yet in the studio's branch are on ${s0.copy.branch}; the next agent's copy gets them merged in.` : '';
+    const onBranch = `${ahead ? ` ${ahead} commit(s) not yet in the studio's branch are on ${s0.copy.branch}; the next agent's copy gets them merged in.` : ''}${engineLine(id)}`;
     // A session that ended without task done or a hand-back still holds its task (test #2: claims sat
     // for up to an hour). Hand it back now, with what it last said and what it left.
     const note = stop
@@ -852,7 +860,9 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
       const cwd = copyDir && fs.existsSync(copyDir) ? copyDir : REPO_ROOT;
       const gl = spawnSync('git', ['log', `--since=${t0}`, '--grep', oTask, '--format=%h'], { windowsHide: true, cwd, encoding: 'utf8' });
       const commits = gl.status === 0 ? gl.stdout.split('\n').filter(Boolean).length : 0;
-      outcome = sessionOutcome({ agent, task: oTask, startedAt: t0, events: readRecentEvents(20000), commits: Math.max(commits, finished.includes(oTask) ? 1 : 0), counts: !stop && !capped && !limit && !trouble && !reasoningOnly });
+      // 2.83: an engine task's commits are the ones in its engine worktree (engineOf, above).
+      outcome = sessionOutcome({ agent, task: oTask, startedAt: t0, events: readRecentEvents(20000), commits: Math.max(commits, Number(engineOf[oTask]?.commits) || 0, finished.includes(oTask) ? 1 : 0), counts: !stop && !capped && !limit && !trouble && !reasoningOnly });
+      if (outcome && engineOf[oTask]?.dir) outcome = { ...outcome, engine: engineOf[oTask].engine, engineCommits: engineOf[oTask].commits, engineDirty: (engineOf[oTask].dirty || []).length };
       if (outcome && (finished.includes(oTask) || queuedForTrain.includes(oTask))) outcome = { ...outcome, done: true, noWork: false, stuck: false, why: '', ...(queuedForTrain.includes(oTask) ? { queuedForTrain: true } : {}) };
       // 2.79.2 (a): a driven aider session's own account (claimed by the launcher; what aider changed; why it went back).
       else if (outcome && aider && aider.result !== 'queued' && aider.result !== 'done') outcome = { ...outcome, why: `the launcher claimed ${oTask} for aider; ${aider.line}` };

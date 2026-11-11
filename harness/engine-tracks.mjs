@@ -174,7 +174,9 @@ export function engineTask(taskId, { root = mainRoot(), events = null, env = pro
     }
   }
   if (!engine) return null;
-  const branch = evs.filter((e) => e.type === 'task.unity_branch' && e.task === taskId).pop()?.meta?.branch || added.meta.branch || null;
+  // 2.83: a record that holds only a branch (written at launch for a task whose track is in its task.added event) is
+  // still that task's branch. Before, the launch's branch was dropped here and task done said "no branch recorded".
+  const branch = evs.filter((e) => e.type === 'task.unity_branch' && e.task === taskId).pop()?.meta?.branch || (typeof rec?.branch === 'string' && rec.branch ? rec.branch : null) || added.meta.branch || null;
   return { task: taskId, engine, track, branch, scope: added.meta.scope || null, visual: added.meta.visualCheck ? { required: true, refs: added.meta.refs || [] } : null, from: 'event' };
 }
 
@@ -480,7 +482,7 @@ export function engineLaunch({ task, agent = null, role = null, root = mainRoot(
   const note = (created) => `Your ${t.label} work is in its own repo: your worktree is ${dir.split(path.sep).join('/')} on branch ${branch}${created ? ` (new, from ${target || 'its HEAD'})` : ''}. Edit and commit there (no editor run needed; the land run does it). Then: npm run task -- done ${task} --agent ${agent || '<you>'} --train${rec.visual?.required ? ` (first the visual check: npm run visual -- status ${task})` : ''}.`;
   if (fs.existsSync(path.join(dir, '.git'))) {
     const cur = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: dir, encoding: 'utf8', windowsHide: true }).stdout.trim();
-    if (cur === branch) return { dir, branch, repo, created: false, note: note(false) };
+    if (cur === branch) { if (!rec.branch && !dryRun) { try { setEngineTask(task, { engine: rec.engine, ...(rec.track ? { track: rec.track } : {}), branch }, { root }); } catch { /* the record is a help */ } } return { dir, branch, repo, created: false, note: note(false) }; }
     return { error: `${dir} is a worktree on ${cur || 'a detached HEAD'}, not ${branch}: remove it (git -C "${repo}" worktree remove "${dir}") and start again` };
   }
   // 2.78.1 (e, B-119): a branch checked out in another worktree can't be checked out twice. An engine pass launched then
@@ -511,7 +513,8 @@ export function engineLaunch({ task, agent = null, role = null, root = mainRoot(
   const base = target && g('rev-parse', '--verify', '--quiet', `refs/heads/${target}`).status === 0 ? target : 'HEAD';
   const add = has ? g('worktree', 'add', dir, branch) : g('worktree', 'add', '-b', branch, dir, base);
   if (add.status !== 0) return { error: `git worktree add in ${repo} failed: ${String(add.stderr || '').trim().split('\n').pop()} (a branch checked out in another folder can't be checked out twice: work there, or move it)` };
-  if (!rec.branch) setEngineTask(task, { branch }, { root });
+  // 2.83: the whole record (engine, track, branch), so task done finds the branch without --branch.
+  if (!rec.branch) setEngineTask(task, { engine: rec.engine, ...(rec.track ? { track: rec.track } : {}), branch }, { root });
   return { dir, branch, repo, created: !has, note: note(!has) };
 }
 
@@ -569,4 +572,33 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   else if (!list.length) console.log('No engine target: studio/game.json "engines": { "<name>": { "land": "<command>", "target": "<branch>" } } names one (docs/ENGINE-TRACKS.md).');
   else for (const t of list) console.log(`${t.name} (${t.label}): ${t.land ? 'land command set' : 'no land command'}; ${t.queued} queued; one land run ~${t.expected.minutes ?? '?'} min (${t.expected.from}), ${t.rig.ramGb} GB, ${t.rig.cpuThreads} threads as machine:heavy "${t.heavyKind}"; RAM floor ${t.floor.gb} GB (${t.floor.from}); self-tune: ${t.tune.join(', ') || 'nothing'}${t.repo ? `; its repo: ${t.repo}` : ''}`);
   process.exit(0);
+}
+
+/**
+ * 2.83: what a session left in its task's engine worktree: { dir, branch, repo, commits, dirty: [paths], queued } or null
+ * (not an engine task, or its engine's work is in the studio). commits: the worktree's own commits made since `since`
+ * (ISO): not in the engine's target, merges aside; dirty: modified, staged and untracked files (git-ignored ones aside). The launcher's end-of-session
+ * account read only the studio's lane copy, so an engine builder's committed work read as "committed nothing".
+ * Never throws.
+ */
+export function engineWork(taskId, { since = null, root = mainRoot() } = {}) {
+  try {
+    const rec = engineTask(taskId, { root });
+    if (!rec) return null;
+    const repo = engineRepo(rec.engine, { root });
+    if (!repo) return null;
+    const own = path.join(root, '.lanes', 'engine', String(taskId));
+    const dir = fs.existsSync(path.join(own, '.git')) ? own : (rec.branch ? worktreeOn(repo, rec.branch) : null);
+    if (!dir || !fs.existsSync(dir)) return { dir: null, branch: rec.branch || null, repo, commits: 0, dirty: [], engine: rec.engine };
+    const g = (...a) => spawnSync('git', a, { cwd: dir, encoding: 'utf8', windowsHide: true });
+    // The session's own commits: not the target's (merged in at launch), not that merge itself.
+    const target = (() => { try { return engineTarget(rec.engine, { root })?.cfg?.target || null; } catch { return null; } })();
+    const range = target && g('rev-parse', '--verify', '--quiet', `refs/heads/${target}^{commit}`).status === 0 ? `refs/heads/${target}..HEAD` : 'HEAD';
+    const log = g('log', ...(since ? [`--since=${since}`] : ['-n', '50']), '--no-merges', '--format=%h', range);
+    const commits = log.status === 0 ? log.stdout.split('\n').filter(Boolean).length : 0;
+    const st = g('status', '--porcelain');
+    const dirty = st.status === 0 ? st.stdout.split('\n').filter((l) => l.trim()).map((l) => l.slice(3).trim()) : [];
+    const branch = g('symbolic-ref', '--short', '-q', 'HEAD').stdout.trim() || rec.branch || null;
+    return { dir, branch, repo, commits, dirty, engine: rec.engine };
+  } catch { return null; }
 }
