@@ -258,5 +258,123 @@ console.log(JSON.stringify({ id: t.id, s: { ok: s.ok, message: s.message }, ts: 
     return [r.s?.ok === false && /can't start yet: parked by watchdog: handed back 3 times in 2 h/.test(words) && r.s.message === `Not started: ${words}` && r.ref?.length === 1 && r.ref[0][0] === r.id && r.ref[0][1] === 'held' && /parked by watchdog/.test(r.ref[0][2] || '') && r.started === 0, JSON.stringify(r)];
   });
 
+  // ================= 2.84 (a2): the back-off by outcome =================
+  await guard('2.84 (a2) pure: the back-off doubles from the base with each quiet session (x2, x4, x8 ...) and stops at the ceiling; no quiet session, news that cuts it short, or a ceiling of 0 (off) never holds a wake back (fails before this fix: no backoffVerdict)', () => {
+    const r = probe(`
+import { backoffVerdict } from ${WG};
+const M = 60000; const T = Date.parse('2026-03-03T10:00:00Z');
+const waits = [1, 2, 3, 4, 5].map((q) => backoffVerdict({ quiet: q, lastAt: T, now: T, baseMs: 45 * M, maxH: 12 }).wait / M);
+const zero = backoffVerdict({ quiet: 0, lastAt: T, now: T + M, baseMs: 45 * M, maxH: 12 }).skip;
+const held = backoffVerdict({ quiet: 2, lastAt: T, now: T + 179 * M, baseMs: 45 * M, maxH: 12 }).skip;
+const due = backoffVerdict({ quiet: 2, lastAt: T, now: T + 180 * M, baseMs: 45 * M, maxH: 12 }).skip;
+const cut = backoffVerdict({ quiet: 3, lastAt: T, now: T + M, baseMs: 45 * M, maxH: 12, cutShort: true }).skip;
+const off = backoffVerdict({ quiet: 3, lastAt: T, now: T + M, baseMs: 45 * M, maxH: 0 }).skip;
+console.log(JSON.stringify({ waits, zero, held, due, cut, off }));`);
+    return [r.waits?.join() === '90,180,360,720,720' && r.zero === false && r.held === true && r.due === false && r.cut === false && r.off === false, JSON.stringify(r)];
+  });
+
+  await guard('2.84 (a2) pure: strong news is an answer by a person or the owner\'s stand-in, a person\'s or the stand-in\'s decision, a person\'s message, a playtest verdict, a dev yes, a phase change (Bible signed, phase override, milestone closed); an agent\'s own answer or decision, a hand-back, a park, a red train and a red trunk are not', () => {
+    const r = probe(`
+import { isStrongNews, STRONG_NEWS_TYPES } from ${WG};
+const yes = [
+  { type: 'ask.answered', agent: 'dana', meta: { by: 'dana' } },
+  { type: 'ask.answered', agent: 'opus-1', meta: { by: 'dana', recordedBy: 'opus-1', via: 'owner proxy' } },
+  { type: 'decision', agent: 'dana', meta: { as: 'person' } },
+  { type: 'decision', agent: 'opus-1', meta: { as: 'outside agent' } },
+  { type: 'inbound.message', agent: 'dana' }, { type: 'playtest.verdict', agent: 'dana' }, { type: 'task.dev_yes', agent: 'dana' },
+  { type: 'bible.signed', agent: 'dana' }, { type: 'bible.phase_override', agent: 'dana' }, { type: 'milestone.closed', agent: 'harness' },
+];
+const no = [
+  { type: 'ask.answered', agent: 'producer-3', meta: { by: 'producer-3' } },
+  { type: 'decision', agent: 'producer-362', meta: { as: 'agent' } },
+  { type: 'decision', agent: 'director-1', meta: { as: 'autonomous' } },
+  { type: 'task.paused', agent: 'builder-s1' }, { type: 'task.hold', agent: 'watchdog' }, { type: 'task.train.unity.dropped', agent: 'unity-train' }, { type: 'trunk.red', agent: 'dana' },
+];
+console.log(JSON.stringify({ yes: yes.map((e) => isStrongNews(e)), no: no.map((e) => isStrongNews(e)), n: STRONG_NEWS_TYPES.length }));`);
+    return [r.yes?.every(Boolean) && r.no?.every((x) => x === false) && r.n === 8, JSON.stringify(r)];
+  });
+
+  await guard('2.84 (a2) cycle: through cyclePass: after a cycle that changed nothing the next one waits twice the base, then four times (a hand-back in the digest does not end the wait); the skip says "backing off: N cycles in a row changed nothing; next regular cycle at HH:MM UTC"; a session that changed the board resets that role to the base; after a restart (a new process) the count is still there; strong news (an answer by a person) makes the cycle due at once, ahead of its own timer, and keeps the count; the mode line shows the wait (fails before this fix: every cycle with a hand-back in its digest woke both roles)', () => {
+    resetState();
+    const SETUP = `
+import { cyclePass } from ${u('harness/dev-cycle.mjs')};
+import { readWakeGate, backoffClause } from ${WG};
+import fs from 'node:fs';
+const T0 = Date.parse('2026-03-03T10:00:00Z'); const at = (m) => new Date(T0 + m * 60000).toISOString();
+const store = '.studio/probe-284a-evs.json';
+const evs = fs.existsSync(store) ? JSON.parse(fs.readFileSync(store, 'utf8')) : [];
+let n = evs.filter((e) => e.type === 'agent.session.end').length;
+const woke = [];
+const wakeFn = (role) => { n++; woke.push(role + '-' + n); return { started: true, agent: role + '-' + n }; };
+const endAll = (m, board = {}) => { for (const a of woke.splice(0)) { if (board[a.split('-')[0]]) evs.push({ ts: at(m - 1), type: 'task.added', agent: a, task: 'T-9' + n }); evs.push({ ts: at(m), type: 'agent.session.end', agent: a, meta: { role: a.split('-')[0] } }); } };
+const step = async (m) => { const r = await cyclePass({ now: T0 + m * 60000, events: evs, wakeFn }); return (r.woke || []).length + ':' + (r.skipped || []).join('+'); };
+const save = () => fs.writeFileSync(store, JSON.stringify(evs));
+const skips = () => fs.readFileSync(process.env.AGENT_EVENTS_FILE, 'utf8').split('\\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.type === 'agent.wake.skipped').map((e) => e.msg);
+`;
+    const env1 = { STUDIO_REFILL_MIN: '0', STUDIO_DEV_CYCLE_MIN: '30' };
+    const a = probe(`${SETUP}
+const seq = [];
+seq.push(await step(0)); endAll(2);
+evs.push({ ts: at(20), type: 'task.paused', task: 'T-5', agent: 'builder-s1', msg: 'handed back' });
+seq.push(await step(30));            // quiet 1: wait 60, due 11:00: skipped although a hand-back is in the digest
+seq.push(await step(60)); endAll(62); // due: wakes; nothing changed again: quiet 2
+evs.push({ ts: at(80), type: 'task.paused', task: 'T-6', agent: 'builder-s2', msg: 'handed back' });
+seq.push(await step(90)); seq.push(await step(150)); // wait 120 from 60: due 12:00
+seq.push(await step(180)); endAll(182, { director: true }); // the Director's session added a task, the Producer's did not
+save();
+const st = readWakeGate();
+console.log(JSON.stringify({ seq, msgs: skips().slice(0, 2), q: [st['cycle:director']?.quiet, st['cycle:producer']?.quiet] }));`, env1);
+    // a new process: the state is read back from disk
+    const b = probe(`${SETUP}
+const seq = [];
+evs.push({ ts: at(200), type: 'task.paused', task: 'T-7', agent: 'builder-s3', msg: 'handed back' });
+seq.push(await step(210));           // Director reset to the base: due, wakes; Producer quiet 3: wait 240 from 180: skipped
+endAll(212);
+evs.push({ ts: at(220), type: 'ask.answered', agent: 'dana', meta: { by: 'dana' }, msg: 'A-1 answered by dana: yes' });
+seq.push(await step(225));           // 15 min after the last cycle: due at once on the answer, both wake
+endAll(227);
+seq.push(await step(270));
+const st = readWakeGate();
+const all = skips();
+console.log(JSON.stringify({ seq, q: [st['cycle:director']?.quiet, st['cycle:producer']?.quiet], last: all.slice(-2), clause: backoffClause(T0 + 270 * 60000) }));`, env1);
+    const ok = a.seq?.join() === '2:,0:director+producer,2:,0:director+producer,0:director+producer,2:' && a.q?.join() === '2,2'
+      && /^Director wake skipped \(regular cycle\): backing off: 1 cycle in a row changed nothing; next regular cycle at 11:00 UTC \(or sooner on an answer, an owner order or a phase change\)$/.test(a.msgs?.[0] || '')
+      && b.seq?.join() === '1:producer,2:,0:director+producer' && b.q?.join() === '2,4'
+      && /Director wake skipped \(regular cycle\): backing off: 2 cycles in a row changed nothing; next regular cycle at 15:45 UTC/.test(b.last?.[0] || '')
+      && /Producer wake skipped \(regular cycle\): backing off: 4 cycles in a row changed nothing; next regular cycle at 21:45 UTC/.test(b.last?.[1] || '')
+      && /^backed off: the Director's next regular cycle at 15:45 UTC \(2 quiet in a row\); the Producer's next regular cycle at 21:45 UTC \(4 quiet in a row\)$/.test(b.clause || '');
+    return [ok, JSON.stringify({ a, b })];
+  });
+
+  await guard('2.84 (a2) queue: through queueDepthPass: after a queue-depth session that added no task the next wake waits twice the base, then four times; new open task ids alone do NOT end the wait; a blocked area that frees up ends it at once; a session that added a task resets it; the queue reaching its target and falling short again ends it; STUDIO_WAKE_SAME_MAX_H=off wakes as 2.83 did (fails before this fix: any new task id woke the Producer again)', () => {
+    resetState();
+    const r = probe(`
+import { queueDepthPass } from ${u('harness/queue-depth.mjs')};
+const T0 = Date.parse('2026-03-03T10:00:00Z'); const at = (m) => new Date(T0 + m * 60000).toISOString();
+const park = { by: 'watchdog', why: 'handed back 3 times in 2 h', at: at(0) };
+const b = (id) => ({ id, title: 'Change: ' + id, role: 'builder' });
+const rv = (id) => ({ id, title: 'Docs: ' + id, role: 'reviewer' });
+const holdsAB = { 'T-1': { lane: 'game/a', parked: park }, 'T-2': { lane: 'game/b', parked: park } };
+const holdsA = { 'T-1': { lane: 'game/a', parked: park }, 'T-2': { lane: 'game/b' } };
+const q = (extra = []) => ({ inProgress: [], backlog: [b('T-1'), b('T-2'), ...extra], done: [] });
+let n = 0; const evs = []; const live = [];
+const run = async (m, qq, holds, env = {}) => { const r = await queueDepthPass({ q: qq, cap: 3, now: T0 + m * 60000, env: { STUDIO_REFILL_WAKE: 'on', STUDIO_QUEUE_DEPTH_ASK_MIN: '10', ...env }, deps: { holds, events: [], lineStatus: null, wakeEvents: evs, wake: async () => { n++; live.push('producer-' + n); return { started: true, agent: 'producer-' + n }; } } }); return r.woke?.skipped ? (r.woke.why.startsWith('backing off') ? 'back' : 'skip') : r.woke?.started ? 'wake' : (r.asked ? 'asked' : 'none'); };
+const end = (m, added = 0) => { for (const a of live.splice(0)) { for (let i = 0; i < added; i++) evs.push({ ts: at(m - 1), type: 'task.added', agent: a, task: 'T-' + (80 + i) }); evs.push({ ts: at(m), type: 'agent.session.end', agent: a, meta: { role: 'producer' } }); } };
+const seq = [];
+seq.push(await run(0, q(), holdsAB)); end(2);                    // wake; added nothing: quiet 1 (wait 20)
+seq.push(await run(10, q([rv('T-50')]), holdsAB));              // new ids only: held back
+seq.push(await run(20, q([rv('T-50')]), holdsAB)); end(22);     // due: wake; quiet 2 (wait 40, due 11:00)
+seq.push(await run(30, q([rv('T-51')]), holdsAB));              // new ids only: held back
+seq.push(await run(40, q([rv('T-51')]), holdsA)); end(42, 1);   // area game/b freed: wake at once; it added a task: reset
+seq.push(await run(50, q([rv('T-51'), rv('T-52')]), holdsA)); end(52); // base wait only: wake; added nothing: quiet 1 (due 11:10)
+seq.push(await run(55, { inProgress: [], backlog: [b('T-3'), b('T-4'), b('T-5')], done: [] }, {})); // the queue reached its target
+seq.push(await run(57, q([rv('T-53')]), holdsA));               // short again: the wait ended
+end(59);
+seq.push(await run(70, q([rv('T-54')]), holdsA));               // quiet 1 again: held back
+seq.push(await run(80, q([rv('T-55')]), holdsA, { STUDIO_WAKE_SAME_MAX_H: 'off' })); // off: as 2.83
+console.log(JSON.stringify({ seq }));`);
+    return [r.seq?.join() === 'wake,back,wake,back,wake,wake,none,wake,back,wake', JSON.stringify(r)];
+  });
+
   try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 4, retryDelay: 200 }); } catch { /* the OS cleans its temp folder */ }
 }

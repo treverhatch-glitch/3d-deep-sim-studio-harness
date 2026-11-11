@@ -75,6 +75,8 @@ export async function queueDepthPass({ q, cap, now = Date.now(), dryRun = false,
   const st = readJson(STATE(), {});
   if (short <= 0) {
     if (st.short && !dryRun) { try { fs.writeFileSync(STATE(), `${JSON.stringify({ short: 0, at: null }, null, 2)}\n`); } catch {} }
+    // 2.84 (a2): the queue reached its target: a queue-depth back-off ends when it falls short again.
+    if (!dryRun) { try { (await import('./wake-gate.mjs')).markQueueFull(now); } catch {} }
     return { target, ready: r.ready, short: 0, asked: false, blocked: r.blocked, why: `${r.ready.length} builder task(s) ready, target ${target}` };
   }
   const recent = st.at && now - Date.parse(st.at) < askEveryMs(env) && short <= (st.short || 0);
@@ -97,7 +99,7 @@ export async function queueDepthPass({ q, cap, now = Date.now(), dryRun = false,
       try {
         const wg = await import('./wake-gate.mjs');
         fp = wg.queueFingerprint({ ready: r.ready, target, blocked: r.blocked, open: [...(q.backlog || []), ...(q.inProgress || [])].map((t) => t.id) });
-        gate = wg.gateWake({ kind: 'queue-depth', role: 'producer', fp, now, env, ...(deps.wakeEvents ? { events: deps.wakeEvents } : {}) });
+        gate = wg.gateWake({ kind: 'queue-depth', role: 'producer', fp, now, env, baseMs: askEveryMs(env), ...(deps.wakeEvents ? { events: deps.wakeEvents } : {}) });
       } catch {}
     }
     if (back.skip) woke = { skipped: true, why: back.why };

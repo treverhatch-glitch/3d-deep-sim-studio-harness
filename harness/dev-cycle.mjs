@@ -24,7 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
-import { cycleDigest, digestHeader, gateWake, recordWake } from './wake-gate.mjs';
+import { cycleDigest, digestHeader, gateWake, isStrongNews, readWakeGate, recordWake } from './wake-gate.mjs';
 
 const FILE = () => path.join(STUDIO_STATE_DIR, 'dev-cycle.json');
 const BRIEF = () => path.join(STUDIO_STATE_DIR, 'briefs', 'dev-cycle.md');
@@ -81,7 +81,11 @@ export async function cyclePass({ now = Date.now(), force = false, events = read
   const q = parseNextQueue();
   const open = [...q.inProgress, ...q.backlog].filter((t) => t.role === 'builder').length;
   const closed = events.some((e) => e.type === 'milestone.closed' && Date.parse(e.ts) > last);
-  const why = force ? 'asked' : closed ? 'a milestone closed' : open < Number(process.env.STUDIO_REFILL_MIN ?? 4) && now - last >= 10 * 60000 ? `the queue is low (${open} open)` : now - last >= every ? 'its regular cycle' : null;
+  // 2.84 (a2): strong news (an answer, an owner order, a phase change: wake-gate.mjs STRONG_NEWS_TYPES) makes a backed-off
+  // regular cycle due at once, not at the next STUDIO_DEV_CYCLE_MIN tick. Five minutes apart at least.
+  const backedOff = ['director', 'producer'].some((r) => Number(readWakeGate()[`cycle:${r}`]?.quiet) > 0);
+  const news = backedOff && now - last >= 5 * 60000 && events.some((e) => Date.parse(e.ts) > last && isStrongNews(e));
+  const why = force ? 'asked' : closed ? 'a milestone closed' : open < Number(process.env.STUDIO_REFILL_MIN ?? 4) && now - last >= 10 * 60000 ? `the queue is low (${open} open)` : now - last >= every || news ? 'its regular cycle' : null;
   if (!why) return { ran: false, why: `next cycle in ${Math.round((every - (now - last)) / 60000)} min` };
 
   const { fileTask, milestones, nextOpen } = await import('./producer-refill.mjs');
@@ -113,7 +117,7 @@ export async function cyclePass({ now = Date.now(), force = false, events = read
         // 2.84: a regular cycle wakes a role only when something changed on the board since its last cycle session ended
         // (harness/wake-gate.mjs; at most STUDIO_CYCLE_QUIET_MAX_H hours apart). The news opens its own brief.
         const regular = why === 'its regular cycle';
-        const gate = regular ? gateWake({ kind: 'cycle', role, fp: (since) => cycleDigest(events, { since, until: now }), now, events, fallbackSince: last }) : { skip: false };
+        const gate = regular ? gateWake({ kind: 'cycle', role, fp: (since) => cycleDigest(events, { since, until: now }), now, events, fallbackSince: last, baseMs: every }) : { skip: false };
         if (gate.skip) { skipped.push(role); continue; }
         let file = BRIEF();
         if (gate.fp) {

@@ -67,8 +67,8 @@ naming who may act for the owner (beta mode's agents; the owner's delegate via `
 | `STUDIO_CHAIN_GATE_N` | `3` | 2.83: one task gating MORE than this many builder tasks that would otherwise start, for `STUDIO_CHAIN_GATE_MIN`, is said once as `line.chain_gate` (warn, to the Producer: which task, how many, since when, where it is, and "split off the parts that do not need it, or remove the dependency"); it repeats at most every 120 minutes while it lasts. State: `.studio/line/state.json`. |
 | `STUDIO_CHAIN_GATE_MIN` | `60` | 2.83: how many minutes a task must have gated more than `STUDIO_CHAIN_GATE_N` builder tasks before `line.chain_gate` fires. |
 | `STUDIO_PRODUCER_BLOCKED_WAKE_MIN` | `60` | 2.83: while the only blocker is a task in a train or a chain gate (`blocker` in the status), the Producer is woken (queue below target, "N stalled" Watch task) once, then at most once per this many minutes; one `agent.wake.skipped` (at most every 30 min) says why; `0` turns the back-off off. |
-| `STUDIO_WAKE_SAME_MAX_H` | `6` | 2.84: the Producer's "queue is below its depth target" wake is skipped while its situation (the count ready, the target, the blocked areas with the kinds of their reasons, the open task ids) is the same as at the last wake and that wake's session changed nothing on the board; never for longer than this many hours since the last wake that ran. `0` or `off`: never skipped (as before 2.84). See "Planning wakes need a change" below. |
-| `STUDIO_CYCLE_QUIET_MAX_H` | `12` | 2.84: a role's regular development cycle (harness/dev-cycle.mjs, "its regular cycle") is skipped while nothing changed on the board since that role's last cycle session ended; never for longer than this many hours. `0` or `off`: never skipped. |
+| `STUDIO_WAKE_SAME_MAX_H` | `6` | 2.84: the Producer's "queue is below its depth target" wake is skipped while its situation (the count ready, the target, the blocked areas with the kinds of their reasons, the open task ids) is the same as at the last wake and that wake's session changed nothing on the board; never for longer than this many hours since the last wake that ran. It is also the cap of the queue-depth back-off (2.84 a2). `0` or `off`: never skipped and no back-off (as before 2.84). See "Planning wakes need a change" below. |
+| `STUDIO_CYCLE_QUIET_MAX_H` | `12` | 2.84: a role's regular development cycle (harness/dev-cycle.mjs, "its regular cycle") is skipped while nothing changed on the board since that role's last cycle session ended; never for longer than this many hours. It is also the cap of the cycle back-off (2.84 a2). `0` or `off`: never skipped and no back-off (2.83's cadence). |
 
 | `STUDIO_LINE_PROTECTED_HOLD_MIN` | `120` | How long a task whose protected step was routed to an approver is held from new builders (or until an approval names it). |
 
@@ -86,6 +86,18 @@ alert or an owner order wakes as before):
   decisions, tester and playtest findings, a red train or trunk), from the recent-events reader. Empty: skipped, until
   `STUDIO_CYCLE_QUIET_MAX_H`. Not empty: the role is woken, and its brief `.studio/briefs/dev-cycle-<role>.md` opens with
   that digest (ten lines at most); the session's kickoff note says to read it first.
+- **Back-off by outcome** (2.84 a2): the digest is rarely empty (hand-backs and parks fill it), so the wake also looks
+  at what the last session did. After a cycle session with no board event, that role's next regular cycle waits twice the
+  cycle's interval (`STUDIO_DEV_CYCLE_MIN`), then four times, eight times, up to `STUDIO_CYCLE_QUIET_MAX_H`; a session
+  that changed the board resets it, a hand-back or a park in the digest does not. Strong news (`STRONG_NEWS_TYPES`: an
+  ask answered by a person or the owner's stand-in, a decision made as a person or by the stand-in, a person's message,
+  a playtest verdict, a dev yes, the Bible signed, a phase override, a milestone closed) makes the cycle due at once and
+  keeps the count; a red train or a hand-back is not strong news. After a queue-depth session that added no task, the next
+  queue-depth wake waits twice `STUDIO_QUEUE_DEPTH_ASK_MIN`, then four times, up to `STUDIO_WAKE_SAME_MAX_H`; a session
+  that adds a task resets it, a blocked area that frees up or the queue reaching its target ends the wait, new task ids
+  alone do not. The skip says "backing off: N cycles in a row changed nothing; next regular cycle at HH:MM UTC (or
+  sooner on an answer, an owner order or a phase change)", and the mode line (`npm run mode`) adds the next time while a
+  wake is backed off. One off switch per kind: its ceiling set to `0` or `off`.
 - **Board events** (one list, `BOARD_EVENT_TYPES`): `task.added`, `task.dropped`, `task.reordered`, `task.reopened`,
   `task.retyped`, `task.hold`, `task.held`, `task.unheld`, `task.unblocked`, `task.dev_yes`, `decision`, `ask.open`,
   `ask.answered`. A Producer or Director session's `agent.session.end` carries `meta.outcome.boardEvents`, how many of
