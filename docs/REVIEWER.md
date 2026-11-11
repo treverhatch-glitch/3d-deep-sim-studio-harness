@@ -37,6 +37,21 @@ variables changes nothing. The launch of a review and both checks (`review recor
 union. A refused header says which family is configured and where it was found (`.env`, `studio/models.json` or
 `environment`). The function is `configuredFamilies` in `harness/review-family.mjs`.
 
+**The same-family switch (2.84 g).** Whether a same-family review counts is a studio switch in `studio/review.json` in the
+main checkout: `{ "sameFamily": "auto" | "on" | "off", "by", "at", "why" }`. No file, an unreadable one, or any other value
+is `auto`. `auto` is the rule above. `on`: a same-family review counts whether or not another family is configured; the
+reviewer still writes a header (`same-family: allowed by the studio`, or the old `same-family: no other family
+available`), so every such review is visible, and `review record` says it counted because the studio allows it and who set
+that. At launch another family still comes first; `on` only lets a review run on a model of the implementer's family when
+no other-family model is live (not out of quota). `off`: a same-family review never counts, header or not, even with one
+family configured. Change it with `npm run review -- same-family on|off|auto --by <who> [--why "..."]` (with no value it
+prints the setting, who set it and when, and the families configured). The owner, the overseer (the owner's proxy, a
+beta-mode agent the owner named, or an outside signer), an outside agent, or a Producer or Director session (a board
+decision, `mayDecide`) may run it; a worker session never may, under any `--by`. Each change is one decisions-log line and
+one `review.same_family` event. The file is not a protected file (the overseer flips it without a signature); no
+environment variable turns it on, and the checks read the main checkout's copy. What `on` gives up: a model reviewing its
+own family's work shares its blind spots, so a second family is the stronger check.
+
 **DeepSeek or another OpenAI-compatible reviewer.** The harness has no DeepSeek provider of its own (the router's providers
 are in harness/models.config.mjs: Gemini, NVIDIA NIM, xAI, Anthropic, Groq, OpenRouter, local Ollama), so there is no pool to
 turn on. To add one: add an entry to `PROVIDERS` in harness/models.config.mjs (protocol openai-compatible: `baseUrl`,

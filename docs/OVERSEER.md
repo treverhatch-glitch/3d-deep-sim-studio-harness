@@ -50,6 +50,7 @@ Board work. No signature is involved; each command records who did it.
 - Spend budgets, on the owner's order (`npm run budget -- set … --why "<the order>"`).
 - Releasing a held lane of tier A or B.
 - Answering an ask, unless it is about money, deleting data, keys, publishing or the owner's tools.
+- Turning same-family reviews on or off (`npm run review -- same-family on|off|auto --by <you>`, recorded; docs/REVIEWER.md): a beta-time choice, a second model family is the stronger check.
 - Logging every workaround (`npm run workaround -- log`): a workaround that isn't logged can't become a fix.
 
 ## What it signs as the owner

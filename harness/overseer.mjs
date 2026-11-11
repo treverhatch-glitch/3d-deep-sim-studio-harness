@@ -421,8 +421,15 @@ export async function overseerSheet({ root = REPO_ROOT, now = Date.now(), events
     .map(([id, r]) => ({ who: 'overseer', id, what: `${id} handed back ${r.n} times in ${hours} h`, since: r.last.ts, why: String(r.last.msg || '').replace(/^Handed back [A-Z]+-\d+:\s*/, '').slice(0, 160), cmd: `npm run task -- park ${id} --by <you> --why "<the blocker>"` }));
   add('dead-ends', 'Dead ends', { items: dead });
 
+  // 2.84 (g): one line when the studio lets a same-family review count; kept out of the item counts below.
+  const notes = [];
+  try {
+    const { readSameFamily, studioRoot } = await import('./review-family.mjs');
+    const sw = readSameFamily({ root: studioRoot(root) });
+    if (sw.value === 'on') notes.push(`Same-family reviews count (set by ${sw.by}, ${String(sw.at || '').slice(0, 10) || 'no date'}): a second model family is the stronger check.`);
+  } catch { /* no note */ }
   const all = sections.flatMap((s) => s.items || s.groups.flatMap((g) => g.items));
-  return { at: new Date(now).toISOString(), hours, summary: { person: all.filter((i) => i.who === 'person').length, overseer: all.filter((i) => i.who === 'overseer').length }, sections };
+  return { at: new Date(now).toISOString(), hours, notes, summary: { person: all.filter((i) => i.who === 'person').length, overseer: all.filter((i) => i.who === 'overseer').length }, sections };
 }
 
 /** The sheet as text: one summary line, then each section, each item one or two lines. */
@@ -439,6 +446,7 @@ export function sheetText(s, now = Date.parse(s.at)) {
     (sec.items || []).forEach(item);
   }
   if (!s.sections.length) L.push('', 'Nothing waits.');
+  if (s.notes?.length) L.push('', ...s.notes);
   return L.join('\n');
 }
 
