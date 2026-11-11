@@ -52,14 +52,14 @@ export async function selftest284M({ dir, root, report, tmpRoot }) {
     const R = path.join(T, `repo-${n}`);
     const GW = path.join(T, `gate-${n}`);
     fs.mkdirSync(R, { recursive: true });
-    g(R, 'init', '-q', '-b', 'port/main'); write(R, 'base.txt', 'base\n'); write(R, 'Game.csproj', '<Project>\n  <Item>A</Item>\n</Project>\n');
+    g(R, 'init', '-q', '-b', 'port/main'); g(R, 'config', 'core.autocrlf', 'false'); g(R, 'config', 'core.eol', 'lf'); write(R, 'base.txt', 'base\n'); write(R, 'Game.csproj', '<Project>\n  <Item>A</Item>\n</Project>\n');
     for (const [f, t] of Object.entries(shared)) write(R, f, t);
     g(R, 'add', '-A'); g(R, 'commit', '-qm', 'start');
     g(R, 'checkout', '-q', '-b', 'dev'); g(R, 'worktree', 'add', '-q', GW, 'port/main');
     write(S, 'studio/game.json', `${JSON.stringify({ engines: { unity: { land, target: 'port/main', cwd: fwd(R), gateWorktree: fwd(GW), timeoutMin: 5, ...(rules ? { rules } : {}) } } }, null, 2)}\n`);
     const ev = path.join(S, '.studio', 'events-284m.jsonl');
     fs.mkdirSync(path.dirname(ev), { recursive: true }); fs.writeFileSync(ev, '');
-    g(S, 'init', '-q', '-b', 'main'); g(S, 'add', '-A'); g(S, 'commit', '-qm', 'studio', '--no-verify');
+    g(S, 'init', '-q', '-b', 'main'); g(S, 'config', 'core.autocrlf', 'false'); g(S, 'config', 'core.eol', 'lf'); g(S, 'add', '-A'); g(S, 'commit', '-qm', 'studio', '--no-verify');
     const env = { ...process.env, ...base, AGENT_EVENTS_FILE: ev, STUDIO_MAIN_ROOT: S };
     return { S, R, GW, ev, env };
   };

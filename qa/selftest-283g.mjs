@@ -96,7 +96,9 @@ const W = 64; const H = 64; const rgba = Buffer.alloc(W * H * 4);
 for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = (y * W + x) * 4; const v = ((x * 4) ^ (y * 3)) & 255; rgba[i] = v; rgba[i + 1] = (v * 2) & 255; rgba[i + 2] = 255 - v; rgba[i + 3] = 255; }
 const d = path.join(process.cwd(), '.studio', 'proof', 'T-001', 'visual', 'after'); fs.mkdirSync(d, { recursive: true });
 fs.writeFileSync(path.join(d, 'main.png'), encodePng({ width: W, height: H, rgba }));
-const t0 = Date.now();
+// The four passes span about three hours and must fall on ONE UTC day (the rule is one try a day): started from the
+// real clock they crossed midnight when the suite ran after 20:57 UTC, and the board was asked twice.
+const today = new Date(); const t0 = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 2, 0, 0);
 const acts = [];
 for (let i = 0; i < 4; i++) acts.push(...await gamedevPass(t0 + i * 61 * 60000));
 const st = JSON.parse(fs.readFileSync(path.join(process.cwd(), '.studio', 'gamedev.json'), 'utf8'));
