@@ -59,7 +59,10 @@ supervisor is the launcher, so its pass doesn't fill slots itself: its launch st
    refused until the owner lets go (`--force` for a person reassigning it). A lane copy with commits that name the
    task (or on its branch, or named for the owner) ahead of the studio's branch keeps it however quiet the owner is
    (built, not landed), for up to `STUDIO_CLAIM_LANE_MAX_H` (24) hours since the lane last changed, unless the
-   owner's session ended. 2.76.0 (B-90, W-0084): only the owner's own work counts: its events on that task or on none,
+   owner's session ended. 2.83: none of this keeps a claim whose owner's launched session has no process and was last
+   heard from (its last heartbeat, or its end) more than `STUDIO_DEAD_CLAIM_MIN` (30; `off` or 0 turns it off) minutes
+   ago: it is handed back with the usual note. Claimed minutes toward a task's budget skip the time no supervisor ran,
+   so an outage queues no rescue by itself. 2.76.0 (B-90, W-0084): only the owner's own work counts: its events on that task or on none,
    never an event about another of its tasks, nor one the train wrote in its name (the train's checks run with
    `STUDIO_ON_BEHALF=train`, which marks their events `meta.onBehalf`); and a lane copy that is another agent's (a
    launcher-made `.lanes/<name>` of a session other than the owner, or the asking agent's own) is never the owner's

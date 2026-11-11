@@ -75,6 +75,7 @@ import { aiderDriven, laneFiles, laneIgnoreLines, editBrief, claimTask, finishAi
 import { pickNimModel, stubFetchFrom } from './nim-check.mjs';
 import { AIDER_SESSION } from './models.config.mjs';
 import { rescueOf, rescueModelFor } from './rescue.mjs';
+import { reviewLaunch } from './review-family.mjs';
 import { cooldown } from './task-hold.mjs';
 import { mapStale, writeMap } from './map.mjs';
 import { pitfallsForPrompt } from './pitfalls.mjs';
@@ -2410,6 +2411,25 @@ export function startAgent(opts, { detach = false } = {}) {
       }
       emitEvent({ type: rr.applied ? 'model.rerouted' : 'model.reroute_suggested', agent: 'director', to: 'producer', task: opts.task, msg: `${opts.task}: ${rr.fromModel} (${rr.fromFamily}) replied with reasoning only; ${rr.applied ? `rerouted to ${rr.model}${rr.tool ? ` on ${rr.tool}` : ''}` : 'route it to another model family (set STUDIO_REROUTE_MODELS, e.g. codex:gpt-5)'}`, meta: rr });
     }
+  }
+  // 2.83: a review must come from another model family than the implementer's. Another family configured and not out of
+  // quota: the review runs on it. None configured: a different model of the same family (else the same), and one line in
+  // the brief says the reviewer writes the same-family header (harness/review-family.mjs). Two sessions had read the rule
+  // and handed back on a one-family crew. An explicit --model is respected.
+  if (role === 'reviewer' && opts.task && !opts.model) {
+    try {
+      const t = [...parseNextQueue().inProgress, ...parseNextQueue().backlog].find((x) => x.id === opts.task);
+      const plan = t ? reviewLaunch({ taskId: opts.task, title: t.title, events: readRecentEvents(20000), current: model }) : null;
+      if (plan?.kind === 'other' && plan.model && plan.model !== model) {
+        model = plan.model;
+        opts.model = plan.model;
+        const tt = modelFamilyTool(plan.model);
+        if (tt && !opts.tool) tool = tt;
+      } else if (plan?.kind === 'same') {
+        if (plan.model && plan.model !== model) { model = plan.model; opts.model = plan.model; }
+        opts.note = `${opts.note ? `${opts.note}\n` : ''}${plan.note}`;
+      }
+    } catch { /* the review's model is a preference, never a blocker */ }
   }
   // 2.77.0 (n, Priority 8): an agy session runs a Gemini model. An explicit non-Gemini --model is refused unless forced
   // (--force-model, STUDIO_AGY_ANY_MODEL=on, or an agy:<model> entry the owner put in the budget order); a model the

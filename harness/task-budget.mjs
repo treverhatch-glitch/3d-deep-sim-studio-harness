@@ -53,6 +53,27 @@ const PAUSES_CLOCK = new Set(['task.held', 'task.train.queued', 'task.remote.lea
 const RESUMES_CLOCK = new Set(['task.unheld', 'task.train.dropped', 'task.remote.ended']);
 
 /**
+ * 2.83: the periods in which no supervisor was running, [from, to] in ms, from the events: a supervisor.stop to the next
+ * supervisor.start, or (a supervisor that died without a stop event) the last event before a supervisor.start to it.
+ * Time the studio was off is not time a task was worked on: a 42 h outage made a 2,543 min "claim" and a rescue.
+ */
+export function offPeriods(events) {
+  const out = [];
+  let lastAt = 0; let stoppedAt = null; let running = false;
+  for (const e of events) {
+    const at = Date.parse(e.ts) || 0;
+    if (e.type === 'supervisor.start') {
+      const from = stoppedAt ?? (running ? lastAt : null);
+      if (from !== null && at > from) out.push([from, at]);
+      running = true; stoppedAt = null;
+    } else if (e.type === 'supervisor.stop') { stoppedAt = at; running = false; }
+    if (at > lastAt) lastAt = at;
+  }
+  return out;
+}
+const overlapMs = (periods, a, b) => periods.reduce((n, [f, t]) => n + Math.max(0, Math.min(b, t) - Math.max(a, f)), 0);
+
+/**
  * What a task has spent since its last reset: { sessions, minutes, tokens, since }.
  * events: oldest first (readRecentEvents order).
  */
@@ -69,6 +90,8 @@ export function taskSpend(taskId, events = readRecentEvents(20000), now = Date.n
   let sessions = 0;
   let tokens = 0;
   let ms = 0;
+  const off = offPeriods(events);
+  const span = (a, b) => Math.max(0, b - a - overlapMs(off, a, b)); // 2.83: the time the studio was off doesn't count
   for (let i = 0; i < events.length; i += 1) {
     const e = events[i];
     const at = Date.parse(e.ts) || 0;
@@ -89,7 +112,7 @@ export function taskSpend(taskId, events = readRecentEvents(20000), now = Date.n
       }
     }
     if (e.task === taskId && PAUSES_CLOCK.has(e.type) && !paused) {
-      if (counted) for (const t of open.values()) if (t !== null) ms += Math.max(0, at - t);
+      if (counted) for (const t of open.values()) if (t !== null) ms += span(t, at);
       for (const k of open.keys()) open.set(k, null);
       paused = true;
     }
@@ -100,12 +123,12 @@ export function taskSpend(taskId, events = readRecentEvents(20000), now = Date.n
     if (counted && e.type === 'agent.session.end' && onTask.get(e.agent) === taskId) tokens += weightedTokens(e);
     if (counted && e.type === 'usage.reported' && e.task === taskId) tokens += (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0);
     if (e.task === taskId && ENDS_CLAIM.has(e.type)) {
-      if (counted) for (const t of open.values()) if (t !== null) ms += Math.max(0, at - t);
+      if (counted) for (const t of open.values()) if (t !== null) ms += span(t, at);
       open.clear();
       if (e.type !== 'task.paused') paused = false; // a hand-back doesn't end a hold
     }
   }
-  for (const t of open.values()) if (t !== null) ms += Math.max(0, now - t);
+  for (const t of open.values()) if (t !== null) ms += span(t, now);
   return { sessions, minutes: Math.round(ms / 60000), tokens: Math.round(tokens), since: start > 0 ? events[start - 1]?.ts || null : null };
 }
 

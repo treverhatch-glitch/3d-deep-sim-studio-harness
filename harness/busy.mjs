@@ -27,12 +27,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { readRecentEvents, emitEvent } from './event.mjs';
+import { readRecentEvents, emitEvent, STUDIO_STATE_DIR } from './event.mjs';
 import { emitOnChange } from './telemetry.mjs';
 import { updateHolds } from './task-hold.mjs';
 import { LIMIT_STOP } from './budget.mjs';
 import { claim as claimLock, status as lockStatus } from './lock.mjs';
-import { selfIdentity, liveAs } from './proc-identity.mjs';
+import { selfIdentity, liveAs, recordAlive } from './proc-identity.mjs';
 
 // 2.79 (b): a record that carries the writer's start identity is judged by it (proc-identity.mjs liveAs): a reused pid is not alive.
 const alive = (pid, identity = null) => liveAs(Number(pid), identity);
@@ -118,6 +118,27 @@ function laneChangedAt(dir) {
 }
 
 /**
+ * 2.83: STUDIO_DEAD_CLAIM_MIN (30): a claim whose owner's launched session has no process and has not been heard from
+ * (its last heartbeat, or its end) for this long is dead: it is handed back, never kept. A "lock.kept" went on for a
+ * session whose process was gone, through a 42 h outage. 0 or off: never judged dead this way.
+ * Returns { dead: true, ageMin, why } or null (no session record for the owner: a person or an outside agent, never dead here).
+ */
+export function deadClaimOwner(owner, { dir = null, now = Date.now(), env = process.env } = {}) {
+  const raw = String(env.STUDIO_DEAD_CLAIM_MIN ?? '').trim();
+  const min = /^(off|0|false|no)$/i.test(raw) ? 0 : (Number.isFinite(Number(raw)) && raw !== '' ? Math.max(0, Number(raw)) : 30);
+  if (!(min > 0) || !owner) return null;
+  const rec = read(path.join(dir || STUDIO_STATE_DIR, 'agents', `${owner}.json`), null);
+  if (!rec || rec.agent !== owner) return null;
+  if (rec.status === 'running' && recordAlive(rec)) return null;
+  const at = Math.max(Date.parse(rec.lastBeat || '') || 0, rec.status === 'running' ? 0 : Date.parse(rec.endedAt || '') || 0);
+  const base = at || Date.parse(rec.startedAt || '') || 0;
+  if (!base) return null;
+  const ageMin = Math.round((now - base) / 60000);
+  if (now - base <= min * 60000) return null;
+  return { dead: true, ageMin, why: `${owner}'s process is gone and it was last heard from ${ageMin} min ago (STUDIO_DEAD_CLAIM_MIN ${Math.round(min)})` };
+}
+
+/**
  * 2.58.3 (N2): is the owner of this task's last claim still working on it, though its claim ran out? Busy when the
  * owner has any event (other than ones saying it has gone, and the claim's own start) in the last STUDIO_CLAIM_ACTIVE_MIN (30) minutes, or its
  * lane copy (.lanes/<owner>, .lanes/<owner>-*, or the copy on the task's remembered lane branch) has a commit or a
@@ -130,6 +151,8 @@ export function claimActive(task, { root = null, now = Date.now(), env = process
   const evs = events || readRecentEvents(20000);
   const c = claimOwner(task, evs);
   if (!c || (c.orphaned && !orphaned)) return { busy: false };
+  // 2.83: an owner whose process is gone for STUDIO_DEAD_CLAIM_MIN is not working on it, whatever else looks busy.
+  { const dead = deadClaimOwner(c.owner, { dir: root ? path.join(root, '.studio') : null, now, env }); if (dead) return { busy: false, owner: c.owner, dead: true, why: dead.why }; }
   // The claim's own task.start isn't proof of work since: a claim runs out an hour after it, so on its own it is never
   // inside the window when the claim ran out by itself (only when it was released by hand straight away).
   // 2.69.0: nor is the overlap advice its start records (task.overlap): written by the start command, not by work.
