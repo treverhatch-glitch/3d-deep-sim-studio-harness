@@ -33,6 +33,7 @@ import { mixedLane, mayCarry } from './train-lanes.mjs';
 import { boardStates, readDeps } from './train-deps.mjs';
 import { lanePlan, writeRecord as writeSparseRecord, removeRecord as removeSparseRecord, widenStrays } from './lane-sparse.mjs';
 import { approvedBranchFor } from './lane-approvals.mjs';
+import { writeLaneBaseline } from './drift-baseline.mjs';
 
 export const LANES_DIR = '.lanes';
 const BRANCHES = () => path.join(STUDIO_STATE_DIR, 'lane-branches.json');
@@ -208,6 +209,8 @@ export function createLaneCopy(agent, { task = null, lane = null, carry = true }
     if (fs.existsSync(path.join(root, '.env'))) fs.writeFileSync(path.join(dir, '.env'), fs.readFileSync(path.join(root, '.env'), 'utf8').split(/(?<=\n)/).filter((l) => !PROXY_HELD.some((k) => new RegExp(`^\\s*(?:export\\s+)?${k}\\s*=`, 'i').test(l))).join(''));
   } catch {}
   // The links are not changes: keep them out of this copy's git status.
+  // 2.84 (j): what the main checkout has uncommitted now is not this session's work (harness/drift-baseline.mjs).
+  writeLaneBaseline(agent, root);
   const exclude = path.join(root, '.studio', 'lanes', `${agent}.exclude`);
   fs.mkdirSync(path.dirname(exclude), { recursive: true });
   fs.writeFileSync(exclude, ['/studio', '/.studio', '/.env', 'node_modules', ''].join('\n'));

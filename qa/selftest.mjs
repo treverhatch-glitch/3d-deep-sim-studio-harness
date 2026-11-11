@@ -5108,6 +5108,13 @@ if (inShard('selftest-283j')) {
   await selftest283J({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
+// 2.84 (j): the drift check counts only the files the session changed, not the main checkout's uncommitted ones.
+if (inShard('selftest-284j')) {
+  const dir = copyRepo();
+  const { selftest284J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284j.mjs')).href);
+  await selftest284J({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
 // 2.84 (g): the studio's same-family review switch (studio/review.json), set by the owner or the overseer, never a worker.
 if (inShard('selftest-284g')) {
   const dir = copyRepo();
