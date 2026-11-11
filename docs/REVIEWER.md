@@ -27,6 +27,16 @@ worker can't record its own review. The review is written to `studio/reviews/<da
 outside the harness, and one `Verdict:` line; a `review.recorded` event is logged and the file is committed (`--no-commit`
 to leave it for you). It counts for the done check's "Approved by a reviewer from another model family" like any review.
 
+**A studio with only one model family (2.83, 2.84).** A review from the implementer's own family is taken only when its
+header says `same-family: no other family available` AND no other family is configured. Which families are configured is
+decided from the studio's own files in the MAIN checkout (found by git, never from `STUDIO_MAIN_ROOT`): the model and tool
+settings in its `.env` (`STUDIO_*_MODEL`, `STUDIO_*_MODELS`, `STUDIO_REVIEW_TOOLS`, `STUDIO_REVIEWER_TOOL`; nothing else
+in that file is read) and the model names in its `studio/models.json`, together with the session's environment. The
+result is the union: the environment can add a family, never remove one, so a session that unsets or overrides those
+variables changes nothing. The launch of a review and both checks (`review record` and the done check) use the same
+union. A refused header says which family is configured and where it was found (`.env`, `studio/models.json` or
+`environment`). The function is `configuredFamilies` in `harness/review-family.mjs`.
+
 **DeepSeek or another OpenAI-compatible reviewer.** The harness has no DeepSeek provider of its own (the router's providers
 are in harness/models.config.mjs: Gemini, NVIDIA NIM, xAI, Anthropic, Groq, OpenRouter, local Ollama), so there is no pool to
 turn on. To add one: add an entry to `PROVIDERS` in harness/models.config.mjs (protocol openai-compatible: `baseUrl`,
