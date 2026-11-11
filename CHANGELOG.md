@@ -72,7 +72,7 @@ no editor. 27 files, +1,951 / −58 lines (net +1,893) against 2.81.0. Details: 
 ## [2.81.0] — 2026-11-10
 Grade, measure, cut again (the owner's "Round 2.81"). Verdict: 5 of 10, a working production line that is not yet an
 autonomous one (studio/notes/VERDICT-2.81-2026-11-10.md). 250 files, +3,498 / −1,818 lines (net +1,680) against 2.80.0; with 2.80.0, 397 files, +5,373 / −21,388 lines (net −16,015)
-against 2.79.2. Details: docs/RELEASE-2.81.0.md.
+against 2.79.2. Details: the release notes of 2.81.0 (in git history: git log -p -- docs/RELEASE-2.81.0.md).
 - **The round scorecard:** `npm run score`, fifteen fixed measures from a studio's logs, `--record` to compare rounds
   (docs/SCORECARD.md). Baseline from the crew's 8.2 days: 1 of 15 targets met.
 - **The outside overseer's official role:** `npm run overseer -- role | can <action> | pass` (docs/OVERSEER.md): does,
@@ -98,7 +98,7 @@ against 2.79.2. Details: docs/RELEASE-2.81.0.md.
 ## [2.80.0] — 2026-11-10
 The trim (the owner's order; HARNESS_TRIM_BRIEF_2026-11-10). 2.79.2 stays, leaner: 211 files, +2,013 / −19,710 lines (net −17,697) against 2.79.2;
 tracked lines 175,491 → 157,794, `harness/` modules 319 → 310, npm scripts 179 → 165, settings 729 → 712, literal event
-types 477 → 438, gates 37 → 35. Details, what was kept and what waits: docs/RELEASE-2.80.0.md.
+types 477 → 438, gates 37 → 35. Details, what was kept and what waits: the release notes of 2.80.0 (in git history: git log -p -- docs/RELEASE-2.80.0.md).
 - **The War Room and the hub server are gone** (`hub/`, `war-room.mjs`, `hud.mjs`, `planning-room.mjs`, `phone.mjs`,
   `away.mjs`, `hub-keeper.mjs`, `meeting.mjs`, `qa/hud-check.mjs`, `qa/hub-smoke.mjs`, the `hud` and `hub-smoke` gates,
   the React leftovers). Nobody opened it in the audited week; the studio is read through Studio Status and the CLI.
