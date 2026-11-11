@@ -21,6 +21,16 @@ Details: docs/RELEASE-2.84.0.md.
 - **A real Unity editor in the online checks** (`scripts/unity-real.mjs`, job `engine-unity-real`): the Edit Mode
   arguments the harness plans, a failing test's name and a compile error's file, checked against a real editor's
   output. The test runner is pinned to v4.3.2. UNTESTED until the repository's Unity sign-in secrets work.
+- **A batch window for the engine train** (`engines.<x>.batchMin`, `batchWaitMin`; default off): the automatic start
+  waits a few minutes for more queued branches while sessions are still working on that engine's tasks.
+- **Play Mode focus** (`engines.<x>.play.focus`): the land command is told which Play Mode tests a batch needs
+  (`STUDIO_PLAY_MODE`, `STUDIO_PLAY_FILTER`, `STUDIO_UNITY_PLAYMODE_ARGS`); a full run once a day. UNVERIFIED on a
+  real editor.
+- **A check for commands that end before they run** (`npm run check:tla`, in the release gate): a module that awaits,
+  at top level, an import that reaches back to itself exits 13. Four more found and fixed (`ask`, `engine-tracks`,
+  `session-cap`, `waves`); `engine-tracks.mjs backfill` had been ending that way.
+- **Drift check:** files already changed in the main checkout when a session started are not counted as the session's.
+- **The Windows self-test in 8 shards** (was 4): about half the wait for every release.
 - **Which commands a studio runs** (`npm run commands-run`): an empty marker per command and month, so a feature is
   cut on evidence.
 - **Cut:** eleven old release notes, three old handoff notes, the 2.79 audit write-up; the changelog, the problems log

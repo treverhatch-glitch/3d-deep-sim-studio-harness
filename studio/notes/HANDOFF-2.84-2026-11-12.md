@@ -17,7 +17,11 @@ two newest handoffs and release notes are kept; older ones are in git history.
 2. **The same-family switch is a protected decision** ('tests'): the owner and the owner's stand-ins, not a Producer
    session. The owner asked that the overseer may flip it; the file is deliberately not a protected file.
 3. **No feature cut on five days of one crew's log.** `npm run commands-run` collects the evidence from here on.
-4. **Two newest kept** for release notes and handoffs; four newest changelog entries in full.
+4. **The batch window and Play Mode focus are off until a studio sets them.** A focused Play Mode run is a weaker
+   check; the daily full land run is its backstop.
+5. **The top-level-await check flags only the exact failing shape** (an awaited import that reaches back to the module).
+   43 more modules have a top-level await and static importers: `node scripts/check-top-level-await.mjs --all`.
+6. **Two newest kept** for release notes and handoffs; four newest changelog entries in full.
 
 ## Open, most valuable first
 

@@ -20,6 +20,11 @@ design (skip a cycle when nothing changed since the last) was replayed on the lo
 | Same-family review | `studio/review.json` `sameFamily`: `auto` (as 2.83), `on`, `off`. The owner, the owner's stand-ins and outside agents flip it; a Producer session only with `STUDIO_PRODUCER_APPROVES=protected`; a worker never. Families are read from the main checkout's `.env` and `studio/models.json`; the environment can add one, never remove one. | `harness/review-family.mjs`, `review.mjs`; docs/REVIEWER.md | `qa/selftest-284b.mjs` (10), `284g` (17) |
 | The overseer's sheet | `npm run overseer -- sheet [--json]`: asks, held and parked tasks, train holds, engine hand-backs, chain gates, dangling waits, dead ends. | `harness/overseer.mjs`; docs/OVERSEER.md | `qa/selftest-284c.mjs` (11) |
 | A real editor | Three copies of the Unity template, one editor run each (GameCI), then `editModePlan`, `failingTests` and `compileErrorFiles` against what the editor wrote. A fork's pull request has no secrets and skips it. | `scripts/unity-real.mjs`, `.github/workflows/ci.yml` | the job itself |
+| Batch window | `engines.<x>.batchMin` and `batchWaitMin` (default 1 and 0: off): the automatic engine train waits for more queued branches while sessions still work on that engine's tasks; a branch that lands alone and a person's own `task train` never wait. A crew landed 6 branches on one 41-minute run; most trains started with one. | `harness/line-producer.mjs` `engineBatchWait`; docs/ENGINE-TRACKS.md | `qa/selftest-284h.mjs` (10) |
+| Play Mode focus | `engines.<x>.play.focus` (`map`, `smoke`, `join`): when every changed path maps, the land command gets `STUDIO_PLAY_MODE=focus`, `STUDIO_PLAY_FILTER` and, for Unity, `STUDIO_UNITY_PLAYMODE_ARGS`; never on the daily full run. A focused run is a weaker check than a full one. | `harness/engine-rules.mjs` `playSelection`, `unity-train.mjs`; docs/NATIVE-ENGINE.md | 284h |
+| Commands that end before they run | `npm run check:tla` in the release gate: a top-level await of an import that reaches back to the module itself. Four found and fixed. | `scripts/check-top-level-await.mjs` | `qa/selftest-284i.mjs` (11) |
+| Drift check | Files dirty in the main checkout when a session started are not the session's. | `harness/drift-baseline.mjs`, `stall.mjs` | `qa/selftest-284j.mjs` (7) |
+| Online checks | The Windows self-test in 8 shards. | `.github/workflows/ci.yml` | |
 | Commands run | `.studio/usage/<YYYY-MM>/<script>~<word>` markers; `npm run commands-run`. `STUDIO_USAGE_MARKS=off`. | `harness/event.mjs`, `scripts/commands-run.mjs`; docs/SCORECARD.md | none yet |
 
 ## What was cut
@@ -43,8 +48,18 @@ of `commands-run` markers from a live studio says nobody runs it.
 - The real-editor job: licence activation reaches Unity's sign-in and is refused there. Nothing after that has run.
 - The back-off on a live studio. The replay assumes each session did what it really did.
 - `boardEvents` on a real session's end (the counting function and the scorecard are tested).
+- The batch window and Play Mode focus on a live studio; `-testFilter` on a real editor.
+- The drift record is made at a session's first observation, not at its launch.
 
 ## For a studio on 2.83
 
-Nothing to set. To let same-family reviews count: `npm run review -- same-family on --by <you> --why "…"`.
+Nothing must be set. Optional, under `engines.<engine>` in `studio/game.json`:
+
+```json
+"batchMin": 4, "batchWaitMin": 12,
+"play": { "focus": { "map": [ { "match": "^Assets/Scripts/([A-Za-z]+)/", "filter": "Game.PlayTests.$1" } ],
+                     "smoke": "Game.PlayTests.Smoke", "join": ";" } }
+```
+
+To let same-family reviews count: `npm run review -- same-family on --by <you> --why "…"`.
 To keep 2.83's planning cadence: `STUDIO_CYCLE_QUIET_MAX_H=off` and `STUDIO_WAKE_SAME_MAX_H=off`.
