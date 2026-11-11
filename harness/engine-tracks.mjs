@@ -152,6 +152,8 @@ function normalizeOnce(taskId, t, { root, from }) {
 export function engineTask(taskId, { root = mainRoot(), events = null, env = process.env } = {}) {
   if (!taskId) return null;
   const rec = readEngineTasks(root)[taskId];
+  // 2.83: `task track <ID> web` writes { track: 'web', engine: null }: the task is a web task again, whatever its task.added event said.
+  if (rec?.track === 'web' && !rec.engine) return null;
   if (rec?.engine && engineOfTrack(rec.track) === rec.engine) return { task: taskId, ...rec };
   if (rec?.engine || rec?.track) {
     const t = readTrack(rec.track || rec.engine, { root, env });

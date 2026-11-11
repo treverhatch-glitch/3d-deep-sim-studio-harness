@@ -43,6 +43,7 @@ nothing is inferred.
 
 | Where | In a native studio |
 | --- | --- |
+| `task add` (web code, 2.83) | A builder task with no `--track` whose title, `--scope`, `--paths` or `--lane` names a path under the web game folder (`game/<game>/`, `web/<game>/`, `cartridges/<game>/`) or a `.ts`, `.tsx`, `.js` or `.mjs` file goes on the web track, and says so (`webCodeNamed` in `harness/native.mjs`); `--track engine:<x>` overrides. |
 | `task add` | A builder task with no `--track` goes on `engine:<engine>`, and says so. `--track web` keeps a web task (the web rules a studio is still moving out of). A task with a lane, paths, or a type that is studio work (docs, chore, study, research, review, idea, playtest) gets no track. |
 | The Line Producer | No scheduled game-tester run on the web build (`npm run tester -- now` still runs one on demand), and no engine twins of web tasks. |
 | The game's train | No playable web build and clip after a landing: the playable build is the engine's (`npm run engine:build`). |

@@ -515,10 +515,12 @@ export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'un
   const L = labelOf(engine);
   if (quiet && !st.queue.length && !st.running) return '';
   const lines = [];
+  // 2.83: the running train's batch and the waiting queue are two lists: a branch queued again while its train runs showed
+  // as "No Unity branch waits". A queue entry whose task rides the running train is marked, not hidden.
   const inTrain = new Set(st.running?.lanes || []);
-  const waiting = st.queue.filter((e) => !inTrain.has(e.task));
-  const row = (e) => `  ${e.task}  ${e.agent || '?'}  ${e.branch} at ${short(e.head)} (queued ${String(e.at).slice(0, 16)})`;
-  lines.push(waiting.length ? `${waiting.length} ${L} branch(es) wait for the next ${L} train (npm run task -- train --engine ${engine}):\n${waiting.map(row).join('\n')}` : `No ${L} branch waits for a ${L} train (task done <ID> --train on a ${L}-track task queues one).`);
+  const row = (e) => `  ${e.task}  ${e.agent || '?'}  ${e.branch} at ${short(e.head)} (queued ${String(e.at).slice(0, 16)})${inTrain.has(e.task) ? '  (also in the running train)' : ''}`;
+  if (st.running?.lanes?.length) lines.push(`Running ${L} train batch (${st.running.lanes.length}): ${st.running.lanes.join(', ')}`);
+  lines.push(st.queue.length ? `${st.queue.length} ${L} branch(es) wait in the queue for the next ${L} train (npm run task -- train --engine ${engine}):\n${st.queue.map(row).join('\n')}` : `No ${L} branch waits for a ${L} train (task done <ID> --train on a ${L}-track task queues one).`);
   if (st.running) lines.push(`${L} train running: ${st.running.id} by ${st.running.by || '?'} (pid ${st.running.pid}, since ${new Date(st.running.at).toISOString().slice(11, 16)} UTC)${st.running.lanes?.length ? `, ${st.running.lanes.join(', ')}` : ''}${st.running.now ? `; now: ${st.running.now}` : ''}`);
   if (st.last && !st.running) lines.push(`Last ${L} train ${st.last.id} (${String(st.last.at || '').slice(0, 16)}): ${st.last.message}`);
   return lines.join('\n');

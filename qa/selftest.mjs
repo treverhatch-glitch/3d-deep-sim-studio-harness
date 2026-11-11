@@ -5070,6 +5070,14 @@ if (inShard('selftest-282a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.83 (d): task after --remove/--set/--clear, unknown --after ids, task train dequeue and its subcommand guard, track web, native web code.
+if (inShard('selftest-283d')) {
+  const dir = copyRepo();
+  const { selftest283D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283d.mjs')).href);
+  await selftest283D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
