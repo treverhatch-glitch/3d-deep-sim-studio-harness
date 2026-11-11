@@ -274,9 +274,13 @@ export function landScriptDrift(s, root = mainRoot()) {
       const dir = path.dirname(file);
       const top = out(git(dir, 'rev-parse', '--show-toplevel'));
       if (!top) continue;
-      const common = (d) => { const c = out(git(d, 'rev-parse', '--git-common-dir')); return c ? fs.realpathSync(path.resolve(d, c)) : ''; };
+      // Native real paths: on Windows git prints long names while a temp folder is often spelled with its 8.3 short name.
+      const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
+      const fold = (p) => (process.platform === 'win32' ? real(p).toLowerCase() : real(p));
+      const common = (d) => { const c = out(git(d, 'rev-parse', '--git-common-dir')); return c ? fold(path.resolve(d, c)) : ''; };
       if (!common(dir) || common(dir) !== common(s.repo)) continue;
-      const rel = path.relative(fs.realpathSync(top), fs.realpathSync(file)).split(path.sep).join('/');
+      const rel = path.relative(real(top), real(file)).split(path.sep).join('/');
+      if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue;
       const want = out(git(s.repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${s.target}:${rel}`));
       const have = out(git(dir, 'hash-object', '--', file));
       if (!want) return { file, rel, branch: out(git(dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || 'a detached HEAD', missing: true };
