@@ -5109,6 +5109,14 @@ if (inShard('selftest-283j')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.84: the same-family review fallback decides from the studio's files and the environment together, not the environment alone.
+if (inShard('selftest-284b')) {
+  const dir = copyRepo();
+  const { selftest284B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284b.mjs')).href);
+  await selftest284B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

@@ -27,7 +27,7 @@ import { parseNextQueue } from './task.mjs';
 import { taskType } from './done-check.mjs';
 import { taggedCommits } from './scorecard.mjs';
 import { modelFamily } from './families.mjs';
-import { sameFamilyAccepted, SAME_FAMILY_HEADER } from './review-family.mjs';
+import { SAME_FAMILY_RE, sameFamilyAccepted, sameFamilyRefusal, SAME_FAMILY_HEADER } from './review-family.mjs';
 import { routeChatCompletion, getRouterMatrix } from './route.mjs';
 import { scrub } from './secrets.mjs';
 import { spawnAgentSync } from './launch.mjs';
@@ -298,7 +298,7 @@ export function recordOutsideReview(id, { by, family, file, model = null, implem
   if (fam === 'unknown') return { ok: false, error: `Unknown family "${family}".` };
   // 2.83: a same-family review is taken when its text says no other family is available AND none is configured.
   const sameOk = impl !== 'unknown' && fam === impl && sameFamilyAccepted(text, g.builder, env);
-  if (impl !== 'unknown' && fam === impl && !sameOk) return { ok: false, error: `Refused: ${by} (${fam}) is the same family as the builder (${g.builder}, ${impl}); a review from another family is what counts.` };
+  if (impl !== 'unknown' && fam === impl && !sameOk) return { ok: false, error: `Refused: ${by} (${fam}) is the same family as the builder (${g.builder}, ${impl}); a review from another family is what counts.${SAME_FAMILY_RE.test(text) ? ` (${sameFamilyRefusal(g.builder, env)})` : ''}` };
   const verdicts = [...text.matchAll(/^[ \t>*_#-]*verdict\**\s*:\**\s*(approve[sd]?|lgtm|changes|request(?:ed)? changes|changes requested|reject(?:ed)?)\b/gim)].map((m) => m[1].toLowerCase());
   if (!verdicts.length) return { ok: false, error: `${file} has no verdict line: end it with "VERDICT: APPROVE" or "VERDICT: CHANGES".` };
   const verdict = /^(approve|lgtm)/.test(verdicts.at(-1)) ? 'approve' : 'request changes';

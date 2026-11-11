@@ -36,7 +36,7 @@ import { failsBefore, regressionKind } from '../qa/fails-before.mjs';
 import { ownerType, ownerTypeWords } from './reclassify.mjs';
 import { renderDecision, readVerdict } from './verdict-split.mjs';
 import { modelFamily } from './families.mjs';
-import { sameFamilyAccepted } from './review-family.mjs';
+import { sameFamilyAccepted, sameFamilyRefusal, SAME_FAMILY_RE } from './review-family.mjs';
 import { proofStatus } from './proof.mjs';
 import { listLocks, coveringLock } from './lock.mjs';
 import { overLimits, isGameCode, LIMITS } from '../scripts/check-function-size.mjs';
@@ -909,7 +909,8 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
       if (rev && impl && modelFamily(rev) === modelFamily(impl) && sameFamilyAccepted(t, impl)) return true;
       return rev && impl && modelFamily(rev) !== modelFamily(impl) && modelFamily(rev) !== 'unknown';
     });
-    check('Approved by a reviewer from another model family', cross.length, approving.length ? 'the approving review is from the same model family as the builder (or has no model-family line)' : `no review in studio/reviews/ names ${task.id} and approves it (with "model-family:" and "implementer-family:" lines)`);
+    const famNote = (() => { for (const t of approving) { if (!SAME_FAMILY_RE.test(t.replace(/\r\n/g, '\n'))) continue; const w = sameFamilyRefusal((t.match(/implementer-family\s*:\s*(\S+)/i) || [])[1] || implementer); if (w) return ` (${w})`; } return ''; })();
+    check('Approved by a reviewer from another model family', cross.length, approving.length ? `the approving review is from the same model family as the builder (or has no model-family line)${famNote}` : `no review in studio/reviews/ names ${task.id} and approves it (with "model-family:" and "implementer-family:" lines)`);
   }
   if (type === 'direction') {
     const reviews = newestSince(filesUnder('studio/bible/reviews', (n) => n.endsWith('.md') && n !== 'README.md'), since).map((f) => parseReview(abs(f))).filter(Boolean);
