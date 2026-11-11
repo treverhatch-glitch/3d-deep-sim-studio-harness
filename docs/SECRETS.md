@@ -52,7 +52,7 @@ force-push), the owner can allow that one finding:
   (`npm run approve -- protected`), so an agent can't allow its own secret.
 - **Only for a true false alarm.** A real token is rotated at the provider, never allowed: allowing it leaves a live
   key in a public repo.
-What it catches and what it doesn't: [`docs/SECURITY.md`](SECURITY.md#secrets).
+What agents may and may not do with keys: [`docs/SECURITY.md`](SECURITY.md#keys-and-secrets).
 
 A quick manual check for the most common provider prefixes, before pushing to a public remote:
 
