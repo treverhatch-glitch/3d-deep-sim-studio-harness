@@ -46,8 +46,9 @@ that. At launch another family still comes first; `on` only lets a review run on
 no other-family model is live (not out of quota). `off`: a same-family review never counts, header or not, even with one
 family configured. Change it with `npm run review -- same-family on|off|auto --by <who> [--why "..."]` (with no value it
 prints the setting, who set it and when, and the families configured). The owner, the overseer (the owner's proxy, a
-beta-mode agent the owner named, or an outside signer), an outside agent, or a Producer or Director session (a board
-decision, `mayDecide`) may run it; a worker session never may, under any `--by`. Each change is one decisions-log line and
+beta-mode agent the owner named, or an outside signer) or an outside agent may run it. It loosens a check, so it is
+judged as a protected decision: a Producer or Director session may only where the owner set
+`STUDIO_PRODUCER_APPROVES=protected`, and a worker session never may, under any `--by`. Each change is one decisions-log line and
 one `review.same_family` event. The file is not a protected file (the overseer flips it without a signature); no
 environment variable turns it on, and the checks read the main checkout's copy. What `on` gives up: a model reviewing its
 own family's work shares its blind spots, so a second family is the stronger check.

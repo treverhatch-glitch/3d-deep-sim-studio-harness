@@ -72,6 +72,7 @@
     "budget": "node harness/budget.mjs",
     "tools": "node harness/tool-registry.mjs",
     "tokens": "node harness/tokens.mjs",
+    "commands-run": "node scripts/commands-run.mjs",
     "help": "node harness/help.mjs",
     "division": "node harness/division.mjs",
     "cheatsheet": "node harness/cheatsheet.mjs",

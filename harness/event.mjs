@@ -370,8 +370,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
 // 2.84: which commands a studio actually runs, so a feature nobody uses can be found by evidence instead of by guess.
 // When a harness/ or scripts/ file is run as a command, an empty marker file .studio/usage/<YYYY-MM>/<script>~<word>
 // is made once a month (<word>: the first argument when it is a plain subcommand word, else "_"). No argument values,
-// no environment, nothing appended: a few hundred empty files a month at most. `npm run usage` reads them
-// (scripts/usage.mjs). STUDIO_USAGE_MARKS=off turns it off; a folder that is not a studio (.studio missing) is left alone.
+// no environment, nothing appended: a few hundred empty files a month at most. `npm run commands-run` reads them
+// (scripts/commands-run.mjs). STUDIO_USAGE_MARKS=off turns it off; a folder that is not a studio (.studio missing) is left alone.
 export function markCommandRun(argv = process.argv, { root = REPO_ROOT, stateDir = STUDIO_STATE_DIR, env = process.env, now = new Date() } = {}) {
   try {
     if (/^(off|0|false|no)$/i.test(String(env.STUDIO_USAGE_MARKS || ''))) return null;

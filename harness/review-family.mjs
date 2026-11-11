@@ -36,7 +36,7 @@ export const SAME_FAMILY_RE = /^[ \t>*_#-]*same-family[ \t*_]*:[ \t*_]*(?:no oth
 export const SAME_FAMILY_NONE_RE = /^[ \t>*_#-]*same-family[ \t*_]*:[ \t*_]*no other family available\b/im;
 export const SAME_FAMILY_FILE_REL = 'studio/review.json';
 export const SAME_FAMILY_COMMAND = 'npm run review -- same-family on|off|auto --by <who> [--why "..."]';
-export const SAME_FAMILY_WHO = 'the owner, the overseer (the owner\'s proxy, a beta-mode agent the owner named, or an outside signer), or a Producer or Director session as a board decision; never a worker session';
+export const SAME_FAMILY_WHO = 'the owner, the overseer (the owner\'s proxy, a beta-mode agent the owner named, or an outside signer); never a worker session';
 const TOOLS = new Set(['claude', 'codex', 'agy', 'gemini', 'grok', 'custom', 'nim', 'vertex', 'aider', 'cursor', 'hermes']);
 const TOOL_FAMILY = { claude: 'anthropic', codex: 'openai', agy: 'google', gemini: 'google', grok: 'xai' };
 

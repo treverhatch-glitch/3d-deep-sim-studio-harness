@@ -4,7 +4,7 @@
  * The owner's decision: the overseer may turn same-family reviews on and off; a second model family is the stronger
  * check, but the studio is in beta with limited resources. `auto` is the 2.83/2.84 (b) rule; `on` counts a same-family
  * review (header still written, so each is visible); `off` never counts one. `npm run review -- same-family` flips it, with
- * the harness's board-decision verdict (permission.mjs mayDecide): a person, the owner's stand-ins and a Producer/Director
+ * the harness's protected-decision verdict (permission.mjs mayDecide 'tests'): a person, the owner's stand-ins, not a Producer/Director
  * session may, a worker session never. No environment variable turns it on; the checks read the main checkout's file.
  */
 import fs from 'node:fs';
@@ -158,7 +158,7 @@ export async function selftest284G({ dir, report, tmpRoot }) {
     const b = SET({ STUDIO_ROLE: 'reviewer', STUDIO_LOCK_OWNER: 'reviewer-g2' }, 'on', 'patch');
     const c = SET({ STUDIO_LOCK_OWNER: 'builder-g3' }, 'on', 'patch');
     const d = SET({}, 'on', 'builder-g4');
-    return [[a, b, c, d].every((r) => r.status !== 0 && /Refused/.test(out(r)) && /board decision/.test(out(r))) && /worker/.test(out(a)) && fs.readFileSync(SWITCH, 'utf8') === before && events().filter((x) => x.type === 'review.same_family').length === 0 && decisionLines().length === 0, `${out(a)} | ${out(b)} | ${out(c)} | ${out(d)}`];
+    return [[a, b, c, d].every((r) => r.status !== 0 && /Refused/.test(out(r)) && /loosens a check/.test(out(r))) && /worker/.test(out(a)) && fs.readFileSync(SWITCH, 'utf8') === before && events().filter((x) => x.type === 'review.same_family').length === 0 && decisionLines().length === 0, `${out(a)} | ${out(b)} | ${out(c)} | ${out(d)}`];
   });
   await guard('a beta-mode agent the owner named sets it and it is recorded as theirs (by = the agent, via = beta mode), from an unmarked shell with --by and from its own STUDIO_LOCK_OWNER shell (fails before this fix: no such command)', () => {
     clearAll();
@@ -174,14 +174,14 @@ export async function selftest284G({ dir, report, tmpRoot }) {
     git(S, 'rm', '-q', '-f', 'studio/beta.json'); git(S, 'commit', '-q', '-m', 'beta off', '--no-verify');
     return [a.status === 0 && ja?.sameFamily === 'on' && ja.by === 'patch-bot' && ja.via === 'beta mode' && ma.by === 'patch-bot' && ma.via === 'beta mode' && b.status === 0 && jb?.sameFamily === 'off' && jb.by === 'patch-bot' && mb.was === 'on' && dl.length === 2, `${out(a)} | ${JSON.stringify(ja)} | ${out(b)} | ${JSON.stringify(jb)}`];
   });
-  await guard('a Producer session follows mayDecide for a board decision (allowed, recorded as producer), and a bad value or a missing --by from a person is refused without writing', () => {
+  await guard('a Producer session may not flip the switch (it loosens a check: a protected decision, the owner\'s and the overseer\'s), and a bad value or a missing --by from a person is refused without writing', () => {
     clearAll();
     const a = SET({ STUDIO_ROLE: 'producer', STUDIO_LOCK_OWNER: 'producer-g1' }, 'on', 'producer-g1');
     const j = readSwitch();
     clearAll();
     const bad = SET({}, 'maybe', 'pat');
     const noBy = SET({}, 'on', null);
-    return [a.status === 0 && j?.sameFamily === 'on' && j.via === 'producer' && bad.status !== 0 && /on, off or auto/.test(out(bad)) && noBy.status !== 0 && /--by/.test(out(noBy)) && readSwitch() === null, `${out(a)} | ${JSON.stringify(j)} | ${out(bad)} | ${out(noBy)}`];
+    return [a.status !== 0 && j === null && /Refused/.test(out(a)) && bad.status !== 0 && /on, off or auto/.test(out(bad)) && noBy.status !== 0 && /--by/.test(out(noBy)) && readSwitch() === null, `${out(a)} | ${JSON.stringify(j)} | ${out(bad)} | ${out(noBy)}`];
   });
 
   // ---- malformed or unknown values count as auto ----

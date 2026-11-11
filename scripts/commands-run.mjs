@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * scripts/usage.mjs — 2.84: which harness commands this studio has run, and which it never has.
+ * scripts/commands-run.mjs — 2.84: which harness commands this studio has run, and which it never has.
  *
- *   npm run usage [-- --json]
+ *   npm run commands-run [-- --json]
  *
  * Reads the monthly marker files harness/event.mjs makes (.studio/usage/<YYYY-MM>/<script>~<word>). Lists the commands
  * run in each month on record, then every harness/ and scripts/ file that can be run as a command and has no marker at

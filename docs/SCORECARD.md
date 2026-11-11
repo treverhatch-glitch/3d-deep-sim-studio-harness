@@ -83,3 +83,12 @@ fails the score.
 Measure 12 (machine samples under 25% CPU) reads the single samples when the log has them and otherwise the hourly
 `machine.sample.summary` events, weighted by each summary's sample count (`meta.cpu`: n, mean, under25, over90). A
 summary written before 2.83 has no `meta.cpu`: it is skipped and the note says how many were.
+
+## Which commands a studio runs (2.84)
+
+`npm run commands-run` lists the harness commands this studio has run, by month, and every command file it has never run
+(with its npm script names and size). The evidence is an empty marker file per command and month under
+`.studio/usage/<YYYY-MM>/`, made when a `harness/` or `scripts/` file is run as a command: the script's name and its
+first argument when that is a plain subcommand word, nothing else. It judges commands, not modules: a file never run as
+a command may still be used by import. `STUDIO_USAGE_MARKS=off` (default on) makes no markers. It exists so that a
+feature nobody uses is cut on a month of evidence from a live studio, not on a guess.

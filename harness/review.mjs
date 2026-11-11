@@ -343,19 +343,21 @@ export function recordOutsideReview(id, { by, family, file, model = null, implem
 }
 
 /**
- * 2.84 (g): who may flip the same-family switch, and how the change is recorded. It is a board decision, so the verdict is
+ * 2.84 (g): who may flip the same-family switch, and how the change is recorded. It loosens a check, so it is judged as a protected decision ('tests'), and the verdict is
  * the harness's one (permission.mjs mayDecide, as for an engine push): a person's terminal, the owner's proxy, a beta-mode
- * agent or outside signer, an outside agent, and a Producer/Director session as mayDecide says for 'board'; never a worker
+ * agent or outside signer, an outside agent, and a Producer/Director session only where the owner lets them make protected decisions; never a worker
  * session or a worker's name, under any --by. Returns { ok, by, via } or { ok: false, why }.
  */
 export async function sameFamilyActor(by, { env = process.env, root = REPO_ROOT } = {}) {
   const who = String(by || '').trim();
   const me = String(env.STUDIO_LOCK_OWNER || '').trim();
   const actor = actorOf({ env, root });
-  const no = (why) => ({ ok: false, why: `Refused: ${why}. The same-family switch is a board decision: ${SAME_FAMILY_COMMAND.split(' --by')[0]} is for the owner, the overseer or an outside signer, or a Producer or Director session; a worker session hands the task back (npm run task -- pause <ID> --note "...") and asks one of them.` });
+  const no = (why) => ({ ok: false, why: `Refused: ${why}. The same-family switch loosens a check: ${SAME_FAMILY_COMMAND.split(' --by')[0]} is for the owner, the overseer or an outside signer; a worker session hands the task back (npm run task -- pause <ID> --note "...") and asks one of them.` });
   if (actor.tier === 'worker') return no(`${me || (env.STUDIO_ROLE ? `a launched ${env.STUDIO_ROLE} session` : 'this session')} is a worker`);
   if ((who && !permittedSetter(who)) || (me && !permittedSetter(me))) return no(`${who || me} is a worker name`);
-  const d = mayDecide('board', actor, { root });
+  // It loosens a check, so it is judged as a protected decision ('tests'): the owner, the owner's stand-ins and outside
+  // agents; a Producer or Director session only with the owner's STUDIO_PRODUCER_APPROVES=protected.
+  const d = mayDecide('tests', actor, { root });
   if (!d.ok) return no(d.why);
   // Recorded as the stand-in's own (the proxy, a beta-mode agent, an outside signer), the same way ask.mjs records an answer.
   let s = null;
