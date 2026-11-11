@@ -39,6 +39,7 @@ import { pidAlive } from './proc-identity.mjs';
 import { laneOf, laneList } from './task-hold.mjs';
 import { listLocks } from './lock.mjs';
 import { boardStates } from './train-deps.mjs';
+import { mainOf, snapshotDirty, notTheSessions } from './drift-baseline.mjs';
 
 import { PLANNING_ROLES } from './planning-roles.mjs';
 export { PLANNING_ROLES };
@@ -392,6 +393,11 @@ export function driftCheck(session, { cwd = REPO_ROOT, now = Date.now(), events,
   let ws = null;
   const working = () => (ws = ws || workingState(cwd));
   if (st.base === null) st.base = working().head || '';
+  // 2.84 (j): a session first seen in the main checkout: what is already dirty there (the overseer's own edits) is not
+  // its work. Recorded once, with the content hashes, only for a record that names no lane copy (one that does is judged in its copy); a state written before 2.84 has none and is judged as before.
+  if ((!prev || prev.startedAt !== session.startedAt) && !session.copy?.dir) {
+    try { if (!mainOf(cwd).lane) st.dirty0 = snapshotDirty(cwd, working().files.map((f) => norm(f.file))); } catch { /* judged as before */ }
+  }
   const raised = [];
   const scope = sessionScope(session, { events, locks: locks || listLocks() });
   const raise = (signal, why, detail) => {
@@ -439,10 +445,17 @@ export function driftCheck(session, { cwd = REPO_ROOT, now = Date.now(), events,
 
   // (c) edits outside the brief's scope.
   if (!st.raised['out-of-scope'] && scope.paths.length) {
-    const edited = [...new Set([...working().files.map((f) => f.file), ...ownCommits(cwd, st.base, session.agent)].map(norm))];
+    const committed = new Set(ownCommits(cwd, st.base, session.agent).map(norm));
+    const edited = [...new Set([...working().files.map((f) => f.file), ...committed].map(norm))];
     const extra = String(env.STUDIO_DRIFT_SCOPE_ALLOW || '').split(',').map(norm).filter(Boolean);
     const allowed = [...scope.paths, ...DRIFT_SCOPE_ALWAYS, ...extra];
-    const out = edited.filter((f) => !allowed.some((p) => under(f, p)));
+    let out = edited.filter((f) => !allowed.some((p) => under(f, p)));
+    // 2.84 (j): uncommitted files the session did not touch (main's own dirty files) are not its edits.
+    if (out.length) {
+      let skip = new Set();
+      try { skip = notTheSessions(cwd, session.agent, out.filter((f) => !committed.has(f)), { dirty0: st.dirty0 }); } catch { /* counted as before */ }
+      if (skip.size) out = out.filter((f) => !skip.has(f));
+    }
     if (out.length) raise('out-of-scope', `edited ${out.length} file(s) outside its scope (${scope.paths.join(', ')}): ${out.slice(0, 5).join(', ')}${out.length > 5 ? ', …' : ''}`, { files: out.slice(0, 20), scope: scope.paths });
   }
 
