@@ -5070,6 +5070,14 @@ if (inShard('selftest-282a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.83 (c): a cheaper rules check (env, LFS skip, sparse paths, focused runs, merged inputs) and the CLI / porter's check fixes.
+if (inShard('selftest-283c')) {
+  const dir = copyRepo();
+  const { selftest283C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283c.mjs')).href);
+  await selftest283C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
