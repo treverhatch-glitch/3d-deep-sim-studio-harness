@@ -136,7 +136,15 @@ export function engineFlow(events) {
     }
   }
   const rules = events.filter((e) => e.type === 'engine.rules');
+  // 2.84: branches per land run (the batch window's measure): the runs that ran (not refused, not run, not an error).
+  const ran = lands.filter((e) => ['pass', 'red', 'conflict'].includes(e.meta.status));
+  const perRun = ran.map((e) => (Array.isArray(e.meta.tasks) && e.meta.tasks.length ? e.meta.tasks.length : Array.isArray(e.meta.branches) && e.meta.branches.length ? e.meta.branches.length : 1));
+  // 2.84: the Play Mode stage, focused or full (a run before 2.84 says no playMode: its play stage ran in full).
+  const playRows = lands.map((e) => ({ mode: e.meta.playMode === 'focus' ? 'focus' : 'full', st: (Array.isArray(e.meta.stages) ? e.meta.stages : []).find((x) => String(x?.name || '').toLowerCase() === 'play') })).filter((x) => x.st);
+  const playMins = (m) => playRows.filter((x) => x.mode === m && Number.isFinite(x.st.seconds)).map((x) => x.st.seconds / 60);
   return {
+    branchesPerRun: perRun.length ? { median: r1(quantile(perRun, 0.5)), runs: perRun.length } : null,
+    play: playRows.length ? { focused: playRows.filter((x) => x.mode === 'focus').length, full: playRows.filter((x) => x.mode === 'full').length, focusMedianMin: r1(quantile(playMins('focus'), 0.5)), fullMedianMin: r1(quantile(playMins('full'), 0.5)) } : null,
     runs: lands.length,
     landedLanes,
     passPct: pct(by(['pass']).length, lands.length),
@@ -253,6 +261,8 @@ export function engineText(en, prev = null) {
   L.push(`  Minutes spent in red runs: ${en.redMinutesPct ?? 'n/a'}%${was('redMinutesPct', '%')}; a passing run takes ${en.passMedianMin ?? 'n/a'} min (median)${was('passMedianMin', ' min')}, a red one ${en.redMedianMin ?? 'n/a'} min`);
   if (en.stages.length) L.push(`  Stages (median minutes; red runs that failed there first): ${en.stages.map((s) => `${s.name} ${s.medianMin ?? 'n/a'} (${s.failedFirst})`).join(', ')}`);
   else L.push('  Stages: the land command reports none (STUDIO_LAND_RESULT, docs/NATIVE-ENGINE.md)');
+  if (en.branchesPerRun) L.push(`  Branches per land run: median ${en.branchesPerRun.median ?? 'n/a'} (${en.branchesPerRun.runs} runs)`);
+  if (en.play) L.push(`  Play stage: ${en.play.focused} focused, ${en.play.full} full; median minutes focused ${en.play.focusMedianMin ?? 'n/a'}, full ${en.play.fullMedianMin ?? 'n/a'}`);
   L.push(en.rules.checks ? `  Rules check before the land run: ${en.rules.checks} batch(es), ${en.rules.runs} run(s), ${en.rules.minutes} min; ${en.rules.refused} lane(s) refused before they cost a land run` : '  Rules check before the land run: none ran');
   return L;
 }

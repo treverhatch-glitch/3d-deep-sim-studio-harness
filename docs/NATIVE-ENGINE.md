@@ -127,6 +127,26 @@ half as much machine time as the land runs. Five settings, all optional, in the 
   system can break another system's test, which a focused run does not run; the full run every `fullEveryHours` is
   the backstop, and a land script that reads `STUDIO_RULES_MODE` can run the full tests itself after a focused green.
 
+**Play Mode focus (2.84).** The Play Mode stage became the longest stage of a land (20 to 40 minutes). The same idea,
+as a hint the land script may use: `engines.<x>.play.focus`.
+
+```json
+{ "play": { "focus": { "map": [ { "match": "^Assets/Scripts/([A-Za-z]+)/", "filter": "Game.PlayTests.$1" } ],
+                       "smoke": "Game.PlayTests.Smoke", "join": ";" } } }
+```
+
+When every path the batch changes (the same list the rules focus reads: the batch as it would land, against the target)
+matches a `map` entry, the land command gets `STUDIO_PLAY_MODE=focus` and `STUDIO_PLAY_FILTER` with the matching
+entries' filters plus `smoke`, de-duplicated, joined by `join` (default `;`; `$1`..`$9` as in the rules focus). For
+Unity it also gets `STUDIO_UNITY_PLAYMODE_ARGS`, set to `-testFilter "<filter>"` (the Unity Test Framework's command-line filter;
+UNVERIFIED on a real editor from the harness's side, as the Edit Mode plan is). Otherwise (a path no entry maps, no
+`play.focus`, or a full land run with `STUDIO_LAND_FULL=1`) the engine train sets `STUDIO_PLAY_MODE=full` and neither
+of the other two. A filter with a character outside letters, digits, space and `_ . ; | ~ = ! ( ) * -` is refused (a
+full play stage, said in the train's log), so nothing odd reaches a command line. The retry of a red play stage runs with
+the same filter. The `engine.land` event and the train's result carry `playMode` and `playFilter`. **A focused Play
+Mode run is a weaker check than a full one**: a change in one system can break another system's scene test, which a
+focused run does not run; the daily full land run is the backstop.
+
 ```bash
 npm run engine -- rules show                         # the command, where it comes from, env names, paths, focus
 npm run engine -- rules --ref unity/my-branch        # run it on one branch or commit (a porter's own check)
@@ -215,6 +235,8 @@ fall back to a full Edit Mode run when the filtered run finds no test, and keep 
 | Minutes spent in red runs | the share of land-run minutes that ended red or in a conflict; the median length of a passing and of a red run |
 | Stages | median minutes per stage, and how many red runs failed there first (from the stage report) |
 | Rules check before the land run | batches checked, runs, minutes, and lanes refused before they cost a land run |
+| Branches per land run (2.84) | the median number of tasks in a land run that ran (pass, red or conflict), and how many runs |
+| Play stage (2.84) | land runs whose play stage was focused or full (from `playMode` on `engine.land`; older runs count as full), and the median minutes of each |
 
 The baseline from the crew's log (2026-10-31 to 2026-11-08): 67 land runs, 11 lanes landed, 3,524 machine minutes;
 320 minutes per landed lane; 16.4% passed; 25.4% refused or not run (495 minutes waiting, 16 of 17 for free memory);

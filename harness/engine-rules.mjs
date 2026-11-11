@@ -257,10 +257,23 @@ export function rulesSelection({ changed = [], cfg, full = false, fullWhy = '' }
   if (full) return fullSel(fullWhy || 'a full run was asked for');
   if (!ch) return fullSel('the batch\'s changed paths are not known');
   if (!ch.length) return fullSel('the batch changes no path');
+  const ff = focusFilters({ changed: ch, map: cfg.focus.map, smoke: cfg.focus.smoke, join: cfg.focus.join });
+  if (!ff.ok) return fullSel(`${ff.unmatched} matches no rules.focus.map entry`);
+  return { mode: 'focus', filter: ff.filter, command: cfg.focus.test.split('{filter}').join(ff.filter), changed: ch, why: `${ch.length} changed path(s), all mapped by rules.focus` };
+}
+
+/**
+ * 2.84: the focus mapping shared by the rules check and the land's Play Mode stage. changed: repo paths; map:
+ * [{ match: <regex>, filter }]. Every path must match at least one entry; each matching entry gives its filter with
+ * $1..$9 replaced by the regex groups (a group with anything but letters, digits, . _ and - makes that entry not match:
+ * the filter goes onto a command line). { ok: true, filters, filter } (the unique filters in order, then smoke, joined)
+ * or { ok: false, unmatched: <the first path no entry maps> }.
+ */
+export function focusFilters({ changed = [], map = [], smoke = '', join = '|' } = {}) {
   const filters = [];
-  for (const p of ch) {
+  for (const p of changed) {
     let hit = false;
-    for (const m of cfg.focus.map) {
+    for (const m of map) {
       let re; try { re = new RegExp(m.match); } catch { continue; }
       const g = re.exec(p);
       if (!g) continue;
@@ -271,11 +284,46 @@ export function rulesSelection({ changed = [], cfg, full = false, fullWhy = '' }
       hit = true;
       if (!filters.includes(f)) filters.push(f);
     }
-    if (!hit) return fullSel(`${p} matches no rules.focus.map entry`);
+    if (!hit) return { ok: false, unmatched: p };
   }
-  if (cfg.focus.smoke && !filters.includes(cfg.focus.smoke)) filters.push(cfg.focus.smoke);
-  const filter = filters.join(cfg.focus.join);
-  return { mode: 'focus', filter, command: cfg.focus.test.split('{filter}').join(filter), changed: ch, why: `${ch.length} changed path(s), all mapped by rules.focus` };
+  if (smoke && !filters.includes(smoke)) filters.push(smoke);
+  return { ok: true, filters, filter: filters.join(join) };
+}
+
+/**
+ * 2.84: engines.<x>.play.focus = { map: [{ match, filter }], smoke, join } (join ";" when not given: the Unity Test
+ * Framework's separator), or null (not set, or no usable map entry).
+ */
+export function playFocusConfig(cfg = {}) {
+  const f = cfg?.play && typeof cfg.play === 'object' ? cfg.play.focus : null;
+  if (!f || typeof f !== 'object' || !Array.isArray(f.map)) return null;
+  const map = f.map.filter((m) => m && typeof m.match === 'string' && typeof m.filter === 'string').map((m) => ({ match: m.match, filter: m.filter }));
+  if (!map.length) return null;
+  return { map, smoke: typeof f.smoke === 'string' ? f.smoke.trim() : '', join: typeof f.join === 'string' && f.join ? f.join : ';' };
+}
+
+/** 2.84: the characters a Play Mode filter may hold; anything else and the play stage runs in full (it reaches a command line). */
+export const PLAY_FILTER_SAFE = /^[A-Za-z0-9_.;|~=!()* -]+$/;
+
+/**
+ * 2.84: what the land's Play Mode stage is told. changed: the batch's changed repo paths (null: not known); cfg: the
+ * engine's config (engines.<x>); full: a full land run (fullLandDue). { mode: 'focus' | 'full', filter, why, refused? }.
+ * Focus only when every changed path matches a play.focus.map entry and the joined filter holds only PLAY_FILTER_SAFE
+ * characters. A hint the land script may use: a focused Play Mode run is a weaker check than a full one.
+ */
+export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = '' } = {}) {
+  const pf = playFocusConfig(cfg);
+  const fullSel = (why, extra = {}) => ({ mode: 'full', filter: '', why, ...extra });
+  if (!pf) return fullSel('no play.focus');
+  if (full) return fullSel(fullWhy || 'a full land run');
+  if (!changed) return fullSel('the batch\'s changed paths are not known');
+  const ch = [...new Set(changed.map((p) => String(p || '').replace(/\\/g, '/')).filter(Boolean))];
+  if (!ch.length) return fullSel('the batch changes no path');
+  const ff = focusFilters({ changed: ch, map: pf.map, smoke: pf.smoke, join: pf.join });
+  if (!ff.ok) return fullSel(`${ff.unmatched} matches no play.focus.map entry`);
+  if (!ff.filter) return fullSel('the filter is empty');
+  if (!PLAY_FILTER_SAFE.test(ff.filter)) return fullSel(`refused the filter "${ff.filter.slice(0, 120)}": only letters, digits, space and _ . ; | ~ = ! ( ) * - may reach the land command`, { refused: true });
+  return { mode: 'focus', filter: ff.filter, why: `${ch.length} changed path(s), all mapped by play.focus` };
 }
 
 /** 2.83: is a full run due (rules.focus.fullEveryHours since the last full pass, STUDIO_ENGINE_RULES_FULL, --full)? '' or why. */

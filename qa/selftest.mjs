@@ -5151,6 +5151,14 @@ if (inShard('selftest-284a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.84 (h): the engine train's batch window, and the Play Mode focus.
+if (inShard('selftest-284h')) {
+  const dir = copyRepo();
+  const { selftest284H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284h.mjs')).href);
+  await selftest284H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
