@@ -59,6 +59,7 @@ import { shrinkAtDone } from './ratchet.mjs';
 import { capRefusal } from './round-cap.mjs';
 import { eligibility, recordAttempt, clearAttempts, sameBlocker } from './attempts.mjs';
 import { pinRefusal } from './task-pin.mjs';
+import { TASK_LINE_RE } from './board-line.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 // 2.30c (#13): finished tasks live in studio/DONE.md, so NEXT.md (read by every agent) holds only open work.
@@ -68,7 +69,7 @@ export const CURRENT_TASK_FILE = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md
 // 2.58.0 (P-057): the line the harness writes, plus the drifts people make by hand, read as the same task and put back
 // in shape by the next write: an ASCII "-" (or "--", "–") for the "—", a role without backticks, "[X]", a "*" bullet,
 // a lower-case priority. Anything else that isn't the harness's own heading or note is kept (see UNREADABLE below).
-const TASK_LINE_RE = /^[-*]\s+\[([ xX>~])\]\s+\*\*([A-Z]+-\d+)\*\*\s+\[([Pp][0-3])\]\s+\((`?)([^`()]+?)\4\)\s+(?:—|–|--?)\s+(.+)$/;
+// 2.84: the pattern lives in harness/board-line.mjs, so a reader that only lists ids (the overseer's sheet) uses the same one.
 /** The section kept lines go under, at the end of NEXT.md or DONE.md (2.58.0, P-057). */
 export const UNREADABLE_HEADING = '## UNREADABLE (kept by the harness: fix the format)';
 const UNREADABLE_NOTE = '_The harness couldn\'t read these lines as tasks, so it keeps them here instead of dropping them. Rewrite each like a task line ("- [ ] **T-123** [P1] (`builder`) — Title"; it then counts as waiting work), or delete it._';

@@ -42,6 +42,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents } from './event.mjs';
+import { readJson } from './fsafe.mjs';
+import { TASK_LINE_RE } from './board-line.mjs';
 
 export const OVERSEER_REL = 'studio/overseer.json';
 const DAY = 86400000;
@@ -282,7 +284,7 @@ export const passText = (p) => [`Overseer pass, last ${p.window.hours} h: ${p.la
 // since (ISO or null), why, cmd (or null) }. A missing or malformed state file is an empty section, never a crash. ----
 
 const SHEET_HOURS = 24;
-const readJ = (f, dflt) => { try { const j = JSON.parse(fs.readFileSync(f, 'utf8')); return j ?? dflt; } catch { return dflt; } };
+const readJ = (f, dflt) => readJson(f, dflt) ?? dflt;
 /** "3 h", "45 min": how long ago `iso` was (empty when it has no time). */
 export function ageText(iso, now) {
   const t = Date.parse(iso || '');
@@ -294,15 +296,14 @@ export function ageText(iso, now) {
 function sheetBoard(root) {
   const open = new Map();
   const done = new Set();
-  const re = /^[-*]\s+\[([ xX>~])\]\s+\*\*([A-Z]+-\d+)\*\*\s+\[[Pp][0-3]\]\s+\(`?([^`()]+?)`?\)\s+(?:—|–|--?)\s+(.+)$/;
   for (const f of ['NEXT.md', 'DONE.md']) {
     let text = '';
     try { text = fs.readFileSync(path.join(root, 'studio', f), 'utf8').replace(/\r\n?/g, '\n'); } catch { /* none */ }
     for (const line of text.split('\n')) {
-      const m = line.match(re);
+      const m = line.trim().match(TASK_LINE_RE);
       if (!m) continue;
       if (/x/i.test(m[1]) || f === 'DONE.md') done.add(m[2]);
-      else open.set(m[2], { title: m[4].trim(), role: m[3].trim(), mark: m[1] });
+      else open.set(m[2], { title: m[6].trim(), role: m[5].trim(), mark: m[1] });
     }
   }
   for (const id of done) open.delete(id);
