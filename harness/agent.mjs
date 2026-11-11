@@ -92,6 +92,8 @@ import { toolCmd } from './spend-guard.mjs';
 import { pickTool, readBudget, budgetStopFor } from './budget.mjs';
 import { STOP_NOTE, loopHandBacks, parkOnce } from './busy.mjs';
 import { sessionOutcome, parkIfNoWork } from './session-outcome.mjs';
+import { PLANNING_OUTCOME_ROLES, boardEventsBy } from './wake-gate.mjs';
+import { startRefusal } from './attempts.mjs';
 import { writeAtomic } from './fsafe.mjs';
 import { selfIdentity, spawnedIdentity, pidAlive, recordAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
 import { gateEnv } from './gate-env.mjs';
@@ -489,7 +491,7 @@ export function markGone() {
     const endedAt = lastSeen === null ? at : new Date(Math.min(Date.now(), lastSeen + (Number.isFinite(graceS) && graceS >= 0 ? graceS : 120) * 1000)).toISOString();
     fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...s, running: undefined, stalled: undefined, beatAgeMin: undefined, ending: undefined, status: 'ended', endedAt: at, reason: 'its process is gone (killed, crashed or the machine restarted)' }, null, 2));
     // 2.73.2 (B-72): one agent.session.end per session (claimSessionEnd), whichever pass or launcher records it.
-    if (claimSessionEnd(s.agent, s.startedAt, 'watch')) emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, task: sessionTask(s) || claimedSince(s.agent, s.startedAt) || undefined, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone', endedAt, detectedAt: at, startedAt: s.startedAt || undefined, bootAt: new Date(Date.now() - os.uptime() * 1000).toISOString() } }); // 2.71.0 (z): times for harness/workaround.mjs
+    if (claimSessionEnd(s.agent, s.startedAt, 'watch')) emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, task: sessionTask(s) || claimedSince(s.agent, s.startedAt) || undefined, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone', ...(PLANNING_OUTCOME_ROLES.includes(s.role) ? { outcome: { counts: false, boardEvents: boardEventsBy(s.agent, readRecentEvents(20000), { from: Date.parse(s.startedAt || '') || 0 }) } } : {}), endedAt, detectedAt: at, startedAt: s.startedAt || undefined, bootAt: new Date(Date.now() - os.uptime() * 1000).toISOString() } }); // 2.71.0 (z): times for harness/workaround.mjs
     // 2.65.0: the uniform job.done (harness/jobs.mjs) beside agent.session.end.
     jobDone({ kind: 'session', id: s.agent, agent: s.agent, task: s.task || null, result: 'gone', ms: Date.parse(s.startedAt) ? Date.now() - Date.parse(s.startedAt) : null, tail: `its process is gone (last heartbeat ${s.lastBeat || 'never'})`, log: s.log || null, extra: { role: s.role || null } });
     // Its own copy: save what's uncommitted, keep unmerged commits on their branch, remove the copy.
@@ -869,6 +871,11 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
       else if (outcome && aider && aider.result !== 'queued' && aider.result !== 'done') outcome = { ...outcome, why: `the launcher claimed ${oTask} for aider; ${aider.line}` };
     }
   } catch { outcome = null; }
+  // 2.84: a planning session's outcome: how many board-changing events it emitted (harness/wake-gate.mjs BOARD_EVENT_TYPES);
+  // the wake gate and the scorecard read it. Without a task of its own it never counts as a no-work exit (counts: false).
+  if (PLANNING_OUTCOME_ROLES.includes(role)) {
+    try { outcome = { ...(outcome || { counts: false }), boardEvents: boardEventsBy(agent, readRecentEvents(20000), { from: Date.parse(s0.startedAt || '') || 0 }) }; } catch { /* the outcome is a record, never a blocker */ }
+  }
   let tok = tokensFrom(log);
   // 2.76.0 (B-82): no result line of its own (the launcher ended it, it crashed): its usage from the stream, and its
   // cost estimated at studio/prices.json (meta.costEstimated), so API spend isn't undercounted.
@@ -2307,6 +2314,14 @@ export function startAgent(opts, { detach = false } = {}) {
     const held = listLocks().find((l) => l.key === `task:${opts.task}` && l.owner !== agent);
     if (busy) return { ok: false, message: `Not started: ${busy.agent} is already on ${opts.task}.` };
     if (held) return { ok: false, message: `Not started: ${held.owner} holds ${opts.task}.` };
+    // 2.84: the question task start would ask (holds, parks, trains, the budget, the round cap): a session whose task
+    // start is refused is a dead session ("held: queued for the unity train", "parked by watchdog"). Same words.
+    let refused = null;
+    try { refused = startRefusal(opts.task, { agent, role, q: parseNextQueue() }); } catch { refused = null; }
+    if (refused) {
+      emitEvent({ type: 'agent.start.refused', agent, to: 'producer', task: opts.task, status: 'warn', msg: `${agent} not started: ${refused.message}`.slice(0, 600), meta: { role, kind: refused.kind, reason: String(refused.why).slice(0, 300) } });
+      return { ok: false, skipped: true, refused: 'task-start', message: `Not started: ${refused.message}` };
+    }
   }
   // 2.78.1 (e): `agent stop` then a start with the same name: the stopped session's lane copy is still in use (its clean-up
   // runs on, or it changed minutes ago), and the launch would be refused once the copy is wanted. Say which fresh name to
@@ -2546,7 +2561,7 @@ export async function fillAgents({ byDirector = false, autonomous = false } = {}
  * 2.58.0: `auto: true` is a wake-up nobody asked for (the game-dev loop, the queue refill, the development
  * cycle): it starts nothing while auto-start is off (npm run mode -- autostart on --by <name>).
  */
-export function wake(role, { task = null, why = '', auto = false } = {}) {
+export function wake(role, { task = null, why = '', auto = false, note = '' } = {}) {
   const label = { rnd: 'R&D', producer: 'the Producer', director: 'the Director', art: 'the art department', builder: 'a builder' }[role] || role;
   // 2.80: every wake comes from the supervisor's passes (the War Room, whose clicks woke agents too, is gone).
   const from = 'supervisor';
@@ -2559,7 +2574,8 @@ export function wake(role, { task = null, why = '', auto = false } = {}) {
     if (!lastAlert || Date.now() - Date.parse(lastAlert.ts) > 3600000) emitEvent({ type: 'agent.no_tool', agent: from, to: 'human', status: 'warn', msg });
     return { started: false, next: `${task ? `Queued as ${task} for ${label}. ` : `Saved for ${label}. `}No tool is set to start ${label} on its own (STUDIO_AGENT_TOOL or STUDIO_${roleKey(role)}_TOOL in .env), so it waits until someone starts that agent (Start agent in Ops, or npm run agent).` };
   }
-  const r = startAgent({ role, agent: nextAgentName(role), task }, { detach: true });
+  // 2.84: a note (the development cycle's brief to read first) goes into the session's kickoff.
+  const r = startAgent({ role, agent: nextAgentName(role), task, ...(note ? { note, by: 'harness (wake)' } : {}) }, { detach: true });
   if (!r.ok) return { started: false, next: `${task ? `Queued as ${task}. ` : ''}${label} didn't start: ${r.message.replace(/^Not started: /, '')} It starts when a slot frees.` };
   emitEvent({ type: 'agent.wake', agent: from, to: role, task, msg: `Started ${r.agent} (${label})${why ? ` for ${why}` : ''}` });
   return { started: true, agent: r.agent, next: `${label} is starting now as ${r.agent} (${r.tool}${r.model !== 'unknown' ? `, ${r.model}` : ''})${task ? ` on ${task}` : ''}. Watch it in Ops.` };

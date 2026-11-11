@@ -57,7 +57,7 @@ import { checkStamped, stampWrite, watchCommand } from './workaround.mjs';
 import { gateEnv } from './gate-env.mjs';
 import { shrinkAtDone } from './ratchet.mjs';
 import { capRefusal } from './round-cap.mjs';
-import { eligibility, recordAttempt, clearAttempts, sameBlocker } from './attempts.mjs';
+import { eligibility, recordAttempt, clearAttempts, sameBlocker, startRefusalWords } from './attempts.mjs';
 import { pinRefusal } from './task-pin.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
@@ -465,7 +465,7 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   if (stop) return { error: 'stopped', message: `The studio is stopped (by ${stop.by}${stop.reason ? `: ${stop.reason}` : ''}). Don't start work: finish or hand back what you hold (task pause <ID> --note "..."), then wait. A person resumes it with: npm run task -- resume --by <name>` };
   // Dependencies, parking and a stop's cooldown (harness/task-hold.mjs). Work already in progress may continue.
   const held = holdReason(taskId, parseNextQueue(), Date.now(), undefined, process.env.STUDIO_ROLE || null);
-  if (held && !force && !parseNextQueue().inProgress.some((t) => t.id === taskId)) return { error: 'held', message: `${taskId} can't start yet: ${held}. Pick another task (npm run task -- next), or a person releases it.` };
+  if (held && !force && !parseNextQueue().inProgress.some((t) => t.id === taskId)) return { error: 'held', message: startRefusalWords(taskId, { kind: 'held', why: held }) }; // 2.84: the launcher says the same words
   // 2.77.0 (P9.2): a task in progress whose lane is queued for the merge train is its lane agent's: another agent can't
   // claim it (the supervisor's or a hand-started builder's --task) until it lands or leaves the queue. --force: a person.
   if (!force) {

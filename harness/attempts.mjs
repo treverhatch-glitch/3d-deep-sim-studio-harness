@@ -141,3 +141,34 @@ export function eligibility(taskId, { agent = null, q, role = null, now = Date.n
   if (cap) return { kind: 'round-cap', why: cap };
   return null;
 }
+
+/**
+ * 2.84: the words `task start` prints for an eligibility verdict (held, over budget, round cap). One place, so the
+ * launcher's refusal says what `task start` would have said.
+ */
+export function startRefusalWords(taskId, v) {
+  if (!v) return '';
+  if (v.kind === 'held') return `${taskId} can't start yet: ${v.why}. Pick another task (npm run task -- next), or a person releases it.`;
+  if (v.kind === 'round-cap') return `${taskId} can't start: ${v.why}.`;
+  return `${taskId} can't start: ${v.why}`;
+}
+
+/**
+ * 2.84: would `task start <taskId>` by `agent` (a session of `role`) be refused now? The launcher asks before it starts
+ * a session for a named task (the supervisor's picks, agent start --task): a session whose first step is refused only
+ * costs money. Work already in progress may continue (as task start: its hold does not apply). Returns
+ * { kind, why, message } or null. Never throws.
+ */
+export function startRefusal(taskId, { agent = null, role = null, q, now = Date.now(), holds, events } = {}) {
+  try {
+    const inProgress = Boolean(q?.inProgress?.some((t) => t.id === taskId));
+    let v = eligibility(taskId, { agent, q, role, now, holds, events });
+    if (v?.kind === 'held' && inProgress) {
+      const b = overBudget(taskId, { events, now });
+      const cap = !b.over && agent ? capRefusal(taskId, agent, { events, now }) : '';
+      v = b.over ? { kind: 'over-budget', why: b.why } : cap ? { kind: 'round-cap', why: cap } : null;
+    }
+    return v ? { ...v, message: startRefusalWords(taskId, v) } : null;
+  } catch { return null; }
+}
+
