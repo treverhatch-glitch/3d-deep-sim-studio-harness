@@ -29,6 +29,8 @@ of any pace: twice the agents (up to 12), agents start automatically, the Direct
 four times as often and the Producer every hour. `--until <HH:MM UTC|ISO>` ends it at a time and `--until off` keeps it until turned off; when it runs out the studio says so once (a Studio Status line and `mode.boost_expired`, with the agent target it fell back to). Going faster without the leads looking more often is
 how studios drift; the lever does both. Agents start on their own only with auto-start on (below).
 
+2.83: for more builders at the same planning spend, use `npm run mode -- boost on --by <name> --builders-only`. It raises the agent and builder caps exactly as boost does and leaves the Director's and Producer's check-in cadence as the pace has it; `npm run mode` says which kind is on.
+
 ## Auto-start (off by default)
 
 ```bash

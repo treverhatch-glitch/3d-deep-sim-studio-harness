@@ -304,6 +304,14 @@ export const PERSON_CAUSE = /\ba stop, not a failure\b/i;
 // PU-58 (2.78.0): the honest exit (task impossible) is a report, not a failure: it counts nowhere as a hand-back.
 export const IMPOSSIBLE_NOTE = /(?:^|Handed back [^:]+:\s*)Impossible as written/i;
 export const impossibleExit = (e) => e?.meta?.cause === 'impossible' || IMPOSSIBLE_NOTE.test(String(e?.msg || ''));
+/**
+ * 2.83: a refresh hand-off (a session that reached its turn or time cap and hands its task to a fresh session by design):
+ * not a failure of the model or route that ran it. agent.mjs writes "A fresh session continues from this hand-back".
+ */
+export const REFRESH_NOTE = /\bA fresh session continues from this hand-back\b/i;
+export const refreshCaused = (e) => e?.meta?.cause === 'refresh' || REFRESH_NOTE.test(String(e?.msg || ''));
+/** 2.83: a session end that says it was not a failure: a refresh, a person's stop or pause, or a usage-limit stop. */
+export const endNotAFailure = (e) => Boolean(e?.meta?.refreshed || e?.meta?.stoppedBy || e?.meta?.usageLimit) || /refreshed \(session cap\)|^(paused|stopped) by |usage limit:/i.test(String(e?.meta?.reason || ''));
 export const personCaused = (e) => e?.meta?.cause === 'person' || PERSON_CAUSE.test(String(e?.msg || '')) || impossibleExit(e);
 
 /**

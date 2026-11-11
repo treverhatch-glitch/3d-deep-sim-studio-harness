@@ -12,7 +12,7 @@ import path from 'node:path';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { modelFamily } from './families.mjs';
 import { LIMIT_STOP } from './budget.mjs';
-import { harnessCaused, personCaused } from './busy.mjs';
+import { harnessCaused, personCaused, refreshCaused } from './busy.mjs';
 
 export const ROLES_CHECKED = ['producer', 'director', 'planner', 'builder', 'reviewer', 'qa-playtester'];
 export const SUGGESTED = {
@@ -89,8 +89,9 @@ export function escalationFor(taskId, { events = readRecentEvents(20000), env = 
   const lastDone = mine.filter((e) => e.type === 'task.done').pop();
   const after = lastDone ? mine.slice(mine.indexOf(lastDone) + 1) : mine;
   // PU-19: a session that stopped at its usage limit didn't fail the task; it isn't a reason to go a tier up.
+  // 2.83: nor a refresh hand-off (a fresh session continues by design).
   // 2.58.3 (N1): nor a person's stop, nor a hand-back the harness caused (claim ran out, merge refused).
-  const failed = after.filter((e) => e.type === 'task.paused' && !LIMIT_STOP.test(e.msg || '') && !harnessCaused(e) && !personCaused(e)).length;
+  const failed = after.filter((e) => e.type === 'task.paused' && !LIMIT_STOP.test(e.msg || '') && !harnessCaused(e) && !personCaused(e) && !refreshCaused(e)).length;
   if (!failed) return null;
   const lastModel = after.filter((e) => (e.type === 'task.start' || e.type === 'agent.session.start') && e.model && e.model !== 'unknown').pop()?.model || null;
   const from = tierOf(lastModel);
