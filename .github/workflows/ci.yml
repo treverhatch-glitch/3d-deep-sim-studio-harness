@@ -47,6 +47,9 @@ jobs:
       # 2.72.0 (d): the self-test (the gate that proves each gate can fail) runs in the parallel shards below.
       - name: npm run release (the self-test runs in release-gate-selftest)
         run: node scripts/release.mjs --except selftest
+      # 2.84: no command that awaits an import which imports it back (exit 13, unsettled top-level await).
+      - name: No top-level await that closes an import cycle
+        run: node scripts/check-top-level-await.mjs
       - name: Optional gates (report only)
         if: always()
         run: node scripts/run-gates.mjs --only balance,fun,renderer-budget

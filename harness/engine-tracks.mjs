@@ -547,7 +547,8 @@ export function syncEngineTarget({ task, dir, repo = null, root = mainRoot() } =
 
 // ---- the CLI --------------------------------------------------------------------------------------------------------
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+// 2.84: the command-line part is an async function, not a top-level await: an import cycle through a top-level await ends the process with exit 13.
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)))(async () => {
   const argv = process.argv.slice(2);
   const json = argv.includes('--json');
   const root = mainRoot();
@@ -574,7 +575,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   else if (!list.length) console.log('No engine target: studio/game.json "engines": { "<name>": { "land": "<command>", "target": "<branch>" } } names one (docs/ENGINE-TRACKS.md).');
   else for (const t of list) console.log(`${t.name} (${t.label}): ${t.land ? 'land command set' : 'no land command'}; ${t.queued} queued; one land run ~${t.expected.minutes ?? '?'} min (${t.expected.from}), ${t.rig.ramGb} GB, ${t.rig.cpuThreads} threads as machine:heavy "${t.heavyKind}"; RAM floor ${t.floor.gb} GB (${t.floor.from}); self-tune: ${t.tune.join(', ') || 'nothing'}${t.repo ? `; its repo: ${t.repo}` : ''}`);
   process.exit(0);
-}
+})().catch((e) => { console.error(e?.stack || String(e)); process.exit(1); });
 
 /**
  * 2.83: what a session left in its task's engine worktree: { dir, branch, repo, commits, dirty: [paths], queued } or null
