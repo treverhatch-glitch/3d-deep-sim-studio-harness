@@ -146,7 +146,7 @@ export function readLineStatus(root = REPO_ROOT, now = Date.now()) {
   const running = pick('running', 'busy', 'active', 'now');
   const target = pick('target', 'want', 'wanted', 'n', 'goal');
   const blocked = (Array.isArray(s.blocked) ? s.blocked : []).slice(0, 5).map((x) => (typeof x === 'string' ? x : `${x?.task || x?.id || '?'}: ${x?.why || x?.reason || '?'}`)).map((x) => short(x, 100));
-  return { running, target, text: short(s.text || s.line || s.summary || '', 200), blocked, at, fresh: now - at <= LINE_FRESH_MS && now - at >= -60000 };
+  return { running, target, text: short(s.text || s.line || s.summary || '', 200), lead: short(typeof s.lead === 'string' ? s.lead : '', 260), blocked, at, fresh: now - at <= LINE_FRESH_MS && now - at >= -60000 };
 }
 
 /**
@@ -259,7 +259,7 @@ export function alertsNow(f, { env = process.env, state = {}, passWhy = [] } = {
   let low = null;
   if (f.line?.fresh && Number.isFinite(f.line.target) && Number.isFinite(f.line.running) && f.line.running < f.line.target) low = { have: f.line.running, want: f.line.target, from: 'the Line Producer' };
   else if (!f.line?.fresh && s.minBuilders > 0 && f.supRunning && builders < s.minBuilders) low = { have: builders, want: s.minBuilders, from: 'STUDIO_COMM_MIN_BUILDERS' };
-  if (low && !stopped && Date.parse(state.lowSince || '') && f.now - Date.parse(state.lowSince) >= LOW_BUILDERS_MS) add('builders-low', 'fix', `Only ${low.have} of ${low.want} builders busy (${low.from}) for ${mins(f.now - Date.parse(state.lowSince))}${f.line?.blocked?.length ? `; blocked: ${f.line.blocked.slice(0, 3).join('; ')}` : ''}.`);
+  if (low && !stopped && Date.parse(state.lowSince || '') && f.now - Date.parse(state.lowSince) >= LOW_BUILDERS_MS) add('builders-low', 'fix', f.line?.lead && low.from === 'the Line Producer' ? `${low.have} of ${low.want} builders busy for ${mins(f.now - Date.parse(state.lowSince))}: ${f.line.lead}.` : `Only ${low.have} of ${low.want} builders busy (${low.from}) for ${mins(f.now - Date.parse(state.lowSince))}${f.line?.blocked?.length ? `; blocked: ${f.line.blocked.slice(0, 3).join('; ')}` : ''}.`); // 2.83: the planner's own reason leads, when it has one
   f.lowNow = Boolean(low && !stopped);
   // The crew breaker, a halt, stop files.
   for (const c of f.crewPaused) add(`breaker:${c.role}`, 'fix', `Crew breaker: launching ${c.role} is paused${c.why ? ` (${c.why})` : ''}. New work clears it, or: npm run crew -- resume ${c.role} --by <name>`);

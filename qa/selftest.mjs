@@ -5094,6 +5094,14 @@ if (inShard('selftest-283e')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.83 (f): the Line Producer and the alerts stop saying the same thing for hours.
+if (inShard('selftest-283f')) {
+  const dir = copyRepo();
+  const { selftest283F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283f.mjs')).href);
+  await selftest283F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

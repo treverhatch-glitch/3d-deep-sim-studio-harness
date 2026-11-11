@@ -84,7 +84,11 @@ export async function queueDepthPass({ q, cap, now = Date.now(), dryRun = false,
   let woke = null;
   if (String(env.STUDIO_REFILL_WAKE || '') !== 'off') {
     const wake = deps.wake || (async (why) => (await import('./agent.mjs')).wake('producer', { why, auto: true }));
-    try { woke = await wake(`the queue is below its depth target (${r.ready.length} ready, target ${target}): plan builder tasks outside the blocked areas; never re-list done work`); } catch {}
+    // 2.83: while the only blocker is a running train or a chain gate, a wake can do nothing: at most one per STUDIO_PRODUCER_BLOCKED_WAKE_MIN.
+    let back = { skip: false };
+    try { back = (await import('./line-producer.mjs')).producerWakeBackoff({ now, env, kind: 'queue-below-target', ...(deps.lineStatus !== undefined ? { status: deps.lineStatus } : {}) }); } catch {}
+    if (back.skip) woke = { skipped: true, why: back.why };
+    else try { woke = await wake(`the queue is below its depth target (${r.ready.length} ready, target ${target}): plan builder tasks outside the blocked areas; never re-list done work`); } catch {}
   }
   try { fs.mkdirSync(path.dirname(STATE()), { recursive: true }); fs.writeFileSync(STATE(), `${JSON.stringify({ short, at: new Date(now).toISOString() }, null, 2)}\n`); } catch {}
   return { target, ready: r.ready, short, asked: true, woke, blocked: r.blocked, why: msg };
