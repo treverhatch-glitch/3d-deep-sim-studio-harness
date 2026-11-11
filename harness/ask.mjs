@@ -94,8 +94,9 @@ export function askKind(a) {
  * The owner's stand-in in this shell: the owner proxy, or a beta-mode actor (beta mode's named agents, an outside signer,
  * a Producer/Director session), for this kind of decision. { owner, agent, via } | { refused } | null. `by` names the
  * agent in a shell the harness didn't launch and that names nobody (2.79 (c): --by grokbot, --by opus-1).
+ * 2.84 (g): exported: `npm run review -- same-family` records its caller the same way.
  */
-function ownerStandIn(env = process.env, { by = '', kind = 'board' } = {}) {
+export function ownerStandIn(env = process.env, { by = '', kind = 'board' } = {}) {
   const said = selfNamingShell(env) && by ? { ...env, STUDIO_LOCK_OWNER: String(by).trim() } : env;
   try { const p = proxyShell({ env: said }); if (p.ok) return kind === 'board' || kind === 'protected' ? { owner: String(p.doc.by), agent: String(p.doc.agent), via: 'owner proxy' } : { refused: `${p.doc.agent} is the owner's proxy` }; } catch {}
   try {

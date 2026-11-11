@@ -3,6 +3,7 @@
  * harness/review.mjs — a second opinion from a model made by another company, in one command.
  *
  *   npm run review -- <TASK_ID> [--local] [--implementer <model>] [--dry-run] [--router-only]
+ *   npm run review -- same-family [on|off|auto] --by <who> [--why "..."]   2.84 (g): whether a same-family review counts
  *   npm run review -- record <TASK_ID> --by <reviewer name> --family <xai|deepseek|openai|google|anthropic|…>
  *                     --file <review.md> [--model <m>] [--implementer <model>] [--no-commit]
  *
@@ -27,12 +28,12 @@ import { parseNextQueue } from './task.mjs';
 import { taskType } from './done-check.mjs';
 import { taggedCommits } from './scorecard.mjs';
 import { modelFamily } from './families.mjs';
-import { SAME_FAMILY_RE, sameFamilyAccepted, sameFamilyRefusal, SAME_FAMILY_HEADER } from './review-family.mjs';
+import { sameFamilyDecision, sameFamilyRefusal, readSameFamily, studioRoot, configuredFamilies, SAME_FAMILY_FILE_REL, SAME_FAMILY_COMMAND } from './review-family.mjs';
 import { routeChatCompletion, getRouterMatrix } from './route.mjs';
 import { scrub } from './secrets.mjs';
 import { spawnAgentSync } from './launch.mjs';
 import { contractForReview } from './contracts.mjs';
-import { WORKER_NAME, DECIDER_ROLES } from './permission.mjs';
+import { WORKER_NAME, DECIDER_ROLES, AGENT_SHELL, permittedSetter, mayDecide, actorOf } from './permission.mjs';
 
 const DIFF_CAP = 24000;
 const VERDICT_WORDS = /\b(approve[sd]?|lgtm|request(ed)? changes|changes requested|reject(ed)?|blocking)\b/gi;
@@ -297,8 +298,10 @@ export function recordOutsideReview(id, { by, family, file, model = null, implem
   const impl = modelFamily(g.builder);
   if (fam === 'unknown') return { ok: false, error: `Unknown family "${family}".` };
   // 2.83: a same-family review is taken when its text says no other family is available AND none is configured.
-  const sameOk = impl !== 'unknown' && fam === impl && sameFamilyAccepted(text, g.builder, env);
-  if (impl !== 'unknown' && fam === impl && !sameOk) return { ok: false, error: `Refused: ${by} (${fam}) is the same family as the builder (${g.builder}, ${impl}); a review from another family is what counts.${SAME_FAMILY_RE.test(text) ? ` (${sameFamilyRefusal(g.builder, env)})` : ''}` };
+  // 2.84 (g): the studio's switch (studio/review.json): auto is the rule above, on counts it with either header, off never.
+  const dec = impl !== 'unknown' && fam === impl ? sameFamilyDecision(text, g.builder, env) : null;
+  const sameOk = Boolean(dec?.ok);
+  if (dec && !sameOk) { const w = sameFamilyRefusal(g.builder, env, { text }); return { ok: false, error: `Refused: ${by} (${fam}) is the same family as the builder (${g.builder}, ${impl}); a review from another family is what counts.${w ? ` (${w})` : ''}` }; }
   const verdicts = [...text.matchAll(/^[ \t>*_#-]*verdict\**\s*:\**\s*(approve[sd]?|lgtm|changes|request(?:ed)? changes|changes requested|reject(?:ed)?)\b/gim)].map((m) => m[1].toLowerCase());
   if (!verdicts.length) return { ok: false, error: `${file} has no verdict line: end it with "VERDICT: APPROVE" or "VERDICT: CHANGES".` };
   const verdict = /^(approve|lgtm)/.test(verdicts.at(-1)) ? 'approve' : 'request changes';
@@ -310,7 +313,7 @@ export function recordOutsideReview(id, { by, family, file, model = null, implem
   const out = [
     `model-family: ${fam}`,
     `implementer-family: ${impl}`,
-    ...(sameOk ? [SAME_FAMILY_HEADER] : []),
+    ...(sameOk ? [dec.header] : []),
     '',
     `# Review of ${id}: ${g.task.title}`,
     '',
@@ -334,16 +337,76 @@ export function recordOutsideReview(id, { by, family, file, model = null, implem
     const add = git('add', '--', rel);
     const c = add.status === 0 ? git('commit', '-m', `Review: ${id} by ${by} (${fam}, outside the harness): ${verdict}`, '--', rel) : add;
     committed = c.status === 0;
-    if (!committed) return { ok: true, file: rel, verdict, committed: false, warn: `written but not committed: ${String(c.stderr || c.stdout).trim().split('\n').slice(-3).join(' | ')}` };
+    if (!committed) return { ok: true, file: rel, verdict, committed: false, sameFamilyNote: sameOk ? dec.note : '', warn: `written but not committed: ${String(c.stderr || c.stdout).trim().split('\n').slice(-3).join(' | ')}` };
   }
-  return { ok: true, file: rel, verdict, committed };
+  return { ok: true, file: rel, verdict, committed, sameFamilyNote: sameOk ? dec.note : '' };
+}
+
+/**
+ * 2.84 (g): who may flip the same-family switch, and how the change is recorded. It is a board decision, so the verdict is
+ * the harness's one (permission.mjs mayDecide, as for an engine push): a person's terminal, the owner's proxy, a beta-mode
+ * agent or outside signer, an outside agent, and a Producer/Director session as mayDecide says for 'board'; never a worker
+ * session or a worker's name, under any --by. Returns { ok, by, via } or { ok: false, why }.
+ */
+export async function sameFamilyActor(by, { env = process.env, root = REPO_ROOT } = {}) {
+  const who = String(by || '').trim();
+  const me = String(env.STUDIO_LOCK_OWNER || '').trim();
+  const actor = actorOf({ env, root });
+  const no = (why) => ({ ok: false, why: `Refused: ${why}. The same-family switch is a board decision: ${SAME_FAMILY_COMMAND.split(' --by')[0]} is for the owner, the overseer or an outside signer, or a Producer or Director session; a worker session hands the task back (npm run task -- pause <ID> --note "...") and asks one of them.` });
+  if (actor.tier === 'worker') return no(`${me || (env.STUDIO_ROLE ? `a launched ${env.STUDIO_ROLE} session` : 'this session')} is a worker`);
+  if ((who && !permittedSetter(who)) || (me && !permittedSetter(me))) return no(`${who || me} is a worker name`);
+  const d = mayDecide('board', actor, { root });
+  if (!d.ok) return no(d.why);
+  // Recorded as the stand-in's own (the proxy, a beta-mode agent, an outside signer), the same way ask.mjs records an answer.
+  let s = null;
+  try { s = (await import('./ask.mjs')).ownerStandIn(env, { by: who, kind: 'board' }); } catch { /* not a stand-in */ }
+  if (s?.refused) return no(s.refused);
+  if (s?.agent) return { ok: true, by: s.agent, via: s.via };
+  const role = String(env.STUDIO_ROLE || '').trim().toLowerCase();
+  const marker = AGENT_SHELL.find((k) => String(env[k] || '').trim());
+  return { ok: true, by: me || who || (role ? `a ${role} session` : marker ? `a coding agent (${marker})` : 'a person'), via: role || (marker || me ? 'outside agent' : 'person') };
+}
+
+/** Print form: the setting, who set it and when, and the families configured. */
+export function sameFamilyText({ root = studioRoot(), env = process.env } = {}) {
+  const sw = readSameFamily({ root });
+  const c = configuredFamilies({ root, env });
+  const fams = c.families.length ? c.families.map((f) => `${f} (${c.sources[f].join(', ')})`).join('; ') : 'none found';
+  const meaning = { auto: 'a same-family review counts only with the header and no other family configured', on: 'a same-family review counts (the reviewer still writes the header)', off: 'a same-family review never counts' }[sw.value];
+  return [`Same-family review: ${sw.value}${sw.set ? ` (set by ${sw.by}${sw.at ? ` on ${sw.at.slice(0, 16).replace('T', ' ')} UTC` : ''}${sw.why ? `: ${sw.why}` : ''})` : ' (no studio/review.json: the default)'}: ${meaning}.`, `Families configured: ${fams}.`, `Change it: ${SAME_FAMILY_COMMAND} (${'the owner, the overseer, an outside signer, or a Producer or Director session; never a worker'}).`].join('\n');
+}
+
+/** Set the switch: checks who, writes studio/review.json in the main checkout, one decisions-log line, one review.same_family event. */
+export async function setSameFamily(value, { by, why = '', env = process.env, root = studioRoot() } = {}) {
+  const v = String(value || '').trim().toLowerCase();
+  if (!['on', 'off', 'auto'].includes(v)) return { ok: false, message: 'Say on, off or auto: npm run review -- same-family on|off|auto --by <who> [--why "..."]' };
+  const a = await sameFamilyActor(by, { env, root });
+  if (!a.ok) return { ok: false, message: a.why };
+  if (!String(by || '').trim() && a.via === 'person') return { ok: false, message: 'Say who changed it: --by <name>.' };
+  const was = readSameFamily({ root }).value;
+  const at = new Date().toISOString();
+  const rec = { sameFamily: v, by: a.by, at, why: String(why || '').replace(/\s+/g, ' ').trim().slice(0, 300), ...(a.via !== 'person' ? { via: a.via } : {}) };
+  const f = path.join(root, 'studio', 'review.json');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, `${JSON.stringify(rec, null, 2)}\n`);
+  const line = `Same-family reviews ${v === 'auto' ? 'back to auto' : v} (was ${was}), set by ${a.by}${a.via !== 'person' ? ` (${a.via})` : ''}${rec.why ? `: ${rec.why}` : ''}`;
+  try { const { logDecision } = await import('./decisions-log.mjs'); logDecision({ action: 'same-family-review', subject: SAME_FAMILY_FILE_REL, by: a.by, as: a.via === 'person' ? 'person' : `agent (${a.via})`, why: `${was} -> ${v}${rec.why ? `: ${rec.why}` : ''}`, undo: { kind: 'text', text: `npm run review -- same-family ${was} --by <name>` }, root }); } catch { /* the file is written; the log is best effort */ }
+  emitEvent({ type: 'review.same_family', agent: a.by, to: 'producer', msg: line, meta: { to: v, was, by: a.by, via: a.via } });
+  return { ok: true, value: v, was, by: a.by, via: a.via, line };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const id = argv.find((a) => /^T-\d+$/.test(a));
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
-  if (argv[0] === 'record') {
+  if (argv[0] === 'same-family') {
+    const word = argv[1] && !argv[1].startsWith('--') ? argv[1] : null;
+    if (!word) { console.log(sameFamilyText()); process.exit(0); }
+    // (This file's command line already awaits further down, so awaiting here adds no top-level-await risk.)
+    const r = await setSameFamily(word, { by: flag('by'), why: flag('why') || '' }).catch((e) => ({ ok: false, message: `same-family failed: ${e?.message || e}` }));
+    (r.ok ? console.log : console.error)(r.ok ? r.line : r.message);
+    process.exit(r.ok ? 0 : 1);
+  } else if (argv[0] === 'record') {
     const rid = argv.find((a) => /^[A-Z]+-\d+$/.test(a));
     if (!rid) {
       console.error('Usage: npm run review -- record <TASK_ID> --by <reviewer name> --family <xai|deepseek|openai|google|anthropic|…> --file <review.md> [--model <m>] [--no-commit]');
@@ -352,6 +415,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const r = recordOutsideReview(rid, { by: flag('by'), family: flag('family'), file: flag('file'), model: flag('model'), implementer: flag('implementer'), noCommit: argv.includes('--no-commit') });
     if (!r.ok) { console.error(r.error); process.exit(1); }
     console.log(`${rid}: ${r.verdict}, recorded from ${flag('by')} (outside the harness). Written to ${r.file}${r.committed ? ' and committed' : r.warn ? `; ${r.warn}` : ''}`);
+    if (r.sameFamilyNote) console.log(`Same-family review ${r.sameFamilyNote}.`);
     process.exit(r.warn ? 1 : 0);
   }
   if (!id) {

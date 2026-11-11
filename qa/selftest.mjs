@@ -5108,6 +5108,13 @@ if (inShard('selftest-283j')) {
   await selftest283J({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
+// 2.84 (g): the studio's same-family review switch (studio/review.json), set by the owner or the overseer, never a worker.
+if (inShard('selftest-284g')) {
+  const dir = copyRepo();
+  const { selftest284G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284g.mjs')).href);
+  await selftest284G({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
 if (inShard('selftest-284c')) {
   const dir = copyRepo();
   const { selftest284C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284c.mjs')).href);
