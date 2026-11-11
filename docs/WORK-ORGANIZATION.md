@@ -699,6 +699,24 @@ RAM, threads and minutes; `node harness/rig-budget.mjs` shows an `artBake` share
   says so when that holds one back. Tests stub the scan with `STUDIO_TEST_MACHINE` (a profile as JSON, a path, or
   `none`).
 
+### Slots, timeouts and waits for heavy checks
+
+- `STUDIO_GATE_SLOTS` (default 2): how many heavy checks run at once, so one web and one engine check do not time each
+  other out. A landing's own checks take the next free slot ahead of verifies.
+- `STUDIO_HEAVY_SLOTS` (default 1): slots of the `machine:heavy` lock for whole heavy runs. A second job waits, naming
+  the holder, and fails after `STUDIO_HEAVY_WAIT_MIN` (60). A dead holder does not count (`node harness/heavy.mjs status`).
+- `node harness/heavy.mjs stop [--label <x> | --all] --by <name>` kills a holder's whole process tree, frees the slot and
+  records `heavy.stop`. A worker session is refused. What a killed holder left running is stopped by the next take;
+  `STUDIO_HEAVY_REAP=off` only names it.
+- A game check's timeout (`STUDIO_GAME_GATE_TIMEOUT_MS`, default 600 s) is stretched up to 3 times for load and never
+  shortened; the value used is printed. Without a load average (Windows), a CPU-busy sample over
+  `STUDIO_CPU_BUSY_THRESHOLD` (0.6) counts. The timeout is never below `STUDIO_GAME_GATE_TIMEOUT_FLOOR` (1.5) times the
+  check's last quiet passing run. A Unity editor outside the lock (`STUDIO_HEAVY_PROGRAMS`) counts as another heavy job.
+- A heavy job also waits while free memory is under `STUDIO_RAM_FLOOR_GB`, up to `STUDIO_HEAVY_RAM_WAIT_MIN` (10), then
+  fails with a clear message.
+- `task done` does not re-run the game's checks when a green full verify tested the same tree (`STUDIO_DONE_REUSE_VERIFY=off`
+  re-runs them). After a rebase onto a moved main, only checks whose declared `paths` the incoming files touch run again.
+
 ### The GPU area for jobs (2.70.0)
 
 The PC's GPU sat at 1-7% while CPU verifies queued, because browser playtests, Blender and Unity graphics runs all

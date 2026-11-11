@@ -26,6 +26,12 @@ PASSWORD or WEBHOOK, and those token shapes wrapped in base64, in UTF-8 and UTF-
 and, for history, the commit, never the value; placeholders pass. A key that reached a commit must be rotated and taken out
 of the commit before pushing: cleaning the file is not enough.
 
+What it does not cover: secrets split across lines or built by concatenation, named values under 24 characters, tokens with no
+shape here (npm, PyPI, Twilio, unless under a secret-sounding name), hex or other encodings, UTF-16 without a BOM, and binary
+files or file names. In history: commits already on the base branch (rotate the key), images, audio, video, fonts, archives
+and binary files over 4 MB. `scrub()` in `harness/secrets.mjs` strips the same kinds from exported data (trajectory export,
+review diffs).
+
 ### A false alarm: the owner's allowlist (`studio/secrets-allow.json`)
 
 Each finding prints the sha256 of its value (`sha256:<64 hex>`), never the value. When a finding is **not a key** (a test
@@ -46,7 +52,7 @@ force-push), the owner can allow that one finding:
   (`npm run approve -- protected`), so an agent can't allow its own secret.
 - **Only for a true false alarm.** A real token is rotated at the provider, never allowed: allowing it leaves a live
   key in a public repo.
-What it catches and what it doesn't: [`docs/SECURITY.md`](SECURITY.md#secrets).
+What agents may and may not do with keys: [`docs/SECURITY.md`](SECURITY.md#keys-and-secrets).
 
 A quick manual check for the most common provider prefixes, before pushing to a public remote:
 

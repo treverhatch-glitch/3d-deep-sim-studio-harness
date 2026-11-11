@@ -373,6 +373,14 @@ person, a Producer/Director session or outside agent on a person's permission, o
 delegation for `janitor-lanes` (`npm run delegate -- grant <agent> --actions janitor-lanes …`; a `hold` delegation no
 longer covers it).
 
+## Which model rescues a stuck task
+
+A rescue runs on a stronger model from a different family than the ones that got stuck. The model comes from
+`STUDIO_RESCUE_MODEL`, then `STUDIO_RESCUE_MODELS` (comma-separated), then `STUDIO_TIER_TOP_MODEL`. Each step takes the
+first one that is from another family, is not out of quota or at its spend guard, and was not used by an earlier step;
+then the same family; then the launcher's own choice. `STUDIO_RESCUE_LEVELS` (default 2) sets how many rescue steps run
+before the task is shelved. `STUDIO_RESCUE=off` sends budget stops straight to a person.
+
 ## What the owner sees
 
 - Ops: "Running unattended" (since when, sessions, tasks done, tokens, why nothing started), the
