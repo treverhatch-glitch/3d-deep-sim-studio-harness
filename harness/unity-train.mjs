@@ -245,15 +245,22 @@ export function suspectsOf({ repo, tip, lanes = [], failures = [] } = {}) {
   return found;
 }
 
-/** 2.83: the last full land run that passed ({ at, id } or null), and whether one is due (STUDIO_ENGINE_FULL_LAND_HOURS, 24; 0 or off: never). */
+/**
+ * 2.83: is a full land run due? Every STUDIO_ENGINE_FULL_LAND_HOURS (24; 0 or off: never), counted from the last full
+ * run that passed ({ at, id } in .studio/engine/<engine>-full-land.json). With no record the clock starts now (written
+ * unless `start` is false) and nothing is due: a studio's first land run after an upgrade is an ordinary one.
+ */
 const fullLandFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-full-land.json`);
-export function fullLandDue(root, engine, cfg = {}, env = process.env, now = Date.now()) {
+export function fullLandDue(root, engine, cfg = {}, env = process.env, now = Date.now(), { start = true } = {}) {
   const raw = String(env.STUDIO_ENGINE_FULL_LAND_HOURS ?? cfg.fullLandHours ?? '').trim();
   if (/^(off|false|no)$/i.test(raw)) return '';
   const h = raw === '' ? 24 : Number(raw);
   if (!Number.isFinite(h) || h <= 0) return '';
   const at = Date.parse(readJson(fullLandFile(root, engine))?.at || '');
-  if (!Number.isFinite(at)) return 'no full land run is recorded yet';
+  if (!Number.isFinite(at)) {
+    if (start) { try { fs.mkdirSync(path.dirname(fullLandFile(root, engine)), { recursive: true }); writeJson(fullLandFile(root, engine), { at: new Date(now).toISOString(), id: null, clock: 'started' }); } catch { /* asked again next time */ } }
+    return '';
+  }
   return now - at >= h * 3600000 ? `the last full land run that passed is older than ${h} h` : '';
 }
 
@@ -514,7 +521,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         // 2.83: once a day (STUDIO_ENGINE_FULL_LAND_HOURS) a land run is told nothing that lets it skip its own tests:
         // no STUDIO_RULES_GREEN, no Edit Mode plan, and STUDIO_LAND_FULL=1. The shortcuts rest on tests run outside the
         // editor; this run is the one that would see a difference between the two runtimes.
-        const fullWhy = fullLandDue(root, engine, s.cfg, env);
+        const fullWhy = fullLandDue(root, engine, s.cfg, env, Date.now(), { start: !dryRun });
         if (fullWhy) log(`[unity-train] ${id}: a full land run (${fullWhy}): the land command is not told the rules are green and gets no Edit Mode plan`);
         r = await (deps.land || runUnityGate)({ engine, ...arg, task: group.map((l) => l.task).join(','), label: `${engine} train ${id} (${group.map((l) => l.task).join(', ')})`, env: { ...env, STUDIO_GATE_PRIORITY: 'landing', ...(fullWhy ? { STUDIO_LAND_FULL: '1' } : checked ? { STUDIO_RULES_GREEN: '1', STUDIO_RULES_MODE: rulesGreen.mode } : {}) }, log });
         res.runs += 1;
@@ -544,7 +551,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       res.landed.push(lane.task);
       live.delete(lane.task);
       // 2.83: a landed lane's engine worktree is removed (kept, with the reason, when anything unlanded is in it).
-      if (!dryRun && !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_LANE_CLEAN || ''))) { try { const rm = removeLandedLane({ root, engine, task: lane.task, log }); if (rm && !rm.removed && rm.why && rm.dir) log(`[unity-train] ${id}: kept ${lane.task}'s engine worktree: ${rm.why}`); } catch (e) { log(`[unity-train] ${id}: could not clean ${lane.task}'s engine worktree: ${e.message}`); } }
+      if (!dryRun && !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_LANE_CLEAN || ''))) { try { const rm = removeLandedLane({ root, engine, task: lane.task, log }); if (rm && !rm.removed && rm.why && rm.dir && rm.why !== 'no such folder') log(`[unity-train] ${id}: kept ${lane.task}'s engine worktree: ${rm.why}`); } catch (e) { log(`[unity-train] ${id}: could not clean ${lane.task}'s engine worktree: ${e.message}`); } }
     }
     liveNow();
     // 2.83: old gate builds are pruned (engines.<x>.builds; absent: nothing is touched).
@@ -706,12 +713,13 @@ export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'un
   const L = labelOf(engine);
   if (quiet && !st.queue.length && !st.running) return '';
   const lines = [];
-  // 2.83: the running train's batch and the waiting queue are two lists: a branch queued again while its train runs showed
-  // as "No Unity branch waits". A queue entry whose task rides the running train is marked, not hidden.
+  // 2.83: the running train's batch and the waiting queue are two lists. A queue entry whose task rides the running
+  // train is on the first, not the second (it leaves the queue when it lands or is handed back).
   const inTrain = new Set(st.running?.lanes || []);
-  const row = (e) => `  ${e.task}  ${e.agent || '?'}  ${e.branch} at ${short(e.head)} (queued ${String(e.at).slice(0, 16)})${inTrain.has(e.task) ? '  (also in the running train)' : ''}`;
+  const waiting = st.queue.filter((e) => !inTrain.has(e.task));
+  const row = (e) => `  ${e.task}  ${e.agent || '?'}  ${e.branch} at ${short(e.head)} (queued ${String(e.at).slice(0, 16)})`;
   if (st.running?.lanes?.length) lines.push(`Running ${L} train batch (${st.running.lanes.length}): ${st.running.lanes.join(', ')}`);
-  lines.push(st.queue.length ? `${st.queue.length} ${L} branch(es) wait in the queue for the next ${L} train (npm run task -- train --engine ${engine}):\n${st.queue.map(row).join('\n')}` : `No ${L} branch waits for a ${L} train (task done <ID> --train on a ${L}-track task queues one).`);
+  lines.push(waiting.length ? `${waiting.length} ${L} branch(es) wait in the queue for the next ${L} train (npm run task -- train --engine ${engine}):\n${waiting.map(row).join('\n')}` : `No ${L} branch waits for a ${L} train (task done <ID> --train on a ${L}-track task queues one).`);
   if (st.running) lines.push(`${L} train running: ${st.running.id} by ${st.running.by || '?'} (pid ${st.running.pid}, since ${new Date(st.running.at).toISOString().slice(11, 16)} UTC)${st.running.lanes?.length ? `, ${st.running.lanes.join(', ')}` : ''}${st.running.now ? `; now: ${st.running.now}` : ''}`);
   if (st.last && !st.running) lines.push(`Last ${L} train ${st.last.id} (${String(st.last.at || '').slice(0, 16)}): ${st.last.message}`);
   return lines.join('\n');

@@ -2514,7 +2514,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const asked = String(flags._[2] || '').trim();
       const et = await import('./engine-tracks.mjs');
       // 2.83: `track <ID> web` sets a task back to the web track (a rules bug that went to an engine track).
-      if (asked.toLowerCase() === 'web') {
+      // An engine porter's task is engine work by its role: for it "web" is no track, as before (refused below).
+      if (asked.toLowerCase() === 'web' && all.find((t) => t.id === arg1)?.role !== 'engine-porter') {
         const webNo = laneRefusal(by);
         if (webNo) { console.error(webNo.replace(/set a task's lane|sets lanes/g, 'set a task\'s track')); process.exit(1); }
         const was = et.engineTask(arg1)?.track || et.rawTrack(arg1) || 'none';

@@ -480,7 +480,10 @@ export function importCcusage({ run = spawnSync, now = Date.now() } = {}) {
   return { ok: true, ledger: out };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+// 2.83: the command line runs in an async function, not at the top level. Other modules import this one (agent.mjs,
+// review-family.mjs), and the commands below import modules that import those: a top-level await here left that cycle
+// unsettled and the process ended with exit 13 before printing the spend lines (the same fault as engine-rules.mjs on 2.82).
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) (async () => {
   const argv = process.argv.slice(2);
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
   // 2.79.1 (a): spend budgets per tool or key (harness/spend-budget.mjs): set <name> <usd> | clear <name> | resume <name>,
@@ -533,4 +536,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   console.log(`Order when a tool runs out: ${(readBudget().order || []).join(' → ')}`);
   // 2.79.1 (a): spend in dollars per tool and key (Vertex's live usage log too), and each spend budget (none by default).
   try { const sb = await import('./spend-budget.mjs'); await sb.spendPass(); for (const l of await sb.spendLines()) console.log(l); } catch (e) { console.log(`Spend: couldn't be read (${e.message})`); }
-}
+})().catch((e) => { console.error(e?.stack || String(e)); process.exit(1); });

@@ -18,7 +18,8 @@ unused code taken out; a grade before and a projected grade after.
    a stage that is red twice is treated as really red. A studio names its own stages (`retryStages`).
 2. **Blame by evidence needs exactly one lane.** Two lanes touching the failing test's class, or none, falls back to
    the search by land runs. The class name is matched as a whole word in the files a lane changes.
-3. **A full land run every 24 hours**, counted from the last full run that passed. It costs about one long run a day
+3. **A full land run every 24 hours**, counted from the last full run that passed, or from a studio's first train on
+   2.83 (its first land run after the upgrade is an ordinary one). It costs about one long run a day
    and is what makes the shortcuts safe.
 4. **Planning sessions don't take builder slots.** They still obey their own per-role caps and the memory floor.
 5. **The owner-only readings are narrow word lists** (harness/owner-acts.mjs). A miss on the safe side asks the owner
@@ -39,3 +40,6 @@ unused code taken out; a grade before and a projected grade after.
 4. The rule tests under the editor's own runtime in the cheap check (the overseer's B-127), if the daily full run
    finds a second runtime difference.
 5. A window that collects branches before a land run: only if the week shows trains of one.
+6. The same-family review fallback (harness/review-family.mjs) reads which families are configured from the
+   session's own environment, and a review's header is self-declared as before. Read the main checkout's settings
+   instead, so a session cannot make the fallback apply by unsetting its own.

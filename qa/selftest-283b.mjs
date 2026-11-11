@@ -192,15 +192,26 @@ console.log(JSON.stringify({ ok: r.ok, message: r.message, entry: readUnityQueue
     const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/c': { 'c.txt': 'c\n' } }, { shared: { 'Assets/x.txt': 'x\n' } });
     const ctl = path.join(T, 'ctl-full');
     setEngines({ unity: cfgFor(E, ctl, { rules: `node "${fwd(rulesStub)}"`, editModeArgs: '-testCategory "!Slow"' }) });
-    queue(E, [['T-841', 'feat/a']]);
+    // No record: the clock starts and the first run is an ordinary one. Then the record is made 25 hours old.
+    queue(E, [['T-840', 'feat/a']]);
+    const r0 = probe(TRAIN, { STUDIO_ENGINE_FULL_LAND_HOURS: '24' });
+    const clockFile = path.join(S, '.studio', 'engine', 'unity-full-land.json');
+    const clock = (() => { try { return JSON.parse(fs.readFileSync(clockFile, 'utf8')); } catch { return null; } })();
+    fs.writeFileSync(clockFile, JSON.stringify({ at: new Date(Date.now() - 25 * 3600000).toISOString(), id: null, clock: 'started' }));
+    const E1 = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/c': { 'c.txt': 'c\n' } }, { shared: { 'Assets/x.txt': 'x\n' } });
+    const ctl1 = path.join(T, 'ctl-full-1');
+    setEngines({ unity: cfgFor(E1, ctl1, { rules: `node "${fwd(rulesStub)}"`, editModeArgs: '-testCategory "!Slow"' }) });
+    queue(E1, [['T-841', 'feat/a']]);
     const r1 = probe(TRAIN, { STUDIO_ENGINE_FULL_LAND_HOURS: '24' });
-    queue(E, [['T-842', 'feat/c']]);
+    queue(E1, [['T-842', 'feat/c']]);
     const r2 = probe(TRAIN, { STUDIO_ENGINE_FULL_LAND_HOURS: '24' });
-    const runs = runsOf(ctl);
-    await guard('2.83 a full land run: with no full run on record, the land command is told nothing that lets it skip its own tests (STUDIO_LAND_FULL=1, no STUDIO_RULES_GREEN, no Edit Mode arguments) although the rules check was green; once that run passed, the next land run gets the shortcuts again, with the owner\'s own Edit Mode arguments (engines.unity.editModeArgs) (fails before this fix: every land run got the shortcuts, so a difference between the two runtimes could go unseen for good)', () => [
-      r1.landed?.join() === 'T-841' && r1.fullLand === 1 && runs[0]?.full === '1' && runs[0].rulesGreen === '' && runs[0].editArgs === '' && r1.rules?.ran === true
+    const runs0 = runsOf(ctl);
+    const runs = runsOf(ctl1);
+    await guard('2.83 a full land run: a studio with no full run on record starts the clock and its first land run is an ordinary one (shortcuts given); once the last full run (or the clock\'s start) is older than STUDIO_ENGINE_FULL_LAND_HOURS, the land command is told nothing that lets it skip its own tests (STUDIO_LAND_FULL=1, no STUDIO_RULES_GREEN, no Edit Mode arguments) although the rules check was green; once that run passed, the next land run gets the shortcuts again, with the owner\'s own Edit Mode arguments (engines.unity.editModeArgs) (fails before this fix: every land run got the shortcuts, so a difference between the two runtimes could go unseen for good)', () => [
+      r0.landed?.join() === 'T-840' && r0.fullLand === 0 && runs0[0]?.full === '' && runs0[0].rulesGreen === '1' && clock?.clock === 'started' && Number.isFinite(Date.parse(clock.at))
+        && r1.landed?.join() === 'T-841' && r1.fullLand === 1 && runs[0]?.full === '1' && runs[0].rulesGreen === '' && runs[0].editArgs === '' && r1.rules?.ran === true
         && r2.landed?.join() === 'T-842' && r2.fullLand === 0 && runs[1]?.full === '' && runs[1].rulesGreen === '1' && runs[1].rulesMode === 'full' && runs[1].editArgs === '-testCategory "!Slow"',
-      JSON.stringify({ r1, r2, runs }).slice(0, 2500)]);
+      JSON.stringify({ r0, clock, r1, r2, runs0, runs }).slice(0, 3000)]);
   }
 
   // ---- 6. a lane handed back is out of the train at once ----

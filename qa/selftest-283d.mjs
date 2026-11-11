@@ -132,8 +132,8 @@ export async function selftest283D({ dir, root, run, report, tmpRoot }) {
     // ---- 5. status: the running batch and the waiting queue as two lists (the lock and T-004 from above) ----
     fs.writeFileSync(trainFile('train/unity-queue.json'), JSON.stringify([entry('T-004'), entry('T-003')]));
     const stt = task('train status --engine unity');
-    await guard('2.83 task train status --engine: lists the running train\'s batch and the waiting queue as two lists, a branch queued again while its train runs is on the waiting list (fails before this fix: it said "No Unity branch waits")', () => [
-      stt.status === 0 && /Running unity train batch \(1\): T-004/i.test(out(stt)) && /2 \w+ branch\(es\) wait in the queue/.test(out(stt)) && /T-004 .*\(also in the running train\)/.test(out(stt)) && /T-003 /.test(out(stt)) && !/No \w+ branch waits/.test(out(stt)),
+    await guard('2.83 task train status --engine: lists the running train\'s batch and the waiting queue as two lists: the branch the train is landing on the first, the one that waits on the second (fails before this fix: the running batch was only inside the "train running" line)', () => [
+      stt.status === 0 && /Running unity train batch \(1\): T-004/i.test(out(stt)) && /1 \w+ branch\(es\) wait in the queue/.test(out(stt)) && !/\n  T-004 /.test(out(stt)) && /\n  T-003 /.test(out(stt)) && !/No \w+ branch waits/.test(out(stt)),
       out(stt),
     ]);
   }

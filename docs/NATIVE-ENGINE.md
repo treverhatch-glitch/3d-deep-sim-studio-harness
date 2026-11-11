@@ -157,7 +157,8 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
 - **A full land run once a day.** Every `engines.<x>.fullLandHours` hours (default 24, `STUDIO_ENGINE_FULL_LAND_HOURS`,
   `off` for never) one land run gets `STUDIO_LAND_FULL=1` and none of the shortcuts: no `STUDIO_RULES_GREEN`, no
   `STUDIO_UNITY_EDITMODE_ARGS`. A land script that skips work on those variables should run everything when it sees
-  `STUDIO_LAND_FULL=1`. The time of the last full run that passed is kept in `.studio/engine/<engine>-full-land.json`.
+  `STUDIO_LAND_FULL=1`. The time of the last full run that passed is kept in `.studio/engine/<engine>-full-land.json`;
+  with no record the clock starts at the first train, so the first full run comes that many hours later.
 - **The owner's own Edit Mode arguments.** `engines.unity.editModeArgs` (a string, for example
   `-testCategory "!Slow"`) is passed as `STUDIO_UNITY_EDITMODE_ARGS` in place of the harness's plan. Not on a full run.
 - **The land script that runs.** When the land command names a script inside another worktree of the engine repo and
