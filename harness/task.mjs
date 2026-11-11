@@ -1141,6 +1141,18 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
   const lock = lockStatus(`task:${taskId}`);
   if (lock.locked && lock.lock.owner !== agent) return { error: 'locked', message: `${taskId} is claimed by ${lock.lock.owner} now, not ${agent}` };
   const root = mainRoot();
+  // 2.83: a task with work in two repositories is done when both halves have landed. The merge train landed a task's
+  // studio half and closed it while its engine branch had been handed back by the engine train: the engine half was
+  // orphaned ("task done: not found"). Now the task stays open; its engine branch is queued again if it can be.
+  if (!repo) {
+    const half = (() => { try { return engineHalfOpen(taskId, root); } catch { return null; } })();
+    if (half) {
+      let queued = '';
+      try { const ut = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'unity-train.mjs'), 'queue', '--engine', half.engine, '--task', taskId, '--agent', agent || '', '--branch', half.branch], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }); queued = ut.status === 0 ? `; its branch is queued for the ${half.engine} train` : ''; } catch { /* said below */ }
+      emitEvent({ type: 'task.half_landed', agent: agent || 'train', task: taskId, to: 'producer', status: 'warn', msg: `${taskId}: its studio half landed (merge train ${train}), its ${half.engine} branch ${half.branch} has ${half.ahead} commit(s) that ${half.target} doesn't have: the task stays open until the ${half.engine} train lands it${queued || `: npm run task -- done ${taskId} --train queues it`}`, meta: { train, engine: half.engine, branch: half.branch, ahead: half.ahead } });
+      return { id: taskId, halfLanded: true };
+    }
+  }
   // 2.63.0: a Unity train's branch landed in the Unity repo (repo) on its target branch, not in the studio's branch.
   const gitRoot = repo || root;
   const anc = (a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { windowsHide: true, cwd: gitRoot }).status === 0;
@@ -1248,11 +1260,29 @@ async function queueLaneForTrain(targetId, flags, noopFlag, { kick = false } = {
   return kick && tierC ? 1 : 0;
 }
 
+/**
+ * 2.83: the engine half of a task that is not landed yet: { engine, branch, target, ahead } when the task has an engine
+ * record in another repository whose branch holds commits the engine's target doesn't have; else null.
+ */
+export function engineHalfOpen(taskId, root = mainRoot()) {
+  const rec = engineTaskOf(taskId);
+  if (!rec?.branch) return null;
+  const repo = engineRepo(rec.engine);
+  const target = engineTarget(rec.engine)?.cfg?.target || null;
+  if (!repo || !target) return null;
+  const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd: repo, encoding: 'utf8' });
+  if (g('rev-parse', '--verify', '--quiet', `refs/heads/${rec.branch}^{commit}`).status !== 0 || g('rev-parse', '--verify', '--quiet', `refs/heads/${target}^{commit}`).status !== 0) return null;
+  const ahead = Number(g('rev-list', '--count', `refs/heads/${target}..refs/heads/${rec.branch}`).stdout.trim()) || 0;
+  void root;
+  return ahead > 0 ? { engine: rec.engine, branch: rec.branch, target, ahead } : null;
+}
+
 /** 2.59.0: what the merge train needs from the board (harness/train.mjs never imports this module). */
 export function trainDeps(busyMod, { forDone = false } = {}) {
   return {
     close: (lane, ctx) => {
       const t = closeTrainTask(lane.task, lane.agent, { train: ctx.train, head: ctx.head, laneHead: lane.head, record: ctx.record, note: lane.note || '', repo: ctx.repo || null, target: ctx.target || null });
+      if (t?.halfLanded) return { ok: true, half: true }; // 2.83: its engine half is still to land: the task stays open
       return t?.error ? { ok: false, message: t.message } : t ? { ok: true, target: t } : { ok: false, message: `${lane.task} is not on the board` };
     },
     handBack: (lane, note, o = {}) => pauseTask(lane.task, lane.agent, note, { force: true, handBackCause: o.cause }),
@@ -2146,7 +2176,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         const pre = completeTask(targetId, '', whoAmI(flags), { unityTrainCheck: true, noop: noopFlag });
         if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
         if (pre.error) { console.error(pre.message); process.exit(1); }
-        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { engine: trainEngine, task: pre.id, agent: whoAmI(flags), branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '' });
+        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { engine: trainEngine, task: pre.id, agent: whoAmI(flags), alone: flags.alone ? true : null, branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '' });
         (r.ok ? console.log : console.error)(r.message);
         process.exit(r.ok ? 0 : 1);
       }
@@ -2389,6 +2419,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
 
   // 2.83: a task's --after list (studio/task-holds.json): add ids, --remove some, --set a new list, --clear it.
+  // 2.83: `task alone <ID> [on|off]`: an engine task whose branch must land by itself (a switch-over, a change that
+  // has to be judged alone). The engine train gives it a land run of its own; task done --train --alone does the same.
+  if (cmd === 'alone') {
+    const on = !/^(off|no|false|0)$/i.test(String(process.argv[4] || 'on'));
+    if (!/^[A-Z]+-\d+$/.test(String(arg1 || ''))) { console.error('Usage: npm run task -- alone <TASK_ID> [on|off]'); process.exit(2); }
+    const et = await import('./engine-tracks.mjs');
+    const rec = et.engineTask(arg1);
+    if (!rec) { console.error(`${arg1} is not an engine task (task track ${arg1} engine:<name> first): only an engine train lands a branch alone.`); process.exit(1); }
+    et.setEngineTask(arg1, { engine: rec.engine, ...(rec.track ? { track: rec.track } : {}), ...(rec.branch ? { branch: rec.branch } : {}), alone: on });
+    try { const ut = await import('./unity-train.mjs'); const q = ut.readUnityQueue(mainRoot(), rec.engine).find((e) => e.task === arg1); if (q) ut.queueUnityTask(mainRoot(), { engine: rec.engine, task: arg1, agent: q.agent, branch: q.branch, note: q.note || '', alone: on }); } catch { /* the record is what counts */ }
+    emitEvent({ type: 'task.alone', agent: actor(), task: arg1, msg: `${arg1} ${on ? 'lands alone: the engine train gives its branch a land run of its own' : 'may land in a batch again'}`, meta: { alone: on } });
+    console.log(`${arg1} ${on ? `lands alone on the ${rec.engine} train (a land run of its own).` : 'may land in a batch again.'}`);
+    process.exit(0);
+  }
   if (cmd === 'after') {
     const by = typeof flags.by === 'string' ? flags.by : actor();
     const ids = (v) => (typeof v === 'string' ? v.split(/[,\s]+/).filter(Boolean) : []);

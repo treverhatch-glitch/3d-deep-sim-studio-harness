@@ -5126,6 +5126,14 @@ if (inShard('selftest-283c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.83: the engine train: a branch that lands alone, one more run before blame, blame by evidence.
+if (inShard('selftest-283b')) {
+  const dir = copyRepo();
+  const { selftest283B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283b.mjs')).href);
+  await selftest283B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

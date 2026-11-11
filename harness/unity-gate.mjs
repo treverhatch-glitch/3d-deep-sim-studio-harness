@@ -300,7 +300,13 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   const tuneEnv = { STUDIO_ENGINE: engine, STUDIO_ENGINE_TUNE: JSON.stringify(tune || {}), STUDIO_ENGINE_TUNE_FILE: tunePath(REPO_ROOT, engine), STUDIO_ENGINE_FLAGS: flags.join(' '), STUDIO_LAND_RESULT: stageFile };
   // 2.82: for a Unity land script: which Edit Mode assemblies the editor still has to run after its .NET tests passed
   // (harness/unity.mjs editModePlan on the land's own checkout; "SKIP": none). The script decides whether to use it.
-  if (engine === 'unity' && !/^(off|0|false|no)$/i.test(String(env.STUDIO_UNITY_EDITMODE_PLAN || ''))) {
+  // 2.83: a full land run (STUDIO_LAND_FULL=1, set by the engine train once a day) gets no plan: the editor runs every
+  // Edit Mode test. And the owner may give the arguments outright (engines.unity.editModeArgs, e.g. `-testCategory
+  // "!Slow"`): tests that are compiled outside the editor too can still behave differently on the editor's runtime, so a
+  // studio keeps its fast ported-rules tests in Edit Mode and leaves out only a category it names.
+  if (engine === 'unity' && env.STUDIO_LAND_FULL === '1') { /* no plan on a full run */ }
+  else if (engine === 'unity' && typeof cfg.editModeArgs === 'string' && cfg.editModeArgs.trim()) tuneEnv.STUDIO_UNITY_EDITMODE_ARGS = cfg.editModeArgs.trim();
+  else if (engine === 'unity' && !/^(off|0|false|no)$/i.test(String(env.STUDIO_UNITY_EDITMODE_PLAN || ''))) {
     try {
       const proj = [cfg.gateWorktree ? path.resolve(REPO_ROOT, cfg.gateWorktree) : null, folder, cwd].find((d) => d && fs.existsSync(path.join(d, 'Assets')));
       if (proj) {

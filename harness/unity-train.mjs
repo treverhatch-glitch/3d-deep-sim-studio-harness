@@ -54,10 +54,11 @@ import { mainRoot } from './worktree.mjs';
 import { withLandLock } from './merge-lane.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
 import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, taskBranch } from './unity-gate.mjs';
-import { engineTarget, engineFiles } from './engine-tracks.mjs';
+import { engineTarget, engineFiles, engineTask } from './engine-tracks.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
-import { rulesConfig, rulesGate, inputsPrint } from './engine-rules.mjs';
+import { rulesConfig, rulesGate, inputsPrint, shareInputs } from './engine-rules.mjs';
+import { removeLandedLane, pruneBuilds, buildsConfig } from './engine-clean.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -152,7 +153,7 @@ export const dequeueUnity = (root, task, engine = 'unity') => withQueue(root, (q
  * { ok: false, error, message }. The branch: `branch`, else the task's recorded Unity branch, else the Unity folder's
  * current branch (never the target).
  */
-export function queueUnityTask(root, { engine = 'unity', task, agent = null, branch = null, note = '' } = {}) {
+export function queueUnityTask(root, { engine = 'unity', task, agent = null, branch = null, note = '', alone = null } = {}) {
   const s = unityTrainSettings(root, engine);
   const L = labelOf(engine);
   const UNITY_REF_PREFIX = refPrefix(engine);
@@ -173,13 +174,117 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
   if (!ahead) return { ok: false, error: 'nothing', message: `${task} was not queued: ${br} has no commits that ${s.target} doesn't have.` };
   const entry = withQueue(root, (q) => {
     const i = q.findIndex((e) => e.task === task);
-    const rec = { task, agent, branch: br, head, note: note || '', at: new Date().toISOString() };
+    // 2.83: a branch that must land alone (task done --train --alone, or the task's record: task alone <ID> on).
+    const solo = alone === null || alone === undefined ? Boolean((() => { try { return engineTask(task, { root })?.alone; } catch { return false; } })() || (i >= 0 && q[i].alone)) : Boolean(alone);
+    const rec = { task, agent, branch: br, head, note: note || '', at: new Date().toISOString(), ...(solo ? { alone: true } : {}) };
     if (i >= 0) q.splice(i, 1, { ...rec, at: q[i].at });
     else q.push(rec);
     return rec;
   }, engine);
-  evTop('queued', 'queue', `${task}: ${br} at ${short(head)} waits for the next ${L} train`, { engine, agent: agent || `${engine}-train`, task, to: 'producer', meta: { branch: br, head } });
+  evTop('queued', 'queue', `${task}: ${br} at ${short(head)} waits for the next ${L} train${entry.alone ? ' (it lands alone)' : ''}`, { engine, agent: agent || `${engine}-train`, task, to: 'producer', meta: { branch: br, head, ...(entry.alone ? { alone: true } : {}) } });
+  // 2.83: the lane's new shared input files (engines.<x>.rules.share: content-addressed files a lane adds, git-ignored)
+  // go to the engine's input folder now, so the rules check and the land run find them. Never overwrites.
+  try { shareLaneInputs(root, engine, s, task, (m) => console.error(m)); } catch { /* the train tries again */ }
   return { ok: true, entry, message: `${task} is checked and its ${L} branch ${br} (at ${short(head)}, ${ahead} commit(s) ahead of ${s.target}) is queued for the next ${L} train. npm run task -- train --engine ${engine} lands every queued branch on ONE land run (the Line Producer starts it in a quiet window); until then the task stays in progress.` };
+}
+
+/** 2.83: copy a lane's new shared input files (rules.share) into the engine's input folder. { copied, skipped } | null. */
+export function shareLaneInputs(root, engine, s, task, log = () => {}) {
+  const cfg = (() => { try { return rulesConfig(engine, { root, repo: s.repo, ref: s.target }); } catch { return null; } })();
+  if (!cfg || !Array.isArray(cfg.share) || !cfg.share.length) return null;
+  const laneDir = path.join(root, '.lanes', 'engine', String(task));
+  if (!fs.existsSync(laneDir)) return null;
+  const to = s.cfg.cwd ? path.resolve(root, s.cfg.cwd) : s.folder;
+  if (!to || !fs.existsSync(to)) return null;
+  const r = shareInputs({ cfg, laneDir, to, log });
+  if (r?.copied?.length) { log(`[unity-train] ${task}: ${r.copied.length} new shared input file(s) copied to ${to.split(path.sep).join('/')}: ${r.copied.slice(0, 4).join(', ')}${r.copied.length > 4 ? ', ...' : ''}`); evTop('inputs_shared', 'queue', `${task}: ${r.copied.length} new shared input file(s) copied to the ${engine} input folder`, { engine, task, meta: { files: r.copied.slice(0, 20) } }); }
+  return r;
+}
+
+/** 2.83: the stage a red land run failed in first (from its stage report), or null when it reported none. */
+export const firstRedStage = (r) => (Array.isArray(r?.stages) ? (r.stages.find((x) => x && x.name && !/^(pass|passed|ok|skip|skipped)$/i.test(String(x.status || ''))) || {}).name || null : null);
+
+/**
+ * 2.83: the stages a red land run is tried once more for before anyone is blamed: engines.<x>.retryStages (a list), or
+ * STUDIO_ENGINE_RETRY_STAGES (comma-separated; off: none); for Unity, "play" when neither is set (its Play Mode tests
+ * wait on frames and time, and failed under load on lanes that passed alone).
+ */
+export function retryStagesOf(cfg = {}, env = process.env, engine = 'unity') {
+  const raw = String(env.STUDIO_ENGINE_RETRY_STAGES ?? '').trim();
+  if (raw) return /^(off|0|false|no|none)$/i.test(raw) ? [] : raw.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+  if (Array.isArray(cfg.retryStages)) return cfg.retryStages.map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+  return engine === 'unity' ? ['play'] : [];
+}
+
+/**
+ * 2.83: blame by evidence. For a red batch whose failing tests are named: which lanes change a file that names a
+ * failing test's class (the test itself, or the code it is named after)? [{ lane, tests: [names], files: [paths] }].
+ * Reads refs only (git diff, git grep on the lane's head). A lane with too many changed files, or a test name with no
+ * usable class, yields no evidence: the caller then searches as before.
+ */
+export function suspectsOf({ repo, tip, lanes = [], failures = [] } = {}) {
+  const tokens = new Map();
+  for (const f of failures.slice(0, 20)) {
+    const parts = String(f).replace(/\(.*$/, '').split('.').map((x) => x.trim()).filter(Boolean);
+    const cls = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
+    if (cls && /^[A-Za-z_][A-Za-z0-9_]{3,}$/.test(cls)) tokens.set(String(f), cls);
+  }
+  if (!tokens.size) return [];
+  const found = [];
+  for (const lane of lanes) {
+    const files = out(git(repo, 'diff', '--name-only', '--no-renames', `${tip}...${lane.head}`)).split('\n').filter(Boolean);
+    if (!files.length || files.length > 300) continue;
+    const tests = []; const hit = new Set();
+    for (const [name, cls] of tokens) {
+      const r = git(repo, 'grep', '-l', '-F', '-w', '-e', cls, lane.head, '--', ...files);
+      const fs2 = r.status === 0 ? String(r.stdout || '').split('\n').filter(Boolean).map((l) => l.slice(l.indexOf(':') + 1)) : [];
+      if (fs2.length) { tests.push(name); for (const x of fs2) hit.add(x); }
+    }
+    if (tests.length) found.push({ lane, tests, files: [...hit].slice(0, 6) });
+  }
+  return found;
+}
+
+/** 2.83: the last full land run that passed ({ at, id } or null), and whether one is due (STUDIO_ENGINE_FULL_LAND_HOURS, 24; 0 or off: never). */
+const fullLandFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-full-land.json`);
+export function fullLandDue(root, engine, cfg = {}, env = process.env, now = Date.now()) {
+  const raw = String(env.STUDIO_ENGINE_FULL_LAND_HOURS ?? cfg.fullLandHours ?? '').trim();
+  if (/^(off|false|no)$/i.test(raw)) return '';
+  const h = raw === '' ? 24 : Number(raw);
+  if (!Number.isFinite(h) || h <= 0) return '';
+  const at = Date.parse(readJson(fullLandFile(root, engine))?.at || '');
+  if (!Number.isFinite(at)) return 'no full land run is recorded yet';
+  return now - at >= h * 3600000 ? `the last full land run that passed is older than ${h} h` : '';
+}
+
+/**
+ * 2.83: does the land command run a script that differs from the target branch's copy of it? A crew landed a change to
+ * its land script and nothing changed: the command ran the script from another worktree, on another branch.
+ * { file, rel, branch } | null (no script named, not in the engine repo, or the same).
+ */
+export function landScriptDrift(s, root = mainRoot()) {
+  try {
+    const base = s.cfg.cwd ? path.resolve(root, s.cfg.cwd) : s.folder;
+    const words = String(s.cfg.land || '').match(/"[^"]+"|'[^']+'|\S+/g) || [];
+    for (const w0 of words) {
+      const w = w0.replace(/^["']|["']$/g, '');
+      if (!/\.(ps1|sh|mjs|cjs|js|py|cmd|bat)$/i.test(w)) continue;
+      const file = path.isAbsolute(w) ? w : path.resolve(base || root, w);
+      if (!fs.existsSync(file)) continue;
+      const dir = path.dirname(file);
+      const top = out(git(dir, 'rev-parse', '--show-toplevel'));
+      if (!top) continue;
+      const common = (d) => { const c = out(git(d, 'rev-parse', '--git-common-dir')); return c ? fs.realpathSync(path.resolve(d, c)) : ''; };
+      if (!common(dir) || common(dir) !== common(s.repo)) continue;
+      const rel = path.relative(fs.realpathSync(top), fs.realpathSync(file)).split(path.sep).join('/');
+      const want = out(git(s.repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${s.target}:${rel}`));
+      const have = out(git(dir, 'hash-object', '--', file));
+      if (!want) return { file, rel, branch: out(git(dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || 'a detached HEAD', missing: true };
+      if (have && have !== want) return { file, rel, branch: out(git(dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || 'a detached HEAD' };
+      return null;
+    }
+  } catch { /* a warning only */ }
+  return null;
 }
 
 // ---- one Unity train at a time ----------------------------------------------------------------------------
@@ -298,6 +403,18 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   let lanes = readUnityQueue(root, engine);
   if (Number(max) > 0) lanes = lanes.slice(0, Number(max));
   if (!lanes.length) { res.message = `No ${L} branch is waiting to land (task done <ID> --train on a ${L}-track task queues one).`; return finish(); }
+  // 2.83: a branch marked "alone" (a change that must be judged by itself, like switching a system over) rides by
+  // itself: first in the queue, it is this train's whole batch; further back, this train stops before it.
+  const soloAt = lanes.findIndex((l) => l.alone);
+  if (soloAt === 0 && lanes.length > 1) { log(`[unity-train] ${id}: ${lanes[0].task} lands alone; ${lanes.length - 1} other branch(es) wait for the next ${L} train`); res.alone = lanes[0].task; lanes = [lanes[0]]; }
+  else if (soloAt > 0) { log(`[unity-train] ${id}: ${lanes[soloAt].task} lands alone, on the next ${L} train; this one takes the ${soloAt} branch(es) before it`); lanes = lanes.slice(0, soloAt); }
+  else if (soloAt === 0) res.alone = lanes[0].task;
+  const live = new Set(lanes.map((l) => l.task));
+  const liveNow = () => { try { update({ lanes: [...live] }); } catch { /* the status line only */ } };
+  if (!dryRun) {
+    const sd = landScriptDrift(s, root);
+    if (sd) { res.landScript = sd; const m = `the land command runs ${sd.file.split(path.sep).join('/')} (on ${sd.branch}), ${sd.missing ? `which ${target} does not have` : `which differs from ${target}'s copy of ${sd.rel}`}: a change landed to that script is not in use until that folder is updated`; log(`[unity-train] ${id}: WARNING: ${m}`); ev('land_script', id, m, { agent: by, to: 'producer', status: 'warn', meta: { file: sd.rel, branch: sd.branch } }); }
+  }
   update({ lanes: lanes.map((l) => l.task), now: 'checking the branches' });
   ev('start', id, `${lanes.length} branch(es): ${lanes.map((l) => `${l.task} (${l.branch})`).join(', ')}${dryRun ? ' (dry run)' : ''}`, { agent: by, meta: { lanes: lanes.map((l) => l.task), dryRun } });
 
@@ -305,6 +422,9 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     res.dropped.push({ task: lane.task, why, ...(cause ? { cause } : {}) });
     if (dryRun) return;
     try { dequeueUnity(root, lane.task, engine); } catch {}
+    // 2.83: handed back means out of this train now: its fix can start at once, not after the train's remaining runs.
+    live.delete(lane.task); liveNow();
+    try { deps.clearRunning?.(lane.task); } catch { /* the finally below clears it too */ }
     ev('dropped', id, `${lane.task} handed back: ${why.split('\n')[0]}`, { task: lane.task, agent: by, to: lane.agent, status: 'blocked', ...(cause ? { meta: { cause } } : {}) });
     if (handBack) { try { deps.handBack?.(lane, `Not landed by ${L} train ${id}: ${why}`, cause ? { cause } : undefined); } catch (e) { log(`[unity-train] ${id}: could not hand ${lane.task} back: ${e.message}`); } }
   };
@@ -350,12 +470,15 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     if (rc && set.length) {
       update({ now: `rules check: ${set.map((l) => l.task).join(', ')}` });
       const from = [...new Set([s.folder, s.cfg.gateWorktree ? path.resolve(root, s.cfg.gateWorktree) : null, s.cfg.cwd ? path.resolve(root, s.cfg.cwd) : null, repo].filter(Boolean))];
-      const rg = (deps.rulesGate || rulesGate)({ engine, repo, tip: tip0, lanes: set, cfg: rc, from, root, id, env, log, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine) });
+      // 2.83: each lane's new shared input files first (rules.share), and the lanes' own folders as further input sources.
+      for (const l of set) { try { shareLaneInputs(root, engine, s, l.task, log); } catch { /* the check says what is missing */ } }
+      const extraFrom = set.map((l) => path.join(root, '.lanes', 'engine', String(l.task))).filter((d) => fs.existsSync(d));
+      const rg = (deps.rulesGate || rulesGate)({ engine, repo, tip: tip0, lanes: set, cfg: rc, from, extraFrom, root, id, env, log, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine) });
       log(`[unity-train] ${id}: rules check: ${rg.why}${rg.runs ? ` (${rg.runs} run(s), ${Math.round(rg.ms / 1000)} s)` : ''}`);
       for (const d of rg.dropped) drop(d.lane, `refused before the land run: ${d.why}\nFix it on ${d.lane.branch} (merge ${target} in first), then task done ${d.lane.task} --train again.`, { cause: 'rules' });
       set = rg.kept;
-      res.rules = { ran: rg.ran, runs: rg.runs, ms: rg.ms, dropped: rg.dropped.map((d) => d.lane.task), ...(rg.skipped ? { skipped: rg.why } : {}) };
-      if (rg.green) rulesGreen = { tip: tip0, tasks: set.map((l) => l.task).join(','), same: () => { try { return inputsPrint(rc, from) === (rg.inputs ?? inputsPrint(rc, from)); } catch { return false; } } };
+      res.rules = { ran: rg.ran, runs: rg.runs, ms: rg.ms, dropped: rg.dropped.map((d) => d.lane.task), ...(rg.skipped ? { skipped: rg.why } : {}), ...(rg.mode ? { mode: rg.mode } : {}), ...(rg.filter ? { filter: rg.filter } : {}) };
+      if (rg.green) rulesGreen = { tip: tip0, tasks: set.map((l) => l.task).join(','), mode: rg.mode || 'full', same: () => { try { return inputsPrint(rc, [...from, ...extraFrom]) === (rg.inputs ?? inputsPrint(rc, [...from, ...extraFrom])); } catch { return false; } } };
     }
   }
   for (const l of set) deps.markRunning?.(l.task, l.agent);
@@ -384,8 +507,14 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         update({ now: `${what}: ${group.map((l) => l.task).join(', ')}${a ? ` (try ${a + 1})` : ''}`, runs: res.runs + 1 });
         log(`[unity-train] ${id}: ${what}: land ${group.map((l) => `${l.task} (${l.branch})`).join(', ')} on ${target} at ${short(tip)}${ref ? ` through ${ref}` : ''}`);
         const checked = rulesGreen && rulesGreen.tip === tip && rulesGreen.tasks === group.map((l) => l.task).join(',') && rulesGreen.same();
-        r = await (deps.land || runUnityGate)({ engine, ...arg, task: group.map((l) => l.task).join(','), label: `${engine} train ${id} (${group.map((l) => l.task).join(', ')})`, env: { ...env, STUDIO_GATE_PRIORITY: 'landing', ...(checked ? { STUDIO_RULES_GREEN: '1' } : {}) }, log });
+        // 2.83: once a day (STUDIO_ENGINE_FULL_LAND_HOURS) a land run is told nothing that lets it skip its own tests:
+        // no STUDIO_RULES_GREEN, no Edit Mode plan, and STUDIO_LAND_FULL=1. The shortcuts rest on tests run outside the
+        // editor; this run is the one that would see a difference between the two runtimes.
+        const fullWhy = fullLandDue(root, engine, s.cfg, env);
+        if (fullWhy) log(`[unity-train] ${id}: a full land run (${fullWhy}): the land command is not told the rules are green and gets no Edit Mode plan`);
+        r = await (deps.land || runUnityGate)({ engine, ...arg, task: group.map((l) => l.task).join(','), label: `${engine} train ${id} (${group.map((l) => l.task).join(', ')})`, env: { ...env, STUDIO_GATE_PRIORITY: 'landing', ...(fullWhy ? { STUDIO_LAND_FULL: '1' } : checked ? { STUDIO_RULES_GREEN: '1', STUDIO_RULES_MODE: rulesGreen.mode } : {}) }, log });
         res.runs += 1;
+        if (fullWhy) { res.fullLand = (res.fullLand || 0) + 1; if (r.status === 'pass') { try { fs.mkdirSync(path.dirname(fullLandFile(root, engine)), { recursive: true }); writeJson(fullLandFile(root, engine), { at: new Date().toISOString(), id }); } catch { /* it is due again next time */ } } }
         if ((r.status !== 'refused' && r.status !== 'not-run') || a >= retries) break;
         log(`[unity-train] ${id}: the land command ${r.status === 'not-run' ? 'did not run' : 'refused'} (${r.why}); nobody is blamed; trying again in ${Math.round(retryMs / 1000)} s (${a + 1} of ${retries} retries)`);
         update({ now: `waiting after a refusal (${r.why.slice(0, 120)})` });
@@ -409,7 +538,13 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       if (c?.ok === false) { ev('close_failed', id, `${lane.task} landed but couldn't be closed: ${c.message}`, { task: lane.task, agent: by, to: 'producer', status: 'warn' }); res.unclosed = [...(res.unclosed || []), { task: lane.task, why: c.message }]; }
       try { dequeueUnity(root, lane.task, engine); } catch {}
       res.landed.push(lane.task);
+      live.delete(lane.task);
+      // 2.83: a landed lane's engine worktree is removed (kept, with the reason, when anything unlanded is in it).
+      if (!dryRun && !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_LANE_CLEAN || ''))) { try { const rm = removeLandedLane({ root, engine, task: lane.task, log }); if (rm && !rm.removed && rm.why && rm.dir) log(`[unity-train] ${id}: kept ${lane.task}'s engine worktree: ${rm.why}`); } catch (e) { log(`[unity-train] ${id}: could not clean ${lane.task}'s engine worktree: ${e.message}`); } }
     }
+    liveNow();
+    // 2.83: old gate builds are pruned (engines.<x>.builds; absent: nothing is touched).
+    if (!dryRun) { try { const bc = buildsConfig(engine, { root, env }); if (bc) { const pb = pruneBuilds({ ...bc, root, log }); if (pb?.removed?.length) log(`[unity-train] ${id}: pruned ${pb.removed.length} old build(s) in ${String(bc.dir).split(path.sep).join('/')}; kept ${pb.kept.length}`); } } catch (e) { log(`[unity-train] ${id}: could not prune old builds: ${e.message}`); } }
     // 2.79 (e): before/after pictures of a green land (engines.<x>.shots); no shots: nothing happens.
     if (typeof s.cfg.shots === 'string' && s.cfg.shots.trim() && !dryRun) {
       const base = s.cfg.cwd ? path.resolve(root, s.cfg.cwd) : s.folder;
@@ -431,11 +566,48 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   try {
     let remaining = set;
     let rounds = 0;
-    while (remaining.length && rounds++ <= set.length) {
-      const r = await landGroup(remaining, 'land run');
+    const again = retryStagesOf(s.cfg, env, engine);
+    let retried = false;
+    while (remaining.length && rounds++ <= set.length + 2) {
+      let r = await landGroup(remaining, 'land run');
       if (r.status === 'pass') { close(remaining, r); break; }
+      // 2.83: one more run before anyone is blamed, when the red is in a stage known to fail under load (retryStagesOf).
+      // A crew's Play Mode failed on batches that only added files, passed alone and passed on the next run; the search
+      // that followed handed back a lane that was never run by itself.
+      const stage0 = r.status === 'red' ? firstRedStage(r) : null;
+      if (stage0 && !retried && again.includes(String(stage0).toLowerCase())) {
+        retried = true;
+        ev('retry', id, `red in ${stage0} (${(r.failures || []).slice(0, 3).join(', ') || 'no test named'}): one more run of ${remaining.map((l) => l.task).join(', ')} before anyone is blamed`, { agent: by, meta: { stage: stage0, failures: (r.failures || []).slice(0, 10) } });
+        const r2 = await landGroup(remaining, `land run again (red in ${stage0})`);
+        if (r2.status === 'pass') {
+          res.flaky = [...(res.flaky || []), { stage: stage0, failures: (r.failures || []).slice(0, 10) }];
+          ev('flaky', id, `the same batch passed on the second run: ${stage0} failed the first time (${(r.failures || []).slice(0, 3).join(', ') || 'no test named'}); nobody is handed back. A test that fails under load is the game's to fix`, { agent: by, to: 'producer', status: 'warn', meta: { stage: stage0, failures: (r.failures || []).slice(0, 10), lanes: remaining.map((l) => l.task) } });
+          close(remaining, r2); break;
+        }
+        r = r2;
+      }
       if (r.status !== 'red' && r.status !== 'conflict') { hold(remaining, r); break; }
       if (r.lane) { drop(r.lane, r.lane.why); remaining = remaining.filter((l) => l.task !== r.lane.task); continue; }
+      // 2.83: blame by evidence, before any search by land runs. When the failing tests are named and exactly one lane
+      // of the batch changes a file naming their classes, the batch is run without that lane: green lands the rest on
+      // one run and hands that lane back with the evidence; red means the evidence was wrong and the search goes on.
+      if (r.status === 'red' && remaining.length > 1 && Array.isArray(r.failures) && r.failures.length && !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_BLAME_EVIDENCE || ''))) {
+        let sus = [];
+        try { sus = suspectsOf({ repo, tip: headOf(repo, target), lanes: remaining, failures: r.failures }); } catch { sus = []; }
+        if (sus.length === 1 && sus[0].tests.length === Math.min(r.failures.length, 20)) {
+          const sp = sus[0];
+          const rest = remaining.filter((l) => l.task !== sp.lane.task);
+          ev('evidence', id, `${sp.lane.task} is the only branch that changes files naming the failing test(s) (${sp.tests.slice(0, 3).join(', ')}: ${sp.files.slice(0, 3).join(', ')}): running ${rest.map((l) => l.task).join(', ')} without it`, { agent: by, meta: { suspect: sp.lane.task, tests: sp.tests.slice(0, 10), files: sp.files } });
+          const rr = await landGroup(rest, `without ${sp.lane.task}`);
+          if (rr.status === 'pass') {
+            close(rest, rr);
+            drop(sp.lane, `${blame(r)}\nBlame by evidence: the batch was red on ${sp.tests.slice(0, 5).join(', ')}, which ${sp.lane.branch} changes (${sp.files.slice(0, 4).join(', ')}), and the batch without it landed green (${rest.map((l) => l.task).join(', ')}). Fix it on ${sp.lane.branch} (merge ${target} in first), then task done ${sp.lane.task} --train again.`, { cause: 'evidence' });
+            remaining = []; break;
+          }
+          if (rr.status !== 'red' && rr.status !== 'conflict') { hold(remaining, rr); break; }
+          log(`[unity-train] ${id}: the batch without ${sp.lane.task} is ${rr.status} too: the evidence did not hold; searching by land runs`);
+        }
+      }
       if (remaining.length === 1) { drop(remaining[0], `${blame(r)}\nFix it on ${remaining[0].branch}, then task done ${remaining[0].task} --train again.`); break; }
       // Prefix bisection: the smallest k with target + the first k branches not green. Green prefixes land.
       // 2.79 (e): the batch's failure signature (the failing test names the red run printed). A red subset whose failures
@@ -449,6 +621,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       let lo = 0;
       let hi = remaining.length;
       let bad = r;
+      let badGroup = remaining;
       const steps = [{ n: hi, status: r.status }];
       let held = false;
       while (hi - lo > 1) {
@@ -460,9 +633,10 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         steps.push({ n: mid, status: rm.status, ...(rm.failures?.length ? { failures: rm.failures.length } : {}), ...(sig && rm.failures?.length && rm.failures.every((n) => sig.has(n)) ? { signature: true } : {}) });
         if (rm.status === 'pass') { close(part, rm); lo = mid; continue; }
         if (rm.status !== 'red' && rm.status !== 'conflict') { hold(remaining.slice(lo), rm); held = true; break; }
-        if (rm.lane) { bad = rm; hi = remaining.findIndex((l) => l.task === rm.lane.task) + 1 || mid; break; }
+        if (rm.lane) { bad = rm; badGroup = [rm.lane]; hi = remaining.findIndex((l) => l.task === rm.lane.task) + 1 || mid; break; }
         hi = mid;
         bad = rm;
+        badGroup = part;
       }
       if (held) break;
       if (capped) {
@@ -474,6 +648,19 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         continue;
       }
       const culprit = remaining[hi - 1];
+      // 2.83: no blame by elimination. When the last red run was not a run of this lane by itself on the target as it
+      // is now, it is run once by itself: green lands it (the red was the batch's, or a flake), red is its own evidence.
+      if (!(badGroup.length === 1 && badGroup[0].task === culprit.task)) {
+        const rc = await landGroup([culprit], `confirm ${culprit.task}`);
+        if (rc.status === 'pass') {
+          ev('bisect', id, `${steps.map((st) => `${target} + ${remaining.slice(0, st.n).map((l) => l.task).join(' + ')}: ${st.status}`).join(', ')}; ${culprit.task} was the one left, and it passed by itself: landed, nobody is handed back`, { agent: by, meta: { steps, confirmed: culprit.task, passedAlone: true } });
+          close([culprit], rc);
+          remaining = remaining.slice(hi);
+          continue;
+        }
+        if (rc.status !== 'red' && rc.status !== 'conflict') { hold(remaining.slice(hi - 1), rc); break; }
+        bad = rc;
+      }
       const before = remaining.slice(0, hi - 1).map((l) => l.task);
       ev('bisect', id, `${steps.map((st) => `${target} + ${remaining.slice(0, st.n).map((l) => l.task).join(' + ')}: ${st.status}`).join(', ')}; first not green with ${culprit.task}`, { agent: by, meta: { steps, culprit: culprit.task } });
       drop(culprit, `${blame(bad)}\nThe ${L} train's prefix bisection: ${target} + ${[...before, culprit.task].join(' + ')} is ${bad.status}${before.length ? `, ${target} + ${before.join(' + ')} landed green` : ''}; so ${culprit.branch} breaks it${before.length ? ' (alone, or together with the branches before it)' : ''}. Fix it on ${culprit.branch} (merge ${target} in first), then task done ${culprit.task} --train again.`);
@@ -534,6 +721,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (argv.includes('--json')) console.log(JSON.stringify(unityTrainStatus(root, engine), null, 2));
     else console.log(unityStatusText(root, { engine }));
     process.exit(0);
+  }
+  // 2.83: `queue --task <ID> [--engine x] [--agent a] [--branch b] [--alone]`: queue a task's branch (what task done --train does after its checks).
+  if (argv[0] === 'queue') {
+    const fl = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+    const r = queueUnityTask(mainRoot(), { engine: fl('engine') || 'unity', task: fl('task'), agent: fl('agent') || null, branch: fl('branch') || null, alone: argv.includes('--alone') ? true : null });
+    console.log(JSON.stringify({ ok: r.ok, message: r.message, error: r.error || null }));
+    process.exit(r.ok ? 0 : 1);
   }
   console.error('Usage: node harness/unity-train.mjs status [--json]   (npm run task -- train --unity runs a Unity train)');
   process.exit(1);
