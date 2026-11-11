@@ -91,10 +91,47 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   the tests then run once, on the batch. With `"rules"` set and no `"quickCheck"`, a porter's `npm run engine -- check`
   by hand is this same rules check on the lane's committed work as it would land (throwaway checkout, inputs copied
   in, the target first), never the bare command in the lane's own folder, where the inputs are not.
+  2.83: when the task's lane folder (`.lanes/engine/<task>`) is gone, the check runs on the task's recorded engine
+  branch in a throwaway checkout, removed after; with no recorded branch it is skipped and names the missing lane. It
+  never runs in the studio repo's own folder.
+
+**Making it cheaper (2.83).** A crew's rules runs grew from 12 to 60+ minutes as the game added test data, and took
+half as much machine time as the land runs. Five settings, all optional, in the same `"rules"` object:
+
+```json
+{ "rules": { "test": "dotnet test tools/SimTests", "inputs": ["Rules~"],
+  "env": { "SIM_DATA": "Rules~/data" }, "paths": ["Assets/Sim", "Assets/Tests/EditMode", "tools/SimTests"],
+  "lfs": false, "share": ["Rules~/blobs"],
+  "focus": { "test": "dotnet test tools/SimTests --filter \"{filter}\"",
+             "map": [ { "match": "^Assets/Sim/([A-Za-z]+)/", "filter": "Category=$1" } ],
+             "smoke": "Category=Smoke", "join": "|", "fullEveryHours": 24 } } }
+```
+
+- `env`: variables (strings) for the command, over the process's own and under the harness's `STUDIO_RULES_*`.
+  `rules show` prints their names only. A changed value is a new kept-result key.
+- Large files: the throwaway checkout skips Git LFS smudging (`GIT_LFS_SKIP_SMUDGE=1`) unless `"lfs": true`.
+- `paths`: the repo folders or files the rule tests compile or read. Only those are checked out (a sparse checkout; a
+  full one, said in the log, if that fails), and a kept result's key is those paths' git ids instead of the whole
+  tree: a batch that changes nothing under them gets the target's kept result without a run.
+- `inputs` are merged over every folder they are copied from: each file comes from the first folder that has it and
+  never overwrites one already there, and the inputs' fingerprint is of that merged view. The train may add the
+  lanes' own folders after the regular ones (`extraFrom`); `share` lists folders of content-addressed input files a
+  lane adds, which `shareInputs` copies (missing files only, nothing overwritten or deleted) where the next check finds them.
+- `focus`: when every path a batch changes (under `paths`, when set) matches a `map` entry, the batch runs
+  `focus.test` with `{filter}` replaced by the matching entries' filters (`$1`..`$9` are the regex groups; a group
+  with anything but letters, digits, `.`, `_` or `-` counts as unmatched) plus `smoke`, joined by `join`. Otherwise,
+  and whenever the last full pass on the target is older than `fullEveryHours`, it runs the full `test`. The target's
+  calibration and the narrowing of a red batch use the batch's same command. The command gets
+  `STUDIO_RULES_MODE=focus` or `full`; the `engine.rules` event and the train's result say the mode and the filter.
+  `STUDIO_ENGINE_RULES_FULL=1` forces a full run. **A focus-mode green is weaker than a full one**: a change in one
+  system can break another system's test, which a focused run does not run; the full run every `fullEveryHours` is
+  the backstop, and a land script that reads `STUDIO_RULES_MODE` can run the full tests itself after a focused green.
 
 ```bash
-npm run engine -- rules show                  # the command and where it comes from
-npm run engine -- rules --ref unity/my-branch # run it on one branch or commit (a porter's own check)
+npm run engine -- rules show                         # the command, where it comes from, env names, paths, focus
+npm run engine -- rules --ref unity/my-branch        # run it on one branch or commit (a porter's own check)
+npm run engine -- rules --ref unity/my-branch --full # the full command even when focus would apply
+npm run engine -- rules --ref unity/my-branch --fresh # ignore kept results
 ```
 
 ## The land's stage report

@@ -5118,6 +5118,14 @@ if (inShard('selftest-283g')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.83 (c): a cheaper rules check (harness/engine-rules.mjs) and two bugs around it.
+if (inShard('selftest-283c')) {
+  const dir = copyRepo();
+  const { selftest283C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283c.mjs')).href);
+  await selftest283C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
