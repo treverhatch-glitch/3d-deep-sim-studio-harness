@@ -78,7 +78,9 @@ export const eolNote = (eol) => `${eol.length} file${eol.length === 1 ? '' : 's'
 export function splitPhantom(cwd, lines, { limit = 200 } = {}) {
   const all = (lines || []).filter(Boolean);
   try {
-    const cand = all.filter((l) => l.length > 3 && /^[ M][ M]/.test(l) && l.slice(0, 2) !== '  ' && porcelainPath(l));
+    // Only an UNSTAGED modification (" M") can be a phantom: once something is staged for the path, a commit would
+    // change the committed blob, so it counts as the session's.
+    const cand = all.filter((l) => l.length > 3 && l.slice(0, 2) === ' M' && porcelainPath(l));
     if (!cand.length || cand.length > limit) return { real: all, phantom: [] };
     const git = (args, input) => spawnSync('git', ['-c', 'core.quotepath=off', ...args], { windowsHide: true, cwd, encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024 });
     const top = git(['rev-parse', '--show-toplevel']);

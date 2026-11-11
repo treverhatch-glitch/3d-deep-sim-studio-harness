@@ -11,6 +11,11 @@ regular cycles cost $38.83 and left one change on the board. The Producer's 80 c
 design (skip a cycle when nothing changed since the last) was replayed on the log and would have skipped 1 cycle in
 32: a hand-back appears in nearly every hour. So the rule is by outcome, not by news.
 
+A studio's first 100 minutes on 2.83 added three: sessions told to run a `git merge` they may not run (three tasks,
+three dead sessions each, merged by hand), a never-touched file that git reports as modified blocking `task done`, and
+a batch whose Play Mode and UI files forced the full 28-minute rules run. The drift check fired 10 times on files that
+were already changed in the main checkout.
+
 ## What was built
 
 | | What | Where | Checks |
@@ -25,6 +30,9 @@ design (skip a cycle when nothing changed since the last) was replayed on the lo
 | Commands that end before they run | `npm run check:tla` in the release gate: a top-level await of an import that reaches back to the module itself. Four found and fixed. | `scripts/check-top-level-await.mjs` | `qa/selftest-284i.mjs` (11) |
 | Drift check | Files dirty in the main checkout when a session started are not the session's. | `harness/drift-baseline.mjs`, `stall.mjs` | `qa/selftest-284j.mjs` (7) |
 | Online checks | The Windows self-test in 8 shards. | `.github/workflows/ci.yml` | |
+| Engine target merge | `npm run engine -- merge <ID>`: the merge the launch could not make, left in the worktree with its conflict; `--continue` refuses while markers remain; `--abort`. Only the task's own session or a person. The same conflict again, with no new commit, parks the task once. | `harness/engine-tracks.mjs`, `agent.mjs` | `qa/selftest-284m.mjs` (11) |
+| Phantom changes | An unstaged "modified" path whose bytes equal the committed blob (a filter or line-ending rule) is left out of every "uncommitted work" list, and the command says so. | `harness/eol-only.mjs` `splitPhantom` | 284m |
+| Focus ignore | `rules.focus.ignore`, `play.focus.ignore`: regexes for changed paths that cannot affect the tests. | `harness/engine-rules.mjs` | 284m |
 | Commands run | `.studio/usage/<YYYY-MM>/<script>~<word>` markers; `npm run commands-run`. `STUDIO_USAGE_MARKS=off`. | `harness/event.mjs`, `scripts/commands-run.mjs`; docs/SCORECARD.md | none yet |
 
 ## What was cut

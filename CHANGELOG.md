@@ -29,6 +29,11 @@ Details: docs/RELEASE-2.84.0.md.
 - **A check for commands that end before they run** (`npm run check:tla`, in the release gate): a module that awaits,
   at top level, an import that reaches back to itself exits 13. Four more found and fixed (`ask`, `engine-tracks`,
   `session-cap`, `waves`); `engine-tracks.mjs backfill` had been ending that way.
+- **From a studio's first hours on 2.83:** `npm run engine -- merge <ID> [--continue|--abort]` merges the engine target
+  into a task's worktree and leaves a conflict for the session to resolve (a session may not run `git merge`; three
+  tasks burned three sessions each); the same conflict twice parks the task once. A file git reports as modified
+  whose bytes equal the committed version is not "uncommitted work". `rules.focus.ignore` and `play.focus.ignore`:
+  paths that cannot affect the tests do not force the full run.
 - **Drift check:** files already changed in the main checkout when a session started are not counted as the session's.
 - **The Windows self-test in 8 shards** (was 4): about half the wait for every release.
 - **Which commands a studio runs** (`npm run commands-run`): an empty marker per command and month, so a feature is
