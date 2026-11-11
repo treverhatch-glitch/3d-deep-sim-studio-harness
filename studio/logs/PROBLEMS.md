@@ -1529,3 +1529,55 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-300 — the porter's own check ran the rules command where its inputs were not · fixed in 2.82.0 (before release)
 - **Evidence:** 2.82's fold ("with no quickCheck, the owner's rules command is the porter's check too") ran the command in the lane's folder when a porter ran `npm run engine -- check`. The crew's engine lanes are worktrees under `.lanes/engine/` with no copy of the git-ignored rules pack, so a good lane would read red, with no check of the target first. (`task done` was never affected: it runs an engine check only when `quickCheck` is set.) Found on the day the crew took 2.82 early.
 - **Fix:** harness/engine-check.mjs `rulesAsQuickCheck`: the rules check (engine-rules.mjs) on the lane's HEAD chained on the target, skipped whenever it cannot judge. docs: for a check at `task done`, set `quickCheck` to a compile. qa/selftest-282a.mjs.
+
+### P-301 — an engine task's session was scored in the wrong repository · fixed in 2.83.0
+- **Evidence:** 26 hours on 2.82 in a native studio: 89 session ends said "no work" ($268 of $368 session spend) on 50 tasks, 32 of which later landed; 25 tasks were parked for "2 sessions with no work". The work was in the engine worktree; the session end looked at the studio lane copy.
+- **Fix:** harness/engine-tracks.mjs `engineWork` (commits and unsaved files in `.lanes/engine/<task>`), used by the session end in harness/agent.mjs; a task in the engine train is "queued"; harness/crew-watch.mjs counts queued work. qa/selftest-283a.mjs.
+
+### P-302 — `npm run engine -- rules` exited 13 without running · fixed in 2.83.0 (the overseer's B-124)
+- **Evidence:** 2.82's P-300 change added a top-level `await import` to harness/engine-rules.mjs inside an import cycle with unity-train.mjs; run as a script, Node ended with "unsettled top-level await". The crew patched it locally.
+- **Fix:** the command line runs in an async function; a check runs the file as a script. qa/selftest-283c.mjs.
+
+### P-303 — the plan reported itself blocked 166 times for two causes · fixed in 2.83.0
+- **Evidence:** `plan_blocked` 166 times in 26 hours: 41 for an `--after` that named a task that did not exist, 26 for one chain-breaker that was in the train; each woke the Producer (79 of 89 Producer sessions ended in under 3 minutes).
+- **Fix:** harness/line-producer.mjs: a dangling `--after` asks once; `line.chain_gate`; the alert leads with the reason; the Producer is not woken again for the same blocker within `STUDIO_PRODUCER_BLOCKED_WAKE_MIN` (60). harness/task.mjs refuses an unknown `--after` id. qa/selftest-283f.mjs, 283d.
+
+### P-304 — the rules check ran every test for every batch · fixed in 2.83.0
+- **Evidence:** 24 batches, 50 runs, 514 machine minutes in 26 hours, and growing with every ported system; its throwaway checkout downloaded LFS files it never read and could not see the web game its vector test compares against (the overseer's B-129), so that test was skipped in the check and failed in the land run.
+- **Fix:** harness/engine-rules.mjs: `rules.env`, `rules.paths`, `rules.focus`, merged inputs, `rules.share`. qa/selftest-283c.mjs.
+
+### P-305 — the engine train blamed by elimination · fixed in 2.83.0
+- **Evidence:** 10 of 30 land runs failed (first red stage: Play Mode 5, Edit Mode 3, .NET 2). A lane was handed back "first not green" after a Play Mode test failed under load, without ever being run by itself; a switch-over was batched with a port; a lane handed back could not be restarted until the train ended.
+- **Fix:** harness/unity-train.mjs: land alone, one more run on a retry stage, blame by evidence, a culprit by elimination confirmed by itself, a handed-back lane released at once. qa/selftest-283b.mjs.
+
+### P-306 — a task was closed on its studio half · fixed in 2.83.0
+- **Evidence:** a task with commits in the studio repo and on an engine branch was closed when the merge train landed the studio half; the engine branch was never queued and was found by hand.
+- **Fix:** harness/task.mjs `engineHalfOpen`: the task stays open (`task.half_landed`) and its engine branch is queued. qa/selftest-283b.mjs.
+
+### P-307 — the land run's shortcuts could hide a difference between two runtimes for good · fixed in 2.83.0 (the overseer's B-127)
+- **Evidence:** .NET 8 and the editor's runtime printed a number differently; the .NET rules check passed code that failed in the editor. With "Edit Mode only what .NET didn't run" and "trust the rules check" both on, no later run would have shown it.
+- **Fix:** a full land run every 24 hours (`STUDIO_LAND_FULL=1`, no shortcuts); `engines.unity.editModeArgs` so the owner chooses what Edit Mode runs on the other runs. qa/selftest-283b.mjs.
+
+### P-308 — a landed change to the land script changed nothing · fixed in 2.83.0 (the overseer's B-128)
+- **Evidence:** the studio's land command named the script in another worktree of the engine repo, on an old branch.
+- **Fix:** harness/unity-train.mjs `landScriptDrift`: the train reports the file and the branch it is on. qa/selftest-283b.mjs.
+
+### P-309 — a model-pool route overrode every role's own model · fixed in 2.83.0 (the overseer's B-126)
+- **Evidence:** Director tasks ran on the builders' route instead of the Director's model; a session ended by a refresh or a usage limit was counted as the route failing.
+- **Fix:** `routeRoles` in studio/models.json (default builder, engine-porter); harness/busy.mjs `endNotAFailure`. qa/selftest-283e.mjs.
+
+### P-310 — the owner was asked in person about the game's own money and about removing code · fixed in 2.83.0
+- **Evidence:** a balance question that used the word "money", and a task that removed three unwired modules, were refused to the owner's proxy as "real money" and "deleting data".
+- **Fix:** harness/owner-acts.mjs `unless`: two narrow readings, each undone by one word of real spending or of data; a stand-in's answer records the reading. qa/selftest-283j.mjs.
+
+### P-311 — board commands that did something else than asked · fixed in 2.83.0
+- **Evidence:** `task train dequeue T-x` did not exist and the unknown word started a train; an `--after` could be added and not removed; the train status did not show what was queued.
+- **Fix:** harness/task.mjs: `train dequeue`, an unknown train word exits 2, `after --remove|--set|--clear`, two lists in the status. qa/selftest-283d.mjs.
+
+### P-312 — landed engine worktrees and old builds filled the disk · fixed in 2.83.0
+- **Evidence:** about 3 GB per landed engine worktree and one build folder per land run, cleaned by hand.
+- **Fix:** harness/engine-clean.mjs; the train removes a landed lane's worktree and prunes builds. qa/selftest-283h.mjs, 283b.
+
+### P-313 — watchers that cried wolf · fixed in 2.83.0
+- **Evidence:** "stalled" for lanes waiting in a train; 37 refusals of the same unchanged-shots review; the idle stop counted the hours the supervisor was off; a dead session's claim held its task.
+- **Fix:** harness/watch.mjs `laneInTrain`, harness/gamedev-loop.mjs, harness/review-family.mjs, harness/watchdog.mjs, `deadClaimOwner`. qa/selftest-283g.mjs.

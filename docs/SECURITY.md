@@ -287,6 +287,13 @@ owner never types `--by <owner>`. Every use is logged as before (the decisions l
   launched session with the reason ("… stays the owner's own"): an ask whose question names one, `approve -- keygen`,
   a delegated action of that name (`delegationFor`; the proxy's and beta mode's never-lists are this list), and
   `beta -- off` (before, anyone could turn beta mode off). Only a person's own terminal does them.
+  From 2.83 an ask's words are read for what they are in two cases, and only those: a question that says it is about
+  the game (the player, in-game, a balance or playtest question) and names nothing of real spending is not "real
+  money"; removing code through a lane (modules, functions, tests, a named source file) is not "deleting data". One
+  word of real spending (a paid plan, a subscription, an asset bought, a real currency) or of data (backups, history,
+  saves, a branch, a worktree, logs, `.studio`), a wipe or purge of anything, or a bare "buy it?" or "delete it?",
+  keeps it the owner's. A stand-in's answer to such an ask records the reading (`readAs` on the ask). The action
+  names (`money`, `pay`, `delete`, `wipe` …) are refused to every stand-in as before. `qa/selftest-283j.mjs`.
 - Asks (`npm run ask -- answer A-x … --by <orchestrator>`): every kind, protected-file and budget asks included. The
   orchestrator's chat shell may name itself with `--by` when it sets no `STUDIO_LOCK_OWNER` (a shell the harness didn't
   launch: no `STUDIO_ROLE`). The answer is recorded as the owner's, with `recordedBy`, `via` and the ask's kind, an

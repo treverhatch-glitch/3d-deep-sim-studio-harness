@@ -75,6 +75,18 @@ export async function selftest283J({ dir, report, tmpRoot, root }) {
       JSON.stringify({ acts, others, r1, r2, r3 }).slice(0, 900)];
   });
 
+  // The studio's own command list is the owner's to change, and never a blanket.
+  await guard('2.83 the studio\'s own command list: studio/allowlist.json is on the protected list (an agent\'s lane cannot widen what agents may run without the owner\'s signed approval), and an entry whose pattern starts with a wildcard is skipped with a reason while a named command is kept', async () => {
+    const prot = JSON.parse(fs.readFileSync(path.join(dir, 'studio', 'protected.json'), 'utf8'));
+    const m = await import(pathToFileURL(path.join(dir, 'harness', 'allowlist.mjs')).href);
+    const S = fs.mkdtempSync(path.join(tmpRoot, '283j-allow-'));
+    fs.mkdirSync(path.join(S, 'studio'), { recursive: true });
+    fs.writeFileSync(path.join(S, 'studio', 'allowlist.json'), JSON.stringify([['all', '*'], ['all2', ' * --x'], ['short', 'a *'], ['quoted', '"*" x'], ['tool', '/opt/tool/bin/tool *'], ['exact', 'tool --version']]));
+    const r = m.studioAllowed(S);
+    return [prot.globs.includes('studio/allowlist.json') && r.entries.map((e) => e[0]).join() === 'tool,exact' && r.problems.filter((x) => /starts with a wildcard/.test(x)).length === 4,
+      JSON.stringify({ protectedHas: prot.globs.includes('studio/allowlist.json'), r }).slice(0, 900)];
+  });
+
   // Through the real command, in a studio with beta mode on (the overseer the owner named answers asks for the owner):
   // the balance question is answered and the reading recorded; the question about a paid plan is refused and stays open.
   {
@@ -92,7 +104,7 @@ export async function selftest283J({ dir, report, tmpRoot, root }) {
     const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
     const g = (...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: S, encoding: 'utf8', env: gEnv() });
     g('init', '-q', '-b', 'main'); g('add', '-A'); g('commit', '-qm', 'studio, owner key, beta on', '--no-verify');
-    const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_OUTSIDE_SIGNERS: '', STUDIO_BETA: '', CLAUDECODE: '', STUDIO_ROOT: '', AGENT_EVENTS_FILE: path.join(S, '.studio', 'events-283j.jsonl') };
+    const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_OUTSIDE_SIGNERS: '', CLAUDECODE: '', AGENT_EVENTS_FILE: path.join(S, '.studio', 'events-283j.jsonl') };
     const node = (args, extra = {}) => spawnSync(process.execPath, args, { cwd: S, encoding: 'utf8', windowsHide: true, timeout: 120000, env: { ...process.env, ...ident, ...base, ...extra } });
     const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
     const asked = [

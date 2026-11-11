@@ -135,7 +135,7 @@ console.log(JSON.stringify({ base: { max: plain0.maxAgents, b: plain0.perRole.bu
     const cli = spawnSync(process.execPath, [path.join(S, 'harness', 'mode.mjs'), 'boost', 'on', '--by', 'tester', '--hours', '2', '--builders-only'], { windowsHide: true, cwd: S, env: { ...base, AGENT_EVENTS_FILE: evFile, STUDIO_MAIN_ROOT: S }, encoding: 'utf8', timeout: 60000 });
     await guard('2.83 `mode boost on --builders-only` raises the agent and builder caps exactly as boost does and leaves the Director\'s and Producer\'s cadence as the mode had it; plain boost still makes them 1 h for the Producer; the status says which is on (fails before this fix: no such flag, the cadence always changed)', () => [
       q.bo?.max > q.base?.max && q.bo.b > q.base.b && q.bo.max === q.full?.max && q.bo.d === q.base.d && q.bo.p === q.base.p && q.bo.flag === true
-        && q.full?.p === 1 && q.full.flag === false && /builders only: planning cadence unchanged/.test(q.boText || '') && /builders and planning cadence/.test(q.fullText || ''), JSON.stringify(q)]);
+        && q.full?.p === 1 && q.full.flag === false && /builders only: planning cadence unchanged/.test(q.boText || '') && /MAX SPEED on(?: until|:)/.test(q.fullText || '') && !/builders only/.test(q.fullText || ''), JSON.stringify(q)]);
     await guard('2.83 the command line takes --builders-only and its status line says so', () => [
       cli.status === 0 && /builders only: planning cadence unchanged/.test(out(cli)), out(cli).slice(0, 800)]);
   }

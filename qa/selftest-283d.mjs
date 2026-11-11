@@ -194,7 +194,7 @@ console.log(JSON.stringify({ rec: engineTask(${JSON.stringify(id || 'none')}, { 
 const r = ${JSON.stringify(roots)};
 console.log(JSON.stringify({
   folder: webCodeNamed('fix rounding in cartridges/demo/sim/fees', r.native), dotted: webCodeNamed('see ./web/demo/a', r.native), other: webCodeNamed('fix Assets/game/demo.cs and engine/game/demo/x', r.native),
-  ts: webCodeNamed('Fix the fee rounding in fees.ts', r.native), tsx: webCodeNamed('Panel.tsx crashes', r.native), mjs: webCodeNamed('harness/foo.mjs is slow', r.native),
+  ts: webCodeNamed('Fix the fee rounding in fees.ts', r.native), tsx: webCodeNamed('Panel.tsx crashes', r.native), mjs: webCodeNamed('harness/task.mjs is slow', r.native),
   engine: webCodeNamed('Add Assets/Scripts/Fuel.cs and Assets/Prefabs/Ramp.prefab', r.native), product: webCodeNamed('Upgrade Node.js for the build', r.native), empty: webCodeNamed('', r.native),
   plain: webCodeNamed('fix fees.ts in game/demo/sim', r.plain), off: webCodeNamed('fix fees.ts in game/demo/sim', r.off),
 }));`);

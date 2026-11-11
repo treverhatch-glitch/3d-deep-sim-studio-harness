@@ -134,6 +134,52 @@ npm run engine -- rules --ref unity/my-branch --full # the full command even whe
 npm run engine -- rules --ref unity/my-branch --fresh # ignore kept results
 ```
 
+## The engine train from 2.83: who lands with whom, and who is blamed
+
+Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mjs`, `qa/selftest-283b.mjs`).
+
+- **A branch that lands alone.** `npm run task -- done <ID> --train --alone`, or `npm run task -- alone <ID> on|off`
+  at any time before it lands. The train takes the lanes queued before it as one batch, then gives the marked branch a
+  land run of its own. Use it for a switch-over (the step that makes the engine's own code the live one): a red run then
+  names one change.
+- **One more run before blame.** When the first red stage of a land run is one that fails under load, the same batch
+  is run once more before anyone is searched for. Which stages: `engines.<x>.retryStages` (a list) or
+  `STUDIO_ENGINE_RETRY_STAGES=play,build`; Unity's default is `play`; `off` turns it off. A batch that passes the
+  second time lands, and the run is recorded as flaky (`task.train.unity.flaky`, with the stage and the failing test).
+- **Blame by evidence.** After a red run the failing test's name is read from the land's output and its class is
+  looked up in what each lane changes. When exactly one lane touches it, the batch is run without that lane: green, and
+  the rest lands on that one run while the lane is handed back with the evidence (cause `evidence`); red, and the
+  search by land runs goes on as before. `STUDIO_ENGINE_BLAME_EVIDENCE=off` turns it off.
+- **No blame by elimination.** A lane that the search by land runs leaves over ("everything before it was green") is
+  run by itself before it is handed back. If it passes, it lands and nobody is handed back.
+- **Handed back means out.** A lane the train hands back leaves the train's record at once, so `task start` on its
+  fix works while the train is still landing the rest.
+- **A full land run once a day.** Every `engines.<x>.fullLandHours` hours (default 24, `STUDIO_ENGINE_FULL_LAND_HOURS`,
+  `off` for never) one land run gets `STUDIO_LAND_FULL=1` and none of the shortcuts: no `STUDIO_RULES_GREEN`, no
+  `STUDIO_UNITY_EDITMODE_ARGS`. A land script that skips work on those variables should run everything when it sees
+  `STUDIO_LAND_FULL=1`. The time of the last full run that passed is kept in `.studio/engine/<engine>-full-land.json`.
+- **The owner's own Edit Mode arguments.** `engines.unity.editModeArgs` (a string, for example
+  `-testCategory "!Slow"`) is passed as `STUDIO_UNITY_EDITMODE_ARGS` in place of the harness's plan. Not on a full run.
+- **The land script that runs.** When the land command names a script inside another worktree of the engine repo and
+  that copy differs from the target branch's, the train says so (`task.train.unity.land_script`): a landed change to
+  the script changes nothing until that copy is updated.
+
+Around the train:
+
+- **Two repositories, one task.** When the merge train lands a task's studio half while its engine branch still has
+  commits the engine's target lacks, the task stays open (`task.half_landed`) and the branch is queued for the engine
+  train. It closes when that lands.
+- **Shared input files.** `engines.<x>.rules.share` (a list of folders, for example `["Rules~/packs"]`): files a lane
+  adds there, named by their content, are copied into the engine folder when the lane is queued, so the rules check
+  and the land run find them. Existing files are never overwritten.
+- **Cleanup.** A landed lane's engine worktree (`.lanes/engine/<task>`) is removed (`STUDIO_ENGINE_LANE_CLEAN=off`
+  keeps it; a worktree with uncommitted files is always kept). `engines.<x>.builds` = `{ "dir": "...", "keep": 5,
+  "pattern": "...", "latest": "latest.txt" }` keeps the newest builds and writes the newest one's name to `latest`
+  (`STUDIO_ENGINE_KEEP_BUILDS`). `npm run lanes -- prune` covers engine lanes; `node harness/engine-clean.mjs lanes|builds`
+  runs either by hand.
+- `node harness/unity-train.mjs queue --task <ID> [--engine x] [--branch b] [--alone]` queues a branch without closing
+  a task; `npm run task -- train dequeue <ID>` takes one out.
+
 ## The land's stage report
 
 A land command knows where its time went; the harness didn't. Now it names a file in `STUDIO_LAND_RESULT` and reads

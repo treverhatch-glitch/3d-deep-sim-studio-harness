@@ -174,6 +174,9 @@ The built-in list is in `harness/allowlist.mjs` (`ALLOWED`). A studio adds its o
 entries are appended to the built-in list for Claude agents' `--allowedTools`, the kickoff's list of what may run and the
 denial report's "on the list" check (`allowed(root)` in `harness/allowlist.mjs`). A file that is not valid JSON, or not an
 array, is ignored; a bad pair is skipped; nothing crashes. agy's enrolment (below) stays on the owner's approved set.
+The file is protected (`studio/protected.json`): it changes only with the owner's signed approval, so a lane cannot
+widen what agents may run. A pattern must name its command: one that starts with a wildcard (fewer than 3 characters
+before the first `*`) is skipped.
 
 ## agy's allow-rules: the owner enrols them once
 

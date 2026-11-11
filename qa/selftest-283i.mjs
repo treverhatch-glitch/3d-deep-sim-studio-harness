@@ -97,7 +97,7 @@ console.log(JSON.stringify(got.map((e) => [e.type, e.meta?.cpu || null])));`);
     const notJson = check('a', '{ nope');
     const notArray = check('b', '{"x":1}');
     const mixed = check('c', JSON.stringify([['good', 'good *'], ['nl', 'a\nb'], ['long', 'x'.repeat(301)], ['one'], [1, 2], 'str', ['ok300', 'y'.repeat(300)]]));
-    const many = check('d', JSON.stringify(Array.from({ length: 60 }, (_, i) => [`t${i}`, `t${i} *`])));
+    const many = check('d', JSON.stringify(Array.from({ length: 60 }, (_, i) => [`t${i}`, `tool${i} *`])));
     const ok = notJson.entries.length === 0 && notJson.problems.length === 1 && notArray.entries.length === 0 && notArray.problems.length === 1
       && mixed.entries.map(([n]) => n).join() === 'good,ok300' && mixed.problems.length === 5
       && many.entries.length === 50 && m.allowed(path.join(T, 'allow-a')).length === m.ALLOWED.length;

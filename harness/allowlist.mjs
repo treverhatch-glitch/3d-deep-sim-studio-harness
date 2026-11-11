@@ -46,7 +46,11 @@ export function studioAllowed(root = REPO_ROOT) {
   if (data.length > 50) problems.push(`studio/allowlist.json has ${data.length} entries; only the first 50 are read`);
   data.slice(0, 50).forEach((row, i) => {
     const ok = Array.isArray(row) && row.length === 2 && typeof row[0] === 'string' && typeof row[1] === 'string' && row[0].trim() && row[1].trim() && row[1].length <= 300 && !/[\r\n]/.test(row[0] + row[1]);
-    if (ok) entries.push([row[0], row[1]]);
+    // A pattern that is a wildcard from (nearly) its first character would allow any command: at least 3 characters of
+    // the command's own name come before the first `*`.
+    const open = ok && row[1].trim().split('*')[0].replace(/[\s"']/g, '').length < 3;
+    if (ok && !open) entries.push([row[0], row[1]]);
+    else if (open) problems.push(`studio/allowlist.json entry ${i + 1} skipped: its pattern starts with a wildcard (name the command: at least 3 characters before the first *)`);
     else problems.push(`studio/allowlist.json entry ${i + 1} skipped: it needs a label and a one-line pattern of at most 300 characters`);
   });
   return { entries, problems };
