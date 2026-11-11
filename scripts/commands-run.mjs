@@ -6,8 +6,9 @@
  *
  * Reads the monthly marker files harness/event.mjs makes (.studio/usage/<YYYY-MM>/<script>~<word>). Lists the commands
  * run in each month on record, then every harness/ and scripts/ file that can be run as a command and has no marker at
- * all, with its npm script names and line count. A file never run as a command may still be used by import: this page
- * judges commands, not modules. Evidence for cutting a feature starts at a month of markers from a live studio.
+ * all, with its npm script names and line count. A marker is made when a command writes its first event, so a command
+ * that only reads (a status page, --help) leaves none, and a file never run as a command may still be used by import:
+ * this page judges commands that change something, not modules. Evidence for cutting a feature starts at a month of markers from a live studio.
  */
 import fs from 'node:fs';
 import path from 'node:path';

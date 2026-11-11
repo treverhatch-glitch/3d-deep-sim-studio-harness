@@ -88,7 +88,8 @@ summary written before 2.83 has no `meta.cpu`: it is skipped and the note says h
 
 `npm run commands-run` lists the harness commands this studio has run, by month, and every command file it has never run
 (with its npm script names and size). The evidence is an empty marker file per command and month under
-`.studio/usage/<YYYY-MM>/`, made when a `harness/` or `scripts/` file is run as a command: the script's name and its
+`.studio/usage/<YYYY-MM>/`, made when a `harness/` or `scripts/` file run as a command writes its first event (a command that only reads leaves
+none, and still writes nothing): the script's name and its
 first argument when that is a plain subcommand word, nothing else. It judges commands, not modules: a file never run as
 a command may still be used by import. `STUDIO_USAGE_MARKS=off` (default on) makes no markers. It exists so that a
 feature nobody uses is cut on a month of evidence from a live studio, not on a guess.
