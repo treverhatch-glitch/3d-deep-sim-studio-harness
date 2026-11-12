@@ -134,7 +134,7 @@ a rescue keeps the rescue model. With every pool on the list passed over, the le
 
 - **Data:** `studio/models.json` (optional; `npm run models -- init` writes the defaults to edit): `pools.<name>` `{ tool,
   model, match, sessions5h, sessionsDay, tokens5h, tokensDay, off }`, `routes`, `escalate`, `nearPct`, `success`,
-  `protectedHours`, `routeRoles` (2.83: the roles a pool route applies to, default `["builder", "engine-porter"]`; the Director, Producer, Line Producer and reviewers keep their own role model). **The default limits are guesses** (no provider publishes agy's pools): set your own.
+  `protectedHours`, `routeRoles` (2.84: a pool may also set `stallMin`, the minutes a planning session on that pool's model may go without a write before the stall watchdog ends it; unset, a top-tier model gets 20 and any other 8, and `STUDIO_STALL_PLAN_MIN` overrides both) (2.83: the roles a pool route applies to, default `["builder", "engine-porter"]`; the Director, Producer, Line Producer and reviewers keep their own role model). **The default limits are guesses** (no provider publishes agy's pools): set your own.
 - **Use** is counted from the studio's own events (sessions started per pool; tokens from session ends, agy's often
   estimated: harness/agent.mjs `agyUsage` records "not reported" and an estimate from text length when agy prints no usage).
 - **agy's own quota:** no `agy usage` or `agy quota` command shows in the crew's evidence (only `agy models`), so it is

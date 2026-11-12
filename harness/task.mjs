@@ -8,7 +8,7 @@ import { postAsk } from './ask-post.mjs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
+import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, boardRoot } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks, SHARED_OWNERS } from './lock.mjs';
 import { ensureResearchTemplate, researchRel } from './research.mjs';
 import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType, skipGameChecks } from './done-check.mjs';
@@ -22,7 +22,7 @@ import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS }
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
 import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal, laneEntries } from './task-hold.mjs';
-import { stopIfOverBudget } from './task-budget.mjs';
+import { stopIfOverBudget, overBudget as overBudgetOf } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
 import { laneConfigWarning } from './lane-studio.mjs';
@@ -61,9 +61,11 @@ import { eligibility, recordAttempt, clearAttempts, sameBlocker, startRefusalWor
 import { pinRefusal } from './task-pin.mjs';
 import { TASK_LINE_RE } from './board-line.mjs';
 
-export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
+// 2.84: the board is the main checkout's (boardRoot): a lane copy made by hand has no link to main's studio/, and read its own
+// git snapshot of the board ("Task not found" for a task that exists). In main, or a linked lane copy, it is the same file as before.
+export const NEXT_FILE = path.join(boardRoot(), 'studio', 'NEXT.md');
 // 2.30c (#13): finished tasks live in studio/DONE.md, so NEXT.md (read by every agent) holds only open work.
-export const DONE_FILE = path.join(REPO_ROOT, 'studio', 'DONE.md');
+export const DONE_FILE = path.join(boardRoot(), 'studio', 'DONE.md');
 export const CURRENT_TASK_FILE = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
 
 // 2.58.0 (P-057): the line the harness writes, plus the drifts people make by hand, read as the same task and put back
@@ -427,9 +429,16 @@ export function showTask(taskId, q = parseNextQueue()) {
   const meta = events.find((e) => e.type === 'task.added')?.meta || {};
   const handoff = path.join(HANDOFF_DIR, `${taskId}.md`);
   const check = lane === 'done' ? null : checkDone(task);
+  // 2.84: why the supervisor is not starting it: the refusal it keeps skipping the task for (.studio/start-backoff.json).
+  let startBackoff = null;
+  try {
+    const e = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'start-backoff.json'), 'utf8'))?.tasks?.[taskId];
+    if (e && Number(e.until) > Date.now()) startBackoff = { why: e.text || e.reason || 'unknown', refused: e.count, skippedUntil: new Date(e.until).toISOString(), minutesLeft: Math.max(1, Math.round((e.until - Date.now()) / 60000)) };
+  } catch { startBackoff = null; }
   return {
     ...task,
     lane,
+    ...(startBackoff ? { startBackoff } : {}),
     type: taskType(task),
     owner: lockStatus(`task:${taskId}`).lock?.owner || null,
     meta,
@@ -457,7 +466,9 @@ export function liveOwner(taskId, agent, events = null, { waiting = false } = {}
   } catch { return null; }
 }
 
-export function startTask(taskId, agent = null, { model = null, force = false } = {}) {
+export function startTask(taskId, agent = null, { model = null, force = false, dryRun = false } = {}) {
+  // 2.84: dryRun runs every check below and changes nothing: no event, no park by the budget, no claim, no board write.
+  const say = (e) => { if (!dryRun) emitEvent(e); };
   if (!agent) return { error: 'owner-required', message: 'Pass --agent <unique-name> so the task lock has an owner.' };
   // 2.77.0 (n, B-92): a session the launcher started on a task works only that task (harness/task-pin.mjs); --force too.
   const pinWhy = pinRefusal(taskId, { action: 'start' });
@@ -474,24 +485,33 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
     try { tq = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'train', 'queue.json'), 'utf8')).find((e) => e?.task === taskId) || null; } catch {}
     const mine = lockStatus(`task:${taskId}`).lock?.owner === agent;
     if (tq && tq.agent && tq.agent !== agent && !mine) {
-      emitEvent({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: `Task ${taskId}: queued for the merge train (lane of ${tq.agent})` });
+      say({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: `Task ${taskId}: queued for the merge train (lane of ${tq.agent})` });
       return { error: 'queued', message: `${taskId} can't start: its lane (${tq.agent}, ${tq.branch || 'its branch'} at ${String(tq.head || '').slice(0, 8)}) is queued for the merge train${tq.released ? ` and released by ${tq.released.by}` : ''}; it lands with the next train. Pick another task (npm run task -- next); npm run task -- train leave ${taskId} --by <name> takes it out of the queue first.` };
     }
   }
   // 2.31.0: a task that used its budget (sessions, claimed minutes, tokens; harness/task-budget.mjs) is
   // parked and refused, even for a re-claim of work in progress: re-claiming is how a task loops.
-  const overWhy = stopIfOverBudget(taskId, { by: 'budget' });
+  const overWhy = dryRun ? (() => { const b = overBudgetOf(taskId); return b.over ? b.why : ''; })() : stopIfOverBudget(taskId, { by: 'budget' });
   if (overWhy) return { error: 'over-budget', message: `${taskId} can't start: ${overWhy}` };
   // 2.72.0 (b): handed back by the two-round cap in this agent's session: no third attempt here (harness/round-cap.mjs).
   const capWhy = force ? '' : capRefusal(taskId, agent);
-  if (capWhy) { emitEvent({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: `Task ${taskId}: refused by the round cap` }); return { error: 'round-cap', message: `${taskId} can't start: ${capWhy}.` }; }
+  if (capWhy) { say({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: `Task ${taskId}: refused by the round cap` }); return { error: 'round-cap', message: `${taskId} can't start: ${capWhy}.` }; }
   // 2.58.5 (H-5): a claim that ran out under an owner still at work is that owner's (--force: a person reassigns it).
   if (!force && !lockStatus(`task:${taskId}`).locked) {
     const live = liveOwner(taskId, agent, null, { waiting: !parseNextQueue().inProgress.some((t) => t.id === taskId) });
     if (live) {
-      emitEvent({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: `Task ${taskId}: ${live.why}` });
+      say({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: `Task ${taskId}: ${live.why}` });
       return { error: 'locked', lock: { owner: live.owner }, message: `${taskId} is ${live.owner}'s: ${live.why}. Pick another task (npm run task -- next); a person can reassign it with --force.` };
     }
+  }
+  if (dryRun) {
+    // What claim() would answer, read without taking it: another owner's lock refuses, a free or own one would be taken.
+    const cur = lockStatus(`task:${taskId}`);
+    if (cur.locked && cur.lock?.owner !== agent) return { error: 'locked', lock: cur.lock, message: `Task ${taskId} is claimed by ${cur.lock.owner}. Pick another task.` };
+    const q0 = parseNextQueue();
+    const t0 = q0.inProgress.find((t) => t.id === taskId) || q0.backlog.find((t) => t.id === taskId) || null;
+    if (!t0) return null;
+    return { ...t0, dryRun: true, owner: agent, was: q0.inProgress.some((t) => t.id === taskId) ? 'in progress' : 'waiting' };
   }
   const lockRes = claim(`task:${taskId}`, agent);
   if (!lockRes.ok) {
@@ -1858,11 +1878,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   const flags = parseFlags(process.argv.slice(2));
   // 2.71.0 (z): --force and a refused command re-run again and again are detected workarounds (harness/workaround.mjs).
-  try { watchCommand('task', process.argv.slice(2), { agent: (typeof flags.agent === 'string' && flags.agent) || (typeof flags.by === 'string' && flags.by) || whoAmI({}, REPO_ROOT, { ...process.env, STUDIO_LOCK_OWNER: '' }) || process.env.STUDIO_LOCK_OWNER || null }); } catch { /* evidence only */ }
+  // 2.84: `start --dry-run` changes nothing, so it leaves no trace in the workaround watch (that records a run's exit).
+  if (!(flags._[0] === 'start' && flags['dry-run'])) try { watchCommand('task', process.argv.slice(2), { agent: (typeof flags.agent === 'string' && flags.agent) || (typeof flags.by === 'string' && flags.by) || whoAmI({}, REPO_ROOT, { ...process.env, STUDIO_LOCK_OWNER: '' }) || process.env.STUDIO_LOCK_OWNER || null }); } catch { /* evidence only */ }
   const [cmd = 'next', arg1] = flags._;
   // 2.81 (b4): end sessions whose process is gone, at most once per STUDIO_GONE_CHECK_S (harness/gone-check.mjs). A child
   // process: agent.mjs imports this file, so importing it from here (as the main module) would wait on itself.
-  if (cmd === 'next' || cmd === 'start') { try { const gc = await import('./gone-check.mjs'); if (gc.goneDue()) spawnSync(process.execPath, [fileURLToPath(new URL('./gone-check.mjs', import.meta.url))], { windowsHide: true, stdio: 'ignore', timeout: 60000 }); } catch { /* a check, never a crash */ } }
+  if (cmd === 'next' || (cmd === 'start' && !flags['dry-run'])) { try { const gc = await import('./gone-check.mjs'); if (gc.goneDue()) spawnSync(process.execPath, [fileURLToPath(new URL('./gone-check.mjs', import.meta.url))], { windowsHide: true, stdio: 'ignore', timeout: 60000 }); } catch { /* a check, never a crash */ } }
   const q = parseNextQueue();
 
   if (cmd === 'next') {
@@ -2001,6 +2022,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (!targetId) {
       console.error('Usage: node harness/task.mjs start <TASK_ID> --agent <unique-name>');
       process.exit(1);
+    }
+    // 2.84: --dry-run: every check `task start` runs, then what would happen; nothing is claimed, copied or logged.
+    if (flags['dry-run']) {
+      const who = whoAmI(flags);
+      const t = q.backlog.find((x) => x.id === targetId) || q.inProgress.find((x) => x.id === targetId);
+      const ov = t ? overlapCheck({ id: t.id, title: t.title, role: t.role, phase: 'start', agent: who, board: q }) : null;
+      const r = ov?.block ? { error: 'overlap', message: `overlap (STUDIO_OVERLAP=block): ${(ov.found || []).map((f) => f.with).join(', ')}` } : startTask(targetId, who, { model: typeof flags.model === 'string' ? flags.model : null, force: Boolean(flags.force), dryRun: true });
+      if (!r) { console.log(`DRY RUN: ${targetId} would be refused: Task "${targetId}" not found.`); process.exit(1); }
+      if (r.error) { console.log(`DRY RUN: ${targetId} would be refused (${r.error}): ${r.message || `can't be claimed right now`}`); process.exit(1); }
+      let lane = null; let copy = null;
+      try { lane = (await import('./task-hold.mjs')).laneOf(r.id, readRecentEvents(20000)) || null; } catch { lane = null; }
+      try { const w = (await import('./lane-at-claim.mjs')).claimWantsCopy({ agent: who, task: r.id, lane }); copy = w.want ? `a lane copy .lanes/${who} would be made` : `no lane copy (${w.why})`; } catch { copy = null; }
+      console.log(`DRY RUN: ${r.id} would start for ${who} (${r.was}, role ${r.role || 'none'}). Lane: ${lane || 'none'}${copy ? `; ${copy}` : ''}. Nothing was changed.`);
+      process.exit(0);
     }
     // 2.69.0 (s): the task against the work in flight (its lane, its own diff once it has one, near-duplicate titles).
     const startOv = (() => { const t = q.backlog.find((x) => x.id === targetId) || q.inProgress.find((x) => x.id === targetId); return t ? overlapCheck({ id: t.id, title: t.title, role: t.role, phase: 'start', agent: whoAmI(flags), board: q }) : null; })();

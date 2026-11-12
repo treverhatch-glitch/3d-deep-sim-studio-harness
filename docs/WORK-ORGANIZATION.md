@@ -34,6 +34,9 @@ Read `studio/CURRENT_TASK.md`; a clear next step in `IN_PROGRESS` is yours. If i
   When the last `STUDIO_ROUND_CAP` (default 2; `0` off) rounds in a session are red with the same signature (failing sub-id + first
   FAIL line) the task is handed back and a third attempt (`npm run verify` while holding it, `task start`) is refused until a new
   session (outside the launcher: the last 12 hours). `--force` on `task start` is a person's reassignment.
+- **`task start <ID> --agent <you> --dry-run`** (2.84) runs every check `task start` runs and prints what would happen (would start, with
+  the lane, or the refusal and why); it claims nothing, makes no lane copy and logs no event. The board commands (`show`, `list`,
+  `next`, `start --dry-run`) read the main checkout's board, also from a lane copy made by hand (it said "Task not found").
 - **Held lanes**: `npm run task -- hold <ID> --by <name> --why "…"` (a person, Producer/Director session or outside agent; never a
   worker) marks a lane that waits to land on purpose; `task unhold <ID> --by <name>` ends it. A held or queued lane's claim clock
   (`STUDIO_TASK_MAX_MIN` 240; `STUDIO_TASK_MAX_SESSIONS` 6 and `STUDIO_TASK_MAX_TOKENS` 10M weighted tokens still count) stops, no

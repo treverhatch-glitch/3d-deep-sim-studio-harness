@@ -5108,6 +5108,13 @@ if (inShard('selftest-283j')) {
   await selftest283J({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
+// 2.84 (v): the supervisor says why a task is skipped, the crew breaker's progress, the model-aware planning stall, task start --dry-run, reload-env names.
+if (inShard('selftest-284v')) {
+  const dir = copyRepo();
+  const { selftest284V } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284v.mjs')).href);
+  await selftest284V({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
 // 2.84 (m): the engine target merge a session can run, phantom files a filter rule makes look changed, rules.focus.ignore.
 if (inShard('selftest-284m')) {
   const dir = copyRepo();

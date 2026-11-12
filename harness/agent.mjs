@@ -1528,7 +1528,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
         onContinue: (c) => agyContinueEvent(agent, task, c),
         // 2.78.1: the progress nudge reads the stall check's progress and stays below its no-progress limit.
         progressAt: () => Date.parse(readStall(agent)?.lastProgressAt || '') || 0,
-        stallMin: () => stallLimits(role).stallMin,
+        stallMin: () => stallLimits(role, process.env, model).stallMin,
       });
     } catch (err) {
       fs.writeSync(out, `[launcher] agy stream: couldn't follow the session (${String(err?.message || err).slice(0, 200)}); its input is closed after the kickoff\n`);
@@ -1545,7 +1545,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, ...(viaProxy ? { proxy: 'vertex' } : {}), keys: billKeys, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, ...(task ? { pinned: task } : {}), lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, logFrom, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
   resetStall(agent); // 2.76.0 (B-83): the last session's stall record never judges this one
-  emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane } });
+  emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane, ...(STARTED_BY_HAND ? { byHand: true } : {}) } });
   // 2.73.1 (B-66): when this launcher ends the agent itself (stall, idle, budget), so the end records why.
   let killedBy = null;
   let lastBeatEvent = 0;
@@ -1907,6 +1907,9 @@ function stopChild(child) {
 
 // This launcher's start: the spawn time its parent wrote in the placeholder (startAgent --detach), else its own
 // clock (Date.now() - process.uptime()). Never an OS query.
+// 2.84: this launcher was started by a person or the overseer (`npm run agent -- start ...` typed, not the supervisor's or the
+// watcher's own start): its session.start event says so (meta.byHand), so the crew watchdog doesn't count it as the crew's.
+let STARTED_BY_HAND = false;
 let LAUNCHER_ID = null;
 const launcherIdentity = () => LAUNCHER_ID || (LAUNCHER_ID = selfIdentity());
 /** 2.58.5: a "starting" record for this launcher (its pid and spawn time), unless another live session holds the name. */
@@ -2539,7 +2542,7 @@ export function startAgent(opts, { detach = false } = {}) {
   if (opts.next && !opts.task) opts = { ...opts, task: nextFor({ role }, parseNextQueue()).task?.id || null };
   if (detach) {
     // A supervisor process of its own, so the agent outlives this command (the supervisor and the watcher use this).
-    const args = [fileURLToPath(import.meta.url), 'start', '--attach', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : []), ...(opts.forceModel || (tool === 'agy' && !isGeminiModel(model)) ? ['--force-model'] : [])];
+    const args = [fileURLToPath(import.meta.url), 'start', '--attach', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : []), ...(STARTED_BY_HAND ? ['--by-hand'] : []), ...(opts.forceModel || (tool === 'agy' && !isGeminiModel(model)) ? ['--force-model'] : [])];
     // 2.77.0 (n, B-92): the launcher is not the pinned session that may have started it (its agent gets its own pin).
     const sup = spawn(process.execPath, args, { windowsHide: true, cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: { ...process.env, STUDIO_TASK_PIN: '' } });
     sup.unref();
@@ -2657,6 +2660,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // started it returned (builder-api2 after 12 min, builder-api3 after 1). --attach (or --foreground, for
     // a script or a test that wants the session in this process) keeps it here.
     const attach = argv.includes('--attach') || argv.includes('--foreground');
+    // 2.84: typed by a person (no --attach: only a detached launcher's own re-run has it), not hired by an agent: by hand.
+    // The detached launcher is told with --by-hand, so its session.start carries it.
+    STARTED_BY_HAND = argv.includes('--by-hand') || (!argv.includes('--attach') && !(flag('by') && isAgentName(flag('by'))));
     const r = startAgent(base, { detach: argv.includes('--detach') || !attach });
     if (!r.ok) {
       if (r.needsApproval) {

@@ -54,7 +54,8 @@ npm run studio:status
   for a reload now: a running supervisor answers within seconds with what changed; if busy it waits one pass
   (`STUDIO_SUPERVISOR_SEC` plus 10 s) and says "Queued: the supervisor reloads on its next pass" (exit 0); with no
   supervisor it exits 0 and says the settings apply at start. Each change is logged once (`env.reloaded`, key names only;
-  values of keys that look secret (`*_TOKEN`, `*_KEY`, `*_SECRET`, `*PASSWORD*`, webhooks) are never written). It also lists
+  values of keys that look secret (`*_TOKEN`, `*_KEY`, `*_SECRET`, `*PASSWORD*`, webhooks) are never written). 2.84: a name
+  the harness no longer reads is named again after the list with the closest current name, or "none is close". It also lists
   the `STUDIO_*` names `.env` sets and marks those the harness no longer reads (not in `docs/SETTINGS.md`) "unknown (removed
   or misspelled)" (2.79).
   - Precedence: a variable in the environment a process was started with (your shell, a scheduled task) wins over `.env`; a
@@ -80,6 +81,9 @@ npm run studio:status
 - **Start backoff** (2.78.0, `.studio/start-backoff.json`): a start of task T refused for the same reason as last time
   (`task.start_refused`, `task.lock_denied`, a launcher refusal) is skipped for 2, 4, 8 ... minutes, at most
   `STUDIO_START_BACKOFF_MAX_MIN` (30); a changed reason or task state resets it. The pass's `why` says so once.
+  2.84: that line, the `supervisor.backoff` event (`meta.reason`) and `npm run task -- show <ID>` (`startBackoff`) give the
+  refusal in its own words. A refusal about the crew and not the task (every seat taken, a budget stop) is not counted:
+  it clears by itself, and counting it kept a startable task waiting up to 30 minutes.
 - **Line Producer** (2.76.0, docs/LINE-PRODUCER.md): before the supervisor picks, `harness/line-producer.mjs` frees locks of
   ended sessions, recreates a train lane's lost copy, clears expired cooldowns, puts chain-breakers first on the strongest
   model, keeps a share of builders on research/expansion across phases, and holds builders back when the rig is full.
@@ -155,6 +159,9 @@ npm run studio:status
 - **The stall watchdog** (`harness/stall.mjs`): a session with no file write, commit or task change for `STUDIO_STALL_MIN` (15)
   minutes, or past its wall-clock cap (`STUDIO_SESSION_MAX_MIN`, 90; planning roles `STUDIO_SESSION_PLAN_MAX_MIN`, 25), is
   ended and its task handed back (`session.stall`).
+  - 2.84: with `STUDIO_STALL_PLAN_MIN` unset a planning session gets 8 minutes, or 20 on a top-tier model (it thinks long
+    before its first write), or the model's own `stallMin` in `studio/models.json`; a set `STUDIO_STALL_PLAN_MIN` always
+    wins. The `session.stall` event says which limit applied and why.
   - Read-burn ratio (`STUDIO_STALL_RATIO`, 120:1 over `STUDIO_STALL_RATIO_WINDOW_TOKENS`; 0 = off) counts uncached input plus
     cache creation only, and gives no verdict in the first `STUDIO_STALL_GRACE_MIN` (15) minutes.
   - Each session is judged on its own tokens: the session record's `logFrom` says where its part of an agent's appended log
@@ -278,6 +285,8 @@ Each supervisor pass (code only, no model) also does these.
   words>"`; never a worker). `npm run crew` shows each role's hour. `STUDIO_CREW_WATCH=off` turns it off. A pause also ends
   itself after `STUDIO_CREW_BREAKER_RESUME_MIN` (30; `0` or `off`: never) when the evidence no longer trips the breaker, or once
   per cause (the same tasks): a second trip on the same tasks stays paused. Each is a `crew.resumed` event (`meta.auto`) (2.78.2).
+  2.84: a session whose lane was checked and queued for a train, and a hand-back whose note says the work is ready for the
+  train, count as progress; a session a person or the overseer started by hand (`meta.byHand`) is not counted.
 - **Futility cap** (`harness/futility.mjs`): a running session past the 90th percentile of its task type's successful sessions
   (weighted tokens, or wall time) raises one `futility.check`. With fewer than `STUDIO_FUTILITY_MIN_N` (20) successful sessions
   of the type, no cap. `STUDIO_FUTILITY=auto` (default, 2.78.0) enforces for a type only with those 20 good runs and a shadow

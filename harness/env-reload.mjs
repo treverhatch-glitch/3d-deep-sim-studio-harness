@@ -138,14 +138,53 @@ export function envNameReport({ root = REPO_ROOT, file = path.join(root, '.env')
   const families = [...known].filter((k) => k.endsWith('*')).map((k) => k.slice(0, -1));
   const readable = known.size > 0;
   const unknown = readable ? names.filter((n) => REMOVED_SETTINGS.includes(n) || (!known.has(n) && !families.some((f) => n.startsWith(f)))) : [];
-  return { names, unknown, known: readable };
+  // 2.84: for each unknown name, the closest name the map has now (a misspelling or a rename), or null.
+  const current = [...known].filter((k) => !k.endsWith('*') && !k.endsWith('_') && !REMOVED_SETTINGS.includes(k));
+  const near = {};
+  for (const n of unknown) near[n] = closestSetting(n, current);
+  return { names, unknown, known: readable, near };
+}
+/**
+ * 2.84: the name in `current` closest to `name`: the smallest edit distance when it is at most a third of the longer
+ * name, else the best overlap of the words between the underscores (at least 0.6), else null.
+ */
+export function closestSetting(name, current = []) {
+  const a = String(name || '');
+  const dist = (x, y) => {
+    let prev = Array.from({ length: y.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= x.length; i += 1) {
+      const row = [i];
+      for (let j = 1; j <= y.length; j += 1) row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+      prev = row;
+    }
+    return prev[y.length];
+  };
+  let best = null; let bestD = Infinity;
+  for (const c of current) {
+    const d = dist(a, c);
+    if (d < bestD && d <= Math.max(a.length, c.length) / 3) { best = c; bestD = d; }
+  }
+  if (best) return best;
+  const words = (x) => new Set(x.split('_').filter(Boolean));
+  const wa = words(a); let bestJ = 0;
+  for (const c of current) {
+    const wc = words(c);
+    const both = [...wa].filter((w) => wc.has(w)).length;
+    const j = both / (wa.size + wc.size - both || 1);
+    if (j >= 0.6 && j > bestJ) { best = c; bestJ = j; }
+  }
+  return best;
 }
 /** The text `npm run studio:reload-env` prints after the reload line. */
 export function envNameText(r) {
   if (!r.names.length) return 'The .env sets no STUDIO_* names.';
   const lines = [`The .env sets ${r.names.length} STUDIO_* names (names only, no values):`, ...r.names.map((n) => `  ${n}${r.unknown.includes(n) ? '   unknown (removed or misspelled)' : ''}`)];
   if (!r.known) lines.push('(docs/SETTINGS.md not found: could not check which names the harness still reads.)');
-  else if (r.unknown.length) lines.push(`${r.unknown.length} name${r.unknown.length === 1 ? '' : 's'} the harness no longer reads: remove or fix ${r.unknown.length === 1 ? 'it' : 'them'} in .env.`);
+  else if (r.unknown.length) {
+    // 2.84: name them (the list above is long, and the marks are easy to miss), each with the closest current name.
+    lines.push(`${r.unknown.length} name${r.unknown.length === 1 ? '' : 's'} the harness no longer reads: remove or fix ${r.unknown.length === 1 ? 'it' : 'them'} in .env:`);
+    for (const n of r.unknown) lines.push(`  ${n}${r.near?.[n] ? `   closest current name: ${r.near[n]}` : '   no current name is close to it: remove it'}`);
+  }
   return lines.join('\n');
 }
 

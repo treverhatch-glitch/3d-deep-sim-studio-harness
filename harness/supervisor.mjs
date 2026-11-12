@@ -82,14 +82,18 @@ export function taskStateSig(events, task, locked = false) {
   return `${last ? `${last.type}@${last.ts}` : 'none'}|${locked ? 'locked' : 'free'}`;
 }
 /** Record a refusal of `task` for `reason` in state.startBackoff; returns the entry ({ count, until, … }). */
-export function noteStartRefusal(state, task, reason, sig, now = Date.now(), env = process.env) {
+export function noteStartRefusal(state, task, reason, sig, now = Date.now(), env = process.env, shown = reason) {
   const bo = (state.startBackoff ||= {});
   const key = refusalKey(reason);
   const prev = bo[task];
   const count = prev && prev.reason === key && prev.sig === sig ? prev.count + 1 : 1;
-  bo[task] = { reason: key, sig, count, until: now + startBackoffMs(count - 1, env), said: false };
+  // 2.84: `text` is the refusal in its own words (first 160 characters), kept so the line that says the task is skipped
+  // can say why (the key above is lower-cased with the numbers taken out, for comparing, not for reading).
+  bo[task] = { reason: key, text: String(shown ?? '').replace(/\s+/g, ' ').trim().slice(0, 160), sig, count, until: now + startBackoffMs(count - 1, env), said: false };
   return bo[task];
 }
+/** 2.84: the words for one skipped task: "T-1 (refused 3x for the same reason: "<why>"; skipped for 4 min)". */
+export const backoffWords = (task, bo, now = Date.now()) => `${task} (refused ${bo.count}x for the same reason${bo.text ? `: "${bo.text}"` : ''}; skipped for ${Math.max(1, Math.round((bo.until - now) / 60000))} min)`;
 /** The live backoff entry for `task`, or null (none, expired, or the task's state changed, which resets it). */
 export function startBackedOff(state, task, sig, now = Date.now()) {
   const e = state.startBackoff?.[task];
@@ -97,6 +101,12 @@ export function startBackedOff(state, task, sig, now = Date.now()) {
   if (e.sig !== sig) { delete state.startBackoff[task]; return null; }
   return now < e.until ? e : null;
 }
+/**
+ * 2.84: a refusal about the crew and not the task: every seat is taken (the mode's cap, a role's cap) or a budget stop.
+ * It clears by itself when a session ends or the budget opens, so the task is not backed off for it. Why: the same cap
+ * refusal twice in a row put a startable task to sleep for up to 30 minutes after the seat was free again.
+ */
+export const crewWideRefusal = (msg) => /\bagents? ?(\(s\))? already running\b|\bagent\(s\) already running\b|\bbudget stop\b/i.test(String(msg || ''));
 const START_REFUSALS = new Set(['task.start_refused', 'task.lock_denied']);
 /** Fold the log's refusals since the last look into state.startBackoff. Returns how many it noted. */
 export function ingestRefusals(state, events, sigOf, now = Date.now(), env = process.env) {
@@ -105,7 +115,7 @@ export function ingestRefusals(state, events, sigOf, now = Date.now(), env = pro
   for (const e of [...events].sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))) {
     const t = Date.parse(e.ts);
     if (!START_REFUSALS.has(e.type) || !e.task || !(t > from)) continue;
-    noteStartRefusal(state, e.task, `${e.type} ${e.msg || ''}`.replace(new RegExp(String(e.task).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'T'), sigOf(e.task), now, env);
+    noteStartRefusal(state, e.task, `${e.type} ${e.msg || ''}`.replace(new RegExp(String(e.task).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'T'), sigOf(e.task), now, env, String(e.msg || e.type));
     seen = Math.max(seen, t); k += 1;
   }
   state.startBackoffSeen = seen;
@@ -543,7 +553,12 @@ export async function supervise(opts, state, now = Date.now()) {
   for (const t of waiting) {
     const bo = startBackedOff(state, t.id, sigOf(t.id), now);
     if (bo) {
-      if (!bo.said) { bo.said = true; backedOff.push(`${t.id} (refused ${bo.count}x for the same reason; skipped for ${Math.max(1, Math.round((bo.until - now) / 60000))} min)`); }
+      if (!bo.said) {
+        bo.said = true; backedOff.push(backoffWords(t.id, bo, now));
+        // 2.84: once per backoff, with the reason, so the log says why a task is skipped (the crew's art tasks sat skipped
+        // all afternoon, and nothing said why).
+        if (!opts.dryRun) { try { emitEvent({ type: 'supervisor.backoff', agent: 'supervisor', to: 'producer', task: t.id, status: 'warn', msg: backoffWords(t.id, bo, now).slice(0, 400), meta: { task: t.id, count: bo.count, reason: bo.text || bo.reason, minutes: Math.max(1, Math.round((bo.until - now) / 60000)) } }); } catch { /* a note, never a crash */ } }
+      }
       continue;
     }
     // Lanes always count now: a task's own lane, `task lane`, or its --part (harness/task-hold.mjs).
@@ -730,7 +745,7 @@ export async function supervise(opts, state, now = Date.now()) {
       if (!planning) room -= 1;
     } else {
       why.push(`${g.role}: ${r.message}`);
-      try { noteStartRefusal(state, taskId, `start_agent ${r.message}`, sigOf(taskId), now); saveBackoff(); } catch { /* best effort */ }
+      if (!crewWideRefusal(r.message)) try { noteStartRefusal(state, taskId, `start_agent ${r.message}`, sigOf(taskId), now, process.env, r.message); saveBackoff(); } catch { /* best effort */ }
     }
   }
   if (!groups.size) why.push('no waiting tasks for agents');

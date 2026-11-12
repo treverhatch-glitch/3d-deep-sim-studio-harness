@@ -7,7 +7,7 @@
  * tripped it. Now every heartbeat (and every watchdog pass) asks:
  *   - progress: did the session write a file, commit, or change a task's state since its last progress?
  *     (fingerprint = HEAD + `git status --porcelain` of its working copy + its task.* events)
- *   - stall: no progress for STUDIO_STALL_MIN minutes (15; Producer/Director/planner: STUDIO_STALL_PLAN_MIN, 8)
+ *   - stall: no progress for STUDIO_STALL_MIN minutes (15; Producer/Director/planner: STUDIO_STALL_PLAN_MIN: 8, or 20 for a top-tier or slow-thinking model; see planStallFor)
  *   - burn: over the last STUDIO_STALL_RATIO_WINDOW_TOKENS (300000) input tokens the input:output ratio
  *     passed STUDIO_STALL_RATIO (120:1) with no progress in that window. 2.77.3 (B-109): the input counted here is
  *     uncached input plus cache creation only: a cache read is the same context re-read on every turn (an Opus turn
@@ -33,7 +33,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents, boardRoot } from './event.mjs';
+import { tierOf } from './model-tiers.mjs';
 import { doneRunning } from './busy.mjs';
 import { pidAlive } from './proc-identity.mjs';
 import { laneOf, laneList } from './task-hold.mjs';
@@ -44,10 +45,37 @@ import { mainOf, snapshotDirty, notTheSessions } from './drift-baseline.mjs';
 import { PLANNING_ROLES } from './planning-roles.mjs';
 export { PLANNING_ROLES };
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
-export function stallLimits(role, env = process.env) {
+/**
+ * 2.84: how long a planning session on this model may go with no file write, commit or task change, and why that long.
+ * An explicit STUDIO_STALL_PLAN_MIN wins. Else the model's own "stallMin" in studio/models.json (the pool whose model or
+ * "match" names it), else 20 minutes for a top-tier model (a deep-thinking Director can think that long before it writes
+ * anything: it was ended at 8 with no output yet), else 8. { min, why }.
+ */
+export const SLOW_THINKER_STALL_MIN = 20;
+export function planStallFor(model, { env = process.env, root = boardRoot() } = {}) {
+  const set = String(env.STUDIO_STALL_PLAN_MIN ?? '').trim();
+  if (set !== '' && Number.isFinite(Number(set))) return { min: Number(set), why: 'STUDIO_STALL_PLAN_MIN is set' };
+  const m = String(model || '').trim().replace(/^models\//, '');
+  if (m && m !== 'unknown') {
+    try {
+      const pools = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'models.json'), 'utf8'))?.pools || {};
+      for (const [name, p] of Object.entries(pools)) {
+        if (!p || !Number.isFinite(Number(p.stallMin)) || p.stallMin === null || p.stallMin === '') continue;
+        let hit = String(p.model || '').toLowerCase() === m.toLowerCase();
+        if (!hit && p.match) { try { hit = new RegExp(p.match, 'i').test(m); } catch { hit = false; } }
+        if (hit) return { min: Number(p.stallMin), why: `studio/models.json pool "${name}" sets stallMin ${Number(p.stallMin)} for ${m}` };
+      }
+    } catch { /* no models.json: the tier decides */ }
+    if (tierOf(m) === 'top') return { min: SLOW_THINKER_STALL_MIN, why: `${m} is a top-tier model, which thinks long before its first write` };
+  }
+  return { min: 8, why: m && m !== 'unknown' ? `the default for a planning session (${m} is not a slow-thinking model)` : 'the default for a planning session' };
+}
+export function stallLimits(role, env = process.env, model = null) {
   const plan = PLANNING_ROLES.has(String(role || '').toLowerCase());
+  const pl = plan ? planStallFor(model, { env }) : null;
   return {
-    stallMin: plan ? num(env.STUDIO_STALL_PLAN_MIN, 8) : num(env.STUDIO_STALL_MIN, 15),
+    stallMin: plan ? pl.min : num(env.STUDIO_STALL_MIN, 15),
+    stallWhy: plan ? pl.why : (String(env.STUDIO_STALL_MIN ?? '').trim() !== '' ? 'STUDIO_STALL_MIN is set' : 'the default for a session'),
     maxMin: plan ? num(env.STUDIO_SESSION_PLAN_MAX_MIN, 25) : num(env.STUDIO_SESSION_MAX_MIN, 90),
     ratio: num(env.STUDIO_STALL_RATIO, 120),
     ratioWindow: num(env.STUDIO_STALL_RATIO_WINDOW_TOKENS, 300000),
@@ -140,14 +168,14 @@ export function progressFingerprint(agent, cwd = REPO_ROOT, events = readRecentE
  * Pure verdict. s = { role, startedAt, lastProgressAt, tokensIn, tokensOut, windowIn, windowOut }
  * (window* = tokens since the last progress). Returns { stalled, kind, why }.
  */
-export function stallVerdict(s, now = Date.now(), lim = stallLimits(s.role)) {
+export function stallVerdict(s, now = Date.now(), lim = stallLimits(s.role, process.env, s.model)) {
   const ran = (now - Date.parse(s.startedAt)) / 60000;
   const quiet = (now - Date.parse(s.lastProgressAt || s.startedAt)) / 60000;
   // 2.73.1 (B-68): waiting on its own verify or task done (s.busy, set by observe) stretches the wall-clock cap, by at
   // most STUDIO_STALL_VERIFY_MAX_MIN in all.
   const stretch = s.busy ? Math.max(0, num(lim.busyMaxMin, 60)) : 0;
   if (lim.maxMin > 0 && ran >= lim.maxMin + stretch) return { stalled: true, kind: 'wall-clock', why: `ran ${Math.round(ran)} min, past the ${lim.maxMin} min cap for a ${s.role} session${stretch ? ` (+${stretch} min while it waits on its own ${s.busy.kind}, STUDIO_STALL_VERIFY_MAX_MIN)` : ''}` };
-  if (lim.stallMin > 0 && quiet >= lim.stallMin) return { stalled: true, kind: 'no-progress', why: `no file write, commit or task change for ${Math.round(quiet)} min (limit ${lim.stallMin})` };
+  if (lim.stallMin > 0 && quiet >= lim.stallMin) return { stalled: true, kind: 'no-progress', why: `no file write, commit or task change for ${Math.round(quiet)} min (limit ${lim.stallMin}: ${lim.stallWhy || 'the default'})`, limitMin: lim.stallMin, limitWhy: lim.stallWhy || null };
   const wi = Number(s.windowIn || 0); const wo = Number(s.windowOut || 0);
   if (lim.ratio > 0 && lim.ratioWindow > 0 && ran >= num(lim.graceMin, 15) && wi >= lim.ratioWindow && wi / Math.max(1, wo) >= lim.ratio) return { stalled: true, kind: 'read-burn', why: `read ${wi} tokens and wrote ${wo} (${Math.round(wi / Math.max(1, wo))}:1, limit ${lim.ratio}:1) with no progress` };
   return { stalled: false, kind: null, why: '', ranMin: Math.round(ran), quietMin: Math.round(quiet) };
@@ -175,7 +203,7 @@ export function observe(session, { tokens = { in: 0, out: 0 }, cwd = REPO_ROOT, 
   const fresh = !prev || prev.startedAt !== session.startedAt;
   // 2.77.3 (B-109): the burn ratio counts uncached input + cache creation (tokens.fresh from logTokens), not cache reads.
   tokens = { ...tokens, in: tokens.fresh ?? tokens.in };
-  let s = fresh ? { agent: session.agent, role: session.role, startedAt: session.startedAt, fp, lastProgressAt: session.startedAt, baseIn: 0, baseOut: 0 } : prev;
+  let s = fresh ? { agent: session.agent, role: session.role, model: session.model || null, startedAt: session.startedAt, fp, lastProgressAt: session.startedAt, baseIn: 0, baseOut: 0 } : prev;
   // 2.76.0 (B-83, the crew's W-0070): fewer tokens than the last observation means the count started over (a new Claude
   // session inside this launcher run: logTokens counts only the newest one). The window starts again from here, so the
   // old session's base can neither kill the new one nor hide a real burn behind a base it never reaches. The
@@ -191,6 +219,7 @@ export function observe(session, { tokens = { in: 0, out: 0 }, cwd = REPO_ROOT, 
   s.busy = doing ? { kind: doing.kind, since: doing.since, pid: doing.pid, file: doing.file } : null;
   s.tokensIn = tokens.in; s.tokensOut = tokens.out;
   s.windowIn = tokens.in - (s.baseIn || 0); s.windowOut = tokens.out - (s.baseOut || 0);
+  if (!s.model && session.model) s.model = session.model; // 2.84: the limit for a planning session follows its model
   const v = stallVerdict(s, now);
   if (!v.stalled && s.busy) v.waiting = `on its own ${s.busy.kind} (pid ${s.busy.pid}, since ${String(s.busy.since || '').slice(11, 16)})`;
   s.verdict = v;
@@ -284,7 +313,7 @@ export function logStall(session, v, { by = 'launcher', now = Date.now() } = {})
   if (same && prev.ended) return false;
   const ended = { at: new Date(now).toISOString(), by, kind: v.kind || null, why: String(v.why || '').slice(0, 300) };
   try { writeStall(session.agent, { ...(same ? prev : { agent: session.agent, role: session.role, startedAt: session.startedAt }), ended }); } catch { /* the log below still goes out */ }
-  emitEvent({ type: 'session.stall', agent: 'watchdog', to: 'producer', task: session.task || undefined, status: 'warn', msg: `Ended ${session.agent} (${session.role}${session.task ? `, ${session.task}` : ''}): ${v.why}`, meta: { kind: v.kind, target: session.agent, role: session.role, by } });
+  emitEvent({ type: 'session.stall', agent: 'watchdog', to: 'producer', task: session.task || undefined, status: 'warn', msg: `Ended ${session.agent} (${session.role}${session.task ? `, ${session.task}` : ''}): ${v.why}`, meta: { kind: v.kind, target: session.agent, role: session.role, by, ...(v.limitMin ? { limitMin: v.limitMin, limitWhy: v.limitWhy } : {}) } });
   return true;
 }
 
