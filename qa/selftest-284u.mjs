@@ -329,9 +329,9 @@ console.log(JSON.stringify({ winDry: winDry.lines, n0, win: win.lines, winRm: wi
       r.winDry?.some((l) => /schtasks \/Create \/SC ONLOGON \/TN "Studio boot \(my-studio\)" \/TR .*node\.exe.*harness\\boot\.mjs.* \/F/.test(l)) && r.winDry.some((l) => /--dry-run: nothing was registered/.test(l)) && r.n0 === 0
         && sch[0] === 'schtasks' && sch.slice(1, 7).join(' ') === '/Create /SC ONLOGON /TN Studio boot (my-studio) /TR' && /^"C:\\node\\node\.exe" "C:\\studios\\my-studio\\harness\\boot\.mjs"$/.test(sch[7] || '') && sch[8] === '/F'
         && r.calls?.[1]?.slice(0, 2).join(' ') === 'schtasks /Delete' && r.n1 === 2 && r.winWorker?.ok === false && r.calls.length === 2
-        && r.lin?.some((l) => /@reboot cd '\/srv\/my-studio' && '\/usr\/bin\/node' harness\/boot\.mjs/.test(l)) && r.lin.some((l) => /ExecStart=\/usr\/bin\/node \/srv\/my-studio\/harness\/boot\.mjs/.test(l))
-        && r.mac?.some((l) => /@reboot cd '\/Users\/a\/my-studio'/.test(l)) && !r.mac.some((l) => /systemd/.test(l))
-        && cliDry.status === 0 && (process.platform === 'win32' ? /schtasks \/Create/.test(out(cliDry)) : /@reboot cd /.test(out(cliDry))) && !/Studio boot:/.test(out(cliDry)),
+        && r.lin?.some((l) => /@reboot '\/usr\/bin\/node' '\/srv\/my-studio\/harness\/boot\.mjs' >> '\/srv\/my-studio\/\.studio\/logs\/boot\.log'/.test(l)) && !r.lin.some((l) => / && /.test(l)) && r.lin.some((l) => /ExecStart=\/usr\/bin\/node \/srv\/my-studio\/harness\/boot\.mjs/.test(l))
+        && r.mac?.some((l) => /@reboot '[^']+' '\/Users\/a\/my-studio\/harness\/boot\.mjs'/.test(l)) && !r.mac.some((l) => /systemd/.test(l))
+        && cliDry.status === 0 && (process.platform === 'win32' ? /schtasks \/Create/.test(out(cliDry)) : /@reboot '/.test(out(cliDry))) && !/Studio boot:/.test(out(cliDry)),
       JSON.stringify({ r, cliDry: out(cliDry).slice(-800) }).slice(0, 3000)]);
 
     // studio:boot: a stale engine train lock (its process gone) is cleared, the engine queue kept and reported.

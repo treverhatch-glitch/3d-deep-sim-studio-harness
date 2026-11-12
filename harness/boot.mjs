@@ -318,7 +318,8 @@ export function bootHook({ root = REPO_ROOT, platform = process.platform, node =
     : [
       `Nothing was changed on ${platform}: add ONE of these yourself.`,
       '  crontab -e, then the line:',
-      `    @reboot cd ${q(root)} && ${q(node)} harness/boot.mjs >> .studio/logs/boot.log 2>&1`,
+      // One command, no `cd … &&` chain (the harness never prints a chained command): boot.mjs finds the studio from its own path.
+      `    @reboot ${q(node)} ${q(script)} >> ${q(P.join(root, '.studio', 'logs', 'boot.log'))} 2>&1`,
       ...(platform === 'linux' ? [
         `  or a systemd user unit, ~/.config/systemd/user/${unit}.service:`,
         '    [Unit]', `    Description=Studio boot (${folder})`, '    [Service]', '    Type=oneshot', '    RemainAfterExit=yes', '    KillMode=process', `    WorkingDirectory=${root}`, `    ExecStart=${node} ${script}`, '    [Install]', '    WantedBy=default.target',
