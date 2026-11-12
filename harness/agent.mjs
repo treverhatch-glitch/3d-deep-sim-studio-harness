@@ -288,7 +288,7 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], a
       // STUDIO_CLAUDE_BYPASS=1 skips permission prompts (the clone is the boundary). stream-json keeps every message in the log.
       const bypass = process.env.STUDIO_CLAUDE_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
       // harness/allowlist.mjs: the same list the kickoff prints; each pattern is its own argument after the flag.
-      const allowed = allowedToolsList({ engineDir }); // 2.79.1: an engine pass may git add / commit in its own worktree
+      const allowed = allowedToolsList({ engineDir }); // an engine pass may git add / commit in its own worktree
       const ceiling = sessionLimits().ceilingTurns;
       return { argv: ['claude', '-p', ...(bypass ? ['--dangerously-skip-permissions'] : ['--permission-mode', 'acceptEdits', '--allowedTools', ...allowed]), ...dirs, '--output-format', 'stream-json', '--verbose', ...(ceiling > 0 ? ['--max-turns', String(ceiling)] : []), ...(m ? ['--model', m] : []), ...(effort ? ['--effort', effort] : [])], stdin: prompt };
     }
@@ -624,13 +624,12 @@ export function agyStopLine(log) {
 }
 
 /**
- * What an agy session used, from its own output (agy -p prints no usage line), newest session part only:
- *   - Gemini usage objects: usageMetadata { promptTokenCount, candidatesTokenCount, cachedContentTokenCount } (one per
- *     response id, the last counts), or a stats.models.<model>.tokens { prompt, candidates, cached } summary (the Gemini
- *     CLI's --output-format json shape); a plain `usage` line is tokensFrom's;
- *   - the model it names: modelVersion, model, or the stats.models key.
- * { reported: true, tokensIn, tokensOut, cacheRead, model } or, with nothing reported, an estimate from text length (~4
- * characters a token): { reported: false, estimated: true, ... }, recorded as usage "not reported", never as 0.
+ * What an agy session used, from its own output (agy -p prints no usage line), newest session part only: Gemini usage
+ * objects usageMetadata { promptTokenCount, candidatesTokenCount, cachedContentTokenCount } (one per response id, the
+ * last counts), or a stats.models.<model>.tokens { prompt, candidates, cached } summary (Gemini CLI --output-format json);
+ * a plain `usage` line is tokensFrom's. The model comes from modelVersion, model, or the stats.models key.
+ * { reported: true, tokensIn, tokensOut, cacheRead, model } or an estimate from text length (~4 characters a token):
+ * { reported: false, estimated: true, ... }, recorded as usage "not reported", never as 0.
  */
 export function agyUsage(log, { kickoffChars = 0 } = {}) {
   const part = newestSessionPart(String(log || ''));
@@ -869,7 +868,7 @@ export function autoFinish(agent, id, copyDir, mine, code) {
     if (dirty.trim()) return { ok: false, output: 'working tree dirty' };
   }
   const env = { ...process.env, STUDIO_LOCK_OWNER: agent, STUDIO_TASK_PIN: id, ...(cwd !== REPO_ROOT ? { STUDIO_MAIN_ROOT: REPO_ROOT } : {}) };
-  const g = spawnSync(process.execPath, [path.join(cwd, 'scripts', 'run-gates.mjs')], { windowsHide: true, cwd, env: gateEnv(env), encoding: 'utf8', timeout: 20 * 60000 }); // 2.71.1 (B): harness/gate-env.mjs
+  const g = spawnSync(process.execPath, [path.join(cwd, 'scripts', 'run-gates.mjs')], { windowsHide: true, cwd, env: gateEnv(env), encoding: 'utf8', timeout: 20 * 60000 }); // harness/gate-env.mjs
   if (g.status !== 0) {
     const out = `${g.stderr || ''}${g.stdout || ''}`.trim().split('\n').slice(-15).join('\n');
     return { ok: false, output: out || 'verify failed' };
@@ -1121,12 +1120,12 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     custom = `node harness/rehearsal-agent.mjs {agent} {task} ok`;
     rehearsal = true;
   }
-  // A code-writing role on a task with no lane gets its own copy too (no path claims), so its staged or half-done files never
-  // block other tasks' `task done`. Producer, Director and planner stay in the main checkout; STUDIO_LANELESS=shared turns it off.
+  // A code-writing role on a task with no lane gets its own copy too (no path claims), so its half-done files never block
+  // other tasks' `task done`. Producer, Director and planner stay in the main checkout; STUDIO_LANELESS=shared turns it off.
   // A custom command (STUDIO_<ROLE>_CMD, STUDIO_TOOL_<TOOL>_CMD, STUDIO_AGENT_CMD) runs in the copy (cwd) with STUDIO_MAIN_ROOT
-  // set, and its line may use {mainRoot} and {addDirs} (the --add-dir pair the built-in claude gets). The rehearsal agent stays
-  // in the main checkout. From here until the real record (below) this session counts as running: making the lane copy can
-  // take seconds, and in that gap a supervisor pass would see the role under its cap and start a second session.
+  // set and may use {mainRoot} and {addDirs} (the --add-dir pair the built-in claude gets). The rehearsal agent stays in the
+  // main checkout. From here until the real record (below) this session counts as running: making the copy can take seconds,
+  // and a supervisor pass in that gap would start a second session.
   holdStarting({ agent, role, tool, model, task, lane });
   let copy = null;
   const laneless = !laneWantsCopy(lane) && !rehearsal && lanelessWantsCopy({ role, lane, task });
@@ -1398,7 +1397,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   try { billKeys = sessionKeyNames({ tool, role, agent, keys: regRun ? reg.keyEnv : null, proxy: viaProxy ? 'vertex' : null }); } catch {}
   const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, ...(viaProxy ? { proxy: 'vertex' } : {}), keys: billKeys, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, ...(task ? { pinned: task } : {}), lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, logFrom, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
-  resetStall(agent); // 2.76.0 (B-83): the last session's stall record never judges this one
+  resetStall(agent); // the last session's stall record never judges this one
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane, ...(STARTED_BY_HAND ? { byHand: true } : {}) } });
   let killedBy = null;
   let lastBeatEvent = 0;
@@ -1521,7 +1520,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
       emitEvent({ type: 'agent.model_gone', agent, to: 'human', task: task || undefined, status: 'error', msg: `${agent}: ${gone}`.slice(0, 400), meta: { tool: 'nim', model } });
     }
   }
-  const atClaim = !copy ? (readJson(sessionFile(agent)) || {}).copy || null : null; // 2.76.0 (B-84): made at task start
+  const atClaim = !copy ? (readJson(sessionFile(agent)) || {}).copy || null : null; // made at task start
   // An agy stream session that exited before its first turn ended, on an input-format error or with no stream-json: recorded
   // once (.studio/agy-stream.json) and relaunched below in the one-turn mode.
   let streamFail = null;
@@ -1756,13 +1755,12 @@ function dropStarting(agent) {
 
 /**
  * What a stop does with a session's process, decided at kill time. `cur` is what the OS says about the target now
- * (harness/proc-identity.mjs readStarts, read once by the caller): { start, proc?, cmd? }, { error } when unreadable, or null
- * when the number is free. The target is the agent's process, or, while the session is still starting, the launcher.
+ * (harness/proc-identity.mjs readStarts, read once by the caller): { start, proc?, cmd? }, { error }, or null when the
+ * number is free. The target is the agent's process, or the launcher while the session is still starting.
  *   kill: kill the target and its tree. end: mark the session ended and hand its work back here (no live launcher is left).
- *   same start (within the tolerance): kill. Clearly different: the number is another program's; nothing is killed.
- *   Nothing to compare (unreadable, or an old record): a heartbeat within the stall threshold means the number is still the
- *   agent's: kill; an older one: nothing is killed and the session is treated as dead. Wrongly sparing a dead record costs
- *   nothing; wrongly killing costs a stranger's program.
+ *   Same start (within the tolerance): kill. Clearly different: the number is another program's; nothing is killed.
+ *   Nothing to compare (unreadable, or an old record): a heartbeat within the stall threshold means kill; an older one:
+ *   kill nothing and treat the session as dead. Wrongly sparing a dead record is free; wrongly killing hits a stranger's program.
  */
 export function killVerdict(s, cur, now = Date.now()) {
   const beat = Date.parse(s.lastBeat || s.startedAt || '');
@@ -2271,12 +2269,12 @@ export function startAgent(opts, { detach = false } = {}) {
     }
   }
   // A review must come from another model family than the implementer's. Another family configured and not out of quota: the
-  // review runs on it. None configured: a different model of the same family (else the same), and one line in the brief says
-  // the reviewer writes the same-family header (harness/review-family.mjs). An explicit --model is respected.
-  // The plan's model decides its tool (harness/model-tool.mjs toolForModel), over the supervisor's default tool
-  // (opts.toolDefault). A tool a person named (--tool, no toolDefault) is kept, and a plan model it cannot run is not taken.
-  // A model no tool is known for is refused with one line. A tool whose sessions cannot run commands (vertex) cannot act as a
-  // reviewer: the harness asks the model itself (harness/review-ask.mjs, `npm run review -- ask`) and no session starts.
+  // review runs on it. None: a different model of the same family (else the same), and one line in the brief says the reviewer
+  // writes the same-family header (harness/review-family.mjs). An explicit --model is respected.
+  // The plan's model decides its tool (harness/model-tool.mjs toolForModel), over the supervisor's default (opts.toolDefault);
+  // a tool a person named (--tool, no toolDefault) is kept, and a plan model it cannot run is not taken. A model no tool is
+  // known for is refused with one line. A tool whose sessions cannot run commands (vertex) cannot review: the harness asks
+  // the model itself (harness/review-ask.mjs, `npm run review -- ask`) and no session starts.
   if (role === 'reviewer' && opts.task && !opts.model) {
     let plan = null;
     try {
