@@ -109,7 +109,6 @@
     "line": "node harness/line-producer.mjs",
     "tester": "node harness/tester.mjs",
     "models": "node harness/model-pools.mjs",
-    "remote": "node harness/remote-workers.mjs",
     "lane": "node harness/lane-create.mjs",
     "delegate": "node harness/delegation.mjs",
     "decisions": "node harness/decisions.mjs",

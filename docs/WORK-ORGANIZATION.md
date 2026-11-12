@@ -179,11 +179,6 @@ A lane's tier comes from its diff and its commits' trailers, by code. A game may
   (`.studio/train/<id>/pins.json`). If each declared it (`Pin-Moves: <pin>` trailer) and no invariant pin moved, ONE extra commit "train
   <id>: pin refresh" (`Pin-Refresh: <lanes>`, a Golden-Reason) lands with them after a full verify; otherwise the lane(s) attributed are
   handed back (pins red on main itself: nobody); a failed refresh falls back to bisection.
-- **Remote verify** (`harness/remote-verify.mjs`, `STUDIO_VERIFY_REMOTE=github`, off by default): remote CI may stand for the game's
-  own checks ONLY (every other gate runs locally first), for a PUBLIC GitHub repo with `GH_TOKEN` or `GITHUB_TOKEN` set by the owner
-  (never printed). The train pushes `train/<id>` and waits for the check run `STUDIO_VERIFY_REMOTE_CHECK` (default `release-gate`; skipped
-  or neutral is not green) up to `STUDIO_VERIFY_REMOTE_START_MIN` (10) to start and `STUDIO_VERIFY_REMOTE_TIMEOUT_MIN` (60) to finish
-  (poll `STUDIO_VERIFY_REMOTE_POLL_S` 30); any error or red CI runs the full local verify.
 
 ### When the verify is red
 

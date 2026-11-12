@@ -10,8 +10,7 @@
  *     cores, freeGb, totalGb, known,                       the last machine scan (known: false with none)
  *     running: [{ kind, label, workers, ramGb, threads, startedAt, etaMin, pid, owner, source }],
  *     shares: { train, verify, check, soak: { workers, why }, unity, art, playtest, other: { threads, ramGb } },
- *     coming: [{ kind: 'train', why }], weights, why,
- *     remote: { out, queued, cpu: 0, tasks, why } }       2.77.0 (o): tasks on remote workers, 0 local CPU until queued
+ *     coming: [{ kind: 'train', why }], weights, why }
  *
  *   kind     train | verify | check | soak | unity | art | playtest | other (heavy-budget.mjs rigKind)
  *   source   machine:heavy (a holder), gate slot (a lane's game check), verify-running (a verify record whose process
@@ -89,14 +88,9 @@ export async function rigBudget({ root = null, env = process.env, now = Date.now
     for (const self of ['check', 'soak']) { const t = hb.testWorkers({ profile, env, holders, laneChecks: slots.length, root: hroot, trainRoot: hroot, self }); shares[self] = { workers: t.workers, why: t.why }; }
     for (const [k, kind] of [['unity', 'unity'], ['art', 'blender-preview'], ['artBake', 'art-bake'], ['playtest', 'browser-playtest'], ['other', 'heavy']]) { const c = hb.jobClaim(kind, { root: hroot, env, profile, state }); shares[k] = { threads: c.cpuThreads, ramGb: c.ramGb, why: `a fixed claim (${c.label})${c.areaWhy ? `; ${c.areaWhy}` : ''}` }; }
   } catch {}
-  // 2.77.0 (o): tasks on remote (cloud) workers cost this machine nothing until their branch is queued for the train
-  // (then the train's verify counts, as for any lane): listed, never counted (harness/remote-workers.mjs).
-  let remote = { out: 0, queued: 0, cpu: 0, tasks: [], why: 'no task on a remote worker' };
-  try { remote = (await import('./remote-workers.mjs')).rigRemote(hroot); } catch {}
   return {
     at: new Date(now).toISOString(),
     known: Boolean(state.known),
-    remote,
     cores: hb.logicalCores(profile),
     freeGb: state.known ? state.freeRamGb : null,
     totalGb: state.known ? state.totalRamGb : null,
@@ -115,7 +109,6 @@ export function rigText(b) {
   L.push(b.running.length ? 'Running:' : 'Running: nothing.');
   for (const r of b.running) L.push(`  ${r.kind.padEnd(8)} ${r.label || '?'}${r.owner ? ` (${r.owner})` : ''}: ${r.workers ? `${r.workers} workers` : r.threads ? `${r.threads} threads` : 'workers unknown'}${r.ramGb ? `, ${r.ramGb} GB` : ''}${r.etaMin !== null && r.etaMin !== undefined ? `, about ${r.etaMin} min left` : ''} [${r.source}]`);
   for (const c of b.coming) L.push(`Coming: ${c.why}.`);
-  if (b.remote?.out || b.remote?.queued) L.push(`Remote: ${b.remote.why}${b.remote.tasks?.length ? ` (${b.remote.tasks.join(', ')})` : ''}.`);
   L.push('If one started now:');
   for (const [k, s] of Object.entries(b.shares)) L.push(`  ${k.padEnd(8)} ${s.workers ? `${s.workers} test workers` : `${s.threads} threads, ${s.ramGb} GB`}: ${s.why}`);
   return L.join('\n');

@@ -4121,7 +4121,7 @@ if (inShard('selftest-269p')) {
 }
 
 // 2.69.0 (q): a red train's prefix search checks K prefixes at once (K from the machine budget, each in its own scratch
-// copy), and STUDIO_VERIFY_REMOTE=github uses the repo's CI as the verify, falling back to the local one (qa/selftest-269q.mjs).
+// copy) (qa/selftest-269q.mjs; its remote verify checks went with the remote verify in 2.84).
 if (inShard('selftest-269q')) {
   const dir = copyRepo();
   const { selftest269Q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269q.mjs')).href);
@@ -4950,8 +4950,7 @@ if (inShard('selftest-277n')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.77.0 (helper o): remote (cloud) workers (npm run remote: mark, brief with a lease, fetch remote/* into the normal
-// train, expiry; the Line Producer's offer; the rig budget's 0 local CPU) and `npm run lane -- create` from chosen branches.
+// 2.77.0 (helper o): `npm run lane -- create` from chosen branches (its remote workers' checks went with them in 2.84).
 if (inShard('selftest-277o')) {
   const dir = copyRepo();
   const { selftest277O } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277o.mjs')).href);
@@ -4959,7 +4958,7 @@ if (inShard('selftest-277o')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.77.0 (helper m): Windows-safe remote worker owner names (remote-<worker>), tests for the owner command rules and the scoped agents.
+// 2.77.0 (helper m): tests for the owner command rules and the scoped agents.
 if (inShard('selftest-277m')) {
   const dir = copyRepo();
   const { selftest277M } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277m.mjs')).href);
@@ -5106,6 +5105,14 @@ if (inShard('selftest-283j')) {
   const dir = copyRepo();
   const { selftest283J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283j.mjs')).href);
   await selftest283J({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+// 2.84 (y): unused features taken out (remote workers, the harness scout, signed results, causes); the Line Producer's
+// plan and a local train landing are as before (qa/selftest-284y.mjs).
+if (inShard('selftest-284y')) {
+  const dir = copyRepo();
+  const { selftest284Y } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284y.mjs')).href);
+  await selftest284Y({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 // 2.84 (m): the engine target merge a session can run, phantom files a filter rule makes look changed, rules.focus.ignore.
