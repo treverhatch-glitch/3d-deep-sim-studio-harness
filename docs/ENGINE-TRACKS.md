@@ -97,8 +97,21 @@ npm run task -- add "Pass 11: realism pass on the hangar" --role engine-porter -
   prints each one; with several engines configured it lists them for a person with the `task track` command, and an
   engine-porter whose track names no engine is listed too. By hand: `node harness/engine-tracks.mjs backfill
   [--dry-run] --by <you>`.
+  2.84: the engine's target is merged into the pass worktree before each session (2.79.1); on a conflict that merge is
+  aborted, so the session starts from a clean tree, and its note and the `engine.target_conflict` event give
+  `npm run engine -- merge <T-ID>`, which a session may run (`git merge` is not on its allowlist, so no session can merge
+  a lane into the target). The command works only in the task's own engine worktree (from its engine record; never the
+  land script's `gateWorktree`), and an agent caller must hold the task's claim (a session launched for another task is
+  refused; a person's shell may run it). A clean merge is committed at once; a conflict is LEFT in the worktree with
+  each file named: edit it (small conflicts in project files usually want both sides kept), `git -C <dir> add <file>`,
+  then `npm run engine -- merge <T-ID> --continue` (refused while `<<<<<<<`/`>>>>>>>` lines or unmerged paths remain).
+  `--abort` puts the worktree back. Events: `engine.target_merge` (`started`, `conflict`, `done`, `aborted`). A launch
+  that meets the same conflicted files as the previous launch, with no new commit in the worktree since, starts no
+  session: the task is parked once for the Producer with the files named (the attempt ledger's same-blocker rule).
 - **Done check.** A pass in its own repo is judged in that repo:
-  - its branch has commits the target lacks, and everything on it is committed;
+  - its branch has commits the target lacks, and everything on it is committed (2.84: a file git reports as modified
+    whose bytes equal the committed blob, as a `.gitattributes` filter or Git LFS rule on a plain blob makes it, is not
+    counted, and the row says it was ignored; the same rule holds in a lane copy's check and the session's account);
   - the visual check passes, when the task asks for one;
   - the engine's land run stands for the studio's verify. The studio's game checks don't judge it.
   `task done <ID> --train [--branch <b>]` queues the pass for its engine train. Plain `task done` runs the land gate
@@ -146,7 +159,55 @@ the train starts only when all of these hold:
 The Line Producer doesn't start the same engine's train again within `STUDIO_ENGINE_TRAIN_COOLDOWN_MIN` (3) minutes.
 `STUDIO_ENGINE_TRAIN_AUTO=off`, or `"trainAuto": false` for one engine, leaves starting it to a person.
 
+**A batch window (2.84).** A land run takes 22 to 40 minutes whatever the number of branches in it, so a train that
+starts with one branch while more are minutes away spends a whole run on one task. `"batchMin": 4, "batchWaitMin": 12`
+in an engine's config makes the Line Producer's automatic start wait while fewer than `batchMin` branches are queued,
+the oldest has waited less than `batchWaitMin` minutes, and at least one running session works on a task of that
+engine whose branch is not queued yet (no such session: nothing is coming, it starts at once). `STUDIO_ENGINE_BATCH_MIN`
+overrides `batchMin` (default 1: start as soon as one branch waits) and `STUDIO_ENGINE_BATCH_WAIT_MIN` overrides
+`batchWaitMin` (default 0: never wait); the game train's `STUDIO_TRAIN_MIN` and `STUDIO_TRAIN_WAIT_MIN` work the same way.
+A branch that lands alone at the head of the queue never waits, and one behind others does not count toward
+`batchMin`. A person's `npm run task -- train --engine <x>` always starts at once. The start of a wait is one
+`task.train.<engine>.batch_wait` event (the numbers in its meta); `npm run score` prints "Branches per land run".
+
 The land run itself still takes `machine:heavy` as that engine's job kind, with its RAM and its free-RAM floor.
+
+**Controlling the train (2.84).** The commands, all for engine `<x>`:
+
+- `npm run task -- train --engine <x> --only T-a,T-b`: this train takes only those queued tasks, in queue order; every
+  other lane stays queued. An id that is not queued is refused before anything starts, naming it.
+  `STUDIO_UNITY_TRAIN_ONLY="T-a,T-b"` is a deprecated alias of `--only` (it was a studio's local patch); use `--only`.
+- Lane tags: `npm run task -- done <ID> --train --tag <word>` queues the lane with a tag, and
+  `npm run task -- tag <ID> <word>|none` sets or clears it any time before it lands (on the engine record and the queue
+  entry; a `task.tag` event). `npm run task -- train --engine <x> --tag <word>` takes only lanes with that tag. A train
+  with neither `--only` nor `--tag` (the automatic start, a plain `train --engine <x>`) takes only untagged lanes: a
+  tagged lane (an art batch) is never swept into a general train.
+- A batch cap: `"batchMax": 6` in the engine's config (`STUDIO_ENGINE_BATCH_MAX` overrides it; 0, the default, is no
+  cap): a train takes at most that many lanes, the rest wait for the next train.
+- Grouping by risk: `"batchGroup": "play"` groups lanes by the Play Mode class of what each lane changes (the
+  `play.focus` mapping, `playSelection` per lane: `focus` or `full`). The train takes the class of the lane at the head of
+  the queue and only lanes of that class, so pure ports are not held behind a branch that needs the long stage. With no
+  `play.focus` every lane is class `full` and nothing changes. A lane marked alone still lands alone. Order: `--only` and
+  `--tag`, then alone, then grouping, then the cap. The train's start event and `train status --engine <x>` say why the
+  batch is what it is ("6 of 14 queued: class focus, cap 6; 8 wait (5 full, 3 focus)").
+- `npm run task -- train cancel --engine <x> --by <name> [--why "…"]`: writes `.studio/train/<x>-cancel.json` (the train
+  id from its lock) first, kills the train's process tree (its land run with it; `taskkill /T /F` on Windows) and waits
+  up to 30 s, puts the gate worktree back (`git merge --abort`, `git reset --hard <target>`, `git clean -fd`; only a
+  linked worktree of the engine repo, never its main checkout or a lane), deletes the train's integration refs and
+  releases its lock. The queue is left as it was: nobody is handed back or blamed (`task.train.<x>.cancelled`). It does
+  not turn the automatic start off; it prints the command that does.
+- `npm run task -- train auto off|on --engine <x> --by <name> [--why "…"] [--hours N]`: the Line Producer's automatic
+  start for that engine (`.studio/train/<x>-auto.json`). Off, it starts no train for `<x>` and says why (a
+  `task.train.<x>.auto_off` event at most once an hour); `--hours N` turns it back on by itself after N hours. A person's
+  `train --engine <x>` still starts one. `STUDIO_ENGINE_TRAIN_AUTO=off` still wins. Without `--engine`, `train auto` is
+  the game train's daemon, as before.
+- Who may cancel or switch: the board-decision verdict (`mayDecide('board')`): the owner, the owner's stand-ins,
+  Producer/Director sessions and outside agents; never a launched worker session.
+- After a reboot: `npm run studio:boot` clears a stale engine train lock (its process gone), leaves the queues as they
+  are and says how many branches each engine has queued; the automatic start then resumes them (unless auto is off).
+  `npm run studio:boot -- install [--remove] [--dry-run]` registers (Windows: a Task Scheduler task at logon,
+  `schtasks /Create /SC ONLOGON`) or prints (Linux/macOS: a crontab `@reboot` line or a systemd user unit; nothing is
+  changed) the hook that runs `studio:boot` after a reboot.
 
 **The engine line (2.78.1, B-117).** A Unity land (8 GB, 2 GB VRAM) used to take one of the game's `STUDIO_HEAVY_SLOTS`
 and go as a landing: with few slots a game train's flake re-run waited 20+ minutes behind it. Now an engine land

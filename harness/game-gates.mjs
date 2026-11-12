@@ -1,70 +1,53 @@
 #!/usr/bin/env node
 /**
- * harness/game-gates.mjs — 2.30n: the gates follow the studio's game, not the bundled cartridge.
+ * harness/game-gates.mjs: the gates follow the studio's game, not the bundled cartridge.
  *
- * In the Marina run every `npm run verify` and `task done` checked cartridges/example-sim, so the game
- * actually being built was never gated and builders had to --force. Now, when a game is set
- * (`task game <name>`, studio/game.json "game", STUDIO_GAME) and it is not a cartridge, its own checks run:
+ * When a game is set (`task game <name>`, studio/game.json "game", STUDIO_GAME) and it is not a cartridge, its own
+ * checks run:
  *
  *   <game>/studio.gates.json   { "gates": [{ "id": "playtest", "command": "node tools/x.mjs", "required": true }] }
  *                              commands run from the repo root
  *   else, by convention:       <sim>/qa.mjs (scenarios; exit 1 fails), <sim>/playtest.mjs, <sim>/golden.mjs
  *
- * Engine gate: a task whose files are in a Godot project (a folder with project.godot) also runs Godot
- * headless: --import, then tools/gate.gd when the project has one. A non-zero exit or a SCRIPT ERROR /
- * Parse Error / ERROR: line fails it. Godot binary: STUDIO_GODOT, else godot on PATH.
+ * Engine gate: a task whose files are in a Godot project (a folder with project.godot) also runs Godot headless:
+ * --import, then tools/gate.gd when the project has one. A non-zero exit or a SCRIPT ERROR / Parse Error / ERROR:
+ * line fails it. Godot binary: STUDIO_GODOT, else godot on PATH.
  *
  *   node harness/game-gates.mjs [--paths a,b] [--changed a,b] [--json]   exit 1 when a required check fails
  *
- * 2.58.0: the game's checks run with CI=true (test runners then never write snapshots during a verify).
- * 2.60.0: a manifest's "slowTests" gives the checks STUDIO_TEST_TIMEOUT_SCALE (the gate's load factor, >= 1) for the
- * game's test config to raise its per-test timeouts by (slowTestsOf, testTimeoutScale).
- * 2.60.1 (B-17): a check's timeout is never below 1.5 x its last quiet run (harness/heavy.mjs scaledTimeout), and
- * the timeout line is printed whenever the value differs from the base.
- * 2.65.0 (self-triage): a check that timed out under load (load factor above 1) runs once more at the cap
- * (STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR x the base), once per check per window (harness/self-triage.mjs timeoutRerun).
- * 2.65.1 (B-17): the load probe's reading is printed for every check, scaled or not (loadReading): the load factor and
- * its reasons or "nothing scaling it", the CPU-busy sample, whether a quiet-run floor is recorded. A check with no quiet
- * run recorded yet that times out gets self-triage's one re-run at the cap too; that re-run's pass is its lastPass
- * (heavy.mjs recordGatePass) and, at load factor 1 only, its quiet run.
- *
- * 2.65.3 (B-43): a merge train's re-check passes STUDIO_GATE_FOCUS ({ "<check>": [test files] }, honoured only in a
- * run-gates --only run): a failing check runs on those files only (its manifest "focus" command with {files}, else the
- * files appended to a command that clearly runs vitest, jest or node --test; else the whole check, saying why), checks
- * not in the map are skipped, and a failing check's test files are printed ("failing test files in <check>: [...]").
- *
- * 2.30p: a gate may declare "paths" (globs) and "track"; the manifest may declare "shared" globs. With
- * --changed (or STUDIO_GATE_CHANGED), only gates whose paths the change touches run; skipped gates are
- * logged with the reason. A gate without paths always runs, and no --changed means every gate runs.
  * No game set (or the game is a cartridge): nothing extra runs, the cartridge gates cover it.
  *
- * 2.73.2 (d, B-71): a check that runs vitest, jest or node --test (directly or as its npm script's last step) gets a per-test
- * timeout scaled for its test workers (--testTimeout / --hookTimeout / --test-timeout; harness/test-timeouts.mjs), never
- * below the game's own; printed and kept in the row as "testTimeout". STUDIO_TEST_TIMEOUT_SCALE=off: nothing passed.
- *
- * 2.72.0 (b): a gate may declare "ratchet": true (with a section in <game>/purity-baseline.json it fails only on new
- * hits, harness/ratchet.mjs) and "canary": "<command or fixture path>" (input that must make it fail; npm run gates --
- * --canaries, harness/canaries.mjs).
- *
- * 2.78.2 (b): the game:perf step. Tests that measure wall-clock (a millisecond budget) flake on a busy machine (the crew:
- * the same tree green at 674 s, red at 1000 s with only the load changed). A studio lists their globs in studio/game.json
- * "perfTests" (["src/**\/*.perf.test.ts", ...]; the file is protected: the owner adds the key) or STUDIO_PERF_TESTS (comma
- * list; off: none). The test checks (a "related" or "focus" command, "slowTests": true, or a command that clearly runs
- * vitest, jest or node --test) leave them out (STUDIO_TEST_EXCLUDE) and, after the other checks, a game:perf step runs
- * only them (STUDIO_TEST_ONLY, one test worker) once the machine is quiet (harness/flake-quiet.mjs: no other heavy job,
- * game check, Unity editor or engine-porter session). A landing run (a merge train's) waits up to STUDIO_PERF_WAIT_MIN
- * (10) and holds new builder and lane verifies back meanwhile (harness/heavy.mjs markQuietHold, as the flake triager's
- * quiet re-run); any other verify runs it only if the machine is quiet already. Never quiet: "not run (busy)", a WARN,
- * never red; in a train's focused re-check of game:perf it is a busy refusal (the train judges nothing from it). Quiet:
- * its result counts like any required check. docs/ONBOARDING-A-GAME.md "Perf tests".
- *
- * 2.78.2 (f): the quarantine line says "skipped" only once verified (harness/test-config-check.mjs verifySkip: the
- * runner's list mode, without and with STUDIO_TEST_QUARANTINE naming the files, once per test config, cached in
- * .studio/test-config-check.json); a config that still lists them is "WARN game:quarantine: quarantine NOT honoured by
- * the game's test config (<file>): N quarantined tests still run", and the row's "quarantine" counts none skipped. A
- * check whose npm script runs vitest or jest gets an inferred focus command (harness/train-focus.mjs inferFocus; "focus
- * inferred: ..." once). Test files outside the perf globs that assert on wall-clock time print "WARN game:test-timing"
- * (harness/test-timing.mjs; advisory, STUDIO_TEST_TIMING=off).
+ * Manifest keys and settings:
+ * - "paths" (globs) and "track" per gate, "shared" globs for the manifest. With --changed (or STUDIO_GATE_CHANGED) only
+ *   gates whose paths the change touches run; skipped gates are logged with the reason. A gate without paths always
+ *   runs; no --changed means every gate runs. The checks run with CI=true (test runners never write snapshots).
+ * - Timeouts: "slowTests" and the load factor give STUDIO_TEST_TIMEOUT_SCALE (slowTestsOf, testTimeoutScale); a vitest,
+ *   jest or node --test check also gets a per-test timeout scaled for its workers (harness/test-timeouts.mjs, row
+ *   field "testTimeout"; STUDIO_TEST_TIMEOUT_SCALE=off: nothing passed). A check's timeout is scaled by load
+ *   (harness/heavy.mjs scaledTimeout, loadReading); one that times out under load runs once more at the cap
+ *   (STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR x the base, harness/self-triage.mjs timeoutRerun). Details at runGameGates.
+ * - STUDIO_GATE_FOCUS ({ "<check>": [test files] }, a merge train's re-check; honoured only in a run-gates --only run):
+ *   a failing check runs on those files only (its manifest "focus" command with {files}, else the files appended to a
+ *   command that clearly runs vitest, jest or node --test, else an inferred focus (harness/train-focus.mjs inferFocus;
+ *   "focus inferred: ..." once), else the whole check, saying why). Checks not in the map are skipped, and a failing
+ *   check's test files are printed ("failing test files in <check>: [...]").
+ * - "ratchet": true (with a section in <game>/purity-baseline.json it fails only on new hits, harness/ratchet.mjs) and
+ *   "canary": "<command or fixture path>" (input that must make it fail; npm run gates -- --canaries,
+ *   harness/canaries.mjs).
+ * - The game:perf step. Wall-clock tests flake on a busy machine. A studio lists their globs in studio/game.json
+ *   "perfTests" (["src/**\/*.perf.test.ts", ...]; the file is protected: the owner adds the key) or STUDIO_PERF_TESTS
+ *   (comma list; off: none). The test checks (a "related" or "focus" command, "slowTests": true, or a command that
+ *   clearly runs vitest, jest or node --test) leave them out (STUDIO_TEST_EXCLUDE) and, after the other checks, a
+ *   game:perf step runs only them (STUDIO_TEST_ONLY, one test worker) once the machine is quiet (harness/flake-quiet.mjs).
+ *   A landing run (a merge train's) waits up to STUDIO_PERF_WAIT_MIN (10) and holds new builder and lane verifies back
+ *   (harness/heavy.mjs markQuietHold); any other verify runs it only if the machine is quiet already. Never quiet:
+ *   "not run (busy)", a WARN, never red; in a train's focused re-check of game:perf it is a busy refusal. Quiet: its
+ *   result counts like any required check. docs/ONBOARDING-A-GAME.md "Perf tests".
+ * - The quarantine line says "skipped" only once verified (harness/test-config-check.mjs verifySkip, once per test
+ *   config, cached in .studio/test-config-check.json); a config that still lists them is "WARN game:quarantine:
+ *   quarantine NOT honoured by the game's test config (<file>): N quarantined tests still run". Test files outside the
+ *   perf globs that assert on wall-clock time print "WARN game:test-timing" (harness/test-timing.mjs; advisory,
+ *   STUDIO_TEST_TIMING=off).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -111,20 +94,20 @@ export function declaredGates(game) {
   if (fs.existsSync(man)) {
     const j = JSON.parse(fs.readFileSync(man, 'utf8'));
     const list = (j.gates || []).filter((x) => x && x.id && x.command).map((x) => ({ id: `game:${x.id}`, command: x.command, required: x.required !== false, ...(Array.isArray(x.paths) && x.paths.length ? { paths: x.paths.map(String) } : {}), ...(x.track ? { track: String(x.track) } : {}), ...(typeof x.related === 'string' && x.related.includes('{files}') ? { related: x.related } : {}), ...(typeof x.focus === 'string' && x.focus.includes('{files}') ? { focus: x.focus } : {}), ...(x.tier === 'slow' ? { tier: 'slow' } : {}), ...(x.slowTests === true ? { slowTests: true } : {}), ...(x.ratchet === true ? { ratchet: true } : {}), ...(typeof x.canary === 'string' && x.canary.trim() ? { canary: x.canary.trim() } : {}) }));
-    // 2.58.2 (PU-22): a manifest with "detMath" (warn or required) gets the deterministic-math check on its sim
-    // paths; the cartridge purity gate is skipped for such a game, so this is where it runs. Required fails.
+    // A manifest with "detMath" (warn or required) gets the deterministic-math check on its sim paths; the cartridge
+    // purity gate is skipped for such a game, so this is where it runs. Required fails.
     if (j.detMath !== undefined && !list.some((x) => /check-sim-purity/.test(x.command))) {
       const { mode } = normMode(j.detMath && typeof j.detMath === 'object' ? j.detMath.mode : j.detMath);
       if (mode !== 'off') list.push({ id: 'game:det-math', command: 'node scripts/check-sim-purity.mjs --det-math-only', required: mode === 'required' });
     }
-    // 2.67.0 (B-48): "testRandomness" adds the test-randomness check (harness/test-rng.mjs): a seeded game on the shared
-    // Math.random, or an unseeded game, in a test file. Advisory (WARN) unless "mode": "required" or STUDIO_TEST_RNG=required.
+    // "testRandomness" adds the test-randomness check (harness/test-rng.mjs): a seeded game on the shared Math.random,
+    // or an unseeded game, in a test file. Advisory (WARN) unless "mode": "required" or STUDIO_TEST_RNG=required.
     if (j.testRandomness && typeof j.testRandomness === 'object' && !list.some((x) => x.id === 'game:test-rng')) {
       const mode = testRngMode(j.testRandomness);
       if (mode !== 'off') list.push({ id: 'game:test-rng', command: 'node harness/test-rng.mjs', required: mode === 'required' });
     }
-    // 2.72.0 (c): "stateProbe" adds the state probe (harness/state-probe.mjs): the sim's digests at the declared ticks,
-    // compared with main's; a change with no Golden-Reason is red with the first differing tick.
+    // "stateProbe" adds the state probe (harness/state-probe.mjs): the sim's digests at the declared ticks, compared
+    // with main's; a change with no Golden-Reason is red with the first differing tick.
     if (j.stateProbe && typeof j.stateProbe === 'object' && !list.some((x) => x.id === 'game:state-probe')) {
       list.push({ id: 'game:state-probe', command: 'node harness/state-probe.mjs', required: true });
     }
@@ -140,14 +123,14 @@ export function declaredGates(game) {
 }
 
 /**
- * 2.60.0 (#6): the manifest's slow seeded tests, { pattern, minScale } or null: "slowTests": { "pattern": "<file glob or
- * test-name pattern>", "timeoutScale": true, "minScale": <n, optional> }. "timeoutScale": false turns it off.
+ * The manifest's slow seeded tests, { pattern, minScale } or null: "slowTests": { "pattern": "<file glob or test-name
+ * pattern>", "timeoutScale": true, "minScale": <n, optional> }. "timeoutScale": false turns it off.
  */
 export function slowTestsOf(game) {
   if (!game?.root) return null;
   try {
     const st = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, game.root, 'studio.gates.json'), 'utf8')).slowTests;
-    if (!st || typeof st !== 'object' || Array.isArray(st) || st.timeoutScale === false) return null; // 2.69.0: an array is the slow tier
+    if (!st || typeof st !== 'object' || Array.isArray(st) || st.timeoutScale === false) return null; // an array is the slow tier
     const min = Number(st.minScale);
     return { pattern: String(st.pattern || ''), minScale: Number.isFinite(min) && min > 1 ? min : 1 };
   } catch {
@@ -156,11 +139,12 @@ export function slowTestsOf(game) {
 }
 
 /**
- * 2.69.0 (p): the game's slow tier, or null. The manifest marks test globs slow ("slowTests": ["<glob>", ...], e.g. a soak-test file glob;
- * the object form, { "pattern", "timeoutScale" }, still only scales timeouts, unless it also says "tier": "slow") and/or
- * whole checks ("tier": "slow" on a gate). Verifies and trains skip them (STUDIO_TEST_EXCLUDE for the game's test config);
- * the nightly slow tier (npm run gates -- --tier slow, harness/slow-tier.mjs) runs only them, on main. The manifest is a
- * protected file, so only the owner moves a test out of landing. STUDIO_SLOW_TIER=off runs everything in every verify.
+ * The game's slow tier, or null. The manifest marks test globs slow ("slowTests": ["<glob>", ...], e.g. a soak-test
+ * file glob; the object form, { "pattern", "timeoutScale" }, only scales timeouts unless it also says "tier": "slow")
+ * and/or whole checks ("tier": "slow" on a gate). Verifies and trains skip them (STUDIO_TEST_EXCLUDE for the game's
+ * test config); the nightly slow tier (npm run gates -- --tier slow, harness/slow-tier.mjs) runs only them, on main.
+ * The manifest is protected, so only the owner moves a test out of landing. STUDIO_SLOW_TIER=off runs everything in
+ * every verify.
  */
 export function slowTierOf(game) {
   if (!game?.root) return null;
@@ -171,14 +155,14 @@ export function slowTierOf(game) {
   const gates = (Array.isArray(j?.gates) ? j.gates : []).filter((x) => x && x.id && x.command && x.tier === 'slow').map((x) => `game:${x.id}`);
   return globs.length || gates.length ? { globs, gates } : null;
 }
-/** 2.69.0 (p): this run is the slow tier (STUDIO_GATE_TIER=slow, set by harness/slow-tier.mjs). */
+/** This run is the slow tier (STUDIO_GATE_TIER=slow, set by harness/slow-tier.mjs). */
 export const slowTierRun = (env = process.env) => /^slow$/i.test(String(env.STUDIO_GATE_TIER || ''));
-/** 2.69.0 (p): STUDIO_SLOW_TIER=off: no slow tier, every check and test runs in every verify (as before 2.69.0). */
+/** STUDIO_SLOW_TIER=off: no slow tier, every check and test runs in every verify. */
 export const slowTierOff = (env = process.env) => /^(off|0|false|no)$/i.test(String(env.STUDIO_SLOW_TIER || ''));
 
 /**
- * 2.78.2 (b): the perf test globs: STUDIO_PERF_TESTS (comma list; off: none), else studio/game.json "perfTests" (a list
- * of globs, or one comma-separated string). [] when neither.
+ * The perf test globs: STUDIO_PERF_TESTS (comma list; off: none), else studio/game.json "perfTests" (a list of globs,
+ * or one comma-separated string). [] when neither.
  */
 export function perfTestsOf(env = process.env, root = REPO_ROOT) {
   const split = (v) => String(v).split(',').map((x) => x.trim()).filter(Boolean);
@@ -190,16 +174,15 @@ export function perfTestsOf(env = process.env, root = REPO_ROOT) {
   } catch {}
   return [];
 }
-/** 2.78.2 (b): minutes a landing run's game:perf step waits for a quiet machine (STUDIO_PERF_WAIT_MIN, default 10). */
+/** Minutes a landing run's game:perf step waits for a quiet machine (STUDIO_PERF_WAIT_MIN, default 10). */
 export function perfWaitMin(env = process.env) {
   const v = String(env.STUDIO_PERF_WAIT_MIN ?? '').trim();
   return v !== '' && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 10;
 }
-/** 2.78.2 (b): a check that runs the game's tests (it gets STUDIO_TEST_EXCLUDE / STUDIO_TEST_ONLY). */
-// 2.78.2 (f): or an npm script whose last step runs vitest or jest (the inferred focus, harness/train-focus.mjs inferFocus).
+/** A check that runs the game's tests (it gets STUDIO_TEST_EXCLUDE / STUDIO_TEST_ONLY): also an npm script whose last step runs vitest or jest (inferFocus). */
 export const isTestCheck = (g) => Boolean(g && (g.related || g.focus || g.slowTests || clearRunner(g.command) || inferFocus(g.command, { root: REPO_ROOT }).focus));
 
-/** 2.78.2 (f): "focus inferred: …", printed once per check per run (a focused re-check, a timeout-only re-run). */
+/** "focus inferred: …", printed once per check per run (a focused re-check, a timeout-only re-run). */
 const inferredSaid = new Set();
 export function focusFor(g, files, log = (m) => console.error(m)) {
   const fc = focusCommand(g, files, { root: REPO_ROOT });
@@ -216,7 +199,7 @@ export function testTimeoutScale(gateFactor, slow, env = process.env) {
   return Math.round(Math.max(1, Number(gateFactor) || 1, slow?.minScale || 1, Number.isFinite(given) ? given : 1) * 10) / 10;
 }
 
-/** 2.30p: the manifest's shared globs (a change there runs every gate), plus the manifest itself. */
+/** The manifest's shared globs (a change there runs every gate), plus the manifest itself. */
 export function sharedPaths(game) {
   if (!game?.root) return [];
   const out = [`${game.root}/studio.gates.json`];
@@ -249,16 +232,16 @@ export function engineGates(paths) {
 
 function runGodot(project) {
   const bin = godotBin();
-  // 2.42.0: the binary, the project, the export templates and gdUnit4 must agree on the version
-  // (harness/godot-version.mjs). Notes by default; STUDIO_GODOT_PIN=fail makes a mismatch fail the gate.
+  // The binary, the project, the export templates and gdUnit4 must agree on the version (harness/godot-version.mjs).
+  // Notes by default; STUDIO_GODOT_PIN=fail makes a mismatch fail the gate.
   let notes = [];
   if (pinMode() !== 'off') {
     const v = checkGodotVersions(project, { bin });
     notes = v.problems.map((p) => `Godot version: ${p}`);
     if (pinMode() === 'fail' && v.problems.length) return { ok: false, why: notes.join('; '), notes: [] };
   }
-  // 2.32.0: tools/gate.gd presses every control in tools/controls.gd and writes one result per id here,
-  // for the controls check (qa/controls-check.mjs).
+  // tools/gate.gd presses every control in tools/controls.gd and writes one result per id here, for the controls
+  // check (qa/controls-check.mjs).
   const reports = path.join(REPO_ROOT, 'qa', 'reports');
   fs.mkdirSync(reports, { recursive: true });
   const env = { ...gateEnv(), STUDIO_CONTROLS_OUT: path.join(reports, `controls-godot-${project.replace(/[^\w.-]+/g, '_')}.json`) };
@@ -276,9 +259,9 @@ function runGodot(project) {
 }
 
 /**
- * 2.58.5 (H-3): which of the game's checks a change runs, and the scope a pass covers, without running anything:
- * { game, all, shared, gates, skipped, scope, layout, layoutPaths, engine, why }. runGameGates runs this plan;
- * task done uses it to record the right scope when a verify stands in for the checks.
+ * Which of the game's checks a change runs, and the scope a pass covers, without running anything:
+ * { game, all, shared, gates, skipped, scope, layout, layoutPaths, engine, why }. runGameGates runs this plan; task
+ * done uses it to record the right scope when a verify stands in for the checks.
  *
  * incoming (the landing re-check after a rebase onto a moved main, STUDIO_GATE_INCOMING_FILE): the files main brought
  * in. The lane's own pass on its pre-rebase commit stands for a check whose declared inputs ("paths", layoutPaths, a
@@ -293,8 +276,8 @@ export async function planGameGates({ paths = [], changed = null, incoming = nul
   let gates = sel.run;
   const skipped = [...sel.skipped];
   let scope = game && all.length ? scopeOf(gates, shared) : null;
-  // 2.30o: the game's layout rules (studio.layout.json), when it declares them; unscoped unless the manifest names
-  // its inputs ("layoutPaths").
+  // The game's layout rules (studio.layout.json), when it declares them; unscoped unless the manifest names its
+  // inputs ("layoutPaths").
   const layout = Boolean(game?.root && fs.existsSync(path.join(REPO_ROOT, game.root, 'studio.layout.json')) && process.env.STUDIO_LAYOUT_GATE !== 'off');
   let layoutPaths = null;
   if (layout) {
@@ -323,7 +306,24 @@ export async function planGameGates({ paths = [], changed = null, incoming = nul
     }
     engine = keepEngine;
   }
-  // 2.69.0 (p): the slow tier. A verify (and a train) skips the slow checks; the slow tier runs only them, plus the test
+  // Run by the verify for the tracks it covers (STUDIO_GATE_TRACKS, harness/gate-tracks.mjs): a game check on
+  // another track (a manifest check is web unless its "track" says otherwise), the layout rules (web) and a Godot
+  // project's gate (engine:godot) are skipped with that reason. Unset (task done, the train's re-checks): all of them.
+  {
+    const gt = await import('./gate-tracks.mjs');
+    const cov = gt.coveredFromEnv();
+    if (cov !== '*') {
+      const why = (t) => `${t.join('+')} track; this change covers ${[...cov].join(', ')} only`;
+      const keep = [];
+      for (const g of gates) { const t = gt.gateTrack(g).tracks; if (gt.runsFor(t, cov)) keep.push(g); else skipped.push({ id: g.id, why: why(t) }); }
+      gates = keep;
+      if (runLayout && !gt.runsFor(['web'], cov)) { runLayout = false; skipped.push({ id: 'game:layout', why: why(['web']) }); }
+      const keepEngine = [];
+      for (const e of engine) { if (gt.runsFor(['engine:godot'], cov)) keepEngine.push(e); else skipped.push({ id: e.id, why: why(['engine:godot']) }); }
+      engine = keepEngine;
+    }
+  }
+  // The slow tier. A verify (and a train) skips the slow checks; the slow tier runs only them, plus the test
   // checks (a "related" or "focus" command, or "slowTests": true) with only the slow test globs (STUDIO_TEST_ONLY).
   const tierInfo = game && !slowTierOff() ? slowTierOf(game) : null;
   let slowTier = null;
@@ -339,20 +339,18 @@ export async function planGameGates({ paths = [], changed = null, incoming = nul
     slowTier = { run: slowRun, globs: tierInfo.globs };
     if (slowRun) { runLayout = false; engine = []; }
   }
-  // 2.78.2 (b): the game:perf step (perf test globs; not in the slow tier's own run).
   let perf = null;
   if (game && !slowTierRun()) {
     const globs = perfTestsOf();
     if (globs.length) {
       perf = { globs, gates: gates.filter((g) => g.tier !== 'slow' && isTestCheck(g)) };
-      // A change whose scope selected none of the test checks doesn't run their perf tests either.
       if (!perf.gates.length && all.some((g) => g.tier !== 'slow' && isTestCheck(g))) { skipped.push({ id: 'game:perf', why: 'none of the checks that run the perf tests is selected for this change' }); perf = null; }
     }
   }
   return { game, all, shared, gates, skipped, scope, layout: runLayout, layoutPaths, engine, why: sel.why || '', slowTier, perf };
 }
 
-/** 2.69.0 (p): the slow-tier env one game check runs with: STUDIO_TEST_EXCLUDE in a verify, STUDIO_TEST_ONLY in the slow tier. */
+/** The slow-tier env one game check runs with: STUDIO_TEST_EXCLUDE in a verify, STUDIO_TEST_ONLY in the slow tier. */
 export function slowTierEnv(slowTier, gate, env = process.env) {
   if (!slowTier?.globs?.length || gate?.tier === 'slow') return {};
   if (slowTier.run) return { STUDIO_TEST_ONLY: slowTier.globs.join(',') };
@@ -360,7 +358,7 @@ export function slowTierEnv(slowTier, gate, env = process.env) {
   return { STUDIO_TEST_EXCLUDE: [...new Set([...mine, ...slowTier.globs])].join(',') };
 }
 
-/** 2.44.0: related tests only (STUDIO_GATE_RELATED=on, or STUDIO_WHOLE_GAME=on). */
+/** Related tests only (STUDIO_GATE_RELATED=on, or STUDIO_WHOLE_GAME=on). */
 export const relatedTestsOn = (env = process.env) => /^(on|1|true|yes)$/i.test(env.STUDIO_GATE_RELATED || '') || /^(on|1|true|yes)$/i.test(env.STUDIO_WHOLE_GAME || '');
 
 /** The files a landing re-check was told main brought in (STUDIO_GATE_INCOMING_FILE), or null (unknown: no filter). */
@@ -371,10 +369,9 @@ export function readIncoming(env = process.env) {
 }
 
 /**
- * 2.65.1 (B-17): one line with the load probe's reading for a check, printed every time (the crew saw a 600 s timeout
- * with no line at all): "[game-gates] <check>: load factor F (<reasons> | nothing scaling it); <CPU reading>;
- * quiet-run floor: <...>[; timeout N s, not scaled]". It never reads "timeout <n> s (": that is the scaled-timeout
- * line, printed after it when the timeout isn't the base.
+ * One line with the load probe's reading for a check, printed every time: "[game-gates] <check>: load factor F
+ * (<reasons> | nothing scaling it); <CPU reading>; quiet-run floor: <...>[; timeout N s, not scaled]". It never reads
+ * "timeout <n> s (": that is the scaled-timeout line, printed after it when the timeout isn't the base.
  */
 export function loadReading(label, t, base) {
   const sec = (ms) => Math.round(Number(ms) / 1000);
@@ -397,9 +394,9 @@ export function loadReading(label, t, base) {
 }
 
 /**
- * 2.72.0 (a): the timeout-only re-run of one failed check (harness/timeout-rerun.mjs). Returns null (not timeout-only,
+ * The timeout-only re-run of one failed check (harness/timeout-rerun.mjs). Returns null (not timeout-only,
  * switched off, too many files, no way to run one file) or { green: [files], red: [files], allGreen }. Each file runs
- * once, alone, through the check's focus command (2.65.3), with one test worker; a pass that ran no test isn't green.
+ * once, alone, through the check's focus command, with one test worker; a pass that ran no test isn't green.
  */
 export async function timeoutOnlyRerun({ g, r, runOnce, log = () => {}, root = REPO_ROOT, setRelated = () => {}, env = process.env }) {
   const tr = await import('./timeout-rerun.mjs');
@@ -408,7 +405,7 @@ export async function timeoutOnlyRerun({ g, r, runOnce, log = () => {}, root = R
   const t0 = tr.timeoutOnly(text);
   if (!t0.ok) { if (t0.blocks.some((b) => b.timeout)) log(`[game-gates] ${g.id}: not re-run for timeouts: ${t0.why}`); return null; }
   const { repoRel } = await import('./gate-subids.mjs');
-  const t = { ...t0, files: [...new Set(t0.files.map((f) => repoRel(f, [REPO_ROOT])))] }; // node --test prints absolute paths
+  const t = { ...t0, files: [...new Set(t0.files.map((f) => repoRel(f, [REPO_ROOT])))] };
   const { flakeRules, recordTimeoutFlakes } = await import('./flakes.mjs');
   const max = flakeRules(env).maxFiles;
   if (t.files.length > max) { log(`[game-gates] ${g.id}: timeout-only red in ${t.files.length} files, more than STUDIO_FLAKE_MAX_FILES (${max}): not re-run, it stays red`); return null; }
@@ -426,13 +423,13 @@ export async function timeoutOnlyRerun({ g, r, runOnce, log = () => {}, root = R
     (ok ? green : red).push(f);
     log(`[game-gates] ${g.id}: ${f} alone at low load: ${ok ? 'green (timeout-flake)' : `red (${x.status === 0 ? 'passed having run no test' : `exit ${x.status ?? x.signal ?? '?'}`})`}`);
   }
-  if (green.length) recordTimeoutFlakes(root, { check: g.id, files: green, text, env, log }); // 2.77.3 (C2): text: a port collision there is named
+  if (green.length) recordTimeoutFlakes(root, { check: g.id, files: green, text, env, log }); // text: a port collision there is named
   if (red.length) log(`[game-gates] ${g.id}: ${red.length} timed-out file(s) red alone too: a real red (${red.join(', ')})`);
   else log(`[game-gates] ${g.id}: every timed-out file passed alone: counted green for those files only (the rest of the check had passed)`);
   return { green, red, allGreen: !red.length };
 }
 
-/** 2.72.0 (a): the manifest's "divergence" ({ command, gate?, state?, goldens? }) or null. */
+/** The manifest's "divergence" ({ command, gate?, state?, goldens? }) or null. */
 export function divergenceConfOf(game) {
   if (!game?.root) return null;
   try {
@@ -441,7 +438,7 @@ export function divergenceConfOf(game) {
   } catch { return null; }
 }
 
-/** 2.72.0 (a): run the game's divergence contract for a failed check it applies to, printing its two lines. Never throws. */
+/** Run the game's divergence contract for a failed check it applies to, printing its two lines. Never throws. */
 async function divergenceForCheck(game, g, log) {
   try {
     const conf = divergenceConfOf(game);
@@ -451,7 +448,7 @@ async function divergenceForCheck(game, g, log) {
     if (!applies || !dv.divergenceOn()) return null;
     const res = await dv.gameDivergence({ root: REPO_ROOT, game, conf, gate: g.id });
     for (const l of dv.divergenceLines('[game-gates]', { ...res, gate: g.id })) log(l);
-    // 2.73.0 (g, A13): the signed report a re-record of the declared goldens carries (harness/golden-report.mjs).
+    // The signed report a re-record of the declared goldens carries (harness/golden-report.mjs).
     if (Array.isArray(conf.goldens) && conf.goldens.length) (await import('./golden-report.mjs')).writeGoldenReport(REPO_ROOT, conf.goldens.map(String), res, { by: 'harness/game-gates.mjs', gate: g.id });
     return res;
   } catch (e) { log(`[game-gates] first divergence: not found (${String(e.message || e).slice(0, 160)})`); return null; }
@@ -464,11 +461,11 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
   const rows = [];
   const skipped = [...plan.skipped];
   const log = (s) => !quiet && console.log(s);
-  // 2.31.0: heavy checks take a box-wide gate slot (shared by every lane copy through the main checkout).
+  // Heavy checks take a box-wide gate slot (shared by every lane copy through the main checkout).
   let slotRoot = REPO_ROOT;
   try { slotRoot = (await import('./worktree.mjs')).mainRoot(); } catch {}
   const slot = (label, fn) => withGateSlot(slotRoot, label, fn, { log: (m) => console.error(m) });
-  // 2.70.0 (w): in a sparse lane, put back every left-out file the checks about to run read (harness/lane-sparse.mjs).
+  // In a sparse lane, put back every left-out file the checks about to run read (harness/lane-sparse.mjs).
   if (game?.root) {
     try {
       const ls = await import('./lane-sparse.mjs');
@@ -478,56 +475,48 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
   if (game) {
     if (plan.why) log(`[game-gates] ${plan.why}`);
     if (!all.length) rows.push({ id: 'game:none', ok: false, required: true, why: `the game ${game.name} declares no checks: add ${game.root || `web/${game.name}`}/studio.gates.json or ${game.sim || '<game>/sim'}/qa.mjs` });
-    // 2.44.0: related tests only. A gate may declare `related` (a command with {files}, such as
-    // "cd game/x && npx vitest related --run --passWithNoTests {files}"): when the change is known and is only
-    // code files under the game, that runs instead of the whole suite. Only when the whole suite still runs
-    // after landing (STUDIO_WHOLE_GAME=on) or STUDIO_GATE_RELATED=on says so. A real 2,244-test game: a leaf
-    // module's tests took 2.5 s instead of 5 min 40 s.
+    // Related tests only. A gate may declare `related` (a command with {files}, such as "cd game/x && npx vitest
+    // related --run --passWithNoTests {files}"): when the change is known and is only code files under the game, that
+    // runs instead of the whole suite; only when the whole suite still runs after landing (STUDIO_WHOLE_GAME=on) or
+    // STUDIO_GATE_RELATED=on says so.
     const relatedOn = relatedTestsOn();
     const prefix = `${game.root}/`;
     const changedHere = (changed || []).map((f) => String(f).replace(/\\/g, '/')).filter((f) => f.startsWith(prefix));
     const codeOnly = changedHere.length && changedHere.every((f) => /\.(m?[jt]sx?|cjs|vue|svelte)$/i.test(f)) && !/ is shared/.test(plan.why || '');
     const q = (s) => `"${String(s).replace(/"/g, '\\"')}"`;
     let cmdLabel = '';
-    // 2.58.0 (F2): the game's checks run with CI=true, so test runners (Vitest, Jest, ...) never write or rewrite
-    // snapshots during a verify (on Windows each verify rewrote a snapshot's line endings on main). Updating
-    // snapshots is a deliberate run with -u. STUDIO_GAME_GATE_CI=off leaves CI as it is.
-    // 2.71.1 (B, S03): and without code-loading NODE_OPTIONS, git redirects or replace refs (harness/gate-env.mjs).
+    // The game's checks run with CI=true, so test runners never write or rewrite snapshots during a verify (updating
+    // is a deliberate run with -u). STUDIO_GAME_GATE_CI=off leaves CI as it is. Code-loading NODE_OPTIONS, git
+    // redirects and replace refs are dropped (harness/gate-env.mjs).
     const env = gateEnv(/^(off|0|false|no)$/i.test(process.env.STUDIO_GAME_GATE_CI || '') ? process.env : { ...process.env, CI: 'true' });
-    // 2.59.0 (#2): the timeout is scaled for load, judged once the check has its slot (harness/heavy.mjs
-    // scaledTimeout): other heavy work running (a full verify, the Unity gate, a browser playtest), other game checks,
-    // a high load average. Never below STUDIO_GAME_GATE_TIMEOUT_MS (600 s), at most STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR
-    // (3) times it; the value used is printed and kept in the check's row, so a real hang still fails, just later.
-    // 2.69.0 (p): the slow tier's checks are long by definition: their base is STUDIO_SLOW_TIMEOUT_MS (60 min).
+    // The timeout is scaled for load, judged once the check has its slot (harness/heavy.mjs scaledTimeout): other heavy
+    // work, other game checks, a high load average. Never below STUDIO_GAME_GATE_TIMEOUT_MS (600 s), at most
+    // STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR (3) times it; the value used is printed and kept in the check's row, so a
+    // real hang still fails, just later. The slow tier's base is STUDIO_SLOW_TIMEOUT_MS (60 min).
     const baseTimeout = plan.slowTier?.run ? Number(process.env.STUDIO_SLOW_TIMEOUT_MS || 3600000) : Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000);
     let timing = { ms: baseTimeout, base: baseTimeout, factor: 1, why: '' };
-    // 2.60.0 (#6): slow seeded tests ("slowTests" in the manifest). A per-test timeout in the game's test config still
-    // tripped under load after 2.59.0 scaled the gate's own timeout, so the game's checks get the same factor in
-    // STUDIO_TEST_TIMEOUT_SCALE (and the pattern in STUDIO_SLOW_TESTS) for its test config to multiply its timeouts by
-    // (docs/ONBOARDING-A-GAME.md, "Slow tests"). Never below 1; printed for every check.
+    // Slow seeded tests ("slowTests"): the game's checks get the gate's load factor in STUDIO_TEST_TIMEOUT_SCALE (and
+    // the pattern in STUDIO_SLOW_TESTS) for its test config to multiply its timeouts by (docs/ONBOARDING-A-GAME.md,
+    // "Slow tests"). Never below 1; printed for every check.
     const slow = slowTestsOf(game);
     let testScale = 1;
-    // 2.60.1 (B-17): the timeout is also never below 1.5 x the check's last quiet run (heavy.mjs lastQuietTime), kept
-    // per game and check in the main checkout's .studio/gates/game-gate-times.json from passing whole-suite runs at
-    // load factor 1; the line is printed whenever the timeout differs from the base, naming why.
+    // The timeout is also never below 1.5 x the check's last quiet run (heavy.mjs lastQuietTime), kept per game and
+    // check in the main checkout's .studio/gates/game-gate-times.json from passing whole-suite runs at load factor 1;
+    // the line names why whenever the timeout differs from the base.
     let curRelated = false;
     let curGate = null;
-    let curPerf = null; // 2.78.2 (b): the test globs or files of the game:perf step while it runs
+    let curPerf = null;
     const timeKey = () => `${game.name}:${cmdLabel}`;
     const timingWhy = (t) => [t.factor > 1 ? `${Math.round(baseTimeout / 1000)} s x ${t.factor}: ${t.why}` : '', t.floor ? t.floor.why : '', t.rerun && !(t.factor > 1) && !t.floor ? 'self-triage\'s one re-run at the cap' : ''].filter(Boolean).join('; ');
     const workersNow = () => {
       let profile = null;
       try { profile = machineProfile(slotRoot); } catch {}
       try {
-        // 2.76.0 (j, B-89): a lane check (or the slow tier's soak) gets its share of the cores beside what runs.
         return { ...testWorkers({ profile, env: process.env, holdClaim: heldClaim(slotRoot), holders: heavyHolders(slotRoot), laneChecks: laneChecksRunning(slotRoot), root: REPO_ROOT, trainRoot: slotRoot, self: plan.slowTier?.run ? 'soak' : 'check' }), cores: logicalCores(profile) };
       } catch (err) { return { workers: 2, why: `couldn't size them (${String(err.message || err).slice(0, 80)}): 2`, cores: logicalCores(profile) }; }
     };
-    // 2.73.2 (d, B-71): the per-test timeout passed to the check's runner for this many workers (harness/test-timeouts.mjs).
     let testTO = null;
-    // 2.76.0 (j, B-89): the workers a check ran with, its share of the cores and why (kept in its row).
     let twRow = null;
-    // 2.78.2 (f): the quarantine's verdict per check, judged once a run (and cached per test config across runs).
     const qVerdict = new Map();
     const quarantineState = (g, files) => {
       if (!g) return { state: 'unknown', why: 'not a check of the game', still: [] };
@@ -540,10 +529,8 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     };
     const runOnce = (cmd, forceMs = null, extraEnv = null) => slot(cmdLabel, () => {
       timing = scaledTimeout(baseTimeout, slotRoot, { label: curRelated || plan.slowTier?.run ? null : timeKey() });
-      // 2.65.0: self-triage's one re-run after a timeout under load runs at the cap (harness/self-triage.mjs timeoutRerun).
       if (forceMs) timing = { ...timing, ms: Math.max(timing.ms, forceMs), rerun: true };
       const changedT = timing.ms !== baseTimeout;
-      // 2.65.1 (B-17): the probe's reading, every time (a timeout that isn't scaled says so, and why).
       console.error(loadReading(cmdLabel, timing, baseTimeout));
       if (changedT) console.error(`[game-gates] ${cmdLabel}: timeout ${Math.round(timing.ms / 1000)} s (${timingWhy(timing)}; STUDIO_GAME_GATE_TIMEOUT_SCALE=off keeps ${Math.round(baseTimeout / 1000)} s)`);
       if (changedT) emitSampled({ type: 'gate.timeout_scaled', agent: process.env.STUDIO_LOCK_OWNER || 'gates', msg: `${cmdLabel}: timeout ${Math.round(timing.ms / 1000)} s (${timingWhy(timing)})`.slice(0, 400), meta: { gate: cmdLabel, timeoutMs: timing.ms, baseMs: baseTimeout, factor: timing.factor, ...(timing.floor ? { floorFromMs: timing.floor.lastMs } : {}) } }, cmdLabel);
@@ -553,17 +540,14 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
         runEnv = { ...env, STUDIO_TEST_TIMEOUT_SCALE: String(testScale), STUDIO_SLOW_TESTS: slow.pattern };
         console.error(`[game-gates] ${cmdLabel}: slow tests${slow.pattern ? ` (${slow.pattern})` : ''}: per-test timeouts x${testScale} (STUDIO_TEST_TIMEOUT_SCALE=${testScale}; the gate's load factor ${timing.factor}${slow.minScale > 1 ? `, minScale ${slow.minScale}` : ''})`);
       }
-      // 2.68.0 (n): test workers sized to the machine (harness/heavy-budget.mjs testWorkers), always passed (CI=true
+      // Test workers sized to the machine (harness/heavy-budget.mjs testWorkers), always passed (CI=true
       // stays for snapshots): STUDIO_TEST_WORKERS and VITEST_MAX_WORKERS for the game's test config to read.
       const tw = workersNow();
       twRow = { workers: tw.workers, why: String(tw.why || '').slice(0, 400), ...(tw.share ? { share: tw.share } : {}), ...(Number(tw.machineWorkers) > 0 ? { machineWorkers: tw.machineWorkers } : {}) };
       runEnv = { ...runEnv, STUDIO_TEST_WORKERS: String(tw.workers), VITEST_MAX_WORKERS: String(tw.workers) };
-      // 2.72.0 (a): the timeout-only re-run's low load (one test worker), applied last.
       if (extraEnv) runEnv = { ...runEnv, ...extraEnv };
-      // 2.69.0 (p): the slow tier's test globs: left out of a verify (STUDIO_TEST_EXCLUDE), the only ones in the slow tier.
       const ste = slowTierEnv(plan.slowTier, curGate);
       if (Object.keys(ste).length) { runEnv = { ...runEnv, ...ste }; console.error(`[game-gates] ${cmdLabel}: slow tier: ${ste.STUDIO_TEST_ONLY ? `only ${ste.STUDIO_TEST_ONLY} (STUDIO_TEST_ONLY)` : `skips ${plan.slowTier.globs.join(', ')} (STUDIO_TEST_EXCLUDE; they run nightly on main)`}`); }
-      // 2.78.2 (b): the perf tests: only them in the game:perf step (STUDIO_TEST_ONLY), left out of every other run.
       if (plan.perf) {
         if (curPerf) { runEnv = { ...runEnv, STUDIO_TEST_ONLY: curPerf.join(',') }; console.error(`[game-gates] ${cmdLabel}: game:perf: only ${curPerf.join(', ')} (STUDIO_TEST_ONLY)`); }
         else {
@@ -572,12 +556,12 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
           console.error(`[game-gates] ${cmdLabel}: skips the perf tests ${plan.perf.globs.join(', ')} (STUDIO_TEST_EXCLUDE; they run alone in game:perf)`);
         }
       }
-      // 2.69.0 (r): the quarantine list (studio/quarantine.json, harness/flakes.mjs) as STUDIO_TEST_QUARANTINE, a JSON
+      // The quarantine list (studio/quarantine.json, harness/flakes.mjs) as STUDIO_TEST_QUARANTINE, a JSON
       // list of test files for the game's runner to skip; unset when nothing is quarantined.
-      // 2.78.2 (f): "skipped" only once verified: the runner's list mode drops them with the variable set
+      // "skipped" only once verified: the runner's list mode drops them with the variable set
       // (harness/test-config-check.mjs verifySkip, once per test config); a config that ignores it is a WARN, and those
       // tests are not counted as skipped (the row's "quarantine").
-      // 2.80 (f, N4/N13): a quarantined file this lane changed is not skipped in its run (the fix is proven in its own lane).
+      // A quarantined file this lane changed is not skipped in its run (the fix is proven in its own lane).
       const qAll = quarantineEnvValue(REPO_ROOT) ? JSON.parse(quarantineEnvValue(REPO_ROOT)) : [];
       const qFiles = qAll.filter((t) => {
         const hit = changedHere.some((c) => c === t || c.endsWith(`/${t}`));
@@ -594,14 +578,13 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
         else console.error(`[game-gates] ${cmdLabel}: ${n} quarantined test file(s) passed to the game's runner in STUDIO_TEST_QUARANTINE (not verified that its test config skips them: ${qs.why || 'not a test check'})`);
       } else { const { STUDIO_TEST_QUARANTINE: _q, ...rest } = runEnv; runEnv = rest; }
       console.error(`[game-gates] ${cmdLabel}: ${extraEnv?.STUDIO_TEST_WORKERS || tw.workers} test workers (STUDIO_TEST_WORKERS, VITEST_MAX_WORKERS: ${extraEnv?.STUDIO_TEST_WORKERS ? 'low load for the timeout-only re-run' : tw.why})`);
-      // 2.73.2 (d, B-71): a vitest/jest/node --test check gets a per-test timeout that fits its workers (a runtime flag).
       const scaled = scaleTestTimeouts({ command: cmd, root: REPO_ROOT, workers: Number(runEnv.STUDIO_TEST_WORKERS) || tw.workers, machineWorkers: extraEnv?.STUDIO_TEST_WORKERS ? null : tw.machineWorkers, cores: tw.cores, gateFactor: timing.factor, minScale: slow?.minScale || 1, env: process.env });
       testTO = scaled.info;
       if (testTO) console.error(testTimeoutLine(cmdLabel, testTO));
       const t0 = Date.now();
       const res = spawnSync(scaled.command, { windowsHide: true, cwd: REPO_ROOT, shell: true, encoding: 'utf8', env: runEnv, maxBuffer: 32 * 1024 * 1024, timeout: timing.ms });
-      // A pass at load factor 1 is the check's quiet run (its floor). 2.65.1: a pass of self-triage's re-run at the cap is
-      // also its lastPass at any factor, which stands in for the floor only while no quiet run is recorded.
+      // A pass at load factor 1 is the check's quiet run (its floor); a pass of self-triage's re-run at the cap is also
+      // its lastPass at any factor, standing in for the floor only while no quiet run is recorded.
       if (res.status === 0 && !curRelated && !plan.slowTier?.run) {
         const took = Date.now() - t0;
         if (timing.factor === 1) recordGateTime(slotRoot, timeKey(), took);
@@ -609,11 +592,11 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       }
       return res;
     });
-    // 2.65.3 (B-43): a merge train's re-check (STUDIO_GATE_FOCUS, passed on by run-gates only in an --only run) runs a
+    // A merge train's re-check (STUDIO_GATE_FOCUS, passed on by run-gates only in an --only run) runs a
     // failing check on its failing test files only (harness/train-focus.mjs); the checks that passed in the verify are
     // skipped. Never in a verify: run-gates drops the variable from any other run.
     const focusMap = readFocus();
-    // 2.69.0 (p): a merge train's related-first check (STUDIO_GATE_RELATED_ONLY=on with STUDIO_GATE_RELATED=on) runs
+    // A merge train's related-first check (STUDIO_GATE_RELATED_ONLY=on with STUDIO_GATE_RELATED=on) runs
     // only the checks that have related tests for these files; nothing else (no whole suite, no layout, no engine gate).
     const relatedOnly = relatedOn && /^(on|1|true|yes)$/i.test(process.env.STUDIO_GATE_RELATED_ONLY || '');
     if (relatedOnly) { plan.layout = false; plan.engine = []; }
@@ -649,7 +632,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
           r = runOnce(g.command);
         }
       }
-      // 2.68.0 (n): a check killed for memory (heavy-budget.mjs oomSignature) runs once more (it queues for its gate
+      // A check killed for memory (heavy-budget.mjs oomSignature) runs once more (it queues for its gate
       // slot again), with a note, instead of counting red. STUDIO_HEAVY_OOM_RETRY=off: it counts as it is.
       let oomRetry = null;
       const oom = /^(off|0|false|no)$/i.test(process.env.STUDIO_HEAVY_OOM_RETRY || '') ? '' : oomSignature(r);
@@ -662,20 +645,18 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       const timedOut = (x) => x.error?.code === 'ETIMEDOUT' || (x.status === null && x.signal);
       const timeoutLine = () => `\nError: timed out after ${Math.round(timing.ms / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_MS${timing.factor > 1 ? ` ${Math.round(baseTimeout / 1000)} s x ${timing.factor} for load` : ''}${timing.floor ? `${timing.factor > 1 ? ',' : ` ${Math.round(baseTimeout / 1000)} s`} raised to ${timing.floor.mult} x the last ${timing.floor.from === 'last pass' ? 'passing' : 'quiet'} run of ${Math.round(timing.floor.lastMs / 1000)} s` : ''}${timing.rerun ? '; self-triage\'s one re-run at the cap' : ''})`;
       if (timedOut(r)) r.stderr = `${r.stderr || ''}${timeoutLine()}`;
-      // 2.65.0 (self-triage, rerun-timeout): a check that timed out under load (factor > 1) runs once more at the cap,
-      // once per check per window (harness/self-triage.json); a timeout with no load, or at the cap, stands. 2.65.1: so
-      // does one with no quiet run recorded yet (the floor on), so a suite near its base gets a time for its floor.
+      // A check that timed out under load (factor > 1), or has no quiet run recorded yet, runs once more at the cap,
+      // once per check per window (harness/self-triage.json); a timeout with no load, or at the cap, stands.
       if (timedOut(r) && !curRelated) {
         const tr = timeoutRerun({ gate: timeKey(), timing, base: baseTimeout, root: slotRoot });
         if (tr.rerun) {
           console.error(`[game-gates] ${g.id}: ${tr.why}`);
           const first = String(r.stderr || '').trim().split('\n').pop();
           r = runOnce(cmd, tr.ms);
-          // Both attempts are named when the re-run times out too: the first timeout line, then the re-run's.
           if (timedOut(r)) r.stderr = `${first}\n${r.stderr || ''}${timeoutLine()}`;
         } else if (timing.factor > 1 || tr.reason) console.error(`[game-gates] ${g.id}: no re-run (${tr.why})`);
       }
-      // 2.72.0 (a): a red whose only failures are per-test timeouts re-runs just those files, each alone at low load
+      // A red whose only failures are per-test timeouts re-runs just those files, each alone at low load
       // (harness/timeout-rerun.mjs). All green alone: the check counts green, each file a "timeout-flake"; any red alone:
       // red, naming only the red files. Mixed reds, unreadable output, STUDIO_TIMEOUT_RERUN=off: red as before.
       let timeoutFlake = null;
@@ -687,8 +668,8 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
         if (t?.green) { timeoutFlake = t.green; if (t.allGreen) r = { ...r, status: 0, signal: null, error: undefined }; }
         if (t?.red) redAlone = t.red;
       }
-      // 2.44.0: STUDIO_GAME_GATE_RETRY=on (opt-in): a failed check runs once more before it counts. Passing the
-      // second time is logged as flaky (gate.flaky), a real game's 30-day test failed on a busy box only.
+      // STUDIO_GAME_GATE_RETRY=on (opt-in): a failed check runs once more before it counts; passing the second time is
+      // logged as flaky (gate.flaky).
       let flaky = null;
       if (r.status !== 0 && /^(on|1|true|yes)$/i.test(process.env.STUDIO_GAME_GATE_RETRY || '')) {
         const first = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').filter((l) => /FAIL|Error|error/.test(l)).slice(0, 2).join(' | ');
@@ -700,7 +681,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
           r = again;
         } else r = again;
       }
-      // 2.72.0 (b): a "ratchet": true check whose game has a baseline for it fails only on hits the baseline doesn't list
+      // A "ratchet": true check whose game has a baseline for it fails only on hits the baseline doesn't list
       // (harness/ratchet.mjs judgeCheck); only those are printed. No baseline section: its own exit code, as before.
       let ratchet = null;
       if (g.ratchet && !related && !focused) {
@@ -710,25 +691,22 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
         } catch (err) { log(`[game-gates] WARN ${g.id}: the ratchet couldn't judge it (${err.message}); its exit code stands`); }
         if (ratchet) { for (const l of ratchet.lines) log(l); r = { ...r, status: ratchet.status }; }
       }
-      // 2.72.0 (a): a red golden-type check of a game whose manifest declares "divergence": where it first went wrong
+      // A red golden-type check of a game whose manifest declares "divergence": where it first went wrong
       // (harness/divergence.mjs gameDivergence: the game's per-tick digests on this tree and the reference commit).
       if (r.status !== 0) await divergenceForCheck(game, g, log);
       const tail = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').filter((l) => /FAIL|Error|error/.test(l)).slice(0, 3).join(' | ');
-      // 2.36.0: exit 0 with "nothing was run" is a silent green (harness/silent-green.mjs; warn by default).
+      // Exit 0 with "nothing was run" is a silent green (harness/silent-green.mjs; warn by default).
       // A related run with no related tests is fine: the whole suite runs after landing.
       const sg = r.status === 0 ? (related ? { ok: true, why: '', note: '' } : judgePass(g.id, { output: `${r.stdout || ''}${r.stderr || ''}` })) : null;
       if (sg?.note) log(`[game-gates] WARN ${sg.note}`);
-      // 2.54.0 (PU-06): the failing test names, so a task is judged only on failures that are new since it was claimed.
+      // The failing test names, so a task is judged only on failures that are new since it was claimed.
       const failures = r.status === 0 ? null : (await import('./baseline.mjs')).failingTests(`${r.stdout || ''}${r.stderr || ''}`);
       let failFiles = r.status === 0 ? [] : failingTestFiles(`${r.stdout || ''}${r.stderr || ''}`);
-      // 2.72.0 (a): after a timeout-only re-run, the failing files are the ones red alone (the green ones are timeout-flakes).
-      // (Every failure was one of the timed-out files, so the files red alone are exactly the failing ones.)
       if (r.status !== 0 && redAlone) failFiles = [...redAlone];
       rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(failFiles.length ? { failingFiles: failFiles } : {}), ...(focused ? { focus: focused.fellBack ? { files: focused.files, fellBack: focused.fellBack } : { files: focused.files, how: focused.how } } : {}), ...(timing.ms !== baseTimeout ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: [timing.why, timing.floor?.why].filter(Boolean).join('; ') } : {}), ...(slow ? { testTimeoutScale: testScale } : {}), ...(testTO ? { testTimeout: testTO } : {}), ...(twRow ? { testWorkers: twRow } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}), ...(oomRetry ? { oomRetry } : {}), ...(timeoutFlake ? { timeoutFlake } : {}) });
-      { const qs = qVerdict.get(g.id); if (qs) rows[rows.length - 1].quarantine = { files: qs.files, state: qs.state, skipped: qs.state === 'honoured' ? qs.files : 0, ...(qs.state === 'not-honoured' ? { stillRun: qs.still.length || qs.files } : {}) }; } // 2.78.2 (f)
+      { const qs = qVerdict.get(g.id); if (qs) rows[rows.length - 1].quarantine = { files: qs.files, state: qs.state, skipped: qs.state === 'honoured' ? qs.files : 0, ...(qs.state === 'not-honoured' ? { stillRun: qs.still.length || qs.files } : {}) }; }
       if (ratchet) { const row = rows[rows.length - 1]; delete row.failures; delete row.failingFiles; if (ratchet.why) row.why = ratchet.why; row.ratchet = { fresh: ratchet.judged?.fresh.length ?? null, standing: ratchet.judged?.standing ?? null }; }
     }
-    // 2.78.2 (b): the game:perf step (see the header): the perf tests alone, on a quiet machine, after the other checks.
     const perfFocus = focusMap ? focusMap['game:perf'] || null : null;
     if (plan.perf && relatedOnly) skipped.push({ id: 'game:perf', why: 'related-first: the perf tests run in the full verify' });
     else if (plan.perf && focusMap && !perfFocus) skipped.push({ id: 'game:perf', why: 'it passed in the train\'s verify; this focused re-check runs only the checks that failed there' });
@@ -763,7 +741,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
             cmdLabel = `${g.id} (game:perf)`;
             curGate = g;
             curPerf = only;
-            curRelated = true; // a part of the suite: never the check's quiet-run time
+            curRelated = true;
             let r;
             try { r = runOnce(g.command, null, { STUDIO_TEST_WORKERS: '1', VITEST_MAX_WORKERS: '1', STUDIO_TIMEOUT_RERUN: 'off' }); } finally { curPerf = null; curRelated = false; }
             const text = `${r.stdout || ''}${r.stderr || ''}`;
@@ -785,7 +763,6 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       } finally { if (held) hv.clearQuietHold(slotRoot, 'perf'); }
     }
   }
-  // 2.30o: the game's layout rules (studio.layout.json), when it declares them.
   if (plan.layout) {
     const { runLayoutGate } = await import('./layout-gate.mjs');
     const lay = runLayoutGate({ gameDir: game.root });
@@ -796,23 +773,21 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     for (const n of r.notes || []) log(`[game-gates] WARN ${e.id}: ${n} (STUDIO_GODOT_PIN=fail makes this fail the gate)`);
     rows.push({ id: e.id, ok: r.ok, required: true, why: r.why });
   }
-  // 2.60.0: a failing check's test names, one JSON line, so the merge train can tell a red that is only the game's
+  // A failing check's test names, one JSON line, so the merge train can tell a red that is only the game's
   // declared pins (harness/train.mjs pinsOnlyRed) from any other.
   for (const r of rows) {
-    // 2.67.0: an optional check that fails is a WARN (never the gate's FAIL), so the Fix line and the train's focus
+    // An optional check that fails is a WARN (never the gate's FAIL), so the Fix line and the train's focus
     // read the required check that failed, not an advisory one listed before it.
     log(`[game-gates] ${r.ok ? 'PASS' : r.required === false ? 'WARN' : 'FAIL'} ${r.id}${r.why ? `: ${r.why}` : ''}`);
     if (!r.ok && r.failures?.length) log(`[game-gates] failing tests in ${r.id}: ${JSON.stringify(r.failures)}`);
-    // 2.65.3 (B-43): the failing test files, for a red merge train's focused re-checks (harness/train-focus.mjs).
     if (!r.ok && r.failingFiles?.length) log(`[game-gates] failing test files in ${r.id}: ${JSON.stringify(r.failingFiles)}`);
-    // 2.72.0 (a): files that timed out and passed alone at low load (read by run-gates and the train: timeoutFlakesFromLog).
     if (r.timeoutFlake?.length) log(`[game-gates] timeout-flake in ${r.id}: ${JSON.stringify(r.timeoutFlake)}`);
   }
   for (const s of skipped) log(`[game-gates] SKIP ${s.id}: ${s.why}`);
-  // 2.77.3 (C2b, B-108): e2e/browser tests that start a server on a fixed port with strictPort collide when two verifies
-  // run them at once. Advisory only (never a FAIL, no row): run-gates shows these WARN lines even on a passing check.
+  // E2E/browser tests that start a server on a fixed port with strictPort collide when two verifies run them at once.
+  // Advisory only (never a FAIL, no row): run-gates shows these WARN lines even on a passing check.
   if (game?.root && rows.length && !process.env.STUDIO_GATE_FOCUS) { try { const { fixedPortWarnings } = await import('./test-ports.mjs'); for (const l of fixedPortWarnings(REPO_ROOT, [game.root])) log(l); } catch {} }
-  // 2.78.2 (f): test files outside the perf tests that assert on wall-clock time (harness/test-timing.mjs). Advisory only.
+  // Test files outside the perf tests that assert on wall-clock time (harness/test-timing.mjs). Advisory only.
   if (game?.root && rows.length && !process.env.STUDIO_GATE_FOCUS) { try { const { timingWarnings } = await import('./test-timing.mjs'); for (const l of timingWarnings(REPO_ROOT, [game.root], { perfGlobs: perfTestsOf(), gameRoot: game.root })) log(l); } catch {} }
   if (!rows.length && !skipped.length) log(`[game-gates] no studio game set${game ? '' : ' (or it is a cartridge)'}; the cartridge gates cover it`);
   const failed = rows.filter((r) => !r.ok && r.required);
@@ -820,11 +795,11 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  applyGateEnv(); // 2.71.1 (B): every git call and check this run makes, as run-gates does
+  applyGateEnv();
   const a = process.argv.slice(2);
   const paths = String(a.includes('--paths') ? a[a.indexOf('--paths') + 1] || '' : process.env.STUDIO_GATE_PATHS || '').split(',').filter(Boolean);
   const ch = String(a.includes('--changed') ? a[a.indexOf('--changed') + 1] || '' : process.env.STUDIO_GATE_CHANGED || '').split(',').filter(Boolean);
-  // 2.58.5 (H-3): --plan prints which checks would run and the scope a pass covers, running nothing.
+  // --plan prints which checks would run and the scope a pass covers, running nothing.
   if (a.includes('--plan')) {
     const p = await planGameGates({ paths, changed: ch.length ? ch : null });
     console.log(JSON.stringify({ game: p.game?.name || null, gates: [...p.gates.map((g) => g.id), ...(p.layout ? ['game:layout'] : []), ...p.engine.map((e) => e.id)], skipped: p.skipped, scope: p.scope }));
@@ -832,7 +807,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   }
   const t0 = Date.now();
   const res = await runGameGates({ paths, changed: ch.length ? ch : null, incoming: readIncoming(), quiet: a.includes('--json') });
-  // 2.65.0: the uniform job.done (harness/jobs.mjs) for a run of the game's checks.
+  // The uniform job.done (harness/jobs.mjs) for a run of the game's checks.
   try { (await import('./jobs.mjs')).jobDone({ kind: 'game-gates', id: res.game || null, code: res.ok ? 0 : 1, ms: Date.now() - t0, tail: res.failed.map((f) => `${f.id}: ${String(f.why || '').slice(0, 160)}`).join(' | '), task: process.env.STUDIO_JOB_TASK || null, extra: { ran: res.rows.map((r) => r.id), skipped: res.skipped.map((x) => x.id) } }); } catch {}
   if (a.includes('--json')) console.log(JSON.stringify(res));
   process.exit(res.ok ? 0 : 1);

@@ -126,6 +126,64 @@ half as much machine time as the land runs. Five settings, all optional, in the 
   `STUDIO_ENGINE_RULES_FULL=1` forces a full run. **A focus-mode green is weaker than a full one**: a change in one
   system can break another system's test, which a focused run does not run; the full run every `fullEveryHours` is
   the backstop, and a land script that reads `STUDIO_RULES_MODE` can run the full tests itself after a focused green.
+- `focus.ignore` (2.84): a list of regexes; a changed path matching any of them is left out before the "does every
+  path map?" test (Play Mode tests, UI files: what the rules tests cannot read), so it no longer forces the full
+  command on the whole batch. When only ignored paths changed, the batch runs `smoke` alone (focus), or with no `smoke`
+  the target's kept result answers (as when nothing under `paths` changed). A pattern that is not a valid regex is
+  skipped with a log line; `rules show` lists the patterns. `play.focus.ignore` does the same for the Play Mode focus
+  (only ignored paths: `smoke` alone, or a full play stage). **An ignore pattern that is too wide hides a real change
+  from the rules check**: a rules file it matches lands without its tests being run, so match folders, not suffixes.
+- `focus.split` (2.84, B-134): `true` runs one command per filter group (each mapped filter, then `smoke`) in
+  sequence instead of one joined command, so one test process holds one system's data at a time. Green when all are,
+  red on the first red (its output kept); the result and the `engine.rules` event carry each group's seconds.
+- `maxLanes` (2.84, B-134; default 0, off): a batch with more lanes is checked in consecutive slices of that many,
+  each merged on the same target. A red slice is narrowed within itself, so only its lanes can be refused; one
+  `engine.rules` event per slice. The whole batch was never one tree in the check, so a sliced check never sends
+  `STUDIO_RULES_GREEN`: it only refuses lanes before they cost a land run.
+
+**Play Mode focus (2.84).** The Play Mode stage became the longest stage of a land (20 to 40 minutes). The same idea,
+as a hint the land script may use: `engines.<x>.play.focus`.
+
+```json
+{ "play": { "focus": { "map": [ { "match": "^Assets/Scripts/([A-Za-z]+)/", "filter": "Game.PlayTests.$1" } ],
+                       "smoke": "Game.PlayTests.Smoke", "join": ";" } } }
+```
+
+When every path the batch changes (the same list the rules focus reads: the batch as it would land, against the target)
+matches a `map` entry, the land command gets `STUDIO_PLAY_MODE=focus` and `STUDIO_PLAY_FILTER` with the matching
+entries' filters plus `smoke`, de-duplicated, joined by `join` (default `;`; `$1`..`$9` as in the rules focus). For
+Unity it also gets `STUDIO_UNITY_PLAYMODE_ARGS`, set to `-testFilter "<filter>"` (the Unity Test Framework's command-line filter;
+UNVERIFIED on a real editor from the harness's side, as the Edit Mode plan is). Otherwise (a path no entry maps, no
+`play.focus`, or a full land run with `STUDIO_LAND_FULL=1`) the engine train sets `STUDIO_PLAY_MODE=full` and neither
+of the other two. A filter with a character outside letters, digits, space and `_ . ; | ~ = ! ( ) * -` is refused (a
+full play stage, said in the train's log), so nothing odd reaches a command line. The retry of a red play stage runs with
+the same filter. The `engine.land` event and the train's result carry `playMode` and `playFilter`. **A focused Play
+Mode run is a weaker check than a full one**: a change in one system can break another system's scene test, which a
+focused run does not run; the daily full land run is the backstop.
+
+**Play Mode skip (2.84).** `play.focus.skip`: a list of regexes. When every path the batch changes (after `ignore`)
+matches one, the land command gets `STUDIO_PLAY_MODE=skip` and no filter: a pure port of rules code, judged by its
+.NET and Edit Mode tests. **What it gives up**: a skipped batch runs no Play Mode test at all, so a rules change that
+breaks a scene, a prefab or a runtime script that reads those rules lands unseen until the next full land run. Never on
+a full land run (`STUDIO_LAND_FULL=1`), which is the backstop: keep it daily. `engine.land` says `playMode: 'skip'`; the
+scorecard's Play stage line counts skipped runs.
+
+**What a land script should honour.** Every variable the harness sets for the land command (all optional to use):
+
+| Variable | What to do with it |
+| --- | --- |
+| `STUDIO_RULES_GREEN` | `1`: the rules check passed on exactly this batch and target; the script may skip its own copy of those tests. |
+| `STUDIO_RULES_MODE` | `focus` or `full`: how that green was reached; after a `focus` green the script may still run the full rules tests. |
+| `STUDIO_LAND_FULL` | `1`: the daily full run; skip nothing, ignore every shortcut. |
+| `STUDIO_UNITY_EDITMODE_ARGS` | Edit Mode arguments to add after the .NET tests passed (`SKIP`: no Edit Mode run needed). Unset on a full run. |
+| `STUDIO_PLAY_MODE` | `full`, `focus` or `skip`: run every Play Mode test, only the filter, or none. |
+| `STUDIO_PLAY_FILTER` | With `focus`: the Play Mode test filter (`;`-joined). |
+| `STUDIO_UNITY_PLAYMODE_ARGS` | For Unity: `-testFilter "<filter>"` to add to the Play Mode start, as is (focus, or a retry's failed tests). |
+| `STUDIO_LAND_ONLY` | `compile`: merge the sources into the gate worktree, compile, exit 0 (compiles) or non-zero with the compiler's error lines; land nothing, and put the worktree back. |
+| `STUDIO_LAND_RETRY` | `1`: this run repeats a red one; the branches are the same. |
+| `STUDIO_LAND_RETRY_STAGE` | The stage that was red (`play`, `edit`, ...). |
+| `STUDIO_LAND_RETRY_TESTS` | The failed tests' full names joined by `;`: re-run just those on the merged tree; land if they pass. |
+| `STUDIO_LAND_RESULT` | A file to write the stage report to (`stages`/`gates`, and a `failures` list of test full names). |
 
 ```bash
 npm run engine -- rules show                         # the command, where it comes from, env names, paths, focus
@@ -152,6 +210,37 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
   search by land runs goes on as before. A compile error names no test: then the file the compiler names
   (`Assets/Tests/Foo.cs(12,5): error CS0117`) is the evidence, and the one lane that changes it is run without.
   `STUDIO_ENGINE_BLAME_EVIDENCE=off` turns it off.
+  2.84: when the class names no single lane, the failing test's namespace (its full name less class and method) is
+  the evidence: the one lane that changes a test file (`*Tests.cs`, or a path with `/Tests/`) declaring that
+  namespace, or a file named after the test's class. Still exactly one lane, or the search by land runs. The
+  `evidence` event and the hand-back name the tests (up to five), the suspect, the files and the red stage; a `bisect`
+  event says which tests were red.
+- **Test names from the results files (2.84).** A land script that writes NUnit XML and prints only a summary names no
+  test in its output. `engines.<x>.results` lists the result files it leaves (relative to the gate worktree, or
+  absolute; `*` within one path segment); for Unity the default is `TestResults*.xml`, `Logs/*results*.xml` and
+  `artifacts/*.xml` in the gate worktree. After a red run the newest of them (20 files, 20 MB at most) that were
+  written after the run started are read: every `<test-case>` with `result="Failed"` or `result="Error"`. A
+  `"failures"` list in the stage report (`STUDIO_LAND_RESULT`) counts too.
+- **Retry only what failed (2.84).** When the red stage is a retry stage and the failing tests are known, the retry is
+  told to re-run only those: `STUDIO_LAND_RETRY=1`, `STUDIO_LAND_RETRY_STAGE`, `STUDIO_LAND_RETRY_TESTS` (names joined
+  by `;`) and, for a Unity play stage, `STUDIO_UNITY_PLAYMODE_ARGS=-testFilter "<names>"` in place of any focus filter.
+  A script that ignores them runs everything again, as before. A name with a character outside the Play Mode filter's
+  safe set (a parameterized case's comma or quote), or more than 50 names: the whole land runs again.
+  `engines.<x>.flakyTests` (full names, or prefixes ending in `*`): a red run whose ONLY failures are on that list is
+  retried the same way whatever its stage. The `flaky` event carries the tests; the scorecard counts them.
+- **Compile first (2.84).** `engines.<x>.compileFirst: true`: before a group's land run the train runs the same land
+  command once more with `STUDIO_LAND_ONLY=compile` (and every other variable it would get), up to
+  `engines.<x>.compileTimeoutMin` (10) minutes. A red compile is handled as a red land run (the compiler's file names
+  the lane) and costs minutes, not a land run; a green one goes on to the land run, whose stage report then begins with
+  `compile`. Events `task.train.<x>.compile` (pass/red, seconds). A script that answers with an error or a not-run code,
+  or lands the branches anyway, is noted once (`compile` event, status `ignored`) and not asked again by that train.
+  Not run again for a group, or a lone lane, that already compiled in this train, nor before a retry.
+- **A land killed from outside (2.84, B-130).** An exit code in `engines.<x>.killedExits` (default `[1073807364,
+  3221225786]`: 0x40010004, a Windows reboot, and 0xC000013A) or a SIGKILL/SIGTERM the harness did not send by a time-out
+  is status `killed`. The train tries it once more after `STUDIO_ENGINE_KILLED_RETRY_SEC` (60) seconds
+  (`task.train.<x>.killed_retry`); a second kill ends the train with the lanes still queued and nobody handed back. When
+  `.studio/train/<x>-cancel.json` names the train (a person's cancel), nothing is retried: the lanes stay queued and a
+  `task.train.<x>.cancelled` event is written. The train only reads that file.
 - **No blame by elimination.** A lane that the search by land runs leaves over ("everything before it was green") is
   run by itself before it is handed back. If it passes, it lands and nobody is handed back.
 - **Handed back means out.** A lane the train hands back leaves the train's record at once, so `task start` on its
@@ -215,6 +304,9 @@ fall back to a full Edit Mode run when the filtered run finds no test, and keep 
 | Minutes spent in red runs | the share of land-run minutes that ended red or in a conflict; the median length of a passing and of a red run |
 | Stages | median minutes per stage, and how many red runs failed there first (from the stage report) |
 | Rules check before the land run | batches checked, runs, minutes, and lanes refused before they cost a land run |
+| Branches per land run (2.84) | the median number of tasks in a land run that ran (pass, red or conflict), and how many runs |
+| Play stage (2.84) | land runs whose play stage was focused or full (from `playMode` on `engine.land`; older runs count as full), and the median minutes of each; skipped runs (`play.focus.skip`) when there are any |
+| Flaky retries (2.84) | retries that passed (`task.train.<x>.flaky`), and the test seen most in them (`top: <test> ×k`) |
 
 The baseline from the crew's log (2026-10-31 to 2026-11-08): 67 land runs, 11 lanes landed, 3,524 machine minutes;
 320 minutes per landed lane; 16.4% passed; 25.4% refused or not run (495 minutes waiting, 16 of 17 for free memory);
@@ -226,9 +318,45 @@ done work by what it serves. It measures the link, not the quality: a pillar wit
 untraced share, is the Director's and the owner's signal. The same log: 57.3% of 358 done tasks traced, 7.8% asked
 for by the owner, 92.2% proposed by agents.
 
+## The editor service (2.84, untested on a real editor)
+
+One harness-owned engine editor that stays open, used two ways. **Untested on a real editor**: the harness side is
+checked against a stand-in editor (`qa/fixtures/fake-editor.mjs`); the Unity side
+(`engine/_unity/Assets/Editor/StudioService/StudioEditorService.cs`, its own Editor-only assembly) has never been
+compiled. Everything is off by default, and any failure falls back to today's cold path.
+
+- **Warm land runs** (`engines.<x>.warm: "land"`, or `true`): the engine train opens the `land` instance on the land
+  tree (`gateWorktree`, else `cwd`) before its first land run and keeps it between runs. When it is healthy the land
+  command gets `STUDIO_EDITOR_SERVICE` (the service folder) and `STUDIO_EDITOR_SERVICE_CLI` (a command line); the land
+  script may then run `node harness/editor-service.mjs request test --engine <x> --instance land --mode EditMode --results <file>`
+  instead of starting Unity (exit 3: no healthy editor, start Unity as before). Not healthy after one restart: the
+  variables are not set and `engine.warm.fallback` says why. The land script still owns the land; see
+  `docs/examples/land-warm.md`. An editor of the service is not counted as a heavy program outside the lock:
+  the default of `STUDIO_HEAVY_IGNORE_ARGS` matches `-studioService` (a studio that set its own value adds `|-studioService`).
+- **The agents' queue** (`engines.<x>.service.check: true`): `npm run editor -- check [--lane <agent>] [--branch b]
+  [--capture <scene>[:<camera>]] [--wait]` from any session queues a compile (and a capture) of that lane's branch,
+  one waiting request per lane. The supervisor's pass runs the oldest in the `check` instance's own checkout
+  (`engines.<x>.service.dir`, else a git worktree `.studio/editor-service/<x>-tree`), writes
+  `.studio/editor-service/out/<lane>/<head8>/result.json` and the PNGs, and emits `editor.check`. Never while that
+  engine's train runs. `npm run editor -- result` prints `file(line): code message` and the image paths.
+
+`npm run editor -- start|status|stop|request <kind>|check|result|pass`. The protocol is files in
+`<project>/Temp/StudioService/` (requests, responses, a heartbeat); the editor is started with `-studioService
+<folder>` and does nothing without it. Settings in `studio/game.json` `engines.<x>.service`: `check` (false), `dir`,
+`heartbeatSec` (5), `requestTimeoutMin` (30), `recycleAfter` (20 requests), `recycleMin` (240), `startTimeoutMin` (15),
+`graceSec` (30). A timed-out request always recycles the editor. `STUDIO_EDITOR_SERVICE=off` turns every use off.
+A project another editor has open (Unity's `Temp/UnityLockfile`) is refused; `stop` kills only the pid it started.
+
+**The first run on a PC**: `npm run editor -- start --project <a copy of the project>` and watch for the heartbeat
+(`status`); `request ping`; `request compile` with a planted compile error (errors listed, paths project-relative);
+`request test --mode EditMode --results <file>` (an NUnit file appears); `request capture --scene <scene> --out <png>`;
+a domain reload during a compile (the answer still comes); `stop` (the editor quits, the lock file goes). Then
+turn on `service.check` and run one `check` end to end, and only then `warm`.
+
 ## Untested
 
 - Everything here on a real Unity editor and on Windows beyond the pull request's checks: the self-test uses a
   made-up engine repo and stand-in commands.
 - `STUDIO_UNITY_EDITMODE_ARGS` with a real land script.
 - A live studio in native mode.
+- The editor service (above) on any real editor.

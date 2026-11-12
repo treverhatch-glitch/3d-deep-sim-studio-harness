@@ -15,6 +15,8 @@
  *   ladder  when a ladder's last milestone is half met (or it has no open milestone left), the Director gets a
  *           task to propose the next one (content, depth, polish, port) and append it to the charter
  * Tasks go through fileTask (deduplicated). STUDIO_DEV_CYCLE=off turns it off.
+ * 2.84: a regular cycle wakes a role only when the board changed since that role's last cycle session ended
+ * (harness/wake-gate.mjs, STUDIO_CYCLE_QUIET_MAX_H); the change list opens .studio/briefs/dev-cycle-<role>.md.
  *
  *   node harness/dev-cycle.mjs [--force] [--json]
  */
@@ -22,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { cycleDigest, digestHeader, gateWake, isStrongNews, readWakeGate, recordWake } from './wake-gate.mjs';
 
 const FILE = () => path.join(STUDIO_STATE_DIR, 'dev-cycle.json');
 const BRIEF = () => path.join(STUDIO_STATE_DIR, 'briefs', 'dev-cycle.md');
@@ -69,7 +72,7 @@ export async function ladderEnds() {
   return out;
 }
 
-export async function cyclePass({ now = Date.now(), force = false, events = readRecentEvents(5000), wake = true } = {}) {
+export async function cyclePass({ now = Date.now(), force = false, events = readRecentEvents(5000), wake = true, wakeFn = null } = {}) {
   if (/^off$/i.test(process.env.STUDIO_DEV_CYCLE || '')) return { ran: false, why: 'STUDIO_DEV_CYCLE=off' };
   const st = read(FILE(), {});
   const last = st.last || 0;
@@ -78,7 +81,11 @@ export async function cyclePass({ now = Date.now(), force = false, events = read
   const q = parseNextQueue();
   const open = [...q.inProgress, ...q.backlog].filter((t) => t.role === 'builder').length;
   const closed = events.some((e) => e.type === 'milestone.closed' && Date.parse(e.ts) > last);
-  const why = force ? 'asked' : closed ? 'a milestone closed' : open < Number(process.env.STUDIO_REFILL_MIN ?? 4) && now - last >= 10 * 60000 ? `the queue is low (${open} open)` : now - last >= every ? 'its regular cycle' : null;
+  // 2.84 (a2): strong news (an answer, an owner order, a phase change: wake-gate.mjs STRONG_NEWS_TYPES) makes a backed-off
+  // regular cycle due at once, not at the next STUDIO_DEV_CYCLE_MIN tick. Five minutes apart at least.
+  const backedOff = ['director', 'producer'].some((r) => Number(readWakeGate()[`cycle:${r}`]?.quiet) > 0);
+  const news = backedOff && now - last >= 5 * 60000 && events.some((e) => Date.parse(e.ts) > last && isStrongNews(e));
+  const why = force ? 'asked' : closed ? 'a milestone closed' : open < Number(process.env.STUDIO_REFILL_MIN ?? 4) && now - last >= 10 * 60000 ? `the queue is low (${open} open)` : now - last >= every || news ? 'its regular cycle' : null;
   if (!why) return { ran: false, why: `next cycle in ${Math.round((every - (now - last)) / 60000)} min` };
 
   const { fileTask, milestones, nextOpen } = await import('./producer-refill.mjs');
@@ -102,14 +109,29 @@ export async function cyclePass({ now = Date.now(), force = false, events = read
   fs.writeFileSync(BRIEF(), brief);
   fs.writeFileSync(FILE(), `${JSON.stringify({ last: now, why }, null, 2)}\n`);
   const woke = [];
+  const skipped = [];
   if (wake && process.env.STUDIO_DEV_CYCLE_WAKE !== 'off') {
     try {
-      const { wake: w } = await import('./agent.mjs');
-      for (const role of ['director', 'producer']) { const r = w(role, { why: `development cycle (${why}): read .studio/briefs/dev-cycle.md`, auto: true }); if (r.started) woke.push(r.agent); }
+      const w = wakeFn || (await import('./agent.mjs')).wake;
+      for (const role of ['director', 'producer']) {
+        // 2.84: a regular cycle wakes a role only when something changed on the board since its last cycle session ended
+        // (harness/wake-gate.mjs; at most STUDIO_CYCLE_QUIET_MAX_H hours apart). The news opens its own brief.
+        const regular = why === 'its regular cycle';
+        const gate = regular ? gateWake({ kind: 'cycle', role, fp: (since) => cycleDigest(events, { since, until: now }), now, events, fallbackSince: last, baseMs: every }) : { skip: false };
+        if (gate.skip) { skipped.push(role); continue; }
+        let file = BRIEF();
+        if (gate.fp) {
+          file = path.join(STUDIO_STATE_DIR, 'briefs', `dev-cycle-${role}.md`);
+          fs.writeFileSync(file, `${digestHeader(role, gate.fp, gate.since)}\n\n${brief}`);
+        }
+        const rel = path.relative(REPO_ROOT, file).split(path.sep).join('/');
+        const r = w(role, { why: `development cycle (${why}): read ${rel}`, auto: true, ...(gate.fp ? { note: `Development cycle: read ${rel} first; its first lines say what changed since your last cycle.` } : {}) });
+        if (r.started) { woke.push(r.agent); if (regular) recordWake({ kind: 'cycle', role, fp: gate.fp, agent: r.agent, now }); }
+      }
     } catch {}
   }
-  emitEvent({ type: 'dev.cycle', agent: 'watchdog', to: 'director', msg: `Development cycle (${why}): ${landed.length} landing(s), ${unmet.length} unmet criteria, filed ${filed.length}${woke.length ? `, woke ${woke.join(', ')}` : ''}`, meta: { filed, why } });
-  return { ran: true, why, filed, woke, brief: path.relative(REPO_ROOT, BRIEF()) };
+  emitEvent({ type: 'dev.cycle', agent: 'watchdog', to: 'director', msg: `Development cycle (${why}): ${landed.length} landing(s), ${unmet.length} unmet criteria, filed ${filed.length}${woke.length ? `, woke ${woke.join(', ')}` : ''}${skipped.length ? `, not woken (nothing changed): ${skipped.join(', ')}` : ''}`, meta: { filed, why, ...(skipped.length ? { skipped } : {}) } });
+  return { ran: true, why, filed, woke, skipped, brief: path.relative(REPO_ROOT, BRIEF()) };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {

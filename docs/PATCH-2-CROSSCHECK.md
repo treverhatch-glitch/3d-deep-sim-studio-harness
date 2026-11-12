@@ -34,8 +34,8 @@ DONE = shipped (version, commit). DONE (differently) = shipped another way, with
 | P5.5 | DONE | 2.77.0 (u): `npm run visual -- …`: fixed-camera shots, reference photos side by side, the builder's look, a review by someone else ("toyish" blocks done), shots sent to the owner. No code scores a picture. |
 | P5.6 | DONE | 2.77.0 (u): one engine table (harness/engine-tracks.mjs) for Unity, Godot or any engine. |
 | P6.1–P6.4 | DONE | 2.76.0 8a06793: the Communicator. |
-| P7.1 | DONE | 2.77.0 782d0f0: `npm run remote -- mark\|brief\|fetch`; cloud branches land only through the normal train. |
-| P7.2 | DONE | 2.77.0: docs/REMOTE-WORKERS.md says how to point it at a push-enabled remote; the train, board, locks, .studio and Unity stay local. |
+| P7.1 | REMOVED | 2.77.0 782d0f0 added remote (cloud) workers; 2.84 took them out, unused (git history keeps them). |
+| P7.2 | REMOVED | 2.77.0's remote-workers page went with them in 2.84. |
 | P8.1 | DONE (differently) | 2.76.0 00fb2d6: the write_file rule and GEMINI.md. Pipes and chains are not allowed by a rule on purpose (a chain rule lets any command through); GEMINI.md tells Gemini to run one command per call. |
 | P8.2 | DONE | 2.76.0 4281e52. |
 | P8.3 | DONE | 2.77.0 (n): agy refuses a non-Gemini model unless forced. |

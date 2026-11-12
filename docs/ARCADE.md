@@ -16,6 +16,8 @@ npm run play -- list         # saved builds; play an older one with --build <id>
 # The root redirects to the page in its own folder, so its ./main.mjs loads.
 ```
 
+`STUDIO_PLAY_PORT` is the port `npm run play` serves on (default `4610`; `--port` overrides it for one run).
+
 2.70.0: a build is also saved, with a short clip, after every merge-train landing (`harness/landing-build.mjs`,
 docs/WORK-ORGANIZATION.md); `npm run status -- --brief` and the digest name the latest. `STUDIO_LANDING_BUILD=off`
 turns that off.

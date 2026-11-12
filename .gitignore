@@ -69,3 +69,6 @@ studio/research/**/*.mp4
 studio/research/**/*.webm
 studio/research/**/*.mkv
 studio/research/**/*.vtt
+
+# 2.84: scratch copies of the Unity template for the real-editor check (scripts/unity-real.mjs)
+.unity-real/

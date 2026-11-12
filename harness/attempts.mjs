@@ -70,7 +70,7 @@ export function readAttempts(taskId) {
 export const lastAttempt = (taskId) => readAttempts(taskId).attempts.at(-1) || null;
 
 /**
- * Append one attempt. fields: { agent, endLabel ('hand-back'|'owner-only'|'claim-expired'|'done'|'breaker'|'cap'),
+ * Append one attempt. fields: { agent, endLabel ('hand-back'|'owner-only'|'claim-expired'|'done'|'breaker'|'cap'|'merge-conflict' (2.84)),
  * reasonKey, blockers, ownerOnly, mainTip?, laneHead? }. Returns the attempt, or null when the ledger is off.
  */
 export function recordAttempt(taskId, fields = {}) {
@@ -110,12 +110,21 @@ export const hasActiveAttempt = (taskId) => { const a = lastAttempt(taskId); ret
 
 /**
  * The last recorded failure attempt's signature against the signature of the current facts.
- * nowFacts: { mainTip?, holds?, done? (Set of done ids) }. Returns { same, n, since, mainTip, reasonKey }.
+ * nowFacts: { mainTip?, holds?, done? (Set of done ids), reasonKey? (2.84) }. Returns { same, n, since, mainTip, reasonKey }.
  */
 export function sameBlocker(taskId, nowFacts = {}) {
   const no = { same: false, n: 0, since: null };
   if (attemptsOff()) return no;
-  const last = lastAttempt(taskId);
+  // 2.84 (m): nowFacts.reasonKey: judge the last attempt recorded for THAT reason (a launch's merge conflict), not only the
+  // very last one (the session's own hand-back comes after it), as long as no cleared or done attempt follows it.
+  const last = nowFacts.reasonKey !== undefined ? (() => {
+    const all = readAttempts(taskId).attempts;
+    for (let i = all.length - 1; i >= 0; i -= 1) {
+      if (all[i].cleared || all[i].endLabel === 'done') return null;
+      if (all[i].reasonKey === nowFacts.reasonKey) return all[i];
+    }
+    return null;
+  })() : lastAttempt(taskId);
   if (!last || last.cleared || last.endLabel === 'done' || !last.mainTip) return no;
   const tip = nowFacts.mainTip !== undefined ? nowFacts.mainTip : gitTip(mainRoot());
   if (!tip) return { ...no, n: last.n, since: last.at };
@@ -141,3 +150,34 @@ export function eligibility(taskId, { agent = null, q, role = null, now = Date.n
   if (cap) return { kind: 'round-cap', why: cap };
   return null;
 }
+
+/**
+ * 2.84: the words `task start` prints for an eligibility verdict (held, over budget, round cap). One place, so the
+ * launcher's refusal says what `task start` would have said.
+ */
+export function startRefusalWords(taskId, v) {
+  if (!v) return '';
+  if (v.kind === 'held') return `${taskId} can't start yet: ${v.why}. Pick another task (npm run task -- next), or a person releases it.`;
+  if (v.kind === 'round-cap') return `${taskId} can't start: ${v.why}.`;
+  return `${taskId} can't start: ${v.why}`;
+}
+
+/**
+ * 2.84: would `task start <taskId>` by `agent` (a session of `role`) be refused now? The launcher asks before it starts
+ * a session for a named task (the supervisor's picks, agent start --task): a session whose first step is refused only
+ * costs money. Work already in progress may continue (as task start: its hold does not apply). Returns
+ * { kind, why, message } or null. Never throws.
+ */
+export function startRefusal(taskId, { agent = null, role = null, q, now = Date.now(), holds, events } = {}) {
+  try {
+    const inProgress = Boolean(q?.inProgress?.some((t) => t.id === taskId));
+    let v = eligibility(taskId, { agent, q, role, now, holds, events });
+    if (v?.kind === 'held' && inProgress) {
+      const b = overBudget(taskId, { events, now });
+      const cap = !b.over && agent ? capRefusal(taskId, agent, { events, now }) : '';
+      v = b.over ? { kind: 'over-budget', why: b.why } : cap ? { kind: 'round-cap', why: cap } : null;
+    }
+    return v ? { ...v, message: startRefusalWords(taskId, v) } : null;
+  } catch { return null; }
+}
+

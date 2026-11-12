@@ -143,7 +143,8 @@ export async function checkWave({ id = null, by, reportsDir = path.join(REPO_ROO
   return { ok: true, wave, result: 'failed' };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+// 2.84: the command-line part is an async function, not a top-level await: an import cycle through a top-level await ends the process with exit 13.
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)))(async () => {
   const argv = process.argv.slice(2);
   const i = argv.indexOf('--by');
   const by = i >= 0 ? argv[i + 1] : null;
@@ -187,4 +188,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   } else {
     console.log('Usage: npm run wave -- <command>\n\n  status\n  on|off --by <name>\n  ready --by <name>\n  check [W-n] --by <name>');
   }
-}
+})().catch((e) => { console.error(e?.stack || String(e)); process.exit(1); });

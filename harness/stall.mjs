@@ -1,30 +1,23 @@
 #!/usr/bin/env node
 /**
- * harness/stall.mjs — 2.30o: end a session that has stopped producing work.
+ * harness/stall.mjs — end a session that has stopped producing work.
  *
- * In the Marina run a Director planning session read about 2M tokens, wrote about 11.5k, ran 56 minutes
- * and landed nothing: session-cap only counts context and turns, so a session that keeps re-reading never
- * tripped it. Now every heartbeat (and every watchdog pass) asks:
+ * session-cap only counts context and turns, so a session that keeps re-reading never tripped it. Every heartbeat (and
+ * every watchdog pass) now asks:
  *   - progress: did the session write a file, commit, or change a task's state since its last progress?
  *     (fingerprint = HEAD + `git status --porcelain` of its working copy + its task.* events)
- *   - stall: no progress for STUDIO_STALL_MIN minutes (15; Producer/Director/planner: STUDIO_STALL_PLAN_MIN, 8)
- *   - burn: over the last STUDIO_STALL_RATIO_WINDOW_TOKENS (300000) input tokens the input:output ratio
- *     passed STUDIO_STALL_RATIO (120:1) with no progress in that window. 2.77.3 (B-109): the input counted here is
- *     uncached input plus cache creation only: a cache read is the same context re-read on every turn (an Opus turn
- *     re-reads ~100k tokens), not new work, and it ended a session after 4 min ("read 2169593, wrote 267"). And no burn
- *     verdict in the first STUDIO_STALL_GRACE_MIN (15) minutes of a session. STUDIO_STALL_RATIO=0 turns the check off.
- *   - wall clock: the session ran longer than STUDIO_SESSION_MAX_MIN (90; planning roles
- *     STUDIO_SESSION_PLAN_MAX_MIN, 25)
- * A stalled session is ended and its task handed back with the reason (event session.stall). 0 turns a
- * limit off; STUDIO_STALL=off turns the whole check off.
- * 2.73.1 (B-68): a session waiting on its own verify (npm run verify, detached or in-process: .studio/verify-running/
- * <agent>.json or a full*.json it owns, with a live process and no result yet) or on its own background `task done`
- * (.studio/done-running/, any task, by agent) is busy, not stalled: the stall clock is held and the wall-clock cap
- * may run over while it waits. Bounded: a verify counts for at most STUDIO_STALL_VERIFY_MAX_MIN (60) minutes from its
- * start (a done for STUDIO_DONE_RUNNING_MAX_MIN, 90), and the wall-clock cap stretches by at most
- * STUDIO_STALL_VERIFY_MAX_MIN in all; after that the clocks run as before, so a hung verify can't keep a session alive.
- * 2.64.0: each observation also runs the drift checks (driftCheck below: the same gate failing the same way 3 times,
- * verify runs with no new diff, edits outside the task's lane and claims). Those only raise a Check to the Producer.
+ *   - stall: no progress for STUDIO_STALL_MIN minutes (15; Producer/Director/planner: STUDIO_STALL_PLAN_MIN: 8, or 20 for
+ *     a top-tier or slow-thinking model; see planStallFor)
+ *   - burn: over the last STUDIO_STALL_RATIO_WINDOW_TOKENS (300000) input tokens the input:output ratio passed
+ *     STUDIO_STALL_RATIO (120:1) with no progress in that window. Input counts uncached input plus cache creation only
+ *     (a cache read is context re-read, not new work). None in the first STUDIO_STALL_GRACE_MIN (15) minutes.
+ *     STUDIO_STALL_RATIO=0 turns the check off.
+ *   - wall clock: longer than STUDIO_SESSION_MAX_MIN (90; planning roles STUDIO_SESSION_PLAN_MAX_MIN, 25)
+ * A stalled session is ended and its task handed back with the reason (event session.stall). 0 turns a limit off;
+ * STUDIO_STALL=off turns the whole check off. A session waiting on its own verify or `task done` is busy, not stalled
+ * (busyWait: the stall clock is held and the wall-clock cap stretches, bounded by STUDIO_STALL_VERIFY_MAX_MIN (60) for a
+ * verify and STUDIO_DONE_RUNNING_MAX_MIN (90) for a done, so a hung verify can't keep a session alive). Each
+ * observation also runs the drift checks (driftCheck below), which only raise a Check to the Producer.
  *
  *   node harness/stall.mjs check [--json]     every running session's stall state and drift Checks (read-only)
  */
@@ -33,20 +26,44 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents, boardRoot } from './event.mjs';
+import { tierOf } from './model-tiers.mjs';
 import { doneRunning } from './busy.mjs';
 import { pidAlive } from './proc-identity.mjs';
 import { laneOf, laneList } from './task-hold.mjs';
 import { listLocks } from './lock.mjs';
 import { boardStates } from './train-deps.mjs';
+import { mainOf, snapshotDirty, notTheSessions } from './drift-baseline.mjs';
 
 import { PLANNING_ROLES } from './planning-roles.mjs';
 export { PLANNING_ROLES };
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
-export function stallLimits(role, env = process.env) {
+/** The no-progress limit for a planning session on this model, and why: STUDIO_STALL_PLAN_MIN, else the pool's "stallMin" in studio/models.json (matched by model or "match"), else 20 for a top-tier model (slow to its first write), else 8. { min, why } */
+export const SLOW_THINKER_STALL_MIN = 20;
+export function planStallFor(model, { env = process.env, root = boardRoot() } = {}) {
+  const set = String(env.STUDIO_STALL_PLAN_MIN ?? '').trim();
+  if (set !== '' && Number.isFinite(Number(set))) return { min: Number(set), why: 'STUDIO_STALL_PLAN_MIN is set' };
+  const m = String(model || '').trim().replace(/^models\//, '');
+  if (m && m !== 'unknown') {
+    try {
+      const pools = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'models.json'), 'utf8'))?.pools || {};
+      for (const [name, p] of Object.entries(pools)) {
+        if (!p || !Number.isFinite(Number(p.stallMin)) || p.stallMin === null || p.stallMin === '') continue;
+        let hit = String(p.model || '').toLowerCase() === m.toLowerCase();
+        if (!hit && p.match) { try { hit = new RegExp(p.match, 'i').test(m); } catch { hit = false; } }
+        if (hit) return { min: Number(p.stallMin), why: `studio/models.json pool "${name}" sets stallMin ${Number(p.stallMin)} for ${m}` };
+      }
+    } catch { /* no models.json: the tier decides */ }
+    if (tierOf(m) === 'top') return { min: SLOW_THINKER_STALL_MIN, why: `${m} is a top-tier model, which thinks long before its first write` };
+  }
+  return { min: 8, why: m && m !== 'unknown' ? `the default for a planning session (${m} is not a slow-thinking model)` : 'the default for a planning session' };
+}
+export function stallLimits(role, env = process.env, model = null) {
   const plan = PLANNING_ROLES.has(String(role || '').toLowerCase());
+  const pl = plan ? planStallFor(model, { env }) : null;
   return {
-    stallMin: plan ? num(env.STUDIO_STALL_PLAN_MIN, 8) : num(env.STUDIO_STALL_MIN, 15),
+    stallMin: plan ? pl.min : num(env.STUDIO_STALL_MIN, 15),
+    stallWhy: plan ? pl.why : (String(env.STUDIO_STALL_MIN ?? '').trim() !== '' ? 'STUDIO_STALL_MIN is set' : 'the default for a session'),
     maxMin: plan ? num(env.STUDIO_SESSION_PLAN_MAX_MIN, 25) : num(env.STUDIO_SESSION_MAX_MIN, 90),
     ratio: num(env.STUDIO_STALL_RATIO, 120),
     ratioWindow: num(env.STUDIO_STALL_RATIO_WINDOW_TOKENS, 300000),
@@ -56,11 +73,10 @@ export function stallLimits(role, env = process.env) {
 }
 
 /**
- * 2.73.1 (B-68): what the session is waiting on that it started itself, or null: its own running verify (the detached
- * run's record .studio/verify-running/<agent>.json with no result for its runId and a live host process, or a
- * full*.json in-process record it owns with a live pid) or its own background task done (.studio/done-running/<task>.json
- * naming it, or its task's). { kind: 'verify'|'task done', since, pid, file }. A verify older than
- * STUDIO_STALL_VERIFY_MAX_MIN (60) minutes, or a done past STUDIO_DONE_RUNNING_MAX_MIN (90), doesn't count.
+ * What the session is waiting on that it started itself, or null: its own running verify (.studio/verify-running/<agent>.json
+ * with no result for its runId and a live host, or an in-process full*.json it owns with a live pid) or its own
+ * background task done (.studio/done-running/<task>.json). { kind: 'verify'|'task done', since, pid, file }. A verify
+ * older than STUDIO_STALL_VERIFY_MAX_MIN, or a done past STUDIO_DONE_RUNNING_MAX_MIN, doesn't count.
  */
 export function busyWait(session, { dir = STUDIO_STATE_DIR, now = Date.now(), env = process.env, alive = pidAlive } = {}) {
   const agent = String(session?.agent || '');
@@ -139,28 +155,22 @@ export function progressFingerprint(agent, cwd = REPO_ROOT, events = readRecentE
  * Pure verdict. s = { role, startedAt, lastProgressAt, tokensIn, tokensOut, windowIn, windowOut }
  * (window* = tokens since the last progress). Returns { stalled, kind, why }.
  */
-export function stallVerdict(s, now = Date.now(), lim = stallLimits(s.role)) {
+export function stallVerdict(s, now = Date.now(), lim = stallLimits(s.role, process.env, s.model)) {
   const ran = (now - Date.parse(s.startedAt)) / 60000;
   const quiet = (now - Date.parse(s.lastProgressAt || s.startedAt)) / 60000;
-  // 2.73.1 (B-68): waiting on its own verify or task done (s.busy, set by observe) stretches the wall-clock cap, by at
-  // most STUDIO_STALL_VERIFY_MAX_MIN in all.
+  // s.busy (set by observe) stretches the wall-clock cap by at most STUDIO_STALL_VERIFY_MAX_MIN.
   const stretch = s.busy ? Math.max(0, num(lim.busyMaxMin, 60)) : 0;
   if (lim.maxMin > 0 && ran >= lim.maxMin + stretch) return { stalled: true, kind: 'wall-clock', why: `ran ${Math.round(ran)} min, past the ${lim.maxMin} min cap for a ${s.role} session${stretch ? ` (+${stretch} min while it waits on its own ${s.busy.kind}, STUDIO_STALL_VERIFY_MAX_MIN)` : ''}` };
-  if (lim.stallMin > 0 && quiet >= lim.stallMin) return { stalled: true, kind: 'no-progress', why: `no file write, commit or task change for ${Math.round(quiet)} min (limit ${lim.stallMin})` };
+  if (lim.stallMin > 0 && quiet >= lim.stallMin) return { stalled: true, kind: 'no-progress', why: `no file write, commit or task change for ${Math.round(quiet)} min (limit ${lim.stallMin}: ${lim.stallWhy || 'the default'})`, limitMin: lim.stallMin, limitWhy: lim.stallWhy || null };
   const wi = Number(s.windowIn || 0); const wo = Number(s.windowOut || 0);
   if (lim.ratio > 0 && lim.ratioWindow > 0 && ran >= num(lim.graceMin, 15) && wi >= lim.ratioWindow && wi / Math.max(1, wo) >= lim.ratio) return { stalled: true, kind: 'read-burn', why: `read ${wi} tokens and wrote ${wo} (${Math.round(wi / Math.max(1, wo))}:1, limit ${lim.ratio}:1) with no progress` };
   return { stalled: false, kind: null, why: '', ranMin: Math.round(ran), quietMin: Math.round(quiet) };
 }
 
-/**
- * One observation for a running session (called from the launcher's heartbeat and the watchdog).
- * tokens = { in, out } so far. Updates .studio/stall/<agent>.json and returns the verdict.
- */
+/** One observation for a running session (heartbeat, watchdog); tokens = { in, out } so far. Updates .studio/stall/<agent>.json, returns the verdict. */
 export function observe(session, { tokens = { in: 0, out: 0 }, cwd = REPO_ROOT, now = Date.now(), events } = {}) {
-  // 2.64.0: the drift checks ride the same observation (heartbeat and watchdog). They only raise Check events.
-  // At most once per STUDIO_DRIFT_EVERY_S (120 s) per session, like the watchdog's pass: each check runs git (status,
-  // log) synchronously, and on Windows a heartbeat that ran them every beat held the launcher up (CI #49: sessions
-  // ended late, a supervisor test's lanes never started).
+  // Drift checks ride this observation, at most once per STUDIO_DRIFT_EVERY_S (120 s) per session: they run git
+  // synchronously, and on Windows every beat held the launcher up.
   const every = Number(process.env.STUDIO_DRIFT_EVERY_S ?? 120) * 1000;
   let driftFresh = false;
   try { driftFresh = readDrift(session.agent)?.startedAt === session.startedAt && now - fs.statSync(driftFile(session.agent)).mtimeMs < every; } catch {}
@@ -172,24 +182,20 @@ export function observe(session, { tokens = { in: 0, out: 0 }, cwd = REPO_ROOT, 
   const fp = progressFingerprint(session.agent, cwd, events);
   const prev = readStall(session.agent);
   const fresh = !prev || prev.startedAt !== session.startedAt;
-  // 2.77.3 (B-109): the burn ratio counts uncached input + cache creation (tokens.fresh from logTokens), not cache reads.
+  // The burn ratio counts uncached input + cache creation (tokens.fresh from logTokens), not cache reads.
   tokens = { ...tokens, in: tokens.fresh ?? tokens.in };
-  let s = fresh ? { agent: session.agent, role: session.role, startedAt: session.startedAt, fp, lastProgressAt: session.startedAt, baseIn: 0, baseOut: 0 } : prev;
-  // 2.76.0 (B-83, the crew's W-0070): fewer tokens than the last observation means the count started over (a new Claude
-  // session inside this launcher run: logTokens counts only the newest one). The window starts again from here, so the
-  // old session's base can neither kill the new one nor hide a real burn behind a base it never reaches. The
-  // no-progress clock is kept (the crew's local patch reset it to the session's start, which could end a long session
-  // on its next beat).
+  let s = fresh ? { agent: session.agent, role: session.role, model: session.model || null, startedAt: session.startedAt, fp, lastProgressAt: session.startedAt, baseIn: 0, baseOut: 0 } : prev;
+  // Fewer tokens than last time means the count started over (a new Claude session in this launcher run): restart the
+  // window so the old base neither kills the new session nor hides a burn. The no-progress clock is kept.
   if (!fresh && Number(tokens.in) < Number(prev.tokensIn || 0)) s = { ...s, baseIn: Number(tokens.in) || 0, baseOut: Number(tokens.out) || 0, recounted: new Date(now).toISOString() };
-  // 2.30q (#6): a session waiting on its own task done (gates, landing) is busy, not stalled. 2.73.1 (B-68): so is one
-  // waiting on its own verify, and a done of any task it runs (busyWait above, bounded by STUDIO_STALL_VERIFY_MAX_MIN).
+  // Waiting on its own task done or verify is busy, not stalled (busyWait).
   let doing = null;
   try { doing = busyWait(session, { now }); } catch { doing = null; }
   if (!fresh && (fp !== prev.fp || doing)) s = { ...s, fp, lastProgressAt: new Date(now).toISOString(), baseIn: tokens.in, baseOut: tokens.out };
-  // While it waits, the wall-clock cap stretches (stallVerdict): never past the cap + STUDIO_STALL_VERIFY_MAX_MIN.
   s.busy = doing ? { kind: doing.kind, since: doing.since, pid: doing.pid, file: doing.file } : null;
   s.tokensIn = tokens.in; s.tokensOut = tokens.out;
   s.windowIn = tokens.in - (s.baseIn || 0); s.windowOut = tokens.out - (s.baseOut || 0);
+  if (!s.model && session.model) s.model = session.model; // a planning session's limit follows its model
   const v = stallVerdict(s, now);
   if (!v.stalled && s.busy) v.waiting = `on its own ${s.busy.kind} (pid ${s.busy.pid}, since ${String(s.busy.since || '').slice(11, 16)})`;
   s.verdict = v;
@@ -197,11 +203,7 @@ export function observe(session, { tokens = { in: 0, out: 0 }, cwd = REPO_ROOT, 
   return v;
 }
 
-/**
- * 2.76.0 (B-83): the lines of the newest Claude session in a log (stream-json lines carry "session_id"). A log that
- * holds two sessions (a second Claude process in one launcher run, a wrapper that restarts it) is cut to the last one;
- * lines without a session id (the launcher's own, another tool's) are kept. A log with no session id is returned whole.
- */
+/** The newest Claude session's lines of a log ("session_id" in stream-json); lines without an id are kept. */
 export function newestSessionPart(log) {
   const text = String(log || '');
   const ids = [...text.matchAll(/"session_id"\s*:\s*"([^"]+)"/g)];
@@ -211,11 +213,7 @@ export function newestSessionPart(log) {
   return text.split('\n').filter((l) => !/"session_id"\s*:/.test(l) || l.includes(`"${id}"`)).join('\n');
 }
 
-/**
- * 2.76.0 (B-83): the part of an agent log this session wrote: from byte `from` (the log's size when the session
- * started, recorded as the session's logFrom) to the end, at most `bytes` of its tail. The log is appended to across
- * sessions under one name, so the whole file counted the earlier sessions' tokens too. Never throws ('' on error).
- */
+/** The part of an agent log this session wrote: from byte `from` (its logFrom; the log is appended to across sessions) to the end, at most `bytes` of the tail. '' on error. */
 export function readLogFrom(file, from = 0, bytes = 2 * 1024 * 1024) {
   try {
     const size = fs.statSync(file).size;
@@ -229,13 +227,12 @@ export function readLogFrom(file, from = 0, bytes = 2 * 1024 * 1024) {
   } catch { return ''; }
 }
 
-/** 2.76.0 (B-83): a new session under this name starts with no stall record (the last session's is dropped). */
+/** A new session under this name starts with no stall record. */
 export function resetStall(agent) {
   try { clearStall(agent); } catch { /* a guard, never a crash */ }
 }
 
-/** Cumulative tokens from a stream-json log (each assistant message's usage), for a live session. 2.76.0 (B-83): only
- * the newest Claude session's lines count (newestSessionPart). */
+/** Cumulative tokens from a stream-json log, newest Claude session only. */
 export function logTokens(log) {
   let tin = 0; let tfresh = 0; let tout = 0; const seen = new Set();
   for (const l of newestSessionPart(log).split(/\r?\n/)) {
@@ -251,16 +248,11 @@ export function logTokens(log) {
     tin += plain + (u.cache_read_input_tokens || u.cached_input_tokens || 0);
     tout += u.output_tokens ?? u.completion_tokens ?? 0;
   }
-  // in = everything read (as before); fresh = without cache reads, which is what the read-burn ratio uses (2.77.3, B-109).
+  // in = everything read; fresh = without cache reads, which the read-burn ratio uses.
   return { in: tin, fresh: tfresh, out: tout };
 }
 
-/**
- * 2.30o: an idle session ends itself. idleSince = when it last held no task (null while it holds one).
- * Any role by default (STUDIO_IDLE_EXIT_ROLES, '*'); minutes: STUDIO_IDLE_EXIT_MIN (5, 0 = off). A session that
- * writes, commits or changes a task (stall.mjs progress) is not idle, so a planning pass that is writing stays.
- * Separate from the watchdog's whole-studio idle stop: this frees one slot.
- */
+/** An idle session ends itself (this frees one slot; the watchdog's whole-studio idle stop is separate). idleSince = when it last held no task. STUDIO_IDLE_EXIT_ROLES ('*' = any), STUDIO_IDLE_EXIT_MIN (5, 0 = off). */
 export function idleVerdict({ role, startedAt, idleSince }, now = Date.now(), env = process.env) {
   const roles = String(env.STUDIO_IDLE_EXIT_ROLES ?? '*').split(',').map((x) => x.trim()).filter(Boolean);
   const min = num(env.STUDIO_IDLE_EXIT_MIN, 5);
@@ -270,49 +262,41 @@ export function idleVerdict({ role, startedAt, idleSince }, now = Date.now(), en
   return m >= min ? { exit: true, why: `no task claimed for ${Math.round(m)} min (limit ${min})` } : { exit: false, idleMin: Math.round(m) };
 }
 
-/**
- * Log a stall once per session. 2.73.2 (B-72): the launcher's heartbeat and the watchdog's pass (the supervisor's, every few
- * minutes) both end a stalled session; the watchdog's guard read the listing's "stalled" (a heartbeat-age flag, not
- * this verdict), so "Ended builder-s122" was logged and the kill tried on every pass, 4 times in 6 minutes. The first
- * caller records the end in the session's stall state (ended: { at, by, kind, why }, for this startedAt) and logs it;
- * every later call for the same session returns false and logs nothing. by: 'launcher' or 'watchdog'.
- */
+/** Log a stall once per session: the first caller (by: 'launcher' or 'watchdog') records ended: { at, by, kind, why } in the stall state and returns true; later calls return false and log nothing. */
 export function logStall(session, v, { by = 'launcher', now = Date.now() } = {}) {
   const prev = readStall(session.agent);
   const same = prev && prev.startedAt === session.startedAt;
   if (same && prev.ended) return false;
   const ended = { at: new Date(now).toISOString(), by, kind: v.kind || null, why: String(v.why || '').slice(0, 300) };
   try { writeStall(session.agent, { ...(same ? prev : { agent: session.agent, role: session.role, startedAt: session.startedAt }), ended }); } catch { /* the log below still goes out */ }
-  emitEvent({ type: 'session.stall', agent: 'watchdog', to: 'producer', task: session.task || undefined, status: 'warn', msg: `Ended ${session.agent} (${session.role}${session.task ? `, ${session.task}` : ''}): ${v.why}`, meta: { kind: v.kind, target: session.agent, role: session.role, by } });
+  emitEvent({ type: 'session.stall', agent: 'watchdog', to: 'producer', task: session.task || undefined, status: 'warn', msg: `Ended ${session.agent} (${session.role}${session.task ? `, ${session.task}` : ''}): ${v.why}`, meta: { kind: v.kind, target: session.agent, role: session.role, by, ...(v.limitMin ? { limitMin: v.limitMin, limitWhy: v.limitWhy } : {}) } });
   return true;
 }
 
-/** 2.73.2 (B-72): the stall end recorded for this session (logStall), or null. */
+/** The stall end recorded for this session (logStall), or null. */
 export function stallEndOf(agent, startedAt) {
   const st = readStall(agent);
   return st && st.startedAt === startedAt && st.ended ? st.ended : null;
 }
 
 /*
- * 2.64.0: deterministic drift checks. Per running session, three signals that it is going round in circles or off
- * its brief, each raised ONCE per session as a "Check" event to the Producer (drift.check). They never stop, kill,
- * hand back or edit anything: the Producer (or a person) looks. No model judges here: research on long-running agents
- * found a model-based progress monitor hurt structured tasks. An optional advisory hook (setDriftAdvisor, used only
- * with STUDIO_DRIFT_ADVISOR=on) may add a note to a Check that was already raised; it can't raise, stop or clear one.
+ * Deterministic drift checks. Per running session, signals that it is going in circles or off its brief, each raised
+ * ONCE per session as a "Check" event to the Producer (drift.check). They never stop, kill, hand back or edit anything,
+ * and no model judges (a model-based monitor hurt structured tasks). An optional advisory hook (setDriftAdvisor, only
+ * with STUDIO_DRIFT_ADVISOR=on) may add a note to a Check already raised; it can't raise, stop or clear one.
  *   gate-loop       the same gate failed with the same signature (gate id + its normalised output) STUDIO_DRIFT_SAME_FAIL
  *                   (3) times in the session's own verify runs
  *   verify-no-diff  STUDIO_DRIFT_SAME_DIFF (2) verify runs in a row with no change to its working copy since the verify
  *                   before (files dated after a verify or rewritten by it are "unknown", never "unchanged")
  *   out-of-scope    a file it edited (uncommitted, or committed under its own Studio-Agent trailer) outside its task's
  *                   lane and its claimed paths. No lane and no claim (the whole game) is not judged.
- * 2.65.0 (crew feedback 5) adds two:
  *   no-heartbeat      listed running, but its record has no heartbeat at all STUDIO_DRIFT_NOHEARTBEAT_MIN (5) minutes
- *                     after it started (a session whose tool never started, e.g. not on PATH)
- *   borrowed-commits  its lane holds commits of another OPEN task's unlanded lane (it merged that lane wholesale, or
- *                     carries commits tagged Studio-Task: <that task>): its own work now depends on unlanded work
+ *                     after it started (its tool never started, e.g. not on PATH)
+ *   borrowed-commits  its lane holds commits of another OPEN task's unlanded lane (merged wholesale, or tagged
+ *                     Studio-Task: <that task>): its work now depends on unlanded work
  * STUDIO_DRIFT=off turns them off. State: .studio/drift/<agent>.json.
  */
-// Files the harness writes for any task (the board, hand-offs, notes), and regression replays: never "out of scope".
+// Files the harness writes for any task, and regression replays: never "out of scope".
 const DRIFT_SCOPE_ALWAYS = ['studio/NEXT.md', 'studio/DONE.md', 'studio/CURRENT_TASK.md', 'studio/handoffs', 'studio/notes', 'studio/daily', 'studio/logs', 'studio/producer', 'qa/regressions'];
 const DRIFT_DIR = path.join(STUDIO_STATE_DIR, 'drift');
 const driftFile = (agent) => path.join(DRIFT_DIR, `${String(agent).replace(/[^\w.-]/g, '_')}.json`);
@@ -320,11 +304,11 @@ export function readDrift(agent) {
   try { return JSON.parse(fs.readFileSync(driftFile(agent), 'utf8')); } catch { return null; }
 }
 const advisor = { fn: null };
-/** The optional advisory hook (off unless STUDIO_DRIFT_ADVISOR=on): fn({ session, signal, detail }) -> a short note. */
+/** The advisory hook (needs STUDIO_DRIFT_ADVISOR=on): fn({ session, signal, detail }) -> a short note. */
 export function setDriftAdvisor(fn) { advisor.fn = typeof fn === 'function' ? fn : null; }
 
 const h8 = (s) => crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 12);
-/** A failure's output, normalised: numbers, times, hex ids and paths' drive letters don't make it "different". */
+/** A failure's output, normalised: numbers, times, hex ids and drive letters don't make it "different". */
 export function failureSignature(text, lines = 40) {
   const tail = String(text || '').replace(/\r/g, '').trimEnd().split('\n').slice(-lines).join('\n');
   return h8(tail.replace(/\b[0-9a-f]{7,40}\b/gi, '#').replace(/\d+(\.\d+)?/g, '#').replace(/[A-Za-z]:\\/g, '/').replace(/\\/g, '/').replace(/[ \t]+/g, ' '));
@@ -378,10 +362,7 @@ export function sessionScope(session, { events, locks = listLocks() } = {}) {
   return { task, paths: [...new Set(paths)] };
 }
 
-/**
- * One drift observation for a running session. Returns the Checks raised by this call ([] mostly). Never acts on the
- * session. env: STUDIO_DRIFT, STUDIO_DRIFT_SAME_FAIL, STUDIO_DRIFT_SAME_DIFF, STUDIO_DRIFT_ADVISOR.
- */
+/** One drift observation for a running session: the Checks raised by this call ([] mostly); never acts on it. env: STUDIO_DRIFT, STUDIO_DRIFT_SAME_FAIL, STUDIO_DRIFT_SAME_DIFF, STUDIO_DRIFT_ADVISOR. */
 export function driftCheck(session, { cwd = REPO_ROOT, now = Date.now(), events, env = process.env, locks } = {}) {
   if (/^off$/i.test(env.STUDIO_DRIFT || '') || !session?.agent || !session.startedAt) return [];
   const sameFail = num(env.STUDIO_DRIFT_SAME_FAIL, 3);
@@ -392,6 +373,11 @@ export function driftCheck(session, { cwd = REPO_ROOT, now = Date.now(), events,
   let ws = null;
   const working = () => (ws = ws || workingState(cwd));
   if (st.base === null) st.base = working().head || '';
+  // A session first seen in the main checkout: what is already dirty there is not its work. Recorded once (content
+  // hashes), only for a record that names no lane copy.
+  if ((!prev || prev.startedAt !== session.startedAt) && !session.copy?.dir) {
+    try { if (!mainOf(cwd).lane) st.dirty0 = snapshotDirty(cwd, working().files.map((f) => norm(f.file))); } catch { /* judged as before */ }
+  }
   const raised = [];
   const scope = sessionScope(session, { events, locks: locks || listLocks() });
   const raise = (signal, why, detail) => {
@@ -406,12 +392,10 @@ export function driftCheck(session, { cwd = REPO_ROOT, now = Date.now(), events,
     raised.push({ signal, why, detail });
   };
 
-  // 2.65.0: listed running (agent.mjs sessions(): running) with no heartbeat ever (the launcher's record writes one at
-  // once; a "starting" placeholder that never became a session has none).
+  // Listed running with no heartbeat ever (a "starting" placeholder that never became a session has none).
   const nobeat = num(env.STUDIO_DRIFT_NOHEARTBEAT_MIN, 5);
   const ranMin = (now - (Date.parse(session.startedAt) || now)) / 60000;
   if (nobeat > 0 && session.running === true && !session.lastBeat && ranMin >= nobeat) raise('no-heartbeat', `it is listed running but has never sent a heartbeat ${Math.round(ranMin)} min after it started (limit ${nobeat}); its tool may never have started (not on PATH, a crash at launch)`, { minutes: Math.round(ranMin) });
-  // 2.65.0: commits of another open task's unlanded lane in this one.
   if (!st.raised['borrowed-commits'] && scope.task) {
     const b = borrowedCommits(cwd, scope.task);
     if (b.length) raise('borrowed-commits', `its lane holds commits of ${b.map((x) => `${x.task}'s`).join(', ')} unlanded lane (${b.map((x) => `${x.task}: ${x.commits.length} commit(s)${x.via === 'trailer' ? ', tagged' : ', merged'}`).join('; ')}): its work now depends on work that hasn't landed. Land ${b.map((x) => x.task).join(', ')} first (--after), or take those commits out`, { borrowed: b.map((x) => ({ task: x.task, commits: x.commits.slice(0, 10), via: x.via })) });
@@ -439,10 +423,17 @@ export function driftCheck(session, { cwd = REPO_ROOT, now = Date.now(), events,
 
   // (c) edits outside the brief's scope.
   if (!st.raised['out-of-scope'] && scope.paths.length) {
-    const edited = [...new Set([...working().files.map((f) => f.file), ...ownCommits(cwd, st.base, session.agent)].map(norm))];
+    const committed = new Set(ownCommits(cwd, st.base, session.agent).map(norm));
+    const edited = [...new Set([...working().files.map((f) => f.file), ...committed].map(norm))];
     const extra = String(env.STUDIO_DRIFT_SCOPE_ALLOW || '').split(',').map(norm).filter(Boolean);
     const allowed = [...scope.paths, ...DRIFT_SCOPE_ALWAYS, ...extra];
-    const out = edited.filter((f) => !allowed.some((p) => under(f, p)));
+    let out = edited.filter((f) => !allowed.some((p) => under(f, p)));
+    // Uncommitted files the session did not touch (main's own dirty files) are not its edits.
+    if (out.length) {
+      let skip = new Set();
+      try { skip = notTheSessions(cwd, session.agent, out.filter((f) => !committed.has(f)), { dirty0: st.dirty0 }); } catch { /* counted as before */ }
+      if (skip.size) out = out.filter((f) => !skip.has(f));
+    }
     if (out.length) raise('out-of-scope', `edited ${out.length} file(s) outside its scope (${scope.paths.join(', ')}): ${out.slice(0, 5).join(', ')}${out.length > 5 ? ', …' : ''}`, { files: out.slice(0, 20), scope: scope.paths });
   }
 
@@ -451,11 +442,7 @@ export function driftCheck(session, { cwd = REPO_ROOT, now = Date.now(), events,
   return raised;
 }
 
-/**
- * 2.65.0: commits in this lane (not on main, not on its own first-parent line) that belong to another OPEN task's
- * lane: shared with that task's branch (.studio/lane-branches.json) or queued head (.studio/train/queue.json), or
- * tagged Studio-Task: <that task> and not this one. Returns [{ task, commits: [sha], via: 'branch'|'trailer' }].
- */
+/** Commits in this lane (not on main, not on its own first-parent line) of another OPEN task's lane: shared with its branch (.studio/lane-branches.json) or queued head (.studio/train/queue.json), or tagged Studio-Task. [{ task, commits: [sha], via: 'branch'|'trailer' }] */
 export function borrowedCommits(cwd, task, { stateDir = STUDIO_STATE_DIR, boardRoot = REPO_ROOT } = {}) {
   const g = (...a) => { const r = spawnSync('git', a, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }); return r.status === 0 ? String(r.stdout || '').trim() : ''; };
   const board = boardStates(boardRoot);
@@ -491,7 +478,7 @@ export function borrowedCommits(cwd, task, { stateDir = STUDIO_STATE_DIR, boardR
   return [...found.values()];
 }
 
-// The CLI loads agent.mjs (which imports this file) without a top-level await, so the import cycle can settle.
+// The CLI loads agent.mjs (which imports this file) without a top-level await, so the import cycle settles.
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) import('./agent.mjs').then(({ sessions }) => {
   const rows = sessions().filter((s) => s.running).map((s) => ({ agent: s.agent, role: s.role, ...(readStall(s.agent)?.verdict || { stalled: false, why: 'not observed yet' }), checks: Object.keys(readDrift(s.agent)?.startedAt === s.startedAt ? readDrift(s.agent).raised || {} : {}) }));
   if (process.argv.includes('--json')) console.log(JSON.stringify(rows));

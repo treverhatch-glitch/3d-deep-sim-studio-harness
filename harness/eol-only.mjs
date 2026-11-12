@@ -64,3 +64,54 @@ export function splitEolOnly(cwd, lines, { limit = 200 } = {}) {
 
 /** The note shown when files were skipped. */
 export const eolNote = (eol) => `${eol.length} file${eol.length === 1 ? '' : 's'} differ${eol.length === 1 ? 's' : ''} in line endings only, ignored (${eol.slice(0, 3).join(', ')}${eol.length > 3 ? ` and ${eol.length - 3} more` : ''}); add \`* text=auto\` or \`*.snap text eol=lf\` to .gitattributes to stop it`;
+
+/**
+ * 2.84 (m): PHANTOM entries. A tracked file that a `.gitattributes` line routes through a filter (Git LFS, a clean
+ * filter) while it was committed as a plain blob shows as modified in every checkout although nobody touched it: git
+ * cleans the working file before comparing, and the cleaned bytes are not the committed blob. `task done` refused a
+ * crew's task for one such file ("1 uncommitted file(s) ... URP.png: commit them first"). A path counts as phantom
+ * only when it is reported as modified (` M`, `M `, `MM`; never added, deleted, untracked, renamed or conflicted) and its
+ * working-tree bytes, unfiltered, hash to the blob HEAD holds for it (git hash-object --no-filters = HEAD:<path>).
+ * At most `limit` paths are hashed; beyond that every line counts as real (never a silent pass). Never throws.
+ * { real: [line…], phantom: [path…] }: real keeps the input lines; phantom holds repo-relative paths.
+ */
+export function splitPhantom(cwd, lines, { limit = 200 } = {}) {
+  const all = (lines || []).filter(Boolean);
+  try {
+    // Only an UNSTAGED modification (" M") can be a phantom: once something is staged for the path, a commit would
+    // change the committed blob, so it counts as the session's.
+    const cand = all.filter((l) => l.length > 3 && l.slice(0, 2) === ' M' && porcelainPath(l));
+    if (!cand.length || cand.length > limit) return { real: all, phantom: [] };
+    const git = (args, input) => spawnSync('git', ['-c', 'core.quotepath=off', ...args], { windowsHide: true, cwd, encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024 });
+    const top = git(['rev-parse', '--show-toplevel']);
+    if (top.status !== 0) return { real: all, phantom: [] };
+    const root = top.stdout.trim();
+    const paths = cand.map(porcelainPath);
+    // The committed blobs (ls-tree --full-tree takes repo-relative paths from any folder; -z keeps names as they are).
+    const ls = spawnSync('git', ['ls-tree', '-r', '-z', '--full-tree', 'HEAD', '--', ...paths], { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    if (ls.status !== 0) return { real: all, phantom: [] };
+    const blob = new Map();
+    for (const rec of String(ls.stdout || '').split('\0')) {
+      const m = rec.match(/^\d+ blob ([0-9a-f]{40,64})\t(.+)$/s);
+      if (m) blob.set(m[2], m[1]);
+    }
+    const known = paths.filter((p) => blob.has(p));
+    if (!known.length) return { real: all, phantom: [] };
+    // The working-tree bytes as they are, no clean filter and no line-ending rule (one call for all the paths).
+    const ho = spawnSync('git', ['hash-object', '--no-filters', '--stdin-paths'], { windowsHide: true, cwd: root, encoding: 'utf8', input: `${known.join('\n')}\n`, maxBuffer: 64 * 1024 * 1024 });
+    if (ho.status !== 0) return { real: all, phantom: [] };
+    const hashes = String(ho.stdout || '').trim().split(/\r?\n/);
+    if (hashes.length !== known.length) return { real: all, phantom: [] };
+    const same = new Set(known.filter((p, i) => hashes[i] === blob.get(p)));
+    const real = [];
+    const phantom = [];
+    for (const l of all) {
+      const p = l.length > 3 && /^[ M][ M]/.test(l) ? porcelainPath(l) : null;
+      if (p && same.has(p)) phantom.push(p); else real.push(l);
+    }
+    return { real, phantom };
+  } catch { return { real: all, phantom: [] }; }
+}
+
+/** 2.84 (m): the one line a command prints when it dropped phantom files (said once per command). */
+export const phantomNote = (phantom) => `ignored ${phantom.length} file(s) git reports as modified whose content equals the committed version (a filter or line-ending rule): ${phantom.slice(0, 3).join(', ')}${phantom.length > 3 ? ` and ${phantom.length - 3} more` : ''}`;

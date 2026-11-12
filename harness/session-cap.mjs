@@ -273,7 +273,8 @@ export function refreshBoard() {
 export const HANDOFF_TEMPLATE = 'Done: … | Failed/tried: … | Next step: … | Standing rules: … | Files: …';
 export const HANDOFF_MAX = 3000;
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+// 2.84: the command-line part is an async function, not a top-level await: an import cycle through a top-level await ends the process with exit 13.
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)))(async () => {
   const argv = process.argv.slice(2);
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
   const words = argv.slice(1).filter((x, i, a) => !x.startsWith('--') && !(i > 0 && a[i - 1].startsWith('--')));
@@ -299,4 +300,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   console.log(`Refresh point: ${lim.turns} turns or ${lim.context.toLocaleString()} tokens of context; ceiling ${lim.ceilingTurns} turns; checks every ${lim.checkTurns} turns / ${lim.checkTokens.toLocaleString()} tokens past it.`);
   if (!rows.length) console.log('No launched session has reported yet.');
   for (const r of rows) console.log(`${r.running ? 'running' : 'ended  '}  ${r.agent.padEnd(18)} ${String(r.turns).padStart(3)} turns  ${r.context.toLocaleString().padStart(9)} tokens (${r.model})  ${r.state}${r.exception ? ' [mid-debug]' : ''}${r.checkDue ? '  CHECK DUE' : ''}`);
-}
+})().catch((e) => { console.error(e?.stack || String(e)); process.exit(1); });

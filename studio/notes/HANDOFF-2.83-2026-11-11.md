@@ -1,6 +1,6 @@
 # Handoff: round 2.83, flow (`studio/notes/HANDOFF-2.83-2026-11-11.md`)
 
-Written by the harness maintainer session (Fable 5.2) on 2026-11-11, after `HANDOFF-2.82-2026-11-10.md`. The owner's
+Written by the harness maintainer session (Fable 5.2) on 2026-11-11, after the 2.82 handoff (in git history). The owner's
 order: the next harness upgrade, from the maintainer's plan, the overseer's notes and the crew's own numbers, with
 unused code taken out; a grade before and a projected grade after.
 

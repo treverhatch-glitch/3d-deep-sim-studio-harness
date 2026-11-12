@@ -43,7 +43,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, boardRoot } from './event.mjs';
 import { canonicalBytes } from './hash.mjs';
 import { proxyApprovalOk, proxyShell } from './owner-proxy.mjs';
-import { betaActor, betaRecordVerdict } from './beta-mode.mjs';
+import { betaActor, betaRecordVerdict, standInMay, recordStandInUse } from './beta-mode.mjs';
 import { ownerOnlyAction, ownerOnlyWhy } from './owner-acts.mjs';
 import { matchAny, matchAnyFold } from './merge-lane.mjs';
 import { protectRoot, trustedEnv, mainRootTrust } from './gate-trust.mjs';
@@ -424,6 +424,23 @@ function sign(approval) {
   const privateKey = crypto.createPrivateKey(fs.readFileSync(keyFile, 'utf8'));
   return crypto.sign(null, Buffer.from(canonicalBytes(approval)), privateKey).toString('base64');
 }
+/**
+ * 2.84 (q): what of an approval's subject `who` committed itself (a Studio-Agent trailer naming it, written by the
+ * studio's commit-msg hook): the protected files or weakened tests changed by its commits since the approval's base, or
+ * the hook-skipping commits that are its own. [] when none or unreadable. Only marks the approval; it refuses nothing.
+ */
+export function selfAuthored(approval, who) {
+  const me = String(who || '').trim().toLowerCase();
+  if (!me) return [];
+  const mine = (trailers) => String(trailers || '').split(',').some((t) => t.trim().toLowerCase() === me);
+  try {
+    if (approval.kind === 'hooks') return (approval.commits || []).filter((c) => mine(git(['log', '-1', '--format=%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', c.sha]).stdout)).map((c) => String(c.sha).slice(0, 8));
+    const files = approval.kind === 'protected' ? (approval.files || []).map((f) => f.path) : approval.kind === 'tests' ? [...new Set((approval.findings || []).map((f) => f.file))] : [];
+    const baseOk = approval.base && git(['rev-parse', '--verify', '--quiet', `${approval.base}^{commit}`]).status === 0;
+    return files.filter((f) => f && String(git(['log', ...(baseOk ? [`${approval.base}..HEAD`] : ['-n', '200', 'HEAD']), '--format=%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', '--', f]).stdout || '').split('\n').some(mine));
+  } catch { return []; }
+}
+
 // 2.73.1 (B-67): the owner's yes the proxy records (--permission "<the owner's words, or a link to the message>").
 let proxyPermission = '';
 /**
@@ -438,6 +455,20 @@ function signOrProxy(approval) {
   // 2.76.0: in beta mode (harness/beta-mode.mjs) the owner's stand-ins approve without the key or per-step words; the
   // approval carries studio/beta.json and counts while beta mode is still on with it. Logged like every owner act.
   // 2.79 (c): --by names an outside signer in a shell the harness didn't launch and that names nobody (--by grokbot).
+  // 2.84 (q): the overseer or an outside signer in beta mode (beta-mode.mjs standInMay, the one rule): a force approval is
+  // 'force', every other kind (protected files, weakened tests, hooks, a protected config part) 'protected'. Its own
+  // change too (the owner's words: "an agent can approve its own protected file change"): marked self, never refused.
+  const si = standInMay(approval.kind === 'force' ? 'force' : 'protected', { by: approval.by, root: ROOT });
+  if (si.ok) {
+    const yes = String(proxyPermission || '').trim();
+    const self = selfAuthored(approval, si.who);
+    const a = { ...approval, recordedBy: si.who, via: si.via === 'signer' ? 'beta signer' : 'beta agent', decides: 'protected', ...(self.length ? { self: true } : {}), ...(yes ? { permission: yes.slice(0, 500) } : {}) };
+    const what = approval.kind === 'force' ? `closing ${approval.task} without its check` : approval.kind === 'protected' ? `${(approval.files || []).length} protected change(s) (${(approval.files || []).map((f) => f.path).slice(0, 4).join(', ')})` : `${approval.kind}`;
+    recordStandInUse(si, { kind: approval.kind === 'force' ? 'force' : 'protected', task: approval.task || null, self: self.length > 0, why: approval.note || approval.reason || '', subject: approval.change || approval.task || approval.kind,
+      msg: self.length ? `${si.who} approved its own change to ${self.slice(0, 4).join(', ')} in beta mode` : `${si.who} approved ${what} in beta mode` });
+    import('./decisions-log.mjs').then((dm) => dm.logDecision({ action: `approve-${approval.kind}`, subject: approval.change || approval.task || approval.kind, by: String(si.doc.by).slice(0, 60), as: 'beta', why: String(approval.note || approval.reason || '').slice(0, 300), evidence: `${si.via} ${si.who}${self.length ? ` (its own change: ${self.slice(0, 4).join(', ')})` : ''}`, undo: null })).catch(() => {});
+    return { approval: a, signature: null, beta: { by: si.doc.by, at: si.doc.at } };
+  }
   const b = betaActor({ allowLane: true, kind: approval.kind, by: approval.by });
   // 2.78.2 (h): a protected decision a Producer/Director session may not make (or a worker) is refused, saying who may.
   if (b.refused) throw new Error(`${b.why} Nothing was written.`);

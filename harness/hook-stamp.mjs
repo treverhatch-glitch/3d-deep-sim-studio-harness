@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * harness/hook-stamp.mjs — 2.58.2 (PU-29): find commits that skipped the git hooks.
+ * harness/hook-stamp.mjs: find commits that skipped the git hooks.
  *
  * A hook can't stop `git commit --no-verify` (or `git -c core.hooksPath=… commit`): it simply doesn't run. So the hooks
  * leave a stamp on every commit they passed, and a gate looks for commits without a valid one afterwards.
@@ -11,64 +11,61 @@
  *                       (`s<id>` with an old git that has no `patch-id --verbatim`; `empty` for an empty commit;
  *                       `merge` for a merge commit, which only commit-msg runs for). Only when pre-commit passed on
  *                       exactly this tree, and never when the commit replaces (amends) a HEAD that wasn't checked.
+ *                       Also the trailer   Studio-Patch-U0: p<id>   (s<id> with an old git; none for an empty commit
+ *                       or a merge): the patch-id of the change without context (`git diff -U0`).
  *
  * The gate (`node harness/hook-stamp.mjs check`, the `hooks` gate and every `task done`) lists the commits since the
  * base branch (approve.mjs resolveBase) whose stamp is missing or doesn't match the commit: its tree (the same commit)
- * or its patch-id (the same change after a clean rebase or cherry-pick) must match. Exempt: commits made before the
- * stamping hooks existed (their parent's scripts/hooks/commit-msg doesn't stamp), commits the harness makes without
- * hooks marked `Studio-Harness: <kind>` (a known kind only), and commits the owner approved
- * (`npm run approve -- hooks --note "why"`). CI's own merge commit of a pull request is not judged, its PR head is.
+ * or its patch-id (the same change after a clean rebase or cherry-pick) must match. A commit whose tree and context
+ * patch-id no longer match also passes when its -U0 patch-id does: exactly the same added and removed lines, in the
+ * same files, in the same order (a context patch-id changes when a rebase moves lines near a hunk). A stamp without
+ * the U0 trailer keeps the old rule. A -U0 match can't see where in a file the lines sit; that comes from the commit's
+ * base, judged on its own, and the gates and task done judge the final tree whatever the stamps say. The U0 trailer is
+ * separate from Studio-Hooks (an older harness still reads the stamp) and not named Studio-Hooks-<x>, because
+ * git interpret-trailers matches a key by its prefix.
+ *
+ * Exempt: commits made before the stamping hooks existed (their parent's scripts/hooks/commit-msg doesn't stamp),
+ * commits the harness makes without hooks marked `Studio-Harness: <kind>` (a known kind only), and commits the owner
+ * approved (`npm run approve -- hooks --note "why"`). CI's own merge commit of a pull request is not judged, its PR
+ * head is.
  *
  * Enforced when the hooks are installed in this checkout (core.hooksPath=scripts/hooks), or the base branch's recent
- * history carries stamps (the studio uses them), or STUDIO_HOOKS_CHECK=on. STUDIO_HOOKS_CHECK=off turns it off.
+ * history carries stamps, or STUDIO_HOOKS_CHECK=on. STUDIO_HOOKS_CHECK=off turns it off.
  *
- * Upgrading: commits a checkout already had when it took the stamping hooks (lane branches, local work not yet
- * pushed) are listed once, by patch-id, in <git common dir>/studio-hooks-grandfather.json. The first stamping hook run
- * writes it (the upgrade's own merge commit), and `node harness/hook-stamp.mjs grandfather` adds to it by hand. Those
- * commits stay exempt after a clean rebase onto the upgrade (P-068); a commit made after the list was written is not in it.
- * 2.78.1: an update's own merge commits (`grandfather --ref`, upgrade --merge: grandfatherRange) are listed too, by sha.
+ * Upgrading: commits a checkout already had when it took the stamping hooks (lane branches, local work not yet pushed)
+ * are listed once, by patch-id, in <git common dir>/studio-hooks-grandfather.json. The first stamping hook run writes
+ * it (the upgrade's own merge commit), and `node harness/hook-stamp.mjs grandfather` adds to it by hand. Those commits
+ * stay exempt after a clean rebase onto the upgrade; a commit made after the list was written is not in it. An
+ * update's own merge commits (`grandfather --ref`, upgrade --merge: grandfatherRange) are listed too, by sha.
  *
  * Limits: a stamp is plain text, so a deliberate forger who computes one by hand passes (the weakened-test and
  * protected-file gates still judge the content); `git revert`, `git rebase` with conflicts or squashes, and an amend
  * with `-m` that is later rebased onto a moved base are flagged until re-committed with the hooks.
  *
- * Size (2.58.5, H-7): only the commits that need a patch-id get one (a stamp whose tree doesn't match, the grandfather
- * list, the commits listed), and every diff streams from git into git patch-id; none is held in memory, so a range
- * holding a game's binary art costs time, not memory. A commit list too big to read fails the gate, never passes it.
+ * Size: only the commits that need a patch-id get one (a stamp whose tree doesn't match, the grandfather list, the
+ * commits listed), and every diff streams from git into git patch-id, so a range holding a game's binary art costs
+ * time, not memory. A commit list too big to read fails the gate, never passes it.
  *
- * Context (2.59.0, H-13): a patch-id hashes the diff's context lines too, so a clean rebase onto a main that changed
- * lines within 3 lines of a commit's hunks changed it and the gate called the commit "changed after the hooks ran". The
- * commit-msg hook now also records the patch-id of the change without context (`git diff -U0`) in a second trailer,
- *   Studio-Patch-U0: p<id>      (s<id> with an old git; none for an empty commit or a merge)
- * and a commit whose tree and context patch-id no longer match passes when its -U0 patch-id does: exactly the same
- * added and removed lines, in the same files, in the same order. A stamp without that trailer (made before 2.59.0)
- * keeps the old rule. What a -U0 match can't see: where in a file the same lines sit, and the unchanged lines around
- * them. Those come from the commit's base, which is judged on its own (every commit since the base branch is; the
- * base branch's own commits passed their hooks when they were made), and every hook check judges the staged lines and
- * file names, not their position; the gates and task done judge the final tree whatever the stamps say.
- * A separate trailer (not a field in the Studio-Hooks line) so an older harness still reads the stamp as before; not
- * named Studio-Hooks-<x>, because git interpret-trailers matches a key by its prefix and replaced one with the other.
- *
- * Re-stamp (2.59.0): `npm run hooks -- restamp`, in a lane copy only, re-commits the lane's commits since the studio's
- * branch through the real hooks (from the oldest one whose stamp no longer matches), keeping the same trees, messages and
+ * Re-stamp: `npm run hooks -- restamp`, in a lane copy only, re-commits the lane's commits since the studio's branch
+ * through the real hooks (from the oldest one whose stamp no longer matches), keeping the same trees, messages and
  * authors, after saving the old head as backup/<lane>-pre-restamp-<time>. It never writes a stamp itself: a commit the
  * hooks refuse stops it and the lane goes back to where it was. task done runs it (--auto) after its own rebase when a
  * commit's stamp was valid before the rebase and isn't after it (STUDIO_HOOKS_RESTAMP=off: never).
  *
- * Lane harness (2.59.0, #6): a lane copy runs its own committed harness/ and scripts/. When the studio's branch changed
- * files there since the lane branched, `check` refuses (it would judge with the old code: T-061 failed the hooks gate
- * again after the fix had landed) and names the files and the fix: rebase on the studio's branch. STUDIO_LANE_HARNESS=own
- * runs the lane's own copy anyway. The hooks only print that note at commit; they never block on it.
+ * Lane harness: a lane copy runs its own committed harness/ and scripts/. When the studio's branch changed files there
+ * since the lane branched, `check` refuses (it would judge with the old code) and names the files and the fix: rebase
+ * on the studio's branch. STUDIO_LANE_HARNESS=own runs the lane's own copy anyway. The hooks only print that note at
+ * commit; they never block on it.
  *
- * Harness ref (2.60.0, #4): a studio that took an unmerged harness branch on the owner's say-so (its commits aren't on
- * the base branch yet, and the harness's own release commit carries no stamp) sets STUDIO_HARNESS_REF=<remote>/<branch>
- * in .env. Commits reachable from that branch as the remote reports it (git ls-remote; never a local branch or a
+ * Harness ref: a studio that took an unmerged harness branch on the owner's say-so (its commits aren't on the base
+ * branch yet, and the harness's own release commit carries no stamp) sets STUDIO_HARNESS_REF=<remote>/<branch> in
+ * .env. Commits reachable from that branch as the remote reports it (git ls-remote; never a local branch or a
  * remote-tracking ref moved by hand) are exempt, and the output names the ref and commit used, or why it wasn't used.
  *
  *   node harness/hook-stamp.mjs check [--json]
  *   node harness/hook-stamp.mjs stamp <message-file>      (the commit-msg hook)
  *   node harness/hook-stamp.mjs grandfather [--json]      (list the commits this checkout already has as exempt)
- *   node harness/hook-stamp.mjs grandfather --ref <remote ref>  (2.77.2: an update's commits, merged by an older guard)
+ *   node harness/hook-stamp.mjs grandfather --ref <remote ref>  (an update's commits, merged by an older guard)
  *   node harness/hook-stamp.mjs restamp [--json]          (npm run hooks -- restamp; in a lane copy)
  */
 import fs from 'node:fs';
@@ -80,15 +77,15 @@ import { protectRoot } from './gate-trust.mjs';
 import { readEnvFile } from './dotenv.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = protectRoot(path.resolve(HERE, '..')) || path.resolve(HERE, '..'); // 2.71.1 (A16): never in a lane copy
+const ROOT = protectRoot(path.resolve(HERE, '..')) || path.resolve(HERE, '..'); // never in a lane copy
 export const TRAILER = 'Studio-Hooks';
 export const HARNESS_TRAILER = 'Studio-Harness';
 /** Commits the harness itself makes without the hooks: the kind, and a trailer such a commit always carries too. */
 export const HARNESS_KINDS = { 'config-from': /^Config-From:\s*\S/m };
 /**
- * 2.65.0 (B-40): what a harness commit of each kind may change. A config-from commit (harness/config-proposal.mjs, made
- * on main right after a lane landed) changes only top-level studio/*.json and studio-proposals/*.json, one parent: any
- * other file, and the trailer exempts nothing.
+ * What a harness commit of each kind may change. A config-from commit (harness/config-proposal.mjs, made on main right
+ * after a lane landed) changes only top-level studio/*.json and studio-proposals/*.json, one parent: any other file,
+ * and the trailer exempts nothing.
  */
 const HARNESS_FILES = { 'config-from': /^(studio\/[^/]+\.json|studio-proposals\/[^/]+\.json)$/ };
 function harnessExempt(kind, c, cwd) {
@@ -106,7 +103,7 @@ const MARKER = 'hook-stamp.mjs'; // a commit-msg hook that calls this file stamp
 export const PASS_FILE = 'studio-hooks-pass';
 export const AMEND_FILE = 'studio-hooks-amend';
 const STAMP_RE = /^Studio-Hooks:[ \t]*v([0-9a-f]{8})[ \t]+t([0-9a-f]{12})[ \t]+(?:([ps])([0-9a-f]{12})|(empty)|(merge))[ \t]*$/gim;
-/** 2.59.0 (H-13): the patch-id of the change without context lines (git diff -U0), beside the stamp. */
+/** The patch-id of the change without context lines (git diff -U0), beside the stamp. */
 export const Z_TRAILER = 'Studio-Patch-U0';
 const Z_RE = /^Studio-Patch-U0:[ \t]*([ps])([0-9a-f]{12})[ \t]*$/gim;
 
@@ -115,13 +112,13 @@ const GIT_CFG = ['-c', 'core.quotePath=true', '-c', 'diff.noprefix=false', '-c',
   '-c', 'diff.suppressBlankEmpty=false', '-c', 'log.showSignature=false', '-c', 'color.ui=false', '-c', 'patchid.verbatim=false', '-c', 'patchid.stable=false'];
 export const DIFF_OPTS = ['--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--diff-algorithm=myers', '--indent-heuristic', '-U3',
   '--inter-hunk-context=0', '--src-prefix=a/', '--dst-prefix=b/', '--binary', '--ignore-submodules=none', '--submodule=short'];
-/** 2.59.0 (H-13): the same diff without context lines, for the Studio-Patch-U0 patch-id. */
+/** The same diff without context lines, for the Studio-Patch-U0 patch-id. */
 export const DIFF_OPTS_Z = DIFF_OPTS.map((o) => (o === '-U3' ? '-U0' : o));
 /** A pid mode: p (verbatim), s (stable), zp / zs (the same, without context). */
 const diffOptsFor = (mode) => (String(mode).startsWith('z') ? DIFF_OPTS_Z : DIFF_OPTS);
 const idModeOf = (mode) => String(mode || 'p').replace(/^z/, '');
-// 2.58.5 (H-7): no diff is read into memory any more (patch-ids stream, below); what is still read whole is small
-// (commit messages, names). STUDIO_HOOKS_MAX_BUFFER (bytes) lowers the limit, for tests that prove that.
+// No diff is read into memory (patch-ids stream, below); what is still read whole is small (commit messages, names).
+// STUDIO_HOOKS_MAX_BUFFER (bytes) lowers the limit, for tests that prove that.
 export const MAX_BUFFER = Number(process.env.STUDIO_HOOKS_MAX_BUFFER) > 0 ? Number(process.env.STUDIO_HOOKS_MAX_BUFFER) : 512 * 1024 * 1024;
 const git = (args, { cwd = ROOT, input } = {}) => spawnSync('git', [...GIT_CFG, ...args], { windowsHide: true, cwd, encoding: 'utf8', input, maxBuffer: MAX_BUFFER });
 /** git(), but an output too big to read is an error, never a silently cut list (spawnSync stops at maxBuffer). */
@@ -134,9 +131,9 @@ function gitAll(args, opts) {
 const isSha = (s) => /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(String(s || ''));
 
 /**
- * 2.58.5 (H-7): `git <diffArgs>` piped straight into `git patch-id`, so the diff never passes through this process (a
- * whole-range `git log -p --binary` over a game's art passed Node's string limit: ERR_STRING_TOO_LONG). stdinText feeds
- * the first command (commit ids for `log --stdin`). Resolves { status, lines } with patch-id's output lines.
+ * `git <diffArgs>` piped straight into `git patch-id`, so the diff never passes through this process (a whole-range
+ * `git log -p --binary` over a game's art passed Node's string limit). stdinText feeds the first command (commit ids
+ * for `log --stdin`). Resolves { status, lines } with patch-id's output lines.
  */
 function pipePatchId(diffArgs, mode, { cwd = ROOT, stdinText = null } = {}) {
   return new Promise((resolve) => {
@@ -161,7 +158,7 @@ function pipePatchId(diffArgs, mode, { cwd = ROOT, stdinText = null } = {}) {
 /**
  * Patch-ids (12 hex) of exactly these non-merge commits, for one mode: Map sha -> id (a commit with an empty diff has
  * none). Each commit's diff against its first parent (the empty tree for a root), the same diff the commit-msg hook
- * patch-ids (`git diff --cached` against the parent), streamed (pipePatchId). The ids go in on stdin: no command-line limit.
+ * patch-ids, streamed (pipePatchId); the ids go in on stdin: no command-line limit.
  */
 export async function patchIdsOf(shas, mode = 'p', cwd = ROOT) {
   const out = new Map();
@@ -190,8 +187,8 @@ function pidStore(cwd = ROOT) {
     },
     /**
      * stampValid for many commits, computing only the patch-ids it looks at, in rounds: each dry run stops a commit at
-     * the first id not computed yet, the ids asked for are computed in one batch per mode, and again. So the context-free
-     * id (2.59.0) is computed only for a commit whose context id didn't match, never for every rebased commit.
+     * the first id not computed yet, the ids asked for are computed in one batch per mode, and again. So the
+     * context-free id is computed only for a commit whose context id didn't match.
      */
     async validate(list) {
       const NEED = Symbol('need');
@@ -242,7 +239,7 @@ export function patchIdOf(diff, cwd = ROOT, mode = null) {
 
 /**
  * The patch-id of the staged change against a parent, as patchIdOf gives it ({ mode, id } or null when empty), the diff
- * streamed into git patch-id (2.58.5, H-7: a large binary file staged no longer has to fit in this process).
+ * streamed into git patch-id (a large binary file staged doesn't have to fit in this process).
  */
 export async function stagedPatchId(parent, cwd = ROOT, { zero = false, mode = null } = {}) {
   for (const m of mode ? [mode] : ['p', 's']) {
@@ -258,7 +255,7 @@ export async function stagedPatchId(parent, cwd = ROOT, { zero = false, mode = n
 export function parseStamps(msg) {
   return [...String(msg || '').matchAll(STAMP_RE)].map((m) => ({ ver: m[1], tree: m[2], mode: m[3] || null, pid: m[4] || null, empty: Boolean(m[5]), merge: Boolean(m[6]) }));
 }
-/** 2.59.0 (H-13): the Studio-Patch-U0 ids in a message: [{ mode: 'p'|'s', pid }]. */
+/** The Studio-Patch-U0 ids in a message: [{ mode: 'p'|'s', pid }]. */
 export function parseZ(msg) {
   return [...String(msg || '').matchAll(Z_RE)].map((m) => ({ mode: m[1], pid: m[2] }));
 }
@@ -278,7 +275,7 @@ export function stampValid(c, pidOf, parentTree = null) {
     if (s.empty && parentTree && parentTree === c.tree) return { ok: true };
     if (s.pid && pidOf(c.sha, s.mode) === s.pid) return { ok: true };
   }
-  // 2.59.0 (H-13): the same added and removed lines after a clean rebase whose new base changed the lines around them
+  // The same added and removed lines after a clean rebase whose new base changed the lines around them
   // (the context patch-id above hashes those too). Only for a stamp that recorded its -U0 id (Studio-Patch-U0); a stamp
   // from before keeps the rule above. Never for a merge or an empty stamp.
   if (!merge && stamps.some((s) => !s.merge && s.pid)) {
@@ -296,10 +293,10 @@ function commitInfo(rev, cwd) {
 const emptyTree = (cwd) => git(['hash-object', '-t', 'tree', '--stdin'], { cwd, input: '' }).stdout.trim();
 const hookStamps = (blob, cwd) => isSha(blob) && git(['cat-file', 'blob', blob], { cwd }).stdout.includes(MARKER);
 
-// 2.58.2 (P-068): the commits a checkout already had when it took the stamping hooks. They were never stamped, and once a
-// lane rebases them onto the upgrade their parent's hook stamps, so without this list every in-flight lane task would
-// fail the hooks gate at task done. Kept by patch-id (a clean rebase keeps it) in the git common dir, shared by every
-// worktree (lanes) of the checkout and never committed.
+// The commits a checkout already had when it took the stamping hooks were never stamped; without this list every
+// in-flight lane task would fail the hooks gate at task done once its lane rebases them onto the upgrade. Kept by
+// patch-id (a clean rebase keeps it) in the git common dir, shared by every worktree (lanes) of the checkout, never
+// committed.
 export const GRANDFATHER_FILE = 'studio-hooks-grandfather.json';
 export function grandfatherPath(cwd = ROOT) {
   const r = git(['rev-parse', '--git-common-dir'], { cwd });
@@ -323,26 +320,24 @@ export async function writeGrandfather(cwd = ROOT) {
   const unstamped = new Set(list.stdout.split('\x1e').filter((x) => x.includes('\x1f')).map((x) => x.split('\x1f')).filter(([, msg]) => !parseStamps(msg).length).map(([sha]) => sha.trim()));
   const old = readGrandfather(cwd);
   const pids = new Set(old.pids);
-  // 2.58.5 (H-7): patch-ids of the unstamped commits only, streamed; never a whole-history `git log -p --binary`.
+  // Patch-ids of the unstamped commits only, streamed; never a whole-history `git log -p --binary`.
   for (const pid of (await patchIdsOf([...unstamped], 'p', cwd)).values()) pids.add(pid);
   const shas = new Set([...old.shas, ...unstamped]);
   fs.writeFileSync(f, `${JSON.stringify({ at: old.at || new Date().toISOString(), updated: new Date().toISOString(), shas: [...shas], pids: [...pids] }, null, 1)}\n`);
   return { ok: true, file: f, added: unstamped.size - [...unstamped].filter((x) => old.shas.has(x)).length, total: shas.size };
 }
 /**
- * 2.77.1 (B-100): add the unstamped commits of one range (`<old head>..<merged ref>`: a harness update's own commits,
+ * Add the unstamped commits of one range (`<old head>..<merged ref>`: a harness update's own commits,
  * made on GitHub without this studio's hooks) to the grandfather list, by sha and patch-id. `upgrade --merge` calls it
  * right after its merge commit, so the hooks gate on main doesn't start red. Adds only; never removes an entry.
  */
 export async function grandfatherRange(range, cwd = ROOT, { env = process.env } = {}) {
   const f = grandfatherPath(cwd);
   if (!f) return { ok: false, why: 'not a git checkout' };
-  // 2.78.1 (grandfather): the release's own merge commits too ("Merge 2.77.3 into claude/278", "Merge main into …"):
-  // with --no-merges they were never listed, so the hooks gate on main stayed red on them after taking the release.
-  // Only the merges of this range (reachable from the release tip, not from the base: the release's, never the
-  // studio's own), and by sha only (a merge has no patch-id): the merge itself, as the release made it, is exempt; a
-  // merge made later (a lane merging main) is a different commit and is judged as before. STUDIO_GRANDFATHER_MERGES=off:
-  // non-merge commits only (the 2.78.0 way).
+  // The release's own merge commits too ("Merge 2.77.3 into claude/278", "Merge main into …"), only those of this
+  // range (reachable from the release tip, not from the base), and by sha only (a merge has no patch-id): the merge as
+  // the release made it is exempt; a merge made later (a lane merging main) is a different commit and is judged.
+  // STUDIO_GRANDFATHER_MERGES=off: non-merge commits only.
   const merges = !/^(off|0|false|no)$/i.test(String(env.STUDIO_GRANDFATHER_MERGES || '').trim());
   const list = gitAll(['log', ...(merges ? [] : ['--no-merges']), '--format=%x1e%H%x1f%P%x1f%B', range], { cwd });
   if (list.status !== 0) return { ok: false, why: (list.stderr || '').trim().split('\n')[0] || `git log ${range} failed` };
@@ -427,7 +422,7 @@ export async function stampMessage(msgFile, { cwd = process.cwd() } = {}) {
       else {
         const pid = await stagedPatchId(parent, cwd);
         stamp = `v${ver} t${tree.slice(0, 12)} ${pid ? `${pid.mode}${pid.id.slice(0, 12)}` : 'empty'}`;
-        // 2.59.0 (H-13): and the same change's patch-id without context lines, so a clean rebase keeps the stamp valid.
+        // And the same change's patch-id without context lines, so a clean rebase keeps the stamp valid.
         const z = pid ? await stagedPatchId(parent, cwd, { zero: true, mode: pid.mode }) : null;
         if (z) zStamp = `${z.mode}${z.id.slice(0, 12)}`;
       }
@@ -474,13 +469,12 @@ function headToJudge(env) {
 }
 
 /**
- * 2.60.0 (#4): STUDIO_HARNESS_REF=<remote>/<branch> (set in .env by a person; for example upstream/claude/2591) names
- * an unmerged harness ref the owner told the studio to take. Its commits are the harness's, not the studio's, so they
- * are exempt like the base branch's, but only as the remote itself has them: <remote> must be a configured remote,
- * refs/remotes/<remote>/<branch> must exist (a local branch of that name doesn't count), and `git ls-remote` must
- * confirm <branch> on <remote>; the exempt commits are the ones reachable from the commit the remote reports (a
- * remote-tracking ref moved by hand to a local commit doesn't count). Asked only when a commit is unstamped. Can't
- * reach the remote: not used, and the output says why (the gate fails closed). Returns { declared, ref, ok, why, sha, shas }.
+ * STUDIO_HARNESS_REF=<remote>/<branch> (set in .env by a person; for example upstream/claude/2591) names an unmerged
+ * harness ref the owner told the studio to take. Its commits are exempt like the base branch's, but only as the
+ * remote itself has them: <remote> must be a configured remote, refs/remotes/<remote>/<branch> must exist (a local
+ * branch of that name doesn't count), and `git ls-remote` must confirm <branch> on <remote>; the exempt commits are
+ * those reachable from the commit the remote reports. Asked only when a commit is unstamped. Can't reach the remote:
+ * not used, and the output says why (the gate fails closed). Returns { declared, ref, ok, why, sha, shas }.
  */
 export function declaredHarnessRef(env = process.env, root = ROOT) {
   if (String(env.STUDIO_HARNESS_REF || '').trim()) return String(env.STUDIO_HARNESS_REF).trim();
@@ -519,7 +513,7 @@ export function harnessRefCommits(base, env = process.env, root = ROOT) {
  */
 export async function checkHookStamps({ env = process.env, ignoreApprovals = false, range: given = null } = {}) {
   if (falsy(env.STUDIO_HOOKS_CHECK)) return { ok: true, off: true, enforced: false, open: [], why: 'off (STUDIO_HOOKS_CHECK=off): commits are not checked for skipped hooks' };
-  // 2.59.0: restamp judges an explicit range (the lane before and after task done's rebase): { base, head } shas.
+  // Restamp judges an explicit range (the lane before and after task done's rebase): { base, head } shas.
   const b = given ? { ref: given.base.slice(0, 8), base: given.base } : await changeBase(env);
   if (!b) return { ok: true, enforced: false, open: [], why: 'no base branch to compare with, so no commits to check' };
   const head = given ? given.head : headToJudge(env);
@@ -542,9 +536,8 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
   const treeOf = new Map(commits.map((c) => [c.sha, c.tree]));
   const parentTree = (c) => (c.parents[0] ? treeOf.get(c.parents[0]) || git(['rev-parse', `${c.parents[0]}^{tree}`]).stdout.trim() : null);
 
-  // 2.58.5 (H-7): patch-ids only for the commits that need one (a stamp whose tree doesn't match: rebased, cherry-picked;
-  // the grandfather list; the commits listed), streamed in one batch per mode. Never a whole-range `git log -p --binary`:
-  // with a base far behind, the range holds a game's whole art import and that passed Node's string limit.
+  // Patch-ids only for the commits that need one (a stamp whose tree doesn't match: rebased, cherry-picked; the
+  // grandfather list; the commits listed), streamed in one batch per mode. Never a whole-range `git log -p --binary`.
   const pids = pidStore(ROOT);
   const open = [];
   let exempt = 0;
@@ -556,7 +549,7 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
   for (const c of commits) {
     if (!stamped(c)) { exempt++; continue; }
     if (maybeOld(c) && grandfathered(g, c.sha, pids.get(c.sha, 'p'))) { exempt++; continue; }
-    // 2.78.1 (grandfather): an unstamped merge commit is exempt only by its own sha on the list (grandfatherRange adds
+    // An unstamped merge commit is exempt only by its own sha on the list (grandfatherRange adds
     // a release's merges; a merge has no patch-id, so a re-made merge is a new commit and judged).
     if (c.parents.length > 1 && g.shas.has(c.sha) && !parseStamps(c.msg).length) { exempt++; continue; }
     const kind = (c.msg.match(/^Studio-Harness:[ \t]*([\w-]+)/m) || [])[1];
@@ -570,7 +563,7 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
     const subject = c.msg.split('\n')[0].slice(0, 80);
     open.push({ sha: c.sha, subject, why: kind ? `it says Studio-Harness: ${kind}, which isn't a commit the harness makes without hooks; ${v.why}` : v.why, merge: c.parents.length > 1 });
   });
-  // 2.60.0 (#4): the declared harness ref's own commits, as its remote has them, are the harness's (asked only now).
+  // The declared harness ref's own commits, as its remote has them, are the harness's (asked only now).
   let harnessRef = null;
   if (open.length) {
     harnessRef = harnessRefCommits(b.base, env, ROOT);
@@ -592,7 +585,7 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
   let keyNote = '';
   if (open.length && !ignoreApprovals) {
     const { readApprovals, verifyApproval, keyFor } = await import('./approve.mjs');
-    // 2.78.1 (B-120): the key-carrying base's key (approve.mjs keyFor): on a studio that doesn't push, the base
+    // The key-carrying base's key (approve.mjs keyFor): on a studio that doesn't push, the base
     // origin/main has no owner key, and the owner's `approve -- hooks` never verified.
     const key = keyFor(b, env);
     const pub = key.pub;
@@ -611,7 +604,7 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
   return { ok: !left.length || !enforced, enforced, base: b.ref, baseSha: b.base, checked: commits.length, open: left, approved, exempt, patchIds: pids.computed, harnessRef: hr, why };
 }
 
-// ---- 2.59.0 (#6): a lane copy whose harness is older than the studio's branch ----
+// ---- a lane copy whose harness is older than the studio's branch ----
 
 /** Folders that hold the harness a lane copy runs (its gates, hooks and task done). */
 export const LANE_HARNESS_DIRS = ['harness', 'scripts'];
@@ -660,7 +653,7 @@ export function laneHarnessDrift(root = ROOT, env = process.env) {
   return { lane, branch: lane.branch, base, tip, files: d.stdout.split('\n').map((s) => s.trim()).filter(Boolean) };
 }
 
-/** 2.78.0 (B-105): is this a launched worker session (a builder, …), which may not refresh a lane or restamp? */
+/** Is this a launched worker session (a builder, …), which may not refresh a lane or restamp? */
 export async function workerSession(env = process.env) {
   const role = String(env.STUDIO_ROLE || '').trim();
   const owner = String(env.STUDIO_LOCK_OWNER || '').trim();
@@ -677,13 +670,13 @@ export const laneHarnessOwn = (env = process.env) => /^own$/i.test(String(env.ST
 export function laneDriftText(d, { builder = false } = {}) {
   const shown = d.files.slice(0, 6).join(', ') + (d.files.length > 6 ? ` and ${d.files.length - 6} more` : '');
   const head = `this lane copy runs its own harness, and ${d.branch} has changed ${d.files.length} harness file(s) since the lane branched from it (${shown}), so its checks would judge with the old code.`;
-  // 2.78.0 (B-105): a launched worker may not rebase or restamp: the harness refreshes its lane (npm run verify does it, leaving
+  // A launched worker may not rebase or restamp: the harness refreshes its lane (npm run verify does it, leaving
   // the shared studio/ alone); failing that it hands the task back and the lane is refreshed for the next session.
   if (builder) return `${head} The harness refreshes a lane copy itself when its verify runs (${d.branch} merged in, studio/ left alone, the hooks re-stamped as its own step); if that did not happen, hand the task back (npm run task -- pause <ID> --agent <you> --note "…"): the lane is refreshed for the next session. STUDIO_LANE_HARNESS=own runs this copy's harness anyway.`;
   return `${head} Rebase on it: git rebase ${d.branch} (then npm run hooks -- restamp if the hooks gate lists commits), or npm run lanes -- refresh <task> --by <name>, which merges it in and leaves studio/ alone. STUDIO_LANE_HARNESS=own runs this copy's harness anyway.`;
 }
 
-// ---- 2.59.0: re-stamp a lane's commits through the real hooks ----
+// ---- re-stamp a lane's commits through the real hooks ----
 
 /**
  * Re-commit a lane copy's commits since the studio's branch through the real git hooks, from the oldest one whose stamp
@@ -709,9 +702,8 @@ export async function restamp({ cwd = ROOT, auto = false, all = false, base: giv
   }
   const dirty = g(['status', '--porcelain', '--untracked-files=no']).stdout.split('\n').filter((l) => l.length > 3);
   if (dirty.length) return { ok: false, why: `uncommitted changes (${dirty.slice(0, 3).map((l) => l.slice(3)).join(', ')}${dirty.length > 3 ? ` +${dirty.length - 3}` : ''}): commit or set them aside first` };
-  // 2.60.1 (B-32): the same base as the hooks check (changeBase: approve.mjs resolveBase, which in a lane copy is the
-  // main checkout's local branch). Restamp took the lane's local main while the check took a stale origin/main, so it
-  // said "nothing to do" while the check failed on main's own commits.
+  // The same base as the hooks check (changeBase: approve.mjs resolveBase, which in a lane copy is the main checkout's
+  // local branch), so restamp and the check never disagree about which commits are in range.
   const cb = givenBase ? null : await changeBase(env);
   const mainBranch = cb?.ref || lane?.branch || null;
   const base = givenBase || cb?.base || '';
@@ -809,12 +801,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     } catch (e) {
       console.error(`[commit-msg] note: could not stamp this commit (${e.message}); the hooks gate will list it.`);
     }
-    // 2.59.0 (#6): a note, never a refusal: the commit is the agent's work and must not be lost to a stale copy.
+    // A note, never a refusal: the commit is the agent's work and must not be lost to a stale copy.
     try { const d = laneHarnessOwn() ? null : laneHarnessDrift(process.cwd()); if (d?.files.length) console.error(`[commit-msg] note: ${laneDriftText(d, { builder: await workerSession() })}`); } catch {}
     process.exit(0);
   }
   if (cmd === 'check') {
-    // 2.59.0 (#6): an older harness in a lane copy doesn't judge the lane's commits; the studio's branch has the fix.
+    // An older harness in a lane copy doesn't judge the lane's commits; the studio's branch has the fix.
     if (!falsy(process.env.STUDIO_HOOKS_CHECK)) {
       let d = null;
       try { d = laneHarnessDrift(); } catch {}
@@ -835,7 +827,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (process.argv.includes('--json')) { console.log(JSON.stringify(r)); process.exit(r.ok ? 0 : 1); }
     if (r.off) { console.log(`[hooks] ${r.why}`); process.exit(0); }
     const list = r.open.map((o) => `  ${o.sha.slice(0, 8)} ${o.subject} — ${o.why}`);
-    // 2.60.1 (B-32): which base was judged from, the same line restamp prints.
+    // Which base was judged from, the same line restamp prints.
     if (r.baseSha) (r.ok ? console.log : console.error)(`[hooks] base ${r.base} ${String(r.baseSha).slice(0, 8)}`);
     if (!r.ok) {
       console.error(`[hooks] FAIL ${r.why}:`);
@@ -848,9 +840,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   if (cmd === 'grandfather') {
-    // 2.77.2 (B-104): `grandfather --ref <remote-tracking ref>`: an update merged by an older upgrade guard (one without
-    // the 2.77.1 step) lists its commits here by hand: the unstamped commits between the hooks gate's base and that ref.
-    // Only a remote-tracking ref (refs/remotes/…, what was fetched): a local branch can't exempt local work.
+    // `grandfather --ref <remote-tracking ref>`: an update merged by an older upgrade guard lists its commits here by
+    // hand: the unstamped commits between the hooks gate's base and that ref. Only a remote-tracking ref
+    // (refs/remotes/…, what was fetched): a local branch can't exempt local work.
     const refAt = process.argv.indexOf('--ref');
     if (refAt > 0) {
       const ref = String(process.argv[refAt + 1] || '');

@@ -2,14 +2,12 @@
 
 **2-minute read for Hatch: the latest summary is first. Then open problems, then proposals waiting for you.**
 
-## Latest summary — 2026-10-31 evening
-- **Done:**
-  - HDRP switch and the Unity side of the replay check (Unity repo PR #2).
-  - Harness 2.47 (U-001, U-002), 2.48 (Windows by default), 2.49 (U-004), 2.50 (U-006), 2.51 (U-005) and 2.52 (U-003): all merged, CI green, a backup branch of main before each.
-- **Untested:** everything that needs the Unity editor (HDRP set-up, Edit/Play Mode in Unity, the Windows build).
-- **Open problems:** P-005 (GPU model), P-009 (no Unity on Claude's side). P-001 fixed: the harness and the two old copies are private (confirmed by Hatch, 2026-10-31).
-- **Port finding:** the web rules run unchanged in .NET (Jint): 3/3 replays match at day 3. Waiting for Hatch: option A (one set of rules) or B (full C# port).
-- **Waiting for your OK:** U-007 (last, only when nothing else waits); merging PR #21 on local checks (P-010).
+## Latest summary — 2026-11-12
+- **Done:** harness 2.83.0 is merged (flow: session accounting, the engine train, a cheaper rules check, the planner); a crew runs it. Notes: docs/RELEASE-2.83.0.md, studio/notes/HANDOFF-2.83-2026-11-11.md.
+- **In progress:** 2.84 on a branch (planning wakes that change nothing, the same-family review switch, the overseer's sheet, a real Unity editor in the online checks, shorter documents).
+- **Untested:** nothing from 2.83 or 2.84 has run on a real Unity editor from the harness's side; the online editor job waits for working sign-in secrets.
+- **Open problems:** P-005 (GPU model), P-009 (no Unity on the maintainer's side: the online job is the fix once it signs in).
+- **Waiting for your OK:** U-007 (last, only when nothing else waits).
 
 ## The files
 | File | What | Format |

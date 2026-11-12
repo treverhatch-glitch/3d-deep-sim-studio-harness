@@ -1,52 +1,38 @@
 #!/usr/bin/env node
 /**
- * harness/upgrade-guard.mjs — 2.58.5 (H-4): the board is committed before a harness upgrade, never stashed.
+ * harness/upgrade-guard.mjs — the board is committed before a harness upgrade, never stashed (a stash hides the board
+ * files other agents write all day; a merge keeps both sides).
  *
- * On a crew's PC the 2.58.2 upgrade stashed the dirty main checkout ("pre-2.58.2-upgrade") and the board went with it:
- * DONE.md rows for four finished tasks and five NEXT.md tasks added that morning, never committed. A finished task
- * reopened and seven crew sessions were spent on it. The board files are plain studio state that other agents write
- * all day; a stash hides them, a merge keeps both sides.
- *
- *   npm run upgrade -- --check      exit 1 while a board file is uncommitted (names them and the command to commit
- *                                   them); also names stash entries that hold board changes (restore by merge, below)
+ *   npm run upgrade -- --check      exit 1 while a board file is uncommitted (names them and the commit command); also
+ *                                   names stash entries that hold board changes
  *   npm run upgrade -- --snapshot   copy the board files to .studio/board-snapshots/<time>/ (gitignored), then check
- *
- * 2.60.0 (#3), the upgrade path for an orchestrator:
  *   npm run upgrade -- --merge <ref> --by <person> [--permission "<their words or a link>"] [--golden-reason "<why>"]
- *       takes the update: refuses unless --check passes, backs the branch up as backup/pre-<version>, merges <ref> in the
- *       main checkout through the hooks, with the main-checkout guard opened for exactly this merge (STUDIO_UPGRADE_MERGE
- *       = the merged commit, in the merge's own environment; scripts/hooks/pre-commit lets only a commit whose
- *       MERGE_HEAD is that commit through). The merge commit records Upgrade-By / Upgrade-Permission /
- *       Upgrade-Recorded-By / Upgrade-Ref / Upgrade-Versions / Upgrade-Backup, and an upgrade.merged event. A person in
- *       their own terminal needs no --permission; an agent needs it (harness/permission.mjs: a Producer or Director
- *       session, or an agent outside the harness); a worker is refused. A conflict stops with the files listed and
- *       `git merge --abort` advice: nothing is resolved for anyone. `--continue` commits a merge a person resolved.
- *       Goldens: the merge adds `Golden-Reason: from <ref> (upgrade)` naming the qa/golden files that come exactly as
- *       they are on <ref>; a golden the merge combined with the studio's own change needs --golden-reason (a person's).
+ *       refuses unless --check passes, backs the branch up as backup/pre-<version>, merges <ref> in the main checkout
+ *       through the hooks, with the main-checkout guard opened for exactly this merge (STUDIO_UPGRADE_MERGE = the merged
+ *       commit; scripts/hooks/pre-commit checks MERGE_HEAD). The merge commit records Upgrade-By / -Permission /
+ *       -Recorded-By / -Ref / -Versions / -Backup trailers and an upgrade.merged event. A person in their own terminal
+ *       needs no --permission; an agent needs it (harness/permission.mjs); a worker is refused. A conflict stops with
+ *       the files listed and `git merge --abort` advice; nothing is resolved for anyone. `--continue` commits a merge a
+ *       person resolved. Goldens: `Golden-Reason: from <ref> (upgrade)` is added for qa/golden files exactly as on
+ *       <ref>; a golden combined with the studio's own change needs --golden-reason (a person's).
  *   npm run upgrade -- --restore-stash <sha> --by <person>
- *       with the board committed, three-way merges a stash's board files into the board, keeping both sides' rows
- *       (studio/NEXT.md and studio/DONE.md: conflicting list or table rows are all kept); any other conflict refuses
- *       and lists, writing nothing. Commits, then prints the `git stash drop` to run. It never drops anything.
+ *       three-way merges a stash's board files into the committed board, keeping both sides' rows (studio/NEXT.md,
+ *       studio/DONE.md); any other conflict refuses, writing nothing. Commits; never drops the stash.
+ *   npm run upgrade -- --rollback --by <person> [--permission "…"]   revert the last update's merge commit, never a reset
+ *   npm run upgrade -- --preflight [--ref <ref>]   before an update (harness/upgrade-preflight.mjs, read-only)
+ *   npm run upgrade -- --smoke [--keep]            right after one (harness/upgrade-smoke.mjs)
+ *   `--merge` also writes the "before" snapshot .studio/upgrades/<from>-to-<to>.json (harness/upgrade-baseline.mjs)
+ *   that `npm run autonomy -- impact` compares against.
  *
- *   npm run upgrade -- --rollback --by <person> [--permission "…"]   (2.71.1)
- *       back to the harness before the last update: reverts that update's merge commit (upgradeRollback), never a reset.
+ * A merged update ends with `npm run lanes -- refresh --all`, reported per lane: refreshed / conflicted / red / skipped.
+ * STUDIO_UPGRADE_REFRESH=off skips it; =no-tests skips the targeted tests.
  *
- * 2.73.0 (f): `--preflight [--ref <ref>]` before an update (harness/upgrade-preflight.mjs, read-only) and `--smoke [--keep]`
- * right after one (harness/upgrade-smoke.mjs); `--merge` writes the "before" snapshot .studio/upgrades/<from>-to-<to>.json
- * (harness/upgrade-baseline.mjs) that `npm run autonomy -- impact` compares against. The two helpers without harness
- * imports load from beside this file, the studio, or the ref (loadHelper), as permission.mjs does.
- *
- * 2.67.0 (B-49): a merged update ends with `npm run lanes -- refresh --all` (the updated harness's), reported per lane:
- *   refreshed / conflicted (merge aborted, files named) / red (targeted tests) / skipped (a running session, uncommitted
- *   work: never touched). STUDIO_UPGRADE_REFRESH=off keeps the old behaviour; =no-tests skips the targeted tests.
- *
- * Bootstrap (2.60.0): an old studio has no --merge, so docs/RELEASE.md runs the new guard straight from the ref
- * (`git show <ref>:harness/upgrade-guard.mjs` into .studio/). So this file finds the studio by git from the current
- * folder, never by its own location, and loads harness/permission.mjs from beside it, the studio, or the ref.
+ * Bootstrap: an old studio has no --merge, so docs/RELEASE.md runs this guard from the ref (`git show
+ * <ref>:harness/upgrade-guard.mjs` into .studio/). So it finds the studio by git from the current folder, never by
+ * its own location, and loads harness/permission.mjs from beside it, the studio, or the ref.
  *
  * Board files: studio/NEXT.md, studio/DONE.md, studio/task-holds.json, studio/pending-review.json, studio/handoffs/.
- * --check and --snapshot never stash, commit or change a tracked file. docs/RELEASE.md "Taking a harness update" has
- * the steps.
+ * --check and --snapshot never stash, commit or change a tracked file. docs/RELEASE.md "Taking a harness update" has the steps.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -56,19 +42,19 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SELF = fileURLToPath(import.meta.url);
 export const BOARD_FILES = ['studio/NEXT.md', 'studio/DONE.md', 'studio/task-holds.json', 'studio/pending-review.json', 'studio/handoffs'];
-// Board files whose conflicting rows are all kept (one task per line: list items and table rows).
+// Board files whose conflicting rows are all kept (one task per line).
 export const ROW_FILES = ['studio/NEXT.md', 'studio/DONE.md'];
 const git = (args, cwd, opts = {}) => spawnSync('git', ['-c', 'core.quotePath=false', ...args], { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts });
 const out1 = (r) => (r.status === 0 ? r.stdout.trim() : '');
 
-/** The checkout to work on: git's top level for the folder it runs in (never this file's folder: a copy runs anywhere). */
+/** The checkout to work on: git's top level for the current folder, never this file's folder (a copy runs anywhere). */
 export function repoRoot(cwd = process.cwd()) {
   const r = git(['rev-parse', '--show-toplevel'], cwd);
   return r.status === 0 && r.stdout.trim() ? path.resolve(r.stdout.trim()) : null;
 }
 const ROOT = repoRoot() || process.cwd();
 
-/** Board files with uncommitted changes (modified, staged, new or deleted): [{ file, state }], or null when not a git checkout. */
+/** Board files with uncommitted changes: [{ file, state }], or null when not a git checkout. */
 export function dirtyBoard(root = ROOT) {
   if (!root) return null;
   const r = git(['status', '--porcelain', '--untracked-files=all', '--', ...BOARD_FILES], root);
@@ -76,7 +62,7 @@ export function dirtyBoard(root = ROOT) {
   return r.stdout.split('\n').filter((l) => l.length > 3).map((l) => ({ state: l.slice(0, 2), file: l.slice(3).replace(/^.* -> /, '').replace(/^"|"$/g, '') }));
 }
 
-/** Board files a stash changed: tracked changes against the commit it was made on, plus its untracked files (third parent). */
+/** Board files a stash changed, including its untracked files (third parent). */
 function stashBoardFiles(sha, root) {
   const files = new Set(git(['diff', '--name-only', '--no-renames', `${sha}^1`, sha, '--', ...BOARD_FILES], root).stdout.split('\n').filter(Boolean));
   const untracked = new Set();
@@ -99,7 +85,7 @@ export function stashesWithBoard(root = ROOT) {
   return out;
 }
 
-/** Copy the board files as they are now to .studio/board-snapshots/<time>/; returns that folder (repo-relative). */
+/** Copy the board files to .studio/board-snapshots/<time>/; returns that folder (repo-relative). */
 export function snapshotBoard(root = ROOT, now = new Date()) {
   const rel = path.posix.join('.studio', 'board-snapshots', now.toISOString().replace(/[:.]/g, '-'));
   const dest = path.join(root, rel);
@@ -136,14 +122,14 @@ export function checkUpgrade(root = ROOT) {
   return { ok: dirty.length === 0, dirty, stashes, lines };
 }
 
-// ---- 2.60.0 (#3): who may take an update, the merge, a stash's board rows ----
+// ---- who may take an update, the merge, a stash's board rows ----
 
 const AGENT_SHELL = ['CLAUDECODE', 'AI_AGENT', 'CODEX_SANDBOX', 'GEMINI_CLI'];
-// The same names harness/agent-env.mjs AGENTISH lists, for a studio too old to have it.
+// The names harness/agent-env.mjs AGENTISH lists, for a studio too old to have it.
 const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|scout|designer|balancer|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes|nim|sound|composer|writer)\b/i;
 
 const importFile = (f) => import(pathToFileURL(f).href);
-/** harness/permission.mjs: beside this file, in the studio, or (a studio older than 2.59.1) from the ref being merged. */
+/** harness/permission.mjs: beside this file, in the studio, or from the ref being merged. */
 async function loadPermission(root, ref = null) {
   for (const f of [path.join(path.dirname(SELF), 'permission.mjs'), path.join(root, 'harness', 'permission.mjs')]) {
     if (fs.existsSync(f)) { try { return await importFile(f); } catch {} }
@@ -159,13 +145,10 @@ async function loadPermission(root, ref = null) {
   }
   return null;
 }
-/**
- * 2.73.0 (f): a helper module with no harness imports (upgrade-baseline.mjs, upgrade-preflight.mjs): beside this file, in
- * the studio, or (a studio older than the helper, running this guard from the ref) from the ref, copied into .studio/.
- */
+/** A helper with no harness imports (upgrade-baseline.mjs, upgrade-preflight.mjs): beside this file, in the studio, or from the ref (copied to .studio/). */
 export async function loadHelper(name, root, ref = null) {
   const beside = path.join(path.dirname(SELF), name);
-  // Beside this file only when this file is a harness's own (a copy run from .studio/ may sit beside an older copy).
+  // Beside this file only when it is a harness's own (a copy in .studio/ may sit beside an older one).
   const first = path.basename(path.dirname(SELF)) === 'harness' ? [beside] : [];
   for (const f of [...first, path.join(root, 'harness', name)]) {
     if (fs.existsSync(f)) { try { return await importFile(f); } catch {} }
@@ -183,17 +166,14 @@ export async function loadHelper(name, root, ref = null) {
   return null;
 }
 
-/** The studio's event log (its own harness/event.mjs), or [] when it can't be read. */
+/** The studio's event log, or [] when unreadable. */
 async function studioEvents(root, limit = 200000) {
   const f = path.join(root, 'harness', 'event.mjs');
   if (!fs.existsSync(f)) return [];
   try { const m = await importFile(f); return m.readRecentEvents ? m.readRecentEvents(limit) : []; } catch { return []; }
 }
 
-/**
- * 2.73.0 (f): the "before" snapshot (harness/upgrade-baseline.mjs) just before an update merges, so the impact report
- * compares against the studio's numbers at that moment. Never stops the update: a failure is one line.
- */
+/** The "before" snapshot (harness/upgrade-baseline.mjs) just before a merge. A failure is one line, never a stop. */
 export async function beforeSnapshot({ root, from, to, ref, sha, by, env = process.env, now = new Date() }) {
   try {
     const b = await loadHelper('upgrade-baseline.mjs', root, ref);
@@ -210,9 +190,9 @@ async function agentLike(root, who) {
 }
 
 /**
- * May this caller take an update (or restore board rows) for <by>? { ok, why, via, recordedBy, permission }.
- * Workers never. An agent (a launched session, a coding agent's shell, an agent's name in STUDIO_LOCK_OWNER) needs a
- * person's direct permission when needPermission (harness/permission.mjs); a person in their own terminal doesn't.
+ * May this caller take an update (or restore board rows) for <by>? { ok, why, via, recordedBy, permission }. Workers
+ * never; an agent (launched session, coding agent's shell, agent name in STUDIO_LOCK_OWNER) needs a person's direct
+ * permission when needPermission (harness/permission.mjs); a person in their own terminal doesn't.
  */
 export async function whoActs({ by, permission, env = process.env, root = ROOT, ref = null, needPermission = true }) {
   const who = String(by || '').trim();
@@ -243,9 +223,7 @@ async function emit(root, event) {
 }
 const versionAt = (root, rev) => { try { return JSON.parse(git(['show', `${rev}:package.json`], root).stdout).version || '?'; } catch { return '?'; } };
 const gitPath = (root, name) => path.resolve(root, out1(git(['rev-parse', '--git-path', name], root)));
-// 2.69.0: compared as real paths. git prints the absolute git dir with the real path but the common dir relative to
-// the folder it was given, so a root reached through a link (or a Windows 8.3 short name such as RUNNER~1) made the
-// main checkout look like a lane copy (CI windows: "this is a lane copy" on the main checkout).
+// Compared as real paths: a root reached through a link or a Windows 8.3 short name (RUNNER~1) would look like a lane copy.
 const realOf = (p) => { let r = p; try { r = fs.realpathSync.native(p); } catch {} return process.platform === 'win32' ? r.toLowerCase() : r; };
 export const isMainCheckout = (root) => {
   const d = out1(git(['rev-parse', '--absolute-git-dir'], root));
@@ -254,10 +232,7 @@ export const isMainCheckout = (root) => {
 };
 const unmergedFiles = (root) => git(['diff', '--name-only', '--diff-filter=U'], root).stdout.split('\n').filter(Boolean);
 
-/**
- * The qa/golden files a merge in progress changes, split by whether each comes exactly as it is on the merged commit
- * (fromRef) or not (combined with the studio's own change). Compares the index with HEAD and with <sha>.
- */
+/** The qa/golden files a merge changes: fromRef (exactly as on <sha>) or combined (with the studio's change). */
 export function mergeGoldens(root, sha) {
   const names = git(['diff', '--cached', '--name-only', '--no-renames', 'HEAD', '--', 'qa/golden'], root).stdout.split('\n').filter(Boolean);
   const fromRef = [];
@@ -272,10 +247,7 @@ export function mergeGoldens(root, sha) {
 
 const short = (files, n = 8) => `${files.slice(0, n).join(', ')}${files.length > n ? ` and ${files.length - n} more` : ''}`;
 
-/**
- * `npm run upgrade -- --merge <ref> --by <person> [--permission "…"] [--golden-reason "…"] [--continue]`.
- * Returns { ok, code, lines, commit?, backup?, conflicts? }.
- */
+/** `--merge` (see the header; `cont` = --continue). Returns { ok, code, lines, commit?, backup?, conflicts? }. */
 export async function upgradeMerge({ ref, by, permission = '', goldenReason = '', cont = false, root = ROOT, env = process.env, now = new Date() } = {}) {
   const lines = [];
   const stop = (why, extra = {}) => ({ ok: false, code: 1, lines: [...lines, `[upgrade] Not merged: ${why}`], ...extra });
@@ -303,10 +275,10 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
   const to = versionAt(root, sha);
   if (!cont && git(['merge-base', '--is-ancestor', sha, 'HEAD'], root).status === 0) return { ok: true, code: 0, lines: [...lines, `[upgrade] ${branch} already has ${ref} (${sha.slice(0, 10)}): nothing to merge.`] };
 
-  // 2.73.0 (f): the scorecard just before the update (.studio/upgrades/<from>-to-<to>.json; kept on --continue).
+  // The scorecard just before the update (.studio/upgrades/<from>-to-<to>.json; kept on --continue).
   const snap = await beforeSnapshot({ root, from, to, ref, sha, by, env, now });
   lines.push(...snap.lines);
-  // A backup of the branch as it was (reused when it already points there).
+  // Backup of the branch (reused when it already points there).
   let backup = `backup/pre-${to}`;
   const head = out1(git(['rev-parse', 'HEAD'], root));
   const existing = out1(git(['rev-parse', '--verify', '--quiet', `refs/heads/${backup}`], root));
@@ -317,8 +289,11 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
   }
   lines.push(`[upgrade] ${branch} backed up as ${backup} (${head.slice(0, 10)}).`);
 
+  const betaBefore = betaAt(root, 'HEAD');
   if (!cont) {
     const m = git(['merge', '--no-ff', '--no-commit', sha], root, { env: { ...env, GIT_MERGE_AUTOEDIT: 'no' } });
+    // Beta mode is the owner's switch: studio/beta.json stays as the studio had it.
+    keepStudioBeta(root, betaBefore);
     const conflicts = unmergedFiles(root);
     if (conflicts.length) {
       await emit(root, { type: 'upgrade.merge_conflict', agent: String(by).trim().slice(0, 60), msg: `harness update ${ref} (${from} -> ${to}) stopped on ${conflicts.length} conflicting file(s): ${short(conflicts, 5)}`.slice(0, 600), meta: { ref, sha, from, to, backup, files: conflicts.slice(0, 50), recordedBy: who.recordedBy } });
@@ -333,7 +308,7 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
     if (m.status !== 0 || !out1(git(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], root))) return stop(`git merge refused: ${(m.stderr || m.stdout).trim().split('\n').slice(0, 6).join(' / ')}`, { backup });
   }
 
-  // Goldens: the ones that come exactly as the ref has them carry the upgrade's reason; a combined one needs a person's.
+  // Goldens exactly as on the ref carry the upgrade's reason; a combined one needs a person's.
   const g = mergeGoldens(root, sha);
   const reason = String(goldenReason || '').trim();
   if (g.combined.length && reason.length < 10) {
@@ -341,6 +316,7 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
     return stop(`${g.combined.length} golden file(s) differ from ${ref}'s (the merge combined the studio's change with the update's): ${short(g.combined)}. ${cont ? 'The merge is still in progress. ' : 'The merge was undone. '}Say why the recorded answers changed: --golden-reason "<why, 10+ characters>" (it is added as a Golden-Reason trailer).`, { backup, combinedGoldens: g.combined });
   }
 
+  if (cont) keepStudioBeta(root, betaBefore);
   const trailers = [`Upgrade-By: ${String(by).trim()}`];
   if (who.permission) trailers.push(`Upgrade-Permission: ${who.permission}`);
   trailers.push(`Upgrade-Recorded-By: ${who.recordedBy}`, `Upgrade-Ref: ${ref} ${sha}`, `Upgrade-Versions: ${from} -> ${to}`, `Upgrade-Backup: ${backup}`);
@@ -349,29 +325,25 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
   const msg = [`upgrade: merge harness ${to} from ${ref} into ${branch} (${from} -> ${to})`, '', ...trailers, ''].join('\n');
   const msgFile = gitPath(root, 'STUDIO_UPGRADE_MSG');
   fs.writeFileSync(msgFile, msg);
-  // The main-checkout guard lets exactly this merge through: STUDIO_UPGRADE_MERGE is this commit, in this commit's own
-  // environment, and pre-commit checks MERGE_HEAD is it. Every other hook runs as for any commit.
+  // STUDIO_UPGRADE_MERGE opens the main-checkout guard for this commit only; other hooks run as usual.
   const c = git(['commit', '-F', msgFile], root, { env: { ...env, STUDIO_UPGRADE_MERGE: sha } });
   try { fs.rmSync(msgFile, { force: true }); } catch {}
   if (c.status !== 0) {
     return stop(`the hooks refused the merge commit (the merge is still in progress; fix what they say and run --continue, or undo it with git merge --abort):\n${`${c.stdout}${c.stderr}`.trim().split('\n').slice(-15).map((l) => `  ${l}`).join('\n')}`, { backup });
   }
   const commit = out1(git(['rev-parse', 'HEAD'], root));
-  // 2.77.1 (B-100): the update's own commits were made on GitHub, without this studio's hooks: list them as exempt
-  // (the grandfather list, by sha and patch-id) so the hooks gate on main doesn't fail on them. The studio's own new
-  // commits are still judged. The merged harness's helper, loaded from the studio; a failure is said, never fatal.
+  lines.push(betaAcrossLine(betaBefore, betaAt(root, 'HEAD')));
+  // List the update's commits (made without this studio's hooks) as exempt; a failure is said, never fatal.
   try {
     const hs = await import(pathToFileURL(path.join(root, 'harness', 'hook-stamp.mjs')).href);
-    // From the hooks gate's own base, not just the old head: commits of an earlier update that was merged before this
-    // step existed (2.77.0 on the crew's main) are listed too. Only the ref's history: the studio's own commits aren't in it.
+    // From the hooks gate's own base, so an earlier unlisted update is covered too.
     const b = hs.changeBase ? await hs.changeBase(env).catch(() => null) : null;
     const gf = hs.grandfatherRange ? await hs.grandfatherRange(`${b?.base || head}..${sha}`, root) : null;
     if (gf?.ok && gf.added) lines.push(`[upgrade] ${gf.added} commit(s) of the update listed as made without this studio's hooks (exempt from the hooks gate)${gf.merges ? `, ${gf.merges} of them its own merge commits (2.78.1)` : ''}.`);
     else if (gf && !gf.ok) lines.push(`[upgrade] WARN couldn't list the update's commits for the hooks gate (${gf.why}): node harness/hook-stamp.mjs grandfather adds them by hand.`);
   } catch (e) { lines.push(`[upgrade] WARN couldn't list the update's commits for the hooks gate (${String(e?.message || e).slice(0, 160)}).`); }
-  // 2.78.2 (g, item 18): open engine-porter tasks added before engine tracks get their track (the studio's only engine;
-  // with several they are listed for a person), and a track written "unity" reads as engine:unity. The merged harness's
-  // helper, loaded from the studio; a studio without it (before 2.78.2) or a failure is said, never fatal.
+  // Open engine-porter tasks get their track (the studio's only engine; with several they are listed for a person);
+  // "unity" reads as engine:unity. A missing helper or failure is said, never fatal.
   try {
     const etf = path.join(root, 'harness', 'engine-tracks.mjs');
     const et = fs.existsSync(etf) ? await import(pathToFileURL(etf).href) : null;
@@ -385,7 +357,7 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
     msg: `harness update ${ref} (${from} -> ${to}) merged into ${branch} as ${commit.slice(0, 10)} for ${String(by).trim()}${who.permission ? ` (recorded by ${who.recordedBy} on their permission: "${who.permission.slice(0, 120)}")` : ''}; backup ${backup}`.slice(0, 600),
     meta: { ref, sha, from, to, branch, backup, commit, by: String(by).trim().slice(0, 60), recordedBy: who.recordedBy, permission: who.permission || null, goldens: g.fromRef.length + g.combined.length, ...(snap.file ? { baseline: snap.file } : {}) },
   });
-  // 2.67.0 (B-49): every lane copy takes the update now, so the next train doesn't hand each one back as stale.
+  // Lane copies take the update now, so the next train doesn't hand them back as stale.
   const lanes = refreshLanesAfterUpgrade({ root, by: String(by).trim(), env });
   return {
     ok: true, code: 0, commit, backup, lanes,
@@ -396,10 +368,38 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
   };
 }
 
-/**
- * 2.73.0 (f): `--preflight [--ref <ref>]` (harness/upgrade-preflight.mjs: read-only, before an update) or `--smoke
- * [--keep]` (harness/upgrade-smoke.mjs: right after one). Returns { ok, items, lines, scratch? }.
- */
+/** studio/beta.json as committed at `rev`: { present, on, text }. Read from git (this file also runs from a ref). */
+export const BETA_FILE = 'studio/beta.json';
+export function betaAt(root, rev = 'HEAD') {
+  const r = git(['show', `${rev}:${BETA_FILE}`], root);
+  if (r.status !== 0) return { present: false, on: false, text: null };
+  let on = false;
+  try { on = JSON.parse(r.stdout)?.on === true; } catch { /* unreadable: off */ }
+  return { present: true, on, text: r.stdout };
+}
+/** Put studio/beta.json back (staged) as the studio had it before the merge. */
+export function keepStudioBeta(root, before) {
+  const now = git(['show', `:${BETA_FILE}`], root);
+  const unmerged = git(['ls-files', '-u', '--', BETA_FILE], root).stdout.trim() !== '';
+  if (before.present) {
+    if (!unmerged && now.status === 0 && now.stdout === before.text) return false;
+    git(['checkout', 'HEAD', '--', BETA_FILE], root);
+    return true;
+  }
+  if (now.status !== 0 && !unmerged) return false;
+  git(['rm', '-q', '-f', '--cached', '--', BETA_FILE], root);
+  try { fs.rmSync(path.join(root, BETA_FILE), { force: true }); } catch { /* gone */ }
+  return true;
+}
+/** Beta mode before and after the update, one line. */
+export function betaAcrossLine(before, after) {
+  if (before.on && after.on) return '[upgrade] Beta mode was on before the upgrade and is on after (studio/beta.json kept as the studio had it).';
+  if (!before.on && !after.on) return `[upgrade] Beta mode was off before the upgrade and is off after${before.present ? '' : ' (no studio/beta.json)'}.`;
+  if (before.on) return `[upgrade] WARN beta mode was on before the upgrade and is OFF after: studio/beta.json ${after.present ? 'says on: false' : 'is gone'} in the merge commit. The owner turns it on again (npm run beta -- on --by <owner>).`;
+  return '[upgrade] WARN beta mode was off before the upgrade and is ON after: the update brought a studio/beta.json; the owner turns it off (npm run beta -- off --by <owner>).';
+}
+
+/** `--preflight` or `--smoke` (see the header). Returns { ok, items, lines, scratch? }. */
 export async function prePost({ root = ROOT, smokeRun = false, ref = null, keep = false, env = process.env } = {}) {
   if (smokeRun) {
     const f = path.join(root, 'harness', 'upgrade-smoke.mjs');
@@ -416,10 +416,7 @@ export async function prePost({ root = ROOT, smokeRun = false, ref = null, keep 
   return pf.preflight({ root, ref, env, deps: { checkUpgrade, isMainCheckout } });
 }
 
-/**
- * 2.71.1 (B): the last harness update merged here (first-parent history; a commit with an Upgrade-Backup trailer and two
- * parents) that no later rollback (an Upgrade-Rollback-Of trailer) undid: { sha, backup, ref, versions } or null.
- */
+/** The last update merge (first-parent commit with an Upgrade-Backup trailer) no Upgrade-Rollback-Of undid: { sha, backup, ref, versions } or null. */
 export function lastUpgradeMerge(root = ROOT, { depth = 2000 } = {}) {
   const r = git(['log', '--first-parent', `-n${depth}`, '--format=%H%x1f%P%x1f%B%x1e', 'HEAD'], root);
   if (r.status !== 0) return null;
@@ -439,13 +436,11 @@ export function lastUpgradeMerge(root = ROOT, { depth = 2000 } = {}) {
 }
 
 /**
- * 2.71.1 (B): `npm run upgrade -- --rollback --by <person> [--permission "…"]`: one command back to the harness the
- * studio had before its last update. It reverts that update's merge commit (git revert -m 1: the studio's own work since
- * stays, nothing is reset or deleted, no branch is touched), through the hooks with the main-checkout guard opened for
- * exactly this revert (STUDIO_UPGRADE_REVERT = the merge, checked against REVERT_HEAD), then refreshes the lanes, and
- * records an upgrade.rolled_back event and a decision-log entry. Refuses with uncommitted board changes or any other
- * uncommitted tracked change, in a lane copy, mid-merge or mid-revert, and on a conflict (the revert is undone, the
- * files are named). Who may: the same as --merge (whoActs). Returns { ok, code, lines, commit?, merge?, backup? }.
+ * `--rollback`: git revert -m 1 of the last update's merge (the studio's own work stays), through the hooks with the
+ * guard opened for it (STUDIO_UPGRADE_REVERT = the merge, checked against REVERT_HEAD); then refreshes the lanes and
+ * records an upgrade.rolled_back event and a decision-log entry. Refuses with uncommitted tracked changes, in a lane
+ * copy, mid-merge or mid-revert, and on a conflict (undone, files named). Who may: as --merge.
+ * Returns { ok, code, lines, commit?, merge?, backup? }.
  */
 export async function upgradeRollback({ by, permission = '', root = ROOT, env = process.env } = {}) {
   const lines = [];
@@ -479,7 +474,7 @@ export async function upgradeRollback({ by, permission = '', root = ROOT, env = 
     }
     return stop(`git revert refused: ${(rv.stderr || rv.stdout).trim().split('\n').slice(0, 6).join(' / ')}`, { merge: m.sha, backup: m.backup });
   }
-  // Goldens that come back exactly as they were before the update carry the rollback's reason.
+  // Goldens back exactly as before the update carry the rollback's reason.
   const goldens = git(['diff', '--cached', '--name-only', '--no-renames', 'HEAD', '--', 'qa/golden'], root).stdout.split('\n').filter(Boolean);
   const trailers = [`Upgrade-Rollback-Of: ${m.sha}`, `Upgrade-Rollback-By: ${String(by).trim()}`];
   if (who.permission) trailers.push(`Upgrade-Permission: ${who.permission}`);
@@ -501,8 +496,7 @@ export async function upgradeRollback({ by, permission = '', root = ROOT, env = 
     msg: `harness update ${m.sha.slice(0, 10)} (${m.versions || '?'}) rolled back on ${branch} as ${commit.slice(0, 10)} for ${String(by).trim()}${who.permission ? ` (recorded by ${who.recordedBy} on their permission)` : ''}; backup ${m.backup}`.slice(0, 600),
     meta: { merge: m.sha, commit, branch, backup: m.backup, versions: m.versions || null, by: String(by).trim().slice(0, 60), recordedBy: who.recordedBy, permission: who.permission || null, sameTreeAsBackup: Boolean(sameAsBackup) },
   });
-  // The decision log (harness/decisions-log.mjs, 2.71.0): the harness now on disk is the one rolled back to; an older one
-  // without the log gets none (the event and the commit's trailers still record it).
+  // The decision log (harness/decisions-log.mjs); an older harness without it gets none.
   let logged = false;
   for (const f of [path.join(root, 'harness', 'decisions-log.mjs'), path.join(path.dirname(SELF), 'decisions-log.mjs')]) {
     if (logged || !fs.existsSync(f)) continue;
@@ -521,11 +515,9 @@ export async function upgradeRollback({ by, permission = '', root = ROOT, env = 
 }
 
 /**
- * 2.67.0 (B-49): after a merged update, `lanes refresh --all` (harness/lanes.mjs, 2.65.0) from the studio as it is now
- * (the updated harness), so each lane copy merges main and runs its targeted tests. A lane whose session is running,
- * with uncommitted work or a merge in progress is skipped, never touched; a conflict is aborted and named (nothing is
- * resolved). STUDIO_UPGRADE_REFRESH=off keeps the old behaviour (no refresh), =no-tests merges without the tests.
- * Returns { ran, refreshed, conflicted, red, skipped, results, lines }; never throws, never fails the upgrade.
+ * After a merged update, `lanes refresh --all` (harness/lanes.mjs) from the updated harness. A lane with a running
+ * session, uncommitted work or a merge in progress is skipped; a conflict is aborted and named. Honours
+ * STUDIO_UPGRADE_REFRESH. Returns { ran, refreshed, conflicted, red, skipped, results, lines }; never throws.
  */
 export function refreshLanesAfterUpgrade({ root = ROOT, by, env = process.env } = {}) {
   const mode = String(env.STUDIO_UPGRADE_REFRESH || '').trim().toLowerCase();
@@ -534,11 +526,8 @@ export function refreshLanesAfterUpgrade({ root = ROOT, by, env = process.env } 
   const script = path.join(root, 'harness', 'lanes.mjs');
   if (!fs.existsSync(script)) return empty('this studio has no harness/lanes.mjs');
   const args = [script, 'refresh', '--all', '--by', String(by || ''), '--json', ...(mode === 'no-tests' ? ['--no-tests'] : [])];
-  // 2.76.0 (B-81): the refresh runs in its own background process (detached: it outlives this command and whatever
-  // limit its caller's shell has) and the upgrade waits for it at most STUDIO_UPGRADE_REFRESH_WAIT_S (120) seconds.
-  // On the crew's PC the refresh (every lane's targeted tests) ran past its caller's limit, gave "exit 143", and the
-  // next train bounced every stale lane on the hooks check. A refresh still running is said so; the train refreshes a
-  // lane whose harness is still behind main before it checks it (harness/train-refresh.mjs).
+  // Detached (it outlives a caller's shell time limit); waits at most STUDIO_UPGRADE_REFRESH_WAIT_S (120) seconds. The
+  // train refreshes a lagging lane first (harness/train-refresh.mjs).
   const r = runRefreshBackground(root, args, env);
   let j = null;
   try { j = JSON.parse(String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{')).pop()); } catch { j = null; }
@@ -563,10 +552,7 @@ export function refreshLanesAfterUpgrade({ root = ROOT, by, env = process.env } 
   return out;
 }
 
-/**
- * 2.76.0 (B-81): run `lanes refresh` detached, its output in .studio/upgrades/lanes-refresh-<time>.log, and wait for it
- * at most STUDIO_UPGRADE_REFRESH_WAIT_S (120; 0 = don't wait) seconds. { stdout, status, running, pid, log, waitedS }.
- */
+/** Run `lanes refresh` detached (log .studio/upgrades/lanes-refresh-<time>.log), waiting at most STUDIO_UPGRADE_REFRESH_WAIT_S. { stdout, status, running, pid, log, waitedS }. */
 export function runRefreshBackground(root, args, env = process.env) {
   const dir = path.join(root, '.studio', 'upgrades');
   fs.mkdirSync(dir, { recursive: true });
@@ -574,7 +560,7 @@ export function runRefreshBackground(root, args, env = process.env) {
   const logFile = path.join(dir, `lanes-refresh-${stamp}.log`);
   const exitFile = `${logFile}.exit`;
   const rel = path.relative(root, logFile).split(path.sep).join('/');
-  // A tiny wrapper records the exit code next to the log, so the wait knows the refresh is over (not only its pid).
+  // A wrapper records the exit code next to the log.
   const wrapper = `const { spawnSync } = require('node:child_process'); const fs = require('node:fs');
 const r = spawnSync(process.execPath, ${JSON.stringify(args)}, { cwd: ${JSON.stringify(root)}, stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true });
 fs.writeFileSync(${JSON.stringify(exitFile)}, String(r.status === null ? 'signal ' + (r.signal || '') : r.status));`;
@@ -600,10 +586,7 @@ fs.writeFileSync(${JSON.stringify(exitFile)}, String(r.status === null ? 'signal
 /** Is every line of a conflict side a task row (a list item or a table row) or blank? */
 const rowLine = (l) => { const t = l.replace(/\r$/, ''); return !t.trim() || /^\s*([-*+]|\d+[.)])\s/.test(t) || /^\s*\|/.test(t); };
 
-/**
- * Resolve git merge-file's conflict blocks by keeping both sides' rows (ours first, then theirs not already there).
- * Returns { text } or { refused: '<first line of a block that isn't only rows>' }.
- */
+/** Resolve git merge-file's conflict blocks by keeping both sides' rows. Returns { text } or { refused: '<first line of a block that isn't only rows>' }. */
 export function unionRows(merged) {
   const src = merged.split('\n');
   const outL = [];
@@ -708,7 +691,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF)) {
     ].join('\n'));
     process.exit(0);
   }
-  // 2.73.0 (f): the preflight (before an update, read-only) and the smoke (right after one).
   if (a.includes('--preflight') || a.includes('--smoke')) {
     const root = repoRoot();
     if (!root) { console.error('[upgrade] not a git checkout: run it in the studio\'s main checkout'); process.exit(1); }
@@ -717,7 +699,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF)) {
     else for (const l of r.lines) (r.ok ? console.log : console.error)(l);
     process.exit(r.ok ? 0 : 1);
   }
-  // 2.69.0 (s): the upgrade watch (harness/upgrade-watch.mjs).
   if (a[0] === 'watch') {
     const uw = await import(pathToFileURL(path.join(path.dirname(SELF), 'upgrade-watch.mjs')).href);
     const root = repoRoot();

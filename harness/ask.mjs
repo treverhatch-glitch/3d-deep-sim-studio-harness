@@ -94,8 +94,9 @@ export function askKind(a) {
  * The owner's stand-in in this shell: the owner proxy, or a beta-mode actor (beta mode's named agents, an outside signer,
  * a Producer/Director session), for this kind of decision. { owner, agent, via } | { refused } | null. `by` names the
  * agent in a shell the harness didn't launch and that names nobody (2.79 (c): --by grokbot, --by opus-1).
+ * 2.84 (g): exported: `npm run review -- same-family` records its caller the same way.
  */
-function ownerStandIn(env = process.env, { by = '', kind = 'board' } = {}) {
+export function ownerStandIn(env = process.env, { by = '', kind = 'board' } = {}) {
   const said = selfNamingShell(env) && by ? { ...env, STUDIO_LOCK_OWNER: String(by).trim() } : env;
   try { const p = proxyShell({ env: said }); if (p.ok) return kind === 'board' || kind === 'protected' ? { owner: String(p.doc.by), agent: String(p.doc.agent), via: 'owner proxy' } : { refused: `${p.doc.agent} is the owner's proxy` }; } catch {}
   try {
@@ -171,7 +172,8 @@ export function answer(id, ans, by) {
   if (!r.ok) return r;
   if (r.a.status === 'answered') {
     const rec = r.a.recordedBy;
-    emitEvent({ type: 'ask.answered', agent: rec || r.a.answeredBy || by, to: r.a.by, msg: `${id} answered by ${r.a.answeredBy || by}${rec ? ` (recorded by ${rec}, ${r.a.via})` : ''}: ${r.a.answer} (${r.a.question})`.slice(0, 600), meta: { ask: id, by: r.a.answeredBy || by, ...(rec ? { recordedBy: rec, via: r.a.via, kind: r.a.kind } : {}) } });
+    // 2.84 (n): meta.role: answered from a launched session's shell (never news to the planning back-off, wake-gate.mjs).
+    emitEvent({ type: 'ask.answered', agent: rec || r.a.answeredBy || by, to: r.a.by, msg: `${id} answered by ${r.a.answeredBy || by}${rec ? ` (recorded by ${rec}, ${r.a.via})` : ''}: ${r.a.answer} (${r.a.question})`.slice(0, 600), meta: { ask: id, by: r.a.answeredBy || by, ...(rec ? { recordedBy: rec, via: r.a.via, kind: r.a.kind } : {}), ...(String(process.env.STUDIO_ROLE || '').trim() ? { role: String(process.env.STUDIO_ROLE).trim().toLowerCase() } : {}) } });
     // 2.79 (c): a stand-in's answer goes in the decisions log, like its releases and approvals.
     if (rec) { try { logDecision({ action: 'ask-answer', subject: id, by: rec, as: r.a.via === 'owner proxy' ? 'outside agent' : 'beta', why: `answered "${String(r.a.answer).slice(0, 120)}" for ${r.a.answeredBy}`, evidence: `${r.a.via} ${rec}: ${String(r.a.question).slice(0, 160)}` }); } catch {} }
   }
@@ -205,7 +207,8 @@ export async function reverse(id, ans, by) {
   return { ok: true, ask: r.a, task: t.id };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+// 2.84: the command-line part is an async function, not a top-level await: an import cycle through a top-level await ends the process with exit 13.
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)))(async () => {
   const argv = process.argv.slice(2);
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
   const pos = argv.filter((x, i) => !x.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--')));
@@ -244,4 +247,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   out(ask({ question: pos[0], options: flag('options') || [], def: flag('default'), timeout: flag('timeout'), why: flag('why') || '', by: flag('by') || undefined, task: flag('task') }), (r) => `${r.ask.id} asked${r.ask.deadline ? `; if nobody answers by ${r.ask.deadline.slice(0, 16)} UTC the default "${r.ask.default}" applies (logged)` : '; it waits for a person'}.${r.note ? ` ${r.note}` : ''}`);
-}
+})().catch((e) => { console.error(e?.stack || String(e)); process.exit(1); });

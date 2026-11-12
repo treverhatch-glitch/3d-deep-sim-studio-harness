@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
+import { backoffClause } from './wake-gate.mjs';
 import { activeCartridge, isTemplateCartridge } from './cartridge.mjs';
 import { queueNotice } from './comm-notice.mjs';
 import { defaultPushEngine, pushRecordEngine } from './engine-ram.mjs';
@@ -306,8 +307,10 @@ export function setScope(id, by) {
   return { ok: true, mode: effectiveMode(m) };
 }
 
+// 2.84 (a2): when a planning wake is backed off (harness/wake-gate.mjs), the mode line says when the next one is due.
+const backedOff = () => { try { const c = backoffClause(); return c ? ` (${c})` : ''; } catch { return ''; } };
 export function describeMode(e = effectiveMode()) {
-  return `${e.enginePush ? `ENGINE PUSH ${e.enginePush.engine}${e.enginePush.until ? ` until ${e.enginePush.until.slice(11, 16)} UTC` : ''}, ` : ''}${e.label}${e.chosen ? '' : ' (default; the game dev hasn\'t chosen yet: npm run mode -- set …)'}${e.boost ? `, MAX SPEED on${e.boostBuildersOnly ? ' (builders only: planning cadence unchanged)' : ''}${e.boostUntil ? ` until ${e.boostUntil.slice(11, 16)} UTC` : ''}` : ''}: up to ${e.maxAgents} agents (builders ${e.perRole.builder}), reviews on ${e.review === 'every-build' ? 'every build task' : 'whole systems'}, ${e.autoLaunch && e.autostart ? 'the watcher starts agents' : 'agents started by hand or npm run agent'}, Director every ${e.directorEveryHours} h, Producer every ${e.producerEveryHours} h. ${e.autostart ? `Auto-start is on${e.autostartBy ? ` (${e.autostartBy})` : ''}: the watcher and the supervisor may start agents on their own (npm run mode -- autostart off --by <name> stops that).` : `Auto-start is off: nothing starts on its own${e.autoLaunch ? ', although this pace would' : ''} (npm run mode -- autostart on --by <name> turns it on).`}`;
+  return `${e.enginePush ? `ENGINE PUSH ${e.enginePush.engine}${e.enginePush.until ? ` until ${e.enginePush.until.slice(11, 16)} UTC` : ''}, ` : ''}${e.label}${e.chosen ? '' : ' (default; the game dev hasn\'t chosen yet: npm run mode -- set …)'}${e.boost ? `, MAX SPEED on${e.boostBuildersOnly ? ' (builders only: planning cadence unchanged)' : ''}${e.boostUntil ? ` until ${e.boostUntil.slice(11, 16)} UTC` : ''}` : ''}: up to ${e.maxAgents} agents (builders ${e.perRole.builder}), reviews on ${e.review === 'every-build' ? 'every build task' : 'whole systems'}, ${e.autoLaunch && e.autostart ? 'the watcher starts agents' : 'agents started by hand or npm run agent'}, Director every ${e.directorEveryHours} h, Producer every ${e.producerEveryHours} h${backedOff()}. ${e.autostart ? `Auto-start is on${e.autostartBy ? ` (${e.autostartBy})` : ''}: the watcher and the supervisor may start agents on their own (npm run mode -- autostart off --by <name> stops that).` : `Auto-start is off: nothing starts on its own${e.autoLaunch ? ', although this pace would' : ''} (npm run mode -- autostart on --by <name> turns it on).`}`;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

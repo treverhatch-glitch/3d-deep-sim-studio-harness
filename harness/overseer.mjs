@@ -13,6 +13,8 @@
  *       does, what it signs as the owner (and under which grant), what stays human-only. docs/OVERSEER.md.
  *   npm run overseer -- can <action> [--by <agent>]    one verdict, by script: yes / ask / human-only, with the rule.
  *       The model proposes an action; this (and the command's own check, which uses the same rules) decides.
+ *   npm run overseer -- sheet [--json]                 2.84: everything waiting on a person or the overseer now, each with its reason
+ *       and the command that resolves it. Reads state only; changes nothing.
  *   npm run overseer -- pass [--hours 24] [--json]     the facts for one pass of the overseer's loop: blockers, tasks
  *       claimed again and again, repeated workarounds, stalls and reds, each with the kind of attention it needs.
  *
@@ -40,6 +42,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents } from './event.mjs';
+import { readJson } from './fsafe.mjs';
+import { TASK_LINE_RE } from './board-line.mjs';
 
 export const OVERSEER_REL = 'studio/overseer.json';
 const DAY = 86400000;
@@ -275,14 +279,190 @@ export async function overseerPass({ root = REPO_ROOT, now = Date.now(), hours =
 }
 export const passText = (p) => [`Overseer pass, last ${p.window.hours} h: ${p.landed} task(s) done; ${p.items.length ? `${p.items.length} thing(s) need the overseer` : 'nothing needs the overseer'}.`, ...p.items.map((i) => `  [${i.kind}] ${i.what}${i.detail ? `: ${i.detail}` : ''}. Next: ${i.next}.`)].join('\n');
 
+// ---- 2.84 (c): the sheet: everything that waits on a person or the overseer right now, with the command that resolves it.
+// It reads state files and the recent events and changes nothing. Each item: { who: 'person' | 'overseer' | 'info', what,
+// since (ISO or null), why, cmd (or null) }. A missing or malformed state file is an empty section, never a crash. ----
+
+const SHEET_HOURS = 24;
+const readJ = (f, dflt) => readJson(f, dflt) ?? dflt;
+/** "3 h", "45 min": how long ago `iso` was (empty when it has no time). */
+export function ageText(iso, now) {
+  const t = Date.parse(iso || '');
+  if (!Number.isFinite(t)) return '';
+  const m = Math.max(0, Math.round((now - t) / 60000));
+  return m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}` : `${m} min`;
+}
+/** The board as ids, read from studio/NEXT.md and DONE.md: { open: Map(id -> { title, role, mark }), done: Set }. */
+function sheetBoard(root) {
+  const open = new Map();
+  const done = new Set();
+  for (const f of ['NEXT.md', 'DONE.md']) {
+    let text = '';
+    try { text = fs.readFileSync(path.join(root, 'studio', f), 'utf8').replace(/\r\n?/g, '\n'); } catch { /* none */ }
+    for (const line of text.split('\n')) {
+      const m = line.trim().match(TASK_LINE_RE);
+      if (!m) continue;
+      if (/x/i.test(m[1]) || f === 'DONE.md') done.add(m[2]);
+      else open.set(m[2], { title: m[6].trim(), role: m[5].trim(), mark: m[1] });
+    }
+  }
+  for (const id of done) open.delete(id);
+  return { open, done };
+}
+
+/**
+ * The sheet as data: { at, hours, summary: { person, overseer }, sections: [{ key, title, items | groups }] }, sections in
+ * the order of docs/OVERSEER.md and none empty. `events` (newest last) is injected by the tests; the CLI reads a capped tail.
+ */
+export async function overseerSheet({ root = REPO_ROOT, now = Date.now(), events = null, hours = SHEET_HOURS } = {}) {
+  const ev = events || (() => { try { return readRecentEvents(50000); } catch { return []; } })();
+  const from = now - hours * 3600000;
+  const recent = ev.filter((e) => { const t = Date.parse(e?.ts) || 0; return t >= from && t <= now; });
+  const board = sheetBoard(root);
+  const rawHolds = readJ(path.join(root, 'studio', 'task-holds.json'), {});
+  const holds = rawHolds && typeof rawHolds.tasks === 'object' && rawHolds.tasks ? rawHolds.tasks : {};
+  const sections = [];
+  const add = (key, title, body) => { if ((body.items?.length || 0) + (body.groups?.reduce((n, g) => n + g.items.length, 0) || 0)) sections.push({ key, title, ...body }); };
+
+  // 1. asks
+  let asks = [];
+  try {
+    const { askKind } = await import('./ask.mjs');
+    const { ownerOnlyTopic } = await import('./owner-acts.mjs');
+    let names = [];
+    try { names = fs.readdirSync(path.join(root, 'studio', 'asks')).filter((f) => /^A-\d+\.json$/.test(f)).sort(); } catch { /* none */ }
+    for (const f of names) {
+      const a = readJ(path.join(root, 'studio', 'asks', f), null);
+      if (!a || a.status !== 'open') continue;
+      const kind = askKind(a);
+      const own = kind !== 'board' && kind !== 'protected';
+      const topic = own ? ownerOnlyTopic(a.question, a.why) : null;
+      asks.push({ who: own ? 'person' : 'overseer', id: a.id, what: `${a.id}: ${String(a.question || '').slice(0, 140)}`, since: a.at || null, kind, why: own ? `owner only: ${topic?.what || kind}` : `the overseer may answer it when it is the owner's proxy or in beta mode (${kind})`, cmd: `npm run ask -- answer ${a.id} "<answer>" --by <you>` });
+    }
+  } catch { asks = []; }
+  add('asks', 'Asks waiting', { groups: [{ label: 'Owner only: these need the person', items: asks.filter((a) => a.who === 'person') }, { label: 'The overseer may answer', items: asks.filter((a) => a.who === 'overseer') }].filter((g) => g.items.length) });
+
+  // 2. tasks held or parked
+  const grp = { watchdog: [], 'owner-only': [], blocked: [], held: [], parked: [] };
+  const doneNow = board.done;
+  for (const [id, h] of Object.entries(holds)) {
+    if (!h || typeof h !== 'object' || doneNow.has(id)) continue;
+    const title = board.open.get(id)?.title ? ` ${board.open.get(id).title.slice(0, 60)}` : '';
+    const p = h.parked;
+    if (p && typeof p === 'object') {
+      const over = p.until && (/^[A-Z]+-\d+$/.test(p.until) ? doneNow.has(p.until) : Number.isFinite(Date.parse(p.until)) && Date.parse(p.until) <= now);
+      if (!over) {
+        const kind = p.ownerOnly || p.reason === 'owner-only' ? 'owner-only' : p.by === 'watchdog' ? 'watchdog' : 'parked';
+        grp[kind].push({ who: kind === 'owner-only' ? 'person' : 'overseer', id, what: `${id}${title}`, since: p.at || null, why: `parked by ${p.by || 'someone'}${p.why ? `: ${String(p.why).slice(0, 160)}` : ''}${p.note ? ` (don't unpark until: ${String(p.note).slice(0, 100)})` : ''}`, cmd: `npm run task -- unpark ${id} --by <you>` });
+      }
+    }
+    if (h.held && typeof h.held === 'object') grp.held.push({ who: 'overseer', id, what: `${id}${title}`, since: h.held.at || null, why: `held for landing by ${h.held.by || 'someone'}${h.held.why ? `: ${String(h.held.why).slice(0, 160)}` : ''}`, cmd: `npm run task -- unhold ${id} --by <you>` });
+    if (h.until && Date.parse(h.until) > now) grp.blocked.push({ who: 'info', id, what: `${id}${title}`, since: null, why: `blocked until ${new Date(h.until).toISOString().slice(0, 16).replace('T', ' ')} UTC${h.why ? `: ${String(h.why).slice(0, 120)}` : ''}`, cmd: null });
+  }
+  const gl = { 'owner-only': 'Owner-only steps (parked by the harness)', watchdog: 'Parked by the watchdog', parked: 'Parked by a person or an agent', held: 'Held for the owner or a conductor (held for landing)', blocked: 'Blocked until a time (starts by itself)' };
+  add('held', 'Tasks held or parked', { groups: Object.keys(gl).map((k) => ({ label: gl[k], items: grp[k] })).filter((g) => g.items.length) });
+
+  // 3. train holds (the merge train's queue: a lane held for a release or an approval)
+  const q = readJ(path.join(root, '.studio', 'train', 'queue.json'), []);
+  const trainHolds = [];
+  for (const e of Array.isArray(q) ? q : []) {
+    if (!e || !e.task || !e.held || (e.released && e.released.head === e.head)) continue;
+    const tier = String(e.held.tier || '');
+    trainHolds.push({ who: /^c$/i.test(tier) ? 'person' : 'overseer', id: e.task, what: `${e.task} (${e.branch || 'lane'}) held${tier ? `, tier ${tier}` : ''}`, since: e.held.at || e.at || null, why: String(e.held.why || 'needs a release').slice(0, 200), cmd: `npm run task -- train release ${e.task} --by <you>` });
+  }
+  add('train-holds', 'Train holds', { items: trainHolds });
+
+  // 4. the engine train
+  const eng = [];
+  const T = (re) => recent.filter((e) => re.test(String(e?.type || '')));
+  const laterDone = (e) => ev.some((x) => x.type === 'task.done' && x.task === e.task && (Date.parse(x.ts) || 0) > (Date.parse(e.ts) || 0));
+  for (const e of T(/^task\.train\.[a-z0-9-]+\.dropped$/)) {
+    if (!e.task || laterDone(e)) continue;
+    const cause = e.meta?.cause;
+    eng.push({ who: 'overseer', id: e.task, what: `${e.task} handed back by the ${e.type.split('.')[2]} train`, since: e.ts, why: `${cause ? `cause "${cause}": ` : ''}${String(e.msg || '').slice(0, 160)}`, cmd: `npm run task -- done ${e.task} --train --agent <you>` });
+  }
+  const seenHalf = new Set();
+  for (const e of [...ev].reverse()) {
+    if (e.type !== 'task.half_landed' || !e.task || seenHalf.has(e.task)) continue;
+    seenHalf.add(e.task);
+    if (laterDone(e)) continue;
+    eng.push({ who: 'overseer', id: e.task, what: `${e.task} half landed`, since: e.ts, why: `its studio half landed, its ${e.meta?.engine || 'engine'} branch ${e.meta?.branch || ''} still has ${e.meta?.ahead ?? '?'} commit(s) to land`.replace(/\s+/g, ' '), cmd: `npm run task -- done ${e.task} --train --agent <you>` });
+  }
+  const ls = T(/^task\.train\.[a-z0-9-]+\.land_script$/).pop();
+  if (ls) eng.push({ who: 'info', id: null, what: 'a land script warning', since: ls.ts, why: String(ls.msg || '').slice(0, 220), cmd: `npm run task -- train status --engine ${String(ls.type).split('.')[2]}` });
+  const flaky = T(/^task\.train\.[a-z0-9-]+\.flaky$/).length;
+  if (flaky) eng.push({ who: 'info', id: null, what: `${flaky} flaky retr${flaky === 1 ? 'y' : 'ies'} in ${hours} h`, since: null, why: 'a batch failed once and passed on the second run: a test that fails under load is the game\'s to fix', cmd: null });
+  add('engine', 'Engine train', { items: eng });
+
+  // 5. chains
+  const gates = readJ(path.join(root, '.studio', 'line', 'state.json'), {})?.gates;
+  const chains = [];
+  for (const [g, rec] of Object.entries(gates && typeof gates === 'object' ? gates : {})) {
+    if (doneNow.has(g)) continue;
+    const waiting = Object.entries(holds).filter(([id, h]) => (h?.after || []).includes(g) && board.open.get(id)?.role === 'builder').map(([id]) => id);
+    if (!waiting.length) continue;
+    const since = Number.isFinite(rec?.since) ? new Date(rec.since).toISOString() : null;
+    chains.push({ who: 'overseer', id: g, what: `${g} gates ${waiting.length} builder task${waiting.length === 1 ? '' : 's'} (${waiting.slice(0, 5).join(', ')}${waiting.length > 5 ? ' …' : ''})`, since, why: 'split off the parts that do not need it, or remove the dependency', cmd: `npm run task -- after ${waiting[0]} --remove ${g}` });
+  }
+  add('chains', 'Chains', { items: chains });
+
+  // 6. dangling waits
+  const dang = [];
+  for (const [id, h] of Object.entries(holds)) {
+    if (!board.open.has(id)) continue;
+    for (const on of Array.isArray(h?.after) ? h.after : []) if (!board.open.has(on) && !board.done.has(on)) dang.push({ who: 'overseer', id, what: `${id} waits for ${on}`, since: null, why: `${on} is on neither the open board nor the done list, so ${id} can never start`, cmd: `npm run task -- after ${id} --remove ${on}` });
+  }
+  add('dangling', 'Dangling waits', { items: dang });
+
+  // 7. dead ends
+  const byTask = new Map();
+  for (const e of recent) if (e.type === 'task.paused' && e.task) { const r = byTask.get(e.task) || { n: 0, last: e }; r.n += 1; r.last = e; byTask.set(e.task, r); }
+  const dead = [...byTask.entries()].filter(([id, r]) => r.n >= 3 && !laterDone(r.last)).sort((a, b) => (Date.parse(b[1].last.ts) || 0) - (Date.parse(a[1].last.ts) || 0))
+    .map(([id, r]) => ({ who: 'overseer', id, what: `${id} handed back ${r.n} times in ${hours} h`, since: r.last.ts, why: String(r.last.msg || '').replace(/^Handed back [A-Z]+-\d+:\s*/, '').slice(0, 160), cmd: `npm run task -- park ${id} --by <you> --why "<the blocker>"` }));
+  add('dead-ends', 'Dead ends', { items: dead });
+
+  // 2.84 (g): one line when the studio lets a same-family review count; kept out of the item counts below.
+  const notes = [];
+  try {
+    const { readSameFamily, studioRoot } = await import('./review-family.mjs');
+    const sw = readSameFamily({ root: studioRoot(root) });
+    if (sw.value === 'on') notes.push(`Same-family reviews count (set by ${sw.by}, ${String(sw.at || '').slice(0, 10) || 'no date'}): a second model family is the stronger check.`);
+  } catch { /* no note */ }
+  const all = sections.flatMap((s) => s.items || s.groups.flatMap((g) => g.items));
+  return { at: new Date(now).toISOString(), hours, notes, summary: { person: all.filter((i) => i.who === 'person').length, overseer: all.filter((i) => i.who === 'overseer').length }, sections };
+}
+
+/** The sheet as text: one summary line, then each section, each item one or two lines. */
+export function sheetText(s, now = Date.parse(s.at)) {
+  const L = [`${s.summary.person} item${s.summary.person === 1 ? '' : 's'} wait${s.summary.person === 1 ? 's' : ''} on a person, ${s.summary.overseer} on the overseer (${s.at.slice(0, 16).replace('T', ' ')} UTC)`];
+  const item = (i) => {
+    const age = ageText(i.since, now);
+    L.push(`  - ${i.what}${age ? `, ${age}` : ''}: ${i.why}`);
+    if (i.cmd) L.push(`      → ${i.cmd}`);
+  };
+  for (const sec of s.sections) {
+    L.push('', `${sec.title}`);
+    for (const g of sec.groups || []) { L.push(` ${g.label}:`); g.items.forEach(item); }
+    (sec.items || []).forEach(item);
+  }
+  if (!s.sections.length) L.push('', 'Nothing waits.');
+  if (s.notes?.length) L.push('', ...s.notes);
+  return L.join('\n');
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const flag = (k) => { const i = argv.indexOf(`--${k}`); return i >= 0 && argv[i + 1] !== undefined && !String(argv[i + 1]).startsWith('--') ? argv[i + 1] : null; };
   if (argv.includes('--help') || argv.includes('-h')) {
     console.log(['Usage: npm run overseer [-- --json]   the stage the owner set and whether the next stage\'s criteria hold (a suggestion)',
-      '       npm run overseer -- role [--by <agent>] | can <action> [--by <agent>] | pass [--hours 24]   (docs/OVERSEER.md)',
+      '       npm run overseer -- role [--by <agent>] | can <action> [--by <agent>] | pass [--hours 24] | sheet [--json]   (docs/OVERSEER.md)',
       `       npm run overseer -- record ${RECORD_KINDS.join('|')} <subject> --by <person> [--note "…"] [--permission "…"]`].join('\n'));
     process.exit(0);
+  }
+  // 2.84 (c): the sheet; no top-level await here (an import cycle would end the process with exit 13).
+  if (argv[0] === 'sheet') {
+    const runSheet = async () => { const sh = await overseerSheet({ hours: Number(flag('hours')) > 0 ? Number(flag('hours')) : SHEET_HOURS }); console.log(argv.includes('--json') ? JSON.stringify(sh, null, 2) : sheetText(sh)); process.exit(0); };
+    runSheet().catch((e) => { console.error(`overseer sheet failed: ${e?.message || e}`); process.exit(1); });
   }
   if (argv[0] === 'role') { const r = await overseerRole({ by: flag('by') }); console.log(argv.includes('--json') ? JSON.stringify(r, null, 2) : roleText(r)); process.exit(0); }
   if (argv[0] === 'can') {
@@ -296,7 +476,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     (r.ok ? console.log : console.error)(r.text);
     process.exit(r.code);
   }
-  const s = await overseerStatus({});
-  console.log(argv.includes('--json') ? JSON.stringify(s, null, 2) : overseerText(s));
-  process.exit(0);
+  if (argv[0] !== 'sheet') {
+    const s = await overseerStatus({});
+    console.log(argv.includes('--json') ? JSON.stringify(s, null, 2) : overseerText(s));
+    process.exit(0);
+  }
 }

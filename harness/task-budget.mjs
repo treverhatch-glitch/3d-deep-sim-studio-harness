@@ -17,8 +17,7 @@
  *
  * 2.60.1 (B-39): the claim clock (minutes) doesn't run while the lane waits to land on purpose: from `task hold`
  * (task.held) or `task done --train` (task.train.queued) until `task unhold` (task.unheld) or the train hands it back
- * (task.train.dropped); and a task held or queued right now is never stopped for its minutes. 2.77.0 (o): nor while it
- * is out to a remote worker (task.remote.leased until task.remote.ended: the lease, STUDIO_REMOTE_LEASE_H, is its limit). Sessions and tokens
+ * (task.train.dropped); and a task held or queued right now is never stopped for its minutes. Sessions and tokens
  * still count, and a lane that is neither held nor queued is clocked as before.
  *
  * 0 turns one limit off; STUDIO_TASK_BUDGET=off turns the whole check off. A task over budget is parked
@@ -48,9 +47,8 @@ export function taskBudgetLimits(env = process.env) {
 /** Events that start the count again: the task finished, was reopened, or a person unparked it. */
 const isReset = (e) => ['task.done', 'task.forced', 'task.reopened', 'task.budget.reset'].includes(e.type) || (e.type === 'task.hold' && /unparked/.test(e.msg || ''));
 const ENDS_CLAIM = new Set(['task.paused', 'task.done', 'task.forced', 'task.reopened']);
-// 2.77.0 (o): a task out to a remote worker (harness/remote-workers.mjs) runs on its own lease, not the local claim clock.
-const PAUSES_CLOCK = new Set(['task.held', 'task.train.queued', 'task.remote.leased']);
-const RESUMES_CLOCK = new Set(['task.unheld', 'task.train.dropped', 'task.remote.ended']);
+const PAUSES_CLOCK = new Set(['task.held', 'task.train.queued']);
+const RESUMES_CLOCK = new Set(['task.unheld', 'task.train.dropped']);
 
 /**
  * 2.83: the periods in which no supervisor was running, [from, to] in ms, from the events: a supervisor.stop to the next

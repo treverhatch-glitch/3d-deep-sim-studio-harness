@@ -63,7 +63,7 @@ export function smokeEnv(base, scratch) {
     AGENT_EVENTS_FILE: path.join(scratch, '.studio', 'events.jsonl'),
     STUDIO_GAME: 'smoke', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_WATCHDOG: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_HEAVY_SLOTS: '0',
     STUDIO_VISUAL_GATE: 'off', STUDIO_VERIFY_DETACH: 'off', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_UPGRADE_REFRESH: 'off', STUDIO_HOOKS_CHECK: 'on',
-    STUDIO_LANE_LIVE_MIN: '0', STUDIO_WORKAROUND_DETECT: 'off', STUDIO_UPGRADE_WATCH_MIN: 'off', STUDIO_REPORT_HOUR: 'off', STUDIO_HARNESS_SCOUT: 'off', STUDIO_TRAIN_AUTO: 'off',
+    STUDIO_LANE_LIVE_MIN: '0', STUDIO_WORKAROUND_DETECT: 'off', STUDIO_UPGRADE_WATCH_MIN: 'off', STUDIO_REPORT_HOUR: 'off', STUDIO_TRAIN_AUTO: 'off',
     STUDIO_OWNER_KEY: path.join(scratch, '.studio', 'no-owner-key.pem'),
     GIT_AUTHOR_NAME: 'studio smoke', GIT_AUTHOR_EMAIL: 'smoke@example.invalid', GIT_COMMITTER_NAME: 'studio smoke', GIT_COMMITTER_EMAIL: 'smoke@example.invalid',
   };

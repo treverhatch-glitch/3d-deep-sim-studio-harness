@@ -1,20 +1,12 @@
 #!/usr/bin/env node
 /**
- * harness/engine-tracks.mjs — 2.77.0 (u, P5.1-P5.6): one table for every engine target (Unity, Godot, Unreal, or any
- * engine a studio names), so its lane, land gate, merge train and rig cost come from data, not Unity-only code paths.
+ * harness/engine-tracks.mjs — one table for every engine target (Unity, Godot, Unreal, or any engine a studio names), so
+ * its lane, land gate, merge train and rig cost come from data, not Unity-only code paths.
  *
- * Why (the crew, 2026-11-04): the Unity work ran OUTSIDE the harness (a hand-run agent in the Unity repo with its own
- * land script and a 12 GB RAM floor) because the harness's Unity track wasn't fed end to end:
- *   1. a Unity pass titled like real work ("Pass 11: …") is a "change" task, and its done check looked for commits and
- *      a full verify in the STUDIO repo, where an engine pass in its own repo has neither: `task done --train` refused
- *      it ("no changes found"). The 2.63 train test dodged it with a "Plan …" title (type none).
- *   2. the track lived only in the task.added event, read from the last 20000 events: on a busy board an older engine
- *      task lost its track and was closed as a web task.
- *   3. nobody ran `task train --unity`: the web train has its daemon, the Unity queue waited for a person.
- *   4. a launched porter got a lane copy of the studio, not a checkout of the engine repo on its branch.
- * The fixes: engine task records (this file), engine-aware done checks (harness/done-check.mjs engineWorkChecks), the
- * Line Producer starting an engine's train in a quiet window (harness/line-producer.mjs enginePass), and an engine
- * worktree per launched pass (engineLaunch below, used by harness/agent.mjs).
+ * An engine pass has its own record (this file), is judged in the engine's repo (harness/done-check.mjs
+ * engineWorkChecks), has its train started by the Line Producer in a quiet window (harness/line-producer.mjs
+ * enginePass), and gets an engine worktree per launched pass (engineLaunch below, used by harness/agent.mjs). The track
+ * lives in .studio/engine/tasks.json, not only in the task.added event (which can scroll out of the last 20000 events).
  *
  * The table: ENGINE_TARGETS (defaults), merged with studio/game.json "engines": { "<name>": { ... } } (protected: the
  * owner's). A studio can name any engine there; an unknown name gets the generic defaults.
@@ -22,11 +14,11 @@
  *   rig         { ramGb, cpuThreads, minutes }: the expected cost of ONE land run (minutes: until durations exist)
  *   floor       { env, gb }: the free-RAM floor a land run waits for (env wins; then the lane's tuned ram-floor)
  *   tune        the settings the engine lane may change itself (harness/engine-tune.mjs); engines.<x>.tune.allow narrows
- *   files       queue/lock/last files of its train and gate: unity keeps its 2.63 names (unity-queue.json, …)
+ *   files       queue/lock/last files of its train and gate (unity-queue.json, …)
  *
  *   node harness/engine-tracks.mjs [list] [--json]       every engine target, its land command, queue and cost
  *   node harness/engine-tracks.mjs task <T-ID> [--json]   the engine record of one task
- *   node harness/engine-tracks.mjs backfill [--dry-run] [--by <name>]   2.78.2: open engine-porter tasks get their track
+ *   node harness/engine-tracks.mjs backfill [--dry-run] [--by <name>]   open engine-porter tasks get their track
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,12 +28,13 @@ import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
 import { learnedNeed } from './engine-ram.mjs';
 import { readJson } from './fsafe.mjs';
+import { splitPhantom, phantomNote } from './eol-only.mjs';
 
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(tmp, f); };
 const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
 const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 
-/** The settings every engine lane may tune itself (P5.4). Each: { what, check(value) -> { ok, value, why } }. */
+/** The settings every engine lane may tune itself. Each: { what, check(value) -> { ok, value, why } }. */
 export const TUNE_KEYS = {
   'quality-level': { what: 'the quality level its editor runs and builds use (a name or an index)', check: (v) => (/^[A-Za-z0-9 _.-]{1,40}$/.test(String(v)) ? { ok: true, value: /^\d+$/.test(String(v)) ? Number(v) : String(v) } : { ok: false, why: 'a quality level is a name or an index (letters, digits, space, _ . -)' }) },
   volume: { what: 'the render volume profile it uses (a name)', check: (v) => (/^[A-Za-z0-9 _./-]{1,80}$/.test(String(v)) ? { ok: true, value: String(v) } : { ok: false, why: 'a volume is a profile name (letters, digits, space, _ . / -)' }) },
@@ -68,7 +61,7 @@ export function enginesConfig(root = REPO_ROOT) {
   return e && typeof e === 'object' ? e : {};
 }
 
-/** The files of an engine's train and gate. Unity keeps the 2.63 names. */
+/** The files of an engine's train and gate. */
 export function engineFiles(engine) {
   return { queue: `${engine}-queue.json`, last: `${engine}-last.json`, lock: `${engine}-train.lock`, gateLast: `${engine}-last.json`, gateLog: `${engine}.log`, refPrefix: `${engine}-train/` };
 }
@@ -102,14 +95,14 @@ export function engineTargets({ root = REPO_ROOT } = {}) {
   return [...names].sort().map((n) => engineTarget(n, { root })).filter(Boolean);
 }
 
-// ---- engine task records (P5.1) ------------------------------------------------------------------------------------
+// ---- engine task records ------------------------------------------------------------------------------------
 
 const tasksFile = (root) => path.join(root, '.studio', 'engine', 'tasks.json');
 export function readEngineTasks(root = mainRoot()) { const j = readJson(tasksFile(root), {}); return j && typeof j === 'object' && !Array.isArray(j) ? j : {}; }
 
 /**
- * 2.78.2 (g, item 18): the engines this studio configures: the names in studio/game.json "engines" (the owner's) and
- * the engine of each engine/<game>/engine.json track. Sorted.
+ * The engines this studio configures: the names in studio/game.json "engines" (the owner's) and the engine of each
+ * engine/<game>/engine.json track. Sorted.
  */
 export function configuredEngines({ root = REPO_ROOT } = {}) {
   const names = new Set(Object.keys(enginesConfig(root)).filter((n) => ENGINE_NAME_RE.test(n)));
@@ -118,11 +111,10 @@ export function configuredEngines({ root = REPO_ROOT } = {}) {
 }
 
 /**
- * 2.78.2 (g, item 18): read a track value. "engine:<name>" is that engine (configured: whether the studio names it);
- * a bare name the studio configures ("unity") reads as "engine:<name>" (normalized: true; tasks added before engine
- * tracks, or a hand-set record, said it that way and silently weren't engine tasks); anything else is unknown.
+ * Read a track value. "engine:<name>" is that engine (configured: whether the studio names it); a bare name the studio
+ * configures ("unity") reads as "engine:<name>" (normalized: true); anything else is unknown.
  * { track, engine, configured, normalized } | { track: null, engine: null, unknown: <value>, why } | { track: null } (empty).
- * STUDIO_ENGINE_TRACK_NORMALIZE=off: a bare name is unknown (2.78.1).
+ * STUDIO_ENGINE_TRACK_NORMALIZE=off: a bare name is unknown.
  */
 export function readTrack(value, { root = REPO_ROOT, env = process.env } = {}) {
   const v = String(value ?? '').trim();
@@ -135,7 +127,7 @@ export function readTrack(value, { root = REPO_ROOT, env = process.env } = {}) {
   return { track: null, engine: null, unknown: v, why: `"${v}" is not a track: an engine pass's track is engine:<name>, and ${known.length ? `this studio configures ${known.map((n) => `engine:${n}`).join(', ')}` : 'this studio configures no engine (studio/game.json "engines")'}` };
 }
 
-/** 2.78.2 (g, item 18): a track written without "engine:" was read as the engine: the record is fixed once, and said so. */
+/** A track written without "engine:" was read as the engine: the record is fixed once, and said so. */
 function normalizeOnce(taskId, t, { root, from }) {
   let rec = null;
   try { rec = setEngineTask(taskId, { engine: t.engine, track: t.track, normalized: { from: t.from, at: new Date().toISOString() } }, { root }); } catch { return null; }
@@ -145,14 +137,13 @@ function normalizeOnce(taskId, t, { root, from }) {
 
 /**
  * The engine record of a task: { task, engine, track, branch, scope, visual: { required, refs }, by, at } or null. The
- * record (.studio/engine/tasks.json, written by task add --track engine:<x>) wins; a task added before 2.77 falls back
- * to its task.added event (and its task.unity_branch record) as before. 2.78.2 (g, item 18): a track written as a bare
- * engine name ("unity", in the record or the event) reads as engine:<name> (readTrack); the record is written once.
+ * record (.studio/engine/tasks.json, written by task add --track engine:<x>) wins; an older task falls back to its
+ * task.added event (and its task.unity_branch record). A bare engine name ("unity") reads as engine:<name> (readTrack).
  */
 export function engineTask(taskId, { root = mainRoot(), events = null, env = process.env } = {}) {
   if (!taskId) return null;
   const rec = readEngineTasks(root)[taskId];
-  // 2.83: `task track <ID> web` writes { track: 'web', engine: null }: the task is a web task again, whatever its task.added event said.
+  // `task track <ID> web` writes { track: 'web', engine: null }: a web task again, whatever its task.added event said.
   if (rec?.track === 'web' && !rec.engine) return null;
   if (rec?.engine && engineOfTrack(rec.track) === rec.engine) return { task: taskId, ...rec };
   if (rec?.engine || rec?.track) {
@@ -176,15 +167,13 @@ export function engineTask(taskId, { root = mainRoot(), events = null, env = pro
     }
   }
   if (!engine) return null;
-  // 2.83: a record that holds only a branch (written at launch for a task whose track is in its task.added event) is
-  // still that task's branch. Before, the launch's branch was dropped here and task done said "no branch recorded".
+  // A record that holds only a branch (written at launch; the track is in the task.added event) is still the branch.
   const branch = evs.filter((e) => e.type === 'task.unity_branch' && e.task === taskId).pop()?.meta?.branch || (typeof rec?.branch === 'string' && rec.branch ? rec.branch : null) || added.meta.branch || null;
   return { task: taskId, engine, track, branch, scope: added.meta.scope || null, visual: added.meta.visualCheck ? { required: true, refs: added.meta.refs || [] } : null, from: 'event' };
 }
 
 /**
- * 2.78.2 (g, item 18): the raw track a task was given (record, else its task.added event), for saying why it isn't an
- * engine task. '' when none.
+ * The raw track a task was given (record, else its task.added event), for saying why it isn't an engine task. '' when none.
  */
 export function rawTrack(taskId, { root = mainRoot(), events = null } = {}) {
   const rec = readEngineTasks(root)[taskId];
@@ -194,8 +183,7 @@ export function rawTrack(taskId, { root = mainRoot(), events = null } = {}) {
 }
 
 /**
- * 2.78.2 (g, item 18): which engine train `task done --train` queues this task on, or why none. The one place the
- * decision is made (task.mjs asks it). { engine } | { engine: null, engineTask: true, why, fix } (an engine pass that
+ * Which engine train `task done --train` queues this task on, or why none. The one place the decision is made (task.mjs asks it). { engine } | { engine: null, engineTask: true, why, fix } (an engine pass that
  * can't be queued: done says so and queues nothing) | { engine: null, engineTask: false, note? } (a studio lane).
  */
 export function engineTrainVerdict(taskId, { role = null, root = mainRoot(), env = process.env, events = null } = {}) {
@@ -227,11 +215,10 @@ export function engineTrainVerdict(taskId, { role = null, root = mainRoot(), env
 }
 
 /**
- * 2.78.2 (g, item 18): on upgrade, open engine-porter tasks that have no engine track (added before engine tracks)
- * get one when the studio configures exactly one engine (the record, inferred: { from: 'upgrade backfill' }, and an
- * engine.track_backfilled event); with several, they are listed for a person (npm run task -- track <ID> engine:<name>).
- * A bare-name track ("unity") is normalized on the way (engineTask); an engine-porter's track that names no engine is
- * listed. `open`: [{ id, role }] (default: the board's open tasks). { changed: [{ task, track, how }], ambiguous: [task],
+ * On upgrade, open engine-porter tasks with no engine track get one when the studio configures exactly one engine
+ * (inferred: { from: 'upgrade backfill' } plus an engine.track_backfilled event); with several they are listed for a
+ * person (npm run task -- track <ID> engine:<name>), as is a track that names no engine. Bare names are normalized.
+ * `open`: [{ id, role }] (default: the board's open tasks). Returns { changed: [{ task, track, how }], ambiguous: [task],
  * unknown: [{ task, track }], engines, lines }. dryRun: nothing written.
  */
 export async function backfillEngineTracks({ root = mainRoot(), by = 'upgrade', dryRun = false, env = process.env, open = null } = {}) {
@@ -286,7 +273,7 @@ export function setEngineTask(taskId, patch, { root = mainRoot() } = {}) {
   return { task: taskId, ...next };
 }
 
-/** 2.78.2 (item 7d): is this a launch role that works on an engine pass (engine-porter, or an engine's own "role")? */
+/** Is this a launch role that works on an engine pass (engine-porter, or an engine's own "role")? */
 export function isEngineRole(role, { root = REPO_ROOT } = {}) {
   const r = String(role || '').trim().toLowerCase();
   if (!r) return false;
@@ -294,15 +281,15 @@ export function isEngineRole(role, { root = REPO_ROOT } = {}) {
   return Object.values(enginesConfig(root)).some((c) => c && typeof c.role === 'string' && c.role.toLowerCase() === r);
 }
 
-/** 2.79.1: the engines this studio configures (studio/game.json "engines"), sorted. */
+/** The engines this studio configures (studio/game.json "engines"), sorted. */
 export const engineNames = (root = REPO_ROOT) => Object.keys(enginesConfig(root)).filter((n) => ENGINE_NAME_RE.test(n)).sort();
 
 /**
- * 2.79.1 (task add --role engine-porter with no --track): { track: "engine:<name>" } when the studio configures exactly
- * one engine, else { error }  (STUDIO_ENGINE_TRACK_INFER=off: { track: null }, no default) listing the engines (several) or saying there is none.
+ * For task add --role engine-porter with no --track: { track: "engine:<name>" } when the studio configures exactly one
+ * engine, else { error } listing the engines or saying there is none. STUDIO_ENGINE_TRACK_INFER=off: { track: null }.
  */
 export function defaultEngineTrack(root = REPO_ROOT, env = process.env) {
-  if (off(env.STUDIO_ENGINE_TRACK_INFER)) return { track: null }; // the same switch as inferEngineTrack: a plain lane, the 2.78.1 way
+  if (off(env.STUDIO_ENGINE_TRACK_INFER)) return { track: null }; // the same switch as inferEngineTrack
   const names = engineNames(root);
   if (names.length === 1) return { track: `engine:${names[0]}` };
   if (!names.length) return { error: 'an engine-porter task needs an engine track, and studio/game.json "engines" names no engine' };
@@ -310,11 +297,10 @@ export function defaultEngineTrack(root = REPO_ROOT, env = process.env) {
 }
 
 /**
- * 2.78.2 (item 7d): the track of an engine-porter task that has no engine record. With exactly one engine named in
- * studio/game.json "engines" (the owner's), that engine: the record is written (.studio/engine/tasks.json, inferred: true)
- * and an engine.track_inferred event says so. With several: { error } naming them and how to set it (npm run task --
- * track <ID> engine:<name>). With none: { rec: null } (the engine's work lives in the studio, as before).
- * STUDIO_ENGINE_TRACK_INFER=off: { rec: null } always (a plain lane, the 2.78.1 way).
+ * The track of an engine-porter task that has no engine record. With exactly one engine in studio/game.json "engines",
+ * that engine: the record is written (.studio/engine/tasks.json, inferred: true) with an engine.track_inferred event.
+ * With several: { error } naming them and how to set it (npm run task -- track <ID> engine:<name>). With none:
+ * { rec: null } (the work lives in the studio). STUDIO_ENGINE_TRACK_INFER=off: { rec: null } always.
  */
 export function inferEngineTrack(taskId, { root = mainRoot(), env = process.env, dryRun = false, by = null } = {}) {
   if (off(env.STUDIO_ENGINE_TRACK_INFER)) return { rec: null, why: 'STUDIO_ENGINE_TRACK_INFER=off' };
@@ -357,7 +343,7 @@ export function engineRepo(engine, { root = REPO_ROOT } = {}) {
   return null;
 }
 
-// ---- recorded durations (P5.3) --------------------------------------------------------------------------------------
+// ---- recorded durations --------------------------------------------------------------------------------------
 
 const durFile = (root) => path.join(root, '.studio', 'engine', 'durations.json');
 /** Keep one land run's length: .studio/engine/durations.json { <engine>: [{ kind, ms, status, at }] } (the last 20). */
@@ -399,20 +385,19 @@ export function engineFloor(engine, { env = process.env, root = mainRoot() } = {
   if (raw !== undefined && String(raw).trim() !== '') return off(raw) ? { gb: 0, from: `${t.floor.env}=${raw} (the owner's setting)` } : { gb: num(raw, t.floor.gb), from: `${t.floor.env} (the owner's setting)` };
   const tuned = readTune(engine, root).values['ram-floor'];
   if (Number.isFinite(Number(tuned)) && t.tune.includes('ram-floor')) return { gb: Number(tuned), from: `the ${t.label} lane's tuned ram-floor (studio/engine/${engine}-tune.json)` };
-  // 2.79.1 (3.2): the RAM the last green land runs really took (engine-ram.mjs), plus a margin, once there are enough of them.
+  // The RAM the last green land runs really took (engine-ram.mjs), plus a margin, once there are enough of them.
   try { const l = learnedNeed(engine, { root, env }); if (l) return { gb: l.gb, from: l.from }; } catch { /* the table's */ }
   return { gb: t.floor.gb, from: `the engine table (${t.label}: ${t.floor.gb} GB)` };
 }
 
-// ---- launching an engine pass (P5.1) --------------------------------------------------------------------------------
+// ---- launching an engine pass --------------------------------------------------------------------------------
 
 const safeName = (s) => typeof s === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(s) && !s.includes('..') && !s.endsWith('.lock') && !s.endsWith('/');
 
 /**
- * 2.78.1 (B-119 on Windows): one path in one spelling for comparing. git prints a worktree as its real path (long names,
- * forward slashes: C:/Users/runneradmin/...), while the studio's own paths may be short names (C:\Users\RUNNER~1\..., as
- * Windows' TEMP is) or another letter case; path.resolve() equates neither. The native real path does; on Windows case
- * doesn't count.
+ * One path in one spelling for comparing (Windows trap): git prints a worktree as its real path (long names, forward
+ * slashes) while the studio's paths may be short names (C:\Users\RUNNER~1\...) or another case; path.resolve() equates
+ * neither. The native real path does; on Windows case doesn't count.
  */
 const canonPath = (p) => {
   let r;
@@ -444,7 +429,7 @@ export function ownSpelling(p, anchors = []) {
   return p;
 }
 
-/** 2.78.1 (e, B-119): the worktree of `repo` that has `branch` checked out (git worktree list), or null. */
+/** The worktree of `repo` that has `branch` checked out (git worktree list), or null. */
 export function worktreeOn(repo, branch) {
   const r = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8', windowsHide: true });
   if (r.status !== 0) return null;
@@ -464,8 +449,8 @@ export function worktreeOn(repo, branch) {
  */
 export function engineLaunch({ task, agent = null, role = null, root = mainRoot(), dryRun = false, env = process.env } = {}) {
   let rec = engineTask(task, { root });
-  // 2.78.2 (item 7d): an engine-porter task with no engine record (added before 2.77, or without --track) got a plain
-  // lane copy of the studio. Its track is worked out (inferEngineTrack) or the launch is refused with how to set it.
+  // An engine-porter task with no engine record (older, or added without --track) has its track worked out
+  // (inferEngineTrack) or the launch is refused with how to set it.
   if (!rec && isEngineRole(role, { root })) {
     const inf = inferEngineTrack(task, { root, env, dryRun, by: agent });
     if (inf.error) return { error: inf.error };
@@ -487,19 +472,19 @@ export function engineLaunch({ task, agent = null, role = null, root = mainRoot(
     if (cur === branch) { if (!rec.branch && !dryRun) { try { setEngineTask(task, { engine: rec.engine, ...(rec.track ? { track: rec.track } : {}), branch }, { root }); } catch { /* the record is a help */ } } return { dir, branch, repo, created: false, note: note(false) }; }
     return { error: `${dir} is a worktree on ${cur || 'a detached HEAD'}, not ${branch}: remove it (git -C "${repo}" worktree remove "${dir}") and start again` };
   }
-  // 2.78.1 (e, B-119): a branch checked out in another worktree can't be checked out twice. An engine pass launched then
-  // ran with no code access. Clean there: the pass works in that worktree. Uncommitted work there: refused, with what to do.
+  // A branch checked out in another worktree can't be checked out twice. Clean there: the pass works in that worktree.
+  // Uncommitted work there: refused, with what to do.
   if (has) {
     g('worktree', 'prune');
-    // In the studio's spelling, compared by real path (Windows: short names, letter case; see samePath).
-    // The configured folders first: engineRepo's repo is git's own top-level path, in git's spelling too.
+    // Compared by real path in the studio's spelling (see samePath); the configured folders come first because
+    // engineRepo's repo is git's own spelling.
     const spelled = [t.cfg.gateWorktree, t.cfg.folder, t.cfg.cwd].filter((c) => typeof c === 'string' && c.trim()).map((c) => path.resolve(root, c));
     const other = ownSpelling(worktreeOn(repo, branch), [...spelled, root, repo]);
     if (other && !samePath(other, dir)) {
       const st = spawnSync('git', ['status', '--porcelain'], { cwd: other, encoding: 'utf8', windowsHide: true });
       const dirty = st.status === 0 ? st.stdout.split('\n').filter((l) => l.trim()) : null;
       const shown = other.split(path.sep).join('/');
-      // The land script's own worktree (engines.<x>.gateWorktree) is never an agent's: the harness never touches its files.
+      // The land script's own worktree (engines.<x>.gateWorktree) is never an agent's.
       const gw = t.cfg.gateWorktree ? path.resolve(root, t.cfg.gateWorktree) : null;
       if (gw && samePath(other, gw)) return { error: `the task's ${t.label} branch ${branch} is checked out in ${shown}, the land script's own worktree (engines.${rec.engine}.gateWorktree), which no agent edits: switch that folder back to its own branch (git -C "${shown}" switch <its branch>), then start the pass again`, busy: shown };
       if (dirty && !dirty.length) {
@@ -515,17 +500,175 @@ export function engineLaunch({ task, agent = null, role = null, root = mainRoot(
   const base = target && g('rev-parse', '--verify', '--quiet', `refs/heads/${target}`).status === 0 ? target : 'HEAD';
   const add = has ? g('worktree', 'add', dir, branch) : g('worktree', 'add', '-b', branch, dir, base);
   if (add.status !== 0) return { error: `git worktree add in ${repo} failed: ${String(add.stderr || '').trim().split('\n').pop()} (a branch checked out in another folder can't be checked out twice: work there, or move it)` };
-  // 2.83: the whole record (engine, track, branch), so task done finds the branch without --branch.
+  // The whole record (engine, track, branch), so task done finds the branch without --branch.
   if (!rec.branch) setEngineTask(task, { engine: rec.engine, ...(rec.track ? { track: rec.track } : {}), branch }, { root });
   return { dir, branch, repo, created: !has, note: note(!has) };
 }
 
 /**
- * 2.79.1: before an engine pass's session starts, the engine's target branch (engines.<x>.target, e.g. unity/main) is
- * merged into its pass worktree, no fast-forward (a merge commit, as the train merges lanes). A pass whose worktree
- * lacked the target's newer changes ran two empty sessions and was parked. On a conflict the merge is aborted and the
- * conflicting files are returned for the porter's brief and an event; the session then starts on the unmerged
- * worktree. { merged, upToDate, conflicts, note } | null (nothing to merge: no target, or the ref isn't there).
+ * The engine target merge a session can run itself. At launch the harness merges the engine's target into the task's
+ * engine worktree and, on a conflict, aborts. A launched session may not run `git merge` (harness/allowlist.mjs: only
+ * add, commit, status, diff, log, show; a session must not merge lanes into the target), so this command merges the
+ * TARGET into the task's OWN engine worktree, found from its engine record, and nothing else:
+ *   npm run engine -- merge <ID>             merge (no fast-forward, no commit); clean: committed at once with the launch
+ *                                            merge's message; a conflict is LEFT in the worktree with each file named
+ *   npm run engine -- merge <ID> --continue  refused while a conflicted file still holds <<<<<<< or >>>>>>> lines or git
+ *                                            still lists unmerged paths; else git commit --no-edit
+ *   npm run engine -- merge <ID> --abort     git merge --abort
+ * A caller that works as an agent (STUDIO_AGENT, or STUDIO_LOCK_OWNER as a launched session has) must hold the task's
+ * claim; a launched session pinned to another task is refused. A shell with neither is a person's and may run it.
+ * So may the owner's stand-ins outside the harness (targetMergeStandIn), for any task; meta.via says how.
+ * Events: engine.target_merge with meta.step started | conflict (meta.files) | done | aborted.
+ */
+export const targetMergeCommand = (task) => `npm run engine -- merge ${task}`;
+export const targetMergeMessage = (target, rec, task) => `Merge ${target} into ${rec?.branch || task} (engine pass ${task})`;
+const BOTH_SIDES = 'Small conflicts in project files (a project file, an asmdef, a package list) usually want both sides kept.';
+const mergeStateFile = (root, task) => path.join(root, '.studio', 'engine', `merge-${String(task).replace(/[^A-Za-z0-9._-]/g, '_')}.json`);
+const MARKER = /^(<{7}|>{7})(\s|$)/m;
+
+/** The task's own engine worktree (the launch's, else the worktree holding its branch), or { error }. */
+export function engineTaskDir(task, { root = mainRoot(), engine = null } = {}) {
+  const rec = engineTask(task, { root });
+  if (!rec) return { error: `${task} is not an engine task (no engine record): there is no engine worktree to merge into` };
+  if (engine && engine !== rec.engine) return { error: `${task} is a ${rec.engine} task, not ${engine}` };
+  const repo = engineRepo(rec.engine, { root });
+  if (!repo) return { error: `the ${rec.engine} work of ${task} is not in a repo of its own (engines.${rec.engine}.cwd): nothing to merge here` };
+  const t = engineTarget(rec.engine, { root });
+  const target = t?.cfg?.target;
+  if (!target) return { error: `engines.${rec.engine}.target is not set in studio/game.json: there is no target branch to merge` };
+  const own = path.join(root, '.lanes', 'engine', String(task));
+  const dir = fs.existsSync(path.join(own, '.git')) ? own : (rec.branch ? worktreeOn(repo, rec.branch) : null);
+  if (!dir || !fs.existsSync(dir)) return { error: `${task} has no engine worktree yet (it is made when a session is launched on the task): nothing to merge into` };
+  // The land script's own worktree is never an agent's, and nothing but the task's branch is merged into.
+  const gw = t.cfg.gateWorktree ? path.resolve(root, t.cfg.gateWorktree) : null;
+  if (gw && samePath(dir, gw)) return { error: `${dir.split(path.sep).join('/')} is the land script's own worktree (engines.${rec.engine}.gateWorktree): refused` };
+  const cur = spawnSync('git', ['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: dir, encoding: 'utf8', windowsHide: true }).stdout.trim();
+  if (rec.branch && cur !== rec.branch) return { error: `${dir.split(path.sep).join('/')} is on ${cur || 'a detached HEAD'}, not ${task}'s branch ${rec.branch}: refused` };
+  return { rec, repo, dir, target, label: t.label, branch: rec.branch || cur };
+}
+
+/**
+ * Who may merge for any task without its claim: the owner's stand-in in a shell the harness did not launch (no
+ * STUDIO_ROLE, no STUDIO_TASK_PIN): the owner's proxy, a beta-mode named agent or an outside signer (ask.mjs
+ * ownerStandIn), or an outside coding agent's shell that the board-decision verdict lets decide (permission.mjs
+ * mayDecide 'board'). { name, via } or null. A launched session, worker or planner keeps the claim rule.
+ */
+export async function targetMergeStandIn({ env = process.env, root = mainRoot() } = {}) {
+  const me = String(env.STUDIO_AGENT || env.STUDIO_LOCK_OWNER || '').trim();
+  if (!me || String(env.STUDIO_ROLE || '').trim() || String(env.STUDIO_TASK_PIN || '').trim()) return null;
+  try {
+    const pm = await import('./permission.mjs');
+    if (pm.WORKER_NAME.test(me)) return null;
+    const actEnv = { ...env, STUDIO_LOCK_OWNER: me };
+    const s = (await import('./ask.mjs')).ownerStandIn(actEnv, { kind: 'board' });
+    if (s?.agent && s.agent.toLowerCase() === me.toLowerCase()) return { name: me, via: s.via };
+    const marker = pm.AGENT_SHELL.find((k) => String(env[k] || '').trim());
+    if (marker && pm.mayDecide('board', pm.actorOf({ env: actEnv, root }), { root }).ok) return { name: me, via: 'outside agent' };
+  } catch { /* not a stand-in: the claim rule */ }
+  return null;
+}
+
+/** Why this caller may not merge for `task` ('' when it may). A person's shell (no agent identity) may. */
+export async function targetMergeRefusal(task, { env = process.env, root = mainRoot() } = {}) {
+  const me = String(env.STUDIO_AGENT || env.STUDIO_LOCK_OWNER || '').trim();
+  const pin = String(env.STUDIO_TASK_PIN || '').trim();
+  if (pin && pin !== String(task)) return `this session was launched for ${pin}, not ${task}: a session merges only into its own task's worktree`;
+  if (!me) return '';
+  if (await targetMergeStandIn({ env, root })) return '';
+  let holder = null;
+  try { const { listLocks } = await import('./lock.mjs'); holder = listLocks().find((l) => l.key === `task:${task}`)?.owner || null; } catch { holder = null; }
+  if (holder === me) return '';
+  return holder ? `${task} is claimed by ${holder}, not ${me}: only the agent holding a task's claim (or a person, or the overseer) merges into its worktree` : `${me} does not hold ${task}'s claim (npm run task -- start ${task} --agent ${me} first), and only the agent holding it (or a person, or the overseer) merges into its worktree`;
+}
+
+/**
+ * The command. mode: 'merge' | 'continue' | 'abort'. { ok, code (0 done or nothing to do, 1 refused, 2 conflict left),
+ * lines, files?, step }. Never throws.
+ */
+export async function engineTargetMerge(task, { mode = 'merge', engine = null, root = mainRoot(), env = process.env } = {}) {
+  const fail = (line, extra = {}) => ({ ok: false, code: 1, lines: [line], ...extra });
+  try {
+    if (!task || !/^[A-Za-z]+-\d+$/.test(String(task))) return fail(`Usage: ${targetMergeCommand('<TASK_ID>')} [--engine <x>] [--continue | --abort]`);
+    const who = await targetMergeRefusal(task, { env, root });
+    if (who) return fail(`Not merged: ${who}.`);
+    const standIn = await targetMergeStandIn({ env, root });
+    const w = engineTaskDir(task, { root, engine });
+    if (w.error) return fail(`Not merged: ${w.error}.`);
+    const { dir, target, rec, branch } = w;
+    const shown = dir.split(path.sep).join('/');
+    const g = (...a) => spawnSync('git', a, { cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+    const ident = g('config', 'user.name').stdout.trim() ? [] : ['-c', 'user.name=studio-launcher', '-c', 'user.email=studio-launcher@example.invalid'];
+    const agent = String(env.STUDIO_AGENT || env.STUDIO_LOCK_OWNER || '').trim() || 'person';
+    const ev = (step, msg, meta = {}) => { try { emitEvent({ type: 'engine.target_merge', agent, task, ...(step === 'conflict' ? { to: 'producer', status: 'warn' } : {}), msg: `${task}: ${msg}`.slice(0, 500), meta: { step, dir: shown, target, ...(standIn ? { via: standIn.via } : {}), ...meta } }); } catch { /* the merge stands without its event */ } };
+    const merging = () => g('rev-parse', '-q', '--verify', 'MERGE_HEAD').status === 0;
+    const unmerged = () => g('-c', 'core.quotepath=off', 'diff', '--name-only', '--diff-filter=U').stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+    const state = mergeStateFile(root, task);
+    const readState = () => { const j = readJson(state, null); return j && Array.isArray(j.files) ? j : { files: [] }; };
+    const dropState = () => { try { fs.rmSync(state, { force: true }); } catch { /* a record */ } };
+    const withMarkers = (files) => files.filter((f) => { try { return MARKER.test(fs.readFileSync(path.join(dir, f), 'utf8')); } catch { return false; } });
+    const fileLines = (files) => files.slice(0, 40).map((f) => `  ${f}: edit it to keep both sides where both are needed (and remove the <<<<<<< ======= >>>>>>> lines), then git -C ${shown} add ${f}, then ${targetMergeCommand(task)} --continue`);
+
+    if (mode === 'abort') {
+      if (!merging()) { dropState(); return { ok: true, code: 0, step: 'none', lines: [`No merge is in progress in ${shown}: nothing to abort.`] }; }
+      const a = g('merge', '--abort');
+      if (a.status !== 0) return fail(`git merge --abort failed in ${shown}: ${String(a.stderr || a.stdout).trim().split('\n').pop()}`);
+      dropState();
+      ev('aborted', `the merge of ${target} into ${branch} was aborted; the worktree is as it was before it`);
+      return { ok: true, code: 0, step: 'aborted', lines: [`Aborted: ${shown} is back where it was before the merge of ${target}.`] };
+    }
+    if (mode === 'continue') {
+      if (!merging()) { dropState(); return fail(`No merge is in progress in ${shown}: start one with ${targetMergeCommand(task)}.`); }
+      const open = unmerged();
+      const marked = withMarkers([...new Set([...readState().files, ...open])]);
+      if (open.length || marked.length) {
+        const lines = [`Not committed: the merge of ${target} still has ${open.length ? `${open.length} unmerged path(s) (${open.slice(0, 8).join(', ')})` : ''}${open.length && marked.length ? ' and ' : ''}${marked.length ? `conflict markers in ${marked.slice(0, 8).join(', ')}` : ''}.`, ...fileLines([...new Set([...marked, ...open])]), BOTH_SIDES];
+        return { ok: false, code: 2, step: 'conflict', files: [...new Set([...marked, ...open])], lines };
+      }
+      const c = g(...ident, 'commit', '--no-edit');
+      if (c.status !== 0) return fail(`git commit --no-edit failed in ${shown}: ${String(c.stderr || c.stdout).trim().split('\n').pop()}`);
+      dropState();
+      const sha = g('rev-parse', '--short', 'HEAD').stdout.trim();
+      ev('done', `${target} was merged into ${branch} (${sha}) after the conflicts were resolved`);
+      return { ok: true, code: 0, step: 'done', lines: [`Merged: ${target} is in ${branch} (merge commit ${sha}). Go on with the task.`] };
+    }
+
+    // A plain merge.
+    if (merging()) {
+      const open = unmerged();
+      return { ok: false, code: 2, step: 'conflict', files: open, lines: [`A merge is already in progress in ${shown}${open.length ? ` with ${open.length} unmerged path(s)` : ''}.`, ...fileLines(open), `Or put it back: ${targetMergeCommand(task)} --abort.`] };
+    }
+    const ref = ['', 'refs/heads/', 'refs/remotes/'].map((p) => `${p}${target}`).find((r) => g('rev-parse', '--verify', '--quiet', `${r}^{commit}`).status === 0);
+    if (!ref) return fail(`Not merged: ${target} is not a branch the ${rec.engine} repo has.`);
+    if (g('merge-base', '--is-ancestor', ref, 'HEAD').status === 0) return { ok: true, code: 0, step: 'up-to-date', lines: [`${branch} already has everything on ${target}: nothing to merge.`] };
+    // Staged or modified tracked files would be mixed into the merge commit: they are committed (or set aside) first.
+    const tracked = g('status', '--porcelain', '--untracked-files=no').stdout.split('\n').filter((l) => l.trim());
+    const dirty = splitPhantom(dir, tracked).real;
+    if (dirty.length) return fail(`Not merged: ${dirty.length} uncommitted file(s) in ${shown} (${dirty.slice(0, 3).map((l) => l.slice(3)).join(', ')}): commit them first (git -C ${shown} add <file>, then git -C ${shown} commit -m "..."), then run this again.`);
+    ev('started', `merging ${target} into ${branch} in ${shown}`);
+    const m = g(...ident, 'merge', '--no-ff', '--no-commit', '-m', targetMergeMessage(target, rec, task), ref);
+    if (m.status === 0 && merging()) {
+      const c = g(...ident, 'commit', '--no-edit');
+      if (c.status !== 0) return fail(`The merge of ${target} was clean but git commit failed in ${shown}: ${String(c.stderr || c.stdout).trim().split('\n').pop()} (finish it with ${targetMergeCommand(task)} --continue)`);
+      const sha = g('rev-parse', '--short', 'HEAD').stdout.trim();
+      ev('done', `${target} was merged into ${branch} (${sha}), no conflict`);
+      return { ok: true, code: 0, step: 'done', lines: [`Merged: ${target} is in ${branch} (merge commit ${sha}), no conflict. Go on with the task.`] };
+    }
+    const files = unmerged();
+    if (!files.length) {
+      const why = String(m.stderr || m.stdout || '').trim().split('\n').filter(Boolean).slice(-2).join(' ').slice(0, 300);
+      if (merging()) g('merge', '--abort');
+      return fail(`Not merged: git merge of ${target} failed in ${shown} without a conflict to resolve (${why || `exit ${m.status}`}); the worktree is as it was.`);
+    }
+    try { fs.mkdirSync(path.dirname(state), { recursive: true }); fs.writeFileSync(state, `${JSON.stringify({ task, target, dir: shown, files, at: new Date().toISOString() }, null, 2)}\n`); } catch { /* --continue still reads git's unmerged list */ }
+    ev('conflict', `merging ${target} into ${branch} left ${files.length} conflicted file(s): ${files.slice(0, 8).join(', ')}`, { files: files.slice(0, 40) });
+    return { ok: false, code: 2, step: 'conflict', files, lines: [`Merging ${target} into ${branch} left ${files.length} conflicted file(s) in ${shown}; the merge stays open there for you to resolve:`, ...fileLines(files), BOTH_SIDES, `To put the worktree back instead: ${targetMergeCommand(task)} --abort.`] };
+  } catch (e) { return fail(`Not merged: ${e.message}`); }
+}
+
+/**
+ * Before an engine pass's session starts, the engine's target branch (engines.<x>.target, e.g. unity/main) is merged
+ * into its pass worktree, no fast-forward (a merge commit, as the train merges lanes). On a conflict the merge is
+ * aborted and the conflicting files are returned for the porter's brief and an event; the session starts unmerged. { merged, upToDate, conflicts, note } | null (nothing to merge: no target, or the ref isn't there).
  */
 export function syncEngineTarget({ task, dir, repo = null, root = mainRoot() } = {}) {
   const rec = engineTask(task, { root });
@@ -537,27 +680,36 @@ export function syncEngineTarget({ task, dir, repo = null, root = mainRoot() } =
   if (!ref) return null;
   if (g('merge-base', '--is-ancestor', ref, 'HEAD').status === 0) return { merged: false, upToDate: true, conflicts: [], note: '' };
   const who = g('config', 'user.name').stdout.trim() ? [] : ['-c', 'user.name=studio-launcher', '-c', 'user.email=studio-launcher@example.invalid'];
-  const m = g(...who, 'merge', '--no-ff', '--no-edit', '-m', `Merge ${target} into ${rec.branch || task} (engine pass ${task})`, ref);
+  const m = g(...who, 'merge', '--no-ff', '--no-edit', '-m', targetMergeMessage(target, rec, task), ref);
   if (m.status === 0) return { merged: true, upToDate: false, conflicts: [], note: `${target} was merged into your worktree before this session (a merge commit), so you start with its newer changes.` };
   const conflicts = g('diff', '--name-only', '--diff-filter=U').stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
   g('merge', '--abort');
   const files = conflicts.slice(0, 12).join(', ') || 'none named';
-  return { merged: false, upToDate: false, conflicts, note: `Merging ${target} into your worktree failed${conflicts.length ? ` with conflicts in ${files}${conflicts.length > 12 ? ` +${conflicts.length - 12}` : ''}` : `: ${String(m.stderr || m.stdout || '').trim().split('\n').pop().slice(0, 160)}`}; the merge was aborted and your worktree is as it was. Start by running git -C ${dir.split(path.sep).join('/')} merge ${target} and resolving ${conflicts.length ? 'those files' : 'what it reports'}, then commit.` };
+  return { merged: false, upToDate: false, conflicts, note: `Merging ${target} into your worktree failed${conflicts.length ? ` with conflicts in ${files}${conflicts.length > 12 ? ` +${conflicts.length - 12}` : ''}` : `: ${String(m.stderr || m.stdout || '').trim().split('\n').pop().slice(0, 160)}`}; the merge was aborted and your worktree is as it was. Start by running ${targetMergeCommand(task)}: it merges ${target} into your worktree and leaves ${conflicts.length ? 'those files' : 'what it reports'} for you to resolve (then git add each, then ${targetMergeCommand(task)} --continue). ${BOTH_SIDES}` };
 }
 
 // ---- the CLI --------------------------------------------------------------------------------------------------------
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+// The CLI is an async function, not a top-level await: an import cycle through a top-level await ends the process with exit 13.
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)))(async () => {
   const argv = process.argv.slice(2);
   const json = argv.includes('--json');
   const root = mainRoot();
-  // 2.78.2 (g, item 18): the upgrade's backfill, by hand: node harness/engine-tracks.mjs backfill [--dry-run] [--by <name>]
+  // The upgrade's backfill, by hand: node harness/engine-tracks.mjs backfill [--dry-run] [--by <name>]
   if (argv[0] === 'backfill') {
     const i = argv.indexOf('--by');
     const r = await backfillEngineTracks({ root, by: i >= 0 && argv[i + 1] ? argv[i + 1] : 'engine-tracks', dryRun: argv.includes('--dry-run') });
     if (json) console.log(JSON.stringify({ changed: r.changed, ambiguous: r.ambiguous, unknown: r.unknown, engines: r.engines }));
     else console.log(r.lines.length ? r.lines.join('\n') : '[upgrade] engine tracks: nothing to backfill (every open engine-porter task has its track)');
     process.exit(0);
+  }
+  // npm run engine -- merge <ID> [--engine x] [--continue | --abort] (engineTargetMerge above).
+  if (argv[0] === 'merge') {
+    const i = argv.indexOf('--engine');
+    const r = await engineTargetMerge(argv[1], { mode: argv.includes('--abort') ? 'abort' : argv.includes('--continue') ? 'continue' : 'merge', engine: i >= 0 ? argv[i + 1] || null : null, root });
+    if (json) console.log(JSON.stringify({ ok: r.ok, step: r.step || null, files: r.files || [], lines: r.lines }));
+    else (r.ok ? console.log : console.error)(r.lines.join('\n'));
+    process.exit(r.code);
   }
   if (argv[0] === 'task') {
     const r = engineTask(argv[1], { root });
@@ -574,14 +726,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   else if (!list.length) console.log('No engine target: studio/game.json "engines": { "<name>": { "land": "<command>", "target": "<branch>" } } names one (docs/ENGINE-TRACKS.md).');
   else for (const t of list) console.log(`${t.name} (${t.label}): ${t.land ? 'land command set' : 'no land command'}; ${t.queued} queued; one land run ~${t.expected.minutes ?? '?'} min (${t.expected.from}), ${t.rig.ramGb} GB, ${t.rig.cpuThreads} threads as machine:heavy "${t.heavyKind}"; RAM floor ${t.floor.gb} GB (${t.floor.from}); self-tune: ${t.tune.join(', ') || 'nothing'}${t.repo ? `; its repo: ${t.repo}` : ''}`);
   process.exit(0);
-}
+})().catch((e) => { console.error(e?.stack || String(e)); process.exit(1); });
 
 /**
- * 2.83: what a session left in its task's engine worktree: { dir, branch, repo, commits, dirty: [paths], queued } or null
- * (not an engine task, or its engine's work is in the studio). commits: the worktree's own commits made since `since`
- * (ISO): not in the engine's target, merges aside; dirty: modified, staged and untracked files (git-ignored ones aside). The launcher's end-of-session
- * account read only the studio's lane copy, so an engine builder's committed work read as "committed nothing".
- * Never throws.
+ * What a session left in its task's engine worktree: { dir, branch, repo, commits, dirty: [paths], queued } or null (not
+ * an engine task, or its work is in the studio). commits: the worktree's own commits since `since` (ISO), not in the
+ * engine's target, merges aside; dirty: modified, staged and untracked files (git-ignored aside). Never throws.
  */
 export function engineWork(taskId, { since = null, root = mainRoot() } = {}) {
   try {
@@ -599,8 +749,10 @@ export function engineWork(taskId, { since = null, root = mainRoot() } = {}) {
     const log = g('log', ...(since ? [`--since=${since}`] : ['-n', '50']), '--no-merges', '--format=%h', range);
     const commits = log.status === 0 ? log.stdout.split('\n').filter(Boolean).length : 0;
     const st = g('status', '--porcelain');
-    const dirty = st.status === 0 ? st.stdout.split('\n').filter((l) => l.trim()).map((l) => l.slice(3).trim()) : [];
+    // A file git reports as modified whose bytes are the committed blob (a filter rule) is not a leftover.
+    const ph = splitPhantom(dir, st.status === 0 ? st.stdout.split('\n').filter((l) => l.trim()) : []);
+    const dirty = ph.real.map((l) => l.slice(3).trim());
     const branch = g('symbolic-ref', '--short', '-q', 'HEAD').stdout.trim() || rec.branch || null;
-    return { dir, branch, repo, commits, dirty, engine: rec.engine };
+    return { dir, branch, repo, commits, dirty, phantom: ph.phantom, ...(ph.phantom.length ? { phantomNote: phantomNote(ph.phantom) } : {}), engine: rec.engine };
   } catch { return null; }
 }
