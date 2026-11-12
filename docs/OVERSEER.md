@@ -65,6 +65,33 @@ review afterwards (the beta digest, the decisions log).
 
 `npm run overseer -- role` shows which of these the studio's grants cover today.
 
+## What the overseer and an outside signer may decide unattended
+
+As `qa/selftest-284n.mjs` finds it (stdin closed, no TTY, any hour). Proxy: the owner's proxy shell; beta agent: a
+beta-mode named agent; signer: `STUDIO_OUTSIDE_SIGNERS`; P/D: a launched Producer or Director session; worker: any
+other launched session. "–": not tested.
+
+| Command | Owner in person | Proxy | Beta agent | Signer | P/D | Worker |
+|---|---|---|---|---|---|---|
+| `task alone <ID> on\|off` (no actor check) | yes | yes | yes | yes | yes | yes |
+| `task train dequeue <ID> [--engine x]` (no actor check) | yes | yes | yes | yes | yes | yes |
+| `task after <ID> --set\|--remove\|--clear` (no actor check) | yes | yes | yes | yes | yes | yes |
+| `task track <ID> web` | yes | yes | yes | yes | yes | no |
+| `task unpark <ID>` of the owner's own park | yes | yes | yes | yes | no | no |
+| `task unhold <ID>` | yes | yes | yes | yes | yes | no |
+| `review -- same-family on\|off\|auto` | yes | yes | yes | yes | no | no |
+| `engine -- merge <ID>` (and `--continue`, `--abort`) without the claim | yes | yes | yes | yes | no | no |
+| `task train --engine <x>` (never held by the batch window) | – | – | yes | – | – | – |
+| `ask -- answer`: a board ask, or one about the game's own money | yes | yes | yes | yes | yes | no |
+| `ask -- answer`: real money (owner-only) | yes | no | no | no | no | no |
+| `task type <ID> <type>` (with an owner key: the key's signature) | key only | yes | yes | yes | yes | no |
+| `mode -- boost on --builders-only` (no actor check) | yes | yes | yes | yes | yes | yes |
+| `task unpark` then `agent start --task <ID>` | – | – | yes | – | – | – |
+| `approve -- protected` for `studio/game.json`, `studio/allowlist.json` | – | – | – | yes | – | – |
+
+The owner-only list (`harness/owner-acts.mjs`: money, delete, credentials, publish, tools, beta-off) is the only thing a
+stand-in is refused.
+
 ## What stays human-only, whatever the grant
 
 - Real money; deleting data; keys and credentials; publishing outside the PC; defining an owner tool

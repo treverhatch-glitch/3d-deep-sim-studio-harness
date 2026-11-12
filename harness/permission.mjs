@@ -180,3 +180,19 @@ export function mayDecide(kind, actor, { root = process.cwd(), agents = [] } = {
   if (producerApprovesProtected(root)) return { ok: true, cls, why: '' };
   return { ok: false, cls, why: `a launched Producer/Director session doesn't make ${what} in beta mode: ${askWho(agents)}. The owner's switch STUDIO_PRODUCER_APPROVES=protected in the main checkout's .env (off by default; docs/SECURITY.md) lets Producer/Director sessions make them` };
 }
+
+/**
+ * 2.84 (n): is this shell one of the owner's stand-ins outside the harness: 'owner proxy' (harness/owner-proxy.mjs), 'beta
+ * agent' (a beta-mode named agent or an outside signer, harness/beta-mode.mjs), or null. Never a launched session (STUDIO_ROLE)
+ * or a worker's name. `by` names the agent in a shell that names nobody (selfNamingShell), as ask.mjs ownerStandIn reads it.
+ * The park rank (task-hold.mjs parkRank) and the decisions log (decisions-log.mjs: the planning back-off's strong news) use it.
+ */
+export function ownerStandInRole({ by = '', env = process.env } = {}) {
+  if (String(env.STUDIO_ROLE || '').trim()) return null;
+  const said = selfNamingShell(env) && String(by || '').trim() ? { ...env, STUDIO_LOCK_OWNER: String(by).trim() } : env;
+  const me = String(said.STUDIO_LOCK_OWNER || '').trim();
+  if (!me || WORKER_NAME.test(me)) return null;
+  try { if (proxyShell({ env: said }).ok) return 'owner proxy'; } catch { /* not the proxy */ }
+  try { const b = betaActor({ env, by, kind: 'board' }); if (b.ok && b.via === 'beta agent') return 'beta agent'; } catch { /* not a beta agent */ }
+  return null;
+}

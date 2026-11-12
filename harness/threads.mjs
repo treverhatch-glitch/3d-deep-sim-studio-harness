@@ -494,7 +494,9 @@ export function postInbound({ source, key, text, by, ref = null, author = null, 
   // 2.65.0: the author id the bot got from Discord or GitHub (not checked here: the bot passes it; the policy uses it).
   const who = author === null || author === undefined || author === '' ? null : String(author).trim();
   if (who !== null && !/^[\w.-]{1,64}$/.test(who)) return { ok: false, message: `--author is the sender's id as Discord or GitHub gave it (digits, or a GitHub login); got "${oneLine(who, 40)}"` };
-  const e = emitEvent({ type: 'inbound.message', agent: oneLine(by, 60), msg: `${oneLine(by, 60)}: ${msg}`, meta: { source, thread: k, ...(ref ? { ref: oneLine(ref, 80) } : {}), ...(who ? { author: who } : {}) } });
+  // 2.84 (n): meta.role: posted from a launched session's shell (a Producer's own post is not an owner's order to it).
+  const role = String(env.STUDIO_ROLE || '').trim().toLowerCase();
+  const e = emitEvent({ type: 'inbound.message', agent: oneLine(by, 60), msg: `${oneLine(by, 60)}: ${msg}`, meta: { source, thread: k, ...(ref ? { ref: oneLine(ref, 80) } : {}), ...(who ? { author: who } : {}), ...(role ? { role } : {}) } });
   const mode = threadsMode(env);
   if (mode === 'off') return { ok: true, action: 'none', mode };
   return { ok: true, mode, ...routeNow(e, { producer }) };

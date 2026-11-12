@@ -24,7 +24,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './even
 import { activeGame, isTemplateCartridge } from './cartridge.mjs';
 import { isFixTask, trunkState } from './baseline.mjs';
 import { withFileLock, writeAtomic, pidAlive } from './fsafe.mjs';
-import { WORKER_NAME, DECIDER_ROLES } from './permission.mjs';
+import { WORKER_NAME, DECIDER_ROLES, ownerStandInRole } from './permission.mjs';
 import { ownerType } from './reclassify.mjs';
 import { entryPath, hasRegion, listsClash } from './lane-regions.mjs';
 import { sameBlocker, attemptsRefuse } from './attempts.mjs'; // a cycle (attempts.mjs reads the holds): only called at run time
@@ -188,12 +188,17 @@ export function laneRefusal(by, env = process.env, { workerName = WORKER_NAME, d
  * A launched session's rank comes from STUDIO_ROLE (a name passed with --by can't raise it); outside a launched session
  * an agent's name (STUDIO_LOCK_OWNER, else --by) says it: opus-N or orchestrator-N is the orchestrator, producer-N and
  * director-N those roles, no name at all (a person's terminal) or the owner's proxy is the owner.
+ * 2.84 (n): the owner's stand-ins outside a launched session (the owner's proxy, a beta-mode named agent, an outside
+ * signer: permission.mjs ownerStandInRole) rank as the owner, as this said of the proxy; before, any name but opus-N ranked 2, so the
+ * overseer was refused the owner's parks and the harness's owner-only parks (rank 3).
  */
 export function parkRank({ by = '', env = process.env } = {}) {
   const role = String(env.STUDIO_ROLE || '').trim().toLowerCase();
   const name = String(env.STUDIO_LOCK_OWNER || by || '').trim().toLowerCase();
   const byRole = (r) => (r === 'orchestrator' ? 3 : r === 'producer' || r === 'director' ? 2 : 1);
   if (role) return { rank: byRole(role), role };
+  const standIn = ownerStandInRole({ by, env });
+  if (standIn) return { rank: 4, role: standIn };
   if (/^(opus|orchestrator)(-|_|\d|$)/.test(name)) return { rank: 3, role: 'orchestrator' };
   if (/^(producer|director)(-|_|\d|$)/.test(name)) return { rank: 2, role: name.startsWith('d') ? 'director' : 'producer' };
   if (WORKER_NAME.test(name)) return { rank: 1, role: 'builder' };

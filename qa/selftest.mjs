@@ -5108,6 +5108,13 @@ if (inShard('selftest-283j')) {
   await selftest283J({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
+// 2.84 (n): the overseer and an outside signer keep their authority to decide unattended (every decision command of 2.82-2.84).
+if (inShard('selftest-284n')) {
+  const dir = copyRepo();
+  const { selftest284N } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284n.mjs')).href);
+  await selftest284N({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
 // 2.84 (m): the engine target merge a session can run, phantom files a filter rule makes look changed, rules.focus.ignore.
 if (inShard('selftest-284m')) {
   const dir = copyRepo();
