@@ -288,12 +288,16 @@ export async function cancelEngineTrain(root, { engine = 'unity', by = '', why =
   writeJson(cancelFile(root, engine), { train: h.id, by: who, at, why: reason });
   await noteStandIn({ by: who, env, root, msg: `${who} cancelled the ${L} train ${h.id} in beta mode`, why: reason });
   // 2. The train's process tree (the land run below it included); Windows: taskkill /T /F (harness/heavy.mjs).
-  const killer = kill || (async (holder) => { const hv = await import('./heavy.mjs'); const r = hv.killHolderTree(holder, { self: process.pid }); return { killed: r.killed || [], survivors: r.survivors || [] }; });
+  // 2.84: the lock's start identity goes with it, so a train pid another program has taken over is not killed (heavy.mjs
+  // holderTree: a root whose start differs is not a member, nor are its children). What the kill saw is kept for the
+  // message: on Windows the process list is one PowerShell call, and when it fails nothing can be confirmed or killed.
+  const killer = kill || (async (holder) => { const hv = await import('./heavy.mjs'); const r = hv.killHolderTree(holder, { self: process.pid }); return { killed: r.killed || [], survivors: r.survivors || [], members: r.members || [], rootLive: r.rootLive }; });
   let k = { killed: [], survivors: [] };
   try { k = await killer({ pid: h.pid, identity: h.identity, tree: { root: h.pid, groups: [] } }) || k; } catch (e) { k = { killed: [], survivors: [], error: String(e?.message || e).slice(0, 200) }; }
   for (const until = Date.now() + waitMs; trainProcessLive(h.pid, h.identity) && Date.now() < until;) sleep(200);
   if (trainProcessLive(h.pid, h.identity)) {
-    const m = `The ${L} train ${h.id} (pid ${h.pid}) did not end within ${Math.round(waitMs / 1000)} s of being killed; its gate worktree, refs and lock were left as they are (the cancel file is written: it neither retries nor blames). Try again, or stop pid ${h.pid} by hand.`;
+    const saw = k.error ? `the process list could not be read: ${k.error}` : k.rootLive === false ? 'its process start did not match the lock\'s record, so it was not killed' : `${(k.killed || []).length} of ${(k.members || []).length} process(es) of its tree ended, ${(k.survivors || []).length} still running`;
+    const m = `The ${L} train ${h.id} (pid ${h.pid}) did not end within ${Math.round(waitMs / 1000)} s of being killed (${saw}); its gate worktree, refs and lock were left as they are (the cancel file is written: it neither retries nor blames). Try again, or stop pid ${h.pid} by hand.`;
     try { emit({ type: `task.train.${engine}.cancel_failed`, agent: who, to: 'producer', track: `engine:${engine}`, status: 'blocked', msg: m.slice(0, 600), meta: { train: h.id, engine, pid: h.pid } }); } catch {}
     return { ok: false, id: h.id, message: m };
   }
