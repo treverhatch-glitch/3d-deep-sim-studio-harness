@@ -43,7 +43,7 @@ harness-asked` line, one `Verdict:` line, a `review.recorded` event (meta `via`,
 commit. An answer with no verdict is saved as `<date>-<ID>-asked-<model>.rejected.txt` and nothing is recorded. A network,
 quota or tool failure exits 1 with one line and a `review.ask_failed` event, and records nothing. The launcher runs it,
 detached, for a reviewer task whose planned model runs on such a tool (`review.ask_started`); it is not asked again while one is
-in flight or once one is recorded for that review task, which then only needs closing. Who may run it: as for `review record`
+in flight or once one is recorded for that review task. With `--for`, the same process then closes that review task (2.84 r: it starts it as "review-ask" before recording and runs `task done` after, the path a reviewer session uses, which runs no game checks for a reviewer's task); a refused close never fails the review, it emits one `review.ask_close_failed` event naming the task and `npm run task -- done <review task> --agent <you>`, and the launcher then keeps saying that task only needs closing. Who may run it: as for `review record`
 (never a worker session). Who must review, and what the done check needs, are unchanged.
 
 **A studio with only one model family (2.83, 2.84).** A review from the implementer's own family is taken only when its

@@ -200,4 +200,44 @@ console.log(JSON.stringify({ ok: res.ok, asked: res.asked ?? null, tool: res.too
       && done?.type === 'review.ask_failed' && !JSON.stringify(events(ev)).includes(TOKEN) && !events(ev).some((e) => e.type === 'agent.session.start');
     return [ok, JSON.stringify({ r, started: started?.msg || null, done: done?.msg || null })];
   });
+
+  // ---- 7. the harness closes the review task it asked a review for (2.84 r) ----
+  const boardOf = (S) => { const rd = (f) => { try { return fs.readFileSync(path.join(S, 'studio', f), 'utf8'); } catch { return ''; } }; const open = rd('NEXT.md').split(/^## DONE\s*$/m)[0]; return { open: /\*\*T-102\*\*/.test(open), done: /\*\*T-102\*\*/.test(rd('DONE.md')) }; };
+  await guard('2.84 (r): a harness-asked review with --for closes the review task on the board itself, for an approval and for a changes-requested verdict (T-102 leaves the open list and is in the done list, one task.done event, the final line says it was closed) (fails before this fix: the review task stayed open and needed a person)', async () => {
+    const res = [];
+    for (const [name, answer] of [['approve', 'VERDICT: APPROVE\\nWHY: the toggle is pure and covers T-101.\\nISSUES:\\n- none'], ['changes', 'VERDICT: CHANGES\\nWHY: T-101 has no test.\\nISSUES:\\n- game/rules/toggle.mjs: add a test']]) {
+      const { S, env, ev } = studio(`close-${name}`);
+      if (!has(path.join(S, 'harness', 'review-ask.mjs'))) return [false, 'harness/review-ask.mjs is missing'];
+      const r = ask(S, env, `r.a = await askReview('T-101', { model: 'google/gemini-3.1-pro-preview', forTask: 'T-102', noCommit: true, deps: { transport: say('${answer}'), doneSummary: () => 'all checks listed' } });`);
+      const b = boardOf(S);
+      res.push({ name, ok: r.a?.ok === true && r.a.closed === true && !b.open && b.done && /T-102 was closed by the harness/.test(r.a.line || '') && events(ev).filter((e) => e.type === 'task.done' && e.task === 'T-102').length === 1 && !events(ev).some((e) => e.type === 'review.ask_close_failed'), info: JSON.stringify({ a: r.a, b, err: r._err?.slice(-400) }) });
+    }
+    return [res.every((x) => x.ok), JSON.stringify(res)];
+  });
+  await guard('2.84 (r): after the harness closed the review task, a later launcher pass starts no second ask and does not say the task "needs closing" (fails before this fix: the pass answered "only needs closing" for a task that was closed)', async () => {
+    const { S, env, ev } = studio('later');
+    const r = ask(S, env, `
+r.a = await askReview('T-101', { model: 'google/gemini-3.1-pro-preview', forTask: 'T-102', noCommit: true, deps: { transport: say('VERDICT: APPROVE\\nWHY: fine for T-101.\\nISSUES:\\n- none'), doneSummary: () => 'x' } });
+const { startReviewAsk } = await import(${u(S, 'harness/review-ask.mjs')});
+let spawned = 0;
+r.p = startReviewAsk({ reviewTask: 'T-102', reviewed: 'T-101', model: 'google/gemini-3.1-pro-preview', tool: 'vertex', spawnImpl: () => { spawned++; return { pid: 1, unref() {} }; } });
+r.spawned = spawned;`);
+    const ok = r.a?.closed === true && r.spawned === 0 && r.p?.started === false && !/needs closing/.test(r.p.message || '');
+    return [ok, JSON.stringify({ a: r.a?.line, p: r.p, spawned: r.spawned, err: r._err?.slice(-300) })];
+  });
+  await guard('2.84 (r): when the close is refused (the review task is parked, a person\'s hold), the review is still recorded, review.ask_close_failed is emitted once (to the producer, warn, naming the task and the command that closes it), the process exits 0, and a launcher pass gives the one "only needs closing" text every time (fails before this fix: no event was emitted and the review task stayed open without a trace)', async () => {
+    const { S, env, ev } = studio('refused');
+    const pk = spawnSync(process.execPath, [path.join(S, 'harness', 'task.mjs'), 'park', 'T-102', '--why', 'waits for the owner to look at it', '--by', 'person-w'], { windowsHide: true, cwd: S, encoding: 'utf8', env });
+    const r = ask(S, env, `
+r.a = await askReview('T-101', { model: 'google/gemini-3.1-pro-preview', forTask: 'T-102', noCommit: true, deps: { transport: say('VERDICT: CHANGES\\nWHY: T-101 needs a test.\\nISSUES:\\n- add one'), doneSummary: () => 'x' } });
+const { startReviewAsk } = await import(${u(S, 'harness/review-ask.mjs')});
+const m = () => startReviewAsk({ reviewTask: 'T-102', reviewed: 'T-101', model: 'google/gemini-3.1-pro-preview', tool: 'vertex', spawnImpl: () => ({ pid: 1, unref() {} }) }).message;
+r.m1 = m(); r.m2 = m();`);
+    const evs = events(ev);
+    const fail = evs.filter((e) => e.type === 'review.ask_close_failed');
+    const recorded = evs.filter((e) => e.type === 'review.recorded' && e.meta?.via === 'harness-asked');
+    const ok = pk.status === 0 && r.a?.ok === true && r.a.closed === false && r.a.code === 0 && recorded.length === 1 && fail.length === 1 && fail[0].status === 'warn' && fail[0].to === 'producer' && fail[0].task === 'T-102' && /npm run task -- done T-102/.test(fail[0].msg)
+      && boardOf(S).open && !boardOf(S).done && r.m1 === r.m2 && /only needs closing/.test(r.m1 || '');
+    return [ok, JSON.stringify({ park: pk.status, a: r.a, fail: fail.map((e) => e.msg), recorded: recorded.length, m1: r.m1, err: r._err?.slice(-300) })];
+  });
 }
