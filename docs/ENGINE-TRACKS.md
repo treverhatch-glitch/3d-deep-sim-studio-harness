@@ -172,6 +172,43 @@ A branch that lands alone at the head of the queue never waits, and one behind o
 
 The land run itself still takes `machine:heavy` as that engine's job kind, with its RAM and its free-RAM floor.
 
+**Controlling the train (2.84).** The commands, all for engine `<x>`:
+
+- `npm run task -- train --engine <x> --only T-a,T-b`: this train takes only those queued tasks, in queue order; every
+  other lane stays queued. An id that is not queued is refused before anything starts, naming it.
+  `STUDIO_UNITY_TRAIN_ONLY="T-a,T-b"` is a deprecated alias of `--only` (it was a studio's local patch); use `--only`.
+- Lane tags: `npm run task -- done <ID> --train --tag <word>` queues the lane with a tag, and
+  `npm run task -- tag <ID> <word>|none` sets or clears it any time before it lands (on the engine record and the queue
+  entry; a `task.tag` event). `npm run task -- train --engine <x> --tag <word>` takes only lanes with that tag. A train
+  with neither `--only` nor `--tag` (the automatic start, a plain `train --engine <x>`) takes only untagged lanes: a
+  tagged lane (an art batch) is never swept into a general train.
+- A batch cap: `"batchMax": 6` in the engine's config (`STUDIO_ENGINE_BATCH_MAX` overrides it; 0, the default, is no
+  cap): a train takes at most that many lanes, the rest wait for the next train.
+- Grouping by risk: `"batchGroup": "play"` groups lanes by the Play Mode class of what each lane changes (the
+  `play.focus` mapping, `playSelection` per lane: `focus` or `full`). The train takes the class of the lane at the head of
+  the queue and only lanes of that class, so pure ports are not held behind a branch that needs the long stage. With no
+  `play.focus` every lane is class `full` and nothing changes. A lane marked alone still lands alone. Order: `--only` and
+  `--tag`, then alone, then grouping, then the cap. The train's start event and `train status --engine <x>` say why the
+  batch is what it is ("6 of 14 queued: class focus, cap 6; 8 wait (5 full, 3 focus)").
+- `npm run task -- train cancel --engine <x> --by <name> [--why "…"]`: writes `.studio/train/<x>-cancel.json` (the train
+  id from its lock) first, kills the train's process tree (its land run with it; `taskkill /T /F` on Windows) and waits
+  up to 30 s, puts the gate worktree back (`git merge --abort`, `git reset --hard <target>`, `git clean -fd`; only a
+  linked worktree of the engine repo, never its main checkout or a lane), deletes the train's integration refs and
+  releases its lock. The queue is left as it was: nobody is handed back or blamed (`task.train.<x>.cancelled`). It does
+  not turn the automatic start off; it prints the command that does.
+- `npm run task -- train auto off|on --engine <x> --by <name> [--why "…"] [--hours N]`: the Line Producer's automatic
+  start for that engine (`.studio/train/<x>-auto.json`). Off, it starts no train for `<x>` and says why (a
+  `task.train.<x>.auto_off` event at most once an hour); `--hours N` turns it back on by itself after N hours. A person's
+  `train --engine <x>` still starts one. `STUDIO_ENGINE_TRAIN_AUTO=off` still wins. Without `--engine`, `train auto` is
+  the game train's daemon, as before.
+- Who may cancel or switch: the board-decision verdict (`mayDecide('board')`): the owner, the owner's stand-ins,
+  Producer/Director sessions and outside agents; never a launched worker session.
+- After a reboot: `npm run studio:boot` clears a stale engine train lock (its process gone), leaves the queues as they
+  are and says how many branches each engine has queued; the automatic start then resumes them (unless auto is off).
+  `npm run studio:boot -- install [--remove] [--dry-run]` registers (Windows: a Task Scheduler task at logon,
+  `schtasks /Create /SC ONLOGON`) or prints (Linux/macOS: a crontab `@reboot` line or a systemd user unit; nothing is
+  changed) the hook that runs `studio:boot` after a reboot.
+
 **The engine line (2.78.1, B-117).** A Unity land (8 GB, 2 GB VRAM) used to take one of the game's `STUDIO_HEAVY_SLOTS`
 and go as a landing: with few slots a game train's flake re-run waited 20+ minutes behind it. Now an engine land
 (`harness/unity-gate.mjs`, any engine) takes the engine line instead: at most `STUDIO_ENGINE_SLOTS` (default 1; read

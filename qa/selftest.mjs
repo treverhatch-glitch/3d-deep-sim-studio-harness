@@ -5189,6 +5189,14 @@ if (inShard('selftest-284t')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.84 (u): control of the engine train: which lanes it takes, stopping it, its automatic start,
+if (inShard('selftest-284u')) {
+  const dir = copyRepo();
+  const { selftest284U } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284u.mjs')).href);
+  await selftest284U({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
