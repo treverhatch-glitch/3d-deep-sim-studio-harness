@@ -317,8 +317,12 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
   }
   lines.push(`[upgrade] ${branch} backed up as ${backup} (${head.slice(0, 10)}).`);
 
+  const betaBefore = betaAt(root, 'HEAD');
   if (!cont) {
     const m = git(['merge', '--no-ff', '--no-commit', sha], root, { env: { ...env, GIT_MERGE_AUTOEDIT: 'no' } });
+    // 2.84 (q): the studio's beta mode is the owner's switch, never the update's: studio/beta.json stays as the studio had
+    // it (the ref's copy, a deletion or a conflict in it is undone before anything else is judged).
+    keepStudioBeta(root, betaBefore);
     const conflicts = unmergedFiles(root);
     if (conflicts.length) {
       await emit(root, { type: 'upgrade.merge_conflict', agent: String(by).trim().slice(0, 60), msg: `harness update ${ref} (${from} -> ${to}) stopped on ${conflicts.length} conflicting file(s): ${short(conflicts, 5)}`.slice(0, 600), meta: { ref, sha, from, to, backup, files: conflicts.slice(0, 50), recordedBy: who.recordedBy } });
@@ -341,6 +345,7 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
     return stop(`${g.combined.length} golden file(s) differ from ${ref}'s (the merge combined the studio's change with the update's): ${short(g.combined)}. ${cont ? 'The merge is still in progress. ' : 'The merge was undone. '}Say why the recorded answers changed: --golden-reason "<why, 10+ characters>" (it is added as a Golden-Reason trailer).`, { backup, combinedGoldens: g.combined });
   }
 
+  if (cont) keepStudioBeta(root, betaBefore);
   const trailers = [`Upgrade-By: ${String(by).trim()}`];
   if (who.permission) trailers.push(`Upgrade-Permission: ${who.permission}`);
   trailers.push(`Upgrade-Recorded-By: ${who.recordedBy}`, `Upgrade-Ref: ${ref} ${sha}`, `Upgrade-Versions: ${from} -> ${to}`, `Upgrade-Backup: ${backup}`);
@@ -357,6 +362,8 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
     return stop(`the hooks refused the merge commit (the merge is still in progress; fix what they say and run --continue, or undo it with git merge --abort):\n${`${c.stdout}${c.stderr}`.trim().split('\n').slice(-15).map((l) => `  ${l}`).join('\n')}`, { backup });
   }
   const commit = out1(git(['rev-parse', 'HEAD'], root));
+  // 2.84 (q): beta mode across the update, said plainly (the owner runs the studio from abroad on it).
+  lines.push(betaAcrossLine(betaBefore, betaAt(root, 'HEAD')));
   // 2.77.1 (B-100): the update's own commits were made on GitHub, without this studio's hooks: list them as exempt
   // (the grandfather list, by sha and patch-id) so the hooks gate on main doesn't fail on them. The studio's own new
   // commits are still judged. The merged harness's helper, loaded from the studio; a failure is said, never fatal.
@@ -394,6 +401,40 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
       ...lanes.lines,
       '[upgrade] Next: npm run verify -- --all, then npm run task -- drain off --by <you>. Undo: git reset --hard ' + backup + ' (only before anything else lands).'],
   };
+}
+
+/**
+ * 2.84 (q): studio/beta.json as committed at `rev`: { present, on, text }. Read straight from git (no harness import: this
+ * file also runs from a ref, before the studio has the new harness).
+ */
+export const BETA_FILE = 'studio/beta.json';
+export function betaAt(root, rev = 'HEAD') {
+  const r = git(['show', `${rev}:${BETA_FILE}`], root);
+  if (r.status !== 0) return { present: false, on: false, text: null };
+  let on = false;
+  try { on = JSON.parse(r.stdout)?.on === true; } catch { /* unreadable: off */ }
+  return { present: true, on, text: r.stdout };
+}
+/** Put studio/beta.json back as the studio had it before the merge (staged), whatever the update did to it. */
+export function keepStudioBeta(root, before) {
+  const now = git(['show', `:${BETA_FILE}`], root);
+  const unmerged = git(['ls-files', '-u', '--', BETA_FILE], root).stdout.trim() !== '';
+  if (before.present) {
+    if (!unmerged && now.status === 0 && now.stdout === before.text) return false;
+    git(['checkout', 'HEAD', '--', BETA_FILE], root);
+    return true;
+  }
+  if (now.status !== 0 && !unmerged) return false;
+  git(['rm', '-q', '-f', '--cached', '--', BETA_FILE], root);
+  try { fs.rmSync(path.join(root, BETA_FILE), { force: true }); } catch { /* gone */ }
+  return true;
+}
+/** The guard's line: beta mode before and after the update. */
+export function betaAcrossLine(before, after) {
+  if (before.on && after.on) return '[upgrade] Beta mode was on before the upgrade and is on after (studio/beta.json kept as the studio had it).';
+  if (!before.on && !after.on) return `[upgrade] Beta mode was off before the upgrade and is off after${before.present ? '' : ' (no studio/beta.json)'}.`;
+  if (before.on) return `[upgrade] WARN beta mode was on before the upgrade and is OFF after: studio/beta.json ${after.present ? 'says on: false' : 'is gone'} in the merge commit. The owner turns it on again (npm run beta -- on --by <owner>).`;
+  return '[upgrade] WARN beta mode was off before the upgrade and is ON after: the update brought a studio/beta.json; the owner turns it off (npm run beta -- off --by <owner>).';
 }
 
 /**

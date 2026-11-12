@@ -5189,6 +5189,14 @@ if (inShard('selftest-284t')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.84 (q): in beta mode the overseer and an outside signer make the owner's decisions (one rule: standInMay), logged.
+if (inShard('selftest-284q')) {
+  const dir = copyRepo();
+  const { selftest284Q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284q.mjs')).href);
+  await selftest284Q({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

@@ -11,13 +11,21 @@
  * module can be loaded from anywhere without a cycle.
  */
 
-export async function deciderCheck({ by, permission = '', action, env = process.env, what = 'do this' } = {}) {
+export async function deciderCheck({ by, permission = '', action, env = process.env, what = 'do this', standIn = '' } = {}) {
   // 2.71.0 (x): autonomous mode (harness/policy.mjs) applies only where the caller names its action; the decisions that
   // borrow hold's people (crew resume, ending a wind-down: they spend usage) are never autonomous.
   const autonomy = Boolean(action);
   action = action || 'hold';
   const who = String(by || '').trim();
   if (!who) return { ok: false, why: `Say who decides: --by <name>.` };
+  // 2.84 (q): standIn names the owner decision this is (beta-mode.mjs STAND_IN_KINDS, e.g. 'crew-resume'): in beta mode the
+  // overseer and an outside signer make it with no --permission (standInMay, the one rule); via 'beta agent' | 'signer'.
+  if (standIn) {
+    try {
+      const si = (await import('./beta-mode.mjs')).standInMay(standIn, { by: who, env });
+      if (si.ok) return { ok: true, via: si.via, by: si.who, recordedBy: si.who, permission: '', standIn: si };
+    } catch { /* the usual rules */ }
+  }
   const { DECIDER_ROLES, WORKER_NAME, AGENT_SHELL, agentOnPermission, permissionText } = await import('./permission.mjs');
   const role = String(env.STUDIO_ROLE || '').trim();
   const owner = String(env.STUDIO_LOCK_OWNER || '').trim();

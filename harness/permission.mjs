@@ -17,7 +17,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { proxyShell, mainCheckout } from './owner-proxy.mjs';
 import { parseStudioEnv } from './dotenv.mjs';
-import { betaActor } from './beta-mode.mjs';
+import { betaActor, standInMay } from './beta-mode.mjs';
+// 2.84 (q): the one rule for the owner's decisions a stand-in makes in beta mode (defined in beta-mode.mjs, beside readBeta).
+export { standInMay, STAND_IN_KINDS, recordStandInUse } from './beta-mode.mjs';
 
 // Launched sessions that may act on a person's permission.
 export const DECIDER_ROLES = /^(producer|director)$/i;
@@ -107,7 +109,8 @@ export function outsideSigners(root = process.cwd()) {
  * the harness"; 2.79 (c): an outside agent that runs commands there (grokbot on the owner's PC, the orchestrator's chat
  * shell) is then the beta agent its --by names, if beta mode names it, and nobody else.
  */
-export const selfNamingShell = (env = process.env) => !String(env.STUDIO_ROLE || '').trim() && !String(env.STUDIO_LOCK_OWNER || '').trim();
+// 2.84 (q): nor a session pinned to a task (STUDIO_TASK_PIN, set by the launcher): it never names itself a stand-in with --by.
+export const selfNamingShell = (env = process.env) => !String(env.STUDIO_ROLE || '').trim() && !String(env.STUDIO_LOCK_OWNER || '').trim() && !String(env.STUDIO_TASK_PIN || '').trim();
 
 const readJsonQuiet = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 /**
@@ -188,11 +191,12 @@ export function mayDecide(kind, actor, { root = process.cwd(), agents = [] } = {
  * The park rank (task-hold.mjs parkRank) and the decisions log (decisions-log.mjs: the planning back-off's strong news) use it.
  */
 export function ownerStandInRole({ by = '', env = process.env } = {}) {
-  if (String(env.STUDIO_ROLE || '').trim()) return null;
+  if (String(env.STUDIO_ROLE || '').trim() || String(env.STUDIO_TASK_PIN || '').trim()) return null;
   const said = selfNamingShell(env) && String(by || '').trim() ? { ...env, STUDIO_LOCK_OWNER: String(by).trim() } : env;
   const me = String(said.STUDIO_LOCK_OWNER || '').trim();
   if (!me || WORKER_NAME.test(me)) return null;
   try { if (proxyShell({ env: said }).ok) return 'owner proxy'; } catch { /* not the proxy */ }
-  try { const b = betaActor({ env, by, kind: 'board' }); if (b.ok && b.via === 'beta agent') return 'beta agent'; } catch { /* not a beta agent */ }
+  // 2.84 (q): a beta-mode named agent or an outside signer, by the one rule (beta-mode.mjs standInMay; never a pinned session).
+  try { if (standInMay('unpark', { by, env }).ok) return 'beta agent'; } catch { /* not a beta agent */ }
   return null;
 }

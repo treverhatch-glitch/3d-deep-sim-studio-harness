@@ -40,6 +40,19 @@ logs, `.studio`), a wipe or purge, or a bare "buy it?" or "delete it?" keeps it 
   or owner runs `npm run task -- train config <ID>`.
 - A release (`harness/train-lanes.mjs laneContent`) records the lane's content: a new head with the same content keeps it; a
   commit changing a released file, adding one, or a main change merged in voids it.
+- 2.84 (q), the owner's decision: while beta mode is on, a beta-mode named agent (the overseer) and an outside signer may,
+  with no owner key and no `--permission`: release a tier-C lane (`task train release`), record a force approval and run
+  `task done --force` (and `--force --train` when a force approval is on file), approve protected files, weakened tests and
+  hooks, their own change included (marked `self: true`; no second approver is asked for), unpark at any rank, resume a
+  paused role (`crew -- resume`), and cancel an engine train or switch its auto mode. One rule decides: `standInMay` in
+  `harness/beta-mode.mjs`. Never: a launched session (`STUDIO_ROLE`) or one pinned to a task (`STUDIO_TASK_PIN`), whatever
+  `--by` says; a worker's name; the owner's own acts above; anyone with beta mode off or a beta record that doesn't count. A
+  launched Producer/Director keeps its rules (protected decisions only with `STUDIO_PRODUCER_APPROVES=protected`). No check
+  is skipped: the train's verify, the game's tests, the hooks and weakened-tests gates and every `task done`'s safety checks
+  run as before; only who approves changed. Every use is one `beta.use` event (who, task, what, `via`: beta agent or
+  signer, `self` for an approval of one's own change), listed in the daily digest's beta section with self-approvals marked
+  "SELF-APPROVED". A harness update (`npm run upgrade -- --merge`) keeps `studio/beta.json` as the studio had it and says
+  whether beta mode was on before and is on after.
 - Not covered: an agent that sets another agent's name (`STUDIO_LOCK_OWNER=...`) is impersonating; the records show what it ran.
 
 ## Protected files and the owner key
