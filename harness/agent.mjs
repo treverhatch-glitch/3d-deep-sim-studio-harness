@@ -2381,7 +2381,7 @@ export async function fillAgents({ byDirector = false, autonomous = false } = {}
   const mode = effectiveMode();
   // Away mode (or the game-dev loop asking for it) means the studio starts agents on its own.
   if (!mode.autoLaunch && !autonomous) {
-    // With no pace chosen nothing starts on its own, the Director included; a note goes to the dev once an hour.
+    // 2.55.0 (P-032): with no pace chosen nothing starts on its own, the Director included; a note goes to the dev once an hour.
     if (!mode.chosen) {
       const msg = 'No pace is chosen, so the studio starts no agents on its own: npm run mode -- set <pace> --by <name> (precise, budget, fast, prototype or extreme), or start agents by hand';
       const last = readRecentEvents(2000).filter((e) => e.type === 'pace.unchosen').pop();

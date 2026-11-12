@@ -323,7 +323,8 @@ export function bootHook({ root = REPO_ROOT, platform = process.platform, node =
       ...(platform === 'linux' ? [
         `  or a systemd user unit, ~/.config/systemd/user/${unit}.service:`,
         '    [Unit]', `    Description=Studio boot (${folder})`, '    [Service]', '    Type=oneshot', '    RemainAfterExit=yes', '    KillMode=process', `    WorkingDirectory=${root}`, `    ExecStart=${node} ${script}`, '    [Install]', '    WantedBy=default.target',
-        `    then: systemctl --user daemon-reload && systemctl --user enable ${unit}.service`,
+        '    then: systemctl --user daemon-reload',
+        `    then: systemctl --user enable ${unit}.service`,
       ] : []),
     ];
   return { platform, name, lines };
