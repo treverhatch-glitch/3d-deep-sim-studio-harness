@@ -1,53 +1,29 @@
 #!/usr/bin/env node
 /**
- * harness/line-producer.mjs — 2.76.0 (k): the Line Producer, the studio's flow desk. Code on the supervisor's loop, no
- * model and no tokens for the routine part.
- *
- * The owner's words: "add the line producer with the logic of keeping things running and watching the rigs available
- * resources and handing out tasks based on priority and free resources as well (also considering additional research,
- * building out the game with early, mid, late game in mind, and working with and through the director and planning with
- * the producer etc.)". Chain of command (studio/roles/line-producer.md): the Director owns creative direction and turns
- * it into a ranked, sized plan; the Producer approves it against the Bible; the Line Producer executes it: it orders
- * the launches, routes the models, watches the machine, unblocks what is mechanical and reports up. It never changes
- * direction: a plan that can't run becomes one Producer note ("this plan can't run because …").
+ * harness/line-producer.mjs — the Line Producer, the studio's flow desk. Code on the supervisor's loop, no model and no
+ * tokens for the routine part. The Director ranks the plan, the Producer approves it (studio/roles/line-producer.md);
+ * this executes it and never changes direction: a plan that can't run becomes one Producer note.
  *
  * Each supervisor pass (lineProducerPass, before the supervisor picks what to start):
- *   a. builders: how many the rig can carry now (the rig budget: harness/rig-budget.mjs rigBudget() when it is there,
- *      else the machine scan and the heavy claims of harness/heavy-budget.mjs; STUDIO_LINE_RIG=heavy forces the
- *      second), against the pace's builder count. It only ever lowers the supervisor's starts (a full machine), never
- *      raises them past the pace's caps;
- *   b. why each waiting task can't start (trunk, chain, park, cooldown, budget, lock, busy, merge, waiting on a yes,
- *      held), and the mechanical fixes it makes itself, logged (.studio/line/actions.jsonl, line.fixed events): a lock
- *      whose holder's session is over, a lane copy queued for the train that is gone while its branch is still there
- *      (recreated from the branch), a cooldown, block or park whose time has passed (cleared);
- *   c. chain-breakers (a task STUDIO_LINE_CHAIN_MIN (3) or more open tasks wait on) start first, on the strongest model;
- *   d. a model per task by size (2.73 routing's tiers: harness/routing.mjs tierModels, else STUDIO_TIER_<TIER>_MODEL):
- *      size 1-2 cheap, 3 (or none) mid, 4-5 and chain-breakers top, one tier up per red round; a task already started
- *      keeps its model (never mid-task) and a rescue keeps the rescue model;
- *   e. a share of the builders (STUDIO_LINE_EXPANSION_SHARE, default 1/6: round(N × share) slots) on research and
- *      expansion work, balanced across the Bible's phases (1 early, 2 mid, 3 late); when fewer than
- *      STUDIO_LINE_EXPANSION_MIN (2) such tasks are open it files ONE "Director: next ranked slice for phase <n>" task
- *      (never two open);
- *   f. one Producer note (.studio/line/producer-note.md, a line.plan_blocked event when its reasons change) when the plan
- *      can't run;
- *   g. (2.84: the remote workers of 2.77.0 (o) are gone; nothing used them.)
- *   h. 2.77.0 (u, P5.2/P5.3): each engine train (harness/unity-train.mjs, any engine target of harness/engine-tracks.mjs)
- *      with branches queued is started when its engine slot is free (2.79: STUDIO_ENGINE_SLOTS; game trains neither block it nor
- *      are blocked by it), or, for "window": "quiet" / STUDIO_ENGINE_WINDOW=quiet / the line off, in a quiet window (enginePass/engineWindow): no web train running (train >
- *      builder verifies > engine > soaks), no other job of the same heavy kind, free RAM at or over the engine's floor,
- *      CPU under STUDIO_ENGINE_QUIET_CPU_PCT (75), and no web lane queued unless the engine queue waited
- *      STUDIO_ENGINE_TRAIN_MAX_WAIT_MIN (120). It runs `task train --engine <x>` detached; the train itself still takes
- *      machine:heavy with the RAM floor, and an infrastructure abort stays NOT RUN (2.73.2). STUDIO_ENGINE_TRAIN_AUTO=off
- *      (or engines.<x>.trainAuto false) leaves starting it to a person.
- *   i. 2.79 (t): the game tester (testerPass, harness/tester.mjs): starts a run when STUDIO_TESTER_EVERY_HOURS (24) AND
- *      STUDIO_TESTER_MIN_LANDINGS (10) game landings passed since the last one, or on `npm run tester -- now`, only while
- *      the rig isn't starved and a gate slot is free; no slot, no hold. A landed module nothing imports gets one "Wire
- *      <module> into the game" task (STUDIO_TESTER_WIRE_TASKS).
+ *   a. builders the rig can carry (harness/rig-budget.mjs rigBudget(), else harness/heavy-budget.mjs; STUDIO_LINE_RIG=heavy
+ *      forces the second) against the pace's count; it only ever lowers the starts;
+ *   b. why each waiting task can't start, and the mechanical fixes it makes, logged (.studio/line/actions.jsonl, line.fixed
+ *      events): dead locks, lost lane copies queued for the train, past-due cooldowns/blocks/parks;
+ *   c. chain-breakers (STUDIO_LINE_CHAIN_MIN (3) or more open tasks wait on it) start first, on the strongest model;
+ *   d. a model per task by size (harness/routing.mjs tierModels, else STUDIO_TIER_<TIER>_MODEL), one tier up per red round;
+ *   e. STUDIO_LINE_EXPANSION_SHARE (1/6) of the builders on research and expansion work, balanced across the Bible's phases;
+ *      under STUDIO_LINE_EXPANSION_MIN (2) such tasks it files ONE "Director: next ranked slice for phase <n>" task;
+ *   f. one Producer note (.studio/line/producer-note.md, a line.plan_blocked event when its reasons change);
+ *   h. engine trains (harness/unity-train.mjs, harness/engine-tracks.mjs): enginePass starts `task train --engine <x>`
+ *      detached when the engine slot is free (STUDIO_ENGINE_SLOTS), or in a quiet window (STUDIO_ENGINE_WINDOW=quiet).
+ *      STUDIO_ENGINE_TRAIN_AUTO=off (or engines.<x>.trainAuto false) leaves it to a person;
+ *   i. the game tester (testerPass, harness/tester.mjs; STUDIO_TESTER_EVERY_HOURS (24), STUDIO_TESTER_MIN_LANDINGS (10),
+ *      STUDIO_TESTER_WIRE_TASKS).
  * It writes .studio/line/status.json (lineStatus(): what the Communicator posts and the supervisor reads for its order).
  *
  * STUDIO_LINE_PRODUCER: on (default) | report (status only: no fixes, no task filed, the supervisor ignores the plan) |
- * off. Beta mode: its own fixes are routine harness housekeeping, never an owner decision; what needs the owner (a yes,
- * an unpark, an unhold) is only reported, naming who may act (harness/delegation.mjs delegationFor; beta mode's agents).
+ * off. Its fixes are routine housekeeping, never an owner decision; what needs the owner (a yes, an unpark, an unhold) is
+ * only reported, naming who may act (harness/delegation.mjs delegationFor; beta mode's agents).
  *
  *   npm run line -- status [--json]      the last pass (or a dry one when there is none)
  *   npm run line -- plan [--json]        a dry pass now: the order, the routes, what it would fix
@@ -96,7 +72,7 @@ export function expansionShare(env = process.env) {
 }
 export const phaseLabel = (p) => (Number(p) >= 3 ? 'late' : PHASE_LABEL[Number(p)] || 'unphased');
 
-/** Research or expansion work: a research/study/idea task, an engine track, meta.expansion, or a Research:/Expansion: title. */
+/** Research or expansion work: a research/study/idea task, engine track, meta.expansion, or Research:/Expansion: title. */
 export function isExpansion(t, meta = {}, type = '') {
   if (!t || t.role === 'human' || t.role === 'producer' || t.role === 'director' || SLICE_TITLE.test(t.title || '')) return false;
   if (meta.expansion || meta.slice) return true;
@@ -105,10 +81,7 @@ export function isExpansion(t, meta = {}, type = '') {
   return /^(research|expansion|explore)\b\s*[:—–-]/i.test(String(t.title || ''));
 }
 
-/**
- * Tasks STUDIO_LINE_CHAIN_MIN (3) or more open tasks wait on (directly or down a chain of --after): [{ task, waiting,
- * n }], most first. `open` the open tasks, `holds` studio/task-holds.json's map, `done` the done ids.
- */
+/** Tasks STUDIO_LINE_CHAIN_MIN (3) or more open tasks wait on, directly or down a chain of --after: [{ task, waiting, n }], most first. */
 export function chainBreakers(open, holds = {}, done = new Set(), min = 3) {
   const openIds = new Set(open.map((t) => t.id));
   const deps = new Map();
@@ -133,17 +106,14 @@ export function chainBreakers(open, holds = {}, done = new Set(), min = 3) {
   return [...waitingOn.entries()].filter(([, w]) => w.length >= min).map(([task, waiting]) => ({ task, waiting: waiting.sort(), n: waiting.length })).sort((a, b) => b.n - a.n || a.task.localeCompare(b.task));
 }
 
-/** The tier a task's size gives: 1-2 cheap, 3 mid, 4-5 top; no size: chore/docs/test cheap, else mid. */
+/** 1-2 cheap, 3 mid, 4-5 top; no size: chore/docs/test cheap, else mid. */
 export function sizeTier(meta = {}, type = '') {
   const s = Number(meta.size);
   if (Number.isFinite(s) && s > 0) return s <= 2 ? 'cheap' : s >= 4 ? 'top' : 'mid';
   return ['chore', 'docs', 'test'].includes(String(type || '').toLowerCase()) ? 'cheap' : 'mid';
 }
 
-/**
- * The route for one task: { tier, model, why }. model null: the launcher keeps its own choice (no model listed for the
- * tier, a rescue, a task that already started and hasn't failed since). models: { cheap, mid, top } (only those set).
- */
+/** The route for one task: { tier, model, why }. model null: the launcher keeps its own choice (no model for the tier, a rescue, a started task). */
 export function routeTask(t, { meta = {}, type = '', chainBreaker = false, failed = 0, started = false, models = {} } = {}) {
   if (/^Rescue:/i.test(String(t.title || ''))) return { tier: null, model: null, why: 'a rescue: the rescue model starts it' };
   const base = chainBreaker ? 'top' : sizeTier(meta, type);
@@ -156,11 +126,7 @@ export function routeTask(t, { meta = {}, type = '', chainBreaker = false, faile
   return { tier, model, why: model ? `${sized} -> ${model}` : `${sized}; no model listed for the ${tier} tier (studio/policy.json "routing".tiers or STUDIO_TIER_${tier.toUpperCase()}_MODEL): the launcher's default` };
 }
 
-/**
- * 2.77.0 (n): the route by model pool (harness/model-pools.mjs pickPool): Gemini first (Flash small, Argon normal),
- * Claude for hard work, chain-breakers and after a Gemini failure, quota-aware. { tier (the size class), model, tool,
- * pool, why }; model null: the launcher's default. A rescue keeps the rescue model.
- */
+/** The route by model pool (harness/model-pools.mjs pickPool), quota-aware: { tier (the size class), model, tool, pool, why }. A rescue keeps the rescue model. */
 export function poolRoute(t, { chainBreaker = false, pools }) {
   if (/^Rescue:/i.test(String(t.title || ''))) return { tier: null, model: null, why: 'a rescue: the rescue model starts it' };
   const r = pickPoolFn(pools)({ size: t.size || 'normal', chainBreaker, failed: t.poolFailed ?? t.failed ?? 0, lastFailedPool: t.lastFailedPool || null, protectedHeavy: Boolean(t.protectedHeavy), startedOn: t.started && t.state !== 'running' ? t.startedOn || null : null }, pools);
@@ -170,12 +136,11 @@ let pickPoolImpl = null;
 const pickPoolFn = (pools) => pools.pickPool || pickPoolImpl;
 
 /**
- * The plan from plain data (pure, testable). facts: { now, tasks: [{ id, title, role, priority, meta, type, state:
- * 'ready'|'running'|'blocked', block: { kind, why, fix, mechanical? }, failed, started }], holds, done (Set), sessions:
- * [{ role, task, running }], pace: { maxAgents, perRole, label }, rig: { known, byRam, cpuBusy, cpuHold, why },
- * models, share, chainMin, expansionMin, sliceOpen: { id, title } | null, extraBlocked: [] }.
+ * The plan from plain data (pure). facts: { now, tasks: [{ id, title, role, priority, meta, type, state: 'ready'|
+ * 'running'|'blocked', block: { kind, why, fix, mechanical? }, failed, started }], holds, done (Set), sessions, pace,
+ * rig, models, share, chainMin, expansionMin, sliceOpen, extraBlocked }.
  */
-/** Under this CPU share the machine counts as idle (the scorecard's rig measure counts samples under the same line). */
+/** Under this CPU share the machine counts as idle (the scorecard's rig measure uses the same line). */
 export const RIG_IDLE_PCT = 25;
 export function linePlan(f) {
   const tasks = f.tasks || [];
@@ -191,26 +156,22 @@ export function linePlan(f) {
   if (rig.known) {
     if (rig.cpuHold) { rigCap = builders.length; rigWhy = `CPU ${Math.round(rig.cpuBusy * 100)}% busy (STUDIO_LINE_CPU_BUSY_PCT ${rig.cpuBusyPct}): no new builder until it drops`; } else if (Number.isFinite(rig.byRam)) { rigCap = rig.byRam; rigWhy = rig.why || `RAM room for ${rig.byRam}`; }
   }
-  // 2.79.1 (3.2): while an engine land waits for RAM, the builder cap steps down one at a time (engine-ram.mjs); none is stopped.
-  // It goes through rigCap, which the supervisor holds new builders by.
+  // While an engine land waits for RAM, the builder cap steps down one at a time (engine-ram.mjs) via rigCap; none is stopped.
   if (Number.isFinite(f.engineHold?.cap) && (rigCap === null || f.engineHold.cap < rigCap)) { rigCap = Math.max(0, f.engineHold.cap); rigWhy = `an engine land waits for RAM: builder cap stepped down to ${rigCap} (${f.engineHold.why})`; }
   const target = rigCap === null ? paceCap : Math.min(paceCap, rigCap);
   const readyB = tasks.filter((t) => t.state === 'ready' && t.role === 'builder');
-  // 2.81: the other direction. The rig only ever lowers the builder count; when the pace is the limit, ready builder work
-  // waits and the machine is idle (CPU under RIG_IDLE_PCT, RAM room for more builders than the pace allows), the plan
-  // says how many more it could carry. It starts none: the pace is the owner's spend decision (npm run mode).
+  // Pace-limited but the machine is idle (CPU under RIG_IDLE_PCT, RAM room): the plan says how many more it could carry.
+  // It starts none: the pace is the owner's spend decision (npm run mode).
   let room = null;
   if (rig.known && !rig.cpuHold && !f.engineHold && Number.isFinite(rig.cpuBusy) && rig.cpuBusy * 100 < RIG_IDLE_PCT && Number.isFinite(rig.byRam) && rig.byRam > paceCap && builders.length >= paceCap && readyB.length) {
     room = { extra: Math.min(rig.byRam - paceCap, readyB.length), cpuPct: Math.round(rig.cpuBusy * 100), byRam: rig.byRam, waiting: readyB.length };
   }
   const blocked = tasks.filter((t) => t.state === 'blocked').map((t) => ({ task: t.id, role: t.role, kind: t.block.kind, why: t.block.why, fix: t.block.fix || '', ...(t.block.mechanical ? { mechanical: true } : {}), ...(t.block.fixed ? { fixed: t.block.fixed } : {}) }));
   for (const b of f.extraBlocked || []) blocked.push(b);
-  // 2.78.1 (B-123): a ready builder task with no lane runs, but alone: it is listed as "unscoped" for the Producer.
   for (const u of f.lanes?.unscoped || []) blocked.push({ task: u.task, role: 'builder', kind: 'unscoped', why: u.why, fix: u.fix, runsAlone: true });
   blocked.sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || a.task.localeCompare(b.task));
   const kinds = {};
   for (const b of blocked) kinds[b.kind] = (kinds[b.kind] || 0) + 1;
-  // Expansion share, balanced across the phases.
   const share = Number.isFinite(f.share) ? f.share : 1 / 6;
   const slots = share > 0 ? Math.round(target * share) : 0;
   const exp = tasks.filter((t) => isExpansion(t, t.meta || {}, t.type));
@@ -224,13 +185,11 @@ export function linePlan(f) {
   const lowPhase = ['1', '2', '3'].sort((a, b) => (byPhase[a].open + byPhase[a].running) - (byPhase[b].open + byPhase[b].running) || Number(a) - Number(b))[0];
   const expMin = f.expansionMin ?? 2;
   const askSlice = slots > 0 && exp.length < expMin && !f.sliceOpen ? Number(lowPhase) : null;
-  // Order: chain-breakers, then the expansion share (lowest-covered phase first), then priority and board order.
   const ready = tasks.filter((t) => t.state === 'ready');
   const boardIdx = new Map(tasks.map((t, i) => [t.id, i]));
   const order = [];
   const take = (t) => { if (t && !order.includes(t.id)) order.push(t.id); };
-  // 2.79.1 (4): an engine push: the pushed engine's ready porters go first (up to every builder slot), the game's work after.
-  // 2.82: a builder task on that engine's track counts too (a native studio's builders work in the engine).
+  // An engine push: that engine's ready porters and track builders go first, the game's work after.
   if (f.enginePush?.engine) for (const t of ready) if ((t.role === 'engine-porter' || t.role === 'builder') && String(t.meta?.track || '').replace(/^engine:/, '') === f.enginePush.engine) take(t);
   for (const c of cbs) take(ready.find((t) => t.id === c.task));
   const expNeed = Math.max(0, slots - runningExp.length);
@@ -239,9 +198,8 @@ export function linePlan(f) {
     ready.filter((t) => exp.includes(t)).sort((a, b) => phaseRank(a) - phaseRank(b) || PRI(a.priority) - PRI(b.priority) || boardIdx.get(a.id) - boardIdx.get(b.id)).slice(0, expNeed).forEach(take);
   }
   ready.slice().sort((a, b) => PRI(a.priority) - PRI(b.priority) || boardIdx.get(a.id) - boardIdx.get(b.id)).forEach(take);
-  // 2.79.1 (3.1): a blocked item blocks only what depends on it. A lane-less ready task holds the whole game, so no other builder
-  // would run beside it (the freeze: 10 ready, 1 running): it is skipped while other work can run, and the Producer is asked
-  // once to scope it. With nothing else to run it may still go alone.
+  // A lane-less ready task holds the whole game: it is skipped while other work can run (the Producer is asked once to
+  // scope it) and may go alone when nothing else can.
   const skip = [];
   if (target > 1 && f.lanes?.unscoped?.length) {
     const unscoped = new Set(f.lanes.unscoped.map((u) => u.task));
@@ -250,7 +208,6 @@ export function linePlan(f) {
   }
   const routes = {};
   for (const t of tasks.filter((x) => x.state !== 'blocked' || cbSet.has(x.id))) routes[t.id] = f.pools ? poolRoute(t, { chainBreaker: cbSet.has(t.id), pools: f.pools }) : routeTask(t, { meta: t.meta || {}, type: t.type, chainBreaker: cbSet.has(t.id), failed: t.failed || 0, started: Boolean(t.started), models: f.models || {} });
-  // Plans that can't run: for the Producer.
   const reasons = [];
   for (const c of cbs) {
     const t = byTask.get(c.task);
@@ -264,13 +221,11 @@ export function linePlan(f) {
     reasons.push(`${free} builder slot${free === 1 ? ' is' : 's are'} free but every open builder task is blocked (${Object.entries(k).map(([kk, n]) => `${n} ${kk}`).join(', ')})`);
   }
   if (target > 1 && f.lanes?.unscoped?.length) reasons.push(`${f.lanes.unscoped.length} ready builder task${f.lanes.unscoped.length === 1 ? ' has' : 's have'} no lane the Line Producer could work out (${f.lanes.unscoped.slice(0, 5).map((u) => u.task).join(', ')}${f.lanes.unscoped.length > 5 ? ' …' : ''}): a builder on one holds the whole game, so no other builder runs beside it; npm run task -- lane <ID> <folders> --by <you>`);
-  // 2.83: a dependency on a task that is on no list holds only that task (it is not startable); it is a reason the plan
-  // "can't run" only when nothing else can run. The Producer is asked once per (task, missing id): see askDangling.
+  // A dependency on a task that is on no list holds only that task; the plan "can't run" only when nothing else can run (askDangling asks once).
   const dangling = (f.dangling || []).filter((d) => !(f.done || new Set()).has(d.on));
   const otherWork = tasks.some((t) => t.state === 'running' || t.state === 'ready');
   if (!otherWork) for (const d of dangling) reasons.push(`${d.task} waits for ${d.on}, which isn't on the board: the chain can't finish`);
   if (blocked.some((b) => b.kind === 'trunk')) reasons.push('the trunk is red: only fix tasks start until it is green');
-  // 2.83: what gates the line: for each chain-breaker, the builder tasks that wait only on it, and where it is.
   const gates = cbs.map((c) => {
     const g = byTask.get(c.task);
     const waiters = c.waiting.filter((id) => { const w = byTask.get(id); return w && w.role === 'builder' && w.state === 'blocked' && w.block?.kind === 'chain'; });
@@ -293,10 +248,10 @@ export function linePlan(f) {
   };
 }
 
-// ---- the rig (an adapter: helper j's rigBudget() when it is there, else the heavy budget) ----------------------------
+// the rig (an adapter: rigBudget() when it is there, else the heavy budget)
 
 const JOB_RANK = (h) => { const k = `${h.kind || ''} ${h.label || ''}`.toLowerCase(); return /train/.test(k) ? 0 : /verify|gate/.test(k) ? 1 : /unity|blender|art|asset|bake/.test(k) ? 2 : /soak|slow/.test(k) ? 3 : 4; };
-/** The rig now: { source, known, byRam, cpuBusy, cpuBusyPct, cpuHold, usableRamGb, claimedGb, freeRamGb, cores, heavy: [...], train, why }. */
+/** The rig now: { source, known, byRam, cpuBusy, cpuHold, usableRamGb, claimedGb, freeRamGb, cores, heavy, train, why }. */
 export async function rigNow({ env = process.env, now = Date.now(), deps = {} } = {}) {
   const busyPct = num(env.STUDIO_LINE_CPU_BUSY_PCT, 90);
   const perGb = Math.max(0.1, num(env.STUDIO_LINE_BUILDER_GB, 1));
@@ -329,7 +284,7 @@ export async function rigNow({ env = process.env, now = Date.now(), deps = {} } 
     const heavy = holders.map((x) => { const c = hb.claimOf(x); return { kind: c.kind || 'heavy', label: x.label || null, owner: x.owner || null, ramGb: c.ramGb ?? null, cpuThreads: c.cpuThreads ?? null, workers: c.workers ?? null, minutes: x.at ? Math.round((now - Number(x.at)) / 60000) : null }; }).sort((a, b) => JOB_RANK(a) - JOB_RANK(b));
     if (!profile) return { source: 'heavy-budget', known: false, heavy, train, why: 'no fresh machine scan: the pace decides', cpuBusyPct: busyPct };
     const st = hb.budgetState(profile, holders, { env });
-    // 2.78.1 (f): a running engine train's RAM counts between its land runs too (heavy-budget.mjs engineTrainReserve).
+    // A running engine train's RAM counts between its land runs too (heavy-budget.mjs engineTrainReserve).
     const er = deps.engineReserve || hb.engineTrainReserve(root, holders, { env, now });
     const room = Number.isFinite(st.usableRamGb) ? Math.max(0, st.usableRamGb - (st.claimedGb || 0) - (er.gb || 0)) : null;
     const byRam = room === null ? null : Math.floor(room / perGb);
@@ -338,7 +293,7 @@ export async function rigNow({ env = process.env, now = Date.now(), deps = {} } 
   } catch (e) { return { source: 'none', known: false, heavy: [], train, why: `the machine budget couldn't be read (${e.message})` }; }
 }
 
-// ---- gathering the facts, and the mechanical fixes ------------------------------------------------------------------
+// gathering the facts, and the mechanical fixes
 
 const gitIn = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
 
@@ -358,7 +313,7 @@ export function readActions(n = 10) {
   try { return fs.readFileSync(LINE_ACTIONS_FILE(), 'utf8').split('\n').filter(Boolean).slice(-n).map((l) => JSON.parse(l)); } catch { return []; }
 }
 
-/** A train queue entry whose lane copy is gone and whose branch is still there: recreate the copy from the branch. */
+/** Recreates a train queue entry's lost lane copy from its branch. */
 export function restoreLaneCopy(root, entry, { dryRun = false } = {}) {
   const rel = path.relative(path.join(root, '.lanes'), path.resolve(root, entry.dir || ''));
   if (!entry.dir || !entry.branch || rel.startsWith('..') || path.isAbsolute(rel) || !rel || rel.includes(path.sep) || rel.startsWith('_train-')) return { ok: false, why: `its lane copy ${entry.dir || '(none)'} isn't a lane folder under .lanes/` };
@@ -382,7 +337,7 @@ export function restoreLaneCopy(root, entry, { dryRun = false } = {}) {
   return { ok: true, why: `recreated ${entry.dir} from ${entry.branch}${head ? ` at ${head.slice(0, 8)}` : ''}`, head };
 }
 
-/** Who may act where the owner is needed (a yes, an unpark, an unhold): beta mode's agents and the owner's delegate. */
+/** Who may act where the owner is needed: beta mode's agents and the owner's delegate. */
 async function ownerHelpers(action) {
   const out = [];
   try {
@@ -398,10 +353,7 @@ async function ownerHelpers(action) {
   return [...new Set(out)];
 }
 
-/**
- * The facts for linePlan, and the mechanical fixes (unless dryRun or mode report). deps (tests): { queue, holds,
- * events, sessions, locks, pace, rig, trainQueue, root }.
- */
+/** The facts for linePlan, and the mechanical fixes (unless dryRun or report mode). deps are for tests. */
 export async function gatherFacts({ now = Date.now(), dryRun = false, env = process.env, deps = {} } = {}) {
   const fix = !dryRun && lineMode(env) === 'on';
   const task = await import('./task.mjs');
@@ -411,14 +363,12 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
   const root = deps.root || mainRoot();
   const events = deps.events || readRecentEvents(20000);
   const fixed = [];
-  // 1. Locks whose holder's session is over (a dead process, an ended record): freed at once.
   if (fix) {
     try {
       const freed = lock.releaseDeadOwners((owner, l) => lock.holderGone(l) === true);
       for (const k of freed) fixed.push(logAction({ kind: 'lock', task: (k.match(/^task:(\S+)/) || [])[1] || null, what: `freed ${k}: its holder's session is over` }));
     } catch { /* the watcher frees them too */ }
   }
-  // 2. Holds whose time has passed: a cooldown, a block, a park until a time or a landed task.
   let holds = deps.holds || th.readHolds();
   const q = deps.queue || task.parseNextQueue();
   const doneSet = new Set(q.done.map((t) => t.id));
@@ -434,7 +384,7 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
     }
     holds = th.readHolds();
   }
-  // 3. Lanes queued for the train whose copy is gone: recreated from their branch (never while a train runs).
+  // Lane copies gone for the train's queue: recreated from the branch (never while a train runs).
   const extraBlocked = [];
   try {
     const tq = deps.trainQueue || readJson(path.join(root, '.studio', 'train', 'queue.json'), []);
@@ -449,7 +399,6 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
       }
     }
   } catch { /* the train hands it back as before */ }
-  // 2.83: which tasks sit in a train's queue (the merge train, or an engine train such as the Unity one), for "where is the gate".
   const inTrain = {};
   try {
     const mq = deps.trainQueue || readJson(path.join(root, '.studio', 'train', 'queue.json'), []);
@@ -512,8 +461,7 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
       tasks.push({ ...row, state: block ? 'blocked' : 'ready', ...(block ? { block } : {}) });
     }
   }
-  // 2.78.1 (B-123): lanes for unscoped ready builder tasks (the Producer's decision, made by this pass), "unscoped" for
-  // those it can't work out, and phase awareness: a task on shared sim code waits for the open one on the same files.
+  // Lanes for unscoped ready builder tasks, and phase awareness: a task on shared sim code waits for the open one on the same files.
   let lanes = null;
   try {
     const lp = await import('./lane-plan.mjs');
@@ -524,8 +472,7 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
       if (t && t.state === 'ready') { t.state = 'blocked'; t.block = { kind: 'chain', why: `waits for ${st.after}: both touch shared sim code (${st.via.slice(0, 3).join(', ')})${st.dry ? ' (the pass would stack it)' : ''}`, fix: `starts when ${st.after} lands (phase awareness: STUDIO_SHARED_SIM)` }; }
     }
   } catch (e) { lanes = { error: e.message }; }
-  // 2.77.0 (n): model pools (harness/model-pools.mjs), when on: each task's size class, its last failed pool, the model
-  // it started on, whether it is protected-heavy; the outcomes file is rebuilt (written only when this pass acts).
+  // Model pools (harness/model-pools.mjs), when on: each task's size class, last failed pool, started model; the outcomes file is rebuilt (written only when this pass acts).
   let pools = null;
   let protectedSteps = [];
   try {
@@ -538,8 +485,7 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
     for (const t of tasks) {
       const outs = byTaskOut.get(t.id) || [];
       t.size = sizes.get(t.id);
-      // A red round here is a session handed back for its own reasons since the task last landed: not a protected
-      // step (that is correct behaviour, routed to an approver below), not a usage limit or a person's stop.
+      // A red round: a session handed back since the task last landed, not for a protected step, a usage limit or a person's stop.
       const sinceLand = outs.slice(outs.map((o) => o.result).lastIndexOf('landed') + 1);
       t.poolFailed = sinceLand.filter((o) => o.result === 'handed' && !o.protected).length;
       t.lastFailedPool = sinceLand.filter((o) => o.result === 'handed' && !o.protected).pop()?.pool || null;
@@ -550,8 +496,8 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
       if (st) t.startedOn = { model: st.model, tool: st.meta?.tool || null };
     }
     if (mc.on) pools = { cfg: mc.cfg, state: mc.state, rates: mc.rates, recentProt: mc.recentProt, pickPool: mp.pickPool, why: mc.why, quota: mc.quota.why };
-    // 2.77.0 (n, Priority 8): a protected step a builder handed back goes to someone who may approve it (beta mode or
-    // the owner proxy) instead of stranding the task; it is held from new builders until approved (or the hold ends).
+    // A protected step a builder handed back goes to someone who may approve it (beta mode or the owner proxy); the task is
+    // held from new builders until approved (or the hold ends).
     protectedSteps = await protectedRoutes({ tasks, events, now, env, act: fix });
     for (const ps of protectedSteps) {
       const t = tasks.find((x) => x.id === ps.task);
@@ -572,18 +518,14 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
   return { now, tasks, holds, done: doneSet, sessions: live, pace: { maxAgents: pace.maxAgents, perRole: pace.perRole, label: pace.label }, rig, models, share: expansionShare(env), chainMin: Math.max(1, num(env.STUDIO_LINE_CHAIN_MIN, 3)), expansionMin: Math.max(0, num(env.STUDIO_LINE_EXPANSION_MIN, 2)), sliceOpen: sliceOpen ? { id: sliceOpen.id, title: sliceOpen.title } : null, extraBlocked, dangling, inTrain, fixed, pools, protectedSteps, lanes };
 }
 
-/**
- * 2.77.0 (n): who may approve a protected step now: beta mode's named agents (harness/beta-mode.mjs; betaActor asked as
- * each), else the owner proxy's agent (harness/delegation.mjs delegationFor, which then needs the owner's recorded yes
- * as --permission). { who, via, note } or null (only the owner).
- */
+/** Who may approve a protected step now: beta mode's agents (harness/beta-mode.mjs), else the owner proxy's agent (harness/delegation.mjs; needs the owner's recorded yes as --permission). { who, via, note } or null. */
 export async function protectedApprover({ env = process.env } = {}) {
   try {
     const { readBeta, betaActor } = await import('./beta-mode.mjs');
     const b = readBeta();
     if (b.on) {
       for (const a of b.doc.agents || []) { const x = betaActor({ env: { STUDIO_LOCK_OWNER: String(a) }, kind: 'protected' }); if (x.ok) return { who: String(a), via: 'beta mode', note: 'approves without the owner key while beta mode is on' }; }
-      // 2.78.2 (h): a Producer session approves a protected step only with the owner's switch (permission.mjs mayDecide).
+      // A Producer session approves a protected step only with the owner's switch (permission.mjs mayDecide).
       const { producerApprovesProtected } = await import('./permission.mjs');
       if (producerApprovesProtected()) return { who: 'producer', via: 'beta mode (a Producer session)', note: 'a Producer session approves while beta mode is on (STUDIO_PRODUCER_APPROVES=protected)' };
     }
@@ -598,10 +540,9 @@ export async function protectedApprover({ env = process.env } = {}) {
 }
 
 /**
- * The protected steps waiting (each task whose newest hand-back since its last start names a protected file and has
- * no approval since): routed once per hand-back (a line.protected_routed event to the approver) and held from new
- * builders for STUDIO_LINE_PROTECTED_HOLD_MIN (120) after it was routed, or until an approval names it (approval.protected
- * or .proposal, or a beta/proxy approve-protected use, after the hand-back). No approver: reported only.
+ * The protected steps waiting (a task whose newest hand-back names a protected file, with no approval since): routed
+ * once per hand-back (a line.protected_routed event) and held from new builders for STUDIO_LINE_PROTECTED_HOLD_MIN (120),
+ * or until an approval.protected / approval.proposal or an approve-protected use follows. No approver: reported only.
  */
 export async function protectedRoutes({ tasks, events, now = Date.now(), env = process.env, act = true } = {}) {
   const holdMs = Math.max(0, num(env.STUDIO_LINE_PROTECTED_HOLD_MIN, 120)) * 60000;
@@ -612,7 +553,6 @@ export async function protectedRoutes({ tasks, events, now = Date.now(), env = p
     const mine = events.filter((e) => e.task === t.id || (e.type && /^approval\.|^delegation\.used$/.test(e.type) && String(e.msg || '').includes(t.id)));
     const lastStart = mine.filter((e) => e.type === 'task.start' || e.type === 'agent.session.start').pop();
     const pause = mine.filter((e) => e.type === 'task.paused' && (!lastStart || Date.parse(e.ts) >= Date.parse(lastStart.ts))).pop();
-    // 2.79 (d): the hand-back's structured field (meta.ownerStep, from the harness's own refusal), not the words of its note.
     if (!pause || pause.meta?.ownerStep !== OWNER_STEP_PROTECTED) continue;
     const at = Date.parse(pause.ts);
     const approved = mine.some((e) => Date.parse(e.ts) > at && (/^approval\.(protected|proposal)$/.test(e.type) || (e.type === 'delegation.used' && /approve-(protected|proposal)/.test(String(e.meta?.action || '')))));
@@ -633,7 +573,7 @@ export async function protectedRoutes({ tasks, events, now = Date.now(), env = p
   return out;
 }
 
-// ---- 2.83: planner state, the chain gate, dangling asks, the Producer wake back-off -------------------------------------
+// planner state, the chain gate, dangling asks, the Producer wake back-off
 
 export const LINE_STATE_FILE = () => path.join(LINE_DIR(), 'state.json');
 export const readLineState = () => { const j = readJson(LINE_STATE_FILE(), {}); return j && typeof j === 'object' ? j : {}; };
@@ -648,8 +588,8 @@ const hm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padS
 
 /**
  * One task gating more than STUDIO_CHAIN_GATE_N builder tasks for more than STUDIO_CHAIN_GATE_MIN minutes. Pure: `gates`
- * are the plan's (task, n, where, waiting), `gateState` is { <task>: { since, lastEmit } } from the last pass. Returns
- * { gateState, active: [{ ...gate, since }], fire: [the same, to be said now] }. It repeats at most every 120 minutes.
+ * are the plan's, `gateState` is { <task>: { since, lastEmit } }. Returns { gateState, active, fire } (fire: to be said
+ * now, at most every 120 minutes).
  */
 export function chainGateStep({ gates = [], gateState = {}, now = Date.now(), env = process.env } = {}) {
   const N = chainGateN(env);
@@ -668,13 +608,11 @@ export function chainGateStep({ gates = [], gateState = {}, now = Date.now(), en
   return { gateState: next, active, fire };
 }
 
-/** The one plain line a chain gate event carries. */
 export const chainGateText = (g, now = Date.now()) => `Line Producer: ${g.task} gates ${g.n} builder task${g.n === 1 ? '' : 's'} (${g.waiting.slice(0, 5).join(', ')}${g.n > 5 ? ' …' : ''}) since ${hm(g.since)} (${Math.round((now - g.since) / 60000)} min); it is ${g.where}. Split off the parts that do not need it, or remove the dependency: npm run task -- after <ID> --remove ${g.task}`;
 
 /**
- * The planner's own reason, in one line, for the alerts (communicator's builders-low) and for the wake back-off:
- * { lead, blocker }. lead: "all ready work waits on T-548, which is in a Unity train since 10:26 (5 tasks); 42 parked, 2 held".
- * blocker: { key, text } when everything startable waits on a task in a train, or a chain gate stands; else null.
+ * The planner's own reason in one line for the alerts and the wake back-off: { lead, blocker }. blocker: { key, text }
+ * when everything startable waits on a task in a train, or a chain gate stands; else null.
  */
 export function planLead(p, { gateState = {}, active = [] } = {}) {
   const g = (p.gates || [])[0];
@@ -693,7 +631,7 @@ export function planLead(p, { gateState = {}, active = [] } = {}) {
   return { lead, blocker };
 }
 
-/** Ask the Producer, once per (task, missing id), about a dependency that is on no list. State: state.json "asked". */
+/** Asks the Producer once per (task, missing id) about a dependency on no list (state.json "asked"). */
 export function askDangling({ dangling = [], state, now = Date.now(), deps = {} } = {}) {
   const asked = state.asked && typeof state.asked === 'object' ? state.asked : {};
   const live = new Set(dangling.map((d) => `${d.task}|${d.on}`));
@@ -711,10 +649,7 @@ export function askDangling({ dangling = [], state, now = Date.now(), deps = {} 
   return out;
 }
 
-/**
- * Should a plan_blocked event go out for this reason text? When the text changed, or the last one is over 30 minutes old.
- * Pure over state.blocked { key, at }; returns { emit, state }.
- */
+/** Should a plan_blocked event go out for this reason text (changed, or the last one over 30 minutes old)? Pure over state.blocked { key, at }. */
 export function planBlockedDue(key, state, now = Date.now()) {
   const b = state.blocked || {};
   const emit = b.key !== key || !Number.isFinite(b.at) || now - b.at >= PLAN_BLOCKED_REPEAT_MIN * 60000;
@@ -722,10 +657,8 @@ export function planBlockedDue(key, state, now = Date.now()) {
 }
 
 /**
- * 2.83: the Producer's wake while the only blocker is a running train or a chain gate. The first wake goes as today; then
- * one per STUDIO_PRODUCER_BLOCKED_WAKE_MIN minutes while the same blocker stands; the back-off ends when it changes or
- * lands. Reads the last status (its `blocker`), keeps { key, lastWake, lastSkip } in state.json "wake". Emits one
- * agent.wake.skipped at most every 30 minutes. Returns { skip, why }. Never throws.
+ * The Producer's wake while the only blocker is a running train or a chain gate: the first wake goes out, then one per
+ * STUDIO_PRODUCER_BLOCKED_WAKE_MIN minutes (state.json "wake"; agent.wake.skipped at most every 30 minutes). { skip, why }.
  */
 export function producerWakeBackoff({ now = Date.now(), env = process.env, kind = 'wake', status = undefined, emit = emitEvent } = {}) {
   try {
@@ -747,7 +680,7 @@ export function producerWakeBackoff({ now = Date.now(), env = process.env, kind 
   } catch (e) { return { skip: false, why: `error: ${e.message}` }; }
 }
 
-/** The Producer note: one file, rewritten when its reasons change, and one line.plan_blocked event per change. */
+/** The Producer note file, rewritten when its reasons change, plus one line.plan_blocked event per change. */
 function writeNote(reasons, { now = Date.now() } = {}) {
   const f = LINE_NOTE_FILE();
   const prev = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
@@ -760,7 +693,7 @@ function writeNote(reasons, { now = Date.now() } = {}) {
   if (Buffer.from(key).toString('base64') === prevKey) return { file: f, changed: false };
   fs.mkdirSync(LINE_DIR(), { recursive: true });
   fs.writeFileSync(f, `# Line Producer: this plan can't run because …\n\n> Written by harness/line-producer.mjs at ${new Date(now).toISOString()}. The Line Producer never changes direction:\n> the Producer (with the Director for the plan) decides. This note is rewritten when its reasons change and removed\n> when the plan can run. <!-- reasons: ${Buffer.from(key).toString('base64')} -->\n\n${reasons.map((r) => `- ${r}`).join('\n')}\n`);
-  // 2.83: said when the reason text changes (ids and counts included), else at most once per 30 minutes (166 in 26 h before).
+  // Said when the reason text changes (ids and counts included), else at most once per 30 minutes.
   const st = readLineState();
   const due = planBlockedDue(key, st, now);
   if (due.emit) {
@@ -770,21 +703,17 @@ function writeNote(reasons, { now = Date.now() } = {}) {
   return { file: f, changed: true };
 }
 
-/**
- * One pass: gather, fix what is mechanical, plan, file at most one Director slice, write the note and
- * .studio/line/status.json. Returns the status (lineStatus's shape). Never throws.
- */
+/** One pass: gather, fix, plan, file at most one Director slice, write the note and status.json. Returns the status; never throws. */
 export async function lineProducerPass({ now = Date.now(), dryRun = false, env = process.env, deps = {} } = {}) {
   const mode = lineMode(env);
   if (mode === 'off') return { mode, off: true, why: 'STUDIO_LINE_PRODUCER=off' };
   try {
     const f = await gatherFacts({ now, dryRun, env, deps });
     const acting = !dryRun && mode === 'on';
-    // 2.77.0 (u, P5.2/P5.3): engine trains in quiet windows. 2.79.1 (3.2): and the room an engine land needs (before the plan:
-    // its builder-target step-down is part of it).
+    // Engine trains, then the room an engine land needs (before the plan: its builder-target step-down is part of it).
     let engines = [];
     try { engines = await enginePass({ now, env, dryRun: !acting, rig: f.rig, deps }); } catch (e) { engines = [{ error: e.message }]; }
-    // 2.79.1 (4): an engine push (npm run mode -- engine-push): that engine's porters first, the machine's priority for its lands.
+    // An engine push (npm run mode -- engine-push): that engine's porters first, the machine's priority for its lands.
     let enginePush = null;
     try { const pm = await import('./mode.mjs'); const ep = pm.enginePushOf(pm.readMode(), now); enginePush = ep ? { engine: ep.engine, until: ep.until || null, by: ep.by || null } : null; } catch { enginePush = null; }
     f.enginePush = enginePush;
@@ -803,7 +732,6 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
     }
     let note = null;
     if (acting) { try { note = writeNote(p.reasons, { now }); } catch {} }
-    // 2.83: the chain gate (one task gating many), the dangling asks, and the planner's own one-line reason.
     let lineState = readLineState();
     const gateStep = chainGateStep({ gates: p.gates, gateState: lineState.gates || {}, now, env });
     let danglingAsked = [];
@@ -814,15 +742,12 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
     lineState.gates = gateStep.gateState;
     if (acting) writeLineState(lineState);
     const leadInfo = planLead(p, { gateState: lineState.gates, active: gateStep.active });
-    // 2.79.1 (3.1): a blocked item is paged once and the rest runs.
     let paged = [];
     if (acting) { try { paged = pagePlanBlockers({ p, f, now, deps }); } catch { paged = []; } }
-    // 2.78.1 (f): the chain-breaker push (a quiet hold while a chain-breaker waits for the train) and engine twins.
     let chainPush = null;
     try { chainPush = await chainBreakerPush({ chainBreakers: p.chainBreakers, now, env, act: acting, deps: { ...(deps.root ? { root: deps.root } : {}), ...(deps.trainQueue ? { trainQueue: deps.trainQueue } : {}), ...(deps.heavy ? { heavy: deps.heavy } : {}) } }); } catch (e) { chainPush = { on: false, holding: false, why: `error: ${e.message}` }; }
     let twins = null;
     try { twins = await twinPass({ now, env, act: acting, deps: { ...(deps.root ? { root: deps.root } : {}), ...(deps.events ? { events: deps.events } : {}), ...(deps.queue ? { queue: deps.queue } : {}), ...(deps.engines ? { engines: deps.engines } : {}), ...(deps.filesOf ? { filesOf: deps.filesOf } : {}), ...(deps.addTask ? { addTask: deps.addTask } : {}) } }); } catch (e) { twins = { on: false, checked: [], why: `error: ${e.message}` }; }
-    // 2.79 (t): the game tester's schedule (harness/tester.mjs), and wire-it tasks for landed modules nothing imports.
     let tester = null;
     try { tester = await testerPass({ now, env, act: acting, rig: f.rig, deps }); } catch (e) { tester = { state: 'error', why: e.message }; }
     const status = {
@@ -856,7 +781,6 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
       twins,
       tester,
     };
-    // One plain line for the Communicator (helper l reads { at, builders: { running, target }, blocked, text }).
     status.text = summaryLine(status);
     if (!dryRun) { try { fs.mkdirSync(LINE_DIR(), { recursive: true }); writeAtomic(LINE_STATUS_FILE(), `${JSON.stringify(status, null, 2)}\n`); } catch {} }
     void note;
@@ -886,20 +810,18 @@ export function summaryLine(s) {
   ].filter(Boolean).join('; ');
 }
 
-// ---- 2.79 (t): the game tester (harness/tester.mjs) ------------------------------------------------------------------
+// the game tester (harness/tester.mjs)
 
 /**
- * The Line Producer owns the game tester's schedule: each pass advances the run that is going (build, then the agent,
- * then the report) or starts one that is due (STUDIO_TESTER_EVERY_HOURS AND STUDIO_TESTER_MIN_LANDINGS, or `npm run
- * tester -- now`) when the rig isn't starved and a gate slot is free; it never takes a slot or holds anything. Then the
- * wire-it pass: a landed module nothing in the game imports gets one "Wire <module> into the game" task.
- * deps.tester: the tester's own deps (selftests). act false: what it would do.
+ * The game tester's schedule: advances the run that is going or starts one that is due (STUDIO_TESTER_EVERY_HOURS AND
+ * STUDIO_TESTER_MIN_LANDINGS, or `npm run tester -- now`) when the rig isn't starved and a gate slot is free. Then the
+ * wire-it pass: a landed module nothing imports gets a "Wire <module> into the game" task. act false: dry.
  */
 export async function testerPass({ now = Date.now(), env = process.env, act = true, rig = null, deps = {} } = {}) {
   const t = await import('./tester.mjs');
   let root = deps.root || null;
   if (!root) root = (await import('./worktree.mjs')).mainRoot();
-  // 2.82: a native-engine studio's game is not its web build: no scheduled tester run on it, no wire-it pass over its imports.
+  // A native-engine studio's game is not its web build: no scheduled tester run, no wire-it pass.
   const ne = (await import('./native.mjs')).nativeEngine(root, env);
   if (ne) return { state: 'off', why: `native ${ne}: the game tester's schedule plays the web build, which is not the game here (npm run tester -- now runs one on demand)`, line: '' };
   const td = deps.tester || {};
@@ -910,14 +832,10 @@ export async function testerPass({ now = Date.now(), env = process.env, act = tr
   return { ...run, wire, line };
 }
 
-// ---- 2.79.1 (3.1): page once, keep going --------------------------------------------------------------------------
+// page once, keep going
 
 const PAGED_FILE = () => path.join(LINE_DIR(), 'paged.json');
-/**
- * A blocker is told once: a parked/owner-only chain-breaker pages the orchestrator (line.blocker_paged, per task and cause),
- * lane-less ready tasks ask the Producer to scope them (line.scope_asked, per task). The plan keeps running meanwhile.
- * Returns the keys paged now.
- */
+/** A blocker is told once: a parked/owner-only chain-breaker pages the orchestrator (line.blocker_paged), lane-less ready tasks ask the Producer to scope them (line.scope_asked). Returns the keys paged now. */
 export function pagePlanBlockers({ p, f, now = Date.now(), deps = {} } = {}) {
   const seen = readJson(PAGED_FILE(), {}) || {};
   const emit = deps.emit || emitEvent;
@@ -945,12 +863,12 @@ export function pagePlanBlockers({ p, f, now = Date.now(), deps = {} } = {}) {
   return out;
 }
 
-// ---- 2.79.1 (3.2): room for an engine land -------------------------------------------------------------------------------
+// room for an engine land
 
 /**
- * The Line Producer's half of engine-ram.mjs: which engine land is queued or near, the free RAM now, who holds the heavy
- * slots; then hold new verifies, step the builder target down, or release (engineHoldPlan). "Near": an in-progress
- * engine-porter task whose porter ran `task done --check` in the last STUDIO_ENGINE_NEAR_MIN (30) minutes.
+ * The Line Producer's half of engine-ram.mjs: hold new verifies, step the builder target down, or release (engineHoldPlan)
+ * for a queued or near engine land. "Near": an engine-porter task that ran `task done --check` in the last
+ * STUDIO_ENGINE_NEAR_MIN (30) minutes.
  */
 export async function engineRoomPass({ now = Date.now(), env = process.env, act = true, f, deps = {} } = {}) {
   const er = await import('./engine-ram.mjs');
@@ -970,7 +888,7 @@ export async function engineRoomPass({ now = Date.now(), env = process.env, act 
   return er.engineHoldPass({ now, env, act, builders, owner: LINE_AGENT, deps: { root, targets, near, freeGb, push: deps.push ?? f.enginePush?.engine ?? null, ...(deps.holders ? { holders: deps.holders } : {}), ...(deps.heavy ? { heavy: deps.heavy } : {}), readQueue: deps.readQueue || ((e) => ut.readUnityQueue(root, e)), needGb: deps.needGb || ((e) => et.engineFloor(e, { env, root }).gb), emit: deps.emit || ((ev) => { try { emitEvent(ev); } catch {} }) } });
 }
 
-// ---- 2.78.1 (f): the chain-breaker push ----------------------------------------------------------------------------
+// the chain-breaker push
 
 /** STUDIO_LINE_CHAIN_HOLD_MIN: minutes from a chain-breaker's queueing that new builder verifies are held back (60; 0/off: none). */
 export function chainHoldMin(env = process.env) {
@@ -978,17 +896,13 @@ export function chainHoldMin(env = process.env) {
   if (/^(off|no|false)$/i.test(v)) return 0;
   return Math.max(0, num(v, 60));
 }
-/** 2.79.1 (3.1): STUDIO_LINE_HOLD_MAX_MIN: no Line Producer hold on builder verifies lasts longer than this (20). */
+/** STUDIO_LINE_HOLD_MAX_MIN: no Line Producer hold on builder verifies lasts longer than this (20). */
 export const lineHoldMaxMin = (env = process.env) => Math.max(0, num(env.STUDIO_LINE_HOLD_MAX_MIN, 20));
 export const CHAIN_HOLD_TAG = 'chain-breaker';
 /**
- * T-173, a chain-breaker, waited 4 h behind load for its train. While a chain-breaker (linePlan's chainBreakers) is
- * queued for the merge train (.studio/train/queue.json, not held for a person), this leaves a quiet hold (harness/heavy.mjs
- * markQuietHold, tag "chain-breaker", the 2.78.0 C2c mechanism): a heavy waiter that isn't a game landing (a builder's
- * verify, a lane check's heavy run, an engine land) doesn't start, so the train's own checks (landings) get a quiet
- * machine. Running holders are never stopped. Bounded: STUDIO_LINE_CHAIN_HOLD_MIN (60) from when the chain-breaker was
- * queued; then no hold for it. The hold ends when no chain-breaker is queued any more (landed, handed back) or the
- * supervisor that made it is gone. act false (a dry pass, report mode): nothing is written.
+ * While a chain-breaker is queued for the merge train (.studio/train/queue.json, not held for a person), leaves a quiet
+ * hold (harness/heavy.mjs markQuietHold, tag "chain-breaker"): heavy waiters that aren't game landings don't start;
+ * running holders are never stopped. Bounded by STUDIO_LINE_CHAIN_HOLD_MIN (60). act false: nothing is written.
  * { on, holding, task?, until?, why }.
  */
 export async function chainBreakerPush({ chainBreakers = [], now = Date.now(), env = process.env, act = true, deps = {} } = {}) {
@@ -1004,8 +918,7 @@ export async function chainBreakerPush({ chainBreakers = [], now = Date.now(), e
   const queued = (Array.isArray(q) ? q : []).filter((e) => e?.task && cbs.has(e.task) && !(e.held && !(e.released && e.released.head === e.head)));
   const atOf = (e) => { const t = typeof e.at === 'number' ? e.at : Date.parse(e.at); return Number.isFinite(t) ? t : now; };
   const live = queued.map((e) => ({ e, until: atOf(e) + min * 60000 })).filter((x) => x.until > now).sort((a, b) => b.until - a.until);
-  // 2.79.1 (3.1): the hold is for the wait BEFORE the train starts. A train running the chain-breaker's lane needs no
-  // builder verify hold (it stayed on for ~30 min while the train ran and froze the builders' verifies).
+  // The hold is for the wait BEFORE the train starts: a running train needs none (it would freeze builder verifies).
   let trainRunning = false;
   if (queued.length) { try { trainRunning = deps.trainRunning !== undefined ? Boolean(deps.trainRunning) : Boolean((await import('./train-daemon.mjs')).trainLockHeld(root, env, now)); } catch { trainRunning = false; } }
   if (queued.length && trainRunning) {
@@ -1032,12 +945,11 @@ export async function chainBreakerPush({ chainBreakers = [], now = Date.now(), e
   return { on: true, holding: true, task: e.task, until: new Date(until).toISOString(), why };
 }
 
-// ---- 2.78.1 (f): engine twins --------------------------------------------------------------------------------------
+// engine twins
 
 /**
- * The engine twins the owner listed: studio/game.json engines.<name>.twins (protected, the owner's), either the game
- * paths (globs) that have a twin in that engine's slice, or { paths, role, priority, branch, lane }. Generic default:
- * none. [{ engine, label, paths, role, priority, branch, lane }].
+ * The engine twins the owner listed: studio/game.json engines.<name>.twins (protected), either game path globs that have
+ * a twin in that engine's slice, or { paths, role, priority, branch, lane }. Default: none.
  */
 export function twinConfigs(engines = {}, labelOf = (n) => n) {
   const out = [];
@@ -1053,7 +965,7 @@ export function twinConfigs(engines = {}, labelOf = (n) => n) {
 export const twinTitle = (label, id, title) => `${label} twin of ${id}: ${String(title || '').replace(/\s+/g, ' ').slice(0, 110)}`;
 const TWIN_TITLE_RE = (label) => new RegExp(`^${String(label).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} twin of T-\\d+\\b`);
 
-/** The files a landed task's commits on the main checkout's branch changed (commits whose message names the task). */
+/** Files changed by the main branch's commits whose message names the task. */
 export function landedFiles(root, taskId, { max = 200 } = {}) {
   const id = String(taskId || '');
   if (!/^T-\d+$/.test(id)) return [];
@@ -1071,12 +983,9 @@ export function landedFiles(root, taskId, { max = 200 } = {}) {
 }
 
 /**
- * Patch's T-246 by hand: a game feature landed and the engine slice needed its twin. Each pass looks at the game tasks
- * that landed (task.done events) since the last one; a task whose changed files (landedFiles) match an engine's twin
- * paths gets ONE twin task for that engine: role engine-porter (or the config's), track engine:<name>, its branch
- * (<engine>/twin-<task>, or the config's {task} template), stacked --after the engine's open twins (and the landed task),
- * filed by the Line Producer (task add, promoted). A task that matches nothing is reported "no twin needed". Each task is
- * looked at once (.studio/line/twins.json; the first pass only starts the record). act false: what it would add.
+ * A landed game task whose changed files (landedFiles) match an engine's twin paths gets ONE twin task for that engine
+ * (role engine-porter or the config's, track engine:<name>, stacked --after the engine's open twins and the landed task).
+ * Each task is looked at once (.studio/line/twins.json; the first pass only starts the record). act false: dry.
  * STUDIO_LINE_TWINS=off: nothing. { on, checked: [{ task, engine, need, added?, files?, why }], why }.
  */
 export async function twinPass({ now = Date.now(), env = process.env, act = true, deps = {} } = {}) {
@@ -1089,7 +998,7 @@ export async function twinPass({ now = Date.now(), env = process.env, act = true
     cfgs = twinConfigs(deps.engines || et.enginesConfig(root), (n) => { try { return et.engineTarget(n, { root })?.label || n; } catch { return n; } });
   } catch { cfgs = []; }
   if (!cfgs.length) return { on: false, checked: [], why: 'no engine twins listed (studio/game.json engines.<name>.twins: the game paths that have an engine twin)' };
-  // 2.82: a native-engine studio builds a feature once, in the engine: a web task has no twin to add.
+  // A native-engine studio builds a feature once, in the engine: a web task has no twin to add.
   { const ne = (await import('./native.mjs')).nativeEngine(root, env); if (ne) return { on: false, checked: [], why: `native ${ne}: features are built once, in the engine, so there are no twins of web tasks` }; }
   const f = path.join(LINE_DIR(), 'twins.json');
   const st = readJson(f, null);
@@ -1139,13 +1048,9 @@ export async function twinPass({ now = Date.now(), env = process.env, act = true
   return { on: true, checked, why: !landed.length ? 'no game task landed since the last look' : need.length ? `${need.length} engine twin${need.length === 1 ? '' : 's'}: ${need.map((r) => `${r.added || '(would add)'} for ${r.task} (${r.engine})`).join(', ')}` : `no twin needed for ${landed.map((e) => e.task).join(', ')}` };
 }
 
-// ---- engine trains in quiet windows (2.77.0, u: P5.2/P5.3) -----------------------------------------------------------
+// engine trains in quiet windows
 
-/**
- * Should engine <x>'s train start now? Pure. f: { engine, label, heavyKind, queued, oldestAt, running, startedRecently,
- * auto, webTrain, webQueued, heavy: [{ kind, label }], freeGb, floorGb, floorFrom, cpuBusy, expectedMin, now }.
- * { start, wait, why }. Priority (the owner's): the web train > builder verifies > Unity/art > soaks.
- */
+/** Should engine <x>'s train start now? Pure. f carries the queue, running state, web train, heavy jobs, free RAM and CPU. { start, wait, why }. Priority: the web train > builder verifies > Unity/art > soaks. */
 export function engineWindow(f, env = process.env) {
   const L = f.label || f.engine;
   const quietPct = num(env.STUDIO_ENGINE_QUIET_CPU_PCT, 75);
@@ -1156,11 +1061,9 @@ export function engineWindow(f, env = process.env) {
   if (!f.queued) return { start: false, wait: false, why: `no ${L} branch queued` };
   if (f.running) return { start: false, wait: false, why: `the ${L} train is running` };
   if (f.startedRecently) return { start: false, wait: false, why: `started it ${f.startedRecently} min ago` };
-  // 2.79 (e): the engine's own slot (STUDIO_ENGINE_SLOTS, heavy.mjs engineSlotsAt): the train starts when that slot is free,
-  // whatever the game's trains and verifies are doing (they never take it, and the land never takes one of theirs), and
-  // never needs `train auto off`. Free RAM and CPU are the land's own heavy wait (it queues for its RAM, never starves a
-  // game job). The quiet window below is kept for an engine that wants a quiet machine ("window": "quiet" in its engine
-  // config, or STUDIO_ENGINE_WINDOW=quiet) and when the engine line is off (STUDIO_ENGINE_SLOTS=off).
+  // The engine's own slot (STUDIO_ENGINE_SLOTS, heavy.mjs engineSlotsAt): the train starts when that slot is free, whatever
+  // the game's trains and verifies are doing. Free RAM and CPU are the land's own heavy wait. The quiet window below is
+  // kept for an engine with "window": "quiet" in its config, or STUDIO_ENGINE_WINDOW=quiet, and when STUDIO_ENGINE_SLOTS=off.
   if (f.engineSlots > 0 && f.window !== 'quiet' && !/^quiet$/i.test(String(env.STUDIO_ENGINE_WINDOW || ''))) {
     if (!f.slotFree) return no(`the ${L} slot is taken (${(f.engineHolders || []).slice(0, 2).join(', ') || 'another engine land'}; STUDIO_ENGINE_SLOTS ${f.engineSlots})`);
     return { start: true, wait: false, why: `the ${L} slot is free (STUDIO_ENGINE_SLOTS ${f.engineSlots}): game trains and verifies don't take it${f.webTrain ? ' (a web train is running beside it)' : ''}; one land run ~${f.expectedMin ?? '?'} min` };
@@ -1179,9 +1082,9 @@ const ENGINE_BATCH = () => path.join(LINE_DIR(), 'engine-batch.json');
 const ENGINE_AUTO_TOLD = () => path.join(LINE_DIR(), 'engine-auto-told.json');
 
 /**
- * 2.84: the engine train's batch window, in the game train's words (STUDIO_TRAIN_MIN / STUDIO_TRAIN_WAIT_MIN):
- * engines.<x>.batchMin (1: start as soon as one branch waits) and engines.<x>.batchWaitMin (0: never wait), over them
- * STUDIO_ENGINE_BATCH_MIN and STUDIO_ENGINE_BATCH_WAIT_MIN. { min, waitMin }.
+ * The engine train's batch window, like the game train's (STUDIO_TRAIN_MIN / STUDIO_TRAIN_WAIT_MIN): engines.<x>.batchMin
+ * (1: start as soon as one branch waits) and engines.<x>.batchWaitMin (0: never wait); the env STUDIO_ENGINE_BATCH_MIN and
+ * STUDIO_ENGINE_BATCH_WAIT_MIN win. { min, waitMin }.
  */
 export function engineBatchRules(cfg = {}, env = process.env) {
   const pick = (k, v, d) => { for (const x of [env[k], v]) { const t = String(x ?? '').trim(); if (t !== '' && Number.isFinite(Number(t)) && Number(t) >= 0) return Number(t); } return d; };
@@ -1189,13 +1092,10 @@ export function engineBatchRules(cfg = {}, env = process.env) {
 }
 
 /**
- * 2.84: should the automatic start of engine <x>'s train wait for more branches? Pure. f: { engine, label, queue:
- * [{ task, at, alone? }] (in queue order), rules: { min, waitMin }, working: [task ids of running sessions on this
- * engine's track whose branch is not queued], now }. { wait, why, counted, waitedMin, left }. It waits only while
- * (a) fewer than min branches are queued (a branch that lands alone behind others does not count), (b) the oldest has
- * waited less than waitMin minutes, and (c) a session is still working on one of the engine's tasks (else nothing is
- * coming). A branch that lands alone at the head never waits: it rides alone anyway. A land run takes 22 to 40
- * minutes whatever its size, so a few minutes' wait for a fuller batch buys landed tasks per run.
+ * Should the automatic start of engine <x>'s train wait for more branches? Pure. f: { engine, label, queue: [{ task, at,
+ * alone? }], rules: { min, waitMin }, working: [task ids of sessions on this engine's track, branch not queued], now }.
+ * { wait, why, counted, waitedMin, left }. Waits only while fewer than min branches are queued (a branch that lands alone
+ * does not count), the oldest has waited under waitMin minutes, and a session still works on an engine task.
  */
 export function engineBatchWait(f) {
   const L = f.label || f.engine;
@@ -1217,11 +1117,7 @@ export function engineBatchWait(f) {
   return { ...base, wait: true, left, why: `waiting up to ${rules.waitMin} min for more ${L} branches: ${counted} of ${rules.min} queued, the oldest for ${Math.round(waitedMin)} min, ${working.length} session${working.length === 1 ? '' : 's'} still working on ${L} tasks (${working.slice(0, 4).join(', ')}); ${left} min left` };
 }
 
-/**
- * One look at every engine train: [{ engine, queued, running, expectedMin, floorGb, start, why, started? }]. Starts the
- * ones whose window is open (unless dryRun or STUDIO_LINE_PRODUCER=report). deps: { rig, rigBudget, machine, root,
- * startTrain(engine) -> { pid } }.
- */
+/** One look at every engine train: [{ engine, queued, running, expectedMin, floorGb, start, why, started? }]. Starts those whose window is open (unless dryRun or report mode). deps: rig, rigBudget, machine, root, startTrain(engine) -> { pid }. */
 export async function enginePass({ now = Date.now(), env = process.env, dryRun = false, rig = null, deps = {} } = {}) {
   const et = await import('./engine-tracks.mjs');
   const ut = await import('./unity-train.mjs');
@@ -1229,7 +1125,6 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
   const root = deps.root || mainRoot();
   const targets = et.engineTargets({ root }).filter((t) => t.land);
   if (!targets.length) return [];
-  // The machine: rigBudget's running jobs and free RAM, the scan's CPU.
   let rb = null;
   try { rb = deps.rigBudget ? await deps.rigBudget() : await (await import('./rig-budget.mjs')).rigBudget({ env, now }); } catch { rb = null; }
   let cpuBusy = null;
@@ -1240,7 +1135,7 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
   if (deps.webTrain !== undefined) webTrain = deps.webTrain;
   const webQ = (readJson(path.join(root, '.studio', 'train', 'queue.json'), []) || []).filter((e) => e?.task && !(e.held && !(e.released && e.released.head === e.head)));
   const starts = readJson(ENGINE_STARTS(), {}) || {};
-  // 2.84: the batch window: the running sessions (who may still queue a branch) and the waits already announced.
+  // The batch window: the running sessions (who may still queue a branch) and the waits already announced.
   let liveSessions = null;
   const sessionsNow = async () => {
     if (liveSessions) return liveSessions;
@@ -1256,11 +1151,11 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
   let toldChanged = false;
   const out = [];
   for (const t of targets) {
-    // 2.84 (u): the automatic start takes untagged lanes only: a tagged lane waits for train --engine <x> --tag <tag>.
+    // The automatic start takes untagged lanes only: a tagged lane waits for train --engine <x> --tag <tag>.
     const qAll = ut.readUnityQueue(root, t.name);
     const q = qAll.filter((e) => !e?.tag);
     const taggedN = qAll.length - q.length;
-    // 2.84 (u): `train auto off --engine <x>` (.studio/train/<x>-auto.json; --hours runs out by itself).
+    // `train auto off --engine <x>` (.studio/train/<x>-auto.json; --hours runs out by itself).
     const ea = ctl.engineAutoState(root, t.name, { env, now });
     if (ea.expired && acting) {
       try { fs.rmSync(ctl.autoFile(root, t.name), { force: true }); } catch {}
@@ -1272,7 +1167,6 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     const last = starts[t.name];
     const since = last ? Math.round((now - Date.parse(last.at)) / 60000) : null;
     const f = { engine: t.name, label: t.label, heavyKind: t.heavyKind, queued: q.length, oldestAt: q[0]?.at || null, running: Boolean(running), startedRecently: since !== null && since < num(env.STUDIO_ENGINE_TRAIN_COOLDOWN_MIN, 3) ? Math.max(0, since) : 0, auto: autoOn && t.trainAuto && (ea.on || ea.source !== 'file'), webTrain, webQueued: webQ.length, heavy, freeGb: Number.isFinite(rb?.freeGb) ? rb.freeGb : Number.isFinite(rig?.freeRamGb) ? rig.freeRamGb : null, floorGb: floor.gb, floorFrom: floor.from, cpuBusy, expectedMin: exp.minutes, now };
-    // 2.79 (e): the engine slot: how many engine lands hold machine:heavy now against STUDIO_ENGINE_SLOTS.
     try {
       const hv = await import('./heavy.mjs');
       f.engineSlots = hv.engineSlotsAt(root, env);
@@ -1284,7 +1178,6 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     const w = engineWindow(f, env);
     if (autoOn && t.trainAuto && !ea.on && ea.source === 'file') {
       w.start = false; w.wait = false; w.why = ctl.autoOffWhy(ea, t.name);
-      // Said once per hour as an event (the why is in every pass's row).
       const last = Date.parse(told[t.name] || '');
       if (acting && (q.length || taggedN) && (!Number.isFinite(last) || now - last >= 3600000)) {
         told[t.name] = new Date(now).toISOString(); toldChanged = true;
@@ -1294,7 +1187,7 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
       const tc = ctl.tagCounts(qAll);
       w.why = `no untagged ${t.label} branch queued; ${taggedN} tagged lane(s) wait (${Object.entries(tc).map(([k, v]) => `${k} ${v}`).join(', ')}): the automatic start takes untagged lanes only, npm run task -- train --engine ${t.name} --tag <tag> lands them`;
     }
-    // 2.84: the batch window, only for this automatic start (a person's `task train --engine <x>` starts at once).
+    // The batch window applies only to this automatic start (a person's `task train --engine <x>` starts at once).
     const br = engineBatchRules(t.cfg, env);
     let batchWaiting = false;
     if (w.start && br.min > 1 && br.waitMin > 0) {
@@ -1350,18 +1243,14 @@ export function startEngineTrain(root, engine, env = process.env) {
   return { pid: child.pid };
 }
 
-/** The last pass's status (.studio/line/status.json), or null. */
 export const readLineStatus = () => readJson(LINE_STATUS_FILE(), null);
-/** The status the Communicator posts: the last pass's, or a dry pass now when there is none (or fresh: true). */
+/** The status the Communicator posts: the last pass's, or a dry pass when there is none (or fresh: true). */
 export async function lineStatus({ fresh = false, env = process.env } = {}) {
   const s = fresh ? null : readLineStatus();
   return s || lineProducerPass({ dryRun: true, env });
 }
 
-/**
- * The supervisor's half: the plan it follows this pass, or null (off, report, an error, or older than
- * STUDIO_LINE_PLAN_MAX_SEC (300)). { order: Map(id -> rank), routes, rigCap, cbs }.
- */
+/** The supervisor's half: the plan to follow, or null (off, report, an error, or older than STUDIO_LINE_PLAN_MAX_SEC (300)). { order: Map(id -> rank), routes, rigCap, cbs }. */
 export function supervisorPlan({ now = Date.now(), env = process.env } = {}) {
   if (lineMode(env) !== 'on') return null;
   const s = readLineStatus();
@@ -1369,17 +1258,17 @@ export function supervisorPlan({ now = Date.now(), env = process.env } = {}) {
   if (now - Date.parse(s.at) > num(env.STUDIO_LINE_PLAN_MAX_SEC, 300) * 1000) return null;
   return { order: new Map(s.order.map((id, i) => [id, i])), routes: s.routes || {}, hold: new Map((s.protectedSteps || []).filter((p) => p.hold).map((p) => [p.task, p.why])), rigCap: Number.isFinite(s.builders?.rigCap) ? s.builders.rigCap : null, rigWhy: s.builders?.why || '', cbs: new Set((s.chainBreakers || []).map((c) => c.task)), skip: new Set(Array.isArray(s.skip) ? s.skip : []) };
 }
-/** Sort the supervisor's groups (and each group's tasks) by the plan's order; tasks not in it keep their place after. */
+/** Sorts the supervisor's groups and their tasks by the plan's order; unlisted tasks keep their place after. */
 export function orderGroups(groups, plan) {
   if (!plan) return groups;
-  // 2.79.1 (3.1): tasks the plan skips (no lane, other work can run) are not started this pass; a group with nothing left drops out.
+  // Tasks the plan skips (no lane, other work can run) are not started this pass; a group with nothing left drops out.
   if (plan.skip?.size) groups = groups.map((g) => (g.tasks.some((t) => plan.skip.has(t.id)) ? { ...g, tasks: g.tasks.filter((t) => !plan.skip.has(t.id)) } : g)).filter((g) => g.tasks.length);
   const rank = (id) => (plan.order.has(id) ? plan.order.get(id) : 1e6);
   for (const g of groups) g.tasks = g.tasks.map((t, i) => ({ t, i })).sort((a, b) => rank(a.t.id) - rank(b.t.id) || a.i - b.i).map((x) => x.t);
   return groups.map((g, i) => ({ g, i })).sort((a, b) => (a.g.role === 'dev-hacker') - (b.g.role === 'dev-hacker') || rank(a.g.tasks[0]?.id) - rank(b.g.tasks[0]?.id) || a.i - b.i).map((x) => x.g);
 }
 
-// ---- the CLI -------------------------------------------------------------------------------------------------------
+// the CLI
 
 export function statusText(s) {
   if (!s) return 'Line Producer: no pass yet.';
@@ -1402,7 +1291,7 @@ export function statusText(s) {
   return L.join('\n');
 }
 
-/** 2.78.1 (B-123): the lane lines (harness/lane-plan.mjs laneLines' words; inline so the CLI never fails on an import). */
+/** The lane lines (harness/lane-plan.mjs laneLines' words; inline so the CLI never fails on an import). */
 export function laneLinesOf(l) {
   const L = [];
   if (l.set?.length) L.push(`Lanes ${l.set.some((x) => x.dry) ? 'it would set' : 'set'} (for the Producer): ${l.set.map((x) => `${x.task} -> ${x.lane} (from ${(x.from || []).join(', ')})`).join('; ')}.`);
