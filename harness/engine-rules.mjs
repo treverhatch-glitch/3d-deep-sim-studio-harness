@@ -1,26 +1,21 @@
 /**
- * harness/engine-rules.mjs — 2.82: the engine's rules check, run before the long land run.
+ * harness/engine-rules.mjs — the engine's rules check, run before the long land run.
  *
- * A game's rules that live in plain code (for Unity: a C# assembly with no engine types, tested with `dotnet test`) can
- * be judged without the editor. In the crew's first 64 land runs, 24 of the 45 failures were in exactly those tests, and
- * each one was found by a full land run and then bisected with more full land runs. This module runs the cheap check
- * first, on the batch as it would land, and bisects a red batch with the cheap check instead of the land command.
+ * A game's rules in plain code (Unity: a C# assembly with no engine types, `dotnet test`) can be judged without the
+ * editor. This runs that cheap check first, on the batch as it would land, and bisects a red batch with it.
  *
  *   studio/game.json (the owner's, protected):
  *     "engines": { "<x>": { "rules": "<command>" } }                      one command, run at the top of a checkout
  *     "engines": { "<x>": { "rules": { "test": "<command>", "inputs": ["<folder>", ...], "timeoutMin": 30 } } }
  *   Default for unity when "rules" is absent: `dotnet test tools/SimTests` when the target branch has that folder.
- *   "rules": false, or STUDIO_ENGINE_RULES=off: no rules check.
- *   "inputs": git-ignored files or folders the tests read, copied from the engine's folder into the throwaway checkout.
- *   2.83: also "env" (variables for the command), "lfs" (true: smudge large files in the checkout; default skipped),
- *   "paths" (the repo folders the tests compile or read: a sparse checkout, and the kept result's key), "focus" (run only
- *   the tests of the systems a batch changed, with a full run every fullEveryHours) and "share" (folders of
- *   content-addressed inputs a lane adds, copied by shareInputs). docs/NATIVE-ENGINE.md has the shapes.
+ *   "rules": false, or STUDIO_ENGINE_RULES=off: no rules check. "inputs": git-ignored files or folders the tests read,
+ *   copied into the throwaway checkout. Also "env", "lfs" (true: smudge large files), "paths" (a sparse checkout, and
+ *   the kept result's key), "focus" (only the tests of the systems a batch changed, a full run every fullEveryHours),
+ *   "share" (shareInputs), "maxLanes", "play.focus". docs/NATIVE-ENGINE.md has the shapes.
  *
- * It judges a batch only after it has passed on the target itself in the same kind of checkout (the calibration): a
- * check that is red on the landed target (a missing input, a missing SDK) blames nobody and is skipped with the reason.
- * Results are kept per tree, command and inputs (.studio/engine/<x>-rules.json), so a tree is run once. The inputs are
- * not in the tree, so their content is part of the key (inputsPrint): a kept result never answers for other inputs.
+ * A batch is judged only after the target itself passed in the same kind of checkout (the calibration); a red target
+ * (a missing input or SDK) blames nobody and is skipped with the reason. Results are kept per tree, command and inputs
+ * (.studio/engine/<x>-rules.json); the inputs' content is part of the key (inputsPrint).
  *
  *   node harness/engine-rules.mjs [--engine unity] [--ref <branch|commit>] [--full] [--fresh] [--json]   run it on one commit
  *   node harness/engine-rules.mjs show [--engine unity]                                 the command and where it comes from
@@ -48,16 +43,13 @@ const lastLine = (r) => String(r.stderr || r.error?.message || '').trim().split(
 
 export const rulesFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-rules.json`);
 
-/** The default rules command of an engine whose target branch has the files it needs, or null. */
+/** Default rules command per engine, used when the target branch has the files it needs. */
 const DEFAULTS = { unity: { has: 'tools/SimTests', test: 'dotnet test tools/SimTests' } };
 
-/** Repo-relative paths from the owner's list: forward slashes, no trailing slash, nothing absolute or outside. */
+/** Repo-relative paths from the owner's list: forward slashes, none absolute or outside. */
 const relList = (list) => (Array.isArray(list) ? list : []).map((x) => String(x || '').trim().replace(/\\/g, '/').replace(/\/+$/, '')).filter((x) => x && !x.startsWith('/') && !/(^|\/)\.\.(\/|$)/.test(x) && !/^[A-Za-z]:/.test(x));
 
-/**
- * The rules check of engine <x>: { command, inputs, timeoutMin, source, env, lfs, paths, focus, share } or null (none
- * configured, none by default, or switched off). repo and ref: the engine repo and the branch whose tree decides the default.
- */
+/** The rules check of engine <x>: { command, inputs, timeoutMin, source, env, lfs, paths, focus, share, maxLanes } or null. repo/ref: the engine repo and branch that decide the default. */
 export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo = null, ref = null } = {}) {
   if (!ENGINE_NAME_RE.test(String(engine || '')) || off(env.STUDIO_ENGINE_RULES)) return null;
   const cfg = engineTarget(engine, { root })?.cfg || {};
@@ -68,7 +60,6 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
   const withSdk = (cmd) => (dotnet && /^dotnet\s/.test(cmd) ? `${/\s/.test(dotnet) ? `"${dotnet}"` : dotnet}${cmd.slice(6)}` : cmd);
   const timeoutMin = Math.max(1, num(env.STUDIO_ENGINE_RULES_TIMEOUT_MIN, num(o.timeoutMin, 30)));
   const inputs = relList(o.inputs);
-  // 2.83: the command's own variables (strings only), the sparse paths, LFS, focused runs and shared input folders.
   const vars = o.env && typeof o.env === 'object' && !Array.isArray(o.env)
     ? Object.fromEntries(Object.entries(o.env).filter(([k, v]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof v === 'string')) : {};
   const f = o.focus;
@@ -80,10 +71,8 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
       join: typeof f.join === 'string' && f.join ? f.join : '|',
       fullEveryHours: Math.max(0, num(f.fullEveryHours, 24)),
       ignore: ignoreList(f.ignore),
-      // 2.84 (t, B-134): one command per filter group, in sequence, instead of one joined command.
       split: f.split === true,
     } : null;
-  // 2.84 (t, B-134): rules.maxLanes: a batch with more lanes is checked in consecutive slices of that many (0: off).
   const maxLanes = Math.max(0, Math.floor(num(o.maxLanes, 0)));
   const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), focus: focus?.map.length ? focus : null, share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes };
   const test = typeof r === 'string' ? r.trim() : typeof o.test === 'string' ? o.test.trim() : '';
@@ -94,10 +83,7 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
   return { command: withSdk(d.test), inputs, timeoutMin, source: `the ${engine} default (${ref} has ${d.has})`, ...extra };
 }
 
-/**
- * 2.83: the files of one input as the tests see them, merged over the folders it is copied from: each folder in order,
- * the first folder that has a file wins it. { found, files: [[name, abs]] } sorted by name (forward slashes).
- */
+/** The files of one input merged over the folders it is copied from (the first folder with a file wins). { found, files: [[name, abs]] } sorted by name. */
 export function inputFiles(rel, from = []) {
   const files = new Map();
   let found = false;
@@ -116,11 +102,7 @@ export function inputFiles(rel, from = []) {
   return { found, files: [...files.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)) };
 }
 
-/**
- * A fingerprint of the git-ignored inputs as the tests see them ('' with no inputs): 2.83, the merged view over every
- * folder they are copied from (inputFiles), so a file only a later folder has is part of it. They are not in the
- * commit's tree, so a kept result is only valid for the same inputs, and so is STUDIO_RULES_GREEN.
- */
+/** A fingerprint of the git-ignored inputs ('' with none), over inputFiles' merged view. They are not in the tree, so a kept result and STUDIO_RULES_GREEN are valid only for the same inputs. */
 export function inputsPrint(cfg, from = []) {
   if (!cfg?.inputs?.length) return '';
   const h = crypto.createHash('sha1');
@@ -130,14 +112,14 @@ export function inputsPrint(cfg, from = []) {
     for (const [name, p] of files) {
       let st; try { st = fs.statSync(p); } catch { h.update(`${name}\0gone\n`); continue; }
       h.update(`${name}\0${st.size}\0`);
-      // Content for anything of ordinary size; a very large file is told apart by its size and time.
+      // Content for ordinary sizes; a very large file by size and time.
       if (st.size <= 64 * 1024 * 1024) { try { h.update(fs.readFileSync(p)); } catch { h.update('unreadable'); } } else h.update(String(Math.floor(st.mtimeMs)));
     }
   }
   return h.digest('hex').slice(0, 12);
 }
 
-/** Copy the merged inputs into a checkout: a file already there (tracked, or from an earlier folder) is never overwritten. */
+/** Copy the merged inputs into a checkout; an existing file is never overwritten. */
 function copyInputs(cfg, from, dir) {
   const missing = [];
   for (const rel of cfg.inputs || []) {
@@ -153,11 +135,7 @@ function copyInputs(cfg, from, dir) {
   return missing;
 }
 
-/**
- * 2.83: copy a lane's newly added shared input files (cfg.share: repo-relative folders of content-addressed files) into
- * another folder. Only files missing under <to> are copied: never an overwrite, never a delete. An entry that is absolute
- * or reaches outside with `..` is refused. { copied: [relative paths], skipped: n, refused: [entries] }.
- */
+/** Copy a lane's new shared input files (cfg.share) to <to>: missing files only; an absolute or `..` entry is refused. { copied, skipped: n, refused } */
 export function shareInputs({ cfg, laneDir, to, log = () => {} } = {}) {
   const res = { copied: [], skipped: 0, refused: [] };
   if (!laneDir || !to) return res;
@@ -186,11 +164,9 @@ export function shareInputs({ cfg, laneDir, to, log = () => {} } = {}) {
 }
 
 /**
- * 2.83: the throwaway checkout's git environment and steps. Large files are not smudged unless rules.lfs is true (a
- * crew's checkout was 3.2 GB each time; rule tests do not read art). With rules.paths only those paths are checked out:
- * `worktree add --no-checkout`, then the patterns are written to the worktree's own info/sparse-checkout and checked out
- * with core.sparseCheckout given on the command line. (`git sparse-checkout set` in a linked worktree turns on
- * extensions.worktreeConfig in the engine repo's shared config: a lasting change to the owner's repo this avoids.)
+ * The throwaway checkout's git environment and steps. Large files are not smudged unless rules.lfs is true. With
+ * rules.paths: `worktree add --no-checkout`, patterns written to the worktree's own info/sparse-checkout, core.sparseCheckout
+ * on the command line (`git sparse-checkout set` would change the engine repo's shared config: a lasting change to the owner's repo).
  */
 export function checkoutPlan({ dir, sha, cfg = {}, env = process.env } = {}) {
   const gitEnv = { ...env };
@@ -213,7 +189,7 @@ export function removeCheckout(repo, dir) {
   git(repo, 'worktree', 'prune');
 }
 
-/** Make the throwaway checkout (checkoutPlan); a sparse checkout that fails falls back to a full one. { ok, sparse, why } */
+/** Make the checkout; a failed sparse one falls back to full. { ok, sparse, why } */
 export function rulesCheckout({ repo, sha, dir, cfg = {}, env = process.env, log = () => {}, engine = 'unity' } = {}) {
   const p = checkoutPlan({ dir, sha, cfg, env });
   const g = (cwd, args) => spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, env: p.env, maxBuffer: 32 * 1024 * 1024 });
@@ -237,7 +213,7 @@ export function rulesCheckout({ repo, sha, dir, cfg = {}, env = process.env, log
   return a.status === 0 ? { ok: true, sparse: false } : { ok: false, why: lastLine(a) };
 }
 
-/** The repo paths that differ between two commits (renames as a delete and an add), or null when git can't tell. */
+/** Repo paths that differ between two commits (renames as delete + add), or null. */
 export function changedPaths(repo, a, b) {
   const r = git(repo, '-c', 'core.quotePath=false', 'diff', '--name-only', '--no-renames', '-z', a, b, '--');
   if (r.status !== 0) return null;
@@ -245,27 +221,23 @@ export function changedPaths(repo, a, b) {
 }
 
 /**
- * 2.83: what a batch runs. changed: the batch's changed repo paths (null: not known); full: a full run is forced.
- * { mode: 'focus' | 'full', filter, command, changed, why, unchanged? }. Focus only when there is a changed path and every
- * one (under rules.paths, when set) matches a rules.focus.map entry: the unique filters of the matching entries in order,
- * then smoke, joined. A regex group may only bring letters, digits, . _ and - into the command; anything else makes that
- * path unmapped (the filter goes into a shell command). With paths set and nothing under them changed: the full command,
- * and `unchanged`: the batch's rule inputs are the target's, so the target's kept result answers.
+ * What a batch runs. changed: the batch's changed repo paths (null: unknown); full: a full run is forced.
+ * { mode: 'focus' | 'full', filter, command, changed, why, unchanged? }. Focus only when every changed path (under
+ * rules.paths, when set) matches a rules.focus.map entry (focusFilters). Nothing under paths changed: the full command
+ * with `unchanged` (the target's kept result answers).
  */
 export function rulesSelection({ changed = [], cfg, full = false, fullWhy = '' } = {}) {
   const paths = cfg?.paths || [];
   const under = (p) => !paths.length || paths.some((x) => p === x || p.startsWith(`${x}/`));
   const ch0 = changed == null ? null : [...new Set(changed.map((p) => String(p || '').replace(/\\/g, '/')).filter(Boolean))].filter(under);
-  // 2.84 (m): paths matching rules.focus.ignore cannot affect the rules tests (Play Mode tests, UI files): left out
-  // before the "does every path map?" test, so they no longer force the full command on the whole batch.
+  // rules.focus.ignore paths (Play Mode, UI files) cannot affect the tests: left out before the "does every path map?" test.
   const ig = cfg?.focus && ch0 ? ignoreSplit(ch0, cfg.focus.ignore) : { kept: ch0, ignored: [], bad: [] };
   const ch = ig.kept;
   const more = { ...(ig.ignored.length ? { ignored: ig.ignored } : {}), ...(ig.bad.length ? { ignoreBad: ig.bad } : {}) };
   const fullSel = (why, extra = {}) => ({ mode: 'full', filter: '', command: cfg.command, changed: ch || [], why, ...more, ...extra });
   if (ch && paths.length && !ch0.length) return fullSel('nothing under rules.paths changed: the target\'s kept result answers', { unchanged: true });
   if (!cfg?.focus) return fullSel('no rules.focus');
-  // Only ignored paths changed: nothing the rules tests read. The smoke filter alone (focus), or with no smoke the
-  // answer for "nothing under rules.paths changed": the target's kept result.
+  // Only ignored paths changed: the smoke filter alone, else the target's kept result.
   if (ch && ch0.length && !ch.length) {
     if (!cfg.focus.smoke) return fullSel(`every changed path matches rules.focus.ignore (${ig.ignored.length}): the target's kept result answers`, { unchanged: true });
     if (!full) return { mode: 'focus', filter: cfg.focus.smoke, command: cfg.focus.test.split('{filter}').join(cfg.focus.smoke), changed: ch, why: `every changed path matches rules.focus.ignore (${ig.ignored.length}): the smoke filter alone`, ...more, ...splitParts(cfg, [cfg.focus.smoke]) };
@@ -278,25 +250,19 @@ export function rulesSelection({ changed = [], cfg, full = false, fullWhy = '' }
   return { mode: 'focus', filter: ff.filter, command: cfg.focus.test.split('{filter}').join(ff.filter), changed: ch, why: `${ch.length} changed path(s), all mapped by rules.focus${ig.ignored.length ? ` (${ig.ignored.length} more left out by rules.focus.ignore)` : ''}`, ...more, ...splitParts(cfg, ff.filters) };
 }
 
-/**
- * 2.84 (t, B-134): with rules.focus.split, a focused selection runs one command per filter group (each mapped filter,
- * then smoke) in sequence: one test process holds one system's data at a time. { parts: [{ filter, command }] } or {}.
- */
+/** With rules.focus.split, a focused selection runs one command per filter group in sequence (one process holds one system's data). { parts: [{ filter, command }] } or {}. */
 function splitParts(cfg, filters = []) {
   if (!cfg?.focus?.split) return {};
   const parts = [...new Set(filters.filter(Boolean))].map((f) => ({ filter: f, command: cfg.focus.test.split('{filter}').join(f) }));
   return parts.length > 1 ? { parts } : {};
 }
 
-/**
- * 2.84 (m): rules.focus.ignore / play.focus.ignore: a list of regex strings (non-strings dropped). Kept as given; an
- * invalid one is skipped where it is used (ignoreSplit names it) and never crashes a run.
- */
+/** rules.focus.ignore / play.focus.ignore: a list of regex strings; an invalid one is skipped where used (ignoreSplit names it). */
 export function ignoreList(v) {
   return (Array.isArray(v) ? v : []).filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim());
 }
 
-/** 2.84 (m): split changed paths by an ignore list: { kept, ignored, bad (the patterns that are not a valid regex) }. */
+/** Split changed paths by an ignore list: { kept, ignored, bad (patterns that are not a valid regex) }. */
 export function ignoreSplit(changed = [], ignore = []) {
   const res = [];
   const bad = [];
@@ -309,11 +275,10 @@ export function ignoreSplit(changed = [], ignore = []) {
 }
 
 /**
- * 2.84: the focus mapping shared by the rules check and the land's Play Mode stage. changed: repo paths; map:
- * [{ match: <regex>, filter }]. Every path must match at least one entry; each matching entry gives its filter with
- * $1..$9 replaced by the regex groups (a group with anything but letters, digits, . _ and - makes that entry not match:
- * the filter goes onto a command line). { ok: true, filters, filter } (the unique filters in order, then smoke, joined)
- * or { ok: false, unmatched: <the first path no entry maps> }.
+ * The focus mapping shared by the rules check and the Play Mode stage. map: [{ match: <regex>, filter }]. Every path must
+ * match an entry; the filter has $1..$9 replaced by the regex groups (a group with anything but letters, digits, . _ -
+ * makes that entry not match: the filter goes onto a command line). { ok: true, filters, filter } (unique, then smoke,
+ * joined) or { ok: false, unmatched: <first unmapped path> }.
  */
 export function focusFilters({ changed = [], map = [], smoke = '', join = '|' } = {}) {
   const filters = [];
@@ -336,40 +301,35 @@ export function focusFilters({ changed = [], map = [], smoke = '', join = '|' } 
   return { ok: true, filters, filter: filters.join(join) };
 }
 
-/**
- * 2.84: engines.<x>.play.focus = { map: [{ match, filter }], smoke, join } (join ";" when not given: the Unity Test
- * Framework's separator), or null (not set, or no usable map entry).
- */
+/** engines.<x>.play.focus = { map, smoke, join (";": the Unity Test Framework's separator), ignore, skip }, or null (not set or unusable). */
 export function playFocusConfig(cfg = {}) {
   const f = cfg?.play && typeof cfg.play === 'object' ? cfg.play.focus : null;
   if (!f || typeof f !== 'object') return null;
   const map = (Array.isArray(f.map) ? f.map : []).filter((m) => m && typeof m.match === 'string' && typeof m.filter === 'string').map((m) => ({ match: m.match, filter: m.filter }));
-  // 2.84 (t): play.focus.skip, regexes for paths that need no Play Mode run at all; a config with only skip is usable.
+  // play.focus.skip: paths that need no Play Mode run; a config with only skip is usable.
   const skip = ignoreList(f.skip);
   if (!map.length && !skip.length) return null;
   return { map, smoke: typeof f.smoke === 'string' ? f.smoke.trim() : '', join: typeof f.join === 'string' && f.join ? f.join : ';', ignore: ignoreList(f.ignore), skip };
 }
 
-/** 2.84: the characters a Play Mode filter may hold; anything else and the play stage runs in full (it reaches a command line). */
+/** The characters a Play Mode filter may hold (it reaches a command line); anything else runs the stage in full. */
 export const PLAY_FILTER_SAFE = /^[A-Za-z0-9_.;|~=!()* -]+$/;
 
 /**
- * 2.84: what the land's Play Mode stage is told. changed: the batch's changed repo paths (null: not known); cfg: the
- * engine's config (engines.<x>); full: a full land run (fullLandDue). { mode: 'focus' | 'full', filter, why, refused? }.
- * Focus only when every changed path matches a play.focus.map entry and the joined filter holds only PLAY_FILTER_SAFE
- * characters. A hint the land script may use: a focused Play Mode run is a weaker check than a full one.
+ * What the land's Play Mode stage is told (a hint the land script may use; focus is weaker than full). changed: repo
+ * paths (null: unknown); full: a full land run. { mode: 'focus' | 'skip' | 'full', filter, why, refused? }. Focus only
+ * when every changed path matches a play.focus.map entry and the filter is PLAY_FILTER_SAFE.
  */
 export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = '' } = {}) {
   const pf = playFocusConfig(cfg);
   const fullSel = (why, extra = {}) => ({ mode: 'full', filter: '', why, ...extra });
   if (!pf) return fullSel('no play.focus');
-  // (2.84 t: a full land run never skips, so this stays before play.focus.skip.)
+  // A full land run never skips, so this stays before play.focus.skip.
   if (full) return fullSel(fullWhy || 'a full land run');
   if (!changed) return fullSel('the batch\'s changed paths are not known');
   const ch0 = [...new Set(changed.map((p) => String(p || '').replace(/\\/g, '/')).filter(Boolean))];
   if (!ch0.length) return fullSel('the batch changes no path');
-  // 2.84 (m): play.focus.ignore, as rules.focus.ignore: those paths are left out before the mapping. Only ignored paths
-  // changed: the smoke filter alone, or with no smoke the full stage (the Play Mode stage has no kept result).
+  // play.focus.ignore, as rules.focus.ignore: only ignored paths changed gives the smoke filter alone, else the full stage.
   const ig = ignoreSplit(ch0, pf.ignore);
   const ch = ig.kept;
   const bad = ig.bad.length ? { ignoreBad: ig.bad } : {};
@@ -377,8 +337,7 @@ export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = 
     if (pf.smoke && PLAY_FILTER_SAFE.test(pf.smoke)) return { mode: 'focus', filter: pf.smoke, why: `every changed path matches play.focus.ignore (${ig.ignored.length}): the smoke filter alone`, ignored: ig.ignored, ...bad };
     return fullSel(`every changed path matches play.focus.ignore (${ig.ignored.length}) and there is no smoke filter`, { ignored: ig.ignored, ...bad });
   }
-  // 2.84 (t): every path left matches a play.focus.skip pattern (a pure port of rules code, its .NET tests): no Play
-  // Mode run at all. Never on a full land run (returned above). The daily full land run is the backstop.
+  // Every path left matches play.focus.skip (rules code covered by .NET tests): no Play Mode run; the daily full land run is the backstop.
   if (pf.skip.length) {
     const sk = ignoreSplit(ch, pf.skip);
     for (const b of sk.bad) if (!bad.ignoreBad) bad.ignoreBad = [b]; else if (!bad.ignoreBad.includes(b)) bad.ignoreBad.push(b);
@@ -391,7 +350,7 @@ export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = 
   return { mode: 'focus', filter: ff.filter, why: `${ch.length} changed path(s), all mapped by play.focus${ig.ignored.length ? ` (${ig.ignored.length} more left out by play.focus.ignore)` : ''}`, ...bad };
 }
 
-/** 2.83: is a full run due (rules.focus.fullEveryHours since the last full pass, STUDIO_ENGINE_RULES_FULL, --full)? '' or why. */
+/** Is a full run due (fullEveryHours, STUDIO_ENGINE_RULES_FULL, --full)? '' or why. */
 export function fullDue(root, engine, cfg, { env = process.env, full = false } = {}) {
   if (!cfg?.focus) return '';
   if (full) return 'a full run was asked for (--full)';
@@ -424,13 +383,13 @@ function keep(root, engine, key, rec) {
   });
 }
 
-/** The median minutes of the last recorded rules runs that ran to the end, or null. */
+/** Median minutes of the last recorded runs that ran to the end, or null. */
 export function rulesMinutes(root, engine) {
   const runs = (readCache(root, engine).runs || []).filter((r) => ['pass', 'red'].includes(r.status) && r.ms > 0).slice(-12).map((r) => r.ms).sort((a, b) => a - b);
   return runs.length ? Math.round(runs[Math.floor(runs.length / 2)] / 6000) / 10 : null;
 }
 
-/** 2.83: the key a result is kept under: the tree (or, with rules.paths, those paths' ids), command, inputs, selection. */
+/** The key a result is kept under: tree (or rules.paths ids), command, inputs, selection. */
 export function rulesKey({ repo, sha, cfg, sel = null, print = '' }) {
   const s = sel || { mode: 'full', filter: '', command: cfg.command };
   let base;
@@ -440,10 +399,9 @@ export function rulesKey({ repo, sha, cfg, sel = null, print = '' }) {
 }
 
 /**
- * Run the rules check on one commit of the engine repo, in a throwaway checkout (never the land script's worktree, never
- * a lane). { status: 'pass' | 'red' | 'error', why, ms, failures?, tail?, cached?, mode }. 'error': it could not be run or
- * timed out (nobody is blamed). opts: repo, sha, cfg (rulesConfig), from (folders the inputs are copied from), extraFrom
- * (2.83: more folders after those), sel (rulesSelection; default the full command), root, id, env, log, useCache (true).
+ * Run the rules check on one commit in a throwaway checkout (never the land script's worktree or a lane).
+ * { status: 'pass' | 'red' | 'error', why, ms, failures?, tail?, cached?, mode }; 'error' (could not run, or timed out)
+ * blames nobody. from / extraFrom: input source folders; sel: default the full command.
  */
 export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraFrom = [], sel = null, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, useCache = true } = {}) {
   const tree = out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}^{tree}`));
@@ -465,8 +423,7 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
     const missing = copyInputs(cfg, src, dir);
     if (missing.length) log(`[engine-rules] ${engine}: input(s) not found in the engine's folder: ${missing.join(', ')} (engines.${engine}.rules.inputs)`);
     const runEnv = { ...env, ...(cfg.env || {}), STUDIO_ENGINE: engine, STUDIO_RULES_COMMIT: sha, STUDIO_RULES_DIR: dir, STUDIO_ENGINE_REPO: repo, STUDIO_RULES_MODE: s.mode };
-    // 2.84 (t, B-134): rules.focus.split: one command per filter group, in sequence; green when all are, red on the first
-    // red (its output kept). The time limit is for the whole sequence.
+    // rules.focus.split: one command per group, in sequence; red on the first red. The time limit covers the sequence.
     if (Array.isArray(s.parts) && s.parts.length > 1) {
       const groups = [];
       for (const part of s.parts) {
@@ -506,25 +463,18 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
 
 /**
  * The batch check before a land run. lanes: the train's lanes in order ({ task, branch, head }); chain(tip, lanes) ->
- * { head } | { error } builds the commit the batch would land as (unity-train.mjs chainOnTarget). Returns
- * { ran, skipped?, why, kept: [lane], dropped: [{ lane, why, failures }], runs, ms, green?: <commit the kept lanes passed as>,
- * inputs: <inputsPrint when the check began>, mode, filter }.
- * A red batch is narrowed with the same cheap check: the first prefix that is red names its last lane, which is dropped;
- * the rest is checked again. STUDIO_ENGINE_RULES_MAX_RUNS (12) bounds the runs of one batch: past it the lanes left go
- * to the land run unjudged.
- * 2.83: the batch's selection (rulesSelection on the paths it changes against the target) is decided once, and the
- * calibration and every narrowing prefix use that same command. extraFrom: more input folders (the lanes' own), full:
- * force a full run, useCache: false ignores kept results.
+ * { head } | { error } builds the commit the batch would land as (unity-train.mjs chainOnTarget). Returns { ran,
+ * skipped?, why, kept, dropped: [{ lane, why, failures }], runs, ms, green? (the commit the kept lanes passed as), inputs, mode, filter }.
+ * A red batch is bisected by prefixes: the first red prefix names its last lane, which is dropped.
+ * STUDIO_ENGINE_RULES_MAX_RUNS (12) bounds the runs: past it the lanes left go to the land run unjudged.
  */
 export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], extraFrom = [], full = false, useCache = true, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt, slice = null } = {}) {
   const src = [...from, ...extraFrom];
   const res = { ran: false, kept: lanes.slice(), dropped: [], runs: 0, ms: 0, why: '', inputs: inputsPrint(cfg, src), mode: 'full', filter: '' };
   if (!cfg) return { ...res, skipped: true, why: 'no rules check is configured' };
   if (!lanes.length) return { ...res, skipped: true, why: 'no lane to check' };
-  // 2.84 (t, B-134): rules.maxLanes: a batch with more lanes is checked in consecutive slices of that many lanes, each
-  // merged on the same target, so one test run holds a bounded batch. A red slice is narrowed within itself: only its
-  // lanes can be refused. The whole batch was never checked as one tree, so a sliced check is never "green" for the
-  // land run (no STUDIO_RULES_GREEN): it only refuses lanes early. Kept results stay per tree, so per slice.
+  // rules.maxLanes (0: off): a bigger batch is checked in slices on the same target, a red slice narrowed within itself.
+  // Never "green" for the land run (no STUDIO_RULES_GREEN): the batch was not checked as one tree.
   if (!slice && cfg.maxLanes > 0 && lanes.length > cfg.maxLanes) {
     const n = Math.ceil(lanes.length / cfg.maxLanes);
     const all = { ...res, ran: false, kept: [], sliced: n, slices: [] };
@@ -544,28 +494,26 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     return all;
   }
   const maxRuns = Math.max(2, Math.floor(num(env.STUDIO_ENGINE_RULES_MAX_RUNS, 12)));
-  // 2.83: the batch as it would land, and what it runs: focused on the systems it changes, or the full command.
   let first = chain(tip, lanes);
   const due = fullDue(root, engine, cfg, { env, full });
   const sel = rulesSelection({ changed: first && !first.error && first.head ? changedPaths(repo, tip, first.head) : null, cfg, full: Boolean(due), fullWhy: due });
   res.mode = sel.mode;
   res.filter = sel.filter.slice(0, 300);
   if (cfg.focus || sel.unchanged) log(`[engine-rules] ${engine}: ${sel.mode} run: ${sel.why}${sel.filter ? ` (${res.filter})` : ''}`);
-  // 2.84 (m): an ignore pattern that is not a valid regex is skipped, and said.
   for (const b of sel.ignoreBad || []) log(`[engine-rules] ${engine}: rules.focus.ignore pattern ${JSON.stringify(b).slice(0, 120)} is not a valid regex; skipped`);
-  // 2.84 (t): with rules.focus.split, the seconds of each filter group over this batch's runs (cached runs left out).
+  // rules.focus.split: seconds of each group over this batch's uncached runs.
   const groupSecs = new Map();
   const at = (sha) => {
     const r = run({ engine, repo, sha, cfg, from, extraFrom, sel, root, id, env, log, useCache });
     if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; for (const gr of Array.isArray(r.groups) ? r.groups : []) groupSecs.set(gr.filter, (groupSecs.get(gr.filter) || 0) + (gr.seconds || 0)); }
     return r;
   };
-  // The calibration: the landed target must be green in the same kind of checkout (2.83: the same command), or the check judges nobody.
+  // The calibration: the target must be green with the same command.
   const base = at(tip);
   if (base.status !== 'pass') {
     return { ...res, skipped: true, calibration: base.status, why: `the rules check is ${base.status === 'red' ? 'red' : 'not runnable'} on the target itself (${base.why}${base.failures?.length ? `: ${base.failures.slice(0, 3).join(', ')}` : ''}), so it judges no lane: fix the target, or name the inputs its tests read in studio/game.json engines.${engine}.rules.inputs` };
   }
-  // 2.83: a full pass on the target is the backstop a focused run leans on (rules.focus.fullEveryHours).
+  // A full pass on the target is the backstop for focused runs (fullEveryHours).
   if (sel.mode === 'full' && cfg.focus) writeCache(root, engine, (j) => { j.lastFullAt = new Date().toISOString(); });
   res.ran = true;
   let set = lanes.slice();
@@ -577,7 +525,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     if (r.status === 'pass') { res.green = whole.head; break; }
     if (r.status !== 'red') { res.why = `${r.why}: the land run decides`; break; }
     if (res.runs >= maxRuns) { res.why = `the rules check is red and its ${maxRuns} runs are used (STUDIO_ENGINE_RULES_MAX_RUNS): the land run decides for ${set.map((l) => l.task).join(', ')}`; break; }
-    // The smallest prefix that is red: its last lane is the one that turns the batch red.
+    // The smallest red prefix: its last lane turns the batch red.
     let lo = 0; // target + the first lo lanes is green
     let hi = set.length; // target + the first hi lanes is red
     let bad = r;
@@ -605,10 +553,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
   return res;
 }
 
-/**
- * The command line. 2.83: an async function, not top-level await: unity-train.mjs imports this module, so awaiting its
- * import at the top level left this module's evaluation unsettled and node exited 13 (B-124).
- */
+/** The command line. Not top-level await: unity-train.mjs imports this module, so that left evaluation unsettled (node exit 13). */
 async function cli(argv) {
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
   const engine = flag('engine') || 'unity';
@@ -625,7 +570,6 @@ async function cli(argv) {
     // Variable names only: their values may be private.
     console.log(`[engine-rules] env: ${vars.join(', ') || 'none'}; paths: ${cfg.paths.join(', ') || 'the whole tree'}; large files: ${cfg.lfs ? 'checked out' : 'skipped'}; share: ${cfg.share.join(', ') || 'none'}`);
     console.log(`[engine-rules] focus: ${cfg.focus ? `${cfg.focus.test} with ${cfg.focus.map.length} map entr${cfg.focus.map.length === 1 ? 'y' : 'ies'}${cfg.focus.smoke ? `, smoke ${cfg.focus.smoke}` : ''}; a full run every ${cfg.focus.fullEveryHours} h (last full pass: ${readCache(root, engine).lastFullAt || 'none'})` : 'off (every run is the full command)'}`);
-    // 2.84 (m): the paths left out before the mapping, each pattern checked.
     if (cfg.focus) console.log(`[engine-rules] ignore: ${cfg.focus.ignore.length ? cfg.focus.ignore.map((p) => { try { new RegExp(p); return p; } catch { return `${p} (not a valid regex: skipped)`; } }).join(', ') : 'none'}`);
     return 0;
   }
