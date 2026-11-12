@@ -78,7 +78,13 @@ The overseer wrote a list; this pass builds it.
 
 In the second pass three unused features went, with their tests, pages and 14 settings: remote workers and the remote
 verify, the harness scout, signed results (`qa/selftest-284y.mjs`). The run report and the causes list were proposed
-and kept: both are in use. Five more pages were shortened (ROADMAP 32 KB → 5 KB).
+and kept: both are in use. Five more pages were shortened (ROADMAP 32 KB → 5 KB). Code comments in the twenty
+largest modules were cut (1,557 KB → 1,439 KB across `harness/` and `scripts/`), each file landed on
+`npm run check:same-code` showing its code tokens unchanged; files that were mostly release history lost about 40%,
+files that were mostly rules and reasons 10 to 30%. One old test reads a version tag in a comment; it was put back.
+
+Net: the pages an agent or a maintainer reads, 1,672 KB → 958 KB. Tracked lines are level with 2.83 (164,633 →
+164,630): the second pass added about as much code and tests as the cuts removed.
 
 In the first pass no feature was removed. Seventy modules that left no trace in five days of a crew's log were checked one by one: the
 two that looked unreachable are reached as subprocesses and were asked for by the owner. A feature is cut when a month

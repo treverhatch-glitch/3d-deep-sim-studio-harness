@@ -5,8 +5,9 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 ---
 
 ## [2.84.0] — 2026-11-12
-Less waste (the owner's order: keep what moves the studio forward, cut what costs tokens). The first release that
-shrinks the repository: tracked lines 164,633 → 161,027, the documents an agent or a maintainer reads 1,672 KB → 1,040 KB.
+Less waste (the owner's order: keep what moves the studio forward, cut what costs tokens). The documents an agent or
+a maintainer reads went from 1,672 KB to 958 KB and code comments from 1,557 KB to 1,439 KB; tracked lines stayed level
+(164,633 → 164,630) because the second pass added as much as the cuts removed.
 Details: docs/RELEASE-2.84.0.md.
 - **Planning wakes that change nothing** (`harness/wake-gate.mjs`): after a regular cycle or a queue-depth session that
   changed nothing on the board, that role's next one waits twice as long, up to `STUDIO_CYCLE_QUIET_MAX_H` (12) and
