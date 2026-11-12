@@ -450,14 +450,14 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## HEAVY_* (19)
 
 - `STUDIO_HEAVY_HELD` · default `'1'` · harness/asset-gate.mjs, harness/flake-quiet.mjs, harness/heavy.mjs (+24 more) · undocumented
-- `STUDIO_HEAVY_IGNORE_ARGS` · no simple default · harness/heavy.mjs, qa/selftest-2653a.mjs · [UNITY-TRACK.md:209](UNITY-TRACK.md)
+- `STUDIO_HEAVY_IGNORE_ARGS` · no simple default · harness/heavy.mjs, qa/selftest-2653a.mjs · [UNITY-TRACK.md:208](UNITY-TRACK.md)
 - `STUDIO_HEAVY_MAX_*` · no simple default · harness/heavy-budget.mjs · [WORK-ORGANIZATION.md:304](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_MAX_BLENDER` · no simple default · harness/blender-job.mjs, qa/selftest-270t.mjs · [WORK-ORGANIZATION.md:305](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_MAX_UNITY` · no simple default · qa/selftest-268n.mjs, qa/selftest-2781f.mjs, qa/selftest-279e.mjs · [WORK-ORGANIZATION.md:304](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_OOM_RETRY` · no simple default · harness/asset-gate.mjs, harness/game-gates.mjs, harness/heavy.mjs (+3 more) · [WORK-ORGANIZATION.md:314](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_OWN_GROUP` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-260d.mjs (+2 more) · undocumented
 - `STUDIO_HEAVY_POLL_MS` · no simple default · harness/heavy.mjs, qa/selftest-259d.mjs, qa/selftest-2601m.mjs (+20 more) · undocumented
-- `STUDIO_HEAVY_PROGRAMS` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-2651a.mjs (+26 more) · [UNITY-TRACK.md:208](UNITY-TRACK.md)
+- `STUDIO_HEAVY_PROGRAMS` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-2651a.mjs (+26 more) · [UNITY-TRACK.md:207](UNITY-TRACK.md)
 - `STUDIO_HEAVY_RAM_FLOOR_GB` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-2671k.mjs (+9 more) · undocumented
 - `STUDIO_HEAVY_RAM_WAIT_MIN` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-268n.mjs (+1 more) · [WORK-ORGANIZATION.md:300](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_REAP` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-260d.mjs (+4 more) · [WORK-ORGANIZATION.md:285](WORK-ORGANIZATION.md)
@@ -467,7 +467,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_HEAVY_SLOTS_LIVE` · no simple default · harness/heavy.mjs, qa/selftest-2782b.mjs · [WATCH-2.78.1.md:23](WATCH-2.78.1.md)
 - `STUDIO_HEAVY_STALE_MIN` · no simple default · harness/heavy.mjs · undocumented
 - `STUDIO_HEAVY_STOP_GRACE_MS` · no simple default · harness/heavy.mjs · undocumented
-- `STUDIO_HEAVY_WAIT_MIN` · no simple default · harness/heavy.mjs, harness/train-watch.mjs, harness/train.mjs (+25 more) · [UNITY-TRACK.md:316](UNITY-TRACK.md)
+- `STUDIO_HEAVY_WAIT_MIN` · no simple default · harness/heavy.mjs, harness/train-watch.mjs, harness/train.mjs (+25 more) · [UNITY-TRACK.md:315](UNITY-TRACK.md)
 
 ## HOLDOUT_* (2)
 
@@ -937,27 +937,27 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 - `STUDIO_UNITY` · default `'unity'` · harness/engine.mjs, harness/gate-fix.mjs, harness/unity.mjs (+11 more) · [ENGINE-TRACK.md:36](ENGINE-TRACK.md)
 - `STUDIO_UNITY_*` · no simple default · harness/heavy.mjs · [ENGINE-TRACKS.md:33](ENGINE-TRACKS.md)
-- `STUDIO_UNITY_ACCELERATOR` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs, qa/selftest-272c.mjs (+2 more) · [UNITY-TRACK.md:246](UNITY-TRACK.md)
-- `STUDIO_UNITY_ACCELERATOR_TIMEOUT_MS` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:250](UNITY-TRACK.md)
-- `STUDIO_UNITY_CACHE_COPY` · no simple default · harness/unity-cache.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:286](UNITY-TRACK.md)
-- `STUDIO_UNITY_CACHE_COPY_JOBS` · no simple default · harness/unity-cache.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:287](UNITY-TRACK.md)
-- `STUDIO_UNITY_CODE_ONLY` · no simple default · harness/unity.mjs, qa/selftest-2671k.mjs, qa/selftest-270u.mjs (+2 more) · [UNITY-TRACK.md:219](UNITY-TRACK.md)
-- `STUDIO_UNITY_CODE_OPT` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:281](UNITY-TRACK.md)
+- `STUDIO_UNITY_ACCELERATOR` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs, qa/selftest-272c.mjs (+2 more) · [UNITY-TRACK.md:245](UNITY-TRACK.md)
+- `STUDIO_UNITY_ACCELERATOR_TIMEOUT_MS` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:249](UNITY-TRACK.md)
+- `STUDIO_UNITY_CACHE_COPY` · no simple default · harness/unity-cache.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:285](UNITY-TRACK.md)
+- `STUDIO_UNITY_CACHE_COPY_JOBS` · no simple default · harness/unity-cache.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:286](UNITY-TRACK.md)
+- `STUDIO_UNITY_CODE_ONLY` · no simple default · harness/unity.mjs, qa/selftest-2671k.mjs, qa/selftest-270u.mjs (+2 more) · [UNITY-TRACK.md:218](UNITY-TRACK.md)
+- `STUDIO_UNITY_CODE_OPT` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:280](UNITY-TRACK.md)
 - `STUDIO_UNITY_EDITMODE_ARGS` · no simple default · harness/unity-gate.mjs, qa/selftest-282a.mjs, qa/selftest-283b.mjs (+1 more) · [NATIVE-ENGINE.md:188](NATIVE-ENGINE.md)
 - `STUDIO_UNITY_EDITMODE_PLAN` · no simple default · harness/unity-gate.mjs · [NATIVE-ENGINE.md:230](NATIVE-ENGINE.md)
-- `STUDIO_UNITY_EDITMODE_REUSE` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs, qa/selftest-272c.mjs (+1 more) · [UNITY-TRACK.md:254](UNITY-TRACK.md)
-- `STUDIO_UNITY_GATE_TIMEOUT_MIN` · default `120` · harness/unity-gate.mjs, qa/selftest-2732e.mjs · [UNITY-TRACK.md:147](UNITY-TRACK.md)
-- `STUDIO_UNITY_GRAPHICS_SPLIT` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs, qa/selftest-272c.mjs (+1 more) · [UNITY-TRACK.md:269](UNITY-TRACK.md)
-- `STUDIO_UNITY_LANDING_BUILD` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:274](UNITY-TRACK.md)
-- `STUDIO_UNITY_LIBRARY_BASE` · no simple default · harness/unity-cache.mjs, qa/selftest-2671k.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:225](UNITY-TRACK.md)
-- `STUDIO_UNITY_LIBRARY_CACHE` · no simple default · harness/unity-cache.mjs, qa/selftest-2671k.mjs, qa/selftest-270u.mjs (+2 more) · [UNITY-TRACK.md:223](UNITY-TRACK.md)
-- `STUDIO_UNITY_LIBRARY_CACHE_KEEP` · no simple default · harness/unity-cache.mjs, qa/selftest-2671k.mjs · [UNITY-TRACK.md:227](UNITY-TRACK.md)
+- `STUDIO_UNITY_EDITMODE_REUSE` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs, qa/selftest-272c.mjs (+1 more) · [UNITY-TRACK.md:253](UNITY-TRACK.md)
+- `STUDIO_UNITY_GATE_TIMEOUT_MIN` · default `120` · harness/unity-gate.mjs, qa/selftest-2732e.mjs · [UNITY-TRACK.md:146](UNITY-TRACK.md)
+- `STUDIO_UNITY_GRAPHICS_SPLIT` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs, qa/selftest-272c.mjs (+1 more) · [UNITY-TRACK.md:268](UNITY-TRACK.md)
+- `STUDIO_UNITY_LANDING_BUILD` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:273](UNITY-TRACK.md)
+- `STUDIO_UNITY_LIBRARY_BASE` · no simple default · harness/unity-cache.mjs, qa/selftest-2671k.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:224](UNITY-TRACK.md)
+- `STUDIO_UNITY_LIBRARY_CACHE` · no simple default · harness/unity-cache.mjs, qa/selftest-2671k.mjs, qa/selftest-270u.mjs (+2 more) · [UNITY-TRACK.md:222](UNITY-TRACK.md)
+- `STUDIO_UNITY_LIBRARY_CACHE_KEEP` · no simple default · harness/unity-cache.mjs, qa/selftest-2671k.mjs · [UNITY-TRACK.md:226](UNITY-TRACK.md)
 - `STUDIO_UNITY_MIN_FREE_GB` · no simple default · harness/engine-tracks.mjs, harness/engine-tune.mjs, harness/gate-fix.mjs (+24 more) · [ENGINE-TRACKS.md:33](ENGINE-TRACKS.md)
-- `STUDIO_UNITY_ONE_EDITOR` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs, qa/selftest-272c.mjs (+2 more) · [UNITY-TRACK.md:264](UNITY-TRACK.md)
-- `STUDIO_UNITY_PIN` · no simple default · harness/unity.mjs, qa/selftest-246.mjs, qa/selftest-2601m.mjs (+4 more) · [UNITY-TRACK.md:382](UNITY-TRACK.md)
+- `STUDIO_UNITY_ONE_EDITOR` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs, qa/selftest-272c.mjs (+2 more) · [UNITY-TRACK.md:263](UNITY-TRACK.md)
+- `STUDIO_UNITY_PIN` · no simple default · harness/unity.mjs, qa/selftest-246.mjs, qa/selftest-2601m.mjs (+4 more) · [UNITY-TRACK.md:381](UNITY-TRACK.md)
 - `STUDIO_UNITY_PLAYMODE_ARGS` · no simple default · harness/unity-train.mjs, qa/selftest-284h.mjs · [NATIVE-ENGINE.md:148](NATIVE-ENGINE.md)
-- `STUDIO_UNITY_TRAIN_RETRIES` · no simple default · harness/unity-train.mjs, qa/selftest-263j.mjs, qa/selftest-2732e.mjs (+6 more) · [UNITY-TRACK.md:170](UNITY-TRACK.md)
-- `STUDIO_UNITY_TRAIN_RETRY_MIN` · no simple default · harness/unity-train.mjs, qa/selftest-263j.mjs, qa/selftest-2732e.mjs (+6 more) · [UNITY-TRACK.md:170](UNITY-TRACK.md)
+- `STUDIO_UNITY_TRAIN_RETRIES` · no simple default · harness/unity-train.mjs, qa/selftest-263j.mjs, qa/selftest-2732e.mjs (+6 more) · [UNITY-TRACK.md:169](UNITY-TRACK.md)
+- `STUDIO_UNITY_TRAIN_RETRY_MIN` · no simple default · harness/unity-train.mjs, qa/selftest-263j.mjs, qa/selftest-2732e.mjs (+6 more) · [UNITY-TRACK.md:169](UNITY-TRACK.md)
 - `STUDIO_UNITY_TRAIN_STALE_MIN` · no simple default · harness/heavy-budget.mjs, harness/unity-train.mjs · undocumented
 
 ## UNREAL_* (2)
