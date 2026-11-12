@@ -5108,6 +5108,13 @@ if (inShard('selftest-283j')) {
   await selftest283J({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
+// 2.84 (w): the reviewer's route: which tool runs a model id, a launch refused before it starts, review ask.
+if (inShard('selftest-284w')) {
+  const dir = copyRepo();
+  const { selftest284W } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284w.mjs')).href);
+  await selftest284W({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
 // 2.84 (m): the engine target merge a session can run, phantom files a filter rule makes look changed, rules.focus.ignore.
 if (inShard('selftest-284m')) {
   const dir = copyRepo();

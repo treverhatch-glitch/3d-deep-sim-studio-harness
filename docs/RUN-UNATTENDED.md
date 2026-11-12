@@ -126,6 +126,11 @@ Scheduler (Windows); `--uninstall` removes it.
   `signal`, `at` and `ranSec`), and `supervisor.halted` lists the causes (`meta.causes`). On Windows a kill from outside
   (taskkill /F) reads as exit 1, since Windows has no signals. A halt stops new sessions only: merge trains for lanes
   already queued still run (the train daemon, docs/WORK-ORGANIZATION.md).
+  2.84 (w): a reviewer session that crashes at launch (ran under a minute, an exit
+  that is not 126, 127 or 9009) never counts toward this halt: that role waits 2, 4, 8 ... minutes (at most
+  `STUDIO_START_BACKOFF_MAX_MIN`), with a `supervisor.role_backoff` event and a "backed off" reason on its starts, and the
+  other roles go on. A reviewer session that runs past a minute clears it. A code-writing role's launch crashes still halt. (A crew's reviewer launched with a model its
+  tool refused halted the whole supervisor twice; such a launch is now refused before it starts, docs/AGENT-TOOLS.md.)
   While the supervisor is halted, or nothing can start agents, a queued rescue's pick-up clock
   (`STUDIO_RESCUE_WAIT_MIN`) is stopped and the Producer is told once; it counts again from when agents can start.
 - **The Line Producer (2.76.0, docs/LINE-PRODUCER.md).** Each pass, before the supervisor picks what to start,
