@@ -12,8 +12,7 @@
  *              stage's criteria hold from git trailers and the logs; `overseer -- record` is a person's, never the overseer's
  *   repro      `workaround -- repro <H-id>`: refused below stage 1 and for the studio itself; in a separate clone a branch,
  *              a selftest-style failing test and a PR body with the trailers
- *   scout      the weekly harness scout: off by default; on its day one research task with the scout template, once a
- *              week; the supervisor's pass runs it
+ *   (2.84 (y): the weekly harness scout this file also covered is gone, and its two checks with it.)
  * Each check fails on 2.71.1 (none of these commands or files exist there).
  */
 import fs from 'node:fs';
@@ -40,7 +39,7 @@ export async function selftest273F({ dir, run, report, tmpRoot, root }) {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
     STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_COMPACT_OUTPUT: '', STUDIO_VERIFY_DETACH: 'off', STUDIO_VERIFY_RUN: '', STUDIO_HEAVY_SLOTS: '0', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '',
     STUDIO_HOOKS_CHECK: 'off', STUDIO_UPGRADE_REFRESH: 'off', STUDIO_GAME: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', npm_lifecycle_event: '', NODE_OPTIONS: '', npm_config_node_options: '',
-    STUDIO_REPORT_WEBHOOK: '', STUDIO_UNITY: '', GODOT_BIN: '', STUDIO_HARNESS_SCOUT: '', STUDIO_SCOUT_DAY: '', STUDIO_TZ: '', STUDIO_IMPACT_MIN_N: '', STUDIO_UPGRADE_SNAPSHOT_DAYS: '', STUDIO_UPGRADE_WATCH_MIN: 'off',
+    STUDIO_REPORT_WEBHOOK: '', STUDIO_UNITY: '', GODOT_BIN: '', STUDIO_TZ: '', STUDIO_IMPACT_MIN_N: '', STUDIO_UPGRADE_SNAPSHOT_DAYS: '', STUDIO_UPGRADE_WATCH_MIN: 'off',
     STUDIO_DISK_MIN_FREE_GB: '0.5', STUDIO_PREFLIGHT_MIN_RAM_GB: '0', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-273f-${process.pid}.pem`), ...ident,
   };
   let n = 0;
@@ -49,7 +48,7 @@ export async function selftest273F({ dir, run, report, tmpRoot, root }) {
     const S = path.join(tmpRoot, `273f-${name}-${process.pid}-${++n}`);
     fs.cpSync(dir, S, { recursive: true, filter: (src) => !/[\\/](\.git|\.lanes|node_modules)$/.test(src) });
     if (fs.existsSync(nm)) { try { fs.symlinkSync(fs.realpathSync(nm), path.join(S, 'node_modules'), 'junction'); } catch {} }
-    for (const x of ['.studio/agents', '.studio/locks', '.studio/gates', '.studio/train', '.studio/decisions.jsonl', '.studio/gates-last.json', '.studio/upgrades', '.studio/workarounds.jsonl', '.studio/harness-tasks.json', '.studio/harness-scout.json', 'docs/releases']) fs.rmSync(path.join(S, x), { recursive: true, force: true });
+    for (const x of ['.studio/agents', '.studio/locks', '.studio/gates', '.studio/train', '.studio/decisions.jsonl', '.studio/gates-last.json', '.studio/upgrades', '.studio/workarounds.jsonl', '.studio/harness-tasks.json', 'docs/releases']) fs.rmSync(path.join(S, x), { recursive: true, force: true });
     const ev = path.join(S, '.studio', 'events-273f.jsonl');
     fs.mkdirSync(path.dirname(ev), { recursive: true }); fs.writeFileSync(ev, '');
     g(S, ['init', '-q', '-b', 'main']); g(S, ['config', 'core.autocrlf', 'false']);
@@ -200,7 +199,7 @@ export async function selftest273F({ dir, run, report, tmpRoot, root }) {
       JSON.stringify(j?.predictions || null)]);
   }
 
-  // ---- overseer, repro, scout ----
+  // ---- overseer, repro ----
   {
     const { S, ev, env } = studio('over');
     const ov = (doc) => { fs.writeFileSync(path.join(S, 'studio', 'overseer.json'), `${JSON.stringify(doc, null, 2)}\n`); };
@@ -257,42 +256,6 @@ export async function selftest273F({ dir, run, report, tmpRoot, root }) {
         && st3?.evidence?.acceptedRepros === 2 && st3.evidence.protectedAttempts === 1 && st3.holds === false && prot.includes('studio/overseer.json') && /'studio\/overseer\.json'/.test(approveText),
       `self ${selfRec.status}: ${out(selfRec).slice(-300)}\nrec ${rec.status}: ${out(rec).slice(-300)}\n${JSON.stringify(st3?.evidence)}`]);
 
-    // ---- the weekly harness scout ----
-    const probe = path.join(S, '.probe-273f-scout.mjs');
-    const monday = Date.parse('2026-11-09T10:00:00Z');
-    fs.writeFileSync(probe, [
-      `import { scoutPass } from ${JSON.stringify(pathToFileURL(path.join(S, 'harness', 'harness-scout.mjs')).href)};`,
-      `const now = ${monday};`,
-      'const offRun = await scoutPass({ now, env: { ...process.env, STUDIO_HARNESS_SCOUT: "" } });',
-      'const tuesday = await scoutPass({ now: now + 86400000, env: { ...process.env, STUDIO_HARNESS_SCOUT: "on" } });',
-      'const first = await scoutPass({ now, env: { ...process.env, STUDIO_HARNESS_SCOUT: "on" } });',
-      'const again = await scoutPass({ now: now + 3600000, env: { ...process.env, STUDIO_HARNESS_SCOUT: "on" } });',
-      'const nextWeek = await scoutPass({ now: now + 7 * 86400000, env: { ...process.env, STUDIO_HARNESS_SCOUT: "on" } });',
-      'const friday = await scoutPass({ now: now + 4 * 86400000, env: { ...process.env, STUDIO_HARNESS_SCOUT: "on", STUDIO_SCOUT_DAY: "fri" } });',
-      'console.log(JSON.stringify({ offRun, tuesday, first, again, nextWeek, friday }));', ''].join('\n'));
-    const sc = run(S, `node "${probe}"`, env);
-    const sj = lastJson(sc);
-    const tid = sj?.first?.task;
-    const nextMd = fs.readFileSync(path.join(S, 'studio', 'NEXT.md'), 'utf8');
-    const tpl = (() => { try { return fs.readFileSync(path.join(S, sj.first.file), 'utf8'); } catch { return ''; } })();
-    await guard('273f scout: off by default; with STUDIO_HARNESS_SCOUT=on, on STUDIO_SCOUT_DAY (monday) ONE research task (role rnd) with the scout template (sources, the claim, measured or vendor claim, the scorecard number it could move), once a week and never while the last is open (fails on 2.71.1: no scout)', () => [
-      sc.status === 0 && sj.offRun === null && sj.tuesday === null && /^T-\d+$/.test(tid || '') && sj.again === null && /still open/.test(sj.nextWeek?.line || '') && /still open/.test(sj.friday?.line || '')
-        && new RegExp(`\\*\\*${tid}\\*\\* \\[P2\\] \\(\`rnd\`\\) — Research: weekly harness scout \\(week of 2026-11-09\\)`).test(nextMd) && (nextMd.match(/weekly harness scout/g) || []).length === 1
-        && /## Sources/.test(tpl) && /- The claim:/.test(tpl) && /measured \| vendor claim/.test(tpl) && /Scorecard number it could move:/.test(tpl) && events(ev).some((e) => e.type === 'harness.scout_filed' && e.task === tid),
-      `${sc.status}: ${out(sc).slice(-1500)}\n${tpl.slice(0, 400)}`]);
-    const sup = path.join(S, '.probe-273f-sup.mjs');
-    fs.writeFileSync(sup, [
-      `import { supervise } from ${JSON.stringify(pathToFileURL(path.join(S, 'harness', 'supervisor.mjs')).href)};`,
-      "const deps = { sessions: () => [], startAgent: () => ({ ok: false }), launchableRoles: () => [], nextAgentName: (r) => r + '-z', pauseAgent: () => ({ ok: true }), lanesInline: true, reportInline: true };",
-      `const r = await supervise({ deps, dryRun: true }, { startedAt: Date.now() - 1000, names: [] }, ${monday + 14 * DAY});`,
-      'console.log(JSON.stringify({ why: r.why || [] }));', ''].join('\n'));
-    // Close the open scout task so the supervisor's pass would file the next one (a dry run: nothing is written).
-    fs.writeFileSync(path.join(S, 'studio', 'NEXT.md'), nextMd.split('\n').filter((l) => !l.includes('weekly harness scout')).join('\n'));
-    const sOn = lastJson(run(S, `node "${sup}"`, { ...env, STUDIO_HARNESS_SCOUT: 'on' }));
-    const sOff = lastJson(run(S, `node "${sup}"`, env));
-    await guard('273f scout: the supervisor\'s pass runs the scout (dry run: "would file", nothing written) and says nothing while it is off (fails on 2.71.1: no scout in the pass)', () => [
-      (sOn?.why || []).some((w) => /harness scout: would file "Research: weekly harness scout \(week of 2026-11-23\)/.test(w)) && !(sOff?.why || []).some((w) => /harness scout/.test(w)) && !/2026-11-23/.test(fs.readFileSync(path.join(S, 'studio', 'NEXT.md'), 'utf8')),
-      `${JSON.stringify(sOn)}\n${JSON.stringify(sOff)}`]);
   }
 
   for (const d of made) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 }); } catch {} }

@@ -183,7 +183,7 @@ console.log(JSON.stringify({ a, b }));`);
 
   // ---- B-74 b: precedence, and the train daemon's pass ----
   await guard('2.73.2 (B-74): in a process started by one that loaded .env, a value it inherited from .env follows the file when .env changes, a value its starter set itself still wins, and a line removed from .env gives the default back; the train daemon\'s pass reads the new STUDIO_TRAIN_AUTO (fails on 2.73.1: the inherited values never changed and the daemon kept training)', async () => {
-    const { S, env } = studio('prec', 'STUDIO_TRAIN_AUTO=on\nSTUDIO_TRAIN_MIN=3\nSTUDIO_TRAIN_WAIT_MIN=9\nSTUDIO_SCOUT_DAY=sun\n');
+    const { S, env } = studio('prec', 'STUDIO_TRAIN_AUTO=on\nSTUDIO_TRAIN_MIN=3\nSTUDIO_TRAIN_WAIT_MIN=9\nSTUDIO_TZ=UTC\n');
     const go = path.join(tmpRoot, `go-2732f-${process.pid}-${++n}`);
     const r = probe(S, env, 'prec', `import fs from 'node:fs'; import path from 'node:path'; import { spawn } from 'node:child_process';
 await import(${u(S, 'harness/event.mjs')});
@@ -195,7 +195,7 @@ const before = { min: process.env.STUDIO_TRAIN_MIN, wait: process.env.STUDIO_TRA
 while (!fs.existsSync(${JSON.stringify(go.replace(/\\/g, '/'))})) await new Promise((r) => setTimeout(r, 100));
 const { trainDaemonPass } = await import(${u(S, 'harness/train-daemon.mjs')});
 const d = await trainDaemonPass({ root: process.cwd(), dryRun: true, auto: { on: true }, trainOn: true, queue: [], lock: null, running: null });
-console.log(JSON.stringify({ before, after: { min: process.env.STUDIO_TRAIN_MIN ?? null, wait: process.env.STUDIO_TRAIN_WAIT_MIN ?? null, auto: process.env.STUDIO_TRAIN_AUTO ?? null, scout: process.env.STUDIO_SCOUT_DAY ?? null, role: process.env.STUDIO_ROLE ?? null }, why: d.why }));\`);
+console.log(JSON.stringify({ before, after: { min: process.env.STUDIO_TRAIN_MIN ?? null, wait: process.env.STUDIO_TRAIN_WAIT_MIN ?? null, auto: process.env.STUDIO_TRAIN_AUTO ?? null, scout: process.env.STUDIO_TZ ?? null, role: process.env.STUDIO_ROLE ?? null }, why: d.why }));\`);
 const p = spawn(process.execPath, [child], { windowsHide: true, cwd: root, env: { ...process.env, STUDIO_TRAIN_WAIT_MIN: '7' }, stdio: ['ignore', 'pipe', 'pipe'] });
 let o = ''; let e = ''; p.stdout.on('data', (b) => { o += b; }); p.stderr.on('data', (b) => { e += b; });
 await new Promise((r) => setTimeout(r, 1500));

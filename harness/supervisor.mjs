@@ -469,14 +469,6 @@ export async function supervise(opts, state, now = Date.now()) {
       if (w?.line) why.push(w.line);
     } catch { /* a watch, never a crash */ }
   }
-  // 2.73.0 (f): the weekly harness scout (harness/harness-scout.mjs): one research task on STUDIO_SCOUT_DAY, off by
-  // default (STUDIO_HARNESS_SCOUT=on, the owner's).
-  if (!opts.watcher) {
-    try {
-      const sc = await (await import('./harness-scout.mjs')).scoutPass({ now, dryRun: opts.dryRun, deps: opts.deps?.scoutDeps || {} });
-      if (sc?.line) why.push(sc.line);
-    } catch { /* paperwork, never a crash */ }
-  }
   // 2.70.0 (w): the janitor's stale-lane proposals (a dry run, never deletes) and the lane disk report, at most every
   // STUDIO_JANITOR_LANES_MIN (360) minutes, in a detached child (harness/lane-disk.mjs).
   if (!opts.watcher) {

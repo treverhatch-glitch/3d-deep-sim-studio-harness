@@ -4299,7 +4299,7 @@ if (inShard('selftest-273e')) {
 // 2.73.0 (f): taking an update safely and the overseer's stages: `upgrade --preflight` (read-only, PASS/WARN/FAIL with Fix
 // lines) and `--smoke` (a tiny verify and train in a scratch copy, the machine scan, a dry supervisor pass), the before
 // snapshot `--merge` writes and `autonomy -- impact` reads, `release -- predict` scored by impact, studio/overseer.json
-// and `npm run overseer`, `workaround -- repro` in a separate harness clone, the weekly harness scout (qa/selftest-273f.mjs).
+// and `npm run overseer`, `workaround -- repro` in a separate harness clone (qa/selftest-273f.mjs).
 if (inShard('selftest-273f')) {
   const dir = copyRepo();
   const { selftest273F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-273f.mjs')).href);

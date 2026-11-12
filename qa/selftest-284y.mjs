@@ -2,7 +2,7 @@
  * qa/selftest-284y.mjs — 2.84 (y): features nobody used are taken out, and what stays behaves as before.
  *
  * The overseer read twelve days of a live studio's event log: remote (cloud) workers and the remote verify, the weekly
- * harness scout, signed results and `npm run causes` never fired an event and their commands never ran. They are gone
+ * harness scout and signed results never fired an event and their commands never ran. They are gone
  * (git history keeps them). These checks hold that: the modules are gone and nothing live still names them, the Line
  * Producer's plan for a studio with no remote settings is the plan it made before the cut, and a merge train lands an
  * ordinary local lane with one local verify, as before.
@@ -20,12 +20,12 @@ export async function selftest284Y({ dir, run, report, tmpRoot }) {
   const parse = (r) => { try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return {}; } };
 
   // ---- 1. the modules are gone, and nothing live names them ----
-  const GONE = ['harness/remote-workers.mjs', 'harness/remote-verify.mjs', 'harness/harness-scout.mjs', 'harness/sign.mjs', 'harness/causes.mjs'];
-  await guard('2.84 (y) cut: the removed modules (remote workers, remote verify, the harness scout, signed results, causes) are not in the harness any more (fails before this cut: all five files were there)', () => {
+  const GONE = ['harness/remote-workers.mjs', 'harness/remote-verify.mjs', 'harness/harness-scout.mjs', 'harness/sign.mjs'];
+  await guard('2.84 (y) cut: the removed modules (remote workers, remote verify, the harness scout, signed results) are not in the harness any more (fails before this cut: all four files were there)', () => {
     const left = GONE.filter((f) => fs.existsSync(path.join(dir, f)));
     return [left.length === 0, `still there: ${left.join(', ')}`];
   });
-  await guard('2.84 (y) cut: no file under harness/, scripts/, qa/ (but the self-tests), studio/llms.txt or package.json names a removed module, its npm command (remote, sign, causes) or its settings (the remote workers, the remote verify and the harness scout switch) (fails before this cut: the Line Producer, the train, the supervisor and package.json wired them in)', () => {
+  await guard('2.84 (y) cut: no file under harness/, scripts/, qa/ (but the self-tests), studio/llms.txt or package.json names a removed module, its npm command (remote, sign) or its settings (the remote workers, the remote verify and the harness scout switch) (fails before this cut: the Line Producer, the train, the supervisor and package.json wired them in)', () => {
     const files = [];
     const walk = (rel) => {
       const abs = path.join(dir, rel);
@@ -39,7 +39,7 @@ export async function selftest284Y({ dir, run, report, tmpRoot }) {
     files.push('studio/llms.txt');
     // The setting names are built from parts so the settings scanner does not count this file as a user of them.
     const S_ = 'STUDIO_';
-    const RE = new RegExp(['remote-workers', 'remote-verify', 'harness-scout', '\\bsign\\.mjs', '\\bcauses\\.mjs', `${S_}REMOTE`, `${S_}VERIFY_REMOTE`, `${S_}HARNESS_SCOUT`, 'npm run (remote|sign|causes)\\b'].join('|'));
+    const RE = new RegExp(['remote-workers', 'remote-verify', 'harness-scout', '\\bsign\\.mjs', `${S_}REMOTE`, `${S_}VERIFY_REMOTE`, `${S_}HARNESS_SCOUT`, 'npm run (remote|sign)\\b'].join('|'));
     const hits = [];
     for (const f of files) {
       let text = '';
@@ -47,7 +47,7 @@ export async function selftest284Y({ dir, run, report, tmpRoot }) {
       text.split('\n').forEach((l, i) => { if (RE.test(l)) hits.push(`${f}:${i + 1}: ${l.trim().slice(0, 120)}`); });
     }
     const scripts = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).scripts || {};
-    const cmds = ['remote', 'sign', 'causes'].filter((k) => k in scripts);
+    const cmds = ['remote', 'sign'].filter((k) => k in scripts);
     const pkgHits = Object.entries(scripts).filter(([, v]) => RE.test(v)).map(([k]) => k);
     return [!hits.length && !cmds.length && !pkgHits.length, `${hits.slice(0, 20).join('\n')}\nscripts: ${cmds.join(', ')} ${pkgHits.join(', ')}`];
   });
