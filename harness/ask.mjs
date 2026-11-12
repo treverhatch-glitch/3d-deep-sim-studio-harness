@@ -172,7 +172,8 @@ export function answer(id, ans, by) {
   if (!r.ok) return r;
   if (r.a.status === 'answered') {
     const rec = r.a.recordedBy;
-    emitEvent({ type: 'ask.answered', agent: rec || r.a.answeredBy || by, to: r.a.by, msg: `${id} answered by ${r.a.answeredBy || by}${rec ? ` (recorded by ${rec}, ${r.a.via})` : ''}: ${r.a.answer} (${r.a.question})`.slice(0, 600), meta: { ask: id, by: r.a.answeredBy || by, ...(rec ? { recordedBy: rec, via: r.a.via, kind: r.a.kind } : {}) } });
+    // 2.84 (n): meta.role: answered from a launched session's shell (never news to the planning back-off, wake-gate.mjs).
+    emitEvent({ type: 'ask.answered', agent: rec || r.a.answeredBy || by, to: r.a.by, msg: `${id} answered by ${r.a.answeredBy || by}${rec ? ` (recorded by ${rec}, ${r.a.via})` : ''}: ${r.a.answer} (${r.a.question})`.slice(0, 600), meta: { ask: id, by: r.a.answeredBy || by, ...(rec ? { recordedBy: rec, via: r.a.via, kind: r.a.kind } : {}), ...(String(process.env.STUDIO_ROLE || '').trim() ? { role: String(process.env.STUDIO_ROLE).trim().toLowerCase() } : {}) } });
     // 2.79 (c): a stand-in's answer goes in the decisions log, like its releases and approvals.
     if (rec) { try { logDecision({ action: 'ask-answer', subject: id, by: rec, as: r.a.via === 'owner proxy' ? 'outside agent' : 'beta', why: `answered "${String(r.a.answer).slice(0, 120)}" for ${r.a.answeredBy}`, evidence: `${r.a.via} ${rec}: ${String(r.a.question).slice(0, 160)}` }); } catch {} }
   }

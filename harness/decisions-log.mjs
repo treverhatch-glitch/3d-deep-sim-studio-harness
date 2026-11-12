@@ -29,6 +29,7 @@ import crypto from 'node:crypto';
 import { emitEvent, readRecentEvents } from './event.mjs';
 import { appendLine } from './fsafe.mjs';
 import { mainRoot } from './worktree.mjs';
+import { ownerStandInRole } from './permission.mjs';
 
 export const DECISIONS_REL = '.studio/decisions.jsonl';
 const H = 3600000;
@@ -62,6 +63,12 @@ export function logDecision({ action, subject = null, by, as = 'person', why = '
   if (suppress > 0) return null;
   try {
     const rec = { kind: 'decision', id: `D-${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, at: at || new Date().toISOString(), action: String(action || 'decision'), subject: clip(subject, 200), by: clip(by, 60) || 'someone', as: clip(as, 260) || 'person', why: clip(why, 400) || '', evidence: clip(evidence, 300) || '', undo: undo && typeof undo === 'object' ? undo : null };
+    // 2.84 (n): who decided, for the planning back-off (wake-gate.mjs isStrongNews): a launched session's role (its own
+    // decisions are never news to it), or, for an "agent" decision, the owner's stand-in it came from (the overseer's
+    // board moves are news exactly as a person's are).
+    const role = String(process.env.STUDIO_ROLE || '').trim().toLowerCase();
+    if (role) rec.role = role;
+    else if (rec.as === 'agent') { let s = null; try { s = ownerStandInRole({ by: rec.by }); } catch { s = null; } if (s) rec.standIn = s; }
     const f = decisionsFile(root);
     fs.mkdirSync(path.dirname(f), { recursive: true });
     appendLine(f, JSON.stringify(rec));

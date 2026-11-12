@@ -100,8 +100,10 @@ export function sessionOutcomeOf(agent, since, events = []) {
  * predicate where the type alone is not enough. A red train, a hand-back, a park or an agent's own decision is not news
  * of this kind: those were in nearly every digest and bought nothing.
  *   ask.answered          by a person, or recorded by the owner's stand-in (meta.via: owner proxy, beta mode)
- *   decision              made as a person or by the owner's stand-in (meta.as not "agent" or "autonomous")
- *   inbound.message       a person's message (a new owner note)
+ *   decision              made as a person or by the owner's stand-in (meta.as not "agent" or "autonomous", or
+ *                         meta.standIn: the overseer's own board decision, 2.84 n)
+ *   inbound.message       a person's message (a new owner note), or the overseer's order
+ *   2.84 (n): none of these from a launched session's own shell (meta.role).
  *   playtest.verdict      the owner played a build
  *   task.dev_yes          the dev said yes to an agent-proposed mechanic (an order)
  *   bible.signed, bible.phase_override, milestone.closed   a phase change
@@ -113,8 +115,13 @@ export const looksLikePerson = (name) => { const n = String(name || '').trim(); 
 const STRONG = new Set(STRONG_NEWS_TYPES);
 export function isStrongNews(e, { isPerson = looksLikePerson } = {}) {
   if (!e || !STRONG.has(e.type)) return false;
+  // 2.84 (n): an answer, a decision or a post made from a launched session's shell (meta.role: a Producer or Director
+  // standing in under beta mode, say) is that session's own news, not an owner's: it never ends a back-off.
+  if (['ask.answered', 'decision', 'inbound.message'].includes(e.type) && String(e.meta?.role || '').trim()) return false;
   if (e.type === 'ask.answered') return Boolean(e.meta?.via || e.meta?.recordedBy) || isPerson(e.meta?.by || e.agent);
-  if (e.type === 'decision') { const as = String(e.meta?.as || '').toLowerCase(); return as !== '' ? !/^(agent|autonomous)/.test(as) : isPerson(e.agent); }
+  // 2.84 (n): a board decision the owner's stand-in took as itself (meta.standIn: the owner's proxy, a beta-mode agent or
+  // an outside signer; decisions-log.mjs) counts as the owner's, like a person's.
+  if (e.type === 'decision') { const as = String(e.meta?.as || '').toLowerCase(); if (e.meta?.standIn) return true; return as !== '' ? !/^(agent|autonomous)/.test(as) : isPerson(e.agent); }
   return true;
 }
 

@@ -5173,6 +5173,14 @@ if (inShard('selftest-284h')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.84 (n): the overseer and an outside signer keep their authority to decide unattended.
+if (inShard('selftest-284n')) {
+  const dir = copyRepo();
+  const { selftest284N } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284n.mjs')).href);
+  await selftest284N({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

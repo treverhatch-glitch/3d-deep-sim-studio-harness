@@ -535,6 +535,8 @@ export function engineLaunch({ task, agent = null, role = null, root = mainRoot(
  *   npm run engine -- merge <ID> --abort     git merge --abort
  * A caller that works as an agent (STUDIO_AGENT, or STUDIO_LOCK_OWNER as a launched session has) must hold the task's
  * claim; a launched session pinned to another task is refused. A shell with neither is a person's and may run it.
+ * 2.84 (n): so may the owner's stand-ins outside the harness (targetMergeStandIn), for any task; the event names them
+ * and meta.via says how.
  * Events: engine.target_merge with meta.step started | conflict (meta.files) | done | aborted.
  */
 export const targetMergeCommand = (task) => `npm run engine -- merge ${task}`;
@@ -564,16 +566,40 @@ export function engineTaskDir(task, { root = mainRoot(), engine = null } = {}) {
   return { rec, repo, dir, target, label: t.label, branch: rec.branch || cur };
 }
 
+/**
+ * 2.84 (n): who may merge for any task without its claim: the owner's stand-in in a shell the harness did not launch (no
+ * STUDIO_ROLE, no STUDIO_TASK_PIN): the owner's proxy, a beta-mode named agent or an outside signer (ask.mjs
+ * ownerStandIn), or an outside coding agent's shell (an agent marker) that the harness's board-decision verdict lets
+ * decide (permission.mjs mayDecide 'board'). The overseer's shell names itself in STUDIO_LOCK_OWNER, so the claim rule
+ * refused it the merge it did by hand before this command existed. { name, via } or null. A launched session, worker
+ * or planner, keeps the claim rule.
+ */
+export async function targetMergeStandIn({ env = process.env, root = mainRoot() } = {}) {
+  const me = String(env.STUDIO_AGENT || env.STUDIO_LOCK_OWNER || '').trim();
+  if (!me || String(env.STUDIO_ROLE || '').trim() || String(env.STUDIO_TASK_PIN || '').trim()) return null;
+  try {
+    const pm = await import('./permission.mjs');
+    if (pm.WORKER_NAME.test(me)) return null;
+    const actEnv = { ...env, STUDIO_LOCK_OWNER: me };
+    const s = (await import('./ask.mjs')).ownerStandIn(actEnv, { kind: 'board' });
+    if (s?.agent && s.agent.toLowerCase() === me.toLowerCase()) return { name: me, via: s.via };
+    const marker = pm.AGENT_SHELL.find((k) => String(env[k] || '').trim());
+    if (marker && pm.mayDecide('board', pm.actorOf({ env: actEnv, root }), { root }).ok) return { name: me, via: 'outside agent' };
+  } catch { /* not a stand-in: the claim rule */ }
+  return null;
+}
+
 /** Why this caller may not merge for `task` ('' when it may). A person's shell (no agent identity) may. */
-export async function targetMergeRefusal(task, { env = process.env } = {}) {
+export async function targetMergeRefusal(task, { env = process.env, root = mainRoot() } = {}) {
   const me = String(env.STUDIO_AGENT || env.STUDIO_LOCK_OWNER || '').trim();
   const pin = String(env.STUDIO_TASK_PIN || '').trim();
   if (pin && pin !== String(task)) return `this session was launched for ${pin}, not ${task}: a session merges only into its own task's worktree`;
   if (!me) return '';
+  if (await targetMergeStandIn({ env, root })) return '';
   let holder = null;
   try { const { listLocks } = await import('./lock.mjs'); holder = listLocks().find((l) => l.key === `task:${task}`)?.owner || null; } catch { holder = null; }
   if (holder === me) return '';
-  return holder ? `${task} is claimed by ${holder}, not ${me}: only the agent holding a task's claim (or a person) merges into its worktree` : `${me} does not hold ${task}'s claim (npm run task -- start ${task} --agent ${me} first), and only the agent holding it (or a person) merges into its worktree`;
+  return holder ? `${task} is claimed by ${holder}, not ${me}: only the agent holding a task's claim (or a person, or the overseer) merges into its worktree` : `${me} does not hold ${task}'s claim (npm run task -- start ${task} --agent ${me} first), and only the agent holding it (or a person, or the overseer) merges into its worktree`;
 }
 
 /**
@@ -584,8 +610,9 @@ export async function engineTargetMerge(task, { mode = 'merge', engine = null, r
   const fail = (line, extra = {}) => ({ ok: false, code: 1, lines: [line], ...extra });
   try {
     if (!task || !/^[A-Za-z]+-\d+$/.test(String(task))) return fail(`Usage: ${targetMergeCommand('<TASK_ID>')} [--engine <x>] [--continue | --abort]`);
-    const who = await targetMergeRefusal(task, { env });
+    const who = await targetMergeRefusal(task, { env, root });
     if (who) return fail(`Not merged: ${who}.`);
+    const standIn = await targetMergeStandIn({ env, root });
     const w = engineTaskDir(task, { root, engine });
     if (w.error) return fail(`Not merged: ${w.error}.`);
     const { dir, target, rec, branch } = w;
@@ -593,7 +620,7 @@ export async function engineTargetMerge(task, { mode = 'merge', engine = null, r
     const g = (...a) => spawnSync('git', a, { cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
     const ident = g('config', 'user.name').stdout.trim() ? [] : ['-c', 'user.name=studio-launcher', '-c', 'user.email=studio-launcher@example.invalid'];
     const agent = String(env.STUDIO_AGENT || env.STUDIO_LOCK_OWNER || '').trim() || 'person';
-    const ev = (step, msg, meta = {}) => { try { emitEvent({ type: 'engine.target_merge', agent, task, ...(step === 'conflict' ? { to: 'producer', status: 'warn' } : {}), msg: `${task}: ${msg}`.slice(0, 500), meta: { step, dir: shown, target, ...meta } }); } catch { /* the merge stands without its event */ } };
+    const ev = (step, msg, meta = {}) => { try { emitEvent({ type: 'engine.target_merge', agent, task, ...(step === 'conflict' ? { to: 'producer', status: 'warn' } : {}), msg: `${task}: ${msg}`.slice(0, 500), meta: { step, dir: shown, target, ...(standIn ? { via: standIn.via } : {}), ...meta } }); } catch { /* the merge stands without its event */ } };
     const merging = () => g('rev-parse', '-q', '--verify', 'MERGE_HEAD').status === 0;
     const unmerged = () => g('-c', 'core.quotepath=off', 'diff', '--name-only', '--diff-filter=U').stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
     const state = mergeStateFile(root, task);
