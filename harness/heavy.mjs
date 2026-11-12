@@ -1,97 +1,63 @@
 #!/usr/bin/env node
 /**
- * harness/heavy.mjs — 2.59.0 (#11, #2): the machine:heavy lock, and the load a gate's timeout is scaled for.
+ * harness/heavy.mjs — the machine:heavy lock, and the load a gate's timeout is scaled for.
  *
- * Full verifies, a Unity editor run (6-7 GB) and 3D browser playtests (about 5 GB each) overlapping on one PC gave
- * e2e timeouts ("Test timed out in 120000ms", "timed out after 600 s") and a dip to 2.6 GB free. Gate slots
- * (merge-lane.mjs withGateSlot, STUDIO_GATE_SLOTS) only spread single game checks; nothing kept whole heavy runs
- * apart. Heavy work now takes one of STUDIO_HEAVY_SLOTS (1) slots in <main checkout>/.studio/locks/
- * machine-heavy-<n>.lock (every lane copy shares the main checkout's, like the gate slots) while it runs:
+ * Full verifies, Unity editor runs (6-7 GB) and 3D browser playtests (about 5 GB each) overlapping on one PC cause e2e
+ * timeouts and memory exhaustion. Heavy work takes one of STUDIO_HEAVY_SLOTS (1) slots in <main checkout>/.studio/locks/
+ * machine-heavy-<n>.lock (every lane copy shares the main checkout's, like the gate slots; STUDIO_GATE_SLOTS only spreads
+ * single game checks) while it runs:
  *   - a full verify (scripts/run-gates.mjs: the full set, or any run that includes a heavy gate: game, browser-play);
  *   - the Unity landing gate (harness/unity-gate.mjs);
  *   - anything wrapped in `node harness/heavy.mjs run --label <what> -- <command>` (a game's own browser playtest).
- * It is one slot class beside the gate slots: a full verify holds machine:heavy for its whole run and its game
- * checks still take gate slots, so a landing's game checks (task done) are not held up by it.
- *
- * A holder records its pid and start identity (harness/proc-identity.mjs): a dead holder, or a pid now used by
- * another program (Linux /proc start), is stale and taken over, as is one older than STUDIO_HEAVY_STALE_MIN (240).
- * A waiter waits, naming the holder (again every 5 min), up to STUDIO_HEAVY_WAIT_MIN (60), then fails clearly
- * (code HEAVY_BUSY): heavy work never runs on top of other heavy work just because it waited. A landing
- * (STUDIO_GATE_PRIORITY=landing) leaves a machine-heavy-landing-<pid>.wait marker and goes ahead of other waiters;
- * a running holder is never stopped. The children of a holder (the gates a verify runs) see STUDIO_HEAVY_HELD and
- * don't wait for their own parent. STUDIO_HEAVY_SLOTS=0 turns it off.
+ * A full verify holds machine:heavy for its whole run while its game checks still take gate slots, so a landing's game
+ * checks (task done) are not held up by it. STUDIO_HEAVY_SLOTS=0 turns the lock off.
  *
  *   node harness/heavy.mjs status                       who holds machine:heavy now (JSON with --json)
  *   node harness/heavy.mjs run --label <what> -- <cmd>  run a command under the lock; exits with its code
+ *                                                       (also --kind/--ram-gb/--vram-gb/--gpu-only for its claim, --min-free-gb, --timeout-min)
  *   node harness/heavy.mjs stop [--label <x> | --all] --by <name>
  *                                                       kill a holder's whole process tree and free its slot
  *   node harness/heavy.mjs wait [--min-free-gb N] [--timeout-min M] [--kind K] [--hold <label>]
- *   node harness/heavy.mjs release --label <label>      2.73.2 (e, B-73): for a studio's own scripts before Unity
- *                                                       (heavyWaitCli); `run` takes --min-free-gb / --timeout-min too
+ *   node harness/heavy.mjs release --label <label>      for a studio's own scripts before Unity (heavyWaitCli)
  *
- * 2.73.2 (e, B-73): a Unity job (every Unity kind) also waits for live free RAM of at least STUDIO_UNITY_MIN_FREE_GB
- * (12, never above 60% of the RAM; heavy-budget.mjs unityMinFreeGb, floorFree here); --min-free-gb asks for a floor on
- * any kind. A wait that runs out throws HEAVY_BUSY with floor: true ("[heavy] NOT RUN <label>: ..."), exit 3. Not
- * checked when machine:heavy is off (STUDIO_HEAVY_SLOTS=0) or inside a parent's hold (the parent waited for it).
+ * Holders and waiting: a holder records its pid and start identity (harness/proc-identity.mjs); a dead holder, a pid now
+ * used by another program (Linux /proc start), or one older than STUDIO_HEAVY_STALE_MIN (240) is stale and taken over (a
+ * live one past it is never killed by a take). A waiter names the holder (again every 5 min) and waits up to
+ * STUDIO_HEAVY_WAIT_MIN (60), then fails with code HEAVY_BUSY: heavy work never runs on top of other heavy work just because
+ * it waited. A landing (STUDIO_GATE_PRIORITY=landing) leaves a machine-heavy-landing-<pid>.wait marker and goes ahead of
+ * other waiters. A running holder is never stopped by a waiter. The children of a holder (the gates a verify runs) see
+ * STUDIO_HEAVY_HELD and don't wait for their own parent.
  *
- * 2.60.0 (#5): killing a bash landing loop on Windows left `npm run verify` and its vitest workers running (Git Bash
- * can't kill a process group there; the crew used taskkill /T /F by hand). So a holder also records its process tree
- * ("tree": its root pid and start, the POSIX process groups it runs its work in, and how it is killed: taskkill /T /F
- * on Windows, the process group elsewhere). `stop` lists the processes once (harness/proc-identity.mjs
- * listProcesses), kills the holder's tree (the root, its descendants, every process left in its groups), checks
- * they are gone, frees the slot and records a heavy.stop event; it is refused in a worker session (harness/
- * permission.mjs: a launched non-Producer/Director role, or a worker agent's name). A holder whose root is gone
- * frees its slot on the next take as before, and processes its tree left running (orphans: a killed parent's
- * children) are found and killed first (POSIX: still in its group; Windows: they still name the dead parent's pid
- * and started after it), so the next heavy job doesn't run on top of them (STUDIO_HEAVY_REAP=off only names them).
- * `heavy.mjs run` runs its command in a process group of its own (POSIX) and records it; a full verify
- * (scripts/run-gates.mjs) re-runs itself as the leader of a new group (heavyOwnGroup), so a stop gets its gates.
- * A live holder past STUDIO_HEAVY_STALE_MIN loses its slot as before but is never killed by a take.
+ * Budgeted pool (harness/heavy-budget.mjs): each job declares a claim ({ ramGb, cpuThreads, gpu, label }; acquireHeavy's
+ * kind: verify, unity, browser-playtest, gpu-playtest, blender-preview, asset-roundtrip, heavy) and starts when it fits the
+ * free RAM, GPU and CPU of the last machine scan and a slot is free (STUDIO_HEAVY_SLOTS, computed from the scan; 1 with
+ * none). Waiters queue (a landing first, then first come) and say what they wait for. Mostly-GPU kinds take the GPU area
+ * beside CPU work when the scan shows a GPU. A command killed for memory runs once more (STUDIO_HEAVY_OOM_RETRY).
  *
- * 2.60.1 (B-17, B-35): on Windows os.loadavg() is always zeros, so a game check timed out at its base 600 s with the
- * CPU 63% busy and a Unity editor open (the suite takes about 555 s quiet), and no scaling line was printed.
- *   - Where there is no load average (Windows, or all zeros), loadFactor samples os.cpus() twice ~500 ms apart; a
- *     busy fraction over STUDIO_CPU_BUSY_THRESHOLD (0.6) adds 0.5 at the threshold up to 2 at 100%, as the load
- *     term does (STUDIO_CPU_PROBE=off skips the probe).
- *   - A heavy program running outside the lock (STUDIO_HEAVY_PROGRAMS, default Unity.exe,Unity: a Unity editor
- *     someone opened) that is in no holder's tree is an implicit holder: it counts like another heavy job in
- *     loadFactor and `status` lists it. It doesn't make heavy jobs wait (an editor can stay open all day).
- *   - scaledTimeout(base, root, { label }) never gives less than STUDIO_GAME_GATE_TIMEOUT_FLOOR (1.5) times the
- *     check's last passing run at factor 1 (recordGateTime, .studio/gates/game-gate-times.json in the main checkout),
- *     capped at STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR (3) times the base like the load factor: one bound, and a suite
- *     whose quiet time nears that needs its base raised, which is the owner's setting, not the harness's.
- *   - acquireHeavy checks free memory against STUDIO_HEAVY_RAM_FLOOR_GB, else STUDIO_RAM_FLOOR_GB (supervisor.mjs
- *     ramCheck, 3; 0 turns it off): under it the job
- *     waits, saying so, up to STUDIO_HEAVY_RAM_WAIT_MIN (10, at most STUDIO_HEAVY_WAIT_MIN), then fails HEAVY_BUSY.
+ * Free-RAM floors (STUDIO_UNITY_* settings for Unity kinds): a Unity job (every Unity kind) also waits for live free RAM of at least STUDIO_UNITY_MIN_FREE_GB (12,
+ * never above 60% of the RAM; heavy-budget.mjs unityMinFreeGb, floorFree here); --min-free-gb asks for a floor on any
+ * kind. A wait that runs out throws HEAVY_BUSY with floor: true ("[heavy] NOT RUN <label>: ..."), exit 3. Not checked
+ * when machine:heavy is off or inside a parent's hold. With no scan, acquireHeavy checks free memory against
+ * STUDIO_HEAVY_RAM_FLOOR_GB, else STUDIO_RAM_FLOOR_GB (supervisor.mjs ramCheck, 3; 0 turns it off): under it the job waits
+ * up to STUDIO_HEAVY_RAM_WAIT_MIN (10, at most STUDIO_HEAVY_WAIT_MIN), then fails HEAVY_BUSY.
  *
- * 2.68.0 (n): a budgeted pool (harness/heavy-budget.mjs). Each job declares a claim ({ ramGb, cpuThreads, gpu, label };
- * acquireHeavy's kind: verify, unity, browser-playtest, gpu-playtest, blender-preview, asset-roundtrip, heavy) and starts
- * when it fits the free RAM, GPU and CPU of the last machine scan and a slot is free (STUDIO_HEAVY_SLOTS, computed from
- * the scan; 1 with none, as before). Waiters queue (a landing first, then first come) and say what they wait for. The
- * record keeps its claim; identity, trees, stop and reaping are unchanged. `heavy run --kind/--ram-gb/--vram-gb/
- * --gpu-only` sets a wrapped command's claim, and a command killed for memory runs once more (STUDIO_HEAVY_OOM_RETRY).
- * 2.70.0 (t): mostly-GPU kinds (browser playtest with GPU flags, Blender, Unity bake/graphics, the landing clip) take the
- * GPU area beside CPU work when the scan shows a GPU, and say which area they took and why (heavy-budget.mjs).
+ * Process trees: a holder also records its process tree (its root pid and start, the POSIX process groups it runs its work
+ * in, and how it is killed: taskkill /T /F on Windows, the process group elsewhere). `stop` kills the holder's tree, frees the
+ * slot and records a heavy.stop event; it is refused in a worker session (harness/permission.mjs). Orphans a gone holder's
+ * tree left running are killed at the next take (STUDIO_HEAVY_REAP=off only names them). `heavy.mjs run` runs its command in
+ * a process group of its own (POSIX); a full verify re-runs itself as a group leader (heavyOwnGroup), so a stop gets its gates.
  *
- * 2.77.3 (M6): with few slots, builders' verifies took every freed slot and the train daemon kept saying "no room on the
- * machine for a verify". A merge train now gets the next free slot: while one waits for room (the daemon's pass found
- * none; or a train's check just gave its slot back and its next check is about to ask), it leaves
- * machine-heavy-train-wait.json, and a waiter that isn't a landing doesn't take a newly freed slot (in its class) while
- * that marker is fresh: up to 3 x STUDIO_SUPERVISOR_SEC (at least 5 min) since the daemon last saw no room, 15 s after a
- * train's check, and never more than STUDIO_TRAIN_SLOT_PRIORITY_MIN (15; 0 or off: no priority) since it was set (then
- * as long without it, so builders get their turn when the train can't start for another reason). A landing that takes
- * a slot clears it. Running holders are never stopped.
- * 2.78.0 (C2c): "the alone re-run isn't alone if another verify is on the same port". While the flake triager's quiet
- * re-run (PU-56, harness/flakes.mjs) waits for a quiet machine and runs, its train leaves
- * machine-heavy-quiet-hold-<pid>.json (markQuietHold), and a waiter that isn't a landing doesn't start (any class), as
- * for M6's marker but not cleared by a landing taking a slot: it ends when the re-run ends (clearQuietHold), at its
- * bound (until: STUDIO_FLAKE_HOLD_MIN), or when its process is gone (quietHolding removes it). Running holders are never
- * stopped (the quiet wait waits for them).
+ * Load scaling (loadFactor, scaledTimeout): STUDIO_CPU_BUSY_THRESHOLD (0.6), STUDIO_CPU_PROBE=off, STUDIO_HEAVY_PROGRAMS
+ * (default Unity.exe,Unity: an implicit holder outside the lock), STUDIO_GAME_GATE_TIMEOUT_FLOOR (1.5) and
+ * STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR (3); last quiet run times are in .studio/gates/game-gate-times.json (main checkout).
  *
- * Test hooks: STUDIO_TEST_LOADAVG=<1-min load> stands in for os.loadavg()[0] in loadFactor (unset: the real one; set,
- * the CPU probe is not used); STUDIO_TEST_CPU_BUSY=<0..1> stands in for the CPU probe (and is used even where a load
- * average exists); STUDIO_PROC_LIST_STUB (proc-identity.mjs) for the process list; STUDIO_TEST_FREEMEM_MB for free
- * memory (supervisor.mjs ramCheck).
+ * Priority holds: a merge train waiting for a slot goes first (machine-heavy-train-wait.json, markTrainWait; up to
+ * STUDIO_TRAIN_SLOT_PRIORITY_MIN, 15, 0 or off: none; 3 x STUDIO_SUPERVISOR_SEC freshness). The flake triager's quiet re-run
+ * (harness/flakes.mjs) leaves machine-heavy-quiet-hold-<pid>.json (markQuietHold, bound STUDIO_FLAKE_HOLD_MIN): a waiter that
+ * isn't a landing doesn't start until it ends. A landing is never held back; running holders are never stopped.
+ * Test hooks: STUDIO_TEST_LOADAVG=<1-min load> stands in for os.loadavg()[0] in loadFactor (set: the CPU probe is not
+ * used); STUDIO_TEST_CPU_BUSY=<0..1> stands in for the CPU probe; STUDIO_PROC_LIST_STUB (proc-identity.mjs) for the
+ * process list; STUDIO_TEST_FREEMEM_MB for free memory (supervisor.mjs ramCheck).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -120,7 +86,7 @@ export async function heavyRoot() {
 }
 export const heavyDir = (root) => path.join(root, '.studio', 'locks');
 
-// ---- 2.77.3 (M6): a merge train waiting for a slot goes first ----
+// ---- a merge train waiting for a slot goes first ----
 export const TRAIN_WAIT_FILE = `${PREFIX}-train-wait.json`;
 /** STUDIO_TRAIN_SLOT_PRIORITY_MIN in ms (default 15 min; 0/off: trains get no slot priority). */
 export function trainSlotPriorityMs(env = process.env) {
@@ -164,16 +130,15 @@ export function trainWaiting(root, { env = process.env, now = Date.now() } = {})
   if (!(limit > 0) || now - Number(w.seen || 0) > Number(w.ttlMs || HANDOFF_MS) || now - Number(w.at || 0) > limit) return null;
   return w;
 }
-// ---- 2.78.0 (C2c): a flake triager's quiet re-run holds new heavy work back ----
-// 2.78.1 (f): a tag gives one process more than one hold (the Line Producer's chain-breaker push beside a flake re-run).
+// ---- a flake triager's quiet re-run holds new heavy work back ----
+// A tag gives one process more than one hold (the Line Producer's chain-breaker push beside a flake re-run).
 const QUIET_HOLD_RE = /^machine-heavy-quiet-hold-(\d+)(?:-[a-z0-9][a-z0-9.-]{0,40})?\.json$/;
 const holdTag = (tag) => (tag ? `-${String(tag).toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 40)}` : '');
 export const quietHoldFile = (root, pid = process.pid, tag = '') => path.join(heavyDir(root), `${PREFIX}-quiet-hold-${pid}${holdTag(tag)}.json`);
 /**
  * Leave the hold marker (one per process and tag): from the start of the flake triager's quiet wait to the end of its
- * re-run, a waiter that isn't a game landing doesn't start (it waits in the queue). ms: the bound (STUDIO_FLAKE_HOLD_MIN;
- * 0: no hold). tag (2.78.1): a second hold of the same process (the chain-breaker push). Returns the record, or null (no
- * hold). Never throws.
+ * re-run, a waiter that isn't a game landing doesn't start. ms: the bound (STUDIO_FLAKE_HOLD_MIN; 0: no hold). tag: a
+ * second hold of the same process (the chain-breaker push). Returns the record, or null (no hold). Never throws.
  */
 export function markQuietHold(root, { ms = 0, why = '', owner = null, train = null, file = '', tag = '', task = null, now = Date.now() } = {}) {
   if (!(Number(ms) > 0)) return null;
@@ -202,24 +167,22 @@ export function quietHolding(root, { now = Date.now(), skipTags = [] } = {}) {
       const f = path.join(dir, nm);
       const h = readJson(f);
       if (!h || !(now < Number(h.until || 0)) || holderGone(h)) { try { fs.rmSync(f, { force: true }); } catch {} continue; }
-      if (h.tag && skipTags.includes(h.tag)) continue; // 2.79.1: the engine land ignores the hold made for it
+      if (h.tag && skipTags.includes(h.tag)) continue; // the engine land ignores the hold made for it
       if (!live || Number(h.at || 0) > Number(live.at || 0)) live = h;
     }
   } catch {}
   return live;
 }
-/** 2.68.0 (n): STUDIO_HEAVY_SLOTS, else computed from the machine scan (heavy-budget.mjs slotsFor); 1 with no scan. */
+/** STUDIO_HEAVY_SLOTS, else computed from the machine scan (heavy-budget.mjs slotsFor); 1 with no scan. */
 export const heavySlots = (env = process.env, profile = null) => slotsFor(profile, env);
 
-// ---- 2.78.1 (f, B-117): the machine's slot counts are read where the machine's other settings live ----
+// ---- the machine's slot counts are read where the machine's other settings live ----
 const isNum = (v) => v !== undefined && v !== null && String(v).trim() !== '' && Number.isFinite(Number(v));
 /**
- * A machine-wide count (STUDIO_HEAVY_SLOTS, STUDIO_ENGINE_SLOTS) as it stands now: { value, from }. Each waiter used to
- * admit by its own copy of the environment, so a builder session started before the owner lowered STUDIO_HEAVY_SLOTS in
- * .env (or started with none: computed from the scan, 6 on a 28-thread 32 GB PC) let 4-5 verifies run with slots=2.
- * Now the main checkout's .env (<root>/.env, read on every look) counts too: with both set, the lower wins (a cap
- * shared by every process on the machine: lowering it reaches the running ones, and 0 still turns the lock off), else
- * whichever is set; value null: neither. STUDIO_HEAVY_SLOTS_LIVE=off: the process's own value only (2.78.0).
+ * A machine-wide count (STUDIO_HEAVY_SLOTS, STUDIO_ENGINE_SLOTS) as it stands now: { value, from }. The main checkout's
+ * .env (<root>/.env, read on every look) counts too, so lowering it reaches running processes: with both set, the lower
+ * wins (0 still turns the lock off), else whichever is set; value null: neither. STUDIO_HEAVY_SLOTS_LIVE=off: the
+ * process's own value only.
  */
 export function liveCount(root, key, env = process.env) {
   const own = isNum(env[key]) ? Number(env[key]) : null;
@@ -236,17 +199,16 @@ export function heavySlotsAt(root, env = process.env, profile = null) {
   return slotsFor(profile, c.value === null ? { ...env, STUDIO_HEAVY_SLOTS: '' } : { ...env, STUDIO_HEAVY_SLOTS: String(c.value) });
 }
 /**
- * 2.78.1 (f, B-117): the engine line: how many engine lands (an engine train's land run, harness/unity-gate.mjs) run at
- * once beside the game's work, STUDIO_ENGINE_SLOTS (default 1; live like the slots), when a machine scan is known and
- * shows room for an engine land beside a game job (heavy-budget.mjs engineLineRoom; with neither an engine land shares
- * the game's slots, and still gives way to the game's train). 0 or off: no engine line, an engine land shares the
- * game's slots and goes as a landing, as in 2.78.0.
+ * The engine line: how many engine lands (an engine train's land run, harness/unity-gate.mjs) run at once beside the
+ * game's work, STUDIO_ENGINE_SLOTS (default 1; live like the slots), when a machine scan shows room for one beside a game
+ * job (heavy-budget.mjs engineLineRoom). Without a scan an engine land shares the game's slots and still gives way to the
+ * game's train. 0 or off: no engine line; an engine land shares the game's slots and goes as a landing.
  */
 export function engineSlotsAt(root, env = process.env) {
   if (off(env.STUDIO_ENGINE_SLOTS) && !isNum(env.STUDIO_ENGINE_SLOTS)) return 0;
   const c = liveCount(root, 'STUDIO_ENGINE_SLOTS', env);
   const base = c.value === null ? 1 : Math.max(0, Math.floor(c.value));
-  try { return pushSlots(base, root, env); } catch { return base; } // 2.79.1 (4): an engine push, 2 slots if the RAM allows
+  try { return pushSlots(base, root, env); } catch { return base; } // an engine push, 2 slots if the RAM allows
 }
 /** A live game merge train's verify holding a slot now (a landing verify that isn't an engine land), or null. */
 const gameTrainVerifying = (holders) => holders.find((h) => h && h.landing && claimOf(h).kind === 'verify' && !claimOf(h).engine) || null;
@@ -277,7 +239,7 @@ export function heavyHolders(root, { env = process.env } = {}) {
   return out;
 }
 
-// ---- 2.60.0 (#5): a holder's process tree, and killing it ----
+// ---- a holder's process tree, and killing it ----
 
 const TREE_TOL_MS = 3000;
 const off = (v) => /^(off|0|false|no)$/i.test(String(v || ''));
@@ -346,12 +308,10 @@ export function holderTree(h, procs, { self = process.pid } = {}) {
     }
   }
   {
-    // 2.60.0 (#5, Windows): the holder's own children are recorded (tree.children). When the holder dies, Node's job
-    // object takes its direct child (the shell) with it, but the shell's children broke away and live on, naming the
-    // dead shell as their parent: they are found through the recorded child, as the root's orphans are through it.
-    // 2.65.0: also while the holder still runs (a full verify's gate shell that ended and left children running:
-    // scripts/run-gates.mjs records each gate's shell, harness/gate-spawn.mjs); a live recorded child is already in the
-    // walk above then.
+    // Windows: the holder's own children are recorded (tree.children). When the holder dies, Node's job object takes its
+    // direct child (the shell) with it, but the shell's children break away and live on, naming the dead shell as parent: they
+    // are found through the recorded child. Also while the holder runs (a full verify's gate shell that ended and left
+    // children: scripts/run-gates.mjs records each gate's shell, harness/gate-spawn.mjs); a live recorded child is already in the walk above then.
     for (const [cpRaw, cRec] of Object.entries(h?.tree?.children || {})) {
       const cp = Number(cpRaw);
       if (!Number.isInteger(cp) || cp <= 0 || cp === root) continue;
@@ -547,27 +507,25 @@ function heldByParent(dir, env) {
   return h && Number(h.pid) === Number(m[2]) && holderLive(h, { staleMs: staleOf(env) }) ? h : null;
 }
 
-/** 2.68.0 (n): the claim of the machine:heavy hold this process runs inside (STUDIO_HEAVY_HELD), or null. */
+/** The claim of the machine:heavy hold this process runs inside (STUDIO_HEAVY_HELD), or null. */
 export function heldClaim(root, env = process.env) {
   try { const h = heldByParent(heavyDir(root), env); return h?.claim ? { ...h.claim, label: h.claim.label || h.label, holderPid: h.pid } : null; } catch { return null; }
 }
 
 /**
- * Take a machine:heavy slot (sync; waits). Returns { release(), held, waitedMs, claim, skipped?, inside? }. Throws an
- * Error with code HEAVY_BUSY when the wait limit passes. While held, process.env.STUDIO_HEAVY_HELD names the slot
- * so the processes this one starts don't wait for it.
- * 2.68.0 (n): a budgeted pool (harness/heavy-budget.mjs). The job declares a claim (opts.kind: verify, unity,
- * browser-playtest, gpu-playtest, blender-preview, asset-roundtrip, heavy; or opts.claim) and starts when it fits the
- * free RAM, GPU and CPU areas of the last machine scan and a slot is free (STUDIO_HEAVY_SLOTS, computed from the scan;
- * 1 with no scan). Waiters queue in order (machine-heavy-queue-<pid>.wait: a landing first, then first come), each
- * class apart (a GPU-only job doesn't queue behind a CPU verify). A job that doesn't fit waits, saying for what
- * ("waiting for RAM: needs 8 GB, 3.1 free"), up to STUDIO_HEAVY_WAIT_MIN like any wait. With no scan, the 2.67 rules:
- * one slot and the STUDIO_RAM_FLOOR_GB floor (STUDIO_HEAVY_RAM_WAIT_MIN). The record keeps its claim (status shows it).
+ * Take a machine:heavy slot (sync; waits). Returns { release(), held, waitedMs, claim, skipped?, inside? }. Throws an Error
+ * with code HEAVY_BUSY when the wait limit passes. While held, process.env.STUDIO_HEAVY_HELD names the slot so the
+ * processes this one starts don't wait for it. The job declares a claim (opts.kind: verify, unity, browser-playtest,
+ * gpu-playtest, blender-preview, asset-roundtrip, heavy; or opts.claim) and starts when it fits the free RAM, GPU and CPU
+ * areas of the last machine scan and a slot is free. Waiters queue in order (machine-heavy-queue-<pid>.wait: a landing
+ * first, then first come), each class apart (a GPU-only job doesn't queue behind a CPU verify), and say what they wait for
+ * ("waiting for RAM: needs 8 GB, 3.1 free"), up to STUDIO_HEAVY_WAIT_MIN. With no scan: one slot and the STUDIO_RAM_FLOOR_GB
+ * floor (STUDIO_HEAVY_RAM_WAIT_MIN). The record keeps its claim (status shows it).
  */
 export function acquireHeavy(root, label, { log = () => {}, env = process.env, owner = null, freemem = undefined, kind = 'heavy', claim: givenClaim = null, machine = undefined, ramGb, vramGb, gpuOnly, minFreeGb = undefined, waitMin = undefined, engine = null } = {}) {
   const profileNow = () => { try { return machineProfile(root, { env, machine }); } catch { return null; } };
   let profile = profileNow();
-  // 2.78.1 (f, B-117): the slot count as it stands now (heavySlotsAt: the main checkout's .env counts too), looked at again each poll.
+  // The slot count as it stands now (heavySlotsAt: the main checkout's .env counts too), looked at again each poll.
   let n = heavySlotsAt(root, env, profile);
   const none = { release: () => {}, update: () => false, held: null, waitedMs: 0, claim: null };
   if (!(n > 0)) return { ...none, skipped: true };
@@ -576,27 +534,23 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   const parent = heldByParent(dir, env);
   if (parent) return { ...none, inside: parent };
   const staleMs = staleOf(env);
-  // 2.73.2 (e): waitMin (heavy.mjs wait/run --timeout-min) stands in for STUDIO_HEAVY_WAIT_MIN for this one take.
+  // waitMin (heavy.mjs wait/run --timeout-min) stands in for STUDIO_HEAVY_WAIT_MIN for this one take.
   const waitMs = (Number(waitMin) >= 0 && waitMin !== null && waitMin !== '' ? Number(waitMin) : num(env.STUDIO_HEAVY_WAIT_MIN, 60)) * 60000;
-  // 2.60.1 (B-35): free memory under STUDIO_RAM_FLOOR_GB holds the start back, for at most this long (no scan only).
+  // Free memory under STUDIO_RAM_FLOOR_GB holds the start back, for at most this long (no scan only).
   const ramWaitMs = Math.min(waitMs, num(env.STUDIO_HEAVY_RAM_WAIT_MIN, 10) * 60000);
   const poll = num(env.STUDIO_HEAVY_POLL_MS, 2000);
   const remind = num(env.STUDIO_HEAVY_REMIND_MS, 5 * 60000);
   const landing = String(env.STUDIO_GATE_PRIORITY || '').toLowerCase() === 'landing';
-  // 2.78.1 (f, B-117): an engine land (an engine train's land run: opts.engine) takes the engine line (STUDIO_ENGINE_SLOTS),
-  // never a game slot, and gives way to the game's merge train: it isn't a landing for the game's queue, waits while the
-  // game's train verifies, waits for the train's slot priority (M6) and for a quiet hold (C2c). Its RAM still counts.
-  // The line itself needs a machine scan (the RAM budget is what keeps an engine land and game work apart then); with
-  // none, the slot count is the only guard, so the land keeps sharing the game's slots (it still gives way to the train).
-  // 2.78.1 (B-117 fix): and the scanned machine must have room for both at full size (heavy-budget.mjs engineLineRoom):
-  // on Windows every heavy wait scans, so "a scan exists" alone opened the line on a 4-core machine beside a live holder.
+  // An engine land (an engine train's land run: opts.engine) takes the engine line (STUDIO_ENGINE_SLOTS), never a game slot,
+  // and gives way to the game's merge train: it isn't a landing for the game's queue, waits while the game's train verifies,
+  // and waits for the train's slot priority and for a quiet hold. Its RAM still counts. The line needs a machine scan with
+  // room for both at full size (heavy-budget.mjs engineLineRoom); with none the land shares the game's slots (still giving way to the train).
   const engineSlots = engine ? engineSlotsAt(root, env) : 0;
   const engineYield = Boolean(engine) && engineSlots > 0;
   const t0 = Date.now();
   const baseClaim = givenClaim || jobClaim(kind, { root, env, label, profile, state: budgetState(profile, [], { env }), ramGb, vramGb, gpuOnly });
   const room = engineYield && profile ? engineLineRoom(profile, baseClaim, { root, env }) : null;
-  // 2.79 (e): with no machine scan, an owner who SET STUDIO_ENGINE_SLOTS (env or .env) asked for the engine's own slot:
-  // the land takes it (a game verify never does, the land never takes a game slot). Unset: shares the game's slots as before.
+  // With no machine scan, an owner who SET STUDIO_ENGINE_SLOTS (env or .env) asked for the engine's own slot: the land takes it (a game verify never does). Unset: shares the game's slots.
   const explicitLine = engineYield && !profile && isNum(liveCount(root, 'STUDIO_ENGINE_SLOTS', env).value);
   const engineLand = Boolean(room?.ok) || explicitLine;
   if (room && !room.ok) log(`[heavy] ${label}: ${room.why}`);
@@ -604,7 +558,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   const withEngine = (c) => (engineLand && c ? { ...c, engine: String(engine) } : c);
   const firstClaim = withEngine(baseClaim);
   const queueFile = path.join(dir, `${PREFIX}-queue-${process.pid}.wait`);
-  try { fs.writeFileSync(queueFile, JSON.stringify({ pid: process.pid, identity: selfIdentity(), at: t0, label, landing, gpuOnly: Boolean(firstClaim.gpuOnly), owner: owner || env.STUDIO_LOCK_OWNER || null, ...(engineLand ? { engine: String(engine) } : {}) })); } catch {} // 2.77.3: owner (a train's stall watch reads it)
+  try { fs.writeFileSync(queueFile, JSON.stringify({ pid: process.pid, identity: selfIdentity(), at: t0, label, landing, gpuOnly: Boolean(firstClaim.gpuOnly), owner: owner || env.STUDIO_LOCK_OWNER || null, ...(engineLand ? { engine: String(engine) } : {}) })); } catch {} // owner: a train's stall watch reads it
   let mine = null;
   let claim = firstClaim;
   let toldAt = 0;
@@ -617,8 +571,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   const ramVar = ownFloor ? 'STUDIO_HEAVY_RAM_FLOOR_GB' : 'STUDIO_RAM_FLOOR_GB';
   const ramEnv = ownFloor ? { ...env, STUDIO_RAM_FLOOR_GB: env.STUDIO_HEAVY_RAM_FLOOR_GB } : env;
   let ramTold = false;
-  // 2.73.2 (e, B-73): a Unity editor run (every Unity kind) waits for a free-RAM floor before it starts (STUDIO_UNITY_
-  // MIN_FREE_GB, 12, never above 60% of the RAM); minFreeGb (heavy.mjs wait/run --min-free-gb) asks for one on any kind.
+  // A Unity editor run (every Unity kind) waits for a free-RAM floor (STUDIO_UNITY_MIN_FREE_GB, 12, never above 60% of the RAM); minFreeGb (heavy.mjs wait/run --min-free-gb) asks for one on any kind.
   const explicitFloor = minFreeGb !== undefined && minFreeGb !== null && minFreeGb !== '';
   const floorCfg = explicitFloor ? unityMinFreeGb({ env: { ...env, STUDIO_UNITY_MIN_FREE_GB: String(minFreeGb) }, profile }) : isUnityKind(firstClaim.kind || kind) ? unityMinFreeGb({ env, profile }) : { gb: 0 };
   const floorVar = explicitFloor ? '--min-free-gb' : 'STUDIO_UNITY_MIN_FREE_GB';
@@ -643,14 +596,14 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
       if (!ram.low && ramTold) { log(`[heavy] ${label}: free memory is back over the floor (${ram.freeGb ?? '?'} GB)`); ramTold = false; }
       holders = collectHolders(dir, { staleMs, log, env });
       const state = budgetState(profile, holders, { env });
-      // 2.76.0 (j, B-89): a verify's share of the cores also counts the lane checks running (gate slots).
+      // A verify's share of the cores also counts the lane checks running (gate slots).
       claim = withEngine(givenClaim || jobClaim(kind, { root, env, label, profile, state, ramGb, vramGb, gpuOnly, extraJobs: kind === 'verify' && profile ? laneCheckSlots(root, env).map(() => ({ kind: 'check', workers: null, threads: 0 })) : [] }));
       const ahead = queueAhead(dir, { landing, at: t0, gpuOnly: Boolean(profile && claim.gpuOnly), classed: Boolean(profile), staleMs, engine: engineLand });
-      // 2.78.1 (f, B-117): an engine land gives way while the game's merge train verifies (train > builder verifies > engine).
+      // An engine land gives way while the game's merge train verifies (train > builder verifies > engine).
       if (engineYield) { const tv = gameTrainVerifying(holders); if (tv) ahead.push({ pid: tv.pid || 0, label: `the game's merge train verifying (${describeHolder(tv)}): an engine land waits for it (train > builder verifies > engine; STUDIO_ENGINE_SLOTS=off lets it go beside)`, landing: true, yieldTo: true }); }
-      // 2.77.3 (M6): a merge train waiting for a slot goes ahead of every waiter that isn't a landing (CPU class).
+      // A merge train waiting for a slot goes ahead of every waiter that isn't a landing (CPU class).
       if (!gameLanding && !(profile && claim.gpuOnly)) { const tw = trainWaiting(root, { env }); if (tw) ahead.push({ pid: tw.pid || 0, label: `a merge train waiting for the next free slot${tw.why ? ` (${tw.why.slice(0, 120)})` : ''}; STUDIO_TRAIN_SLOT_PRIORITY_MIN`, landing: true, train: true }); }
-      // 2.78.0 (C2c): a flake triager's quiet re-run is running: nothing but a landing starts (any class: quiet means quiet).
+      // A flake triager's quiet re-run is running: nothing but a landing starts (any class: quiet means quiet).
       if (!gameLanding) { const qh = quietHolding(root, engine ? { skipTags: ['engine-land'] } : {}); if (qh) ahead.push({ pid: qh.pid || 0, label: `${qh.tag ? `${qh.why || 'a quiet hold'}${qh.owner ? ` (${qh.owner})` : ''}` : `a flake check's quiet re-run${qh.file ? ` of ${qh.file}` : ''}${qh.owner ? ` by ${qh.owner}` : ''}`} holds new heavy work back until it ends (at most until ${new Date(Number(qh.until)).toISOString().slice(11, 19)} UTC, STUDIO_FLAKE_HOLD_MIN)`, landing: true, hold: true }); }
       adm = ahead.length ? { ok: false, area: 'queue', line: '' } : admit(claim, state, { slots: n, holders, kindMax: maxConcurrent(claim.kind, { root, env }), groupMax: maxConcurrent(capGroup(claim.kind), { root, env }), engineSlots });
       floor = floorCfg.gb > 0 ? floorFree(floorCfg.gb, { env, freemem, profile }) : { low: false };
@@ -666,7 +619,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
         }
       }
       if (mine) break;
-      // 2.73.2 (e, B-73): only the free-RAM floor holds it back: wait for memory, then "not run" (never a red) on timeout.
+      // Only the free-RAM floor holds it back: wait for memory, then "not run" (never a red) on timeout.
       const floorLine = floor.low ? `free RAM is ${floor.freeGb} GB${floor.src ? ` (${floor.src})` : ''}, under the ${floorCfg.gb} GB floor (${floorVar === '--min-free-gb' ? `--min-free-gb ${minFreeGb}` : floorCfg.why})` : '';
       if (floor.low && adm.ok && !ram.low) {
         if (Date.now() - t0 >= waitMs) {
@@ -677,7 +630,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
         continue;
       }
       if (ram.low && !holders.length && !ahead.length) { sleep(poll); continue; }
-      // 2.78.1 (f): with holders running, a hold or the train that also keeps this one back is named too.
+      // With holders running, a hold or the train that also keeps this one back is named too.
       const keptBy = ahead.filter((w) => w.hold || w.yieldTo || w.train);
       const busyWith = holders.length ? `${holders.map(describeHolder).join('; ')}${keptBy.length ? `; and ${keptBy.map((w) => w.label).join(', ')}` : ''}` : ahead.length ? `${ahead.some((w) => w.hold) && !gameLanding ? 'a quiet hold on the machine' : ahead.some((w) => w.yieldTo) ? "the game's merge train" : ahead.some((w) => w.landing) && !gameLanding ? 'a landing waiting first' : 'earlier waiters'} (${ahead.map((w) => w.label).join(', ')})` : 'nobody';
       const why = [['ram', 'gpu', 'cpu', 'kind'].includes(adm.area) || (adm.area === 'slots' && claim?.engine) ? adm.line : '', floorLine].filter(Boolean).join('; ');
@@ -696,11 +649,11 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
     try { fs.rmSync(queueFile, { force: true }); } catch {}
   }
   const waitedMs = Date.now() - t0;
-  if (gameLanding) clearTrainWait(root); // 2.77.3 (M6): the train has its slot (2.78.1: not an engine land's take)
+  if (gameLanding) clearTrainWait(root); // the train has its slot (not an engine land's take)
   if (toldAt) log(`[heavy] ${label} got the machine:heavy lock after ${Math.round(waitedMs / 1000)} s`);
   if (floorCfg.gb > 0) log(`[heavy] ${label}: free RAM ${floor.freeGb ?? '?'} GB, over the ${floorCfg.gb} GB floor (${floorVar === '--min-free-gb' ? `--min-free-gb ${minFreeGb}` : floorCfg.why})`);
   if (adm.line) log(`[heavy] ${label}: ${adm.line}`);
-  // 2.70.0 (t): one line naming the area a mostly-GPU job took and why (heavy-budget.mjs gpuAreaClaim).
+  // One line naming the area a mostly-GPU job took and why (heavy-budget.mjs gpuAreaClaim).
   if (claim?.areaWhy) log(`[heavy] ${label} took ${claim.areaWhy}`);
   const token = `${path.basename(mine)}:${process.pid}`;
   const prevEnv = process.env.STUDIO_HEAVY_HELD;
@@ -710,12 +663,12 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   const release = () => {
     if (released) return;
     released = true;
-    // 2.77.3 (M6): a train's check hands its slot to the train's next check (15 s), not to a builder's verify.
+    // A train's check hands its slot to the train's next check (15 s), not to a builder's verify.
     if (trainOwner) markTrainWait(root, { handoff: true, why: `${String(owner || env.STUDIO_LOCK_OWNER)} just ran a check`, env, train: String(owner || env.STUDIO_LOCK_OWNER).replace(/^train-/, '') });
     try { if (readJson(mine)?.pid === process.pid) fs.rmSync(mine, { force: true }); } catch {}
     if (process.env.STUDIO_HEAVY_HELD === token) { if (prevEnv === undefined) delete process.env.STUDIO_HEAVY_HELD; else process.env.STUDIO_HEAVY_HELD = prevEnv; }
   };
-  // 2.60.0 (#5): add to the record while held (heavy.mjs run adds its command's process group to the tree).
+  // Add to the record while held (heavy.mjs run adds its command's process group to the tree).
   const update = (fn) => {
     if (released) return false;
     try {
@@ -729,9 +682,9 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
 }
 
 /**
- * 2.73.2 (e, B-73): free RAM now against a floor: { low, freeGb, floorGb, src }. The live figure (harness/ram.mjs
- * ramCheck: os.freemem, and on Windows the commit headroom of a machine scan at most 2 x STUDIO_MACHINE_SAMPLE_S old);
- * test hooks: freemem / STUDIO_TEST_FREEMEM_MB, else STUDIO_TEST_MACHINE's free figure. Never throws (unknown: not low).
+ * Free RAM now against a floor: { low, freeGb, floorGb, src }. The live figure (harness/ram.mjs ramCheck: os.freemem, and
+ * on Windows the commit headroom of a machine scan at most 2 x STUDIO_MACHINE_SAMPLE_S old); test hooks: freemem /
+ * STUDIO_TEST_FREEMEM_MB, else STUDIO_TEST_MACHINE's free figure. Never throws (unknown: not low).
  */
 export function floorFree(floorGb, { env = process.env, freemem = undefined, profile = null } = {}) {
   const t = env.STUDIO_TEST_FREEMEM_MB;
@@ -746,7 +699,7 @@ export function floorFree(floorGb, { env = process.env, freemem = undefined, pro
   } catch { return { low: false, freeGb: null, floorGb }; }
 }
 
-/** 2.68.0 (n): the live holders in every slot file; a stale one (dead, reused pid, too old) is cleared after its tree is reaped. */
+/** The live holders in every slot file; a stale one (dead, reused pid, too old) is cleared after its tree is reaped. */
 function collectHolders(dir, { staleMs, log, env }) {
   let names = [];
   try { names = fs.readdirSync(dir); } catch { return []; }
@@ -758,7 +711,7 @@ function collectHolders(dir, { staleMs, log, env }) {
     // Stale (dead holder, reused pid, too old) or unreadable for more than a moment: take it over.
     if (h || Date.now() - (fs.statSync(f, { throwIfNoEntry: false })?.mtimeMs || 0) > 5000) {
       if (h) log(`[heavy] ${describeHolder(h)} is gone: its machine:heavy slot is free again`);
-      // 2.60.0 (#5): what its tree left running (a killed parent's children) goes first.
+      // What its tree left running (a killed parent's children) goes first.
       if (h && holderGone(h)) reapOrphans(h, { log, env });
       try { if (!h || readJson(f)?.pid === h.pid) fs.rmSync(f, { force: true }); } catch {}
     } else out.push({ pid: 0, label: 'a slot being written', at: Date.now() });
@@ -767,9 +720,9 @@ function collectHolders(dir, { staleMs, log, env }) {
 }
 
 /**
- * 2.68.0 (n): live waiters ahead of this one in its class: a landing first, then first come. A dead or stale entry is
- * removed. 2.78.1 (f): engine lands (engine: true) are a class of their own: a game waiter never queues behind one, and
- * an engine land queues behind earlier engine lands and behind every game landing waiting (the game's train goes first).
+ * Live waiters ahead of this one in its class: a landing first, then first come. A dead or stale entry is removed. Engine
+ * lands (engine: true) are a class of their own: a game waiter never queues behind one, and an engine land queues behind
+ * earlier engine lands and behind every game landing waiting.
  */
 function queueAhead(dir, { landing, at, gpuOnly, classed, staleMs, self = process.pid, engine = false }) {
   let names = [];
@@ -818,9 +771,9 @@ function otherGateSlots(root, env) {
 }
 
 /**
- * 2.76.0 (j, B-89): the lane checks running now in other processes: gate-slot holders that are not the game check of a
- * live machine:heavy holder (a full verify's own check took a gate slot too: its record names the hold, heavyHeld, so it
- * is counted once, as the verify). [{ pid, label, landing, at }].
+ * The lane checks running now in other processes: gate-slot holders that are not the game check of a live machine:heavy
+ * holder (a full verify's own check also took a gate slot: its record names the hold, heavyHeld, so it is counted once).
+ * [{ pid, label, landing, at }].
  */
 export function laneCheckSlots(root, env = process.env) {
   let slots = [];
@@ -833,12 +786,12 @@ export function laneCheckSlots(root, env = process.env) {
   };
   return slots.filter((g) => !covered(g)).map((g) => ({ pid: g.pid, label: g.label || null, landing: Boolean(g.landing), at: g.at || null }));
 }
-/** 2.68.0 (n): game checks running now in other processes (gate-slot holders): a lane's share of the budget divides by them + 1. 2.76.0: not a verify's own. */
+/** Game checks running now in other processes (gate-slot holders): a lane's share of the budget divides by them + 1. Not a verify's own. */
 export function laneChecksRunning(root, env = process.env) {
   try { return laneCheckSlots(root, env).length; } catch { return 0; }
 }
 
-// ---- 2.60.1 (B-17, B-35): what loads the machine outside the lock ----
+// ---- what loads the machine outside the lock ----
 
 /** Heavy programs that may run outside the lock, lower-cased: STUDIO_HEAVY_PROGRAMS (comma list; '' or off: none). */
 export function heavyPrograms(env = process.env) {
@@ -864,9 +817,9 @@ export function implicitHolders(root, { env = process.env, procs = null, listPro
   for (const h of heavyHolders(root, { env })) { try { for (const m of holderTree(h, list, { self: -1 }).members) covered.add(m); } catch {} }
   for (let p = self, k = 0; p && k < 64; k += 1) { covered.add(p); const rec = byPid.get(p); if (!rec || Number(rec.ppid) === p) break; p = Number(rec.ppid); }
   const found = list.filter((p) => isHeavy(p) && !covered.has(Number(p.pid)) && !(isHeavy(byPid.get(Number(p.ppid)))));
-  // 2.65.3 (B-44): a heavy program's background service is not an editor at work: Unity Hub keeps a `Unity.exe ...
-  // serve` process alive for days. Those whose command line matches STUDIO_HEAVY_IGNORE_ARGS (a regex; default the
-  // `serve` word; off: none) don't count. A command line that can't be read still counts, as before.
+  // A heavy program's background service is not an editor at work (Unity Hub keeps a `Unity.exe ... serve` process alive for
+  // days): those whose command line matches STUDIO_HEAVY_IGNORE_ARGS (a regex; default the `serve` word; off: none) don't
+  // count. A command line that can't be read still counts.
   const ignore = heavyIgnoreArgs(env);
   const args = ignore && found.length ? processArgs(found.map((p) => p.pid), { procs: procs || null }) : {};
   return found.filter((p) => !(ignore && typeof args[Number(p.pid)] === 'string' && ignore.test(args[Number(p.pid)]))).map((p) => ({ pid: Number(p.pid), cmd: p.cmd, start: p.start || null }));
@@ -922,14 +875,13 @@ function cpuOrLoad({ env, loadavg, cpuBusy: given, platform, cpus }) {
 }
 
 /**
- * 2.59.0 (#2): how loaded the machine is, as a factor for a gate's timeout: 1 + 1 per other live machine:heavy holder
- * (not the one this process runs inside) + 0.5 per other running gate check + the 1-minute load above 1.5 per core.
- * 2.60.1 (B-17): + 1 per heavy program outside the lock (implicitHolders: a Unity editor), and where there is no
- * load average (Windows: os.loadavg is all zeros) the CPU's busy fraction over STUDIO_CPU_BUSY_THRESHOLD (0.6) adds
- * 0.5 at the threshold up to 2 at 100% busy, as the load term does. Capped at STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR
- * (3), never below 1. { factor, why, busy, busyThreshold, load, cores } (2.65.1: busy is the CPU's busy fraction the probe
- * measured, or null when it didn't sample; load the 1-min load average used, or null). Injectable: loadavg, cpus (core count), cpuBusy, cpuSample (os.cpus for the
- * probe), platform, procs, listProcs.
+ * How loaded the machine is, as a factor for a gate's timeout: 1 + 1 per other live machine:heavy holder (not the one this
+ * process runs inside) + 1 per heavy program outside the lock (implicitHolders: a Unity editor) + 0.5 per other running
+ * gate check + the 1-minute load above 1.5 per core; where there is no load average (Windows) the CPU's busy fraction over
+ * STUDIO_CPU_BUSY_THRESHOLD (0.6) adds 0.5 at the threshold up to 2 at 100% busy. Capped at STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR
+ * (3), never below 1. { factor, why, busy, busyThreshold, load, cores } (busy: the CPU's busy fraction the probe measured, or
+ * null; load: the 1-min load average used, or null). Injectable: loadavg, cpus (core count), cpuBusy, cpuSample (os.cpus
+ * for the probe), platform, procs, listProcs.
  */
 export function loadFactor(root, { env = process.env, loadavg = null, cpus = null, cpuBusy: busyGiven = null, cpuSample = null, platform = process.platform, procs = null, listProcs = undefined } = {}) {
   const dir = heavyDir(root);
@@ -949,12 +901,12 @@ export function loadFactor(root, { env = process.env, loadavg = null, cpus = nul
   const thr = Math.min(0.99, Math.max(0.05, num(env.STUDIO_CPU_BUSY_THRESHOLD, 0.6)));
   if (Number.isFinite(busy) && busy > thr) { f += Math.min(2, 0.5 + (1.5 * (busy - thr)) / (1 - thr)); why.push(`CPU ${Math.round(busy * 100)}% busy (over ${Math.round(thr * 100)}%, STUDIO_CPU_BUSY_THRESHOLD; no load average here)`); }
   const cap = maxFactor(env);
-  // 2.65.1 (B-17): the readings themselves, so the gate can print them even when nothing scales the timeout.
+  // The readings themselves, so the gate can print them even when nothing scales the timeout.
   return { factor: Math.round(Math.min(cap, Math.max(1, f)) * 10) / 10, why: why.join('; '), busy: Number.isFinite(busy) ? busy : null, busyThreshold: thr, load: Number.isFinite(load) ? load : null, cores };
 }
 const maxFactor = (env) => Math.max(1, num(env.STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR, 3));
 
-// ---- 2.60.1 (B-17): the last quiet run of each game check ----
+// ---- the last quiet run of each game check ----
 
 const timesFile = (root) => path.join(root, '.studio', 'gates', 'game-gate-times.json');
 /** The last passing run of `label` at load factor 1: { ms, at } or null. */
@@ -963,8 +915,8 @@ export function lastQuietTime(root, label) {
   return r && Number(r.ms) > 0 ? { ms: Number(r.ms), at: r.at || null } : null;
 }
 /**
- * 2.65.1: the last pass of `label` in self-triage's one re-run at the cap, at any load factor: { ms, at, factor } or
- * null. It stands in for the floor only while no quiet run is recorded (scaledTimeout); it is never a quiet run.
+ * The last pass of `label` in self-triage's one re-run at the cap, at any load factor: { ms, at, factor } or null. It stands
+ * in for the floor only while no quiet run is recorded (scaledTimeout); it is never a quiet run.
  */
 export function lastPassTime(root, label) {
   const r = readJson(timesFile(root))?.[label]?.lastPass;
@@ -988,7 +940,7 @@ export function recordGateTime(root, label, ms) {
   if (!(Number(ms) > 0)) return false;
   return writeTimes(root, label, (r) => ({ ...r, ms: Math.round(Number(ms)), at: new Date().toISOString() }));
 }
-/** 2.65.1: record a pass of self-triage's re-run (any factor) as `label`'s lastPass. Never throws. */
+/** Record a pass of self-triage's re-run (any factor) as `label`'s lastPass. Never throws. */
 export function recordGatePass(root, label, ms, factor = 1) {
   if (!(Number(ms) > 0)) return false;
   return writeTimes(root, label, (r) => ({ ...r, lastPass: { ms: Math.round(Number(ms)), at: new Date().toISOString(), factor: Number(factor) || 1 } }));
@@ -996,14 +948,12 @@ export function recordGatePass(root, label, ms, factor = 1) {
 
 /**
  * A timeout scaled for load: { ms, base, factor, why, floor }. Never shorter than the configured base;
- * STUDIO_GAME_GATE_TIMEOUT_SCALE=off keeps the base. 2.60.1 (B-17): with a `label`, never shorter than
- * STUDIO_GAME_GATE_TIMEOUT_FLOOR (1.5; 0 or off: none) times that check's last quiet run (lastQuietTime), capped at
- * the same STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR times the base as the load factor. floor: { lastMs, mult, capped,
- * from, why } when it raised the timeout, else null.
- * 2.65.1: the readings come back too, for the line the gate prints every time: busy, busyThreshold, load, cores (the
- * load factor's), scaleOff, floorMult (0: no floor), quiet (the quiet run, null when none is recorded; undefined
- * without a label), lastPass, floorMs (the floor's value before it is compared with the timeout). While no quiet run
- * is recorded, the last pass of self-triage's re-run at the cap (lastPassTime) stands in for it (from: 'last pass').
+ * STUDIO_GAME_GATE_TIMEOUT_SCALE=off keeps the base. With a `label`, never shorter than STUDIO_GAME_GATE_TIMEOUT_FLOOR (1.5;
+ * 0 or off: none) times that check's last quiet run (lastQuietTime), capped at the same STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR
+ * times the base as the load factor. floor: { lastMs, mult, capped, from, why } when it raised the timeout, else null.
+ * The readings come back too, for the line the gate prints every time: busy, busyThreshold, load, cores, scaleOff,
+ * floorMult (0: no floor), quiet (null when none is recorded; undefined without a label), lastPass, floorMs. While no quiet
+ * run is recorded, the last pass of self-triage's re-run at the cap (lastPassTime) stands in for it (from: 'last pass').
  */
 export function scaledTimeout(base, root, { env = process.env, label = null, ...rest } = {}) {
   if (off(env.STUDIO_GAME_GATE_TIMEOUT_SCALE)) return { ms: base, base, factor: 1, why: '', floor: null, scaleOff: true, label };
@@ -1031,8 +981,7 @@ export function scaledTimeout(base, root, { env = process.env, label = null, ...
 }
 
 /**
- * 2.73.2 (e, B-73): for a studio's own scripts (a Unity landing script) before they start Unity, which the harness
- * doesn't run for them:
+ * For a studio's own scripts (a Unity landing script) before they start Unity, which the harness doesn't run for them:
  *   heavy wait [--min-free-gb N] [--timeout-min M] [--kind K]
  *       wait for the free-RAM floor (--min-free-gb, else STUDIO_UNITY_MIN_FREE_GB for a Unity kind; never above 60% of
  *       the RAM) and a free machine:heavy slot (the kind's claim, default unity); exit 0 when both were there (the slot is
@@ -1123,7 +1072,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const argv = process.argv.slice(2);
   const root = await heavyRoot();
   const opt = (k) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : null);
-  // 2.73.2 (e): an option before `--` only (the wrapped command's own arguments are never read as ours).
+  // An option before `--` only (the wrapped command's own arguments are never read as ours).
   const pre = argv.indexOf('--') >= 0 ? argv.slice(0, argv.indexOf('--')) : argv;
   const preOpt = (k) => (pre.includes(k) ? pre[pre.indexOf(k) + 1] : null);
   const floorOpts = () => {
@@ -1141,9 +1090,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const cmd = sep >= 0 ? argv.slice(sep + 1) : [];
     if (!cmd.length) { console.error('Usage: node harness/heavy.mjs run --label <what> -- <command> [args]'); process.exit(2); }
     const t0Run = Date.now();
-    // 2.68.0 (n): the job's claim: --kind (browser-playtest, gpu-playtest, blender-preview, unity, asset-roundtrip,
-    // verify; 2.70.0: unity-bake, unity-visual, build-clip; default heavy), --ram-gb / --vram-gb / --gpu-only to override
-    // it. 2.70.0 (t): a mostly-GPU kind takes the GPU area when the scan shows a GPU (heavy-budget.mjs gpuAreaClaim).
+    // The job's claim: --kind (browser-playtest, gpu-playtest, blender-preview, unity, asset-roundtrip, verify, unity-bake,
+    // unity-visual, build-clip; default heavy), --ram-gb / --vram-gb / --gpu-only to override it. A mostly-GPU kind takes the
+    // GPU area when the scan shows a GPU (heavy-budget.mjs gpuAreaClaim).
     const claimOpts = { kind: opt('--kind') || 'heavy', ...(opt('--ram-gb') ? { ramGb: Number(opt('--ram-gb')) } : {}), ...(opt('--vram-gb') ? { vramGb: Number(opt('--vram-gb')) } : {}), ...(argv.slice(0, sep >= 0 ? sep : argv.length).includes('--gpu-only') ? { gpuOnly: true } : {}), ...floorOpts() };
     const runOnce = async () => {
       let lk;
@@ -1152,13 +1101,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       } catch (err) {
         if (err.code !== 'HEAVY_BUSY') throw err;
         console.error(err.message);
-        // 2.73.2 (e, B-73): one line a studio's script can match: the command did not run (exit 3), why, and nothing failed.
+        // One line a studio's script can match: the command did not run (exit 3), why, and nothing failed.
         if (!/NOT RUN/.test(err.message)) console.error(`[heavy] NOT RUN ${label}: ${err.floor ? 'free RAM stayed under the floor' : 'the machine:heavy lock stayed busy'} (exit 3: not a failure of the work; run it again later)`);
         process.exit(3);
       }
-      // One command line, run by the shell as written (no glob of ours; quoting is the caller's). 2.60.0 (#5): in a
-      // process group of its own on POSIX (recorded in the holder's tree), so `stop` and a later take find what it
-      // started even after this process is killed; on Windows taskkill /T from this process covers it.
+      // One command line, run by the shell as written (no glob of ours; quoting is the caller's). On POSIX in a process group
+      // of its own (recorded in the holder's tree), so `stop` and a later take find what it started even after this process is
+      // killed; on Windows taskkill /T from this process covers it.
       const posix = process.platform !== 'win32';
       const child = spawn(cmd.join(' '), { cwd: process.cwd(), shell: true, stdio: ['inherit', 'inherit', 'pipe'], windowsHide: true, detached: posix });
       // On Windows the shell itself is recorded: it dies with this process (Node's job object), its children don't.
@@ -1166,7 +1115,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       if (posix && child.pid) lk.update((cur) => ({ ...cur, tree: { ...(cur.tree || {}), groups: [...new Set([...(cur.tree?.groups || []), child.pid])], groupIds: { ...(cur.tree?.groupIds || {}), [child.pid]: spawnedIdentity(child.pid, 'sh') }, kill: 'the process groups' } }));
       const fwd = (sig) => () => { try { if (posix) process.kill(-child.pid, sig); else child.kill(sig); } catch {} };
       for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(s, fwd(s));
-      // 2.68.0 (n): stderr is passed through and its tail kept, to spot "JavaScript heap out of memory".
+      // stderr is passed through and its tail kept, to spot "JavaScript heap out of memory".
       let stderrTail = '';
       child.stderr?.on('data', (d) => { process.stderr.write(d); stderrTail = (stderrTail + d.toString()).slice(-8192); });
       const code = await new Promise((resolve) => {
@@ -1180,7 +1129,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       lk.release();
       return { code, stderrTail };
     };
-    // 2.68.0 (n): a job killed for memory (heavy-budget.mjs oomSignature) is queued once more, with a note, not red.
+    // A job killed for memory (heavy-budget.mjs oomSignature) is queued once more, with a note, not red.
     let { code, stderrTail } = await runOnce();
     const oom = oomSignature({ status: code, stderr: stderrTail });
     if (oom && !off(process.env.STUDIO_HEAVY_OOM_RETRY)) {
@@ -1189,7 +1138,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       ({ code, stderrTail } = await runOnce());
       if (oomSignature({ status: code, stderr: stderrTail })) console.error(`[heavy] ${label} died out of memory again: not retried a second time`);
     }
-    // 2.65.0: the uniform job.done (harness/jobs.mjs) for a heavy run.
+    // The uniform job.done (harness/jobs.mjs) for a heavy run.
     try { (await import('./jobs.mjs')).jobDone({ kind: 'heavy', id: label, code, ms: Date.now() - t0Run, extra: { command: cmd.join(' ').slice(0, 200) } }); } catch {}
     process.exit(code);
   }
@@ -1199,15 +1148,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(res.code);
   } else {
     const holders = heavyHolders(root);
-    // 2.60.0 (#5): a gone holder whose tree still runs (only then are the processes listed).
+    // A gone holder whose tree still runs (only then are the processes listed).
     const left = [];
     for (const r of heavyRecords(root).filter((x) => !x.live && holderGone(x))) {
       try { const t = holderTree(r, listProcesses()); if (t.members.length) left.push({ ...r, orphans: t.members }); } catch {}
     }
     for (const r of left) console.error(`[heavy] ${describeHolder(r)} is gone but ${r.orphans.length} process(es) of its tree still run (pids ${r.orphans.join(', ')}): the next heavy take stops them, or node harness/heavy.mjs stop --all --by <name>`);
-    // 2.60.1 (B-35): a Unity editor (STUDIO_HEAVY_PROGRAMS) running outside the lock is an implicit holder.
+    // A Unity editor (STUDIO_HEAVY_PROGRAMS) running outside the lock is an implicit holder.
     const implicit = implicitHolders(root);
-    // 2.68.0 (n): the budget (heavy-budget.mjs) and each holder's claim.
+    // The budget (heavy-budget.mjs) and each holder's claim.
     const profile = machineProfile(root);
     const slots = heavySlotsAt(root, process.env, profile);
     const budget = budgetState(profile, holders);
