@@ -3,61 +3,53 @@
  *
  * A train lands several lanes on ONE full verify instead of one serial verify and rebase per lane.
  *
- *   1. pick the ready lanes: the train queue (.studio/train/queue.json; `task done <ID> --train` puts a lane there once
- *      every check of task done but the game's checks passes), oldest first, at most --max;
- *   2. check each lane again (the checks task done runs before the game's checks, in the lane's own copy: board,
- *      done-check, protected files, secrets, hooks, weakened tests; uncommitted work refuses);
- *   3. build an integration branch train/<id> = main + each lane, in order, in a scratch copy (.lanes/_train-<id>,
- *      made like a lane copy: never the main checkout's files, never a lane's copy). A lane is merged as it is (a
- *      fast-forward, or a merge commit the hooks stamp): its own commits are never rewritten, so their stamps hold.
- *      A lane that conflicts with the lanes before it waits for the next train; one that conflicts with main is
- *      handed back;
- *   4. ONE full verify (scripts/run-gates.mjs, scoped as a lane's verify is to the files the lanes change; --all for a
- *      "whole" task) of the final tree. A green full verify already recorded for exactly that tree stands for it;
- *   5. green: under the land lock, main moves (compare-and-swap, harness/worktree.mjs landFastForward) to the train's
- *      tip, whose tree is the one verified, and each task closes (board, claim, events) as task done closes it;
- *   6. red (prefix bisection): only the failing checks run again (run-gates --only), first on main (red there: main
- *      itself is red, nobody is handed back), then on cumulative prefixes main+A, main+A+B, ... by binary search. The
- *      first red prefix names the lane that breaks them, alone or together with the lanes before it; it is handed
- *      back and the rest train again. STUDIO_TRAIN_BISECT=alone: each lane is verified alone on main, one that
- *      fails alone is handed back, lanes that pass alone but fail together: the last one waits;
- *   7. pins: when the red is only the game's declared pin tests (studio.gates.json "pins"), the pins' report runs on
- *      every prefix and each moved pin value is attributed to the lane(s) whose step changed it. If every move is
- *      declared by its lane (a Pin-Moves: trailer on the lane's own commits) and no invariant pin moved, the pins'
- *      refresh runs on the combined tree and ONE extra train commit ("pin refresh", Pin-Refresh: <lanes>) is
- *      verified in full and lands with the lanes; the report is kept in .studio/train/<id>/pins.json. An undeclared
- *      move or a moved invariant hands back the lane it is attributed to; pins red on main itself is a regression
- *      on main (nobody handed back). All of it is code: nothing here is decided by a model;
- *   8. unionFiles: two lanes (or a lane and main) that conflict ONLY inside files the manifest lists as "unionFiles"
- *      (one-import-per-line barrels) are merged with git's union driver for those files (both sides' added lines
- *      kept, ours first) and the merge commit says so (Union-Merge:);
- *   9. tiers (harness/tiers.mjs): each lane gets a blast-radius tier from its own diff, by code. C (protected files,
- *      harness code, deleted tests, irreversible files, upgrade merges) is held in the queue as "needs the owner"
- *      until a person releases it (releaseLane; never a worker); B (sim, goldens, pins, shared code) makes the
- *      verify --all, is handed back for a golden without Golden-Reason or a pin file without Pin-Moves, and is held
- *      after more than 3 hand-backs; A lands with the normal verify;
- *  10. batching: a queued train waits up to STUDIO_TRAIN_WAIT_MIN for STUDIO_TRAIN_MIN lanes, takes at most
- *      STUDIO_TRAIN_MAX; a "runAlone" lane (manifest) gets a train of its own; a lone task done takes the queued
- *      lanes along (ride along), its own lane's result its answer.
- *  11. re-checks run only the failing test files (harness/train-focus.mjs, STUDIO_GATE_FOCUS); the red event names
- *      the failing tests; each re-check says its question and an ETA (harness/train-status.mjs); the step is in
- *      .studio/train/<id>/status.json. Once a culprit at position k > 1 is named, the green prefix is verified in
- *      full and lands at once and the later lanes go in the next train (landPrefixEarly; STUDIO_TRAIN_LAND_PREFIX=off
- *      turns it off);
+ *   1. pick: the queue (.studio/train/queue.json; `task done <ID> --train` puts a lane there once every check of task
+ *      done but the game's checks passes), oldest first, at most --max;
+ *   2. re-check each lane in its own copy (board, done-check, protected files, secrets, hooks, weakened tests;
+ *      uncommitted work refuses);
+ *   3. build train/<id> = main + each lane, in order, in a scratch copy (.lanes/_train-<id>, made like a lane copy).
+ *      A lane is merged as it is (fast-forward or a merge commit the hooks stamp); its commits are never rewritten.
+ *      A lane that conflicts with earlier lanes waits for the next train; one that conflicts with main is handed back;
+ *   4. ONE full verify (scripts/run-gates.mjs, scoped to the files the lanes change; --all for a "whole" task). A green
+ *      full verify already recorded for exactly that tree stands for it;
+ *   5. green: under the land lock main moves (compare-and-swap, harness/worktree.mjs landFastForward) to the train's
+ *      tip, and each task closes (board, claim, events) as task done closes it;
+ *   6. red (prefix bisection): only the failing checks run again (run-gates --only), first on main (red there: main is
+ *      red, nobody is handed back), then on prefixes main+A, main+A+B, ... by binary search. The first red prefix names
+ *      the lane that breaks them; it is handed back and the rest train again. STUDIO_TRAIN_BISECT=alone: each lane is
+ *      verified alone on main; one failing alone is handed back, and if all pass alone the last one waits;
+ *   7. pins: when the red is only the game's pin tests (studio.gates.json "pins"), the pins' report runs on every prefix
+ *      and each moved pin is attributed to the lane(s) that changed it. If every move is declared (Pin-Moves: trailer on
+ *      the lane's own commits) and no invariant pin moved, the pins' refresh runs on the combined tree and ONE extra
+ *      commit ("pin refresh", Pin-Refresh: <lanes>) is verified and lands with the lanes; the report is kept in
+ *      .studio/train/<id>/pins.json. An undeclared move or a moved invariant hands back its lane; pins red on main is a
+ *      regression on main (nobody handed back). All of this is code, no model decides;
+ *   8. unionFiles: lanes that conflict ONLY inside files the manifest lists as "unionFiles" (one-import-per-line
+ *      barrels) are merged with git's union driver (both sides' added lines, ours first); the merge commit says
+ *      Union-Merge:;
+ *   9. tiers (harness/tiers.mjs): each lane gets a tier from its own diff. C (protected files, harness code, deleted
+ *      tests, irreversible files, upgrade merges) is held as "needs the owner" until a person releases it (releaseLane;
+ *      never a worker); B (sim, goldens, pins, shared code) makes the verify --all, is handed back for a golden without
+ *      Golden-Reason or a pin file without Pin-Moves, and is held after more than 3 hand-backs; A lands normally;
+ *  10. batching: a queued train waits up to STUDIO_TRAIN_WAIT_MIN for STUDIO_TRAIN_MIN lanes and takes at most
+ *      STUDIO_TRAIN_MAX; a "runAlone" lane (manifest) gets its own train; a lone task done takes queued lanes along;
+ *  11. re-checks run only the failing test files (harness/train-focus.mjs, STUDIO_GATE_FOCUS); each says its question
+ *      and an ETA (harness/train-status.mjs); the step is in .studio/train/<id>/status.json. Once a culprit at position
+ *      k > 1 is named, the green prefix is verified and lands at once (landPrefixEarly; STUDIO_TRAIN_LAND_PREFIX=off
+ *      disables it);
  *  12. chain tails (harness/train-tail.mjs, STUDIO_TRAIN_CHAIN_TAIL): before the verify, a stacked chain (or a lane
- *      declaring pin moves) is built alone in a second scratch copy and its touched tests and pins run there; red:
- *      ONE "chain tail" builder task stacked on its last lane. A verify red on exactly those tests defers the whole
- *      chain "waiting for its tail" (no bisection, nobody handed back); chain + tail land together once queued.
- *  13. parallel prefixes (harness/train-parallel.mjs): the prefix search re-checks K boundary prefixes at once, each
- *      in its own scratch copy (K from the machine budget, STUDIO_TRAIN_BISECT_PARALLEL; no scan: 1).
+ *      declaring pin moves) is built alone in a second scratch copy and its touched tests and pins run; red: ONE "chain
+ *      tail" builder task stacked on the last lane. A verify red on exactly those tests defers the chain "waiting for
+ *      its tail" (no bisection, nobody handed back); chain + tail land together;
+ *  13. parallel prefixes (harness/train-parallel.mjs): the search re-checks K boundary prefixes at once, each in its
+ *      own scratch copy (K from the machine budget, STUDIO_TRAIN_BISECT_PARALLEL; no scan: 1).
  *
  * Safety: main moves only after a green full verify of exactly the tree it ends at, and only from the tip the train
- * was built on (if main moved meanwhile, the train is rebuilt and verified again); one train at a time
- * (.studio/locks/train.lock); drain and stop are respected; the verify takes gate slots as a landing
- * (STUDIO_GATE_PRIORITY=landing). A lane that gained commits after its check lands as checked and stays queued
- * (unless they are only merges of main that bring nothing beyond it: the task closes as landed).
- * A tier-A lane whose tip changes no file against main lands without a verify (empty_diff), since main's tree
- * doesn't change (STUDIO_TRAIN_EMPTY_DIFF=off: it rides the verify).
+ * was built on (if main moved, the train is rebuilt and verified again); one train at a time (.studio/locks/train.lock);
+ * drain and stop are respected; the verify takes gate slots as a landing (STUDIO_GATE_PRIORITY=landing). A lane that
+ * gained commits after its check lands as checked and stays queued (unless they are only merges of main). A tier-A
+ * lane whose tip changes no file against main lands without a verify (empty_diff; STUDIO_TRAIN_EMPTY_DIFF=off: it rides
+ * the verify).
  *
  * `task done <ID>` in a lane copy is a one-lane train (STUDIO_TRAIN=off: the old deliver path). This module never
  * imports harness/task.mjs (its CLI imports this one): the board operations come in as `deps`.
@@ -922,14 +914,13 @@ export function trainVerifyParts(text, ok, roots = []) {
 
 const flakeSeen = new Map();
 /**
- * After a red verify or re-check: each failing test file runs ALONE on this same tree (run-gates --only the game's
- * gates, STUDIO_GATE_FOCUS; the second, low-load run with STUDIO_TEST_WORKERS=1), at most once per train, and is
- * labelled real / seed-flake / load-flake / intermittent in .studio/flakes.jsonl. Labels only: what the train does
- * next is decided as before. Never throws (but a stall or a lane leaving still stops the train). Each run says so in
- * the train's status ("flake check k of n: <file> alone"), waits at most STUDIO_FLAKE_WAIT_MIN (10) for a
- * machine:heavy slot (its STUDIO_HEAVY_WAIT_MIN), and a run refused as busy or stopped before any gate is "not run"
- * (no label), never "real"; the triage ends at the first real label. A red whose every failing file is a port
- * collision is not the lanes' (trainBody defers them).
+ * After a red verify or re-check: each failing test file runs ALONE on this tree (run-gates --only the game's gates,
+ * STUDIO_GATE_FOCUS; the second, low-load run with STUDIO_TEST_WORKERS=1), at most once per train, and is labelled
+ * real / seed-flake / load-flake / intermittent in .studio/flakes.jsonl. Labels only: the train's next step is decided
+ * as before. Never throws (a stall or a lane leaving still stops the train). Each run shows in the status ("flake check
+ * k of n: <file> alone") and waits at most STUDIO_FLAKE_WAIT_MIN (10) for a machine:heavy slot (STUDIO_HEAVY_WAIT_MIN);
+ * a run refused as busy or stopped before any gate is "not run" (no label), never "real"; triage ends at the first
+ * real label. A red whose every failing file is a port collision is not the lanes' (trainBody defers them).
  */
 export function flakeTriage(sc, { id, tree, text, log }) {
   if (!triageOn()) return null;
@@ -1541,10 +1532,10 @@ export function releaseRefusal({ by, permission, env = process.env, ownerKey = f
 /** Release a held lane for the head it is at (recorded in the queue entry and as a task.train.released event). */
 export function releaseLane(root, task, { by, permission = '', env = process.env } = {}) {
   const ownerKey = /BEGIN PUBLIC KEY/.test(out(git(root, 'show', `refs/heads/${mainBranch(root)}:studio/keys/owner-ed25519.pub.pem`)));
-  // 2.84 (q): in beta mode the overseer and an outside signer release a held lane themselves, any tier, no owner key and
+  // In beta mode the overseer and an outside signer release a held lane themselves, any tier, no owner key and
   // no --permission (beta-mode.mjs standInMay, the one rule; logged as beta.use). Recorded as the owner's release, by them.
   const si = standInMay('release', { by, env, root });
-  // 2.67.0: the owner's standing delegation (harness/delegation.mjs) lets the named outside agent release with --by <agent>.
+  // The owner's standing delegation (harness/delegation.mjs) lets the named outside agent release with --by <agent>.
   const dg = si.ok ? { ok: true, beta: true, standIn: true, owner: String(si.doc.by), agent: si.who, at: si.doc.at, signed: false, permission: si.words.slice(0, 500), why: '' } : delegationFor({ action: 'train-release', by, env, root });
   if (dg.ok && ownerKey && !dg.signed && !dg.beta) return { ok: false, message: `This studio has an owner key: the delegation isn't signed with it. Nothing was released.` };
   // A lane the hand-back cap held in beta mode is released by the beta actors (the orchestrator, a Producer or Director
@@ -1575,12 +1566,12 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
   });
   if (!r.ok) return r;
   const e = r.entry;
-  keepRelease(root, task, e.released); // 2.76.0: survives the lane leaving and re-entering the queue at this head
+  keepRelease(root, task, e.released); // survives the lane leaving and re-entering the queue at this head
   if (si.ok) recordStandInUse(si, { kind: 'release', task, msg: `${si.who} released ${task} (tier ${e.held.tier}) for the merge train in beta mode, at ${String(e.head).slice(0, 8)}`, why: e.held.why });
   else if (dg.ok) recordUse(dg, { action: 'train-release', task, detail: `tier ${e.held.tier} at ${String(e.head).slice(0, 8)}` });
   if (ba.ok) recordBetaUse(ba, { action: 'train-release', subject: task, why: e.held.why });
   emitEvent({ type: 'task.train.released', agent: e.released.recordedBy || e.released.by, task, to: e.agent, status: 'ok', msg: `${task} (tier ${e.held.tier}: ${String(e.held.why).slice(0, 200)}) released for the merge train by ${dg.autonomous ? `${dg.agent} in autonomous mode (allowed by ${e.released.by}; on the review list)` : e.released.by}${dg.autonomous ? '' : e.released.recordedBy ? ` (recorded by ${e.released.recordedBy} on ${e.released.by}'s permission: "${e.released.permission.slice(0, 120)}")` : ''}, at ${String(e.head).slice(0, 8)}`.slice(0, 600), meta: { by: e.released.by, head: e.head, tier: e.held.tier, ...(e.released.permission ? { permission: e.released.permission, recordedBy: e.released.recordedBy } : {}), ...(dg.autonomous ? { autonomous: true } : {}) } });
-  // 2.71.0 (x): one record in the decision log (harness/decisions.mjs).
+  // One record in the decision log (harness/decisions.mjs).
   logDecision({ action: 'train-release', subject: task, by: dg.ok ? dg.agent : e.released.by, as: si.ok ? 'beta' : asOf(dg.ok ? dg : { via: rec?.via, permission: e.released.permission }), why: `tier ${e.held.tier}: ${e.held.why}`, evidence: `${e.held.rerecord ? `${rerecordEvidence(e.held)}; ` : ''}${e.held.tier} at ${String(e.head).slice(0, 8)}`, undo: { kind: 'rehold-lane', task, head: e.head, text: `npm run decisions -- revert <id> (holds ${task} again if it hasn't landed; else files a revert task)` }, root });
   return { ok: true, entry: e, message: `${task} is released (tier ${e.held.tier}: ${e.held.why}) by ${e.released.by}${e.released.recordedBy ? `, recorded by ${e.released.recordedBy}` : ''}, for ${String(e.head).slice(0, 8)}. It lands with the next train (npm run task -- train); new commits on the lane need a new release.` };
 }
@@ -1663,7 +1654,7 @@ export function precheckChild(root, lane) {
   if (!src.includes("flags['train-check']")) return { ok: false, error: 'old-harness', message: `${lane.task}'s lane copy runs a harness from before the merge train (2.59.0): merge the studio's branch into the copy (git merge ${mainBranch(root)}), commit, and queue it again, or land it with STUDIO_TRAIN=off npm run task -- done ${lane.task}` };
   // Run in the lane owner's name, but its events are the train's (meta.onBehalf), never the owner's activity.
   const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: lane.agent, STUDIO_ON_BEHALF: 'train' };
-  // 2.84 (q): a lane queued with task done --force --train (a force approval on file) is checked as forced: the lane's own
+  // A lane queued with task done --force --train (a force approval on file) is checked as forced: the lane's own
   // task done checks the approval again (forceApproved) before it skips the done check; the safety checks and this train's
   // full verify still run.
   const r = spawnSync(process.execPath, [script, 'done', lane.task, '--agent', lane.agent, '--train-check', ...(lane.forced ? ['--force'] : [])], { windowsHide: true, cwd: lane.dir, env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -1940,10 +1931,9 @@ function relatedRun(sc, { owner, files }) {
 
 /**
  * Related tests first. Before the full verify of a multi-lane train, each lane's related tests (the game's "related"
- * command on the lane's own changed files, as a lane verify runs them with STUDIO_GATE_RELATED) run on the COMBINED
- * tree in the scratch copy. A lane whose related tests fail there and pass on main's tip alone (so main isn't the red)
- * is handed back at once with the failing tests and the facts block, without a full verify or a bisection. A run that
- * judges nothing (no related command, no code files) drops nobody. Returns the lanes dropped.
+ * command on its changed files, as with STUDIO_GATE_RELATED) run on the COMBINED tree. A lane whose tests fail there
+ * but pass on main's tip alone is handed back at once with the failing tests and facts block, with no full verify or
+ * bisection. A run that judges nothing drops nobody. Returns the lanes dropped.
  */
 function relatedFirst({ sc, root, id, tip, set, built, settings, log, res, drop }) {
   if (set.length < 2) return [];
@@ -2039,10 +2029,10 @@ function tailRun(sc, { id, n, focus, changed, log }) {
 }
 
 /**
- * Before the verify: each chain of this train (train-tail.mjs trainChains) built alone on main in a second scratch
- * copy, its touched test files run (focused) and the pins' report taken on main and on it; red (and not fixed by the
- * pin refresh the train would make): ONE tail task stacked on its last lane (deduped by chain + failure signature).
- * res.chainTails: the chains red here, with their tail. Never throws; a check that can't run says why and is skipped.
+ * Before the verify: each chain (train-tail.mjs trainChains) is built alone on main in a second scratch copy, its
+ * touched test files run (focused) and the pins' report taken on main and on it. Red (and not fixed by the train's own
+ * pin refresh): ONE tail task stacked on its last lane (deduped by chain + failure signature). res.chainTails: the
+ * red chains with their tail. Never throws; a check that can't run says why and is skipped.
  */
 async function chainTailCheck({ root, id, tip, set, settings, depInfo, log, res, by, deps, main }) {
   res.chainTails = [];
@@ -2174,12 +2164,11 @@ function fixFirst(root, lanes, { id, by, dryRun, log }) {
 }
 
 /**
- * The red chain ran past its budget (STUDIO_TRAIN_RED_BUDGET_MIN). The newest lane (queued last: the most likely
- * cause) is handed back with the red's summary; of the others, the longest prefix whose exact tree a full verify has
- * already passed (this train's own, or a trusted record that covers it: verifyTree noRun, which runs no verify) is
- * returned as the verdict to land; the rest keep their place in the queue (keepOrHold: a second time at the same head
- * they are held for the Producer). No full verify passed: nothing lands. Logs task.train.red_budget. Returns the
- * verdict ({ built, v }) or null.
+ * The red chain ran past its budget (STUDIO_TRAIN_RED_BUDGET_MIN). The newest lane (the most likely cause) is handed
+ * back with the red's summary. Of the others, the longest prefix whose exact tree a full verify already passed (this
+ * train's own or a trusted record: verifyTree noRun runs no verify) is returned as the verdict to land; the rest keep
+ * their queue place (keepOrHold: held for the Producer a second time at the same head). None passed: nothing lands.
+ * Logs task.train.red_budget. Returns { built, v } or null.
  */
 function redBudgetEnd({ marker, sc, tip, set, id, log, res, seen, by, unionFiles, drop, keepOrHold }) {
   redClock.delete(String(id));
@@ -2222,9 +2211,8 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   const rules = batchRules();
   // A train takes at most STUDIO_TRAIN_BATCH lanes (default 4), beside --max and STUDIO_TRAIN_MAX.
   let maxLanes = batchCap({ max, rulesMax: rules.max });
-  // The DEFAULT batch of 4 only splits the queue when a speculative train can follow (pipeline on,
-  // or auto with room for a second verify); otherwise one train takes them all,, so 6 green lanes still
-  // land on one verify. A STUDIO_TRAIN_BATCH that is set always applies.
+  // The default batch of 4 splits the queue only when a speculative train can follow (pipeline on, or auto with room
+  // for a second verify); else one train takes all. A STUDIO_TRAIN_BATCH that is set always applies.
   if (!given && String(process.env.STUDIO_TRAIN_BATCH ?? '').trim() === '' && maxLanes === batchSize()) {
     const mode = pipelineMode();
     let room = mode === 'on';
@@ -2772,9 +2760,9 @@ function listRedMain(root, { id, logRel, roots, tree, gates }) {
 }
 
 /**
- * The verify is red: if its only red parts are known-red tests no lane changes, re-run just those test files on main's
- * tip alone. Still red there: { built, subs } (the train lands; the reds are reported). Green there: the entries clear,
- * null (the red is the lanes'). Anything else: null. The scratch copy is back at the train's tree when it returns.
+ * Red with only known-red tests no lane changes: re-run just those files on main's tip alone. Still red there:
+ * { built, subs } (the train lands; the reds are reported). Green: the entries clear and null (the red is the lanes').
+ * Else null. The scratch copy is back at the train's tree on return.
  */
 function knownRedTry({ sc, tip, set, built, v, redSub, id, log, res, cache, all, main, root, unionFiles, depInfo, by, text }) {
   if (!readKnownRed(root).length) return null;
@@ -2806,9 +2794,8 @@ export function boardPaths(file = path.join(path.dirname(fileURLToPath(import.me
 }
 
 /**
- * Did main move from `tip` to `now` by board/record files only? { ok, files } or { ok: false, why }. `now` must be a
- * descendant of `tip`, and every path changed in tip..now must be on the list, added or modified (a delete or a
- * rename never counts: --no-renames shows a rename as a delete).
+ * Did main move from `tip` to `now` by board/record files only? { ok, files } or { ok: false, why }. `now` must descend
+ * from `tip` and every changed path must be on the list, added or modified (a delete or rename never counts).
  */
 /** Files a board move may add, never change (train-board.json "addOnlyPaths"). */
 export function addOnlyPaths(file = path.join(path.dirname(fileURLToPath(import.meta.url)), 'train-board.json')) {
@@ -2820,10 +2807,9 @@ export function recheckPaths(file = path.join(path.dirname(fileURLToPath(import.
 }
 
 /**
- * Did studio/quarantine.json change only by skipping MORE tests (every test skipped at `tip` is still skipped at
- * `now`)? A quarantine that only grows can't make a verified tree wrong; a release (or a status back to "proposed")
- * means a test the verify never ran will run, so that verifies again. STUDIO_TRAIN_QUARANTINE_MOVE=off: every change
- * verifies again.
+ * Did studio/quarantine.json change only by skipping MORE tests? A quarantine that only grows can't make a verified
+ * tree wrong; a release (or a status back to "proposed") lets an unverified test run, so that verifies again.
+ * STUDIO_TRAIN_QUARANTINE_MOVE=off: every change verifies again.
  */
 export function quarantineOnlyGrows(root, tip, now, rel = 'studio/quarantine.json', env = process.env) {
   if (/^(off|0|false|no)$/i.test(String(env.STUDIO_TRAIN_QUARANTINE_MOVE ?? '').trim())) return false;
@@ -2907,10 +2893,9 @@ export function recordEntriesChanged(root, from, to, file, key) {
 }
 
 /**
- * Main moved by board files only while the train was verified (called under the land lock): merge the train's lanes
- * again onto the new tip and keep the verify when, checked with git, the new tree is the verified tree with exactly
- * those board files as main has them now. Returns { ok, built, files } or { ok: false, why } (the caller builds and
- * verifies again on the new main).
+ * Main moved by board files only while the train was verified (under the land lock): merge the lanes onto the new tip
+ * again and keep the verify when git shows the new tree is the verified tree plus exactly those board files. Returns
+ * { ok, built, files } or { ok: false, why } (the caller then builds and verifies again).
  */
 function rebuildOverBoardMove(root, sc, { tip, now, built, id, unionFiles }) {
   const move = boardOnlyMove(root, tip, now, boardPaths(), { lanes: built.included.map((l) => l.task) });
@@ -2962,10 +2947,9 @@ export function gameReadGlobs(root, rev) {
 
 /**
  * Who reads this file, by the checks' own rules: [] means no required check does (a "non-code" file); else the reasons.
- * Every file outside studio/ is code (the copy tests it from its own tree; the studio's required checks declare no
- * paths). A studio file is non-code only when it is on the board list and no rule reads it: not a task record,
- * approval or recheckPaths file, not read by docs, session or reviewer (harness/check-reads.mjs), not in a game
- * check's "paths" or "shared" globs, not always-shared. ctx: { board, rechecks, records, addOnly, game }.
+ * Every file outside studio/ is code. A studio file is non-code only when it is on the board list and no rule reads it
+ * (not a task record, approval or recheckPaths file, not read by docs, session or reviewer (harness/check-reads.mjs),
+ * not in a game check's "paths" or "shared" globs, not always-shared). ctx: { board, rechecks, records, addOnly, game }.
  */
 export function nonCodeReaders(file, ctx) {
   const f = String(file || '').replace(/\\/g, '/');
@@ -3010,13 +2994,12 @@ export function mainNonCodeCommits(root, tip, now, ctx) {
 }
 
 /**
- * Main moved after a green verify of the train's tree T, and the board rule (rebuildOverBoardMove) can't take it (a
- * deleted or renamed board file, a pin-refresh commit, ...). When every new main commit touches only files no check
- * reads (mainNonCodeCommits): merge them onto T in the train's copy (`git merge`, hooks on: parents T, then main) and
- * land that, under the land lock, without a new verify. Checked with git first: a clean merge (merge-tree) whose tree
- * is T with exactly main's versions of those files, and the one check that reads every file (secrets) runs on the new
- * commits (secret-scan --since T). Any doubt: { ok: false, why }, the copy back at T, and the caller builds and
- * verifies again.
+ * Main moved after a green verify of the train's tree T and rebuildOverBoardMove can't take it (a deleted or renamed
+ * board file, a pin-refresh commit, ...). If every new main commit touches only files no check reads
+ * (mainNonCodeCommits), merge them onto T in the train's copy (`git merge`, hooks on: parents T, then main) and land
+ * that under the land lock without a new verify. Git checks first: a clean merge-tree whose tree is T plus main's
+ * versions of those files, and secret-scan --since T on the new commits. Any doubt: { ok: false, why }, copy back at T,
+ * and the caller verifies again.
  */
 function landOverNonCode(root, sc, { tip, now, verified, id }) {
   const ctx = { board: boardPaths(), rechecks: recheckPaths(), records: taskRecordPaths(), addOnly: addOnlyPaths(), game: gameReadGlobs(root, now) };
@@ -3071,10 +3054,9 @@ function recheckBoardMove(root, sc, { id, tree, ids, files }) {
 }
 
 /**
- * Under the land lock: if main is still at `tip`, move it to the verified head (compare-and-swap, the main checkout's
- * files follow) and close each lane's task. A lane whose copy gained commits after its check lands as checked (its
- * content is in the verified tree) but stays queued with its new commits; if those are only merges of main
- * that bring nothing beyond it, the task closes as landed (task.train.main_merges_only). Returns 'moved', or nothing.
+ * Under the land lock: if main is still at `tip`, move it to the verified head (compare-and-swap) and close each lane's
+ * task. A lane whose copy gained commits after its check lands as checked but stays queued with them; if they are only
+ * merges of main that add nothing, the task closes as landed (task.train.main_merges_only). Returns 'moved', or nothing.
  */
 function landTrain(root, sc, main, tip, { built: verified, v }, { id, by, deps, log, res, unionFiles = [] }) {
   const from = res.landed.length; // an empty-diff landing may come first in the same train: this call's lanes only
@@ -3178,11 +3160,11 @@ export function nextBaseVerdict(root, { assumed, now, lanes = [] }) {
 const nextPollMs = () => 1000;
 
 /**
- * Run the speculative train behind train `after` (opts: { root, after, deps, log, by, quietJob }): its lanes from the
- * queue (not A's; held, tier-C, run-alone-behind-others, waiting and refused lanes left for the next normal train), built
- * on A's verified head in its own scratch copy, ONE verify, then it waits for A: landed exactly that tree (or plus record
- * files): B lands under the train lock without verifying again; anything else: discarded (lanes untouched, a
- * task.train.next_discarded event). Its own lock: .studio/locks/train-next.lock; its own life record.
+ * Run the speculative train behind train `after` (opts: { root, after, deps, log, by, quietJob }). It takes queue lanes
+ * (not A's; held, tier-C, run-alone-behind-others, waiting and refused lanes wait for the next normal train), builds on
+ * A's verified head in its own scratch copy, runs ONE verify, then waits for A. If A landed exactly that tree (or plus
+ * record files) B lands under the train lock without verifying again; else it is discarded (lanes untouched,
+ * task.train.next_discarded event). Lock: .studio/locks/train-next.lock; own life record.
  * Returns the train result plus { speculative: true, after, discarded?: why }.
  */
 export async function runNextTrain(opts = {}) {
