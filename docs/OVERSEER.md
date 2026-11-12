@@ -90,9 +90,32 @@ other launched session. "–": not tested.
 | `mode -- boost on --builders-only` (no actor check) | yes | yes | yes | yes | yes | yes |
 | `task unpark` then `agent start --task <ID>` | – | – | yes | – | – | – |
 | `approve -- protected` for `studio/game.json`, `studio/allowlist.json` | – | – | – | yes | – | – |
+| 2.84 (q), beta mode on (`qa/selftest-284q.mjs`; the signer's shell sets AI_AGENT and names nobody, `--by signer-1`): | | | | | | |
+| `task train release <ID>` of a tier-C lane, no `--permission` | – | – | yes | yes | yes (board decision, as before) | no |
+| `approve -- force <ID>`, then `task done <ID> --force` | – | – | yes | yes | no | no |
+| `task done <ID> --force --train` with a force approval on file (T-662) | – | – | yes | yes | – | – |
+| `approve -- protected` of the agent's own change (marked `self: true`) | – | – | yes | yes | no | no |
+| `task unpark <ID>` of a park at the orchestrator's rank | – | – | yes | yes | – | no |
+| `crew -- resume <role>`, no `--permission` | – | – | yes | yes | yes (as before) | no |
+| `review -- same-family on\|off\|auto` | – | – | – | yes | – | no |
+| engine train cancel / auto on\|off (part u: same rule, `standInMay('engine-train')`) | – | – | yes | yes | – | – |
+| Any of these with beta mode off | – | – | no | no | – | no |
+| A session pinned to a task (`STUDIO_TASK_PIN`) saying `--by <the overseer>` | – | – | no | no | – | – |
 
 The owner-only list (`harness/owner-acts.mjs`: money, delete, credentials, publish, tools, beta-off) is the only thing a
 stand-in is refused.
+
+2.84 (q), the owner's decision: while beta mode is on, the overseer (a beta-mode named agent) and an outside signer make
+these owner decisions themselves, with no owner key and no `--permission`: releasing a tier-C lane, a force approval and a
+forced done (also `--force --train` when a force approval is on file), protected-file, test and hook approvals (their
+own change included: the approval is marked `self: true`), unparking at any rank, resuming a paused role, and cancelling
+an engine train or switching its auto mode. One rule decides all of them, `standInMay(kind, { by, env, root })` in
+`harness/beta-mode.mjs` (also exported from `harness/permission.mjs`); each use is one `beta.use` event, listed in the
+daily digest's beta section, a self-approval called out as "SELF-APPROVED: … approved its own change to <file>". Never:
+a launched session (`STUDIO_ROLE`) or a pinned one (`STUDIO_TASK_PIN`) whatever `--by` says, a worker's name, the
+owner-only list, or anyone with beta mode off. The checks themselves (the train's verify, the game's tests, the hooks and
+weakened-tests gates, the safety checks of every `task done`) still run: only who approves changed. A harness update
+keeps `studio/beta.json` as the studio had it and says whether beta mode is on before and after.
 
 ## What stays human-only, whatever the grant
 
@@ -103,7 +126,8 @@ stand-in is refused.
 - Merging a harness release into its main branch.
 - Granting, widening or extending a delegation, the proxy, beta mode or an outside signer: no agent grants itself more.
 - Raising the overseer's own stage, or recording an outcome about its own work.
-- Releasing a tier-C lane in a studio with an owner key.
+- Releasing a tier-C lane in a studio with an owner key, unless beta mode is on (then the overseer and an outside
+  signer may: 2.84 q, above).
 - Committing in the main checkout past the pre-commit guard; `--no-verify`; weakening a test.
 - Ending a wind-down early; confirming autonomous mode or changing the studio policy.
 

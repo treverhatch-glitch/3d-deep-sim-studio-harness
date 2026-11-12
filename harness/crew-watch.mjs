@@ -207,13 +207,15 @@ export async function resumeRole(role, { by, why = '', permission = '', env = pr
   const r = String(role || '').trim();
   if (!r) return { code: 1, text: 'Usage: npm run crew -- resume <role> --by <name> [--why "…"] [--permission "…"]' };
   const { deciderCheck } = await import('./decider.mjs');
-  const d = await deciderCheck({ by, permission, env, what: 'resume a role the crew watchdog paused' });
+  const d = await deciderCheck({ by, permission, env, what: 'resume a role the crew watchdog paused', standIn: 'crew-resume' });
   if (!d.ok) return { code: 1, text: d.why };
   if (!readPaused().roles?.[r]) return { code: 0, text: `${r} isn't paused; nothing to resume.` };
   const asks = readJson(RESUME_FILE(), {}) || {};
   asks[r] = { by: d.by, via: d.via, recordedBy: d.recordedBy, permission: d.permission || null, why: String(why || '').slice(0, 300), at: new Date().toISOString() };
   writeJson(RESUME_FILE(), asks);
-  try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'crew-resume', subject: r, by: d.by, as: dm.asOf(d), why: asks[r].why || `resume ${r}`, evidence: 'paused by the crew watchdog', undo: null }); } catch {}
+  try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'crew-resume', subject: r, by: d.by, as: d.standIn ? 'beta' : dm.asOf(d), why: asks[r].why || `resume ${r}`, evidence: 'paused by the crew watchdog', undo: null }); } catch {}
+  // 2.84 (q): a stand-in's resume in beta mode is a beta.use (the owner reviews it afterwards).
+  if (d.standIn) { try { (await import('./beta-mode.mjs')).recordStandInUse(d.standIn, { kind: 'crew-resume', msg: `${d.by} resumed ${r} (paused by the crew watchdog) in beta mode`, why: asks[r].why, subject: r }); } catch {} }
   return { code: 0, text: `Asked the supervisor to launch ${r} again (${d.via}${d.via !== 'person' ? `, recorded by ${d.recordedBy}` : ''}); its next pass emits crew.resumed.` };
 }
 

@@ -81,7 +81,7 @@ import { beginTrainLife, reapDeadTrains } from './train-life.mjs';
 import { processHarness, chainGuard, copyHarnessDrift } from './harness-version.mjs';
 import { cancelPath } from './train-watch.mjs';
 import { recreateLaneCopy, ownWorktree, infraHandBack, INFRA_HANDBACK, keepRelease, keptRelease, forgetRelease, mixedLane, mayCarry, noteMixed, laneContent, carriedRelease } from './train-lanes.mjs';
-import { readBeta, betaActor, recordBetaUse } from './beta-mode.mjs';
+import { readBeta, betaActor, recordBetaUse, standInMay, recordStandInUse } from './beta-mode.mjs';
 import { addKnownRed, clearKnownRed, knownRedCandidate, readKnownRed, fileSub } from './known-red.mjs';
 import { toolchainProtected } from './test-toolchain.mjs';
 import { fixFirstOrder, noteTrainRed, noteTrainLanded, noteFixTried } from './train-fix-first.mjs';
@@ -1556,8 +1556,11 @@ export function releaseRefusal({ by, permission, env = process.env, ownerKey = f
 /** Release a held lane for the head it is at (recorded in the queue entry and as a task.train.released event). */
 export function releaseLane(root, task, { by, permission = '', env = process.env } = {}) {
   const ownerKey = /BEGIN PUBLIC KEY/.test(out(git(root, 'show', `refs/heads/${mainBranch(root)}:studio/keys/owner-ed25519.pub.pem`)));
+  // 2.84 (q): in beta mode the overseer and an outside signer release a held lane themselves, any tier, no owner key and
+  // no --permission (beta-mode.mjs standInMay, the one rule; logged as beta.use). Recorded as the owner's release, by them.
+  const si = standInMay('release', { by, env, root });
   // 2.67.0: the owner's standing delegation (harness/delegation.mjs) lets the named outside agent release with --by <agent>.
-  const dg = delegationFor({ action: 'train-release', by, env, root });
+  const dg = si.ok ? { ok: true, beta: true, standIn: true, owner: String(si.doc.by), agent: si.who, at: si.doc.at, signed: false, permission: si.words.slice(0, 500), why: '' } : delegationFor({ action: 'train-release', by, env, root });
   if (dg.ok && ownerKey && !dg.signed && !dg.beta) return { ok: false, message: `This studio has an owner key: the delegation isn't signed with it. Nothing was released.` };
   // 2.76.0: a lane the hand-back cap held in beta mode is released by the beta actors (the orchestrator, a Producer or
   // Director session: harness/beta-mode.mjs betaActor), no owner needed. Recorded as a beta use.
@@ -1588,11 +1591,12 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
   if (!r.ok) return r;
   const e = r.entry;
   keepRelease(root, task, e.released); // 2.76.0: survives the lane leaving and re-entering the queue at this head
-  if (dg.ok) recordUse(dg, { action: 'train-release', task, detail: `tier ${e.held.tier} at ${String(e.head).slice(0, 8)}` });
+  if (si.ok) recordStandInUse(si, { kind: 'release', task, msg: `${si.who} released ${task} (tier ${e.held.tier}) for the merge train in beta mode, at ${String(e.head).slice(0, 8)}`, why: e.held.why });
+  else if (dg.ok) recordUse(dg, { action: 'train-release', task, detail: `tier ${e.held.tier} at ${String(e.head).slice(0, 8)}` });
   if (ba.ok) recordBetaUse(ba, { action: 'train-release', subject: task, why: e.held.why });
   emitEvent({ type: 'task.train.released', agent: e.released.recordedBy || e.released.by, task, to: e.agent, status: 'ok', msg: `${task} (tier ${e.held.tier}: ${String(e.held.why).slice(0, 200)}) released for the merge train by ${dg.autonomous ? `${dg.agent} in autonomous mode (allowed by ${e.released.by}; on the review list)` : e.released.by}${dg.autonomous ? '' : e.released.recordedBy ? ` (recorded by ${e.released.recordedBy} on ${e.released.by}'s permission: "${e.released.permission.slice(0, 120)}")` : ''}, at ${String(e.head).slice(0, 8)}`.slice(0, 600), meta: { by: e.released.by, head: e.head, tier: e.held.tier, ...(e.released.permission ? { permission: e.released.permission, recordedBy: e.released.recordedBy } : {}), ...(dg.autonomous ? { autonomous: true } : {}) } });
   // 2.71.0 (x): one record in the decision log (harness/decisions.mjs).
-  logDecision({ action: 'train-release', subject: task, by: dg.ok ? dg.agent : e.released.by, as: asOf(dg.ok ? dg : { via: rec?.via, permission: e.released.permission }), why: `tier ${e.held.tier}: ${e.held.why}`, evidence: `${e.held.rerecord ? `${rerecordEvidence(e.held)}; ` : ''}${e.held.tier} at ${String(e.head).slice(0, 8)}`, undo: { kind: 'rehold-lane', task, head: e.head, text: `npm run decisions -- revert <id> (holds ${task} again if it hasn't landed; else files a revert task)` }, root });
+  logDecision({ action: 'train-release', subject: task, by: dg.ok ? dg.agent : e.released.by, as: si.ok ? 'beta' : asOf(dg.ok ? dg : { via: rec?.via, permission: e.released.permission }), why: `tier ${e.held.tier}: ${e.held.why}`, evidence: `${e.held.rerecord ? `${rerecordEvidence(e.held)}; ` : ''}${e.held.tier} at ${String(e.head).slice(0, 8)}`, undo: { kind: 'rehold-lane', task, head: e.head, text: `npm run decisions -- revert <id> (holds ${task} again if it hasn't landed; else files a revert task)` }, root });
   return { ok: true, entry: e, message: `${task} is released (tier ${e.held.tier}: ${e.held.why}) by ${e.released.by}${e.released.recordedBy ? `, recorded by ${e.released.recordedBy}` : ''}, for ${String(e.head).slice(0, 8)}. It lands with the next train (npm run task -- train); new commits on the lane need a new release.` };
 }
 
@@ -1674,7 +1678,10 @@ export function precheckChild(root, lane) {
   if (!src.includes("flags['train-check']")) return { ok: false, error: 'old-harness', message: `${lane.task}'s lane copy runs a harness from before the merge train (2.59.0): merge the studio's branch into the copy (git merge ${mainBranch(root)}), commit, and queue it again, or land it with STUDIO_TRAIN=off npm run task -- done ${lane.task}` };
   // 2.76.0 (B-90): run in the lane owner's name, but its events are the train's (meta.onBehalf), never the owner's activity.
   const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: lane.agent, STUDIO_ON_BEHALF: 'train' };
-  const r = spawnSync(process.execPath, [script, 'done', lane.task, '--agent', lane.agent, '--train-check'], { windowsHide: true, cwd: lane.dir, env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  // 2.84 (q): a lane queued with task done --force --train (a force approval on file) is checked as forced: the lane's own
+  // task done checks the approval again (forceApproved) before it skips the done check; the safety checks and this train's
+  // full verify still run.
+  const r = spawnSync(process.execPath, [script, 'done', lane.task, '--agent', lane.agent, '--train-check', ...(lane.forced ? ['--force'] : [])], { windowsHide: true, cwd: lane.dir, env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const line = String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{"train')).pop();
   try { const j = JSON.parse(line); return { ...j, ok: Boolean(j.ok) }; } catch {}
   return { ok: false, error: 'check-failed', message: `${`${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').slice(-12).join('\n') || `exit ${r.status}`}` };

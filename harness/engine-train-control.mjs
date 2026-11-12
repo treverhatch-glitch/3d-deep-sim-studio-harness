@@ -135,6 +135,18 @@ export async function mayControl({ by = '', env = process.env, root = process.cw
   return d.ok ? { ok: true, why: '' } : { ok: false, why: `Refused: ${d.why}` };
 }
 
+/**
+ * 2.84 (q): when the caller is one of the owner's stand-ins in beta mode (a beta-mode agent or an outside signer), the
+ * decision is also written as a beta.use event, so the owner's digest lists it. Anyone else: nothing extra. Never throws.
+ */
+async function noteStandIn({ by, env, root, msg, why }) {
+  try {
+    const bm = await import('./beta-mode.mjs');
+    const si = bm.standInMay('engine-train', { by, env, root });
+    if (si.ok) bm.recordStandInUse(si, { kind: 'engine-train', msg, why });
+  } catch { /* the command's own event is the record */ }
+}
+
 // ---- automatic start on/off --------------------------------------------------------------------------------------
 
 export const autoFile = (root, engine) => path.join(root, '.studio', 'train', `${engine}-auto.json`);
@@ -193,6 +205,7 @@ export async function setEngineAuto(root, { engine, on, by = '', why = '', hours
   if (on) { try { fs.rmSync(f, { force: true }); } catch {} }
   else writeJson(f, { off: true, engine, by: who, why: reason, at, ...(until ? { until } : {}) });
   try { emit({ type: `task.train.${engine}.auto_${on ? 'on' : 'off'}`, agent: who, to: 'producer', track: `engine:${engine}`, status: on ? 'ok' : 'warn', msg: `${who} turned the ${L} train's automatic start ${on ? 'on' : 'off'}${until ? ` until ${until.slice(0, 16)} UTC` : ''}${reason ? `: ${reason}` : ''}`.slice(0, 600), meta: { engine, on, by: who, why: reason || null, until } }); } catch {}
+  await noteStandIn({ by: who, env, root, msg: `${who} turned the ${L} train's automatic start ${on ? 'on' : 'off'} in beta mode`, why: reason });
   const envOff = offWord(env.STUDIO_ENGINE_TRAIN_AUTO);
   return { ok: true, message: on
     ? `The ${L} train's automatic start is on: the Line Producer starts it when branches wait${envOff ? ' (but STUDIO_ENGINE_TRAIN_AUTO is off in this environment, which wins)' : ''}.`
@@ -273,6 +286,7 @@ export async function cancelEngineTrain(root, { engine = 'unity', by = '', why =
   const at = new Date().toISOString();
   // 1. The cancel file first: the train's land loop reads it and neither retries nor blames.
   writeJson(cancelFile(root, engine), { train: h.id, by: who, at, why: reason });
+  await noteStandIn({ by: who, env, root, msg: `${who} cancelled the ${L} train ${h.id} in beta mode`, why: reason });
   // 2. The train's process tree (the land run below it included); Windows: taskkill /T /F (harness/heavy.mjs).
   const killer = kill || (async (holder) => { const hv = await import('./heavy.mjs'); const r = hv.killHolderTree(holder, { self: process.pid }); return { killed: r.killed || [], survivors: r.survivors || [] }; });
   let k = { killed: [], survivors: [] };

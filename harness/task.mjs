@@ -609,12 +609,14 @@ const CODE_TYPES = ['change', 'chore', 'bug', 'system', 'whole', 'balance', 'fun
  * (harness/done-check.mjs). force skips both; a skipped check is logged and the Producer gets a
  * P1 task to run it.
  */
-export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '', noop = '', checkOnly = false, trainCheck = false, unityTrainCheck = false, claims = [] } = {}) {
+export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '', noop = '', checkOnly = false, trainCheck = false, unityTrainCheck = false, claims = [], trainForce = false } = {}) {
   // 2.59.0: trainCheck runs every check task done runs before the game's checks (board, done-check, the committed lane
   // copy, protected files, secrets, hooks, weakened tests) and stops there: nothing is closed or landed. The merge train
   // (harness/train.mjs) lands the lane after ONE full verify of main + the lanes, which stands for the game's checks and
   // the "full verify after the last change" check. Never forced.
-  if (trainCheck && force) return { error: 'train-force', message: 'A forced done never goes through the merge train; run it without --train (STUDIO_TRAIN=off).' };
+  // 2.84 (q, T-662): except a forced done with a force approval on file (trainForce: the caller checked forceApproved), so
+  // a tier-C lane that must land through the train can be forced past its done check there.
+  if (trainCheck && force && !trainForce) return { error: 'train-force', message: 'A forced done goes through the merge train only with a force approval on file (npm run approve -- force <ID> --reason "…"); run it without --train (STUDIO_TRAIN=off), or record the approval first.' };
   // 2.30n: a builder in a lane copy (.lanes/<agent>) launched without STUDIO_MAIN_ROOT used to be
   // "done" with its work never merged (T-028 in the Marina run). Refuse, forced or not.
   if (/[\\/]\.lanes[\\/][^\\/]+$/.test(REPO_ROOT) && !inLaneCopy()) {
@@ -1241,15 +1243,17 @@ async function predictAtQueue(pre, agent) {
  * kickTrain: the supervisor's train daemon, else one detached train), so the train never runs in the builder's shell.
  * Prints what happened; returns the exit code (0: queued). The task stays in progress until the train lands it.
  */
-async function queueLaneForTrain(targetId, flags, noopFlag, { kick = false } = {}) {
+async function queueLaneForTrain(targetId, flags, noopFlag, { kick = false, forced = null } = {}) {
   const who = whoAmI(flags);
-  const pre = completeTask(targetId, '', who, { trainCheck: true, noop: noopFlag });
+  // 2.84 (q): forced: the force approval on file (task done --force --train); the lane is checked and queued as forced.
+  const pre = completeTask(targetId, '', who, { trainCheck: true, noop: noopFlag, ...(forced?.ok ? { force: true, trainForce: true, reason: typeof flags.reason === 'string' ? flags.reason : '', acceptedBy: flags['accepted-by'] || '' } : {}) });
   if (!pre) { console.error(`Task "${targetId}" not found.`); return 1; }
   if (pre.error) { console.error(pre.message); return 1; }
   const predicted = await predictAtQueue(pre, who);
   if (predicted.refuse) { console.error(predicted.refuse); return 1; }
   const { enqueue } = await import('./train.mjs');
-  const e = enqueue(mainRoot(), { task: pre.id, agent: who, dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, note: typeof flags.note === 'string' ? flags.note : '', ...(predicted.after ? { after: predicted.after } : {}) });
+  const e = enqueue(mainRoot(), { task: pre.id, agent: who, dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, note: typeof flags.note === 'string' ? flags.note : '', ...(predicted.after ? { after: predicted.after } : {}), ...(forced?.ok ? { forced: { by: forced.by, file: forced.file, reason: String(forced.reason || '').slice(0, 300) } } : {}) });
+  if (forced?.ok) { try { const bm = await import('./beta-mode.mjs'); const si = bm.standInMay('force', { by: who || '' }); if (si.ok) bm.recordStandInUse(si, { kind: 'force', task: pre.id, msg: `${si.who} queued ${pre.id} forced for the merge train (force approval ${forced.file})`, why: forced.reason }); } catch { /* logged by the approval */ } }
   for (const l of predicted.lines || []) console.log(l);
   emitEvent({ type: 'task.train.queued', agent: who, task: pre.id, to: 'producer', msg: `${pre.id} is checked and waits for the next merge train (${pre.branch} at ${String(pre.head).slice(0, 8)})`, meta: { head: pre.head, branch: pre.branch, ...(kick ? { viaDone: true } : {}) } });
   console.log(kick
@@ -2147,9 +2151,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     // 2.32.0: once the studio has an owner key (harness/approve.mjs), a forced done needs the owner's signed
     // approval for this task, and --accepted-by comes from that approval, never from a flag an agent types.
+    let forceApproval = null; // 2.84 (q): the force approval on file, for --force --train
     if (flags.force || flags['accepted-by']) {
       const { forceApproved } = await import('./approve.mjs');
       const fa = forceApproved(targetId);
+      forceApproval = fa;
       if (fa && !fa.ok) {
         console.error(`${targetId} can't be forced closed without the owner's approval. Hand it back (task pause ${targetId} --note "…") and ask; the owner runs: npm run approve -- force ${targetId} --reason "…". Nothing was closed.`);
         process.exit(1);
@@ -2188,14 +2194,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const noopFlag = typeof flags['no-op'] === 'string' ? flags['no-op'] : '';
     // 2.59.0: the merge train's lane check (harness/train.mjs runs it in the lane's own copy): one JSON line, nothing closed.
     if (flags['train-check']) {
-      const pre = completeTask(targetId, '', whoAmI(flags), { trainCheck: true, noop: noopFlag });
+      // 2.84 (q): a lane queued with --force --train is checked forced (precheckChild passes --force), with its approval.
+      const pre = completeTask(targetId, '', whoAmI(flags), { trainCheck: true, noop: noopFlag, ...(flags.force && forceApproval?.ok ? { force: true, trainForce: true, reason: flags.reason, acceptedBy: flags['accepted-by'] } : {}) });
       const res = !pre ? { ok: false, error: 'not-found', message: `Task "${targetId}" not found.` } : pre.error ? { ok: false, error: pre.error, message: pre.message } : { ok: true, ...pre };
       console.log(JSON.stringify({ train: 'check', ...res }));
       process.exit(res.ok ? 0 : 1);
     }
     // 2.59.0: --train: check the lane now and queue it for the next merge train (npm run task -- train lands it).
     if (flags.train) {
-      if (flags.force) { console.error('--train and --force don\'t go together: a forced done never goes through the merge train. Nothing was queued.'); process.exit(1); }
+      // 2.84 (q, T-662): --force --train with a force approval on file queues the lane forced (the train still runs its
+      // full verify and the safety checks; a tier-C lane still waits for a release). Without one: refused, as before.
+      if (flags.force && !forceApproval?.ok) { console.error(`--train and --force don't go together without a force approval: record one first (npm run approve -- force ${targetId} --reason "…"; in beta mode the overseer or an outside signer may), then run task done ${targetId} --force --train again. Nothing was queued.`); process.exit(1); }
       // 2.63.0: a Unity-track task queues its Unity branch for the Unity merge train (harness/unity-train.mjs).
       // 2.77.0 (u, P5.2/P5.6): any engine target with a land command trains on its own engine train.
       // 2.78.2 (g, item 18): one verdict (engine-tracks.mjs engineTrainVerdict): a track written "unity" reads as
@@ -2226,7 +2235,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         (r.ok ? console.log : console.error)(r.message);
         process.exit(r.ok ? 0 : 1);
       }
-      process.exit(await queueLaneForTrain(targetId, flags, noopFlag));
+      process.exit(await queueLaneForTrain(targetId, flags, noopFlag, { forced: flags.force ? forceApproval : null }));
     }
     // 2.78.2 (a, W-0090): in a lane copy with commits to land, task done queues the lane and a train lands it outside
     // this shell (it died with the builder's command at Claude Code's 10-minute limit or the session cap).
@@ -2657,7 +2666,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     } else if (cmd === 'unpark') {
       const refusedUnpark = unparkRefusal(arg1, { by });
       if (refusedUnpark) { console.error(refusedUnpark); process.exit(1); }
+      const wasParked = readHolds()[arg1]?.parked || null;
       setHold(arg1, { parked: null }, { by, msg: `${by} unparked ${arg1}` });
+      // 2.84 (q): a stand-in's unpark of a park above an agent's rank (the owner's, the orchestrator's, an owner-only step's)
+      // is the owner's decision made in beta mode: a beta.use event.
+      if (wasParked?.rank >= 3) { try { const bm = await import('./beta-mode.mjs'); const si = bm.standInMay('unpark', { by }); if (si.ok) bm.recordStandInUse(si, { kind: 'unpark', task: arg1, msg: `${si.who} unparked ${arg1} (parked by ${wasParked.by || '?'}${wasParked.why ? `: ${String(wasParked.why).slice(0, 120)}` : ''}) in beta mode`, why: wasParked.why || '' }); } catch { /* the hold event records it */ } }
       clearAttempts(arg1); // 2.81 (b1): whoever unparks decided it can run again
       console.log(`${arg1} can start again.`);
     } else if (cmd === 'block') {

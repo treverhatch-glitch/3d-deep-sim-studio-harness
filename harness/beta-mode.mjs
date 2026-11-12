@@ -30,6 +30,13 @@
  * decisions: the owner, the outside orchestrator, a Producer/Director session. Protected decisions (protected files,
  * weakened tests, hooks, task done --force, a protected config change): the owner and outside agents only, unless the
  * owner's switch STUDIO_PRODUCER_APPROVES=protected is on. Every beta record is judged by one predicate, betaRecordVerdict.
+ *
+ * 2.84 (q), the owner's decision (2026-11-12, away for a trip): the overseer (a beta-mode named agent) and an outside
+ * signer get the same power, with no owner key and no quoted permission: release a tier-C lane, force a done (also
+ * --force --train with a force approval on file), approve protected files, tests and hooks (their own change too, marked
+ * self), unpark at any rank, resume a paused role, cancel an engine train or switch its auto mode. One rule: standInMay
+ * (below). Each use is a beta.use event; the digest lists them and calls self-approvals out. Unchanged: the owner-only
+ * list, launched and pinned sessions and workers never, nothing with beta mode off, and every check still runs.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -128,6 +135,60 @@ export function betaActor({ env = process.env, from = REPO_ROOT, allowLane = fal
     return { ok: true, who: me, via: 'beta agent', doc: b.doc, words: betaWords(b.doc), why: '', decides: d.cls };
   }
   return { ok: false, why: '' };
+}
+
+/**
+ * 2.84 (q), the owner's decision (2026-11-12, before a trip abroad): while beta mode is on, a beta-mode named agent (the
+ * overseer) and an outside signer (permission.mjs outsideSigners) make these owner decisions themselves, with no owner
+ * key and no quoted permission line: 'release' (a tier-C lane from the train queue), 'force' (a force approval, task done
+ * --force, --force --train), 'protected' (protected files, weakened tests, hooks; their own change included, marked
+ * self), 'unpark' (any rank), 'crew-resume' (npm run crew -- resume) and 'engine-train' (cancel a running engine train,
+ * its auto mode on/off). One rule for all of them: may this shell make this decision right now? { ok, via, who, why,
+ * doc, words }; via is 'beta agent' or 'signer'.
+ *
+ * Never: an owner-only act (harness/owner-acts.mjs: money, deleting data, keys, publishing, beta mode off), a launched
+ * session (STUDIO_ROLE) or a session pinned to a task (STUDIO_TASK_PIN) whatever --by says, a worker's name, a name beta
+ * mode doesn't list, or anyone while beta mode is off or its record fails readBeta (set from a worker's commit, …). A
+ * coding agent's markers (CLAUDECODE, AI_AGENT, …) don't matter: the overseer and the signers are coding agents. The
+ * name is STUDIO_LOCK_OWNER, or --by in a shell that names nobody (selfNamingShell). A launched Producer/Director keeps its
+ * own rules (betaActor, mayDecide): this function never answers yes for it. Log each use with recordStandInUse.
+ */
+export const STAND_IN_KINDS = Object.freeze(['release', 'force', 'protected', 'unpark', 'crew-resume', 'engine-train']);
+export function standInMay(kind, { by = '', env = process.env, root = REPO_ROOT, allowLane = true } = {}) {
+  const no = (why, extra = {}) => ({ ok: false, via: null, who: '', why, ...extra });
+  const k = String(kind || '').trim().toLowerCase();
+  const own = ownerOnlyAction(k);
+  if (own) return no(`Refused: ${ownerOnlyWhy(own)}.`, { ownerOnly: own.act });
+  if (!STAND_IN_KINDS.includes(k)) return no(`"${kind}" isn't a decision the owner's stand-ins make (${STAND_IN_KINDS.join(', ')})`);
+  const role = String(env.STUDIO_ROLE || '').trim();
+  if (role) return no(`a launched ${role} session is never the owner's stand-in, whatever --by says`);
+  const pin = String(env.STUDIO_TASK_PIN || '').trim();
+  if (pin) return no(`a session pinned to ${pin} (STUDIO_TASK_PIN) is never the owner's stand-in, whatever --by says`);
+  const lock = String(env.STUDIO_LOCK_OWNER || '').trim();
+  const said = String(by || '').trim();
+  const worker = [lock, said].find((n) => n && WORKER.test(n));
+  if (worker) return no(`${worker} is a worker agent; workers never make the owner's decisions`);
+  let main = root;
+  try { main = mainCheckout(root); } catch { /* root as given */ }
+  if (!allowLane) { let lane = false; try { lane = inLane(root); } catch { lane = true; } if (lane) return no('a lane copy is never the owner\'s stand-in'); }
+  const b = readBeta({ root: main });
+  if (!b.on) return no(`beta mode is off (${b.why || 'no beta record'}): this is the owner's own decision, in their own terminal`);
+  const me = lock || (selfNamingShell(env) ? said : '');
+  if (!me) return no('say who decides: --by <your name>');
+  const same = (x) => String(x).trim().toLowerCase() === me.toLowerCase();
+  const via = (b.doc.agents || []).some(same) ? 'beta agent' : outsideSigners(main).some(same) ? 'signer' : null;
+  if (!via) return no(`${me} is neither one of beta mode's agents (${(b.doc.agents || []).join(', ') || 'none'}) nor an outside signer (STUDIO_OUTSIDE_SIGNERS)`);
+  return { ok: true, via, who: me, why: '', doc: b.doc, words: betaWords(b.doc), kind: k };
+}
+
+/**
+ * 2.84 (q): one beta.use event per stand-in decision, the owner's review afterwards (the digest's beta section and the
+ * War Room read it): { type: 'beta.use', agent, task?, msg, meta: { kind, by, via, self?, why?, subject? } }.
+ */
+export function recordStandInUse(si, { kind = si?.kind, task = null, msg = '', self = false, why = '', subject = '' } = {}) {
+  try {
+    emitEvent({ type: 'beta.use', agent: String(si.who).slice(0, 60), ...(task ? { task } : {}), msg: String(msg || `${si.who} made the owner's ${kind} decision in beta mode`).slice(0, 400), meta: { kind, by: String(si.who).slice(0, 60), via: si.via, ...(self ? { self: true } : {}), ...(why ? { why: String(why).slice(0, 200) } : {}), ...(subject ? { subject: String(subject).slice(0, 160) } : {}) } });
+  } catch { /* the decision's own record is written by the command */ }
 }
 
 /** An approval made in beta mode (no signature, beta.json embedded): counts while beta mode is still on with that file. */
@@ -281,7 +342,8 @@ export async function betaDigestLines({ events = null, now = Date.now(), root = 
     let ev = events;
     if (!ev) { try { ev = readRecentEvents(20000); } catch { ev = []; } }
     const inP = (t) => { const ms = Date.parse(t); return Number.isFinite(ms) && ms >= since && ms <= now + 60000; };
-    const uses = (ev || []).filter((e) => e?.type === 'delegation.used' && e.meta?.beta && inP(e.ts));
+    // 2.84 (q): and the stand-ins' own decisions (beta.use: release, force, protected, unpark, crew-resume, engine-train).
+    const uses = (ev || []).filter((e) => ((e?.type === 'delegation.used' && e.meta?.beta) || e?.type === 'beta.use') && inP(e.ts));
     const sw = (ev || []).filter((e) => (e?.type === 'beta.on' || e?.type === 'beta.off') && inP(e.ts))
       .map((e) => ({ on: e.type === 'beta.on', at: e.ts, by: e.meta?.by || e.agent, rec: e.meta?.recordedBy || '', why: '' }));
     try {
@@ -304,11 +366,13 @@ export async function betaDigestLines({ events = null, now = Date.now(), root = 
     const shown = uses.length > room ? Math.max(0, room - 1) : uses.length;
     for (const e of uses.slice(0, shown)) {
       const m = e.meta || {};
+      // 2.84 (q): a stand-in's decision in its own words; one that approved its own change says so first, in capitals.
+      if (e.type === 'beta.use') { L.push(`  ${short(e.ts)} ${m.self ? 'SELF-APPROVED: ' : ''}${e.agent} (${m.via || 'beta'}, ${m.kind || 'decision'}${e.task ? ` ${e.task}` : ''}): ${String(e.msg || '').slice(0, 160)}${m.why ? ` (${String(m.why).slice(0, 100)})` : ''}`); continue; }
       const subject = m.subject || '';
       const why = m.why || (String(e.msg || '').match(/in beta mode: (.*)$/) || [])[1] || '';
       L.push(`  ${short(e.ts)} ${e.agent}: ${m.action || 'action'}${subject ? ` ${subject}` : ''}${why ? ` (${String(why).slice(0, 100)})` : ' (no reason given)'}`);
     }
-    if (uses.length > shown) L.push(`  ... and ${uses.length - shown} more (npm run events -- --type delegation.used)`);
+    if (uses.length > shown) L.push(`  ... and ${uses.length - shown} more (npm run events -- --type beta.use; --type delegation.used)`);
     return L.slice(0, Math.max(max, 1));
   } catch { return []; }
 }
