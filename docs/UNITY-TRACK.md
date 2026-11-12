@@ -372,6 +372,11 @@ before the land run and hands back the lane that breaks it ([NATIVE-ENGINE.md](N
 took). Keep the rules' maths in plain C# with no engine types: compiled tests take seconds, rules run through an interpreter
 inside .NET take minutes, and every land run pays twice.
 
+## A warm editor and an editor service (2.84, untested on a real editor)
+
+Off by default: a land run may reuse one open editor, and agents may queue a compile and capture of their branch
+(`npm run editor -- check`). See docs/NATIVE-ENGINE.md "The editor service".
+
 ## Settings and licence
 
 In `.env`:

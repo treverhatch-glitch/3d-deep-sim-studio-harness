@@ -917,6 +917,9 @@ async function main(argv) {
     await import('./studio-passes.mjs').then(({ timedPasses }) => timedPasses({ since: state.startedAt, last: (state.timed ||= {}), dryRun: opts.dryRun, deps: { step: (label, fn) => boundedStep(label, fn, { state }) } })).catch((err) => console.error(`[supervisor] timed passes: ${err?.message || err}`));
     // 2.71.0 (z): the self-repair loop's pass (harness/workaround.mjs): hand-edited records, supervisor restarts, killed
     // launchers, harness tasks and their "maybe fixed" marks. Itself throttled to STUDIO_WORKAROUND_SCAN_MIN (10).
+    // 2.84 (s): the editor service's queue (harness/editor-service.mjs): off unless engines.<x>.service.check; started, never
+    // awaited (a compile can take minutes), and skipped while that engine's train runs.
+    if (!opts.dryRun) { try { (await import('./editor-service.mjs')).editorServicePass({ background: true }); } catch { /* off or broken: never a crash */ } }
     await boundedStep('workaround', () => import('./workaround.mjs').then(({ workaroundPass }) => workaroundPass({})), { state }).catch(() => {});
     // 2.69.0 (r): the train daemon (harness/train-daemon.mjs, STUDIO_TRAIN_AUTO): a train starts, detached, when lanes
     // are ready and the machine has room for a verify; never two at once, never while halted or winding down.

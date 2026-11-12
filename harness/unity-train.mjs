@@ -641,7 +641,10 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         const landEnv = { ...env, STUDIO_GATE_PRIORITY: 'landing', ...(fullWhy ? { STUDIO_LAND_FULL: '1' } : checked ? { STUDIO_RULES_GREEN: '1', STUDIO_RULES_MODE: rulesGreen.mode } : {}), ...playEnv };
         if (play.mode !== 'focus') { delete landEnv.STUDIO_PLAY_FILTER; delete landEnv.STUDIO_UNITY_PLAYMODE_ARGS; }
         // 2.84 (t): what the harness tells a land script is its own: nothing of these comes from the train's environment.
-        for (const k of ['STUDIO_LAND_ONLY', 'STUDIO_LAND_RETRY', 'STUDIO_LAND_RETRY_STAGE', 'STUDIO_LAND_RETRY_TESTS']) delete landEnv[k];
+        for (const k of ['STUDIO_LAND_ONLY', 'STUDIO_LAND_RETRY', 'STUDIO_LAND_RETRY_STAGE', 'STUDIO_LAND_RETRY_TESTS', 'STUDIO_EDITOR_SERVICE', 'STUDIO_EDITOR_SERVICE_CLI']) delete landEnv[k];
+        // 2.84 (s): the warm editor (engines.<x>.warm, harness/editor-service.mjs): offered to the land script, never required.
+        // Not healthy after one restart: the variables stay unset (the cold path) and engine.warm.fallback says why.
+        if (s.cfg.warm && !dryRun) { try { Object.assign(landEnv, await (await import('./editor-service.mjs')).warmLandEnv({ root, engine, cfg: s.cfg, env, log })); } catch { /* the cold path */ } }
         const rt = opts.retry || null;
         if (rt) {
           landEnv.STUDIO_LAND_RETRY = '1';

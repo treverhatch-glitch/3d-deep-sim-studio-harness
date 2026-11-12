@@ -458,7 +458,10 @@ function owningAsmdef(file, assets, cache = new Map()) {
   }
   return null;
 }
-const isTestAsmdef = (j) => Boolean(j && ((j.defineConstraints || []).includes('UNITY_INCLUDE_TESTS') || (j.references || []).some((r) => /TestRunner/.test(String(r))) || (j.optionalUnityReferences || []).includes('TestAssemblies')));
+// 2.84 (s): the harness's own editor service assembly (Assets/Editor/StudioService) references the test runner to run tests
+// on request; it holds no test, so it is not a test assembly (an Edit Mode plan naming it would make the editor run none).
+const HARNESS_ASSEMBLIES = new Set(['StudioService.Editor']);
+const isTestAsmdef = (j) => Boolean(j && !HARNESS_ASSEMBLIES.has(j.name) && ((j.defineConstraints || []).includes('UNITY_INCLUDE_TESTS') || (j.references || []).some((r) => /TestRunner/.test(String(r))) || (j.optionalUnityReferences || []).includes('TestAssemblies')));
 const isEditorOnly = (j) => Boolean(j && Array.isArray(j.includePlatforms) && j.includePlatforms.length === 1 && j.includePlatforms[0] === 'Editor');
 
 /**

@@ -92,6 +92,7 @@
     "map": "node harness/map.mjs",
     "pitfall": "node harness/pitfalls.mjs",
     "engine": "node harness/engine.mjs",
+    "editor": "node harness/editor-service.mjs",
     "engine:gate": "node scripts/check-engine.mjs",
     "engine:sim": "node harness/unity.mjs sim",
     "logs": "node harness/logs.mjs",

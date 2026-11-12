@@ -5189,6 +5189,15 @@ if (inShard('selftest-284t')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.84 (s): one harness-owned engine editor that stays open: warm land runs and the agents' compile + capture queue
+// (against a stand-in editor; untested on a real one).
+if (inShard('selftest-284s')) {
+  const dir = copyRepo();
+  const { selftest284S } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284s.mjs')).href);
+  await selftest284S({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
