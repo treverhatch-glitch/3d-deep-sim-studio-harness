@@ -37,7 +37,7 @@ Read this list first: the names a real crew sets in its `.env`, and the main sch
 - `STUDIO_CODEX_BYPASS` · no simple default · harness/agent.mjs · [PACE-AND-AGENTS.md:77](PACE-AND-AGENTS.md)
 - `STUDIO_GATE_SLOTS` · default `2` · harness/heavy.mjs, harness/merge-lane.mjs, harness/overseer-repro.mjs (+157 more) · [WORK-ORGANIZATION.md:306](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_SLOTS` · no simple default · harness/heavy-budget.mjs, harness/heavy.mjs, harness/train-parallel.mjs (+62 more) · [ENGINE-TRACKS.md:175](ENGINE-TRACKS.md)
-- `STUDIO_TEST_WORKERS` · default `'-'` · harness/flakes.mjs, harness/game-gates.mjs, harness/heavy-budget.mjs (+15 more) · [ONBOARDING-A-GAME.md:334](ONBOARDING-A-GAME.md)
+- `STUDIO_TEST_WORKERS` · default `'-'` · harness/flakes.mjs, harness/game-gates.mjs, harness/heavy-budget.mjs (+15 more) · [ONBOARDING-A-GAME.md:168](ONBOARDING-A-GAME.md)
 - `STUDIO_THREADS` · no simple default · harness/threads.mjs, qa/selftest-264l.mjs, qa/selftest-265r.mjs (+12 more) · [DIRECTOR-FLOW.md:122](DIRECTOR-FLOW.md)
 - `STUDIO_ENGINE_TRAIN_AUTO` · no simple default · harness/line-producer.mjs, qa/selftest-2791b.mjs · [ENGINE-TRACKS.md:160](ENGINE-TRACKS.md)
 - `STUDIO_SESSION_TURNS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:48](SESSIONS.md)
@@ -376,7 +376,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## GAME_* (7)
 
 - `STUDIO_GAME` · no simple default · harness/cartridge.mjs, harness/cheatsheet.mjs, harness/game-gates.mjs (+91 more) · undocumented
-- `STUDIO_GAME_GATE_CI` · no simple default · harness/game-gates.mjs, harness/train.mjs, qa/selftest-258f.mjs (+7 more) · [ONBOARDING-A-GAME.md:41](ONBOARDING-A-GAME.md)
+- `STUDIO_GAME_GATE_CI` · no simple default · harness/game-gates.mjs, harness/train.mjs, qa/selftest-258f.mjs (+7 more) · [ONBOARDING-A-GAME.md:42](ONBOARDING-A-GAME.md)
 - `STUDIO_GAME_GATE_RETRY` · no simple default · harness/game-gates.mjs, qa/selftest-244.mjs, qa/selftest-260a.mjs (+11 more) · [DISCORD-CREW.md:179](DISCORD-CREW.md)
 - `STUDIO_GAME_GATE_TIMEOUT_FLOOR` · no simple default · harness/game-gates.mjs, harness/heavy.mjs, qa/selftest-259d.mjs (+3 more) · [WORK-ORGANIZATION.md:312](WORK-ORGANIZATION.md)
 - `STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR` · no simple default · harness/game-gates.mjs, harness/heavy.mjs, harness/self-triage.mjs (+2 more) · [AUTONOMY.md:135](AUTONOMY.md)
@@ -407,7 +407,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_GATE_SLOT_STALE_MIN` · default `120` · harness/heavy.mjs, harness/merge-lane.mjs · undocumented
 - `STUDIO_GATE_SLOT_WAIT_MIN` · default `60` · harness/merge-lane.mjs, qa/selftest-2585s.mjs · undocumented
 - `STUDIO_GATE_SPAWN` · no simple default · harness/gate-spawn.mjs, qa/selftest-265s.mjs · undocumented
-- `STUDIO_GATE_TIER` · no simple default · harness/game-gates.mjs, harness/slow-tier.mjs, qa/selftest-269p.mjs · [ONBOARDING-A-GAME.md:257](ONBOARDING-A-GAME.md)
+- `STUDIO_GATE_TIER` · no simple default · harness/game-gates.mjs, harness/slow-tier.mjs, qa/selftest-269p.mjs · [ONBOARDING-A-GAME.md:227](ONBOARDING-A-GAME.md)
 
 ## GODOT_* (9)
 
@@ -614,8 +614,8 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## PERF_* (2)
 
-- `STUDIO_PERF_TESTS` · no simple default · harness/game-gates.mjs, harness/gate-fix.mjs, harness/test-timing.mjs (+1 more) · [ONBOARDING-A-GAME.md:274](ONBOARDING-A-GAME.md)
-- `STUDIO_PERF_WAIT_MIN` · no simple default · harness/game-gates.mjs, harness/train.mjs, qa/selftest-2782b.mjs (+1 more) · [ONBOARDING-A-GAME.md:280](ONBOARDING-A-GAME.md)
+- `STUDIO_PERF_TESTS` · no simple default · harness/game-gates.mjs, harness/gate-fix.mjs, harness/test-timing.mjs (+1 more) · [ONBOARDING-A-GAME.md:241](ONBOARDING-A-GAME.md)
+- `STUDIO_PERF_WAIT_MIN` · no simple default · harness/game-gates.mjs, harness/train.mjs, qa/selftest-2782b.mjs (+1 more) · [ONBOARDING-A-GAME.md:247](ONBOARDING-A-GAME.md)
 
 ## PLAY_* (3)
 
@@ -775,11 +775,11 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## SLOW_* (5)
 
-- `STUDIO_SLOW_HOUR` · no simple default · harness/slow-tier.mjs, harness/supervisor.mjs, qa/selftest-269p.mjs · [ONBOARDING-A-GAME.md:258](ONBOARDING-A-GAME.md)
+- `STUDIO_SLOW_HOUR` · no simple default · harness/slow-tier.mjs, harness/supervisor.mjs, qa/selftest-269p.mjs · [ONBOARDING-A-GAME.md:227](ONBOARDING-A-GAME.md)
 - `STUDIO_SLOW_MAX_TASKS` · no simple default · harness/slow-tier.mjs · [WORK-ORGANIZATION.md:173](WORK-ORGANIZATION.md)
-- `STUDIO_SLOW_TESTS` · no simple default · harness/game-gates.mjs, qa/selftest-260d.mjs · [ONBOARDING-A-GAME.md:225](ONBOARDING-A-GAME.md)
-- `STUDIO_SLOW_TIER` · no simple default · harness/game-gates.mjs, harness/slow-tier.mjs, qa/selftest-269p.mjs (+5 more) · [ONBOARDING-A-GAME.md:259](ONBOARDING-A-GAME.md)
-- `STUDIO_SLOW_TIMEOUT_MS` · default `3600000` · harness/game-gates.mjs · [ONBOARDING-A-GAME.md:258](ONBOARDING-A-GAME.md)
+- `STUDIO_SLOW_TESTS` · no simple default · harness/game-gates.mjs, qa/selftest-260d.mjs · [ONBOARDING-A-GAME.md:213](ONBOARDING-A-GAME.md)
+- `STUDIO_SLOW_TIER` · no simple default · harness/game-gates.mjs, harness/slow-tier.mjs, qa/selftest-269p.mjs (+5 more) · [ONBOARDING-A-GAME.md:229](ONBOARDING-A-GAME.md)
+- `STUDIO_SLOW_TIMEOUT_MS` · default `3600000` · harness/game-gates.mjs · [ONBOARDING-A-GAME.md:228](ONBOARDING-A-GAME.md)
 
 ## SPEND_* (3)
 
@@ -804,7 +804,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_STATE_LOCK_LIVE_MAX_MS` · no simple default · harness/fsafe.mjs · [WORK-ORGANIZATION.md:60](WORK-ORGANIZATION.md)
 - `STUDIO_STATE_LOCK_STALE_MS` · no simple default · harness/fsafe.mjs, qa/selftest-258b.mjs · undocumented
 - `STUDIO_STATE_LOCK_WAIT_MS` · no simple default · harness/fsafe.mjs · undocumented
-- `STUDIO_STATE_PROBE_BASE` · no simple default · harness/state-probe.mjs, qa/selftest-272c.mjs · [ONBOARDING-A-GAME.md:210](ONBOARDING-A-GAME.md)
+- `STUDIO_STATE_PROBE_BASE` · no simple default · harness/state-probe.mjs, qa/selftest-272c.mjs · [ONBOARDING-A-GAME.md:163](ONBOARDING-A-GAME.md)
 
 ## STOP_* (2)
 
@@ -835,22 +835,22 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## TEST_* (18)
 
 - `STUDIO_TEST_CPU_BUSY` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-2651a.mjs (+1 more) · undocumented
-- `STUDIO_TEST_EXCLUDE` · default `'-'` · harness/game-gates.mjs, harness/slow-tier.mjs, harness/test-config-check.mjs (+6 more) · [ONBOARDING-A-GAME.md:246](ONBOARDING-A-GAME.md)
+- `STUDIO_TEST_EXCLUDE` · default `'-'` · harness/game-gates.mjs, harness/slow-tier.mjs, harness/test-config-check.mjs (+6 more) · [ONBOARDING-A-GAME.md:176](ONBOARDING-A-GAME.md)
 - `STUDIO_TEST_FILE` · no simple default · qa/fails-before.mjs · undocumented
 - `STUDIO_TEST_FREEMEM_MB` · no simple default · harness/brief-status.mjs, harness/heavy.mjs, harness/ram.mjs (+14 more) · undocumented
 - `STUDIO_TEST_GIT_VERSION` · no simple default · harness/merge-tree.mjs, qa/selftest-2651a.mjs · undocumented
-- `STUDIO_TEST_LIST_TIMEOUT_MS` · no simple default · harness/test-config-check.mjs · [ONBOARDING-A-GAME.md:392](ONBOARDING-A-GAME.md)
+- `STUDIO_TEST_LIST_TIMEOUT_MS` · no simple default · harness/test-config-check.mjs · [ONBOARDING-A-GAME.md:271](ONBOARDING-A-GAME.md)
 - `STUDIO_TEST_LOADAVG` · no simple default · harness/heavy.mjs, qa/selftest-259d.mjs, qa/selftest-2601m.mjs (+17 more) · undocumented
 - `STUDIO_TEST_MACHINE` · no simple default · harness/heavy-budget.mjs, harness/heavy.mjs, qa/selftest-268n.mjs (+14 more) · [WORK-ORGANIZATION.md:301](WORK-ORGANIZATION.md)
 - `STUDIO_TEST_NAME` · no simple default · qa/fails-before.mjs · undocumented
-- `STUDIO_TEST_ONLY` · default `'-'` · harness/game-gates.mjs, harness/test-config-check.mjs, qa/selftest-269p.mjs (+2 more) · [ONBOARDING-A-GAME.md:247](ONBOARDING-A-GAME.md)
+- `STUDIO_TEST_ONLY` · default `'-'` · harness/game-gates.mjs, harness/test-config-check.mjs, qa/selftest-269p.mjs (+2 more) · [ONBOARDING-A-GAME.md:175](ONBOARDING-A-GAME.md)
 - `STUDIO_TEST_ON_PATH` · no simple default · harness/self-triage.mjs, qa/selftest-265t.mjs · undocumented
-- `STUDIO_TEST_QUARANTINE` · default `'[]'` · harness/flakes.mjs, harness/game-gates.mjs, harness/test-config-check.mjs (+6 more) · [ONBOARDING-A-GAME.md:376](ONBOARDING-A-GAME.md)
-- `STUDIO_TEST_RNG` · no simple default · harness/game-gates.mjs, harness/test-rng.mjs, qa/selftest-267h.mjs · [ONBOARDING-A-GAME.md:173](ONBOARDING-A-GAME.md)
+- `STUDIO_TEST_QUARANTINE` · default `'[]'` · harness/flakes.mjs, harness/game-gates.mjs, harness/test-config-check.mjs (+6 more) · [ONBOARDING-A-GAME.md:177](ONBOARDING-A-GAME.md)
+- `STUDIO_TEST_RNG` · no simple default · harness/game-gates.mjs, harness/test-rng.mjs, qa/selftest-267h.mjs · [ONBOARDING-A-GAME.md:136](ONBOARDING-A-GAME.md)
 - `STUDIO_TEST_SEED` · no simple default · qa/fails-before.mjs · undocumented
-- `STUDIO_TEST_TIMEOUT_SCALE` · default `'unset'` · harness/game-gates.mjs, harness/test-timeouts.mjs, qa/selftest-2601m.mjs (+3 more) · [ONBOARDING-A-GAME.md:223](ONBOARDING-A-GAME.md)
-- `STUDIO_TEST_TIMING` · no simple default · harness/game-gates.mjs, harness/test-timing.mjs, qa/selftest-2782f.mjs · [ONBOARDING-A-GAME.md:293](ONBOARDING-A-GAME.md)
-- `STUDIO_TEST_WORKERS` · default `'-'` · harness/flakes.mjs, harness/game-gates.mjs, harness/heavy-budget.mjs (+15 more) · [ONBOARDING-A-GAME.md:334](ONBOARDING-A-GAME.md)
+- `STUDIO_TEST_TIMEOUT_SCALE` · default `'unset'` · harness/game-gates.mjs, harness/test-timeouts.mjs, qa/selftest-2601m.mjs (+3 more) · [ONBOARDING-A-GAME.md:174](ONBOARDING-A-GAME.md)
+- `STUDIO_TEST_TIMING` · no simple default · harness/game-gates.mjs, harness/test-timing.mjs, qa/selftest-2782f.mjs · [ONBOARDING-A-GAME.md:257](ONBOARDING-A-GAME.md)
+- `STUDIO_TEST_WORKERS` · default `'-'` · harness/flakes.mjs, harness/game-gates.mjs, harness/heavy-budget.mjs (+15 more) · [ONBOARDING-A-GAME.md:168](ONBOARDING-A-GAME.md)
 - `STUDIO_TEST_WORKER_GB` · no simple default · harness/heavy-budget.mjs · [WORK-ORGANIZATION.md:318](WORK-ORGANIZATION.md)
 
 ## TESTER_* (9)
@@ -1076,7 +1076,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_BROKEN_LOCK_GRACE_SEC` · no simple default · harness/lock.mjs, harness/watch.mjs, qa/selftest-pu16.mjs · [WORK-ORGANIZATION.md:62](WORK-ORGANIZATION.md)
 - `STUDIO_BROWSER_GPU` · no simple default · harness/heavy-budget.mjs, harness/landing-build.mjs, harness/visual-proof.mjs (+3 more) · [BROWSER-PLAY.md:76](BROWSER-PLAY.md)
 - `STUDIO_BUDGET_STOP` · no simple default · harness/budget.mjs, qa/selftest-230q.mjs, qa/selftest-2782d.mjs · undocumented
-- `STUDIO_CANARY` · no simple default · harness/canaries.mjs · [ONBOARDING-A-GAME.md:320](ONBOARDING-A-GAME.md)
+- `STUDIO_CANARY` · no simple default · harness/canaries.mjs · [ONBOARDING-A-GAME.md:303](ONBOARDING-A-GAME.md)
 - `STUDIO_CARRY_SKIP_APPLIED` · no simple default · harness/lane-orphans.mjs · [WORK-ORGANIZATION.md:51](WORK-ORGANIZATION.md)
 - `STUDIO_CARTRIDGE` · no simple default · harness/cartridge.mjs, harness/gate-cache.mjs, harness/landing-build.mjs (+14 more) · undocumented
 - `STUDIO_CCUSAGE_CMD` · no simple default · harness/budget.mjs, qa/selftest.mjs · undocumented
@@ -1097,7 +1097,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_FIDELITY_TIMEOUT_MS` · default `60000` · harness/fidelity.mjs · undocumented
 - `STUDIO_FLOW_IDLE_MIN` · default `10` · harness/director-flow.mjs, qa/selftest-230h.mjs, qa/selftest-2583n.mjs (+1 more) · [DIRECTOR-FLOW.md:82](DIRECTOR-FLOW.md)
 - `STUDIO_FN_MAX_LINES` · default `80` · harness/gate-fix.mjs, scripts/check-function-size.mjs, qa/selftest-2583o.mjs (+1 more) · undocumented
-- `STUDIO_FOCUS_INFER` · no simple default · harness/game-gates.mjs, harness/train-focus.mjs, qa/selftest-2782f.mjs · [ONBOARDING-A-GAME.md:82](ONBOARDING-A-GAME.md)
+- `STUDIO_FOCUS_INFER` · no simple default · harness/game-gates.mjs, harness/train-focus.mjs, qa/selftest-2782f.mjs · [ONBOARDING-A-GAME.md:60](ONBOARDING-A-GAME.md)
 - `STUDIO_FSYNC` · no simple default · harness/fsafe.mjs · undocumented
 - `STUDIO_FUN_WAVES` · no simple default · harness/waves.mjs, qa/selftest.mjs · [AWAY-AND-ALERTS.md:26](AWAY-AND-ALERTS.md)
 - `STUDIO_GH` · no simple default · harness/ci-watch.mjs, qa/selftest-230h.mjs, qa/selftest-264l.mjs · undocumented
@@ -1132,10 +1132,10 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_PHASE_DAYS` · default `14` · harness/director.mjs · undocumented
 - `STUDIO_PITFALLS_KEEP` · default `40` · harness/pitfalls.mjs, qa/selftest-261f.mjs · [MEMORY.md:72](MEMORY.md)
 - `STUDIO_PLANNING_ROOM` · no simple default · qa/selftest-2781g.mjs, qa/selftest-279a.mjs · [LINE-PRODUCER.md:188](LINE-PRODUCER.md)
-- `STUDIO_PLAYTEST_GAME_CHECK` · no simple default · harness/done-check.mjs, qa/playtest.mjs, qa/selftest-2781f.mjs · [ONBOARDING-A-GAME.md:461](ONBOARDING-A-GAME.md)
+- `STUDIO_PLAYTEST_GAME_CHECK` · no simple default · harness/done-check.mjs, qa/playtest.mjs, qa/selftest-2781f.mjs · [ONBOARDING-A-GAME.md:371](ONBOARDING-A-GAME.md)
 - `STUDIO_POST_BROWSER_PLAY` · no simple default · harness/agent.mjs, qa/selftest-230j.mjs, qa/selftest-2732f.mjs (+9 more) · undocumented
 - `STUDIO_PYTHON` · no simple default · qa/run-python.mjs · [ROADMAP.md:19](ROADMAP.md)
-- `STUDIO_QUARANTINE_VERIFY` · no simple default · harness/test-config-check.mjs, qa/selftest-2782f.mjs · [ONBOARDING-A-GAME.md:395](ONBOARDING-A-GAME.md)
+- `STUDIO_QUARANTINE_VERIFY` · no simple default · harness/test-config-check.mjs, qa/selftest-2782f.mjs · [ONBOARDING-A-GAME.md:274](ONBOARDING-A-GAME.md)
 - `STUDIO_QUIET_BUSY_ROLES` · no simple default · harness/flake-quiet.mjs, qa/selftest-2782b.mjs · [WORK-ORGANIZATION.md:216](WORK-ORGANIZATION.md)
 - `STUDIO_REACHABILITY` · default `'warn'` · harness/done-check.mjs, harness/reachability.mjs, harness/task.mjs (+58 more) · [DISCORD-CREW.md:176](DISCORD-CREW.md)
 - `STUDIO_RECORDS` · no simple default · harness/lane-studio.mjs · undocumented
