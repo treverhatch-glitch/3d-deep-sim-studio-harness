@@ -5108,6 +5108,14 @@ if (inShard('selftest-283j')) {
   await selftest283J({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
+// 2.84 (t): the engine train's land runs: results files, blame by namespace, retry only what failed, Play Mode skip,
+// compile first, a land killed from outside, and the rules check split by focus group and by slices of lanes.
+if (inShard('selftest-284t')) {
+  const dir = copyRepo();
+  const { selftest284T } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284t.mjs')).href);
+  await selftest284T({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
 // 2.84 (m): the engine target merge a session can run, phantom files a filter rule makes look changed, rules.focus.ignore.
 if (inShard('selftest-284m')) {
   const dir = copyRepo();

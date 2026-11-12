@@ -140,11 +140,19 @@ export function engineFlow(events) {
   const ran = lands.filter((e) => ['pass', 'red', 'conflict'].includes(e.meta.status));
   const perRun = ran.map((e) => (Array.isArray(e.meta.tasks) && e.meta.tasks.length ? e.meta.tasks.length : Array.isArray(e.meta.branches) && e.meta.branches.length ? e.meta.branches.length : 1));
   // 2.84: the Play Mode stage, focused or full (a run before 2.84 says no playMode: its play stage ran in full).
-  const playRows = lands.map((e) => ({ mode: e.meta.playMode === 'focus' ? 'focus' : 'full', st: (Array.isArray(e.meta.stages) ? e.meta.stages : []).find((x) => String(x?.name || '').toLowerCase() === 'play') })).filter((x) => x.st);
+  const playRows = lands.filter((e) => e.meta.playMode !== 'skip').map((e) => ({ mode: e.meta.playMode === 'focus' ? 'focus' : 'full', st: (Array.isArray(e.meta.stages) ? e.meta.stages : []).find((x) => String(x?.name || '').toLowerCase() === 'play') })).filter((x) => x.st);
   const playMins = (m) => playRows.filter((x) => x.mode === m && Number.isFinite(x.st.seconds)).map((x) => x.st.seconds / 60);
+  // 2.84 (t): land runs told to skip the play stage (play.focus.skip), with or without a play row in their report.
+  const playSkipped = lands.filter((e) => e.meta.playMode === 'skip').length;
+  // 2.84 (t): the engine trains' retries that passed (task.train.<x>.flaky), and which tests failed the first time.
+  const flakyEvents = events.filter((e) => /^task\.train\.[\w-]+\.flaky$/.test(e.type));
+  const flakyCount = new Map();
+  for (const e of flakyEvents) for (const t of new Set(Array.isArray(e.meta?.tests) ? e.meta.tests : Array.isArray(e.meta?.failures) ? e.meta.failures : [])) flakyCount.set(t, (flakyCount.get(t) || 0) + 1);
+  const flakyTop = [...flakyCount.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0] || null;
   return {
+    flaky: flakyEvents.length ? { retries: flakyEvents.length, top: flakyTop ? { test: flakyTop[0], times: flakyTop[1] } : null } : null,
     branchesPerRun: perRun.length ? { median: r1(quantile(perRun, 0.5)), runs: perRun.length } : null,
-    play: playRows.length ? { focused: playRows.filter((x) => x.mode === 'focus').length, full: playRows.filter((x) => x.mode === 'full').length, focusMedianMin: r1(quantile(playMins('focus'), 0.5)), fullMedianMin: r1(quantile(playMins('full'), 0.5)) } : null,
+    play: playRows.length || playSkipped ? { focused: playRows.filter((x) => x.mode === 'focus').length, full: playRows.filter((x) => x.mode === 'full').length, skipped: playSkipped, focusMedianMin: r1(quantile(playMins('focus'), 0.5)), fullMedianMin: r1(quantile(playMins('full'), 0.5)) } : null,
     runs: lands.length,
     landedLanes,
     passPct: pct(by(['pass']).length, lands.length),
@@ -262,7 +270,8 @@ export function engineText(en, prev = null) {
   if (en.stages.length) L.push(`  Stages (median minutes; red runs that failed there first): ${en.stages.map((s) => `${s.name} ${s.medianMin ?? 'n/a'} (${s.failedFirst})`).join(', ')}`);
   else L.push('  Stages: the land command reports none (STUDIO_LAND_RESULT, docs/NATIVE-ENGINE.md)');
   if (en.branchesPerRun) L.push(`  Branches per land run: median ${en.branchesPerRun.median ?? 'n/a'} (${en.branchesPerRun.runs} runs)`);
-  if (en.play) L.push(`  Play stage: ${en.play.focused} focused, ${en.play.full} full; median minutes focused ${en.play.focusMedianMin ?? 'n/a'}, full ${en.play.fullMedianMin ?? 'n/a'}`);
+  if (en.play) L.push(`  Play stage: ${en.play.focused} focused, ${en.play.full} full${en.play.skipped ? `, ${en.play.skipped} skipped` : ''}; median minutes focused ${en.play.focusMedianMin ?? 'n/a'}, full ${en.play.fullMedianMin ?? 'n/a'}`);
+  if (en.flaky) L.push(`  Flaky retries: ${en.flaky.retries}${en.flaky.top ? ` (top: ${en.flaky.top.test} ×${en.flaky.top.times})` : ''}`);
   L.push(en.rules.checks ? `  Rules check before the land run: ${en.rules.checks} batch(es), ${en.rules.runs} run(s), ${en.rules.minutes} min; ${en.rules.refused} lane(s) refused before they cost a land run` : '  Rules check before the land run: none ran');
   return L;
 }

@@ -80,8 +80,12 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
       join: typeof f.join === 'string' && f.join ? f.join : '|',
       fullEveryHours: Math.max(0, num(f.fullEveryHours, 24)),
       ignore: ignoreList(f.ignore),
+      // 2.84 (t, B-134): one command per filter group, in sequence, instead of one joined command.
+      split: f.split === true,
     } : null;
-  const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), focus: focus?.map.length ? focus : null, share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean) };
+  // 2.84 (t, B-134): rules.maxLanes: a batch with more lanes is checked in consecutive slices of that many (0: off).
+  const maxLanes = Math.max(0, Math.floor(num(o.maxLanes, 0)));
+  const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), focus: focus?.map.length ? focus : null, share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes };
   const test = typeof r === 'string' ? r.trim() : typeof o.test === 'string' ? o.test.trim() : '';
   if (test) return { command: withSdk(test), inputs, timeoutMin, source: `studio/game.json engines.${engine}.rules`, ...extra };
   const d = DEFAULTS[engine];
@@ -264,14 +268,24 @@ export function rulesSelection({ changed = [], cfg, full = false, fullWhy = '' }
   // answer for "nothing under rules.paths changed": the target's kept result.
   if (ch && ch0.length && !ch.length) {
     if (!cfg.focus.smoke) return fullSel(`every changed path matches rules.focus.ignore (${ig.ignored.length}): the target's kept result answers`, { unchanged: true });
-    if (!full) return { mode: 'focus', filter: cfg.focus.smoke, command: cfg.focus.test.split('{filter}').join(cfg.focus.smoke), changed: ch, why: `every changed path matches rules.focus.ignore (${ig.ignored.length}): the smoke filter alone`, ...more };
+    if (!full) return { mode: 'focus', filter: cfg.focus.smoke, command: cfg.focus.test.split('{filter}').join(cfg.focus.smoke), changed: ch, why: `every changed path matches rules.focus.ignore (${ig.ignored.length}): the smoke filter alone`, ...more, ...splitParts(cfg, [cfg.focus.smoke]) };
   }
   if (full) return fullSel(fullWhy || 'a full run was asked for');
   if (!ch) return fullSel('the batch\'s changed paths are not known');
   if (!ch.length) return fullSel('the batch changes no path');
   const ff = focusFilters({ changed: ch, map: cfg.focus.map, smoke: cfg.focus.smoke, join: cfg.focus.join });
   if (!ff.ok) return fullSel(`${ff.unmatched} matches no rules.focus.map entry`);
-  return { mode: 'focus', filter: ff.filter, command: cfg.focus.test.split('{filter}').join(ff.filter), changed: ch, why: `${ch.length} changed path(s), all mapped by rules.focus${ig.ignored.length ? ` (${ig.ignored.length} more left out by rules.focus.ignore)` : ''}`, ...more };
+  return { mode: 'focus', filter: ff.filter, command: cfg.focus.test.split('{filter}').join(ff.filter), changed: ch, why: `${ch.length} changed path(s), all mapped by rules.focus${ig.ignored.length ? ` (${ig.ignored.length} more left out by rules.focus.ignore)` : ''}`, ...more, ...splitParts(cfg, ff.filters) };
+}
+
+/**
+ * 2.84 (t, B-134): with rules.focus.split, a focused selection runs one command per filter group (each mapped filter,
+ * then smoke) in sequence: one test process holds one system's data at a time. { parts: [{ filter, command }] } or {}.
+ */
+function splitParts(cfg, filters = []) {
+  if (!cfg?.focus?.split) return {};
+  const parts = [...new Set(filters.filter(Boolean))].map((f) => ({ filter: f, command: cfg.focus.test.split('{filter}').join(f) }));
+  return parts.length > 1 ? { parts } : {};
 }
 
 /**
@@ -328,10 +342,12 @@ export function focusFilters({ changed = [], map = [], smoke = '', join = '|' } 
  */
 export function playFocusConfig(cfg = {}) {
   const f = cfg?.play && typeof cfg.play === 'object' ? cfg.play.focus : null;
-  if (!f || typeof f !== 'object' || !Array.isArray(f.map)) return null;
-  const map = f.map.filter((m) => m && typeof m.match === 'string' && typeof m.filter === 'string').map((m) => ({ match: m.match, filter: m.filter }));
-  if (!map.length) return null;
-  return { map, smoke: typeof f.smoke === 'string' ? f.smoke.trim() : '', join: typeof f.join === 'string' && f.join ? f.join : ';', ignore: ignoreList(f.ignore) };
+  if (!f || typeof f !== 'object') return null;
+  const map = (Array.isArray(f.map) ? f.map : []).filter((m) => m && typeof m.match === 'string' && typeof m.filter === 'string').map((m) => ({ match: m.match, filter: m.filter }));
+  // 2.84 (t): play.focus.skip, regexes for paths that need no Play Mode run at all; a config with only skip is usable.
+  const skip = ignoreList(f.skip);
+  if (!map.length && !skip.length) return null;
+  return { map, smoke: typeof f.smoke === 'string' ? f.smoke.trim() : '', join: typeof f.join === 'string' && f.join ? f.join : ';', ignore: ignoreList(f.ignore), skip };
 }
 
 /** 2.84: the characters a Play Mode filter may hold; anything else and the play stage runs in full (it reaches a command line). */
@@ -347,6 +363,7 @@ export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = 
   const pf = playFocusConfig(cfg);
   const fullSel = (why, extra = {}) => ({ mode: 'full', filter: '', why, ...extra });
   if (!pf) return fullSel('no play.focus');
+  // (2.84 t: a full land run never skips, so this stays before play.focus.skip.)
   if (full) return fullSel(fullWhy || 'a full land run');
   if (!changed) return fullSel('the batch\'s changed paths are not known');
   const ch0 = [...new Set(changed.map((p) => String(p || '').replace(/\\/g, '/')).filter(Boolean))];
@@ -359,6 +376,13 @@ export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = 
   if (!ch.length) {
     if (pf.smoke && PLAY_FILTER_SAFE.test(pf.smoke)) return { mode: 'focus', filter: pf.smoke, why: `every changed path matches play.focus.ignore (${ig.ignored.length}): the smoke filter alone`, ignored: ig.ignored, ...bad };
     return fullSel(`every changed path matches play.focus.ignore (${ig.ignored.length}) and there is no smoke filter`, { ignored: ig.ignored, ...bad });
+  }
+  // 2.84 (t): every path left matches a play.focus.skip pattern (a pure port of rules code, its .NET tests): no Play
+  // Mode run at all. Never on a full land run (returned above). The daily full land run is the backstop.
+  if (pf.skip.length) {
+    const sk = ignoreSplit(ch, pf.skip);
+    for (const b of sk.bad) if (!bad.ignoreBad) bad.ignoreBad = [b]; else if (!bad.ignoreBad.includes(b)) bad.ignoreBad.push(b);
+    if (!sk.kept.length && sk.ignored.length) return { mode: 'skip', filter: '', why: `every changed path (${sk.ignored.length}) matches play.focus.skip: no Play Mode run`, ...bad };
   }
   const ff = focusFilters({ changed: ch, map: pf.map, smoke: pf.smoke, join: pf.join });
   if (!ff.ok) return fullSel(`${ff.unmatched} matches no play.focus.map entry`, bad);
@@ -440,8 +464,35 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
   try {
     const missing = copyInputs(cfg, src, dir);
     if (missing.length) log(`[engine-rules] ${engine}: input(s) not found in the engine's folder: ${missing.join(', ')} (engines.${engine}.rules.inputs)`);
+    const runEnv = { ...env, ...(cfg.env || {}), STUDIO_ENGINE: engine, STUDIO_RULES_COMMIT: sha, STUDIO_RULES_DIR: dir, STUDIO_ENGINE_REPO: repo, STUDIO_RULES_MODE: s.mode };
+    // 2.84 (t, B-134): rules.focus.split: one command per filter group, in sequence; green when all are, red on the first
+    // red (its output kept). The time limit is for the whole sequence.
+    if (Array.isArray(s.parts) && s.parts.length > 1) {
+      const groups = [];
+      for (const part of s.parts) {
+        const left = cfg.timeoutMin * 60000 - (Date.now() - t0);
+        if (left <= 0) return { status: 'error', why: `the rules check timed out after ${cfg.timeoutMin} min (engines.${engine}.rules.timeoutMin), split: ${groups.length} of ${s.parts.length} group(s) done`, ms: Date.now() - t0, mode: s.mode, groups };
+        log(`[engine-rules] ${engine}: ${part.command} on ${short(sha)} (focus, group ${groups.length + 1} of ${s.parts.length})${co.sparse ? ' (sparse checkout)' : ''}`);
+        const g0 = Date.now();
+        const rp = spawnSync(part.command, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: left, env: runEnv });
+        const gs = { filter: part.filter, seconds: Math.round((Date.now() - g0) / 1000), status: rp.error ? 'error' : rp.status === 0 ? 'pass' : 'red' };
+        groups.push(gs);
+        const text = `${rp.stdout || ''}${rp.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd();
+        if (rp.error) return { status: 'error', why: rp.error.code === 'ETIMEDOUT' ? `the rules check timed out after ${cfg.timeoutMin} min (engines.${engine}.rules.timeoutMin), in group ${part.filter}` : `the rules check could not run: ${rp.error.code || rp.error.message}`, ms: Date.now() - t0, mode: s.mode, groups };
+        if (rp.status !== 0) {
+          const ms = Date.now() - t0;
+          const rec = { status: 'red', why: `the rules check failed (exit ${rp.status ?? rp.signal ?? '?'}, focus, group ${part.filter})`, ms, at: new Date().toISOString(), mode: s.mode, groups, failures: failingTests(text).slice(0, 40), tail: text.split('\n').slice(-12).join('\n') };
+          keep(root, engine, key, rec);
+          return rec;
+        }
+      }
+      const ms = Date.now() - t0;
+      const rec = { status: 'pass', why: `the rules check passed (${Math.round(ms / 1000)} s, focus, ${groups.length} groups)`, ms, at: new Date().toISOString(), mode: s.mode, groups };
+      keep(root, engine, key, rec);
+      return rec;
+    }
     log(`[engine-rules] ${engine}: ${s.command} on ${short(sha)}${s.mode === 'focus' ? ' (focus)' : ''}${co.sparse ? ' (sparse checkout)' : ''}`);
-    const r = spawnSync(s.command, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: cfg.timeoutMin * 60000, env: { ...env, ...(cfg.env || {}), STUDIO_ENGINE: engine, STUDIO_RULES_COMMIT: sha, STUDIO_RULES_DIR: dir, STUDIO_ENGINE_REPO: repo, STUDIO_RULES_MODE: s.mode } });
+    const r = spawnSync(s.command, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: cfg.timeoutMin * 60000, env: runEnv });
     const ms = Date.now() - t0;
     const text = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd();
     if (r.error) return { status: 'error', why: r.error.code === 'ETIMEDOUT' ? `the rules check timed out after ${cfg.timeoutMin} min (engines.${engine}.rules.timeoutMin)` : `the rules check could not run: ${r.error.code || r.error.message}`, ms, mode: s.mode };
@@ -465,11 +516,33 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
  * calibration and every narrowing prefix use that same command. extraFrom: more input folders (the lanes' own), full:
  * force a full run, useCache: false ignores kept results.
  */
-export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], extraFrom = [], full = false, useCache = true, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt } = {}) {
+export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], extraFrom = [], full = false, useCache = true, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt, slice = null } = {}) {
   const src = [...from, ...extraFrom];
   const res = { ran: false, kept: lanes.slice(), dropped: [], runs: 0, ms: 0, why: '', inputs: inputsPrint(cfg, src), mode: 'full', filter: '' };
   if (!cfg) return { ...res, skipped: true, why: 'no rules check is configured' };
   if (!lanes.length) return { ...res, skipped: true, why: 'no lane to check' };
+  // 2.84 (t, B-134): rules.maxLanes: a batch with more lanes is checked in consecutive slices of that many lanes, each
+  // merged on the same target, so one test run holds a bounded batch. A red slice is narrowed within itself: only its
+  // lanes can be refused. The whole batch was never checked as one tree, so a sliced check is never "green" for the
+  // land run (no STUDIO_RULES_GREEN): it only refuses lanes early. Kept results stay per tree, so per slice.
+  if (!slice && cfg.maxLanes > 0 && lanes.length > cfg.maxLanes) {
+    const n = Math.ceil(lanes.length / cfg.maxLanes);
+    const all = { ...res, ran: false, kept: [], sliced: n, slices: [] };
+    for (let i = 0; i < n; i += 1) {
+      const part = lanes.slice(i * cfg.maxLanes, (i + 1) * cfg.maxLanes);
+      log(`[engine-rules] ${engine}: slice ${i + 1} of ${n} (rules.maxLanes ${cfg.maxLanes}): ${part.map((l) => l.task).join(', ')}`);
+      const r = rulesGate({ engine, repo, tip, lanes: part, chain, cfg, from, extraFrom, full, useCache, root, id: `${id}-s${i + 1}`, env, log, run, slice: { i: i + 1, n } });
+      all.ran = all.ran || r.ran;
+      all.runs += r.runs; all.ms += r.ms;
+      all.kept.push(...r.kept); all.dropped.push(...r.dropped);
+      all.slices.push({ lanes: part.map((l) => l.task), why: r.why, ...(r.skipped ? { skipped: true } : {}), ...(r.groups ? { groups: r.groups } : {}) });
+      if (i === 0) { all.mode = r.mode; all.filter = r.filter; }
+      else if (r.mode !== all.mode) all.mode = 'mixed';
+    }
+    if (!all.ran) all.skipped = true;
+    all.why = `${n} slices of at most ${cfg.maxLanes} lanes (rules.maxLanes): ${all.dropped.length} lane(s) refused, ${all.kept.length} go to the land run (a sliced check does not tell the land run the rules are green)`;
+    return all;
+  }
   const maxRuns = Math.max(2, Math.floor(num(env.STUDIO_ENGINE_RULES_MAX_RUNS, 12)));
   // 2.83: the batch as it would land, and what it runs: focused on the systems it changes, or the full command.
   let first = chain(tip, lanes);
@@ -480,7 +553,13 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
   if (cfg.focus || sel.unchanged) log(`[engine-rules] ${engine}: ${sel.mode} run: ${sel.why}${sel.filter ? ` (${res.filter})` : ''}`);
   // 2.84 (m): an ignore pattern that is not a valid regex is skipped, and said.
   for (const b of sel.ignoreBad || []) log(`[engine-rules] ${engine}: rules.focus.ignore pattern ${JSON.stringify(b).slice(0, 120)} is not a valid regex; skipped`);
-  const at = (sha) => { const r = run({ engine, repo, sha, cfg, from, extraFrom, sel, root, id, env, log, useCache }); if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; } return r; };
+  // 2.84 (t): with rules.focus.split, the seconds of each filter group over this batch's runs (cached runs left out).
+  const groupSecs = new Map();
+  const at = (sha) => {
+    const r = run({ engine, repo, sha, cfg, from, extraFrom, sel, root, id, env, log, useCache });
+    if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; for (const gr of Array.isArray(r.groups) ? r.groups : []) groupSecs.set(gr.filter, (groupSecs.get(gr.filter) || 0) + (gr.seconds || 0)); }
+    return r;
+  };
   // The calibration: the landed target must be green in the same kind of checkout (2.83: the same command), or the check judges nobody.
   const base = at(tip);
   if (base.status !== 'pass') {
@@ -519,9 +598,10 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     set = set.filter((l) => l.task !== culprit.task);
   }
   res.kept = set;
+  if (groupSecs.size) res.groups = [...groupSecs.entries()].map(([filter, seconds]) => ({ filter, seconds }));
   if (!res.why) res.why = res.dropped.length ? `${res.dropped.length} lane(s) refused by the rules check, ${set.length} go to the land run` : `the rules check is green for ${set.map((l) => l.task).join(', ')}`;
   if (sel.mode === 'focus') res.why += ` (focus: ${res.filter})`;
-  try { emitEvent({ type: 'engine.rules', agent: env.STUDIO_LOCK_OWNER || 'gates', track: `engine:${engine}`, status: res.dropped.length ? 'warn' : 'ok', msg: `${engine} rules check: ${res.why}`.slice(0, 400), meta: { engine, runs: res.runs, ms: res.ms, kept: set.map((l) => l.task), dropped: res.dropped.map((d) => d.lane.task), green: Boolean(res.green), mode: res.mode, filter: res.filter } }); } catch { /* the check's result stands without its event */ }
+  try { emitEvent({ type: 'engine.rules', agent: env.STUDIO_LOCK_OWNER || 'gates', track: `engine:${engine}`, status: res.dropped.length ? 'warn' : 'ok', msg: `${engine} rules check: ${res.why}`.slice(0, 400), meta: { engine, runs: res.runs, ms: res.ms, kept: set.map((l) => l.task), dropped: res.dropped.map((d) => d.lane.task), green: Boolean(res.green), mode: res.mode, filter: res.filter, ...(res.groups ? { groups: res.groups } : {}), ...(slice ? { slice: `${slice.i}/${slice.n}` } : {}) } }); } catch { /* the check's result stands without its event */ }
   return res;
 }
 
