@@ -888,45 +888,6 @@ if (inShard()) {
   report('the fun check reads the game through every persona with a lens', /## Through the personas/.test(fun) && /The first-timer: first win after/.test(fun) && /The min-maxer:/.test(fun) && /The calm player:/.test(fun) && /The explorer:/.test(fun), fun);
 }
 
-// Signed results: a signature proves who vouched; tampering breaks it; --replay re-runs the goldens.
-if (inShard()) {
-  const dir = copyRepo();
-  const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
-  git('init -q');
-  git('add -A');
-  git('commit -q -m init --no-verify');
-  const allGates = (ok = true) => JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), rows: gates.filter((g) => g.required).map((g) => ({ id: g.id, required: true, ok })) });
-  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), rows: [{ id: 'golden', required: true, ok: true }] }));
-  run(dir, 'node harness/sign.mjs keygen');
-  const partialSign = run(dir, 'node harness/sign.mjs result --by hatch');
-  report('signing refuses a gate run that skipped required gates', partialSign.status !== 0 && /required gates that never ran/.test(partialSign.stderr), partialSign.stderr);
-  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: '2020-01-01T00:00:00.000Z', rows: JSON.parse(allGates()).rows }));
-  const staleSign = run(dir, 'node harness/sign.mjs result --by hatch');
-  report('signing refuses a gate run older than the last game change', staleSign.status !== 0 && /older than the last change/.test(staleSign.stderr), staleSign.stderr);
-  fs.rmSync(path.join(dir, '.studio/keys'), { recursive: true, force: true });
-  fs.rmSync(path.join(dir, 'studio/keys'), { recursive: true, force: true });
-  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), allGates());
-  report('signing needs a key first', run(dir, 'node harness/sign.mjs result --by hatch').status !== 0);
-  const kg = run(dir, 'node harness/sign.mjs keygen');
-  report('keygen keeps the private key out of git and the public key in studio/keys', kg.status === 0 && fs.existsSync(path.join(dir, '.studio/keys/studio-ed25519.pem')) && fs.existsSync(path.join(dir, 'studio/keys/studio-ed25519.pub.pem')) && git('check-ignore -q .studio/keys/studio-ed25519.pem').status === 0, kg.stdout + kg.stderr);
-  const sr = run(dir, 'node harness/sign.mjs result --by hatch --note "slice 1"');
-  const signed = path.join(dir, 'studio/signed', fs.readdirSync(path.join(dir, 'studio/signed'))[0]);
-  const doc = JSON.parse(fs.readFileSync(signed, 'utf8'));
-  report('a signed result lists every golden\'s SHA-256, the gates and the commit', sr.status === 0 && doc.manifest.goldens.length === 2 && doc.manifest.goldens.every((g) => /^[0-9a-f]{64}$/.test(g.sha256)) && doc.manifest.gates.required === gates.filter((g) => g.required).length && doc.manifest.goldens.every((g) => /^[0-9a-f]{64}$/.test(g.fileSha256)) && /^[0-9a-f]{64}$/.test(doc.manifest.code.cartridges[0]?.sha256) && /^[0-9a-f]{40}$/.test(doc.manifest.commit), sr.stdout + sr.stderr);
-  const v = run(dir, `node harness/sign.mjs verify "${signed}" --replay`);
-  report('verify --replay checks the signature and re-runs the goldens', v.status === 0 && /this code produces the signed results/.test(v.stdout), v.stdout + v.stderr);
-  const tampered = path.join(dir, 'tampered.json');
-  fs.writeFileSync(tampered, JSON.stringify({ ...doc, manifest: { ...doc.manifest, signedBy: 'someone-else' } }));
-  report('a changed manifest fails verification', run(dir, `node harness/sign.mjs verify "${tampered}"`).status !== 0);
-  edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}\n// edited after signing\n`);
-  const codeChanged = run(dir, `node harness/sign.mjs verify "${signed}" --replay`);
-  report('verify --replay fails when the cartridge code differs from the signed code', codeChanged.status !== 0 && /differs from the signed code/.test(codeChanged.stderr), codeChanged.stdout + codeChanged.stderr);
-  edit(dir, 'qa/golden/example-1337.json', (s) => s.replace(/"sha256": "[0-9a-f]{64}"/, `"sha256": "${'1'.repeat(64)}"`));
-  report('verify --replay fails when the repo no longer produces the signed results', run(dir, `node harness/sign.mjs verify "${signed}" --replay`).status !== 0);
-  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), allGates(false));
-  report('signing refuses a red verify unless told to record it', run(dir, 'node harness/sign.mjs result --by hatch').status !== 0);
-}
-
 // The data-sharing question (harness/data-consent.mjs): starts ticked.
 if (inShard()) {
   const dir = copyRepo();
@@ -4121,7 +4082,7 @@ if (inShard('selftest-269p')) {
 }
 
 // 2.69.0 (q): a red train's prefix search checks K prefixes at once (K from the machine budget, each in its own scratch
-// copy), and STUDIO_VERIFY_REMOTE=github uses the repo's CI as the verify, falling back to the local one (qa/selftest-269q.mjs).
+// copy) (qa/selftest-269q.mjs; its remote verify checks went with the remote verify in 2.84).
 if (inShard('selftest-269q')) {
   const dir = copyRepo();
   const { selftest269Q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269q.mjs')).href);
@@ -4299,7 +4260,7 @@ if (inShard('selftest-273e')) {
 // 2.73.0 (f): taking an update safely and the overseer's stages: `upgrade --preflight` (read-only, PASS/WARN/FAIL with Fix
 // lines) and `--smoke` (a tiny verify and train in a scratch copy, the machine scan, a dry supervisor pass), the before
 // snapshot `--merge` writes and `autonomy -- impact` reads, `release -- predict` scored by impact, studio/overseer.json
-// and `npm run overseer`, `workaround -- repro` in a separate harness clone, the weekly harness scout (qa/selftest-273f.mjs).
+// and `npm run overseer`, `workaround -- repro` in a separate harness clone (qa/selftest-273f.mjs).
 if (inShard('selftest-273f')) {
   const dir = copyRepo();
   const { selftest273F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-273f.mjs')).href);
@@ -4950,8 +4911,7 @@ if (inShard('selftest-277n')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.77.0 (helper o): remote (cloud) workers (npm run remote: mark, brief with a lease, fetch remote/* into the normal
-// train, expiry; the Line Producer's offer; the rig budget's 0 local CPU) and `npm run lane -- create` from chosen branches.
+// 2.77.0 (helper o): `npm run lane -- create` from chosen branches (its remote workers' checks went with them in 2.84).
 if (inShard('selftest-277o')) {
   const dir = copyRepo();
   const { selftest277O } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277o.mjs')).href);
@@ -4959,7 +4919,7 @@ if (inShard('selftest-277o')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.77.0 (helper m): Windows-safe remote worker owner names (remote-<worker>), tests for the owner command rules and the scoped agents.
+// 2.77.0 (helper m): tests for the owner command rules and the scoped agents.
 if (inShard('selftest-277m')) {
   const dir = copyRepo();
   const { selftest277M } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277m.mjs')).href);
@@ -5194,6 +5154,14 @@ if (inShard('selftest-284u')) {
   const dir = copyRepo();
   const { selftest284U } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284u.mjs')).href);
   await selftest284U({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.84 (y): features nobody used are taken out, and what stays behaves as before.
+if (inShard('selftest-284y')) {
+  const dir = copyRepo();
+  const { selftest284Y } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284y.mjs')).href);
+  await selftest284Y({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

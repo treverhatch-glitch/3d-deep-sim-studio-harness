@@ -316,7 +316,7 @@ Every workaround of the harness is recorded, and repeats open one task for the h
 - **Measured**: the digest's "Workarounds:" line and `npm run autonomy -- impact`. **Export**: `npm run workaround -- export [--since 7d]`
   writes `.studio/exports/harness-workarounds-<date>.md` (secret patterns removed).
 
-## The overseer's stages, repro PRs and the weekly harness scout (2.73.0)
+## The overseer's stages and repro PRs (2.73.0)
 
 `studio/overseer.json` (protected; read as committed) holds the stage the owner set (0-3), the overseer's `agent`, `setBy`, `setAt` and each
 stage's entry criteria.
@@ -340,9 +340,6 @@ Gates, protected files and money stay the owner's at every stage.
   any stage; never a builder) scaffolds a failing-test PR branch `repro/<h-id>-<sig>` in a SEPARATE clone of the harness repo (never the
   studio): `qa/selftest-repro-<h-id>.mjs` and the PR body in the clone's `.studio/repro/<H-id>-PR.md` with the `Repro-Of` /
   `Repro-Signature` / `Overseer-By` trailers. `--commit` commits it; nothing is pushed.
-- **The weekly harness scout**: with `STUDIO_HARNESS_SCOUT=on` (off by default) the supervisor files one research task (`--type
-  research`, role rnd) on `STUDIO_SCOUT_DAY` (monday by default; a day name or 0-6, in `STUDIO_TZ`, else UTC), once a week and never
-  while the last is open: "Research: weekly harness scout (week of <date>)". Paperwork only: the harness makes no network call.
 
 ## Drift checks (Check cards to the Producer)
 

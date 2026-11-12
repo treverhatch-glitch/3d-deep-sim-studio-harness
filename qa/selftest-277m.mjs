@@ -1,7 +1,6 @@
 /**
- * qa/selftest-277m.mjs — 2.77.0 (helper m): Windows-safe remote worker names, and tests for the maintainer's owner
- * command rules and scoped agents.
- *   owner     remote workers' lock owner is `remote-<worker>` (a colon is an NTFS stream separator); the old `remote:` form is still recognized
+ * qa/selftest-277m.mjs — 2.77.0 (helper m): tests for the maintainer's owner command rules and scoped agents. (2.84 (y):
+ * the remote workers' owner-name check went with the remote workers.)
  *   rules     OWNER_RULES carry npm and npm.cmd prefix rules for agent stop/pause, task park/block/unblock/pause, beta on/off;
  *             narrowRule accepts each and refuses broad rules; `claude-settings --owner --dir <folder> --write` writes them in beta mode
  *   agents    .claude/agents/scout.md, fixer.md, architect.md: name + model haiku/sonnet/opus; scout has no Edit/Write
@@ -20,15 +19,6 @@ export async function selftest277M({ dir, run, report, tmpRoot }) {
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
   const imp = (rel) => import(`${pathToFileURL(path.join(dir, rel)).href}?m=${Date.now()}`);
   const NEW_CMDS = ['agent -- stop', 'agent -- pause', 'task -- park', 'task -- block', 'task -- unblock', 'task -- pause', 'beta -- on', 'beta -- off'];
-
-  await guard('2.77.0 (m) owner: the remote worker\'s lock owner is remote-<worker> (no colon), the old remote:<worker> is still recognized, never written (fails on 2.76.0: no helper)', async () => {
-    const m = await imp('harness/remote-workers.mjs');
-    const src = fs.readFileSync(path.join(dir, 'harness/remote-workers.mjs'), 'utf8').replace(/\r\n/g, '\n');
-    const made = `${m.OWNER_PREFIX}web1`;
-    const ok = made === 'remote-web1' && typeof m.isRemoteOwner === 'function' && m.isRemoteOwner('remote-web1') && m.isRemoteOwner('remote:web1') && !m.isRemoteOwner('builder-1') && !m.isRemoteOwner(null)
-      && !/(?<![A-Z_])OWNER_PREFIX\s*=\s*'remote:'/.test(src);
-    return [ok, `owner ${made}`];
-  });
 
   await guard('2.77.0 (m) rules: OWNER_RULES has the npm and npm.cmd prefix rule for each of agent stop/pause, task park/block/unblock/pause, beta on/off; narrowRule accepts each and refuses broad rules (fails on 2.76.0)', async () => {
     const d = await imp('harness/delegation.mjs');

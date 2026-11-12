@@ -72,8 +72,7 @@ Makes the lane copy the way the launcher does (studio/ and .studio/ linked to ma
 `.studio/lanes/<agent>.lane.json`, the task's branch remembered) and merges the branches in order; with no `--from`,
 the task's own unlanded branch. A branch carrying another open task's commits is refused unless `--allow-mixed`; a
 conflict removes the copy and names the files. Use it instead of `git worktree add` (a bare worktree's studio/ is its
-own, so `task done` there says "Task not found"). docs/REMOTE-WORKERS.md has the details; remote (cloud) workers
-come back through it too.
+own, so `task done` there says "Task not found").
 
 ### Orphaned finished work: `npm run lanes -- orphans` and `carry` (2.78.1)
 

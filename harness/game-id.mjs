@@ -9,13 +9,13 @@
  * game's name, when it was made, the harness version, and its parent's ID when it was started from
  * another game (a setup or a copy), so a game's family tree can be followed.
  *
- * It is stamped on goldens, regressions, signed results and saved builds, and on events. A golden or
+ * It is stamped on goldens, regressions and saved builds, and on events. A golden or
  * regression whose gameId isn't its cartridge's fails the gates: results from another game (two games
  * built side by side, a copied folder, a marketplace upload) can't pass as this one's.
  *
  * It is public on purpose and is not mixed into seeds or state hashes: anyone must be able to replay
  * a game from its code and a seed and get the same hash, including a port to another engine. Proving
- * who made a game is the job of signed results (harness/sign.mjs), not of a secret.
+ * who made a game is the job of a signature, not of a secret.
  * Template cartridges (example-sim, _template) have no ID.
  */
 import fs from 'node:fs';
