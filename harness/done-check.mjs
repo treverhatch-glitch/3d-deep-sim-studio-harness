@@ -9,19 +9,14 @@
  *
  * The type comes from a title prefix (Bug:, Fix, Chore:, Study:, Balance:, Fun:, Playtest:, Review:, Docs:)
  * and otherwise from the role. Each type is described in studio/skills/ (the table in studio/skills/README.md).
- * 2.59.0: the owner can reclassify a task (npm run task -- type <ID> <type> --by <owner> --why "…",
- * harness/reclassify.mjs); that type wins over the title's, and the output says which one is used and why.
- * A bug's regression is a cartridge replay or a seeded game unit test ("kind": "test", qa/regressions/README.md).
- * 2.62.0 (H): a task with an agreed acceptance contract (studio/contracts/<ID>.json) also needs every criterion in
- * force passing (harness/contracts.mjs contractChecks); one without a contract is checked as before.
- * 2.65.0 (hands-off by default): a "bug" type from the title or role whose committed changes are only tests, docs or
- * config (no game logic: harness/type-evidence.mjs, the sim paths of harness/tiers.mjs and the game's manifest) is
- * judged a "change" task (no regression replay), said as "type: change (evidence: …)" and logged once as a
- * task.type.evidence event (evidenceType). An owner or permission record always outranks the evidence; a change in
- * a sim path keeps "bug" and its replay.
- * 2.77.0 (u, P5.1/P5.5): an engine pass whose work lives in the engine's own repo (harness/engine-tracks.mjs engineRepo)
- * is judged there (engineWorkChecks): commits on its branch that the engine's target lacks; the engine's land run (the
- * gate or its train) stands for the studio's verify, so the studio-repo rows (changes, verify, size, reach) don't apply.
+ * The owner can reclassify a task (npm run task -- type <ID> <type> --by <owner> --why "…", harness/reclassify.mjs);
+ * that type wins over the title's. A bug's regression is a cartridge replay or a seeded game unit test
+ * ("kind": "test", qa/regressions/README.md).
+ * A task with an agreed acceptance contract (studio/contracts/<ID>.json) also needs every criterion in force passing
+ * (harness/contracts.mjs contractChecks).
+ * A "bug" whose commits are only tests, docs or config is judged a "change" (evidenceType, harness/type-evidence.mjs,
+ * logged as task.type.evidence). An engine pass in the engine's own repo (harness/engine-tracks.mjs engineRepo) is judged
+ * there (engineWorkChecks) and its land run stands for the studio's verify.
  * A task added with --visual-check or --refs also needs the visual check (harness/visual-check.mjs visualCheckRows).
  */
 import fs from 'node:fs';
@@ -61,10 +56,9 @@ import { anchorCheckRows } from './anchors.mjs';
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
 
 /**
- * 2.78.2 (c): does a review file approve? Judged by its LAST "Verdict:" line (its own line, case-insensitive; markdown
- * markers before it are fine): "approve"/"LGTM" approves; "changes requested", "reject" or "blocking" doesn't; anything
- * else doesn't. So a re-review appended to the first one decides, and a "non-blocking note" doesn't count against it.
- * A file with no Verdict line keeps the old rule: it names approve/LGTM and none of changes requested/reject/blocking.
+ * Does a review file approve? Judged by its LAST "Verdict:" line (own line, case-insensitive, markdown markers allowed):
+ * "approve"/"LGTM" approves; "changes requested", "reject", "blocking" or anything else doesn't. A re-review appended
+ * to the first one decides. A file with no Verdict line must name approve/LGTM and none of the refusal words.
  */
 export const reviewApproves = (text) => {
   const t = String(text || '').replace(/\r\n/g, '\n');
@@ -76,21 +70,18 @@ export const reviewApproves = (text) => {
   return /\b(approve[sd]?|lgtm)\b/i.test(v);
 };
 
-/** 2.78.2 (c): task types that produce notes, reviews and docs, never game code. */
+/** Task types that produce notes, reviews and docs, never game code. */
 export const NO_GAME_CODE_TYPES = ['direction', 'review', 'docs', 'idea', 'research', 'study'];
-/** 2.79 (d): roles whose tasks write notes, reviews and plans, never game code (a title like "Fix …" doesn't change that). */
+/** Roles whose tasks write notes, reviews and plans, never game code (a title like "Fix …" doesn't change that). */
 export const NO_GAME_CODE_ROLES = ['director', 'reviewer'];
 /**
- * 2.78.2 (c): may `task done` skip the game's own checks (the whole game test suite)? Yes when the task's type is one of
- * NO_GAME_CODE_TYPES and every file its lane changes (or claims, or has dirty) is a Markdown file or under studio/,
- * docs/ or .studio/. Any other file, or a type that can write code, runs them as before: a docs task that also touched
- * code still runs them. The docs and board checks are separate rows and always run. { skip, why }.
- * 2.79 (d): a Director's or reviewer's task (NO_GAME_CODE_ROLES) is judged the same way when its title typed it "bug" or
- * "change" and no owner reclassified it: its files decide.
+ * May `task done` skip the game's own checks (the whole game test suite)? Yes when the type is in NO_GAME_CODE_TYPES and
+ * every file its lane changes (or claims, or has dirty) is a Markdown file or under studio/, docs/ or .studio/. Any
+ * other file, or a type that can write code, runs them. The docs and board checks always run. Returns { skip, why }.
+ * A task of a NO_GAME_CODE_ROLES role is judged the same way even when its title typed it "bug" or "change", unless an
+ * owner reclassified it (ownerTyped): its files decide.
  */
 export function skipGameChecks(type, files, env = process.env, { role = null, ownerTyped = false } = {}) {
-  // 2.79 (d): a Director's or reviewer's task whose title typed it "bug" or "change" (no type set) is still that role's: the
-  // rule is its files, as for a typed one. An owner's reclassification (ownerTyped) is taken as said.
   const byRole = !ownerTyped && NO_GAME_CODE_ROLES.includes(String(role || '').toLowerCase());
   if (!byRole && !NO_GAME_CODE_TYPES.includes(type)) return { skip: false, why: `a ${type} task can change game code` };
   const list = [...new Set((files || []).map((f) => String(f).replace(/\\/g, '/').replace(/^\.\//, '')).filter(Boolean))];
@@ -107,9 +98,8 @@ function firstTaggedCommit(taskId) {
   return line ? line.split('\t')[0] : null;
 }
 
-// 2.58.0: build, toolchain, CI and dependency work. "build" alone is the usual start of a game task ("Build the
-// stairwell", "Fix build menu …", a game's build tool or build times), so it counts only as a label (Build: /
-// build(deps)), at the end ("Fix the build"), or with a toolchain word; anything else stays a change or a bug.
+// Build, toolchain, CI and dependency work. "build" alone often starts a game task ("Build the stairwell"), so it counts
+// only as a label (Build: / build(deps)), at the end ("Fix the build"), or with a toolchain word.
 const TOOL_WORD = String.raw`(scripts?|pipeline|config\w*|toolchain|tooling|cache|deps|dependencies|break(s|age)?|broke|broken|errors?|failures?|fail(s|ed|ing)?|warnings?|red|again|(is|was)\s+(broken|red|failing|slow)|on\s+(windows|linux|mac\w*|node|ci|ubuntu|github))\b`;
 const CHORE_START = new RegExp(String.raw`^(chore|toolchain|tooling|infra|ci|deps|dependencies)\b|^build\s*[:([]|^build\s+${TOOL_WORD}`, 'i');
 const CHORE_FIX = new RegExp(String.raw`^fix(es|ed|ing)?\b[\s:]*((the|a)\s+)?((ci|toolchain|tooling|deps|dependencies)\b|build(?=\s*$|\s*[:;,.!()[\]—–-]|\s+${TOOL_WORD}))`, 'i');
@@ -117,32 +107,29 @@ const CHORE_FIX = new RegExp(String.raw`^fix(es|ed|ing)?\b[\s:]*((the|a)\s+)?((c
 const choreTagged = (task) => /\[chore(:[^\]]*)?\]/i.test(String(task?.title || '')) || /(^|\n)\s*type\s*:\s*chore\b/im.test(String(task?.detail || ''));
 
 /**
- * 2.58.3 (crew P-041): the subject of a "Fix …"/"Bug …" title, the part that says what is being fixed: the title up
- * to the first separator (" — ", " – ", " - ", ";", "(", "[") or reference word (see, per, ref, refs, cf, via). The
- * crew's "Fix: bug batch 3 … see qa/reports/kept/known-bugs-….md" was typed docs because of the file it pointed at;
- * its subject is "Fix: bug batch 3 …". "Fix: typo in docs/X.md" keeps the .md in its subject and stays docs.
+ * The subject of a "Fix …"/"Bug …" title (what is being fixed): the title up to the first separator (" — ", " – ",
+ * " - ", ";", "(", "[") or reference word (see, per, ref, refs, cf, via). A "see x.md" reference doesn't make a docs task;
+ * "Fix: typo in docs/X.md" keeps the .md in its subject and stays docs.
  */
 export const docsFixSubject = (title) => String(title || '').split(/\s+[—–-]\s+|\s*[;([]|\b(?:see|per|refs?|cf|via)\b/i)[0];
 const isDocsFix = (title) => /^(bug|fix)\b/i.test(title) && /\b(docs?[- ]gate|check-docs|[\w/-]+\.md)\b/i.test(docsFixSubject(title));
 
 const PREFIX = [
-  // 2.35.0: a rescue of a task stopped by its budget (harness/rescue.mjs).
+  // A rescue of a task stopped by its budget (harness/rescue.mjs).
   [/^rescue:/i, 'rescue'],
-  // 2.37.0: the whole-game check went red after a landing (harness/whole-game.mjs).
+  // The whole-game check went red after a landing (harness/whole-game.mjs).
   [/^whole-game check red\b/i, 'whole'],
   [/^check forced done\b/i, 'none'],
-  // A bug in the docs (the docs gate, a .md file) closes like a docs task, not with a sim replay
-  // (Jed's run: docs-gate bugs could only close with --force). 2.58.3 (crew P-041): only when the docs are what
-  // is being fixed, named in the title's subject (docsFixSubject), not a "see <file>.md" reference.
+  // A bug in the docs (the docs gate, a .md file) closes like a docs task, not with a sim replay, but only when the docs
+  // are what is being fixed (the title's docsFixSubject), not a "see <file>.md" reference.
   [{ test: (title) => isDocsFix(title) }, 'docs'],
-  // 2.58.0: "Fix the build", "Fix CI", "Fix toolchain", "Fix deps" are chores, not bugs: no regression to replay
-  // (a crew report: toolchain tasks titled "Fix …" had to be retitled to close). Other "Fix …" stays a bug.
+  // "Fix the build", "Fix CI", "Fix toolchain", "Fix deps" are chores: no regression to replay. Other "Fix …" is a bug.
   [CHORE_FIX, 'chore'],
   [CHORE_START, 'chore'],
   [/^(bug|fix)\b/i, 'bug'],
   [/^system\b/i, 'system'],
   [/^study\b/i, 'study'],
-  // 2.71.0 (y): a research write-up with its sources (harness/research.mjs).
+  // A research write-up with its sources (harness/research.mjs).
   [/^research\b/i, 'research'],
   [/^balance\b/i, 'balance'],
   [/^fun\b/i, 'fun'],
@@ -197,7 +184,7 @@ export const TYPES = {
 /** The type the title (or, failing that, the role) gives: { type, by: 'title' | 'role' }. */
 function titleRule(task) {
   const title = String(task?.title || '');
-  // 2.58.0: a [chore] tag retypes a "Fix …" or a plain build task, never a review, study, rescue...
+  // A [chore] tag retypes a "Fix …" or a plain build task, never a review, study, rescue...
   const tagged = choreTagged(task);
   for (const [re, type] of PREFIX) if (re.test(title)) return { type: type === 'bug' && tagged ? 'chore' : type, by: 'title' };
   const byRole = BY_ROLE[task?.role] || 'change';
@@ -207,9 +194,9 @@ function titleRule(task) {
 export const titleType = (task) => titleRule(task).type;
 
 /**
- * 2.59.0: the task's type and where it comes from: { type, source, owner, ignored }. An owner reclassification
- * (harness/reclassify.mjs) wins; one on file that doesn't count (unsigned with an owner key, set by an agent's commit,
- * not committed yet) is named in `ignored` and the title decides.
+ * The task's type and where it comes from: { type, source, owner, ignored }. An owner reclassification
+ * (harness/reclassify.mjs) wins; one that doesn't count (unsigned, set by an agent's commit, not committed yet) is
+ * named in `ignored` and the title decides.
  */
 export function typeOf(task) {
   const rule = titleRule(task);
@@ -220,9 +207,9 @@ export function typeOf(task) {
 }
 
 /**
- * 2.65.0: the type the task's own diff gives, when it overrides a title/role "bug": { type: 'change', source, files,
- * kinds } or null (no override: an owner record, not a bug, no commits yet, or any game-logic file changed). Writes
- * one task.type.evidence event per task and file set (emit: false skips it). ch: taskChanges() when the caller has it.
+ * The type the task's own diff gives when it overrides a title/role "bug": { type: 'change', source, files, kinds }, or
+ * null (owner record, not a bug, no commits yet, or a game-logic file changed). Writes one task.type.evidence event
+ * per task and file set (emit: false skips it). ch: taskChanges() when the caller has it.
  */
 export function evidenceType(task, typed = typeOf(task), { since = null, ch = null, emit = true, env = process.env } = {}) {
   if (!task?.id || typed.owner || typed.type !== 'bug') return null;
@@ -250,10 +237,8 @@ export function taskType(task) {
 }
 
 /**
- * When the work started: the first task.start since the task was last finished or reopened, else when it
- * was queued, else the beginning of time. The first, not the last: a task handed back and picked up again
- * keeps the work done before the hand-back (Jed's run: the second agent's done-check missed the first
- * agent's commits and asked for changes that were already there).
+ * When the work started: the first task.start since the task was last finished or reopened, else when it was queued,
+ * else 0. The first, not the last, so a task handed back and picked up again keeps the earlier work.
  */
 export function startedAt(taskId) {
   const events = readRecentEvents(20000);
@@ -295,8 +280,7 @@ function filesUnder(rel, test, deep = false) {
 const newestSince = (files, since) => files.filter((f) => mtime(f) >= since);
 
 // ---- what changed, and when ----
-// 2.73.0: the harness's own records (the harness-task queue a forced done adds to, 2.71.0 z; pending reviews and holds)
-// are no task's change: another task's forced done wrote HARNESS-TASKS.md and it counted as this task's edit.
+// The harness's own records (the harness-task queue a forced done adds to, pending reviews, holds) are no task's change.
 const BOOKKEEPING = /^(package-lock\.json$|\.studio\/|studio\/(task-types\.json$|HARNESS-TASKS\.md$|pending-review\.json$|task-holds\.json$|NEXT\.md|CURRENT_TASK\.md|handoffs\/|meetings\/|producer\/|game\/|memory\/retros\/|harness-notes\/|proof\/)|qa\/reports\/)/;
 const WORK_DIRS = ['cartridges', 'src', 'harness', 'qa', 'scripts', 'tools', 'docs', 'studio'];
 const git = (...args) => {
@@ -318,7 +302,7 @@ export function taskChanges(taskId, since) {
   const files = new Set();
   const committed = new Set();
   let lastAt = 0;
-  // 2.58.3 (O5): what the newest change was, so a stale verify can say what made it stale.
+  // The newest change, so a stale verify can say what made it stale.
   let last = null;
   const bump = (at, what) => { if (at >= lastAt) { lastAt = at; last = { at, ...what }; } };
   const eolSkipped = [];
@@ -332,9 +316,8 @@ export function taskChanges(taskId, since) {
       const [hash, ct, tasks] = head.split('\t');
       const tagged = (tasks || '').split(',').map((x) => x.trim()).filter(Boolean);
       if (tagged.length && !tagged.includes(taskId)) continue; // someone else's task
-      // Untagged commits count when made after the task started: after the commit it started from when
-      // that's recorded (2.29; git keeps whole seconds, so a quick agent's commit can share the start's
-      // second), else by time.
+      // Untagged commits count when made after the task started: after its start commit when recorded (git keeps
+      // whole seconds, so a commit can share the start's second), else by time.
       if (!tagged.length && (afterBase ? !afterBase.has(hash) : Number(ct) * 1000 < since)) continue;
       const touched = names.filter((n) => n && !BOOKKEEPING.test(n));
       if (!touched.length) continue;
@@ -356,8 +339,7 @@ export function taskChanges(taskId, since) {
       bump(Number(ct) * 1000, { kind: 'commit', hash, file: touched[0], tagged: true });
     }
     const status = git('status', '--porcelain') || '';
-    // Another agent's uncommitted work in its own claimed folder isn't this task's change (Jed's run: a
-    // Producer's Check forced done could never clear while builders had edits in progress).
+    // Another agent's uncommitted work in its own claimed folder isn't this task's change.
     const locks = listLocks();
     const mine = locks.find((l) => l.key === `task:${taskId}`)?.owner || null;
     for (const line of status.split('\n').filter(Boolean)) {
@@ -367,7 +349,7 @@ export function taskChanges(taskId, since) {
       if (held && held.owner !== mine) continue;
       const m = mtime(f);
       if (m >= since) {
-        // 2.58.3 (O3, crew P-035): a tracked file whose only difference is line endings isn't a change.
+        // A tracked file whose only difference is line endings isn't a change.
         if (isEolOnlyLine(REPO_ROOT, line)) { eolSkipped.push(f); continue; }
         files.add(f);
         bump(m, { kind: 'file', file: f });
@@ -410,10 +392,9 @@ function studioMainBranches() {
   return [...new Set(names.filter((n) => n && n !== own && n !== `origin/${own}`))];
 }
 /**
- * 2.58.0: the commit a task's growth is measured from. Its start commit, unless its branch has since taken in the
- * studio's main branch (a merge or a rebase): then the merge-base of HEAD and main, so what came from main isn't
- * counted as the task's own growth (a crew report: a merged-in main forced a --force close twice). Only a
- * merge-base at or after the start counts; on main itself, or with no main, the start commit.
+ * The commit a task's growth is measured from: its start commit, unless its branch has since taken in the studio's main
+ * branch (merge or rebase): then the merge-base of HEAD and main, so what came from main isn't the task's growth. Only
+ * a merge-base at or after the start counts; on main itself, or with no main, the start commit.
  */
 export function sizeBase(taskId) {
   const base = taskBase(taskId);
@@ -427,9 +408,9 @@ export function sizeBase(taskId) {
 }
 
 /**
- * 2.58.3 (crew P-034): an anonymous function is named by its line ("(anonymous, line 120)"), so lines inserted above
- * an unchanged one made it look new. It is matched with the old version by its stable key (codeindex: the describe/it
- * titles and calls around it, nth occurrence), else by the most lines in common (half of the old body at least).
+ * An anonymous function is named by its line, so lines inserted above an unchanged one would make it look new. It is
+ * matched with the old version by its stable key (codeindex: the describe/it titles and calls around it, nth
+ * occurrence), else by the most lines in common (at least half of the old body).
  */
 function matchAnonymous(x, was, used, nowText, beforeText) {
   const olds = was.filter((y) => y.kind === 'function' && y.key && !used.has(y));
@@ -449,17 +430,16 @@ function matchAnonymous(x, was, used, nowText, beforeText) {
 }
 
 /**
- * The size ratchet (2.29): game functions and files over the limit (scripts/check-function-size.mjs) that
- * this task made bigger, or created. Ones that were already that big and didn't grow are left to a split
- * task. Null when the start commit isn't known (a task started before 2.29). 2.58.0: compared with sizeBase
- * (the merge-base with the studio's main branch once the task took main in), not always the start commit.
+ * The size ratchet: game functions and files over the limit (scripts/check-function-size.mjs) that this task made
+ * bigger, or created. Ones already that big that didn't grow are left to a split task. Compared with sizeBase. Null
+ * when the start commit isn't known.
  */
 export function sizeGrowth(taskId, files, info = null) {
   const base = sizeBase(taskId);
   if (!base) return null;
   const limits = LIMITS();
   const out = [];
-  // 2.60.0: the game's "sizeRule" (harness/size-rule.mjs), as committed on the studio's main branch, else at the base.
+  // The game's "sizeRule" (harness/size-rule.mjs), as committed on the studio's main branch, else at the base.
   const ruleRef = studioMainBranches().find((b) => git('rev-parse', '--verify', '--quiet', `${b}^{commit}`)) || base;
   const cache = new Map();
   const ignored = new Set();
@@ -483,7 +463,7 @@ export function sizeGrowth(taskId, files, info = null) {
     for (const x of now) {
       const old = x.key ? matchAnonymous(x, was, used, fs.readFileSync(abs(f), 'utf8'), before) : was.find((y) => y.kind === x.kind && y.name === x.name && y.unit === x.unit);
       if (x.kind === 'file' && (rule.exempt || rule.importLinesFree)) {
-        // 2.60.0: an exempt file has a hard cap instead of the no-growth rule; import-only lines added don't count.
+        // An exempt file has a hard cap instead of the no-growth rule; import-only lines added don't count.
         const text = fs.readFileSync(abs(f), 'utf8');
         const lines = text.split('\n').length;
         const kb = Buffer.byteLength(text) / 1024;
@@ -533,9 +513,9 @@ function lastGameChange() {
   return out.reduce((m, f) => Math.max(m, mtime(f)), 0);
 }
 /**
- * 2.79.1 (d): a game tester run (qa/reports/tester/<id>/summary.json, harness/tester.mjs) newer than `min` and newer than the
- * last change to the game (the cartridge, or the studio's own game folder). It satisfies a "playtest of the current build"
- * row where the template's stage-1 playtest would have: it played the real build, which stage 1 does not. [] when none.
+ * Game tester runs (qa/reports/tester/<id>/summary.json, harness/tester.mjs) newer than `min` and than the last change
+ * to the game (the cartridge, or the studio's own game folder). One satisfies a "playtest of the current build" row
+ * where the template's stage-1 playtest would have, because it played the real build. [] when none.
  */
 function testerRunsSince(min) {
   const out = [];
@@ -557,7 +537,7 @@ export function lastFullRecord() {
 }
 
 const hhmm = (ms) => `${new Date(ms).toISOString().slice(11, 16)} UTC`;
-/** 2.58.3 (O5): who ran the studio-wide full verify: the owner whose own record (.studio/gates/<owner>-full.json) is the same run. */
+/** Who ran the studio-wide full verify: the owner whose own record (.studio/gates/<owner>-full.json) is the same run. */
 function studioRecordOwner(rec) {
   try {
     for (const f of fs.readdirSync(abs('.studio/gates')).filter((n) => n.endsWith('-full.json'))) {
@@ -575,9 +555,8 @@ function landedSince(ms, taskId) {
 }
 const landedText = (l) => `${l.slice(-2).map((x) => `${x.task} landed at ${hhmm(x.at)}`).join(', ')}${l.length > 2 ? ` and ${l.length - 2} more` : ''}`;
 /**
- * 2.58.3 (O5): why the verify record doesn't cover this task, in words that say what is stale (a crew report: "no full
- * verify after your last change" came back unchanged after a full verify had run, because main had moved and the
- * verify was under another name of the same bot). The rule is unchanged: only the reason is named.
+ * Why the verify record doesn't cover this task, in words that say what is stale (a verify under another name, main
+ * moved, or the task's own files changed). Only the reason is named; the rule is unchanged.
  */
 function staleVerifyWhy(run, at, taskId, ch, usedOwn) {
   const me = process.env.STUDIO_LOCK_OWNER;
@@ -594,7 +573,7 @@ function staleVerifyWhy(run, at, taskId, ch, usedOwn) {
   if (last) return `no full \`npm run verify\` after your last change: your files changed after it (${last.file}${last.kind === 'commit' ? ` in commit ${String(last.hash).slice(0, 8)}` : ''} at ${hhmm(last.at)}; the last full verify was at ${hhmm(runAt)}); run it again`;
   return `no full \`npm run verify\` after your last change (the last full verify was at ${hhmm(runAt)}); run it again`;
 }
-/** 2.58.3 (O5): the studio's full verify of this very commit, when it was run under another name. */
+/** The studio's full verify of this very commit, when it was run under another name. */
 function otherOwnerOnHead(head) {
   const me = process.env.STUDIO_LOCK_OWNER;
   const studio = readJson('.studio/gates-last-full.json');
@@ -602,7 +581,7 @@ function otherOwnerOnHead(head) {
   const by = studioRecordOwner(studio);
   return by === me ? '' : `: the full verify of this commit (${hhmm(Date.parse(studio.at) || 0)}) was by ${by || 'another name'}, not you (STUDIO_LOCK_OWNER=${me}); a verify counts for the name that ran it, so run it as ${me}`;
 }
-/** 2.58.3 (O5): what moved HEAD since the commit the verify ran on. */
+/** What moved HEAD since the commit the verify ran on. */
 function movedHeadWhy(run, head, taskId) {
   if (!isSha(run.head) || !isAncestor(run.head, head)) return '';
   const tags = (git('log', '--format=%(trailers:key=Studio-Task,valueonly,separator=%x2C)', `${run.head}..${head}`) || '').split('\n');
@@ -616,7 +595,7 @@ export function gatesAfter(at, files = null, taskId = null, ch = null) {
   let run = null;
   let usedOwn = false;
   try {
-    // The agent's own full run first (2.29: in its own copy, the studio-wide record is someone else's code).
+    // The agent's own full run first (in its own copy, the studio-wide record is someone else's code).
     const owner = process.env.STUDIO_LOCK_OWNER;
     const own = owner && /^[\w.-]+$/.test(owner) ? `.studio/gates/${owner}-full.json` : null;
     usedOwn = Boolean(own && fs.existsSync(abs(own)));
@@ -627,23 +606,22 @@ export function gatesAfter(at, files = null, taskId = null, ch = null) {
   }
   if (run.partial) return 'the last verify was a partial run (--only); run the full `npm run verify`';
   if ((Date.parse(run.at) || 0) < at) return staleVerifyWhy(run, at, taskId, ch, usedOwn);
-  // 2.58.0 (PU-34, P-047): only a verify of this very commit on a clean tree counts. The time and the rows alone
-  // could be an older commit's run, or a record written by hand. (Not a git checkout: no commit to compare.)
+  // Only a verify of this very commit on a clean tree counts: time and rows alone could be an older commit's run or a
+  // hand-written record. (Not a git checkout: no commit to compare.)
   const head = (git('rev-parse', 'HEAD') || '').trim();
   if (isSha(head)) {
     if (!run.head) return 'the last verify record names no commit (it is older than 2.43.0, or was written by hand); run `npm run verify` again';
     if (run.head !== head) return `the last verify ran on commit ${String(run.head).slice(0, 8)}, not on this one (${head.slice(0, 8)})${(usedOwn && otherOwnerOnHead(head)) || movedHeadWhy(run, head, taskId)}; run \`npm run verify\` again`;
     if (run.dirty) return 'the last verify ran with uncommitted changes, so it tested something other than this commit; commit your work, then run `npm run verify` again';
   }
-  // 2.31.0: a verify scoped to a lane's changes (scripts/run-gates.mjs) counts as full when its scope holds
-  // every file this task changed.
+  // A verify scoped to a lane's changes (scripts/run-gates.mjs) counts as full when its scope holds every changed file.
   if (run.scoped && Array.isArray(run.changed) && files?.length) {
     const inScope = new Set(run.changed);
     const outside = files.filter((f) => !inScope.has(f));
     if (outside.length) return `the last verify was scoped to ${run.changed.length} file(s) and missed ${outside.slice(0, 3).join(', ')}${outside.length > 3 ? ` and ${outside.length - 3} more` : ''}; run \`npm run verify\` again (or \`npm run verify -- --all\`)`;
   }
-  // 2.84 (x): a verify run by track (harness/gate-tracks.mjs) counts only when the tracks it covered include every track
-  // this task's own changes need: one that skipped the web gates does not stand for a task that changed web code.
+  // A verify run by track (harness/gate-tracks.mjs) counts only when its covered tracks include every track this task's
+  // changes need (a run that skipped the web gates doesn't stand for a task that changed web code).
   if (run.tracks?.mode === 'by-track' && Array.isArray(run.tracks.covered) && files?.length) {
     let engines = null;
     try { engines = configuredEngines({ root: REPO_ROOT }); } catch {}
@@ -654,7 +632,7 @@ export function gatesAfter(at, files = null, taskId = null, ch = null) {
   }
   const red = (run.rows || []).filter((r) => r.required && !r.ok).map((r) => r.id);
   if (!red.length) return null;
-  // 2.54.0 (PU-06): checks already red when the task was claimed don't count against it; new failures do.
+  // Checks already red when the task was claimed don't count against it; new failures do.
   const base = taskId ? readBaseline(taskId) : null;
   if (!base) return `the last verify failed: ${red.join(', ')}`;
   const { fresh } = judgeRed(run.rows, base);
@@ -671,9 +649,9 @@ const readJson = (rel) => {
 };
 const words = (rel) => (fs.readFileSync(abs(rel), 'utf8').match(/[A-Za-z0-9]{2,}/g) || []).length;
 
-// 2.30b (J1, J4): a gameplay task closes only on a real-input browser play whose fun probes all pass after the last
-// change, plus a clip of the build; a sim task on a game with a browser build closes only when every sim feature shows.
-/** After a task closes: gameplay work in wave mode joins the open wave (2.30d). */
+// A gameplay task closes only on a real-input browser play whose fun probes all pass after the last change, plus a clip
+// of the build; a sim task on a game with a browser build closes only when every sim feature shows.
+/** After a task closes: gameplay work in wave mode joins the open wave. */
 export function joinWaveIfGameplay(task, by) {
   if (!wavesOn() || !['change', 'bug'].includes(taskType(task)) || !GAMEPLAY.test(`${task.title} ${task.detail || ''}`)) return null;
   try { return joinWave(task.id, { by })?.id || null; } catch { return null; }
@@ -687,8 +665,7 @@ export function gameplayChecks(task, part, since, check) {
   if (!gameplay && !simShown) return;
   const lastChange = taskChanges(task.id, since).lastAt;
   const after = all.filter((r) => (Date.parse(r.at) || 0) >= Math.max(since, lastChange));
-  // 2.30d (plan #6): in wave mode the probes run on the batch (harness/waves.mjs), not per task: the task
-  // closes, joins the open wave, and the lane moves on.
+  // In wave mode the probes run on the batch (harness/waves.mjs), not per task: the task closes and joins the open wave.
   if (gameplay && wavesOn()) {
     const w = (() => { try { return waveFor(task.id)?.id || nextWaveId(); } catch { return null; } })();
     check(`Fun check runs on the batch: this joins wave ${w || 'W-?'} when done (npm run wave -- status)`, true, null);
@@ -707,12 +684,8 @@ export function gameplayChecks(task, part, since, check) {
 }
 
 /**
- * Returns { ok, type, means, skill, checks: [{ label, ok, why }], missing: [why…] }.
- * Each check reads what the work contains, not only when a file was touched.
- */
-/**
- * 2.77.0 (u): the engine pass's work in its own repo: { engine, label, repo, branch, target, ahead, rows } or null (not
- * an engine task, or its engine's work lives in the studio repo).
+ * The engine pass's work in its own repo: { engine, label, repo, branch, target, ahead, rows } or null (not an engine
+ * task, or its engine's work lives in the studio repo).
  */
 export function engineWorkChecks(task) {
   let rec = null;
@@ -731,8 +704,8 @@ export function engineWorkChecks(task) {
     const head = g('rev-parse', '--verify', '--quiet', `refs/heads/${br}^{commit}`).stdout.trim();
     const base = target ? g('rev-parse', '--verify', '--quiet', `refs/heads/${target}^{commit}`).stdout.trim() : '';
     ahead = head && base ? Number(g('rev-list', '--count', `${base}..${head}`).stdout.trim()) || 0 : head ? 1 : 0;
-    // 2.84 (m): files git reports as modified whose bytes are the committed blob (a filter rule, Git LFS) are left out
-    // and named once in the row's label (eol-only.mjs splitPhantom).
+    // Files git reports as modified whose bytes are the committed blob (a filter rule, Git LFS) are left out and named
+    // once in the row's label (eol-only.mjs splitPhantom).
     let phantom = [];
     const dirtyIn = (() => { const wt = g('worktree', 'list', '--porcelain').stdout.split('\n\n').map((b) => ({ dir: (b.match(/^worktree (.+)$/m) || [])[1], br: (b.match(/^branch refs\/heads\/(.+)$/m) || [])[1] })).find((w) => w.br === br && w.dir); if (!wt) return []; const lines = g('-C', wt.dir, 'status', '--porcelain').stdout.split('\n').filter(Boolean).filter((l) => !/(^|\/)(Library|Temp|Logs|obj|UserSettings|\.godot)\//.test(l.slice(3))); const ph = splitPhantom(wt.dir, lines); phantom = ph.phantom; return ph.real; })();
     rows.push({ label: `Commits on ${br} in the ${t.label} repo that ${target || 'its target'} doesn't have`, ok: Boolean(head) && ahead > 0, why: !head ? `the ${t.label} repo (${repo}) has no branch ${br}` : `${br} has no commits that ${target} lacks: commit the pass's work on ${br}` });
@@ -742,8 +715,12 @@ export function engineWorkChecks(task) {
 }
 const ENGINE_WORK_TYPES = new Set(['change', 'chore', 'bug', 'system', 'whole', 'docs']);
 
+/**
+ * Returns { ok, type, means, skill, checks: [{ label, ok, why }], missing: [why…] }.
+ * Each check reads what the work contains, not only when a file was touched.
+ */
 export function checkDone(task, since = startedAt(task.id), { noop = false } = {}) {
-  // 2.77.0 (u): an engine pass in its own repo is judged there; the engine's land run is its verify.
+  // An engine pass in its own repo is judged there; the engine's land run is its verify.
   const ew = (() => { try { return engineWorkChecks(task); } catch { return null; } })();
   if (ew && ENGINE_WORK_TYPES.has(typeOf(task).type)) {
     const checks = [...ew.rows];
@@ -754,7 +731,7 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
     return { ok: !missing.length, type: typed.type, typeSource: typed.source, titleType: typed.titleType, part: null, since, checks, missing, notes: [], engineWork: { engine: ew.engine, repo: ew.repo, branch: ew.branch, target: ew.target, ahead: ew.ahead }, skill: 'studio/roles/engine-porter.md', means: `an engine pass in the ${ew.label} repo: commits on its branch that ${ew.target || 'the target'} lacks, all committed${checks.some((c) => /visual|screenshots|reference photo|looked|Reviewed/i.test(c.label)) ? ', the visual check' : ''}; the ${ew.label} land run (task done --train, then the ${ew.label} train; or the gate at done) is its verify` };
   }
   const typed = typeOf(task);
-  // 2.65.0: a bug whose diff is only tests, docs or config is a change (evidence; an owner record outranks it).
+  // A bug whose diff is only tests, docs or config is a change (an owner record outranks this).
   const ev = evidenceType(task, typed, { since });
   if (ev) Object.assign(typed, { type: ev.type, source: ev.source, evidence: ev });
   const type = typed.type;
@@ -762,8 +739,8 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
   const seen = part === 'renderer' || part === 'both';
   const checks = [];
   const check = (label, ok, why) => checks.push({ label, ok: Boolean(ok), why: ok ? null : why });
-  // 2.78.1 (f, M7): warnings that don't block, shown as "WARN ..." (a playtest stage 1 that played the template cartridge
-  // while the studio's game has its own checks, STUDIO_PLAYTEST_GAME_CHECK=warn, the default).
+  // Warnings that don't block, shown as "WARN ..." (a playtest stage 1 that played the template cartridge while the
+  // studio's game has its own checks; STUDIO_PLAYTEST_GAME_CHECK=warn, the default).
   const warnings = [];
   const stage1Warnings = (reps) => {
     const newest = (reps || []).filter(({ j }) => j?.stage1).sort((a, b) => mtime(b.f) - mtime(a.f))[0];
@@ -779,18 +756,18 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
     if (!docsOnly) {
       const sizeInfo = [];
       const grew = sizeGrowth(task.id, ch.files, sizeInfo);
-      // 2.58.3 (crew P-034): every item, not the first 3 (fixing them one by one kept turning up the next ones); past
-      // 10, the first 10 and the full list in .studio/size-growth/<task>.txt. 2.60.0: what the game's "sizeRule" let through, in the label.
+      // Every item is listed; past 10, the first 10 and the full list in .studio/size-growth/<task>.txt. What the
+      // game's "sizeRule" let through goes in the label.
       if (grew !== null) check(`No function or file grown past the size limit${sizeInfo.length && !grew.length ? ` (${sizeInfo.slice(0, 3).join('; ')})` : ''}`, !grew.length, `${sizeList(task.id, grew)}. Split it first (move a part into its own function or file), or ask the Producer for a split task (npm run task -- add "Split …")`);
     }
   };
 
-  // 2.58.0: a chore closes like a change, without the gameplay, reach and screenshot checks below.
-  // 2.80 (f, N6): a chore closed --no-op (with its reason) has no change to verify: it skips exactly those two items.
+  // A chore closes like a change, without the gameplay, reach and screenshot checks below. A chore closed --no-op (with
+  // its reason) has no change to verify and skips those two items.
   if (type === 'change' || (type === 'chore' && !noop)) workAndVerify();
   if (type === 'change' || type === 'bug') gameplayChecks(task, part, since, check);
-  // 2.38.0: built but not wired. Game code this task changed that nothing in the game reaches from its entry
-  // points (harness/reachability.mjs). A note by default; STUDIO_REACHABILITY=fail makes it a failing check.
+  // Built but not wired: game code this task changed that nothing reaches from the game's entry points
+  // (harness/reachability.mjs). A note by default; STUDIO_REACHABILITY=fail makes it a failing check.
   const notes = [];
   if (['change', 'bug', 'system'].includes(type) && reachMode() !== 'off') {
     try {
@@ -806,14 +783,14 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
   }
   if (type === 'docs') workAndVerify(true);
   if (type === 'bug') {
-    // 2.59.0: a cartridge replay (seed, tick, pinned hash) or a seeded game unit test ("kind": "test": the test file,
-    // its name and the seed; the command is the studio's own, qa/regressions/README.md).
+    // A cartridge replay (seed, tick, pinned hash) or a seeded game unit test ("kind": "test": file, name, seed;
+    // qa/regressions/README.md).
     const replayReg = (j) => regressionKind(j) === 'replay' && Number.isInteger(j.seed) && Number.isInteger(j.tick) && isSha256(j.sha256);
     const testReg = (j) => regressionKind(j) === 'test' && Number.isInteger(j.seed) && typeof j.test?.file === 'string' && j.test.file && typeof j.test?.name === 'string' && j.test.name;
     const cands = newestSince(filesUnder('qa/regressions', (n) => n.endsWith('.json')), since).map((f) => ({ f, j: readJson(f) }));
     const regs = cands.filter(({ j }) => j && (replayReg(j) || testReg(j)));
-    // 2.67.2: the refusal says exactly what to add: the file path, the fields a file written since the claim still
-    // lacks, the pin command and the fails-before command (harness/regression-howto.mjs; the bug brief says the same).
+    // The refusal says what to add: the file path, the fields still missing, the pin and fails-before commands
+    // (harness/regression-howto.mjs).
     const fix0 = regs.length ? null : firstTaggedCommit(task.id);
     const lacking = cands.filter(({ j }) => !(j && (replayReg(j) || testReg(j)))).slice(0, 3).map(({ f, j }) => `${String(f).replace(/\\/g, '/')} (missing ${regressionMissing(j).join(', ')})`);
     if (part !== 'renderer') check('Regression saved (a cartridge replay with seed, tick and a pinned hash, or a seeded game test)', regs.length, `no regression in qa/regressions/ since this task started${lacking.length ? `; written since the claim but not counted: ${lacking.join('; ')}` : ''}. ${regressionHowTo(task.id, { fix: fix0 || null }).join(' ')} (studio/skills/bug.md)`);
@@ -841,9 +818,8 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
       const plays = newestSince(filesUnder('qa/reports', (n) => /^browser_\d+\.json$/.test(n)), since).map((f) => readJson(f)).filter(Boolean);
       const good = plays.filter((r) => r.passed && (Date.parse(r.at) || 0) >= lastChange && bregs.every((f) => (r.regressions || []).some((x) => x.file === f && x.ok)));
       check('Browser play passed with the regression, after the last change', good.length, 'no passing browser play (npm run play:browser) that ran the new regression after your last change');
-      // 2.41.0: STUDIO_TWO_GREENS=on (opt-in): a new browser regression joins the protected set only after two
-      // separate passing plays since the last change and no failing one. The research pack: "one flaky input
-      // test turned the main branch red even though the game code was fine".
+      // STUDIO_TWO_GREENS=on (opt-in): a new browser regression joins the protected set only after two separate passing
+      // plays since the last change and no failing one (a flaky input test must not turn main red).
       if (/^(on|1|true|yes)$/i.test(process.env.STUDIO_TWO_GREENS || '') && good.length) {
         const after = plays.filter((r) => (Date.parse(r.at) || 0) >= lastChange);
         const red = after.filter((r) => bregs.some((f) => (r.regressions || []).some((x) => x.file === f && !x.ok)));
@@ -864,8 +840,8 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
     check('Fun report since the task started', mtime('studio/fun/latest.md') >= since, 'no fun report since this task started (`npm run fun`)');
     check('Fun report is newer than the last game change', mtime('studio/fun/latest.md') >= fresh, 'the game changed after the fun report; run `npm run fun` again');
   }
-  // 2.79 (t): a studio whose game has its own build or checks doesn't play the template cartridge per task any more: the
-  // game tester (harness/tester.mjs) plays the real build on its own schedule. A template studio keeps the stage-1 rows.
+  // A studio whose game has its own build or checks doesn't play the template cartridge per task: the game tester
+  // (harness/tester.mjs) plays the real build on its own schedule. A template studio keeps the stage-1 rows.
   const s1 = stage1Replaced();
   if (type === 'playtest' && s1.replaced) check(`Stage-1 playtest: ${s1.words}`, true, '');
   else if (type === 'playtest' && testerRunsSince(since).length) {
@@ -877,7 +853,7 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
     check('Report covers the current build with seed, ticks and hash (and the failing tick if it failed)', good.length, 'no report on the current build with a seed, ticks, a hash and (if it failed) the failing tick; run the playtest again');
     stage1Warnings(good.length ? good : reps);
   }
-  // 2.71.0 (y): research is paperwork: its write-up, with a Sources section and at least one link (harness/research.mjs).
+  // Research is paperwork: a write-up with a Sources section and at least one link (harness/research.mjs).
   if (type === 'research') {
     const r = checkResearch(task);
     let wrote = null;
@@ -897,7 +873,7 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
     check('Note gives a verdict', notes.some((t) => /\b(approve[sd]?|lgtm|request(ed)? changes|changes requested|reject(ed)?|blocking)\b/i.test(t)), 'the review note has no verdict (approve, request changes, or reject)');
   }
   if (type === 'system') {
-    // 2.30n: the spec must be this task's (its ID in the file name or text), not any spec written meanwhile.
+    // The spec must be this task's (its ID in the file name or text), not any spec written meanwhile.
     const idRe = new RegExp(`\\b${task.id}\\b`);
     const specs = newestSince(filesUnder('studio/bible/systems', (n) => n.endsWith('.md') && n !== 'README.md'), since).filter((f) => idRe.test(path.basename(f)) || idRe.test(fs.readFileSync(abs(f), 'utf8')));
     check('Spec for this task written in studio/bible/systems/ since it started', specs.length, `no spec in studio/bible/systems/ naming ${task.id} since this task started (what it does, its phase and layer, its rules and invariants; put ${task.id} in its name or text)`);
@@ -919,7 +895,7 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
     const cross = approving.filter((t) => {
       const rev = (t.match(/model-family\s*:\s*(\S+)/i) || [])[1];
       const impl = (t.match(/implementer-family\s*:\s*(\S+)/i) || [])[1] || (implementer ? modelFamily(implementer) : null);
-      // 2.83: the same-family line counts only while no other family is configured (harness/review-family.mjs).
+      // The same-family line counts only while no other family is configured (harness/review-family.mjs).
       if (rev && impl && modelFamily(rev) === modelFamily(impl) && sameFamilyAccepted(t, impl)) return true;
       return rev && impl && modelFamily(rev) !== modelFamily(impl) && modelFamily(rev) !== 'unknown';
     });
@@ -982,10 +958,10 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
     check('Screenshots, each with a line saying what it shows', pr.shots && pr.fresh, `no screenshots for ${task.id} since it started: npm run play:browser, then npm run proof -- add ${task.id} <png> "<what it shows>"`);
     check('Checked by someone other than the builder', pr.checked, pr.wrong ? `the last check said they don't match: ${pr.wrong}` : `nobody else has checked them yet: npm run proof -- check ${task.id} --by <name> --verdict matches|wrong`);
   }
-  // 2.77.0 (u, P5.5): a task added with --visual-check or --refs needs the visual check (harness/visual-check.mjs).
+  // A task added with --visual-check or --refs needs the visual check (harness/visual-check.mjs).
   try { for (const r of visualCheckRows(task.id)) check(r.label, r.ok, r.why); } catch { /* not readable: no rows */ }
-  // 2.81 (b2): the anchors the task cites (task add --anchors): met | unmet | unknown from the deliverable, never the
-  // note (harness/anchors.mjs). Unknown is a warning and never green; unmet fails only under STUDIO_ANCHORS=fail.
+  // The anchors the task cites (task add --anchors): met | unmet | unknown from the deliverable, never the note
+  // (harness/anchors.mjs). Unknown is a warning and never green; unmet fails only under STUDIO_ANCHORS=fail.
   let anchors = null;
   try {
     const ar = anchorCheckRows(task.id, { since });
@@ -993,11 +969,11 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
     warnings.push(...ar.warnings);
     if (ar.rows.length) anchors = ar.summary;
   } catch { /* no anchors readable: no rows */ }
-  // 2.62.0 (H): an agreed acceptance contract (studio/contracts/<ID>.json, harness/contracts.mjs) needs every
-  // criterion in force passing; no contract, no change (unless studio/game.json "contracts.required" names the type).
+  // An agreed acceptance contract (studio/contracts/<ID>.json, harness/contracts.mjs) needs every criterion in force
+  // passing; no contract, no change (unless studio/game.json "contracts.required" names the type).
   {
-    // 2.72.0 (c): in a lane that lands through the merge train, an unverified must-item waits for the reviewer there
-    // (tier C, harness/train.mjs laneTier) instead of blocking done here; elsewhere it blocks as before.
+    // In a lane that lands through the merge train, an unverified must-item waits for the reviewer there (tier C,
+    // harness/train.mjs laneTier) instead of blocking done here.
     const k = contractChecks(task, type, { defer: inLaneCopy() && !/^(off|0|false|no)$/i.test(String(process.env.STUDIO_TRAIN || '')) });
     for (const c of k.checks) check(c.label, c.ok, c.why);
     notes.push(...k.notes);
@@ -1018,14 +994,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   console.log(`${task.id} is a "${res.type}" task (${res.typeSource}). Done means: ${res.means}.${res.skill ? ` Skill: ${res.skill}` : ''}`);
   if (res.typeIgnored) console.log(`  note: ${res.typeIgnored}`);
   if (res.typeEvidence) console.log(`  type: ${res.type} (${res.typeSource}; the title says ${res.titleType}, so no regression replay is needed)`);
-  // 2.60.1 (B-38): whether it needs a visual result, and why (the owner's decision, the evidence or the title).
+  // Whether it needs a visual result, and why (the owner's decision, the evidence or the title).
   try {
     const d = renderDecision(task);
     if (d.by === 'owner') console.log(`  ${d.why}`);
     else if (d.why) console.log(`  visual proof: ${d.render ? 'needed' : 'not needed'} (${d.why})`);
     if (d.warn) console.log(`  WARN ${d.warn}`);
     if (d.ignored) console.log(`  note: ${d.ignored}`);
-    // 2.65.0: the visual result on file, with each camera's noise baseline (harness/visual-proof.mjs).
+    // The visual result on file, with each camera's noise baseline (harness/visual-proof.mjs).
     const vp = readVerdict(task.id)?.parts?.visual;
     if (vp) console.log(`  visual result: ${vp.ok ? 'PASS' : 'FAIL'}${vp.why ? ` (${vp.why.slice(0, 300)})` : ''}${(vp.evidence || []).length ? ` [${vp.evidence.join('; ').slice(0, 300)}]` : ''}`);
   } catch { /* no verdict module */ }

@@ -1,34 +1,31 @@
 /**
- * harness/heavy-budget.mjs — 2.68.0 (n): the machine:heavy lock as a budgeted pool, test workers and agent sessions
- * sized to the machine, and the out-of-memory retry. No harness imports at load but machine.mjs, a leaf (heavy.mjs,
- * game-gates.mjs and the supervisor all import this; the supervisor's CLI uses top-level await, so nothing here may
- * import it back).
+ * harness/heavy-budget.mjs — the machine:heavy lock as a budgeted pool, test workers and agent sessions sized to the
+ * machine, and the out-of-memory retry. Imports only machine.mjs, a leaf (heavy.mjs, game-gates.mjs and the supervisor
+ * all import this; the supervisor's CLI uses top-level await, so nothing here may import it back).
  *
- * The machine profile is helper m's scan (harness/machine.mjs readMachine(), written to <studio>/.studio/machine.json):
+ * The machine profile is the scan harness/machine.mjs readMachine() writes to <studio>/.studio/machine.json:
  *   { os, cores: { logical, performance, efficiency }, ram: { totalGb, freeGb, commitUsedGb, commitLimitGb },
  *     gpus: [{ name, vramGb, vramFreeGb, busy }], disk, power, at }
- * Admission reads the last scan only (it never runs a scan itself: a heavy take must not wait on PowerShell); a scan
- * older than STUDIO_MACHINE_MAX_AGE_MIN (15) counts as none. No scan (or STUDIO_MACHINE_SCAN=off) keeps the 2.67
- * behaviour: one slot, the STUDIO_RAM_FLOOR_GB floor.
+ * Admission reads the last scan only (it never runs a scan itself: a heavy take must not wait on PowerShell) and
+ * ignores one older than STUDIO_MACHINE_MAX_AGE_MIN (15). No scan (or STUDIO_MACHINE_SCAN=off): one slot and the
+ * STUDIO_RAM_FLOOR_GB floor.
  *
  * Areas (a claim must fit every one it names):
  *   RAM  free = commit headroom on Windows (commitLimitGb - commitUsedGb), else freeGb (MemAvailable), minus
- *        STUDIO_RESERVE_RAM_GB (default max(4, 10% of RAM)) and minus the claims of holders that started after the
- *        scan; never more than total - reserve - every live claim.
+ *        STUDIO_RESERVE_RAM_GB (default max(4, 10% of RAM)) and the claims of holders that started after the scan;
+ *        never more than total - reserve - every live claim.
  *   GPU  the largest GPU's free VRAM minus STUDIO_GPU_RESERVE_GB (2.5 when it drives the display; 0 for a GPU the scan
  *        marks display: false), minus GPU claims the same way. No GPU in the scan: GPU claims aren't held back.
  *   CPU  the threads every non-GPU-only holder claims stay within STUDIO_CPU_OVERCOMMIT (1.5) x logical cores.
- *   slots  at most STUDIO_HEAVY_SLOTS holders (default computed: min(total RAM / 10 GB, cores / 4), 1..6, since 2.79;
- *        was (RAM - reserve) / 4; 1 with no scan). A GPU-only claim (Blender preview, a GPU playtest) uses the GPU area and no slot or CPU share, so it
- *        runs beside a CPU verify.
+ *   slots  at most STUDIO_HEAVY_SLOTS holders (default min(total RAM / 10 GB, cores / 4), 1..6; 1 with no scan). A
+ *        GPU-only claim (Blender preview, a GPU playtest) uses the GPU area and no slot or CPU share, so it runs beside
+ *        a CPU verify.
  * A claim bigger than its whole area can never fit: it runs alone (no other holder in that area) rather than waiting
  * for ever. Test hook: STUDIO_TEST_MACHINE (a profile as JSON, a path to one, or "none" for a failed scan).
  *
- * 2.70.0 (t): the GPU area for jobs. Kinds that are mostly GPU work (GPU_AREA_KINDS: a browser playtest with GPU flags
- * on, Blender previews and the asset round trip, Unity bakes and graphics runs, the landing clip) claim VRAM plus a
- * small RAM/CPU share instead of a slot when the scan shows a GPU, so they run beside a CPU verify. No GPU in the scan,
- * no scan, or STUDIO_GPU_AREA=off: the 2.69 claims. Per-kind caps count by group (CAP_GROUPS: one Unity, one browser
- * playtest, one harness Blender job unless raised).
+ * GPU area for jobs: kinds that are mostly GPU work (GPU_AREA_KINDS) claim VRAM plus a small RAM/CPU share instead of a
+ * slot when the scan shows a GPU. No GPU, no scan, or STUDIO_GPU_AREA=off: the plain claims. Per-kind caps count by
+ * group (CAP_GROUPS: one Unity, one browser playtest, one harness Blender job unless raised).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -50,32 +47,30 @@ export const JOB_KINDS = {
   'blender-preview': { ramGb: 2, cpuThreads: 1, vramGb: 1, gpuOnly: true, what: 'Blender preview render' },
   'asset-roundtrip': { ramGb: 1, cpuThreads: 1, vramGb: 0, gpuOnly: false, what: 'asset export/re-import round trip' },
   heavy: { ramGb: 4, cpuThreads: 2, vramGb: 0, gpuOnly: false, what: 'heavy command' },
-  // 2.70.0 (t): with no GPU in the scan these are CPU jobs like the rest (a slot); with one, gpuAreaClaim moves them.
+  // With no GPU in the scan these are CPU jobs like the rest (a slot); with one, gpuAreaClaim moves them.
   'unity-bake': { ramGb: 8, cpuThreads: 4, vramGb: 4, gpuOnly: false, what: 'Unity lightmap bake' },
   'unity-visual': { ramGb: 8, cpuThreads: 4, vramGb: 2, gpuOnly: false, what: 'Unity graphics test run' },
   'build-clip': { ramGb: 3, cpuThreads: 2, vramGb: 0, gpuOnly: false, what: 'playable build and clip after a landing' },
-  // 2.77.0 (f, P4.2): an art bake (lightmap, texture, mesh or atlas bake run by an art pass), whatever tool runs it. A
-  // fixed claim like Unity's (rig kind "art"); `minutes` is what the Line Producer expects it to take. All three are data:
-  // studio/machine-budget.json "jobs": { "art-bake": { ramGb, cpuThreads, minutes } }.
+  // An art bake (lightmap, texture, mesh or atlas bake run by an art pass), whatever tool runs it. A fixed claim like
+  // Unity's (rig kind "art"); `minutes` is what the Line Producer expects. Data: studio/machine-budget.json "jobs".
   'art-bake': { ramGb: 6, cpuThreads: 4, vramGb: 0, gpuOnly: false, minutes: 20, what: 'art bake' },
 };
 /** Per-kind concurrency caps (more slots never mean two Unity editors at once unless the owner sets it); others: none. */
 export const MAX_CONCURRENT = { unity: 1, 'browser-playtest': 1, blender: 1 };
 /**
- * 2.70.0 (t): kinds that share one per-kind cap: every Unity editor run counts as "unity", the harness's own Blender
- * jobs as "blender" (one at a time; an interactive Blender someone opened is never counted, closed or touched), and the
- * landing clip (a browser playtest) as "browser-playtest".
+ * Kinds that share one per-kind cap: every Unity editor run counts as "unity", the harness's own Blender jobs as
+ * "blender" (an interactive Blender someone opened is never counted, closed or touched), the landing clip as
+ * "browser-playtest".
  */
 export const CAP_GROUPS = { 'unity-bake': 'unity', 'unity-visual': 'unity', 'blender-preview': 'blender', 'asset-roundtrip': 'blender', 'build-clip': 'browser-playtest' };
 export const capGroup = (kind) => CAP_GROUPS[kind] || kind;
 /** The kind shares a cap with others (it is in a group, or names one). */
 export const isGrouped = (kind) => Boolean(CAP_GROUPS[kind]) || Object.values(CAP_GROUPS).includes(kind);
 /**
- * 2.70.0 (t): the GPU area for jobs that are mostly GPU work. When the machine scan shows a GPU (and STUDIO_GPU_AREA
- * isn't off), these kinds claim VRAM plus a small RAM and CPU share instead of a machine:heavy slot, so they run
- * beside a CPU verify when VRAM and RAM allow. `browser` kinds only when the browser runs with GPU flags
- * (STUDIO_BROWSER_GPU on, or auto with a GPU); with the flags off Chromium renders on the CPU (SwiftShader) and the
- * job keeps its slot. studio/machine-budget.json "gpuJobs": { "<kind>": { ramGb, cpuThreads, vramGb } } overrides.
+ * Jobs that are mostly GPU work. When the scan shows a GPU (and STUDIO_GPU_AREA isn't off), these claim VRAM plus a small
+ * RAM and CPU share instead of a machine:heavy slot. `browser` kinds only when the browser runs with GPU flags
+ * (STUDIO_BROWSER_GPU on, or auto with a GPU); with them off Chromium renders on the CPU (SwiftShader) and the job
+ * keeps its slot. studio/machine-budget.json "gpuJobs": { "<kind>": { ramGb, cpuThreads, vramGb } } overrides.
  */
 export const GPU_AREA_KINDS = {
   'browser-playtest': { ramGb: 5, cpuThreads: 1, vramGb: 1, browser: true },
@@ -87,8 +82,8 @@ export const GPU_AREA_KINDS = {
   'build-clip': { ramGb: 3, cpuThreads: 1, vramGb: 0.5, browser: true },
 };
 /**
- * 2.70.0 (t): STUDIO_BROWSER_GPU=on|off|auto (default off): { on, mode, why }. auto = on when the machine scan shows a
- * GPU. The flags themselves (qa/chromium.mjs browserGpuFlags) are UNVERIFIED on the crew's PC: opt-in.
+ * STUDIO_BROWSER_GPU=on|off|auto (default off): { on, mode, why }. auto = on when the machine scan shows a GPU. The
+ * flags themselves (qa/chromium.mjs browserGpuFlags) are UNVERIFIED on the owner's PC: opt-in.
  */
 export function browserGpuMode(env = process.env, profile = null) {
   const raw = String(env.STUDIO_BROWSER_GPU || '').trim().toLowerCase();
@@ -99,8 +94,8 @@ export function browserGpuMode(env = process.env, profile = null) {
   return g ? { on: true, mode, why: `STUDIO_BROWSER_GPU=auto and the machine scan shows ${g.name || 'a GPU'}` } : { on: false, mode, why: `STUDIO_BROWSER_GPU=auto and the machine scan shows no GPU${profile ? '' : ' (no scan)'}` };
 }
 /**
- * 2.70.0 (t): the GPU-area claim for `kind`, or { claim: null, why } when the job keeps the 2.69 claim (no GPU in the
- * scan or no scan, STUDIO_GPU_AREA=off, a browser job with GPU flags off, or a kind that isn't mostly GPU).
+ * The GPU-area claim for `kind`, or { claim: null, why } when the job keeps its plain claim (no GPU or no scan,
+ * STUDIO_GPU_AREA=off, a browser job with GPU flags off, or a kind that isn't mostly GPU).
  */
 export function gpuAreaClaim(kind, { root = process.cwd(), env = process.env, profile = null } = {}) {
   if (!GPU_AREA_KINDS[kind]) return { claim: null, why: '' };
@@ -131,13 +126,12 @@ export function maxConcurrent(kind, { root = process.cwd(), env = process.env } 
 }
 export const WORKER_GB = (env = process.env) => Math.max(0.05, num(env.STUDIO_TEST_WORKER_GB, 0.45));
 
-/** 2.73.2 (e, B-73): every Unity editor kind (unity, unity-bake, unity-visual: the "unity" cap group). */
+/** Every Unity editor kind (unity, unity-bake, unity-visual: the "unity" cap group). */
 export const isUnityKind = (kind) => capGroup(kind) === 'unity';
 /**
- * 2.73.2 (e, B-73): the free-RAM floor a Unity editor run waits for before it starts: STUDIO_UNITY_MIN_FREE_GB (default
- * 12; 0 or off: none), never more than 60% of the machine's RAM (a 16 GB machine waits for 9.6 GB, not 12). A Unity
- * landing that started with about 9 GB free peaked at 4.6 GB beside a web verify's vitest and fell to 3.9 GB free:
- * the run aborted. { gb, setGb, capGb, totalGb, why }; gb 0 means no floor. totalGb: the scan's, else os.totalmem().
+ * The free-RAM floor a Unity editor run waits for before it starts: STUDIO_UNITY_MIN_FREE_GB (default 12; 0 or off:
+ * none), never more than 60% of the machine's RAM (a 16 GB machine waits for 9.6 GB). A run that starts with too little
+ * free RAM beside a web verify aborts. { gb, setGb, capGb, totalGb, why }; gb 0 means no floor. totalGb: the scan's, else os.totalmem().
  */
 export function unityMinFreeGb({ env = process.env, profile = null, totalGb = null } = {}) {
   const raw = env.STUDIO_UNITY_MIN_FREE_GB;
@@ -154,8 +148,8 @@ const toMs = (at) => (fin(at) ? at : Number.isFinite(Date.parse(at)) ? Date.pars
 /**
  * The machine profile admission uses (sync): opts.machine (an object, null, or a function giving one), else
  * STUDIO_TEST_MACHINE, else <root>/.studio/machine.json when younger than STUDIO_MACHINE_MAX_AGE_MIN (15), else a scan
- * taken now and written there for the next caller (2.80 (c), N1: a stale file gave null, 2 test workers and false reds
- * while the supervisor was off). null = no scan (off, STUDIO_TEST_MACHINE=none, or the scan failed: 2.67 behaviour).
+ * taken now and written there for the next caller (a stale file must not mean "no scan" while the supervisor is off).
+ * null = no scan (off, STUDIO_TEST_MACHINE=none, or the scan failed): one slot, the RAM floor.
  */
 export function machineProfile(root, { env = process.env, machine, now = Date.now() } = {}) {
   if (machine !== undefined) return typeof machine === 'function' ? machine() || null : machine || null;
@@ -187,7 +181,7 @@ const cfgEnv = (root, env) => {
 const isWin = (p) => /^win/i.test(String(p?.os?.platform || p?.os?.name || p?.os || ''));
 export const logicalCores = (p) => Math.max(1, num(p?.cores?.logical, (os.availableParallelism ? os.availableParallelism() : os.cpus().length) || 1));
 export const totalRamGb = (p) => (fin(p?.ram?.totalGb) ? p.ram.totalGb : null);
-/** Free RAM by the scan: commit headroom on Windows (where "available" stayed 5.8 GB with commit at 55/60 GB), else freeGb. */
+/** Free RAM by the scan: commit headroom on Windows (where "available" can stay high with commit nearly full), else freeGb. */
 export function scanFreeGb(p) {
   const r = p?.ram || {};
   if (isWin(p) && fin(r.commitLimitGb) && fin(r.commitUsedGb)) return Math.max(0, r.commitLimitGb - r.commitUsedGb);
@@ -205,9 +199,8 @@ export function mainGpu(p) {
 export const gpuReserveGb = (g, env = process.env) => Math.max(0, num(env.STUDIO_GPU_RESERVE_GB, g && g.display === false ? 0 : 2.5));
 
 /**
- * STUDIO_HEAVY_SLOTS, else computed from the scan; 1 with no scan (2.67). 0 turns the lock off.
- * 2.79 (f): by RAM about one slot per 10 GB of total RAM (a 32 GB, 28-thread PC gets 3; it got 6 and the crew set 3 by
- * hand), a quarter of the logical cores, at least 1, at most 6. Before 2.79 it was one per 4 GB beyond the reserve.
+ * STUDIO_HEAVY_SLOTS, else computed from the scan; 1 with no scan. 0 turns the lock off. By RAM about one slot per
+ * 10 GB of total RAM and a quarter of the logical cores, at least 1, at most 6.
  */
 export function slotsFor(p, env = process.env) {
   if (env.STUDIO_HEAVY_SLOTS !== undefined && env.STUDIO_HEAVY_SLOTS !== '' && Number.isFinite(Number(env.STUDIO_HEAVY_SLOTS))) return Number(env.STUDIO_HEAVY_SLOTS);
@@ -255,42 +248,39 @@ export function budgetState(p, holders = [], { env = process.env } = {}) {
     gpuClaimedGb: r1(vAll),
     gpuName: g?.name || null,
     cpuCap: Math.floor(logicalCores(p) * Math.max(1, num(env.STUDIO_CPU_OVERCOMMIT, 1.5))),
-    // 2.70.0 (t): a GPU-area claim (area 'gpu') counts its small CPU share; older GPU-only claims count none (2.68).
+    // A GPU-area claim (area 'gpu') counts its small CPU share; older GPU-only claims count none.
     cpuUsed: sum(claims.filter((x) => !x.c.gpuOnly || x.c.area === 'gpu'), (x) => x.c.cpuThreads),
     cores: logicalCores(p),
     holders: holders.length,
     ramHolders: claims.filter((x) => Number(x.c.ramGb) > 0).length,
     gpuHolders: claims.filter((x) => Number(x.c.gpu?.vramGb) > 0).length,
     cpuHolders: claims.filter((x) => !x.c.gpuOnly || x.c.area === 'gpu').length,
-    // 2.76.0 (j, B-89): what runs, by rig kind, for the core share (coreShare).
+    // What runs, by rig kind, for the core share (coreShare).
     jobs: rigJobs(holders),
   };
 }
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 
-// ---- 2.76.0 (j, B-89): test workers shared by cores too, by priority ----
+// ---- test workers shared by cores too, by priority ----
 /**
- * Test workers were sized by free RAM only, so each check that started took up to cores - 2 (26 of 28 threads) and two or
- * three verifies at once ran the CPU at 100% (full verifies went from about 12 to 25-48 min). Now a job that sizes its own
- * test workers (a full verify, a lane's game check, a soak) also gets only its share of the logical cores, counting the
- * other jobs running (machine:heavy holders, the gate slots of lane checks) and the train's verify when one is coming:
+ * A job that sizes its own test workers (a full verify, a lane's game check, a soak) gets only its share of the logical
+ * cores, counting the other jobs running (machine:heavy holders, the gate slots of lane checks) and the train's verify
+ * when one is coming:
  *
  *   share = floor((cores - threads of fixed-size jobs) x weight / (weight + the weights of the other sizing jobs))
- *   workers = min(share, the RAM figure as before, the CPU headroom: STUDIO_CPU_OVERCOMMIT x cores - the others' threads)
+ *   workers = min(share, the RAM figure, the CPU headroom: STUDIO_CPU_OVERCOMMIT x cores - the others' threads)
  *
  * Weights (studio/machine-budget.json "priority" overrides): the train's verify 4, a builder's verify or lane check 2, a
- * soak 1. Jobs with a fixed claim (Unity, Blender and asset jobs, playtests, a generic heavy command) take the threads
- * they claim off the top, so they are never squeezed. The train's verify is "coming" (counted as if running) while a
- * train holds its lock or lanes wait in its queue (STUDIO_TRAIN_RESERVE=off: not counted). STUDIO_TEST_WORKERS still
- * wins; STUDIO_RIG_SHARE=off sizes by RAM only (2.75). Always between 2 and cores - 2.
+ * soak 1. Jobs with a fixed claim (Unity, Blender and asset jobs, playtests, a generic heavy command) take their threads
+ * off the top and are never squeezed. The train's verify is "coming" (counted as if running) while a train holds its
+ * lock or lanes wait in its queue (STUDIO_TRAIN_RESERVE=off: not counted). STUDIO_TEST_WORKERS still wins;
+ * STUDIO_RIG_SHARE=off sizes by RAM only. Always between 2 and cores - 2.
  */
 /**
- * 2.77.0 (f, P4.2): the rig's priority order, in ONE table: train > builder verifies (a verify, a lane's check) >
- * Unity/art > soaks. `weight` is the share of the cores a job that sizes its own test workers gets (RIG_WEIGHTS below,
- * derived from this table); Unity, art, playtest and other jobs have fixed claims and no weight (they are never
- * squeezed, they take their threads off the top), so their rank only says where they stand when something compares
- * kinds (rigRank). Playtest and other share Unity/art's rank: the order names no other place for them.
+ * The rig's priority order, in ONE table: train > builder verifies (a verify, a lane's check) > Unity/art > soaks.
+ * `weight` is the share of the cores a job that sizes its own test workers gets (RIG_WEIGHTS is derived from this);
+ * fixed-claim jobs have no weight, so their rank only matters when something compares kinds (rigRank).
  */
 export const RIG_PRIORITY = [
   { rank: 1, kinds: ['train'], weight: 4, what: "the merge train's verify" },
@@ -411,8 +401,8 @@ export function jobClaim(kind, { root = process.cwd(), env = process.env, label 
     const ew = envWorkers(e);
     const ramW = state?.known && fin(state.freeRamGb) ? workersFor(state.freeRamGb - 1, cores, e) : 2;
     let w = ew ?? ramW;
-    // 2.76.0 (j, B-89): a verify run as a landing is the merge train's; it and a builder's verify get their share of
-    // the cores beside what runs (state.jobs) and the train's verify that is coming (coreShare).
+    // A verify run as a landing is the merge train's; it and a builder's verify get their share of the cores beside what
+    // runs (state.jobs) and the train's verify that is coming (coreShare).
     const self = as || (String(e.STUDIO_GATE_PRIORITY || '').toLowerCase() === 'landing' ? 'train' : /\bsoak/i.test(String(label || '')) ? 'soak' : 'verify');
     out.rig = self;
     if (ew) out.workersWhy = 'STUDIO_TEST_WORKERS';
@@ -429,7 +419,7 @@ export function jobClaim(kind, { root = process.cwd(), env = process.env, label 
     if (!(Number(base.ramGb) > 0)) out.ramGb = r1(1 + WORKER_GB(e) * w);
     if (!(Number(base.cpuThreads) > 0)) out.cpuThreads = w;
   }
-  // 2.70.0 (t): a mostly-GPU kind takes the GPU area when the scan shows a GPU; out.areaWhy says which area and why.
+  // A mostly-GPU kind takes the GPU area when the scan shows a GPU; out.areaWhy says which area and why.
   if (GPU_AREA_KINDS[k]) {
     const ga = gpuAreaClaim(k, { root, env: e, profile });
     if (ga.claim) Object.assign(out, ga.claim, { areaWhy: `the GPU area: ${ga.why}` });
@@ -442,13 +432,12 @@ export function jobClaim(kind, { root = process.cwd(), env = process.env, label 
 }
 
 /**
- * 2.78.1 (B-117 fix): does the scanned machine have room for the engine line? An engine land on its own line runs beside
- * the game's work, so the machine must hold both at full size: the engine land's claim plus one game job (the `heavy`
- * kind's claim, studio/machine-budget.json jobs.heavy) within the usable RAM (total - STUDIO_RESERVE_RAM_GB) and within
- * the logical cores with no overcommit. The moment's free figures aren't enough: on Windows every heavy wait takes a
- * scan of its own (ram.mjs, for the commit headroom), so a 4-core 16 GB machine had a fresh scan and its budget let an
- * 8 GB, 4-thread Unity land in beside a 4 GB heavy job at the edge of overcommit. No room: the land shares the game's
- * slots, as with no scan. { ok, why }. STUDIO_ENGINE_LINE_ROOM=off: any fresh scan opens the line (2.78.1 as shipped).
+ * Does the scanned machine have room for the engine line? An engine land on its own line runs beside the game's work, so
+ * the machine must hold both at full size: the engine land's claim plus one game job (the `heavy` kind's claim,
+ * studio/machine-budget.json jobs.heavy) within the usable RAM (total - STUDIO_RESERVE_RAM_GB) and the logical cores
+ * with no overcommit. The moment's free figures aren't enough (a small machine would let a big Unity land in beside a
+ * heavy job). No room: the land shares the game's slots, as with no scan. { ok, why }. STUDIO_ENGINE_LINE_ROOM=off: any
+ * fresh scan opens the line.
  */
 export function engineLineRoom(p, engineClaim, { root = process.cwd(), env = process.env } = {}) {
   if (!p) return { ok: false, why: 'no machine scan' };
@@ -468,17 +457,17 @@ export function engineLineRoom(p, engineClaim, { root = process.cwd(), env = pro
 
 /**
  * Does `claim` fit now? { ok, area: 'slots'|'ram'|'gpu'|'cpu'|null, line, alone? }. `holders` are the live records,
- * `slots` the holder cap. Without a profile only the slot count decides (2.67).
+ * `slots` the holder cap. Without a profile only the slot count decides.
  */
 export function admit(claim, state, { slots = 1, holders = [], kindMax = null, groupMax = null, engineSlots = 0 } = {}) {
   const capLine = (same, name, max) => `waiting: ${same} ${name} job${same === 1 ? '' : 's'} already running (max ${max}; STUDIO_HEAVY_MAX_${String(name).toUpperCase().replace(/[^A-Z0-9]+/g, '_')} or studio/machine-budget.json "maxConcurrent")`;
-  // 2.68.0 (n): a per-kind cap (maxConcurrent), before the areas.
+  // A per-kind cap (maxConcurrent), before the areas.
   if (kindMax && claim.kind) {
     const same = holders.filter((h) => claimOf(h).kind === claim.kind).length;
     if (same >= kindMax) return { ok: false, area: 'kind', line: capLine(same, claim.kind, kindMax) };
   }
-  // 2.78.1 (f, B-117): an engine land (claim.engine) has its own line, STUDIO_ENGINE_SLOTS: it never takes one of the
-  // game's machine:heavy slots, and the game's slots don't count it. Its RAM, VRAM and CPU still count in every area below.
+  // An engine land (claim.engine) has its own line, STUDIO_ENGINE_SLOTS: it never takes a machine:heavy slot, and the
+  // game's slots don't count it. Its RAM, VRAM and CPU still count in every area below.
   const isEngine = (h) => Boolean(claimOf(h).engine);
   if (claim.engine) {
     const eng = holders.filter(isEngine).length;
@@ -487,8 +476,7 @@ export function admit(claim, state, { slots = 1, holders = [], kindMax = null, g
   const gameHolders = holders.filter((h) => !isEngine(h));
   const slotHolders = state.known ? gameHolders.filter((h) => !claimOf(h).gpuOnly).length : gameHolders.length;
   if (!claim.engine && !(state.known && claim.gpuOnly) && slotHolders >= slots) return { ok: false, area: 'slots', line: `all ${slots} machine:heavy slot${slots === 1 ? '' : 's'} are taken (STUDIO_HEAVY_SLOTS)` };
-  // 2.70.0 (t): the cap group's cap (CAP_GROUPS: every Unity kind is one "unity", the harness's Blender jobs one
-  // "blender"), counting every kind in the group.
+  // The cap group's cap (CAP_GROUPS), counting every kind in the group.
   if (groupMax && claim.kind && isGrouped(claim.kind)) {
     const grp = capGroup(claim.kind);
     const same = holders.filter((h) => capGroup(claimOf(h).kind) === grp).length;
@@ -519,13 +507,13 @@ export function describeBudget(state, slots) {
 
 /**
  * Test workers for a game check: { workers, why }. STUDIO_TEST_WORKERS wins; inside a heavy hold, its claim's workers;
- * no scan: 2 (what CI=true gave before); else the free budget shared with the other running lane checks.
+ * no scan: 2; else the free budget shared with the other running lane checks.
  */
 export function testWorkers({ profile = null, env = process.env, holdClaim = null, holders = [], laneChecks = 0, root = process.cwd(), self = null, trainRoot = null, coming = undefined } = {}) {
   const { env: e } = cfgEnv(root, env);
   const ew = envWorkers(e);
-  // 2.76.0 (j, B-89): machineWorkers = this check's workers plus the others' running now (known or estimated): the
-  // per-test timeout factor reads it (harness/test-timeouts.mjs), so a smaller share never means a shorter timeout.
+  // machineWorkers = this check's workers plus the others' running now (known or estimated): the per-test timeout factor
+  // reads it (harness/test-timeouts.mjs), so a smaller share never means a shorter timeout.
   const cores = logicalCores(profile);
   const mine = holdClaim?.holderPid ? holders.filter((h) => Number(h.pid) !== Number(holdClaim.holderPid)) : holders;
   const othersOf = () => [...rigJobs(mine), ...Array.from({ length: Math.max(0, Number(laneChecks) || 0) }, () => ({ kind: 'check', workers: null, threads: 0 }))];
@@ -546,18 +534,17 @@ export function testWorkers({ profile = null, env = process.env, holdClaim = nul
   return { workers: w, why: `${cs.why}${ramW < cs.workers ? `; RAM allows ${ramW}: ${ramWhy}` : ''}`, share: { workers: cs.workers, ramWorkers: ramW, cores: cs.cores, weight: cs.weight, weightAll: cs.weightAll, coming: cs.coming }, machineWorkers: w + cs.used };
 }
 
-/** 2.77.1 (B-101): the GB one session counts for in sessionCap (STUDIO_SESSION_RAM_GB, studio/machine-budget.json sessionRamGb; 0.6). */
+/** The GB one session counts for in sessionCap (STUDIO_SESSION_RAM_GB, studio/machine-budget.json sessionRamGb; 0.6). */
 export function sessionRamGb({ env = process.env, root = process.cwd() } = {}) {
   const { env: e } = cfgEnv(root, env);
   return Math.max(0.05, num(e.STUDIO_SESSION_RAM_GB, 0.6));
 }
 
 /**
- * 2.78.1 (f, Line Producer "rig-aware scheduling"): the RAM a running engine train will take again between its land runs
- * (its merge-tree checks, a refusal's retry wait, the next bisection run), which no machine:heavy claim shows then.
- * Every live <root>/.studio/locks/<engine>-train.lock (not the web train's train.lock) counts its recorded ramGb
- * (unity-train.mjs writes it at start; an older lock: the engine kind's claim, Unity 8 GB), unless a live holder is that
- * engine's land right now (its claim already counts). { gb, trains: [{ engine, id, ramGb }], why }. Never throws.
+ * The RAM a running engine train will take again between its land runs (merge-tree checks, a refusal's retry wait, the
+ * next bisection run), which no machine:heavy claim shows then. Every live <root>/.studio/locks/<engine>-train.lock
+ * (not the web train's train.lock) counts its recorded ramGb (unity-train.mjs writes it; an older lock: the engine
+ * kind's claim), unless a live holder is that engine's land right now (its claim already counts). { gb, trains: [{ engine, id, ramGb }], why }. Never throws.
  * STUDIO_ENGINE_TRAIN_RESERVE=off: { gb: 0 }.
  */
 export function engineTrainReserve(root, holders = [], { env = process.env, now = Date.now() } = {}) {
@@ -584,8 +571,7 @@ export function engineTrainReserve(root, holders = [], { env = process.env, now 
 
 /**
  * The supervisor's session cap by RAM: { cap, why }. cap = min(configured, floor((RAM budget - heavy claims - running
- * engine trains between their land runs (engineTrainReserve; 2.78.1)) / STUDIO_SESSION_RAM_GB (0.6))); no scan:
- * configured (2.67). heavyRoot: where the locks are (the main checkout's .studio), default root.
+ * engine trains between their land runs (engineTrainReserve)) / STUDIO_SESSION_RAM_GB (0.6))); no scan: configured. heavyRoot: where the locks are (the main checkout's .studio), default root.
  */
 export function sessionCap({ configured, profile = null, holders = [], env = process.env, root = process.cwd(), heavyRoot = null } = {}) {
   if (!profile) return { cap: configured, why: '' };
