@@ -323,6 +323,23 @@ export async function planGameGates({ paths = [], changed = null, incoming = nul
     }
     engine = keepEngine;
   }
+  // 2.84 (x): run by the verify for the tracks it covers (STUDIO_GATE_TRACKS, harness/gate-tracks.mjs): a game check on
+  // another track (a manifest check is web unless its "track" says otherwise), the layout rules (web) and a Godot
+  // project's gate (engine:godot) are skipped with that reason. Unset (task done, the train's re-checks): all of them.
+  {
+    const gt = await import('./gate-tracks.mjs');
+    const cov = gt.coveredFromEnv();
+    if (cov !== '*') {
+      const why = (t) => `${t.join('+')} track; this change covers ${[...cov].join(', ')} only`;
+      const keep = [];
+      for (const g of gates) { const t = gt.gateTrack(g).tracks; if (gt.runsFor(t, cov)) keep.push(g); else skipped.push({ id: g.id, why: why(t) }); }
+      gates = keep;
+      if (runLayout && !gt.runsFor(['web'], cov)) { runLayout = false; skipped.push({ id: 'game:layout', why: why(['web']) }); }
+      const keepEngine = [];
+      for (const e of engine) { if (gt.runsFor(['engine:godot'], cov)) keepEngine.push(e); else skipped.push({ id: e.id, why: why(['engine:godot']) }); }
+      engine = keepEngine;
+    }
+  }
   // 2.69.0 (p): the slow tier. A verify (and a train) skips the slow checks; the slow tier runs only them, plus the test
   // checks (a "related" or "focus" command, or "slowTests": true) with only the slow test globs (STUDIO_TEST_ONLY).
   const tierInfo = game && !slowTierOff() ? slowTierOf(game) : null;

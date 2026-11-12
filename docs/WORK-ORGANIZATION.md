@@ -87,6 +87,33 @@ whose declared `paths` the incoming files touch re-run.
 - **Timeout-only reds** (`harness/timeout-rerun.mjs`): a game-check red whose ONLY failures are per-test timeouts re-runs those files
   once alone at low load; all green counts green, each labelled `timeout-flake` (`.studio/flakes.jsonl`), the lane not blamed. A file
   red alone, a mixed red, or more files than `STUDIO_FLAKE_MAX_FILES`: a real red. `STUDIO_TIMEOUT_RERUN=off` disables it.
+- **Gates by track** (2.84, `harness/gate-tracks.mjs`): gates run for the engine a task is on. A verify covers the tracks of the
+  lane's changed paths plus the track of its task (`STUDIO_VERIFY_TASKS`, a comma list of task ids the merge train sets to its batch;
+  else `STUDIO_JOB_TASK`; else the one task the owner holds). Gates on other tracks are not run, and the summary names them: "not run
+  for this change: golden, vision (web track); this change touches engine:unity only". The record's `tracks` says what was covered;
+  `task done` and the train accept it only when that includes every track their own changes and tasks need. No task track and no
+  diff, a path outside every track, `--all` or `--only`: every gate runs. `STUDIO_GATES_BY_TRACK=off` runs every gate every time
+  (default on); one line says which mode ran. The game gate passes the covered tracks on to its own checks (`STUDIO_GATE_TRACKS`):
+  a manifest check is `web` unless its `"track"` says otherwise, a Godot project's gate is `engine:godot`.
+
+  | Changed path | Track |
+  |---|---|
+  | `docs/`, `studio/` notes, logs, the board, a `.md` outside the game and engine folders | `docs`: only the gates that judge docs (docs, secrets, hooks, protected, approvals, session, reviewer) |
+  | inside an engine project (`project.godot`, a Unity `ProjectSettings/`, a `.uproject`) | `engine:<that engine>` |
+  | `engine/<game>/` | `engine:<the engine its engine.json names>` |
+  | `game/<name>/`, `web/<name>/`, `cartridges/`, `src/`, `assets/`, `public/`, `qa/golden/`, `qa/regressions/` | `web` |
+  | `harness/`, `scripts/`, `qa/`, `tools/`, `.github/` | `harness` (and the `all` gates) |
+  | `studio/godot-unit.json` | `harness`, `engine:godot`; any other `studio/` .json, or any other path: every gate |
+
+  | Gate track | Gates (a `"track"` on a gate in `studio/gates.json` or a game's `studio.gates.json` wins) |
+  |---|---|
+  | `all` (every change but a docs-only one) | approvals, protected, secrets, hooks, weakened-tests, holdout; any gate the table doesn't name |
+  | `harness` | session, docs, reviewer, selftest |
+  | `web` | purity, isolation, golden, golden-py, regressions, vertical-slice, playtest, browser-play, soak, tick-budget, assets, fidelity, content-schema, balance, fun, renderer-budget, module-size, function-size, vision, journey; the game's own checks (`game:<id>`) |
+  | `web` + `engine:godot` | game |
+  | `engine:godot` | godot-unit, a Godot project's gate (`engine:<project>`) |
+  | `web` + `engine:*` | controls, parity |
+  | `engine:<x>` | engine (the engines `engine/*/engine.json` name) |
 
 ## The merge train (`harness/train.mjs`)
 

@@ -52,7 +52,8 @@ import { activeGame } from './cartridge.mjs';
 import { stage1Replaced, studioGameSync } from './tester-config.mjs';
 import { regressionHowTo, regressionMissing } from './regression-howto.mjs';
 import { checkResearch, ensureResearchTemplate } from './research.mjs';
-import { engineTask, engineRepo, engineTarget } from './engine-tracks.mjs';
+import { engineTask, engineRepo, engineTarget, configuredEngines } from './engine-tracks.mjs';
+import { pathTracks, missingTracks } from './gate-tracks.mjs';
 import { visualCheckRows } from './visual-check.mjs';
 import { anchorCheckRows } from './anchors.mjs';
 
@@ -640,6 +641,16 @@ export function gatesAfter(at, files = null, taskId = null, ch = null) {
     const inScope = new Set(run.changed);
     const outside = files.filter((f) => !inScope.has(f));
     if (outside.length) return `the last verify was scoped to ${run.changed.length} file(s) and missed ${outside.slice(0, 3).join(', ')}${outside.length > 3 ? ` and ${outside.length - 3} more` : ''}; run \`npm run verify\` again (or \`npm run verify -- --all\`)`;
+  }
+  // 2.84 (x): a verify run by track (harness/gate-tracks.mjs) counts only when the tracks it covered include every track
+  // this task's own changes need: one that skipped the web gates does not stand for a task that changed web code.
+  if (run.tracks?.mode === 'by-track' && Array.isArray(run.tracks.covered) && files?.length) {
+    let engines = null;
+    try { engines = configuredEngines({ root: REPO_ROOT }); } catch {}
+    const pt = pathTracks(files, { root: REPO_ROOT, engines });
+    const need = pt.wide ? [...pt.tracks.filter((t) => t !== '*'), '*'] : pt.tracks;
+    const miss = missingTracks(run.tracks.covered, need);
+    if (miss.length) return `the last verify ran the gates for ${run.tracks.covered.join(', ') || 'no track'} only, and this task's changes also need ${miss.map((t) => (t === '*' ? `every gate (${pt.wide} is outside every track)` : t)).join(', ')}; run \`npm run verify\` again (or \`npm run verify -- --all\`)`;
   }
   const red = (run.rows || []).filter((r) => r.required && !r.ok).map((r) => r.id);
   if (!red.length) return null;
