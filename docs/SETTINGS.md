@@ -1134,7 +1134,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_PLANNING_ROOM` · no simple default · qa/selftest-2781g.mjs, qa/selftest-279a.mjs · [LINE-PRODUCER.md:188](LINE-PRODUCER.md)
 - `STUDIO_PLAYTEST_GAME_CHECK` · no simple default · harness/done-check.mjs, qa/playtest.mjs, qa/selftest-2781f.mjs · [ONBOARDING-A-GAME.md:371](ONBOARDING-A-GAME.md)
 - `STUDIO_POST_BROWSER_PLAY` · no simple default · harness/agent.mjs, qa/selftest-230j.mjs, qa/selftest-2732f.mjs (+9 more) · undocumented
-- `STUDIO_PYTHON` · no simple default · qa/run-python.mjs · [ROADMAP.md:19](ROADMAP.md)
+- `STUDIO_PYTHON` · no simple default · qa/run-python.mjs · [ROADMAP.md:13](ROADMAP.md)
 - `STUDIO_QUARANTINE_VERIFY` · no simple default · harness/test-config-check.mjs, qa/selftest-2782f.mjs · [ONBOARDING-A-GAME.md:274](ONBOARDING-A-GAME.md)
 - `STUDIO_QUIET_BUSY_ROLES` · no simple default · harness/flake-quiet.mjs, qa/selftest-2782b.mjs · [WORK-ORGANIZATION.md:216](WORK-ORGANIZATION.md)
 - `STUDIO_REACHABILITY` · default `'warn'` · harness/done-check.mjs, harness/reachability.mjs, harness/task.mjs (+58 more) · [DISCORD-CREW.md:176](DISCORD-CREW.md)
