@@ -318,9 +318,45 @@ done work by what it serves. It measures the link, not the quality: a pillar wit
 untraced share, is the Director's and the owner's signal. The same log: 57.3% of 358 done tasks traced, 7.8% asked
 for by the owner, 92.2% proposed by agents.
 
+## The editor service (2.84, untested on a real editor)
+
+One harness-owned engine editor that stays open, used two ways. **Untested on a real editor**: the harness side is
+checked against a stand-in editor (`qa/fixtures/fake-editor.mjs`); the Unity side
+(`engine/_unity/Assets/Editor/StudioService/StudioEditorService.cs`, its own Editor-only assembly) has never been
+compiled. Everything is off by default, and any failure falls back to today's cold path.
+
+- **Warm land runs** (`engines.<x>.warm: "land"`, or `true`): the engine train opens the `land` instance on the land
+  tree (`gateWorktree`, else `cwd`) before its first land run and keeps it between runs. When it is healthy the land
+  command gets `STUDIO_EDITOR_SERVICE` (the service folder) and `STUDIO_EDITOR_SERVICE_CLI` (a command line); the land
+  script may then run `node harness/editor-service.mjs request test --engine <x> --instance land --mode EditMode --results <file>`
+  instead of starting Unity (exit 3: no healthy editor, start Unity as before). Not healthy after one restart: the
+  variables are not set and `engine.warm.fallback` says why. The land script still owns the land; see
+  `docs/examples/land-warm.md`. An editor of the service counts as a heavy program outside the lock
+  (`STUDIO_HEAVY_PROGRAMS`): add `|-studioService` to `STUDIO_HEAVY_IGNORE_ARGS` so the land run is not refused for it.
+- **The agents' queue** (`engines.<x>.service.check: true`): `npm run editor -- check [--lane <agent>] [--branch b]
+  [--capture <scene>[:<camera>]] [--wait]` from any session queues a compile (and a capture) of that lane's branch,
+  one waiting request per lane. The supervisor's pass runs the oldest in the `check` instance's own checkout
+  (`engines.<x>.service.dir`, else a git worktree `.studio/editor-service/<x>-tree`), writes
+  `.studio/editor-service/out/<lane>/<head8>/result.json` and the PNGs, and emits `editor.check`. Never while that
+  engine's train runs. `npm run editor -- result` prints `file(line): code message` and the image paths.
+
+`npm run editor -- start|status|stop|request <kind>|check|result|pass`. The protocol is files in
+`<project>/Temp/StudioService/` (requests, responses, a heartbeat); the editor is started with `-studioService
+<folder>` and does nothing without it. Settings in `studio/game.json` `engines.<x>.service`: `check` (false), `dir`,
+`heartbeatSec` (5), `requestTimeoutMin` (30), `recycleAfter` (20 requests), `recycleMin` (240), `startTimeoutMin` (15),
+`graceSec` (30). A timed-out request always recycles the editor. `STUDIO_EDITOR_SERVICE=off` turns every use off.
+A project another editor has open (Unity's `Temp/UnityLockfile`) is refused; `stop` kills only the pid it started.
+
+**The first run on a PC**: `npm run editor -- start --project <a copy of the project>` and watch for the heartbeat
+(`status`); `request ping`; `request compile` with a planted compile error (errors listed, paths project-relative);
+`request test --mode EditMode --results <file>` (an NUnit file appears); `request capture --scene <scene> --out <png>`;
+a domain reload during a compile (the answer still comes); `stop` (the editor quits, the lock file goes). Then
+turn on `service.check` and run one `check` end to end, and only then `warm`.
+
 ## Untested
 
 - Everything here on a real Unity editor and on Windows beyond the pull request's checks: the self-test uses a
   made-up engine repo and stand-in commands.
 - `STUDIO_UNITY_EDITMODE_ARGS` with a real land script.
 - A live studio in native mode.
+- The editor service (above) on any real editor.
