@@ -178,16 +178,59 @@ export async function askReview(taskId, { model, tool = null, forTask = null, no
   } catch (e) { r = { ok: false, why: String(e?.message || e) }; }
   if (!r?.ok) return fail(r?.why || 'the model gave no answer', r?.status ? { status: r.status } : {});
   const answer = String(r.text || '');
+  // 2.84 (r): the review task `--for` names is started first (as the harness's own "review-ask"), so the review note written
+  // below is newer than its start: the done-check for a review task reads "a review note since the task started".
+  const closer = forTask ? startForClose(forTask, { root }) : null;
   const rec = rv.recordOutsideReview(taskId, { by: model, family: modelFamily(model), text: answer, model, implementer: g.builder, noCommit, env, asked: { tool, forTask, by: 'review-ask' } });
   if (!rec.ok) {
     const date = new Date().toISOString().slice(0, 10);
     const draft = path.join(REPO_ROOT, 'studio', 'reviews', `${date}-${taskId}-asked-${label(model)}.rejected.txt`);
     try { fs.mkdirSync(path.dirname(draft), { recursive: true }); fs.writeFileSync(draft, `Rejected draft: ${clean(rec.error)}\nAsked: ${model} on ${tool} for ${taskId}. Nothing was recorded.\n\n${scrub(answer).text}\n`); } catch {}
     const rel = path.relative(REPO_ROOT, draft).split(path.sep).join('/');
+    if (closer?.started) runTask(['pause', forTask, '--note', `the harness-asked review of ${taskId} recorded nothing; ${forTask} is handed back`], { root });
     const out = fail(`${rec.noVerdict ? 'the answer has no VERDICT line' : rec.error}; the answer is saved as ${rel}`, { draft: rel });
     return { ...out, draft: rel };
   }
-  return { ok: true, code: 0, file: rec.file, verdict: rec.verdict, line: `${taskId}: ${rec.verdict} from ${model} (${tool}, asked by the harness). Written to ${rec.file}${rec.committed ? ' and committed' : rec.warn ? `; ${rec.warn}` : ''}` };
+  const base = `${taskId}: ${rec.verdict} from ${model} (${tool}, asked by the harness). Written to ${rec.file}${rec.committed ? ' and committed' : rec.warn ? `; ${rec.warn}` : ''}`;
+  if (!forTask) return { ok: true, code: 0, file: rec.file, verdict: rec.verdict, line: base };
+  const closed = closeReviewTask(forTask, closer, { reviewed: taskId, file: rec.file, model, root });
+  return { ok: true, code: 0, file: rec.file, verdict: rec.verdict, closed: closed.ok, line: `${base}. ${closed.ok ? `${forTask} was closed by the harness.` : `${forTask} was not closed: ${closed.why}; to close it: ${closed.fix}`}` };
+}
+
+/**
+ * 2.84 (r): run one `task` command the way a harness step does: node harness/task.mjs <args> --agent review-ask, from the
+ * checkout it works in. The name matches no worker name (permission.mjs WORKER_NAME). { ok, out }; never throws.
+ */
+const CLOSER = 'review-ask';
+function runTask(args, { root = REPO_ROOT } = {}) {
+  try {
+    const r = spawnSync(process.execPath, [path.join(root, 'harness', 'task.mjs'), ...args, '--agent', CLOSER], { windowsHide: true, cwd: root, encoding: 'utf8', timeout: 20 * 60000, maxBuffer: 16 * 1024 * 1024 });
+    const out = `${r.stderr || ''}\n${r.stdout || ''}`.split('\n').map((l) => l.trim()).filter(Boolean);
+    return { ok: r.status === 0, out: clean(out.find((l) => /not done|can't|cannot|refus|held|claimed|not found|is done|stopped|waits/i.test(l)) || out[0] || `exit ${r.status ?? 'without a code'}`).slice(0, 300) };
+  } catch (e) { return { ok: false, out: clean(e?.message || e).slice(0, 300) }; }
+}
+
+/** Start the review task before the review is recorded: { started, why }. A refusal is kept for the close step. */
+function startForClose(reviewTask, { root = REPO_ROOT } = {}) {
+  const r = runTask(['start', reviewTask], { root });
+  return { started: r.ok, why: r.ok ? '' : r.out };
+}
+
+/**
+ * Close the review task the same way a reviewer session does: `task done <review task>` (the done-check for a review task:
+ * a review note since it started; no game checks run for a reviewer's task). A refusal never fails the review: one
+ * review.ask_close_failed event for the producer, with the command that closes it.
+ */
+function closeReviewTask(reviewTask, closer, { reviewed, file, model, root = REPO_ROOT } = {}) {
+  const fix = `npm run task -- done ${reviewTask} --agent <you>`;
+  let why = closer?.started ? '' : `it could not be started (${closer?.why || 'no answer'})`;
+  if (!why) {
+    const r = runTask(['done', reviewTask], { root });
+    if (r.ok) return { ok: true };
+    why = `task done refused it (${r.out})`;
+  }
+  emitEvent({ type: 'review.ask_close_failed', agent: CLOSER, to: 'producer', task: reviewTask, status: 'warn', msg: `${reviewTask}: the review of ${reviewed} is recorded, but ${reviewTask} was not closed: ${why}. To close it: ${fix}`.slice(0, 600), meta: { reviewed, forTask: reviewTask, model: model || null, file: file || null, why } });
+  return { ok: false, why, fix };
 }
 
 /**
@@ -197,7 +240,12 @@ export async function askReview(taskId, { model, tool = null, forTask = null, no
 export function startReviewAsk({ reviewTask, reviewed, model, tool, by = 'launcher', events = null, spawnImpl = spawn } = {}) {
   try {
     const ev = events || readRecentEvents(20000);
-    const done = ev.filter((e) => e.type === 'review.recorded' && e.task === reviewed && e.meta?.via === 'harness-asked' && e.meta?.forTask === reviewTask).pop();
+    const rec0 = ev.filter((e) => e.type === 'review.recorded' && e.task === reviewed && e.meta?.via === 'harness-asked' && e.meta?.forTask === reviewTask).pop();
+    // 2.84 (r): the harness closes the review task itself after recording; a refused close (review.ask_close_failed) leaves the
+    // one "only needs closing" text below, the same every pass, so the supervisor's back-off on repeated refusals quiets it.
+    const failed = ev.filter((e) => e.type === 'review.ask_close_failed' && e.task === reviewTask).pop();
+    const done = rec0 || (failed ? { meta: failed.meta } : null);
+    if (rec0 && ev.some((e) => e.type === 'task.done' && e.task === reviewTask && String(e.ts) >= String(rec0.ts))) return { started: false, message: `Not started: ${reviewTask} is already done (the harness asked ${rec0.meta.model || 'a model'} for the review of ${reviewed} and closed it).` };
     if (done) return { started: false, message: `Not started: the harness already asked ${done.meta.model || 'a model'} for the review of ${reviewed} (${done.meta.file || 'studio/reviews/'}); ${reviewTask} only needs closing: npm run task -- done ${reviewTask} by a person or the Producer.` };
     if (tool === 'vertex') { const c = vertexConfigured(); if (!c.ok) return { started: false, message: `Not started: ${tool} cannot run commands, so the harness would ask ${model} for the review of ${reviewed} itself, but ${c.why}.` }; }
     const f = path.join(INFLIGHT_DIR(), `${reviewed}.json`);
