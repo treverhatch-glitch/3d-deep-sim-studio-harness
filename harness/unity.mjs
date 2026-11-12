@@ -1,39 +1,31 @@
 #!/usr/bin/env node
 /**
- * harness/unity.mjs — 2.46.0: the Unity track's checks.
+ * harness/unity.mjs — the Unity track's checks.
  *
- *   npm run engine:sim [-- <folder>]     the sim, with no editor and no licence: the purity check, then the
- *                                        sim's tests with plain .NET (dotnet test <folder>/tools/SimTests)
+ *   npm run engine:sim [-- <folder>]     the sim, no editor or licence: the purity check, then `dotnet test <folder>/tools/SimTests`
  *   node harness/unity.mjs gate <folder> [--platform EditMode|PlayMode]
- *                                        the editor's own run: purity, the version pin, then Unity's test
- *                                        runner in batch mode for Edit Mode and Play Mode; results read from
- *                                        its NUnit XML (a run where no test ran fails), Play Mode's controls
- *                                        test writes qa/reports/controls-unity.json for the controls check
+ *                                        the editor's run: purity, the version pin, then Unity's test runner in batch mode for
+ *                                        Edit Mode and Play Mode (results from its NUnit XML; a run where no test ran fails);
+ *                                        Play Mode's controls test writes qa/reports/controls-unity.json
  *   npm run engine:build [-- <folder>] [--target windows|web]
- *                                        a playable build: a Windows .exe (the default since 2.48.0) or WebGL
- *                                        (any browser; the Arcade's engine tab) (Assets/Editor/StudioBuild.cs)
+ *                                        a playable build: a Windows .exe (default) or WebGL (Assets/Editor/StudioBuild.cs)
  *   node harness/unity.mjs purity <folder>
  *   node harness/unity.mjs version <folder>
- *   node harness/unity.mjs accelerator [<folder>]   2.70.0: does STUDIO_UNITY_ACCELERATOR answer (a TCP connect)
- *   gate and build exit 3 when machine:heavy (or free memory) stayed busy and the editor didn't run.
- *   2.73.2 (e, B-73): gate also exits 3, "NOT RUN <kind>", for an infrastructure abort (the editor ran out of memory,
- *   was ended from outside, couldn't start, had no licence, or aborted batch mode before it wrote results; or free RAM
- *   stayed under STUDIO_UNITY_MIN_FREE_GB): nothing was tested, so it is never a FAIL of the game's tests. A compile
+ *   node harness/unity.mjs accelerator [<folder>]   does STUDIO_UNITY_ACCELERATOR answer (a TCP connect)
+ *   gate and build exit 3 when machine:heavy (or free memory) stayed busy. gate also exits 3, "NOT RUN <kind>", for an
+ *   infrastructure abort (the editor ran out of memory, was ended from outside, couldn't start, had no licence, or aborted
+ *   before it wrote results; or free RAM under STUDIO_UNITY_MIN_FREE_GB): nothing was tested, so never a FAIL. A compile
  *   error or a failing test is always a FAIL (exit 1).
  *
- * The folder is a Unity project (ProjectSettings/ProjectVersion.txt): engine/<game> for an engine track, or
- * game/<slug> for an adopted Unity game. The editor: STUDIO_UNITY (its full path) or `unity` on the PATH.
+ * The folder is a Unity project (ProjectSettings/ProjectVersion.txt): engine/<game> for an engine track, or game/<slug>
+ * for an adopted Unity game. The editor: STUDIO_UNITY (its full path) or `unity` on the PATH.
  *
- * Why the sim is checked apart from the editor: the editor needs an install and a licence on every machine
- * that runs it, so an agent's every change can't wait for it. The sim is a pure C# assembly
- * (Assets/Sim, Sim.asmdef with noEngineReferences), so .NET builds and tests it anywhere in seconds, and the
- * purity check keeps it that way: no UnityEngine, no Time, no unseeded Random, no wall clock.
+ * The sim is a pure C# assembly (Assets/Sim, Sim.asmdef with noEngineReferences), so .NET tests it anywhere without the
+ * editor; the purity check keeps it that way (no UnityEngine, no Time, no unseeded Random, no wall clock).
  *
- * 2.60.1 (B-35): the editor's runs here (`gate`'s Edit Mode and Play Mode tests, `build`) take the machine:heavy lock
- * (harness/heavy.mjs; free memory under STUDIO_RAM_FLOOR_GB holds them back too), so an agent's Unity run never
- * overlaps a full verify, a browser playtest or another editor run. Other editor batch work a Unity lane starts
- * goes through `node harness/heavy.mjs run --label <what> -- <command>`. When the lock stays busy (or memory stays
- * low) the run doesn't start and the command exits 3 (busy; not a failure of the work).
+ * The editor's runs (`gate`'s tests, `build`) take the machine:heavy lock (harness/heavy.mjs; free memory under
+ * STUDIO_RAM_FLOOR_GB holds them back too). Other editor batch work goes through `node harness/heavy.mjs run --label <what>
+ * -- <command>`. When the lock stays busy the run doesn't start and the command exits 3 (not a failure).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -52,7 +44,6 @@ const rel = (f) => path.relative(REPO_ROOT, f).split(path.sep).join('/');
 
 export const isUnityProject = (dir) => fs.existsSync(path.join(dir, 'ProjectSettings', 'ProjectVersion.txt'));
 
-/** The editor version a project asks for (ProjectVersion.txt m_EditorVersion), or null. */
 export function projectVersion(dir) {
   const m = (read(path.join(dir, 'ProjectSettings', 'ProjectVersion.txt')) || '').match(/m_EditorVersion:\s*(\S+)/);
   return m ? m[1] : null;
@@ -67,7 +58,7 @@ export function checkPin(dir, pin = process.env.STUDIO_UNITY_PIN || '') {
   return ok ? { ok: true, version: v } : { ok: false, version: v, why: `the project asks for Unity ${v}, but STUDIO_UNITY_PIN is ${pin}: an editor upgrade changes the project files, so it is a decision, not a side effect (set the pin, or reopen the project in ${pin})` };
 }
 
-// What the sim may not touch. Matched on code with comments and strings removed.
+// What the sim may not touch, matched on code with comments and strings removed.
 export const SIM_BANNED = [
   { re: /\busing\s+UnityEngine\b|\bUnityEngine\./, why: 'UnityEngine (the sim is pure C#: the engine draws it, it never asks the engine)' },
   { re: /\busing\s+UnityEditor\b|\bUnityEditor\./, why: 'UnityEditor' },
@@ -81,7 +72,6 @@ export const SIM_BANNED = [
   { re: /\bFile\s*\.|\bDirectory\s*\.|\bHttpClient\b|\bWebRequest\b/, why: 'files or the network' },
 ];
 
-/** C# with comments, strings and chars blanked (line numbers kept). */
 export function stripCs(src) {
   let out = '';
   let i = 0;
@@ -110,10 +100,7 @@ function csFiles(dir) {
   return out;
 }
 
-/**
- * The sim stays pure: Assets/Sim's asmdef has noEngineReferences and references no engine assembly, and no
- * file there uses what SIM_BANNED lists. Returns { ok, problems, files }.
- */
+/** The sim stays pure: Assets/Sim's asmdef has noEngineReferences and no engine assembly, and no file there uses what SIM_BANNED lists. { ok, problems, files }. */
 export function simPurity(dir, simRel = 'Assets/Sim') {
   const simDir = path.join(dir, simRel);
   const problems = [];
@@ -156,24 +143,18 @@ const which = (bin) => fs.existsSync(bin) || spawnSync(process.platform === 'win
 export const unityBin = () => process.env.STUDIO_UNITY || 'unity';
 export const dotnetBin = () => process.env.STUDIO_DOTNET || 'dotnet';
 
-/**
- * 2.60.1 (B-35): run fn under machine:heavy (heavyRoot: the main checkout, which the CLI passes; else this one).
- * { value } or { busy: message } when the lock (or free memory) stayed busy. heavy: false runs fn as it is.
- * Inside a holder (a full verify, the Unity land gate, an outer gate()) it doesn't wait for its own parent.
- */
+/** Run fn under machine:heavy (heavyRoot: the main checkout, else this one). { value } or { busy: message } when the lock (or memory) stayed busy. heavy: false runs fn as is. Inside a holder it doesn't wait for its parent. */
 export function underHeavy(label, fn, { heavy = true, heavyRoot = REPO_ROOT, log = (m) => console.error(m), vramGb } = {}) {
   if (heavy === false) return { value: fn() };
   try {
-    // 2.70.0 (u): vramGb (the Graphics split's device run) claims the GPU area; unset: the unity kind's own claim.
-    return { value: withHeavy(heavyRoot, label, fn, { log, kind: 'unity', ...(vramGb !== undefined ? { vramGb } : {}) }) };
+      return { value: withHeavy(heavyRoot, label, fn, { log, kind: 'unity', ...(vramGb !== undefined ? { vramGb } : {}) }) };
   } catch (err) {
-    // 2.73.2 (e, B-73): floor: free RAM stayed under STUDIO_UNITY_MIN_FREE_GB (else the lock stayed busy).
+    // floor: free RAM stayed under STUDIO_UNITY_MIN_FREE_GB.
     if (err.code === 'HEAVY_BUSY') return { busy: String(err.message || err).replace(/^\[heavy\]\s*(NOT RUN\s*)?/, ''), floor: Boolean(err.floor) };
     throw err;
   }
 }
 
-/** The sim with plain .NET: purity, then `dotnet test tools/SimTests`. */
 export function runSim(dir, { log = console.log } = {}) {
   const p = simPurity(dir);
   if (!p.ok) return { ok: false, step: 'purity', problems: p.problems };
@@ -185,7 +166,6 @@ export function runSim(dir, { log = console.log } = {}) {
   fs.rmSync(results, { recursive: true, force: true });
   const r = spawnSync(dotnetBin(), ['test', proj, '--logger', 'trx;LogFileName=sim.trx', '--results-directory', results], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_NOLOGO: '1' }, timeout: 10 * 60000, maxBuffer: 64 * 1024 * 1024 });
   const out = `${r.stdout || ''}${r.stderr || ''}`;
-  // Counted from the run's own results file, so "nothing ran" can't pass.
   const trx = read(path.join(results, 'sim.trx')) || '';
   const c = trx.match(/<Counters\b([^>]*)>/);
   const n = (k) => Number(((c?.[1] || '').match(new RegExp(`\\b${k}="(\\d+)"`)) || [])[1] || 0);
@@ -198,27 +178,21 @@ export function runSim(dir, { log = console.log } = {}) {
   return { ok: problems.length === 0, step: 'tests', total, failed, problems, out };
 }
 
-/**
- * Unity's test runner in batch mode, one platform: { ok, platform, results, problems, log }.
- * 2.70.0 (u): extraArgs (the Accelerator's), category (-testCategory, e.g. "!Graphics"), graphics: true starts the
- * editor with a graphics device (no -nographics), suffix names the results file (TestResults-<platform><suffix>.xml).
- */
+/** Unity's test runner in batch mode, one platform: { ok, platform, results, problems, log }. extraArgs, category (-testCategory), graphics: true (a device), suffix (TestResults-<platform><suffix>.xml). */
 export function runUnityTests(dir, platform, { controlsOut = null, extraArgs = [], category = null, graphics = false, suffix = '', allowEmpty = false, ...heavyOpts } = {}) {
-  // 2.72.0 (c): this run's nonce is in the results file's name, and older results files for this platform are removed
-  // first: no file another run wrote can stand in for this one (harness/engine-proof.mjs).
+  // This run's nonce is in the results file's name and older results files are removed first (harness/engine-proof.mjs).
   const nonce = runNonce();
   const resultsFile = path.join(dir, `TestResults-${platform}${suffix}-${nonce}.xml`);
   removeOldResults(dir, `${platform}${suffix}`);
   let startedAt = null;
   const args = (file) => ['-batchmode', ...(graphics ? [] : ['-nographics']), '-projectPath', dir, '-runTests', '-testPlatform', platform, ...(category ? ['-testCategory', category] : []), '-testResults', file, '-logFile', '-', ...extraArgs];
-  // Under machine:heavy (2.60.1, B-35); STUDIO_HEAVY_HELD (set while held) reaches the editor's own children.
+  // STUDIO_HEAVY_HELD (set while held) reaches the editor's own children.
   const h = underHeavy(`unity ${platform} tests (${rel(dir) || '.'})`, () => { startedAt = Date.now(); return spawnSync(unityBin(), args(resultsFile), { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, ...(controlsOut ? { STUDIO_CONTROLS_OUT: controlsOut } : {}) }, timeout: 30 * 60000, maxBuffer: 256 * 1024 * 1024 }); }, heavyOpts);
   if (h.busy) return { ok: false, busy: true, platform, results: null, problems: [`${platform}: did not run: ${h.busy}`], log: '', notRun: { kind: h.floor ? 'ram-floor' : 'busy', text: `${platform}: ${h.busy}` } };
   const r = h.value;
   return { ...judgeRun(platform, resultsFile, `${r.stdout || ''}${r.stderr || ''}`, r.status, { startedAt, allowEmpty, signal: r.signal || (r.error?.code === 'ETIMEDOUT' ? 'timeout' : null), spawnError: r.error || null }), resultsFile: rel(resultsFile) };
 }
 
-/** 2.72.0 (c): remove the results files earlier runs left for one platform (TestResults-<platform>[-<nonce>].xml). */
 function removeOldResults(dir, stem) {
   let names = [];
   try { names = fs.readdirSync(dir); } catch { return; }
@@ -226,21 +200,14 @@ function removeOldResults(dir, stem) {
   for (const n of names) if (re.test(n)) { try { fs.rmSync(path.join(dir, n), { force: true }); } catch {} }
 }
 
-/**
- * 2.72.0 (c): may a platform's run count 0 tests? studio/game.json engines.unity "allowEmpty": true (every platform) or a
- * list of platforms (["PlayMode"]). Default: no (an empty run is not a check).
- */
+/** May a platform's run count 0 tests? studio/game.json engines.unity "allowEmpty": true or a platform list (["PlayMode"]). Default: no. */
 export function unityAllowEmpty(platform, { root = REPO_ROOT } = {}) {
   let v = null;
   v = readJson(path.join(root, 'studio', 'game.json'))?.engines?.unity?.allowEmpty ?? null;
   return v === true || (Array.isArray(v) && v.map(String).includes(platform));
 }
 
-/**
- * A run's NUnit results and log, judged: { ok, platform, results, problems, proof, log }. unhandled: count exceptions in
- * the log. 2.72.0 (c), harness/engine-proof.mjs: startedAt (the run's start; a results file older than it was not
- * written by this run), allowEmpty (0 tests may pass), signal (the run was killed). `proof` lists each failure's kind.
- */
+/** A run's NUnit results and log, judged: { ok, platform, results, problems, proof, log }. unhandled: count exceptions in the log. startedAt (an older results file isn't this run's), allowEmpty, signal (killed): harness/engine-proof.mjs. */
 export function judgeRun(platform, resultsFile, log, status, { unhandled: countUnhandled = true, startedAt = null, allowEmpty = false, signal = null, spawnError = null } = {}) {
   const problems = [];
   const proof = [];
@@ -263,7 +230,7 @@ export function judgeRun(platform, resultsFile, log, status, { unhandled: countU
     if (!res.total && !allowEmpty) add('empty-run', 'no test ran: an empty run is not a check', `${platform}: no test ran: an empty run is not a check`);
     for (const f of res.failures) add('test-failed', `${f.name} failed: ${f.message}`, `${platform}: ${f.name} failed: ${f.message}`);
     if (res.failed && !res.failures.length) add('test-failed', `${res.failed} test(s) failed`, `${platform}: ${res.failed} test(s) failed`);
-    // A results file next to compile errors or a batch-mode abort: the log says the run is not what the file says.
+    // A results file next to compile errors or a batch-mode abort: the log wins.
     const ce = sigs.find((x) => x.kind === 'compile-error');
     if (ce) add('compile-error', `${ce.text} (while a results file was written: the tests may have run against an older build)`, `${platform}: ${ce.text} (while a results file was written: the tests may have run against an older build)`);
     if (res.total || res.failed) {
@@ -273,10 +240,8 @@ export function judgeRun(platform, resultsFile, log, status, { unhandled: countU
   }
   const ab = sigs.find((x) => x.kind === 'aborted');
   if (ab) add('aborted', ab.text, `${platform}: ${ab.text}`);
-  // 2.73.2 (e, B-73): an infrastructure abort (out of memory, killed, no licence, couldn't start, aborted before any
-  // results) is NOT RUN: nothing was tested. Never when the log shows a compile error or a test failed (those stay FAIL).
-  // 2.80 (f, patch #28): no results file at all (the editor died under RAM pressure) is the environment's, never the lane's
-  // (a compile error in the log or our own timeout stays a FAIL: infraAbort returns null for those only when they show).
+  // An infrastructure abort (out of memory, killed, no licence, couldn't start, no results at all) is NOT RUN, never the
+  // lane's fault; a compile error in the log, a failed test or our own timeout stays FAIL.
   const infra = infraAbort({ log, status, signal, spawnError, results: res, timedOut: signal === 'timeout', engine: 'unity' })
     || (noFile && signal !== 'timeout' && !/error CS\d+/.test(log) ? { kind: 'no-results', text: `the editor wrote no test results (exit ${status ?? signal ?? '?'}): it died or was killed before the tests finished` } : null);
   if (infra) {
@@ -288,20 +253,16 @@ export function judgeRun(platform, resultsFile, log, status, { unhandled: countU
   return { ok: problems.length === 0, platform, results: res, problems, proof, log, ...(res && !res.total && allowEmpty ? { note: `${platform}: 0 tests ran, allowed by studio/game.json engines.unity.allowEmpty` } : {}) };
 }
 
-/**
- * A playable build (Assets/Editor/StudioBuild.cs): web (WebGL, played in a browser and on the Arcade's engine
- * tab) or windows (Build/Windows/Game.exe). Returns { ok, target, out, problems }.
- */
+/** A playable build (Assets/Editor/StudioBuild.cs): web (WebGL) or windows (Build/Windows/Game.exe). { ok, target, out, problems }. */
 export function build(dir, target = 'windows', { out = null, release = false, env = process.env, ...heavyOpts } = {}) {
   const t = { web: ['WebGL', 'Build/WebGL'], webgl: ['WebGL', 'Build/WebGL'], windows: ['Windows', 'Build/Windows'] }[String(target).toLowerCase()];
   if (!t) return { ok: false, problems: [`unknown build target "${target}" (web or windows)`] };
   if (!fs.existsSync(path.join(dir, 'Assets', 'Editor', 'StudioBuild.cs'))) return { ok: false, problems: [`${rel(dir)}/Assets/Editor/StudioBuild.cs is missing (copy it from engine/_unity)`] };
   if (!which(unityBin())) return { ok: false, problems: [`the Unity editor isn't found (${unityBin()}): set STUDIO_UNITY to the editor's full path. A ${t[0]} build also needs that platform's module installed in Unity Hub.`] };
   const dest = path.resolve(dir, out || t[1]);
-  // 2.67.1 (k): the warm Library is seeded before the editor and saved after a passing build (harness/unity-cache.mjs).
+  // The warm Library is seeded before and saved after a passing build (harness/unity-cache.mjs).
   const mainRoot = heavyOpts.heavyRoot || REPO_ROOT;
   const say = heavyOpts.log || ((m) => console.error(m));
-  // 2.70.0 (u): the Accelerator (probed once, before the wait) and the landing build options.
   const acc = accelerator(dir, { env });
   say(`[unity] ${acc.line}`);
   const speed = buildSpeedArgs(env, { release });
@@ -326,11 +287,7 @@ export function build(dir, target = 'windows', { out = null, release = false, en
   return { ok: problems.length === 0, target: t[0], out: rel(dest), problems, line, accelerator: acc, speed: speed.args };
 }
 
-/**
- * 2.67.1 (k): the editor-free steps of a Unity-track check, from studio/game.json engines.unity "codeOnly" (a command
- * or a list; {folder} is the project; "codeOnly": [] or false: none), else `dotnet test tools/SimTests` when the
- * project has that .NET test project. [{ kind: 'command', cmd } | { kind: 'dotnet' }].
- */
+/** The editor-free steps: studio/game.json engines.unity "codeOnly" (a command or list; {folder} is the project; [] or false: none), else `dotnet test tools/SimTests`. [{ kind: 'command', cmd } | { kind: 'dotnet' }]. */
 export function codeOnlySteps(dir, { root = REPO_ROOT, env = process.env } = {}) {
   if (/^(off|0|false|no)$/i.test(String(env.STUDIO_UNITY_CODE_ONLY || ''))) return [];
   let cfg = {};
@@ -342,15 +299,11 @@ export function codeOnlySteps(dir, { root = REPO_ROOT, env = process.env } = {})
   return fs.existsSync(path.join(dir, 'tools', 'SimTests')) ? [{ kind: 'dotnet' }] : [];
 }
 
-/**
- * 2.67.1 (k): run the editor-free steps WITHOUT machine:heavy, before the editor waits for it: a lane gets its code
- * checks while another lane's editor run holds the machine, and a failure here stops before any wait for the editor.
- * { ok, ran, problems }.
- */
+/** Run the editor-free steps WITHOUT machine:heavy, before the editor waits for it. { ok, ran, problems }. */
 export function runCodeOnly(dir, { log = console.log, root = REPO_ROOT, env = process.env } = {}) {
   const steps = codeOnlySteps(dir, { root, env });
   const ran = [];
-  let dotnet = null; // 2.70.0 (u): the dotnet step's result, so the editor's Edit Mode run can be skipped when it covered it
+  let dotnet = null; // the dotnet step's result, so the editor's Edit Mode run can be skipped when it covered it
   for (const st of steps) {
     if (st.kind === 'dotnet') {
       if (!which(dotnetBin())) { log('[unity] note: the sim\'s .NET tests (tools/SimTests) need the .NET 8 SDK (dotnet, or STUDIO_DOTNET), which isn\'t here: skipped; the editor\'s Edit Mode tests still run'); continue; }
@@ -376,8 +329,7 @@ export function runCodeOnly(dir, { log = console.log, root = REPO_ROOT, env = pr
   return { ok: true, ran, problems: [], dotnet };
 }
 
-// 2.67.1 (k): a failed Play Mode run is retried once when its tests ran and failed (never a compile error, a missing
-// results file, a licence problem or Edit Mode).
+// A Play Mode run is retried once when its tests ran and failed (never a compile error, missing results, licence problem or Edit Mode).
 const compileErrors = (log) => /error CS\d+/.test(String(log || ''));
 export const retryablePlayMode = (r) => Boolean(r && !r.ok && !r.busy && r.platform === 'PlayMode' && r.results && r.results.failed > 0 && !compileErrors(r.log) && !r.problems.some((x) => /licence/.test(x)));
 const saveLog = (name, text) => {
@@ -386,7 +338,7 @@ const saveLog = (name, text) => {
   return rel(f);
 };
 
-/** 2.67.1 (k): record a Play Mode flake: <main checkout>/.studio/unity-flakes.jsonl and a unity.flake event. */
+/** Record a Play Mode flake: <main checkout>/.studio/unity-flakes.jsonl and a unity.flake event. */
 export function recordFlake(mainRoot, rec) {
   const f = path.join(mainRoot, '.studio', 'unity-flakes.jsonl');
   try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.appendFileSync(f, `${JSON.stringify(rec)}\n`); } catch {}
@@ -394,17 +346,12 @@ export function recordFlake(mainRoot, rec) {
   return rel(f);
 }
 
-// ---- 2.70.0 (u): Unity speed ---------------------------------------------------------------------------------------
+// ---- Unity speed ----
 
 const isOn = (v) => /^(on|1|true|yes)$/i.test(String(v || '').trim());
 const isOff = (v) => /^(off|0|false|no)$/i.test(String(v || '').trim());
 
-/**
- * The Unity Accelerator (a local cache server for import results, shader variants and texture compression):
- * STUDIO_UNITY_ACCELERATOR=<host:port> (default unset: off). { endpoint, namespace } or null. The namespace is the
- * project's Unity version, so a result made by another editor version is never reused (Unity warns cache hits can be
- * non-hermetic).
- */
+/** The Unity Accelerator (a local cache server): STUDIO_UNITY_ACCELERATOR=<host:port> (default unset: off). { endpoint, namespace } or null; the namespace is the project's Unity version. */
 export function acceleratorConfig(dir, env = process.env) {
   const v = String(env.STUDIO_UNITY_ACCELERATOR || '').trim();
   if (!v || isOff(v)) return null;
@@ -412,13 +359,9 @@ export function acceleratorConfig(dir, env = process.env) {
   return { endpoint: v, namespace: `${version.replace(/[^A-Za-z0-9._-]+/g, '_')}` };
 }
 
-/** The editor arguments for an Accelerator config (every editor start: tests, build, any batch work). */
 export const acceleratorArgs = (acc) => (acc ? ['-EnableCacheServer', '-cacheServerEndpoint', acc.endpoint, '-cacheServerEnableDownload', 'true', '-cacheServerEnableUpload', 'true', '-cacheServerNamespacePrefix', acc.namespace] : []);
 
-/**
- * Does host:port answer a TCP connect within timeoutMs (STUDIO_UNITY_ACCELERATOR_TIMEOUT_MS, 1500)? Synchronous (a
- * short child node process), like the gate. { ok, ms, why }. Never throws.
- */
+/** Does host:port answer a TCP connect within timeoutMs (STUDIO_UNITY_ACCELERATOR_TIMEOUT_MS, 1500)? Synchronous (a short child node process). { ok, ms, why }. Never throws. */
 export function probeEndpoint(endpoint, { timeoutMs = num(process.env.STUDIO_UNITY_ACCELERATOR_TIMEOUT_MS, 1500) } = {}) {
   const m = String(endpoint || '').trim().match(/^\[?([^\]]+?)\]?:(\d{1,5})$/);
   if (!m) return { ok: false, ms: 0, why: `"${endpoint}" is not host:port` };
@@ -427,10 +370,7 @@ export function probeEndpoint(endpoint, { timeoutMs = num(process.env.STUDIO_UNI
   try { return JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch { return { ok: false, ms: 0, why: `the probe did not run (${r.error?.code || `exit ${r.status}`})` }; }
 }
 
-/**
- * The Accelerator for this run: probed once. { on, args, line }: unset or unreachable means off (the run goes on
- * without it and says so once); it never fails a gate or a build.
- */
+/** The Accelerator for this run, probed once: { on, args, line }. Unset or unreachable means off (said once); it never fails a gate or a build. */
 export function accelerator(dir, { env = process.env, probe = probeEndpoint } = {}) {
   const acc = acceleratorConfig(dir, env);
   if (!acc) return { on: false, args: [], line: 'cache server off (STUDIO_UNITY_ACCELERATOR is not set)' };
@@ -449,7 +389,6 @@ const walkFiles = (root, ext, out = []) => {
   return out;
 };
 const readAsmdef = (f) => { try { return JSON.parse(read(f)); } catch { return null; } };
-/** The asmdef that owns a file (the nearest one in its folder or above, up to Assets/), or null. */
 function owningAsmdef(file, assets, cache = new Map()) {
   for (let d = path.dirname(file); d.length >= assets.length; d = path.dirname(d)) {
     if (!cache.has(d)) { let a = null; try { const n = fs.readdirSync(d).find((x) => x.endsWith('.asmdef')); if (n) a = { file: path.join(d, n), json: readAsmdef(path.join(d, n)) }; } catch {} cache.set(d, a); }
@@ -464,11 +403,7 @@ const HARNESS_ASSEMBLIES = new Set(['StudioService.Editor']);
 const isTestAsmdef = (j) => Boolean(j && !HARNESS_ASSEMBLIES.has(j.name) && ((j.defineConstraints || []).includes('UNITY_INCLUDE_TESTS') || (j.references || []).some((r) => /TestRunner/.test(String(r))) || (j.optionalUnityReferences || []).includes('TestAssemblies')));
 const isEditorOnly = (j) => Boolean(j && Array.isArray(j.includePlatforms) && j.includePlatforms.length === 1 && j.includePlatforms[0] === 'Editor');
 
-/**
- * The project's test sources by platform: { EditMode: [files], PlayMode: [files] } (test assemblies: an asmdef with
- * UNITY_INCLUDE_TESTS or a TestRunner reference; Editor-only ones are Edit Mode). Tests outside any asmdef are left
- * out (Unity's default test assemblies need one).
- */
+/** The project's test sources by platform: { EditMode: [files], PlayMode: [files] } (an asmdef with UNITY_INCLUDE_TESTS or a TestRunner reference; Editor-only is Edit Mode). Tests outside any asmdef are left out. */
 export function testSources(dir) {
   const assets = path.join(dir, 'Assets');
   const out = { EditMode: [], PlayMode: [] };
@@ -481,19 +416,13 @@ export function testSources(dir) {
   return out;
 }
 
-/** Test sources tagged [Category("Graphics")] (a grep of the test sources), by platform. */
 export function graphicsTests(dir, sources = testSources(dir)) {
   const re = /\bCategory\s*\(\s*"Graphics"\s*\)/;
-  // Comments removed (strings kept: the category is one).
   const pick = (files) => files.filter((f) => re.test((read(f) || '').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:"])\/\/[^\n]*/g, '$1')));
   return { EditMode: pick(sources.EditMode), PlayMode: pick(sources.PlayMode) };
 }
 
-/**
- * The Graphics split: STUDIO_UNITY_GRAPHICS_SPLIT=on|off (default: on when any test is tagged Graphics). On: each
- * platform with Graphics tests runs `-nographics -testCategory "!Graphics"`, then the Graphics tests in a second start
- * with a graphics device. { on, platforms: [platforms with Graphics tests], why }.
- */
+/** The Graphics split: STUDIO_UNITY_GRAPHICS_SPLIT=on|off (default: on when any test is tagged Graphics): `-nographics -testCategory "!Graphics"`, then the Graphics tests in a second start with a device. { on, platforms, why }. */
 export function graphicsSplit(dir, env = process.env) {
   const v = String(env.STUDIO_UNITY_GRAPHICS_SPLIT || '').trim();
   if (isOff(v)) return { on: false, platforms: [], why: 'STUDIO_UNITY_GRAPHICS_SPLIT=off' };
@@ -503,7 +432,6 @@ export function graphicsSplit(dir, env = process.env) {
   return { on: true, platforms, files: [...g.EditMode, ...g.PlayMode].map(rel), why: `${g.EditMode.length + g.PlayMode.length} test file(s) tagged Graphics (${platforms.join(', ')})` };
 }
 
-/** The VRAM claim for the gate's hold: a Graphics pass needs a device in the GPU area; -nographics runs need none. */
 export function graphicsVramGb() {
   const k = JOB_KINDS['unity-visual'] || JOB_KINDS['unity-graphics'] || JOB_KINDS.unity;
   return Number(k?.vramGb) > 0 ? Number(k.vramGb) : 2;
@@ -515,10 +443,7 @@ const sumResults = (rs) => {
   return { total: ok.reduce((n, r) => n + r.total, 0), passed: ok.reduce((n, r) => n + r.passed, 0), failed: ok.reduce((n, r) => n + r.failed, 0), skipped: ok.reduce((n, r) => n + r.skipped, 0), result: ok.some((r) => r.failed) ? 'Failed' : 'Passed', failures: ok.flatMap((r) => r.failures) };
 };
 
-/**
- * One platform's editor tests, split when the platform has Graphics tests: the headless start ("!Graphics",
- * -nographics), then the Graphics start (a device). `headless` is a result already in hand (the one-editor run).
- */
+/** One platform's editor tests, split when it has Graphics tests. `headless` is a result already in hand (the one-editor run). */
 export function runPlatform(dir, platform, opts = {}, { split = null, headless = null, log = () => {} } = {}) {
   const splitHere = Boolean(split?.on && split.platforms.includes(platform));
   if (!splitHere) return headless || runUnityTests(dir, platform, opts);
@@ -526,11 +451,10 @@ export function runPlatform(dir, platform, opts = {}, { split = null, headless =
   if (a.busy || a.notRun || a.problems.some((x) => /licence/.test(x)) || (!a.results && compileErrors(a.log))) return a;
   log(`[gate] ${platform}: the Graphics tests run in their own start with a graphics device (the rest ran with -nographics)`);
   const b = runUnityTests(dir, platform, { ...opts, category: 'Graphics', graphics: true, suffix: '-Graphics' });
-  // 2.73.2 (e): the device half not run: a red headless half still stands as the FAIL; else the platform is not run.
+  // Device half not run: a red headless half still stands as the FAIL; else the platform is not run.
   if (b.busy || b.notRun) return a.ok ? b : a;
   const results = sumResults([a.results, b.results]);
   const problems = [...a.problems, ...b.problems].filter((x) => !/: no test ran: /.test(x));
-  // 2.72.0 (c): each half's failure kinds, the empty-run one judged over both halves.
   const proof = [...(a.proof || []), ...(b.proof || [])].filter((x) => x.kind !== 'empty-run');
   if (results && !results.total && !opts.allowEmpty) { problems.push(`${platform}: no test ran: an empty run is not a check`); proof.push({ kind: 'empty-run', text: `${platform}: no test ran in either start: an empty run is not a check` }); }
   if (!a.results && !b.results) problems.push(`${platform}: no test results written`);
@@ -539,7 +463,6 @@ export function runPlatform(dir, platform, opts = {}, { split = null, headless =
 
 // -- no duplicate Edit Mode --
 
-/** The .NET test project's Compile globs (tools/SimTests/*.csproj), as absolute regexes. [] when there is none. */
 function dotnetCompileGlobs(dir) {
   const proj = path.join(dir, 'tools', 'SimTests');
   let csproj = null;
@@ -554,10 +477,7 @@ function dotnetCompileGlobs(dir) {
   return { include: grab('Include'), remove: [...grab('Remove'), ...grab('Exclude')] };
 }
 
-/**
- * Does the code-only `dotnet test tools/SimTests` run every Edit Mode test the editor would? { ok, files, why }: ok only
- * when the project has Edit Mode test sources and the .NET project compiles each of them (so they also passed there).
- */
+/** Does `dotnet test tools/SimTests` cover every Edit Mode test the editor would? { ok, files, why }. */
 export function dotnetCoversEditMode(dir, sources = testSources(dir)) {
   const files = sources.EditMode;
   if (!files.length) return { ok: false, files: 0, why: 'no Edit Mode test assembly found under Assets/' };
@@ -570,13 +490,9 @@ export function dotnetCoversEditMode(dir, sources = testSources(dir)) {
 }
 
 /**
- * 2.82: which Edit Mode test assemblies the editor still has to run after the .NET rules tests passed. The crew's land
- * runs spent a median 53 minutes in Edit Mode re-running the rule tests .NET had just run; only the assemblies .NET
- * doesn't compile (art and editor checks) need the editor. { assemblies: [{ name, files, covered }], covered: [name],
- * uncovered: [name], args: [..] , why }: `args` is what a land script adds to its Edit Mode start (the Unity Test
- * Framework's -assemblyNames list; [] when the editor has to run everything, ['-skip'] is never given: with nothing
- * uncovered `skip` is true and the script can leave Edit Mode out). UNVERIFIED on a real editor from the harness's side:
- * a land script that uses it should keep one full Edit Mode run a day (docs/UNITY-TRACK.md).
+ * The Edit Mode assemblies the editor still has to run after the .NET tests passed (those .NET doesn't compile).
+ * { assemblies, covered, uncovered, args, why }: `args` is the -assemblyNames list for a land script's Edit Mode start ([]:
+ * run everything; nothing uncovered: `skip` true). UNVERIFIED on a real editor: keep one full Edit Mode run a day (docs/UNITY-TRACK.md).
  */
 export function editModePlan(dir) {
   const assets = path.join(dir, 'Assets');
@@ -606,10 +522,7 @@ export function editModePlan(dir) {
 // What the editor and the gate write inside a project: never a change to its tree.
 const OUTPUT_PATHS = /^(?:Library|Temp|Logs|obj|UserSettings|Build|Builds|MemoryCaptures|StudioHarnessTemp)(?:\/|$)|^TestResults-[^/]*\.xml$|^Assets\/StudioHarnessTemp(?:\.meta|\/|$)|^Library\.(?:seed|tmp|old)-/;
 
-/**
- * The project's committed tree and whether it is clean: { tree, clean, why }. Tree: git's tree id of the project
- * folder at HEAD; clean: no tracked change and no untracked file in it (the editor's own outputs aside). No git: no tree.
- */
+/** The project's committed tree and whether it is clean: { tree, clean, why } (git's tree id at HEAD; clean: no tracked change or untracked file, the editor's outputs aside). No git: no tree. */
 export function projectTree(dir) {
   const g = (...a) => spawnSync('git', ['-C', dir, ...a], { encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
   const top = g('rev-parse', '--show-toplevel');
@@ -626,7 +539,6 @@ export function projectTree(dir) {
 const editModeFile = () => path.join(REPO_ROOT, '.studio', 'gates', 'unity-editmode.json');
 const editorId = (dir) => ({ version: projectVersion(dir), editor: unityBin() });
 
-/** After the editor's Edit Mode tests passed on a clean tree: remember it for this checkout (by project, tree, version). */
 export function recordEditModePass(dir, results, { tree = projectTree(dir), now = Date.now() } = {}) {
   if (!tree.tree || !tree.clean || !results?.total || results.failed) return null;
   const f = editModeFile();
@@ -637,14 +549,7 @@ export function recordEditModePass(dir, results, { tree = projectTree(dir), now 
   return all[rel(dir) || '.'];
 }
 
-/**
- * May this gate skip the editor's Edit Mode run? Pure judgement over gathered facts, the 2.69 verify-reuse rules: the
- * same clean tree and the same Unity version and editor, never a changed tree, at most maxAgeH old.
- *   coRan: the code-only step ran `dotnet test tools/SimTests` and passed in THIS gate; covers: dotnetCoversEditMode;
- *   playMode: Play Mode's editor run follows in this gate (the editor still compiles the whole project);
- *   rec: the recorded editor pass for this project; tree: projectTree now.
- * { ok, how: 'dotnet'|'record'|null, why }.
- */
+/** May this gate skip the editor's Edit Mode run? Pure: same clean tree, Unity version and editor, at most maxAgeH old. coRan: dotnet passed in THIS gate; covers: dotnetCoversEditMode; playMode: Play Mode's run follows; rec: the recorded pass; tree: projectTree now. { ok, how: 'dotnet'|'record'|null, why }. */
 export function judgeEditModeReuse({ env = process.env, coRan = null, covers = null, playMode = false, rec = null, tree = null, version = null, editor = null, now = Date.now(), maxAgeH = 24 } = {}) {
   if (isOff(env.STUDIO_UNITY_EDITMODE_REUSE)) return { ok: false, how: null, why: 'STUDIO_UNITY_EDITMODE_REUSE=off' };
   if (coRan?.ok && coRan.total > 0 && covers?.ok && playMode) return { ok: true, how: 'dotnet', why: `the same Edit Mode tests passed with .NET in this gate's code-only step (${coRan.total - (coRan.failed || 0)}/${coRan.total}; ${covers.why}); the editor still starts for Play Mode` };
@@ -658,7 +563,6 @@ export function judgeEditModeReuse({ env = process.env, coRan = null, covers = n
   return { ok: true, how: 'record', why: `Edit Mode passed (${rec.passed}/${rec.total}) at ${String(rec.at).slice(11, 19)} UTC on this same tree (${tree.tree.slice(0, 8)}, clean) with Unity ${version}` };
 }
 
-/** The recorded editor Edit Mode pass for dir in this checkout, or null. */
 export function editModeRecord(dir) {
   try { return (JSON.parse(read(editModeFile()) || '{}') || {})[rel(dir) || '.'] || null; } catch { return null; }
 }
@@ -666,13 +570,7 @@ export function editModeRecord(dir) {
 // -- one editor start (opt-in, UNVERIFIED) --
 
 export const ONE_EDITOR_DIR = 'Assets/StudioHarnessTemp';
-/**
- * The editor script the harness writes for STUDIO_UNITY_ONE_EDITOR=on (and removes after the run): Edit Mode, then
- * Play Mode, through TestRunnerApi, each result saved to the file its argument names. UNVERIFIED on a real editor:
- * that both modes run in one Execute chain, and that the callbacks come back after Play Mode's domain reload
- * ([InitializeOnLoad] registers them again while the phase file exists). The harness falls back to two starts when
- * the run doesn't write both result files.
- */
+/** The editor script for STUDIO_UNITY_ONE_EDITOR=on (removed after the run): Edit Mode, then Play Mode, via TestRunnerApi. UNVERIFIED on a real editor: that both modes run in one Execute chain and that the callbacks return after Play Mode's domain reload. Falls back to two starts. */
 export const ONE_EDITOR_SCRIPT = `// Written by the studio harness (harness/unity.mjs, STUDIO_UNITY_ONE_EDITOR=on) for one gate run and removed after it.
 // Never commit it; never edit it in the game.
 using System;
@@ -753,13 +651,9 @@ const removeOneEditorFiles = (dir) => {
   for (const f of [ONE_EDITOR_DIR, `${ONE_EDITOR_DIR}.meta`]) { try { fs.rmSync(path.join(dir, f), { recursive: true, force: true }); } catch {} }
 };
 
-/**
- * Edit Mode and Play Mode in one editor start (-executeMethod StudioHarnessRunAll.Run). The script is written into
- * Assets/StudioHarnessTemp (with a .gitignore of *, so a killed run can't get it committed) and removed after, whatever
- * happens. { ok: both result files written, results: { EditMode, PlayMode } (judged runs), why, log }.
- */
+/** Edit Mode and Play Mode in one editor start (-executeMethod StudioHarnessRunAll.Run); the script lives in Assets/StudioHarnessTemp (with a .gitignore of *) and is removed after. { ok: both result files written, results, why, log }. */
 export function runOneEditor(dir, { controlsOut = null, extraArgs = [], category = null, timeoutMin = 60, allowEmpty = {} } = {}) {
-  // 2.72.0 (c): this run's nonce in both results files' names (harness/engine-proof.mjs).
+  // This run's nonce is in both results files' names.
   const nonce = runNonce();
   const files = { EditMode: path.join(dir, `TestResults-EditMode-${nonce}.xml`), PlayMode: path.join(dir, `TestResults-PlayMode-${nonce}.xml`) };
   for (const p of Object.keys(files)) removeOldResults(dir, p);
@@ -788,11 +682,9 @@ export function runOneEditor(dir, { controlsOut = null, extraArgs = [], category
 // -- landing build options --
 
 /**
- * The build method's speed arguments (the contract a game's StudioBuild.cs may read; docs/UNITY-TRACK.md):
- * STUDIO_UNITY_LANDING_BUILD=fast adds `-studioBuildSpeed fast` to landing/dev builds (never with release: true);
- * STUDIO_UNITY_CODE_OPT=release adds `-studioCodeOptimization release`. The harness never edits ProjectSettings, and
- * adds no editor-wide code optimization flag: its name is unverified (TODO in docs/UNITY-TRACK.md).
- * { args, notes }.
+ * The build method's speed arguments (what a game's StudioBuild.cs may read; docs/UNITY-TRACK.md): STUDIO_UNITY_LANDING_BUILD=fast
+ * adds `-studioBuildSpeed fast` to landing/dev builds (never with release: true); STUDIO_UNITY_CODE_OPT=release adds
+ * `-studioCodeOptimization release`. Never edits ProjectSettings; no editor-wide code optimization flag (name unverified). { args, notes }.
  */
 export function buildSpeedArgs(env = process.env, { release = false } = {}) {
   const args = [];
@@ -808,27 +700,22 @@ export function buildSpeedArgs(env = process.env, { release = false } = {}) {
   return { args, notes };
 }
 
-/**
- * The editor's gate: purity, pin, the code-only steps (no machine:heavy; 2.67.1), then Edit Mode and Play Mode tests
- * under one machine:heavy hold, with the warm Library seeded first and saved after a green run (harness/unity-cache.mjs)
- * and one retry for a Play Mode test failure (a pass on retry is green with a flake record). { ok, problems, flakes }.
- */
+/** The editor's gate: purity, pin, code-only steps (no machine:heavy), then Edit Mode and Play Mode under one machine:heavy hold, warm Library seeded and saved (harness/unity-cache.mjs), one Play Mode retry (a pass on retry is green with a flake record). { ok, problems, flakes }. */
 export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.log, env = process.env, ...heavyOpts } = {}) {
   const problems = [];
   const flakes = [];
-  const proof = []; // 2.72.0 (c): each failure's kind (harness/engine-proof.mjs), for its own plain-words and Fix line
+  const proof = []; // each failure's kind (harness/engine-proof.mjs), for its plain-words and Fix line
   const p = simPurity(dir);
   if (!p.ok) return { ok: false, problems: p.problems };
   const pin = checkPin(dir);
   if (!pin.ok) return { ok: false, problems: [pin.why] };
   if (pin.note) log(`[unity] note: ${pin.note}`);
-  // 2.67.1 (k): code-only first, without the lock; a failure stops here, before any wait for the editor.
+  // Code-only first, without the lock; a failure stops here.
   const co = runCodeOnly(dir, { log, env });
   if (!co.ok) return { ok: false, codeOnly: co, problems: co.problems };
   if (!which(unityBin())) return { ok: false, problems: [`the Unity editor isn't found (${unityBin()}): install Unity ${pin.version} with Unity Hub and set STUDIO_UNITY to the editor's full path (Windows: C:\\Program Files\\Unity\\Hub\\Editor\\${pin.version}\\Editor\\Unity.exe). The sim's checks need no editor: npm run engine:sim`] };
   const controlsOut = path.join(REPO_ROOT, 'qa', 'reports', 'controls-unity.json');
   const mainRoot = heavyOpts.heavyRoot || REPO_ROOT;
-  // 2.70.0 (u): the Accelerator (probed once, before any wait), the Graphics split and Edit Mode reuse.
   const acc = accelerator(dir, { env });
   log(`[unity] ${acc.line}`);
   const split = graphicsSplit(dir, env);
@@ -847,17 +734,16 @@ export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.
     } else if (co.dotnet?.ok || rec) log(`[unity] note: the editor runs Edit Mode: ${j.why}`);
   }
   if (!todo.length) return { ok: true, problems, flakes, codeOnly: co, cache: null, editMode: reused, accelerator: acc, split };
-  // A one-editor script left by a killed run never stays in the project (it would compile into every later start).
+  // A one-editor script left by a killed run is removed (it would compile into every later start).
   if (fs.existsSync(path.join(dir, ONE_EDITOR_DIR))) { removeOneEditorFiles(dir); log(`[unity] removed ${ONE_EDITOR_DIR}/ left by an earlier one-editor run`); }
   const oneEditor = isOn(env.STUDIO_UNITY_ONE_EDITOR) && todo.includes('EditMode') && todo.includes('PlayMode');
   let oneEditorUsed = false;
   let cache = null;
-  const notRuns = []; // 2.73.2 (e, B-73): platforms an infrastructure abort stopped (NOT RUN, apart from problems)
-  // One machine:heavy hold for every platform (no other heavy job slips in between Edit Mode and Play Mode).
+  const notRuns = []; // platforms an infrastructure abort stopped (NOT RUN, apart from problems)
   const h = underHeavy(`unity gate ${todo.join('+')} (${rel(dir) || '.'})`, () => {
     const seed = seedLibrary(dir, { mainRoot, env });
     if (seed.status !== 'off' && seed.status !== 'skipped') log(cacheLine(seed, 'before the editor'));
-    // 2.70.0 (u): STUDIO_UNITY_ONE_EDITOR=on: both modes in one start; anything short of both results: two starts.
+    // STUDIO_UNITY_ONE_EDITOR=on: both modes in one start; anything short of both results: two starts.
     let pre = null;
     if (oneEditor) {
       const o = runOneEditor(dir, { controlsOut, extraArgs: acc.args, category: split.on ? '!Graphics' : null, allowEmpty: { EditMode: unityAllowEmpty('EditMode'), PlayMode: unityAllowEmpty('PlayMode') } });
@@ -868,7 +754,7 @@ export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.
       const opts = { controlsOut: platform === 'PlayMode' ? controlsOut : null, extraArgs: acc.args, allowEmpty: unityAllowEmpty(platform), ...heavyOpts };
       let r = runPlatform(dir, platform, opts, { split, headless: pre?.[platform] || null, log });
       if (r.notRun) {
-        // 2.73.2 (e, B-73): not run is not red: no retry, no FAIL line, no Edit Mode record; the next platform isn't started.
+        // Not run is not red: no retry, no FAIL line, no Edit Mode record; the next platform isn't started.
         notRuns.push({ ...r.notRun, platform, proof: r.proof || [] });
         log(`[gate] NOT RUN ${platform}: ${r.notRun.text.replace(`${platform}: `, '')} (not a failure of the work)`);
         break;
@@ -890,7 +776,7 @@ export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.
         }
       }
       log(`[gate] ${r.ok ? 'PASS' : 'FAIL'} ${platform}${r.results ? `: ${r.results.passed}/${r.results.total} passed` : ''}${r.ok && flakes.some((f) => f.platform === platform) ? ' (on retry)' : ''}`);
-      // 2.70.0 (u): a passing Edit Mode run on a clean tree is remembered, so the next gate on that tree skips it.
+      // A passing Edit Mode run on a clean tree is remembered, so the next gate on that tree skips it.
       if (platform === 'EditMode' && r.ok) recordEditModePass(dir, r.results, { tree });
       problems.push(...r.problems);
       if (!r.ok) proof.push(...(r.proof || []));
@@ -904,7 +790,7 @@ export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.
     } else cache = { seed };
   }, { ...heavyOpts, ...(split.on ? { vramGb: graphicsVramGb() } : {}) });
   if (h.busy) return { ok: false, busy: true, notRun: { kind: h.floor ? 'ram-floor' : 'busy', text: h.busy }, codeOnly: co, accelerator: acc, problems: [`the editor's tests did not run: ${h.busy}`] };
-  // 2.73.2 (e, B-73): a real FAIL on one platform wins over a later platform that didn't run; else not run, not red.
+  // A real FAIL on one platform wins over a later platform that didn't run; else not run, not red.
   const notRun = !problems.length && notRuns.length ? { kind: notRuns[0].kind, text: notRuns.map((x) => x.text).join('; '), platforms: notRuns.map((x) => x.platform) } : null;
   if (notRun) return { ok: false, notRun, problems: notRuns.map((x) => `not run (${x.kind}): ${x.text}`), proof: notRuns.flatMap((x) => x.proof), flakes, codeOnly: co, cache, editMode: reused, accelerator: acc, split };
   return { ok: problems.length === 0, problems, proof, flakes, codeOnly: co, cache, editMode: reused, accelerator: acc, split, oneEditor: oneEditor ? (oneEditorUsed ? 'used' : 'fell back') : 'off' };
@@ -918,7 +804,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   try { const { readTrack } = await import('./engine.mjs'); track = readTrack(); } catch {}
   if (!folder) folder = track?.engine === 'unity' ? track.folder : null;
   if (!folder && cmd === 'accelerator') {
-    // 2.70.0 (u): no project: probe the endpoint only (the namespace needs a project's Unity version).
+    // No project: probe the endpoint only.
     const v = String(process.env.STUDIO_UNITY_ACCELERATOR || '').trim();
     const pr = v ? probeEndpoint(v) : null;
     console.log(`[unity] ${!v ? 'cache server off (STUDIO_UNITY_ACCELERATOR is not set)' : pr.ok ? `cache server on: the Unity Accelerator at ${v} answered in ${pr.ms} ms` : `cache server off: the Accelerator at ${v} did not answer (${pr.why}): runs go on without it`}`);
@@ -931,7 +817,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const dir = path.resolve(REPO_ROOT, folder);
   if (!isUnityProject(dir)) { console.error(`[unity] FAIL ${folder} is not a Unity project (no ProjectSettings/ProjectVersion.txt)`); process.exit(1); }
   const fail = (problems, code = 1) => { for (const p of problems) console.error(`[unity] ${code === 3 ? 'BUSY' : 'FAIL'} ${p}`); process.exit(code); };
-  // 2.60.1 (B-35): the editor's runs take machine:heavy in the main checkout (lane copies share its lock).
+  // machine:heavy lives in the main checkout (lane copies share its lock).
   let heavyRoot = REPO_ROOT;
   try { heavyRoot = await (await import('./heavy.mjs')).heavyRoot(); } catch {}
   if (cmd === 'purity') {
@@ -950,12 +836,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const pf = flag('platform');
     const t0 = Date.now();
     const r = gate(dir, { platforms: pf ? [pf] : undefined, heavyRoot });
-    // 2.65.0: the uniform job.done (harness/jobs.mjs) for the editor's tests.
     try { (await import('./jobs.mjs')).jobDone({ kind: 'unity-test', id: folder, code: r.ok ? 0 : r.busy || r.notRun ? 3 : 1, result: r.ok ? 'pass' : r.notRun ? 'not-run' : r.busy ? 'busy' : 'fail', ms: Date.now() - t0, tail: (r.problems || []).join(' | ') }); } catch {}
-    // 2.70.0 (u): the summary line says whether the cache server was on and whether Edit Mode was reused.
     const tail = `${r.accelerator ? `; ${r.accelerator.on ? 'cache server on' : 'cache server off'}` : ''}${r.editMode ? `; Edit Mode reused (${r.editMode.how === 'dotnet' ? 'passed with .NET in this gate' : 'passed earlier on this tree'})` : ''}${r.oneEditor === 'used' ? '; one editor start' : r.oneEditor === 'fell back' ? '; one editor start fell back to two' : ''}`;
     if (!r.ok && r.notRun) {
-      // 2.73.2 (e, B-73): not run (exit 3): one NOT RUN line per kind and its Fix line; never "[engine-gate] FAIL".
+      // Not run (exit 3): one NOT RUN line per kind and its Fix line; never "[engine-gate] FAIL".
       const { engineFix } = await import('./gate-fix.mjs');
       const shown = r.proof?.length ? r.proof : [{ kind: r.notRun.kind, text: r.notRun.text }];
       for (const k of kindsOf(shown)) { console.error(notRunLine(shown.find((x) => x.kind === k), 'unity')); console.error(`[engine-gate] Fix: ${engineFix(k, 'unity')}`); }
@@ -964,33 +848,30 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     if (!r.ok) {
       if (tail) console.error(`[unity] FAIL summary${tail}`);
-      // 2.72.0 (c): one plain-words line and one Fix line per kind of failure (harness/engine-proof.mjs, gate-fix.mjs).
+      // One plain-words and one Fix line per failure kind (harness/engine-proof.mjs, gate-fix.mjs).
       if (r.proof?.length) {
         const { engineFix } = await import('./gate-fix.mjs');
         for (const k of kindsOf(r.proof)) { console.error(proofLine(r.proof.find((x) => x.kind === k), 'unity')); console.error(`[engine-gate] Fix: ${engineFix(k, 'unity')}`); }
       }
       fail(r.problems, r.busy ? 3 : 1);
     }
-    // 2.67.1 (k): a pass on retry is green, with a warning naming the flaky tests.
+    // A pass on retry is green, with a warning naming the flaky tests.
     for (const f of r.flakes || []) console.log(`[unity] WARN flaky ${f.platform} test(s): ${f.tests.join(', ') || '?'} failed once, passed on retry (.studio/unity-flakes.jsonl)`);
     const which2 = pf ? `${pf === 'EditMode' ? 'Edit Mode' : 'Play Mode'}` : 'Edit Mode and Play Mode';
     console.log(`[unity] PASS the editor's tests (${which2})${r.flakes?.length ? ' (with a flake: see the warning)' : ''}${tail}`);
   } else if (cmd === 'build') {
-    // 2.47.0: the track's buildTarget (npm run engine -- link unity <repo> --build windows) is the default.
+    // Default: the track's buildTarget (npm run engine -- link unity <repo> --build windows).
     const t0 = Date.now();
     const r = build(dir, flag('target') || track?.buildTarget || 'windows', { out: flag('out'), heavyRoot, release: process.argv.includes('--release') });
-    // 2.65.0: the uniform job.done (harness/jobs.mjs) for a build.
     try { (await import('./jobs.mjs')).jobDone({ kind: 'unity-build', id: `${r.target || flag('target') || 'build'} ${folder}`, code: r.ok ? 0 : r.busy ? 3 : 1, result: r.ok ? 'pass' : r.busy ? 'busy' : 'fail', ms: Date.now() - t0, tail: (r.problems || []).join(' | '), log: r.out || null }); } catch {}
     if (!r.ok) fail(r.problems, r.busy ? 3 : 1);
     console.log(`[unity] PASS ${r.target} build: ${r.out}${r.target === 'WebGL' ? ' (the Arcade\'s engine tab plays it; or serve the folder and open index.html)' : ''}`);
   } else if (cmd === 'editmode-plan') {
-    // 2.82: for a land script: which Edit Mode assemblies the editor still runs after the .NET tests passed.
     const p = editModePlan(dir);
     if (process.argv.includes('--json')) console.log(JSON.stringify(p));
     else if (process.argv.includes('--args')) console.log(p.skip ? 'SKIP' : p.args.map((a) => (/[\s;]/.test(a) ? `"${a}"` : a)).join(' '));
     else console.log(`[unity] Edit Mode after a green .NET run: ${p.why}${p.args.length ? `\n[unity] add to the editor's Edit Mode start: ${p.args.map((a) => (/[\s;]/.test(a) ? `"${a}"` : a)).join(' ')}` : ''}`);
   } else if (cmd === 'accelerator') {
-    // 2.70.0 (u): is the Unity Accelerator (STUDIO_UNITY_ACCELERATOR) answering, and the editor arguments it adds.
     const a = accelerator(dir);
     console.log(`[unity] ${a.line}`);
     if (a.on) console.log(`[unity] editor arguments: ${a.args.join(' ')}`);

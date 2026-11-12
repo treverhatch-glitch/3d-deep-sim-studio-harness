@@ -1,46 +1,35 @@
 #!/usr/bin/env node
 /**
- * harness/autonomy.mjs — 2.64.0: the autonomy scorecard. How much the studio needs a person, from the event log.
+ * harness/autonomy.mjs — the autonomy scorecard. How much the studio needs a person, from the event log.
  *
  *   npm run autonomy                     the last 7 days, with daily buckets and the level badge
  *   npm run autonomy -- --days 14 --json
  *   npm run autonomy -- --now 2026-11-08T00:00:00Z   the window ending then (a replay of an older week)
- *   npm run autonomy -- --since 2026-11-01T00:00:00Z  2.66.0: the window from then to now (or to --now)
- * 2.66.0: a "Tokens" block (tokenWork): the effective-token ratio (tokens of sessions whose task landed and stayed
- * landed for keepDays, over all judged tokens), the cost per kept change (also per task type) and the waste split
- * (reopened / reverted or redone / handed back / dropped / no task), with pending landings apart; --json: card.tokenWork.
- *   npm run autonomy -- level <L1|L2|L3|L4> --by <name> [--why "…"] [--permission "…"]   2.65.0: set the level (setLevel)
- *   npm run autonomy -- mode autonomous on|off --by <game dev> [--agent <name>]   2.71.0: propose autonomous mode (the
- *     owner confirms: npm run policy -- confirm) or pause it at once (harness/policy.mjs)
- *   npm run autonomy -- impact [--release <version>] [--days 3] [--json]   2.68.0: a harness upgrade's before vs after
+ *   npm run autonomy -- --since 2026-11-01T00:00:00Z  the window from then to now (or to --now)
+ *   npm run autonomy -- level <L1|L2|L3|L4> --by <name> [--why "…"] [--permission "…"]   set the level (setLevel)
+ *   npm run autonomy -- mode autonomous on|off --by <game dev> [--agent <name>]   propose autonomous mode (the owner
+ *     confirms: npm run policy -- confirm) or pause it at once (harness/policy.mjs)
+ *   npm run autonomy -- impact [--release <version>] [--days 3] [--json]   a harness upgrade's before vs after
  *     (harness/impact.mjs)
- *   npm run autonomy -- routing [--days 14] [--json]   2.73.0 (e): cheap-first routing's success rate and tokens per
- *     landed change by task type and tier (harness/routing.mjs); the holdout is off
- * 2.73.0 (e): the L3 bar's rates are judged at a one-sided Wilson bound ("confidence", default 0.9) for a promotion and
- * as point estimates for a demotion; a failed audit (harness/audit.mjs) counts as a Redo.
- * 2.65.0: the card also shows the cost per landed task (tokens; dollars only with a studio/prices.json table), the
- * person's round-trips per landed task and orchestrator interventions (conductor.note events).
+ *   npm run autonomy -- routing [--days 14] [--json]   cheap-first routing's success rate and tokens per landed change
+ *     by task type and tier (harness/routing.mjs); the holdout is off
  *
- * A script over .studio/events.jsonl (no model, no tokens). It measures, over the window:
- *   - hours of supervisor running (minus halted time) per UNPLANNED person intervention: a person resuming a halted
- *     supervisor, forcing a task done, stopping an agent, reopening, dropping or reordering a task, unblocking a parked
- *     one, stopping the studio, retyping a task, or sending an away decision back with "redo". Planned reviews (away
- *     "great"/"comment", fun verdicts, intent confirmations, the dev's yes, Bible signing, approvals) are counted apart.
- *   - the hands-free land rate: landed tasks (task done, a train landing, a lane merge) not forced and with no person
- *     event on the task between its claim and its landing;
- *   - the forced-done rate; the reopen/escape rate (reopened, or a bug added --caused-by it, within 7 days of landing);
- *   - hand-backs by failure label (harness/metrics.mjs's labels); the halt wait (supervisor halted until resumed);
- *   - gate catches (train reds and done-check refusals) per landed task, which separates "the agents got better" from
- *     "the gates caught it";
- *   - the owner's Great/Redo verdicts on away cards; tokens per landed task (counted as the overnight page counts them).
- * Who is a person uses the harness's own rules: verdict.mjs isPerson, reclassify.mjs isAgentName (agent shapes, a
- * "-bot" suffix, launched session names), and the harness's own scripts (watchdog, train, supervisor). A decision an
- * agent recorded on a person's direct permission (2.59.1, meta.permission + meta.recordedBy) is the PERSON's
- * intervention: the person decided, the agent only typed it.
+ * A script over .studio/events.jsonl (no model, no tokens). Over the window it measures: supervisor hours (minus halted
+ * time) per UNPLANNED person intervention (resuming a halted supervisor, forcing a task done, stopping an agent,
+ * reopening, dropping or reordering a task, unblocking a parked one, stopping the studio, retyping a task, sending an
+ * away decision back with "redo"; planned reviews such as "great"/"comment", fun verdicts, the dev's yes, Bible signing
+ * and approvals are counted apart); the hands-free land rate (landed tasks not forced, no person event between claim and
+ * landing); the forced-done and reopen/escape rates (a bug added --caused-by it within 7 days); hand-backs by failure
+ * label (harness/metrics.mjs); the halt wait; gate catches per landed task; the owner's Great/Redo verdicts; cost per
+ * landed task (tokens; dollars only with a studio/prices.json table); orchestrator interventions (conductor.note); and
+ * the "Tokens" block (tokenWork; --json: card.tokenWork): effective-token ratio, cost per kept change, waste split.
+ * Who is a person: verdict.mjs isPerson, reclassify.mjs isAgentName and the harness's own scripts. A decision an agent
+ * recorded on a person's direct permission (meta.permission + meta.recordedBy) is the PERSON's intervention.
  *
- * The level badge: the level the owner set (studio/autonomy.json "level", default L2) and whether the window meets
- * the L3 bar in that file. Moving up is only ever a suggestion shown to the owner; when the studio is at L3 and a
- * metric falls below the bar, a demotion is suggested. Nothing here changes how the studio runs.
+ * The level badge: the level the owner set (studio/autonomy.json "level", default L2) and whether the window meets the
+ * L3 bar in that file. The L3 rates are judged at a one-sided Wilson bound ("confidence", default 0.9) for a promotion
+ * and as point estimates for a demotion; a failed audit (harness/audit.mjs) counts as a Redo. Moving up is only a
+ * suggestion shown to the owner. Nothing here changes how the studio runs.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -65,12 +54,9 @@ export const DEFAULT_AUTONOMY = Object.freeze({
 });
 const DAY = 86400000;
 /**
- * 2.65.0: an optional price table, studio/prices.json (none ships): { "models": { "<model or tool>": { "in": usd,
- * "out": usd, "cacheRead": usd } } } per million tokens. Without it the scorecard's cost is in tokens only.
- * 2.65.2: cache writes are priced as Anthropic bills them, not as plain input: a 5-minute write at 1.25x the model's
- * input price, a 1-hour write at 2x (a model may set "cacheWrite5m" / "cacheWrite1h" in USD itself). A model with no
- * "cacheRead" price reads at 0.1x its input price, not $0. The multipliers can be set in the file's top-level
- * "multipliers": { "cacheWrite5m": 1.25, "cacheWrite1h": 2, "cacheRead": 0.1 }.
+ * Optional price table studio/prices.json: { "models": { "<model or tool>": { "in": usd, "out": usd, "cacheRead": usd } } }
+ * per million tokens; without it cost is in tokens only. Cache writes: 5-minute at 1.25x the input price, 1-hour at 2x
+ * ("cacheWrite5m" / "cacheWrite1h"); no "cacheRead" reads at 0.1x. Top-level "multipliers" sets the factors.
  */
 export const PRICES_REL = 'studio/prices.json';
 export const DEFAULT_PRICE_MULTIPLIERS = Object.freeze({ cacheWrite5m: 1.25, cacheWrite1h: 2, cacheRead: 0.1 });
@@ -79,21 +65,14 @@ export function readPrices(root = REPO_ROOT) {
   const j = readPriceFile(root);
   return j?.models && typeof j.models === 'object' ? j.models : null;
 }
-/**
- * 2.67.0: where the prices come from, for the card: { file, checked, placeholder } or null with no table. The file
- * ships with defaults for the Claude families ("opus", "sonnet", "haiku") and a "checked" date the owner sets after
- * comparing them with the provider's price page ("UNVERIFIED" until then).
- */
+/** Where the prices come from: { file, checked, placeholder } or null. The shipped family rows stay "UNVERIFIED" until the owner sets "checked". */
 export function readPriceInfo(root = REPO_ROOT) {
   const j = readPriceFile(root);
   if (!(j?.models && typeof j.models === 'object')) return null;
   const checked = String(j.checked ?? '').trim().slice(0, 40) || null;
   return { file: PRICES_REL, checked, placeholder: !checked || /unverified|placeholder/i.test(checked) };
 }
-/**
- * 2.67.0: the price row for a session: its model's own row, else its tool's, else the longest family key the model
- * names as a word ("claude-opus-4-5" -> "opus"), so the shipped family rows price full model ids.
- */
+/** The price row for a session: its model's, else its tool's, else the longest family key the model names ("claude-opus-4-5" -> "opus"). */
 export function priceFor(prices, model, tool) {
   if (!prices || typeof prices !== 'object') return null;
   if (model && prices[model]) return prices[model];
@@ -108,7 +87,7 @@ export function priceFor(prices, model, tool) {
   }
   return best ? prices[best] : null;
 }
-/** 2.65.2: the price file's "multipliers" over DEFAULT_PRICE_MULTIPLIERS (a value that isn't a number >= 0 is ignored). */
+/** The price file's "multipliers" over DEFAULT_PRICE_MULTIPLIERS (a value that isn't a number >= 0 is ignored). */
 export function readPriceMultipliers(root = REPO_ROOT) {
   const m = readPriceFile(root)?.multipliers;
   const out = { ...DEFAULT_PRICE_MULTIPLIERS };
@@ -117,11 +96,9 @@ export function readPriceMultipliers(root = REPO_ROOT) {
 }
 const num = (x) => (x === null || x === undefined || x === '' || !Number.isFinite(Number(x)) ? null : Number(x));
 /**
- * Dollars for session-end events at a price table (by the event's model, else its tool): { usd, unpriced, reported }.
- * 2.65.2: a session whose tool reported its own cost (meta.costUsd, Claude Code's total_cost_usd) counts at that cost
- * (reported); the others are priced from the table, with tokensIn split into plain input and cache writes
- * (meta.cacheWrite, which agent.mjs folds into tokensIn): writes at the 1-hour price for meta.cacheWrite1h, else at
- * the TTL the launcher asked for (meta.cacheTtl), else at the 5-minute price.
+ * Dollars for session-end events at a price table (by model, else tool): { usd, unpriced, reported }. A session whose tool
+ * reported its own cost (meta.costUsd) counts at that cost; the others are priced from the table, with tokensIn split
+ * into plain input and cache writes (meta.cacheWrite): 1-hour price for meta.cacheWrite1h, else per meta.cacheTtl, else 5-minute.
  */
 export function dollarsOf(ends, prices, multipliers = DEFAULT_PRICE_MULTIPLIERS) {
   const mult = { ...DEFAULT_PRICE_MULTIPLIERS, ...(multipliers || {}) };
@@ -149,7 +126,6 @@ const ESCAPE_DAYS = 7;
 const ts = (e) => Date.parse(e?.ts) || 0;
 const round = (x, d = 2) => (x === null || x === undefined || !Number.isFinite(x) ? null : Math.round(x * 10 ** d) / 10 ** d);
 
-/** The owner's config merged over the defaults. Returns { ...config, file, exists }. */
 export function readAutonomyConfig(root = REPO_ROOT) {
   const file = path.join(root, AUTONOMY_REL);
   let raw = null;
@@ -159,12 +135,11 @@ export function readAutonomyConfig(root = REPO_ROOT) {
 }
 
 /**
- * 2.66.0: tokens that do work. A landed change is KEPT when, within keepDays of its landing, it was not reopened,
- * reverted (a later commit `Revert "…<task>…"`, or a merge-train hand-back of the same task after it landed) or redone
- * (a task added naming it: --caused-by, meta.redoOf / meta.fixes, or "redo of <task>" / "fixes <task>" in its title).
- * A landing younger than keepDays with none of those yet is PENDING, reported apart (not counted either way).
- * keepDays: STUDIO_KEEP_DAYS, else studio/autonomy.json "keepDays", else 7. Any rate on fewer than minSample items
- * (studio/autonomy.json "minSample", default 30) reads "not enough data (n=…)" with its Wilson 95% interval.
+ * A landed change is KEPT when, within keepDays of landing, it was not reopened, reverted (a later `Revert "…<task>…"`
+ * commit, or a merge-train hand-back of it) or redone (a task naming it: --caused-by, meta.redoOf / meta.fixes, or "redo
+ * of <task>" / "fixes <task>" in its title); a younger clean landing is PENDING. keepDays: STUDIO_KEEP_DAYS, else
+ * studio/autonomy.json "keepDays", else 7. A rate on fewer than minSample items (autonomy.json "minSample", 30) reads
+ * "not enough data (n=…)".
  */
 export const DEFAULT_KEEP_DAYS = 7;
 export const DEFAULT_MIN_SAMPLE = 30;
@@ -172,7 +147,6 @@ export function keepDaysOf(c = {}, env = process.env) {
   for (const v of [env.STUDIO_KEEP_DAYS, c?.keepDays]) if (v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v)) && Number(v) > 0) return Number(v);
   return DEFAULT_KEEP_DAYS;
 }
-/** Wilson score interval (95% two-sided by default) for k successes in n: [low, high], or null with n = 0. */
 export function wilson(k, n, z = 1.96) {
   if (!(n > 0)) return null;
   const p = Math.min(1, Math.max(0, k / n)); const z2 = z * z;
@@ -181,10 +155,9 @@ export function wilson(k, n, z = 1.96) {
   return [Math.max(0, mid - half), Math.min(1, mid + half)];
 }
 /**
- * 2.73.0 (e): the L3 bar's confidence. Point estimates let 10 lucky landings suggest L3; promotion now needs the one-
- * sided bound at this confidence to clear each rate bar (the hands-free rate's LOWER bound at or above its bar, the
- * reopen and redo rates' UPPER bounds at or below theirs). studio/autonomy.json "confidence" (the owner's), else
- * STUDIO_L3_CONFIDENCE, else 0.9. 0 means point estimates (the old behaviour). Demotion always reads point estimates.
+ * The L3 bar's confidence: promotion needs the one-sided bound to clear each rate bar (the hands-free rate's LOWER bound
+ * at or above its bar, the reopen and redo rates' UPPER bounds at or below). studio/autonomy.json "confidence", else
+ * STUDIO_L3_CONFIDENCE, else 0.9; 0 means point estimates.
  */
 export const DEFAULT_L3_CONFIDENCE = 0.9;
 export function l3Confidence(fileValue = undefined, env = process.env) {
@@ -195,7 +168,7 @@ export function l3Confidence(fileValue = undefined, env = process.env) {
   }
   return DEFAULT_L3_CONFIDENCE;
 }
-/** The standard normal quantile (Acklam's approximation, |error| < 1.2e-9): z with P(Z <= z) = p, 0 < p < 1. */
+/** Normal quantile (Acklam's approximation). */
 export function normalQuantile(p) {
   if (!(p > 0 && p < 1)) return p >= 1 ? Infinity : -Infinity;
   const a = [-39.69683028665376, 220.9460984245205, -275.9285104469687, 138.357751867269, -30.66479806614716, 2.506628277459239];
@@ -208,17 +181,14 @@ export function normalQuantile(p) {
   const q = p - 0.5; const r = q * q;
   return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
 }
-/** One-sided Wilson bound at `confidence`: side 'lower' | 'upper'; null with n = 0; the point estimate with confidence 0. */
+/** One-sided Wilson bound: side 'lower' | 'upper'; null with n = 0; the point estimate at confidence 0. */
 export function wilsonBound(k, n, confidence, side) {
   if (!(n > 0)) return null;
   if (!(confidence > 0)) return Math.min(1, Math.max(0, k / n));
   const w = wilson(k, n, normalQuantile(confidence));
   return side === 'lower' ? w[0] : w[1];
 }
-/**
- * How many more landings (or reviews) at the current rate would make the bound clear the bar: a count, 0 when it
- * already clears, null when it never would at this rate (the rate itself is on the wrong side of the bar) or n = 0.
- */
+/** How many more landings (or reviews) at this rate would clear the bar: 0 if it does, null if never. */
 export function moreToClear(k, n, bar, confidence, side, cap = 5000) {
   if (!(n > 0)) return null;
   const p = k / n;
@@ -228,7 +198,7 @@ export function moreToClear(k, n, bar, confidence, side, cap = 5000) {
   for (let m = 1; m <= cap; m++) if (clears(p * (n + m), n + m)) return m;
   return null;
 }
-/** A rate with its sample: { k, n, rate, low, high, enough, text }. Under minSample the text never shows a bare percentage. */
+/** A rate with its sample: { k, n, rate, low, high, enough, text } (a Wilson 95% interval; under minSample the text shows no bare percentage). */
 export function sampledRate(k, n, minSample = DEFAULT_MIN_SAMPLE) {
   const w = wilson(k, n);
   const p1 = (x) => `${Math.round(x * 1000) / 10}%`;
@@ -237,11 +207,7 @@ export function sampledRate(k, n, minSample = DEFAULT_MIN_SAMPLE) {
   return { k: round(k, 2), n: round(n, 2), rate: n > 0 ? round(k / n, 4) : null, low: w ? round(w[0], 4) : null, high: w ? round(w[1], 4) : null, enough, text };
 }
 const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-/**
- * 2.71.1 (B): tokens per landed change from the sessions that name their task (agent.session.end's task, or meta.task):
- * { sessions, named, tasks: landed tasks with at least one named session, tokensPerLandedNamed (their mean), top: the
- * five costliest [{ task, tokens, sessions }] }. Sessions that name no task are left to the window average.
- */
+/** Tokens per landed change from sessions that name their task: { sessions, named, tasks, tokensPerLandedNamed, top: the five costliest }. */
 export function tokensByLandedTask(ends, landedTasks, weightOf) {
   const landed = new Set((landedTasks || []).map(String));
   const per = new Map();
@@ -260,14 +226,9 @@ export function tokensByLandedTask(ends, landedTasks, weightOf) {
   return { sessions: (ends || []).length, named, tasks: rows.length, tokensPerLandedNamed: rows.length ? Math.round(rows.reduce((n, r) => n + r.tokens, 0) / rows.length) : null, top: rows.slice(0, 5) };
 }
 
-/** Does this text name the task id as a whole word (T-1 is not T-12)? */
 export const namesTask = (text, id) => Boolean(id) && new RegExp(`(?<![\\w-])${reEsc(id)}(?![\\w])`).test(String(text || ''));
-/** A revert commit subject naming the task: `Revert "…<task>…"` (what git revert writes). */
 export const revertNames = (subject, id) => /^\s*Revert\s+"/i.test(String(subject || '')) && namesTask(subject, id);
-/**
- * Revert commits on the checked-out branch since `sinceMs`: [{ at, subject }]. One `git log` (no shell, so the same on
- * Windows); [] when git or the repo isn't there.
- */
+/** Revert commits on the checked-out branch since `sinceMs`: [{ at, subject }]. One `git log`, no shell (same on Windows); [] without git. */
 export function revertCommits(root = REPO_ROOT, sinceMs = 0) {
   try {
     const args = ['log', '--format=%ct%x1f%s', '--grep=^Revert "'];
@@ -277,7 +238,6 @@ export function revertCommits(root = REPO_ROOT, sinceMs = 0) {
     return String(r.stdout || '').split('\n').filter(Boolean).map((l) => { const [t, ...s] = l.split('\x1f'); return { at: Number(t) * 1000, subject: s.join('\x1f') }; }).filter((x) => Number.isFinite(x.at));
   } catch { return []; }
 }
-/** The tasks a task.added event names as the work it redoes or fixes: --caused-by, meta.redoOf / meta.fixes, or "redo of T-…" / "fixes T-…" in its title. */
 export function redoTargets(e) {
   if (e?.type !== 'task.added') return [];
   const out = new Set([e.meta?.causedBy, e.meta?.redoOf, e.meta?.fixes].filter(Boolean).map(String));
@@ -285,9 +245,7 @@ export function redoTargets(e) {
   if (e.task) out.delete(String(e.task));
   return [...out];
 }
-/** A merge-train hand-back (task.paused "Handed back <task>: Not landed by merge train …", train.mjs handBack). */
 const trainHandBack = (e) => e.type === 'task.paused' && /Not landed by merge train/i.test(String(e.msg || ''));
-/** The type a task.added event's title gives when no typing function is passed: meta.type, else its "Bug: …" prefix. */
 const KNOWN_PREFIX = /^(bug|fix|chore|study|balance|fun|playtest|review|docs|idea|rescue|system|direction)\b/i;
 function defaultTypeOf(t) {
   if (t.retyped) return t.retyped;
@@ -298,14 +256,11 @@ function defaultTypeOf(t) {
 }
 
 /**
- * 2.66.0: the Tokens block. sorted: the whole log by time; the window is [from, now]. Each agent.session.end in the
- * window is shared among the task attempts it held (metrics.mjs buildAttempts; an attempt belongs to its agent's first
- * session end at or after its start, shared by wall time as attemptRows shares tokens). Each attempt falls in one bucket:
- *   kept / reopened / revertedOrRedone (the landing it led to, judged over keepDays) · pending (that landing is younger
- *   than keepDays, or the attempt is still open) · handedBack (no landing before the next claim) · dropped (the task
- *   was dropped or shelved after it) · noTask (a session that held no attempt: Producer, Director, reviews, …).
- * Effective-token ratio = kept tokens / judged tokens (all minus pending). Cost per kept change = judged tokens and $ /
- * kept landings in the window (also per task type, without noTask).
+ * The Tokens block. sorted: the whole log by time; the window is [from, now]. Each agent.session.end in the window is
+ * shared among the task attempts it held (metrics.mjs buildAttempts), each in one bucket: kept / reopened /
+ * revertedOrRedone · pending (landing younger than keepDays, or attempt open) · handedBack · dropped · noTask (Producer,
+ * Director, reviews). Effective-token ratio = kept / (all minus pending). Cost per kept change = judged tokens and $ /
+ * kept landings (also per task type).
  */
 export function tokenWork(sorted, { from, now, judgedAt = null, keepDays = DEFAULT_KEEP_DAYS, minSample = DEFAULT_MIN_SAMPLE, weight = null, prices = null, priceMultipliers = null, reverts = [], typeOfTask = null } = {}) {
   const K = keepDays * DAY;
@@ -334,8 +289,7 @@ export function tokenWork(sorted, { from, now, judgedAt = null, keepDays = DEFAU
     }
     return typeCache.get(id);
   };
-  // Landing times per task (first landing of each cluster: a train landing and its task.done count once).
-  const landTimes = new Map();
+    const landTimes = new Map();
   for (const [t, evs] of byTask) {
     const xs = evs.filter((e) => landingsOf(e).includes(t)).map(ts);
     if (xs.length) landTimes.set(t, xs);
@@ -357,7 +311,7 @@ export function tokenWork(sorted, { from, now, judgedAt = null, keepDays = DEFAU
     fateCache.set(key, f);
     return f;
   };
-  // Attempts: which landing each led to (a landing after its start and before the task's next claim).
+  // Each attempt's landing: after its start and before the task's next claim.
   const attempts = buildAttempts(sorted, { now: judged });
   const byTaskAttempts = new Map();
   for (const a of attempts) { if (!byTaskAttempts.has(a.task)) byTaskAttempts.set(a.task, []); byTaskAttempts.get(a.task).push(a); }
@@ -371,19 +325,16 @@ export function tokenWork(sorted, { from, now, judgedAt = null, keepDays = DEFAU
       if (L !== undefined) { const f = fateOf(task, L); a.bucket = f.fate; a.landedAt = L; return; }
       if (a.outcome === 'open') { a.bucket = 'pending'; return; }
       if (ends.some((t) => t >= a.start && t < next) || ['dropped', 'shelved'].includes(a.outcome)) { a.bucket = 'dropped'; return; }
-      // A hand-back is judged with its task (so a young window doesn't count failures at once and successes keepDays
-      // later): pending while the landing that followed is pending, or, with no landing yet, for keepDays after it.
+      // A hand-back is judged with its task: pending while the landing after it is pending.
       const later = lands.find((t) => t >= a.start);
       a.bucket = later !== undefined ? (fateOf(task, later).fate === 'pending' ? 'pending' : 'handedBack') : (a.end ?? judged) + K > judged ? 'pending' : 'handedBack';
     });
   }
-  // Each window session's share per attempt.
   const endsByAgent = new Map();
   for (const e of sorted) if (e.type === 'agent.session.end') { const k = String(e.agent || ''); if (!endsByAgent.has(k)) endsByAgent.set(k, []); endsByAgent.get(k).push(e); }
   const held = new Map(); // session end event -> attempts
   const hold = (s, a) => { if (!held.has(s)) held.set(s, []); held.get(s).push(a); };
-  // A session end that names its task (e.task or meta.task) holds that task's latest attempt claimed before it ended.
-  const named = (e) => String(e.task || e.meta?.task || '');
+    const named = (e) => String(e.task || e.meta?.task || '');
   const claimed = new Set();
   for (const ends of endsByAgent.values()) for (const s of ends) {
     if (!named(s) || !inWin(ts(s))) continue;
@@ -421,12 +372,11 @@ export function tokenWork(sorted, { from, now, judgedAt = null, keepDays = DEFAU
       }
     }
   }
-  // Landings in the window and their fates (each task's landings in the window, once each).
   const landings = [];
   for (const [task, xs] of landTimes) {
     let prev = -Infinity;
     for (const L of xs) {
-      // A task.done and the train landing that closed it (or a landing repeated without a claim between) are one landing.
+      // A task.done and the train landing that closed it are one landing.
       const claimBetween = (byTask.get(task) || []).some((e) => (e.type === 'task.start' || e.type === 'task.reopened') && ts(e) > prev && ts(e) < L);
       if (prev !== -Infinity && !claimBetween) continue;
       prev = L;
@@ -460,10 +410,9 @@ export function tokenWork(sorted, { from, now, judgedAt = null, keepDays = DEFAU
   };
 }
 
-// The harness's own scripts and accounts: never a person.
 const SYSTEM = /^(watchdog|train|supervisor|launcher|harness|hub|system|ci|ci-watch|rescue|router|gamedev|director-flow|scheduler|self-triage|done-check|digest|null|undefined|unknown)$/i;
 let classifier = null;
-/** A person's name? The harness's existing rules (verdict.mjs isPerson + reclassify.mjs isAgentName), cached per name. */
+/** A person's name (verdict.mjs isPerson + reclassify.mjs isAgentName), cached. */
 export async function personClassifier() {
   if (classifier) return classifier;
   const { isPerson } = await import('./verdict.mjs');
@@ -479,10 +428,9 @@ export async function personClassifier() {
   return classifier;
 }
 
-/** Who acted, and whether a person decided it. { who, person, onPermission }. */
 export function actorOf(e, isPersonName) {
   const m = e?.meta || {};
-  // 2.59.1: recorded by an agent on a person's direct permission: the person decided.
+  // Recorded by an agent on a person's direct permission: the person decided.
   if (String(m.permission || '').trim() && String(m.recordedBy || '').trim()) return { who: String(m.by || e.agent || ''), person: true, onPermission: true, recordedBy: String(m.recordedBy) };
   // A done forced past a check that a person accepted with a reason: the person decided.
   if (e.type === 'task.forced' && m.acceptedBy && isPersonName(String(m.acceptedBy))) return { who: String(m.acceptedBy), person: true, onPermission: false };
@@ -497,7 +445,6 @@ export function actorOf(e, isPersonName) {
 
 const UNPLANNED = new Set(['supervisor.resumed', 'task.forced', 'agent.stopped', 'task.reopened', 'task.dropped', 'task.reordered', 'task.unblocked', 'studio.stopped', 'task.retyped']);
 const PLANNED = new Set(['playtest.verdict', 'intent.confirmed', 'task.dev_yes', 'bible.signed', 'golden.approved', 'approval.protected', 'supervisor.halt_cleared']);
-/** 'unplanned' | 'planned' | null for one event, given its actor. */
 export function interventionKind(e, actor) {
   if (!actor.person) return null;
   if (e.type === 'away.verdict') return (e.status || e.meta?.verdict) === 'redo' ? 'unplanned' : 'planned';
@@ -507,7 +454,6 @@ export function interventionKind(e, actor) {
   return null;
 }
 
-/** Landing events: [{ task, at, event, forced }] (a train landing names its lanes in meta.lanes). */
 function landingsOf(e) {
   if (e.type === 'task.done' || e.type === 'lane.merged') return e.task ? [e.task] : [];
   if (e.type === 'task.forced') return e.task ? [e.task] : [];
@@ -515,7 +461,7 @@ function landingsOf(e) {
   return [];
 }
 
-/** Spans [a, b] the supervisor ran: supervisor.start to supervisor.stop; an open one ends at the log's last event. */
+/** Spans the supervisor ran: supervisor.start to supervisor.stop (an open one ends at the log's last event). */
 function supervisorSpans(events, end) {
   const spans = [];
   let from = null;
@@ -526,12 +472,7 @@ function supervisorSpans(events, end) {
   if (from !== null) spans.push([from, Math.min(end, events.length ? ts(events[events.length - 1]) : end)]);
   return spans;
 }
-/**
- * Spans the supervisor was halted, each with its wait: supervisor.halted to supervisor.resumed, or (2.67.0) to
- * supervisor.halt_cleared (studio:resume clearing a stale halt whose supervisor isn't running), supervisor.stop or a
- * new supervisor.start (a halt lives in the supervisor's own state: a stopped one waits on nothing, a new one starts
- * unhalted). An open span carries its halted event.
- */
+/** Spans the supervisor was halted: supervisor.halted to resumed, halt_cleared, stop or a new start. An open span carries its halted event. */
 const HALT_ENDS = new Set(['supervisor.resumed', 'supervisor.halt_cleared', 'supervisor.stop', 'supervisor.start']);
 function haltSpans(events, end) {
   const spans = [];
@@ -543,15 +484,12 @@ function haltSpans(events, end) {
   if (from !== null) spans.push({ from, to: Math.max(from, end), open: true, event: ev });
   return spans;
 }
-/** 2.67.0: hours after which an open halt whose supervisor isn't running is stale (STUDIO_HALT_STALE_H, default 24). */
+/** Hours after which an open halt with no running supervisor is stale (STUDIO_HALT_STALE_H, default 24). */
 export function haltStaleHours(env = process.env) {
   const v = env.STUDIO_HALT_STALE_H;
   return v !== undefined && v !== '' && Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 24;
 }
-/**
- * 2.67.0: the open halt in an event log, or null: { at, who, cause, ageH, stale, supervisorRunning, clear }.
- * supervisorRunning: from the log (a supervisor.start with no stop after it), or the caller's `running` (the status file).
- */
+/** The open halt, or null: { at, who, cause, ageH, stale, supervisorRunning, clear } (running: from the log, or the caller's). */
 export function openHaltOf(events, { now = Date.now(), running = null, staleH = haltStaleHours(), zone = null } = {}) {
   const sorted = [...events].filter((e) => e && e.ts).sort((a, b) => ts(a) - ts(b));
   const h = haltSpans(sorted, now).find((x) => x.open);
@@ -572,10 +510,9 @@ export function openHaltOf(events, { now = Date.now(), running = null, staleH = 
 }
 
 /**
- * 2.67.0: the studio's time zone for daily rows and landing times: STUDIO_TZ (an IANA name this Node knows), else UTC
- * (as before). { zone, source, machine } (machine: this computer's zone, from TZ or the system, for the card's hint
- * "set STUDIO_TZ=<zone>"). TZ alone doesn't switch the card: TZ is often set machine-wide, and the days (and the
- * replays scored on them) would then change with whichever computer printed them.
+ * The studio's time zone for daily rows: STUDIO_TZ (an IANA name), else UTC. { zone, source, machine } (machine: this
+ * computer's zone, for the hint "set STUDIO_TZ=<zone>"). TZ alone does not switch the card: it is often set machine-wide
+ * and replays would change per computer.
  */
 const zoneOk = (z) => { try { new Intl.DateTimeFormat('en-US', { timeZone: z }); return true; } catch { return false; } };
 export function studioZone(env = process.env) {
@@ -596,27 +533,23 @@ function zoneParts(ms, zone) {
   const p = Object.fromEntries(ZFMT.get(k).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
   return { y: Number(p.year), mo: Number(p.month) - 1, d: Number(p.day), h: Number(p.hour) % 24, mi: Number(p.minute), s: Number(p.second) };
 }
-/** Minutes the zone is ahead of UTC at `ms`. */
 export function zoneOffsetMin(ms, zone) {
   const w = zoneParts(ms, zone);
   return Math.round((Date.UTC(w.y, w.mo, w.d, w.h, w.mi, w.s) - Math.floor(ms / 1000) * 1000) / 60000);
 }
-/** The instant of local midnight starting the local day y-mo-d (day overflow rolls on, as Date.UTC does). */
 function localMidnight(y, mo, d, zone) {
   const guess = Date.UTC(y, mo, d);
   const first = guess - zoneOffsetMin(guess, zone) * 60000;
   return guess - zoneOffsetMin(first, zone) * 60000;
 }
 const pad = (x) => String(x).padStart(2, '0');
-/** "YYYY-MM-DD" of `ms` in the zone. */
 export const localDate = (ms, zone) => { const w = zoneParts(ms, zone); return `${w.y}-${pad(w.mo + 1)}-${pad(w.d)}`; };
-/** "YYYY-MM-DD HH:MM +07:00" (UTC: "… UTC"). */
 export function localStamp(ms, zone) {
   const w = zoneParts(ms, zone); const off = zoneOffsetMin(ms, zone);
   const o = off === 0 ? 'UTC' : `${off > 0 ? '+' : '-'}${pad(Math.floor(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`;
   return `${w.y}-${pad(w.mo + 1)}-${pad(w.d)} ${pad(w.h)}:${pad(w.mi)} ${o}`;
 }
-/** Local calendar days covering [from, now]: [{ day, b0, b1 }] (the first and last may be partial). */
+/** Local days covering [from, now]: [{ day, b0, b1 }] (first and last may be partial). */
 export function localDays(from, now, zone) {
   const out = [];
   let w = zoneParts(from, zone);
@@ -632,11 +565,9 @@ export function localDays(from, now, zone) {
 }
 
 /**
- * 2.67.0: orchestrator interventions. An outside orchestrator's own steps, besides its conductor notes: train releases
- * it recorded, lanes refreshes, holds, a stale halt cleared, and the person-only steps (reopen, drop, reorder, force,
- * resume, …) it took. Planned: notes, releases (recorded approvals), refreshes, halt clears, the card's planned types.
- * Unplanned: holds and the card's unplanned types. Its actor: who recorded it (meta.recordedBy), else the event's agent;
- * an outside agent is neither the harness, a worker, a launched Producer/Director session, nor a person acting alone.
+ * An outside orchestrator's own steps besides conductor notes: train releases, lanes refreshes, holds, a stale halt
+ * cleared, and person-only steps (reopen, drop, reorder, force, resume, …). Planned: notes, releases, refreshes, halt
+ * clears. Unplanned: holds and the card's unplanned types. Its actor: meta.recordedBy, else the event's agent.
  */
 const LAUNCHED_DECIDER = /^(producer|director)(-|_|\d|$)/i;
 const WORKER_RE = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|art|artist|art-director|designer|designer-calibrator|balancer|fun-tester|scout|reference-scout|engine-porter|planner)(-|_|\d|$)/i;
@@ -653,12 +584,11 @@ export function orchestratorOf(e, isPersonName) {
   const rec = String(e.meta?.recordedBy || '').trim();
   const who = rec || String(e.agent || '').trim();
   if (!who || SYSTEM.test(who) || WORKER_RE.test(who) || LAUNCHED_DECIDER.test(who) || /^a (producer|director) session$/i.test(who)) return null;
-  // A conductor note counts whoever wrote it (2.65.0); the other steps only an agent's (a person's own are interventions).
+  // A conductor note counts whoever wrote it; the other steps only an agent's (a person's own are interventions).
   if (e.type !== 'conductor.note' && !rec && who !== 'conductor' && isPersonName(who)) return null;
   return { who, kind, type: e.type };
 }
 const overlap = (a0, a1, b0, b1) => Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
-/** Supervisor running time (minus halts) inside [a, b], in ms. */
 function runningMs(a, b, runs, halts) {
   let ms = 0;
   for (const [r0, r1] of runs) {
@@ -680,12 +610,11 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   const from = now - days * DAY;
   const inWin = (t) => t >= from && t <= now;
   const win = sorted.filter((e) => inWin(ts(e)));
-  // 2.65.2: without `weigh`, the budget meter's weighting (cache reads at cacheReadWeight), as the CLI and the hub use.
-  // 2.66.0: the cache-read weight read once per scorecard (weightedTokens' default re-read studio/budget.json per event).
+  // Without `weigh`, the budget meter's weighting (cache reads at cacheReadWeight), read once per scorecard.
   const crw = weigh ? null : cacheReadWeight();
   const weight = weigh || ((e) => weightedTokens(e, crw));
 
-  // Interventions. A reopen an away verdict made (same person and task, within 2 min) is that verdict, not a second one.
+  // A reopen an away verdict made (same person and task, within 2 min) is that verdict, not a second intervention.
   const all = [];
   for (const e of sorted) {
     const actor = actorOf(e, isPersonName);
@@ -697,7 +626,6 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   const unplanned = interventions.filter((x) => x.kind === 'unplanned');
   const planned = interventions.filter((x) => x.kind === 'planned');
 
-  // Supervisor hours (halted time excluded) and the hours between unplanned interventions.
   const runs = supervisorSpans(sorted, now);
   const halts = haltSpans(sorted, now);
   const supMs = runningMs(from, now, runs, halts);
@@ -706,7 +634,6 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   for (let i = 1; i < cuts.length; i++) longest = Math.max(longest, runningMs(cuts[i - 1], cuts[i], runs, halts));
   const hoursBetween = supMs / 3600000 / Math.max(1, unplanned.length);
 
-  // Landed tasks in the window: the first landing of each.
   const landedAt = new Map(); // task -> { at, forced, viaTrain }
   const landingsByTask = new Map(); // task -> all landing times (whole log)
   for (const e of sorted) {
@@ -722,7 +649,6 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
     }
   }
   const landed = [...landedAt.entries()].map(([task, x]) => ({ task, ...x }));
-  // Per-task index (one pass), so each landed task reads only its own events.
   const byTask = new Map();
   const add = (t, e) => { if (!byTask.has(t)) byTask.set(t, []); byTask.get(t).push(e); };
   const causedBy = new Map();
@@ -731,8 +657,7 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
     if (e.type === 'task.train.landed') for (const t of (e.meta?.lanes || []).map(String)) if (t !== e.task) add(t, e);
     if (e.type === 'task.added' && e.meta?.causedBy) { const k = String(e.meta.causedBy); if (!causedBy.has(k)) causedBy.set(k, []); causedBy.get(k).push(ts(e)); }
   }
-  // Hands-free: no person event on the task from the claim that led to this landing up to the landing. A person
-  // running the train counts on each lane it landed.
+  // Hands-free: no person event from the claim to the landing; a person running the train counts on each lane it landed.
   for (const l of landed) {
     const mine = byTask.get(l.task) || [];
     const prevLand = (landingsByTask.get(l.task) || []).filter((t) => t < l.at).pop() ?? -Infinity;
@@ -752,8 +677,7 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   const n = landed.length;
   const rate = (k) => (n ? round(landed.filter(k).length / n, 4) : null);
 
-  // Hand-backs by failure label (metrics.mjs attempts that started in the window and didn't end done).
-  let handBacks = null;
+    let handBacks = null;
   if (Array.isArray(attempts)) {
     const rows = attempts.filter((r) => inWin(Date.parse(r.start) || 0));
     // An attempt that didn't end done (a done later reopened is the reopen rate's, not a hand-back).
@@ -763,23 +687,19 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
     handBacks = { attempts: rows.length, count: failed.length, rate: rows.length ? round(failed.length / rows.length, 4) : null, byLabel };
   }
 
-  // Halt wait: halts that started in the window.
   const hw = halts.filter((h) => inWin(h.from)).map((h) => ({ ...h, min: round((h.to - h.from) / 60000, 1) }));
   const waits = hw.map((h) => h.min).sort((a, b) => a - b);
   const z = zone && typeof zone === 'object' ? zone : typeof zone === 'string' && zone ? { zone, source: 'given' } : studioZone();
   const oh = hw.some((h) => h.open) ? openHaltOf(sorted, { now, zone: z.zone, running: supervisorRunning }) : null;
   const haltWait = { ...(oh ? { openHalt: oh } : {}), count: hw.length, open: hw.filter((h) => h.open).length, totalMin: round(waits.reduce((s, x) => s + x, 0), 1), medianMin: waits.length ? waits[Math.floor((waits.length - 1) / 2)] : null, maxMin: waits.length ? waits[waits.length - 1] : null };
 
-  // Gate catches per landed task.
   const trainReds = win.filter((e) => e.type === 'task.train.red' || e.type === 'task.train.red_main').length;
   const notDone = win.filter((e) => e.type === 'task.not_done').length;
 
-  // The owner's verdicts on away cards (persons only).
   const av = win.filter((e) => e.type === 'away.verdict' && actorOf(e, isPersonName).person).map((e) => e.status || e.meta?.verdict);
   const verdicts = { great: av.filter((v) => v === 'great').length, redo: av.filter((v) => v === 'redo').length, comment: av.filter((v) => v === 'comment').length };
   const vTotal = verdicts.great + verdicts.redo + verdicts.comment;
-  // 2.73.0 (e): audits (harness/audit.mjs): a failed audit of a hands-free landing or an autonomous decision counts as
-  // a Redo, a passed one as a review. The last verdict per audit item counts.
+  // Audits (harness/audit.mjs): a failed audit of a hands-free landing or an autonomous decision counts as a Redo, a passed one as a review; the last verdict per item counts.
   const auditLast = new Map();
   for (const e of win) if (e.type === 'audit.verdict' && e.meta?.of && ['pass', 'fail'].includes(e.meta?.verdict)) auditLast.set(String(e.meta.of), e.meta.verdict);
   verdicts.audited = auditLast.size;
@@ -787,35 +707,29 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   const rTotal = vTotal + verdicts.audited;
   verdicts.redoRate = rTotal ? round((verdicts.redo + verdicts.auditFailed) / rTotal, 4) : null;
 
-  // Tokens per landed task.
   const tokens = win.filter((e) => e.type === 'agent.session.end').reduce((s, e) => s + weight(e), 0);
-  // 2.65.0: cost per merged change, this window and the one before (the trend). Tokens as the tools reported them;
-  // dollars only from a price table in config (none ships: tokens only, and the card says so).
+  // Cost per merged change, this window and the one before (the trend); dollars only from a price table in config (none ships).
   const prevFrom = from - days * DAY;
   const inPrev = (t) => t >= prevFrom && t < from;
   const prevTokens = sorted.filter((e) => e.type === 'agent.session.end' && inPrev(ts(e))).reduce((s, e) => s + weight(e), 0);
   const prevLanded = new Set();
   for (const e of sorted) if (inPrev(ts(e))) for (const t of landingsOf(e)) prevLanded.add(t);
   const cost = { tokensPerLanded: n ? Math.round(tokens / n) : null, previousTokensPerLanded: prevLanded.size ? Math.round(prevTokens / prevLanded.size) : null, dollarsPerLanded: null, priced: false, note: `tokens only: no price table in config (${PRICES_REL})` };
-  // 2.71.1 (B): sessions that name their task (agent.session.end carries it since 2.71.1) are counted per landed task.
+  // Sessions that name their task are counted per landed task.
   cost.byTask = tokensByLandedTask(win.filter((e) => e.type === 'agent.session.end'), landed.map((l) => l.task), weight);
   if (prices && typeof prices === 'object') {
-    // 2.67.0: "prices from <file>, checked <date>"; with a table but no session it can price (or that reported its
-    // cost) in the window, the card stays in tokens and says why instead of showing $0.
+    // "prices from <file>, checked <date>"; with no priceable session the card stays in tokens and says why.
     const src = `prices from ${priceInfo?.file || PRICES_REL}${priceInfo?.checked ? `, checked ${priceInfo.checked}` : priceInfo ? ', never checked' : ''}${priceInfo?.placeholder ? ' (placeholders: confirm them against the provider\'s price page and set "checked" to that date)' : ''}`;
     const d = dollarsOf(win.filter((e) => e.type === 'agent.session.end'), prices, priceMultipliers || DEFAULT_PRICE_MULTIPLIERS);
     cost.priceSource = { file: priceInfo?.file || PRICES_REL, checked: priceInfo?.checked || null, placeholder: Boolean(priceInfo?.placeholder) };
     if (d.priced + d.reported > 0) Object.assign(cost, { priced: true, dollars: round(d.usd, 2), dollarsPerLanded: n ? round(d.usd / n, 2) : null, unpricedSessions: d.unpriced, reportedSessions: d.reported, note: `${src}${d.reported ? ` (${d.reported} session(s) at the cost their tool reported)` : ''}${d.unpriced ? `; ${d.unpriced} session(s) of a model or tool not in the table are not counted in dollars` : ''}` });
     else Object.assign(cost, { unpricedSessions: d.unpriced, note: `tokens only: no session in the window has a model or tool in the table (${src})` });
   }
-  // 2.65.0: orchestrator interventions: conductor notes (event conductor.note, an outside orchestrator's rulings in a
-  // task's record), counted by type so they show once the conductor tools write them; and a person's round-trips
-  // (planned and unplanned interventions) per landed task.
+  // Orchestrator interventions: conductor notes (event conductor.note), counted by type; and a person's round-trips per landed task.
   const notes = win.filter((e) => e.type === 'conductor.note');
   const byWho = {};
   for (const e of notes) { const w = String(e.meta?.by || e.agent || 'unknown'); byWho[w] = (byWho[w] || 0) + 1; }
-  // 2.67.0: and the orchestrator's other steps (orchestratorOf): releases, lanes refreshes, holds, halt clears and
-  // person-only steps it recorded, split planned / unplanned; plus the work it reported (npm run usage: outside sessions).
+  // The orchestrator's other steps (orchestratorOf), split planned / unplanned; plus its reported work (npm run usage).
   const steps = win.map((e) => orchestratorOf(e, isPersonName)).filter(Boolean);
   const byType = {}; const stepWho = {};
   for (const s of steps) { byType[s.type] = (byType[s.type] || 0) + 1; stepWho[s.who] = (stepWho[s.who] || 0) + 1; }
@@ -828,11 +742,7 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
     usage: { sessions: outsideEnds.length, tokens: Math.round(outsideTokens), share: tokens > 0 ? round(outsideTokens / tokens, 4) : null, by: outsideBy } };
   const roundTripsPerLanded = n ? round((unplanned.length + planned.length) / n, 2) : null;
 
-  // Risk tiers (2.63): a landing that names tier C without a signature. n/a while no landing carries a tier.
-  // 2.67.0: the train records a lane's tier on its own task.train.tier event (meta.tier, meta.released) before the
-  // landing, not on task.train.landed, so the old check read n/a forever. A landed task's tier: its landing event's
-  // meta.tier, else its latest tier event since its previous landing; a tier-C landing is signed when that tier event
-  // names a release or a task.train.released (the owner's release, or one recorded on their permission) came between.
+  // Risk tiers: a tier-C landing without a signature (n/a while no landing carries a tier). A landed task's tier: its landing's meta.tier, else its latest task.train.tier event since its previous landing; tier C is signed when that event names a release or a task.train.released came between.
   const tierRows = [];
   for (const l of landed) {
     const mine = byTask.get(l.task) || [];
@@ -846,9 +756,7 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   const tierC = tierRows.length ? tierRows.filter((r) => r.tier === 'C' && !r.signed).length : null;
   const tiers = { A: tierRows.filter((r) => r.tier === 'A').length, B: tierRows.filter((r) => r.tier === 'B').length, C: tierRows.filter((r) => r.tier === 'C').length, untiered: n - tierRows.length, cUnsigned: tierC, rows: tierRows.filter((r) => r.tier === 'C') };
 
-  // Daily buckets: 24 h slices ending at `now`, oldest first.
-  // 2.67.0: calendar days in the studio's zone (studioZone: STUDIO_TZ, else TZ, else UTC), each with its UTC span
-  // when the zone isn't UTC; an event at a day's first instant is that day's, and the window's end is the last day's.
+  // Daily buckets: calendar days in the studio's zone (studioZone), each with its UTC span when the zone isn't UTC; an event at a day's first instant is that day's.
   const buckets = [];
   for (const { day, b0, b1 } of localDays(from, now, z.zone)) {
     const inB = (t) => t >= b0 && (t < b1 || (b1 === now && t === now));
@@ -857,7 +765,6 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
     buckets.push({ day, zone: z.zone, ...(off0 || off1 ? { utc: `${new Date(b0).toISOString().slice(0, 16).replace('T', ' ')} to ${new Date(b1).toISOString().slice(0, 16).replace('T', ' ')} UTC` } : {}), from: new Date(b0).toISOString(), supervisorHours: round(runningMs(b0, b1, runs, halts) / 3600000, 2), unplanned: unplanned.filter((x) => inB(x.at)).length, planned: planned.filter((x) => inB(x.at)).length, landed: bl.length, handsFree: bl.filter((l) => l.handsFree).length, forced: bl.filter((l) => l.forced).length, tokens: Math.round(win.filter((e) => e.type === 'agent.session.end' && inB(ts(e))).reduce((s, e) => s + weight(e), 0)) });
   }
 
-  // 2.66.0: tokens that do work (effective-token ratio, cost per kept change, the waste split).
   const work = tokenWork(sorted, { from, now, judgedAt, keepDays: Number(keepDays) > 0 ? Number(keepDays) : keepDaysOf({}), minSample, weight, prices, priceMultipliers, reverts, typeOfTask });
 
   const firstEvent = sorted.length ? ts(sorted[0]) : null;
@@ -893,11 +800,9 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
 }
 
 /**
- * Each L3 bar against a scorecard: [{ id, ok, value, bar, na }].
- * 2.73.0 (e): with confidence > 0 (l3Confidence) the three rate bars read a one-sided Wilson bound: ok is the bound's
- * verdict (promotion), pointOk the point estimate's (demotion); each also carries { point, bound, k, n, side,
- * confidence, more } (more: landings or reviews at the current rate that would clear it, null: never at this rate).
- * The redo rate counts the owner's Redo verdicts and failed audits (harness/audit.mjs) over verdicts plus audits.
+ * Each L3 bar against a scorecard: [{ id, ok, value, bar, na }]. With confidence > 0 the three rate bars read a one-sided
+ * Wilson bound: ok is the bound's verdict (promotion), pointOk the point estimate's (demotion). The redo rate counts Redo
+ * verdicts and failed audits over verdicts plus audits.
  */
 export function l3Checks(card, l3 = DEFAULT_AUTONOMY.l3, days = DEFAULT_AUTONOMY.days, confidence = 0) {
   const pct = (x) => (x === null ? 'n/a' : `${Math.round(x * 1000) / 10}%`);
@@ -933,10 +838,8 @@ export function l3Checks(card, l3 = DEFAULT_AUTONOMY.l3, days = DEFAULT_AUTONOMY
 }
 
 /**
- * The badge and the suggestion. Never changes the level: the owner does, in studio/autonomy.json (signed).
- * { level, meets, checks, confidence, suggestion: { kind: 'promote'|'demote'|null, text } }
- * 2.73.0 (e): promotion needs every bar at its confidence bound (fast to step down, slow to step up); demotion reads
- * the point estimates (pointOk), so a studio at L3 isn't told to step down only because its sample is small.
+ * The badge and the suggestion; never changes the level (the owner does, in studio/autonomy.json, signed). { level,
+ * meets, checks, confidence, suggestion: { kind: 'promote'|'demote'|null, text } }. Demotion reads point estimates.
  */
 export function levelBadge(card, cfg = DEFAULT_AUTONOMY, env = process.env) {
   const confidence = l3Confidence(cfg.confidence, env);
@@ -953,14 +856,12 @@ export function levelBadge(card, cfg = DEFAULT_AUTONOMY, env = process.env) {
   return { level, meets, checks, confidence, suggestion };
 }
 const pct1 = (x) => (x === null || x === undefined ? 'n/a' : `${Math.round(x * 1000) / 10}%`);
-/** One line for the overnight page and the War Room. */
 export function autonomyLine(card, badge) {
   const pct = (x) => (x === null ? 'n/a' : `${Math.round(x * 100)}%`);
   const sug = badge.suggestion.kind ? ` · ${badge.suggestion.kind === 'promote' ? 'suggest L3 (your call)' : 'suggest back to L2'}` : '';
   return `Autonomy (${card.window.days} d): ${badge.level}${badge.meets === 'L3' ? ', meets the L3 bar' : ''} · ${card.hoursBetweenInterventions} h between interventions (${card.interventions.unplanned} unplanned, ${card.interventions.planned} planned) · hands-free ${pct(card.handsFreeLandRate)}${(() => { const h = (badge.checks || []).find((c) => c.id === 'handsFreeLandRate'); return h?.confidence && h.bound !== null && h.bound !== undefined ? ` (lower bound ${pct(h.bound)} at ${Math.round(h.confidence * 100)}%)` : ''; })()} of ${card.landed} landed · forced ${pct(card.forcedRate)} · reopened ${pct(card.reopenRate)} · Redo ${pct(card.verdicts.redoRate)} · ${card.tokensPerLanded === null ? 'no task landed' : `${Math.round(card.tokensPerLanded / 1000)}k tokens per landed task${card.cost?.previousTokensPerLanded ? ` (was ${Math.round(card.cost.previousTokensPerLanded / 1000)}k)` : ''}${card.cost?.priced ? (card.cost.dollarsPerLanded !== null ? `, $${card.cost.dollarsPerLanded}` : '') : card.cost ? ', tokens only' : ''}`}${card.roundTripsPerLanded !== null && card.roundTripsPerLanded !== undefined ? ` · ${card.roundTripsPerLanded} person round-trips per landed task` : ''}${card.orchestrator?.interventions ? ` · ${card.orchestrator.interventions} orchestrator interventions (${card.orchestrator.conductorNotes} conductor notes)` : card.orchestrator?.conductorNotes ? ` · ${card.orchestrator.conductorNotes} conductor notes` : ''}${card.orchestrator?.usage?.sessions ? ` · outside work ${Math.round(card.orchestrator.usage.tokens / 1000)}k tokens` : ''}${sug}`;
 }
 
-/** 2.66.0: the CLI's short "Tokens" block (lines). */
 export function tokenBlock(w) {
   if (!w) return [];
   const tk = (x) => (x === null || x === undefined ? '-' : x >= 1e6 ? `${Math.round(x / 1e5) / 10}M` : x >= 1e3 ? `${Math.round(x / 100) / 10}k` : String(Math.round(x)));
@@ -979,12 +880,11 @@ export function tokenBlock(w) {
 }
 
 /**
- * 2.65.0: `npm run autonomy -- level <L1|L2|L3|L4> --by <name> [--why "…"] [--permission "…"]`. Sets "level" in
- * studio/autonomy.json, set once; agents then make every decision that level allows, and the scorecard only suggests.
- * Who (the owner's rule, harness/permission.mjs): a person in their own terminal; a launched Producer or Director
- * session; an agent outside the harness on a person's direct permission (--permission, 10+ characters). A worker
- * (a launched builder, qa, ... session, or a worker's name in STUDIO_LOCK_OWNER or --by) never. One autonomy.level
- * event names who and why. Returns { ok, message, from, to }.
+ * Sets "level" in studio/autonomy.json; agents then make every decision that level allows, and the scorecard only
+ * suggests. Who (harness/permission.mjs): a person in their own terminal; a launched Producer or Director session; an
+ * agent outside the harness on a person's direct permission (--permission, 10+ characters). A worker (a launched
+ * builder, qa, ... session, or a worker's name in STUDIO_LOCK_OWNER or --by) never. One autonomy.level event names who
+ * and why. Returns { ok, message, from, to }.
  */
 export async function setLevel(level, { by, why = '', permission = '', env = process.env, root = REPO_ROOT } = {}) {
   const to = String(level || '').toUpperCase();
@@ -1025,7 +925,7 @@ export async function setLevel(level, { by, why = '', permission = '', env = pro
   return { ok: true, from, to, message: `Autonomy level ${from} -> ${to} in ${AUTONOMY_REL}, set by ${who}${how}${note ? ` (${note})` : ''}. Commit ${AUTONOMY_REL} so the change is on record.` };
 }
 
-/** Is studio/autonomy.json in the protected list (so only the owner's signed change moves the bar)? */
+/** Is studio/autonomy.json protected (only the owner's signed change moves the bar)? */
 export async function configProtected() {
   try {
     const { protectedGlobs } = await import('./approve.mjs');
@@ -1034,10 +934,9 @@ export async function configProtected() {
   } catch { return null; }
 }
 
-/** Everything the CLI, the overnight page and the War Room show. */
 export async function autonomyReport({ now = Date.now(), days = null, since = null, events = null, withAttempts = true, root = REPO_ROOT } = {}) {
   const cfg = readAutonomyConfig(root);
-  // 2.66.0: --since <ISO>: the window from then to `now` (overrides --days).
+  // --since <ISO>: the window from then to `now` (overrides --days).
   const sinceMs = since === null || since === undefined || since === '' ? NaN : (typeof since === 'number' ? since : Date.parse(since));
   const d = Number.isFinite(sinceMs) && sinceMs < now ? (now - sinceMs) / DAY : Number(days) > 0 ? Number(days) : cfg.days;
   const evs = events || readRecentEvents(200000);
@@ -1046,11 +945,11 @@ export async function autonomyReport({ now = Date.now(), days = null, since = nu
   if (withAttempts) { try { attempts = (await import('./metrics.mjs')).attemptRows(evs, { now }); } catch {} }
   let weigh = null;
   try { const { weightedTokens } = await import('./budget.mjs'); weigh = (e) => weightedTokens(e); } catch {}
-  // 2.66.0: the task types done-check uses (title, role, an owner's reclassification), and the revert commits.
+  // The task types done-check uses (title, role, an owner's reclassification), and the revert commits.
   let typeOfTask = null;
   try { const dc = await import('./done-check.mjs'); typeOfTask = (t) => dc.typeOf({ id: t.id, title: t.title, role: t.role }).type; } catch {}
   const reverts = revertCommits(root, now - d * DAY);
-  // 2.67.0: is a supervisor running now (its status file and a live pid)? An open halt whose supervisor is gone is stale.
+  // Is a supervisor running now (its status file and a live pid)? An open halt whose supervisor is gone is stale.
   let supervisorRunning = false;
   try {
     const st = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'supervisor.json'), 'utf8'));
@@ -1062,7 +961,7 @@ export async function autonomyReport({ now = Date.now(), days = null, since = nu
 }
 
 let cached = null;
-/** The War Room's card (GET /api/autonomy): the report without the per-task rows, recomputed at most every STUDIO_AUTONOMY_CACHE_S (300) s. */
+/** The War Room's card (GET /api/autonomy): the report without per-task rows, recomputed at most every STUDIO_AUTONOMY_CACHE_S (300) s. */
 export async function autonomyCard({ now = Date.now() } = {}) {
   const ttl = Number(process.env.STUDIO_AUTONOMY_CACHE_S ?? 300) * 1000;
   if (cached && now - cached.at < ttl) return cached.card;
@@ -1082,16 +981,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     (r.ok ? console.log : console.error)(r.message);
     process.exit(r.ok ? 0 : 1);
   }
-  // 2.71.0 (x): `mode autonomous on|off --by <game dev>`: on writes a proposal the owner confirms (npm run policy --
-  // confirm); off pauses autonomous mode at once (harness/policy.mjs). Never turns anything on by itself.
+  // `mode autonomous on` writes a proposal the owner confirms; `off` pauses at once. Never turns anything on by itself.
   if (argv[0] === 'mode') {
     if (argv[1] !== 'autonomous' || !['on', 'off'].includes(argv[2])) { console.error('Usage: npm run autonomy -- mode autonomous on --agent <name> --by <game dev> [--actions …] [--review-h 72] [--why "…"] [--permission "…"]\n       npm run autonomy -- mode autonomous off --by <name> [--why "…"]'); process.exit(2); }
     const r = await (await import('./policy-rules.mjs')).proposeMode({ on: argv[2] === 'on', agent: flag('agent') || '', actions: flag('actions'), reviewH: flag('review-h'), by: flag('by'), why: flag('why') || '', permission: flag('permission') || '' });
     (r.ok ? console.log : console.error)(r.message);
     process.exit(r.ok ? 0 : 1);
   }
-  // 2.73.0 (e): cheap-first routing's measures (harness/routing.mjs): success rate and tokens per landed change by task
-  // type and tier, from session ends; the holdout is off until the owner turns it on.
+  // Cheap-first routing's measures (harness/routing.mjs); the holdout is off until the owner turns it on.
   if (argv[0] === 'routing') {
     const rt = await import('./routing.mjs');
     const { readPolicy } = await import('./policy-rules.mjs');
@@ -1111,7 +1008,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(rt.routingText(st, rp));
     process.exit(0);
   }
-  // 2.68.0: the release impact report (harness/impact.mjs): the same measures before vs after a harness upgrade.
+  // The release impact report (harness/impact.mjs): the same measures before vs after a harness upgrade.
   if (argv[0] === 'impact') {
     const r = await (await import('./impact.mjs')).impactCli(argv.slice(1), { root: REPO_ROOT, autonomy: { buildAutonomy, personClassifier } });
     (r.code ? console.error : console.log)(r.text);
