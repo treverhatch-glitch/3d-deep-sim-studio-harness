@@ -248,6 +248,34 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 - **Evidence:** the repository's first real editor run: `game-ci/unity-test-runner@v4` (a rewrite since v4.4.0) ended with "Code 400 … TimeStamp validation failed".
 - **Fix:** pinned to v4.3.2 in .github/workflows/ci.yml.
 
+### P-318 — the engine train's evidence never saw a crew's results · fixed in 2.84.0
+- **Evidence:** a crew's first 21.5 hours on 2.83: engine land runs passed 34.8% (2.82: 64.5%), 36.2 land minutes per landed branch. The blame by evidence read the land command's output; the crew's land script writes results files. A red run was repeated in full.
+- **Fix:** `engines.<x>.results`, the stage report's `failures`, retry by test name, `flakyTests`, `compileFirst`, a killed run retried. qa/selftest-284t.mjs. Untested on a real editor.
+
+### P-319 — the rules check took 12.7 GB on a 17-branch batch · mitigated in 2.84.0
+- **Evidence:** the overseer's note: one test process for the whole batch on a 31.8 GB machine.
+- **Fix:** `rules.focus.split`, `rules.maxLanes`, `batchMax`. qa/selftest-284t.mjs, 284u. Not measured on a live studio.
+
+### P-320 — a reviewer planned on another family's model was started with the wrong tool, and two crashes halted the supervisor · fixed in 2.84.0
+- **Evidence:** a launch of the default tool with a `google/…` model id exited 1 twice; the supervisor's two-identical-failures halt fired.
+- **Fix:** harness/model-tool.mjs `toolForModel`; a mismatch is refused before start; a reviewer's launch crash backs that role off. qa/selftest-284w.mjs.
+
+### P-321 — the overseer was refused decisions beta mode had given it · fixed in 2.84.0
+- **Evidence:** unpark of an owner-rank park refused to every stand-in name but one; the engine merge needed the task's claim; `--force` with `--train` always refused while a tier-C lane must use the train; an upgrade could remove `studio/beta.json`.
+- **Fix:** `ownerStandInRole`, `standInMay`, the owner's decision on beta powers (docs/SECURITY.md). qa/selftest-284n.mjs, 284q.
+
+### P-322 — a start refused for a full crew put the task to sleep for up to 30 minutes · fixed in 2.84.0
+- **Evidence:** the start back-off keyed on the refusal text with numbers removed, so "N agents already running" repeated.
+- **Fix:** harness/supervisor.mjs `crewWideRefusal`. qa/selftest-284v.mjs.
+
+### P-323 — every verify ran every gate · fixed in 2.84.0
+- **Evidence:** docs-only and engine-only tasks ran the web game's build, tests and replays.
+- **Fix:** harness/gate-tracks.mjs. qa/selftest-284x.mjs.
+
+### P-324 — 2.83 was projected to raise the engine pass rate and did not · open
+- **Evidence:** projected about 75% of land runs passing and 65% of tasks without an overseer step; measured 34.8% and 22% on a crew's first day.
+- **Lesson:** a projection is not a measurement; a release's notes give the measured numbers of the release before it, and nothing built without a real editor is called an improvement until a crew's log says so.
+
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
 - **P-001** (reopened on purpose 2026-10-31: Hatch made the harness and hatchfield-game public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist

@@ -38,6 +38,32 @@ Details: docs/RELEASE-2.84.0.md.
 - **The Windows self-test in 8 shards** (was 4): about half the wait for every release.
 - **Which commands a studio runs** (`npm run commands-run`): an empty marker per command and month, so a feature is
   cut on evidence.
+- **Second pass, from a crew's first day on 2.83** (4 of 15 scorecard targets; engine land runs passed 34.8%; 22% of
+  landed tasks without an overseer step) **and the overseer's list:**
+  - *Land runs:* failing tests and compiler errors are read from the results files a land run writes
+    (`engines.<x>.results`); a red stage is retried with only the tests that failed, and known-flaky names
+    (`flakyTests`) before anyone is blamed; `play.focus.skip`; `compileFirst`; a run the OS killed is retried, never
+    blamed; `rules.focus.split` and `rules.maxLanes` for the rules check's memory.
+  - *Train control:* `task train --engine <x> --only <ids> | --tag <name>`, `task tag`, `batchMax`, `batchGroup`,
+    `task train cancel --engine <x>`, `task train auto off|on --engine <x>`, `npm run studio:boot -- install`.
+  - *Gates by track* (`harness/gate-tracks.mjs`, on by default, `STUDIO_GATES_BY_TRACK=off`): a docs-only or
+    engine-only change no longer runs the web game's gates; the safety gates run on every change.
+  - *The reviewer:* the tool follows the planned model, a mismatch is refused before a process starts, a reviewer's
+    launch crash no longer halts the supervisor; `npm run review -- ask <ID> --model <id>` (the harness asks, records
+    and closes the review task).
+  - *Supervisor and crew:* a skipped task says why; a refusal about the crew is not counted against the task; the crew
+    breaker counts queued and ready work; the planning stall limit follows the model; `task start --dry-run`;
+    `studio:reload-env` names the settings it no longer reads.
+  - *Who decides:* the overseer and the signers were refused the engine merge and unparks, and their own decisions did
+    not end the planning back-off: fixed, with a table in docs/OVERSEER.md. **Beta powers, the owner's decision:** in
+    beta mode a beta-mode agent and an outside signer release tier-C lanes, force a done (with the train too), approve
+    protected files including their own change (marked `self`), resume a crew and control an engine train; each use
+    is a `beta.use` event and a digest line; the owner-only list, launched sessions and workers are unchanged; an
+    upgrade keeps `studio/beta.json`.
+  - *A harness-owned editor* (`npm run editor`, `harness/editor-service.mjs`, a C# service in the Unity template):
+    warm land runs and a compile-and-capture queue for sessions. Off by default. UNTESTED on a real editor.
+  - *Cut:* remote workers and the remote verify, the harness scout, signed results (14 settings); five more pages
+    shortened; code comments in the largest modules cut with a proof that no code token changed.
 - **Cut:** eleven old release notes, three old handoff notes, the 2.79 audit write-up; the changelog, the problems log
   and the proposals log keep their newest entries in full and one line for each older one; README 18 KB → 4 KB;
   docs/SECURITY.md 46 KB → 17 KB with every rule kept. One pattern for a board line (`harness/board-line.mjs`).

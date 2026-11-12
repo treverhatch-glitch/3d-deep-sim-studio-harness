@@ -5,11 +5,24 @@ two newest handoffs and release notes are kept; older ones are in git history.
 
 ## Where it stands
 
-- 2.84 is on `claude/284` (pull request #85). It is not merged: the owner merges 2.83's fixes onto it in a second pass
-  once the crew has run 2.83 for some days.
+- 2.84 is on `claude/284` (pull request #85). It is not merged: the owner says when.
 - The online Unity editor jobs fail at Unity's sign-in ("Failed to login"): the repository's `UNITY_EMAIL` and
   `UNITY_PASSWORD` secrets are the owner's to correct. `game-ci/unity-test-runner` is pinned to v4.3.2 because the
   floating v4 cannot activate a Personal licence file; `game-ci/unity-builder@v4` is not pinned and not yet tried.
+
+## The second pass (same day)
+
+The owner asked for the overseer's list to be cross-checked and built, more trimming, and for the overseer and the
+outside signer to keep (and get) the authority to run the studio unattended while he travels. A crew's first 21.5 hours
+on 2.83 measured worse than 2.82 on most scorecard lines (docs/RELEASE-2.84.0.md has the numbers): 2.83's projection
+did not hold. The second pass is twelve parts, each with its own test unit (284n, q, s, t, u, v, w, x, y).
+
+The owner's decisions, in his words to the maintainer: the outside signer gets the same power as the overseer; both
+get the commands that refused them; the same-family review stays a switch the overseer flips; and "in beta an agent
+can approve its own protected file change". Built as said, logged (`beta.use`, `self`), nothing else loosened.
+
+Not built: the engine adapter for a third engine (a plan, not a patch); the web train's own auto mode; removing gates
+nobody runs (waits for `commands-run` evidence).
 
 ## Decisions made on judgment
 
@@ -27,7 +40,10 @@ two newest handoffs and release notes are kept; older ones are in git history.
 
 1. The Unity sign-in secrets, then read the `engine-unity-real` job: it is the first time the harness's readers meet a
    real editor. Expect it to find something.
-2. The second pass: what 2.83 shows on the crew's PC, applied here.
+2. The first real run of the harness-owned editor on a PC (docs/NATIVE-ENGINE.md, "The first run on a PC"), and a land script
+   that honours the new variables. Then score a day on 2.84 against P-324.
 3. After a month of markers: `npm run commands-run`, and cut what nobody runs.
-4. Large pages left: docs/WORK-ORGANIZATION.md (83 KB), docs/AGENT-TOOLS.md (52 KB), docs/AUTONOMY.md (48 KB).
+4. Large pages left: docs/WORK-ORGANIZATION.md (38 KB), docs/AGENT-TOOLS.md, docs/ENGINE-TRACKS.md, docs/AUTONOMY.md
+   (33 KB each). Comments are a quarter of the code's bytes: `npm run check:same-code` proves a comment-only
+   change (docs/RELEASE.md).
 5. `harness/review.mjs`'s command line still uses top-level await while other modules import it.

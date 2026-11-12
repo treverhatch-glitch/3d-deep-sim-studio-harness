@@ -7,6 +7,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 export async function selftest284I({ dir, report, tmpRoot, root }) {
@@ -90,4 +91,17 @@ export async function selftest284I({ dir, report, tmpRoot, root }) {
     return [r.status === 0 && /nothing to backfill|engine tracks/.test(out(r)), `exit ${r.status} ${out(r).slice(0, 400)}`];
   });
   try { fs.rmSync(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch {}
+  // 2.84: scripts/same-code.mjs, the proof that a change touched comments only.
+  {
+    const { sameCode } = await import(pathToFileURL(path.join(root, 'scripts', 'same-code.mjs')).href);
+    const base = "/** A long story about 2.69. */\nexport const f = (a) => `x ${a} // not a comment`; // trailing\nconst re = /\\/\\/ x/;\n";
+    const trimmed = "/** Short. */\nexport const f = (a) => `x ${a} // not a comment`;\nconst re = /\\/\\/ x/;\n";
+    const inTemplate = base.replace('// not a comment`', '// not a comment `');
+    const inCode = base.replace('(a) =>', '(b) =>');
+    const broken = base.replace('const re', 'const re re');
+    await guard('2.84 same-code: a file whose comments changed and whose code did not is "same"; a change inside a template literal that looks like a comment, a renamed parameter, and a file that no longer parses are each "different" (fails before this fix: no such check; a comment trim was trusted by eye)', () => [
+      sameCode(base, trimmed).same === true && sameCode(base, base).same === true && sameCode(base, inTemplate).same === false && sameCode(base, inCode).same === false && sameCode(base, broken).same === false && sameCode(base, trimmed).b.com < sameCode(base, trimmed).a.com,
+      JSON.stringify([sameCode(base, trimmed).same, sameCode(base, inTemplate).same, sameCode(base, inCode).same, sameCode(base, broken).same])]);
+  }
+
 }

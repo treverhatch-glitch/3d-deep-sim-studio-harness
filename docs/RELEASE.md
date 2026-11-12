@@ -78,6 +78,12 @@ The file ships with the harness; a studio's `npm run autonomy -- impact` scores 
   count, and with `--against` the delta per number (reads the ref with `git archive`; no tests run). The audit using them:
   `docs/CLEANUP-2.79-AUDIT.md`.
 
+### A change that claims "comments only"
+
+`npm run check:same-code -- <base-commit> <file>...` (`scripts/same-code.mjs`) lists every code token of each file
+(strings, template parts and regexes included) at the base commit and now, and fails when one differs. 2.84's comment
+trim was landed file by file on that proof. `-- --measure <file>...` prints comment bytes per file.
+
 ## Taking a harness update into a studio
 
 A studio (a private copy with a game in it) takes a new harness version by merging it, never by stashing its board (a stash
