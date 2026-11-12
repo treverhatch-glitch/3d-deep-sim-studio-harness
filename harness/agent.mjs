@@ -75,7 +75,9 @@ import { aiderDriven, laneFiles, laneIgnoreLines, editBrief, claimTask, finishAi
 import { pickNimModel, stubFetchFrom } from './nim-check.mjs';
 import { AIDER_SESSION } from './models.config.mjs';
 import { rescueOf, rescueModelFor } from './rescue.mjs';
-import { reviewLaunch } from './review-family.mjs';
+import { reviewLaunch, studioRoot } from './review-family.mjs';
+import { toolForModel, toolByShape, toolMismatch, toolCapabilities } from './model-tool.mjs';
+import { startReviewAsk } from './review-ask.mjs';
 import { cooldown, inAnyTrain } from './task-hold.mjs';
 import { mapStale, writeMap } from './map.mjs';
 import { pitfallsForPrompt } from './pitfalls.mjs';
@@ -262,12 +264,23 @@ export const AGY_DEFAULT_MODEL = 'gemini-4-argon-high';
  * here (gemini -> agy, claude/opus/sonnet/haiku -> claude), or null.
  */
 export const isGeminiModel = (m) => /^(models\/)?gemini[-_.]/i.test(String(m || '').trim());
-export function modelFamilyTool(m) {
-  const s = String(m || '').trim().toLowerCase();
-  if (isGeminiModel(s)) return 'agy';
-  if (/^(claude|opus|sonnet|haiku)\b|^claude-/.test(s)) return 'claude';
-  return null;
+// 2.84 (w): the id's shape is answered in one place (harness/model-tool.mjs toolByShape); google/... is vertex now.
+export const modelFamilyTool = (m) => toolByShape(m);
+
+/**
+ * 2.84 (w, B-133): the tool and model a reviewer plan launches. { tool, model } | { ask: true, tool } | { refused } | {}.
+ * explicitTool: a person named the tool; then a plan model that tool cannot run is not taken ({} keeps the launch as it
+ * was). Otherwise the plan model's tool (toolForModel) is the tool; one that cannot run commands means the harness asks.
+ */
+export function reviewerRoute({ plan, tool, explicitTool = false, env = process.env, root = null, models = null } = {}) {
+  if (!plan?.model) return {};
+  const need = toolForModel(plan.model, { env, root, models });
+  if (explicitTool) return need.tool && need.tool !== tool ? {} : { tool, model: plan.model };
+  if (!need.tool) return { refused: `Not started: the review plan picked ${plan.model}, and ${need.why}.` };
+  if (!toolCapabilities(need.tool).runsCommands) return { ask: true, tool: need.tool, model: plan.model };
+  return { tool: need.tool, model: plan.model };
 }
+const reviewRoot = () => { try { return studioRoot(); } catch { return REPO_ROOT; } };
 /** STUDIO_AGY_ANY_MODEL=on (or --force-model): agy may run a model that isn't Gemini (a person's explicit choice). */
 export const agyAnyModel = (env = process.env) => /^(on|1|true|yes)$/i.test(String(env.STUDIO_AGY_ANY_MODEL || '').trim());
 export function agyOptions(model = null, env = process.env) {
@@ -2484,20 +2497,49 @@ export function startAgent(opts, { detach = false } = {}) {
   // quota: the review runs on it. None configured: a different model of the same family (else the same), and one line in
   // the brief says the reviewer writes the same-family header (harness/review-family.mjs). Two sessions had read the rule
   // and handed back on a one-family crew. An explicit --model is respected.
+  // 2.84 (w, B-133): the plan's model decides its tool (harness/model-tool.mjs toolForModel), over the supervisor's default
+  // tool (opts.toolDefault): the supervisor passes its preferred tool to every start, so `!opts.tool` never held and a
+  // Vertex model (google/gemini-...) ran on claude, exit 1. A tool a person named (--tool, no toolDefault) is kept, and a
+  // plan model it cannot run is not taken. A model no tool is known for is refused with one line. A tool whose sessions
+  // cannot run commands (vertex: aider only suggests them) cannot act as a reviewer: the harness asks the model itself
+  // (harness/review-ask.mjs, `npm run review -- ask`) and no session starts.
   if (role === 'reviewer' && opts.task && !opts.model) {
+    let plan = null;
     try {
       const t = [...parseNextQueue().inProgress, ...parseNextQueue().backlog].find((x) => x.id === opts.task);
-      const plan = t ? reviewLaunch({ taskId: opts.task, title: t.title, events: readRecentEvents(20000), current: model }) : null;
-      if (plan?.kind === 'other' && plan.model && plan.model !== model) {
-        model = plan.model;
-        opts.model = plan.model;
-        const tt = modelFamilyTool(plan.model);
-        if (tt && !opts.tool) tool = tt;
-      } else if (plan?.kind === 'same') {
-        if (plan.model && plan.model !== model) { model = plan.model; opts.model = plan.model; }
-        opts.note = `${opts.note ? `${opts.note}\n` : ''}${plan.note}`;
+      plan = t ? reviewLaunch({ taskId: opts.task, title: t.title, events: readRecentEvents(20000), current: model }) : null;
+    } catch { plan = null; /* the review's model is a preference, never a blocker */ }
+    const take = Boolean(plan && plan.model && (plan.kind === 'other' || plan.kind === 'same'));
+    if (take) {
+      const route = reviewerRoute({ plan, tool, explicitTool: Boolean(opts.tool) && !opts.toolDefault, root: reviewRoot() });
+      if (route.refused) {
+        emitEvent({ type: 'agent.start.refused', agent, to: 'producer', task: opts.task, status: 'warn', msg: `${agent} not started: ${route.refused}`.slice(0, 600), meta: { role, kind: 'review-tool', model: plan.model } });
+        return { ok: false, skipped: true, refused: 'review-tool', message: route.refused };
       }
-    } catch { /* the review's model is a preference, never a blocker */ }
+      if (route.ask) {
+        const a = startReviewAsk({ reviewTask: opts.task, reviewed: plan.reviewed, model: plan.model, tool: route.tool, by: opts.by || 'launcher' });
+        return { ok: false, skipped: true, asked: a.started, refused: a.started ? undefined : 'review-ask', message: a.message };
+      }
+      if (route.model) {
+        if (route.model !== model) { model = route.model; opts.model = route.model; }
+        if (route.tool) tool = route.tool;
+        if (plan.kind === 'same' && plan.note) opts.note = `${opts.note ? `${opts.note}\n` : ''}${plan.note}`;
+      }
+    }
+  }
+  // 2.84 (w, B-133): a tool that cannot run its model is refused before any process starts (claude given a Vertex id exited
+  // 1 at launch, and two such exits halted the supervisor). Only the tools whose models are known; vertex and agy coerce a
+  // model nobody named (the role's), so for them only a named one is checked; agy's own override still lets it run any.
+  {
+    const named = Boolean(opts.model);
+    const viaCustom = Boolean(toolCmd(tool) || process.env[`STUDIO_${roleKey(role)}_CMD`]) && tool !== 'vertex';
+    if (!viaCustom && (named || !['vertex', 'agy'].includes(tool))) {
+      const line = toolMismatch({ tool, model, forced: tool === 'agy' && (Boolean(opts.forceModel) || agyAnyModel() || Boolean(opts.orderModel)), root: reviewRoot() });
+      if (line) {
+        emitEvent({ type: 'agent.start.refused', agent, to: 'producer', task: opts.task || undefined, status: 'warn', msg: `${agent} not started: ${line}`.slice(0, 600), meta: { role, kind: 'tool-model', tool, model } });
+        return { ok: false, skipped: true, refused: 'tool-model', message: line };
+      }
+    }
   }
   // 2.77.0 (n, Priority 8): an agy session runs a Gemini model. An explicit non-Gemini --model is refused unless forced
   // (--force-model, STUDIO_AGY_ANY_MODEL=on, or an agy:<model> entry the owner put in the budget order); a model the

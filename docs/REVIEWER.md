@@ -27,6 +27,25 @@ worker can't record its own review. The review is written to `studio/reviews/<da
 outside the harness, and one `Verdict:` line; a `review.recorded` event is logged and the file is committed (`--no-commit`
 to leave it for you). It counts for the done check's "Approved by a reviewer from another model family" like any review.
 
+**A review the harness asks for (2.84 w).** A tool whose sessions cannot run commands (vertex, aider, nim: aider only suggests
+them; `TOOL_CAPABILITIES` in `harness/model-tool.mjs`) cannot be a reviewer session. The harness asks the model itself, with no session:
+
+    npm run review -- ask <ID> --model <id> [--tool <tool>] [--for <review task>] [--no-commit]
+
+It sends ONE request with what a reviewer session reads: the task's title, spec and contract, the done-check's summary
+(`node harness/done-check.mjs <ID>`), and the diff of the task's lane against its base (an engine task: its engine branch against
+the engine target; else its tagged commits), cut at `STUDIO_REVIEW_DIFF_KB` (200) with a note saying so. Vertex goes straight to
+its endpoint with the key from the main checkout's `.env` as `x-goog-api-key` (never printed, logged or put in an event); claude,
+codex and agy run their CLI read-only with the prompt on stdin. The tool is the model's (`toolForModel`) unless `--tool` names it;
+a mismatch is refused. The answer must start with `VERDICT: APPROVE` or `VERDICT: CHANGES`. It is recorded as `review record`
+does: `studio/reviews/<date>-<ID>-asked-<model>.md` with the `model-family:` and `implementer-family:` lines, a `via:
+harness-asked` line, one `Verdict:` line, a `review.recorded` event (meta `via`, `model`, `tool`), the same family rules, and a
+commit. An answer with no verdict is saved as `<date>-<ID>-asked-<model>.rejected.txt` and nothing is recorded. A network,
+quota or tool failure exits 1 with one line and a `review.ask_failed` event, and records nothing. The launcher runs it,
+detached, for a reviewer task whose planned model runs on such a tool (`review.ask_started`); it is not asked again while one is
+in flight or once one is recorded for that review task, which then only needs closing. Who may run it: as for `review record`
+(never a worker session). Who must review, and what the done check needs, are unchanged.
+
 **A studio with only one model family (2.83, 2.84).** A review from the implementer's own family is taken only when its
 header says `same-family: no other family available` AND no other family is configured. Which families are configured is
 decided from the studio's own files in the MAIN checkout (found by git, never from `STUDIO_MAIN_ROOT`): the model and tool

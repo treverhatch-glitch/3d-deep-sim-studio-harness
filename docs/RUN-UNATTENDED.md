@@ -144,6 +144,10 @@ npm run studio:status
   `supervisor.resumed` event names who asked (`meta.by`, `meta.why`); not halted: it says so. It refuses inside a launched
   session (`STUDIO_ROLE` set) and for agents' names (`builder-s3`, `claude-a`, any name the launcher handed out); to narrow
   who may resume further, set `STUDIO_RESUME_BY=<name>[,<name>]` in `.env` (off by default).
+  2.84: a reviewer session that crashes at launch (under a minute, an exit that is not 126, 127 or 9009) does not count
+  toward this halt: the reviewer role waits 2, 4, 8 ... minutes (at most `STUDIO_START_BACKOFF_MAX_MIN`,
+  `supervisor.role_backoff`) and the other roles go on. A code-writing role's launch crashes still halt. A reviewer whose
+  tool cannot run its planned model is refused before it starts (docs/AGENT-TOOLS.md).
   - A session someone stopped or paused (`agent stop`, Pause, Stop all) never counts: the stop is written before the kill,
     the end reads "stopped by <name>" (`meta.stoppedBy`) and its hand-back says "a stop, not a failure" (no park, breaker
     or tier-up). An end the launcher caused itself (stall watchdog, idle exit, task budget) never counts either.

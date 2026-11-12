@@ -5165,6 +5165,14 @@ if (inShard('selftest-284y')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.84 (w, B-133): the reviewer's route.
+if (inShard('selftest-284w')) {
+  const dir = copyRepo();
+  const { selftest284W } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284w.mjs')).href);
+  await selftest284W({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

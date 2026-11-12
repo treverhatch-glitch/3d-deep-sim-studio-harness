@@ -279,7 +279,12 @@ async function checkBadEnds(opts, state, now) {
   // like the watchdog's stop (stoppedBy) it ends with exit 1 or a signal, and those have their own handling (the breaker,
   // the crew watchdog). And sessions that die within STUDIO_HALT_SAME_DEATH_SEC (5) of each other count as ONE end: one
   // outside cause (a killed process tree, a crash of the machine's shell) took them together.
-  const mine = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent) && !e.meta?.usageLimit && !e.meta?.stoppedBy && !LAUNCHER_KILLS.has(e.meta?.exitCause?.kind));
+  const mine0 = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent) && !e.meta?.usageLimit && !e.meta?.stoppedBy && !LAUNCHER_KILLS.has(e.meta?.exitCause?.kind));
+  // 2.84 (w, B-133): a reviewer session that crashed at launch (ran under a minute, an exit that does
+  // not say the tool is missing) is that role's problem (a reviewer given a model its tool refuses), not proof the tool is
+  // broken for everyone: it puts that role on a doubling back-off (roleBackoff) and never halts the supervisor.
+  noteRoleLaunchFailures(state, mine0, now);
+  const mine = mine0.filter((e) => !roleLaunchFailure(e));
   const ends = groupSameDeaths(mine);
   const last2 = ends.slice(-2).map((g) => g[g.length - 1]);
   if (last2.length === 2 && last2.every((e) => e.meta?.code && e.meta.code === last2[0].meta.code && (e.meta?.tool || '') === (last2[0].meta?.tool || ''))) {
@@ -310,6 +315,49 @@ async function checkBadEnds(opts, state, now) {
   }
   return false;
 }
+
+/**
+ * 2.84 (w): a reviewer session that crashed at launch: ran under SAME_DEATH_MIN_RUN_SEC with a non-zero exit, tool not
+ * missing. Only the reviewer: its launch takes a model from the review plan (another family, often another tool), so its
+ * crash says that route is wrong, not that the studio's tools are broken. A code-writing role (builder, rnd, ...) that
+ * crashes at launch still counts toward the halt (PU-19).
+ */
+export const LAUNCH_BACKOFF_ROLES = ['reviewer'];
+export function roleLaunchFailure(e) {
+  const role = String(e?.meta?.role || 'builder');
+  if (!LAUNCH_BACKOFF_ROLES.includes(role)) return false;
+  const code = Number(e?.meta?.code);
+  if (!code || TOOL_MISSING.has(code)) return false;
+  const ran = Number(e?.meta?.exitCause?.ranSec);
+  return Number.isFinite(ran) && ran < SAME_DEATH_MIN_RUN_SEC;
+}
+/**
+ * 2.84 (w): fold launch crashes of non-builder roles into state.roleBackoff[role] = { count, until, last, said }: the role's
+ * next start waits 2, 4, 8 ... minutes (startBackoffMs, capped at STUDIO_START_BACKOFF_MAX_MIN); a session of that role that
+ * ran past a minute (or ended cleanly) clears it. One supervisor.role_backoff event per new failure.
+ */
+export function noteRoleLaunchFailures(state, ends, now = Date.now(), env = process.env) {
+  const bo = (state.roleBackoff ||= {});
+  if (!Array.isArray(state.roleBackoffSeen)) state.roleBackoffSeen = [];
+  const seen = state.roleBackoffSeen;
+  for (const e of [...ends].sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))) {
+    const role = String(e.meta?.role || 'builder');
+    const t = Date.parse(e.ts) || now;
+    const key = e.id || `${e.agent}@${e.ts}`;
+    if (seen.includes(key)) continue;
+    seen.push(key);
+    if (seen.length > 200) seen.splice(0, seen.length - 200);
+    const cur = bo[role];
+    if (roleLaunchFailure(e)) {
+      const count = (cur?.count || 0) + 1;
+      bo[role] = { count, lastAt: t, until: t + Math.max(60000, startBackoffMs(count, env)), agent: e.agent, code: e.meta?.code ?? null, said: false };
+      emitEvent({ type: 'supervisor.role_backoff', agent: 'supervisor', to: 'producer', status: 'warn', msg: `${e.agent} (${role}) ended at launch with exit ${e.meta?.code} (${count} in a row): ${role} sessions wait ${Math.round((bo[role].until - now) / 60000)} min; the supervisor goes on with the other roles (npm run agent -- logs ${e.agent})`, meta: { role, agent: e.agent, code: e.meta?.code ?? null, count, until: new Date(bo[role].until).toISOString() } });
+    } else if (cur && String(e.meta?.role || 'builder') === role) delete bo[role];
+  }
+  return bo;
+}
+/** The live back-off of a role, or null. */
+export const roleBackedOff = (state, role, now = Date.now()) => { const b = state.roleBackoff?.[role]; return b && now < b.until ? b : null; };
 
 /** 2.73.1 (B-66): ends the launcher caused itself (exitCause kinds), never a sign the tool is broken. */
 const LAUNCHER_KILLS = new Set(['stall', 'idle', 'budget', 'stopped']);
@@ -622,6 +670,8 @@ export async function supervise(opts, state, now = Date.now()) {
       why.push(`${g.role}: paused by the crew watchdog (${String(crewPaused[g.role].why || '').slice(0, 120)}; npm run crew -- resume ${g.role} --by <name>)`);
       continue;
     }
+    // 2.84 (w): a role whose sessions crashed at launch waits out its back-off; the other roles go on.
+    { const rb = roleBackedOff(state, g.role, now); if (rb) { why.push(`${g.role}: backed off after ${rb.count} launch crash${rb.count === 1 ? '' : 'es'} (last ${rb.agent}, exit ${rb.code}) until ${new Date(rb.until).toISOString().slice(11, 16)} UTC`); continue; } }
     if (!canStart.has(g.role)) {
       why.push(`${g.role}: no tool set to start it (STUDIO_AGENT_TOOL or STUDIO_${g.role.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_TOOL)`);
       continue;
@@ -724,7 +774,8 @@ export async function supervise(opts, state, now = Date.now()) {
       why.push(`${taskId} is being started by ${launch.lock?.owner || 'another pass'}`);
       continue;
     }
-    const r = startAgent({ role: g.role, agent, tool: vx ? 'vertex' : lr.tool || tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra, ...(vx ? { model: vx.model } : lr.model ? { model: lr.model } : {}) }, { detach: true });
+    // 2.84 (w): toolDefault: this tool is the supervisor's default, not a decision; a reviewer plan's model picks its own tool.
+    const r = startAgent({ role: g.role, agent, tool: vx ? 'vertex' : lr.tool || tool, toolDefault: !vx && !lr.tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra, ...(vx ? { model: vx.model } : lr.model ? { model: lr.model } : {}) }, { detach: true });
     if (r.ok && vx) emitEvent({ type: 'model.routed', agent: 'supervisor', task: taskId, msg: `${taskId}: starts on ${vx.model} (vertex): ${vx.why}`.slice(0, 400), meta: { task: taskId, arm: 'vertex', tier: vx.size, model: vx.model, tool: 'vertex' } });
     else if (r.ok && lr.model) emitEvent({ type: 'model.routed', agent: 'line-producer', task: taskId, msg: `${taskId}: starts on ${lr.model}${lr.tool ? ` (${lr.tool})` : ''} (${lr.tier} ${lr.tool ? 'task' : 'tier'}, the Line Producer): ${lr.why}`.slice(0, 400), meta: { task: taskId, arm: 'line-producer', tier: lr.tier, model: lr.model, ...(lr.tool ? { tool: lr.tool } : {}), failed: lr.failed || 0 } });
     if (r.ok) {

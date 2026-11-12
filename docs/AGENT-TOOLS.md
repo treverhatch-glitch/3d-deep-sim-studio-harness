@@ -234,6 +234,14 @@ aiplatform.googleapis.com, location global, only) and `VERTEX_PROJECT_ID=<the pr
 - **Router** (`harness/route.mjs`): providers `vertex-ai-pro` and `vertex-ai-flash` (`GEMINI_PRO_MODEL`, `GEMINI_FLASH_MODEL`) come first
   in every chain; `npm run models:check` shows them as "listed: n/a". `STUDIO_VERTEX_BASE_URL` replaces the endpoint (https, or http on
   127.0.0.1 only; read from `.env`).
+- **Which tool runs a model id (2.84 w)**: one function, `toolForModel` in `harness/model-tool.mjs`: a `studio/models.json` pool names
+  its tool; then the studio's settings (`<tool>:<model>` entries, `STUDIO_TOOL_<TOOL>_MODEL`, `STUDIO_VERTEX_MODEL`,
+  `STUDIO_VERTEX_HARD_MODEL`); then the id's shape: `google/...` is vertex, `agy-...` or a bare `gemini-...` is agy, `gpt-...`/`o3...`
+  is codex, `claude-...`/`opus`/`sonnet`/`haiku` is claude. A launch on claude, codex, agy or vertex with a model another of them runs
+  (`--tool claude --model google/gemini-...`) is refused before any process starts, with one line naming the tool it needs.
+- **Vertex cannot review as a session**: aider only suggests commands, so a vertex session cannot run `npm run review -- record`. A
+  reviewer task whose planned model runs on vertex starts no session; the harness asks the model itself (`npm run review -- ask`,
+  docs/REVIEWER.md), sending the key as `x-goog-api-key` exactly as the proxy does and logging usage as session `review-ask`.
 
 ## Spend budgets per tool or key (2.79.1)
 
