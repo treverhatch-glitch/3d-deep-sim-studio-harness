@@ -61,9 +61,8 @@ npm run engine -- link unity ../my-unity-port --build windows --web "<web runs c
 
 ## Render pipeline: URP or HDRP
 
-The template uses neither in particular. Hatchfield uses HDRP at maximum quality (decided 2026-10-31): a Windows game, so
-HDRP's lack of a browser build doesn't matter. Its Unity repo has a one-click set-up (`Assets/Editor/HdrpSetup.cs`, menu
-Hatchfield > Switch to HDRP). Know first: Unity's 2026 plan puts new lighting work into URP (HDRP gets stability fixes only);
+The template uses neither in particular. A Windows-only game can take HDRP (its lack of a browser build doesn't matter
+there); a game that also ships to the browser takes URP. Know first: Unity's 2026 plan puts new lighting work into URP (HDRP gets stability fixes only);
 HDRP's first build compiles thousands of shaders (30-60 minutes on CI); ray tracing needs DirectX 12 and an RTX-class card.
 To switch by hand: install **High Definition RP** (Package Manager, the 17.x line of URP); **Window > Rendering > HDRP Wizard
 > Fix All**; **Edit > Rendering > Materials > Convert All Built-in/URP Materials to HDRP**, then recheck every scene's
@@ -107,7 +106,7 @@ The web game can keep growing while it is ported.
   each lane runs only its own checks. The engine gate and parity are optional, so a web change the port hasn't caught up
   with never fails a web lane.
 - **The port follows a pin.** `npm run engine -- port --from <sha>` pins the web rules the port matches (an adopted game
-  names its rule folders once: `--source game/hatchfield/src/game`). Parity compares the Unity sim with the pin, not the
+  names its rule folders once: `--source game/<name>/src/game`). Parity compares the Unity sim with the pin, not the
   live web rules.
 - **The lag is work, not a failure.** `npm run engine -- drift` lists the web commits since the pin; `--queue` adds one port
   task per commit to the porters' lane, each ending by moving the pin forward. The five-line status shows "Unity port N
