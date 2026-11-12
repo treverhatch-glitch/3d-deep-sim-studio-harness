@@ -200,10 +200,15 @@ export function editorCommand(bin = unityBin()) {
   return /\.(mjs|cjs|js)$/i.test(bin) ? [process.execPath, [bin]] : [bin, []];
 }
 
-/** Kill an editor this harness started (the recorded pid, only while it is still that process), with its tree. */
+/**
+ * Kill an editor this harness started (the recorded pid, only while it is still that process), with its tree.
+ * 2.84: only a CONFIRMED identity is killed (liveAs strict: the OS's start of the pid matches the recorded one). A pid
+ * whose start can't be read (on Windows a PowerShell that failed or timed out) is left alone: the old rule counted it
+ * as ours and killed, with taskkill /T, whatever program had taken over the number.
+ */
 function killOwn(rec) {
   // liveAs: the pid and its recorded start (one OS query on Windows and macOS, where pid numbers are reused).
-  if (!rec?.pid || !editorAlive(rec) || !liveAs(rec.pid, rec.identity)) return false;
+  if (!rec?.pid || !editorAlive(rec) || !liveAs(rec.pid, rec.identity, { strict: true })) return false;
   if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(rec.pid), '/T', '/F'], { windowsHide: true });
   else {
     // Started detached, so it leads its own process group: the group is the editor and its workers.
@@ -270,15 +275,41 @@ export async function startEditor(engine = 'unity', { root = mainRoot(), instanc
 // A stopped instance keeps its project and folder (the next ensure() opens the same project again).
 const STOPPED = { pid: null, identity: null };
 
-/** A `quit` request, then (still alive after graceSec) a kill of the pid THIS harness started. Never another process. */
+/**
+ * A `quit` request, then (still alive after graceSec) a kill of the pid THIS harness started. Never another process.
+ * 2.84: who the recorded pid is, before anything is sent:
+ *  - its start differs from the recorded one, or it is gone: another program now; nothing sent, nothing killed;
+ *  - its start matches (liveAs strict): ours; quit, then the kill;
+ *  - its start can't be read (on Windows a PowerShell that failed or timed out): the editor's own heartbeat decides
+ *    whether the quit is sent (a fresh heartbeat in the recorded folder naming this very pid: the editor says it is
+ *    this process). A quit request only reaches the editor serving that folder. The kill still needs a confirmed
+ *    start, so an unconfirmed pid is never killed; it is reported instead.
+ */
 export async function stopEditor(engine = 'unity', { root = mainRoot(), instance = 'check', env = process.env, log = () => {}, why = 'stopped' } = {}) {
   const s = serviceSettings(root, engine, env);
   const rec = readInstance(root, engine, instance);
   if (!rec?.pid) return { ok: true, running: false, why: 'no editor recorded' };
-  if (!editorAlive(rec) || !liveAs(rec.pid, rec.identity)) { patchInstance(root, engine, instance, STOPPED); return { ok: true, running: false, why: `pid ${rec.pid} is not the editor this harness started (gone or another program now): nothing killed` }; }
+  const notOurs = () => { patchInstance(root, engine, instance, STOPPED); return { ok: true, running: false, why: `pid ${rec.pid} is not the editor this harness started (gone or another program now): nothing killed` }; };
+  if (!editorAlive(rec) || !liveAs(rec.pid, rec.identity)) return notOurs();
+  const note = {};
+  const confirmed = liveAs(rec.pid, rec.identity, { strict: true, note });
+  if (!confirmed) {
+    const hb = readHeartbeat(rec.folder);
+    const fresh = hb && Date.now() - hb.at <= s.staleSec * 1000;
+    // The editor serving this folder is another pid: the record names a program that only has the number now.
+    if (fresh && Number(hb.pid) !== Number(rec.pid)) return notOurs();
+    if (!fresh || Number(hb.pid) !== Number(rec.pid)) {
+      return { ok: false, running: true, unconfirmed: true, pid: rec.pid, why: `pid ${rec.pid} could not be confirmed as the editor this harness started (${note.why || 'start unreadable'}) and its heartbeat does not name it: nothing sent, nothing killed; the record is kept` };
+    }
+  }
   try { writeRequest(rec.folder, 'quit', {}); } catch { /* the kill below */ }
   let killed = false;
   if (!(await waitGone(rec, s.graceSec * 1000))) { killed = killOwn(rec); await waitGone(rec, 5000); }
+  if (editorAlive(rec) && !killed) {
+    const m = `editor pid ${rec.pid} did not quit within ${s.graceSec} s and was not killed: its start could not be confirmed (${note.why || 'start unreadable'}); stop it by hand if it is the editor`;
+    log(`[editor-service] ${engine}/${instance}: ${m}`);
+    return { ok: false, running: true, killed: false, unconfirmed: true, pid: rec.pid, why: m };
+  }
   patchInstance(root, engine, instance, STOPPED);
   log(`[editor-service] ${engine}/${instance}: editor pid ${rec.pid} ${killed ? 'killed after the grace period' : 'quit'} (${why})`);
   return { ok: true, running: true, killed, pid: rec.pid };

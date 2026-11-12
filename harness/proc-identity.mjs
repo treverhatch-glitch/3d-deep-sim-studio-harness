@@ -26,6 +26,7 @@
  *   STUDIO_PROC_IDENTITY_LOG=<file>        every readStarts call appends one JSON line: when, which pids, who asked.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pidAlive as pidExists } from './fsafe.mjs';
@@ -133,19 +134,29 @@ export function pidAlive(pid, recorded, { eperm = true } = {}) {
 // the supervisor's stall check asks on every pass while a task done runs).
 const LIVE_AS_CACHE_MS = 60_000;
 const liveAsStarts = new Map();
-export function liveAs(pid, recorded, { eperm = true, starts = readStarts, now = Date.now() } = {}) {
+//
+// 2.84: `strict` is for a kill. Then only a CONFIRMED same process is true: a record without a start, and a start the OS
+// would not give (PowerShell timed out or failed, access), are false, so an unconfirmed number is never killed (on
+// Windows the old rule killed a process that had only taken over the number, with its whole tree). `note`, when given,
+// gets { why } for an unconfirmed answer, for the caller's message.
+export function liveAs(pid, recorded, { eperm = true, starts = readStarts, now = Date.now(), strict = false, note = null } = {}) {
   if (!pidAlive(pid, recorded, { eperm })) return false;
-  if (!recorded || (!recorded.start && !recorded.proc)) return true;
+  if (!recorded || (!recorded.start && !recorded.proc)) {
+    if (note) note.why = 'no start time on record';
+    return !strict;
+  }
   if (LINUX && recorded.proc && linuxTicks(pid) !== null) return true; // pidAlive compared the /proc start
   const key = Number(pid);
   let cur = null;
   const hit = starts === readStarts ? liveAsStarts.get(key) : null;
   if (hit && now - hit.at < LIVE_AS_CACHE_MS) cur = hit.cur;
   else {
-    try { cur = starts([key]).get(key) || null; } catch { cur = null; }
+    try { cur = starts([key]).get(key) || null; } catch (err) { cur = { error: String(err?.message || err).slice(0, 80) }; }
     if (starts === readStarts && cur) liveAsStarts.set(key, { cur, at: now });
   }
-  return sameProcess(recorded, cur) !== false;
+  const same = sameProcess(recorded, cur);
+  if (same === null && note) note.why = `its start could not be read (${cur?.error || 'not listed'})`;
+  return strict ? same === true : same !== false;
 }
 
 /** Is a launcher session record's process alive (listing check)? Its launcher when it has one, else the agent. */
@@ -214,13 +225,43 @@ export function winStartsFrom(stdout, t0) {
   return out;
 }
 
+/**
+ * 2.84: the environment for powershell.exe. A process started with a cut-down environment (a scheduler's, a test's
+ * `env: { ... }` without process.env) passes PowerShell only what Windows itself adds (PATH, SystemRoot, TEMP, the
+ * user's profile). On the Windows CI runner every PowerShell query from such a process ran into its timeout (8 s, no
+ * answer), while the same query from a process with the full environment answered: every pid's start was then
+ * unreadable. The usual system variables are filled in with Windows' own defaults when missing; nothing set is
+ * changed. Off Windows the environment is returned as it is.
+ */
+export function psEnv(env = process.env, platform = process.platform) {
+  const e = { ...env };
+  if (platform !== 'win32') return e;
+  const get = (k) => { const key = Object.keys(e).find((x) => x.toLowerCase() === k.toLowerCase()); return key ? e[key] : ''; };
+  const sysRoot = get('SystemRoot') || get('windir') || 'C:\\Windows';
+  const drive = get('SystemDrive') || sysRoot.slice(0, 2);
+  const prof = get('USERPROFILE');
+  const pf = `${drive}\\Program Files`;
+  const arch = { x64: 'AMD64', arm64: 'ARM64', ia32: 'x86' }[process.arch] || 'AMD64';
+  const want = {
+    SystemRoot: sysRoot, windir: sysRoot, SystemDrive: drive, OS: 'Windows_NT', ComSpec: `${sysRoot}\\System32\\cmd.exe`, PATHEXT: '.COM;.EXE;.BAT;.CMD;.VBS;.JS;.WSF;.MSC',
+    ProgramFiles: pf, ProgramW6432: pf, 'ProgramFiles(x86)': `${drive}\\Program Files (x86)`, CommonProgramFiles: `${pf}\\Common Files`, CommonProgramW6432: `${pf}\\Common Files`,
+    ProgramData: `${drive}\\ProgramData`, ALLUSERSPROFILE: `${drive}\\ProgramData`, PUBLIC: `${drive}\\Users\\Public`,
+    PSModulePath: `${pf}\\WindowsPowerShell\\Modules;${sysRoot}\\System32\\WindowsPowerShell\\v1.0\\Modules`,
+    COMPUTERNAME: os.hostname().toUpperCase(), NUMBER_OF_PROCESSORS: String(Math.max(1, os.cpus().length)), PROCESSOR_ARCHITECTURE: arch,
+    ...(get('TEMP') ? { TMP: get('TEMP') } : {}),
+    ...(prof ? { APPDATA: `${prof}\\AppData\\Roaming`, LOCALAPPDATA: `${prof}\\AppData\\Local` } : {}),
+  };
+  for (const [k, v] of Object.entries(want)) if (!get(k)) e[k] = v;
+  return e;
+}
+
 function winStarts(pids) {
   // No double quotes anywhere in the script: Node escapes them on the command line in a way powershell.exe 5.1 reads
   // differently. The creation time goes out as milliseconds since 1970, so no date text is parsed.
   const filter = pids.map((p) => `ProcessId=${Number(p)}`).join(' OR ');
   const script = `'self|' + $PID; Get-CimInstance Win32_Process -Filter ('${filter} OR ProcessId=' + $PID) | ForEach-Object { if ($_.CreationDate) { '{0}|{1}|{2}' -f $_.ProcessId, ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds(), $_.Name } else { '{0}||{1}' -f $_.ProcessId, $_.Name } }`;
   const t0 = Date.now();
-  const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: READ_TIMEOUT_MS, windowsHide: true });
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { env: psEnv(), encoding: 'utf8', timeout: READ_TIMEOUT_MS, windowsHide: true });
   if (r.error || r.status !== 0) throw new Error(r.error?.code || `powershell exit ${r.status}`);
   const out = winStartsFrom(r.stdout, t0);
   const self = Number((String(r.stdout).match(/^self\|(\d+)/m) || [])[1]);
@@ -372,7 +413,7 @@ export function listProcesses() {
   if (process.platform === 'win32') {
     const script = `'self|' + $PID; Get-CimInstance Win32_Process | ForEach-Object { $ms = ''; if ($_.CreationDate) { $ms = ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() }; '{0}|{1}|{2}|{3}' -f $_.ProcessId, $_.ParentProcessId, $ms, $_.Name }`;
     const t0 = Date.now();
-    const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: READ_TIMEOUT_MS * 2, windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+    const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { env: psEnv(), encoding: 'utf8', timeout: READ_TIMEOUT_MS * 2, windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
     if (r.error || r.status !== 0) throw new Error(r.error?.code || `powershell exit ${r.status}`);
     return winProcsFrom(r.stdout, t0);
   }
@@ -404,7 +445,7 @@ export function processArgs(pids, { procs = null } = {}) {
     if (process.platform === 'win32') {
       const filter = want.map((p) => `ProcessId=${p}`).join(' or ');
       const script = `Get-CimInstance Win32_Process -Filter '${filter}' | ForEach-Object { '{0}|{1}' -f $_.ProcessId, $_.CommandLine }`;
-      const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: READ_TIMEOUT_MS * 2, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+      const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { env: psEnv(), encoding: 'utf8', timeout: READ_TIMEOUT_MS * 2, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
       for (const line of String(r.stdout || '').split(/\r?\n/)) { const m = line.match(/^(\d+)\|(.*)$/); if (m && m[2].trim()) out[Number(m[1])] = m[2].trim(); }
       return out;
     }
