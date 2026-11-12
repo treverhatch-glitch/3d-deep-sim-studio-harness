@@ -872,10 +872,11 @@ export function implicitHolders(root, { env = process.env, procs = null, listPro
   return found.filter((p) => !(ignore && typeof args[Number(p.pid)] === 'string' && ignore.test(args[Number(p.pid)]))).map((p) => ({ pid: Number(p.pid), cmd: p.cmd, start: p.start || null }));
 }
 
-/** STUDIO_HEAVY_IGNORE_ARGS: a heavy program whose command line matches this (case-insensitive) is a background service, not counted; default `(^|\s)-?-?serve(\s|$)` (also when empty); off: none. A bad regex counts as the default. */
+/** STUDIO_HEAVY_IGNORE_ARGS: a heavy program whose command line matches this (case-insensitive) is a background service, not counted; default `(^|\s)(-?-?serve|-studioService)(\s|$)` (also when empty); off: none. A bad regex counts as the default. */
 export function heavyIgnoreArgs(env = process.env) {
   const v = env.STUDIO_HEAVY_IGNORE_ARGS;
-  const def = '(^|\\s)-?-?serve(\\s|$)';
+  // 2.84: the harness's own editor (harness/editor-service.mjs, started with -studioService) is a background service too.
+  const def = '(^|\\s)(-?-?serve|-studioService)(\\s|$)';
   if (v !== undefined && off(String(v))) return null;
   try { return new RegExp(v === undefined || String(v).trim() === '' ? def : String(v), 'i'); } catch { return new RegExp(def, 'i'); }
 }

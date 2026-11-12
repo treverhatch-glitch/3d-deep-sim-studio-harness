@@ -457,14 +457,14 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## HEAVY_* (19)
 
 - `STUDIO_HEAVY_HELD` · default `'1'` · harness/asset-gate.mjs, harness/flake-quiet.mjs, harness/heavy.mjs (+24 more) · undocumented
-- `STUDIO_HEAVY_IGNORE_ARGS` · no simple default · harness/heavy.mjs, qa/selftest-2653a.mjs · [NATIVE-ENGINE.md:335](NATIVE-ENGINE.md)
+- `STUDIO_HEAVY_IGNORE_ARGS` · no simple default · harness/heavy.mjs, qa/selftest-2653a.mjs, qa/selftest-284s.mjs · [NATIVE-ENGINE.md:335](NATIVE-ENGINE.md)
 - `STUDIO_HEAVY_MAX_*` · no simple default · harness/heavy-budget.mjs · [WORK-ORGANIZATION.md:329](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_MAX_BLENDER` · no simple default · harness/blender-job.mjs, qa/selftest-270t.mjs · [WORK-ORGANIZATION.md:330](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_MAX_UNITY` · no simple default · qa/selftest-268n.mjs, qa/selftest-2781f.mjs, qa/selftest-279e.mjs · [WORK-ORGANIZATION.md:329](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_OOM_RETRY` · no simple default · harness/asset-gate.mjs, harness/game-gates.mjs, harness/heavy.mjs (+3 more) · [WORK-ORGANIZATION.md:339](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_OWN_GROUP` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-260d.mjs (+2 more) · undocumented
 - `STUDIO_HEAVY_POLL_MS` · no simple default · harness/heavy.mjs, qa/selftest-259d.mjs, qa/selftest-2601m.mjs (+25 more) · undocumented
-- `STUDIO_HEAVY_PROGRAMS` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-2651a.mjs (+32 more) · [NATIVE-ENGINE.md:335](NATIVE-ENGINE.md)
+- `STUDIO_HEAVY_PROGRAMS` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-2651a.mjs (+32 more) · [UNITY-TRACK.md:207](UNITY-TRACK.md)
 - `STUDIO_HEAVY_RAM_FLOOR_GB` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-2671k.mjs (+9 more) · undocumented
 - `STUDIO_HEAVY_RAM_WAIT_MIN` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-268n.mjs (+1 more) · [WORK-ORGANIZATION.md:325](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_REAP` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-260d.mjs (+4 more) · [WORK-ORGANIZATION.md:310](WORK-ORGANIZATION.md)
@@ -1094,7 +1094,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_FOCUS_INFER` · no simple default · harness/game-gates.mjs, harness/train-focus.mjs, qa/selftest-2782f.mjs · [ONBOARDING-A-GAME.md:60](ONBOARDING-A-GAME.md)
 - `STUDIO_FSYNC` · no simple default · harness/fsafe.mjs · undocumented
 - `STUDIO_FUN_WAVES` · no simple default · harness/waves.mjs, qa/selftest.mjs · [AWAY-AND-ALERTS.md:26](AWAY-AND-ALERTS.md)
-- `STUDIO_GATES_BY_TRACK` · no simple default · harness/gate-tracks.mjs, scripts/run-gates.mjs, qa/selftest-284x.mjs · [WORK-ORGANIZATION.md:95](WORK-ORGANIZATION.md)
+- `STUDIO_GATES_BY_TRACK` · no simple default · harness/gate-tracks.mjs, scripts/run-gates.mjs, qa/selftest-284x.mjs · [RELEASE-2.84.0.md:60](RELEASE-2.84.0.md)
 - `STUDIO_GH` · no simple default · harness/ci-watch.mjs, qa/selftest-230h.mjs, qa/selftest-264l.mjs · undocumented
 - `STUDIO_GOLDEN_DIVERGENCE` · no simple default · harness/divergence.mjs, qa/check-golden.mjs, qa/selftest-272a.mjs (+1 more) · [HASH.md:95](HASH.md)
 - `STUDIO_GRANDFATHER_MERGES` · no simple default · harness/hook-stamp.mjs, qa/selftest-2781c.mjs · [SECURITY.md:112](SECURITY.md)

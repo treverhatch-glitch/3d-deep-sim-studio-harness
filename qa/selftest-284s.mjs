@@ -307,4 +307,13 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: 
     try { fs.rmSync(T, { recursive: true, force: true, maxRetries: 4, retryDelay: 200 }); } catch { /* the run's tmp sweep */ }
     try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 4, retryDelay: 200 }); } catch { /* the run's tmp sweep */ }
   }
+  // The harness's own editor is not a heavy program that blocks a land run.
+  {
+    const { heavyIgnoreArgs } = await import(pathToFileURL(path.join(dir, 'harness', 'heavy.mjs')).href);
+    const re = heavyIgnoreArgs({});
+    await guard('2.84 (s) heavy programs: with STUDIO_HEAVY_IGNORE_ARGS unset, an editor started with -studioService is a background service (not counted against a land run), as an editor started with serve is; an editor running tests still counts (fails before this fix: the service editor was counted, so a land run was refused while it was open)', () => [
+      re.test('Unity.exe -batchmode -projectPath C:/p -studioService C:/p/Temp/StudioService -logFile x') && re.test('Unity.exe -batchmode serve') && !re.test('Unity.exe -batchmode -runTests -projectPath C:/p'),
+      String(re)]);
+  }
+
 }

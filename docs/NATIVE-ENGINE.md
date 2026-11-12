@@ -331,8 +331,8 @@ compiled. Everything is off by default, and any failure falls back to today's co
   script may then run `node harness/editor-service.mjs request test --engine <x> --instance land --mode EditMode --results <file>`
   instead of starting Unity (exit 3: no healthy editor, start Unity as before). Not healthy after one restart: the
   variables are not set and `engine.warm.fallback` says why. The land script still owns the land; see
-  `docs/examples/land-warm.md`. An editor of the service counts as a heavy program outside the lock
-  (`STUDIO_HEAVY_PROGRAMS`): add `|-studioService` to `STUDIO_HEAVY_IGNORE_ARGS` so the land run is not refused for it.
+  `docs/examples/land-warm.md`. An editor of the service is not counted as a heavy program outside the lock:
+  the default of `STUDIO_HEAVY_IGNORE_ARGS` matches `-studioService` (a studio that set its own value adds `|-studioService`).
 - **The agents' queue** (`engines.<x>.service.check: true`): `npm run editor -- check [--lane <agent>] [--branch b]
   [--capture <scene>[:<camera>]] [--wait]` from any session queues a compile (and a capture) of that lane's branch,
   one waiting request per lane. The supervisor's pass runs the oldest in the `check` instance's own checkout
