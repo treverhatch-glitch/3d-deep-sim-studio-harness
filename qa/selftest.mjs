@@ -5108,6 +5108,13 @@ if (inShard('selftest-283j')) {
   await selftest283J({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
+// 2.84 (x): gates run for the engine a task is on (harness/gate-tracks.mjs).
+if (inShard('selftest-284x')) {
+  const dir = copyRepo();
+  const { selftest284X } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284x.mjs')).href);
+  await selftest284X({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
 // 2.84 (m): the engine target merge a session can run, phantom files a filter rule makes look changed, rules.focus.ignore.
 if (inShard('selftest-284m')) {
   const dir = copyRepo();

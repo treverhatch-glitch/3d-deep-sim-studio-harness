@@ -73,6 +73,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, readRecentEvents } from './event.mjs';
+import * as engineTracks from './engine-tracks.mjs';
+import { tracksOfTasks, decideTracks, missingTracks } from './gate-tracks.mjs';
 import { mainRoot, mainBranch, linkDir, nodeModuleDirs, ignoreLanes, landFastForward, forgetLanded, rememberTaskBranch, LANES_DIR } from './worktree.mjs';
 import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot, selectGates, ALWAYS_SHARED } from './merge-lane.mjs';
 import { studioCheckReaders } from './check-reads.mjs';
@@ -565,8 +567,15 @@ export function ignoredOnlyDirty(rec) {
  * judgeVerifyReuse: same tree, clean, at least as wide, engine gate, not related-only, at most 24 h old), and every
  * required row green (task done reruns the safety checks itself; a train has only this verify).
  */
-export function recordCovers(rec, { root, tree, changed, all = false, whole = null }) {
+export function recordCovers(rec, { root, tree, changed, all = false, whole = null, tasks = null }) {
   if (!recordGreen(rec)) return { ok: false, why: 'not a green full verify' };
+  // 2.84 (x): a verify run by track (harness/gate-tracks.mjs) stands for this batch only when it covered every track the
+  // batch needs: the tracks of its changed files and of each of its tasks (the union, never less).
+  if (rec.tracks?.mode === 'by-track' && Array.isArray(rec.tracks.covered)) {
+    const need = trainTracks(root, { changed, tasks }); // the tracks; --all's whole game is judged below (wholeEquiv), as before
+    const miss = missingTracks(rec.tracks.covered, need.covered === '*' ? ['*'] : need.covered);
+    if (miss.length) return { ok: false, why: `it ran the gates for ${rec.tracks.covered.join(', ')} only, and this batch also needs ${miss.map((t) => (t === '*' ? `every gate (${need.why})` : t)).join(', ')}` };
+  }
   // 2.69.0 (p): a lane's verify is scoped to its files; a tier-B train verifies with --all. The scoped record is as wide
   // when every game check ran for those files anyway (wholeEquiv: no check skipped by its paths).
   if (all && rec.scoped) {
@@ -578,6 +587,15 @@ export function recordCovers(rec, { root, tree, changed, all = false, whole = nu
   const recTree = rec.head && /^[0-9a-f]{40,64}$/.test(String(rec.head)) ? out(git(root, 'rev-parse', '--verify', '--quiet', `${rec.head}^{tree}`)) : '';
   const hadPaths = Array.isArray(rec.gatePaths) ? rec.gatePaths : rec.scoped ? rec.changed || [] : [];
   return judgeVerifyReuse(rec, { tree, recTree: recTree || null, clean: true, changed: changed?.length ? changed : null, needEngine: engineGates(changed || []).map((e) => e.project), hadEngine: engineGates(hadPaths).map((e) => e.project), relatedNow: relatedTestsOn(), maxAgeH: Number(process.env.STUDIO_DONE_REUSE_MAX_H || 24) });
+}
+
+/** 2.84 (x): the tracks a train's verify of this batch must cover: decideTracks over its changed files and its tasks' tracks. */
+export function trainTracks(root, { changed = [], tasks = [], all = false } = {}) {
+  let engines = null;
+  try { engines = engineTracks.configuredEngines({ root }); } catch {}
+  let tt = [];
+  try { tt = tracksOfTasks(tasks || [], engineTracks, root); } catch { tt = []; }
+  return decideTracks({ paths: changed?.length ? changed : null, tasks: tt, all, root, engines });
 }
 
 /**
@@ -669,7 +687,7 @@ export function greenFirst(root, tip, lanes, { id = '', log = () => {}, whole = 
     const tree = m.status === 0 ? out(m).split('\n')[0].trim() : '';
     if (!/^[0-9a-f]{40,64}$/.test(tree)) return l;
     const changed = out(git(root, 'diff', '--name-only', tip, tree)).split('\n').filter(Boolean);
-    const hit = recordedVerifies(root, { tree, lanes: [l] }).find((rec) => rec.tree === tree && recordCovers(rec, { root, tree, changed, all: Boolean(l.all), whole }).ok && recordTrusted(rec, root).ok);
+    const hit = recordedVerifies(root, { tree, lanes: [l] }).find((rec) => rec.tree === tree && recordCovers(rec, { root, tree, changed, all: Boolean(l.all), whole, tasks: [l.task] }).ok && recordTrusted(rec, root).ok);
     return hit ? { ...l, greenTree: tree } : l;
   });
   const first = marked.filter((l) => l.greenTree);
@@ -742,7 +760,7 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   let notReused = '';
   for (const rec of recordedVerifies(root, { tree, lanes })) {
     if (rec.tree !== tree) continue;
-    const c0 = recordCovers(rec, { root, tree, changed, all, whole });
+    const c0 = recordCovers(rec, { root, tree, changed, all, whole, tasks });
     const c = c0.ok ? recordTrusted(rec, root) : c0; // 2.71.1 (D01/T04): only a record run-gates wrote (its run log matches)
     if (!c.ok) notReused ||= c.why;
     if (c.ok) c.why = c0.why;
@@ -789,6 +807,9 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off' };
   for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[k];
   const t0 = Date.now();
+  // 2.84 (x): the batch's tasks, so the verify covers the union of their tracks and of the files they change.
+  delete env.STUDIO_JOB_TASK;
+  if (tasks.length) env.STUDIO_VERIFY_TASKS = tasks.join(','); else delete env.STUDIO_VERIFY_TASKS;
   log(`[train] ${id}: verify ${n} of tree ${tree.slice(0, 8)} (${changed.length} changed file(s)${all ? ', --all' : ''})`);
   // 2.67.2 (B-50): a run refused before any gate ran (busy) waits and runs again, bounded; it is never read as red.
   const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', ...(all ? ['--all'] : [])], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `verify ${n}` });
@@ -839,7 +860,7 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
  * recorded green verify) is not sent out again. deps.remoteClient: a test's fake client.
  */
 async function verifyRemoteFirst(sc, o, { head, by, deps = {}, res }) {
-  if (remoteMode() === 'off' || o.seen.has(o.tree) || recordedVerifies(sc.root).some((rec) => rec.tree === o.tree && recordCovers(rec, { root: sc.root, tree: o.tree, changed: o.changed, all: o.all }).ok && recordTrusted(rec, sc.root).ok)) return verifyTree(sc, o);
+  if (remoteMode() === 'off' || o.seen.has(o.tree) || recordedVerifies(sc.root).some((rec) => rec.tree === o.tree && recordCovers(rec, { root: sc.root, tree: o.tree, changed: o.changed, all: o.all, tasks: o.tasks || [] }).ok && recordTrusted(rec, sc.root).ok)) return verifyTree(sc, o);
   const root = sc.root;
   const games = gameGateIds(root);
   let gates = [];

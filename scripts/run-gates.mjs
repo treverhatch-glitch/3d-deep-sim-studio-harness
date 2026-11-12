@@ -120,6 +120,7 @@ const FULL_FILE = path.join(VERIFY_DIR, CHECKOUT.file);
   if (wait) process.exit(await flushed(await waitForVerify()));
   if (detach) process.exit(await flushed(await detachVerify(argv.filter((a) => !['--wait', '--detach', '--no-detach'].includes(a)))));
 }
+const onlyGiven = argv.includes('--only');
 let only = argv.includes('--only') ? new Set(argv[argv.indexOf('--only') + 1].split(',')) : null;
 // 2.72.0 (d): --except id,id leaves those gates out (CI runs the self-test in parallel shards of its own jobs:
 // `node scripts/run-gates.mjs --required-only --deep --except selftest` beside `node qa/selftest.mjs --shard i/N`).
@@ -218,6 +219,35 @@ if (changedFiles?.length) {
   process.env.STUDIO_GATE_CHANGED = changedFiles.join(',');
   if (!process.env.STUDIO_GATE_PATHS) process.env.STUDIO_GATE_PATHS = changedFiles.join(',');
   console.log(`[gates] scoped to the ${changedFiles.length} file(s) this lane changed${changedBase ? ` since ${changedBase.slice(0, 8)}` : ''}; game checks outside them are skipped (--all runs everything)`);
+}
+// 2.84 (x): gates run for the engine a task is on (harness/gate-tracks.mjs). The run covers the tracks of the lane's
+// changed paths plus the track of each task it is for (STUDIO_VERIFY_TASKS, which the merge train sets to its batch; else
+// STUDIO_JOB_TASK; else the one task this owner holds): a gate on another track is not run, and named. No task track and
+// no diff, a path outside every track, --all, an --only run or STUDIO_GATES_BY_TRACK=off: every gate runs, as before.
+let trackRun = null;
+{
+  const gt = await import('../harness/gate-tracks.mjs');
+  let taskIds = String(process.env.STUDIO_VERIFY_TASKS || process.env.STUDIO_JOB_TASK || '').split(',').map((x) => x.trim()).filter(Boolean);
+  if (!taskIds.length && !onlyGiven) { try { const t = await (await import('../harness/error-memory.mjs')).taskOfOwner(process.env.STUDIO_LOCK_OWNER); if (t) taskIds = [t]; } catch {} }
+  let tasks = [];
+  try { tasks = await gt.taskTracks(taskIds); } catch { tasks = []; }
+  let engines = null;
+  try { engines = (await import('../harness/engine-tracks.mjs')).configuredEngines({ root }); } catch {}
+  const d = gt.decideTracks({ paths: changedFiles, tasks, all: argv.includes('--all') || onlyGiven, root, engines });
+  if (onlyGiven && d.mode === 'all') d.why = '--only names its gates: every gate';
+  let split = gt.splitByTrack(gates, d, { root });
+  // A change none of whose tracks has a gate here (a docs-only lane in a studio with no docs gate) would check nothing:
+  // every gate runs instead, as before.
+  if (gates.length && !split.run.length) { Object.assign(d, { mode: 'all', covered: '*', why: `no gate here is on ${d.covered.join(', ')}: every gate` }); split = gt.splitByTrack(gates, d, { root }); }
+  if (split.notRun.length) {
+    const drop = new Set(split.notRun.map((n) => n.id));
+    for (let i = gates.length - 1; i >= 0; i--) if (drop.has(gates[i].id)) gates.splice(i, 1);
+    for (const n of split.notRun) skipped.push(`${n.id} (${n.tracks.join('+')} track; not for this change)`);
+  }
+  trackRun = { mode: d.mode, covered: d.covered === '*' ? ['*'] : d.covered, why: d.why, tasks: d.tasks, notRun: split.notRun };
+  if (!onlyGiven) console.log(`[gates] ${gt.modeLine(d)}`);
+  const nl = gt.notRunLine(split.notRun, d);
+  if (nl) console.log(`[gates] ${nl}`);
 }
 // 2.59.0: the owner's task reclassifications in force (harness/reclassify.mjs), shown like approvals, and any on file
 // that doesn't count (unsigned with an owner key, set by an agent's commit, not committed).
@@ -331,7 +361,9 @@ for (const gate of gates) {
   const outName = `.studio/gates/out/${String(gate.id).replace(/[^\w.-]/g, '_')}.log`;
   const fence = createFence({ show: compact ? null : (t) => process.stdout.write(t), logName: outName, pick: /^\[game-gates\] WARN game:/ });
   const outTmp = path.join(root, `${outName}.${process.pid}.tmp`);
-  const res = await runGateCommand(gate.command, { cwd: root, compact, lk: heavyLock, outFile: outTmp, onData: (d) => fence.push(d) });
+  // 2.84 (x): the game gate is told which tracks this run covers (STUDIO_GATE_TRACKS), so its own checks follow the same rule.
+  const gateEnvFor = gate.id === 'game' && trackRun?.mode === 'by-track' ? { ...process.env, STUDIO_GATE_TRACKS: trackRun.covered.join(',') } : (() => { const e = { ...process.env }; delete e.STUDIO_GATE_TRACKS; return e; })();
+  const res = await runGateCommand(gate.command, { cwd: root, compact, lk: heavyLock, outFile: outTmp, onData: (d) => fence.push(d), env: gateEnvFor });
   try { fs.renameSync(outTmp, path.join(root, outName)); } catch { try { fs.rmSync(outTmp, { force: true }); } catch {} }
   const fenced = fence.end();
   if (compact) {
@@ -398,7 +430,7 @@ try {
   // 2.71.1 (D01/T04): every record carries a run id, and a full run also writes its run log (.studio/gates/runs/<id>.json,
   // the record's digest): reuse needs the two to match (harness/gate-trust.mjs recordTrust).
   const runId = /^[\w.-]{6,80}$/.test(process.env.STUDIO_VERIFY_RUN || '') ? process.env.STUDIO_VERIFY_RUN : trust.newRunId();
-  const rec = JSON.stringify({ runId, at: new Date().toISOString(), head: headNow, tree: treeAtStart, dirty: dirtyNow, gatePaths: gatePathsAtStart, ...(relatedAtStart ? { related: true } : {}), ...(process.env.STUDIO_GATE_INCOMING_FILE ? { incomingOnly: true } : {}), partial: Boolean(only) || isFastTier, ...(focusRun ? { focus: true } : {}), scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}), ...(hiddenAtStart?.length ? { hidden: hiddenAtStart } : {}), ...(dirtyFrom ? { dirtyFrom } : {}), ...(process.env.STUDIO_VERIFY_PRELOADED ? { nodeOptionsPreload: process.env.STUDIO_VERIFY_PRELOADED.split(' ') } : {}) }, null, 2);
+  const rec = JSON.stringify({ runId, at: new Date().toISOString(), head: headNow, tree: treeAtStart, dirty: dirtyNow, gatePaths: gatePathsAtStart, ...(relatedAtStart ? { related: true } : {}), ...(process.env.STUDIO_GATE_INCOMING_FILE ? { incomingOnly: true } : {}), partial: Boolean(only) || isFastTier, ...(focusRun ? { focus: true } : {}), scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(trackRun ? { tracks: trackRun } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}), ...(hiddenAtStart?.length ? { hidden: hiddenAtStart } : {}), ...(dirtyFrom ? { dirtyFrom } : {}), ...(process.env.STUDIO_VERIFY_PRELOADED ? { nodeOptionsPreload: process.env.STUDIO_VERIFY_PRELOADED.split(' ') } : {}) }, null, 2);
   // 2.73.0 (g): the run log is signed with the studio's verify key (outside every checkout); unsigned, it is never reused.
   const runLog = !only && !isFastTier ? trust.writeRunLog(path.join(root, '.studio'), JSON.parse(rec), { root: CHECKOUT.real, owner: process.env.STUDIO_LOCK_OWNER || null }) : null;
   if (runLog && !runLog.signed) console.log(`[gates] note: this verify's record is not signed (${runLog.why}), so task done and the train won't reuse it`);
