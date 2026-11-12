@@ -16,7 +16,7 @@ export const TASK_USAGE = {
   trunk: `${T} trunk   whether main is green`,
   type: `${T} type <TASK_ID> [<change|chore|bug|docs|…|auto> --by <owner> --why "<reason>" [--permission "<the owner's words or a link>"]] [--no-commit]`,
   visual: `${T} visual <TASK_ID> [off|on|auto --by <owner> --why "<reason>" [--permission "<the owner's words or a link>"]] [--no-commit]`,
-  start: `${T} start <TASK_ID> --agent <unique-name> [--model m]`,
+  start: `${T} start <TASK_ID> --agent <unique-name> [--model m] [--dry-run]   (--dry-run: the checks and what would happen, nothing changed)`,
   pause: `${T} pause <TASK_ID> --agent <owner> --note "where you stopped and what is left"`,
   reopen: `${T} reopen <TASK_ID> --reason "what was wrong" (the task must be done)`,
   done: `${T} done <TASK_ID> --agent <owner> [--check] [--train [--branch <Unity branch>]] [--note "..."] [--force --reason "<10+ chars>"]`,

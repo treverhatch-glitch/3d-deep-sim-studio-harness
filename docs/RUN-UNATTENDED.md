@@ -59,7 +59,7 @@ follows the file; a line removed from `.env` gives that setting its default back
 `STUDIO_ROLE`, `STUDIO_AGENT`, `STUDIO_MAIN_ROOT`) are never taken from `.env`. Read once at start, so a restart is still
 needed: `STUDIO_SUPERVISOR_SEC`, `STUDIO_HEARTBEAT_SEC`.
 `studio:reload-env` (2.79) also lists the `STUDIO_*` names the `.env` sets (names only, never values) and marks any the
-harness no longer reads (not in `docs/SETTINGS.md`) as "unknown (removed or misspelled)".
+harness no longer reads (not in `docs/SETTINGS.md`) as "unknown (removed or misspelled)". 2.84: it then names each of them again after the list, with the closest current name the settings map has (a misspelling or a rename), or says none is close.
 
 2.77.1 (B-102): a pass never stops the loop. The loop is set before the first pass, passes never overlap, and each step of
 a pass (the Line Producer, the launch step, the Director's flow, the machine scan, the Communicator, the
@@ -148,8 +148,10 @@ Scheduler (Windows); `--uninstall` removes it.
   into an alert) and the supervisor starts no builder on it until `npm run task -- unpark <ID> --by <name>` (the orchestrator
   or the owner).
 - **The stall watchdog (harness/stall.mjs).** A session with no file write, commit or task change for
-  `STUDIO_STALL_MIN` (15) minutes, or past its wall-clock cap (`STUDIO_SESSION_MAX_MIN`, 90; planning roles
-  `STUDIO_SESSION_PLAN_MAX_MIN`, 25), is ended and its task handed back (`session.stall`). 2.77.3 (B-109): the
+  `STUDIO_STALL_MIN` (15) minutes (planning roles: `STUDIO_STALL_PLAN_MIN`; 2.84: unset, that is 8 minutes, or 20 for a
+  top-tier model, which thinks long before its first write, or the model's own `stallMin` in `studio/models.json`; a set
+  `STUDIO_STALL_PLAN_MIN` always wins, and the `session.stall` event says which limit applied and why), or past its
+  wall-clock cap (`STUDIO_SESSION_MAX_MIN`, 90; planning roles `STUDIO_SESSION_PLAN_MAX_MIN`, 25), is ended and its task handed back (`session.stall`). 2.77.3 (B-109): the
   read-burn ratio (`STUDIO_STALL_RATIO`, 120:1 over `STUDIO_STALL_RATIO_WINDOW_TOKENS`; 0 = off) counts uncached input
   plus cache creation only (a cache read is the same context re-read each turn, not new work), and gives no read-burn
   verdict in the first `STUDIO_STALL_GRACE_MIN` (15) minutes of a session. 2.76.0 (B-83, the crew's
@@ -308,7 +310,9 @@ Each supervisor pass (code only, no model) also does three things:
   `STUDIO_CREW_BREAKER_RESUME_MIN` (30; `0` or `off`: never) minutes, when the evidence no longer trips the breaker
   (for example the supervisor was down and the sessions aged out of the hour), or once for that cause (the same
   tasks): the window starts again and a second trip on the same tasks stays paused. Each is a `crew.resumed` event
-  (`meta.auto`).
+  (`meta.auto`). 2.84: a session whose lane was checked and queued for a train, and a hand-back whose note says the work is
+  ready for the train, count as progress (not "0 landed"), and a session a person or the overseer started by hand
+  (`npm run agent -- start`, typed; `meta.byHand` on its `agent.session.start`) is not counted among the crew's sessions.
 - **Futility cap, auto** (`harness/futility.mjs`): a running session past the 90th percentile of its task
   type's successful sessions (weighted tokens, or wall time) raises one `futility.check` ("past the p90 of good runs").
   Fewer than `STUDIO_FUTILITY_MIN_N` (20) successful sessions of that type: no cap. `STUDIO_FUTILITY=auto` (the default,
@@ -324,7 +328,7 @@ Each supervisor pass (code only, no model) also does three things:
   last time (`task.start_refused`, `task.lock_denied`, a start the launcher refused) is skipped in later passes for 2, 4, 8
   ... minutes, at most `STUDIO_START_BACKOFF_MAX_MIN` (30); a changed reason or a changed task state (held, unheld,
   handed back, started, its lock taken or freed) resets it. The pass's `why` says so once per backoff; state in
-  `.studio/start-backoff.json`. Why: a launcher once retried one refused start 61 times in 85 minutes, and 18 of 40 "can't
+  `.studio/start-backoff.json`. 2.84: that line, the `supervisor.backoff` event (once per backoff, `meta.reason`) and `npm run task -- show <ID>` (`startBackoff`) give the refusal in its own words (the first 160 characters), so a task skipped for an hour says why. Why: a launcher once retried one refused start 61 times in 85 minutes, and 18 of 40 "can't
   start yet" refusals came back to the same agent within an hour. The loop waits `STUDIO_SUPERVISOR_SEC` +-
   `STUDIO_SUPERVISOR_JITTER` (0.1; 0 = fixed) so several studios on one PC don't fire together. A new agent name never reuses
   one with a leftover `.lanes/<name>` folder or one another launch just took.

@@ -51,6 +51,15 @@ export function crewLimits(env = process.env) {
   };
 }
 
+/**
+ * 2.84: events that say a task's work is finished and waits for a train (it counts as progress, not as nothing): its lane
+ * was checked and queued (task done --train, or a lane's plain done), or a hand-back whose note says the work is ready
+ * for the train. No outcome is recorded for that kind of hand-back, so its note is read (the words "ready ... train", not
+ * "not ready"). The agent's own launcher records a hand-back by the session's name, so the task is what is matched.
+ */
+const READY_FOR_TRAIN = /(?<!\bnot\s)(?<!n't\s)\bready\b[^.\n]{0,40}\btrain\b/i;
+export const readyForTrain = (e) => e.type === 'task.train.queued' || e.type === 'task.done.queued' || (e.type === 'task.paused' && READY_FOR_TRAIN.test(String(e.msg || '').replace(/^Handed back [^:]*:/, '')));
+
 const landingsOf = (e) => (e.type === 'task.done' || e.type === 'lane.merged' ? (e.task ? [e.task] : []) : e.type === 'task.train.landed' ? (Array.isArray(e.meta?.lanes) ? e.meta.lanes.map(String) : e.task ? [e.task] : []) : []);
 
 /**
@@ -61,8 +70,9 @@ export function crewHealth(events, { now = Date.now(), env = process.env, sinceB
   const lim = crewLimits(env);
   const roleOf = new Map(); // agent -> role (from its starts)
   const startOf = new Map(); // agent -> latest start time
+  const byHand = new Map(); // agent -> its latest session was started by a person or the overseer (2.84)
   const out = {};
-  const row = (role) => (out[role] ||= { sessions: 0, ended: 0, noCommit: 0, shortExits: 0, tokens: 0, landed: 0, queued: 0, tokensPerLanded: null, tasks: [], landedTasks: [], whys: [], agents: [], unhealthy: false, why: '' });
+  const row = (role) => (out[role] ||= { sessions: 0, ended: 0, noCommit: 0, shortExits: 0, tokens: 0, landed: 0, queued: 0, tokensPerLanded: null, tasks: [], landedTasks: [], ready: 0, readyTasks: [], whys: [], agents: [], unhealthy: false, why: '' });
   const sorted = [...events].sort((a, b) => ts(a) - ts(b));
   const from = (role) => Math.max(now - lim.windowMs, Number(sinceByRole[role]) || 0);
   for (const e of sorted) {
@@ -70,13 +80,15 @@ export function crewHealth(events, { now = Date.now(), env = process.env, sinceB
     if (t > now) break;
     if (e.type === 'agent.session.start') {
       const role = String(e.meta?.role || '').trim() || 'unknown';
-      roleOf.set(e.agent, role); startOf.set(e.agent, t);
-      if (e.meta?.outside || t < from(role)) continue;
+      roleOf.set(e.agent, role); startOf.set(e.agent, t); byHand.set(e.agent, Boolean(e.meta?.byHand));
+      // 2.84: a session a person or the overseer started by hand (agent start --task from outside the supervisor) is not the
+      // crew's: not counted among its sessions, nor its end (meta.byHand on agent.session.start, harness/agent.mjs).
+      if (e.meta?.outside || e.meta?.byHand || t < from(role)) continue;
       const r = row(role);
       r.sessions += 1;
       if (!r.agents.includes(e.agent)) r.agents.push(e.agent);
       if (e.task && !r.tasks.includes(e.task)) r.tasks.push(e.task);
-    } else if (e.type === 'agent.session.end' && !e.meta?.outside) {
+    } else if (e.type === 'agent.session.end' && !e.meta?.outside && !byHand.get(e.agent)) {
       const role = String(e.meta?.role || roleOf.get(e.agent) || '').trim() || 'unknown';
       if (t < from(role)) continue;
       const r = row(role);
@@ -103,10 +115,20 @@ export function crewHealth(events, { now = Date.now(), env = process.env, sinceB
       }
     }
   }
+  // 2.84: finished work waiting for a train, in each role's window, for the tasks its sessions held.
+  for (const e of sorted) {
+    const t = ts(e);
+    if (t > now) break;
+    if (!readyForTrain(e) || !e.task) continue;
+    for (const [role, r] of Object.entries(out)) {
+      if (t < from(role) || !r.tasks.includes(e.task) || r.readyTasks.includes(e.task)) continue;
+      r.readyTasks.push(e.task); r.ready += 1;
+    }
+  }
   for (const r of Object.values(out)) {
     r.tokens = Math.round(r.tokens);
     r.tokensPerLanded = r.landed ? Math.round(r.tokens / r.landed) : null;
-    r.unhealthy = r.sessions > lim.maxSessions && r.landed === 0 && r.queued === 0;
+    r.unhealthy = r.sessions > lim.maxSessions && r.landed === 0 && r.queued === 0 && r.ready === 0;
     if (r.unhealthy) r.why = `${r.sessions} sessions in ${Math.round(lim.windowMs / 60000)} min and 0 landed (STUDIO_CREW_MAX_SESSIONS=${lim.maxSessions}): ${r.noCommit} with no commit, ${r.shortExits} short exit${r.shortExits === 1 ? '' : 's'} (under ${Math.round(lim.shortMs / 1000)} s), ${r.tokens.toLocaleString('en-US')} tokens for nothing landed`;
   }
   return out;
