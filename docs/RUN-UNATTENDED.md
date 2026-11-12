@@ -1,11 +1,15 @@
-# Running the studio unattended
+# Running the studio unattended (`docs/RUN-UNATTENDED.md`)
 
-Run #1 stopped at 07:09 with 36 tasks queued: the laptop restarted, the studio's processes died, and nothing
-started again until someone asked. The supervisor fixes that.
+The supervisor keeps the studio working without a person: every minute it starts a fresh agent for the next waiting task of
+each role (one task per session, within the pace's caps) and starts the next when a session ends. It starts nothing while
+"Stop all agents" is on, outside the window, past `--until`, or past the budget. This page is its commands, guards and
+settings. A tag such as (2.73.1) says which release added a feature. An agent needs a tool to start with:
+`STUDIO_AGENT_TOOL` (and `STUDIO_AGENT_MODEL`) in `.env`, per role `STUDIO_BUILDER_TOOL`, `STUDIO_ART_TOOL`, ..., or
+`STUDIO_<ROLE>_CMD` with `{kickoff}`, `{agent}`, `{model}`, `{role}`, `{task}`.
 
-## Start it
+## Start, stop, change
 
-After a restart, one command brings the studio up (2.73.1, B-69):
+After a restart, one command brings the studio up (2.73.1):
 
 ```bash
 npm run studio:boot                    # Windows PowerShell: npm.cmd run studio:boot
@@ -14,179 +18,191 @@ npm run studio:boot -- --until 46h     # --until, --window, --budget, --lanes go
 npm run studio:boot -- --shortcut      # also put a "Studio boot" file on the Desktop (Windows: a .cmd running npm.cmd)
 ```
 
-It checks node, npm (on Windows it says to type `npm.cmd` when the execution policy blocks `npm.ps1`) and `.env` (no
-session identity in it); clears lock and status files whose process is gone
-(`train.lock`, `land.lock`, `unity-train.lock`, `verify-running/full.json`, `train/daemon.json`, a "running"
-`supervisor.json`), one `boot.stale_cleared` event each, never a lane copy or anyone's work; starts
-the supervisor only when it isn't running already, detached and hidden, with output in `.studio/logs/`; the train
-daemon runs inside the supervisor's pass. Then one card: crew sessions, the train, halts, what needs you, outside agents
-seen lately, and lane copies and leftover folders in `.lanes/`. 2.80: there is no hub to start; `--hub`/`--no-hub` are
-accepted and ignored with one line. Chat-based orchestrators outside the harness are not restarted. The supervisor never
-get the shell's `STUDIO_LOCK_OWNER`, `STUDIO_ROLE`, `STUDIO_AGENT` or `STUDIO_MAIN_ROOT`.
+It checks node, npm (on Windows it says to type `npm.cmd` when the policy blocks `npm.ps1`) and `.env` (no session identity
+in it); clears lock and status files whose process is gone (`train.lock`, `land.lock`, `unity-train.lock`,
+`verify-running/full.json`, `train/daemon.json`, a "running" `supervisor.json`; one `boot.stale_cleared` event each; never a
+lane copy or anyone's work); starts the supervisor if it isn't running, detached and hidden, output in `.studio/logs/` (the
+train daemon runs inside the supervisor's pass); then prints one card (crew sessions, train, halts, what needs you, outside
+agents, lane copies in `.lanes/`). There is no hub to start (2.80): `--hub`/`--no-hub` are ignored with one line. Chat
+orchestrators outside the harness are not restarted. The supervisor never gets the shell's `STUDIO_LOCK_OWNER`,
+`STUDIO_ROLE`, `STUDIO_AGENT` or `STUDIO_MAIN_ROOT`.
 
 ```bash
-npm run studio:start -- --until 23:00                 # until 23:00 (or --until 8h); runs on its own
-npm run studio:start -- --until 23:00 --foreground    # stays attached to this terminal instead
+npm run studio:start -- --until 23:00                 # (or --until 8h); detaches by default and outlives the terminal; output in .studio/supervisor.log
+npm run studio:start -- --until 23:00 --foreground    # stays attached to this terminal
 npm run studio:start -- --window 09:00-23:00          # every day inside a window
 npm run studio:start -- --until 8h --budget 50%       # stop when the plan reaches 50% of its week
 npm run studio:start -- --until 8h --lanes auto       # one builder per lane, in parallel
-npm run studio:start -- --install --window 09:00-23:00   # come back after a restart or login
+npm run studio:start -- --install --window 09:00-23:00   # come back after a restart or login (--uninstall removes it)
 npm run studio:stop                                   # agents finish their task; nothing new starts
 npm run studio:status
-npm run studio:extend -- --until 2026-11-05T11:52:00Z --by <your name>   # move a running supervisor's end time
-npm run studio:reload-env -- --by <your name>         # running processes pick up what you changed in .env now
 ```
 
-**Changing the end time (2.73.1).** `npm run studio:extend -- --until <23:00 | +8h | ISO time | none> --by <your name>
-[--why "…"]` moves a running supervisor's `--until` without a restart (`+8h` and `8h` count from now; `none` removes
-the end time). It writes `.studio/supervisor-extend.json`; the next pass (within a minute) applies it and logs a
-`supervisor.extended` event (from, to, who). Who may: a person; an agent the owner's delegation covers for
-`supervisor-extend`; a Producer or Director session or an outside agent on a person's direct permission
-(`--by <the person> --permission "<their words or a link>"`); never a worker session or a worker's name.
+- `--install` uses launchd (macOS), systemd --user (Linux) or Task Scheduler (Windows). Install from a terminal where the
+  agent tool works: the login job gets that terminal's PATH and HOME, and install warns when `claude --version` (or your
+  tool) wouldn't be found.
+- `studio:start` is you choosing to run the studio, so it starts agents whatever `npm run mode -- autostart` says; that
+  switch is for the watcher's and supervisor passes' own starts (docs/PACE-AND-AGENTS.md).
+- **Change the end time** (2.73.1): `npm run studio:extend -- --until <23:00 | +8h | ISO time | none> --by <your name>
+  [--why "…"]` (`+8h`/`8h` count from now; `none` removes it) writes `.studio/supervisor-extend.json`; the next pass (within a
+  minute) applies it and logs `supervisor.extended` (from, to, who). Who may: a person; an agent under the owner's
+  delegation for `supervisor-extend`; a Producer/Director session or outside agent on a person's direct permission
+  (`--by <the person> --permission "<their words or a link>"`); never a worker session or a worker's name.
+- **Change `.env` while it runs** (2.73.2): the long-running loops re-read `.env` when its mtime or size changed (each
+  supervisor pass with the train daemon's pass, each launcher heartbeat, the watchdog's and the watch pass), so a raised
+  `STUDIO_STALL_MIN` reaches running sessions at their next heartbeat. `npm run studio:reload-env -- --by <your name>` asks
+  for a reload now: a running supervisor answers within seconds with what changed; if busy it waits one pass
+  (`STUDIO_SUPERVISOR_SEC` plus 10 s) and says "Queued: the supervisor reloads on its next pass" (exit 0); with no
+  supervisor it exits 0 and says the settings apply at start. Each change is logged once (`env.reloaded`, key names only;
+  values of keys that look secret (`*_TOKEN`, `*_KEY`, `*_SECRET`, `*PASSWORD*`, webhooks) are never written). It also lists
+  the `STUDIO_*` names `.env` sets and marks those the harness no longer reads (not in `docs/SETTINGS.md`) "unknown (removed
+  or misspelled)" (2.79).
+  - Precedence: a variable in the environment a process was started with (your shell, a scheduled task) wins over `.env`; a
+    value that came from `.env`, directly or through its parent (`STUDIO_ENV_FROM_FILE` is the internal note of which
+    names, never values), follows the file; a line removed from `.env` gives the default back. Identity settings
+    (`STUDIO_LOCK_OWNER`, `STUDIO_ROLE`, `STUDIO_AGENT`, `STUDIO_MAIN_ROOT`) are never taken from `.env`. Read once at start,
+    so a restart is needed for `STUDIO_SUPERVISOR_SEC` and `STUDIO_HEARTBEAT_SEC`.
 
-**Changing a setting in .env while the studio runs (2.73.2, B-74).** The long-running loops re-read `.env` when its
-mtime or size changed: each supervisor pass (with the train daemon's pass in it), each launcher heartbeat (the stall
-limits, the idle exit), the watchdog's pass and the watch pass. So a raised `STUDIO_STALL_MIN` reaches the sessions
-already running at their next heartbeat, not only new ones. `npm run studio:reload-env` asks for a reload now; a
-running supervisor answers within seconds with what changed; if it is busy in a pass, the command waits one pass
-(`STUDIO_SUPERVISOR_SEC` plus 10 s) and then says "Queued: the supervisor reloads on its next pass" (exit 0); with no
-supervisor running it exits 0 and says the settings apply when it starts. Each change is logged once (`env.reloaded`, naming the
-keys; values of keys that look secret, `*_TOKEN`, `*_KEY`, `*_SECRET`, `*PASSWORD*`, webhooks, are never written).
-Precedence: a variable set in the environment a process was started with (your shell, a scheduled task's
-environment) still wins over `.env`; a value that came from `.env`, in the process or through its parent (a launcher
-inherits the supervisor's; `STUDIO_ENV_FROM_FILE` is the internal note of which names those are, never their values),
-follows the file; a line removed from `.env` gives that setting its default back. Identity settings (`STUDIO_LOCK_OWNER`,
-`STUDIO_ROLE`, `STUDIO_AGENT`, `STUDIO_MAIN_ROOT`) are never taken from `.env`. Read once at start, so a restart is still
-needed: `STUDIO_SUPERVISOR_SEC`, `STUDIO_HEARTBEAT_SEC`.
-`studio:reload-env` (2.79) also lists the `STUDIO_*` names the `.env` sets (names only, never values) and marks any the
-harness no longer reads (not in `docs/SETTINGS.md`) as "unknown (removed or misspelled)".
+## What a pass does
 
-2.77.1 (B-102): a pass never stops the loop. The loop is set before the first pass, passes never overlap, and each step of
-a pass (the Line Producer, the launch step, the Director's flow, the machine scan, the Communicator, the
-workaround pass, the train daemon) is bounded: a step still running after `STUDIO_SUPERVISOR_STEP_SEC` (300; the launch
-step twice that) is reported as `supervisor.step_timeout` and the pass goes on without it. A whole pass still running after
-`STUDIO_SUPERVISOR_STUCK_MIN` (15) minutes is reported once as `supervisor.pass_stuck`. `.studio/supervisor.json` counts
-the finished passes (`passes`). Before 2.77.1 the first pass could wait on itself (a pass that imports supervisor.mjs back,
-such as the Communicator's needs-a-person list) and Node exited with code 13 ("unsettled top-level await").
+- A pass never stops the loop (2.77.1): passes never overlap, and each step (Line Producer, launch step, Director's flow,
+  machine scan, Communicator, workaround pass, train daemon) is bounded. A step running past
+  `STUDIO_SUPERVISOR_STEP_SEC` (300; the launch step twice that) is reported as `supervisor.step_timeout` and the pass
+  goes on without it. A pass running past `STUDIO_SUPERVISOR_STUCK_MIN` (15) is reported once as `supervisor.pass_stuck`.
+  `.studio/supervisor.json` counts finished `passes` and keeps each timed group's last run (`timed`).
+- Timed groups (2.80, `harness/studio-passes.mjs`): every `STUDIO_WATCH_INTERVAL` seconds (300) the watch pass, the retro,
+  the learn pass, the run report and the Director's daily ping (0 turns off the watch pass only; the others are then checked
+  every 300 s, 2.81); every `STUDIO_GAMEDEV_INTERVAL` seconds (180; 0 off) the game-dev watchdog pass. Each group first
+  runs one full interval after the supervisor started, never in a dry run; a pass that throws is logged without stopping
+  the others.
+- The loop waits `STUDIO_SUPERVISOR_SEC` +- `STUDIO_SUPERVISOR_JITTER` (0.1; 0 = fixed) so several studios on one PC don't
+  fire together. A new agent name never reuses one with a leftover `.lanes/<name>` folder.
+- **Start backoff** (2.78.0, `.studio/start-backoff.json`): a start of task T refused for the same reason as last time
+  (`task.start_refused`, `task.lock_denied`, a launcher refusal) is skipped for 2, 4, 8 ... minutes, at most
+  `STUDIO_START_BACKOFF_MAX_MIN` (30); a changed reason or task state resets it. The pass's `why` says so once.
+- **Line Producer** (2.76.0, docs/LINE-PRODUCER.md): before the supervisor picks, `harness/line-producer.mjs` frees locks of
+  ended sessions, recreates a train lane's lost copy, clears expired cooldowns, puts chain-breakers first on the strongest
+  model, keeps a share of builders on research/expansion across phases, and holds builders back when the rig is full.
+  `npm run line -- status`; `STUDIO_LINE_PRODUCER=report|off`.
+- **Memory floor** (2.59.0): no new agent starts while free memory is under `STUDIO_RAM_FLOOR_GB` (3; `0` off). The pass
+  says why in its status and a `supervisor.ram_low` event (at most every 15 min); running agents are never stopped; an agent
+  a person starts is not held. On Windows the floor uses the smaller of free memory and commit headroom.
 
-2.80 (b1): the timed passes the War Room hub used to run are steps of the supervisor's pass (harness/studio-passes.mjs):
-every `STUDIO_WATCH_INTERVAL` seconds (300) the watch pass, the retro, the learn pass, the run
-report and the Director's daily ping (2.81: 0 turns off the watch pass only; the others are then checked every 300 s), and every `STUDIO_GAMEDEV_INTERVAL` seconds (180; 0 turns it off) the game-dev
-watchdog pass. Each group first runs one full interval after the supervisor started (a short run never runs them), never in a dry run;
-one bounded step per group, and a pass that throws is logged without stopping the others. `.studio/supervisor.json`
-keeps each group's last run (`timed`). Wakes these passes cause are logged from `supervisor`.
+## Machine scan, disk and janitor
 
-Every minute it starts a fresh agent
-for the next waiting task of each role, one task per session, within the pace's caps. When a session
-ends, the next minute starts the next. It starts nothing while "Stop all agents" is on, outside the
-window, past `--until`, or past the budget. `npm run studio:status` shows it, and the run
-report has a section for it. `--install` uses launchd (macOS), systemd --user (Linux) or Task
-Scheduler (Windows); `--uninstall` removes it.
+- **Machine scan** (2.68.0): `npm run machine` (`--json`, `--cached`; `harness/machine.mjs`) reads OS, cores, RAM (and on
+  Windows commit charge), GPUs with VRAM and busy (nvidia-smi; macOS system_profiler), the studio's disk, power source and the
+  top 10 processes by memory (names only). Each probe has a timeout (`STUDIO_MACHINE_PROBE_TIMEOUT_MS`, 15000) and fails soft.
+  It writes `.studio/machine.json`; `STUDIO_MACHINE_SCAN=off` turns it all off. The supervisor samples it every
+  `STUDIO_MACHINE_SAMPLE_S` (300) into a `machine.sample` event and `.studio/machine-history.jsonl` (kept under
+  `STUDIO_MACHINE_HISTORY_KB`, 256). `status --brief` and `npm run lanes` show "Machine: RAM 26/32 GB (commit 55/60), CPU 32%,
+  GPU 1% (1.8/12 GB), disk 130 GB free".
+- **Disk budget:** under `STUDIO_DISK_MIN_FREE_GB` (default max(20, 5% of the disk)) the supervisor emits `machine.disk_low`
+  (at most every 6 h), the digest has a line, and `task start` and the train warn, naming what the janitor can free.
+- **Temp-file janitor** (`npm run janitor`, `harness/janitor.mjs`): a dry run by default; `--yes` deletes only the harness's
+  own temporary files: train scratch copies of a train no longer running, `.studio/tmp` entries older than
+  `STUDIO_JANITOR_TMP_H` (24) h, train logs beyond the newest `STUDIO_JANITOR_KEEP_LOGS` (40) or `STUDIO_JANITOR_LOGS_MB`
+  (200), temp folders marked `.studio-temp.json` (system temp or `STUDIO_JANITOR_TMPDIR`) once old with their process gone,
+  and the oldest cache entries while `.studio/unity-cache` and `.studio/assets/library` exceed `STUDIO_CACHE_MAX_GB` (20).
+  It never deletes a lane copy with commits not on main, uncommitted changes, a running session or a held or parked task. One
+  `janitor.run` event. After each train or verify job it runs `--yes` itself, at most every `STUDIO_JANITOR_EVERY_MIN` (30)
+  minutes (never lanes); `STUDIO_JANITOR=off` turns that off. `janitorEstimate()` feeds the disk-low line.
+  - Stale lane copies (untouched for `STUDIO_JANITOR_LANE_H`, 24 h, clean, nothing unique, nobody in them) are listed with
+    `npm run janitor -- --lanes` and deleted only with `--lanes --yes --by <name>`. A copy whose work landed (its task done
+    in `studio/DONE.md`, or a `lane.merged` event) is stale after `STUDIO_JANITOR_LANDED_H` (6). The supervisor runs these
+    proposals as a dry run (never deleting) at most every `STUDIO_JANITOR_LANES_MIN` (360; `off`/0: never), in a detached
+    child (`harness/lane-disk.mjs`); the digest, `status --brief` and `npm run status -- --json` (`staleLanes`) then show
+    "N stale lane copies (X GB) proposed: npm run janitor -- --lanes --yes --by <name>" (`janitor.lanes_proposed`). Deleting
+    is a decider's action: a person, a Producer/Director session or outside agent on a person's permission, or an agent
+    under the owner's delegation for `janitor-lanes` (`npm run delegate -- grant <agent> --actions janitor-lanes …`; a `hold`
+    delegation doesn't cover it).
+  - Landed engine passes (2.79.1): `--yes` also removes an engine pass's worktree (`.lanes/engine/<task>`) once the engine
+    train's `landed` event names its task, when clean and no session is on it (`janitor.engine_pass`; the branch stays). In
+    the system temp folder it removes orphan copies named with a harness prefix (`studio-build-`) or one in
+    `STUDIO_JANITOR_TEMP_PREFIXES` (comma list), untouched for `STUDIO_JANITOR_ORPHAN_H` (2) h, with no live owner process.
+  - Idle lane copies (2.79): the automatic run also removes the worktree of a lane idle for `STUDIO_LANE_IDLE_HOURS` (4; `0` or
+    `off`: never): session ended, task not queued for a train, held or parked, nobody working in it, no uncommitted change,
+    no commit not on main. The branch is kept. `npm run lanes -- prune --idle <hours> [--dry-run] [--by <name>]` applies the
+    rule now (`lanes.pruned` event). `npm run lanes` alone is a cheap listing; `--full` or a task/agent/branch name reads
+    ahead/behind, dirty and stamps.
+- **Orphaned gate runs** (2.78.1, `harness/gate-reaper.mjs`): each pass (at most every `STUDIO_ORPHAN_GATE_SCAN_MIN`, 10) ends
+  every `scripts/run-gates.mjs` process whose parent is gone and that is older than `STUDIO_ORPHAN_GATE_MIN` (60) minutes,
+  with its whole tree, and logs `gate.orphan_ended` (pid, age, why, command line). "Parent gone": no process has its parent's
+  pid, or a newer one does (Windows reuses pids), or on POSIX it was re-parented to pid 1 or an init/systemd reaper.
+  `npm run verify`'s host is parentless on purpose and counts as alive while its verify record names it running (at most
+  `STUDIO_VERIFY_MAX_MIN`, 360). `STUDIO_ORPHAN_GATE_MIN=0` or `off`: never.
 
-- **A memory floor (2.59.0).** No new agent starts while free memory is under `STUDIO_RAM_FLOOR_GB` (3; `0`
-  turns it off): a Unity editor and browser playtests beside a full verify took a PC down to 2.6 GB free. The
-  pass says why in its status and a `supervisor.ram_low` event (at most every 15 min); running agents are never
-  stopped. The watcher's and the Director's auto-start use the same pass; an agent a person starts is not held.
+## When sessions fail or stop
 
-- **The machine scan and resource monitor (2.68.0).** `npm run machine` (`--json`, `--cached`) reads the hardware the
-  studio runs on (harness/machine.mjs): OS, logical and performance/efficiency cores, RAM and (Windows) the commit
-  charge, GPUs with VRAM and busy (nvidia-smi; macOS system_profiler), the studio's disk, the power source and the
-  top 10 processes by memory (names only). Each probe has a timeout (`STUDIO_MACHINE_PROBE_TIMEOUT_MS`, 15000) and
-  fails soft (null + reason). It writes `.studio/machine.json`; `STUDIO_MACHINE_SCAN=off` turns it all off. The
-  supervisor samples it every `STUDIO_MACHINE_SAMPLE_S` (300) into a `machine.sample` event and
-  `.studio/machine-history.jsonl` (kept under `STUDIO_MACHINE_HISTORY_KB`, 256). `status --brief`, `npm run lanes`
-  show "Machine: RAM 26/32 GB (commit 55/60), CPU 32%, GPU 1% (1.8/12 GB),
-  disk 130 GB free". On Windows the memory floor uses the smaller of free memory and commit headroom.
-  **Disk budget:** under `STUDIO_DISK_MIN_FREE_GB` (default max(20, 5% of the disk)) the supervisor emits
-  `machine.disk_low` (at most every 6 h), the daily digest has a line, and `task start` and the train warn, naming
-  what the temp-file janitor can free when it is installed.
-
-- **It runs on its own.** `studio:start` detaches by default, so it outlives the terminal or agent shell that
-  started it (run #1: every agent died when the host shell restarted). Its output goes to `.studio/supervisor.log`.
-- **Install from a terminal where the agent tool works.** The login job gets that terminal's PATH and HOME
-  and the `node` on the PATH; install warns when `claude --version` (or your tool) wouldn't be found.
-  Run #1 looped on exit 127 because launchd's PATH had no `~/.local/bin`.
-- **Two identical failures stop it.** When two sessions in a row end with the same exit code (127: tool not
-  found), the supervisor stops starting agents and shows one "Needs you" card with the reason. Fix the
-  cause, then run, from a terminal (2.59.0):
-  `npm run studio:resume -- --by <your name> [--why "what you fixed"]`. It prints the halt it cleared, and the next
-  pass's `supervisor.resumed` event names who asked (`meta.by`, `meta.why`). Not halted: it says so and does nothing.
-  A person decides to retry after repeated failures, so it refuses inside a launched agent session (`STUDIO_ROLE` set)
-  and for agents' names (`builder-s3`, `claude-a`, `opus-bot`, any name the launcher handed out). A chat bot that isn't
-  launched by the harness can still type a person's name: to narrow who may resume, set `STUDIO_RESUME_BY=<name>[,<name>]`
-  in `.env` (off by default). A session someone stopped or paused (`agent stop`, Pause, Stop all)
-  never counts: the stop is written down before the kill, so its end reads "stopped by <name>"
-  (`meta.stoppedBy`), not "exit 1", and its hand-back says "a stop, not a failure" (no park, breaker or tier-up).
-  2.73.1 (B-66): sessions that end within `STUDIO_HALT_SAME_DEATH_SEC` (5; 0 = off) seconds of each other count as ONE
-  end for this rule (one outside cause took them together). Only sessions that had run a minute or more are merged,
-  and never exit 126, 127 or 9009 (the tool itself can't run): sessions that crash at launch each count,
-  and an end the launcher caused itself (the stall
-  watchdog, the idle exit, the task's budget) never counts, like a stop. Each `agent.session.end` records how the
-  process ended in `meta.exitCause` (`kind`: exit, signal, stall, idle, budget, stopped, spawn-error; with `code`,
-  `signal`, `at` and `ranSec`), and `supervisor.halted` lists the causes (`meta.causes`). On Windows a kill from outside
-  (taskkill /F) reads as exit 1, since Windows has no signals. A halt stops new sessions only: merge trains for lanes
-  already queued still run (the train daemon, docs/WORK-ORGANIZATION.md).
-  While the supervisor is halted, or nothing can start agents, a queued rescue's pick-up clock
-  (`STUDIO_RESCUE_WAIT_MIN`) is stopped and the Producer is told once; it counts again from when agents can start.
-- **The Line Producer (2.76.0, docs/LINE-PRODUCER.md).** Each pass, before the supervisor picks what to start,
-  `harness/line-producer.mjs` frees locks of ended sessions, recreates a train lane's lost copy from its branch, clears
-  cooldowns whose time has passed, puts chain-breakers first on the strongest model, keeps a share of builders on
-  research/expansion across the early/mid/late phases, and holds builders back when the rig is full (never more than
-  the pace allows). `npm run line -- status`; `STUDIO_LINE_PRODUCER=report|off`.
-- **Only real limit errors count as out of quota** (a 429, "usage limit reached", "credit balance is too
-  low"). `STUDIO_QUOTA_SKIP=off` turns quota-skipping off entirely when you watch usage outside the harness.
-- **A usage limit is saved per model for tools with a quota per model (2.78.2).** A 429 on one Gemini model through agy is
-  marked `agy:<model>` in `.studio/tool-quota.json`, not `agy`, so the tool's other models keep running (a launch, the
-  reviewer, the router's pools and the fallback check the `tool:model` mark first, then the tool's). Errors that are
-  really tool-wide (auth, binary missing) and old tool-only marks still mark the whole tool. `STUDIO_QUOTA_MODEL_TOOLS`
-  (default `agy,gemini`; `all`, or `off` for the old tool-wide key) lists the tools that get per-model marks.
-- **A task that waits for the owner (2.78.2).** When a hand-back note, or the end of a session's output, carries the
-  harness's own refusal of a step only the owner can do ("Only the owner can approve these" from the protected check, "needs
-  the owner's signature", "no owner key at", "only the owner approves weakening a test", "exceptions are the owner's call",
-  or the builder's own "owner-only step" / "waits for the owner" / "needs the owner's approval"), harness/owner-only.mjs parks
-  the task with reason `owner-only` at the orchestrator's rank, sends an event to the orchestrator (the Communicator turns it
-  into an alert) and the supervisor starts no builder on it until `npm run task -- unpark <ID> --by <name>` (the orchestrator
-  or the owner).
-- **The stall watchdog (harness/stall.mjs).** A session with no file write, commit or task change for
-  `STUDIO_STALL_MIN` (15) minutes, or past its wall-clock cap (`STUDIO_SESSION_MAX_MIN`, 90; planning roles
-  `STUDIO_SESSION_PLAN_MAX_MIN`, 25), is ended and its task handed back (`session.stall`). 2.77.3 (B-109): the
-  read-burn ratio (`STUDIO_STALL_RATIO`, 120:1 over `STUDIO_STALL_RATIO_WINDOW_TOKENS`; 0 = off) counts uncached input
-  plus cache creation only (a cache read is the same context re-read each turn, not new work), and gives no read-burn
-  verdict in the first `STUDIO_STALL_GRACE_MIN` (15) minutes of a session. 2.76.0 (B-83, the crew's
-  W-0070): each session is judged on its own tokens only. An agent's log is appended to across sessions under one name,
-  so a relaunch counted the last session's tokens and was ended within seconds ("read 837668 tokens … 3 s into the new
-  session", every builder). The session record's `logFrom` says where its part of the log starts (the launcher's
-  heartbeat and the watchdog read only that part), only the newest Claude session id in it counts, its stall record
-  starts fresh, and a count that starts over restarts the read-burn window there. 2.76.0 (B-82): a session the launcher
-  ends (stall, idle, budget) records its usage from its stream and a cost estimated at `studio/prices.json`
-  (`meta.costEstimated`); before, it recorded the previous session's result line (the same cost twice) or nothing.
-  2.73.1 (B-68): a session
-  waiting on its own verify (`npm run verify`, its `.studio/verify-running/<agent>.json` or a `full*.json` it owns,
-  with a live process and no result yet) or on its own background `task done` (`.studio/done-running/`) is busy, not
-  stalled: the stall clock is held and the wall-clock cap may run over while it waits, by at most
-  `STUDIO_STALL_VERIFY_MAX_MIN` (60) minutes. A verify counts for at most that long from its start (a done for
-  `STUDIO_DONE_RUNNING_MAX_MIN`, 90), so a hung verify can't keep a session alive. `node harness/stall.mjs check`
-  shows "waiting on its own verify" for such a session. 2.73.2 (B-72): a stall end is recorded once per session
-  (`.studio/stall/<agent>.json` `ended`), whether the launcher's heartbeat or the watchdog's pass saw it first, and the
-  watchdog's end counts as a stall end (`exitCause.kind` stall), never toward the "two sessions in a row" halt. Once the
-  agent's process has exited, the session lists as `ending` (not STALLED) while its launcher hands the work back, which
-  can take minutes when it closes the task itself; the watchdog, the watch pass and the silent-agent release leave it
-  to the launcher (bounded by `STUDIO_DONE_RUNNING_MAX_MIN`, 90). One `agent.session.end` per session, whoever records it.
-- **A silent agent doesn't hold its task forever.** A session whose process is alive but whose heartbeat
-  is older than `STUDIO_STALL_RELEASE_MIN` (30 min; 0 turns it off) gets its work saved, its task handed back
-  and its claims and slot freed by the watcher; the process itself is left alone (a machine waking from sleep,
-  or a process id now used by something else, is never killed). End it by hand if it is stuck. A pass right
-  after the machine slept (the watcher's own last pass as old) frees nothing and checks again next pass.
-- **The supervisor doesn't need auto-start.** `studio:start` is you choosing to run the studio, so it starts
-  agents whatever `npm run mode -- autostart` says; the switch is for the watcher and the supervisor's passes starting
-  agents on their own (docs/PACE-AND-AGENTS.md).
-- **Launched agents inherit your MCP servers.** Jed's Serena server opened its dashboard tab for every
-  `claude -p` session. Turn that off in the server's own settings
-  (Serena: `web_dashboard_open_on_launch: false` in `~/.serena/serena_config.yml`).
-
-It needs a tool to start agents with: `STUDIO_AGENT_TOOL` (and `STUDIO_AGENT_MODEL`) in `.env`, or per
-role `STUDIO_BUILDER_TOOL`, `STUDIO_ART_TOOL`, …, or `STUDIO_<ROLE>_CMD` with `{kickoff}`, `{agent}`,
-`{model}`, `{role}` and `{task}` for anything else.
+- **Two identical failures halt it.** When two sessions in a row end with the same exit code (127: tool not found), the
+  supervisor stops starting agents and shows one "Needs you" card. Fix the cause, then from a terminal (2.59.0):
+  `npm run studio:resume -- --by <your name> [--why "what you fixed"]`; it prints the halt it cleared and the next pass's
+  `supervisor.resumed` event names who asked (`meta.by`, `meta.why`); not halted: it says so. It refuses inside a launched
+  session (`STUDIO_ROLE` set) and for agents' names (`builder-s3`, `claude-a`, any name the launcher handed out); to narrow
+  who may resume further, set `STUDIO_RESUME_BY=<name>[,<name>]` in `.env` (off by default).
+  - A session someone stopped or paused (`agent stop`, Pause, Stop all) never counts: the stop is written before the kill,
+    the end reads "stopped by <name>" (`meta.stoppedBy`) and its hand-back says "a stop, not a failure" (no park, breaker
+    or tier-up). An end the launcher caused itself (stall watchdog, idle exit, task budget) never counts either.
+  - Sessions ending within `STUDIO_HALT_SAME_DEATH_SEC` (5; 0 = off) of each other count as ONE end (one outside cause took
+    them), only if they had run a minute or more and never exit 126, 127 or 9009 (the tool itself can't run). (2.73.1)
+  - Each `agent.session.end` records `meta.exitCause` (`kind`: exit, signal, stall, idle, budget, stopped, spawn-error; with
+    `code`, `signal`, `at`, `ranSec`); `supervisor.halted` lists `meta.causes`. On Windows a kill from outside reads as exit 1.
+  - A halt stops new sessions only: merge trains for queued lanes still run (docs/WORK-ORGANIZATION.md). While halted, or
+    nothing can start agents, a queued rescue's pick-up clock (`STUDIO_RESCUE_WAIT_MIN`) is stopped and the Producer told once.
+- **Stop cooldown:** `npm run agent -- stop <name>` (and Pause) keep that task from restarting for 15 minutes
+  (`STUDIO_STOP_COOLDOWN_MIN`), for the stopped role only (a stopped builder's task can't restart as a builder, but a
+  reviewer can; time shown in UTC). "Stop all" also stops running agents and hands their tasks back.
+- **The stall watchdog** (`harness/stall.mjs`): a session with no file write, commit or task change for `STUDIO_STALL_MIN` (15)
+  minutes, or past its wall-clock cap (`STUDIO_SESSION_MAX_MIN`, 90; planning roles `STUDIO_SESSION_PLAN_MAX_MIN`, 25), is
+  ended and its task handed back (`session.stall`).
+  - Read-burn ratio (`STUDIO_STALL_RATIO`, 120:1 over `STUDIO_STALL_RATIO_WINDOW_TOKENS`; 0 = off) counts uncached input plus
+    cache creation only, and gives no verdict in the first `STUDIO_STALL_GRACE_MIN` (15) minutes.
+  - Each session is judged on its own tokens: the session record's `logFrom` says where its part of an agent's appended log
+    starts, only the newest Claude session id counts, and its stall record starts fresh. A session the launcher ends
+    records its usage from its stream and a cost estimated at `studio/prices.json` (`meta.costEstimated`).
+  - A session waiting on its own verify (`npm run verify`, its `.studio/verify-running/<agent>.json` or a `full*.json` it
+    owns, live process, no result) or its own background `task done` (`.studio/done-running/`) is busy, not stalled: the stall
+    clock is held and the wall cap may run over by at most `STUDIO_STALL_VERIFY_MAX_MIN` (60) (a done:
+    `STUDIO_DONE_RUNNING_MAX_MIN`, 90). `node harness/stall.mjs check` shows "waiting on its own verify".
+  - A stall end is recorded once per session (`.studio/stall/<agent>.json` `ended`), whoever sees it first, counts as
+    `exitCause.kind` stall and never toward the halt rule. Once the agent's process has exited the session lists as `ending`
+    (not STALLED) while its launcher hands the work back (bounded by `STUDIO_DONE_RUNNING_MAX_MIN`); the watchdog, watch pass
+    and silent-agent release leave it to the launcher. One `agent.session.end` per session.
+- **A silent agent doesn't hold its task forever:** a session whose process is alive but whose heartbeat is older than
+  `STUDIO_STALL_RELEASE_MIN` (30; 0 off) gets its work saved, its task handed back and its claims and slot freed by the
+  watcher; the process is left alone (a machine waking from sleep, or a reused pid, is never killed): end it by hand if stuck.
+  A pass right after the machine slept frees nothing and checks again.
+- **A dead session ends in time** (2.81, `harness/gone-check.mjs`): a launched session whose process is gone (PID plus its
+  start-time identity, `harness/proc-identity.mjs`; never the heartbeat alone) is ended by the supervisor's pass and by
+  `task next` / `task start`, at most once per `STUDIO_GONE_CHECK_S` (60; `off` turns these extra passes off; stamp
+  `.studio/gone-check.json`). Its `agent.session.end` keeps the detection time as `ts` and `meta.detectedAt`, and carries
+  `meta.endedAt`: the last heartbeat (else the start) plus `STUDIO_GONE_GRACE_S` (120), never later than the detection. Session
+  hours (`harness/model-pools.mjs`, `run-report.mjs`, `metrics.mjs`) read `meta.endedAt`.
+- **No-work sessions** (2.67.2, `harness/session-outcome.mjs`): each `agent.session.end` carries `meta.outcome` (task, whether
+  claimed, commits, done, and without a done why: `task.start_refused`, never claimed, `task done` refused and by what, or
+  claimed and committed nothing). After `STUDIO_NO_WORK_EXITS` (2; 0 off) such exits in a row (a stop, refresh, usage limit or
+  provider error doesn't count) the launcher parks the task with that reason and tells the Producer; `npm run task --
+  unpark <ID> --by <name>` resets the count. A bug task's brief and done-check refusal name the regression:
+  `qa/regressions/<ID>.json`, its fields, `node qa/check-regressions.mjs --update` and
+  `node qa/fails-before.mjs qa/regressions/<ID>.json "<fix>^"` (`harness/regression-howto.mjs`).
+- **Attempt ledger** (2.81, `harness/attempts.mjs`): every failed or owner-only hand-back is written to
+  `.studio/attempts/<ID>.json` (reason, main's tip, what it waits for, and a signature of the three). While the current
+  signature equals the last attempt's, a new session would meet the same wall. `STUDIO_ATTEMPTS`: `record` (default) writes
+  the ledger, and `task next` and the supervisor offer that task after every other eligible one (nothing refused; the loop
+  park, breaker, tier-up and usage-limit stop keep their own counts); `refuse` also refuses it in `task next`, `task start`,
+  the supervisor and the Line Producer ("same blocker as attempt <n> (<reason>): main unchanged since <sha> and nothing it
+  waits for landed"); `off` writes and reads nothing. A commit on main, a landed dependency, `npm run task -- unblock <ID>
+  --by <name>` (even with no park), `unpark` or a done clears it. A hand-back the harness or a person caused (claim ran out,
+  a stop, a refresh, a session cap) is never recorded, and the ledger never releases a lock or claim. `task next` and the
+  supervisor's pick also ask `task start`'s budget and round-cap questions (`eligibility()`).
+- **A task that waits for the owner** (2.78.2): when a hand-back note or a session's last output carries the harness's own
+  refusal of an owner-only step ("Only the owner can approve these", "needs the owner's signature", "no owner key at", "only
+  the owner approves weakening a test", "exceptions are the owner's call", or the builder's "owner-only step" / "waits for
+  the owner" / "needs the owner's approval"), `harness/owner-only.mjs` parks the task with reason `owner-only` at the
+  orchestrator's rank and sends the orchestrator an event (the Communicator turns it into an alert). No builder starts on it
+  until `npm run task -- unpark <ID> --by <name>` (the orchestrator or the owner).
+- **Launched agents inherit your MCP servers:** turn off any that open a tab per `claude -p` session in the server's own
+  settings (Serena: `web_dashboard_open_on_launch: false` in `~/.serena/serena_config.yml`).
 
 ## Plans and quota
 
@@ -196,28 +212,35 @@ npm run budget -- set claude --weekly 40000000 --reset thursday --hour 9 --targe
 npm run budget -- order claude,codex,agy
 ```
 
-Usage is what each session's tool reported (Claude Code's JSON result, `codex exec --json`). Plans
-don't publish token counts, so `--weekly` is your own estimate of a week on that plan. With it, the
-supervisor paces: under the target for this point in the week it allows up to two more agents; over
-it, it starts nothing new. A tool that hits its limit is skipped until its reset ("try again at 6:12")
-and its lanes move to the next tool in the order, instead of stalling.
-Claude Code's window limits count too ("5-hour limit reached ∙ resets 3pm", "Weekly limit reached ∙ resets
-Mon 9am", "Opus weekly limit reached ∙ resets Nov 3, 9am", "usage limit reached|<unix time>"), read in the
-zone the message names ("(Asia/Bangkok)") or else this machine's; such a stop hands the task back as
-"stopped at its usage limit", which is waiting for the reset, not a failure (no breaker, park or halt). A
-role run by its own `STUDIO_<ROLE>_CMD` (or `STUDIO_AGENT_CMD`) is marked per program, `custom:<program>`
-(the command's program, or the script an interpreter runs: `python -m hermes …` is `custom:hermes`), and
-every start of that command waits the same way: `npm run agent -- start` says "Not started: budget stop
-(custom:hermes is marked out until …)". Another command isn't held by it. Since 2.58.0; marks saved as plain
-`custom` by 2.57.0 run out on their own.
+- Usage is what each session's tool reported (Claude Code's JSON result, `codex exec --json`). Plans don't publish token
+  counts, so `--weekly` is your own estimate. With it the supervisor paces: under the target for this point in the week it
+  allows up to two more agents; over it, nothing new. A tool that hits its limit is skipped until its reset ("try again at
+  6:12") and its lanes move to the next tool in the order.
+- Only real limit errors count as out of quota (a 429, "usage limit reached", "credit balance is too low").
+  `STUDIO_QUOTA_SKIP=off` turns quota-skipping off when you watch usage outside the harness.
+- Claude Code's window limits count too ("5-hour limit reached ∙ resets 3pm", "Weekly limit reached ∙ resets Mon 9am", "Opus
+  weekly limit reached ∙ resets Nov 3, 9am", "usage limit reached|<unix time>"), read in the zone the message names or else this
+  machine's. Such a stop hands the task back as "stopped at its usage limit": waiting for the reset, not a failure (no
+  breaker, park or halt).
+- A role run by its own `STUDIO_<ROLE>_CMD` (or `STUDIO_AGENT_CMD`) is marked per program, `custom:<program>` (the command's
+  program, or the script an interpreter runs: `python -m hermes …` is `custom:hermes`); every start of it waits the same way
+  ("Not started: budget stop (custom:hermes is marked out until …)"); another command isn't held (2.58.0).
+- Per-model marks (2.78.2): a 429 on one Gemini model through agy is marked `agy:<model>` in `.studio/tool-quota.json`, so the
+  tool's other models keep running (launch, reviewer, router pools and fallback check `tool:model` first, then the tool).
+  Tool-wide errors (auth, binary missing) and old tool-only marks still mark the whole tool. `STUDIO_QUOTA_MODEL_TOOLS`
+  (default `agy,gemini`; `all`, or `off` for the old key) lists the tools with per-model marks.
+- **Usage wind-down** (`harness/winddown.mjs`): with `STUDIO_USAGE_WINDDOWN_PCT` set (unset: off), when the highest share of a
+  tool's week used (`npm run budget`; out of quota counts as 100%) reaches it, no new session starts, running ones finish,
+  `.studio/restart-log.md` lists what was running, queued and held with the next steps, and `studio.winddown` is emitted.
+  When usage resets the supervisor resumes (`studio.winddown_resumed` links the log). `npm run studio:winddown -- --now --by
+  <name>` does it on demand (until the soonest reset); `-- --off --by <name>` ends it early.
 
 ## Lanes, dependencies and parked work
 
-Two agents in the same files clash, so parallel work needs separate folders. Give tasks a lane
-(`npm run task -- add "…" --lane game/<game>/src/floors`, or later `npm run task -- lane T-041 <folder>`).
-`--part sim` or `--part renderer` implies the cartridge or renderer folder. Each lane gets its own agent
-holding that folder, and a builder with no lane holds the whole game, so no other builder runs beside it.
-Split big renderer files early (studio/rules/lanes.md; `node scripts/check-module-size.mjs`).
+Two agents in the same files clash, so parallel work needs separate folders. Give tasks a lane (`npm run task -- add "…" --lane
+game/<game>/src/floors`, or later `npm run task -- lane T-041 <folder>`). `--part sim` or `--part renderer` implies the
+cartridge or renderer folder. Each lane gets its own agent holding that folder; a builder with no lane holds the whole game, so
+no other builder runs beside it. Split big renderer files early (studio/rules/lanes.md; `node scripts/check-module-size.mjs`).
 
 ```bash
 npm run task -- add "Playtest the merged build" --role qa-playtester --after T-146   # waits for T-146
@@ -227,167 +250,56 @@ npm run task -- unpark T-100 --by producer-1
 npm run task -- holds                                         # everything that can't start yet, and why
 ```
 
-A park is undone by an unpark: the launcher's loop park and the watchdog's "handed back 3 times in 2 h" both
-count only hand-backs since the last done, unblock or unpark, and a park is written once however many passes
-reach it at the same moment (2.58.3).
+- A park is undone by an unpark. The loop park and the watchdog's "handed back 3 times in 2 h" count only hand-backs since the
+  last done, unblock or unpark; a park is written once however many passes reach it at once (2.58.3).
+- `task park <ID> --why "…" --until "<condition>"` stores a condition that isn't a task id, `phase:N` or a time as a note
+  (shown on every refusal). A park records its rank (owner > orchestrator > producer/director > any agent); `task unpark` and
+  `task unblock` by a lower rank are refused, naming who parked it (2.77.3).
+- A builder task added by `task add` must name its folders (`--lane <folders>`, `--paths`, `--part`, or `--lane all` on purpose)
+  unless they can be worked out from its title: `STUDIO_REQUIRE_LANE=on` refuses it, `warn` (default) queues it with a warning,
+  `off` is silent. Without folders it counts as working on the whole game. `task lane <ID> <folder> [<folder>…] --by <you>`
+  sets them afterwards, also on a task in progress (from the next pass its builder counts in that lane; a person, the
+  orchestrator or a Producer/Director session; a launched worker is refused) (2.78.1).
+- The Line Producer sets lanes on unscoped ready builder tasks itself and reports the ones it can't as `unscoped`
+  (`STUDIO_LINE_LANES`); builders with no lane run side by side when plan-waves predicts non-overlapping files
+  (`STUDIO_UNSCOPED_PARALLEL=off` turns that off); a task on shared sim code waits for the open task on the same shared files
+  (`STUDIO_SHARED_SIM`). Details: docs/LINE-PRODUCER.md.
 
-A session that ends with no work is recorded and counted too (2.67.2, `harness/session-outcome.mjs`): each
-`agent.session.end` carries `meta.outcome` (its task, whether it claimed it, its commits, whether it was done, and,
-without a done, why: its `task start` was refused (`task.start_refused`), it never claimed the task, `task done` was
-refused and by what, or it claimed and committed nothing). After `STUDIO_NO_WORK_EXITS` (2; 0 turns it off) such exits
-in a row (no done, and no commit or a refused task done; a person's stop, a refresh, a usage limit or a provider error
-don't count) the launcher parks the task with that reason and tells the Producer, instead of starting it again; `npm
-run task -- unpark <ID> --by <name>` resets the count. A bug task's brief and its done-check refusal name the
-regression exactly: `qa/regressions/<ID>.json`, its fields, `node qa/check-regressions.mjs --update` and
-`node qa/fails-before.mjs qa/regressions/<ID>.json "<fix>^"` (`harness/regression-howto.mjs`).
+## Crew watchdog and futility cap (2.68.0)
 
-**Attempt ledger** (2.81, `harness/attempts.mjs`): every failed or owner-only hand-back is recorded in
-`.studio/attempts/<ID>.json` (its reason, main's tip, what it waits for, and a signature of those three). While the
-signature of the current facts equals the last attempt's, a new session would meet the same wall. `STUDIO_ATTEMPTS`
-says what happens then: `record` (the default) writes the ledger, and `task next` and the supervisor offer that task after
-every other eligible one; nothing is refused (the loop park, the breaker, the tier-up and the usage-limit stop keep their
-own counts). `refuse` also refuses it in `task next`, `task start`, the supervisor and the Line Producer: "same blocker as
-attempt <n> (<reason>): main unchanged since <sha> and nothing it waits for landed". `off` writes and reads nothing. A
-commit on main, a landed dependency, `npm run task -- unblock <ID> --by <name>` (even with no park), `unpark` or a done
-clears it; a hand-back the harness or a person caused (claim ran out, a stop, a refresh, a session cap) is never recorded,
-and the ledger never releases a lock or a claim. `task next` and the supervisor's pick also ask the same budget and round-cap
-questions `task start` asks (`eligibility()`), so they stop offering a task that `start` would refuse.
+Each supervisor pass (code only, no model) also does these.
 
-**A dead session ends in time** (2.81, `harness/gone-check.mjs`): a launched session whose process is gone (PID plus its
-start-time identity, `harness/proc-identity.mjs`; never the heartbeat alone) is ended by the supervisor's pass and by
-`task next` / `task start` too, not only by the watch pass, at most once per `STUDIO_GONE_CHECK_S` (60 seconds; `off`
-turns these extra passes off; the stamp is `.studio/gone-check.json`). Its `agent.session.end` keeps the detection time
-as `ts` and `meta.detectedAt`, and carries `meta.endedAt`: the last heartbeat (else the start) plus `STUDIO_GONE_GRACE_S`
-(120 seconds), never later than the detection. Session hours (`harness/model-pools.mjs`, `harness/run-report.mjs`, and
-`harness/metrics.mjs` for an attempt closed by its agent's session end) read `meta.endedAt`, so a session that died hours
-before anyone noticed no longer counts those hours.
-
-`npm run agent -- stop <name>` (and Pause) keep that task from restarting for 15 minutes
-(`STUDIO_STOP_COOLDOWN_MIN`). "Stop all" also stops running agents and hands their tasks back. The cooldown (2.77.3)
-holds only the stopped role: a stopped builder's task can't restart as a builder for 15 minutes, but a reviewer can start;
-the restart time is shown in UTC.
-
-2.77.3: `task park <ID> --why "…" --until "<condition>"` stores the condition as a note (shown on every refusal) when it
-isn't a task id, `phase:N` or a time. A park records its rank (owner > orchestrator > producer/director > any agent);
-`task unpark` (and `task unblock`) by a lower rank is refused, naming who parked it. A builder task added by `task add` must name its folders
-(`--lane <folders>`, `--paths`, `--part`, or `--lane all` for the whole game on purpose) unless they can be worked out from
-its title: `STUDIO_REQUIRE_LANE=on` refuses it, `warn` (the default) queues it with a warning, `off` is silent. Without folders
-it counts as working on the whole game and no other builder runs beside it. `task lane <ID> <folder> [<folder>…]` sets them afterwards.
-
-2.78.1 (B-123): `npm run task -- lane <ID> <folder> [<folder>…] --by <you>` (a person, the orchestrator, or a Producer or
-Director session; a launched worker session is refused) also scopes a task already in progress: from the supervisor's
-next pass its builder counts as working in that lane, not on the whole game (a session's lane used to be fixed at
-launch). The Line Producer's pass sets lanes on unscoped ready builder tasks itself and reports the ones it can't scope
-as `unscoped` (`STUDIO_LINE_LANES`); builders with no lane run side by side when plan-waves predicts files for both and
-they don't overlap (`STUDIO_UNSCOPED_PARALLEL=off` turns that off); a task on shared sim code waits for the open task on
-the same shared files (`STUDIO_SHARED_SIM`). docs/LINE-PRODUCER.md has the details.
-
-## Orphaned gate runs (2.78.1)
-
-A `run-gates.mjs --only protected` once ran 13 h on the main checkout with no live parent. Each supervisor pass (at most
-every `STUDIO_ORPHAN_GATE_SCAN_MIN`, 10, minutes; `harness/gate-reaper.mjs`) ends every `scripts/run-gates.mjs` process
-whose parent is gone and that is older than `STUDIO_ORPHAN_GATE_MIN` (60) minutes, with its whole tree (taskkill /T on
-Windows, the process and its children on POSIX), and logs a `gate.orphan_ended` event (pid, age, why, its command line).
-"Parent gone": no process has its parent's pid, or a newer one does (Windows reuses pids and keeps the dead parent's
-number), or on POSIX it was re-parented to pid 1 or an init/systemd reaper. `npm run verify`'s host is parentless on
-purpose: it counts as alive while its verify record still names it as running (no longer than `STUDIO_VERIFY_MAX_MIN`,
-360). `STUDIO_ORPHAN_GATE_MIN=0` or `off`: never.
-
-## Crew watchdog, futility cap, wind-down and janitor (2.68.0)
-
-Each supervisor pass (code only, no model) also does three things:
-
-- **Crew watchdog** (`harness/crew-watch.mjs`): per role, over the last `STUDIO_CREW_WINDOW_MIN` (60) minutes, its
-  sessions, sessions with no commit, short exits (under `STUDIO_CREW_SHORT_SEC`, 180 s), tokens and tasks landed. More
-  than `STUDIO_CREW_MAX_SESSIONS` (6) sessions and 0 landed: the role isn't launched (running sessions go on), one
-  `crew.unhealthy` event goes to the Producer with the evidence, and the digest and `npm run status -- --brief` show it.
-  It resumes on its own when a task the role worked lands or new work for it appears, or on
-  `npm run crew -- resume <role> --by <name>` (a person, an agent under the owner's delegation for hold, or a
-  Producer/Director session or outside agent with `--permission "<the person's words>"`; never a worker). `npm run crew`
-  shows each role's hour. `STUDIO_CREW_WATCH=off` turns it off. 2.78.2: a pause also ends by itself after
-  `STUDIO_CREW_BREAKER_RESUME_MIN` (30; `0` or `off`: never) minutes, when the evidence no longer trips the breaker
-  (for example the supervisor was down and the sessions aged out of the hour), or once for that cause (the same
-  tasks): the window starts again and a second trip on the same tasks stays paused. Each is a `crew.resumed` event
-  (`meta.auto`).
-- **Futility cap, auto** (`harness/futility.mjs`): a running session past the 90th percentile of its task
-  type's successful sessions (weighted tokens, or wall time) raises one `futility.check` ("past the p90 of good runs").
-  Fewer than `STUDIO_FUTILITY_MIN_N` (20) successful sessions of that type: no cap. `STUDIO_FUTILITY=auto` (the default,
-  2.78.0) enforces for a type only when it has those 20 good runs and its shadow record (at least
-  `STUDIO_FUTILITY_AUTO_MIN_SHADOW`, 5, ended flagged sessions) shows that at most `STUDIO_FUTILITY_AUTO_MAX_LATE`
-  (0.10) of the sessions the cap would have stopped went on to succeed anyway (`taskDone` in the log: their task was done by
-  the time they ended). Why: the cap was measured in shadow first, and a cap that cuts good runs short costs more than it
-  saves, so each type is switched on only by its own data; a type without that data stays in shadow. Each type that
-  switches on emits one `futility.auto_on` event. `=shadow` stops nothing; when the session ends, `futility.shadow` and
-  `.studio/futility-log.jsonl` record what a cap would have saved and whether it would have cut a good run short. `=on` always
-  hands the task back (the diff is saved, the lane copy kept); `=off` turns it off.
-- **Start backoff and loop jitter** (`harness/supervisor.mjs`, 2.78.0): a start of task T refused for the same reason as
-  last time (`task.start_refused`, `task.lock_denied`, a start the launcher refused) is skipped in later passes for 2, 4, 8
-  ... minutes, at most `STUDIO_START_BACKOFF_MAX_MIN` (30); a changed reason or a changed task state (held, unheld,
-  handed back, started, its lock taken or freed) resets it. The pass's `why` says so once per backoff; state in
-  `.studio/start-backoff.json`. Why: a launcher once retried one refused start 61 times in 85 minutes, and 18 of 40 "can't
-  start yet" refusals came back to the same agent within an hour. The loop waits `STUDIO_SUPERVISOR_SEC` +-
-  `STUDIO_SUPERVISOR_JITTER` (0.1; 0 = fixed) so several studios on one PC don't fire together. A new agent name never reuses
-  one with a leftover `.lanes/<name>` folder or one another launch just took.
-- **Usage wind-down** (`harness/winddown.mjs`): with `STUDIO_USAGE_WINDDOWN_PCT` set (unset: off), when the highest
-  share of a tool's week used (`npm run budget`; a tool out of quota counts as 100%) reaches it, no new session starts,
-  the running ones finish, `.studio/restart-log.md` lists what was running, queued and held with the next steps, and a
-  `studio.winddown` event says so. When the usage resets the supervisor resumes and its `studio.winddown_resumed` event
-  links the restart log. `npm run studio:winddown -- --now --by <name>` does it on demand (until the soonest known
-  reset); `npm run studio:winddown -- --off --by <name>` ends it early.
-
-**Temp-file janitor** (`npm run janitor`, `harness/janitor.mjs`): a dry run by default (what, and how much);
-`--yes` deletes only the harness's own temporary files: train scratch copies left by a train that is no longer running
-(clean, nothing of their own), `.studio/tmp` entries older than `STUDIO_JANITOR_TMP_H` (24) hours, train logs beyond
-the newest `STUDIO_JANITOR_KEEP_LOGS` (40) or `STUDIO_JANITOR_LOGS_MB` (200), temp folders the harness marked for this
-studio (`.studio-temp.json`; in the system temp folder or `STUDIO_JANITOR_TMPDIR`) once old and their process gone,
-and the oldest cache entries while `.studio/unity-cache` and `.studio/assets/library` are over `STUDIO_CACHE_MAX_GB`
-(20). It never deletes a lane copy with commits not on main, uncommitted changes, a running session or a held or parked
-task. Lane copies that are merely stale (untouched for `STUDIO_JANITOR_LANE_H`, 24 h, clean, nothing unique, nobody in
-them) are listed with `npm run janitor -- --lanes` and deleted only with `--lanes --yes --by <name>` (the same deciders
-as above). One `janitor.run` event. After each train or verify job it runs `--yes` by itself, at most every
-`STUDIO_JANITOR_EVERY_MIN` (30) minutes (never lanes); `STUDIO_JANITOR=off` turns that off. `janitorEstimate()` gives a
-disk-low warning its "the janitor can free N GB" line.
-
-**Landed engine passes and orphan temp copies (2.79.1).** The janitor (`--yes`) also removes an engine pass's worktree
-(`.lanes/engine/<task>`, a full engine checkout) once the engine train's `landed` event names its task, when it is clean
-and no session is on the task (`janitor.engine_pass` event; the branch stays). In the system temp folder it removes orphan
-copies: folders whose name starts with a prefix the harness makes (`studio-build-`) or one the studio lists in
-`STUDIO_JANITOR_TEMP_PREFIXES` (comma list; a game's own play-copy prefix goes here), untouched for `STUDIO_JANITOR_ORPHAN_H`
-(2) hours by their newest file, with no live owner process (the marker's pid, else the pid in the name).
-
-**Idle lane copies (2.79).** The automatic janitor run also removes the worktree of a lane copy that has been idle for
-`STUDIO_LANE_IDLE_HOURS` (4 since 2.79.1, 12 before; 0 or `off`: never): its session ended, its task isn't queued for a train (read through the
-train queue's reader), held or parked, nobody works in it (no process, no live claim, no recent change), it has no
-uncommitted change and no commit that isn't on main. Only the worktree goes; the branch is kept (the train or the next
-session makes the copy again from it). `npm run lanes -- prune --idle <hours> [--dry-run] [--by <name>]` applies the same
-rule now and prints what it removed and the disk freed (`lanes.pruned` event). `npm run lanes` with no arguments is a
-cheap listing (no git process per copy); `--full` or a task/agent/branch name reads ahead/behind, dirty and stamps.
-
-**Stale-lane proposals surfaced (2.70.0).** A lane copy whose work has landed (its task is done in `studio/DONE.md`,
-or a `lane.merged` event names it) is stale after `STUDIO_JANITOR_LANDED_H` (6) hours instead of 24. The supervisor
-runs the janitor's lane proposals as a dry run (it never deletes) at most every `STUDIO_JANITOR_LANES_MIN` (360)
-minutes (`off` or 0: never), in a detached child (`harness/lane-disk.mjs`), with the lane disk report; the digest,
-`status --brief` and `npm run status -- --json` (`staleLanes`) then show "N stale lane copies (X GB) proposed: npm run
-janitor -- --lanes --yes --by <name>" (one `janitor.lanes_proposed` event). Deleting stays a decider's action: a
-person, a Producer/Director session or outside agent on a person's permission, or an agent under the owner's
-delegation for `janitor-lanes` (`npm run delegate -- grant <agent> --actions janitor-lanes …`; a `hold` delegation no
-longer covers it).
+- **Crew watchdog** (`harness/crew-watch.mjs`): per role, over the last `STUDIO_CREW_WINDOW_MIN` (60) minutes, its sessions,
+  sessions with no commit, short exits (under `STUDIO_CREW_SHORT_SEC`, 180 s), tokens and tasks landed. More than
+  `STUDIO_CREW_MAX_SESSIONS` (6) sessions and 0 landed: the role isn't launched (running sessions go on), one `crew.unhealthy`
+  event goes to the Producer with the evidence, and the digest and `npm run status -- --brief` show it. It resumes when a task
+  the role worked lands or new work for it appears, or on `npm run crew -- resume <role> --by <name>` (a person, an agent
+  under the owner's delegation for hold, or a Producer/Director session or outside agent with `--permission "<the person's
+  words>"`; never a worker). `npm run crew` shows each role's hour. `STUDIO_CREW_WATCH=off` turns it off. A pause also ends
+  itself after `STUDIO_CREW_BREAKER_RESUME_MIN` (30; `0` or `off`: never) when the evidence no longer trips the breaker, or once
+  per cause (the same tasks): a second trip on the same tasks stays paused. Each is a `crew.resumed` event (`meta.auto`) (2.78.2).
+- **Futility cap** (`harness/futility.mjs`): a running session past the 90th percentile of its task type's successful sessions
+  (weighted tokens, or wall time) raises one `futility.check`. With fewer than `STUDIO_FUTILITY_MIN_N` (20) successful sessions
+  of the type, no cap. `STUDIO_FUTILITY=auto` (default, 2.78.0) enforces for a type only with those 20 good runs and a shadow
+  record (at least `STUDIO_FUTILITY_AUTO_MIN_SHADOW`, 5, ended flagged sessions) showing at most
+  `STUDIO_FUTILITY_AUTO_MAX_LATE` (0.10) of the sessions the cap would have stopped went on to succeed (`taskDone` in the log),
+  because a cap that cuts good runs short costs more than it saves; each switch-on emits `futility.auto_on`, a type without
+  data stays in shadow. `=shadow` stops nothing (`futility.shadow` and `.studio/futility-log.jsonl` record what a cap would
+  have saved). `=on` always hands the task back (diff saved, lane copy kept); `=off` turns it off.
 
 ## Which model rescues a stuck task
 
 A rescue runs on a stronger model from a different family than the ones that got stuck. The model comes from
-`STUDIO_RESCUE_MODEL`, then `STUDIO_RESCUE_MODELS` (comma-separated), then `STUDIO_TIER_TOP_MODEL`. Each step takes the
-first one that is from another family, is not out of quota or at its spend guard, and was not used by an earlier step;
-then the same family; then the launcher's own choice. `STUDIO_RESCUE_LEVELS` (default 2) sets how many rescue steps run
-before the task is shelved. `STUDIO_RESCUE=off` sends budget stops straight to a person.
+`STUDIO_RESCUE_MODEL`, then `STUDIO_RESCUE_MODELS` (comma-separated), then `STUDIO_TIER_TOP_MODEL`. Each step takes the first one
+from another family, not out of quota or at its spend guard, and not used by an earlier step; then the same family; then the
+launcher's own choice. `STUDIO_RESCUE_LEVELS` (default 2) sets how many rescue steps run before the task is shelved.
+`STUDIO_RESCUE=off` sends budget stops straight to a person.
 
 ## What the owner sees
 
-- Ops: "Running unattended" (since when, sessions, tasks done, tokens, why nothing started), the
-  budget per tool, and each agent's work in progress ("main.js +120/−40, last verify 2 min ago")
-  and what it says it is doing (`npm run agent -- now "…"`).
-- Progress by phase: "Phase 1: 12/15 · exit 3/5 · Phase 2: not planned yet". The exit checklist is
+- Ops: "Running unattended" (since when, sessions, tasks done, tokens, why nothing started), the budget per tool, and each
+  agent's work in progress ("main.js +120/−40, last verify 2 min ago") and what it says it is doing (`npm run agent -- now "…"`).
+- Progress by phase ("Phase 1: 12/15 · exit 3/5 · Phase 2: not planned yet"); the exit checklist is
   `studio/bible/PHASE-<n>-EXIT.md`.
-- Golden changes as cards: the commit's `Golden-Reason:` and which recorded numbers moved, with
-  "Looks right".
-- The Arcade: the last good build to play.
+- Golden changes as cards (the commit's `Golden-Reason:`, which recorded numbers moved, "Looks right"); the Arcade: the last
+  good build to play. `npm run studio:status` shows the supervisor, and the run report has a section for it.
