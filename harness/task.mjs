@@ -2176,12 +2176,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       if (tv.note) console.log(`[task done] ${tv.note}`);
       const trainEngine = tv.engine || null;
       if (trainEngine) {
+        // 2.84 (u): --tag <word>: only a train for that tag takes the lane (checked before anything runs).
+        let doneTag = null;
+        if (flags.tag !== undefined) {
+          doneTag = (await import('./engine-train-control.mjs')).normTag(flags.tag === true ? '' : flags.tag);
+          if (doneTag === undefined || flags.tag === true) { console.error(`${targetId} was not queued: --tag takes one plain word (letters, digits, _ and -), e.g. --tag art.`); process.exit(2); }
+        }
         // --branch is recorded first, so the done check looks at that branch in the engine repo.
         if (typeof flags.branch === 'string' && flags.branch) { try { (await import('./engine-tracks.mjs')).setEngineTask(targetId, { engine: trainEngine, branch: flags.branch }); } catch {} }
         const pre = completeTask(targetId, '', whoAmI(flags), { unityTrainCheck: true, noop: noopFlag });
         if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
         if (pre.error) { console.error(pre.message); process.exit(1); }
-        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { engine: trainEngine, task: pre.id, agent: whoAmI(flags), alone: flags.alone ? true : null, branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '' });
+        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { engine: trainEngine, task: pre.id, agent: whoAmI(flags), alone: flags.alone ? true : null, branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '', tag: doneTag === null ? null : doneTag });
         (r.ok ? console.log : console.error)(r.message);
         process.exit(r.ok ? 0 : 1);
       }
@@ -2279,7 +2285,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.83: a word that is not a train subcommand starts nothing (`train log --engine unity` and a mistyped word started a
     // real train): usage, exit 2. A train starts with `train`, `train run` or `train --engine <name>`.
     if ((arg1 && !['run', 'status', 'release', 'leave', 'dequeue', 'auto', 'config', 'cancel'].includes(arg1)) || (typeof flags.unity === 'string' && flags.unity !== 'status')) {
-      console.error(`"${arg1 || flags.unity}" is not a train subcommand, so no train was started. Usage: npm run task -- train [run] [--engine <name>] | train status [--engine <name>] | train release <ID> | train leave <ID> --by <name> --why "…" | train dequeue <ID> [--engine <name>] --by <name> | train cancel | train config <ID> | train auto [on|off]`);
+      console.error(`"${arg1 || flags.unity}" is not a train subcommand, so no train was started. Usage: npm run task -- train [run] [--engine <name> [--only T-a,T-b] [--tag <word>]] | train status [--engine <name>] | train release <ID> | train leave <ID> --by <name> --why "…" | train dequeue <ID> [--engine <name>] --by <name> | train cancel [--engine <name>] | train config <ID> | train auto [on|off] [--engine <name>]`);
       process.exit(2);
     }
     const tr = await import('./train.mjs');
@@ -2297,8 +2303,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (trainEng && (!arg1 || arg1 === 'run' || arg1 === 'status')) {
       const ut = await import('./unity-train.mjs');
       if (arg1 === 'status' || flags.unity === 'status' || flags.status) { console.log(ut.unityStatusText(mainRoot(), { engine: trainEng })); process.exit(0); }
+      // 2.84 (u): --only T-a,T-b (only those queued tasks) and --tag <word> (only lanes with that tag); neither: untagged lanes only.
+      let trainTag = null;
+      if (flags.tag !== undefined) {
+        trainTag = (await import('./engine-train-control.mjs')).normTag(flags.tag === true ? '' : flags.tag);
+        if (!trainTag) { console.error('No train was started: --tag takes one plain word (letters, digits, _ and -), e.g. train --engine <name> --tag art.'); process.exit(2); }
+      }
+      if (flags.only === true) { console.error('No train was started: --only takes queued task ids, e.g. --only T-1,T-2.'); process.exit(2); }
       const busyMod = await import('./busy.mjs');
-      const r = await ut.runUnityTrain({ engine: trainEng, root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), by: typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human', waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
+      const r = await ut.runUnityTrain({ engine: trainEng, root: mainRoot(), ...(typeof flags.only === 'string' ? { only: flags.only } : {}), ...(trainTag ? { tag: trainTag } : {}), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), by: typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human', waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
       (r.ok ? console.log : console.error)(r.message);
       console.log(JSON.stringify({ unityTrain: r.id, engine: trainEng, landed: r.landed, dropped: r.dropped, deferred: r.deferred, runs: r.runs ?? 0, ...(r.refused ? { refused: r.refused } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
       process.exit(r.ok ? 0 : r.refused ? 3 : 1);
@@ -2325,7 +2338,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const which = eng ? `the ${eng} train queue` : 'the train queue';
       if (!entry) { console.error(`${tid} is not in ${which}; nothing was changed (npm run task -- train status${eng ? ` --engine ${eng}` : ''} lists it).`); process.exit(1); }
       const running = eng ? (ut.runningUnityTrain(mainRoot(), eng)?.lanes || []).includes(tid) : Boolean((await import('./train-status.mjs')).readTrainStatus(mainRoot())?.train);
-      if (running) { console.error(`${tid} is in a train that is running right now; it was not taken out. Wait for the train, or stop it: npm run task -- train cancel --by <name>${eng ? '' : `, or train leave ${tid} --by <name> --why "…" (the train stops before its next check)`}.`); process.exit(1); }
+      if (running) { console.error(`${tid} is in a train that is running right now; it was not taken out. Wait for the train, or stop it: npm run task -- train cancel${eng ? ` --engine ${eng}` : ''} --by <name>${eng ? '' : `, or train leave ${tid} --by <name> --why "…" (the train stops before its next check)`}.`); process.exit(1); }
       if (eng) ut.dequeueUnity(mainRoot(), tid, eng); else tr.dequeue(mainRoot(), tid);
       emitEvent({ type: 'task.train.dequeued', agent: by, task: tid, to: entry.agent || undefined, status: 'warn', msg: `${tid} was taken out of ${which} by ${by}`, meta: { head: entry.head || null, branch: entry.branch || null, ...(eng ? { engine: eng } : {}) } });
       // The train hands a lane back (pauseTask: the task goes back to the open list and its claim is released), so it can be started again.
@@ -2351,6 +2364,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(r.ok ? 0 : 1);
     }
     // 2.69.0 (r): the train daemon's switch (harness/train-daemon.mjs; decider rules: a person, never a worker).
+    // 2.84 (u): `train auto [off|on] --engine <x> --by <name> [--why "…"] [--hours N]`: that engine train's automatic start
+    // (harness/engine-train-control.mjs); without --engine, the game train's daemon as before.
+    if (arg1 === 'auto' && (typeof flags.engine === 'string' || flags.unity)) {
+      const eng = typeof flags.engine === 'string' ? flags.engine : 'unity';
+      const ctl = await import('./engine-train-control.mjs');
+      const want = flags._[2];
+      if (!want) { console.log(ctl.autoLine(mainRoot(), eng)); process.exit(0); }
+      if (!/^(on|off)$/.test(want) || typeof flags.by !== 'string') { console.error(`Usage: npm run task -- train auto off|on --engine ${eng} --by <name> [--why "…"] [--hours N]`); process.exit(1); }
+      const r = await ctl.setEngineAuto(mainRoot(), { engine: eng, on: want === 'on', by: flags.by, why: typeof flags.why === 'string' ? flags.why : '', hours: flags.hours ?? null });
+      (r.ok ? console.log : console.error)(r.message);
+      process.exit(r.ok ? 0 : 1);
+    }
     if (arg1 === 'auto') {
       const want = flags._[2];
       const td = await import('./train-daemon.mjs');
@@ -2369,6 +2394,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(r.ok ? 0 : 1);
     }
     // 2.78.2 (a): stop the running train cleanly (harness/train-cancel.mjs): a person, the orchestrator or a Producer.
+    // 2.84 (u): `train cancel --engine <x> --by <name> [--why "…"]`: that engine's running train, cleanly
+    // (harness/engine-train-control.mjs): the queue is kept, nobody handed back or blamed.
+    if (arg1 === 'cancel' && (typeof flags.engine === 'string' || flags.unity)) {
+      const eng = typeof flags.engine === 'string' ? flags.engine : 'unity';
+      if (typeof flags.by !== 'string') { console.error(`Usage: npm run task -- train cancel --engine ${eng} --by <name> [--why "…"]`); process.exit(1); }
+      const r = await (await import('./engine-train-control.mjs')).cancelEngineTrain(mainRoot(), { engine: eng, by: flags.by, why: typeof flags.why === 'string' ? flags.why : '' });
+      (r.ok ? console.log : console.error)(r.message);
+      process.exit(r.ok ? 0 : 1);
+    }
     if (arg1 === 'cancel') {
       const tid = flags._[2] || null;
       if (typeof flags.by !== 'string') { console.error('Usage: npm run task -- train cancel [<train id>] --by <name> [--why "…"]'); process.exit(1); }
@@ -2426,6 +2460,23 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   // 2.83: a task's --after list (studio/task-holds.json): add ids, --remove some, --set a new list, --clear it.
   // 2.83: `task alone <ID> [on|off]`: an engine task whose branch must land by itself (a switch-over, a change that
   // has to be judged alone). The engine train gives it a land run of its own; task done --train --alone does the same.
+  // 2.84 (u): `task tag <ID> <word>|none`: an engine task's lane tag. Only `train --engine <x> --tag <word>` takes a tagged
+  // lane; a plain train and the automatic start never do. Recorded on the engine record and on the queue entry.
+  if (cmd === 'tag') {
+    const ctl = await import('./engine-train-control.mjs');
+    const word = flags._[2];
+    const tg = ctl.normTag(word);
+    if (!/^[A-Z]+-\d+$/.test(String(arg1 || '')) || word === undefined || tg === undefined) { console.error('Usage: npm run task -- tag <TASK_ID> <word>|none   (a word: letters, digits, _ and -)'); process.exit(2); }
+    const et = await import('./engine-tracks.mjs');
+    const rec = et.engineTask(arg1);
+    if (!rec) { console.error(`${arg1} is not an engine task (task track ${arg1} engine:<name> first): only an engine train takes lanes by tag.`); process.exit(1); }
+    et.setEngineTask(arg1, { engine: rec.engine, ...(rec.track ? { track: rec.track } : {}), tag: tg });
+    let queued = null;
+    try { queued = (await import('./unity-train.mjs')).setQueueTag(mainRoot(), arg1, tg, rec.engine); } catch { /* the record is what counts */ }
+    emitEvent({ type: 'task.tag', agent: actor(), task: arg1, track: `engine:${rec.engine}`, msg: `${arg1} ${tg ? `is tagged ${tg}: only npm run task -- train --engine ${rec.engine} --tag ${tg} takes its lane` : 'is untagged: a plain engine train takes its lane'}${queued ? ' (queued)' : ''}`, meta: { tag: tg, engine: rec.engine, queued: Boolean(queued) } });
+    console.log(`${arg1} ${tg ? `is tagged ${tg}: only npm run task -- train --engine ${rec.engine} --tag ${tg} takes it; a plain train and the automatic start leave it queued` : 'has no tag: the next plain train (or the automatic start) takes it'}${queued ? '' : ' (not queued yet: task done --train queues it with this tag)'}.`);
+    process.exit(0);
+  }
   if (cmd === 'alone') {
     const on = !/^(off|no|false|0)$/i.test(String(process.argv[4] || 'on'));
     if (!/^[A-Z]+-\d+$/.test(String(arg1 || ''))) { console.error('Usage: npm run task -- alone <TASK_ID> [on|off]'); process.exit(2); }

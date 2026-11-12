@@ -5108,6 +5108,14 @@ if (inShard('selftest-283j')) {
   await selftest283J({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
+// 2.84 (u): control of the engine train: --only and lane tags, a batch cap and grouping by risk, a clean cancel, the
+// automatic start off and on, and coming back after a reboot (studio:boot -- install).
+if (inShard('selftest-284u')) {
+  const dir = copyRepo();
+  const { selftest284U } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284u.mjs')).href);
+  await selftest284U({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
 // 2.84 (m): the engine target merge a session can run, phantom files a filter rule makes look changed, rules.focus.ignore.
 if (inShard('selftest-284m')) {
   const dir = copyRepo();

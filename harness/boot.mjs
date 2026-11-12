@@ -27,13 +27,24 @@
  *   4. one status card: crew sessions, train, halts, what needs a person, outside agents seen lately (event log), lane
  *      copies and leftover folders in .lanes/ (B-51, listed, never removed).
  * Restarting outside orchestrators (chat sessions the harness doesn't launch) is not done here.
+ *
+ * 2.84 (u, B-130): after a Windows reboot the supervisor did not come back although auto-start was on ("auto-start"
+ * lets the supervisor start agents; nothing started the supervisor). So:
+ *   npm run studio:boot -- install [--remove] [--dry-run]
+ *     Windows: registers (or removes) a Task Scheduler task at logon that runs this file in this checkout
+ *     (schtasks /Create /SC ONLOGON /TN "Studio boot (<folder>)" /TR "<node> <boot.mjs>" /F); Linux/macOS: prints the
+ *     systemd user unit and the crontab @reboot line to add, and changes nothing. It prints what it will register first;
+ *     --dry-run prints only. A person or a board-decision caller only (never a launched worker session).
+ *   The sweep also clears every engine train's lock (.studio/locks/<engine>-train.lock) whose process is gone; the engine
+ *   queues are left as they are and the card says how many branches wait, so the Line Producer's automatic start
+ *   resumes them in the supervisor's next pass (unless `train auto off --engine <x>`).
  * UNTESTED on Windows: detached + windowsHide starts (same options as studio:start), `where npm.cmd`, the Desktop path
  * (%USERPROFILE%\Desktop, else %OneDrive%\Desktop) and the .cmd file.
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { identityLines, SESSION_IDENTITY_KEYS } from './dotenv.mjs';
@@ -77,6 +88,8 @@ export function sweepTargets(root = REPO_ROOT) {
     { file: path.join(st, 'verify-running', 'full.json'), what: 'the full-verify record', kind: 'remove' },
     { file: path.join(st, 'train', 'daemon.json'), what: 'the train daemon\'s running-train record', kind: 'remove' },
     { file: path.join(st, 'supervisor.json'), what: 'the supervisor\'s status', kind: 'supervisor' },
+    // 2.84 (u): every other engine train's lock (<engine>-train.lock).
+    ...(() => { try { return fs.readdirSync(path.join(st, 'locks')).filter((n) => /^[a-z][a-z0-9-]{1,30}-train\.lock$/.test(n) && n !== 'unity-train.lock').sort().map((n) => ({ file: path.join(st, 'locks', n), what: `the ${n.replace(/-train\.lock$/, '')} train lock`, kind: 'remove' })); } catch { return []; } })(),
   ];
 }
 
@@ -199,12 +212,25 @@ export async function outsideAgents({ root = REPO_ROOT, now = Date.now(), events
 
 /** Step 4's facts: { crew, train, halt, needs, outside, lanes, leftovers }. Every source is optional. */
 export async function cardFacts({ root = REPO_ROOT, env = process.env, now = Date.now() } = {}) {
-  const f = { crew: [], train: null, trainAuto: null, queue: { lanes: 0, held: 0 }, halt: null, needs: [], outside: [], lanes: 0, leftovers: [] };
+  const f = { crew: [], train: null, trainAuto: null, queue: { lanes: 0, held: 0 }, engines: [], halt: null, needs: [], outside: [], lanes: 0, leftovers: [] };
   const tryIt = async (fn) => { try { await fn(); } catch { /* a source that can't be read is left out */ } };
   await tryIt(async () => { f.crew = (await import('./agent.mjs')).sessions().filter((s) => s.running).map((s) => ({ agent: s.agent, task: s.task || null, role: s.role || null })); });
   await tryIt(async () => { const ts = await import('./train-status.mjs'); f.train = ts.trainStatusLine(ts.readTrainStatus(root)) || null; });
   await tryIt(async () => { const a = (await import('./train-daemon.mjs')).trainAuto(root, env); f.trainAuto = a.on ? 'on (runs in each supervisor pass)' : `off: ${a.why}`; });
   await tryIt(async () => { const q = readJson(path.join(root, '.studio', 'train', 'queue.json')); if (Array.isArray(q)) f.queue = { lanes: q.length, held: q.filter((e) => e?.held && !(e.released && e.released.head === e.head)).length }; });
+  // 2.84 (u): each engine queue (kept as it is) and whether its train's automatic start will resume it.
+  await tryIt(async () => {
+    const ut = await import('./unity-train.mjs');
+    const ctl = await import('./engine-train-control.mjs');
+    const names = new Set();
+    try { for (const n of fs.readdirSync(path.join(root, '.studio', 'train'))) { const m = n.match(/^([a-z][a-z0-9-]{1,30})-queue\.json$/); if (m) names.add(m[1]); } } catch {}
+    for (const e of [...names].sort()) {
+      const q = ut.readUnityQueue(root, e);
+      if (!q.length) continue;
+      const a = ctl.engineAutoState(root, e, { env, now });
+      f.engines.push({ engine: e, queued: q.length, tagged: q.filter((x) => x?.tag).length, running: Boolean(ut.runningUnityTrain(root, e)), auto: a.on ? 'on' : `off (${a.source === 'file' ? `train auto off by ${a.by}` : a.why})` });
+    }
+  });
   await tryIt(async () => { const s = readJson(path.join(root, '.studio', 'supervisor.json')); if (s?.status === 'running' && s.halted) f.halt = String(s.halted.why || 'no reason recorded').slice(0, 160); });
   await tryIt(async () => { f.needs = (await (await import('./digest.mjs')).needsPerson({ now, root })).filter((n) => n.kind !== 'halt' || !f.halt).map((n) => n.line); });
   await tryIt(async () => { f.outside = await outsideAgents({ root, now }); });
@@ -222,6 +248,7 @@ export function cardLines({ name, version, pre, swept, daemons, facts, check }) 
   if (daemons.hubGone) L.push('  hub         --hub/--no-hub ignored: there is no hub since 2.80 (this card and npm run studio:status show the studio)');
   L.push(`  supervisor  ${d(daemons.supervisor)}${daemons.supervisor?.state === 'started' ? ', log .studio/logs/supervisor.log' : daemons.supervisor?.state === 'down' ? ' (npm run studio:boot starts it)' : ''}`);
   L.push(`  train       daemon ${facts.trainAuto || '?'} · ${facts.train || 'no train running'} · queue ${facts.queue.lanes} lane(s)${facts.queue.held ? `, ${facts.queue.held} held for a person` : ''}`);
+  for (const e of facts.engines || []) L.push(`  engine      ${e.engine}: ${e.queued} branch(es) queued${e.tagged ? ` (${e.tagged} tagged: only train --engine ${e.engine} --tag <tag> takes them)` : ''}, kept as they were; ${e.running ? 'its train is running' : e.auto === 'on' ? 'the automatic start resumes them in the supervisor\'s next pass' : `automatic start ${e.auto}: npm run task -- train --engine ${e.engine} lands them`}`);
   L.push(`  crew        ${facts.crew.length ? `${facts.crew.length} session(s) running: ${facts.crew.slice(0, 8).map((c) => `${c.agent}${c.task ? ` (${c.task})` : ''}`).join(', ')}${facts.crew.length > 8 ? ' …' : ''}` : 'no sessions running'}`);
   L.push(`  halts       ${facts.halt ? `the supervisor is halted: ${facts.halt} (npm run studio:resume -- --by <you>)` : 'none'}`);
   L.push(`  needs you   ${facts.needs.length ? `${facts.needs.length}:` : 'nothing'}`);
@@ -269,11 +296,72 @@ export async function boot({ root = REPO_ROOT, env = process.env, argv = [], now
   return { ok: !failed, check, pre, swept, daemons, facts, shortcut, lines };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+/**
+ * 2.84 (u, B-130): what `studio:boot -- install` registers so the studio comes back after a reboot. Pure. { platform,
+ * name, lines, cmd?: [file, args] } (cmd only on Windows: the schtasks call; elsewhere nothing is run).
+ */
+export function bootHook({ root = REPO_ROOT, platform = process.platform, node = process.execPath, remove = false } = {}) {
+  const P = platform === 'win32' ? path.win32 : path.posix;
+  const folder = P.basename(root) || 'studio';
+  const name = `Studio boot (${folder.replace(/["%]/g, '')})`;
+  const script = P.join(root, 'harness', 'boot.mjs');
+  if (platform === 'win32') {
+    const tr = `"${node}" "${script}"`;
+    const args = remove ? ['/Delete', '/TN', name, '/F'] : ['/Create', '/SC', 'ONLOGON', '/TN', name, '/TR', tr, '/F'];
+    const shown = `schtasks ${args.map((a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)).join(' ')}`;
+    return { platform, name, cmd: ['schtasks', args], lines: [remove ? `Removes the Task Scheduler task "${name}":` : `Registers a Task Scheduler task "${name}" that runs studio:boot in ${root.split(/[\\/]/).join('/')} at each logon:`, `  ${shown}`] };
+  }
+  const q = (p) => `'${String(p).replace(/'/g, "'\\''")}'`;
+  const unit = `studio-boot-${folder.replace(/[^\w.-]+/g, '-').toLowerCase()}`;
+  const lines = remove
+    ? [`Nothing is registered on ${platform}: remove the line or unit you added (crontab -e; or systemctl --user disable ${unit}.service and delete ~/.config/systemd/user/${unit}.service).`]
+    : [
+      `Nothing was changed on ${platform}: add ONE of these yourself.`,
+      '  crontab -e, then the line:',
+      `    @reboot cd ${q(root)} && ${q(node)} harness/boot.mjs >> .studio/logs/boot.log 2>&1`,
+      ...(platform === 'linux' ? [
+        `  or a systemd user unit, ~/.config/systemd/user/${unit}.service:`,
+        '    [Unit]', `    Description=Studio boot (${folder})`, '    [Service]', '    Type=oneshot', '    RemainAfterExit=yes', '    KillMode=process', `    WorkingDirectory=${root}`, `    ExecStart=${node} ${script}`, '    [Install]', '    WantedBy=default.target',
+        `    then: systemctl --user daemon-reload && systemctl --user enable ${unit}.service`,
+      ] : []),
+    ];
+  return { platform, name, lines };
+}
+
+/**
+ * 2.84 (u): `studio:boot -- install [--remove] [--dry-run]`. opts: exec(file, args) -> { status, stdout, stderr }
+ * (injectable for tests), env, platform. Prints first, then (Windows, not --dry-run) runs schtasks. { ok, ran, lines }.
+ */
+export async function bootInstall({ root = REPO_ROOT, argv = [], env = process.env, platform = process.platform, node = process.execPath, exec = null } = {}) {
+  const remove = argv.includes('--remove');
+  const dry = argv.includes('--dry-run');
+  const h = bootHook({ root, platform, node, remove });
+  const lines = [...h.lines];
+  if (!h.cmd) return { ok: true, ran: false, lines };
+  if (dry) { lines.push('  (--dry-run: nothing was registered)'); return { ok: true, ran: false, lines }; }
+  const { mayControl } = await import('./engine-train-control.mjs');
+  const may = await mayControl({ env, root, what: 'register the studio\'s boot task' });
+  if (!may.ok) { lines.push(`  Not registered. ${may.why}`); return { ok: false, ran: false, lines }; }
+  const run = exec || ((f, a) => spawnSync(f, a, { windowsHide: true, encoding: 'utf8' }));
+  const r = run(h.cmd[0], h.cmd[1]) || {};
+  const ok = r.status === 0;
+  lines.push(ok ? `  Done: ${remove ? 'removed' : 'registered'} "${h.name}".` : `  schtasks exited ${r.status ?? r.error?.code ?? '?'}: ${String(r.stderr || r.stdout || r.error?.message || '').trim().split('\n').pop()}`);
+  try { if (ok) emitEvent({ type: remove ? 'boot.hook_removed' : 'boot.hook_installed', agent: BY, to: 'producer', msg: `studio:boot ${remove ? 'removed' : 'registered'} the logon task "${h.name}"`, meta: { name: h.name } }); } catch {}
+  return { ok, ran: true, lines };
+}
+
+async function main() {
   const argv = process.argv.slice(2);
   fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
+  if (argv[0] === 'install') {
+    const r = await bootInstall({ argv });
+    console.log(r.lines.join('\n'));
+    process.exit(r.ok ? 0 : 1);
+  }
   const r = await boot({ argv });
   if (argv.includes('--json')) console.log(JSON.stringify({ ...r, lines: undefined }));
   else console.log(r.lines.join('\n'));
   process.exit(r.ok ? 0 : 1);
 }
+// 2.84 (u): no top-level await here (an import cycle would end the process with exit 13).
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) main();

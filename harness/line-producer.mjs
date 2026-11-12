@@ -1194,6 +1194,7 @@ export function engineWindow(f, env = process.env) {
 
 const ENGINE_STARTS = () => path.join(LINE_DIR(), 'engine-trains.json');
 const ENGINE_BATCH = () => path.join(LINE_DIR(), 'engine-batch.json');
+const ENGINE_AUTO_TOLD = () => path.join(LINE_DIR(), 'engine-auto-told.json');
 
 /**
  * 2.84: the engine train's batch window, in the game train's words (STUDIO_TRAIN_MIN / STUDIO_TRAIN_WAIT_MIN):
@@ -1268,15 +1269,27 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
   let batchChanged = false;
   const autoOn = !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_TRAIN_AUTO ?? ''));
   const acting = !dryRun && lineMode(env) === 'on';
+  const ctl = await import('./engine-train-control.mjs');
+  const told = readJson(ENGINE_AUTO_TOLD(), {}) || {};
+  let toldChanged = false;
   const out = [];
   for (const t of targets) {
-    const q = ut.readUnityQueue(root, t.name);
+    // 2.84 (u): the automatic start takes untagged lanes only: a tagged lane waits for train --engine <x> --tag <tag>.
+    const qAll = ut.readUnityQueue(root, t.name);
+    const q = qAll.filter((e) => !e?.tag);
+    const taggedN = qAll.length - q.length;
+    // 2.84 (u): `train auto off --engine <x>` (.studio/train/<x>-auto.json; --hours runs out by itself).
+    const ea = ctl.engineAutoState(root, t.name, { env, now });
+    if (ea.expired && acting) {
+      try { fs.rmSync(ctl.autoFile(root, t.name), { force: true }); } catch {}
+      try { emitEvent({ type: `task.train.${t.name}.auto_on`, agent: LINE_AGENT, to: 'producer', track: `engine:${t.name}`, msg: `Line Producer: the ${t.label} train's automatic start is on again: the off by ${ea.expired.by || '?'} ran out at ${String(ea.expired.until).slice(0, 16)} UTC`, meta: { engine: t.name, expired: true, by: ea.expired.by || null } }); } catch {}
+    }
     const running = ut.runningUnityTrain(root, t.name);
     const floor = et.engineFloor(t.name, { env, root });
     const exp = et.expectedMinutes(t.name, { root });
     const last = starts[t.name];
     const since = last ? Math.round((now - Date.parse(last.at)) / 60000) : null;
-    const f = { engine: t.name, label: t.label, heavyKind: t.heavyKind, queued: q.length, oldestAt: q[0]?.at || null, running: Boolean(running), startedRecently: since !== null && since < num(env.STUDIO_ENGINE_TRAIN_COOLDOWN_MIN, 3) ? Math.max(0, since) : 0, auto: autoOn && t.trainAuto, webTrain, webQueued: webQ.length, heavy, freeGb: Number.isFinite(rb?.freeGb) ? rb.freeGb : Number.isFinite(rig?.freeRamGb) ? rig.freeRamGb : null, floorGb: floor.gb, floorFrom: floor.from, cpuBusy, expectedMin: exp.minutes, now };
+    const f = { engine: t.name, label: t.label, heavyKind: t.heavyKind, queued: q.length, oldestAt: q[0]?.at || null, running: Boolean(running), startedRecently: since !== null && since < num(env.STUDIO_ENGINE_TRAIN_COOLDOWN_MIN, 3) ? Math.max(0, since) : 0, auto: autoOn && t.trainAuto && (ea.on || ea.source !== 'file'), webTrain, webQueued: webQ.length, heavy, freeGb: Number.isFinite(rb?.freeGb) ? rb.freeGb : Number.isFinite(rig?.freeRamGb) ? rig.freeRamGb : null, floorGb: floor.gb, floorFrom: floor.from, cpuBusy, expectedMin: exp.minutes, now };
     // 2.79 (e): the engine slot: how many engine lands hold machine:heavy now against STUDIO_ENGINE_SLOTS.
     try {
       const hv = await import('./heavy.mjs');
@@ -1287,6 +1300,18 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     } catch { f.engineSlots = 0; }
     f.window = t.cfg?.window === 'quiet' ? 'quiet' : 'slot';
     const w = engineWindow(f, env);
+    if (autoOn && t.trainAuto && !ea.on && ea.source === 'file') {
+      w.start = false; w.wait = false; w.why = ctl.autoOffWhy(ea, t.name);
+      // Said once per hour as an event (the why is in every pass's row).
+      const last = Date.parse(told[t.name] || '');
+      if (acting && (q.length || taggedN) && (!Number.isFinite(last) || now - last >= 3600000)) {
+        told[t.name] = new Date(now).toISOString(); toldChanged = true;
+        try { emitEvent({ type: `task.train.${t.name}.auto_off`, agent: LINE_AGENT, to: 'producer', track: `engine:${t.name}`, status: 'warn', msg: `Line Producer: ${qAll.length} ${t.label} branch(es) queued, none started: ${w.why}`.slice(0, 600), meta: { engine: t.name, queued: qAll.length, by: ea.by, until: ea.until || null, reminder: true } }); } catch {}
+      }
+    } else if (!q.length && taggedN && w.why === `no ${t.label} branch queued`) {
+      const tc = ctl.tagCounts(qAll);
+      w.why = `no untagged ${t.label} branch queued; ${taggedN} tagged lane(s) wait (${Object.entries(tc).map(([k, v]) => `${k} ${v}`).join(', ')}): the automatic start takes untagged lanes only, npm run task -- train --engine ${t.name} --tag <tag> lands them`;
+    }
     // 2.84: the batch window, only for this automatic start (a person's `task train --engine <x>` starts at once).
     const br = engineBatchRules(t.cfg, env);
     let batchWaiting = false;
@@ -1314,7 +1339,7 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
         }
       } else if (batchState[t.name]) { delete batchState[t.name]; batchChanged = true; }
     } else if (batchState[t.name] && !w.wait) { delete batchState[t.name]; batchChanged = true; }
-    const row = { engine: t.name, queued: q.length, running: Boolean(running), expectedMin: exp.minutes, expectedFrom: exp.from, floorGb: floor.gb, start: w.start, why: w.why, ...(batchWaiting ? { batchWait: true } : {}) };
+    const row = { engine: t.name, queued: q.length, ...(taggedN ? { tagged: taggedN } : {}), ...(!ea.on && ea.source === 'file' ? { autoOff: true } : {}), running: Boolean(running), expectedMin: exp.minutes, expectedFrom: exp.from, floorGb: floor.gb, start: w.start, why: w.why, ...(batchWaiting ? { batchWait: true } : {}) };
     if (w.start && acting) {
       try {
         const r = deps.startTrain ? await deps.startTrain(t.name) : startEngineTrain(root, t.name, env);
@@ -1328,6 +1353,7 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     }
     out.push(row);
   }
+  if (toldChanged && acting) { try { fs.mkdirSync(LINE_DIR(), { recursive: true }); fs.writeFileSync(ENGINE_AUTO_TOLD(), `${JSON.stringify(told, null, 2)}\n`); } catch { /* a second event at worst */ } }
   if (batchChanged && acting) { try { fs.mkdirSync(LINE_DIR(), { recursive: true }); fs.writeFileSync(ENGINE_BATCH(), `${JSON.stringify(batchState, null, 2)}\n`); } catch { /* a second event at worst */ } }
   return out;
 }
