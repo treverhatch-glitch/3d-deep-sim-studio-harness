@@ -88,7 +88,17 @@ const WORDS = {
   refused: 'refused to start (busy: an editor open, too little memory or another landing). Not a failure of the work: try again later',
   error: 'failed to run',
   'not-run': 'did not run to the end for a reason outside the work (an infrastructure abort): not a failure of the work; try again later',
+  killed: 'was killed from outside (the operating system ended it, for example a reboot): not a failure of the work; try again later',
 };
+
+/**
+ * 2.84 (t, B-130): the exit codes that mean the operating system killed the land command: 0x40010004 (a Windows
+ * reboot or log-off ended it) and 0xC000013A (Ctrl+C or a closed console). engines.<x>.killedExits replaces the list.
+ */
+export const KILLED_EXITS = [1073807364, 3221225786];
+export function killedExitsOf(cfg = {}) {
+  return Array.isArray(cfg?.killedExits) ? cfg.killedExits.map(Number).filter(Number.isFinite) : KILLED_EXITS.slice();
+}
 
 /** The studio's Unity land settings (studio/game.json engines.unity), or null when no land command is set. */
 export function unityConfig(root = REPO_ROOT, engine = 'unity') {
@@ -145,7 +155,7 @@ export function setTaskBranch(taskId, branch, { agent = process.env.STUDIO_LOCK_
   return { ok: true, why: `${taskId} lands from the Unity branch ${branch}` };
 }
 
-const STATUSES = new Set(['pass', 'red', 'conflict', 'refused', 'error', 'not-run']);
+const STATUSES = new Set(['pass', 'red', 'conflict', 'refused', 'error', 'not-run', 'killed']);
 
 // 2.73.2 (e, B-73): signs in a land command's output that the work's own tests or compile failed (then a red stays red).
 const WORK_FAILED = /<test-case\b[^>]*\bresult="Failed"|\b[1-9]\d* (?:test\(s\)|tests?) failed\b|\[gate\] FAIL\b|\[engine-gate\] FAIL (?:test-failed|compile-error)\b|\bTest(?:Run)? ?Failed\b/i;
@@ -167,6 +177,79 @@ export function failingTests(text) {
     if (x) names.add(x[1]);
   }
   return [...names].sort();
+}
+
+/**
+ * 2.84 (t): the failing tests of an NUnit 3 results file: <test-case ... fullname="X" ... result="Failed"> or
+ * result="Error" (an exception in the test or its set-up), sorted and unique.
+ */
+export function nunitFailures(text) {
+  const names = new Set();
+  for (const m of String(text || '').matchAll(/<test-case\b[^>]*>/g)) {
+    if (!/\bresult="(?:Failed|Error)"/.test(m[0])) continue;
+    const n = (/\bfullname="([^"]+)"/.exec(m[0]) || /\bname="([^"]+)"/.exec(m[0]))?.[1];
+    if (n) names.add(n.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&apos;/g, "'").replace(/&amp;/g, '&'));
+  }
+  return [...names].sort();
+}
+
+/** 2.84 (t): where a Unity land leaves its test results when engines.unity.results is not set (relative to the gate worktree). */
+export const UNITY_RESULTS = ['TestResults*.xml', 'Logs/*results*.xml', 'artifacts/*.xml'];
+
+/**
+ * 2.84 (t): the results files a land run left. patterns: paths relative to base (the gate worktree) or absolute, with
+ * forward or back slashes; `*` and `?` match within one path segment (no `**`). Only files modified at or after sinceMs
+ * (less 2 s, for file systems that keep coarse times) count. [{ file, mtimeMs, size }], newest first, maxFiles at most.
+ */
+export function resultFiles(patterns = [], { base = process.cwd(), sinceMs = 0, maxFiles = 20 } = {}) {
+  const found = new Map();
+  const ci = process.platform === 'win32';
+  const segRe = (seg) => new RegExp(`^${seg.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, ci ? 'i' : '');
+  for (const raw of Array.isArray(patterns) ? patterns : []) {
+    const pat = String(raw || '').trim();
+    if (!pat) continue;
+    const abs = path.isAbsolute(pat) ? pat : path.join(base, pat);
+    const parts = abs.split(/[\\/]+/);
+    let dirs = [parts[0] === '' ? path.sep : `${parts[0]}${path.sep}`];
+    for (let i = 1; i < parts.length && dirs.length; i += 1) {
+      const seg = parts[i];
+      if (!seg) continue;
+      const next = [];
+      for (const d of dirs) {
+        if (!/[*?]/.test(seg)) { const p = path.join(d, seg); if (fs.existsSync(p)) next.push(p); continue; }
+        let names = []; try { names = fs.readdirSync(d); } catch { continue; }
+        const re = segRe(seg);
+        for (const n of names) if (re.test(n)) next.push(path.join(d, n));
+      }
+      dirs = next.slice(0, 500);
+    }
+    for (const f of dirs) {
+      let st; try { st = fs.statSync(f); } catch { continue; }
+      if (!st.isFile() || st.mtimeMs < sinceMs - 2000) continue;
+      found.set(path.resolve(f), { file: path.resolve(f), mtimeMs: st.mtimeMs, size: st.size });
+    }
+  }
+  return [...found.values()].sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, Math.max(0, maxFiles));
+}
+
+/** 2.84 (t): the failing tests in results files (resultFiles), reading at most maxBytes in all (a larger file is skipped). */
+export function resultFailures(files = [], { maxBytes = 20 * 1024 * 1024 } = {}) {
+  const names = new Set();
+  let left = maxBytes;
+  for (const f of files) {
+    if (f.size > left) continue;
+    left -= f.size;
+    try { for (const n of nunitFailures(fs.readFileSync(f.file, 'utf8'))) names.add(n); } catch { /* a file being written or gone: the output's names stand */ }
+  }
+  return [...names].sort();
+}
+
+/** 2.84 (t): a "failures" list (test full names) in the land's stage report (STUDIO_LAND_RESULT), [] when none. */
+export function reportFailures(file) {
+  try {
+    const j = file && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) : null;
+    return Array.isArray(j?.failures) ? j.failures.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().slice(0, 400)).slice(0, 200) : [];
+  } catch { return []; }
 }
 
 /**
@@ -224,9 +307,13 @@ export function landStages(file, text = '') {
  * Map a land command's exit to a result. 2.60.1 (B-41): `exits` (studio/game.json engines.unity.exits) is the land
  * script's own contract and replaces the default one; a code it doesn't list is an error naming the code.
  */
-export function mapUnityExit(code, { signal = null, timedOut = false, timeoutMin = null, exits = null } = {}) {
+export function mapUnityExit(code, { signal = null, timedOut = false, timeoutMin = null, exits = null, killedExits = KILLED_EXITS } = {}) {
   if (timedOut) return { status: 'error', why: `timed out after ${timeoutMin} min (engines.unity.timeoutMin or STUDIO_UNITY_GATE_TIMEOUT_MIN)` };
+  // 2.84 (t, B-130): a kill or terminate signal the harness did not send by a time-out: killed from outside.
+  if ((code === null || code === undefined) && /^(SIGKILL|SIGTERM)$/.test(String(signal || ''))) return { status: 'killed', why: `killed by ${signal} from outside (not a time-out of the harness): ${WORDS.killed}` };
   if (code === null || code === undefined) return { status: 'error', why: `stopped${signal ? ` by ${signal}` : ''} before it ended` };
+  const killed = (Array.isArray(killedExits) ? killedExits : []).some((k) => Number(k) >>> 0 === Number(code) >>> 0);
+  const killedWhy = () => ({ status: 'killed', why: `exited ${code} (0x${(Number(code) >>> 0).toString(16).toUpperCase()}): ${WORDS.killed} (engines.<x>.killedExits)` });
   if (exits && typeof exits === 'object') {
     const e = exits[String(code)];
     if (typeof e === 'string' && e.trim()) return { status: code === 0 ? 'pass' : 'error', why: `exited ${code}: ${e.trim()} (studio/game.json engines.unity.exits)` };
@@ -235,8 +322,10 @@ export function mapUnityExit(code, { signal = null, timedOut = false, timeoutMin
       return { status, why: `exited ${code}: ${String(e.why || WORDS[status] || status).trim()} (studio/game.json engines.unity.exits)` };
     }
     if (code === 0) return { status: 'pass', why: WORDS.pass };
+    if (killed) return killedWhy();
     return { status: 'error', why: `exited ${code}, which the land script's contract (studio/game.json engines.unity.exits: ${Object.keys(exits).join(', ') || 'none'}) doesn't name: see its last lines` };
   }
+  if (killed && !UNITY_EXIT[code]) return killedWhy();
   const status = UNITY_EXIT[code] || 'error';
   if (!UNITY_EXIT[code]) return { status, why: `exited ${code}, which the land contract doesn't define (0 pass, 1 red, 2 conflict, 3 refused, 4 error): see its last lines` };
   return { status, why: code === 0 ? WORDS[status] : `exited ${code}: ${WORDS[status]} (the default land contract; if the script means something else by ${code}, set studio/game.json engines.unity.exits)` };
@@ -246,7 +335,10 @@ export function mapUnityExit(code, { signal = null, timedOut = false, timeoutMin
  * Run the Unity landing gate. { status: pass|red|conflict|refused|error|skipped, ok, code, why, ms, log }.
  * onlyUnityTask: a `task` not on the Unity track is skipped (notUnity). A busy lock is a refusal, never a throw.
  */
-export async function runUnityGate({ engine = 'unity', task = null, branch = null, branches = null, label = null, env = process.env, log = () => {}, onlyUnityTask = false } = {}) {
+export async function runUnityGate({ engine = 'unity', task = null, branch = null, branches = null, label = null, env = process.env, log = () => {}, onlyUnityTask = false, only = null, timeoutMin: timeoutOverride = null, stagesBefore = [] } = {}) {
+  // 2.84 (t): only 'compile': the engine train's compile-only run (STUDIO_LAND_ONLY=compile in env). It lands nothing, so
+  // it writes no engine.land event and no land duration (the train writes task.train.<x>.compile). timeoutMin overrides
+  // the land's limit for it; stagesBefore: stages the train ran before this run (its compile), put first in the report.
   const t0 = Date.now();
   const et = engineTarget(engine) || engineTarget('unity');
   const L = et.label;
@@ -288,7 +380,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   const tune = (() => { try { return readTune(engine).values; } catch { return {}; } })();
   const flags = Array.isArray(tune['batch-flags']) && et.tune.includes('batch-flags') ? tune['batch-flags'].filter((f) => /^-{1,2}[A-Za-z][A-Za-z0-9_-]*(=[A-Za-z0-9_.:,/-]+)?$/.test(f)) : [];
   const cmd = template.replaceAll('{flags}', flags.join(' ')).replaceAll('{branches}', many ? many.join(' ') : '').replaceAll('{branch}', br ? q(br) : '').replaceAll('{task}', task ? q(task) : '').replaceAll('{target}', cfg.target ? q(cfg.target) : '').replaceAll('{folder}', folder ? q(folder) : '');
-  const timeoutMin = Number(cfg.timeoutMin || env.STUDIO_UNITY_GATE_TIMEOUT_MIN || 120);
+  const timeoutMin = Number(timeoutOverride || cfg.timeoutMin || env.STUDIO_UNITY_GATE_TIMEOUT_MIN || 120);
   // 2.77.0 (u, P5.3): the engine table's job kind, RAM and floor (unity: the "unity" kind and STUDIO_UNITY_MIN_FREE_GB as before).
   const floor = engineFloor(engine, { env });
   // 2.78.1 (f, B-117): engine: the land takes the engine line (STUDIO_ENGINE_SLOTS), not one of the game's slots.
@@ -339,7 +431,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   }
   const landEnd = Date.now();
   // 2.79.1 (3.2): keep what this run took in RAM (the machine monitor's samples while it ran) for the next land's floor.
-  const keepPeak = (status) => { try { recordLandPeak(engine, { root: hroot, startMs: landStart, endMs: landEnd, status }); } catch { /* the table's floor stays */ } };
+  const keepPeak = (status) => { if (only) return; try { recordLandPeak(engine, { root: hroot, startMs: landStart, endMs: landEnd, status }); } catch { /* the table's floor stays */ } };
   // 2.68.0 (n): a run killed for memory (heavy-budget.mjs oomSignature) queues once more for the budget, with a note.
   const oom = !/^(off|0|false|no)$/i.test(String(env.STUDIO_HEAVY_OOM_RETRY || '')) ? oomSignature(r) : '';
   if (oom) {
@@ -358,7 +450,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   const out = path.join(REPO_ROOT, '.studio', 'gates', 'out', et.files.gateLog);
   try { fs.mkdirSync(path.dirname(out), { recursive: true }); fs.writeFileSync(out, text); } catch {}
   const timedOut = r.error?.code === 'ETIMEDOUT';
-  let m = r.error && !timedOut ? { status: 'error', why: `could not run it: ${r.error.code || r.error.message}` } : mapUnityExit(r.status, { signal: r.signal, timedOut, timeoutMin, exits: cfg.exits && typeof cfg.exits === 'object' ? cfg.exits : null });
+  let m = r.error && !timedOut ? { status: 'error', why: `could not run it: ${r.error.code || r.error.message}` } : mapUnityExit(r.status, { signal: r.signal, timedOut, timeoutMin, exits: cfg.exits && typeof cfg.exits === 'object' ? cfg.exits : null, killedExits: killedExitsOf(cfg) });
   // 2.73.2 (e, B-73): a red or error that the output shows was an infrastructure abort is "not run", never red.
   let infra = null;
   if ((m.status === 'red' || (m.status === 'error' && !r.error)) && (infra = landInfra(text, { status: r.status, signal: r.signal, timedOut }))) {
@@ -367,17 +459,28 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   keepPeak(m.status);
   const tail = text.trimEnd().split('\n').slice(-12).join('\n');
   // 2.79 (e): a red run's failing test names (the train's bisect stops on the batch's signature).
-  const failures = m.status === 'red' ? failingTests(text) : [];
+  // 2.84 (t): and the names in the results files the land left (engines.<x>.results; Unity's usual places by default),
+  // and a "failures" list in its stage report: a land script that writes NUnit XML and prints a summary names no test.
+  const failures = m.status === 'red' ? (() => {
+    const names = new Set(failingTests(text));
+    try {
+      const gw = cfg.gateWorktree ? path.resolve(REPO_ROOT, cfg.gateWorktree) : cwd;
+      const pats = Array.isArray(cfg.results) ? cfg.results : engine === 'unity' ? UNITY_RESULTS : [];
+      for (const n of resultFailures(resultFiles(pats, { base: gw, sinceMs: landStart }))) names.add(n);
+    } catch { /* the output's names stand */ }
+    for (const n of reportFailures(stageFile)) names.add(n);
+    return [...names].sort();
+  })() : [];
   const errorFiles = m.status === 'red' ? compileErrorFiles(text) : [];
-  const stages = (() => { try { return landStages(stageFile, text); } catch { return []; } })();
+  const stages = (() => { try { return [...(Array.isArray(stagesBefore) ? stagesBefore : []), ...landStages(stageFile, text)].slice(0, 12); } catch { return []; } })();
   return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), ...(errorFiles.length ? { errorFiles } : {}), ...(stages.length ? { stages } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
 
   function finish(res) {
     const full = { ...res, engine, ms: Date.now() - t0, ...(task ? { task } : {}), ...(br ? { branch: br } : {}), ...(many ? { branches: many } : {}), at: new Date().toISOString() };
     try { fs.mkdirSync(path.join(REPO_ROOT, '.studio', 'gates'), { recursive: true }); fs.writeFileSync(path.join(REPO_ROOT, '.studio', 'gates', et.files.gateLast), JSON.stringify({ ...full, engine }, null, 2)); } catch {}
     // 2.77.0 (u, P5.3): a run that ran to the end keeps its length for the Line Producer's schedule.
-    if (['pass', 'red', 'conflict'].includes(full.status)) { try { recordDuration(engine, { kind: 'land', ms: full.ms, status: full.status }); } catch {} }
-    try { emitEvent({ type: 'engine.land', agent: env.STUDIO_LOCK_OWNER || 'gates', task: task && !String(task).includes(',') ? task : undefined, track: `engine:${engine}`, status: full.ok ? 'ok' : full.status === 'refused' || full.status === 'not-run' ? 'warn' : 'blocked', msg: `${L} land${task ? ` for ${task}` : ''}: ${full.status} (${full.why})`.slice(0, 400), meta: { engine, status: full.status, code: full.code ?? null, ms: full.ms, ...(full.infra ? { infra: full.infra.kind } : {}), ...(full.stages ? { stages: full.stages } : {}), ...(many ? { branches: many } : {}), ...(String(task || '').includes(',') ? { tasks: String(task).split(',') } : {}), ...(env.STUDIO_PLAY_MODE ? { playMode: env.STUDIO_PLAY_MODE, playFilter: env.STUDIO_PLAY_FILTER || '' } : {}) } }); } catch {}
+    if (!only && ['pass', 'red', 'conflict'].includes(full.status)) { try { recordDuration(engine, { kind: 'land', ms: full.ms, status: full.status }); } catch {} }
+    if (!only) try { emitEvent({ type: 'engine.land', agent: env.STUDIO_LOCK_OWNER || 'gates', task: task && !String(task).includes(',') ? task : undefined, track: `engine:${engine}`, status: full.ok ? 'ok' : full.status === 'refused' || full.status === 'not-run' || full.status === 'killed' ? 'warn' : 'blocked', msg: `${L} land${task ? ` for ${task}` : ''}: ${full.status} (${full.why})`.slice(0, 400), meta: { engine, status: full.status, code: full.code ?? null, ms: full.ms, ...(full.infra ? { infra: full.infra.kind } : {}), ...(full.stages ? { stages: full.stages } : {}), ...(many ? { branches: many } : {}), ...(String(task || '').includes(',') ? { tasks: String(task).split(',') } : {}), ...(env.STUDIO_PLAY_MODE ? { playMode: env.STUDIO_PLAY_MODE, playFilter: env.STUDIO_PLAY_FILTER || '' } : {}) } }); } catch {}
     // 2.84: playMode / playFilter above: what the engine train told the land's Play Mode stage (focus or full).
     // 2.65.0: the uniform job.done (harness/jobs.mjs) beside engine.land.
     if (full.status !== 'skipped') jobDone({ kind: `${engine}-gate`, id: task || br || null, code: full.code ?? null, result: full.status, ms: full.ms, tail: full.tail || full.why || '', log: full.log || null, task: task && !String(task).includes(',') ? task : null, agent: env.STUDIO_LOCK_OWNER || 'gates' });
@@ -390,7 +493,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
 export const runEngineLand = (opts = {}) => runUnityGate(opts);
 
 /** One line for people: "PASS unity: ..." etc. */
-export const unityLine = (res) => `[unity-gate] ${res.status === 'skipped' ? 'SKIP' : res.status === 'not-run' ? 'NOT RUN' : res.status.toUpperCase()} ${res.engine || 'unity'}: ${res.why}${res.ms && res.status !== 'skipped' ? ` (${Math.round(res.ms / 1000)} s)` : ''}`;
+export const unityLine = (res) => `[unity-gate] ${res.status === 'skipped' ? 'SKIP' : res.status === 'not-run' ? 'NOT RUN' : res.status === 'killed' ? 'KILLED' : res.status.toUpperCase()} ${res.engine || 'unity'}: ${res.why}${res.ms && res.status !== 'skipped' ? ` (${Math.round(res.ms / 1000)} s)` : ''}`;
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
@@ -407,5 +510,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(unityLine(res));
     if (res.tail) console.log(`[unity-gate] its last lines (all of it: ${res.log}):\n${res.tail}`);
   }
-  process.exit(res.status === 'pass' || res.status === 'skipped' ? 0 : res.status === 'refused' || res.status === 'not-run' ? 3 : 1);
+  process.exit(res.status === 'pass' || res.status === 'skipped' ? 0 : res.status === 'refused' || res.status === 'not-run' || res.status === 'killed' ? 3 : 1);
 }

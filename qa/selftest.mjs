@@ -5181,6 +5181,14 @@ if (inShard('selftest-284n')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.84 (t): the engine train's land runs: read the failing tests from the results files, blame
+if (inShard('selftest-284t')) {
+  const dir = copyRepo();
+  const { selftest284T } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284t.mjs')).href);
+  await selftest284T({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

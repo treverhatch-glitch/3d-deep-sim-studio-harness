@@ -271,8 +271,9 @@ console.log(JSON.stringify({
     queue(E, [['T-941', 'feat/a'], ['T-942', 'feat/b']]);
     const r = probe(TRAIN, noFull);
     const runs = runsOf(ctl);
-    await guard('2.84 play focus, the retry: a batch red once in the play stage is run again (2.83 retryStages) with the SAME STUDIO_PLAY_FILTER and Unity arguments, passes and lands (fails before this fix: neither run was given a filter)', () => [
-      r.landed?.join() === 'T-941,T-942' && r.runs === 2 && runs.length === 2 && r.flaky?.length === 1 && runs.every((x) => x.playMode === 'focus' && x.playFilter === want && x.playArgs === `-testFilter "${want}"`),
+    await guard('2.84 play focus, the retry: a batch red once in the play stage is run again (2.83 retryStages), still in focus mode with the same STUDIO_PLAY_FILTER; the first run gets the focus filter as its Unity arguments and the retry gets only the test that failed (2.84 t: retry by name); it passes and lands (fails before this fix: neither run was given a filter)', () => [
+      r.landed?.join() === 'T-941,T-942' && r.runs === 2 && runs.length === 2 && r.flaky?.length === 1 && runs.every((x) => x.playMode === 'focus' && x.playFilter === want)
+        && runs[0].playArgs === `-testFilter "${want}"` && runs[1].playArgs === '-testFilter "Game.PlayTests.Economy.OpensTheLedger"',
       JSON.stringify({ r, runs }).slice(0, 2000)]);
   }
   {
