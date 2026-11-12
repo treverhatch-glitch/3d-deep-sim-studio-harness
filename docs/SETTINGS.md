@@ -784,7 +784,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## STATE_* (5)
 
-- `STUDIO_STATE_DIR` · no simple default · harness/agent.mjs, harness/agy-allow.mjs, harness/aider-launch.mjs (+87 more) · undocumented
+- `STUDIO_STATE_DIR` · no simple default · harness/agent.mjs, harness/agy-allow.mjs, harness/aider-launch.mjs (+86 more) · undocumented
 - `STUDIO_STATE_LOCK_LIVE_MAX_MS` · no simple default · harness/fsafe.mjs · [WORK-ORGANIZATION.md:60](WORK-ORGANIZATION.md)
 - `STUDIO_STATE_LOCK_STALE_MS` · no simple default · harness/fsafe.mjs, qa/selftest-258b.mjs · undocumented
 - `STUDIO_STATE_LOCK_WAIT_MS` · no simple default · harness/fsafe.mjs · undocumented

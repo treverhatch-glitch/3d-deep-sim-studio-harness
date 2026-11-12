@@ -46,7 +46,7 @@ A matching SHA-256 proves two states are byte-for-byte the same. It doesn't prov
 state, or that the code which produced it is honest: anyone can hash a state they made up. Trust
 comes from **replaying**: the verifier re-runs the seed and actions with the same cartridge and checks
 the SHA-256 itself, which is what `qa/check-golden.mjs` and `qa/test-golden.py` do. Proving *who*
-made a result needs a signature: `npm run sign` (see `docs/SIGNED-RESULTS-AND-DATA.md`).
+made a result needs a signature, which the harness no longer makes (2.84 took out the unused signed results, `harness/sign.mjs`).
 
 ## Game IDs: which game a hash belongs to
 
@@ -59,14 +59,14 @@ preflight or watcher pass for a game made before 2.25), in `cartridges/<game>/ca
 { "id": "gid_7q2kz…", "cartridge": "next-floor", "name": "Next Floor", "created": "…", "harness": "2.25.0", "parent": "gid_…" }
 ```
 
-The ID is stamped on goldens, regressions, signed results, saved builds and events.
+The ID is stamped on goldens, regressions, saved builds and events.
 - **A recording from another game fails**, even when its hashes match.
 - **A copy gets its own ID.** A game started from another (a setup carrying a game template) gets a new
   ID, with the original's as `parent`, so a game's family tree can be followed.
 
 The ID is public, and it is not mixed into seeds or state hashes. Anyone must be able to replay a game
 from its code and a seed and get the same hash, including a port to another engine. Proving who made a
-game is the job of signed results (`npm run sign`), not of a secret. `npm run game-id` shows it.
+game is the job of a signature, not of a secret. `npm run game-id` shows it.
 
 ## Changing a hash
 

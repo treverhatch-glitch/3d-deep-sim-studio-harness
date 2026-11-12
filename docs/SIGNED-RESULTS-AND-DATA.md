@@ -1,38 +1,7 @@
-# Signed results, training data, and public receipts
+# Training data and public receipts
 
-Three optional layers on top of the SHA-256 goldens (`docs/HASH.md`), for when results are shared,
+Two optional layers on top of the SHA-256 goldens (`docs/HASH.md`), for when results are shared,
 sold, rewarded or learned from. A person using the harness on their own needs none of them.
-
-## Signed results (`npm run sign`)
-
-A hash proves two states match. A signature proves who vouched for them.
-
-```bash
-npm run sign -- keygen                     # once: private key in .studio/keys/ (never committed), public key in studio/keys/
-npm run verify                             # results are checked before they are signed
-npm run sign -- result --by hatch --note "Phase 1 slice"
-npm run sign -- verify studio/signed/<file>.json --replay
-```
-
-A signed result is a manifest that binds code, inputs and outputs, signed with Ed25519 (Node's
-built-in crypto):
-
-- **Code:** a SHA-256 over each cartridge's files (paths and contents), and one over the harness
-  files that run and hash it.
-- **Inputs:** each golden's and regression's own file SHA-256 (seed, tick, actions, scenario).
-- **Outputs:** the state SHA-256 each one pins, and the actions SHA-256 for scenarios.
-- The last gate run, the harness version and commit, the Game Bible's and asset manifest's SHA-256,
-  who signed and when.
-
-Signing refuses a gate run that is red, partial, missing any required gate from `studio/gates.json`,
-or older than the last change to the game or its goldens, unless you pass `--allow-red`, which
-records why in the manifest.
-
-`verify` checks the signature and the key. `--replay` also checks the code in hand is the signed
-code, then re-runs the goldens, regressions, purity and isolation checks and the vertical slice: that
-proves this code produces what was signed, not just that someone signed it, even outside git. Publish
-your key's fingerprint (`npm run sign -- fingerprint`) somewhere you control, so others can tell your
-signatures from anyone else's.
 
 ## Training and evaluation data (`npm run data`)
 
@@ -83,7 +52,7 @@ terms of every model provider whose output is in them.
 ## Public receipts (later, optional)
 
 Planned for the platform stage, never required: write the SHA-256 of a signed manifest to a public
-ledger as a receipt that a version existed at a time.
+ledger as a receipt that a version existed at a time. (2.84: the signed results are gone, unused; git history keeps `harness/sign.mjs`.)
 
 - **What it proves:** that you held exactly this file or result at that time. Useful as evidence of
   prior creation, resale history, or a marketplace badge.

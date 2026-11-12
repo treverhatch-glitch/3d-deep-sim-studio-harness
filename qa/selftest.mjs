@@ -888,45 +888,6 @@ if (inShard()) {
   report('the fun check reads the game through every persona with a lens', /## Through the personas/.test(fun) && /The first-timer: first win after/.test(fun) && /The min-maxer:/.test(fun) && /The calm player:/.test(fun) && /The explorer:/.test(fun), fun);
 }
 
-// Signed results: a signature proves who vouched; tampering breaks it; --replay re-runs the goldens.
-if (inShard()) {
-  const dir = copyRepo();
-  const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
-  git('init -q');
-  git('add -A');
-  git('commit -q -m init --no-verify');
-  const allGates = (ok = true) => JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), rows: gates.filter((g) => g.required).map((g) => ({ id: g.id, required: true, ok })) });
-  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), rows: [{ id: 'golden', required: true, ok: true }] }));
-  run(dir, 'node harness/sign.mjs keygen');
-  const partialSign = run(dir, 'node harness/sign.mjs result --by hatch');
-  report('signing refuses a gate run that skipped required gates', partialSign.status !== 0 && /required gates that never ran/.test(partialSign.stderr), partialSign.stderr);
-  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: '2020-01-01T00:00:00.000Z', rows: JSON.parse(allGates()).rows }));
-  const staleSign = run(dir, 'node harness/sign.mjs result --by hatch');
-  report('signing refuses a gate run older than the last game change', staleSign.status !== 0 && /older than the last change/.test(staleSign.stderr), staleSign.stderr);
-  fs.rmSync(path.join(dir, '.studio/keys'), { recursive: true, force: true });
-  fs.rmSync(path.join(dir, 'studio/keys'), { recursive: true, force: true });
-  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), allGates());
-  report('signing needs a key first', run(dir, 'node harness/sign.mjs result --by hatch').status !== 0);
-  const kg = run(dir, 'node harness/sign.mjs keygen');
-  report('keygen keeps the private key out of git and the public key in studio/keys', kg.status === 0 && fs.existsSync(path.join(dir, '.studio/keys/studio-ed25519.pem')) && fs.existsSync(path.join(dir, 'studio/keys/studio-ed25519.pub.pem')) && git('check-ignore -q .studio/keys/studio-ed25519.pem').status === 0, kg.stdout + kg.stderr);
-  const sr = run(dir, 'node harness/sign.mjs result --by hatch --note "slice 1"');
-  const signed = path.join(dir, 'studio/signed', fs.readdirSync(path.join(dir, 'studio/signed'))[0]);
-  const doc = JSON.parse(fs.readFileSync(signed, 'utf8'));
-  report('a signed result lists every golden\'s SHA-256, the gates and the commit', sr.status === 0 && doc.manifest.goldens.length === 2 && doc.manifest.goldens.every((g) => /^[0-9a-f]{64}$/.test(g.sha256)) && doc.manifest.gates.required === gates.filter((g) => g.required).length && doc.manifest.goldens.every((g) => /^[0-9a-f]{64}$/.test(g.fileSha256)) && /^[0-9a-f]{64}$/.test(doc.manifest.code.cartridges[0]?.sha256) && /^[0-9a-f]{40}$/.test(doc.manifest.commit), sr.stdout + sr.stderr);
-  const v = run(dir, `node harness/sign.mjs verify "${signed}" --replay`);
-  report('verify --replay checks the signature and re-runs the goldens', v.status === 0 && /this code produces the signed results/.test(v.stdout), v.stdout + v.stderr);
-  const tampered = path.join(dir, 'tampered.json');
-  fs.writeFileSync(tampered, JSON.stringify({ ...doc, manifest: { ...doc.manifest, signedBy: 'someone-else' } }));
-  report('a changed manifest fails verification', run(dir, `node harness/sign.mjs verify "${tampered}"`).status !== 0);
-  edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}\n// edited after signing\n`);
-  const codeChanged = run(dir, `node harness/sign.mjs verify "${signed}" --replay`);
-  report('verify --replay fails when the cartridge code differs from the signed code', codeChanged.status !== 0 && /differs from the signed code/.test(codeChanged.stderr), codeChanged.stdout + codeChanged.stderr);
-  edit(dir, 'qa/golden/example-1337.json', (s) => s.replace(/"sha256": "[0-9a-f]{64}"/, `"sha256": "${'1'.repeat(64)}"`));
-  report('verify --replay fails when the repo no longer produces the signed results', run(dir, `node harness/sign.mjs verify "${signed}" --replay`).status !== 0);
-  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), allGates(false));
-  report('signing refuses a red verify unless told to record it', run(dir, 'node harness/sign.mjs result --by hatch').status !== 0);
-}
-
 // The data-sharing question (harness/data-consent.mjs): starts ticked.
 if (inShard()) {
   const dir = copyRepo();

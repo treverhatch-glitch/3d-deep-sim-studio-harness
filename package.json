@@ -83,7 +83,6 @@
     "wave": "node harness/waves.mjs",
     "clip": "node qa/clip.mjs",
     "shot": "node qa/clip.mjs shot",
-    "sign": "node harness/sign.mjs",
     "onboard": "node scripts/onboard-game.mjs",
     "studio:reset": "node scripts/studio-reset.mjs",
     "studio:restart": "node harness/restart.mjs",
