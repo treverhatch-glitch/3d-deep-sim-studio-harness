@@ -38,6 +38,13 @@ unit again, regenerate.
    assertions are unchanged.
 7. **Cuts need proof per item** (P-331). Three of the plan's "safe cuts" were wrong.
 
+## The overseer's notes
+
+The owner asked that the overseer be told to update his own notes: mark what 2.85 closed, take out everything that
+treats real money as a harness rule, and consider archiving his old harness write-ups and starting a fresh, short bug
+list and devlog. That is section 7 of the upgrade note written for him. Expect the next request as one short file (a
+day's score and the open bugs), not as additions to the old lists.
+
 ## Open, most valuable first
 
 1. Score a day on 2.85 (`npm run score -- --days 1`): hand-backs with a harness cause, tasks landed with no overseer
