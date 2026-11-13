@@ -40,11 +40,13 @@
  *
  *   node harness/test-weakening.mjs [--json]
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { protectRoot, trustedEnv } from './gate-trust.mjs';
+import { TASK_LINE_RE } from './board-line.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // 2.71.1 (A16): STUDIO_PROTECT_ROOT is never used in a lane copy (harness/gate-trust.mjs).
@@ -232,18 +234,49 @@ export function weakeningsInDiff(files) {
 
 const chunks = (arr, n) => { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; };
 
-/** Golden/snapshot files changed by a commit since the base with no Golden-Reason trailer. */
-export function goldenWithoutReason(range) {
+/** 2.85 (g): the task ids on the board (studio/NEXT.md and studio/DONE.md of the main checkout, open or done). */
+export function boardTaskIds(root = ROOT, env = process.env) {
+  const lane = String(root).replace(/\\/g, '/').match(/^(.*)\/\.lanes\/[^/]+\/?$/);
+  const main = env.STUDIO_MAIN_ROOT || (lane ? lane[1] : root);
+  const ids = new Set();
+  for (const f of ['NEXT.md', 'DONE.md']) {
+    let text = '';
+    try { text = fs.readFileSync(path.join(main, 'studio', f), 'utf8'); } catch { continue; }
+    for (const line of text.replace(/\r\n/g, '\n').split('\n')) { const m = line.trim().match(TASK_LINE_RE); if (m) ids.add(m[2]); }
+  }
+  return ids;
+}
+
+/**
+ * 2.85 (g): is a Golden-Reason enough? It was any non-empty text, so "x" waived the golden check. Strict: 20+ characters
+ * and a task id that is on the board (open or done), in the board's form (T-123). STUDIO_GOLDEN_REASON=strict|loose; the
+ * default is strict when the board has tasks, loose on a fresh studio (an empty board has no id to name).
+ * Returns null when the reason is fine, else the sentence to show.
+ */
+export function goldenReasonProblem(reason, { ids = boardTaskIds(), env = process.env } = {}) {
+  const mode = String(env.STUDIO_GOLDEN_REASON || '').toLowerCase();
+  if (mode === 'loose' || (mode !== 'strict' && ids.size === 0)) return String(reason || '').trim() ? null : 'it is empty';
+  const text = String(reason || '').trim();
+  const named = (text.match(/\b[A-Z]+-\d+\b/g) || []).filter((id) => ids.has(id));
+  if (text.length >= 20 && named.length) return null;
+  return `a Golden-Reason must be at least 20 characters and name a task on the board (for example "T-123: the faster belt moves the end tick"); "${text.slice(0, 60)}" ${text.length < 20 ? 'is too short' : 'names no task on the board'}`;
+}
+
+/** Golden/snapshot files changed by a commit since the base with no Golden-Reason trailer (or a reason that names nothing). */
+export function goldenWithoutReason(range, { env = process.env } = {}) {
   const log = git(['log', '--no-merges', '--no-renames', '--format=%x1e%H%x1f%B%x1f', '--name-status', range]);
+  const ids = boardTaskIds(ROOT, env);
   const out = [];
   for (const rec of log.stdout.split('\x1e').filter((s) => s.includes('\x1f'))) {
     const [sha, msg, names] = rec.split('\x1f');
-    if (/^Golden-Reason:[ \t]*\S/im.test(msg)) continue;
+    const gr = msg.match(/^Golden-Reason:[ \t]*(\S.*)$/im);
+    const problem = gr ? goldenReasonProblem(gr[1], { ids, env }) : null;
+    if (gr && !problem) continue;
     for (const l of String(names || '').split('\n')) {
       const [st, file] = l.trim().split('\t');
       if (!file || !/^[MD]/.test(st) || !isGoldenPath(file)) continue;
       const subject = msg.split('\n')[0].trim();
-      out.push({ ...finding('golden-edited', file, 1, `${subject} :: ${file}`, `commit ${sha.trim().slice(0, 8)} ${st === 'D' ? 'deletes' : 'changes'} it with no Golden-Reason trailer`), sha: sha.trim() });
+      out.push({ ...finding('golden-edited', file, 1, `${subject} :: ${file}`, `commit ${sha.trim().slice(0, 8)} ${st === 'D' ? 'deletes' : 'changes'} it ${gr ? `with a Golden-Reason that is not enough: ${problem}` : 'with no Golden-Reason trailer'}`), sha: sha.trim() });
     }
   }
   return out;

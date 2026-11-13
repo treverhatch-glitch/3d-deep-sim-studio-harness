@@ -15,6 +15,7 @@
  * claims are still diffed).
  */
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
@@ -31,6 +32,45 @@ export const CLAIM_ALLOWLIST = [
 // add) is not re-run: it is unverifiable, never green.
 export const CLAIM_WRITES = /\s--?(update|write|fix|init[\w-]*|prune[\w-]*|accept|bless)\b/;
 const UNSAFE = /[|;&`$<>]|\n/;
+
+
+/**
+ * 2.85 (g): the repo-file paths a hand-back note says it created, changed or pointed to ("added X", "wrote X", "see X",
+ * "in X"). Conservative: one token with no spaces, no URL, no glob, no placeholder; it has a "/" and an extension, or
+ * starts with a known top folder. The check is cheap (does the file exist), and it never refuses: see noteMissingPaths.
+ */
+const TOP_FOLDERS = /^(harness|qa|studio|docs|game|cartridges|web|scripts|tools|engine|skills|src)\//;
+export function notedRepoPaths(note) {
+  const text = String(note || '').replace(/\r\n?/g, '\n');
+  const out = new Set();
+  const re = /\b(?:added|adds|created|creates|wrote|written|writes|changed|changes|updated|updates|edited|modified|renamed|fixed|new|see|in)\s+(?:the\s+|a\s+|file\s+)?[`'"(]?([^\s`'",;:()]+)/gi;
+  for (const m of text.matchAll(re)) {
+    const p = m[1].replace(/^\.\//, '').replace(/[.]+$/, '');
+    if (!p || /[*?{}<>|\\$~]|:\/\/|^(https?:|www\.)|^\/|\.\.\//.test(p)) continue;
+    if ((/\//.test(p) && /\.[A-Za-z0-9]{1,8}$/.test(p)) || TOP_FOLDERS.test(p)) out.add(p);
+  }
+  return [...out];
+}
+
+/** The paths the note names that exist in none of `roots` (the lane, then main). Never throws. */
+export function noteMissingPaths(note, roots = [REPO_ROOT]) {
+  try {
+    const where = roots.filter(Boolean);
+    return notedRepoPaths(note).filter((p) => !where.some((r) => fs.existsSync(path.join(r, p))));
+  } catch { return []; }
+}
+
+/** The line the hand-back facts show for one missing path. */
+export const noteMissingLine = (p) => `the note names ${p}, which does not exist`;
+
+/** A task.note_unverified event (status warn) for the missing paths. Never refuses anything. */
+export function recordNoteUnverified(taskId, missing, { agent = null, where = 'hand-back' } = {}) {
+  if (!missing?.length) return null;
+  try {
+    emitEvent({ type: 'task.note_unverified', agent: agent || 'harness', task: taskId, status: 'warn', msg: `${taskId}: ${missing.slice(0, 5).map(noteMissingLine).join('; ')} (${where})`.slice(0, 600), meta: { missing: missing.slice(0, 20), where } });
+  } catch { /* a record, never a blocker */ }
+  return missing;
+}
 
 /** "<cmd> => <last line>" → { cmd, expect } or { error }. */
 export function parseClaim(text) {

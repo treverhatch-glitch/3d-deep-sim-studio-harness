@@ -852,6 +852,22 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
 }
 
 /**
+ * The browser check the launcher runs after it closes a task. 2.85 (g): the check plays the studio's game (qa/browser-play.mjs
+ * picks it), and a game it cannot drive is reported as a skip with its reason, never as a pass. Returns the event it emitted.
+ */
+export function browserCheckAfter(id, cwd, env = process.env) {
+  const bp = spawnSync(process.execPath, [path.join(cwd, 'qa', 'browser-play.mjs')], { windowsHide: true, cwd, env, encoding: 'utf8', timeout: 5 * 60000 });
+  const bpOut = `${bp.stdout || ''}${bp.stderr || ''}`;
+  const na = bpOut.match(/not applicable: ([^\n]*)/);
+  const played = (bpOut.match(/\[browser-play\] PASS (\S+?):/) || [])[1];
+  const ev = bp.status === 0 && na
+    ? { status: 'skipped', msg: `browser check after ${id}: not applicable: ${na[1].slice(0, 400)}` }
+    : { status: bp.status === 0 ? 'ok' : 'warn', msg: `browser check after ${id}: ${bp.status === 0 ? `passed${played ? ` (${played})` : ''}` : 'failed or skipped'}` };
+  emitEvent({ type: 'qa.browser_play', agent: 'launcher', task: id, ...ev });
+  return ev;
+}
+
+/**
  * Finish a task an agent left without calling task done, if its done-check passes: run task done as that agent (in its
  * copy, so the work is delivered), running the everyday verify first if only that is missing or stale. In the shared
  * checkout, only when the agent left nothing uncommitted under its claims. STUDIO_AUTO_FINISH=off turns it off.
@@ -883,8 +899,7 @@ export function autoFinish(agent, id, copyDir, mine, code) {
     return { ok: false, output: out || 'task done failed' };
   }
   if (!/^(off|0|false|no)$/i.test(process.env.STUDIO_POST_BROWSER_PLAY || '')) {
-    const bp = spawnSync(process.execPath, [path.join(cwd, 'qa', 'browser-play.mjs')], { windowsHide: true, cwd, env, encoding: 'utf8', timeout: 5 * 60000 });
-    emitEvent({ type: 'qa.browser_play', agent: 'launcher', task: id, status: bp.status === 0 ? 'ok' : 'warn', msg: `browser check after ${id}: ${bp.status === 0 ? 'passed' : 'failed or skipped'}` });
+    browserCheckAfter(id, cwd, env);
   }
   emitEvent({ type: 'agent.finished_for', agent: 'launcher', task: id, to: 'producer', msg: `${agent} ended without task done; its check passed, so the launcher closed ${id}` });
   return { ok: true, output: '' };

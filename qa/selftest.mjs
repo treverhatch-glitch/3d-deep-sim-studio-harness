@@ -5197,6 +5197,14 @@ if (inShard('selftest-284q')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.85 (g): claims that need evidence: milestones met, Golden-Reason, sim changes without a test, the browser check's game, a note's files
+if (inShard('selftest-285g')) {
+  const dir = copyRepo();
+  const { selftest285G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285g.mjs')).href);
+  await selftest285G({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

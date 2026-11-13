@@ -42,6 +42,7 @@ import { timeoutFlakesFromLog } from './timeout-rerun.mjs';
 import { seenBefore, seenLine } from './error-memory.mjs';
 import { laneOf } from './task-hold.mjs';
 import { readJson } from './fsafe.mjs';
+import { noteMissingPaths, noteMissingLine, recordNoteUnverified } from './said-vs-did.mjs';
 
 export const FACTS_HEAD = 'Hand-back facts (written by the harness from git and the gate logs; the note after them is the agent\'s or the train\'s):';
 export const FACTS_END = 'End of hand-back facts.';
@@ -283,7 +284,10 @@ export function buildFacts(taskId, { agent = null, dir = null, note = '', root =
     try { lane = laneFacts(taskId, cwd); } catch { lane = null; }
     try { commits = start?.head ? taskCommits(cwd, start.head, taskId, { shared: !lane?.copy }) : null; } catch { commits = null; }
   }
-  return { ...(seen ? { seenBefore: seen } : {}), ...(withNext ? { lane, commits } : {}), task: taskId, base: start?.head || null, files: ch?.files || null, total: ch?.total ?? null, gates, where: best?.where || null, at: best?.at || null, signature, seed, log: best?.log || null, ...(testRng ? { testRng } : {}), ...(parts.subIds.length ? { subIds: parts.subIds } : {}), ...(parts.divergence ? { divergence: parts.divergence } : {}), ...(parts.timeoutFlakes.length ? { timeoutFlakes: parts.timeoutFlakes } : {}) };
+  // 2.85 (g): a file the note says it made or changed that is nowhere (the lane, main): said, never refused.
+  let noteMissing = [];
+  try { noteMissing = noteMissingPaths(note, [cwd, mainRootOf()]); } catch { noteMissing = []; }
+  return { ...(noteMissing.length ? { noteMissing } : {}), ...(seen ? { seenBefore: seen } : {}), ...(withNext ? { lane, commits } : {}), task: taskId, base: start?.head || null, files: ch?.files || null, total: ch?.total ?? null, gates, where: best?.where || null, at: best?.at || null, signature, seed, log: best?.log || null, ...(testRng ? { testRng } : {}), ...(parts.subIds.length ? { subIds: parts.subIds } : {}), ...(parts.divergence ? { divergence: parts.divergence } : {}), ...(parts.timeoutFlakes.length ? { timeoutFlakes: parts.timeoutFlakes } : {}) };
 }
 
 /** The block, as written into the hand-back: at most FACTS_MAX characters (lists shortened first, then lines). */
@@ -322,6 +326,7 @@ function factLines(f, { filesShown = FILES_SHOWN, commitsShown = COMMITS_CAP } =
     L.push(`- Last verify: ${!f.gates?.length ? 'not run since the task started' : red ? `red (${(f.gates || []).filter((g) => !g.ok).map((g) => g.id).join(', ')})` : 'green'}${f.where ? ` (${f.where})` : ''}`);
     L.push(`- Next command: ${nextCommand(f)}`);
   }
+  for (const p of (f.noteMissing || []).slice(0, 3)) L.push(`- ${noteMissingLine(p)}`);
   L.push(FACTS_END);
   return L;
 }
@@ -352,7 +357,9 @@ export function factsFor(taskId, note, opts = {}) {
   const text = String(note || '');
   if (text.includes(FACTS_HEAD)) return '';
   try {
-    return renderFacts(buildFacts(taskId, { ...opts, note: text }));
+    const f = buildFacts(taskId, { ...opts, note: text });
+    if (f.noteMissing?.length) recordNoteUnverified(taskId, f.noteMissing, { agent: opts.agent, where: 'hand-back' });
+    return renderFacts(f);
   } catch {
     return '';
   }

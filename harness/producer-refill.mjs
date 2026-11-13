@@ -18,13 +18,16 @@
  *
  *   node harness/producer-refill.mjs [--dry-run] [--json]       one pass
  *   node harness/producer-refill.mjs milestones                  the ladder and what is unmet
- *   node harness/producer-refill.mjs met M2 <n> --by <who>       record exit criterion n of M2 as met
+ *   node harness/producer-refill.mjs met M2 <n> --by <who> --evidence <file|commit|event id> [...]
+ *                                                                record exit criterion n of M2 as met, with the proof
+ *                                                                (a person may give --evidence none --why "<reason>")
  *   node harness/producer-refill.mjs close M2 --by director      close a milestone (opens the next)
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { spawnSync } from 'node:child_process';
+import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 
 const CHARTER = () => process.env.STUDIO_CHARTER || path.join(REPO_ROOT, 'studio', 'bible', 'CHARTER.md');
 const ASSETS = () => path.join(REPO_ROOT, 'studio', 'bible', 'ASSETS.md');
@@ -71,7 +74,48 @@ export function nextOpen(list = milestones(), ahead = Number(process.env.STUDIO_
   for (const m of list) if (!m.closed && (seen.get(m.ladder) || 0) < Math.max(1, ahead)) { seen.set(m.ladder, (seen.get(m.ladder) || 0) + 1); out.push(m); }
   return out;
 }
-export function setMet(id, n, by) { const s = read(MS(), {}); s[id] = { ...(s[id] || {}), met: { ...(s[id]?.met || {}), [n]: { by, at: new Date().toISOString() } } }; write(MS(), s); }
+/**
+ * 2.85 (g): evidence for a met criterion. A milestone was "met" on a name alone; now each item must be something that
+ * exists: a file under the repo (a capture, a report, a review file), a commit git finds, or an event id in the log.
+ * Returns { ok, items, bad } where bad lists what was not found.
+ */
+export const EVIDENCE_HELP = 'evidence is a file in the repo (a capture, a report, a review file), a commit sha, or an event id (evt_...) that exists: --evidence <path|sha|evt_id> [...]';
+export function checkEvidence(items, root = REPO_ROOT) {
+  const bad = []; const good = [];
+  let events = null;
+  for (const raw of items) {
+    const it = String(raw).trim();
+    if (!it) continue;
+    const file = path.resolve(root, it);
+    const inside = file === root || file.startsWith(path.resolve(root) + path.sep);
+    if (inside && it !== '.' && fs.existsSync(file)) { good.push({ kind: 'file', ref: it.split(path.sep).join('/') }); continue; }
+    if (/^[0-9a-f]{7,40}$/i.test(it)) {
+      const r = spawnSync('git', ['cat-file', '-e', `${it}^{commit}`], { windowsHide: true, cwd: root, encoding: 'utf8' });
+      if (r.status === 0) { good.push({ kind: 'commit', ref: it }); continue; }
+    }
+    if (/^evt_/.test(it)) {
+      try { events = events || readRecentEvents(0); } catch { events = []; }
+      if (events.some((e) => e.id === it)) { good.push({ kind: 'event', ref: it }); continue; }
+    }
+    bad.push(it);
+  }
+  return { ok: bad.length === 0 && good.length > 0, items: good, bad };
+}
+/** Record criterion n of milestone id as met. evidence: [items] (checked here), or { none: true, why, person: true } for a person (the caller decides who is one). */
+export function setMet(id, n, by, evidence = null) {
+  let ev = null;
+  if (evidence && !Array.isArray(evidence) && evidence.none) {
+    if (evidence.person !== true) return { ok: false, why: `${by} is an agent: it cannot record a milestone as met without evidence. ${EVIDENCE_HELP}` };
+    if (String(evidence.why || '').trim().length < 10) return { ok: false, why: '--evidence none needs --why "<reason>" (10+ characters)' };
+    ev = { none: true, why: String(evidence.why).trim() };
+  } else if (Array.isArray(evidence) && evidence.length) {
+    const c = checkEvidence(evidence);
+    if (!c.ok) return { ok: false, why: `${c.bad.length ? `not found: ${c.bad.join(', ')}. ` : ''}${EVIDENCE_HELP}` };
+    ev = c.items;
+  } else return { ok: false, why: `milestone ${id} criterion ${n}: no evidence given. ${EVIDENCE_HELP}. A person may give --evidence none --why "<reason>".` };
+  const s = read(MS(), {}); s[id] = { ...(s[id] || {}), met: { ...(s[id]?.met || {}), [n]: { by, at: new Date().toISOString(), evidence: ev } } }; write(MS(), s);
+  return { ok: true, evidence: ev };
+}
 export function closeMilestone(id, by) {
   const s = read(MS(), {}); s[id] = { ...(s[id] || {}), closed: { by, at: new Date().toISOString() } }; write(MS(), s);
   const next = nextOpen(milestones(), 1).find((m) => m.ladder === milestones().find((x) => x.id === id)?.ladder);
@@ -158,12 +202,25 @@ export async function refillPass({ dryRun = false, min = Number(process.env.STUD
   return { refilled: picked, added, refused, woke, why: `${open.length} open < ${min}` };
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+async function main() {
   const a = process.argv.slice(2);
   const by = a.includes('--by') ? a[a.indexOf('--by') + 1] : null;
   if (a[0] === 'milestones') {
-    for (const m of milestones()) console.log(`${m.closed ? '[closed]' : m.ready ? '[ready] ' : '[open]  '} ${m.id} ${m.title} (${m.ladder}): ${m.exit.filter((e) => e.met).length}/${m.exit.length} exit criteria met`);
-  } else if (a[0] === 'met' && a[1] && a[2] && by) { setMet(a[1], Number(a[2]), by); console.log(`${a[1]} criterion ${a[2]} met (${by})`); }
+    const st = read(MS(), {});
+    for (const m of milestones()) {
+      console.log(`${m.closed ? '[closed]' : m.ready ? '[ready] ' : '[open]  '} ${m.id} ${m.title} (${m.ladder}): ${m.exit.filter((e) => e.met).length}/${m.exit.length} exit criteria met`);
+      for (const e of m.exit) { const r = st[m.id]?.met?.[e.n]; if (r) console.log(`         ${e.n}. met by ${r.by}: ${r.evidence?.none ? `no evidence (${r.evidence.why})` : Array.isArray(r.evidence) ? r.evidence.map((x) => x.ref).join(', ') : 'no evidence recorded (older record)'}`); }
+    }
+  } else if (a[0] === 'met' && a[1] && a[2] && by) {
+    const ei = a.indexOf('--evidence');
+    const items = []; if (ei >= 0) for (let i = ei + 1; i < a.length && !a[i].startsWith('--'); i++) items.push(a[i]);
+    const wi = a.indexOf('--why');
+    const none = items.length === 1 && items[0] === 'none';
+    const person = none ? !(await import('./reclassify.mjs')).isAgentName(by) : false;
+    const r = setMet(a[1], Number(a[2]), by, none ? { none: true, why: wi >= 0 ? a[wi + 1] : '', person } : items);
+    if (!r.ok) { console.error(`[milestone] refused: ${r.why}`); process.exit(1); }
+    console.log(`${a[1]} criterion ${a[2]} met (${by}; ${none ? `no evidence: ${r.evidence.why}` : r.evidence.map((x) => x.ref).join(', ')})`);
+  }
   else if (a[0] === 'close' && a[1] && by) { const n = closeMilestone(a[1], by); console.log(`${a[1]} closed${n ? `; next ${n.id}` : ''}`); }
   else {
     const r = await refillPass({ dryRun: a.includes('--dry-run') });
@@ -171,3 +228,5 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
     else console.log(r.refilled.length ? r.refilled.map((c) => `+ ${c.title}`).join('\n') + (r.refused?.length ? `\n(refused ${r.refused.length} already covered)` : '') : `No refill: ${r.why}`);
   }
 }
+
+if (import.meta.url === pathToFileURL(process.argv[1] || '').href) main().catch((e) => { console.error(e?.stack || e); process.exit(1); });
