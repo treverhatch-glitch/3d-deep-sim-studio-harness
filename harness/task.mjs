@@ -2266,8 +2266,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const want = flags._[2];
       const td = await import('./train-daemon.mjs');
       if (!want) { console.log(td.autoStatusText(mainRoot())); process.exit(0); }
-      if (!/^(on|off)$/.test(want) || typeof flags.by !== 'string') { console.error('Usage: npm run task -- train auto off|on --by <name> [--why "…"] [--permission "<their words or a link>"]'); process.exit(1); }
-      const r = await td.setTrainAuto(mainRoot(), { on: want === 'on', by: flags.by, why: typeof flags.why === 'string' ? flags.why : '', permission: typeof flags.permission === 'string' ? flags.permission : '' });
+      if (!/^(on|off)$/.test(want) || typeof flags.by !== 'string') { console.error('Usage: npm run task -- train auto off|on --by <name> [--why "…"] [--hours N] [--permission "<their words or a link>"]'); process.exit(1); }
+      const r = await td.setTrainAuto(mainRoot(), { on: want === 'on', by: flags.by, why: typeof flags.why === 'string' ? flags.why : '', permission: typeof flags.permission === 'string' ? flags.permission : '', hours: flags.hours ?? null }); // 2.85 (e): --hours N
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
