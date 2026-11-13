@@ -323,7 +323,7 @@ export function pickTool(preferred, now = Date.now()) {
 }
 
 /**
- * The key a usage limit on a custom command (STUDIO_<ROLE>_CMD, STUDIO_AGY_CMD...) is saved under: `custom:<program>`,
+ * The key a usage limit on a custom command (STUDIO_<ROLE>_CMD, STUDIO_AGENT_CMD ...) is saved under: `custom:<program>`,
  * the program's base name without extension, lower case. For an interpreter (node, python, bash, cmd /c, powershell
  * -File, npx ...) the script it runs names it. Quotes, Windows paths and leading NAME=value settings are handled.
  * Per program, so two custom commands don't hold each other and a launch check can match the mark. Null for an empty command.
