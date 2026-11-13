@@ -190,6 +190,11 @@ The land run itself still takes `machine:heavy` as that engine's job kind, with 
   `play.focus` every lane is class `full` and nothing changes. A lane marked alone still lands alone. Order: `--only` and
   `--tag`, then alone, then grouping, then the cap. The train's start event and `train status --engine <x>` say why the
   batch is what it is ("6 of 14 queued: class focus, cap 6; 8 wait (5 full, 3 focus)").
+- 2.85: `npm run engine -- play-plan --branch <b>` (or `--paths a,b`) prints which class and Play Mode filter a branch
+  would get and names the paths no `play.focus.map` entry takes; `train status --engine <x>` says when the running land
+  run is the daily full run and lists the tests the target itself fails in it (see docs/NATIVE-ENGINE.md, "The
+  target's own red in the full run"); `task done --train` refuses a branch the train handed back that has changed only
+  by merges of the target since (`--again` overrides it).
 - `npm run task -- train cancel --engine <x> --by <name> [--why "…"]`: writes `.studio/train/<x>-cancel.json` (the train
   id from its lock) first, kills the train's process tree (its land run with it; `taskkill /T /F` on Windows) and waits
   up to 30 s, puts the gate worktree back (`git merge --abort`, `git reset --hard <target>`, `git clean -fd`; only a

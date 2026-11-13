@@ -5197,6 +5197,15 @@ if (inShard('selftest-284q')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.85 (a): the engine train's land runs: the daily full run is visible (B-137), a red full run does not blame a branch for
+// the target's own failures, the suspect first and no repeat of an unchanged red, and a UI batch's Play Mode plan.
+if (inShard('selftest-285a')) {
+  const dir = copyRepo();
+  const { selftest285A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285a.mjs')).href);
+  await selftest285A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
