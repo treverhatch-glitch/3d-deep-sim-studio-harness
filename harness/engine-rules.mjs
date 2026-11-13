@@ -30,6 +30,7 @@ import { mainRoot } from './worktree.mjs';
 import { engineTarget, ENGINE_NAME_RE } from './engine-tracks.mjs';
 import { failingTests } from './unity-gate.mjs';
 import { readJson, writeAtomic } from './fsafe.mjs';
+import { splitPlan } from './rules-parts.mjs';
 
 const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 const on = (v) => /^(1|true|yes|on)$/i.test(String(v ?? '').trim());
@@ -72,6 +73,9 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
       fullEveryHours: Math.max(0, num(f.fullEveryHours, 24)),
       ignore: ignoreList(f.ignore),
       split: f.split === true,
+      // 2.85: how many split parts run at once (null: 1) and the GB one test process is expected to take (null: 4, or the largest measured peak).
+      splitMax: Number(f.splitMax) >= 1 ? Math.floor(Number(f.splitMax)) : null,
+      splitGb: Number(f.splitGb) > 0 ? Number(f.splitGb) : null,
     } : null;
   const maxLanes = Math.max(0, Math.floor(num(o.maxLanes, 0)));
   const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), focus: focus?.map.length ? focus : null, share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes };
@@ -246,7 +250,8 @@ export function rulesSelection({ changed = [], cfg, full = false, fullWhy = '' }
   if (!ch) return fullSel('the batch\'s changed paths are not known');
   if (!ch.length) return fullSel('the batch changes no path');
   const ff = focusFilters({ changed: ch, map: cfg.focus.map, smoke: cfg.focus.smoke, join: cfg.focus.join });
-  if (!ff.ok) return fullSel(`${ff.unmatched} matches no rules.focus.map entry`);
+  // 2.85: the why names up to 5 of the unmapped paths, so a studio can extend rules.focus.map.
+  if (!ff.ok) { const all = ff.unmatchedAll || [ff.unmatched]; return fullSel(`${ff.unmatched} matches no rules.focus.map entry${all.length > 1 ? ` (${all.length} unmapped paths: ${all.slice(0, 5).join(', ')}${all.length > 5 ? ', ...' : ''})` : ''}`, { unmapped: all.slice(0, 5) }); }
   return { mode: 'focus', filter: ff.filter, command: cfg.focus.test.split('{filter}').join(ff.filter), changed: ch, why: `${ch.length} changed path(s), all mapped by rules.focus${ig.ignored.length ? ` (${ig.ignored.length} more left out by rules.focus.ignore)` : ''}`, ...more, ...splitParts(cfg, ff.filters) };
 }
 
@@ -282,6 +287,7 @@ export function ignoreSplit(changed = [], ignore = []) {
  */
 export function focusFilters({ changed = [], map = [], smoke = '', join = '|' } = {}) {
   const filters = [];
+  const unmatchedAll = [];
   for (const p of changed) {
     let hit = false;
     for (const m of map) {
@@ -295,8 +301,9 @@ export function focusFilters({ changed = [], map = [], smoke = '', join = '|' } 
       hit = true;
       if (!filters.includes(f)) filters.push(f);
     }
-    if (!hit) return { ok: false, unmatched: p };
+    if (!hit) unmatchedAll.push(p);
   }
+  if (unmatchedAll.length) return { ok: false, unmatched: unmatchedAll[0], unmatchedAll };
   if (smoke && !filters.includes(smoke)) filters.push(smoke);
   return { ok: true, filters, filter: filters.join(join) };
 }
@@ -310,6 +317,11 @@ export function playFocusConfig(cfg = {}) {
   const skip = ignoreList(f.skip);
   if (!map.length && !skip.length) return null;
   return { map, smoke: typeof f.smoke === 'string' ? f.smoke.trim() : '', join: typeof f.join === 'string' && f.join ? f.join : ';', ignore: ignoreList(f.ignore), skip };
+}
+
+/** 2.85: the paths no map entry takes (focusFilters stops at the first), in order. */
+export function unmappedPaths(changed = [], map = []) {
+  return changed.filter((p) => !focusFilters({ changed: [p], map }).ok);
 }
 
 /** The characters a Play Mode filter may hold (it reaches a command line); anything else runs the stage in full. */
@@ -344,7 +356,14 @@ export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = 
     if (!sk.kept.length && sk.ignored.length) return { mode: 'skip', filter: '', why: `every changed path (${sk.ignored.length}) matches play.focus.skip: no Play Mode run`, ...bad };
   }
   const ff = focusFilters({ changed: ch, map: pf.map, smoke: pf.smoke, join: pf.join });
-  if (!ff.ok) return fullSel(`${ff.unmatched} matches no play.focus.map entry`, bad);
+  if (!ff.ok) {
+    // 2.85: name every path no map entry takes (up to 5), so a studio can see what to add to its map; a path that matches
+    // play.focus.skip still sends a mixed batch to the full stage (2.84's rule, kept), and is named as such.
+    const um = unmappedPaths(ch, pf.map);
+    const sk = pf.skip.length ? new Set(ignoreSplit(um, pf.skip).ignored) : new Set();
+    const shown = um.slice(0, 5).map((p) => (sk.has(p) ? `${p} (play.focus.skip, in a batch with other paths)` : p));
+    return fullSel(`${um.length} changed path(s) match no play.focus.map entry: ${shown.join(', ')}${um.length > 5 ? ', ...' : ''}${pf.map.length ? '' : ' (play.focus has no map)'}`, { unmatched: um.slice(0, 5), unmatchedCount: um.length, ...bad });
+  }
   if (!ff.filter) return fullSel('the filter is empty', bad);
   if (!PLAY_FILTER_SAFE.test(ff.filter)) return fullSel(`refused the filter "${ff.filter.slice(0, 120)}": only letters, digits, space and _ . ; | ~ = ! ( ) * - may reach the land command`, { refused: true, ...bad });
   return { mode: 'focus', filter: ff.filter, why: `${ch.length} changed path(s), all mapped by play.focus${ig.ignored.length ? ` (${ig.ignored.length} more left out by play.focus.ignore)` : ''}`, ...bad };
@@ -403,7 +422,7 @@ export function rulesKey({ repo, sha, cfg, sel = null, print = '' }) {
  * { status: 'pass' | 'red' | 'error', why, ms, failures?, tail?, cached?, mode }; 'error' (could not run, or timed out)
  * blames nobody. from / extraFrom: input source folders; sel: default the full command.
  */
-export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraFrom = [], sel = null, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, useCache = true } = {}) {
+export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraFrom = [], sel = null, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, useCache = true, freeGb = null } = {}) {
   const tree = out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}^{tree}`));
   if (!tree) return { status: 'error', why: `${short(sha)} is not a commit of the ${engine} repo`, ms: 0 };
   const src = [...from, ...extraFrom];
@@ -423,30 +442,59 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
     const missing = copyInputs(cfg, src, dir);
     if (missing.length) log(`[engine-rules] ${engine}: input(s) not found in the engine's folder: ${missing.join(', ')} (engines.${engine}.rules.inputs)`);
     const runEnv = { ...env, ...(cfg.env || {}), STUDIO_ENGINE: engine, STUDIO_RULES_COMMIT: sha, STUDIO_RULES_DIR: dir, STUDIO_ENGINE_REPO: repo, STUDIO_RULES_MODE: s.mode };
-    // rules.focus.split: one command per group, in sequence; red on the first red. The time limit covers the sequence.
+    // rules.focus.split: one command per group. 2.85: how many run at once is decided by free RAM (harness/rules-parts.mjs): at least
+    // one, more only while free RAM - the floor holds another splitGb, never over rules.focus.splitMax (unset: 1, in sequence).
+    // Red on the first red (its output kept). The time limit covers the whole.
     if (Array.isArray(s.parts) && s.parts.length > 1) {
-      const groups = [];
-      for (const part of s.parts) {
-        const left = cfg.timeoutMin * 60000 - (Date.now() - t0);
-        if (left <= 0) return { status: 'error', why: `the rules check timed out after ${cfg.timeoutMin} min (engines.${engine}.rules.timeoutMin), split: ${groups.length} of ${s.parts.length} group(s) done`, ms: Date.now() - t0, mode: s.mode, groups };
-        log(`[engine-rules] ${engine}: ${part.command} on ${short(sha)} (focus, group ${groups.length + 1} of ${s.parts.length})${co.sparse ? ' (sparse checkout)' : ''}`);
-        const g0 = Date.now();
-        const rp = spawnSync(part.command, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: left, env: runEnv });
-        const gs = { filter: part.filter, seconds: Math.round((Date.now() - g0) / 1000), status: rp.error ? 'error' : rp.status === 0 ? 'pass' : 'red' };
-        groups.push(gs);
-        const text = `${rp.stdout || ''}${rp.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd();
-        if (rp.error) return { status: 'error', why: rp.error.code === 'ETIMEDOUT' ? `the rules check timed out after ${cfg.timeoutMin} min (engines.${engine}.rules.timeoutMin), in group ${part.filter}` : `the rules check could not run: ${rp.error.code || rp.error.message}`, ms: Date.now() - t0, mode: s.mode, groups };
-        if (rp.status !== 0) {
-          const ms = Date.now() - t0;
-          const rec = { status: 'red', why: `the rules check failed (exit ${rp.status ?? rp.signal ?? '?'}, focus, group ${part.filter})`, ms, at: new Date().toISOString(), mode: s.mode, groups, failures: failingTests(text).slice(0, 40), tail: text.split('\n').slice(-12).join('\n') };
+      const plan = splitPlan(cfg.focus || {}, { root, engine, env });
+      const timedOut = (n, filter) => `the rules check timed out after ${cfg.timeoutMin} min (engines.${engine}.rules.timeoutMin), ${filter ? `in group ${filter}` : `split: ${n} of ${s.parts.length} group(s) done`}`;
+      const finish = (groups, texts, splitAtOnce) => {
+        const ms = Date.now() - t0;
+        const redAt = groups.findIndex((gr) => gr.status === 'red');
+        if (redAt >= 0) {
+          const part = s.parts.find((x) => x.filter === groups[redAt].filter) || s.parts[redAt];
+          const text = texts[redAt] || '';
+          const rec = { status: 'red', why: `the rules check failed (exit ${groups[redAt].code ?? '?'}, focus, group ${part.filter})`, ms, at: new Date().toISOString(), mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce, part: { filter: part.filter, command: part.command }, failures: failingTests(text).slice(0, 40), tail: text.split('\n').slice(-12).join('\n') };
           keep(root, engine, key, rec);
           return rec;
         }
+        const rec = { status: 'pass', why: `the rules check passed (${Math.round(ms / 1000)} s, focus, ${groups.length} groups${splitAtOnce > 1 ? `, up to ${splitAtOnce} at once` : ''})`, ms, at: new Date().toISOString(), mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce };
+        keep(root, engine, key, rec);
+        return rec;
+      };
+      let ran = null;
+      if (plan.max > 1) {
+        const job = { parts: s.parts, cwd: dir, env: runEnv, timeoutMs: cfg.timeoutMin * 60000, max: plan.max, gb: plan.gb, floorGb: plan.floorGb, ...(typeof freeGb === 'function' && Number.isFinite(Number(freeGb())) ? { freeGb: Number(freeGb()) } : {}) };
+        log(`[engine-rules] ${engine}: split of ${s.parts.length} part(s) on ${short(sha)}: ${plan.why}`);
+        const w = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'rules-parts.mjs')], { input: JSON.stringify(job), encoding: 'utf8', windowsHide: true, maxBuffer: 256 * 1024 * 1024, timeout: cfg.timeoutMin * 60000 + 30000 });
+        try { ran = JSON.parse(String(w.stdout || '').trim().split('\n').pop()); } catch { ran = null; }
+        if (!ran) log(`[engine-rules] ${engine}: the parallel runner gave no result (${lastLine(w) || `exit ${w.status}`}); the parts run in sequence`);
+        else {
+          for (const d of ran.decisions || []) log(`[engine-rules] ${engine}: ${d}`);
+          const rs = ran.results.map((r) => r).filter(Boolean);
+          const groups = rs.map((r) => ({ filter: r.filter, seconds: r.seconds, status: r.status === 'error' ? 'error' : r.status, code: r.code }));
+          const bad = rs.find((r) => r.status === 'error');
+          if (bad) return { status: 'error', why: bad.timedOut ? timedOut(rs.filter((r) => r.status === 'pass').length, bad.filter) : `the rules check could not run: ${bad.errorCode || bad.why || '?'}`, ms: Date.now() - t0, mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce: ran.atOnce };
+          return finish(groups, ran.results.map((r) => String(r?.text || '').replace(/\r\n?/g, '\n').trimEnd()), ran.atOnce);
+        }
       }
-      const ms = Date.now() - t0;
-      const rec = { status: 'pass', why: `the rules check passed (${Math.round(ms / 1000)} s, focus, ${groups.length} groups)`, ms, at: new Date().toISOString(), mode: s.mode, groups };
-      keep(root, engine, key, rec);
-      return rec;
+      // One at a time (splitMax 1 or unset, the 2.84 way).
+      log(`[engine-rules] ${engine}: split of ${s.parts.length} part(s) on ${short(sha)}: one at a time (${plan.max > 1 ? 'the parallel runner failed' : 'rules.focus.splitMax is not set or 1'})`);
+      const groups = [];
+      const texts = [];
+      for (const part of s.parts) {
+        const left = cfg.timeoutMin * 60000 - (Date.now() - t0);
+        if (left <= 0) return { status: 'error', why: timedOut(groups.length), ms: Date.now() - t0, mode: s.mode, groups, splitAtOnce: 1 };
+        log(`[engine-rules] ${engine}: ${part.command} on ${short(sha)} (focus, group ${groups.length + 1} of ${s.parts.length})${co.sparse ? ' (sparse checkout)' : ''}`);
+        const g0 = Date.now();
+        const rp = spawnSync(part.command, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: left, env: runEnv });
+        const gs = { filter: part.filter, seconds: Math.round((Date.now() - g0) / 1000), status: rp.error ? 'error' : rp.status === 0 ? 'pass' : 'red', code: rp.status ?? rp.signal };
+        groups.push(gs);
+        texts.push(`${rp.stdout || ''}${rp.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd());
+        if (rp.error) return { status: 'error', why: rp.error.code === 'ETIMEDOUT' ? timedOut(0, part.filter) : `the rules check could not run: ${rp.error.code || rp.error.message}`, ms: Date.now() - t0, mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce: 1 };
+        if (rp.status !== 0) return finish(groups, texts, 1);
+      }
+      return finish(groups, texts, 1);
     }
     log(`[engine-rules] ${engine}: ${s.command} on ${short(sha)}${s.mode === 'focus' ? ' (focus)' : ''}${co.sparse ? ' (sparse checkout)' : ''}`);
     const r = spawnSync(s.command, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: cfg.timeoutMin * 60000, env: runEnv });
@@ -483,6 +531,9 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
       log(`[engine-rules] ${engine}: slice ${i + 1} of ${n} (rules.maxLanes ${cfg.maxLanes}): ${part.map((l) => l.task).join(', ')}`);
       const r = rulesGate({ engine, repo, tip, lanes: part, chain, cfg, from, extraFrom, full, useCache, root, id: `${id}-s${i + 1}`, env, log, run, slice: { i: i + 1, n } });
       all.ran = all.ran || r.ran;
+      if (r.splitAtOnce) all.splitAtOnce = Math.max(all.splitAtOnce || 0, r.splitAtOnce);
+      if (r.selWhy) all.selWhy = all.selWhy ? `${all.selWhy}; ${r.selWhy}`.slice(0, 400) : r.selWhy;
+      all.parts = (all.parts || 0) + (r.parts || 0);
       all.runs += r.runs; all.ms += r.ms;
       all.kept.push(...r.kept); all.dropped.push(...r.dropped);
       all.slices.push({ lanes: part.map((l) => l.task), why: r.why, ...(r.skipped ? { skipped: true } : {}), ...(r.groups ? { groups: r.groups } : {}) });
@@ -499,12 +550,17 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
   const sel = rulesSelection({ changed: first && !first.error && first.head ? changedPaths(repo, tip, first.head) : null, cfg, full: Boolean(due), fullWhy: due });
   res.mode = sel.mode;
   res.filter = sel.filter.slice(0, 300);
+  res.selWhy = String(sel.why || '').slice(0, 400);
+  res.parts = Array.isArray(sel.parts) ? sel.parts.length : 1;
   if (cfg.focus || sel.unchanged) log(`[engine-rules] ${engine}: ${sel.mode} run: ${sel.why}${sel.filter ? ` (${res.filter})` : ''}`);
   for (const b of sel.ignoreBad || []) log(`[engine-rules] ${engine}: rules.focus.ignore pattern ${JSON.stringify(b).slice(0, 120)} is not a valid regex; skipped`);
   // rules.focus.split: seconds of each group over this batch's uncached runs.
   const groupSecs = new Map();
   const at = (sha) => {
     const r = run({ engine, repo, sha, cfg, from, extraFrom, sel, root, id, env, log, useCache });
+    // 2.85: a kept result is said in the log (a restarted train reusing a green tree is not a silent skip).
+    if (r.cached) log(`[engine-rules] ${engine}: rules ${r.status} cached for ${short(sha)} (${r.mode || sel.mode}, kept result of this tree: not run again)`);
+    if (Number(r.splitAtOnce) > 0) res.splitAtOnce = Math.max(res.splitAtOnce || 0, Number(r.splitAtOnce));
     if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; for (const gr of Array.isArray(r.groups) ? r.groups : []) groupSecs.set(gr.filter, (groupSecs.get(gr.filter) || 0) + (gr.seconds || 0)); }
     return r;
   };
@@ -542,14 +598,14 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     if (stuck) { res.why = `the rules check is red for ${set.map((l) => l.task).join(' + ')} and could not be narrowed: the land run decides`; break; }
     const culprit = set[hi - 1];
     const before = set.slice(0, hi - 1).map((l) => l.task);
-    res.dropped.push({ lane: culprit, failures: bad.failures || [], why: `the rules check (${sel.command}) is red with ${culprit.branch}${before.length ? ` on top of ${before.join(' + ')}` : ''}; it is green without it${bad.failures?.length ? `. Failing: ${bad.failures.slice(0, 8).join(', ')}${bad.failures.length > 8 ? ', ...' : ''}` : ''}${bad.tail ? `\n${bad.tail.split('\n').map((x) => `  ${x}`).join('\n')}` : ''}` });
+    res.dropped.push({ lane: culprit, failures: bad.failures || [], part: bad.part?.filter || null, why: `the rules check (${bad.part ? `${bad.part.command}, part ${bad.part.filter} of ${res.parts}` : sel.command}${slice ? `, slice ${slice.i} of ${slice.n}` : ''}) is red with ${culprit.branch}${before.length ? ` on top of ${before.join(' + ')}` : ''}; it is green without it${bad.failures?.length ? `. Failing${bad.part ? ` in part ${bad.part.filter}` : ''}: ${bad.failures.slice(0, 8).join(', ')}${bad.failures.length > 8 ? ', ...' : ''}` : bad.part ? `. Part ${bad.part.filter} failed; no test name was read from its output` : ''}${bad.tail ? `\n${bad.tail.split('\n').map((x) => `  ${x}`).join('\n')}` : ''}` });
     set = set.filter((l) => l.task !== culprit.task);
   }
   res.kept = set;
   if (groupSecs.size) res.groups = [...groupSecs.entries()].map(([filter, seconds]) => ({ filter, seconds }));
   if (!res.why) res.why = res.dropped.length ? `${res.dropped.length} lane(s) refused by the rules check, ${set.length} go to the land run` : `the rules check is green for ${set.map((l) => l.task).join(', ')}`;
   if (sel.mode === 'focus') res.why += ` (focus: ${res.filter})`;
-  try { emitEvent({ type: 'engine.rules', agent: env.STUDIO_LOCK_OWNER || 'gates', track: `engine:${engine}`, status: res.dropped.length ? 'warn' : 'ok', msg: `${engine} rules check: ${res.why}`.slice(0, 400), meta: { engine, runs: res.runs, ms: res.ms, kept: set.map((l) => l.task), dropped: res.dropped.map((d) => d.lane.task), green: Boolean(res.green), mode: res.mode, filter: res.filter, ...(res.groups ? { groups: res.groups } : {}), ...(slice ? { slice: `${slice.i}/${slice.n}` } : {}) } }); } catch { /* the check's result stands without its event */ }
+  try { emitEvent({ type: 'engine.rules', agent: env.STUDIO_LOCK_OWNER || 'gates', track: `engine:${engine}`, status: res.dropped.length ? 'warn' : 'ok', msg: `${engine} rules check: ${res.why}`.slice(0, 400), meta: { engine, runs: res.runs, ms: res.ms, kept: set.map((l) => l.task), dropped: res.dropped.map((d) => d.lane.task), green: Boolean(res.green), mode: res.mode, why: res.selWhy, parts: res.parts, splitAtOnce: res.splitAtOnce || 1, filter: res.filter, ...(res.groups ? { groups: res.groups } : {}), ...(slice ? { slice: `${slice.i}/${slice.n}` } : {}) } }); } catch { /* the check's result stands without its event */ }
   return res;
 }
 

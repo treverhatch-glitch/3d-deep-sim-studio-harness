@@ -1,17 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/visual-proof.mjs — 2.30o: a render task proves itself with pictures.
- *
- * In the Marina run Godot tasks passed with no visible change (a boat that never moved, a scene that
- * looked the same). A render task (Godot, graphics, visuals, a scene, a model) now needs before/after
- * captures from fixed, named cameras:
+ * harness/visual-proof.mjs — a render task proves itself with pictures. A render task (Godot, graphics, visuals, a
+ * scene, a model) needs before/after captures from fixed, named cameras, because such tasks can pass with no visible
+ * change:
  *
  *   .studio/proof/<TASK>/visual/before/<camera>.png     taken when the task starts (or by `capture`)
  *   .studio/proof/<TASK>/visual/after/<camera>.png      taken before `task done`
  *
  * The check fails when a capture is missing, a frame is blank (almost no luminance variation, or almost
  * fully transparent), or a before/after pair is near-identical (mean luminance change below
- * STUDIO_VISUAL_DIFF_MIN, 0.01 = 1%; 2.65.0: or STUDIO_VISUAL_NOISE_K times the camera's measured noise, see
+ * STUDIO_VISUAL_DIFF_MIN, 0.01 = 1%; or STUDIO_VISUAL_NOISE_K times the camera's measured noise, see
  * visualLimits). The result is written as the `visual` part of the task's verdict
  * (harness/verdict-split.mjs).
  *
@@ -26,7 +24,7 @@
  *   node harness/visual-proof.mjs stats <file.png>                  blank-frame numbers for one image
  *   node harness/visual-proof.mjs diff <a.png> <b.png>              mean change between two images
  *
- * 2.59.0: a game that isn't a Godot project (a web game, any engine) names its own capture command in its check
+ * A game that isn't a Godot project (a web game, any engine) names its own capture command in its check
  * manifest, <game root>/studio.gates.json: "visual": { "capture": "node tools/capture.mjs {out} {cams}" }. The
  * command writes one <camera>.png per camera into {out}; the same before/after check applies. The manifest is a
  * protected file, so the owner approves the command once. Placeholders: {out} (absolute folder), {cams} (comma
@@ -44,8 +42,8 @@ import { gameCapture } from './visual-capture.mjs';
 
 const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 /**
- * 2.65.0: the noise baseline. Two captures of unchanged code differed by 0.58-0.68% (the crew's web game), against the
- * 1% "near-identical" line: a small real change might not clear the noise. So "before" is captured twice per camera
+ * The noise baseline. Two captures of unchanged code differ a little, so a small real change might not clear the
+ * "near-identical" line. So "before" is captured twice per camera
  * (before/ and before-noise/), and a camera's change must reach max(diffMin, noiseK x its measured noise)
  * (STUDIO_VISUAL_NOISE_K, 2). That bar is capped (STUDIO_VISUAL_NOISE_CAP, 0.05): a camera whose bar would pass the
  * cap is too noisy to judge, an error naming it, never a pass. A camera with no second before capture is judged
@@ -70,16 +68,15 @@ export function noiseBar(noise, limits = visualLimits()) {
 export const proofDir = (task) => path.join(STUDIO_STATE_DIR, 'proof', task, 'visual');
 
 /**
- * 2.70.0 (t): which renderer drew a capture side: <side>.renderer.json beside the side's folder (the folder keeps only
- * the pictures), written by a browser capture through
- * qa/chromium.mjs rendererReport (STUDIO_RENDERER_FILE, set by captureWithCommand), else captureWithCommand's own
- * record of the browser GPU setting. A renderer change (SwiftShader to a GPU, STUDIO_BROWSER_GPU) shifts pixels, so:
- *   - the two "before" captures on different renderers: the noise between them is the renderer's, not the scene's;
- *     the noise baseline is dropped with a note (judged against the minimum, as with no second capture), never
- *     "too noisy";
- *   - before and after on different renderers: the pair can't be compared (it would pass or fail on the renderer,
- *     not the change): a problem naming both that asks for a new before. `capture after` runs with the GPU setting
- *     the before was taken with (STUDIO_BROWSER_GPU pinned, said in its log), so a changed setting alone doesn't do this.
+ * Which renderer drew a capture side: <side>.renderer.json beside the side's folder (the folder keeps only the
+ * pictures), written by a browser capture through qa/chromium.mjs rendererReport (STUDIO_RENDERER_FILE, set by
+ * captureWithCommand), else captureWithCommand's own record of the browser GPU setting. A renderer change (SwiftShader
+ * to a GPU, STUDIO_BROWSER_GPU) shifts pixels, so:
+ *   - two "before" captures on different renderers: the noise is the renderer's, not the scene's; the noise baseline
+ *     is dropped with a note (judged against the minimum), never "too noisy";
+ *   - before and after on different renderers: the pair can't be compared (it would pass or fail on the renderer, not
+ *     the change): a problem naming both that asks for a new before. `capture after` runs with the GPU setting the
+ *     before was taken with (STUDIO_BROWSER_GPU pinned, said in its log).
  * The tolerance is never loosened: no record on either side compares as before.
  */
 export const RENDERER_SUFFIX = '.renderer.json';
@@ -164,9 +161,9 @@ export function checkVisualProof(task, { dir = proofDir(task), limits = visualLi
         const B = load(path.join(dir, 'before', f));
         row.before = imageStats(B, limits);
         row.diff = imageDiff(B, A);
-        // 2.65.0: the camera's own noise (two captures of the same code), when a second before capture exists.
+        // The camera's own noise (two captures of the same code), when a second before capture exists.
         const nf = path.join(dir, NOISE_SIDE, f);
-        // 2.70.0 (t): a second before drawn by another renderer measures the renderer, not the scene: re-baselined.
+        // A second before drawn by another renderer measures the renderer, not the scene: re-baselined.
         const noiseSplit = fs.existsSync(nf) && rendererSplit(rB, rN);
         const bar = noiseBar(fs.existsSync(nf) && !noiseSplit ? imageDiff(B, load(nf)) : null, limits);
         if (noiseSplit) row.rebaselined = `the two before captures ran on different renderers (${rB.key} / ${rN.key}): noise baseline dropped, judged against the minimum; capture before again to measure it`;
@@ -190,7 +187,7 @@ export function checkVisualProof(task, { dir = proofDir(task), limits = visualLi
 }
 
 /**
- * 2.65.0: capture "before" for the noise baseline: the capture into before/, then the same again into before-noise/.
+ * Capture "before" for the noise baseline: the capture into before/, then the same again into before-noise/.
  * capture(outDir) -> { ok, files, why, log }. The second run failing leaves no noise folder (the check then says no
  * noise was measured), never a failed before.
  */
@@ -301,7 +298,7 @@ export function captureGodot(project, outDir, { cams = [], frames = 30, bin = pr
 const quoteArg = (v) => (process.platform === 'win32' ? `"${String(v).replace(/"/g, '""')}"` : `'${String(v).replace(/'/g, `'\\''`)}'`);
 
 /**
- * 2.70.0 (t): the capture's environment: STUDIO_RENDERER_FILE (<out>.renderer.json, which qa/chromium.mjs
+ * The capture's environment: STUDIO_RENDERER_FILE (<out>.renderer.json, which qa/chromium.mjs
  * rendererReport fills), and for an after capture the browser GPU setting its before was taken with. done() writes the
  * GPU setting alone when the capture recorded no renderer.
  */
@@ -319,7 +316,7 @@ function rendererEnv(outDir, phase, env = process.env) {
   return { env: e, note, done };
 }
 
-/** 2.59.0: run the game's own capture command into outDir. Returns { ok, files, why, log } like captureGodot. */
+/** Run the game's own capture command into outDir. Returns { ok, files, why, log } like captureGodot. */
 export function captureWithCommand(template, outDir, { cams = [], task = '', phase = '', timeoutMs = num(process.env.STUDIO_VISUAL_CAPTURE_TIMEOUT_MS, 300000) } = {}) {
   fs.mkdirSync(outDir, { recursive: true });
   for (const f of pngs(outDir)) fs.rmSync(path.join(outDir, f));
@@ -339,7 +336,7 @@ export function captureWithCommand(template, outDir, { cams = [], task = '', pha
 /** Record the visual result in the task's split verdict. */
 export async function recordVisual(task, res) {
   const { setPart } = await import('./verdict-split.mjs');
-  // 2.65.0: each camera's noise and the bar it had to clear go into the verdict (the proof JSON) too.
+  // Each camera's noise and the bar it had to clear go into the verdict (the proof JSON) too.
   return setPart(task, 'visual', { ok: res.ok, why: res.why || [res.noise?.length ? `noise baseline: ${res.noise.join('; ')}` : '', ...(res.notes || [])].filter(Boolean).join('; '), evidence: res.cameras?.map((c) => `${c.camera}: change ${c.diff ?? 'n/a'}${c.noise !== undefined ? `, noise ${c.noise ?? 'not measured'}, needs ${c.need}${c.tooNoisy ? ' (too noisy to judge)' : ''}` : ''}`) || [] });
 }
 
@@ -347,7 +344,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const a = process.argv.slice(2);
   const opt = (k, d = null) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   const [cmd, x, y] = a;
-  // 2.77.0 (u, P5.5): the visual check's records (harness/visual-check.mjs): shots, asset, looked, review, send, status.
+  // The visual check's records (harness/visual-check.mjs): shots, asset, looked, review, send, status.
   if (['shots', 'asset', 'looked', 'review', 'send', 'status'].includes(cmd)) process.exit(spawnSync(process.execPath, [fileURLToPathOf('./visual-check.mjs'), ...a], { stdio: 'inherit', windowsHide: true }).status ?? 1); // a child: visual-check imports this module
   if (cmd === 'stats' && x) { console.log(JSON.stringify(imageStats(load(x)))); process.exit(0); }
   if (cmd === 'diff' && x && y) { console.log(JSON.stringify({ diff: imageDiff(load(x), load(y)) })); process.exit(0); }

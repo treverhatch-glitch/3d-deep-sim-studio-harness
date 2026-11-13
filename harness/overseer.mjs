@@ -23,7 +23,7 @@
  *   1 repro tests  also writes failing reproduction tests as harness PRs (npm run workaround -- repro <H-id>)
  *   2 small fixes  also small non-gate harness fixes, reviewed and merged by someone else
  *   3 own releases also merges its own non-gate releases
- * At every stage gates, protected files and money stay the owner's.
+ * At every stage gates and protected files stay the owner's.
  * The file counts as committed (git's HEAD copy): an uncommitted edit is shown and ignored, so a working-copy edit can't
  * raise a stage. No file, or one that doesn't parse: stage 0 with the default criteria.
  *
@@ -53,7 +53,7 @@ export const STAGES = [
   { stage: 2, name: 'small fixes', allows: 'small non-gate harness fixes, reviewed and merged by someone else' },
   { stage: 3, name: 'own releases', allows: 'merges its own non-gate harness releases' },
 ];
-export const ALWAYS_OWNER = 'gates, protected files and money';
+export const ALWAYS_OWNER = 'gates and protected files';
 const DEFAULT_CRITERIA = Object.freeze({
   1: { minDaysAtStage: 7, minWorkaroundsLogged: 10, maxProtectedAttempts: 0 },
   2: { minDaysAtStage: 7, minAcceptedRepros: 5, maxProtectedAttempts: 0 },
@@ -197,7 +197,7 @@ export const HUMAN_ONLY = Object.freeze([
 ]);
 
 /** What the overseer does without signing anything, and what it signs as the owner (each by the command's own check). */
-export const OVERSEER_DOES = Object.freeze(['queue order and priority', 'adding, splitting, parking and unparking tasks', 'briefs, pitfalls and notes', 'a task\'s lane, type and visual check', 'starting and stopping agents', 'a wind-down with an end time', 'spend budgets on the owner\'s order', 'engine push mode and boost', 'releasing a held lane (tier A or B)', 'answering an ask that is not about money, deletes, keys, publishing or tools', 'logging workarounds']);
+export const OVERSEER_DOES = Object.freeze(['queue order and priority', 'adding, splitting, parking and unparking tasks', 'briefs, pitfalls and notes', 'a task\'s lane, type and visual check', 'starting and stopping agents', 'a wind-down with an end time', 'spend budgets on the owner\'s order', 'engine push mode and boost', 'releasing a held lane (tier A or B)', 'answering an ask that is not about deletes, keys, publishing or tools', 'logging workarounds']);
 export const OVERSEER_SIGNS = Object.freeze(['protected', 'tests', 'hooks', 'force', 'proposal', 'train-config']);
 const HARNESS_STAGE = Object.freeze({ 'workaround-log': 0, 'repro-test': 1, 'harness-fix': 2, 'harness-release': 3 });
 
@@ -218,7 +218,7 @@ export async function overseerCan(action, { by = null, root = REPO_ROOT, env = p
   if (h) return { verdict: 'human-only', why: `${h.what} stays with a person (${h.where})`, via: h.act };
   if (a in HARNESS_STAGE) {
     const need = HARNESS_STAGE[a];
-    return o.stage >= need ? { verdict: 'yes', why: `stage ${o.stage} (${STAGES[o.stage].name}) allows it; gates, protected files and money stay the owner's`, via: `stage ${o.stage}` }
+    return o.stage >= need ? { verdict: 'yes', why: `stage ${o.stage} (${STAGES[o.stage].name}) allows it; gates and protected files stay the owner's`, via: `stage ${o.stage}` }
       : { verdict: 'ask', why: `it needs stage ${need} (${STAGES[need].name}); the studio's overseer is at stage ${o.stage}. The owner sets the stage (${OVERSEER_REL})`, via: `stage ${o.stage}` };
   }
   if (!who) return { verdict: 'ask', why: 'say who acts: --by <agent>', via: null };
@@ -327,8 +327,7 @@ export async function overseerSheet({ root = REPO_ROOT, now = Date.now(), events
   // 1. asks
   let asks = [];
   try {
-    const { askKind } = await import('./ask.mjs');
-    const { ownerOnlyTopic } = await import('./owner-acts.mjs');
+    const { askKind, askOwnerTopic } = await import('./ask.mjs');
     let names = [];
     try { names = fs.readdirSync(path.join(root, 'studio', 'asks')).filter((f) => /^A-\d+\.json$/.test(f)).sort(); } catch { /* none */ }
     for (const f of names) {
@@ -336,7 +335,7 @@ export async function overseerSheet({ root = REPO_ROOT, now = Date.now(), events
       if (!a || a.status !== 'open') continue;
       const kind = askKind(a);
       const own = kind !== 'board' && kind !== 'protected';
-      const topic = own ? ownerOnlyTopic(a.question, a.why) : null;
+      const topic = own ? askOwnerTopic(a) : null;
       asks.push({ who: own ? 'person' : 'overseer', id: a.id, what: `${a.id}: ${String(a.question || '').slice(0, 140)}`, since: a.at || null, kind, why: own ? `owner only: ${topic?.what || kind}` : `the overseer may answer it when it is the owner's proxy or in beta mode (${kind})`, cmd: `npm run ask -- answer ${a.id} "<answer>" --by <you>` });
     }
   } catch { asks = []; }

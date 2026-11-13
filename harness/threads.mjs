@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * harness/threads.mjs — 2.64.0: thread subscription, pass-through and the trigger table.
+ * harness/threads.mjs — thread subscription, pass-through and the trigger table.
  *
  *   npm run thread -- status                              mode, live sources, keys, last sweep
  *   npm run thread -- sweep                               index and route the events since the last sweep
@@ -21,16 +21,15 @@
  *   candidate  a match goes to the task's inbox (read in the brief and with `inbox`), no notice;
  *   ignore     dropped.
  * An event with no thread (or whose tasks are all done) goes to the Producer: one line in studio/producer/INBOX.md,
- * which the Producer reads at its next start (batched as before). Pass-through never adds a task and never edits
- * the board (studio/NEXT.md): the Producer stays the only writer to the live queue.
+ * which the Producer reads at its next start. Pass-through never adds a task and never edits the board (studio/NEXT.md):
+ * the Producer stays the only writer to the live queue.
  *
- * 2.65.0, "senders" in studio/triggers.json: a discord or github event responds only when its author id (--author, the id
- * the bot got from Discord or GitHub; the harness can't verify it) is listed as owner or trusted; any other author's
- * event, or one with no author, is at most a candidate. Empty lists: all candidates.
+ * "senders" in studio/triggers.json: a discord or github event responds only when its author id (--author, the id the bot
+ * got from Discord or GitHub; the harness can't verify it) is listed as owner or trusted; any other author's event, or one
+ * with no author, is at most a candidate. Empty lists: all candidates.
  *
- * STUDIO_THREADS (or "mode" in studio/triggers.json): on routes the sources listed in "live" (ci and train by default;
- * the others are left alone until listed); off does nothing. 2.80: the shadow mode (would_route / would_drop events,
- * the shadow report) is gone: "shadow", the old default, now behaves as off.
+ * STUDIO_THREADS (or "mode" in studio/triggers.json): on routes the sources listed in "live" (ci and train by default; the
+ * others are left alone until listed); off does nothing. "shadow" (the old default) now behaves as off.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -58,13 +57,13 @@ export const DEFAULT_TRIGGERS = {
   sources: {
     ci: { policy: 'respond', types: { 'ci.green': 'ignore' } },
     train: { policy: 'ignore', types: { 'task.train.dropped': 'respond', 'task.train.partial': 'respond', 'task.train.deferred': 'candidate', 'task.train.red': 'candidate', 'task.train.red_main': 'candidate', 'task.train.flaky': 'candidate' } },
-    // 2.65.0: respond only for an admitted sender (senders below); with the lists empty every post is a candidate.
+    // Respond only for an admitted sender (senders below); with the lists empty every post is a candidate.
     discord: { policy: 'respond' },
     github: { policy: 'respond' },
   },
   senders: { discord: { owner: [], trusted: [] }, github: { owner: [] } },
 };
-/** 2.65.0: the sources whose events carry an outside author (the id the bot got from Discord or GitHub). */
+/** The sources whose events carry an outside author (the id the bot got from Discord or GitHub). */
 export const SENDER_SOURCES = ['discord', 'github'];
 
 // Keys: "<kind>:<value>". Code builds every kind but the external ones, which a bot registers with `link`.
@@ -112,7 +111,7 @@ export function readTriggers(file = TRIGGERS_FILE()) {
   return { mode: ['off', 'shadow', 'on'].includes(t.mode) ? t.mode : DEFAULT_TRIGGERS.mode, live: Array.isArray(t.live) ? t.live.filter((s) => SOURCES.includes(s)) : DEFAULT_TRIGGERS.live, sources, senders: readSenders(t.senders) };
 }
 
-/** 2.65.0: "senders": { discord: { owner: [ids], trusted: [ids] }, github: { owner: [ids] } }; anything else ignored. */
+/** "senders": { discord: { owner: [ids], trusted: [ids] }, github: { owner: [ids] } }; anything else ignored. */
 export function readSenders(raw) {
   const ids = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === 'string' || typeof x === 'number').map((x) => String(x).trim()).filter((x) => /^[\w.-]{1,64}$/.test(x)))] : []);
   const out = {};
@@ -124,7 +123,7 @@ export function readSenders(raw) {
 }
 
 /**
- * 2.65.0: who sent an outside event, as the studio's trigger table admits them: owner | trusted | untrusted (an author
+ * Who sent an outside event, as the studio's trigger table admits them: owner | trusted | untrusted (an author
  * not listed) | unknown (no author id given), or null for a source without outside authors. The author id is the
  * one the bot passed (meta.author): the harness can't check a Discord or GitHub identity itself; it applies the
  * owner's lists to the id it was given. GitHub logins compare without case.
@@ -141,7 +140,7 @@ export function senderClass(e, triggers = readTriggers()) {
   return 'untrusted';
 }
 
-/** off | on: STUDIO_THREADS first, then studio/triggers.json, else off ("shadow" is off since 2.80). */
+/** off | on: STUDIO_THREADS first, then studio/triggers.json, else off ("shadow" is off). */
 export function threadsMode(env = process.env, triggers = readTriggers()) {
   const v = String(env.STUDIO_THREADS || '').trim().toLowerCase();
   if (['off', '0', 'false', 'no', 'shadow'].includes(v)) return 'off';
@@ -340,8 +339,8 @@ export function routeEvent(e, { idx, mode = threadsMode(), triggers = readTrigge
   const source = sourceOf(e);
   if (!source || mode !== 'on' || !triggers.live.includes(source)) return { action: 'none' };
   let policy = policyFor(source, e.type, triggers);
-  // 2.65.0: a Discord or GitHub event responds only for an admitted sender (studio/triggers.json "senders"); anyone
-  // else's is at most a candidate (never respond).
+  // A Discord or GitHub event responds only for an admitted sender (studio/triggers.json "senders"); anyone else's is at
+  // most a candidate (never respond).
   const sender = senderClass(e, triggers);
   const admitted = sender === 'owner' || sender === 'trusted';
   const capped = sender !== null && !admitted && policy === 'respond';
@@ -362,7 +361,7 @@ export function routeEvent(e, { idx, mode = threadsMode(), triggers = readTrigge
     const told = open.map((id) => deliverToTask(id, lineOf(e, source, ref), { notice: policy === 'respond' })).filter(Boolean);
     emitEvent({ type: 'thread.routed', agent: 'threads', task: open[0], msg: `${e.type} routed to ${open.join(', ')}'s inbox${told.length ? ` (${told.join(', ')} told at the next tool call)` : ''}${capNote}`, meta: { ...out, told } });
   } else {
-    // producer: false — the caller delivers to the Producer its own way (the War Room's /api/inbox, as before).
+    // producer: false — the caller delivers to the Producer its own way (the War Room's /api/inbox).
     if (producer) deliverToProducer(`- [${stamp(e.ts)}] **${source}** (${hit ? `thread ${hit.key}${why}` : 'no thread'}): ${oneLine(e.msg || e.type, 300)}`);
     emitEvent({ type: 'thread.to_producer', agent: 'threads', to: 'producer', msg: `${e.type} has no open thread: in the Producer's inbox${why}`, meta: out });
   }
@@ -491,10 +490,10 @@ export function postInbound({ source, key, text, by, ref = null, author = null, 
   if (!k) return { ok: false, message: `"${key}" isn't a key (a task id, a lane branch, a sha, discord:<id>, pr:<n> ...)` };
   const msg = oneLine(text, 600);
   if (!msg) return { ok: false, message: 'empty message' };
-  // 2.65.0: the author id the bot got from Discord or GitHub (not checked here: the bot passes it; the policy uses it).
+  // The author id the bot got from Discord or GitHub (not checked here: the bot passes it; the policy uses it).
   const who = author === null || author === undefined || author === '' ? null : String(author).trim();
   if (who !== null && !/^[\w.-]{1,64}$/.test(who)) return { ok: false, message: `--author is the sender's id as Discord or GitHub gave it (digits, or a GitHub login); got "${oneLine(who, 40)}"` };
-  // 2.84 (n): meta.role: posted from a launched session's shell (a Producer's own post is not an owner's order to it).
+  // meta.role: posted from a launched session's shell (a Producer's own post is not an owner's order to it).
   const role = String(env.STUDIO_ROLE || '').trim().toLowerCase();
   const e = emitEvent({ type: 'inbound.message', agent: oneLine(by, 60), msg: `${oneLine(by, 60)}: ${msg}`, meta: { source, thread: k, ...(ref ? { ref: oneLine(ref, 80) } : {}), ...(who ? { author: who } : {}), ...(role ? { role } : {}) } });
   const mode = threadsMode(env);

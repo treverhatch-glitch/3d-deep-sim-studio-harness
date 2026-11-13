@@ -10,11 +10,10 @@
  *   node harness/lock.mjs check-staged [--owner me]  (pre-commit: refuse staged files locked by someone else)
  *
  * Owners must be unique per running agent: tool and role names that several agents share are refused.
- * 2.58.5 (H-10): a by-hand claim on a game's (source) root or a folder of more than STUDIO_LOCK_MAX_FILES (50) tracked
- * files needs --wide; in a lane copy another agent's lock only warns at commit (checked when the lane lands); and a
- * merge commit is judged on its own diff, not the files the merged branch brings (H-6).
- * `file:` is accepted as an alias of `path:`. Paths are compared without regard to case (2.58.0, PU-43): on Windows
- * `game/Branding` and `game/branding` are one folder, so two agents can't hold it under two spellings.
+ * A by-hand claim on a game's (source) root or a folder of more than STUDIO_LOCK_MAX_FILES (50) tracked files needs --wide.
+ * In a lane copy another agent's lock only warns at commit (checked when the lane lands); a merge commit is judged on
+ * its own diff. `file:` is an alias of `path:`. Paths are compared without regard to case: on Windows `game/Branding`
+ * and `game/branding` are one folder, so two agents can't hold it under two spellings.
  */
 
 import crypto from 'node:crypto';
@@ -29,12 +28,12 @@ import { watchCommand } from './workaround.mjs';
 import { inNoteDir } from './reviewer-scope.mjs';
 import { actorOf, outsideSigners } from './permission.mjs';
 
-// 2.58.0 (PU-43): fsafe's warnings (a state file written in place because another program held it open) are logged
-// as events too, not only printed to a console nobody may read. Every command that changes studio state loads this.
+// fsafe's warnings (a state file written in place because another program held it open) are logged as events too.
+// Every command that changes studio state loads this.
 onFsafeWarning((msg, info) => emitEvent({ type: 'fsafe.warning', agent: process.env.STUDIO_LOCK_OWNER || 'harness', status: 'warn', target: info?.file ? path.relative(REPO_ROOT, info.file).replace(/\\/g, '/') : null, msg: String(msg).replace(/^\[fsafe\]\s*/, '') }));
 
 const LOCK_DIR = path.join(REPO_ROOT, '.studio', 'locks');
-/** 2.57.0 (PU-16, P-037): unreadable lock files are moved here (renamed, never deleted) once they are this old. */
+/** Unreadable lock files are moved here (renamed, never deleted) once they are this old. */
 export const BROKEN_DIR = path.join(LOCK_DIR, 'broken');
 export const brokenGraceMs = () => {
   const v = Number(process.env.STUDIO_BROKEN_LOCK_GRACE_SEC);
@@ -92,8 +91,7 @@ function inspectLock(file) {
   if (lock.expiresAt && Date.parse(lock.expiresAt) < Date.now()) return { expired: true, raw, lock };
   return { lock, raw };
 }
-// Never negative: a file's mtime can be a fraction of a millisecond ahead of Date.now() (finer timestamp
-// resolution), which made a grace of 0 skip a file written just before (seen in the 2.57.0 combined selftest).
+// Never negative: a file's mtime can be a fraction of a millisecond ahead of Date.now(), which made a grace of 0 skip a file.
 function ageOf(file) {
   try { return Math.max(0, Date.now() - fs.statSync(file).mtimeMs); } catch { return 0; }
 }
@@ -105,10 +103,7 @@ function readLock(file) {
   return seen.lock && !seen.expired ? seen.lock : null;
 }
 
-/**
- * 2.57.0 (PU-16, P-037): move an unreadable lock file to .studio/locks/broken/<name>.<time> (kept for a look, never
- * deleted), only if it still holds what was read. Returns the new path, or null when it changed or couldn't move.
- */
+/** Moves an unreadable lock file to .studio/locks/broken/<name>.<time> (kept, never deleted), only if it still holds what was read. Returns the new path, or null. */
 function setAside(file, raw, why) {
   const dest = path.join(BROKEN_DIR, `${path.basename(file)}.${new Date().toISOString().replace(/[-:]/g, '').replace('.', '')}`);
   if (!moveAside(file, dest, raw === null ? undefined : raw)) return null;
@@ -119,9 +114,9 @@ function setAside(file, raw, why) {
 }
 
 /**
- * 2.57.0 (PU-16): the watcher's sweep. Lock files that can't be read as JSON and are older than the grace
- * (STUDIO_BROKEN_LOCK_GRACE_SEC, 10) go to .studio/locks/broken/; temp files a killed writer left are removed.
- * Lock files that parse but aren't claims (the land lock's) are left alone. Returns the names set aside.
+ * The watcher's sweep. Lock files that can't be read as JSON and are older than the grace (STUDIO_BROKEN_LOCK_GRACE_SEC,
+ * 10) go to .studio/locks/broken/; temp files a killed writer left are removed. Lock files that parse but aren't claims
+ * (the land lock's) are left alone. Returns the names set aside.
  */
 export function sweepBrokenLocks({ graceMs = brokenGraceMs(), dryRun = false } = {}) {
   const out = [];
@@ -140,10 +135,8 @@ export function sweepBrokenLocks({ graceMs = brokenGraceMs(), dryRun = false } =
 }
 
 /**
- * A short studio-wide mutex around "check for overlapping folder locks, then write". Each lock file
- * is created atomically, but two agents claiming a folder and a file inside it at the same moment
- * could both pass the overlap check before either writes. 2.57.0 (PU-16): harness/fsafe.mjs's lock (a dead
- * holder's is broken at once, a stale one after 10 s).
+ * A short studio-wide mutex around "check for overlapping folder locks, then write": two agents claiming a folder and a
+ * file inside it at once could both pass the check. It is harness/fsafe.mjs's lock (a dead holder's is broken at once, a stale one after 10 s).
  */
 function withMutex(fn) {
   try {
@@ -158,9 +151,9 @@ function withMutex(fn) {
 export const WIDE_PATHS = new Set(['', 'studio', 'qa', 'cartridges', 'src', 'game', 'harness', 'scripts', 'docs', 'tools', 'assets', 'public']);
 
 /**
- * 2.58.5 (H-10): a folder too broad to claim by hand without --wide: a game's root or source root (game|web|engine/<name>,
- * .../<name>/src), or a folder with more than STUDIO_LOCK_MAX_FILES (50) tracked files. Returns why, or null. A file is
- * never too broad. (The launcher's lane claims are not checked here: a task's lane decides those.)
+ * A folder too broad to claim by hand without --wide: a game's root or source root (game|web|engine/<name>, .../<name>/src),
+ * or one with more than STUDIO_LOCK_MAX_FILES (50) tracked files. Returns why, or null. A file is never too broad.
+ * (The launcher's lane claims are not checked here.)
  */
 export function tooBroad(rel, { cwd = REPO_ROOT, env = process.env } = {}) {
   const at = String(rel || '').replace(/\\/g, '/').replace(/\/+$/, '');
@@ -183,8 +176,8 @@ export function claim(key, owner, ttlSec = 3600, { wide = null, byHand = false }
     const at = k.slice(5).replace(/\/+$/, '');
     return { ok: false, reason: 'too-wide', message: `path:${at} is a whole top-level folder and would block every other agent. Claim the narrowest folder or file you will edit (for example path:${at || '<folder>'}/<subfolder or file>), or pass --wide "<why you need all of it>".` };
   }
-  // 2.77.3 (M4): a note folder (studio/reviews: one file per review) is never claimed whole: a reviewer held it for 90+
-  // min and every other reviewer and commit waited. Claim the one file you write.
+  // A note folder (studio/reviews: one file per review) is never claimed whole, or every other reviewer and commit waits.
+  // Claim the one file you write.
   if (byHand && k.startsWith('path:') && !wide && inNoteDir(k.slice(5))?.isDir) {
     const at = k.slice(5).replace(/\/+$/, '');
     return { ok: false, reason: 'too-wide', message: `path:${at} holds one file per note (each review is its own file), so nobody claims the whole folder: a folder lock held every other reviewer and every commit that carried a note. Claim only the file you write (path:${at}/<date>-<ID>-<you>.md), or write it without a claim.` };
@@ -199,9 +192,8 @@ export function claim(key, owner, ttlSec = 3600, { wide = null, byHand = false }
 function claimUnlocked(k, owner, ttlSec, again = false) {
   const check = { ok: true, owner };
   if (k.startsWith('path:')) {
-    // A folder lock covers its files, and a file lock blocks locking its folder: refuse overlaps. 2.58.0 (PU-43):
-    // compared without regard to case (game/Branding and game/branding were both granted; on Windows that is one
-    // folder held by two agents).
+    // A folder lock covers its files, and a file lock blocks locking its folder: refuse overlaps, compared without regard
+    // to case (on Windows game/Branding and game/branding are one folder).
     const at = foldPath(k.slice(5));
     let took = null;
     const overlap = listLocks().find((l) => {
@@ -215,7 +207,7 @@ function claimUnlocked(k, owner, ttlSec, again = false) {
   const file = lockPath(k);
   const now = Date.now();
   const payload = { key: k, owner: check.owner, claimedAt: new Date(now).toISOString(), expiresAt: new Date(now + ttlSec * 1000).toISOString(), holder: holderOf() };
-  // 2.57.0 (PU-16): the lock file appears already holding its payload (never empty, even if this process is killed).
+  // The lock file appears already holding its payload (never empty, even if this process is killed).
   if (createExclusive(file, JSON.stringify(payload, null, 2))) return { ok: true, lock: payload };
   const seen = inspectLock(file);
   if (seen.lock && !seen.expired) {
@@ -223,9 +215,8 @@ function claimUnlocked(k, owner, ttlSec, again = false) {
     if (!again && takeOver(seen.lock, owner, file, seen.raw)) { const r = claimUnlocked(k, owner, ttlSec, true); return r.ok ? { ...r, message: `took over an expired lock of ${seen.lock.owner} (no live session)` } : r; }
     return { ok: false, reason: 'claimed', lock: seen.lock };
   }
-  // P-037: an unreadable lock file (an agent killed between creating and writing it, under an older harness) used
-  // to make this recurse until the stack overflowed. Young: someone is writing it right now. Old: set it aside and
-  // claim once more. Never more than one retry.
+  // An unreadable lock file (an agent killed between creating and writing it) must not recurse forever. Young: someone is
+  // writing it right now. Old: set it aside and claim once more. Never more than one retry.
   if (seen.broken) {
     if (brokenGraceMs() > 0 && seen.ageMs < brokenGraceMs()) return { ok: false, reason: 'claimed', writing: true, lock: null, message: `${k} is claimed (lock being written): its lock file is still being written. Pick another task, or try again in a few seconds.` };
     setAside(file, seen.raw, seen.raw === null ? 'unreadable' : seen.raw.trim() ? 'half-written' : 'empty');
@@ -235,9 +226,9 @@ function claimUnlocked(k, owner, ttlSec, again = false) {
 }
 
 /**
- * 2.80 (c), Patch #24 / R3-14: a path or task lock whose owner's launched session is over (holderGone: its record says
- * ended, or its process is gone) counts as expired for a taker; a P0 "fix main" waited an hour for one. An owner with no
- * session record (a person, the orchestrator) is never taken over this way. Moves the lock aside; true when it did.
+ * A path or task lock whose owner's launched session is over (holderGone: its record says ended, or its process is gone)
+ * counts as expired for a taker. An owner with no session record (a person, the orchestrator) is never taken over this
+ * way. Moves the lock aside; true when it did.
  */
 function takeOver(lock, taker, file = lockPath(lock.key), raw = undefined) {
   if (!/^(path|task):/.test(lock.key) || holderGone(lock) !== true) return false;
@@ -252,7 +243,7 @@ export function release(key, owner, { caller = null } = {}) {
   if (!check.ok) return check;
   let file = lockPath(key);
   let existing = fs.existsSync(file) ? readLock(file) : null;
-  // 2.58.0 (PU-43): a folder claimed as game/Branding can be released as game/branding (the owner's own claim).
+  // A folder claimed as game/Branding can be released as game/branding (the owner's own claim).
   if (!existing && normalizeKey(key).startsWith('path:')) {
     const want = foldPath(normalizeKey(key).slice(5));
     const mine = listLocks().find((l) => l.owner === check.owner && l.key.startsWith('path:') && foldPath(l.key.slice(5)) === want);
@@ -260,7 +251,7 @@ export function release(key, owner, { caller = null } = {}) {
   }
   if (!existing) return { ok: true, released: false };
   if (existing.owner !== check.owner) return { ok: false, reason: 'not-owner', lock: existing, message: `${existing.key} is held by ${existing.owner}, not ${check.owner}: only ${existing.owner} releases it` };
-  // 2.71.1 (B, K01): `lock release` from the command line is bound to the holder, not only to the name it was given.
+  // `lock release` from the command line is bound to the holder, not only to the name it was given.
   if (caller) {
     const refused = releaseRefused(existing, check.owner, caller);
     if (refused) return refused;
@@ -270,9 +261,9 @@ export function release(key, owner, { caller = null } = {}) {
 }
 
 /**
- * 2.71.1 (B, K01): who is claiming, recorded on the lock: { lane: the lane copy it was claimed from (null: the main
- * checkout), as: STUDIO_LOCK_OWNER then }. The launcher's session record (.studio/agents/<owner>.json: pid and start
- * identity, harness/proc-identity.mjs) says whether the owner's session still runs.
+ * Who is claiming, recorded on the lock: { lane: the lane copy it was claimed from (null: the main checkout), as:
+ * STUDIO_LOCK_OWNER then }. The launcher's session record (.studio/agents/<owner>.json: pid and start identity,
+ * harness/proc-identity.mjs) says whether the owner's session still runs.
  */
 export function holderOf({ root = REPO_ROOT, env = process.env } = {}) {
   return { lane: laneCopyName(root), as: String(env.STUDIO_LOCK_OWNER || '').trim() || null };
@@ -283,7 +274,7 @@ export function holderGone(lock) {
   let s = null;
   try { s = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'agents', `${lock.owner}.json`), 'utf8')); } catch { return null; }
   if (!s || typeof s !== 'object') return null;
-  // P-028: a claim made after that session ended is someone else's under the same name: nothing says it is over.
+  // A claim made after that session ended is someone else's under the same name: nothing says it is over.
   if (s.status !== 'running') return s.endedAt && Date.parse(lock.claimedAt || '') > Date.parse(s.endedAt) ? null : true;
   return !recordAlive(s);
 }
@@ -307,8 +298,8 @@ export function releaseRefused(lock, owner, caller) {
 }
 
 /**
- * 2.30h: drop every lock an agent holds whose process is gone. `isDead(owner)` decides (the launcher's
- * session records); owners it doesn't know (a person, a CLI user) are never touched. Returns the keys freed.
+ * Drops every lock an agent holds whose process is gone. `isDead(owner)` decides (the launcher's session records); owners
+ * it doesn't know (a person, a CLI user) are never touched. Returns the keys freed.
  */
 export function releaseDeadOwners(isDead) {
   const freed = [];
@@ -321,9 +312,8 @@ export function releaseDeadOwners(isDead) {
 }
 
 /**
- * Extend every claim an owner holds to at least `ttlSec` from now. The launcher calls it on each
- * heartbeat, so a long task never loses its claim mid-work while the agent is alive (Jed's run: claims
- * ran out under a working agent and the watcher requeued its task).
+ * Extends every claim an owner holds to at least `ttlSec` from now. The launcher calls it on each heartbeat, so a long
+ * task never loses its claim while the agent is alive.
  */
 export function renewOwner(owner, ttlSec = 3600) {
   if (!owner || !fs.existsSync(LOCK_DIR)) return 0;
@@ -335,8 +325,7 @@ export function renewOwner(owner, ttlSec = 3600) {
     const lock = seen.lock && !seen.expired ? seen.lock : null;
     if (!lock || lock.owner !== owner || Date.parse(lock.expiresAt) >= until - 60000) continue;
     try {
-      // 2.57.0 (PU-16): renewed by replacing the file whole (a reader polling during a renew saw "unlocked" in
-      // about 29% of reads when it was truncated and rewritten in place). Skipped if it was released meanwhile.
+      // Renewed by replacing the file whole: a reader polling during an in-place rewrite saw "unlocked". Skipped if released meanwhile.
       if (fs.readFileSync(file, 'utf8') !== seen.raw) continue;
       writeAtomic(file, JSON.stringify({ ...lock, expiresAt: new Date(until).toISOString(), renewedAt: new Date().toISOString() }, null, 2), { fsync: false });
       n += 1;
@@ -361,7 +350,7 @@ export function listLocks() {
     .filter((l) => l && typeof l.key === 'string' && typeof l.owner === 'string');
 }
 
-/** The path lock that covers a repo-relative file (the file itself or any parent folder), if any. Case-blind (PU-43). */
+/** The path lock that covers a repo-relative file (the file itself or any parent folder), if any. Case-blind. */
 export function coveringLock(relFile, locks = listLocks()) {
   const p = foldPath(normalizeKey(`path:${relFile}`).slice(5));
   return locks
@@ -376,10 +365,9 @@ const gitLines = (args, cwd) => {
 };
 
 /**
- * The files a commit being made changes, as the lock gate judges them. 2.58.5 (H-6): for a merge commit (MERGE_HEAD is
- * set) only the files the result doesn't simply take from the branch merged in: the lane's own diff and the conflicts it
- * resolved. On 2.58.3 `git merge main` in a lane failed with "studio/bible/BIBLE.md is locked by director-s32", a file
- * that came from main as it was. { files, merge } (merge: the number of heads merged, or 0).
+ * The files a commit being made changes, as the lock gate judges them. For a merge commit (MERGE_HEAD set) only the files
+ * the result doesn't simply take from the branch merged in: the lane's own diff and its conflict resolutions, so
+ * `git merge main` in a lane isn't refused over main's locked files. { files, merge } (merge: heads merged, or 0).
  */
 export function stagedForLocks(cwd = REPO_ROOT) {
   const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMRD'], { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean);
@@ -397,21 +385,17 @@ export function stagedForLocks(cwd = REPO_ROOT) {
   return { files, merge: heads.length };
 }
 
-/** 2.58.5 (H-10): the lane copy this checkout is (<main>/.lanes/<name>), or null for the main checkout. */
+/** The lane copy this checkout is (<main>/.lanes/<name>), or null for the main checkout. */
 export function laneCopyName(root = REPO_ROOT) {
   const m = String(root).replace(/\\/g, '/').match(/\/\.lanes\/([^/]+)\/?$/);
   return m ? m[1] : null;
 }
 
 /**
- * 2.59.0 (H-12): the task a commit is for, for the commit-msg hook's Studio-Task trailer. It used to list every task the
- * agent held ("Studio-Task: T-089, T-090, T-092, T-093, T-094, T-095" on a T-093 commit), so done-check counted that
- * commit as a change for all six. Now, in order:
- *   1. in a lane copy, the lane's own task: the task whose branch (.studio/lane-branches.json) is this copy's branch, or
- *      the launcher's session record for the lane (.studio/agents/<lane>.json: its task, with this branch);
- *   2. the subject's leading task id ("T-093: …"), when the agent holds that task;
- *   3. the agent's only task lock, when it holds exactly one;
- *   4. otherwise none, with a note saying how to name it (several tasks held and nothing says which).
+ * The task a commit is for, for the commit-msg hook's Studio-Task trailer (one task, not every task the agent holds).
+ * In order: 1. in a lane copy, the lane's own task (the task whose branch in .studio/lane-branches.json is this copy's
+ * branch, or the session record .studio/agents/<lane>.json); 2. the subject's leading task id ("T-093: ...") when the
+ * agent holds it; 3. the agent's only task lock; 4. none, with a note saying how to name it.
  * Returns { tasks: [ids], from: 'lane'|'subject'|'only-lock'|null, note }.
  */
 export function commitTasks({ owner = process.env.STUDIO_LOCK_OWNER || '', subject = '', root = REPO_ROOT, locks = null } = {}) {
@@ -439,11 +423,9 @@ export function commitTasks({ owner = process.env.STUDIO_LOCK_OWNER || '', subje
 
 /**
  * For pre-commit: staged files locked by another owner fail; STUDIO_LOCK_STRICT=1 also requires your own lock.
- * 2.58.5 (H-10): in a lane copy (.lanes/<name>, its own working copy), another agent's path lock is a warning, not a
- * refusal: that agent edits its own copy, so the two can't collide here, and overlapping edits are caught when the
- * lane lands (task done rebases onto the studio's branch and stops on a conflict). Only a lock held in this lane's own
- * name still refuses. On 2.58.3 builder-s45's path:<game>/src/game and builder-s51's path:<game>/src refused unrelated
- * lane commits for an hour. The main checkout is judged as before.
+ * In a lane copy (.lanes/<name>, its own working copy) another agent's path lock is a warning, not a refusal: the two
+ * can't collide here, and overlapping edits are caught when the lane lands (task done rebases and stops on a conflict).
+ * Only a lock held in this lane's own name still refuses. The main checkout is judged strictly.
  */
 export function checkStaged(owner, { strict = process.env.STUDIO_LOCK_STRICT === '1', files, lane = laneCopyName(), env = process.env } = {}) {
   const picked = files ? { files, merge: 0 } : stagedForLocks();
@@ -455,9 +437,8 @@ export function checkStaged(owner, { strict = process.env.STUDIO_LOCK_STRICT ===
     const lock = coveringLock(file, locks);
     if (lock && lock.owner !== owner) {
       const line = `${file} is locked by ${lock.owner} (${lock.key}, until ${lock.expiresAt})`;
-      // 2.77.3 (M4): a file in a note folder (studio/reviews, STUDIO_LOCK_NOTE_DIRS) is its own note: committing it can't
-      // undo anybody's edit, so another owner's lock there is a note, not a refusal (a reviewer's lock on studio/reviews
-      // refused every main commit that carried a review file for 90+ min).
+      // A file in a note folder (studio/reviews, STUDIO_LOCK_NOTE_DIRS) is its own note: another owner's lock there is a
+      // note, not a refusal.
       if (inNoteDir(file, env)) warnings.push(`${line}: a note folder (one file per note), so the commit goes ahead`);
       else if (lane && lock.owner !== lane) warnings.push(`${line}: this is lane copy ${lane}, so it is checked when the lane lands`);
       else problems.push(line);
@@ -471,7 +452,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const all = process.argv.slice(2);
   const flag = (name) => (all.includes(name) ? all[all.indexOf(name) + 1] : undefined);
   const owner = flag('--owner') || process.env.STUDIO_LOCK_OWNER || '';
-  // 2.71.0 (z): --force and a refused claim re-run again and again are detected workarounds (harness/workaround.mjs).
+  // --force and a refused claim re-run again and again are detected workarounds (harness/workaround.mjs).
   if (cmd !== 'check-staged') { try { watchCommand('lock', all, { agent: owner || null }); } catch { /* evidence only */ } }
   const out = (res, ok = res.ok) => {
     console.log(JSON.stringify(res, null, 2));
@@ -495,13 +476,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   if (cmd === 'claim') out(claim(maybeKey, owner, Number(flag('--ttl') || 3600), { wide: flag('--wide') || null, byHand: true }));
   if (cmd === 'release') {
-    // 2.80 (c), Patch #24: `--owner X` naming someone else acts for X when the caller is a person (no STUDIO_LOCK_OWNER),
-    // a Producer/Director session or an outside agent the owner named (the owner proxy, beta mode, STUDIO_OUTSIDE_SIGNERS);
-    // anyone else (a worker, an agent naming itself) is refused naming that rule (K01: naming the holder is not enough).
+    // `--owner X` naming someone else acts for X when the caller is a person (no STUDIO_LOCK_OWNER), a Producer/Director
+    // session or an outside agent the owner named (the owner proxy, beta mode, STUDIO_OUTSIDE_SIGNERS); anyone else (a
+    // worker, an agent naming itself) is refused naming that rule: naming the holder is not enough.
     const actor = actorOf({ root: REPO_ROOT });
     const named = Boolean(flag('--owner')) && flag('--owner') !== actor.name;
-    // 2.81: also the owner's stand-ins by the studio's own grants (the owner proxy, an agent beta mode names): the crew's
-    // orchestrator is the proxy, not an outside signer, and 2.80 refused it.
+    // Also the owner's stand-ins by the studio's own grants (the owner proxy, an agent beta mode names): the crew's
+    // orchestrator is the proxy, not an outside signer.
     let standIn = false;
     if (named && actor.tier === 'outside' && actor.name) { try { standIn = (await import('./owner-proxy.mjs')).proxyShell({ from: REPO_ROOT }).ok || (await import('./beta-mode.mjs')).betaActor({ from: REPO_ROOT, kind: 'hold' }).ok; } catch { standIn = false; } }
     const may = named && (actor.tier === 'decider' || (actor.tier === 'outside' && (!actor.name || standIn || outsideSigners(REPO_ROOT).includes(actor.name))));

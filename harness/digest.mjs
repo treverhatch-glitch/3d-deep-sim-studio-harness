@@ -68,8 +68,12 @@ export async function needsPerson({ now = Date.now(), root = REPO_ROOT, events =
     if (b.hasBible() && !b.readBible().signed) out.push({ kind: 'bible', line: 'the Game Bible is waiting for your signature (npm run bible)' });
   });
   await tryAdd(async () => {
-    const { openAsks } = await import('./ask.mjs');
-    const open = openAsks();
+    const { openAsks, askOwnerTopic } = await import('./ask.mjs');
+    // 2.85: the owner's own asks (harness/owner-acts.mjs: no stand-in and no timer answers them) are listed apart.
+    const all = openAsks();
+    const owners = all.filter((a) => askOwnerTopic(a));
+    const open = all.filter((a) => !askOwnerTopic(a));
+    if (owners.length) out.push({ kind: 'bible', line: `${owners.length} ask${owners.length === 1 ? '' : 's'} waiting for the owner (only you answer these: ${[...new Set(owners.map((a) => askOwnerTopic(a).act))].join(', ')}): ${owners.slice(0, 6).map((a) => a.id).join(', ')}${owners.length > 6 ? ' …' : ''} (npm run ask -- list --open)` });
     if (open.length) out.push({ kind: 'bible', line: `${open.length} open question${open.length === 1 ? '' : 's'} for you${open[0]?.question ? `, first: "${String(open[0].question).slice(0, 80)}"` : ''} (npm run ask)` });
   });
   // 2.79 (c): the harness's own asks still open (harness/ask-post.mjs): posted once, then listed here once a day instead of

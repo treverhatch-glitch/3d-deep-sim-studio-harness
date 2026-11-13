@@ -1,5 +1,5 @@
 /**
- * harness/agy-allow.mjs — P-067 (crew P-037): an owner-approved step that writes agy's headless allow-rules.
+ * harness/agy-allow.mjs — an owner-approved step that writes agy's headless allow-rules.
  *
  *   npm run agent -- allow agy --dry-run                       the rules and the file, nothing written
  *   npm run agent -- allow agy --by <owner>                    merge them into the studio's .studio/agy-settings.json
@@ -7,36 +7,33 @@
  *   … --all                                                    the whole harness list, beyond the approved set (owner)
  *   … --prune                                                  remove harness rules beyond the set being written
  *
- * H-2b (2.58.5): the default set is the owner's approval for agy (2026-10-31): node, npm, npx and git status, diff,
- * add, commit, log (AGY_APPROVED), not the whole harness list: 2.58.3 wrote 30 rules (ffmpeg, blender, git show, ls,
- * mkdir, cp, mv too) that nobody had approved for agy. More needs --all and the owner; --prune takes extra harness
- * rules back out (the file is backed up first; the owner's own rules are never touched).
- * Claude agents get the harness's command list (harness/allowlist.mjs) on their command line (--allowedTools).
- * Antigravity CLI (agy) has no such flag: in headless mode (-p) a shell command is "Ask" by default and is
- * soft-denied (the run goes on, exits 0, and prints "add an allow-rule under permissions.allow in settings.json"),
- * so a launched agy agent couldn't run node, npm or git. This writes the owner-approved part of that list as agy
- * rules, once, with the owner's OK. It never adds a skip-all setting (toolPermission, --dangerously-skip-permissions): that stays for a
- * frozen test clone (STUDIO_AGY_BYPASS=1, harness/agent.mjs).
+ * The default set is the owner's approval for agy: node, npm, npx and git status, diff, add, commit, log (AGY_APPROVED),
+ * not the whole harness list. More needs --all and the owner; --prune takes extra harness rules back out (the file is
+ * backed up first; the owner's own rules are never touched).
+ * Claude agents get the harness's command list (harness/allowlist.mjs) on their command line (--allowedTools). Antigravity
+ * CLI (agy) has no such flag: in headless mode (-p) a shell command is "Ask" by default and is soft-denied (the run goes
+ * on, exits 0, and prints "add an allow-rule under permissions.allow in settings.json"), so a launched agy agent couldn't
+ * run node, npm or git. This writes the owner-approved part of that list as agy rules, once, with the owner's OK. It
+ * never adds a skip-all setting (toolPermission, --dangerously-skip-permissions): that stays for a frozen test clone
+ * (STUDIO_AGY_BYPASS=1, harness/agent.mjs).
  *
  * What agy reads (checked 2026-11-01 against Google's docs, see docs/AGENT-TOOLS.md):
  *   - the user's settings file: ~/.gemini/antigravity-cli/settings.json (%USERPROFILE%\.gemini\... on Windows).
  *     No workspace-level settings.json is documented (a workspace has .agents/hooks.json, .agents/mcp_config.json and
  *     plugins only).
- *   - M3 (2.58.3, crew P-037 addendum): agy also takes a session settings file, `agy --settings <file>` (the crew ran
- *     it on Windows). So the default target is the studio's own file, .studio/agy-settings.json (written by the
- *     harness, never committed: .studio/ is ignored), and the launcher passes `--settings <it>` to agy when it exists
- *     (harness/agent.mjs toolCommand). The user-level file stays available with --scope user, said out loud.
- *     UNTESTED: whether agy merges --settings with the user file or uses it alone.
+ *   - agy also takes a session settings file, `agy --settings <file>`. So the default target is the studio's own file,
+ *     .studio/agy-settings.json (written by the harness, never committed: .studio/ is ignored), and the launcher passes
+ *     `--settings <it>` to agy when it exists (harness/agent.mjs toolCommand). The user-level file stays available with
+ *     --scope user, said out loud. UNTESTED: whether agy merges --settings with the user file or uses it alone.
  *   - rules: permissions.allow / ask / deny, each an "action(target)" string; deny > ask > allow.
  *     command(<words>) matches a command by its leading words ("word-by-word literally"); regex:<re> instead
  *     matches a regular expression. On Windows (PowerShell, cmd) a line that can't be split into words needs an
  *     exact match, and Google's docs say to use regex: there. So each entry gets both forms (AGY_RULES below).
- *     The crew's finding on Windows (P-037 addendum): agy matched exact commands only. `command(node --version)` was
- *     allowed; `command(node *)`, `command(node*)`, `command(node**)`, `command(node:*)` and `command(node)` were all
- *     denied for `node --version`. So on Windows the word-prefix form does nothing, and the regex form is UNTESTED on
- *     real agy (kept: it is the documented way). UNCONFIRMED too: whether a CLI regex is anchored, and against which
- *     text exactly; ours carry their own ^ and $. If agy's format turns out different, agyRulesFor() is the one place
- *     to change.
+ *     Observed on Windows: agy matched exact commands only. `command(node --version)` was allowed; `command(node *)`,
+ *     `command(node*)`, `command(node**)`, `command(node:*)` and `command(node)` were all denied for `node --version`. So on
+ *     Windows the word-prefix form does nothing, and the regex form is UNTESTED on real agy (kept: it is the documented
+ *     way). UNCONFIRMED too: whether a CLI regex is anchored, and against which text; ours carry their own ^ and $. If
+ *     agy's format turns out different, agyRulesFor() is the one place to change.
  *
  * Safety: the file is backed up first (<file>.bak-<time>, never deleted), written atomically (fsafe.writeAtomic),
  * and only ever gains rules: other keys and the user's own allow, ask and deny rules stay as they were. A file that
@@ -80,28 +77,27 @@ export function agyRulesFor(pattern) {
   return [`command(${prefix})`, `command(regex:^${escapeRe(prefix)}(?: ${REST})?$)`];
 }
 
-/** H-2b: the entries of the harness list (harness/allowlist.mjs, by name) the owner approved for agy. */
+/** The entries of the harness list (harness/allowlist.mjs, by name) the owner approved for agy. */
 export const AGY_APPROVED = ['node', 'npm', 'npx', 'git status', 'git diff', 'git add', 'git commit', 'git log'];
 /** The approved entries, as harness list rows. */
 export const agyApprovedList = (list = ALLOWED) => list.filter(([name]) => AGY_APPROVED.includes(name));
 
 /**
- * 2.76.0 (B-80): agy gates file writes apart from commands. A builder with only command rules read, then quit with
- * "jetski: no output produced — a tool required the "write_file" permission that headless mode cannot prompt for, so it
- * was auto-denied". The crew's test on Windows (agy 1.4.12): a bare "write_file" entry allows creating and editing files
- * in place. UNTESTED: a lane-scoped form (write_file(<path>)); the bare form is the one found to work.
+ * agy gates file writes apart from commands: a builder with only command rules quit with "jetski: no output produced — a
+ * tool required the "write_file" permission that headless mode cannot prompt for". A bare "write_file" entry allows
+ * creating and editing files in place (tested on Windows, agy 1.4.12). UNTESTED: a lane-scoped form (write_file(<path>)).
  */
 export const AGY_FILE_RULES = ['write_file'];
 
-/** Every rule a list gives, in list order: by default the approved set (H-2b); agyRules(ALLOWED) for the whole list.
- * 2.76.0 (B-80): plus the file-write rule (AGY_FILE_RULES). */
+/** Every rule a list gives, in list order: by default the approved set; agyRules(ALLOWED) for the whole list, plus the
+ * file-write rule (AGY_FILE_RULES). */
 export const agyRules = (list = agyApprovedList()) => [...new Set([...list.flatMap(([, p]) => agyRulesFor(p)), ...AGY_FILE_RULES])];
 
 /**
- * 2.76.0 (B-80 part 2): one refused command ends a headless agy session, and Gemini pipes and chains by habit
- * (`git status 2>&1 | Select-Object -First 3`, `cd .. ; node --version` were refused by the regex rules, by design:
- * no | ; &&). These lines, in a GEMINI.md in the session's folder, steered it (the crew's test); the launcher writes
- * them into each agy lane copy (never committed: the lane's exclude file) and puts them in the agy kickoff.
+ * One refused command ends a headless agy session, and Gemini pipes and chains by habit (`git status 2>&1 | Select-Object
+ * -First 3`, `cd .. ; node --version` are refused by the regex rules, by design: no | ; &&). These lines, in a GEMINI.md in
+ * the session's folder, steer it; the launcher writes them into each agy lane copy (never committed: the lane's exclude
+ * file) and puts them in the agy kickoff.
  */
 export const AGY_SHELL_RULES = [
   '# Rules for this studio (written by the harness launcher)',
@@ -110,8 +106,8 @@ export const AGY_SHELL_RULES = [
   '  A command the allow-list refuses ends your session at once, with your work unsaved.',
   '- You are already in the right folder. Use relative paths; never cd elsewhere.',
   '- To see less output, run the command plainly; the harness keeps its own output short.',
-  // 2.77.1 (B-99): agy -p ends the session (exit 0, work unsaved) when its agent goes idle while a background command
-  // runs, and a cd-prefixed test command is refused. The crew's fix, shipped: foreground only, and one test form.
+  // agy -p ends the session (exit 0, work unsaved) when its agent goes idle while a background command runs, and a
+  // cd-prefixed test command is refused: foreground only, and one test form.
   '- Run every command in the foreground and wait for it to finish. Never start one in the background: if you go idle',
   '  while a background command (a test run) is still running, the session ends.',
   '- Tests of a game in its own folder: npm --prefix <game folder> run test -- <test file> (one command; never cd first).',
@@ -144,7 +140,7 @@ export function settingsFile(scope = DEFAULT_SCOPE, { home = os.homedir(), state
   return typeof f === 'function' ? f(home, stateDir) : null;
 }
 
-/** M3: the studio's agy settings file when it exists (the launcher passes it as `agy --settings <file>`), else null. */
+/** The studio's agy settings file when it exists (the launcher passes it as `agy --settings <file>`), else null. */
 export function agyStudioSettings({ stateDir = STUDIO_STATE_DIR } = {}) {
   const f = settingsFile('studio', { stateDir });
   try { return fs.statSync(f).isFile() ? f : null; } catch { return null; }
@@ -175,7 +171,7 @@ export function agyAllowState({ home = os.homedir(), stateDir = STUDIO_STATE_DIR
   if (s.error) return { file, want: rules.length, have: 0, missing: rules, error: s.error };
   const allow = new Set((s.data.permissions?.allow || []).map(String));
   // The owner allowed every command already: nothing for the harness to add.
-  // 2.76.0 (B-80): file writes are gated apart from commands, so command(*) doesn't cover write_file.
+  // File writes are gated apart from commands, so command(*) doesn't cover write_file.
   const missing = rules.filter((r) => !allow.has(r) && !(allow.has('command(*)') && r.startsWith('command(')));
   return { file, want: rules.length, have: rules.length - missing.length, missing };
 }
@@ -244,8 +240,8 @@ export function enrolAgy({ by = null, scope = null, dryRun = false, all = false,
   }
   const who = String(by || '').trim();
   if (!who) return fail('Nothing written: --by <owner> is required. The owner approves what agy may run without asking.');
-  // 2.76.0: in beta mode (harness/beta-mode.mjs) the orchestrator the owner named, or a Producer/Director session, may
-  // write them as the owner would (logged as a beta use); a worker never.
+  // In beta mode (harness/beta-mode.mjs) the orchestrator the owner named, or a Producer/Director session, may write them as
+  // the owner would (logged as a beta use); a worker never.
   const beta = env.STUDIO_ROLE || AGENTISH.test(who) ? betaActor({ env }) : { ok: false };
   if ((env.STUDIO_ROLE || AGENTISH.test(who)) && !beta.ok) return fail(`Nothing written: ${env.STUDIO_ROLE ? `this runs inside a launched ${env.STUDIO_ROLE} session` : `"${who}" is an agent's name`}. The owner runs this in their own terminal, after reading the --dry-run${beta.why ? ` (${beta.why})` : ''}.`);
   if (beta.ok) recordBetaUse(beta, { action: 'allow agy', subject: settingsFile(want, { home, stateDir }) ? path.basename(settingsFile(want, { home, stateDir })) : '', why: setName });

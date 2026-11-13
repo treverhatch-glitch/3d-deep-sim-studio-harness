@@ -5,6 +5,9 @@
 set -euo pipefail
 MSG_FILE="$1"
 ROOT="$(git rev-parse --show-toplevel)"
+# 2.85 (B-138): a Golden-Reason line in the body (or wrapped onto a second line) goes into the trailer block first;
+# otherwise the trailers added below start a new last paragraph and leave it where git doesn't read it.
+node "$ROOT/harness/trailers.mjs" fix "$MSG_FILE" || true
 add() { grep -q "^$1:" "$MSG_FILE" || git interpret-trailers --in-place --trailer "$1: $2" "$MSG_FILE"; }
 # Goldens are the recorded answers: changing them needs a reason in the commit, and the commit says
 # which numbers moved, so a re-recorded wrong answer gets a second look (War Room: Needs you).

@@ -26,7 +26,7 @@ already tried. Read its report in `studio/rescues/<T-ID>.md` first; your decisio
   in one session, each with how to check it. The stuck task stays parked until they land.
 - **needs-person**: only a person can decide. Examples: a protected file has to change (scenario
   expectations, regressions, the controls list, gates), the task needs a forced done, it's a design call
-  the Game Bible doesn't settle, or it needs money, an account or a key. Say exactly what the person must
+  the Game Bible doesn't settle, or it needs an account or a key. Say exactly what the person must
   decide.
 
 ## Write `studio/rescues/<T-ID>.md`

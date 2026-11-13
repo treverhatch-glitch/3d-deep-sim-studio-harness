@@ -147,7 +147,12 @@ A lane copy's work reaches the studio's branch through a train, so landing does 
   train, nor while winding down, "Stop all" or drain (`npm run task -- drain on`) is on. `npm run task -- train auto off|on --by <name>
   [--why "…"]` (a person, the owner's delegation, or a Producer/Director session or outside agent on a person's `--permission`; never a
   worker) stops or starts every automatic game-train start (`.studio/train/auto.json`; a person's own `train` still runs; engine
-  trains are separate); `npm run task -- train auto` shows it.
+  trains are separate); `npm run task -- train auto` shows it. 2.85: an agent's `train auto off` lapses after
+  `STUDIO_TRAIN_AUTO_OFF_HOURS` (4; `0`: until turned on), or after `--hours N`; a person's lasts until they turn it on. Why no
+  train starts is said once per reason (`train.daemon.waiting`) and in `train status` ("The automatic start is waiting: …");
+  lanes waiting only for the owner (tier C) are named with `train release <ID> --by <name>`, never released by the daemon.
+  A web train runs beside an engine land when the heavy budget admits its verify (an engine land takes no machine:heavy slot;
+  its RAM counts), so free RAM covering the web verify's measured need is enough.
 - **Leaving**: a held task stays out of every train (`OUT (held)` in `npm run lanes`, `OUT OF TRAINS` in `train status`). `npm run
   task -- train leave <ID> --by <name> --why "…"` takes a queued lane out (as `task hold`); `task done <ID> --train` queues it again.
   `npm run task -- train dequeue <ID> [--engine <name>] [--by <name>]` (2.83) takes it out of the game's or that engine's queue and
@@ -372,3 +377,28 @@ A Blender command gets `-t <n>` render threads unless it sets its own: `STUDIO_B
 - The watcher logs `waves.shadow` at most every `STUDIO_WAVES_MIN` minutes (30); `STUDIO_WAVES=off` stops it.
 - `node harness/plan-waves.mjs replay --events <events.jsonl> --days 14` reports how many recorded overlaps waves would have avoided
   and roughly the extra wall time.
+
+## Evidence behind a claim (2.85 g)
+
+Five places that took a name or a sentence on trust now ask for something that exists.
+
+- **A milestone is met with evidence.** `npm run refill -- met M2 1 --by <name> --evidence <file|commit|evt_id> [...]`: each item
+  must be a file in the repo, a commit git finds or an event id in the log, and is stored with the record (`milestones` lists it).
+  An agent without evidence is refused with one line saying what counts. A person may give `--evidence none --why "<reason>"`.
+- **The same refusal twice holds the task.** Two identical `task done` refusals with no commit between them hold the task
+  (`task.hold`); every 10 minutes the harness runs `task done <ID> --check` itself and lifts the hold when that reason is gone.
+  Its own look carries `STUDIO_DONE_PROBE=1` (set by the harness, never by a person) and writes no `task.not_done` event.
+  A check that cannot judge keeps the hold; a hold lifted once whose refusal comes back stays held until a planner or the
+  overseer unparks it (`npm run task -- unpark <ID> --by <name>`).
+- **A Golden-Reason names its task.** The trailer must be 20+ characters and name a task on the board (open or done, `T-123`);
+  a shorter or anonymous one no longer waives the golden check (`harness/test-weakening.mjs`). `STUDIO_GOLDEN_REASON=strict|loose`
+  sets it; the default is strict when the board has tasks and loose on an empty board (a fresh studio).
+- **Sim or rules code changes with a test or a stated reason.** A `change` task whose files include game sim code (the "sim" rule
+  of `harness/tiers.mjs`) and no test file gets a WARN line at `task done` unless a commit carries `No-Test-Reason: <20+ characters>`.
+  It is a note by default: the `task.done` event records it (`meta.noTest`, or `meta.noTestReason` with the reason) and
+  `npm run score` counts both. `STUDIO_RULES_TEST=require` makes it a refusal. Docs, assets and tooling are not asked.
+- **The browser check plays the studio's game.** `qa/browser-play.mjs` plays the active game's cartridge (`studio/game.json` `game`,
+  then `cartridge`), never the template's sample unless it is the active game. A game with no cartridge manifest is skipped with
+  "not applicable: <why>" (`qa.browser_play` status `skipped`); its own `studio.gates.json` play or smoke check covers play.
+- **A hand-back note's files are looked for.** A repo path the note says it added, wrote or changed ("added X", "see X", "in X")
+  that exists in neither the lane nor main adds a line to the hand-back facts and a `task.note_unverified` event (warn); never a refusal.

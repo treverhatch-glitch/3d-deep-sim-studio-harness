@@ -23,6 +23,7 @@
  * With --lanes auto, tasks that name a lane (task add --lane game/x/src/floors) get one agent per lane, each holding that folder.
  * Status: .studio/supervisor.json, the War Room's Ops view, and the run report.
  */
+import { visionFixIds, visionFirst } from './vision-fix.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -606,7 +607,11 @@ export async function supervise(opts, state, now = Date.now()) {
     g.tasks = [...g.tasks.filter((t) => !same(t)), ...g.tasks.filter((t) => same(t))];
     allSame.set(g, same(g.tasks[0]));
   }
-  let ordered = [...groups.values()].sort((a, b) => allSame.get(a) - allSame.get(b) || String(a.tasks[0].priority).localeCompare(String(b.tasks[0].priority)));
+  // 2.85 (f): a vision fix (harness/vision-fix.mjs) is first in its group, and its group goes before the others.
+  const vfix = (() => { try { return visionFixIds(evs); } catch { return new Set(); } })();
+  if (vfix.size) for (const g of groups.values()) g.tasks = visionFirst(g.tasks, (t) => vfix.has(t.id));
+  const vg = (g) => (vfix.has(g.tasks[0]?.id) ? 0 : 1);
+  let ordered = [...groups.values()].sort((a, b) => vg(a) - vg(b) || allSame.get(a) - allSame.get(b) || String(a.tasks[0].priority).localeCompare(String(b.tasks[0].priority)));
   // The Line Producer's plan (harness/line-producer.mjs, STUDIO_LINE_PRODUCER): its order, model routes and the rig's builder cap.
   // Within the pace's caps only: it reorders and can hold builders back, never adds one.
   const line = await linePlanNow(now);

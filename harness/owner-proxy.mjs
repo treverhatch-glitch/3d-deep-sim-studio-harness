@@ -15,7 +15,7 @@
  *     owner's private key: `npm run approve -- protected --note "…" --by <owner> --permission "<the owner's yes on
  *     Discord: words or a message link>"` writes an approval that carries the signed grant instead of a signature. The
  *     owner's yes is required for these (10+ characters), and kept in the approval and the decision log.
- * Never: money (the harness spends none), a worker or launched session (STUDIO_ROLE), a lane copy, granting itself
+ * Never: the owner's own acts (harness/owner-acts.mjs), a worker or launched session (STUDIO_ROLE), a lane copy, granting itself
  * another delegation. `npm run delegate -- revoke` (anyone) ends it at once: proxy approvals count only while the grant
  * that made them is still the one on file, so revoking also voids approvals not yet landed.
  *
@@ -35,8 +35,8 @@ export const OWNER_PUB_REL = 'studio/keys/owner-ed25519.pub.pem';
 export const PROXY_MAX_DAYS = 366;
 export const PROXY_DEFAULT_DAYS = 30;
 /**
- * What a proxy never covers, by action name: 2.79 (c), the owner's own acts (harness/owner-acts.mjs, the one list: real
- * money, deleting data, keys and credentials, publishing outside the PC, turning beta mode off).
+ * What a proxy never covers, by action name: 2.79 (c), the owner's own acts (harness/owner-acts.mjs, the one list: deleting
+ * data, keys and credentials, publishing outside the PC, an owner tool, turning beta mode off).
  */
 export const PROXY_NEVER = OWNER_ONLY_ACTIONS;
 export const GRANT_FIELDS = ['agent', 'actions', 'until', 'by', 'at', 'why'];

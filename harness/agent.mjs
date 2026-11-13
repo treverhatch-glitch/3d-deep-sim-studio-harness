@@ -89,7 +89,7 @@ import { profileGuard, profileOf } from './profile-guard.mjs';
 import { toolCmd } from './spend-guard.mjs';
 import { pickTool, readBudget, budgetStopFor } from './budget.mjs';
 import { STOP_NOTE, loopHandBacks, parkOnce } from './busy.mjs';
-import { sessionOutcome, parkIfNoWork } from './session-outcome.mjs';
+import { sessionOutcome, parkIfNoWork, holdIfSameRefusal } from './session-outcome.mjs';
 import { PLANNING_OUTCOME_ROLES, boardEventsBy } from './wake-gate.mjs';
 import { startRefusal, sameBlocker, recordAttempt } from './attempts.mjs';
 import { writeAtomic } from './fsafe.mjs';
@@ -838,6 +838,8 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : cause.kind === 'prompt-cap' ? `exit ${code}, ended by the launcher (prompt-cap: ${cause.why})` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget', 'prompt-cap'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
   if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${aider?.line && !outcome?.why ? `; aider: ${aider.line}` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(aider ? { aider } : {}), ...(followUps ? { followUps, ...(nudges ? { nudges } : {}) } : {}), ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(Array.isArray(s0.keys) && s0.keys.length ? { keys: s0.keys } : {}), ...(vertexUse?.requests ? { usageFrom: 'vertex-proxy', requests: vertexUse.requests } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
   if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
+    // 2.85: the same task done refusal as the session before it, no new commit: held for the overseer and the Producer.
+    try { holdIfSameRefusal(agent, readRecentEvents(20000), { park: parkOnce }); } catch { /* a help, never a crash */ }
     try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => postAsk({ agent: 'launcher', to: 'producer', task: outcome.task, subject: 'parked', msg: m }) }); } catch { /* the park is a help, never a crash */ }
   }
   jobDone({ kind: 'session', id: agent, agent, task: s0.task || tasks[0] || null, code: code ?? null, result: stop ? (stop.kind === 'pause' ? 'paused' : 'stopped') : bad ? 'fail' : 'pass', ms: Date.parse(s0.startedAt) ? Date.now() - Date.parse(s0.startedAt) : null, tail: reason, log: s0.log || null, extra: { role: role || null, handed: handed.map((h) => h.task) } });
@@ -849,6 +851,22 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: s.status === 'ended' && s.endedAt ? s.endedAt : new Date().toISOString(), code, reason, exitCause: cause, handed, ...(outcome ? { outcome } : {}), ...(stop ? { stoppedBy: stop.by } : {}), ...tok }, null, 2));
   fs.rmSync(stopFile(agent), { force: true });
   return { bad, trouble, troubleKind: t?.kind || (agyCut ? 'agy-cut' : undefined), agyCut, handed, finished, reason, capped, usageLimit: Boolean(limit), stoppedBy: stop?.by || null };
+}
+
+/**
+ * The browser check the launcher runs after it closes a task. 2.85 (g): the check plays the studio's game (qa/browser-play.mjs
+ * picks it), and a game it cannot drive is reported as a skip with its reason, never as a pass. Returns the event it emitted.
+ */
+export function browserCheckAfter(id, cwd, env = process.env) {
+  const bp = spawnSync(process.execPath, [path.join(cwd, 'qa', 'browser-play.mjs')], { windowsHide: true, cwd, env, encoding: 'utf8', timeout: 5 * 60000 });
+  const bpOut = `${bp.stdout || ''}${bp.stderr || ''}`;
+  const na = bpOut.match(/not applicable: ([^\n]*)/);
+  const played = (bpOut.match(/\[browser-play\] PASS (\S+?):/) || [])[1];
+  const ev = bp.status === 0 && na
+    ? { status: 'skipped', msg: `browser check after ${id}: not applicable: ${na[1].slice(0, 400)}` }
+    : { status: bp.status === 0 ? 'ok' : 'warn', msg: `browser check after ${id}: ${bp.status === 0 ? `passed${played ? ` (${played})` : ''}` : 'failed or skipped'}` };
+  emitEvent({ type: 'qa.browser_play', agent: 'launcher', task: id, ...ev });
+  return ev;
 }
 
 /**
@@ -883,8 +901,7 @@ export function autoFinish(agent, id, copyDir, mine, code) {
     return { ok: false, output: out || 'task done failed' };
   }
   if (!/^(off|0|false|no)$/i.test(process.env.STUDIO_POST_BROWSER_PLAY || '')) {
-    const bp = spawnSync(process.execPath, [path.join(cwd, 'qa', 'browser-play.mjs')], { windowsHide: true, cwd, env, encoding: 'utf8', timeout: 5 * 60000 });
-    emitEvent({ type: 'qa.browser_play', agent: 'launcher', task: id, status: bp.status === 0 ? 'ok' : 'warn', msg: `browser check after ${id}: ${bp.status === 0 ? 'passed' : 'failed or skipped'}` });
+    browserCheckAfter(id, cwd, env);
   }
   emitEvent({ type: 'agent.finished_for', agent: 'launcher', task: id, to: 'producer', msg: `${agent} ended without task done; its check passed, so the launcher closed ${id}` });
   return { ok: true, output: '' };
@@ -1441,6 +1458,12 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     // logStall logs once per session (not again when the watchdog logged it first); this launcher ends its own agent once.
     // A builder's verify red on a different cause than its previous red, past half its refresh point, ends this session as a
     // refresh (the flag's endedBy), so a fresh one starts from the hand-back with the failure only.
+    // 2.85: a refresh check decided by rule (harness/session-cap.mjs) to hand off: end this session as a refresh, as a
+    // person's `session -- check <agent> handoff` would.
+    if (progress?.decided?.decision === 'handoff' && !killedBy) {
+      killedBy = { kind: 'refresh', why: progress.decided.why, at: new Date().toISOString() };
+      stopChild(child);
+    }
     try {
       const nr = !killedBy ? newRedCheck(agent, { since: Date.parse(startedAt) || 0, context: progress?.context || 0, role, model }) : null;
       if (nr?.handoff) {

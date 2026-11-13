@@ -1,12 +1,10 @@
 /**
- * harness/launch.mjs — P-066 (crew P-036): how an agent tool is started, with its arguments intact on every OS.
+ * harness/launch.mjs — how an agent tool is started, with its arguments intact on every OS.
  *
- * Before, the launcher started each tool with `shell: true` on Windows, so npm's .cmd shims would start at all (since
- * the 2024 fix for CVE-2024-27980 Node refuses to spawn a .cmd or .bat without a shell). Node then joins the
- * arguments with spaces, unquoted, and cmd.exe splits them again and acts on ( ) & | < > ^ %: Claude Code lost its
- * --allowedTools list (every command waited for a yes) and agy got its prompt word by word ("unexpected argument").
- *
- * Now no built-in tool goes through a shell:
+ * No built-in tool goes through a shell. With `shell: true` on Windows (needed for npm's .cmd shims: since the
+ * CVE-2024-27980 fix Node refuses to spawn a .cmd or .bat without a shell) Node joins the arguments with spaces,
+ * unquoted, and cmd.exe splits them again and acts on ( ) & | < > ^ %: Claude Code lost its --allowedTools list and agy
+ * got its prompt word by word ("unexpected argument"). So:
  *   - macOS, Linux: the program is started directly (Node looks it up on the agent's PATH).
  *   - Windows: the program is looked up on the agent's PATH x PATHEXT (never in the current folder), then
  *       .exe / .com          started directly;
@@ -15,9 +13,8 @@
  *       any other .cmd/.bat  cmd.exe /d /s /c, with every argument quoted for cmd.exe by quoteCmdArg.
  *   - A prompt given as an argument that can't travel on the command line (longer than Windows takes, or a line
  *     break through cmd.exe) is replaced by a one-line instruction to read the kickoff file; the log says so.
- * A custom command (STUDIO_<ROLE>_CMD, STUDIO_AGENT_CMD) is the user's own command line and still runs in the shell;
- * the values filled into its {kickoff} {agent} {model} {role} {task} {mainRoot} {addDirs} are quoted for that shell
- * (fillCommand).
+ * A custom command (STUDIO_<ROLE>_CMD, STUDIO_AGENT_CMD) is the user's own command line and still runs in the shell; the
+ * values filled into its {kickoff} {agent} {model} {role} {task} {mainRoot} {addDirs} are quoted for that shell (fillCommand).
  *
  * The quoting follows the documented rules: a Windows program splits its command line by the MSVCRT /
  * CommandLineToArgvW rules (quoteWinArg); cmd.exe expands %VAR% first (even inside quotes), then removes a ^ before
@@ -288,10 +285,10 @@ function cmdValue(v, quote, next) {
 }
 
 /**
- * H-9 (2.58.5): a custom command started in a lane copy names its scripts relative to the main checkout
- * (`node tools/my-wrapper.mjs {kickoff}`); one that isn't committed isn't in the copy. Each bare word of the line that
- * is a relative path to a file in the main checkout but not in the copy becomes a placeholder for that file's absolute
- * path, quoted by fillCommand like any value. Returns { template, values, moved } (moved: the words changed).
+ * A custom command started in a lane copy names its scripts relative to the main checkout (`node tools/my-wrapper.mjs
+ * {kickoff}`); one that isn't committed isn't in the copy. Each bare word of the line that is a relative path to a file in
+ * the main checkout but not in the copy becomes a placeholder for that file's absolute path, quoted by fillCommand like
+ * any value. Returns { template, values, moved } (moved: the words changed).
  */
 export function localizeCommand(template, { from, to, fs: fsx = fs } = {}) {
   const t = String(template || '');
@@ -316,7 +313,7 @@ export function localizeCommand(template, { from, to, fs: fsx = fs } = {}) {
 /**
  * A custom command line with its placeholders filled, each value quoted for the shell that runs it (cmd.exe on
  * Windows, sh elsewhere) and for where it stands in the line: bare, or inside the line's own '…' or "…". Values that
- * need no quoting are filled as they are, and an empty value as nothing, as before.
+ * need no quoting are filled as they are, and an empty value as nothing.
  * values: { kickoff, agent, model, role, task, mainRoot, addDirs }; a list (addDirs: ['--add-dir', <dir>, …], empty
  * outside a lane copy) fills as one quoted argument per item.
  */
@@ -332,8 +329,8 @@ export function fillCommand(template, values, { platform = process.platform } = 
       const end = i + key.length + 2;
       const raw = values[key];
       if (Array.isArray(raw)) {
-        // H-9 (2.58.5): a list ({addDirs}) fills as several arguments, each quoted on its own; it can't stand inside
-        // the line's own quotes, where it would become one argument.
+        // A list ({addDirs}) fills as several arguments, each quoted on its own; it can't stand inside the line's own quotes,
+        // where it would become one argument.
         if (quote) throw new LaunchError(`{${key}} fills in several arguments: write it outside quotes in the custom command`);
         out += raw.map((x) => (win ? cmdValue(String(x), null, ' ') : shValue(String(x), null))).join(' ');
       } else {

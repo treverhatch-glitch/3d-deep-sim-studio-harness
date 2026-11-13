@@ -291,7 +291,7 @@ only its own key names, and spend through the budget code (`npm run budget -- se
   `STUDIO_KEYMAP_AGENT_<NAME>=OPENAI_API_KEY:MYPROVIDER_API_KEY`), `models` (the first is the default), `prices` (USD per 1M tokens, or
   `"studio/prices.json"`), `roles` (default `builder`), `proxy` (optional `"vertex"`: traffic goes through the studio's Vertex proxy,
   which holds the key; `keyEnv` is then `[]`).
-- Defining or changing a tool is the owner's own act, like keys and money (`harness/owner-acts.mjs`): the file is protected
+- Defining or changing a tool is the owner's own act, like keys (`harness/owner-acts.mjs`): the file is protected
   (`studio/protected.json`) and an approval of it made in beta mode, by the owner proxy or by an outside signer is refused. What counts
   is the file as committed on the main checkout: with an owner key, only an approval signed with that key (`npm run approve --
   protected`, on the owner's own device) that records exactly its contents; with no owner key yet, only a commit that is a person's (no

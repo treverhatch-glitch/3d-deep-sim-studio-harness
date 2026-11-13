@@ -65,18 +65,22 @@ export function reloadEnvIfChanged({ by = actor(), env = process.env, force = fa
     writeFromFileNote(env, st);
     const keys = [...r.changed.map((c) => c.key), ...r.added, ...r.removed];
     let logged = false;
+    // 2.85 (e): the names this .env sets that the harness no longer reads, named in the event and the supervisor's answer
+    // (they said only the count, or nothing). Names only, never values.
+    let unknownLine = '';
+    if (keys.length || (ack && asked)) { try { unknownLine = unknownNamesLine(envNameReport({ file: st.file })); } catch { unknownLine = ''; } }
     if (keys.length) {
       // One event per version of the file (and per reload request), whichever process saw it first; the others apply it quietly.
       const key = `${sig || 'none'}|${asked?.id || ''}`;
       const prev = readJson(LOGGED_FILE());
       if (prev?.key !== key) {
         try { fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true }); fs.writeFileSync(LOGGED_FILE(), JSON.stringify({ key, at: new Date().toISOString(), by, pid: process.pid })); } catch {}
-        emit({ type: 'env.reloaded', agent: String(by || 'harness').slice(0, 60), msg: `Reloaded .env (${by}, pid ${process.pid}): ${describeChanges(r)}${r.kept.length ? `; kept the value this process was started with for ${r.kept.join(', ')}` : ''}`.slice(0, 600), meta: { by, pid: process.pid, keys, changes: r.changed.map((c) => ({ key: c.key, from: shown(c.key, c.from), to: shown(c.key, c.to), ...(looksSecret(c.key) ? { secret: true } : {}) })), added: r.added, removed: r.removed, kept: r.kept, asked: asked ? { by: asked.by || null, id: asked.id } : null } });
+        emit({ type: 'env.reloaded', agent: String(by || 'harness').slice(0, 60), msg: `Reloaded .env (${by}, pid ${process.pid}): ${describeChanges(r)}${r.kept.length ? `; kept the value this process was started with for ${r.kept.join(', ')}` : ''}${unknownLine ? `. ${unknownLine}` : ''}`.slice(0, 900), meta: { by, pid: process.pid, keys, changes: r.changed.map((c) => ({ key: c.key, from: shown(c.key, c.from), to: shown(c.key, c.to), ...(looksSecret(c.key) ? { secret: true } : {}) })), added: r.added, removed: r.removed, kept: r.kept, asked: asked ? { by: asked.by || null, id: asked.id } : null } });
         logged = true;
       }
     }
     if (ack && asked) {
-      try { fs.writeFileSync(ACK_FILE(), `${JSON.stringify({ id: asked.id, by, pid: process.pid, at: new Date().toISOString(), keys, kept: r.kept, line: keys.length ? describeChanges(r) : 'no setting changed' })}\n`); } catch {}
+      try { fs.writeFileSync(ACK_FILE(), `${JSON.stringify({ id: asked.id, by, pid: process.pid, at: new Date().toISOString(), keys, kept: r.kept, line: `${keys.length ? describeChanges(r) : 'no setting changed'}${unknownLine ? `. ${unknownLine}` : ''}` })}\n`); } catch {}
     }
     return { keys, ...r, logged };
   } catch {
@@ -175,6 +179,16 @@ export function closestSetting(name, current = []) {
   }
   return best;
 }
+/**
+ * 2.85 (e): the unknown names on ONE line, each with the closest current name or "none is close" (names only), or ''.
+ * The overseer still saw "2 names the harness no longer reads" with no names: the names were on the lines after it, so a
+ * filtered or cut output (a grep, a tail, a log that keeps one line) lost them. Every path uses this line.
+ */
+export function unknownNamesLine(r) {
+  if (!r?.known || !r.unknown?.length) return '';
+  const n = r.unknown.length;
+  return `${n} name${n === 1 ? '' : 's'} the harness no longer reads: ${r.unknown.map((u) => `${u} (${r.near?.[u] ? `closest current name: ${r.near[u]}` : 'none is close'})`).join(', ')}; remove or fix ${n === 1 ? 'it' : 'them'} in .env`;
+}
 /** The text `npm run studio:reload-env` prints after the reload line. */
 export function envNameText(r) {
   if (!r.names.length) return 'The .env sets no STUDIO_* names.';
@@ -182,7 +196,7 @@ export function envNameText(r) {
   if (!r.known) lines.push('(docs/SETTINGS.md not found: could not check which names the harness still reads.)');
   else if (r.unknown.length) {
     // 2.84: name them (the list above is long, and the marks are easy to miss), each with the closest current name.
-    lines.push(`${r.unknown.length} name${r.unknown.length === 1 ? '' : 's'} the harness no longer reads: remove or fix ${r.unknown.length === 1 ? 'it' : 'them'} in .env:`);
+    lines.push(`${unknownNamesLine(r)}:`);
     for (const n of r.unknown) lines.push(`  ${n}${r.near?.[n] ? `   closest current name: ${r.near[n]}` : '   no current name is close to it: remove it'}`);
   }
   return lines.join('\n');

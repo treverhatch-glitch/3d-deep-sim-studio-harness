@@ -16,13 +16,12 @@ A tag such as (2.73.1) says which release added a rule, so you can tell whether 
 One function decides (`harness/permission.mjs mayDecide`). The second signer on a re-recorded golden is never the lane's
 author. Every stand-in decision is logged (decisions log, event naming the actor).
 
-**The owner's own acts** (`harness/owner-acts.mjs`): real money, deleting data, keys and credentials, publishing outside the
-PC, turning beta mode off. Refused to the orchestrator, the proxy, outside signers and launched sessions: an ask that names
-one, `npm run approve -- keygen`, a delegated action of that name, `npm run beta -- off`. (2.83) An ask is read for meaning
-in two cases only: a question about the game itself that names no real spending is not "real money", and removing code
-through a lane is not "deleting data". One word of real spending, of data (backups, history, saves, a branch, a worktree,
-logs, `.studio`), a wipe or purge, or a bare "buy it?" or "delete it?" keeps it the owner's. The action names `money`, `pay`,
-`delete`, `wipe` are refused to every stand-in.
+**The owner's own acts** (`harness/owner-acts.mjs`): deleting data, keys and credentials, publishing outside the PC,
+defining an owner tool, turning beta mode off. Refused to the orchestrator, the proxy, outside signers and launched
+sessions: an ask that names one, `npm run approve -- keygen`, a delegated action of that name, `npm run beta -- off`.
+(2.83) An ask is read for meaning in one case only: removing code through a lane is not "deleting data". One word of
+data (backups, history, saves, a branch, a worktree, logs, `.studio`), a wipe or purge, or a bare "delete it?" keeps it
+the owner's. The action names `delete` and `wipe` are refused to every stand-in.
 
 ## Beta mode
 

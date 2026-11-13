@@ -71,7 +71,7 @@ standing with GitHub and model providers, and they keep a many-agent team fast a
   `Check forced done`. Everything else goes to the event log, which costs no tokens to
   read.
 - **The ladder:** script (free, mechanical fixes) → cheap model (summaries, triage) → Producer (what
-  to do next, who does it) → you (design, balance, money, anything you can't undo).
+  to do next, who does it) → you (design, balance, anything you can't undo).
 
 ## Letting the studio improve itself
 

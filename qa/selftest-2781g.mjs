@@ -18,7 +18,7 @@ export async function selftest2781G({ dir, report, tmpRoot, root }) {
   const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
   const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const UNSET = ['STUDIO_PLANNING_ROOM', 'STUDIO_SHARED_SIM', 'STUDIO_LINE_LANES', 'STUDIO_LINE_PLAN_MAX_SEC', 'STUDIO_PRODUCER_NAME', 'STUDIO_WORKTREES', 'STUDIO_ENV_FROM_FILE'];
+  const UNSET = ['STUDIO_SHARED_SIM', 'STUDIO_LINE_LANES', 'STUDIO_LINE_PLAN_MAX_SEC', 'STUDIO_PRODUCER_NAME', 'STUDIO_WORKTREES', 'STUDIO_ENV_FROM_FILE'];
   const base = {
     STUDIO_WATCHDOG: 'off', STUDIO_WATCH_INTERVAL: '0', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '',
     STUDIO_MACHINE_SCAN: 'off', STUDIO_LANE_INFER: 'off', STUDIO_GAME: '', STUDIO_CARTRIDGE: '', CLAUDECODE: '', AI_AGENT: '', NODE_OPTIONS: '', npm_config_node_options: '', STUDIO_UPGRADE_WATCH_MIN: 'off',

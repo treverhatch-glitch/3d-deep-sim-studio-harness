@@ -102,10 +102,10 @@ console.log(JSON.stringify({ ok: r.ok, via: r.via, why: r.why, same: pm.standInM
     const kinds = ['release', 'force', 'protected', 'unpark', 'crew-resume', 'engine-train'];
     const res = {};
     for (const k of kinds) res[k] = { overseer: ask(k, OVER, 'overseer-1'), signer: ask(k, SIGNER, 'signer-1'), producer: ask(k, PROD, 'producer-q1'), worker: ask(k, WORK, 'builder-q1'), pinned: ask(k, PINNED, 'overseer-1'), stranger: ask(k, { CLAUDECODE: '1' }, 'someone-else') };
-    const money = { overseer: ask('money', OVER, 'overseer-1'), signer: ask('money', SIGNER, 'signer-1'), betaOff: ask('beta-off', OVER, 'overseer-1') };
-    await guard('2.84 (q) standInMay(kind, { by, env, root }), the one rule for release, force, protected, unpark, crew-resume and engine-train: the overseer (via "beta agent") and the signer (via "signer", its --by in a shell naming nobody, AI_AGENT set) may; a launched Producer session, a worker session, a pinned session saying --by overseer-1 and a name beta mode doesn\'t list may not; real money and turning beta mode off stay refused (fails before this fix: there was no such function, each command had its own rule)', () => [
+    const own = { overseer: ask('delete', OVER, 'overseer-1'), signer: ask('delete', SIGNER, 'signer-1'), betaOff: ask('beta-off', OVER, 'overseer-1') };
+    await guard('2.84 (q) standInMay(kind, { by, env, root }), the one rule for release, force, protected, unpark, crew-resume and engine-train: the overseer (via "beta agent") and the signer (via "signer", its --by in a shell naming nobody, AI_AGENT set) may; a launched Producer session, a worker session, a pinned session saying --by overseer-1 and a name beta mode doesn\'t list may not; deleting data and turning beta mode off stay refused (fails before this fix: there was no such function, each command had its own rule)', () => [
       kinds.every((k) => res[k].overseer.ok && res[k].overseer.via === 'beta agent' && res[k].overseer.same && res[k].signer.ok && res[k].signer.via === 'signer' && !res[k].producer.ok && !res[k].worker.ok && !res[k].pinned.ok && !res[k].stranger.ok)
-        && !money.overseer.ok && /owner's own/.test(money.overseer.why) && !money.signer.ok && !money.betaOff.ok, JSON.stringify({ res, money })]);
+        && !own.overseer.ok && /owner's own/.test(own.overseer.why) && !own.signer.ok && !own.betaOff.ok, JSON.stringify({ res, own })]);
   }
 
   // ---- a. train release <ID> of a tier-C lane ----

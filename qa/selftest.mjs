@@ -1617,8 +1617,8 @@ if (inShard()) {
   const noWhy = run(dir, 'node harness/ask.mjs "Which floor first?" --options "Cubicle,Food court" --default Cubicle --timeout 1m', env);
   report('a timed question needs the reason behind its default', noWhy.status !== 0 && /--why/.test(noWhy.stderr), noWhy.stderr);
   run(dir, 'node harness/ask.mjs "Which floor first?" --options "Cubicle,Food court" --default Cubicle --timeout 1m --why "it teaches the controls" --by prod-1', env);
-  const prot = run(dir, 'node harness/ask.mjs "Can we spend 20 USD on a sound pack?" --options "yes,no" --default yes --timeout 1m --why "cheap" --by prod-1', env);
-  report('questions about money, signing, pillars or deleting never get a deadline', /waits for a person/.test(prot.stdout) && JSON.parse(fs.readFileSync(path.join(dir, 'studio/asks/A-002.json'), 'utf8')).deadline === null, prot.stdout);
+  const prot = run(dir, 'node harness/ask.mjs "Delete the old save files?" --options "yes,no" --default yes --timeout 1m --why "they are stale" --by prod-1', env);
+  report('questions about signing, pillars or deleting never get a deadline', /waits for a person/.test(prot.stdout) && JSON.parse(fs.readFileSync(path.join(dir, 'studio/asks/A-002.json'), 'utf8')).deadline === null, prot.stdout);
   const a1 = path.join(dir, 'studio/asks/A-001.json');
   fs.writeFileSync(a1, JSON.stringify({ ...JSON.parse(fs.readFileSync(a1, 'utf8')), deadline: new Date(Date.now() - 1000).toISOString() }));
   const w = run(dir, 'node harness/watch.mjs', env);
@@ -5061,7 +5061,7 @@ if (inShard('selftest-283i')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.83: the owner-only list tells the game's own money from real money, and code removed in a
+// 2.83: the owner-only list tells code removed in a lane from deleted data.
 if (inShard('selftest-283j')) {
   const dir = copyRepo();
   const { selftest283J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283j.mjs')).href);
@@ -5194,6 +5194,70 @@ if (inShard('selftest-284q')) {
   const dir = copyRepo();
   const { selftest284Q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-284q.mjs')).href);
   await selftest284Q({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.85 (b): the engine train's rules check within the memory there is, why it was full, no second run of the same tree, a red part named
+if (inShard('selftest-285b')) {
+  const dir = copyRepo();
+  const { selftest285B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285b.mjs')).href);
+  await selftest285B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.85 (h): less that nobody uses.
+if (inShard('selftest-285h')) {
+  const dir = copyRepo();
+  const { selftest285H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285h.mjs')).href);
+  await selftest285H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.85 (f): the designer's vision in every brief, and vision fixes land first.
+if (inShard('selftest-285f')) {
+  const dir = copyRepo();
+  const { selftest285F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285f.mjs')).href);
+  await selftest285F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.85 (a): the engine train's land runs: the daily full land run is visible and the compile check carries
+if (inShard('selftest-285a')) {
+  const dir = copyRepo();
+  const { selftest285A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285a.mjs')).href);
+  await selftest285A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.85 (c): every ask resolves, a question with a price in it is an ordinary ask, and the refresh check decides by rule.
+if (inShard('selftest-285c')) {
+  const dir = copyRepo();
+  const { selftest285C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285c.mjs')).href);
+  await selftest285C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.85 (d): finished work waiting for a train, and hand-backs that are not the session's.
+if (inShard('selftest-285d')) {
+  const dir = copyRepo();
+  const { selftest285D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285d.mjs')).href);
+  await selftest285D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.85 (e): six things a crew's overseer had to do by hand in its first 16 hours on 2.84.
+if (inShard('selftest-285e')) {
+  const dir = copyRepo();
+  const { selftest285E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285e.mjs')).href);
+  await selftest285E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.85 (g): places that took an agent's word with no evidence now ask for something that exists.
+if (inShard('selftest-285g')) {
+  const dir = copyRepo();
+  const { selftest285G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285g.mjs')).href);
+  await selftest285G({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

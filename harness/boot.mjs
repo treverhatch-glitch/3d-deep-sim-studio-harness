@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
- * harness/boot.mjs — 2.73.1 (B-69): one command to bring the studio up after a restart ("the long boot up": 2.5 h of the
- * owner's time on 2026-11-03).
+ * harness/boot.mjs — one command to bring the studio up after a restart.
  *
  *   npm run studio:boot [-- --until 46h] [--window 09:00-23:00] [--budget 50%] [--lanes auto] [--no-supervisor]
  *                                         (--hub/--no-hub: accepted and ignored, there is no hub since 2.80)
@@ -11,25 +10,23 @@
  *   --json                                the same as one JSON object
  *
  * Steps:
- *   1. preflight-lite: node against package.json engines, npm on the PATH (npm.cmd on Windows, with the hint that a
- *      PowerShell execution policy blocking npm.ps1 is passed by typing npm.cmd), the .env: no session identity in it
- *      (B-60, harness/dotenv.mjs);
+ *   1. preflight-lite: node against package.json engines, npm on the PATH (npm.cmd on Windows; a PowerShell execution
+ *      policy blocking npm.ps1 is passed by typing npm.cmd), the .env: no session identity in it (harness/dotenv.mjs);
  *   2. the stale sweep: train.lock, land.lock, unity-train.lock, verify-running/full.json and train/daemon.json whose
  *      recorded process is gone are removed, and a supervisor.json still saying "running" for a gone process is marked
  *      stopped; one boot.stale_cleared event names each. Live, unreadable or pid-less files are left. Lane copies, claims,
  *      logs and work are never touched;
  *   3. the supervisor, started only when not already running (supervisor.json running with a live process that is still
- *      that supervisor, not another program holding a reused pid: supervisorAlive, 2.77.1 M5), detached and hidden
+ *      that supervisor, not another program holding a reused pid: supervisorAlive), detached and hidden
  *      (windowsHide), output in .studio/logs/supervisor.log. The train daemon runs inside each supervisor pass
  *      (harness/train-daemon.mjs), so it is up when the supervisor is; its switch is reported. The daemons get this
  *      shell's environment minus the session identity (STUDIO_LOCK_OWNER, STUDIO_ROLE, STUDIO_AGENT, STUDIO_MAIN_ROOT):
  *      they are the studio's, not an agent's;
  *   4. one status card: crew sessions, train, halts, what needs a person, outside agents seen lately (event log), lane
- *      copies and leftover folders in .lanes/ (B-51, listed, never removed).
+ *      copies and leftover folders in .lanes/ (listed, never removed).
  * Restarting outside orchestrators (chat sessions the harness doesn't launch) is not done here.
  *
- * 2.84 (u, B-130): after a Windows reboot the supervisor did not come back although auto-start was on ("auto-start"
- * lets the supervisor start agents; nothing started the supervisor). So:
+ * After a reboot nothing starts the supervisor ("auto-start" only lets it start agents), so:
  *   npm run studio:boot -- install [--remove] [--dry-run]
  *     Windows: registers (or removes) a Task Scheduler task at logon that runs this file in this checkout
  *     (schtasks /Create /SC ONLOGON /TN "Studio boot (<folder>)" /TR "<node> <boot.mjs>" /F); Linux/macOS: prints the
@@ -88,7 +85,7 @@ export function sweepTargets(root = REPO_ROOT) {
     { file: path.join(st, 'verify-running', 'full.json'), what: 'the full-verify record', kind: 'remove' },
     { file: path.join(st, 'train', 'daemon.json'), what: 'the train daemon\'s running-train record', kind: 'remove' },
     { file: path.join(st, 'supervisor.json'), what: 'the supervisor\'s status', kind: 'supervisor' },
-    // 2.84 (u): every other engine train's lock (<engine>-train.lock).
+    // Every other engine train's lock (<engine>-train.lock).
     ...(() => { try { return fs.readdirSync(path.join(st, 'locks')).filter((n) => /^[a-z][a-z0-9-]{1,30}-train\.lock$/.test(n) && n !== 'unity-train.lock').sort().map((n) => ({ file: path.join(st, 'locks', n), what: `the ${n.replace(/-train\.lock$/, '')} train lock`, kind: 'remove' })); } catch { return []; } })(),
   ];
 }
@@ -121,12 +118,11 @@ export function staleSweep({ root = REPO_ROOT, dry = false, emit = emitEvent, al
 }
 
 /**
- * Is the supervisor that supervisor.json describes really running? 2.77.1 (M5). The cheap test (the pid exists; on Linux
- * its /proc start matches) can't tell on Windows and macOS: the OS reuses pids, so a killed supervisor's number held by
- * another program looked alive, boot said "running" and started nothing (and a supervisor started anyway refuses at
- * once, "already running", by the same cheap test). So a pid that exists is asked once what program it is (the kill-time
- * query of harness/proc-identity.mjs: its start time against the one on record). Same: running. Different: gone.
- * Can't be read: only a recent loop (lastLoop, as studio:stop judges it) counts.
+ * Is the supervisor that supervisor.json describes really running? The cheap test (the pid exists; on Linux its /proc
+ * start matches) can't tell on Windows and macOS: the OS reuses pids, so a killed supervisor's number held by another
+ * program looks alive. So a pid that exists is asked once what program it is (the kill-time query of
+ * harness/proc-identity.mjs: its start time against the one on record). Same: running. Different: gone. Can't be read:
+ * only a recent loop (lastLoop, as studio:stop judges it) counts.
  */
 export function supervisorAlive(s, { alive = pidAlive, starts = readStarts, now = Date.now(), env = process.env } = {}) {
   if (!s || s.status !== 'running' || !s.pid) return false;
@@ -146,7 +142,7 @@ export function runningSupervisor(root = REPO_ROOT, alive = pidAlive, opts = {})
   return supervisorAlive(s, { alive, ...opts }) ? s : null;
 }
 
-/** This shell's environment for a studio daemon: the session identity left out (B-60). */
+/** This shell's environment for a studio daemon: the session identity left out. */
 export function daemonEnv(env = process.env) {
   const e = { ...env };
   for (const k of Object.keys(e)) if (SESSION_IDENTITY_KEYS.includes(k.toUpperCase())) delete e[k];
@@ -177,7 +173,7 @@ export function supervisorArgs(argv) {
 export async function startDaemons({ root = REPO_ROOT, env = process.env, argv = [], check = false, start = startDetached, alive = pidAlive, starts = readStarts, emit = emitEvent } = {}) {
   const res = {};
   const denv = daemonEnv(env);
-  // 2.80: the hub is gone; a start script that still passes --hub/--no-hub keeps working (one note on the card).
+  // The hub is gone; a start script that still passes --hub/--no-hub keeps working (one note on the card).
   if (argv.includes('--hub') || argv.includes('--no-hub')) res.hubGone = true;
   const sup = runningSupervisor(root, alive, { starts, env });
   if (argv.includes('--no-supervisor')) res.supervisor = { state: 'skipped', why: '--no-supervisor' };
@@ -218,7 +214,7 @@ export async function cardFacts({ root = REPO_ROOT, env = process.env, now = Dat
   await tryIt(async () => { const ts = await import('./train-status.mjs'); f.train = ts.trainStatusLine(ts.readTrainStatus(root)) || null; });
   await tryIt(async () => { const a = (await import('./train-daemon.mjs')).trainAuto(root, env); f.trainAuto = a.on ? 'on (runs in each supervisor pass)' : `off: ${a.why}`; });
   await tryIt(async () => { const q = readJson(path.join(root, '.studio', 'train', 'queue.json')); if (Array.isArray(q)) f.queue = { lanes: q.length, held: q.filter((e) => e?.held && !(e.released && e.released.head === e.head)).length }; });
-  // 2.84 (u): each engine queue (kept as it is) and whether its train's automatic start will resume it.
+  // Each engine queue (kept as it is) and whether its train's automatic start will resume it.
   await tryIt(async () => {
     const ut = await import('./unity-train.mjs');
     const ctl = await import('./engine-train-control.mjs');
@@ -297,7 +293,7 @@ export async function boot({ root = REPO_ROOT, env = process.env, argv = [], now
 }
 
 /**
- * 2.84 (u, B-130): what `studio:boot -- install` registers so the studio comes back after a reboot. Pure. { platform,
+ * What `studio:boot -- install` registers so the studio comes back after a reboot. Pure. { platform,
  * name, lines, cmd?: [file, args] } (cmd only on Windows: the schtasks call; elsewhere nothing is run).
  */
 export function bootHook({ root = REPO_ROOT, platform = process.platform, node = process.execPath, remove = false } = {}) {
@@ -331,7 +327,7 @@ export function bootHook({ root = REPO_ROOT, platform = process.platform, node =
 }
 
 /**
- * 2.84 (u): `studio:boot -- install [--remove] [--dry-run]`. opts: exec(file, args) -> { status, stdout, stderr }
+ * `studio:boot -- install [--remove] [--dry-run]`. opts: exec(file, args) -> { status, stdout, stderr }
  * (injectable for tests), env, platform. Prints first, then (Windows, not --dry-run) runs schtasks. { ok, ran, lines }.
  */
 export async function bootInstall({ root = REPO_ROOT, argv = [], env = process.env, platform = process.platform, node = process.execPath, exec = null } = {}) {
@@ -365,5 +361,5 @@ async function main() {
   else console.log(r.lines.join('\n'));
   process.exit(r.ok ? 0 : 1);
 }
-// 2.84 (u): no top-level await here (an import cycle would end the process with exit 13).
+// No top-level await here (an import cycle would end the process with exit 13).
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) main();

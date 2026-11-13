@@ -36,7 +36,7 @@ export async function selftest279A({ dir, report, tmpRoot, root }) {
   await guard('census-known', async () => {
     const { census } = await imp('scripts/settings-census.mjs');
     const c = census(dir);
-    const hud = c.items.find((i) => i.name === 'STUDIO_GAMEDEV_AUTOLAUNCH'); // 2.80: STUDIO_PLANNING_ROOM's reader (hud.mjs) is gone
+    const hud = c.items.find((i) => i.name === 'STUDIO_GAMEDEV_AUTOLAUNCH'); // 2.80: the War Room's old Planning Room switch went with its reader
     const def = c.items.find((i) => i.name === 'STUDIO_TEMP_SWEEP_MIN');
     const r = spawnSync(process.execPath, ['scripts/settings-census.mjs'], { windowsHide: true, cwd: dir, encoding: 'utf8' });
     const last = String(r.stdout || '').trim().split('\n').pop();

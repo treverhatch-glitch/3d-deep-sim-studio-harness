@@ -17,7 +17,7 @@
  * (harness/delegation.mjs delegationFor), approvals of protected files, gates, tests, hooks and forced dones
  * (harness/approve.mjs, an approval that carries this file instead of a signature), answering owner asks, releasing a
  * golden re-record. Every use is logged (who, why) and shown in the daily digest and the War Room, so the owner reviews
- * afterwards instead of approving before. What stays on: the game's tests, the train's full verify, no deletes, no money,
+ * afterwards instead of approving before. What stays on: the game's tests, the train's full verify, no deletes,
  * worker sessions never act as the owner.
  *
  * Who may turn it on: the owner in their own terminal (signed with the owner key when the private key is here), or the
@@ -52,8 +52,8 @@ import { OWNER_ONLY_ACTIONS, ownerOnlyAction, ownerOnlyWhy } from './owner-acts.
 
 export const BETA_REL = 'studio/beta.json';
 export const BETA_ROLES = ['producer', 'director'];
-// 2.79 (c): the owner's own acts (harness/owner-acts.mjs, the one list): real money, deleting data, keys and credentials,
-// publishing outside the PC, turning beta mode off.
+// 2.79 (c): the owner's own acts (harness/owner-acts.mjs, the one list): deleting data, keys and credentials,
+// publishing outside the PC, an owner tool, turning beta mode off.
 export const BETA_NEVER = OWNER_ONLY_ACTIONS;
 const FIELDS = ['on', 'by', 'at', 'why', 'agents', 'roles'];
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true });
@@ -146,7 +146,7 @@ export function betaActor({ env = process.env, from = REPO_ROOT, allowLane = fal
  * its auto mode on/off). One rule for all of them: may this shell make this decision right now? { ok, via, who, why,
  * doc, words }; via is 'beta agent' or 'signer'.
  *
- * Never: an owner-only act (harness/owner-acts.mjs: money, deleting data, keys, publishing, beta mode off), a launched
+ * Never: an owner-only act (harness/owner-acts.mjs: deleting data, keys, publishing, an owner tool, beta mode off), a launched
  * session (STUDIO_ROLE) or a session pinned to a task (STUDIO_TASK_PIN) whatever --by says, a worker's name, a name beta
  * mode doesn't list, or anyone while beta mode is off or its record fails readBeta (set from a worker's commit, …). A
  * coding agent's markers (CLAUDECODE, AI_AGENT, …) don't matter: the overseer and the signers are coding agents. The
@@ -287,7 +287,7 @@ export function setBeta({ on, by, agents = '', why = '', permission = '', env = 
     const c = commit ? commitBeta(root, `beta: on (by ${doc.by}${viaProxy ? `, recorded by ${doc.recordedBy}` : ''})`, doc.why) : { committed: false, note: ' Not committed (--no-commit).' };
     emitEvent({ type: 'beta.on', agent: viaProxy ? doc.recordedBy : doc.by, msg: `beta mode on: ${list.length ? `${list.join(', ')} and ` : ''}Producer/Director sessions act as the owner (${doc.why})`.slice(0, 400), meta: { agents: list, roles: BETA_ROLES, by: doc.by, recordedBy: doc.recordedBy || null, signed: Boolean(doc.signature) } });
     logBeta({ action: 'beta-on', by: doc.by, why: doc.why, evidence: `${list.join(', ') || 'Producer/Director sessions'}${viaProxy ? `; recorded by ${doc.recordedBy}: ${yes.slice(0, 160)}` : ''}`, root });
-    return { ok: true, doc, committed: c.committed, message: `Beta mode is on${c.committed ? ` (committed ${BETA_REL})` : ''}.${c.note || ''} ${list.length ? `${list.join(', ')} and ` : ''}Producer/Director sessions now act as the owner, with --by <their name>, no owner key and no --permission: every owner action, owner asks and golden releases; approvals of protected files, weakened tests, hooks, forced dones and protected config changes are the outside agents' only (Producer/Director sessions too with STUDIO_PRODUCER_APPROVES=protected), and count once committed. Every use is logged (npm run decisions; the digest; the War Room). Tests and the train's full verify stay on; the owner's own acts (real money, deleting data, keys and credentials, publishing outside the PC, turning beta mode off: harness/owner-acts.mjs) stay the owner's. The owner ends it in their own terminal: npm run beta -- off --by <owner>.`.replace(/\s+/g, ' ').trim() };
+    return { ok: true, doc, committed: c.committed, message: `Beta mode is on${c.committed ? ` (committed ${BETA_REL})` : ''}.${c.note || ''} ${list.length ? `${list.join(', ')} and ` : ''}Producer/Director sessions now act as the owner, with --by <their name>, no owner key and no --permission: every owner action, owner asks and golden releases; approvals of protected files, weakened tests, hooks, forced dones and protected config changes are the outside agents' only (Producer/Director sessions too with STUDIO_PRODUCER_APPROVES=protected), and count once committed. Every use is logged (npm run decisions; the digest; the War Room). Tests and the train's full verify stay on; the owner's own acts (deleting data, keys and credentials, publishing outside the PC, an owner tool, turning beta mode off: harness/owner-acts.mjs) stay the owner's. The owner ends it in their own terminal: npm run beta -- off --by <owner>.`.replace(/\s+/g, ' ').trim() };
   }
   // 2.79 (c): turning beta mode off is the owner's own (harness/owner-acts.mjs): never a launched session, an agent's
   // shell (STUDIO_LOCK_OWNER or a coding agent's marker), nor --by naming beta mode's agents, an outside signer or the proxy.

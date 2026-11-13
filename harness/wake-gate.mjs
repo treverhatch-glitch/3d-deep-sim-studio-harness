@@ -1,10 +1,7 @@
 /**
- * harness/wake-gate.mjs — 2.84: a planning wake needs something that changed.
- *
- * In one crew's 26 hours the Director was woken 33 times for its regular development cycle and the Producer 50 times
- * because the queue was below its depth target (0 ready, every area blocked) and 29 more for its cycle: about $60 of
- * $82 of planning spend left no board event behind. 2.83 backed off one case (the same train or chain-gate blocker,
- * harness/line-producer.mjs producerWakeBackoff); this gate covers the two kinds of planning wake:
+ * harness/wake-gate.mjs — a planning wake needs something that changed: most planning wakes otherwise leave no board
+ * event behind. (The same train or chain-gate blocker is backed off separately, harness/line-producer.mjs
+ * producerWakeBackoff.) This gate covers the two kinds of planning wake:
  *
  *   queue-depth  the Producer's "queue is below its depth target" wake (harness/queue-depth.mjs). Its fingerprint: the
  *                count ready, the target, the blocked areas with the kinds of their reasons (no times, no counters),
@@ -19,17 +16,16 @@
  * Never longer than STUDIO_WAKE_SAME_MAX_H (6) hours for a queue-depth wake, STUDIO_CYCLE_QUIET_MAX_H (12) for a cycle,
  * since the last wake that ran; 0 or off turns that kind's skipping off. Every skip emits agent.wake.skipped with the
  * kind and a plain reason. Nothing else is gated here: a person's request, an ask's answer, an alert or an owner order
- * wakes as before. State: .studio/line/wake-gate.json, next to the 2.83 state.json (its own file, so the Line
+ * wakes as before. State: .studio/line/wake-gate.json, next to state.json (its own file, so the Line
  * Producer's rewrites of state.json never race it); it survives a supervisor restart.
  *
- * 2.84 (a2): a back-off by outcome, per kind and role. In the replayed log the digest was almost never empty (hand-backs
- * and parks fill it), so only 1 of 32 Director cycles would have been skipped by the digest. Now after a session that
- * changed nothing (a cycle: no board event; a queue-depth session: no task added) the next wake of that kind waits twice
- * as long: the base interval (the cycle's STUDIO_DEV_CYCLE_MIN, the depth ask's STUDIO_QUEUE_DEPTH_ASK_MIN), then x2, x4,
+ * Back-off by outcome, per kind and role (the digest is rarely empty, since hand-backs and parks fill it): after a
+ * session that changed nothing (a cycle: no board event; a queue-depth session: no task added) the next wake of that
+ * kind waits twice as long: the base interval (the cycle's STUDIO_DEV_CYCLE_MIN, the depth ask's STUDIO_QUEUE_DEPTH_ASK_MIN), then x2, x4,
  * x8 ..., never longer than the kind's ceiling. A session that changed the board (a cycle) or added a task (a queue
  * session) resets it; a hand-back or a park does not. Strong news (STRONG_NEWS_TYPES) makes a cycle due at once and keeps
  * the count; a queue wake is cut short when a blocked area frees up or the queue reached its target since. The ceilings'
- * `off` (or 0) turns the back-off off with the rest: 2.83's cadence.
+ * `off` (or 0) turns the back-off off with the rest.
  *
  * The fingerprint, the digest and the verdicts are pure (inputs in, verdict out); gateWake/recordWake read and write
  * the state. Imports only event.mjs and fsafe.mjs.
@@ -96,14 +92,14 @@ export function sessionOutcomeOf(agent, since, events = []) {
 }
 
 /**
- * 2.84 (a2): news that makes a backed-off regular cycle due at once (the back-off count is kept). Each type with its
+ * News that makes a backed-off regular cycle due at once (the back-off count is kept). Each type with its
  * predicate where the type alone is not enough. A red train, a hand-back, a park or an agent's own decision is not news
  * of this kind: those were in nearly every digest and bought nothing.
  *   ask.answered          by a person, or recorded by the owner's stand-in (meta.via: owner proxy, beta mode)
  *   decision              made as a person or by the owner's stand-in (meta.as not "agent" or "autonomous", or
- *                         meta.standIn: the overseer's own board decision, 2.84 n)
+ *                         meta.standIn: the overseer's own board decision)
  *   inbound.message       a person's message (a new owner note), or the overseer's order
- *   2.84 (n): none of these from a launched session's own shell (meta.role).
+ *   None of these count from a launched session's own shell (meta.role).
  *   playtest.verdict      the owner played a build
  *   task.dev_yes          the dev said yes to an agent-proposed mechanic (an order)
  *   bible.signed, bible.phase_override, milestone.closed   a phase change
@@ -115,18 +111,18 @@ export const looksLikePerson = (name) => { const n = String(name || '').trim(); 
 const STRONG = new Set(STRONG_NEWS_TYPES);
 export function isStrongNews(e, { isPerson = looksLikePerson } = {}) {
   if (!e || !STRONG.has(e.type)) return false;
-  // 2.84 (n): an answer, a decision or a post made from a launched session's shell (meta.role: a Producer or Director
+  // An answer, a decision or a post made from a launched session's shell (meta.role: a Producer or Director
   // standing in under beta mode, say) is that session's own news, not an owner's: it never ends a back-off.
   if (['ask.answered', 'decision', 'inbound.message'].includes(e.type) && String(e.meta?.role || '').trim()) return false;
   if (e.type === 'ask.answered') return Boolean(e.meta?.via || e.meta?.recordedBy) || isPerson(e.meta?.by || e.agent);
-  // 2.84 (n): a board decision the owner's stand-in took as itself (meta.standIn: the owner's proxy, a beta-mode agent or
+  // A board decision the owner's stand-in took as itself (meta.standIn: the owner's proxy, a beta-mode agent or
   // an outside signer; decisions-log.mjs) counts as the owner's, like a person's.
   if (e.type === 'decision') { const as = String(e.meta?.as || '').toLowerCase(); if (e.meta?.standIn) return true; return as !== '' ? !/^(agent|autonomous)/.test(as) : isPerson(e.agent); }
   return true;
 }
 
 /**
- * 2.84 (a2): the back-off verdict, pure: { skip, wait (ms), due (ms) }. quiet: sessions in a row that changed nothing;
+ * The back-off verdict, pure: { skip, wait (ms), due (ms) }. quiet: sessions in a row that changed nothing;
  * lastAt: the last wake that ran; baseMs: the kind's own interval; maxH: its ceiling; cutShort: news that ends the wait.
  */
 export function backoffVerdict({ quiet = 0, lastAt = null, now = Date.now(), baseMs = 0, maxH = 6, cutShort = false } = {}) {
@@ -234,7 +230,7 @@ export function gateWake({ kind, role, fp, now = Date.now(), env = process.env, 
     let last = st[slotKey] || null;
     const evs = events || readRecentEvents(5000);
     const outcome = last?.agent ? sessionOutcomeOf(last.agent, last.at, evs) : null;
-    // 2.84 (a2): fold the last session's outcome into the back-off count, once per session.
+    // Fold the last session's outcome into the back-off count, once per session.
     if (last?.agent && outcome?.ended && last.folded !== last.agent) {
       const changed = kind === 'cycle' ? outcome.boardEvents > 0 : outcome.tasksAdded > 0;
       last = { ...last, quiet: changed ? 0 : (Number(last.quiet) || 0) + 1, folded: last.agent };
@@ -280,7 +276,7 @@ export function recordWake({ kind, role, fp, agent = null, now = Date.now() } = 
   } catch { /* the next wake runs without a gate */ }
 }
 
-/** 2.84 (a2): the queue reached its depth target: a queue-depth back-off ends (its next wake is not held back). */
+/** The queue reached its depth target: a queue-depth back-off ends (its next wake is not held back). */
 export function markQueueFull(now = Date.now()) {
   try {
     const st = readWakeGate();
@@ -293,7 +289,7 @@ export function markQueueFull(now = Date.now()) {
 }
 
 /**
- * 2.84 (a2): one clause for the mode line when a planning wake is backed off, else ''. E.g. "backed off: the Director's
+ * One clause for the mode line when a planning wake is backed off, else ''. E.g. "backed off: the Director's
  * next regular cycle at 16:40 UTC (3 quiet in a row)".
  */
 export function backoffClause(now = Date.now()) {

@@ -51,7 +51,8 @@ RAM floor, the settings its lane may tune itself, and its repo.
 Each engine gets its own copy of every part, and Unity keeps its 2.63 file names:
 
 - **Lane:** the `engine-porter` role and an engine worktree for each launched pass.
-- **Gate:** `node harness/unity-gate.mjs --engine <name>`, a land run of `engines.<name>.land`.
+- **Gate:** `node harness/unity-gate.mjs --engine <name> --task <ID>` (or `--branch <name>`), a land run of `engines.<name>.land`;
+  with neither it prints how to call it and runs nothing.
 - **Train:** `.studio/train/<name>-queue.json`, `.studio/locks/<name>-train.lock`, the integration refs
   `<name>-train/<id>`, and the `task.train.<name>.*` events.
 - **Results:** `.studio/gates/<name>-last.json` and `.studio/gates/out/<name>.log`.
@@ -159,6 +160,12 @@ the train starts only when all of these hold:
 The Line Producer doesn't start the same engine's train again within `STUDIO_ENGINE_TRAIN_COOLDOWN_MIN` (3) minutes.
 `STUDIO_ENGINE_TRAIN_AUTO=off`, or `"trainAuto": false` for one engine, leaves starting it to a person.
 
+**Finished work is queued by the harness (2.85).** When a session hands an engine task back with a note that says the
+work is done or ready, and its branch has commits ahead of the target, the Line Producer's engine pass runs the checks
+`task done --train` runs and queues the branch itself (`task.train.<x>.queued` with `meta.auto: "ready hand-back"`); failing
+checks queue nothing and say why once (`task.train.<x>.not_queued`). `STUDIO_ENGINE_AUTO_QUEUE=off` turns it off. A task
+never carries its own queue or batch rule: `batchMax` and `batchGroup` decide.
+
 **A batch window (2.84).** A land run takes 22 to 40 minutes whatever the number of branches in it, so a train that
 starts with one branch while more are minutes away spends a whole run on one task. `"batchMin": 4, "batchWaitMin": 12`
 in an engine's config makes the Line Producer's automatic start wait while fewer than `batchMin` branches are queued,
@@ -190,6 +197,11 @@ The land run itself still takes `machine:heavy` as that engine's job kind, with 
   `play.focus` every lane is class `full` and nothing changes. A lane marked alone still lands alone. Order: `--only` and
   `--tag`, then alone, then grouping, then the cap. The train's start event and `train status --engine <x>` say why the
   batch is what it is ("6 of 14 queued: class focus, cap 6; 8 wait (5 full, 3 focus)").
+- 2.85: `npm run engine -- play-plan --branch <b>` (or `--paths a,b`) prints which class and Play Mode filter a branch
+  would get and names the paths no `play.focus.map` entry takes; `train status --engine <x>` says when the running land
+  run is the daily full run and lists the tests the target itself fails in it (see docs/NATIVE-ENGINE.md, "The
+  target's own red in the full run"); `task done --train` refuses a branch the train handed back that has changed only
+  by merges of the target since (`--again` overrides it).
 - `npm run task -- train cancel --engine <x> --by <name> [--why "…"]`: writes `.studio/train/<x>-cancel.json` (the train
   id from its lock) first, kills the train's process tree (its land run with it; `taskkill /T /F` on Windows) and waits
   up to 30 s, puts the gate worktree back (`git merge --abort`, `git reset --hard <target>`, `git clean -fd`; only a

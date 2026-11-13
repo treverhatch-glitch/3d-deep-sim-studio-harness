@@ -1,5 +1,5 @@
 /**
- * harness/upgrade-preflight.mjs — 2.73.0 (f): `npm run upgrade -- --preflight [--ref <ref>] [--json]`, before taking a
+ * harness/upgrade-preflight.mjs — `npm run upgrade -- --preflight [--ref <ref>] [--json]`, before taking a
  * harness update. Read-only: it changes no file, commit, branch or lock (the machine scan is read, never written).
  *
  * One line per item, PASS / WARN / FAIL / INFO, with a Fix line under each WARN and FAIL; exit 1 on any FAIL:
@@ -19,22 +19,22 @@
  *                 FAIL when .env is tracked by git (the webhook is a secret)
  *   policy        studio/policy.json, studio/delegation.json, studio/autonomy.json, studio/overseer.json: each one there
  *                 must parse (FAIL otherwise); missing: INFO (defaults)
- *   dotenv-identity 2.73.1 (B-60): a .env line setting STUDIO_LOCK_OWNER, STUDIO_ROLE, STUDIO_AGENT or STUDIO_MAIN_ROOT
+ *   dotenv-identity a .env line setting STUDIO_LOCK_OWNER, STUDIO_ROLE, STUDIO_AGENT or STUDIO_MAIN_ROOT
  *                 (WARN, the line numbers): identity settings belong to a session; the harness ignores them in .env
  *   lanes         lane copies (.lanes/<name>) with uncommitted work or commits not on the studio's branch (WARN, listed):
- *                 the update's lane refresh skips a lane with uncommitted work. 2.73.1 (B-51): a lane is a registered
- *                 worktree of this repo (git worktree list) with its own .git; any other folder there is a "leftover
- *                 folder (not a lane)" (INFO), never asked for git status (git would answer for the main checkout)
- *   long-run/…    2.78.1, "before a long run" (WARN only): .env workarounds a later release made unnecessary (the list is
+ *                 the update's lane refresh skips a lane with uncommitted work. A lane is a registered worktree of this
+ *                 repo (git worktree list) with its own .git; any other folder there is a "leftover folder (not a
+ *                 lane)" (INFO), never asked for git status (git would answer for the main checkout)
+ *   long-run/…    "before a long run" (WARN only): .env workarounds a later release made unnecessary (the list is
  *                 harness/upgrade-leftovers.json: version, key, value, why), ready builder tasks with no lane (the
  *                 studio's own harness/task.mjs and task-hold.mjs read the board, when it has them), uncommitted changes
  *                 in harness/ or scripts/ (a local patch), and trains (.studio/train/<id>/life.json) or gate runs
  *                 (.studio/verify-running) still running from before the harness last changed
- *   game-tests/…  2.78.2 (f): the studio game's test checks (the studio's own harness/test-config-check.mjs, when it has
- *                 one): FAIL a test check with neither a "focus" command nor a vitest/jest runner the harness can run
- *                 single files with (every train re-check re-runs the whole suite); FAIL a test config whose list mode
- *                 still lists a file named in STUDIO_TEST_QUARANTINE (or, with perf / slow-tier tests declared,
- *                 STUDIO_TEST_EXCLUDE); WARN when that can't be told. Runs the runner's list mode; writes nothing.
+ *   game-tests/…  the studio game's test checks (the studio's own harness/test-config-check.mjs, when it has one): FAIL
+ *                 a test check with neither a "focus" command nor a vitest/jest runner the harness can run single files
+ *                 with (every train re-check re-runs the whole suite); FAIL a test config whose list mode still lists a
+ *                 file named in STUDIO_TEST_QUARANTINE (or, with perf / slow-tier tests declared, STUDIO_TEST_EXCLUDE);
+ *                 WARN when that can't be told. Runs the runner's list mode; writes nothing.
  *
  * No harness imports (only node's): an old studio runs this from the ref through the upgrade guard (docs/RELEASE.md).
  * The guard passes its own checkUpgrade / isMainCheckout in. UNTESTED on Windows: `where` for the PATH lookups.
@@ -62,7 +62,7 @@ export function readDotEnv(root) {
   return o;
 }
 
-// 2.73.1 (B-60): the session identity the launcher sets (harness/dotenv.mjs SESSION_IDENTITY_KEYS; repeated here, as this
+// The session identity the launcher sets (harness/dotenv.mjs SESSION_IDENTITY_KEYS; repeated here, as this
 // file imports nothing of the harness). The harness ignores these in .env.
 const IDENTITY = ['STUDIO_LOCK_OWNER', 'STUDIO_ROLE', 'STUDIO_AGENT', 'STUDIO_MAIN_ROOT'];
 /** [{ line, key }] of the .env lines setting a session identity to a non-empty value. */
@@ -84,7 +84,7 @@ function checkDotEnvIdentity(root) {
 }
 
 /**
- * 2.73.1 (B-51): the registered worktrees of this repo (git worktree list --porcelain), as resolved paths. A folder in
+ * The registered worktrees of this repo (git worktree list --porcelain), as resolved paths. A folder in
  * .lanes/ is a lane only when it is one of them AND has its own .git file: an old, emptied lane folder has neither, and
  * git run inside it answers for the main checkout (its dirty board counted once per leftover folder).
  */
@@ -266,7 +266,7 @@ function checkLanes(root) {
   return [...left, item('lanes', 'WARN', `${busy.length} lane(s) hold unlanded work: ${busy.slice(0, 8).join('; ')}${busy.length > 8 ? ` and ${busy.length - 8} more` : ''}`, 'land them first (npm run task -- train --by <you>), or let their agents commit: the update\'s lane refresh skips a lane with uncommitted work, and its agent merges main in later')];
 }
 
-// ---- 2.78.1: before a long run (leftovers from earlier workarounds) -------------------------------------------------
+// ---- before a long run (leftovers from earlier workarounds) -------------------------------------------------
 
 /** harness/upgrade-leftovers.json: the studio's own, else the one beside this file. [{ version, key, value?, why }]. */
 export function readLeftovers(root) {
@@ -344,7 +344,7 @@ function checkOldRuns(root) {
   return [item('long-run/runs', 'WARN', `${old.length} still running from before the harness last changed (they run the old code): ${old.slice(0, 6).join('; ')}${old.length > 6 ? ` and ${old.length - 6} more` : ''}`, 'let them finish, or stop them (npm run task -- train cancel, npm run studio:stop); the supervisor and train daemon start fresh ones on the new harness')];
 }
 
-/** 2.78.2 (f): the studio game's test checks (focus command, quarantine / exclude honoured), via the studio's own module. */
+/** The studio game's test checks (focus command, quarantine / exclude honoured), via the studio's own module. */
 async function checkGameTests(root, env) {
   const f = path.join(root, 'harness', 'test-config-check.mjs');
   if (!fs.existsSync(f)) return [];
@@ -354,7 +354,7 @@ async function checkGameTests(root, env) {
   } catch (e) { return [item('game-tests', 'INFO', `the game's test checks were not read (${String(e.message || e).slice(0, 160)})`)]; }
 }
 
-/** 2.78.1: "before a long run": leftovers from earlier workarounds. WARN only, never a FAIL. */
+/** "Before a long run": leftovers from earlier workarounds. WARN only, never a FAIL. */
 export async function longRunItems(root) {
   return [...checkLeftoverEnv(root), ...(await checkUnscoped(root)), ...checkHarnessDirty(root), ...checkOldRuns(root)];
 }

@@ -8,18 +8,23 @@ import { postAsk } from './ask-post.mjs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, boardRoot } from './event.mjs';
+import { actor, emitEvent as emitEventRaw, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, boardRoot } from './event.mjs';
+// 2.85: the harness's own look at a held task (`task done --check` with STUDIO_DONE_PROBE=1, director-flow.mjs) is not
+// an agent being refused: it writes no task.not_done event, so a hold's lift check adds nothing to the log.
+const emitEvent = process.env.STUDIO_DONE_PROBE === '1' ? (e) => (e?.type === 'task.not_done' ? null : emitEventRaw(e)) : emitEventRaw;
 import { claim, release, status as lockStatus, listLocks, SHARED_OWNERS } from './lock.mjs';
 import { ensureResearchTemplate, researchRel } from './research.mjs';
-import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType, skipGameChecks } from './done-check.mjs';
-import { judgeClaims, recordClaimVerdict, claimLines } from './said-vs-did.mjs';
+import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType, skipGameChecks, rulesTestEvidence } from './done-check.mjs';
+import { judgeClaims, recordClaimVerdict, claimLines, noteMissingPaths, noteMissingLine, recordNoteUnverified } from './said-vs-did.mjs';
 import { validateAnchorIds, readAnchors } from './anchors.mjs';
 import { splitEolOnly, eolNote, splitPhantom, phantomNote } from './eol-only.mjs';
 import { isGameCode } from '../scripts/check-function-size.mjs';
 import { summarize as summarizeVerdict, renderDecision } from './verdict-split.mjs';
 import { visualGate } from './visual-capture.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
-import { writeFocus } from './focus.mjs';
+import { writeFocus, visionFor } from './focus.mjs';
+import { visionFixIds, visionFirst, mayFileVisionFix, parentIsVisionFix } from './vision-fix.mjs';
+import { PLAYER_TYPES } from './vision-card.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
 import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal, laneEntries } from './task-hold.mjs';
 import { stopIfOverBudget, overBudget as overBudgetOf } from './task-budget.mjs';
@@ -31,7 +36,7 @@ import { engineTask as engineTaskOf, engineRepo, engineTarget, engineOfTrack, en
 import { nativeEngine, webCodeNamed } from './native.mjs';
 /** Task types that are studio work, not a change to the game (no native-engine track by default). */
 const NON_CHANGE_TYPES = new Set(['chore', 'study', 'research', 'review', 'docs', 'idea', 'playtest']);
-import { misplacedTrailers, misplacedTrailerText } from './trailers.mjs';
+import { misplacedTrailers, misplacedTrailerText, ownCommitOf } from './trailers.mjs';
 import { inferLaneFromText } from './lane-infer.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, carryTaskBranchEx, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf, taskOnBoard } from './worktree.mjs';
 import { laneConfigBefore } from './config-proposal.mjs';
@@ -395,7 +400,10 @@ export function nextFor({ role = null, agent = null } = {}, q = parseNextQueue()
     .filter(([t]) => !lockStatus(`task:${t.id}`).locked && (!role || t.role === role || !t.role) && !eligibility(t.id, { q, agent, role: role || process.env.STUDIO_ROLE || null, events: (evs ||= readRecentEvents(20000)) }) && !liveOwner(t.id, agent, (evs ||= readRecentEvents(20000)), { waiting: true }))
     .map(([t, i]) => [t, i, (() => { try { return sameBlocker(t.id, { done: new Set((q.done || []).map((x) => x.id)) }).same ? 1 : 0; } catch { return 0; } })()])
     .sort((a, b) => a[2] - b[2] || (PRI[a[0].priority] ?? 9) - (PRI[b[0].priority] ?? 9) || a[1] - b[1]);
-  return { task: open[0]?.[0] || null, held: false };
+  // 2.85 (f): a startable vision fix (harness/vision-fix.mjs) goes before every other waiting task of the role.
+  const vf = (() => { try { return visionFixIds(evs || readRecentEvents(20000)); } catch { return new Set(); } })();
+  const ordered = vf.size ? visionFirst(open, (x) => vf.has(x[0].id)) : open;
+  return { task: ordered[0]?.[0] || null, held: false };
 }
 
 /** Everything known about one task, for agents and people: status, owner, meta, hand-off notes, checklist. */
@@ -424,6 +432,9 @@ export function showTask(taskId, q = parseNextQueue()) {
     handoff: fs.existsSync(handoff) ? fs.readFileSync(handoff, 'utf8') : null,
     brief: fs.existsSync(path.join(STUDIO_STATE_DIR, 'briefs', `${taskId}.md`)) ? `.studio/briefs/${taskId}.md` : null,
     checklist: check ? check.checks.map((c) => `[${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`) : null,
+    // 2.85 (f): the vision card its brief carries (kind, words, the pillar or layer), and whether it is a vision fix.
+    vision: (() => { try { const v = visionFor(task); return v.card ? { kind: v.card.kind, words: v.card.words, ...(v.card.pillar ? { pillar: v.card.pillar } : {}), ...(v.card.layer ? { layer: v.card.layer } : {}), ...(v.reviewed ? { reviewed: v.reviewed } : {}) } : null; } catch { return null; } })(),
+    visionFix: (() => { try { return visionFixIds(readRecentEvents(50000)).has(taskId); } catch { return Boolean(meta.visionFix); } })(),
   };
 }
 
@@ -535,7 +546,10 @@ export function startTask(taskId, agent = null, { model = null, force = false, d
   const handoff = readTaskHandoff(target.id);
   // The commit the work starts from, for the size ratchet (harness/done-check.mjs sizeGrowth).
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout?.trim() || null;
-  emitEvent({ type: 'task.start', agent, model, task: target.id, status: 'editing', msg: `${handoff ? 'Picked up' : 'Started'} ${target.id}: ${target.title}`, meta: head ? { head } : {} });
+  // 2.85 (f): which vision card the brief carries ('pillar' | 'layer' | 'port' | null) and whether the task is player-facing
+  // (build, change, bug or system work, not tooling), for the scorecard's "Briefs with a vision card" line.
+  const vis = (() => { try { const ty = taskType(target); const m = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta || {}; return { visionCard: visionFor(target).card?.kind || null, playerFacing: PLAYER_TYPES.has(ty) && !m.infra && !m.prototype }; } catch { return { visionCard: null, playerFacing: false }; } })();
+  emitEvent({ type: 'task.start', agent, model, task: target.id, status: 'editing', msg: `${handoff ? 'Picked up' : 'Started'} ${target.id}: ${target.title}`, meta: { ...(head ? { head } : {}), ...vis } });
   try { if (!readBaseline(target.id)) recordBaseline(target.id); } catch {}
   let brief = null;
   try {
@@ -589,7 +603,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     return { error: 'no-main-root', message: `This is a lane copy (${REPO_ROOT}) but STUDIO_MAIN_ROOT isn't set, so task done can't merge your work into the studio's branch. Relaunch with STUDIO_MAIN_ROOT=<the main checkout>, or run task done there. Nothing was closed.` };
   }
   const lock = lockStatus(`task:${taskId}`);
-  if (lock.locked && lock.lock.owner !== agent && !force) {
+  // 2.85: the harness's own look at a held task (--check with STUDIO_DONE_PROBE=1) reads the checks whoever holds the claim; it closes nothing.
+  if (lock.locked && lock.lock.owner !== agent && !force && !(checkOnly && process.env.STUDIO_DONE_PROBE === '1')) {
     return { error: 'locked', lock: lock.lock, message: `Task ${taskId} is claimed by ${lock.lock.owner}. Finish it as that owner or pass --force.` };
   }
   let q = parseNextQueue();
@@ -608,7 +623,18 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     try {
       const lane = inLaneCopy();
       const start = lane ? mainBranchOf(mainRoot()) : taskBase(target.id);
-      const found = start ? misplacedTrailers(REPO_ROOT, start, 'HEAD', 'Golden-Reason') : [];
+      // 2.85 (B-138): from the main checkout taskBase..HEAD is every commit that landed since the task started (a
+      // Director's board commit blocked every task's done): only the task's own commits are judged there (trailers.mjs
+      // ownCommitOf: its Studio-Task, else an agent that claimed it or a subject that starts with its id). In a lane copy
+      // the lane's commits ahead of main are all its own, as before. The train's own gate still judges goldens.
+      let only = null;
+      if (!lane) {
+        const owners = new Set(readRecentEvents(20000).filter((e) => e.task === target.id && e.type === 'task.start' && e.agent).map((e) => e.agent));
+        if (lock.locked && lock.lock?.owner) owners.add(lock.lock.owner);
+        if (agent) owners.add(agent);
+        only = ownCommitOf(target.id, [...owners]);
+      }
+      const found = start ? misplacedTrailers(REPO_ROOT, start, 'HEAD', 'Golden-Reason', { only }) : [];
       if (found.length) {
         const why = misplacedTrailerText(found, 'Golden-Reason');
         emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${why}`.slice(0, 600) });
@@ -691,7 +717,14 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     if (judged?.unverifiable?.length) for (const u of judged.unverifiable) console.warn(`[done] claim not verifiable: ${u}`);
     if (judged) check.claims = judged.results.map((r) => ({ cmd: r.cmd || null, verdict: r.verdict }));
   }
-  for (const w of check.warnings || []) {
+  // 2.85 (g): a file the note says it made or changed that exists in neither the lane nor main: a warning and an event, never a refusal.
+  if (!checkOnly && note) {
+    const gone = noteMissingPaths(note, [REPO_ROOT, mainRoot()]);
+    for (const p of gone.slice(0, 5)) console.warn(`[done] WARN ${noteMissingLine(p)}`);
+    recordNoteUnverified(target.id, gone, { agent: agent || target.role, where: 'task done' });
+  }
+  // 2.85 (g): the rules-no-test note waits while another check refuses, so the refusal's first line still names that check (2.60.1).
+  for (const w of (check.warnings || []).filter((x) => !(/^rules-no-test:/.test(String(x)) && !check.ok && !force))) {
     console.warn(`[done] WARN ${w}`);
     emitEvent({ type: 'task.warn', agent: agent || target.role, task: target.id, status: 'warn', msg: `${target.id}: WARN ${w}`.slice(0, 400) });
   }
@@ -994,7 +1027,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   const nextActive = q.inProgress[0] || null;
   syncCurrentTaskCheckpoint(nextActive, `Completed ${target.id}${note ? `: ${note}` : ''}`);
   clearAttempts(target.id); // 2.81 (b1): a finished task has nothing to hold back (harness/attempts.mjs)
-  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title}`, ...(check.anchors || check.claims ? { meta: { ...(check.anchors ? { anchors: check.anchors } : {}), ...(check.claims ? { claims: check.claims } : {}) } } : {}) });
+  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title}`, ...(check.anchors || check.claims || check.noTestReason || check.noTest ? { meta: { ...(check.anchors ? { anchors: check.anchors } : {}), ...(check.claims ? { claims: check.claims } : {}), ...(check.noTestReason ? { noTestReason: check.noTestReason } : {}), ...(check.noTest ? { noTest: true } : {}) } } : {}) });
   try { canaryEnd(target.id, 'cheated', { agent: agent || target.role }); } catch { /* a record, never a blocker */ }
   assetHandoffAfterLanding(target.id, agent); // 2.67.1 (j)
   if (taskType(target) === 'rescue') { try { applyRescue(target, { by: agent || 'rescue' }); } catch { /* the rescue's own record stays */ } }
@@ -1088,6 +1121,11 @@ function assetHandoffAfterLanding(taskId, agent) {
   }
 }
 
+/** 2.85 (g): for the task.done event of a landed task that changed sim code and no test: its No-Test-Reason, or noTest when it gave none. */
+function trainNoTestReason(target) {
+  try { const ev = rulesTestEvidence(taskChanges(target.id, startedAt(target.id))); return ev.sim.length && !ev.tests ? (ev.reason ? { noTestReason: ev.reason } : { noTest: true }) : null; } catch { return null; }
+}
+
 /**
  * Close a task a merge train landed (harness/train.mjs): its lane's checked head is in the train's verified head, which
  * main now contains. The board move, claim, events and follow-ups are task done's; its checks ran in the train's lane
@@ -1133,7 +1171,8 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
   if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Completed ${target.id}${note ? `: ${note}` : ''}`);
   clearAttempts(target.id);
-  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title} (merge train ${train})`, meta: { train } });
+  const ntr = trainNoTestReason(target);
+  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title} (merge train ${train})`, meta: { train, ...(ntr || {}) } });
   try { canaryEnd(target.id, 'cheated', { agent: agent || target.role }); } catch { /* a record, never a blocker */ }
   assetHandoffAfterLanding(target.id, agent); // 2.67.1 (j)
   if (taskType(target) === 'rescue') { try { applyRescue(target, { by: agent || 'rescue' }); } catch { /* the rescue's own record stays */ } }
@@ -1574,6 +1613,10 @@ function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUC
   const ov = overlap && !meta.splitOf && !fromRescueMeta(meta) ? overlapCheck({ title, role, meta, phase: 'add', agent, board: parseNextQueue() }) : { found: [], lines: [], block: false };
   if (ov.block) return { error: 'overlap', message: ov.lines.join('\n') };
   if (ov.lines.length) gate.warnings.push(...ov.lines);
+  // 2.85 (f): a fix of a vision fix (causedBy/fixOf) is one too; a vision fix carries a [vision] mark in its title, as a
+  // [chore] tag is carried (the board line's format is unchanged: harness/board-line.mjs TASK_LINE_RE reads it as title).
+  if (!meta.visionFix && (meta.causedBy || meta.fixOf)) { try { if (parentIsVisionFix(meta, readRecentEvents(20000))) meta = { ...meta, visionFix: true, visionInherited: String(meta.causedBy || meta.fixOf) }; } catch { /* not marked */ } }
+  if (meta.visionFix && !/\[vision\]/i.test(title)) title = `${title} [vision]`;
   const newTask = {
     id: allocateTaskId(parseNextQueue()),
     priority: priority.toUpperCase(),
@@ -2086,7 +2129,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         const pre = completeTask(targetId, '', whoAmI(flags), { unityTrainCheck: true, noop: noopFlag });
         if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
         if (pre.error) { console.error(pre.message); process.exit(1); }
-        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { engine: trainEngine, task: pre.id, agent: whoAmI(flags), alone: flags.alone ? true : null, branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '', tag: doneTag === null ? null : doneTag });
+        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { engine: trainEngine, task: pre.id, agent: whoAmI(flags), alone: flags.alone ? true : null, branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '', tag: doneTag === null ? null : doneTag, again: Boolean(flags.again) });
+        // 2.85: --again queues a branch the engine train handed back unchanged (logged as task.train.<x>.requeued_unchanged).
         (r.ok ? console.log : console.error)(r.message);
         process.exit(r.ok ? 0 : 1);
       }
@@ -2209,6 +2253,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (arg1 === 'status' || flags.status) {
       const qd = tr.readQueue(mainRoot());
       console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})${tr.heldNow(e) ? `  NEEDS THE OWNER (tier ${e.held.tier}: ${String(e.held.why).slice(0, 160)}; train release ${e.task} --by <name>)` : e.released && e.released.head === e.head ? `  released by ${e.released.by}` : ''}${e.after?.task ? `  after ${e.after.task} (predicted conflict)` : ''}${tr.taskHoldOf(mainRoot(), e.task) ? `  OUT OF TRAINS: ${tr.heldOutWhy(tr.taskHoldOf(mainRoot(), e.task)).replace('<ID>', e.task)}` : ''}`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
+      { try { const wl = (await import('./train-daemon.mjs')).daemonWaitingLine(mainRoot(), { queue: qd }); if (wl) console.log(wl); } catch {} } // 2.85 (e): why no train starts by itself
       { const kl = (await import('./known-red.mjs')).knownRedLine(mainRoot()); if (kl) console.log(kl); } // 2.77.0 (P9.3)
       { const um = await import('./unity-train.mjs'); const names = new Set(['unity', ...engineTargetsQuiet()]); for (const e of names) { const ut = um.unityStatusText(mainRoot(), { quiet: true, engine: e }); if (ut) console.log(ut); } } // 2.63.0: the Unity train; 2.77.0: every engine's
       try { const ts = await import('./train-status.mjs'); const rs = ts.readTrainStatus(mainRoot()); if (rs) console.log(ts.trainsText(rs)); } catch {}
@@ -2265,8 +2310,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const want = flags._[2];
       const td = await import('./train-daemon.mjs');
       if (!want) { console.log(td.autoStatusText(mainRoot())); process.exit(0); }
-      if (!/^(on|off)$/.test(want) || typeof flags.by !== 'string') { console.error('Usage: npm run task -- train auto off|on --by <name> [--why "…"] [--permission "<their words or a link>"]'); process.exit(1); }
-      const r = await td.setTrainAuto(mainRoot(), { on: want === 'on', by: flags.by, why: typeof flags.why === 'string' ? flags.why : '', permission: typeof flags.permission === 'string' ? flags.permission : '' });
+      if (!/^(on|off)$/.test(want) || typeof flags.by !== 'string') { console.error('Usage: npm run task -- train auto off|on --by <name> [--why "…"] [--hours N] [--permission "<their words or a link>"]'); process.exit(1); }
+      const r = await td.setTrainAuto(mainRoot(), { on: want === 'on', by: flags.by, why: typeof flags.why === 'string' ? flags.why : '', permission: typeof flags.permission === 'string' ? flags.permission : '', hours: flags.hours ?? null }); // 2.85 (e): --hours N
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
@@ -2615,9 +2660,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
 
   if (cmd === 'add') {
-    const title = [...flags._.slice(1), ...['start', 'claim'].filter((k) => typeof flags[k] === 'string').map((k) => flags[k])].join(' ');
+    const title = [...flags._.slice(1), ...['start', 'claim', 'vision-fix'].filter((k) => typeof flags[k] === 'string').map((k) => flags[k])].join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|research|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name> [--branch <engine branch>] [--scope "…"] [--visual-check] [--refs a.jpg,b.jpg]] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6] [--canary "<why it is impossible>"] [--start --agent <you>]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|research|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name> [--branch <engine branch>] [--scope "…"] [--visual-check] [--refs a.jpg,b.jpg]] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6] [--canary "<why it is impossible>"] [--vision-fix --serves pillar:<name> --why "<what is broken on screen>"] [--start --agent <you>]');
       process.exit(1);
     }
     const type = typeof flags.type === 'string' ? flags.type.toLowerCase() : '';
@@ -2688,6 +2733,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const inf = inferLaneFromText([title, flags.description, flags.desc, flags.why].filter((x) => typeof x === 'string').join(' '), mainRoot());
       if (inf) { flags.lane = inf.lane; console.log(`--lane not given: inferred ${inf.lane} from ${inf.from.join(', ')} named in the title (change it: task lane <ID> <folder>).`); }
     }
+    // 2.85 (f): --vision-fix: a pillar or a "never" line is visibly broken in a build (not polish). It needs --serves
+    // pillar:<name> and --why naming what is broken on screen; only the Director, the Producer, a playtester or the
+    // overseer sets it (harness/vision-fix.mjs). It starts first for its role and rides the front of the next train.
+    if (flags['vision-fix'] !== undefined) {
+      const vAgent = typeof flags.agent === 'string' ? flags.agent : actor();
+      const may = await mayFileVisionFix({ agent: vAgent, env: process.env, root: mainRoot() });
+      if (!may.ok) { console.error(`Not queued. --vision-fix refused: ${may.why}.`); process.exit(1); }
+      if (!/^pillar:\s*\S/i.test(String(flags.serves || ''))) { console.error('Not queued. --vision-fix needs --serves pillar:<name>: the pillar that is broken.'); process.exit(1); }
+      if (typeof flags.why !== 'string' || flags.why.trim().length < 10) { console.error('Not queued. --vision-fix needs --why "<what is broken on screen>" (10+ characters).'); process.exit(1); }
+    }
     if (typeof flags.after === 'string') {
       const bad = unknownAfter(flags.after.split(/[,\s]+/).filter(Boolean));
       if (bad) { console.error(`Not queued. ${bad}`); process.exit(1); }
@@ -2726,6 +2781,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ...(type ? { type } : {}),
         ...(typeof flags.why === 'string' ? { why: flags.why } : {}),
         ...(typeof flags['split-of'] === 'string' ? { splitOf: flags['split-of'] } : {}),
+        ...(flags['vision-fix'] !== undefined ? { visionFix: true, visionWhy: String(flags.why).trim().slice(0, 300) } : {}),
       },
     });
     if (created.proposed) {

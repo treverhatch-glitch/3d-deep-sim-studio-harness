@@ -4,10 +4,10 @@
  * its own team beside the web game, linked to it only by a parity test. Never started on its own.
  *
  *   npm run engine                                   the options, and the track if there is one
- *   npm run engine -- targets [--json]                every engine target: land command, queue, rig cost (2.77.0)
+ *   npm run engine -- targets [--json]                every engine target: land command, queue, rig cost
  *   npm run engine -- merge <ID> [--continue|--abort] merge the engine's target into the task's own engine worktree;
- *                                                    a conflict is left there to resolve (2.84, engine-tracks.mjs)
- *   npm run engine -- tune <engine> [<key> <value>] --by <you> --why "…"   the lane's own settings (2.77.0, P5.4)
+ *                                                    a conflict is left there to resolve (engine-tracks.mjs)
+ *   npm run engine -- tune <engine> [<key> <value>] --by <you> --why "…"   the lane's own settings
  *   npm run engine -- propose godot|unity|unreal --by <producer> [--why "…"]
  *                                                    a "Needs you" question for the game dev (Phase 1 must be proven)
  *   npm run engine -- start godot --by <person>      what a yes does (the War Room's yes calls it)
@@ -21,14 +21,13 @@
  * UnrealEditor-Cmd on the PATH. A Godot track starts from engine/_godot/: a worked port of the template
  * game with its gate (tests + a smoke run), its parity script and a capture command, all headless.
  *
- * The web version stays the design lab: a mechanic is proven there first (fast), then ported. The
- * engine track gets its own folder (engine/<game>/), department (Engine Bay), tasks tagged
- * `engine:<name>` with that folder as their lane, its own gate (npm run engine:gate, the engine's own
- * headless test run), and its own recordings. The two versions share the Bible, the phase exits and
- * the sim's numbers, and `npm run parity` plays the same seeds in both and compares the results.
+ * The web version stays the design lab: a mechanic is proven there first (fast), then ported. The engine track gets
+ * its own folder (engine/<game>/), department (Engine Bay), tasks tagged `engine:<name>` with that folder as their
+ * lane, its own gate (npm run engine:gate, the engine's own headless test run), and its own recordings. The two
+ * versions share the Bible, the phase exits and the sim's numbers, and `npm run parity` plays the same seeds in both.
  *
- * Why a gate on Phase 1: a port doubles the agents, and every bug still open doubles with it. From
- * Jed's run: keep it in web until playtests show it plays the way the dev imagined.
+ * Why a gate on Phase 1: a port doubles the agents, and every open bug doubles with it. Keep it in web until
+ * playtests show it plays the way the dev imagined.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -37,10 +36,10 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, actor, emitEvent } from './event.mjs';
 import { activeCartridge, activeGame, isTemplateCartridge } from './cartridge.mjs';
 
-/** 2.47.0: the studio's game (an adopted game, or else the cartridge): the engine track belongs to it. */
+/** The studio's game (an adopted game, or else the cartridge): the engine track belongs to it. */
 const activeGameName = () => { try { return activeGame().name || activeCartridge().name; } catch { return activeCartridge().name; } };
 
-// Estimates from run #1's SendIt experiment (Godot: a playable game in 3 hours; Unreal: 7 slow hours).
+// Rig-time estimates (Godot is quick; Unreal is slow).
 export const ENGINES = {
   godot: {
     label: 'Godot 4',
@@ -66,7 +65,7 @@ export const ENGINES = {
     // Parity needs no editor: the same sim source, built with .NET (engine/_unity/tools/SimCli).
     parity: 'dotnet run --project {folder}/tools/SimCli -- parity {seeds}',
     capture: null,
-    // 2.48.0: a Unity track builds a Windows .exe by default, with no browser export (the web version is the
+    // A Unity track builds a Windows .exe by default, with no browser export (the web version is the
     // browser game). npm run engine -- link unity <repo> --build web turns the WebGL export back on.
     webExport: null,
     buildTarget: 'windows',
@@ -108,8 +107,7 @@ export function engineCommand(track, which, { seeds = [], frames = 120 } = {}) {
   const raw = which === 'parity' ? track.parity?.command : track[which];
   if (!raw) return null;
   let cmd = raw.replaceAll('{bin}', /\s/.test(engineBin(track.engine)) ? `"${engineBin(track.engine)}"` : engineBin(track.engine)).replaceAll('{seeds}', seeds.join(',')).replaceAll('{frames}', String(frames));
-  // 2.30h: Godot resolves a relative --write-movie path against the project folder (--path), not the repo, so
-  // "engine/<game>/captures/frame.png" landed in engine/<game>/engine/<game>/captures/ (or failed). Make it absolute.
+  // Godot resolves a relative --write-movie path against the project folder (--path), not the repo: make it absolute.
   if (which === 'capture') cmd = cmd.replace(/--write-movie\s+("?)([^"\s]+)\1/, (_, _q, p) => `--write-movie "${path.isAbsolute(p) ? p : path.join(REPO_ROOT, p)}"`);
   // Frames need a display; a Linux server without one gets a virtual one when xvfb-run is installed.
   if (which === 'capture' && process.platform === 'linux' && !process.env.DISPLAY && spawnSync('which', ['xvfb-run'], { windowsHide: true }).status === 0) cmd = `xvfb-run -a -s "-screen 0 1280x720x24" ${cmd}`;
@@ -158,9 +156,9 @@ export async function proposeEngine(engine, { by = actor(), why = '' } = {}) {
 }
 
 /**
- * 2.46.0: how far the web rules have moved past what the port follows. The web game keeps growing while it is
- * ported; the port follows a pinned commit (npm run engine -- port --from <sha>), and every web commit since
- * that touches the rules (`portSource`, default cartridges/<game>) is work for the port. Returns
+ * How far the web rules have moved past what the port follows: the port follows a pinned commit (npm run engine --
+ * port --from <sha>), and every web commit since that touches the rules (`portSource`, default cartridges/<game>) is
+ * work for the port. Returns
  * { pinned, base, commits: ['sha subject'], files } or { pinned: false }.
  */
 export function portDrift(t = readTrack()) {
@@ -178,7 +176,7 @@ export const portSources = (t) => (Array.isArray(t?.portSource) && t.portSource.
 /** One port task per web commit not yet ported (duplicates are skipped by the queue). */
 export async function queueDrift({ by = actor() } = {}) {
   const t = readTrack();
-  // 2.82: a native-engine studio has no port: a feature is built once, in the engine.
+  // A native-engine studio has no port: a feature is built once, in the engine.
   { const ne = (await import('./native.mjs')).nativeEngine(); if (ne) return { ok: false, message: `This studio is native ${ne}: features are built once, in the engine, so there are no port tasks to queue from web commits (node harness/native.mjs says why it is native).` }; }
   const d = portDrift(t);
   if (!d.pinned) return { ok: false, message: 'The port is not pinned yet: npm run engine -- port --from <sha> (the web commit the port matches now).' };
@@ -194,8 +192,7 @@ export async function queueDrift({ by = actor() } = {}) {
 }
 
 /**
- * 2.47.0 (U-001): an engine port that lives in its own repo, beside the studio (Hatchfield: the web game is
- * adopted into the studio, the Unity port is its own public repo). Records engine/<game>/engine.json with the
+ * An engine port that lives in its own repo, beside the studio. Records engine/<game>/engine.json with the
  * port's folder (relative to the studio, e.g. ../hatchfield-unity-harness), its gate, its parity commands and
  * its build target. Nothing is copied into the port's repo: the porters work in it directly, on its own
  * branches. --build windows makes the Windows build the default and turns the browser export off (the Arcade
@@ -284,11 +281,13 @@ export async function startEngine(engine, { by = actor() } = {}) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
-  // 2.77.0 (u, P5.4/P5.6): the engine lane's own settings, and every engine target (harness/engine-tune.mjs, engine-tracks.mjs).
+  // The engine lane's own settings, and every engine target (harness/engine-tune.mjs, engine-tracks.mjs).
   if (argv[0] === 'tune') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'engine-tune.mjs'), ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
   if (argv[0] === 'targets') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'engine-tracks.mjs'), 'list', ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
-  // 2.84 (m): merge the engine's target into a task's own engine worktree, leaving a conflict there to resolve (engine-tracks.mjs).
+  // Merge the engine's target into a task's own engine worktree, leaving a conflict there to resolve (engine-tracks.mjs).
   if (argv[0] === 'merge') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'engine-tracks.mjs'), 'merge', ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
+  // 2.85: what a batch's Play Mode stage would run, and why (harness/unity-train.mjs play-plan; read-only).
+  if (argv[0] === 'play-plan') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'unity-train.mjs'), 'play-plan', ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
   if (argv[0] === 'check') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'engine-check.mjs'), ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
   if (argv[0] === 'propose') {
     const r = await proposeEngine(argv[1], { by: flag('by') || actor(), why: flag('why') || '' });
@@ -300,7 +299,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console[r.ok ? 'log' : 'error'](r.ok ? `Linked: ${r.track.label} port in ${r.track.folder} (its own repo). Gate: ${r.track.gate}. Parity: ${r.track.parity.command}${r.track.parity.web ? ` against ${r.track.parity.web}` : ''}. Build: ${r.track.buildTarget || 'default'}${r.track.webExport ? '' : ', no browser export'}.` : r.message);
     process.exit(r.ok ? 0 : 1);
   }
-  // 2.82: the engine's rules check (harness/engine-rules.mjs) and native-engine mode (harness/native.mjs).
+  // The engine's rules check (harness/engine-rules.mjs) and native-engine mode (harness/native.mjs).
   if (argv[0] === 'rules' || argv[0] === 'native') {
     const mod = argv[0] === 'rules' ? 'engine-rules.mjs' : 'native.mjs';
     const r = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), mod), ...argv.slice(1)], { stdio: 'inherit', windowsHide: true, cwd: process.cwd() });
@@ -328,7 +327,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(1);
     }
     const game = t.game || activeCartridge().name;
-    // 2.46.0: --source a,b sets the web paths the port follows (an adopted game's rules, e.g. game/hatchfield/src/game).
+    // --source a,b sets the web paths the port follows (an adopted game's rules, e.g. game/hatchfield/src/game).
     if (flag('source')) t.portSource = flag('source').split(',').map((x) => x.trim()).filter(Boolean);
     const srcs = portSources(t);
     const src = srcs[0];

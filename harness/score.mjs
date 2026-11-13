@@ -17,6 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
+import { visionFixFlow } from './vision-fix.mjs';
 
 const DAY = 86400000;
 const HOUR = 3600000;
@@ -259,6 +260,33 @@ export function visionText(v, prev = null) {
   ];
 }
 
+/**
+ * 2.85 (f): briefs with a vision card, from task.start events (meta.visionCard 'pillar' | 'layer' | 'port' | null and
+ * meta.playerFacing, recorded at start): { started, withCard } over the player-facing tasks started in the window (each
+ * task once, its first start). An older start without the field counts as no card.
+ */
+export function visionCardFlow(events) {
+  const seen = new Map();
+  for (const e of events) if (e.type === 'task.start' && e.task && e.meta?.playerFacing && !seen.has(e.task)) seen.set(e.task, e.meta);
+  return { started: seen.size, withCard: [...seen.values()].filter((m) => m.visionCard).length };
+}
+/**
+ * 2.85 (g): game-rules changes that landed with no test, from task.done events (meta.noTest: none given; meta.noTestReason:
+ * a stated reason): { noTest, withReason } or null when neither happened. The number a studio reads before it turns
+ * STUDIO_RULES_TEST=require on.
+ */
+export function rulesTestFlow(events) {
+  const done = events.filter((e) => e.type === 'task.done');
+  const noTest = done.filter((e) => e.meta?.noTest).length; const withReason = done.filter((e) => e.meta?.noTestReason).length;
+  return noTest || withReason ? { noTest, withReason } : null;
+}
+export const rulesTestText = (r) => (r ? [`Game-rules changes landed with no test: ${r.noTest} with no reason given, ${r.withReason} with a stated reason`] : []);
+/** The vision lines (2.85 f): briefs with a card, vision fixes filed and how long they took to land. */
+export const visionCardText = (c, f) => [
+  ...(c ? [`Briefs with a vision card: ${c.withCard} of ${c.started} player-facing tasks started`] : []),
+  ...(f ? [`Vision fixes: ${f.filed} filed, median time from filed to landed ${f.medianH === null ? 'n/a' : f.medianH} h${f.landed < f.filed ? ` (${f.filed - f.landed} not landed yet)` : ''}`] : []),
+];
+
 /** The engine flow as printed lines ([] when there was no land run). prev: an earlier record's engine block. */
 export function engineText(en, prev = null) {
   if (!en) return [];
@@ -310,6 +338,10 @@ export async function roundScore({ events = null, machine = null, now = null, da
   const { card } = await autonomyReport({ now: end, days, events: all, root });
   const rest = countRest(inWin, { from, now: end, machine: machine || readLines(path.join(STUDIO_STATE_DIR, 'machine-history.jsonl')) });
   const supDays = (card.supervisorHours || 0) / 24;
+  // 2.85: the hand-back line names the real hand-backs (handback-kind.mjs: the watchdog's and the crew breaker's rule) and,
+  // apart, the claims let go while their task waited for a train.
+  let hb = null;
+  try { const { handBackTally } = await import('./handback-kind.mjs'); const { LIMIT_STOP } = await import('./budget.mjs'); hb = handBackTally(all, { from, to: end, limit: LIMIT_STOP }); } catch { hb = null; }
   const values = {
     handsFreePct: pct(card.handsFree, card.landed),
     hoursBetweenInterventions: card.hoursBetweenInterventions,
@@ -333,11 +365,11 @@ export async function roundScore({ events = null, machine = null, now = null, da
     hoursBetweenInterventions: `${card.interventions?.unplanned ?? 0} unplanned in ${card.supervisorHours} supervisor hour(s)`,
     overseerStepsPerLanded: `${card.orchestrator?.interventions || 0} step(s) by an outside agent`,
     costPerLandedUsd: `${Math.round((card.tokensPerLanded || 0) / 1000)}k tokens per landed task`,
-    harnessHandBackPct: `${card.handBacks?.count ?? 0} of ${card.handBacks?.attempts ?? 0} attempt(s) were handed back in all`,
+    harnessHandBackPct: `${card.handBacks?.count ?? 0} of ${card.handBacks?.attempts ?? 0} attempt(s) were handed back in all${hb ? `; ${hb.real} real hand-back(s) (a session gave the work back or failed); ${hb.released} released while waiting for a train` : ''}`,
     landedPerDay: `${rest.doneCount} done in ${r1(supDays)} supervisor day(s)`,
     escapedPct: `${card.escaped} of ${card.landed}`,
   };
-  return { window: { from: new Date(from).toISOString(), to: new Date(end).toISOString(), days, events: inWin.length }, values, notes, measures: MEASURES.map(([id, label, unit, better, target]) => ({ id, label, unit, better, target })), engine: engineFlow(inWin), planning: await planningFlow(inWin), vision: visionFlow(all.filter((e) => at(e) <= end), { from }), progress: engineProgress(root, { timeoutMs: progressTimeoutMs }) };
+  return { window: { from: new Date(from).toISOString(), to: new Date(end).toISOString(), days, events: inWin.length }, values, notes, measures: MEASURES.map(([id, label, unit, better, target]) => ({ id, label, unit, better, target })), engine: engineFlow(inWin), rulesTests: rulesTestFlow(inWin), planning: await planningFlow(inWin), vision: visionFlow(all.filter((e) => at(e) <= end), { from }), visionCards: visionCardFlow(inWin), visionFixes: visionFixFlow(all.filter((e) => at(e) <= end), { from }), progress: engineProgress(root, { timeoutMs: progressTimeoutMs }) };
 }
 
 /** Does this value meet its target? null when there is no value. */
@@ -361,6 +393,8 @@ export function scoreText(score, prev = null, prevEngine = null, prevVision = nu
   L.push(...engineText(score.engine, prevEngine));
   L.push(...(score.progress || []).map((p) => (p.line ? `Progress (${p.engine}): ${p.line}` : `Progress (${p.engine}): not available (${p.why})`)));
   L.push(...visionText(score.vision, prevVision));
+  L.push(...visionCardText(score.visionCards, score.visionFixes));
+  L.push(...rulesTestText(score.rulesTests));
   return L.join('\n');
 }
 

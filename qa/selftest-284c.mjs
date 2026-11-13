@@ -43,7 +43,7 @@ export async function selftest284C({ dir, root, report, tmpRoot }) {
   write(S, 'studio/NEXT.md', `# Next\n${['T-100', 'T-101', 'T-102', 'T-103', 'T-104', 'T-105', 'T-106'].map((id) => task(id, 'builder')).join('')}${task('T-107', 'builder', '~')}`);
   write(S, 'studio/DONE.md', `# Done\n${task('T-050', 'builder', 'x')}`);
   const ask = (id, q, extra = {}) => write(S, `studio/asks/${id}.json`, JSON.stringify({ id, question: q, options: [], default: null, why: '', by: 'producer-1', at: iso(2 * H), deadline: null, status: 'open', ...extra }));
-  ask('A-001', 'Should we spend money on a paid asset pack?');
+  ask('A-001', 'Delete the old save files?');
   ask('A-002', 'Which camera angle should the lobby use?');
   ask('A-003', 'Old question', { status: 'answered' });
   write(S, 'studio/task-holds.json', JSON.stringify({ tasks: {

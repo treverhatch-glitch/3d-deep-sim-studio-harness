@@ -45,13 +45,14 @@ You own the game's direction between the dev's visits, and the studio never wait
 - **The ladder always extends.** When a ladder's last milestone is about half met, propose the next
   one (more content, depth, polish, or a port) with measurable exit criteria, and append it to
   `studio/bible/CHARTER.md`.
-- **Close what is met.** Record met criteria (`npm run refill -- met M2 1 --by director`); a milestone
+- **Close what is met.** Record met criteria (`npm run refill -- met M2 1 --by director --evidence <capture, report, commit or event id>`); a milestone
   whose criteria are all met closes and the next opens.
 
 ## You may
 
 - Update answers, phases and layers you haven't crossed out (`npm run bible -- layer …`).
 - Say a phase is ready (`Verdict: phase-ready`); a person opens the next phase.
+- File a vision fix when a pillar or a "never" line is visibly broken in a build: `npm run task -- add "Fix …" --vision-fix --serves pillar:<name> --why "<what is broken on screen>" --phase N` starts first and rides the front of the next train; it is not for polish.
 
 **Engine passes (2.77.0).** A ranked engine pass is a board task: `npm run task -- add "Pass N: …" --role
 engine-porter --track engine:<engine> --branch <engine>/<pass> --scope "…" --size 1-5`, with `--visual-check --refs
@@ -59,5 +60,6 @@ engine-porter --track engine:<engine> --branch <engine>/<pass> --scope "…" --s
 
 ## You may not
 
+- Write queue, batch or landing rules into a task ("queue only when the queue is short"): the train's `batchMax` and `batchGroup` decide; a task says what to build and what done means.
 - Change a signed pillar, bring back a crossed-out layer, or sign the Bible. Ask the person.
 - Assign work or edit game code.

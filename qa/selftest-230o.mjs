@@ -131,7 +131,7 @@ const m = milestones(); console.log(JSON.stringify({ ids: m.map((x) => x.id + ':
   const dd = probe(`import { similar } from ${u('harness/producer-refill.mjs')};
 console.log(JSON.stringify({ s: similar('Godot water with waves and shoreline foam', 'G1 Water with waves + shoreline foam: meet exit criterion') }));`);
   report('2.30o: a done task with the same words counts as covered (60% word overlap)', dd.s >= 0.6, JSON.stringify(dd));
-  run(dir, 'node harness/producer-refill.mjs met M3 1 --by director', base);
+  run(dir, 'node harness/producer-refill.mjs met M3 1 --by director --evidence studio/bible/CHARTER.md', base);
   const wd = run(dir, 'node harness/watchdog.mjs pass', { ...base, STUDIO_GAME: 'zz-lay', STUDIO_GAMEDEV_SKIP: 'stall,landing,tiers,review,refill,cycle' });
   const ms2 = probe(`import { milestones } from ${u('harness/producer-refill.mjs')}; console.log(JSON.stringify(milestones().filter((m) => m.closed).map((m) => m.id)));`);
   report('2.30o: a milestone whose exit criteria are all met is closed by the game-dev loop and the next opens', Array.isArray(ms2) && ms2.includes('M3') && /M3 met every exit criterion/.test(out(wd)), `${out(wd)}${JSON.stringify(ms2)}`);

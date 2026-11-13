@@ -6,7 +6,7 @@
  *       no STUDIO_LOCK_OWNER; logged (decisions log, an event with the actor); a Producer can't answer a protected one,
  *       a builder none.
  *   c2  outside signer: STUDIO_OUTSIDE_SIGNERS (the main checkout's .env) lets grokbot answer and approve as itself.
- *   c3  the owner-only list (money, deleting data, keys, publishing, beta off) refuses the orchestrator.
+ *   c3  the owner-only list (deleting data, keys, publishing, beta off) refuses the orchestrator.
  *   c4  a release survives a catch-up merge of main that leaves the released files alone; a lane commit to one voids it;
  *       a builder can't release.
  *   c5  goldens: a merge of main is nobody's authorship, so the orchestrator who only refreshed the lane second-signs.
@@ -128,10 +128,10 @@ export async function selftest279C({ dir, report, tmpRoot, root }) {
   {
     const { S, env } = studio('c3');
     const opus = { STUDIO_LOCK_OWNER: 'opus-1' };
-    askIn(S, env, 'Buy the 40 dollar sound pack for the menus?'); // A-001, real money
+    askIn(S, env, 'Rotate the API key of the build bot?'); // A-001, keys
     askIn(S, env, 'Delete the old save files under saves/?'); // A-002, deleting data
-    const money = answer(S, env, 'A-001', 'opus-1', opus);
-    const moneyAsOwner = answer(S, env, 'A-001', 'pat', opus); // the orchestrator's shell typing the owner's name
+    const keys = answer(S, env, 'A-001', 'opus-1', opus);
+    const keysAsOwner = answer(S, env, 'A-001', 'pat', opus); // the orchestrator's shell typing the owner's name
     const del = answer(S, env, 'A-002', 'opus-1', { CLAUDECODE: '1' });
     const keyFile = path.join(tmpRoot, `279c-keygen-${process.pid}.pem`);
     const keygen = node(S, ['harness/approve.mjs', 'keygen', '--by', 'pat'], { ...env, ...opus, STUDIO_OWNER_KEY: keyFile });
@@ -140,12 +140,12 @@ export async function selftest279C({ dir, report, tmpRoot, root }) {
     const stillOn = JSON.parse(fs.readFileSync(path.join(S, 'studio', 'beta.json'), 'utf8')).on === true;
     const person = answer(S, env, 'A-001', 'pat');
     const personOff = node(S, ['harness/beta-mode.mjs', 'off', '--by', 'pat', '--no-commit'], env);
-    await guard('2.79 (c, c3): what stays the owner\'s own refuses the orchestrator in beta mode, each saying so: an ask about real money (also when its shell types --by <the owner>) or deleting data, `approve -- keygen` (no key written), a delegated "publish", and `beta -- off`; the same orchestrator still releases lanes; the owner\'s own terminal answers the money ask and turns beta mode off (fails on 2.78.2: the orchestrator answered both asks, made the key and turned beta mode off)', () => [
-      money.status === 1 && /stays the owner's own/.test(out(money)) && moneyAsOwner.status === 1 && del.status === 1 && /deleting data/.test(out(del))
+    await guard('2.79 (c, c3): what stays the owner\'s own refuses the orchestrator in beta mode, each saying so: an ask about keys (also when its shell types --by <the owner>) or deleting data, `approve -- keygen` (no key written), a delegated "publish", and `beta -- off`; the same orchestrator still releases lanes; the owner\'s own terminal answers the keys ask and turns beta mode off (fails on 2.78.2: the orchestrator answered both asks, made the key and turned beta mode off)', () => [
+      keys.status === 1 && /stays the owner's own/.test(out(keys)) && keysAsOwner.status === 1 && del.status === 1 && /deleting data/.test(out(del))
         && keygen.status === 1 && /keys and credentials/.test(out(keygen)) && !fs.existsSync(keyFile)
         && dg.j?.publish === false && dg.j?.release === true && off.status === 1 && /turning beta mode off/.test(out(off)) && stillOn
         && person.status === 0 && askDoc(S, 'A-001')?.answeredBy === 'pat' && !askDoc(S, 'A-001')?.recordedBy && personOff.status === 0,
-      JSON.stringify({ money: out(money).slice(-200), moneyAsOwner: out(moneyAsOwner).slice(-120), del: out(del).slice(-160), keygen: out(keygen).slice(-200), dg: dg.j || out(dg).slice(-300), off: out(off).slice(-200), stillOn, person: out(person).slice(-120), personOff: out(personOff).slice(-160) })]);
+      JSON.stringify({ keys: out(keys).slice(-200), keysAsOwner: out(keysAsOwner).slice(-120), del: out(del).slice(-160), keygen: out(keygen).slice(-200), dg: dg.j || out(dg).slice(-300), off: out(off).slice(-200), stillOn, person: out(person).slice(-120), personOff: out(personOff).slice(-160) })]);
   }
 
   // ---- c4 + c5: a release survives a catch-up merge of main; goldens: a merge of main is nobody's authorship ----

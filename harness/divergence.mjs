@@ -1,19 +1,19 @@
 /**
- * harness/divergence.mjs — 2.72.0 (a): where a red golden first went wrong.
+ * harness/divergence.mjs — where a red golden first went wrong.
  *
- * A red golden said only "hash differs": the agent then bisected by hand (or re-recorded). On a red (never in a routine
- * run: per-tick hashing of the whole state roughly doubles a run), the harness now re-runs the golden twice in lockstep,
- * on this tree and on a reference tree, with a cheap per-subsystem digest per tick (FNV-1a of each top-level state key's
- * canonical JSON), stops at the first tick where a digest differs and names the first field that differs there:
+ * On a red golden (never in a routine run: per-tick hashing of the whole state roughly doubles a run) the harness re-runs
+ * the golden twice in lockstep, on this tree and on a reference tree, with a cheap per-subsystem digest per tick (FNV-1a of
+ * each top-level state key's canonical JSON), stops at the first tick where a digest differs and names the first field that
+ * differs there:
  *
  *   [golden] first divergence: tick 23, resources.credits 101 -> 102 (subsystem resources; example-1337.json vs 3f2a1b4c, ...)
  *   [golden] divergence-json {"file":"example-1337.json","tick":23,"subsystem":"resources","field":"resources.credits",...}
  *
  * The reference is the commit that last changed the golden file (it recorded the hash; STUDIO_DIVERGENCE_REF names
- * another). Its cartridge folder is read with `git show` into a temp folder and loaded with loadCartridge({ dir }). The
- * reference (2.76.0, B-94: with every file it imports from outside its folder, as it was in that commit, and the
- * checkout's node_modules linked: materializeClosure) is then run to its end: when its sha256 is not the golden's, the
- * line says the reference does not reproduce the golden (the divergence is against that commit, not the recording). It LOCATES a bug; the golden check
+ * another). Its cartridge folder is read with `git show` into a temp folder and loaded with loadCartridge({ dir }), with
+ * every file it imports from outside its folder as it was in that commit and the checkout's node_modules linked
+ * (materializeClosure). It is run to its end: when its sha256 is not the golden's, the line says the reference does not
+ * reproduce the golden (the divergence is against that commit, not the recording). It LOCATES a bug; the golden check
  * still decides red or green. STUDIO_GOLDEN_DIVERGENCE=off turns it off.
  *
  * Generic contract for a studio game (not a cartridge): its studio.gates.json may declare
@@ -150,7 +150,7 @@ export function materialize(root, ref, rel, dest) {
   return files.length;
 }
 
-// ---- 2.76.0 (j, B-94): a reference cartridge that imports files outside its folder ----
+// ---- a reference cartridge that imports files outside its folder ----
 const JS_EXT = /\.(m?[jt]s|c[jt]s)$/i;
 /** Relative specifiers a module's text names: static and dynamic imports, re-exports, require(), new URL(…, import.meta.url). */
 export function relativeSpecifiers(text) {
@@ -258,9 +258,9 @@ function emit(r, extra = {}) {
 }
 
 /**
- * 2.79 (d): the reference is built under <repo>/.studio/tmp, not the system temp folder: a build there (Vite, a game's own
- * scripts) finds no node_modules above it and failed on the crew's Windows PC ("Cannot find module C:\\Users\\…\\Temp…").
- * Under the repo, node's resolution walks up to the repo's own node_modules. Removed by the caller when done.
+ * The reference is built under <repo>/.studio/tmp, not the system temp folder: a build there (Vite, a game's own scripts)
+ * finds no node_modules above it and fails on Windows ("Cannot find module C:\\Users\\…\\Temp…"). Under the repo, node's
+ * resolution walks up to the repo's own node_modules. Removed by the caller when done.
  */
 export function refTemp(root, prefix) {
   const base = path.join(root, '.studio', 'tmp');
@@ -269,7 +269,7 @@ export function refTemp(root, prefix) {
 }
 
 /**
- * 2.79.1: the temp folder a build the divergence starts (a game's Vite/esbuild step, its scripts) uses: under the same
+ * The temp folder a build the divergence starts (a game's Vite/esbuild step, its scripts) uses: under the same
  * <repo>/.studio/tmp, never the OS temp folder (TMP/TEMP/TMPDIR are what os.tmpdir() reads), so those builds find the
  * repo's node_modules too. The caller removes `tmp` when done.
  */
@@ -295,7 +295,7 @@ export async function goldenDivergence({ root, file, rel, spec, cart, env = proc
   try {
     const crel = `cartridges/${cart.name}`;
     if (objType(root, ref.ref, crel) !== 'tree') return { file, ref: ref.ref, error: `the reference ${ref.ref.slice(0, 8)} has no ${crel}` };
-    // 2.76.0 (j, B-94): with what it imports from outside its folder (a game's own cartridge loader and its sim).
+    // With what it imports from outside its folder (a game's own cartridge loader and its sim).
     const m = materializeClosure(root, ref.ref, crel, tmp);
     const { loadCartridge, groupActions } = await import('./cartridge.mjs');
     let refCart;

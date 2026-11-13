@@ -33,6 +33,7 @@ import { updateHolds } from './task-hold.mjs';
 import { LIMIT_STOP } from './budget.mjs';
 import { claim as claimLock, status as lockStatus } from './lock.mjs';
 import { selfIdentity, liveAs, recordAlive } from './proc-identity.mjs';
+import { harnessCaused, handBackKind } from './handback-kind.mjs';
 
 // 2.79 (b): a record that carries the writer's start identity is judged by it (proc-identity.mjs liveAs): a reused pid is not alive.
 const alive = (pid, identity = null) => liveAs(Number(pid), identity);
@@ -66,6 +67,8 @@ export function doneRunning(task, { dir, now = Date.now(), env = process.env } =
 
 // Events about an agent that say it has gone, not that it is working.
 const GONE_TYPES = new Set(['agent.session.end', 'lock.dead_released', 'agent.pid_reused']);
+// 2.85: events the launcher writes in an agent's name right after its session ended (bookkeeping, not work).
+const AFTER_END = new Set(['job.done', 'lane.kept', 'lane.removed', 'lane.merged', 'lane.released']);
 // What ends a claim on a task.
 const ENDS = new Set(['task.paused', 'task.done', 'task.forced', 'task.reopened']);
 const claimWindowMs = (env) => {
@@ -159,7 +162,12 @@ export function claimActive(task, { root = null, now = Date.now(), env = process
   // 2.76.0 (B-90): only the owner's own work counts: an event on this task or on none, never one the harness wrote in
   // its name (the train's checks of another of its lanes: task.unwired on T-105 kept T-144, T-146, T-152 and T-153 of an
   // old orchestrator name "busy" for hours; meta.onBehalf, set by the train) and never one about another task.
-  const mine = evs.filter((e) => e.agent === c.owner && ownWork(e, task) && !(e.type === 'task.start' && e.task === task && e.ts === c.at) && !(e.type === 'task.overlap' && e.task === task));
+  const mine0 = evs.filter((e) => e.agent === c.owner && ownWork(e, task) && !(e.type === 'task.start' && e.task === task && e.ts === c.at) && !(e.type === 'task.overlap' && e.task === task));
+  // 2.85: what the launcher writes in a session's name once it has ended (its job.done, "kept its lane copy") is not the
+  // session working: a minute after an ended session queued its task for a train, lock.kept said "its owner is still
+  // working on it" and kept the claim for another hour.
+  let gone = false;
+  const mine = mine0.filter((e) => { if (GONE_TYPES.has(e.type)) gone = true; else if (e.type === 'agent.session.start') gone = false; else if (gone && AFTER_END.has(e.type)) return false; return true; });
   const last = mine[mine.length - 1];
   const min = (t) => Math.max(0, Math.round((now - t) / 60000));
   if (last && !GONE_TYPES.has(last.type)) {
@@ -315,18 +323,9 @@ export async function taskBusy(task, { now = Date.now(), env = process.env, even
   return { busy: false };
 }
 
-/** A hand-back the harness caused, not the work: never counts toward parking. */
-export const HARNESS_CAUSE = /claim ran out|couldn't be added to \S+ in the main checkout|land lock|kept moving while|index\.lock|merge worktree|done is running|queued to land/i;
-export const harnessCaused = (e) => e?.meta?.cause === 'harness' || HARNESS_CAUSE.test(String(e?.msg || ''));
-/**
- * 2.58.3 (N1): a hand-back because a person (or the Producer) stopped or paused the session: the note says
- * "a stop, not a failure" (STOP_NOTE). Not the task looping, and not the harness's fault (the health share stays clean).
- */
-export const STOP_NOTE = 'a stop, not a failure';
-export const PERSON_CAUSE = /\ba stop, not a failure\b/i;
-// PU-58 (2.78.0): the honest exit (task impossible) is a report, not a failure: it counts nowhere as a hand-back.
-export const IMPOSSIBLE_NOTE = /(?:^|Handed back [^:]+:\s*)Impossible as written/i;
-export const impossibleExit = (e) => e?.meta?.cause === 'impossible' || IMPOSSIBLE_NOTE.test(String(e?.msg || ''));
+// 2.85: the hand-back causes live in harness/handback-kind.mjs (no imports, so the crew watchdog and the scorecard read
+// the same answer); re-exported here for the modules that import them from busy.mjs.
+export { HARNESS_CAUSE, harnessCaused, STOP_NOTE, PERSON_CAUSE, IMPOSSIBLE_NOTE, impossibleExit, personCaused } from './handback-kind.mjs';
 /**
  * 2.83: a refresh hand-off (a session that reached its turn or time cap and hands its task to a fresh session by design):
  * not a failure of the model or route that ran it. agent.mjs writes "A fresh session continues from this hand-back".
@@ -335,8 +334,6 @@ export const REFRESH_NOTE = /\bA fresh session continues from this hand-back\b/i
 export const refreshCaused = (e) => e?.meta?.cause === 'refresh' || REFRESH_NOTE.test(String(e?.msg || ''));
 /** 2.83: a session end that says it was not a failure: a refresh, a person's stop or pause, or a usage-limit stop. */
 export const endNotAFailure = (e) => Boolean(e?.meta?.refreshed || e?.meta?.stoppedBy || e?.meta?.usageLimit) || /refreshed \(session cap\)|^(paused|stopped) by |usage limit:/i.test(String(e?.meta?.reason || ''));
-export const personCaused = (e) => e?.meta?.cause === 'person' || PERSON_CAUSE.test(String(e?.msg || '')) || impossibleExit(e);
-
 /**
  * 2.58.3 (N3): the one rule for counting a task's loop. The hand-backs (task.paused) that count, since the task was
  * last done, unblocked or unparked, and not harness-caused, person-caused or a usage-limit stop. `events` are
@@ -345,7 +342,9 @@ export const personCaused = (e) => e?.meta?.cause === 'person' || PERSON_CAUSE.t
 export function loopHandBacks(task, events, { since = 0 } = {}) {
   const mine = events.filter((e) => e.task === task && (Date.parse(e.ts) || 0) >= since);
   const reset = mine.filter((e) => e.type === 'task.done' || e.type === 'task.unblocked' || (e.type === 'task.hold' && /unparked/.test(e.msg || ''))).pop();
-  return mine.filter((e) => e.type === 'task.paused' && (!reset || e.ts > reset.ts) && !harnessCaused(e) && !personCaused(e) && !LIMIT_STOP.test(e.msg || ''));
+  // 2.85: one rule with the crew breaker and the scorecard (handback-kind.mjs): only a real hand-back counts, not one the
+  // harness caused, a person's stop, a usage-limit stop, a "ready for the train" note or the same done refusal again.
+  return mine.filter((e) => e.type === 'task.paused' && (!reset || e.ts > reset.ts) && handBackKind(e, events, { limit: LIMIT_STOP }) === 'real');
 }
 
 /**
@@ -353,13 +352,14 @@ export function loopHandBacks(task, events, { since = 0 } = {}) {
  * so two passes at the same moment (the supervisor's, the watcher's) park it once, and only the pass that
  * parked it emits the task.hold event. Returns true when this call parked it.
  */
-export function parkOnce(task, parked, { by = 'watchdog', msg = '' } = {}) {
+export function parkOnce(task, parked, { by = 'watchdog', msg = '', to = null, status = null, meta = null } = {}) {
   const did = updateHolds((all) => {
     if (all[task]?.parked) return false;
     all[task] = { ...(all[task] || {}), parked };
     return true;
   });
-  if (did && msg) emitEvent({ type: 'task.hold', agent: by, task, msg });
+  // 2.85: a park addressed to someone (the same done refusal twice: the overseer and the Producer) says so on its event.
+  if (did && msg) emitEvent({ type: 'task.hold', agent: by, task, msg, ...(to ? { to } : {}), ...(status ? { status } : {}), ...(meta ? { meta } : {}) });
   return did;
 }
 

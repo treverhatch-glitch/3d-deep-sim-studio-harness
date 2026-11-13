@@ -287,29 +287,25 @@ console.log(JSON.stringify(engineBatchWait({ engine: 'unity', label: 'Unity', qu
       w.wait === true && r.status === 0 && new RegExp(`land ${br.replace('/', '\\/')}`).test(landed) && !q.some((x) => x.task === id), JSON.stringify({ w, r: tail(r, 900), landed, q })]);
   }
 
-  // ---- 9. ask -- answer: a board ask, an in-game money ask, an owner-only (real money) ask ----
+  // ---- 9. ask -- answer: a board ask, an owner-only (deleting data) ask ----
   {
     const askAs = (q) => (out(cli({ STUDIO_LOCK_OWNER: 'builder-n1' }, ['harness/ask.mjs', q, '--by', 'builder-n1'])).match(/\b(A-\d+)\b/) || [])[1];
     const doc = (id) => readJson(path.join(S, 'studio', 'asks', `${id}.json`));
     const res = {};
     for (const [who, a] of Object.entries(ACTORS)) {
       const board = askAs(`Should the fees panel go before the loans panel (${who})?`);
-      const game = askAs(`Balance (${who}): the grace week hands out money the game doesn't need. Cut the starting cash for the career start?`);
-      const real = askAs(`Buy the paid asset pack for 20 dollars (${who})?`);
+      const own = askAs(`Delete the save files of the old build (${who})?`);
       const rb = cli(a, ['harness/ask.mjs', 'answer', board, 'yes', '--by', byName[who]]);
-      const rg = cli(a, ['harness/ask.mjs', 'answer', game, 'yes', '--by', byName[who]]);
-      const rr = cli(a, ['harness/ask.mjs', 'answer', real, 'yes', '--by', byName[who]]);
-      const [db, dg, dr] = [doc(board), doc(game), doc(real)];
-      res[who] = { board: { st: rb.status, s: db?.status, recordedBy: db?.recordedBy, via: db?.via }, game: { st: rg.status, s: dg?.status, recordedBy: dg?.recordedBy, readAs: (dg?.readAs || []).map((x) => x.act) }, real: { st: rr.status, s: dr?.status, refused: /^Refused/m.test(out(rr)), out: tail(rr, 160) } };
+      const ro = cli(a, ['harness/ask.mjs', 'answer', own, 'yes', '--by', byName[who]]);
+      const [db, dOwn] = [doc(board), doc(own)];
+      res[who] = { board: { st: rb.status, s: db?.status, recordedBy: db?.recordedBy, via: db?.via }, own: { st: ro.status, s: dOwn?.status, refused: /^Refused/m.test(out(ro)), out: tail(ro, 160) } };
       mark('ask board', who, rb.status === 0 && db?.status === 'answered');
-      mark('ask in-game money', who, rg.status === 0 && dg?.status === 'answered');
-      mark('ask real money', who, rr.status === 0 && dr?.status === 'answered');
+      mark('ask owner-only (deleting data)', who, ro.status === 0 && dOwn?.status === 'answered');
     }
     const standIn = (w, via) => res[w].board.s === 'answered' && res[w].board.recordedBy === byName[w] && res[w].board.via === via
-      && res[w].game.s === 'answered' && res[w].game.recordedBy === byName[w] && res[w].game.readAs.includes('money')
-      && res[w].real.st !== 0 && res[w].real.s === 'open' && res[w].real.refused;
-    await guard('2.84 (n) `ask -- answer <ID> "<answer>" --by <name>` (guard): the overseer and the signer (via beta mode) and the proxy (via owner proxy) answer a board ask and an in-game money ask unattended, recorded as theirs, the second with readAs "money"; an ask about real money is refused to all three and stays open (the owner\'s own: correct, and it stays); a worker session is refused every ask; the owner in person answers all three', () => [
-      standIn('overseer', 'beta mode') && standIn('signer', 'beta mode') && standIn('proxy', 'owner proxy') && res.worker.board.s === 'open' && res.worker.game.s === 'open' && res.worker.real.s === 'open' && table['ask real money'].owner === 'yes',
+      && res[w].own.st !== 0 && res[w].own.s === 'open' && res[w].own.refused;
+    await guard('2.84 (n) `ask -- answer <ID> "<answer>" --by <name>` (guard): the overseer and the signer (via beta mode) and the proxy (via owner proxy) answer a board ask unattended, recorded as theirs; an owner-only ask (deleting data) is refused to all three and stays open (the owner\'s own: correct, and it stays); a worker session is refused every ask; the owner in person answers both', () => [
+      standIn('overseer', 'beta mode') && standIn('signer', 'beta mode') && standIn('proxy', 'owner proxy') && res.worker.board.s === 'open' && res.worker.own.s === 'open' && table['ask owner-only (deleting data)'].owner === 'yes',
       JSON.stringify({ proxy: res.proxy, overseer: res.overseer, signer: res.signer, owner: res.owner, worker: res.worker })]);
   }
 

@@ -356,7 +356,8 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   const tuneEnv = { STUDIO_ENGINE: engine, STUDIO_ENGINE_TUNE: JSON.stringify(tune || {}), STUDIO_ENGINE_TUNE_FILE: tunePath(REPO_ROOT, engine), STUDIO_ENGINE_FLAGS: flags.join(' '), STUDIO_LAND_RESULT: stageFile };
   // Edit Mode assemblies still to run after the .NET tests (harness/unity.mjs editModePlan; "SKIP": none); none on a
   // full run (STUDIO_LAND_FULL=1). The owner may set the arguments (engines.unity.editModeArgs, e.g. `-testCategory "!Slow"`).
-  if (engine === 'unity' && env.STUDIO_LAND_FULL === '1') { /* no plan on a full run */ }
+  // 2.85 (B-137): nor on the compile check, which runs no test.
+  if (engine === 'unity' && (env.STUDIO_LAND_FULL === '1' || only === 'compile')) { /* no plan on a full run or a compile check */ }
   else if (engine === 'unity' && typeof cfg.editModeArgs === 'string' && cfg.editModeArgs.trim()) tuneEnv.STUDIO_UNITY_EDITMODE_ARGS = cfg.editModeArgs.trim();
   else if (engine === 'unity' && !/^(off|0|false|no)$/i.test(String(env.STUDIO_UNITY_EDITMODE_PLAN || ''))) {
     try {
@@ -424,8 +425,8 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
     try { fs.mkdirSync(path.join(REPO_ROOT, '.studio', 'gates'), { recursive: true }); fs.writeFileSync(path.join(REPO_ROOT, '.studio', 'gates', et.files.gateLast), JSON.stringify({ ...full, engine }, null, 2)); } catch {}
     // A run that ran to the end keeps its length for the Line Producer's schedule.
     if (!only && ['pass', 'red', 'conflict'].includes(full.status)) { try { recordDuration(engine, { kind: 'land', ms: full.ms, status: full.status }); } catch {} }
-    if (!only) try { emitEvent({ type: 'engine.land', agent: env.STUDIO_LOCK_OWNER || 'gates', task: task && !String(task).includes(',') ? task : undefined, track: `engine:${engine}`, status: full.ok ? 'ok' : full.status === 'refused' || full.status === 'not-run' || full.status === 'killed' ? 'warn' : 'blocked', msg: `${L} land${task ? ` for ${task}` : ''}: ${full.status} (${full.why})`.slice(0, 400), meta: { engine, status: full.status, code: full.code ?? null, ms: full.ms, ...(full.infra ? { infra: full.infra.kind } : {}), ...(full.stages ? { stages: full.stages } : {}), ...(many ? { branches: many } : {}), ...(String(task || '').includes(',') ? { tasks: String(task).split(',') } : {}), ...(env.STUDIO_PLAY_MODE ? { playMode: env.STUDIO_PLAY_MODE, playFilter: env.STUDIO_PLAY_FILTER || '' } : {}) } }); } catch {}
-    // playMode / playFilter: what the train told the Play Mode stage. job.done (harness/jobs.mjs) goes beside engine.land.
+    if (!only) try { emitEvent({ type: 'engine.land', agent: env.STUDIO_LOCK_OWNER || 'gates', task: task && !String(task).includes(',') ? task : undefined, track: `engine:${engine}`, status: full.ok ? 'ok' : full.status === 'refused' || full.status === 'not-run' || full.status === 'killed' ? 'warn' : 'blocked', msg: `${L} land${task ? ` for ${task}` : ''}: ${full.status} (${full.why})`.slice(0, 400), meta: { engine, status: full.status, code: full.code ?? null, ms: full.ms, ...(full.infra ? { infra: full.infra.kind } : {}), ...(full.stages ? { stages: full.stages } : {}), ...(many ? { branches: many } : {}), ...(String(task || '').includes(',') ? { tasks: String(task).split(',') } : {}), ...(env.STUDIO_PLAY_MODE ? { playMode: env.STUDIO_PLAY_MODE, playFilter: env.STUDIO_PLAY_FILTER || '' } : {}), ...(env.STUDIO_LAND_FULL === '1' ? { full: true } : {}) } }); } catch {}
+    // playMode / playFilter: what the train told the Play Mode stage. 2.85 (B-137): full, the daily full land run (STUDIO_LAND_FULL=1). job.done (harness/jobs.mjs) goes beside engine.land.
     if (full.status !== 'skipped') jobDone({ kind: `${engine}-gate`, id: task || br || null, code: full.code ?? null, result: full.status, ms: full.ms, tail: full.tail || full.why || '', log: full.log || null, task: task && !String(task).includes(',') ? task : null, agent: env.STUDIO_LOCK_OWNER || 'gates' });
     try { logEngine(`${engine} land${task ? ` ${task}` : ''}: ${full.status === 'not-run' ? `not run${full.infra ? ` (${full.infra.kind})` : ''}` : full.status}${full.code !== null && full.code !== undefined ? ` (exit ${full.code})` : ''}`, env.STUDIO_LOCK_OWNER || undefined); } catch {}
     return full;
@@ -446,6 +447,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const r = setTaskBranch(argv[1], argv[2]);
     (r.ok ? console.log : console.error)(`[unity-gate] ${r.why}`);
     process.exit(r.ok ? 0 : 2);
+  }
+  // 2.85: with no --task and no --branch there is nothing to land. An agent's probe (`node harness/unity-gate.mjs
+  // --engine unity`, as the docs showed the gate) ran a land with no branch and logged an engine.land error and a failed
+  // job; now it prints how to call it and runs nothing (no event). The train passes its branches itself.
+  if (argv.includes('--help') || argv.includes('-h') || (!flag('task') && !flag('branch'))) {
+    const help = argv.includes('--help') || argv.includes('-h');
+    (help ? console.log : console.error)('Usage: node harness/unity-gate.mjs --task <ID> [--engine <x>] [--json] | --branch <name> [--engine <x>] | branch <ID> <branch>. It runs a land of that branch (the engine train runs these for queued work: npm run task -- done <ID> --train queues it). Nothing was run.');
+    process.exit(help ? 0 : 2);
   }
   const res = await runUnityGate({ engine: flag('engine') || 'unity', task: flag('task'), branch: flag('branch'), log: (m) => console.error(m), onlyUnityTask: argv.includes('--if-unity-task') });
   if (json) console.log(JSON.stringify(res));

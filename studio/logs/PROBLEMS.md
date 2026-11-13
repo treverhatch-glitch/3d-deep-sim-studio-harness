@@ -216,9 +216,9 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 - **Evidence:** Director tasks ran on the builders' route instead of the Director's model; a session ended by a refresh or a usage limit was counted as the route failing.
 - **Fix:** `routeRoles` in studio/models.json (default builder, engine-porter); harness/busy.mjs `endNotAFailure`. qa/selftest-283e.mjs.
 
-### P-310 — the owner was asked in person about the game's own money and about removing code · fixed in 2.83.0
-- **Evidence:** a balance question that used the word "money", and a task that removed three unwired modules, were refused to the owner's proxy as "real money" and "deleting data".
-- **Fix:** harness/owner-acts.mjs `unless`: two narrow readings, each undone by one word of real spending or of data; a stand-in's answer records the reading. qa/selftest-283j.mjs.
+### P-310 — the owner was asked in person about removing code · fixed in 2.83.0
+- **Evidence:** a task that removed three unwired modules was refused to the owner's proxy as "deleting data".
+- **Fix:** harness/owner-acts.mjs `unless`: one narrow reading, undone by one word of data; a stand-in's answer records the reading. qa/selftest-283j.mjs.
 
 ### P-311 — board commands that did something else than asked · fixed in 2.83.0
 - **Evidence:** `task train dequeue T-x` did not exist and the unknown word started a train; an `--after` could be added and not removed; the train status did not show what was queued.
@@ -272,9 +272,37 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 - **Evidence:** docs-only and engine-only tasks ran the web game's build, tests and replays.
 - **Fix:** harness/gate-tracks.mjs. qa/selftest-284x.mjs.
 
-### P-324 — 2.83 was projected to raise the engine pass rate and did not · open
+### P-324 — 2.83 was projected to raise the engine pass rate and did not · measured again in P-325
 - **Evidence:** projected about 75% of land runs passing and 65% of tasks without an overseer step; measured 34.8% and 22% on a crew's first day.
 - **Lesson:** a projection is not a measurement; a release's notes give the measured numbers of the release before it, and nothing built without a real editor is called an improvement until a crew's log says so.
+
+### P-325 — 2.84 landed nothing without an overseer step · fixes in 2.85.0, not measured
+- **Evidence:** a crew's first 16.3 hours on 2.84: land runs passing 46.2% (34.8% on 2.83), passing run 32.9 min (51.1), 0 of 26 landed tasks with no overseer step, 59.5% of hand-backs with a harness or machine cause, 3 of 15 scorecard targets.
+- **Lesson:** faster land runs did not make the studio hands-free; the overseer's steps came from the harness's own false alarms (P-326 to P-330).
+
+### P-326 — a task waiting in a train queue was handed back for "no running session" · fixed in 2.85.0
+- **Evidence:** 30 of 73 hand-backs in that log; three in two hours parked a task (9 parks, 12 unparks by the overseer).
+- **Fix:** harness/director-flow.mjs releases the claim quietly; harness/handback-kind.mjs is the one reading. qa/selftest-285d.mjs.
+
+### P-327 — `task done` from the main checkout judged other roles' commits · fixed in 2.85.0
+- **Evidence:** a `Golden-Reason:` line above a blank line in another role's commit refused every task's done; three sessions looped in four minutes; the crew patched it locally.
+- **Fix:** the check reads the task's own commits; the hook moves the line into the trailer block; the same refusal twice holds the task. qa/selftest-285d.mjs.
+
+### P-328 — a game-rules question was refused as the owner's only · fixed in 2.85.0
+- **Evidence:** an ask about a price rule in the game could be answered by nobody but the owner, even with the owner's permission quoted.
+- **Fix:** the owner-only list is deleting data, keys, publishing, tool definitions and beta-off; a word list that guessed at a question's subject is gone. qa/selftest-285c.mjs.
+
+### P-329 — the daily full land run was invisible and blamed its branches · fixed in 2.85.0
+- **Evidence:** it fell on a one-branch train after a 37 s compile check and was reported as the compile check running everything; its failures on the target handed the branch back.
+- **Fix:** announced, a baseline for target failures, suspect first. qa/selftest-285a.mjs. No real editor.
+
+### P-330 — the web train's automatic mode stayed off for a week · fixed in 2.85.0
+- **Evidence:** an agent ran `train auto off` on 2026-11-06 "until the engine land holds the lock"; nothing turned it on and the daemon wrote nothing while off.
+- **Fix:** an agent's off switch lapses; the daemon says why it waits. qa/selftest-285e.mjs.
+
+### P-331 — the maintainer's inventory overstated what could be cut · lesson
+- **Evidence:** "56 settings with no reader" was 2; three "noise" event kinds had readers; a "duplicate" module was not one.
+- **Lesson:** a cut needs proof per item; `check-docs` now proves the settings case on every run.
 
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
