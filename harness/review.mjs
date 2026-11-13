@@ -3,8 +3,8 @@
  * harness/review.mjs — a second opinion from a model made by another company, in one command.
  *
  *   npm run review -- <TASK_ID> [--local] [--implementer <model>] [--dry-run] [--router-only]
- *   npm run review -- same-family [on|off|auto] --by <who> [--why "..."]   2.84 (g): whether a same-family review counts
- *   npm run review -- ask <TASK_ID> --model <id> [--tool <tool>] [--for <review task>] [--no-commit]   2.84 (w): the harness
+ *   npm run review -- same-family [on|off|auto] --by <who> [--why "..."]   whether a same-family review counts
+ *   npm run review -- ask <TASK_ID> --model <id> [--tool <tool>] [--for <review task>] [--no-commit]   the harness
  *                     asks the model itself, no session (harness/review-ask.mjs)
  *   npm run review -- record <TASK_ID> --by <reviewer name> --family <xai|deepseek|openai|google|anthropic|…>
  *                     --file <review.md> [--model <m>] [--implementer <model>] [--no-commit]
@@ -14,8 +14,8 @@
  * and writes studio/reviews/<date>-<ID>-<model>.md with `model-family:` and `implementer-family:`
  * lines and one verdict. The done-check for system tasks and the reviewer gate read that file.
  * It refuses when the reviewer would be the same family as the builder.
- * 2.62.0 (H): a task with an agreed acceptance contract (studio/contracts/<ID>.json) sends it too, and the reviewer
- * grades the work against each criterion (a criterion not met means CHANGES).
+ * A task with an agreed acceptance contract (studio/contracts/<ID>.json) sends it too, and the reviewer grades the work
+ * against each criterion (a criterion not met means CHANGES).
  *
  * Small local models miss things: treat an approval as a second look, not proof. A person can always
  * write a review by hand instead (studio/skills/review.md).
@@ -46,7 +46,7 @@ function diffOf(hash) {
 }
 
 /**
- * 2.79 (d): where a task's commits live when the current branch has none (review run from main): the lane branch the
+ * Where a task's commits live when the current branch has none (review run from main): the lane branch the
  * registry (.studio/lane-branches.json) or the train queue names for it, else a branch whose commits carry
  * "Studio-Task: <ID>". [{ branch, commits }] for the first that has tagged commits, or null.
  */
@@ -82,7 +82,7 @@ export function gather(taskId, { implementer = null } = {}) {
   let diff = commits.map((c) => diffOf(c.hash)).join('\n');
   const cut = diff.length > DIFF_CAP;
   diff = scrub(diff.slice(0, DIFF_CAP)).text;
-  // 2.62.0 (H): the task's agreed acceptance contract, if any, so the review grades against what done means.
+  // The task's agreed acceptance contract, if any, so the review grades against what done means.
   return { task, type: taskType(task), builder, commits, onBranch, specs, diff, cut, contract: contractForReview(taskId) };
 }
 
@@ -130,9 +130,8 @@ export function writeReview(g, { model, content }) {
 }
 
 /**
- * No router keys (or the router failed): ask an agent CLI made by another company instead, read-only.
- * Run #1 showed "503: All channels exhausted for role reviewer" on a studio that reviews through agent
- * CLIs and never set router keys. Order: STUDIO_REVIEWER_TOOL (+ _MODEL), then STUDIO_REVIEW_TOOLS
+ * No router keys (or the router failed): ask an agent CLI made by another company instead, read-only (otherwise a
+ * studio that reviews through agent CLIs gets "503: All channels exhausted"). Order: STUDIO_REVIEWER_TOOL (+ _MODEL), then STUDIO_REVIEW_TOOLS
  * ("codex:gpt-6-sol,agy"), then codex, agy, claude; tools of the builder's family, missing from the
  * PATH or out of quota are skipped.
  */
@@ -153,8 +152,7 @@ export function reviewerTools(builder, env = process.env) {
   });
 }
 /**
- * Reviews that couldn't happen because every reviewer of another family was out (test #2: Codex and agy
- * were both out all afternoon, and reviews just stopped). Kept in studio/reviews/OWED.json with when to
+ * Reviews that couldn't happen because every reviewer of another family was out. Kept in studio/reviews/OWED.json with when to
  * try again; the watcher retries each one once that time has passed.
  */
 export const OWED = path.join(REPO_ROOT, 'studio', 'reviews', 'OWED.json');
@@ -199,23 +197,23 @@ export async function cliReview(g, messages, { run = spawnSync } = {}) {
       tried.push(`${tool}: not installed`);
       continue;
     }
-    // 2.78.2 (d): the tool:model mark first, then the tool's: Argon's 429 no longer skips agy's Flash. A tool-wide mark
+    // The tool:model mark first, then the tool's: one model's 429 doesn't skip the tool's other models. A tool-wide mark
     // (the tool is out for every model) still does.
     if (exhaustedUntil(tool) || (tool !== 'agy' && model && exhaustedFor(tool, model))) {
       tried.push(`${tool}: out of quota`);
       continue;
     }
     // Read-only: the reviewer looks and writes a verdict, it never edits the game.
-    // 2.78.1: agy runs a Gemini model by name (with none it ran its own default, a Claude model: a "Gemini" review of a
-    // Claude builder's work would have been the same family) and reads the review from stdin (H-2: on Windows agy split
-    // a `-p <text>` argument at its spaces); no --mode, so it can't edit. agyReview below.
+    // agy runs a Gemini model by name (with none it runs its own default, a Claude model: the same family as a Claude
+    // builder) and reads the review from stdin (on Windows agy splits a `-p <text>` argument at its spaces); no --mode,
+    // so it can't edit. agyReview below.
     const agyRun = tool === 'agy' ? await agyReview(model) : null;
     if (agyRun?.allOut) {
       tried.push(`agy: out of quota for ${agyRun.allOut.join(', ')}`);
       continue;
     }
     const argv = agyRun ? agyRun.argv : reviewArgv(tool, model, text);
-    // P-066: no shell for the tool (harness/launch.mjs), so agy's and grok's review text arrives as one argument on
+    // No shell for the tool (harness/launch.mjs), so agy's and grok's review text arrives as one argument on
     // Windows too; text too long for the command line goes by file.
     const promptAt = argv.indexOf(text);
     const promptFile = promptAt > 0 ? path.join(REPO_ROOT, '.studio', 'review-prompt.md') : null;
@@ -228,8 +226,8 @@ export async function cliReview(g, messages, { run = spawnSync } = {}) {
     const out = String(r.stdout || '').trim();
     if (r.status === 0 && out) return { ok: true, model: agyRun?.model || model || TOOL_MODEL_NAME[tool], content: out, tool };
     // A reviewer that says it hit its limit is marked out until it resets, so the owed review knows when to retry.
-    // 2.30 (J12): the provider's limit line on a failed run, never the review text (a review of budget code
-    // that said "quota" marked the reviewer out for an hour).
+    // Read the provider's limit line on a failed run, never the review text (a review of budget code that said "quota"
+    // would mark the reviewer out).
     const { limitLine } = await import('./budget.mjs');
     const said = limitLine(r.stderr, r.status === 0 ? '' : r.stdout, r.status ?? 1);
     if (said && run === spawnSync) {
@@ -241,7 +239,7 @@ export async function cliReview(g, messages, { run = spawnSync } = {}) {
   return { ok: false, error: tried.length ? tried.join('; ') : `no reviewer tool of another family than ${modelFamily(g.builder)} (set STUDIO_REVIEWER_TOOL)` };
 }
 
-/** The read-only command line a review runs a CLI tool with (the text goes on stdin for claude, codex and agy). 2.84 (w): shared with review ask. */
+/** The read-only command line a review runs a CLI tool with (the text goes on stdin for claude, codex and agy). Shared with review ask. */
 export function reviewArgv(tool, model, text) {
   return tool === 'claude' ? ['claude', '-p', '--output-format', 'text', '--disallowedTools', 'Bash,Edit,Write,MultiEdit,NotebookEdit', ...(model ? ['--model', model] : [])]
     : tool === 'codex' ? ['codex', 'exec', '--sandbox', 'read-only', ...(model ? ['-m', model] : []), '-']
@@ -250,7 +248,7 @@ export function reviewArgv(tool, model, text) {
 }
 
 /**
- * 2.78.1: how the agy reviewer starts: { argv, model }. The model is Gemini: the one asked for (STUDIO_REVIEWER_MODEL with
+ * How the agy reviewer starts: { argv, model }. The model is Gemini: the one asked for (STUDIO_REVIEWER_MODEL with
  * STUDIO_REVIEWER_TOOL=agy, or agy:<model> in STUDIO_REVIEW_TOOLS) when it is a Gemini model, else STUDIO_TOOL_AGY_MODEL,
  * else the agy default (harness/agent.mjs AGY_DEFAULT_MODEL). agy's print timeout 900 s and its model flag
  * (STUDIO_AGY_MODEL_FLAG) as for a builder (agyOptions), without --mode; the review goes on stdin.
@@ -258,7 +256,7 @@ export function reviewArgv(tool, model, text) {
 export async function agyReview(asked = null, env = process.env) {
   const { agyOptions, isGeminiModel, AGY_DEFAULT_MODEL } = await import('./agent.mjs');
   const { exhaustedFor } = await import('./budget.mjs');
-  // 2.78.2 (d): the first Gemini model not out of quota: the one asked for, STUDIO_TOOL_AGY_MODEL, the agy default, then
+  // The first Gemini model not out of quota: the one asked for, STUDIO_TOOL_AGY_MODEL, the agy default, then
   // STUDIO_REVIEW_AGY_FALLBACK (comma list, default the Flash model in harness/model-pools.mjs). A model marked out
   // (agy:<model>) is skipped, not the whole tool; allOut names the models when every one is out.
   const fallback = String(env.STUDIO_REVIEW_AGY_FALLBACK || 'gemini-3.8-flash-high').split(',');
@@ -269,7 +267,7 @@ export async function agyReview(asked = null, env = process.env) {
 }
 
 /**
- * 2.78.2 (d): who may record a review done outside the harness (a person, grokbot through xAI, a DeepSeek chat): a person,
+ * Who may record a review done outside the harness (a person, grokbot through xAI, a DeepSeek chat): a person,
  * the orchestrator (an agent outside the harness) or a Producer/Director session; never a worker (a launched builder,
  * qa, reviewer … session, or a worker's name in --by or STUDIO_LOCK_OWNER): a worker recording its own review would
  * approve its own work. Returns the refusal, or null.
@@ -284,8 +282,7 @@ export function recordRefusal(by, env = process.env, { workerName = WORKER_NAME,
 }
 
 /**
- * 2.78.2 (d): record a review somebody else did outside the harness (the cross-family reviewer tools were all out: grokbot via
- * xAI reviewed T-174). The family must differ from the implementer's; the file must carry a verdict (the last
+ * Record a review somebody else did outside the harness (the cross-family reviewer tools were all out). The family must differ from the implementer's; the file must carry a verdict (the last
  * `VERDICT: APPROVE|CHANGES` or `Verdict: approve|request changes` line). Written to studio/reviews/ with the same
  * header as `npm run review` plus a line naming the outside reviewer, logged, and committed unless noCommit.
  * Returns { ok, file, verdict } or { ok: false, error }.
@@ -295,7 +292,7 @@ export function recordOutsideReview(id, { by, family, file, text: given = null, 
   if (no) return { ok: false, error: no };
   if (!String(by || '').trim()) return { ok: false, error: 'Say who reviewed it: --by <reviewer name>.' };
   if (!/^[a-z0-9][a-z0-9._-]{1,30}$/i.test(String(family || ''))) return { ok: false, error: 'Say the reviewer\'s model family: --family <xai|deepseek|openai|google|anthropic|…>.' };
-  // 2.84 (w): `text` instead of a file: the harness-asked review (harness/review-ask.mjs) records its parsed answer here.
+  // `text` instead of a file: the harness-asked review (harness/review-ask.mjs) records its parsed answer here.
   if (!file && given === null) return { ok: false, error: 'Give the review text: --file <review.md>.' };
   let text;
   if (given !== null) text = String(given).replace(/\r\n/g, '\n');
@@ -305,8 +302,8 @@ export function recordOutsideReview(id, { by, family, file, text: given = null, 
   const fam = modelFamily(String(family).toLowerCase());
   const impl = modelFamily(g.builder);
   if (fam === 'unknown') return { ok: false, error: `Unknown family "${family}".` };
-  // 2.83: a same-family review is taken when its text says no other family is available AND none is configured.
-  // 2.84 (g): the studio's switch (studio/review.json): auto is the rule above, on counts it with either header, off never.
+  // A same-family review is taken when its text says no other family is available AND none is configured.
+  // The studio's switch (studio/review.json): auto is the rule above, on counts it with either header, off never.
   const dec = impl !== 'unknown' && fam === impl ? sameFamilyDecision(text, g.builder, env) : null;
   const sameOk = Boolean(dec?.ok);
   if (dec && !sameOk) { const w = sameFamilyRefusal(g.builder, env, { text }); return { ok: false, error: `Refused: ${by} (${fam}) is the same family as the builder (${g.builder}, ${impl}); a review from another family is what counts.${w ? ` (${w})` : ''}` }; }
@@ -352,10 +349,10 @@ export function recordOutsideReview(id, { by, family, file, text: given = null, 
 }
 
 /**
- * 2.84 (g): who may flip the same-family switch, and how the change is recorded. It loosens a check, so it is judged as a protected decision ('tests'), and the verdict is
- * the harness's one (permission.mjs mayDecide, as for an engine push): a person's terminal, the owner's proxy, a beta-mode
- * agent or outside signer, an outside agent, and a Producer/Director session only where the owner lets them make protected decisions; never a worker
- * session or a worker's name, under any --by. Returns { ok, by, via } or { ok: false, why }.
+ * Who may flip the same-family switch, and how the change is recorded. It loosens a check, so it is judged as a protected
+ * decision ('tests') by the harness's one verdict (permission.mjs mayDecide, as for an engine push): a person's terminal,
+ * the owner's proxy, a beta-mode agent or outside signer, an outside agent, and a Producer/Director session only where
+ * the owner lets them make protected decisions; never a worker session or a worker's name, under any --by. Returns { ok, by, via } or { ok: false, why }.
  */
 export async function sameFamilyActor(by, { env = process.env, root = REPO_ROOT } = {}) {
   const who = String(by || '').trim();
@@ -406,9 +403,9 @@ export async function setSameFamily(value, { by, why = '', env = process.env, ro
   return { ok: true, value: v, was, by: a.by, via: a.via, line };
 }
 
-// 2.84 (w): the command line runs in a function, not at top level (rule: a module both imported and run must not await at
-// top level): `review ask` imports harness/review-ask.mjs, which imports this file back, and a top-level await here
-// left that import waiting for this module forever (exit 13).
+// The command line runs in a function, not at top level (a module both imported and run must not await at top level):
+// `review ask` imports harness/review-ask.mjs, which imports this file back, and a top-level await here would leave
+// that import waiting forever (exit 13).
 async function cli() {
   const argv = process.argv.slice(2);
   const id = argv.find((a) => /^T-\d+$/.test(a));
@@ -420,7 +417,7 @@ async function cli() {
     (r.ok ? console.log : console.error)(r.ok ? r.line : r.message);
     process.exit(r.ok ? 0 : 1);
   } else if (argv[0] === 'ask') {
-    // 2.84 (w): the harness asks one model for the review itself (harness/review-ask.mjs).
+    // The harness asks one model for the review itself (harness/review-ask.mjs).
     const r = await (await import('./review-ask.mjs')).askCli(argv.slice(1)).catch((e) => ({ code: 1, line: `review ask failed: ${scrub(String(e?.message || e)).text.slice(0, 300)}` }));
     (r.code ? console.error : console.log)(r.line);
     process.exit(r.code);
