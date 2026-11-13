@@ -24,6 +24,7 @@ in your own lane copy, on a vision-capable model. Nobody starts you by hand. How
    working, broken, missing or not reached, with a screenshot; every bug with the step it shows at.
 4. `npm run tester -- finish`, then stop. The harness files your bugs (P1, with your steps, the replay command and the
    images), and tells the Producer, the Director and the orchestrator.
+5. When a pillar or a "never" line is visibly broken in the build you played, also file a vision fix: `npm run task -- add "Fix …" --vision-fix --serves pillar:<name> --why "<what is broken on screen>" --phase N --agent <you>` (it starts first and lands first); it is not for polish.
 
 ## Who you are
 

@@ -21,7 +21,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { emitEvent } from './event.mjs';
+import { emitEvent, readRecentEvents } from './event.mjs';
+import { visionFixIds, visionFirst } from './vision-fix.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { pidAlive } from './proc-identity.mjs';
 import { changedPaths, playSelection, playFocusConfig } from './engine-rules.mjs';
@@ -78,7 +79,7 @@ export function laneClass({ repo, target, cfg = {}, lane }) {
  * cap. { lanes, why, total, waiting, cls, alone, tagged } or { error: 'unknown', unknown, why } when an --only id is not
  * queued.
  */
-export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 0, group = null, classOf = () => 'full' } = {}) {
+export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 0, group = null, classOf = () => 'full', isVision = null } = {}) {
   const q = Array.isArray(queue) ? queue.filter((e) => e && e.task) : [];
   const ids = onlyList(only);
   const unknown = ids.filter((id) => !q.some((e) => e.task === id));
@@ -90,6 +91,14 @@ export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 
   else pool = q;
   if (tag) { pool = pool.filter((e) => e.tag === tag); parts.push(`tag ${tag}`); }
   else if (!ids.length) { pool = pool.filter((e) => !e.tag); if (tagged) parts.push(`untagged lanes only (${tagged} tagged wait for train --tag)`); }
+  // 2.85 (f): a vision fix (harness/vision-fix.mjs; isVision, else read from the event log) goes to the front before
+  // the alone lane, the grouping and the cap, so the batch forms around it: its class is the batch's class.
+  if (!ids.length) {
+    let vis = isVision;
+    if (typeof vis !== 'function') { let vf = new Set(); try { vf = visionFixIds(readRecentEvents(20000)); } catch { /* none */ } vis = (l) => vf.has(l.task); }
+    const front = pool.filter((l) => { try { return vis(l); } catch { return false; } });
+    if (front.length) { pool = visionFirst(pool, (l) => front.includes(l)); parts.push(`vision fix first: ${front.map((l) => l.task).join(',')}`); }
+  }
   let alone = null;
   const soloAt = pool.findIndex((l) => l.alone);
   if (soloAt === 0) { alone = pool[0].task; pool = [pool[0]]; parts.push(`${alone} lands alone`); }

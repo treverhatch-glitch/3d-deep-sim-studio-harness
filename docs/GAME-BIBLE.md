@@ -40,6 +40,16 @@ follow-ups (a line for winning, a line for failing, words it must never use) mak
 the Bible. Add to it any time: `npm run bible -- voice --do "…" --dont "…" --never "a, b" --example "…"`.
 Every agent writing something the player reads or hears gets it in its brief.
 
+**The vision card (2.85).** Once the Bible is signed, the brief of every task that serves a pillar or a kept layer
+(`task add --serves`), and of every engine port, carries a short card from it (harness/vision-card.mjs): the pillar or
+layer, the "never" answer cut to six lines (three for a port), the "feel great" answer and the phase's goal, and how to
+hand back when the work would break one of them. A reviewer's brief shows the card of the task it reviews; `task show`
+gives it as `vision`. `STUDIO_VISION_CARD=off` leaves the card out of every brief. `STUDIO_VISION_CARD_WORDS` (default
+300) caps its length; the phase goal goes first, then the feel line, then never items from the end.
+A task filed with `--vision-fix` (Director, Producer, playtester or the overseer; needs `--serves pillar:<name>` and a
+`--why` naming what is broken on screen) is a vision fix, as is a fix of one: it starts before its role's other waiting
+work and goes to the front of the next web and engine train. `npm run score` counts both.
+
 ## 2. Phases: the three parts of the game the player plays
 
 | Phase | The player | Moves on when |

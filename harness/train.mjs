@@ -59,6 +59,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, readRecentEvents } from './event.mjs';
+import { visionFixIds, visionFirst } from './vision-fix.mjs';
 import * as engineTracks from './engine-tracks.mjs';
 import { tracksOfTasks, decideTracks, missingTracks } from './gate-tracks.mjs';
 import { mainRoot, mainBranch, linkDir, nodeModuleDirs, ignoreLanes, landFastForward, forgetLanded, rememberTaskBranch, LANES_DIR } from './worktree.mjs';
@@ -2148,6 +2149,16 @@ function chainTailDefer(ctx, { set, v, text }) {
  * With main stuck red on a game check (harness/train-fix-first.mjs), the first lane that changes that check's
  * configuration goes first and alone (its runAlone), with a task.train.fix_first event naming why.
  */
+/** 2.85 (f): the web train's lanes with the queued vision fixes (harness/vision-fix.mjs) first, the rest in queue order. */
+export function visionLanesFirst(lanes, { events = null, log = () => {} } = {}) {
+  let vf = new Set();
+  try { vf = visionFixIds(events || readRecentEvents(20000)); } catch { /* the queue's order stands */ }
+  if (!vf.size) return lanes;
+  const out = visionFirst(lanes, (l) => vf.has(l.task));
+  if (out.some((l, i) => l !== lanes[i])) log(`vision fix first: ${out.filter((l) => vf.has(l.task)).map((l) => l.task).join(', ')}`);
+  return out;
+}
+
 function fixFirst(root, lanes, { id, by, dryRun, log }) {
   let r;
   try {
@@ -2244,6 +2255,9 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   // A chain deferred for its tail waits until the tail is queued (harness/train-tail.mjs).
   waits.push(...chainTailWaits(root, lanes.filter((l) => !waits.some((w) => w.lane === l)), deps));
   lanes = lanes.filter((l) => !waits.some((w) => w.lane === l));
+  // 2.85 (f): a queued vision fix (harness/vision-fix.mjs) goes to the front, before the cap, so it is never cut; only a
+  // fix for a red trunk (fix-first, below) goes before it.
+  lanes = visionLanesFirst(lanes, { log: (m) => log(`[train] ${id}: ${m}`) });
   lanes = fixFirst(root, lanes, { id, by, dryRun, log }); // before the cap so the fix is never cut
   // The lanes past the cap wait for the next train (behind this one's speculative train, if any).
   if (maxLanes > 0 && lanes.length > maxLanes) { res.batchCut = lanes.slice(maxLanes).map((l) => l.task); lanes = lanes.slice(0, maxLanes); log(`[train] ${id}: ${res.batchCut.length} more lane(s) wait for the next train (at most ${maxLanes} per train: STUDIO_TRAIN_BATCH ${batchSize() || 'off'}, STUDIO_TRAIN_MAX ${rules.max || 0}${Number(max) > 0 ? `, --max ${max}` : ''}): ${res.batchCut.join(', ')}`); }

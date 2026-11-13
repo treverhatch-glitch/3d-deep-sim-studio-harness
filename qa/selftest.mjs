@@ -5213,6 +5213,14 @@ if (inShard('selftest-285h')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.85 (f): the designer's vision in every brief, and vision fixes land first.
+if (inShard('selftest-285f')) {
+  const dir = copyRepo();
+  const { selftest285F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285f.mjs')).href);
+  await selftest285F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

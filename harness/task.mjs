@@ -19,7 +19,9 @@ import { isGameCode } from '../scripts/check-function-size.mjs';
 import { summarize as summarizeVerdict, renderDecision } from './verdict-split.mjs';
 import { visualGate } from './visual-capture.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
-import { writeFocus } from './focus.mjs';
+import { writeFocus, visionFor } from './focus.mjs';
+import { visionFixIds, visionFirst, mayFileVisionFix, parentIsVisionFix } from './vision-fix.mjs';
+import { PLAYER_TYPES } from './vision-card.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
 import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal, laneEntries } from './task-hold.mjs';
 import { stopIfOverBudget, overBudget as overBudgetOf } from './task-budget.mjs';
@@ -395,7 +397,10 @@ export function nextFor({ role = null, agent = null } = {}, q = parseNextQueue()
     .filter(([t]) => !lockStatus(`task:${t.id}`).locked && (!role || t.role === role || !t.role) && !eligibility(t.id, { q, agent, role: role || process.env.STUDIO_ROLE || null, events: (evs ||= readRecentEvents(20000)) }) && !liveOwner(t.id, agent, (evs ||= readRecentEvents(20000)), { waiting: true }))
     .map(([t, i]) => [t, i, (() => { try { return sameBlocker(t.id, { done: new Set((q.done || []).map((x) => x.id)) }).same ? 1 : 0; } catch { return 0; } })()])
     .sort((a, b) => a[2] - b[2] || (PRI[a[0].priority] ?? 9) - (PRI[b[0].priority] ?? 9) || a[1] - b[1]);
-  return { task: open[0]?.[0] || null, held: false };
+  // 2.85 (f): a startable vision fix (harness/vision-fix.mjs) goes before every other waiting task of the role.
+  const vf = (() => { try { return visionFixIds(evs || readRecentEvents(20000)); } catch { return new Set(); } })();
+  const ordered = vf.size ? visionFirst(open, (x) => vf.has(x[0].id)) : open;
+  return { task: ordered[0]?.[0] || null, held: false };
 }
 
 /** Everything known about one task, for agents and people: status, owner, meta, hand-off notes, checklist. */
@@ -424,6 +429,9 @@ export function showTask(taskId, q = parseNextQueue()) {
     handoff: fs.existsSync(handoff) ? fs.readFileSync(handoff, 'utf8') : null,
     brief: fs.existsSync(path.join(STUDIO_STATE_DIR, 'briefs', `${taskId}.md`)) ? `.studio/briefs/${taskId}.md` : null,
     checklist: check ? check.checks.map((c) => `[${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`) : null,
+    // 2.85 (f): the vision card its brief carries (kind, words, the pillar or layer), and whether it is a vision fix.
+    vision: (() => { try { const v = visionFor(task); return v.card ? { kind: v.card.kind, words: v.card.words, ...(v.card.pillar ? { pillar: v.card.pillar } : {}), ...(v.card.layer ? { layer: v.card.layer } : {}), ...(v.reviewed ? { reviewed: v.reviewed } : {}) } : null; } catch { return null; } })(),
+    visionFix: (() => { try { return visionFixIds(readRecentEvents(50000)).has(taskId); } catch { return Boolean(meta.visionFix); } })(),
   };
 }
 
@@ -535,7 +543,10 @@ export function startTask(taskId, agent = null, { model = null, force = false, d
   const handoff = readTaskHandoff(target.id);
   // The commit the work starts from, for the size ratchet (harness/done-check.mjs sizeGrowth).
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout?.trim() || null;
-  emitEvent({ type: 'task.start', agent, model, task: target.id, status: 'editing', msg: `${handoff ? 'Picked up' : 'Started'} ${target.id}: ${target.title}`, meta: head ? { head } : {} });
+  // 2.85 (f): which vision card the brief carries ('pillar' | 'layer' | 'port' | null) and whether the task is player-facing
+  // (build, change, bug or system work, not tooling), for the scorecard's "Briefs with a vision card" line.
+  const vis = (() => { try { const ty = taskType(target); const m = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta || {}; return { visionCard: visionFor(target).card?.kind || null, playerFacing: PLAYER_TYPES.has(ty) && !m.infra && !m.prototype }; } catch { return { visionCard: null, playerFacing: false }; } })();
+  emitEvent({ type: 'task.start', agent, model, task: target.id, status: 'editing', msg: `${handoff ? 'Picked up' : 'Started'} ${target.id}: ${target.title}`, meta: { ...(head ? { head } : {}), ...vis } });
   try { if (!readBaseline(target.id)) recordBaseline(target.id); } catch {}
   let brief = null;
   try {
@@ -1574,6 +1585,10 @@ function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUC
   const ov = overlap && !meta.splitOf && !fromRescueMeta(meta) ? overlapCheck({ title, role, meta, phase: 'add', agent, board: parseNextQueue() }) : { found: [], lines: [], block: false };
   if (ov.block) return { error: 'overlap', message: ov.lines.join('\n') };
   if (ov.lines.length) gate.warnings.push(...ov.lines);
+  // 2.85 (f): a fix of a vision fix (causedBy/fixOf) is one too; a vision fix carries a [vision] mark in its title, as a
+  // [chore] tag is carried (the board line's format is unchanged: harness/board-line.mjs TASK_LINE_RE reads it as title).
+  if (!meta.visionFix && (meta.causedBy || meta.fixOf)) { try { if (parentIsVisionFix(meta, readRecentEvents(20000))) meta = { ...meta, visionFix: true, visionInherited: String(meta.causedBy || meta.fixOf) }; } catch { /* not marked */ } }
+  if (meta.visionFix && !/\[vision\]/i.test(title)) title = `${title} [vision]`;
   const newTask = {
     id: allocateTaskId(parseNextQueue()),
     priority: priority.toUpperCase(),
@@ -2615,9 +2630,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
 
   if (cmd === 'add') {
-    const title = [...flags._.slice(1), ...['start', 'claim'].filter((k) => typeof flags[k] === 'string').map((k) => flags[k])].join(' ');
+    const title = [...flags._.slice(1), ...['start', 'claim', 'vision-fix'].filter((k) => typeof flags[k] === 'string').map((k) => flags[k])].join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|research|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name> [--branch <engine branch>] [--scope "…"] [--visual-check] [--refs a.jpg,b.jpg]] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6] [--canary "<why it is impossible>"] [--start --agent <you>]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|research|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name> [--branch <engine branch>] [--scope "…"] [--visual-check] [--refs a.jpg,b.jpg]] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6] [--canary "<why it is impossible>"] [--vision-fix --serves pillar:<name> --why "<what is broken on screen>"] [--start --agent <you>]');
       process.exit(1);
     }
     const type = typeof flags.type === 'string' ? flags.type.toLowerCase() : '';
@@ -2688,6 +2703,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const inf = inferLaneFromText([title, flags.description, flags.desc, flags.why].filter((x) => typeof x === 'string').join(' '), mainRoot());
       if (inf) { flags.lane = inf.lane; console.log(`--lane not given: inferred ${inf.lane} from ${inf.from.join(', ')} named in the title (change it: task lane <ID> <folder>).`); }
     }
+    // 2.85 (f): --vision-fix: a pillar or a "never" line is visibly broken in a build (not polish). It needs --serves
+    // pillar:<name> and --why naming what is broken on screen; only the Director, the Producer, a playtester or the
+    // overseer sets it (harness/vision-fix.mjs). It starts first for its role and rides the front of the next train.
+    if (flags['vision-fix'] !== undefined) {
+      const vAgent = typeof flags.agent === 'string' ? flags.agent : actor();
+      const may = await mayFileVisionFix({ agent: vAgent, env: process.env, root: mainRoot() });
+      if (!may.ok) { console.error(`Not queued. --vision-fix refused: ${may.why}.`); process.exit(1); }
+      if (!/^pillar:\s*\S/i.test(String(flags.serves || ''))) { console.error('Not queued. --vision-fix needs --serves pillar:<name>: the pillar that is broken.'); process.exit(1); }
+      if (typeof flags.why !== 'string' || flags.why.trim().length < 10) { console.error('Not queued. --vision-fix needs --why "<what is broken on screen>" (10+ characters).'); process.exit(1); }
+    }
     if (typeof flags.after === 'string') {
       const bad = unknownAfter(flags.after.split(/[,\s]+/).filter(Boolean));
       if (bad) { console.error(`Not queued. ${bad}`); process.exit(1); }
@@ -2726,6 +2751,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ...(type ? { type } : {}),
         ...(typeof flags.why === 'string' ? { why: flags.why } : {}),
         ...(typeof flags['split-of'] === 'string' ? { splitOf: flags['split-of'] } : {}),
+        ...(flags['vision-fix'] !== undefined ? { visionFix: true, visionWhy: String(flags.why).trim().slice(0, 300) } : {}),
       },
     });
     if (created.proposed) {

@@ -189,6 +189,8 @@ export function linePlan(f) {
   const boardIdx = new Map(tasks.map((t, i) => [t.id, i]));
   const order = [];
   const take = (t) => { if (t && !order.includes(t.id)) order.push(t.id); };
+  // 2.85 (f): a ready vision fix (task add --vision-fix, or a fix of one: meta.visionFix) goes before everything else.
+  for (const t of ready) if (t.meta?.visionFix) take(t);
   // An engine push: that engine's ready porters and track builders go first, the game's work after.
   if (f.enginePush?.engine) for (const t of ready) if ((t.role === 'engine-porter' || t.role === 'builder') && String(t.meta?.track || '').replace(/^engine:/, '') === f.enginePush.engine) take(t);
   for (const c of cbs) take(ready.find((t) => t.id === c.task));
