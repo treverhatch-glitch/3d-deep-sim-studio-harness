@@ -1,59 +1,44 @@
 /**
- * harness/reclassify.mjs — 2.59.0: the owner's reclassification of a task's type.
+/**
+ * harness/reclassify.mjs — the owner's reclassification of a task's type (and visual-proof decision).
  *
- * A task's type comes from its title (harness/done-check.mjs: "Fix: …" is a bug, and a bug closes only with a
- * regression that fails before the fix). When the title rule is wrong for a task, retitling it to dodge the rule is
- * not an agent's call; the owner decides, and the decision is kept where every check can read it:
+ * A task's type comes from its title (harness/done-check.mjs: "Fix: …" is a bug, and a bug closes only with a regression
+ * that fails before the fix). Retitling a task to dodge the rule is not an agent's call; the owner decides, and the
+ * decision is kept where every check can read it:
  *
  *   npm run task -- type <ID>                                       the type, and where it comes from
  *   npm run task -- type <ID> <change|chore|bug|docs|…> --by <owner> --why "<reason, 10+ chars>"
  *   npm run task -- type <ID> auto --by <owner> --why "…"           back to the title's type
- *
- * Who: a person, in their own terminal. Refused inside a launched agent session (STUDIO_ROLE), in a shell that works
- * as an agent (STUDIO_LOCK_OWNER set to an agent's name, or to a name other than --by), in a coding agent's own shell
- * (CLAUDECODE, AI_AGENT, CODEX_SANDBOX, GEMINI_CLI set), and for agent names (and launched sessions' names).
- *
- * How it is kept:
- *   - The studio has an owner key (studio/keys/owner-ed25519.pub.pem, harness/approve.mjs): the reclassification is
- *     signed with the owner's private key (studio/approvals/type-<ID>.json, the same signed-approval format the
- *     protected check verifies) on the owner's device; an unsigned record is then ignored.
- *   - No owner key yet: it is RECORDED in studio/task-types.json (who, why, when, from → to) and committed from the
- *     owner's terminal (the command commits that one file; --no-commit leaves it to you). It counts only once
- *     committed, and only when the commit that set it is not an agent's (no Studio-Agent trailer, which the
- *     commit-msg hook adds for every agent commit). That is a speed bump, not a lock: until the owner key exists,
- *     nothing an agent can write is proof. Every record in force is shown in verify and done output.
- * In a lane copy the record is read from the main checkout, so the owner's decision counts without a rebase.
- * "none" and "rescue" can't be set here: closing a task without its check is `npm run approve -- force`.
- *
- * 2.59.1 (the owner's rule): with a person's direct permission a Producer or Director session, or an agent outside the
- * harness, may record it for them: `--by <the person> --permission "<their words, or a link to the message>"`
- * (harness/permission.mjs). The entry keeps `permission` and `recordedBy`, an agent commit that set it counts when it
- * is that same agent and not a worker, and every output shows it. Builders never can. With an owner key the
- * reclassification still has to be signed with it.
- *
- * 2.60.1 (B-38): the owner's visual-proof decision for a task, recorded the same way and under the same rules (a person,
- * or a Producer/Director/outside agent on a person's permission; workers never; signed once there is an owner key):
- *
  *   npm run task -- visual <ID> off|on --by <owner> --why "…" [--permission "…"]     auto: back to the detection
  *
- * It is kept in the same file, under "visual" (studio/task-types.json), and an approval is studio/approvals/visual-<ID>.json.
- * ownerVisual() applies exactly the validity rules ownerType() applies (one resolver serves both); harness/verdict-split.mjs
- * honours a valid one before anything else, and a valid owner type that isn't render work outranks the title's words.
+ * Who: a person, in their own terminal. Refused inside a launched agent session (STUDIO_ROLE), in a shell that works as an
+ * agent (STUDIO_LOCK_OWNER set to an agent's name, or to a name other than --by), in a coding agent's own shell
+ * (CLAUDECODE, AI_AGENT, CODEX_SANDBOX, GEMINI_CLI set), and for agent names (and launched sessions' names).
+ * With a person's direct permission a Producer or Director session, or an agent outside the harness, may record it for
+ * them: `--by <the person> --permission "<their words, or a link to the message>"` (harness/permission.mjs). The entry
+ * keeps `permission` and `recordedBy`, an agent commit that set it counts when it is that same agent and not a worker,
+ * and every output shows it. Builders and other workers never can. Beta mode's stand-in (harness/beta-mode.mjs) counts as
+ * the owner, as do the owner's key and proxy.
  *
- * 2.77.3 (B-111): recording and reading agree.
- *   - The owner key: the base branch's (as the checks read it) or, when that has none, the one committed in the main
- *     checkout (ownerKey). Before, a main checkout whose origin/main lagged behind the key commit wrote unsigned records
- *     ("recorded") that a train copy, whose base is the local main, then ignored.
- *   - Beta mode (harness/beta-mode.mjs; the owner's rule: the owner's key, the owner's proxy and beta mode are all the
- *     owner's): a beta stand-in's type or visual decision is kept as an approval in the beta format approve.mjs writes
- *     (studio/approvals/type-<ID>.json or visual-<ID>.json: no signature, studio/beta.json's by/at embedded,
- *     recordedBy), with or without an owner key. It counts while beta mode is still on with that studio/beta.json, once
+ * How it is kept:
+ *   - With an owner key (studio/keys/owner-ed25519.pub.pem, harness/approve.mjs) the decision is signed with the owner's
+ *     private key (studio/approvals/type-<ID>.json, visual-<ID>.json; the protected check's approval format); an unsigned
+ *     record is then ignored. The key is the base branch's or, when that has none, the one committed in the main checkout
+ *     (ownerKey), so recording and reading agree.
+ *   - Beta mode: a stand-in's decision is kept as an approval in beta format (no signature, studio/beta.json's by/at
+ *     embedded, recordedBy), with or without an owner key. It counts while beta mode is on with that studio/beta.json, once
  *     committed with exactly that content by a commit that isn't a worker's (betaRecordOk); logged "as beta" in the
- *     decisions log. Workers never qualify (betaActor refuses them, and a worker's commit of the file doesn't count).
- *   - With an owner key, outside beta mode, an unsigned record still doesn't count, so the command refuses it up front
- *     (exit 1: the owner signs it on the device that holds the key, or turns beta mode on). And after writing, the
- *     command reads its own record back with the same resolver every check uses: if that says it doesn't count, it
- *     says so and exits 1 instead of claiming success.
+ *     decisions log. Workers never qualify.
+ *   - No owner key: RECORDED in studio/task-types.json (who, why, when, from → to; visual ones under "visual") and committed
+ *     from the owner's terminal (--no-commit leaves that to you). It counts only once committed, and only when the commit
+ *     is not an agent's (no Studio-Agent trailer, added by the commit-msg hook). A speed bump, not a lock: without an
+ *     owner key nothing an agent can write is proof. Every record in force is shown in verify and done output.
+ *   - With an owner key, outside beta mode, an unsigned record doesn't count, so the command refuses it up front (exit 1:
+ *     sign it on the device that holds the key, or turn beta mode on). After writing it reads its own record back with the
+ *     resolver every check uses, and exits 1 if that says it doesn't count.
+ * In a lane copy the record is read from the main checkout. ownerVisual() applies the validity rules ownerType() applies;
+ * harness/verdict-split.mjs honours a valid visual decision first, and a valid owner type that isn't render work outranks
+ * the title's words. "none" and "rescue" can't be set here: closing a task without its check is `npm run approve -- force`.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -97,8 +82,7 @@ export function personRefusal(by, env = process.env) {
   const who = String(by || '').trim();
   if (!who) return `Say who decides: --by <your name>. ${tail}`;
   if (env.STUDIO_ROLE) return `Refused: this runs inside a launched ${env.STUDIO_ROLE} session (STUDIO_ROLE). ${tail}`;
-  // A coding agent's own shell (Claude Code sets CLAUDECODE and AI_AGENT, Codex CODEX_SANDBOX, Gemini CLI GEMINI_CLI):
-  // a chat bot relaying "the owner said yes" is still an agent typing it.
+  // A coding agent's own shell (CLAUDECODE and AI_AGENT, CODEX_SANDBOX, GEMINI_CLI): a chat bot relaying "the owner said yes" is still an agent typing it.
   const marker = AGENT_SHELL.find((k) => String(env[k] || '').trim());
   if (marker) return `Refused: this shell is run by a coding agent (${marker} is set). ${tail}`;
   const owner = String(env.STUDIO_LOCK_OWNER || '').trim();
@@ -109,10 +93,8 @@ export function personRefusal(by, env = process.env) {
 
 let keyMemo = null;
 /**
- * The owner's public key as the checks read it (the base branch's), or, 2.77.3 (B-111), when that has none, the one
- * committed in the main checkout; null: no owner key, records are unsigned. The writers and every reader use this one
- * answer, so a record the command accepts is one the checks accept (a main checkout behind its key commit on
- * origin/main no longer writes unsigned records a train copy then ignores).
+ * The owner's public key as the checks read it (the base branch's) or, when that has none, the one committed in the main
+ * checkout; null: no owner key, records are unsigned. Writers and readers use this one answer.
  */
 export function ownerKey() {
   if (keyMemo && Date.now() - keyMemo.at < 30000) return keyMemo.pub;
@@ -130,16 +112,15 @@ function readRecord(root = REPO_ROOT) {
 const approvalDirs = () => [...new Set([REPO_ROOT, recordRoot()])].map((root) => ({ root, dir: path.join(root, APPROVALS_REL) }));
 const approvalName = (taskId, prefix = 'type') => `${prefix}-${String(taskId).replace(/[^\w.-]/g, '_')}.json`;
 /**
- * 2.77.3 (B-111): a beta-mode record (no signature, studio/beta.json's by/at embedded) counts while beta mode is still on
- * with that file (beta-mode.mjs betaApprovalOk: recordedBy set and not a worker), and only once committed in this
- * checkout, with exactly this content, by a commit that isn't a worker's (the Studio-Agent trailer): a file dropped in
- * the folder, or edited after its commit, proves nothing.
+ * A beta-mode record counts while beta mode is on with that file (beta-mode.mjs betaApprovalOk: recordedBy set, not a
+ * worker), and only once committed in this checkout with exactly this content by a commit that isn't a worker's: a file
+ * dropped in the folder, or edited after its commit, proves nothing.
  */
 const betaRecordOk = (root, rel, doc) => !WORKER_NAME.test(String(doc?.approval?.recordedBy || '').trim()) && betaRecordCommitted(root, rel, doc);
 
 /**
  * The newest approval of this task's decision that counts: signed with the owner key (or the owner proxy's, which
- * verifyApproval judges), or, 2.77.3 (B-111), recorded in beta mode (betaRecordOk), with or without an owner key.
+ * verifyApproval judges), or recorded in beta mode (betaRecordOk), with or without an owner key.
  */
 function signedApproval(taskId, pub, kind = 'type') {
   const found = [];
@@ -187,7 +168,7 @@ const validVisual = (e) => {
   return null;
 };
 
-// 2.60.1 (B-38): the owner decisions kept in studio/task-types.json. One resolver applies the same validity rules to each.
+// The owner decisions kept in studio/task-types.json. One resolver applies the same validity rules to each.
 const KINDS = {
   type: { section: 'tasks', validate: validEntry, what: 'a reclassification', set: (id) => `npm run task -- type ${id} <type> --by <name> --why "…"`, fromApproval: (a) => ({ type: a.to, from: a.from }), only: 'only the owner reclassifies a task (npm run task -- type, from the owner\'s own terminal)' },
   visual: { section: 'visual', validate: validVisual, what: 'a visual-proof decision', set: (id) => `npm run task -- visual ${id} off|on --by <name> --why "…"`, fromApproval: (a) => ({ visual: a.to }), only: 'only the owner decides a task\'s visual proof (npm run task -- visual, from the owner\'s own terminal, or on their permission)' },
@@ -199,7 +180,7 @@ const memo = new Map();
  * { ignored: why } when a record exists but doesn't count, or null (the title decides).
  */
 export function ownerType(taskId) { return ownerDecision(taskId, 'type'); }
-/** 2.60.1 (B-38): the owner's visual-proof decision: { visual: 'off'|'on', by, why, at, source, ... }, { ignored }, or null. */
+/** The owner's visual-proof decision: { visual: 'off'|'on', by, why, at, source, ... }, { ignored }, or null. */
 export function ownerVisual(taskId) { return ownerDecision(taskId, 'visual'); }
 
 function ownerDecision(taskId, kind) {
@@ -218,19 +199,17 @@ function resolveOwnerDecision(taskId, root, kind) {
   const work = (readRecord(root)[K.section] || {})[taskId] || null;
   const hasApproval = approvalDirs().some(({ dir }) => fs.existsSync(path.join(dir, approvalName(taskId, kind))));
   if (!work && !hasApproval) {
-    // Cheap common case: nothing on disk names this task. A committed entry removed from the working tree only makes
-    // the check stricter, so it is not looked up.
+    // Cheap common case: nothing on disk names this task. A committed entry removed from the working tree only makes the check stricter.
     return null;
   }
   const pub = ownerKey();
-  // 2.77.3 (B-111): a signed approval, or one recorded in beta mode, decides first (a beta one with or without a key).
+  // A signed approval, or one recorded in beta mode, decides first.
   const a = signedApproval(taskId, pub, kind);
   if (a?.viaBeta) return { ...K.fromApproval(a.approval), by: a.approval.by, why: a.approval.why, at: a.approval.at, source: 'owner-beta', file: a.file, recordedBy: a.approval.recordedBy, beta: a.beta };
   if (pub) {
     if (a) return { ...K.fromApproval(a.approval), by: a.approval.by, why: a.approval.why, at: a.approval.at, source: 'owner-signed', file: a.file };
-    // 2.67.0: an entry an outside agent recorded under the owner's signed delegation (harness/delegation.mjs) carries the
-    // signed delegation; it counts when that signature verifies, covers this action and agent and the entry's time, and
-    // the commit that set the entry is that agent's.
+    // An entry an outside agent recorded under the owner's signed delegation (harness/delegation.mjs) counts when that
+    // signature verifies, covers this action, agent and the entry's time, and the commit that set it is that agent's.
     const committed = git(root, 'rev-parse', '--verify', 'HEAD').status === 0 ? entryAt(root, 'HEAD', taskId, K.section) : null;
     if (committed?.delegation && !K.validate(committed) && embeddedDelegationOk(committed.delegation, pub, { action: kind, agent: committed.recordedBy, at: committed.at })) {
       const setter = setterOf(root, taskId, committed, K.section);
@@ -249,8 +228,8 @@ function resolveOwnerDecision(taskId, root, kind) {
   if (bad) return { ignored: `${TYPE_RECORD_REL} names ${taskId}, but ${bad}` };
   const setter = setterOf(root, taskId, committed, K.section);
   if (!setter) return { ignored: `${TYPE_RECORD_REL}: the commit that set ${taskId}'s entry wasn't found, so who wrote it can't be checked` };
-  // 2.59.1: an agent's commit counts when the entry says it was recorded on a person's permission, by that agent, and
-  // the agent isn't a worker (harness/permission.mjs).
+  // An agent's commit counts when the entry says it was recorded on a person's permission, by that agent, and the agent isn't
+  // a worker (harness/permission.mjs).
   if (setter.agent && permissionText(committed.permission).length >= 10 && permittedSetter(setter.agent) && String(committed.recordedBy || '') === setter.agent) {
     return { ...committed, source: 'owner record', onPermission: true, commit: setter.sha.slice(0, 8), ...(same(work, committed) ? {} : { note: `the working copy of ${TYPE_RECORD_REL} differs from the committed one, which is what counts` }) };
   }
@@ -258,7 +237,7 @@ function resolveOwnerDecision(taskId, root, kind) {
   return { ...committed, source: 'owner record', commit: setter.sha.slice(0, 8), ...(same(work, committed) ? {} : { note: `the working copy of ${TYPE_RECORD_REL} differs from the committed one, which is what counts` }) };
 }
 
-/** 2.77.3 (B-111): words for a decision recorded in beta mode. */
+/** Words for a decision recorded in beta mode. */
 const betaHow = (o) => `beta mode, recorded by ${o.recordedBy || 'the owner\'s stand-in'}, ${o.file}; counts while beta mode is on (studio/beta.json set by ${o.beta?.by || '?'} at ${String(o.beta?.at || '').slice(0, 16).replace('T', ' ')})`;
 
 /** Words for where an owner type came from, for done and verify output. */
@@ -271,10 +250,7 @@ export function ownerTypeWords(o) {
   return `set by ${o.by}${when ? ` on ${when}` : ''}${o.from ? ` (the title says ${o.from})` : ''} [${how}]: ${o.why}`;
 }
 
-/**
- * 2.60.1 (B-38): words for the owner's visual-proof decision, for done-check and verify output:
- * 'visual proof: off, set by opus-bot on hatch's permission ("…") [commit 1a2b3c4d]: why'.
- */
+/** Words for the owner's visual-proof decision, for done-check and verify output: 'visual proof: off, set by opus-bot on hatch's permission ("…") [commit 1a2b3c4d]: why'. */
 export function ownerVisualWords(o) {
   if (!o?.visual) return '';
   const when = String(o.at || '').slice(0, 10);
@@ -283,7 +259,7 @@ export function ownerVisualWords(o) {
   return `visual proof: ${o.visual}, ${who} [${how}]: ${o.why}`;
 }
 
-/** Every reclassification (and, 2.60.1, visual-proof decision) on record, honoured or not, for the verify output: [{ task, line, ok }]. */
+/** Every reclassification and visual-proof decision on record, honoured or not, for the verify output: [{ task, line, ok }]. */
 export function typeRecordLines() {
   const root = recordRoot();
   const rec = readRecord(root);
@@ -317,7 +293,7 @@ function sign(approval, pub) {
  */
 /** Who may record an owner decision: a person, or a Producer/Director/outside agent on a person's permission. */
 function callerCheck(by, permission, env, action = 'type') {
-  // 2.67.0: the owner's standing delegation to this outside agent (harness/delegation.mjs): --by <agent>, no words.
+  // The owner's standing delegation to this outside agent (harness/delegation.mjs): --by <agent>, no words.
   const d = delegationFor({ action, by, env });
   if (d.ok) return { ok: true, perm: d.permission, onPerm: { ok: true, recordedBy: d.agent, via: 'delegation' }, by: d.owner, delegation: d };
   const r = callerCheckPlain(by, permission, env);
@@ -348,16 +324,16 @@ function commitRecord(files, msg, why) {
   return { committed, commitNote: committed ? '' : ` Committing it failed (${String(r.stderr || r.stdout).trim().split('\n').pop() || `exit ${r.status}`}): commit ${files.join(' and ')} yourself, from this terminal.` };
 }
 
-/** 2.71.0 (x): one decision-log record per type/visual decision (harness/decisions.mjs). */
+/** One decision-log record per type/visual decision (harness/decisions.mjs). */
 function logDecisionFor(action, taskId, who, entry, { evidence, undo }) {
   const d = who.delegation ? who.delegation : who.onPerm ? { via: who.onPerm.via, permission: who.perm } : { via: 'person' };
-  // 2.77.3 (B-111): a beta stand-in's decision is logged "as beta", like approve.mjs's beta approvals.
+  // A beta stand-in's decision is logged "as beta", like approve.mjs's beta approvals.
   const beta = Boolean(who.delegation?.beta);
   logDecision({ action, subject: taskId, by: who.delegation ? who.delegation.agent : entry.by, as: beta ? 'beta' : asOf(d), why: entry.why, evidence: beta ? `beta mode ${who.delegation.agent}: ${evidence}` : evidence, undo });
 }
 
 /**
- * 2.77.3 (B-111): the shared parts of keeping a type or visual decision.
+ * The shared parts of keeping a type or visual decision.
  *   unsignedRefusal: with an owner key, a record that would not count is refused before anything is written.
  *   betaDoc: a beta stand-in's decision as an approval in approve.mjs's beta format.
  *   readBack: the decision as every check reads it, right after writing it (null when it counts).
@@ -399,7 +375,7 @@ export function reclassify({ task, from, to, by, why, permission = '', commit = 
   if (beta) entry.beta = { by: who.delegation.doc.by, at: who.delegation.doc.at };
   const approvalRel = `${APPROVALS_REL}/${approvalName(task.id)}`;
   if (beta && !auto) {
-    // 2.77.3 (B-111): a beta stand-in's reclassification, kept where the checks look first (signedApproval).
+    // A beta stand-in's reclassification, kept where the checks look first (signedApproval).
     fs.mkdirSync(path.join(REPO_ROOT, APPROVALS_REL), { recursive: true });
     fs.writeFileSync(path.join(REPO_ROOT, approvalRel), `${JSON.stringify(betaDoc({ kind: 'type', task: task.id, from, to: target, title: task.title, by: entry.by, why: entry.why, at }, who), null, 2)}\n`);
     entry.approval = approvalRel;
@@ -414,7 +390,7 @@ export function reclassify({ task, from, to, by, why, permission = '', commit = 
     files.push(approvalRel);
   }
   const rec = readRecord(REPO_ROOT);
-  const prevType = rec.tasks[task.id]?.type || null; // 2.71.0 (x): the decision log's undo
+  const prevType = rec.tasks[task.id]?.type || null; // for the decision log's undo
   rec.note = NOTE;
   if (auto) {
     delete rec.tasks[task.id];
@@ -429,7 +405,7 @@ export function reclassify({ task, from, to, by, why, permission = '', commit = 
   const msg = auto ? `${task.id}: back to the title's type (${from}), by ${entry.by}` : `${task.id}: owner reclassified it from ${from} to ${target} (${entry.by})`;
   const { committed, commitNote } = commit ? commitRecord(files, msg, entry.why) : { committed: false, commitNote: '' };
   const counts = beta ? 'It counts while beta mode stays on (npm run beta -- status); the use is logged (npm run decisions).' : pub ? 'It counts once the approval file is on the studio\'s main branch.' : 'It counts once committed (from your terminal, not an agent\'s); until the studio has an owner key it is a record, not a signature.';
-  // 2.77.3 (B-111): read it back as the checks do; a record that doesn't count is not reported as done.
+  // Read it back as the checks do; a record that doesn't count is not reported as done.
   const notCounted = !auto && committed ? readBack(task.id, 'type', 'type') : null;
   if (notCounted) return { ok: false, entry, files, committed, message: `${task.id}: the reclassification to "${target}" was written${committed ? ` and committed (${files.join(' and ')})` : ''}, but it does not count: ${notCounted}. done-check, verify and the train still use the title's type (${from}).` };
   return {
@@ -442,8 +418,8 @@ export function reclassify({ task, from, to, by, why, permission = '', commit = 
 }
 
 /**
- * 2.60.1 (B-38): record (or sign) the owner's visual-proof decision for a task: to = off | on | auto (remove it).
- * The same callers as a reclassification (callerCheck), the same file, the same commit, the same signing with an owner key.
+ * Records (or signs) the owner's visual-proof decision: to = off | on | auto (remove it). Same callers (callerCheck), file,
+ * commit and signing as a reclassification.
  */
 export function setVisual({ task, to, by, why, permission = '', commit = true, env = process.env }) {
   const who = callerCheck(by, permission, env, 'visual');
@@ -466,7 +442,7 @@ export function setVisual({ task, to, by, why, permission = '', commit = true, e
   if (beta) entry.beta = { by: who.delegation.doc.by, at: who.delegation.doc.at };
   const approvalRel = `${APPROVALS_REL}/${approvalName(task.id, 'visual')}`;
   if (beta && !auto) {
-    // 2.77.3 (B-111): a beta stand-in's visual-proof decision, kept where the checks look first (signedApproval).
+    // A beta stand-in's visual-proof decision, kept where the checks look first (signedApproval).
     fs.mkdirSync(path.join(REPO_ROOT, APPROVALS_REL), { recursive: true });
     fs.writeFileSync(path.join(REPO_ROOT, approvalRel), `${JSON.stringify(betaDoc({ kind: 'visual', task: task.id, to: target, title: task.title, by: entry.by, why: entry.why, at }, who), null, 2)}\n`);
     entry.approval = approvalRel;
@@ -483,7 +459,7 @@ export function setVisual({ task, to, by, why, permission = '', commit = true, e
   const rec = readRecord(REPO_ROOT);
   rec.note = NOTE;
   rec.visual = rec.visual && typeof rec.visual === 'object' ? rec.visual : {};
-  const prevVisual = rec.visual[task.id]?.visual || null; // 2.71.0 (x): the decision log's undo
+  const prevVisual = rec.visual[task.id]?.visual || null; // for the decision log's undo
   if (auto) {
     delete rec.visual[task.id];
     if (fs.existsSync(path.join(REPO_ROOT, approvalRel))) { fs.rmSync(path.join(REPO_ROOT, approvalRel)); files.push(approvalRel); }
@@ -499,7 +475,7 @@ export function setVisual({ task, to, by, why, permission = '', commit = true, e
   const msg = auto ? `${task.id}: visual proof back to the detection, by ${entry.by}` : `${task.id}: owner set visual proof ${target} (${entry.by})`;
   const { committed, commitNote } = commit ? commitRecord(files, msg, entry.why) : { committed: false, commitNote: '' };
   const counts = beta ? 'It counts while beta mode stays on (npm run beta -- status); the use is logged (npm run decisions).' : pub ? 'It counts once the approval file is on the studio\'s main branch.' : 'It counts once committed (by a person, or by the Producer/Director/outside agent that recorded it on permission; never a worker\'s commit); until the studio has an owner key it is a record, not a signature.';
-  // 2.77.3 (B-111): read it back as the checks do; a record that doesn't count is not reported as done.
+  // Read it back as the checks do; a record that doesn't count is not reported as done.
   const notCounted = !auto && committed ? readBack(task.id, 'visual', 'visual') : null;
   if (notCounted) return { ok: false, entry, files, committed, message: `${task.id}: the visual-proof decision (${target}) was written${committed ? ` and committed (${files.join(' and ')})` : ''}, but it does not count: ${notCounted}. done-check and the train still use the detection.` };
   return {
