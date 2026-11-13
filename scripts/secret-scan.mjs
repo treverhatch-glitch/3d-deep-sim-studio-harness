@@ -5,11 +5,11 @@
  *
  *   (no flag)       what git would publish: tracked files plus untracked files that are not ignored, AND every
  *                   commit not on the base branch yet (the `secrets` gate in verify). A key committed and then
- *                   cleaned from the file is still in a commit; PU-33 (P-046): the gate reads those commits too.
+ *                   cleaned from the file is still in a commit, so the gate reads those commits too.
  *   --staged        what is staged, read from the index (the pre-commit hook), not the file on disk: a token
  *                   staged and then cleaned only in the file is what the commit would hold.
  *   --since <ref>   only the commits in <ref>..HEAD: the lines each one adds and its message.
- *   --no-history    only the files (the scan before 2.58.0).
+ *   --no-history    only the files.
  *
  * The base for the commits: origin/$GITHUB_BASE_REF (CI), origin/HEAD, origin/main, origin/master, then the
  * studio's branch (a lane's main checkout), main or master when HEAD is on another branch; the commits since the
@@ -64,8 +64,8 @@ const IN_GIT = where.status === 0 && whereLines[0] === 'true';
 const PREFIX = IN_GIT ? whereLines[1] || '' : '';
 const TOP = IN_GIT && whereLines[2] ? whereLines[2] : ROOT;
 
-// PU-33: skips are tied to their real place from the repo's top (before 2.58.0 any secrets.mjs or *.lock
-// anywhere was skipped). harness/secrets.mjs spells out the shapes; the root lockfile is npm's hashes.
+// Skips are tied to their real place from the repo's top, never any secrets.mjs or *.lock anywhere.
+// harness/secrets.mjs spells out the shapes; the root lockfile is npm's hashes.
 const SKIP_FILES = new Set(['harness/secrets.mjs', 'package-lock.json']);
 const SKIP_DIRS = ['.studio/locks/'];
 const skipped = (repoRel) => SKIP_FILES.has(repoRel) || SKIP_DIRS.some((d) => repoRel.startsWith(d));
@@ -243,7 +243,7 @@ function coveredBlobs() {
 }
 let covered = new Set();
 
-/** PU-33 (P-046): the staged blobs, read from the index (`git diff --cached`; GIT_INDEX_FILE is honoured). */
+/** The staged blobs, read from the index (`git diff --cached`; GIT_INDEX_FILE is honoured). */
 function scanStaged() {
   const r = git(['diff', '--cached', '--raw', '-z', '--no-abbrev', '--no-renames', '--diff-filter=ACMT']);
   if (r.status !== 0) throw new Error(`git diff --cached failed: ${String(r.stderr || '').trim().slice(0, 200)}`);
@@ -323,7 +323,7 @@ const BINARY_EXT = new RegExp(`\\.(?:${BINARY_EXTS.join('|')})$`, 'i');
 const NOT_BINARY = ['.', ...BINARY_EXTS.map((e) => `:(exclude,icase)*.${e}`)];
 
 /**
- * PU-33 (P-046): every commit in the range: its message, and the lines it adds (a merge: the lines in no parent,
+ * Every commit in the range: its message, and the lines it adds (a merge: the lines in no parent,
  * `--cc`). A file git shows as binary (UTF-16, or marked `-diff`/`binary` in .gitattributes) is read back from
  * the commit and scanned whole when it is text. Returns the number of commits read.
  */

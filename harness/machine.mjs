@@ -1,21 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/machine.mjs — 2.68.0 (m): the machine scan, the resource monitor and the disk budget.
+ * harness/machine.mjs — the machine scan, the resource monitor and the disk budget.
  *
  *   npm run machine [-- --json] [--cached]   scan now (or show the last scan), write .studio/machine.json, print it
  *
- * scanMachine() reads the hardware the studio runs on, read-only, with one bounded probe per source (each with a
- * timeout; a probe that fails leaves its fields null and says why in `errors`, never a crash):
- *   - OS and arch; logical cores and, where the OS says, performance vs efficiency cores (Windows: CIM
- *     Win32_Processor; macOS: sysctl hw.perflevel0/1.logicalcpu; Linux: /proc/cpuinfo and /sys/devices/cpu_core|cpu_atom);
- *   - RAM total/free and the commit charge (Windows: Win32_PerfFormattedData_PerfOS_Memory CommittedBytes/CommitLimit,
- *     else Win32_OperatingSystem's virtual memory; Linux: /proc/meminfo MemAvailable, Committed_AS, CommitLimit;
- *     macOS: vm_stat and kern.memorystatus_level, no commit charge);
- *   - GPUs: nvidia-smi when present (name, VRAM total/free, busy), macOS system_profiler (GPU, unified memory),
- *     Windows Win32_VideoController names; else none;
- *   - the disk holding the studio (fs.statfs), the power source (Win32_Battery, pmset -g batt, /sys/class/power_supply),
- *     the CPU's busy fraction (two os.cpus() samples), and the top 10 processes by memory: names, MB, CPU% only
- *     (never command lines; nothing is stopped or touched).
+ * scanMachine() reads the hardware read-only, with one bounded probe per source (each with a timeout; a probe that
+ * fails leaves its fields null and says why in `errors`, never a crash): OS and arch; cores (performance vs efficiency
+ * where the OS says); RAM and the commit charge (Windows CIM, Linux /proc/meminfo, macOS vm_stat; no commit charge on
+ * macOS); GPUs (nvidia-smi, macOS system_profiler, Windows Win32_VideoController names); the disk holding the studio
+ * (fs.statfs); the power source; the CPU busy fraction (two os.cpus() samples); and the top 10 processes by memory:
+ * names, MB, CPU% only (never command lines; nothing is stopped or touched).
  * Shape: { os, arch, osName, cores: { logical, physical, performance, efficiency, source }, cpu: { model, busy },
  *   ram: { totalGb, freeGb, commitUsedGb, commitLimitGb, pressure }, gpus: [{ name, vramGb, vramFreeGb, busy }],
  *   disk: { path, freeGb, totalGb }, power: { onBattery, percent, source }, processes: [{ name, mb, cpu }], errors, at }.
@@ -287,7 +281,7 @@ export function scanMachine({ root = MACHINE_ROOT, env = process.env, platform =
   if (p.ram.totalGb === null) p.ram.totalGb = probe('ram', () => r1(totalmem() / GB));
   if (p.ram.freeGb === null) p.ram.freeGb = probe('ram', () => r1(freemem() / GB));
   probe('disk', () => { const s = statfs(root); p.disk.freeGb = r1((Number(s.bavail) * Number(s.bsize)) / GB); p.disk.totalGb = r1((Number(s.blocks) * Number(s.bsize)) / GB); return true; });
-  // 2.70.0 (w): the lane copies' total from the last lane disk report (harness/lane-disk.mjs; never measured here).
+  // The lane copies' total from the last lane disk report (harness/lane-disk.mjs; never measured here).
   { const l = readJson(path.join(root, '.studio', 'lanes', 'disk.json')); if (Number.isFinite(l?.totalGb)) p.disk.lanesGb = l.totalGb; }
   p.at = new Date(now).toISOString();
   return p;
@@ -317,7 +311,7 @@ export function readMachine({ maxAgeMs = null, root = MACHINE_ROOT, env = proces
 
 /**
  * The memory a new job can still get, in GB: on Windows the smaller of free memory and commit headroom (limit - used;
- * the 2.68 research: "available" stayed 5.8 GB while commit was 55/60 GB and allocations failed); elsewhere free memory
+ * "available" can look fine while the commit limit is nearly reached and allocations fail); elsewhere free memory
  * (Linux's Committed_AS routinely passes CommitLimit under overcommit, so it isn't a limit there). null when unknown.
  */
 export function memHeadroomGb(profile) {

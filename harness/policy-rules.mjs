@@ -1,5 +1,5 @@
 /**
- * harness/policy-rules.mjs — 2.71.0 (x): the studio policy file and autonomous mode (the overseer's duties 19 and 20).
+ * harness/policy-rules.mjs — the studio policy file and autonomous mode (the overseer's duties 19 and 20).
  *
  * studio/policy.json is the owner's plain rules, read by agents (npm run policy) and enforced by the harness:
  *   {
@@ -8,28 +8,26 @@
  *     "never": ["delete-lanes", "money", "protected-files", "gates"],
  *     "notes": ["free text rules the owner wants every agent to read"]
  *   }
- * A missing file means today's behaviour (no autonomous mode, the harness's own rules). The file is protected (the
- * shipped list: studio/protected.json, approve.mjs, tiers.mjs), so a lane that writes it is tier C, and it counts the
- * way the owner's delegation does (harness/delegation.mjs): as committed in the main checkout (HEAD); with an owner key
- * only with a valid signature by it; without one only when the commit that set it is not an agent's (no Studio-Agent
- * trailer). Anything else reads as the defaults, with the reason shown by `npm run policy`.
+ * A missing file means no autonomous mode. The file is protected (a lane that writes it is tier C). It counts the way
+ * the owner's delegation does (harness/delegation.mjs): as committed in the main checkout (HEAD); with an owner key
+ * only with a valid signature by it; without one only when the commit that set it has no Studio-Agent trailer.
+ * Anything else reads as the defaults, with the reason shown by `npm run policy`.
  *
  * Autonomous mode: while the policy counts and says `autonomous.allowed: true`, the named overseer agent may take the
  * listed game-dev decisions (default: train-release, type, yes, hold, visual, asset-review, quarantine) with
  * `--by <agent>` and no per-decision permission. Each is recorded with `as: "autonomous"` in the decision log
  * (harness/decisions.mjs) and goes on a review list that never blocks work. Never in autonomous mode, whatever the
  * file says (NEVER_AUTONOMOUS): protected files, gates (harness code, silencers, deleted tests) and this file, money,
- * deletes (janitor-lanes, any rm), visibility, keys. A train release in autonomous mode is refused for a lane held for
- * any of those (autonomousReleaseRefusal).
+ * deletes (janitor-lanes, any rm), visibility, keys. A train release is refused for a lane held for any of those.
  *
  * Who turns it on: the owner, in their own terminal (`npm run policy -- autonomous on --agent <name> --by <owner>`), or
  * a game dev proposes it (`npm run autonomy -- mode autonomous on --agent <name> --by <game dev>`, a proposal in
  * .studio/policy-proposal.json) and the owner confirms it (`npm run policy -- confirm --by <owner>`). An agent never
  * turns it on: confirm and `autonomous on` refuse agents' shells, lanes and launched sessions, and a policy.json an
- * agent commits doesn't count. Anyone but a worker may pause it at once (`npm run autonomy -- mode autonomous off`):
- * it only takes power away (.studio/autonomy-paused.json; the owner's next confirm or `autonomous on` clears it).
- * The rules live here; harness/policy.mjs is the CLI (npm run policy). Modules import this one, never the CLI: a module
- * that the CLI's own imports load back would wait on its top-level await (a load deadlock).
+ * agent commits doesn't count. Anyone but a worker may pause it at once (`npm run autonomy -- mode autonomous off`);
+ * that only takes power away (.studio/autonomy-paused.json; the owner's next confirm or `autonomous on` clears it).
+ * harness/policy.mjs is the CLI. Modules import this one, never the CLI: a module the CLI's imports load back would
+ * wait on its top-level await (a load deadlock).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -50,16 +48,15 @@ export const PAUSE_REL = '.studio/autonomy-paused.json';
 /** The game-dev decisions autonomous mode can ever cover (a policy naming anything else is ignored for it). */
 export const AUTONOMOUS_ELIGIBLE = ['train-release', 'type', 'yes', 'hold', 'visual', 'asset-review', 'quarantine'];
 export const DEFAULT_AUTONOMOUS_ACTIONS = [...AUTONOMOUS_ELIGIBLE];
-/** Never in autonomous mode, whatever the file says (the owner's direction: safety stays owner-only). */
+/** Never in autonomous mode, whatever the file says (safety stays owner-only). */
 export const NEVER_AUTONOMOUS = ['protected-files', 'gates', 'policy', 'money', 'deletes', 'visibility', 'keys'];
 export const NEVER_WORDS = 'protected files, gates and the policy file, money, deletes (janitor-lanes, any rm), visibility and keys';
 export const DEFAULT_REVIEW_H = 72;
 /** A policy "never" word and the decision actions it rules out (for any agent: delegation and autonomous mode). */
 export const NEVER_ACTIONS = { 'delete-lanes': ['janitor-lanes'], deletes: ['janitor-lanes'], 'janitor-lanes': ['janitor-lanes'], 'upgrade-auto': ['upgrade-auto'], upgrades: ['upgrade-auto'] };
 /**
- * Tier rules (harness/tiers.mjs) whose holds autonomous mode never releases: every shipped tier-C rule (protected files,
- * harness code, deleted tests/goldens/regressions, irreversible formats, upgrade merges, protected config proposals,
- * check silencers). A lane held only by a game's own rule, or after too many hand-backs (tier B), may be released.
+ * Tier rules (harness/tiers.mjs) whose holds autonomous mode never releases: every shipped tier-C rule. A lane held
+ * only by a game's own rule, or after too many hand-backs (tier B), may be released.
  */
 export const NEVER_RELEASE_RULES = ['protected', 'harness', 'test-deleted', 'golden-deleted', 'regression-deleted', 'irreversible', 'upgrade', 'config-proposal-protected', 'silencer', 'config-proposal-silencer'];
 
@@ -88,14 +85,14 @@ function shapeError(d) {
 }
 
 /**
- * 2.73.0 (e): the policy's "audit" and "routing" blocks.
+ * The policy's "audit" and "routing" blocks.
  *   "audit": { "rate": 0.1 }   the share of hands-free landings and autonomous decisions picked for an after-the-fact
  *                              audit (harness/audit.mjs); default 0.1 while autonomous mode is on, else 0.
  *   "routing": { "cheapFirst": ["chore", "docs", "test"], "tiers": { "cheap": "<model>", "mid": "<model>", "top":
  *                "<model>" }, "models": ["<model>", …], "holdout": 0 }   cheap-first routing (harness/routing.mjs): the
  *                listed task types/tracks start on the cheapest listed tier; the router never picks a model the policy
- *                doesn't list (tiers' values and "models"). "holdout" (default 0, OFF: deferred by the owner until API
- *                credit is available) sends that share of matching tasks to the default tier to measure the difference.
+ *                doesn't list. "holdout" (default 0, OFF until the owner has API credit) sends that share of matching
+ *                tasks to the default tier to measure the difference.
  */
 function auditRoutingShapeError(d) {
   const au = d.audit;
@@ -127,7 +124,7 @@ export function effectivePolicy(doc) {
   };
 }
 
-/** 2.73.0 (e): the routing block in force: { cheapFirst, tiers, models (every model it lists), holdout }. */
+/** The routing block in force: { cheapFirst, tiers, models (every model it lists), holdout }. */
 export function routingOf(r) {
   const o = r && typeof r === 'object' && !Array.isArray(r) ? r : {};
   const tiers = {};
@@ -218,8 +215,7 @@ export function autonomousFor({ action, by, env = process.env, root = mainRoot()
   const worker = [who, owner].find((n) => n && WORKER_NAME.test(n));
   if (worker) return no(`${worker} is a worker agent`);
   if (owner && owner.toLowerCase() !== who.toLowerCase()) return no(`this shell works as ${owner}, not ${a.agent}`);
-  // owner: the person who turned autonomous mode on (records that must name a person, like a delegation's, name them);
-  // the decision log names the agent (harness/decisions-log.mjs).
+  // owner: the person who turned it on (records that must name a person name them); the decision log names the agent.
   return { ok: true, autonomous: true, owner: String(eff.autonomous.by || 'the owner').slice(0, 60), agent: String(a.agent), at: eff.autonomous.at || (p.commit ? `commit ${p.commit}` : ''), until: null, signed: p.signed, permission: autonomyWords(eff).slice(0, 500), doc: p.doc, reviewWithinH: eff.autonomous.reviewWithinH, setBy: eff.autonomous.by, why: '' };
 }
 
@@ -388,7 +384,6 @@ export function policyText({ root = mainRoot() } = {}) {
   if (e.ignoredActions.length && p.counts) L.push(`Ignored in the file's actions (never autonomous): ${e.ignoredActions.join(', ')}.`);
   L.push(`Never (any agent, whatever the file says, in autonomous mode): ${NEVER_WORDS}.${e.never.filter((x) => !NEVER_AUTONOMOUS.includes(x)).length ? ` The file adds: ${e.never.filter((x) => !NEVER_AUTONOMOUS.includes(x)).join(', ')}.` : ''}`);
   if (e.notes.length) { L.push('The owner\'s notes for every agent:'); for (const n of e.notes) L.push(`  - ${n}`); }
-  // 2.73.0 (e): audits and cheap-first routing.
   const on = p.counts && a.allowed && !p.paused;
   const ar = p.counts && e.audit.rate !== null ? e.audit.rate : on ? 0.1 : 0;
   L.push(`Audits: ${ar ? `${Math.round(ar * 1000) / 10}% of hands-free landings and autonomous decisions${p.counts && e.audit.rate !== null ? ' ("audit.rate")' : ' (the default while autonomous mode is on)'}, picked by a draw seeded with the task or decision id, reviewed after the fact by someone who didn't do the work (npm run decisions -- review); never blocks work` : 'off (0: no "audit.rate" and autonomous mode is off)'}.`);

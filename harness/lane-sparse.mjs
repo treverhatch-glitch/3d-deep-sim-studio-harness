@@ -1,9 +1,7 @@
 /**
- * harness/lane-sparse.mjs — 2.70.0 (w): sparse lanes. A lane copy leaves out the paths its task can't need.
- *
- * The evidence: 90-100 GB of lane copies on one 1 TB drive, and in a real game repo about 75% of the tracked bytes are
- * docs/ and media a code lane never touches. Lanes already use a non-cone sparse checkout to leave studio/ and .studio/
- * out (they are links to the main checkout's); this adds the game's own exclusions to those patterns.
+ * harness/lane-sparse.mjs — sparse lanes. A lane copy leaves out the paths its task can't need (docs/ and media are
+ * most of a game repo's bytes). Lanes already use a non-cone sparse checkout to leave studio/ and .studio/ out (they
+ * are links to the main checkout's); this adds the game's own exclusions to those patterns.
  *
  *   What is left out   the game manifest's "laneExclude": ["<glob>", ...] (<game>/studio.gates.json, read as committed
  *                      in the main checkout: the manifest is protected) plus STUDIO_LANE_EXCLUDE (comma-separated
@@ -19,13 +17,12 @@
  *                      to a left-out tracked file, and refuses to add a new one) are found at task done and before the
  *                      lane's checks, and the lane is widened over them so they show as changes.
  *   The checks         never see a partial tree: before the lane's own verify (scripts/run-gates.mjs) and the game's
- *                      checks (harness/game-gates.mjs, also run by task done and lanes refresh), every left-out file a
- *                      check that is about to run reads is put back (widenForChecks), and the run says so. What a
- *                      check reads: its "needs" globs (studio/gates.json gate or manifest gate), else a game check's
- *                      "paths", else the game's whole folder; harness checks have a built-in list (CHECK_NEEDS). A
- *                      verify in a lane that still leaves files out never writes the shared gate cache. Train builds
- *                      and the whole-game check use their own scratch copies with only studio/ and .studio/ left out
- *                      (full trees); they don't read laneExclude.
+ *                      checks (harness/game-gates.mjs), every left-out file a check about to run reads is put back
+ *                      (widenForChecks), and the run says so. A check reads its "needs" globs (studio/gates.json or
+ *                      manifest gate), else a game check's "paths", else the game's whole folder; harness checks have
+ *                      CHECK_NEEDS. A verify in a lane that still leaves files out never writes the shared gate
+ *                      cache. Train builds and the whole-game check use full scratch copies (only studio/ and
+ *                      .studio/ left out) and don't read laneExclude.
  *
  * Imports only leaf modules (no worktree.mjs: it imports this one).
  */
@@ -36,7 +33,7 @@ import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { globRe } from './merge-lane.mjs';
 import { readJson } from './fsafe.mjs';
 
-/** The patterns every lane copy has had since 2.29: everything but the shared studio/ and .studio/ links. */
+/** The patterns every lane copy has: everything but the shared studio/ and .studio/ links. */
 export const BASE_SPARSE = ['/*', '!/studio/', '!/.studio/'];
 /** Never left out of a lane: the harness that runs its checks, the package files, the shared links. */
 const NEVER_EXCLUDED = ['harness/x.mjs', 'scripts/x.mjs', 'qa/x.mjs', 'tools/x.mjs', 'package.json', 'package-lock.json', 'node_modules/x', 'studio/x', '.studio/x'];
@@ -132,7 +129,7 @@ export function taskScope(task, { lane = null, events = null } = {}) {
   const added = task ? ev.filter((e) => e.type === 'task.added' && e.task === task).pop() : null;
   const meta = added?.meta || {};
   const role = meta.role || (String(added?.msg || '').match(/^Queued [A-Z]+-\d+ \[[^\]]*\] \(([a-z-]+)\)/) || [])[1] || null;
-  // 2.78.2 (item 9): a region entry (path/sim.ts#symbol) keeps its whole file.
+  // A region entry (path/sim.ts#symbol) keeps its whole file.
   const list = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).map((x) => norm(String(x).split('#')[0])).filter(Boolean);
   const keep = uniq([...list(lane), ...list(meta.paths), ...list(meta.lane)]).filter((p) => !/^(studio|\.studio)(\/|$)/.test(p));
   const track = meta.track || null;
@@ -140,8 +137,8 @@ export function taskScope(task, { lane = null, events = null } = {}) {
 }
 
 /**
- * The sparse patterns for a new lane copy: { on, patterns, exclude, keep, why }. on=false: the 2.29 patterns (only
- * studio/ and .studio/ left out).
+ * The sparse patterns for a new lane copy: { on, patterns, exclude, keep, why }. on=false: only studio/ and .studio/ left
+ * out.
  */
 export function lanePlan({ root = studioMain(), env = process.env, task = null, lane = null, events = null } = {}) {
   const cfg = laneExcludeConfig({ root, env });
@@ -166,7 +163,7 @@ export function writeRecord(root, agent, rec) {
 }
 export const removeRecord = (root, agent) => { try { fs.rmSync(recordFile(root, agent), { force: true }); } catch {} };
 
-/** The lane copy's sparse patterns now: { sparse, patterns, extra (exclusions beyond the 2.29 ones), on }. */
+/** The lane copy's sparse patterns now: { sparse, patterns, extra (exclusions beyond the base ones), on }. */
 export function laneSparseState(dir = REPO_ROOT) {
   const cfg = git(dir, 'config', '--get', 'core.sparseCheckout');
   if (String(cfg.stdout || '').trim() !== 'true') return { sparse: false, on: false, patterns: [], extra: [] };
@@ -178,13 +175,11 @@ export function laneSparseState(dir = REPO_ROOT) {
 }
 
 /**
- * 2.78.0 (B-105): a lane copy's studio/ and .studio/ are links (a symlink, or a junction on Windows) to the main
- * checkout's. createLaneCopy leaves them out with a sparse checkout, so git never writes through them. When that
- * state is lost (the entries lose skip-worktree), a merge of main sees main's live board files through the link as
- * local changes ("commit your changes or stash") and, were it to go on, would write main's files. Before any merge
- * or rebase in the lane: mark every tracked path under a linked folder skip-worktree again (the state the copy was
- * made in), and say whether the copy's sparse patterns still leave the folders out, so files main adds there are not
- * written either. Touches only this lane's index; the link and main's files are never opened. A folder that is a real
+ * A lane copy's studio/ and .studio/ are links (a symlink, or a junction on Windows) to the main checkout's, left out
+ * by the sparse checkout so git never writes through them. If the entries lose skip-worktree, a merge of main sees
+ * main's live board files through the link as local changes and could write main's files. Before any merge or rebase
+ * in the lane: mark every tracked path under a linked folder skip-worktree again, and say whether the sparse patterns
+ * still leave the folders out. Touches only this lane's index; the link and main's files are never opened. A real
  * folder (not a link) is left alone. Returns { links: [names], marked, sparseOk, why? }.
  */
 export function protectSharedLinks(dir = REPO_ROOT) {

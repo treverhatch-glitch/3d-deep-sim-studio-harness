@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 /**
- * harness/model-pools.mjs — 2.77.0 (n): model pools and quota-aware routing that prefers Gemini (the owner's Priority 8).
- *
- * The owner's words: "i'd love to lean on gemini for more tasks and use its usage more than claudes... argon is a solid
- * model, gemini flash has a bigger usage pool available but less capable". So the Line Producer (harness/line-producer.mjs)
- * routes each builder task to a model POOL:
+ * harness/model-pools.mjs — model pools and quota-aware routing that prefers Gemini (it has the bigger usage pool;
+ * Flash is less capable, Argon solid). The Line Producer (harness/line-producer.mjs) routes each builder task to a
+ * model POOL:
  *   - small or mechanical tasks (size 1-2, or a chore/docs/test task) -> Gemini Flash (the big pool),
  *   - normal features (size 3, or no size) -> Gemini Argon,
  *   - hard work (size 4-5) and chain-breakers -> Claude (Opus, then Sonnet),
@@ -24,15 +22,15 @@
  *            least minSamples, it landed less than `floor`;
  *   protectedHours (24): how long a protected hand-back keeps a pool off protected-heavy tasks.
  * Observed use comes from the session events (agent.session.start per session, agent.session.end tokens; agy's are
- * often estimated, harness/agent.mjs agyUsage). agy's own quota: no `agy usage`/`agy quota` command appears in the crew's
- * evidence (only `agy models`), so it is read only when STUDIO_AGY_QUOTA_CMD names one (e.g. "agy usage --json"; JSON
+ * often estimated, harness/agent.mjs agyUsage). agy's own quota: no `agy usage`/`agy quota` command is known (only
+ * `agy models`), so it is read only when STUDIO_AGY_QUOTA_CMD names one (e.g. "agy usage --json"; JSON
  * with per-model used/limit/remaining/percent, or text lines "<model> … 37%" / "… 120/500"), cached for
  * STUDIO_AGY_QUOTA_SEC (600) in .studio/routing/agy-quota.json. UNTESTED on real agy.
  * Outcomes: .studio/routing/outcomes.json (rebuilt from the events each Line Producer pass, older rows kept): per
  * session { task, agent, model, pool, size, result landed|handed|open|other, protected }.
  *
  * On when STUDIO_MODEL_ROUTING=on, or (auto, the default) when studio/models.json exists or agy is enrolled
- * (.studio/agy-settings.json, `npm run agent -- allow agy`); off: the 2.76 tier routing as before.
+ * (.studio/agy-settings.json, `npm run agent -- allow agy`); off: the tier routing.
  *
  *   npm run models -- status [--json]     pools, use, success rates, and what routing would pick now and why
  *   npm run models -- init [--force]      write studio/models.json with the defaults (the guesses, to edit)
@@ -78,7 +76,7 @@ export const DEFAULT_MODELS = {
   nearPct: 85,
   success: { last: 6, floor: 0.34, minSamples: 3 },
   protectedHours: 24,
-  // 2.83: the roles a pool route applies to; any other role keeps its own role model.
+  // The roles a pool route applies to; any other role keeps its own role model.
   routeRoles: ['builder', 'engine-porter'],
 };
 
@@ -317,7 +315,7 @@ export function pickPool(ctx, { cfg, state = {}, rates = {}, recentProt = {} }) 
   const size = ctx.chainBreaker ? 'hard' : SIZE_CLASSES.includes(ctx.size) ? ctx.size : 'normal';
   const failed = Math.max(0, Number(ctx.failed) || 0);
   const stickyPool = ctx.startedOn?.model ? poolOf(ctx.startedOn.model, cfg) : null;
-  // 2.79.2: a task that started on Vertex isn't kept there by this rule: the supervisor picks Vertex per start (share, budget).
+  // A task that started on Vertex isn't kept there by this rule: the supervisor picks Vertex per start (share, budget).
   if (ctx.startedOn?.model && ctx.startedOn.tool !== 'vertex' && !failed && !(ctx.protectedHeavy && stickyPool && recentProt[stickyPool]) && !(stickyPool && state[stickyPool]?.out)) return { pool: poolOf(ctx.startedOn.model, cfg), tool: ctx.startedOn.tool || null, model: ctx.startedOn.model, size, why: `it already started on ${ctx.startedOn.model}: it keeps that model until it lands or fails`, skipped: [] };
   const geminiFailed = failed > 0 && ctx.lastFailedPool && isGeminiPool(ctx.lastFailedPool, cfg);
   const listName = failed >= 2 || (failed > 0 && !geminiFailed) ? 'twice' : failed > 0 ? size : null;

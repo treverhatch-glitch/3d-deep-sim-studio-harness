@@ -1,25 +1,24 @@
 /**
- * harness/handback-facts.mjs — 2.66.0 (c): hand-back facts written by the harness, ahead of the agent's prose.
+ * harness/handback-facts.mjs — hand-back facts written by the harness, ahead of the agent's prose.
  *
- * Compressed hand-offs lose the artifact trail first (which files changed, what ran, what failed): research3,
- * 1-agent-harnesses.md F5. So every hand-back (task pause, the merge train's drop, the watcher, a session that ended
+ * Compressed hand-offs lose the artifact trail first (which files changed, what ran, what failed). So every hand-back (task pause, the merge train's drop, the watcher, a session that ended
  * holding its task) starts with a block the harness writes from git and the gate logs, never from the agent:
  *
  *   Hand-back facts (written by the harness from git and the gate logs; the note after them is the agent's or the train's):
  *   - Changed files since <base> (N): a, b, … (+K more)        git diff --name-only <task base>, plus untracked files
  *   - Gates run (<where>, <when>): PASS x, FAIL y               the newest gate run since the task started
  *   - Failure signature: <gate>: <first failing test line> [sig <hash>]
- *   - Failing sub-ids: game:test:<file>, golden:<file>, …        2.72.0 (a): which parts failed (harness/gate-subids.mjs)
- *   - First divergence: tick N, <subsystem>.<field> a -> b      2.72.0 (a): a red golden's (harness/divergence.mjs)
- *   - Timeout-flakes: <files>                                   2.72.0 (a): timed out, passed alone at low load
+ *   - Failing sub-ids: game:test:<file>, golden:<file>, …        which parts failed (harness/gate-subids.mjs)
+ *   - First divergence: tick N, <subsystem>.<field> a -> b      a red golden's (harness/divergence.mjs)
+ *   - Timeout-flakes: <files>                                   timed out, passed alone at low load
  *   - Failing seed: <n>                                         only when the log names one
- *   - Test randomness (advisory|required): N finding(s): …      2.67.0: harness/test-rng.mjs, only when it finds any
+ *   - Test randomness (advisory|required): N finding(s): …      harness/test-rng.mjs, only when it finds any
  *   - Last verify log: <path>
- *   - Lane: <paths> (copy .lanes/<agent>, branch <b>)          2.78.1 (e): from studio/task-holds.json / the task's add
- *   - Commits since <base> (N): <sha> <subject>; …; and K more  2.78.1 (e): git log, the task's own copy (or --grep <ID>)
- *   - Last verify: green|red (<failing gate>) | not run         2.78.1 (e): from the gate evidence above
- *   - Next command: <the exact command to run next>             2.78.1 (e): from the above, never from the note
- *     (the four 2.78.1 lines are left out of the merge train's drop note, whose reason names its own next step)
+ *   - Lane: <paths> (copy .lanes/<agent>, branch <b>)          from studio/task-holds.json / the task's add
+ *   - Commits since <base> (N): <sha> <subject>; …; and K more  git log, the task's own copy (or --grep <ID>)
+ *   - Last verify: green|red (<failing gate>) | not run         from the gate evidence above
+ *   - Next command: <the exact command to run next>             from the above, never from the note
+ *     (the last four lines (Lane to Next command) are left out of the merge train's drop note, whose reason names its own next step)
  *   End of hand-back facts.
  *
  * Where the gate evidence comes from, newest wins: a log the note itself names ("Full log: …" / "Log: …", the train's
@@ -47,7 +46,7 @@ export const FACTS_HEAD = 'Hand-back facts (written by the harness from git and 
 export const FACTS_END = 'End of hand-back facts.';
 export const FILES_CAP = 30;
 export const COMMITS_CAP = 5;
-// 2.78.1: the block must fit the hand-back's own cap (task.mjs HANDBACK_ENTRY_MAX, under 3k with the prose), so it is
+// The block must fit the hand-back's own cap (task.mjs HANDBACK_ENTRY_MAX, under 3k with the prose), so it is
 // kept compact: at most FILES_SHOWN files and COMMITS_CAP commits listed ("and N more"), lines and the whole block capped.
 export const FILES_SHOWN = 12;
 export const FACTS_MAX = 1600;
@@ -81,7 +80,7 @@ export function workDir(agent, dir = null) {
   if (agent && /^[\w.-]+$/.test(agent)) {
     const s = readJson(path.join(STUDIO_STATE_DIR, 'agents', `${agent}.json`));
     const fromSession = s?.copy?.dir ? path.join(root, s.copy.dir) : null;
-    if (fromSession && fs.existsSync(path.join(fromSession, '.git'))) return fromSession; // 2.73.1 (B-51): a lane has its own .git
+    if (fromSession && fs.existsSync(path.join(fromSession, '.git'))) return fromSession; // a lane has its own .git
     const lane = path.join(root, '.lanes', agent);
     if (fs.existsSync(path.join(lane, '.git'))) return lane;
   }
@@ -148,7 +147,7 @@ export function readGateLog(text) {
   const failLine = failGate ? pick(failSeg) || pick(lines) : pick(lines);
   const seedIn = (seg) => { for (const l of seg) { const m = l.match(SEED); if (m) return m[1]; } return null; };
   const seed = seedIn(failSeg) || seedIn(lines);
-  // 2.72.0 (a): which parts failed (sub-ids), a red golden's first divergence, files that were timeout-flakes.
+  // Which parts failed (sub-ids), a red golden's first divergence, files that were timeout-flakes.
   const subIds = subIdsFromLog(text, { roots: [REPO_ROOT, mainRootOf()] });
   const divergence = divergenceFromLog(text)[0] || null;
   const timeoutFlakes = [...new Set(Object.values(timeoutFlakesFromLog(text)).flat())];
@@ -188,7 +187,7 @@ function ownVerify(agent, since) {
 }
 
 /**
- * 2.78.1 (e): the cause of a session's newest verify since `since` (its own record, .studio/gates/<agent>[-full].json):
+ * The cause of a session's newest verify since `since` (its own record, .studio/gates/<agent>[-full].json):
  * { at, ok, gates (the failing ids), failGate, line, key, log } or null when it ran none. `key` names the cause: the
  * failing gate and its first failing line (signatureKey), so the same red seen again has the same key.
  */
@@ -203,7 +202,7 @@ export function verifyCause(agent, since = 0) {
 }
 
 /**
- * 2.78.1 (e): the commits the task made: in its own copy every commit since the task's start (merges of main left out),
+ * The commits the task made: in its own copy every commit since the task's start (merges of main left out),
  * in the shared checkout only those naming the task. { list: [{ sha, subject }], total } or null when git can't say.
  */
 export function taskCommits(dir, base, taskId, { shared = false } = {}) {
@@ -215,7 +214,7 @@ export function taskCommits(dir, base, taskId, { shared = false } = {}) {
   return { list: all.slice(-COMMITS_CAP), total: all.length };
 }
 
-/** 2.78.1 (e): the task's lane (task-holds / its add) and the branch of the copy it works in. */
+/** The task's lane (task-holds / its add) and the branch of the copy it works in. */
 function laneFacts(taskId, cwd) {
   let paths = null;
   try { paths = laneOf(taskId); } catch { paths = null; }
@@ -224,7 +223,7 @@ function laneFacts(taskId, cwd) {
   return { paths, copy: inCopy ? slash(path.relative(mainRootOf(), cwd)) : null, branch };
 }
 
-/** 2.78.1 (e): the exact next command, from the harness's facts only. */
+/** The exact next command, from the harness's facts only. */
 export function nextCommand(f) {
   const id = f.task;
   const red = (f.gates || []).find((g) => !g.ok);
@@ -270,13 +269,13 @@ export function buildFacts(taskId, { agent = null, dir = null, note = '', root =
     seed = r.seed;
     parts = { subIds: gates.some((g) => !g.ok) ? r.subIds : [], divergence: r.divergence, timeoutFlakes: r.timeoutFlakes };
   }
-  // 2.67.0 (B-48): the game's test-randomness findings in the task's copy (advisory unless the game requires it).
+  // The game's test-randomness findings in the task's copy (advisory unless the game requires it).
   const testRng = testRngFacts(cwd);
-  // 2.72.0 (c): the same red fixed before (harness/error-memory.mjs).
+  // The same red fixed before (harness/error-memory.mjs).
   let seen = null;
   try { seen = signature ? seenBefore(signature.key) : null; } catch { seen = null; }
-  // 2.78.1 (e): lane, commits and the next command, so a refresh never starts from scratch.
-  // The merge train's drop note names its own next step (make a clean lane, fix the red): it keeps the 2.66 block.
+  // Lane, commits and the next command, so a refresh never starts from scratch.
+  // The merge train's drop note names its own next step (make a clean lane, fix the red): it keeps the block without them.
   let lane = null;
   let commits = null;
   if (withNext) {
@@ -311,7 +310,7 @@ function factLines(f, { filesShown = FILES_SHOWN, commitsShown = COMMITS_CAP } =
   if (f.seed !== null && f.seed !== undefined) L.push(`- Failing seed: ${f.seed}`);
   if (f.testRng?.count) L.push(`- Test randomness (${f.testRng.mode === 'required' ? 'required' : 'advisory'}, node harness/test-rng.mjs): ${f.testRng.count} finding(s): ${f.testRng.items.slice(0, 5).join(', ')}${f.testRng.count > 5 ? ` (+${f.testRng.count - 5} more)` : ''}`);
   L.push(`- Last verify log: ${f.log || 'none'}`);
-  // 2.78.1 (e): lane, commits, verdict and the next command (absent in a block built by an older harness).
+  // Lane, commits, verdict and the next command (absent in a block built by an older harness).
   if (f.lane !== undefined) L.push(`- Lane: ${f.lane?.paths || 'none (the whole game)'}${f.lane?.copy ? ` (copy ${f.lane.copy}${f.lane.branch ? `, branch ${f.lane.branch}` : ''})` : ''}`);
   if (f.commits !== undefined) {
     const shown = f.commits ? f.commits.list.slice(-commitsShown) : [];
@@ -327,7 +326,7 @@ function factLines(f, { filesShown = FILES_SHOWN, commitsShown = COMMITS_CAP } =
 }
 
 /**
- * 2.78.1: the block at most FACTS_MAX characters, so the hand-back (facts and prose) stays under its cap: long lines are
+ * The block at most FACTS_MAX characters, so the hand-back (facts and prose) stays under its cap: long lines are
  * shortened first (to 200, then 120 characters), then the optional lines go (sub-ids, divergence, flakes, seen before,
  * test randomness), then the rest is cut; the head and the end line always stay.
  */
@@ -347,7 +346,7 @@ function compactFacts(lines) {
   return join([...out, FACTS_END]);
 }
 
-/** 2.78.1: the facts block for a hand-back of `taskId` ('' when the note already has one or the facts can't be read). */
+/** The facts block for a hand-back of `taskId` ('' when the note already has one or the facts can't be read). */
 export function factsFor(taskId, note, opts = {}) {
   const text = String(note || '');
   if (text.includes(FACTS_HEAD)) return '';
