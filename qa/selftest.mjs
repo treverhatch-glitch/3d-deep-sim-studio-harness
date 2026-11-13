@@ -5197,6 +5197,14 @@ if (inShard('selftest-284q')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.85 (b): the engine train's rules check within the memory there is, why it was full, no second run of the same tree, a red part named
+if (inShard('selftest-285b')) {
+  const dir = copyRepo();
+  const { selftest285B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285b.mjs')).href);
+  await selftest285B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

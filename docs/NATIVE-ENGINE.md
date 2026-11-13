@@ -136,6 +136,19 @@ half as much machine time as the land runs. Five settings, all optional, in the 
 - `focus.split` (2.84, B-134): `true` runs one command per filter group (each mapped filter, then `smoke`) in
   sequence instead of one joined command, so one test process holds one system's data at a time. Green when all are,
   red on the first red (its output kept); the result and the `engine.rules` event carry each group's seconds.
+- `focus.splitMax` and `focus.splitGb` (2.85): how many split parts run at once is a decision about free RAM
+  (`harness/rules-parts.mjs`). A part starts only while free RAM minus the floor (`STUDIO_RAM_FLOOR_GB`, 3) holds
+  `splitGb` (the GB one test process is expected to take; default 4, or the largest peak `.studio/engine-ram.json`
+  has measured); at least one part always runs, the check is made again before every start, and `splitMax` is the
+  most at once. `splitMax` unset means 1: in sequence, as 2.84 ran. Each decision is one log line, and the
+  `engine.rules` event carries `splitAtOnce`. The result is the same either way; only the time and the memory differ.
+- What the rules check cost and why (2.85): the `engine.rules` event's `meta` has `mode` (`focus` or `full`), `why`
+  (a full run because of unmapped paths names up to 5 of them, so you can extend `focus.map`), `parts`, `ms` and
+  `splitAtOnce`; `train status` prints the last check's mode, why, runs, seconds and parts. A green full check on
+  exactly the tree the land run will land makes the land run get `STUDIO_RULES_GREEN=1` and `STUDIO_RULES_MODE=full`;
+  the kept result (`.studio/engine/<x>-rules.json`) survives a cancel and restart, so the same batch on the same
+  target tip is not checked again ("rules pass cached" in the log). A red part is handed back by name: the part's
+  filter and command and the failing test names.
 - `maxLanes` (2.84, B-134; default 0, off): a batch with more lanes is checked in consecutive slices of that many,
   each merged on the same target. A red slice is narrowed within itself, so only its lanes can be refused; one
   `engine.rules` event per slice. The whole batch was never one tree in the check, so a sliced check never sends
