@@ -33,6 +33,7 @@ Every architectural change follows:
     models and unblocks what is mechanical. When it can't run the plan it says why in `.studio/line/producer-note.md`
     (`npm run line -- status`); deciding what changes is yours.
 13. When the harness itself helps or gets in the way, write it in `studio/harness-notes/NOTES.md` (`npm run notes -- add --kind well|bad|workaround|upgrade "…"`). Known workarounds show in your briefing; these notes carry over to the next project.
+14. Never write queue, batch or landing rules into a task ("queue only when the queue is short"): the train's `batchMax` and `batchGroup` decide; a task says what to build and what done means.
 
 ## Who you are: you own continuous development
 

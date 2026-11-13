@@ -95,6 +95,16 @@ export async function flowPass({ fill = true, dryRun = false, launcherWhy = null
   // 2.58.3 (N2): so is one whose claim's owner (an agent working outside the launcher) is still active.
   // 2.58.5 (H-5): and its claim is made again in the owner's name, so no crew builder's `task start` takes it meanwhile.
   const { taskBusy, keepClaim } = await import('./busy.mjs');
+  // 2.85: a task queued for a train (the web train's queue, an engine train's queue, or a running train's lanes) is
+  // finished work, not abandoned: its expired claim is let go quietly (no hand-back, no note, the board left as the train
+  // expects), with one task.claim.released, and never kept as "its owner is still working on it". The train lands it or
+  // hands it back. On 2.84 the flow pass handed such tasks back an hour after their session queued them (30 of a crew's
+  // 73 hand-backs in 16 h), and the supervisor then refused to start anyone on them.
+  const released = await releaseWaitingClaims(r.expired, { now, dryRun });
+  if (released.length) {
+    r.expired = r.expired.filter((id) => !released.some((x) => x.id === id));
+    r.waiting = released;
+  }
   const busyNow = [];
   let keptSig = null;
   const evs = r.expired.length ? readRecentEvents(20000) : [];
@@ -119,6 +129,10 @@ export async function flowPass({ fill = true, dryRun = false, launcherWhy = null
     if (f.started.length) actions.push(`started ${f.started.join(', ')}`);
     else if (f.why) launcherWhy = launcherWhy || f.why;
     if (mode.chosen && !mode.autoLaunch) actions.push(`the ${mode.label || 'current'} pace doesn't start agents on its own`);
+  }
+  // 2.85: a task held because task done refused it twice for the same reason is let go once that reason is gone.
+  if (!dryRun) {
+    try { const lifted = await liftSameRefusalHolds({ now }); if (lifted.length) actions.push(`lifted the same-refusal hold on ${lifted.join(', ')} (task done --check no longer gives that reason)`); } catch { /* a help, never a blocker */ }
   }
   // 4. Missing mechanics go back as builder work (once each).
   try {
@@ -149,6 +163,87 @@ export async function flowPass({ fill = true, dryRun = false, launcherWhy = null
     }
   }
   return out;
+}
+
+/**
+ * 2.85: the expired claims whose task waits for a train: [{ id, engine, why }]. Each is released quietly: any claim left
+ * on it is freed, and one task.claim.released (status ok) says so per task and train entry (emitOnChange), so a pass a
+ * minute never repeats it. Nothing is handed back and the board is not touched.
+ */
+export async function releaseWaitingClaims(ids, { now = Date.now(), dryRun = false } = {}) {
+  if (!ids?.length) return [];
+  const { heldForLanding } = await import('./task-hold.mjs');
+  const out = [];
+  for (const id of ids) {
+    let tq = null;
+    try { tq = heldForLanding(id, { holds: {} }); } catch { tq = null; }
+    if (tq?.via !== 'train') continue;
+    const train = tq.engine ? `${tq.engine}` : 'merge';
+    out.push({ id, engine: tq.engine || null, why: tq.why });
+    if (dryRun) continue;
+    try {
+      const { status, release } = await import('./lock.mjs');
+      const l = status(`task:${id}`);
+      if (l?.locked && l.lock?.owner) release(`task:${id}`, l.lock.owner);
+    } catch { /* an expired claim is free already */ }
+    try {
+      const { emitOnChange } = await import('./telemetry.mjs');
+      emitOnChange({ type: 'task.claim.released', agent: 'director', task: id, status: 'ok', msg: `Released ${id}'s claim quietly: it waits for the ${train} train (${tq.why}); not a hand-back, the train lands it or hands it back`.slice(0, 400), meta: { why: `waits for the ${train} train`, train, at: tq.at || null } },
+        `claim.released|${id}`, `${train}|${tq.at || ''}`, { now });
+    } catch { /* the release stands without its event */ }
+  }
+  return out;
+}
+
+/** 2.85: how often a same-refusal hold's check runs, at most (ms). */
+const LIFT_EVERY_MS = 10 * 60000;
+/** `task done <ID> --check`'s output, or '' when it passes; null when it could not run. */
+function doneCheckText(id, { timeoutMs = 180000 } = {}) {
+  return new Promise((resolve) => {
+    import('node:child_process').then(({ spawn }) => import('./event.mjs').then(({ REPO_ROOT }) => {
+      let text = '';
+      let child;
+      try {
+        child = spawn(process.execPath, [path.join(REPO_ROOT, 'harness', 'task.mjs'), 'done', id, '--check'], { cwd: REPO_ROOT, windowsHide: true, env: { ...process.env, STUDIO_LOCK_OWNER: 'harness' }, stdio: ['ignore', 'pipe', 'pipe'] });
+      } catch { resolve(null); return; }
+      const timer = setTimeout(() => { try { child.kill(); } catch {} resolve(null); }, timeoutMs);
+      child.stdout.on('data', (d) => { text += d; });
+      child.stderr.on('data', (d) => { text += d; });
+      child.on('error', () => { clearTimeout(timer); resolve(null); });
+      child.on('close', (code) => { clearTimeout(timer); resolve(code === 0 ? '' : text); });
+    })).catch(() => resolve(null));
+  });
+}
+
+/**
+ * 2.85: lift the holds made for "task done is refused for the same reason twice" (session-outcome.mjs holdIfSameRefusal)
+ * whose refusal is gone: `task done <ID> --check` (seconds) no longer gives that reason. Checked at most every 10 minutes
+ * per task; a check that can't run keeps the hold. `check(id)` -> text ('' = passes) | null is for tests. Returns the ids lifted.
+ */
+export async function liftSameRefusalHolds({ now = Date.now(), check = doneCheckText, everyMs = LIFT_EVERY_MS } = {}) {
+  const { readHolds, updateHolds } = await import('./task-hold.mjs');
+  const { refusalKey } = await import('./handback-kind.mjs');
+  const lifted = [];
+  for (const [id, h] of Object.entries(readHolds())) {
+    const p = h?.parked;
+    if (!p || p.reason !== 'same-refusal' || !p.key) continue;
+    if (now - (Date.parse(p.checkedAt || p.at || '') || 0) < everyMs) continue;
+    const text = await check(id);
+    const still = text === null || (text !== '' && refusalKey(text).includes(String(p.key).slice(0, 120)));
+    let did = false;
+    updateHolds((all) => {
+      const cur = all[id]?.parked;
+      if (!cur || cur.reason !== 'same-refusal' || cur.key !== p.key) return false;
+      if (still) all[id] = { ...all[id], parked: { ...cur, checkedAt: new Date(now).toISOString() } };
+      else { const { parked, ...rest } = all[id]; all[id] = rest; did = true; }
+      return true;
+    });
+    if (did) {
+      lifted.push(id);
+      emitEvent({ type: 'task.hold', agent: 'harness', task: id, to: 'producer', msg: `harness unparked ${id}: task done --check no longer gives the refusal it was held for (${String(p.why || '').slice(0, 200)})`.slice(0, 400), meta: { reason: 'same-refusal', lifted: true } });
+    }
+  }
+  return lifted;
 }
 
 /** Lines for the Director's brief. */

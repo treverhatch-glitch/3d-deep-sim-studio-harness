@@ -18,8 +18,16 @@
  * STUDIO_NO_WORK_EXITS (default 2; 0 turns it off) the launcher parks the task with the reason for the Producer or an
  * outside agent (npm run task -- unpark <ID> --by <name>) instead of relaunching it blindly.
  *
- * No imports: agent.mjs passes the events, the commit count and the park in.
+ * No imports beyond handback-kind.mjs (none of its own): agent.mjs passes the events, the commit count and the park in.
+ *
+ * 2.85: holdIfSameRefusal(). Three sessions in four minutes were started on one task, each refused by `task done` for the
+ * same harness check none of them could fix, each handed it back; then the watchdog parked it "handed back 3 times".
+ * Now, when a session's `task done` is refused for the same reason as the session before it on the task, and it made no
+ * new commit, the task is held at once for the overseer and the Producer (rank 2: a planner, the overseer or the owner
+ * lifts it; never a worker). The Director's flow pass lifts it by itself once `task done --check` no longer gives that
+ * reason (director-flow.mjs liftSameRefusalHolds).
  */
+import { sameRefusalAgain } from './handback-kind.mjs';
 
 const since = (e, t0) => (Date.parse(e.ts) || 0) >= t0;
 
@@ -93,4 +101,21 @@ export function parkIfNoWork(task, events, { park, ask = () => {}, env = process
   if (!park(task, { by: 'launcher', why, at: new Date(now).toISOString() }, { by: 'launcher', msg: `Parked ${task}: ${why}`.slice(0, 600) })) return null;
   ask(`${task} is parked: ${why}`.slice(0, 600));
   return why;
+}
+
+/**
+ * 2.85: after a session's end is recorded: hold its task when this refusal of `task done` is the same as the last
+ * session's (handback-kind.mjs sameRefusalAgain). park(task, parked, { by, msg, to, meta }) is busy.mjs parkOnce.
+ * Returns { task, why } when this call held it, else null.
+ */
+export function holdIfSameRefusal(agent, events, { park, now = Date.now() } = {}) {
+  const end = [...events].reverse().find((e) => e.type === 'agent.session.end' && e.agent === agent);
+  const s = end ? sameRefusalAgain(end, events) : null;
+  if (!s) return null;
+  const why = `task done is refused for the same reason twice: ${s.reason}`.replace(/\s+/g, ' ').slice(0, 600);
+  const at = new Date(now).toISOString();
+  const parked = { by: 'harness', why, reason: 'same-refusal', key: s.key.slice(0, 120), rank: 2, byRole: 'producer', addressedTo: ['overseer', 'producer'], at, checkedAt: at };
+  const msg = `Held ${s.task} for the overseer and the Producer: ${why} (${s.prev}, then ${agent}, no new commit). It lifts by itself once task done --check no longer gives that reason; or fix the cause, then npm run task -- unpark ${s.task} --by <name>`.slice(0, 900);
+  if (!park(s.task, parked, { by: 'harness', msg, to: 'producer', status: 'blocked', meta: { reason: 'same-refusal', addressedTo: ['overseer', 'producer'], key: parked.key } })) return null;
+  return { task: s.task, why };
 }

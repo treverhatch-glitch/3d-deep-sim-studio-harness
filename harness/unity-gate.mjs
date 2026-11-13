@@ -447,6 +447,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     (r.ok ? console.log : console.error)(`[unity-gate] ${r.why}`);
     process.exit(r.ok ? 0 : 2);
   }
+  // 2.85: with no --task and no --branch there is nothing to land. An agent's probe (`node harness/unity-gate.mjs
+  // --engine unity`, as the docs showed the gate) ran a land with no branch and logged an engine.land error and a failed
+  // job; now it prints how to call it and runs nothing (no event). The train passes its branches itself.
+  if (argv.includes('--help') || argv.includes('-h') || (!flag('task') && !flag('branch'))) {
+    const help = argv.includes('--help') || argv.includes('-h');
+    (help ? console.log : console.error)('Usage: node harness/unity-gate.mjs --task <ID> [--engine <x>] [--json] | --branch <name> [--engine <x>] | branch <ID> <branch>. It runs a land of that branch (the engine train runs these for queued work: npm run task -- done <ID> --train queues it). Nothing was run.');
+    process.exit(help ? 0 : 2);
+  }
   const res = await runUnityGate({ engine: flag('engine') || 'unity', task: flag('task'), branch: flag('branch'), log: (m) => console.error(m), onlyUnityTask: argv.includes('--if-unity-task') });
   if (json) console.log(JSON.stringify(res));
   else {

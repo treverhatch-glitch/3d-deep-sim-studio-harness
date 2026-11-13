@@ -5197,6 +5197,15 @@ if (inShard('selftest-284q')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.85 (d): finished work waiting for a train is not handed back; only real hand-backs count; the same done refusal
+// twice holds the task; ready engine work is queued by the harness; the trailer check judges a task's own commits.
+if (inShard('selftest-285d')) {
+  const dir = copyRepo();
+  const { selftest285D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285d.mjs')).href);
+  await selftest285D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

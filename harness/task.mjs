@@ -31,7 +31,7 @@ import { engineTask as engineTaskOf, engineRepo, engineTarget, engineOfTrack, en
 import { nativeEngine, webCodeNamed } from './native.mjs';
 /** Task types that are studio work, not a change to the game (no native-engine track by default). */
 const NON_CHANGE_TYPES = new Set(['chore', 'study', 'research', 'review', 'docs', 'idea', 'playtest']);
-import { misplacedTrailers, misplacedTrailerText } from './trailers.mjs';
+import { misplacedTrailers, misplacedTrailerText, ownCommitOf } from './trailers.mjs';
 import { inferLaneFromText } from './lane-infer.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, carryTaskBranchEx, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf, taskOnBoard } from './worktree.mjs';
 import { laneConfigBefore } from './config-proposal.mjs';
@@ -608,7 +608,18 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     try {
       const lane = inLaneCopy();
       const start = lane ? mainBranchOf(mainRoot()) : taskBase(target.id);
-      const found = start ? misplacedTrailers(REPO_ROOT, start, 'HEAD', 'Golden-Reason') : [];
+      // 2.85 (B-138): from the main checkout taskBase..HEAD is every commit that landed since the task started (a
+      // Director's board commit blocked every task's done): only the task's own commits are judged there (trailers.mjs
+      // ownCommitOf: its Studio-Task, else an agent that claimed it or a subject that starts with its id). In a lane copy
+      // the lane's commits ahead of main are all its own, as before. The train's own gate still judges goldens.
+      let only = null;
+      if (!lane) {
+        const owners = new Set(readRecentEvents(20000).filter((e) => e.task === target.id && e.type === 'task.start' && e.agent).map((e) => e.agent));
+        if (lock.locked && lock.lock?.owner) owners.add(lock.lock.owner);
+        if (agent) owners.add(agent);
+        only = ownCommitOf(target.id, [...owners]);
+      }
+      const found = start ? misplacedTrailers(REPO_ROOT, start, 'HEAD', 'Golden-Reason', { only }) : [];
       if (found.length) {
         const why = misplacedTrailerText(found, 'Golden-Reason');
         emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${why}`.slice(0, 600) });

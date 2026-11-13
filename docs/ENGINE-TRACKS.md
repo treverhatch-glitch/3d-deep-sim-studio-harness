@@ -51,7 +51,8 @@ RAM floor, the settings its lane may tune itself, and its repo.
 Each engine gets its own copy of every part, and Unity keeps its 2.63 file names:
 
 - **Lane:** the `engine-porter` role and an engine worktree for each launched pass.
-- **Gate:** `node harness/unity-gate.mjs --engine <name>`, a land run of `engines.<name>.land`.
+- **Gate:** `node harness/unity-gate.mjs --engine <name> --task <ID>` (or `--branch <name>`), a land run of `engines.<name>.land`;
+  with neither it prints how to call it and runs nothing.
 - **Train:** `.studio/train/<name>-queue.json`, `.studio/locks/<name>-train.lock`, the integration refs
   `<name>-train/<id>`, and the `task.train.<name>.*` events.
 - **Results:** `.studio/gates/<name>-last.json` and `.studio/gates/out/<name>.log`.
@@ -158,6 +159,12 @@ the train starts only when all of these hold:
 
 The Line Producer doesn't start the same engine's train again within `STUDIO_ENGINE_TRAIN_COOLDOWN_MIN` (3) minutes.
 `STUDIO_ENGINE_TRAIN_AUTO=off`, or `"trainAuto": false` for one engine, leaves starting it to a person.
+
+**Finished work is queued by the harness (2.85).** When a session hands an engine task back with a note that says the
+work is done or ready, and its branch has commits ahead of the target, the Line Producer's engine pass runs the checks
+`task done --train` runs and queues the branch itself (`task.train.<x>.queued` with `meta.auto: "ready hand-back"`); failing
+checks queue nothing and say why once (`task.train.<x>.not_queued`). `STUDIO_ENGINE_AUTO_QUEUE=off` turns it off. A task
+never carries its own queue or batch rule: `batchMax` and `batchGroup` decide.
 
 **A batch window (2.84).** A land run takes 22 to 40 minutes whatever the number of branches in it, so a train that
 starts with one branch while more are minutes away spends a whole run on one task. `"batchMin": 4, "batchWaitMin": 12`

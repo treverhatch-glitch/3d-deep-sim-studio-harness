@@ -136,7 +136,7 @@ export const setQueueTag = (root, task, tag, engine = 'unity') => withQueue(root
  * Queue a Unity-track task's branch (task done <ID> --train, after its checks). { ok, entry, message } or { ok: false, error,
  * message }. The branch: `branch`, else the task's recorded Unity branch, else the Unity folder's current branch (never the target).
  */
-export function queueUnityTask(root, { engine = 'unity', task, agent = null, branch = null, note = '', alone = null, tag = null } = {}) {
+export function queueUnityTask(root, { engine = 'unity', task, agent = null, branch = null, note = '', alone = null, tag = null, meta = null } = {}) {
   const s = unityTrainSettings(root, engine);
   const L = labelOf(engine);
   const UNITY_REF_PREFIX = refPrefix(engine);
@@ -167,7 +167,7 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
     return rec;
   }, engine);
   if (tag !== null && tag !== undefined) { try { const r0 = engineTask(task, { root }); if (r0?.engine === engine || !r0) setEngineTask(task, { engine, ...(r0?.track ? { track: r0.track } : {}), tag: tag || null }, { root }); } catch { /* the queue entry carries it */ } }
-  evTop('queued', 'queue', `${task}: ${br} at ${short(head)} waits for the next ${L} train${entry.alone ? ' (it lands alone)' : ''}${entry.tag ? ` (tag ${entry.tag}: only train --engine ${engine} --tag ${entry.tag} takes it)` : ''}`, { engine, agent: agent || `${engine}-train`, task, to: 'producer', meta: { branch: br, head, ...(entry.alone ? { alone: true } : {}), ...(entry.tag ? { tag: entry.tag } : {}) } });
+  evTop('queued', 'queue', `${task}: ${br} at ${short(head)} waits for the next ${L} train${entry.alone ? ' (it lands alone)' : ''}${entry.tag ? ` (tag ${entry.tag}: only train --engine ${engine} --tag ${entry.tag} takes it)` : ''}`, { engine, agent: agent || `${engine}-train`, task, to: 'producer', meta: { branch: br, head, ...(entry.alone ? { alone: true } : {}), ...(entry.tag ? { tag: entry.tag } : {}), ...(meta && typeof meta === 'object' ? meta : {}) } }); // 2.85: meta.auto when the harness queued it
   // The lane's new shared input files (engines.<x>.rules.share: content-addressed files a lane adds, git-ignored) go to the
   // engine's input folder now, so the rules check and the land run find them. Never overwrites.
   try { shareLaneInputs(root, engine, s, task, (m) => console.error(m)); } catch { /* the train tries again */ }
