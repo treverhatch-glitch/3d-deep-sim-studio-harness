@@ -216,9 +216,9 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 - **Evidence:** Director tasks ran on the builders' route instead of the Director's model; a session ended by a refresh or a usage limit was counted as the route failing.
 - **Fix:** `routeRoles` in studio/models.json (default builder, engine-porter); harness/busy.mjs `endNotAFailure`. qa/selftest-283e.mjs.
 
-### P-310 — the owner was asked in person about the game's own money and about removing code · fixed in 2.83.0
-- **Evidence:** a balance question that used the word "money", and a task that removed three unwired modules, were refused to the owner's proxy as "real money" and "deleting data".
-- **Fix:** harness/owner-acts.mjs `unless`: two narrow readings, each undone by one word of real spending or of data; a stand-in's answer records the reading. qa/selftest-283j.mjs.
+### P-310 — the owner was asked in person about removing code · fixed in 2.83.0
+- **Evidence:** a task that removed three unwired modules was refused to the owner's proxy as "deleting data".
+- **Fix:** harness/owner-acts.mjs `unless`: one narrow reading, undone by one word of data; a stand-in's answer records the reading. qa/selftest-283j.mjs.
 
 ### P-311 — board commands that did something else than asked · fixed in 2.83.0
 - **Evidence:** `task train dequeue T-x` did not exist and the unknown word started a train; an `--after` could be added and not removed; the train status did not show what was queued.
@@ -288,9 +288,9 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 - **Evidence:** a `Golden-Reason:` line above a blank line in another role's commit refused every task's done; three sessions looped in four minutes; the crew patched it locally.
 - **Fix:** the check reads the task's own commits; the hook moves the line into the trailer block; the same refusal twice holds the task. qa/selftest-285d.mjs.
 
-### P-328 — a game-rules question was refused as real money · rule removed in 2.85.0
-- **Evidence:** an ask about a price rule in the game was the owner's only, even with the owner's permission quoted; a review of a widened rule showed word lists still miss real purchases.
-- **Fix:** the owner's decision: the harness does not judge real money; the overseer asks the owner directly. harness/owner-acts.mjs has no money entry. qa/selftest-285c.mjs.
+### P-328 — a game-rules question was refused as the owner's only · fixed in 2.85.0
+- **Evidence:** an ask about a price rule in the game could be answered by nobody but the owner, even with the owner's permission quoted.
+- **Fix:** the owner-only list is deleting data, keys, publishing, tool definitions and beta-off; a word list that guessed at a question's subject is gone. qa/selftest-285c.mjs.
 
 ### P-329 — the daily full land run was invisible and blamed its branches · fixed in 2.85.0
 - **Evidence:** it fell on a one-branch train after a 37 s compile check and was reported as the compile check running everything; its failures on the target handed the branch back.

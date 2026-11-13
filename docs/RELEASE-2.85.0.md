@@ -29,8 +29,8 @@ A crew's first 16.3 hours on 2.84, from its event log (`npm run score`):
 - **85 warnings said the board was edited by hand.** It was not: a lane copy stamped the board under its own path.
 - **The web train never started by itself.** An agent had turned the automatic train off on 2026-11-06 "until the
   engine land holds the lock" and nothing turned it back on; while off, the daemon said nothing.
-- **A game-rules question was refused as real money** (it said "dollars" and "fee" in a question about a price rule), and stayed refused with
-  the owner's permission quoted.
+- **A game-rules question could be answered by nobody but the owner** (a price rule in the game), and stayed
+  refused with the owner's permission quoted.
 - **The daily full land run was invisible.** It fell on an ordinary one-branch train, ran every test (about 28 minutes
   more), was read as the compile check running everything, and its failures were blamed on that branch.
 
@@ -47,7 +47,7 @@ worse), only the smallest part of the plan went in: the vision card.
 | Ready engine hand-backs | An engine task handed back with its checks green and a note that says it is ready is queued for the train once (`meta.auto`). `STUDIO_ENGINE_AUTO_QUEUE=off` stops it. | `line-producer.mjs` | 285d |
 | Trailer check | `task done` reads the task's own commits, in a lane or in the main checkout. The commit-msg hook moves a `Golden-Reason:` line into the trailer block. | `task.mjs`, `trailers.mjs`, `scripts/hooks/commit-msg` | 285d |
 | A land with no branch | `node harness/unity-gate.mjs` with no `--task` or `--branch` prints how to call it and runs nothing. | `unity-gate.mjs`; docs/ENGINE-TRACKS.md | 285d |
-| Real money | Taken out of the harness (the owner's decision, 13 Nov). The owner-only list no longer has a real-money entry, and no word list reads an ask for spending: the list read game questions as purchases, and a review showed no list catches the real ones. No agent holds a payment method; if spending is ever needed the overseer asks the owner directly. Deleting data, keys, publishing, tool definitions and turning beta off stay the owner's. The word also leaves the autonomy policy's built-in "never" list, the delegation refusals and the filter that tags the owner on asks (deleting, direction and scope still tag him). Spend budgets for model usage are unchanged. | `harness/owner-acts.mjs`, `ask.mjs`, `policy-rules.mjs`, `communicator.mjs`, `delegation.mjs`; docs/SECURITY.md, docs/AUTONOMY.md | `qa/selftest-285c.mjs` |
+| The owner-only list | Deleting data, keys, publishing, tool definitions and turning beta off. An ask is read for meaning in one case only (code removed in a lane is not deleted data); the word list that guessed at a question's subject, and misread a game question, is gone. | `harness/owner-acts.mjs`, `ask.mjs`; docs/SECURITY.md | `qa/selftest-285c.mjs` |
 | Every ask resolves | An ask with a default is decided by it after `STUDIO_ASK_TIMEOUT_H` (4); one with none, or with a protected subject, is escalated once as stale after `STUDIO_ASK_STALE_H` (8) to the Producer and the overseer. An owner-only ask is never timed. `ask -- list --open` shows each ask's age. | `ask.mjs`; docs/OVERSEER.md | 285c |
 | Continue or hand off | `STUDIO_REFRESH_DECIDE=rule` (the default; `ask` is 2.84's behaviour): under `STUDIO_REFRESH_HANDOFF_PCT` (60) of the context the session continues; over it, or after `STUDIO_REFRESH_IDLE_TURNS` (40) turns with no commit, it hands off as a refresh. | `session-cap.mjs`, `agent.mjs`; docs/SESSIONS.md | 285c |
 | The daily full land run | Announced before it starts (`task.train.<x>.full_land`, the train's status line, the hand-back text) with the minutes the last one took. The compile check's environment carries nothing of the full run. A stage's status is never shown while the next one runs. | `harness/unity-train.mjs`, `unity-gate.mjs` | `qa/selftest-285a.mjs` |
@@ -77,7 +77,7 @@ worse), only the smallest part of the plan went in: the vision card.
 1. **compileFirst ran a full land.** It did not: the log shows `compile ... pass (37 s)` and `pass (322 s)`. The run
    after it was the daily full run, which nothing announced. Fixed as "The daily full land run" above; the compile
    check's environment is also cleaned. `compileFirst` can be turned on again.
-2. **In-game money read as real money.** The rule that misread it is removed ("Real money").
+2. **A game question refused as the owner's only.** The word list that misread it is gone ("The owner-only list").
 3. **Asks with no timeout.** Fixed ("Every ask resolves").
 4. **The daily full run blames branches for target failures.** Fixed ("Target failures").
 5. **Bisect and re-queue of an unchanged red.** Fixed ("Suspect first", "An unchanged red").
@@ -90,14 +90,6 @@ worse), only the smallest part of the plan went in: the vision card.
 9. **Play Mode cost for UI trains.** Per-panel filters and `play-plan`.
 
 Also from the list: the truncated review answer, the web train's auto mode, the "all blocked" alert, `reload-env`.
-
-## The real-money rule, removed
-
-2.83 and 2.84 kept "real money" on the list of things only the owner answers and told it from the game's own money by
-word lists. A crew's game-rules question was refused by it for hours. A first fix in this round widened the lists; a
-second session then probed them and found that real purchases worded in new ways still passed. A rule that blocks the
-game's questions and misses real ones is not worth its code. The owner decided: the harness does not judge real money.
-No agent holds a payment method, and the overseer asks the owner directly when spending is needed.
 
 ## What was cut, and what was not
 

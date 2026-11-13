@@ -1,8 +1,8 @@
 /**
  * qa/selftest-285c.mjs — 2.85 (c): every ask resolves, and the "continue or hand off?" check decides by rule.
  *
- *   money     money is not on the owner-only list (harness/owner-acts.mjs): a question with money words in it is
- *             an ordinary ask, answered by the owner's stand-ins, with the ordinary deadline from its default
+ *   prices    a question with a price in it is an ordinary ask (harness/owner-acts.mjs): answered by the owner's
+ *             stand-ins, with the ordinary deadline from its default
  *   timers    a default and no --timeout: STUDIO_ASK_TIMEOUT_H; no default: ask.stale once at STUDIO_ASK_STALE_H, never
  *             answered; the owner's own asks: never a deadline, never escalated (injected clock)
  *   refresh   the check point decides by rule (STUDIO_REFRESH_DECIDE): under the percentage it continues, over it or
@@ -64,7 +64,7 @@ export async function selftest285C({ dir, root, report, tmpRoot }) {
   const askAs = (q, extra = []) => (out(cli(ASKER, ['harness/ask.mjs', q, '--by', 'builder-c1', ...extra])).match(/\b(A-\d+)\b/) || [])[1];
   const doc = (id) => readJson(path.join(S, 'studio', 'asks', `${id}.json`));
 
-  // ---- 2. money words are no rule of the harness's ----
+  // ---- 2. a question with a price in it is an ordinary ask ----
   {
     const q = 'Is 8 dollars a ride right?';
     const id = askAs(q, ['--options', 'yes,no', '--default', 'no', '--why', 'the lower one is the safer start']);
@@ -72,7 +72,7 @@ export async function selftest285C({ dir, root, report, tmpRoot }) {
     const a = cli(OVER, ['harness/ask.mjs', 'answer', id, 'yes', '--by', 'overseer-1']);
     const d = doc(id);
     const H = 3600000;
-    await guard('2.85 (c) money words are an ordinary ask: "Is 8 dollars a ride right?" is not owner-only (harness/owner-acts.mjs has no money entry), gets the ordinary STUDIO_ASK_TIMEOUT_H deadline from its default, and the beta-mode agent (overseer-1) answers it, recorded as its answer (fails before this change: it was owner-only "real money", had no deadline and the stand-in was refused)', () => [
+    await guard('2.85 (c) a question with a price in it is an ordinary ask: "Is 8 dollars a ride right?" is not owner-only (harness/owner-acts.mjs), gets the ordinary STUDIO_ASK_TIMEOUT_H deadline from its default, and the beta-mode agent (overseer-1) answers it, recorded as its answer (fails before this change: it was owner-only, had no deadline and the stand-in was refused)', () => [
       oa.ownerOnlyTopic(q) === null && !d0?.ownerOnly && d0?.protected === false && Date.parse(d0?.deadline) - Date.parse(d0?.at) === 4 * H && a.status === 0 && d?.status === 'answered' && d?.recordedBy === 'overseer-1',
       JSON.stringify({ d0, d, a: tail(a, 400) })]);
   }

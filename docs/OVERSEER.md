@@ -123,8 +123,7 @@ keeps `studio/beta.json` as the studio had it and says whether beta mode is on b
   turning beta mode off. (`harness/owner-acts.mjs`: refused to every stand-in.) A question about removing code
   through a lane is not one of these (2.83, docs/SECURITY.md): the overseer may answer it, and the answer records how
   it was read. (2.85) An ask with no default is escalated to the overseer once (`ask.stale`) after
-  `STUDIO_ASK_STALE_H` hours. Spending is not a harness rule: no agent holds a payment method, and the overseer
-  asks the owner directly if it is ever needed.
+  `STUDIO_ASK_STALE_H` hours.
 - Merging a harness release into its main branch.
 - Granting, widening or extending a delegation, the proxy, beta mode or an outside signer: no agent grants itself more.
 - Raising the overseer's own stage, or recording an outcome about its own work.

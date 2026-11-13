@@ -136,5 +136,5 @@ research); refresh by hand-back rather than summarising (Anthropic's progress fi
 - **An LLM summariser for large-window models.** The study shows about 3 points at 128k; refresh by hand-back is simpler and auditable.
 - **"Reflect and retry" without a test or replay signal.** Huang et al. found no gain; every retry must be tied to a failing check.
 - **Choosing models by public SWE-bench scores.** Contamination, and the tasks don't match ours; use the studio bench.
-- **Paid cloud sandboxes** (Devin, Copilot cloud, OpenHands Cloud). They break the no-money rule, and the Unity licence is local.
+- **Paid cloud sandboxes** (Devin, Copilot cloud, OpenHands Cloud). They are paid services, and the Unity licence is local.
 - **Auto-merge to `main` without a person** (Copilot's opt-in Agent Merge) for sim or protected files. Signed approval stays.

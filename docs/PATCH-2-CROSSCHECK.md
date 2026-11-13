@@ -9,7 +9,7 @@ DONE = shipped (version, commit). DONE (differently) = shipped another way, with
 | P1.2 | DONE | 2.76.0 87079ce: in beta mode the hand-back cap goes to the orchestrator and the Producer, with one Rescue task. |
 | P1.3 | DONE | 2.76.0 87079ce: infrastructure hand-backs don't count; a release is kept for the same task and commit. |
 | P1.4 | DONE | 2.76.0 391acde: `delegate -- claude-settings --owner --dir <folder> --write` writes the owner's command rules into the orchestrator's own folder. 2.77.0 d2ecdf5: plus agent stop/pause, task park/block/unblock/pause, beta on/off. |
-| P1.5 | DONE | 2.76.0: never deletes (the real-money rule that was also built here was removed in 2.85); workers never act as the owner; tests and the train's full verify stay. |
+| P1.5 | DONE | 2.76.0: never deletes; workers never act as the owner; tests and the train's full verify stay. |
 | P2.1 | DONE | 2.76.0 76e893c (B-88): life record and heartbeat; a dead train is found, recorded with its last step, its lock freed and its lanes kept for the next train. |
 | P2.2 | DONE | 2.76.0 f2f5e7a (B-89): test workers are shared by cores, the train's verify first. |
 | P2.3 | DONE | 2.76.0 ace09db (B-90/W-0084). |

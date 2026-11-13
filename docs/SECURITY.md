@@ -21,7 +21,7 @@ defining an owner tool, turning beta mode off. Refused to the orchestrator, the 
 sessions: an ask that names one, `npm run approve -- keygen`, a delegated action of that name, `npm run beta -- off`.
 (2.83) An ask is read for meaning in one case only: removing code through a lane is not "deleting data". One word of
 data (backups, history, saves, a branch, a worktree, logs, `.studio`), a wipe or purge, or a bare "delete it?" keeps it
-the owner's. The action names `delete` and `wipe` are refused to every stand-in. Real money is not on this list: the harness does not judge what is real spending. No agent holds a payment method, and if spending is ever needed the overseer asks the owner directly.
+the owner's. The action names `delete` and `wipe` are refused to every stand-in.
 
 ## Beta mode
 

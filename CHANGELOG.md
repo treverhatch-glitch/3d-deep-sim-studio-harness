@@ -15,9 +15,8 @@ and 0 of 26 landed tasks without an overseer step: 59.5% of hand-backs had a har
   ready engine hand-back queues itself (`STUDIO_ENGINE_AUTO_QUEUE`).
 - **The trailer check** reads the task's own commits wherever `task done` runs; the commit-msg hook puts a
   `Golden-Reason:` line in the trailer block.
-- **Real money is no longer judged by the harness** (the owner's decision): the owner-only list has no real-money
-  entry and no word list reads an ask for spending. No agent holds a payment method; the overseer asks the owner
-  directly. Deleting data, keys, publishing, tool definitions and beta-off stay the owner's.
+- **The owner-only list** is deleting data, keys, publishing, tool definitions and turning beta off; an ask is read
+  for meaning in one case only (code removed in a lane is not deleted data).
 - **Every ask resolves:** `STUDIO_ASK_TIMEOUT_H` (4) decides by the default, `STUDIO_ASK_STALE_H` (8) escalates once;
   an owner-only ask is never timed. "Continue or hand off" is decided by rule (`STUDIO_REFRESH_DECIDE`).
 - **Engine land runs:** the daily full run is announced and kept out of the compile check; a full run red only on
@@ -133,8 +132,8 @@ and a train that blamed by elimination. 72 files, +4,078 / −823 lines (net +3,
 - **Watching**: no "stalled" for a lane in a train; the same unchanged-shots review is retried once a day; a review
   falls back to the same model family when no other is available (and says so); the idle stop and claim minutes skip
   downtime; a dead session's claim is handed back after 30 minutes.
-- **The owner-only list** (`harness/owner-acts.mjs`): the game's own money is not real money, and code removed in a
-  lane is not deleted data; anything that names real spending or data stays the owner's.
+- **The owner-only list** (`harness/owner-acts.mjs`): code removed in a lane is not deleted data; anything that
+  names data stays the owner's.
 - **Cleanup**: landed engine worktrees are removed; `engines.<x>.builds` keeps the newest builds
   (`harness/engine-clean.mjs`); `lanes prune` covers engine lanes.
 - **Scorecard**: the CPU measure reads the hourly summaries; `engines.<x>.progress` prints a progress line;
@@ -200,7 +199,7 @@ no editor. 27 files, +1,951 / −58 lines (net +1,893) against 2.81.0. Details: 
 - **2.65.3** (2026-11-02): Fixes the crew's B-43 (a red merge train took over an hour to find the lane that broke it) and B-44.
 - **2.65.2** (2026-11-02): Measurement fixes from the 2026-11-02 research pass, and the first bug a fuzz run found.
 - **2.65.1** (2026-11-02): The crew's 2.65.1 hitlist: the parts that 2.64.0 and 2.65.0 did not already cover.
-- **2.65.0** (2026-11-02): Hands off by default: the harness decides routine questions from evidence and logs why; people are needed only for safety gates, Bible changes and money.
+- **2.65.0** (2026-11-02): Hands off by default: the harness decides routine questions from evidence and logs why; people are needed only for safety gates and Bible changes.
 - **2.64.0** (2026-11-01): Everything built for 2.60.1 to 2.64 in one release, so a studio upgrades once: bugs B-17 to B-41, the learning edge, sealed bench, risk-tiered landing.
 - **2.60.0** (2026-11-01): The crew's round-2.60 brief: pins, shared lines, an upgrade path and heavy-lock trees, shaped by merge-queue practice.
 - **2.59.1** (2026-11-01): The owner's permission rule: agents may act on a person's direct permission (P-112).

@@ -23,11 +23,11 @@ unit again, regenerate.
 
 ## Decisions made on judgment
 
-1. **The real-money rule is gone, by the owner's decision** (13 Nov, in his words: "take all references and everything
-   out, leave it to Patch to get permission from me directly"). It was first widened, then reviewed by a second
-   session, which showed word lists miss real purchases however long they get. Do not bring a word list back; if the
-   owner wants a guard again, build it on who holds a payment method, not on the wording of a question.
-2. **No example purchase questions in the repository.** The owner objected to them; tests of asks use neutral wording.
+1. **The owner-only list is short on purpose**: deleting data, keys, publishing, tool definitions, turning beta off.
+   The owner decides what is on it. An ask is read for meaning in one case only (code removed in a lane). Do not add
+   word lists that guess what a question is about: a second session showed they misread ordinary game questions and
+   still miss what they are meant to catch.
+2. **No made-up example questions in the repository.** The owner objected to them; tests of asks use neutral wording.
 3. **"A rules change needs a test" is a note, not a refusal.** As a refusal it broke two existing tests and added a
    new way for `task done` to say no in a release whose point is fewer of those. The score counts it;
    `STUDIO_RULES_TEST=require` is there when the count says so.
@@ -40,8 +40,8 @@ unit again, regenerate.
 
 ## The overseer's notes
 
-The owner asked that the overseer be told to update his own notes: mark what 2.85 closed, take out everything that
-treats real money as a harness rule, and consider archiving his old harness write-ups and starting a fresh, short bug
+The owner asked that the overseer be told to update his own notes: mark what 2.85 closed, take out what no longer
+exists, and consider archiving his old harness write-ups and starting a fresh, short bug
 list and devlog. That is section 7 of the upgrade note written for him. Expect the next request as one short file (a
 day's score and the open bugs), not as additions to the old lists.
 

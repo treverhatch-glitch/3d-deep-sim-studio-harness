@@ -44,7 +44,7 @@ or art is taken. Planned updates from it are PU-22 to PU-32 in `../PROPOSALS.md`
 
 **Skipped:**
 - A SQLite task board (`node:sqlite` is still a release candidate [27]; PU-16 covers the need).
-- Paid GPU runners (costs money).
+- Paid GPU runners.
 - A self-hosted runner on a public repo: fork PRs could run code on Hatch's PC [Judge]. This matches Hatch's rule.
 - MCP Agent Mail (duplicates the queue; licence unconfirmed).
 - NVIDIA FLIP: pixelmatch with a tolerance is enough for now.

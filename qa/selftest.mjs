@@ -5229,7 +5229,7 @@ if (inShard('selftest-285a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.85 (c): every ask resolves, money words are an ordinary ask, and the refresh check decides by rule.
+// 2.85 (c): every ask resolves, a question with a price in it is an ordinary ask, and the refresh check decides by rule.
 if (inShard('selftest-285c')) {
   const dir = copyRepo();
   const { selftest285C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285c.mjs')).href);

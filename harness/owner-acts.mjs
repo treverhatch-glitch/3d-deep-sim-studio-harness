@@ -7,7 +7,6 @@
  * (harness/beta-mode.mjs), the owner proxy (harness/owner-proxy.mjs), an outside signer and every launched session are
  * refused these, with the reason; only a person's own terminal does them. This file is that list and nothing else (no
  * imports), so permission.mjs, beta-mode.mjs, owner-proxy.mjs, delegation.mjs and ask.mjs all read the same one.
- * Real money is not on this list: the harness does not judge it; no agent holds a payment method and the overseer asks the owner directly.
  *
  *   act       the name a refusal and the decisions log use
  *   actions   delegation action names it covers (delegationFor refuses them to the proxy and beta mode)
