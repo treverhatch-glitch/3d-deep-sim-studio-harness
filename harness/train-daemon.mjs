@@ -27,6 +27,17 @@
  * on the board for a builder with the hand-back facts block: the train's own hand-back (task.mjs pauseTask) normally
  * did it; a task still in progress is handed back, and a waiting task whose hand-back note has no facts block gets
  * one. Then ONE job.done (kind train, meta.auto) sums the train and what was re-queued.
+ *
+ * 2.85 (e): a crew's web lanes sat 2 h each for 16 hours, every train started by hand, because an agent had turned the
+ * daemon off five days before (`train auto off`, no reason, to let an engine land through) and nobody turned it on again:
+ * while off, the daemon said nothing (its waiting event needed it on) and `train status` never mentioned it. Now:
+ *   - an off switch an agent records (anyone but a person in their own terminal) lapses after STUDIO_TRAIN_AUTO_OFF_HOURS
+ *     (4; 0: never), or after `--hours N` when given; a person's off lasts until they turn it on. The deciders are the same.
+ *   - why the daemon doesn't start a train is said once per distinct reason (train.daemon.waiting, and the older
+ *     task.train.auto_waiting), off included, and `train status` prints "the automatic start is waiting: <reason>".
+ *   - lanes that wait only for the owner (tier C) are named with the one command; the daemon never releases one.
+ *   - an engine land does not stop a web train: the verify claim is admitted by the heavy budget beside it (an engine land
+ *     takes no machine:heavy slot; its RAM counts), so the train starts when free RAM covers the web verify's need.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -43,32 +54,74 @@ export const DAEMON_FILE = (root) => path.join(root, '.studio', 'train', 'daemon
 export const DAEMON_LAST = (root) => path.join(root, '.studio', 'train', 'daemon-last.json');
 export const DAEMON_BY = 'train-daemon';
 
-/** Is the daemon on? { on, why }: STUDIO_TRAIN_AUTO (default on), then the recorded switch. */
-export function trainAuto(root, env = process.env) {
-  if (off(env.STUDIO_TRAIN_AUTO)) return { on: false, why: 'STUDIO_TRAIN_AUTO is off' };
+/** 2.85 (e): how long an agent's `train auto off` lasts without --hours (STUDIO_TRAIN_AUTO_OFF_HOURS, 4; 0: until turned on). */
+export function autoOffHours(env = process.env) {
+  const s = String(env.STUDIO_TRAIN_AUTO_OFF_HOURS ?? '').trim();
+  const n = Number(s);
+  return s !== '' && Number.isFinite(n) && n >= 0 ? n : 4;
+}
+/** When a recorded off switch ends (ms), or null (it lasts until turned on). 2.85 (e): an agent's off lapses. */
+export function autoOffUntil(s, env = process.env) {
+  if (!s?.off) return null;
+  const until = Date.parse(s.until || '');
+  if (Number.isFinite(until)) return until;
+  const at = Date.parse(s.at || '');
+  const h = autoOffHours(env);
+  if (s.via && s.via !== 'person' && h > 0 && Number.isFinite(at)) return at + h * 3600000;
+  return null;
+}
+
+/** Is the daemon on? { on, why, key, lapsed? }: STUDIO_TRAIN_AUTO (default on), then the recorded switch (2.85: it may have lapsed). */
+export function trainAuto(root, env = process.env, now = Date.now()) {
+  if (off(env.STUDIO_TRAIN_AUTO)) return { on: false, why: 'STUDIO_TRAIN_AUTO is off', key: 'env-off' };
   const s = readJson(AUTO_FILE(root));
-  if (s && s.off) return { on: false, why: `train auto is off (by ${s.by || '?'} at ${String(s.at || '').slice(0, 16)}${s.why ? `: ${s.why}` : ''}; npm run task -- train auto on --by <name>)` };
+  if (s && s.off) {
+    const until = autoOffUntil(s, env);
+    if (until !== null && now >= until) return { on: true, why: '', lapsed: { by: s.by || '?', at: s.at || null, until: new Date(until).toISOString() } };
+    return { on: false, key: `off:${s.at || ''}`, why: `train auto is off (by ${s.by || '?'} at ${String(s.at || '').slice(0, 16)}${until !== null ? `, until ${new Date(until).toISOString().slice(0, 16)}` : ''}${s.why ? `: ${s.why}` : ''}; npm run task -- train auto on --by <name>)` };
+  }
   return { on: true, why: '' };
 }
 export function autoStatusText(root, env = process.env) {
   const a = trainAuto(root, env);
   const run = readJson(DAEMON_FILE(root));
   const last = readJson(DAEMON_LAST(root));
-  return [`Train daemon: ${a.on ? 'on (a supervisor pass starts trains when lanes are ready and the machine has room)' : `off: ${a.why}`}.`, run && alive(run.pid) ? `A daemon train is running (pid ${run.pid}, since ${String(run.at).slice(0, 16)}).` : '', last ? `Last daemon train: ${last.id || '?'} at ${String(last.at).slice(0, 16)}: ${last.tail || last.message || ''}`.slice(0, 300) : ''].filter(Boolean).join('\n');
+  return [`Train daemon: ${a.on ? 'on (a supervisor pass starts trains when lanes are ready and the machine has room)' : `off: ${a.why}`}.`, run && alive(run.pid) ? `A daemon train is running (pid ${run.pid}, since ${String(run.at).slice(0, 16)}).` : '', last ? `Last daemon train: ${last.id || '?'} at ${String(last.at).slice(0, 16)}: ${last.tail || last.message || ''}`.slice(0, 300) : '', daemonWaitingLine(root, { env })].filter(Boolean).join('\n');
+}
+
+export const DAEMON_WHY = (root) => path.join(root, '.studio', 'train', 'daemon-why.json');
+/**
+ * 2.85 (e): the line `train status` prints while lanes wait and no daemon train runs: "The automatic start is waiting:
+ * <reason>" (the switch first; else the last pass's reason), or '' (nothing waits, or a train runs).
+ */
+export function daemonWaitingLine(root, { env = process.env, queue = null, now = Date.now() } = {}) {
+  let q = queue;
+  if (!q) { try { q = readJson(path.join(root, '.studio', 'train', 'queue.json')) || []; } catch { q = []; } }
+  if (!Array.isArray(q) || !q.length) return '';
+  const run = readJson(DAEMON_FILE(root));
+  if (run && alive(run.pid)) return '';
+  const a = trainAuto(root, env, now);
+  if (!a.on) return `The automatic start is waiting: ${a.why}.`;
+  const w = readJson(DAEMON_WHY(root));
+  return w?.why ? `The automatic start is waiting: ${w.why} (since ${String(w.at || '').slice(11, 16)} UTC).` : '';
 }
 
 /** `train auto off|on --by <name>`: decider rules; records who and why, one event. */
-export async function setTrainAuto(root, { on, by, why = '', permission = '', env = process.env, emit = emitEvent } = {}) {
+export async function setTrainAuto(root, { on, by, why = '', permission = '', hours = null, env = process.env, emit = emitEvent } = {}) {
   const { deciderCheck } = await import('./decider.mjs');
   const d = await deciderCheck({ by, permission, env, action: 'train-auto', what: `turn the train daemon ${on ? 'on' : 'off'}` });
   if (!d.ok) return { ok: false, message: d.why };
   const f = AUTO_FILE(root);
   fs.mkdirSync(path.dirname(f), { recursive: true });
-  const rec = { off: !on, by: d.by, why: String(why || '').slice(0, 300), at: new Date().toISOString(), via: d.via, ...(d.via !== 'person' ? { recordedBy: d.recordedBy, permission: d.permission || null } : {}) };
+  const at = new Date();
+  // 2.85 (e): an off switch says when it ends: --hours N, else an agent's lapses after STUDIO_TRAIN_AUTO_OFF_HOURS.
+  const h = Number(hours);
+  const lastH = !on ? (hours !== null && hours !== undefined && hours !== '' && Number.isFinite(h) && h > 0 ? h : d.via !== 'person' && autoOffHours(env) > 0 ? autoOffHours(env) : null) : null;
+  const rec = { off: !on, by: d.by, why: String(why || '').slice(0, 300), at: at.toISOString(), via: d.via, ...(lastH ? { until: new Date(at.getTime() + lastH * 3600000).toISOString() } : {}), ...(d.via !== 'person' ? { recordedBy: d.recordedBy, permission: d.permission || null } : {}) };
   writeAtomic(f, `${JSON.stringify(rec, null, 2)}\n`);
   try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'train-auto', subject: 'train daemon', by: d.by, as: dm.asOf(d), why: rec.why || (on ? 'train daemon on' : 'train daemon off'), evidence: on ? 'on' : 'off', undo: { kind: 'train-auto', on: !on, text: `npm run task -- train auto ${on ? 'off' : 'on'} --by <name>` }, root }); } catch {}
   emit({ type: on ? 'task.train.auto_on' : 'task.train.auto_off', agent: String(d.recordedBy || d.by).slice(0, 60), to: 'producer', msg: `${d.by} turned the train daemon ${on ? 'on' : 'off'}${d.via !== 'person' ? ` (recorded by ${d.recordedBy})` : ''}${rec.why ? `: ${rec.why}` : ''}`.slice(0, 600), meta: rec });
-  return { ok: true, message: on ? `The train daemon is on: the supervisor starts a train when lanes are ready and the machine has room${off(env.STUDIO_TRAIN_AUTO) ? ' (but STUDIO_TRAIN_AUTO is off in this environment)' : ''}.` : 'The train daemon is off: trains run only by hand (npm run task -- train) until train auto on.' };
+  return { ok: true, message: on ? `The train daemon is on: the supervisor starts a train when lanes are ready and the machine has room${off(env.STUDIO_TRAIN_AUTO) ? ' (but STUDIO_TRAIN_AUTO is off in this environment)' : ''}.` : `The train daemon is off: trains run only by hand (npm run task -- train) until ${rec.until ? `${rec.until.slice(0, 16)} UTC (it turns itself on again then; --hours N sets how long, STUDIO_TRAIN_AUTO_OFF_HOURS for an agent's)` : 'train auto on'}.` };
 }
 
 /** A train lock held by a live process (and not stale): its record, else null. */
@@ -81,16 +134,17 @@ export function trainLockHeld(root, env = process.env, now = Date.now()) {
 }
 
 /** Room for a verify claim on the machine budget (the machine:heavy admission): { ok, line }. */
-export async function verifyRoom(root, env = process.env) {
+export async function verifyRoom(root, env = process.env, given = {}) {
   try {
     const hb = await import('./heavy-budget.mjs');
     const h = await import('./heavy.mjs');
-    const hroot = await h.heavyRoot();
-    const profile = hb.machineProfile(hroot, { env });
-    const holders = h.heavyHolders(hroot, { env });
+    // 2.85 (e): the machine facts may be given (tests); an engine land among the holders takes no game slot, its RAM counts.
+    const hroot = 'profile' in given && 'holders' in given && 'slots' in given ? null : await h.heavyRoot();
+    const profile = 'profile' in given ? given.profile : hb.machineProfile(hroot, { env });
+    const holders = 'holders' in given ? given.holders : h.heavyHolders(hroot, { env });
     const state = hb.budgetState(profile, holders, { env });
     const claim = hb.jobClaim('verify', { root, env, profile, state, as: 'train' }); // 2.76.0 (j, B-89): sized as the train's verify
-    const a = hb.admit(claim, state, { slots: h.heavySlotsAt(hroot, env, profile), holders, kindMax: hb.maxConcurrent('verify', { root, env }) });
+    const a = hb.admit(claim, state, { slots: 'slots' in given ? given.slots : h.heavySlotsAt(hroot, env, profile), holders, kindMax: hb.maxConcurrent('verify', { root, env }) });
     return { ok: a.ok, line: a.ok ? '' : a.line };
   } catch (e) { return { ok: false, line: `the machine budget couldn't be read (${e.message})` }; }
 }
@@ -102,33 +156,44 @@ export async function verifyRoom(root, env = process.env) {
  * now }.
  */
 export function daemonDecision(f) {
-  const no = (why) => ({ start: false, why, lanes: [] });
-  if (!f.auto?.on) return no(f.auto?.why || 'train auto is off');
-  if (!f.trainOn) return no('STUDIO_TRAIN is off');
-  if (f.halted && f.haltScope !== 'builders') return no(`halted: ${f.halted}`);
-  if (f.drain) return no(`drain is on (${f.drain}; npm run task -- drain off)`);
-  if (f.winddown) return no(`winding down: ${f.winddown}`);
-  if (f.stopped) return no(`"Stop all" is on (${f.stopped})`);
-  if (f.lock) return no(`another train is running (${f.lock.id || '?'}, by ${f.lock.by || '?'})`);
+  // 2.85 (e): each reason has a key that names it without its changing numbers: the waiting event is said once per key.
+  const no = (why, key = why) => ({ start: false, why, key, lanes: [] });
+  if (!f.auto?.on) return no(f.auto?.why || 'train auto is off', f.auto?.key || 'off');
+  if (!f.trainOn) return no('STUDIO_TRAIN is off', 'train-off');
+  if (f.halted && f.haltScope !== 'builders') return no(`halted: ${f.halted}`, 'halted');
+  if (f.drain) return no(`drain is on (${f.drain}; npm run task -- drain off)`, 'drain');
+  if (f.winddown) return no(`winding down: ${f.winddown}`, 'winddown');
+  if (f.stopped) return no(`"Stop all" is on (${f.stopped})`, 'stopped');
+  if (f.lock) return no(`another train is running (${f.lock.id || '?'}, by ${f.lock.by || '?'})`, `lock:${f.lock.id || ''}`);
   // 2.77.0 (p, P9.6): a speculative train that lands on main now (its train A ended) goes first.
-  if (f.next) return no(`the speculative train ${f.next.id || '?'} (after ${f.next.after || '?'}) lands first`);
-  if (f.running) return no(`the daemon's train is still running (pid ${f.running.pid})`);
+  if (f.next) return no(`the speculative train ${f.next.id || '?'} (after ${f.next.after || '?'}) lands first`, `next:${f.next.id || ''}`);
+  if (f.running) return no(`the daemon's train is still running (pid ${f.running.pid})`, `running:${f.running.pid}`);
   if (f.redMain) return no(f.redMain);
-  const ready = (f.queue || []).filter((e) => !(f.heldNow || (() => false))(e) && !(f.heldOut || (() => false))(e.task));
-  if (!ready.length) return no((f.queue || []).length ? 'every queued lane waits for the owner or is held out of trains' : 'no lane is queued');
+  const isHeld = (e) => (f.heldNow || (() => false))(e);
+  const isOut = (e) => (f.heldOut || (() => false))(e.task);
+  const ready = (f.queue || []).filter((e) => !isHeld(e) && !isOut(e));
+  if (!ready.length) {
+    if (!(f.queue || []).length) return no('no lane is queued', 'empty');
+    // 2.85 (e): name the lanes and the one command. The daemon never releases a lane (a decision: a person's, or in
+    // beta mode a stand-in's, harness/beta-mode.mjs standInMay('release')).
+    const held = (f.queue || []).filter(isHeld).map((e) => e.task);
+    const out = (f.queue || []).filter((e) => !isHeld(e) && isOut(e)).map((e) => e.task);
+    const parts = [held.length ? `${held.join(', ')} need${held.length === 1 ? 's' : ''} the owner (tier C): ${f.betaRelease ? 'beta mode is on, so a stand-in may release it' : 'a person releases it'} (the daemon never does): npm run task -- train release <ID> --by <name>` : '', out.length ? `${out.join(', ')} ${out.length === 1 ? 'is' : 'are'} held out of trains (npm run task -- train status says why)` : ''].filter(Boolean);
+    return no(`every queued lane waits: ${parts.join('; ')}`, `held:${held.join(',')}|${out.join(',')}`);
+  }
   const rules = f.rules || { min: 1, waitMin: 10 };
   const now = f.now ?? Date.now();
   const oldest = Math.min(...ready.map((e) => Date.parse(e.at) || now));
   const waitedMin = (now - oldest) / 60000;
-  if (ready.length < rules.min && waitedMin < rules.waitMin) return no(`${ready.length} of ${rules.min} lane(s) ready (STUDIO_TRAIN_MIN); waiting up to ${Math.ceil(rules.waitMin - waitedMin)} min more (STUDIO_TRAIN_WAIT_MIN)`);
-  if (!f.room?.ok) return no(`no room on the machine for a verify: ${f.room?.line || 'the budget says no'}`);
+  if (ready.length < rules.min && waitedMin < rules.waitMin) return no(`${ready.length} of ${rules.min} lane(s) ready (STUDIO_TRAIN_MIN); waiting up to ${Math.ceil(rules.waitMin - waitedMin)} min more (STUDIO_TRAIN_WAIT_MIN)`, `min:${ready.length}`);
+  if (!f.room?.ok) return no(`no room on the machine for a verify: ${f.room?.line || 'the budget says no'}`, `room:${String(f.room?.line || '').split(':')[0].slice(0, 40)}`);
   return { start: true, why: `${ready.length} lane(s) ready${ready.length < rules.min ? ` (waited ${Math.round(waitedMin)} min, STUDIO_TRAIN_WAIT_MIN)` : ''}${f.halted ? ` (the supervisor's builder halt stops new sessions, not trains: ${String(f.halted).slice(0, 120)})` : ''}`, lanes: ready.map((e) => e.task) };
 }
 
 /** Gather the facts for one pass. opts override any of them (tests). */
 export async function daemonFacts(root, { env = process.env, now = Date.now(), halted = null, ...given } = {}) {
   const tr = await import('./train.mjs');
-  const facts = { now, auto: trainAuto(root, env), trainOn: tr.trainOn(env), halted: halted ? String(halted.why || halted) : null, haltScope: halted && typeof halted === 'object' ? halted.scope || null : null, ...given };
+  const facts = { now, auto: trainAuto(root, env, now), trainOn: tr.trainOn(env), halted: halted ? String(halted.why || halted) : null, haltScope: halted && typeof halted === 'object' ? halted.scope || null : null, ...given };
   if (!('drain' in given)) { try { const d = await (await import('./busy.mjs')).readDrain(); facts.drain = d?.on ? `by ${d.by || '?'}${d.why ? `: ${d.why}` : ''}` : null; } catch { facts.drain = null; } }
   if (!('winddown' in given)) { try { const wm = await import('./winddown.mjs'); const w = wm.readWinddown(); facts.winddown = w && !wm.winddownOver(w, { env, now }) ? w.why || `since ${w.at}` : null; } catch { facts.winddown = null; } }
   if (!('stopped' in given)) { try { const s = (await import('./task.mjs')).readStop(); facts.stopped = s ? `by ${s.by}` : null; } catch { facts.stopped = null; } }
@@ -140,6 +205,8 @@ export async function daemonFacts(root, { env = process.env, now = Date.now(), h
   if (!('heldOut' in given)) facts.heldOut = (task) => Boolean(tr.taskHoldOf(root, task));
   if (!('rules' in given)) facts.rules = tr.batchRules(env);
   if (!('redMain' in given)) { try { facts.redMain = await redMainWait(root, facts.queue, { env, now }); } catch { facts.redMain = null; } }
+  // 2.85 (e): may a stand-in release a tier C lane (beta mode on, and 'release' one of its kinds)? Only for the wording.
+  if (!('betaRelease' in given)) { try { const bm = await import('./beta-mode.mjs'); facts.betaRelease = bm.STAND_IN_KINDS.includes('release') && bm.readBeta({ root }).on; } catch { facts.betaRelease = false; } }
   return facts;
 }
 
@@ -175,7 +242,19 @@ export async function trainDaemonPass({ root = null, env = process.env, now = Da
   // 2.73.2 (B-74): STUDIO_TRAIN_* changed in .env since the last pass apply from this pass (harness/env-reload.mjs).
   if (env === process.env) { try { (await import('./env-reload.mjs')).reloadEnvIfChanged({ by: DAEMON_BY }); } catch {} }
   root ||= (await import('./worktree.mjs')).mainRoot();
-  if (off(env.STUDIO_TRAIN_AUTO)) return { started: false, why: 'STUDIO_TRAIN_AUTO is off' };
+  if (off(env.STUDIO_TRAIN_AUTO)) {
+    // 2.85 (e): said once, while lanes wait (it was silent).
+    if (!dryRun) { let q = given.queue; if (!q) { try { q = (await import('./train.mjs')).readQueue(root); } catch { q = []; } } sayWaiting(root, { why: 'STUDIO_TRAIN_AUTO is off', key: 'env-off' }, q, { now, emit }); }
+    return { started: false, why: 'STUDIO_TRAIN_AUTO is off' };
+  }
+  // 2.85 (e): an agent's off switch that lapsed is turned back on, once, with one event.
+  if (!dryRun && !('auto' in given)) {
+    const a = trainAuto(root, env, now);
+    if (a.lapsed) {
+      try { const s = readJson(AUTO_FILE(root)) || {}; writeAtomic(AUTO_FILE(root), `${JSON.stringify({ ...s, off: false, lapsedAt: new Date(now).toISOString() }, null, 2)}\n`); } catch {}
+      emit({ type: 'task.train.auto_on', agent: DAEMON_BY, to: 'producer', msg: `train daemon: on again: the off switch ${a.lapsed.by} set at ${String(a.lapsed.at || '').slice(0, 16)} ended at ${a.lapsed.until.slice(0, 16)} (an agent's off lasts STUDIO_TRAIN_AUTO_OFF_HOURS, or its --hours)`.slice(0, 600), meta: { lapsed: a.lapsed } });
+    }
+  }
   // 2.76.0 (B-88): a train that died without recording its end (process gone) is recorded, its lock freed, its lanes kept.
   if (!dryRun && !('lock' in given)) { try { (await import('./train.mjs')).reapTrains(root, { env }); } catch {} }
   const f = await daemonFacts(root, { env, now, halted, ...given });
@@ -184,28 +263,49 @@ export async function trainDaemonPass({ root = null, env = process.env, now = Da
   // The machine budget is read only when everything else says go (it reads the scan and the heavy holders).
   if (!('room' in given)) f.room = { ok: true };
   let d = daemonDecision(f);
-  if (d.start && !('room' in given)) { f.room = await verifyRoom(root, env); d = daemonDecision(f); }
+  // 2.85 (e): given.machine ({ profile, holders, slots }) stands in for the machine (tests); else it is read.
+  if (d.start && !('room' in given)) { f.room = await verifyRoom(root, env, given.machine || {}); d = daemonDecision(f); }
   // 2.77.3 (M6): no room only for want of a slot or budget: the train goes first on the next free one (harness/heavy.mjs
   // markTrainWait; builders' verifies don't take a newly freed slot while it is fresh, STUDIO_TRAIN_SLOT_PRIORITY_MIN).
-  if (!d.start && f.room && !f.room.ok && !dryRun && !('room' in given)) {
+  if (!d.start && f.room && !f.room.ok && !dryRun && !('room' in given) && !given.machine) {
     try { const h = await import('./heavy.mjs'); const w = h.markTrainWait(await h.heavyRoot(), { why: `train daemon: ${f.room.line || 'no room'}`, lanes: (f.queue || []).map((e) => e.task), env }); if (w) d.why = `${d.why}; the train takes the next free slot (builders' verifies wait for it, STUDIO_TRAIN_SLOT_PRIORITY_MIN)`; } catch {}
   }
-  const last = readJson(path.join(root, '.studio', 'train', 'daemon-why.json'));
   if (!d.start) {
-    if (!dryRun && f.auto?.on && (f.queue || []).length && last?.why !== d.why) {
-      try { fs.mkdirSync(path.join(root, '.studio', 'train'), { recursive: true }); fs.writeFileSync(path.join(root, '.studio', 'train', 'daemon-why.json'), JSON.stringify({ why: d.why, at: new Date(now).toISOString() })); } catch {}
-      emit({ type: 'task.train.auto_waiting', agent: DAEMON_BY, status: 'warn', msg: `train daemon: not starting a train: ${d.why}`.slice(0, 600), meta: { why: d.why, queued: (f.queue || []).map((e) => e.task) } });
-    }
+    if (!dryRun) sayWaiting(root, d, f.queue || [], { now, emit });
     return { started: false, why: d.why, ...(f.pipeline?.started ? { next: f.pipeline } : {}) };
   }
   if (dryRun) return { started: false, why: `would start: ${d.why}`, lanes: d.lanes };
+  // 2.85 (e): the switch may have been read before it lapsed this pass; d.start means it is on now.
   const child = spawnTrain(root, env);
   const pid = child?.pid || null;
-  try { fs.rmSync(path.join(root, '.studio', 'train', 'daemon-why.json'), { force: true }); } catch {}
+  try { fs.rmSync(DAEMON_WHY(root), { force: true }); } catch {}
   fs.mkdirSync(path.dirname(DAEMON_FILE(root)), { recursive: true });
   writeAtomic(DAEMON_FILE(root), `${JSON.stringify({ pid, at: new Date(now).toISOString(), lanes: d.lanes })}\n`);
   emit({ type: 'task.train.auto_start', agent: DAEMON_BY, status: 'ok', msg: `train daemon: started a train for ${d.lanes.join(', ')}: ${d.why}`.slice(0, 600), meta: { pid, lanes: d.lanes, why: d.why } });
   return { started: true, why: d.why, pid, lanes: d.lanes };
+}
+
+/**
+ * 2.85 (e): say why no train starts, once per distinct reason (d.key: the reason without its changing numbers), while
+ * lanes wait: .studio/train/daemon-why.json (what `train status` prints) and one train.daemon.waiting event (and the older
+ * task.train.auto_waiting, which the board and older tools read). Before, the event needed the daemon on (so an off
+ * switch was silent) and compared the whole text (so a changing RAM figure said it again on most passes).
+ */
+export function sayWaiting(root, d, queue, { now = Date.now(), emit = emitEvent } = {}) {
+  if (!(queue || []).length) { try { fs.rmSync(DAEMON_WHY(root), { force: true }); } catch {} return false; }
+  const last = readJson(DAEMON_WHY(root));
+  const key = d.key || d.why;
+  if (last && (last.key || last.why) === key) {
+    // Same reason: keep its first time, refresh the words (the numbers in them may have moved).
+    try { fs.writeFileSync(DAEMON_WHY(root), JSON.stringify({ ...last, key, why: d.why })); } catch {}
+    return false;
+  }
+  try { fs.mkdirSync(path.dirname(DAEMON_WHY(root)), { recursive: true }); fs.writeFileSync(DAEMON_WHY(root), JSON.stringify({ why: d.why, key, at: new Date(now).toISOString() })); } catch {}
+  const msg = `train daemon: not starting a train: ${d.why}`.slice(0, 600);
+  const meta = { why: d.why, key, queued: (queue || []).map((e) => e.task) };
+  emit({ type: 'train.daemon.waiting', agent: DAEMON_BY, status: 'warn', msg, meta });
+  emit({ type: 'task.train.auto_waiting', agent: DAEMON_BY, status: 'warn', msg, meta });
+  return true;
 }
 
 /**

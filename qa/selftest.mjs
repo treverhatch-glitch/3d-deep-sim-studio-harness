@@ -5197,6 +5197,15 @@ if (inShard('selftest-284q')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.85 (e): the web train starts itself, "all blocked" counts engine work, reload-env names the names, a review carries
+// its verdict, lane-copy board writes are the harness's, and the hooks gate names the fix after a plain release merge.
+if (inShard('selftest-285e')) {
+  const dir = copyRepo();
+  const { selftest285E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285e.mjs')).href);
+  await selftest285E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

@@ -399,6 +399,29 @@ export function betaAcrossLine(before, after) {
   return '[upgrade] WARN beta mode was off before the upgrade and is ON after: the update brought a studio/beta.json; the owner turns it off (npm run beta -- off --by <owner>).';
 }
 
+/**
+ * 2.85 (e): after an update, the hooks gate as it will judge the next `task done`: when its unstamped commits all came
+ * in with a harness release merged by a plain `git merge`, one line "hooks check: N upstream commits are unstamped; run:
+ * <command>" (harness/hooks-upgrade-hint.mjs; it exempts nothing). '' when there are none, or the helper isn't there.
+ * deps.check (tests): () -> { open, baseSha } instead of running `node harness/hook-stamp.mjs check --json`.
+ */
+export async function hooksAfterUpgrade(root = ROOT, { env = process.env, deps = {} } = {}) {
+  try {
+    const helper = path.join(root, 'harness', 'hooks-upgrade-hint.mjs');
+    if (!fs.existsSync(helper)) return '';
+    let r = deps.check ? await deps.check() : null;
+    if (!r) {
+      const c = spawnSync(process.execPath, [path.join(root, 'harness', 'hook-stamp.mjs'), 'check', '--json'], { windowsHide: true, cwd: root, encoding: 'utf8', env, timeout: 180000, maxBuffer: 32 * 1024 * 1024 });
+      const l = String(c.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop();
+      r = l ? JSON.parse(l) : null;
+    }
+    if (!r || r.ok || !(r.open || []).length) return '';
+    const hint = await (await importFile(helper)).upgradeMergeHint(r.open, { cwd: root, base: r.baseSha || null, env });
+    if (!hint) return '';
+    return `[upgrade smoke] hooks check: ${hint.count} upstream commit(s) are unstamped (the release ${hint.from || '?'} -> ${hint.to} came in by a plain git merge); run: ${hint.command} (${hint.who})`;
+  } catch { return ''; }
+}
+
 /** `--preflight` or `--smoke` (see the header). Returns { ok, items, lines, scratch? }. */
 export async function prePost({ root = ROOT, smokeRun = false, ref = null, keep = false, env = process.env } = {}) {
   if (smokeRun) {
@@ -409,6 +432,7 @@ export async function prePost({ root = ROOT, smokeRun = false, ref = null, keep 
     const r = await sm.smoke({ root, env, keep });
     const lines = pf?.itemLines ? pf.itemLines('smoke', r.items) : r.items.map((i) => `[upgrade smoke] ${i.status} ${i.id}: ${i.detail}${i.fix && i.status === 'FAIL' ? `\n  Fix: ${i.fix}` : ''}`);
     if (r.scratch) lines.push(`[upgrade smoke] the scratch copy is kept at ${r.scratch} (remove it when done)`);
+    { const h = await hooksAfterUpgrade(root, { env }); if (h) lines.push(h); }
     return { ...r, lines };
   }
   const pf = await loadHelper('upgrade-preflight.mjs', root, ref);

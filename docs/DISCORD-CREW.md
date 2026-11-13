@@ -140,7 +140,8 @@ supervisor runs it once per pass.
   owner: only owner decisions (asks; in beta mode only asks about money, deleting, direction or scope; spend over budget;
   a policy proposal) and disasters, which tag the orchestrator too: disk under `STUDIO_COMM_DISK_GB` (30),
   `STUDIO_COMM_CRASHES` (3) crashes in an hour, everything blocked (no agent, no train, a blocker, the supervisor
-  running) over `STUDIO_COMM_BLOCKED_MIN` (60).
+  running) over `STUDIO_COMM_BLOCKED_MIN` (60). 2.85: a running engine train, web train, engine land or rules check counts
+  as work (no alert); when it fires, the text names any other heavy work still running.
 - **Rules**: one alert at most once per `STUDIO_COMM_DEDUP_MIN` (30); one still open is tagged again every
   `STUDIO_COMM_REPEAT_MIN` (120; disasters every 30; 2.79 (c): an open question at most every `STUDIO_ASK_DIGEST_HOURS`, 24, then the daily digest); a pass's alerts go in one post, with the status when it is due;
   closed alerts are named once ("Cleared: …"); `STUDIO_COMM_QUIET=23:00-07:00` (local time) holds owner-only alerts that

@@ -167,6 +167,8 @@ export async function commFacts({ root = REPO_ROOT, env = process.env, now = Dat
   f.train = brief?.train || null;
   const lock = readJson(path.join(root, '.studio', 'locks', 'train.lock'), null);
   f.trainLock = lock && lock.pid ? { ...lock, dead: !alive(lock.pid) } : null;
+  // 2.85 (e): the rest of what is running (an engine train, an engine land or rules check, other heavy work).
+  f.inProgress = deps.inProgress !== undefined ? deps.inProgress : await workInProgress(root, { env });
   const starts = events.filter((e) => e.type === 'task.train.start' && e.meta?.train);
   const ends = events.filter((e) => /^task\.train\.(done|died|dead|crashed)$/.test(e.type) && e.meta?.train);
   const lastEnd = ends[ends.length - 1] || null;
@@ -214,6 +216,34 @@ export async function commFacts({ root = REPO_ROOT, env = process.env, now = Dat
   if (fs.existsSync(path.join(root, '.studio', 'supervisor-stop'))) f.stopFiles.push({ key: 'supervisor', text: 'npm run studio:stop was asked: the supervisor is stopping (agents finish their task)' });
   f.crewPaused = Object.entries(readJson(path.join(root, '.studio', 'crew-paused.json'), {})?.roles || {}).map(([role, p]) => ({ role, why: short(p?.why || '', 120) }));
   return f;
+}
+
+/**
+ * 2.85 (e): what runs besides agents and the web train: [{ text, work }]. work true: a train or a landing step (an engine
+ * train holding its lock, an engine land, a rules check, a land run): progress, so "everything is blocked" doesn't fire
+ * (it fired while an engine train ran for hours). Other heavy work (a playtest, a builder's verify after its session) is
+ * named in the alert's text but is not a train. Never throws.
+ */
+export async function workInProgress(root, { env = process.env } = {}) {
+  const out = [];
+  const dir = path.join(root, '.studio', 'locks');
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { names = []; }
+  for (const n of names) {
+    const m = /^([a-z][a-z0-9-]*)-train\.lock$/.exec(n);
+    if (!m) continue;
+    const h = readJson(path.join(dir, n), null);
+    if (h && h.pid && alive(h.pid)) out.push({ text: `the ${m[1]} train ${h.id || ''}`.replace(/\s+$/, ''), work: true });
+  }
+  try {
+    const hv = await import('./heavy.mjs');
+    for (const h of hv.heavyHolders(root, { env })) {
+      const label = short(h.label || h.claim?.kind || 'heavy work', 80);
+      const work = Boolean(h.claim?.engine) || Boolean(h.landing) || /\b(land|rules|train)\b/i.test(`${h.label || ''} ${h.claim?.kind || ''}`);
+      out.push({ text: `${label}${h.owner ? ` (${short(h.owner, 30)})` : ''}`, work });
+    }
+  } catch { /* no heavy holders known */ }
+  return out;
 }
 
 // ---- alerts ----------------------------------------------------------------------------------------------------------
@@ -287,8 +317,12 @@ export function alertsNow(f, { env = process.env, state = {}, passWhy = [] } = {
   const hour = f.events.filter((e) => (Date.parse(e.ts) || 0) > f.now - 3600000 && (e.type === 'supervisor.halted' || /^task\.train\.(died|dead|crashed)$/.test(e.type)));
   if (hour.length >= s.crashes) add('crashes', 'disaster', `Repeated crashes: ${hour.length} in the last hour (${cut([...new Set(hour.map((e) => e.type.replace(/^supervisor\.|^task\./, '')))], 4)}).`);
   const trainRunning = Boolean(f.train) || Boolean(f.trainLock && !f.trainLock.dead);
-  f.blockedNow = f.supRunning && f.workers.length === 0 && !trainRunning && (f.blockers.length > 0 || f.stopFiles.length > 0);
-  if (f.blockedNow && Date.parse(state.blockedSince || '') && f.now - Date.parse(state.blockedSince) >= s.blockedMin * 60000) add('all-blocked', 'disaster', `Everything is blocked for ${mins(f.now - Date.parse(state.blockedSince))}: no agent and no train running; ${short(f.blockers.map((b) => (b.ids ? `${b.text}: ${cut(b.ids, 3)}` : b.text)).join('; ') || f.stopFiles.map((x) => x.text).join('; '), 200)}.`);
+  // 2.85 (e): an engine train, an engine land or a rules check in progress is work too (the alert fired during one).
+  const inProg = Array.isArray(f.inProgress) ? f.inProgress : [];
+  const working = inProg.filter((x) => x.work);
+  f.blockedNow = f.supRunning && f.workers.length === 0 && !trainRunning && !working.length && (f.blockers.length > 0 || f.stopFiles.length > 0);
+  const still = inProg.filter((x) => !x.work).map((x) => x.text);
+  if (f.blockedNow && Date.parse(state.blockedSince || '') && f.now - Date.parse(state.blockedSince) >= s.blockedMin * 60000) add('all-blocked', 'disaster', `Everything is blocked for ${mins(f.now - Date.parse(state.blockedSince))}: no agent, no train and no land or rules check running${still.length ? ` (running, not landing work: ${cut(still, 3)})` : ' (nothing else running)'}; ${short(f.blockers.map((b) => (b.ids ? `${b.text}: ${cut(b.ids, 3)}` : b.text)).join('; ') || f.stopFiles.map((x) => x.text).join('; '), 200)}.`);
   return out;
 }
 
