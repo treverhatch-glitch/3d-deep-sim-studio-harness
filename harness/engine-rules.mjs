@@ -319,6 +319,11 @@ export function playFocusConfig(cfg = {}) {
   return { map, smoke: typeof f.smoke === 'string' ? f.smoke.trim() : '', join: typeof f.join === 'string' && f.join ? f.join : ';', ignore: ignoreList(f.ignore), skip };
 }
 
+/** 2.85: the paths no map entry takes (focusFilters stops at the first), in order. */
+export function unmappedPaths(changed = [], map = []) {
+  return changed.filter((p) => !focusFilters({ changed: [p], map }).ok);
+}
+
 /** The characters a Play Mode filter may hold (it reaches a command line); anything else runs the stage in full. */
 export const PLAY_FILTER_SAFE = /^[A-Za-z0-9_.;|~=!()* -]+$/;
 
@@ -351,7 +356,14 @@ export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = 
     if (!sk.kept.length && sk.ignored.length) return { mode: 'skip', filter: '', why: `every changed path (${sk.ignored.length}) matches play.focus.skip: no Play Mode run`, ...bad };
   }
   const ff = focusFilters({ changed: ch, map: pf.map, smoke: pf.smoke, join: pf.join });
-  if (!ff.ok) return fullSel(`${ff.unmatched} matches no play.focus.map entry`, bad);
+  if (!ff.ok) {
+    // 2.85: name every path no map entry takes (up to 5), so a studio can see what to add to its map; a path that matches
+    // play.focus.skip still sends a mixed batch to the full stage (2.84's rule, kept), and is named as such.
+    const um = unmappedPaths(ch, pf.map);
+    const sk = pf.skip.length ? new Set(ignoreSplit(um, pf.skip).ignored) : new Set();
+    const shown = um.slice(0, 5).map((p) => (sk.has(p) ? `${p} (play.focus.skip, in a batch with other paths)` : p));
+    return fullSel(`${um.length} changed path(s) match no play.focus.map entry: ${shown.join(', ')}${um.length > 5 ? ', ...' : ''}${pf.map.length ? '' : ' (play.focus has no map)'}`, { unmatched: um.slice(0, 5), unmatchedCount: um.length, ...bad });
+  }
   if (!ff.filter) return fullSel('the filter is empty', bad);
   if (!PLAY_FILTER_SAFE.test(ff.filter)) return fullSel(`refused the filter "${ff.filter.slice(0, 120)}": only letters, digits, space and _ . ; | ~ = ! ( ) * - may reach the land command`, { refused: true, ...bad });
   return { mode: 'focus', filter: ff.filter, why: `${ch.length} changed path(s), all mapped by play.focus${ig.ignored.length ? ` (${ig.ignored.length} more left out by play.focus.ignore)` : ''}`, ...bad };

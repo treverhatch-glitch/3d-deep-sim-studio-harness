@@ -2101,7 +2101,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         const pre = completeTask(targetId, '', whoAmI(flags), { unityTrainCheck: true, noop: noopFlag });
         if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
         if (pre.error) { console.error(pre.message); process.exit(1); }
-        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { engine: trainEngine, task: pre.id, agent: whoAmI(flags), alone: flags.alone ? true : null, branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '', tag: doneTag === null ? null : doneTag });
+        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { engine: trainEngine, task: pre.id, agent: whoAmI(flags), alone: flags.alone ? true : null, branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '', tag: doneTag === null ? null : doneTag, again: Boolean(flags.again) });
+        // 2.85: --again queues a branch the engine train handed back unchanged (logged as task.train.<x>.requeued_unchanged).
         (r.ok ? console.log : console.error)(r.message);
         process.exit(r.ok ? 0 : 1);
       }

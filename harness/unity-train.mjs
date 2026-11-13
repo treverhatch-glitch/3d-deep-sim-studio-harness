@@ -136,7 +136,7 @@ export const setQueueTag = (root, task, tag, engine = 'unity') => withQueue(root
  * Queue a Unity-track task's branch (task done <ID> --train, after its checks). { ok, entry, message } or { ok: false, error,
  * message }. The branch: `branch`, else the task's recorded Unity branch, else the Unity folder's current branch (never the target).
  */
-export function queueUnityTask(root, { engine = 'unity', task, agent = null, branch = null, note = '', alone = null, tag = null } = {}) {
+export function queueUnityTask(root, { engine = 'unity', task, agent = null, branch = null, note = '', alone = null, tag = null, again = false } = {}) {
   const s = unityTrainSettings(root, engine);
   const L = labelOf(engine);
   const UNITY_REF_PREFIX = refPrefix(engine);
@@ -154,6 +154,14 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
   if (!head) return { ok: false, error: 'no-branch', message: `${task} was not queued: the ${L} repo has no branch ${br}.` };
   const ahead = Number(out(git(s.repo, 'rev-list', '--count', `refs/heads/${s.target}..${head}`))) || 0;
   if (!ahead) return { ok: false, error: 'nothing', message: `${task} was not queued: ${br} has no commits that ${s.target} doesn't have.` };
+  // 2.85: a branch the train handed back is not queued again unchanged (only merges of the target since that red, and the target
+  // changed nothing the red's evidence names): the same red would repeat. --again (the overseer or a planner) queues it anyway, logged.
+  // An entry already in the queue (task alone, a re-tag) is not asked.
+  if (!readUnityQueue(root, engine).some((e) => e.task === task)) {
+    const rec = (() => { try { return unchangedSinceRed(s, readHandbacks(root, engine)[task], br, head); } catch { return null; } })();
+    if (rec && !again) return { ok: false, error: 'unchanged', handback: rec, message: `${task} was not queued: nothing changed since ${L} train ${rec.train} handed ${br} back for ${rec.reason}: the same red would repeat (since then ${br} has only merges of ${s.target}${(rec.files || []).length ? `, and ${s.target} changed none of ${rec.files.slice(0, 4).join(', ')}` : `, and ${s.target} has not moved`}). Fix it, or \`npm run task -- impossible ${task} --why "<what contradicts what>"\`. The overseer or a planner may queue it anyway with --again.` };
+    if (rec && again) evTop('requeued_unchanged', 'queue', `${task}: ${br} at ${short(head)} queued again with --again though nothing changed since train ${rec.train} handed it back (${rec.reason})`, { engine, agent: agent || `${engine}-train`, task, to: 'producer', status: 'warn', meta: { branch: br, head, handback: rec.train, reason: String(rec.reason).slice(0, 200) } });
+  }
   const entry = withQueue(root, (q) => {
     const i = q.findIndex((e) => e.task === task);
     // A branch that must land alone (task done --train --alone, or the task's record: task alone <ID> on).
@@ -275,6 +283,117 @@ export function suspectsByNamespace({ repo, tip, lanes = [], failures = [] } = {
     if (tests.length) found.push({ lane, tests, files: [...hit].slice(0, 6) });
   }
   return found;
+}
+
+/** A test's full name in parts: { name, cls, ns } (cls null when it has no usable class). */
+const testParts = (f) => {
+  const parts = String(f).replace(/\(.*$/, '').split('.').map((x) => x.trim()).filter(Boolean);
+  const cls = parts.length >= 2 ? parts[parts.length - 2] : null;
+  return { name: String(f), cls: cls && /^[A-Za-z_][A-Za-z0-9_]{2,}$/.test(cls) ? cls : null, ns: parts.slice(0, -2).join('.') };
+};
+
+/** 2.85: the files at `ref` that declare a class (C#, GDScript, Python), 5 at most. */
+export function testFilesAt(repo, ref, cls) {
+  if (!ref || !cls || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(cls)) return [];
+  const r = git(repo, 'grep', '-l', '-E', '-e', `(class|struct|record|class_name)[[:space:]]+${cls}([^A-Za-z0-9_]|$)`, ref, '--');
+  return r.status === 0 ? String(r.stdout || '').split('\n').filter(Boolean).map((l) => l.slice(l.indexOf(':') + 1)).slice(0, 5) : [];
+}
+
+/** 2.85: a test file's assembly folder: the nearest folder above it holding an .asmdef at `ref`, else its own folder. */
+function asmFolderOf(repo, ref, file, cache) {
+  const key = `${ref}`;
+  if (!cache.has(key)) cache.set(key, out(git(repo, 'ls-tree', '-r', '--name-only', ref)).split('\n').filter((x) => /\.asmdef$/i.test(x)).map((x) => path.posix.dirname(x)));
+  const dirs = cache.get(key).filter((d) => d !== '.' && file.startsWith(`${d}/`)).sort((a, b) => b.length - a.length);
+  return dirs[0] || path.posix.dirname(file);
+}
+
+/**
+ * 2.85: which lanes are tied to which failing tests, by every evidence rule: the class rule (a changed file names the test's class,
+ * which covers the lane that added the test), the namespace rule (a changed test file declares its namespace, or a file is named
+ * after its class), the class file less "Tests" (FeesTests: Fees.cs), and the assembly folder (a changed file under the folder of the
+ * .asmdef that holds the test's file, at the target or at the lane's head). With `weak`, also a lane that changes a path with a folder
+ * named like a namespace part (Game.Economy.Tests: .../Economy/...): too loose to blame anyone by, used only to decide whether a red
+ * full run is the target's own.
+ * { byTest: { name: [task] }, byLane: Map task -> { lane, tests, files, rules }, unjudged: [task] } (unjudged: too many files to judge).
+ */
+export function tiesOf({ repo, tip, lanes = [], failures = [], weak = false } = {}) {
+  const want = [...new Set(failures)].slice(0, 20).map(testParts);
+  const byTest = Object.fromEntries(want.map((w) => [w.name, []]));
+  const byLane = new Map();
+  const unjudged = [];
+  const asmCache = new Map();
+  const tie = (lane, test, files, rule) => {
+    if (!byLane.has(lane.task)) byLane.set(lane.task, { lane, tests: [], files: [], rules: [] });
+    const t = byLane.get(lane.task);
+    if (!t.tests.includes(test)) t.tests.push(test);
+    for (const f of files) if (!t.files.includes(f) && t.files.length < 6) t.files.push(f);
+    if (!t.rules.includes(rule)) t.rules.push(rule);
+    if (!byTest[test].includes(lane.task)) byTest[test].push(lane.task);
+  };
+  if (!want.length) return { byTest, byLane, unjudged };
+  for (const [rule, found] of [['class', suspectsOf({ repo, tip, lanes, failures: want.map((w) => w.name) })], ['namespace', suspectsByNamespace({ repo, tip, lanes, failures: want.map((w) => w.name) })]]) {
+    for (const f of found) for (const t of f.tests) tie(f.lane, t, f.files, rule);
+  }
+  const atTip = new Map(want.map((w) => [w.name, w.cls ? testFilesAt(repo, tip, w.cls) : []]));
+  for (const lane of lanes) {
+    const changed = out(git(repo, 'diff', '--name-only', '--no-renames', `${tip}...${lane.head}`)).split('\n').filter(Boolean);
+    if (changed.length > 300) { unjudged.push(lane.task); continue; }
+    if (!changed.length) continue;
+    for (const w of want) {
+      if (!w.cls) continue;
+      const stem = w.cls.replace(/Tests?$/, '');
+      const byStem = stem.length >= 3 && stem !== w.cls ? changed.filter((x) => path.posix.basename(x).replace(/\.[^.]*$/, '') === stem) : [];
+      if (byStem.length) tie(lane, w.name, byStem, 'class-file');
+      const homes = [...atTip.get(w.name).map((f) => asmFolderOf(repo, tip, f, asmCache)), ...testFilesAt(repo, lane.head, w.cls).map((f) => asmFolderOf(repo, lane.head, f, asmCache))];
+      const inAsm = changed.filter((x) => homes.some((d) => d && d !== '.' && x.startsWith(`${d}/`)));
+      if (inAsm.length) tie(lane, w.name, inAsm, 'assembly');
+      if (weak) {
+        const segs = w.ns.split('.').slice(1).filter((x) => x.length >= 3 && !/^(Tests?|EditMode|PlayMode|PlayModeTests|EditModeTests)$/i.test(x)).map((x) => x.toLowerCase());
+        const near = segs.length ? changed.filter((x) => x.toLowerCase().split('/').slice(0, -1).some((d) => segs.includes(d))) : [];
+        if (near.length) tie(lane, w.name, near, 'folder');
+      }
+    }
+  }
+  return { byTest, byLane, unjudged };
+}
+
+// 2.85: the target's own red tests in the daily full land run, and the train's hand-back records.
+const baselineFile = (root, engine) => path.join(root, '.studio', 'train', `${engine}-full-baseline.json`);
+/** The engine's full-run baseline: { at, target, failing: [names], source, told } ({ failing: [] } when none). */
+export function readFullBaseline(root, engine = 'unity') {
+  const j = readJson(baselineFile(root, engine));
+  return j && typeof j === 'object' && Array.isArray(j.failing) ? { ...j, failing: j.failing.filter((x) => typeof x === 'string') } : { failing: [] };
+}
+const handbacksFile = (root, engine) => path.join(root, '.studio', 'train', `${engine}-handbacks.json`);
+/** What the train handed each task back for: { [task]: { train, branch, head, reason, cause, files, tests, targetAt, at } }. */
+export function readHandbacks(root, engine = 'unity') {
+  const j = readJson(handbacksFile(root, engine));
+  return j && typeof j === 'object' && !Array.isArray(j) ? j : {};
+}
+const editHandbacks = (root, engine, fn) => { try { withLandLock(root, () => { const h = readHandbacks(root, engine); fn(h); writeJson(handbacksFile(root, engine), h); }, { name: `${engine}-train-handbacks`, waitMs: 30000 }); } catch { /* a record only */ } };
+
+/**
+ * 2.85: would queueing `br` at `head` repeat the red the train handed it back for? The record when every commit on the branch since
+ * that red is a merge of the target (no commit of its own) and the target changed none of the files the red's evidence names (with
+ * no file named: the target has not moved); else null.
+ */
+export function unchangedSinceRed(s, rec, br, head) {
+  if (!rec || rec.branch !== br || !rec.head || !rec.reason) return null;
+  if (head !== rec.head) {
+    if (!isAncestor(s.repo, rec.head, head)) return null;
+    // Commits on the branch since the red that the target does not hold: none may be a commit of its own.
+    if (out(git(s.repo, 'rev-list', '--no-merges', `${rec.head}..${head}`, '--not', `refs/heads/${s.target}`))) return null;
+    for (const line of out(git(s.repo, 'rev-list', '--merges', '--parents', `${rec.head}..${head}`, '--not', `refs/heads/${s.target}`)).split('\n').filter(Boolean)) {
+      const others = line.split(' ').slice(2);
+      if (!others.length || !others.every((p) => isAncestor(s.repo, p, `refs/heads/${s.target}`))) return null;
+    }
+  }
+  const tipNow = headOf(s.repo, s.target);
+  const files = Array.isArray(rec.files) ? rec.files.filter(Boolean) : [];
+  if (!rec.targetAt || !tipNow) return null;
+  if (files.length) { const d = git(s.repo, 'diff', '--name-only', `${rec.targetAt}..${tipNow}`, '--', ...files); if (d.status !== 0 || out(d)) return null; }
+  else if (tipNow !== rec.targetAt) return null;
+  return rec;
 }
 
 /** Does a test's full name match engines.<x>.flakyTests (a full name, or a prefix ending in *)? */
@@ -486,9 +605,18 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   update({ lanes: lanes.map((l) => l.task), now: 'checking the branches', batch: sel.why, targetAt: headOf(repo, target) || null, ...(tag ? { tag } : {}) });
   ev('start', id, `${lanes.length} branch(es): ${lanes.map((l) => `${l.task} (${l.branch})`).join(', ')}${dryRun ? ' (dry run)' : ''}; batch ${sel.why}`, { agent: by, meta: { lanes: lanes.map((l) => l.task), dryRun, batch: sel.why, ...(tag ? { tag } : {}), ...(only.length ? { only } : {}), ...(sel.cls ? { cls: sel.cls } : {}) } });
 
-  const drop = (lane, why, { handBack = true, cause = null } = {}) => {
+  const drop = (lane, why, { handBack = true, cause = null, evidence = null } = {}) => {
     res.dropped.push({ task: lane.task, why, ...(cause ? { cause } : {}) });
     if (dryRun) return;
+    // 2.85: what this lane was handed back for, so an unchanged branch is not queued again (queueUnityTask): its head, the reason and
+    // the files the red's evidence names (the failing tests' files, the conflict or compile files).
+    if (handBack) {
+      try {
+        const tests = (evidence?.tests || []).slice(0, 10);
+        const files = [...new Set([...(evidence?.files || []), ...tests.flatMap((t) => testFilesAt(repo, lane.head, testParts(t).cls))])].slice(0, 20);
+        editHandbacks(root, engine, (h) => { h[lane.task] = { train: id, branch: lane.branch, head: lane.head, reason: `${cause ? `${cause}: ` : ''}${why.split('\n')[0]}`.slice(0, 240), cause: cause || 'red', files, tests, targetAt: headOf(repo, target) || null, at: new Date().toISOString() }; });
+      } catch { /* a record only */ }
+    }
     try { dequeueUnity(root, lane.task, engine); } catch {}
     // Handed back means out of this train now: its fix can start at once, not after the train's remaining runs.
     live.delete(lane.task); liveNow();
@@ -511,7 +639,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   const tip0 = headOf(repo, target);
   const pre = chainOnTarget(repo, tip0, ready, id, engine);
   if (pre.error) { res.ok = false; res.message = `The ${L} train could not check the branches: ${pre.error}. Nothing ran; the queue is kept.`; return finish(); }
-  for (const l of pre.conflictTarget) drop(l, l.why);
+  for (const l of pre.conflictTarget) drop(l, l.why, { evidence: { files: l.files || [] } });
   for (const l of pre.deferred) defer(l, l.why);
   for (const l of pre.already) drop(l, `${l.branch} is already in ${target}; task done ${l.task} closes it`, { handBack: false });
   let set = pre.included;
@@ -597,13 +725,18 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     let r = null;
     try {
       for (let a = 0; ; a += 1) {
-        update({ now: `${what}: ${group.map((l) => l.task).join(', ')}${a ? ` (try ${a + 1})` : ''}`, runs: res.runs + 1 });
-        log(`[unity-train] ${id}: ${what}: land ${group.map((l) => `${l.task} (${l.branch})`).join(', ')} on ${target} at ${short(tip)}${ref ? ` through ${ref}` : ''}`);
         const checked = rulesGreen && rulesGreen.tip === tip && rulesGreen.tasks === group.map((l) => l.task).join(',') && rulesGreen.same();
         // Once a day (STUDIO_ENGINE_FULL_LAND_HOURS) a land run is told nothing that lets it skip its own tests (no STUDIO_RULES_GREEN, no Edit Mode
         // plan, STUDIO_LAND_FULL=1): the shortcuts rest on tests run outside the editor, and this run would see a difference between the runtimes.
-        const fullWhy = fullLandDue(root, engine, s.cfg, env, Date.now(), { start: !dryRun });
+        // opts.notFull: the ordinary run after a full run that was red only on the target's own tests (2.85).
+        const fullWhy = opts.notFull ? '' : fullLandDue(root, engine, s.cfg, env, Date.now(), { start: !dryRun });
+        // 2.85 (B-137): the daily full run is said wherever a person looks: the train's "now" line, train status, an event at its start.
+        const fullMin = fullWhy ? Number(readJson(fullLandFile(root, engine))?.minutes) || null : null;
+        const runText = fullWhy ? `${what}, the daily full run: every test runs, expect about ${fullMin ? `${fullMin} min` : 'the longest land run of the day'}` : what;
+        update({ now: `${runText}: ${group.map((l) => l.task).join(', ')}${a ? ` (try ${a + 1})` : ''}`, runs: res.runs + 1, full: fullWhy ? { why: fullWhy, minutes: fullMin } : null });
+        log(`[unity-train] ${id}: ${what}: land ${group.map((l) => `${l.task} (${l.branch})`).join(', ')} on ${target} at ${short(tip)}${ref ? ` through ${ref}` : ''}`);
         if (fullWhy) log(`[unity-train] ${id}: a full land run (${fullWhy}): the land command is not told the rules are green and gets no Edit Mode plan`);
+        if (fullWhy && a === 0 && !opts.retry && !dryRun) ev('full_land', id, `${what} of ${group.map((l) => l.task).join(', ')} is the daily full run (${fullWhy}): every test runs${fullMin ? `, expect about ${fullMin} min` : ''}; a red here is checked against the target's own full-run failures`, { agent: by, to: 'producer', meta: { why: fullWhy, tasks: group.map((l) => l.task), ...(fullMin ? { minutes: fullMin } : {}) } });
         // The Play Mode focus (engines.<x>.play.focus): a hint the land script may use. Never on a full land run; a retry of a red play stage
         // gets the selection of the run it repeats.
         const play = fullWhy ? { mode: 'full', filter: '', why: fullWhy } : opts.play || playSelection({ changed: batchPaths(), cfg: s.cfg, full: false });
@@ -611,6 +744,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         if (play.refused) log(`[unity-train] ${id}: play focus: ${play.why}; the play stage runs in full`);
         else if (play.mode === 'focus') log(`[unity-train] ${id}: play focus: ${play.why} (${play.filter})`);
         else if (play.mode === 'skip') log(`[unity-train] ${id}: play stage skipped: ${play.why}`);
+        // 2.85: a full play stage says why, naming the paths no play.focus.map entry takes.
+        else if (play.unmatched?.length) { log(`[unity-train] ${id}: play stage in full: ${play.why}`); res.playUnmatched = play.unmatched; }
         const playEnv = { STUDIO_PLAY_MODE: play.mode, ...(play.mode === 'focus' ? { STUDIO_PLAY_FILTER: play.filter, ...(engine === 'unity' ? { STUDIO_UNITY_PLAYMODE_ARGS: `-testFilter "${play.filter}"` } : {}) } : {}) };
         const landEnv = { ...env, STUDIO_GATE_PRIORITY: 'landing', ...(fullWhy ? { STUDIO_LAND_FULL: '1' } : checked ? { STUDIO_RULES_GREEN: '1', STUDIO_RULES_MODE: rulesGreen.mode } : {}), ...playEnv };
         if (play.mode !== 'focus') { delete landEnv.STUDIO_PLAY_FILTER; delete landEnv.STUDIO_UNITY_PLAYMODE_ARGS; }
@@ -637,10 +772,14 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         let decided = null;
         let stagesBefore = [];
         if (compileOn && !compileOff && !rt && !compiledGroups.has(gkey) && !(group.length === 1 && compiledLanes.has(group[0].task))) {
-          update({ now: `compile check: ${group.map((l) => l.task).join(', ')}` });
+          update({ now: `compile check: ${group.map((l) => l.task).join(', ')}${fullWhy ? ' (the daily full land run comes after it)' : ''}` });
           log(`[unity-train] ${id}: compile check (STUDIO_LAND_ONLY=compile) of ${group.map((l) => l.task).join(', ')}, up to ${compileMin} min`);
           const c0 = Date.now();
-          const rc = await land({ engine, ...arg, task: gkey, label: `${label} compile`, env: { ...landEnv, STUDIO_LAND_ONLY: 'compile' }, log, only: 'compile', timeoutMin: compileMin });
+          // 2.85 (B-137): the compile check carries only what a compile needs: no full-run, rules, retry or Play Mode filter variables.
+          // STUDIO_PLAY_MODE stays (2.84's qa/selftest-284t.mjs pins it on the compile run).
+          const compileEnv = { ...landEnv, STUDIO_LAND_ONLY: 'compile' };
+          for (const k of Object.keys(compileEnv)) if (/^STUDIO_(LAND_(FULL|RETRY.*)|RULES_(GREEN|MODE)|PLAY_FILTER|UNITY_(PLAYMODE|EDITMODE)_ARGS)$/.test(k)) delete compileEnv[k];
+          const rc = await land({ engine, ...arg, task: gkey, label: `${label} compile`, env: compileEnv, log, only: 'compile', timeoutMin: compileMin });
           const secs = Math.round((Date.now() - c0) / 1000);
           res.compileRuns += 1;
           const notHonoured = (why) => {
@@ -657,7 +796,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
           } else if (rc.status === 'pass') {
             compiledGroups.add(gkey); for (const l of group) compiledLanes.add(l.task);
             stagesBefore = [{ name: 'compile', status: 'pass', seconds: secs }];
-            ev('compile', id, `compile check of ${gkey}: pass (${secs} s)`, { agent: by, status: 'ok', meta: { status: 'pass', seconds: secs, lanes: group.map((l) => l.task) } });
+            ev('compile', id, `compile check of ${gkey}: passed in ${secs} s; the land run starts now${fullWhy ? ' (the daily full run)' : ''}`, { agent: by, status: 'ok', meta: { status: 'pass', seconds: secs, lanes: group.map((l) => l.task), ...(fullWhy ? { full: true } : {}) } });
+            update({ now: `compile check passed in ${secs} s; ${runText} starts now: ${group.map((l) => l.task).join(', ')}` });
           } else if (rc.status === 'red' || rc.status === 'conflict') {
             decided = { ...rc, compileOnly: true, stages: [{ name: 'compile', status: 'fail', seconds: secs }] };
             ev('compile', id, `compile check of ${gkey}: ${rc.status} (${secs} s)${rc.errorFiles?.length ? `: ${rc.errorFiles.slice(0, 3).join(', ')}` : ''}`, { agent: by, status: 'blocked', meta: { status: rc.status, seconds: secs, lanes: group.map((l) => l.task), files: (rc.errorFiles || []).slice(0, 10), failures: (rc.failures || []).slice(0, 10) } });
@@ -667,11 +807,23 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         }
         if (decided) r = decided;
         else {
+          const l0 = Date.now();
           r = await land({ engine, ...arg, task: gkey, label, env: landEnv, log, ...(stagesBefore.length ? { stagesBefore } : {}) });
           res.runs += 1;
-          if (fullWhy) { res.fullLand = (res.fullLand || 0) + 1; if (r.status === 'pass') { try { fs.mkdirSync(path.dirname(fullLandFile(root, engine)), { recursive: true }); writeJson(fullLandFile(root, engine), { at: new Date().toISOString(), id }); } catch { /* it is due again next time */ } } }
+          if (fullWhy) {
+            res.fullLand = (res.fullLand || 0) + 1;
+            // 2.85: the full run's minutes are kept for the next one's "expect about N min" (a run that ran to the end only).
+            const minutes = ['pass', 'red'].includes(r.status) ? Math.max(1, Math.round((Date.now() - l0) / 60000)) : null;
+            try {
+              const prev = readJson(fullLandFile(root, engine)) || {};
+              if (r.status === 'pass') writeJson(fullLandFile(root, engine), { at: new Date().toISOString(), id, ...(minutes ? { minutes } : prev.minutes ? { minutes: prev.minutes } : {}) });
+              else if (minutes && prev.at) writeJson(fullLandFile(root, engine), { ...prev, minutes });
+            } catch { /* it is due again next time */ }
+          }
         }
-        r = { ...r, play };
+        // 2.85: never the previous stage while the next runs: the run ended, the train decides what comes next.
+        update({ now: `${runText} of ${group.map((l) => l.task).join(', ')} ended ${r.status}; deciding what runs next`, full: null });
+        r = { ...r, play, ...(fullWhy ? { full: true } : {}) };
         res.playMode = play.mode;
         res.playFilter = play.filter;
         if (play.mode === 'skip') res.playSkipped = (res.playSkipped || 0) + 1;
@@ -702,6 +854,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     } finally {
       if (ref) git(repo, 'update-ref', '-d', `refs/heads/${ref}`);
     }
+    // 2.85: a daily full run is judged against the target's own full-run failures (fullRunVerdict).
+    if (r.full && !dryRun) { const fr = await fullRunVerdict(group, r, tip, what); if (fr) return fr; }
     if (r.status === 'pass') {
       const now = headOf(repo, target);
       const missing = group.filter((l) => !isAncestor(repo, l.head, now));
@@ -710,12 +864,56 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     }
     return r;
   };
+  /**
+   * 2.85: the daily full run against the target's own full-run failures (.studio/train/<engine>-full-baseline.json). Green: the
+   * baseline is cleared. Red with named tests: a baseline name the run no longer shows is cleared (only when the run went on past its
+   * first red stage, so the test did run); when no failure is tied to a branch of the batch by the evidence rules (tiesOf, with the
+   * loose folder rule too) or every failure is already in the baseline, the batch is neither blamed nor bisected: the names go to the
+   * baseline, the director is told once per set of names (engine.full_red_on_target), the full-run clock counts as served, and the
+   * same batch lands again as an ordinary land run, once. Otherwise null: the usual blame, with the baseline's names left out.
+   */
+  const fullRunVerdict = async (group, r, tip, what) => {
+    const base = readFullBaseline(root, engine);
+    const emitB = (type, status, msg, meta) => { try { emitEvent({ type, agent: by, to: 'director', status, track: `engine:${engine}`, msg: `${L} train ${id}: ${msg}`.slice(0, 600), meta: { train: id, engine, ...meta } }); } catch {} };
+    const save = (failing, extra = {}) => { try { writeJson(baselineFile(root, engine), { at: new Date().toISOString(), target: headOf(repo, target) || tip, failing, source: `the full land run of ${L} train ${id}`, ...(base.told ? { told: base.told } : {}), ...extra }); } catch { /* asked again next time */ } };
+    const clear = (gone) => { if (!gone.length) return; emitB('engine.full_baseline_cleared', 'ok', `the daily full run no longer fails ${gone.length} test(s) the target was red on: ${gone.slice(0, 5).join(', ')}${gone.length > 5 ? ', ...' : ''}; removed from the known-red list`, { tests: gone.slice(0, 20) }); log(`[unity-train] ${id}: full-run baseline: ${gone.length} name(s) pass again: ${gone.slice(0, 5).join(', ')}`); };
+    if (r.status === 'pass') { if (base.failing.length) { save([], { told: '' }); clear(base.failing); } return null; }
+    const names = r.status === 'red' && !r.compileOnly && Array.isArray(r.failures) ? [...new Set(r.failures)] : [];
+    if (!names.length) return null;
+    const st = Array.isArray(r.stages) ? r.stages.map((x) => x?.name) : [];
+    const red0 = firstRedStage(r);
+    const ranOn = red0 && st.indexOf(red0) >= 0 && st.indexOf(red0) < st.length - 1;
+    const gone = ranOn ? base.failing.filter((n) => !names.includes(n)) : [];
+    const kept = base.failing.filter((n) => !gone.includes(n));
+    const fresh = names.filter((n) => !kept.includes(n));
+    let tied = [];
+    let unjudged = [];
+    try { const t = tiesOf({ repo, tip, lanes: group, failures: fresh, weak: true }); tied = fresh.filter((n) => t.byTest[n]?.length); unjudged = t.unjudged; } catch { unjudged = ['?']; }
+    if (tied.length || unjudged.length || fresh.length > 20) {
+      if (gone.length) { save(kept); clear(gone); }
+      log(`[unity-train] ${id}: the full run is red on ${names.length} test(s); ${tied.length ? `tied to a branch of the batch: ${tied.slice(0, 5).join(', ')}` : 'a branch could not be judged (too many files)'}${kept.length ? `; the target's own (not counted against anyone): ${kept.filter((n) => names.includes(n)).slice(0, 5).join(', ') || 'none in this run'}` : ''}`);
+      return null;
+    }
+    const failing = [...new Set([...kept, ...names])].sort();
+    const key = failing.join('\n');
+    const told = base.told === key;
+    save(failing, { told: key });
+    clear(gone);
+    if (!told) emitB('engine.full_red_on_target', 'warn', `the daily full land run is red on ${names.length} test(s) no branch of the batch is tied to: ${names.slice(0, 5).join(', ')}${names.length > 5 ? ', ...' : ''}. They fail on the target itself, or in the full run only; nobody was handed back and the batch lands on an ordinary run. A fix task for them is wanted.`, { tests: names.slice(0, 20), failing: failing.slice(0, 50), lanes: group.map((l) => l.task) });
+    // The full-run clock counts as served: the next full run is due after the usual hours.
+    try { const prev = readJson(fullLandFile(root, engine)) || {}; writeJson(fullLandFile(root, engine), { ...prev, at: new Date().toISOString(), id, served: 'red only on the target\'s own tests' }); } catch { /* due again next time */ }
+    log(`[unity-train] ${id}: the full run is red only on test(s) no branch is tied to (${names.slice(0, 5).join(', ')}): known red on the target; nobody is blamed; the same batch lands again as an ordinary land run`);
+    res.fullRedOnTarget = names.slice(0, 20);
+    const again = await landGroup(group, `${what} again, as an ordinary land run (the full run was red only on the target's own tests)`, { notFull: true });
+    return { ...again, fullRedOnTarget: names };
+  };
   const shotJobs = [];
   const close = (group, r) => {
     for (const lane of group) {
       const c = deps.close ? deps.close(lane, { train: id, head: r.newTip, repo, target }) : { ok: true };
       if (c?.ok === false) { ev('close_failed', id, `${lane.task} landed but couldn't be closed: ${c.message}`, { task: lane.task, agent: by, to: 'producer', status: 'warn' }); res.unclosed = [...(res.unclosed || []), { task: lane.task, why: c.message }]; }
       try { dequeueUnity(root, lane.task, engine); } catch {}
+      if (!dryRun) editHandbacks(root, engine, (h) => { delete h[lane.task]; });
       res.landed.push(lane.task);
       live.delete(lane.task);
       // A landed lane's engine worktree is removed (kept, with the reason, when anything unlanded is in it).
@@ -782,10 +980,16 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       // Blame by evidence, before any search by land runs: when the failing tests are named and exactly one lane changes a file naming their classes,
       // the batch runs without that lane: green lands the rest and hands that lane back with the evidence; red means the evidence was wrong and the
       // search goes on. A compile error names no test: then the file the compiler names is the evidence.
-      const namedTests = Array.isArray(r.failures) ? r.failures : [];
+      // 2.85: the target's own full-run failures (the baseline) are never counted against a branch.
+      const baseNames = new Set(readFullBaseline(root, engine).failing);
+      const namedAll = Array.isArray(r.failures) ? r.failures : [];
+      const namedTests = namedAll.filter((n) => !baseNames.has(n));
+      if (namedTests.length < namedAll.length) log(`[unity-train] ${id}: ${namedAll.length - namedTests.length} failing test(s) are known red on the target in the full run and are not counted against anyone: ${namedAll.filter((n) => baseNames.has(n)).slice(0, 5).join(', ')}`);
       const namedFiles = Array.isArray(r.errorFiles) ? r.errorFiles : [];
+      const redEvidence = (x) => ({ tests: (Array.isArray(x?.failures) ? x.failures : []).filter((n) => !baseNames.has(n)).slice(0, 10), files: (Array.isArray(x?.errorFiles) ? x.errorFiles : []).slice(0, 10) });
       if (r.status === 'red' && remaining.length > 1 && (namedTests.length || namedFiles.length) && !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_BLAME_EVIDENCE || ''))) {
         let sp = null; let what = ''; let rule = '';
+        let apart = null;
         const redStage = firstRedStage(r);
         try {
           const tipNow = headOf(repo, target);
@@ -799,22 +1003,41 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
               const ns = suspectsByNamespace({ repo, tip: tipNow, lanes: remaining, failures: namedTests });
               if (ns.length === 1 && ns[0].tests.length === Math.min(namedTests.length, 20)) { sp = ns[0]; rule = 'namespace'; what = `test files of the failing test's namespace or class (${sp.tests.slice(0, 3).join(', ')}: ${sp.files.slice(0, 3).join(', ')})`; }
             }
+            // 2.85: every rule at once (tiesOf: also the class file less "Tests" and the test's assembly folder), and a lane tied to only
+            // some of the tests counts. Exactly one lane tied: the batch without it. Two or more: those apart from the untied ones first.
+            if (!sp) {
+              const t = tiesOf({ repo, tip: tipNow, lanes: remaining, failures: namedTests });
+              const tiedSet = new Set([...t.byLane.keys(), ...t.unjudged]);
+              if (tiedSet.size === 1 && t.byLane.size === 1) { sp = [...t.byLane.values()][0]; rule = sp.rules.join('+'); what = `files tied to the failing test(s) by ${sp.rules.join(', ')} (${sp.tests.slice(0, 3).join(', ')}: ${sp.files.slice(0, 3).join(', ')})`; }
+              else if (tiedSet.size >= 2 && remaining.some((l) => !tiedSet.has(l.task))) apart = { tied: remaining.filter((l) => tiedSet.has(l.task)), untied: remaining.filter((l) => !tiedSet.has(l.task)), byTest: t.byTest };
+            }
           }
-        } catch { sp = null; }
+        } catch { sp = null; apart = null; }
+        // 2.85: the plan, said in the log and in task.train.<x>.blame: without the one suspect, the tied apart from the rest, or the search.
+        const plan = sp ? { plan: 'without', suspect: sp.lane.task, next: remaining.filter((l) => l.task !== sp.lane.task).map((l) => l.task), rule } : apart ? { plan: 'apart', tied: apart.tied.map((l) => l.task), next: apart.untied.map((l) => l.task) } : { plan: 'bisect', next: remaining.map((l) => l.task) };
+        const planText = plan.plan === 'without' ? `exactly one branch is tied to the failing test(s), ${plan.suspect}: the next land run is the batch without it (${plan.next.join(', ')}), not a halving search` : plan.plan === 'apart' ? `${plan.tied.length} branches are tied to the failing test(s) (${plan.tied.join(', ')}): the untied ones (${plan.next.join(', ')}) land first, apart from them` : `no single branch is tied to the failing test(s)${namedTests.length ? '' : ' (only a compile error)'}: the search by land runs`;
+        log(`[unity-train] ${id}: blame plan: ${planText}`);
+        ev('blame', id, `red${redStage ? ` in ${redStage}` : ''} on ${namedTests.slice(0, 3).join(', ') || namedFiles.slice(0, 3).join(', ')}: ${planText}`, { agent: by, meta: { ...plan, tests: namedTests.slice(0, 10), files: namedFiles.slice(0, 10), stage: redStage, ...(apart ? { byTest: Object.fromEntries(Object.entries(apart.byTest).slice(0, 10)) } : {}) } });
+        if (apart) {
+          const ru = await landGroup(apart.untied, `apart from ${apart.tied.map((l) => l.task).join(', ')}`);
+          if (ru.status === 'pass') { close(apart.untied, ru); remaining = apart.tied; continue; }
+          if (ru.status !== 'red' && ru.status !== 'conflict') { hold(remaining, ru); break; }
+          log(`[unity-train] ${id}: the untied branches are ${ru.status} by themselves too: the evidence did not hold; searching by land runs`);
+        }
         if (sp) {
           const rest = remaining.filter((l) => l.task !== sp.lane.task);
           ev('evidence', id, `${sp.lane.task} is the only branch that changes ${what}${redStage ? ` (red in ${redStage})` : ''}: running ${rest.map((l) => l.task).join(', ')} without it`, { agent: by, meta: { suspect: sp.lane.task, tests: sp.tests.slice(0, 5), files: sp.files, stage: redStage, rule } });
           const rr = await landGroup(rest, `without ${sp.lane.task}`);
           if (rr.status === 'pass') {
             close(rest, rr);
-            drop(sp.lane, `${blame(r)}\nBlame by evidence: the batch was red${redStage ? ` in its ${redStage} stage` : ''} on ${sp.tests.length ? sp.tests.slice(0, 5).join(', ') : 'a compile error'}, ${sp.lane.branch} (${sp.lane.task}) is the only branch that changes ${what}, and the batch without it landed green (${rest.map((l) => l.task).join(', ')}). The files that tie them: ${sp.files.slice(0, 6).join(', ')}. Fix it on ${sp.lane.branch} (bring ${target} in first: ${targetMergeCommand(sp.lane.task)}), then task done ${sp.lane.task} --train again.`, { cause: 'evidence' });
+            drop(sp.lane, `${blame(r)}\nBlame by evidence: the batch was red${redStage ? ` in its ${redStage} stage` : ''} on ${sp.tests.length ? sp.tests.slice(0, 5).join(', ') : 'a compile error'}, ${sp.lane.branch} (${sp.lane.task}) is the only branch that changes ${what}, and the batch without it landed green (${rest.map((l) => l.task).join(', ')}). The files that tie them: ${sp.files.slice(0, 6).join(', ')}. Fix it on ${sp.lane.branch} (bring ${target} in first: ${targetMergeCommand(sp.lane.task)}), then task done ${sp.lane.task} --train again.`, { cause: 'evidence', evidence: { tests: sp.tests, files: sp.files } });
             remaining = []; break;
           }
           if (rr.status !== 'red' && rr.status !== 'conflict') { hold(remaining, rr); break; }
           log(`[unity-train] ${id}: the batch without ${sp.lane.task} is ${rr.status} too: the evidence did not hold; searching by land runs`);
         }
       }
-      if (remaining.length === 1) { drop(remaining[0], `${blame(r)}\nFix it on ${remaining[0].branch}, then task done ${remaining[0].task} --train again.`); break; }
+      if (remaining.length === 1) { drop(remaining[0], `${blame(r)}\nFix it on ${remaining[0].branch}, then task done ${remaining[0].task} --train again.`, { evidence: redEvidence(r) }); break; }
       // Prefix bisection: the smallest k with target + the first k branches not green; green prefixes land. A red subset whose failures are the batch's
       // failure signature (the failing test names) or a subset of it holds the culprit: the search narrows there and stops after
       // STUDIO_ENGINE_BISECT_MAX runs (3), handing back the lanes still in the red range. No readable names: the full search.
@@ -850,7 +1073,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         const group = remaining.slice(lo, hi);
         const before = remaining.slice(0, lo).map((l) => l.task);
         ev('bisect', id, `${steps.map((st) => `${target} + ${remaining.slice(0, st.n).map((l) => l.task).join(' + ')}: ${st.status}${st.signature ? ' (the batch\'s failures)' : ''}`).join(', ')}; stopped after ${bisectRuns} bisect run(s) (STUDIO_ENGINE_BISECT_MAX): ${group.map((l) => l.task).join(', ')} still fail${before.length ? `, ${before.join(' + ')} landed green` : ''}${redSaid}`, { agent: by, meta: { steps, culprits: group.map((l) => l.task), capped: true, tests: redTests } });
-        for (const g of group) drop(g, `${blame(bad)}\nThe ${L} train's bisect stopped after ${bisectRuns} run(s) (STUDIO_ENGINE_BISECT_MAX ${bisectMax}): ${target} + ${[...before, ...group.map((l) => l.task)].join(' + ')} still shows the batch's failures (${[...sig].slice(0, 5).join(', ')}${sig.size > 5 ? ', ...' : ''}), so one of ${group.map((l) => l.branch).join(', ')} breaks it${before.length ? `; ${target} + ${before.join(' + ')} landed green` : ''}. Fix it on its branch (bring ${target} in first: ${targetMergeCommand(g.task)}), then task done ${g.task} --train again.`);
+        for (const g of group) drop(g, `${blame(bad)}\nThe ${L} train's bisect stopped after ${bisectRuns} run(s) (STUDIO_ENGINE_BISECT_MAX ${bisectMax}): ${target} + ${[...before, ...group.map((l) => l.task)].join(' + ')} still shows the batch's failures (${[...sig].slice(0, 5).join(', ')}${sig.size > 5 ? ', ...' : ''}), so one of ${group.map((l) => l.branch).join(', ')} breaks it${before.length ? `; ${target} + ${before.join(' + ')} landed green` : ''}. Fix it on its branch (bring ${target} in first: ${targetMergeCommand(g.task)}), then task done ${g.task} --train again.`, { evidence: redEvidence(bad) });
         remaining = remaining.slice(hi);
         continue;
       }
@@ -869,7 +1092,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       }
       const before = remaining.slice(0, hi - 1).map((l) => l.task);
       ev('bisect', id, `${steps.map((st) => `${target} + ${remaining.slice(0, st.n).map((l) => l.task).join(' + ')}: ${st.status}`).join(', ')}; first not green with ${culprit.task}${redSaid}`, { agent: by, meta: { steps, culprit: culprit.task, tests: redTests } });
-      drop(culprit, `${blame(bad)}\nThe ${L} train's prefix bisection: ${target} + ${[...before, culprit.task].join(' + ')} is ${bad.status}${before.length ? `, ${target} + ${before.join(' + ')} landed green` : ''}; so ${culprit.branch} breaks it${before.length ? ' (alone, or together with the branches before it)' : ''}. Fix it on ${culprit.branch} (bring ${target} in first: ${targetMergeCommand(culprit.task)}), then task done ${culprit.task} --train again.`);
+      drop(culprit, `${blame(bad)}\nThe ${L} train's prefix bisection: ${target} + ${[...before, culprit.task].join(' + ')} is ${bad.status}${before.length ? `, ${target} + ${before.join(' + ')} landed green` : ''}; so ${culprit.branch} breaks it${before.length ? ' (alone, or together with the branches before it)' : ''}. Fix it on ${culprit.branch} (bring ${target} in first: ${targetMergeCommand(culprit.task)}), then task done ${culprit.task} --train again.`, { evidence: redEvidence(bad) });
       remaining = remaining.slice(hi);
     }
   } finally {
@@ -882,7 +1105,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   function finish() {
     res.message = res.message || summary(res);
     try { writeJson(lastFile(root, engine), { ...res, by, at: new Date().toISOString() }); } catch {}
-    ev('done', id, res.message, { agent: by, status: res.landed.length ? 'ok' : 'warn', meta: { landed: res.landed, dropped: res.dropped.map((d) => d.task), deferred: res.deferred.map((d) => d.task), runs: res.runs, refused: Boolean(res.refused), notRun: Boolean(res.notRun), ...(res.killed ? { killed: true } : {}), ...(res.cancelled ? { cancelled: true } : {}), ...(res.compileRuns ? { compileRuns: res.compileRuns } : {}) } });
+    ev('done', id, res.message, { agent: by, status: res.landed.length ? 'ok' : 'warn', meta: { landed: res.landed, dropped: res.dropped.map((d) => d.task), deferred: res.deferred.map((d) => d.task), runs: res.runs, refused: Boolean(res.refused), notRun: Boolean(res.notRun), ...(res.killed ? { killed: true } : {}), ...(res.cancelled ? { cancelled: true } : {}), ...(res.compileRuns ? { compileRuns: res.compileRuns } : {}), ...(res.fullLand ? { fullLand: res.fullLand } : {}), ...(res.fullRedOnTarget ? { fullRedOnTarget: res.fullRedOnTarget } : {}), ...(res.playUnmatched ? { playUnmatched: res.playUnmatched } : {}) } });
     return res;
   }
 }
@@ -893,6 +1116,39 @@ function summary(res) {
   if (res.dropped.length) parts.push(`handed back ${res.dropped.map((d) => `${d.task} (${d.why.split('\n')[0]})`).join('; ')}`);
   if (res.deferred.length) parts.push(`waiting for the next ${labelOf(res.engine || 'unity')} train: ${res.deferred.map((d) => `${d.task} (${d.why.split('\n')[0]})`).join('; ')}`);
   return parts.join('. ') || 'nothing to land';
+}
+
+// ---- the Play Mode plan of a batch (2.85) ----
+
+/**
+ * What a batch's Play Mode stage would run (playSelection on the engine's play.focus), read-only: `paths` (a list, or a comma-separated
+ * string) or `branch` (its changes since it left the target). { engine, source, changed, selection } or { error, message }.
+ */
+export function playPlan(root, { engine = 'unity', branch = null, paths = null } = {}) {
+  const cfg = unityConfig(root, engine);
+  if (!cfg) return { error: 'no-land', message: `No ${labelOf(engine)} land command is configured (studio/game.json engines.${engine}).` };
+  let changed = null;
+  let source = '';
+  if (paths) { changed = (Array.isArray(paths) ? paths : String(paths).split(',')).map((x) => x.trim().replace(/\\/g, '/')).filter(Boolean); source = `${changed.length} path(s) given`; }
+  else if (branch) {
+    const s = unityTrainSettings(root, engine);
+    if (s.error) return { error: s.error, message: s.message };
+    const head = headOf(s.repo, branch);
+    if (!head) return { error: 'no-branch', message: `The ${labelOf(engine)} repo has no branch ${branch}.` };
+    const mb = out(git(s.repo, 'merge-base', `refs/heads/${s.target}`, head));
+    changed = mb ? changedPaths(s.repo, mb, head) : null;
+    source = `${branch} at ${short(head)} against ${s.target}`;
+  } else return { error: 'usage', message: 'Which batch? Pass --branch <name> or --paths a,b.' };
+  return { engine, source, changed, selection: playSelection({ changed, cfg, full: false }) };
+}
+export function playPlanText(r) {
+  const sel = r.selection;
+  const lines = [`Play Mode plan for ${r.source}: ${sel.mode}${sel.mode === 'focus' ? ` with the filter ${sel.filter}` : ''}`, `  why: ${sel.why}`];
+  if (sel.unmatched?.length) lines.push(`  paths no play.focus.map entry takes (${sel.unmatchedCount || sel.unmatched.length}): ${sel.unmatched.join(', ')}; add an entry for them (studio/game.json engines.${r.engine}.play.focus.map), or list them in play.focus.ignore`);
+  if (sel.ignored?.length) lines.push(`  left out by play.focus.ignore: ${sel.ignored.slice(0, 5).join(', ')}${sel.ignored.length > 5 ? ', ...' : ''}`);
+  if (sel.ignoreBad?.length) lines.push(`  not a valid regex (skipped): ${sel.ignoreBad.join(', ')}`);
+  lines.push('  (a daily full land run always runs the whole Play Mode stage)');
+  return lines.join('\n');
 }
 
 // ---- status ----
@@ -915,6 +1171,10 @@ export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'un
   if (st.running?.lanes?.length) lines.push(`Running ${L} train batch (${st.running.lanes.length}): ${st.running.lanes.join(', ')}`);
   lines.push(waiting.length ? `${waiting.length} ${L} branch(es) wait in the queue for the next ${L} train (npm run task -- train --engine ${engine}):\n${waiting.map(row).join('\n')}` : `No ${L} branch waits for a ${L} train (task done <ID> --train on a ${L}-track task queues one).`);
   if (st.running) lines.push(`${L} train running: ${st.running.id} by ${st.running.by || '?'} (pid ${st.running.pid}, since ${new Date(st.running.at).toISOString().slice(11, 16)} UTC)${st.running.lanes?.length ? `, ${st.running.lanes.join(', ')}` : ''}${st.running.now ? `; now: ${st.running.now}` : ''}`);
+  // 2.85 (B-137): the daily full run is said plainly while it runs.
+  if (st.running?.full) lines.push(`This ${L} land run is the daily full run (${st.running.full.why}): every test runs, expect about ${st.running.full.minutes ? `${st.running.full.minutes} min` : 'the longest land run of the day'}.`);
+  // 2.85: the tests the target itself fails in the full run (not counted against any branch).
+  { const b = readFullBaseline(root, engine); if (b.failing.length) lines.push(`Known red on the target in the full run: ${b.failing.length} test(s): ${b.failing.slice(0, 3).join(', ')}${b.failing.length > 3 ? ', ...' : ''} (not counted against any branch; a fix task is wanted)`); }
   // Tags (how many wait per tag), why the running train's batch is what it is, and the automatic start.
   const tc = tagCounts(waiting);
   if (Object.keys(tc).length) lines.push(`Tagged ${L} lanes (only train --engine ${engine} --tag <tag> takes them; the automatic start never does): ${Object.entries(tc).map(([k, v]) => `${k} ${v} waiting`).join(', ')}; untagged ${waiting.filter((e) => !e.tag).length} waiting`);
@@ -938,10 +1198,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   // `queue --task <ID> [--engine x] [--agent a] [--branch b] [--alone]`: queue a task's branch (what task done --train does after its checks).
   if (argv[0] === 'queue') {
     const fl = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
-    const r = queueUnityTask(mainRoot(), { engine: fl('engine') || 'unity', task: fl('task'), agent: fl('agent') || null, branch: fl('branch') || null, alone: argv.includes('--alone') ? true : null });
+    const r = queueUnityTask(mainRoot(), { engine: fl('engine') || 'unity', task: fl('task'), agent: fl('agent') || null, branch: fl('branch') || null, alone: argv.includes('--alone') ? true : null, again: argv.includes('--again') });
     console.log(JSON.stringify({ ok: r.ok, message: r.message, error: r.error || null }));
     process.exit(r.ok ? 0 : 1);
   }
-  console.error('Usage: node harness/unity-train.mjs status [--json]   (npm run task -- train --unity runs a Unity train)');
+  // 2.85: `play-plan [--engine x] [--branch b | --paths a,b] [--json]`: what a batch's Play Mode stage would run, and why (read-only).
+  if (argv[0] === 'play-plan') {
+    const fl = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+    const r = playPlan(mainRoot(), { engine: fl('engine') || 'unity', branch: fl('branch'), paths: fl('paths') });
+    if (argv.includes('--json')) console.log(JSON.stringify(r));
+    else console.log(r.error ? r.message : playPlanText(r));
+    process.exit(r.error ? 1 : 0);
+  }
+  console.error('Usage: node harness/unity-train.mjs status [--json] | queue --task <ID> [--again] | play-plan [--branch b | --paths a,b]   (npm run task -- train --unity runs a Unity train)');
   process.exit(1);
 }
