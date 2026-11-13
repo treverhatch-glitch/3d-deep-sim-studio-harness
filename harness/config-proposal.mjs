@@ -1,8 +1,8 @@
 /**
- * harness/config-proposal.mjs — 2.65.0 (B-40 full): a lane carries studio config changes through a sanctioned route.
+ * harness/config-proposal.mjs — a lane carries studio config changes through a sanctioned route.
  *
- * studio/ in a lane copy is the main checkout's (a link, 2.60.1), so a lane's commits can never carry studio config and
- * an edit there lands in main's checkout, uncommitted (the edit guard refuses it). Instead the lane commits a proposal:
+ * studio/ in a lane copy is the main checkout's (a link), so a lane's commits can never carry studio config and an edit
+ * there lands in main's checkout, uncommitted (the edit guard refuses it). Instead the lane commits a proposal:
  *
  *   studio-proposals/<TASK-ID>.json
  *   { "changes": [ { "file": "studio/game.json", "set": { "engines.unity.land": "tools/land", "/gates/0/id": "x" } } ],
@@ -23,10 +23,9 @@
  *     with such a proposal is tier C, harness/tiers.mjs, held until a person releases it). Otherwise the protected part
  *     is held: it stays on main in studio-proposals/<ID>.json (with "held" saying why), an event asks a person, and
  *     npm run task -- train config <ID> applies it once that is settled. Nothing is dropped silently.
- * 2.77.3 (B-111): in beta mode (harness/beta-mode.mjs) a beta stand-in's release of the lane (npm run task -- train
- * release <ID>, whose hold names the protected keys and values) decides the protected part as the owner's would, also
- * with an owner key, while beta mode is still on with the same studio/beta.json (betaReleaseOk); before, the release was
- * accepted and the protected part then held at landing ("only the owner's signed approval").
+ * In beta mode (harness/beta-mode.mjs) a beta stand-in's release of the lane (npm run task -- train release <ID>, whose hold
+ * names the protected keys and values) decides the protected part as the owner's would, also with an owner key, while beta
+ * mode is still on with the same studio/beta.json (betaReleaseOk).
  * The applying commit is the harness's own (commit-tree on main, landed by compare-and-swap like a lane), carries
  * `Studio-Harness: config-from` and changes only studio/*.json and studio-proposals/ (harness/hook-stamp.mjs exempts
  * exactly that). The train's verify can't see it first: a train copy's studio/ is main's live folder.
@@ -198,11 +197,9 @@ export const ownerKeyAt = (root, rev) => { const pem = show(root, rev, OWNER_PUB
 
 /** The owner's signed approval for these protected changes of `task` (studio/approvals/*.json, kind "proposal"), or null. */
 export function signedProposal(root, { task, hash, pub }) {
-  // 2.77.1 (B-103): beta-mode and owner-proxy approvals count here as they do in every other gate (approve.mjs
-  // verifyApproval); before, only the owner key's signature did, so `approve -- proposal` in beta mode was never applied.
-  // 2.77.3 (B-111): a beta one counts only as committed with exactly this content, under the current beta session, not
-  // from a worker's commit nor recorded by a worker (beta-mode.mjs betaRecordCommitted, the predicate task types and
-  // visual decisions use); a dropped or worker-committed file no longer counts.
+  // Beta-mode and owner-proxy approvals count here as they do in every other gate (approve.mjs verifyApproval). A beta one
+  // counts only as committed with exactly this content, under the current beta session, not from a worker's commit nor
+  // recorded by a worker (beta-mode.mjs betaRecordCommitted, the predicate task types and visual decisions use).
   if (!hash) return null;
   const dir = path.join(root, 'studio', 'approvals');
   let names = [];
@@ -223,7 +220,7 @@ export function signedProposal(root, { task, hash, pub }) {
 }
 
 /**
- * 2.77.3 (B-111): a lane release made in beta mode ({ beta, betaAt, by, recordedBy? }: harness/train.mjs releaseLane or
+ * A lane release made in beta mode ({ beta, betaAt, by, recordedBy? }: harness/train.mjs releaseLane or
  * train config) counts as the owner's decision while beta mode is still on with the studio/beta.json it was made under,
  * and neither the releaser nor the one who recorded it is a worker.
  */
@@ -234,9 +231,9 @@ export function betaReleaseOk(released, root) {
   let cur = null;
   try { cur = readBeta({ root }); } catch { return false; }
   if (!(Boolean(cur?.on) && String(cur.doc.at) === String(released.betaAt))) return false;
-  // 2.78.2 (h): applying a protected config part is a protected decision (permission.mjs mayDecide): a release recorded by
-  // a Producer/Director session counts only with STUDIO_PRODUCER_APPROVES=protected, or (grandfathered) one made before
-  // 2.78.2 (no `decides` field) under the beta session still on. Otherwise the part stays held for the outside agents.
+  // Applying a protected config part is a protected decision (permission.mjs mayDecide): a release recorded by a
+  // Producer/Director session counts only with STUDIO_PRODUCER_APPROVES=protected, or (grandfathered) one made before the
+  // `decides` field existed under the beta session still on. Otherwise the part stays held for the outside agents.
   const tier = recordTier({ via: typeof released.beta === 'string' ? released.beta : '', recordedBy: released.recordedBy, committers: [released.by] }, root);
   if (mayDecide('proposal', { tier }, { root }).ok) return true;
   return tier === 'decider' && !released.decides;
