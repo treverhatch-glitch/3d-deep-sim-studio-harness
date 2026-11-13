@@ -18,8 +18,7 @@
  *     render(id, { tMs, seed, w, h }),   // draw effect `id` as it looks `tMs` after it starts; tMs < 0 clears it
  *   }
  * drawing into an element with id "studio-vfx-stage" of w x h pixels on a fixed background. It may return a
- * promise. Engines (Godot, Unity): the same contract through STUDIO_VFX_CAPTURE_CMD, a command that writes one PNG
- * per requested time ({id} {seed} {w} {h} {times} {out}); documented here, not built or tested yet.
+ * promise. Engines (Godot, Unity): not built; 2.85: the planned capture command setting was dropped, nothing read it.
  *
  * Checks (by rule, on the captured frames; taste is left to the art review):
  *   ends-empty     a one-shot's last frame is back to the background

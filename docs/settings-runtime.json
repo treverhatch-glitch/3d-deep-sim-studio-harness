@@ -1,0 +1,108 @@
+{
+  "note": "2.85: STUDIO_* names production code builds at run time, so no file spells them out (scripts/settings-map.mjs --check, scripts/check-docs.mjs). pattern: the names it covers. template: a regular expression that must still match production code (the builder); when it stops matching the entry is stale and fails the check. testOwned: names a self-test invents for its own fake tools or fixtures; no production code reads them, and a test must not rely on one to say a setting works.",
+  "families": [
+    {
+      "pattern": "^STUDIO_(BUILDER|RND|QA|QA_PLAYTESTER|PLAYTESTER|REVIEWER|ART|ARTIST|ART_DIRECTOR|DESIGNER|DESIGNER_CALIBRATOR|BALANCER|FUN_TESTER|SCOUT|REFERENCE_SCOUT|ENGINE_PORTER|PLANNER|PRODUCER|DIRECTOR|LINE_PRODUCER|LIAISON|SOUND_DESIGNER)_CMD$",
+      "template": "STUDIO_\\$\\{roleKey\\(role\\)\\}_CMD",
+      "note": "per-role launch command (harness/agent.mjs roleKey)"
+    },
+    {
+      "pattern": "^STUDIO_(BUILDER|RND|QA|QA_PLAYTESTER|PLAYTESTER|REVIEWER|ART|ARTIST|ART_DIRECTOR|DESIGNER|DESIGNER_CALIBRATOR|BALANCER|FUN_TESTER|SCOUT|REFERENCE_SCOUT|ENGINE_PORTER|PLANNER|PRODUCER|DIRECTOR|LINE_PRODUCER|LIAISON|SOUND_DESIGNER)_MODEL$",
+      "template": "STUDIO_\\$\\{roleKey\\(role\\)\\}_MODEL",
+      "note": "per-role model"
+    },
+    {
+      "pattern": "^STUDIO_(BUILDER|RND|QA|QA_PLAYTESTER|PLAYTESTER|REVIEWER|ART|ARTIST|ART_DIRECTOR|DESIGNER|DESIGNER_CALIBRATOR|BALANCER|FUN_TESTER|SCOUT|REFERENCE_SCOUT|ENGINE_PORTER|PLANNER|PRODUCER|DIRECTOR|LINE_PRODUCER|LIAISON|SOUND_DESIGNER)_TOOL$",
+      "template": "STUDIO_\\$\\{roleKey\\(role\\)\\}_TOOL",
+      "note": "per-role tool"
+    },
+    {
+      "pattern": "^STUDIO_(BUILDER|RND|QA|QA_PLAYTESTER|PLAYTESTER|REVIEWER|ART|ARTIST|ART_DIRECTOR|DESIGNER|DESIGNER_CALIBRATOR|BALANCER|FUN_TESTER|SCOUT|REFERENCE_SCOUT|ENGINE_PORTER|PLANNER|PRODUCER|DIRECTOR|LINE_PRODUCER|LIAISON|SOUND_DESIGNER)_PROFILE$",
+      "template": "STUDIO_\\$\\{key\\(role\\)\\}_PROFILE",
+      "note": "per-role profile (harness/profile-guard.mjs)"
+    },
+    {
+      "pattern": "^STUDIO_(BUILDER|RND|QA|QA_PLAYTESTER|PLAYTESTER|REVIEWER|ART|ARTIST|ART_DIRECTOR|DESIGNER|DESIGNER_CALIBRATOR|BALANCER|FUN_TESTER|SCOUT|REFERENCE_SCOUT|ENGINE_PORTER|PLANNER|PRODUCER|DIRECTOR|LINE_PRODUCER|LIAISON|SOUND_DESIGNER)_ENV$",
+      "template": "STUDIO_\\$\\{roleKey\\(role\\)\\}_ENV",
+      "note": "per-role extra env names to pass (harness/agent-env.mjs)"
+    },
+    {
+      "pattern": "^STUDIO_(CLAUDE|CODEX|AGY|CURSOR|GROK|AIDER|NIM|VERTEX)_PROBE_CMD$",
+      "template": "STUDIO_\\$\\{String\\(tool\\)\\.toUpperCase\\(\\)\\}_PROBE_CMD",
+      "note": "per-tool quota probe (harness/budget.mjs)"
+    },
+    {
+      "pattern": "^STUDIO_TOOL_[A-Z0-9_]+_(CMD|MODEL)$",
+      "template": "STUDIO_TOOL_\\$\\{",
+      "note": "per-tool command and model"
+    },
+    {
+      "pattern": "^STUDIO_KEYMAP_[A-Z0-9_]+$",
+      "template": "STUDIO_KEYMAP_AGENT_\\$\\{roleKey\\(agent\\)\\}",
+      "note": "key maps (harness/agent-env.mjs)"
+    },
+    {
+      "pattern": "^STUDIO_TIER_[A-Z0-9]+_MODEL$",
+      "template": "STUDIO_TIER_\\$\\{",
+      "note": "model per tier (harness/routing.mjs)"
+    },
+    {
+      "pattern": "^STUDIO_HEAVY_MAX_[A-Z0-9_]+$",
+      "template": "STUDIO_HEAVY_MAX_\\$\\{",
+      "note": "heavy jobs at once, per kind (harness/heavy-budget.mjs)"
+    },
+    {
+      "pattern": "^STUDIO_SESSION_CONTEXT_[A-Z0-9_]+$",
+      "template": "STUDIO_SESSION_CONTEXT_\\$\\{",
+      "note": "context cap per role (harness/session-cap.mjs)"
+    },
+    {
+      "pattern": "^STUDIO_SPEND_GUARD_TOKENS_[A-Z0-9_]+$",
+      "template": "STUDIO_SPEND_GUARD_TOKENS_\\$\\{",
+      "note": "token cap per tool (harness/spend-guard.mjs)"
+    },
+    {
+      "pattern": "^STUDIO_PROFILE_[A-Z0-9_]+_MAX$",
+      "template": "STUDIO_PROFILE_\\$\\{",
+      "note": "sessions per profile (harness/profile-guard.mjs)"
+    }
+  ],
+  "testOwned": [
+    {
+      "name": "STUDIO_ARGV_OUT",
+      "why": "a fake tool's output folder in selftest-259h"
+    },
+    {
+      "name": "STUDIO_FAKE_AIDER_410",
+      "why": "a switch for selftest-2585r's fake aider"
+    },
+    {
+      "name": "STUDIO_FAKE_AIDER_FAIL",
+      "why": "a switch for selftest-2601n's fake aider"
+    },
+    {
+      "name": "STUDIO_FAKE_AIDER_HISTORY",
+      "why": "a switch for selftest-2601n's fake aider"
+    },
+    {
+      "name": "STUDIO_FAKE_TOKEN",
+      "why": "a made-up value in a settings.env the setup test must not copy"
+    },
+    {
+      "name": "STUDIO_GODOT_REAL",
+      "why": "where selftest-230n/o find a real editor, if there is one"
+    },
+    {
+      "name": "STUDIO_SELFTEST_SLOW",
+      "why": "the self-tests' own time multiplier"
+    },
+    {
+      "name": "STUDIO_X",
+      "why": "an example name in selftest-2583m's cut-down environment"
+    },
+    {
+      "name": "STUDIO_X230I",
+      "why": "an example name in selftest-230i's .env fixture"
+    }
+  ]
+}

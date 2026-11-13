@@ -5205,6 +5205,14 @@ if (inShard('selftest-285b')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.85 (h): less that nobody uses.
+if (inShard('selftest-285h')) {
+  const dir = copyRepo();
+  const { selftest285H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285h.mjs')).href);
+  await selftest285H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

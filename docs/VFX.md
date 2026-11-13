@@ -40,9 +40,7 @@ window.__studioVfx = {
 It draws into an element with id `studio-vfx-stage`, `w` × `h` pixels, on the spec's background, and may return a
 promise. The same `tMs` and `seed` must always draw the same picture.
 
-**Engines (Godot, Unity): not built yet.** The planned contract is a command in `STUDIO_VFX_CAPTURE_CMD` that writes
-one PNG per requested time (`{id} {seed} {w} {h} {times} {out}`), for example a fixed-step recorder in the editor.
-Untested.
+**Engines (Godot, Unity): not built yet.** Only a page that exposes `window.__studioVfx` is captured.
 
 ## The checks
 
