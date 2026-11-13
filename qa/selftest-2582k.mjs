@@ -199,7 +199,7 @@ export async function selftest2582K({ dir, run, report, tmpRoot, root }) {
   const wg = weak();
   g('reset', '-q', '--hard', 'HEAD~1');
   fs.appendFileSync(path.join(dir, goldenRel), '\n');
-  commit('retune', '-m', 'Golden-Reason: the bounds fix moves the final tick');
+  commit('retune', '-m', 'Golden-Reason: T-003: the bounds fix moves the final tick');
   const wg2 = weak();
   g('reset', '-q', '--hard', 'HEAD~1');
   report('2.58.2 (PU-29): weakened test flagged: a golden file changed in a commit without a Golden-Reason trailer (golden-edited); with the trailer it passes',

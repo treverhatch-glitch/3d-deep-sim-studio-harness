@@ -44,6 +44,7 @@ import { sizeRuleFor, freeImportLines } from './size-rule.mjs';
 import { contractChecks } from './contracts.mjs';
 import { judgeFiles, manifestSettings, evidenceWords } from './type-evidence.mjs';
 import { activeGame } from './cartridge.mjs';
+import { isTestPath } from './test-weakening.mjs';
 import { stage1Replaced, studioGameSync } from './tester-config.mjs';
 import { regressionHowTo, regressionMissing } from './regression-howto.mjs';
 import { checkResearch, ensureResearchTemplate } from './research.mjs';
@@ -716,6 +717,30 @@ export function engineWorkChecks(task) {
 const ENGINE_WORK_TYPES = new Set(['change', 'chore', 'bug', 'system', 'whole', 'docs']);
 
 /**
+ * 2.85 (g): a change to the game's sim or rules comes with a test, or says why it has none. The sim files are the ones
+ * harness/tiers.mjs calls "sim" (game/<g>/sim, web/<g>/sim, cartridges/, the manifest's simPaths; judgeFiles); a test is
+ * a file isTestPath reads as one. When the task's files hold sim code and no test, a commit of the task must carry a
+ * "No-Test-Reason: <20+ characters>" trailer. Docs, assets and tooling are not sim files: nothing is asked of them.
+ * Returns { sim: [files], tests: n, reason } ('reason' is the first trailer found, '' when none).
+ */
+/** 2.85 (g): STUDIO_RULES_TEST=warn|require (default warn: measured first, refused only when a studio asks). */
+export const rulesTestMode = (env = process.env) => (/^(require|strict|on|1)$/i.test(String(env.STUDIO_RULES_TEST || '').trim()) ? 'require' : 'warn');
+export function rulesTestEvidence(ch, { commitsIn = (hash) => git('log', '-1', '--format=%(trailers:key=No-Test-Reason,valueonly,separator=%x0a)', hash) } = {}) {
+  let game = null;
+  try { game = activeGame().name || null; } catch { game = null; }
+  const files = (ch?.files || []).map((f) => String(f).replace(/\\/g, '/'));
+  const j = judgeFiles(files, { settings: manifestSettings(REPO_ROOT, game), exists: (f) => fs.existsSync(abs(f)) });
+  const sim = j.logic.filter((x) => x.why === 'a sim path' && !isTestPath(x.path)).map((x) => x.path);
+  const tests = files.filter((f) => isTestPath(f)).length;
+  let reason = '';
+  if (sim.length && !tests) for (const c of ch?.commits || []) {
+    const r = String(commitsIn(c.hash) || '').split('\n').map((x) => x.trim()).find((x) => x.length >= 20);
+    if (r) { reason = r; break; }
+  }
+  return { sim, tests, reason };
+}
+
+/**
  * Returns { ok, type, means, skill, checks: [{ label, ok, why }], missing: [why…] }.
  * Each check reads what the work contains, not only when a file was touched.
  */
@@ -766,6 +791,21 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
   // its reason) has no change to verify and skips those two items.
   if (type === 'change' || (type === 'chore' && !noop)) workAndVerify();
   if (type === 'change' || type === 'bug') gameplayChecks(task, part, since, check);
+  // 2.85 (g): sim or rules code changed, no test changed: say why in a No-Test-Reason trailer (recorded on task.done).
+  // By default a note (a WARN line, meta.noTest on task.done, a line in the score): STUDIO_RULES_TEST=require refuses.
+  let noTestReason = null;
+  let noTest = false;
+  if (type === 'change') {
+    try {
+      const ev = rulesTestEvidence(taskChanges(task.id, since));
+      if (ev.sim.length && !ev.tests) {
+        const why = `this task changes the game's sim/rules (${ev.sim.slice(0, 3).join(', ')}${ev.sim.length > 3 ? ` and ${ev.sim.length - 3} more` : ''}) and no test file: add a test (it fails before your change), or put a trailer in a commit message: No-Test-Reason: <at least 20 characters: why this change has no test>`;
+        if (rulesTestMode() === 'require') check('Game rules changed with a test, or a stated reason', ev.reason, why);
+        else if (!ev.reason) { noTest = true; warnings.push(`rules-no-test: ${why} (a note, not a refusal: STUDIO_RULES_TEST=require makes it one)`.slice(0, 700)); }
+        if (ev.reason) noTestReason = ev.reason;
+      }
+    } catch { /* the rows above stand; a git read that failed asks nothing more */ }
+  }
   // Built but not wired: game code this task changed that nothing reaches from the game's entry points
   // (harness/reachability.mjs). A note by default; STUDIO_REACHABILITY=fail makes it a failing check.
   const notes = [];
@@ -979,7 +1019,7 @@ export function checkDone(task, since = startedAt(task.id), { noop = false } = {
     notes.push(...k.notes);
   }
   const missing = checks.filter((c) => !c.ok).map((c) => c.why);
-  return { ok: missing.length === 0, type, typeSource: typed.source, typeIgnored: typed.ignored, titleType: typed.titleType, ...(typed.evidence ? { typeEvidence: typed.evidence } : {}), part, since, checks, missing, notes, ...(warnings.length ? { warnings } : {}), ...(anchors ? { anchors } : {}), ...TYPES[type] };
+  return { ok: missing.length === 0, type, typeSource: typed.source, typeIgnored: typed.ignored, titleType: typed.titleType, ...(typed.evidence ? { typeEvidence: typed.evidence } : {}), part, since, checks, missing, notes, ...(warnings.length ? { warnings } : {}), ...(anchors ? { anchors } : {}), ...(noTestReason ? { noTestReason } : {}), ...(noTest ? { noTest: true } : {}), ...TYPES[type] };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

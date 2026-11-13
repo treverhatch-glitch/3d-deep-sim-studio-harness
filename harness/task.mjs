@@ -11,8 +11,8 @@ import { fileURLToPath } from 'node:url';
 import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, boardRoot } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks, SHARED_OWNERS } from './lock.mjs';
 import { ensureResearchTemplate, researchRel } from './research.mjs';
-import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType, skipGameChecks } from './done-check.mjs';
-import { judgeClaims, recordClaimVerdict, claimLines } from './said-vs-did.mjs';
+import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType, skipGameChecks, rulesTestEvidence } from './done-check.mjs';
+import { judgeClaims, recordClaimVerdict, claimLines, noteMissingPaths, noteMissingLine, recordNoteUnverified } from './said-vs-did.mjs';
 import { validateAnchorIds, readAnchors } from './anchors.mjs';
 import { splitEolOnly, eolNote, splitPhantom, phantomNote } from './eol-only.mjs';
 import { isGameCode } from '../scripts/check-function-size.mjs';
@@ -713,7 +713,14 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     if (judged?.unverifiable?.length) for (const u of judged.unverifiable) console.warn(`[done] claim not verifiable: ${u}`);
     if (judged) check.claims = judged.results.map((r) => ({ cmd: r.cmd || null, verdict: r.verdict }));
   }
-  for (const w of check.warnings || []) {
+  // 2.85 (g): a file the note says it made or changed that exists in neither the lane nor main: a warning and an event, never a refusal.
+  if (!checkOnly && note) {
+    const gone = noteMissingPaths(note, [REPO_ROOT, mainRoot()]);
+    for (const p of gone.slice(0, 5)) console.warn(`[done] WARN ${noteMissingLine(p)}`);
+    recordNoteUnverified(target.id, gone, { agent: agent || target.role, where: 'task done' });
+  }
+  // 2.85 (g): the rules-no-test note waits while another check refuses, so the refusal's first line still names that check (2.60.1).
+  for (const w of (check.warnings || []).filter((x) => !(/^rules-no-test:/.test(String(x)) && !check.ok && !force))) {
     console.warn(`[done] WARN ${w}`);
     emitEvent({ type: 'task.warn', agent: agent || target.role, task: target.id, status: 'warn', msg: `${target.id}: WARN ${w}`.slice(0, 400) });
   }
@@ -1016,7 +1023,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   const nextActive = q.inProgress[0] || null;
   syncCurrentTaskCheckpoint(nextActive, `Completed ${target.id}${note ? `: ${note}` : ''}`);
   clearAttempts(target.id); // 2.81 (b1): a finished task has nothing to hold back (harness/attempts.mjs)
-  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title}`, ...(check.anchors || check.claims ? { meta: { ...(check.anchors ? { anchors: check.anchors } : {}), ...(check.claims ? { claims: check.claims } : {}) } } : {}) });
+  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title}`, ...(check.anchors || check.claims || check.noTestReason || check.noTest ? { meta: { ...(check.anchors ? { anchors: check.anchors } : {}), ...(check.claims ? { claims: check.claims } : {}), ...(check.noTestReason ? { noTestReason: check.noTestReason } : {}), ...(check.noTest ? { noTest: true } : {}) } } : {}) });
   try { canaryEnd(target.id, 'cheated', { agent: agent || target.role }); } catch { /* a record, never a blocker */ }
   assetHandoffAfterLanding(target.id, agent); // 2.67.1 (j)
   if (taskType(target) === 'rescue') { try { applyRescue(target, { by: agent || 'rescue' }); } catch { /* the rescue's own record stays */ } }
@@ -1110,6 +1117,11 @@ function assetHandoffAfterLanding(taskId, agent) {
   }
 }
 
+/** 2.85 (g): for the task.done event of a landed task that changed sim code and no test: its No-Test-Reason, or noTest when it gave none. */
+function trainNoTestReason(target) {
+  try { const ev = rulesTestEvidence(taskChanges(target.id, startedAt(target.id))); return ev.sim.length && !ev.tests ? (ev.reason ? { noTestReason: ev.reason } : { noTest: true }) : null; } catch { return null; }
+}
+
 /**
  * Close a task a merge train landed (harness/train.mjs): its lane's checked head is in the train's verified head, which
  * main now contains. The board move, claim, events and follow-ups are task done's; its checks ran in the train's lane
@@ -1155,7 +1167,8 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
   if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Completed ${target.id}${note ? `: ${note}` : ''}`);
   clearAttempts(target.id);
-  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title} (merge train ${train})`, meta: { train } });
+  const ntr = trainNoTestReason(target);
+  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title} (merge train ${train})`, meta: { train, ...(ntr || {}) } });
   try { canaryEnd(target.id, 'cheated', { agent: agent || target.role }); } catch { /* a record, never a blocker */ }
   assetHandoffAfterLanding(target.id, agent); // 2.67.1 (j)
   if (taskType(target) === 'rescue') { try { applyRescue(target, { by: agent || 'rescue' }); } catch { /* the rescue's own record stays */ } }

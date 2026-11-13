@@ -35,7 +35,7 @@ import path from 'node:path';
 import { launchChromium, rendererReport } from './chromium.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { REPO_ROOT, emitEvent } from '../harness/event.mjs';
-import { cartridgeFromArgv, loadCartridge, isTemplateCartridge } from '../harness/cartridge.mjs';
+import { cartridgeFromArgv, loadCartridge, isTemplateCartridge, activeGame, activeCartridge } from '../harness/cartridge.mjs';
 import { runProbes, checkSimFeatures } from './fun-probes.mjs';
 import { checkEffects } from '../harness/control-effects.mjs';
 
@@ -84,8 +84,37 @@ async function canvasColours(page) {
   }, png);
 }
 
+/**
+ * 2.85 (g): which game the browser check plays. It used to take the first cartridge when studio/game.json named an adopted
+ * game ("game": "<name>" under game/ or web/) with no cartridge: a crew's check played the template's sample four times
+ * and reported on a game that was not theirs. Now: an explicit name (--cartridge, STUDIO_CARTRIDGE) is played as asked;
+ * otherwise the studio's active game: a cartridge of that name is played; a game with no cartridge manifest cannot be
+ * driven here, so the answer is { skip } with the reason and the game's own play check; never the sample.
+ * The sample plays only when it is the active game (nothing else set, or named).
+ */
+export function resolvePlayTarget({ cartridge = null, env = process.env } = {}) {
+  if (cartridge) return { cartridge };
+  if (env.STUDIO_CARTRIDGE) return { cartridge: env.STUDIO_CARTRIDGE };
+  const g = activeGame();
+  const named = g.name && ['STUDIO_GAME', 'studio/game.json game'].includes(g.from);
+  if (named && !fs.existsSync(path.join(REPO_ROOT, 'cartridges', g.name, 'index.mjs'))) {
+    let covers = '';
+    const root = ['game', 'web'].map((d) => `${d}/${g.name}`).find((d) => fs.existsSync(path.join(REPO_ROOT, d)));
+    try {
+      const man = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, root || '.', 'studio.gates.json'), 'utf8'));
+      const ids = (man.gates || []).filter((x) => x && x.id && /play|smoke/i.test(`${x.id} ${x.command || ''}`)).map((x) => `game:${x.id}`);
+      if (ids.length) covers = `; the game's own play check is ${ids.join(', ')} (its studio.gates.json)`;
+    } catch { /* no manifest: said below */ }
+    return { skip: `the studio's game "${g.name}" has no cartridge manifest (cartridges/${g.name}/index.mjs) for the browser check to drive, and the sample game is not played in its place${covers || '; its own checks (a studio.gates.json play or smoke check) cover play'}` };
+  }
+  const name = named ? g.name : activeCartridge().name;
+  return name ? { cartridge: name } : { skip: 'the studio has no cartridge to play' };
+}
+
 export async function playInBrowser({ cartridge, url: urlArg, shots = true, video = null, maxMs = null, save = true } = {}) {
-  const cart = await loadCartridge(cartridge || cartridgeFromArgv([]));
+  const target = resolvePlayTarget({ cartridge });
+  if (target.skip) return { cartridge: null, at: new Date().toISOString(), findings: [], screenshots: [], inputs: 0, checks: 0, skipped: `not applicable: ${target.skip}`, notApplicable: true, passed: true };
+  const cart = await loadCartridge(target.cartridge);
   const b = cart.browser;
   const report = { cartridge: cart.name, at: new Date().toISOString(), findings: [], screenshots: [], inputs: 0, checks: 0 };
   const fail = (id, summary, extra = {}) => report.findings.push({ id, severity: 'P1', summary, ...extra });
@@ -355,7 +384,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
   const r = await playInBrowser({ cartridge: flag('cartridge') || undefined, url: flag('url') || undefined, shots: !argv.includes('--no-shots') });
   if (r.skipped) {
-    console.log(`[browser-play] ${r.passed ? 'SKIP' : 'FAIL'} ${r.cartridge}: ${r.skipped}${r.passed ? '' : ' (a real game needs the browser check)'}`);
+    console.log(`[browser-play] ${r.passed ? 'SKIP' : 'FAIL'} ${r.cartridge || 'no game'}: ${r.skipped}${r.passed ? '' : ' (a real game needs the browser check)'}`);
     process.exit(r.passed ? 0 : 1);
   }
   emitEvent({ type: r.passed ? 'qa.browser.pass' : 'qa.browser.fail', agent: process.env.STUDIO_LOCK_OWNER || 'qa', msg: `${r.cartridge} in the browser: ${r.passed ? `${r.outcome} at tick ${r.ticks} with ${r.inputs} real inputs, ${r.checks} screen checks` : r.findings.map((f) => f.id).join(', ')}` });

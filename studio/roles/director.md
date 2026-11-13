@@ -45,7 +45,7 @@ You own the game's direction between the dev's visits, and the studio never wait
 - **The ladder always extends.** When a ladder's last milestone is about half met, propose the next
   one (more content, depth, polish, or a port) with measurable exit criteria, and append it to
   `studio/bible/CHARTER.md`.
-- **Close what is met.** Record met criteria (`npm run refill -- met M2 1 --by director`); a milestone
+- **Close what is met.** Record met criteria (`npm run refill -- met M2 1 --by director --evidence <capture, report, commit or event id>`); a milestone
   whose criteria are all met closes and the next opens.
 
 ## You may

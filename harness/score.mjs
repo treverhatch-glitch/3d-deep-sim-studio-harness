@@ -270,6 +270,17 @@ export function visionCardFlow(events) {
   for (const e of events) if (e.type === 'task.start' && e.task && e.meta?.playerFacing && !seen.has(e.task)) seen.set(e.task, e.meta);
   return { started: seen.size, withCard: [...seen.values()].filter((m) => m.visionCard).length };
 }
+/**
+ * 2.85 (g): game-rules changes that landed with no test, from task.done events (meta.noTest: none given; meta.noTestReason:
+ * a stated reason): { noTest, withReason } or null when neither happened. The number a studio reads before it turns
+ * STUDIO_RULES_TEST=require on.
+ */
+export function rulesTestFlow(events) {
+  const done = events.filter((e) => e.type === 'task.done');
+  const noTest = done.filter((e) => e.meta?.noTest).length; const withReason = done.filter((e) => e.meta?.noTestReason).length;
+  return noTest || withReason ? { noTest, withReason } : null;
+}
+export const rulesTestText = (r) => (r ? [`Game-rules changes landed with no test: ${r.noTest} with no reason given, ${r.withReason} with a stated reason`] : []);
 /** The vision lines (2.85 f): briefs with a card, vision fixes filed and how long they took to land. */
 export const visionCardText = (c, f) => [
   ...(c ? [`Briefs with a vision card: ${c.withCard} of ${c.started} player-facing tasks started`] : []),
@@ -358,7 +369,7 @@ export async function roundScore({ events = null, machine = null, now = null, da
     landedPerDay: `${rest.doneCount} done in ${r1(supDays)} supervisor day(s)`,
     escapedPct: `${card.escaped} of ${card.landed}`,
   };
-  return { window: { from: new Date(from).toISOString(), to: new Date(end).toISOString(), days, events: inWin.length }, values, notes, measures: MEASURES.map(([id, label, unit, better, target]) => ({ id, label, unit, better, target })), engine: engineFlow(inWin), planning: await planningFlow(inWin), vision: visionFlow(all.filter((e) => at(e) <= end), { from }), visionCards: visionCardFlow(inWin), visionFixes: visionFixFlow(all.filter((e) => at(e) <= end), { from }), progress: engineProgress(root, { timeoutMs: progressTimeoutMs }) };
+  return { window: { from: new Date(from).toISOString(), to: new Date(end).toISOString(), days, events: inWin.length }, values, notes, measures: MEASURES.map(([id, label, unit, better, target]) => ({ id, label, unit, better, target })), engine: engineFlow(inWin), rulesTests: rulesTestFlow(inWin), planning: await planningFlow(inWin), vision: visionFlow(all.filter((e) => at(e) <= end), { from }), visionCards: visionCardFlow(inWin), visionFixes: visionFixFlow(all.filter((e) => at(e) <= end), { from }), progress: engineProgress(root, { timeoutMs: progressTimeoutMs }) };
 }
 
 /** Does this value meet its target? null when there is no value. */
@@ -383,6 +394,7 @@ export function scoreText(score, prev = null, prevEngine = null, prevVision = nu
   L.push(...(score.progress || []).map((p) => (p.line ? `Progress (${p.engine}): ${p.line}` : `Progress (${p.engine}): not available (${p.why})`)));
   L.push(...visionText(score.vision, prevVision));
   L.push(...visionCardText(score.visionCards, score.visionFixes));
+  L.push(...rulesTestText(score.rulesTests));
   return L.join('\n');
 }
 
