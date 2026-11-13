@@ -99,8 +99,10 @@ export function emitSampled(ev, key = '', { env = process.env, now = Date.now(),
  * a counter would hide the fact: they stay real events, one per change instead of one per pass.
  * STUDIO_TELEMETRY=full (or state that can't be kept) writes every one, as before. Returns true when it wrote the event.
  */
-export function emitOnChange(ev, key, sig = '', { repeatMin = 0, env = process.env, now = Date.now(), emit = emitEvent } = {}) {
+export function emitOnChange(ev, key, sig = '', { repeatMin = 0, repeatEnv = false, env = process.env, now = Date.now(), emit = emitEvent } = {}) {
   if (telemetryFull(env)) { emit(ev); return true; }
+  // 2.85 (h): repeatEnv: the caller's repeat window is the owner's STUDIO_EVENT_REPEAT_MIN (minutes; repeatMin is its default).
+  if (repeatEnv) repeatMin = num(env.STUDIO_EVENT_REPEAT_MIN, repeatMin);
   let write = true;
   try {
     withFileLock('emit-seen', () => {

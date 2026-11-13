@@ -65,6 +65,15 @@ function trail(events, agent) {
 }
 
 /** When the watcher's last pass ran (.studio/watch-last.json), or NaN when it never ran here. */
+/**
+ * 2.85 (h): write a standing finding's `watch.report` event: one record per report text (digits left out), so two findings
+ * taking turns (a parked task, a queued one) are not each "new" against the other every pass; a text written within
+ * STUDIO_EVENT_REPEAT_MIN (60) minutes is not written again. Retro counts the reports and reads their words. Returns true when written.
+ */
+export function recordReport(wmsg, opts = {}) {
+  return emitOnChange({ type: 'watch.report', agent: 'watch', msg: wmsg }, `watch.report|${String(wmsg).replace(/\d+/g, '#').slice(0, 200)}`, '', { repeatMin: 60, repeatEnv: true, ...opts });
+}
+
 export function lastPassAt() {
   try {
     return Date.parse(JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'watch-last.json'), 'utf8')).at);
@@ -329,7 +338,7 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   } else if (findings.length && !dryRun) {
     // 2.80 (d): a finding that stands is said again at most hourly (2,179 in a week); retro needs that it was seen and its words.
     const wmsg = findings.map((f) => f.msg).join('; ').slice(0, 300);
-    emitOnChange({ type: 'watch.report', agent: 'watch', msg: wmsg }, 'watch.report', wmsg.replace(/\d+/g, '#'), { repeatMin: 60 });
+    recordReport(wmsg);
   }
   // A Watch task nobody has started, whose findings have all cleared: close it, so no Producer session
   // is spent confirming "all quiet" (test #2, T-197).
