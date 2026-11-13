@@ -1127,6 +1127,8 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
   const root = deps.root || mainRoot();
   const targets = et.engineTargets({ root }).filter((t) => t.land);
   if (!targets.length) return [];
+  // 2.85 (item 7): finished engine work handed back as ready is queued by the harness (autoQueuePass).
+  if (!dryRun && lineMode(env) === 'on') { try { await autoQueuePass({ root, now, env, deps }); } catch { /* a help, never a blocker */ } }
   let rb = null;
   try { rb = deps.rigBudget ? await deps.rigBudget() : await (await import('./rig-budget.mjs')).rigBudget({ env, now }); } catch { rb = null; }
   let cpuBusy = null;
@@ -1235,6 +1237,101 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
   return out;
 }
 
+/**
+ * 2.85 (item 7): finished engine work is queued by the harness, not by a rule in the task's text. Sessions handed finished
+ * work back as READY two or three times because a planner had written "queue only when the queue is short" into the task
+ * (the train's batchMax and batchGroup are the real limit). The engine pass now looks at recent hand-backs of engine tasks
+ * whose note says the work is done or ready (handback-kind.mjs saysReady) and, once per hand-back, starts
+ * `node harness/line-producer.mjs auto-queue <ID> --engine <x>` (autoQueueReady): the checks `task done --train` runs, then
+ * the same queue call, with meta.auto 'ready hand-back' on its task.train.<x>.queued event; failing checks queue nothing
+ * and the reason goes on the task once. STUDIO_ENGINE_AUTO_QUEUE=off turns it off.
+ */
+const ENGINE_AUTO_QUEUED = () => path.join(LINE_DIR(), 'engine-auto-queued.json');
+export const engineAutoQueueOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_AUTO_QUEUE ?? '').trim());
+
+/**
+ * The ready hand-backs of the last `windowMs` (3 h): [{ task, agent, at, note }], newest per task, from task.paused events
+ * a session wrote (not the harness's, not a person's stop) whose note says the work is done or ready, and with no later
+ * start, done or queueing of that task. Plain data in, plain data out.
+ */
+export async function readyHandBacks(events = [], { now = Date.now(), windowMs = 3 * 3600000 } = {}) {
+  const hk = await import('./handback-kind.mjs');
+  const last = new Map();
+  for (const e of events) {
+    if (!e?.task) continue;
+    const t = Date.parse(e.ts) || 0;
+    if (t > now) continue;
+    if (e.type === 'task.paused') {
+      if (now - t > windowMs || hk.harnessCaused(e) || hk.personCaused(e) || !hk.saysReady(e.msg)) { last.delete(e.task); continue; }
+      last.set(e.task, { task: e.task, agent: e.agent || null, at: e.ts, note: String(e.msg || '').slice(0, 300) });
+    } else if (e.type === 'task.start' || e.type === 'task.done' || /^task\.train\.[a-z0-9-]+\.queued$/.test(e.type) || e.type === 'task.train.queued') last.delete(e.task);
+  }
+  return [...last.values()];
+}
+
+/**
+ * Queue one ready engine task as `task done --train` would (run in its own process by the engine pass). Its branch must
+ * have commits of its own ahead of the target; then completeTask's unityTrainCheck (the quick checks), then queueUnityTask.
+ * Returns { ok, queued?, skipped?, why }.
+ */
+export async function autoQueueReady(root, { task, engine, agent = null, at = null, env = process.env } = {}) {
+  const ut = await import('./unity-train.mjs');
+  const s = ut.unityTrainSettings(root, engine);
+  if (s.error) return { ok: false, skipped: true, why: s.message };
+  const { taskBranch } = await import('./unity-gate.mjs');
+  const br = taskBranch(task);
+  const git = (...a) => spawnSync('git', a, { cwd: s.repo, encoding: 'utf8', windowsHide: true });
+  const head = br ? git('rev-parse', '--verify', '--quiet', `refs/heads/${br}^{commit}`).stdout.trim() : '';
+  const ahead = head ? Number(git('rev-list', '--count', `refs/heads/${s.target}..${head}`).stdout.trim()) || 0 : 0;
+  if (!ahead) return { ok: false, skipped: true, why: `${task} has no ${engine} branch with commits ahead of ${s.target}` };
+  const t = await import('./task.mjs');
+  let pre = null;
+  try { pre = t.completeTask(task, '', LINE_AGENT, { unityTrainCheck: true }); } catch (e) { pre = { error: 'threw', message: e.message }; }
+  if (!pre || pre.error) {
+    const why = String(pre?.message || `${task} is not on the board`).replace(/\s+/g, ' ').slice(0, 400);
+    emitEvent({ type: `task.train.${engine}.not_queued`, agent: LINE_AGENT, task, to: 'producer', status: 'blocked', track: `engine:${engine}`, msg: `${task}: the session said the work is ready, but the harness did not queue it: ${why}`.slice(0, 600), meta: { auto: 'ready hand-back', handBackAt: at } });
+    return { ok: false, why };
+  }
+  const r = ut.queueUnityTask(root, { engine, task, agent: agent || LINE_AGENT, branch: br, note: 'queued by the harness: the session handed it back as ready', meta: { auto: 'ready hand-back', handBackAt: at } });
+  return r.ok ? { ok: true, queued: true, why: r.message } : { ok: false, why: r.message };
+}
+
+/** The engine pass's part: start autoQueueReady for each new ready hand-back of an engine task, once each. Returns the tasks started. */
+export async function autoQueuePass({ root, now = Date.now(), env = process.env, events = null, acting = true, deps = {} } = {}) {
+  if (!engineAutoQueueOn(env)) return [];
+  const evs = events || readRecentEvents(20000);
+  const cands = await readyHandBacks(evs, { now });
+  if (!cands.length) return [];
+  const et = await import('./engine-tracks.mjs');
+  const ut = await import('./unity-train.mjs');
+  const { listLocks } = await import('./lock.mjs');
+  const claimed = new Set(listLocks().filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5)));
+  let done = new Set();
+  try { done = new Set((await import('./task.mjs')).parseNextQueue().done.map((x) => x.id)); } catch {}
+  const seen = readJson(ENGINE_AUTO_QUEUED(), {}) || {};
+  const started = [];
+  for (const c of cands) {
+    const key = `${c.task}@${c.at}`;
+    if (seen[key] || claimed.has(c.task) || done.has(c.task)) continue;
+    let rec = null;
+    try { rec = deps.engineTask ? deps.engineTask(c.task) : et.engineTask(c.task, { root, env, events: evs }); } catch { rec = null; }
+    if (!rec?.engine) continue;
+    if (ut.readUnityQueue(root, rec.engine).some((x) => x.task === c.task)) continue;
+    if (!acting) { started.push({ task: c.task, engine: rec.engine, dry: true }); continue; }
+    seen[key] = new Date(now).toISOString();
+    try { fs.mkdirSync(LINE_DIR(), { recursive: true }); writeAtomic(ENGINE_AUTO_QUEUED(), `${JSON.stringify(seen, null, 2)}\n`); } catch { /* once more at worst */ }
+    if (deps.autoQueue) await deps.autoQueue({ task: c.task, engine: rec.engine, agent: c.agent, at: c.at });
+    else {
+      const fd = fs.openSync(path.join(LINE_DIR(), `${rec.engine}-auto-queue.log`), 'a');
+      const child = spawn(process.execPath, [path.join(root, 'harness', 'line-producer.mjs'), 'auto-queue', c.task, '--engine', rec.engine, ...(c.agent ? ['--agent', c.agent] : []), '--at', c.at], { cwd: root, env: { ...env, STUDIO_LOCK_OWNER: LINE_AGENT }, detached: true, stdio: ['ignore', fd, fd], windowsHide: true });
+      child.unref();
+      try { fs.closeSync(fd); } catch {}
+    }
+    started.push({ task: c.task, engine: rec.engine });
+  }
+  return started;
+}
+
 /** `node harness/task.mjs train --engine <x> --by line-producer`, detached, its output in .studio/line/<x>-train.log. */
 export function startEngineTrain(root, engine, env = process.env) {
   fs.mkdirSync(LINE_DIR(), { recursive: true });
@@ -1324,6 +1421,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const argv = process.argv.slice(2);
   const cmd = argv[0] || 'status';
   const json = argv.includes('--json');
+  if (cmd === 'auto-queue') {
+    // 2.85: the engine pass's child (autoQueuePass): queue one ready engine task, or put why not on it.
+    const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+    const { mainRoot } = await import('./worktree.mjs');
+    const r = await autoQueueReady(mainRoot(), { task: argv[1], engine: flag('engine') || 'unity', agent: flag('agent'), at: flag('at') });
+    console.log(JSON.stringify(r));
+    process.exit(r.ok || r.skipped ? 0 : 1);
+  }
   if (argv.includes('--help') || argv.includes('-h') || !['status', 'plan', 'why', 'pass'].includes(cmd)) {
     console.log('Usage: npm run line -- status [--json] | plan [--json] | why <T-ID>');
     process.exit(cmd === 'help' || argv.includes('--help') || argv.includes('-h') ? 0 : 1);

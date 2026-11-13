@@ -24,7 +24,7 @@
  *     the window starts again, and if the role trips again on the same cause it stays paused for a decider or real
  *     progress. Logged as crew.resumed (meta.auto). A landing or new work clears the cause and forgets "once".
  * STUDIO_CREW_WATCH=off turns it off. State: .studio/crew-paused.json (pauses), .studio/crew-resume.json (asks).
- * No model, no tokens. Only event.mjs and token-weight.mjs are imported at load (the supervisor imports this file).
+ * No model, no tokens. Only event.mjs, token-weight.mjs, fsafe.mjs and handback-kind.mjs are imported at load (the supervisor imports this file).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { weightedTokens } from './token-weight.mjs';
 import { readJson } from './fsafe.mjs';
+import { readyForTrain, sessionEndRefusedAgain } from './handback-kind.mjs';
 
 export const PAUSED_FILE = () => path.join(STUDIO_STATE_DIR, 'crew-paused.json');
 export const RESUME_FILE = () => path.join(STUDIO_STATE_DIR, 'crew-resume.json');
@@ -51,14 +52,9 @@ export function crewLimits(env = process.env) {
   };
 }
 
-/**
- * 2.84: events that say a task's work is finished and waits for a train (it counts as progress, not as nothing): its lane
- * was checked and queued (task done --train, or a lane's plain done), or a hand-back whose note says the work is ready
- * for the train. No outcome is recorded for that kind of hand-back, so its note is read (the words "ready ... train", not
- * "not ready"). The agent's own launcher records a hand-back by the session's name, so the task is what is matched.
- */
-const READY_FOR_TRAIN = /(?<!\bnot\s)(?<!n't\s)\bready\b[^.\n]{0,40}\btrain\b/i;
-export const readyForTrain = (e) => e.type === 'task.train.queued' || e.type === 'task.done.queued' || (e.type === 'task.paused' && READY_FOR_TRAIN.test(String(e.msg || '').replace(/^Handed back [^:]*:/, '')));
+// 2.84: finished work waiting for a train counts as progress (readyForTrain). 2.85: it lives in handback-kind.mjs, with
+// the one rule for which hand-backs count (the watchdog's park and the scorecard use it too); re-exported here.
+export { readyForTrain } from './handback-kind.mjs';
 
 const landingsOf = (e) => (e.type === 'task.done' || e.type === 'lane.merged' ? (e.task ? [e.task] : []) : e.type === 'task.train.landed' ? (Array.isArray(e.meta?.lanes) ? e.meta.lanes.map(String) : e.task ? [e.task] : []) : []);
 
@@ -98,7 +94,9 @@ export function crewHealth(events, { now = Date.now(), env = process.env, sinceB
       // 2.83: a session whose task done queued its lane for a train did its job; the landing comes when the train runs
       // (an engine land takes most of an hour, so "0 landed in 60 min" tripped the breaker on productive builders).
       if (o?.queuedForTrain) r.queued += 1;
-      if (o && !o.done && !o.commits && o.counts !== false) { r.noCommit += 1; if (o.why && r.whys.length < 3) r.whys.push(`${e.agent}: ${o.why}`); }
+      // 2.85: a session refused by task done for the same reason as the one before it (no new commit) met a harness check it
+      // could not act on: not the crew burning sessions (handback-kind.mjs; the task is held for a planner instead).
+      if (o && !o.done && !o.commits && o.counts !== false && !sessionEndRefusedAgain(e, sorted)) { r.noCommit += 1; if (o.why && r.whys.length < 3) r.whys.push(`${e.agent}: ${o.why}`); }
       if (o?.task && !r.tasks.includes(o.task)) r.tasks.push(o.task);
       const st = startOf.get(e.agent);
       if (st && t - st < lim.shortMs && !e.meta?.stoppedBy && !e.meta?.usageLimit) r.shortExits += 1;

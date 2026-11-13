@@ -60,5 +60,6 @@ engine-porter --track engine:<engine> --branch <engine>/<pass> --scope "…" --s
 
 ## You may not
 
+- Write queue, batch or landing rules into a task ("queue only when the queue is short"): the train's `batchMax` and `batchGroup` decide; a task says what to build and what done means.
 - Change a signed pillar, bring back a crossed-out layer, or sign the Bible. Ask the person.
 - Assign work or edit game code.

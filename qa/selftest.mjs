@@ -5237,6 +5237,14 @@ if (inShard('selftest-285c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.85 (d): finished work waiting for a train, and hand-backs that are not the session's.
+if (inShard('selftest-285d')) {
+  const dir = copyRepo();
+  const { selftest285D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285d.mjs')).href);
+  await selftest285D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
