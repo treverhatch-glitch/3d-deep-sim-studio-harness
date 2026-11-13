@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * harness/delegation.mjs — 2.67.0: the owner's standing delegation to one outside agent (the crew's orchestrator).
+ * harness/delegation.mjs — the owner's standing delegation to one outside agent (the crew's orchestrator).
  *
- * The owner's direction: "an outside agent should do what a game dev can do". Recording the owner's words for every
- * tier-C release (--permission "…", harness/permission.mjs) costs an owner round-trip each time. Instead the owner, in
- * their own terminal, grants one named outside agent a short list of owner actions for a few hours:
+ * An outside agent should do what a game dev can do, but recording the owner's words for every tier-C release
+ * (--permission "…", harness/permission.mjs) costs an owner round-trip each time. Instead the owner, in their own
+ * terminal, grants one named outside agent a short list of owner actions for a few hours:
  *
  *   npm run delegate -- grant <agent> --actions train-release,type,yes,hold --hours 12 --by <owner> [--why "…"] [--no-commit]
  *   npm run delegate -- list                       the delegation on file, whether it counts, and why
@@ -47,16 +47,16 @@ const readBetaOn = (root) => readBeta({ root }).on;
 
 export const DELEGATION_REL = 'studio/delegation.json';
 /**
- * The owner actions a delegation can cover. `hold` covers hold and unhold; `upgrade-auto` (2.69.0) the auto-upgrade
- * switch; `asset-review` (2.70.0) answering an asset's preview review (npm run asset -- review, harness/asset-review.mjs);
- * `janitor-lanes` (2.70.0) deleting the stale lane copies the janitor proposes (npm run janitor -- --lanes --yes).
+ * The owner actions a delegation can cover. `hold` covers hold and unhold; `upgrade-auto` the auto-upgrade switch;
+ * `asset-review` answering an asset's preview review (npm run asset -- review, harness/asset-review.mjs); `janitor-lanes`
+ * deleting the stale lane copies the janitor proposes (npm run janitor -- --lanes --yes).
  */
-// 2.72.0 (b): `purity-baseline` growing a game's purity ratchet baseline (npm run purity -- baseline --write, harness/purity.mjs).
+// `purity-baseline` growing a game's purity ratchet baseline (npm run purity -- baseline --write, harness/purity.mjs).
 export const DELEGABLE = ['train-release', 'type', 'visual', 'yes', 'hold', 'upgrade-auto', 'asset-review', 'janitor-lanes', 'purity-baseline'];
 export const NEVER_DELEGATED = 'signing protected-file approvals (npm run approve), changing gates or the protected list, and money';
 export const MAX_HOURS = 72;
 const git = (root, ...args) => spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
-// 2.73.1 (B-67): a proxy grant also signs `proxy: true` (harness/owner-proxy.mjs); a 2.67 grant's body is unchanged.
+// A proxy grant also signs `proxy: true` (harness/owner-proxy.mjs); an older grant's body is unchanged.
 const body = (d) => grantBody(d);
 const short = (iso) => String(iso || '').slice(0, 16).replace('T', ' ');
 
@@ -67,13 +67,13 @@ export const ACTION_COMMANDS = {
   visual: ['visual'],
   yes: ['yes'],
   hold: ['hold', 'unhold'],
-  // 2.69.0 (s): `npm run upgrade -- watch auto on` (harness/upgrade-watch.mjs); not a task command, so no allow rule.
+  // `npm run upgrade -- watch auto on` (harness/upgrade-watch.mjs); not a task command, so no allow rule.
   'upgrade-auto': [],
-  // 2.70.0 (v): `npm run asset -- review` (harness/asset-review.mjs); not a task command, so no allow rule.
+  // `npm run asset -- review` (harness/asset-review.mjs); not a task command, so no allow rule.
   'asset-review': [],
-  // 2.70.0 (w): `npm run janitor -- --lanes --yes --by <agent>` (harness/janitor.mjs); not a task command, so no allow rule.
+  // `npm run janitor -- --lanes --yes --by <agent>` (harness/janitor.mjs); not a task command, so no allow rule.
   'janitor-lanes': [],
-  'purity-baseline': [], // 2.72.0 (b): not a task command, so no allow rule
+  'purity-baseline': [], // not a task command, so no allow rule
 };
 
 /**
@@ -82,7 +82,7 @@ export const ACTION_COMMANDS = {
  * STUDIO_LOCK_OWNER or STUDIO_AGENT, a worker's name.
  */
 export function ownerShellRefusal({ env = process.env, lane = inLaneCopy() } = {}) {
-  // 2.76.0: in beta mode the owner's stand-ins (harness/beta-mode.mjs) pass where the owner's own terminal does.
+  // In beta mode the owner's stand-ins (harness/beta-mode.mjs) pass where the owner's own terminal does.
   try { if (!lane && betaActor({ env }).ok) return ''; } catch { /* the usual rules */ }
   const role = String(env.STUDIO_ROLE || '').trim();
   if (role) return `this runs inside a launched ${role} session (STUDIO_ROLE is set)`;
@@ -157,15 +157,15 @@ export const delegationWords = (doc) => `under delegation ${doc.at} by ${doc.by}
  */
 export function delegationFor({ action, by, env = process.env, root = mainRoot(), now = Date.now(), lane = inLaneCopy(), autonomy = true } = {}) {
   let d = delegationOnly({ action, by, env, root, now, lane });
-  // 2.76.0 (beta mode, harness/beta-mode.mjs): while it is on, the named outside agents and the Producer/Director
-  // sessions act as the owner for every action but money and deletes, with --by <their name> or --by <the owner>.
+  // Beta mode (harness/beta-mode.mjs): while it is on, the named outside agents and the Producer/Director sessions act as
+  // the owner for every action but money and deletes, with --by <their name> or --by <the owner>.
   if (!d.ok) { const b = betaFor({ action, by, env, root }); if (b) d = b; }
-  // 2.71.0 (x): the studio policy's "never" rules an action out for every agent, a delegated one included.
+  // The studio policy's "never" rules an action out for every agent, a delegated one included.
   const never = d.ok ? policyNeverWhy(action, { root }) : '';
   if (never) return { ok: false, why: `no delegation applies: ${never}` };
   if (d.ok || !autonomy) return d;
-  // 2.71.0 (x): autonomous mode (studio/policy.json, harness/policy.mjs): the overseer takes the listed game-dev
-  // decisions itself; each is logged "autonomous" and put on the review list. Same shape as a delegation, autonomous: true.
+  // Autonomous mode (studio/policy.json, harness/policy.mjs): the overseer takes the listed game-dev decisions itself; each
+  // is logged "autonomous" and put on the review list. Same shape as a delegation, autonomous: true.
   const a = autonomousFor({ action, by, env, root, lane });
   if (a.ok) return a;
   return { ok: false, why: d.why || a.why };
@@ -174,8 +174,8 @@ function betaFor({ action, by, env, root }) {
   const who = String(by || '').trim();
   if (!who) return null;
   let a = null;
-  // 2.79 (c): an owner-only act is refused first, whoever asks (harness/owner-acts.mjs); --by names the agent in a shell
-  // the harness didn't launch and that names nobody (an outside signer: --by grokbot).
+  // An owner-only act is refused first, whoever asks (harness/owner-acts.mjs); --by names the agent in a shell the harness
+  // didn't launch and that names nobody (an outside signer: --by grokbot).
   if (BETA_NEVER.includes(String(action || '').toLowerCase())) { try { if (readBetaOn(root)) return { ok: false, why: `no delegation applies: beta mode never covers ${action}` }; } catch {} return null; }
   try { a = betaActor({ env, from: root, by: who }); } catch { return null; }
   if (!a?.ok) return null;
@@ -193,8 +193,8 @@ function delegationOnly({ action, by, env, root, now, lane }) {
   const d = readDelegation({ root, now });
   if (!d.doc) return { ok: false, why: '' };
   const proxy = isProxyGrant(d.doc);
-  // 2.73.1 (B-67): the owner proxy's own shell (STUDIO_LOCK_OWNER=<agent>) may also act --by <the owner> (the person it
-  // stands in for), so every command reads the same for the owner and the proxy.
+  // The owner proxy's own shell (STUDIO_LOCK_OWNER=<agent>) may also act --by <the owner> (the person it stands in for), so
+  // every command reads the same for the owner and the proxy.
   const shellIsProxy = proxy && String(env.STUDIO_LOCK_OWNER || '').trim().toLowerCase() === String(d.doc.agent).toLowerCase();
   const asOwner = shellIsProxy && who.toLowerCase() === String(d.doc.by).toLowerCase();
   if (who.toLowerCase() !== String(d.doc.agent).toLowerCase() && !asOwner) return { ok: false, why: '' };
@@ -218,7 +218,7 @@ function delegationOnly({ action, by, env, root, now, lane }) {
  * entry's time is inside its window.
  */
 export function embeddedDelegationOk(doc, pub, { action, agent, at } = {}) {
-  if (doc?.autonomous) return embeddedAutonomyOk(doc, pub, { action, agent, at }); // 2.71.0 (x): a signed policy
+  if (doc?.autonomous) return embeddedAutonomyOk(doc, pub, { action, agent, at }); // a signed policy
   if (!doc || shapeError(doc) || !doc.signature || !pub) return false;
   if (!verifyApproval({ approval: body(doc), signature: doc.signature }, pub)) return false;
   const t = Date.parse(at);
@@ -227,7 +227,7 @@ export function embeddedDelegationOk(doc, pub, { action, agent, at } = {}) {
 
 /** One delegation.used event per use (the daily digest counts them). */
 export function recordUse(d, { action, task = null, detail = '' } = {}) {
-  if (d?.autonomous) return; // 2.71.0 (x): an autonomous decision's record is the decision log's (harness/decisions.mjs)
+  if (d?.autonomous) return; // an autonomous decision's record is the decision log's (harness/decisions.mjs)
   try {
     emitEvent({ type: 'delegation.used', agent: d.agent, task, to: d.owner, msg: `${d.agent} ran ${action}${task ? ` ${task}` : ''} ${delegationWords({ at: d.at, by: d.owner })}${detail ? ` (${detail})` : ''}`.slice(0, 400), meta: { action, owner: d.owner, at: d.at, until: d.until, signed: Boolean(d.signed) } });
   } catch { /* the record of the action itself is written by the action */ }
@@ -266,7 +266,7 @@ export function grantDelegation({ agent, actions, hours, by, why = '', commit = 
   const name = String(agent || '').trim();
   if (!/^[\w.-]{1,60}$/.test(name)) return refuse('name the outside agent: grant <agent-name>');
   if (WORKER_NAME.test(name)) return refuse(`${name} is a worker agent's name; workers and launched sessions are never covered`);
-  // 2.73.1 (B-67): `delegate proxy <agent>`: the owner's standing proxy, every action (harness/owner-proxy.mjs), for days.
+  // `delegate proxy <agent>`: the owner's standing proxy, every action (harness/owner-proxy.mjs), for days.
   const list = proxy ? ['*'] : [...new Set(String(actions || '').split(/[,\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean))];
   const unknown = proxy ? [] : list.filter((a) => !DELEGABLE.includes(a));
   if (!list.length || unknown.length) return refuse(`${unknown.length ? `${unknown.join(', ')} can't be delegated` : 'say which actions'}: --actions takes some of ${DELEGABLE.join(', ')} (never ${NEVER_DELEGATED}; npm run delegate -- proxy <agent> makes a standing owner proxy that covers everything)`);
@@ -319,19 +319,19 @@ export function claudeRules(actions, { owner = false } = {}) {
   return [...new Set(out)];
 }
 /**
- * 2.76.0 (B-95): the owner's commands for the owner proxy's or a beta-mode stand-in's own Claude Code session (whose
- * folder may not be the studio's: `claude-settings --owner --dir <its folder>`). Prefix rules for exactly these commands,
- * npm and npm.cmd forms; never a broad rule.
+ * The owner's commands for the owner proxy's or a beta-mode stand-in's own Claude Code session (whose folder may not be the
+ * studio's: `claude-settings --owner --dir <its folder>`). Prefix rules for exactly these commands, npm and npm.cmd
+ * forms; never a broad rule.
  */
 const OWNER_CMDS = ['task -- train release', 'task -- type', 'task -- visual', 'task -- yes', 'task -- hold', 'task -- unhold', 'task -- unpark',
   'approve -- protected', 'approve -- tests', 'approve -- hooks', 'approve -- force', 'approve -- show', 'ask -- answer', 'beta -- status', 'delegate -- list',
   'studio:resume', 'studio:extend', 'studio:reload-env', 'studio:boot', 'studio:status', 'lanes -- refresh', 'janitor -- --lanes',
-  // 2.77.0 (P9.5): the orchestrator's other actions Claude Code kept asking about.
+  // The orchestrator's other actions Claude Code kept asking about.
   'agent -- stop', 'agent -- pause', 'task -- park', 'task -- block', 'task -- unblock', 'task -- pause', 'beta -- on', 'beta -- off',
-  // 2.77.3 (H6): re-stamping hooks after an update (approve -- hooks / force are above).
+  // Re-stamping hooks after an update (approve -- hooks / force are above).
   'hooks -- restamp'];
 export const OWNER_RULES = [...OWNER_CMDS.flatMap((c) => [`Bash(npm run ${c}:*)`, `Bash(npm.cmd run ${c}:*)`]),
-  // 2.77.3 (H6): the node form of the hook-stamp grandfather command (with any arguments, such as --ref).
+  // The node form of the hook-stamp grandfather command (with any arguments, such as --ref).
   'Bash(node harness/hook-stamp.mjs grandfather:*)'];
 /** A rule this command would ever write: exactly a delegated command's prefix (no other wildcard, no shell tricks). */
 export const narrowRule = (r) => OWNER_RULES.includes(r) || /^Bash\((npm run task --|node harness\/task\.mjs) (train release|type|visual|yes|hold|unhold):\*\)$/.test(r);
@@ -365,7 +365,7 @@ The owner runs grant and claude-settings --write in their own terminal. Never de
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  // B-47: --help / -h prints usage and never acts.
+  // --help / -h prints usage and never acts.
   if (argv.includes('--help') || argv.includes('-h')) { console.log(USAGE); process.exit(0); }
   const opt = (k) => { const i = argv.indexOf(k); return i >= 0 && argv[i + 1] !== undefined && !String(argv[i + 1]).startsWith('--') ? argv[i + 1] : null; };
   const cmd = argv[0] || 'list';
@@ -397,8 +397,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const d = readDelegation();
     const list = opt('--actions') ? String(opt('--actions')).split(/[,\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean) : (isProxyGrant(d.doc) ? DELEGABLE : (d.doc?.actions || []));
     const unknown = list.filter((a) => !DELEGABLE.includes(a));
-    // 2.76.0 (B-95): --owner adds the owner's commands (the proxy's or beta mode's session); --dir writes that session's
-    // own folder's .claude/settings.json when it isn't the studio's.
+    // --owner adds the owner's commands (the proxy's or beta mode's session); --dir writes that session's own folder's
+    // .claude/settings.json when it isn't the studio's.
     const ownerRules = argv.includes('--owner') || isProxyGrant(d.doc);
     if (ownerRules && !unknown.length) {
       const rules = claudeRules(list, { owner: true });

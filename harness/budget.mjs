@@ -8,14 +8,11 @@
  *   npm run budget -- probe [tool]                   ask the tool with one tiny call; clears a wrong mark
  *   npm run budget -- clear <tool>                   drop a tool's quota mark by hand
  *
- * "Use the plan we pay for": a target like 100% of the week's tokens by the reset. Usage is what the
- * launcher's agents reported at the end of each session (agent.session.end), per tool, since the
- * tool's weekly reset. Plans don't publish token counts, so --weekly is the owner's own estimate (a
- * week's tokens on that plan); without it the studio shows tokens used and can't pace.
- *
- * The supervisor (npm run studio:start) reads this: under target it may start up to two extra lanes;
- * over target it starts nothing new; a tool that hit its limit (usage limit, 429) is skipped until
- * its reset, and its lanes move to the next tool in `order`.
+ * Target: e.g. 100% of the week's tokens by the reset. Usage is what agents reported in agent.session.end events,
+ * per tool, since its weekly reset. --weekly is the owner's own estimate (plans publish no counts); without it
+ * the studio shows tokens used and can't pace.
+ * The supervisor (npm run studio:start) reads this: under target it may start up to two extra lanes; over target
+ * nothing new; a tool at its limit (usage limit, 429) is skipped until its reset and its lanes move to the next in `order`.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -54,16 +51,11 @@ export function weekStart(cfg = {}, now = Date.now()) {
 }
 
 /**
- * Cache reads count (2.29.2) at a weight: STUDIO_CACHE_READ_WEIGHT, or cacheReadWeight in studio/budget.json,
- * default 0.1. 2.65.2: the two functions live in harness/token-weight.mjs (no harness imports but event.mjs), so the
- * autonomy scorecard's default weighting is this one without importing budget.mjs at load.
+ * Cache reads count at a weight: STUDIO_CACHE_READ_WEIGHT, or cacheReadWeight in studio/budget.json, default 0.1.
+ * Both functions live in harness/token-weight.mjs (imports only event.mjs) so the scorecard can use them without loading this file.
  */
 export { cacheReadWeight, weightedTokens };
-/**
- * The daily token cap (weighted tokens since midnight UTC). 2.29.2: it had no default (0 = no cap), so
- * nothing stopped a runaway night. Default 50,000,000, about 1.4x a 10-hour, 104-session overnight
- * test run measured this way; STUDIO_DAILY_TOKEN_CAP sets it, and off or 0 turns it off.
- */
+/** The daily token cap (weighted tokens since midnight UTC). Default 50,000,000; STUDIO_DAILY_TOKEN_CAP sets it, off or 0 turns it off. */
 export const DEFAULT_DAILY_TOKEN_CAP = 50000000;
 export function dailyCap(env = process.env) {
   const v = env.STUDIO_DAILY_TOKEN_CAP;
@@ -72,18 +64,18 @@ export function dailyCap(env = process.env) {
   return Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : DEFAULT_DAILY_TOKEN_CAP;
 }
 
-/** Tokens the launcher's agents reported for a tool since a time (cache reads weighted). */
+/** Tokens agents reported for a tool since a time (cache reads weighted). */
 export function usedSince(tool, since, events = readRecentEvents(50000)) {
   const w = cacheReadWeight();
   return Math.round(events.filter((e) => e.type === 'agent.session.end' && (e.meta?.tool || 'unknown') === tool && Date.parse(e.ts) >= since).reduce((n, e) => n + weightedTokens(e, w), 0));
 }
-/** Raw cache reads and the models behind them, for a tool since a time (counts are only comparable within a model). */
+/** Raw cache reads and their models for a tool since a time (comparable only within a model). */
 export function cacheSince(tool, since, events = readRecentEvents(50000)) {
   const ends = events.filter((e) => e.type === 'agent.session.end' && (e.meta?.tool || 'unknown') === tool && Date.parse(e.ts) >= since);
   return { cacheRead: ends.reduce((n, e) => n + (Number(e.meta?.cacheRead) || 0), 0), models: [...new Set(ends.map((e) => e.model).filter((m) => m && m !== 'unknown'))] };
 }
 
-// PU-19: wall-clock times in a named time zone, with Intl only (no dependency). An empty zone is this machine's.
+// Wall-clock times in a named time zone, with Intl only. An empty zone is this machine's.
 const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 const WALL_FMT = new Map();
@@ -93,7 +85,7 @@ function wallParts(ms, zone) {
   const p = Object.fromEntries(WALL_FMT.get(k).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
   return { y: Number(p.year), mo: Number(p.month) - 1, d: Number(p.day), h: Number(p.hour) % 24, mi: Number(p.minute), s: Number(p.second), wd: WEEKDAYS.indexOf(String(p.weekday).toLowerCase().slice(0, 3)) };
 }
-/** The instant a wall-clock time names in a zone; day overflow (the 32nd) rolls on, as Date.UTC does. */
+/** The instant a wall-clock time names in a zone; day overflow rolls on, as Date.UTC does. */
 function fromWall(y, mo, d, h, mi, zone) {
   const guess = Date.UTC(y, mo, d, h, mi);
   const offset = (ms) => {
@@ -103,7 +95,7 @@ function fromWall(y, mo, d, h, mi, zone) {
   const first = guess - offset(guess);
   return guess - offset(first); // a second look, in case a DST change lies between the guess and the answer
 }
-/** An IANA zone in brackets, "(Asia/Bangkok)", that this Node knows; null otherwise. */
+/** An IANA zone in brackets, "(Asia/Bangkok)", that this Node knows, else null. */
 function zoneIn(t) {
   const m = String(t).match(/\(\s*((?:[A-Za-z_]+\/)+[A-Za-z0-9_+-]+|UTC|GMT)\s*\)/);
   if (!m) return null;
@@ -126,15 +118,12 @@ function clock(hs, ms, ap) {
 }
 
 /**
- * When a provider's limit resets, from its own words: "Resets in 80h54m54s", "resets in 3 days",
- * "try again in 45 minutes", "resets 06:12", "try again at 3pm", or an ISO time. Null when it doesn't say.
- * Test #2: agy's "Resets in 80h54m" (three days) was read as one hour.
- * PU-19 (P-042) adds Claude Code's forms: "usage limit reached|1761962400" (the reset in unix seconds, or
- * milliseconds with 13 digits), a weekday ("resets Mon 9am", "resets Tuesday 14:00": the next one after now),
- * a date ("resets Nov 3, 9am", "Nov 3 at 9:00", "3 Nov 9am"; a date more than 45 days off is not believed),
- * and a zone in brackets ("resets 3pm (Asia/Bangkok)") for any clock time. Without a zone a clock time is
- * read in this machine's local time, as before. A reset time already past is no reset time (null).
- * The exact wording of Claude Code's limit lines is not verified against a live run.
+ * When a provider's limit resets, from its own words: "Resets in 80h54m54s", "try again in 45 minutes",
+ * "resets 06:12", "try again at 3pm", or an ISO time. Null when it doesn't say.
+ * Also Claude Code's forms: "usage limit reached|1761962400" (unix seconds, or milliseconds with 13 digits), a weekday
+ * ("resets Mon 9am": the next one after now), a date ("resets Nov 3, 9am", "3 Nov 9am"; more than 45 days off is not
+ * believed) and a zone in brackets ("resets 3pm (Asia/Bangkok)"). Without a zone a clock time is read in this machine's
+ * local time. A reset time already past is null. The wording of Claude Code's limit lines is not verified against a live run.
  */
 export function parseReset(text = '', now = Date.now()) {
   const t = String(text);
@@ -202,26 +191,17 @@ const harnessVersion = () => {
   return VERSION;
 };
 
-/**
- * A tool that hit its limit, and when it resets (1 h if the provider didn't say). The provider's own
- * line is kept word for word, so whoever reads "out of quota" sees what the provider actually said.
- */
 // Only a real limit message from a provider (shared with the launcher, the probe and the reviewer).
-// PU-19 (P-042): Claude Code's window limits, "5-hour limit reached ∙ resets 3pm", "Weekly limit reached",
-// "Opus weekly limit reached", "session limit reached", "You've reached your weekly limit", and any
-// "… limit reached" followed by a reset time or "|<unix time>". A usage-window word (5-hour, session, daily,
-// weekly, monthly, usage, plan, Opus, Sonnet, model) or a reset time is required, so "recursion limit reached"
-// or "file size limit reached" in a stack trace is not a usage limit. These wordings are taken from what
-// users report; they are not verified against a live Claude Code run.
+// Claude Code's window limits: "5-hour limit reached ∙ resets 3pm", "Weekly limit reached", "You've reached your weekly
+// limit", and any "… limit reached" followed by a reset time or "|<unix time>". A usage-window word (5-hour, session,
+// daily, weekly, monthly, usage, plan, Opus, Sonnet, model) or a reset time is required, so "recursion limit reached" in
+// a stack trace is not a usage limit. The wordings come from user reports, not a live Claude Code run.
 const LIMIT_WINDOW = String.raw`(?:(?:\d+|five)[- ]?hours?|hourly|hours?|session|daily|weekly|monthly|usage|plan|opus|sonnet|model)`;
 const LIMIT_RESET = String.raw`resets?\s+(?:(?:in|at|on)\s+)?(?:\d|(?:sun|mon|tue|wed|thu|fri|sat|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|today|tomorrow)`;
 const WINDOW_LIMIT = String.raw`\b${LIMIT_WINDOW}(?:[ -](?:${LIMIT_WINDOW}|\d+(?:\.\d+)?))*[ -]limit (?:reached|exceeded|hit)\b|(?:hit|reached) (?:your|the) (?:(?:${LIMIT_WINDOW}|rate|\d+(?:\.\d+)?)[ -])*limit\b|\blimit (?:reached|exceeded|hit)(?:\|\d{10,13}\b|\b[^\w\n]{0,6}(?:(?:it|and|which|will) )?${LIMIT_RESET})`;
 const PROVIDER_LIMIT = /usage limit (?:reached|exceeded|hit)|(?:hit|reached) (?:your|the) (?:usage |rate )?limit|\b429\b|too many requests|rate[ _-]?limit(?:ed| exceeded| reached| error)|quota (?:exceeded|exhausted)|insufficient[_ ]quota|credit balance is too low|insufficient[_ ]credits?|out of (?:credits|quota)|credits? (?:refused|exhausted|depleted)|payment required|\b402\b|spend(?:ing)? (?:limit|cap|guard) (?:reached|exceeded|hit)|budget (?:exceeded|exhausted)|token (?:cap|limit|budget) (?:reached|exceeded|hit)/i;
 export const QUOTA_ERROR = new RegExp(`${PROVIDER_LIMIT.source}|${WINDOW_LIMIT}`, 'i');
-/**
- * PU-19: the hand-back note of a session that stopped at its usage limit. It is not a failure: the circuit
- * breaker (its "usage limit" words), the loop park, the model escalation and the supervisor's halt skip it.
- */
+/** The hand-back note of a session that stopped at its usage limit. Not a failure: the circuit breaker, loop park, model escalation and supervisor halt skip it. */
 export const LIMIT_STOP = /\bstopped at its usage limit\b/i;
 /** The provider's limit line in a failed command's stderr (or stdout when it printed nothing else), or null. */
 export function limitLine(stderr = '', stdout = '', code = 1) {
@@ -229,11 +209,12 @@ export function limitLine(stderr = '', stdout = '', code = 1) {
   const lines = `${stderr || ''}`.trim() ? String(stderr).split('\n') : String(stdout || '').split('\n').slice(-5);
   return lines.reverse().find((l) => QUOTA_ERROR.test(l) && !/"type"\s*:\s*"(?:user|assistant|system|stream_event)"/.test(l)) || null;
 }
+/** Marks a tool as out of quota until its reset (1 h if the provider didn't say), keeping the provider's own line word for word. */
 export function markExhausted(tool, text = '', now = Date.now()) {
   const q = readJson(QUOTA_FILE, {});
   const at = parseReset(text, now);
   const until = at || now + 3600000;
-  // 2.30 (J12): a stop shows the numbers it used: tokens counted in the last 5 h and this week, by model.
+  // A stop records the tokens counted in the last 5 h, by model.
   let used = null;
   try {
     const ev = readRecentEvents(20000);
@@ -246,11 +227,9 @@ export function markExhausted(tool, text = '', now = Date.now()) {
   return q[tool];
 }
 /**
- * 2.78.2 (d): the key a usage-limit stop is saved under. A limit on one model of a tool that keeps a quota per model
- * (agy runs Gemini models side by side: a 429 on Argon said nothing about Flash) is saved as `tool:model`; any other
- * stop, and an error that is really tool-wide (auth, binary missing: those callers pass the tool), under the tool.
- * STUDIO_QUOTA_MODEL_TOOLS lists the tools that get per-model keys (default "agy,gemini"; "all" for every tool, "off"
- * for none: the tool-wide key as before).
+ * The key a usage-limit stop is saved under: `tool:model` for a tool that keeps a quota per model (agy runs Gemini
+ * models side by side), otherwise the tool; tool-wide errors (auth, binary missing) pass only the tool.
+ * STUDIO_QUOTA_MODEL_TOOLS lists the tools with per-model keys (default "agy,gemini"; "all", or "off" for none).
  */
 export function quotaKeyFor(tool, model = '', env = process.env) {
   const t = String(tool || '');
@@ -274,7 +253,7 @@ export function toolNamed(line = '') {
   if (/\bgrokbot\b/i.test(l)) return 'grokbot';
   if (/AGY_ERROR|antigravity|\bagy\b/i.test(l)) return 'agy';
   if (/gemini/i.test(l)) return (readBudget().order || []).includes('gemini') ? 'gemini' : 'agy';
-  // 2.58.3 (M4): a NIM session (aider on NVIDIA's OpenAI-compatible endpoint) is nim's, not codex's.
+  // A NIM session (aider on NVIDIA's OpenAI-compatible endpoint) is nim's, not codex's.
   if (/integrate\.api\.nvidia|\bnvidia\b|\bnim\b/i.test(l)) return 'nim';
   if (/\bcodex\b|chatgpt|openai/i.test(l)) return 'codex';
   if (/\bclaude\b|anthropic/i.test(l)) return 'claude';
@@ -282,17 +261,14 @@ export function toolNamed(line = '') {
   if (/\bcursor\b/i.test(l)) return 'cursor';
   return null;
 }
-/**
- * Drop marks we can't trust: written by a harness before 2.26 (they read any "quota" text), expired, or
- * naming another tool's error. Returns what was dropped and what stands.
- */
+/** Drops marks we can't trust (written before 2.26, expired, or quoting another tool's error). Returns what was dropped and what stands. */
 export function cleanQuotaMarks(now = Date.now()) {
   const q = readJson(QUOTA_FILE, {});
   const dropped = [];
   const kept = [];
   for (const [tool, m] of Object.entries(q)) {
     const other = toolNamed(m.line || m.why);
-    // 2.78.2 (d): a tool:model mark is its tool's mark (agy:gemini-x quoting agy's error is agy's).
+    // A tool:model mark is its tool's mark.
     const base = tool.startsWith('custom:') ? tool : tool.split(':')[0];
     const why = Date.parse(m.until) <= now ? 'it had expired' : !m.version ? `it was written by a harness before 2.26 (said: "${String(m.why || '').slice(0, 80)}")` : other && other !== base ? `the error it quoted was ${other}'s, not ${tool}'s` : null;
     if (why) {
@@ -307,23 +283,20 @@ export function cleanQuotaMarks(now = Date.now()) {
   return { dropped, kept };
 }
 const AGY_PROBE_PROMPT = 'Reply with the word OK.';
-/** agy's probe call: the prompt on stdin (2.58.5, H-2); STUDIO_AGY_PROMPT=arg brings back `-p <prompt>` as for sessions. */
+/** agy's probe call: the prompt on stdin; STUDIO_AGY_PROMPT=arg uses `-p <prompt>` as for sessions. */
 export const agyProbeArgv = () => (/^(arg|argument|p)$/i.test(process.env.STUDIO_AGY_PROMPT || '')
   ? ['agy', '-p', AGY_PROBE_PROMPT, '--print-timeout', '60s'] : ['agy', '--print-timeout', '60s']);
-/**
- * Ask the tool itself before believing an old mark: one tiny call ("reply OK"). It answers: the mark is
- * cleared. STUDIO_QUOTA_PROBE=off turns it off; STUDIO_<TOOL>_PROBE_CMD replaces the call.
- */
+/** Asks the tool itself ("reply OK") before believing an old mark; an answer clears it. STUDIO_QUOTA_PROBE=off turns it off; STUDIO_<TOOL>_PROBE_CMD replaces the call. */
 export function probeTool(tool, { timeoutMs = 90000 } = {}) {
   const custom = process.env[`STUDIO_${String(tool).toUpperCase()}_PROBE_CMD`];
   const argv = custom ? null : { claude: ['claude', '-p', 'Reply with the word OK.', '--output-format', 'json', '--max-turns', '1'], codex: ['codex', 'exec', '--json', ...(process.env.STUDIO_AGENT_MODEL ? ['-m', process.env.STUDIO_AGENT_MODEL] : []), 'Reply with the word OK.'], agy: agyProbeArgv() }[tool];
   if (!custom && !argv) return { ok: null, why: `no probe for ${tool}` };
-  // P-066: no shell for the tool (harness/launch.mjs); on Windows "Reply with the word OK." reached claude word by word.
-  // 2.58.5 (H-2): agy reads the probe's prompt on stdin like a session's kickoff (agy.exe split -p's text on spaces).
+  // No shell for the tool (harness/launch.mjs): on Windows the prompt reached claude word by word.
+  // agy reads the prompt on stdin like a session's kickoff (agy.exe splits -p's text on spaces).
   const input = tool === 'agy' && !argv.includes('-p') ? AGY_PROBE_PROMPT : null;
   const r = custom ? spawnSync(custom, { windowsHide: true, shell: true, encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT }) : spawnAgentSync(argv, { encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT, ...(input === null ? { stdio: ['ignore', 'pipe', 'pipe'] } : { input, stdio: ['pipe', 'pipe', 'pipe'] }) });
   const out = `${r.stdout || ''}\n${r.stderr || ''}`;
-  // 2.30 (J12): the provider's own limit message only; a word like "quota" anywhere in the answer isn't one.
+  // Only the provider's own limit message counts; a word like "quota" in the answer isn't one.
   const said = limitLine(r.stderr, r.stdout, r.status);
   const limited = Boolean(said);
   const ok = r.status === 0 && !/"is_error"\s*:\s*true/.test(out);
@@ -336,10 +309,7 @@ export const exhaustedUntil = (tool, now = Date.now()) => {
   return q && Date.parse(q.until) > now ? q.until : null;
 };
 export const quotaMark = (tool) => readJson(QUOTA_FILE, {})[tool] || null;
-/**
- * 2.78.2 (d): until when this tool's model is out: the `tool:model` mark first, then the tool-wide mark (old marks, and
- * errors that are really tool-wide, are saved under the tool). Null when neither stands.
- */
+/** Until when this tool's model is out: the `tool:model` mark first, then the tool-wide mark. Null when neither stands. */
 export const exhaustedFor = (tool, model = '', now = Date.now()) => {
   const m = String(model || '').trim();
   return (m && !String(tool).includes(':') ? exhaustedUntil(`${tool}:${m}`, now) : null) || exhaustedUntil(tool, now);
@@ -347,18 +317,16 @@ export const exhaustedFor = (tool, model = '', now = Date.now()) => {
 /** The first tool in the order that isn't out of quota, starting from the preferred one. */
 export function pickTool(preferred, now = Date.now()) {
   const order = [...new Set([preferred, ...(readBudget().order || [])].filter(Boolean))];
-  // 2.30o: an entry may be tool or tool:model; it is out when either it or its tool is marked.
-  // 2.79.1 (a): a tool whose spend budget cut it (harness/spend-budget.mjs) is passed over like one out of quota.
+  // An entry may be tool or tool:model; it is out when either it or its tool is marked.
+  // A tool cut by its spend budget (harness/spend-budget.mjs) is passed over like one out of quota.
   return order.find((t) => !exhaustedUntil(t, now) && !(t.includes(':') && exhaustedUntil(t.split(':')[0], now)) && !cutFor([t.split(':')[0]])) || null;
 }
 
 /**
- * 2.58.0 (PU-40, P-051): the key a usage limit on a custom command (STUDIO_<ROLE>_CMD, STUDIO_AGENT_CMD) is saved
- * under: `custom:<program>`, the program's base name without its extension, lower case. For an interpreter
- * (node, python, bash, cmd /c, powershell -File, npx …) the script it runs names it. Quotes, Windows paths and
- * leading NAME=value settings are handled. Saved as plain `custom` (2.57.0), no launch check could match it, so
- * the next launch hit the same limit at once; per program, two different custom commands don't hold each other.
- * Null for an empty command.
+ * The key a usage limit on a custom command (STUDIO_<ROLE>_CMD, STUDIO_AGENT_CMD ...) is saved under: `custom:<program>`,
+ * the program's base name without extension, lower case. For an interpreter (node, python, bash, cmd /c, powershell
+ * -File, npx ...) the script it runs names it. Quotes, Windows paths and leading NAME=value settings are handled.
+ * Per program, so two custom commands don't hold each other and a launch check can match the mark. Null for an empty command.
  */
 const INTERPRETERS = new Set(['node', 'nodejs', 'bun', 'deno', 'python', 'python3', 'py', 'bash', 'sh', 'zsh', 'dash', 'pwsh', 'powershell', 'cmd', 'npx', 'pnpx', 'bunx', 'env', 'call', 'start', 'exec', 'uv', 'uvx', 'ruby', 'perl']);
 export function customKey(cmd = '') {
@@ -370,8 +338,8 @@ export function customKey(cmd = '') {
   let i = 0;
   while (i < words.length && setting(words[i])) i++;
   let prog = words[i] ? base(words[i]) : '';
-  // An interpreter runs the program: skip its flags to the script it runs. -c/-e/--eval/-Command run inline code
-  // (no script: the interpreter names it); -m and -File name the module or script next.
+  // An interpreter runs the program: skip its flags to the script. -c/-e/--eval/-Command run inline code
+  // (the interpreter names it); -m and -File name the module or script next.
   for (let hops = 0; INTERPRETERS.has(prog) && hops < 3; hops++) {
     let j = i + 1;
     let inline = false;
@@ -390,24 +358,22 @@ export function customKey(cmd = '') {
 }
 
 /**
- * 2.30q (#7): is this launch stopped by a budget mark? In the Marina run gemini was marked out by its spend
- * guard at 20:27 UTC, yet 69 Gemini sessions started afterwards: they ran as tool "custom" (the role's
- * STUDIO_<ROLE>_CMD wraps gemini), so the mark on "gemini" never matched, and with every tool marked out
- * pickTool() returned null and startAgent kept the original tool. A launch is stopped when any active mark
- * (quota or spend guard) names its tool, its tool:model, its model's family (gemini-3.1-pro-preview ->
+ * Is this launch stopped by a budget mark? A role's custom command can wrap another tool (it runs as tool "custom"),
+ * so a mark on "gemini" must also match by model family or a word of the command. A launch is stopped when any
+ * active mark (quota or spend guard) names its tool, its tool:model, its model's family (gemini-3.1-pro-preview ->
  * gemini) or a word of its launch command, or a .studio/credit.json meter for one of those is at its guard.
  * Returns { stopped, by, until, why } (stopped false when nothing applies).
  */
 export function budgetStopFor({ tool = '', model = '', cmd = '', keys = [] } = {}, now = Date.now(), env = process.env) {
-  // 2.79.1 (a): a spend budget at 100% (harness/spend-budget.mjs) cuts new sessions on its tool or key: a money cap someone
-  // allowed set, so STUDIO_BUDGET_STOP=off doesn't lift it (raise or resume the budget).
+  // A spend budget at 100% (harness/spend-budget.mjs) cuts new sessions on its tool or key. It is a money cap an owner
+  // set, so STUDIO_BUDGET_STOP=off doesn't lift it (raise or resume the budget).
   { const cut = cutFor([tool, ...(keys || [])]); if (cut) return { stopped: true, by: 'spend budget', until: null, why: cut }; }
   if (/^(off|0|false|no)$/i.test(env.STUDIO_BUDGET_STOP || '')) return { stopped: false };
   const names = new Set();
   const add = (x) => { const v = String(x || '').toLowerCase().trim(); if (v && v !== 'unknown' && v !== 'custom') names.add(v); };
   add(tool); add(model); if (tool && model) add(`${tool}:${model}`);
   const fam = String(model || '').toLowerCase().match(/^[a-z]+/); if (fam) add(fam[0]);
-  // PU-40 (P-051): a launch through a command honours a usage limit saved for that program (custom:<program>).
+  // A launch through a command honours a limit saved for that program (custom:<program>).
   const ck = cmd ? customKey(cmd) : null; if (ck) add(ck);
   const words = String(cmd || '').toLowerCase().split(/[^a-z0-9.:_-]+/).filter(Boolean);
   const hit = (key) => {
@@ -455,10 +421,10 @@ export function budgetStatus(now = Date.now(), events = readRecentEvents(50000))
   });
 }
 
-// ---- ccusage (2.30, opt-in plugin): Claude Code's own usage log, copied beside the harness's count ----
+// ---- ccusage (opt-in plugin): Claude Code's own usage log, kept beside the harness's count ----
 export const CCUSAGE_FILE = path.join(STUDIO_STATE_DIR, 'ccusage.json');
 export const readCcusage = () => readJson(CCUSAGE_FILE, null);
-/** Run ccusage (only when its plugin is on) and keep its daily totals: tokens per day and model, cache reads apart. */
+/** Runs ccusage (plugin on only) and keeps its daily totals per model. */
 export function importCcusage({ run = spawnSync, now = Date.now() } = {}) {
   let plugin = null;
   try {
@@ -480,14 +446,13 @@ export function importCcusage({ run = spawnSync, now = Date.now() } = {}) {
   return { ok: true, ledger: out };
 }
 
-// 2.83: the command line runs in an async function, not at the top level. Other modules import this one (agent.mjs,
-// review-family.mjs), and the commands below import modules that import those: a top-level await here left that cycle
-// unsettled and the process ended with exit 13 before printing the spend lines (the same fault as engine-rules.mjs on 2.82).
+// The command line runs in an async function, not at the top level: other modules import this one and the commands
+// below import modules that import those, so a top-level await left the cycle unsettled (exit 13, no output).
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) (async () => {
   const argv = process.argv.slice(2);
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
-  // 2.79.1 (a): spend budgets per tool or key (harness/spend-budget.mjs): set <name> <usd> | clear <name> | resume <name>,
-  // each with --by <who> --why "<the owner's order>". `set <tool> --weekly …` and `clear <tool>` without --by are as before.
+  // Spend budgets per tool or key (harness/spend-budget.mjs): set <name> <usd> | clear <name> | resume <name>,
+  // each with --by <who> --why "<the owner's order>". `set <tool> --weekly ...` and `clear <tool>` without --by are the quota forms.
   const spendCmd = (argv[0] === 'set' && /^\$?\d+(\.\d+)?$/.test(String(argv[2] || ''))) || argv[0] === 'resume' || (argv[0] === 'clear' && flag('by') && (await import('./spend-budget.mjs')).readBudgets().budgets[argv[1]]);
   if (spendCmd) {
     const r = await (await import('./spend-budget.mjs')).budgetCommand(argv[0], { name: argv[1], usd: argv[2], by: flag('by'), why: flag('why'), since: flag('since') });
@@ -534,6 +499,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   console.log(cap ? `Daily cap: ${cap.toLocaleString()} tokens (input + output + cache reads at ${cacheReadWeight()}x); STUDIO_DAILY_TOKEN_CAP changes it, off turns it off.` : 'Daily cap: off (STUDIO_DAILY_TOKEN_CAP=off).');
   console.log(st.length ? st.map((s) => s.text).join('\n') : 'No tool has reported usage yet. Agents started with npm run agent or npm run studio:start report it.');
   console.log(`Order when a tool runs out: ${(readBudget().order || []).join(' → ')}`);
-  // 2.79.1 (a): spend in dollars per tool and key (Vertex's live usage log too), and each spend budget (none by default).
+  // Spend in dollars per tool and key (Vertex's live usage log too), and each spend budget (none by default).
   try { const sb = await import('./spend-budget.mjs'); await sb.spendPass(); for (const l of await sb.spendLines()) console.log(l); } catch (e) { console.log(`Spend: couldn't be read (${e.message})`); }
 })().catch((e) => { console.error(e?.stack || String(e)); process.exit(1); });

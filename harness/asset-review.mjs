@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 /**
- * harness/asset-review.mjs — 2.70.0 (v): a vision check on asset previews before an asset lands.
+ * harness/asset-review.mjs — a vision check on asset previews before an asset lands.
  *
- * The crew's orchestrator used to look at every asset preview by eye before it landed (wrong scale, model off-frame,
- * black or empty renders, untextured pink, upside-down). The harness can't look (no paid service, no model call), so
- * this splits the job in two:
+ * The harness can't look at a preview (no paid service, no model call), so the job is split in two:
  *
  * 1. Deterministic preview checks (pure Node, harness/png.mjs decodes the PNG): for each preview render the asset gate
  *    finds next to a model, it measures and records
@@ -485,7 +483,7 @@ export async function recordVerdict({ asset, verdict, why = '', by, permission =
     fs.writeFileSync(path.join(dir, `asset-${rec.asset}-${at.slice(0, 10)}.md`), `# Asset review: ${rec.asset}\n\nReviewed: ${rec.task}${rec.reviewTask ? ` (review task ${rec.reviewTask})` : ''}, ${rec.model}\nVerdict: ${verdict === 'pass' ? 'approved' : 'request changes'}\nBy: ${d.by} (${d.via}${d.recordedBy !== d.by ? `, recorded by ${d.recordedBy}` : ''})\n${words ? `Why: ${words}\n` : ''}${fixTask ? `Fix task: ${fixTask}\n` : ''}Request: ${REVIEWS_DIR_REL}/${rec.asset}.md\n`);
   } catch { /* the record above is what the gate reads */ }
   emitEvent({ type: 'asset.review', agent: d.recordedBy, task: rec.task, to: roleOf(taskAdded(evs, rec.task)) || 'producer', status: verdict === 'pass' ? 'ok' : 'blocked', msg: (verdict === 'pass' ? `${rec.asset} passed its review (${d.by}${d.via !== 'agent' && d.via !== 'person' ? `, ${d.via}` : ''}): task done ${rec.task} lands it` : `${rec.asset} failed its review (${d.by}): ${words}${fixTask ? `; ${fixTask} fixes it` : ''}`).slice(0, 500), meta: { asset: rec.asset, verdict, by: d.by, via: d.via, reviewTask: rec.reviewTask || null, fixTask } });
-  // 2.71.0 (x): one decision-log record (harness/decisions.mjs); a revert asks for the review again.
+  // One decision-log record (harness/decisions.mjs); a revert asks for the review again.
   try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'asset-review', subject: rec.asset, by: d.by, as: dm.asCaller(d, env), why: words || `${verdict} (${rec.task})`, evidence: `${verdict}, ${rec.task}${fixTask ? `, fix task ${fixTask}` : ''}`, undo: { kind: 'asset-review-reopen', asset: rec.asset, task: rec.task, text: `the asset waits for a new review (npm run asset -- review ${rec.asset} --pass|--fail "…" --by <name>)` }, root }); } catch {}
   // The review task is answered: take it off the queue when nobody has started it (a session working it closes it).
   if (rec.reviewTask && board?.dropTask && board?.parseNextQueue) {
@@ -495,8 +493,8 @@ export async function recordVerdict({ asset, verdict, why = '', by, permission =
 }
 
 /**
- * 2.71.0 (x): a reverted review decision (npm run decisions -- revert): the asset waits for a review again (verdict
- * cleared, history kept). An asset whose task already landed says so: its files are on main; a person looks again.
+ * A reverted review decision (npm run decisions -- revert): the asset waits for a review again (verdict cleared, history
+ * kept). An asset whose task already landed says so: its files are on main; a person looks again.
  */
 export function reopenReview(root, asset, { by = 'someone', why = '' } = {}) {
   const rec = findAsset(root, asset);

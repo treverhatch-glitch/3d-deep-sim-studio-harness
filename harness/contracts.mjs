@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 /**
- * harness/contracts.mjs — 2.62.0 (H): per-task acceptance contracts ("what done means", agreed before coding).
+ * harness/contracts.mjs — per-task acceptance contracts ("what done means", agreed before coding).
  *
- * A task's title is one line; a builder can make every check green and still deliver less than was meant. A contract
- * is a small JSON per task (studio/contracts/<ID>.json, committed) listing checkable criteria, agreed before the work
- * starts, after which the builder may only flip `passes` (Anthropic's long-running-harness pattern: a feature list
- * where agents only flip `passes`; "sprint contracts" agreed before coding):
+ * A task's title is one line; a builder can make every check green and still deliver less than was meant. A contract is a
+ * small JSON per task (studio/contracts/<ID>.json, committed) listing checkable criteria, agreed before the work starts,
+ * after which the builder may only flip `passes`:
  *
  *   { "task": "T-012", "criteria": [{ "id": "C1", "text": "…", "check": { "kind": "command", "command": "…" }, "passes": false },
  *                                   { "id": "C2", "text": "…", "check": { "kind": "file", "path": "…", "contains": "…" }, "passes": false },
@@ -42,10 +41,9 @@
  *     (protected: owner-approved) makes an agreed contract mandatory for those task types.
  *   - The reviewer (harness/review.mjs) gets the contract in its brief and grades the work against each criterion.
  *
- * Limits: a commit with no Studio-Agent trailer counts as a person's (an agent shell without STUDIO_LOCK_OWNER set
- * writes none; the hooks gate catches commits that skipped the hooks, not a missing name). Until the studio has an
- * owner key nothing an agent writes is proof; this is a speed bump that makes redefining done visible, like the
- * type reclassification record.
+ * Limits: a commit with no Studio-Agent trailer counts as a person's (an agent shell without STUDIO_LOCK_OWNER set writes
+ * none; the hooks gate catches commits that skipped the hooks, not a missing name). Until the studio has an owner key
+ * nothing an agent writes is proof; this is a speed bump that makes redefining done visible.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -103,7 +101,7 @@ const frozenPart = (x) => canon(Object.fromEntries(Object.entries(x || {}).filte
 const agreeKey = (d) => canon([d?.agreedBy || null, d?.agreedAt || null, d?.recordedBy || null, d?.permission || null, (d?.amendments || []).length]);
 const nextId = (c) => `C${Math.max(0, ...c.criteria.map((x) => Number(String(x.id || '').replace(/^C/, '')) || 0)) + 1}`;
 const checkWords = (k) => (k?.kind === 'command' ? `command: ${k.command}` : k?.kind === 'file' ? `file: ${k.path}${k.contains ? ` contains "${k.contains}"` : ''}` : k?.kind === 'test' ? `test: "${k.name}"${k.file ? ` in ${k.file}` : ''}` : 'manual: a reviewer or a person signs it');
-/** 2.72.0 (c): a criterion is a must-item unless it says "must": false (a should-item: listed, never blocking). */
+/** A criterion is a must-item unless it says "must": false (a should-item: listed, never blocking). */
 export const isMust = (x) => x?.must !== false;
 const mechanical = (x) => ['command', 'file', 'test'].includes(x?.check?.kind);
 
@@ -169,10 +167,10 @@ const isTestPath = (f) => !/(^|\/)(node_modules|\.git|addons\/gdUnit4)\//.test(f
     || /(^|\/)(test_[^/]+\.(py|gd)|[^/]+_test\.(py|gd|go|rs|js|ts|mjs)|[^/]+Tests?\.(cs|gd|java|kt))$/.test(f));
 const escRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /**
- * 2.72.0 (c): a test criterion, judged now: a test named `name` is defined, and not skipped, in a test file (check.file,
- * else every tracked or untracked test file: harness/test-weakening.mjs isTestPath). Definitions: it/test/describe
- * ('<name>' …) in JS/TS, def/func <name>( in Python/GDScript/Go, void|fn <name>( in C#/Java/Rust. { ok, why, where }.
- * That the test passes is the verify's job (task done needs a green one); this ties the criterion to a real test.
+ * A test criterion, judged now: a test named `name` is defined, and not skipped, in a test file (check.file, else every
+ * tracked or untracked test file: harness/test-weakening.mjs isTestPath). Definitions: it/test/describe ('<name>' …) in
+ * JS/TS, def/func <name>( in Python/GDScript/Go, void|fn <name>( in C#/Java/Rust. { ok, why, where }.
+ * That the test passes is the verify's job; this ties the criterion to a real test.
  */
 export function testCheck(check, root = REPO_ROOT) {
   const name = String(check?.name || '').trim();
@@ -281,11 +279,10 @@ export function runChecks(id, { root = REPO_ROOT, env = process.env, log = () =>
  * (and whose type the studio doesn't require one for) gets nothing. Command criteria count from the last `contract check`
  * only when it ran on the work as it is now (workState) with the agreed command; file and test criteria are read now;
  * manual criteria need a reviewer's or a person's signature.
- * 2.72.0 (c), the completeness rubric: every criterion tied to a command, a file or a test name is checked mechanically;
- * the ones it can't verify (manual, not signed yet) are listed as "unverified, for the reviewer" (`unverified`). With
- * defer (the task lands through the merge train: a lane copy with the train on), an unverified must-item doesn't block
- * done: the train holds the lane as tier C until a reviewer signs it (or a person releases it): unverifiedMust. A
- * should-item ("must": false) never blocks; a signed fail always does.
+ * Every criterion tied to a command, a file or a test name is checked mechanically; the ones it can't verify (manual, not
+ * signed yet) are listed as `unverified`, for the reviewer. With defer (the task lands through the merge train: a lane
+ * copy with the train on), an unverified must-item doesn't block done: the train holds the lane as tier C until a
+ * reviewer signs it (or a person releases it): unverifiedMust. A should-item ("must": false) never blocks; a signed fail always does.
  */
 export function contractChecks(task, type, { root = REPO_ROOT, defer = false } = {}) {
   const checks = [];
@@ -346,14 +343,14 @@ export function contractChecks(task, type, { root = REPO_ROOT, defer = false } =
   return { checks, notes, unverified };
 }
 
-/** 2.72.0 (c): the contract's must-items nobody has verified yet (manual, in force, not signed pass by a reviewer or a person). */
+/** The contract's must-items nobody has verified yet (manual, in force, not signed pass by a reviewer or a person). */
 export function unverifiedMust(id, root = REPO_ROOT) {
   const c = readContract(id, root);
   if (!isAgreed(c)) return [];
   return inForce(c).filter((x) => isMust(x) && !mechanical(x) && !(x.passes === true && signerOk(x.signed))).map((x) => ({ id: x.id, text: String(x.text) }));
 }
 
-/** 2.72.0 (c): the train's tier-C reason for them (no "; " in it: the train joins reasons with that). */
+/** The train's tier-C reason for them (no "; " in it: the train joins reasons with that). */
 export const CONTRACT_HOLD = 'its acceptance contract has unverified must-items';
 export const contractHoldWhy = (id, items) => `${CONTRACT_HOLD} (${items.map((x) => x.id).join(', ')}: a reviewer signs them with npm run task -- contract ${id} sign <CID> pass|fail --by <reviewer>, or a person releases the lane)`;
 /** Is a held lane's reason only the contract's (so a reviewer's signature, not only a release, clears it)? */
@@ -515,7 +512,7 @@ export function contractCommand({ task, done = false, sub = 'show', args = [], f
     const text = args.join(' ').trim();
     if (text.length < 5) return { ok: false, message: `Say what done means, in words someone can check: npm run task -- contract ${id} add "<text>" [--check "<command>" | --file <path> [--contains "<text>"] | --manual]` };
     const check = typeof flags.check === 'string' && flags.check.trim() ? { kind: 'command', command: flags.check.trim() }
-      // 2.72.0 (c): a criterion tied to a test name (--test "<name>" [--file <test file>]).
+      // A criterion tied to a test name (--test "<name>" [--file <test file>]).
       : typeof flags.test === 'string' && flags.test.trim() ? { kind: 'test', name: flags.test.trim(), ...(typeof flags.file === 'string' && flags.file.trim() ? { file: flags.file.trim().replace(/\\/g, '/') } : {}) }
       : typeof flags.file === 'string' && flags.file.trim() ? { kind: 'file', path: flags.file.trim().replace(/\\/g, '/'), ...(typeof flags.contains === 'string' ? { contains: flags.contains } : {}) }
       : { kind: 'manual' };
