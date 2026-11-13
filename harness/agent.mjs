@@ -1441,6 +1441,12 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     // logStall logs once per session (not again when the watchdog logged it first); this launcher ends its own agent once.
     // A builder's verify red on a different cause than its previous red, past half its refresh point, ends this session as a
     // refresh (the flag's endedBy), so a fresh one starts from the hand-back with the failure only.
+    // 2.85: a refresh check decided by rule (harness/session-cap.mjs) to hand off: end this session as a refresh, as a
+    // person's `session -- check <agent> handoff` would.
+    if (progress?.decided?.decision === 'handoff' && !killedBy) {
+      killedBy = { kind: 'refresh', why: progress.decided.why, at: new Date().toISOString() };
+      stopChild(child);
+    }
     try {
       const nr = !killedBy ? newRedCheck(agent, { since: Date.parse(startedAt) || 0, context: progress?.context || 0, role, model }) : null;
       if (nr?.handoff) {

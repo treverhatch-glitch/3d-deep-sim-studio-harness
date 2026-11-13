@@ -158,3 +158,12 @@ npm run ask -- "Which floor first?" --options "Cubicle,Food court" --default Cub
 The question shows under **Needs you** (`npm run digest`, Studio Status) and is answered with `npm run ask -- answer`. If nobody answers
 in time, the default applies, logged in `studio/decisions/decided-without-you.md` and the run report;
 the dev can reverse it. Signing, pillars, money and deleting never get a deadline.
+
+Every ask resolves (2.85). A question with a `--default` and no `--timeout` gets `STUDIO_ASK_TIMEOUT_H` (4) hours, then
+its default applies exactly as with `--timeout`. A question that cannot decide itself (no default, or a protected subject)
+is escalated once after `STUDIO_ASK_STALE_H` (8) hours: an `ask.stale` event to the Producer and the overseer with the one
+command that answers it; `npm run ask -- list --open` shows each open ask's age. It is never answered by itself. The
+owner's own asks (real money, deleting data, keys: `harness/owner-acts.mjs`) never get a deadline and are listed in the
+digest as waiting for the owner. The watcher's pass (every `STUDIO_WATCH_INTERVAL` in the supervisor) applies the deadlines.
+`--task <ID>` ties a question to a task and `--game-rules` tags it as a question about the game's rules (see
+docs/SECURITY.md for what that changes).
