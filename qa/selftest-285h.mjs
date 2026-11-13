@@ -106,4 +106,63 @@ export async function selftest285H({ dir, report, tmpRoot }) {
     });
     fresh();
   }
+
+  // ================= 3. who decides =================
+  // harness/decider.mjs (deciderCheck) is kept, not folded into permission.mjs: it is built from permission.mjs's parts
+  // (DECIDER_ROLES, WORKER_NAME, agentOnPermission, permissionText, standInMay) and adds the --by and --permission rules and
+  // the owner's delegation that mayDecide (a tier question: board or protected) does not ask. These checks pin its answers
+  // for each caller (the callers in flakes, crew-watch, supervisor, policy-rules, janitor, decisions-log, winddown, audit,
+  // train-daemon all ask it), and show mayDecide would answer differently for an agent shell with no permission.
+  {
+    const crypto = await import('node:crypto'); void crypto;
+    const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
+    const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
+    const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
+    const S = path.join(tmpRoot, `285h-studio-${process.pid}`);
+    fs.cpSync(dir, S, { recursive: true, filter: (src) => !/[\\/](\.git|\.lanes|node_modules)$/.test(src) });
+    for (const x of ['.studio', '.env', 'studio/beta.json', 'studio/delegation.json', 'studio/approvals', 'studio/task-holds.json', 'studio/mode.json', 'studio/policy.json']) fs.rmSync(path.join(S, x), { recursive: true, force: true });
+    write(S, 'studio/beta.json', `${JSON.stringify({ on: true, by: 'pat', at: '2026-11-05T01:00:00.000Z', why: 'beta for the selftest', agents: ['overseer-1'], roles: ['producer', 'director'] }, null, 2)}\n`);
+    write(S, '.gitignore', '/.lanes/\n/.studio/\n.env\n');
+    write(S, '.env', 'STUDIO_OUTSIDE_SIGNERS=signer-1\n');
+    g(S, 'init', '-q', '-b', 'main'); g(S, 'add', '-A'); g(S, 'commit', '-qm', 'studio with beta mode on', '--no-verify');
+    const clean = {};
+    for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
+    const baseEnv = { ...process.env, ...clean, ...ident, STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-285h-${process.pid}.pem`), STUDIO_MAIN_ROOT: S, CLAUDECODE: '', AI_AGENT: '' };
+    const asked = (args, env = {}) => {
+      const f = path.join(S, '.probe-285h.mjs');
+      fs.writeFileSync(f, `import { deciderCheck } from ${JSON.stringify(pathToFileURL(path.join(S, 'harness', 'decider.mjs')).href)};
+const r = await deciderCheck(${JSON.stringify(args)});
+console.log(JSON.stringify({ ok: r.ok, via: r.via || null, recordedBy: r.recordedBy || null, by: r.by || null, why: r.why || null }));`);
+      const r = spawnSync(process.execPath, [f], { windowsHide: true, cwd: S, env: { ...baseEnv, ...env }, encoding: 'utf8', timeout: 120000 });
+      try { fs.rmSync(f, { force: true }); } catch { /* swept later */ }
+      const l = String(r.stdout || '').split('\n').filter((x) => x.startsWith('{')).pop();
+      try { return JSON.parse(l); } catch { return { _raw: out(r).slice(-800) }; }
+    };
+    const PERM = 'the owner said yes in chat at 10:02';
+    const pin = (name, got, want) => guard(`decider: ${name}`, async () => [Object.keys(want).every((k) => (k === 'why' ? new RegExp(want.why).test(got.why || '') : got[k] === want[k])), JSON.stringify(got)]);
+    await pin('the owner in their own terminal (no agent marker): allowed, as a person', asked({ by: 'alex' }), { ok: true, via: 'person', recordedBy: 'alex' });
+    await pin('the owner\'s terminal where --by names an agent: refused', asked({ by: 'builder-2' }), { ok: false, why: 'worker agent' });
+    await pin('no --by: refused ("Say who decides")', asked({ by: '' }), { ok: false, why: 'Say who decides' });
+    await pin('a launched Producer session on a person\'s permission: allowed, via producer', asked({ by: 'alex', permission: PERM }, { STUDIO_ROLE: 'producer', STUDIO_LOCK_OWNER: 'producer-s1' }), { ok: true, via: 'producer', recordedBy: 'producer-s1' });
+    await pin('a launched Producer session with no permission while beta mode is on: allowed, via producer (beta mode\'s words stand in for the permission)', asked({ by: 'alex' }, { STUDIO_ROLE: 'producer', STUDIO_LOCK_OWNER: 'producer-s1' }), { ok: true, via: 'producer' });
+    await pin('a launched builder (a worker) with a permission: refused', asked({ by: 'alex', permission: PERM }, { STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'builder-s3' }), { ok: false, why: 'launched builder session' });
+    await pin('a worker\'s name in the lock owner outside a launched session: refused, with or without permission', asked({ by: 'alex', permission: PERM }, { STUDIO_LOCK_OWNER: 'qa-playtester-s2' }), { ok: false, why: 'worker agent' });
+    await pin('an agent outside the harness (a coding agent\'s shell) on a person\'s permission: allowed, via outside agent', asked({ by: 'alex', permission: PERM }, { CLAUDECODE: '1' }), { ok: true, via: 'outside agent' });
+    await pin('an agent outside the harness with no permission: refused', asked({ by: 'alex' }, { CLAUDECODE: '1' }), { ok: false, why: 'direct permission' });
+    await pin('an agent outside the harness whose --by is an agent\'s name: refused', asked({ by: 'builder-2', permission: PERM }, { CLAUDECODE: '1' }), { ok: false, why: 'worker agent' });
+    await pin('the beta-mode overseer (beta agent) with a stand-in kind and no permission: allowed, via beta agent', asked({ by: 'overseer-1', standIn: 'crew-resume' }), { ok: true, via: 'beta agent', recordedBy: 'overseer-1' });
+    await pin('an outside signer with a stand-in kind and no permission: allowed, via signer', asked({ by: 'signer-1', standIn: 'crew-resume' }), { ok: true, via: 'signer', recordedBy: 'signer-1' });
+    await pin('a stranger with a stand-in kind and no permission, in an agent\'s shell: refused', asked({ by: 'stranger-9', standIn: 'crew-resume' }, { CLAUDECODE: '1' }), { ok: false, why: 'direct permission' });
+    await pin('a launched Producer session is no beta stand-in (STUDIO_ROLE set): its answer comes from the producer rule, not the stand-in one', asked({ by: 'overseer-1', standIn: 'crew-resume' }, { STUDIO_ROLE: 'producer', STUDIO_LOCK_OWNER: 'producer-s1' }), { ok: true, via: 'producer', recordedBy: 'producer-s1' });
+    write(S, 'studio/beta.json', `${JSON.stringify({ on: false, by: 'pat', at: '2026-11-06T01:00:00.000Z', why: 'over', agents: [], roles: [] }, null, 2)}\n`);
+    g(S, 'add', '-A'); g(S, 'commit', '-qm', 'beta off', '--no-verify');
+    await pin('beta mode off: a launched Producer session with no permission is refused', asked({ by: 'alex' }, { STUDIO_ROLE: 'producer', STUDIO_LOCK_OWNER: 'producer-s1' }), { ok: false, why: 'direct permission' });
+    await pin('beta mode off: the overseer with a stand-in kind and no permission, in an agent\'s shell, is refused', asked({ by: 'overseer-1', standIn: 'crew-resume' }, { CLAUDECODE: '1' }), { ok: false, why: 'direct permission' });
+    await guard('decider: it cannot be replaced by mayDecide: for an agent shell with no permission mayDecide says yes (tier outside) and deciderCheck says no', async () => {
+      const perm = await imp('harness/permission.mjs');
+      const md = perm.mayDecide('hold', { tier: 'outside' }, { root: S });
+      const dc = asked({ by: 'alex' }, { CLAUDECODE: '1' });
+      return [md.ok === true && dc.ok === false, JSON.stringify({ md, dc })];
+    });
+  }
 }
