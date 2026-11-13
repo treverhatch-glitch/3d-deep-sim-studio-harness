@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * harness/janitor.mjs — 2.68.0: the temp-file janitor. Deletes ONLY the harness's own temporary files.
+ * harness/janitor.mjs — the temp-file janitor. Deletes ONLY the harness's own temporary files.
  *
  *   npm run janitor                       dry run (the default): what it would delete, and how much
  *   npm run janitor -- --yes              delete them
@@ -18,22 +18,21 @@
  *     older than STUDIO_JANITOR_TMP_H and whose process is gone; in the system temp folder (STUDIO_JANITOR_TMPDIR);
  *   - cache entries (.studio/unity-cache, .studio/assets/library), oldest first, while the caches are over
  *     STUDIO_CACHE_MAX_GB (20); an entry a Unity run holds (a lock under an hour old) is kept.
- *   - 2.79 (d): idle lane copies, in the automatic run and by `npm run lanes -- prune --idle <hours> [--dry-run]`: the
- *     session ended, the task isn't queued, held or parked, nobody works in the copy (no process, claim or recent change),
- *     no uncommitted change, no commit that isn't on main, and untouched for STUDIO_LANE_IDLE_HOURS (4; 0 or off: never).
+ *   - Idle lane copies, in the automatic run and by `npm run lanes -- prune --idle <hours> [--dry-run]`: the session
+ *     ended, the task isn't queued, held or parked, nobody works in the copy (no process, claim or recent change), no
+ *     uncommitted change, no commit that isn't on main, and untouched for STUDIO_LANE_IDLE_HOURS (4; 0 or off: never).
  *     Only the worktree goes; the branch is kept.
- *   - 2.79.1: an engine pass's worktree (.lanes/engine/<task>) once its pass has landed (the engine train's landed event
- *     names the task), when it is clean and no session is on the task; the branch stays. Orphan temp copies in the system
- *     temp folder: only folders whose name starts with a prefix the harness makes (studio-build-) or one the studio lists
- *     in STUDIO_JANITOR_TEMP_PREFIXES (comma list, e.g. a game's own play-copy prefix), older than STUDIO_JANITOR_ORPHAN_H
- *     (2) hours by their newest file, whose owner process (the marker's pid, else the pid in the name) is gone.
+ *   - An engine pass's worktree (.lanes/engine/<task>) once its pass has landed (the engine train's landed event names
+ *     the task), when it is clean and no session is on the task; the branch stays. Orphan temp copies in the system temp
+ *     folder: only folders whose name starts with a prefix the harness makes (studio-build-) or one listed in
+ *     STUDIO_JANITOR_TEMP_PREFIXES (comma list), older than STUDIO_JANITOR_ORPHAN_H (2) hours by their newest file,
+ *     whose owner process (the marker's pid, else the pid in the name) is gone.
  * What it never deletes: a lane copy with commits not on main, uncommitted changes, a running session or a held or
  * parked task; anything outside the studio except a temp folder carrying this studio's marker. Lanes that are merely
- * stale (older than STUDIO_JANITOR_LANE_H, 24 h, or STUDIO_JANITOR_LANDED_H, 6 h, once their work has landed (2.70.0);
+ * stale (older than STUDIO_JANITOR_LANE_H, 24 h, or STUDIO_JANITOR_LANDED_H, 6 h, once their work has landed;
  * nothing unique; clean; nobody in them) are listed with --lanes and deleted only with --yes --by <name>: a person, an
- * agent under the owner's delegation for janitor-lanes (2.70.0; before: hold), or a Producer/Director
- * session or outside agent on a person's direct permission (harness/decider.mjs; the people `task hold` allows, made
- * exact). One janitor.run event per run that deletes (or finds) something.
+ * agent under the owner's delegation for janitor-lanes, or a Producer/Director session or outside agent on a person's
+ * direct permission (harness/decider.mjs). One janitor.run event per run that deletes (or finds) something.
  *
  * It also runs by itself after each train and verify job (harness/jobs.mjs janitorAfterJob: --yes --auto, never lanes)
  * at most every STUDIO_JANITOR_EVERY_MIN (30) minutes; STUDIO_JANITOR=off turns that off. janitorEstimate() gives the
@@ -52,7 +51,7 @@ const H = 3600000;
 const num = (v, d) => (v === undefined || v === null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
 export const MARKER = '.studio-temp.json';
-/** 2.79.1: name prefixes of the temp copies the harness itself makes in the system temp folder (builds.mjs snapshotBuild). */
+/** Name prefixes of the temp copies the harness itself makes in the system temp folder (builds.mjs snapshotBuild). */
 export const HARNESS_TEMP_PREFIXES = ['studio-build-'];
 const gb = (b) => Math.round((b / 1024 ** 3) * 100) / 100;
 export const human = (b) => (b >= 1024 ** 3 ? `${gb(b)} GB` : b >= 1024 ** 2 ? `${Math.round(b / 1024 ** 2)} MB` : `${Math.round(b / 1024)} KB`);
@@ -67,7 +66,7 @@ export function janitorLimits(env = process.env) {
   return {
     tmpMs: Math.max(0, num(env.STUDIO_JANITOR_TMP_H, 24)) * H,
     laneMs: Math.max(0, num(env.STUDIO_JANITOR_LANE_H, 24)) * H,
-    // 2.70.0 (w): a lane copy whose work has landed (its task is done, or its branch was merged) is stale sooner.
+    // A lane copy whose work has landed (its task is done, or its branch was merged) is stale sooner.
     landedMs: Math.max(0, num(env.STUDIO_JANITOR_LANDED_H, 6)) * H,
     keepLogs: Math.max(0, Math.round(num(env.STUDIO_JANITOR_KEEP_LOGS, 40))),
     logsBytes: Math.max(0, num(env.STUDIO_JANITOR_LOGS_MB, 200)) * 1024 ** 2,
@@ -179,8 +178,8 @@ export function janitorPlan({ root = studioRoot(), env = process.env, now = Date
     if (pidAlive(m.pid) && m.pid !== process.pid) { kept.push({ path: d, why: `its process ${m.pid} is still running` }); continue; }
     items.push({ kind: 'test-temp', path: d, abs: true, bytes: sizeOf(d), why: `a temp folder the harness made (${m.by || 'harness'}), ${Math.round(age / H)} h old` });
   }
-  // 2.79.1: orphan temp copies (a play or build copy whose run died): the harness's own prefixes and the studio's listed
-  // ones, old by their newest file, and no live owner (the marker's pid, else the pid after the prefix in the name).
+  // Orphan temp copies (a play or build copy whose run died): the harness's own prefixes and the studio's listed ones, old
+  // by their newest file, and no live owner (the marker's pid, else the pid after the prefix in the name).
   for (const d of tdirs) {
     const name = path.basename(d);
     const pre = lim.tempPrefixes.find((x) => name.startsWith(x));
@@ -227,8 +226,8 @@ export async function laneProposals({ root = studioRoot(), env = process.env, no
   try { running = new Set((await import('./agent.mjs')).sessions().filter((s) => s.running).map((s) => s.agent)); } catch {}
   let holds = {}; try { holds = (await import('./task-hold.mjs')).readHolds(); } catch {}
   const landed = landedLanes(root);
-  // 2.79 (d): a copy whose task waits for a train is kept (the train makes the lane from its branch, but never from a copy
-  // someone removed under it), read through the queue's own reader.
+  // A copy whose task waits for a train is kept (the train makes the lane from its branch, but never from a copy someone
+  // removed under it), read through the queue's own reader.
   let queue = []; try { queue = (await import('./train.mjs')).readQueue(root); } catch {}
   let locks = []; try { locks = (await import('./lock.mjs')).listLocks(); } catch {}
   const out = [];
@@ -254,7 +253,7 @@ export async function laneProposals({ root = studioRoot(), env = process.env, no
   return out;
 }
 
-/** STUDIO_LANE_IDLE_HOURS (default 4; 12 before 2.79.1: ~25 copies piled up in 4 h) in hours; null when it is 0 or off (the janitor then leaves idle copies alone). */
+/** STUDIO_LANE_IDLE_HOURS (default 4) in hours; null when it is 0 or off (the janitor then leaves idle copies alone). */
 export function laneIdleHours(env = process.env) {
   const raw = String(env.STUDIO_LANE_IDLE_HOURS ?? '').trim();
   if (/^(off|no|false)$/i.test(raw)) return null;
@@ -263,7 +262,7 @@ export function laneIdleHours(env = process.env) {
 }
 
 /**
- * 2.79 (d): remove the idle lane copies, now. A copy goes when its session has ended, its task isn't queued for a train
+ * Removes the idle lane copies, now. A copy goes when its session has ended, its task isn't queued for a train
  * and isn't held or parked, nobody works in it (no process, no claim, no change in the last minutes), it has no
  * uncommitted change and no commit that isn't on the studio's branch, and nothing touched it for `hours`. Only the
  * worktree goes: the branch stays. dryRun lists them. Returns { hours, removed, kept, freed, dryRun }.
@@ -301,9 +300,9 @@ export function engineLandedTasks(root) {
 }
 
 /**
- * 2.79.1: remove the worktree of an engine pass (.lanes/engine/<task>) once its pass has landed (the engine train's
- * landed event names the task): it holds a full engine checkout (3 x 3.2 GB piled up on the crew's PC). Kept when it has
- * uncommitted changes or a session is on the task. Only the worktree goes (git worktree remove, from the engine repo):
+ * Removes the worktree of an engine pass (.lanes/engine/<task>) once its pass has landed (the engine train's landed event
+ * names the task): it holds a full engine checkout, several GB. Kept when it has uncommitted changes or a session is on
+ * the task. Only the worktree goes (git worktree remove, from the engine repo):
  * the branch stays. { removed: [{ task, path, bytes }], kept: [{ task, path, why }] }.
  */
 export async function pruneEnginePasses({ root = studioRoot(), dryRun = false, emit = emitEvent, by = 'janitor' } = {}) {
@@ -339,7 +338,7 @@ export async function pruneEnginePasses({ root = studioRoot(), dryRun = false, e
 }
 
 /**
- * 2.70.0 (w): lanes whose work has landed: { tasks, agents } from studio/DONE.md (tasks marked done) and lane.merged
+ * Lanes whose work has landed: { tasks, agents } from studio/DONE.md (tasks marked done) and lane.merged
  * events (the agent that landed, the task).
  */
 export function landedLanes(root) {
@@ -400,7 +399,7 @@ export async function runJanitor({ yes = false, lanes = false, by = '', permissi
     const stale = props.filter((l) => l.stale);
     if (yes && stale.length) {
       const { deciderCheck } = await import('./decider.mjs');
-      // 2.70.0 (w): the owner's delegation for exactly this action (janitor-lanes), no longer the one for hold.
+      // The owner's delegation for exactly this action (janitor-lanes), not the one for hold.
       const d = await deciderCheck({ by, permission, env, action: 'janitor-lanes', what: 'delete lane copies' });
       if (!d.ok) refused = d.why;
       else {
@@ -419,13 +418,13 @@ export async function runJanitor({ yes = false, lanes = false, by = '', permissi
       }
     }
   }
-  // 2.79 (d): the automatic run (after a train or verify job) also removes idle lane copies: pruneIdleLanes' rule is stricter
-  // than a stale proposal's (nothing unsaved or unlanded, no queued task), and it keeps the branch.
+  // The automatic run (after a train or verify job) also removes idle lane copies: pruneIdleLanes' rule is stricter than a
+  // stale proposal's (nothing unsaved or unlanded, no queued task), and it keeps the branch.
   let enginePasses = null;
   if (yes) { try { enginePasses = await pruneEnginePasses({ root, emit, by: auto ? 'janitor' : by || 'janitor' }); } catch {} }
   let pruned = null;
   if (auto && yes) { try { pruned = await pruneIdleLanes({ root, env, now, emit, by: 'janitor' }); } catch {} }
-  // 2.70.0 (w): what the digest, status --brief and the War Room show (harness/lane-disk.mjs), kept current.
+  // What the digest, status --brief and the War Room show (harness/lane-disk.mjs), kept current.
   if (lanes) {
     try { await (await import('./lane-disk.mjs')).recordProposals({ root, env, now, emit: null, props: props.filter((l) => !lanesDeleted.some((x) => x.agent === l.agent)) }); } catch {}
   }
