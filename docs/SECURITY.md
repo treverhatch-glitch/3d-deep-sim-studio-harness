@@ -24,6 +24,18 @@ through a lane is not "deleting data". One word of real spending, of data (backu
 logs, `.studio`), a wipe or purge, or a bare "buy it?" or "delete it?" keeps it the owner's. The action names `money`, `pay`,
 `delete`, `wipe` are refused to every stand-in.
 
+(2.85) **The game's own money is read from more than a word list.** Real spending always stays the owner's, whatever else
+the question says, whatever tag it carries and whatever task it is tied to: real currencies, a paid plan, tier, tool, asset
+or licence, a subscription, an invoice or billing, a vendor, contractor, freelancer or composer, an online store, a card, a
+top-up, API or model credits, hiring people, a bounty, buying tools or assets, and "we buy" or a bare "buy it?". The
+refusal names the word that made it real money. Money words with none of those (dollars, a fee, a price, a cost, paying
+as a game verb) are the game's own money when the question names a game-design subject (a rule, balance, a fee card, a
+contract, a tier, a level, an unlock, tuning, the Bible, a pillar, a system the Bible keeps), or the ask is tied with
+`--task` to a game-work task (a change, bug, system, balance, playtest or art task, or one on an engine track; not
+tooling or infra), or the asker tagged it `--game-rules`. With none of these, "8 dollars" alone stays the owner's. Every
+ask read that way records `readAs` (on the ask, its answer and a default applied on time), and the daily digest lists
+them: "N ask(s) about money were read as the game's own money: <ids>".
+
 ## Beta mode
 
 - The orchestrator is whoever `studio/beta.json` or `studio/delegation.json` names: an outside agent (no `STUDIO_ROLE`, no

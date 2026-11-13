@@ -5229,6 +5229,14 @@ if (inShard('selftest-285a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.85 (c): the game's own money is not real money (B-136), every ask resolves, and the
+if (inShard('selftest-285c')) {
+  const dir = copyRepo();
+  const { selftest285C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285c.mjs')).href);
+  await selftest285C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

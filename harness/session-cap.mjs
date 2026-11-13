@@ -22,12 +22,20 @@
  * STUDIO_SESSION_CEILING_TURNS (80, passed to Claude Code as --max-turns), STUDIO_CHECK_TURNS (20),
  * STUDIO_CHECK_TOKENS (40000). Counts are the tool's own (Claude Code stream-json usage), named with
  * the model, since every model family counts tokens differently.
+ *
+ * 2.85: the check decides by rule (STUDIO_REFRESH_DECIDE=rule, the default): hand off when the context is at or over
+ * STUDIO_REFRESH_HANDOFF_PCT (60) percent of the model's context window (harness/model-limits.mjs; unknown: twice the
+ * refresh point), or when the session has made no commit and no verify for STUDIO_REFRESH_IDLE_TURNS (40) turns; else
+ * continue. Recorded as a check by "rule" (agent.refresh.decided), no ask. A session flagged mid-debug asked for a person's
+ * check, so it still gets the card. STUDIO_REFRESH_DECIDE=ask: every check is a card, as before. A person's
+ * `session -- check` still decides at any time.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { verifyCause } from './handback-facts.mjs';
+import { limitsFor } from './model-limits.mjs';
 
 export const REFRESH_DIR = path.join(STUDIO_STATE_DIR, 'refresh');
 const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
@@ -85,11 +93,14 @@ export function sessionLimits(env = process.env, { role = null, model = null } =
  * Turns and current context from a Claude Code stream-json log (or any log with per-message usage):
  * a turn is an assistant message (by id), the context is the last one's input + cache reads + cache writes.
  */
+// 2.85: a tool call that is work landing: a commit or a verify (the idle-turns rule counts turns since the last one).
+const WORK_CMD = /\bgit\b(?:\s+-c\s+\S+)*\s+commit\b|\bnpm run verify\b|run-gates\.mjs|\btask(?:\.mjs| --) done\b/;
 export function sessionProgress(log) {
   const ids = new Set();
   let turns = 0;
   let context = 0;
   let resultTurns = null;
+  let workTurn = 0;
   for (const l of String(log || '').split(/\r?\n/)) {
     const s = l.trim();
     if (!s.startsWith('{')) continue;
@@ -107,9 +118,31 @@ export function sessionProgress(log) {
       }
       const u = o.message.usage;
       if (u) context = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+      if (Array.isArray(o.message.content) && o.message.content.some((c) => c?.type === 'tool_use' && WORK_CMD.test(String(c.input?.command || '')))) workTurn = turns;
     } else if (o.type === 'result' && o.num_turns != null) resultTurns = Number(o.num_turns);
   }
-  return { turns: resultTurns ?? turns, context };
+  // 2.85: idleTurns: turns since the last commit or verify in this log (all of them when there was none).
+  return { turns: resultTurns ?? turns, context, idleTurns: Math.max(0, turns - workTurn) };
+}
+
+/** 2.85: STUDIO_REFRESH_DECIDE: 'rule' (default) or 'ask'. */
+export const refreshDecideMode = (env = process.env) => (/^ask$/i.test(String(env.STUDIO_REFRESH_DECIDE || '').trim()) ? 'ask' : 'rule');
+
+/**
+ * 2.85: the rule a check point decides by: { decision: 'continue'|'handoff', why, pct, window }. The window is the
+ * model's context size (harness/model-limits.mjs limitsFor); unknown: twice the refresh point.
+ */
+export function refreshRuleDecision({ turns = 0, context = 0, idleTurns = 0, model = null, point = 0, env = process.env } = {}) {
+  let window = 0;
+  try { window = Number(limitsFor(model)?.context) || 0; } catch { window = 0; }
+  const from = window ? `its ${Math.round(window / 1000)}k window` : `twice its ${Math.round(point / 1000)}k refresh point (window unknown)`;
+  if (!window) window = point > 0 ? point * 2 : 0;
+  const pctAt = num(env.STUDIO_REFRESH_HANDOFF_PCT, 60);
+  const idleAt = num(env.STUDIO_REFRESH_IDLE_TURNS, 40);
+  const pct = window > 0 ? Math.round((context / window) * 1000) / 10 : 0;
+  if (window > 0 && pctAt > 0 && pct >= pctAt) return { decision: 'handoff', why: `context ${context.toLocaleString()} tokens is ${pct} % of ${from}, at or over STUDIO_REFRESH_HANDOFF_PCT (${pctAt} %)`, pct, window };
+  if (idleAt > 0 && idleTurns >= idleAt) return { decision: 'handoff', why: `no commit and no verify in its last ${idleTurns} turns (STUDIO_REFRESH_IDLE_TURNS ${idleAt})`, pct, window };
+  return { decision: 'continue', why: `context at ${pct} % of ${from} (under ${pctAt} %), last commit or verify ${idleTurns} turns ago (under ${idleAt})`, pct, window };
 }
 
 const flagFile = (agent) => path.join(REFRESH_DIR, `${agent}.json`);
@@ -181,8 +214,9 @@ export function recordCheck(agent, decision, { by, note = '' } = {}) {
  * Called from the launcher's heartbeat: read the session's log, record where it stands, and raise one
  * card per owed check (to the Producer, copied to the Director). Never stops anything by itself.
  */
-export function heartbeatCheck(agent, { log, model = 'unknown', task = null, role = null, lim = sessionLimits(process.env, { role, model }) } = {}) {
+export function heartbeatCheck(agent, { log, model = 'unknown', task = null, role = null, env = process.env, lim = sessionLimits(env, { role, model }) } = {}) {
   const p = sessionProgress(log);
+  let decided = null;
   const f = readFlag(agent) || { agent, checks: [] };
   const st = refreshState(p, f, lim);
   const prev = f.last?.state;
@@ -191,10 +225,19 @@ export function heartbeatCheck(agent, { log, model = 'unknown', task = null, rol
   if (st.checkDue && f.cardFor !== st.checksOwed) {
     f.cardFor = st.checksOwed;
     f.cardAt = new Date().toISOString();
-    emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task, msg: `Check ${agent}${st.state === 'exception' ? ' (mid-debug exception)' : ''}: ${p.turns} turns, ${p.context.toLocaleString()} tokens of context (${model}). Continue or hand off: npm run session -- check ${agent} continue|handoff --by <you>`, meta: { refreshCheck: true, director: true } });
+    if (refreshDecideMode(env) === 'rule' && st.state !== 'exception') {
+      // 2.85: decided by rule, recorded as a check like a person's (by: 'rule'); a hand-off ends the session as a
+      // refresh (endedBy), which the launcher acts on (agent.mjs). No ask.
+      const d = refreshRuleDecision({ ...p, model, point: lim.context, env });
+      const at = f.cardAt;
+      f.checks = [...(f.checks || []), { by: 'rule', decision: d.decision, covers: Math.max(1, st.checksOwed), note: d.why.slice(0, 300), at, turns: p.turns, context: p.context, model }];
+      if (d.decision === 'handoff') { f.handoffAsked = at; f.endedBy = `handed off at a refresh check by the rule: ${d.why}`; }
+      decided = d;
+      emitEvent({ type: 'agent.refresh.decided', agent, to: 'producer', task, msg: `${agent}: ${d.decision === 'handoff' ? 'hand off now' : 'continue'} by rule at ${p.turns} turns, ${p.context.toLocaleString()} tokens (${model}): ${d.why}`.slice(0, 600), meta: { decision: d.decision, why: d.why, turns: p.turns, tokens: p.context, pct: d.pct, idleTurns: p.idleTurns, window: d.window, by: 'rule' } });
+    } else emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task, msg: `Check ${agent}${st.state === 'exception' ? ' (mid-debug exception)' : ''}: ${p.turns} turns, ${p.context.toLocaleString()} tokens of context (${model}). Continue or hand off: npm run session -- check ${agent} continue|handoff --by <you>`, meta: { refreshCheck: true, director: true } });
   }
   writeFlag(agent, f);
-  return { ...p, ...st };
+  return { ...p, ...st, ...(decided ? { decided } : {}) };
 }
 
 /**

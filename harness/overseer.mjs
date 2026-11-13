@@ -327,8 +327,8 @@ export async function overseerSheet({ root = REPO_ROOT, now = Date.now(), events
   // 1. asks
   let asks = [];
   try {
-    const { askKind } = await import('./ask.mjs');
-    const { ownerOnlyTopic } = await import('./owner-acts.mjs');
+    // 2.85: read with the ask's context (its game-work task, a --game-rules tag), as `ask -- answer` reads it.
+    const { askKind, askOwnerTopic } = await import('./ask.mjs');
     let names = [];
     try { names = fs.readdirSync(path.join(root, 'studio', 'asks')).filter((f) => /^A-\d+\.json$/.test(f)).sort(); } catch { /* none */ }
     for (const f of names) {
@@ -336,7 +336,7 @@ export async function overseerSheet({ root = REPO_ROOT, now = Date.now(), events
       if (!a || a.status !== 'open') continue;
       const kind = askKind(a);
       const own = kind !== 'board' && kind !== 'protected';
-      const topic = own ? ownerOnlyTopic(a.question, a.why) : null;
+      const topic = own ? askOwnerTopic(a) : null;
       asks.push({ who: own ? 'person' : 'overseer', id: a.id, what: `${a.id}: ${String(a.question || '').slice(0, 140)}`, since: a.at || null, kind, why: own ? `owner only: ${topic?.what || kind}` : `the overseer may answer it when it is the owner's proxy or in beta mode (${kind})`, cmd: `npm run ask -- answer ${a.id} "<answer>" --by <you>` });
     }
   } catch { asks = []; }

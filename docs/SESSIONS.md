@@ -44,6 +44,14 @@ The studio's files are the memory, not the chat.
   gets a "Check <agent>" card at every 20 turns / 40k tokens past the refresh point and answers with
   `npm run session -- check <agent> continue|handoff --by <name>` (or Continue / Hand off in the War
   Room). An agent past the point without the exception gets the same check one step later.
+- **The check decides by rule (2.85).** With `STUDIO_REFRESH_DECIDE=rule` (the default) an agent past the point without
+  the exception gets no card: at each check point the harness hands it off when its context is at or over
+  `STUDIO_REFRESH_HANDOFF_PCT` (60) percent of its model's context window (the window `harness/model-limits.mjs` knows;
+  unknown: twice the refresh point), or when it has made no commit and no verify for `STUDIO_REFRESH_IDLE_TURNS` (40)
+  turns, and otherwise lets it continue. The decision is recorded as a check by `rule` and logged as
+  `agent.refresh.decided` (decision, why, turns, tokens, percent). A flagged mid-debug session still gets the card, and
+  the Director or Producer can still run `session -- check` by hand at any time. `STUDIO_REFRESH_DECIDE=ask` sends every
+  check as a card, as before 2.85.
 - `npm run session` lists every launched session's turns and context, with the model named.
 - Limits: `STUDIO_SESSION_TURNS` (40), `STUDIO_SESSION_CONTEXT` (120000), `STUDIO_SESSION_CEILING_TURNS`
   (80), `STUDIO_CHECK_TURNS` (20), `STUDIO_CHECK_TOKENS` (40000); 0 turns one off.
