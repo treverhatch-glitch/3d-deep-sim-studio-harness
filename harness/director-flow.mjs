@@ -204,7 +204,7 @@ function doneCheckText(id, { timeoutMs = 180000 } = {}) {
       let text = '';
       let child;
       try {
-        child = spawn(process.execPath, [path.join(REPO_ROOT, 'harness', 'task.mjs'), 'done', id, '--check'], { cwd: REPO_ROOT, windowsHide: true, env: { ...process.env, STUDIO_LOCK_OWNER: 'harness' }, stdio: ['ignore', 'pipe', 'pipe'] });
+        child = spawn(process.execPath, [path.join(REPO_ROOT, 'harness', 'task.mjs'), 'done', id, '--check'], { cwd: REPO_ROOT, windowsHide: true, env: { ...process.env, STUDIO_LOCK_OWNER: 'harness', STUDIO_DONE_PROBE: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
       } catch { resolve(null); return; }
       const timer = setTimeout(() => { try { child.kill(); } catch {} resolve(null); }, timeoutMs);
       child.stdout.on('data', (d) => { text += d; });
@@ -218,7 +218,8 @@ function doneCheckText(id, { timeoutMs = 180000 } = {}) {
 /**
  * 2.85: lift the holds made for "task done is refused for the same reason twice" (session-outcome.mjs holdIfSameRefusal)
  * whose refusal is gone: `task done <ID> --check` (seconds) no longer gives that reason. Checked at most every 10 minutes
- * per task; a check that can't run keeps the hold. `check(id)` -> text ('' = passes) | null is for tests. Returns the ids lifted.
+ * per task; a check that can't run or can't judge keeps the hold. A hold made again for a reason it was already lifted for
+ * (noAutoLift: the check ran somewhere the refusal does not show, e.g. the main checkout for a lane's refusal) is left to a planner. `check(id)` -> text ('' = passes) | null is for tests. Returns the ids lifted.
  */
 export async function liftSameRefusalHolds({ now = Date.now(), check = doneCheckText, everyMs = LIFT_EVERY_MS } = {}) {
   const { readHolds, updateHolds } = await import('./task-hold.mjs');
@@ -227,9 +228,11 @@ export async function liftSameRefusalHolds({ now = Date.now(), check = doneCheck
   for (const [id, h] of Object.entries(readHolds())) {
     const p = h?.parked;
     if (!p || p.reason !== 'same-refusal' || !p.key) continue;
+    if (p.noAutoLift) continue; // it was lifted once for this reason and came back: a planner or the overseer lifts it
     if (now - (Date.parse(p.checkedAt || p.at || '') || 0) < everyMs) continue;
     const text = await check(id);
-    const still = text === null || (text !== '' && refusalKey(text).includes(String(p.key).slice(0, 120)));
+    // A check that could not judge the task (it is claimed by a running session) says nothing about the reason: kept.
+    const still = text === null || /\bis claimed by\b/.test(text) || (text !== '' && refusalKey(text).includes(String(p.key).slice(0, 120)));
     let did = false;
     updateHolds((all) => {
       const cur = all[id]?.parked;
@@ -240,7 +243,7 @@ export async function liftSameRefusalHolds({ now = Date.now(), check = doneCheck
     });
     if (did) {
       lifted.push(id);
-      emitEvent({ type: 'task.hold', agent: 'harness', task: id, to: 'producer', msg: `harness unparked ${id}: task done --check no longer gives the refusal it was held for (${String(p.why || '').slice(0, 200)})`.slice(0, 400), meta: { reason: 'same-refusal', lifted: true } });
+      emitEvent({ type: 'task.hold', agent: 'harness', task: id, to: 'producer', msg: `harness unparked ${id}: task done --check no longer gives the refusal it was held for (${String(p.why || '').slice(0, 200)})`.slice(0, 400), meta: { reason: 'same-refusal', lifted: true, key: p.key } });
     }
   }
   return lifted;

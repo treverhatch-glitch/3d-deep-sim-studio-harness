@@ -180,7 +180,18 @@ const calls = [];
 const keep = await liftSameRefusalHolds({ now: t0 + 20 * M, check: async (id) => { calls.push(id); return 'T-9 is not done: ' + ${JSON.stringify(REFUSAL)}.replace('b484f172', 'd606f394') + ' Fix it with git commit --amend.'; } });
 const soon = await liftSameRefusalHolds({ now: t0 + 25 * M, check: async (id) => { calls.push('soon:' + id); return ''; } });
 const lift = await liftSameRefusalHolds({ now: t0 + 31 * M, check: async (id) => { calls.push(id); return ''; } });
-console.log(JSON.stringify({ once, held, h, worker: Boolean(worker), planner, why, diff, commit, keep, soon, lift, calls, after: readHolds()['T-9']?.parked || null }));`);
+// Lifted, and the same refusal comes back (the check ran where it does not show): held again, and not lifted by itself.
+const { readRecentEvents } = await import(${u(S, 'harness/event.mjs')});
+const liftEv = readRecentEvents(2000).filter((e) => e.type === 'task.hold' && e.task === 'T-9' && e.meta?.lifted);
+const back = [...twiceN, ...liftEv, ...session('builder-s85', 40).map((e) => (e.meta?.outcome ? { ...e, meta: { ...e.meta, outcome: { ...e.meta.outcome, why: e.meta.outcome.why.replace('b484f172', 'e717a0a5') } } } : e))];
+const heldAgain = holdIfSameRefusal('builder-s85', back, { park: parkOnce, now: t0 + 41 * M });
+const h2 = readHolds()['T-9']?.parked || null;
+const noLift = await liftSameRefusalHolds({ now: t0 + 90 * M, check: async (id) => { calls.push('again:' + id); return ''; } });
+// A check that cannot judge (the task is claimed by a running session) keeps a hold.
+const { updateHolds } = await import(${u(S, 'harness/task-hold.mjs')});
+updateHolds((all) => { all['T-9'] = { ...all['T-9'], parked: { ...all['T-9'].parked, noAutoLift: undefined, checkedAt: new Date(t0).toISOString() } }; return true; });
+const claimed = await liftSameRefusalHolds({ now: t0 + 120 * M, check: async () => 'Task T-9 is claimed by builder-s86. Finish it as that owner or pass --force.' });
+console.log(JSON.stringify({ once, held, h, worker: Boolean(worker), planner, why, diff, commit, keep, soon, lift, calls, after: h2 ? null : readHolds()['T-9']?.parked || null, liftKey: liftEv[0]?.meta?.key || null, heldAgain, h2, noLift, claimed, last: readHolds()['T-9']?.parked ? 'held' : 'free' }));`);
       const evs = events(ev);
       const holdEv = evs.filter((e) => e.type === 'task.hold' && e.task === 'T-9');
       await guard('2.85 (d3): a session refused by task done for the same reason as the session before it (numbers and ids normalised), with no new commit, holds the task at once: one task.hold by harness to the Producer, addressed to the overseer and the Producer, liftable by a planner and not by a worker; the first refusal holds nothing (fails before this fix: a third session was started)', () => [
@@ -192,6 +203,10 @@ console.log(JSON.stringify({ once, held, h, worker: Boolean(worker), planner, wh
         JSON.stringify(r.keep) === '[]' && JSON.stringify(r.soon) === '[]' && JSON.stringify(r.lift) === '["T-9"]' && JSON.stringify(r.calls) === '["T-9","T-9"]' && r.after === null
           && holdEv.some((e) => /unparked T-9/.test(e.msg || '')),
         JSON.stringify({ r, holdEv })]);
+      await guard('2.85 (d3): a hold lifted once whose refusal comes back is held again and stays held (noAutoLift, the message says so; the lift pass does not even run its check), and a check that cannot judge ("is claimed by") keeps a hold (fails before this fix: a check run where the refusal does not show lifted the hold every 10 minutes)', () => [
+        r.liftKey && r.heldAgain?.task === 'T-9' && r.h2?.noAutoLift === true && r.h2.key === r.liftKey && JSON.stringify(r.noLift) === '[]' && !r.calls.includes('again:T-9')
+          && holdEv.some((e) => /lifted once and the same refusal came back/.test(e.msg || '')) && JSON.stringify(r.claimed) === '[]' && r.last === 'held',
+        JSON.stringify({ r, holdEv: holdEv.map((e) => e.msg) })]);
     }
 
     // ================= 4. finished engine work is queued by the harness =================
@@ -256,7 +271,7 @@ console.log(JSON.stringify({ results, cands, calls, p1: p1.map((x) => x.task), p
 
     // ================= 5. the trailer check from the main checkout (B-138) =================
     {
-      const { S, env } = studio('trailer');
+      const { S, env, ev } = studio('trailer');
       const add = node(S, ['harness/task.mjs', 'add', 'Docs: a note', '--role', 'builder', '--priority', 'P1', '--agent', 'producer-1'], env);
       const id = (out(add).match(/"id":\s*"(T-\d+)"/) || out(add).match(/\b(T-\d+)\b/) || [])[1];
       const as = { ...env, STUDIO_LOCK_OWNER: 'tr-1' };
@@ -279,6 +294,12 @@ console.log(JSON.stringify({ results, cands, calls, p1: p1.map((x) => x.task), p
         id && !/Golden-Reason/.test(out(fromMain)) && own.status === 1 && /Golden-Reason/.test(out(own)) && !/Board review/.test(out(own))
           && /git commit --amend/.test(out(own)) && /a blank line, then Golden-Reason: .* as the last paragraph of the commit message/.test(out(own)),
         JSON.stringify({ id, fromMain: [fromMain.status, out(fromMain).slice(-600)], own: [own.status, out(own).slice(-600)] })]);
+      // The harness's own look at a held task (STUDIO_DONE_PROBE=1) is refused the same way and writes no event.
+      const n0 = events(ev).filter((e) => e.type === 'task.not_done' && e.task === id).length;
+      const quiet = node(S, ['harness/task.mjs', 'done', id, '--agent', 'harness', '--check'], { ...as, STUDIO_LOCK_OWNER: 'harness', STUDIO_DONE_PROBE: '1' });
+      const n1 = events(ev).filter((e) => e.type === 'task.not_done' && e.task === id).length;
+      await guard('2.85 (d3): the lift check\'s own `task done --check` (STUDIO_DONE_PROBE=1) is refused like any other and writes no task.not_done event, while an agent\'s refusal did (fails before this fix: one event every 10 minutes while a hold stood)', () => [
+        quiet.status === 1 && /Golden-Reason/.test(out(quiet)) && n0 >= 1 && n1 === n0, JSON.stringify({ status: quiet.status, n0, n1, out: out(quiet).slice(-300) })]);
 
       const L = path.join(tmpRoot, `285d-lane-${process.pid}-${++n}`);
       fs.mkdirSync(L, { recursive: true });

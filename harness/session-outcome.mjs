@@ -114,8 +114,12 @@ export function holdIfSameRefusal(agent, events, { park, now = Date.now() } = {}
   if (!s) return null;
   const why = `task done is refused for the same reason twice: ${s.reason}`.replace(/\s+/g, ' ').slice(0, 600);
   const at = new Date(now).toISOString();
-  const parked = { by: 'harness', why, reason: 'same-refusal', key: s.key.slice(0, 120), rank: 2, byRole: 'producer', addressedTo: ['overseer', 'producer'], at, checkedAt: at };
-  const msg = `Held ${s.task} for the overseer and the Producer: ${why} (${s.prev}, then ${agent}, no new commit). It lifts by itself once task done --check no longer gives that reason; or fix the cause, then npm run task -- unpark ${s.task} --by <name>`.slice(0, 900);
+  const key = s.key.slice(0, 120);
+  // Lifted once for this very reason and refused again: the lift check does not see the refusal (it runs in the main
+  // checkout; a lane's refusal may not show there), so this hold waits for a planner or the overseer.
+  const again = events.some((e) => e.type === 'task.hold' && e.task === s.task && e.meta?.lifted && e.meta?.key === key);
+  const parked = { by: 'harness', why, reason: 'same-refusal', key, rank: 2, byRole: 'producer', addressedTo: ['overseer', 'producer'], at, checkedAt: at, ...(again ? { noAutoLift: true } : {}) };
+  const msg = `Held ${s.task} for the overseer and the Producer: ${why} (${s.prev}, then ${agent}, no new commit). ${again ? 'It was lifted once and the same refusal came back, so it stays held: fix the cause' : 'It lifts by itself once task done --check no longer gives that reason; or fix the cause'}, then npm run task -- unpark ${s.task} --by <name>`.slice(0, 900);
   if (!park(s.task, parked, { by: 'harness', msg, to: 'producer', status: 'blocked', meta: { reason: 'same-refusal', addressedTo: ['overseer', 'producer'], key: parked.key } })) return null;
   return { task: s.task, why };
 }

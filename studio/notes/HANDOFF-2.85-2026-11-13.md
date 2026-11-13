@@ -43,7 +43,8 @@ unit again, regenerate.
 1. Score a day on 2.85 (`npm run score -- --days 1`): hand-backs with a harness cause, tasks landed with no overseer
    step, briefs with a vision card. Nothing in 2.85 is measured yet.
 2. Tasks stacked on a parent that waits in an engine queue: 45 `line.plan_blocked` in the crew's log; not built.
-3. The lift check of a same-refusal hold writes a `task.not_done` event every 10 minutes while the hold stands.
+3. The lift check of a same-refusal hold runs in the main checkout, so a lane's refusal lifts once wrongly before the
+   second hold sticks. Running it in the lane copy needs the lane recorded on the hold.
 4. The Unity sign-in secrets, then the `engine-unity-real` job.
 5. 2.86 (a judge before landing) only if item 1 says 2.85 held. It blocks only after catching 70% of at least 20 real
    rejections with under 10% false fails.

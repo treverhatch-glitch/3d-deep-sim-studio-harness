@@ -43,7 +43,7 @@ worse), only the smallest part of the plan went in: the vision card.
 | --- | --- | --- | --- |
 | Claims of queued work | A task whose branch waits in a train queue is never handed back: its claim is released quietly (`task.claim.released`). The launcher's own bookkeeping after a session ends no longer counts as "still working". | `harness/director-flow.mjs`, `busy.mjs` | `qa/selftest-285d.mjs` |
 | One reading of hand-backs | `harness/handback-kind.mjs`: real, a train release, or a repeated refusal. The watchdog, the crew breaker and the score all read it; a train release never counts toward a park. | `handback-kind.mjs`, `crew-watch.mjs`, `session-outcome.mjs`, `score.mjs` | 285d |
-| The same refusal twice | Two identical `task done` refusals with no commit between them hold the task; the hold lifts by itself when `task done --check` stops giving that reason. | `director-flow.mjs`, `agent.mjs` | 285d |
+| The same refusal twice | Two identical `task done` refusals with no commit between them hold the task; the hold lifts by itself when `task done --check` stops giving that reason (the harness's own look writes no event). Lifted once and refused again for the same reason: held until a planner or the overseer unparks. | `director-flow.mjs`, `agent.mjs` | 285d |
 | Ready engine hand-backs | An engine task handed back with its checks green and a note that says it is ready is queued for the train once (`meta.auto`). `STUDIO_ENGINE_AUTO_QUEUE=off` stops it. | `line-producer.mjs` | 285d |
 | Trailer check | `task done` reads the task's own commits, in a lane or in the main checkout. The commit-msg hook moves a `Golden-Reason:` line into the trailer block. | `task.mjs`, `trailers.mjs`, `scripts/hooks/commit-msg` | 285d |
 | A land with no branch | `node harness/unity-gate.mjs` with no `--task` or `--branch` prints how to call it and runs nothing. | `unity-gate.mjs`; docs/ENGINE-TRACKS.md | 285d |
@@ -105,8 +105,8 @@ a duplicate of `mayDecide` (16 cases now pinned). An inventory overstates what c
 - Not tested end to end: the hooks gate's failure path with the new hint (a source check only); the done-time call of
   the hand-back note check (the pause path is tested); a real web train with the vision order (the order is tested on
   the batch function).
-- Known wart: while a task is held for a repeated refusal, the lift check writes a `task.not_done` event every 10
-  minutes.
+- The same-refusal hold's lift check runs in the main checkout. A refusal that only shows in a lane copy lifts once
+  wrongly; when the same refusal comes back the task is held again and stays held for a planner or the overseer.
 - Not built: tasks stacked on a parent that waits in an engine queue (45 `line.plan_blocked` in the log); the judge
   before landing, the daily pictures and the consolidation releases of the plan, which wait for 2.85's numbers.
 

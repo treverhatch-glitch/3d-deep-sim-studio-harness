@@ -8,7 +8,10 @@ import { postAsk } from './ask-post.mjs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, boardRoot } from './event.mjs';
+import { actor, emitEvent as emitEventRaw, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, boardRoot } from './event.mjs';
+// 2.85: the harness's own look at a held task (`task done --check` with STUDIO_DONE_PROBE=1, director-flow.mjs) is not
+// an agent being refused: it writes no task.not_done event, so a hold's lift check adds nothing to the log.
+const emitEvent = process.env.STUDIO_DONE_PROBE === '1' ? (e) => (e?.type === 'task.not_done' ? null : emitEventRaw(e)) : emitEventRaw;
 import { claim, release, status as lockStatus, listLocks, SHARED_OWNERS } from './lock.mjs';
 import { ensureResearchTemplate, researchRel } from './research.mjs';
 import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType, skipGameChecks, rulesTestEvidence } from './done-check.mjs';
@@ -600,7 +603,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     return { error: 'no-main-root', message: `This is a lane copy (${REPO_ROOT}) but STUDIO_MAIN_ROOT isn't set, so task done can't merge your work into the studio's branch. Relaunch with STUDIO_MAIN_ROOT=<the main checkout>, or run task done there. Nothing was closed.` };
   }
   const lock = lockStatus(`task:${taskId}`);
-  if (lock.locked && lock.lock.owner !== agent && !force) {
+  // 2.85: the harness's own look at a held task (--check with STUDIO_DONE_PROBE=1) reads the checks whoever holds the claim; it closes nothing.
+  if (lock.locked && lock.lock.owner !== agent && !force && !(checkOnly && process.env.STUDIO_DONE_PROBE === '1')) {
     return { error: 'locked', lock: lock.lock, message: `Task ${taskId} is claimed by ${lock.lock.owner}. Finish it as that owner or pass --force.` };
   }
   let q = parseNextQueue();

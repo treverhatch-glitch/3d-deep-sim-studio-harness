@@ -385,6 +385,11 @@ Five places that took a name or a sentence on trust now ask for something that e
 - **A milestone is met with evidence.** `npm run refill -- met M2 1 --by <name> --evidence <file|commit|evt_id> [...]`: each item
   must be a file in the repo, a commit git finds or an event id in the log, and is stored with the record (`milestones` lists it).
   An agent without evidence is refused with one line saying what counts. A person may give `--evidence none --why "<reason>"`.
+- **The same refusal twice holds the task.** Two identical `task done` refusals with no commit between them hold the task
+  (`task.hold`); every 10 minutes the harness runs `task done <ID> --check` itself and lifts the hold when that reason is gone.
+  Its own look carries `STUDIO_DONE_PROBE=1` (set by the harness, never by a person) and writes no `task.not_done` event.
+  A check that cannot judge keeps the hold; a hold lifted once whose refusal comes back stays held until a planner or the
+  overseer unparks it (`npm run task -- unpark <ID> --by <name>`).
 - **A Golden-Reason names its task.** The trailer must be 20+ characters and name a task on the board (open or done, `T-123`);
   a shorter or anonymous one no longer waives the golden check (`harness/test-weakening.mjs`). `STUDIO_GOLDEN_REASON=strict|loose`
   sets it; the default is strict when the board has tasks and loose on an empty board (a fresh studio).
