@@ -197,10 +197,10 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, compileRuns: r.compileRuns 
   }
   {
     resetState();
-    const TIED = 'Game.Economy.Tests.FeesTests.AddsUpOnPayday';
+    const TIED = 'Game.Economy.Tests.ShopTests.AddsUpOnPayday';
     const E = engineRepo({
       'feat/a': { 'Assets/Hangar/Doors.cs': 'class Doors {}\n' },
-      'feat/b': { 'Assets/Economy/Tests/FeesTests.cs': 'namespace Game.Economy.Tests { public class FeesTests {} }\n', 'edit-bad.txt': `${rev(TIED)}\n` },
+      'feat/b': { 'Assets/Economy/Tests/ShopTests.cs': 'namespace Game.Economy.Tests { public class ShopTests {} }\n', 'edit-bad.txt': `${rev(TIED)}\n` },
       'feat/c': { 'Assets/Ui/Menu.cs': 'class Menu {}\n' },
     }, { shared: cargo });
     const ctl = path.join(T, 'ctl-full-tied-plus-base');
@@ -211,7 +211,7 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, compileRuns: r.compileRuns 
     setBaseline([TARGET_RED]);
     const r = probe(TRAIN);
     const d = r.dropped || [];
-    await guard('2.85 (a) a full run red on a branch-tied failure plus a baseline failure: only the tied branch (T-522, whose file names FeesTests) is handed back, by evidence; the baseline\'s test is not counted against anyone, so T-521 and T-523 land (fails before this fix: the two failures had no single suspect, the search by land runs blamed the first prefix that was red on the target\'s own test)', () => [
+    await guard('2.85 (a) a full run red on a branch-tied failure plus a baseline failure: only the tied branch (T-522, whose file names ShopTests) is handed back, by evidence; the baseline\'s test is not counted against anyone, so T-521 and T-523 land (fails before this fix: the two failures had no single suspect, the search by land runs blamed the first prefix that was red on the target\'s own test)', () => [
       d.length === 1 && d[0].task === 'T-522' && d[0].cause === 'evidence' && r.landed?.slice().sort().join() === 'T-521,T-523' && r.handed?.length === 1 && r.handed[0].note.includes(TIED)
         && r.logs?.some((l) => /not counted against anyone/.test(l)),
       JSON.stringify({ r }).slice(0, 3000)]);
@@ -309,28 +309,28 @@ console.log(JSON.stringify({ ok: r.ok, error: r.error || null, message: r.messag
     const r = probe(`import { playSelection } from ${u('harness/engine-rules.mjs')};
 const cfg = { play: { focus: ${JSON.stringify(playCfg)} } };
 console.log(JSON.stringify({
-  panel: playSelection({ changed: ['Assets/UI/Panels/Fees/FeesPanel.cs', 'Assets/Tests/PlayMode/Panels/FeesShotTests.cs', 'docs/fees.md'], cfg }),
-  two: playSelection({ changed: ['Assets/UI/Panels/Fees/FeesPanel.cs', 'Assets/UI/Panels/Gates/GatesPanel.cs'], cfg }),
-  unmapped: playSelection({ changed: ['Assets/UI/Panels/Fees/FeesPanel.cs', 'Assets/UI/Hud.cs', 'Assets/Scenes/Main.unity', 'Assets/Sim/Fees.cs'], cfg }),
+  panel: playSelection({ changed: ['Assets/UI/Panels/Shop/ShopPanel.cs', 'Assets/Tests/PlayMode/Panels/ShopShotTests.cs', 'docs/shop.md'], cfg }),
+  two: playSelection({ changed: ['Assets/UI/Panels/Shop/ShopPanel.cs', 'Assets/UI/Panels/Maps/MapsPanel.cs'], cfg }),
+  unmapped: playSelection({ changed: ['Assets/UI/Panels/Shop/ShopPanel.cs', 'Assets/UI/Hud.cs', 'Assets/Scenes/Main.unity', 'Assets/Sim/Shop.cs'], cfg }),
 }));`);
     await guard('2.85 (a) play focus per panel: a batch whose paths all match map entries (or ignore) runs focus with its own panel\'s filter plus smoke; two panels give both filters plus smoke; a path no entry takes makes it full, and the reason and the result NAME every unmatched path (up to 5), a play.focus.skip path in a mixed batch said as such (fails before this fix: only the first unmatched path was named)', () => [
-      r.panel?.mode === 'focus' && r.panel.filter === 'Game.PlayTests.Panels.Fees;Game.PlayTests.Smoke' && r.two?.filter === 'Game.PlayTests.Panels.Fees;Game.PlayTests.Panels.Gates;Game.PlayTests.Smoke'
-        && r.unmapped?.mode === 'full' && r.unmapped.unmatched?.join() === 'Assets/UI/Hud.cs,Assets/Scenes/Main.unity,Assets/Sim/Fees.cs' && /3 changed path\(s\) match no play\.focus\.map entry: Assets\/UI\/Hud\.cs, Assets\/Scenes\/Main\.unity, Assets\/Sim\/Fees\.cs \(play\.focus\.skip/.test(r.unmapped.why),
+      r.panel?.mode === 'focus' && r.panel.filter === 'Game.PlayTests.Panels.Shop;Game.PlayTests.Smoke' && r.two?.filter === 'Game.PlayTests.Panels.Shop;Game.PlayTests.Panels.Maps;Game.PlayTests.Smoke'
+        && r.unmapped?.mode === 'full' && r.unmapped.unmatched?.join() === 'Assets/UI/Hud.cs,Assets/Scenes/Main.unity,Assets/Sim/Shop.cs' && /3 changed path\(s\) match no play\.focus\.map entry: Assets\/UI\/Hud\.cs, Assets\/Scenes\/Main\.unity, Assets\/Sim\/Shop\.cs \(play\.focus\.skip/.test(r.unmapped.why),
       JSON.stringify(r).slice(0, 2000)]);
   }
   {
     resetState();
-    const E = engineRepo({ 'feat/a': { 'Assets/UI/Panels/Fees/FeesPanel.cs': 'class FeesPanel {}\n' }, 'feat/b': { 'Assets/UI/Hud.cs': 'class Hud {}\n' } });
+    const E = engineRepo({ 'feat/a': { 'Assets/UI/Panels/Shop/ShopPanel.cs': 'class ShopPanel {}\n' }, 'feat/b': { 'Assets/UI/Hud.cs': 'class Hud {}\n' } });
     const ctl = path.join(T, 'ctl-play-panel');
     setEngines({ unity: cfgFor(E, ctl, { play: { focus: playCfg } }) });
     const cli = (args) => spawnSync(process.execPath, [path.join(S, 'harness', 'engine.mjs'), 'play-plan', ...args], { windowsHide: true, cwd: S, env: envOf(), encoding: 'utf8', timeout: 120000 });
-    const p1 = cli(['--paths', 'Assets/UI/Panels/Gates/GatesPanel.cs,README.md']);
+    const p1 = cli(['--paths', 'Assets/UI/Panels/Maps/MapsPanel.cs,README.md']);
     const p2 = cli(['--branch', 'feat/b']);
     const p3 = cli(['--branch', 'feat/a', '--json']);
     let j3 = null; try { j3 = JSON.parse(String(p3.stdout).trim().split('\n').pop()); } catch { /* checked below */ }
     await guard('2.85 (a) npm run engine -- play-plan: --paths prints the focus plan and its filter; --branch reads the branch\'s changes against the target and names the unmapped path with what to do; --json gives the selection; nothing is queued or run (fails before this fix: there was no play-plan command)', () => [
-      p1.status === 0 && /focus with the filter Game\.PlayTests\.Panels\.Gates;Game\.PlayTests\.Smoke/.test(out(p1)) && p2.status === 0 && /: full/.test(out(p2)) && /Assets\/UI\/Hud\.cs; add an entry/.test(out(p2))
-        && j3?.selection?.mode === 'focus' && j3.changed?.join() === 'Assets/UI/Panels/Fees/FeesPanel.cs' && runsOf(ctl).length === 0 && !fs.existsSync(path.join(S, '.studio', 'train', 'unity-queue.json')),
+      p1.status === 0 && /focus with the filter Game\.PlayTests\.Panels\.Maps;Game\.PlayTests\.Smoke/.test(out(p1)) && p2.status === 0 && /: full/.test(out(p2)) && /Assets\/UI\/Hud\.cs; add an entry/.test(out(p2))
+        && j3?.selection?.mode === 'focus' && j3.changed?.join() === 'Assets/UI/Panels/Shop/ShopPanel.cs' && runsOf(ctl).length === 0 && !fs.existsSync(path.join(S, '.studio', 'train', 'unity-queue.json')),
       JSON.stringify({ p1: out(p1), p2: out(p2), p3: out(p3) }).slice(0, 2500)]);
     queue(E, [['T-571', 'feat/a']]);
     const r1 = probe(TRAIN, { STUDIO_ENGINE_FULL_LAND_HOURS: 'off' });
@@ -339,7 +339,7 @@ console.log(JSON.stringify({
     const runs = runsOf(ctl);
     const done = evs(/^task\.train\.unity\.done$/).pop();
     await guard('2.85 (a) play focus per panel through the train: the panel branch lands with STUDIO_PLAY_MODE=focus and its panel filter plus smoke; a branch with an unmapped path lands with the full stage, and the train\'s log line and its done event meta (playUnmatched) name that path (fails before this fix: the full stage said nothing about which path had no map entry)', () => [
-      r1.landed?.join() === 'T-571' && runs[0]?.playMode === 'focus' && runs[0].playFilter === 'Game.PlayTests.Panels.Fees;Game.PlayTests.Smoke'
+      r1.landed?.join() === 'T-571' && runs[0]?.playMode === 'focus' && runs[0].playFilter === 'Game.PlayTests.Panels.Shop;Game.PlayTests.Smoke'
         && r2.landed?.join() === 'T-572' && runs[1]?.playMode === 'full' && r2.logs?.some((l) => /play stage in full: .*Assets\/UI\/Hud\.cs/.test(l)) && done?.meta?.playUnmatched?.join() === 'Assets/UI/Hud.cs',
       JSON.stringify({ r1, r2, runs, done: done?.meta }).slice(0, 2500)]);
   }

@@ -310,7 +310,7 @@ function asmFolderOf(repo, ref, file, cache) {
 /**
  * 2.85: which lanes are tied to which failing tests, by every evidence rule: the class rule (a changed file names the test's class,
  * which covers the lane that added the test), the namespace rule (a changed test file declares its namespace, or a file is named
- * after its class), the class file less "Tests" (FeesTests: Fees.cs), and the assembly folder (a changed file under the folder of the
+ * after its class), the class file less "Tests" (ShopTests: Shop.cs), and the assembly folder (a changed file under the folder of the
  * .asmdef that holds the test's file, at the target or at the lane's head). With `weak`, also a lane that changes a path with a folder
  * named like a namespace part (Game.Economy.Tests: .../Economy/...): too loose to blame anyone by, used only to decide whether a red
  * full run is the target's own.

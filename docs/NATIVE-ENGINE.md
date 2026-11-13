@@ -190,15 +190,15 @@ filter that every focused run adds (made-up names):
   "skip": [ "^Assets/Sim/" ] } } }
 ```
 
-A branch that changes `Assets/UI/Panels/Fees/FeesPanel.cs` and its `FeesShotTests.cs` runs
-`Game.PlayTests.Panels.Fees;Game.PlayTests.Smoke`; two panels run both filters plus the smoke. A path no entry takes
+A branch that changes `Assets/UI/Panels/Shop/ShopPanel.cs` and its `ShopShotTests.cs` runs
+`Game.PlayTests.Panels.Shop;Game.PlayTests.Smoke`; two panels run both filters plus the smoke. A path no entry takes
 (`Assets/UI/Hud.cs`) makes the stage full, which is safe, and the train's log line (`play stage in full: ...`) and its
 `done` event (`playUnmatched`) name up to five such paths, so the map can be extended. A path that matches `skip` in a
 batch with other paths still makes it full (2.84's rule); a path in `ignore` joins a focused batch. To check a map
 without a train (read-only; nothing is queued or run):
 
 ```bash
-npm run engine -- play-plan --branch feat/fees-panel        # the branch's changes since it left the target
+npm run engine -- play-plan --branch feat/shop-panel        # the branch's changes since it left the target
 npm run engine -- play-plan --paths Assets/UI/Hud.cs,README.md [--json]
 ```
 
@@ -287,7 +287,7 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
   `task.train.<x>.cancelled` event is written. The train only reads that file.
 - **The suspect first (2.85).** Before 2.85 a lane was run without only when one rule alone (the class, then the
   namespace) tied exactly one lane to EVERY failing test. Now every rule counts at once (`tiesOf`): the class, the
-  namespace, the class file less `Tests` (`FeesTests`: `Fees.cs`), and the test's assembly folder (the folder of the
+  namespace, the class file less `Tests` (`ShopTests`: `Shop.cs`), and the test's assembly folder (the folder of the
   `.asmdef` above the test's file, at the target or at the lane's head; without one, the file's own folder); a lane tied
   to only some of the tests counts. One lane tied: the next land run is the batch without it (the innocent land at once;
   the lane is handed back with the failing names). Two or more: the untied lanes land first, apart from them, and only
