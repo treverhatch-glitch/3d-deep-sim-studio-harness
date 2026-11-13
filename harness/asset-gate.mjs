@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * harness/asset-gate.mjs — 2.67.1 (j): the asset track's gate, and its hand-off to the engine track.
+ * harness/asset-gate.mjs — the asset track's gate, and its hand-off to the engine track.
  *
  * An asset task (task add --track asset, or any task whose change adds or changes files under the game's declared
  * asset paths) is checked at `task done` before it lands. Every limit comes from the game's manifest, studio/game.json
@@ -19,34 +19,29 @@
  *     "roundTrip": { "command": "blender -b --factory-startup -P tools/x.py -- {file}", "timeoutMin": 20 }
  *   }
  *
- * The checks (each failure names the file, a Fix line from harness/gate-fix.mjs ASSET_FIXES, and is kept for the
- * task's next hand-back facts):
- *   licence     a row for every new asset file; the licence on the allow list; CC-BY (or a row saying a credit is
- *               required) needs its credit line; NC / ND blocked; SA (copyleft) needs a game dev's yes (tier C:
- *               `node harness/asset-gate.mjs allow <file> --by <person> --permission "<their words>"`, which a worker
- *               can't record); an AI-made row needs its recorded terms and is listed for the Steam AI disclosure.
- *   triangles   per LOD (mesh or node name ending _LOD<n>, else LOD 0), from the glTF JSON: indices count / 3
- *               (POSITION count when unindexed); within triangleBudget.
- *   texture     PNG/JPEG headers (loose files, and images embedded in a .glb or a data: URI): longest side within
- *               textureMaxPx.
+ * The checks (each failure names the file and a Fix line from harness/gate-fix.mjs ASSET_FIXES, and is kept for the task's
+ * next hand-back facts):
+ *   licence     a row for every new asset file; the licence on the allow list; CC-BY (or a row saying a credit is required)
+ *               needs its credit line; NC / ND blocked; SA (copyleft) needs a game dev's yes (tier C: `node
+ *               harness/asset-gate.mjs allow <file> --by <person> --permission "<their words>"`, which a worker can't
+ *               record); an AI-made row needs its recorded terms and is listed for the Steam AI disclosure.
+ *   triangles   per LOD (mesh or node name ending _LOD<n>, else LOD 0) from the glTF JSON, within triangleBudget.
+ *   texture     PNG/JPEG headers (loose, or embedded in a .glb or data: URI): longest side within textureMaxPx.
  *   preview     a preview render next to each model when previewRequired.
- *   preview-*   2.70.0 (v): the preview checks (harness/asset-review.mjs): blank, black, white, magenta, clipped, small;
- *               an up-axis warning. When every check passes, `review` in the result lists each model with its
- *               previews' numbers and checksums: task done asks a session that can view images for a look and lands
- *               the asset only once it is answered (npm run asset -- review <asset> --pass|--fail "why" --by <name>).
- *   roundtrip   the configured export/re-import command (a Blender script; a Unity batchmode run if the studio puts
- *               one in it) runs under machine:heavy (2.70.0: a Blender command in the GPU area when the scan shows a GPU,
- *               one harness Blender job at a time, with -t <n> threads: harness/blender-job.mjs) and must exit 0. No command, or its program isn't installed: skipped
- *               with a note. {file} runs it once per model, else once with {files}.
- *   scale       (owner, 11:30) the model's bounding box in metres (LOD 0 meshes' POSITION min/max through their nodes'
- *               world transforms) within the expected size ("size": { "w", "d", "h" } in its manifest row, else in
- *               <name>.asset.json next to it) ± sizeTolerance (default 15%; a row or sidecar may set its own). No size
- *               recorded: a note, or a failure when "sizeRequired" is true. glTF is Y-up: w = x, h = y, d = z. A game's
- *               own engine-side model check (an import that measures the prefab) can run as the roundTrip command.
- *   brand       no configured brand name (case-insensitive, punctuation ignored) in the file name, glTF node, mesh,
- *               material, texture or image names, or the manifest row.
- *   name        a file name with characters a command line could misread (anything but letters, digits, . _ - and
- *               spaces) is refused before any command runs.
+ *   preview-*   the preview checks (harness/asset-review.mjs): blank, black, white, magenta, clipped, small; an up-axis
+ *               warning. When all pass, `review` in the result lists each model with its previews' numbers and checksums:
+ *               task done asks a session that can view images for a look and lands the asset only once it is answered
+ *               (npm run asset -- review <asset> --pass|--fail "why" --by <name>).
+ *   roundtrip   the configured export/re-import command (a Blender script, or a Unity batchmode run) runs under machine:heavy
+ *               (a Blender command in the GPU area when the scan shows a GPU, one Blender job at a time, with -t <n> threads:
+ *               harness/blender-job.mjs) and must exit 0. No command, or its program isn't installed: skipped with a
+ *               note. {file} runs it once per model, else once with {files}.
+ *   scale       the bounding box in metres (LOD 0 POSITION min/max through the nodes' world transforms) within the expected
+ *               size ("size": { "w", "d", "h" } in its manifest row, else <name>.asset.json) ± sizeTolerance (default 15%).
+ *               No size: a note, or a failure when "sizeRequired". glTF is Y-up: w = x, h = y, d = z. An engine-side model
+ *               check can run as the roundTrip command.
+ *   brand       no configured brand name (case-insensitive, punctuation ignored) in the file name, glTF names or the row.
+ *   name        a file name with anything but letters, digits, . _ - and spaces is refused before any command runs.
  *
  *   node harness/asset-gate.mjs [--task T-012] [--files a.glb,b.png] [--no-round-trip] [--json]
  *        exit 0 pass or skipped, 1 a check failed, 3 the heavy lock stayed busy (try again later)
@@ -54,10 +49,9 @@
  *        record a game dev's yes for a share-alike (SA) licence on that file (its current checksum)
  *
  * The asset ("make") task's brief template is studio/templates/asset-brief.md (ASSET_BRIEF_TEMPLATE).
- *
- * When an asset task lands (task done, or the merge train), the harness files one engine-track task
- * ("Wire in <asset>", --track engine:unity for an engine-porter when the studio has the Unity engine configured, else a
- * builder task), --after the asset task, naming the files. Never twice for the same asset task (an asset.handoff event).
+ * When an asset task lands (task done, or the merge train), the harness files one engine-track task ("Wire in <asset>",
+ * --track engine:unity for an engine-porter when the Unity engine is configured, else a builder task), --after the asset
+ * task, naming the files. Never twice for the same asset task (an asset.handoff event).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -71,7 +65,7 @@ import { readJson } from './fsafe.mjs';
 export const MODEL_EXT = ['.glb', '.gltf', '.fbx', '.obj', '.blend', '.dae', '.usd', '.usdz'];
 export const IMAGE_EXT = ['.png', '.jpg', '.jpeg', '.webp', '.tga', '.ktx2', '.exr', '.hdr'];
 const ASSET_EXT = [...MODEL_EXT, ...IMAGE_EXT, '.bin'];
-// 2.70.0 (v): one view per file too (<name>.preview-front.png, -34, -top: harness/asset-review.mjs VIEWS).
+// One view per file too (<name>.preview-front.png, -34, -top: harness/asset-review.mjs VIEWS).
 const PREVIEW_RE = /[._-]preview(?:-(?:front|34|top))?\.(png|jpe?g|webp)$/i;
 
 export const ASSET_DEFAULTS = {
@@ -92,7 +86,7 @@ export const ASSET_DEFAULTS = {
   sizeRequired: false,
 };
 
-/** 2.67.1 (j): where the asset ("make") task's brief template lives (a stable path other tools copy it from). */
+/** Where the asset ("make") task's brief template lives (a stable path other tools copy it from). */
 export const ASSET_BRIEF_TEMPLATE = 'studio/templates/asset-brief.md';
 
 const slash = (p) => String(p).split(path.sep).join('/').replace(/^\.\//, '');
@@ -178,7 +172,7 @@ export function readGltf(buf, ext) {
   return { json, bin };
 }
 
-// 2.67.1 (j, owner 11:30): scale within spec. 4x4 column-major matrices, as glTF stores them.
+// Scale within spec. 4x4 column-major matrices, as glTF stores them.
 const mul = (a, b) => { const o = Array.from({ length: 16 }, () => 0); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) o[c * 4 + r] += a[k * 4 + r] * b[c * 4 + k]; return o; };
 const IDENT = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 function nodeMatrix(n) {
@@ -367,8 +361,8 @@ export async function runRoundTrip(root, cfg, models, { env, log }) {
   const cmds = rt.command.includes('{file}') ? models.map((f) => ({ f, cmd: rt.command.replaceAll('{file}', q(f)).replaceAll('{files}', q(f)) })) : [{ f: models.join(', '), cmd: rt.command.replaceAll('{files}', models.map(q).join(' ')) }];
   const timeoutMin = Number(rt.timeoutMin || 20);
   const { acquireHeavy, heavyRoot } = await import('./heavy.mjs');
-  // 2.70.0 (t): the claim follows the program (Blender: the GPU area when the scan shows a GPU; Unity: the Unity cap),
-  // and a Blender command gets -t <n> render threads (harness/blender-job.mjs).
+  // The claim follows the program (Blender: the GPU area when the scan shows a GPU; Unity: the Unity cap), and a Blender
+  // command gets -t <n> render threads (harness/blender-job.mjs).
   const hroot = await heavyRoot();
   const bj = await import('./blender-job.mjs');
   const kind = bj.blenderKind(rt.command, 'asset-roundtrip');
@@ -392,7 +386,7 @@ export async function runRoundTrip(root, cfg, models, { env, log }) {
       log(`[asset-gate] round trip: ${cmd}`);
       const once = () => spawnSync(cmd, { cwd: root, shell: true, encoding: 'utf8', env: { ...env, STUDIO_HEAVY_HELD: '1' }, timeout: timeoutMin * 60000, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
       let r = once();
-      // 2.68.0 (n): killed for memory (heavy-budget.mjs oomSignature): run once more, with a note.
+      // Killed for memory (heavy-budget.mjs oomSignature): run once more, with a note.
       const oom = /^(off|0|false|no)$/i.test(String(env.STUDIO_HEAVY_OOM_RETRY || '')) ? '' : (await import('./heavy-budget.mjs')).oomSignature(r);
       if (oom) { log(`[asset-gate] round trip died out of memory (${oom}): running it once more`); r = once(); }
       const tail = `${r.stdout || ''}${r.stderr || ''}`.trimEnd().split('\n').slice(-8).join('\n');
@@ -421,7 +415,7 @@ export async function runAssetGate({ root = REPO_ROOT, files = null, task = null
   const failures = [];
   const steam = [];
   const fail = (check, file, why) => failures.push({ check, file, why, fix: assetFix(check, file) });
-  const review = { required: false, items: [] }; // 2.70.0 (v)
+  const review = { required: false, items: [] };
   if (!all.length) return { status: 'skipped', ok: true, files: [], failures, notes: [`no asset file under ${cfg.paths.join(', ')} in the change`], task };
   const rows = manifestRows(root, cfg);
   const brands = cfg.brandNames.map((b) => ({ b, n: normBrand(b) })).filter((x) => x.n.length >= 2);
@@ -472,7 +466,7 @@ export async function runAssetGate({ root = REPO_ROOT, files = null, task = null
         }
         for (const im of info.images) if (Math.max(im.w, im.h) > cfg.textureMaxPx) fail('texture', rel, `embedded texture ${im.name} is ${im.w}x${im.h}, over the texture budget (${cfg.textureMaxPx} px)`);
         for (const n of info.names) { const b = brandIn(n); if (b) { fail('brand', rel, `the glTF name "${n}" contains the brand name "${b}"`); break; } }
-        // 2.67.1 (j, owner 11:30): scale within the stated size (row "size", else <name>.asset.json), ± the tolerance.
+        // Scale within the stated size (row "size", else <name>.asset.json), ± the tolerance.
         const side = readJson(path.join(root, `${rel.slice(0, -ext.length)}.asset.json`));
         const row = rows.get(rel);
         const want = expectedSize(row) || expectedSize(side);
@@ -505,7 +499,7 @@ export async function runAssetGate({ root = REPO_ROOT, files = null, task = null
   } else notes.push('round trip not run (task done --check); task done runs it');
   return finish({ status: failures.length ? 'fail' : 'pass', ok: !failures.length });
 
-  /** 2.70.0 (v): the preview checks for one model, and (when they pass) its entry for the review a person or agent answers. */
+  /** The preview checks for one model, and (when they pass) its entry for the review a person or agent answers. */
   async function previewReview(rel, ext) {
     const ar = await import('./asset-review.mjs');
     const rcfg = ar.reviewConfig(root);
@@ -541,7 +535,7 @@ export function assetGateText(res) {
   for (const n of res.notes || []) lines.push(`[asset-gate] note: ${n}`);
   if (res.status === 'busy') lines.push(`[asset-gate] BUSY: ${res.why}`);
   if (res.status === 'pass') lines.push(`[asset-gate] PASS ${res.files.length} asset file(s)`);
-  // 2.70.0 (v): the checks pass; a look is still due before it lands.
+  // The checks pass; a look is still due before it lands.
   if (res.status === 'pass' && res.review?.required) {
     for (const it of res.review.items || []) {
       if (it.state === 'passed') lines.push(`[asset-gate] review ${it.asset}: passed (its current files)`);
