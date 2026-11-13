@@ -23,7 +23,11 @@
  * escalated as stale: the digest lists them as waiting for the owner. The watcher's pass (harness/watch.mjs, every
  * STUDIO_WATCH_INTERVAL from the supervisor's timed passes) runs expireAsks.
  * The money reading: --task ties an ask to a task (a game-work task makes its money words the game's own) and
- * --game-rules tags it as a game-rules question; neither ever outranks a word of real spending.
+ * --game-rules tags it as a game-rules question; neither ever outranks a word of real spending. 2.85 (hardening): both
+ * count only from a planner session (Producer, Director), an owner's stand-in or a person (permission.mjs actorOf); a
+ * worker's --game-rules is recorded as gameRulesIgnored and a worker's --task counts only when it holds the task's
+ * claim. An ask with any money word never gets a deadline, whatever the reading: a reading as the game's own money
+ * changes who may answer, never that a timer applies the asker's default.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,8 +35,8 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { proxyShell } from './owner-proxy.mjs';
 import { betaActor } from './beta-mode.mjs';
-import { ownerOnlyTopic, ownerOnlyWhy, ownerOnlyReadAs, ownerOnlyWord } from './owner-acts.mjs';
-import { selfNamingShell, DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
+import { ownerOnlyTopic, ownerOnlyWhy, ownerOnlyReadAs, ownerOnlyWord, moneyWorded } from './owner-acts.mjs';
+import { selfNamingShell, DECIDER_ROLES, WORKER_NAME, actorOf, nameTier } from './permission.mjs';
 import { logDecision } from './decisions-log.mjs';
 
 export const ASKS_DIR = path.join(REPO_ROOT, 'studio', 'asks');
@@ -77,8 +81,20 @@ const hoursMs = (v, d) => { const s = String(v ?? '').trim(); if (/^(off|no|fals
 export const askTimeoutMs = (env = process.env) => hoursMs(env.STUDIO_ASK_TIMEOUT_H, 4);
 /** 2.85: STUDIO_ASK_STALE_H (8): when an ask that cannot decide itself is escalated, once. */
 export const askStaleMs = (env = process.env) => hoursMs(env.STUDIO_ASK_STALE_H, 8);
+/** 2.85 (hardening): a tie counts only as a non-empty string, a tag only as `true` (an edited "false" or {} never counts). */
+const cleanTie = (x) => (typeof x === 'string' && x.trim() ? x.trim().slice(0, 200) : null);
 /** 2.85: what the money reading (harness/owner-acts.mjs) knows about an ask besides its words. */
-export const askContext = (a) => ({ gameTie: a?.gameTie || null, gameRules: Boolean(a?.gameRules) });
+export const askContext = (a) => ({ gameTie: cleanTie(a?.gameTie), gameRules: a?.gameRules === true });
+/**
+ * 2.85 (hardening): who is asking, for the money tags: 'worker' (a launched non-planner session, or a worker's name in
+ * the shell or --by), 'decider' (a Producer or Director session) or 'outside' (a person's terminal or an owner's
+ * stand-in): permission.mjs actorOf and nameTier, the verdict beta mode's decisions use. The worse of shell and --by wins.
+ */
+export const askerTier = ({ by = '', env = process.env } = {}) => {
+  const tiers = [actorOf({ env }).tier, nameTier(String(by || '').trim())];
+  return tiers.includes('worker') ? 'worker' : tiers.includes('decider') ? 'decider' : 'outside';
+};
+const IGNORED_TAG = '--game-rules was not counted: a worker session\'s tag does not change the money reading; a planner (Producer or Director) or the overseer tags it.';
 /** 2.85: the owner-only entry an ask is about, read with its context, or null. */
 export const askOwnerTopic = (a) => ownerOnlyTopic(a?.question, a?.why, askContext(a));
 
@@ -86,11 +102,16 @@ export function ask({ question, options = [], def = null, timeout = null, why = 
   const q = String(question || '').trim();
   if (!q) return { ok: false, message: 'Ask something: npm run ask -- "<question>" --options "a,b" --default a --timeout 4h' };
   const opts = (Array.isArray(options) ? options : String(options).split(',')).map((o) => o.trim()).filter(Boolean);
-  const ctx = { gameTie: gameTie || null, gameRules: Boolean(gameRules) };
-  // 2.85: read with the ask's context: money words read as the game's own are recorded (readAs) and don't stop its timer.
+  // 2.85 (hardening): a tag counts only as `true` and a tie only as a non-empty string; a worker's --game-rules is
+  // recorded as ignored and does not change the reading.
+  const tagged = gameRules === true;
+  const ignored = tagged && askerTier({ by, env }) === 'worker';
+  const ctx = { gameTie: cleanTie(gameTie), gameRules: tagged && !ignored };
+  // 2.85: read with the ask's context: money words read as the game's own are recorded (readAs). Hardening (reverts the
+  // 2.85 (c) "don't stop its timer"): any money word keeps the ask off a timer; the reading only changes who may answer.
   const readAs = ownerOnlyReadAs(q, why, ctx);
   const gameMoney = readAs.some((r) => r.act === 'money');
-  const protectedTopic = PROTECTED_CORE.test(q) || (PROTECTED_MONEY.test(q) && !gameMoney);
+  const protectedTopic = PROTECTED_CORE.test(q) || PROTECTED_MONEY.test(`${q}\n${why}`) || moneyWorded(q, why);
   const own = ownerOnlyTopic(q, why, ctx);
   const noTimer = protectedTopic || Boolean(own);
   let deadline = null;
@@ -108,9 +129,10 @@ export function ask({ question, options = [], def = null, timeout = null, why = 
     deadlineFrom = 'STUDIO_ASK_TIMEOUT_H';
   }
   const n = allAsks().length + 1;
-  const a = write({ id: `A-${String(n).padStart(3, '0')}`, question: q.slice(0, 500), options: opts, default: def, why: String(why).slice(0, 500), by, at: new Date(now).toISOString(), deadline, ...(deadlineFrom ? { deadlineFrom } : {}), protected: protectedTopic, status: 'open', ...(action ? { action } : {}), ...(/^[A-Z]+-\d+$/.test(String(task || '')) ? { task: String(task) } : {}), ...(ctx.gameRules ? { gameRules: true } : {}), ...(ctx.gameTie ? { gameTie: String(ctx.gameTie).slice(0, 200) } : {}), ...(own ? { ownerOnly: own.act } : {}), ...(readAs.length ? { readAs } : {}) });
+  const a = write({ id: `A-${String(n).padStart(3, '0')}`, question: q.slice(0, 500), options: opts, default: def, why: String(why).slice(0, 500), by, at: new Date(now).toISOString(), deadline, ...(deadlineFrom ? { deadlineFrom } : {}), protected: protectedTopic, status: 'open', ...(action ? { action } : {}), ...(/^[A-Z]+-\d+$/.test(String(task || '')) ? { task: String(task) } : {}), ...(ctx.gameRules ? { gameRules: true } : {}), ...(ignored ? { gameRulesIgnored: true } : {}), ...(ctx.gameTie ? { gameTie: String(ctx.gameTie).slice(0, 200) } : {}), ...(own ? { ownerOnly: own.act } : {}), ...(readAs.length ? { readAs } : {}) });
   emitEvent({ type: 'ask.open', agent: by, to: 'human', msg: `${a.id} for the game dev: ${a.question}${deadline ? ` (if no answer by ${deadline.slice(11, 16)} UTC: "${def}")` : ''}`, ...(readAs.length ? { meta: { ask: a.id, readAs } } : {}) });
-  return { ok: true, ask: a, note: noTimer && (timeout || def) ? (own ? `This is about ${own.what}, which only the owner answers: no deadline.` : 'This is about signing, pillars, money or deleting, so it waits for a person: no deadline.') : null };
+  const note = noTimer && (timeout || def) ? (own ? `This is about ${own.what}, which only the owner answers: no deadline.` : gameMoney ? 'Its money words are read as the game\'s own money, so the overseer or a stand-in may answer it, but no timer applies its default: no deadline.' : 'This is about signing, pillars, money or deleting, so it waits for a person: no deadline.') : null;
+  return { ok: true, ask: a, note, ...(ignored ? { ignored: IGNORED_TAG } : {}) };
 }
 
 /**
@@ -121,9 +143,20 @@ export function ask({ question, options = [], def = null, timeout = null, why = 
  */
 const GAME_WORK_TYPES = new Set(['change', 'bug', 'system', 'balance', 'fun', 'playtest', 'whole', 'art']);
 const TOOLING_TASK = /\[(?:chore|tooling|infra|harness|ci)\]|\b(harness|tooling|infra(?:structure)?|toolchain|ci)\b/i;
-export async function gameTieOf({ task = null, question = '', why = '' } = {}) {
+/**
+ * 2.85 (hardening): may this asker tie an ask to this task? A planner, a stand-in or a person may (tier other than
+ * 'worker'); a worker only when it holds the task's claim (lock task:<ID>, its owner the asker).
+ */
+export async function taskTieAllowed({ task = null, by = '', tier = 'outside' } = {}) {
+  if (tier !== 'worker') return true;
   const id = String(task || '').trim().toUpperCase();
-  if (/^[A-Z]+-\d+$/.test(id)) {
+  const me = String(by || '').trim().toLowerCase();
+  if (!/^[A-Z]+-\d+$/.test(id) || !me) return false;
+  try { const { status } = await import('./lock.mjs'); return String(status(`task:${id}`).lock?.owner || '').trim().toLowerCase() === me; } catch { return false; }
+}
+export async function gameTieOf({ task = null, question = '', why = '', by = '', tier = 'outside' } = {}) {
+  const id = String(task || '').trim().toUpperCase();
+  if (/^[A-Z]+-\d+$/.test(id) && await taskTieAllowed({ task: id, by, tier })) {
     try {
       const { parseNextQueue } = await import('./task.mjs');
       const q = parseNextQueue();
@@ -269,13 +302,16 @@ export function expireAsks(now = Date.now(), env = process.env) {
     if (askOwnerTopic(a)) continue;
     const at = Date.parse(a.at) || now;
     const set = a.deadline ? Date.parse(a.deadline) : null;
-    const due = a.protected ? null : set != null ? set : a.default && H > 0 && (!a.options?.length || a.options.includes(a.default)) ? at + H : null;
+    // 2.85 (hardening): any money word keeps an ask off a timer (an ask made before this had protected false), even one
+    // with a deadline of its own: it is escalated as stale instead, like every protected ask.
+    const prot = Boolean(a.protected) || PROTECTED_MONEY.test(`${a.question || ''}\n${a.why || ''}`) || moneyWorded(a.question, a.why);
+    const due = prot ? null : set != null ? set : a.default && H > 0 && (!a.options?.length || a.options.includes(a.default)) ? at + H : null;
     if (due == null) {
       if (stale > 0 && !a.staleAt && now - at >= stale) {
         const cmd = `npm run ask -- answer ${a.id} "<answer>" --by <you>`;
         const hours = Math.floor((now - at) / 3600000);
         write({ ...a, staleAt: new Date(now).toISOString() });
-        emitEvent({ type: 'ask.stale', agent: 'watch', to: 'producer', msg: `${a.id} has waited ${hours} h with no default it can fall back on${a.protected ? ' (a protected subject)' : ''}; the overseer or the Producer answers it: ${cmd} (${String(a.question).slice(0, 200)})`.slice(0, 600), meta: { ask: a.id, ageH: hours, cmd, overseer: true, director: true } });
+        emitEvent({ type: 'ask.stale', agent: 'watch', to: 'producer', msg: `${a.id} has waited ${hours} h with no default it can fall back on${prot ? ' (a protected subject)' : ''}; the overseer or the Producer answers it: ${cmd} (${String(a.question).slice(0, 200)})`.slice(0, 600), meta: { ask: a.id, ageH: hours, cmd, overseer: true, director: true } });
       }
       continue;
     }
@@ -324,7 +360,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     try {
       const f = path.join(ASKS_DIR, `${String(pos[1] || '').toUpperCase()}.json`);
       const a0 = read(f);
-      if (a0 && a0.status === 'open' && a0.task && a0.gameTie === undefined) { const tie = await gameTieOf({ task: a0.task, question: a0.question, why: a0.why }); write({ ...a0, gameTie: tie || null }); }
+      if (a0 && a0.status === 'open' && a0.task && a0.gameTie === undefined) { const tie = await gameTieOf({ task: a0.task, question: a0.question, why: a0.why, by: a0.by, tier: nameTier(String(a0.by || '')) }); write({ ...a0, gameTie: tie || null }); }
     } catch { /* the answer is judged on its words */ }
     const r = answer(pos[1], pos[2], flag('by'));
     const act = r.ok ? await runAskAction(r.ask, flag('by')) : null;
@@ -353,6 +389,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(list.length ? list.map((a) => `${a.id} [${a.status}] ${a.question}${a.options.length ? ` (${a.options.join(' / ')})` : ''}${a.status === 'open' ? ` (${age(a)}${askOwnerTopic(a) ? ', waiting for the owner' : ''}${a.staleAt ? ', escalated' : ''})` : ''}${a.status === 'open' && a.deadline ? `; default "${a.default}" at ${a.deadline.slice(0, 16)}` : ''}${a.answer ? ` -> ${a.answer}` : ''}`).join('\n') : 'No questions yet.');
     process.exit(0);
   }
-  const gameTie = await gameTieOf({ task: flag('task'), question: pos[0], why: flag('why') || '' });
-  out(ask({ question: pos[0], options: flag('options') || [], def: flag('default'), timeout: flag('timeout'), why: flag('why') || '', by: flag('by') || undefined, task: flag('task'), gameRules: argv.includes('--game-rules'), gameTie }), (r) => `${r.ask.id} asked${r.ask.deadline ? `; if nobody answers by ${r.ask.deadline.slice(0, 16)} UTC the default "${r.ask.default}" applies (logged)` : '; it waits for a person'}.${r.note ? ` ${r.note}` : ''}`);
+  // 2.85 (hardening): a worker's --task ties the ask only when the worker holds the task's claim.
+  const asker = flag('by') || process.env.STUDIO_LOCK_OWNER || process.env.STUDIO_PRODUCER_NAME || 'producer';
+  const tier = askerTier({ by: asker });
+  const gameTie = await gameTieOf({ task: flag('task'), question: pos[0], why: flag('why') || '', by: asker, tier });
+  if (flag('task') && tier === 'worker' && !(await taskTieAllowed({ task: flag('task'), by: asker, tier }))) console.log(`--task ${flag('task')} was not counted as a game tie: ${asker} does not hold its claim (npm run task -- start ${flag('task')} --agent ${asker}).`);
+  const made = ask({ question: pos[0], options: flag('options') || [], def: flag('default'), timeout: flag('timeout'), why: flag('why') || '', by: flag('by') || undefined, task: flag('task'), gameRules: argv.includes('--game-rules'), gameTie });
+  if (made.ok && made.ignored) console.log(made.ignored);
+  out(made, (r) => `${r.ask.id} asked${r.ask.deadline ? `; if nobody answers by ${r.ask.deadline.slice(0, 16)} UTC the default "${r.ask.default}" applies (logged)` : '; it waits for a person'}.${r.note ? ` ${r.note}` : ''}`);
 })().catch((e) => { console.error(e?.stack || String(e)); process.exit(1); });

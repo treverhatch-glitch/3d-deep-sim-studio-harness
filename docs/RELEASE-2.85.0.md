@@ -47,8 +47,8 @@ worse), only the smallest part of the plan went in: the vision card.
 | Ready engine hand-backs | An engine task handed back with its checks green and a note that says it is ready is queued for the train once (`meta.auto`). `STUDIO_ENGINE_AUTO_QUEUE=off` stops it. | `line-producer.mjs` | 285d |
 | Trailer check | `task done` reads the task's own commits, in a lane or in the main checkout. The commit-msg hook moves a `Golden-Reason:` line into the trailer block. | `task.mjs`, `trailers.mjs`, `scripts/hooks/commit-msg` | 285d |
 | A land with no branch | `node harness/unity-gate.mjs` with no `--task` or `--branch` prints how to call it and runs nothing. | `unity-gate.mjs`; docs/ENGINE-TRACKS.md | 285d |
-| Game money | Real spending is read first, by family (a real currency, a paid plan, a subscription, an invoice, a vendor, a store, a card, a top-up, API credits, hiring, a bounty, "we buy", in-app purchases): one such word keeps a question the owner's whatever tag or task it carries. Otherwise money words in a question about the game's rules, a system the Bible names, a buyer inside the game, a game-work task (`--task`) or one tagged `--game-rules` are the game's own money, and the answer records the reading (`readAs`, in the digest). | `harness/owner-acts.mjs`, `ask.mjs`, `digest.mjs`, `overseer.mjs`; docs/SECURITY.md | `qa/selftest-285c.mjs` |
-| Every ask resolves | An ask with a default is decided by it after `STUDIO_ASK_TIMEOUT_H` (4); one with none, or with a protected subject, is escalated once as stale after `STUDIO_ASK_STALE_H` (8). An owner-only ask is never timed. `ask -- list --open` shows each ask's age. | `ask.mjs`; docs/OVERSEER.md | 285c |
+| Game money | Real spending is read first, by family (a real currency, a paid plan, a subscription, an invoice, a vendor, a store, a card, a top-up, API credits, hiring, a bounty, buying, things outside the game such as ads, a domain, hosting, a licence, a rented GPU): one such word keeps a question the owner's whatever tag or task it carries. Otherwise money words in a question about the game's rules, a system the Bible names, a buyer inside the game, a game-work task (`--task`) or one tagged `--game-rules` are the game's own money, and the answer records the reading (`readAs`, in the digest). **The backstop, because no word list is complete:** an ask with any money word never gets a timer, so only the owner or a stand-in answers it; `--game-rules` counts only from the Director, the Producer, a stand-in or a person; a worker's `--task` counts only while it holds the task's claim. | `harness/owner-acts.mjs`, `ask.mjs`, `digest.mjs`, `overseer.mjs`; docs/SECURITY.md | `qa/selftest-285c.mjs` |
+| Every ask resolves | An ask with a default is decided by it after `STUDIO_ASK_TIMEOUT_H` (4); one with none, or with a protected subject or any money word, is escalated once as stale after `STUDIO_ASK_STALE_H` (8) to the Producer and the overseer. An owner-only ask is never timed. `ask -- list --open` shows each ask's age. | `ask.mjs`; docs/OVERSEER.md | 285c |
 | Continue or hand off | `STUDIO_REFRESH_DECIDE=rule` (the default; `ask` is 2.84's behaviour): under `STUDIO_REFRESH_HANDOFF_PCT` (60) of the context the session continues; over it, or after `STUDIO_REFRESH_IDLE_TURNS` (40) turns with no commit, it hands off as a refresh. | `session-cap.mjs`, `agent.mjs`; docs/SESSIONS.md | 285c |
 | The daily full land run | Announced before it starts (`task.train.<x>.full_land`, the train's status line, the hand-back text) with the minutes the last one took. The compile check's environment carries nothing of the full run. A stage's status is never shown while the next one runs. | `harness/unity-train.mjs`, `unity-gate.mjs` | `qa/selftest-285a.mjs` |
 | Target failures | A full run red only on tests no branch in it is tied to: the branches land on the ordinary run's word, the failures go to `.studio/train/<x>-full-baseline.json` and one `engine.full_red_on_target` event; a baseline name clears when the test passes. | `unity-train.mjs`, `engine-rules.mjs` | 285a |
@@ -90,6 +90,16 @@ worse), only the smallest part of the plan went in: the vision card.
 9. **Play Mode cost for UI trains.** Per-panel filters and `play-plan`.
 
 Also from the list: the truncated review answer, the web train's auto mode, the "all blocked" alert, `reload-env`.
+
+## The money rule, reviewed
+
+A second session was given the money rule and told to find a real purchase it would read as game money. On 92
+real-spending questions the first version missed 51 with no tag at all (most were holes 2.84 already had: the rule
+only knew a short list of money words) and 67 with a tag an asker could add itself; with the new four-hour timer an
+agent could have had its own "yes" applied to a purchase with nobody involved. After the fix the same set misses 7,
+and a fresh set written afterwards still misses 12 of 28: word lists do not carry over to new wording. That is why the
+rule that matters is the backstop (no timer on a money-worded ask, tags only from planners and stand-ins), not the
+lists. An agent holds no payment method either way.
 
 ## What was cut, and what was not
 

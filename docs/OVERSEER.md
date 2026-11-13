@@ -124,7 +124,8 @@ keeps `studio/beta.json` as the studio had it and says whether beta mode is on b
   A question about the game's own money, or about removing code through a lane, is not one of these (2.83,
   docs/SECURITY.md): the overseer may answer it, and the answer records how it was read. (2.85) A refusal names the word
   that made it real money; an ask with no default is escalated to the overseer once (`ask.stale`) after
-  `STUDIO_ASK_STALE_H` hours.
+  `STUDIO_ASK_STALE_H` hours. Hardening: an ask with any money word is never decided by a timer, even when read as the
+  game's own money; it reaches the overseer as stale instead. A worker's `--game-rules` tag does not count.
 - Merging a harness release into its main branch.
 - Granting, widening or extending a delegation, the proxy, beta mode or an outside signer: no agent grants itself more.
 - Raising the overseer's own stage, or recording an outcome about its own work.

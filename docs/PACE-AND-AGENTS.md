@@ -166,4 +166,6 @@ command that answers it; `npm run ask -- list --open` shows each open ask's age.
 owner's own asks (real money, deleting data, keys: `harness/owner-acts.mjs`) never get a deadline and are listed in the
 digest as waiting for the owner. The watcher's pass (every `STUDIO_WATCH_INTERVAL` in the supervisor) applies the deadlines.
 `--task <ID>` ties a question to a task and `--game-rules` tags it as a question about the game's rules (see
-docs/SECURITY.md for what that changes).
+docs/SECURITY.md for what that changes). A question with any money word never gets a deadline, even when it is read as
+the game's own money: it waits for an answer and is escalated once as stale. A worker's `--game-rules` is ignored (a
+Producer, a Director or the overseer tags it), and a worker's `--task` counts only for a task it has claimed.

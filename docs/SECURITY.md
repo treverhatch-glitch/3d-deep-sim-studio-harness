@@ -36,6 +36,20 @@ tooling or infra), or the asker tagged it `--game-rules`. With none of these, "8
 ask read that way records `readAs` (on the ask, its answer and a default applied on time), and the daily digest lists
 them: "N ask(s) about money were read as the game's own money: <ids>".
 
+(2.85, hardening) **The word lists cannot be complete; two rules are the backstop.** Real spending is also read when it
+has no money word at all (renting a GPU, licensing a font or a track, hiring a freelancer, ads, a domain, hosting, a
+trademark, tax, a dev kit, an amount next to a pack or plugin, a store's sale price, "players buy the game"), but some
+real purchase will always be worded in a way no list names. So:
+- **No timer on a money-worded ask.** An ask with any money word (the money list's words, any real-spending word, or
+  spend, pay, buy, budget, money) never gets a deadline, from `--timeout` or from `STUDIO_ASK_TIMEOUT_H`, whatever the
+  reading. A reading as the game's own money only changes who may answer (the overseer or another stand-in may); it never
+  lets the asker's own default apply by itself. Such an ask is escalated once as stale (`ask.stale`), like other
+  protected asks.
+- **Tags only from planners, stand-ins and people.** `--game-rules` counts only from a Producer or Director session, an
+  owner's stand-in or a person's own terminal (`harness/permission.mjs` actorOf). A worker session's tag is recorded on
+  the ask as `gameRulesIgnored` and changes nothing. A worker's `--task` ties the ask only while that worker holds the
+  task's claim. In an ask's file, a tag counts only as `true` and a tie only as a non-empty string.
+
 ## Beta mode
 
 - The orchestrator is whoever `studio/beta.json` or `studio/delegation.json` names: an outside agent (no `STUDIO_ROLE`, no
