@@ -34,6 +34,8 @@ import { untrustedBlock } from './untrusted.mjs';
 import { inboxForBrief } from './threads.mjs';
 import { conductorForBrief } from './conductor.mjs';
 import { regressionHowTo } from './regression-howto.mjs';
+import { visionCard, visionSection } from './vision-card.mjs';
+import { taskType } from './done-check.mjs';
 
 const read = (rel) => {
   try {
@@ -44,6 +46,35 @@ const read = (rel) => {
 };
 const part = (text, label) => (text?.match(new RegExp(`\\*\\*${label}\\.?\\*\\*\\s*([\\s\\S]*?)(?=\\n\\*\\*[A-Z][^*]*\\*\\*|$)`)) || [, ''])[1].trim();
 const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'into', 'that', 'this', 'when', 'then', 'task', 'tasks', 'add', 'fix', 'bug', 'study', 'docs', 'review', 'balance', 'playtest', 'our', 'your', 'run', 'one', 'new']);
+
+/**
+ * 2.85 (f): the designer's vision card for a task (harness/vision-card.mjs), or null. A task with no --serves of its own
+ * takes its causedBy/fixOf parent's (4 levels), as the scorecard's design link does. A review task (type review, or role
+ * reviewer) shows the card of the task its title names, so the reviewer judges against what the builder saw:
+ * { card, reviewed } with reviewed the id, else { card, reviewed: null }.
+ */
+export function visionFor(task, events = readRecentEvents(20000), { env = process.env } = {}) {
+  if (!task) return { card: null, reviewed: null };
+  const added = new Map();
+  for (const e of events) if (e.type === 'task.added' && e.task) added.set(e.task, e.meta || {});
+  const metaOf = (id) => {
+    let m = added.get(id) || {};
+    let p = m.causedBy || m.fixOf || null;
+    for (let d = 0; !m.serves && p && d < 4; d += 1) { const pm = added.get(String(p)); if (!pm) break; if (pm.serves) { m = { ...m, serves: pm.serves, ...(m.phase === undefined && pm.phase !== undefined ? { phase: pm.phase } : {}) }; break; } p = pm.causedBy || pm.fixOf || null; }
+    return m;
+  };
+  const q = (() => { try { return parseNextQueue(); } catch { return { inProgress: [], backlog: [], done: [] }; } })();
+  const find = (id) => [...q.inProgress, ...q.backlog, ...q.done].find((t) => t.id === id) || null;
+  const type = (() => { try { return taskType(task); } catch { return null; } })();
+  if (type === 'review' || task.role === 'reviewer') {
+    const rid = (String(task.title || '').match(/\bT-\d+\b/g) || []).find((x) => x !== task.id);
+    const rt = rid ? find(rid) : null;
+    if (!rt) return { card: null, reviewed: null };
+    const rType = (() => { try { return taskType(rt); } catch { return null; } })();
+    return { card: visionCard({ task: rt, meta: metaOf(rt.id), type: rType, root: REPO_ROOT, env }), reviewed: rt.id };
+  }
+  return { card: visionCard({ task, meta: metaOf(task.id), type, root: REPO_ROOT, env }), reviewed: null };
+}
 
 export function buildFocus(taskId, agent = null) {
   const q = parseNextQueue();
@@ -108,7 +139,8 @@ export function buildFocus(taskId, agent = null) {
   const preparedRel = `.studio/briefs/${taskId}.prepared.md`;
   const prepared = fs.existsSync(path.join(REPO_ROOT, preparedRel)) ? preparedRel : null;
   const historyWords = events.filter((e) => e.task === taskId && e.msg).reduce((n, e) => n + String(e.msg).split(/\s+/).length, 0);
-  return { task, check, skill, size, causedBy, anchors, handoff: readTaskHandoff(taskId), tricks: readAttached(taskId)?.tricks || [], tricksBy: readAttached(taskId)?.preapproved?.approvedBy || null, mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice, verdictNotes: safe(() => notesForBrief({ id: task.id, title: task.title, role: task.role })), godotFailures: safe(() => godotFailuresForBrief()), inbox: safe(() => inboxForBrief(task.id)) || null, conductor: safe(() => conductorForBrief(task.id)) || null };
+  const vision = safe(() => visionFor(task, events)) || { card: null, reviewed: null };
+  return { vision, task, check, skill, size, causedBy, anchors, handoff: readTaskHandoff(taskId), tricks: readAttached(taskId)?.tricks || [], tricksBy: readAttached(taskId)?.preapproved?.approvedBy || null, mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice, verdictNotes: safe(() => notesForBrief({ id: task.id, title: task.title, role: task.role })), godotFailures: safe(() => godotFailuresForBrief()), inbox: safe(() => inboxForBrief(task.id)) || null, conductor: safe(() => conductorForBrief(task.id)) || null };
 }
 
 export function renderVoice(v) {
@@ -143,6 +175,9 @@ export function renderFocus(f) {
   L.push(`# Focus: ${f.task.id}`, '');
   L.push(`${f.task.priority}, size ${f.size} of 5, a "${f.check.type}" task for \`${f.task.role}\`${f.causedBy ? `. It is a bug traced to ${f.causedBy}` : ''}. Read this page instead of the repo; open other files only when a step needs them.`);
   if (told) L.push('', '## What this task is, and what others left on it', told.trimEnd());
+  // 2.85 (f): the designer's vision for this task (the signed Bible's pillar, never list, feel and phase goal), between
+  // what the task is and what done means, so the builder sees it before working (harness/vision-card.mjs).
+  if (f.vision?.card) L.push('', ...visionSection(f.vision.card, f.task.id, { reviewed: f.vision.reviewed }));
   if (f.inbox) L.push('', '## Inbox', `${f.inbox.total} follow-up(s) routed to this task (${f.inbox.unread} unread), quoted in the marked block above. Read them before you start: \`npm run thread -- inbox ${f.task.id}\`. New ones arrive while you work; a Claude Code session is told at its next tool call.`);
   if (f.identity) L.push('', `## Who you are (studio/roles/${f.task.role}.md)`, f.identity);
   L.push('', '## Done means', `${f.check.means}.${f.check.ok ? ' (Already true; confirm before you finish.)' : ''}`);

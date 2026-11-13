@@ -52,6 +52,7 @@ You own the game's direction between the dev's visits, and the studio never wait
 
 - Update answers, phases and layers you haven't crossed out (`npm run bible -- layer …`).
 - Say a phase is ready (`Verdict: phase-ready`); a person opens the next phase.
+- File a vision fix when a pillar or a "never" line is visibly broken in a build: `npm run task -- add "Fix …" --vision-fix --serves pillar:<name> --why "<what is broken on screen>" --phase N` starts first and rides the front of the next train; it is not for polish.
 
 **Engine passes (2.77.0).** A ranked engine pass is a board task: `npm run task -- add "Pass N: …" --role
 engine-porter --track engine:<engine> --branch <engine>/<pass> --scope "…" --size 1-5`, with `--visual-check --refs
