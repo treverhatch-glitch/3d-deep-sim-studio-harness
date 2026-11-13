@@ -4,6 +4,39 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.85.0] — 2026-11-13
+Hands off (the owner's order: fix the overseer's list, make it better, clean up, start on the plan). A crew's first
+16.3 hours on 2.84 measured 46.2% of engine land runs passing (34.8% on 2.83) and a 32.9-minute passing run (51.1),
+and 0 of 26 landed tasks without an overseer step: 59.5% of hand-backs had a harness or machine cause. 106 files,
++5,813 / −1,401 lines against 2.84.0; tracked lines 164,719 to 169,131. Details: docs/RELEASE-2.85.0.md.
+- **False hand-backs:** a task whose branch waits in a train queue is never handed back (30 of 73 hand-backs in the
+  crew's log were that); one reading of hand-backs for the watchdog, the crew breaker and the score
+  (`harness/handback-kind.mjs`); the same `task done` refusal twice holds the task until the check stops giving it; a
+  ready engine hand-back queues itself (`STUDIO_ENGINE_AUTO_QUEUE`).
+- **The trailer check** reads the task's own commits wherever `task done` runs; the commit-msg hook puts a
+  `Golden-Reason:` line in the trailer block.
+- **The game's own money:** real spending is read first, by family, and is always the owner's; money words in a
+  question about the game's rules, a Bible system, a buyer inside the game, a game-work task or `--game-rules` are not.
+- **Every ask resolves:** `STUDIO_ASK_TIMEOUT_H` (4) decides by the default, `STUDIO_ASK_STALE_H` (8) escalates once;
+  an owner-only ask is never timed. "Continue or hand off" is decided by rule (`STUDIO_REFRESH_DECIDE`).
+- **Engine land runs:** the daily full run is announced and kept out of the compile check; a full run red only on
+  tests no branch is tied to lands the branches and records a baseline; a failing test's suspect is tried first; an
+  unchanged red is not queued again (`--again`); Play Mode filters per panel, `npm run engine -- play-plan`; the rules
+  split is memory-aware (`harness/rules-parts.mjs`).
+- **The web train's switch:** an agent's `train auto off` lapses (`STUDIO_TRAIN_AUTO_OFF_HOURS`, 4); the daemon says
+  why it waits. A running engine train counts as work. Review answers give the verdict first. A lane copy's board
+  write is not a hand edit. The hooks gate names the upgrade command after a plain merge.
+- **The vision card** (`harness/vision-card.mjs`): every player-facing brief carries the signed Bible's lines for the
+  task (the pillar, up to six "never" lines, the feel line, the phase goal). **Vision fixes** (`task add
+  --vision-fix`) start and land first.
+- **Gaps closed:** a milestone criterion is met with evidence; a `Golden-Reason` is 20+ characters and names a task
+  (`STUDIO_GOLDEN_REASON`); a rules change with no test is noted and counted (`STUDIO_RULES_TEST=require` refuses);
+  the browser check plays the studio's own game, never the sample; a hand-back note's file claims are checked.
+- **Cut:** two settings nothing read; `check-docs` now fails on a documented or tested setting with no production
+  reader. The plan's larger cuts did not survive a proper check (docs/RELEASE-2.85.0.md). Comments shortened in 30
+  files, code tokens proven unchanged.
+- **Not measured:** nothing here has run on a live studio or a real editor yet.
+
 ## [2.84.0] — 2026-11-12
 Less waste (the owner's order: keep what moves the studio forward, cut what costs tokens). The documents an agent or
 a maintainer reads went from 1,672 KB to 958 KB and code comments from 1,557 KB to 1,439 KB; tracked lines stayed level
@@ -134,34 +167,9 @@ no editor. 27 files, +1,951 / −58 lines (net +1,893) against 2.81.0. Details: 
 - **A note, nothing built:** studio/notes/TRAIN-SPLIT-2026-11.md answers whether the Unity train should be split into
   stages, from the crew's 65 land runs.
 
-## [2.81.0] — 2026-11-10
-Grade, measure, cut again (the owner's "Round 2.81"). Verdict: 5 of 10, a working production line that is not yet an
-autonomous one (studio/notes/VERDICT-2.81-2026-11-10.md). 250 files, +3,498 / −1,818 lines (net +1,680) against 2.80.0; with 2.80.0, 397 files, +5,373 / −21,388 lines (net −16,015)
-against 2.79.2. Details: the release notes of 2.81.0 (in git history: git log -p -- docs/RELEASE-2.81.0.md).
-- **The round scorecard:** `npm run score`, fifteen fixed measures from a studio's logs, `--record` to compare rounds
-  (docs/SCORECARD.md). Baseline from the crew's 8.2 days: 1 of 15 targets met.
-- **The outside overseer's official role:** `npm run overseer -- role | can <action> | pass` (docs/OVERSEER.md): does,
-  signs, human-only; a script's verdict from the studio's own grants. `lock release --owner` also for the owner's
-  proxy and beta mode's agents.
-- **Faster tests:** the self-test takes `--only`, `--changed [ref]` (`--deep`), `--jobs`, `--timing`, `--balance`;
-  `npm run selftest:changed`, `selftest:fast`.
-- **Ported from the Fable 5.1 round-2 trial:** the attempt ledger and one eligibility verdict (`STUDIO_ATTEMPTS`),
-  said-vs-did at `task done` (`--claim`), anchors for reference games (docs/ANCHORS.md), a structured cause on every
-  train verify, timely "process gone" with `endedAt`, a prompt-cap launch preflight.
-- **Engine first by default:** a studio's only engine gets the push unless someone turned it off.
-- **Cut:** the liaison role; `experiment.mjs`, the Dev Hacker flow and the commit-msg hook's experiment lines; the War
-  Room config and its reader, `gate-progress.mjs`, the last hub leftovers; readers of events nothing emits.
-- **Duplicate helpers folded:** one `readJson` (71 copies; it skips a byte-order mark), one `pidAlive` (19 copies), one
-  `.env` reader and loader (four copies).
-- **The Line Producer says when the machine has room the pace doesn't use** (idle CPU, RAM room, ready work waiting);
-  it starts nothing by itself.
-- **Decided:** `STUDIO_WATCH_INTERVAL=0` turns off the watch pass only. `STUDIO_BUILDER_ORDER` is tested in real
-  supervisor passes.
-- **Prompts pruned:** no read-less lines, no token budget for the agent to manage, a reason on every absolute rule
-  (originals: branch `claude/prompts-before-2.81`).
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.81.0** (2026-11-10): grade, measure, cut again: the round scorecard (`npm run score`), the outside overseer's role, a faster self-test, duplicate helpers folded.
 - **2.80.0** (2026-11-10): the trim: the hub and other unused parts cut, tracked lines 175,491 to 157,794, the timed passes moved into the supervisor.
 - **2.79.2** (2026-11-07): Fixes Vertex builders that ended "no work" after huge requests, and the STUDIO_VERTEX_SHARE=0 off switch that did not stop them.
 - **2.79.1** (2026-11-06): The crew's request after a good day on 2.79.0: Vertex as a builder tool, owner-set spend budgets, an engine push mode, and fat cut.

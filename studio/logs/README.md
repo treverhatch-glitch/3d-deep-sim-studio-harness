@@ -3,9 +3,9 @@
 **2-minute read for Hatch: the latest summary is first. Then open problems, then proposals waiting for you.**
 
 ## Latest summary — 2026-11-12
-- **Done:** harness 2.83.0 is merged (flow: session accounting, the engine train, a cheaper rules check, the planner); a crew runs it. Notes: docs/RELEASE-2.83.0.md, studio/notes/HANDOFF-2.83-2026-11-11.md.
-- **In progress:** 2.84 on a branch (planning wakes that change nothing, the same-family review switch, the overseer's sheet, a real Unity editor in the online checks, shorter documents).
-- **Untested:** nothing from 2.83 or 2.84 has run on a real Unity editor from the harness's side; the online editor job waits for working sign-in secrets.
+- **Done:** harness 2.84.0 is merged (less waste, the overseer's list, beta powers for the owner's stand-ins); a crew runs it. Notes: docs/RELEASE-2.84.0.md, studio/notes/HANDOFF-2.84-2026-11-12.md.
+- **In progress:** 2.85 on a branch (false hand-backs, the game's own money, asks that resolve, the daily full land run, the vision card). Notes: docs/RELEASE-2.85.0.md, studio/notes/HANDOFF-2.85-2026-11-13.md.
+- **Untested:** nothing from 2.83 to 2.85 has run on a real Unity editor from the harness's side; 2.85 has not run on a live studio.
 - **Open problems:** P-005 (GPU model), P-009 (no Unity on the maintainer's side: the online job is the fix once it signs in).
 - **Waiting for your OK:** U-007 (last, only when nothing else waits).
 

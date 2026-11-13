@@ -439,7 +439,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## GOLDEN_* (2)
 
 - `STUDIO_GOLDEN_DIVERGENCE` · no simple default · harness/divergence.mjs, qa/check-golden.mjs, qa/selftest-272a.mjs (+1 more) · [HASH.md:95](HASH.md)
-- `STUDIO_GOLDEN_REASON` · no simple default · harness/test-weakening.mjs, qa/selftest-285g.mjs · [WORK-ORGANIZATION.md:389](WORK-ORGANIZATION.md)
+- `STUDIO_GOLDEN_REASON` · no simple default · harness/test-weakening.mjs, qa/selftest-285g.mjs · [RELEASE-2.85.0.md:67](RELEASE-2.85.0.md)
 
 ## GONE_* (2)
 
@@ -716,9 +716,9 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## REFRESH_* (7)
 
-- `STUDIO_REFRESH_DECIDE` · no simple default · harness/session-cap.mjs, qa/selftest-285c.mjs · [SESSIONS.md:47](SESSIONS.md)
-- `STUDIO_REFRESH_HANDOFF_PCT` · no simple default · harness/session-cap.mjs, qa/selftest-285c.mjs · [SESSIONS.md:49](SESSIONS.md)
-- `STUDIO_REFRESH_IDLE_TURNS` · no simple default · harness/session-cap.mjs, qa/selftest-285c.mjs · [SESSIONS.md:50](SESSIONS.md)
+- `STUDIO_REFRESH_DECIDE` · no simple default · harness/session-cap.mjs, qa/selftest-285c.mjs · [RELEASE-2.85.0.md:52](RELEASE-2.85.0.md)
+- `STUDIO_REFRESH_HANDOFF_PCT` · no simple default · harness/session-cap.mjs, qa/selftest-285c.mjs · [RELEASE-2.85.0.md:52](RELEASE-2.85.0.md)
+- `STUDIO_REFRESH_IDLE_TURNS` · no simple default · harness/session-cap.mjs, qa/selftest-285c.mjs · [RELEASE-2.85.0.md:52](RELEASE-2.85.0.md)
 - `STUDIO_REFRESH_NEW_RED_ROLES` · default `'builder'` · harness/session-cap.mjs · [SESSIONS.md:68](SESSIONS.md)
 - `STUDIO_REFRESH_NEW_RED_SHARE` · no simple default · harness/session-cap.mjs · [SESSIONS.md:65](SESSIONS.md)
 - `STUDIO_REFRESH_ON_NEW_RED` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:68](SESSIONS.md)
@@ -744,7 +744,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_REVIEW_AGY_FALLBACK` · default `'gemini-3.8-flash-high'` · harness/review.mjs, qa/selftest-2782d.mjs · [AGENT-TOOLS.md:94](AGENT-TOOLS.md)
 - `STUDIO_REVIEW_DIFF_KB` · no simple default · harness/review-ask.mjs, qa/selftest-284w.mjs · [REVIEWER.md:37](REVIEWER.md)
 - `STUDIO_REVIEW_FILE_MIN` · default `60` · harness/gamedev-loop.mjs, qa/selftest-283g.mjs · undocumented
-- `STUDIO_REVIEW_MAX_TOKENS` · no simple default · harness/review-ask.mjs, qa/selftest-285e.mjs · [REVIEWER.md:41](REVIEWER.md)
+- `STUDIO_REVIEW_MAX_TOKENS` · no simple default · harness/review-ask.mjs, qa/selftest-285e.mjs · [RELEASE-2.85.0.md:61](RELEASE-2.85.0.md)
 - `STUDIO_REVIEW_MIN` · default `60` · harness/gamedev-loop.mjs, qa/selftest-283g.mjs · undocumented
 - `STUDIO_REVIEW_TOOLS` · no simple default · harness/model-tool.mjs, harness/review-family.mjs, harness/review.mjs (+5 more) · [AGENT-TOOLS.md:90](AGENT-TOOLS.md)
 
@@ -764,7 +764,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_RULES_DIR` · no simple default · harness/engine-rules.mjs, qa/selftest-282a.mjs · [NATIVE-ENGINE.md:75](NATIVE-ENGINE.md)
 - `STUDIO_RULES_GREEN` · no simple default · harness/engine-rules.mjs, harness/unity-train.mjs, qa/selftest-282a.mjs (+5 more) · [NATIVE-ENGINE.md:79](NATIVE-ENGINE.md)
 - `STUDIO_RULES_MODE` · no simple default · harness/engine-rules.mjs, harness/unity-train.mjs, qa/selftest-283b.mjs (+4 more) · [NATIVE-ENGINE.md:125](NATIVE-ENGINE.md)
-- `STUDIO_RULES_TEST` · no simple default · harness/done-check.mjs, harness/score.mjs, qa/selftest-285g.mjs · [WORK-ORGANIZATION.md:394](WORK-ORGANIZATION.md)
+- `STUDIO_RULES_TEST` · no simple default · harness/done-check.mjs, harness/score.mjs, qa/selftest-285g.mjs · [RELEASE-2.85.0.md:68](RELEASE-2.85.0.md)
 
 ## SESSION_* (13)
 
@@ -910,7 +910,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_TRAIN` · no simple default · harness/done-check.mjs, harness/heavy-budget.mjs, harness/task.mjs (+35 more) · [RELEASE.md:231](RELEASE.md)
 - `STUDIO_TRAIN_*` · no simple default · harness/train-daemon.mjs · [ENGINE-TRACKS.md:175](ENGINE-TRACKS.md)
 - `STUDIO_TRAIN_AUTO` · no simple default · harness/heavy-budget.mjs, harness/supervisor.mjs, harness/train-daemon.mjs (+21 more) · [WORK-ORGANIZATION.md:145](WORK-ORGANIZATION.md)
-- `STUDIO_TRAIN_AUTO_OFF_HOURS` · no simple default · harness/train-daemon.mjs, qa/selftest-285e.mjs · [WORK-ORGANIZATION.md:151](WORK-ORGANIZATION.md)
+- `STUDIO_TRAIN_AUTO_OFF_HOURS` · no simple default · harness/train-daemon.mjs, qa/selftest-285e.mjs · [RELEASE-2.85.0.md:59](RELEASE-2.85.0.md)
 - `STUDIO_TRAIN_BATCH` · no simple default · harness/train-pipeline.mjs, harness/train.mjs, qa/selftest-2653a.mjs (+5 more) · [WORK-ORGANIZATION.md:142](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_BISECT` · no simple default · harness/train.mjs, qa/selftest-259a.mjs, qa/selftest-260a.mjs (+16 more) · [WORK-ORGANIZATION.md:223](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_BISECT_PARALLEL` · no simple default · harness/train-parallel.mjs, harness/train.mjs, qa/selftest-269q.mjs (+2 more) · [WORK-ORGANIZATION.md:227](WORK-ORGANIZATION.md)
