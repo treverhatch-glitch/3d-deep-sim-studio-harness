@@ -16,39 +16,12 @@ A tag such as (2.73.1) says which release added a rule, so you can tell whether 
 One function decides (`harness/permission.mjs mayDecide`). The second signer on a re-recorded golden is never the lane's
 author. Every stand-in decision is logged (decisions log, event naming the actor).
 
-**The owner's own acts** (`harness/owner-acts.mjs`): real money, deleting data, keys and credentials, publishing outside the
-PC, turning beta mode off. Refused to the orchestrator, the proxy, outside signers and launched sessions: an ask that names
-one, `npm run approve -- keygen`, a delegated action of that name, `npm run beta -- off`. (2.83) An ask is read for meaning
-in two cases only: a question about the game itself that names no real spending is not "real money", and removing code
-through a lane is not "deleting data". One word of real spending, of data (backups, history, saves, a branch, a worktree,
-logs, `.studio`), a wipe or purge, or a bare "buy it?" or "delete it?" keeps it the owner's. The action names `money`, `pay`,
-`delete`, `wipe` are refused to every stand-in.
-
-(2.85) **The game's own money is read from more than a word list.** Real spending always stays the owner's, whatever else
-the question says, whatever tag it carries and whatever task it is tied to: real currencies, a paid plan, tier, tool, asset
-or licence, a subscription, an invoice or billing, a vendor, contractor, freelancer or composer, an online store, a card, a
-top-up, API or model credits, hiring people, a bounty, buying tools or assets, and "we buy" or a bare "buy it?". The
-refusal names the word that made it real money. Money words with none of those (dollars, a fee, a price, a cost, paying
-as a game verb) are the game's own money when the question names a game-design subject (a rule, balance, a fee card, a
-contract, a tier, a level, an unlock, tuning, the Bible, a pillar, a system the Bible keeps), or the ask is tied with
-`--task` to a game-work task (a change, bug, system, balance, playtest or art task, or one on an engine track; not
-tooling or infra), or the asker tagged it `--game-rules`. With none of these, "8 dollars" alone stays the owner's. Every
-ask read that way records `readAs` (on the ask, its answer and a default applied on time), and the daily digest lists
-them: "N ask(s) about money were read as the game's own money: <ids>".
-
-(2.85, hardening) **The word lists cannot be complete; two rules are the backstop.** Real spending is also read when it
-has no money word at all (renting a GPU, licensing a font or a track, hiring a freelancer, ads, a domain, hosting, a
-trademark, tax, a dev kit, an amount next to a pack or plugin, a store's sale price, "players buy the game"), but some
-real purchase will always be worded in a way no list names. So:
-- **No timer on a money-worded ask.** An ask with any money word (the money list's words, any real-spending word, or
-  spend, pay, buy, budget, money) never gets a deadline, from `--timeout` or from `STUDIO_ASK_TIMEOUT_H`, whatever the
-  reading. A reading as the game's own money only changes who may answer (the overseer or another stand-in may); it never
-  lets the asker's own default apply by itself. Such an ask is escalated once as stale (`ask.stale`), like other
-  protected asks.
-- **Tags only from planners, stand-ins and people.** `--game-rules` counts only from a Producer or Director session, an
-  owner's stand-in or a person's own terminal (`harness/permission.mjs` actorOf). A worker session's tag is recorded on
-  the ask as `gameRulesIgnored` and changes nothing. A worker's `--task` ties the ask only while that worker holds the
-  task's claim. In an ask's file, a tag counts only as `true` and a tie only as a non-empty string.
+**The owner's own acts** (`harness/owner-acts.mjs`): deleting data, keys and credentials, publishing outside the PC,
+defining an owner tool, turning beta mode off. Refused to the orchestrator, the proxy, outside signers and launched
+sessions: an ask that names one, `npm run approve -- keygen`, a delegated action of that name, `npm run beta -- off`.
+(2.83) An ask is read for meaning in one case only: removing code through a lane is not "deleting data". One word of
+data (backups, history, saves, a branch, a worktree, logs, `.studio`), a wipe or purge, or a bare "delete it?" keeps it
+the owner's. The action names `delete` and `wipe` are refused to every stand-in. Real money is not on this list: the harness does not judge what is real spending. No agent holds a payment method, and if spending is ever needed the overseer asks the owner directly.
 
 ## Beta mode
 

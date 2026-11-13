@@ -48,7 +48,7 @@ The Producer is the most expensive seat, so only decisions should reach it:
 | The watcher (`npm run watch`, a script) | Claims that expired: work goes back to the queue with a note. Silent agents, unclaimed handed-back work and provider outages: one `Watch:` task for you |
 | The agent itself | Handing a task back with `task pause --note` when it runs out or is swapped |
 | You, the Producer | `Watch:` and `Check forced done` tasks, the plan, who does what next |
-| The person | Design, balance, money, releases, anything that can't be undone |
+| The person | Design, balance, releases, anything that can't be undone |
 
 ## Decisions that need several roles
 

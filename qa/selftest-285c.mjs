@@ -1,13 +1,8 @@
 /**
- * qa/selftest-285c.mjs — 2.85 (c): the game's own money is not real money (B-136), every ask resolves, and the
- * "continue or hand off?" check decides by rule.
+ * qa/selftest-285c.mjs — 2.85 (c): every ask resolves, and the "continue or hand off?" check decides by rule.
  *
- *   money     a game-rules question that says "dollars" and "fee" (the ferry toll: the contract share or a flat
- *             8 dollars a car on the fee card?) is answered by the owner's stand-ins (a beta-mode agent, an outside
- *             signer); every family of real-spending words is still refused to both, with --game-rules and with a quoted
- *             --permission, and the refusal names the word; "8 dollars" with nothing tying it to the game stays the
- *             owner's; a game-work task or a Bible system ties it; the readAs record and the digest line
- *             (harness/owner-acts.mjs, harness/ask.mjs, harness/digest.mjs)
+ *   money     money is not on the owner-only list (harness/owner-acts.mjs): a question with money words in it is
+ *             an ordinary ask, answered by the owner's stand-ins, with the ordinary deadline from its default
  *   timers    a default and no --timeout: STUDIO_ASK_TIMEOUT_H; no default: ask.stale once at STUDIO_ASK_STALE_H, never
  *             answered; the owner's own asks: never a deadline, never escalated (injected clock)
  *   refresh   the check point decides by rule (STUDIO_REFRESH_DECIDE): under the percentage it continues, over it or
@@ -37,110 +32,7 @@ export async function selftest285C({ dir, root, report, tmpRoot }) {
     STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-285c-${process.pid}.pem`), CI: '', GITHUB_ACTIONS: '', NODE_OPTIONS: '', npm_lifecycle_event: '', npm_config_node_options: '',
   };
 
-  // ---- 1. the reading itself (harness/owner-acts.mjs) ----
   const oa = await import(pathToFileURL(path.join(dir, 'harness', 'owner-acts.mjs')).href);
-  const FIELD = 'The ferry toll: the contract share or a flat 8 dollars a car on the fee card?';
-  const act = (q, ctx) => (ctx ? oa.ownerOnlyTopic(q, '', ctx) : oa.ownerOnlyTopic(q))?.act || null;
-  await guard('2.85 (c) money, the reading: a game-rules question that says "dollars" and "fee" with no real-spending word (the ferry toll: the contract share or a flat 8 dollars a car on the fee card?) is not the owner\'s real money, and is recorded as read as the game\'s own money (fails before this fix: none of the in-game words, so it was owner-only "real money")', () => {
-    const r = oa.ownerOnlyReadAs(FIELD);
-    return [act(FIELD) === null && r.length === 1 && r[0].act === 'money' && /game-design subject/.test(r[0].why), JSON.stringify({ act: act(FIELD), r })];
-  });
-  // One question per family of real spending, each written to look like a game question (in-game words, a game-design
-  // subject) and read with a --game-rules tag and a game-work task: every one stays the owner's.
-  const families = {
-    currency: 'In-game shop balance: price the pack at 4 euros?',
-    plan: 'Game balance: upgrade to the pro plan of the tile tool for 20 dollars so the level art is done?',
-    subscription: 'In-game economy: the music library subscription is 9 dollars a month, keep it?',
-    invoice: 'Level 3 tuning: pay the invoice of 300 dollars for the playtest build?',
-    vendor: 'In-game music for level 2: pay the composer 300 dollars?',
-    store: 'Game balance: the asset store price for the truck pack is 15 dollars, take it?',
-    card: 'In-game unlock art: charge it to our card, 30 dollars?',
-    topup: 'Tuning pass: a top-up of 50 dollars so the balance bots keep running?',
-    api: 'Game balance sweep: the API credits cost 40 dollars, run it anyway?',
-    hiring: 'In-game balance check: hire testers for 500 dollars?',
-    bounty: 'In-game crash on level 4: post a bounty of 100 dollars on the issue?',
-    buying: 'In the game the trucks are too plain: should we buy a few for 25 dollars from the art site?',
-    owner: 'In-game currency: sell coins as in-app purchases at 2 dollars?',
-  };
-  const tie = { gameRules: true, gameTie: 'T-1 (a change task)' };
-  await guard('2.85 (c) money, real spending: one word of each family of real spending (a real currency, a paid or pro plan, a subscription, an invoice, a vendor or composer, an online store, a card, a top-up, API credits, hiring people, a bounty, "we buy", in-app purchases) keeps a question the owner\'s even when it says "in-game", names a game subject, is tagged --game-rules and is tied to a game task, and the reading names the word and its family (fails before this fix: a composer, our card, a top-up, hiring, a bounty and "we buy" next to "in-game" were read as the game\'s own money)', () => {
-    const wrong = Object.entries(families).filter(([fam, q]) => act(q) !== 'money' || act(q, tie) !== 'money' || oa.realSpendWord(q)?.family !== fam).map(([fam, q]) => `${fam}: ${act(q)}/${act(q, tie)}/${JSON.stringify(oa.realSpendWord(q))}`);
-    return [wrong.length === 0, wrong.join(' | ')];
-  });
-  await guard('2.85 (c) money, the safe default: "8 dollars" with no game subject, no game task and no tag stays the owner\'s, and the refusal\'s words say it was "dollars" with nothing tying it to the game; the same question tagged --game-rules or tied to a game-work task is the game\'s own money; real spending with no money word ("upgrade to the paid tier") is the owner\'s too (fails before this fix: a tag and a task tie were not read, and "upgrade to the paid tier" was nobody\'s)', () => {
-    const q = 'Is 8 dollars a car right?';
-    const w = oa.ownerOnlyWord(oa.ownerOnlyTopic(q), q);
-    const tagged = oa.ownerOnlyReadAs(q, '', { gameRules: true });
-    const tied = oa.ownerOnlyReadAs(q, '', { gameTie: 'T-7 (a bug task)' });
-    const alone = act('Upgrade to the paid tier of the art tool?');
-    return [act(q) === 'money' && /"dollars", and nothing ties/.test(w) && act(q, { gameRules: true }) === null && tagged[0]?.act === 'money' && /--game-rules/.test(tagged[0].why) && /T-7/.test(tied[0]?.why || '') && alone === 'money',
-      JSON.stringify({ act: act(q), w, tagged, tied, alone })];
-  });
-
-  await guard('2.85 (c) money, someone in the game buys: "players buy tools from the shop; should the price double after level 3?" and "the player hires a second cleaner for 500 dollars" are the game\'s own money (the buyer is inside the game); the same buyer with a paid plan, a real currency or a card in the question stays the owner\'s, and so does "we buy" (fails before this fix: "buy tools" read as real spending)', async () => {
-    const game = ['Players buy tools from the shop; should the price double after level 3?', 'The player hires a second cleaner for 500 dollars: too cheap?', 'Customers can rent a boat for 40 dollars a day. Raise it?'];
-    const real = ['Players buy tools from the shop; should we buy the tool pack for 20 dollars?', 'The player buys the pro plan for 9 dollars?', 'Should the player pay 4 euros for the boat?', 'Customers rent boats; charge it to our card?'];
-    const wrong = [...game.filter((q) => act(q) !== null || oa.ownerOnlyReadAs(q)[0]?.act !== 'money').map((q) => `game read as the owner's: ${q}`), ...real.filter((q) => act(q) !== 'money' || act(q, tie) !== 'money').map((q) => `real read as the game's: ${q}`)];
-    return [wrong.length === 0, wrong.join(' | ')];
-  });
-
-  // ---- 1b. hardening (B-136): real spending with no money word, or under in-game cover, and the game's own money ----
-  const REAL_T = [
-    'Should we buy the low-poly city pack for the level art?',
-    'Can we get the vehicle pack from the Unity Asset Store?',
-    'Is it OK to grab the $39 props pack?',
-    'Can we license the font for the HUD?',
-    'Should we license a soundtrack from a music library?',
-    'OK to pay 49 for the terrain plugin?',
-    'Spend 50 bucks on a font for the logo?',
-    'Rent an A100 for the texture upscale?',
-    'Should we hire a freelance composer for the soundtrack?',
-    'Can we commission an artist for the logo?',
-    'Should we bring on a contract 3D modeller for a week?',
-    'Should we pay someone on Upwork to rig the characters?',
-    'What price should the game sell for on Steam?',
-    'Should players buy the game for 9.99 or 14.99?',
-    'A player asked for a refund on itch; give it?',
-    'Should we donate 50 to the engine foundation?',
-    'Should we run 100 of Reddit ads for the demo?',
-    'Should we get a domain for the press kit?',
-    'Pay for a VPS to host the multiplayer test?',
-    'Should we file a trademark for the game name?',
-    'Should we pay the VAT on the store sales now?',
-    'Should we put more money on the render-farm account?',
-    'Keep paying for the photo editor this month?',
-    'Should we pay for the next tier of Tilekit so the art goes faster?',
-    'Should we take the higher tier on Hostco for the build cache?',
-    'In-game shop needs art: pay 40 for the shop icon pack?',
-    "For the game's economy balance, pay 30 for the coin sound pack?",
-    'For the gameplay tooltips we need the font license, pay 20?',
-    'Players spend more if the shop looks good: buy the UI kit for 25?',
-    'So customers can buy, we need the Pro plan; go?',
-  ];
-  const GAME_T = [
-    'RPG: how much should a health potion cost at the blacksmith?',
-    'Should the merchant buy back items at 50 percent?',
-    'Should the hero pay gold to rest at the inn?',
-    'How much XP and gold should the first boss drop?',
-    'City builder: should the city pay for road maintenance each month?',
-    'Card game: should a rare pack cost 100 coins?',
-    'Should a deck slot be bought with gems or earned?',
-    'Racing: how much money for first place in the cup?',
-    'Should money be shown in thousands in the HUD?',
-    'Should a shop pay rent to the landlord each week?',
-    'Should loans have 5% interest per in-game year?',
-    'Should a power plant cost 50k and 500 a month to run?',
-    'Starting cash: 2 million or 5 million?',
-    'Should staff wages rise with experience?',
-  ];
-  await guard('2.85 (c) hardening, real spending: 30 real-spending questions (an asset pack, a plugin, a font or music licence, a rented GPU, a freelancer or contractor, a store price, a refund on a store, a donation, ads, a domain, hosting, a trademark, tax, an account top-up, a tool\'s next tier, and the same under in-game cover: "in-game shop needs art: pay 40 for the icon pack", "players spend more: buy the UI kit") are the owner\'s with no context and with --game-rules and a game-work task (fails before this fix: 27 of the 30 were nobody\'s or read as the game\'s own money)', () => {
-    const wrong = REAL_T.filter((q) => act(q) !== 'money' || act(q, tie) !== 'money').map((q) => `${q} -> ${act(q)}/${act(q, tie)} ${JSON.stringify(oa.ownerOnlyReadAs(q, '', tie))}`);
-    return [wrong.length === 0, wrong.join(' | ')];
-  });
-  await guard('2.85 (c) hardening, the game\'s own money: 14 game-design money questions from other genres (an RPG shop, a merchant buying back, gold at an inn, a city paying for roads, a card pack in coins, gems, prize money for first place, money in the HUD, a shop paying rent, wages) are not the owner\'s, with no context or with a game tie (fails before this fix: 7 of the 14 were owner-only "real money")', () => {
-    const wrong = GAME_T.filter((q) => act(q) !== null || act(q, tie) !== null).map((q) => `${q} -> ${act(q)}/${act(q, tie)} ${oa.ownerOnlyWord(oa.ownerOnlyTopic(q), q)}`);
-    return [wrong.length === 0, wrong.join(' | ')];
-  });
 
   // ---- the studio: beta mode naming overseer-1, signer-1 in the main checkout's .env ----
   const S = path.join(tmpRoot, `285c-studio-${process.pid}`);
@@ -157,7 +49,6 @@ export async function selftest285C({ dir, root, report, tmpRoot }) {
   g(S, 'init', '-q', '-b', 'main'); g(S, 'add', '-A'); g(S, 'commit', '-qm', 'studio, owner key, beta on', '--no-verify');
   const env = { ...process.env, ...base, AGENT_EVENTS_FILE: ev, STUDIO_MAIN_ROOT: S };
   const cli = (actor, args) => spawnSync(process.execPath, args, { windowsHide: true, cwd: S, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000, env: { ...env, ...actor } });
-  const events = () => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; } };
   const u = (rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   let pn = 0;
   const probe = (code, extra = {}) => {
@@ -169,119 +60,21 @@ export async function selftest285C({ dir, root, report, tmpRoot }) {
     try { return { ...JSON.parse(l), _out: out(r).slice(-1200) }; } catch { return { _raw: out(r).slice(-2500) }; }
   };
   const OVER = { CLAUDECODE: '1', STUDIO_LOCK_OWNER: 'overseer-1' }; // the beta-mode named agent
-  const SIGNER = { AI_AGENT: '1', STUDIO_LOCK_OWNER: 'signer-1' }; // the outside signer the owner lists in .env
   const ASKER = { STUDIO_LOCK_OWNER: 'builder-c1' };
-  const PRODUCER = { STUDIO_ROLE: 'producer', STUDIO_LOCK_OWNER: 'producer-c1' }; // a launched planner session
-  const STANDINS = { overseer: [OVER, 'overseer-1'], signer: [SIGNER, 'signer-1'] };
   const askAs = (q, extra = []) => (out(cli(ASKER, ['harness/ask.mjs', q, '--by', 'builder-c1', ...extra])).match(/\b(A-\d+)\b/) || [])[1];
   const doc = (id) => readJson(path.join(S, 'studio', 'asks', `${id}.json`));
-  const addTask = (title) => (out(cli({}, ['harness/task.mjs', 'add', title, '--role', 'builder', '--priority', 'P1'])).match(/\b(T-\d+)\b/) || [])[1];
-  const PERM = ['--permission', 'the owner said in chat: answer the game-rules asks for me'];
 
-  // ---- 2. through the ask command ----
+  // ---- 2. money words are no rule of the harness's ----
   {
-    const res = {};
-    for (const [who, [actor, name]] of Object.entries(STANDINS)) {
-      const id = askAs(`${FIELD} (${who})`);
-      const r = cli(actor, ['harness/ask.mjs', 'answer', id, 'contract share', '--by', name]);
-      const d = doc(id);
-      const e = events().filter((x) => x.type === 'ask.answered' && x.meta?.ask === id).pop();
-      res[who] = { id, r: tail(r, 200), s: d?.status, recordedBy: d?.recordedBy, readAs: (d?.readAs || []).map((x) => x.act), evReadAs: (e?.meta?.readAs || []).map((x) => x.act) };
-    }
-    await guard('2.85 (c) money, through `ask -- answer`: the toll question is answered unattended by a beta-mode agent (overseer-1) and by an outside signer (signer-1), each recorded as theirs, with readAs "money" on the ask and on the ask.answered event (fails before this fix: both were refused, "is about real money")', () => [
-      ['overseer', 'signer'].every((w) => res[w].s === 'answered' && res[w].recordedBy === STANDINS[w][1] && res[w].readAs.includes('money') && res[w].evReadAs.includes('money')), JSON.stringify(res)]);
-  }
-  {
-    const res = {};
-    for (const [fam, q] of Object.entries(families)) {
-      const id = askAs(q, ['--game-rules']);
-      for (const [who, [actor, name]] of Object.entries(STANDINS)) {
-        const r = cli(actor, ['harness/ask.mjs', 'answer', id, 'yes', '--by', name, ...PERM]);
-        const word = oa.realSpendWord?.(q)?.word || '?';
-        const ok = r.status !== 0 && /^Refused: .*real money/m.test(out(r)) && out(r).includes(`"${word}"`) && doc(id)?.status === 'open';
-        if (!ok) res[`${fam}/${who}`] = tail(r, 260);
-      }
-    }
-    await guard('2.85 (c) money, through `ask -- answer`: an ask from each family of real spending, tagged --game-rules, is refused to the beta-mode agent and to the outside signer even with the owner\'s permission quoted (--permission), stays open, and the refusal names the word that made it real money (fails before this fix: the refusal named no word, and the composer, card, top-up, hiring, bounty and "we buy" asks were answered)', () => [Object.keys(res).length === 0, JSON.stringify(res)]);
-  }
-  {
-    const q = 'Is 8 dollars a car right?';
-    const plain = askAs(q);
-    const game = addTask('Toll rules for the ferry dock');
-    const tool = addTask('[chore] harness flag for the land script');
-    // 2.85 (hardening): a worker's --task counts only with the task's claim, and --game-rules only from a planner, a
-    // stand-in or a person: the asker holds the claim, and a Producer session tags it.
-    cli({}, ['harness/lock.mjs', 'claim', `task:${game}`, '--owner', 'builder-c1']);
-    cli({}, ['harness/lock.mjs', 'claim', `task:${tool}`, '--owner', 'builder-c1']);
-    const tiedGame = askAs(q, ['--task', game]);
-    const tiedTool = askAs(q, ['--task', tool]);
-    const tagged = (out(cli(PRODUCER, ['harness/ask.mjs', q, '--by', 'producer-c1', '--game-rules'])).match(/\b(A-\d+)\b/) || [])[1];
-    const r = {};
-    for (const [k, id] of Object.entries({ plain, tiedGame, tiedTool, tagged })) {
-      const a = cli(OVER, ['harness/ask.mjs', 'answer', id, 'yes', '--by', 'overseer-1']);
-      r[k] = { id, st: a.status, s: doc(id)?.status, out: tail(a, 700), tie: doc(id)?.gameTie ?? null };
-    }
-    await guard('2.85 (c) money, the safe default through the command: "Is 8 dollars a car right?" with no tie and no tag is refused to the beta-mode agent (the refusal says "dollars" and that nothing ties it to the game); tied with --task to a game-work task (a change task) or tagged --game-rules it is answered; tied to a tooling task ([chore] harness …) it is still refused (fails before this fix: --task and --game-rules were not read)', () => [
-      game && tool && r.plain.st !== 0 && /"dollars", and nothing ties/.test(r.plain.out) && r.plain.s === 'open' && r.tiedGame.s === 'answered' && /\(a change task\)/.test(r.tiedGame.tie || '') && r.tagged.s === 'answered' && r.tiedTool.st !== 0 && r.tiedTool.s === 'open',
-      JSON.stringify({ game, tool, r })]);
-  }
-  {
-    // A system the Bible keeps ties a question to the game: the loans layer kept, "a loan" is the game's.
-    write(S, 'studio/bible/bible.json', `${JSON.stringify({ version: 1, answers: {}, pillars: [], layers: { 'upkeep-loans': { answer: 'yes' } }, phases: { 1: {}, 2: {}, 3: {} } }, null, 2)}\n`);
-    const id = askAs('Should a loan cost 8 dollars a day?');
-    const a = cli(SIGNER, ['harness/ask.mjs', 'answer', id, 'yes', '--by', 'signer-1']);
-    fs.rmSync(path.join(S, 'studio', 'bible'), { recursive: true, force: true });
-    await guard('2.85 (c) money, a Bible system: with the Bible keeping the upkeep-and-loans layer, "should a loan cost 8 dollars a day?" is tied to the game (the Bible\'s "loan") and the outside signer answers it (fails before this fix: refused as real money)', () => [
-      doc(id)?.status === 'answered' && /Bible's "loan"/.test(doc(id)?.gameTie || ''), JSON.stringify({ a: tail(a, 300), d: doc(id) })]);
-  }
-  {
-    const r = probe(`const d = await import(${u('harness/digest.mjs')});
-const need = await d.needsPerson({ events: [] });
-console.log(JSON.stringify({ lines: need.map((x) => x.line) }));`);
-    const lines = r.lines || [];
-    const readLine = lines.find((l) => /about money were read as the game's own money: /.test(l)) || '';
-    const ownerLine = lines.find((l) => /waiting for the owner/.test(l)) || '';
-    const readIds = (readLine.match(/A-\d+/g) || []);
-    const shouldRead = fs.readdirSync(path.join(S, 'studio', 'asks')).map((f) => readJson(path.join(S, 'studio', 'asks', f))).filter((a) => (a?.readAs || []).some((x) => x.act === 'money')).map((a) => a.id);
-    await guard('2.85 (c) money, the digest: one line lists every ask of the day whose money words were read as the game\'s own money ("N asks about money were read as the game\'s own money: <ids>"), and the owner\'s own open asks are listed apart as waiting for the owner (fails before this fix: neither line existed)', () => [
-      shouldRead.length >= 4 && shouldRead.slice(0, 8).every((x) => readIds.includes(x)) && new RegExp(`^${shouldRead.length} asks about money were read`).test(readLine) && /money/.test(ownerLine) && /A-\d+/.test(ownerLine),
-      JSON.stringify({ lines, shouldRead, r: r._raw || r._out })]);
-  }
-
-  // ---- 2b. hardening: who may tag, and an edited ask file ----
-  {
-    const q = 'Is 8 dollars a ticket right?';
-    const wr = cli(ASKER, ['harness/ask.mjs', `${q} (worker tag)`, '--by', 'builder-c1', '--game-rules']);
-    const wId = (out(wr).match(/\b(A-\d+)\b/) || [])[1];
-    const pId = (out(cli(PRODUCER, ['harness/ask.mjs', `${q} (producer tag)`, '--by', 'producer-c1', '--game-rules'])).match(/\b(A-\d+)\b/) || [])[1];
-    const wAns = cli(OVER, ['harness/ask.mjs', 'answer', wId, 'yes', '--by', 'overseer-1']);
-    const pAns = cli(OVER, ['harness/ask.mjs', 'answer', pId, 'yes', '--by', 'overseer-1']);
-    const task = addTask('Ticket prices for the ferry');
-    const noClaim = cli(ASKER, ['harness/ask.mjs', `${q} (worker task, no claim)`, '--by', 'builder-c1', '--task', task]);
-    const ncId = (out(noClaim).match(/\b(A-\d+)\b/) || [])[1];
-    cli({}, ['harness/lock.mjs', 'claim', `task:${task}`, '--owner', 'builder-c1']);
-    const cId = askAs(`${q} (worker task, claimed)`, ['--task', task]);
-    const pick = (d) => ({ status: d?.status, gameRules: d?.gameRules, gameRulesIgnored: d?.gameRulesIgnored, ownerOnly: d?.ownerOnly, readAs: d?.readAs });
-    const r = { w: { d: pick(doc(wId)), said: /--game-rules was not counted/.test(out(wr)), refused: /Refused/.test(out(wAns)) }, p: { d: pick(doc(pId)), ans: tail(pAns, 200) }, nc: { tie: doc(ncId)?.gameTie ?? null, said: /was not counted as a game tie/.test(out(noClaim)) }, c: { tie: doc(cId)?.gameTie ?? null } };
-    await guard('2.85 (c) hardening, who may tag: a worker session\'s --game-rules is recorded as gameRulesIgnored with one line saying a planner or the overseer tags it, does not change the reading (the beta-mode agent is refused); a Producer session\'s --game-rules is honoured (the beta-mode agent answers); a worker\'s --task ties the ask only once the worker holds the task\'s claim (fails before this fix: the worker\'s tag and its unclaimed task both made the money the game\'s own)', () => [
-      r.w.d?.gameRulesIgnored === true && !r.w.d?.gameRules && r.w.said && r.w.d?.status === 'open' && r.w.refused
-        && r.p.d?.gameRules === true && r.p.d?.status === 'answered'
-        && r.nc.tie === null && r.nc.said && /\(a \w+ task\)/.test(r.c.tie || ''),
-      JSON.stringify(r)]);
-    const e = probe(`import fs from 'node:fs';
-import path from 'node:path';
-const m = await import(${u('harness/ask.mjs')});
-const base = { question: 'Is 8 dollars a ticket right?', options: [], default: null, why: '', by: 'builder-c1', at: new Date().toISOString(), deadline: null, protected: false, status: 'open' };
-fs.mkdirSync(m.ASKS_DIR, { recursive: true });
-fs.writeFileSync(path.join(m.ASKS_DIR, 'A-801.json'), JSON.stringify({ ...base, id: 'A-801', gameRules: 'false' }));
-fs.writeFileSync(path.join(m.ASKS_DIR, 'A-802.json'), JSON.stringify({ ...base, id: 'A-802', gameTie: {} }));
-const read = (id) => JSON.parse(fs.readFileSync(path.join(m.ASKS_DIR, id + '.json'), 'utf8'));
-const mod = m.ask({ question: 'Is 8 dollars a ticket right? (module)', by: 'producer-c1', gameRules: 'yes', gameTie: { id: 'T-1' } }).ask;
-console.log(JSON.stringify({ a801: m.askOwnerTopic(read('A-801'))?.act || null, a802: m.askOwnerTopic(read('A-802'))?.act || null, ctx: m.askContext(read('A-801')), mod: { gameRules: mod.gameRules || null, gameTie: mod.gameTie || null, ownerOnly: mod.ownerOnly || null } }));`, PRODUCER);
-    const a1 = cli(OVER, ['harness/ask.mjs', 'answer', 'A-801', 'yes', '--by', 'overseer-1']);
-    await guard('2.85 (c) hardening, an edited ask: "gameRules": "false" and "gameTie": {} in an ask\'s file do not count (the ask stays the owner\'s and the beta-mode agent is refused), and ask() called as a module counts a tag only when it is true and a tie only when it is a non-empty string (fails before this fix: any truthy value made the money the game\'s own)', () => [
-      e.a801 === 'money' && e.a802 === 'money' && e.ctx?.gameRules === false && e.ctx?.gameTie === null && e.mod?.gameRules === null && e.mod?.gameTie === null && e.mod?.ownerOnly === 'money' && a1.status !== 0 && doc('A-801')?.status === 'open',
-      JSON.stringify({ e, a1: tail(a1, 300) })]);
+    const q = 'Is 8 dollars a ride right?';
+    const id = askAs(q, ['--options', 'yes,no', '--default', 'no', '--why', 'the lower one is the safer start']);
+    const d0 = doc(id);
+    const a = cli(OVER, ['harness/ask.mjs', 'answer', id, 'yes', '--by', 'overseer-1']);
+    const d = doc(id);
+    const H = 3600000;
+    await guard('2.85 (c) money words are an ordinary ask: "Is 8 dollars a ride right?" is not owner-only (harness/owner-acts.mjs has no money entry), gets the ordinary STUDIO_ASK_TIMEOUT_H deadline from its default, and the beta-mode agent (overseer-1) answers it, recorded as its answer (fails before this change: it was owner-only "real money", had no deadline and the stand-in was refused)', () => [
+      oa.ownerOnlyTopic(q) === null && !d0?.ownerOnly && d0?.protected === false && Date.parse(d0?.deadline) - Date.parse(d0?.at) === 4 * H && a.status === 0 && d?.status === 'answered' && d?.recordedBy === 'overseer-1',
+      JSON.stringify({ d0, d, a: tail(a, 400) })]);
   }
 
   // ---- 3. every ask resolves (injected clock) ----
@@ -296,7 +89,7 @@ const T0 = ${T0}; const H = ${H};
 const evs = () => fs.readFileSync(process.env.AGENT_EVENTS_FILE, 'utf8').split('\\n').filter(Boolean).map((l) => JSON.parse(l));
 const withDef = m.ask({ question: 'Which panel first, the gates or the shops?', options: ['gates', 'shops'], def: 'gates', why: 'the gates panel teaches the flow', by: 'builder-t1', now: T0 }).ask;
 const noDef = m.ask({ question: 'Which colour for the gates panel?', options: ['blue', 'green'], by: 'builder-t1', now: T0 }).ask;
-const owner = m.ask({ question: 'Is 8 dollars a car right?', options: ['yes', 'no'], def: 'no', why: 'safe', by: 'builder-t1', now: T0 }).ask;
+const owner = m.ask({ question: 'Should the build bot get its own access token?', options: ['yes', 'no'], def: 'no', why: 'safe', by: 'builder-t1', now: T0 }).ask;
 const short = m.ask({ question: 'Which dock name style?', options: ['a', 'b'], def: 'a', by: 'builder-t1', now: T0, env: { STUDIO_ASK_TIMEOUT_H: '1' } }).ask;
 // An ask made before 2.85: a default and no deadline at all.
 fs.writeFileSync(path.join(m.ASKS_DIR, 'A-005.json'), JSON.stringify({ id: 'A-005', question: 'Old: which sign colour?', options: ['red', 'blue'], default: 'red', why: 'old', by: 'builder-t1', at: new Date(T0).toISOString(), deadline: null, protected: false, status: 'open' }));
@@ -323,8 +116,8 @@ console.log(JSON.stringify({ withDef: { deadline: withDef.deadline, from: withDe
     await guard('2.85 (c) every ask resolves: an ask with no default is never answered by itself; at STUDIO_ASK_STALE_H (8 h) it is escalated once (ask.stale to the Producer, for the overseer, with the one command that answers it), not at 7 h and not again at 9 h or 100 h (fails before this fix: nothing ever said it was waiting)', () => [
       j.noDef === null && j.s?.noDef === 'open' && j.at7 === 0 && j.st7 === 0 && j.stale.length === 1 && j.stale[0].ask === j.ids.noDef && j.stale[0].to === 'producer' && j.stale[0].overseer === true && new RegExp(`npm run ask -- answer ${j.ids.noDef} `).test(j.stale[0].cmd || ''),
       JSON.stringify(j)]);
-    await guard('2.85 (c) every ask resolves, the owner\'s own (guard): an owner-only ask ("is 8 dollars a car right?", nothing tying it to the game) gets no deadline from its default, is never decided by a timer and never escalated as stale, even 100 h later', () => [
-      j.owner?.deadline === null && j.owner.ownerOnly === 'money' && j.s?.owner === 'open' && !j.stale.some((e) => e.ask === j.ids.owner) && !j.timeouts.some((t) => t.ask === j.ids.owner), JSON.stringify(j)]);
+    await guard('2.85 (c) every ask resolves, the owner\'s own (guard): an owner-only ask (keys: "should the build bot get its own access token?") gets no deadline from its default, is never decided by a timer and never escalated as stale, even 100 h later', () => [
+      j.owner?.deadline === null && j.owner.ownerOnly === 'credentials' && j.s?.owner === 'open' && !j.stale.some((e) => e.ask === j.ids.owner) && !j.timeouts.some((t) => t.ask === j.ids.owner), JSON.stringify(j)]);
     // The deadline check runs with no person: the watcher's pass calls expireAsks and the supervisor's timed passes run it.
     const watch = fs.readFileSync(path.join(dir, 'harness', 'watch.mjs'), 'utf8');
     const passes = fs.readFileSync(path.join(dir, 'harness', 'studio-passes.mjs'), 'utf8');
@@ -333,32 +126,6 @@ console.log(JSON.stringify({ withDef: { deadline: withDef.deadline, from: withDe
     const list = cli({}, ['harness/ask.mjs', 'list', '--open']);
     await guard('2.85 (c) every ask resolves: `npm run ask -- list --open` shows each open ask\'s age and marks the owner\'s own as waiting for the owner; the deadline check runs with no person (the watcher\'s pass calls expireAsks, run from the supervisor\'s timed passes) (fails before this fix: no age shown)', () => [
       /A-099 \[open\] Which shade of grey\? \(open 9 h\)/.test(out(list)) && /waiting for the owner/.test(out(list)) && /expireAsks\(now\)/.test(watch) && /watchPass/.test(passes), tail(list, 900)]);
-  }
-
-  // ---- 3b. hardening: a money-worded ask never gets a timer, whatever the reading ----
-  {
-    const T0 = Date.parse('2026-11-13T00:00:00.000Z');
-    const H = 3600000;
-    const r = probe(`import fs from 'node:fs';
-import path from 'node:path';
-const m = await import(${u('harness/ask.mjs')});
-fs.rmSync(path.join(process.cwd(), 'studio', 'asks'), { recursive: true, force: true });
-const T0 = ${T0}; const H = ${H};
-const evs = () => fs.readFileSync(process.env.AGENT_EVENTS_FILE, 'utf8').split('\\n').filter(Boolean).map((l) => JSON.parse(l));
-const q = 'The ferry toll: the contract share or a flat 8 dollars a car on the fee card?';
-const withTimeout = m.ask({ question: q, options: ['share', 'flat'], def: 'flat', timeout: '2h', why: 'flat is simpler', by: 'producer-c1', gameRules: true, now: T0 }).ask;
-const withDef = m.ask({ question: q + ' (default only)', options: ['share', 'flat'], def: 'flat', why: 'flat is simpler', by: 'producer-c1', gameRules: true, now: T0 }).ask;
-// An ask made before this fix: read as the game's money, a deadline of its own and protected false.
-fs.writeFileSync(path.join(m.ASKS_DIR, 'A-050.json'), JSON.stringify({ id: 'A-050', question: q + ' (old)', options: ['share', 'flat'], default: 'flat', why: 'old', by: 'producer-c1', at: new Date(T0).toISOString(), deadline: new Date(T0 + H).toISOString(), protected: false, gameRules: true, status: 'open' }));
-const seen = evs().length;
-const decided = [T0 + 3 * H, T0 + 5 * H, T0 + 9 * H, T0 + 100 * H].flatMap((t) => m.expireAsks(t));
-const after = evs().slice(seen);
-const doc = (id) => JSON.parse(fs.readFileSync(path.join(m.ASKS_DIR, id + '.json'), 'utf8'));
-const ids = [withTimeout.id, withDef.id, 'A-050'];
-console.log(JSON.stringify({ ids, deadlines: [withTimeout.deadline, withDef.deadline], prot: [withTimeout.protected, withDef.protected], readAs: [withTimeout, withDef].map((a) => (a.readAs || []).map((x) => x.act)), decided, status: ids.map((id) => doc(id).status), timeouts: after.filter((e) => e.type === 'decision.timeout').length, stale: ids.map((id) => after.filter((e) => e.type === 'ask.stale' && e.meta?.ask === id).length) }));`, PRODUCER);
-    await guard('2.85 (c) hardening, the timer: a money-worded ask read as the game\'s own money (a Producer\'s --game-rules toll question) still records readAs, but gets no deadline from --timeout or from its default, is not decided by expireAsks even 100 h later (nor an older such ask that had a deadline of its own), and is escalated as stale exactly once (fails before this fix: the toll question\'s default applied by itself at its deadline)', () => [
-      r.deadlines?.every((d) => d === null) && r.prot.every((x) => x === true) && r.readAs.every((x) => x.includes('money')) && r.decided.length === 0 && r.status.every((x) => x === 'open') && r.timeouts === 0 && r.stale.every((n) => n === 1),
-      JSON.stringify(r)]);
   }
 
   // ---- 4. the refresh check decides by rule ----

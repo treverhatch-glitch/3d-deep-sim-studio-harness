@@ -2,7 +2,7 @@
  * qa/selftest-2731o.mjs — 2.73.1 (B-67, the owner's emergency request): the standing owner proxy.
  *   grant     `delegate -- proxy <agent> --by <owner> --days N`: one owner-signed grant, actions ["*"], proxy: true
  *   covers    in the proxy's own shell (STUDIO_LOCK_OWNER=<agent>) delegationFor covers any action with --by <agent> or
- *             --by <owner>; never money, a launched session, another shell's name; permissionText('') stands in
+ *             --by <owner>; never keys, a launched session, another shell's name; permissionText('') stands in
  *   approve   `approve -- protected --by <owner> --permission "<the owner's yes>"` without the private key: an approval
  *             that carries the signed grant; refused without the yes; counts in `approve -- show`; a builder's commit of
  *             it doesn't count; a revoke voids it
@@ -56,17 +56,17 @@ export async function selftest2731O({ dir, run, report, tmpRoot }) {
       `${out(kg).slice(-200)}\n${out(r).slice(-400)}\n${JSON.stringify(grant).slice(0, 300)}\nlog: ${logged}\nagent: ${agentTry.status} ${out(agentTry).slice(-200)}`];
   });
 
-  await guard('2.73.1 (o) proxy covers: in opus-1\'s shell delegationFor covers any action (train-release, unpark, resume) with --by opus-1 or --by pat; never money, a launched session or another shell; permissionText("") is the grant\'s words there and "" elsewhere (fails on 2.73.0)', () => {
+  await guard('2.73.1 (o) proxy covers: in opus-1\'s shell delegationFor covers any action (train-release, unpark, resume) with --by opus-1 or --by pat; never keys, a launched session or another shell; permissionText("") is the grant\'s words there and "" elsewhere (fails on 2.73.0)', () => {
     const js = (action, by) => `import('./harness/delegation.mjs').then((m) => { const d = m.delegationFor({ action: ${JSON.stringify(action)}, by: ${JSON.stringify(by)} }); console.log(JSON.stringify({ ok: d.ok, why: d.why, proxy: d.proxy })); });`;
     const p = (env, action, by) => probe(env, js(action, by));
     const words = (env) => probe(env, "import('./harness/permission.mjs').then((m) => console.log(JSON.stringify({ t: m.permissionText('') })));").t;
     const rows = {
       release: p(proxy, 'train-release', 'opus-1'), unpark: p(proxy, 'unpark', 'pat'), resume: p(proxy, 'resume', 'opus-1'),
-      money: p(proxy, 'money', 'opus-1'), launched: p({ ...proxy, STUDIO_ROLE: 'builder' }, 'train-release', 'opus-1'),
+      keys: p(proxy, 'keys', 'opus-1'), launched: p({ ...proxy, STUDIO_ROLE: 'builder' }, 'train-release', 'opus-1'),
       other: p({ ...proxy, STUDIO_LOCK_OWNER: 'helper-x' }, 'train-release', 'pat'), patOwnShell: p(owner, 'train-release', 'pat'),
       wordsProxy: words(proxy), wordsOther: words({ ...proxy, STUDIO_LOCK_OWNER: 'helper-x' }), wordsWorker: words({ ...proxy, STUDIO_ROLE: 'builder' }),
     };
-    return [rows.release.ok && rows.unpark.ok && rows.resume.ok && rows.release.proxy === true && !rows.money.ok && !rows.launched.ok && !rows.other.ok && !rows.patOwnShell.ok
+    return [rows.release.ok && rows.unpark.ok && rows.resume.ok && rows.release.proxy === true && !rows.keys.ok && !rows.launched.ok && !rows.other.ok && !rows.patOwnShell.ok
       && /owner proxy: the standing grant to opus-1 by pat/.test(rows.wordsProxy || '') && rows.wordsOther === '' && rows.wordsWorker === '', JSON.stringify(rows).slice(0, 1400)];
   });
 

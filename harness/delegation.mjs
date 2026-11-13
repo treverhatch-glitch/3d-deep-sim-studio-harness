@@ -25,7 +25,7 @@
  * What it covers (delegationFor): while it is valid, the named agent runs exactly the listed actions with
  * `--by <agent>` and no per-action permission words. Each use is recorded as before (who, why) with the words
  * "under delegation <at> by <owner>", plus one delegation.used event that the daily digest counts. Never covered:
- * signing protected-file approvals (npm run approve), gates or the protected list, money; workers, launched sessions
+ * signing protected-file approvals (npm run approve), gates or the protected list, the owner's own acts (harness/owner-acts.mjs); workers, launched sessions
  * (STUDIO_ROLE) and lane copies.
  */
 import fs from 'node:fs';
@@ -53,7 +53,7 @@ export const DELEGATION_REL = 'studio/delegation.json';
  */
 // `purity-baseline` growing a game's purity ratchet baseline (npm run purity -- baseline --write, harness/purity.mjs).
 export const DELEGABLE = ['train-release', 'type', 'visual', 'yes', 'hold', 'upgrade-auto', 'asset-review', 'janitor-lanes', 'purity-baseline'];
-export const NEVER_DELEGATED = 'signing protected-file approvals (npm run approve), changing gates or the protected list, and money';
+export const NEVER_DELEGATED = 'signing protected-file approvals (npm run approve), changing gates or the protected list, and the owner\'s own acts (harness/owner-acts.mjs)';
 export const MAX_HOURS = 72;
 const git = (root, ...args) => spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
 // A proxy grant also signs `proxy: true` (harness/owner-proxy.mjs); an older grant's body is unchanged.
@@ -158,7 +158,7 @@ export const delegationWords = (doc) => `under delegation ${doc.at} by ${doc.by}
 export function delegationFor({ action, by, env = process.env, root = mainRoot(), now = Date.now(), lane = inLaneCopy(), autonomy = true } = {}) {
   let d = delegationOnly({ action, by, env, root, now, lane });
   // Beta mode (harness/beta-mode.mjs): while it is on, the named outside agents and the Producer/Director sessions act as
-  // the owner for every action but money and deletes, with --by <their name> or --by <the owner>.
+  // the owner for every action but the owner's own acts (harness/owner-acts.mjs), with --by <their name> or --by <the owner>.
   if (!d.ok) { const b = betaFor({ action, by, env, root }); if (b) d = b; }
   // The studio policy's "never" rules an action out for every agent, a delegated one included.
   const never = d.ok ? policyNeverWhy(action, { root }) : '';
@@ -291,7 +291,7 @@ export function grantDelegation({ agent, actions, hours, by, why = '', commit = 
   const c = commit ? commitFile(root, `delegate: ${doc.by} lets ${name} run ${list.join(', ')} until ${doc.until}`, doc.why) : { committed: false, note: ` Not committed (--no-commit): it counts once you commit ${DELEGATION_REL} from this terminal.` };
   emitEvent({ type: 'delegation.granted', agent: doc.by, to: name, msg: `${doc.by} lets ${name} run ${list.join(', ')} until ${short(doc.until)}${pub ? ' (signed)' : ''}: ${doc.why}`.slice(0, 400), meta: { agent: name, actions: list, at, until: doc.until, signed: Boolean(pub) } });
   logDecision({ action: 'delegate', subject: DELEGATION_REL, by: doc.by, as: 'person', why: doc.why, evidence: `${name}: ${list.join(', ')} until ${short(doc.until)}`, undo: { kind: 'text', text: 'npm run delegate -- revoke --by <name>' }, root });
-  if (proxy) return { ok: true, doc, committed: c.committed, message: `${name} is your owner proxy until ${short(doc.until)} (${dd} day(s)), ${pub ? 'signed with the owner key' : 'recorded (no owner key yet: a record, not a signature)'}. ${c.committed ? `Committed ${DELEGATION_REL}.` : ''}${c.note} From its own shell (STUDIO_LOCK_OWNER=${name}) it may do everything you can in the harness, with --by ${name} or --by ${doc.by}; approvals (protected files, gates, tests, hooks, forced dones) also need your yes: --permission "<your words or a message link>". Never covered: money, worker sessions, lane copies. Every use is logged; npm run delegate -- revoke ends it at once and voids approvals not yet landed.`.replace(/\s+/g, ' ').trim() };
+  if (proxy) return { ok: true, doc, committed: c.committed, message: `${name} is your owner proxy until ${short(doc.until)} (${dd} day(s)), ${pub ? 'signed with the owner key' : 'recorded (no owner key yet: a record, not a signature)'}. ${c.committed ? `Committed ${DELEGATION_REL}.` : ''}${c.note} From its own shell (STUDIO_LOCK_OWNER=${name}) it may do everything you can in the harness, with --by ${name} or --by ${doc.by}; approvals (protected files, gates, tests, hooks, forced dones) also need your yes: --permission "<your words or a message link>". Never covered: the owner's own acts (harness/owner-acts.mjs), worker sessions, lane copies. Every use is logged; npm run delegate -- revoke ends it at once and voids approvals not yet landed.`.replace(/\s+/g, ' ').trim() };
   return { ok: true, doc, committed: c.committed, message: `${name} may run ${list.join(', ')} with --by ${name} until ${short(doc.until)} (${h} h), ${pub ? 'signed with the owner key' : 'recorded (no owner key yet: a record, not a signature)'}. ${c.committed ? `Committed ${DELEGATION_REL}.` : ''}${c.note} Every use is recorded "${delegationWords(doc).slice(0, 80)}…" and shows in the digest. Never covered: ${NEVER_DELEGATED}. Claude Code rules for these commands: npm run delegate -- claude-settings.`.replace(/\s+/g, ' ').trim() };
 }
 
@@ -357,7 +357,7 @@ export function writeClaudeRules(rules, { root = mainRoot(), remove = false } = 
 }
 
 export const USAGE = `Usage: npm run delegate -- grant <agent> --actions ${DELEGABLE.join(',')} --hours <1-${MAX_HOURS}> --by <owner> [--why "…"] [--no-commit]
-       npm run delegate -- proxy <agent> --by <owner> [--days <1-${PROXY_MAX_DAYS}, default ${PROXY_DEFAULT_DAYS}>] [--why "…"] [--no-commit]   the standing owner proxy (2.73.1): everything but money
+       npm run delegate -- proxy <agent> --by <owner> [--days <1-${PROXY_MAX_DAYS}, default ${PROXY_DEFAULT_DAYS}>] [--why "…"] [--no-commit]   the standing owner proxy (2.73.1): everything but the owner's own acts
        npm run delegate -- list
        npm run delegate -- revoke [--by <name>] [--no-commit]
        npm run delegate -- claude-settings [--actions …] [--write] [--remove]
@@ -382,7 +382,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'list') {
     const d = readDelegation();
     if (!d.doc) { console.log(d.why === 'no delegation on file' ? 'No delegation on file (npm run delegate -- grant …).' : d.why); process.exit(0); }
-    if (isProxyGrant(d.doc)) console.log(`${d.doc.agent} is the owner proxy (everything but money), granted by ${d.doc.by} at ${short(d.doc.at)}, until ${short(d.doc.until)}${d.signed ? ' (signed)' : d.commit ? ` (commit ${d.commit})` : ''}: ${d.doc.why}`);
+    if (isProxyGrant(d.doc)) console.log(`${d.doc.agent} is the owner proxy (everything but the owner's own acts), granted by ${d.doc.by} at ${short(d.doc.at)}, until ${short(d.doc.until)}${d.signed ? ' (signed)' : d.commit ? ` (commit ${d.commit})` : ''}: ${d.doc.why}`);
     else console.log(`${d.doc.agent} may run ${d.doc.actions.join(', ')} with --by ${d.doc.agent}, granted by ${d.doc.by} at ${short(d.doc.at)}, until ${short(d.doc.until)}${d.signed ? ' (signed)' : d.commit ? ` (commit ${d.commit})` : ''}: ${d.doc.why}`);
     console.log(d.ok ? 'It counts now.' : `It doesn't count: ${d.why}.`);
     if (d.note) console.log(`note: ${d.note}`);

@@ -27,7 +27,7 @@
  *                 restarting); in beta mode also what the orchestrator may now do itself (releases, ordinary asks).
  *   keys          an owner-key step (a lane held for the owner's release, protected files changed without approval);
  *                 never in beta mode, nor when the orchestrator holds a delegation for it (harness/delegation.mjs).
- *   owner         only owner decisions (asks; in beta mode only those about money, deleting, direction or scope; spend over
+ *   owner         only owner decisions (asks; in beta mode only those about deleting, direction or scope; spend over
  *                 budget; a policy proposal) and disasters (disk under STUDIO_COMM_DISK_GB 30, STUDIO_COMM_CRASHES 3 crashes
  *                 in an hour, everything blocked over STUDIO_COMM_BLOCKED_MIN 60). A disaster tags the orchestrator too.
  * Rules: one alert at most once per STUDIO_COMM_DEDUP_MIN (30); one still open is tagged again at most every
@@ -249,7 +249,7 @@ export async function workInProgress(root, { env = process.env } = {}) {
 // ---- alerts ----------------------------------------------------------------------------------------------------------
 
 const PATCH_CAN = (f) => Boolean(f.beta?.on);
-const OWNER_TOPIC = /\b(money|spend|pay|purchase|buy|budget|price|cost|delete|remove|wipe|direction|vision|pillars?|scope|bible|signature|sign(?:ing)? (?:the )?bible)\b/i;
+const OWNER_TOPIC = /\b(delete|remove|wipe|direction|vision|pillars?|scope|bible|signature|sign(?:ing)? (?:the )?bible)\b/i;
 
 /**
  * Who must act on an alert. kind: 'fix' (the orchestrator), 'key' (an owner-key step), 'decision' or 'disaster' (the
@@ -309,7 +309,7 @@ export function alertsNow(f, { env = process.env, state = {}, passWhy = [] } = {
     add(`ask:${a.id}`, PATCH_CAN(f) && !ownerTopic ? 'fix' : 'decision', `Question ${a.id}${a.by ? ` from ${short(a.by, 30)}` : ''}: "${short(a.question, 160)}"${Array.isArray(a.options) && a.options.length ? ` (${cut(a.options.map(String), 4)}${a.default ? `; default ${a.default}` : ''})` : ''}: npm run ask -- answer ${a.id} "<answer>" --by <name>`);
   }
   for (const n of f.needs || []) {
-    if (n.kind === 'spend') add('spend', 'decision', `Money: ${n.line}`);
+    if (n.kind === 'spend') add('spend', 'decision', `Spend budget: ${n.line}`);
     else if (n.kind === 'policy') add('policy', 'decision', `Decision: ${n.line}`);
   }
   // Disasters.

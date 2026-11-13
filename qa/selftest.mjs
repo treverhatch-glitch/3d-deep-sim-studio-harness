@@ -1617,8 +1617,8 @@ if (inShard()) {
   const noWhy = run(dir, 'node harness/ask.mjs "Which floor first?" --options "Cubicle,Food court" --default Cubicle --timeout 1m', env);
   report('a timed question needs the reason behind its default', noWhy.status !== 0 && /--why/.test(noWhy.stderr), noWhy.stderr);
   run(dir, 'node harness/ask.mjs "Which floor first?" --options "Cubicle,Food court" --default Cubicle --timeout 1m --why "it teaches the controls" --by prod-1', env);
-  const prot = run(dir, 'node harness/ask.mjs "Can we spend 20 USD on a sound pack?" --options "yes,no" --default yes --timeout 1m --why "cheap" --by prod-1', env);
-  report('questions about money, signing, pillars or deleting never get a deadline', /waits for a person/.test(prot.stdout) && JSON.parse(fs.readFileSync(path.join(dir, 'studio/asks/A-002.json'), 'utf8')).deadline === null, prot.stdout);
+  const prot = run(dir, 'node harness/ask.mjs "Delete the old save files?" --options "yes,no" --default yes --timeout 1m --why "they are stale" --by prod-1', env);
+  report('questions about signing, pillars or deleting never get a deadline', /waits for a person/.test(prot.stdout) && JSON.parse(fs.readFileSync(path.join(dir, 'studio/asks/A-002.json'), 'utf8')).deadline === null, prot.stdout);
   const a1 = path.join(dir, 'studio/asks/A-001.json');
   fs.writeFileSync(a1, JSON.stringify({ ...JSON.parse(fs.readFileSync(a1, 'utf8')), deadline: new Date(Date.now() - 1000).toISOString() }));
   const w = run(dir, 'node harness/watch.mjs', env);
@@ -5061,7 +5061,7 @@ if (inShard('selftest-283i')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.83: the owner-only list tells the game's own money from real money, and code removed in a
+// 2.83: the owner-only list tells code removed in a lane from deleted data.
 if (inShard('selftest-283j')) {
   const dir = copyRepo();
   const { selftest283J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-283j.mjs')).href);
@@ -5229,7 +5229,7 @@ if (inShard('selftest-285a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.85 (c): the game's own money is not real money (B-136), every ask resolves, and the
+// 2.85 (c): every ask resolves, money words are an ordinary ask, and the refresh check decides by rule.
 if (inShard('selftest-285c')) {
   const dir = copyRepo();
   const { selftest285C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285c.mjs')).href);

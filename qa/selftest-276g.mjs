@@ -3,7 +3,7 @@
  * built, plus B-86 (the proxy answers owner asks), B-93 (approvals hash text with LF) and B-95 (owner allow rules for the
  * proxy's own session folder).
  *   switch    `beta on --by <owner>` (signed where the key is) / `beta off`; a worker or an agent's own shell can't
- *   covers    in beta mode the named agent and Producer/Director sessions act as the owner for every action but money and
+ *   covers    in beta mode the named agent and Producer/Director sessions act as the owner for every action but keys and
  *             deletes; workers and builder sessions never; the beta words stand in for --permission
  *   approve   an approval without the key or the owner's words that counts while beta mode is on, not from a worker's
  *             commit, and not after `beta off`
@@ -62,17 +62,17 @@ export async function selftest276G({ dir, run, report, tmpRoot }) {
       `before ${JSON.stringify(before)}\nworker ${worker.status} ${out(worker).slice(-200)}\nagent ${agentShell.status} ${out(agentShell).slice(-200)}\non ${on.status} ${out(on).slice(-300)}\n${JSON.stringify(doc).slice(0, 300)}\nstatus ${out(st).slice(-200)}`];
   });
 
-  await guard('2.76.0 (g) beta covers: opus-1\'s shell and a Producer session act as the owner for any action (unpark, train-release, resume) with --by opus-1 or --by pat; never money or delete, a worker\'s name, a builder session; permissionText("") is the beta words there (fails on 2.75.0)', () => {
+  await guard('2.76.0 (g) beta covers: opus-1\'s shell and a Producer session act as the owner for any action (unpark, train-release, resume) with --by opus-1 or --by pat; never keys or delete, a worker\'s name, a builder session; permissionText("") is the beta words there (fails on 2.75.0)', () => {
     const rows = {
       unpark: dfor(patch, 'unpark', 'opus-1'), release: dfor(patch, 'train-release', 'pat'), resume: dfor(patch, 'resume', 'opus-1'),
       producer: dfor({ ...base, STUDIO_ROLE: 'producer', STUDIO_LOCK_OWNER: 'producer-s1', STUDIO_OWNER_KEY: noKey }, 'yes', 'producer-s1'),
-      money: dfor(patch, 'money', 'opus-1'), del: dfor(patch, 'delete', 'opus-1'),
+      keys: dfor(patch, 'keys', 'opus-1'), del: dfor(patch, 'delete', 'opus-1'),
       worker: dfor({ ...base, STUDIO_LOCK_OWNER: 'builder-s1', STUDIO_OWNER_KEY: noKey }, 'unpark', 'builder-s1'),
       builderSession: dfor({ ...base, STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'opus-1', STUDIO_OWNER_KEY: noKey }, 'unpark', 'opus-1'),
       words: probe(patch, "import('./harness/permission.mjs').then((m) => console.log(JSON.stringify({ t: m.permissionText('') })));").t,
       wordsOther: probe({ ...base, STUDIO_LOCK_OWNER: 'helper-x' }, "import('./harness/permission.mjs').then((m) => console.log(JSON.stringify({ t: m.permissionText('') })));").t,
     };
-    return [rows.unpark.ok && rows.unpark.beta && rows.release.ok && rows.resume.ok && rows.producer.ok && !rows.money.ok && !rows.del.ok && !rows.worker.ok && !rows.builderSession.ok
+    return [rows.unpark.ok && rows.unpark.beta && rows.release.ok && rows.resume.ok && rows.producer.ok && !rows.keys.ok && !rows.del.ok && !rows.worker.ok && !rows.builderSession.ok
       && /beta mode: set by pat/.test(rows.words || '') && rows.wordsOther === '', JSON.stringify(rows).slice(0, 1400)];
   });
 

@@ -15,10 +15,9 @@ and 0 of 26 landed tasks without an overseer step: 59.5% of hand-backs had a har
   ready engine hand-back queues itself (`STUDIO_ENGINE_AUTO_QUEUE`).
 - **The trailer check** reads the task's own commits wherever `task done` runs; the commit-msg hook puts a
   `Golden-Reason:` line in the trailer block.
-- **The game's own money:** real spending is read first, by family, and is always the owner's; money words in a
-  question about the game's rules, a Bible system, a buyer inside the game, a game-work task or `--game-rules` are not.
-  The backstop (a second session found purchases the word lists missed): an ask with any money word never gets a timer,
-  and `--game-rules` counts only from a planner, a stand-in or a person.
+- **Real money is no longer judged by the harness** (the owner's decision): the owner-only list has no real-money
+  entry and no word list reads an ask for spending. No agent holds a payment method; the overseer asks the owner
+  directly. Deleting data, keys, publishing, tool definitions and beta-off stay the owner's.
 - **Every ask resolves:** `STUDIO_ASK_TIMEOUT_H` (4) decides by the default, `STUDIO_ASK_STALE_H` (8) escalates once;
   an owner-only ask is never timed. "Continue or hand off" is decided by rule (`STUDIO_REFRESH_DECIDE`).
 - **Engine land runs:** the daily full run is announced and kept out of the compile check; a full run red only on

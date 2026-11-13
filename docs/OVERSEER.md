@@ -28,7 +28,7 @@ the command that resolves it. A studio with nothing waiting prints "Nothing wait
 
 Asks waiting
  Owner only: these need the person:
-  - A-004: Buy the paid asset pack?, 2 h 10 min: owner only: spending real money
+  - A-004: Delete the old save files?, 2 h 10 min: owner only: deleting data
       → npm run ask -- answer A-004 "<answer>" --by <you>
 Tasks held or parked
  Parked by the watchdog:
@@ -51,7 +51,7 @@ Board work. No signature is involved; each command records who did it.
 - Releasing a held lane of tier A or B.
 - Cancelling a running engine train cleanly, the queue kept (`npm run task -- train cancel --engine <x> --by <you> --why "…"`; docs/ENGINE-TRACKS.md).
 - Turning an engine train's automatic start off for a window, or on (`npm run task -- train auto off|on --engine <x> --by <you> [--hours N]`).
-- Answering an ask, unless it is about money, deleting data, keys, publishing or the owner's tools.
+- Answering an ask, unless it is about deleting data, keys, publishing or the owner's tools.
 - Turning same-family reviews on or off (`npm run review -- same-family on|off|auto --by <you>`, recorded; docs/REVIEWER.md): a beta-time choice, a second model family is the stronger check.
 - Logging every workaround (`npm run workaround -- log`): a workaround that isn't logged can't become a fix.
 
@@ -84,8 +84,8 @@ other launched session. "–": not tested.
 | `review -- same-family on\|off\|auto` | yes | yes | yes | yes | no | no |
 | `engine -- merge <ID>` (and `--continue`, `--abort`) without the claim | yes | yes | yes | yes | no | no |
 | `task train --engine <x>` (never held by the batch window) | – | – | yes | – | – | – |
-| `ask -- answer`: a board ask, or one about the game's own money | yes | yes | yes | yes | yes | no |
-| `ask -- answer`: real money (owner-only) | yes | no | no | no | no | no |
+| `ask -- answer`: a board ask | yes | yes | yes | yes | yes | no |
+| `ask -- answer`: an owner-only ask (deleting data, keys, publishing, tools, beta off) | yes | no | no | no | no | no |
 | `task type <ID> <type>` (with an owner key: the key's signature) | key only | yes | yes | yes | yes | no |
 | `mode -- boost on --builders-only` (no actor check) | yes | yes | yes | yes | yes | yes |
 | `task unpark` then `agent start --task <ID>` | – | – | yes | – | – | – |
@@ -102,7 +102,7 @@ other launched session. "–": not tested.
 | Any of these with beta mode off | – | – | no | no | – | no |
 | A session pinned to a task (`STUDIO_TASK_PIN`) saying `--by <the overseer>` | – | – | no | no | – | – |
 
-The owner-only list (`harness/owner-acts.mjs`: money, delete, credentials, publish, tools, beta-off) is the only thing a
+The owner-only list (`harness/owner-acts.mjs`: delete, credentials, publish, tools, beta-off) is the only thing a
 stand-in is refused.
 
 2.84 (q), the owner's decision: while beta mode is on, the overseer (a beta-mode named agent) and an outside signer make
@@ -119,13 +119,12 @@ keeps `studio/beta.json` as the studio had it and says whether beta mode is on b
 
 ## What stays human-only, whatever the grant
 
-- Real money; deleting data; keys and credentials; publishing outside the PC; defining an owner tool
-  (`studio/tools.json`); turning beta mode off. (`harness/owner-acts.mjs`: refused to every stand-in.)
-  A question about the game's own money, or about removing code through a lane, is not one of these (2.83,
-  docs/SECURITY.md): the overseer may answer it, and the answer records how it was read. (2.85) A refusal names the word
-  that made it real money; an ask with no default is escalated to the overseer once (`ask.stale`) after
-  `STUDIO_ASK_STALE_H` hours. Hardening: an ask with any money word is never decided by a timer, even when read as the
-  game's own money; it reaches the overseer as stale instead. A worker's `--game-rules` tag does not count.
+- Deleting data; keys and credentials; publishing outside the PC; defining an owner tool (`studio/tools.json`);
+  turning beta mode off. (`harness/owner-acts.mjs`: refused to every stand-in.) A question about removing code
+  through a lane is not one of these (2.83, docs/SECURITY.md): the overseer may answer it, and the answer records how
+  it was read. (2.85) An ask with no default is escalated to the overseer once (`ask.stale`) after
+  `STUDIO_ASK_STALE_H` hours. Spending is not a harness rule: no agent holds a payment method, and the overseer
+  asks the owner directly if it is ever needed.
 - Merging a harness release into its main branch.
 - Granting, widening or extending a delegation, the proxy, beta mode or an outside signer: no agent grants itself more.
 - Raising the overseer's own stage, or recording an outcome about its own work.
@@ -141,8 +140,8 @@ with what doesn't depend on it.
 
 By stage (`studio/overseer.json`, protected; the owner sets it): 0 logs workarounds; 1 also writes failing reproduction
 tests as harness pull requests; 2 also small fixes that aren't gates, reviewed and merged by someone else; 3 also its
-own non-gate releases. `npm run overseer` shows the evidence for the next stage. Gates, protected files and money stay
-the owner's at every stage.
+own non-gate releases. `npm run overseer` shows the evidence for the next stage. Gates and protected files stay the
+owner's at every stage.
 
 ## The loop
 

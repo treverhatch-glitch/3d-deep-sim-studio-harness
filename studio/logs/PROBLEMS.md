@@ -288,9 +288,9 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 - **Evidence:** a `Golden-Reason:` line above a blank line in another role's commit refused every task's done; three sessions looped in four minutes; the crew patched it locally.
 - **Fix:** the check reads the task's own commits; the hook moves the line into the trailer block; the same refusal twice holds the task. qa/selftest-285d.mjs.
 
-### P-328 — a game-rules question was refused as real money · fixed in 2.85.0
-- **Evidence:** an ask that said "dollars" and "fee" about a price rule was the owner's only, even with the owner's permission quoted.
-- **Fix:** harness/owner-acts.mjs reads real spending by family first, then the game's own money. qa/selftest-285c.mjs.
+### P-328 — a game-rules question was refused as real money · rule removed in 2.85.0
+- **Evidence:** an ask about a price rule in the game was the owner's only, even with the owner's permission quoted; a review of a widened rule showed word lists still miss real purchases.
+- **Fix:** the owner's decision: the harness does not judge real money; the overseer asks the owner directly. harness/owner-acts.mjs has no money entry. qa/selftest-285c.mjs.
 
 ### P-329 — the daily full land run was invisible and blamed its branches · fixed in 2.85.0
 - **Evidence:** it fell on a one-branch train after a 37 s compile check and was reported as the compile check running everything; its failures on the target handed the branch back.

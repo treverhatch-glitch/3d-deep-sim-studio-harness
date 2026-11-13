@@ -168,7 +168,7 @@ npm run delegate -- list | revoke
 - **Covers**: `train-release`, `type`, `visual`, `yes`, `hold` (and unhold), `upgrade-auto` (`npm run upgrade -- watch auto on`),
   `asset-review` (`npm run asset -- review`, `docs/BLENDER.md`), at most 72 hours. The agent runs them with `--by <agent>` and no
   `--permission`; each use is recorded for the owner "under delegation <at> by <owner>" plus a `delegation.used` event, and the digest
-  counts them. Never covered: `npm run approve`, gates or the protected list, money; workers, launched builder sessions, lane copies.
+  counts them. Never covered: `npm run approve`, gates or the protected list; workers, launched builder sessions, lane copies.
 - **Claude Code's permission prompt**: `npm run delegate -- claude-settings` prints narrow allow rules for exactly the delegated commands
   (`Bash(npm run task -- train release:*)` and the like); `--write` (the owner's terminal only) merges them into the studio's
   `.claude/settings.json` `permissions.allow`; never a broad rule, never deny rules. The harness still refuses anyone but the delegated
@@ -205,7 +205,7 @@ Outside beta mode, with an owner key, `task type` and `task visual` refuse an un
 signature") and read their record back as the checks do. Test files (`*.test.*`, `*.spec.*`, `*.e2e.*`, `tests/`, `e2e/`;
 `isRenderTestFile` in `harness/verdict-split.mjs`) are never render files, even under the game's `visualPaths`.
 
-Every use is logged (`delegation.used`, the decision log, the digest). Never: money, deletes, worker sessions or workers' names, a lane
+Every use is logged (`delegation.used`, the decision log, the digest). Never: deletes, worker sessions or workers' names, a lane
 copy acting as the owner (except approving that lane's own change). The game's tests, the train's full verify and the weakened-tests and
 hooks gates stay on. `npm run beta -- off` brings the owner gates back at once; approvals made in beta that haven't landed stop counting.
 The daily digest's `## Beta mode` section (24 hours; whether beta is on and who set it, who turned it on or off, each use as one line, at
@@ -230,7 +230,7 @@ signed with the owner key when there is one (the owner's own terminal only). Whi
   while that grant is the one on file in the main checkout, inside its window, made by the grant's agent, and, once committed, only in
   a commit that is the proxy's own or a person's. This covers gates and the protected list too. Each use is a `delegation.used` event and
   a decision-log line.
-- **Never**: money, worker sessions, a lane copy (except to approve a lane's own change), granting itself another delegation.
+- **Never**: worker sessions, a lane copy (except to approve a lane's own change), granting itself another delegation.
 - **Ending it**: `npm run delegate -- revoke --by <name>` (anyone may); approvals it made that haven't landed stop counting; the owner's
   signature is needed again as before.
 
@@ -269,7 +269,7 @@ npm run decisions -- approve <id> --by <you> | revert <id> --by <you> [--why "â€
 npm run decisions -- stats [--days 14]
 ```
 
-- **Never autonomous**: protected files, gates (harness code, check silencers, deleted tests) and the policy file, money, deletes
+- **Never autonomous**: protected files, gates (harness code, check silencers, deleted tests) and the policy file, deletes
   (`janitor-lanes`, any rm), visibility, keys. A train release in autonomous mode is refused for a lane held by any shipped tier-C rule; a
   lane held only after too many hand-backs, or by a game's own rule, may be released. **Never self-granted**: `policy autonomous on` and
   `policy confirm` refuse agents' shells, lanes and launched sessions; a policy.json an agent committed doesn't count; a worker can't propose.
@@ -328,7 +328,7 @@ stage's entry criteria.
 | 2 small fixes | makes small non-gate harness fixes, reviewed and merged by someone else |
 | 3 own releases | merges its own non-gate harness releases |
 
-Gates, protected files and money stay the owner's at every stage.
+Gates and protected files stay the owner's at every stage.
 
 - `npm run overseer [-- --json]` shows the stage, the evidence since it was set and whether the next stage's criteria hold (workarounds
   logged, accepted repro PRs with `Repro-Of: <H-id>` and `Overseer-By: <agent>` trailers, merged PRs, revert rate, protected-file

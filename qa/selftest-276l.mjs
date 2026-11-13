@@ -9,7 +9,7 @@
  *   dedup     the same alert isn't posted again within STUDIO_COMM_DEDUP_MIN; an open one is tagged again only after
  *             STUDIO_COMM_REPEAT_MIN; a closed one is named "Cleared" once
  *   beta      in beta mode the held lane and an ordinary ask go to the orchestrator (no key holder, no owner); an ask
- *             about money still tags the owner
+ *             about scope still tags the owner
  *   quiet     STUDIO_COMM_QUIET holds an owner-only ask; a disaster (disk under STUDIO_COMM_DISK_GB) still tags the owner
  *             (and the orchestrator); after the quiet hours the held ask is posted
  *   disaster  3 crashes in an hour, everything blocked over STUDIO_COMM_BLOCKED_MIN (only with a supervisor running)
@@ -153,14 +153,14 @@ http.createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; })
     fresh();
     write('.studio/train/queue.json', [{ task: 'T-41', head: 'abd', at: iso(T), held: { tier: 'B', why: 'tier B' } }]);
     write('studio/asks/A-002.json', { id: 'A-002', status: 'open', question: 'Which color for the gate sign?', by: 'producer-1' });
-    write('studio/asks/A-003.json', { id: 'A-003', status: 'open', question: 'Raise the monthly budget for art?', by: 'producer-1' });
+    write('studio/asks/A-003.json', { id: 'A-003', status: 'open', question: 'Cut the night level from the scope?', by: 'producer-1' });
     write('studio/beta.json', { on: true, by: 'owner-person', at: iso(T - 60000), why: 'beta', agents: ['orch-1'], roles: ['producer', 'director'] });
     g('add', '-A', 'studio/beta.json'); g('commit', '-qm', 'beta on', '--no-verify');
     const b1 = pass(T);
     const c5 = String(posts()[0]?.content || '');
     const l5 = (re) => c5.split('\n').find((l) => re.test(l)) || '';
     rm('studio/beta.json'); g('add', '-A', 'studio'); g('commit', '-qm', 'beta gone', '--no-verify');
-    await guard('276l beta: in beta mode the held lane and an ordinary ask tag the orchestrator (not the key holder, not the owner); the ask about the budget still tags the owner; the status says beta mode on (fails on 2.75.0)', () => [
+    await guard('276l beta: in beta mode the held lane and an ordinary ask tag the orchestrator (not the key holder, not the owner); the ask about scope still tags the owner; the status says beta mode on (fails on 2.75.0)', () => [
       b1.posted === true && /^<@111111111111> T-41 waits.*beta mode/.test(l5(/T-41/)) && /^<@111111111111> Question A-002/.test(l5(/A-002/)) && /^<@333333333333> Question A-003/.test(l5(/A-003/)) && !/222222222222/.test(c5) && /Beta mode: on \(set by owner-person/.test(c5),
       c5.slice(0, 1500)]);
 

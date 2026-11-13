@@ -5,7 +5,7 @@
  *   {
  *     "autonomous": { "allowed": false, "agent": null, "actions": ["train-release", "type", ...], "reviewWithinH": 72,
  *                     "by": "<the owner who set it>", "at": "<ISO time>" },
- *     "never": ["delete-lanes", "money", "protected-files", "gates"],
+ *     "never": ["delete-lanes", "protected-files", "gates"],
  *     "notes": ["free text rules the owner wants every agent to read"]
  *   }
  * A missing file means no autonomous mode. The file is protected (a lane that writes it is tier C). It counts the way
@@ -17,7 +17,7 @@
  * listed game-dev decisions (default: train-release, type, yes, hold, visual, asset-review, quarantine) with
  * `--by <agent>` and no per-decision permission. Each is recorded with `as: "autonomous"` in the decision log
  * (harness/decisions.mjs) and goes on a review list that never blocks work. Never in autonomous mode, whatever the
- * file says (NEVER_AUTONOMOUS): protected files, gates (harness code, silencers, deleted tests) and this file, money,
+ * file says (NEVER_AUTONOMOUS): protected files, gates (harness code, silencers, deleted tests) and this file,
  * deletes (janitor-lanes, any rm), visibility, keys. A train release is refused for a lane held for any of those.
  *
  * Who turns it on: the owner, in their own terminal (`npm run policy -- autonomous on --agent <name> --by <owner>`), or
@@ -49,8 +49,8 @@ export const PAUSE_REL = '.studio/autonomy-paused.json';
 export const AUTONOMOUS_ELIGIBLE = ['train-release', 'type', 'yes', 'hold', 'visual', 'asset-review', 'quarantine'];
 export const DEFAULT_AUTONOMOUS_ACTIONS = [...AUTONOMOUS_ELIGIBLE];
 /** Never in autonomous mode, whatever the file says (safety stays owner-only). */
-export const NEVER_AUTONOMOUS = ['protected-files', 'gates', 'policy', 'money', 'deletes', 'visibility', 'keys'];
-export const NEVER_WORDS = 'protected files, gates and the policy file, money, deletes (janitor-lanes, any rm), visibility and keys';
+export const NEVER_AUTONOMOUS = ['protected-files', 'gates', 'policy', 'deletes', 'visibility', 'keys'];
+export const NEVER_WORDS = 'protected files, gates and the policy file, deletes (janitor-lanes, any rm), visibility and keys';
 export const DEFAULT_REVIEW_H = 72;
 /** A policy "never" word and the decision actions it rules out (for any agent: delegation and autonomous mode). */
 export const NEVER_ACTIONS = { 'delete-lanes': ['janitor-lanes'], deletes: ['janitor-lanes'], 'janitor-lanes': ['janitor-lanes'], 'upgrade-auto': ['upgrade-auto'], upgrades: ['upgrade-auto'] };
@@ -299,7 +299,7 @@ export async function setAutonomous({ on, agent = '', actions = null, reviewH = 
     if (!(h > 0 && h <= 720)) return refuse('--review-h takes the hours a decision may wait for review (1-720)');
     doc.autonomous = { allowed: true, agent: name, actions: list, reviewWithinH: h, by: String(by).trim().slice(0, 60), at: new Date(now).toISOString(), ...(proposal ? { proposedBy: proposal.by, proposedAt: proposal.at } : {}), ...(why ? { why: String(why).slice(0, 300) } : {}) };
   } else doc.autonomous = { ...prev, allowed: false, by: String(by).trim().slice(0, 60), at: new Date(now).toISOString() };
-  if (!Array.isArray(doc.never)) doc.never = ['delete-lanes', 'money', 'protected-files', 'gates'];
+  if (!Array.isArray(doc.never)) doc.never = ['delete-lanes', 'protected-files', 'gates'];
   if (!Array.isArray(doc.notes)) doc.notes = [];
   const a = doc.autonomous;
   const w = writeOwnerPolicy(root, doc, { env, commit, msg: `policy: autonomous mode ${on ? `on for ${a.agent} (${a.actions.join(', ')})` : 'off'} by ${a.by}`, why: why || (proposal ? `confirmed the proposal by ${proposal.by}` : 'the owner\'s policy') });

@@ -122,7 +122,7 @@ export function prBodyText(t, { by, branch, base, file, stage }) {
     '- [ ] the check fails on the current harness (the FAIL line is pasted above)',
     '- [ ] made-up studios only: no game content, no network, no keys or tokens',
     '- [ ] registered in qa/selftest.mjs after the last registration block',
-    '- [ ] no gate, protected file or money change (those stay the owner\'s)',
+    '- [ ] no gate or protected file change (those stay the owner\'s)',
     '',
     'Keep these lines in the merge or squash commit message (npm run overseer counts them):',
     '',

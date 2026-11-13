@@ -137,7 +137,7 @@ supervisor runs it once per pass.
   halt, a stop file, a stuck lane (queued over `STUDIO_COMM_STUCK_MIN`, 120, with no train running, or a stalled
   session), a harness error. The key holder: an owner-key step (a lane held for the owner's release, protected files
   changed without approval); never in beta mode, nor when the orchestrator's agent holds a delegation for releases. The
-  owner: only owner decisions (asks; in beta mode only asks about money, deleting, direction or scope; spend over budget;
+  owner: only owner decisions (asks; in beta mode only asks about deleting, direction or scope; spend over budget;
   a policy proposal) and disasters, which tag the orchestrator too: disk under `STUDIO_COMM_DISK_GB` (30),
   `STUDIO_COMM_CRASHES` (3) crashes in an hour, everything blocked (no agent, no train, a blocker, the supervisor
   running) over `STUDIO_COMM_BLOCKED_MIN` (60). 2.85: a running engine train, web train, engine land or rules check counts

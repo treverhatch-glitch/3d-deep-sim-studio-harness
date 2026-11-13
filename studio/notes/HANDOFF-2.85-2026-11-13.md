@@ -23,14 +23,11 @@ unit again, regenerate.
 
 ## Decisions made on judgment
 
-1. **Real spending always wins.** No tag, task or permission text makes a question with a real-spending word the
-   game's own money. The reverse error (a game question read as real money) costs one ask to the owner; this one
-   would cost money.
-   A review by a second session found the word lists miss real purchases (12 of 28 fresh ones after the fix), so the
-   rule that holds is structural: no timer on any money-worded ask, and the game-rules tag only from planners,
-   stand-ins and people. Do not loosen either to make an ask resolve by itself.
-2. **A buyer inside the game is game money** ("players buy tools from the shop"). Only the buying and hiring verbs
-   lose their match; a plan, a card, a store or a real currency in the same question still makes it the owner's.
+1. **The real-money rule is gone, by the owner's decision** (13 Nov, in his words: "take all references and everything
+   out, leave it to Patch to get permission from me directly"). It was first widened, then reviewed by a second
+   session, which showed word lists miss real purchases however long they get. Do not bring a word list back; if the
+   owner wants a guard again, build it on who holds a payment method, not on the wording of a question.
+2. **No example purchase questions in the repository.** The owner objected to them; tests of asks use neutral wording.
 3. **"A rules change needs a test" is a note, not a refusal.** As a refusal it broke two existing tests and added a
    new way for `task done` to say no in a release whose point is fewer of those. The score counts it;
    `STUDIO_RULES_TEST=require` is there when the count says so.
@@ -51,7 +48,5 @@ unit again, regenerate.
 4. The Unity sign-in secrets, then the `engine-unity-real` job.
 5. 2.86 (a judge before landing) only if item 1 says 2.85 held. It blocks only after catching 70% of at least 20 real
    rejections with under 10% false fails.
-6. The money word lists: the reviewer's probe sets and patched copy were scratch files; the cases worth keeping are in
-   `qa/selftest-285c.mjs` (30 real, 14 game). `ask()` as a module still takes any tie string from its caller.
-7. The weakened-tests check flags `qa/selftest-285c.mjs:256` as a seed special case; it is a comparison of a turn
+6. The weakened-tests check flags `qa/selftest-285c.mjs:256` as a seed special case; it is a comparison of a turn
    count, a false positive of the rule.
