@@ -5245,6 +5245,14 @@ if (inShard('selftest-285d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.85 (e): six things a crew's overseer had to do by hand in its first 16 hours on 2.84.
+if (inShard('selftest-285e')) {
+  const dir = copyRepo();
+  const { selftest285E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285e.mjs')).href);
+  await selftest285E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

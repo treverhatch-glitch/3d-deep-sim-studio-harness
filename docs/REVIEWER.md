@@ -37,7 +37,10 @@ It sends ONE request with what a reviewer session reads: the task's title, spec 
 the engine target; else its tagged commits), cut at `STUDIO_REVIEW_DIFF_KB` (200) with a note saying so. Vertex goes straight to
 its endpoint with the key from the main checkout's `.env` as `x-goog-api-key` (never printed, logged or put in an event); claude,
 codex and agy run their CLI read-only with the prompt on stdin. The tool is the model's (`toolForModel`) unless `--tool` names it;
-a mismatch is refused. The answer must start with `VERDICT: APPROVE` or `VERDICT: CHANGES`. It is recorded as `review record`
+a mismatch is refused. The answer must start with `VERDICT: APPROVE` or `VERDICT: CHANGES`. 2.85: the prompt asks for
+the verdict line first (`VERDICT: approve|changes|unsure`), the call asks for up to `STUDIO_REVIEW_MAX_TOKENS` (4000) output
+tokens, an answer with findings but no verdict line gets one verdict-only follow-up request before it becomes a draft, and an
+`unsure` verdict is kept as a draft (nothing recorded). It is recorded as `review record`
 does: `studio/reviews/<date>-<ID>-asked-<model>.md` with the `model-family:` and `implementer-family:` lines, a `via:
 harness-asked` line, one `Verdict:` line, a `review.recorded` event (meta `via`, `model`, `tool`), the same family rules, and a
 commit. An answer with no verdict is saved as `<date>-<ID>-asked-<model>.rejected.txt` and nothing is recorded. A network,

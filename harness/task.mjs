@@ -2236,6 +2236,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (arg1 === 'status' || flags.status) {
       const qd = tr.readQueue(mainRoot());
       console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})${tr.heldNow(e) ? `  NEEDS THE OWNER (tier ${e.held.tier}: ${String(e.held.why).slice(0, 160)}; train release ${e.task} --by <name>)` : e.released && e.released.head === e.head ? `  released by ${e.released.by}` : ''}${e.after?.task ? `  after ${e.after.task} (predicted conflict)` : ''}${tr.taskHoldOf(mainRoot(), e.task) ? `  OUT OF TRAINS: ${tr.heldOutWhy(tr.taskHoldOf(mainRoot(), e.task)).replace('<ID>', e.task)}` : ''}`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
+      { try { const wl = (await import('./train-daemon.mjs')).daemonWaitingLine(mainRoot(), { queue: qd }); if (wl) console.log(wl); } catch {} } // 2.85 (e): why no train starts by itself
       { const kl = (await import('./known-red.mjs')).knownRedLine(mainRoot()); if (kl) console.log(kl); } // 2.77.0 (P9.3)
       { const um = await import('./unity-train.mjs'); const names = new Set(['unity', ...engineTargetsQuiet()]); for (const e of names) { const ut = um.unityStatusText(mainRoot(), { quiet: true, engine: e }); if (ut) console.log(ut); } } // 2.63.0: the Unity train; 2.77.0: every engine's
       try { const ts = await import('./train-status.mjs'); const rs = ts.readTrainStatus(mainRoot()); if (rs) console.log(ts.trainsText(rs)); } catch {}
@@ -2292,8 +2293,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const want = flags._[2];
       const td = await import('./train-daemon.mjs');
       if (!want) { console.log(td.autoStatusText(mainRoot())); process.exit(0); }
-      if (!/^(on|off)$/.test(want) || typeof flags.by !== 'string') { console.error('Usage: npm run task -- train auto off|on --by <name> [--why "…"] [--permission "<their words or a link>"]'); process.exit(1); }
-      const r = await td.setTrainAuto(mainRoot(), { on: want === 'on', by: flags.by, why: typeof flags.why === 'string' ? flags.why : '', permission: typeof flags.permission === 'string' ? flags.permission : '' });
+      if (!/^(on|off)$/.test(want) || typeof flags.by !== 'string') { console.error('Usage: npm run task -- train auto off|on --by <name> [--why "…"] [--hours N] [--permission "<their words or a link>"]'); process.exit(1); }
+      const r = await td.setTrainAuto(mainRoot(), { on: want === 'on', by: flags.by, why: typeof flags.why === 'string' ? flags.why : '', permission: typeof flags.permission === 'string' ? flags.permission : '', hours: flags.hours ?? null }); // 2.85 (e): --hours N
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }

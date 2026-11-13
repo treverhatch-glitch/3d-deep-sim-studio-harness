@@ -832,7 +832,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (!r.ok) {
       console.error(`[hooks] FAIL ${r.why}:`);
       console.error(list.join('\n'));
-      console.error(fixText(r.open).map((l) => `[hooks] ${l}`).join('\n'));
+      // 2.85 (e): commits a harness release brought in through a plain `git merge` get the one command that lists them
+      // (harness/hooks-upgrade-hint.mjs), not the reset advice; last, so task done's 12-line tail keeps it. Exempts nothing.
+      let hint = null;
+      try { hint = await (await import('./hooks-upgrade-hint.mjs')).upgradeMergeHint(r.open, { cwd: ROOT, base: r.baseSha }); } catch {}
+      console.error((hint ? hint.lines : fixText(r.open)).map((l) => `[hooks] ${l}`).join('\n'));
       process.exit(1);
     }
     console.log(`[hooks] ${r.open.length ? 'note' : 'PASS'}: ${r.why}`);

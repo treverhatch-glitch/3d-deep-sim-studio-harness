@@ -331,10 +331,35 @@ export function watchCommand(script, argv = [], { agent = null, now = Date.now()
 
 const stampFile = (root, rel) => path.join(root, '.studio', 'write-stamps', `${rel.replace(/[\\/:]+/g, '__')}.json`);
 const relOf = (root, file) => path.relative(root, file).replace(/\\/g, '/');
+const realish = (p) => { try { return fs.realpathSync(p); } catch { try { return path.join(fs.realpathSync(path.dirname(p)), path.basename(p)); } catch { return path.resolve(p); } } };
+const inside = (rel) => rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+/**
+ * 2.85 (e): where a file's stamp lives: { root, rel }, the same for every process that writes it. In 16 hours a crew got
+ * 85 "hand-edited studio/NEXT.md" / "../../studio/NEXT.md" / "DONE.md" warnings while agents only used the board
+ * commands: a board command in a lane copy (<main>/.lanes/<name>, its studio/ the main checkout's) stamped the main
+ * checkout's board under the copy's own root, as "../../studio/NEXT.md", so the main checkout's stamp went stale (its
+ * next pass saw "studio/NEXT.md" changed) and the copy's stamp went stale on the next write from main (it saw
+ * "../../studio/NEXT.md" changed). Now a file is stamped in the checkout that holds it (its real path: under `root`,
+ * else under the nearest folder above it with a .git), whichever checkout's process writes or checks it.
+ */
+export function stampHome(file, root = REPO_ROOT) {
+  const real = realish(file);
+  const r0 = realish(root);
+  const rel0 = path.relative(r0, real);
+  if (inside(rel0)) return { root, rel: relOf(r0, real) };
+  let d = path.dirname(real);
+  for (let i = 0; i < 40; i += 1) {
+    if (fs.existsSync(path.join(d, '.git'))) return { root: d, rel: relOf(d, real) };
+    const up = path.dirname(d);
+    if (up === d) break;
+    d = up;
+  }
+  return { root, rel: relOf(root, file) };
+}
 
 /** Stamp what the harness is about to write to `file` (call BEFORE writing it). */
-export function stampWrite(file, text, { root = REPO_ROOT } = {}) {
-  const rel = relOf(root, file);
+export function stampWrite(file, text, { root: given = REPO_ROOT } = {}) {
+  const { root, rel } = stampHome(file, given);
   const s = String(text);
   writeAtomic(stampFile(root, rel), `${JSON.stringify({ file: rel, sha: sha(s), size: Buffer.byteLength(s), lines: s.split('\n').length, at: Date.now(), pid: process.pid })}\n`, { fsync: false });
 }
@@ -352,9 +377,9 @@ function gitHeadCopy(file) {
  * Was `file` changed by something other than the harness since its last stamp? Records a detected workaround once per
  * content and stamps the file as it is now. text: the file's content when the caller already read it. Returns the record or null.
  */
-export function checkStamped(file, { text = undefined, root = REPO_ROOT, now = Date.now(), env = process.env } = {}) {
+export function checkStamped(file, { text = undefined, root: given = REPO_ROOT, now = Date.now(), env = process.env } = {}) {
   if (off(env)) return null;
-  const rel = relOf(root, file);
+  const { root, rel } = stampHome(file, given);
   const sf = stampFile(root, rel);
   const st = readJson(sf, null);
   if (!st?.sha) return null;
@@ -385,6 +410,9 @@ function checkAllStamps({ root = REPO_ROOT, now = Date.now(), env = process.env 
   let names = [];
   try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.json')); } catch { return []; }
   const out = [];
+  // 2.85 (e): stamps made under a lane copy's root for a file outside it (named "..__...") are never read again: removed.
+  for (const n of names.filter((x) => x.startsWith('..'))) { try { fs.rmSync(path.join(dir, n), { force: true }); } catch {} }
+  names = names.filter((x) => !x.startsWith('..'));
   for (const n of names) {
     const st = readJson(path.join(dir, n), null);
     if (!st?.file || /(^|\/)\.\.(\/|$)/.test(st.file)) continue;

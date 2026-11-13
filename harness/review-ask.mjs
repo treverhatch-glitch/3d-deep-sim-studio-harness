@@ -36,6 +36,20 @@ import { vertexConfigured } from './vertex.mjs';
 
 const HARNESS = path.dirname(fileURLToPath(import.meta.url));
 export const REVIEW_DIFF_KB_DEFAULT = 200;
+/**
+ * 2.85 (e): the output limit a review call asks for (STUDIO_REVIEW_MAX_TOKENS, 4000). A Gemini model counts its thinking
+ * against it, so 2000 cut a crew's review before its VERDICT line and the review became a draft.
+ */
+export const REVIEW_MAX_TOKENS_DEFAULT = 4000;
+export const reviewMaxTokens = (env = process.env) => { const t = String(env.STUDIO_REVIEW_MAX_TOKENS ?? '').trim(); const n = Number(t); return t !== '' && Number.isFinite(n) && n >= 256 ? Math.round(n) : REVIEW_MAX_TOKENS_DEFAULT; };
+/** 2.85 (e): the verdict line `review record` reads (harness/review.mjs recordOutsideReview), or unsure: 'approve'|'changes'|'unsure'|null. */
+export function verdictOf(text) {
+  const m = [...String(text || '').replace(/\r\n/g, '\n').matchAll(/^[ \t>*_#-]*verdict\**\s*:\**\s*(approve[sd]?|lgtm|changes|request(?:ed)? changes|changes requested|reject(?:ed)?|unsure)\b/gim)].map((x) => x[1].toLowerCase());
+  if (!m.length) return null;
+  const v = m.at(-1);
+  return v === 'unsure' ? 'unsure' : /^(approve|lgtm)/.test(v) ? 'approve' : 'changes';
+}
+export const VERDICT_ONLY_ASK = 'Give only the verdict line for the review above, nothing else: VERDICT: approve, VERDICT: changes or VERDICT: unsure.';
 export const reviewDiffKb = (env = process.env) => { const n = Number(String(env.STUDIO_REVIEW_DIFF_KB ?? '').trim()); return String(env.STUDIO_REVIEW_DIFF_KB ?? '').trim() !== '' && Number.isFinite(n) && n > 0 ? n : REVIEW_DIFF_KB_DEFAULT; };
 const INFLIGHT_DIR = () => path.join(STUDIO_STATE_DIR, 'review-ask');
 const INFLIGHT_MAX_MS = 20 * 60000;
@@ -94,7 +108,7 @@ export function doneSummary(taskId, { root = REPO_ROOT } = {}) {
  * The Vertex transport: one chat completion, sent as the Vertex proxy sends it (the key from the main checkout's .env as
  * x-goog-api-key, never logged). { ok, text } or { ok: false, why } (why scrubbed). fetchImpl for tests.
  */
-export async function vertexAsk({ model, messages, task = null, root = null, fetchImpl = globalThis.fetch, maxTokens = 2000 } = {}) {
+export async function vertexAsk({ model, messages, task = null, root = null, fetchImpl = globalThis.fetch, maxTokens = reviewMaxTokens() } = {}) {
   const vx = await import('./vertex.mjs');
   const r0 = root || vx.studioRoot();
   const vals = vx.mainEnv(r0);
@@ -169,15 +183,36 @@ export async function askReview(taskId, { model, tool = null, forTask = null, no
   const capped = capDiff(scrub(d.diff).text, reviewDiffKb(env));
   const summary = (deps.doneSummary || doneSummary)(taskId, { root });
   const messages = rv.prompt({ ...g, diff: capped.text, cut: false });
-  messages[1].content += `\n\nThe diff above is ${d.from}${capped.cut ? `; ${capped.note}` : ''}.\n\nThe done-check's summary (node harness/done-check.mjs ${taskId}):\n${summary}\n\nAnswer with the text of the review only, in the shape asked: its first line VERDICT: APPROVE or VERDICT: CHANGES.`;
-  let r;
-  try {
-    r = deps.transport ? await deps.transport({ tool, model, messages, task: taskId })
-      : tool === 'vertex' ? await vertexAsk({ model, messages, task: taskId, fetchImpl: deps.fetchImpl || globalThis.fetch })
-        : await cliAsk({ tool, model, messages, root });
-  } catch (e) { r = { ok: false, why: String(e?.message || e) }; }
+  // 2.85 (e): the verdict FIRST, before any finding, so an answer cut at the output limit still carries it.
+  messages[1].content += `\n\nThe diff above is ${d.from}${capped.cut ? `; ${capped.note}` : ''}.\n\nThe done-check's summary (node harness/done-check.mjs ${taskId}):\n${summary}\n\nAnswer with the text of the review only. Your FIRST line, before any finding, must be exactly one of: VERDICT: approve | VERDICT: changes | VERDICT: unsure. Then WHY and ISSUES, as asked.`;
+  const maxTokens = reviewMaxTokens(env);
+  const call = async (msgs) => {
+    try {
+      return deps.transport ? await deps.transport({ tool, model, messages: msgs, task: taskId, maxTokens })
+        : tool === 'vertex' ? await vertexAsk({ model, messages: msgs, task: taskId, maxTokens, fetchImpl: deps.fetchImpl || globalThis.fetch })
+          : await cliAsk({ tool, model, messages: msgs, root });
+    } catch (e) { return { ok: false, why: String(e?.message || e) }; }
+  };
+  const r = await call(messages);
   if (!r?.ok) return fail(r?.why || 'the model gave no answer', r?.status ? { status: r.status } : {});
-  const answer = String(r.text || '');
+  let answer = String(r.text || '');
+  // 2.85 (e): findings but no verdict line (cut, or the shape not kept): ask once more for the verdict line only, then record.
+  let followUp = null;
+  if (!verdictOf(answer) && answer.trim()) {
+    const r2 = await call([...messages, { role: 'assistant', content: answer }, { role: 'user', content: VERDICT_ONLY_ASK }]);
+    const v2 = r2?.ok ? verdictOf(r2.text) : null;
+    followUp = { asked: true, verdict: v2 };
+    if (v2) { const line = String(r2.text).replace(/\r\n/g, '\n').split('\n').find((l) => verdictOf(l)) || `VERDICT: ${v2}`; answer = `${line.trim()}\n${answer}\n\n(The verdict line came from a second, verdict-only request: the first answer had none.)`; }
+  }
+  // An unsure verdict is no verdict: the answer is kept as a draft and nothing is recorded (a person or another model decides).
+  if (verdictOf(answer) === 'unsure') {
+    const date = new Date().toISOString().slice(0, 10);
+    const draft = path.join(REPO_ROOT, 'studio', 'reviews', `${date}-${taskId}-asked-${label(model)}.rejected.txt`);
+    try { fs.mkdirSync(path.dirname(draft), { recursive: true }); fs.writeFileSync(draft, `Unsure: ${model} answered VERDICT: unsure. Asked on ${tool} for ${taskId}. Nothing was recorded.\n\n${scrub(answer).text}\n`); } catch {}
+    const rel = path.relative(REPO_ROOT, draft).split(path.sep).join('/');
+    const out = fail(`${model} answered VERDICT: unsure; the answer is saved as ${rel}`, { draft: rel, unsure: true });
+    return { ...out, draft: rel };
+  }
   // 2.84 (r): the review task `--for` names is started first (as the harness's own "review-ask"), so the review note written
   // below is newer than its start: the done-check for a review task reads "a review note since the task started".
   const closer = forTask ? startForClose(forTask, { root }) : null;
@@ -188,7 +223,7 @@ export async function askReview(taskId, { model, tool = null, forTask = null, no
     try { fs.mkdirSync(path.dirname(draft), { recursive: true }); fs.writeFileSync(draft, `Rejected draft: ${clean(rec.error)}\nAsked: ${model} on ${tool} for ${taskId}. Nothing was recorded.\n\n${scrub(answer).text}\n`); } catch {}
     const rel = path.relative(REPO_ROOT, draft).split(path.sep).join('/');
     if (closer?.started) runTask(['pause', forTask, '--note', `the harness-asked review of ${taskId} recorded nothing; ${forTask} is handed back`], { root });
-    const out = fail(`${rec.noVerdict ? 'the answer has no VERDICT line' : rec.error}; the answer is saved as ${rel}`, { draft: rel });
+    const out = fail(`${rec.noVerdict ? `the answer has no VERDICT line${followUp?.asked ? ' (and a second, verdict-only request gave none)' : ''}` : rec.error}; the answer is saved as ${rel}`, { draft: rel });
     return { ...out, draft: rel };
   }
   const base = `${taskId}: ${rec.verdict} from ${model} (${tool}, asked by the harness). Written to ${rec.file}${rec.committed ? ' and committed' : rec.warn ? `; ${rec.warn}` : ''}`;

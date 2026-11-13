@@ -147,7 +147,12 @@ A lane copy's work reaches the studio's branch through a train, so landing does 
   train, nor while winding down, "Stop all" or drain (`npm run task -- drain on`) is on. `npm run task -- train auto off|on --by <name>
   [--why "…"]` (a person, the owner's delegation, or a Producer/Director session or outside agent on a person's `--permission`; never a
   worker) stops or starts every automatic game-train start (`.studio/train/auto.json`; a person's own `train` still runs; engine
-  trains are separate); `npm run task -- train auto` shows it.
+  trains are separate); `npm run task -- train auto` shows it. 2.85: an agent's `train auto off` lapses after
+  `STUDIO_TRAIN_AUTO_OFF_HOURS` (4; `0`: until turned on), or after `--hours N`; a person's lasts until they turn it on. Why no
+  train starts is said once per reason (`train.daemon.waiting`) and in `train status` ("The automatic start is waiting: …");
+  lanes waiting only for the owner (tier C) are named with `train release <ID> --by <name>`, never released by the daemon.
+  A web train runs beside an engine land when the heavy budget admits its verify (an engine land takes no machine:heavy slot;
+  its RAM counts), so free RAM covering the web verify's measured need is enough.
 - **Leaving**: a held task stays out of every train (`OUT (held)` in `npm run lanes`, `OUT OF TRAINS` in `train status`). `npm run
   task -- train leave <ID> --by <name> --why "…"` takes a queued lane out (as `task hold`); `task done <ID> --train` queues it again.
   `npm run task -- train dequeue <ID> [--engine <name>] [--by <name>]` (2.83) takes it out of the game's or that engine's queue and
