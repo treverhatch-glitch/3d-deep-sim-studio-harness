@@ -36,6 +36,7 @@ const DEFAULT_AFTER = [new RegExp(String.raw`^\s*\)?\s*(?:\?\?|\|\|)\s*${LIT}`),
 export const MAP_FILE = 'docs/SETTINGS.md';
 export const BASELINE_FILE = 'docs/settings-baseline.json';
 export const TOP_FILE = 'scripts/settings-top.json';
+export const RUNTIME_FILE = 'docs/settings-runtime.json';
 
 /** 2.79 (g): scripts/settings-top.json: { top: [names], passedToCommands: [{ name, note }] } (empty lists when missing). */
 export function topLists(root = ROOT) {
@@ -187,6 +188,54 @@ function writeBaseline(root, names) {
   fs.writeFileSync(path.join(root, BASELINE_FILE), `${JSON.stringify(body, null, 2)}\n`);
 }
 
+// ---- 2.85 (h): a name documented or used in a test must be read by production code ----
+// Production = what runs: harness/, scripts/ (not the lists that only name settings), tools/, hub/, the Claude hooks, CI, the
+// npm scripts, and qa/*.mjs that are gates (not qa/selftest*). A mention in a comment is not a read. Names built at run time
+// (STUDIO_${role}_CMD) are listed as families in docs/settings-runtime.json: a pattern, plus the template that builds them,
+// which must still be in production code (an old entry fails when its builder goes). { families, testOwned } there.
+const PROD_DIRS = ['harness', 'scripts', 'tools', 'hub', '.claude/hooks', '.github'];
+const PROD_FILES = ['package.json', 'setup.cmd'];
+const NOT_PROD = new Set([TOP_FILE]);
+const stripComments = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1').replace(/^\s*#.*$/gm, '');
+
+export function prodTexts(root = ROOT) {
+  const files = [];
+  for (const d of PROD_DIRS) walk(path.join(root, d), (n) => !/\.(png|jpe?g|glb|bin|gif|ico|zip)$/i.test(n), files);
+  try { for (const n of fs.readdirSync(path.join(root, 'qa'))) if (n.endsWith('.mjs') && !n.startsWith('selftest')) files.push(path.join(root, 'qa', n)); } catch {}
+  for (const f of PROD_FILES) files.push(path.join(root, f));
+  return files.map((f) => rel(root, f)).filter((f) => !NOT_PROD.has(f)).sort().map((f) => [f, stripComments(read(path.join(root, f)))]);
+}
+
+export function readRuntime(root = ROOT) {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(root, RUNTIME_FILE), 'utf8'));
+    return { families: Array.isArray(j.families) ? j.families : [], testOwned: Array.isArray(j.testOwned) ? j.testOwned : [] };
+  } catch { return { families: [], testOwned: [] }; }
+}
+
+/**
+ * { unread: [{ name, where }], staleFamilies: [pattern] }. unread = a name in the map (code and tests) or in docs/ that no
+ * production file reads, that no run-time family covers and that is not a test's own fixture name.
+ */
+export function unreadNames(root = ROOT, rows = settingsMap(root)) {
+  const prod = prodTexts(root);
+  const rt = readRuntime(root);
+  const fams = rt.families.map((f) => ({ ...f, re: new RegExp(f.pattern), built: new RegExp(f.template) }));
+  const staleFamilies = fams.filter((f) => !prod.some(([, t]) => f.built.test(t))).map((f) => f.pattern);
+  const live = fams.filter((f) => !staleFamilies.includes(f.pattern));
+  const owned = new Set(rt.testOwned.map((o) => String(o.name)));
+  const places = new Map(rows.map((r) => [r.name, r.files.slice(0, 3).join(', ') || (r.doc || '')]));
+  for (const [n, w] of scanDocs(root)) if (!places.has(n)) places.set(n, w);
+  const unread = [];
+  for (const [name, where] of places) {
+    if (name.endsWith('_')) continue; // a prefix, not a setting
+    if (prod.some(([, t]) => t.includes(name))) continue;
+    if (live.some((f) => f.re.test(name)) || owned.has(name)) continue;
+    unread.push({ name, where });
+  }
+  return { unread: unread.sort((a, b) => (a.name < b.name ? -1 : 1)), staleFamilies };
+}
+
 /**
  * The ratchet: { ok, missing: [{ name, files }], prunable: [names], baseline: n|null, stale: bool }. missing = used in
  * the code, not mentioned in docs/, not in the baseline. stale = docs/SETTINGS.md differs from a fresh map (a note).
@@ -203,7 +252,8 @@ export function checkSettings(root = ROOT) {
   // documented instead of frozen). No main branch or no baseline there (a fresh clone, CI's shallow checkout): skipped.
   const was = baselineAt(root, process.env.STUDIO_SETTINGS_BASE_REF || mainRef());
   const grown = was ? [...base].filter((n) => !was.has(n)).sort() : [];
-  return { ok: missing.length === 0 && grown.length === 0, missing, grown, prunable, baseline: baseline ? baseline.length : null, names: rows.length, stale };
+  const { unread, staleFamilies } = unreadNames(root, rows);
+  return { ok: missing.length === 0 && grown.length === 0 && unread.length === 0 && staleFamilies.length === 0, missing, grown, unread, staleFamilies, prunable, baseline: baseline ? baseline.length : null, names: rows.length, stale };
 }
 
 const gitOut = (root, args) => { const r = spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8' }); return r.status === 0 ? String(r.stdout || '') : null; };
@@ -223,6 +273,12 @@ export function baselineAt(root, ref) {
 export function checkLines(c) {
   const out = [];
   if (c.grown?.length) out.push(`[settings] FAIL ${BASELINE_FILE} gained ${c.grown.length} name(s) since the main branch (${c.grown.slice(0, 8).join(', ')}${c.grown.length > 8 ? ', …' : ''}): it only shrinks. Document each in docs/ and take it out of the baseline.`);
+  if (c.unread?.length) {
+    out.push(`[settings] FAIL ${c.unread.length} STUDIO_* name(s) documented or used in tests that no production code reads (${c.unread.slice(0, 8).map((u) => u.name).join(', ')}${c.unread.length > 8 ? ', …' : ''}):`);
+    for (const u of c.unread.slice(0, 20)) out.push(`  ${u.name} (${u.where})`);
+    out.push(`[settings] Fix: take the name out of the docs and the tests (a setting nothing reads does nothing), or, if production code builds it at run time, add its family to ${RUNTIME_FILE}`);
+  }
+  if (c.staleFamilies?.length) out.push(`[settings] FAIL ${RUNTIME_FILE} lists a family whose builder is gone from production code: ${c.staleFamilies.join(', ')}. Remove the entry.`);
   if (!c.missing.length) return out;
   out.push(`[settings] FAIL ${c.missing.length} STUDIO_* setting(s) used in the code but not documented in docs/${c.baseline === null ? ` (no ${BASELINE_FILE})` : ''}:`);
   for (const m of c.missing.slice(0, 20)) out.push(`  ${m.name} (${m.files.slice(0, 3).join(', ')}${m.files.length > 3 ? ', …' : ''})`);
@@ -238,7 +294,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
     const c = checkSettings();
     if (json) console.log(JSON.stringify(c));
     else if (!c.ok) for (const l of checkLines(c)) console.error(l);
-    else console.log(`[settings] PASS ${c.names} STUDIO_* names: each documented in docs/ or frozen in ${BASELINE_FILE}${c.prunable.length ? `; ${c.prunable.length} baseline name(s) can go (--prune-baseline)` : ''}${c.stale ? '; note: docs/SETTINGS.md is out of date (node scripts/settings-map.mjs)' : ''}`);
+    else console.log(`[settings] PASS ${c.names} STUDIO_* names: each documented in docs/ or frozen in ${BASELINE_FILE}, each read by production code${c.prunable.length ? `; ${c.prunable.length} baseline name(s) can go (--prune-baseline)` : ''}${c.stale ? '; note: docs/SETTINGS.md is out of date (node scripts/settings-map.mjs)' : ''}`);
     process.exit(c.ok ? 0 : 1);
   }
   if (a.includes('--init-baseline')) {
