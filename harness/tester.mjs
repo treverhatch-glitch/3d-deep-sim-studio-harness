@@ -1,26 +1,24 @@
 #!/usr/bin/env node
 /**
- * harness/tester.mjs — 2.79 (t): the game tester. An agent session (role qa-playtester, a vision-capable model) that plays
- * the game's real build in a real browser the way a player would, checks the Game Bible against what is actually in the
- * game, and reports with screenshots. The owner: "a genuine playtester (someone playing) ... they should work with the
- * line producer", "their runs shouldn't stop other parts of production. It's a test to be sure that the game bible is
- * being applied into actual gameplay and to catch what is/isn't in the game as well as gameplay bugs".
+ * harness/tester.mjs — the game tester. An agent session (role qa-playtester, a vision-capable model) that plays the
+ * game's real build in a real browser the way a player would, checks the Game Bible against what is actually in the
+ * game, and reports with screenshots. It works with the line producer and its runs never stop other production.
  *
  * Who starts it: the Line Producer (harness/line-producer.mjs testerPass, on the supervisor's loop), never a person by
  * hand: a run is due when BOTH STUDIO_TESTER_EVERY_HOURS (24) have passed since the last run (or since the tester's first
  * look) AND STUDIO_TESTER_MIN_LANDINGS (10) game landings (task.train.landed / lane.merged) happened since; or when anyone
  * asked (`npm run tester -- now`). STUDIO_TESTER=off stops the schedule (on demand still works). One run at a time.
  *
- * It never blocks production: it takes no machine:heavy slot and no train or gate slot, waits (never preempts) while the
- * machine is starved (the Line's rig check: CPU over STUDIO_LINE_CPU_BUSY_PCT, no RAM room) or while every gate slot is
- * taken, the train runs or waits, or a quiet hold is on. Its session gets its own seat (the launcher's extra allowance),
- * so a builder isn't displaced. Its verdicts hold nothing: no task hold, no gate, no blocked plan slice or landing. Its
- * output is information: a report, bug tasks (P1, deduplicated), one inbox item, one Studio Status line.
+ * It never blocks production: it takes no machine:heavy slot and no train or gate slot, and waits (never preempts) while
+ * the machine is starved (CPU over STUDIO_LINE_CPU_BUSY_PCT, no RAM room), every gate slot is taken, the train runs or
+ * waits, or a quiet hold is on. Its session gets its own seat (the launcher's extra allowance), so a builder isn't
+ * displaced. Its verdicts hold nothing (no task hold, gate, plan slice or landing); its output is information: a report,
+ * bug tasks (P1, deduplicated), one inbox item, one Studio Status line.
  *
  * A run:
- *   1. the harness picks a plan from a seeded RNG over the game's (mode, style, goal) (docs/TESTER.md), writes the brief
- *      (what landed since the last run, a rotating regression area, the Bible's features, every
- *      STUDIO_TESTER_COMPARE_EVERY (3)rd run the genre references) to .studio/tester/runs/<id>/brief.md;
+ *   1. the harness picks a plan from a seeded RNG over the game's (mode, style, goal) (docs/TESTER.md) and writes the
+ *      brief (what landed, a rotating regression area, the Bible's features, every STUDIO_TESTER_COMPARE_EVERY (3)rd
+ *      run the genre references) to .studio/tester/runs/<id>/brief.md;
  *   2. builds the game at the studio branch's commit in its own clean copy (.studio/tester-wt) as a normal child process
  *      (the game's "tester".build, else the cartridge's browser contract) and keeps the dist in the run folder;
  *   3. starts the agent through the launcher (harness/agent.mjs startAgent: a lane copy like a builder's; the tool from
@@ -249,7 +247,7 @@ export async function startRun({ root, env = process.env, now = Date.now(), by =
   const n = (Number(st.runs) || 0) + 1;
   const id = `${new Date(now).toISOString().slice(0, 10)}-r${n}`;
   if (!takeLock(root, id)) {
-    // A lock left by a process that died before it recorded its run (no run going, the lock's process gone) is freed.
+    // A lock left by a process that died before recording its run is freed.
     const l = readJson(lockFile(root), null);
     if (st.current || (l && alive(l.pid) && l.pid !== process.pid) || !takeLock(root, id, { stale: true })) return { error: 'another run is starting or going (.studio/tester/run.lock)' };
   }
@@ -478,7 +476,7 @@ export async function testerPass({ root, now = Date.now(), env = process.env, ac
   if (!act) return { state: 'due', why: `${due.why}: would start a run` };
   const r = await startRun({ root, env, now, by: st.asked?.by || 'line-producer', seed: st.asked?.seed ?? null, inline, deps });
   if (r.error) return { state: 'due', waiting: true, why: r.error };
-  // An inline build (or no build at all) is done now: go on to the launch in the same look.
+  // An inline build (or none) is done now: launch in the same look.
   if (readJson(path.join(r.run.dir, 'build.json'), null)) return testerPass({ root, now, env, act, rig, inline, deps });
   return { state: 'building', run: r.run.id, started: true, why: due.why, line: `tester: run ${r.run.id} building` };
 }
