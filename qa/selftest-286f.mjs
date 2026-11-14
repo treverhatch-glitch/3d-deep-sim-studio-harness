@@ -18,7 +18,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
-export async function selftest286F({ dir, root, report, tmpRoot }) {
+export async function selftest286F({ dir, root, run, report, tmpRoot }) {
   void root;
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
@@ -209,6 +209,36 @@ console.log(JSON.stringify({ n1, low: low.map((e) => e.msg), stop, go, off }));`
     disk.stop?.stop === true && /12 GB free .*under 50 GB, STUDIO_DISK_MIN_FREE_GB\): no new engine worktree or lane copy is started \(a harness reason, not the task's/.test(disk.stop.why) && disk.go?.stop === false && disk.off?.stop === false, JSON.stringify(disk)]);
   const sup = fs.readFileSync(path.join(S, 'harness', 'supervisor.mjs'), 'utf8');
   await guard('2.86 (f) disk: the supervisor checks the stop before a start that would make a new lane copy or engine worktree, says why in its line and notes no start refusal against the task (fails before this fix: nothing looked)', () => [/disk \|\|= \(await import\('\.\/machine\.mjs'\)\)\.diskStop\(\{\}\);\s*if \(disk\.stop && await needsNewCopy\(g\)\) \{\s*why\.push\(`\$\{g\.tasks\[0\]\?\.id\}: \$\{disk\.why\}`\);\s*continue;/.test(sup), 'the disk stop is not in the supervisor start loop']);
+
+  // The same through a real pass of the supervisor, in a studio copy with git, one tool and two ready tasks (the launcher is a
+  // stand-in that records what it was asked to start): under the budget the task that needs a new lane copy is not started and
+  // the pass says why; with the budget off the same pass asks for it.
+  {
+    const gd = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8', env: gEnv() });
+    if (!fs.existsSync(path.join(dir, '.git'))) { gd('init', '-q', '-b', 'main'); gd('add', '-A'); gd('commit', '-qm', 'studio', '--no-verify'); }
+    const senv = { TZ: 'UTC', STUDIO_QUOTA_PROBE: 'off', STUDIO_CLAUDE_PROBE_CMD: 'node -e "process.exit(3)"', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_AUTO_FINISH: 'off', STUDIO_POST_BROWSER_PLAY: 'off', STUDIO_LAUNCH_LOCK_SEC: '1', STUDIO_RND_TOOL: 'claude', STUDIO_TOOL_CLAUDE_CMD: 'node -e 0' };
+    run(dir, 'node harness/mode.mjs set fast --by selftest', senv);
+    run(dir, 'node harness/budget.mjs order claude', senv);
+    for (const t of ['Polish the dock labels', 'Polish the pier labels']) run(dir, `node harness/task.mjs add "${t}" --role rnd --priority P0`, senv);
+    const dh = (f) => JSON.stringify(pathToFileURL(path.join(dir, 'harness', f)).href);
+    fs.writeFileSync(path.join(dir, '.probe-286f-pass.mjs'), `import * as agent from ${dh('agent.mjs')};
+import { supervise } from ${dh('supervisor.mjs')};
+const calls = [];
+const deps = { sessions: agent.sessions, launchableRoles: agent.launchableRoles, nextAgentName: agent.nextAgentName, startAgent: (o) => { calls.push(o.task); return { ok: false, message: 'stand-in: nothing is started' }; } };
+process.env.STUDIO_DISK_MIN_FREE_GB = '99999999';
+const low = await supervise({ dryRun: true, deps }, { startedAt: Date.now() });
+const lowCalls = calls.slice();
+process.env.STUDIO_DISK_MIN_FREE_GB = '0';
+const free = await supervise({ dryRun: true, deps }, { startedAt: Date.now() });
+console.log(JSON.stringify({ lowWhy: low.why, lowCalls, freeCalls: calls.slice(lowCalls.length), freeWhy: free.why }));
+`);
+    const pr = run(dir, 'node .probe-286f-pass.mjs', senv);
+    let pass = {};
+    try { pass = JSON.parse(String(pr.stdout || '').split('\n').filter((x) => x.startsWith('{')).pop()); } catch { pass = { _raw: out(pr).slice(-2500) }; }
+    const held = (pass.lowWhy || []).map((w) => /^(T-\d+): disk low: .*STUDIO_DISK_MIN_FREE_GB\): no new engine worktree or lane copy is started/.exec(w)?.[1]).filter(Boolean);
+    await guard('2.86 (f) disk: a real supervisor pass under the disk budget does not start the task that needs a new lane copy and says so, naming the task and the setting; the same pass with the budget off asks the launcher for that task (fails before this fix: it was started with no room for its copy)', () => [
+      held.length >= 1 && held.every((id) => !pass.lowCalls.includes(id)) && held.some((id) => (pass.freeCalls || []).includes(id)) && !(pass.freeWhy || []).some((w) => /disk low/.test(w)), JSON.stringify(pass).slice(0, 2500)]);
+  }
 
   // ================= atomic =================
   const at = probe(`import { addEngineWorktree } from ${href('engine-worktree.mjs')};

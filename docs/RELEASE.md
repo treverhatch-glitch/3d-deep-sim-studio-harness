@@ -64,6 +64,11 @@ The file ships with the harness; a studio's `npm run autonomy -- impact` scores 
   before the command does anything (shipped twice: `engine-rules.mjs` in 2.82, `budget.mjs` in 2.83). Fix: wrap the
   command-line part in an async function with a `.catch` that exits 1. `--all` also lists, as information only, modules with a
   top-level await that another module imports statically (latent); `--json` prints the offenders with their chain.
+- **Names check (2.86).** `npm run check:names` (`scripts/check-names.mjs`, a step after the top-level await check in the
+  `release-gate` job of ci.yml) fails when a JavaScript file of `harness/`, `scripts/`, `qa/`, `tools/` or the hooks reads a
+  name that is defined nowhere: a variable declared in another block, a name a refactor removed, a typo. It is the
+  TypeScript compiler reading the files as JavaScript and showing only those three findings; types are not checked. About
+  15 seconds. One such name reached the 2.86 pull request in a hand-back text of the engine train.
 - **Settings map (2.66.0).** `node scripts/settings-map.mjs` writes `docs/SETTINGS.md`: every `STUDIO_*` name the code reads,
   with its default, files and the docs page that explains it. The docs gate runs `--check`: a name used in the code must be
   mentioned on a docs/ page or listed in `docs/settings-baseline.json` (the undocumented ones of 2.66.0, frozen; it only

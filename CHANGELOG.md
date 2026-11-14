@@ -32,6 +32,9 @@ first 19.5 hours on 2.85: tasks landed with no overseer step 25% (0% on 2.84), h
   engine task file is written with retries; a promoted proposal's holds follow it; a pool's own `anyModel` flag.
 - **Unused code:** `npm run check:unused` classes every export by reading every text file of the checkout; 17 dead
   exports removed, one duplicate folded, the count left (2) pinned by a test. Of 3,713 exports 20 were dead.
+- **Undefined names:** `npm run check:names` (a step of the online checks) reads every script for a name that is
+  defined nowhere. The online checks caught one in the engine train's capped hand-back (a ReferenceError); it is
+  fixed and was the only one in 656 files.
 - **Not measured:** nothing here has run on a live studio or a real editor yet.
 
 ## [2.85.0] — 2026-11-13

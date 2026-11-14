@@ -137,7 +137,9 @@ const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readF
 // 2.60.1 (B-17, B-35): the same for heavy work's memory floor, the CPU probe (Windows) and an open Unity editor
 // counted as heavy work (qa/selftest-2601m.mjs tests them with its own settings).
 // 2.70.0 (t): no playable build + clip worker after a test train's landing (qa/selftest-270t.mjs turns it on).
-const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
+// 2.86.0 (f): under the disk budget the supervisor starts no new lane copy or engine worktree; checks run with it off so a
+// test machine with little free disk doesn't change their result (qa/selftest-286f.mjs tests the stop with its own setting).
+const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_DISK_MIN_FREE_GB: '0', STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
   // 2.73.0 (g): the copies' verify keys (harness/verify-key.mjs) live in the self-test's temp folder, never in the user's home.
   STUDIO_VERIFY_KEY_DIR: path.join(tmpRoot, 'verify-keys') };
 // Per-unit counters for --timing (harness/selftest-timing.mjs): subprocesses started and checks reported.
@@ -5314,6 +5316,14 @@ if (inShard('selftest-286d')) {
   const dir = copyRepo();
   const { selftest286D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286d.mjs')).href);
   await selftest286D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.86 (h): no name used and defined nowhere (scripts/check-names.mjs, npm run check:names).
+if (inShard('selftest-286h')) {
+  const dir = copyRepo();
+  const { selftest286H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286h.mjs')).href);
+  await selftest286H({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

@@ -124,6 +124,7 @@
     "check:purity": "node scripts/check-sim-purity.mjs",
     "check:isolation": "node scripts/check-sim-isolation.mjs",
     "check:tla": "node scripts/check-top-level-await.mjs",
+    "check:names": "node scripts/check-names.mjs",
     "check:same-code": "node scripts/same-code.mjs",
     "check:unused": "node scripts/unused-exports.mjs",
     "event:sh": "node scripts/append-event.mjs",

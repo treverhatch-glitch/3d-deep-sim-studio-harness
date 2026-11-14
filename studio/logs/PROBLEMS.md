@@ -327,6 +327,14 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 - **Evidence:** a list of files by extension called a function dead that scripts/hooks/commit-msg (no extension) imports; removing it would have broken every commit. A search of all tracked files caught it.
 - **Fix:** scripts/unused-exports.mjs reads every text file of the checkout. qa/selftest-286g.mjs.
 
+### P-337 — a name defined nowhere, in a branch no new check took · caught by the online checks
+- **Evidence:** harness/unity-train.mjs read `bisectMax` in the capped hand-back, outside the block that declared it; qa/selftest-279e.mjs took that branch on the online run and the train ended with a ReferenceError. The local run before the push covered the 2.83 to 2.86 units only.
+- **Fix:** the cap is read through a function in scope. scripts/check-names.mjs (`npm run check:names`, a step of the online checks) reads every script for such a name. qa/selftest-286h.mjs.
+
+### P-338 — the disk stop used the warning's level and stopped a small test machine · caught before release
+- **Evidence:** with 7 GB free, the supervisor in three checks of qa/selftest-pu19.mjs started nothing: STUDIO_DISK_MIN_FREE_GB (20 GB by default) had become a stop in 2.86.
+- **Fix:** the stop stays (its reason is in the pass's line); the self-test's clean environment turns the budget off as it does the memory floor, and qa/selftest-286f.mjs runs a real supervisor pass under the budget and with it off. docs/RELEASE-2.86.0.md says what a studio under its budget sees.
+
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
 - **P-001** (reopened on purpose 2026-10-31: Hatch made the harness and hatchfield-game public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist

@@ -1326,7 +1326,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     const isFlaky = flakyMatcher(s.cfg.flakyTests);
     const fRetries = flakyRetriesOf(s.cfg);
     const krOn = Number(s.cfg.knownRedHours) > 0;
-    const bisectMax = Math.max(1, Math.floor(num(env.STUDIO_ENGINE_BISECT_MAX, 3)));
+    const bisectMax = bisectCap();
     let stageRetried = false;
     let stop = false;
     const byTask = new Map(set.map((l) => [l.task, l]));
@@ -1416,6 +1416,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   function bisectSteps(results) { return results.filter((x) => ['land', 'bisect', 'confirm'].includes(x.kind)).map((x) => ({ n: x.kind === 'bisect' ? x.n : x.group.length, kind: x.kind, status: x.status, ...(x.byName ? { byName: true } : {}), ...(x.failures?.length ? { failures: x.failures.length } : {}) })); }
   // The round's runs as 2.85's bisect event said them: "<target> + A + B: red, <target> + A: pass" (a bisect step by its prefix).
   function bisectText(results) { const all = results[0]?.group || []; return results.filter((x) => ['land', 'bisect', 'confirm'].includes(x.kind)).map((x) => `${target} + ${(x.kind === 'bisect' ? (x.byName ? x.group : all.slice(0, x.n)) : x.group).join(' + ')}: ${x.status}`).join(', '); }
+  function bisectCap() { return Math.max(1, Math.floor(num(env.STUDIO_ENGINE_BISECT_MAX, 3))); }
   /** 2.86: a hand-back the plan decided, with 2.85's texts and events. */
   function handBackStep(st, ls, results, ties) {
     const red = st.red?.r || st.red || {};
@@ -1433,7 +1434,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       const sig = new Set(Array.isArray(results[0]?.failures) ? results[0].failures : []);
       const before = st.green || [];
       ev('bisect', id, `${bisectText(results)}; stopped after ${st.runs} bisect run(s) (STUDIO_ENGINE_BISECT_MAX): ${ls.map((l) => l.task).join(', ')} still fail${before.length ? `, ${before.join(' + ')} landed green` : ''}${redSaid}`, { agent: by, meta: { steps: bisectSteps(results), culprits: ls.map((l) => l.task), capped: true, tests: redTests } });
-      for (const g of ls) drop(g, `${blame(red)}\nThe ${L} train's bisect stopped after ${st.runs} run(s) (STUDIO_ENGINE_BISECT_MAX ${bisectMax}): ${target} + ${[...before, ...ls.map((l) => l.task)].join(' + ')} still shows the batch's failures (${[...sig].slice(0, 5).join(', ')}${sig.size > 5 ? ', ...' : ''}), so one of ${ls.map((l) => l.branch).join(', ')} breaks it${before.length ? `; ${target} + ${before.join(' + ')} landed green` : ''}. Fix it on its branch (bring ${target} in first: ${targetMergeCommand(g.task)}), then task done ${g.task} --train again.`, { evidence: redEvidenceOf(red) });
+      for (const g of ls) drop(g, `${blame(red)}\nThe ${L} train's bisect stopped after ${st.runs} run(s) (STUDIO_ENGINE_BISECT_MAX ${bisectCap()}): ${target} + ${[...before, ...ls.map((l) => l.task)].join(' + ')} still shows the batch's failures (${[...sig].slice(0, 5).join(', ')}${sig.size > 5 ? ', ...' : ''}), so one of ${ls.map((l) => l.branch).join(', ')} breaks it${before.length ? `; ${target} + ${before.join(' + ')} landed green` : ''}. Fix it on its branch (bring ${target} in first: ${targetMergeCommand(g.task)}), then task done ${g.task} --train again.`, { evidence: redEvidenceOf(red) });
       return;
     }
     const culprit = ls[0];

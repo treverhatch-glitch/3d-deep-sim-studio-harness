@@ -34,6 +34,11 @@ check: a matching bug, not memory; the narrowing: a flaky test, not the order of
 7. **Dead code is proven against every tracked file** (P-336). The list by extension was wrong once in twenty.
 8. **Six older checks were rewritten** (285a, 283b, 284h) because the daily full run no longer rides a batch; each
    asserts the new rule for the same subject.
+9. **The online run is the only complete run** (P-337). The local run before the push covered the 2.83 to 2.86 units;
+   a 2.79 check found a name defined nowhere in the train's capped hand-back. `npm run check:names` reads every script
+   for that in 15 seconds: run it before a push.
+10. **A default that stops work is checked on a small machine** (P-338). The disk budget became a stop; with 7 GB free
+   it stopped every start in three older checks. The self-test runs with it off; 286f runs a real pass both ways.
 
 ## Open, most valuable first
 

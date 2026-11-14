@@ -52,6 +52,7 @@ Four findings, each read from the log and the studio's files, not from anyone's 
 | Sparse engine worktrees | `engines.<x>.sparse`: `{ roles, paths }`. A listed role's worktree holds only those folders and the top-level files; merges of the target work, a conflict outside the folders says how to widen (`engine -- lane <ID> --full`). The land run's gate worktree stays full. | `harness/engine-worktree.mjs`, `engine-tracks.mjs` | `qa/selftest-286f.mjs` |
 | Worktrees and disk | One rule for "safe to remove" (landed, done or cancelled; never in progress, queued, or holding uncommitted or unpushed work), applied every 30 minutes, not only after a landing. `STUDIO_DISK_WARN_GB` (60): one `machine.disk_low` a day naming the biggest users, on both volumes. Under the disk budget (`STUDIO_DISK_MIN_FREE_GB`) the supervisor starts no new worktree or lane copy. `engine -- lanes` lists them. | `engine-clean.mjs`, `machine.mjs`, `supervisor.mjs` | 286f |
 | Smaller fixes | A merge of the target re-queues a conflict hand-back, and every "nothing changed" refusal names `--again`. The same force approval answers `--force --train`. The engine task file is written with retries. A promoted proposal's holds follow it to its task id. A model pool's own `"anyModel": true` lets it run on another vendor's tool. | `unity-train.mjs`, `task.mjs`, `engine-tracks.mjs`, `proposed.mjs`, `model-tool.mjs`, `agent.mjs` | `qa/selftest-286e.mjs` |
+| Undefined names | `npm run check:names` (`scripts/check-names.mjs`), a step of the online checks: a name read and defined nowhere, in any script of `harness/`, `scripts/`, `qa/`, `tools/` and the hooks. The TypeScript compiler reads them as JavaScript; only that finding is shown. | `scripts/check-names.mjs`, `.github/workflows/ci.yml` | `qa/selftest-286h.mjs` |
 | Unused code | `npm run check:unused` (`scripts/unused-exports.mjs`): every export classed as used, test-only, internal or dead by reading every text file of the checkout. 17 dead exports removed, one exact duplicate folded; the count left (2) is pinned by a test. | `scripts/unused-exports.mjs` | `qa/selftest-286g.mjs` |
 
 ## The overseer's list, item by item
@@ -75,6 +76,19 @@ shell script with no extension), which imports one of the 20; removing it would 
 reads every text file. 17 are removed, 2 stay (one is the only reader of a documented setting, one sits in a
 protected file), and the test fails if the count rises. 400 more are named only by tests; 14 of those are used by
 nothing else at all. The code is not carrying dead weight by reference; its size is in features that are wired in.
+
+## What the online checks found
+
+- **A name defined nowhere.** The engine train's "bisect stopped at its cap" hand-back read a variable declared in a
+  block it could not see. No check written for 2.86 took that branch; one from 2.79 did, on the online run, and the
+  train ended with a ReferenceError. Fixed, and `npm run check:names` now reads every script for such a name (it found
+  that one and no other in 656 files).
+- **The disk stop on a small machine.** `STUDIO_DISK_MIN_FREE_GB` was a warning until 2.86; it is now also the level
+  under which no new lane copy or engine worktree starts (default: 20 GB, or 5% of the volume when that is more). On a
+  machine with 7 GB free the supervisor of three older checks started nothing, correctly. The self-test now runs with
+  the budget off, as it does for the memory floor, and a new check runs a real supervisor pass under the budget and
+  with it off. A studio already under its budget starts no new copy after this upgrade until space is freed
+  (`npm run janitor`, `npm run engine -- lanes`) or the setting is lowered.
 
 ## Not tested, and not built
 
