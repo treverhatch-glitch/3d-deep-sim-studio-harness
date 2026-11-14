@@ -73,7 +73,6 @@ export const permittedSetter = (agent) => !WORKER_NAME.test(String(agent || '').
 
 /** Decision kinds (approval kinds and the beta actions that decide one). Anything not listed is judged protected. */
 export const BOARD_DECISIONS = Object.freeze(['board', 'type', 'visual', 'lane', 'lanes', 'park', 'unpark', 'stack', 'config', 'train-release', 'hold', 'yes']);
-export const PROTECTED_DECISIONS = Object.freeze(['protected', 'tests', 'hooks', 'force', 'proposal', 'train-config']);
 export const decisionClass = (kind) => (BOARD_DECISIONS.includes(String(kind || '').trim().toLowerCase()) ? 'board' : 'protected');
 /**
  * The owner's switch, STUDIO_PRODUCER_APPROVES=protected: a Producer/Director session may also make protected decisions.

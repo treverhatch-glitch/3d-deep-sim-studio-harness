@@ -55,7 +55,6 @@ export function listEchoes() {
   if (!fs.existsSync(ECHO_DIR)) return [];
   return fs.readdirSync(ECHO_DIR).filter((f) => /^E-\d+\.json$/.test(f)).sort().map((f) => readJson(path.join(ECHO_DIR, f))).filter(Boolean);
 }
-export const pendingEchoes = () => listEchoes().filter((e) => !e.confirmed);
 
 /** The card: "You asked for: X. I will NOT change: Y." */
 export function addEcho({ asked, wont = '', tasks = [], by = 'producer' }) {

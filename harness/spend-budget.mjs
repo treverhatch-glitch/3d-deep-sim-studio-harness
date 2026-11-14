@@ -29,7 +29,6 @@ import { agentEnv, keymapFor } from './agent-env.mjs';
 import { readUsage } from './vertex.mjs';
 import { queueNotice } from './comm-notice.mjs';
 
-export const BUDGETS_REL = '.studio/spend-budgets.json';
 export const PAGE_AT = 0.75;
 const NAME = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/;
 const file = () => path.join(STUDIO_STATE_DIR, 'spend-budgets.json');

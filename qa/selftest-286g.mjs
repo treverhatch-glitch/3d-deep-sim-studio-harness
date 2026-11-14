@@ -13,7 +13,7 @@ import { spawnSync } from 'node:child_process';
 // 2.86: the number of DEAD exports left in the repo. Lower it when you remove more; the check below fails when the
 // tool finds more than this, so a new export that nothing uses cannot be added unnoticed. Print the list with
 // `node scripts/unused-exports.mjs --list DEAD`.
-export const DEAD_EXPORTS_ALLOWED = 20;
+export const DEAD_EXPORTS_ALLOWED = 8;
 
 export async function selftest286G({ dir, report, tmpRoot }) {
   const write = (b, rel, text) => { fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true }); fs.writeFileSync(path.join(b, rel), text); };

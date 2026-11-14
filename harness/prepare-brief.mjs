@@ -240,19 +240,6 @@ export async function prepareBrief({ taskId = null, mode = 'auto', force = false
   return { ok: true, taskId: task.id, by, provider, model, note, wordsIn: w.sourceWords, wordsOut: outWords, file: posix(path.relative(REPO_ROOT, file)), brief: md };
 }
 
-/** Kept for the HUB's "prepare brief" button: the script's version, no model, synchronous. */
-export function buildPreparedBrief() {
-  const task = pickTask(null);
-  if (!task) return { taskId: null, wordCount: 0, mode: 'template', briefPath: null, brief: 'No task in progress or queued.' };
-  const w = gatherWindow(task);
-  const md = render(task, templateBrief(w), { by: 'a script (no model)', note: 'From the HUB button.' });
-  fs.mkdirSync(BRIEFS_DIR, { recursive: true });
-  fs.writeFileSync(path.join(BRIEFS_DIR, `${task.id}.prepared.md`), md);
-  fs.writeFileSync(path.join(BRIEFS_DIR, 'latest.md'), md);
-  emitEvent({ type: 'brief.prepared', agent: 'preparer', to: 'producer', provider: 'template', model: 'none', task: task.id, target: `.studio/briefs/${task.id}.prepared.md`, msg: `Brief for ${task.id} by a script (no model).` });
-  return { taskId: task.id, wordCount: words(md), mode: 'template', briefPath: `.studio/briefs/${task.id}.prepared.md`, brief: md };
-}
-
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   // 2.71.0 (y): `npm run brief -- builder [--write]` is the builder role's generated brief (harness/role-brief.mjs).

@@ -93,11 +93,6 @@ export function readAttached(id) {
     return null;
   }
 }
-/** Every task's attached tricks, for the War Room. */
-export function allAttached() {
-  if (!fs.existsSync(ATTACH_DIR)) return {};
-  return Object.fromEntries(fs.readdirSync(ATTACH_DIR).filter((f) => f.endsWith('.json')).map((f) => [f.slice(0, -5), readAttached(f.slice(0, -5))]).filter(([, v]) => v));
-}
 
 /**
  * Attach the matches to a task, pre-approved by whoever assigns it. The brief shows them from the next
