@@ -472,6 +472,20 @@ export function knownRedOf(root, engine, cfg = {}, now = Date.now()) {
 /** 2.86: tests a probe found red on the target alone at exactly this tip (a later green probe on it clears one). */
 export const targetRedAt = (root, engine, tip) => Object.entries(readFlakes(root, engine).tests).filter(([, t]) => t?.probeRed?.target && t.probeRed.target === tip && !(t.probeGreen?.target === tip && Date.parse(t.probeGreen.at) > Date.parse(t.probeRed.at))).map(([n]) => n);
 
+const probeFile = (root, engine) => path.join(root, '.studio', 'train', `${engine}-probe.json`);
+/**
+ * 2.86: does the engine's land script honour STUDIO_LAND_PROBE=1 (land nothing)? A run of the target alone is safe either way (its
+ * branch is the target itself); a by-name step on lanes is not, so it is used only when the script said so in a run told
+ * STUDIO_LAND_PROBE=1 (an output line "[land-probe] honoured", or "probe": true in its stage report), or the owner set
+ * engines.<x>.landProbe true. A run that moved the target anyway withdraws it until a person removes .studio/train/<x>-probe.json.
+ */
+export function probeHonoured(root, engine = 'unity', cfg = {}) {
+  const j = readJson(probeFile(root, engine));
+  if (j?.revoked) return false;
+  return cfg?.landProbe === true || j?.honoured === true;
+}
+const noteProbe = (root, engine, rec) => { try { const j = readJson(probeFile(root, engine)); if (j?.revoked && !rec.revoked) return; if (j?.honoured === rec.honoured && !rec.revoked) return; writeJson(probeFile(root, engine), { ...rec, at: new Date().toISOString() }); } catch { /* a record only */ } };
+
 const greenFile = (root, engine) => path.join(root, '.studio', 'train', `${engine}-green.json`);
 /** 2.86: the green record: [{ tree, target, kind, train, at }], newest last, 200 at most. */
 export function readGreen(root, engine = 'unity') { const j = readJson(greenFile(root, engine)); return Array.isArray(j) ? j.filter((x) => x && x.tree && x.target && x.kind) : []; }
@@ -492,103 +506,137 @@ export function waitingOnTarget(root, engine = 'unity', queue = null) {
 
 // ---- 2.86: the order of steps after a red, as one pure plan ----
 
-/** Kinds of step whose pass lands its group. A probe and a full run land nothing. */
+/** Kinds of step whose pass lands its group, when it is a complete run (a by-name step lands nothing). */
 const LANDS = new Set(['land', 'retry', 'known-red', 'without', 'apart', 'bisect', 'confirm']);
 
 /**
  * 2.86: the next step of a round of a train (one set of lanes, from its first land run), from the results so far. Pure: no
  * git, no file. in: lanes (task ids, batch order); results [{ kind, group: [task], status, failures?, compileOnly?, lane?,
- * suspect?, tied? }]; ties (undefined: not asked yet; null: no evidence; { suspect, tied, untied }); flaky(name); flakyRetries;
- * stageRetry (the first red's stage is a retry stage and none was retried in this train); targetRed (names a probe found red on
- * this very target); knownRed (engines.<x>.knownRedHours is on); bisectMax; namesOk(names).
- * out: { step, ... }: land | retry | probe | known-red | wait-target | ties | without | apart | bisect | confirm | handback |
- * next-round | done. A handback names `lanes`, its `cause`, the red that blames them and `next` (the lanes of the next round).
- * The order: retries by name (a red on listed flaky tests only: up to flakyRetries; else one for a retry stage), then the
- * target alone (a probe of the same tests, no branch), then the suspect (without / apart), then the prefix search. A culprit
- * is not run alone to confirm when the prefix without it was green on the same target, unless every failure is a flaky one.
+ * suspect?, tied?, byName? }]; ties (undefined: not asked yet; null: no evidence; { suspect, tied, untied }); flaky(name);
+ * flakyRetries; stageRetry (the first red's stage is a retry stage and none was retried in this train); targetRed (names a probe
+ * found red on this very target); knownRed (engines.<x>.knownRedHours is on); bisectMax; namesOk(names); byNameOk (the land
+ * script honours STUDIO_LAND_PROBE: probeHonoured).
+ * out: { step, group?, run: 'complete' | 'name', lands, ... }: land | retry | probe | known-red | wait-target | ties | without |
+ * apart | bisect | confirm | handback | next-round | done. handback and next-round carry `rounds`: the lane lists of the rounds
+ * that follow, in order (each starts with a complete land run).
+ * The order: retries by name (a red on listed flaky tests only: up to flakyRetries; else one for a retry stage), then the target
+ * alone (a probe of the same tests), then the suspect (without / apart), then the prefix search, then a culprit alone (confirm:
+ * 2.83, no blame by elimination). When the red names its tests and byNameOk, every one of those narrowing steps runs only those
+ * tests on its merged tree and lands nothing; the culprit is handed back on the same proof, and the survivors land on ONE
+ * complete run (the next round). Otherwise every step is a complete run, and a green one lands, as before.
  */
-export function nextStep({ lanes = [], results = [], ties = undefined, flaky = () => false, flakyRetries = 2, stageRetry = false, targetRed = [], knownRed = false, bisectMax = 3, namesOk = (n) => Boolean(retryNames(n)) } = {}) {
-  if (!results.length) return { step: 'land', group: lanes.slice() };
-  const landed = new Set(results.filter((x) => x.status === 'pass' && LANDS.has(x.kind)).flatMap((x) => x.group || []));
+export function nextStep({ lanes = [], results = [], ties = undefined, flaky = () => false, flakyRetries = 2, stageRetry = false, targetRed = [], knownRed = false, bisectMax = 3, namesOk = (n) => Boolean(retryNames(n)), byNameOk = false } = {}) {
+  const C = { run: 'complete', lands: true };
+  if (!results.length) return { step: 'land', group: lanes.slice(), ...C };
+  const landed = new Set(results.filter((x) => x.status === 'pass' && LANDS.has(x.kind) && !x.byName).flatMap((x) => x.group || []));
   const left = lanes.filter((t) => !landed.has(t));
   if (!left.length) return { step: 'done' };
   const last = results[results.length - 1];
   // A lane the merge itself names is handed back for its conflict; the rest go on as a new round.
-  if (last.kind !== 'probe' && last.status === 'conflict' && last.lane) return { step: 'handback', lanes: [last.lane], cause: 'conflict', red: last, next: left.filter((t) => t !== last.lane) };
+  if (last.kind !== 'probe' && last.status === 'conflict' && last.lane) return { step: 'handback', lanes: [last.lane], cause: 'conflict', red: last, rounds: [left.filter((t) => t !== last.lane)] };
   const of = (k) => results.filter((x) => x.kind === k);
   const opening = results.filter((x) => ['land', 'retry', 'known-red'].includes(x.kind));
   const main = [...opening].reverse().find((x) => x.status === 'red' || x.status === 'conflict') || results[0];
   const F = [...new Set(Array.isArray(main.failures) ? main.failures : [])];
   const flakyOnly = F.length > 0 && F.every((n) => flaky(n)) && !main.compileOnly;
+  const asNamed = F.length > 0 && namesOk(F) ? { run: 'name', lands: true } : C;
   const inOpening = results.every((x) => ['land', 'retry', 'known-red', 'probe'].includes(x.kind));
   if (inOpening) {
     const retries = of('retry').length;
     const probe = of('probe')[0] || null;
     const kr = of('known-red')[0] || null;
     const proven = flakyOnly && F.every((n) => targetRed.includes(n));
-    if (flakyOnly && !probe && !proven && retries < flakyRetries) return { step: 'retry', group: left, tests: F, known: true, n: retries + 1 };
-    if (!flakyOnly && !main.compileOnly && stageRetry && retries < 1) return { step: 'retry', group: left, tests: F, known: false, n: 1 };
-    if (flakyOnly && !probe && !proven && namesOk(F)) return { step: 'probe', group: [], tests: F };
+    if (flakyOnly && !probe && !proven && retries < flakyRetries) return { step: 'retry', group: left, tests: F, known: true, n: retries + 1, ...asNamed };
+    if (!flakyOnly && !main.compileOnly && stageRetry && retries < 1) return { step: 'retry', group: left, tests: F, known: false, n: 1, ...asNamed };
+    if (flakyOnly && !probe && !proven && namesOk(F)) return { step: 'probe', group: [], tests: F, run: 'name', lands: false };
     const onTarget = proven ? F : probe?.status === 'red' ? ((probe.failures || []).filter((n) => F.includes(n)).length ? (probe.failures || []).filter((n) => F.includes(n)) : F) : [];
     if (flakyOnly && onTarget.length) {
       const otherRed = kr && kr.status === 'red' && (kr.failures || []).some((n) => !onTarget.includes(n));
       if (!otherRed) {
-        if (knownRed && !kr) return { step: 'known-red', group: left, tests: F, known: onTarget };
+        if (knownRed && !kr) return { step: 'known-red', group: left, tests: F, known: onTarget, ...asNamed };
         return { step: 'wait-target', group: left, tests: onTarget, proof: probe ? 'probe' : 'earlier' };
       }
     }
   }
+  // The narrowing steps: by name (land nothing) when the red names its tests and the land script honours STUDIO_LAND_PROBE.
+  const byName = byNameOk && main.status === 'red' && !main.compileOnly && F.length > 0 && namesOk(F);
+  const N = byName ? { run: 'name', lands: false, tests: F, byName: true } : C;
   const w = of('without')[0];
   const a = of('apart')[0];
-  if (w?.status === 'pass') return { step: 'handback', lanes: [w.suspect], cause: 'evidence', red: main, next: [] };
-  if (a?.status === 'pass') return { step: 'next-round', next: a.tied || [] };
-  if (left.length === 1 && !of('bisect').length && !of('confirm').length) return { step: 'handback', lanes: left, cause: 'red', red: main, next: [], proof: 'alone' };
+  if (w?.status === 'pass') return { step: 'handback', lanes: [w.suspect], cause: 'evidence', red: main, rounds: byName ? [left.filter((t) => t !== w.suspect)] : [] };
+  if (a?.status === 'pass' && !byName) return { step: 'next-round', rounds: [a.tied || []] };
   const bis = of('bisect');
-  if (!bis.length) {
+  if (left.length === 1 && !bis.length && !of('confirm').length) return { step: 'handback', lanes: left, cause: 'red', red: main, rounds: [], proof: 'alone' };
+  const apartGreen = byName && a?.status === 'pass';
+  if (!bis.length && !apartGreen) {
     if (ties === undefined) return { step: 'ties', red: main };
-    if (!w && !a && ties?.suspect && left.includes(ties.suspect)) return { step: 'without', group: left.filter((t) => t !== ties.suspect), suspect: ties.suspect };
-    if (!w && !a && (ties?.tied || []).length >= 2 && (ties?.untied || []).length) return { step: 'apart', group: ties.untied.slice(), tied: ties.tied.slice() };
+    if (!w && !a && ties?.suspect && left.includes(ties.suspect)) return { step: 'without', group: left.filter((t) => t !== ties.suspect), suspect: ties.suspect, ...N };
+    if (!w && !a && (ties?.tied || []).length >= 2 && (ties?.untied || []).length) return { step: 'apart', group: ties.untied.slice(), tied: ties.tied.slice(), ...N };
   }
-  // The prefix search over the round's lanes: a green prefix lands; the first red one names its last lane.
+  // The prefix search. Complete runs: a green prefix lands and the search goes on past it. By name: nothing lands, so each step
+  // runs the whole prefix; an untied group found green by name is a green prefix to start from.
+  const order = apartGreen ? [...a.group, ...a.tied.filter((t) => !a.group.includes(t))] : lanes.slice();
   const sig = F.length ? new Set(F) : null;
-  let lo = 0;
-  let hi = lanes.length;
+  let lo = apartGreen ? a.group.length : 0;
+  let hi = order.length;
   let bad = main;
   for (const b of bis) { const mid = Math.floor((lo + hi) / 2); if (b.status === 'pass') lo = mid; else { hi = mid; bad = b; } }
-  if (hi - lo > 1 && sig && bis.length >= bisectMax) return { step: 'handback', lanes: lanes.slice(lo, hi), cause: 'capped', red: bad, next: lanes.slice(hi), green: lanes.slice(0, lo), runs: bis.length };
-  if (hi - lo > 1) { const mid = Math.floor((lo + hi) / 2); return { step: 'bisect', group: lanes.slice(lo, mid), prefix: lanes.slice(0, mid) }; }
-  const culprit = lanes[hi - 1];
+  const after = (t) => (byName ? order.filter((x) => x !== t) : order.slice(order.indexOf(t) + 1));
+  if (!byName && hi - lo > 1 && sig && bis.length >= bisectMax) return { step: 'handback', lanes: order.slice(lo, hi), cause: 'capped', red: bad, rounds: [order.slice(hi)], green: order.slice(0, lo), runs: bis.length };
+  if (hi - lo > 1) { const mid = Math.floor((lo + hi) / 2); return { step: 'bisect', group: byName ? order.slice(0, mid) : order.slice(lo, mid), prefix: order.slice(0, mid), ...N }; }
+  const culprit = order[hi - 1];
   const conf = of('confirm')[0];
-  if (conf) return conf.status === 'pass' ? { step: 'next-round', next: lanes.slice(hi), passedAlone: culprit } : { step: 'handback', lanes: [culprit], cause: 'red', red: conf, next: lanes.slice(hi), proof: 'alone' };
-  const alone = (bad.group || []).length === 1 && bad.group[0] === culprit;
-  const badNames = Array.isArray(bad.failures) ? bad.failures : [];
-  if (!alone && badNames.length && badNames.every((n) => flaky(n))) return { step: 'confirm', group: [culprit] };
-  return { step: 'handback', lanes: [culprit], cause: 'red', red: bad, next: lanes.slice(hi), proof: alone ? 'alone' : 'prefix', green: lanes.slice(0, lo) };
+  if (conf) {
+    if (conf.status === 'pass') return { step: 'next-round', passedAlone: culprit, rounds: byName ? [order.slice(0, hi - 1), [culprit], order.slice(hi)].filter((x) => x.length) : [order.slice(hi)] };
+    return { step: 'handback', lanes: [culprit], cause: 'red', red: conf, rounds: [after(culprit)], proof: 'alone', green: order.slice(0, hi - 1) };
+  }
+  // No blame by elimination (2.83): a culprit that was not red by itself is run alone first (by name when the names are known).
+  if (!((bad.group || []).length === 1 && bad.group[0] === culprit)) return { step: 'confirm', group: [culprit], ...N };
+  return { step: 'handback', lanes: [culprit], cause: 'red', red: bad, rounds: [after(culprit)], proof: 'alone', green: order.slice(0, hi - 1) };
 }
 
 /**
- * 2.86: `bisect-plan`: the steps nextStep would take for made-up outcomes (read-only, nothing runs). lanes: task ids in
- * order; red: the lanes that break any group they are in; flakyRed: the batch is red on a listed flaky test only;
- * targetRed: that test is red on the target alone; tied: the lanes the evidence ties. [{ step, group, status }].
+ * 2.86: `bisect-plan`: the steps nextStep would take for made-up outcomes (read-only, nothing runs). lanes: task ids in order;
+ * red: the lanes that break any group they are in; flakyRed: the batch is red on a listed flaky test only; targetRed: that test is
+ * red on the target alone; passOnRetry: the flaky test passes on that retry (1, 2, ...); tied: the lanes the evidence ties;
+ * byName: the land script honours STUDIO_LAND_PROBE; noNames: the red names no test. landMin / nameMin: minutes of a complete run
+ * and of a run by name. [{ step, group, status, run, lands, minutes }].
  */
-export function bisectPlan({ lanes = [], red = [], flakyRed = false, targetRed = false, tied = [], flakyRetries = 2, bisectMax = 3, knownRed = false } = {}) {
-  const T = 'Made.Up.Flaky.Test';
+export function bisectPlan({ lanes = [], red = [], flakyRed = false, targetRed = false, passOnRetry = 0, tied = [], flakyRetries = 2, bisectMax = 3, knownRed = false, byName = true, noNames = false, landMin = 60, nameMin = 5 } = {}) {
+  const TF = 'Made.Up.Flaky.Test';
+  const TR = 'Made.Up.Red.Test';
   const steps = [];
-  let round = lanes.slice();
-  const results = [];
-  for (let guard = 0; guard < 60 && round.length; guard += 1) {
-    const st = nextStep({ lanes: round, results, ties: results.length && tied.length ? (tied.length === 1 ? { suspect: tied[0], tied, untied: round.filter((t) => !tied.includes(t)) } : { suspect: null, tied: tied.filter((t) => round.includes(t)), untied: round.filter((t) => !tied.includes(t)) }) : results.length ? null : undefined, flaky: (n) => n === T, flakyRetries, stageRetry: false, knownRed, bisectMax });
-    if (st.step === 'done') break;
-    if (st.step === 'handback' || st.step === 'next-round' || st.step === 'wait-target') {
-      steps.push({ step: st.step, group: st.lanes || st.group || st.next || [], ...(st.cause ? { cause: st.cause } : {}) });
-      if (st.step === 'wait-target') break;
-      round = st.next || []; results.length = 0; continue;
+  const pending = [lanes.slice()];
+  for (let guard = 0; guard < 80 && pending.length;) {
+    const round = pending.shift();
+    if (!round.length) continue;
+    const results = [];
+    let retry = 0;
+    for (; guard < 80; guard += 1) {
+      const t = results.length ? (tied.length === 1 && round.includes(tied[0]) ? { suspect: tied[0], tied, untied: round.filter((x) => !tied.includes(x)) } : tied.filter((x) => round.includes(x)).length >= 2 ? { suspect: null, tied: tied.filter((x) => round.includes(x)), untied: round.filter((x) => !tied.includes(x)) } : null) : undefined;
+      const st = nextStep({ lanes: round, results, ties: t, flaky: (n) => n === TF, flakyRetries, stageRetry: false, knownRed, bisectMax, byNameOk: byName, namesOk: () => !noNames });
+      if (st.step === 'done') break;
+      if (['handback', 'next-round', 'wait-target'].includes(st.step)) {
+        steps.push({ step: st.step, group: st.lanes || st.group || [], ...(st.cause ? { cause: st.cause } : {}) });
+        if (st.step !== 'wait-target') pending.unshift(...(st.rounds || []).filter((x) => x.length));
+        else pending.length = 0;
+        break;
+      }
+      const g = st.group || [];
+      if (st.step === 'retry') retry += 1;
+      const lanesRed = g.some((x) => red.includes(x));
+      // Made-up outcomes: a red lane breaks every group it is in; a test red on the target breaks every run but one that leaves it
+      // out (known-red); a flaky test that passes on retry N breaks the first land run and the retries before N.
+      let bad = false;
+      if (st.step === 'known-red') bad = lanesRed;
+      else if (st.step === 'probe') bad = flakyRed && targetRed;
+      else if (lanesRed || (flakyRed && targetRed)) bad = true;
+      else if (flakyRed && passOnRetry > 0) bad = (st.step === 'land' && !results.length && steps.filter((x) => x.status).length === 0) || (st.step === 'retry' && retry < passOnRetry);
+      const status = bad ? 'red' : 'pass';
+      steps.push({ step: st.step, group: g, status, run: st.run, lands: st.lands, minutes: st.run === 'name' ? nameMin : landMin });
+      results.push({ kind: st.step, group: g, status, failures: bad ? [flakyRed ? TF : TR] : [], byName: Boolean(st.byName), ...(st.suspect ? { suspect: st.suspect } : {}), ...(st.tied ? { tied: st.tied } : {}) });
+      guard += 1;
     }
-    const g = st.group || [];
-    const bad = st.step === 'probe' ? targetRed : g.some((t) => red.includes(t)) || (flakyRed && targetRed && st.step !== 'known-red');
-    const status = bad ? 'red' : 'pass';
-    steps.push({ step: st.step, group: g, status });
-    results.push({ kind: st.step, group: g, status, failures: bad ? [flakyRed ? T : 'Made.Up.Red.Test'] : [], ...(st.suspect ? { suspect: st.suspect } : {}), ...(st.tied ? { tied: st.tied } : {}) });
   }
   return steps;
 }
@@ -901,22 +949,36 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     let ref = null;
     let merged = null;
     // 2.86: the target alone (a probe, the daily full run): a ref at the target's tip, so a land script that takes {branch} or
-    // {branches} lands nothing new; it is told STUDIO_LAND_PROBE=1 (land nothing). A recorded green of the same tree, target and
-    // kind of run is not run again.
+    // {branches} lands nothing new; it is told STUDIO_LAND_PROBE=1 (land nothing). opts.noLand: a by-name step of a red's search on
+    // a group of lanes, also STUDIO_LAND_PROBE=1 (only once the land script showed it honours that: probeHonoured). A recorded green
+    // of the same tree, target and kind of run is not run again.
     const alone = !group.length;
-    const kind = alone ? (opts.full ? 'full' : `probe:${[...(opts.retry?.tests || [])].sort().join(';')}`) : null;
-    if (alone) {
-      const tree = out(git(repo, 'rev-parse', `${tip}^{tree}`));
+    const noLand = alone || Boolean(opts.noLand);
+    const named = [...(opts.retry?.tests || [])].sort().join(';');
+    const kind = alone ? (opts.full ? 'full' : `probe:${named}`) : noLand ? `name:${named}` : null;
+    if (noLand) {
+      let head0 = tip;
+      if (!alone) { const c = chainOnTarget(repo, tip, group, id, engine); if (c.error) return { status: 'error', why: c.error }; const bad = [...c.conflictTarget, ...c.deferred][0]; if (bad) return { status: 'conflict', why: bad.why, lane: bad }; head0 = c.head; }
+      const tree = out(git(repo, 'rev-parse', `${head0}^{tree}`));
       const g0 = kind !== 'full' && tree ? greenHas(root, engine, { tree, target: tip, kind }) : null;
       if (g0) {
         log(`[unity-train] ${id}: ${what}: not run again: the same tree on ${target} at ${short(tip)} is recorded green for this run (train ${g0.train || '?'}, ${String(g0.at).slice(0, 16)})`);
-        ev('green_reused', id, `${what}: not run: the target at ${short(tip)} is recorded green for the same run by train ${g0.train || '?'}`, { agent: by, meta: { tree, target: tip, kind, from: g0.train || null } });
+        ev('green_reused', id, `${what}: not run: the same tree on ${target} at ${short(tip)} is recorded green for the same run by train ${g0.train || '?'}`, { agent: by, meta: { tree, target: tip, kind, from: g0.train || null, lanes: group.map((l) => l.task) } });
         return { status: 'pass', ok: true, reused: g0, why: 'recorded green', failures: [], play: opts.play || null };
       }
-      ref = `${UNITY_REF_PREFIX}${id}-target`;
-      merged = tip;
-      if (git(repo, 'update-ref', `refs/heads/${ref}`, tip, '').status !== 0) return { status: 'error', why: `could not make the ref ${ref} at the target` };
-      arg = s.many ? { branches: [ref] } : { branch: ref };
+      if (alone) {
+        ref = `${UNITY_REF_PREFIX}${id}-target`;
+        merged = tip;
+        if (git(repo, 'update-ref', `refs/heads/${ref}`, tip, '').status !== 0) return { status: 'error', why: `could not make the ref ${ref} at the target` };
+        arg = s.many ? { branches: [ref] } : { branch: ref };
+      } else if (s.many) { merged = head0; arg = { branches: group.map((l) => l.branch) }; }
+      else if (group.length === 1) { merged = head0; arg = { branch: group[0].branch }; }
+      else {
+        ref = `${UNITY_REF_PREFIX}${id}`;
+        merged = head0;
+        if (git(repo, 'update-ref', `refs/heads/${ref}`, head0, '').status !== 0) return { status: 'error', why: `could not make the integration branch ${ref}` };
+        arg = { branch: ref };
+      }
     } else if (s.many) arg = { branches: group.map((l) => l.branch) };
     else if (group.length === 1) arg = { branch: group[0].branch };
     else {
@@ -941,7 +1003,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     let knownRedUsed = null;
     try {
       for (let a = 0; ; a += 1) {
-        const checked = !alone && rulesGreen && rulesGreen.tip === tip && rulesGreen.tasks === group.map((l) => l.task).join(',') && rulesGreen.same();
+        const checked = !noLand && rulesGreen && rulesGreen.tip === tip && rulesGreen.tasks === group.map((l) => l.task).join(',') && rulesGreen.same();
         // Once a day (STUDIO_ENGINE_FULL_LAND_HOURS) a land run is told nothing that lets it skip its own tests (no STUDIO_RULES_GREEN, no Edit Mode
         // plan, STUDIO_LAND_FULL=1): the shortcuts rest on tests run outside the editor, and this run would see a difference between the runtimes.
         // 2.86: only ever a run of the target alone (opts.full: its why), never a batch's run or a step of a red.
@@ -950,7 +1012,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         const fullMin = fullWhy ? Number(readJson(fullLandFile(root, engine))?.minutes) || null : null;
         const runText = fullWhy ? `${what}, the daily full run: every test runs, expect about ${fullMin ? `${fullMin} min` : 'the longest land run of the day'}` : what;
         update({ now: `${runText}: ${group.map((l) => l.task).join(', ') || `${target} alone`}${a ? ` (try ${a + 1})` : ''}`, runs: res.runs + 1, full: fullWhy ? { why: fullWhy, minutes: fullMin } : null });
-        log(`[unity-train] ${id}: ${what}: ${alone ? `the target alone, no branch (${ref} at ${short(tip)}; STUDIO_LAND_PROBE=1)` : `land ${group.map((l) => `${l.task} (${l.branch})`).join(', ')}`} on ${target} at ${short(tip)}${ref && !alone ? ` through ${ref}` : ''}`);
+        log(`[unity-train] ${id}: ${what}: ${alone ? `the target alone, no branch (${ref} at ${short(tip)}; STUDIO_LAND_PROBE=1)` : `${noLand ? 'run' : 'land'} ${group.map((l) => `${l.task} (${l.branch})`).join(', ')}`} on ${target} at ${short(tip)}${ref && !alone ? ` through ${ref}` : ''}${noLand && opts.retry?.tests?.length ? `; by name: ${opts.retry.tests.length} test(s), does not land` : noLand ? '; does not land' : ''}`);
         if (fullWhy) log(`[unity-train] ${id}: a full land run (${fullWhy}): the land command is not told the rules are green and gets no Edit Mode plan`);
         if (fullWhy && a === 0 && !dryRun) ev('full_land', id, `the daily full run, on ${target} alone with no branch (${fullWhy}): every test runs${fullMin ? `, expect about ${fullMin} min` : ''}; its red goes to the target's own full-run failures`, { agent: by, to: 'producer', meta: { why: fullWhy, tasks: [], alone: true, ...(fullMin ? { minutes: fullMin } : {}) } });
         // The Play Mode focus (engines.<x>.play.focus): a hint the land script may use. Never on a full land run; a retry of a red play stage
@@ -968,10 +1030,10 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         // What the harness tells a land script is its own: nothing of these comes from the train's environment.
         for (const k of ['STUDIO_LAND_ONLY', 'STUDIO_LAND_RETRY', 'STUDIO_LAND_RETRY_STAGE', 'STUDIO_LAND_RETRY_TESTS', 'STUDIO_LAND_PROBE', 'STUDIO_LAND_KNOWN_RED', 'STUDIO_EDITOR_SERVICE', 'STUDIO_EDITOR_SERVICE_CLI']) delete landEnv[k];
         // 2.86: the target alone lands nothing (a probe or the full run).
-        if (alone) landEnv.STUDIO_LAND_PROBE = '1';
+        if (noLand) landEnv.STUDIO_LAND_PROBE = '1';
         // 2.86 (engines.<x>.knownRedHours, off by default): listed flaky tests a probe found red on the target alone are named to the
         // land script, which may leave them out of its verdict. Never on the target alone; each use is an event naming the probe.
-        if (!alone && a === 0) {
+        if (!noLand && a === 0) {
           const kr = knownRedOf(root, engine, s.cfg);
           const isF = flakyMatcher(s.cfg.flakyTests);
           const names = (opts.knownRed || kr.names).filter((n) => isF(n) && kr.names.includes(n));
@@ -981,7 +1043,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
             ev('known_red', id, `${what}: the land script is told ${names.length} test(s) are red on ${target} alone (STUDIO_LAND_KNOWN_RED, engines.${engine}.knownRedHours): ${names.slice(0, 3).join(', ')}; proved by the probe of train ${pr[0]?.train || '?'} at ${String(pr[0]?.at || '').slice(0, 16)}`, { agent: by, to: 'producer', status: 'warn', meta: { tests: names.slice(0, 10), probes: pr.slice(0, 10), lanes: group.map((l) => l.task) } });
           }
         }
-        if (!alone && knownRedUsed) landEnv.STUDIO_LAND_KNOWN_RED = knownRedUsed.join(';');
+        if (!noLand && knownRedUsed) landEnv.STUDIO_LAND_KNOWN_RED = knownRedUsed.join(';');
         // The warm editor (engines.<x>.warm, harness/editor-service.mjs): offered to the land script, never required. Not healthy after one restart:
         // the variables stay unset (the cold path) and engine.warm.fallback says why.
         if (s.cfg.warm && !dryRun) { try { Object.assign(landEnv, await (await import('./editor-service.mjs')).warmLandEnv({ root, engine, cfg: s.cfg, env, log })); } catch { /* the cold path */ } }
@@ -1085,16 +1147,28 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     } finally {
       if (ref) git(repo, 'update-ref', '-d', `refs/heads/${ref}`);
     }
-    // 2.86: the target alone must not have moved (a land script that does not know STUDIO_LAND_PROBE landed a ref at the target).
-    if (alone) { const now = headOf(repo, target); if (now !== tip) { r = { ...r, moved: now }; log(`[unity-train] ${id}: WARNING: ${target} moved during a run of the target alone (${short(tip)} -> ${short(now)}): the land script should land nothing when STUDIO_LAND_PROBE=1`); ev('probe_moved_target', id, `${target} moved during ${what} (${short(tip)} -> ${short(now)}): the land script should land nothing when STUDIO_LAND_PROBE=1 (docs/NATIVE-ENGINE.md)`, { agent: by, to: 'producer', status: 'warn', meta: { from: tip, to: now } }); } }
+    // 2.86: a run that lands nothing (the target alone, a by-name step) must leave the target where it was. If it moved, the land
+    // script did not honour STUDIO_LAND_PROBE: the run is an error (nobody is blamed, the train holds its lanes), and by-name steps
+    // stop for this engine until a person clears .studio/train/<x>-probe.json.
+    if (noLand && !dryRun) {
+      const now = headOf(repo, target);
+      if (now !== tip) {
+        r = { ...r, status: 'error', ok: false, moved: now, why: `${target} moved (${short(tip)} -> ${short(now)}) during ${what}, a run that must land nothing (STUDIO_LAND_PROBE=1): the land script does not honour it` };
+        noteProbe(root, engine, { honoured: false, revoked: true, why: r.why, train: id });
+        log(`[unity-train] ${id}: STOP: ${r.why}; nobody is blamed, the lanes stay queued; by-name steps are off for ${engine} until .studio/train/${engine}-probe.json is cleared`);
+        ev('probe_moved_target', id, `${r.why}. Nobody is blamed; the lanes stay queued; by-name steps are off until a person clears .studio/train/${engine}-probe.json (docs/NATIVE-ENGINE.md)`, { agent: by, to: 'producer', status: 'blocked', meta: { from: tip, to: now, lanes: group.map((l) => l.task) } });
+      } else if (r.probeAck) noteProbe(root, engine, { honoured: true, train: id });
+    }
     if (knownRedUsed) r = { ...r, knownRed: knownRedUsed };
-    // 2.86: the flake record (named: the tests a retry or a probe ran by name) and the green record of the target alone.
+    // 2.86: the flake record (named: the tests a retry or a probe ran by name) and the green record of runs that land nothing.
     if (!dryRun) {
-      noteFlakes(root, engine, { cfg: s.cfg, r, named: opts.retry?.tests || null, train: id, target: tip, probe: alone && !r.full });
-      if (alone && r.status === 'pass' && !r.moved) { const tree = out(git(repo, 'rev-parse', `${tip}^{tree}`)); if (tree) noteGreen(root, engine, { tree, target: tip, kind, train: id }); }
+      // A by-name step of a search judges branches, not the test: it is not counted.
+      if (alone || !noLand) noteFlakes(root, engine, { cfg: s.cfg, r, named: opts.retry?.tests || null, train: id, target: tip, probe: alone && !r.full });
+      if (noLand && r.status === 'pass' && !r.moved && merged) { const tree = out(git(repo, 'rev-parse', `${merged}^{tree}`)); if (tree) noteGreen(root, engine, { tree, target: tip, kind, train: id }); }
     }
     // 2.85: a daily full run is judged against the target's own full-run failures (fullRunVerdict).
     if (r.full && !dryRun) fullRunVerdict(r);
+    if (r.status === 'pass' && noLand) return { ...r, noLand: true };
     if (r.status === 'pass') {
       const now = headOf(repo, target);
       const missing = group.filter((l) => !isAncestor(repo, l.head, now));
@@ -1237,12 +1311,13 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     let fullCancelled = false;
     if (fullFirst) {
       update({ now: 'the daily full run on the target alone' });
-      const fr = await landGroup([], `the daily full run of ${target}`, { full: fullDue.why });
+      const fr = await landGroup([], `${target} alone`, { full: fullDue.why });
       res.full = { status: fr.status, why: fullDue.why, overdue: fullDue.overdue };
       if (!['pass', 'red'].includes(fr.status)) { log(`[unity-train] ${id}: the full run on the target alone ended ${fr.status} (${fr.why}); it is tried again at the next train`); ev('full_land', id, `the daily full run on ${target} alone could not run to its end (${fr.status}: ${String(fr.why || '').split('\n')[0]}); the land script must take a branch that is the target itself and land nothing (STUDIO_LAND_PROBE=1, docs/NATIVE-ENGINE.md); tried again at the next train`, { agent: by, to: 'producer', status: 'warn', meta: { status: fr.status, why: fullDue.why, alone: true } }); }
       if (fr.status === 'cancelled' || cancelledTrain(root, engine, id)) { hold(set, { ...fr, status: 'cancelled', why: fr.status === 'cancelled' ? fr.why : 'the train was cancelled during the full run' }); fullCancelled = true; }
     }
-    let round = fullCancelled ? [] : set;
+    // The rounds still to run, in order (a round starts with a complete land run of its lanes).
+    const pending = fullCancelled || !set.length ? [] : [set];
     let rounds = 0;
     const again = retryStagesOf(s.cfg, env, engine);
     const isFlaky = flakyMatcher(s.cfg.flakyTests);
@@ -1251,24 +1326,27 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     const bisectMax = Math.max(1, Math.floor(num(env.STUDIO_ENGINE_BISECT_MAX, 3)));
     let stageRetried = false;
     let stop = false;
-    while (round.length && !stop && rounds++ <= set.length + 2) {
-      const byTask = new Map(round.map((l) => [l.task, l]));
-      const lanesOf = (ids) => (ids || []).map((t) => byTask.get(t)).filter(Boolean);
+    const byTask = new Map(set.map((l) => [l.task, l]));
+    const lanesOf = (ids) => (ids || []).map((t) => byTask.get(t)).filter(Boolean);
+    const baseNames = new Set(readFullBaseline(root, engine).failing);
+    while (pending.length && !stop && rounds++ <= 2 * set.length + 4) {
+      const round = pending.shift().filter((l) => live.has(l.task) && !res.landed.includes(l.task));
+      if (!round.length) continue;
       const results = [];
       let ties;
-      let next = [];
+      const nextRounds = (lists) => { pending.unshift(...(lists || []).map((x) => lanesOf(x)).filter((x) => x.length)); };
       for (let n = 0; n < 4 * set.length + 12; n += 1) {
         const first = results[0];
         const stage0 = first?.status === 'red' ? firstRedStage(first.r) : null;
-        const st = nextStep({ lanes: round.map((l) => l.task), results, ties, flaky: isFlaky, flakyRetries: fRetries, stageRetry: !stageRetried && Boolean(stage0 && again.includes(String(stage0).toLowerCase())), targetRed: targetRedAt(root, engine, headOf(repo, target)), knownRed: krOn, bisectMax });
+        const st = nextStep({ lanes: round.map((l) => l.task), results, ties, flaky: isFlaky, flakyRetries: fRetries, stageRetry: !stageRetried && Boolean(stage0 && again.includes(String(stage0).toLowerCase())), targetRed: targetRedAt(root, engine, headOf(repo, target)), knownRed: krOn, bisectMax, byNameOk: probeHonoured(root, engine, s.cfg) });
         if (st.step === 'done') break;
         if (st.step === 'ties') { ties = tiesFor(lanesOf(round.map((l) => l.task).filter((t) => live.has(t))), st.red.r); continue; }
         if (st.step === 'next-round') {
-          if (st.passedAlone) ev('bisect', id, `${bisectText(results)}; ${st.passedAlone} was the one left, and it passed by itself: landed, nobody is handed back`, { agent: by, meta: { steps: bisectSteps(results), confirmed: st.passedAlone, passedAlone: true } });
-          next = lanesOf(st.next); break;
+          if (st.passedAlone) ev('bisect', id, `${bisectText(results)}; ${st.passedAlone} was the one left, and it passed by itself: ${results.some((x) => x.byName) ? 'by name; it lands on a complete run of its own' : 'landed'}, nobody is handed back`, { agent: by, meta: { steps: bisectSteps(results), confirmed: st.passedAlone, passedAlone: true } });
+          nextRounds(st.rounds); break;
         }
         if (st.step === 'wait-target') { waitForTarget(st, lanesOf(st.group), st.proof); stop = true; break; }
-        if (st.step === 'handback') { handBackStep(st, lanesOf(st.lanes), results, ties); next = lanesOf(st.next); break; }
+        if (st.step === 'handback') { handBackStep(st, lanesOf(st.lanes), results, ties); nextRounds(st.rounds); break; }
         // A run.
         const group = lanesOf(st.group);
         const firstRun = results[0]?.r || null;
@@ -1298,8 +1376,13 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         } else if (st.step === 'apart') what = `apart from ${st.tied.join(', ')}`;
         else if (st.step === 'bisect') what = `bisect ${st.prefix.join('+')}`;
         else if (st.step === 'confirm') what = `confirm ${st.group[0]}`;
+        // 2.86: a narrowing step by name runs only the red's tests on its merged tree and lands nothing (STUDIO_LAND_PROBE=1).
+        if (st.byName) { const nt = retryNames(st.tests); what = `${what}, by name`; o = { play: firstRun?.play || null, noLand: true, retry: { stage: firstRedStage(firstRun), tests: nt } }; }
         const r = await landGroup(group, what, o);
-        results.push({ kind: st.step, group: st.group.slice(), status: r.status, failures: Array.isArray(r.failures) ? r.failures : [], compileOnly: Boolean(r.compileOnly), ...(r.lane ? { lane: r.lane.task, laneObj: r.lane } : {}), ...(st.suspect ? { suspect: st.suspect } : {}), ...(st.tied ? { tied: st.tied } : {}), ...(st.prefix ? { n: st.prefix.length } : {}), r });
+        // A run that should have landed nothing moved the target: stop, nobody is blamed (landGroup said why).
+        if (r.moved) { hold(lanesOf(round.map((l) => l.task).filter((t) => live.has(t) && !res.landed.includes(t))), r); stop = true; break; }
+        // The target's own full-run failures are never counted against a lane (2.85), nor narrowed on.
+        results.push({ kind: st.step, group: st.group.slice(), status: r.status, failures: (Array.isArray(r.failures) ? r.failures : []).filter((x) => !baseNames.has(x)), byName: Boolean(st.byName), compileOnly: Boolean(r.compileOnly), ...(r.lane ? { lane: r.lane.task, laneObj: r.lane } : {}), ...(st.suspect ? { suspect: st.suspect } : {}), ...(st.tied ? { tied: st.tied } : {}), ...(st.prefix ? { n: st.prefix.length } : {}), r });
         if (st.step === 'probe') {
           if (!['pass', 'red'].includes(r.status)) log(`[unity-train] ${id}: the run of the target alone could not tell (${r.status}: ${String(r.why || '').split('\n')[0]}); blame goes on as before`);
           else log(`[unity-train] ${id}: the target alone is ${r.status === 'pass' ? 'green' : 'red'} on ${tests.join(', ')}${r.status === 'pass' ? ': a branch makes it red; blame goes on' : ''}`);
@@ -1313,13 +1396,12 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
             res.flaky = [...(res.flaky || []), { stage: sname, failures: fails0.slice(0, 10), ...(tests ? { tests: tests.slice(0, 10) } : {}), ...(st.known ? { known: true, retry: st.n } : {}) }];
             ev('flaky', id, `the same batch passed on retry ${st.n}: ${sname || 'unknown'} failed before (${fails0.slice(0, 3).join(', ') || 'no test named'}); nobody is handed back. A test that fails under load is the game's to fix`, { agent: by, to: 'producer', status: 'warn', meta: { stage: sname, failures: fails0.slice(0, 10), tests: fails0.slice(0, 10), retriedOnly: Boolean(tests), ...(st.known ? { known: true, retry: st.n } : {}), lanes: group.map((l) => l.task) } });
           }
-          close(group, r);
+          if (!st.byName && st.lands !== false) close(group, r);
           continue;
         }
         if (r.status !== 'red' && r.status !== 'conflict') { hold(lanesOf(round.map((l) => l.task).filter((t) => live.has(t) && !res.landed.includes(t))), r); stop = true; break; }
         if (st.step === 'without' || st.step === 'apart') log(`[unity-train] ${id}: the ${st.step === 'without' ? `batch without ${st.suspect}` : 'untied branches by themselves'} ${st.step === 'without' ? 'is' : 'are'} ${r.status} too: the evidence did not hold; searching by land runs`);
       }
-      round = next;
     }
   } finally {
     for (const l of set) deps.clearRunning?.(l.task);
@@ -1328,9 +1410,9 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   if (res.ok) res.ok = res.landed.length > 0 || (!res.dropped.length && !res.deferred.length && !res.waitTarget);
   return finish();
 
-  function bisectSteps(results) { return results.filter((x) => ['land', 'bisect', 'confirm'].includes(x.kind)).map((x) => ({ n: x.kind === 'bisect' ? x.n : x.group.length, kind: x.kind, status: x.status, ...(x.failures?.length ? { failures: x.failures.length } : {}) })); }
+  function bisectSteps(results) { return results.filter((x) => ['land', 'bisect', 'confirm'].includes(x.kind)).map((x) => ({ n: x.kind === 'bisect' ? x.n : x.group.length, kind: x.kind, status: x.status, ...(x.byName ? { byName: true } : {}), ...(x.failures?.length ? { failures: x.failures.length } : {}) })); }
   // The round's runs as 2.85's bisect event said them: "<target> + A + B: red, <target> + A: pass" (a bisect step by its prefix).
-  function bisectText(results) { const all = results[0]?.group || []; return results.filter((x) => ['land', 'bisect', 'confirm'].includes(x.kind)).map((x) => `${target} + ${(x.kind === 'bisect' ? all.slice(0, x.n) : x.group).join(' + ')}: ${x.status}`).join(', '); }
+  function bisectText(results) { const all = results[0]?.group || []; return results.filter((x) => ['land', 'bisect', 'confirm'].includes(x.kind)).map((x) => `${target} + ${(x.kind === 'bisect' ? (x.byName ? x.group : all.slice(0, x.n)) : x.group).join(' + ')}: ${x.status}`).join(', '); }
   /** 2.86: a hand-back the plan decided, with 2.85's texts and events. */
   function handBackStep(st, ls, results, ties) {
     const red = st.red?.r || st.red || {};
@@ -1339,8 +1421,9 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     if (st.cause === 'conflict') { for (const l of ls) drop(l, st.red?.laneObj?.why || blame(red)); return; }
     if (st.cause === 'evidence') {
       const sp = ties?.sp || { tests: [], files: [], what: 'the evidence' };
-      const rest = results.find((x) => x.kind === 'without')?.group || [];
-      for (const l of ls) drop(l, `${blame(red)}\nBlame by evidence: the batch was red${sp.stage ? ` in its ${sp.stage} stage` : ''} on ${sp.tests.length ? sp.tests.slice(0, 5).join(', ') : 'a compile error'}, ${l.branch} (${l.task}) is the only branch that changes ${sp.what}, and the batch without it landed green (${rest.join(', ')}). The files that tie them: ${sp.files.slice(0, 6).join(', ')}. Fix it on ${l.branch} (bring ${target} in first: ${targetMergeCommand(l.task)}), then task done ${l.task} --train again.`, { cause: 'evidence', evidence: { tests: sp.tests, files: sp.files } });
+      const wr = results.find((x) => x.kind === 'without');
+      const rest = wr?.group || [];
+      for (const l of ls) drop(l, `${blame(red)}\nBlame by evidence: the batch was red${sp.stage ? ` in its ${sp.stage} stage` : ''} on ${sp.tests.length ? sp.tests.slice(0, 5).join(', ') : 'a compile error'}, ${l.branch} (${l.task}) is the only branch that changes ${sp.what}, and the batch without it ${wr?.byName ? 'was green on those tests by name (it lands on one complete run next)' : 'landed green'} (${rest.join(', ')}). The files that tie them: ${sp.files.slice(0, 6).join(', ')}. Fix it on ${l.branch} (bring ${target} in first: ${targetMergeCommand(l.task)}), then task done ${l.task} --train again.`, { cause: 'evidence', evidence: { tests: sp.tests, files: sp.files } });
       return;
     }
     if (st.cause === 'capped') {
@@ -1352,10 +1435,11 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     }
     const culprit = ls[0];
     if (!culprit) return;
-    if (results.some((x) => ['bisect', 'confirm'].includes(x.kind)) || st.proof === 'prefix') {
+    if (results.some((x) => ['bisect', 'confirm'].includes(x.kind))) {
       const before = st.green || [];
-      ev('bisect', id, `${bisectText(results)}; first not green with ${culprit.task}${st.proof === 'prefix' ? `: ${target} + ${[...before, culprit.task].join(' + ')} red and ${target} + ${before.join(' + ') || 'nothing'} green on the same target, so no run of ${culprit.task} alone` : ''}${redSaid}`, { agent: by, meta: { steps: bisectSteps(results), culprit: culprit.task, tests: redTests, proof: st.proof || null } });
-      drop(culprit, `${blame(red)}\nThe ${L} train's prefix bisection: ${target} + ${[...before, culprit.task].join(' + ')} is ${red.status}${before.length ? `, ${target} + ${before.join(' + ')} landed green` : ''}; so ${culprit.branch} breaks it${before.length ? ' (alone, or together with the branches before it)' : ''}. Fix it on ${culprit.branch} (bring ${target} in first: ${targetMergeCommand(culprit.task)}), then task done ${culprit.task} --train again.`, { evidence: redEvidenceOf(red) });
+      const nm = results.some((x) => x.byName);
+      ev('bisect', id, `${bisectText(results)}; first not green with ${culprit.task}${nm ? ' (steps by name: none landed; the others land on one complete run next)' : ''}${redSaid}`, { agent: by, meta: { steps: bisectSteps(results), culprit: culprit.task, tests: redTests, byName: nm } });
+      drop(culprit, `${blame(red)}\nThe ${L} train's prefix bisection${nm ? ' (by name: only the failing tests, nothing landed)' : ''}: ${target} + ${[...before, culprit.task].join(' + ')} is ${red.status}${before.length ? `, ${target} + ${before.join(' + ')} ${nm ? 'was green' : 'landed green'}` : ''}, and ${culprit.task} was red by itself; so ${culprit.branch} breaks it. Fix it on ${culprit.branch} (bring ${target} in first: ${targetMergeCommand(culprit.task)}), then task done ${culprit.task} --train again.`, { evidence: redEvidenceOf(red) });
       return;
     }
     drop(culprit, `${blame(red)}\nFix it on ${culprit.branch}, then task done ${culprit.task} --train again.`, { evidence: redEvidenceOf(red) });
@@ -1472,17 +1556,21 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     else console.log(r.error ? r.message : playPlanText(r));
     process.exit(r.error ? 1 : 0);
   }
-  // 2.86: `bisect-plan --lanes A,B,C [--red B] [--flaky] [--target-red] [--tied A,B] [--json]`: the steps a red train would take for
-  // made-up outcomes (nextStep, read-only: nothing runs, nothing is read but the engine's flakyRetries).
+  // 2.86: `bisect-plan --lanes A,B,C [--red B] [--flaky] [--target-red] [--pass-on-retry N] [--tied A,B] [--complete] [--no-names]
+  // [--land-min 60] [--name-min 5] [--json]`: the steps a red train would take for made-up outcomes, with each step's kind of run and
+  // its minutes (nextStep, read-only: nothing runs; only the engine's flakyRetries and knownRedHours are read).
   if (argv[0] === 'bisect-plan') {
     const fl = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
     const list = (k) => String(fl(k) || '').split(',').map((x) => x.trim()).filter(Boolean);
     const cfg = unityConfig(mainRoot(), fl('engine') || 'unity') || {};
-    const steps = bisectPlan({ lanes: list('lanes'), red: list('red'), tied: list('tied'), flakyRed: argv.includes('--flaky'), targetRed: argv.includes('--target-red'), flakyRetries: flakyRetriesOf(cfg), knownRed: Number(cfg.knownRedHours) > 0 });
+    const landMin = Number(fl('land-min')) > 0 ? Number(fl('land-min')) : 60;
+    const nameMin = Number(fl('name-min')) > 0 ? Number(fl('name-min')) : 5;
+    const steps = bisectPlan({ lanes: list('lanes'), red: list('red'), tied: list('tied'), flakyRed: argv.includes('--flaky'), targetRed: argv.includes('--target-red'), passOnRetry: Number(fl('pass-on-retry')) || 0, byName: !argv.includes('--complete'), noNames: argv.includes('--no-names'), flakyRetries: flakyRetriesOf(cfg), knownRed: Number(cfg.knownRedHours) > 0, landMin, nameMin });
+    const ran = steps.filter((x) => x.status);
     if (argv.includes('--json')) console.log(JSON.stringify(steps));
-    else console.log(steps.length ? steps.map((x, i) => `${i + 1}. ${x.step}${x.group.length ? ` ${x.group.join(', ')}` : ''}${x.status ? `: ${x.status}` : ''}${x.cause ? ` (${x.cause})` : ''}`).join('\n') + `\n${steps.filter((x) => x.status).length} land run(s)` : 'Pass --lanes A,B,C (and --red B for the lanes that break a run).');
+    else console.log(steps.length ? `${steps.map((x, i) => `${i + 1}. ${x.step}${x.group.length ? ` ${x.group.join(', ')}` : x.step === 'probe' ? ' (the target alone)' : ''}${x.status ? `: ${x.status} [${x.run === 'name' ? 'by name' : 'complete run'}, ~${x.minutes} min${x.lands ? '' : ', does not land'}]` : ''}${x.cause ? ` (${x.cause})` : ''}`).join('\n')}\n${ran.length} land run(s): ${ran.filter((x) => x.run !== 'name').length} complete, ${ran.filter((x) => x.run === 'name').length} by name; about ${ran.reduce((k, x) => k + x.minutes, 0)} min` : 'Pass --lanes A,B,C (and --red B for the lanes that break a run).');
     process.exit(list('lanes').length ? 0 : 1);
   }
-  console.error('Usage: node harness/unity-train.mjs status [--json] | queue --task <ID> [--again] | play-plan [--branch b | --paths a,b] | bisect-plan --lanes A,B,C [--red B] [--flaky] [--target-red] [--tied A]   (npm run task -- train --unity runs a Unity train)');
+  console.error('Usage: node harness/unity-train.mjs status [--json] | queue --task <ID> [--again] | play-plan [--branch b | --paths a,b] | bisect-plan --lanes A,B,C [--red B] [--flaky] [--target-red] [--pass-on-retry N] [--tied A] [--complete] [--no-names]   (npm run task -- train --unity runs a Unity train)');
   process.exit(1);
 }

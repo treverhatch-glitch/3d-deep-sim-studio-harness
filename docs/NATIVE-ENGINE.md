@@ -225,7 +225,7 @@ scorecard's Play stage line counts skipped runs.
 | `STUDIO_LAND_RETRY_STAGE` | The stage that was red (`play`, `edit`, ...). |
 | `STUDIO_LAND_RETRY_TESTS` | The failed tests' full names joined by `;`: re-run just those on the merged tree; land if they pass. |
 | `STUDIO_LAND_RESULT` | A file to write the stage report to (`stages`/`gates`, and a `failures` list of test full names). |
-| `STUDIO_LAND_PROBE` | `1` (2.86): the run is of the target alone; the branch it is given is a ref at the target's own tip. Run the tests (with `STUDIO_LAND_RETRY_TESTS`: only those; with `STUDIO_LAND_FULL=1`: all) and land nothing: exit 0 green, 1 red. |
+| `STUDIO_LAND_PROBE` | `1` (2.86): land nothing. Merge the branch(es) given (for the target alone: a ref at the target's own tip), run the tests (with `STUDIO_LAND_RETRY_TESTS`: only those; with `STUDIO_LAND_FULL=1`: all), put the worktree back; exit 0 green, 1 red. Print `[land-probe] honoured` so the train may run its by-name steps on lanes. |
 | `STUDIO_LAND_KNOWN_RED` | (2.86, only with `engines.<x>.knownRedHours`) listed flaky tests a probe found red on the target alone, joined by `;`: a script may leave them out of its verdict and land when nothing else is red. |
 
 ```bash
@@ -302,9 +302,8 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
   <id> handed <branch> back for <reason>: the same red would repeat". `--again` queues it anyway
   (`task.train.<x>.requeued_unchanged`). A landing clears the record.
 - **No blame by elimination.** A lane that the search by land runs leaves over ("everything before it was green") is
-  run by itself before it is handed back. If it passes, it lands and nobody is handed back. 2.86: only when every
-  failing test of that red is on `flakyTests`; otherwise "with it red, without it green, on the same target" is the
-  proof and the lane is handed back with no run of its own (see below).
+  run by itself before it is handed back. If it passes, it lands and nobody is handed back. 2.86: when the red names its
+  tests, that run is by name (minutes, see below).
 - **Handed back means out.** A lane the train hands back leaves the train's record at once, so `task start` on its
   fix works while the train is still landing the rest.
 - **A full land run once a day.** Every `engines.<x>.fullLandHours` hours (default 24, `STUDIO_ENGINE_FULL_LAND_HOURS`,
@@ -358,11 +357,29 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
   target moves, so the same tree on the same target cannot come back.
 - **One plan for the order of steps (2.86).** `nextStep` in `harness/unity-train.mjs` is pure: from a round's lanes,
   its results so far and the evidence ties it returns the next step (retry, probe, known-red run, wait for the target,
-  without, apart, bisect, confirm, hand back, next round). `npm run engine -- bisect-plan --lanes A,B,C,D --red B
-  [--flaky] [--target-red] [--tied A]` prints the steps for made-up outcomes and counts the land runs.
-- **No confirm run after a clean prefix proof (2.86).** When the prefix with lane L is red and the same prefix without
-  L was green on the same target (it landed), L is handed back without a run of its own. Only a red whose failing tests
-  are all on `flakyTests` still gets the confirm run.
+  without, apart, bisect, confirm, hand back, next round), each with its kind of run (`complete` or `name`) and whether
+  a pass lands. `npm run engine -- bisect-plan --lanes A,B,C,D --red B [--flaky] [--target-red] [--pass-on-retry N]
+  [--tied A] [--complete] [--no-names] [--land-min 60] [--name-min 5]` prints the steps for made-up outcomes, each with
+  its kind of run and minutes, and the total.
+- **The search by name (2.86).** When a red land run names its failing tests (safe on a command line, 50 at most) and
+  the land script honours `STUDIO_LAND_PROBE`, every narrowing step (the suspect's `without` and `apart`, the prefix
+  search) and the confirm run run only those tests on that step's merged tree, with `STUDIO_LAND_PROBE=1` and the retry
+  variables: minutes, not an hour, and they land nothing. The log line of each says "by name: N test(s), does not land".
+  A lane is handed back on the same proof as before (red with it, green without it, on the same target; red by itself).
+  Then ONE complete land run of the survivors lands them; if it is red on other tests, the search starts again from that
+  red. When the red names no test (a compile error, a time-out, a crash, no results), or the script has not shown that
+  it honours `STUDIO_LAND_PROBE`, every step is a complete land run and a green one lands, as before. The script shows
+  it by printing a line `[land-probe] honoured` (or `"probe": true` in its stage report) in a run told
+  `STUDIO_LAND_PROBE=1` (a probe or the full run; kept in `.studio/train/<x>-probe.json`), or the owner sets
+  `engines.<x>.landProbe: true`. A by-name step on lanes gives the script the lanes' branches (or an integration
+  branch): a script that ignored the variable could land them, which is why it must have said so first.
+- **When a run that must land nothing moves the target (2.86).** After every run told `STUDIO_LAND_PROBE=1` the train
+  compares the target's tip with the one before. A run of the target alone gets a ref at the target's own tip as its
+  branch, so a script that knows nothing of the variable merges nothing new and the tip stays where it was. If it moved
+  anyway (the script committed or pushed something), the run counts as an error: the train stops at once, nobody is
+  blamed, the round's lanes stay queued, `task.train.<x>.probe_moved_target` (blocked, to the producer) says what moved,
+  and `.studio/train/<x>-probe.json` is marked revoked, so by-name steps on lanes are off for that engine until a person
+  removes the file. A lane that the run did land is closed by the next train (it is already in the target).
 - **Branches that land alone by path (2.86).** `engines.<x>.batchAlone`: a list of regexes over changed paths (for
   example long Play Mode scenario tests). A queued branch that changes a matching path lands alone, as `--alone` does,
   and the batch line says which path.

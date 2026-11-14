@@ -242,12 +242,14 @@ console.log(JSON.stringify({
     const ctl = path.join(T, 'ctl-play-full');
     setEngines({ unity: cfgFor(E, ctl, { play: PLAY }) });
     fs.mkdirSync(path.join(S, '.studio', 'engine'), { recursive: true });
-    fs.writeFileSync(path.join(S, '.studio', 'engine', 'unity-full-land.json'), JSON.stringify({ at: new Date(Date.now() - 25 * 3600000).toISOString(), id: null }));
+    // 2.86: the full run is overdue (49 h, past 2 x 24), so it runs on the target alone before the lane.
+    fs.writeFileSync(path.join(S, '.studio', 'engine', 'unity-full-land.json'), JSON.stringify({ at: new Date(Date.now() - 49 * 3600000).toISOString(), id: null }));
     queue(E, [['T-921', 'feat/a']]);
     const r = probe(TRAIN, { STUDIO_ENGINE_FULL_LAND_HOURS: '24' });
     const runs = runsOf(ctl);
-    await guard('2.84 play focus, a full land run due: although every path is mapped, the daily full land run (STUDIO_LAND_FULL=1) gets STUDIO_PLAY_MODE=full and no filter (fails before this fix: STUDIO_PLAY_MODE was never set)', () => [
-      r.landed?.join() === 'T-921' && r.fullLand === 1 && runs.length === 1 && runs[0].full === '1' && runs[0].playMode === 'full' && runs[0].playFilter === null && runs[0].playArgs === null,
+    await guard('2.84 play focus, a full land run due (2.86: the full run is its own run on the target alone, so the batch\'s play focus is unaffected by it): the daily full land run (STUDIO_LAND_FULL=1) gets STUDIO_PLAY_MODE=full and no filter; the lane\'s own land run after it, every path mapped, gets STUDIO_PLAY_MODE=focus and its filter (fails before this fix: STUDIO_PLAY_MODE was never set)', () => [
+      r.landed?.join() === 'T-921' && r.fullLand === 1 && runs.length === 2 && runs[0].full === '1' && runs[0].playMode === 'full' && runs[0].playFilter === null && runs[0].playArgs === null
+        && runs[1].full !== '1' && runs[1].playMode === 'focus' && Boolean(runs[1].playFilter),
       JSON.stringify({ r, runs }).slice(0, 2000)]);
   }
   {

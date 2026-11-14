@@ -294,8 +294,8 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## EDITOR_* (2)
 
-- `STUDIO_EDITOR_SERVICE` · no simple default · harness/editor-service.mjs, harness/unity-train.mjs, qa/selftest-284s.mjs · [NATIVE-ENGINE.md:446](NATIVE-ENGINE.md)
-- `STUDIO_EDITOR_SERVICE_CLI` · no simple default · harness/editor-service.mjs, harness/unity-train.mjs, qa/selftest-284s.mjs · [NATIVE-ENGINE.md:446](NATIVE-ENGINE.md)
+- `STUDIO_EDITOR_SERVICE` · no simple default · harness/editor-service.mjs, harness/unity-train.mjs, qa/selftest-284s.mjs · [NATIVE-ENGINE.md:463](NATIVE-ENGINE.md)
+- `STUDIO_EDITOR_SERVICE_CLI` · no simple default · harness/editor-service.mjs, harness/unity-train.mjs, qa/selftest-284s.mjs · [NATIVE-ENGINE.md:463](NATIVE-ENGINE.md)
 
 ## ENGINE_* (43)
 
@@ -309,13 +309,13 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_ENGINE_CHECK_STALE_MIN` · no simple default · harness/engine-check.mjs · [ENGINE-TRACKS.md:377](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_CHECK_WAIT_MIN` · no simple default · harness/engine-check.mjs · [ENGINE-TRACKS.md:377](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_FLAGS` · no simple default · harness/engine-tracks.mjs, harness/engine-tune.mjs, harness/unity-gate.mjs · [ENGINE-TRACKS.md:312](ENGINE-TRACKS.md)
-- `STUDIO_ENGINE_FULL_LAND_HOURS` · no simple default · harness/unity-train.mjs, qa/selftest-283b.mjs, qa/selftest-284h.mjs (+7 more) · [NATIVE-ENGINE.md:310](NATIVE-ENGINE.md)
+- `STUDIO_ENGINE_FULL_LAND_HOURS` · no simple default · harness/unity-train.mjs, qa/selftest-283b.mjs, qa/selftest-284h.mjs (+7 more) · [NATIVE-ENGINE.md:309](NATIVE-ENGINE.md)
 - `STUDIO_ENGINE_HOLD_MAX_MIN` · no simple default · harness/engine-ram.mjs, qa/selftest-2791b.mjs · [ENGINE-TRACKS.md:247](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_KEEP_BUILDS` · no simple default · harness/engine-clean.mjs, qa/selftest-283h.mjs · [ENGINE-TRACKS.md:387](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_KILLED_RETRY_SEC` · no simple default · harness/unity-train.mjs, qa/selftest-284s.mjs, qa/selftest-284t.mjs (+3 more) · [NATIVE-ENGINE.md:286](NATIVE-ENGINE.md)
 - `STUDIO_ENGINE_LAND_WAIT_MIN` · no simple default · harness/engine-ram.mjs, harness/unity-gate.mjs, qa/selftest-2791b.mjs · [ENGINE-TRACKS.md:248](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_LANES` · no simple default · harness/agent.mjs, qa/selftest-2782e.mjs · [ENGINE-TRACKS.md:75](ENGINE-TRACKS.md)
-- `STUDIO_ENGINE_LANE_CLEAN` · no simple default · harness/unity-train.mjs · [NATIVE-ENGINE.md:383](NATIVE-ENGINE.md)
+- `STUDIO_ENGINE_LANE_CLEAN` · no simple default · harness/unity-train.mjs · [NATIVE-ENGINE.md:400](NATIVE-ENGINE.md)
 - `STUDIO_ENGINE_LANE_REQUIRED` · no simple default · harness/agent.mjs · [ENGINE-TRACKS.md:81](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_LINE_ROOM` · no simple default · harness/heavy-budget.mjs, qa/selftest-2781h.mjs · [ENGINE-TRACKS.md:238](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_NEAR_MIN` · no simple default · harness/engine-ram.mjs, harness/line-producer.mjs, qa/selftest-2791b.mjs · [ENGINE-TRACKS.md:242](ENGINE-TRACKS.md)
@@ -470,7 +470,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## HEAVY_* (19)
 
 - `STUDIO_HEAVY_HELD` · default `'1'` · harness/asset-gate.mjs, harness/flake-quiet.mjs, harness/heavy.mjs (+24 more) · undocumented
-- `STUDIO_HEAVY_IGNORE_ARGS` · no simple default · harness/heavy.mjs, qa/selftest-2653a.mjs, qa/selftest-284s.mjs · [NATIVE-ENGINE.md:451](NATIVE-ENGINE.md)
+- `STUDIO_HEAVY_IGNORE_ARGS` · no simple default · harness/heavy.mjs, qa/selftest-2653a.mjs, qa/selftest-284s.mjs · [NATIVE-ENGINE.md:468](NATIVE-ENGINE.md)
 - `STUDIO_HEAVY_MAX_*` · no simple default · harness/heavy-budget.mjs · [WORK-ORGANIZATION.md:334](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_MAX_BLENDER` · no simple default · harness/blender-job.mjs, qa/selftest-270t.mjs · [WORK-ORGANIZATION.md:335](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_MAX_UNITY` · no simple default · qa/selftest-268n.mjs, qa/selftest-2781f.mjs, qa/selftest-279e.mjs · [WORK-ORGANIZATION.md:334](WORK-ORGANIZATION.md)
@@ -542,7 +542,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_LAND_LOCK_STALE_MS` · default `120000` · harness/merge-lane.mjs · undocumented
 - `STUDIO_LAND_LOCK_WAIT_MS` · default `180000` · harness/merge-lane.mjs · undocumented
 - `STUDIO_LAND_ONLY` · no simple default · harness/unity-gate.mjs, harness/unity-train.mjs, qa/selftest-284s.mjs (+4 more) · [NATIVE-ENGINE.md:223](NATIVE-ENGINE.md)
-- `STUDIO_LAND_PROBE` · no simple default · harness/unity-train.mjs, qa/selftest-286b.mjs · [NATIVE-ENGINE.md:228](NATIVE-ENGINE.md)
+- `STUDIO_LAND_PROBE` · no simple default · harness/unity-gate.mjs, harness/unity-train.mjs, qa/selftest-285a.mjs (+1 more) · [NATIVE-ENGINE.md:228](NATIVE-ENGINE.md)
 - `STUDIO_LAND_RESULT` · no simple default · harness/score.mjs, harness/unity-gate.mjs, qa/selftest-282a.mjs (+6 more) · [ENGINE-TRACKS.md:357](ENGINE-TRACKS.md)
 - `STUDIO_LAND_RETRY` · no simple default · harness/unity-train.mjs, qa/selftest-284t.mjs, qa/selftest-285a.mjs (+2 more) · [NATIVE-ENGINE.md:224](NATIVE-ENGINE.md)
 - `STUDIO_LAND_RETRY_STAGE` · no simple default · harness/unity-train.mjs, qa/selftest-284t.mjs, qa/selftest-285b.mjs · [NATIVE-ENGINE.md:225](NATIVE-ENGINE.md)
@@ -962,7 +962,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_UNITY_CODE_ONLY` · no simple default · harness/unity.mjs, qa/selftest-2671k.mjs, qa/selftest-270u.mjs (+2 more) · [UNITY-TRACK.md:218](UNITY-TRACK.md)
 - `STUDIO_UNITY_CODE_OPT` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:280](UNITY-TRACK.md)
 - `STUDIO_UNITY_EDITMODE_ARGS` · no simple default · harness/unity-gate.mjs, qa/selftest-282a.mjs, qa/selftest-283b.mjs (+2 more) · [NATIVE-ENGINE.md:219](NATIVE-ENGINE.md)
-- `STUDIO_UNITY_EDITMODE_PLAN` · no simple default · harness/unity-gate.mjs, qa/selftest-284s.mjs, qa/selftest-284t.mjs (+3 more) · [NATIVE-ENGINE.md:408](NATIVE-ENGINE.md)
+- `STUDIO_UNITY_EDITMODE_PLAN` · no simple default · harness/unity-gate.mjs, qa/selftest-284s.mjs, qa/selftest-284t.mjs (+3 more) · [NATIVE-ENGINE.md:425](NATIVE-ENGINE.md)
 - `STUDIO_UNITY_EDITMODE_REUSE` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs, qa/selftest-272c.mjs (+1 more) · [UNITY-TRACK.md:253](UNITY-TRACK.md)
 - `STUDIO_UNITY_GATE_TIMEOUT_MIN` · default `120` · harness/unity-gate.mjs, qa/selftest-2732e.mjs · [UNITY-TRACK.md:146](UNITY-TRACK.md)
 - `STUDIO_UNITY_GRAPHICS_SPLIT` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs, qa/selftest-272c.mjs (+1 more) · [UNITY-TRACK.md:268](UNITY-TRACK.md)

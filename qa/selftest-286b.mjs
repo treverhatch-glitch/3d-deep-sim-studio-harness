@@ -104,13 +104,15 @@ if (fl) { const [st, name, count] = fl.split(' '); const n = Number(opt('flakyco
 const ar = opt('alwaysred');
 if (ar) { const [st, name] = ar.split(' '); reds.push([st, [name]]); }
 for (const st of ['edit', 'play']) { const f = path.join(gw, st + '-bad.txt'); if (fs.existsSync(f)) { const t = fs.readFileSync(f, 'utf8').trim(); reds.push([st, [t.startsWith('rev:') ? t.slice(4).split('').reverse().join('') : t]]); } }
+if (E.STUDIO_LAND_PROBE === '1' && opt('moveonprobe') !== null) { fs.writeFileSync(path.join(gw, 'moved.txt'), String(Date.now())); git(gw, 'add', '-A'); git(gw, 'commit', '-qm', 'a script that ignores STUDIO_LAND_PROBE'); console.log('landed anyway'); process.exit(0); }
+if (E.STUDIO_LAND_PROBE === '1' && opt('noack') === null) console.log('[land-probe] honoured');
 if (opt('honour') !== null && E.STUDIO_LAND_KNOWN_RED) { const k = E.STUDIO_LAND_KNOWN_RED.split(';'); reds = reds.map(([st, n]) => [st, n.filter((x) => !k.includes(x))]).filter(([, n]) => n.length); }
 const stages = (bad) => { if (E.STUDIO_LAND_RESULT) fs.writeFileSync(E.STUDIO_LAND_RESULT, JSON.stringify({ gates: Object.fromEntries(order.map((n, i) => [n, bad && order.indexOf(bad) < i ? null : { status: n === bad ? 'fail' : 'pass', seconds: 10 }]).filter(([, v]) => v)) })); };
 if (reds.length) {
   reds.sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
   git(gw, 'reset', '-q', '--hard', before);
   stages(reds[0][0]);
-  for (const [, names] of reds) for (const n of names) console.log('  Failed ' + n + ' [3 ms]');
+  if (opt('quiet') === null) for (const [, names] of reds) for (const n of names) console.log('  Failed ' + n + ' [3 ms]');
   console.log(reds.reduce((k, [, n]) => k + n.length, 0) + ' test(s) failed');
   process.exit(1);
 }
@@ -129,7 +131,7 @@ console.log('landed ' + srcs.join(' '));
   const TRAIN = `import { runUnityTrain, readUnityQueue, unityStatusText } from ${u('harness/unity-train.mjs')};
 const handed = []; const logs = [];
 const r = await runUnityTrain({ root: process.cwd(), log: (m) => logs.push(String(m)), deps: { handBack: (lane, note, extra) => handed.push({ task: lane.task, note, extra: extra || null }) } });
-console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: r.dropped, deferred: r.deferred, waitTarget: r.waitTarget || null, full: r.full || null, fullLand: r.fullLand || 0, fullRedOnTarget: r.fullRedOnTarget || null, batch: r.batch || null, message: r.message, handed, logs: logs.filter((l) => /full|blame plan|target alone|recorded green|not run again|no run of|confirm/.test(l)), queue: readUnityQueue(process.cwd()).map((e) => e.task), status: unityStatusText(process.cwd(), { engine: 'unity' }) }));`;
+console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: r.dropped, deferred: r.deferred, waitTarget: r.waitTarget || null, full: r.full || null, fullLand: r.fullLand || 0, fullRedOnTarget: r.fullRedOnTarget || null, batch: r.batch || null, message: r.message, handed, logs: logs.filter((l) => /full|blame plan|target alone|recorded green|not run again|no run of|confirm|by name/.test(l)), queue: readUnityQueue(process.cwd()).map((e) => e.task), status: unityStatusText(process.cwd(), { engine: 'unity' }) }));`;
   const rev = (s) => `rev:${s.split('').reverse().join('')}`;
   const FLAKY = 'Game.Slice.PlayTests.TurnTests.RunsInOrderOnScreen';
   const NOFULL = { STUDIO_ENGINE_FULL_LAND_HOURS: 'off' };
@@ -194,9 +196,9 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: 
     const r = probe(TRAIN, NOFULL);
     const runs = runsOf(ctl);
     const pe = evs(/^task\.train\.unity\.probe$/);
-    await guard('2.86 (b) the probe passes on the target alone: blame goes on: T-621 lands, T-622 (whose branch makes the flaky test red every time) is handed back; one task.train.unity.probe event; no engine.red_on_target; the probe landed nothing (fails before this fix: there was no probe)', () => [
-      r.landed?.join() === 'T-621' && r.dropped?.map((d) => d.task).join() === 'T-622' && runs.filter((x) => x.probe === '1').length === 1 && pe.length === 1 && evs(/^engine\.red_on_target$/).length === 0
-        && r.logs?.some((l) => /the target alone is green/.test(l)),
+    await guard('2.86 (b) the probe passes on the target alone: blame goes on, by name (the probe showed the land script honours STUDIO_LAND_PROBE): [a] by name green, T-622 alone by name red (the confirm, 2.83), nothing landed by them; T-622 is handed back, T-621 lands on one complete run; one task.train.unity.probe event; no engine.red_on_target (fails before this fix: there was no probe)', () => [
+      r.landed?.join() === 'T-621' && r.dropped?.map((d) => d.task).join() === 'T-622' && runs.length === 7 && runs.filter((x) => x.probe === '1').length === 3 && runs[6].retryTests === null && runs[6].srcs.join() === 'feat/a'
+        && pe.length === 1 && evs(/^engine\.red_on_target$/).length === 0 && r.logs?.some((l) => /the target alone is green/.test(l)),
       JSON.stringify({ r, runs: runs.map((x) => [x.srcs, x.probe, x.retryTests]) }).slice(0, 3000)]);
   }
 
@@ -269,21 +271,54 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: 
       JSON.stringify({ r, runs }).slice(0, 2500)]);
   }
 
-  // ================= 6. no confirm run after a clean prefix proof =================
+  // ================= 6. the search by name; complete runs when no test is named =================
   {
     resetState();
     const BAD = 'Game.Made.Up.Tests.BrokenTests.Breaks';
     const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/b': { 'b.txt': 'b\n', 'edit-bad.txt': `${rev(BAD)}\n` }, 'feat/c': { 'c.txt': 'c\n' }, 'feat/d': { 'd.txt': 'd\n' } });
-    const ctl = path.join(T, 'ctl-no-confirm');
-    setEngines({ unity: cfgFor(E, ctl) });
+    const ctl = path.join(T, 'ctl-by-name');
+    setEngines({ unity: cfgFor(E, ctl, { landProbe: true }) });
     queue(E, [['T-671', 'feat/a'], ['T-672', 'feat/b'], ['T-673', 'feat/c'], ['T-674', 'feat/d']]);
+    const tip0 = tipOf(E);
     const r = probe(TRAIN, NOFULL);
     const runs = runsOf(ctl);
+    const byName = runs.filter((x) => x.probe === '1');
     const be = evs(/^task\.train\.unity\.bisect$/);
-    await guard('2.86 (b) no confirm run: [a,b,c,d] red, [a,b] red, [a] green and landed: b is handed back with no run of its own (with it red, without it green, on the same target), then [c,d] land: 4 land runs; the bisect event says the proof (fails before this fix: b was run alone to confirm, 5 runs)', () => [
-      r.runs === 4 && runs.length === 4 && !runs.some((x) => x.srcs.join() === 'feat/b') && r.dropped?.map((d) => d.task).join() === 'T-672' && r.landed?.join() === 'T-671,T-673,T-674'
-        && be.length === 1 && be[0].meta?.proof === 'prefix' && /no run of T-672 alone/.test(be[0].msg),
-      JSON.stringify({ r, runs: runs.map((x) => x.srcs), be: be.map((e) => e.msg) }).slice(0, 2500)]);
+    await guard('2.86 (b) the search by name: [a,b,c,d] red on a named test; [a,b] by name red, [a] by name green, b alone by name red (the confirm, kept), each with STUDIO_LAND_PROBE=1 and only the failing test, none landing or moving the target; b is handed back; a, c, d land on ONE complete run: 5 runs, 2 complete; the log says "by name: 1 test(s), does not land" (fails before this fix: every step was a complete land run, 5 complete runs)', () => [
+      r.runs === 5 && runs.length === 5 && byName.length === 3 && byName.every((x) => x.retryTests === BAD && x.before === tip0)
+        && runs[4].retryTests === null && runs[4].probe === null && r.dropped?.map((d) => d.task).join() === 'T-672' && r.landed?.join() === 'T-671,T-673,T-674'
+        && be.length === 1 && be[0].meta?.byName === true && r.logs?.filter((l) => /by name: 1 test\(s\), does not land/.test(l)).length === 3,
+      JSON.stringify({ n: r.runs, landed: r.landed, dropped: r.dropped?.map((d) => d.task), logs: r.logs, runs: runs.map((x) => [x.srcs, x.probe, x.retryTests, x.before === tip0]), be: be.map((e) => e.meta) }).slice(0, 3000)]);
+  }
+  {
+    resetState();
+    const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/b': { 'b.txt': 'b\n', 'edit-bad.txt': `${rev('Game.Made.Up.Tests.BrokenTests.Breaks')}\n` } });
+    const ctl = path.join(T, 'ctl-no-names');
+    fs.writeFileSync(`${ctl}-quiet`, '1');
+    setEngines({ unity: cfgFor(E, ctl, { landProbe: true }) });
+    queue(E, [['T-675', 'feat/a'], ['T-676', 'feat/b']]);
+    const r = probe(TRAIN, NOFULL);
+    const runs = runsOf(ctl);
+    await guard('2.86 (b) a red that names no test (here the land script prints no names): every step is a complete run as before: [a,b] red, [a] lands, b alone red (the confirm) and is handed back; no run is told STUDIO_LAND_PROBE and the bisect event says byName false (fails before this fix: the bisect event did not say how its steps ran)', () => [
+      evs(/^task\.train\.unity\.bisect$/)[0]?.meta?.byName === false && r.runs === 3 && runs.every((x) => x.probe === null && x.retryTests === null) && r.landed?.join() === 'T-675' && r.dropped?.map((d) => d.task).join() === 'T-676' && runs[2].srcs.join() === 'feat/b'
+        && !fs.existsSync(path.join(S, '.studio', 'train', 'unity-probe.json')) && fs.existsSync(path.join(S, '.studio', 'train', 'unity-flakes.json')) === false,
+      JSON.stringify({ r, runs }).slice(0, 2000)]);
+  }
+  {
+    resetState();
+    const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/b': { 'b.txt': 'b\n' } });
+    const ctl = path.join(T, 'ctl-moves');
+    fs.writeFileSync(`${ctl}-alwaysred`, `play ${FLAKY}`);
+    fs.writeFileSync(`${ctl}-moveonprobe`, '1');
+    setEngines({ unity: cfgFor(E, ctl, { flakyTests: [FLAKY] }) });
+    queue(E, [['T-677', 'feat/a'], ['T-678', 'feat/b']]);
+    const tip0 = tipOf(E);
+    const r = probe(TRAIN, NOFULL);
+    const pm = evs(/^task\.train\.unity\.probe_moved_target$/);
+    let pj = null; try { pj = JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'unity-probe.json'), 'utf8')); } catch { /* checked below */ }
+    await guard('2.86 (b) a land script that commits on a probe anyway (it ignores STUDIO_LAND_PROBE): the train sees the target moved, stops with nobody handed back and both lanes still queued, writes task.train.unity.probe_moved_target (blocked, to the producer) and withdraws by-name steps (.studio/train/unity-probe.json revoked) (fails before this fix: there was no probe)', () => [
+      tipOf(E) !== tip0 && !r.landed?.length && !r.dropped?.length && !r.handed?.length && r.deferred?.length === 2 && queueNow().length === 2 && pm.length === 1 && pm[0].status === 'blocked' && pj?.revoked === true,
+      JSON.stringify({ r, pm: pm.map((e) => e.msg), pj }).slice(0, 2500)]);
   }
 
   // ================= 7. a recorded green probe is not run again =================
@@ -344,8 +379,8 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: 
     const runs = runsOf(ctl);
     const byName = runs.filter((x) => x.retryTests);
     const be = evs(/^task\.train\.unity\.blame$/);
-    await guard('2.86 (b) the crew\'s 6-branch shape: 9 land runs, of which 3 are short runs by name (2 retries, 1 probe on the target alone) and none is the daily full run; the 2.85 tie (apart) still costs one run; T-702 is handed back after a confirm run (its red is on a listed flaky test), T-701, T-703, T-704, T-705 land (fails before this fix: 7 land runs, one of them the daily full run inside the bisect)', () => [
-      r.runs === 9 && runs.length === 9 && byName.length === 3 && runs.filter((x) => x.probe === '1').length === 1 && runs.every((x) => x.landFull === null)
+    await guard('2.86 (b) the crew\'s 6-branch shape, recorded outcomes: 9 land runs, only 2 of them complete (the batch, then the four survivors); 7 by name (2 retries, the probe on the target alone, apart, two bisect steps, the confirm), 5 of which land nothing; none is the daily full run; T-702 is handed back, T-701, T-703, T-704, T-705 land on one complete run (fails before this fix: 7 complete land runs, one of them the daily full run inside the bisect)', () => [
+      r.runs === 9 && runs.length === 9 && byName.length === 7 && runs.filter((x) => x.probe === '1').length === 5 && runs.filter((x) => !x.retryTests).length === 2 && runs.every((x) => x.landFull === null) && runs[8].srcs.join() !== ''
         && be[0]?.meta?.plan === 'apart' && r.dropped?.map((d) => d.task).join() === 'T-702' && r.landed?.slice().sort().join() === 'T-701,T-703,T-704,T-705',
       JSON.stringify({ r, runs: runs.map((x) => [x.srcs.join('+'), x.retryTests ? 'byname' : '', x.probe, x.landFull]) }).slice(0, 3000)]);
   }
@@ -360,17 +395,22 @@ console.log(JSON.stringify({
   probe: nextStep({ lanes: ['A', 'B'], results: [{ kind: 'land', group: ['A', 'B'], status: 'red', failures: ['F'] }, { kind: 'retry', group: ['A', 'B'], status: 'red', failures: ['F'] }, { kind: 'retry', group: ['A', 'B'], status: 'red', failures: ['F'] }], flaky }),
   proven: nextStep({ lanes: ['A', 'B'], results: [{ kind: 'land', group: ['A', 'B'], status: 'red', failures: ['F'] }], flaky, targetRed: ['F'] }),
   prefix: nextStep({ lanes: ['A', 'B'], results: [{ kind: 'land', group: ['A', 'B'], status: 'red', failures: ['X'] }, { kind: 'bisect', group: ['A'], status: 'pass' }], ties: null }),
+  byName: nextStep({ lanes: ['A', 'B', 'C'], results: [{ kind: 'land', group: ['A', 'B', 'C'], status: 'red', failures: ['X'] }], ties: null, byNameOk: true }),
+  noNames: nextStep({ lanes: ['A', 'B', 'C'], results: [{ kind: 'land', group: ['A', 'B', 'C'], status: 'red', failures: [] }], ties: null, byNameOk: true }),
+  survivors: nextStep({ lanes: ['A', 'B', 'C'], results: [{ kind: 'land', group: ['A', 'B', 'C'], status: 'red', failures: ['X'] }, { kind: 'bisect', group: ['A'], status: 'pass', byName: true }, { kind: 'bisect', group: ['A', 'B'], status: 'red', byName: true, failures: ['X'] }, { kind: 'confirm', group: ['B'], status: 'red', byName: true, failures: ['X'] }], ties: null, byNameOk: true }),
   flakyPrefix: nextStep({ lanes: ['A', 'B'], results: [{ kind: 'land', group: ['A', 'B'], status: 'red', failures: ['F'] }, { kind: 'retry', group: ['A', 'B'], status: 'red', failures: ['F'] }, { kind: 'retry', group: ['A', 'B'], status: 'red', failures: ['F'] }, { kind: 'probe', group: [], status: 'pass' }, { kind: 'bisect', group: ['A'], status: 'pass' }], ties: null, flaky }),
   crewOld: bisectPlan({ lanes: ['A', 'B', 'C', 'D'], red: ['B'] }),
 }));`);
-    await guard('2.86 (b) nextStep is pure: no result yet: land all; a flaky-only red after 1 retry: retry 2; after 2: probe the target alone (group []); red names a probe already found red on this tip: wait for the target at once; a clean prefix proof: hand back with proof "prefix" (no confirm); the same with a flaky-only red: confirm; bisectPlan of 4 lanes with the second bad: 4 runs (fails before this fix: there was no plan function)', () => [
-      r.first?.step === 'land' && r.first.group.join() === 'A,B' && r.retry2?.step === 'retry' && r.retry2.n === 2 && r.probe?.step === 'probe' && r.probe.group.length === 0 && r.probe.tests.join() === 'F'
-        && r.proven?.step === 'wait-target' && r.prefix?.step === 'handback' && r.prefix.proof === 'prefix' && r.prefix.lanes.join() === 'B' && r.flakyPrefix?.step === 'confirm'
-        && r.crewOld?.filter((x) => x.status).length === 4,
+    await guard('2.86 (b) nextStep is pure and says each step\'s kind of run: no result yet: land all (complete); a flaky-only red after 1 retry: retry 2 (by name); after 2: probe the target alone (group [], by name, does not land); red names a probe already found red on this tip: wait for the target at once; a culprit after a green prefix is still confirmed alone (2.83); with byNameOk the first narrowing step is by name and lands nothing, with no names it is complete; after a by-name hand-back the survivors (A, C) are the next round; bisectPlan of 4 lanes with the second bad: 5 runs, 2 complete (fails before this fix: there was no plan function)', () => [
+      r.first?.step === 'land' && r.first.group.join() === 'A,B' && r.first.run === 'complete' && r.retry2?.step === 'retry' && r.retry2.n === 2 && r.retry2.run === 'name' && r.probe?.step === 'probe' && r.probe.group.length === 0 && r.probe.tests.join() === 'F' && r.probe.lands === false
+        && r.proven?.step === 'wait-target' && r.prefix?.step === 'confirm' && r.prefix.group.join() === 'B' && r.prefix.run === 'complete' && r.flakyPrefix?.step === 'confirm'
+        && r.byName?.step === 'bisect' && r.byName.run === 'name' && r.byName.lands === false && r.noNames?.step === 'bisect' && r.noNames.run === 'complete'
+        && r.survivors?.step === 'handback' && r.survivors.lanes.join() === 'B' && r.survivors.rounds?.[0]?.join() === 'A,C'
+        && r.crewOld?.filter((x) => x.status).length === 5 && r.crewOld.filter((x) => x.run === 'complete').length === 2,
       JSON.stringify(r).slice(0, 2500)]);
     const cli = spawnSync(process.execPath, [path.join(S, 'harness', 'engine.mjs'), 'bisect-plan', '--lanes', 'A,B,C,D', '--red', 'B'], { windowsHide: true, cwd: S, env: envOf(), encoding: 'utf8', timeout: 120000 });
-    await guard('2.86 (b) npm run engine -- bisect-plan --lanes A,B,C,D --red B prints the steps and "4 land run(s)" (fails before this fix: no such command)', () => [
-      cli.status === 0 && /handback B/.test(out(cli)) && /4 land run\(s\)/.test(out(cli)),
+    await guard('2.86 (b) npm run engine -- bisect-plan --lanes A,B,C,D --red B prints the steps with their kind of run and minutes: "5 land run(s): 2 complete, 3 by name; about 135 min" (fails before this fix: no such command)', () => [
+      cli.status === 0 && /handback B/.test(out(cli)) && /\[by name, ~5 min, does not land\]/.test(out(cli)) && /5 land run\(s\): 2 complete, 3 by name; about 135 min/.test(out(cli)),
       out(cli).slice(0, 1500)]);
   }
 }
