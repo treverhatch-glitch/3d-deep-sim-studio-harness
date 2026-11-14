@@ -5261,6 +5261,14 @@ if (inShard('selftest-285g')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.86 (g): code nothing uses: a read-only tool finds it, each removal is proved.
+if (inShard('selftest-286g')) {
+  const dir = copyRepo();
+  const { selftest286G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286g.mjs')).href);
+  await selftest286G({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
