@@ -88,7 +88,9 @@ function toolBySetting(model, settings) {
 }
 
 /**
- * Which tool runs this model id: { tool, from: 'pool'|'setting'|'shape', why } or { tool: null, why }.
+ * Which tool runs this model id: { tool, from: 'pool'|'setting'|'shape', why } or { tool: null, why }. 2.86: a pool the owner marked
+ * `"anyModel": true` in studio/models.json adds `anyModel: true` (the owner chose to run that model on that tool: the launcher's
+ * per-pool counterpart of STUDIO_AGY_ANY_MODEL).
  * opts.models: a readModels() result (else read from root when given); opts.env: the environment; opts.root: the main
  * checkout (its .env and studio/models.json).
  */
@@ -104,7 +106,7 @@ export function toolForModel(model, { env = process.env, root = null, models = n
   }
   for (const [name, p] of Object.entries(cfg?.pools || {})) {
     if (!p || !p.tool || !p.model || p.off === true) continue;
-    if (norm(p.model) === norm(m) || (String(p.tool).toLowerCase() === 'vertex' && vx(p.model) === vx(m) && /\//.test(m))) return { tool: String(p.tool).toLowerCase(), from: 'pool', why: `the pool ${name} in studio/models.json runs ${p.model} on ${p.tool}` };
+    if (norm(p.model) === norm(m) || (String(p.tool).toLowerCase() === 'vertex' && vx(p.model) === vx(m) && /\//.test(m))) return { tool: String(p.tool).toLowerCase(), from: 'pool', ...(p.anyModel === true ? { anyModel: true } : {}), why: `the pool ${name} in studio/models.json runs ${p.model} on ${p.tool}` };
   }
   const s = toolBySetting(m, env || {}) || toolBySetting(m, envFileSettings(root));
   if (s) return { tool: s.tool, from: 'setting', why: `${s.where} names ${m} for ${s.tool}` };

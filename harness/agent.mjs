@@ -53,17 +53,17 @@ import { layoutPrompt, recordPrefix, cacheStats, LONG_CACHE_ROLES, volatileLeaks
 import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
 import { recordDenials } from './denials.mjs';
 import { taskType } from './done-check.mjs';
-import { listLocks, release, claim, renewOwner, tooBroad } from './lock.mjs';
+import { listLocks, release, claim, renewOwner, tooBroad, holderGone } from './lock.mjs';
 import { AGY_STREAM_FLAGS, agyStreamOn, agyStreamWanted, userLine, driveAgyStream, taskStillOpen, streamFailure, readStreamRecord, writeStreamRecord, streamRecordHolds, STREAM_RECORD } from './agy-stream.mjs';
 import { savePatch } from './wip.mjs';
 import { laneList, laneEntries, readHolds, laneOf } from './task-hold.mjs';
 import { regionOnlyFiles } from './lane-regions.mjs';
 import { engineLaunch, syncEngineTarget, engineWork, targetMergeCommand } from './engine-tracks.mjs';
-import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport, isLaneWorktree, LANES_DIR, laneLive } from './worktree.mjs';
+import { mainRoot, laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport, isLaneWorktree, LANES_DIR, laneLive } from './worktree.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { ownerOnlyStep } from './owner-only.mjs';
 import { markExhausted, quotaKeyFor, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
-import { sessionLimits, heartbeatCheck, newRedCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
+import { sessionLimits, sessionProgress, heartbeatCheck, newRedCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
 import { agentEnv, nimKeyMissing, nimModel, NIM_DEFAULT_MODEL, agentLikeName } from './agent-env.mjs';
 import { aiderProgram, writeAiderIgnore, excludeAiderFiles } from './aider-launch.mjs';
@@ -93,7 +93,7 @@ import { sessionOutcome, parkIfNoWork, holdIfSameRefusal } from './session-outco
 import { PLANNING_OUTCOME_ROLES, boardEventsBy } from './wake-gate.mjs';
 import { startRefusal, sameBlocker, recordAttempt } from './attempts.mjs';
 import { writeAtomic } from './fsafe.mjs';
-import { selfIdentity, spawnedIdentity, pidAlive, recordAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
+import { selfIdentity, spawnedIdentity, pidAlive, recordAlive, pidExists, readStarts, sameProcess, liveAs } from './proc-identity.mjs';
 import { gateEnv } from './gate-env.mjs';
 import { vertexModel, vertexConfigured, ensureProxy, proxyBase, sessionKey, sessionUsage, overPromptCap, promptCap } from './vertex.mjs';
 import { registeredTool, registryPrice } from './tool-registry.mjs';
@@ -262,6 +262,8 @@ export function reviewerRoute({ plan, tool, explicitTool = false, env = process.
 const reviewRoot = () => { try { return studioRoot(); } catch { return REPO_ROOT; } };
 /** STUDIO_AGY_ANY_MODEL=on (or --force-model): agy may run a model that isn't Gemini (a person's explicit choice). */
 export const agyAnyModel = (env = process.env) => /^(on|1|true|yes)$/i.test(String(env.STUDIO_AGY_ANY_MODEL || '').trim());
+/** 2.86: a studio/models.json pool marked "anyModel": true runs its model on agy (the owner's choice for that pool), whatever the vendor. */
+export const poolAnyModel = (model, root = reviewRoot()) => { try { const n = toolForModel(model, { root }); return n.from === 'pool' && n.tool === 'agy' && n.anyModel === true; } catch { return false; } };
 export function agyOptions(model = null, env = process.env) {
   const word = (v, d) => (/^[\w.:-]{1,60}$/.test(String(v ?? '').trim()) ? String(v).trim() : d);
   const timeout = word(env.STUDIO_AGY_PRINT_TIMEOUT, '5400s');
@@ -269,6 +271,24 @@ export function agyOptions(model = null, env = process.env) {
   const flag = /^(off|0|false|no|none)$/i.test(String(env.STUDIO_AGY_MODEL_FLAG || '')) ? null : (/^--?[\w-]{1,30}$/.test(String(env.STUDIO_AGY_MODEL_FLAG || '').trim()) ? String(env.STUDIO_AGY_MODEL_FLAG).trim() : '--model');
   const m = model && model !== 'unknown' ? word(model, null) : null;
   return ['--print-timeout', /^\d+$/.test(timeout) ? `${timeout}s` : timeout, ...(mode ? ['--mode', mode] : []), ...(flag && m ? [flag, m] : [])];
+}
+
+/**
+ * 2.86 (B-140): the folders a session's tool is given with --add-dir. A session in a lane copy gets the main checkout's
+ * studio/ and .studio/ (laneShareDirs); with STUDIO_LANE_ADD_MAIN_DIR=on (the studio's choice; off by default, since lane
+ * isolation is a design rule) also the main checkout itself, which opens read AND edit of it without a prompt. A session
+ * in the main checkout gets neither (it works there already); an engine pass also gets its engine worktree.
+ */
+export function laneAddDirs({ copy = null, engineDir = null, env = process.env, root = mainRoot() } = {}) {
+  const dirs = [];
+  if (copy) {
+    if (/^(on|1|true|yes)$/i.test(String(env.STUDIO_LANE_ADD_MAIN_DIR || '').trim())) {
+      try { dirs.push(fs.realpathSync.native(root)); } catch { dirs.push(path.resolve(root)); }
+    }
+    dirs.push(...laneShareDirs(root));
+  }
+  if (engineDir) dirs.push(engineDir);
+  return dirs;
 }
 
 /**
@@ -400,14 +420,20 @@ export function claimSessionEnd(agent, startedAt, by = 'launcher') {
   return true;
 }
 
-/** Frees locks held by agents with a launcher session record and no running session. People and CLI owners have no record and are left alone. */
-export async function releaseDeadLocks(list = sessions()) {
+/**
+ * Frees locks held by agents with a launcher session record and no running session (sessions(): running is judged by the
+ * recorded start identity, harness/proc-identity.mjs). People and CLI owners have no record and are left alone.
+ * 2.86: a claim the harness made again in the owner's name after its session ended (busy.mjs keepClaim, lock.kept) is
+ * still the ended session's and is freed too; a task claim whose task waits in a train's queue is left to the train.
+ */
+export async function releaseDeadLocks(list = sessions(), { queued = (id) => { try { return Boolean(inAnyTrain(id)); } catch { return false; } } } = {}) {
   const known = new Map();
   for (const s of list) known.set(s.agent, (known.get(s.agent) || false) || s.running);
   const endedAt = new Map(list.filter((s) => !s.running && s.endedAt).map((s) => [s.agent, Date.parse(s.endedAt) || 0]));
   const { releaseDeadOwners } = await import('./lock.mjs');
   // Only claims made before the session ended are its own (a chat bot reclaiming under the same name keeps its claim).
-  const freed = releaseDeadOwners((owner, l) => known.has(owner) && !known.get(owner) && !(endedAt.get(owner) && Date.parse(l?.claimedAt || '') > endedAt.get(owner)));
+  const freed = releaseDeadOwners((owner, l) => known.has(owner) && !known.get(owner) && !(endedAt.get(owner) && Date.parse(l?.claimedAt || '') > endedAt.get(owner) && !l?.kept)
+    && !(String(l?.key || '').startsWith('task:') && queued(String(l.key).slice(5))));
   if (freed.length) emitEvent({ type: 'lock.dead_released', agent: 'watch', msg: `Freed ${freed.length} lock(s) held by agents whose process is gone: ${freed.join(', ')}`.slice(0, 300), meta: { freed } });
   return freed;
 }
@@ -674,6 +700,41 @@ export function agyCutShort({ tool, code, log }) {
   return null;
 }
 
+// 2.86 (B-140): what Claude Code prints when a headless session needs a permission it was not given.
+const PERMISSION_PROMPT = /requested permissions to (?:read|write|edit|use|access)(?: from| to)?\b|haven't granted it yet/i;
+/** 2.86: the folder a permission prompt asked for ("… to read from <folder>, but you haven't granted it yet"), or null. */
+export const promptFolder = (text) => (String(text || '').match(/requested permissions to \w+ (?:from|to) (.+?)(?:,\s*but\b|\s*$)/i)?.[1] || '').replace(/["']/g, '').trim() || null;
+/**
+ * 2.86: why a session is a launch failure, or null: it never started (a spawn error), or it ended non-zero with no
+ * assistant turn in its log, or its last output is a permission prompt. Not a refresh, a stop, a provider's refusal, an
+ * agy cut-short or an end the launcher caused (stall, idle, budget). "Before its first turn" is read from Claude Code's
+ * stream-json log only.
+ */
+export function launchFailure({ code, log = '', exit = {}, capped = false, stop = null, trouble = null, agyCut = null, tool = 'claude' }) {
+  if (capped || stop || trouble || agyCut || exit?.killedBy) return null;
+  if (exit?.spawnError) return `it never started: ${String(exit.spawnError).slice(0, 160)}`;
+  if (!code) return null;
+  const tail = String(log || '').slice(-6000);
+  const perm = tail.split(/\r?\n/).reverse().find((l) => PERMISSION_PROMPT.test(l));
+  if (perm) { const folder = promptFolder(perm); return `it stopped on a permission prompt (${(perm.match(PERMISSION_PROMPT)?.[0] || 'permission').trim()}${folder ? ` ${folder}` : ''})`; }
+  // Only Claude Code's stream-json log says where its turns are; other tools' logs are plain text.
+  // Claude Code started (its stream-json init line) and ended before any assistant turn; a tool that printed an error
+  // and exited without starting is the run's own failure, not a launch failure.
+  if (tool === 'claude' && /"type"\s*:\s*"system"[^\n]*"subtype"\s*:\s*"init"/.test(String(log)) && sessionProgress(log).turns === 0 && !/"type"\s*:\s*"assistant"/.test(String(log))) return 'it ended before its first turn';
+  return null;
+}
+
+/**
+ * 2.86: did a refreshed session do no work on its task? No commit (the studio's or its engine worktree's), not done, no
+ * uncommitted work saved with its hand-back, and no file edit seen in its log (the refresh flag's worked mark).
+ */
+export function refreshDidNoWork({ outcome = null, handed = [], flag = null } = {}) {
+  if (flag?.worked) return false;
+  if (handed.some((h) => h?.patch)) return false;
+  if (!outcome) return true;
+  return !outcome.done && !((Number(outcome.commits) || 0) + (Number(outcome.engineCommits) || 0));
+}
+
 /** After an agent exits: record it, and if it died holding work, hand the work back cleanly. */
 export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, model, cmd = null, exit = {}, followUps = 0, nudges = 0, aider = null }) {
   const agyLine = tool === 'agy' ? agyStopLine(usageLog ?? log) : null;
@@ -700,6 +761,12 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   // is marked out until then and the hand-back says "usage limit", so the breaker, loop park, model escalation and halt don't
   // count it. Repeated 5xx refusals are a run-out but not a usage limit.
   const limit = !capped && !stop && found?.kind === 'quota' && !/^provider refused/.test(found.text) && (!other || (tool === 'custom' && code !== 0)) ? found : null;
+  // 2.86 (B-140): a launch failure: the session never started (spawn error), died before its first turn, or stopped on a
+  // permission prompt it could not answer headless. The harness's start, not the task's work: its hand-back says so
+  // (handback-kind.mjs LAUNCH_NOTE) and no counter of the task's own failures reads it.
+  const launchFail = launchFailure({ code, log, exit, capped, stop, trouble, agyCut, tool });
+  // The folder a permission prompt asked for, on the session's end event, so a brief that points outside the lane can be fixed.
+  const launchFolder = launchFail ? promptFolder(String(log).slice(-6000).split(/\r?\n/).reverse().find((l) => PERMISSION_PROMPT.test(l)) || '') : null;
   // Out of quota: remember until when, so the supervisor moves this tool's lanes to the next tool. STUDIO_QUOTA_SKIP=off:
   // usage is watched outside the harness, so never skip a tool. Marked before the hand-back so the note can say until when.
   let limitMark = null;
@@ -757,7 +824,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
       : limit
       ? `${agent} (${tool}, ${model}) stopped at its usage limit: the provider said "${String(limit.line || limit.text).replace(/^"|"$/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)}".${limitMark ? ` ${limitMark.on} is out until ${limitMark.until}${limitMark.resetKnown ? '' : ' (no reset time given: 1 h assumed)'}.` : ''} Not a failure: the task goes back to the queue for the next tool in the order, or for after the reset.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : bad
-      ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : reasoningOnly ? 'it replied with reasoning only (no answer, no work): a failed hand-off; the Director routes this task to another model family' : agyCut ? (agyCut === 'denied' ? 'agy ended the session mid-task: one shell command was refused in headless mode (one plain command per call; see GEMINI.md)' : 'agy ended the session mid-task: its agent went idle while a background command (a test run) was still running (run commands in the foreground)') : `exit code ${code}`}.${agySaid}${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
+      ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : reasoningOnly ? 'it replied with reasoning only (no answer, no work): a failed hand-off; the Director routes this task to another model family' : agyCut ? (agyCut === 'denied' ? 'agy ended the session mid-task: one shell command was refused in headless mode (one plain command per call; see GEMINI.md)' : 'agy ended the session mid-task: its agent went idle while a background command (a test run) was still running (run commands in the foreground)') : launchFail ? `it never got going (launch failure: ${launchFail}; exit code ${code})` : `exit code ${code}`}.${agySaid}${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${agySaid}${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work ${copyDir ? 'was in its copy and is' : 'is in the tree and'} saved to ${patch}.` : ' No uncommitted work.'}${onBranch} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
     // The harness's own refusal of an owner-only step in the session's output goes into the hand-back, where pauseTask parks
     // the task for the owner (harness/owner-only.mjs) instead of relaunching a builder.
@@ -784,7 +851,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
       const cwd = copyDir && fs.existsSync(copyDir) ? copyDir : REPO_ROOT;
       const gl = spawnSync('git', ['log', `--since=${t0}`, '--grep', oTask, '--format=%h'], { windowsHide: true, cwd, encoding: 'utf8' });
       const commits = gl.status === 0 ? gl.stdout.split('\n').filter(Boolean).length : 0;
-      outcome = sessionOutcome({ agent, task: oTask, startedAt: t0, events: readRecentEvents(20000), commits: Math.max(commits, Number(engineOf[oTask]?.commits) || 0, finished.includes(oTask) ? 1 : 0), counts: !stop && !capped && !limit && !trouble && !reasoningOnly });
+      outcome = sessionOutcome({ agent, task: oTask, startedAt: t0, events: readRecentEvents(20000), commits: Math.max(commits, Number(engineOf[oTask]?.commits) || 0, finished.includes(oTask) ? 1 : 0), counts: !stop && !capped && !limit && !trouble && !reasoningOnly && !launchFail });
       if (outcome && engineOf[oTask]?.dir) outcome = { ...outcome, engine: engineOf[oTask].engine, engineCommits: engineOf[oTask].commits, engineDirty: (engineOf[oTask].dirty || []).length };
       if (outcome && (finished.includes(oTask) || queuedForTrain.includes(oTask))) outcome = { ...outcome, done: true, noWork: false, stuck: false, why: '', ...(queuedForTrain.includes(oTask) ? { queuedForTrain: true } : {}) };
       else if (outcome && aider && aider.result !== 'queued' && aider.result !== 'done') outcome = { ...outcome, why: `the launcher claimed ${oTask} for aider; ${aider.line}` };
@@ -836,10 +903,13 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   const cause = exitCause({ code, exit, stop });
   const firstEnd = claimSessionEnd(agent, s0.startedAt, 'launcher');
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : cause.kind === 'prompt-cap' ? `exit ${code}, ended by the launcher (prompt-cap: ${cause.why})` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget', 'prompt-cap'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
-  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${aider?.line && !outcome?.why ? `; aider: ${aider.line}` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(aider ? { aider } : {}), ...(followUps ? { followUps, ...(nudges ? { nudges } : {}) } : {}), ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(Array.isArray(s0.keys) && s0.keys.length ? { keys: s0.keys } : {}), ...(vertexUse?.requests ? { usageFrom: 'vertex-proxy', requests: vertexUse.requests } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
-  if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
+  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${aider?.line && !outcome?.why ? `; aider: ${aider.line}` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(aider ? { aider } : {}), ...(followUps ? { followUps, ...(nudges ? { nudges } : {}) } : {}), ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(Array.isArray(s0.keys) && s0.keys.length ? { keys: s0.keys } : {}), ...(vertexUse?.requests ? { usageFrom: 'vertex-proxy', requests: vertexUse.requests } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, ...(capped ? { refreshNoWork: refreshDidNoWork({ outcome, handed, flag: refresh }) } : {}), ...(launchFail ? { launchFailure: { why: launchFail, ...(launchFolder ? { folder: launchFolder } : {}) } } : {}), usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
+  if ((outcome?.counts || outcome?.foreignRefusal) && (outcome.noWork || outcome.stuck)) {
     // 2.85: the same task done refusal as the session before it, no new commit: held for the overseer and the Producer.
+    // 2.86: a refusal for commits not the task's own too (a harness hold), so it is never relaunched in a loop.
     try { holdIfSameRefusal(agent, readRecentEvents(20000), { park: parkOnce }); } catch { /* a help, never a crash */ }
+  }
+  if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
     try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => postAsk({ agent: 'launcher', to: 'producer', task: outcome.task, subject: 'parked', msg: m }) }); } catch { /* the park is a help, never a crash */ }
   }
   jobDone({ kind: 'session', id: agent, agent, task: s0.task || tasks[0] || null, code: code ?? null, result: stop ? (stop.kind === 'pause' ? 'paused' : 'stopped') : bad ? 'fail' : 'pass', ms: Date.parse(s0.startedAt) ? Date.now() - Date.parse(s0.startedAt) : null, tail: reason, log: s0.log || null, extra: { role: role || null, handed: handed.map((h) => h.task) } });
@@ -1014,9 +1084,22 @@ export function refreshKickoff(task) {
  * The launch prompt's two parts (runAgent, and the selftest that builds it twice). `stable` (above the marker) is the same
  * bytes for every session of a role in this studio: it never names the agent, model, task, lane or time. Per-session text goes in `volatile`.
  */
+/** 2.86: "Read `AGENTS.lite.md`, …" becomes "`AGENTS.lite.md` is already in your context …" when CLAUDE.md imports it. */
+export function rulesLoadedOnce(text, { root = REPO_ROOT } = {}) {
+  const m = String(text).match(/Read `(AGENTS(?:\.lite)?\.md)`, /);
+  if (!m) return text;
+  let cm = '';
+  try { cm = fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'); } catch { return text; }
+  if (!new RegExp(`^@${m[1].replace('.', '\\.')}\\s*$`, 'm').test(cm)) return text;
+  return text.replace(m[0], `\`${m[1]}\` is already in your context (CLAUDE.md imports it). Read `);
+}
+
 export function sessionPromptParts({ role, agent, model, task = null, lane = null, oneTask = false, refreshes = 0, note = '', by = null, tool = null, custom = null, copy = null, engineLane = null }) {
   // Cache-friendly order: the fixed part comes first so every session of a role reads it from the prompt cache; what changes per session goes last.
-  const { stable: kick, volatile: kickTail } = kickoffParts({ role, agent, model, launched: true, task });
+  const { stable: kick0, volatile: kickTail } = kickoffParts({ role, agent, model, launched: true, task });
+  // 2.86: Claude Code loads CLAUDE.md before the prompt; when it imports the rules file the kickoff names, asking the
+  // session to read it again only puts it in its context twice.
+  const kick = tool === 'claude' ? rulesLoadedOnce(kick0) : kick0;
   const stable = (kick
     + `\nTo find a function, constant or TUNING key, run \`npm run map -- find <name>\`: one call gives the file, the line range and the arguments, so you land on the right lines at once. .studio/MAP.md lists every code file in one line if you need the lay of the land. CHANGELOG.md is the harness's release history (behaviour that later changed): take no rule from it; studio/llms.txt lists every command as it is now. If you hand work back, the note says: done, not done, files touched, next step, proof (a note is cut at 20 lines when it is shown to the next agent).\n`
     + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". It goes out with your heartbeat and work in progress.\n`
@@ -1268,7 +1351,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (held.holds) { agyStream = false; launchNotes.push(`agy stream mode skipped: .studio/${STREAM_RECORD} records that this agy refused it (${held.rec?.why || 'no reason recorded'}); ${held.why}. Delete .studio/${STREAM_RECORD} to try stream mode again; it is tried again by itself when agy changes.`); }
   }
   if (agyOneTurn && tool === 'agy') launchNotes.push('agy one-turn launch: the stream session before this one failed on its input format (see the line above); this session runs as one turn');
-  const cmd = custom ? null : toolCommand(tool, { model, file: editFile || file, prompt, effort, addDirs: [...(copy ? laneShareDirs() : []), ...(engineLane?.dir ? [engineLane.dir] : [])], engineDir: engineLane?.dir || null, aider, stream: agyStream, agent });
+  const cmd = custom ? null : toolCommand(tool, { model, file: editFile || file, prompt, effort, addDirs: laneAddDirs({ copy, engineDir: engineLane?.dir || null }), engineDir: engineLane?.dir || null, aider, stream: agyStream, agent });
   if (!custom && !cmd) dropStarting(agent);
   if (!custom && !cmd) {
     let regWhy = '';
@@ -1590,9 +1673,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const again = result.capped ? result.handed[0]?.task || (task && !parseNextQueue().done.some((t) => t.id === task) ? task : null) : null;
   const maxRefresh = Number(process.env.STUDIO_REFRESH_RELAUNCH ?? 5);
   if (again && !readStop() && (opts2.refreshes || 0) < maxRefresh) {
-    await dropCopies();
-    emitEvent({ type: 'agent.refresh', agent, task: again, msg: `${agent} refreshed on ${again}; a fresh session continues from studio/handoffs/${again}.md` });
-    return runAgent({ role, agent, tool, model, fallback, task: again, lane, oneTask, division, note, by, refreshes: (opts2.refreshes || 0) + 1 });
+    // 2.86: the successor works on in this session's own copy (same task) once this session's process is confirmed gone.
+    const own = ownCopy ? takeOverOwnCopy(agent, ownCopy, { sameTask: again === task || result.handed.some((h) => h.task === again) }) : null;
+    if (!own) await dropCopies();
+    emitEvent({ type: 'agent.refresh', agent, task: again, msg: `${agent} refreshed on ${again}; a fresh session continues from studio/handoffs/${again}.md${own ? ` in the same copy (${LANES_DIR}/${agent}, ${own.branch})` : ''}` });
+    return runAgent({ role, agent, tool, model, fallback, task: again, lane, oneTask, division, note, by, refreshes: (opts2.refreshes || 0) + 1, ...(own ? { reuseCopy: ownCopy } : {}) });
   }
   // The stream session failed on its input format: once, the same agent and model again in the one-turn mode (before any
   // failover), in its own copy, on its task if not done, or (started with none) if it finished nothing.
@@ -1634,6 +1719,28 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
 
 /** The copy the ended session under this name used, to work on in: { dir, branch, laneless, reused }, or null when it is
  * gone or isn't this agent's lane worktree (then a new copy is made). */
+/**
+ * 2.86: a refresh's successor takes over the lane copy of the session it continues. All seven "no lane copy could be made
+ * for <name> (.lanes/<name> is still in use)" in a crew's log came right after a refresh ended that same name: the
+ * launcher dropped the copy and made a new one, and on Windows the removal of a copy the exiting session's processes still
+ * held left the folder behind, which the new copy then saw as "changed 0 min ago" (worktree.mjs laneLive). Now, when the
+ * copy is the predecessor's own (.lanes/<agent>) and holds the same task, the successor works on in it once the
+ * predecessor's process is confirmed gone (proc-identity.mjs liveAs, strict: a reused pid is not it); while it is still
+ * alive the launcher waits and checks again (tries x waitMs), and only then falls back to a new copy. Returns the copy
+ * (reusableCopy's shape) or null.
+ */
+export function takeOverOwnCopy(agent, prev, { sameTask = false, rec = null, alive = (pid, id) => liveAs(Number(pid), id || null, { strict: true }), tries = 6, waitMs = 5000, sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {
+  if (!prev?.dir || !sameTask) return null;
+  const r = rec || readJson(sessionFile(agent)) || {};
+  for (let i = 0; i < Math.max(1, tries); i += 1) {
+    const live = r.pid ? alive(r.pid, r.identity?.pid) : false;
+    if (!live) return reusableCopy(agent, prev);
+    if (i < tries - 1) sleep(waitMs);
+  }
+  emitEvent({ type: 'lane.wait', agent, msg: `${agent}'s refresh successor did not take over ${LANES_DIR}/${agent}: the session before it (pid ${r.pid}) is still running after ${Math.round((tries * waitMs) / 1000)} s`, meta: { pid: r.pid || null } });
+  return null;
+}
+
 function reusableCopy(agent, prev) {
   try {
     const dir = path.resolve(REPO_ROOT, String(prev?.dir || ''));
@@ -2110,7 +2217,7 @@ export function launchEngineLane({ task, agent, role = null }) {
     if (!r) return null;
     // No worktree means no code access: the launch is refused (runAgent), it never runs blind.
     if (r.error) { emitEvent({ type: 'engine.lane', agent, task, status: 'warn', msg: `${agent}: no engine worktree for ${task}: ${r.error}`.slice(0, 400) }); return { note: `Your task is an engine pass, but its worktree couldn't be made: ${r.error}. Fix that first, or hand it back with a note.`, refuse: r.error }; }
-    emitEvent({ type: 'engine.lane', agent, task, msg: `${agent}: ${task} works in ${r.dir.split(path.sep).join('/')} on ${r.branch}${r.created ? ' (new)' : ''}`.slice(0, 400), meta: { dir: r.dir, branch: r.branch, repo: r.repo } });
+    emitEvent({ type: 'engine.lane', agent, task, msg: `${agent}: ${task} works in ${r.dir.split(path.sep).join('/')} on ${r.branch}${r.created ? ' (new)' : ''}${r.sparse?.length ? ` (sparse: ${r.sparse.join(', ')})` : ''}`.slice(0, 400), meta: { dir: r.dir, branch: r.branch, repo: r.repo, ...(r.sparse?.length ? { sparse: r.sparse } : {}) } });
     r.note = `${r.note || ''} You may run git -C ${r.dir.split(path.sep).join('/')} add / commit / status / diff / log there (not push, not checkout of another branch).`.trim();
     // The engine's target branch is merged into the pass worktree first; a conflict goes in the brief and an event.
     try {
@@ -2170,7 +2277,8 @@ export function startAgent(opts, { detach = false } = {}) {
   // Never two sessions on one task.
   if (opts.task) {
     const busy = sessions().find((s) => s.running && s.task === opts.task);
-    const held = listLocks().find((l) => l.key === `task:${opts.task}` && l.owner !== agent);
+    // 2.86: a claim whose holder's launched session is over (lock.mjs holderGone) does not stop the start: task start takes it over.
+    const held = listLocks().find((l) => l.key === `task:${opts.task}` && l.owner !== agent && holderGone(l) !== true);
     if (busy) return { ok: false, message: `Not started: ${busy.agent} is already on ${opts.task}.` };
     if (held) return { ok: false, message: `Not started: ${held.owner} holds ${opts.task}.` };
     // The question task start would ask (holds, parks, trains, the budget, the round cap): a session whose task start is refused is a dead session. Same words.
@@ -2328,7 +2436,7 @@ export function startAgent(opts, { detach = false } = {}) {
     const named = Boolean(opts.model);
     const viaCustom = Boolean(toolCmd(tool) || process.env[`STUDIO_${roleKey(role)}_CMD`]) && tool !== 'vertex';
     if (!viaCustom && (named || !['vertex', 'agy'].includes(tool))) {
-      const line = toolMismatch({ tool, model, forced: tool === 'agy' && (Boolean(opts.forceModel) || agyAnyModel() || Boolean(opts.orderModel)), root: reviewRoot() });
+      const line = toolMismatch({ tool, model, forced: tool === 'agy' && (Boolean(opts.forceModel) || agyAnyModel() || Boolean(opts.orderModel) || poolAnyModel(model)), root: reviewRoot() });
       if (line) {
         emitEvent({ type: 'agent.start.refused', agent, to: 'producer', task: opts.task || undefined, status: 'warn', msg: `${agent} not started: ${line}`.slice(0, 600), meta: { role, kind: 'tool-model', tool, model } });
         return { ok: false, skipped: true, refused: 'tool-model', message: line };
@@ -2339,7 +2447,7 @@ export function startAgent(opts, { detach = false } = {}) {
   // STUDIO_AGY_ANY_MODEL=on, or an agy:<model> budget-order entry); a model picked by rescue, routing, tier-up or reroute
   // that isn't Gemini gives way to the Gemini default.
   if (tool === 'agy' && !isGeminiModel(model)) {
-    const forced = Boolean(opts.forceModel) || agyAnyModel() || Boolean(opts.orderModel);
+    const forced = Boolean(opts.forceModel) || agyAnyModel() || Boolean(opts.orderModel) || poolAnyModel(model);
     if (!forced && opts.model) return { ok: false, refused: 'agy-model', message: `Not started: agy runs Gemini models in this studio, and "${model}" isn't one (agy with a non-Gemini model, or none, ran Claude Sonnet inside agy). Use --model gemini-… (agy models lists them; the default is ${String(process.env.STUDIO_TOOL_AGY_MODEL || '').trim() || AGY_DEFAULT_MODEL}), --tool claude for a Claude model, or --force-model to run it on agy anyway.` };
     if (!forced) {
       const g = isGeminiModel(process.env.STUDIO_TOOL_AGY_MODEL) ? String(process.env.STUDIO_TOOL_AGY_MODEL).trim() : AGY_DEFAULT_MODEL;

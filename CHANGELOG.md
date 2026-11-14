@@ -4,6 +4,39 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.86.0] — 2026-11-14
+The engine train (the owner's order: more effective, unused and duplicate code out, the overseer's list). A crew's
+first 19.5 hours on 2.85: tasks landed with no overseer step 25% (0% on 2.84), hand-backs with a harness cause 34%
+(59.5%), engine land runs passing 35% (46.2%), engine queue wait p90 12.7 h. 67 files, +5,327 / −770 lines against
+2.85.0. Details: docs/RELEASE-2.86.0.md.
+- **New code takes effect:** a crew's supervisor ran 2.84 code for 20 hours after the 2.85 upgrade (32 false
+  hand-backs, the web train never started). A supervisor now notices new harness code and restarts itself
+  (`harness/code-stamp.mjs`, `STUDIO_SUPERVISOR_SELF_RESTART`); `upgrade --merge` commits the board itself under the
+  board lock and names what still runs old code.
+- **A red on a listed flaky test:** `flakyRetries` (2) by name, then a probe of the target alone; a red target blames
+  nobody (`engine.red_on_target`). **Narrowing by test name:** with a land script that honours `STUDIO_LAND_PROBE`,
+  narrowing and confirm steps run only the failing tests and land nothing; the survivors land on one complete run
+  (`npm run engine -- bisect-plan`). **The daily full run** runs alone on the target, never as a train step.
+  `batchAlone`; a flake record per test.
+- **The rules check:** a hand-written map entry that groups its prefixes matches again (a crew's 38 entries had never
+  matched, so every check ran everything); `rules.focus.auto` derives one entry per system from the tree; results are
+  kept per part, so the target is not run again and a new part is not run on it; `npm run engine -- rules-plan`.
+- **Sessions:** the refresh rule is measured from the session's first work (`STUDIO_REFRESH_SAFETY_PCT`); a refresh, a
+  launch failure, a foreign hooks refusal and a refused lane copy count against no task (one reading for the watchdog,
+  the budget, both breakers and the score); a refresh's successor keeps its lane copy; a claim ends with its session.
+  `STUDIO_LANE_ADD_MAIN_DIR` (off) for a tool's extra-directory flag.
+- **Disk:** `engines.<x>.sparse` gives listed roles a worktree of only their folders; one rule for when a worktree is
+  safe to remove, applied every 30 minutes; `STUDIO_DISK_WARN_GB` (60) on both volumes, no new worktree or lane copy
+  under the disk budget; `npm run engine -- lanes`.
+- **Smaller:** a merge of the target re-queues a conflict hand-back; the force approval answers `--force --train`; the
+  engine task file is written with retries; a promoted proposal's holds follow it; a pool's own `anyModel` flag.
+- **Unused code:** `npm run check:unused` classes every export by reading every text file of the checkout; 17 dead
+  exports removed, one duplicate folded, the count left (2) pinned by a test. Of 3,713 exports 20 were dead.
+- **Undefined names:** `npm run check:names` (a step of the online checks) reads every script for a name that is
+  defined nowhere. The online checks caught one in the engine train's capped hand-back (a ReferenceError); it is
+  fixed and was the only one in 656 files.
+- **Not measured:** nothing here has run on a live studio or a real editor yet.
+
 ## [2.85.0] — 2026-11-13
 Hands off (the owner's order: fix the overseer's list, make it better, clean up, start on the plan). A crew's first
 16.3 hours on 2.84 measured 46.2% of engine land runs passing (34.8% on 2.83) and a 32.9-minute passing run (51.1),
@@ -141,34 +174,9 @@ and a train that blamed by elimination. 72 files, +4,078 / −823 lines (net +3,
 - **Cut**: `harness/token-norms.mjs` and `harness/ledger.mjs` (382 lines; nothing imported them, no run on record)
   with their two npm scripts and their checks.
 
-## [2.82.0] — 2026-11-10
-Native engine (the owner's "Round 2.82"). The crew's 64 Unity land runs passed 18 times; a passing run took 92 minutes,
-53 of them re-running in Edit Mode the rule tests .NET had just run, and 24 of the 45 failures were in tests that need
-no editor. 27 files, +1,951 / −58 lines (net +1,893) against 2.81.0. Details: docs/NATIVE-ENGINE.md (the release notes of 2.82.0 are in git history).
-- **Native-engine mode** (`harness/native.mjs`, `npm run engine -- native`): a studio whose game is the engine build
-  builds a feature once. Builder tasks go on the engine track; the web tester schedule, the web landing build, engine
-  twins and the port queue are off; the planning kickoffs say so. `"native": "<engine>"` in `studio/game.json`.
-- **The rules check before the land run** (`harness/engine-rules.mjs`, `npm run engine -- rules`): the cheap rules
-  tests run on the batch first; the lane that breaks them is handed back (cause `rules`) without a land run; a check
-  that is red on the target judges nobody. Unity default: `dotnet test tools/SimTests`.
-- **Land stages** (`STUDIO_LAND_RESULT`) on the `engine.land` event; **Edit Mode once** (`STUDIO_UNITY_EDITMODE_ARGS`,
-  `node harness/unity.mjs editmode-plan`); `STUDIO_RULES_GREEN` for a land script.
-- **Scorecard:** the engine flow (land-run minutes per landed lane, red and refused shares, stages, the rules check's
-  catches) and the design link (done work that traces to a pillar, a layer, an idea or the owner's ask). Baseline:
-  `studio/scores/2026-11-08-engine-baseline.json`.
-- **Folded:** the porter's quick check falls back to the owner's `rules` command; one role file for engine work in a
-  native studio.
-- **Fixed (from 2.81.0's Windows checks):** the attempt ledger's path comparison on Windows.
-- **Fixed before release (P-299):** a kept rules result is valid for its git-ignored inputs too (`inputsPrint`), and
-  the land run is not told the rules are green when those inputs changed after the check.
-- **Fixed before release (P-300):** `npm run engine -- check` with the owner's `rules` command and no `quickCheck` is
-  the rules check on the lane's commit as it would land (throwaway checkout, inputs copied in, the target first), not
-  the bare command in the lane's folder. `task done` still runs an engine check only when `quickCheck` is set.
-- **A note, nothing built:** studio/notes/TRAIN-SPLIT-2026-11.md answers whether the Unity train should be split into
-  stages, from the crew's 65 land runs.
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.82.0** (2026-11-10): measured, then cut: the scorecard read against a crew's log, engine land runs batched, the rules check before the land run, duplicate helpers folded.
 - **2.81.0** (2026-11-10): grade, measure, cut again: the round scorecard (`npm run score`), the outside overseer's role, a faster self-test, duplicate helpers folded.
 - **2.80.0** (2026-11-10): the trim: the hub and other unused parts cut, tracked lines 175,491 to 157,794, the timed passes moved into the supervisor.
 - **2.79.2** (2026-11-07): Fixes Vertex builders that ended "no work" after huge requests, and the STUDIO_VERTEX_SHARE=0 off switch that did not stop them.

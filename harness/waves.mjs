@@ -43,10 +43,6 @@ export function nextWaveId() {
   return st.waves.find((w) => w.status === 'open')?.id || `W-${st.next}`;
 }
 
-export function listWaves() {
-  return readWavesState().waves.slice().reverse();
-}
-
 export function waveFor(taskId) {
   return readWavesState().waves.find(w => w.tasks.includes(taskId)) || null;
 }

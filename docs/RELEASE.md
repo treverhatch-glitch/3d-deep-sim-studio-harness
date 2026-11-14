@@ -64,6 +64,11 @@ The file ships with the harness; a studio's `npm run autonomy -- impact` scores 
   before the command does anything (shipped twice: `engine-rules.mjs` in 2.82, `budget.mjs` in 2.83). Fix: wrap the
   command-line part in an async function with a `.catch` that exits 1. `--all` also lists, as information only, modules with a
   top-level await that another module imports statically (latent); `--json` prints the offenders with their chain.
+- **Names check (2.86).** `npm run check:names` (`scripts/check-names.mjs`, a step after the top-level await check in the
+  `release-gate` job of ci.yml) fails when a JavaScript file of `harness/`, `scripts/`, `qa/`, `tools/` or the hooks reads a
+  name that is defined nowhere: a variable declared in another block, a name a refactor removed, a typo. It is the
+  TypeScript compiler reading the files as JavaScript and showing only those three findings; types are not checked. About
+  15 seconds. One such name reached the 2.86 pull request in a hand-back text of the engine train.
 - **Settings map (2.66.0).** `node scripts/settings-map.mjs` writes `docs/SETTINGS.md`: every `STUDIO_*` name the code reads,
   with its default, files and the docs page that explains it. The docs gate runs `--check`: a name used in the code must be
   mentioned on a docs/ page or listed in `docs/settings-baseline.json` (the undocumented ones of 2.66.0, frozen; it only
@@ -83,6 +88,14 @@ The file ships with the harness; a studio's `npm run autonomy -- impact` scores 
 `npm run check:same-code -- <base-commit> <file>...` (`scripts/same-code.mjs`) lists every code token of each file
 (strings, template parts and regexes included) at the base commit and now, and fails when one differs. 2.84's comment
 trim was landed file by file on that proof. `-- --measure <file>...` prints comment bytes per file.
+
+### Code that nothing uses
+
+`npm run check:unused` (`scripts/unused-exports.mjs`) is a read-only report of every export in `harness/` and `scripts/` by
+class (USED, TEST-ONLY, INTERNAL, DEAD) and of modules no other file names. It is deliberately conservative (a name in a
+comment, a string or a doc counts as a use) and it only finds candidates: remove one only with `node --check`, the
+top-level-await and docs checks and the units that cover the file. `-- --list DEAD` names them, `-- --duplicates` finds
+identical functions that could be imported instead (it refuses a fold that would make an import cycle), `-- --json` prints it all.
 
 ## Taking a harness update into a studio
 
@@ -129,9 +142,17 @@ node can't run, so use the line above there.) The guard finds the studio by git 
 2. **Commit the board first.** `npm run upgrade -- --check` refuses (exit 1) while `studio/NEXT.md`, `studio/DONE.md`,
    `studio/task-holds.json`, `studio/pending-review.json` or `studio/handoffs/` has uncommitted changes, and prints the
    `git add` / `git commit` to run. `--snapshot` also copies them to `.studio/board-snapshots/<time>/`.
+   2.86: `--merge` (step 4) does this commit itself ("board: snapshot before harness upgrade"), through the hooks, holding
+   the board lock, so a running supervisor can't change the board between that commit and the merge; never commit the
+   board with `--no-verify`. It waits up to `STUDIO_UPGRADE_LOCK_WAIT_MS` (120000) for the board lock.
 3. Other uncommitted work: commit it on a branch, or set it aside with a named stash
    (`git stash push -u -m "<unique-tag>" -- <paths>`) that leaves `studio/` out. Never `git stash` the whole checkout.
-4. **Merge:** `npm run upgrade -- --merge <ref> --by <you>`. It refuses unless step 2's check passes, backs the branch up as
+4. **Merge:** `npm run upgrade -- --merge <ref> --by <you>`. **Running processes (2.86):** nothing running is stopped. A
+   supervisor on 2.86 or later notices the new code and restarts itself at its next pass (`harness.code_changed`), keeping
+   its halt, end time and back-offs; agent sessions and a running train finish on the code they started with, and each new
+   one starts on the new code. The merge ends by naming what still runs old code and what happens to it (an older
+   supervisor, one in a terminal or with `STUDIO_SUPERVISOR_SELF_RESTART=off`: restart it by hand), and `npm run
+   harness-health` and `npm run studio:status` say "supervisor runs <old>, installed <new>" until it has. It refuses unless step 2's check passes, backs the branch up as
    `backup/pre-<version>`, and merges `<ref>` through the hooks. The main-checkout guard ("only studio notes and the board are
    committed here") opens for exactly that merge commit, so nobody needs `STUDIO_MAIN_COMMIT=allow`. The merge commit records
    `Upgrade-By`, `Upgrade-Recorded-By`, `Upgrade-Ref`, `Upgrade-Versions` and `Upgrade-Backup`, and an `upgrade.merged` event.

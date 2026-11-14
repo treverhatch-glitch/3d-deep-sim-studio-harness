@@ -137,7 +137,9 @@ const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readF
 // 2.60.1 (B-17, B-35): the same for heavy work's memory floor, the CPU probe (Windows) and an open Unity editor
 // counted as heavy work (qa/selftest-2601m.mjs tests them with its own settings).
 // 2.70.0 (t): no playable build + clip worker after a test train's landing (qa/selftest-270t.mjs turns it on).
-const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
+// 2.86.0 (f): under the disk budget the supervisor starts no new lane copy or engine worktree; checks run with it off so a
+// test machine with little free disk doesn't change their result (qa/selftest-286f.mjs tests the stop with its own setting).
+const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_DISK_MIN_FREE_GB: '0', STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
   // 2.73.0 (g): the copies' verify keys (harness/verify-key.mjs) live in the self-test's temp folder, never in the user's home.
   STUDIO_VERIFY_KEY_DIR: path.join(tmpRoot, 'verify-keys') };
 // Per-unit counters for --timing (harness/selftest-timing.mjs): subprocesses started and checks reported.
@@ -5258,6 +5260,70 @@ if (inShard('selftest-285g')) {
   const dir = copyRepo();
   const { selftest285G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-285g.mjs')).href);
   await selftest285G({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.86 (e): five small fixes from a crew's first day on 2.85 (re-queue after a conflict, force --train, a rename that fails for a moment, holds that name a proposal, a pool's own anyModel flag).
+if (inShard('selftest-286e')) {
+  const dir = copyRepo();
+  const { selftest286E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286e.mjs')).href);
+  await selftest286E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.86 (c): the rules check before an engine land run, by convention and per part.
+if (inShard('selftest-286c')) {
+  const dir = copyRepo();
+  const { selftest286C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286c.mjs')).href);
+  await selftest286C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.86 (f): an engine task's worktree should not cost the whole engine project, and the disk must
+if (inShard('selftest-286f')) {
+  const dir = copyRepo();
+  const { selftest286F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286f.mjs')).href);
+  await selftest286F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.86 (g): code that nothing uses, found by a tool and removed only with proof.
+if (inShard('selftest-286g')) {
+  const dir = copyRepo();
+  const { selftest286G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286g.mjs')).href);
+  await selftest286G({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.86 (a, B-139): new harness code takes effect after an upgrade.
+if (inShard('selftest-286a')) {
+  const dir = copyRepo();
+  const { selftest286A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286a.mjs')).href);
+  await selftest286A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.86 (b): what an engine train does with a red land run. A red on tests the studio lists as flaky is
+if (inShard('selftest-286b')) {
+  const dir = copyRepo();
+  const { selftest286B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286b.mjs')).href);
+  await selftest286B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.86 (d): sessions that end for the harness's reasons do not cost the task.
+if (inShard('selftest-286d')) {
+  const dir = copyRepo();
+  const { selftest286D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286d.mjs')).href);
+  await selftest286D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.86 (h): no name used and defined nowhere (scripts/check-names.mjs, npm run check:names).
+if (inShard('selftest-286h')) {
+  const dir = copyRepo();
+  const { selftest286H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286h.mjs')).href);
+  await selftest286H({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

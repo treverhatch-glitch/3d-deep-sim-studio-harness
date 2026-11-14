@@ -34,18 +34,25 @@ import { poolPlan, builderOrder, builderKind } from './api-pool.mjs';
 const poolPlanNow = (usage, live) => poolPlan({ usage, live });
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { selfIdentity, pidAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
+import { codeStamp, restartHow, noticeNewCode, writeHandoff, takeHandoff, waitGone, oldCodeReport, systemdUnitFile, HANDOFF_FILE, RESTART_EXIT_CODE, RESTART_BY_HAND } from './code-stamp.mjs';
 
 export const STATUS_FILE = path.join(STUDIO_STATE_DIR, 'supervisor.json');
 const STOP_FILE = path.join(STUDIO_STATE_DIR, 'supervisor-stop');
 const LOOP_MS = Number(process.env.STUDIO_SUPERVISOR_SEC || 60) * 1000;
 const num = (v, d) => (Number.isFinite(Number(v)) && String(v ?? '').trim() !== '' ? Number(v) : d);
 /** One step of a pass, bounded: after `ms` it is reported (supervisor.step_timeout) and the pass goes on with `fallback`; the step itself is not killed. */
+// 2.86: steps whose work is still running (a step past its time goes on in the background); a restart waits for none.
+let stepsRunning = 0;
+export const stepsInFlight = () => stepsRunning;
 export async function boundedStep(label, fn, { ms = num(process.env.STUDIO_SUPERVISOR_STEP_SEC, 300) * 1000, fallback, state = null, emit = emitEvent } = {}) {
   if (state) state.step = label;
   let timer = null;
+  stepsRunning += 1;
+  const work = Promise.resolve().then(fn);
+  work.then(() => { stepsRunning -= 1; }, () => { stepsRunning -= 1; });
   try {
     return await Promise.race([
-      Promise.resolve().then(fn),
+      work,
       new Promise((resolve) => { timer = setTimeout(() => { try { emit({ type: 'supervisor.step_timeout', agent: 'supervisor', to: 'producer', status: 'warn', msg: `supervisor step "${label}" still running after ${Math.round(ms / 1000)} s; the pass went on without it`, meta: { step: label, ms } }); } catch {} resolve(typeof fallback === 'function' ? fallback() : fallback); }, ms); }),
     ]);
   } finally { clearTimeout(timer); }
@@ -244,7 +251,8 @@ export function inWindow(win, now = Date.now()) {
 async function checkBadEnds(opts, state, now) {
   // Not bad ends: a session stopped at its usage limit; one a person or the Producer stopped (meta.stoppedBy); one its own launcher
   // ended (meta.exitCause: stall, idle, task budget). Sessions dying within STUDIO_HALT_SAME_DEATH_SEC (5) of each other count as ONE end.
-  const mine0 = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent) && !e.meta?.usageLimit && !e.meta?.stoppedBy && !LAUNCHER_KILLS.has(e.meta?.exitCause?.kind));
+  // 2.86: nor a refresh hand-off (the launcher ends it with exit 1 and starts a fresh session: two in a row halted a crew three times).
+  const mine0 = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent) && !e.meta?.usageLimit && !e.meta?.stoppedBy && !e.meta?.refreshed && !LAUNCHER_KILLS.has(e.meta?.exitCause?.kind));
   // Reviewer launch crashes back off per role (roleBackoff) and never halt the supervisor (see roleLaunchFailure).
   noteRoleLaunchFailures(state, mine0, now);
   const mine = mine0.filter((e) => !roleLaunchFailure(e));
@@ -252,6 +260,20 @@ async function checkBadEnds(opts, state, now) {
   const last2 = ends.slice(-2).map((g) => g[g.length - 1]);
   if (last2.length === 2 && last2.every((e) => e.meta?.code && e.meta.code === last2[0].meta.code && (e.meta?.tool || '') === (last2[0].meta?.tool || ''))) {
     const code = last2[0].meta.code;
+    // 2.86: counted per task and cause. The same task's sessions ending twice on a cause of that task's own (B-140: a
+    // permission prompt in its lane: taskCause) hold THAT task with the start back-off and page once; two DIFFERENT tasks'
+    // sessions ending the same way in a row halt only with no work (the tool or the machine is out). Any other exit twice
+    // in a row (a crash, a missing program) halts as before.
+    if (!TOOL_MISSING.has(Number(code))) {
+      const [a, b] = last2.map(endTask);
+      if (a && a === b && last2.every(taskCause)) {
+        let locked = false;
+        try { locked = Boolean((await import('./lock.mjs')).status(`task:${a}`).locked); } catch { locked = false; }
+        holdTaskForEnds(state, a, last2, code, now, opts, { locked });
+        return false;
+      }
+      if (a && b && a !== b && !last2.every(noWorkEnd)) return false;
+    }
     const groups = ends.slice(-2);
     // Name the program, not "custom": the first word of STUDIO_<ROLE>_CMD or STUDIO_AGENT_CMD.
     const metaTool = last2[0].meta?.tool || 'the agent tool';
@@ -319,8 +341,33 @@ export function noteRoleLaunchFailures(state, ends, now = Date.now(), env = proc
 /** The live back-off of a role, or null. */
 export const roleBackedOff = (state, role, now = Date.now()) => { const b = state.roleBackoff?.[role]; return b && now < b.until ? b : null; };
 
-/** Ends the launcher caused itself (exitCause kinds), never a sign the tool is broken. */
-const LAUNCHER_KILLS = new Set(['stall', 'idle', 'budget', 'stopped']);
+/** Ends the launcher caused itself (exitCause kinds), never a sign the tool is broken. 2.86: a refresh, the prompt cap. */
+const LAUNCHER_KILLS = new Set(['stall', 'idle', 'budget', 'stopped', 'refresh', 'prompt-cap']);
+/** 2.86: a session end whose cause belongs to its task, not the studio: a launch failure on a permission prompt (B-140). */
+const taskCause = (e) => /permission prompt/i.test(String(e?.meta?.launchFailure?.why || ''));
+/** 2.86: the task a session end was on (its outcome's, else the event's), or null. */
+const endTask = (e) => e?.meta?.outcome?.task || e?.task || null;
+/** 2.86: a session end with no work: not done and no commit (the studio's or an engine worktree's); no outcome: no work known. */
+const noWorkEnd = (e) => { const o = e?.meta?.outcome; return !o || (!o.done && !((Number(o.commits) || 0) + (Number(o.engineCommits) || 0))); };
+/**
+ * 2.86: the same task's sessions ended the same bad way twice in a row: hold that task with the start back-off (the 2.84
+ * doubling wait, state.startBackoff, saved with the pass) and page the Producer once per hold. A pair already seen does nothing.
+ */
+export function holdTaskForEnds(state, task, ends, code, now, opts = {}, { locked = false, env = process.env, events = null } = {}) {
+  const key = ends.map((e) => e.id || `${e.agent}@${e.ts}`).join('|');
+  if (state.endHoldSeen === key) return null;
+  state.endHoldSeen = key;
+  if (!state.startBackoff) { const f = readJson(START_BACKOFF_FILE, {}) || {}; state.startBackoff = f.tasks || {}; state.startBackoffSeen ??= f.seen; }
+  const reason = `its last two sessions ended with exit ${code}${ends.some((e) => e.meta?.launchFailure) ? ` (${ends.map((e) => e.meta?.launchFailure?.why).filter(Boolean)[0]})` : ''}`;
+  const rk = refusalKey(`session end ${reason}`);
+  const prev = state.startBackoff[task];
+  const count = prev && prev.reason === rk ? prev.count + 1 : 2;
+  const evs = events || readRecentEvents(5000);
+  const entry = { reason: rk, text: reason.slice(0, 160), sig: taskStateSig(evs, task, locked), count, until: now + startBackoffMs(count, env), said: true, from: 'session-ends' };
+  state.startBackoff[task] = entry;
+  if (!opts.dryRun) { try { emitEvent({ type: 'supervisor.backoff', agent: 'supervisor', to: 'producer', task, status: 'warn', msg: `${task} held: ${reason} (${ends.map((e) => e.agent).join(', ')}); its next start waits ${Math.max(1, Math.round((entry.until - now) / 60000))} min. The studio goes on with other tasks; it halts only when two different tasks end this way in a row.`.slice(0, 500), meta: { task, count, reason: entry.text, minutes: Math.max(1, Math.round((entry.until - now) / 60000)), code, agents: ends.map((e) => e.agent), cause: 'session-ends' } }); } catch { /* a page, never a crash */ } }
+  return entry;
+}
 export const sameDeathSec = (env = process.env) => { const v = String(env.STUDIO_HALT_SAME_DEATH_SEC ?? '').trim(); const n = Number(v); return v !== '' && Number.isFinite(n) && n >= 0 ? n : 5; };
 /**
  * Session ends (in order) grouped: ends within STUDIO_HALT_SAME_DEATH_SEC of the group's first are one group, [[end, …], …]; 0 = no
@@ -486,6 +533,9 @@ export async function supervise(opts, state, now = Date.now()) {
     // (360) minutes, in a detached child (harness/lane-disk.mjs).
   if (!opts.watcher) {
     try { await (await import('./lane-disk.mjs')).lanesPass({ now, inline: Boolean(opts.deps?.lanesInline) }); } catch { /* a report, never a crash */ }
+    // 2.86 (f): engine worktrees whose branch landed or whose task is done or dropped go (harness/engine-clean.mjs laneRemoval),
+    // every 30 minutes in a detached child.
+    try { (await import('./engine-clean.mjs')).engineLanesPass({ now }); } catch { /* a cleanup, never a crash */ }
   }
   // A short planning session (producer, director, line-producer) doesn't take a builder slot: it is left out of the count the pace's
   // cap is held against. It still obeys its own per-role cap and the RAM limit, which counts every session.
@@ -598,6 +648,17 @@ export async function supervise(opts, state, now = Date.now()) {
   }
   const started = [];
   let ram = null;
+  let disk = null;
+  // 2.86 (f): would starting this group make a new lane copy or a new engine worktree? (the disk stop above the start)
+  const needsNewCopy = async (g) => {
+    try {
+      const id = g.tasks[0]?.id;
+      const et = await import('./engine-tracks.mjs');
+      const wt = await import('./worktree.mjs');
+      if ((et.engineTask(id) || et.isEngineRole(g.role)) && !fs.existsSync(path.join(wt.mainRoot(), '.lanes', 'engine', String(id)))) return true;
+      return !process.env.STUDIO_MAIN_ROOT && wt.worktreeSupport().ok && (wt.laneWantsCopy(g.lane) || wt.lanelessWantsCopy({ role: g.role, lane: g.lane, task: id }));
+    } catch { return false; }
+  };
   // Most urgent first. With STUDIO_ATTEMPTS=record, a task whose last failed hand-back met a blocker that has not changed (same reason,
   // main's tip, what it waits for) goes after every other eligible one: last in its group, its group last when it is all such.
   const doneIds = new Set((q.done || []).map((x) => x.id));
@@ -710,6 +771,13 @@ export async function supervise(opts, state, now = Date.now()) {
       ramNote(ram, now);
       break;
     }
+    // 2.86 (f): under STUDIO_DISK_MIN_FREE_GB free, no start that would make a new lane copy or a new engine worktree. A harness
+    // reason: no start refusal is noted against the task, and the line says why.
+    disk ||= (await import('./machine.mjs')).diskStop({});
+    if (disk.stop && await needsNewCopy(g)) {
+      why.push(`${g.tasks[0]?.id}: ${disk.why}`);
+      continue;
+    }
     const agent = kind ? (kind === 'api' ? poolFree.shift() : nextAgentName(g.role, opts.prefix || 's')) : !vx && poolMode ? poolMode.free.shift() : nextAgentName(g.role, opts.prefix || 's');
     if (!agent) break;
     state.names = [...(state.names || []), agent].slice(-200);
@@ -755,6 +823,42 @@ export async function trainDaemonTick(state, r = {}, opts = {}) {
     state.train = { at: new Date().toISOString(), started: Boolean(d.started), why: d.why, ...(d.pid ? { pid: d.pid } : {}) };
     return d;
   } catch (err) { state.train = { at: new Date().toISOString(), started: false, why: `error: ${err.message}` }; return { started: false, why: err.message }; }
+}
+
+/**
+ * 2.86 (B-139): new harness code under a running supervisor. Each pass compares the code this supervisor started with
+ * (state.code) with the installed one (harness/code-stamp.mjs): one harness.code_changed event when they first differ;
+ * then, when it may restart itself (restartHow: on its own, a launchd job, a systemd unit with KillMode=process; not in a
+ * terminal a person watches, nor with STUDIO_SUPERVISOR_SELF_RESTART=off) and nothing of this pass still runs (idle), it
+ * writes its in-memory state for the successor (.studio/supervisor-handoff.json) and either starts a fresh supervisor
+ * with the same options, detached, which waits for this one to end (--after <pid>), or returns exit 75 for the service
+ * manager. Agent sessions and trains are processes of their own and are not touched. Returns { restart, exitCode?,
+ * successor?, pending?, first? }; the loop ends the process when restart is set.
+ */
+export function codeChangePass(state, { installed, how, argv = [], idle = true, pid = process.pid, stateDir = STUDIO_STATE_DIR, emit = emitEvent, log = console.error, spawnFn = spawn, script = fileURLToPath(import.meta.url), env = process.env, now = Date.now() } = {}) {
+  const n = noticeNewCode(state, { name: 'supervisor', pid, running: state.code, installed, how, emit, log, now });
+  if (!n.changed || !n.restart) return { restart: null, first: n.first };
+  if (!idle) return { restart: null, pending: true, first: n.first };
+  writeHandoff(stateDir, state, { pid, now });
+  if (n.restart === 'exit') return { restart: 'exit', exitCode: RESTART_EXIT_CODE, first: n.first };
+  const args = [script];
+  for (let i = 0; i < argv.length; i++) { if (argv[i] === '--after') { i += 1; continue; } if (argv[i] !== '--foreground') args.push(argv[i]); }
+  args.push('--foreground', '--after', String(pid));
+  let fd = null;
+  try {
+    fs.mkdirSync(stateDir, { recursive: true });
+    fd = fs.openSync(path.join(stateDir, 'supervisor.log'), 'a');
+    const child = spawnFn(process.execPath, args, { cwd: REPO_ROOT, detached: true, stdio: ['ignore', fd, fd], env, windowsHide: true });
+    child.on?.('error', () => {});
+    child.unref?.();
+    return { restart: 'spawn', successor: child.pid || null, args, first: n.first };
+  } catch (e) {
+    // It couldn't start a successor: it keeps running the old code and says so once; a person restarts it.
+    state.codeChanged.failed = String(e?.message || e).slice(0, 200);
+    try { fs.rmSync(path.join(stateDir, HANDOFF_FILE), { force: true }); } catch {}
+    log(`[supervisor] couldn't start a fresh supervisor on the new code (${state.codeChanged.failed}); this one keeps running the old code: ${RESTART_BY_HAND}`);
+    return { restart: null, failed: state.codeChanged.failed, first: n.first };
+  } finally { if (fd !== null) { try { fs.closeSync(fd); } catch {} } }
 }
 
 /** Roles whose short sessions don't take a builder slot under the cap. */
@@ -841,6 +945,23 @@ async function main(argv) {
   // The hub is gone; a start script that still passes --hub/--no-hub keeps working.
   if (argv.includes('--hub') || argv.includes('--no-hub')) console.log('[supervisor] --hub/--no-hub ignored: there is no hub since 2.80 (npm run studio:status shows the studio).');
   fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
+  // 2.86: a supervisor restarting itself on new code starts this one with --after <its pid>: never two at once, so wait
+  // for it to end; a studio:stop asked meanwhile is kept.
+  const afterPid = Number(flag('after')) || null;
+  if (afterPid) {
+    const was = readStatus();
+    const ident = Number(was?.pid) === afterPid ? was.identity : null;
+    if (!(await waitGone(afterPid, { alive: (p) => pidAlive(p, ident, { eperm: false }) }))) {
+      console.error(`[supervisor] the supervisor it takes over from (pid ${afterPid}) has not ended within 60 s: not starting a second one.`);
+      process.exit(1);
+    }
+    if (fs.existsSync(STOP_FILE)) {
+      try { if (was) writeAtomic(STATUS_FILE, `${JSON.stringify({ ...was, status: 'stopped', stopReason: 'studio:stop was asked while it restarted on new code' }, null, 2)}\n`); } catch {}
+      try { fs.rmSync(path.join(STUDIO_STATE_DIR, HANDOFF_FILE), { force: true }); } catch {}
+      console.log('[supervisor] studio:stop was asked while it restarted on new code: not starting.');
+      process.exit(0);
+    }
+  }
   const prev = readStatus();
   if (prev?.pid && prev.pid !== process.pid && alive(prev) && prev.status === 'running') {
     console.error(`A supervisor is already running (pid ${prev.pid}). npm run studio:stop first.`);
@@ -849,11 +970,22 @@ async function main(argv) {
   fs.rmSync(STOP_FILE, { force: true });
   const { parseNextQueue } = await import('./task.mjs');
   const state = { pid: process.pid, identity: selfIdentity(), status: 'running', startedAt: Date.now(), opts: { ...opts, until: opts.until ? new Date(opts.until).toISOString() : null }, sessions: 0, doneAtStart: parseNextQueue().done.length };
+  // 2.86: the code it runs and how it restarts itself on new code (both in supervisor.json for status, health and upgrade).
+  const restartPlan = restartHow({ env: process.env, tty: Boolean(process.stdout.isTTY), root: REPO_ROOT });
+  state.code = codeStamp({ root: REPO_ROOT, fresh: true });
+  state.restart = { how: restartPlan.how, why: restartPlan.why, byHand: restartPlan.byHand };
+  // What the supervisor before it handed over (a self-restart): its halt, extended end time, agents and back-offs.
+  const handoff = takeHandoff(STUDIO_STATE_DIR, { alive: (p) => pidAlive(p, null, { eperm: false }) });
+  if (handoff) {
+    Object.assign(state, handoff.state || {});
+    if (handoff.opts && 'until' in handoff.opts) { opts.until = handoff.opts.until ? Date.parse(handoff.opts.until) : null; state.opts.until = handoff.opts.until || null; }
+    state.tookOver = { from: handoff.from, at: handoff.at };
+  }
   const save = (extra = {}) => writeAtomic(STATUS_FILE, `${JSON.stringify({ ...state, ...extra, startedAt: new Date(state.startedAt).toISOString(), lastLoop: new Date().toISOString(), tasksDone: parseNextQueue().done.length - state.doneAtStart }, null, 2)}\n`);
   // Write this supervisor's own pid, identity and status now, before the first full pass (which can take minutes): studio:status and
   // studio:reload-env right after a restart would otherwise read the OLD record and say "Not running".
   try { save(); } catch { /* the first pass writes it */ }
-  emitEvent({ type: 'supervisor.start', agent: 'supervisor', to: 'producer', msg: `Supervisor running${opts.until ? ` until ${new Date(opts.until).toTimeString().slice(0, 5)}` : ''}${opts.window ? `, window ${opts.window}` : ''}${opts.budget ? `, budget ${budgetArg}` : ''}${opts.lanes ? `, lanes ${opts.lanes}` : ''}` });
+  emitEvent({ type: 'supervisor.start', agent: 'supervisor', to: 'producer', msg: `Supervisor running${opts.until ? ` until ${new Date(opts.until).toTimeString().slice(0, 5)}` : ''}${opts.window ? `, window ${opts.window}` : ''}${opts.budget ? `, budget ${budgetArg}` : ''}${opts.lanes ? `, lanes ${opts.lanes}` : ''}${handoff ? ` (took over from pid ${handoff.from} on new harness code; its halt, end time and back-offs kept)` : ''}`, meta: { code: state.code, restart: state.restart.how, ...(handoff ? { tookOverFrom: handoff.from } : {}) } });
   console.log(`[supervisor] running (pid ${process.pid}). npm run studio:stop to stop; agents finish their current task.`);
   // --budget 50% paces against the week's tokens; without --weekly it can never trip.
   if (opts.budget?.share) {
@@ -918,7 +1050,20 @@ async function main(argv) {
     await boundedStep('gate-reaper', () => import('./gate-reaper.mjs').then(({ reapOrphanGates }) => reapOrphanGates({ log: (m) => console.error(m) })), { state }).then((g) => { if (g && !g.skipped) state.gateReaper = { at: new Date().toISOString(), ended: (g.ended || []).map((e) => e.pid) }; }).catch(() => {});
     state.passes = (state.passes || 0) + 1; // passes finished since the start, in supervisor.json
     save();
-    if (r.stop) finish(r.why[0]);
+    if (r.stop) { finish(r.why[0]); return; }
+    // 2.86: new harness code installed? Said once; restarts at this quiet point (no step still running) when it may.
+    let editorBusy = false;
+    try { editorBusy = Boolean((await import('./editor-service.mjs')).editorServiceBusy?.()); } catch {}
+    const cc = codeChangePass(state, { installed: codeStamp({ root: REPO_ROOT }), how: restartPlan, argv, idle: stepsInFlight() === 0 && !editorBusy });
+    if (cc.first || cc.restart) save();
+    if (cc.restart) {
+      stopping = true;
+      state.status = 'restarting';
+      state.stopReason = `new harness code: ${cc.restart === 'spawn' ? `a fresh supervisor (pid ${cc.successor || '?'}) takes over` : 'the service manager starts it again'}`;
+      save();
+      console.log(`[supervisor] ${state.stopReason}; agents and trains keep running.`);
+      setTimeout(() => process.exit(cc.restart === 'exit' ? cc.exitCode : 0), 300);
+    }
   };
   // The loop is set before the first pass, passes never overlap, and a pass still running after STUDIO_SUPERVISOR_STUCK_MIN (15) is
   // reported once (supervisor.pass_stuck) instead of silently stopping the studio.
@@ -991,14 +1136,14 @@ function install(argv, remove = false) {
     const r = spawnSync('schtasks', ['/Create', '/F', '/SC', 'ONLOGON', '/TN', name, '/TR', cmd], { windowsHide: true, encoding: 'utf8' });
     return r.status === 0 ? `Installed the scheduled task "${name}": the supervisor starts when you log in. Remove: npm run studio:start -- --uninstall${warn}` : `Task Scheduler said: ${r.stderr || r.stdout}`;
   }
-  const unit = path.join(os.homedir(), '.config', 'systemd', 'user', `studio-${slug}.service`);
+  const unit = systemdUnitFile(REPO_ROOT);
   if (remove) {
     spawnSync('systemctl', ['--user', 'disable', '--now', `studio-${slug}.service`], { windowsHide: true });
     fs.rmSync(unit, { force: true });
     return `Removed ${unit}`;
   }
   fs.mkdirSync(path.dirname(unit), { recursive: true });
-  fs.writeFileSync(unit, `[Unit]\nDescription=Game studio supervisor (${slug})\n\n[Service]\nWorkingDirectory=${REPO_ROOT}\nEnvironment="PATH=${process.env.PATH || ''}" "HOME=${process.env.HOME || os.homedir()}"\nExecStart=${[node, ...args].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}\nRestart=on-failure\nRestartSec=60\n\n[Install]\nWantedBy=default.target\n`);
+  fs.writeFileSync(unit, `[Unit]\nDescription=Game studio supervisor (${slug})\n\n[Service]\nWorkingDirectory=${REPO_ROOT}\nEnvironment="PATH=${process.env.PATH || ''}" "HOME=${process.env.HOME || os.homedir()}"\nExecStart=${[node, ...args].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}\nRestart=on-failure\nRestartSec=60\nKillMode=process\n\n[Install]\nWantedBy=default.target\n`);
   spawnSync('systemctl', ['--user', 'daemon-reload'], { windowsHide: true });
   spawnSync('systemctl', ['--user', 'enable', '--now', `studio-${slug}.service`], { windowsHide: true });
   return `Installed ${unit} (systemd --user, this terminal's PATH): the supervisor starts at login. Keep it running while logged out: loginctl enable-linger $USER. Remove: npm run studio:start -- --uninstall${warn}`;
@@ -1078,7 +1223,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // " ENGINE PUSH: unity until 18:00 UTC." for studio:status, or ''.
     const pushNow = async () => { try { const p = (await import('./mode.mjs')).enginePushOf(); return p ? ` ENGINE PUSH: ${p.engine}${p.until ? ` until ${p.until.slice(11, 16)} UTC` : ' until turned off'} (${p.by}); its porters and lands go first.` : ''; } catch { return ''; } };
     const trainsNow = async () => { try { const ts = await import('./train-status.mjs'); const t = ts.readTrainStatus((await import('./worktree.mjs')).mainRoot()); return t ? `\n${ts.trainsText(t)}` : ''; } catch { return ''; } };
-    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.opts?.until ? ` until ${s.opts.until}` : ''}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${await yesWaitText()}${await trainsNow()}${await pushNow()}` : `The supervisor has not run here yet: npm run studio:start${await trainsNow()}${await pushNow()}`);
+    // 2.86: "supervisor runs <old>, installed <new>" while a running supervisor is on old harness code.
+    const oldCode = () => { try { return oldCodeReport({ stateDir: STUDIO_STATE_DIR, installed: codeStamp({ root: REPO_ROOT }), alive: (p, id) => pidAlive(p, id, { eperm: false }) }).map((o) => ` Old code: ${o.line}.`).join(''); } catch { return ''; } };
+    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.opts?.until ? ` until ${s.opts.until}` : ''}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${await yesWaitText()}${oldCode()}${await trainsNow()}${await pushNow()}` : `The supervisor has not run here yet: npm run studio:start${await trainsNow()}${await pushNow()}`);
     process.exit(0);
   }
   if (argv.includes('--install') || argv.includes('--uninstall')) {

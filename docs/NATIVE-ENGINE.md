@@ -149,6 +149,42 @@ half as much machine time as the land runs. Five settings, all optional, in the 
   the kept result (`.studio/engine/<x>-rules.json`) survives a cancel and restart, so the same batch on the same
   target tip is not checked again ("rules pass cached" in the log). A red part is handed back by name: the part's
   filter and command and the failing test names.
+- `focus.map` groups (2.86): only the regex groups a filter uses (`$1`..`$9`) must be letters, digits, `.`, `_` and
+  `-`. Before 2.86 any group counted, so an entry like `"^(Sim/Fees/|tools/fees/)"` (a group used only to list
+  prefixes) matched nothing and every batch ran in full.
+- `focus.auto` (2.86): the map by convention. Describe the layout once and the harness derives one entry per rule
+  system from the tree being checked (the target and the batch), so a system a batch adds is covered with no map edit:
+
+```json
+"focus": { "test": "dotnet test tools/SimTests --filter \"{filter}\"", "smoke": "Category=Smoke", "split": true,
+  "auto": { "root": "Game/Sim", "paths": ["Game/Sim/{name}/", "Game/Sim/{name}.meta", "Game/Tests/Sim/{name}", "tools/port/{name}/"],
+            "filter": "FullyQualifiedName~{name}", "filters": { "Path": "FullyQualifiedName~GridPath" }, "inputs": ["Rules~/{name}/"] },
+  "shared": ["Game/Sim/Core", "tools/SimTests"] }
+```
+
+  `root`: a folder whose child folders are the systems (a name may hold letters, digits, `.`, `_`, `-`). `paths`:
+  templates with `{name}`; a changed path belongs to a system when it starts with one, letter case aside (so
+  `tools/port/fees/` is `Fees`'s), and the longest match wins (`MapNavTests.cs` is `MapNav`'s, not `Map`'s). `filter`:
+  the test filter with `{name}`; `filters` names the systems whose tests are called otherwise. `inputs` (optional):
+  templates under `rules.inputs`, so a part's kept result holds only its own input files and the ones no system owns.
+  A path a hand-written `map` entry takes stays the entry's (the map wins). A path neither takes still means a full run,
+  and the why names it. A bad `auto` is named in plain words (in the log, `rules show`, `rules-plan` and the why) and
+  left out.
+- `focus.shared` (2.86): paths every part reads. A batch that changes one runs in full; a folder under `auto.root`
+  listed here is not a system.
+- Results kept per part (2.86, with `auto` or `shared` set): a focused check is a list of parts (one per filter, and
+  the smoke filter). A part's green is kept under what it reads: the blob ids of its own files, the tree ids of
+  `shared`, the command, and its own inputs (all inputs when they cannot be attributed). The smoke part reads
+  everything and is keyed by the whole tree (or `rules.paths`). A part with a kept green is not run again: not on the
+  target, not on the batch, not while a red batch is narrowed ("rules part ... pass kept" in the log; the
+  `engine.rules` event's `reused`). A part whose files the target does not have (a system the batch adds) is not run on
+  the target. A red batch is narrowed with the red part's filter only. Only greens are kept; the full run every
+  `fullEveryHours` stays the backstop. Without `auto` and `shared` the keys and runs are 2.85's.
+- When `rules.paths` is not set and a batch changes only paths under no map entry and no auto root (art, UI), the run
+  is still full (the safe answer), and its why says that `rules.paths` is the setting that would have skipped it.
+- `npm run engine -- rules-plan --branch <b> [--branch <c>] [--json]` (2.86) prints, without running a test: full or
+  focus and why, the parts, which have a kept green on the target and the batch, which are new in the batch, a part's
+  last recorded peak when it is over `splitGb`, and the minutes the recorded runs suggest.
 - `maxLanes` (2.84, B-134; default 0, off): a batch with more lanes is checked in consecutive slices of that many,
   each merged on the same target. A red slice is narrowed within itself, so only its lanes can be refused; one
   `engine.rules` event per slice. The whole batch was never one tree in the check, so a sliced check never sends
@@ -225,6 +261,8 @@ scorecard's Play stage line counts skipped runs.
 | `STUDIO_LAND_RETRY_STAGE` | The stage that was red (`play`, `edit`, ...). |
 | `STUDIO_LAND_RETRY_TESTS` | The failed tests' full names joined by `;`: re-run just those on the merged tree; land if they pass. |
 | `STUDIO_LAND_RESULT` | A file to write the stage report to (`stages`/`gates`, and a `failures` list of test full names). |
+| `STUDIO_LAND_PROBE` | `1` (2.86): land nothing. Merge the branch(es) given (for the target alone: a ref at the target's own tip), run the tests (with `STUDIO_LAND_RETRY_TESTS`: only those; with `STUDIO_LAND_FULL=1`: all), put the worktree back; exit 0 green, 1 red. Print `[land-probe] honoured` so the train may run its by-name steps on lanes. |
+| `STUDIO_LAND_KNOWN_RED` | (2.86, only with `engines.<x>.knownRedHours`) listed flaky tests a probe found red on the target alone, joined by `;`: a script may leave them out of its verdict and land when nothing else is red. |
 
 ```bash
 npm run engine -- rules show                         # the command, where it comes from, env names, paths, focus
@@ -300,7 +338,8 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
   <id> handed <branch> back for <reason>: the same red would repeat". `--again` queues it anyway
   (`task.train.<x>.requeued_unchanged`). A landing clears the record.
 - **No blame by elimination.** A lane that the search by land runs leaves over ("everything before it was green") is
-  run by itself before it is handed back. If it passes, it lands and nobody is handed back.
+  run by itself before it is handed back. If it passes, it lands and nobody is handed back. 2.86: when the red names its
+  tests, that run is by name (minutes, see below).
 - **Handed back means out.** A lane the train hands back leaves the train's record at once, so `task start` on its
   fix works while the train is still landing the rest.
 - **A full land run once a day.** Every `engines.<x>.fullLandHours` hours (default 24, `STUDIO_ENGINE_FULL_LAND_HOURS`,
@@ -311,17 +350,75 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
   2.85 (B-137): the full run is said wherever one looks. The train's `now` line and `train status --engine <x>` read
   "land run, the daily full run: every test runs, expect about N min" (N: the last full run's minutes, kept in that
   file); one `task.train.<x>.full_land` event (meta `why`, `tasks`) at its start; `engine.land` has `meta.full: true`.
+- **2.86: the full run is its own run, on the target alone.** It never carries a branch and is never a retry, bisect or
+  confirm step. It runs when it is due and the train has no lane (the Line Producer starts a train for it when the
+  queue is empty), or, when it is overdue by `engines.<x>.fullLandMaxHours` (default twice `fullLandHours`; counted from
+  the last full run that passed), at the start of the next train before any lane's land run. The land command gets a
+  ref at the target's tip as its branch and `STUDIO_LAND_FULL=1` with `STUDIO_LAND_PROBE=1`. A script that cannot run
+  that (an error or conflict) is told in `task.train.<x>.full_land` (warn) and the full run is tried again at the next
+  train. Every failing test of a full run is the target's own (below); 2.85's search for a branch tied to it, and the
+  batch's second, ordinary run, are gone with the batch.
 - **The target's own red in the full run (2.85).** A full run is the one run that sees every test, so it also sees
-  what the target already fails. When a red full run names its failing tests and none of them is tied to a branch of
-  the batch by the evidence rules below (with one looser rule here: a changed folder named like a part of the test's
-  namespace), or every one is already known, the batch is neither blamed nor bisected: the names go to
-  `.studio/train/<x>-full-baseline.json` (`{ at, target, failing, source }`), the full-run clock counts as served, and
-  the same batch lands again once as an ordinary land run (a red there is handled as any red). `engine.full_red_on_target`
-  (warn, to the director) names the tests and asks for a fix task, once per set of names. When some failure is tied to a
-  branch, blame goes on as usual, but a baseline name is never counted against anyone. A green full run, or a red one
-  that went on past its first red stage without a baseline name, clears it (`engine.full_baseline_cleared`).
-  `train status` shows "Known red on the target in the full run: N test(s)". The cost: a test a branch breaks without
-  any rule tying it lands on the ordinary run's word, until the next full run names it again.
+  what the target already fails. From 2.86 it runs on the target alone, so every failing test it names is the
+  target's own: the names go to `.studio/train/<x>-full-baseline.json` (`{ at, target, failing, source }`) and the
+  full-run clock counts as served. `engine.full_red_on_target` (warn, to the director) names the tests and asks for a
+  fix task, once per set of names. A baseline name is never counted against a branch in an ordinary land run. A green
+  full run, or a red one that went on past its first red stage without a baseline name, clears it
+  (`engine.full_baseline_cleared`). `train status` shows "Known red on the target in the full run: N test(s)".
+- **A red on listed flaky tests is not a branch's fault (2.86).** When every failing test of a red run is on
+  `flakyTests`, the failing tests are run again by name up to `engines.<x>.flakyRetries` times (default 2, 0 to 5;
+  `task.train.<x>.retry`, meta `n`); a pass on any retry lands the batch (`task.train.<x>.flaky`). Still red: the same
+  tests run on the target alone, with no branch (a probe: the retry's variables plus `STUDIO_LAND_PROBE=1`, the branch
+  a ref at the target's tip; `task.train.<x>.probe`). Red there too: the target is red. Nobody is handed back, nothing
+  counts against a task; the round's lanes stay queued (marked `waitTarget` in place, not re-queued) and wait until the
+  target moves (`task.train.<x>.waiting_target`; `train status` lists them); one `engine.red_on_target` (to the
+  planner, once per tests and target tip) asks for a fix task. A later train red on tests a probe already found red on
+  the same tip goes there at once, without retries. Green on the target: blame goes on as below. A probe that cannot
+  tell (an error, a refusal, names not safe on a command line) is not a verdict: blame goes on. A land script that
+  does not know `STUDIO_LAND_PROBE` gets a branch that is the target itself, so landing it moves nothing; the train
+  checks that the target did not move (`task.train.<x>.probe_moved_target` if it did).
+- **Tests known red on the target (2.86, off by default).** With `engines.<x>.knownRedHours` above 0 (the studio's
+  choice, in its protected game file), the names of listed flaky tests that a probe found red on the target alone in
+  that many hours go to the land script in `STUDIO_LAND_KNOWN_RED`; a script that honours it lands the batch when
+  nothing else is red. Each use is a `task.train.<x>.known_red` event naming the tests and the probe that proved them.
+  After a probe found the target red, the train tries one more run by name with them named before it waits for the
+  target. Never a test that is not on `flakyTests`; nothing is ever left out by the harness itself.
+- **The flake record (2.86).** `.studio/train/<x>-flakes.json` keeps, per listed flaky test, the land runs whose
+  result for it is known (it failed, or the run passed with it in: a full Play Mode stage, a full run, a retry or probe
+  that named it) and its reds, and the last probe on the target. `train status` says "<test> red in R of N land runs:
+  fix it or it will keep costing runs" once it has been red twice.
+- **The green record (2.86).** `.studio/train/<x>-green.json` (200 at most) keeps the trees of runs of the target alone
+  that passed (tree, target tip, kind: a probe of which tests, or the full run). The same run on the same target is not
+  run again (`task.train.<x>.green_reused`, and the log says so). A landing run is not looked up: once it passes, the
+  target moves, so the same tree on the same target cannot come back.
+- **One plan for the order of steps (2.86).** `nextStep` in `harness/unity-train.mjs` is pure: from a round's lanes,
+  its results so far and the evidence ties it returns the next step (retry, probe, known-red run, wait for the target,
+  without, apart, bisect, confirm, hand back, next round), each with its kind of run (`complete` or `name`) and whether
+  a pass lands. `npm run engine -- bisect-plan --lanes A,B,C,D --red B [--flaky] [--target-red] [--pass-on-retry N]
+  [--tied A] [--complete] [--no-names] [--land-min 60] [--name-min 5]` prints the steps for made-up outcomes, each with
+  its kind of run and minutes, and the total.
+- **The search by name (2.86).** When a red land run names its failing tests (safe on a command line, 50 at most) and
+  the land script honours `STUDIO_LAND_PROBE`, every narrowing step (the suspect's `without` and `apart`, the prefix
+  search) and the confirm run run only those tests on that step's merged tree, with `STUDIO_LAND_PROBE=1` and the retry
+  variables: minutes, not an hour, and they land nothing. The log line of each says "by name: N test(s), does not land".
+  A lane is handed back on the same proof as before (red with it, green without it, on the same target; red by itself).
+  Then ONE complete land run of the survivors lands them; if it is red on other tests, the search starts again from that
+  red. When the red names no test (a compile error, a time-out, a crash, no results), or the script has not shown that
+  it honours `STUDIO_LAND_PROBE`, every step is a complete land run and a green one lands, as before. The script shows
+  it by printing a line `[land-probe] honoured` (or `"probe": true` in its stage report) in a run told
+  `STUDIO_LAND_PROBE=1` (a probe or the full run; kept in `.studio/train/<x>-probe.json`), or the owner sets
+  `engines.<x>.landProbe: true`. A by-name step on lanes gives the script the lanes' branches (or an integration
+  branch): a script that ignored the variable could land them, which is why it must have said so first.
+- **When a run that must land nothing moves the target (2.86).** After every run told `STUDIO_LAND_PROBE=1` the train
+  compares the target's tip with the one before. A run of the target alone gets a ref at the target's own tip as its
+  branch, so a script that knows nothing of the variable merges nothing new and the tip stays where it was. If it moved
+  anyway (the script committed or pushed something), the run counts as an error: the train stops at once, nobody is
+  blamed, the round's lanes stay queued, `task.train.<x>.probe_moved_target` (blocked, to the producer) says what moved,
+  and `.studio/train/<x>-probe.json` is marked revoked, so by-name steps on lanes are off for that engine until a person
+  removes the file. A lane that the run did land is closed by the next train (it is already in the target).
+- **Branches that land alone by path (2.86).** `engines.<x>.batchAlone`: a list of regexes over changed paths (for
+  example long Play Mode scenario tests). A queued branch that changes a matching path lands alone, as `--alone` does,
+  and the batch line says which path.
 - **The owner's own Edit Mode arguments.** `engines.unity.editModeArgs` (a string, for example
   `-testCategory "!Slow"`) is passed as `STUDIO_UNITY_EDITMODE_ARGS` in place of the harness's plan. Not on a full run.
 - **The land script that runs.** When the land command names a script inside another worktree of the engine repo and

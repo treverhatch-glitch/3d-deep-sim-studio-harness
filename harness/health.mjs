@@ -123,7 +123,19 @@ export function renderHealth(h) {
     `- Tokens: ${(h.tokens / 1e6).toFixed(2)}M${h.tokensPerLanding !== null ? ` (${(h.tokensPerLanding / 1e6).toFixed(2)}M per landing)` : ''}; dones with no usage recorded: ${h.untrackedDones}`,
     `- Watchdog log lines: ${h.watchdogEvents ?? 0}${h.watchdogPerLanding != null ? ` (${h.watchdogPerLanding} per landing)` : ''}; checks that ran nothing: ${h.silentGreens ?? 0}; whole-game reds: ${h.wholeRed ?? 0} (environment ${h.wholeEnvironment ?? 0}); unwired code noted at done: ${h.unwired ?? 0}`,
   ];
+  // 2.86: a long-running process (the supervisor, a watcher loop) still on old harness code after an update.
+  for (const l of h.oldCode || []) lines.push(`- Old harness code: ${l}`);
   return `${lines.join('\n')}\n`;
+}
+
+/** 2.86: "supervisor runs <old>, installed <new>: …" for each long-running process on old harness code (harness/code-stamp.mjs). */
+export async function oldCodeLines() {
+  try {
+    const cs = await import('./code-stamp.mjs');
+    const { REPO_ROOT, STUDIO_STATE_DIR } = await import('./event.mjs');
+    const { pidAlive } = await import('./proc-identity.mjs');
+    return cs.oldCodeReport({ stateDir: STUDIO_STATE_DIR, installed: cs.codeStamp({ root: REPO_ROOT }), alive: (p, id) => pidAlive(p, id, { eperm: false }) }).map((o) => o.line);
+  } catch { return []; }
 }
 
 /** What landed since, and what is waiting on a person: the second half of the morning report. */
@@ -202,6 +214,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const events = readRecentEvents(0);
   const since = parseSince(flag('--since') || '24h');
   const h = health(events, { since });
+  h.oldCode = await oldCodeLines();
   if (a.includes('--brief')) {
     process.stdout.write(`${(await briefLines(h, await needsYou(events, { since }), { since: flag('--since') || '24h' })).join('\n')}\n`);
     process.exit(0);
@@ -219,7 +232,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       gs.text = renderGateStats(gs);
     } catch {}
   }
-  const text = renderHealth(h) + (n ? renderNeeds(n) : '') + (gs ? `\n${gs.text}` : '');
+  // 2.86 (f): a low disk in the last 24 h (machine.disk_low names the biggest users) is a line here too.
+  let diskLine = '';
+  try { diskLine = (await import('./machine.mjs')).diskDigestLine(events); } catch { diskLine = ''; }
+  const text = renderHealth(h) + (diskLine ? `${diskLine}\n` : '') + (n ? renderNeeds(n) : '') + (gs ? `\n${gs.text}` : '');
   if (a.includes('--json')) console.log(JSON.stringify(n ? { ...h, ...n, ...(gs ? { gateStats: { ...gs, text: undefined } } : {}) } : h));
   else process.stdout.write(text);
   const dir = flag('--write') || (a.includes('--write') ? process.env.STUDIO_RESULTS_DIR : null);

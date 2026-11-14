@@ -73,13 +73,26 @@ export function laneClass({ repo, target, cfg = {}, lane }) {
 }
 
 /**
+ * 2.86: does one queued lane change a path engines.<x>.batchAlone names (a list of regexes, like play.focus.skip: long Play Mode
+ * scenario tests, say)? Then it lands alone, as --alone does. The first matching path, or null (no list, no match, git can't tell).
+ */
+export function laneAloneWhy({ repo, target, cfg = {}, lane }) {
+  const pats = (Array.isArray(cfg?.batchAlone) ? cfg.batchAlone : []).map((p) => { try { return new RegExp(String(p)); } catch { return null; } }).filter(Boolean);
+  if (!pats.length) return null;
+  const head = out(git(repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${lane.branch}^{commit}`)) || lane.head;
+  const base = head ? out(git(repo, 'merge-base', `refs/heads/${target}`, head)) : '';
+  const changed = base ? changedPaths(repo, base, head) : null;
+  return (changed || []).find((p) => pats.some((re) => re.test(p))) || null;
+}
+
+/**
  * 2.84 (u): this train's batch from the queue (in queue order). opts: only (task ids), tag, max (--max), batchMax,
  * group ('play' | null), classOf(lane) -> class. Order: --only and --tag first (a train with neither takes untagged lanes
  * only: a tagged lane is never swept into a general train), then an alone lane rides by itself, then grouping, then the
  * cap. { lanes, why, total, waiting, cls, alone, tagged } or { error: 'unknown', unknown, why } when an --only id is not
  * queued.
  */
-export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 0, group = null, classOf = () => 'full', isVision = null } = {}) {
+export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 0, group = null, classOf = () => 'full', isVision = null, waits = null, aloneOf = null } = {}) {
   const q = Array.isArray(queue) ? queue.filter((e) => e && e.task) : [];
   const ids = onlyList(only);
   const unknown = ids.filter((id) => !q.some((e) => e.task === id));
@@ -99,10 +112,16 @@ export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 
     const front = pool.filter((l) => { try { return vis(l); } catch { return false; } });
     if (front.length) { pool = visionFirst(pool, (l) => front.includes(l)); parts.push(`vision fix first: ${front.map((l) => l.task).join(',')}`); }
   }
+  // 2.86 (waits): lanes a train left waiting for the target (red on it alone) sit out until it moves; --only still takes them.
+  if (!ids.length && waits && waits.size) { const n = pool.filter((l) => waits.has(l.task)).length; if (n) { pool = pool.filter((l) => !waits.has(l.task)); parts.push(`${n} wait for the target (red on it alone)`); } }
+  // 2.86 (aloneOf): a lane that changes an engines.<x>.batchAlone path lands alone too; the batch line says which path.
+  const soloWhy = new Map();
+  const solo = (l) => { if (l.alone) return true; if (typeof aloneOf !== 'function') return false; if (!soloWhy.has(l.task)) { let w = null; try { w = aloneOf(l) || null; } catch { w = null; } soloWhy.set(l.task, w); } return Boolean(soloWhy.get(l.task)); };
+  const why1 = (l) => (soloWhy.get(l.task) && !l.alone ? ` (it changes ${soloWhy.get(l.task)}, which engines.<x>.batchAlone lands alone)` : '');
   let alone = null;
-  const soloAt = pool.findIndex((l) => l.alone);
-  if (soloAt === 0) { alone = pool[0].task; pool = [pool[0]]; parts.push(`${alone} lands alone`); }
-  else if (soloAt > 0) { parts.push(`stops before ${pool[soloAt].task}, which lands alone`); pool = pool.slice(0, soloAt); }
+  const soloAt = pool.findIndex(solo);
+  if (soloAt === 0) { alone = pool[0].task; pool = [pool[0]]; parts.push(`${alone} lands alone${why1(pool[0])}`); }
+  else if (soloAt > 0) { parts.push(`stops before ${pool[soloAt].task}, which lands alone${why1(pool[soloAt])}`); pool = pool.slice(0, soloAt); }
   const classes = new Map();
   const cls = (l) => { if (!classes.has(l.task)) { let c = 'full'; try { c = String(classOf(l) || 'full'); } catch { c = 'full'; } classes.set(l.task, c); } return classes.get(l.task); };
   let head = null;

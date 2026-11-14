@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT, emitEvent } from './event.mjs';
+import { updateHolds } from './task-hold.mjs';
 
 export const DECIDERS = ['director', 'producer', 'planner', 'human'];
 export const SIZE_CAP = 3;
@@ -74,6 +75,8 @@ export function promote(ids, { by, drop = [], addTask, env = process.env }) {
     if (t?.error) { refused.push(`${i.id}: ${t.message.split('.')[0]}`); continue; }
     Object.assign(i, { promoted: t.id, by, at2: new Date().toISOString() });
     queued.push(`${i.id}→${t.id}`);
+    // 2.86: a hold that waits for the proposal (task block <ID> --until P-70) now waits for the task it became.
+    try { const moved = []; updateHolds((all) => { for (const [id, h] of Object.entries(all)) if (Array.isArray(h?.after) && h.after.includes(i.id)) { h.after = [...new Set(h.after.map((x) => (x === i.id ? t.id : x)))]; moved.push(id); } }); if (moved.length) emitEvent({ type: 'task.hold', agent: by, task: t.id, msg: `${by}: ${moved.join(', ')} now wait${moved.length === 1 ? 's' : ''} for ${t.id} (proposal ${i.id} was promoted)`, meta: { proposal: i.id, task: t.id, holds: moved } }); } catch { /* the promotion stands; a hold can be re-set by hand */ }
   }
   for (const i of open.filter((x) => drop.includes(x.id))) Object.assign(i, { dropped: true, by });
   writeProposed(p);

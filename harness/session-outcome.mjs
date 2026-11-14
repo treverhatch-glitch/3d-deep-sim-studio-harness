@@ -66,6 +66,9 @@ export function sessionOutcome({ agent, task, startedAt, events = [], commits = 
   if (impossible) return { task, claimed, commits, done, noWork: false, stuck: false, counts: false, impossible: true, why: '' };
   const noWork = !done && !commits;
   const stuck = !done && Boolean(notDone);
+  // 2.86: refused by the hooks check only, for commits that are not the task's own (task.not_done meta.foreign, task.mjs):
+  // the harness's refusal, not the session's work. It counts toward no task's park, hold or breaker (handback-kind.mjs).
+  if (!done && notDone?.meta?.foreign && !commits) return { task, claimed, commits, done, noWork, stuck, counts: false, foreignRefusal: true, why };
   return { task, claimed, commits, done, noWork, stuck, counts: Boolean(counts), why };
 }
 
@@ -112,14 +115,15 @@ export function holdIfSameRefusal(agent, events, { park, now = Date.now() } = {}
   const end = [...events].reverse().find((e) => e.type === 'agent.session.end' && e.agent === agent);
   const s = end ? sameRefusalAgain(end, events) : null;
   if (!s) return null;
-  const why = `task done is refused for the same reason twice: ${s.reason}`.replace(/\s+/g, ' ').slice(0, 600);
+  // 2.86: a refusal for commits that are not the task's own is held too, as the harness's hold (not the task's failure).
+  const why = `${s.foreign ? 'a harness hold, not the task\'s failure: ' : ''}task done is refused for the same reason twice: ${s.reason}`.replace(/\s+/g, ' ').slice(0, 600);
   const at = new Date(now).toISOString();
   const key = s.key.slice(0, 120);
   // Lifted once for this very reason and refused again: the lift check does not see the refusal (it runs in the main
   // checkout; a lane's refusal may not show there), so this hold waits for a planner or the overseer.
   const again = events.some((e) => e.type === 'task.hold' && e.task === s.task && e.meta?.lifted && e.meta?.key === key);
-  const parked = { by: 'harness', why, reason: 'same-refusal', key, rank: 2, byRole: 'producer', addressedTo: ['overseer', 'producer'], at, checkedAt: at, ...(again ? { noAutoLift: true } : {}) };
+  const parked = { by: 'harness', why, reason: 'same-refusal', key, rank: 2, byRole: 'producer', addressedTo: ['overseer', 'producer'], at, checkedAt: at, ...(again ? { noAutoLift: true } : {}), ...(s.foreign ? { harness: true } : {}) };
   const msg = `Held ${s.task} for the overseer and the Producer: ${why} (${s.prev}, then ${agent}, no new commit). ${again ? 'It was lifted once and the same refusal came back, so it stays held: fix the cause' : 'It lifts by itself once task done --check no longer gives that reason; or fix the cause'}, then npm run task -- unpark ${s.task} --by <name>`.slice(0, 900);
-  if (!park(s.task, parked, { by: 'harness', msg, to: 'producer', status: 'blocked', meta: { reason: 'same-refusal', addressedTo: ['overseer', 'producer'], key: parked.key } })) return null;
+  if (!park(s.task, parked, { by: 'harness', msg, to: 'producer', status: 'blocked', meta: { reason: 'same-refusal', addressedTo: ['overseer', 'producer'], key: parked.key, ...(s.foreign ? { harness: true, cause: 'harness' } : {}) } })) return null;
   return { task: s.task, why };
 }

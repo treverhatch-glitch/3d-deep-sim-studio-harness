@@ -1060,7 +1060,7 @@ export function engineWindow(f, env = process.env) {
   const waited = f.oldestAt ? Math.round(((f.now ?? Date.now()) - Date.parse(f.oldestAt)) / 60000) : 0;
   const no = (why) => ({ start: false, wait: true, why });
   if (!f.auto) return { start: false, wait: false, why: `starting the ${L} train is left to a person (STUDIO_ENGINE_TRAIN_AUTO=off or engines.${f.engine}.trainAuto false): npm run task -- train --engine ${f.engine}` };
-  if (!f.queued) return { start: false, wait: false, why: `no ${L} branch queued` };
+  if (!f.queued && !f.fullDue) return { start: false, wait: false, why: `no ${L} branch queued` };
   if (f.running) return { start: false, wait: false, why: `the ${L} train is running` };
   if (f.startedRecently) return { start: false, wait: false, why: `started it ${f.startedRecently} min ago` };
   // The engine's own slot (STUDIO_ENGINE_SLOTS, heavy.mjs engineSlotsAt): the train starts when that slot is free, whatever
@@ -1157,7 +1157,10 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
   for (const t of targets) {
     // The automatic start takes untagged lanes only: a tagged lane waits for train --engine <x> --tag <tag>.
     const qAll = ut.readUnityQueue(root, t.name);
-    const q = qAll.filter((e) => !e?.tag);
+    // 2.86: lanes a train left waiting for the target (red on it alone) are not counted until the target moves.
+    let waitT = new Set();
+    try { waitT = ut.waitingOnTarget(root, t.name, qAll); } catch { /* counted */ }
+    const q = qAll.filter((e) => !e?.tag && !waitT.has(e.task));
     const taggedN = qAll.length - q.length;
     // `train auto off --engine <x>` (.studio/train/<x>-auto.json; --hours runs out by itself).
     const ea = ctl.engineAutoState(root, t.name, { env, now });
@@ -1179,6 +1182,8 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
       f.slotFree = mine.length < f.engineSlots;
     } catch { f.engineSlots = 0; }
     f.window = t.cfg?.window === 'quiet' ? 'quiet' : 'slot';
+    // 2.86: the daily full run runs on the target alone when the queue is empty: a due one starts a train with no lane.
+    if (!q.length) { try { const fd = ut.fullLandDue(root, t.name, t.cfg || {}, env, now, { start: false }); if (fd.why) f.fullDue = fd.why; } catch { /* not due */ } }
     const w = engineWindow(f, env);
     if (autoOn && t.trainAuto && !ea.on && ea.source === 'file') {
       w.start = false; w.wait = false; w.why = ctl.autoOffWhy(ea, t.name);

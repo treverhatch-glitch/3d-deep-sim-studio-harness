@@ -50,6 +50,9 @@ jobs:
       # 2.84: no command that awaits an import which imports it back (exit 13, unsettled top-level await).
       - name: No top-level await that closes an import cycle
         run: node scripts/check-top-level-await.mjs
+      # 2.86: no name used and defined nowhere (a ReferenceError waiting in a branch few runs take).
+      - name: No name that is used and defined nowhere
+        run: node scripts/check-names.mjs
       - name: Optional gates (report only)
         if: always()
         run: node scripts/run-gates.mjs --only balance,fun,renderer-budget

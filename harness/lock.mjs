@@ -168,7 +168,7 @@ export function tooBroad(rel, { cwd = REPO_ROOT, env = process.env } = {}) {
   return n > max ? `${at} holds ${n} tracked files (more than STUDIO_LOCK_MAX_FILES, ${max})` : null;
 }
 
-export function claim(key, owner, ttlSec = 3600, { wide = null, byHand = false } = {}) {
+export function claim(key, owner, ttlSec = 3600, { wide = null, byHand = false, kept = null } = {}) {
   const check = assertOwner(owner);
   if (!check.ok) return check;
   const k = normalizeKey(key);
@@ -186,10 +186,11 @@ export function claim(key, owner, ttlSec = 3600, { wide = null, byHand = false }
     const why = tooBroad(k.slice(5));
     if (why) return { ok: false, reason: 'too-wide', message: `path:${k.slice(5)} is too broad to claim: ${why}. Claim the files your task changes (path:<file>, one claim each), or the narrowest folder, or pass --wide "<why you need all of it>". A file many tasks share (the sim's main file) needs no claim in a lane copy: overlapping edits are caught when the lane lands.` };
   }
-  return k.startsWith('path:') ? withMutex(() => claimUnlocked(k, check.owner, ttlSec)) : claimUnlocked(k, check.owner, ttlSec);
+  return k.startsWith('path:') ? withMutex(() => claimUnlocked(k, check.owner, ttlSec)) : claimUnlocked(k, check.owner, ttlSec, false, kept);
 }
 
-function claimUnlocked(k, owner, ttlSec, again = false) {
+// 2.86: kept: who made the claim again in the owner's name (busy.mjs keepClaim), recorded on the lock as kept: { by, at }.
+function claimUnlocked(k, owner, ttlSec, again = false, kept = null) {
   const check = { ok: true, owner };
   if (k.startsWith('path:')) {
     // A folder lock covers its files, and a file lock blocks locking its folder: refuse overlaps, compared without regard
@@ -206,13 +207,13 @@ function claimUnlocked(k, owner, ttlSec, again = false) {
   }
   const file = lockPath(k);
   const now = Date.now();
-  const payload = { key: k, owner: check.owner, claimedAt: new Date(now).toISOString(), expiresAt: new Date(now + ttlSec * 1000).toISOString(), holder: holderOf() };
+  const payload = { key: k, owner: check.owner, claimedAt: new Date(now).toISOString(), expiresAt: new Date(now + ttlSec * 1000).toISOString(), holder: holderOf(), ...(kept ? { kept: { by: String(kept), at: new Date(now).toISOString() } } : {}) };
   // The lock file appears already holding its payload (never empty, even if this process is killed).
   if (createExclusive(file, JSON.stringify(payload, null, 2))) return { ok: true, lock: payload };
   const seen = inspectLock(file);
   if (seen.lock && !seen.expired) {
     if (seen.lock.owner === check.owner) return { ok: true, lock: seen.lock, reused: true };
-    if (!again && takeOver(seen.lock, owner, file, seen.raw)) { const r = claimUnlocked(k, owner, ttlSec, true); return r.ok ? { ...r, message: `took over an expired lock of ${seen.lock.owner} (no live session)` } : r; }
+    if (!again && takeOver(seen.lock, owner, file, seen.raw)) { const r = claimUnlocked(k, owner, ttlSec, true, kept); return r.ok ? { ...r, message: `took over an expired lock of ${seen.lock.owner} (no live session)` } : r; }
     return { ok: false, reason: 'claimed', lock: seen.lock };
   }
   // An unreadable lock file (an agent killed between creating and writing it) must not recurse forever. Young: someone is
@@ -222,7 +223,7 @@ function claimUnlocked(k, owner, ttlSec, again = false) {
     setAside(file, seen.raw, seen.raw === null ? 'unreadable' : seen.raw.trim() ? 'half-written' : 'empty');
   } else if (seen.expired) moveAside(file, null, seen.raw);
   if (again) return { ok: false, reason: 'busy', lock: null, message: `${k} is changing hands right now; try again in a moment.` };
-  return claimUnlocked(k, owner, ttlSec, true);
+  return claimUnlocked(k, owner, ttlSec, true, kept);
 }
 
 /**
@@ -274,8 +275,9 @@ export function holderGone(lock) {
   let s = null;
   try { s = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'agents', `${lock.owner}.json`), 'utf8')); } catch { return null; }
   if (!s || typeof s !== 'object') return null;
-  // A claim made after that session ended is someone else's under the same name: nothing says it is over.
-  if (s.status !== 'running') return s.endedAt && Date.parse(lock.claimedAt || '') > Date.parse(s.endedAt) ? null : true;
+  // A claim made after that session ended is someone else's under the same name: nothing says it is over. 2.86: unless the
+  // harness made it again in the owner's name (lock.kept, busy.mjs keepClaim): then it is still the ended session's.
+  if (s.status !== 'running') return s.endedAt && Date.parse(lock.claimedAt || '') > Date.parse(s.endedAt) && !lock.kept ? null : true;
   return !recordAlive(s);
 }
 

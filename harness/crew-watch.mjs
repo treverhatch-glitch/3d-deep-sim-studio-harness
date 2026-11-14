@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { weightedTokens } from './token-weight.mjs';
 import { readJson } from './fsafe.mjs';
-import { readyForTrain, sessionEndRefusedAgain } from './handback-kind.mjs';
+import { readyForTrain, sessionEndRefusedAgain, sessionEndKind, harnessKind } from './handback-kind.mjs';
 
 export const PAUSED_FILE = () => path.join(STUDIO_STATE_DIR, 'crew-paused.json');
 export const RESUME_FILE = () => path.join(STUDIO_STATE_DIR, 'crew-resume.json');
@@ -96,10 +96,13 @@ export function crewHealth(events, { now = Date.now(), env = process.env, sinceB
       if (o?.queuedForTrain) r.queued += 1;
       // 2.85: a session refused by task done for the same reason as the one before it (no new commit) met a harness check it
       // could not act on: not the crew burning sessions (handback-kind.mjs; the task is held for a planner instead).
-      if (o && !o.done && !o.commits && o.counts !== false && !sessionEndRefusedAgain(e, sorted)) { r.noCommit += 1; if (o.why && r.whys.length < 3) r.whys.push(`${e.agent}: ${o.why}`); }
+      // 2.86: a session the harness ended (a refresh hand-off, a launch failure, a refusal for commits not the task's own:
+      // handback-kind.mjs sessionEndKind) is neither a no-work session nor a short exit of the crew's.
+      const harnessEnd = harnessKind(sessionEndKind(e));
+      if (o && !o.done && !o.commits && o.counts !== false && !harnessEnd && !sessionEndRefusedAgain(e, sorted)) { r.noCommit += 1; if (o.why && r.whys.length < 3) r.whys.push(`${e.agent}: ${o.why}`); }
       if (o?.task && !r.tasks.includes(o.task)) r.tasks.push(o.task);
       const st = startOf.get(e.agent);
-      if (st && t - st < lim.shortMs && !e.meta?.stoppedBy && !e.meta?.usageLimit) r.shortExits += 1;
+      if (st && t - st < lim.shortMs && !e.meta?.stoppedBy && !e.meta?.usageLimit && !harnessEnd) r.shortExits += 1;
     }
   }
   // Landings in each role's window of the tasks its sessions held.

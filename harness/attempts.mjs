@@ -105,9 +105,6 @@ export function clearAttempts(taskId) {
   } catch { return false; }
 }
 
-/** Does an uncleared failure attempt exist? (a cheap check before any git call) */
-export const hasActiveAttempt = (taskId) => { const a = lastAttempt(taskId); return Boolean(a && !a.cleared && a.endLabel !== 'done'); };
-
 /**
  * The last recorded failure attempt's signature against the signature of the current facts.
  * nowFacts: { mainTip?, holds?, done? (Set of done ids), reasonKey? (2.84) }. Returns { same, n, since, mainTip, reasonKey }.

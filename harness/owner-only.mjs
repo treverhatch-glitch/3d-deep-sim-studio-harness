@@ -70,9 +70,6 @@ export function ownerOnlyStep(text = '') {
   return null;
 }
 
-/** Is this task parked for the owner already (by this module)? */
-export const parkedOwnerOnly = (taskId, holds = readHolds()) => Boolean(holds[taskId]?.parked?.ownerOnly);
-
 /**
  * Park the task for the owner and page the orchestrator. Returns { parked, step, phrase, why } or null (no phrase, or
  * the task is parked already: a park by a person or the breaker stays as it is).

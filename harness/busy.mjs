@@ -174,7 +174,10 @@ export function claimActive(task, { root = null, now = Date.now(), env = process
     const at = Date.parse(last.ts) || 0;
     if (now - at <= win) return { busy: true, owner: c.owner, short: `${task}'s owner ${c.owner} is still working on it`, why: `${task}'s claim ran out, but its owner ${c.owner} was active ${min(at)} min ago (${last.type}); it is still working on it (STUDIO_CLAIM_ACTIVE_MIN ${Math.round(win / 60000)})` };
   }
-  if (root) {
+  // 2.86: a lane copy that changed lately is not its owner working when the owner's launched session has ended since it
+  // claimed (refresh, stall, budget, exit): its last commit is from before the end. Keeping the claim re-made it in a dead
+  // session's name after the session's own release, and the next start was refused "<old agent> holds T-x" for an hour.
+  if (root && !ownerGone(c, mine, root)) {
     try {
       const lanes = path.join(root, '.lanes');
       const dirs = new Set();
@@ -289,7 +292,9 @@ export function keepClaim(task, owner, { by = 'harness', why = '' } = {}) {
   if (!task || !owner) return false;
   try {
     if (lockStatus(`task:${task}`).locked) return false;
-    const r = claimLock(`task:${task}`, owner);
+    // 2.86: marked as kept by the harness, so a claim made after the owner's launched session ended is still that dead
+    // session's (lock.mjs holderGone, agent.mjs releaseDeadLocks), not a new owner's under the same name.
+    const r = claimLock(`task:${task}`, owner, 3600, { kept: by });
     if (!r?.ok || r.reused) return false;
     // 2.79.1 (d): the claim is made again every time it runs out (while the owner works), but the event says it once per task,
     // owner and reason (digits left out: "active 7 min ago" ticks), and again after 6 h (claimOwner reads it from the log).
@@ -328,10 +333,9 @@ export async function taskBusy(task, { now = Date.now(), env = process.env, even
 export { HARNESS_CAUSE, harnessCaused, STOP_NOTE, PERSON_CAUSE, IMPOSSIBLE_NOTE, impossibleExit, personCaused } from './handback-kind.mjs';
 /**
  * 2.83: a refresh hand-off (a session that reached its turn or time cap and hands its task to a fresh session by design):
- * not a failure of the model or route that ran it. agent.mjs writes "A fresh session continues from this hand-back".
+ * not a failure of the model or route that ran it. 2.86: defined in handback-kind.mjs (one reading for every counter).
  */
-export const REFRESH_NOTE = /\bA fresh session continues from this hand-back\b/i;
-export const refreshCaused = (e) => e?.meta?.cause === 'refresh' || REFRESH_NOTE.test(String(e?.msg || ''));
+export { REFRESH_NOTE, refreshCaused } from './handback-kind.mjs';
 /** 2.83: a session end that says it was not a failure: a refresh, a person's stop or pause, or a usage-limit stop. */
 export const endNotAFailure = (e) => Boolean(e?.meta?.refreshed || e?.meta?.stoppedBy || e?.meta?.usageLimit) || /refreshed \(session cap\)|^(paused|stopped) by |usage limit:/i.test(String(e?.meta?.reason || ''));
 /**
