@@ -31,6 +31,7 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
+import { read } from './learning-edge.mjs';
 import { readNotes } from './notes.mjs';
 import { buildScorecard, renderScorecard, renderFollow } from './scorecard.mjs';
 import { RETRO_DIR } from './retro.mjs';
@@ -39,13 +40,6 @@ import { parseNextQueue, addTask, HANDOFF_DIR } from './task.mjs';
 import { taskType } from './done-check.mjs';
 import { ownerType } from './reclassify.mjs';
 
-const read = (rel) => {
-  try {
-    return fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
-  } catch {
-    return '';
-  }
-};
 const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'into', 'task', 'tasks', 'after', 'since', 'when', 'not', 'was', 'has', 'have', 'its', 'are', 'but', 'agent']);
 const keywords = (s) => [...new Set(String(s).toLowerCase().match(/[a-z][a-z-]{3,}/g) || [])].filter((w) => !STOP.has(w));
 

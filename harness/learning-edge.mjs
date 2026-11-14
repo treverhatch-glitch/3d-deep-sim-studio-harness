@@ -47,7 +47,8 @@ export function signature(msg) {
     .slice(0, 140);
 }
 
-const read = (rel) => {
+/** 2.86: a repo file's text with LF line ends, '' when it can't be read (learn.mjs and prepare-brief.mjs import it instead of each keeping a copy). */
+export const read = (rel) => {
   try {
     return fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
   } catch {

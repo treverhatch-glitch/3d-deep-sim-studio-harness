@@ -29,7 +29,7 @@ import { parseNextQueue, readTaskHandoff } from './task.mjs';
 import { PROVIDERS } from './models.config.mjs';
 import { routeChatCompletion } from './route.mjs';
 import { untrustedBlock } from './untrusted.mjs';
-import { constraintsBlock } from './learning-edge.mjs';
+import { constraintsBlock, read } from './learning-edge.mjs';
 import { pitfallPartsForRole } from './pitfalls.mjs';
 
 // 2.61 (the learning edge): roles whose work is planning and cutting work get the constraints from past failures.
@@ -41,13 +41,6 @@ const SECTIONS = ['Goal', 'Relevant history', 'Known pitfalls', 'Files to touch'
 const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'into', 'that', 'this', 'when', 'then', 'task', 'tasks', 'fix', 'bug', 'study', 'docs', 'review', 'balance', 'playtest', 'your', 'one', 'new']);
 
 const words = (t) => (String(t || '').trim().match(/\S+/g) || []).length;
-const read = (rel) => {
-  try {
-    return fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
-  } catch {
-    return '';
-  }
-};
 const posix = (p) => p.split(path.sep).join('/');
 
 /** Cheap providers only: local first, then free tiers. STUDIO_PREPARE_CHAIN overrides (comma-separated ids). */
