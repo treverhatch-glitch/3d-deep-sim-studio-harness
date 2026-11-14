@@ -186,13 +186,13 @@ console.log('Passed!');
   {
     resetState();
     const E = engineRepo({}, { shared: startFiles });
-    setEngines({ unity: cfgFor(E, path.join(T, 'ctl-cfg'), { rules: rulesCfg(path.join(T, 'rules-cfg.jsonl'), { auto: AUTO, map: [{ match: '^(Sim/Hall/|tools/port/hall/)', filter: 'Category=HallNav|Category=Guest' }] }) }) });
+    setEngines({ unity: cfgFor(E, path.join(T, 'ctl-cfg'), { rules: rulesCfg(path.join(T, 'rules-cfg.jsonl'), { auto: AUTO, map: [{ match: '^(Sim/Dock/|tools/port/dock/)', filter: 'Category=DockNav|Category=Guest' }] }) }) });
     const x = probe(`import { rulesConfig, rulesSelection } from ${u('harness/engine-rules.mjs')};
 const cfg = rulesConfig('unity', { root: process.cwd() });
-const sel = rulesSelection({ changed: ['Sim/Hall/hall.cs', 'tools/port/hall/v.json', 'Sim/Fees/b.cs', 'Tests/Sim/PaxNavTests.cs'], cfg, autoNames: ['Fees', 'Hall', 'Pax', 'PaxNav'] });
+const sel = rulesSelection({ changed: ['Sim/Dock/dock.cs', 'tools/port/dock/v.json', 'Sim/Fees/b.cs', 'Tests/Sim/MapNavTests.cs'], cfg, autoNames: ['Fees', 'Dock', 'Map', 'MapNav'] });
 console.log(JSON.stringify({ mode: sel.mode, filters: sel.filters, why: sel.why }));`);
-    await guard('2.86 (c) a hand-written rules.focus.map entry wins over rules.focus.auto: Sim/Hall and tools/port/hall take the entry\'s filter (Category=HallNav|Category=Guest), not the auto one (Category=Hall); Sim/Fees takes auto\'s; Tests/Sim/PaxNavTests.cs is PaxNav\'s, not Pax\'s (the longest name wins) (fails before this fix: the entry\'s prefixes sit in a group its filter does not use, and a group with a slash made the entry match nothing, as a crew\'s 38 entries did; and Sim/Fees matched no map entry: a full run)', () => [
-      x.mode === 'focus' && JSON.stringify(x.filters) === JSON.stringify(['Category=HallNav|Category=Guest', 'Category=Fees', 'Category=PaxNav', 'Category=Smoke']), JSON.stringify(x).slice(0, 1500)]);
+    await guard('2.86 (c) a hand-written rules.focus.map entry wins over rules.focus.auto: Sim/Dock and tools/port/dock take the entry\'s filter (Category=DockNav|Category=Guest), not the auto one (Category=Dock); Sim/Fees takes auto\'s; Tests/Sim/MapNavTests.cs is MapNav\'s, not Map\'s (the longest name wins) (fails before this fix: the entry\'s prefixes sit in a group its filter does not use, and a group with a slash made the entry match nothing, as a crew\'s 38 entries did; and Sim/Fees matched no map entry: a full run)', () => [
+      x.mode === 'focus' && JSON.stringify(x.filters) === JSON.stringify(['Category=DockNav|Category=Guest', 'Category=Fees', 'Category=MapNav', 'Category=Smoke']), JSON.stringify(x).slice(0, 1500)]);
     const bads = [
       [{ root: 'Sim', paths: ['Sim/x/'], filter: 'Category={name}' }, /path template "Sim\/x\/" has no \{name\}/],
       ['yes', /it is not an object/],

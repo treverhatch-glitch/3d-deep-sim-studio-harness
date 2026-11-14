@@ -134,7 +134,7 @@ export function autoSystems({ repo, shas = [], auto, shared = [] } = {}) {
   return { names: [...seen.values()].sort(), skipped };
 }
 
-/** 2.86: the auto system a path belongs to (the longest matching template expansion wins: Sim/PaxNav... is PaxNav, not Pax), or null. */
+/** 2.86: the auto system a path belongs to (the longest matching template expansion wins: Sim/MapNav... is MapNav, not Map), or null. */
 export function autoNameOf(p, auto, names = []) {
   const pl = String(p).toLowerCase();
   let best = null;

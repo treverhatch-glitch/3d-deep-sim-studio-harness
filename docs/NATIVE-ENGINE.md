@@ -164,7 +164,7 @@ half as much machine time as the land runs. Five settings, all optional, in the 
 
   `root`: a folder whose child folders are the systems (a name may hold letters, digits, `.`, `_`, `-`). `paths`:
   templates with `{name}`; a changed path belongs to a system when it starts with one, letter case aside (so
-  `tools/port/fees/` is `Fees`'s), and the longest match wins (`PaxNavTests.cs` is `PaxNav`'s, not `Pax`'s). `filter`:
+  `tools/port/fees/` is `Fees`'s), and the longest match wins (`MapNavTests.cs` is `MapNav`'s, not `Map`'s). `filter`:
   the test filter with `{name}`; `filters` names the systems whose tests are called otherwise. `inputs` (optional):
   templates under `rules.inputs`, so a part's kept result holds only its own input files and the ones no system owns.
   A path a hand-written `map` entry takes stays the entry's (the map wins). A path neither takes still means a full run,
