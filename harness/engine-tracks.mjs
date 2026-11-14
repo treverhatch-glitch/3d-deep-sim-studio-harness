@@ -27,10 +27,11 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
 import { learnedNeed } from './engine-ram.mjs';
-import { readJson } from './fsafe.mjs';
+import { readJson, writeAtomic } from './fsafe.mjs';
 import { splitPhantom, phantomNote } from './eol-only.mjs';
 
-const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(tmp, f); };
+// 2.86: fsafe's writeAtomic retries a rename Windows refuses for a moment (EPERM/EBUSY); a bare rename killed a session's launch (setEngineTask).
+const writeJson = (f, v) => { writeAtomic(f, `${JSON.stringify(v, null, 2)}\n`); };
 const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
 const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 

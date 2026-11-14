@@ -262,6 +262,8 @@ export function reviewerRoute({ plan, tool, explicitTool = false, env = process.
 const reviewRoot = () => { try { return studioRoot(); } catch { return REPO_ROOT; } };
 /** STUDIO_AGY_ANY_MODEL=on (or --force-model): agy may run a model that isn't Gemini (a person's explicit choice). */
 export const agyAnyModel = (env = process.env) => /^(on|1|true|yes)$/i.test(String(env.STUDIO_AGY_ANY_MODEL || '').trim());
+/** 2.86: a studio/models.json pool marked "anyModel": true runs its model on agy (the owner's choice for that pool), whatever the vendor. */
+export const poolAnyModel = (model, root = reviewRoot()) => { try { const n = toolForModel(model, { root }); return n.from === 'pool' && n.tool === 'agy' && n.anyModel === true; } catch { return false; } };
 export function agyOptions(model = null, env = process.env) {
   const word = (v, d) => (/^[\w.:-]{1,60}$/.test(String(v ?? '').trim()) ? String(v).trim() : d);
   const timeout = word(env.STUDIO_AGY_PRINT_TIMEOUT, '5400s');
@@ -2328,7 +2330,7 @@ export function startAgent(opts, { detach = false } = {}) {
     const named = Boolean(opts.model);
     const viaCustom = Boolean(toolCmd(tool) || process.env[`STUDIO_${roleKey(role)}_CMD`]) && tool !== 'vertex';
     if (!viaCustom && (named || !['vertex', 'agy'].includes(tool))) {
-      const line = toolMismatch({ tool, model, forced: tool === 'agy' && (Boolean(opts.forceModel) || agyAnyModel() || Boolean(opts.orderModel)), root: reviewRoot() });
+      const line = toolMismatch({ tool, model, forced: tool === 'agy' && (Boolean(opts.forceModel) || agyAnyModel() || Boolean(opts.orderModel) || poolAnyModel(model)), root: reviewRoot() });
       if (line) {
         emitEvent({ type: 'agent.start.refused', agent, to: 'producer', task: opts.task || undefined, status: 'warn', msg: `${agent} not started: ${line}`.slice(0, 600), meta: { role, kind: 'tool-model', tool, model } });
         return { ok: false, skipped: true, refused: 'tool-model', message: line };
@@ -2339,7 +2341,7 @@ export function startAgent(opts, { detach = false } = {}) {
   // STUDIO_AGY_ANY_MODEL=on, or an agy:<model> budget-order entry); a model picked by rescue, routing, tier-up or reroute
   // that isn't Gemini gives way to the Gemini default.
   if (tool === 'agy' && !isGeminiModel(model)) {
-    const forced = Boolean(opts.forceModel) || agyAnyModel() || Boolean(opts.orderModel);
+    const forced = Boolean(opts.forceModel) || agyAnyModel() || Boolean(opts.orderModel) || poolAnyModel(model);
     if (!forced && opts.model) return { ok: false, refused: 'agy-model', message: `Not started: agy runs Gemini models in this studio, and "${model}" isn't one (agy with a non-Gemini model, or none, ran Claude Sonnet inside agy). Use --model gemini-… (agy models lists them; the default is ${String(process.env.STUDIO_TOOL_AGY_MODEL || '').trim() || AGY_DEFAULT_MODEL}), --tool claude for a Claude model, or --force-model to run it on agy anyway.` };
     if (!forced) {
       const g = isGeminiModel(process.env.STUDIO_TOOL_AGY_MODEL) ? String(process.env.STUDIO_TOOL_AGY_MODEL).trim() : AGY_DEFAULT_MODEL;
