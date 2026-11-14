@@ -5269,6 +5269,14 @@ if (inShard('selftest-286e')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.86 (c): the rules check before an engine land run, by convention and per part.
+if (inShard('selftest-286c')) {
+  const dir = copyRepo();
+  const { selftest286C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286c.mjs')).href);
+  await selftest286C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
