@@ -153,8 +153,3 @@ export function writeWaiting(map) {
   fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
   fs.writeFileSync(WAIT_FILE(), `${JSON.stringify({ at: new Date().toISOString(), tasks: map }, null, 2)}\n`);
 }
-export function readWaiting(maxAgeMs = 5 * 60000) {
-  const w = readJson(WAIT_FILE(), null);
-  if (!w || Date.now() - Date.parse(w.at) > maxAgeMs) return {};
-  return w.tasks || {};
-}

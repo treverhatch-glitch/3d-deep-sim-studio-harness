@@ -5285,6 +5285,14 @@ if (inShard('selftest-286f')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.86 (g): code that nothing uses, found by a tool and removed only with proof.
+if (inShard('selftest-286g')) {
+  const dir = copyRepo();
+  const { selftest286G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286g.mjs')).href);
+  await selftest286G({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

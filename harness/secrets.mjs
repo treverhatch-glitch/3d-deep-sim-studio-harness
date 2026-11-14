@@ -33,7 +33,6 @@ const PROVIDERS = [
   [/r8_[A-Za-z0-9]{20,}/, 'replicate-token'],
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, 'private-key'],
 ];
-export const SECRET_PATTERNS = PROVIDERS.map(([re]) => re);
 const SHARED = PROVIDERS.map(([re, kind]) => ({ re: new RegExp(re.source, 'g'), kind }));
 
 // 2.43.0: a key-shaped match glued inside a longer run of base64 characters is a piece of encoded data (an

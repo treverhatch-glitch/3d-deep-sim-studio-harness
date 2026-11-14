@@ -125,6 +125,7 @@
     "check:isolation": "node scripts/check-sim-isolation.mjs",
     "check:tla": "node scripts/check-top-level-await.mjs",
     "check:same-code": "node scripts/same-code.mjs",
+    "check:unused": "node scripts/unused-exports.mjs",
     "event:sh": "node scripts/append-event.mjs",
     "session:start": "node scripts/session-start.mjs",
     "session:precompact": "node scripts/pre-compact.mjs",

@@ -173,8 +173,6 @@ export function quietHolding(root, { now = Date.now(), skipTags = [] } = {}) {
   } catch {}
   return live;
 }
-/** STUDIO_HEAVY_SLOTS, else computed from the machine scan (heavy-budget.mjs slotsFor); 1 with no scan. */
-export const heavySlots = (env = process.env, profile = null) => slotsFor(profile, env);
 
 // ---- the machine's slot counts are read where the machine's other settings live ----
 const isNum = (v) => v !== undefined && v !== null && String(v).trim() !== '' && Number.isFinite(Number(v));

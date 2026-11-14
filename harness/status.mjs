@@ -50,18 +50,6 @@ export function readSubscriptionUsage() {
   };
 }
 
-export function writeSubscriptionUsage(nextUsage) {
-  fs.mkdirSync(path.dirname(USAGE_FILE), { recursive: true });
-  const current = readSubscriptionUsage();
-  const merged = {
-    ...current,
-    ...nextUsage,
-    updatedAt: new Date().toISOString(),
-  };
-  fs.writeFileSync(USAGE_FILE, JSON.stringify(merged, null, 2) + '\n', 'utf8');
-  return merged;
-}
-
 export function findLatestQaScreenshot() {
   const reportsDir = path.join(REPO_ROOT, 'qa', 'reports');
   if (!fs.existsSync(reportsDir)) return null;

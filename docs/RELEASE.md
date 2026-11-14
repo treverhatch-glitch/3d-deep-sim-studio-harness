@@ -84,6 +84,14 @@ The file ships with the harness; a studio's `npm run autonomy -- impact` scores 
 (strings, template parts and regexes included) at the base commit and now, and fails when one differs. 2.84's comment
 trim was landed file by file on that proof. `-- --measure <file>...` prints comment bytes per file.
 
+### Code that nothing uses
+
+`npm run check:unused` (`scripts/unused-exports.mjs`) is a read-only report of every export in `harness/` and `scripts/` by
+class (USED, TEST-ONLY, INTERNAL, DEAD) and of modules no other file names. It is deliberately conservative (a name in a
+comment, a string or a doc counts as a use) and it only finds candidates: remove one only with `node --check`, the
+top-level-await and docs checks and the units that cover the file. `-- --list DEAD` names them, `-- --duplicates` finds
+identical functions that could be imported instead (it refuses a fold that would make an import cycle), `-- --json` prints it all.
+
 ## Taking a harness update into a studio
 
 A studio (a private copy with a game in it) takes a new harness version by merging it, never by stashing its board (a stash

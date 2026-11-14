@@ -29,7 +29,7 @@ import { parseNextQueue, readTaskHandoff } from './task.mjs';
 import { PROVIDERS } from './models.config.mjs';
 import { routeChatCompletion } from './route.mjs';
 import { untrustedBlock } from './untrusted.mjs';
-import { constraintsBlock } from './learning-edge.mjs';
+import { constraintsBlock, read } from './learning-edge.mjs';
 import { pitfallPartsForRole } from './pitfalls.mjs';
 
 // 2.61 (the learning edge): roles whose work is planning and cutting work get the constraints from past failures.
@@ -41,13 +41,6 @@ const SECTIONS = ['Goal', 'Relevant history', 'Known pitfalls', 'Files to touch'
 const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'into', 'that', 'this', 'when', 'then', 'task', 'tasks', 'fix', 'bug', 'study', 'docs', 'review', 'balance', 'playtest', 'your', 'one', 'new']);
 
 const words = (t) => (String(t || '').trim().match(/\S+/g) || []).length;
-const read = (rel) => {
-  try {
-    return fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
-  } catch {
-    return '';
-  }
-};
 const posix = (p) => p.split(path.sep).join('/');
 
 /** Cheap providers only: local first, then free tiers. STUDIO_PREPARE_CHAIN overrides (comma-separated ids). */
@@ -238,19 +231,6 @@ export async function prepareBrief({ taskId = null, mode = 'auto', force = false
     meta: { wordsIn: w.sourceWords, wordsOut: outWords, tokens },
   });
   return { ok: true, taskId: task.id, by, provider, model, note, wordsIn: w.sourceWords, wordsOut: outWords, file: posix(path.relative(REPO_ROOT, file)), brief: md };
-}
-
-/** Kept for the HUB's "prepare brief" button: the script's version, no model, synchronous. */
-export function buildPreparedBrief() {
-  const task = pickTask(null);
-  if (!task) return { taskId: null, wordCount: 0, mode: 'template', briefPath: null, brief: 'No task in progress or queued.' };
-  const w = gatherWindow(task);
-  const md = render(task, templateBrief(w), { by: 'a script (no model)', note: 'From the HUB button.' });
-  fs.mkdirSync(BRIEFS_DIR, { recursive: true });
-  fs.writeFileSync(path.join(BRIEFS_DIR, `${task.id}.prepared.md`), md);
-  fs.writeFileSync(path.join(BRIEFS_DIR, 'latest.md'), md);
-  emitEvent({ type: 'brief.prepared', agent: 'preparer', to: 'producer', provider: 'template', model: 'none', task: task.id, target: `.studio/briefs/${task.id}.prepared.md`, msg: `Brief for ${task.id} by a script (no model).` });
-  return { taskId: task.id, wordCount: words(md), mode: 'template', briefPath: `.studio/briefs/${task.id}.prepared.md`, brief: md };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

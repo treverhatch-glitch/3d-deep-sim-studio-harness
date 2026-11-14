@@ -86,9 +86,6 @@ export const ASSET_DEFAULTS = {
   sizeRequired: false,
 };
 
-/** Where the asset ("make") task's brief template lives (a stable path other tools copy it from). */
-export const ASSET_BRIEF_TEMPLATE = 'studio/templates/asset-brief.md';
-
 const slash = (p) => String(p).split(path.sep).join('/').replace(/^\.\//, '');
 
 /** The game's asset settings (studio/game.json "assets") merged over the defaults; declared = the block exists. */
