@@ -2060,8 +2060,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // --accepted-by comes from it, never from a flag an agent types.
     let forceApproval = null; // 2.84 (q): the force approval on file, for --force --train
     if (flags.force || flags['accepted-by']) {
-      const { forceApproved } = await import('./approve.mjs');
-      const fa = forceApproved(targetId);
+      const { forceApproved, readApprovals, verifyApproval } = await import('./approve.mjs');
+      let fa = forceApproved(targetId);
+      // 2.86: where no owner key is enforced (forceApproved: null) a force approval a beta stand-in recorded still counts, judged by
+      // the same beta predicate, so `--force --train` and a plain `--force` answer alike (B-142: the train said "no approval").
+      if (!fa) { const rec = readApprovals().find((x) => x.approval?.kind === 'force' && x.approval.task === targetId && !x.signature && x.beta && verifyApproval(x, null)); if (rec) fa = { ok: true, by: rec.approval.by, reason: rec.approval.reason, file: rec.file }; }
       forceApproval = fa;
       if (fa && !fa.ok) {
         console.error(`${targetId} can't be forced closed without the owner's approval. Hand it back (task pause ${targetId} --note "…") and ask; the owner runs: npm run approve -- force ${targetId} --reason "…". Nothing was closed.`);

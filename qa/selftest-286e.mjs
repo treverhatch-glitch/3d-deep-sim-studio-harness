@@ -106,5 +106,34 @@ console.log(JSON.stringify({ ok: r.ok, error: r.error || null, message: r.messag
       JSON.stringify({ b: b.message, c: c.message }).slice(0, 2500)]);
   }
 
-  void events; void gEnv;
+  // ================= e2. --force --train accepts a force approval a beta stand-in recorded (no owner key enforced) =================
+  {
+    const BETA_ON = { on: true, by: 'pat', at: '2026-11-05T01:00:00.000Z', why: 'beta for the selftest', agents: ['overseer-1'], roles: ['producer', 'director'] };
+    write(S, 'studio/beta.json', `${JSON.stringify(BETA_ON, null, 2)}\n`);
+    write(S, '.gitignore', `${fs.existsSync(path.join(dir, '.gitignore')) ? fs.readFileSync(path.join(dir, '.gitignore'), 'utf8') : ''}\n/.lanes/\n/.studio/\n.env\n`);
+    g(S, 'config', 'core.eol', 'lf');
+    g(S, 'add', '-A'); g(S, 'commit', '-qm', 'beta on, no owner key', '--no-verify');
+    fs.mkdirSync(path.join(T, 'hooks'), { recursive: true });
+    fs.copyFileSync(path.join(S, 'scripts', 'hooks', 'commit-msg'), path.join(T, 'hooks', 'commit-msg'));
+    try { fs.chmodSync(path.join(T, 'hooks', 'commit-msg'), 0o755); } catch { /* Windows: git runs it with its own bash */ }
+    g(S, 'config', 'core.hooksPath', fwd(path.join(T, 'hooks')));
+    const cli = (actor, args) => spawnSync(process.execPath, args, { windowsHide: true, cwd: S, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 240000, env: { ...envOf(), ...actor } });
+    const OWNER = {};
+    const OVER = { CLAUDECODE: '1', STUDIO_LOCK_OWNER: 'overseer-1' };
+    const addTask = (title) => (out(cli(OWNER, ['harness/task.mjs', 'add', title, '--role', 'builder', '--priority', 'P1'])).match(/\b(T-\d+)\b/) || [])[1];
+    const commitAs = (who, msg, ...files) => { g(S, 'add', '--', ...files); return spawnSync('git', ['commit', '-qm', msg, '--', ...files], { windowsHide: true, cwd: S, encoding: 'utf8', env: { ...gEnv(), ...envOf(), STUDIO_LOCK_OWNER: who }, stdio: ['ignore', 'pipe', 'pipe'] }); };
+    const id = addTask('Force-train with a beta approval');
+    const ap = cli(OVER, ['harness/approve.mjs', 'force', id, '--reason', 'it lands through the train without the review', '--by', 'overseer-1']);
+    const f = `studio/approvals/force-${id}.json`;
+    const made = fs.existsSync(path.join(S, f));
+    if (made) commitAs('overseer-1', `approve force ${id}`, f);
+    const ft = cli(OVER, ['harness/task.mjs', 'done', id, '--force', '--train', '--reason', 'it lands through the train without the review', '--agent', 'overseer-1']);
+    const id2 = addTask('Force-train with no approval at all');
+    const ft2 = cli(OVER, ['harness/task.mjs', 'done', id2, '--force', '--train', '--reason', 'no approval for this one at all', '--agent', 'overseer-1']);
+    await guard('2.86 (e2) `task done --force --train` after `approve -- force` under beta mode in a studio with no enforced owner key: the recorded approval is accepted (not "--train and --force don\'t go together without a force approval"), while a task with none is still refused with that text (fails before this fix: the train path read the approval only where an owner key is enforced, so a valid beta approval was "not on file")', () => [
+      made && !/don't go together without a force approval/.test(out(ft)) && /don't go together without a force approval/.test(out(ft2)),
+      JSON.stringify({ made, ap: out(ap).slice(-300), ft: out(ft).slice(-500), ft2: out(ft2).slice(-300) })]);
+  }
+
+  void events;
 }
