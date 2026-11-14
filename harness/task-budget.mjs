@@ -20,6 +20,10 @@
  * (task.train.dropped); and a task held or queued right now is never stopped for its minutes. Sessions and tokens
  * still count, and a lane that is neither held nor queued is clocked as before.
  *
+ * 2.86: a session that ended for the harness's reason (handback-kind.mjs sessionEndKind: a refresh hand-off, a launch
+ * failure, a `task done` refused for commits not the task's own) is not one of the task's sessions; its claim time counts
+ * only when it did work (a refresh that committed or edited), since that time was spent on the task.
+ *
  * 0 turns one limit off; STUDIO_TASK_BUDGET=off turns the whole check off. A task over budget is parked
  * (by "budget") with the numbers, the Producer and the War Room get "needs you", and it never starts
  * again until someone unparks it (`npm run task -- unpark <ID> --by <name>`), which also resets the count.
@@ -32,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { readRecentEvents, emitEvent } from './event.mjs';
 import { weightedTokens } from './budget.mjs';
 import { readHolds, setHold, heldForLanding, heldWords } from './task-hold.mjs';
+import { sessionEndKind, harnessKind } from './handback-kind.mjs';
 
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const off = (env) => /^(off|0|false|no)$/i.test(String(env.STUDIO_TASK_BUDGET || ''));
@@ -90,23 +95,30 @@ export function taskSpend(taskId, events = readRecentEvents(20000), now = Date.n
   let ms = 0;
   const off = offPeriods(events);
   const span = (a, b) => Math.max(0, b - a - overlapMs(off, a, b)); // 2.83: the time the studio was off doesn't count
+  // 2.86: how each launched session ended (its next agent.session.end), so one the harness ended costs the task nothing.
+  const endKindAt = new Map();
+  { const pending = new Map(); events.forEach((e, i) => { if (e.type === 'agent.session.start') pending.set(e.agent, i); else if (e.type === 'agent.session.end' && pending.has(e.agent)) { endKindAt.set(pending.get(e.agent), sessionEndKind(e)); pending.delete(e.agent); } }); }
+  const kindOf = new Map(); // launched agent -> how its current session ended
   for (let i = 0; i < events.length; i += 1) {
     const e = events[i];
     const at = Date.parse(e.ts) || 0;
     const counted = i >= start;
     if (e.type === 'agent.session.start') {
       onTask.set(e.agent, e.task || null);
+      kindOf.set(e.agent, endKindAt.get(i) || null);
       countedFor.set(e.agent, counted && e.task === taskId);
-      if (counted && e.task === taskId) sessions += 1;
+      if (counted && e.task === taskId && !harnessKind(kindOf.get(e.agent))) sessions += 1;
     }
     if (e.type === 'task.start' && e.agent) {
       if (launched.has(e.agent)) onTask.set(e.agent, e.task);
       if (counted && e.task === taskId) {
+        const k = launched.has(e.agent) ? kindOf.get(e.agent) || null : null;
         // A launched session counts once, whether it started on the task or claimed it later; an outside
         // builder (never launched by the harness) counts each claim as a session.
         if (!launched.has(e.agent)) sessions += 1;
-        else if (!countedFor.get(e.agent)) { sessions += 1; countedFor.set(e.agent, true); }
-        if (!open.has(e.agent)) open.set(e.agent, paused ? null : at);
+        else if (!countedFor.get(e.agent)) { if (!harnessKind(k)) sessions += 1; countedFor.set(e.agent, true); }
+        // 2.86: the claim clock runs for the task's own sessions and for a refresh that did work, not for the rest.
+        if (!open.has(e.agent) && (!harnessKind(k) || k === 'refresh')) open.set(e.agent, paused ? null : at);
       }
     }
     if (e.task === taskId && PAUSES_CLOCK.has(e.type) && !paused) {

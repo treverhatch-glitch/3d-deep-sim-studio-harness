@@ -5309,6 +5309,14 @@ if (inShard('selftest-286b')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.86 (d): sessions that end for the harness's reasons do not cost the task.
+if (inShard('selftest-286d')) {
+  const dir = copyRepo();
+  const { selftest286D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286d.mjs')).href);
+  await selftest286D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

@@ -341,7 +341,8 @@ export async function roundScore({ events = null, machine = null, now = null, da
   // 2.85: the hand-back line names the real hand-backs (handback-kind.mjs: the watchdog's and the crew breaker's rule) and,
   // apart, the claims let go while their task waited for a train.
   let hb = null;
-  try { const { handBackTally } = await import('./handback-kind.mjs'); const { LIMIT_STOP } = await import('./budget.mjs'); hb = handBackTally(all, { from, to: end, limit: LIMIT_STOP }); } catch { hb = null; }
+  let kindWords = null;
+  try { const { handBackTally, harnessKindWords } = await import('./handback-kind.mjs'); const { LIMIT_STOP } = await import('./budget.mjs'); hb = handBackTally(all, { from, to: end, limit: LIMIT_STOP }); kindWords = harnessKindWords; } catch { hb = null; }
   const values = {
     handsFreePct: pct(card.handsFree, card.landed),
     hoursBetweenInterventions: card.hoursBetweenInterventions,
@@ -365,7 +366,7 @@ export async function roundScore({ events = null, machine = null, now = null, da
     hoursBetweenInterventions: `${card.interventions?.unplanned ?? 0} unplanned in ${card.supervisorHours} supervisor hour(s)`,
     overseerStepsPerLanded: `${card.orchestrator?.interventions || 0} step(s) by an outside agent`,
     costPerLandedUsd: `${Math.round((card.tokensPerLanded || 0) / 1000)}k tokens per landed task`,
-    harnessHandBackPct: `${card.handBacks?.count ?? 0} of ${card.handBacks?.attempts ?? 0} attempt(s) were handed back in all${hb ? `; ${hb.real} real hand-back(s) (a session gave the work back or failed); ${hb.released} released while waiting for a train` : ''}`,
+    harnessHandBackPct: `${card.handBacks?.count ?? 0} of ${card.handBacks?.attempts ?? 0} attempt(s) were handed back in all${hb ? `; ${hb.real} real hand-back(s) (a session gave the work back or failed); ${hb.released} released while waiting for a train; attempts ended for a harness reason, by kind: ${kindWords ? kindWords(hb.harness) : 'none'}` : ''}`,
     landedPerDay: `${rest.doneCount} done in ${r1(supDays)} supervisor day(s)`,
     escapedPct: `${card.escaped} of ${card.landed}`,
   };

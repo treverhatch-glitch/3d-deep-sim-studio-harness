@@ -11,11 +11,15 @@
  * hand-back the harness caused (the claim ran out, the land lock, a merge the main checkout refused: busy.mjs
  * harnessCaused). On 2.58.3 two "claim ran out" hand-backs by the Director's flow pass parked T-060, T-061 and T-064.
  * STUDIO_BREAKER=off turns it off.
+ *
+ * 2.86: and not a hand-back the one reading (handback-kind.mjs handBackKind) gives a harness kind: a refresh hand-off, a
+ * launch failure, a `task done` refused for commits that are not the task's own.
  */
 import { emitEvent, readRecentEvents } from './event.mjs';
 import { setHold, readHolds, unparkRefusal } from './task-hold.mjs';
 import { harnessCaused, personCaused } from './busy.mjs';
 import { clearAttempts } from './attempts.mjs';
+import { handBackKind, harnessKind } from './handback-kind.mjs';
 
 const NOT_A_FAILURE = /\brefresh|session cap|turn ceiling|context (?:is |reached|at)|studio was stopped|paused from the war room|stopped by|out of (?:quota|usage)|usage limit|running low/i;
 export const isFailureNote = (note) => Boolean(String(note || '').trim()) && !NOT_A_FAILURE.test(String(note)) && !harnessCaused({ msg: note }) && !personCaused({ msg: note });
@@ -45,11 +49,16 @@ export function checkBreaker(taskId, note, who = 'launcher', now = Date.now()) {
   if (!isFailureNote(note)) return null;
   const key = reasonKey(note);
   if (!key) return null;
-  const evs = readRecentEvents(20000).filter((e) => e.task === taskId);
+  const all = readRecentEvents(20000);
+  const evs = all.filter((e) => e.task === taskId);
   // Count only hand-backs since the task was last done, unblocked or unparked.
   const reset = evs.filter((e) => e.type === 'task.done' || e.type === 'task.unblocked' || (e.type === 'task.hold' && /unparked/.test(e.msg || ''))).pop();
   // 2.58.5 (H-5): hand-backs logged with a reason before this fix but caused by the harness don't count either.
-  const prior = evs.filter((e) => e.type === 'task.paused' && e.meta?.reasonKey && !harnessCaused(e) && !personCaused(e) && (!reset || e.ts > reset.ts));
+  // 2.86: nor one of a harness kind (handback-kind.mjs), this hand-back (the newest) included.
+  const harnessEnd = (e) => harnessKind(handBackKind(e, all));
+  const newest = evs.filter((e) => e.type === 'task.paused').pop();
+  if (newest && harnessEnd(newest)) return null;
+  const prior = evs.filter((e) => e.type === 'task.paused' && e.meta?.reasonKey && !harnessCaused(e) && !personCaused(e) && !harnessEnd(e) && (!reset || e.ts > reset.ts));
   const last = prior.at(-2); // the newest is this hand-back itself (emitted just before)
   if (!last || last.meta.reasonKey !== key) return null;
   if (readHolds()[taskId]?.parked) return null;
@@ -70,7 +79,7 @@ export function failingTasks(evs = readRecentEvents(20000)) {
   for (const e of evs) {
     if (!e.task) continue;
     if (e.type === 'task.done' || e.type === 'task.unblocked' || (e.type === 'task.hold' && /unparked/.test(e.msg || ''))) last.set(e.task, false);
-    else if (e.type === 'task.paused' && !harnessCaused(e) && !personCaused(e)) last.set(e.task, Boolean(e.meta?.reasonKey));
+    else if (e.type === 'task.paused' && !harnessCaused(e) && !personCaused(e)) last.set(e.task, Boolean(e.meta?.reasonKey) && !harnessKind(handBackKind(e, evs)));
   }
   return new Set([...last].filter(([, f]) => f).map(([id]) => id));
 }

@@ -834,14 +834,17 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       const file = path.join(REPO_ROOT, rel);
       if (!fs.existsSync(file)) { failed.push({ id, rel, why: `${rel} is missing` }); continue; }
       const r = spawnSync(process.execPath, [file, ...args], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: safetyEnv, maxBuffer: 32 * 1024 * 1024 });
-      if (r.status !== 0) failed.push({ id, rel, why: `${r.stderr || ''}${r.stdout || ''}`.trim().split('\n').slice(-12).join('\n') || `exit ${r.status}` });
+      if (r.status !== 0) failed.push({ id, rel, why: `${r.stderr || ''}${r.stdout || ''}`.trim().split('\n').slice(-12).join('\n') || `exit ${r.status}`, out: `${r.stderr || ''}${r.stdout || ''}` });
     }
     for (const [id, name] of [['hooks', 'STUDIO_HOOKS_CHECK'], ['weakened-tests', 'STUDIO_WEAKENED_TESTS']]) {
       if (/^(off|0|false|no)$/i.test(String(process.env[name] || ''))) emitEvent({ type: 'safety.off', agent: agent || target.role, task: target.id, msg: `${target.id} closed with the ${id} check off (${name}=off)` });
     }
     if (failed.length) {
       // The refusal's own code (meta.ownerStep) routes a later hand-back, never the words of its note.
-      { const ownerStep = ownerStepOfChecks(failed.map((f) => f.id)); emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: the ${failed.map((f) => f.id).join(' and ')} check failed`, meta: { refusal: failed.map((f) => f.id), ...(ownerStep ? { ownerStep } : {}) } }); }
+      // 2.86: refused by the hooks check alone, for commits that are not this task's own (B-139: one unstamped board commit
+      // on main refused every task's done): meta.foreign, so the refusal counts against no task (handback-kind.mjs).
+      const foreign = failed.every((f) => f.id === 'hooks') ? foreignHookCommits(failed[0].out, target.id) : null;
+      { const ownerStep = ownerStepOfChecks(failed.map((f) => f.id)); emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: the ${failed.map((f) => f.id).join(' and ')} check failed${foreign ? ` for ${foreign.length} commit(s) that are not ${target.id}'s own (${foreign.slice(0, 3).join(', ')})` : ''}`, meta: { refusal: failed.map((f) => f.id), ...(ownerStep ? { ownerStep } : {}), ...(foreign ? { foreign } : {}) } }); }
       const how = Object.fromEntries(SAFETY.map(([id, , , h]) => [id, h]));
       return { error: 'safety', failed, message: `${target.id} is not done: ${failed.map((f) => `the ${f.id} check fails (node ${f.rel}):\n${f.why.split('\n').map((l) => `  ${l}`).join('\n')}\n  Fix: ${how[f.id]}.`).join('\n')}\nThese run at every task done, forced or not.` };
     }
@@ -1331,6 +1334,25 @@ export function sameClaim(lock, expect) {
  * under the board lock, and the hand-back is skipped ({ error: 'claim-changed' }) if the claim changed meanwhile (the
  * watcher decides from a read made at the start of its pass and could otherwise release a fresh re-claim).
  */
+/**
+ * 2.86: the commits the hooks check listed (its "  <sha8> <subject> — <why>" lines) when none of them is this task's
+ * own: a commit is the task's when its message names the task, or (in a lane copy) when the studio's main branch does not
+ * have it. Returns the short shas, or null (no commit listed, or one of them is the task's).
+ */
+export function foreignHookCommits(output, taskId, { cwd = REPO_ROOT, lane = inLaneCopy(), main = () => mainBranchOf(mainRoot()) } = {}) {
+  const shas = [...new Set([...String(output || '').matchAll(/^\s{2}([0-9a-f]{7,40}) /gm)].map((m) => m[1]))];
+  if (!shas.length || !taskId) return null;
+  const names = new RegExp(`(^|[^\\w-])${String(taskId).replace(/[^\w-]/g, '')}(?![\\w-])`);
+  let mainRef = null;
+  if (lane) { try { mainRef = main() || null; } catch { mainRef = null; } if (!mainRef) return null; }
+  for (const sha of shas) {
+    const msg = spawnSync('git', ['log', '-1', '--format=%B', sha], { windowsHide: true, cwd, encoding: 'utf8' });
+    if (msg.status !== 0 || names.test(msg.stdout || '')) return null;
+    if (lane && spawnSync('git', ['merge-base', '--is-ancestor', sha, mainRef], { windowsHide: true, cwd }).status !== 0) return null;
+  }
+  return shas;
+}
+
 export function pauseTask(taskId, agent = null, note = '', { force = false, expect, cause, handBackCause, ownerStep } = {}) {
   let lock = lockStatus(`task:${taskId}`);
   if (lock.locked && lock.lock.owner !== agent && !force && holderRunning(lock.lock.owner)) {
