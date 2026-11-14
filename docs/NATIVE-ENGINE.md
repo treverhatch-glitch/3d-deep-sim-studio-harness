@@ -149,6 +149,42 @@ half as much machine time as the land runs. Five settings, all optional, in the 
   the kept result (`.studio/engine/<x>-rules.json`) survives a cancel and restart, so the same batch on the same
   target tip is not checked again ("rules pass cached" in the log). A red part is handed back by name: the part's
   filter and command and the failing test names.
+- `focus.map` groups (2.86): only the regex groups a filter uses (`$1`..`$9`) must be letters, digits, `.`, `_` and
+  `-`. Before 2.86 any group counted, so an entry like `"^(Sim/Fees/|tools/fees/)"` (a group used only to list
+  prefixes) matched nothing and every batch ran in full.
+- `focus.auto` (2.86): the map by convention. Describe the layout once and the harness derives one entry per rule
+  system from the tree being checked (the target and the batch), so a system a batch adds is covered with no map edit:
+
+```json
+"focus": { "test": "dotnet test tools/SimTests --filter \"{filter}\"", "smoke": "Category=Smoke", "split": true,
+  "auto": { "root": "Game/Sim", "paths": ["Game/Sim/{name}/", "Game/Sim/{name}.meta", "Game/Tests/Sim/{name}", "tools/port/{name}/"],
+            "filter": "FullyQualifiedName~{name}", "filters": { "Path": "FullyQualifiedName~GridPath" }, "inputs": ["Rules~/{name}/"] },
+  "shared": ["Game/Sim/Core", "tools/SimTests"] }
+```
+
+  `root`: a folder whose child folders are the systems (a name may hold letters, digits, `.`, `_`, `-`). `paths`:
+  templates with `{name}`; a changed path belongs to a system when it starts with one, letter case aside (so
+  `tools/port/fees/` is `Fees`'s), and the longest match wins (`PaxNavTests.cs` is `PaxNav`'s, not `Pax`'s). `filter`:
+  the test filter with `{name}`; `filters` names the systems whose tests are called otherwise. `inputs` (optional):
+  templates under `rules.inputs`, so a part's kept result holds only its own input files and the ones no system owns.
+  A path a hand-written `map` entry takes stays the entry's (the map wins). A path neither takes still means a full run,
+  and the why names it. A bad `auto` is named in plain words (in the log, `rules show`, `rules-plan` and the why) and
+  left out.
+- `focus.shared` (2.86): paths every part reads. A batch that changes one runs in full; a folder under `auto.root`
+  listed here is not a system.
+- Results kept per part (2.86, with `auto` or `shared` set): a focused check is a list of parts (one per filter, and
+  the smoke filter). A part's green is kept under what it reads: the blob ids of its own files, the tree ids of
+  `shared`, the command, and its own inputs (all inputs when they cannot be attributed). The smoke part reads
+  everything and is keyed by the whole tree (or `rules.paths`). A part with a kept green is not run again: not on the
+  target, not on the batch, not while a red batch is narrowed ("rules part ... pass kept" in the log; the
+  `engine.rules` event's `reused`). A part whose files the target does not have (a system the batch adds) is not run on
+  the target. A red batch is narrowed with the red part's filter only. Only greens are kept; the full run every
+  `fullEveryHours` stays the backstop. Without `auto` and `shared` the keys and runs are 2.85's.
+- When `rules.paths` is not set and a batch changes only paths under no map entry and no auto root (art, UI), the run
+  is still full (the safe answer), and its why says that `rules.paths` is the setting that would have skipped it.
+- `npm run engine -- rules-plan --branch <b> [--branch <c>] [--json]` (2.86) prints, without running a test: full or
+  focus and why, the parts, which have a kept green on the target and the batch, which are new in the batch, a part's
+  last recorded peak when it is over `splitGb`, and the minutes the recorded runs suggest.
 - `maxLanes` (2.84, B-134; default 0, off): a batch with more lanes is checked in consecutive slices of that many,
   each merged on the same target. A red slice is narrowed within itself, so only its lanes can be refused; one
   `engine.rules` event per slice. The whole batch was never one tree in the check, so a sliced check never sends
