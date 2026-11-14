@@ -97,6 +97,8 @@ export async function needsPerson({ now = Date.now(), root = REPO_ROOT, events =
     const pending = fs.existsSync(path.join(STUDIO_STATE_DIR, 'supervisor-resume'));
     if (s?.status === 'running' && s.halted && !pending) out.push({ kind: 'halt', line: `the supervisor is halted: ${String(s.halted.why || 'no reason recorded').slice(0, 120)} (npm run studio:resume -- --by <you>)` });
   });
+  // 2.86: a long-running process still on old harness code (a supervisor whose self-restart is off, a watcher loop).
+  await tryAdd(async () => { for (const l of await (await import('./health.mjs')).oldCodeLines()) out.push({ kind: 'code', line: `old harness code: ${l}` }); });
   // 2.68.0: roles the crew watchdog paused (harness/crew-watch.mjs): new work or a landing clears it, else a person.
   await tryAdd(async () => {
     const { pausedLines } = await import('./crew-watch.mjs');

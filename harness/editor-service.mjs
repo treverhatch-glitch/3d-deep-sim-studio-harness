@@ -495,6 +495,8 @@ function checkTree(root, engine, s, repo, head) {
 }
 
 const passing = new Set();
+/** 2.86: a background pass of this process still runs (the supervisor restarts on new code only when none does). */
+export const editorServiceBusy = () => passing.size > 0;
 
 /**
  * One queue pass: the oldest waiting check request of each engine with service.check on. Skipped while that engine's

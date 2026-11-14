@@ -38,6 +38,13 @@ npm run studio:stop                                   # agents finish their task
 npm run studio:status
 ```
 
+- **After a harness update** (2.86): the supervisor checks each pass whether the installed harness (package.json version and
+  the `harness/` tree at HEAD) is still the one it started with. When it isn't, it logs `harness.code_changed` once and, at
+  a quiet point between passes, hands over to a fresh supervisor with the same options (its halt, extended end time and
+  back-offs carry over; agent sessions and trains keep running untouched); under launchd or a systemd unit installed by
+  2.86 or later it exits and the service manager starts it again. In a terminal you watch, or with
+  `STUDIO_SUPERVISOR_SELF_RESTART=off`, it only warns (once, plus a line in the daily digest, `npm run studio:status` and
+  `npm run harness-health`): restart it yourself. A `node harness/watch.mjs --loop` watcher warns the same way.
 - `--install` uses launchd (macOS), systemd --user (Linux) or Task Scheduler (Windows). Install from a terminal where the
   agent tool works: the login job gets that terminal's PATH and HOME, and install warns when `claude --version` (or your
   tool) wouldn't be found.
