@@ -288,6 +288,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (argv[0] === 'merge') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'engine-tracks.mjs'), 'merge', ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
   // 2.85: what a batch's Play Mode stage would run, and why (harness/unity-train.mjs play-plan; read-only).
   if (argv[0] === 'play-plan') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'unity-train.mjs'), 'play-plan', ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
+  // 2.86: the steps a red engine train would take for made-up outcomes (harness/unity-train.mjs bisect-plan; read-only).
+  if (argv[0] === 'bisect-plan') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'unity-train.mjs'), 'bisect-plan', ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
   if (argv[0] === 'check') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'engine-check.mjs'), ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
   if (argv[0] === 'propose') {
     const r = await proposeEngine(argv[1], { by: flag('by') || actor(), why: flag('why') || '' });

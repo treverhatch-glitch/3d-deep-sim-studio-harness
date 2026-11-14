@@ -5261,6 +5261,14 @@ if (inShard('selftest-285g')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.86 (b): what an engine train does with a red land run: flaky retries, the target alone, the full run on its own, fewer steps.
+if (inShard('selftest-286b')) {
+  const dir = copyRepo();
+  const { selftest286B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286b.mjs')).href);
+  await selftest286B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
