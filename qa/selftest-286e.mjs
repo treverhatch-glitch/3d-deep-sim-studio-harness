@@ -135,5 +135,21 @@ console.log(JSON.stringify({ ok: r.ok, error: r.error || null, message: r.messag
       JSON.stringify({ made, ap: out(ap).slice(-300), ft: out(ft).slice(-500), ft2: out(ft2).slice(-300) })]);
   }
 
+  // ================= e3. setEngineTask's write retries a rename that fails for a moment =================
+  {
+    // The probe says it is on Windows (where EPERM is retried) and makes the rename fail twice with EPERM, then work.
+    const r = probe(`Object.defineProperty(process, 'platform', { value: 'win32' });
+import fs from 'node:fs';
+const real = fs.renameSync; let fails = 0, calls = 0;
+fs.renameSync = (a, b) => { calls++; if (String(b).endsWith('tasks.json') && fails < 2) { fails++; throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' }); } return real(a, b); };
+const { setEngineTask, readEngineTasks } = await import(${u('harness/engine-tracks.mjs')});
+let err = null, rec = null;
+try { rec = setEngineTask('T-901', { engine: 'unity' }, { root: process.cwd() }); } catch (e) { err = e.code || e.message; }
+const saved = readEngineTasks(process.cwd())['T-901'] || null;
+console.log(JSON.stringify({ err, fails, calls, saved: saved && saved.engine, rec: rec && rec.engine }));`);
+    await guard('2.86 (e3) setEngineTask writes .studio/engine/tasks.json through fsafe\'s writeAtomic: a rename that fails twice with EPERM and then works still saves the record and throws nothing (fails before this fix: the bare rename threw EPERM and killed the launch)', () => [
+      r.err === null && r.fails === 2 && r.saved === 'unity' && r.rec === 'unity', JSON.stringify(r).slice(0, 1500)]);
+  }
+
   void events;
 }
