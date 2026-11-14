@@ -216,7 +216,8 @@ console.log(JSON.stringify({ f: compileErrorFiles('Assets\\\\A\\\\B.cs(12,5): er
     const r0 = probe(TRAIN, { STUDIO_ENGINE_FULL_LAND_HOURS: '24' });
     const clockFile = path.join(S, '.studio', 'engine', 'unity-full-land.json');
     const clock = (() => { try { return JSON.parse(fs.readFileSync(clockFile, 'utf8')); } catch { return null; } })();
-    fs.writeFileSync(clockFile, JSON.stringify({ at: new Date(Date.now() - 25 * 3600000).toISOString(), id: null, clock: 'started' }));
+    // 2.86: the full run runs on the target alone, before the batch, once it is overdue (2 x the hours): the clock is made 49 hours old.
+    fs.writeFileSync(clockFile, JSON.stringify({ at: new Date(Date.now() - 49 * 3600000).toISOString(), id: null, clock: 'started' }));
     const E1 = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/c': { 'c.txt': 'c\n' } }, { shared: { 'Assets/x.txt': 'x\n' } });
     const ctl1 = path.join(T, 'ctl-full-1');
     setEngines({ unity: cfgFor(E1, ctl1, { rules: `node "${fwd(rulesStub)}"`, editModeArgs: '-testCategory "!Slow"' }) });
@@ -226,10 +227,11 @@ console.log(JSON.stringify({ f: compileErrorFiles('Assets\\\\A\\\\B.cs(12,5): er
     const r2 = probe(TRAIN, { STUDIO_ENGINE_FULL_LAND_HOURS: '24' });
     const runs0 = runsOf(ctl);
     const runs = runsOf(ctl1);
-    await guard('2.83 a full land run: a studio with no full run on record starts the clock and its first land run is an ordinary one (shortcuts given); once the last full run (or the clock\'s start) is older than STUDIO_ENGINE_FULL_LAND_HOURS, the land command is told nothing that lets it skip its own tests (STUDIO_LAND_FULL=1, no STUDIO_RULES_GREEN, no Edit Mode arguments) although the rules check was green; once that run passed, the next land run gets the shortcuts again, with the owner\'s own Edit Mode arguments (engines.unity.editModeArgs) (fails before this fix: every land run got the shortcuts, so a difference between the two runtimes could go unseen for good)', () => [
+    await guard('2.83 a full land run (2.86: on the target alone, never the batch\'s own run): a studio with no full run on record starts the clock and its first land run is an ordinary one (shortcuts given); once the last full run (or the clock\'s start) is overdue (older than 2 x STUDIO_ENGINE_FULL_LAND_HOURS), the train first runs the target alone with nothing that lets it skip its own tests (STUDIO_LAND_FULL=1, no STUDIO_RULES_GREEN, no Edit Mode arguments); the batch\'s own land run after it gets the shortcuts (the rules check was green), with the owner\'s own Edit Mode arguments (engines.unity.editModeArgs); once the full run passed, the next train runs no full run (fails before this fix: every land run got the shortcuts, so a difference between the two runtimes could go unseen for good)', () => [
       r0.landed?.join() === 'T-840' && r0.fullLand === 0 && runs0[0]?.full === '' && runs0[0].rulesGreen === '1' && clock?.clock === 'started' && Number.isFinite(Date.parse(clock.at))
-        && r1.landed?.join() === 'T-841' && r1.fullLand === 1 && runs[0]?.full === '1' && runs[0].rulesGreen === '' && runs[0].editArgs === '' && r1.rules?.ran === true
-        && r2.landed?.join() === 'T-842' && r2.fullLand === 0 && runs[1]?.full === '' && runs[1].rulesGreen === '1' && runs[1].rulesMode === 'full' && runs[1].editArgs === '-testCategory "!Slow"',
+        && r1.landed?.join() === 'T-841' && r1.fullLand === 1 && runs.length === 3 && runs[0]?.full === '1' && runs[0].rulesGreen === '' && runs[0].editArgs === '' && r1.rules?.ran === true
+        && runs[1]?.full === '' && runs[1].rulesGreen === '1' && runs[1].editArgs === '-testCategory "!Slow"'
+        && r2.landed?.join() === 'T-842' && r2.fullLand === 0 && runs[2]?.full === '' && runs[2].rulesGreen === '1' && runs[2].rulesMode === 'full' && runs[2].editArgs === '-testCategory "!Slow"',
       JSON.stringify({ r0, clock, r1, r2, runs0, runs }).slice(0, 3000)]);
   }
 

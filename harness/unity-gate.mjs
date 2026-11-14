@@ -418,7 +418,10 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   })() : [];
   const errorFiles = m.status === 'red' ? compileErrorFiles(text) : [];
   const stages = (() => { try { return [...(Array.isArray(stagesBefore) ? stagesBefore : []), ...landStages(stageFile, text)].slice(0, 12); } catch { return []; } })();
-  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), ...(errorFiles.length ? { errorFiles } : {}), ...(stages.length ? { stages } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
+  // 2.86: a land script told STUDIO_LAND_PROBE=1 (land nothing) says it honoured that: an output line "[land-probe] honoured", or
+  // "probe": true in its stage report. The engine train runs by-name steps on lanes only for a script that said so.
+  const probeAck = env.STUDIO_LAND_PROBE === '1' && (/^\[land-probe\]\s+honoured\b/m.test(text) || (() => { try { return JSON.parse(fs.readFileSync(stageFile, 'utf8').replace(/^\uFEFF/, ''))?.probe === true; } catch { return false; } })());
+  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(probeAck ? { probeAck: true } : {}), ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), ...(errorFiles.length ? { errorFiles } : {}), ...(stages.length ? { stages } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
 
   function finish(res) {
     const full = { ...res, engine, ms: Date.now() - t0, ...(task ? { task } : {}), ...(br ? { branch: br } : {}), ...(many ? { branches: many } : {}), at: new Date().toISOString() };

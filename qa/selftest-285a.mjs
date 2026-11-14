@@ -96,7 +96,7 @@ const opt = (k) => { try { return fs.readFileSync(ctl + '-' + k, 'utf8').trim();
 let lock = {}; try { lock = JSON.parse(fs.readFileSync(path.join(E.STUDIO_MAIN_ROOT, '.studio', 'locks', 'unity-train.lock'), 'utf8')); } catch {}
 let status = null;
 if (opt('status') !== null) { try { const m = await import(pathToFileURL(path.join(E.STUDIO_MAIN_ROOT, 'harness', 'unity-train.mjs')).href); status = m.unityStatusText(E.STUDIO_MAIN_ROOT, { engine: 'unity' }); } catch (e) { status = 'ERR ' + e.message; } }
-fs.appendFileSync(ctl + '-runs.jsonl', JSON.stringify({ srcs, only: E.STUDIO_LAND_ONLY ?? null, landFull: E.STUDIO_LAND_FULL ?? null, retry: E.STUDIO_LAND_RETRY ?? null, retryTests: E.STUDIO_LAND_RETRY_TESTS ?? null, rulesGreen: E.STUDIO_RULES_GREEN ?? null, rulesMode: E.STUDIO_RULES_MODE ?? null, playMode: E.STUDIO_PLAY_MODE ?? null, playFilter: E.STUDIO_PLAY_FILTER ?? null, playArgs: E.STUDIO_UNITY_PLAYMODE_ARGS ?? null, editArgs: E.STUDIO_UNITY_EDITMODE_ARGS ?? null, now: lock.now ?? null, full: lock.full ?? null, status }) + '\\n');
+fs.appendFileSync(ctl + '-runs.jsonl', JSON.stringify({ srcs, only: E.STUDIO_LAND_ONLY ?? null, landFull: E.STUDIO_LAND_FULL ?? null, probe: E.STUDIO_LAND_PROBE ?? null, retry: E.STUDIO_LAND_RETRY ?? null, retryTests: E.STUDIO_LAND_RETRY_TESTS ?? null, rulesGreen: E.STUDIO_RULES_GREEN ?? null, rulesMode: E.STUDIO_RULES_MODE ?? null, playMode: E.STUDIO_PLAY_MODE ?? null, playFilter: E.STUDIO_PLAY_FILTER ?? null, playArgs: E.STUDIO_UNITY_PLAYMODE_ARGS ?? null, editArgs: E.STUDIO_UNITY_EDITMODE_ARGS ?? null, now: lock.now ?? null, full: lock.full ?? null, status }) + '\\n');
 const before = git(gw, 'rev-parse', 'HEAD').stdout.trim();
 for (const s of srcs) { const m = git(gw, 'merge', '--no-ff', '-m', 'land ' + s, 'refs/heads/' + s); if (m.status !== 0) { git(gw, 'merge', '--abort'); git(gw, 'reset', '-q', '--hard', before); console.log('conflict ' + s); process.exit(2); } }
 if (E.STUDIO_LAND_ONLY === 'compile') { git(gw, 'reset', '-q', '--hard', before); console.log('compiles'); process.exit(0); }
@@ -149,18 +149,18 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, compileRuns: r.compileRuns 
     const fe = evs(/^task\.train\.unity\.full_land$/);
     const le = evs(/^engine\.land$/);
     const ce = evs(/^task\.train\.unity\.compile$/);
-    const [c, l] = runs;
-    await guard('2.85 (a) B-137, the compile check: with compileFirst on the day the full run is due, the compile run gets STUDIO_LAND_ONLY=compile and none of STUDIO_LAND_FULL, STUDIO_RULES_MODE, STUDIO_LAND_RETRY, STUDIO_PLAY_FILTER, STUDIO_UNITY_PLAYMODE_ARGS or an Edit Mode plan; the land run after it gets STUDIO_LAND_FULL=1; the compile event says "passed in N s; the land run starts now" (fails before this fix: the compile run was told STUDIO_LAND_FULL=1, the same variables as the full land run, so a log showed a full run where a compile check stood)', () => [
-      runs.length === 2 && c.only === 'compile' && c.landFull === null && c.rulesMode === null && c.retry === null && c.playFilter === null && c.playArgs === null && c.editArgs === null
-        && l.only === null && l.landFull === '1' && ce.length === 1 && /passed in \d+ s; the land run starts now/.test(ce[0].msg) && r.landed?.join() === 'T-501,T-502',
+    const [f, c, l] = runs;
+    await guard('2.85 (a) B-137, the compile check (2.86: the full run is its own run on the target alone, before the batch, with no compile check of its own): with compileFirst on the day the full run is overdue, run 1 is the full run (STUDIO_LAND_FULL=1, STUDIO_LAND_PROBE=1, no compile); the batch\'s compile run gets STUDIO_LAND_ONLY=compile and none of STUDIO_LAND_FULL, STUDIO_RULES_MODE, STUDIO_LAND_RETRY, STUDIO_PLAY_FILTER, STUDIO_UNITY_PLAYMODE_ARGS or an Edit Mode plan; the batch\'s land run after it gets no STUDIO_LAND_FULL; the compile event says "passed in N s; the land run starts now" (fails before this fix: the compile run was told STUDIO_LAND_FULL=1, the same variables as the full land run, so a log showed a full run where a compile check stood)', () => [
+      runs.length === 3 && f.only === null && f.landFull === '1' && f.probe === '1' && c.only === 'compile' && c.landFull === null && c.rulesMode === null && c.retry === null && c.playFilter === null && c.playArgs === null && c.editArgs === null
+        && l.only === null && l.landFull === null && ce.length === 1 && /passed in \d+ s; the land run starts now/.test(ce[0].msg) && r.landed?.join() === 'T-501,T-502',
       JSON.stringify({ r, runs, ce: ce.map((e) => e.msg) }).slice(0, 2500)]);
-    await guard('2.85 (a) B-137, the daily full run is said everywhere: one task.train.unity.full_land event at its start (meta train, why, tasks, minutes of the last full run), engine.land meta.full true, the train\'s "now" line during the land run reads "land run, the daily full run: every test runs, expect about 42 min", and train status says so plainly (fails before this fix: nothing said a land run was the daily full run)', () => [
-      fe.length === 1 && fe[0].meta?.train && /older than/.test(fe[0].meta.why || '') && fe[0].meta.tasks?.join() === 'T-501,T-502' && fe[0].meta.minutes === 42
-        && le.length === 1 && le[0].meta?.full === true && /land run, the daily full run: every test runs, expect about 42 min/.test(l.now || '') && l.full?.minutes === 42
-        && /is the daily full run .*every test runs, expect about 42 min/.test(l.status || ''),
-      JSON.stringify({ fe: fe.map((e) => e.meta), le: le.map((e) => e.meta), l }).slice(0, 2500)]);
-    await guard('2.85 (a) B-137, never the previous stage while the next runs: during the compile check the "now" line says compile check; during the land run it no longer says "compile check:" but that the compile passed and the land run, the daily full run, starts now; the full run\'s minutes are kept for the next one (fails before this fix: the "now" line said "compile check" through the whole land run)', () => [
-      /^compile check: T-501, T-502/.test(c.now || '') && !/^compile check:/.test(l.now || '') && /compile check passed in \d+ s; land run, the daily full run/.test(l.now || '') && fullRec()?.minutes >= 1 && fullRec()?.id !== 'old',
+    await guard('2.85 (a) B-137, the daily full run is said everywhere (2.86: it runs on the target alone, with no task): one task.train.unity.full_land event at its start (meta train, why, no tasks, alone, minutes of the last full run), one engine.land with meta.full true and the batch\'s engine.land without it, the train\'s "now" line during the full run reads "..., the daily full run: every test runs, expect about 42 min", and train status says so plainly; the batch\'s run is not the full run (fails before this fix: nothing said a land run was the daily full run)', () => [
+      fe.length === 1 && fe[0].meta?.train && /older than/.test(fe[0].meta.why || '') && fe[0].meta.tasks?.length === 0 && fe[0].meta.alone === true && fe[0].meta.minutes === 42
+        && le.length === 2 && le.filter((e) => e.meta?.full === true).length === 1 && le[0].meta?.full === true && /the daily full run: every test runs, expect about 42 min/.test(f.now || '') && f.full?.minutes === 42
+        && /is the daily full run .*every test runs, expect about 42 min/.test(f.status || '') && !l.full,
+      JSON.stringify({ fe: fe.map((e) => e.meta), le: le.map((e) => e.meta), f, l }).slice(0, 2500)]);
+    await guard('2.85 (a) B-137, never the previous stage while the next runs (2.86: the full run is its own run before the batch): during the compile check the "now" line says compile check; during the batch\'s land run it no longer says "compile check:" but that the compile passed and the land run starts now; the full run\'s minutes are kept for the next one (fails before this fix: the "now" line said "compile check" through the whole land run)', () => [
+      /^compile check: T-501, T-502/.test(c?.now || '') && !/^compile check:/.test(l?.now || '') && /compile check passed in \d+ s; land run starts now/.test(l?.now || '') && fullRec()?.minutes >= 1 && fullRec()?.id !== 'old',
       JSON.stringify({ c: c?.now, l: l?.now, rec: fullRec() }).slice(0, 1500)]);
   }
 
@@ -211,10 +211,11 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, compileRuns: r.compileRuns 
     setBaseline([TARGET_RED]);
     const r = probe(TRAIN);
     const d = r.dropped || [];
-    await guard('2.85 (a) a full run red on a branch-tied failure plus a baseline failure: only the tied branch (T-522, whose file names ShopTests) is handed back, by evidence; the baseline\'s test is not counted against anyone, so T-521 and T-523 land (fails before this fix: the two failures had no single suspect, the search by land runs blamed the first prefix that was red on the target\'s own test)', () => [
+    const runsT = runsOf(ctl);
+    await guard('2.85 (a) a full run red on the target\'s own test plus a branch-tied failure (2.86: the full run runs on the target alone first, red only on the baseline\'s test, which stays known red; the batch\'s ordinary run is red on the tied test only): only the tied branch (T-522, whose file names ShopTests) is handed back, by evidence; the baseline\'s test is never counted against anyone, so T-521 and T-523 land; no run of the batch is a full run (fails before this fix: the two failures had no single suspect, the search by land runs blamed the first prefix that was red on the target\'s own test)', () => [
       d.length === 1 && d[0].task === 'T-522' && d[0].cause === 'evidence' && r.landed?.slice().sort().join() === 'T-521,T-523' && r.handed?.length === 1 && r.handed[0].note.includes(TIED)
-        && r.logs?.some((l) => /not counted against anyone/.test(l)),
-      JSON.stringify({ r }).slice(0, 3000)]);
+        && runsT[0]?.landFull === '1' && runsT[0].probe === '1' && runsT.slice(1).every((x) => x.landFull === null) && baselineOf()?.failing?.join() === TARGET_RED,
+      JSON.stringify({ r, runs: runsT.map((x) => [x.srcs, x.landFull]) }).slice(0, 3000)]);
   }
   {
     resetState();
