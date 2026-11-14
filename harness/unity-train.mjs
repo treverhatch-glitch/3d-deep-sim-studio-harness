@@ -159,7 +159,7 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
   // An entry already in the queue (task alone, a re-tag) is not asked.
   if (!readUnityQueue(root, engine).some((e) => e.task === task)) {
     const rec = (() => { try { return unchangedSinceRed(s, readHandbacks(root, engine)[task], br, head); } catch { return null; } })();
-    if (rec && !again) return { ok: false, error: 'unchanged', handback: rec, message: `${task} was not queued: nothing changed since ${L} train ${rec.train} handed ${br} back for ${rec.reason}: the same red would repeat (since then ${br} has only merges of ${s.target}${(rec.files || []).length ? `, and ${s.target} changed none of ${rec.files.slice(0, 4).join(', ')}` : `, and ${s.target} has not moved`}). Fix it, or \`npm run task -- impossible ${task} --why "<what contradicts what>"\`. The overseer or a planner may queue it anyway with --again.` };
+    if (rec && !again) return { ok: false, error: 'unchanged', handback: rec, message: `${task} was not queued: nothing changed since ${L} train ${rec.train} handed ${br} back for ${rec.reason}: the same red would repeat (since then ${br} has only merges of ${s.target}${(rec.files || []).length ? `, and ${s.target} changed none of ${rec.files.slice(0, 4).join(', ')}` : `, and ${s.target} has not moved`}). Fix it, or \`npm run task -- impossible ${task} --why "<what contradicts what>"\`. (add --again if a person wants it run again as it is).` };
     if (rec && again) evTop('requeued_unchanged', 'queue', `${task}: ${br} at ${short(head)} queued again with --again though nothing changed since train ${rec.train} handed it back (${rec.reason})`, { engine, agent: agent || `${engine}-train`, task, to: 'producer', status: 'warn', meta: { branch: br, head, handback: rec.train, reason: String(rec.reason).slice(0, 200) } });
   }
   const entry = withQueue(root, (q) => {
@@ -379,6 +379,9 @@ const editHandbacks = (root, engine, fn) => { try { withLandLock(root, () => { c
  */
 export function unchangedSinceRed(s, rec, br, head) {
   if (!rec || rec.branch !== br || !rec.head || !rec.reason) return null;
+  // 2.86: a hand-back for a merge conflict with the target is fixed by merging the target: a new head that holds the target's current
+  // tip counts as changed, even when the target touched none of the conflicting files.
+  if (head !== rec.head && /(^|: )it conflicts with the target/.test(String(rec.reason))) { const tip = headOf(s.repo, s.target); if (tip && isAncestor(s.repo, tip, head)) return null; }
   if (head !== rec.head) {
     if (!isAncestor(s.repo, rec.head, head)) return null;
     // Commits on the branch since the red that the target does not hold: none may be a commit of its own.

@@ -5261,6 +5261,14 @@ if (inShard('selftest-285g')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.86 (e): five small fixes from a crew's first day on 2.85 (re-queue after a conflict, force --train, a rename that fails for a moment, holds that name a proposal, a pool's own anyModel flag).
+if (inShard('selftest-286e')) {
+  const dir = copyRepo();
+  const { selftest286E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286e.mjs')).href);
+  await selftest286E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
