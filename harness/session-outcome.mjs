@@ -66,6 +66,9 @@ export function sessionOutcome({ agent, task, startedAt, events = [], commits = 
   if (impossible) return { task, claimed, commits, done, noWork: false, stuck: false, counts: false, impossible: true, why: '' };
   const noWork = !done && !commits;
   const stuck = !done && Boolean(notDone);
+  // 2.86: refused by the hooks check only, for commits that are not the task's own (task.not_done meta.foreign, task.mjs):
+  // the harness's refusal, not the session's work. It counts toward no task's park, hold or breaker (handback-kind.mjs).
+  if (!done && notDone?.meta?.foreign && !commits) return { task, claimed, commits, done, noWork, stuck, counts: false, foreignRefusal: true, why };
   return { task, claimed, commits, done, noWork, stuck, counts: Boolean(counts), why };
 }
 

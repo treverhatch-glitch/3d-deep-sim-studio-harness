@@ -29,6 +29,10 @@
  * continue. Recorded as a check by "rule" (agent.refresh.decided), no ask. A session flagged mid-debug asked for a person's
  * check, so it still gets the card. STUDIO_REFRESH_DECIDE=ask: every check is a card, as before. A person's
  * `session -- check` still decides at any time.
+ *
+ * 2.86: the percentage is of the room left after the session's start (the context its first commit or file edit was made
+ * with), and a session that has done no work never hands off for its context unless within STUDIO_REFRESH_SAFETY_PCT (5)
+ * of the window (refreshRuleDecision).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -94,13 +98,22 @@ export function sessionLimits(env = process.env, { role = null, model = null } =
  * a turn is an assistant message (by id), the context is the last one's input + cache reads + cache writes.
  */
 // 2.85: a tool call that is work landing: a commit or a verify (the idle-turns rule counts turns since the last one).
-const WORK_CMD = /\bgit\b(?:\s+-c\s+\S+)*\s+commit\b|\bnpm run verify\b|run-gates\.mjs|\btask(?:\.mjs| --) done\b/;
+// 2.86: `git -C <engine worktree> commit` (an engine pass commits in its own worktree) is a commit too.
+const WORK_CMD = /\bgit\b(?:\s+-[cC]\s+\S+)*\s+commit\b|\bnpm run verify\b|run-gates\.mjs|\btask(?:\.mjs| --) done\b/;
+// 2.86: a tool call that changes a file (Claude Code's own editing tools): the session has started its work.
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+/**
+ * 2.86: also worked (a commit or a file edit seen) and startContext: the context the session's first commit or file edit
+ * was made with (its brief and first reads done), null while it has done no work.
+ */
 export function sessionProgress(log) {
   const ids = new Set();
   let turns = 0;
   let context = 0;
   let resultTurns = null;
   let workTurn = 0;
+  let worked = false;
+  let startContext = null;
   for (const l of String(log || '').split(/\r?\n/)) {
     const s = l.trim();
     if (!s.startsWith('{')) continue;
@@ -118,11 +131,15 @@ export function sessionProgress(log) {
       }
       const u = o.message.usage;
       if (u) context = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
-      if (Array.isArray(o.message.content) && o.message.content.some((c) => c?.type === 'tool_use' && WORK_CMD.test(String(c.input?.command || '')))) workTurn = turns;
+      const uses = Array.isArray(o.message.content) ? o.message.content.filter((c) => c?.type === 'tool_use') : [];
+      const landing = uses.some((c) => WORK_CMD.test(String(c.input?.command || '')));
+      if (landing) workTurn = turns;
+      // The first commit or edit: the context it was made with (the brief and every read so far) is where the work starts.
+      if (!worked && (landing || uses.some((c) => EDIT_TOOLS.has(c.name)))) { worked = true; startContext = context; }
     } else if (o.type === 'result' && o.num_turns != null) resultTurns = Number(o.num_turns);
   }
   // 2.85: idleTurns: turns since the last commit or verify in this log (all of them when there was none).
-  return { turns: resultTurns ?? turns, context, idleTurns: Math.max(0, turns - workTurn) };
+  return { turns: resultTurns ?? turns, context, idleTurns: Math.max(0, turns - workTurn), worked, startContext };
 }
 
 /** 2.85: STUDIO_REFRESH_DECIDE: 'rule' (default) or 'ask'. */
@@ -131,18 +148,38 @@ export const refreshDecideMode = (env = process.env) => (/^ask$/i.test(String(en
 /**
  * 2.85: the rule a check point decides by: { decision: 'continue'|'handoff', why, pct, window }. The window is the
  * model's context size (harness/model-limits.mjs limitsFor); unknown: twice the refresh point.
+ *
+ * 2.86: the percentage is of the room the session had when it started, not of the whole window. A porter's brief and
+ * first reads filled 65 to 70 % of a 200k window, so 2.85's "60 % of the window" handed it off at once, three times in
+ * eight minutes, with no work done. Now:
+ *   - start: the context the session's first commit or file edit was made with (sessionProgress startContext);
+ *   - threshold: start + STUDIO_REFRESH_HANDOFF_PCT (60) % of (window - start);
+ *   - before any work (no commit, no file edit) the context alone never hands off, unless it is within
+ *     STUDIO_REFRESH_SAFETY_PCT (5) % of the window itself;
+ *   - the idle-turns rule (STUDIO_REFRESH_IDLE_TURNS) is as before.
+ * Returns also { start, threshold, worked, margin }.
  */
-export function refreshRuleDecision({ turns = 0, context = 0, idleTurns = 0, model = null, point = 0, env = process.env } = {}) {
+export function refreshRuleDecision({ turns = 0, context = 0, idleTurns = 0, model = null, point = 0, env = process.env, worked = true, start = 0 } = {}) {
   let window = 0;
   try { window = Number(limitsFor(model)?.context) || 0; } catch { window = 0; }
   const from = window ? `its ${Math.round(window / 1000)}k window` : `twice its ${Math.round(point / 1000)}k refresh point (window unknown)`;
   if (!window) window = point > 0 ? point * 2 : 0;
   const pctAt = num(env.STUDIO_REFRESH_HANDOFF_PCT, 60);
   const idleAt = num(env.STUDIO_REFRESH_IDLE_TURNS, 40);
+  const safetyPct = Math.min(50, Math.max(0, num(env.STUDIO_REFRESH_SAFETY_PCT, 5)));
   const pct = window > 0 ? Math.round((context / window) * 1000) / 10 : 0;
-  if (window > 0 && pctAt > 0 && pct >= pctAt) return { decision: 'handoff', why: `context ${context.toLocaleString()} tokens is ${pct} % of ${from}, at or over STUDIO_REFRESH_HANDOFF_PCT (${pctAt} %)`, pct, window };
-  if (idleAt > 0 && idleTurns >= idleAt) return { decision: 'handoff', why: `no commit and no verify in its last ${idleTurns} turns (STUDIO_REFRESH_IDLE_TURNS ${idleAt})`, pct, window };
-  return { decision: 'continue', why: `context at ${pct} % of ${from} (under ${pctAt} %), last commit or verify ${idleTurns} turns ago (under ${idleAt})`, pct, window };
+  const k = (n) => `${Math.round(n / 1000)}k`;
+  const s0 = Math.max(0, Math.min(Number(start) || 0, window));
+  const threshold = window > 0 ? Math.round(s0 + (pctAt / 100) * (window - s0)) : 0;
+  const margin = window > 0 ? Math.round(window * (1 - safetyPct / 100)) : 0;
+  const base = { pct, window, start: s0, threshold, worked: Boolean(worked), margin };
+  if (window > 0 && pctAt > 0) {
+    if (worked && context >= threshold) return { decision: 'handoff', why: `context ${context.toLocaleString()} tokens is past ${k(threshold)}: it started its work at ${k(s0)} and has used ${pctAt} % of the room left in ${from} (STUDIO_REFRESH_HANDOFF_PCT ${pctAt} %)`, ...base };
+    if (!worked && context >= margin) return { decision: 'handoff', why: `context ${context.toLocaleString()} tokens is ${pct} % of ${from}, within STUDIO_REFRESH_SAFETY_PCT (${safetyPct} %) of the window, though it has done no work yet`, ...base };
+  }
+  if (idleAt > 0 && idleTurns >= idleAt) return { decision: 'handoff', why: `no commit and no verify in its last ${idleTurns} turns (STUDIO_REFRESH_IDLE_TURNS ${idleAt})`, ...base };
+  const room = !worked ? `no work yet (a commit or a file edit), so the context alone hands off only within ${safetyPct} % of ${from}` : `context ${k(context)}, under ${k(threshold)} (it started its work at ${k(s0)}; ${pctAt} % of the room left in ${from})`;
+  return { decision: 'continue', why: `${room}; at ${pct} % of the window; last commit or verify ${idleTurns} turns ago (under ${idleAt})`, ...base };
 }
 
 const flagFile = (agent) => path.join(REFRESH_DIR, `${agent}.json`);
@@ -220,6 +257,10 @@ export function heartbeatCheck(agent, { log, model = 'unknown', task = null, rol
   const f = readFlag(agent) || { agent, checks: [] };
   const st = refreshState(p, f, lim);
   const prev = f.last?.state;
+  // 2.86: where the session started, kept across beats (each beat reads only the log's tail): its first reading, and the
+  // context its first commit or file edit was made with; and whether it has worked at all.
+  if (f.firstReading == null && p.context > 0) f.firstReading = p.context;
+  if (p.worked && !f.worked) { f.worked = true; f.start = p.startContext ?? p.context; }
   f.last = { ...p, model, role, point: lim.context, state: st.state, at: new Date().toISOString(), task };
   if (st.state === 'due' && prev !== 'due') emitEvent({ type: 'agent.refresh.due', agent, task, msg: `${agent} passed the refresh point (${p.turns} turns, ${p.context.toLocaleString()} tokens of context, ${model}; its point: ${lim.turns || '∞'} turns or ${lim.context ? `${Math.round(lim.context / 1000)}k` : '∞'} tokens${role ? ` for a ${role}` : ''}): hand off at the next breakpoint` });
   if (st.checkDue && f.cardFor !== st.checksOwed) {
@@ -228,12 +269,12 @@ export function heartbeatCheck(agent, { log, model = 'unknown', task = null, rol
     if (refreshDecideMode(env) === 'rule' && st.state !== 'exception') {
       // 2.85: decided by rule, recorded as a check like a person's (by: 'rule'); a hand-off ends the session as a
       // refresh (endedBy), which the launcher acts on (agent.mjs). No ask.
-      const d = refreshRuleDecision({ ...p, model, point: lim.context, env });
+      const d = refreshRuleDecision({ ...p, model, point: lim.context, env, worked: Boolean(f.worked), start: f.worked ? f.start : (f.firstReading ?? p.context) });
       const at = f.cardAt;
       f.checks = [...(f.checks || []), { by: 'rule', decision: d.decision, covers: Math.max(1, st.checksOwed), note: d.why.slice(0, 300), at, turns: p.turns, context: p.context, model }];
       if (d.decision === 'handoff') { f.handoffAsked = at; f.endedBy = `handed off at a refresh check by the rule: ${d.why}`; }
       decided = d;
-      emitEvent({ type: 'agent.refresh.decided', agent, to: 'producer', task, msg: `${agent}: ${d.decision === 'handoff' ? 'hand off now' : 'continue'} by rule at ${p.turns} turns, ${p.context.toLocaleString()} tokens (${model}): ${d.why}`.slice(0, 600), meta: { decision: d.decision, why: d.why, turns: p.turns, tokens: p.context, pct: d.pct, idleTurns: p.idleTurns, window: d.window, by: 'rule' } });
+      emitEvent({ type: 'agent.refresh.decided', agent, to: 'producer', task, msg: `${agent}: ${d.decision === 'handoff' ? 'hand off now' : 'continue'} by rule at ${p.turns} turns, ${p.context.toLocaleString()} tokens (${model}): ${d.why}`.slice(0, 600), meta: { decision: d.decision, why: d.why, turns: p.turns, tokens: p.context, pct: d.pct, idleTurns: p.idleTurns, window: d.window, by: 'rule', start: d.start, threshold: d.threshold, reading: p.context, worked: d.worked, firstReading: f.firstReading ?? null } });
     } else emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task, msg: `Check ${agent}${st.state === 'exception' ? ' (mid-debug exception)' : ''}: ${p.turns} turns, ${p.context.toLocaleString()} tokens of context (${model}). Continue or hand off: npm run session -- check ${agent} continue|handoff --by <you>`, meta: { refreshCheck: true, director: true } });
   }
   writeFlag(agent, f);

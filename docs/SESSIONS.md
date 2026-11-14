@@ -52,6 +52,36 @@ The studio's files are the memory, not the chat.
   `agent.refresh.decided` (decision, why, turns, tokens, percent). A flagged mid-debug session still gets the card, and
   the Director or Producer can still run `session -- check` by hand at any time. `STUDIO_REFRESH_DECIDE=ask` sends every
   check as a card, as before 2.85.
+- **The percentage is of the room the session started with (2.86).** A porter's brief and first reads filled 65 to 70 %
+  of a 200k window, so "60 % of the window" handed it off at once, three times in eight minutes, with no work done.
+  Now the session's start is the context its first commit or file edit was made with (its brief and first reads done),
+  and the threshold is start + `STUDIO_REFRESH_HANDOFF_PCT` percent of (window - start): a session that starts its work
+  at 136k of 200k hands off at 176k by default. Before any work (no commit, no file edit) the context never hands a
+  session off, unless it is within `STUDIO_REFRESH_SAFETY_PCT` (5) percent of the window itself (190k of 200k). The
+  idle-turns rule is unchanged. `agent.refresh.decided` carries the start, the threshold, the reading, whether it has
+  worked and its first reading. A studio's own `STUDIO_REFRESH_HANDOFF_PCT` keeps working with the new meaning: 85 is
+  now 85 % of the room left after the start (a start of 140k of 200k hands off at 191k), not 85 % of the window.
+- **Sessions that end for the harness's reasons don't cost the task (2.86).** `harness/handback-kind.mjs`
+  (`sessionEndKind`, `handBackKind`) is the one reading. A refresh hand-off (`refresh`, or `refresh-no-work` with no
+  commit, no saved work and no file edit), a launch failure (`launch`: the session died before its first turn, on a
+  permission prompt, or never started; its hand-back says "it never got going (launch failure: …)"), a `task done`
+  refused by the hooks check only for commits that are not the task's own (`foreign-refusal`: the task.not_done event
+  lists them) and a start refused because no lane copy could be made (`no-lane-copy`) never count toward the
+  watchdog's park, the same-refusal hold, the no-work park, the crew breaker or the task's session and minute budget
+  (`harness/task-budget.mjs`; a refresh that did work still counts its minutes, not a session). Each stays visible: its
+  events, and the scorecard's "attempts ended for a harness reason, by kind".
+- **Lane sessions read the main checkout (2.86).** Claude Code sessions in a lane copy get `--add-dir <main checkout>`
+  (besides its `studio/` and `.studio/`, which they had), so a headless session no longer dies on "requested
+  permissions to read from <the main checkout>". `STUDIO_LANE_ADD_MAIN_DIR=off` leaves the main checkout out. What it
+  allows: Claude Code's own file tools (Read, Grep, Glob, and, since lane sessions run with `--permission-mode
+  acceptEdits`, Edit and Write) reach files under the main checkout without a prompt. What it does not: the Bash
+  command list is unchanged, a commit in the main checkout still goes through its pre-commit guard, the hook that
+  refuses studio config edits still refuses them, and protected files still need the owner's approval at `task done`.
+  A session in the main checkout gets no extra folder. A custom command's `{addDirs}` is unchanged (studio/ and .studio/).
+- **One task's bad starts don't stop the studio (2.86).** A refresh hand-off is never a bad end for the supervisor's
+  halt. Two sessions of the same task ending with the same exit code in a row hold that task (the start back-off,
+  doubling from 4 min, one `supervisor.backoff` page); the supervisor halts only when two different tasks' sessions end
+  the same way in a row with no work, or the tool is missing.
 - `npm run session` lists every launched session's turns and context, with the model named.
 - Limits: `STUDIO_SESSION_TURNS` (40), `STUDIO_SESSION_CONTEXT` (120000), `STUDIO_SESSION_CEILING_TURNS`
   (80), `STUDIO_CHECK_TURNS` (20), `STUDIO_CHECK_TOKENS` (40000); 0 turns one off.

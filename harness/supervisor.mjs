@@ -244,7 +244,8 @@ export function inWindow(win, now = Date.now()) {
 async function checkBadEnds(opts, state, now) {
   // Not bad ends: a session stopped at its usage limit; one a person or the Producer stopped (meta.stoppedBy); one its own launcher
   // ended (meta.exitCause: stall, idle, task budget). Sessions dying within STUDIO_HALT_SAME_DEATH_SEC (5) of each other count as ONE end.
-  const mine0 = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent) && !e.meta?.usageLimit && !e.meta?.stoppedBy && !LAUNCHER_KILLS.has(e.meta?.exitCause?.kind));
+  // 2.86: nor a refresh hand-off (the launcher ends it with exit 1 and starts a fresh session: two in a row halted a crew three times).
+  const mine0 = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent) && !e.meta?.usageLimit && !e.meta?.stoppedBy && !e.meta?.refreshed && !LAUNCHER_KILLS.has(e.meta?.exitCause?.kind));
   // Reviewer launch crashes back off per role (roleBackoff) and never halt the supervisor (see roleLaunchFailure).
   noteRoleLaunchFailures(state, mine0, now);
   const mine = mine0.filter((e) => !roleLaunchFailure(e));
@@ -252,6 +253,20 @@ async function checkBadEnds(opts, state, now) {
   const last2 = ends.slice(-2).map((g) => g[g.length - 1]);
   if (last2.length === 2 && last2.every((e) => e.meta?.code && e.meta.code === last2[0].meta.code && (e.meta?.tool || '') === (last2[0].meta?.tool || ''))) {
     const code = last2[0].meta.code;
+    // 2.86: counted per task and cause. The same task's sessions ending twice on a cause of that task's own (B-140: a
+    // permission prompt in its lane: taskCause) hold THAT task with the start back-off and page once; two DIFFERENT tasks'
+    // sessions ending the same way in a row halt only with no work (the tool or the machine is out). Any other exit twice
+    // in a row (a crash, a missing program) halts as before.
+    if (!TOOL_MISSING.has(Number(code))) {
+      const [a, b] = last2.map(endTask);
+      if (a && a === b && last2.every(taskCause)) {
+        let locked = false;
+        try { locked = Boolean((await import('./lock.mjs')).status(`task:${a}`).locked); } catch { locked = false; }
+        holdTaskForEnds(state, a, last2, code, now, opts, { locked });
+        return false;
+      }
+      if (a && b && a !== b && !last2.every(noWorkEnd)) return false;
+    }
     const groups = ends.slice(-2);
     // Name the program, not "custom": the first word of STUDIO_<ROLE>_CMD or STUDIO_AGENT_CMD.
     const metaTool = last2[0].meta?.tool || 'the agent tool';
@@ -319,8 +334,33 @@ export function noteRoleLaunchFailures(state, ends, now = Date.now(), env = proc
 /** The live back-off of a role, or null. */
 export const roleBackedOff = (state, role, now = Date.now()) => { const b = state.roleBackoff?.[role]; return b && now < b.until ? b : null; };
 
-/** Ends the launcher caused itself (exitCause kinds), never a sign the tool is broken. */
-const LAUNCHER_KILLS = new Set(['stall', 'idle', 'budget', 'stopped']);
+/** Ends the launcher caused itself (exitCause kinds), never a sign the tool is broken. 2.86: a refresh, the prompt cap. */
+const LAUNCHER_KILLS = new Set(['stall', 'idle', 'budget', 'stopped', 'refresh', 'prompt-cap']);
+/** 2.86: a session end whose cause belongs to its task, not the studio: a launch failure on a permission prompt (B-140). */
+const taskCause = (e) => /permission prompt/i.test(String(e?.meta?.launchFailure?.why || ''));
+/** 2.86: the task a session end was on (its outcome's, else the event's), or null. */
+const endTask = (e) => e?.meta?.outcome?.task || e?.task || null;
+/** 2.86: a session end with no work: not done and no commit (the studio's or an engine worktree's); no outcome: no work known. */
+const noWorkEnd = (e) => { const o = e?.meta?.outcome; return !o || (!o.done && !((Number(o.commits) || 0) + (Number(o.engineCommits) || 0))); };
+/**
+ * 2.86: the same task's sessions ended the same bad way twice in a row: hold that task with the start back-off (the 2.84
+ * doubling wait, state.startBackoff, saved with the pass) and page the Producer once per hold. A pair already seen does nothing.
+ */
+export function holdTaskForEnds(state, task, ends, code, now, opts = {}, { locked = false, env = process.env, events = null } = {}) {
+  const key = ends.map((e) => e.id || `${e.agent}@${e.ts}`).join('|');
+  if (state.endHoldSeen === key) return null;
+  state.endHoldSeen = key;
+  if (!state.startBackoff) { const f = readJson(START_BACKOFF_FILE, {}) || {}; state.startBackoff = f.tasks || {}; state.startBackoffSeen ??= f.seen; }
+  const reason = `its last two sessions ended with exit ${code}${ends.some((e) => e.meta?.launchFailure) ? ` (${ends.map((e) => e.meta?.launchFailure?.why).filter(Boolean)[0]})` : ''}`;
+  const rk = refusalKey(`session end ${reason}`);
+  const prev = state.startBackoff[task];
+  const count = prev && prev.reason === rk ? prev.count + 1 : 2;
+  const evs = events || readRecentEvents(5000);
+  const entry = { reason: rk, text: reason.slice(0, 160), sig: taskStateSig(evs, task, locked), count, until: now + startBackoffMs(count, env), said: true, from: 'session-ends' };
+  state.startBackoff[task] = entry;
+  if (!opts.dryRun) { try { emitEvent({ type: 'supervisor.backoff', agent: 'supervisor', to: 'producer', task, status: 'warn', msg: `${task} held: ${reason} (${ends.map((e) => e.agent).join(', ')}); its next start waits ${Math.max(1, Math.round((entry.until - now) / 60000))} min. The studio goes on with other tasks; it halts only when two different tasks end this way in a row.`.slice(0, 500), meta: { task, count, reason: entry.text, minutes: Math.max(1, Math.round((entry.until - now) / 60000)), code, agents: ends.map((e) => e.agent), cause: 'session-ends' } }); } catch { /* a page, never a crash */ } }
+  return entry;
+}
 export const sameDeathSec = (env = process.env) => { const v = String(env.STUDIO_HALT_SAME_DEATH_SEC ?? '').trim(); const n = Number(v); return v !== '' && Number.isFinite(n) && n >= 0 ? n : 5; };
 /**
  * Session ends (in order) grouped: ends within STUDIO_HALT_SAME_DEATH_SEC of the group's first are one group, [[end, …], …]; 0 = no
