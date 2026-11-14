@@ -93,7 +93,7 @@ import { sessionOutcome, parkIfNoWork, holdIfSameRefusal } from './session-outco
 import { PLANNING_OUTCOME_ROLES, boardEventsBy } from './wake-gate.mjs';
 import { startRefusal, sameBlocker, recordAttempt } from './attempts.mjs';
 import { writeAtomic } from './fsafe.mjs';
-import { selfIdentity, spawnedIdentity, pidAlive, recordAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
+import { selfIdentity, spawnedIdentity, pidAlive, recordAlive, pidExists, readStarts, sameProcess, liveAs } from './proc-identity.mjs';
 import { gateEnv } from './gate-env.mjs';
 import { vertexModel, vertexConfigured, ensureProxy, proxyBase, sessionKey, sessionUsage, overPromptCap, promptCap } from './vertex.mjs';
 import { registeredTool, registryPrice } from './tool-registry.mjs';
@@ -273,14 +273,14 @@ export function agyOptions(model = null, env = process.env) {
 
 /**
  * 2.86 (B-140): the folders a session's tool is given with --add-dir. A session in a lane copy gets the main checkout's
- * studio/ and .studio/ (laneShareDirs), and, with STUDIO_LANE_ADD_MAIN_DIR on (the default), the main checkout itself:
- * headless lane sessions died on "requested permissions to read from <the main checkout>". A session in the main checkout
- * gets neither (it works there already); an engine pass also gets its engine worktree.
+ * studio/ and .studio/ (laneShareDirs); with STUDIO_LANE_ADD_MAIN_DIR=on (the studio's choice; off by default, since lane
+ * isolation is a design rule) also the main checkout itself, which opens read AND edit of it without a prompt. A session
+ * in the main checkout gets neither (it works there already); an engine pass also gets its engine worktree.
  */
 export function laneAddDirs({ copy = null, engineDir = null, env = process.env, root = mainRoot() } = {}) {
   const dirs = [];
   if (copy) {
-    if (!/^(off|0|false|no)$/i.test(String(env.STUDIO_LANE_ADD_MAIN_DIR || '').trim())) {
+    if (/^(on|1|true|yes)$/i.test(String(env.STUDIO_LANE_ADD_MAIN_DIR || '').trim())) {
       try { dirs.push(fs.realpathSync.native(root)); } catch { dirs.push(path.resolve(root)); }
     }
     dirs.push(...laneShareDirs(root));
@@ -699,7 +699,9 @@ export function agyCutShort({ tool, code, log }) {
 }
 
 // 2.86 (B-140): what Claude Code prints when a headless session needs a permission it was not given.
-const PERMISSION_PROMPT = /requested permissions to (?:read|write|edit|use|access)\b|haven't granted it yet/i;
+const PERMISSION_PROMPT = /requested permissions to (?:read|write|edit|use|access)(?: from| to)?\b|haven't granted it yet/i;
+/** 2.86: the folder a permission prompt asked for ("… to read from <folder>, but you haven't granted it yet"), or null. */
+export const promptFolder = (text) => (String(text || '').match(/requested permissions to \w+ (?:from|to) (.+?)(?:,\s*but\b|\s*$)/i)?.[1] || '').replace(/["']/g, '').trim() || null;
 /**
  * 2.86: why a session is a launch failure, or null: it never started (a spawn error), or it ended non-zero with no
  * assistant turn in its log, or its last output is a permission prompt. Not a refresh, a stop, a provider's refusal, an
@@ -712,7 +714,7 @@ export function launchFailure({ code, log = '', exit = {}, capped = false, stop 
   if (!code) return null;
   const tail = String(log || '').slice(-6000);
   const perm = tail.split(/\r?\n/).reverse().find((l) => PERMISSION_PROMPT.test(l));
-  if (perm) return `it stopped on a permission prompt (${(perm.match(PERMISSION_PROMPT)?.[0] || 'permission').trim()})`;
+  if (perm) { const folder = promptFolder(perm); return `it stopped on a permission prompt (${(perm.match(PERMISSION_PROMPT)?.[0] || 'permission').trim()}${folder ? ` ${folder}` : ''})`; }
   // Only Claude Code's stream-json log says where its turns are; other tools' logs are plain text.
   // Claude Code started (its stream-json init line) and ended before any assistant turn; a tool that printed an error
   // and exited without starting is the run's own failure, not a launch failure.
@@ -761,6 +763,8 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   // permission prompt it could not answer headless. The harness's start, not the task's work: its hand-back says so
   // (handback-kind.mjs LAUNCH_NOTE) and no counter of the task's own failures reads it.
   const launchFail = launchFailure({ code, log, exit, capped, stop, trouble, agyCut, tool });
+  // The folder a permission prompt asked for, on the session's end event, so a brief that points outside the lane can be fixed.
+  const launchFolder = launchFail ? promptFolder(String(log).slice(-6000).split(/\r?\n/).reverse().find((l) => PERMISSION_PROMPT.test(l)) || '') : null;
   // Out of quota: remember until when, so the supervisor moves this tool's lanes to the next tool. STUDIO_QUOTA_SKIP=off:
   // usage is watched outside the harness, so never skip a tool. Marked before the hand-back so the note can say until when.
   let limitMark = null;
@@ -897,10 +901,13 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   const cause = exitCause({ code, exit, stop });
   const firstEnd = claimSessionEnd(agent, s0.startedAt, 'launcher');
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : cause.kind === 'prompt-cap' ? `exit ${code}, ended by the launcher (prompt-cap: ${cause.why})` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget', 'prompt-cap'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
-  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${aider?.line && !outcome?.why ? `; aider: ${aider.line}` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(aider ? { aider } : {}), ...(followUps ? { followUps, ...(nudges ? { nudges } : {}) } : {}), ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(Array.isArray(s0.keys) && s0.keys.length ? { keys: s0.keys } : {}), ...(vertexUse?.requests ? { usageFrom: 'vertex-proxy', requests: vertexUse.requests } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, ...(capped ? { refreshNoWork: refreshDidNoWork({ outcome, handed, flag: refresh }) } : {}), ...(launchFail ? { launchFailure: { why: launchFail } } : {}), usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
-  if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
+  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${aider?.line && !outcome?.why ? `; aider: ${aider.line}` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(aider ? { aider } : {}), ...(followUps ? { followUps, ...(nudges ? { nudges } : {}) } : {}), ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(Array.isArray(s0.keys) && s0.keys.length ? { keys: s0.keys } : {}), ...(vertexUse?.requests ? { usageFrom: 'vertex-proxy', requests: vertexUse.requests } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, ...(capped ? { refreshNoWork: refreshDidNoWork({ outcome, handed, flag: refresh }) } : {}), ...(launchFail ? { launchFailure: { why: launchFail, ...(launchFolder ? { folder: launchFolder } : {}) } } : {}), usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
+  if ((outcome?.counts || outcome?.foreignRefusal) && (outcome.noWork || outcome.stuck)) {
     // 2.85: the same task done refusal as the session before it, no new commit: held for the overseer and the Producer.
+    // 2.86: a refusal for commits not the task's own too (a harness hold), so it is never relaunched in a loop.
     try { holdIfSameRefusal(agent, readRecentEvents(20000), { park: parkOnce }); } catch { /* a help, never a crash */ }
+  }
+  if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
     try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => postAsk({ agent: 'launcher', to: 'producer', task: outcome.task, subject: 'parked', msg: m }) }); } catch { /* the park is a help, never a crash */ }
   }
   jobDone({ kind: 'session', id: agent, agent, task: s0.task || tasks[0] || null, code: code ?? null, result: stop ? (stop.kind === 'pause' ? 'paused' : 'stopped') : bad ? 'fail' : 'pass', ms: Date.parse(s0.startedAt) ? Date.now() - Date.parse(s0.startedAt) : null, tail: reason, log: s0.log || null, extra: { role: role || null, handed: handed.map((h) => h.task) } });
@@ -1664,9 +1671,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const again = result.capped ? result.handed[0]?.task || (task && !parseNextQueue().done.some((t) => t.id === task) ? task : null) : null;
   const maxRefresh = Number(process.env.STUDIO_REFRESH_RELAUNCH ?? 5);
   if (again && !readStop() && (opts2.refreshes || 0) < maxRefresh) {
-    await dropCopies();
-    emitEvent({ type: 'agent.refresh', agent, task: again, msg: `${agent} refreshed on ${again}; a fresh session continues from studio/handoffs/${again}.md` });
-    return runAgent({ role, agent, tool, model, fallback, task: again, lane, oneTask, division, note, by, refreshes: (opts2.refreshes || 0) + 1 });
+    // 2.86: the successor works on in this session's own copy (same task) once this session's process is confirmed gone.
+    const own = ownCopy ? takeOverOwnCopy(agent, ownCopy, { sameTask: again === task || result.handed.some((h) => h.task === again) }) : null;
+    if (!own) await dropCopies();
+    emitEvent({ type: 'agent.refresh', agent, task: again, msg: `${agent} refreshed on ${again}; a fresh session continues from studio/handoffs/${again}.md${own ? ` in the same copy (${LANES_DIR}/${agent}, ${own.branch})` : ''}` });
+    return runAgent({ role, agent, tool, model, fallback, task: again, lane, oneTask, division, note, by, refreshes: (opts2.refreshes || 0) + 1, ...(own ? { reuseCopy: ownCopy } : {}) });
   }
   // The stream session failed on its input format: once, the same agent and model again in the one-turn mode (before any
   // failover), in its own copy, on its task if not done, or (started with none) if it finished nothing.
@@ -1708,6 +1717,28 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
 
 /** The copy the ended session under this name used, to work on in: { dir, branch, laneless, reused }, or null when it is
  * gone or isn't this agent's lane worktree (then a new copy is made). */
+/**
+ * 2.86: a refresh's successor takes over the lane copy of the session it continues. All seven "no lane copy could be made
+ * for <name> (.lanes/<name> is still in use)" in a crew's log came right after a refresh ended that same name: the
+ * launcher dropped the copy and made a new one, and on Windows the removal of a copy the exiting session's processes still
+ * held left the folder behind, which the new copy then saw as "changed 0 min ago" (worktree.mjs laneLive). Now, when the
+ * copy is the predecessor's own (.lanes/<agent>) and holds the same task, the successor works on in it once the
+ * predecessor's process is confirmed gone (proc-identity.mjs liveAs, strict: a reused pid is not it); while it is still
+ * alive the launcher waits and checks again (tries x waitMs), and only then falls back to a new copy. Returns the copy
+ * (reusableCopy's shape) or null.
+ */
+export function takeOverOwnCopy(agent, prev, { sameTask = false, rec = null, alive = (pid, id) => liveAs(Number(pid), id || null, { strict: true }), tries = 6, waitMs = 5000, sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {
+  if (!prev?.dir || !sameTask) return null;
+  const r = rec || readJson(sessionFile(agent)) || {};
+  for (let i = 0; i < Math.max(1, tries); i += 1) {
+    const live = r.pid ? alive(r.pid, r.identity?.pid) : false;
+    if (!live) return reusableCopy(agent, prev);
+    if (i < tries - 1) sleep(waitMs);
+  }
+  emitEvent({ type: 'lane.wait', agent, msg: `${agent}'s refresh successor did not take over ${LANES_DIR}/${agent}: the session before it (pid ${r.pid}) is still running after ${Math.round((tries * waitMs) / 1000)} s`, meta: { pid: r.pid || null } });
+  return null;
+}
+
 function reusableCopy(agent, prev) {
   try {
     const dir = path.resolve(REPO_ROOT, String(prev?.dir || ''));

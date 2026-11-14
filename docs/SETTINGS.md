@@ -40,9 +40,9 @@ Read this list first: the names a real crew sets in its `.env`, and the main sch
 - `STUDIO_TEST_WORKERS` · default `'-'` · harness/flakes.mjs, harness/game-gates.mjs, harness/heavy-budget.mjs (+16 more) · [ONBOARDING-A-GAME.md:168](ONBOARDING-A-GAME.md)
 - `STUDIO_THREADS` · no simple default · harness/threads.mjs, qa/selftest-264l.mjs, qa/selftest-265r.mjs (+14 more) · [DIRECTOR-FLOW.md:122](DIRECTOR-FLOW.md)
 - `STUDIO_ENGINE_TRAIN_AUTO` · no simple default · harness/engine-train-control.mjs, harness/line-producer.mjs, qa/selftest-2791b.mjs · [ENGINE-TRACKS.md:161](ENGINE-TRACKS.md)
-- `STUDIO_SESSION_TURNS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:86](SESSIONS.md)
-- `STUDIO_SESSION_CEILING_TURNS` · no simple default · harness/session-cap.mjs, qa/selftest.mjs · [SESSIONS.md:86](SESSIONS.md)
-- `STUDIO_SESSION_CONTEXT` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:86](SESSIONS.md)
+- `STUDIO_SESSION_TURNS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:89](SESSIONS.md)
+- `STUDIO_SESSION_CEILING_TURNS` · no simple default · harness/session-cap.mjs, qa/selftest.mjs · [SESSIONS.md:89](SESSIONS.md)
+- `STUDIO_SESSION_CONTEXT` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:89](SESSIONS.md)
 - `STUDIO_SESSION_MAX_MIN` · no simple default · harness/agent.mjs, harness/stall.mjs, qa/selftest-230q.mjs (+7 more) · [RUN-UNATTENDED.md:164](RUN-UNATTENDED.md)
 - `STUDIO_STALL_MIN` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, harness/dotenv.mjs (+11 more) · [AGENT-TOOLS.md:78](AGENT-TOOLS.md)
 - `STUDIO_STALL_PLAN_MIN` · no simple default · harness/stall.mjs, qa/selftest-230o.mjs, qa/selftest-2731a.mjs (+5 more) · [LINE-PRODUCER.md:136](LINE-PRODUCER.md)
@@ -50,10 +50,10 @@ Read this list first: the names a real crew sets in its `.env`, and the main sch
 - `STUDIO_TASK_MAX_SESSIONS` · no simple default · harness/task-budget.mjs, qa/selftest-231.mjs, qa/selftest-281b1.mjs · [WORK-ORGANIZATION.md:42](WORK-ORGANIZATION.md)
 - `STUDIO_TASK_MAX_TOKENS` · no simple default · harness/task-budget.mjs, qa/selftest-231.mjs · [WORK-ORGANIZATION.md:42](WORK-ORGANIZATION.md)
 - `STUDIO_TASK_BUDGET` · no simple default · harness/line-producer.mjs, harness/overseer-repro.mjs, harness/task-budget.mjs (+184 more) · undocumented
-- `STUDIO_CHECK_TOKENS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:87](SESSIONS.md)
-- `STUDIO_CHECK_TURNS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:87](SESSIONS.md)
+- `STUDIO_CHECK_TOKENS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:90](SESSIONS.md)
+- `STUDIO_CHECK_TURNS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:90](SESSIONS.md)
 - `STUDIO_DAILY_TOKEN_CAP` · no simple default · harness/budget.mjs, harness/retro.mjs, harness/route.mjs (+8 more) · [AGENT-TOOLS.md:314](AGENT-TOOLS.md)
-- `STUDIO_CACHE_READ_WEIGHT` · no simple default · harness/budget.mjs, harness/task-budget.mjs, harness/token-weight.mjs (+8 more) · [SESSIONS.md:123](SESSIONS.md)
+- `STUDIO_CACHE_READ_WEIGHT` · no simple default · harness/budget.mjs, harness/task-budget.mjs, harness/token-weight.mjs (+8 more) · [SESSIONS.md:126](SESSIONS.md)
 - `STUDIO_USAGE_FILE` · no simple default · harness/status.mjs · undocumented
 - `STUDIO_WATCHDOG` · no simple default · harness/overseer-repro.mjs, harness/upgrade-smoke.mjs, harness/watchdog.mjs (+179 more) · undocumented
 - `STUDIO_WATCHDOG_IDLE_HOURS` · no simple default · harness/watchdog.mjs, qa/selftest-230q.mjs, qa/selftest-2583n.mjs · [STEERING.md:42](STEERING.md)
@@ -134,7 +134,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 - `STUDIO_AUTO_FINISH` · no simple default · harness/agent.mjs, qa/selftest-2732f.mjs, qa/selftest-276i.mjs (+10 more) · undocumented
 - `STUDIO_AUTO_NAME` · no simple default · harness/agent.mjs, qa/selftest-2781e.mjs · [AGENT-TOOLS.md:39](AGENT-TOOLS.md)
-- `STUDIO_AUTO_TRICKS` · no simple default · harness/task.mjs, qa/selftest-2585q.mjs, qa/selftest-258b.mjs (+2 more) · [SESSIONS.md:177](SESSIONS.md)
+- `STUDIO_AUTO_TRICKS` · no simple default · harness/task.mjs, qa/selftest-2585q.mjs, qa/selftest-258b.mjs (+2 more) · [SESSIONS.md:180](SESSIONS.md)
 
 ## BACKUP_* (3)
 
@@ -155,7 +155,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## CACHE_* (2)
 
 - `STUDIO_CACHE_MAX_GB` · no simple default · harness/janitor.mjs, qa/selftest-268o.mjs · [RUN-UNATTENDED.md:110](RUN-UNATTENDED.md)
-- `STUDIO_CACHE_READ_WEIGHT` · no simple default · harness/budget.mjs, harness/task-budget.mjs, harness/token-weight.mjs (+8 more) · [SESSIONS.md:123](SESSIONS.md)
+- `STUDIO_CACHE_READ_WEIGHT` · no simple default · harness/budget.mjs, harness/task-budget.mjs, harness/token-weight.mjs (+8 more) · [SESSIONS.md:126](SESSIONS.md)
 
 ## CHAIN_* (2)
 
@@ -171,8 +171,8 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## CHECK_* (2)
 
-- `STUDIO_CHECK_TOKENS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:87](SESSIONS.md)
-- `STUDIO_CHECK_TURNS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:87](SESSIONS.md)
+- `STUDIO_CHECK_TOKENS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:90](SESSIONS.md)
+- `STUDIO_CHECK_TURNS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:90](SESSIONS.md)
 
 ## CLAIM_* (4)
 
@@ -558,7 +558,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## LANE_* (10)
 
-- `STUDIO_LANE_ADD_MAIN_DIR` · no simple default · harness/agent.mjs, qa/selftest-286d.mjs · [SESSIONS.md:75](SESSIONS.md)
+- `STUDIO_LANE_ADD_MAIN_DIR` · no simple default · harness/agent.mjs, qa/selftest-286d.mjs · [SESSIONS.md:74](SESSIONS.md)
 - `STUDIO_LANE_APPROVAL_SCAN` · default `200` · harness/lane-approvals.mjs · [SECURITY.md:115](SECURITY.md)
 - `STUDIO_LANE_EVENTS` · no simple default · harness/event.mjs, qa/selftest-2782e.mjs, qa/selftest-2782h.mjs (+1 more) · [SECURITY.md:110](SECURITY.md)
 - `STUDIO_LANE_EXCLUDE` · no simple default · harness/lane-sparse.mjs, harness/worktree.mjs, qa/selftest-270w.mjs · [CONDUCTOR.md:183](CONDUCTOR.md)
@@ -721,9 +721,9 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_REFRESH_DECIDE` · no simple default · harness/session-cap.mjs, qa/selftest-285c.mjs · [RELEASE-2.85.0.md:52](RELEASE-2.85.0.md)
 - `STUDIO_REFRESH_HANDOFF_PCT` · no simple default · harness/session-cap.mjs, qa/selftest-285c.mjs, qa/selftest-286d.mjs · [RELEASE-2.85.0.md:52](RELEASE-2.85.0.md)
 - `STUDIO_REFRESH_IDLE_TURNS` · no simple default · harness/session-cap.mjs, qa/selftest-285c.mjs · [RELEASE-2.85.0.md:52](RELEASE-2.85.0.md)
-- `STUDIO_REFRESH_NEW_RED_ROLES` · default `'builder'` · harness/session-cap.mjs · [SESSIONS.md:98](SESSIONS.md)
-- `STUDIO_REFRESH_NEW_RED_SHARE` · no simple default · harness/session-cap.mjs · [SESSIONS.md:95](SESSIONS.md)
-- `STUDIO_REFRESH_ON_NEW_RED` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:98](SESSIONS.md)
+- `STUDIO_REFRESH_NEW_RED_ROLES` · default `'builder'` · harness/session-cap.mjs · [SESSIONS.md:101](SESSIONS.md)
+- `STUDIO_REFRESH_NEW_RED_SHARE` · no simple default · harness/session-cap.mjs · [SESSIONS.md:98](SESSIONS.md)
+- `STUDIO_REFRESH_ON_NEW_RED` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:101](SESSIONS.md)
 - `STUDIO_REFRESH_RELAUNCH` · default `5` · harness/agent.mjs, qa/selftest-2781b.mjs, qa/selftest.mjs · [SESSIONS.md:20](SESSIONS.md)
 - `STUDIO_REFRESH_SAFETY_PCT` · no simple default · harness/session-cap.mjs, qa/selftest-286d.mjs · [SESSIONS.md:60](SESSIONS.md)
 
@@ -771,19 +771,19 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## SESSION_* (13)
 
-- `STUDIO_SESSION_CEILING_TURNS` · no simple default · harness/session-cap.mjs, qa/selftest.mjs · [SESSIONS.md:86](SESSIONS.md)
-- `STUDIO_SESSION_CONTEXT` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:86](SESSIONS.md)
-- `STUDIO_SESSION_CONTEXT_*` · no simple default · harness/session-cap.mjs · [SESSIONS.md:90](SESSIONS.md)
-- `STUDIO_SESSION_CONTEXT_EARLY` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:89](SESSIONS.md)
-- `STUDIO_SESSION_CONTEXT_FACTOR_*` · no simple default · harness/session-cap.mjs · [SESSIONS.md:91](SESSIONS.md)
-- `STUDIO_SESSION_CONTEXT_FACTOR_SONNET` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:92](SESSIONS.md)
-- `STUDIO_SESSION_CONTEXT_REVIEWER` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:90](SESSIONS.md)
-- `STUDIO_SESSION_EARLY_ROLES` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:89](SESSIONS.md)
+- `STUDIO_SESSION_CEILING_TURNS` · no simple default · harness/session-cap.mjs, qa/selftest.mjs · [SESSIONS.md:89](SESSIONS.md)
+- `STUDIO_SESSION_CONTEXT` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:89](SESSIONS.md)
+- `STUDIO_SESSION_CONTEXT_*` · no simple default · harness/session-cap.mjs · [SESSIONS.md:93](SESSIONS.md)
+- `STUDIO_SESSION_CONTEXT_EARLY` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:92](SESSIONS.md)
+- `STUDIO_SESSION_CONTEXT_FACTOR_*` · no simple default · harness/session-cap.mjs · [SESSIONS.md:94](SESSIONS.md)
+- `STUDIO_SESSION_CONTEXT_FACTOR_SONNET` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:95](SESSIONS.md)
+- `STUDIO_SESSION_CONTEXT_REVIEWER` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:93](SESSIONS.md)
+- `STUDIO_SESSION_EARLY_ROLES` · no simple default · harness/session-cap.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:92](SESSIONS.md)
 - `STUDIO_SESSION_MAX_MIN` · no simple default · harness/agent.mjs, harness/stall.mjs, qa/selftest-230q.mjs (+7 more) · [RUN-UNATTENDED.md:164](RUN-UNATTENDED.md)
 - `STUDIO_SESSION_PLAN_MAX_MIN` · no simple default · harness/stall.mjs, qa/selftest-2731a.mjs, qa/selftest-284v.mjs · [RUN-UNATTENDED.md:164](RUN-UNATTENDED.md)
 - `STUDIO_SESSION_RAM_GB` · no simple default · harness/heavy-budget.mjs, harness/supervisor.mjs, qa/selftest-268n.mjs (+1 more) · [WORK-ORGANIZATION.md:331](WORK-ORGANIZATION.md)
 - `STUDIO_SESSION_START_QUIET` · no simple default · scripts/session-start.mjs · undocumented
-- `STUDIO_SESSION_TURNS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:86](SESSIONS.md)
+- `STUDIO_SESSION_TURNS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:89](SESSIONS.md)
 
 ## SHARED_* (2)
 
@@ -1100,7 +1100,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_CI_NOTIFY_CMD` · no simple default · harness/ci-watch.mjs, qa/selftest-230h.mjs · [DIRECTOR-FLOW.md:119](DIRECTOR-FLOW.md)
 - `STUDIO_CLAIMS` · no simple default · harness/said-vs-did.mjs, harness/task.mjs · [ANCHORS.md:50](ANCHORS.md)
 - `STUDIO_CONTRACT_TIMEOUT_S` · no simple default · harness/contracts.mjs · [CONTRACTS.md:92](CONTRACTS.md)
-- `STUDIO_CURRENT_TASK_FILE` · default `'auto'` · harness/task.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:112](SESSIONS.md)
+- `STUDIO_CURRENT_TASK_FILE` · default `'auto'` · harness/task.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:115](SESSIONS.md)
 - `STUDIO_CYCLE_QUIET_MAX_H` · no simple default · harness/dev-cycle.mjs, harness/wake-gate.mjs, qa/selftest-284a.mjs · [LINE-PRODUCER.md:70](LINE-PRODUCER.md)
 - `STUDIO_DAILY_TOKEN_CAP` · no simple default · harness/budget.mjs, harness/retro.mjs, harness/route.mjs (+8 more) · [AGENT-TOOLS.md:314](AGENT-TOOLS.md)
 - `STUDIO_DEAD_CLAIM_MIN` · no simple default · harness/busy.mjs, qa/selftest-283g.mjs · [DIRECTOR-FLOW.md:63](DIRECTOR-FLOW.md)

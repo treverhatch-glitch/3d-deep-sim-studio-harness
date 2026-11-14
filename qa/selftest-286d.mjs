@@ -143,7 +143,7 @@ const crew = crewHealth(harnessEvs, { now: t0 + 37 * M, env: {} });
 const tally = handBackTally(all, { from: 0, to: Infinity });
 const foreignOutcome = ends[0].meta.outcome;
 const lf = {
-  perm: launchFailure({ code: 1, tool: 'claude', log: '{"type":"system","subtype":"init"}\\nClaude requested permissions to read from C:\\\\studio-main, but you haven\\'t granted it yet.' }),
+  perm: launchFailure({ code: 1, tool: 'claude', log: '{"type":"system","subtype":"init"}\\nClaude requested permissions to read from /srv/studio-main, but you haven\\'t granted it yet.' }),
   noTurn: launchFailure({ code: 1, tool: 'claude', log: '{"type":"system","subtype":"init"}' }),
   aider: launchFailure({ code: 1, tool: 'aider', log: 'Error: the model is not found' }),
   crash: launchFailure({ code: 1, tool: 'claude', log: 'Error: build failed: 3 type errors' }),
@@ -155,12 +155,12 @@ console.log(JSON.stringify({ kinds: { T1: kindsOf('T-1'), T2: kindsOf('T-2'), T3
       await guard('2.86 (d2): three refresh hand-offs with no work on one task in two hours are kind "refresh-no-work": the watchdog\'s count (busy.mjs loopHandBacks) is 0, so nothing is parked, and the task\'s budget shows 0 sessions and 0 minutes (fails before this fix: 3 "real" hand-backs, the brand-new task parked, 3 sessions on its budget)', () => [
         JSON.stringify(r.kinds?.T1) === '["refresh-no-work","refresh-no-work","refresh-no-work"]' && r.loop?.['T-1'] === 0 && r.spend?.['T-1']?.sessions === 0 && r.spend['T-1'].minutes === 0,
         JSON.stringify({ kinds: r.kinds, loop: r.loop, spend: r.spend, raw: r._raw }).slice(0, 2500)]);
-      await guard('2.86 (d2): a session that died on a permission prompt (or before its first turn, or never started) is kind "launch", and a task done refused by the hooks check only for commits that are not the task\'s own is kind "foreign-refusal" (its outcome counts: false, foreignRefusal): three of each count 0 toward the park, use none of the task\'s budget, never meet the same-refusal hold, and the crew breaker counts no no-work session and no short exit for them; launchFailure() reads only a Claude Code log, and never a refresh or a stall (fails before this fix: all "real", 3 sessions each on the budget, the second foreign refusal held the task)', () => [
+      await guard('2.86 (d2): a session that died on a permission prompt (or before its first turn, or never started) is kind "launch", and a task done refused by the hooks check only for commits that are not the task\'s own is kind "foreign-refusal" (its outcome counts: false, foreignRefusal): three of each count 0 toward the park, use none of the task\'s budget (the second foreign refusal still meets the same-refusal hold, marked foreign: see below), and the crew breaker counts no no-work session and no short exit for them; launchFailure() reads only a Claude Code log, and never a refresh or a stall (fails before this fix: all "real", 3 sessions each on the budget)', () => [
         JSON.stringify(r.kinds?.T2) === '["launch","launch","launch"]' && JSON.stringify(r.kinds?.T3) === '["foreign-refusal","foreign-refusal","foreign-refusal"]'
           && r.loop['T-2'] === 0 && r.loop['T-3'] === 0 && r.spend['T-2'].sessions === 0 && r.spend['T-2'].minutes === 0 && r.spend['T-3'].sessions === 0 && r.spend['T-3'].minutes === 0
-          && r.sameAgain === null && r.foreignOutcome?.counts === false && r.foreignOutcome.foreignRefusal === true
+          && r.sameAgain?.foreign === true && r.foreignOutcome?.counts === false && r.foreignOutcome.foreignRefusal === true
           && r.crew.noCommit === 0 && r.crew.builderNoCommit === 0 && r.crew.shortExits === 0
-          && /permission prompt/.test(r.lf?.perm || '') && /before its first turn/.test(r.lf.noTurn || '') && r.lf.aider === null && r.lf.crash === null && r.lf.refresh === null && r.lf.stall === null && r.lf.worked === null,
+          && /permission prompt \(requested permissions to read from \/srv\/studio-main\)/.test(r.lf?.perm || '') && /before its first turn/.test(r.lf.noTurn || '') && r.lf.aider === null && r.lf.crash === null && r.lf.refresh === null && r.lf.stall === null && r.lf.worked === null,
         JSON.stringify({ kinds: r.kinds, loop: r.loop, spend: r.spend, sameAgain: r.sameAgain, crew: r.crew, fo: r.foreignOutcome, lf: r.lf }).slice(0, 2500)]);
       await guard('2.86 (d2, guard): a real hand-back still counts: three in two hours are three for the watchdog (it parks at 3) and 3 sessions on the task\'s budget; 2.85\'s kinds hold (the flow pass\'s "claim ran out" is "harness", a "ready for the train" note is "ready"); this held before the fix too', () => [
         JSON.stringify(r.kinds?.T4) === '["real","real","real"]' && r.loop?.['T-4'] === 3 && r.spend?.['T-4']?.sessions === 3 && r.spend['T-4'].minutes > 0
@@ -170,6 +170,49 @@ console.log(JSON.stringify({ kinds: { T1: kindsOf('T-1'), T2: kindsOf('T-2'), T3
         r.tally?.real === 3 && r.tally.harness?.['refresh-no-work'] === 3 && r.tally.harness.launch === 3 && r.tally.harness['foreign-refusal'] === 3 && r.tally.harness['no-lane-copy'] === 1
           && r.words === 'refresh with no work 3, launch failure 3, refused for commits not its own 3, no lane copy 1',
         JSON.stringify({ tally: r.tally, words: r.words })]);
+
+      // A refusal for commits not the task's own: a harness hold after two, so no fourth session; nothing counted.
+      const { S: H, env: henv } = studio('foreignhold', { git: false });
+      const fh = probe(H, henv, `import { holdIfSameRefusal, sessionOutcome } from ${u(H, 'harness/session-outcome.mjs')};
+import { parkOnce, loopHandBacks } from ${u(H, 'harness/busy.mjs')};
+import { readHolds, holdReason } from ${u(H, 'harness/task-hold.mjs')};
+import { taskSpend } from ${u(H, 'harness/task-budget.mjs')};
+import { readRecentEvents } from ${u(H, 'harness/event.mjs')};
+const M = 60000; const t0 = Date.parse('2026-11-13T16:00:00Z'); const iso = (t) => new Date(t).toISOString();
+let k = 0; const ev = (at, type, agent, msg, meta) => ({ id: 'f' + (++k), ts: iso(t0 + at * M), type, agent, task: 'T-7', msg, ...(meta ? { meta } : {}) });
+const all = []; const held = [];
+for (const [i, agent] of ['builder-s1099', 'builder-s1100', 'builder-s1101'].entries()) {
+  const at = i * 3;
+  const st = [ev(at, 'agent.session.start', agent, agent + ' started', { role: 'builder' }), ev(at + 0.2, 'task.start', agent, 'Picked up T-7'),
+    ev(at + 1, 'task.not_done', agent, 'T-7 not done yet: the hooks check failed for 1 commit(s) that are not the task own (cf9efbe' + i + ')', { refusal: ['hooks'], foreign: ['cf9efbe' + i] }),
+    ev(at + 2, 'task.paused', agent, 'Handed back T-7: Done: nothing new | Failed/tried: task done refused by the hooks check')];
+  const outcome = sessionOutcome({ agent, task: 'T-7', startedAt: iso(t0 + at * M), events: st, commits: 0 });
+  all.push(...st, ev(at + 2.1, 'agent.session.end', agent, agent + ' ended', { role: 'builder', code: 0, outcome }));
+  held.push(holdIfSameRefusal(agent, all, { park: parkOnce, now: t0 + (at + 2.2) * M }));
+}
+const h = readHolds()['T-7']?.parked || null;
+const start = holdReason('T-7', { inProgress: [], backlog: [{ id: 'T-7', role: 'builder', title: 'x' }], done: [] }, t0 + 10 * M);
+const spend = taskSpend('T-7', all, t0 + 10 * M);
+const holdEv = readRecentEvents(500).filter((e) => e.type === 'task.hold' && e.task === 'T-7');
+console.log(JSON.stringify({ held: held.map(Boolean), h, start: start ? String(start).slice(0, 200) : null, loop: loopHandBacks('T-7', all).length, spend: { sessions: spend.sessions, minutes: spend.minutes }, holdEv: holdEv.map((e) => ({ agent: e.agent, msg: e.msg.slice(0, 120), meta: e.meta })) }));`);
+      await guard('2.86 (d2): a task done refused by the hooks check for commits that are not the task\'s own is still bounded: the second identical refusal (no commit between) puts the 2.85 same-refusal hold on the task, marked as a harness hold in its text and record, so a fourth session is not started (task start refuses); the three count 0 toward the watchdog\'s park and use none of the budget (fails before this fix: the three counted as real hand-backs and 3 sessions on the budget)', () => [
+        JSON.stringify(fh.held) === '[false,true,false]' && fh.h?.reason === 'same-refusal' && fh.h.harness === true && /a harness hold, not the task's failure/.test(fh.h.why || '') && fh.start
+          && fh.loop === 0 && fh.spend?.sessions === 0 && fh.spend.minutes === 0 && fh.holdEv?.length === 1 && fh.holdEv[0].meta?.harness === true,
+        JSON.stringify(fh).slice(0, 2500)]);
+
+      // The per-task breaker reads the same function.
+      const { S: B, env: benv } = studio('breaker', { git: false });
+      const br = probe(B, benv, `import { checkBreaker, isFailureNote, reasonKey } from ${u(B, 'harness/breaker.mjs')};
+import { emitEvent } from ${u(B, 'harness/event.mjs')};
+import { readHolds } from ${u(B, 'harness/task-hold.mjs')};
+const hand = (task, agent, note, notDone) => { if (notDone) emitEvent({ type: 'task.not_done', agent, task, msg: task + ' not done yet: the hooks check failed', meta: { refusal: ['hooks'], foreign: ['cf9efbe'] } }); emitEvent({ type: 'task.paused', agent, task, msg: 'Handed back ' + task + ': ' + note, meta: isFailureNote(note) ? { reasonKey: reasonKey(note) } : {} }); return checkBreaker(task, note, agent); };
+const foreign = ['builder-a1', 'builder-a2'].map((a) => hand('T-8', a, 'Failed/tried: task done refused by the hooks check again', true));
+const real = ['builder-b1', 'builder-b2'].map((a) => hand('T-9', a, 'Failed: verify red on golden (seed 3, tick 120)', false));
+const holds = readHolds();
+console.log(JSON.stringify({ foreign, real: real.map(Boolean), t8: holds['T-8']?.parked || null, t9: holds['T-9']?.parked?.breaker || null }));`);
+      await guard('2.86 (d2): the per-task breaker (harness/breaker.mjs) reads handback-kind.mjs: two hand-backs after task done refusals for commits not the task\'s own do not trip it; two real failures with the same reason still do (fails before this fix: the second foreign refusal tripped the breaker and parked the task)', () => [
+        JSON.stringify(br.foreign) === '[null,null]' && !br.t8 && JSON.stringify(br.real) === '[false,true]' && br.t9 === true,
+        JSON.stringify(br).slice(0, 2000)]);
 
       // task done's reading of the hooks check's list: whose commits are they?
       const { S: G, env: genv } = studio('foreign', { git: true });
@@ -244,15 +287,40 @@ console.log(JSON.stringify({ active, kept, keptMark: lock1?.kept || null, gone, 
 import { laneAddDirs, toolCommand } from ${u(S, 'harness/agent.mjs')};
 const main = fs.realpathSync.native(process.cwd());
 const copy = { dir: '.lanes/builder-x', branch: 'lane/builder-x' };
-const on = laneAddDirs({ copy, env: {} });
+const on = laneAddDirs({ copy, env: { STUDIO_LANE_ADD_MAIN_DIR: 'on' } });
 const off = laneAddDirs({ copy, env: { STUDIO_LANE_ADD_MAIN_DIR: 'off' } });
-const inMain = laneAddDirs({ copy: null, env: {} });
+const dflt = laneAddDirs({ copy, env: {} });
+const inMain = laneAddDirs({ copy: null, env: { STUDIO_LANE_ADD_MAIN_DIR: 'on' } });
 const argv = toolCommand('claude', { model: 'claude-opus-5-5', prompt: 'x', addDirs: on }).argv;
 const at = argv.indexOf(main);
-console.log(JSON.stringify({ main, on, off, inMain, flag: at > 0 ? argv[at - 1] : null, argvOff: toolCommand('claude', { model: 'm', prompt: 'x', addDirs: off }).argv.includes(main) }));`);
-      await guard('2.86 (d4, B-140): a Claude Code session in a lane copy is started with --add-dir <the main checkout> (besides its studio/ and .studio/), not with STUDIO_LANE_ADD_MAIN_DIR=off, and a session in the main checkout gets no extra folder (fails before this fix: only studio/ and .studio/; headless lane sessions died on "requested permissions to read from <the main checkout>")', () => [
-        r.on?.[0] === r.main && r.flag === '--add-dir' && r.on.length === 3 && !r.off?.includes(r.main) && r.off.length === 2 && Array.isArray(r.inMain) && r.inMain.length === 0 && r.argvOff === false,
+console.log(JSON.stringify({ main, on, off, dflt, inMain, flag: at > 0 ? argv[at - 1] : null, argvOff: toolCommand('claude', { model: 'm', prompt: 'x', addDirs: off }).argv.includes(main) }));`);
+      await guard('2.86 (d4, B-140): with STUDIO_LANE_ADD_MAIN_DIR=on (the studio\'s choice) a Claude Code session in a lane copy is started with --add-dir <the main checkout> besides its studio/ and .studio/; by default (off) and with off its folders are exactly the two as before; a session in the main checkout gets none (fails before this fix: no setting, so a headless lane session could not be let read the main checkout)', () => [
+        r.on?.[0] === r.main && r.flag === '--add-dir' && r.on.length === 3 && !r.off?.includes(r.main) && r.off.length === 2 && JSON.stringify(r.dflt) === JSON.stringify(r.off) && Array.isArray(r.inMain) && r.inMain.length === 0 && r.argvOff === false,
         JSON.stringify(r)]);
+    }
+
+    // ================= 4b. a refresh's successor takes over its own copy =================
+    {
+      const { S, ev, env } = studio('takeover', { git: true });
+      gitIn(S, 'worktree', 'add', '-q', '-b', 'lane/builder-x-1', path.join(S, '.lanes', 'builder-x'));
+      fs.writeFileSync(path.join(S, '.lanes', 'builder-x', 'wip.txt'), 'half done\n');
+      const r = probe(S, env, `import fs from 'node:fs'; import path from 'node:path';
+import { takeOverOwnCopy } from ${u(S, 'harness/agent.mjs')};
+const prev = { dir: path.join('.lanes', 'builder-x'), branch: 'lane/builder-x-1' };
+const rec = { agent: 'builder-x', pid: 4242, identity: { pid: { start: 1 } } };
+const gone = takeOverOwnCopy('builder-x', prev, { sameTask: true, rec, alive: () => false });
+let waits = 0;
+const live = takeOverOwnCopy('builder-x', prev, { sameTask: true, rec, alive: () => true, tries: 3, waitMs: 1, sleep: () => { waits += 1; } });
+let checks = 0;
+const late = takeOverOwnCopy('builder-x', prev, { sameTask: true, rec, alive: () => (checks += 1) < 2, tries: 3, waitMs: 1, sleep: () => {} });
+const other = takeOverOwnCopy('builder-x', prev, { sameTask: false, rec, alive: () => false });
+console.log(JSON.stringify({ gone: gone ? { dir: fs.realpathSync(gone.dir), branch: gone.branch, reused: gone.reused } : null, own: fs.realpathSync(path.join('.lanes', 'builder-x')), wip: fs.existsSync(path.join('.lanes', 'builder-x', 'wip.txt')), live, waits, late: Boolean(late), other }));`);
+      const agentSrc = fs.readFileSync(path.join(dir, 'harness', 'agent.mjs'), 'utf8');
+      const waitEv = events(ev).filter((e) => e.type === 'lane.wait');
+      await guard('2.86 (d4b): a refresh\'s successor takes over its predecessor\'s own copy (.lanes/<name>, same branch, the uncommitted work still there) once the predecessor\'s process is confirmed gone; while it is alive the launcher waits and checks again (and takes it when it goes), and a copy whose session is still alive is not taken (one lane.wait event); a copy of another task is not taken; the refresh relaunch passes it on (fails before this fix: the copy was dropped and a new one refused "still in use")', () => [
+        r.gone && r.gone.dir === r.own && r.gone.branch === 'lane/builder-x-1' && r.gone.reused === true && r.wip === true && r.live === null && r.waits === 2 && r.late === true && r.other === null && waitEv.length === 1
+          && /takeOverOwnCopy\(agent, ownCopy[\s\S]{0,1200}reuseCopy: ownCopy/.test(agentSrc),
+        JSON.stringify({ r, waitEv: waitEv.length })]);
     }
 
     // ================= 5. one task's bad starts do not stop the studio =================

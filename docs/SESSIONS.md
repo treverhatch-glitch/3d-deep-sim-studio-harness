@@ -70,14 +70,17 @@ The studio's files are the memory, not the chat.
   watchdog's park, the same-refusal hold, the no-work park, the crew breaker or the task's session and minute budget
   (`harness/task-budget.mjs`; a refresh that did work still counts its minutes, not a session). Each stays visible: its
   events, and the scorecard's "attempts ended for a harness reason, by kind".
-- **Lane sessions read the main checkout (2.86).** Claude Code sessions in a lane copy get `--add-dir <main checkout>`
-  (besides its `studio/` and `.studio/`, which they had), so a headless session no longer dies on "requested
-  permissions to read from <the main checkout>". `STUDIO_LANE_ADD_MAIN_DIR=off` leaves the main checkout out. What it
-  allows: Claude Code's own file tools (Read, Grep, Glob, and, since lane sessions run with `--permission-mode
-  acceptEdits`, Edit and Write) reach files under the main checkout without a prompt. What it does not: the Bash
-  command list is unchanged, a commit in the main checkout still goes through its pre-commit guard, the hook that
-  refuses studio config edits still refuses them, and protected files still need the owner's approval at `task done`.
-  A session in the main checkout gets no extra folder. A custom command's `{addDirs}` is unchanged (studio/ and .studio/).
+- **A lane session and the main checkout (2.86).** A Claude Code session in a lane copy gets `--add-dir` for the main
+  checkout's `studio/` and `.studio/` only, as before. `STUDIO_LANE_ADD_MAIN_DIR=on` is the studio's choice to also give
+  it `--add-dir <main checkout>` (off by default: lane isolation is a design rule). What `on` opens: Claude Code's own
+  file tools read AND edit files anywhere under the main checkout, other agents' lane copies included, without a
+  prompt (lane sessions run with `--permission-mode acceptEdits`). What still applies: the Bash command list is
+  unchanged, a commit in the main checkout goes through its pre-commit guard, the hook that refuses studio config edits
+  still refuses them, and protected files still need the owner's approval at `task done`. The CLI's help shows no
+  read-only form of `--add-dir`, so there is no read-only value. A custom command's `{addDirs}` is unchanged. Without
+  it, a session that stops on "requested permissions to read from <folder>" is a launch failure (not the task's
+  hand-back); its `agent.session.end` names the folder (`meta.launchFailure.folder`), so a brief that points outside
+  the lane can be fixed.
 - **One task's bad starts don't stop the studio (2.86).** A refresh hand-off is never a bad end for the supervisor's
   halt. Two sessions of the same task ending with the same exit code in a row hold that task (the start back-off,
   doubling from 4 min, one `supervisor.backoff` page); the supervisor halts only when two different tasks' sessions end

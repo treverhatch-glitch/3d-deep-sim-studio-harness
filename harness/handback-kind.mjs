@@ -73,19 +73,22 @@ const newCommits = (o) => (Number(o?.commits) || 0) + (Number(o?.engineCommits) 
  * commit in between? `end` is an agent.session.end with meta.outcome; `events` oldest first (any order is sorted).
  * Returns { task, reason, key, prev } (prev: the earlier agent) or null.
  */
+// 2.86: a refusal for commits not the task's own counts toward nothing, but it still meets the same-refusal hold (as a
+// harness hold), or the task would be relaunched against it in a loop.
+const holdable = (o) => o && (o.counts !== false || o.foreignRefusal);
 export function sameRefusalAgain(end, events = []) {
   const o = end?.meta?.outcome;
-  if (!o?.task || o.done || o.counts === false) return null;
+  if (!o?.task || o.done || !holdable(o)) return null;
   const reason = refusalOf(o.why);
   if (!reason || newCommits(o) > 0) return null;
   const key = refusalKey(reason);
-  const before = events.filter((e) => e !== end && e.type === 'agent.session.end' && e.meta?.outcome?.task === o.task && e.meta.outcome.counts !== false && ts(e) <= ts(end) && !(e.agent === end.agent && e.ts === end.ts)).sort((a, b) => ts(a) - ts(b)).pop();
+  const before = events.filter((e) => e !== end && e.type === 'agent.session.end' && e.meta?.outcome?.task === o.task && holdable(e.meta.outcome) && ts(e) <= ts(end) && !(e.agent === end.agent && e.ts === end.ts)).sort((a, b) => ts(a) - ts(b)).pop();
   if (!before) return null;
   // A done or an unpark between the two ends starts over.
   if (events.some((e) => e.task === o.task && ts(e) > ts(before) && ts(e) < ts(end) && (e.type === 'task.done' || (e.type === 'task.hold' && /unparked/.test(e.msg || ''))))) return null;
   const prevReason = refusalOf(before.meta.outcome.why);
   if (!prevReason || refusalKey(prevReason) !== key) return null;
-  return { task: o.task, reason, key, prev: before.agent };
+  return { task: o.task, reason, key, prev: before.agent, ...(o.foreignRefusal ? { foreign: true } : {}) };
 }
 
 /** The session end that belongs to a hand-back: the same agent's next agent.session.end on that task (within 30 min). */
