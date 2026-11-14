@@ -89,6 +89,10 @@ nothing else at all. The code is not carrying dead weight by reference; its size
   the budget off, as it does for the memory floor, and a new check runs a real supervisor pass under the budget and
   with it off. A studio already under its budget starts no new copy after this upgrade until space is freed
   (`npm run janitor`, `npm run engine -- lanes`) or the setting is lowered.
+- **A check that read line endings two ways (Windows).** The sparse-worktree check made its repo with one line-ending
+  setting and the harness checked it out with the machine's (a stock Windows git converts); the fresh worktree then
+  looked modified to the check. The check's repos now state their own setting. Not a fault in the harness: a studio's
+  agents and the harness use the same git settings.
 
 ## Not tested, and not built
 

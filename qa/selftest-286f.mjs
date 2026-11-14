@@ -59,6 +59,9 @@ export async function selftest286F({ dir, root, run, report, tmpRoot }) {
   const GW = path.join(T, 'gate');
   fs.mkdirSync(R, { recursive: true });
   g(R, 'init', '-q', '-b', 'port/main');
+  // The repo says its own line endings, so the harness's git (the machine's settings: core.autocrlf is true on a stock Windows
+  // git) and this file's git read the same files the same way. Without it a fresh checkout looks modified to the other one.
+  g(R, 'config', 'core.autocrlf', 'false');
   write(R, '.gitignore', 'scratch.tmp\n');
   write(R, 'Game.sln', 'sln\n');
   write(R, 'Art/big/hero.bin', 'x'.repeat(4096));
@@ -77,7 +80,7 @@ export async function selftest286F({ dir, root, run, report, tmpRoot }) {
   fs.writeFileSync(path.join(S, 'studio', 'NEXT.md'), next);
   const done = fs.readFileSync(path.join(S, 'studio', 'DONE.md'), 'utf8').replace('## DONE\n', '## DONE\n- [x] **T-15** [P2] (`engine-porter`) — Port rule 15\n');
   fs.writeFileSync(path.join(S, 'studio', 'DONE.md'), done);
-  g(S, 'init', '-q', '-b', 'main'); g(S, 'add', '-A'); g(S, 'commit', '-qm', 'studio', '--no-verify');
+  g(S, 'init', '-q', '-b', 'main'); g(S, 'config', 'core.autocrlf', 'false'); g(S, 'add', '-A'); g(S, 'commit', '-qm', 'studio', '--no-verify');
   const laneDir = (t) => path.join(S, '.lanes', 'engine', t);
   const files = (d) => { const o = []; const walk = (q, rel) => { for (const e of fs.readdirSync(q, { withFileTypes: true })) { if (e.name === '.git') continue; const r = rel ? `${rel}/${e.name}` : e.name; if (e.isDirectory()) walk(path.join(q, e.name), r); else o.push(r); } }; walk(d, ''); return o.sort(); };
   const launch = (task, role) => probe(`import { engineLaunch, setEngineTask } from ${href('engine-tracks.mjs')};
