@@ -151,5 +151,27 @@ console.log(JSON.stringify({ err, fails, calls, saved: saved && saved.engine, re
       r.err === null && r.fails === 2 && r.saved === 'unity' && r.rec === 'unity', JSON.stringify(r).slice(0, 1500)]);
   }
 
+  // ================= e4. a hold that names a proposal follows it to its task =================
+  {
+    const r = probe(`import fs from 'node:fs';
+const th = await import(${u('harness/task-hold.mjs')});
+const pr = await import(${u('harness/proposed.mjs')});
+fs.mkdirSync('studio', { recursive: true });
+fs.writeFileSync('studio/proposed.json', JSON.stringify({ items: [{ id: 'P-70', title: 'Port the harbour', role: 'builder', priority: 'P2', agent: 'builder-1', meta: {} }] }));
+th.setHold('T-738', { after: ['T-700', 'P-70'] });
+th.setHold('T-739', { after: ['T-701'] });
+const q = (done) => ({ done: done.map((id) => ({ id })), inProgress: [], backlog: [] });
+const before = th.holdReason('T-738', q(['T-700']), Date.now(), th.readHolds());
+const res = pr.promote(['P-70'], { by: 'producer', addTask: () => ({ id: 'T-770' }) });
+const holds = th.readHolds();
+const waiting = th.holdReason('T-738', q(['T-700']), Date.now(), holds);
+const resolved = th.holdReason('T-738', q(['T-700', 'T-770']), Date.now(), holds);
+console.log(JSON.stringify({ ok: res.ok, before, after: holds['T-738']?.after, other: holds['T-739']?.after, waiting, resolved }));`);
+    const ev = events().filter((e) => e.type === 'task.hold' && e.meta?.proposal === 'P-70');
+    await guard('2.86 (e4) block T-738 until P-70, promote P-70 (it becomes T-770): the hold now names T-770 (T-700 stays, other holds are untouched), one task.hold event says so, the hold still waits while T-770 is open and resolves once T-770 is done (fails before this fix: the hold kept "P-70" and never resolved)', () => [
+      r.ok === true && r.after?.join() === 'T-700,T-770' && r.other?.join() === 'T-701' && ev.length === 1 && Boolean(r.waiting) && /T-770/.test(String(r.waiting)) && !r.resolved,
+      JSON.stringify({ r, ev: ev.length })]);
+  }
+
   void events;
 }
