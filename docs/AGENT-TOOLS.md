@@ -64,6 +64,7 @@ with a `[launcher]` line when a Windows tool was started as an npm shim or throu
   **Gemini only** (2.77.0): a start whose model isn't `gemini-…` is refused (it would spend Claude's pool under agy's name);
   `--force-model`, `STUDIO_AGY_ANY_MODEL=on`, or an `agy:<model>` budget-order entry runs it anyway. A non-Gemini model picked by
   rescue, routing, tier-up or reroute gives way to the Gemini default (`model.kept_gemini`).
+  2.86: a pool in `studio/models.json` marked `"anyModel": true` (for example an `agy-opus` pool the owner set up on purpose) is allowed to run its own model on agy, one pool at a time; every other pool is refused as before, and `STUDIO_AGY_ANY_MODEL=on` still allows all.
 - **Usage** (2.77.0): the session end reads Gemini usage objects from agy's output and the model it names (`meta.modelReported`);
   with none it records `meta.usage: "not reported"` and tokens estimated from text length (`meta.tokensEstimated`), never a silent 0.
 - In a lane copy the launcher writes `GEMINI.md` with the shell rules (one plain command per call; no pipes, chains, redirects or

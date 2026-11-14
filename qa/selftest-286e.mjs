@@ -173,5 +173,16 @@ console.log(JSON.stringify({ ok: res.ok, before, after: holds['T-738']?.after, o
       JSON.stringify({ r, ev: ev.length })]);
   }
 
+  // ================= e5. a pool the owner configured carries its own anyModel flag =================
+  {
+    const r = probe(`const { toolForModel } = await import(${u('harness/model-tool.mjs')});
+const models = { pools: { 'agy-opus': { tool: 'agy', model: 'claude-opus-9-9', anyModel: true }, 'agy-sonnet': { tool: 'agy', model: 'claude-sonnet-9-9' }, 'agy-off': { tool: 'agy', model: 'claude-haiku-9-9', anyModel: true, off: true } } };
+const f = (m) => { const x = toolForModel(m, { models, env: {} }); return { tool: x.tool, from: x.from, anyModel: x.anyModel === true }; };
+console.log(JSON.stringify({ flagged: f('claude-opus-9-9'), plain: f('claude-sonnet-9-9'), off: f('claude-haiku-9-9'), shape: f('claude-opus-4-1') }));`);
+    await guard('2.86 (e5) toolForModel names the pool\'s own flag: a studio/models.json pool with "anyModel": true says anyModel for its model (agy running a Claude model, on purpose), a pool without the flag, a switched-off pool and a model no pool names do not, so the launcher refuses those as before (fails before this fix: no pool flag existed, only the studio-wide STUDIO_AGY_ANY_MODEL)', () => [
+      r.flagged?.tool === 'agy' && r.flagged.from === 'pool' && r.flagged.anyModel === true && r.plain?.tool === 'agy' && r.plain.anyModel === false && r.off?.anyModel === false && r.shape?.anyModel === false,
+      JSON.stringify(r)]);
+  }
+
   void events;
 }
