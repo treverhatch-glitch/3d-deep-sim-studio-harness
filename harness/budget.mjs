@@ -423,7 +423,6 @@ export function budgetStatus(now = Date.now(), events = readRecentEvents(50000))
 
 // ---- ccusage (opt-in plugin): Claude Code's own usage log, kept beside the harness's count ----
 export const CCUSAGE_FILE = path.join(STUDIO_STATE_DIR, 'ccusage.json');
-export const readCcusage = () => readJson(CCUSAGE_FILE, null);
 /** Runs ccusage (plugin on only) and keeps its daily totals per model. */
 export function importCcusage({ run = spawnSync, now = Date.now() } = {}) {
   let plugin = null;

@@ -13,7 +13,7 @@ import { spawnSync } from 'node:child_process';
 // 2.86: the number of DEAD exports left in the repo. Lower it when you remove more; the check below fails when the
 // tool finds more than this, so a new export that nothing uses cannot be added unnoticed. Print the list with
 // `node scripts/unused-exports.mjs --list DEAD`.
-export const DEAD_EXPORTS_ALLOWED = 8;
+export const DEAD_EXPORTS_ALLOWED = 2;
 
 export async function selftest286G({ dir, report, tmpRoot }) {
   const write = (b, rel, text) => { fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true }); fs.writeFileSync(path.join(b, rel), text); };
@@ -35,6 +35,7 @@ export async function selftest286G({ dir, report, tmpRoot }) {
     `export function docFn(a) ${body(2)}`,
     `export function testFn(a) ${body(3)}`,
     `export function hookFn(a) ${body(4)}`,
+    `export function shellHookFn(a) ${body(6)}`,
     `export const innerConst = 5;`,
     `export function usesInner() { return innerConst; }`,
     `// a comment about commentedOnly(), which is not an export`,
@@ -51,6 +52,8 @@ export async function selftest286G({ dir, report, tmpRoot }) {
   write(R, 'docs/A.md', '# A\nCall `docFn` and see harness/docnamed.mjs.\n');
   write(R, 'qa/t.mjs', `import { testFn } from '../harness/a.mjs';\nimport { onlyTests } from '../harness/tested.mjs';\ntestFn(onlyTests);\n`);
   write(R, '.claude/hooks/h.mjs', `import { hookFn } from '../../harness/a.mjs';\nhookFn();\n`);
+  // A git hook: a shell script with no file extension that imports a harness function (as scripts/hooks/commit-msg does).
+  write(R, 'scripts/hooks/commit-msg', `#!/bin/sh\nnode -e "import('./harness/a.mjs').then(({ shellHookFn }) => shellHookFn())"\n`);
   write(R, 'package.json', JSON.stringify({ scripts: { b: 'node harness/b.mjs' } }));
 
   await guard('tool: a dead export is found; one a doc, a hook or a dynamic import names is USED and one only a test names is TEST-ONLY; fails before this change: no tool', async () => {
@@ -60,6 +63,12 @@ export async function selftest286G({ dir, report, tmpRoot }) {
     const want = { deadFn: 'DEAD', docFn: 'USED', testFn: 'TEST-ONLY', hookFn: 'USED', viaDynamic: 'USED', listedDead: 'DEAD' };
     return [JSON.stringify(got) === JSON.stringify(want), JSON.stringify({ got, raw: rep._raw })];
   });
+  await guard('tool: a function only a hook script with no file extension imports is USED (2.86: a list of files by extension called the commit-msg hook\'s own function dead, and removing it would have broken every commit)', async () => {
+    const rep = json(R);
+    const e = (rep.exports || []).find((x) => x.name === 'shellHookFn');
+    return [e?.class === 'USED', JSON.stringify({ e, raw: rep._raw })];
+  });
+
   await guard('tool: a name only a test uses is TEST-ONLY, and the list prints the dead item with its file, line and size', async () => {
     const rep = json(R);
     const t = (rep.exports || []).find((e) => e.name === 'onlyTests');

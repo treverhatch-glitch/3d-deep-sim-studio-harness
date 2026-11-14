@@ -32,7 +32,7 @@
  * status "not-run" (exit 3). A red or error exit whose output shows an infrastructure abort (harness/engine-proof.mjs
  * infraAbort) is also "not-run", never red; a compile error or failing test keeps it red. The train retries it later.
  *
- * Any engine: runUnityGate({ engine }) (runEngineLand is the same): settings studio/game.json engines.<engine>, files
+ * Any engine: runUnityGate({ engine }): settings studio/game.json engines.<engine>, files
  * .studio/gates/<engine>-last.json and out/<engine>.log; job kind, RAM and floor from harness/engine-tracks.mjs. Run
  * lengths go to .studio/engine/durations.json. The command gets STUDIO_ENGINE_TUNE (JSON), STUDIO_ENGINE_TUNE_FILE and
  * STUDIO_ENGINE_FLAGS. A task's engine and branch come from .studio/engine/tasks.json first.
@@ -435,9 +435,6 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
     return full;
   }
 }
-
-/** The same gate for any engine target. */
-export const runEngineLand = (opts = {}) => runUnityGate(opts);
 
 /** One line for people: "PASS unity: ..." etc. */
 export const unityLine = (res) => `[unity-gate] ${res.status === 'skipped' ? 'SKIP' : res.status === 'not-run' ? 'NOT RUN' : res.status === 'killed' ? 'KILLED' : res.status.toUpperCase()} ${res.engine || 'unity'}: ${res.why}${res.ms && res.status !== 'skipped' ? ` (${Math.round(res.ms / 1000)} s)` : ''}`;

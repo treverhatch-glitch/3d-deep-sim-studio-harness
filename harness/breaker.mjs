@@ -97,7 +97,3 @@ export function unblockTask(taskId, by = 'human', note = '') {
   return { ok: true, message: `${taskId} can start again${h.parked.breaker ? '; the breaker count starts over' : ''}.` };
 }
 
-/** Open breaker cards for the War Room: one per tripped task. */
-export function breakerCards(holds = readHolds()) {
-  return Object.entries(holds).filter(([, h]) => h.parked?.breaker).map(([id, h]) => ({ ts: h.parked.at, agent: 'breaker', task: id, msg: `Parked by the circuit breaker: handed back twice for "${h.parked.reason}". Other work keeps going.`, action: { type: 'unblock', task: id, label: 'Unblock' } }));
-}

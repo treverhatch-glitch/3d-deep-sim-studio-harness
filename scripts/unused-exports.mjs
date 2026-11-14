@@ -29,9 +29,6 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.lanes', '.studio', '.worktrees']);
-const CODE_EXT = /\.(?:mjs|js|cjs|sh|cmd|ps1|json|ts)$/;
-const CODE_DIRS = ['harness', 'scripts', 'hub', 'tools', 'qa', '.claude', 'game', 'cartridges', 'web', 'engine', 'skills'];
-const DOC_DIRS = ['docs', 'studio'];
 const MIN_DUP_LINES = 6;
 
 const fwd = (p) => p.split(path.sep).join('/');
@@ -48,17 +45,18 @@ function walk(root, rel, accept, out) {
   return out;
 }
 
-/** Every code file and doc the rule counts as a possible user, as repo-relative forward-slash paths. */
+/**
+ * Every file the rule counts as a possible user, as repo-relative forward-slash paths: every file of the checkout that
+ * is not media or a binary by its extension and is under 2 MB, whatever its extension or none (2.86: the commit-msg
+ * hook, a shell script with no extension, imports a function nothing else names; a list by extension called it dead).
+ */
+const NOT_TEXT = /\.(?:png|jpe?g|gif|webp|bmp|ico|icns|svgz|glb|gltf|bin|fbx|blend|woff2?|ttf|otf|eot|mp3|wav|ogg|flac|mp4|webm|mov|zip|gz|tgz|7z|pdf|wasm|dll|exe|so|dylib|pck|uid|lock)$/i;
 export function listFiles(root) {
-  const out = new Set();
-  for (const d of CODE_DIRS) for (const f of walk(root, d, (r) => CODE_EXT.test(r) || (d === '.claude' && r.endsWith('.md')) || (d === 'skills' && r.endsWith('.md')), [])) out.add(f);
-  for (const d of DOC_DIRS) for (const f of walk(root, d, (r) => r.endsWith('.md'), [])) out.add(f);
-  try {
-    for (const e of fs.readdirSync(root, { withFileTypes: true })) {
-      if (e.isFile() && (/^[^/]*\.(?:mjs|js)$/.test(e.name) || /^AGENTS.*\.md$/.test(e.name) || e.name === 'package.json')) out.add(e.name);
-    }
-  } catch { /* no root */ }
-  return [...out].sort();
+  const out = walk(root, '', (r) => {
+    if (NOT_TEXT.test(r)) return false;
+    try { return fs.statSync(path.join(root, r)).size <= 2 * 1024 * 1024; } catch { return false; }
+  }, []);
+  return out.sort();
 }
 
 /**

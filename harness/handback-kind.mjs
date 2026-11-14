@@ -174,7 +174,7 @@ export function handBackKind(e, events = [], { limit = null } = {}) {
   if (end && sameRefusalAgain(end, events)) return 'refused';
   return 'real';
 }
-export const realHandBack = (e, events = [], opts = {}) => handBackKind(e, events, opts) === 'real';
+
 
 /** 2.85: a session end that is a harness refusal the session could not act on (the same refusal twice): not "no work" for the crew breaker. */
 export const sessionEndRefusedAgain = (end, events = []) => Boolean(sameRefusalAgain(end, events));
