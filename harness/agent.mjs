@@ -2110,7 +2110,7 @@ export function launchEngineLane({ task, agent, role = null }) {
     if (!r) return null;
     // No worktree means no code access: the launch is refused (runAgent), it never runs blind.
     if (r.error) { emitEvent({ type: 'engine.lane', agent, task, status: 'warn', msg: `${agent}: no engine worktree for ${task}: ${r.error}`.slice(0, 400) }); return { note: `Your task is an engine pass, but its worktree couldn't be made: ${r.error}. Fix that first, or hand it back with a note.`, refuse: r.error }; }
-    emitEvent({ type: 'engine.lane', agent, task, msg: `${agent}: ${task} works in ${r.dir.split(path.sep).join('/')} on ${r.branch}${r.created ? ' (new)' : ''}`.slice(0, 400), meta: { dir: r.dir, branch: r.branch, repo: r.repo } });
+    emitEvent({ type: 'engine.lane', agent, task, msg: `${agent}: ${task} works in ${r.dir.split(path.sep).join('/')} on ${r.branch}${r.created ? ' (new)' : ''}${r.sparse?.length ? ` (sparse: ${r.sparse.join(', ')})` : ''}`.slice(0, 400), meta: { dir: r.dir, branch: r.branch, repo: r.repo, ...(r.sparse?.length ? { sparse: r.sparse } : {}) } });
     r.note = `${r.note || ''} You may run git -C ${r.dir.split(path.sep).join('/')} add / commit / status / diff / log there (not push, not checkout of another branch).`.trim();
     // The engine's target branch is merged into the pass worktree first; a conflict goes in the brief and an event.
     try {

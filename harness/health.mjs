@@ -219,7 +219,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       gs.text = renderGateStats(gs);
     } catch {}
   }
-  const text = renderHealth(h) + (n ? renderNeeds(n) : '') + (gs ? `\n${gs.text}` : '');
+  // 2.86 (f): a low disk in the last 24 h (machine.disk_low names the biggest users) is a line here too.
+  let diskLine = '';
+  try { diskLine = (await import('./machine.mjs')).diskDigestLine(events); } catch { diskLine = ''; }
+  const text = renderHealth(h) + (diskLine ? `${diskLine}\n` : '') + (n ? renderNeeds(n) : '') + (gs ? `\n${gs.text}` : '');
   if (a.includes('--json')) console.log(JSON.stringify(n ? { ...h, ...n, ...(gs ? { gateStats: { ...gs, text: undefined } } : {}) } : h));
   else process.stdout.write(text);
   const dir = flag('--write') || (a.includes('--write') ? process.env.STUDIO_RESULTS_DIR : null);
