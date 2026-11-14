@@ -360,6 +360,46 @@ export function diskBudget({ root = MACHINE_ROOT, env = process.env, statfs = (p
   return { low, freeGb, totalGb, minGb, why: low ? `disk low: ${fmt(freeGb)} GB free (under ${fmt(minGb)} GB, STUDIO_DISK_MIN_FREE_GB)` : '' };
 }
 
+// 2.86 (f): the volumes the studio writes to, a warning level and a stop level. A crew's disk fell from 133 to 78 GB in a
+// day of engine worktrees with nothing saying so. STUDIO_DISK_WARN_GB (60): one machine.disk_low a day naming the biggest
+// users; under the disk budget (STUDIO_DISK_MIN_FREE_GB) the supervisor starts no new engine worktree and no new lane copy.
+export const diskWarnGb = (env = process.env) => (isOff(env.STUDIO_DISK_WARN_GB) ? 0 : numOr(env.STUDIO_DISK_WARN_GB, 60));
+// The stop level is the disk budget itself (STUDIO_DISK_MIN_FREE_GB, default max(20, 5% of the volume)): one setting, two uses.
+export const diskMinGb = (env = process.env, totalGb = null) => (isOff(env.STUDIO_DISK_MIN_FREE_GB) ? 0 : numOr(env.STUDIO_DISK_MIN_FREE_GB, Math.max(20, Number.isFinite(totalGb) ? r1(totalGb * 0.05) : 20)));
+const nearestDir = (p) => { let d = path.resolve(p); while (!fs.existsSync(d) && path.dirname(d) !== d) d = path.dirname(d); return d; };
+const devOf = (p) => { try { return fs.statSync(p).dev; } catch { return null; } };
+
+/**
+ * One reading per volume: the studio's, and the engine lanes' (<root>/.lanes/engine, or .lanes) when that is another
+ * device (a link to another drive). `dirs` replaces the second. [{ path, freeGb, totalGb }]; a volume that can't be read is left out.
+ */
+export function diskVolumes({ root = MACHINE_ROOT, statfs = (p) => fs.statfsSync(p), dirs = null } = {}) {
+  const cands = [root, ...(dirs || [path.join(root, '.lanes', 'engine')])].map(nearestDir);
+  const out = []; const seen = new Set();
+  for (const p of cands) {
+    const dev = devOf(p);
+    const key = dev !== null ? `dev:${dev}` : p;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try { const s = statfs(p); out.push({ path: p, freeGb: r1((Number(s.bavail) * Number(s.bsize)) / GB), totalGb: r1((Number(s.blocks) * Number(s.bsize)) / GB) }); } catch { /* not read */ }
+  }
+  return out;
+}
+
+/**
+ * Under STUDIO_DISK_MIN_FREE_GB on any of the volumes: { stop: true, why, freeGb, path, minGb }. One statfs per volume.
+ * STUDIO_MACHINE_SCAN=off or STUDIO_DISK_MIN_FREE_GB=0/off: never stops.
+ */
+export function diskStop({ root = MACHINE_ROOT, env = process.env, statfs, dirs = null } = {}) {
+  if (scanOff(env) || !(diskMinGb(env) > 0)) return { stop: false, minGb: diskMinGb(env) };
+  let minGb = diskMinGb(env);
+  for (const v of diskVolumes({ root, dirs, ...(statfs ? { statfs } : {}) })) {
+    minGb = diskMinGb(env, v.totalGb);
+    if (Number.isFinite(v.freeGb) && v.freeGb < minGb) return { stop: true, freeGb: v.freeGb, path: v.path, minGb, why: `disk low: ${fmt(v.freeGb)} GB free on ${v.path.split(path.sep).join('/')} (under ${fmt(minGb)} GB, STUDIO_DISK_MIN_FREE_GB): no new engine worktree or lane copy is started (a harness reason, not the task's; npm run engine -- lanes, npm run janitor)` };
+  }
+  return { stop: false, minGb };
+}
+
 /** What the temp-file janitor (harness/janitor.mjs, when present) says it can free, in GB, or null. */
 export async function janitorFreeableGb(root = MACHINE_ROOT, hook = null) {
   try {
@@ -389,7 +429,7 @@ export async function diskWarning({ root = MACHINE_ROOT, env = process.env, stat
 /** The digest's line: the last machine.disk_low event in 24 h ('' when none). */
 export function diskDigestLine(events, now = Date.now()) {
   const e = (events || []).filter((x) => x.type === 'machine.disk_low' && (Date.parse(x.ts) || 0) >= now - 86400000).pop();
-  return e ? `Disk low: ${e.msg || 'under STUDIO_DISK_MIN_FREE_GB'} (npm run machine).` : '';
+  return e ? `Disk low: ${e.msg || 'under STUDIO_DISK_MIN_FREE_GB'} (npm run machine; npm run engine -- lanes).` : '';
 }
 
 // ---- the resource monitor ------------------------------------------------------------------------------------------
@@ -419,7 +459,7 @@ export function appendHistory(root, sample, env = process.env) {
 /**
  * The supervisor's resource monitor, called every pass: when the last scan is older than STUDIO_MACHINE_SAMPLE_S, scan,
  * write machine.json, append the history and emit machine.sample; when the disk is under its budget, a machine.disk_low
- * event (at most every 6 h). Returns { sampled, profile, disk } or null when off. emit defaults to event.mjs emitEvent.
+ * event (2.86: at most once a day, under the higher of this budget and STUDIO_DISK_WARN_GB). Returns { sampled, profile, disk } or null when off. emit defaults to event.mjs emitEvent.
  */
 export async function sampleMachine({ root = MACHINE_ROOT, env = process.env, now = Date.now(), emit = null, ...scanOpts } = {}) {
   if (scanOff(env)) return null;
@@ -432,11 +472,27 @@ export async function sampleMachine({ root = MACHINE_ROOT, env = process.env, no
   const send = emit || (await import('./event.mjs')).emitEvent;
   try { (await import('./telemetry.mjs')).emitSampled({ type: 'machine.sample', agent: 'supervisor', msg: machineLine(p), meta: s }, 'sample', { now, emit: send, env }); } catch {}
   const disk = diskBudget({ root, env, profile: p });
-  if (disk.low) {
+  // 2.86 (f): the warning level is the higher of STUDIO_DISK_WARN_GB (60) and the budget above, on the studio's volume and
+  // on the engine lanes' (when that is another one); at most one machine.disk_low a day, naming the biggest users the
+  // harness knows (engine worktrees, lane copies, saved builds: estimates, cached for an hour, harness/engine-clean.mjs).
+  const warnGb = diskWarnGb(env);
+  const vols = [{ path: root, freeGb: disk.freeGb, totalGb: disk.totalGb }, ...diskVolumes({ root, ...(scanOpts.statfs ? { statfs: scanOpts.statfs } : {}) }).filter((v) => v.path !== nearestDir(root))];
+  const low = vols.map((v) => {
+    const byBudget = disk.minGb > 0 && Number.isFinite(v.freeGb) && v.freeGb < disk.minGb && disk.minGb >= warnGb;
+    const byWarn = warnGb > 0 && Number.isFinite(v.freeGb) && v.freeGb < warnGb;
+    if (!byBudget && !byWarn) return null;
+    const lim = byBudget ? disk.minGb : warnGb;
+    const set = byBudget ? 'STUDIO_DISK_MIN_FREE_GB' : 'STUDIO_DISK_WARN_GB';
+    return { ...v, lim, why: `disk low: ${fmt(v.freeGb)} GB free${v.path === root ? '' : ` on ${v.path.split(path.sep).join('/')}`} (under ${fmt(lim)} GB, ${set})` };
+  }).filter(Boolean);
+  if (low.length) {
     const st = readJson(diskStateFile(root)) || {};
-    if (!(now - (Date.parse(st.lowAt || '') || 0) < 6 * 3600000)) {
+    if (!(now - (Date.parse(st.lowAt || '') || 0) < 24 * 3600000)) {
       const can = await janitorFreeableGb(root, scanOpts.janitor || null);
-      try { send({ type: 'machine.disk_low', agent: 'supervisor', to: 'producer', msg: `${disk.why}${can !== null ? `; the janitor can free ${fmt(can)} GB` : ''}`, meta: { freeGb: disk.freeGb, minGb: disk.minGb, janitorGb: can } }); } catch {}
+      let users = scanOpts.diskUsers || null;
+      if (!users) { try { users = await (await import('./engine-clean.mjs')).diskUsers({ root, env, now }); } catch { users = null; } }
+      const usersLine = users?.line ? `; biggest: ${users.line}` : '';
+      try { send({ type: 'machine.disk_low', agent: 'supervisor', to: 'producer', msg: `${low.map((v) => v.why).join('; ')}${usersLine}${can !== null ? `; the janitor can free ${fmt(can)} GB` : ''}`.slice(0, 900), meta: { freeGb: low[0].freeGb, minGb: low[0].lim, warnGb, volumes: low.map((v) => ({ path: v.path.split(path.sep).join('/'), freeGb: v.freeGb })), janitorGb: can, ...(users?.items ? { users: users.items } : {}) } }); } catch {}
       try { writeAtomic(diskStateFile(root), `${JSON.stringify({ lowAt: new Date(now).toISOString() })}\n`); } catch {}
     }
   }

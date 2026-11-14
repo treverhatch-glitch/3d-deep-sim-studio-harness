@@ -486,6 +486,9 @@ export async function supervise(opts, state, now = Date.now()) {
     // (360) minutes, in a detached child (harness/lane-disk.mjs).
   if (!opts.watcher) {
     try { await (await import('./lane-disk.mjs')).lanesPass({ now, inline: Boolean(opts.deps?.lanesInline) }); } catch { /* a report, never a crash */ }
+    // 2.86 (f): engine worktrees whose branch landed or whose task is done or dropped go (harness/engine-clean.mjs laneRemoval),
+    // every 30 minutes in a detached child.
+    try { (await import('./engine-clean.mjs')).engineLanesPass({ now }); } catch { /* a cleanup, never a crash */ }
   }
   // A short planning session (producer, director, line-producer) doesn't take a builder slot: it is left out of the count the pace's
   // cap is held against. It still obeys its own per-role cap and the RAM limit, which counts every session.
@@ -598,6 +601,17 @@ export async function supervise(opts, state, now = Date.now()) {
   }
   const started = [];
   let ram = null;
+  let disk = null;
+  // 2.86 (f): would starting this group make a new lane copy or a new engine worktree? (the disk stop above the start)
+  const needsNewCopy = async (g) => {
+    try {
+      const id = g.tasks[0]?.id;
+      const et = await import('./engine-tracks.mjs');
+      const wt = await import('./worktree.mjs');
+      if ((et.engineTask(id) || et.isEngineRole(g.role)) && !fs.existsSync(path.join(wt.mainRoot(), '.lanes', 'engine', String(id)))) return true;
+      return !process.env.STUDIO_MAIN_ROOT && wt.worktreeSupport().ok && (wt.laneWantsCopy(g.lane) || wt.lanelessWantsCopy({ role: g.role, lane: g.lane, task: id }));
+    } catch { return false; }
+  };
   // Most urgent first. With STUDIO_ATTEMPTS=record, a task whose last failed hand-back met a blocker that has not changed (same reason,
   // main's tip, what it waits for) goes after every other eligible one: last in its group, its group last when it is all such.
   const doneIds = new Set((q.done || []).map((x) => x.id));
@@ -709,6 +723,13 @@ export async function supervise(opts, state, now = Date.now()) {
       why.push(ram.why);
       ramNote(ram, now);
       break;
+    }
+    // 2.86 (f): under STUDIO_DISK_MIN_FREE_GB free, no start that would make a new lane copy or a new engine worktree. A harness
+    // reason: no start refusal is noted against the task, and the line says why.
+    disk ||= (await import('./machine.mjs')).diskStop({});
+    if (disk.stop && await needsNewCopy(g)) {
+      why.push(`${g.tasks[0]?.id}: ${disk.why}`);
+      continue;
     }
     const agent = kind ? (kind === 'api' ? poolFree.shift() : nextAgentName(g.role, opts.prefix || 's')) : !vx && poolMode ? poolMode.free.shift() : nextAgentName(g.role, opts.prefix || 's');
     if (!agent) break;

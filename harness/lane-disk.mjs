@@ -77,7 +77,9 @@ function trackedSizes(root) {
 export function laneDiskReport({ root = studioMain(), env = process.env, top = 10, now = Date.now(), statfs } = {}) {
   const dir = path.join(root, '.lanes');
   let names = [];
-  try { names = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); } catch {}
+  // 2.86 (f): .lanes/engine holds the engine worktrees (a crew's: 140 GB); walking them every pass is what the estimate in
+  // harness/engine-clean.mjs diskUsers avoids, and they are not lane copies.
+  try { names = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory() && e.name !== 'engine').map((e) => e.name); } catch {}
   const lanes = names.map((n) => {
     const d = path.join(dir, n);
     let sparse = false;

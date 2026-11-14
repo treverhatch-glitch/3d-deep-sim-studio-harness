@@ -29,6 +29,7 @@ import { mainRoot } from './worktree.mjs';
 import { learnedNeed } from './engine-ram.mjs';
 import { readJson, writeAtomic } from './fsafe.mjs';
 import { splitPhantom, phantomNote } from './eol-only.mjs';
+import { addEngineWorktree, sparsePathsFor, sparseState, sparseLine, outsideSparse, widenHint, widenEngineWorktree, reapplySparse } from './engine-worktree.mjs';
 
 // 2.86: fsafe's writeAtomic retries a rename Windows refuses for a moment (EPERM/EBUSY); a bare rename killed a session's launch (setEngineTask).
 const writeJson = (f, v) => { writeAtomic(f, `${JSON.stringify(v, null, 2)}\n`); };
@@ -467,10 +468,11 @@ export function engineLaunch({ task, agent = null, role = null, root = mainRoot(
   const dir = path.join(root, '.lanes', 'engine', String(task));
   const g = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8', windowsHide: true });
   const has = g('rev-parse', '--verify', '--quiet', `refs/heads/${branch}`).status === 0;
-  const note = (created) => `Your ${t.label} work is in its own repo: your worktree is ${dir.split(path.sep).join('/')} on branch ${branch}${created ? ` (new, from ${target || 'its HEAD'})` : ''}. Edit and commit there (no editor run needed; the land run does it). Then: npm run task -- done ${task} --agent ${agent || '<you>'} --train${rec.visual?.required ? ` (first the visual check: npm run visual -- status ${task})` : ''}.`;
+  // 2.86 (f): a sparse worktree says so in the brief, in one line, with the folders it has.
+  const note = (created, sp = null) => `Your ${t.label} work is in its own repo: your worktree is ${dir.split(path.sep).join('/')} on branch ${branch}${created ? ` (new, from ${target || 'its HEAD'})` : ''}. Edit and commit there (no editor run needed; the land run does it). Then: npm run task -- done ${task} --agent ${agent || '<you>'} --train${rec.visual?.required ? ` (first the visual check: npm run visual -- status ${task})` : ''}.${sp?.length ? ` ${sparseLine(task, sp)}` : ''}`;
   if (fs.existsSync(path.join(dir, '.git'))) {
     const cur = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: dir, encoding: 'utf8', windowsHide: true }).stdout.trim();
-    if (cur === branch) { if (!rec.branch && !dryRun) { try { setEngineTask(task, { engine: rec.engine, ...(rec.track ? { track: rec.track } : {}), branch }, { root }); } catch { /* the record is a help */ } } return { dir, branch, repo, created: false, note: note(false) }; }
+    if (cur === branch) { if (!rec.branch && !dryRun) { try { setEngineTask(task, { engine: rec.engine, ...(rec.track ? { track: rec.track } : {}), branch }, { root }); } catch { /* the record is a help */ } } const ss = sparseState(dir); return { dir, branch, repo, created: false, sparse: ss.sparse ? ss.paths : null, note: note(false, ss.sparse ? ss.paths : null) }; }
     return { error: `${dir} is a worktree on ${cur || 'a detached HEAD'}, not ${branch}: remove it (git -C "${repo}" worktree remove "${dir}") and start again` };
   }
   // A branch checked out in another worktree can't be checked out twice. Clean there: the pass works in that worktree.
@@ -495,15 +497,19 @@ export function engineLaunch({ task, agent = null, role = null, root = mainRoot(
       return { error: `the task's ${t.label} branch ${branch} is checked out in ${shown}${dirty ? ` with uncommitted work (${dirty.slice(0, 3).map((l) => l.slice(3)).join(', ')}${dirty.length > 3 ? ` +${dirty.length - 3}` : ''})` : ' (its state could not be read)'}, and a branch can't be checked out twice: commit or stash that work there (or switch that folder to another branch: git -C "${shown}" switch <other>), then start the pass again`, busy: shown };
     }
   }
-  if (dryRun) return { dir, branch, repo, created: !has, dry: true, note: note(!has) };
+  // 2.86 (f): a role listed in engines.<x>.sparse.roles gets a sparse worktree (harness/engine-worktree.mjs), unless the
+  // task was widened before (`npm run engine -- lane <ID> --full` records full: true).
+  const sparse = rec.full ? null : sparsePathsFor(t.cfg, role);
+  if (dryRun) return { dir, branch, repo, created: !has, dry: true, sparse, note: note(!has, sparse) };
   fs.mkdirSync(path.dirname(dir), { recursive: true });
   g('worktree', 'prune');
   const base = target && g('rev-parse', '--verify', '--quiet', `refs/heads/${target}`).status === 0 ? target : 'HEAD';
-  const add = has ? g('worktree', 'add', dir, branch) : g('worktree', 'add', '-b', branch, dir, base);
-  if (add.status !== 0) return { error: `git worktree add in ${repo} failed: ${String(add.stderr || '').trim().split('\n').pop()} (a branch checked out in another folder can't be checked out twice: work there, or move it)` };
+  const add = addEngineWorktree({ repo, dir, branch, base, create: !has, sparse });
+  if (add.error) return { error: `git worktree add in ${repo} failed: ${add.error} (a branch checked out in another folder can't be checked out twice: work there, or move it)` };
+  if (add.fallback) { try { emitEvent({ type: 'engine.lane', agent: agent || 'launcher', task, status: 'warn', msg: `${task}: ${add.fallback}`.slice(0, 400) }); } catch { /* a note */ } }
   // The whole record (engine, track, branch), so task done finds the branch without --branch.
   if (!rec.branch) setEngineTask(task, { engine: rec.engine, ...(rec.track ? { track: rec.track } : {}), branch }, { root });
-  return { dir, branch, repo, created: !has, note: note(!has) };
+  return { dir, branch, repo, created: !has, sparse: add.sparse, note: note(!has, add.sparse) };
 }
 
 /**
@@ -613,6 +619,7 @@ export async function engineTargetMerge(task, { mode = 'merge', engine = null, r
       if (!merging()) { dropState(); return { ok: true, code: 0, step: 'none', lines: [`No merge is in progress in ${shown}: nothing to abort.`] }; }
       const a = g('merge', '--abort');
       if (a.status !== 0) return fail(`git merge --abort failed in ${shown}: ${String(a.stderr || a.stdout).trim().split('\n').pop()}`);
+      reapplySparse(dir); // 2.86 (f): files outside a sparse worktree's folders that the merge wrote go again
       dropState();
       ev('aborted', `the merge of ${target} into ${branch} was aborted; the worktree is as it was before it`);
       return { ok: true, code: 0, step: 'aborted', lines: [`Aborted: ${shown} is back where it was before the merge of ${target}.`] };
@@ -662,8 +669,34 @@ export async function engineTargetMerge(task, { mode = 'merge', engine = null, r
     }
     try { fs.mkdirSync(path.dirname(state), { recursive: true }); fs.writeFileSync(state, `${JSON.stringify({ task, target, dir: shown, files, at: new Date().toISOString() }, null, 2)}\n`); } catch { /* --continue still reads git's unmerged list */ }
     ev('conflict', `merging ${target} into ${branch} left ${files.length} conflicted file(s): ${files.slice(0, 8).join(', ')}`, { files: files.slice(0, 40) });
-    return { ok: false, code: 2, step: 'conflict', files, lines: [`Merging ${target} into ${branch} left ${files.length} conflicted file(s) in ${shown}; the merge stays open there for you to resolve:`, ...fileLines(files), BOTH_SIDES, `To put the worktree back instead: ${targetMergeCommand(task)} --abort.`] };
+    // 2.86 (f): a sparse worktree: git wrote the conflicted files outside its folders into it; say so, and how to widen it.
+    const ss = sparseState(dir);
+    const out = ss.sparse ? outsideSparse(files, ss.paths) : [];
+    const wide = out.length ? [`${out.length} of these are outside this sparse worktree's folders (${ss.paths.join(', ')}): ${out.slice(0, 8).join(', ')}. Git wrote them into the worktree to resolve here; if you need the rest of the project around them, widen it: ${widenHint(task)}.`] : [];
+    return { ok: false, code: 2, step: 'conflict', files, ...(out.length ? { outside: out } : {}), lines: [`Merging ${target} into ${branch} left ${files.length} conflicted file(s) in ${shown}; the merge stays open there for you to resolve:`, ...fileLines(files), ...wide, BOTH_SIDES, `To put the worktree back instead: ${targetMergeCommand(task)} --abort.`] };
   } catch (e) { return fail(`Not merged: ${e.message}`); }
+}
+
+/**
+ * 2.86 (f): `npm run engine -- lane <ID> --full`: the task's sparse engine worktree becomes full (git sparse-checkout
+ * disable), and the task's record keeps full: true so a worktree made again for it is full too. Who may: as for merge.
+ * { ok, code, lines }. Never throws.
+ */
+export async function widenEngineLane(task, { engine = null, root = mainRoot(), env = process.env } = {}) {
+  const fail = (line) => ({ ok: false, code: 1, lines: [line] });
+  try {
+    if (!task || !/^[A-Za-z]+-\d+$/.test(String(task))) return fail('Usage: npm run engine -- lane <TASK_ID> --full');
+    const who = await targetMergeRefusal(task, { env, root });
+    if (who) return fail(`Not widened: ${who}.`);
+    const w = engineTaskDir(task, { root, engine });
+    if (w.error) return fail(`Not widened: ${w.error}.`);
+    const shown = w.dir.split(path.sep).join('/');
+    const r = widenEngineWorktree(w.dir);
+    if (r.error) return fail(`Not widened: ${shown}: ${r.error}.`);
+    setEngineTask(task, { engine: w.rec.engine, ...(w.rec.track ? { track: w.rec.track } : {}), ...(w.rec.branch ? {} : { branch: w.branch }), full: true }, { root });
+    if (!r.already) { try { emitEvent({ type: 'engine.lane', agent: String(env.STUDIO_AGENT || env.STUDIO_LOCK_OWNER || '').trim() || 'person', task, msg: `${task}: its engine worktree ${shown} was widened to full (npm run engine -- lane ${task} --full)`.slice(0, 400), meta: { dir: shown, full: true } }); } catch { /* a record */ } }
+    return { ok: true, code: 0, lines: [r.already ? `${shown} is already a full worktree.` : `${shown} is now a full worktree (every file of ${w.branch} is checked out).`] };
+  } catch (e) { return fail(`Not widened: ${e.message}`); }
 }
 
 /**
@@ -685,8 +718,9 @@ export function syncEngineTarget({ task, dir, repo = null, root = mainRoot() } =
   if (m.status === 0) return { merged: true, upToDate: false, conflicts: [], note: `${target} was merged into your worktree before this session (a merge commit), so you start with its newer changes.` };
   const conflicts = g('diff', '--name-only', '--diff-filter=U').stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
   g('merge', '--abort');
+  reapplySparse(dir);
   const files = conflicts.slice(0, 12).join(', ') || 'none named';
-  return { merged: false, upToDate: false, conflicts, note: `Merging ${target} into your worktree failed${conflicts.length ? ` with conflicts in ${files}${conflicts.length > 12 ? ` +${conflicts.length - 12}` : ''}` : `: ${String(m.stderr || m.stdout || '').trim().split('\n').pop().slice(0, 160)}`}; the merge was aborted and your worktree is as it was. Start by running ${targetMergeCommand(task)}: it merges ${target} into your worktree and leaves ${conflicts.length ? 'those files' : 'what it reports'} for you to resolve (then git add each, then ${targetMergeCommand(task)} --continue). ${BOTH_SIDES}` };
+  return { merged: false, upToDate: false, conflicts, note: `Merging ${target} into your worktree failed${conflicts.length ? ` with conflicts in ${files}${conflicts.length > 12 ? ` +${conflicts.length - 12}` : ''}` : `: ${String(m.stderr || m.stdout || '').trim().split('\n').pop().slice(0, 160)}`}; the merge was aborted and your worktree is as it was. Start by running ${targetMergeCommand(task)}: it merges ${target} into your worktree and leaves ${conflicts.length ? 'those files' : 'what it reports'} for you to resolve (then git add each, then ${targetMergeCommand(task)} --continue). ${BOTH_SIDES}${(() => { const ss = sparseState(dir); const o = ss.sparse ? outsideSparse(conflicts, ss.paths) : []; return o.length ? ` ${o.length} of them are outside this sparse worktree's folders; to widen it: npm run engine -- lane ${task} --full.` : ''; })()}` };
 }
 
 // ---- the CLI --------------------------------------------------------------------------------------------------------
@@ -710,6 +744,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const r = await engineTargetMerge(argv[1], { mode: argv.includes('--abort') ? 'abort' : argv.includes('--continue') ? 'continue' : 'merge', engine: i >= 0 ? argv[i + 1] || null : null, root });
     if (json) console.log(JSON.stringify({ ok: r.ok, step: r.step || null, files: r.files || [], lines: r.lines }));
     else (r.ok ? console.log : console.error)(r.lines.join('\n'));
+    process.exit(r.code);
+  }
+  // 2.86 (f): npm run engine -- lane <ID> --full (widenEngineLane above).
+  if (argv[0] === 'lane') {
+    const i = argv.indexOf('--engine');
+    if (!argv.includes('--full')) { console.error('Usage: npm run engine -- lane <TASK_ID> --full   (makes the task\'s sparse engine worktree full)'); process.exit(1); }
+    const r = await widenEngineLane(argv[1], { engine: i >= 0 ? argv[i + 1] || null : null, root });
+    (r.ok ? console.log : console.error)(r.lines.join('\n'));
     process.exit(r.code);
   }
   if (argv[0] === 'task') {

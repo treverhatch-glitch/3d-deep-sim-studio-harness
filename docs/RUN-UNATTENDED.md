@@ -102,7 +102,12 @@ npm run studio:status
   `STUDIO_MACHINE_HISTORY_KB`, 256). `status --brief` and `npm run lanes` show "Machine: RAM 26/32 GB (commit 55/60), CPU 32%,
   GPU 1% (1.8/12 GB), disk 130 GB free".
 - **Disk budget:** under `STUDIO_DISK_MIN_FREE_GB` (default max(20, 5% of the disk)) the supervisor emits `machine.disk_low`
-  (at most every 6 h), the digest has a line, and `task start` and the train warn, naming what the janitor can free.
+  (at most once a day since 2.86), the digest has a line, and `task start` and the train warn, naming what the janitor can free.
+  2.86: `STUDIO_DISK_WARN_GB` (default 60) is the free space under which the supervisor emits one `machine.disk_low` a
+  day (on the studio's volume and on the engine lanes' volume when that is another), naming the biggest users the
+  harness knows (engine worktrees, lane copies, saved builds; estimated, cached for an hour), with a line in the digest
+  and `npm run harness-health`. `STUDIO_DISK_MIN_FREE_GB` (default the larger of 20 GB and 5% of the volume; the disk budget since 2.68) is also the free space under which the supervisor starts no
+  new engine worktree and no new lane copy, saying why in its line (a harness reason, not the task's); `off` turns it off.
 - **Temp-file janitor** (`npm run janitor`, `harness/janitor.mjs`): a dry run by default; `--yes` deletes only the harness's
   own temporary files: train scratch copies of a train no longer running, `.studio/tmp` entries older than
   `STUDIO_JANITOR_TMP_H` (24) h, train logs beyond the newest `STUDIO_JANITOR_KEEP_LOGS` (40) or `STUDIO_JANITOR_LOGS_MB`

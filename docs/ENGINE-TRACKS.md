@@ -109,6 +109,20 @@ npm run task -- add "Pass 11: realism pass on the hangar" --role engine-porter -
   `--abort` puts the worktree back. Events: `engine.target_merge` (`started`, `conflict`, `done`, `aborted`). A launch
   that meets the same conflicted files as the previous launch, with no new commit in the worktree since, starts no
   session: the task is parked once for the Producer with the files named (the attempt ledger's same-blocker rule).
+- **Sparse engine worktrees (2.86).** `engines.<x>.sparse` in `studio/game.json` = `{ "roles": ["engine-porter"],
+  "paths": ["Assets/Rules", "tools/tests"] }`: a worktree made for a task whose role is listed is checked out with git's
+  cone-mode sparse checkout (those folders plus the repo's top-level files; made with `--no-checkout` first, so the big
+  folders are never written; git 2.38 or newer, else a full worktree and one line saying so). Every other role, and the
+  land run's gate worktree, stay full. The brief says the worktree is sparse and which folders it has. A merge of the
+  target touching files outside the folders needs nothing; a conflict outside them names those files and how to widen:
+  `npm run engine -- lane <T-ID> --full` makes the worktree full (and keeps the task full if it is made again). A
+  failed creation removes what it made (folder, registration, a new branch).
+- **Engine worktree removal (2.86).** `npm run engine -- lanes` lists each engine worktree: sparse or full, its task's
+  state, and whether it is safe to remove. One rule (`harness/engine-clean.mjs laneRemoval`): kept while a merge is in
+  progress, with uncommitted work, while its task is claimed or queued for a train, or while an open task has commits
+  not on the target; removed once its commit is on the target or its task is done or dropped. The branch is never
+  deleted. The supervisor applies it every 30 minutes (`STUDIO_ENGINE_LANE_CLEAN=off` turns that off), as do the
+  train after a landing and `npm run lanes -- prune`.
 - **Done check.** A pass in its own repo is judged in that repo:
   - its branch has commits the target lacks, and everything on it is committed (2.84: a file git reports as modified
     whose bytes equal the committed blob, as a `.gitattributes` filter or Git LFS rule on a plain blob makes it, is not
