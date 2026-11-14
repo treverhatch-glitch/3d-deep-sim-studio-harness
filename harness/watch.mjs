@@ -38,6 +38,7 @@ import { holdReason, inAnyTrain } from './task-hold.mjs';
 import { listLocks, release, sweepBrokenLocks } from './lock.mjs';
 import { writeAtomic, sweepTempsDeep } from './fsafe.mjs';
 import { doneRunning, claimActive, keepClaim } from './busy.mjs';
+import { codeStamp, noteRunning, noticeNewCode } from './code-stamp.mjs';
 import { mainRoot } from './worktree.mjs';
 import { collectIdeas } from './ideas.mjs';
 import { sessions, fillAgents, startAgent, markGone, saveWorkOf, AGENTS_DIR } from './agent.mjs';
@@ -440,5 +441,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const opts = { stallMin: arg('stall', 30), waitMin: arg('wait', 60), dryRun: process.argv.includes('--dry-run') };
   const loop = arg('loop', 0);
   print(watchPass(opts));
-  if (loop > 0) setInterval(() => print(watchPass(opts)), loop * 1000);
+  if (loop > 0) {
+    // 2.86: a watcher loop keeps the code it started with. It notes its code in .studio/running/ (health and upgrade name
+    // it while it is old) and says once, loudly, when new harness code is installed; a person restarts it (it keeps no state).
+    const byHand = `stop it (Ctrl+C) and run node harness/watch.mjs --loop ${loop} again`;
+    const code = codeStamp({ root: REPO_ROOT, fresh: true });
+    const rec = {};
+    noteRunning(STUDIO_STATE_DIR, { name: 'watcher', code, byHand });
+    setInterval(() => {
+      print(watchPass(opts));
+      noticeNewCode(rec, { name: 'watcher', running: code, installed: codeStamp({ root: REPO_ROOT }), how: { how: null, why: 'the watcher loop does not restart itself', byHand }, emit: emitEvent });
+    }, loop * 1000);
+  }
 }

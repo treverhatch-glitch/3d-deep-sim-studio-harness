@@ -5261,6 +5261,14 @@ if (inShard('selftest-285g')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.86 (a): new harness code takes effect after an upgrade (the supervisor restarts itself; upgrade --merge commits the board).
+if (inShard('selftest-286a')) {
+  const dir = copyRepo();
+  const { selftest286A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286a.mjs')).href);
+  await selftest286A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

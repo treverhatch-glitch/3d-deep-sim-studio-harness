@@ -110,6 +110,7 @@ export function checkUpgrade(root = ROOT) {
     lines.push(`  git add -- ${BOARD_FILES.join(' ')}`);
     lines.push('  git commit -m "board: snapshot before harness upgrade"');
     lines.push('[upgrade] Then run npm run upgrade -- --check again. (--snapshot also copies them to .studio/board-snapshots/.)');
+    lines.push('[upgrade] (npm run upgrade -- --merge <ref> --by <you> commits them itself, through the hooks, holding the board lock.)');
   } else lines.push('[upgrade] OK: every board file is committed.');
   if (stashes.length) {
     lines.push(`[upgrade] note: ${stashes.length} stash entr${stashes.length === 1 ? 'y holds' : 'ies hold'} board changes that may not be on the board now:`);
@@ -247,8 +248,137 @@ export function mergeGoldens(root, sha) {
 
 const short = (files, n = 8) => `${files.slice(0, n).join(', ')}${files.length > n ? ` and ${files.length - n} more` : ''}`;
 
+const sleepSync = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { /* no wait */ } };
+
+/**
+ * 2.86 (B-139): run `fn` (synchronous) holding the studio's board lock and its holds lock (.studio/locks/board.mutex,
+ * holds.mutex: what every board and holds write takes, harness/task.mjs withBoard, harness/task-hold.mjs updateHolds),
+ * through the studio's own harness/fsafe.mjs. { run, note }: a studio without it runs `fn` unlocked and says so.
+ */
+export async function boardLocked(root, env = process.env) {
+  const f = path.join(root, 'harness', 'fsafe.mjs');
+  let fsafe = null;
+  try { if (fs.existsSync(f)) fsafe = await importFile(f); } catch { fsafe = null; }
+  if (!fsafe?.withFileLock) return { run: (fn) => fn(), note: '[upgrade] WARN this studio has no board lock (harness/fsafe.mjs withFileLock): the board is committed and merged without holding it' };
+  const dir = path.join(root, '.studio', 'locks');
+  fs.mkdirSync(dir, { recursive: true });
+  const timeoutMs = Number(env.STUDIO_UPGRADE_LOCK_WAIT_MS) > 0 ? Number(env.STUDIO_UPGRADE_LOCK_WAIT_MS) : 120000;
+  return {
+    run: (fn) => {
+      try {
+        return fsafe.withFileLock('board', () => fsafe.withFileLock('holds', fn, { dir, timeoutMs, what: 'The task holds (studio/task-holds.json)' }), { dir, timeoutMs, what: 'The board (studio/NEXT.md)' });
+      } catch (e) {
+        if (e?.code === 'ELOCKBUSY') return { lines: [], stop: `the board stayed locked by another process for ${Math.round(timeoutMs / 1000)} s (${String(e.message).slice(0, 200)}); nothing was committed or merged: run it again` };
+        throw e;
+      }
+    },
+  };
+}
+
+/**
+ * 2.86 (B-139): commit the board files that are not committed, as "board: snapshot before harness upgrade", through the
+ * hooks (pre-commit and commit-msg run and stamp it; never --no-verify). A git busy with another command (index.lock) is
+ * tried again; a board file written meanwhile by a writer that takes no lock (studio/handoffs/, pending-review.json) gets
+ * another commit, up to 3. { ok, commits: [sha], why? }.
+ */
+export function commitBoardSnapshot({ root, ref, to, by, env = process.env, tries = 3 }) {
+  const commits = [];
+  for (let i = 0; i < tries; i++) {
+    const dirty = dirtyBoard(root) || [];
+    if (!dirty.length) return { ok: true, commits };
+    const files = [...new Set(dirty.map((d) => d.file))];
+    const add = git(['add', '-A', '--', ...files], root);
+    if (add.status !== 0) return { ok: false, commits, why: `git add of the board refused: ${(add.stderr || add.stdout).trim().split('\n').slice(0, 4).join(' / ')}` };
+    const msgFile = gitPath(root, 'board-snapshot-msg');
+    fs.writeFileSync(msgFile, [`board: snapshot before harness upgrade to ${to} (${ref})`, '', `The upgrade committed the board itself, holding the board lock (${files.length} file(s)).`, '', `Upgrade-By: ${String(by).trim()}`, ''].join('\n'));
+    let c = null;
+    for (let k = 0; k < 4; k++) {
+      c = git(['commit', '-F', msgFile, '--', ...files], root, { env });
+      if (c.status === 0 || !/index\.lock|another git process/i.test(`${c.stdout}${c.stderr}`)) break;
+      sleepSync(500 * (k + 1));
+    }
+    try { fs.rmSync(msgFile, { force: true }); } catch {}
+    if (c.status !== 0) {
+      git(['reset', '-q', '--', ...files], root);
+      return { ok: false, commits, why: `the hooks refused the board snapshot commit (nothing was merged; fix what they say and run it again):\n${`${c.stdout}${c.stderr}`.trim().split('\n').slice(-12).map((l) => `  ${l}`).join('\n')}` };
+    }
+    commits.push(out1(git(['rev-parse', 'HEAD'], root)));
+  }
+  const left = dirtyBoard(root) || [];
+  return left.length ? { ok: false, commits, why: `board files kept changing while it committed them (${short(left.map((d) => d.file))}); run it again` } : { ok: true, commits };
+}
+
+/**
+ * The git half of --merge, synchronous so it can run under the board lock: the board snapshot commit, the backup branch,
+ * the merge and its commit. { lines, stop?, conflicts?, backup?, g?, head?, boardCommits? }. deps.inLock (tests) runs
+ * once the locks are held, before anything is committed.
+ */
+function mergeSection({ root, ref, sha, by, who, cont, from, to, branch, now, env, goldenReason, betaBefore, inLock }) {
+  const lines = [];
+  if (typeof inLock === 'function') inLock();
+  let boardCommits = [];
+  if (!cont) {
+    const bc = commitBoardSnapshot({ root, ref, to, by, env });
+    boardCommits = bc.commits;
+    for (const c of bc.commits) lines.push(`[upgrade] board committed through the hooks as ${c.slice(0, 10)} (board: snapshot before harness upgrade), holding the board lock.`);
+    if (!bc.ok) return { lines, stop: bc.why, boardCommits };
+    const check = checkUpgrade(root);
+    if (!check.ok) return { lines: [...lines, ...check.lines], stop: 'commit the board first (above)', boardCommits };
+  }
+  // Backup of the branch (reused when it already points there).
+  let backup = `backup/pre-${to}`;
+  const head = out1(git(['rev-parse', 'HEAD'], root));
+  const existing = out1(git(['rev-parse', '--verify', '--quiet', `refs/heads/${backup}`], root));
+  if (existing && existing !== head) backup = `${backup}-${now.toISOString().replace(/[:.]/g, '-')}`;
+  if (existing !== head) {
+    const b = git(['branch', backup, head], root);
+    if (b.status !== 0) return { lines, stop: `could not make the backup branch ${backup}: ${b.stderr.trim()}` };
+  }
+  lines.push(`[upgrade] ${branch} backed up as ${backup} (${head.slice(0, 10)}).`);
+  if (!cont) {
+    const m = git(['merge', '--no-ff', '--no-commit', sha], root, { env: { ...env, GIT_MERGE_AUTOEDIT: 'no' } });
+    // Beta mode is the owner's switch: studio/beta.json stays as the studio had it.
+    keepStudioBeta(root, betaBefore);
+    const conflicts = unmergedFiles(root);
+    if (conflicts.length) {
+      return {
+        backup, conflicts,
+        lines: [...lines, `[upgrade] STOP: merging ${ref} into ${branch} conflicts in ${conflicts.length} file(s). Nothing was committed and nothing was resolved:`,
+          ...conflicts.map((f) => `  ${f}`),
+          '[upgrade] Undo it (the branch goes back to where it was): git merge --abort',
+          `[upgrade] How to resolve an update's conflicts is the owner's call. A person who resolves them by hand (git add each file) finishes with: npm run upgrade -- --merge ${ref} --by <name> --continue`],
+      };
+    }
+    if (m.status !== 0 || !out1(git(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], root))) return { lines, backup, stop: `git merge refused: ${(m.stderr || m.stdout).trim().split('\n').slice(0, 6).join(' / ')}` };
+  }
+  // Goldens exactly as on the ref carry the upgrade's reason; a combined one needs a person's.
+  const g = mergeGoldens(root, sha);
+  const reason = String(goldenReason || '').trim();
+  if (g.combined.length && reason.length < 10) {
+    if (!cont) git(['merge', '--abort'], root);
+    return { lines, backup, stop: `${g.combined.length} golden file(s) differ from ${ref}'s (the merge combined the studio's change with the update's): ${short(g.combined)}. ${cont ? 'The merge is still in progress. ' : 'The merge was undone. '}Say why the recorded answers changed: --golden-reason "<why, 10+ characters>" (it is added as a Golden-Reason trailer).`, extra: { combinedGoldens: g.combined } };
+  }
+
+  if (cont) keepStudioBeta(root, betaBefore);
+  const trailers = [`Upgrade-By: ${String(by).trim()}`];
+  if (who.permission) trailers.push(`Upgrade-Permission: ${who.permission}`);
+  trailers.push(`Upgrade-Recorded-By: ${who.recordedBy}`, `Upgrade-Ref: ${ref} ${sha}`, `Upgrade-Versions: ${from} -> ${to}`, `Upgrade-Backup: ${backup}`);
+  if (g.fromRef.length) trailers.push(`Golden-Reason: from ${ref} (upgrade): ${short(g.fromRef, 20)}`);
+  if (g.combined.length) trailers.push(`Golden-Reason: ${reason.replace(/\s+/g, ' ').slice(0, 300)} (${String(by).trim()}, for ${short(g.combined, 20)})`);
+  const msg = [`upgrade: merge harness ${to} from ${ref} into ${branch} (${from} -> ${to})`, '', ...trailers, ''].join('\n');
+  const msgFile = gitPath(root, 'STUDIO_UPGRADE_MSG');
+  fs.writeFileSync(msgFile, msg);
+  // STUDIO_UPGRADE_MERGE opens the main-checkout guard for this commit only; other hooks run as usual.
+  const c = git(['commit', '-F', msgFile], root, { env: { ...env, STUDIO_UPGRADE_MERGE: sha } });
+  try { fs.rmSync(msgFile, { force: true }); } catch {}
+  if (c.status !== 0) {
+    return { lines, backup, stop: `the hooks refused the merge commit (the merge is still in progress; fix what they say and run --continue, or undo it with git merge --abort):\n${`${c.stdout}${c.stderr}`.trim().split('\n').slice(-15).map((l) => `  ${l}`).join('\n')}` };
+  }
+  return { lines, backup, g, head, boardCommits };
+}
+
 /** `--merge` (see the header; `cont` = --continue). Returns { ok, code, lines, commit?, backup?, conflicts? }. */
-export async function upgradeMerge({ ref, by, permission = '', goldenReason = '', cont = false, root = ROOT, env = process.env, now = new Date() } = {}) {
+export async function upgradeMerge({ ref, by, permission = '', goldenReason = '', cont = false, root = ROOT, env = process.env, now = new Date(), deps = {} } = {}) {
   const lines = [];
   const stop = (why, extra = {}) => ({ ok: false, code: 1, lines: [...lines, `[upgrade] Not merged: ${why}`], ...extra });
   if (!root || !repoRoot(root)) return stop('this isn\'t a git checkout; run it in the studio\'s main checkout');
@@ -267,8 +397,6 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
     if (left.length) return stop(`these files still have conflicts: ${short(left)}`, { conflicts: left });
   } else {
     if (mergeHead) return stop('a merge is already in progress here: finish it (a person resolves the files, then --continue) or undo it with git merge --abort');
-    const check = checkUpgrade(root);
-    if (!check.ok) return { ok: false, code: 1, lines: [...check.lines, '[upgrade] Not merged: commit the board first (above).'] };
     if (git(['diff', '--cached', '--quiet'], root).status !== 0) return stop('there are staged changes; they would go into the merge commit. Commit them or unstage them (git restore --staged <files>) first');
   }
   const from = versionAt(root, 'HEAD');
@@ -278,59 +406,20 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
   // The scorecard just before the update (.studio/upgrades/<from>-to-<to>.json; kept on --continue).
   const snap = await beforeSnapshot({ root, from, to, ref, sha, by, env, now });
   lines.push(...snap.lines);
-  // Backup of the branch (reused when it already points there).
-  let backup = `backup/pre-${to}`;
-  const head = out1(git(['rev-parse', 'HEAD'], root));
-  const existing = out1(git(['rev-parse', '--verify', '--quiet', `refs/heads/${backup}`], root));
-  if (existing && existing !== head) backup = `${backup}-${now.toISOString().replace(/[:.]/g, '-')}`;
-  if (existing !== head) {
-    const b = git(['branch', backup, head], root);
-    if (b.status !== 0) return stop(`could not make the backup branch ${backup}: ${b.stderr.trim()}`);
-  }
-  lines.push(`[upgrade] ${branch} backed up as ${backup} (${head.slice(0, 10)}).`);
-
   const betaBefore = betaAt(root, 'HEAD');
-  if (!cont) {
-    const m = git(['merge', '--no-ff', '--no-commit', sha], root, { env: { ...env, GIT_MERGE_AUTOEDIT: 'no' } });
-    // Beta mode is the owner's switch: studio/beta.json stays as the studio had it.
-    keepStudioBeta(root, betaBefore);
-    const conflicts = unmergedFiles(root);
-    if (conflicts.length) {
-      await emit(root, { type: 'upgrade.merge_conflict', agent: String(by).trim().slice(0, 60), msg: `harness update ${ref} (${from} -> ${to}) stopped on ${conflicts.length} conflicting file(s): ${short(conflicts, 5)}`.slice(0, 600), meta: { ref, sha, from, to, backup, files: conflicts.slice(0, 50), recordedBy: who.recordedBy } });
-      return {
-        ok: false, code: 1, conflicts, backup,
-        lines: [...lines, `[upgrade] STOP: merging ${ref} into ${branch} conflicts in ${conflicts.length} file(s). Nothing was committed and nothing was resolved:`,
-          ...conflicts.map((f) => `  ${f}`),
-          '[upgrade] Undo it (the branch goes back to where it was): git merge --abort',
-          `[upgrade] How to resolve an update's conflicts is the owner's call. A person who resolves them by hand (git add each file) finishes with: npm run upgrade -- --merge ${ref} --by <name> --continue`],
-      };
-    }
-    if (m.status !== 0 || !out1(git(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], root))) return stop(`git merge refused: ${(m.stderr || m.stdout).trim().split('\n').slice(0, 6).join(' / ')}`, { backup });
+  // 2.86 (B-139): the board is committed, checked, merged and committed under the studio's own board and holds locks, so a
+  // running supervisor or agent can't write the board between the snapshot commit and the merge commit (they wait, then
+  // write). The board snapshot commit goes through the hooks like any other (stamped by them).
+  const locked = await boardLocked(root, env);
+  if (locked.note) lines.push(locked.note);
+  const res = locked.run(() => mergeSection({ root, ref, sha, by, who, cont, from, to, branch, now, env, goldenReason, betaBefore, inLock: deps.inLock }));
+  lines.push(...res.lines);
+  if (res.conflicts) {
+    await emit(root, { type: 'upgrade.merge_conflict', agent: String(by).trim().slice(0, 60), msg: `harness update ${ref} (${from} -> ${to}) stopped on ${res.conflicts.length} conflicting file(s): ${short(res.conflicts, 5)}`.slice(0, 600), meta: { ref, sha, from, to, backup: res.backup, files: res.conflicts.slice(0, 50), recordedBy: who.recordedBy } });
+    return { ok: false, code: 1, conflicts: res.conflicts, backup: res.backup, lines };
   }
-
-  // Goldens exactly as on the ref carry the upgrade's reason; a combined one needs a person's.
-  const g = mergeGoldens(root, sha);
-  const reason = String(goldenReason || '').trim();
-  if (g.combined.length && reason.length < 10) {
-    if (!cont) git(['merge', '--abort'], root);
-    return stop(`${g.combined.length} golden file(s) differ from ${ref}'s (the merge combined the studio's change with the update's): ${short(g.combined)}. ${cont ? 'The merge is still in progress. ' : 'The merge was undone. '}Say why the recorded answers changed: --golden-reason "<why, 10+ characters>" (it is added as a Golden-Reason trailer).`, { backup, combinedGoldens: g.combined });
-  }
-
-  if (cont) keepStudioBeta(root, betaBefore);
-  const trailers = [`Upgrade-By: ${String(by).trim()}`];
-  if (who.permission) trailers.push(`Upgrade-Permission: ${who.permission}`);
-  trailers.push(`Upgrade-Recorded-By: ${who.recordedBy}`, `Upgrade-Ref: ${ref} ${sha}`, `Upgrade-Versions: ${from} -> ${to}`, `Upgrade-Backup: ${backup}`);
-  if (g.fromRef.length) trailers.push(`Golden-Reason: from ${ref} (upgrade): ${short(g.fromRef, 20)}`);
-  if (g.combined.length) trailers.push(`Golden-Reason: ${reason.replace(/\s+/g, ' ').slice(0, 300)} (${String(by).trim()}, for ${short(g.combined, 20)})`);
-  const msg = [`upgrade: merge harness ${to} from ${ref} into ${branch} (${from} -> ${to})`, '', ...trailers, ''].join('\n');
-  const msgFile = gitPath(root, 'STUDIO_UPGRADE_MSG');
-  fs.writeFileSync(msgFile, msg);
-  // STUDIO_UPGRADE_MERGE opens the main-checkout guard for this commit only; other hooks run as usual.
-  const c = git(['commit', '-F', msgFile], root, { env: { ...env, STUDIO_UPGRADE_MERGE: sha } });
-  try { fs.rmSync(msgFile, { force: true }); } catch {}
-  if (c.status !== 0) {
-    return stop(`the hooks refused the merge commit (the merge is still in progress; fix what they say and run --continue, or undo it with git merge --abort):\n${`${c.stdout}${c.stderr}`.trim().split('\n').slice(-15).map((l) => `  ${l}`).join('\n')}`, { backup });
-  }
+  if (res.stop) return stop(res.stop, { ...(res.backup ? { backup: res.backup } : {}), ...(res.extra || {}) });
+  const { backup, g, head } = res;
   const commit = out1(git(['rev-parse', 'HEAD'], root));
   lines.push(betaAcrossLine(betaBefore, betaAt(root, 'HEAD')));
   // List the update's commits (made without this studio's hooks) as exempt; a failure is said, never fatal.
@@ -359,13 +448,44 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
   });
   // Lane copies take the update now, so the next train doesn't hand them back as stale.
   const lanes = refreshLanesAfterUpgrade({ root, by: String(by).trim(), env });
+  // 2.86 (B-139): which long-running processes still run the old code, and what happens to each.
+  const old = await oldCodeAfterUpgrade({ root, since: now.getTime(), from, to, by, env });
   return {
-    ok: true, code: 0, commit, backup, lanes,
+    ok: true, code: 0, commit, backup, lanes, oldCode: old.processes, boardCommits: res.boardCommits || [],
     lines: [...lines, `[upgrade] PASS merged ${ref} (${sha.slice(0, 10)}, harness ${from} -> ${to}) into ${branch}: ${commit.slice(0, 10)}, recorded for ${String(by).trim()}${who.permission ? ` on their permission (recorded by ${who.recordedBy})` : ''}.`,
       ...(g.fromRef.length ? [`[upgrade] ${g.fromRef.length} golden file(s) came unchanged from ${ref}: Golden-Reason added for them only.`] : []),
       ...lanes.lines,
+      ...old.lines,
       '[upgrade] Next: npm run verify -- --all, then npm run task -- drain off --by <you>. Undo: git reset --hard ' + backup + ' (only before anything else lands).'],
   };
+}
+
+/**
+ * 2.86 (B-139): after a merge, the long-running processes that still run the code they loaded before it (harness/code-
+ * stamp.mjs oldCodeReport: the supervisor, a watcher loop) with what will happen to each (it restarts itself at its next
+ * pass, or the command to restart it), and the work that finishes on the old code, which is fine (agent sessions, a running
+ * train: each new one starts on the new code). One upgrade.old_code event when anything still runs old code.
+ * { lines, processes }.
+ */
+export async function oldCodeAfterUpgrade({ root, since = Date.now(), from = '?', to = '?', by = '', env = process.env } = {}) {
+  try {
+    const cs = await loadHelper('code-stamp.mjs', root);
+    if (!cs?.oldCodeReport) return { lines: ['[upgrade] long-running processes: not checked (harness/code-stamp.mjs is missing)'], processes: [] };
+    let pidAlive = null;
+    try { pidAlive = (await importFile(path.join(root, 'harness', 'proc-identity.mjs'))).pidAlive; } catch { pidAlive = null; }
+    const alive = (p, id) => { if (pidAlive) return pidAlive(p, id, { eperm: false }); try { process.kill(p, 0); return true; } catch { return false; } };
+    const stateDir = path.join(root, '.studio');
+    const installed = cs.codeStamp({ root, fresh: true });
+    const processes = cs.oldCodeReport({ stateDir, installed, since, alive, env });
+    const work = cs.workStillRunning(stateDir, { alive });
+    const lines = processes.length ? processes.map((p) => `[upgrade] still on the old code: ${p.line}`) : ['[upgrade] long-running processes: none runs the old code (no supervisor or watcher loop started before this update is running).'];
+    if (work.sessions.length || work.trains.length) {
+      const what = [work.sessions.length ? `${work.sessions.length} agent session(s) (${work.sessions.slice(0, 6).join(', ')}${work.sessions.length > 6 ? ', …' : ''})` : null, ...work.trains].filter(Boolean).join(' and ');
+      lines.push(`[upgrade] ${what} keep running on the code they started with until they end; nothing of theirs was stopped or changed, and that is fine: each new session and train starts on ${to}.`);
+    }
+    if (processes.length) await emit(root, { type: 'upgrade.old_code', agent: String(by).trim().slice(0, 60) || 'upgrade', to: 'producer', status: processes.every((p) => p.restarts) ? 'info' : 'warn', msg: `after the harness update ${from} -> ${to}: ${processes.map((p) => p.line).join('; ')}`.slice(0, 600), meta: { from, to, processes: processes.map((p) => ({ name: p.name, pid: p.pid, runs: p.runs, restarts: p.restarts })), sessions: work.sessions.length, trains: work.trains.length } });
+    return { lines, processes };
+  } catch (e) { return { lines: [`[upgrade] long-running processes: not checked (${String(e?.message || e).slice(0, 160)})`], processes: [] }; }
 }
 
 /** studio/beta.json as committed at `rev`: { present, on, text }. Read from git (this file also runs from a ref). */
