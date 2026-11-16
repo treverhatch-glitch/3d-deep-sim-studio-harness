@@ -5,9 +5,9 @@ two newest handoffs and release notes are kept; older ones are in git history.
 
 ## Where it stands
 
-- 2.88 is on `claude/288-h`, built on `claude/287`. Neither is merged: the owner says when. 2.87 goes first.
-- 2.86.1 (one engine-train fix, P-339) is on `claude/2861`, not merged. It was branched from 2.86.0, so whichever of
-  it and 2.87 lands second merges main first (CHANGELOG.md, PROBLEMS.md and the version will conflict).
+- 2.88 is on `claude/288-h`, built on `claude/287`. 2.87 goes first. The owner's word of 16 November: the
+  maintainer merges when the online checks are green.
+- 2.86.1 (one engine-train fix, P-339) is merged and is part of this branch.
 - A crew runs 2.86.0 since 14 November.
 
 ## How the round was built

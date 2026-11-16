@@ -78,6 +78,7 @@ export async function selftest286B({ dir, root, report, tmpRoot }) {
     }
     return { R, GW, heads };
   };
+  // <ctl>-recordonrun: the script commits its own record of every run on the target, as a studio's real one does (2.86.1).
   // The land script stand-in (qa/selftest-285a.mjs's, plus): <ctl>-flaky "stage name count" fails that test in the first `count`
   // runs; <ctl>-alwaysred "stage name" fails it on every run, the target alone included (the target's own red); "<stage>-bad.txt"
   // in the merged tree fails that stage on the test it holds ("rev:" + the name reversed). Names in STUDIO_LAND_KNOWN_RED are left
@@ -101,9 +102,10 @@ if (fl) { const [st, name, count] = fl.split(' '); const n = Number(opt('flakyco
 const ar = opt('alwaysred');
 if (ar) { const [st, name] = ar.split(' '); reds.push([st, [name]]); }
 for (const st of ['edit', 'play']) { const f = path.join(gw, st + '-bad.txt'); if (fs.existsSync(f)) { const t = fs.readFileSync(f, 'utf8').trim(); reds.push([st, [t.startsWith('rev:') ? t.slice(4).split('').reverse().join('') : t]]); } }
-if (E.STUDIO_LAND_PROBE === '1' && opt('moveonprobe') !== null) { fs.writeFileSync(path.join(gw, 'moved.txt'), String(Date.now())); git(gw, 'add', '-A'); git(gw, 'commit', '-qm', 'a script that ignores STUDIO_LAND_PROBE'); console.log('landed anyway'); process.exit(0); }
+if (E.STUDIO_LAND_PROBE === '1' && opt('moveonprobe') !== null && srcs.some((x) => !/-target$/.test(x))) { fs.writeFileSync(path.join(gw, 'moved.txt'), String(Date.now())); git(gw, 'add', '-A'); git(gw, 'commit', '-qm', 'a script that ignores STUDIO_LAND_PROBE'); console.log('landed anyway'); process.exit(0); }
 if (E.STUDIO_LAND_PROBE === '1' && opt('noack') === null) console.log('[land-probe] honoured');
 if (opt('honour') !== null && E.STUDIO_LAND_KNOWN_RED) { const k = E.STUDIO_LAND_KNOWN_RED.split(';'); reds = reds.map(([st, n]) => [st, n.filter((x) => !k.includes(x))]).filter(([, n]) => n.length); }
+const record = (what) => { if (opt('recordonrun') === null) return; fs.appendFileSync(path.join(gw, 'land-record.txt'), what + '\\n'); git(gw, 'add', '-A'); git(gw, 'commit', '-qm', 'land: record ' + what); };
 const stages = (bad) => { if (E.STUDIO_LAND_RESULT) fs.writeFileSync(E.STUDIO_LAND_RESULT, JSON.stringify({ gates: Object.fromEntries(order.map((n, i) => [n, bad && order.indexOf(bad) < i ? null : { status: n === bad ? 'fail' : 'pass', seconds: 10 }]).filter(([, v]) => v)) })); };
 if (reds.length) {
   reds.sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
@@ -111,10 +113,12 @@ if (reds.length) {
   stages(reds[0][0]);
   if (opt('quiet') === null) for (const [, names] of reds) for (const n of names) console.log('  Failed ' + n + ' [3 ms]');
   console.log(reds.reduce((k, [, n]) => k + n.length, 0) + ' test(s) failed');
+  record('FAIL');
   process.exit(1);
 }
 stages(null);
-if (E.STUDIO_LAND_PROBE === '1') { git(gw, 'reset', '-q', '--hard', before); console.log('target alone: green, nothing landed'); process.exit(0); }
+if (E.STUDIO_LAND_PROBE === '1') { git(gw, 'reset', '-q', '--hard', before); console.log('target alone: green, nothing landed'); record('PASS'); process.exit(0); }
+record('PASS');
 console.log('landed ' + srcs.join(' '));
 `);
   const cfgFor = (E, ctl, extra = {}) => ({ land: `node "${fwd(landStub)}" "${fwd(E.GW)}" "${fwd(ctl)}" {branch}`, target: 'port/main', cwd: fwd(E.R), gateWorktree: fwd(E.GW), timeoutMin: 5, rules: false, ...extra });
@@ -301,19 +305,20 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: 
   }
   {
     resetState();
-    const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/b': { 'b.txt': 'b\n' } });
+    const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/b': { 'b.txt': 'b\n', 'play-bad.txt': `${rev(FLAKY)}\n` } });
     const ctl = path.join(T, 'ctl-moves');
-    fs.writeFileSync(`${ctl}-alwaysred`, `play ${FLAKY}`);
     fs.writeFileSync(`${ctl}-moveonprobe`, '1');
     setEngines({ unity: cfgFor(E, ctl, { flakyTests: [FLAKY] }) });
     queue(E, [['T-677', 'feat/a'], ['T-678', 'feat/b']]);
     const tip0 = tipOf(E);
     const r = probe(TRAIN, NOFULL);
+    const runs = runsOf(ctl);
     const pm = evs(/^task\.train\.unity\.probe_moved_target$/);
     let pj = null; try { pj = JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'unity-probe.json'), 'utf8')); } catch { /* checked below */ }
-    await guard('2.86 (b) a land script that commits on a probe anyway (it ignores STUDIO_LAND_PROBE): the train sees the target moved, stops with nobody handed back and both lanes still queued, writes task.train.unity.probe_moved_target (blocked, to the producer) and withdraws by-name steps (.studio/train/unity-probe.json revoked) (fails before this fix: there was no probe)', () => [
-      tipOf(E) !== tip0 && !r.landed?.length && !r.dropped?.length && !r.handed?.length && r.deferred?.length === 2 && queueNow().length === 2 && pm.length === 1 && pm[0].status === 'blocked' && pj?.revoked === true,
-      JSON.stringify({ r, pm: pm.map((e) => e.msg), pj }).slice(0, 2500)]);
+    await guard('2.86 (b), 2.86.1: a land script that honours the probe on the target alone and then commits on a by-name step that carries a branch: the train sees the target moved by a run that must land nothing, stops with nobody handed back and both lanes still queued, writes task.train.unity.probe_moved_target (blocked, to the producer) and withdraws by-name steps (.studio/train/unity-probe.json revoked) (fails before 2.86: there was no probe; 2.86.1: the stop is for runs that carry a branch, a run of the target alone is judged by its result)', () => [
+      tipOf(E) !== tip0 && !r.landed?.length && !r.dropped?.length && !r.handed?.length && r.deferred?.length === 2 && queueNow().length === 2 && pm.length === 1 && pm[0].status === 'blocked' && pj?.revoked === true
+        && runs.filter((x) => x.probe === '1').length === 2 && /-target$/.test(runs.filter((x) => x.probe === '1')[0].srcs[0]) && !/-target$/.test(runs[runs.length - 1].srcs[0]),
+      JSON.stringify({ r, runs: runs.map((x) => [x.probe, x.srcs]), pm: pm.map((e) => e.msg), pj }).slice(0, 2500)]);
   }
 
   // ================= 7. a recorded green probe is not run again =================
@@ -351,6 +356,54 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: 
       JSON.stringify({ r1: [r1.landed, r1.batch], r2: [r2.landed, r2.batch], r3: [r3.landed, r3.batch] }).slice(0, 2000)]);
   }
 
+
+  // ================= 2.86.1: a land script that records every run with a commit on the target =================
+  {
+    resetState();
+    const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' } });
+    const ctl = path.join(T, 'ctl-record-full');
+    fs.writeFileSync(`${ctl}-recordonrun`, '1');
+    setEngines({ unity: cfgFor(E, ctl) });
+    fullAge(30);
+    const tip0 = tipOf(E);
+    const r = probe(TRAIN);
+    const pm = evs(/^task\.train\.unity\.probe_moved_target$/);
+    const ma = evs(/^task\.train\.unity\.target_moved_alone$/);
+    let pj = null; try { pj = JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'unity-probe.json'), 'utf8')); } catch { /* none is fine */ }
+    await guard('2.86.1 a land script that commits its own record on the target after every run: the daily full run on the target alone still counts (status pass, the full-run clock restarts), the move is one warning (task.train.unity.target_moved_alone) and not task.train.unity.probe_moved_target, and by-name steps are not withdrawn (fails on 2.86.0: the run ended "error", its result was thrown away after the whole land run and by-name steps were withdrawn)', () => [
+      r.full?.status === 'pass' && fullRec()?.id !== 'old' && tipOf(E) !== tip0 && g(E.R, 'log', '-1', '--format=%s', 'port/main').stdout.trim() === 'land: record PASS' && pm.length === 0 && ma.length === 1 && ma[0].status === 'warn' && ma[0].meta?.from === tip0 && pj?.revoked !== true,
+      JSON.stringify({ r, pm: pm.map((e) => e.msg), ma: ma.map((e) => e.msg), pj, rec: fullRec() }).slice(0, 2500)]);
+  }
+  {
+    resetState();
+    const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' } });
+    const ctl = path.join(T, 'ctl-record-full-red');
+    fs.writeFileSync(`${ctl}-recordonrun`, '1');
+    fs.writeFileSync(`${ctl}-alwaysred`, `play ${FLAKY}`);
+    setEngines({ unity: cfgFor(E, ctl) });
+    fullAge(30);
+    const r = probe(TRAIN);
+    let base = null; try { base = JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'unity-full-baseline.json'), 'utf8')); } catch { /* checked below */ }
+    await guard('2.86.1 the same script and a full run that is red on the target alone: the result is red (not error), the failing test goes to the target\'s own full-run list and no probe_moved_target is written (fails on 2.86.0: the red was reported as "could not run to its end" and the full run was tried again at the next train)', () => [
+      r.full?.status === 'red' && base?.failing?.includes(FLAKY) && evs(/^task\.train\.unity\.probe_moved_target$/).length === 0 && evs(/^task\.train\.unity\.target_moved_alone$/).length === 1,
+      JSON.stringify({ r, base }).slice(0, 2500)]);
+  }
+  {
+    resetState();
+    const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/b': { 'b.txt': 'b\n' } });
+    const ctl = path.join(T, 'ctl-record-target-red');
+    fs.writeFileSync(`${ctl}-recordonrun`, '1');
+    fs.writeFileSync(`${ctl}-alwaysred`, `play ${FLAKY}`);
+    setEngines({ unity: cfgFor(E, ctl, { flakyTests: [FLAKY] }) });
+    queue(E, [['T-681', 'feat/a'], ['T-682', 'feat/b']]);
+    const r = probe(TRAIN, NOFULL);
+    const q = queueNow();
+    let pj = null; try { pj = JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'unity-probe.json'), 'utf8')); } catch { /* none is fine */ }
+    await guard('2.86.1 the same script, a listed flaky test red on every retry and then on the target alone: the target is red as before (nobody handed back, both lanes queued and waiting on the tip the target has now, one engine.red_on_target), with no probe_moved_target and by-name steps not withdrawn (fails on 2.86.0: the probe on the target alone ended "error", the train stopped and by-name steps were withdrawn)', () => [
+      !r.landed?.length && !r.dropped?.length && !r.handed?.length && q.map((e) => e.task).join() === 'T-681,T-682' && q.every((e) => e.waitTarget?.target === tipOf(E)) && evs(/^engine\.red_on_target$/).length === 1
+        && evs(/^task\.train\.unity\.probe_moved_target$/).length === 0 && pj?.revoked !== true && r.waitTarget?.tests?.includes(FLAKY),
+      JSON.stringify({ r, q, pj }).slice(0, 2500)]);
+  }
   // ================= 9. the shape of a crew's 6-branch train (made-up names) =================
   // Six branches, one dropped before the land run (here: never queued). Of five: the second makes the listed flaky test red every
   // time; the first and the fifth change files in the test's assembly folder (the 2.85 rules tie them, wrongly); the full run is due

@@ -34,6 +34,16 @@ Details: docs/RELEASE-2.87.0.md.
   p90 3.1 h (12.7 h), tasks landed with no overseer step 31.7% (25%).
 - **Not done:** shared helpers in `harness/` (about 100 lines, with the next release's merges).
 
+## [2.86.1] — 2026-11-16
+One fix, found in a crew's log of its first 31 hours on 2.86.0.
+- **A run of the target alone that moved the target was thrown away** (`harness/unity-train.mjs`): 2.86.0 runs the
+  daily full run and the probe of a flaky test with `STUDIO_LAND_PROBE=1` and treated any move of the target as a land
+  script that ignores it. A land script that commits its own record of every run moves the target each time: a
+  174-minute daily full run ended "could not run to its end" and by-name steps were withdrawn. A run that carries no
+  branch cannot land one, so its result now stands and one warning (`task.train.<x>.target_moved_alone`) says what
+  moved. A by-name step that carries a branch and moves the target stops the train as before. Three checks in
+  qa/selftest-286b.mjs (they fail on 2.86.0); one 2.86 check is rebuilt on a run that carries a branch.
+
 ## [2.86.0] — 2026-11-14
 The engine train (the owner's order: more effective, unused and duplicate code out, the overseer's list). A crew's
 first 19.5 hours on 2.85: tasks landed with no overseer step 25% (0% on 2.84), hand-backs with a harness cause 34%
