@@ -14,8 +14,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { withFileLock, writeAtomic, readJson } from './fsafe.mjs';
+import { numBlankDefault as num } from './helpers.mjs';
 
-const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 export const telemetryFull = (env = process.env) => String(env.STUDIO_TELEMETRY || '').trim().toLowerCase() === 'full';
 const dirOf = () => path.join(STUDIO_STATE_DIR, 'telemetry');
 const fileOf = (type) => path.join(dirOf(), `${type.replace(/[^\w.-]/g, '_')}.json`);

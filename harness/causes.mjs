@@ -19,6 +19,7 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 import { ACCEPTED_FILE, causeOf, readAccepted, forcedGroups } from './cause-store.mjs';
 import { parseNextQueue, completeTask } from './task.mjs';
 import { isAgent } from './ask.mjs';
+import { flagOf } from './helpers.mjs';
 
 export { causeOf, readAccepted, forcedGroups };
 export async function acceptCause(cause, { by, why = '' }) {
@@ -40,7 +41,7 @@ export async function acceptCause(cause, { by, why = '' }) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   if (argv[0] === 'accept') {
     const r = await acceptCause(argv[1], { by: flag('by'), why: flag('why') || '' });
     if (!r.ok) {

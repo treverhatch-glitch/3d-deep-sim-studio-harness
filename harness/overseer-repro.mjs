@@ -16,10 +16,10 @@ import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { clean, readTasks } from './workaround.mjs';
 import { readOverseer } from './overseer.mjs';
+import { stdoutOf as out1 } from './helpers.mjs';
 
 const WORKER_ROLES = new Set(['builder', 'qa', 'qa-playtester', 'artist', 'art', 'reviewer', 'tester', 'designer', 'sound', 'writer', 'playtester']);
 const git = (cwd, args, env = process.env) => spawnSync('git', ['-c', 'core.quotePath=false', ...args], { cwd, encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024, windowsHide: true });
-const out1 = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 const real = (p) => { let r = path.resolve(p); try { r = fs.realpathSync.native(p); } catch {} return process.platform === 'win32' ? r.toLowerCase() : r; };
 const inside = (child, parent) => { const rel = path.relative(parent, child); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
 

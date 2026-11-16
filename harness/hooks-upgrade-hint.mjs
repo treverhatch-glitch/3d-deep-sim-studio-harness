@@ -11,11 +11,11 @@
  * beta mode a stand-in may, by harness/beta-mode.mjs standInMay('protected')).
  */
 import { spawnSync } from 'node:child_process';
+import { stdoutOf as ok1 } from './helpers.mjs';
 
 /** Paths a harness release owns (a release that touches anything else is not recognised: the hint stays silent). */
 export const HARNESS_OWNED = /^(harness|scripts|qa|tools|docs|hub|templates|\.github|\.claude)\/|^(package\.json|package-lock\.json|[^/]+\.md|\.gitignore|\.gitattributes|\.npmrc|\.nvmrc)$/;
 const git = (cwd, ...a) => spawnSync('git', ['-c', 'core.quotePath=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-const ok1 = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 const versionAt = (cwd, rev) => { try { return JSON.parse(ok1(git(cwd, 'show', `${rev}:package.json`)) || 'null')?.version ?? null; } catch { return null; } };
 
 /** Is merge M (parents p1, p2) a harness release merge? { ok, from, to, files } */

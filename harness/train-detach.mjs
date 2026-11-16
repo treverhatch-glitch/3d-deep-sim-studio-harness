@@ -16,11 +16,10 @@ import { fileURLToPath } from 'node:url';
 import { launchedSession } from './agent-env.mjs';
 import { AGENT_SHELL } from './permission.mjs';
 import { pidAlive as numberInUse } from './fsafe.mjs';
+import { isOff as off, sleepSync as sleep } from './helpers.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 const onV = (v) => /^(on|1|true|yes)$/i.test(String(v ?? '').trim());
-const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /** STUDIO_DONE_QUEUE (default on): a lane's task done queues the lane for the train instead of running it inline. */
 export const doneQueueOn = (env = process.env) => !off(env.STUDIO_DONE_QUEUE);

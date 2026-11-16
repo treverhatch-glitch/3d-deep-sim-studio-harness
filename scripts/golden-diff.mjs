@@ -9,12 +9,12 @@
  * gets a Golden-Diff: trailer from this script, e.g. "example-sim-start-to-win: tick 300 → 312,
  * sha256 b8483bf1 → 9c0a11e2". The War Room shows each golden change as a card someone checks.
  */
-import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gitInRootOf } from '../harness/helpers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const git = (...a) => spawnSync('git', a, { windowsHide: true, cwd: root, encoding: 'utf8' });
+const git = gitInRootOf(root);
 const flat = (o, pre = '', out = {}) => {
   for (const [k, v] of Object.entries(o || {})) {
     const key = pre ? `${pre}.${k}` : k;

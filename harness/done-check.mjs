@@ -44,6 +44,7 @@ import { engineTask, engineRepo, engineTarget, configuredEngines } from './engin
 import { pathTracks, missingTracks } from './gate-tracks.mjs';
 import { visualCheckRows } from './visual-check.mjs';
 import { anchorCheckRows } from './anchors.mjs';
+import { gitInDirOf, isSha40 as isSha } from './helpers.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -369,7 +370,6 @@ export function taskBase(taskId) {
   return base;
 }
 
-const isSha = (s) => /^[0-9a-f]{40}$/.test(String(s || ''));
 const isAncestor = (a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { windowsHide: true, cwd: REPO_ROOT }).status === 0;
 /** The studio's main branch as this checkout can name it (a lane copy: the main checkout's branch), never HEAD's own. */
 function studioMainBranches() {
@@ -687,7 +687,7 @@ export function engineWorkChecks(task) {
   if (!repo) return null;
   const t = engineTarget(rec.engine);
   const target = t?.cfg?.target || null;
-  const g = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8', windowsHide: true });
+  const g = gitInDirOf(repo);
   const rows = [];
   const br = rec.branch;
   let ahead = 0;

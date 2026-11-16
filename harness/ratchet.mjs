@@ -15,12 +15,12 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { readJson } from './fsafe.mjs';
+import { gitCwdMax64 as git } from './helpers.mjs';
 
 export const BASELINE_NAME = 'purity-baseline.json';
 export const PURITY_SECTION = 'purity';
 export const isBaselinePath = (p) => new RegExp(`(^|/)${BASELINE_NAME.replace(/\./g, '\\.')}$`).test(String(p || '').replace(/\\/g, '/'));
 const slash = (p) => String(p || '').replace(/\\/g, '/');
-const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
 
 const OWN = /^\s*(?:[x!*-]\s+)?((?:[A-Za-z]:)?[^\s:[\]]+?\.[A-Za-z0-9]+):(\d+)(?::\d+)?:?\s+\[([^\]\s]+)\]\s*(.*)$/;
 const UNIX = /^\s*((?:[A-Za-z]:)?[^\s:[\]]+?\.[A-Za-z0-9]+):(\d+):\d+:\s+(.*?)\s+\[([^\]\s]+)\]\s*$/;

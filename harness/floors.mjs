@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, actor } from './event.mjs';
 import { readBible, writeBible } from './bible.mjs';
+import { flagOf } from './helpers.mjs';
 
 const readJson = (f, d = null) => {
   try {
@@ -151,7 +152,7 @@ function showStatus() {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const [cmd, ...rest] = argv.filter(a => !a.startsWith('--'));
   const by = flag('by') || actor();
 

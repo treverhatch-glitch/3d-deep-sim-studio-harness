@@ -16,10 +16,10 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { cycleDigest, digestHeader, gateWake, isStrongNews, readWakeGate, recordWake } from './wake-gate.mjs';
+import { readJsonOr as read } from './helpers.mjs';
 
 const FILE = () => path.join(STUDIO_STATE_DIR, 'dev-cycle.json');
 const BRIEF = () => path.join(STUDIO_STATE_DIR, 'briefs', 'dev-cycle.md');
-const read = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 
 /** Core design docs a bible should have: name -> what counts (file names or headings). */
 export const CORE_DOCS = {

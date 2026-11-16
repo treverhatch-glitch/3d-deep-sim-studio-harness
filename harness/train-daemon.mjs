@@ -17,9 +17,9 @@ import { fileURLToPath } from 'node:url';
 import { emitEvent } from './event.mjs';
 import { spawnDetached } from './train-detach.mjs';
 import { writeAtomic, pidAlive as alive, readJson } from './fsafe.mjs';
+import { isOff as off } from './helpers.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 export const AUTO_FILE = (root) => path.join(root, '.studio', 'train', 'auto.json');
 export const DAEMON_FILE = (root) => path.join(root, '.studio', 'train', 'daemon.json');
 export const DAEMON_LAST = (root) => path.join(root, '.studio', 'train', 'daemon-last.json');

@@ -27,6 +27,7 @@ import { scrub } from './secrets.mjs';
 import { spawnAgentSync } from './launch.mjs';
 import { contractForReview } from './contracts.mjs';
 import { WORKER_NAME, DECIDER_ROLES, AGENT_SHELL, permittedSetter, mayDecide, actorOf } from './permission.mjs';
+import { flagOf } from './helpers.mjs';
 
 const DIFF_CAP = 24000;
 const VERDICT_WORDS = /\b(approve[sd]?|lgtm|request(ed)? changes|changes requested|reject(ed)?|blocking)\b/gi;
@@ -400,7 +401,7 @@ export async function setSameFamily(value, { by, why = '', env = process.env, ro
 async function cli() {
   const argv = process.argv.slice(2);
   const id = argv.find((a) => /^T-\d+$/.test(a));
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   if (argv[0] === 'same-family') {
     const word = argv[1] && !argv[1].startsWith('--') ? argv[1] : null;
     if (!word) { console.log(sameFamilyText()); process.exit(0); }

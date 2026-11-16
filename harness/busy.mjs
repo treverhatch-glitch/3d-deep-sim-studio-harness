@@ -21,10 +21,10 @@ import { LIMIT_STOP } from './budget.mjs';
 import { claim as claimLock, status as lockStatus } from './lock.mjs';
 import { selfIdentity, liveAs, recordAlive } from './proc-identity.mjs';
 import { harnessCaused, handBackKind } from './handback-kind.mjs';
+import { gitInDirOf, readJsonOr as read, sleepSync as sleep } from './helpers.mjs';
 
 // 2.79 (b): a record that carries the writer's start identity is judged by it (proc-identity.mjs liveAs): a reused pid is not alive.
 const alive = (pid, identity = null) => liveAs(Number(pid), identity);
-const read = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 
 async function stateDir() {
   const { mainRoot } = await import('./worktree.mjs');
@@ -88,7 +88,7 @@ export function claimOwner(task, events = readRecentEvents(20000)) {
 /** A lane copy's last change: the newest of its index, its last commit and its uncommitted files (ms, or 0). */
 function laneChangedAt(dir) {
   let t = 0;
-  const git = (...a) => spawnSync('git', a, { cwd: dir, encoding: 'utf8', windowsHide: true });
+  const git = gitInDirOf(dir);
   try { t = Math.max(t, fs.statSync(dir).mtimeMs); } catch { return 0; }
   // 2.73.1 (B-51): a folder without its own .git: only its own time (git there would read the main checkout's files).
   if (!fs.existsSync(path.join(dir, '.git'))) return t;
@@ -360,7 +360,6 @@ export function parkOnce(task, parked, { by = 'watchdog', msg = '', to = null, s
  * `task drain wait` blocks until no done is running (for upgrades); `task drain status` exits 3 while on,
  * so builder wait scripts can check it before calling done.
  */
-const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 export async function readDrain() { return read(path.join(await stateDir(), 'drain.json'), { on: false }); }
 export async function setDrain(on, by, why = '') {
   const d = await stateDir();

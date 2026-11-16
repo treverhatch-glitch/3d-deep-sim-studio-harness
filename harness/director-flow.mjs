@@ -12,15 +12,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { readJsonOrNull as readJson } from './helpers.mjs';
 
 export const FLOW_FILE = () => path.join(STUDIO_STATE_DIR, 'director-flow.json');
-const readJson = (f) => {
-  try {
-    return JSON.parse(fs.readFileSync(f, 'utf8'));
-  } catch {
-    return null;
-  }
-};
 
 /**
  * The flow, from plain data (testable): queue {inProgress, backlog}, sessions [{agent, role, running,

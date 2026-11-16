@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { readJson } from './fsafe.mjs';
+import { flagOf, jsonFileOf } from './helpers.mjs';
 
 export const CHEATSHEET_FILE = path.join(REPO_ROOT, 'studio', 'CHEATSHEET.md');
 export const ATTACH_DIR = path.join(STUDIO_STATE_DIR, 'cheatsheet');
@@ -81,7 +82,7 @@ export function matchTricks(text, { tags = [], entries = readCheatsheet(), max =
   return entries.map((e, i) => ({ ...e, i, hits: e.tags.filter((t) => ws.has(t)) })).filter((e) => e.hits.length && (e.hits.length >= 2 || e.hits.length / Math.max(1, e.tags.filter((t) => t !== 'director').length) >= 0.2 || e.hits.some((t) => explicitTags.has(t)))).sort((a, b) => b.hits.length - a.hits.length || a.i - b.i).slice(0, max).map(({ id, tags: t, text: x, hits }) => ({ id, tags: t, text: x, hits }));
 }
 
-const attachFile = (id) => path.join(ATTACH_DIR, `${id}.json`);
+const attachFile = jsonFileOf(ATTACH_DIR);
 export function readAttached(id) {
   try {
     return JSON.parse(fs.readFileSync(attachFile(id), 'utf8'));
@@ -109,7 +110,7 @@ export function attachTricks(id, { title = '', tags = [], by = 'producer', max =
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const tags = String(flag('tags') || '').split(',').map((t) => t.trim()).filter(Boolean);
   const print = (list) => console.log(list.length ? list.map((t) => `- ${t.id ? `${t.id} ` : ''}${t.text}`).join('\n') : 'No cheat sheet entry matches.');
   if (argv[0] === 'cap') {

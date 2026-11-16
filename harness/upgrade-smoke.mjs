@@ -15,10 +15,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { checkItem as item } from './helpers.mjs';
 
 const BOARD = new Set(['studio/NEXT.md', 'studio/DONE.md', 'studio/task-holds.json', 'studio/pending-review.json', 'studio/proposed.json']);
 const SKIP_STUDIO = /^studio\/(handoffs|keys|approvals|logs|research|daily|meetings|reviews|producer|done|decisions)\//;
-const item = (id, status, detail, fix = '') => ({ id, status, detail, ...(fix ? { fix } : {}) });
 const tail = (r, n = 6) => `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').filter(Boolean).slice(-n).join(' / ').slice(0, 700);
 
 /** Which tracked files the copy takes (repo-relative, forward slashes). */

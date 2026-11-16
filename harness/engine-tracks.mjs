@@ -20,11 +20,10 @@ import { learnedNeed } from './engine-ram.mjs';
 import { readJson, writeAtomic } from './fsafe.mjs';
 import { splitPhantom, phantomNote } from './eol-only.mjs';
 import { addEngineWorktree, sparsePathsFor, sparseState, sparseLine, outsideSparse, widenHint, widenEngineWorktree, reapplySparse } from './engine-worktree.mjs';
+import { foldCase as fold, gitInDirOf, isOff as off, numSplit as num } from './helpers.mjs';
 
 // 2.86: fsafe's writeAtomic retries a rename Windows refuses for a moment (EPERM/EBUSY); a bare rename killed a session's launch (setEngineTask).
 const writeJson = (f, v) => { writeAtomic(f, `${JSON.stringify(v, null, 2)}\n`); };
-const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
-const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 
 /** The settings every engine lane may tune itself. Each: { what, check(value) -> { ok, value, why } }. */
 export const TUNE_KEYS = {
@@ -404,7 +403,6 @@ export function ownSpelling(p, anchors = []) {
   if (!p) return p;
   let real;
   try { real = fs.realpathSync.native(p); } catch { return p; }
-  const fold = (x) => (process.platform === 'win32' ? x.toLowerCase() : x);
   for (const anchor of anchors.filter(Boolean)) {
     for (let a = path.resolve(anchor); ; a = path.dirname(a)) {
       let ra = null;
@@ -455,7 +453,7 @@ export function engineLaunch({ task, agent = null, role = null, root = mainRoot(
   const branch = rec.branch || `${rec.engine}/${String(task).toLowerCase()}`;
   if (!safeName(branch)) return { error: `the task's ${t.label} branch "${String(branch).slice(0, 60)}" is not a plain branch name` };
   const dir = path.join(root, '.lanes', 'engine', String(task));
-  const g = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8', windowsHide: true });
+  const g = gitInDirOf(repo);
   const has = g('rev-parse', '--verify', '--quiet', `refs/heads/${branch}`).status === 0;
   // 2.86 (f): a sparse worktree says so in the brief, in one line, with the folders it has.
   const note = (created, sp = null) => `Your ${t.label} work is in its own repo: your worktree is ${dir.split(path.sep).join('/')} on branch ${branch}${created ? ` (new, from ${target || 'its HEAD'})` : ''}. Edit and commit there (no editor run needed; the land run does it). Then: npm run task -- done ${task} --agent ${agent || '<you>'} --train${rec.visual?.required ? ` (first the visual check: npm run visual -- status ${task})` : ''}.${sp?.length ? ` ${sparseLine(task, sp)}` : ''}`;
@@ -765,7 +763,7 @@ export function engineWork(taskId, { since = null, root = mainRoot() } = {}) {
     const own = path.join(root, '.lanes', 'engine', String(taskId));
     const dir = fs.existsSync(path.join(own, '.git')) ? own : (rec.branch ? worktreeOn(repo, rec.branch) : null);
     if (!dir || !fs.existsSync(dir)) return { dir: null, branch: rec.branch || null, repo, commits: 0, dirty: [], engine: rec.engine };
-    const g = (...a) => spawnSync('git', a, { cwd: dir, encoding: 'utf8', windowsHide: true });
+    const g = gitInDirOf(dir);
     // The session's own commits: not the target's (merged in at launch), not that merge itself.
     const target = (() => { try { return engineTarget(rec.engine, { root })?.cfg?.target || null; } catch { return null; } })();
     const range = target && g('rev-parse', '--verify', '--quiet', `refs/heads/${target}^{commit}`).status === 0 ? `refs/heads/${target}..HEAD` : 'HEAD';

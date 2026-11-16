@@ -17,11 +17,10 @@ import { fileURLToPath } from 'node:url';
 import { emitEvent } from './event.mjs';
 import { mainRoot, mainBranch, createLaneCopy, removeLaneCopy, rememberTaskBranch, unmerged, LANES_DIR } from './worktree.mjs';
 import { readJson } from './fsafe.mjs';
+import { argAfterOf, cleanEnv, stdoutOf as out } from './helpers.mjs';
 
 const TASK_ID = /^[A-Z]+-\d+$/;
-const cleanEnv = (extra = {}) => { const e = { ...process.env, ...extra }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/.test(k)) delete e[k]; return e; };
 const git = (cwd, args, env = {}) => spawnSync('git', args, { cwd, encoding: 'utf8', env: cleanEnv(env), maxBuffer: 64 * 1024 * 1024, windowsHide: true });
-const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 
 export const LANE_RECORD = (root, agent) => path.join(root, '.studio', 'lanes', `${agent}.lane.json`);
 export const defaultLaneAgent = (task) => `lane-${String(task).toLowerCase()}`;
@@ -147,7 +146,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (argv.includes('--help') || argv.includes('-h') || argv[0] !== 'create') { console.log(usage); process.exit(argv[0] === 'create' || argv.includes('--help') || argv.includes('-h') ? 0 : 2); }
   const vals = new Set(['--from', '--agent', '--by']);
   const from = argv.flatMap((a, i) => (a === '--from' && argv[i + 1] ? [argv[i + 1]] : []));
-  const opt = (k) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : null);
+  const opt = argAfterOf(argv);
   const task = argv.slice(1).find((a, i, all) => !a.startsWith('--') && !vals.has(all[i - 1]));
   if (!task) { console.error(usage); process.exit(2); }
   const r = await laneCreate({ task, from, agent: opt('--agent'), allowMixed: argv.includes('--allow-mixed'), by: opt('--by') || process.env.STUDIO_LOCK_OWNER || 'conductor' });

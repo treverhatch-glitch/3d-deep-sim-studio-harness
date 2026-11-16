@@ -28,6 +28,7 @@ import { readLastFidelity } from './fidelity.mjs';
 import { constraintsBlock } from './learning-edge.mjs';
 import { pitfallPartsForRole } from './pitfalls.mjs';
 import { untrustedBlock } from './untrusted.mjs';
+import { flagValueOf } from './helpers.mjs';
 
 const BRIEF = path.join(STUDIO_STATE_DIR, 'briefs', 'director.md');
 const PHASE_NAMES = { 1: 'early game', 2: 'mid game', 3: 'endgame' };
@@ -166,10 +167,7 @@ export function startReview(phase) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => {
-    const i = argv.indexOf(`--${k}`);
-    return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
-  };
+  const flag = flagValueOf(argv);
   const cmd = argv[0] || 'drift';
   if (cmd === 'ping') {
     const res = pingDirector({ reason: flag('reason') || 'Routine check', from: flag('from') || process.env.STUDIO_LOCK_OWNER || 'producer' });

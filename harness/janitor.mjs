@@ -18,9 +18,9 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, getEventPaths } from './event.mjs';
 import { pidAlive, readJson } from './fsafe.mjs';
+import { bytesUnder, flagOf, mtimeMs as mtime, numTrimDefault as num } from './helpers.mjs';
 
 const H = 3600000;
-const num = (v, d) => (v === undefined || v === null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
 export const MARKER = '.studio-temp.json';
 /** Name prefixes of the temp copies the harness itself makes in the system temp folder (builds.mjs snapshotBuild). */
@@ -50,19 +50,7 @@ export function janitorLimits(env = process.env) {
 }
 
 /** Bytes under p, not following links (a link counts as itself). Stops counting past maxEntries. */
-export function sizeOf(p, maxEntries = 200000) {
-  let n = 0; let seen = 0;
-  const walk = (q) => {
-    if (seen++ > maxEntries) return;
-    let st; try { st = fs.lstatSync(q); } catch { return; }
-    if (st.isSymbolicLink() || !st.isDirectory()) { n += st.size || 0; return; }
-    let names = []; try { names = fs.readdirSync(q); } catch { return; }
-    for (const x of names) walk(path.join(q, x));
-  };
-  walk(p);
-  return n;
-}
-const mtime = (p) => { try { return fs.statSync(p).mtimeMs; } catch { return 0; } };
+export function sizeOf(p, maxEntries = 200000) { return bytesUnder(p, maxEntries); }
 /** The newest mtime of a folder, its direct children and their children (shallow: a play copy's files). */
 function newestMtime(dir, depth = 2) {
   let t = mtime(dir);
@@ -436,7 +424,7 @@ export const freeableGb = janitorFreeableGb;
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const known = new Set(['--yes', '--lanes', '--json', '--auto', '--by', '--permission', '--root']);
   const bad = argv.filter((a, i) => a.startsWith('--') ? !known.has(a) : !['--by', '--permission', '--root'].includes(argv[i - 1]));
   if (bad.length) { console.error('Usage: npm run janitor [-- --yes] [--lanes] [--by <name> [--permission "…"]] [--json]   (a dry run without --yes)'); process.exit(2); }

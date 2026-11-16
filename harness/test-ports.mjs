@@ -15,8 +15,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isTestPath, isTestConfig } from './test-weakening.mjs';
+import { toPosix } from './helpers.mjs';
 
-const toPosix = (p) => String(p).replace(/\\/g, '/');
 
 // One regex per message shape; the port is the first group that matched.
 const COLLISION = [

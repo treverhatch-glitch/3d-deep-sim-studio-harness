@@ -22,9 +22,8 @@ import { readJson } from './fsafe.mjs';
 import { rulesConfig, runRulesAt, rulesCheckout, removeCheckout } from './engine-rules.mjs';
 import { unityTrainSettings, chainOnTarget, unityRepo } from './unity-train.mjs';
 import { taskBranch } from './unity-gate.mjs';
+import { flagOf, numBlankDefault as num, sleepSyncClamped as sleep } from './helpers.mjs';
 
-const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
-const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 
 export const checkLockFile = (root, engine) => path.join(root, '.studio', 'locks', `engine-check-${engine}.lock`);
 
@@ -161,7 +160,7 @@ function rulesAsQuickCheck({ engine, root, cwd, task, env, log, onBranch = null 
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const root = mainRoot();
   const task = flag('task');
   let engine = flag('engine');

@@ -15,11 +15,10 @@ import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { weightedTokens, cacheReadWeight } from './token-weight.mjs';
 import { emitSampled } from './telemetry.mjs';
 import { readJson } from './fsafe.mjs';
+import { numTrimDefault as num, tsMs as ts } from './helpers.mjs';
 
 const STATE = () => path.join(STUDIO_STATE_DIR, 'futility.json');
 export const FUTILITY_LOG = () => path.join(STUDIO_STATE_DIR, 'futility-log.jsonl');
-const ts = (e) => Date.parse(e?.ts) || 0;
-const num = (v, d) => (v === undefined || v === null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 
 export function futilityMode(env = process.env) {
   const v = String(env.STUDIO_FUTILITY ?? '').trim().toLowerCase();

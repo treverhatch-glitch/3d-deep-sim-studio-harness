@@ -63,10 +63,8 @@ import { gateEnv } from './gate-env.mjs';
 import { refreshStaleLane } from './train-refresh.mjs';
 import { writeAtomic, pidAlive as alive } from './fsafe.mjs';
 import { misplacedTrailers, misplacedTrailerText } from './trailers.mjs';
+import { gitMax64 as git, sleepSync as sleep, stdoutOf as out, strList as strs } from './helpers.mjs';
 
-const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
-const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 export const TRAIN_DIR = path.join('.studio', 'train');
 export const trainOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_TRAIN || ''));
@@ -322,7 +320,6 @@ function goldenReasons(root, base, head) {
  */
 export function readTrainSettings(j = {}) {
   const notes = [];
-  const strs = (a) => (Array.isArray(a) ? a.map((x) => String(x).trim()).filter(Boolean) : []);
   let pins = null;
   if (j && j.pins !== undefined) {
     const p = j.pins && typeof j.pins === 'object' ? j.pins : {};

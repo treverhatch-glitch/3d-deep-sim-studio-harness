@@ -15,6 +15,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
+import { argAfterOf } from './helpers.mjs';
 
 export function depthAt(layout, x, z) {
   const d = layout.depth;
@@ -93,7 +94,7 @@ export function runLayoutGate({ gameDir, layoutFile, rulesFile, hook = true } = 
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const a = process.argv.slice(2);
-  const opt = (k) => (a.includes(k) ? a[a.indexOf(k) + 1] : null);
+  const opt = argAfterOf(a);
   let gameDir = opt('--game-dir');
   if (!gameDir && !opt('--rules')) { try { const { studioGame } = await import('./game-gates.mjs'); gameDir = (await studioGame())?.root; } catch {} }
   const res = runLayoutGate({ gameDir, layoutFile: opt('--layout') && path.resolve(opt('--layout')), rulesFile: opt('--rules') && path.resolve(opt('--rules')), hook: !a.includes('--no-hook') });

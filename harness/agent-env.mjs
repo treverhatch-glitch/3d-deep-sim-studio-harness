@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readEnvFile } from './dotenv.mjs';
+import { roleKey } from './helpers.mjs';
 
 const HARNESS_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASICS = /^(PATH|Path|PATHEXT|HOME|USER|USERNAME|LOGNAME|SHELL|TERM|COLORTERM|LANG|LANGUAGE|LC_[A-Z]+|TZ|TMP|TEMP|TMPDIR|PWD|SystemRoot|SystemDrive|ComSpec|WINDIR|windir|OS|PROCESSOR_ARCHITECTURE|NUMBER_OF_PROCESSORS|APPDATA|LOCALAPPDATA|USERPROFILE|HOMEDRIVE|HOMEPATH|ProgramFiles|ProgramFiles\(x86\)|ProgramData|CommonProgramFiles|PUBLIC|XDG_[A-Z_]+|DISPLAY|WAYLAND_DISPLAY|DBUS_SESSION_BUS_ADDRESS|HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy|ALL_PROXY|SSL_CERT_FILE|SSL_CERT_DIR|NODE_EXTRA_CA_CERTS|REQUESTS_CA_BUNDLE|CI|GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)|EDITOR|VISUAL)$/;
@@ -36,7 +37,6 @@ const TOOL_KEYS = {
  * No launched session gets them, not even through STUDIO_AGENT_ENV_PASS or STUDIO_AGENT_ENV=full.
  */
 export const PROXY_HELD = Object.freeze(['VERTEX_API_KEY']);
-const roleKey = (role) => String(role || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
 
 const FAMILY = [[/^(claude|anthropic)/i, 'claude'], [/^(gpt|o\d|codex|openai)/i, 'codex'], [/^(grok|xai)/i, 'grok'], [/^(gemini|google)/i, 'gemini'], [/^(qwen|llama|ollama|deepseek)/i, 'aider']];
 

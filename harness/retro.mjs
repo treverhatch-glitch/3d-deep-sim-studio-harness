@@ -18,6 +18,7 @@ import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
 import { parseNextQueue } from './task.mjs';
 import { taskType } from './done-check.mjs';
 import { buildScorecard } from './scorecard.mjs';
+import { ofTypeIn } from './helpers.mjs';
 
 export const RETRO_DIR = path.join(REPO_ROOT, 'studio', 'memory', 'retros');
 const today = () => new Date().toISOString().slice(0, 10);
@@ -33,7 +34,7 @@ export function buildRetro({ hours = 24 } = {}) {
   const events = readRecentEvents(20000).filter((e) => Date.parse(e.ts) >= since);
   const q = parseNextQueue();
   const byId = new Map([...q.inProgress, ...q.backlog, ...q.done].map((t) => [t.id, t]));
-  const count = (type) => events.filter((e) => e.type === type);
+  const count = ofTypeIn(events);
   const typeOf = (id) => (byId.get(id) ? taskType(byId.get(id)) : 'unknown');
 
   const done = count('task.done');

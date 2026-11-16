@@ -23,10 +23,10 @@ import { boardStates, readDeps } from './train-deps.mjs';
 import { lanePlan, writeRecord as writeSparseRecord, removeRecord as removeSparseRecord, widenStrays } from './lane-sparse.mjs';
 import { approvedBranchFor } from './lane-approvals.mjs';
 import { writeLaneBaseline } from './drift-baseline.mjs';
+import { gitMax64 as git, sleepSync as sleepMs } from './helpers.mjs';
 
 export const LANES_DIR = '.lanes';
 const BRANCHES = () => path.join(STUDIO_STATE_DIR, 'lane-branches.json');
-const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
 /** The main checkout: this one, or the one a lane copy was made from. */
 // A lane copy lives at <main>/.lanes/<agent>; that path names the main checkout even when the shell lost
@@ -611,7 +611,6 @@ export function restampAfterRebase(taskId, { tip, before, preHead }) {
   return { ok: false, message: `Your work was rebased on the latest studio branch, and its commits' hook stamps no longer match, so they were re-committed through the hooks, which failed: ${why}. Fix it in your copy and commit (or npm run hooks -- restamp), then task done again.` };
 }
 
-const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 export const MERGE_WT = '.studio/merge-wt';
 
 /** The dedicated merge worktree (detached, no checkout: its own HEAD and index, no files). */

@@ -26,6 +26,7 @@ import { autonomousFor, policyNeverWhy, embeddedAutonomyOk } from './policy-rule
 import { logDecision } from './decisions-log.mjs';
 import { grantBody, isProxyGrant, PROXY_MAX_DAYS, PROXY_DEFAULT_DAYS, PROXY_NEVER } from './owner-proxy.mjs';
 import { betaActor, BETA_NEVER, recordBetaUse, readBeta } from './beta-mode.mjs';
+import { optValueOf, shortIso16 as short } from './helpers.mjs';
 const readBetaOn = (root) => readBeta({ root }).on;
 
 export const DELEGATION_REL = 'studio/delegation.json';
@@ -41,7 +42,6 @@ export const MAX_HOURS = 72;
 const git = (root, ...args) => spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
 // A proxy grant also signs `proxy: true` (harness/owner-proxy.mjs); an older grant's body is unchanged.
 const body = (d) => grantBody(d);
-const short = (iso) => String(iso || '').slice(0, 16).replace('T', ' ');
 
 /** The commands each action names (npm and node forms), for the Claude Code allow rules. */
 export const ACTION_COMMANDS = {
@@ -350,7 +350,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const argv = process.argv.slice(2);
   // --help / -h prints usage and never acts.
   if (argv.includes('--help') || argv.includes('-h')) { console.log(USAGE); process.exit(0); }
-  const opt = (k) => { const i = argv.indexOf(k); return i >= 0 && argv[i + 1] !== undefined && !String(argv[i + 1]).startsWith('--') ? argv[i + 1] : null; };
+  const opt = optValueOf(argv);
   const cmd = argv[0] || 'list';
   if (cmd === 'grant') {
     const r = grantDelegation({ agent: argv[1] && !argv[1].startsWith('--') ? argv[1] : '', actions: opt('--actions'), hours: opt('--hours'), by: opt('--by'), why: opt('--why') || '', commit: !argv.includes('--no-commit') });

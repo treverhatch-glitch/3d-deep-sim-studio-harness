@@ -21,9 +21,8 @@ import { JOB_KINDS } from './heavy-budget.mjs';
 import { seedLibrary, saveLibrary, cacheLine } from './unity-cache.mjs';
 import { runNonce, freshFile, logSignatures, exitAgrees, proofLine, kindsOf, infraAbort, notRunLine } from './engine-proof.mjs';
 import { readJson } from './fsafe.mjs';
+import { numBlankDefault as num, quoteArg as q, readJsonVia, readTextOrNull as read } from './helpers.mjs';
 
-const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
-const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const rel = (f) => path.relative(REPO_ROOT, f).split(path.sep).join('/');
 
 export const isUnityProject = (dir) => fs.existsSync(path.join(dir, 'ProjectSettings', 'ProjectVersion.txt'));
@@ -298,7 +297,6 @@ export function runCodeOnly(dir, { log = console.log, root = REPO_ROOT, env = pr
       if (!r.ok) return { ok: false, ran, problems: r.problems.map((x) => `code-only (dotnet test): ${x}`) };
       continue;
     }
-    const q = (s) => (/[\s"]/.test(s) ? `"${String(s).replace(/"/g, '\\"')}"` : s);
     const cmd = st.cmd.replaceAll('{folder}', q(dir));
     const t0 = Date.now();
     const r = spawnSync(cmd, { cwd: dir, shell: true, encoding: 'utf8', env: { ...env }, timeout: st.timeoutMin * 60000, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
@@ -372,7 +370,7 @@ const walkFiles = (root, ext, out = []) => {
   }
   return out;
 };
-const readAsmdef = (f) => { try { return JSON.parse(read(f)); } catch { return null; } };
+const readAsmdef = readJsonVia(read);
 function owningAsmdef(file, assets, cache = new Map()) {
   for (let d = path.dirname(file); d.length >= assets.length; d = path.dirname(d)) {
     if (!cache.has(d)) { let a = null; try { const n = fs.readdirSync(d).find((x) => x.endsWith('.asmdef')); if (n) a = { file: path.join(d, n), json: readAsmdef(path.join(d, n)) }; } catch {} cache.set(d, a); }

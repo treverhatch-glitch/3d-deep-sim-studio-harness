@@ -21,6 +21,7 @@ import { withFileLock, writeAtomic } from './fsafe.mjs';
 import { parseNextQueue } from './task.mjs';
 import { impossibleExit } from './busy.mjs';
 import { taskType, TYPES } from './done-check.mjs';
+import { readTextOrEmpty as read } from './helpers.mjs';
 
 const NOT_CODE = /^(\.studio\/|studio\/|qa\/(reports|regressions)\/|docs\/)/;
 
@@ -210,13 +211,6 @@ export function followFromSession({ kickoff = '', log = '', taskSkill = null, pi
 
 /** At a session's end (harness/agent.mjs): one skill.follow event. Telemetry only: never a blocker, never a gate. */
 export function recordFollow({ agent, model = null, role = null, task = null, log = '' } = {}) {
-  const read = (f) => {
-    try {
-      return fs.readFileSync(f, 'utf8');
-    } catch {
-      return '';
-    }
-  };
   const kickoff = read(path.join(STUDIO_STATE_DIR, 'kickoff', `${agent}.md`));
   if (!kickoff) return null;
   let taskSkill = null;

@@ -16,9 +16,9 @@ import { weightedTokens } from './token-weight.mjs';
 import { perDayIn, workaroundStats, workaroundTrend } from './workaround-stats.mjs';
 import { baselineMeasures, readSnapshot } from './upgrade-baseline.mjs';
 import { readPredictions, scorePredictions } from './release-predict.mjs';
+import { flagOf, tsMs as ts } from './helpers.mjs';
 
 const DAY = 86400000;
-const ts = (e) => Date.parse(e?.ts) || 0;
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
 export const impactMinN = (env = process.env) => (Number(env.STUDIO_IMPACT_MIN_N) >= 1 ? Math.round(Number(env.STUDIO_IMPACT_MIN_N)) : 30);
 const verOf = (text) => { try { return JSON.parse(text).version || null; } catch { return null; } };
@@ -214,7 +214,7 @@ export async function scorecardWindows({ events, autonomy = null }) {
 }
 
 export async function impactCli(argv, { root = REPO_ROOT, autonomy = null } = {}) {
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const events = readRecentEvents(200000);
   const days = flag('days') ? Number(flag('days')) : 3;
   if (flag('days') && !(days > 0)) return { code: 2, text: 'Usage: npm run autonomy -- impact [--release <version>] [--days 3] [--json]' };

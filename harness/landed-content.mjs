@@ -9,10 +9,8 @@
  *   gitMainRoot(root), mainRefOf(root)  the main checkout (from a lane copy too: git's common dir) and its branch.
  */
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { gitCwdMax64 as git, stdoutOf as out } from './helpers.mjs';
 
-const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
-const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 
 /** The main checkout of the repository `root` is in (a lane copy shares its git's common dir). */
 export function gitMainRoot(root) {

@@ -13,6 +13,7 @@ import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { modelFamily } from './families.mjs';
 import { LIMIT_STOP } from './budget.mjs';
 import { harnessCaused, personCaused, refreshCaused } from './busy.mjs';
+import { roleKey } from './helpers.mjs';
 
 export const ROLES_CHECKED = ['producer', 'director', 'planner', 'builder', 'reviewer', 'qa-playtester'];
 export const SUGGESTED = {
@@ -32,7 +33,6 @@ export function tierOf(model) {
   return 'mid';
 }
 
-const roleKey = (role) => String(role || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
 
 /** The model each role would start on (its STUDIO_<ROLE>_MODEL, else STUDIO_AGENT_MODEL), and models seen in the last day. */
 export function roleModels(env = process.env, events = readRecentEvents(20000), now = Date.now()) {

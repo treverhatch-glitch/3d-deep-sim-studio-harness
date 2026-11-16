@@ -16,10 +16,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, actor } from './event.mjs';
 import { listDivisions, setDivision } from './divisions.mjs';
+import { flagOf } from './helpers.mjs';
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const [cmd, id] = argv;
   if (cmd === 'open' || cmd === 'close') {
     const reason = flag('reason');

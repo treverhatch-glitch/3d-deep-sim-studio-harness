@@ -16,8 +16,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { impossibleExit } from './busy.mjs';
+import { flagOf, tsMs as ts } from './helpers.mjs';
 
-const ts = (e) => Date.parse(e?.ts) || 0;
 const min = (ms) => Math.round((ms / 60000) * 10) / 10;
 const family = (model) => {
   const m = String(model || '').toLowerCase();
@@ -283,7 +283,7 @@ export function writeMetrics(rows, dir = path.join(STUDIO_STATE_DIR, 'metrics'))
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const since = Date.parse(flag('since') || '') || 0;
   const rows = attemptRows(readRecentEvents(200000), { since });
   const files = writeMetrics(rows);

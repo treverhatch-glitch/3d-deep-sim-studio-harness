@@ -19,15 +19,13 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { gameTesterConfig, DEFAULT_STYLES, DEFAULT_GOALS, DEFAULT_AREAS } from './tester-config.mjs';
 import { pidAlive as alive, readJson } from './fsafe.mjs';
+import { flagOf, numSplit as num, relPosix as rel, writeJsonTmp as writeJson } from './helpers.mjs';
 
 export const TESTER_AGENT = 'game-tester';
 export const TESTER_ROLE = 'qa-playtester';
 export const STATUSES = ['working', 'broken', 'missing', 'not-reached'];
 export const VERDICTS = ['green', 'amber', 'red'];
 const OFF = /^(off|0|false|no)$/i;
-const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
-const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(tmp, f); };
-const rel = (root, f) => path.relative(root, f).split(path.sep).join('/');
 const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', windowsHide: true });
 
 export const testerDir = (root) => path.join(root, '.studio', 'tester');
@@ -520,7 +518,7 @@ export function statusText(t) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   try { (await import('./dotenv.mjs')).loadDotEnv(path.join(REPO_ROOT, '.env')); } catch {}
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const cmd = argv[0] || 'status';
   const root = await mainRootOf();
   if (cmd === 'build') { const r = await buildRun(root, flag('run')); console.log(r.ok ? r.why : `build failed: ${r.why}`); process.exitCode = r.ok ? 0 : 1; }

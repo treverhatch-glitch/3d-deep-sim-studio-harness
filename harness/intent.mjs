@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { isPerson } from './verdict.mjs';
+import { flagValueOf, readJsonOrNull as readJson } from './helpers.mjs';
 
 export const ECHO_DIR = path.join(STUDIO_STATE_DIR, 'intent');
 
@@ -37,13 +38,6 @@ export function devSays(by, { quote = '', source = '' } = {}) {
   return { ok: true, relayedBy: inAgent ? process.env.STUDIO_LOCK_OWNER || 'an agent' : null };
 }
 
-const readJson = (f) => {
-  try {
-    return JSON.parse(fs.readFileSync(f, 'utf8'));
-  } catch {
-    return null;
-  }
-};
 export function listEchoes() {
   if (!fs.existsSync(ECHO_DIR)) return [];
   return fs.readdirSync(ECHO_DIR).filter((f) => /^E-\d+\.json$/.test(f)).sort().map((f) => readJson(path.join(ECHO_DIR, f))).filter(Boolean);
@@ -74,10 +68,7 @@ export function confirmEcho(id, by, opts = {}) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => {
-    const i = argv.indexOf(`--${k}`);
-    return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
-  };
+  const flag = flagValueOf(argv);
   const by = flag('by') || process.env.STUDIO_LOCK_OWNER || 'producer';
   const cmd = argv[0] || 'list';
   let r;

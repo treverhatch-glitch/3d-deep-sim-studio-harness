@@ -19,6 +19,7 @@ import { backoffClause } from './wake-gate.mjs';
 import { activeCartridge, isTemplateCartridge } from './cartridge.mjs';
 import { queueNotice } from './comm-notice.mjs';
 import { defaultPushEngine, pushRecordEngine } from './engine-ram.mjs';
+import { flagOf } from './helpers.mjs';
 
 export const MODE_FILE = path.join(REPO_ROOT, 'studio', 'mode.json');
 
@@ -309,7 +310,7 @@ export function describeMode(e = effectiveMode()) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const done = (r) => {
     if (!r.ok) {
       console.error(r.message);

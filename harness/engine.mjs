@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, actor, emitEvent } from './event.mjs';
 import { activeCartridge, activeGame, isTemplateCartridge } from './cartridge.mjs';
+import { flagOf } from './helpers.mjs';
 
 /** The studio's game (an adopted game, or else the cartridge): the engine track belongs to it. */
 const activeGameName = () => { try { return activeGame().name || activeCartridge().name; } catch { return activeCartridge().name; } };
@@ -260,7 +261,7 @@ export async function startEngine(engine, { by = actor() } = {}) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   // The engine lane's own settings, and every engine target (harness/engine-tune.mjs, engine-tracks.mjs).
   if (argv[0] === 'tune') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'engine-tune.mjs'), ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
   if (argv[0] === 'targets') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'engine-tracks.mjs'), 'list', ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }

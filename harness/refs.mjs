@@ -16,12 +16,12 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
+import { failExit as fail, flagValueOf, nowIso as now } from './helpers.mjs';
 
 const INDEX = path.join(REPO_ROOT, 'studio', 'references', 'library.json');
 export const libraryDir = () => path.resolve(REPO_ROOT, process.env.STUDIO_REFERENCE_DIR || 'references');
 const MAX_MB = () => Number(process.env.STUDIO_REFERENCE_MAX_MB || 300);
 const MEDIA = /^(video|image|audio)\/|^model\/|^application\/(octet-stream|pdf|zip)/;
-const now = () => new Date().toISOString();
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'ref';
 
 export function readRefs() {
@@ -139,10 +139,7 @@ export function framesRef(id, { every = 2, max = 8 } = {}) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => {
-    const i = argv.indexOf(`--${k}`);
-    return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
-  };
+  const flag = flagValueOf(argv);
   const pos = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i].startsWith('--')) {
@@ -150,10 +147,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     } else pos.push(argv[i]);
   }
   const [cmd = 'list', a1, a2] = pos;
-  const fail = (m) => {
-    console.error(m);
-    process.exit(1);
-  };
   if (cmd === 'add') {
     const r = await addRef({ source: a1, game: flag('game') || '', feature: flag('feature') || '', at: flag('at') || '', take: flag('take') || '', avoid: flag('avoid') || '', by: flag('by') || process.env.STUDIO_LOCK_OWNER || 'game-dev' });
     if (!r.ok) fail(r.message);

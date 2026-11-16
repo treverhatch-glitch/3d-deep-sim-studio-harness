@@ -17,10 +17,10 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { visionFixFlow } from './vision-fix.mjs';
+import { ofTypeIn, tsMs as at } from './helpers.mjs';
 
 const DAY = 86400000;
 const HOUR = 3600000;
-const at = (e) => Date.parse(e?.ts) || 0;
 const r1 = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
 const pct = (k, n) => (n > 0 ? r1((100 * k) / n) : null);
 const quantile = (xs, p) => { const s = xs.filter(Number.isFinite).sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.floor(p * s.length))] : null; };
@@ -47,7 +47,7 @@ export const MEASURES = [
 
 /** Count the measures the autonomy report doesn't have. events: sorted, inside the window. machine: [{ at, cpu, ram }]. */
 export function countRest(events, { from, now, machine = [] } = {}) {
-  const T = (type) => events.filter((e) => e.type === type);
+  const T = ofTypeIn(events);
   const out = { notes: {} };
   // Spend by role (what each session's tool reported).
   const ends = T('agent.session.end');

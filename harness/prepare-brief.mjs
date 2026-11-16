@@ -19,6 +19,7 @@ import { routeChatCompletion } from './route.mjs';
 import { untrustedBlock } from './untrusted.mjs';
 import { constraintsBlock, read } from './learning-edge.mjs';
 import { pitfallPartsForRole } from './pitfalls.mjs';
+import { posixOf as posix } from './helpers.mjs';
 
 // 2.61 (the learning edge): roles whose work is planning and cutting work get the constraints from past failures.
 const PLANNING_ROLES = new Set(['planner', 'producer', 'director']);
@@ -29,7 +30,6 @@ const SECTIONS = ['Goal', 'Relevant history', 'Known pitfalls', 'Files to touch'
 const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'into', 'that', 'this', 'when', 'then', 'task', 'tasks', 'fix', 'bug', 'study', 'docs', 'review', 'balance', 'playtest', 'your', 'one', 'new']);
 
 const words = (t) => (String(t || '').trim().match(/\S+/g) || []).length;
-const posix = (p) => p.split(path.sep).join('/');
 
 /** Cheap providers only: local first, then free tiers. STUDIO_PREPARE_CHAIN overrides (comma-separated ids). */
 export function cheapChain() {

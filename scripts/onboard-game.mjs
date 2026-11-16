@@ -15,13 +15,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { flagValueOf } from '../harness/helpers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
-const opt = (k) => {
-  const i = args.indexOf(`--${k}`);
-  return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null;
-};
+const opt = flagValueOf(args);
 const flag = (k) => args.includes(`--${k}`);
 if (flag('check')) {
   const { testCheckItems } = await import('../harness/test-config-check.mjs');

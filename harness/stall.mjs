@@ -26,8 +26,8 @@ import { boardStates } from './train-deps.mjs';
 import { mainOf, snapshotDirty, notTheSessions } from './drift-baseline.mjs';
 
 import { PLANNING_ROLES } from './planning-roles.mjs';
+import { jsonFileOf, numBlankDefault as num, readJsonOr as readJson, readJsonOrNull as rd } from './helpers.mjs';
 export { PLANNING_ROLES };
-const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 /** The no-progress limit for a planning session on this model, and why: STUDIO_STALL_PLAN_MIN, else the pool's "stallMin" in studio/models.json (matched by model or "match"), else 20 for a top-tier model (slow to its first write), else 8. { min, why } */
 export const SLOW_THINKER_STALL_MIN = 20;
 export function planStallFor(model, { env = process.env, root = boardRoot() } = {}) {
@@ -71,7 +71,6 @@ export function stallLimits(role, env = process.env, model = null) {
 export function busyWait(session, { dir = STUDIO_STATE_DIR, now = Date.now(), env = process.env, alive = pidAlive } = {}) {
   const agent = String(session?.agent || '');
   if (!agent) return null;
-  const rd = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
   const vmax = num(env.STUDIO_STALL_VERIFY_MAX_MIN, 60) * 60000;
   const fresh = (iso) => { const t = Date.parse(iso || ''); return Number.isFinite(t) && now - t >= -60000 && now - t < vmax; };
   const vdir = path.join(dir, 'verify-running');
@@ -104,7 +103,7 @@ export function busyWait(session, { dir = STUDIO_STATE_DIR, now = Date.now(), en
 }
 
 const DIR = path.join(STUDIO_STATE_DIR, 'stall');
-const stateFile = (agent) => path.join(DIR, `${agent}.json`);
+const stateFile = jsonFileOf(DIR);
 export function readStall(agent) {
   try { return JSON.parse(fs.readFileSync(stateFile(agent), 'utf8')); } catch { return null; }
 }
@@ -435,7 +434,6 @@ export function borrowedCommits(cwd, task, { stateDir = STUDIO_STATE_DIR, boardR
   if (!mine.size) return [];
   const own = new Set(g('rev-list', '--first-parent', `refs/heads/${main}..HEAD`).split('\n').filter(Boolean));
   const others = new Map();
-  const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
   for (const [k, v] of Object.entries(readJson(path.join(stateDir, 'lane-branches.json'), {}))) if (/^[A-Z]+-\d+$/.test(k) && typeof v === 'string' && v) others.set(k, [...(others.get(k) || []), `refs/heads/${v}`]);
   for (const e of readJson(path.join(stateDir, 'train', 'queue.json'), [])) if (e?.task && /^[0-9a-f]{40}$/.test(String(e.head || ''))) others.set(e.task, [...(others.get(e.task) || []), e.head]);
   const found = new Map();

@@ -16,6 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { activeCartridge, isTemplateCartridge, GAME_FILE } from './cartridge.mjs';
+import { flagOf } from './helpers.mjs';
 
 const git = (args, env = {}) => spawnSync('git', args, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, ...env } });
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
@@ -120,7 +121,7 @@ export async function restartStudio({ by, confirmed = 0, name = null }) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const yeses = argv.filter((a) => a === '--yes').length;
   const p = restartPlan();
   if (yeses < 2) {

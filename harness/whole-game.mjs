@@ -16,12 +16,11 @@ import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { mainRoot, linkDir, nodeModuleDirs } from './worktree.mjs';
 import { gateEnv } from './gate-env.mjs';
 import { pidAlive as alive } from './fsafe.mjs';
+import { gitMax64 as git, short8 as short } from './helpers.mjs';
 
 export const WHOLE_TITLE = 'Whole-game check red';
 export const WHOLE_RE = /^Whole-game check red\b/i;
-const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const stateFile = (root = mainRoot()) => path.join(root, '.studio', 'whole-game.json');
-const short = (sha) => String(sha || '').slice(0, 8);
 
 export const wholeOn = (env = process.env) => /^(on|1|true|yes)$/i.test(String(env.STUDIO_WHOLE_GAME || ''));
 

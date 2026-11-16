@@ -19,6 +19,7 @@ import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { agentOnPermission, permissionText, permittedSetter, WORKER_NAME, AGENT_SHELL } from './permission.mjs';
 import { readJson } from './fsafe.mjs';
+import { escapeRe as escRe, gitInRootOf } from './helpers.mjs';
 
 export const CONTRACTS_REL = 'studio/contracts';
 export const contractRel = (id) => `${CONTRACTS_REL}/${id}.json`;
@@ -131,7 +132,6 @@ export function fileCheck(check, root = REPO_ROOT) {
 const isTestPath = (f) => !/(^|\/)(node_modules|\.git|addons\/gdUnit4)\//.test(f) && !/(^|\/)(golden|goldens|__snapshots__)\//i.test(f)
   && (/(^|\/)[^/]+\.(test|spec)\.[^/]+$/i.test(f) || /(^|\/)(tests?|__tests__|specs?|qa)\//i.test(f) || /(^|\/)[^/]*(\.Tests?|Tests)\//.test(f)
     || /(^|\/)(test_[^/]+\.(py|gd)|[^/]+_test\.(py|gd|go|rs|js|ts|mjs)|[^/]+Tests?\.(cs|gd|java|kt))$/.test(f));
-const escRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /**
  * A test criterion, judged now: a test named `name` is defined, and not skipped, in a test file (check.file, else every
  * tracked or untracked test file: harness/test-weakening.mjs isTestPath). Definitions: it/test/describe ('<name>' …) in
@@ -435,7 +435,7 @@ function manualFindings(rel, task, B, C, setter, env) {
 
 function commitOne(id, message, root = REPO_ROOT) {
   const rel = contractRel(id);
-  const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd: root, encoding: 'utf8' });
+  const g = gitInRootOf(root);
   if (g('rev-parse', '--verify', '-q', 'HEAD').status !== 0) return 'not committed (not a git checkout)';
   g('add', '--', rel);
   const r = g('commit', '-q', '-m', message, '--', rel);

@@ -18,8 +18,8 @@ import { readRecentEvents, emitEvent } from './event.mjs';
 import { weightedTokens } from './budget.mjs';
 import { readHolds, setHold, heldForLanding, heldWords } from './task-hold.mjs';
 import { sessionEndKind, harnessKind } from './handback-kind.mjs';
+import { numBlankDefault as num } from './helpers.mjs';
 
-const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const off = (env) => /^(off|0|false|no)$/i.test(String(env.STUDIO_TASK_BUDGET || ''));
 
 export function taskBudgetLimits(env = process.env) {

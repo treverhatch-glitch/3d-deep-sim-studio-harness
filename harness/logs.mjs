@@ -12,8 +12,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
+import { readTextOrNull as read } from './helpers.mjs';
 
-const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
 
 /** Blocks that start with "### " in a log file: [{ id, title, status, body }]. */
 export function blocks(text) {

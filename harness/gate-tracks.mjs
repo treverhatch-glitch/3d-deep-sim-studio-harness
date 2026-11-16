@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT } from './event.mjs';
+import { isOff as off, readJsonOrNull as readJson } from './helpers.mjs';
 
 /** The one table: gate id -> track (or tracks). studio/gates.json "track" on a gate wins. */
 export const GATE_TRACKS = Object.freeze({
@@ -34,10 +35,8 @@ export const GATE_TRACKS = Object.freeze({
 /** The gates that judge docs, run for a docs-only change (and with their own track otherwise). */
 export const DOCS_GATES = Object.freeze(['docs', 'secrets', 'hooks', 'protected', 'approvals', 'session', 'reviewer']);
 
-const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 const ENGINE_RE = /^[a-z][a-z0-9-]{1,30}$/;
 const asList = (t) => (Array.isArray(t) ? t : [t]).map((x) => String(x || '').trim()).filter(Boolean);
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 /** STUDIO_GATES_BY_TRACK=off: every gate every time (default on). */
 export const byTrackOn = (env = process.env) => !off(env.STUDIO_GATES_BY_TRACK);

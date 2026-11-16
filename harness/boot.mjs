@@ -20,11 +20,10 @@ import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './even
 import { identityLines, SESSION_IDENTITY_KEYS } from './dotenv.mjs';
 import { pidAlive, readStarts, sameProcess } from './proc-identity.mjs';
 import { which, versionAtLeast } from './upgrade-preflight.mjs';
+import { checkItem as item, relPosix as rel } from './helpers.mjs';
 
 const BY = 'studio-boot';
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return undefined; } };
-const rel = (root, f) => path.relative(root, f).split(path.sep).join('/');
-const item = (id, status, detail, fix = '') => ({ id, status, detail, ...(fix ? { fix } : {}) });
 
 /** Step 1: [{ id, status: PASS|WARN|FAIL|INFO, detail, fix? }]. Values from .env are never printed. */
 export function preflightLite({ root = REPO_ROOT, env = process.env, platform = process.platform } = {}) {

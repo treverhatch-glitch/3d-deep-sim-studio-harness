@@ -15,6 +15,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { signPayload, checkSignature } from './verify-key.mjs';
+import { foldCase as norm, readJsonOrNull as read } from './helpers.mjs';
 
 const gitEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|CEILING_DIRECTORIES|DISCOVERY_ACROSS_FILESYSTEM)$/.test(k)));
 const git = (cwd, args) => {
@@ -23,7 +24,6 @@ const git = (cwd, args) => {
     return r.status === 0 ? String(r.stdout) : null;
   } catch { return null; }
 };
-const norm = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
 export const realPath = (p) => { try { return norm(fs.realpathSync.native(p)); } catch { return norm(path.resolve(p)); } };
 const under = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
 
@@ -221,7 +221,6 @@ export function generatedGlobRe(glob) {
  */
 export function generatedGlobs(root, gameRoot = null) {
   const res = [];
-  const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
   const add = (list, base) => { for (const g of Array.isArray(list) ? list : []) { const t = String(g || '').trim(); if (!t || t.startsWith('/') || t.split(/[\\/]/).includes('..')) continue; try { res.push(generatedGlobRe(base ? `${base}/${t}` : t)); } catch {} } };
   add(read(path.join(root, 'studio', 'gates.json'))?.generated, '');
   if (gameRoot) add(read(path.join(root, gameRoot, 'studio.gates.json'))?.generated, String(gameRoot).replace(/\\/g, '/').replace(/\/+$/, ''));

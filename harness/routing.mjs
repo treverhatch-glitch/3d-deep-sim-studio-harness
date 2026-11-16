@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import { readRecentEvents } from './event.mjs';
 import { tierOf, escalationFor } from './model-tiers.mjs';
 import { readPolicy } from './policy-rules.mjs';
+import { tsMs as ts } from './helpers.mjs';
 
 export const TIER_ORDER = ['cheap', 'mid', 'top'];
 export const HOLDOUT_NOTE = 'off (0): the owner deferred it until API credit is available, so cheap-first is not compared with the default tier on the same kind of task';
@@ -21,7 +22,6 @@ export const HOLDOUT_NOTE = 'off (0): the owner deferred it until API credit is 
 // dearer tier), so an unset holdout stays 0; set "routing.holdout" (0.1 is the suggested share) to turn it on.
 export const DEFAULT_HOLDOUT = 0;
 const DAY = 86400000;
-const ts = (e) => Date.parse(e?.ts) || 0;
 
 /** The routing block in force: { on, cheapFirst, tiers, models, holdout, why } from a readPolicy() result. */
 export function routingPolicy(policy) {

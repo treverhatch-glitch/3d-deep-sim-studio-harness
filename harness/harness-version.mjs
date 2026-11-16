@@ -14,15 +14,14 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { isOff as off, stdoutOf as out } from './helpers.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The folder whose harness/ this process loads its code from (this file's checkout). */
 export const RUNNING_ROOT = path.resolve(HERE, '..');
 const HARNESS_DIRS = ['harness', 'scripts'];
-const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/.test(k)));
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, env: cleanEnv(), timeout: 30000 });
-const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 
 /** The committed harness of `rev` in `dir`: the tree ids of <rev>:harness and <rev>:scripts, joined ('' when unreadable). */
 export function harnessTree(dir, rev = 'HEAD') {

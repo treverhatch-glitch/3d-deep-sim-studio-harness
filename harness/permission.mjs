@@ -13,6 +13,7 @@ import path from 'node:path';
 import { proxyShell, mainCheckout } from './owner-proxy.mjs';
 import { parseStudioEnv } from './dotenv.mjs';
 import { betaActor, standInMay } from './beta-mode.mjs';
+import { readJsonOrNull as readJsonQuiet } from './helpers.mjs';
 // 2.84 (q): the one rule for the owner's decisions a stand-in makes in beta mode (defined in beta-mode.mjs, beside readBeta).
 export { standInMay, STAND_IN_KINDS, recordStandInUse } from './beta-mode.mjs';
 
@@ -103,7 +104,6 @@ export function outsideSigners(root = process.cwd()) {
 // 2.84 (q): nor a session pinned to a task (STUDIO_TASK_PIN, set by the launcher): it never names itself a stand-in with --by.
 export const selfNamingShell = (env = process.env) => !String(env.STUDIO_ROLE || '').trim() && !String(env.STUDIO_LOCK_OWNER || '').trim() && !String(env.STUDIO_TASK_PIN || '').trim();
 
-const readJsonQuiet = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 /**
  * The role a launched session ran under ('' when the name isn't one): its session record (.studio/agents/<name>.json,
  * written by the launcher, here or in the main checkout), else the launcher's name shape (producer-s1, director-2), else

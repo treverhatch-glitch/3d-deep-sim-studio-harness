@@ -18,6 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { readRecentEvents } from './event.mjs';
 import { weightedTokens } from './budget.mjs';
 import { harnessCaused } from './busy.mjs';
+import { argAfterOf } from './helpers.mjs';
 
 export const TARGETS = { refusalsPerLanding: 1.5, harnessCausedShare: 0.05 };
 
@@ -199,7 +200,7 @@ export function renderNeeds(n) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const a = process.argv.slice(2);
-  const flag = (n) => (a.includes(n) ? a[a.indexOf(n) + 1] : null);
+  const flag = argAfterOf(a);
   const events = readRecentEvents(0);
   const since = parseSince(flag('--since') || '24h');
   const h = health(events, { since });

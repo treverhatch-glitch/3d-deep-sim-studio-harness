@@ -22,6 +22,7 @@ import { canonicalBytes } from './hash.mjs';
 import { matchAny } from './merge-lane.mjs';
 import { SHIPPED_PROTECTED } from './tiers.mjs';
 import { emitEvent } from './event.mjs';
+import { stdoutOf as out } from './helpers.mjs';
 
 export const PROPOSALS_DIR = 'studio-proposals';
 export const OWNER_PUB_REL = 'studio/keys/owner-ed25519.pub.pem';
@@ -36,7 +37,6 @@ const BAD_SEG = new Set(['__proto__', 'constructor', 'prototype']);
 const OWN_KEYS = new Set(['changes', 'why', 'task', 'base', 'held']);
 
 const git = (cwd, args, opts = {}) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts });
-const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 
 /** A key's path: a JSON pointer ("/a/b", "~1" is "/", "~0" is "~") or a dotted key ("a.b"). null when invalid. */
 export function keySegments(key) {

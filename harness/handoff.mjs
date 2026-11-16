@@ -29,6 +29,7 @@ import { repeats, staleSuggestions } from './learn.mjs';
 import { buildConstraints, constraintsBlock } from './learning-edge.mjs';
 import { listPitfallProposals, pitfallPartsForRole } from './pitfalls.mjs';
 import { untrustedBlock } from './untrusted.mjs';
+import { readJsonVia } from './helpers.mjs';
 
 const read = (rel) => {
   try {
@@ -37,13 +38,7 @@ const read = (rel) => {
     return null;
   }
 };
-const readJson = (rel) => {
-  try {
-    return JSON.parse(read(rel));
-  } catch {
-    return null;
-  }
-};
+const readJson = readJsonVia(read);
 const mtime = (rel) => {
   try {
     return fs.statSync(path.join(REPO_ROOT, rel)).mtimeMs;

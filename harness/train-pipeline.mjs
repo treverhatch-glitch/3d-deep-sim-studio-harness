@@ -18,9 +18,9 @@ import { fileURLToPath } from 'node:url';
 import { machineProfile, slotsFor, budgetState, jobClaim, admit, maxConcurrent, rigKind } from './heavy-budget.mjs';
 import { spawnDetached } from './train-detach.mjs';
 import { pidAlive as alive, readJson } from './fsafe.mjs';
+import { isOff as off } from './helpers.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 export const NEXT_BY = 'train-next';
 export const nextLockFile = (root) => path.join(root, '.studio', 'locks', 'train-next.lock');
 const trainLockFile = (root) => path.join(root, '.studio', 'locks', 'train.lock');

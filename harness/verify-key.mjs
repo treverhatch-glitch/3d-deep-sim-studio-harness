@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { foldCase as norm, sha256Hex as sha } from './helpers.mjs';
 
 const gitEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|CEILING_DIRECTORIES|DISCOVERY_ACROSS_FILESYSTEM)$/.test(k)));
 const git = (cwd, args) => {
@@ -23,7 +24,6 @@ const git = (cwd, args) => {
     return r.status === 0 ? String(r.stdout) : null;
   } catch { return null; }
 };
-const norm = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
 // A folder that isn't there yet (a key folder before its first key) resolves through its nearest existing parent:
 // on Windows the temp folder can be a short 8.3 name (RUNNER~1) that only the real path spells out (2.73.0, CI).
 const real = (p) => {
@@ -38,7 +38,6 @@ const real = (p) => {
   }
 };
 const under = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
-const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 export const SIG_ALG = 'hmac-sha256';
 const DOMAIN = 'studio-verify-v1';

@@ -10,12 +10,10 @@
  * Test hook: STUDIO_TEST_GIT_VERSION=<"git version x.y.z"> stands in for `git version` (not cached). Only static imports of
  * merge-lane.mjs and hotspots.mjs, neither of which imports a module whose CLI uses top-level await.
  */
-import { spawnSync } from 'node:child_process';
 import { matchAny } from './merge-lane.mjs';
 import { conflictPlaces } from './hotspots.mjs';
+import { gitCwdMax64 as git, stdoutOf as out } from './helpers.mjs';
 
-const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
-const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 
 let cachedVersion; // undefined: not read yet in this process
 /** git's version as [major, minor, patch] (from `git version`), or null. Read once per process; `text` parses that. */

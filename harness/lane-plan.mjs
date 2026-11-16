@@ -18,9 +18,9 @@ import { laneList, laneEntries, laneOf, inferLaneAtAdd, gameFolders, setHold } f
 import { splitEntry, entriesClash, regionFiles } from './lane-regions.mjs';
 import { parseScope, overlapHistory, firstOverlap } from './plan-waves.mjs';
 import { matchAny } from './merge-lane.mjs';
+import { normRel as norm } from './helpers.mjs';
 
 const OFF = /^(off|0|false|no)$/i;
-const norm = (p) => String(p || '').trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
 const GLOB = /[*?[\]{}]/;
 
 /** STUDIO_LINE_LANES: on (default) | report | off. */

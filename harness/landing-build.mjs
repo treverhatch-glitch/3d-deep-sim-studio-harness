@@ -17,9 +17,8 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readJson } from './fsafe.mjs';
+import { isOffRaw as off, numBlankDefault as num } from './helpers.mjs';
 
-const off = (v) => /^(off|0|false|no)$/i.test(String(v || ''));
-const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 export const lbDir = (root) => path.join(root, '.studio', 'landing-build');
 const pendingFile = (root) => path.join(lbDir(root), 'pending.json');
 const workerFile = (root) => path.join(lbDir(root), 'worker.json');

@@ -19,9 +19,9 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 import { laneExcludeConfig, laneSparseState, studioMain } from './lane-sparse.mjs';
 import { globRe } from './merge-lane.mjs';
 import { readJson } from './fsafe.mjs';
+import { bytesUnder, numTrimDefault as num } from './helpers.mjs';
 
 const GB = 1024 ** 3;
-const num = (v, d) => (v === undefined || v === null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const r2 = (x) => Math.round(x * 100) / 100;
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, windowsHide: true });
 export const human = (b) => (b >= GB ? `${r2(b / GB)} GB` : b >= 1024 ** 2 ? `${Math.round(b / 1024 ** 2)} MB` : `${Math.round(b / 1024)} KB`);
@@ -37,18 +37,7 @@ function writeJson(f, j) {
 }
 
 /** Bytes under p, not following links. */
-export function sizeOf(p, maxEntries = 2000000) {
-  let n = 0; let seen = 0;
-  const walk = (q) => {
-    if (seen++ > maxEntries) return;
-    let st; try { st = fs.lstatSync(q); } catch { return; }
-    if (st.isSymbolicLink() || !st.isDirectory()) { n += st.size || 0; return; }
-    let names = []; try { names = fs.readdirSync(q); } catch { return; }
-    for (const x of names) walk(path.join(q, x));
-  };
-  walk(p);
-  return n;
-}
+export function sizeOf(p, maxEntries = 2000000) { return bytesUnder(p, maxEntries); }
 
 /** The lanes' limit: STUDIO_LANES_MAX_GB, else 25% of the studio's disk (null when the disk can't be read). */
 export function lanesMaxGb({ root, env = process.env, statfs = (p) => fs.statfsSync(p) } = {}) {

@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { readJsonOrNull as readJsonFile, readTextOrNull as readText } from './helpers.mjs';
 
 export const STAMP_CACHE_MS = 60000;
 /** The exit code that asks a service manager (systemd Restart=on-failure, launchd KeepAlive) to start the supervisor again. */
@@ -23,8 +24,6 @@ export const HANDOFF_MAX_AGE_MS = 15 * 60000;
 /** The supervisor's in-memory state that a restart carries over (as a person's restart would want it kept). */
 export const HANDOFF_KEYS = ['halted', 'haltCheckFrom', 'extended', 'names', 'roleBackoff', 'roleBackoffSeen', 'startBackoffSeen', 'timed', 'probed'];
 
-const readText = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
-const readJsonFile = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 
 /** The checkout's git folder and the common one (a worktree's .git is a file naming its folder). */

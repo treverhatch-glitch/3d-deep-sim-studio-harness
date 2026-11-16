@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { mainRoot } from './worktree.mjs';
 import { POLICY_REL, PROPOSAL_REL, AUTONOMOUS_ELIGIBLE, DEFAULT_REVIEW_H, NEVER_WORDS, readPolicy, policyText, setAutonomous, confirmProposal, declineProposal } from './policy-rules.mjs';
 import { readJson } from './fsafe.mjs';
+import { optValueOf } from './helpers.mjs';
 
 
 export const USAGE = `Usage: npm run policy [-- --json]                          the rules in force, and whether ${POLICY_REL} counts
@@ -22,7 +23,7 @@ Anyone but a worker pauses it at once: npm run autonomy -- mode autonomous off -
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   if (argv.includes('--help') || argv.includes('-h')) { console.log(USAGE); process.exit(0); }
-  const opt = (k) => { const i = argv.indexOf(k); return i >= 0 && argv[i + 1] !== undefined && !String(argv[i + 1]).startsWith('--') ? argv[i + 1] : null; };
+  const opt = optValueOf(argv);
   const cmd = argv[0] && !argv[0].startsWith('--') ? argv[0] : 'show';
   const done = (r) => { (r.ok ? console.log : console.error)(r.message); process.exit(r.ok ? 0 : 1); };
   if (cmd === 'show') {

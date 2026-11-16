@@ -11,19 +11,18 @@
  * sources and body, so a changed source or an edited body makes the kickoff write it again (one brief.role.written
  * event). It lives in .studio/ (not committed, not protected): derived, never a source.
  */
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { GATE_FIXES, gameKindFix } from './gate-fix.mjs';
 import { readMode, scopeOf } from './mode.mjs';
+import { sha256Hex as sha } from './helpers.mjs';
 
 export const ROLE_BRIEF_MAX_WORDS = 800;
 export const ROLE_BRIEF_REL = '.studio/briefs/role-builder.md';
 const GENERATOR = 'role-brief 1';
 const BUDGET = { rules: 400, pitfalls: 80, protected: 75, gates: 160, policy: 60 };
-const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const words = (s) => (String(s || '').match(/\S+/g) || []).length;
 const read = (root, rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf8').replace(/\r\n/g, '\n'); } catch { return null; } };
 const readJson = (root, rel) => { try { return JSON.parse(read(root, rel)); } catch { return null; } };

@@ -26,6 +26,7 @@ import { matchAny, matchAnyFold } from './merge-lane.mjs';
 import { protectRoot, trustedEnv, mainRootTrust } from './gate-trust.mjs';
 import { TOOLCHAIN_GLOBS, toolchainProtected } from './test-toolchain.mjs';
 import { gitEnv, gitRedirects, gitRedirectsWhy } from './gate-env.mjs';
+import { argAfterOf, readJsonOrNull as read } from './helpers.mjs';
 
 export const OWNER_PUB_REL = 'studio/keys/owner-ed25519.pub.pem';
 export const APPROVALS_REL = 'studio/approvals';
@@ -440,7 +441,6 @@ function approvalTask(note = '') {
     const board = boardRoot();
     if (board !== REPO_ROOT) {
       const branch = git(['symbolic-ref', '-q', '--short', 'HEAD']).stdout.trim();
-      const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
       const found = new Set();
       if (branch) {
         for (const [k, v] of Object.entries(read(path.join(board, '.studio', 'lane-branches.json')) || {})) if (/^[A-Z]+-\d+$/.test(k) && v === branch) found.add(k);
@@ -504,7 +504,7 @@ async function approveListed(cmd, note, by) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const a = process.argv.slice(2);
-  const flag = (n) => (a.includes(n) ? a[a.indexOf(n) + 1] : null);
+  const flag = argAfterOf(a);
   if (flag('--base')) process.env.STUDIO_PROTECT_BASE = flag('--base');
   const by = flag('--by') || process.env.USER || process.env.USERNAME || 'owner';
   proxyPermission = flag('--permission') || '';

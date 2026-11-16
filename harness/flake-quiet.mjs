@@ -13,8 +13,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { heavyHolders, laneCheckSlots, implicitHolders, describeHolder, describeImplicit } from './heavy.mjs';
 import { recordAlive } from './proc-identity.mjs';
+import { sleepSync } from './helpers.mjs';
 
-const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /** 2.78.2 (b): STUDIO_QUIET_BUSY_ROLES as a list (default engine-porter,engine-worker, also when empty; off: none). */
 export function quietBusyRoles(env = process.env) {

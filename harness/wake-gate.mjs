@@ -15,6 +15,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { readJson, writeAtomic } from './fsafe.mjs';
+import { tsMs as ts } from './helpers.mjs';
 
 /**
  * The events that change the board. One list: a planning session's outcome (agent.session.end meta.outcome.boardEvents)
@@ -46,7 +47,6 @@ export const wakeSameMaxH = (env = process.env) => hours(env.STUDIO_WAKE_SAME_MA
 export const cycleQuietMaxH = (env = process.env) => hours(env.STUDIO_CYCLE_QUIET_MAX_H, 12);
 export const maxHoursFor = (kind, env = process.env) => (kind === 'cycle' ? cycleQuietMaxH(env) : wakeSameMaxH(env));
 
-const ts = (e) => Date.parse(e?.ts) || 0;
 const sha = (x) => crypto.createHash('sha1').update(JSON.stringify(x)).digest('hex').slice(0, 16);
 const utc = (ms) => `${new Date(ms).toISOString().slice(11, 16)} UTC`;
 

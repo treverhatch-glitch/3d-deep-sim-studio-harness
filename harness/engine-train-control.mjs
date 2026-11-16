@@ -19,13 +19,11 @@ import { writeAtomic, readJson } from './fsafe.mjs';
 import { pidAlive } from './proc-identity.mjs';
 import { changedPaths, playSelection, playFocusConfig } from './engine-rules.mjs';
 import { engineTarget, engineFiles } from './engine-tracks.mjs';
+import { foldRealOf, isOff as offWord, realOrResolved as real, slashPath as fwd, sleepSyncClamped as sleep, stdoutOf as out } from './helpers.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
-const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
-const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); writeAtomic(f, `${JSON.stringify(v, null, 2)}\n`); };
 const labelOf = (engine) => engineTarget(engine)?.label || engine;
-const fwd = (p) => String(p || '').split(path.sep).join('/');
 
 // ---- lane tags --------------------------------------------------------------------------------------------------
 
@@ -169,7 +167,6 @@ async function noteStandIn({ by, env, root, msg, why }) {
 // ---- automatic start on/off --------------------------------------------------------------------------------------
 
 export const autoFile = (root, engine) => path.join(root, '.studio', 'train', `${engine}-auto.json`);
-const offWord = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 
 /**
  * 2.84 (u): the automatic start of engine <x>'s train: { on, source: 'env' | 'file' | 'config' | null, by?, at?, why?,
@@ -249,8 +246,7 @@ export const CANCEL_WAIT_MS = 30000;
 /** Is `dir` a linked worktree (never a main checkout) of the repo whose common git dir is `common`? */
 function linkedWorktreeOf(dir, common) {
   if (!dir || !fs.existsSync(dir)) return false;
-  const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
-  const fold = (p) => (process.platform === 'win32' ? real(p).toLowerCase() : real(p));
+  const fold = foldRealOf(real);
   const top = out(git(dir, 'rev-parse', '--show-toplevel'));
   const gd = out(git(dir, 'rev-parse', '--git-dir'));
   const cd = out(git(dir, 'rev-parse', '--git-common-dir'));

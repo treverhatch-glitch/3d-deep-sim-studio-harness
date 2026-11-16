@@ -17,6 +17,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, getEventPaths, rolledEventFiles, readRecentEvents, STUDIO_STATE_DIR } from './event.mjs';
+import { argAfterOf } from './helpers.mjs';
 
 export const JOB_KINDS = ['verify', 'train', 'game-gates', 'heavy', 'unity-gate', 'unity-test', 'unity-build', 'session'];
 
@@ -181,7 +182,7 @@ export async function waitForEvent({ type = null, matches = [], since = Date.now
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const opt = (k) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : null);
+  const opt = argAfterOf(argv);
   const all = (k) => argv.flatMap((a, i) => (a === k && argv[i + 1] !== undefined ? [argv[i + 1]] : []));
   const cmd = argv[0];
   if (cmd === 'wait') {

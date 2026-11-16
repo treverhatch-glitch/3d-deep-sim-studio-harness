@@ -11,7 +11,6 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent } from './event.mjs';
 import { emitOnChange } from './telemetry.mjs';
@@ -19,10 +18,8 @@ import { mainRoot, mainBranch, laneCopies } from './worktree.mjs';
 import { listLocks } from './lock.mjs';
 import { withLandLock } from './merge-lane.mjs';
 import { readJson } from './fsafe.mjs';
+import { gitMax64 as git, isSha40 as isSha, stdoutOf as out } from './helpers.mjs';
 
-const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
-const isSha = (s) => /^[0-9a-f]{40}$/.test(String(s || ''));
 const NEAR = 2;
 export const askAt = (env = process.env) => Math.max(1, Number(env.STUDIO_HOTSPOT_ASK) || 3);
 const stateFile = (root) => path.join(root, '.studio', 'hotspots.json');

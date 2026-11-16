@@ -16,12 +16,11 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { readJsonOr as read, writeJsonPretty as write } from './helpers.mjs';
 
 const CHARTER = () => process.env.STUDIO_CHARTER || path.join(REPO_ROOT, 'studio', 'bible', 'CHARTER.md');
 const ASSETS = () => path.join(REPO_ROOT, 'studio', 'bible', 'ASSETS.md');
 const MS = () => path.join(STUDIO_STATE_DIR, 'milestones.json');
-const read = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
-const write = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${JSON.stringify(v, null, 2)}\n`); };
 
 /** Parse the charter into ladders of milestones with exit criteria. */
 export function parseCharter(text) {

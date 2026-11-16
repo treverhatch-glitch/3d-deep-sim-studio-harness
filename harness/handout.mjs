@@ -15,15 +15,9 @@ import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, getEventPaths, rolledEventFiles } from './event.mjs';
 import { readHolds, lanesClash } from './task-hold.mjs';
 import { bringsNothing, gitMainRoot, mainRefOf } from './landed-content.mjs';
+import { readJsonOr as readJson } from './helpers.mjs';
 
 const WAIT_FILE = () => path.join(STUDIO_STATE_DIR, 'handout-waiting.json');
-const readJson = (f, d) => {
-  try {
-    return JSON.parse(fs.readFileSync(f, 'utf8'));
-  } catch {
-    return d;
-  }
-};
 
 /**
  * 2.77.3 (B-114): a task the board closed as landed (its last closing event is task.done, a merge-train landing or a lane

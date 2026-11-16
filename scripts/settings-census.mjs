@@ -14,11 +14,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { settingsMap, readBaseline } from './settings-map.mjs';
+import { readTextOrEmpty as read } from '../harness/helpers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NAME = /STUDIO_[A-Z0-9_]+/g;
 const isTest = (f) => /^qa\/selftest/.test(f);
-const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 const OFF_NAME = /_(OFF|DISABLE|DISABLED|LEGACY|OLD|CLASSIC|SKIP)(_|$)/;
 const OFF_DOC = /\b(restores?|reverts?|brings? back|old behaviou?r|previous behaviou?r|behaves? as before|as before|escape hatch|kill switch|back to (?:the )?(?:old|previous|2\.\d+)|=\s*`?off`?|`off`|\boff\b[^.]{0,60}(?:old|before|previous|back))/i;
 const FAMILY_WORDS = new Set(['WAIT', 'HOLD', 'TIMEOUT', 'GRACE', 'COOLDOWN', 'INTERVAL', 'LIMIT', 'TTL', 'DELAY', 'STALE', 'RETRIES', 'RETRY', 'AGE', 'IDLE', 'STALL', 'STUCK', 'QUIET', 'SCAN', 'EVERY', 'REPEAT']);

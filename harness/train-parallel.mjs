@@ -12,8 +12,8 @@
 import { spawn } from 'node:child_process';
 import { busyWhy, ranNoCheck, busyWaitMs } from './train-busy.mjs';
 import { machineProfile, slotsFor, budgetState, jobClaim, admit, maxConcurrent } from './heavy-budget.mjs';
+import { isOff } from './helpers.mjs';
 
-const isOff = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 
 /** STUDIO_TRAIN_BISECT_PARALLEL: the most prefixes checked at once (default 4; off/0/1: one). */
 export function parallelCap(env = process.env) {
