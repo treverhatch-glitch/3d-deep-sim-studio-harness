@@ -4,6 +4,19 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.92.0] — 2026-11-17
+Bad news at the queue door, not hours later (the owner's order: upgrade, and take lines away where that is right).
+A live studio's trains handed back half their branches for clashes found only when the train started.
+Details: docs/RELEASE-2.92.0.md.
+- **The compile search runs when a branch is queued**, against the target and the branches queued ahead. A clash is
+  told to the porter at once; the branch is queued and trains keep the two apart.
+- **The check before queueing judges the branch merged with the target**, and runs again when the target moved.
+- **A land run red on a compiler error hands back the branch that changed that file** (`engines.<x>.logs`).
+- **A target red by itself files one fix task**, once per distinct red.
+TIMINGLINE
+- **Size:** harness code SIZESHORT. No dead file was found to remove; a planned tool was not built because the
+  self-test already has it.
+
 ## [2.91.0] — 2026-11-17
 No full run ahead of a waiting batch (the owner's order: the next version, from a live studio's first day on 2.90).
 A train of four small green branches took seven hours: two full rules runs and a daily full land run went ahead of
@@ -22,7 +35,7 @@ it, and the land script's record commit then cost the batch its "rules are green
 ## [2.90.0] — 2026-11-16
 The overseer's list (the owner's order: build what a live studio's overseer asked for after two days on 2.86). Its
 train logs showed more than the list: the rules check had timed out on every engine train for two days and judged
-nobody. Details: docs/RELEASE-2.90.0.md.
+nobody. Details: the 2.90.0 release notes, in git history.
 - **The rules check's time limit follows the suite** when the studio set none, a timeout on the target is an event
   and a line in `train status`, and the same cut-off run is not repeated.
 - **A compile error is searched with the compile command**, not with land runs; `engines.<x>.blame` ties a failing
@@ -48,23 +61,9 @@ showed. Details: the 2.89.0 release notes, in git history.
   functions that never did.
 - **Dropped:** the consolidation map's remaining merges. They save too few lines for their risk.
 
-## [2.88.0] — 2026-11-16
-One reading of "landed", and one module of small helpers (the owner's order: the consolidation map's second step).
-Code and tests are 200 lines larger than 2.87, not smaller: the helpers saved 26 and the landing fix with its tests
-added 226.
-Details: the 2.88.0 release notes, in git history.
-- **Which tasks landed is read in one place** (`harness/landings.mjs`). On a crew's ten days, 140 tasks landed on the
-  web main, 186 on the engine target and 404 were closed; some reports read only the web records and some counted
-  every close. The health report, the brief status, the development cycle's brief and the game-dev loop now count
-  what reached main or an engine target. A studio with no lanes still counts its closes.
-- **The engine flow of the score** counts an engine whose name has a hyphen.
-- **One module of small helpers** (`harness/helpers.mjs`): 53 helpers that 170 files defined 323 times, each replaced
-  only where its body was the same.
-- **Not changed:** the scorecard's "landed" (measures 1, 3, 4 and 15) and the upgrade comparison still count closes,
-  so rounds stay comparable; the owner decides whether to narrow them.
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.88.0** (2026-11-16): One reading of "landed" for every count (web train, engine train, both, closes), and one module of small helpers.
 - **2.87.0** (2026-11-16): Shorter, same behaviour. One length rule for comments (9,431 lines to 5,151), one test kit for 244 test files, finished notes removed.
 - **2.86.1** (2026-11-16): a run of the engine target alone that moved the target is judged by its result (a daily full run had been thrown away).
 - **2.86.0** (2026-11-14): The engine train. New code takes effect (the supervisor restarts itself), engine batches by class, steps by test name, sparse porter lanes, the disk stop.
