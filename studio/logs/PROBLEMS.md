@@ -15,243 +15,6 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
   sends the Console text; CI runs the Windows build once the licence secrets exist.
 - **Harness fix?** Later: a bot on Hatch's PC runs `npm run engine:gate` and posts the result.
 
-### Found by the crew (game bug, not harness): Windows case clash in src/branding
-- T-026 (queued by opus-1): `Finance.tsx` and `finance.ts` in game/hatchfield/src/branding clash on Windows, which
-  breaks the type check and build there. A real hatchfield-game bug; the crew has it queued.
-
-### P-021 findings (2026-10-31, investigated by hand; the investigation agent was stopped)
-- **No green CI run on any branch since 2026-10-16 22:26 UTC.** All 9 failures are timeouts; none is a wrong value.
-- **The 8 browser tests: the game draws one frame every ~5 s in a headless browser** (software 3D, no GPU).
-  Measured on a 2-core box with Playwright's Chromium (SwiftShader): title screen 0.2 fps, in game 0.2 fps; the
-  game clock moved 0.1 game-seconds in 10 real seconds (game time advances per frame). A blank page runs at 52 fps
-  and a plain WebGL page at 43 fps, so the browser is fine. A CPU profile shows the page's main thread 93% idle:
-  it waits on the software renderer. The game's own "low" graphics setting and a small window barely help (0.2 to
-  0.6 fps). **Skipping only the 3D draw call** (a scratch edit, never committed) gave 48 fps on the title screen,
-  15 fps in game, and 9.4 game-seconds per 10 s: about 90 times faster. Run one at a time with nothing else
-  running, 6 of the 7 that could start still timed out, so this is not mainly CPU contention.
-- **The sim tests (security.serve in CI; occupancy, contractPacing and the hub-meltdown tests on Hatch's PC): a
-  different cause, sharing the CPU.** They pass alone, but use much of their time limit: security.serve 10.7 s
-  (limit 20 s), occupancy ~16 s, contractPacing at 3x 16.8 s (limit 60 s). In a full parallel run, alongside
-  browser tests rendering in software for minutes, they cross the limits. Fixing the browser tests frees CPU.
-- **One more:** infoViews.e2e finds Chrome only at /usr/bin/google-chrome; elsewhere it can't start.
-- **Effect while red:** no PR in the game repo can show a green check, and a real regression would hide behind the
-  red. With 2.54.0 the studio's done-check excuses exactly these failing test names (PU-06), so crew work isn't
-  blocked. Players aren't affected: the tests are slow, not wrong (UNPROVEN on a machine with a real GPU).
-- **The fix is one crew task (hatchfield-game, not the harness):**
-
-  > Fix: main's red CI. (1) Add a test-only page switch (`?noRender=1`) that skips `renderer.render` in
-  > src/render/world.ts and src/render/interior/InteriorView.ts (2 lines; never on in a normal page). (2) The 8
-  > *.e2e.test.ts files open the page with it through one shared helper; the tests that save screenshots keep
-  > drawing and move to a separate visual-test script in the game that CI doesn't run by default. (3) infoViews.e2e uses
-  > PLAYWRIGHT_CHROME and Playwright's own Chromium like the others. (4) Heavy sim tests (security.serve,
-  > atc/occupancy, contractPacing, hub live.edge) get time limits of at least 3x their measured time alone, and CI
-  > runs `vitest run --maxWorkers=2`. Proof: `npm test` green 3 runs in a row locally and on GitHub, with a
-  > before/after table of the browser tests' times. Size: half a day to a day. Files: 2 render lines, 8 e2e tests
-  > (+1 helper), 4 sim tests, the CI workflow.
-
-## Tests on 2026-10-31 evening (break tests, cloud checks, Unity)
-
-### Leads not re-checked yet
-- The protected-files gate passed an uncommitted protected edit, and one already pushed: re-checked, real (with no remote even a committed edit passed); fixed in 2.56.1 (PU-20, PR #34).
-- A stalled agent (no heartbeat for 40 min) keeps its slot: the launcher says "1 builder agent(s) already running" and another agent can't hand the task back.
-
-### Held up fine
-- Two agents racing for the same task: only one ever wins (5 rounds).
-- 200,000 events (119 MB): `task next` 0.23 s, `task list` 0.12 s, `status` 0.46 s, watcher 0.49 s.
-- Fresh clone, as a newcomer: `npm run setup` without prompts, `npm run help`, `npm run verify` 10/10 (about 3 s) and `--full` 30/30, `new-game`, its playtest and the hub all worked. (The walkthrough stopped before the crew docs.)
-
-### Suspected, round 2 (read in code or simulated, not seen live)
-- Case-only folder claims: `path:game/Branding` and `path:game/branding` are both granted (seen on Linux); on Windows that is one folder held by two agents (PU-43).
-- Hook scripts have no line-ending rule; with Windows line endings `bash\r` isn't found and every commit fails, pushing agents toward `--no-verify` (simulated on Linux) (PU-43).
-- `git commit --no-verify` skips everything the hooks enforce; weakened tests (`.skip`, removed asserts, wider tolerances) are forbidden only by the rules text (PU-29).
-- fsafe's in-place fallback after about 1 s of EPERM writes the board exactly when another program has it open; it should at least leave a warning event.
-
-### Held up fine (round 2)
-- 2,000 tasks, 100 sessions, 300k events (roll-over off): `task next` 0.28 s, `task start` 3.1 s, `done --check` 2.6 s, watcher 1.4 s.
-- CRLF in NEXT.md parses; IDs with `../` or case-only differences can't reach the board (the ID format is `[A-Z]+-\d+`).
-- `npm run verify` 2.0 s and `task done --check` 0.31 s on a fresh copy.
-
-## From the crew, 2026-11-01 (studio-hatchfield, harness 2.53 to 2.55; Hatch relayed grokbot's notes)
-The crew's log numbers these P-034 and P-035; here they get new numbers, since P-034 and P-035 are already used above.
-
-### Answered without code (crew report)
-- Watchdog "6 sessions, no task finished in 2 h": fixed in 2.54.0 (P-022, P-023); studio-hatchfield runs 2.56.0+.
-  `STUDIO_WATCHDOG_IDLE_HOURS=4` can go back to the default; keeping 4 while tasks take half a day is reasonable.
-- `task done --force`: `--reason` and `--accepted-by` already existed; the owner-typed path is now written down
-  (`docs/FORCED-CLOSE.md`, 2.57.1).
-- Bots wake only on a person's @ping: written into `docs/DISCORD-CREW.md` (2.57.1) and the Unity repo's
-  `docs/crew/BOT-RULES.md` rule 17 (Unity PR #12); the 👀/✅ rule was already rule 13 there.
-
-## From the crew, 2026-11-01 night (studio-hatchfield on 2.56.0; their log numbers P-034 to P-037)
-- Their **P-034** (size rule blames merged-in code) = P-061 here: fixed in 2.58.0 (part A).
-- Their **P-035** (`buildingMass.test.ts.snap` line endings) = P-062 here: fixed in 2.58.0 (part F: game checks run with
-  `CI=true`, verify names files it changed); the game repo should still add `*.snap text eol=lf` (crew task).
-
-### Seen, not changed in code (proposals)
-- **Verify load:** 84 verify runs (median 265 s), up to 4 at once, 43 overlapping; 39 not all green. e2e timeouts seen for alertStack (120 s) and negotiation/panel. Proposal: `STUDIO_GATE_SLOTS=1` on a single-PC studio (one heavy game check at a time), and in the game repo run e2e files serially with a free port (crew P-038). Needs Hatch's OK.
-- **Planning cost:** the 45-minute development cycle woke an Opus Director and Producer 7 times while the supervisor was halted (9 producer and 12 director sessions, 16.6M tokens incl. cache reads; director-1 read 1.8M tokens with no progress, ev 1013). Proposal: skip the regular cycle while nothing can start.
-- **Opus gaps over 15 min:** 9, mostly waits on a 4–7 minute verify (e.g. 23:06→23:25, 00:11→00:29); 2.58's detached verify (`verify -- --wait`) covers a killed shell.
-- **No low-memory guard events** in the studio logs; the harness has no memory guard of its own. Launcher sessions peaked at 3 at once; extra Claude processes come from verify's test workers and the crew's own bots.
-- **P-036 (crew) / P-066:** still present in the logs (node/npm commands blocked 205 times) because the studio runs 2.56.0; 2.58.1 fixes the quoting (Windows CI proof). Real installed claude.cmd/agy.cmd stay UNTESTED until the studio updates.
-
-## Building the Hatchfield replay cartridge, 2026-11-01 (a side job for Hatch, in a copy of the studio)
-
-### P-280 — asks reposted after they were acted on · fixed in 2.79.0
-- **Evidence:** 252 `agent.ask` events against 20 `ask.answered` in six days, most "T-xxx is parked: 2 sessions in a row ended with no work".
-- **Fix:** one post per task and subject, `ask.closed` when the task moves on, repeats only in the daily digest. qa/selftest-279c.mjs.
-
-### P-281 — Vertex credit couldn't carry builder work · fixed in 2.79.1
-- **Evidence:** the key works only with `x-goog-api-key`; the orchestrator's local proxy worked, but adding the tool command was refused by its auto-mode classifier ("Create Unsafe Agents"), so builders couldn't run on Vertex without the owner typing commands.
-- **Fix:** a built-in `vertex` tool through a harness-owned proxy that holds the key; budgets on the owner's orders; owner-defined tools in a protected registry. qa/selftest-2791a.mjs.
-
-### P-282 — one blocked task froze the whole builder line · fixed in 2.79.1
-- **Evidence:** 3 times on 2026-11-06, 10–18 tasks ready and 1–2 of 6 builders running: a parked chain-breaker, lane-less ready tasks, a verify hold kept on while the chain-breaker's train ran.
-- **Fix:** blocked items block only their dependants; lane-less tasks skipped and scoped; one page; the hold ends when the train runs it, max 20 min. qa/selftest-2791b.mjs.
-
-### P-283 — an engine land waited 60 min for RAM and was refused · fixed in 2.79.1
-- **Evidence:** T-215's land waited for 12 GB free while 6 builders ran, then was refused.
-- **Fix:** the Line plans for a near land (hold new heavy starts, step down, learned floor, release at once, max 30 min) and an engine push mode. qa/selftest-2791b.mjs.
-
-### P-284 — a Golden-Reason line under the subject wasn't a trailer · fixed in 2.79.1
-- **Evidence:** T-322 handed back 3 times "no Golden-Reason trailer" while the builder had written the line.
-- **Fix:** `task done` reads trailers the way git does and says exactly where the line goes. qa/selftest-2791c.mjs.
-
-### P-285 — Vertex builders spent money and did no work · fixed in 2.79.2
-- **Evidence:** 8 Vertex builder sessions on 2026-11-06, each "no work on T-xxx: it never claimed T-xxx", 1–3 requests of 438k–520k prompt tokens, $5.84; `STUDIO_VERTEX_SHARE=0` set at 17:56 and two more started at 18:04.
-- **Fix:** the launcher runs the task protocol around one-shot aider; lane-only context with a prompt cap; the share holds on every start path. qa/selftest-2792a.mjs, qa/selftest-2792b.mjs.
-
-### P-286 — a stale machine scan made a good train red · fixed in 2.80.0
-- **Evidence:** the trial studio, supervisor off > 15 min: `.studio/machine.json` too old, the job claim fell back to 2 test workers, the game's tests blew the 600 s gate timeout; a train with 3 good lanes ran 35 min, 4 re-checks, landed nothing. After `npm run machine` the same lanes landed in 8.5 min (N1).
-- **Fix:** a missing or stale scan is taken again at the claim and stored; the 2-worker fallback is only for a scan that is off or fails. qa/selftest-280c.mjs.
-
-### P-287 — a lock outlived its owner's session · fixed in 2.80.0
-- **Evidence:** a P0 "fix main" waited 1 h for a path lock whose owner had no live session; `lock release --owner X` ignored `--owner` (Patch #24, R3-14).
-- **Fix:** the next claimer takes over a path or task lock of an ended launched session (`lock.taken_over`); `--owner` acts for X for a person, a Producer/Director or a named outside agent, and is refused out loud otherwise. qa/selftest-280c.mjs.
-
-### P-288 — "everything off" still started paid builders · fixed in 2.80.0
-- **Evidence:** during a manual wind-down the supervisor went on when the API pool or Vertex was ready; a usage wind-down outlived its removed setting; an agent could start one that only a person could end (Patch #14, R3-7).
-- **Fix:** a manual wind-down returns before the pool and Vertex; the setting is read every pass; an agent's `--now` needs `--until`. qa/selftest-280c.mjs.
-
-### P-289 — the train daemon re-ran the same lanes on a red main · fixed in 2.80.0
-- **Evidence:** after `task.train.red_main` the daemon started the same 7 lanes again at once, about 30 min each, 6 times in one day (Patch #25).
-- **Fix:** it waits while main's head and the queued lanes are unchanged; a moved main, a new or changed lane, or a train started by hand runs. qa/selftest-280c.mjs.
-
-### P-290 — the War Room was the largest part nobody used · cut in 2.80.0
-- **Evidence:** the crew's 7-day audit: no page opened, 0 events from any panel, the `hud` gate never ran; hub, pages, their modules and tests were about 17,000 lines, and the watcher, retro, learn pass and watchdog only ran while the hub was up.
-- **Fix:** the timed passes moved into the supervisor (`harness/studio-passes.mjs`, qa/selftest-280b.mjs); the hub, the pages and what only they used are deleted. docs/RELEASE-2.80.0.md.
-
-### P-291 — nobody could say how well the studio runs, round over round · measured from 2.81.0
-- **Evidence:** the crew's 8.2 days read for the first time as one card: 29.6% of 358 landings hands-free, 567 overseer steps, 53.6% of $874.50 on Producer and Director sessions, 55.2% done on the first claim, 16.4% of 67 engine land runs passed, the machine under 25% CPU in 58.4% of samples.
-- **Fix:** `npm run score` (harness/score.mjs, docs/SCORECARD.md), fifteen fixed measures with targets and `--record`; baseline studio/scores/2026-11-08-baseline.json. qa/selftest-281a.mjs.
-
-### P-292 — tasks were relaunched against a blocker that had not changed · fixed in 2.81.0 (record mode)
-- **Evidence:** 772 of 1,023 attempts ended in a hand-back; 2.3 claims per done task; the Fable trial counted 244 sessions and 52.8 h on strictly unsuccessful relaunches.
-- **Fix:** the attempt ledger: a same-blocker task is offered last by `task next` and the supervisor (`STUDIO_ATTEMPTS=record`; `refuse` holds it). qa/selftest-281b1.mjs.
-
-### P-293 — the overseer's role was spread over five files, and 2.80 refused its lock release · fixed in 2.81.0
-- **Evidence:** the crew's orchestrator took 567 board steps in 8 days with no single statement of what it may do; 2.80's `lock release --owner` accepted only STUDIO_OUTSIDE_SIGNERS, and the orchestrator is the owner's proxy.
-- **Fix:** `npm run overseer -- role | can | pass`, docs/OVERSEER.md; the proxy and beta mode's agents may release another's lock. qa/selftest-281a.mjs.
-
-### P-294 — 71 private copies of "read a JSON file", and almost none skipped a byte-order mark · fixed in 2.81.0
-- **Evidence:** 2.80 fixed `studio/game.json` saved with a byte-order mark for the cartridge reader and the tester's config (N11); the other readers of the same file (engine tracks, the Unity gate, the asset gate, perf tests and more) and the state-file readers still read such a file as missing.
-- **Fix:** one `readJson` in harness/fsafe.mjs (skips the mark), one `pidAlive` (19 copies), one `.env` reader in harness/dotenv.mjs. qa/selftest-281a.mjs.
-
-### P-295 — engine failures that need no editor were found by hour-long land runs · fixed in 2.82.0
-- **Evidence:** the crew's 64 Unity land runs: 24 of 45 failures were in the .NET rule tests, each found under the engine's slot and narrowed with more land runs; 320 land-run minutes per landed lane.
-- **Fix:** the rules check on the batch before the land run, narrowed with the cheap check (harness/engine-rules.mjs); a check red on the target judges nobody. qa/selftest-282a.mjs.
-
-### P-296 — the harness could not see where a land run's time went · fixed in 2.82.0
-- **Evidence:** the land script's own records showed Edit Mode at 53 of 92 minutes, re-running tests .NET had run; the harness's events held one number per run.
-- **Fix:** STUDIO_LAND_RESULT (the land's stages on engine.land), STUDIO_UNITY_EDITMODE_ARGS (what the editor still has to run), the engine flow on the scorecard. qa/selftest-282a.mjs.
-
-### P-297 — a studio whose game is the engine build still paid for the web path · fixed in 2.82.0
-- **Evidence:** builder tasks got web lanes by default, the tester played the web build on a schedule, a web build was queued after every landing and web tasks grew engine twins, in a studio that ships the engine build.
-- **Fix:** native-engine mode (harness/native.mjs, docs/NATIVE-ENGINE.md). qa/selftest-282a.mjs.
-
-### P-298 — the attempt ledger recorded no main tip on Windows · fixed in 2.82.0 (found by 2.81.0's checks)
-- **Evidence:** windows-selftest: 7 attempt-ledger checks failed; git prints the long path with forward slashes and the temp folder was the 8.3 short name, so "the same checkout" compared unequal.
-- **Fix:** harness/attempts.mjs gitTip compares native real paths, case-folded on Windows.
-
-### P-299 — the rules check's kept result did not know its git-ignored inputs · fixed in 2.82.0 (before release)
-- **Evidence:** found while answering the owner's train-split question (studio/notes/TRAIN-SPLIT-2026-11.md): the crew's land records name two different hashes of the git-ignored rules pack on two days, and 11 of 14 rule-test failures at landing were that pack disagreeing with a branch's recorded results. The rules check kept its result per tree and command, so the same tree with another pack got the old answer, and the land run was told the rules were green.
-- **Fix:** harness/engine-rules.mjs `inputsPrint`: the inputs' content is part of a kept result's key; harness/unity-train.mjs looks at the inputs again before the land run and withholds STUDIO_RULES_GREEN when they changed. qa/selftest-282a.mjs (two checks).
-
-### P-300 — the porter's own check ran the rules command where its inputs were not · fixed in 2.82.0 (before release)
-- **Evidence:** 2.82's fold ("with no quickCheck, the owner's rules command is the porter's check too") ran the command in the lane's folder when a porter ran `npm run engine -- check`. The crew's engine lanes are worktrees under `.lanes/engine/` with no copy of the git-ignored rules pack, so a good lane would read red, with no check of the target first. (`task done` was never affected: it runs an engine check only when `quickCheck` is set.) Found on the day the crew took 2.82 early.
-- **Fix:** harness/engine-check.mjs `rulesAsQuickCheck`: the rules check (engine-rules.mjs) on the lane's HEAD chained on the target, skipped whenever it cannot judge. docs: for a check at `task done`, set `quickCheck` to a compile. qa/selftest-282a.mjs.
-
-### P-301 — an engine task's session was scored in the wrong repository · fixed in 2.83.0
-- **Evidence:** 26 hours on 2.82 in a native studio: 89 session ends said "no work" ($268 of $368 session spend) on 50 tasks, 32 of which later landed; 25 tasks were parked for "2 sessions with no work". The work was in the engine worktree; the session end looked at the studio lane copy.
-- **Fix:** harness/engine-tracks.mjs `engineWork` (commits and unsaved files in `.lanes/engine/<task>`), used by the session end in harness/agent.mjs; a task in the engine train is "queued"; harness/crew-watch.mjs counts queued work. qa/selftest-283a.mjs.
-
-### P-302 — `npm run engine -- rules` exited 13 without running · fixed in 2.83.0 (the overseer's B-124)
-- **Evidence:** 2.82's P-300 change added a top-level `await import` to harness/engine-rules.mjs inside an import cycle with unity-train.mjs; run as a script, Node ended with "unsettled top-level await". The crew patched it locally.
-- **Fix:** the command line runs in an async function; a check runs the file as a script. qa/selftest-283c.mjs.
-
-### P-303 — the plan reported itself blocked 166 times for two causes · fixed in 2.83.0
-- **Evidence:** `plan_blocked` 166 times in 26 hours: 41 for an `--after` that named a task that did not exist, 26 for one chain-breaker that was in the train; each woke the Producer (79 of 89 Producer sessions ended in under 3 minutes).
-- **Fix:** harness/line-producer.mjs: a dangling `--after` asks once; `line.chain_gate`; the alert leads with the reason; the Producer is not woken again for the same blocker within `STUDIO_PRODUCER_BLOCKED_WAKE_MIN` (60). harness/task.mjs refuses an unknown `--after` id. qa/selftest-283f.mjs, 283d.
-
-### P-304 — the rules check ran every test for every batch · fixed in 2.83.0
-- **Evidence:** 24 batches, 50 runs, 514 machine minutes in 26 hours, and growing with every ported system; its throwaway checkout downloaded LFS files it never read and could not see the web game its vector test compares against (the overseer's B-129), so that test was skipped in the check and failed in the land run.
-- **Fix:** harness/engine-rules.mjs: `rules.env`, `rules.paths`, `rules.focus`, merged inputs, `rules.share`. qa/selftest-283c.mjs.
-
-### P-305 — the engine train blamed by elimination · fixed in 2.83.0
-- **Evidence:** 10 of 30 land runs failed (first red stage: Play Mode 5, Edit Mode 3, .NET 2). A lane was handed back "first not green" after a Play Mode test failed under load, without ever being run by itself; a switch-over was batched with a port; a lane handed back could not be restarted until the train ended.
-- **Fix:** harness/unity-train.mjs: land alone, one more run on a retry stage, blame by evidence, a culprit by elimination confirmed by itself, a handed-back lane released at once. qa/selftest-283b.mjs.
-
-### P-306 — a task was closed on its studio half · fixed in 2.83.0
-- **Evidence:** a task with commits in the studio repo and on an engine branch was closed when the merge train landed the studio half; the engine branch was never queued and was found by hand.
-- **Fix:** harness/task.mjs `engineHalfOpen`: the task stays open (`task.half_landed`) and its engine branch is queued. qa/selftest-283b.mjs.
-
-### P-307 — the land run's shortcuts could hide a difference between two runtimes for good · fixed in 2.83.0 (the overseer's B-127)
-- **Evidence:** .NET 8 and the editor's runtime printed a number differently; the .NET rules check passed code that failed in the editor. With "Edit Mode only what .NET didn't run" and "trust the rules check" both on, no later run would have shown it.
-- **Fix:** a full land run every 24 hours (`STUDIO_LAND_FULL=1`, no shortcuts); `engines.unity.editModeArgs` so the owner chooses what Edit Mode runs on the other runs. qa/selftest-283b.mjs.
-
-### P-308 — a landed change to the land script changed nothing · fixed in 2.83.0 (the overseer's B-128)
-- **Evidence:** the studio's land command named the script in another worktree of the engine repo, on an old branch.
-- **Fix:** harness/unity-train.mjs `landScriptDrift`: the train reports the file and the branch it is on. qa/selftest-283b.mjs.
-
-### P-309 — a model-pool route overrode every role's own model · fixed in 2.83.0 (the overseer's B-126)
-- **Evidence:** Director tasks ran on the builders' route instead of the Director's model; a session ended by a refresh or a usage limit was counted as the route failing.
-- **Fix:** `routeRoles` in studio/models.json (default builder, engine-porter); harness/busy.mjs `endNotAFailure`. qa/selftest-283e.mjs.
-
-### P-310 — the owner was asked in person about removing code · fixed in 2.83.0
-- **Evidence:** a task that removed three unwired modules was refused to the owner's proxy as "deleting data".
-- **Fix:** harness/owner-acts.mjs `unless`: one narrow reading, undone by one word of data; a stand-in's answer records the reading. qa/selftest-283j.mjs.
-
-### P-311 — board commands that did something else than asked · fixed in 2.83.0
-- **Evidence:** `task train dequeue T-x` did not exist and the unknown word started a train; an `--after` could be added and not removed; the train status did not show what was queued.
-- **Fix:** harness/task.mjs: `train dequeue`, an unknown train word exits 2, `after --remove|--set|--clear`, two lists in the status. qa/selftest-283d.mjs.
-
-### P-312 — landed engine worktrees and old builds filled the disk · fixed in 2.83.0
-- **Evidence:** about 3 GB per landed engine worktree and one build folder per land run, cleaned by hand.
-- **Fix:** harness/engine-clean.mjs; the train removes a landed lane's worktree and prunes builds. qa/selftest-283h.mjs, 283b.
-
-### P-313 — watchers that cried wolf · fixed in 2.83.0
-- **Evidence:** "stalled" for lanes waiting in a train; 37 refusals of the same unchanged-shots review; the idle stop counted the hours the supervisor was off; a dead session's claim held its task.
-- **Fix:** harness/watch.mjs `laneInTrain`, harness/gamedev-loop.mjs, harness/review-family.mjs, harness/watchdog.mjs, `deadClaimOwner`. qa/selftest-283g.mjs.
-
-### P-314 — planning sessions were started on a timer, whatever the last one did · fixed in 2.84.0
-- **Evidence:** a crew's 26 hours: the Director's 33 regular cycles cost $38.83 and left one board change; the Producer's 80 timer and queue wakes cost $31 for 17 tasks.
-- **Fix:** harness/wake-gate.mjs: the wait doubles after a session that changed nothing, up to a ceiling; a person's answer, an owner order or a phase change ends it. qa/selftest-284a.mjs.
-
-### P-315 — a session could make the same-family review fallback apply to itself · fixed in 2.84.0
-- **Evidence:** 2.83's check read which model families are configured from the calling process's environment.
-- **Fix:** harness/review-family.mjs reads the main checkout's files; the environment can add a family, never remove one. qa/selftest-284b.mjs.
-
-### P-316 — the documents cost more to read than the code they describe · fixed in 2.84.0
-- **Evidence:** CHANGELOG.md 304 KB, thirteen release notes 131 KB, this file 149 KB, docs/SECURITY.md 46 KB.
-- **Fix:** the newest entries in full, one line for each older one, the rest in git history.
-
-### P-317 — the Unity test runner's floating tag cannot activate a Personal licence · worked around in 2.84.0
-- **Evidence:** the repository's first real editor run: `game-ci/unity-test-runner@v4` (a rewrite since v4.4.0) ended with "Code 400 … TimeStamp validation failed".
-- **Fix:** pinned to v4.3.2 in .github/workflows/ci.yml.
-
-### P-318 — the engine train's evidence never saw a crew's results · fixed in 2.84.0
-- **Evidence:** a crew's first 21.5 hours on 2.83: engine land runs passed 34.8% (2.82: 64.5%), 36.2 land minutes per landed branch. The blame by evidence read the land command's output; the crew's land script writes results files. A red run was repeated in full.
-- **Fix:** `engines.<x>.results`, the stage report's `failures`, retry by test name, `flakyTests`, `compileFirst`, a killed run retried. qa/selftest-284t.mjs. Untested on a real editor.
-
 ### P-319 — the rules check took 12.7 GB on a 17-branch batch · mitigated in 2.84.0
 - **Evidence:** the overseer's note: one test process for the whole batch on a 31.8 GB machine.
 - **Fix:** `rules.focus.split`, `rules.maxLanes`, `batchMax`. qa/selftest-284t.mjs, 284u. Not measured on a live studio.
@@ -337,8 +100,8 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
-- **P-001** (reopened on purpose 2026-10-31: Hatch made the harness and hatchfield-game public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist
-- **P-002** (fixed 2026-10-31 (2.47, U-001)): The harness works with one adopted game repo; Hatchfield has two (web + Unity)
+- **P-001** (reopened on purpose 2026-10-31: the owner made the harness and the game's repository public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist
+- **P-002** (fixed 2026-10-31 (2.47, U-001)): The harness works with one adopted game repo; a studio can have two (web + Unity)
 - **P-003** (fixed 2026-10-31): Engine template copy skipped every file on Windows
 - **P-004** (fixed 2026-10-31 (2.52, U-003; root cause unproven)): The 2.41 "two greens" selftest failed once on CI timing
 - **P-006** (fixed with a workaround): The game's code can't run outside Vite (import.meta.glob)
@@ -352,10 +115,10 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 - **P-015** (workaround): A URP sample icon shows as changed in every clone
 - **P-016** (kept out of the public repo): Unity wrote Hatch's account IDs into ProjectSettings.asset
 - **P-017** (fixed (Unity repo PR #8, merged)): Unity CI build killed at start-up (exit 137) after restoring a cached Library
-- **P-018** (rebuilt on main): The Unity-port branch was 657 commits behind hatchfield-game main
+- **P-018** (rebuilt on main): The Unity-port branch was 657 commits behind the game's main
 - **P-019** (fixed): main's tests steer Math.random (withSeed, spies), which the rules no longer read
 - **P-020** (fixed): Creating a game took one extra Math.random roll, shifting 7 seeded tests
-- **P-021** (investigated, fix is a crew task): hatchfield-game main has been red on GitHub since at least Oct 17
+- **P-021** (investigated, fix is a crew task): the game's main has been red on GitHub since at least Oct 17
 - **P-022** (fixed in 2.54.0 (PR #27, merged)): The watchdog stopped a 44-minute-old studio for "no task finished in 2 h"
 - **P-023** (fixed in 2.54.0 (PR #27, merged)): Planning sessions count as "sessions that ran" for the idle stop
 - **P-024** (fixed in 2.54.0 (PR #27, merged)): Two "director-1" sessions started at the same moment
@@ -614,3 +377,42 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 - **P-277** (fixed in 2.79.0): a passing note with the word "protected" re-held a task
 - **P-278** (fixed in 2.79.0): a reused PID read as a live record
 - **P-279** (fixed in 2.79.0): the owner had to sign by hand in beta mode
+- **P-280** (fixed in 2.79.0): asks reposted after they were acted on
+- **P-281** (fixed in 2.79.1): Vertex credit couldn't carry builder work
+- **P-282** (fixed in 2.79.1): one blocked task froze the whole builder line
+- **P-283** (fixed in 2.79.1): an engine land waited 60 min for RAM and was refused
+- **P-284** (fixed in 2.79.1): a Golden-Reason line under the subject wasn't a trailer
+- **P-285** (fixed in 2.79.2): Vertex builders spent money and did no work
+- **P-286** (fixed in 2.80.0): a stale machine scan made a good train red
+- **P-287** (fixed in 2.80.0): a lock outlived its owner's session
+- **P-288** (fixed in 2.80.0): "everything off" still started paid builders
+- **P-289** (fixed in 2.80.0): the train daemon re-ran the same lanes on a red main
+- **P-290** (cut in 2.80.0): the War Room was the largest part nobody used
+- **P-291** (measured from 2.81.0): nobody could say how well the studio runs, round over round
+- **P-292** (fixed in 2.81.0 (record mode)): tasks were relaunched against a blocker that had not changed
+- **P-293** (fixed in 2.81.0): the overseer's role was spread over five files, and 2.80 refused its lock release
+- **P-294** (fixed in 2.81.0): 71 private copies of "read a JSON file", and almost none skipped a byte-order mark
+- **P-295** (fixed in 2.82.0): engine failures that need no editor were found by hour-long land runs
+- **P-296** (fixed in 2.82.0): the harness could not see where a land run's time went
+- **P-297** (fixed in 2.82.0): a studio whose game is the engine build still paid for the web path
+- **P-298** (fixed in 2.82.0 (found by 2.81.0's checks)): the attempt ledger recorded no main tip on Windows
+- **P-299** (fixed in 2.82.0 (before release)): the rules check's kept result did not know its git-ignored inputs
+- **P-300** (fixed in 2.82.0 (before release)): the porter's own check ran the rules command where its inputs were not
+- **P-301** (fixed in 2.83.0): an engine task's session was scored in the wrong repository
+- **P-302** (fixed in 2.83.0 (the overseer's B-124)): `npm run engine -- rules` exited 13 without running
+- **P-303** (fixed in 2.83.0): the plan reported itself blocked 166 times for two causes
+- **P-304** (fixed in 2.83.0): the rules check ran every test for every batch
+- **P-305** (fixed in 2.83.0): the engine train blamed by elimination
+- **P-306** (fixed in 2.83.0): a task was closed on its studio half
+- **P-307** (fixed in 2.83.0 (the overseer's B-127)): the land run's shortcuts could hide a difference between two runtimes for good
+- **P-308** (fixed in 2.83.0 (the overseer's B-128)): a landed change to the land script changed nothing
+- **P-309** (fixed in 2.83.0 (the overseer's B-126)): a model-pool route overrode every role's own model
+- **P-310** (fixed in 2.83.0): the owner was asked in person about removing code
+- **P-311** (fixed in 2.83.0): board commands that did something else than asked
+- **P-312** (fixed in 2.83.0): landed engine worktrees and old builds filled the disk
+- **P-313** (fixed in 2.83.0): watchers that cried wolf
+- **P-314** (fixed in 2.84.0): planning sessions were started on a timer, whatever the last one did
+- **P-315** (fixed in 2.84.0): a session could make the same-family review fallback apply to itself
+- **P-316** (fixed in 2.84.0): the documents cost more to read than the code they describe
+- **P-317** (worked around in 2.84.0): the Unity test runner's floating tag cannot activate a Personal licence
+- **P-318** (fixed in 2.84.0): the engine train's evidence never saw a crew's results

@@ -1,5 +1,5 @@
 /**
- * qa/selftest-2771.mjs — 2.77.1: the crew's live-run blockers on 2.77.0 (Windows, harness 2.77 on studio-hatchfield).
+ * qa/selftest-2771.mjs — 2.77.1: the crew's live-run blockers on 2.77.0 (Windows, harness 2.77).
  *   B-102  the supervisor exited after its first pass (exit 13, "unsettled top-level await"): with the Communicator on,
  *          a pass imports supervisor.mjs back while main() was a top-level await. Now: passes keep coming, each saved;
  *          a hung step is bounded (supervisor.step_timeout) and the pass goes on.

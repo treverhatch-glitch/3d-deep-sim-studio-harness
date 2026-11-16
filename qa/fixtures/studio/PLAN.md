@@ -52,4 +52,4 @@ Windows, macOS, Linux or a cloud server.
 
 - Paid asset generators.
 - Agent frameworks (LangGraph, CrewAI, AutoGen): the queue, locks and gates already coordinate.
-- Game-specific loops for Hatchfield; they belong in the Hatchfield repo.
+- Game-specific loops; they belong in the game's own repository.

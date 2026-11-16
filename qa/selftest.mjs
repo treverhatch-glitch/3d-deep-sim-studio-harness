@@ -5327,6 +5327,14 @@ if (inShard('selftest-286h')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.87 (a): the length rule for comments (scripts/check-comments.mjs, npm run check:comments).
+if (inShard('selftest-287a')) {
+  const dir = copyRepo();
+  const { selftest287A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-287a.mjs')).href);
+  await selftest287A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

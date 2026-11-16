@@ -315,7 +315,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(1);
     }
     const game = t.game || activeCartridge().name;
-    // --source a,b sets the web paths the port follows (an adopted game's rules, e.g. game/hatchfield/src/game).
+    // --source a,b sets the web paths the port follows (an adopted game's rules, e.g. game/<name>/src/game).
     if (flag('source')) t.portSource = flag('source').split(',').map((x) => x.trim()).filter(Boolean);
     const srcs = portSources(t);
     const src = srcs[0];
