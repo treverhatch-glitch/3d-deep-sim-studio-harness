@@ -6,8 +6,7 @@ two newest handoffs and release notes are kept; older ones are in git history.
 ## Where it stands
 
 - 2.87 is on `claude/287`. It is not merged: the owner says when.
-- 2.86.1 (one engine-train fix, P-339) is on `claude/2861`, pull request #88, not merged. 2.87 was branched from
-  2.86.0: whichever lands second merges main first (CHANGELOG.md, PROBLEMS.md and the version will conflict).
+- 2.86.1 (one engine-train fix, P-339) is merged (pull request #88) and is part of this branch.
 - A crew runs 2.86.0 since 14 November. Its land script and game file have not taken 2.86's settings (see the release
   notes): the note for the overseer says which.
 - The consolidation map (a document of 15 November, outside the repository) lists the later steps. Its estimates for

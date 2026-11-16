@@ -375,8 +375,8 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
   planner, once per tests and target tip) asks for a fix task. A later train red on tests a probe already found red on
   the same tip goes there at once, without retries. Green on the target: blame goes on as below. A probe that cannot
   tell (an error, a refusal, names not safe on a command line) is not a verdict: blame goes on. A land script that
-  does not know `STUDIO_LAND_PROBE` gets a branch that is the target itself, so landing it moves nothing; the train
-  checks that the target did not move (`task.train.<x>.probe_moved_target` if it did).
+  does not know `STUDIO_LAND_PROBE` gets a branch that is the target itself, so landing it merges nothing; if that
+  script commits its own record of the run, the result still counts (2.86.1, below).
 - **Tests known red on the target (2.86, off by default).** With `engines.<x>.knownRedHours` above 0 (the studio's
   choice, in its protected game file), the names of listed flaky tests that a probe found red on the target alone in
   that many hours go to the land script in `STUDIO_LAND_KNOWN_RED`; a script that honours it lands the batch when
@@ -409,13 +409,18 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
   `STUDIO_LAND_PROBE=1` (a probe or the full run; kept in `.studio/train/<x>-probe.json`), or the owner sets
   `engines.<x>.landProbe: true`. A by-name step on lanes gives the script the lanes' branches (or an integration
   branch): a script that ignored the variable could land them, which is why it must have said so first.
-- **When a run that must land nothing moves the target (2.86).** After every run told `STUDIO_LAND_PROBE=1` the train
-  compares the target's tip with the one before. A run of the target alone gets a ref at the target's own tip as its
-  branch, so a script that knows nothing of the variable merges nothing new and the tip stays where it was. If it moved
-  anyway (the script committed or pushed something), the run counts as an error: the train stops at once, nobody is
-  blamed, the round's lanes stay queued, `task.train.<x>.probe_moved_target` (blocked, to the producer) says what moved,
-  and `.studio/train/<x>-probe.json` is marked revoked, so by-name steps on lanes are off for that engine until a person
-  removes the file. A lane that the run did land is closed by the next train (it is already in the target).
+- **When a run that must land nothing moves the target (2.86, 2.86.1).** After every run told `STUDIO_LAND_PROBE=1`
+  the train compares the target's tip with the one before.
+  - *A run of the target alone* (the daily full run, the probe of a flaky test) carries no branch, so a moved tip
+    cannot be a landing: a land script that commits its own record of every run moves it. The run's result stands for
+    the tip that was run, and one warning says so (`task.train.<x>.target_moved_alone`). 2.86.0 threw such a run away.
+  - *A by-name step that carries a branch* and moves the target has landed something it should not have: the run
+    counts as an error, the train stops at once, nobody is blamed, the round's lanes stay queued,
+    `task.train.<x>.probe_moved_target` (blocked, to the producer) says what moved, and `.studio/train/<x>-probe.json`
+    is marked revoked, so by-name steps are off for that engine until a person removes the file. A lane that the run
+    did land is closed by the next train (it is already in the target).
+  A land script that honours `STUDIO_LAND_PROBE=1` writes nothing to the target on such a run, its own records
+  included: lanes that wait for the target to move are otherwise run again after every record commit.
 - **Branches that land alone by path (2.86).** `engines.<x>.batchAlone`: a list of regexes over changed paths (for
   example long Play Mode scenario tests). A queued branch that changes a matching path lands alone, as `--alone` does,
   and the batch line says which path.
