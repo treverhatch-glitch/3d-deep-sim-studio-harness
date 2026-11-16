@@ -32,10 +32,11 @@ export async function selftest2601M({ dir, run, report, tmpRoot }) {
   };
   const lockF = path.join(dir, '.studio', 'locks', 'machine-heavy-1.lock');
   const sleepF = path.join(tmpRoot, `sleep-2601m-${process.pid}.mjs`);
-  fs.writeFileSync(sleepF, 'setTimeout(() => {}, Number(process.argv[2] || 1000));\n');
+  // Optional 3rd argument: a release file. The process stays up until it exists, or until the time limit (a safety net).
+  fs.writeFileSync(sleepF, "import fs from 'node:fs';\nconst end = Date.now() + Number(process.argv[2] || 1000);\nconst rel = process.argv[3];\nif (!rel) setTimeout(() => {}, end - Date.now());\nelse { const t = setInterval(() => { if (fs.existsSync(rel) || Date.now() > end) clearInterval(t); }, 50); }\n");
   const kids = [];
-  const holder = (ms, label = 'holder-2601m') => {
-    const c = spawn(process.execPath, ['harness/heavy.mjs', 'run', '--label', label, '--', 'node', `"${sleepF}"`, String(ms)], { windowsHide: true, cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
+  const holder = (ms, label = 'holder-2601m', releaseF = null) => {
+    const c = spawn(process.execPath, ['harness/heavy.mjs', 'run', '--label', label, '--', 'node', `"${sleepF}"`, String(ms), ...(releaseF ? [`"${releaseF}"`] : [])], { windowsHide: true, cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
     kids.push(c);
     const up = until(() => readJson(lockF)?.label === label, 15000 * SLOW);
     return { c, up, gone: () => until(() => readJson(lockF)?.pid !== c.pid, 30000 * SLOW) };
@@ -202,10 +203,13 @@ else console.log('[build] PASS stand-in');
       const uenv = { ...base, STUDIO_UNITY: fake };
       const seen = () => { try { return fs.readFileSync(seenF, 'utf8').trim().split('\n').filter(Boolean); } catch { return []; } };
       fs.rmSync(seenF, { force: true });
-      const h = holder(8000 * SLOW);
+      const releaseF = path.join(tmpRoot, `release-2601m-${process.pid}`);
+      fs.rmSync(releaseF, { force: true });
+      const h = holder(120000 * SLOW, 'holder-2601m', releaseF); // lives until released, not for a fixed time
       const busyBuild = run(dir, `node harness/unity.mjs build ${proj}`, { ...uenv, STUDIO_HEAVY_WAIT_MIN: '0.02' });
       const busyGate = run(dir, `node harness/unity.mjs gate ${proj}`, { ...uenv, STUDIO_HEAVY_WAIT_MIN: '0.02' });
       const ranWhileBusy = seen();
+      fs.writeFileSync(releaseF, 'go'); // both busy runs are done: let the holder end
       h.gone();
       const build = run(dir, `node harness/unity.mjs build ${proj}`, uenv);
       const gate = run(dir, `node harness/unity.mjs gate ${proj}`, uenv);
@@ -217,7 +221,7 @@ else console.log('[build] PASS stand-in');
           && lines[1].startsWith('tests EditMode') && lines[2].startsWith('tests PlayMode') && tok(lines[1]) === tok(lines[2]),
         JSON.stringify({ up: h.up, busyBuild: out(busyBuild).slice(-500), busyGate: out(busyGate).slice(-400), ranWhileBusy, build: out(build).slice(-300), gate: out(gate).slice(-400), lines }).slice(0, 2500)]);
       fs.rmSync(path.join(dir, proj), { recursive: true, force: true });
-      for (const f of [seenF, fake]) fs.rmSync(f, { force: true });
+      for (const f of [seenF, fake, releaseF]) fs.rmSync(f, { force: true });
     }
 
     // ---------- B-41: the Unity land gate's branch, folder and exit meanings ----------

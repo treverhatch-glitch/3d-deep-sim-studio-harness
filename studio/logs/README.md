@@ -2,12 +2,12 @@
 
 **2-minute read for the owner: the latest summary is first. Then open problems, then proposals waiting for you.**
 
-## Latest summary — 2026-11-16
-- **Done:** harness 2.86.1 to 2.89 are merged: the daily full run is no longer thrown away (P-339), comments and tests are shorter, "landed" is read one way, and a studio records which functions it runs.
-- **In progress:** 2.90 (the overseer's list: an engine train that finds a red in minutes, slices, two land runs at once) on a branch, merged when its online checks pass. Notes: docs/RELEASE-2.90.0.md, studio/notes/HANDOFF-2.90-2026-11-16.md.
-- **Untested:** nothing from 2.83 to 2.90 has run on a real Unity editor from the harness's side; 2.90's engine train work ran against stand-in scripts only.
-- **Open problems:** P-346 (timing checks under load), P-005 (GPU model), P-009 (no Unity on the maintainer's side: the online job is the fix once it signs in).
-- **Waiting for your OK:** U-007 (last, only when nothing else waits).
+## Latest summary — 2026-11-17
+- **Done:** harness 2.90 is merged and a crew runs it. On a real engine its compile search put two clashing branches out in one minute and the test run first named a stale-pin branch in minutes.
+- **In progress:** 2.91 (no full run ahead of a waiting batch; a rules pass that survives a record commit; the idle stop, the two stops and the stall rule) on a branch, merged when its online checks pass. Notes: docs/RELEASE-2.91.0.md, studio/notes/HANDOFF-2.91-2026-11-17.md.
+- **Untested:** 2.91's train rules ran against stand-in land scripts only. The crew's logs are the first real test.
+- **Open problems:** P-346 (timing checks under load: three made independent of load in 2.91, six known left), P-005 (GPU model), P-009 (no Unity on the maintainer's side: the online job is the fix once it signs in).
+- **Waiting for your OK:** U-007 (last, only when nothing else waits). Two decisions: whether the scorecard's "landed" should stop counting a close; whether the next batch's rules check may run beside a land run.
 
 ## The files
 | File | What | Format |

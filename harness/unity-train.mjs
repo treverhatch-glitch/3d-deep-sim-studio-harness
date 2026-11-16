@@ -24,7 +24,7 @@ import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeComman
 import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
-import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge } from './engine-rules.mjs';
+import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey } from './engine-rules.mjs';
 import { compileSearchOf, compileSearch, compileAt } from './engine-compile.mjs';
 import { parallelState, parallelUse, parallelLine, runGateChild } from './engine-gates.mjs';
 import { engineSlotsAt, heavySlotsAt, floorFree } from './heavy.mjs';
@@ -532,7 +532,11 @@ export function waitingOnTarget(root, engine = 'unity', queue = null) {
 
 /** 2.90: one line when the rules check judged no lane on 2 or more trains in a row (engine-rules.mjs rulesNoJudge), else ''. */
 export function rulesIdleLine(root, engine = 'unity') {
-  try { const nj = rulesNoJudge(root, engine); return nj && nj.n >= 2 ? `The ${labelOf(engine)} rules check judged no lane on the last ${nj.n} trains (${Math.round(nj.minutes)} min spent on it since ${String(nj.since).slice(0, 16)}): ${nj.why}. Change: ${nj.fix}.` : ''; } catch { return ''; }
+  const L = [];
+  try { const nj = rulesNoJudge(root, engine); if (nj && nj.n >= 2) L.push(`The ${labelOf(engine)} rules check judged no lane on the last ${nj.n} trains (${Math.round(nj.minutes)} min spent on it since ${String(nj.since).slice(0, 16)}): ${nj.why}. Change: ${nj.fix}.`); } catch { /* none */ }
+  // 2.91: the owed full rules run red (or timed out) on the target alone: no lane is blamed; it waits for the target to change.
+  try { const fr = rulesFullRed(root, engine); if (fr) L.push(`The ${labelOf(engine)} full rules run on the target alone is ${fr.status === 'red' ? 'red' : 'not green'} at ${short(fr.tip)} (${String(fr.at).slice(0, 16)}): ${fr.why}${fr.failures?.length ? ` (${fr.failures.slice(0, 3).join(', ')})` : ''}. No lane is blamed; it runs again when the target changes under what the rules tests read. A fix task is wanted.`); } catch { /* none */ }
+  return L.join('\n');
 }
 
 /**
@@ -701,7 +705,7 @@ export function cancelledTrain(root, engine, id) {
  * Is a full land run due? Every STUDIO_ENGINE_FULL_LAND_HOURS (engines.<x>.fullLandHours, 24; 0 or off: never),
  * counted from the last full run that passed ({ at, id } in .studio/engine/<engine>-full-land.json). No record: the
  * clock starts now. Returns { why, overdue, hours, maxHours }. Past engines.<x>.fullLandMaxHours (default 2 x the
- * hours) it is overdue and runs at the start of the next train. It runs on the target alone.
+ * hours) it is overdue: 2.91, it runs at the end of the next train, after the batch's rounds. It runs on the target alone.
  */
 const fullLandFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-full-land.json`);
 export function fullLandDue(root, engine, cfg = {}, env = process.env, now = Date.now(), { start = true } = {}) {
@@ -721,6 +725,14 @@ export function fullLandDue(root, engine, cfg = {}, env = process.env, now = Dat
   if (age < h * 3600000) return { ...no, hours: h, maxHours };
   const overdue = age >= maxHours * 3600000;
   return { why: overdue ? `the last full land run that passed is older than ${maxHours} h (engines.${engine}.fullLandMaxHours): overdue` : `the last full land run that passed is older than ${h} h`, overdue, hours: h, maxHours };
+}
+
+/** 2.91: is the full rules run owed now on the target as it is (engine-rules.mjs fullRulesOwed)? { why, overdue, blocked }. */
+export function fullRulesOwedNow(root, engine = 'unity', env = process.env, now = Date.now()) {
+  const s = unityTrainSettings(root, engine);
+  if (s.error) return { why: '' };
+  const rc = rulesConfig(engine, { root, env, repo: s.repo, ref: s.target });
+  return rc ? fullRulesOwed(root, engine, rc, { repo: s.repo, tip: headOf(s.repo, s.target), now }) : { why: '' };
 }
 
 /**
@@ -878,13 +890,28 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   if (sel.error) { res.ok = false; res.message = `No ${L} branch landed: ${sel.why} (--only takes queued tasks).`; return finish(); }
   let lanes = sel.lanes;
   res.batch = sel.why;
-  // 2.86: the daily full run is its own run on the target alone, never with a branch and never a step of a red: when it is due and
-  // this train has no lane, or when it is overdue (engines.<x>.fullLandMaxHours), first, before any lane's land run (runFull below).
+  // 2.91: the periodic full runs (the full rules run rules.focus.fullEveryHours owes, the daily full land run) are runs of the target
+  // alone and never go ahead of a waiting batch: due, they run when this train has no lane; overdue, after the batch's rounds.
   const fullDue = dryRun ? { why: '' } : fullLandDue(root, engine, s.cfg, env, Date.now());
-  const fullFirst = Boolean(fullDue.why && (!lanes.length || fullDue.overdue));
-  if (!lanes.length && !fullFirst) { res.message = queued.length ? `No ${L} branch for this train (${sel.why}).` : `No ${L} branch is waiting to land (task done <ID> --train on a ${L}-track task queues one).`; return finish(); }
+  const rc0 = dryRun ? null : (() => { try { return rulesConfig(engine, { root, env, repo, ref: target }); } catch { return null; } })();
+  const owed0 = rc0 ? fullRulesOwed(root, engine, rc0, { repo, tip: headOf(repo, target) }) : { why: '' };
+  const fullFirst = Boolean(fullDue.why && !lanes.length);
+  const fullLast = Boolean(fullDue.why && fullDue.overdue && lanes.length);
+  const rulesFirst = Boolean(owed0.why && !lanes.length);
+  if (owed0.blocked) log(`[unity-train] ${id}: the full rules run is owed (${owed0.blocked.owed}) but was ${owed0.blocked.status} on ${target} at ${short(owed0.blocked.tip)} (${String(owed0.blocked.at).slice(0, 16)}) and the rules tests see no change since: not run again yet`);
+  if (!lanes.length && !fullFirst && !rulesFirst) { res.message = queued.length ? `No ${L} branch for this train (${sel.why}).` : `No ${L} branch is waiting to land (task done <ID> --train on a ${L}-track task queues one).`; return finish(); }
   if (sel.alone) res.alone = sel.alone;
   if (sel.waiting) log(`[unity-train] ${id}: batch ${sel.why}`);
+  if (lanes.length && fullDue.why) {
+    const m = `the daily full land run is due (${fullDue.why}) and ${lanes.length} lane(s) wait: it does not go ahead of them; ${fullLast ? `it runs at the end of this train, after the batch's rounds, on ${target} as it is then` : `it waits for an empty queue (past engines.${engine}.fullLandMaxHours it runs at the end of a train)`}`;
+    log(`[unity-train] ${id}: ${m}`);
+    ev('full_land', id, m, { agent: by, to: 'producer', meta: { why: fullDue.why, tasks: lanes.map((l) => l.task), waits: fullLast ? 'end' : 'empty-queue', overdue: Boolean(fullDue.overdue) } });
+  }
+  if (lanes.length && owed0.why) {
+    const m = `the full rules run is owed (${owed0.why}) and ${lanes.length} lane(s) wait: this train's rules check runs as if it were not, and the full run ${owed0.overdue ? `runs on ${target} alone at the end of this train, after the batch's rounds` : `waits for an empty queue (past rules.focus.fullEveryMaxHours it runs at the end of a train)`}`;
+    log(`[unity-train] ${id}: ${m}`);
+    ev('rules_full', id, m, { agent: by, to: 'producer', meta: { why: owed0.why, tasks: lanes.map((l) => l.task), waits: owed0.overdue ? 'end' : 'empty-queue', overdue: Boolean(owed0.overdue) } });
+  }
   const live = new Set(lanes.map((l) => l.task));
   const liveNow = () => { try { update({ lanes: [...live] }); } catch { /* the status line only */ } };
   if (!dryRun) {
@@ -966,22 +993,25 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   // handed back with cause 'rules'; a check that is red on the target itself judges nobody. The land run then gets STUDIO_RULES_GREEN=1 while it
   // lands exactly the checked batch on the checked target with the checked inputs (re-looked at right before the land run).
   let rulesGreen = null;
+  const fromAll = [...new Set([s.folder, s.cfg.gateWorktree ? path.resolve(root, s.cfg.gateWorktree) : null, s.cfg.cwd ? path.resolve(root, s.cfg.cwd) : null, repo].filter(Boolean))];
   {
-    const rc = (() => { try { return rulesConfig(engine, { root, env, repo, ref: target }); } catch { return null; } })();
+    const rc = rc0;
     if (rc && set.length) {
       update({ now: `rules check: ${set.map((l) => l.task).join(', ')}` });
-      const from = [...new Set([s.folder, s.cfg.gateWorktree ? path.resolve(root, s.cfg.gateWorktree) : null, s.cfg.cwd ? path.resolve(root, s.cfg.cwd) : null, repo].filter(Boolean))];
+      const from = fromAll;
       // Each lane's new shared input files first (rules.share), and the lanes' own folders as further input sources.
       for (const l of set) { try { shareLaneInputs(root, engine, s, l.task, log); } catch { /* the check says what is missing */ } }
       const extraFrom = set.map((l) => path.join(root, '.lanes', 'engine', String(l.task))).filter((d) => fs.existsSync(d));
-      const rg = (deps.rulesGate || rulesGate)({ engine, repo, tip: tip0, lanes: set, cfg: rc, from, extraFrom, root, id, env, log, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine) });
+      const rg = (deps.rulesGate || rulesGate)({ engine, repo, tip: tip0, lanes: set, cfg: rc, from, extraFrom, owe: true, root, id, env, log, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine) });
       log(`[unity-train] ${id}: rules check: ${rg.why}${rg.runs ? ` (${rg.runs} run(s), ${Math.round(rg.ms / 1000)} s)` : ''}`);
       // 2.90: a check that judged no lane because of the target is said where people look (event; train status after 2 in a row).
       if (rg.noJudge) ev('rules_no_judge', id, `the rules check judged no lane${rg.noJudge.n > 1 ? ` (${rg.noJudge.n} trains in a row, ${Math.round(rg.noJudge.minutes)} min spent)` : ''}: ${rg.why}`, { agent: by, to: 'producer', status: 'warn', meta: { n: rg.noJudge.n, minutes: rg.noJudge.minutes, timeout: Boolean(rg.timedOut), fix: rg.noJudge.fix } });
       for (const d of rg.dropped) drop(d.lane, `refused before the land run: ${d.why}\nFix it on ${d.lane.branch} (bring ${target} in first: ${targetMergeCommand(d.lane.task)}), then task done ${d.lane.task} --train again.`, { cause: 'rules' });
       set = rg.kept;
       res.rules = { ran: rg.ran, runs: rg.runs, ms: rg.ms, dropped: rg.dropped.map((d) => d.lane.task), ...(rg.skipped ? { skipped: rg.why } : {}), ...(rg.mode ? { mode: rg.mode } : {}), ...(rg.selWhy ? { why: rg.selWhy } : {}), ...(rg.parts ? { parts: rg.parts } : {}), ...(rg.splitAtOnce ? { splitAtOnce: rg.splitAtOnce } : {}), ...(rg.filter ? { filter: rg.filter } : {}), ...(rg.groups ? { groups: rg.groups } : {}), ...(rg.reused ? { reused: rg.reused } : {}), ...(rg.sliced ? { sliced: rg.sliced, slices: rg.slices } : {}) };
-      if (rg.green) rulesGreen = { tip: tip0, tasks: set.map((l) => l.task).join(','), mode: rg.mode || 'full', same: () => { try { return inputsPrint(rc, [...from, ...extraFrom]) === (rg.inputs ?? inputsPrint(rc, [...from, ...extraFrom])); } catch { return false; } } };
+      // 2.91: keeps(tip): with rules.paths or rules.ignore, a target that moved only where the rules tests do not read keeps the green.
+      const scope = rc.paths?.length ? 'outside rules.paths' : rc.ignore?.length ? 'under rules.ignore' : '';
+      if (rg.green) rulesGreen = { tip: tip0, tasks: set.map((l) => l.task).join(','), mode: rg.mode || 'full', scope, same: () => { try { return inputsPrint(rc, [...from, ...extraFrom]) === (rg.inputs ?? inputsPrint(rc, [...from, ...extraFrom])); } catch { return false; } }, keeps: (t) => { if (!scope) return false; try { const k = rulesKey({ repo, sha: tip0, cfg: rc }); return Boolean(k) && k === rulesKey({ repo, sha: t, cfg: rc }); } catch { return false; } } };
     }
   }
   for (const l of set) deps.markRunning?.(l.task, l.agent);
@@ -1065,7 +1095,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     let knownRedUsed = null;
     try {
       for (let a = 0; ; a += 1) {
-        const checked = !noLand && rulesGreen && rulesGreen.tip === tip && rulesGreen.tasks === group.map((l) => l.task).join(',') && rulesGreen.same();
+        const checked = !noLand && rulesGreen && rulesGreen.tasks === group.map((l) => l.task).join(',') && (rulesGreen.tip === tip || rulesGreen.keeps(tip)) && rulesGreen.same();
+        if (checked && a === 0 && rulesGreen.tip !== tip) log(`[unity-train] ${id}: the rules green stands: ${target} moved (${short(rulesGreen.tip)} -> ${short(tip)}) only ${rulesGreen.scope}, where the rules tests do not read`);
         // Once a day (STUDIO_ENGINE_FULL_LAND_HOURS) a land run is told nothing that lets it skip its own tests (no STUDIO_RULES_GREEN, no Edit Mode
         // plan, STUDIO_LAND_FULL=1): the shortcuts rest on tests run outside the editor, and this run would see a difference between the runtimes.
         // 2.86: only ever a run of the target alone (opts.full: its why), never a batch's run or a step of a red.
@@ -1076,7 +1107,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         update({ now: `${runText}: ${group.map((l) => l.task).join(', ') || `${target} alone`}${a ? ` (try ${a + 1})` : ''}`, runs: res.runs + 1, full: fullWhy ? { why: fullWhy, minutes: fullMin } : null });
         log(`[unity-train] ${id}: ${what}: ${alone ? `the target alone, no branch (${ref} at ${short(tip)}; STUDIO_LAND_PROBE=1)` : `${noLand ? 'run' : 'land'} ${group.map((l) => `${l.task} (${l.branch})`).join(', ')}`} on ${target} at ${short(tip)}${ref && !alone ? ` through ${ref}` : ''}${noLand && opts.retry?.tests?.length ? `; by name: ${opts.retry.tests.length} test(s), does not land` : noLand ? '; does not land' : ''}`);
         if (fullWhy) log(`[unity-train] ${id}: a full land run (${fullWhy}): the land command is not told the rules are green and gets no Edit Mode plan`);
-        if (fullWhy && a === 0 && !dryRun) ev('full_land', id, `the daily full run, on ${target} alone with no branch (${fullWhy}): every test runs${fullMin ? `, expect about ${fullMin} min` : ''}; its red goes to the target's own full-run failures`, { agent: by, to: 'producer', meta: { why: fullWhy, tasks: [], alone: true, ...(fullMin ? { minutes: fullMin } : {}) } });
+        if (fullWhy && a === 0 && !dryRun) ev('full_land', id, `the daily full run, on ${target} alone with no branch (${fullWhy}), runs now: ${opts.when === 'end' ? 'the end of the train, after the batch\'s rounds' : 'no lane waits'}; every test runs${fullMin ? `, expect about ${fullMin} min` : ''}; its red goes to the target's own full-run failures`, { agent: by, to: 'producer', meta: { why: fullWhy, tasks: [], alone: true, when: opts.when || 'idle', ...(fullMin ? { minutes: fullMin } : {}) } });
         // The Play Mode focus (engines.<x>.play.focus): a hint the land script may use. Never on a full land run; a retry of a red play stage
         // gets the selection of the run it repeats.
         const play = fullWhy ? { mode: 'full', filter: '', why: fullWhy } : opts.play || (alone ? { mode: 'full', filter: '', why: 'the target alone' } : playSelection({ changed: batchPaths(), cfg: s.cfg, full: false }));
@@ -1298,7 +1329,9 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     ev('landed', id, `${target} moved to ${short(r.newTip)} on one land run: ${group.map((l) => l.task).join(', ')}`, { agent: by, status: 'ok', meta: { head: r.newTip, lanes: group.map((l) => l.task) } });
   };
   /** Refused or error: nobody is blamed, every branch left waits (stays queued). */
+  let held = null;
   const hold = (group, r) => {
+    held = r.status;
     if (r.status === 'refused') res.refused = { at: new Date().toISOString(), why: r.why };
     // An infrastructure abort: not run, not red; the branches wait for the next train.
     if (r.status === 'not-run') res.notRun = { at: new Date().toISOString(), why: r.why, kind: r.infra?.kind || null };
@@ -1426,17 +1459,36 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   const par = parallelNow(root, engine, s.cfg, env);
   if (par.state.on && !par.ok) log(`[unity-train] ${id}: two land runs at once are on, not used: ${par.why}`);
   res.rounds = 0;
+  // 2.91: the periodic full runs on the target alone, the full rules run first (it is shorter), then the full land run. when:
+  // 'idle' (no lane: the due ones) or 'end' (after the batch's rounds: the overdue ones). true when the train was cancelled.
+  const fullsOnTarget = async (when) => {
+    const tipN = headOf(repo, target);
+    const ow = when === 'idle' ? (rulesFirst ? owed0 : { why: '' }) : rc0 ? fullRulesOwed(root, engine, rc0, { repo, tip: tipN }) : { why: '' };
+    if (ow.why && (when === 'idle' || ow.overdue)) {
+      const say = when === 'idle' ? 'runs now: no lane waits' : 'runs now: the end of the train, after the batch\'s rounds';
+      update({ now: `the full rules run on ${target} alone (${ow.why})` });
+      log(`[unity-train] ${id}: the full rules run on ${target} alone at ${short(tipN)} (${ow.why}); it ${say}`);
+      const fr = (deps.fullRulesRun || fullRulesRun)({ engine, repo, tip: tipN, cfg: rc0, from: fromAll, root, id, env, log });
+      res.fullRules = { status: fr.status, why: ow.why, overdue: Boolean(ow.overdue), when, tip: tipN, ...(fr.cached ? { cached: true } : {}) };
+      const ok = fr.status === 'pass';
+      const m = ok ? `the full rules run on ${target} alone at ${short(tipN)} passed${fr.cached ? ' (a kept result of this tree)' : ''} (${ow.why}; it ${say}): the next one is owed in ${ow.hours} h`
+        : `the full rules run on ${target} alone at ${short(tipN)} ${fr.timedOut ? 'timed out' : `is ${fr.status}`} (${String(fr.why || '').split('\n')[0]}${fr.failures?.length ? `: ${fr.failures.slice(0, 3).join(', ')}` : ''}): no lane is blamed; it is not run again until ${target} changes under what the rules tests read${fr.timedOut && !fr.timeoutSet ? ' or the doubled timeout applies' : ''}. A fix task is wanted`;
+      log(`[unity-train] ${id}: ${m}`);
+      ev('rules_full', id, m, { agent: by, to: 'producer', status: ok ? 'ok' : 'warn', meta: { status: fr.status, why: ow.why, overdue: Boolean(ow.overdue), when, tip: tipN, ...(fr.failures?.length ? { failures: fr.failures.slice(0, 10) } : {}), ...(fr.timedOut ? { timeout: true } : {}) } });
+      if (cancelledTrain(root, engine, id)) return true;
+    }
+    if (when === 'idle' ? !fullFirst : !fullLast) return false;
+    update({ now: 'the daily full run on the target alone' });
+    const fr = await landGroup([], `${target} alone`, { full: fullDue.why, when });
+    res.full = { status: fr.status, why: fullDue.why, overdue: fullDue.overdue, when };
+    if (!['pass', 'red'].includes(fr.status)) { log(`[unity-train] ${id}: the full run on the target alone ended ${fr.status} (${fr.why}); it is tried again at the next train`); ev('full_land', id, `the daily full run on ${target} alone could not run to its end (${fr.status}: ${String(fr.why || '').split('\n')[0]}); the land script must take a branch that is the target itself and land nothing (STUDIO_LAND_PROBE=1, docs/NATIVE-ENGINE.md); tried again at the next train`, { agent: by, to: 'producer', status: 'warn', meta: { status: fr.status, why: fullDue.why, alone: true, when } }); }
+    return fr.status === 'cancelled' || Boolean(cancelledTrain(root, engine, id));
+  };
 
   try {
     // 2.86: one round per set of lanes; each step comes from nextStep (pure), the train runs it.
     let fullCancelled = false;
-    if (fullFirst) {
-      update({ now: 'the daily full run on the target alone' });
-      const fr = await landGroup([], `${target} alone`, { full: fullDue.why });
-      res.full = { status: fr.status, why: fullDue.why, overdue: fullDue.overdue };
-      if (!['pass', 'red'].includes(fr.status)) { log(`[unity-train] ${id}: the full run on the target alone ended ${fr.status} (${fr.why}); it is tried again at the next train`); ev('full_land', id, `the daily full run on ${target} alone could not run to its end (${fr.status}: ${String(fr.why || '').split('\n')[0]}); the land script must take a branch that is the target itself and land nothing (STUDIO_LAND_PROBE=1, docs/NATIVE-ENGINE.md); tried again at the next train`, { agent: by, to: 'producer', status: 'warn', meta: { status: fr.status, why: fullDue.why, alone: true } }); }
-      if (fr.status === 'cancelled' || cancelledTrain(root, engine, id)) { hold(set, { ...fr, status: 'cancelled', why: fr.status === 'cancelled' ? fr.why : 'the train was cancelled during the full run' }); fullCancelled = true; }
-    }
+    if ((fullFirst || rulesFirst) && await fullsOnTarget('idle')) { hold(set, { status: 'cancelled', why: 'the train was cancelled during the full run' }); fullCancelled = true; }
     // The rounds still to run, in order (a round starts with a complete land run of its lanes).
     const pending = fullCancelled || !set.length ? [] : [set];
     let rounds = 0;
@@ -1539,6 +1591,11 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         if (r.status !== 'red' && r.status !== 'conflict') { hold(lanesOf(round.map((l) => l.task).filter((t) => live.has(t) && !res.landed.includes(t))), r); stop = true; break; }
         if (st.step === 'without' || st.step === 'apart') log(`[unity-train] ${id}: the ${st.step === 'without' ? `batch without ${st.suspect}` : 'untied branches by themselves'} ${st.step === 'without' ? 'is' : 'are'} ${r.status} too: the evidence did not hold; searching by land runs`);
       }
+    }
+    // 2.91: the batch's rounds are over (landed or handed back): an overdue full run goes now, on the target as it is now.
+    if (!fullCancelled && lanes.length && (fullLast || owed0.overdue)) {
+      if (held) log(`[unity-train] ${id}: the overdue full run(s) wait for the next train: this train stopped (${held})`);
+      else if (await fullsOnTarget('end')) res.cancelled = res.cancelled || { at: new Date().toISOString(), why: 'the train was cancelled during the full run at its end' };
     }
   } finally {
     for (const l of set) deps.clearRunning?.(l.task);

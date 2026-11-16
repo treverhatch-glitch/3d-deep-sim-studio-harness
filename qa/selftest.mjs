@@ -5364,6 +5364,30 @@ if (inShard('selftest-290c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.91: a full run never goes ahead of a waiting batch; a rules pass survives a target move the rules tests cannot see.
+if (inShard('selftest-291a')) {
+  const dir = copyRepo();
+  const { selftest291A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-291a.mjs')).href);
+  await selftest291A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.91 (w1, w2): the idle stop counts queued and landed work; each resume command names the other stop.
+if (inShard('selftest-291b')) {
+  const dir = copyRepo();
+  const { selftest291B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-291b.mjs')).href);
+  await selftest291B({ dir, report, tmpRoot, root, copyRepo });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.91 (c): a read of a file the task names holds the stall clock, bounded by STUDIO_STALL_READ_MAX_MIN.
+if (inShard('selftest-291c')) {
+  const dir = copyRepo();
+  const { selftest291C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-291c.mjs')).href);
+  await selftest291C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

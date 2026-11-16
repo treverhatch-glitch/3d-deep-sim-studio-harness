@@ -1923,6 +1923,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   if (cmd === 'resume') {
     console.log(clearStop(typeof flags.by === 'string' ? flags.by : 'human') ? 'Studio resumed. Agents can start tasks again.' : 'The studio was not stopped.');
+    try { for (const l of (await import('./supervisor.mjs')).otherStopLines()) console.log(l); } catch { /* the line is a help */ }
     process.exit(0);
   }
   if (cmd === 'trunk') {

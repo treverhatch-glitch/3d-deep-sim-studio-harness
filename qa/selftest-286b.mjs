@@ -265,8 +265,9 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: 
     queue(E, [['T-661', 'feat/a']]);
     const r = probe(TRAIN);
     const runs = runsOf(ctl);
-    await guard('2.86 (b) the full run is overdue (50 h, past fullLandMaxHours = 2 x 24): at the start of the train, before any lane, it runs on the target alone; then the lane lands on an ordinary run (no STUDIO_LAND_FULL) (fails before this fix: the full run rode the lane\'s land run)', () => [
-      runs.length === 2 && runs[0].landFull === '1' && runs[0].probe === '1' && runs[1].landFull === null && runs[1].probe === null && runs[1].srcs.join() === 'feat/a' && r.landed?.join() === 'T-661' && r.full?.overdue === true,
+    // 2.91: the overdue full run no longer goes ahead of a waiting lane: it runs at the end of the train (qa/selftest-291a.mjs).
+    await guard('2.86 (b) the full run is overdue (50 h, past fullLandMaxHours = 2 x 24): it runs on the target alone, as its own run, not on the lane\'s land run; 2.91: after the lane\'s ordinary run (no STUDIO_LAND_FULL), at the end of the train (fails before this fix: the full run rode the lane\'s land run)', () => [
+      runs.length === 2 && runs[1].landFull === '1' && runs[1].probe === '1' && runs[0].landFull === null && runs[0].probe === null && runs[0].srcs.join() === 'feat/a' && r.landed?.join() === 'T-661' && r.full?.overdue === true && r.full?.when === 'end',
       JSON.stringify({ r, runs }).slice(0, 2500)]);
   }
 

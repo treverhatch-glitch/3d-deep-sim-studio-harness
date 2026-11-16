@@ -25,6 +25,13 @@ read-only check CI runs (syntax, required gates, closed loop, changelog).
 its own commit and its own selftest file. Still required: a backup branch of `main` first, the full selftest, and green online
 checks before the merge.
 
+**Merge commit, not squash, for a branch a studio may have merged (2.91).** A studio on the owner's say-so sometimes
+merges a release branch before it is on `main`. If that branch is then squashed into `main`, the studio's next update
+conflicts in every file the branch touched, and a fix made on the branch after the studio's merge can be lost with no
+conflict at all (the lines it removed come back). So such a pull request is merged with a merge commit: `main` then
+contains the commits the studio has, and its next `--merge origin/main` applies only what is new. `main`'s first-parent
+history stays one commit per release.
+
 **Predictions (2.73.0).** Whoever ships a release can say what it should move: `npm run release -- predict --metric <name>
 --expect "-30%" [--release <version>] [--why "…"] [--by <you>]` writes `docs/releases/<version>.json` (version defaults to
 package.json's; a second predict of the same metric replaces it; `--list` shows them). Metrics: the impact report's

@@ -131,12 +131,39 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-346 — timing checks fail under load in the online runs · open
 - **Evidence:** 16 November, four runs queued at once: "task lane gives each builder its own folder", "the supervisor starts a fresh agent per task", "2.77.0 (p, P9.6)" and "2.69.0 (q, 1)" each failed once and passed on the re-run of the failed job. Each re-run costs about 40 minutes.
 - **Workaround:** re-run the failed job and note it on the pull request. Do not queue four runs at once.
+- **2.91:** three were given a hand-shake in place of a clock (`269q`, `2601m`, `277p` B-before-A). Left: the two supervisor-window checks, `2771a`, the tester drive, and two seen under load on 17 November (`290b` second gate, `277p` "someone moves main").
 
 ### P-347 — a rule added after the last local run broke a 2.85 check, and a Windows path · fixed 2.90
 - **Evidence:** pull request 92, first online run: "2.85 (f): an engine port gets the shorter port card" red on Linux (Node 22, 24) and Windows; "2.90 (t) A: the hand-back of T-003" red on Windows only (`Sim\State.cs`).
 - **Cause:** typing an engine porter's "Port ..." as a chore (so `promote` would take it) changed its type everywhere: no port card, a lighter done check. The compiler's line kept Windows separators. Only the units thought affected had been run locally.
 - **Fix:** the rule moved to the one place that needed it (the phase and pillar gate of `task add`); the task stays a build task. The compiler's line names the file as git does. No existing check changed.
 - **Rule:** after a change to a function many commands share (a task's type, a gate), run every unit that names the role or the command before the push.
+
+### P-348 — periodic full runs went ahead of a waiting batch · fixed 2.91
+- **Evidence:** a studio's train of four green branches, 16 November: about 100 min of full rules runs (target, then batch) and about 140 min of the daily full land run before its own land run began; about seven hours in all.
+- **Cause:** a full rules run that came due replaced the batch's check; an overdue full land run was put first.
+- **Fix:** with lanes waiting the batch goes first. Due full runs wait for an empty queue; overdue ones run at the end of the train. `qa/selftest-291a.mjs`.
+
+### P-349 — a record commit cost the batch its "rules are green" · fixed 2.91 (needs one setting)
+- **Evidence:** the same train: the land script committed its record of the full run to the target (two files in a docs folder); the batch's land run then ran the rules tests again, 47 min.
+- **Cause:** the land run was told green only when the target's tip was the checked commit.
+- **Fix:** `rules.ignore` (or `rules.paths`): a target that moved only where the rule tests do not read is still the checked target. A studio must set one of the two.
+
+### P-350 — the idle stop halted a studio whose work waited on a train · fixed 2.91
+- **Evidence:** "no task finished in 4 h while 6 task sessions ran" with 21 tasks queued for a running engine train.
+- **Cause:** only `task.done` counted as finished. **Fix:** a landing or a lane queued for a train counts too.
+
+### P-351 — two stops, and neither resume command named the other · fixed 2.91
+- **Evidence:** a person cleared the supervisor's stop; the studio stop stayed set and nothing said so.
+- **Fix:** each resume command prints one line when the other stop is still set. No command clears more than before.
+
+### P-352 — a session reading its task's files was ended as stalled · fixed 2.91 (bounded)
+- **Evidence:** a porter ended after 76 min with no write while reading its plan and the source it was to translate.
+- **Fix:** a read of a file the task names counts as progress for at most `STUDIO_STALL_READ_MAX_MIN` since the last write. Session logs in Claude Code's format only.
+
+### P-353 — the maintainer removed test scratch folders while other builds were running · process
+- **Evidence:** 17 November: `rm -rf /tmp/harness-selftest-*` during integration, with two agents' self-tests possibly in flight. Both were told at once; no wrong result was kept.
+- **Rule:** while other builds run on the same machine, remove only the scratch folders of the run just finished (by name), never the pattern.
 
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 

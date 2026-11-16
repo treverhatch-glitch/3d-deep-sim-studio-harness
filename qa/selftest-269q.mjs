@@ -61,9 +61,12 @@ console.log(JSON.stringify({ res, w, pts: [karyPoints(0, 9, 3), karyPoints(0, 5,
   // ---- the studio and its made-up game ----
   const ranLog = path.join(tmpRoot, `ran-269q-${process.pid}.log`);
   const events = path.join(dir, '.studio', 'events-269q.jsonl');
-  const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_GATE_FOCUS: '', STUDIO_TRAIN: '', STUDIO_TRAIN_BISECT: '', STUDIO_TRAIN_LAND_PREFIX: 'off', STUDIO_TRAIN_MAX: '', STUDIO_TRAIN_BATCH: 'off', STUDIO_TRAIN_PIPELINE: 'off', STUDIO_TRAIN_CHAIN_TAIL: '', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_GAME_GATE_RETRY: '', STUDIO_HEAVY_SLOTS: '', STUDIO_TEST_WORKERS: '', STUDIO_RESERVE_RAM_GB: '', STUDIO_MACHINE_SCAN: '', STUDIO_TEST_MACHINE: 'none', STUDIO_TRAIN_BISECT_PARALLEL: '', GH_TOKEN: '', GITHUB_TOKEN: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-269q-${process.pid}.pem`), AGENT_EVENTS_FILE: events, RAN_LOG: ranLog, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
+  // Barrier for the re-checks: each writes a marker, then waits for all three. A serial runner can never pass it.
+  const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === 'win32' ? 2.5 : 1);
+  const barrierDir = path.join(tmpRoot, `barrier-269q-${process.pid}`);
+  const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_GATE_FOCUS: '', STUDIO_TRAIN: '', STUDIO_TRAIN_BISECT: '', STUDIO_TRAIN_LAND_PREFIX: 'off', STUDIO_TRAIN_MAX: '', STUDIO_TRAIN_BATCH: 'off', STUDIO_TRAIN_PIPELINE: 'off', STUDIO_TRAIN_CHAIN_TAIL: '', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_GAME_GATE_RETRY: '', STUDIO_HEAVY_SLOTS: '', STUDIO_TEST_WORKERS: '', STUDIO_RESERVE_RAM_GB: '', STUDIO_MACHINE_SCAN: '', STUDIO_TEST_MACHINE: 'none', STUDIO_TRAIN_BISECT_PARALLEL: '', GH_TOKEN: '', GITHUB_TOKEN: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-269q-${process.pid}.pem`), AGENT_EVENTS_FILE: events, RAN_LOG: ranLog, BARRIER_DIR: barrierDir, BARRIER_MS: String(Math.round(60000 * SLOW)), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const evs = eventsOf(events);
-  const ran = () => { try { return fs.readFileSync(ranLog, 'utf8').split('\n').filter(Boolean).map((l) => { const [owner, file, start, end] = l.split('\t'); return { owner, file, start: Number(start), end: Number(end) }; }); } catch { return []; } };
+  const ran = () => { try { return fs.readFileSync(ranLog, 'utf8').split('\n').filter(Boolean).map((l) => { const [owner, file, start, end, seen, gaveUp] = l.split('\t'); return { owner, file, start: Number(start), end: Number(end), seen: Number(seen), gaveUp: Number(gaveUp) }; }); } catch { return []; } };
   const resetRan = resetRanOf(ranLog);
   write(dir, 'studio/gates.json', `${JSON.stringify({ gates: [
     // A stand-in for qa/protected-check.mjs (a real violation is held at tier C before any verify): red when a note says VIOLATES-PROTECTED.
@@ -80,10 +83,18 @@ console.log(JSON.stringify({ res, w, pts: [karyPoints(0, 9, 3), karyPoints(0, 5,
     "const list = files.length ? files : fs.readdirSync(d).filter((f) => f.endsWith('.test.mjs')).sort().map((f) => `${d}/${f}`);",
     "const nd = 'game/demo/notes';",
     "const notes = fs.existsSync(nd) ? fs.readdirSync(nd).map((f) => fs.readFileSync(path.join(nd, f), 'utf8')).join('\\n') : '';",
-    'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200);',
+    "const owner = process.env.STUDIO_LOCK_OWNER || '-'; const bd = process.env.BARRIER_DIR; let seen = 0; let gaveUp = 0;",
+    'const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);',
+    "// The check on main alone (no lane note yet) is no part of the round, so it skips the barrier.",
+    "const inRound = fs.existsSync(nd) && fs.readdirSync(nd).some((f) => /^p\\d/.test(f));",
+    "if (bd && inRound && /-re\\d*$/.test(owner)) {",
+    "  fs.writeFileSync(path.join(bd, owner), 'started');",
+    '  const limit = Date.now() + Number(process.env.BARRIER_MS || 60000);',
+    '  while ((seen = fs.readdirSync(bd).length) < 3) { if (Date.now() > limit) { gaveUp = 1; break; } nap(50); }',
+    '}',
     'let bad = 0;',
     'for (const f of list) {',
-    "  if (process.env.RAN_LOG) fs.appendFileSync(process.env.RAN_LOG, `${process.env.STUDIO_LOCK_OWNER || '-'}\\t${f}\\t${start}\\t${Date.now()}\\n`);",
+    "  if (process.env.RAN_LOG) fs.appendFileSync(process.env.RAN_LOG, `${process.env.STUDIO_LOCK_OWNER || '-'}\\t${f}\\t${start}\\t${Date.now()}\\t${seen}\\t${gaveUp}\\n`);",
     "  if (notes.includes(`BREAKS ${path.basename(f)}`)) { console.log(` FAIL  ${f} > adds up`); bad += 1; } else console.log(` \\u2713 ${f} (1 test)`);",
     '}',
     "console.log(`Test Files  ${bad ? `${bad} failed | ` : ''}${list.length - bad} passed (${list.length})`);",
@@ -115,6 +126,7 @@ console.log(JSON.stringify({ res, w, pts: [karyPoints(0, 9, 3), karyPoints(0, 5,
   // ---- 3. a red train of 5 lanes, the third breaks b.test.mjs, K = 3 from a roomy machine scan ----
   const P = [1, 2, 3, 4, 5].map((k) => lane(`pq-p${k}`, `Docs: note p${k}`, { [`game/demo/notes/p${k}.md`]: k === 3 ? 'BREAKS b.test.mjs\n' : `# p${k}\n` }));
   resetRan();
+  fs.rmSync(barrierDir, { recursive: true, force: true }); fs.mkdirSync(barrierDir, { recursive: true });
   const machine = JSON.stringify({ os: { platform: process.platform }, cores: { logical: 16 }, ram: { totalGb: 64, freeGb: 48 }, gpus: [], at: new Date().toISOString() });
   const before3 = evs().length;
   const t3 = run(dir, 'node harness/task.mjs train --by tester --now', { ...env, STUDIO_TEST_MACHINE: machine, STUDIO_TRAIN_BISECT_PARALLEL: '3' });
@@ -123,7 +135,9 @@ console.log(JSON.stringify({ res, w, pts: [karyPoints(0, 9, 3), karyPoints(0, 5,
   const re = ran().filter((r) => /-re\d*$/.test(r.owner));
   const r1 = re.filter((r) => ['re', 're2', 're3'].some((s) => r.owner.endsWith(`-${s}`)));
   const owners = [...new Set(r1.map((r) => r.owner.replace(/^.*-(re\d*)$/, '$1')))].sort();
-  const overlap = r1.some((a) => r1.some((b) => a !== b && a.owner !== b.owner && a.start < b.end && b.start < a.end));
+  // Every re-check saw all three start markers before it ended (none gave up): they ran at the same time.
+  const round = r1.filter((r) => r.seen > 0); // the check on main alone has no marker
+  const overlap = round.length === 3 && new Set(round.map((r) => r.owner)).size === 3 && round.every((r) => r.seen === 3 && !r.gaveUp);
   const rounds = ev3.filter((e) => e.type === 'task.train.bisect_round');
   const leftovers = (() => { try { return fs.readdirSync(path.join(dir, '.lanes')).filter((n) => /^_train-.*-p\d+$/.test(n)); } catch { return []; } })();
   const branches = out(g(dir, 'branch', '--list', 'train/*')).trim();
@@ -133,5 +147,5 @@ console.log(JSON.stringify({ res, w, pts: [karyPoints(0, 9, 3), karyPoints(0, 5,
       && dropped(P[2].id) && [0, 1, 3, 4].every((i) => onMain(`game/demo/notes/p${i + 1}.md`)) && !onMain('game/demo/notes/p3.md') && !leftovers.length && !/-p\d/.test(branches),
     `ok=${P.map((l) => l.ok)} owners=${owners} overlap=${overlap} rounds=${rounds.length} left=${leftovers} branches=${branches}\nre=${JSON.stringify(re)}\n${log3.slice(-3000)}\n${P.find((l) => !l.ok)?.log.slice(-800) || ''}`);
 
-  for (const p of [pure, laneProbe, ranLog]) { try { fs.rmSync(p, { force: true }); } catch {} }
+  for (const p of [pure, laneProbe, ranLog, barrierDir]) { try { fs.rmSync(p, { recursive: true, force: true }); } catch {} }
 }
