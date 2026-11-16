@@ -159,7 +159,7 @@ console.log(JSON.stringify({ same: nextBaseVerdict(R, { assumed: ${JSON.stringif
     "const onMain = (rel) => spawnSync('git', ['cat-file', '-e', `main:${rel}`], { cwd: main, windowsHide: true }).status === 0;",
     'if (!files.length && mark) {',
     "  if (notes.includes('B-LANE')) {",
-    "    fs.writeFileSync(path.join(mark, 'b-verifying'), '1'); note('b-verify');",
+    "    note('b-verify'); fs.writeFileSync(path.join(mark, 'b-verifying'), '1');",
     "    if (notes.includes('MOVE-MAIN') && !has('moved')) {",
     "      until(() => onMain('game/demo/notes/a1.md'), 60000);",
     "      fs.writeFileSync(path.join(main, 'game/demo/notes/moved.md'), '# someone else\\n');",
@@ -249,12 +249,16 @@ console.log(JSON.stringify({ same: nextBaseVerdict(R, { assumed: ${JSON.stringif
     const aDone = E.find((e) => e.type === 'task.train.done' && e.meta?.train === aId);
     const verifies = (id) => E.filter((e) => e.type === 'task.train.verify' && e.meta?.train === id).length;
     const bVerifyStart = T.ran().find((r) => r.what === 'b-verify');
+    // A goes on only after the b-verifying marker, which B writes after logging b-verify: so in the log b-verify comes
+    // before a-go, and A lands after a-go. That order is forced; the stamps below may only tie (same millisecond).
+    const order = T.ran().map((r) => r.what);
+    const bBeforeGo = order.indexOf('b-verify') >= 0 && order.indexOf('a-go') > order.indexOf('b-verify');
     const all = [1, 2, 3, 4].every((k) => T.onMain(`game/demo/notes/a${k}.md`)) && [1, 2].every((k) => T.onMain(`game/demo/notes/b${k}.md`));
     const life = bId ? T.lifeOf(bId) : null;
     const detail = `lanes ok=${L.map((l) => l.ok)} A=${aId} B=${bId} done=${JSON.stringify(done)?.slice(0, 300)}\nA lanes=${JSON.stringify(aStart?.meta?.lanes)} B lanes=${JSON.stringify(bStart?.meta?.lanes)} verifies A=${aId && verifies(aId)} B=${bId && verifies(bId)}\nran=${JSON.stringify(T.ran())}\n${out(tr).slice(-2000)}\n--- next.log\n${T.nextLog().slice(-2500)}\n${L.find((l) => !l.ok)?.log || ''}`;
     await guard('2.77.0 (p, P9.6): six queued lanes, STUDIO_TRAIN_BATCH default 4: train A takes the 4 oldest, and while A verifies a speculative train B (its own copy, its own lock) takes the other 2 on A\'s tree: B\'s verify started before A landed (A\'s stand-in check waits until B verifies), each train ran exactly ONE full verify, B landed right after A without verifying again, all six notes are on main, the queue is empty (fails on 2.76.1: one train takes all six lanes, no speculative train)', () => [
       L.every((l) => l.ok) && tr.status === 0 && aId && bId && aId !== bId && JSON.stringify(aStart.meta.lanes) === JSON.stringify(L.slice(0, 4).map((l) => l.id)) && JSON.stringify([...bStart.meta.lanes].sort()) === JSON.stringify(L.slice(4).map((l) => l.id).sort())
-        && bStart.meta.after === aId && bVerifyStart && aLanded && bVerifyStart.at < ts(aLanded) && verifies(aId) === 1 && verifies(bId) === 1 && bLanded && done?.type === 'task.train.done' && all && !T.queue().length && t0 > 0,
+        && bStart.meta.after === aId && bVerifyStart && aLanded && bBeforeGo && bVerifyStart.at <= ts(aLanded) && verifies(aId) === 1 && verifies(bId) === 1 && bLanded && done?.type === 'task.train.done' && all && !T.queue().length && t0 > 0,
       detail]);
     await guard('2.77.0 (p, P9.6): never two trains landing at once: B moved main only after A had landed and let go of the train lock (A\'s done event before B\'s landed event), from exactly A\'s landed head (main\'s parent chain: B\'s landing commit descends from A\'s); B\'s lock is gone and its own life record (B-88) ended "done" (fails on 2.76.1: no B)', () => {
       const aHead = aLanded?.meta?.head; const bHead = bLanded?.meta?.head;
