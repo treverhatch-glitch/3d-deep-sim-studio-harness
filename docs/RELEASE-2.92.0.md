@@ -22,12 +22,12 @@ One more night of a live studio's engine trains on 2.90 (2.91 was merged but not
 | The compile search at the queue door | With the compile search on, `task done --train` compiles the branch merged with the target (red: not queued, with the compiler's lines), then with the branches queued ahead of it. A clash with a queued branch does not refuse: the branch is queued, the porter is told now which branch and which lines, and trains keep the two apart until the other has landed or left. Bounded (`STUDIO_QUEUE_COMPILE_RUNS` 6, `STUDIO_QUEUE_COMPILE_MIN` 10); any failure of the check itself queues as before. Event `task.train.<x>.queue_compile`. | `292a` B |
 | A red compile names its branch | `engines.<x>.logs`: the engine's own log files. After a red land run their compiler error lines are read with the run's output. When each named file is changed by exactly one branch of the batch, those branches go back at once (cause `compile`) and the rest run again, with no halving search. Otherwise the search as before. | `292a` C |
 | A red target gets a fix task | When the target is red by itself (the rules check, the daily full land run, the owed full rules run), the harness files one task, `Fix: <target> is red by itself on <n> rule test(s): ...`, once per distinct red, and `train status` shows it. `STUDIO_ENGINE_TARGET_RED_TASK=off`. | `292b` |
-TIMINGROW
+| Two more checks no longer depend on the machine's load | In `qa/selftest.mjs`: "the supervisor starts a fresh agent per task ... and stops at its time" and "task lane gives each builder its own folder" waited a fixed window and then counted. Each now waits for the thing itself (two sessions and two tasks done; two builders live together) under a long safety limit; "stops at its time" is proved by a second short run that can only end when its time is up. No harness code changed. | three runs each, one under load |
 
 ## Size, said plainly
 
 The owner asked that the harness not grow. `node scripts/size-report.mjs --against origin/main`: harness code
-SIZELINE. What was looked for and not found:
+is 181 lines larger (85,029 to 85,210, one new module), scripts unchanged, tests 607 lines larger, four new settings. What was looked for and not found:
 
 - **Dead files: none.** Every module is imported, run by a command, a hook or the online checks.
 - **A tool that was planned and not built:** a "which units cover this change" command. The self-test already has
