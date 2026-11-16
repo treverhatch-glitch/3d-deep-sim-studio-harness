@@ -144,6 +144,23 @@ export async function resumeCli({ by = null, why = null, permission = null, env 
   return { code: 0, text: `Cleared the halt (${s.halted.why || 'no reason recorded'}). The supervisor starts agents again on its next pass (within ${Math.round(LOOP_MS / 1000)} s); its supervisor.resumed event names ${who}.` };
 }
 /**
+ * 2.91: there are two stops. studio:start and studio:resume end with one line when the studio stop (.studio/STOP.json) is
+ * still set; `task resume` (otherStopLines) says when the supervisor's own stop or halt is still set. Words only.
+ */
+export async function studioStopLine() {
+  const { readStop } = await import('./task.mjs');
+  const st = readStop();
+  if (!st) return null;
+  return `The studio is still stopped by ${st.by || 'unknown'}${st.reason ? ` (${st.reason})` : ''}: no new task starts until it is resumed. npm run task -- resume --by <name>`;
+}
+export function otherStopLines() {
+  const lines = [];
+  if (fs.existsSync(STOP_FILE)) lines.push('The supervisor is still stopped (studio:stop). npm run studio:start starts it.');
+  const s = readStatus();
+  if (s && s.status === 'running' && alive(s) && s.halted) lines.push(`The supervisor is halted (${s.halted.why || 'no reason recorded'}). npm run studio:resume -- --by <name>`);
+  return lines;
+}
+/**
  * `npm run studio:extend -- --until <time|+8h|none> --by <name> [--why "…"] [--permission "…"]` moves a running
  * supervisor's end time without a restart: it writes .studio/supervisor-extend.json, which the next pass applies
  * (applyExtend); "none" removes it. Who may (harness/decider.mjs 'supervisor-extend'): a person; an agent under the
@@ -1189,6 +1206,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const flag = flagOf(argv);
     const r = await resumeCli({ by: flag('by'), why: flag('why'), permission: flag('permission') });
     (r.code ? console.error : console.log)(r.text);
+    if (!r.code) { const l = await studioStopLine(); if (l) console.log(l); }
     process.exit(r.code);
   }
   if (argv[0] === 'extend') {
@@ -1227,6 +1245,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv, '--foreground'], { cwd: REPO_ROOT, detached: true, stdio: ['ignore', log, log], env: process.env, windowsHide: true });
     child.unref();
     console.log(`[supervisor] running on its own (pid ${child.pid}); output in .studio/supervisor.log. npm run studio:status to check, npm run studio:stop to stop.`);
+    const l = await studioStopLine();
+    if (l) console.log(l);
     process.exit(0);
   }
   await main(argv.filter((a) => a !== '--foreground'));
