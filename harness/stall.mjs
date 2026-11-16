@@ -2,13 +2,13 @@
 /**
  * harness/stall.mjs — end a session that has stopped producing work (it keeps re-reading but writes nothing).
  * Every heartbeat and watchdog pass asks:
- *   - progress: did the session write a file, commit, or change a task's state since its last progress?
- *   - stall: no progress for STUDIO_STALL_MIN minutes (15; planners STUDIO_STALL_PLAN_MIN: 8, or 20 for slow models)
+ *   - stall: no write, commit or task change for STUDIO_STALL_MIN minutes (15; planners STUDIO_STALL_PLAN_MIN: 8, or 20 for slow models)
  *   - burn: over STUDIO_STALL_RATIO_WINDOW_TOKENS (300000) input tokens the input:output ratio passed
- *     STUDIO_STALL_RATIO (120:1) with no progress (cache reads don't count; STUDIO_STALL_GRACE_MIN (15); 0: off)
+ *     STUDIO_STALL_RATIO (120:1) with no progress (not cache reads; STUDIO_STALL_GRACE_MIN (15); 0: off)
  *   - wall clock: over STUDIO_SESSION_MAX_MIN (90; planning roles STUDIO_SESSION_PLAN_MAX_MIN, 25)
+ *   - reads: a read of a file the task names counts as progress, up to STUDIO_STALL_READ_MAX_MIN (2 x stall; 0: off)
  * A stalled session is ended and its task handed back (session.stall). 0 turns a limit off; STUDIO_STALL=off turns all
- * off. Waiting on its own verify or `task done` is busy: STUDIO_STALL_VERIFY_MAX_MIN, STUDIO_DONE_RUNNING_MAX_MIN.
+ * off. Waiting on its own verify or `task done` is busy (STUDIO_STALL_VERIFY_MAX_MIN, STUDIO_DONE_RUNNING_MAX_MIN).
  *   node harness/stall.mjs check [--json]
  */
 import fs from 'node:fs';
@@ -60,6 +60,7 @@ export function stallLimits(role, env = process.env, model = null) {
     ratioWindow: num(env.STUDIO_STALL_RATIO_WINDOW_TOKENS, 300000),
     graceMin: num(env.STUDIO_STALL_GRACE_MIN, 15),
     busyMaxMin: num(env.STUDIO_STALL_VERIFY_MAX_MIN, 60),
+    readMaxMin: num(env.STUDIO_STALL_READ_MAX_MIN, 2 * (plan ? pl.min : num(env.STUDIO_STALL_MIN, 15))),
   };
 }
 
@@ -152,6 +153,46 @@ export function progressFingerprint(agent, cwd = REPO_ROOT, events = readRecentE
 }
 
 /**
+ * Reads of the task's files in a session log, counted incrementally. Looks at the log from byte `st.offset` (else `from`),
+ * only complete lines, at most 4 MB a call. Counts Read (file_path) and Grep or Glob (path) tool calls whose path, made
+ * repo-relative against one of `roots`, is a named file or lies under a named folder. Returns { offset, count }; never throws.
+ */
+function countNamedReads(st, { files, log, from = 0, roots = [] }) {
+  const cap = 4 * 1024 * 1024;
+  let offset = Number(st?.offset); let count = Number(st?.count) || 0;
+  if (!Number.isFinite(offset) || offset < 0) offset = Number(from) || 0;
+  try {
+    const size = fs.statSync(log).size;
+    if (offset > size) { offset = Number(from) > 0 && Number(from) <= size ? Number(from) : 0; count = 0; }
+    const len = Math.min(size - offset, cap);
+    if (len <= 0) return { offset, count };
+    const buf = Buffer.alloc(len);
+    const fd = fs.openSync(log, 'r');
+    try { fs.readSync(fd, buf, 0, len, offset); } finally { fs.closeSync(fd); }
+    const end = buf.lastIndexOf(10) + 1;
+    if (end === 0) return { offset: len === cap ? offset + len : offset, count };
+    const rs = roots.map(norm).filter(Boolean);
+    const rel = (p) => {
+      const q = norm(p);
+      if (!/^([a-z]:)?\//i.test(q)) return q;
+      const r = rs.find((x) => under(q, x));
+      return r ? q.slice(r.length).replace(/^\//, '') : null;
+    };
+    for (const l of buf.subarray(0, end).toString('utf8').split('\n')) {
+      if (!l.includes('tool_use')) continue;
+      let o; try { o = JSON.parse(l); } catch { continue; }
+      for (const c of Array.isArray(o?.message?.content) ? o.message.content : []) {
+        if (c?.type !== 'tool_use') continue;
+        const p = c.name === 'Read' ? c.input?.file_path : c.name === 'Grep' || c.name === 'Glob' ? c.input?.path : null;
+        const r = typeof p === 'string' && p ? rel(p) : null;
+        if (r && files.some((f) => under(r, f))) count += 1;
+      }
+    }
+    return { offset: offset + end, count };
+  } catch { return { offset, count }; }
+}
+
+/**
  * Pure verdict. s = { role, startedAt, lastProgressAt, tokensIn, tokensOut, windowIn, windowOut }
  * (window* = tokens since the last progress). Returns { stalled, kind, why }.
  */
@@ -161,6 +202,13 @@ export function stallVerdict(s, now = Date.now(), lim = stallLimits(s.role, proc
   // s.busy (set by observe) stretches the wall-clock cap by at most STUDIO_STALL_VERIFY_MAX_MIN.
   const stretch = s.busy ? Math.max(0, num(lim.busyMaxMin, 60)) : 0;
   if (lim.maxMin > 0 && ran >= lim.maxMin + stretch) return { stalled: true, kind: 'wall-clock', why: `ran ${Math.round(ran)} min, past the ${lim.maxMin} min cap for a ${s.role} session${stretch ? ` (+${stretch} min while it waits on its own ${s.busy.kind}, STUDIO_STALL_VERIFY_MAX_MIN)` : ''}` };
+  // Reads of the task's files held the clock: count the quiet from the last write, and stop holding at the bound.
+  const wrote = Date.parse(s.lastWriteAt || '');
+  const held = Number.isFinite(wrote) && s.lastReadAt && Date.parse(s.lastReadAt) > wrote ? (Date.parse(s.lastReadAt) - wrote) / 60000 : 0;
+  if (held > 0 && lim.stallMin > 0) {
+    const since = (now - wrote) / 60000;
+    if (quiet >= lim.stallMin || (lim.readMaxMin > 0 && since >= Math.max(lim.readMaxMin, lim.stallMin))) return { stalled: true, kind: 'no-progress', why: `no file write, commit or task change for ${Math.round(since)} min (reads of the task's files held the clock for ${Math.round(held)} min) (limit ${lim.stallMin}: ${lim.stallWhy || 'the default'})`, limitMin: lim.stallMin, limitWhy: lim.stallWhy || null };
+  }
   if (lim.stallMin > 0 && quiet >= lim.stallMin) return { stalled: true, kind: 'no-progress', why: `no file write, commit or task change for ${Math.round(quiet)} min (limit ${lim.stallMin}: ${lim.stallWhy || 'the default'})`, limitMin: lim.stallMin, limitWhy: lim.stallWhy || null };
   const wi = Number(s.windowIn || 0); const wo = Number(s.windowOut || 0);
   if (lim.ratio > 0 && lim.ratioWindow > 0 && ran >= num(lim.graceMin, 15) && wi >= lim.ratioWindow && wi / Math.max(1, wo) >= lim.ratio) return { stalled: true, kind: 'read-burn', why: `read ${wi} tokens and wrote ${wo} (${Math.round(wi / Math.max(1, wo))}:1, limit ${lim.ratio}:1) with no progress` };
@@ -168,7 +216,7 @@ export function stallVerdict(s, now = Date.now(), lim = stallLimits(s.role, proc
 }
 
 /** One observation for a running session (heartbeat, watchdog); tokens = { in, out } so far. Updates .studio/stall/<agent>.json, returns the verdict. */
-export function observe(session, { tokens = { in: 0, out: 0 }, cwd = REPO_ROOT, now = Date.now(), events } = {}) {
+export function observe(session, { tokens = { in: 0, out: 0 }, cwd = REPO_ROOT, now = Date.now(), events, reads = null } = {}) {
   // Drift checks ride this observation, at most once per STUDIO_DRIFT_EVERY_S (120 s) per session: they run git
   // synchronously, and on Windows every beat held the launcher up.
   const every = Number(process.env.STUDIO_DRIFT_EVERY_S ?? 120) * 1000;
@@ -191,12 +239,20 @@ export function observe(session, { tokens = { in: 0, out: 0 }, cwd = REPO_ROOT, 
   // Waiting on its own task done or verify is busy, not stalled (busyWait).
   let doing = null;
   try { doing = busyWait(session, { now }); } catch { doing = null; }
-  if (!fresh && (fp !== prev.fp || doing)) s = { ...s, fp, lastProgressAt: new Date(now).toISOString(), baseIn: tokens.in, baseOut: tokens.out };
+  const lim = stallLimits(s.role, process.env, s.model || session.model);
+  // Reads of the task's files (reads = { files, log, from, roots } from the launcher): new ones hold the clock, for at most lim.readMaxMin since the last write.
+  let rd = null;
+  if (reads?.files?.length && reads.log && lim.readMaxMin > 0) rd = countNamedReads(fresh ? { offset: reads.from } : s.reads, reads);
+  const iso = new Date(now).toISOString();
+  if (fresh) s = { ...s, lastWriteAt: session.startedAt };
+  else if (fp !== prev.fp || doing) s = { ...s, fp, lastProgressAt: iso, lastWriteAt: iso, lastReadAt: null, lastProgress: 'write', baseIn: tokens.in, baseOut: tokens.out };
+  else if (rd && rd.count > Number(prev.reads?.count || 0) && now - Date.parse(s.lastWriteAt || s.startedAt) < lim.readMaxMin * 60000) s = { ...s, lastProgressAt: iso, lastReadAt: iso, lastProgress: 'read', baseIn: tokens.in, baseOut: tokens.out };
+  if (rd) s.reads = rd;
   s.busy = doing ? { kind: doing.kind, since: doing.since, pid: doing.pid, file: doing.file } : null;
   s.tokensIn = tokens.in; s.tokensOut = tokens.out;
   s.windowIn = tokens.in - (s.baseIn || 0); s.windowOut = tokens.out - (s.baseOut || 0);
   if (!s.model && session.model) s.model = session.model; // a planning session's limit follows its model
-  const v = stallVerdict(s, now);
+  const v = stallVerdict(s, now, lim);
   if (!v.stalled && s.busy) v.waiting = `on its own ${s.busy.kind} (pid ${s.busy.pid}, since ${String(s.busy.since || '').slice(11, 16)})`;
   s.verdict = v;
   writeStall(session.agent, s);

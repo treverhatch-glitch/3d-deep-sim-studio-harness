@@ -36,7 +36,7 @@ import { conductorForBrief } from './conductor.mjs';
 import { regressionHowTo } from './regression-howto.mjs';
 import { visionCard, visionSection } from './vision-card.mjs';
 import { taskType } from './done-check.mjs';
-import { readHolds } from './task-hold.mjs';
+import { readHolds, laneList } from './task-hold.mjs';
 import { toFollow, followLines, followQuoted } from './ask.mjs';
 
 const read = (rel) => {
@@ -95,6 +95,25 @@ export function namedRanges(texts, root = REPO_ROOT) {
     }
   }
   return out.slice(0, 40);
+}
+
+/**
+ * 2.91: the repo-relative files and folders (forward slashes) a task names that exist under root: the files of
+ * namedRanges, the entries of its lane, paths and holds, and path-like words in its title and scope.
+ * task = { title, scope, paths, lane, holds }.
+ */
+export function namedFiles(task, root = REPO_ROOT) {
+  const t = task || {};
+  const list = (v) => (Array.isArray(v) ? v.join(',') : String(v ?? ''));
+  const words = `${t.title || ''}\n${t.scope || ''}`.match(/[\w.-]+(?:\/[\w.-]+)+\/?|[\w-]+\.\w+/g) || [];
+  const found = [...namedRanges([t.title, t.scope, list(t.paths), t.lane, list(t.holds)], root).map((r) => r.file), ...laneList([list(t.lane), list(t.paths), list(t.holds)].filter(Boolean).join(',')), ...words];
+  const out = [];
+  for (const f of found) {
+    const rel = String(f).replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+    if (!rel || rel.startsWith('/') || rel.includes('..') || out.includes(rel)) continue;
+    if (fs.existsSync(path.join(root, rel))) out.push(rel);
+  }
+  return out;
 }
 
 export function buildFocus(taskId, agent = null) {

@@ -5364,6 +5364,14 @@ if (inShard('selftest-290c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.91 (c): a read of a file the task names holds the stall clock, bounded by STUDIO_STALL_READ_MAX_MIN.
+if (inShard('selftest-291c')) {
+  const dir = copyRepo();
+  const { selftest291C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-291c.mjs')).href);
+  await selftest291C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

@@ -180,6 +180,9 @@ npm run studio:status
     wins. The `session.stall` event says which limit applied and why.
   - Read-burn ratio (`STUDIO_STALL_RATIO`, 120:1 over `STUDIO_STALL_RATIO_WINDOW_TOKENS`; 0 = off) counts uncached input plus
     cache creation only, and gives no verdict in the first `STUDIO_STALL_GRACE_MIN` (15) minutes.
+  - 2.91: a read of a file the task names (its lane, paths, holds, title or scope; `Read`, `Grep` or `Glob` in the session log)
+    counts as progress, for at most `STUDIO_STALL_READ_MAX_MIN` (default 2 x the stall limit; 0 = off) since the last
+    write, commit or task change. Past that the usual no-progress end comes, and its message names the reads.
   - Each session is judged on its own tokens: the session record's `logFrom` says where its part of an agent's appended log
     starts, only the newest Claude session id counts, and its stall record starts fresh. A session the launcher ends
     records its usage from its stream and a cost estimated at `studio/prices.json` (`meta.costEstimated`).
