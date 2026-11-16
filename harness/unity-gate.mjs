@@ -26,6 +26,7 @@ import { engineTarget, engineTask, engineFloor, recordDuration, readTune, tunePa
 import { readJson } from './fsafe.mjs';
 import { gateConfig } from './engine-gates.mjs';
 import { flagOf, quoteArg as q } from './helpers.mjs';
+import { compilerLines } from './engine-compile.mjs';
 
 export const UNITY_EXIT = { 0: 'pass', 1: 'red', 2: 'conflict', 3: 'refused', 4: 'error' };
 const WORDS = {
@@ -386,22 +387,26 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   keepPeak(m.status);
   const tail = text.trimEnd().split('\n').slice(-12).join('\n');
   // A red run's failing test names: from the output, results files (engines.<x>.results) and the stage report.
+  const gw = cfg.gateWorktree ? path.resolve(REPO_ROOT, cfg.gateWorktree) : cwd;
   const failures = m.status === 'red' ? (() => {
     const names = new Set(failingTests(text));
     try {
-      const gw = cfg.gateWorktree ? path.resolve(REPO_ROOT, cfg.gateWorktree) : cwd;
       const pats = Array.isArray(cfg.results) ? cfg.results : engine === 'unity' ? UNITY_RESULTS : [];
       for (const n of resultFailures(resultFiles(pats, { base: gw, sinceMs: landStart }))) names.add(n);
     } catch { /* the output's names stand */ }
     for (const n of reportFailures(stageFile)) names.add(n);
     return [...names].sort();
   })() : [];
-  const errorFiles = m.status === 'red' ? compileErrorFiles(text) : [];
+  // 2.92: engines.<x>.logs (as results): the engine's own logs this run wrote, read for compiler errors (their last 4 MB in all).
+  let cap = 4 * 1024 * 1024;
+  const logText = m.status === 'red' && Array.isArray(cfg.logs) ? resultFiles(cfg.logs, { base: gw, sinceMs: landStart }).map((f) => { const n = Math.min(f.size, cap); cap -= n; if (n <= 0) return ''; try { const fd = fs.openSync(f.file, 'r'); try { const b = Buffer.alloc(n); fs.readSync(fd, b, 0, n, f.size - n); return b.toString('utf8'); } finally { fs.closeSync(fd); } } catch { return ''; } }).join('\n') : '';
+  const errorFiles = m.status === 'red' ? compileErrorFiles(`${text}\n${logText}`) : [];
+  const errorLines = errorFiles.length ? compilerLines(`${text}\n${logText}`, gw) : [];
   const stages = (() => { try { return [...(Array.isArray(stagesBefore) ? stagesBefore : []), ...landStages(stageFile, text)].slice(0, 12); } catch { return []; } })();
   // 2.86: a land script told STUDIO_LAND_PROBE=1 (land nothing) says it honoured that: an output line "[land-probe] honoured", or
   // "probe": true in its stage report. The engine train runs by-name steps on lanes only for a script that said so.
   const probeAck = env.STUDIO_LAND_PROBE === '1' && (/^\[land-probe\]\s+honoured\b/m.test(text) || (() => { try { return JSON.parse(fs.readFileSync(stageFile, 'utf8').replace(/^\uFEFF/, ''))?.probe === true; } catch { return false; } })());
-  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(probeAck ? { probeAck: true } : {}), ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), ...(errorFiles.length ? { errorFiles } : {}), ...(stages.length ? { stages } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
+  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(probeAck ? { probeAck: true } : {}), ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), ...(errorFiles.length ? { errorFiles, errorLines } : {}), ...(stages.length ? { stages } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
 
   function finish(res) {
     const full = { ...res, engine, ms: Date.now() - t0, ...(task ? { task } : {}), ...(br ? { branch: br } : {}), ...(many ? { branches: many } : {}), at: new Date().toISOString() };

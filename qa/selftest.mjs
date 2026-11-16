@@ -5388,6 +5388,14 @@ if (inShard('selftest-291c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.92 (a): preQueue on the branch as it would land; the compile search at the queue door; a red compile names its branch.
+if (inShard('selftest-292a')) {
+  const dir = copyRepo();
+  const { selftest292A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-292a.mjs')).href);
+  await selftest292A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

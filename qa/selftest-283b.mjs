@@ -179,8 +179,8 @@ console.log(JSON.stringify({ ok: r.ok, message: r.message, entry: readUnityQueue
     const d = (r.dropped || [])[0];
     const files = probe(`import { compileErrorFiles } from ${u('harness/unity-gate.mjs')};
 console.log(JSON.stringify({ f: compileErrorFiles('Assets\\\\A\\\\B.cs(12,5): error CS0117: x\\r\\n  C:/w/Assets/C D/E.cs(1,2): error CS1002: ; expected\\nwarning only.cs(3,4): warning CS0168\\nno error here\\n[unity] Assets/F.cs(9,9): error CS0103: y') }));`);
-    await guard('2.83 blame by evidence, a compile error: a batch of three is red on a compiler error that names a file only B\'s branch changes (no test is named); the train runs the batch without B, lands A and C on that one run, and hands B back with the file named (2 land runs, cause "evidence"); the files are read from error lines only, with either slash (fails before this fix: a compile error named no test, so the search by land runs ran)', () => [
-      r.landed?.slice().sort().join() === 'T-825,T-827' && r.dropped?.length === 1 && d.task === 'T-826' && d.cause === 'evidence' && /a compile error/.test(d.why) && /BrokenTests\.cs/.test(d.why) && r.runs === 2 && runs.length === 2
+    await guard('2.83 blame by evidence, a compile error: a batch of three is red on a compiler error that names a file only B\'s branch changes (no test is named); the train runs the batch without B, lands A and C on that one run, and hands B back with the file named (2 land runs; 2.92: cause "compile", handed back before the second run); the files are read from error lines only, with either slash (fails before this fix: a compile error named no test, so the search by land runs ran)', () => [
+      r.landed?.slice().sort().join() === 'T-825,T-827' && r.dropped?.length === 1 && d.task === 'T-826' && d.cause === 'compile' && /a compile error/.test(d.why) && /BrokenTests\.cs/.test(d.why) && r.runs === 2 && runs.length === 2
         && files.f?.join('|') === 'Assets/A/B.cs|C:/w/Assets/C D/E.cs|Assets/F.cs',
       JSON.stringify({ r, runs, files }).slice(0, 2500)]);
   }

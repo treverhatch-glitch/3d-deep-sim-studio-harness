@@ -25,7 +25,7 @@ import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts,
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey } from './engine-rules.mjs';
-import { compileSearchOf, compileSearch, compileAt } from './engine-compile.mjs';
+import { compileSearchOf, compileSearch, compileAt, compilerLines } from './engine-compile.mjs';
 import { parallelState, parallelUse, parallelLine, runGateChild } from './engine-gates.mjs';
 import { engineSlotsAt, heavySlotsAt, floorFree } from './heavy.mjs';
 import { maxConcurrent, capGroup } from './heavy-budget.mjs';
@@ -108,10 +108,19 @@ export function preQueueOf(cfg = {}) {
   return v.map((e) => ({ touches: (Array.isArray(e?.touches) ? e.touches : [e?.touches]).filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().replace(/\\/g, '/')), run: typeof e?.run === 'string' ? e.run.trim() : '', say: typeof e?.say === 'string' ? e.say.trim().slice(0, 300) : '', timeoutMin: Math.max(1, num(e?.timeoutMin, 10)), env: envVars(e?.env) })).filter((e) => e.touches.length && e.run);
 }
 
+/** 2.92: the lane's head merged with the target tip, a commit object only (no ref): { tip, head } | { tip, conflict } | { tip, error }. */
+function mergedOnTarget(s, lane) {
+  const tip = headOf(s.repo, s.target);
+  const c = chainOnTarget(s.repo, tip, [lane], 'queue', s.engine || 'unity');
+  if (c.error) return { tip, error: c.error };
+  return c.conflictTarget[0] ? { tip, conflict: `${lane.branch}: ${c.conflictTarget[0].why}` } : { tip, head: c.head };
+}
+
 /**
  * 2.90: run the preQueue entries whose "touches" match a file the lane's branch changes (against its merge base with the
- * target), in one throwaway checkout of its head (the entry's own "env", then STUDIO_LANE_COMMIT, STUDIO_LANE_DIR,
- * STUDIO_ENGINE_REPO, and STUDIO_ENGINE_LANE_DIR when the porter's lane folder exists). { ran: [run], files, refused?: text, skipped?: why }.
+ * target), in one throwaway checkout of its head merged with the target tip (2.92; a conflict refuses, nothing runs). Env:
+ * the entry's own "env", then STUDIO_LANE_COMMIT (the head), STUDIO_TARGET_COMMIT, STUDIO_LANE_DIR, STUDIO_ENGINE_REPO,
+ * STUDIO_ENGINE_LANE_DIR when the porter's lane folder exists. { ran: [run], files, target, refused?: text, skipped?: why }.
  */
 export function runPreQueue(s, lane, { root, env = process.env } = {}) {
   const list = preQueueOf(s.cfg);
@@ -122,15 +131,19 @@ export function runPreQueue(s, lane, { root, env = process.env } = {}) {
   const due = list.map((e) => ({ e, files: changed.filter((f) => matchAny(f, e.touches)) })).filter((x) => x.files.length);
   if (!due.length) return res;
   res.files = [...new Set(due.flatMap((x) => x.files))];
+  const m = mergedOnTarget(s, lane);
+  res.target = m.tip;
+  if (m.conflict) return { ...res, refused: m.conflict, conflict: true };
+  if (m.error) return { ...res, skipped: m.error };
   const dir = path.join(root, '.studio', 'tmp', `prequeue-${String(lane.task).replace(/[^A-Za-z0-9._-]/g, '_')}`);
   fs.mkdirSync(path.dirname(dir), { recursive: true });
   removeCheckout(s.repo, dir);
-  const co = rulesCheckout({ repo: s.repo, sha: lane.head, dir, cfg: {}, env });
+  const co = rulesCheckout({ repo: s.repo, sha: m.head, dir, cfg: {}, env });
   if (!co.ok) return { ...res, skipped: `could not check ${short(lane.head)} out: ${co.why}` };
   const laneDir = path.join(root, '.lanes', 'engine', String(lane.task));
   try {
     for (const { e, files } of due) {
-      const r = spawnSync(e.run, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout: e.timeoutMin * 60000, env: { ...env, ...e.env, STUDIO_LANE_COMMIT: lane.head, STUDIO_LANE_DIR: dir, STUDIO_ENGINE_REPO: s.repo, ...(fs.existsSync(laneDir) ? { STUDIO_ENGINE_LANE_DIR: laneDir } : {}) } });
+      const r = spawnSync(e.run, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout: e.timeoutMin * 60000, env: { ...env, ...e.env, STUDIO_LANE_COMMIT: lane.head, STUDIO_TARGET_COMMIT: m.tip, STUDIO_LANE_DIR: dir, STUDIO_ENGINE_REPO: s.repo, ...(fs.existsSync(laneDir) ? { STUDIO_ENGINE_LANE_DIR: laneDir } : {}) } });
       if (r.error && r.error.code !== 'ETIMEDOUT') return { ...res, skipped: `${e.run}: ${r.error.code || r.error.message}` };
       if (r.status === 0 && !r.error) { res.ran.push(e.run); continue; }
       const lines = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd().split('\n').slice(-8);
@@ -182,7 +195,11 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
     if (rec && again) evTop('requeued_unchanged', 'queue', `${task}: ${br} at ${short(head)} queued again with --again though nothing changed since train ${rec.train} handed it back (${rec.reason})`, { engine, agent: agent || `${engine}-train`, task, to: 'producer', status: 'warn', meta: { branch: br, head, handback: rec.train, reason: String(rec.reason).slice(0, 200) } });
   }
   // 2.90: engines.<x>.preQueue: the checks keyed to the files this branch changes, before it is queued (not again for the same head).
-  const inQueue = readUnityQueue(root, engine).find((e) => e.task === task);
+  const q0 = readUnityQueue(root, engine);
+  const inQueue = q0.find((e) => e.task === task);
+  // 2.92: what the door found is kept on the entry (preQueue: the target tip it judged; clash: the queued lanes it does not compile with).
+  let kept = inQueue && inQueue.head === head ? { ...(inQueue.preQueue ? { preQueue: inQueue.preQueue } : {}), ...(inQueue.clash ? { clash: inQueue.clash } : {}) } : {};
+  let say = '';
   if (!inQueue || inQueue.head !== head) {
     const pq = runPreQueue(s, { task, branch: br, head }, { root });
     if (pq.refused) {
@@ -190,6 +207,19 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
       return { ok: false, error: 'pre-queue', message: `${task} was not queued: ${pq.refused}` };
     }
     if (pq.ran.length || pq.skipped) evTop('pre_queue', 'queue', `${task}: ${pq.skipped ? `the pre-queue check could not run (${pq.skipped}); queued without it` : `pre-queue check(s) passed: ${pq.ran.join('; ')}`}`, { engine, agent: agent || `${engine}-train`, task, status: pq.skipped ? 'warn' : 'ok', meta: { branch: br, head, ran: pq.ran.length } });
+    kept = pq.ran.length && !pq.skipped ? { preQueue: { target: pq.target, head } } : {};
+    // 2.92: the compile search at the door: lanes queued ahead are the untagged ones that do not land alone or wait for the target.
+    const rec0 = (() => { try { return engineTask(task, { root }); } catch { return null; } })();
+    const apart = (alone == null ? Boolean(rec0?.alone || inQueue?.alone) : Boolean(alone)) || Boolean(tag == null ? rec0?.tag || inQueue?.tag : tag);
+    const waits = waitingOnTarget(root, engine, q0);
+    const ahead = apart ? [] : q0.slice(0, inQueue ? q0.indexOf(inQueue) : q0.length).filter((e) => !e.tag && !e.alone && !waits.has(e.task));
+    const qc = queueCompile(s, { task, branch: br, head }, { root, engine, ahead });
+    if (qc) {
+      evTop('queue_compile', 'queue', `${task}: ${qc.verdict}: ${qc.say.split('\n')[0]}`, { engine, agent: agent || `${engine}-train`, task, to: qc.refused || qc.clash ? agent || 'producer' : undefined, status: qc.refused ? 'blocked' : qc.verdict === 'pass' ? 'ok' : 'warn', meta: { branch: br, head, verdict: qc.verdict, runs: qc.runs, ahead: ahead.length, ...(qc.clash ? { with: qc.clash.with } : {}) } });
+      if (qc.refused) return { ok: false, error: 'compile', message: `${task} was not queued: ${qc.say}` };
+      if (qc.clash) kept.clash = qc.clash;
+      if (qc.verdict !== 'pass') say = `\n${qc.say}`;
+    }
   }
   const entry = withQueue(root, (q) => {
     const i = q.findIndex((e) => e.task === task);
@@ -198,7 +228,7 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
     // A lane tag (task done --train --tag <word>, task tag <ID> <word>): only a train for that tag takes it.
     // tag null: the task's record, else the entry's own; '' clears it.
     const tg = tag === null || tag === undefined ? (() => { try { return engineTask(task, { root })?.tag || null; } catch { return null; } })() || (i >= 0 ? q[i].tag || null : null) : tag || null;
-    const rec = { task, agent, branch: br, head, note: note || '', at: new Date().toISOString(), ...(solo ? { alone: true } : {}), ...(tg ? { tag: tg } : {}) };
+    const rec = { task, agent, branch: br, head, note: note || '', at: new Date().toISOString(), ...(solo ? { alone: true } : {}), ...(tg ? { tag: tg } : {}), ...kept };
     if (i >= 0) q.splice(i, 1, { ...rec, at: q[i].at });
     else q.push(rec);
     return rec;
@@ -208,7 +238,62 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
   // The lane's new shared input files (engines.<x>.rules.share: content-addressed files a lane adds, git-ignored) go to the
   // engine's input folder now, so the rules check and the land run find them. Never overwrites.
   try { shareLaneInputs(root, engine, s, task, (m) => console.error(m)); } catch { /* the train tries again */ }
-  return { ok: true, entry, message: `${task} is checked and its ${L} branch ${br} (at ${short(head)}, ${ahead} commit(s) ahead of ${s.target}) is queued for the next ${L} train${entry.tag ? `, tagged ${entry.tag}: only npm run task -- train --engine ${engine} --tag ${entry.tag} takes it (the automatic start never does)` : ''}. npm run task -- train --engine ${engine} lands every queued branch on ONE land run (the Line Producer starts it in a quiet window); until then the task stays in progress.` };
+  return { ok: true, entry, message: `${task} is checked and its ${L} branch ${br} (at ${short(head)}, ${ahead} commit(s) ahead of ${s.target}) is queued for the next ${L} train${entry.tag ? `, tagged ${entry.tag}: only npm run task -- train --engine ${engine} --tag ${entry.tag} takes it (the automatic start never does)` : ''}. npm run task -- train --engine ${engine} lands every queued branch on ONE land run (the Line Producer starts it in a quiet window); until then the task stays in progress.${say}` };
+}
+
+/** The 2.90 compile hand-back words: x { lane, with: [lane], lines, tail }, where: what the lanes in `with` are doing. */
+function noCompileText(x, { target, engine, cc, where }) {
+  const w = x.with.map((l) => `${l.task} (${l.branch})`).join(', ');
+  const said = x.lines.length ? x.lines : (x.tail || '').split('\n').filter(Boolean).slice(-6);
+  return `it does not compile ${w ? `together with ${w}, ${where}` : `on ${target} by itself`} (engines.${engine}.${cc.source}: ${cc.command}). ${w ? `Once ${x.with.length === 1 ? 'it has' : 'they have'} landed, bring ${target} in (${targetMergeCommand(x.lane.task)}) and fix the lines below${x.lines.some((l) => /\bCS01(01|02|11)\b/.test(l)) ? ' (both branches declare the same member or type: keep one)' : ''}` : `Bring ${target} in (${targetMergeCommand(x.lane.task)}) and fix the lines below`}, then task done ${x.lane.task} --train again.\nThe compiler:\n${said.map((l) => `  ${l}`).join('\n')}`;
+}
+
+/**
+ * 2.92: the compile search at the queue door (engines.<x>.quickCheck): the branch merged with the target (red: refused), then
+ * the target + the lanes queued ahead + the branch (a clash: queued, marked). At most STUDIO_QUEUE_COMPILE_RUNS (6) runs for
+ * the second, STUDIO_QUEUE_COMPILE_MIN (10) in all. Anything that stops the check queues as before. null when off, else
+ * { verdict: pass|red|conflict|clash|unfinished|not-run, say, runs, refused?, clash? }.
+ */
+function queueCompile(s, lane, { root, engine, ahead = [], env = process.env }) {
+  const cc = compileSearchOf(s.cfg);
+  if (!cc) return null;
+  const maxRuns = Math.max(1, Math.floor(num(env.STUDIO_QUEUE_COMPILE_RUNS, 6)));
+  const end = Date.now() + Math.max(0.1, num(env.STUDIO_QUEUE_COMPILE_MIN, 10)) * 60000;
+  let runs = 0; let cap = Infinity; let stop = '';
+  const memo = new Map();
+  const notRun = (why) => ({ verdict: 'not-run', runs, say: `The compile check at the queue door judged nothing (${why}): queued without it.` });
+  try {
+    const m = mergedOnTarget(s, lane);
+    if (m.conflict) return { verdict: 'conflict', runs, refused: true, say: m.conflict };
+    if (m.error) return notRun(m.error);
+    const rules = (() => { try { return rulesConfig(engine, { root, env, repo: s.repo, ref: s.target }); } catch { return null; } })();
+    const at = (sha) => {
+      const tree = out(git(s.repo, 'rev-parse', `${sha}^{tree}`)) || sha;
+      if (memo.has(tree)) return memo.get(tree);
+      if (runs >= cap || Date.now() >= end) { stop = stop || (runs >= cap ? `${maxRuns} compile runs (STUDIO_QUEUE_COMPILE_RUNS)` : 'its time limit (STUDIO_QUEUE_COMPILE_MIN)'); return { status: 'error', why: stop }; }
+      runs += 1;
+      const r = compileAt({ repo: s.repo, sha, cmd: { ...cc, timeoutMin: Math.min(cc.timeoutMin, Math.max(0.1, (end - Date.now()) / 60000)) }, root, id: `queue-${lane.task}`, engine, rules, env });
+      if (r.status !== 'pass' && r.status !== 'red') stop = stop || r.why;
+      memo.set(tree, r);
+      return r;
+    };
+    const chain = (t, ls) => chainOnTarget(s.repo, t, ls, 'queue', engine);
+    const one = compileSearch({ repo: s.repo, tip: m.tip, lanes: [lane], chain, at, maxRuns: 99 });
+    const ctx = { target: s.target, engine, cc };
+    if (one.left.length) return { verdict: 'red', runs, refused: true, say: `${lane.branch}: ${noCompileText(one.left[0], { ...ctx, where: '' })}` };
+    if (!one.green) return notRun(one.why);
+    const lanes = ahead.map((e) => ({ task: e.task, branch: e.branch, head: headOf(s.repo, e.branch) || e.head })).filter((l) => l.head);
+    if (!lanes.length) return { verdict: 'pass', runs, say: '' };
+    runs = 0; cap = maxRuns; stop = '';
+    const two = compileSearch({ repo: s.repo, tip: m.tip, lanes: [...lanes, lane], chain, at, maxRuns: 99 });
+    const x = two.left.find((y) => y.lane.task === lane.task);
+    if (x && x.with.length) {
+      const said = noCompileText(x, { ...ctx, where: 'queued ahead of it' });
+      return { verdict: 'clash', runs, clash: { with: x.with.map((l) => l.task), lines: x.lines.slice(0, 8), target: m.tip, at: new Date().toISOString() }, say: `Queued, but ${said}\nUntil then a train leaves ${lane.task} out of a batch with ${x.with.map((l) => l.task).join(', ')}; it is checked again once ${x.with.length === 1 ? 'that lane has' : 'they have'} landed or left the queue.` };
+    }
+    if (stop || two.targetRed || !two.ran) return { verdict: 'unfinished', runs, say: `The compile check with the ${lanes.length} lane(s) queued ahead did not finish (${stop || two.why}): queued as before.` };
+    return { verdict: 'pass', runs, say: '' };
+  } catch (e) { return notRun(e.message); }
 }
 
 /** Copy a lane's new shared input files (rules.share) into the engine's input folder. { copied, skipped } | null. */
@@ -251,8 +336,10 @@ export function suspectsByFiles({ repo, tip, lanes = [], files = [] } = {}) {
   for (const lane of lanes) {
     const changed = out(git(repo, 'diff', '--name-only', '--no-renames', `${tip}...${lane.head}`)).split('\n').filter(Boolean);
     if (!changed.length || changed.length > 300) continue;
-    const hit = changed.filter((c) => named.some((n) => n === c || n.endsWith(`/${c}`) || c.endsWith(`/${n}`)));
-    if (hit.length) found.push({ lane, tests: [], files: hit.slice(0, 6) });
+    const same = (n, c) => n === c || n.endsWith(`/${c}`) || c.endsWith(`/${n}`);
+    const hit = changed.filter((c) => named.some((n) => same(n, c)));
+    // cover: the named files this lane changes (2.92: every one covered by some lane hands those lanes back at once).
+    if (hit.length) found.push({ lane, tests: [], files: hit.slice(0, 6), cover: named.filter((n) => hit.some((c) => same(n, c))) });
   }
   return found;
 }
@@ -614,6 +701,7 @@ export function nextStep({ lanes = [], results = [], ties = undefined, flaky = (
   const apartGreen = byName && a?.status === 'pass';
   if (!bis.length && !apartGreen) {
     if (ties === undefined) return { step: 'ties', red: main };
+    if (!w && !a && ties?.compile?.length) return { step: 'handback', lanes: ties.compile, cause: 'compile', red: main, rounds: [left.filter((t) => !ties.compile.includes(t))] };
     if (!w && !a && ties?.suspect && left.includes(ties.suspect)) return { step: 'without', group: left.filter((t) => t !== ties.suspect), suspect: ties.suspect, ...N };
     if (!w && !a && (ties?.tied || []).length >= 2 && (ties?.untied || []).length) return { step: 'apart', group: ties.untied.slice(), tied: ties.tied.slice(), ...N };
   }
@@ -945,6 +1033,9 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   // (a) Each branch as it is now.
   const ready = [];
   for (const lane of lanes) {
+    // 2.92: the queue door found it does not compile with a lane of this batch: it waits, as a lane that conflicts with one.
+    const clash = (lane.clash?.with || []).filter((t) => lanes.some((l) => l.task === t));
+    if (clash.length) { defer(lane, `it does not compile with ${clash.join(', ')} in this train (found when it was queued); it is checked again once ${clash.length === 1 ? 'that lane has' : 'they have'} landed or left the queue`); continue; }
     const head = headOf(repo, lane.branch);
     if (!head) { drop(lane, `its branch ${lane.branch} is gone from the ${L} repo; queue it again`, { handBack: false }); continue; }
     if (head !== lane.head) log(`[unity-train] ${id}: ${lane.task}'s branch ${lane.branch} moved since it was queued (${short(lane.head)} -> ${short(head)}); the branch as it is now goes in`);
@@ -972,21 +1063,30 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     }
     set = kept;
   }
+  // 2.92: a lane's preQueue check that judged another target tip (or head) runs again on the lane merged with this tip.
+  if (preQueueOf(s.cfg).length) {
+    const kept = [];
+    for (const l of set) {
+      if (l.preQueue && l.preQueue.target === tip0 && l.preQueue.head === l.head) { kept.push(l); continue; }
+      const pq = runPreQueue(s, l, { root, env });
+      if (pq.refused) { drop(l, `refused before the land run: ${pq.refused}`, { cause: 'pre-queue', evidence: { files: pq.files } }); continue; }
+      if (pq.ran.length || pq.skipped) log(`[unity-train] ${id}: pre-queue check of ${l.task} on ${target} at ${short(tip0)}: ${pq.skipped ? `could not run (${pq.skipped}); it goes on` : 'passed'}`);
+      kept.push(l);
+    }
+    set = kept;
+  }
   // 2.90: the compile search (harness/engine-compile.mjs): the batch compiled with the cheap compile command before anything long.
   // Lanes that do not compile with the ones before them are handed back with the compiler's lines (cause 'compile').
+  // 2.92: also a batch of one the queue door marked, once its clash partner has landed or left the queue.
   const cc = compileSearchOf(s.cfg);
-  if (cc && set.length > 1) {
+  if (cc && (set.length > 1 || set.some((l) => l.clash))) {
     update({ now: `compile search: ${set.map((l) => l.task).join(', ')}` });
     const rc = (() => { try { return rulesConfig(engine, { root, env, repo, ref: target }); } catch { return null; } })();
     const cs = compileSearch({ repo, tip: tip0, lanes: set, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine), at: (sha) => compileAt({ repo, sha, cmd: cc, root, id, engine, rules: rc, env, log }) });
     log(`[unity-train] ${id}: compile search (engines.${engine}.${cc.source}): ${cs.why} (${cs.runs} compile run(s))`);
     res.compile = { runs: cs.runs, left: cs.left.map((x) => x.lane.task), ...(cs.targetRed ? { targetRed: true } : {}) };
     if (cs.left.length || cs.targetRed) ev('compile_search', id, `${cs.why}; ${cs.runs} compile run(s) of engines.${engine}.${cc.source}, no land run`, { agent: by, status: cs.left.length ? 'warn' : 'ok', meta: { runs: cs.runs, left: cs.left.map((x) => x.lane.task), kept: cs.kept.map((l) => l.task), ...(cs.targetRed ? { targetRed: true } : {}) } });
-    for (const x of cs.left) {
-      const w = x.with.map((l) => `${l.task} (${l.branch})`).join(', ');
-      const said = x.lines.length ? x.lines : (x.tail || '').split('\n').filter(Boolean).slice(-6);
-      drop(x.lane, `refused before the land run: it does not compile ${w ? `together with ${w}, which go on in this train` : `on ${target} by itself`} (engines.${engine}.${cc.source}: ${cc.command}). ${w ? `Once ${x.with.length === 1 ? 'it has' : 'they have'} landed, bring ${target} in (${targetMergeCommand(x.lane.task)}) and fix the lines below${x.lines.some((l) => /\bCS01(01|02|11)\b/.test(l)) ? ' (both branches declare the same member or type: keep one)' : ''}` : `Bring ${target} in (${targetMergeCommand(x.lane.task)}) and fix the lines below`}, then task done ${x.lane.task} --train again.\nThe compiler:\n${said.map((l) => `  ${l}`).join('\n')}`, { cause: 'compile', evidence: { files: x.files } });
-    }
+    for (const x of cs.left) drop(x.lane, `refused before the land run: ${noCompileText(x, { target, engine, cc, where: 'which go on in this train' })}`, { cause: 'compile', evidence: { files: x.files } });
     set = set.filter((l) => !cs.left.some((x) => x.lane.task === l.task));
   }
   // The rules check on the batch as it would land (harness/engine-rules.mjs), before the long land run. A lane that turns the batch red is
@@ -1362,6 +1462,16 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     const redStage = firstRedStage(r);
     try {
       const tipNow = headOf(repo, target);
+      // 2.92: each file the compiler names is changed by exactly one lane (two that clash in a file: the search), not all: they go back now.
+      const cf = namedFiles.length ? suspectsByFiles({ repo, tip: tipNow, lanes: left, files: namedFiles }) : [];
+      const all = namedFiles.slice(0, 20).map((f) => String(f).replace(/\\/g, '/').replace(/^\.\//, '')).filter((f) => f.includes('.'));
+      if (cf.length && cf.length < left.length && all.every((f) => cf.filter((h) => h.cover.includes(f)).length === 1)) {
+        const lanesC = cf.map((h) => h.lane.task);
+        const planText = `every file the compiler names (${all.slice(0, 3).join(', ')}) is changed by ${lanesC.join(', ')} and no other branch: ${lanesC.length === 1 ? 'it goes' : 'they go'} back now and ${left.filter((l) => !lanesC.includes(l.task)).map((l) => l.task).join(', ')} run again, no halving search`;
+        log(`[unity-train] ${id}: blame plan: ${planText}`);
+        ev('blame', id, `red on a compile error${redStage ? ` in ${redStage}` : ''}: ${planText}`, { agent: by, meta: { plan: 'compile', lanes: lanesC, next: left.filter((l) => !lanesC.includes(l.task)).map((l) => l.task), files: all.slice(0, 10), stage: redStage } });
+        return { suspect: null, tied: lanesC, untied: [], compile: lanesC, byLane: Object.fromEntries(cf.map((h) => [h.lane.task, h.files])) };
+      }
       // 2.90: engines.<x>.blame first: the studio's own tie from a failing test to the files that explain it.
       const bl = namedTests.length ? blameList(s.cfg.blame).blame : [];
       const bs = bl.length ? blameSuspect({ repo, tip: tipNow, lanes: left, failures: namedTests, blame: bl }) : null;
@@ -1614,6 +1724,11 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     const redTests = Array.isArray(red.failures) ? red.failures.slice(0, 5) : [];
     const redSaid = redTests.length ? ` (red: ${redTests.join(', ')}${red.failures.length > 5 ? ', ...' : ''})` : '';
     if (st.cause === 'conflict') { for (const l of ls) drop(l, st.red?.laneObj?.why || blame(red)); return; }
+    if (st.cause === 'compile') {
+      const lines = red.errorLines?.length ? red.errorLines : compilerLines(red.tail || '');
+      for (const l of ls) drop(l, `${blame(red)}\nThe batch was red on a compile error in ${(ties?.byLane?.[l.task] || []).join(', ')}, which ${ls.length === 1 ? `${l.branch} changes and no other branch in the batch` : `only ${ls.map((x) => x.task).join(', ')} change in the batch`}; the others run again without ${ls.length === 1 ? 'it' : 'them'}. Bring ${target} in (${targetMergeCommand(l.task)}) and fix the lines below, then task done ${l.task} --train again.\nThe compiler:\n${lines.map((x) => `  ${x}`).join('\n')}`, { cause: 'compile', evidence: { files: ties?.byLane?.[l.task] || [] } });
+      return;
+    }
     if (st.cause === 'evidence') {
       const sp = ties?.sp || { tests: [], files: [], what: 'the evidence' };
       const wr = results.find((x) => x.kind === 'without');
