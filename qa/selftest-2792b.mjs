@@ -8,14 +8,11 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { guardCap2500Of, hrefInDirOf } from './kit.mjs';
 
 export async function selftest2792B({ dir, report }) {
-  const u = (rel) => pathToFileURL(path.join(dir, rel)).href;
-  const guard = async (name, fn) => {
-    try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 2500)); }
-    catch (e) { report(name, false, String(e?.stack || e).slice(0, 2500)); }
-  };
+  const u = hrefInDirOf(dir);
+  const guard = guardCap2500Of(report);
   const vx = await import(u('harness/vertex.mjs'));
   const mp = await import(u('harness/model-pools.mjs'));
   const ready = { ok: true, why: '' };

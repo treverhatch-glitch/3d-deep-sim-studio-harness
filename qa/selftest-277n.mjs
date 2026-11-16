@@ -22,17 +22,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitArgsOf, guardOf, iso, out, readAgentRec as readRec, readJsonFile, readJsonl as events } from './kit.mjs';
 
 export async function selftest277N({ dir, run, report, tmpRoot, root }) {
   void run;
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = fs.existsSync(path.join(dir, 'node_modules')) ? path.join(dir, 'node_modules') : path.join(harnessRoot, 'node_modules');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitArgsOf(gEnv);
+  const guard = guardOf(report);
   const UNSET = ['STUDIO_AGY_MODE', 'STUDIO_AGY_PRINT_TIMEOUT', 'STUDIO_AGY_MODEL_FLAG', 'STUDIO_TOOL_AGY_MODEL', 'STUDIO_TOOL_AGY_CMD', 'STUDIO_AGY_PROMPT', 'STUDIO_AGY_BYPASS', 'STUDIO_AGY_ANY_MODEL', 'STUDIO_TASK_PIN', 'STUDIO_MODEL_ROUTING', 'STUDIO_AGY_QUOTA_CMD', 'STUDIO_AGY_QUOTA_SEC', 'STUDIO_LINE_PROTECTED_HOLD_MIN', 'STUDIO_BUILDER_MODEL', 'STUDIO_AGENT_MODEL', 'STUDIO_BUILDER_TOOL', 'STUDIO_WORKTREES', 'STUDIO_ENV_FROM_FILE'];
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_WATCH_INTERVAL: '0', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
@@ -46,7 +46,6 @@ export async function selftest277N({ dir, run, report, tmpRoot, root }) {
   };
   const childEnv = (extra = {}) => { const e = { ...process.env, ...base, ...extra }; for (const k of UNSET) if (!(k in extra)) delete e[k]; return e; };
   const now = Date.now();
-  const iso = (ms) => new Date(ms).toISOString();
   let n = 0;
   const made = [];
   /** A studio copy with its own git, an events file, and optionally a board and events (ts spaced 1 s from 2 h ago). */
@@ -68,9 +67,7 @@ export async function selftest277N({ dir, run, report, tmpRoot, root }) {
     made.push(S);
     return { S, ev, env: { AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const appendEvents = (ev, list, from = now - 600000) => fs.appendFileSync(ev, list.map((e, i) => `${JSON.stringify({ id: `evx_${from}_${i}`, status: 'ok', ts: iso(from + i * 1000), ...e })}\n`).join(''));
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const probe = (S, env, name, code, timeout = 120000) => {
     const f = path.join(tmpRoot, `probe-277n-${name}-${process.pid}-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -80,7 +77,6 @@ export async function selftest277N({ dir, run, report, tmpRoot, root }) {
   };
   const node = (S, env, args, timeout = 120000) => spawnSync(process.execPath, args, { windowsHide: true, cwd: S, encoding: 'utf8', env: childEnv(env), timeout });
   const json = (r) => { try { return JSON.parse(String(r.stdout || '').trim()); } catch { return null; } };
-  const readRec = (S, agent) => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'agents', `${agent}.json`), 'utf8')); } catch { return null; } };
   const startFg = (S, env, args, timeout = 120000) => node(S, env, ['harness/agent.mjs', 'start', '--attach', ...args], timeout);
   const addTask = (S, env, title) => (out(node(S, env, ['harness/task.mjs', 'add', title, '--role', 'builder', '--priority', 'P1'])).match(/"id": "(T-\d+)"/) || [])[1];
   const fwd = (p) => p.replace(/\\/g, '/');
@@ -93,7 +89,6 @@ if (recFile && recFile !== '-') fs.writeFileSync(recFile, JSON.stringify({ model
 try { process.stdout.write(fs.readFileSync(linesFile, 'utf8')); } catch {}
 `);
   const lineFile = (name, text) => { const f = path.join(tmpRoot, `lines-277n-${name}-${process.pid}.txt`); fs.writeFileSync(f, text); return f; };
-  const readJsonFile = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
   // ---- 1. Gemini only on agy ----
   await guard('2.77.0 (n, Priority 8): `agent start --tool agy --model claude-sonnet-5-5` is refused with a clear message (agy ran Claude Sonnet inside agy); --force-model starts it on that model; `--tool agy` with no --model still starts on the Gemini default (fails on 2.76.0: the Claude model started inside agy)', async () => {

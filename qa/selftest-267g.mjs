@@ -17,17 +17,16 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { eventsOf, gitAsT as g, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest267G({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const write = writeInDirOf(dir);
   const events = path.join(dir, '.studio', 'events-267g.jsonl');
   const noKey = path.join(tmpRoot, `no-owner-key-267g-${process.pid}.pem`);
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_AGENT_MODEL: '', STUDIO_OWNER_KEY: noKey, AGENT_EVENTS_FILE: events, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const person = { ...env, CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', STUDIO_LOCK_OWNER: '' };
   const agent = { ...person, CLAUDECODE: '1', STUDIO_LOCK_OWNER: 'opus-bot' };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const qf = path.join(dir, '.studio', 'train', 'queue.json');
   const queue = () => { try { return JSON.parse(fs.readFileSync(qf, 'utf8')); } catch { return []; } };
   const holdLane = (id) => {

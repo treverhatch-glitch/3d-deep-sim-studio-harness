@@ -12,17 +12,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { eventsFileOf, fileUrlRelSOf, fwd, gEnvOf, gitUserCrlfOf, guardCap3000Of, out, queueUnityOf, readJsonFile as readJson, readRunsJsonl as runsOf, setEnginesOf, writeInB as write } from './kit.mjs';
 
 export async function selftest282A({ dir, root, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const write = (b, rel, text) => { fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true }); fs.writeFileSync(path.join(b, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
-  const fwd = (p) => p.split(path.sep).join('/');
+  const gEnv = gEnvOf(ident);
+  const g = gitUserCrlfOf(gEnv);
+  const guard = guardCap3000Of(report);
   const T = path.join(tmpRoot, `s282a-${process.pid}`);
   fs.mkdirSync(T, { recursive: true });
   const harnessRoot = root || dir;
@@ -42,13 +38,13 @@ export async function selftest282A({ dir, root, run, report, tmpRoot }) {
   for (const x of ['.studio', 'studio/beta.json', 'studio/task-holds.json', 'studio/engine', 'studio/game.json', 'studio/mode.json']) fs.rmSync(path.join(S, x), { recursive: true, force: true });
   fs.mkdirSync(path.join(S, '.studio'), { recursive: true });
   const setGame = (game) => write(S, 'studio/game.json', `${JSON.stringify(game, null, 2)}\n`);
-  const setEngines = (engines) => setGame({ engines });
+  const setEngines = setEnginesOf(setGame);
   setEngines({});
   g(S, 'init', '-q', '-b', 'main'); g(S, 'add', '-A'); g(S, 'commit', '-qm', 'studio', '--no-verify');
   const evFile = path.join(S, '.studio', 'events-282a.jsonl');
   const envOf = (extra = {}) => ({ ...base, AGENT_EVENTS_FILE: evFile, STUDIO_MAIN_ROOT: S, ...extra });
-  const events = () => { try { return fs.readFileSync(evFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
+  const events = eventsFileOf(evFile);
+  const u = fileUrlRelSOf(S);
   let pn = 0;
   const probe = (code, env = {}) => {
     const f = path.join(S, `.probe-282a-${++pn}.mjs`);
@@ -105,9 +101,8 @@ if (fs.existsSync('rules-bad.txt')) { console.log('  Failed Rules.Economy.FeesAd
 console.log('Passed!');
 `);
   const rulesRuns = () => { try { return fs.readFileSync(path.join(T, 'rules-runs.txt'), 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
-  const runsOf = (ctl) => { try { return fs.readFileSync(`${ctl}-runs.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const cfgFor = (E, ctl, extra = {}) => ({ land: `node "${fwd(landStub)}" "${fwd(E.GW)}" "${fwd(ctl)}" {branch}`, target: 'port/main', cwd: fwd(E.R), gateWorktree: fwd(E.GW), timeoutMin: 5, ...extra });
-  const queue = (E, lanes) => { fs.mkdirSync(path.join(S, '.studio', 'train'), { recursive: true }); fs.writeFileSync(path.join(S, '.studio', 'train', 'unity-queue.json'), JSON.stringify(lanes.map(([task, branch], i) => ({ task, agent: `porter-${i}`, branch, head: E.heads[branch], at: new Date(Date.now() + i).toISOString() })))); };
+  const queue = queueUnityOf(S);
   const TRAIN = `import { runUnityTrain, readUnityQueue } from ${u('harness/unity-train.mjs')};
 const handed = [];
 const r = await runUnityTrain({ root: process.cwd(), log: () => {}, deps: { handBack: (lane, note, extra) => handed.push({ task: lane.task, note, extra: extra || null }) } });

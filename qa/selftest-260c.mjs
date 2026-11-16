@@ -15,9 +15,9 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { out, writeInRoot as write } from './kit.mjs';
 
 export async function selftest260C({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const q = (p) => JSON.stringify(p);
   const base = path.join(tmpRoot, `c260-${process.pid}`);
   fs.mkdirSync(base, { recursive: true });
@@ -36,7 +36,6 @@ export async function selftest260C({ dir, run, report, tmpRoot }) {
   // Quoted: cmd.exe (Windows) treats ^ as its escape character, so HEAD^2 would reach git as HEAD2.
   const head = (rev = 'HEAD') => sg(`rev-parse "${rev}"`).stdout.trim();
   const body = (rev = 'HEAD') => sg(`log -1 --format=%B ${rev}`).stdout;
-  const write = (root, rel, text) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); };
   const read = (rel) => fs.readFileSync(path.join(S, rel), 'utf8');
   const golden = (n) => `${JSON.stringify(Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`k${i}`, i === 1 ? n.a : i === 10 ? n.b : i])), null, 2)}\n`;
   const PERM = 'Hatch on Discord 2026-11-01 19:09, take the harness update now';

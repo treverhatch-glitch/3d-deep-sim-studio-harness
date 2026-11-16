@@ -6,11 +6,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlRelOf, out } from './kit.mjs';
 
 export async function selftest237({ dir, run, report, tmpRoot }) {
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlRelOf(dir);
   const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd: dir, encoding: 'utf8' });
   const evFile = path.join(dir, '.studio', 'events-237.jsonl');
   const env = { AGENT_EVENTS_FILE: evFile, STUDIO_GATE_SLOTS: '0', STUDIO_WHOLE_GAME: 'on', STUDIO_WHOLE_CMD: 'node wcheck.mjs', STUDIO_HEALTH_CI: 'off', STUDIO_MAIN_ROOT: '' };

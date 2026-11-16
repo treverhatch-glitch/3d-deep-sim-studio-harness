@@ -5,11 +5,11 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlRelOf } from './kit.mjs';
 
 export async function selftest230i({ dir, run, report, tmpRoot }) {
   let n = 0;
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p230i-${++n}-${process.pid}.mjs`);
     fs.writeFileSync(f, code);

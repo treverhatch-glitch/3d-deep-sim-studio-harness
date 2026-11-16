@@ -8,16 +8,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlRelOf, guardOf, out, readJsonFile as readJson } from './kit.mjs';
 
 export async function selftest281B1({ dir, run, report }) {
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   // STUDIO_ATTEMPTS=refuse: the hard mode (holdReason refuses the relaunch). The default, record, only offers the task
   // last (checked below) so the loop park, the breaker and the usage-limit paths keep their own counts.
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HOOKS_CHECK: 'off', STUDIO_ATTEMPTS: 'refuse' };
   const git = (...a) => spawnSync('git', ['-c', 'user.name=selftest', '-c', 'user.email=selftest@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const task = (cmd) => run(dir, `node harness/task.mjs ${cmd}`, env);
   const ledger = (id) => readJson(path.join(dir, '.studio', 'attempts', `${id}.json`))?.attempts || [];
 
@@ -57,7 +55,7 @@ export async function selftest281B1({ dir, run, report }) {
   });
   await guard('record mode: the supervisor\'s one builder slot goes to a fresh task, not the same-blocker one listed before it (fails on 2.80: backlog order)', async () => {
     const rec = { ...env, STUDIO_ATTEMPTS: '', STUDIO_TEST_FREEMEM_MB: '65536', STUDIO_AGENT_TOOL: '', STUDIO_BUILDER_TOOL: '', STUDIO_BUILDER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_BUILDER_ORDER: '', STUDIO_LINE_PRODUCER: 'off' };
-    const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+    const u = fileUrlRelOf(dir);
     fs.writeFileSync(path.join(dir, '.studio', '281b1-sup.mjs'), `import { supervise } from ${u('harness/supervisor.mjs')};
 const starts = [];
 const deps = { sessions: () => [], startAgent: (o) => { starts.push(o.task); return { ok: true }; }, launchableRoles: (r) => r, nextAgentName: (role, p) => p + role + '-' + (starts.length + 1) };

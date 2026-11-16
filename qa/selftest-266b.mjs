@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { eventsOf, out, readInDirOf, readJsonInDirOf } from './kit.mjs';
 
 const CARTS = {
   'fz-planted': `export function createInitialState(seed = 1) { return { seed: seed >>> 0, tick: 0, counter: 10, stage: 0, noise: 0 }; }
@@ -61,13 +62,12 @@ export function step(prev) { return { ...prev, tick: prev.tick + 1 }; }
 export async function selftest266B({ dir, run, report, tmpRoot }) {
   const events = path.join(dir, '.studio', 'events-266b.jsonl');
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_ROLE: '', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_AGENT: '', STUDIO_LANELESS: 'shared', STUDIO_WORKTREES: 'off', STUDIO_FUZZ_SEEDS: '', STUDIO_FUZZ_TICKS: '', STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: events };
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const fuzz = (args, env = {}) => run(dir, `node qa/fuzz.mjs ${args}`, { ...base, ...env });
   const json = (r) => { const line = String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{')).pop(); try { return JSON.parse(line); } catch { return null; } };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const fuzzEvents = () => evs().filter((e) => e.type === 'fuzz.finding');
-  const readJ = (rel) => { try { return JSON.parse(fs.readFileSync(path.join(dir, rel), 'utf8')); } catch { return null; } };
-  const readT = (rel) => { try { return fs.readFileSync(path.join(dir, rel), 'utf8'); } catch { return ''; } };
+  const readJ = readJsonInDirOf(dir);
+  const readT = readInDirOf(dir);
   const cfgFile = path.join(dir, 'studio', 'fuzz.json');
   const setCfg = (obj) => fs.writeFileSync(cfgFile, `${JSON.stringify(obj, null, 2)}\n`);
   const count = (text, s) => text.split(s).length - 1;

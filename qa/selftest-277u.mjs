@@ -25,23 +25,19 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fwd, gEnvOf, gitUserCrlfOf, guardOf, napSync as nap, out, readJsonFile as readJson, readRunsJsonl as runs, untilNap100Of, writeInB as write } from './kit.mjs';
 
 export async function selftest277U({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   void harnessRoot;
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-  const until = (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms && !fn()) nap(100); return fn(); };
+  const until = untilNap100Of(nap);
   const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === 'win32' ? 3 : 1);
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
+  const gEnv = gEnvOf(ident);
+  const g = gitUserCrlfOf(gEnv);
   const head = (cwd, ref) => g(cwd, 'rev-parse', ref).stdout.trim();
   const anc = (cwd, a, b) => g(cwd, 'merge-base', '--is-ancestor', a, b).status === 0;
-  const write = (b, rel, text) => { fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true }); fs.writeFileSync(path.join(b, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const fwd = (p) => p.split(path.sep).join('/');
+  const guard = guardOf(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
   const base = { ...clean, STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_REACHABILITY: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_HEAVY_SLOTS: '1', STUDIO_HEAVY_POLL_MS: '100', STUDIO_UNITY_TRAIN_RETRIES: '0', STUDIO_UNITY_TRAIN_RETRY_MIN: '0', STUDIO_HOOKS_CHECK: 'off', STUDIO_WEAKENED_TESTS: 'off', STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_MACHINE_SCAN: 'off', STUDIO_COMM: '', STUDIO_LINE_PRODUCER: 'on', npm_lifecycle_event: '', NODE_OPTIONS: '', npm_config_node_options: '', ...ident };
@@ -126,7 +122,6 @@ process.exit(0);
     try { return JSON.parse(line); } catch { return { _raw: out(r).slice(-2500) }; }
   };
   const mod = (S, m) => JSON.stringify(pathToFileURL(path.join(S, 'harness', m)).href);
-  const runs = (ctl) => { try { return fs.readFileSync(`${ctl}-runs.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 
   // ================= P5.1 feed + P5.2/P5.3 the Line Producer starts the train beside the web train ==================
   {

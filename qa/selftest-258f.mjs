@@ -10,13 +10,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import { out, readJsonInDirOf, sleep } from './kit.mjs';
 
 export async function selftest258F({ dir, run, report }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const waitFor = async (fn, ms = 20000) => { const end = Date.now() + ms; for (;;) { const v = fn(); if (v || Date.now() > end) return v; await sleep(50); } };
   const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
-  const readJson = (rel) => { try { return JSON.parse(fs.readFileSync(path.join(dir, rel), 'utf8')); } catch { return null; } };
+  const readJson = readJsonInDirOf(dir);
   const stub = path.join(dir, 'game', 'stubgame');
   const runsOf = () => { try { return fs.readFileSync(path.join(stub, 'runs.log'), 'utf8').trim().split('\n').filter(Boolean); } catch { return []; } };
   const mode = (m) => { fs.writeFileSync(path.join(stub, 'mode.txt'), m); fs.rmSync(path.join(stub, 'runs.log'), { force: true }); fs.rmSync(path.join(stub, 'go.txt'), { force: true }); };

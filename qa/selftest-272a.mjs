@@ -14,22 +14,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { eventsOf, fileUrlOf, out, readInDirOf, resetRanOf, writeInDirOf } from './kit.mjs';
 
 export async function selftest272A({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
-  const read = (rel) => { try { return fs.readFileSync(path.join(dir, rel), 'utf8'); } catch { return ''; } };
+  const u = fileUrlOf(dir);
+  const write = writeInDirOf(dir);
+  const read = readInDirOf(dir);
   const events = path.join(dir, '.studio', 'events-272a.jsonl');
   const ranLog = path.join(tmpRoot, `ran-272a-${process.pid}.log`);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
   const env = { ...clean, STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_REACHABILITY: 'off', STUDIO_MACHINE_SCAN: 'off', STUDIO_GAME_GATE_RETRY: '', STUDIO_TEST_WORKERS: '4', AGENT_EVENTS_FILE: events, RAN_LOG: ranLog, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const gameEnv = { ...env, STUDIO_GAME: 'demo' };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const clearEvents = () => { try { fs.rmSync(events, { force: true }); } catch {} };
   const ran = () => { try { return fs.readFileSync(ranLog, 'utf8').split('\n').filter(Boolean).map((l) => l.split('\t')); } catch { return []; } };
-  const clearRan = () => { try { fs.rmSync(ranLog, { force: true }); } catch {} };
+  const clearRan = resetRanOf(ranLog);
   const probe = (name, code, extra = {}) => {
     const f = path.join(dir, `.probe-272a-${name}.mjs`);
     fs.writeFileSync(f, code);

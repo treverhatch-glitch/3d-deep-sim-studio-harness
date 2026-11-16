@@ -19,13 +19,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlInP as u, guardOf, out, readJsonFile as readJson, readJsonl as events } from './kit.mjs';
 
 export async function selftest272B({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const g = (cwd, args) => { const e = { ...process.env, ...ident }; for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete e[k]; return spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: e }); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   const nm = path.join(dir, 'node_modules');
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
@@ -45,7 +44,6 @@ export async function selftest272B({ dir, run, report, tmpRoot }) {
     g(S, ['add', '-A']); g(S, ['commit', '-qm', 'studio', '--no-verify']);
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const probe = (S, code, env) => {
     const f = path.join(S, `.probe-272b-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -55,9 +53,7 @@ export async function selftest272B({ dir, run, report, tmpRoot }) {
     try { j = JSON.parse(String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{')).pop()); } catch {}
     return { ...(j || {}), _out: out(r).slice(-2500) };
   };
-  const u = (S, p) => JSON.stringify(pathToFileURL(path.join(S, p)).href);
   const have = (S, p) => fs.existsSync(path.join(S, p));
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
   const entries = (S, rel, sec = 'purity') => readJson(path.join(S, rel))?.hits?.[sec] || [];
 
   // ---- A: the purity ratchet on a made-up cartridge ------------------------------------------------------------------

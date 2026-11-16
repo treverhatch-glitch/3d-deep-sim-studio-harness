@@ -14,19 +14,19 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { gitDirOf, headOf, lastLineJsonOf, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest2582K({ dir, run, report, tmpRoot, root }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
-  const head = () => g('rev-parse', 'HEAD').stdout.trim();
-  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const g = gitDirOf(dir);
+  const head = headOf(g);
+  const write = writeInDirOf(dir);
   // A file git restored comes back with CRLF on Windows (core.autocrlf); edits match LF text, and git stores LF either way.
   const read = (rel) => fs.readFileSync(path.join(dir, rel), 'utf8').replace(/\r\n/g, '\n');
   const edit = (rel, from, to) => { const t = read(rel); if (!t.includes(from)) throw new Error(`${rel}: no "${from}"`); write(rel, t.replace(from, to)); };
   const ownerKey = path.join(tmpRoot, `owner-2582k-${process.pid}.pem`);
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_DONE_GAME_GATES: 'skip',
     STUDIO_OWNER_KEY: ownerKey, STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', GITHUB_EVENT_NAME: '', GITHUB_SHA: '', STUDIO_HOOKS_CHECK: '', STUDIO_WEAKENED_TESTS: '', STUDIO_LOCK_OWNER: '' };
-  const json = (r) => { try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return { _raw: out(r).slice(-1500) }; } };
+  const json = lastLineJsonOf(out);
   const hooks = (extra = {}) => { const r = run(dir, 'node harness/hook-stamp.mjs check --json', { ...env, ...extra }); return { status: r.status, ...json(r), _out: out(r) }; };
   const hooksText = (extra = {}) => run(dir, 'node harness/hook-stamp.mjs check', { ...env, ...extra });
   const weak = (extra = {}) => { const r = run(dir, 'node harness/test-weakening.mjs --json', { ...env, ...extra }); return { status: r.status, ...json(r), _out: out(r) }; };

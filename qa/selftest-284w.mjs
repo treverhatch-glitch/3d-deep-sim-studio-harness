@@ -12,14 +12,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitArgsOf, guardCap3000DOf, out, readJsonl as events } from './kit.mjs';
 
 export async function selftest284W({ dir, report, tmpRoot }) {
-  const guard = async (name, fn) => { try { const [ok, d] = await fn(); report(name, Boolean(ok), ok ? '' : String(d || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const guard = guardCap3000DOf(report);
   const win = process.platform === 'win32';
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
+  const gEnv = gEnvOf(ident);
+  const g = gitArgsOf(gEnv);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI|VERTEX)/i.test(k)) clean[k] = '';
   const base = {
@@ -47,8 +47,6 @@ export async function selftest284W({ dir, report, tmpRoot }) {
     g(S, ['add', '-A']); g(S, ['commit', '-qm', 'Add a rules toggle\n\nStudio-Task: T-101\nStudio-Model: claude-opus-5-5', '--no-verify']);
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const probe = (S, env, code) => {
     const f = path.join(tmpRoot, `probe-284w-${process.pid}-${++n}.mjs`);
     fs.writeFileSync(f, code);

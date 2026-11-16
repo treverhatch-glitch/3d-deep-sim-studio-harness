@@ -17,6 +17,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { freePortOf, guardOf, out, readJsonl as events } from './kit.mjs';
 
 export async function selftest2731B({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -32,8 +33,7 @@ export async function selftest2731B({ dir, report, tmpRoot, root }) {
   };
   const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: cleanEnv() });
   const node = (cwd, args, extra = {}, opts = {}) => spawnSync(process.execPath, args, { windowsHide: true, cwd, encoding: 'utf8', env: cleanEnv(extra), timeout: 120000, ...opts });
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   let n = 0;
   const made = [];
   const studio = (name) => {
@@ -48,12 +48,11 @@ export async function selftest2731B({ dir, report, tmpRoot, root }) {
     made.push(S);
     return { S, ev };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const lastJson = (r) => { const l = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop(); try { return JSON.parse(l); } catch { return null; } };
   // Harness modules of a copy are imported in a child, never here: their event.mjs would load the copy's .env into this
   // process (the full selftest runs every unit in one process).
   const js = (S, code, E) => { const r = node(S, ['--input-type=module', '-e', code], E); return { r, j: lastJson(r) }; };
-  const freePort = () => new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+  const freePort = freePortOf(net);
   const DEAD = 2147483000; // a pid no process has
 
   // ---- env (B-60) ----

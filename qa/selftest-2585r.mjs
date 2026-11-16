@@ -18,8 +18,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { fileUrlInRoot as u, out, real } from './kit.mjs';
 
 const spawnSyncSleep = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(() => {}, ${ms})`], { windowsHide: true });
 
@@ -28,8 +28,6 @@ const FAKE_KEY = 'fake-nim-key-for-selftest-2585r';
 const QUIET = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_HEARTBEAT_SEC: '1', STUDIO_ROLE: '', STUDIO_MAIN_ROOT: '', STUDIO_BUILDER_CMD: '', STUDIO_PRODUCER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_REHEARSAL: '', STUDIO_TOOL_CLAUDE_CMD: '', STUDIO_TOOL_AGY_CMD: '', STUDIO_TOOL_NIM_CMD: '', STUDIO_AGY_PROMPT: '', STUDIO_NIM_MODEL: '', STUDIO_BUILDER_MODEL: '', STUDIO_AGENT_MODEL: '', STUDIO_LANELESS: '', STUDIO_WORKTREES: '', NVIDIA_API_KEY: '', NVIDIA_API_KEY_2: '', OPENAI_API_KEY: '', AIDER_OPENAI_API_KEY: '', STUDIO_NIM_CHECK: 'off' };
 
 export async function selftest2585R({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (root, p) => JSON.stringify(pathToFileURL(path.join(root, p)).href);
   let n = 0;
   const probe = (root, code, env = {}) => {
     const f = path.join(root, `.probe-2585r-${n++}.mjs`);
@@ -37,7 +35,6 @@ export async function selftest2585R({ dir, run, report, tmpRoot }) {
     const r = run(root, `node ${path.basename(f)}`, { ...QUIET, ...env });
     try { return { ...JSON.parse(String(r.stdout).trim().split('\n').pop()), raw: out(r) }; } catch { return { raw: out(r) }; }
   };
-  const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
   // ---------- stand-ins first on PATH ----------

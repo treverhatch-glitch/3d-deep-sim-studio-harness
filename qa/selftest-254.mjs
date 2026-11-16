@@ -10,10 +10,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf } from './kit.mjs';
 
 export async function selftest254({ dir, run, report }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const u = fileUrlOf(dir);
   const probe = (name, code, env = {}) => {
     const f = path.join(dir, `.probe-254-${name}.mjs`);
     fs.writeFileSync(f, code);

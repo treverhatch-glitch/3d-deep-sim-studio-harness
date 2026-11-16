@@ -17,15 +17,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitArgsOf, guardOf, out, readAgentRec as readRec, readJsonl as events, sleep } from './kit.mjs';
 
 export async function selftest2732F({ dir, run, report, tmpRoot, root }) {
   void run; void root;
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitArgsOf(gEnv);
+  const guard = guardOf(report);
   // Names these checks set from .env or rely on being unset: never inherited from the shell running the self-test.
   const UNSET = ['STUDIO_STALL_MIN', 'STUDIO_STALL_PLAN_MIN', 'STUDIO_SESSION_MAX_MIN', 'STUDIO_STALL', 'STUDIO_TRAIN_AUTO', 'STUDIO_TRAIN_MIN', 'STUDIO_TRAIN_WAIT_MIN', 'STUDIO_TRAIN', 'HUB_TOKEN', 'STUDIO_ENV_FROM_FILE', 'STUDIO_STALL_RELEASE_MIN', 'STUDIO_DONE_RUNNING_MAX_MIN'];
   const base = {
@@ -49,8 +48,6 @@ export async function selftest2732F({ dir, run, report, tmpRoot, root }) {
     g(S, ['add', '-A']); g(S, ['commit', '-qm', 'studio', '--no-verify']);
     return { S, ev, env: { AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const probe = (S, env, name, code, timeout = 120000) => {
     const f = path.join(tmpRoot, `probe-2732f-${name}-${process.pid}-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -58,9 +55,7 @@ export async function selftest2732F({ dir, run, report, tmpRoot, root }) {
     const t = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop();
     try { return { ...JSON.parse(t), _err: r.stderr?.slice(-1500) }; } catch { return { _err: `${out(r).slice(-2500)}` }; }
   };
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await sleep(250); } return fn(); };
-  const readRec = (S, agent) => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'agents', `${agent}.json`), 'utf8')); } catch { return null; } };
   // A stand-in agent that does nothing for `secs` seconds (outside the studio copy, so it never changes its git status).
   const sleeper = path.join(tmpRoot, `sleeper-2732f-${process.pid}.mjs`);
   fs.writeFileSync(sleeper, "setTimeout(() => process.exit(0), Number(process.argv[2] || 30) * 1000);\n");

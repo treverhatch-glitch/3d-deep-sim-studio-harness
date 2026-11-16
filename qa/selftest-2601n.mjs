@@ -16,15 +16,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { fileUrlInRoot as u, guardSyncOf, out, real } from './kit.mjs';
 
 const FAKE_KEY = 'fake-nim-key-for-selftest-2601n';
 const QUIET = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_HEARTBEAT_SEC: '1', STUDIO_ROLE: '', STUDIO_MAIN_ROOT: '', STUDIO_BUILDER_CMD: '', STUDIO_PRODUCER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_REHEARSAL: '', STUDIO_TOOL_NIM_CMD: '', STUDIO_TOOL_AIDER_CMD: '', STUDIO_NIM_MODEL: '', STUDIO_NIM_MODELS: '', STUDIO_BUILDER_MODEL: '', STUDIO_AGENT_MODEL: '', STUDIO_LANELESS: '', STUDIO_WORKTREES: '', NVIDIA_API_KEY: '', NVIDIA_API_KEY_2: '', OPENAI_API_KEY: '', AIDER_OPENAI_API_KEY: '', STUDIO_AIDER_CMD: '', STUDIO_NIM_CHECK: '', STUDIO_NIM_CHECK_STUB: '', STUDIO_NIM_CHECK_HOURS: '', STUDIO_AIDER_MAP_TOKENS: '', STUDIO_AIDER_MAP_REFRESH: '', STUDIO_KEEP_FAILED_LANE: '', STUDIO_FAILED_TAIL_LINES: '', PYTHONUNBUFFERED: '', PYTHONIOENCODING: '', STUDIO_NIM_FALLBACK: '', STUDIO_TAKEOVER: 'off' };
 
 export async function selftest2601N({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (root, p) => JSON.stringify(pathToFileURL(path.join(root, p)).href);
-  const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
-  const guard = (name, fn) => { try { const [ok, detail] = fn(); report(name, ok, detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardSyncOf(report);
   let n = 0;
   const probe = (root, code, env = {}) => {
     const f = path.join(root, `.probe-2601n-${n++}.mjs`);

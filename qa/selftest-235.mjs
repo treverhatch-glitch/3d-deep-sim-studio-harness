@@ -5,11 +5,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlRelOf, out } from './kit.mjs';
 
 export async function selftest235({ dir, run, report, tmpRoot }) {
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlRelOf(dir);
   let n = 0;
   const evFile = path.join(dir, '.studio', 'events-235.jsonl');
   const env = { AGENT_EVENTS_FILE: evFile, STUDIO_TASK_BUDGET: 'off', STUDIO_REFILL_WAKE: 'off', STUDIO_RESCUE_MODELS: 'gpt-6,gemini-3-pro,claude-opus-5-5', STUDIO_RESCUE_MODEL: '', STUDIO_TIER_TOP_MODEL: '' };

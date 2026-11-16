@@ -10,11 +10,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlRelSOf, guardCap3000Of, out } from './kit.mjs';
 
 export async function selftest283F({ dir, root, report, tmpRoot }) {
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const guard = guardCap3000Of(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
   // ---- a studio copy: the state files (.studio/line/state.json, asks-posted.json, emit files) are its own ----
@@ -25,7 +24,7 @@ export async function selftest283F({ dir, root, report, tmpRoot }) {
   fs.mkdirSync(path.join(S, '.studio'), { recursive: true });
   const evFile = path.join(S, '.studio', 'events-283f.jsonl');
   const env = { ...clean, AGENT_EVENTS_FILE: evFile, STUDIO_MAIN_ROOT: S, STUDIO_TASK_BUDGET: 'off', STUDIO_WATCHDOG: 'off', CI: '', NODE_OPTIONS: '' };
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
+  const u = fileUrlRelSOf(S);
   let pn = 0;
   const probe = (code, extra = {}) => {
     const f = path.join(S, `.probe-283f-${++pn}.mjs`);

@@ -18,9 +18,9 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { out } from './kit.mjs';
 
 export async function selftest258C({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const AZ = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   const D = '0123456789';
   const B62 = `${AZ}${AZ.toLowerCase()}${D}`;

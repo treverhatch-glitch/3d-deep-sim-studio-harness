@@ -13,18 +13,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { eventsFileOf, eventTypesOf, fileUrlRelSOf, fwd, gEnvOf, gitUserCrlfOf, guardCap3000Of, out, readJsonFile as readJson, readRunsJsonl as runsOf, sleep as wait, writeInB as write } from './kit.mjs';
 
 export async function selftest284U({ dir, root, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const write = (b, rel, text) => { fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true }); fs.writeFileSync(path.join(b, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
-  const fwd = (p) => p.split(path.sep).join('/');
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const gEnv = gEnvOf(ident);
+  const g = gitUserCrlfOf(gEnv);
+  const guard = guardCap3000Of(report);
   // Running (a killed process not yet reaped, Linux state Z, runs nothing: not running).
   const alive = (pid) => { try { process.kill(Number(pid), 0); } catch (e) { return e.code === 'EPERM'; } try { const st = fs.readFileSync(`/proc/${Number(pid)}/stat`, 'utf8'); return !/^[ZX]$/.test(st.slice(st.lastIndexOf(')') + 2, st.lastIndexOf(')') + 3)); } catch { return true; } };
   const T = path.join(tmpRoot, `s284u-${process.pid}`);
@@ -53,9 +48,9 @@ export async function selftest284U({ dir, root, report, tmpRoot }) {
   g(S, 'init', '-q', '-b', 'main'); g(S, 'add', '-A'); g(S, 'commit', '-qm', 'studio', '--no-verify');
   const evFile = path.join(S, '.studio', 'events-284u.jsonl');
   const envOf = (extra = {}) => ({ ...base, AGENT_EVENTS_FILE: evFile, STUDIO_MAIN_ROOT: S, ...extra });
-  const events = () => { try { return fs.readFileSync(evFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const evs = (re) => events().filter((e) => re.test(e.type));
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
+  const events = eventsFileOf(evFile);
+  const evs = eventTypesOf(events);
+  const u = fileUrlRelSOf(S);
   let pn = 0;
   const probeFile = (code) => { const f = path.join(S, `.probe-284u-${++pn}.mjs`); fs.writeFileSync(f, code); return f; };
   const probe = (code, env = {}) => {
@@ -110,7 +105,6 @@ fs.writeFileSync(path.join(gw, 'leftover-from-land.tmp'), 'x');
 fs.writeFileSync(ctl + '-started', JSON.stringify({ pid: process.pid, srcs }));
 setTimeout(() => {}, 180000);
 `);
-  const runsOf = (ctl) => { try { return fs.readFileSync(`${ctl}-runs.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const cfgFor = (E, ctl, extra = {}, script = landStub) => ({ land: `node "${fwd(script)}" "${fwd(E.GW)}" "${fwd(ctl)}" {branch}`, target: 'port/main', cwd: fwd(E.R), gateWorktree: fwd(E.GW), timeoutMin: 5, rules: false, ...extra });
   const queue = (E, lanes, engine = 'unity') => { fs.mkdirSync(path.join(S, '.studio', 'train'), { recursive: true }); fs.writeFileSync(path.join(S, '.studio', 'train', `${engine}-queue.json`), JSON.stringify(lanes.map(([task, branch, more], i) => ({ task, agent: `porter-${i}`, branch, head: E.heads[branch], at: new Date(Date.now() - 600000 + i).toISOString(), ...(more || {}) })))); };
   const qTasks = (engine = 'unity') => (readJson(path.join(S, '.studio', 'train', `${engine}-queue.json`)) || []).map((e) => e.task);

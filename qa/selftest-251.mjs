@@ -3,11 +3,9 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { gitAsTShort as g, out } from './kit.mjs';
 
 export async function selftest251({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const repo = path.join(tmpRoot, `public-game-251-${process.pid}`);
   fs.mkdirSync(path.join(repo, 'Assets'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'Assets/Plane.cs'), 'public class Plane {}\n');

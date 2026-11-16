@@ -13,18 +13,15 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
+import { fileUrlOf, gitDirOf, guardSyncOf, napSync as nap, out, readJsonFile as readJson, untilNapOf, writeInDirOf } from './kit.mjs';
 
 export async function selftest260D({ dir, run, report, tmpRoot }) {
   const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === 'win32' ? 2.5 : 1);
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-  const until = (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms && !fn()) nap(50); return fn(); };
-  const guard = (name, fn) => { try { const [ok, detail] = fn(); report(name, ok, detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const u = fileUrlOf(dir);
+  const write = writeInDirOf(dir);
+  const until = untilNapOf(nap);
+  const guard = guardSyncOf(report);
   const events = path.join(dir, '.studio', 'events-260d.jsonl');
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_HEAVY_SLOTS: '1', STUDIO_HEAVY_HELD: '', STUDIO_HEAVY_POLL_MS: '100', STUDIO_HEAVY_WAIT_MIN: '0.5', STUDIO_HEAVY_REAP: '', STUDIO_HEAVY_OWN_GROUP: '', STUDIO_HEAVY_REEXEC: '', STUDIO_GATE_PRIORITY: '', STUDIO_VERIFY_DETACH: 'off', STUDIO_VERIFY_RUN: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_GAME: '', STUDIO_COMPACT_OUTPUT: 'off', STUDIO_GAME_GATE_TIMEOUT_MS: '', STUDIO_GAME_GATE_TIMEOUT_SCALE: '', STUDIO_TEST_TIMEOUT_SCALE: '', STUDIO_TEST_LOADAVG: '0', STUDIO_PROC_LIST_STUB: '', STUDIO_PROC_IDENTITY_STUB: '', STUDIO_WORKTREES: '', npm_lifecycle_event: '', AGENT_EVENTS_FILE: events };
   let n = 0;
@@ -181,7 +178,7 @@ console.log(JSON.stringify({ a: { cmds: a.cmds, killed: ra.killed, survivors: ra
 
     // ---------- #6a: createLaneCopy refuses an unknown task id ----------
     {
-      const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
+      const g = gitDirOf(dir);
       if (!fs.existsSync(path.join(dir, '.git'))) { g('init', '-q', '-b', 'main'); g('config', 'core.autocrlf', 'false'); }
       g('add', '-A');
       g('commit', '-q', '--no-verify', '-m', 'base 260d');

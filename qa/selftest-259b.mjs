@@ -13,22 +13,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { gitAsT as gIn, lastLineJsonOf, out, writeInRoot as write } from './kit.mjs';
 
 export async function selftest259B({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '',
     GITHUB_BASE_REF: '', GITHUB_EVENT_NAME: '', GITHUB_SHA: '', STUDIO_HOOKS_CHECK: '', STUDIO_LOCK_OWNER: '', STUDIO_LANE_HARNESS: '', STUDIO_HOOKS_RESTAMP: '',
     STUDIO_MAIN_COMMIT: '', STUDIO_WORKTREES: '', STUDIO_AGENT_MODEL: '', AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-259b.jsonl') };
-  const gIn = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const g = (...a) => gIn(dir, ...a);
-  const write = (root, rel, text) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); };
   const commitIn = (cwd, msgs, extra = {}, flags = []) => {
     gIn(cwd, 'add', '-A');
     return spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', ...[].concat(msgs).flatMap((m) => ['-m', m]), ...flags], { windowsHide: true, cwd, encoding: 'utf8', env: { ...process.env, ...env, ...extra } });
   };
   const msgOf = (cwd, rev = 'HEAD') => gIn(cwd, 'log', '-1', '--format=%B', rev).stdout;
   const sha = (cwd, rev = 'HEAD') => gIn(cwd, 'rev-parse', rev).stdout.trim();
-  const json = (r) => { try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return { _raw: out(r).slice(-1500) }; } };
+  const json = lastLineJsonOf(out);
   const check = (cwd, extra = {}) => { const r = run(cwd, 'node harness/hook-stamp.mjs check --json', { ...env, STUDIO_HOOKS_CHECK: 'on', ...extra }); return { r, j: json(r) }; };
   const lines20 = (n0 = 1) => Array.from({ length: 20 }, (_, i) => `export const v${i + n0} = ${i + n0};`).join('\n') + '\n';
   const edit = (root, rel, from, to) => { const f = path.join(root, rel); fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace(from, to)); };

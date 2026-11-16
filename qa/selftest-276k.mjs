@@ -21,13 +21,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { gEnvOf, gitPlainOf, guardOf, iso, readJsonl as events } from './kit.mjs';
 
 export async function selftest276K({ dir, run, report, tmpRoot, root }) {
   void run; void root;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { cwd, encoding: 'utf8', env: gEnv(), windowsHide: true });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitPlainOf(gEnv);
+  const guard = guardOf(report);
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_WATCH_INTERVAL: '0', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '',
     CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', NODE_OPTIONS: '', STUDIO_MACHINE_SCAN: 'off', STUDIO_TEST_MACHINE: '', STUDIO_RAM_FLOOR_GB: '0', STUDIO_HEAVY_SLOTS: '0',
@@ -38,7 +39,6 @@ export async function selftest276K({ dir, run, report, tmpRoot, root }) {
   const made = [];
   let n = 0;
   const now = Date.now();
-  const iso = (ms) => new Date(ms).toISOString();
   const studio = (name, { tasks = [], holds = {}, events = [], mode = 'extreme' } = {}) => {
     const S = path.join(tmpRoot, `276k-${name}-${process.pid}-${++n}`);
     fs.cpSync(dir, S, { recursive: true, filter: (src) => !/[\\/](\.git|\.lanes|node_modules)$/.test(src) });
@@ -54,7 +54,6 @@ export async function selftest276K({ dir, run, report, tmpRoot, root }) {
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
   const added = (id, meta = {}) => ({ type: 'task.added', agent: 'producer', task: id, msg: `Queued ${id}`, meta });
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const node = (S, env, args) => spawnSync(process.execPath, args, { cwd: S, encoding: 'utf8', env: { ...process.env, ...env }, windowsHide: true, timeout: 120000 });
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`.slice(-3000);
   const json = (r) => { const t = String(r.stdout || '').trim(); try { return JSON.parse(t); } catch { return null; } };

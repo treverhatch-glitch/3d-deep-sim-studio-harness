@@ -11,13 +11,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { guardSyncOf, minAgo, out, readEventsFile as readEvents, readJsonFile as readJson } from './kit.mjs';
 
 export async function selftest2585Q({ dir, run, report, tmpRoot }) {
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_AGENT_TOOL: '', STUDIO_BUILDER_TOOL: '', STUDIO_BUILDER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_WATCHDOG_LAUNCH: 'off', STUDIO_AUTO_TRICKS: '0', STUDIO_LANE_INFER: 'off', STUDIO_FLOW_IDLE_MIN: '999', STUDIO_LOCK_OWNER: '' };
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const minAgo = (m) => new Date(Date.now() - m * 60000).toISOString();
-  const guard = (name, fn) => { try { const [ok, detail] = fn(); report(name, ok, detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardSyncOf(report);
   let n = 0;
   const probeIn = (root, code, env = {}) => {
     const u = (rel) => JSON.stringify(pathToFileURL(path.join(root, rel)).href);
@@ -27,7 +25,6 @@ export async function selftest2585Q({ dir, run, report, tmpRoot }) {
     try { return JSON.parse(r.stdout.trim().split('\n').filter((l) => l.startsWith('{')).pop()); } catch { return { error: out(r) }; }
   };
   const addIn = (root, title, env = {}) => (run(root, `node harness/task.mjs add "${title}" --role builder`, { ...base, ...env }).stdout.match(/"id":\s*"(T-\d+)"/) || [])[1];
-  const readEvents = (f) => { try { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   // Make a task's claim look an hour and more old and run out, and its start event `startMin` minutes ago.
   const expire = (root, ids, evFile, startMin) => {
     const lockDir = path.join(root, '.studio', 'locks');

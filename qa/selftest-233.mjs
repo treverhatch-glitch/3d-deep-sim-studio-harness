@@ -6,11 +6,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlRelOf, out } from './kit.mjs';
 
 export async function selftest233({ dir, run, report, tmpRoot }) {
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlRelOf(dir);
   let n = 0;
   const probe = (code, env = {}, cwd = dir) => {
     const f = path.join(tmpRoot, `p233-${++n}-${process.pid}.mjs`);

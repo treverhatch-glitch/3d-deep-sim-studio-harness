@@ -8,9 +8,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { out } from './kit.mjs';
 
 export async function selftest2582L({ dir, run, report }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off' };
   const purity = (args = '') => run(dir, `node scripts/check-sim-purity.mjs${args ? ` ${args}` : ''}`, env);
   const ANCHOR = '  state.tick += 1;\n';

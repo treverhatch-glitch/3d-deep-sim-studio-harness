@@ -7,12 +7,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, gitAsTShort as g, out } from './kit.mjs';
 
 export async function selftest255({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlOf(dir);
   const probe = (name, code, env = {}) => {
     const f = path.join(dir, `.probe-255-${name}.mjs`);
     fs.writeFileSync(f, code);
@@ -45,7 +43,6 @@ console.log(JSON.stringify({ freed, left: listLocks().map((x) => x.key + ' ' + x
   report('2.55.0 (P-028): the watcher\'s hand-back for an ended session skips a claim made after that session ended', /2\.55\.0 \(P-028\)/.test(watchSrc) && /staleRecord/.test(watchSrc), '');
 
   // P-030: --sync --dry-run writes nothing.
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const env = { AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-255.jsonl'), STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0' };
   const src = path.join(tmpRoot, `pier-255-${process.pid}`);
   fs.mkdirSync(path.join(src, 'src'), { recursive: true });

@@ -27,12 +27,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { guardOf, writeInS as put } from './kit.mjs';
 
 export async function selftest279T({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const put = (S, rel, text) => { fs.mkdirSync(path.dirname(path.join(S, rel)), { recursive: true }); fs.writeFileSync(path.join(S, rel), text); };
+  const guard = guardOf(report);
   const readIn = (S, rel) => { try { return JSON.parse(fs.readFileSync(path.join(S, rel), 'utf8')); } catch { return null; } };
   const textIn = (S, rel) => { try { return fs.readFileSync(path.join(S, rel), 'utf8'); } catch { return ''; } };
   const clean = {};

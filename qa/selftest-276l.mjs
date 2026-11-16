@@ -27,19 +27,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { eventsOf, fileUrlOf, gEnvOf, guardOf, iso, out } from './kit.mjs';
 
 export async function selftest276L({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlOf(dir);
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
+  const gEnv = gEnvOf(ident);
   const g = (...a) => spawnSync('git', a, { cwd: dir, encoding: 'utf8', env: gEnv(), windowsHide: true });
   const write = (rel, v) => { const f = path.join(dir, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, typeof v === 'string' ? v : JSON.stringify(v, null, 2)); };
   const rm = (rel) => fs.rmSync(path.join(dir, rel), { recursive: true, force: true });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   const events = path.join(dir, '.studio', 'events-276l.jsonl');
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const addEvent = (e) => fs.appendFileSync(events, `${JSON.stringify({ agent: 't', status: 'ok', meta: {}, ...e })}\n`);
   const TOKEN = `tok${'Wq8z'.repeat(10)}Ab3c`;
   const env = {
@@ -82,7 +81,6 @@ http.createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; })
   const posts = () => reqs().map((r) => r.json);
   const clear = () => fs.writeFileSync(hookLog, '');
   const deadPid = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8', windowsHide: true }).stdout.trim();
-  const iso = (ms) => new Date(ms).toISOString();
   const fresh = () => {
     for (const x of ['.studio/comm', '.studio/locks', '.studio/train', '.studio/line', '.studio/agents', '.studio/STOP.json', '.studio/supervisor-stop', '.studio/crew-paused.json', '.studio/supervisor.json', 'studio/asks']) rm(x);
     fs.writeFileSync(events, ''); clear();

@@ -11,11 +11,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlRelSOf, guardCap3000Of, out } from './kit.mjs';
 
 export async function selftest283E({ dir, root, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
+  const guard = guardCap3000Of(report);
   const harnessRoot = root || dir;
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
@@ -27,7 +26,7 @@ export async function selftest283E({ dir, root, run, report, tmpRoot }) {
   for (const x of ['.studio', 'studio/mode.json', 'studio/models.json']) fs.rmSync(path.join(S, x), { recursive: true, force: true });
   fs.mkdirSync(path.join(S, '.studio'), { recursive: true });
   const evFile = path.join(S, '.studio', 'events-283e.jsonl');
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
+  const u = fileUrlRelSOf(S);
   let pn = 0;
   const probe = (code, env = {}) => {
     const f = path.join(S, `.probe-283e-${++pn}.mjs`);

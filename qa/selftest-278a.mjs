@@ -9,12 +9,13 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { guardOf, importInDirOf } from './kit.mjs';
 
 export async function selftest278A({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const imp = (rel) => import(pathToFileURL(path.join(dir, rel)).href);
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const imp = importInDirOf(dir);
+  const guard = guardOf(report);
   const fx = fs.mkdtempSync(path.join(tmpRoot, '278a-'));
   void run; void harnessRoot;
   const F = 'game/demo/tests/hostProbe.test.mjs';

@@ -22,16 +22,13 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { eventsOf, fileUrlOf, gitAsT as g, guardOf, iso, out } from './kit.mjs';
 
 export async function selftest271X({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const u = fileUrlOf(dir);
+  const guard = guardOf(report);
   const events = path.join(dir, '.studio', 'events-271x.jsonl');
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const logFile = path.join(dir, '.studio', 'decisions.jsonl');
   const log = () => { try { return fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const decs = () => log().filter((r) => r.kind === 'decision');
@@ -188,7 +185,6 @@ export async function selftest271X({ dir, run, report, tmpRoot }) {
   const mroot = path.join(tmpRoot, `m271x-${process.pid}`);
   fs.mkdirSync(path.join(mroot, '.studio'), { recursive: true });
   const T0 = Date.parse('2026-06-10T00:00:00Z');
-  const iso = (ms) => new Date(ms).toISOString();
   const rows = [];
   const ev = [];
   for (let i = 0; i < 12; i++) { const t = T0 + i * 3600000; ev.push({ type: 'task.train.held', task: `T-${100 + i}`, ts: iso(t) }, { type: 'task.train.released', task: `T-${100 + i}`, ts: iso(t + 2 * 3600000) }); }

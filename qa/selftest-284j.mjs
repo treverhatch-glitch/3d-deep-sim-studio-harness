@@ -11,17 +11,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { fileUrlRelOf, guardCap3000Of, writeInB as write } from './kit.mjs';
 
 export async function selftest284J({ dir, report, tmpRoot }) {
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
+  const guard = guardCap3000Of(report);
   const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (b, rel, text) => { fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true }); fs.writeFileSync(path.join(b, rel), text); };
   const T = path.join(tmpRoot, `s284j-${process.pid}`);
   fs.mkdirSync(T, { recursive: true });
   fs.mkdirSync(path.join(dir, '.studio'), { recursive: true });
   const evFile = path.join(dir, '.studio', 'events-284j.jsonl');
   fs.writeFileSync(evFile, '');
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   let pn = 0;
   // One driftCheck call in a folder, in its own process (the harness's state paths come from the studio copy).
   const check = (agent, cwd) => {

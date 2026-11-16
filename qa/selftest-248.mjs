@@ -3,9 +3,9 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { out } from './kit.mjs';
 
 export async function selftest248({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_UNITY: path.join(tmpRoot, 'no-unity-248') };
   run(dir, 'node scripts/new-game.mjs moth-run', env);
   const st = run(dir, 'node harness/engine.mjs start unity --by prod-1', env);

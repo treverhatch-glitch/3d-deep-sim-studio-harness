@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { guardOf, writeInS as put } from './kit.mjs';
 
 /** The switches 2.79.1 (e) removed. */
 const REMOVED = ['LANE_LOCKS', 'TYPE_EVIDENCE', 'UNITY_PLAYMODE_RETRY', 'TRAIN_GREEN_FIRST', 'STAGE1_PLAYTEST', 'REVIEW_VERDICT_LINE', 'DONE_SKIP_GAME_NONCODE', 'TRAIN_LAND_OVER_NONCODE', 'OWNER_ONLY_PARK'].map((k) => `STUDIO_${k}`);
@@ -19,8 +20,7 @@ const REMOVED = ['LANE_LOCKS', 'TYPE_EVIDENCE', 'UNITY_PLAYMODE_RETRY', 'TRAIN_G
 export async function selftest2791E({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const put = (S, rel, text) => { fs.mkdirSync(path.dirname(path.join(S, rel)), { recursive: true }); fs.writeFileSync(path.join(S, rel), text); };
+  const guard = guardOf(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT)/i.test(k)) clean[k] = '';
   const base = { ...clean, STUDIO_REFILL_WAKE: 'off', STUDIO_WATCHDOG: 'off', STUDIO_TASK_BUDGET: 'off', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', CI: '', NODE_OPTIONS: '', npm_lifecycle_event: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-2791e-${process.pid}.pem`) };

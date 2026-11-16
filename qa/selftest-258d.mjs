@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, out, readInDirOf } from './kit.mjs';
 
 // The marked block, as harness/untrusted.mjs writes it (spelled out here so this file also runs against older code).
 const BEGIN = '----- BEGIN: written by agents or people -----';
@@ -33,8 +33,7 @@ const outside = (text) => {
 };
 
 export async function selftest258D({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlOf(dir);
   const probe = (name, code, env = {}) => {
     const f = path.join(dir, `.probe-258d-${name}.mjs`);
     fs.writeFileSync(f, code);
@@ -42,7 +41,7 @@ export async function selftest258D({ dir, run, report, tmpRoot }) {
     const line = String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{')).pop();
     try { return { ...JSON.parse(line), _err: r.stderr }; } catch { return { _raw: out(r).slice(-1500) }; }
   };
-  const read = (rel) => { try { return fs.readFileSync(path.join(dir, rel), 'utf8'); } catch { return ''; } };
+  const read = readInDirOf(dir);
   const events = () => read('.studio/events.jsonl').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } });
   const board = () => JSON.parse(run(dir, 'node harness/task.mjs list').stdout || '{}');
   const addTask = (title, role = 'builder') => JSON.parse(run(dir, `node harness/task.mjs add "${title}" --role ${role}`, { STUDIO_PRODUCER_NAME: 'producer' }).stdout || '{}').id;

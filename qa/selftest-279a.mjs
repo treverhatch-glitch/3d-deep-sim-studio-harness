@@ -10,12 +10,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { guardOf, importInDirOf, writeInS as put } from './kit.mjs';
 
 export async function selftest279A({ dir, report, tmpRoot, root }) {
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const imp = (rel) => import(pathToFileURL(path.join(dir, rel)).href);
-  const put = (S, rel, text) => { fs.mkdirSync(path.dirname(path.join(S, rel)), { recursive: true }); fs.writeFileSync(path.join(S, rel), text); };
+  const guard = guardOf(report);
+  const imp = importInDirOf(dir);
   const direct = (base) => { // an independent count: every code file under base, its lines
     const files = fs.readdirSync(base, { recursive: true, withFileTypes: true }).filter((e) => e.isFile() && /\.(mjs|cjs|js|ts|tsx|jsx|mts)$/.test(e.name) && !/(^|[\\/])(node_modules|dist|build|coverage|\.vite|\.git)([\\/]|$)/.test(path.relative(base, path.join(e.parentPath, e.name))));
     let lines = 0;

@@ -7,10 +7,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlRelOf } from './kit.mjs';
 
 export async function selftest2583P({ dir, run, report, tmpRoot }) {
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   let n = 0;
   const probe = (code, env = {}) => {
     const file = path.join(tmpRoot, `probe-2583p-${process.pid}-${n += 1}.mjs`);

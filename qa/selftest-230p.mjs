@@ -8,11 +8,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { fileUrlRelOf, out } from './kit.mjs';
 
 export async function selftest230p({ dir, run, report, tmpRoot }) {
   let n = 0;
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlRelOf(dir);
   const w = (rel, text, mode) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); if (mode) fs.chmodSync(path.join(dir, rel), mode); };
   const probe = (code, env = {}, cwd = dir) => {
     const f = path.join(tmpRoot, `p230p-${++n}-${process.pid}.mjs`);

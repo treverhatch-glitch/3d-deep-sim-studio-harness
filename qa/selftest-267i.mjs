@@ -16,15 +16,13 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, out, readEventsFile as readEv } from './kit.mjs';
 
 export async function selftest267I({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlOf(dir);
   const base = { STUDIO_ROLE: '', STUDIO_LOCK_OWNER: '', STUDIO_AGENT: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', STUDIO_TZ: '', TZ: 'UTC', STUDIO_HALT_STALE_H: '', STUDIO_RESUME_BY: '', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_CACHE_READ_WEIGHT: '0.1' };
   const evFile = (n) => path.join(dir, '.studio', `events-267i-${n}.jsonl`);
   fs.mkdirSync(path.join(dir, '.studio'), { recursive: true });
-  const readEv = (f) => { try { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const probe = (name, code, env = {}) => {
     const f = path.join(dir, `.probe-267i-${name}.mjs`);
     fs.writeFileSync(f, code);

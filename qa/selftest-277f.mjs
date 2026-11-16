@@ -17,12 +17,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { gEnvOf, guardOf, out, readJsonl as evs } from './kit.mjs';
 
 export async function selftest277F({ dir, report, tmpRoot }) {
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
+  const gEnv = gEnvOf(ident);
   const g = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '',
     CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', NODE_OPTIONS: '', STUDIO_TRAIN_MIXED: '', STUDIO_DIGEST: 'off', STUDIO_MACHINE_SCAN: 'off', STUDIO_HOOKS_CHECK: 'off',
@@ -41,10 +42,8 @@ export async function selftest277F({ dir, report, tmpRoot }) {
     made.push(S);
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const evs = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const node = (S, env, code) => spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: S, encoding: 'utf8', windowsHide: true, env: { ...process.env, ...env } });
   const imp = (S, f) => JSON.stringify(pathToFileURL(path.join(S, 'harness', f)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
 
   // ---- digest ----
   const mk = (i, over = {}) => ({ ts: new Date(Date.UTC(2026, 10, 4, 6, i)).toISOString(), type: 'delegation.used', agent: 'opus-1', status: 'ok', msg: `opus-1 train-release T-${i} in beta mode: reason ${i}`, meta: { beta: true, action: 'train-release', subject: `T-${i}`, why: `reason ${i}`, via: 'beta' }, ...over });

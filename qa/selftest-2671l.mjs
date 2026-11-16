@@ -5,6 +5,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { out, readJsonInDirOf, writeInDirOf } from './kit.mjs';
 
 /** A box glTF (12 triangles) with an embedded buffer; `s` scales it, `tag` makes the bytes differ. */
 function boxGltf(s = 1, tag = 'box') {
@@ -25,9 +26,8 @@ function boxGltf(s = 1, tag = 'box') {
 
 export async function selftest2671L({ dir, run, report }) {
   const env = { NODE_PATH: '', STUDIO_LOCK_OWNER: '', STUDIO_AGENT: '', STUDIO_ROLE: '', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_SKETCHFAB_KEY: '' };
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
-  const j = (rel) => { try { return JSON.parse(fs.readFileSync(path.join(dir, rel), 'utf8')); } catch { return null; } };
+  const w = writeInDirOf(dir);
+  const j = readJsonInDirOf(dir);
   const needs = () => { try { return fs.readdirSync(path.join(dir, '.studio/assets/needs')).filter((n) => /^N-\d+\.json$/.test(n)).map((n) => j(`.studio/assets/needs/${n}`)); } catch { return []; } };
   const asset = (args) => run(dir, `node harness/assets.mjs ${args}`, env);
 

@@ -20,19 +20,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlInP as u, gateRecOf, gEnvOf, gitCrlfOf, guardOf, lastJsonOf, out, readJsonl as events, writeIn } from './kit.mjs';
 
 export async function selftest276H({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   if (!fs.existsSync(path.join(dir, 'node_modules')) && fs.existsSync(path.join(harnessRoot, 'node_modules'))) {
     try { fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction'); } catch {}
   }
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const gitIn = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const gitIn = gitCrlfOf(gEnv);
+  const guard = guardOf(report);
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
     STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_COMPACT_OUTPUT: '', STUDIO_VERIFY_DETACH: 'off', STUDIO_VERIFY_RUN: '', STUDIO_HEAVY_SLOTS: '0', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '',
@@ -53,8 +52,7 @@ export async function selftest276H({ dir, run, report, tmpRoot, root }) {
     gitIn(S, 'add', '-A'); gitIn(S, 'commit', '-qm', 'studio', '--no-verify');
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const lastJson = (r) => { const t = String(r.stdout || '').trim(); const l = t.split('\n').filter((x) => x.startsWith('{')).pop(); try { return JSON.parse(l); } catch { return { _raw: out(r).slice(-2000) }; } };
+  const lastJson = lastJsonOf(out);
   const probe = (S, env, name, code) => {
     const f = path.join(tmpRoot, `probe-276h-${name}-${process.pid}-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -62,7 +60,6 @@ export async function selftest276H({ dir, run, report, tmpRoot, root }) {
     fs.rmSync(f, { force: true });
     return { ...lastJson(r), _out: out(r).slice(-2500) };
   };
-  const u = (S, p) => JSON.stringify(pathToFileURL(path.join(S, p)).href);
 
   // ONLY_276H=b85,b88,… runs some parts (a maintainer's shortcut; the full selftest runs them all).
   const want = (k) => !process.env.ONLY_276H || process.env.ONLY_276H.split(',').includes(k);
@@ -87,7 +84,7 @@ process.exit(process.env.FAIL_276H ? 1 : 0);
     });
     const gatesDir = path.join(S, '.studio', 'gates');
     const verify = (owner, extra = {}) => run(S, 'node scripts/run-gates.mjs --no-detach', { ...env, STUDIO_LOCK_OWNER: owner, ...extra });
-    const recOf = (owner) => { try { return JSON.parse(fs.readFileSync(path.join(gatesDir, `${owner}-full.json`), 'utf8')); } catch { return null; } };
+    const recOf = gateRecOf(gatesDir);
     const tree = gitIn(S, 'rev-parse', 'HEAD^{tree}').stdout.trim();
     const fresh = () => { for (const d of [path.join(gatesDir, 'trees'), path.join(S, '.studio', 'train'), path.join(S, '.studio', 'gates-last-full.json'), path.join(S, '.studio', 'gates-last.json')]) fs.rmSync(d, { recursive: true, force: true }); for (const f of fs.existsSync(gatesDir) ? fs.readdirSync(gatesDir) : []) if (f.endsWith('.json')) fs.rmSync(path.join(gatesDir, f), { force: true }); };
     const trainVerify = (name) => { fresh(); return probe(S, env, `vt-${name}`, `import { verifyTree } from ${u(S, 'harness/train.mjs')};

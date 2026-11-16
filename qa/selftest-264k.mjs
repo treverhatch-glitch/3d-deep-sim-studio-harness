@@ -13,11 +13,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, out } from './kit.mjs';
 
 export async function selftest264K({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlOf(dir);
   const evFile = path.join(dir, '.studio', 'events-264k.jsonl');
   // 2.73.0 (e): these checks score the L3 bar on point estimates ("confidence": 0); qa/selftest-273e.mjs checks the default 90% bound.
   const env = { AGENT_EVENTS_FILE: evFile, STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_L3_CONFIDENCE: '0' };
