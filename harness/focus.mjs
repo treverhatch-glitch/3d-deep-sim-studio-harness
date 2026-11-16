@@ -36,6 +36,7 @@ import { conductorForBrief } from './conductor.mjs';
 import { regressionHowTo } from './regression-howto.mjs';
 import { visionCard, visionSection } from './vision-card.mjs';
 import { taskType } from './done-check.mjs';
+import { readHolds } from './task-hold.mjs';
 
 const read = (rel) => {
   try {
@@ -74,6 +75,25 @@ export function visionFor(task, events = readRecentEvents(20000), { env = proces
     return { card: visionCard({ task: rt, meta: metaOf(rt.id), type: rType, root: REPO_ROOT, env }), reviewed: rt.id };
   }
   return { card: visionCard({ task, meta: metaOf(task.id), type, root: REPO_ROOT, env }), reviewed: null };
+}
+
+/**
+ * 2.90 (e): the line ranges a task names (path:120-340, path#L120-L340, several as path:1-9,40-60) in its title, --scope,
+ * --paths or lane, for files that exist: [{ file, from, to }]. The brief lists them first: read only those lines.
+ */
+export function namedRanges(texts, root = REPO_ROOT) {
+  const out = [];
+  const R = /([\w./-]+\.\w+)(?::|#L?)(L?\d+\s*-\s*L?\d+(?:\s*,\s*L?\d+\s*-\s*L?\d+)*)/g;
+  for (const m of texts.filter(Boolean).map(String).join('\n').matchAll(R)) {
+    const file = m[1].replace(/^\.\//, '');
+    if (file.includes('..') || !fs.existsSync(path.join(root, file))) continue;
+    for (const r of m[2].split(',')) {
+      const [a, b] = r.replace(/L/gi, '').split('-').map((x) => Number(x.trim()));
+      const one = { file, from: Math.min(a, b), to: Math.max(a, b) };
+      if (!out.some((x) => x.file === one.file && x.from === one.from && x.to === one.to)) out.push(one);
+    }
+  }
+  return out.slice(0, 40);
 }
 
 export function buildFocus(taskId, agent = null) {
@@ -140,7 +160,9 @@ export function buildFocus(taskId, agent = null) {
   const prepared = fs.existsSync(path.join(REPO_ROOT, preparedRel)) ? preparedRel : null;
   const historyWords = events.filter((e) => e.task === taskId && e.msg).reduce((n, e) => n + String(e.msg).split(/\s+/).length, 0);
   const vision = safe(() => visionFor(task, events)) || { card: null, reviewed: null };
-  return { vision, task, check, skill, size, causedBy, anchors, handoff: readTaskHandoff(taskId), tricks: readAttached(taskId)?.tricks || [], tricksBy: readAttached(taskId)?.preapproved?.approvedBy || null, mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice, verdictNotes: safe(() => notesForBrief({ id: task.id, title: task.title, role: task.role })), godotFailures: safe(() => godotFailuresForBrief()), inbox: safe(() => inboxForBrief(task.id)) || null, conductor: safe(() => conductorForBrief(task.id)) || null };
+  const lane = (() => { try { return readHolds()[taskId]?.lane || ''; } catch { return ''; } })();
+  const ranges = namedRanges([task.title, added?.meta?.scope, (added?.meta?.paths || []).join(','), added?.meta?.lane, lane]);
+  return { ranges, vision, task, check, skill, size, causedBy, anchors, handoff: readTaskHandoff(taskId), tricks: readAttached(taskId)?.tricks || [], tricksBy: readAttached(taskId)?.preapproved?.approvedBy || null, mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice, verdictNotes: safe(() => notesForBrief({ id: task.id, title: task.title, role: task.role })), godotFailures: safe(() => godotFailuresForBrief()), inbox: safe(() => inboxForBrief(task.id)) || null, conductor: safe(() => conductorForBrief(task.id)) || null };
 }
 
 export function renderVoice(v) {
@@ -174,6 +196,7 @@ export function renderFocus(f) {
   ]);
   L.push(`# Focus: ${f.task.id}`, '');
   L.push(`${f.task.priority}, size ${f.size} of 5, a "${f.check.type}" task for \`${f.task.role}\`${f.causedBy ? `. It is a bug traced to ${f.causedBy}` : ''}. Read this page instead of the repo; open other files only when a step needs them.`);
+  if (f.ranges?.length) L.push('', '## Read only these lines', 'This task names the parts of the files it needs. Read only these lines (your Read tool\'s offset and limit, or `sed -n \'<from>,<to>p\' <file>`); never read a whole file to find them.', ...f.ranges.map((r) => `- \`${r.file}\` lines ${r.from}-${r.to}: offset ${r.from}, limit ${r.to - r.from + 1}`));
   if (told) L.push('', '## What this task is, and what others left on it', told.trimEnd());
   // 2.85 (f): the designer's vision for this task (the signed Bible's pillar, never list, feel and phase goal), between
   // what the task is and what done means, so the builder sees it before working (harness/vision-card.mjs).

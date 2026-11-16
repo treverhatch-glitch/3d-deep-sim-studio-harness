@@ -4,6 +4,7 @@
  *   b  `task promote` takes --phase, --serves and --type, so a porter's "Port …" proposal can be promoted
  *   c  `task unblock` ends a time block (task block <ID> --until <time>)
  *   d  the crew breaker counts a session that committed to its task as progress
+ *   e  the focus brief lists the line ranges a task names first, and says to read only those
  * Scaffolding: a studio copy with its own git and events file, as in qa/selftest-286e.mjs.
  */
 import fs from 'node:fs';
@@ -126,5 +127,19 @@ console.log(JSON.stringify({ slices: h(mk(() => 1)), nothing: h(mk(() => 0)), on
       JSON.stringify(r)]);
   }
 
+  // ================= e. the brief lists the ranges a task names =================
+  {
+    const lines = Array.from({ length: 400 }, (_, i) => `export const v${i} = ${i};`).join('\n');
+    write(S, 'cartridges/demo290/sim.ts', `${lines}\n`);
+    const add = task('add', 'Port unit M1: cartridges/demo290/sim.ts:120-180,300-340 and missing/nowhere.ts:1-9', '--role', 'engine-porter', '--agent', 'prod-1', '--phase', '1', '--serves', 'pillar:Calm');
+    const id = idOf('Port unit M1');
+    const f = node(['harness/focus.mjs', String(id)]);
+    const md = out(f);
+    const sec = (md.split('## Read only these lines')[1] || '').split('\n## ')[0];
+    await guard('2.90 (e) a task whose title names cartridges/demo290/sim.ts:120-180,300-340: its focus brief has "Read only these lines" before what the task is, listing both ranges with their offset and limit, and leaves out a file that does not exist (fails on 2.89: the brief had no such section, so a porter read the whole file)', () => [
+      add.status === 0 && Boolean(id) && f.status === 0 && md.indexOf('## Read only these lines') > 0 && md.indexOf('## Read only these lines') < md.indexOf('## What this task is')
+        && /`cartridges\/demo290\/sim\.ts` lines 120-180: offset 120, limit 61/.test(sec) && /lines 300-340: offset 300, limit 41/.test(sec) && !/nowhere/.test(sec),
+      JSON.stringify({ add: out(add).slice(-300), id, sec, head: md.slice(0, 800) })]);
+  }
   try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep removes it */ }
 }

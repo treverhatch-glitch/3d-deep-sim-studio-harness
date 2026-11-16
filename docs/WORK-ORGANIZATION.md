@@ -44,7 +44,9 @@ Read `studio/CURRENT_TASK.md`; a clear next step in `IN_PROGRESS` is yours. If i
   needs `--force`).
 - **Dependencies**: `npm run task -- after <ID> <T-x>[,<T-y>] | --remove <T-x> | --set <T-x>,<T-y> | --clear` (2.83) edits the
   `--after` list in `studio/task-holds.json` (an id on neither NEXT.md nor DONE.md nor open in `studio/proposed.json` is refused);
-  `npm run task -- unblock <ID>` clears a park, a tripped breaker or a time block (`task block <ID> --until <time>`, 2.90). A task whose `--after` dependency is done but has commits on its lane branch (`.studio/lane-branches.json`) not on main waits,
+  `npm run task -- unblock <ID>` clears a park, a tripped breaker or a time block (`task block <ID> --until <time>`, 2.90). A task
+  whose title names line ranges (`path/sim.ts:120-340`, `#L120-L340`; also in `--scope`, `--paths` or its lane) gets them first in
+  its focus brief, with the instruction to read only those lines (2.90). A task whose `--after` dependency is done but has commits on its lane branch (`.studio/lane-branches.json`) not on main waits,
   unless it landed another way (a landing record in the last 20000 events, older ones too up to `STUDIO_DEP_HISTORY_MB`, 200; a done
   rescue; a branch adding nothing to main). `STUDIO_DEP_LANDED_EVIDENCE=off`: only the window's own record counts.
 - **Non-code tasks** (direction, review, docs, idea, research, study; changes all Markdown or under `studio/`, `docs/`, `.studio/`) skip
