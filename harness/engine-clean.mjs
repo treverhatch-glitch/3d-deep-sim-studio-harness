@@ -1,20 +1,12 @@
 #!/usr/bin/env node
 /**
- * harness/engine-clean.mjs — 2.83 (h): the disk an engine's work leaves behind.
- *
- * Why (a crew's PC, 2.83): engine work happens in git worktrees of a separate engine repo at <studio>/.lanes/engine/<task>
- * (about 3.2 GB each). After a lane's branch landed on the engine's target branch the worktree stayed for ever, and every
- * engine landing wrote a ~1.6 GB player build into a builds folder (gate-<stamp>/); 25 piled up (43 GB) and the disk fell
- * to 62 GB. `npm run lanes -- prune` did not look at .lanes/engine.
- *
- *   removeLandedLane   one lane folder, removed only when it is clean and its commit is already on the target
+ * harness/engine-clean.mjs — the disk an engine's work leaves behind: landed engine lane worktrees and old build
+ * folders.
+ *   removeLandedLane   one lane folder (.lanes/engine/<task>), removed only when clean and its commit is on the target
  *   pruneEngineLanes   every folder under .lanes/engine/ by the same rule (wired into `npm run lanes -- prune`)
  *   pruneBuilds        keep the newest N build folders of a builds folder, remove the rest, write LATEST.txt
- *   buildsConfig       studio/game.json engines.<x>.builds { dir, keep, pattern } (the owner's); STUDIO_ENGINE_KEEP_BUILDS
- *
- * Nothing here deletes by hand except old build folders (fs.rmSync after the safety rules); a lane goes only through
- * `git worktree remove` (never --force), so git itself refuses a folder with work in it.
- *
+ *   buildsConfig       studio/game.json engines.<x>.builds { dir, keep, pattern } (owner's); STUDIO_ENGINE_KEEP_BUILDS
+ * Only old build folders are deleted by hand (fs.rmSync); a lane goes through `git worktree remove` (never --force).
  *   node harness/engine-clean.mjs lanes [--engine x] [--dry-run]
  *   node harness/engine-clean.mjs builds [--engine x] [--dry-run]
  */
@@ -54,15 +46,10 @@ export function registeredLane(repo, dir) {
 }
 
 /**
- * 2.86 (f): when an engine worktree may go, in one place. Today's rule (2.83) removed a lane only after a train landed it,
- * from the train itself; a task handed back, finished without a train, dropped, or landed by fast-forward kept its 3.8 GB
- * worktree for good (37 of them on a crew's PC). What keeps one, in order:
- *   a merge in progress there; uncommitted work (tracked changes, untracked files that are not git-ignored); its task
- *   claimed (in progress); its task queued for a train; commits not on the target while the task is still open (handed
- *   back with unlanded work); a fresh lane on the target's tip while the task is open (a launched pass, nobody committed yet).
- * What removes it: its commit is on the target (landed by a train); or its task is done or dropped (cancelled). The branch
- * is never deleted: the commits stay on it. `facts`: { merging, dirty: [paths], claimed, queued, status: 'open' | 'done' |
- * 'dropped' | null (not on the board), onTarget, atTip, target, ahead }. -> { safe, why }.
+ * When an engine worktree may go. Kept, in order: a merge in progress; uncommitted work; its task claimed or queued for
+ * a train; commits not on the target while the task is open; a fresh lane on the target's tip while it is open.
+ * Removed: its commit is on the target, or its task is done or dropped. The branch is never deleted. `facts`: {
+ * merging, dirty, claimed, queued, status, onTarget, atTip, target, ahead }.
  */
 export function laneRemoval(f = {}) {
   const t = f.target || 'the target';
@@ -297,9 +284,7 @@ const gbOf = (b) => Math.round((b / GB) * 10) / 10;
 
 /**
  * The biggest disk users the harness knows, estimated cheaply and cached for an hour (.studio/engine/disk-users.json):
- * engine worktrees (count by sparse/full times the target's tracked bytes, whole or under the sparse folders: one git
- * ls-tree per engine, never a walk of the worktrees), lane copies (the last lane disk report, harness/lane-disk.mjs) and
- * saved builds (engines.<x>.builds: their count times the newest one's size, walked with a cap).
+ * engine worktrees (one git ls-tree per engine, never a walk), lane copies (harness/lane-disk.mjs) and saved builds.
  * { at, items: [{ what, gb, n? }], line }.
  */
 export function diskUsers({ root = REPO_ROOT, env = process.env, now = Date.now(), maxAgeMs = 3600000 } = {}) {

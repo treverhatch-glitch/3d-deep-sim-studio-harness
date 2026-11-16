@@ -1,23 +1,13 @@
 /**
- * harness/model-tool.mjs — 2.84 (w): which tool runs a model id, in ONE place.
- *
- * A crew's reviewer route picked a Vertex model (google/gemini-...) for a cross-family review and launched it on the
- * `claude` tool: the supervisor passes its preferred tool to every start, and the reviewer step changed the tool only when
- * none was given, and its own lookup (agent.mjs modelFamilyTool) knew no `google/` id anyway. Claude refused the model
- * (exit 1) four times, and the supervisor halted twice. Now every launch that takes a model from a route asks toolForModel,
- * and a launch whose tool cannot run its model is refused before a process starts (toolMismatch).
- *
- * toolForModel(model) looks, in order:
- *   1. studio/models.json pools (harness/model-pools.mjs readModels/poolOf): a pool names its tool;
- *   2. the studio's own settings (the environment, then the main checkout's .env, model settings only): a `<tool>:<model>`
- *      entry (STUDIO_REVIEW_TOOLS, STUDIO_*_MODELS), STUDIO_TOOL_<TOOL>_MODEL, STUDIO_VERTEX_MODEL / STUDIO_VERTEX_HARD_MODEL;
- *   3. the id's shape: google/... or vertex/... -> vertex; agy-... or a bare gemini-... (models/gemini-...) -> agy;
- *      gpt-..., o1/o3/o4..., codex-... -> codex; claude-..., opus, sonnet, haiku -> claude.
- * Anything else: { tool: null, why } (one line saying no tool is known for it).
- *
- * TOOL_CAPABILITIES: what a tool's session can do. runsCommands false for the aider-driven tools (vertex, aider, nim): such
- * a session only suggests commands, so it cannot act as a reviewer (`npm run review -- record` is a command). A review
- * planned on one of them is asked by the harness itself instead (harness/review-ask.mjs, `npm run review -- ask`).
+ * harness/model-tool.mjs — which tool runs a model id, in ONE place. A launch whose tool cannot run its model is
+ * refused before a process starts (toolMismatch). toolForModel(model) looks, in order:
+ * 1. studio/models.json pools (harness/model-pools.mjs readModels/poolOf);
+ * 2. settings (environment, then the main checkout's .env): a `<tool>:<model>` entry (STUDIO_REVIEW_TOOLS,
+ *   STUDIO_*_MODELS), STUDIO_TOOL_<TOOL>_MODEL, STUDIO_VERTEX_MODEL / STUDIO_VERTEX_HARD_MODEL;
+ * 3. the id's shape: google/... or vertex/... -> vertex; agy-... or bare gemini-... -> agy; gpt-..., o1/o3/o4...,
+ *   codex-... -> codex; claude-..., opus, sonnet, haiku -> claude. Else { tool: null, why }.
+ * TOOL_CAPABILITIES: runsCommands is false for the aider-driven tools (vertex, aider, nim), so they cannot review;
+ * such a review is asked by the harness (harness/review-ask.mjs, `npm run review -- ask`).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -88,9 +78,8 @@ function toolBySetting(model, settings) {
 }
 
 /**
- * Which tool runs this model id: { tool, from: 'pool'|'setting'|'shape', why } or { tool: null, why }. 2.86: a pool the owner marked
- * `"anyModel": true` in studio/models.json adds `anyModel: true` (the owner chose to run that model on that tool: the launcher's
- * per-pool counterpart of STUDIO_AGY_ANY_MODEL).
+ * Which tool runs this model id: { tool, from: 'pool'|'setting'|'shape', why } or { tool: null, why }. A pool marked
+ * `"anyModel": true` in studio/models.json adds `anyModel: true` (the per-pool counterpart of STUDIO_AGY_ANY_MODEL).
  * opts.models: a readModels() result (else read from root when given); opts.env: the environment; opts.root: the main
  * checkout (its .env and studio/models.json).
  */

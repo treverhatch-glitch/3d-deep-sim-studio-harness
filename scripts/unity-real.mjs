@@ -1,21 +1,14 @@
 #!/usr/bin/env node
 /**
- * scripts/unity-real.mjs — 2.84: the harness's Unity readers, checked against a real editor's own output.
- *
- * Every release up to 2.83 met a real Unity editor for the first time on a crew's PC: the self-test uses stand-in land
- * scripts. This script makes three small copies of the Unity template (engine/_unity), each with one more Edit Mode test
- * assembly the .NET test project does not compile, lets the online check run the real editor on each (GameCI's test
- * runner, .github/workflows/ci.yml job engine-unity-real), and then holds the harness's own functions against what
- * the editor wrote:
- *
- *   plan    the editor is started with the arguments harness/unity.mjs editModePlan gives (-assemblyNames <the
- *           assemblies .NET does not compile>): only those tests may have run, and they must have run
- *   red     one test fails on purpose: harness/unity-gate.mjs failingTests must name it from the editor's results
- *   broken  one file does not compile: harness/unity-gate.mjs compileErrorFiles must name that file from the editor's log
- *
- *   node scripts/unity-real.mjs prepare [--out <dir>]   make the three copies; prints (and writes to $GITHUB_OUTPUT) plan_args
- *   node scripts/unity-real.mjs check   [--out <dir>]   judge what the editor left under <dir>/out/<name>/
- *
+ * scripts/unity-real.mjs — the harness's Unity readers, checked against a real editor's own output. It makes three
+ * small copies of the Unity template (engine/_unity), each with one more Edit Mode test assembly the .NET project
+ * does not compile; the online check (.github/workflows/ci.yml job engine-unity-real) runs the real editor on each,
+ * and the harness's functions are held against what it wrote:
+ * plan: the editor starts with harness/unity.mjs editModePlan's arguments (-assemblyNames); only those tests may have
+ * run. red: one test fails on purpose; harness/unity-gate.mjs failingTests must name it. broken: one file does not
+ * compile; compileErrorFiles must name it from the log.
+ *    node scripts/unity-real.mjs prepare [--out <dir>]   make the copies; prints plan_args (also to $GITHUB_OUTPUT)
+ *    node scripts/unity-real.mjs check   [--out <dir>]   judge what the editor left under <dir>/out/<name>/
  * Without a Unity licence the workflow runs neither step and says so. Nothing here reads or prints a secret.
  */
 import fs from 'node:fs';

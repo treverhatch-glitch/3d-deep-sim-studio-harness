@@ -100,18 +100,10 @@ function closingInHistory(taskId, env = process.env) {
 }
 
 /**
- * 2.78.1 (d, B-114 on 2.78.0): has a done dependency's work landed? landedOnBoard looked only at the last 20000 events
- * and only at the dependency's own closing record, so "T-124 waiting on T-152: done, but 14 commits on lane/… not merged"
- * still showed for a T-152 that landed long ago through another task. Yes when any of:
- *   - its last closing record in the window is a landing (landedOnBoard, 2.77.3);
- *   - a done rescue of it ("Rescue: <ID>") landed;
- *   - its lane branch brings nothing to main: every commit's patch is on main, or merging it changes no file (a rescue
- *     or another task carried the work under new hashes: harness/landed-content.mjs bringsNothing);
- *   - the window holds no closing record for it, and its last one in the whole event history (rolled files too, up to
- *     STUDIO_DEP_HISTORY_MB) is a landing (it closed before the last 20000 events).
- * A forced done (or a reopen) as its last record, with commits not on main, still waits, as in 2.77.3; so does a done
- * task with no record at all.
- * STUDIO_DEP_LANDED_EVIDENCE=off: landedOnBoard only (2.78.0).
+ * Has a done dependency's work landed? Yes when its last closing record in the window is a landing (landedOnBoard), a
+ * done rescue of it ("Rescue: <ID>") landed, its lane branch brings nothing to main (harness/landed-content.mjs
+ * bringsNothing), or the whole history's last closing record (up to STUDIO_DEP_HISTORY_MB) is a landing. A forced
+ * done, a reopen or no record still waits. STUDIO_DEP_LANDED_EVIDENCE=off: landedOnBoard only.
  */
 export function depLanded(taskId, { q = { done: [] }, branch = null, events = readRecentEvents(20000), root = REPO_ROOT, env = process.env } = {}) {
   const st = closingOnBoard(taskId, events);

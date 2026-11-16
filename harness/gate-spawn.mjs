@@ -1,16 +1,10 @@
 /**
- * harness/gate-spawn.mjs — 2.65.0: how scripts/run-gates.mjs runs one gate's command, and (Windows) records its shell in
- * the machine:heavy holder's process tree.
- *
- * 2.60.0 fixed orphans for `heavy run` by recording its shell child (harness/heavy.mjs tree.children): on Windows a
- * killed holder's job object takes its direct child (the shell) with it, but the shell's own children (npm, node,
- * vitest workers) break away and live on, still naming the dead shell as their parent. A full verify holds machine:heavy
- * itself and ran every gate with spawnSync, so no gate's shell was ever recorded and its grandchildren escaped the same
- * way. Now, on Windows only, while the run holds the slot, each gate runs with an async spawn whose shell pid (and
- * start identity) goes into the holder's tree.children before the gate's own work starts; `heavy stop` and the next take
- * find what such a shell left running (heavy.mjs holderTree), during the run as well as after it.
- * POSIX is unchanged: spawnSync as before (a full verify there leads a process group of its own: heavyOwnGroup).
- * STUDIO_GATE_SPAWN=recorded takes the Windows way on any OS (how the selftest checks the wiring on Linux).
+ * harness/gate-spawn.mjs — how scripts/run-gates.mjs runs one gate's command, and (Windows) records its shell in the
+ * machine:heavy holder's process tree. On Windows a killed holder's job object takes its direct child (the shell) but
+ * not the shell's own children (npm, node, vitest workers). So while the run holds the slot, each gate runs with an
+ * async spawn whose shell pid (and start identity) goes into the holder's tree.children before the gate's work starts;
+ * `heavy stop` and the next take find what such a shell left running (heavy.mjs holderTree). POSIX: spawnSync (a full
+ * verify leads a process group of its own: heavyOwnGroup). STUDIO_GATE_SPAWN=recorded takes the Windows way on any OS.
  * Small and apart from heavy.mjs: run-gates imports it without loading anything else.
  */
 import fs from 'node:fs';

@@ -1,36 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/tool-registry.mjs — 2.79.1 (a): tools the owner defines (studio/tools.json), treated like the built-in ones.
- *
- * The owner's ask: "let me define as I see fit": other providers and keys as harness tools, even ones the harness doesn't
- * list. An entry in studio/tools.json makes one a first-class tool: `npm run agent -- start --tool <name>` (the orchestrator
- * may launch it), the supervisor and the Line Producer (through the budget order, STUDIO_<ROLE>_TOOL, quota marks and
- * takeovers, as for STUDIO_TOOL_<NAME>_CMD), the same lane copy and checks, an environment with only its own key names, and
- * spend through the same budget code (harness/spend-budget.mjs).
- *
- *   { "tools": [ { "name": "deepseek",                 lower case; not a built-in tool's name
- *                  "command": "<launch line>",          the placeholders of STUDIO_TOOL_<NAME>_CMD: {kickoff} {agent} {model}
- *                                                       {role} {task} {mainRoot} {addDirs}; with proxy "vertex" also
- *                                                       {proxyBase} (the proxy's /v1 URL) and {sessionKey} (session-<agent>)
- *                  "provider": "DeepSeek",              a label
- *                  "keyEnv": ["DEEPSEEK_API_KEY"],      the only key names its sessions see (never STUDIO_/HUB_ names,
- *                                                       the owner key, or a key a harness proxy holds)
- *                  "models": ["deepseek-chat"],         the first is its default model
- *                  "prices": { "deepseek-chat": { "in": 0.27, "out": 1.1 } } | "studio/prices.json",   USD per 1M tokens
- *                  "roles": ["builder"],                the roles that may run on it (default builder)
- *                  "proxy": "vertex" } ] }              optional: its traffic goes through the studio's Vertex proxy
- *
- * Defining or changing a tool (its command, keys, models, prices, roles) is the OWNER's own act (harness/owner-acts.mjs
- * "tools"): the file is protected (studio/protected.json) and an approval of it made by beta mode, the owner proxy or an
- * outside signer is refused (harness/approve.mjs). What counts is the file as committed in the main checkout (HEAD):
- *   - with an owner key (studio/keys/owner-ed25519.pub.pem at HEAD): only when an approval signed with that key (an
- *     approval file in studio/approvals/ with a signature, kind protected or tools) records exactly its contents;
- *   - with no owner key yet: only when the commit that last set it is a person's (no Studio-Agent trailer), as for the
- *     owner's delegation (harness/delegation.mjs): a speed bump until the owner key exists.
- * An entry that doesn't count is not launched, and `npm run tools` says why. STUDIO_TOOL_<NAME>_CMD in .env works as before
- * and wins over an entry of the same name. Budgets are not in this file: npm run budget -- set <name> <usd> (not owner-only).
- *
- *   npm run tools [-- list | check | --json]
+ * harness/tool-registry.mjs — tools the owner defines in studio/tools.json, treated like the built-in ones.
+ *   { "tools": [ { "name": "deepseek",         lower case; not a built-in tool's name
+ *                  "command": "<launch line>", placeholders of STUDIO_TOOL_<NAME>_CMD: {kickoff} {agent} {model} {role}
+ *                                               {task} {mainRoot} {addDirs}; proxy "vertex": {proxyBase} {sessionKey}
+ *                  "provider": "DeepSeek", "keyEnv": ["DEEPSEEK_API_KEY"] (the only key names its sessions see),
+ *                  "models": ["deepseek-chat"] (first is default), "roles": ["builder"] (default builder),
+ *                  "prices": { "deepseek-chat": { "in": 0.27, "out": 1.1 } } | "studio/prices.json" (USD/1M tokens),
+ *                  "proxy": "vertex" } ] }      optional: traffic goes through the studio's Vertex proxy
+ * Changing a tool is the OWNER's own act (harness/owner-acts.mjs "tools"): protected file; only the committed HEAD copy
+ * in the main checkout counts. STUDIO_TOOL_<NAME>_CMD in .env wins. `npm run tools [-- list | check | --json]`
  */
 import fs from 'node:fs';
 import path from 'node:path';

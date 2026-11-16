@@ -1,34 +1,14 @@
 /**
- * harness/wake-gate.mjs — a planning wake needs something that changed: most planning wakes otherwise leave no board
- * event behind. (The same train or chain-gate blocker is backed off separately, harness/line-producer.mjs
- * producerWakeBackoff.) This gate covers the two kinds of planning wake:
- *
- *   queue-depth  the Producer's "queue is below its depth target" wake (harness/queue-depth.mjs). Its fingerprint: the
- *                count ready, the target, the blocked areas with the kinds of their reasons (no times, no counters),
- *                the ids of the open tasks. The same fingerprint as the last wake, whose session has ended and changed
- *                nothing on the board (BOARD_EVENT_TYPES, by that session's agent): skipped.
- *   cycle        each role's regular development cycle (harness/dev-cycle.mjs, "its regular cycle" only). Its
- *                fingerprint is a digest of what changed since that role's last cycle session ended (landed, handed
- *                back, held or parked, asks, decisions, a person's message, tester and playtest findings, a red train
- *                or trunk). An empty digest after an ended session: skipped. A non-empty one runs, and goes at the top
- *                of the brief the session is told to read.
- *
- * Never longer than STUDIO_WAKE_SAME_MAX_H (6) hours for a queue-depth wake, STUDIO_CYCLE_QUIET_MAX_H (12) for a cycle,
- * since the last wake that ran; 0 or off turns that kind's skipping off. Every skip emits agent.wake.skipped with the
- * kind and a plain reason. Nothing else is gated here: a person's request, an ask's answer, an alert or an owner order
- * wakes as before. State: .studio/line/wake-gate.json, next to state.json (its own file, so the Line
- * Producer's rewrites of state.json never race it); it survives a supervisor restart.
- *
- * Back-off by outcome, per kind and role (the digest is rarely empty, since hand-backs and parks fill it): after a
- * session that changed nothing (a cycle: no board event; a queue-depth session: no task added) the next wake of that
- * kind waits twice as long: the base interval (the cycle's STUDIO_DEV_CYCLE_MIN, the depth ask's STUDIO_QUEUE_DEPTH_ASK_MIN), then x2, x4,
- * x8 ..., never longer than the kind's ceiling. A session that changed the board (a cycle) or added a task (a queue
- * session) resets it; a hand-back or a park does not. Strong news (STRONG_NEWS_TYPES) makes a cycle due at once and keeps
- * the count; a queue wake is cut short when a blocked area frees up or the queue reached its target since. The ceilings'
- * `off` (or 0) turns the back-off off with the rest.
- *
- * The fingerprint, the digest and the verdicts are pure (inputs in, verdict out); gateWake/recordWake read and write
- * the state. Imports only event.mjs and fsafe.mjs.
+ * harness/wake-gate.mjs — a planning wake needs something that changed: it skips a wake whose fingerprint equals the
+ * last one's after a session that changed nothing on the board.
+ *   queue-depth  the Producer's "queue is below its depth target" wake (harness/queue-depth.mjs); fingerprint: count
+ *     ready, target, blocked areas, open task ids
+ *   cycle        each role's regular cycle (harness/dev-cycle.mjs); fingerprint: a digest of what changed since its
+ *     last session ended. Empty: skipped; else it tops the brief
+ * Ceilings: STUDIO_WAKE_SAME_MAX_H (6), STUDIO_CYCLE_QUIET_MAX_H (12); 0 or off turns skipping off. Skips emit
+ * agent.wake.skipped. After a session that changed nothing the next wake waits twice as long (STUDIO_DEV_CYCLE_MIN,
+ * STUDIO_QUEUE_DEPTH_ASK_MIN, x2, x4 ...); STRONG_NEWS_TYPES makes a cycle due at once. State:
+ * .studio/line/wake-gate.json. Verdicts are pure; gateWake/recordWake do I/O. Imports only event.mjs and fsafe.mjs.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -92,17 +72,10 @@ export function sessionOutcomeOf(agent, since, events = []) {
 }
 
 /**
- * News that makes a backed-off regular cycle due at once (the back-off count is kept). Each type with its
- * predicate where the type alone is not enough. A red train, a hand-back, a park or an agent's own decision is not news
- * of this kind: those were in nearly every digest and bought nothing.
- *   ask.answered          by a person, or recorded by the owner's stand-in (meta.via: owner proxy, beta mode)
- *   decision              made as a person or by the owner's stand-in (meta.as not "agent" or "autonomous", or
- *                         meta.standIn: the overseer's own board decision)
- *   inbound.message       a person's message (a new owner note), or the overseer's order
- *   None of these count from a launched session's own shell (meta.role).
- *   playtest.verdict      the owner played a build
- *   task.dev_yes          the dev said yes to an agent-proposed mechanic (an order)
- *   bible.signed, bible.phase_override, milestone.closed   a phase change
+ * News that makes a backed-off regular cycle due at once (the back-off count is kept).
+ * ask.answered by a person or the owner's stand-in; decision made as a person or stand-in (meta.as not "agent" or
+ * "autonomous", or meta.standIn); inbound.message (a new owner note or the overseer's order; none from a session's own
+ * shell), playtest.verdict, task.dev_yes, bible.signed, bible.phase_override, milestone.closed.
  */
 export const STRONG_NEWS_TYPES = Object.freeze(['ask.answered', 'decision', 'inbound.message', 'playtest.verdict', 'task.dev_yes', 'bible.signed', 'bible.phase_override', 'milestone.closed']);
 const SYSTEM_NAMES = /^(harness|supervisor|watch|watchdog|launcher|threads|train|line|line-producer|communicator|janitor|budget|dev-cycle)$|-train$/i;

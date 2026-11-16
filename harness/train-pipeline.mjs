@@ -1,35 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/train-pipeline.mjs — 2.77.0 (p, P9.6): pipelined merge trains, and a batch cap per train.
- *
- * A full verify takes about 23-25 minutes on the crew's PC, so lanes waited in line: one train, then the next. Two
- * trains verifying side by side would each verify against a main that is about to move (the second would have to
- * verify again after the first lands), so the trains are pipelined instead:
- *
- *   - batch: a train takes at most STUDIO_TRAIN_BATCH ready lanes (default 4; 0/off: no cap, the 2.76 way), beside
- *     STUDIO_TRAIN_MAX and --max (the smallest cap wins). Fix-first (B-75) still picks its lane before the cap; tiers,
- *     holds and run-alone lanes are judged as before;
- *   - pipeline: while train A verifies, at most ONE speculative train B verifies "main + A's merged result + B's lanes"
- *     in its own scratch copy, under its own lock (.studio/locks/train-next.lock; never two B's). B lands right after A,
- *     without verifying again, when main is then exactly A's verified tree (A landed it), or that tree plus record files
- *     only (the record rule: nextBaseVerdict in harness/train.mjs, its core speculativeBaseVerdict here). If A goes red,
- *     is rebuilt, held, bisected, or ends without landing, or main moves any other way, B is discarded: its lanes keep
- *     their place in the queue (no hand-back, nothing counted toward STUDIO_TRAIN_MAX_HANDBACKS), a
- *     task.train.next_discarded event says why, and the lanes go in the next normal train (B's process runs it when the
- *     train daemon is on). B lands under the train lock (.studio/locks/train.lock), as any train does: never two
- *     trains landing at once, and main moves by compare-and-swap from the tip B assumed;
- *   - STUDIO_TRAIN_PIPELINE: unset (auto) starts B only when the machine budget has room for a second train verify
- *     beside A's (harness/heavy-budget.mjs, the same admission machine:heavy uses; no machine scan: no room, so trains
- *     wait as before); on: start B whenever there are lanes (its verify still waits for its own machine:heavy claim);
- *     off: never.
- *
- * B is conservative: it never hands a lane back, never holds one for the owner and never bisects. A lane it would have
- * to (a precheck refusal, tier C not released, a missing Golden-Reason, run alone behind others, a conflict on A's
- * tree, a dependency) is left for the next normal train, which applies the rules as before; B's own red verify only
- * discards B. A started B, or the train daemon's pass while A verifies (pipelineKick / nextPass), spawns it as a
- * detached child: `node harness/train-daemon.mjs run-next <A's id>` (runNextNow).
- *
- * Imports nothing from train.mjs at load time (train.mjs imports this file); the child's CLI imports it.
+ * harness/train-pipeline.mjs — pipelined merge trains, and a batch cap per train.
+ * - batch: at most STUDIO_TRAIN_BATCH ready lanes per train (default 4; 0/off: no cap; STUDIO_TRAIN_MAX, --max:
+ * smallest wins).
+ * - pipeline: while train A verifies, at most ONE speculative train B verifies "main + A's merged result + B's lanes"
+ * in its own scratch copy (.studio/locks/train-next.lock). B lands right after A without verifying again when main is
+ * exactly A's verified tree (or plus record files: nextBaseVerdict in harness/train.mjs); otherwise B is discarded,
+ * its lanes keep their place (task.train.next_discarded). B lands under train.lock (compare-and-swap).
+ * - STUDIO_TRAIN_PIPELINE: unset (auto: when the machine budget has room) | on | off.
+ * B never hands a lane back, holds one or bisects. Runs as `node harness/train-daemon.mjs run-next <A's id>`. Must not
+ * import train.mjs at load time (train.mjs imports this file).
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,17 +1,14 @@
 #!/usr/bin/env node
 /**
- * scripts/settings-census.mjs — 2.79 (a), PU-64: a read-only census of every STUDIO_* setting, to decide what to cut.
- * Measurement only: it changes nothing and gates nothing.
- *
+ * scripts/settings-census.mjs — a read-only census of every STUDIO_* setting, to decide what to cut. Changes and
+ * gates nothing.
  *   node scripts/settings-census.mjs [--json] [--env <studio .env>] [--events <events.jsonl>]
- *
- * Per setting: its default and its files (scripts/settings-map.mjs's scan, reused, not re-parsed), the modules that
- * read it (harness/, scripts/, qa/*.mjs, not qa/selftest*), how many, whether docs/settings-baseline.json
- * freezes it (undocumented since 2.66.0), the first release whose CHANGELOG.md section or docs/RELEASE-<v>.md mentions
- * it, and with --env / --events whether that studio sets it (a key in the .env, or any mention in the events file).
- * Candidates: (a) off switches for a fix, added two or more releases ago (name or its docs line says off / restores
- * the old behaviour); (b) families by suffix (_WAIT_MIN, _HOLD_MIN, _TIMEOUT_MS ...) with their docs one-liners side
- * by side; (c) dead: no module outside the selftests reads it. A name that only sits in a comment counts as read.
+ * Per setting: its default and files (scripts/settings-map.mjs's scan), the modules that read it (harness/, scripts/,
+ * qa/*.mjs, not qa/selftest*), whether docs/settings-baseline.json freezes it, the first release whose CHANGELOG.md
+ * section or docs/RELEASE-<v>.md mentions it, and with --env / --events whether that studio sets it.
+ * Candidates: (a) off switches for a fix added two or more releases ago; (b) families by suffix (_WAIT_MIN, _HOLD_MIN,
+ * _TIMEOUT_MS ...) with their docs one-liners side by side; (c) dead: no module outside the selftests reads it.
+ * A name that only sits in a comment counts as read.
  */
 import fs from 'node:fs';
 import path from 'node:path';

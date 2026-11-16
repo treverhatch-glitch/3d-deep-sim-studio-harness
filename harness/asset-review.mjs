@@ -1,53 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/asset-review.mjs — a vision check on asset previews before an asset lands.
- *
- * The harness can't look at a preview (no paid service, no model call), so the job is split in two:
- *
- * 1. Deterministic preview checks (pure Node, harness/png.mjs decodes the PNG): for each preview render the asset gate
- *    finds next to a model, it measures and records
- *      blank      one colour covers more than blankShare (98%) of the frame and no object stands out of the
- *                 background (fewer than 0.05% of the pixels, at least 64): an empty render. A small object that
- *                 does stand out is judged by "small" instead (a wrong scale, not an empty render)
- *      black      more than darkShare of the pixels are near black (luma <= 16): an unlit or failed render
- *      white      more than lightShare of the pixels are near white (luma >= 240): a blown-out render
- *      magenta    the missing-texture magenta is over magentaMaxShare (10%) of the object's pixels: untextured pink
- *      clipped    object pixels on the frame's outer ring (edgeMinPixels or more): the model runs off the frame
- *      small      the object's bounding box is under minFrameShare (10%) of the frame and its longer side under half
- *                 the frame: too small, usually the wrong scale (a thin, tall object that fills one way isn't small)
- *      up-axis    (a warning only, a question for the reviewer) more object mass in the top half of its box than
- *                 the bottom (ratio over upWarnRatio) in the front view, and in the 3/4 view when there is one
- *    The object is every pixel that differs from the background (the most common colour on the frame's border, or
- *    transparent pixels) by more than bgTolerance (sum of RGB differences). Each hard finding is an asset-gate failure
- *    with a plain-words line and a Fix line (harness/gate-fix.mjs ASSET_FIXES): the asset goes straight back to its
- *    maker with the findings and no review is asked for. A preview the decoder can't read (a JPEG, 16-bit or
- *    interlaced PNG) is a note: the reviewer still looks at it.
- *
- *    Where previews live (the render step writes them): next to the model, one view per file at a fixed size
- *    (previewSize, 512 px square by default):
- *      <name>.preview-front.png   <name>.preview-34.png   <name>.preview-top.png
- *    The older single <name>.preview.png (or _preview / -preview) counts as the front view.
- *
- * 2. A review request, not a self-review: when the checks pass, the asset still needs a look by a session that can
- *    view images. task done writes .studio/asset-reviews/<asset>.md (the preview paths, the brief's facts, the checks'
- *    numbers and the questions to answer: scale against the reference, style match, orientation, obvious defects) and
- *    files ONE asset-review task for the role in studio/asset-review.json "role" (default art-director: the role that
- *    owns the look and runs on a model that reads images), once per asset and checksum. The asset lands only once the
- *    review is answered:
- *
- *      npm run asset -- review <asset> --pass --by <name>
- *      npm run asset -- review <asset> --fail "what is wrong" --by <name>
- *      npm run asset -- reviews                       assets waiting for a review, oldest first
- *
- *    Who may answer: anyone but the worker who made the asset (the asset task's claimants and the row's madeBy):
- *    another agent under its own name, a person in their own terminal, an agent recording a person's verdict on their
- *    permission (--by <person> --permission "<their words or a link>", never a worker), or the outside agent under the
- *    owner's delegation for asset-review (harness/delegation.mjs). A pass counts for the files' current checksums only:
- *    a re-export asks again. A fail files a fix task with the reviewer's words. Both write a review note in
- *    studio/reviews/ (the review task's own done check reads it).
- *
- * Thresholds: studio/asset-review.json over REVIEW_DEFAULTS. The file silences checks, so a lane that changes it is
- * tier C (harness/tiers.mjs SILENCERS): a game dev releases it, or an outside agent with their permission.
+ * Checks (harness/png.mjs) on each preview: blank, black, white, magenta, clipped, small, up-axis (a warning only). A
+ * hard finding fails the asset gate (harness/gate-fix.mjs ASSET_FIXES). Previews: <name>.preview-front.png,
+ * <name>.preview-34.png, <name>.preview-top.png. When the checks pass, task done writes
+ * .studio/asset-reviews/<asset>.md and files ONE asset-review task for the role in studio/asset-review.json "role"
+ * (default art-director); the asset lands once the review is answered:
+ *   npm run asset -- review <asset> --pass --by <name>
+ *   npm run asset -- review <asset> --fail "what is wrong" --by <name>
+ *   npm run asset -- reviews                       assets waiting for a review, oldest first
+ * Thresholds: studio/asset-review.json (a lane changing it is tier C).
  */
 import fs from 'node:fs';
 import path from 'node:path';

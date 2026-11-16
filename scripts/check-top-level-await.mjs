@@ -1,24 +1,14 @@
 #!/usr/bin/env node
 /**
- * scripts/check-top-level-await.mjs — 2.84: find the import cycle that ends a command with exit 13.
- *
- * The hazard, exactly: module M is run as the entry. At its top level it awaits a DYNAMIC import of X
- * (`await import('./x.mjs')`, also inside a top-level `if` or `try`, or one level down: a top-level `await helper()`
- * where `helper` in the same file holds the `import('./x.mjs')`). X's STATIC import closure (`import ... from`,
- * `export ... from`, `import './y.mjs'`; not dynamic imports) contains M. M is still evaluating, waiting on that
- * await, so X can never finish and Node ends the process with exit code 13 ("unsettled top-level await"). It shipped
- * twice: harness/engine-rules.mjs (2.82) and harness/budget.mjs (2.83). The fix is to wrap the command-line part in an
- * async function, so M finishes evaluating first.
- *
- * The repo has no JavaScript parser among its declared dependencies, so a small scanner does the work: it skips
- * comments, strings, template literals and regex literals, tracks every brace and whether it opens a function (a
- * function, an arrow, a method, a class body), and records each `await` and each `import(...)` seen while no function
- * body is open. An `if (...) { await ... }` block at module level IS top level.
- *
- * Usage: node scripts/check-top-level-await.mjs [--json] [--all] [--root <dir>]
- *   --all   also list (information only, exit 0) every module with a top-level await that another module imports
- *           statically: no cycle today, but a future static import can close one
- *   --root  scan <dir>/harness and <dir>/scripts instead of this repo (the self-test uses it)
+ * scripts/check-top-level-await.mjs — find the import cycle that ends a command with exit 13 ("unsettled top-level
+ * await").
+ * The hazard: entry module M awaits at top level a DYNAMIC import of X (`await import('./x.mjs')`, also inside a
+ * top-level `if` or `try`, or via a top-level `await helper()` whose body holds it), and X's STATIC import closure
+ * contains M. M is still evaluating, so X can never finish. The fix: wrap the command-line part in an async function.
+ * A small scanner skips comments, strings, templates and regexes and records each `await` and `import(...)` seen while
+ * no function body is open; an `if (...) { await ... }` at module level is top level.
+ * node scripts/check-top-level-await.mjs [--json] [--all] [--root <dir>]
+ * --all: also list (info only) top-level-await modules imported statically; --root <dir>: scan <dir>/harness, scripts
  * Exit 0 clean, 1 when an offender is found.
  */
 import fs from 'node:fs';

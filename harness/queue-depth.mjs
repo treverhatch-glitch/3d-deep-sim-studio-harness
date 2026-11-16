@@ -1,18 +1,12 @@
 /**
- * harness/queue-depth.mjs — 2.69.0 (s): a queue-depth target, so builders don't run out of startable work.
- *
- * The crew's orchestrator kept 5–6 builders busy by hand: whenever the startable builder tasks ran low it planned more.
- * Now each supervisor pass counts the builder tasks that could start now (waiting, unclaimed, not held: no --after
- * still open, no hold, park or block, no folder another agent holds) against STUDIO_QUEUE_DEPTH (default: the
- * supervisor's session cap for this pass, 2.68.0 harness/heavy-budget.mjs sessionCap; `off` turns it off). Below it,
- * the Producer is asked the way the refill asks (a queue.depth event to the Producer, a line in
- * studio/producer/INBOX.md, and a wake unless STUDIO_REFILL_WAKE=off), naming the areas that are blocked by chains
- * and holds so it plans work elsewhere. It never adds a task itself. One ask per STUDIO_QUEUE_DEPTH_ASK_MIN (30)
- * minutes while the shortfall lasts (a bigger shortfall asks again at once).
- *
- * 2.84: the wake also asks harness/wake-gate.mjs (same situation after a session that changed nothing: skipped).
- *
- * Imports only event.mjs, task-hold.mjs and handout.mjs: the supervisor loads it with a dynamic import.
+ * harness/queue-depth.mjs — a queue-depth target, so builders don't run out of startable work. Each supervisor pass
+ * counts the builder tasks that could start now (waiting, unclaimed, not held: no open --after, hold, park or block,
+ * no folder another agent holds) against STUDIO_QUEUE_DEPTH (default: the supervisor's session cap,
+ * harness/heavy-budget.mjs sessionCap; `off` turns it off). Below it, the Producer is asked (a queue.depth event, a
+ * line in studio/producer/INBOX.md, and a wake unless STUDIO_REFILL_WAKE=off), naming the areas blocked by chains and
+ * holds. It never adds a task itself. One ask per STUDIO_QUEUE_DEPTH_ASK_MIN (30) minutes while the shortfall lasts
+ * (a bigger shortfall asks again at once). The wake also asks harness/wake-gate.mjs. Imports only event.mjs,
+ * task-hold.mjs and handout.mjs: the supervisor loads it with a dynamic import.
  */
 import fs from 'node:fs';
 import path from 'node:path';

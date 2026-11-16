@@ -1,17 +1,13 @@
 #!/usr/bin/env node
 /**
- * harness/route.mjs — Zero-Server Plug-and-Play Multi-Model Failover Router
- *
- * Implements the `freecc:auto` failover engine:
+ * harness/route.mjs — Zero-Server Plug-and-Play Multi-Model Failover Router: the `freecc:auto` failover engine.
  *  1. Resolves the ordered provider chain for the requested studio role.
  *  2. Expands multi-key environment variables (e.g. NVIDIA_API_KEY, NVIDIA_API_KEY_2).
  *  3. Skips any channel currently cooling down in `.studio/cooldowns.json`.
- *  4. Calls the provider (OpenAI-compatible `/chat/completions`, Anthropic `/v1/messages`,
- *     or local Ollama).
- *  5. On HTTP 429, 5xx, quota exhaustion, or network error: places that channel in a
- *     30s+ cooldown, logs a `route.failover` event to `.studio/events.jsonl`, and
- *     immediately tries the next channel with zero downtime.
- *  6. Writes a run ledger to `.studio/runs/<run-id>/ledger.json` (UltraGameStudio pattern).
+ *  4. Calls the provider (OpenAI-compatible `/chat/completions`, Anthropic `/v1/messages`, or local Ollama).
+ *  5. On HTTP 429, 5xx, quota exhaustion, or network error: places that channel in a 30s+ cooldown, logs a `route.failover`
+ *     event to `.studio/events.jsonl`, and immediately tries the next channel with zero downtime.
+ *  6. Writes a run ledger to `.studio/runs/<run-id>/ledger.json`.
  *  7. If all channels fail, returns an HTTP 503-style failure ledger with full diagnostics.
  */
 

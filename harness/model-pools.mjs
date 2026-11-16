@@ -1,39 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/model-pools.mjs — model pools and quota-aware routing that prefers Gemini (it has the bigger usage pool;
- * Flash is less capable, Argon solid). The Line Producer (harness/line-producer.mjs) routes each builder task to a
- * model POOL:
- *   - small or mechanical tasks (size 1-2, or a chore/docs/test task) -> Gemini Flash (the big pool),
- *   - normal features (size 3, or no size) -> Gemini Argon,
- *   - hard work (size 4-5) and chain-breakers -> Claude (Opus, then Sonnet),
- *   - escalation after a Gemini failure -> Claude (Sonnet, Opus for hard work or a second red round),
- * each falling back to the next pool in its list when a pool is near its limit, marked out (a usage-limit line), or
- * dropped for that size class because it doesn't land there. A task that keeps handing back a protected step is never
- * routed to a pool that just handed one back. A task that started keeps its model until it lands or fails.
- *
- * The data: studio/models.json (optional; `npm run models -- init` writes these defaults), merged over DEFAULT_MODELS:
- *   pools.<name>: { tool, model, match (regex for the session models it counts), sessions5h, sessionsDay, tokens5h?,
- *                   tokensDay?, off? }      the limits are GUESSES (no provider publishes agy's pools): set your own;
- *   routes.small|normal|hard: [pool, …]    first that is fine wins;
- *   escalate.small|normal|hard|twice: [pool, …]   after a red round (twice: after two, or after a Claude failure);
- *   nearPct (85): a pool at this % of either window (or of agy's own quota, when read) is near its limit;
- *   success: { last: 6, floor: 0.34, minSamples: 3 }: a pool is dropped for a size class when, over its last `last`
- *            decided sessions there (landed or handed back; protected hand-backs and usage limits don't count), at
- *            least minSamples, it landed less than `floor`;
- *   protectedHours (24): how long a protected hand-back keeps a pool off protected-heavy tasks.
- * Observed use comes from the session events (agent.session.start per session, agent.session.end tokens; agy's are
- * often estimated, harness/agent.mjs agyUsage). agy's own quota: no `agy usage`/`agy quota` command is known (only
- * `agy models`), so it is read only when STUDIO_AGY_QUOTA_CMD names one (e.g. "agy usage --json"; JSON
- * with per-model used/limit/remaining/percent, or text lines "<model> … 37%" / "… 120/500"), cached for
- * STUDIO_AGY_QUOTA_SEC (600) in .studio/routing/agy-quota.json. UNTESTED on real agy.
- * Outcomes: .studio/routing/outcomes.json (rebuilt from the events each Line Producer pass, older rows kept): per
- * session { task, agent, model, pool, size, result landed|handed|open|other, protected }.
- *
- * On when STUDIO_MODEL_ROUTING=on, or (auto, the default) when studio/models.json exists or agy is enrolled
- * (.studio/agy-settings.json, `npm run agent -- allow agy`); off: the tier routing.
- *
- *   npm run models -- status [--json]     pools, use, success rates, and what routing would pick now and why
- *   npm run models -- init [--force]      write studio/models.json with the defaults (the guesses, to edit)
+ * harness/model-pools.mjs — model pools and quota-aware routing that prefers Gemini (the bigger usage pool).
+ * The Line Producer (harness/line-producer.mjs) routes each builder task to a pool: small or mechanical (size 1-2,
+ * chore/docs/test) -> Gemini Flash; normal (size 3 or none) -> Gemini Argon; hard (size 4-5) and chain-breakers -> Claude
+ * (Opus, then Sonnet); after a Gemini failure -> Claude. A pool near its limit, marked out (usage-limit line) or dropped for
+ * a size class (it doesn't land there) is skipped. A started task keeps its model.
+ * Data: studio/models.json (optional; `npm run models -- init` writes the defaults) over DEFAULT_MODELS: pools.<name>
+ * { tool, model, match, sessions5h, sessionsDay, tokens5h?, tokensDay?, off? } (limits are GUESSES), routes.small|normal|hard,
+ * escalate.small|normal|hard|twice, nearPct (85), success { last: 6, floor: 0.34, minSamples: 3 }, protectedHours (24).
+ * agy's quota is read only when STUDIO_AGY_QUOTA_CMD names a command, cached STUDIO_AGY_QUOTA_SEC (600). On when
+ * STUDIO_MODEL_ROUTING=on, or (auto) when studio/models.json exists or agy is enrolled. npm run models -- status | init [--force]
  */
 import fs from 'node:fs';
 import path from 'node:path';

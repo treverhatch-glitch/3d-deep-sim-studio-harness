@@ -1,21 +1,14 @@
 /**
- * harness/aider-protocol.mjs — 2.79.2 (a): the launcher runs the builder protocol around aider.
- *
- * aider is one-shot (--message-file: read the message, edit files, exit) and doesn't reliably run shell commands, so an
- * aider builder (--tool nim, aider, vertex, or an owner tool in studio/tools.json whose command starts aider) never ran
- * `task start` / `task done`: every session ended "no work on T-…: it never claimed T-…". And its context was the whole
- * repo (repo map, files the kickoff named, a ~1 MB game file), so each request carried hundreds of thousands of tokens.
- * For such a session on a task, in its own lane copy, the launcher now:
- *   1. claims the task before aider starts (`node harness/task.mjs start <ID> --agent <agent>` in the copy: the same path a
- *      builder's own `npm run task -- start` takes; it writes the focus brief);
- *   2. gives aider a short edit brief (editBrief: the task, the lane's paths, the rules for edits, the brief's "what / done
- *      means / steps / never" sections without harness commands), never the kickoff with harness commands;
- *   3. starts aider on the lane's files (--file), with an ignore file that keeps the repo map to the lane (gitignore
- *      whitelist) and leaves out tracked files over STUDIO_AIDER_MAX_FILE_KB (200) unless the lane names them;
- *   4. after aider exits (finishAiderTask): commits its changes on the lane branch (Studio-Task / Studio-Agent trailers),
- *      runs `task done --check`, then `task done` (in a copy: queues the lane for the merge train); no change, a refused
- *      commit or a failed check hands the task back (handBackCause no-change | red) with aider's last lines and the reason.
- * The session's agent.session.end says which (meta.aider, and its message). STUDIO_AIDER_PROTOCOL=off: the 2.79.1 launch.
+ * harness/aider-protocol.mjs — the launcher runs the builder protocol around aider (one-shot, no `task` commands).
+ * For an aider builder (--tool nim, aider, vertex, or an owner tool in studio/tools.json using aider) on a task, in its lane:
+ *   1. claims the task first (`node harness/task.mjs start <ID> --agent <agent>` in the copy; writes the focus brief);
+ *   2. gives aider a short edit brief (editBrief: task, lane paths, edit rules, the brief's what / done means / steps / never);
+ *   3. starts aider on the lane's files (--file), with an ignore file keeping the repo map to the lane and leaving out
+ *      tracked files over STUDIO_AIDER_MAX_FILE_KB (200) unless the lane names them;
+ *   4. after aider exits (finishAiderTask): commits on the lane branch (Studio-Task / Studio-Agent trailers), runs
+ *      `task done --check`, then `task done` (queues the lane for the merge train); no change, a refused commit or a
+ *      failed check hands the task back (handBackCause no-change | red).
+ * agent.session.end says which (meta.aider). STUDIO_AIDER_PROTOCOL=off turns the protocol off.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -64,10 +57,9 @@ export function laneFiles({ cwd, lanePaths }) {
 }
 
 /**
- * The extra ignore lines for a driven session (before the harness's own lines in the agent's .aiderignore):
- *   - a whitelist of the lane (gitignore order: ignore everything, then re-include each ancestor folder and ignore its
- *     other entries, then re-include the lane's folders and files), so the repo map covers only the lane;
- *   - every tracked file over the size limit that the lane doesn't name (/path).
+ * The extra ignore lines for a driven session (before the harness's own lines in the agent's .aiderignore): a whitelist of the
+ * lane (ignore everything, re-include each ancestor folder and ignore its other entries, then re-include the lane's folders and
+ * files), so the repo map covers only the lane; and every tracked file over the size limit that the lane doesn't name (/path).
  * No lane (or a lane with a glob): no whitelist, only the size limit.
  */
 export function laneIgnoreLines({ cwd, lanePaths, env = process.env, tracked = null }) {
@@ -180,11 +172,10 @@ export function changedFiles(cwd, run = spawnSync) {
 }
 
 /**
- * After aider exits: commit, check, done; or hand back. Returns the summary for agent.session.end:
- *   { claimed: true, changed: [files], committed: sha|null, check: 'pass'|'fail'|null, result: 'queued'|'done'|'handed',
- *     cause: null|'no-change'|'red'|'prompt-cap', line }
- * pause(task, agent, note, { cause }): the hand-back (the launcher passes pauseTask with force). queued(task): is it in the
- * merge train's queue now. stopped: { kind, why } when the launcher stopped aider (only 'prompt-cap' gets here).
+ * After aider exits: commit, check, done; or hand back. Returns the summary for agent.session.end: { claimed: true,
+ * changed: [files], committed: sha|null, check: 'pass'|'fail'|null, result: 'queued'|'done'|'handed',
+ * cause: null|'no-change'|'red'|'prompt-cap', line }. pause(task, agent, note, { cause }): the hand-back (pauseTask with force).
+ * queued(task): is it in the merge train's queue now. stopped: { kind, why } when the launcher stopped aider (only 'prompt-cap').
  */
 export function finishAiderTask({ agent, task, title = '', tool, model = null, cwd, env, branch = null, aiderOutput = '', exitCode = 0, stopped = null, secrets = [], pause, queued = () => false, run = spawnSync, timeoutMs = 20 * 60000 }) {
   const said = aiderTailLines(aiderOutput, { secrets });

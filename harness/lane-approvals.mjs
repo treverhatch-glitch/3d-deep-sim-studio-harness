@@ -1,19 +1,13 @@
 /**
- * harness/lane-approvals.mjs — 2.77.0 (B-96): a new lane copy gets the commit the task's owner approval was signed for.
+ * harness/lane-approvals.mjs — a new lane copy gets the commit the task's owner approval was signed for.
  *
- * T-181 was handed back three times with "an approval exists, but for different contents": each new lane copy merged the
- * task's previous builder lane (harness/worktree.mjs carryTaskBranch, .studio/lane-branches.json), while the owner's
- * re-signed approval matched the protected files as another lane branch held them (the owner's delegate re-signed from
- * a checkout of that branch). Merging that branch by hand fixed it.
- *
- * Now, when a lane copy is made for a task, approvedBranchFor() looks at the studio's protected-file approvals
+ * When a lane copy is made for a task, approvedBranchFor() looks at the protected-file approvals
  * (studio/approvals/*.json, kind "protected": each file's path and content hash) and the local lane branches carrying
- * this task's commits (Studio-Task trailer, not yet on main). A branch whose blobs match EVERY file of one approval, and
- * that changes at least one of them against main, holds the approved contents; the newest such branch not already in
- * the copy is merged in (carryTaskBranch does it, after the previous lane). A hash is matched against the blob and the
- * blob with CRLF line endings (an approval signed on a Windows working tree, B-93). The newest STUDIO_LANE_APPROVAL_SCAN
- * (200) local branches are looked at. Signatures are not checked here (the
- * protected gate does that); this only picks which commits the copy starts from. Never throws.
+ * this task's commits (Studio-Task trailer, not yet on main). A branch whose blobs match EVERY file of one approval,
+ * and that changes at least one of them against main, holds the approved contents; the newest such branch not already
+ * in the copy is merged in (carryTaskBranch, after the previous lane). A hash matches the blob or the blob with CRLF
+ * line endings. The newest STUDIO_LANE_APPROVAL_SCAN (200) local branches are looked at. Signatures are not checked
+ * here (the protected gate does that). Never throws.
  */
 import fs from 'node:fs';
 import path from 'node:path';

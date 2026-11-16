@@ -1,21 +1,12 @@
 /**
- * harness/vision-card.mjs — 2.85 (f): the designer's vision, cut to what one task needs, for the brief an agent reads
- * before it works (harness/focus.mjs).
- *
- * A review of a live crew found builders never saw the designer's pillars: the brief held the task line, notes, "Done
- * means", lane rules and gates, and none of the signed Game Bible (studio/bible/bible.json). The only vision check was
- * the Director's review after the work had landed. visionCard() returns the few lines from the signed Bible that bear on
- * this task, capped at about 300 words:
- *
- *   pillar  a task that serves a pillar (task add --serves pillar:<name>): the pillar as the Bible has it, the Bible's
- *           "never" answer as a short list (at most 6 items, the ones sharing a word with the title or pillar first),
- *           the "feel great" answer (2 sentences) and the phase's one-line goal.
- *   layer   a task that serves a kept layer: the layer's label and its Bible line, the pillar names as a reminder (the
- *           Bible does not tie layers to pillars), and the same never and feel lines.
- *   port    an engine port (role engine-porter or track engine:*, no --serves): match the web game exactly; never list
- *           capped at 3.
+ * harness/vision-card.mjs — the designer's vision, cut to what one task needs, for the brief an agent reads.
+ * visionCard() returns the few lines from the signed Bible (studio/bible/bible.json) that bear on this task, about 300
+ * words:
+ *   pillar  a task serving a pillar (task add --serves pillar:<name>): the pillar, the Bible's "never" answer (max 6
+ *           items, those sharing a word with the title or pillar first), the "feel great" answer, the phase goal.
+ *   layer   a task serving a kept layer: its label and Bible line, the pillar names, and the same never and feel lines.
+ *   port    an engine port (role engine-porter or track engine:*, no --serves): match the web game; never list max 3.
  *   null    tooling, infra, docs and other non-player work, an unsigned or missing Bible, or STUDIO_VISION_CARD=off.
- *
  * Pure apart from reading the Bible (when not given) and checking that studio/bible/FEEL.md exists; never throws.
  */
 import fs from 'node:fs';

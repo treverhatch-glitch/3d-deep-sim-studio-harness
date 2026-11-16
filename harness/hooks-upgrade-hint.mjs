@@ -1,17 +1,14 @@
 /**
- * harness/hooks-upgrade-hint.mjs — 2.85 (e): the one fix when the hooks gate's unstamped commits came in with a harness
- * release merged by a plain `git merge`.
+ * harness/hooks-upgrade-hint.mjs — the one fix when the hooks gate's unstamped commits came in with a harness release
+ * merged by a plain `git merge`.
  *
- * A crew's overseer merged a harness release with `git merge` instead of `npm run upgrade -- --merge <ref>`. The release's
- * commits were made without this studio's hooks, so they carry no stamps; `upgrade --merge` lists them as exempt
- * (hook-stamp.mjs grandfatherRange), a plain merge does not. The hooks gate then refused every `task done`, and agents
- * wrote "only a person can fix this (git reset --soft ...)": a reset would have re-made the release's commits as the
- * studio's own. The fix is one command: `node harness/hook-stamp.mjs grandfather --ref <the release's remote ref>`.
- *
- * upgradeMergeHint(open, { cwd, base }) recognises the case and nothing wider: every unstamped commit is a merge M on the
- * studio's first-parent line, or reachable from M's second parent, where M changed package.json's "version" and touched
- * only harness-owned paths (HARNESS_OWNED below). It exempts nothing itself: it says the command and who may run it
- * (a person; in beta mode a stand-in may, by harness/beta-mode.mjs standInMay('protected'): the rule is not changed here).
+ * Such commits were made without this studio's hooks, so they carry no stamps; `npm run upgrade -- --merge <ref>`
+ * lists them as exempt (hook-stamp.mjs grandfatherRange), a plain merge does not. A reset would re-make them as the
+ * studio's own. The fix: `node harness/hook-stamp.mjs grandfather --ref <the release's remote ref>`.
+ * upgradeMergeHint(open, { cwd, base }) recognises only this case: every unstamped commit is a merge M on the studio's
+ * first-parent line, or reachable from M's second parent, where M changed package.json's "version" and touched only
+ * harness-owned paths (HARNESS_OWNED). It exempts nothing itself: it says the command and who may run it (a person; in
+ * beta mode a stand-in may, by harness/beta-mode.mjs standInMay('protected')).
  */
 import { spawnSync } from 'node:child_process';
 

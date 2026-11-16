@@ -1,43 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/janitor.mjs — the temp-file janitor. Deletes ONLY the harness's own temporary files.
- *
- *   npm run janitor                       dry run (the default): what it would delete, and how much
+ *   npm run janitor [-- --json]           dry run (the default): what it would delete, and how much
  *   npm run janitor -- --yes              delete them
- *   npm run janitor -- --lanes            also list stale lane copies, as proposals (never deleted without a decider)
+ *   npm run janitor -- --lanes            also list stale lane copies, as proposals
  *   npm run janitor -- --lanes --yes --by <name> [--permission "…"]   delete those stale lane copies too
- *   npm run janitor -- --json
- *
- * What it may delete (each re-checked just before it is deleted):
- *   - train scratch copies (.lanes/_train-<id>) left by a train that is no longer running (no live train lock), when
- *     the copy has no uncommitted change and no commit of its own that isn't on another branch;
- *   - .studio/tmp entries older than STUDIO_JANITOR_TMP_H (24) hours;
- *   - old train logs (.studio/train/*.log) beyond the newest STUDIO_JANITOR_KEEP_LOGS (40) or STUDIO_JANITOR_LOGS_MB
- *     (200) in all; a running train's logs are kept;
- *   - temp folders the harness made for tests, by their marker file (.studio-temp.json naming THIS studio; markTemp()),
- *     older than STUDIO_JANITOR_TMP_H and whose process is gone; in the system temp folder (STUDIO_JANITOR_TMPDIR);
- *   - cache entries (.studio/unity-cache, .studio/assets/library), oldest first, while the caches are over
- *     STUDIO_CACHE_MAX_GB (20); an entry a Unity run holds (a lock under an hour old) is kept.
- *   - Idle lane copies, in the automatic run and by `npm run lanes -- prune --idle <hours> [--dry-run]`: the session
- *     ended, the task isn't queued, held or parked, nobody works in the copy (no process, claim or recent change), no
- *     uncommitted change, no commit that isn't on main, and untouched for STUDIO_LANE_IDLE_HOURS (4; 0 or off: never).
- *     Only the worktree goes; the branch is kept.
- *   - An engine pass's worktree (.lanes/engine/<task>) once its pass has landed (the engine train's landed event names
- *     the task), when it is clean and no session is on the task; the branch stays. Orphan temp copies in the system temp
- *     folder: only folders whose name starts with a prefix the harness makes (studio-build-) or one listed in
- *     STUDIO_JANITOR_TEMP_PREFIXES (comma list), older than STUDIO_JANITOR_ORPHAN_H (2) hours by their newest file,
- *     whose owner process (the marker's pid, else the pid in the name) is gone.
- * What it never deletes: a lane copy with commits not on main, uncommitted changes, a running session or a held or
- * parked task; anything outside the studio except a temp folder carrying this studio's marker. Lanes that are merely
- * stale (older than STUDIO_JANITOR_LANE_H, 24 h, or STUDIO_JANITOR_LANDED_H, 6 h, once their work has landed;
- * nothing unique; clean; nobody in them) are listed with --lanes and deleted only with --yes --by <name>: a person, an
- * agent under the owner's delegation for janitor-lanes, or a Producer/Director session or outside agent on a person's
- * direct permission (harness/decider.mjs). One janitor.run event per run that deletes (or finds) something.
- *
- * It also runs by itself after each train and verify job (harness/jobs.mjs janitorAfterJob: --yes --auto, never lanes)
- * at most every STUDIO_JANITOR_EVERY_MIN (30) minutes; STUDIO_JANITOR=off turns that off. janitorEstimate() gives the
- * disk monitor its line: "the janitor can free N GB". Nothing imports this file at load (its CLI awaits modules that
- * import jobs.mjs: a static import of it from there would be a cycle).
+ * Deletes: idle train scratch copies (.lanes/_train-<id>); .studio/tmp past STUDIO_JANITOR_TMP_H (24) h; old train
+ * logs past STUDIO_JANITOR_KEEP_LOGS (40) or STUDIO_JANITOR_LOGS_MB (200); marked temp folders (STUDIO_JANITOR_TMPDIR);
+ * caches over STUDIO_CACHE_MAX_GB (20); idle lane copies (STUDIO_LANE_IDLE_HOURS, 4); orphans
+ * (STUDIO_JANITOR_ORPHAN_H). Never a lane copy with commits not on main, uncommitted changes, a running session or a
+ * held task. Runs after each train and verify job every STUDIO_JANITOR_EVERY_MIN (30); STUDIO_JANITOR=off stops it.
  */
 import fs from 'node:fs';
 import os from 'node:os';

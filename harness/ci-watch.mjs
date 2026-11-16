@@ -1,20 +1,13 @@
 #!/usr/bin/env node
 /**
- * harness/ci-watch.mjs — watch CI after a push, re-run a failed job once, then alert (2.30h, item 5).
- *
+ * harness/ci-watch.mjs — watch CI after a push, re-run a failed job once, then alert.
  *   npm run ci:watch [-- --sha <commit>] [--timeout-min 60] [--poll-sec 30] [--detach]
- *
- * Today a red Windows check sat for two hours unseen. After a push (scripts/release-ship.mjs runs this
- * itself; `npm run ci:watch -- --detach` runs it in the background after a hand push) it waits for the
- * GitHub Actions runs on that commit, re-runs the failed jobs once (a flaky timing check gets a second
- * chance), and when a job is still red:
- *   - emits ci.failed (a War Room card, and a phone alert when alerts are on: npm run alerts),
- *   - runs STUDIO_CI_NOTIFY_CMD if set (a notification hook; it gets CI_SHA, CI_STATE and CI_SUMMARY in
- *     its environment, e.g. a curl to a webhook), and
- *   - records .studio/ci-watch.json, which the War Room shows.
- * Green: ci.green and the same file. Needs the gh CLI (logged in); without it, says "CI not checked",
- * never "green". STUDIO_GH points at another gh (the self-test uses a fake one). Never blocks an agent:
- * it runs after the push, in its own process.
+ * After a push (scripts/release-ship.mjs runs this itself; --detach runs it in the background after a hand push) it waits for
+ * the GitHub Actions runs on that commit, re-runs the failed jobs once, and when a job is still red: emits ci.failed (a War
+ * Room card, and a phone alert when alerts are on: npm run alerts); runs STUDIO_CI_NOTIFY_CMD if set (it gets CI_SHA, CI_STATE
+ * and CI_SUMMARY in its environment); records .studio/ci-watch.json, which the War Room shows. Green: ci.green and the same
+ * file. Needs the gh CLI (logged in); without it, says "CI not checked", never "green". STUDIO_GH points at another gh.
+ * Never blocks an agent: it runs after the push, in its own process.
  */
 import fs from 'node:fs';
 import path from 'node:path';

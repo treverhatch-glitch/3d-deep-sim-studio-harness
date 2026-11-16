@@ -1,28 +1,14 @@
 /**
- * harness/upgrade-baseline.mjs — 2.73.0 (f): the "before" snapshot of a harness update.
- *
- * `npm run upgrade -- --merge <ref>` (harness/upgrade-guard.mjs) writes .studio/upgrades/<from>-to-<to>.json just
- * before it merges: the studio's numbers over the STUDIO_UPGRADE_SNAPSHOT_DAYS (3) days before the update, computed from
- * the event log as it is at that moment. `npm run autonomy -- impact` (harness/impact.mjs) reads it when it is there, so
- * the "before" side is the clean starting point the studio had, not one recomputed later from a log that has rolled over
- * or picked up events written during the update (a 48-hour measured run starts from it).
- *
- * The numbers (each { value, n }):
- *   landedPerHour       tasks landed (task.done, lane.merged, the lanes of task.train.landed) per hour
- *   redVerifyPct        red train verifies (task.train.verify ok false) of all train verifies, %
- *   falseRedsPerTrain   red train verifies that were not the change's fault, per train: the same tree verified green
- *                       later, or the flake triage (test.flake_triage of that train and tree) labelled every failing
- *                       test something other than "real"
- *   verifyP50Min / verifyP90Min   train verify minutes
- *   tokensPerLanded     weighted session tokens (agent.session.end, cache reads at STUDIO_CACHE_READ_WEIGHT, 0.1) per landed
- *   tokensByTask        tokens per landed change by task, from the sessions that name their task: { tokensPerLandedNamed,
- *                       tasks, named, sessions, top: the five costliest [{ task, tokens, sessions }] }
- *   workaroundsPerDay   harness.workaround events per day
- *   handBacksPerLanded, noWorkPct   as the impact report has them
- *
- * No harness imports (only node's): an old studio runs the new upgrade guard straight from the ref (docs/RELEASE.md),
- * and the guard loads this file from beside itself, the studio, or the ref, so it must stand alone. A script over the
- * log: no model, no tokens, no network.
+ * harness/upgrade-baseline.mjs — the "before" snapshot of a harness update.
+ * `npm run upgrade -- --merge <ref>` (harness/upgrade-guard.mjs) writes .studio/upgrades/<from>-to-<to>.json just before it
+ * merges: the studio's numbers over the STUDIO_UPGRADE_SNAPSHOT_DAYS (3) days before the update, from the event log at that
+ * moment. `npm run autonomy -- impact` (harness/impact.mjs) reads it when it is there, so "before" is not recomputed later.
+ * Numbers (each { value, n }): landedPerHour (task.done, lane.merged, lanes of task.train.landed), redVerifyPct
+ * (task.train.verify ok false, %), falseRedsPerTrain (red verifies not the change's fault: same tree green later, or flake
+ * triage labelled every failing test other than "real"), verifyP50Min / verifyP90Min, tokensPerLanded (agent.session.end,
+ * cache reads at STUDIO_CACHE_READ_WEIGHT, 0.1), tokensByTask, workaroundsPerDay (harness.workaround), handBacksPerLanded,
+ * noWorkPct.
+ * No harness imports (only node's): the guard loads this file from beside itself, the studio, or the ref; it must stand alone.
  */
 import fs from 'node:fs';
 import path from 'node:path';

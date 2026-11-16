@@ -1,44 +1,14 @@
 /**
-/**
- * harness/reclassify.mjs — the owner's reclassification of a task's type (and visual-proof decision).
- *
- * A task's type comes from its title (harness/done-check.mjs: "Fix: …" is a bug, and a bug closes only with a regression
- * that fails before the fix). Retitling a task to dodge the rule is not an agent's call; the owner decides, and the
- * decision is kept where every check can read it:
- *
+ * harness/reclassify.mjs — the owner's reclassification of a task's type (and visual-proof decision), kept for checks.
+ * A task's type comes from its title (harness/done-check.mjs: "Fix: …" is a bug); retitling to dodge it is not allowed.
  *   npm run task -- type <ID>                                       the type, and where it comes from
  *   npm run task -- type <ID> <change|chore|bug|docs|…> --by <owner> --why "<reason, 10+ chars>"
  *   npm run task -- type <ID> auto --by <owner> --why "…"           back to the title's type
  *   npm run task -- visual <ID> off|on --by <owner> --why "…" [--permission "…"]     auto: back to the detection
- *
- * Who: a person, in their own terminal. Refused inside a launched agent session (STUDIO_ROLE), in a shell that works as an
- * agent (STUDIO_LOCK_OWNER set to an agent's name, or to a name other than --by), in a coding agent's own shell
- * (CLAUDECODE, AI_AGENT, CODEX_SANDBOX, GEMINI_CLI set), and for agent names (and launched sessions' names).
- * With a person's direct permission a Producer or Director session, or an agent outside the harness, may record it for
- * them: `--by <the person> --permission "<their words, or a link to the message>"` (harness/permission.mjs). The entry
- * keeps `permission` and `recordedBy`, an agent commit that set it counts when it is that same agent and not a worker,
- * and every output shows it. Builders and other workers never can. Beta mode's stand-in (harness/beta-mode.mjs) counts as
- * the owner, as do the owner's key and proxy.
- *
- * How it is kept:
- *   - With an owner key (studio/keys/owner-ed25519.pub.pem, harness/approve.mjs) the decision is signed with the owner's
- *     private key (studio/approvals/type-<ID>.json, visual-<ID>.json; the protected check's approval format); an unsigned
- *     record is then ignored. The key is the base branch's or, when that has none, the one committed in the main checkout
- *     (ownerKey), so recording and reading agree.
- *   - Beta mode: a stand-in's decision is kept as an approval in beta format (no signature, studio/beta.json's by/at
- *     embedded, recordedBy), with or without an owner key. It counts while beta mode is on with that studio/beta.json, once
- *     committed with exactly that content by a commit that isn't a worker's (betaRecordOk); logged "as beta" in the
- *     decisions log. Workers never qualify.
- *   - No owner key: RECORDED in studio/task-types.json (who, why, when, from → to; visual ones under "visual") and committed
- *     from the owner's terminal (--no-commit leaves that to you). It counts only once committed, and only when the commit
- *     is not an agent's (no Studio-Agent trailer, added by the commit-msg hook). A speed bump, not a lock: without an
- *     owner key nothing an agent can write is proof. Every record in force is shown in verify and done output.
- *   - With an owner key, outside beta mode, an unsigned record doesn't count, so the command refuses it up front (exit 1:
- *     sign it on the device that holds the key, or turn beta mode on). After writing it reads its own record back with the
- *     resolver every check uses, and exits 1 if that says it doesn't count.
- * In a lane copy the record is read from the main checkout. ownerVisual() applies the validity rules ownerType() applies;
- * harness/verdict-split.mjs honours a valid visual decision first, and a valid owner type that isn't render work outranks
- * the title's words. "none" and "rescue" can't be set here: closing a task without its check is `npm run approve -- force`.
+ * Who: a person in their own terminal; refused in agent sessions and shells (STUDIO_ROLE, STUDIO_LOCK_OWNER, coding
+ * agents' own shells). A Producer/Director session or outside agent may record it with `--by <person> --permission
+ * "<words>"`. Kept as a signed approval (studio/approvals/type-<ID>.json) with an owner key, else in
+ * studio/task-types.json. "none" and "rescue" can't be set here.
  */
 import fs from 'node:fs';
 import path from 'node:path';

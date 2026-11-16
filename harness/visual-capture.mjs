@@ -35,11 +35,10 @@ export function captureHint(task, t = {}) {
 
 
 /**
- * 2.79.1 (d): is the render-task visual gate on? STUDIO_VISUAL_GATE=off turns it off and =on keeps it on whatever the game has.
+ * Is the render-task visual gate on? STUDIO_VISUAL_GATE=off turns it off and =on keeps it on whatever the game has.
  * Unset (the default): on, unless the studio's game is a web or engine game with its own folder that has no capture command
- * (no "visual": { "capture" } in its studio.gates.json and no Godot project): there a render task could never get its
- * result, so the gate is off, with `note` saying so (task done prints it once). { on, auto, note }. A task on the Godot
- * engine track captures its Godot project, so it keeps the gate.
+ * (no "visual": { "capture" } in its studio.gates.json and no Godot project): then the gate is off, with `note` saying so
+ * (task done prints it once). { on, auto, note }. A task on the Godot engine track captures its Godot project: gate kept.
  */
 export function visualGate(t = {}, env = process.env) {
   const v = String(env.STUDIO_VISUAL_GATE || '').trim().toLowerCase();

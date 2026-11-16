@@ -1,17 +1,13 @@
 #!/usr/bin/env node
 /**
  * harness/proof.mjs — screenshot proof for work players see (tasks with --part renderer or both).
- *
  *   npm run proof -- add T-012 <screenshot> "<what it shows, in one line>" [--by <agent>]
  *   npm run proof -- check T-012 --by <name> --verdict matches|wrong [--note "…"]
  *   npm run proof -- show T-012
- *
- * A renderer task isn't done on "the code changed and verify is green": the builder adds the
- * screenshots that show the change (the browser play gate saves start, middle and end shots in
- * qa/reports/) with one line each saying what the image shows. Then someone other than the builder
- * (a person, or a reviewer agent from the studio) opens the images next to the description and the
- * approved art reference and records whether they match. A description that doesn't match the image
- * is how "green but broken" gets caught.
+ * A renderer task isn't done on "verify is green": the builder adds screenshots of the change (the browser play gate
+ * saves shots in qa/reports/) with one line each saying what the image shows. Then someone other than the builder (a
+ * person, or a reviewer agent) opens the images next to the description and the approved art reference and records
+ * whether they match. A description that doesn't match the image is how "green but broken" gets caught.
  */
 import fs from 'node:fs';
 import path from 'node:path';

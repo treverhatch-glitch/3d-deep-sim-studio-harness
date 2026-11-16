@@ -1,25 +1,14 @@
 /**
  * harness/launch.mjs — how an agent tool is started, with its arguments intact on every OS.
  *
- * No built-in tool goes through a shell. With `shell: true` on Windows (needed for npm's .cmd shims: since the
- * CVE-2024-27980 fix Node refuses to spawn a .cmd or .bat without a shell) Node joins the arguments with spaces,
- * unquoted, and cmd.exe splits them again and acts on ( ) & | < > ^ %: Claude Code lost its --allowedTools list and agy
- * got its prompt word by word ("unexpected argument"). So:
- *   - macOS, Linux: the program is started directly (Node looks it up on the agent's PATH).
- *   - Windows: the program is looked up on the agent's PATH x PATHEXT (never in the current folder), then
- *       .exe / .com          started directly;
- *       an npm .cmd shim     (it runs node on a .js file) node is started on that .js file: the shim's own
- *                            node.exe when it has one, else the node running the harness;
- *       any other .cmd/.bat  cmd.exe /d /s /c, with every argument quoted for cmd.exe by quoteCmdArg.
- *   - A prompt given as an argument that can't travel on the command line (longer than Windows takes, or a line
- *     break through cmd.exe) is replaced by a one-line instruction to read the kickoff file; the log says so.
- * A custom command (STUDIO_<ROLE>_CMD, STUDIO_AGENT_CMD) is the user's own command line and still runs in the shell; the
- * values filled into its {kickoff} {agent} {model} {role} {task} {mainRoot} {addDirs} are quoted for that shell (fillCommand).
- *
- * The quoting follows the documented rules: a Windows program splits its command line by the MSVCRT /
- * CommandLineToArgvW rules (quoteWinArg); cmd.exe expands %VAR% first (even inside quotes), then removes a ^ before
- * any character outside quotes, and reads a batch file's %* into a line it parses once more (quoteCmdArg).
- * Delayed expansion (!VAR!) is assumed off, as it is unless the registry turns it on.
+ * No built-in tool goes through a shell: on Windows `shell: true` joins arguments unquoted and cmd.exe acts on ( ) & |
+ * < > ^ %.
+ *   - macOS, Linux: the program is started directly.
+ *   - Windows: looked up on the agent's PATH x PATHEXT (never the current folder): .exe / .com start directly; an
+ *     npm .cmd shim starts node on its .js file; any other .cmd/.bat runs via cmd.exe /d /s /c with every argument
+ *     quoted by quoteCmdArg.
+ *   - A prompt argument too long or with a line break becomes a one-line instruction to read the kickoff file.
+ * A custom command (STUDIO_<ROLE>_CMD, STUDIO_AGENT_CMD) still runs in the shell (fillCommand quotes its placeholders).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -101,8 +90,7 @@ export function cmdCommandLine(file, args, { passes = 2 } = {}) {
 const splitArgs = (s) => String(s || '').trim().split(/[ \t]+/).filter(Boolean);
 
 /**
- * The .js entry of an npm cmd-shim (what npm, pnpm and cmd-shim write next to a package's bin on Windows), or null
- * for any other .cmd/.bat. Two forms, as cmd-shim writes them:
+ * The .js entry of an npm cmd-shim, or null for any other .cmd/.bat. Two forms, as cmd-shim writes them:
  *   3 and later:  SET "_prog=%dp0%\node.exe" ... "%_prog%" [node args] "%dp0%\<path to the .js>" %*
  *   1 and 2:      @IF EXIST "%~dp0\node.exe" ( "%~dp0\node.exe" [node args] "%~dp0\<path to the .js>" %* ) ELSE (...)
  * Returns { form, nodeArgs, target } with target relative to the shim's folder (backslashes, maybe ..\).
@@ -127,12 +115,10 @@ export function parseNpmShim(text) {
 const comspecOf = (env) => envValue(env, 'ComSpec', 'win32') || (envValue(env, 'SystemRoot', 'win32') ? path.win32.join(envValue(env, 'SystemRoot', 'win32'), 'System32', 'cmd.exe') : 'cmd.exe');
 
 /**
- * How to start `name`:
- *   { mode: 'direct', file, prefix: [] }                   start file with the arguments
- *   { mode: 'node', file: node, prefix: [..nodeArgs, js], shim }  an npm shim: node on its .js entry
- *   { mode: 'cmd', file: cmd.exe, script, passes }        another .cmd/.bat (or a PATHEXT type such as .js) via cmd.exe
- *   { mode: 'missing', file: name, prefix: [], looked }   not found on PATH (Windows); starting it reports ENOENT
- * Off Windows always 'direct': Node looks the name up on env.PATH itself.
+ * How to start `name` (always 'direct' off Windows):
+ *   { mode: 'direct', file, prefix: [] } | { mode: 'node', file: node, prefix: [..nodeArgs, js], shim } (an npm shim)
+ *   { mode: 'cmd', file: cmd.exe, script, passes } (another .cmd/.bat) | { mode: 'missing', file: name, prefix: [],
+ *     looked }
  */
 export function resolveCommand(name, { platform = process.platform, env = process.env, fs: fsx = fs, cwd = process.cwd(), execPath = process.execPath } = {}) {
   if (platform !== 'win32') return { mode: 'direct', file: name, prefix: [] };
@@ -312,10 +298,9 @@ export function localizeCommand(template, { from, to, fs: fsx = fs } = {}) {
 
 /**
  * A custom command line with its placeholders filled, each value quoted for the shell that runs it (cmd.exe on
- * Windows, sh elsewhere) and for where it stands in the line: bare, or inside the line's own '…' or "…". Values that
- * need no quoting are filled as they are, and an empty value as nothing.
- * values: { kickoff, agent, model, role, task, mainRoot, addDirs }; a list (addDirs: ['--add-dir', <dir>, …], empty
- * outside a lane copy) fills as one quoted argument per item.
+ * Windows, sh elsewhere) and for where it stands in the line (bare, or inside '…' or "…"). Empty value: nothing.
+ * values: { kickoff, agent, model, role, task, mainRoot, addDirs }; a list (addDirs: ['--add-dir', <dir>, …]) fills as
+ * one quoted argument per item.
  */
 export function fillCommand(template, values, { platform = process.platform } = {}) {
   const win = platform === 'win32';

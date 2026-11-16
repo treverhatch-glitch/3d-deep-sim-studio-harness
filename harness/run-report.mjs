@@ -1,16 +1,12 @@
 #!/usr/bin/env node
 /**
- * harness/run-report.mjs — the results of a test run, in one folder anyone can open.
- *
- *   npm run run-report [-- --to <folder>] [--final]
- *
+ * harness/run-report.mjs — the results of a test run, in one folder anyone can open. A script: no model, no tokens.
+ *    npm run run-report [-- --to <folder>] [--final]     --final marks the report as the end of the run
  * Writes to --to, or STUDIO_RESULTS_DIR (a synced Google Drive folder works):
- *   <folder>/<game>/REPORT.md              the run so far: progress, checks, models, harness notes,
- *                                          the overseer's evaluations, what repeated, what needs a person
- *   <folder>/<game>/snapshots/<time>.md    one short line-set per run of this command (the HUB adds one an hour)
- *   <folder>/<game>/files/                 the Bible, plan, queue, lessons, notes, latest playtest and gate
- *                                          run, retros, reviews, signed results, and the event log (gzipped)
- * A script: no model, no tokens. --final marks the report as the end of the run.
+ *    <folder>/<game>/REPORT.md              the run so far: progress, checks, models, notes, what needs a person
+ *    <folder>/<game>/snapshots/<time>.md    one short line-set per run of this command
+ *    <folder>/<game>/files/                 the Bible, plan, queue, lessons, notes, latest playtest and gate run,
+ *                                           retros, reviews, signed results, the event log (gzipped)
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,19 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/cheatsheet.mjs — the cheat sheet check (2.29.2).
- *
+ * harness/cheatsheet.mjs — the cheat sheet check: matches a task to tricks in studio/CHEATSHEET.md and pre-approves
+ * them.
  *   npm run cheatsheet -- match "<task title or tags>"      up to 3 matching lines from studio/CHEATSHEET.md
  *   npm run cheatsheet -- attach T-123 [--tags godot,test] [--by <name>]   attach them to the task's brief
  *   npm run cheatsheet -- show T-123
- *   npm run cheatsheet -- cap [N]        the Director's per-task trick cap (default 3, 1 to 6); --max N on match/attach overrides it once
- *
- * Before a task is handed out, its title and tags are matched against the [tags] of each line in
- * studio/CHEATSHEET.md, and up to 3 tricks are attached as PRE-APPROVED by whoever assigns it (the
- * Director or Producer): the agent may use them for that task without asking. The approval is recorded
- * (event cheatsheet.preapproved: task, trick ids, approved by). Anything not attached follows the normal
- * approval rules. The brief (.studio/briefs/<ID>.md) and the War Room show them on the task.
- * Lines tagged `director` are for planning and assigning: `match --for director` shows only those, and
- * they are never attached to a builder's task. One small file read, no model, no wait.
+ *   npm run cheatsheet -- cap [N]     the Director's per-task trick cap (default 3, 1 to 6); --max N overrides it once
+ * Before a task is handed out, its title and tags are matched against the [tags] of each CHEATSHEET.md line, and up to
+ * 3 tricks are attached as PRE-APPROVED by whoever assigns it (event cheatsheet.preapproved); anything else follows the
+ * normal approval rules. The brief (.studio/briefs/<ID>.md) and the War Room show them. Lines tagged `director` are
+ * never attached to a builder's task (`match --for director` shows only those). One small file read, no model, no wait.
  */
 import fs from 'node:fs';
 import path from 'node:path';

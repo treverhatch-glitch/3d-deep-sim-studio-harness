@@ -1,24 +1,15 @@
 #!/usr/bin/env node
 /**
  * scripts/onboard-game.mjs — bring an existing game (finished or mid-development) into the studio.
- *
  *   npm run onboard -- --path ../my-game --name "My Game"            scan, write the fact sheet, queue tasks
  *   npm run onboard -- --path ../my-game --name "My Game" --dry-run  print what it found, write nothing
- *
- * It only reads the game's folder; it never edits the game. It writes, inside this studio:
- *   studio/game/GAME.md         the fact sheet: what it detected, plus sections a person fills in
- *   studio/game/inventory.json  the raw scan (engine, languages, scripts, tests, determinism hints)
- *   studio/NEXT.md              onboarding tasks (skipped if they are already queued)
- *   studio/producer/LOG.md      a note saying what was onboarded and from where
- * Guide: docs/ONBOARDING-A-GAME.md. Pass --force to rewrite an existing GAME.md.
- *
- * 2.43.0: --adopt [--ref <branch>] brings the game under the studio (game/<slug>/, its own checks declared,
- * the studio's game, origin recorded: harness/adopt.mjs); --export turns the studio's changes to it back into a
- * patch for the game's own repo. --sync [--ref <branch>] brings the game repo's new commits in; 2.55.0: with
- * --dry-run it lists them and writes nothing.
- * 2.78.2 (f): --check checks the studio game's test checks (harness/test-config-check.mjs): a test check with neither a
- * "focus" command nor a vitest/jest runner the harness can run single files with FAILs, and so does a test config that
- * doesn't drop the files STUDIO_TEST_QUARANTINE (or STUDIO_TEST_EXCLUDE) names; exit 1 on a FAIL.
+ * It only reads the game's folder. It writes studio/game/GAME.md (the fact sheet; --force rewrites it),
+ * studio/game/inventory.json (the raw scan), studio/NEXT.md (onboarding tasks, skipped if queued),
+ * studio/producer/LOG.md. Guide: docs/ONBOARDING-A-GAME.md. --adopt [--ref <branch>] brings the game under the studio
+ * (harness/adopt.mjs); --export makes a patch of the studio's changes for the game's repo. --sync [--ref <branch>]
+ * brings the game repo's new commits in (--dry-run lists them). --check checks the studio game's test checks
+ * (harness/test-config-check.mjs): a test check with no "focus" command and no vitest/jest runner, or a config that
+ * doesn't drop the files STUDIO_TEST_QUARANTINE (or STUDIO_TEST_EXCLUDE) names, FAILs; exit 1.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,22 +1,13 @@
 /**
- * harness/worktree.mjs — one working copy per lane.
- *
- * Builders sharing one checkout leaked half-done edits into each other's tests and commits. An agent the launcher
- * starts with a code lane works in its own git worktree, `.lanes/<agent>/`, on its own branch; its finished work
- * reaches the studio's branch only through `task done`, after its checks pass.
- *
- * Shared: `studio/` (the board, handoffs, the Bible) and `.studio/` (locks, events, sessions) are links to the main
- * checkout's, so every agent sees one board and one set of claims; both are left out of the worktree's own checkout
- * (sparse checkout) so the link never shows as a change. `.env` is copied and `node_modules` folders are linked.
- *
- *   task start (in a lane copy)  fast-forwards it to the studio's branch when it has no work of its own
- *   task done  (in a lane copy)  refuses uncommitted work, rebases on the studio's branch, re-runs the
- *                                everyday checks if the branch moved, then fast-forwards the studio's branch
- *   the session ends             a merged copy is removed; unmerged commits stay on their branch, which the
- *                                next agent on that task gets merged into its own copy
- *
- * Needs git 2.42 or newer (sparse.expectFilesOutsideOfPatterns). Older git, not a git checkout, or
- * STUDIO_WORKTREES=off: agents share the main checkout as before.
+ * harness/worktree.mjs — one git worktree per lane, so builders don't leak half-done edits into each other.
+ * An agent with a code lane works in `.lanes/<agent>/` on its own branch; finished work reaches the studio's branch
+ * only through `task done`. `studio/` and `.studio/` are links to the main checkout's (sparse checkout leaves them
+ * out); `.env` is copied, `node_modules` folders are linked.
+ *   task start (lane copy)  fast-forwards it to the studio's branch when it has no work of its own
+ *   task done  (lane copy)  refuses uncommitted work, rebases, re-runs the everyday checks if the branch moved, then
+ *                           fast-forwards the studio's branch
+ * Needs git 2.42 or newer (sparse.expectFilesOutsideOfPatterns). Older git, not a git checkout, or STUDIO_WORKTREES=off: agents
+ * share the main checkout.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -293,12 +284,10 @@ export function carryTaskBranch(task, dir = REPO_ROOT) {
 }
 
 /**
- * carryTaskBranch with the launcher-side mixed-lane check. A branch whose own commits carry another OPEN task's
- * Studio-Task trailer (not this task, a declared --after dependency, or the task this one rescues: train-lanes.mjs
- * mixedLane / mayCarry, the train's rules) is NOT merged: the copy stays on the studio's branch plus this task's own
- * commits from it (cherry-picked, in order), and a lane.mixed_skipped event says so. STUDIO_TRAIN_MIXED=off turns the
- * check off (as for the train). Returns { carried, mixed: null | { branch, why, foreign,
- * picked, left, line } }.
+ * carryTaskBranch with the launcher-side mixed-lane check. A branch whose commits carry another OPEN task's Studio-Task
+ * trailer (not this task, a declared --after dependency, or the task this one rescues) is NOT merged: the copy stays on
+ * the studio's branch plus this task's own commits (cherry-picked), and a lane.mixed_skipped event says so.
+ * STUDIO_TRAIN_MIXED=off: no check. Returns { carried, mixed: null | { branch, why, foreign, picked, left, line } }.
  */
 export function carryTaskBranchEx(task, dir = REPO_ROOT) {
   const root = mainRoot();
@@ -480,10 +469,9 @@ export function laneDiff() {
 
 /**
  * Uncommitted work in a lane copy, as task done judges it: { dirty: porcelain lines, eol: line-ending-only files }.
- * Engine cache files (.godot/, *.import, *.uid) that every headless Godot run rewrites don't count, nor does a tracked
- * file that differs only in line endings (deliver sets it aside with the engine cache); phantom files (eol-only.mjs
- * splitPhantom) are left out too and returned as `phantom` (paths), for the caller's one note. Shared with the merge
- * train's lane check (harness/train.mjs). Never trim() before slice(3): it eats the first letter of the first path.
+ * Engine cache files (.godot/, *.import, *.uid) and tracked files that differ only in line endings don't count; phantom
+ * files (eol-only.mjs splitPhantom) are returned as `phantom` (paths). Shared with the merge train's lane check. Never
+ * trim() before slice(3): it eats the first letter of the first path.
  */
 export function laneDirty(dir = REPO_ROOT) {
   const dirtyAll = (git(dir, 'status', '--porcelain').stdout || '').split('\n').filter((l) => l.length > 3)
@@ -504,13 +492,10 @@ export function forgetLanded(taskId, branch, root = mainRoot()) {
 }
 
 /**
- * Task done in a lane copy: the work must be committed; it is rebased on the studio's branch and then the studio's
- * branch fast-forwards to it. Returns null when not in a lane copy, { ok: true, merged } or { ok: false, message }.
- *
- * After a clean rebase the checks re-run only when the incoming changes touch this lane's gate scope (recorded by task
- * done in .studio/gate-pass/<task>.json); otherwise the earlier pass is reused. Re-runs are path-scoped too
- * (STUDIO_GATE_CHANGED). Only the final "did the branch move?" check, the fast-forward and onLanded (the board write)
- * hold the short land lock, so tracks land in parallel. STUDIO_LAND_TRIES (6) bounds the rebase attempts.
+ * Task done in a lane copy: the work must be committed; it is rebased on the studio's branch, which then fast-forwards.
+ * Returns null (not a lane copy), { ok: true, merged } or { ok: false, message }. After a clean rebase checks re-run
+ * only if incoming changes touch this lane's gate scope (.studio/gate-pass/<task>.json; STUDIO_GATE_CHANGED). Only the
+ * final check, the fast-forward and onLanded hold the land lock. STUDIO_LAND_TRIES (6) bounds rebase attempts.
  */
 export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
   if (!inLaneCopy()) return null;
@@ -641,16 +626,10 @@ export function mergeWorktree(root = mainRoot()) {
 }
 
 /**
- * Land a lane branch on the studio's branch without the main checkout's index (a `git merge --ff-only` run inside the
- * main checkout fails on its uncommitted files, untracked files and index.lock).
- *   1. in the merge worktree, `git merge-tree --write-tree` proves the result is exactly the lane's tree (a
- *      fast-forward), touching no one's index;
- *   2. the main checkout's own uncommitted edits to files the lane changed are kept in a named stash (never
- *      lost; STUDIO_LAND_STASH=off refuses instead);
- *   3. `git update-ref` moves the branch from old to new only if it still points at old (compare-and-swap);
- *   4. the main checkout's index and files follow (`read-tree -m -u old new`, index.lock retries); if they
- *      can't, the ref is swapped back and the landing reports why.
- * Returns { ok, merged, stashed } or { ok: false, message }.
+ * Land a lane branch on the studio's branch without the main checkout's index: `git merge-tree --write-tree` in the
+ * merge worktree proves the result is the lane's tree; the main checkout's uncommitted edits to changed files go into a
+ * named stash (STUDIO_LAND_STASH=off refuses); `git update-ref` moves the branch only if it still points at old; the
+ * index and files follow (`read-tree -m -u old new`), else the ref is swapped back. Returns { ok, merged, stashed }.
  */
 export function landFastForward(root, main, branch, { taskId = '' } = {}) {
   const rev = (r) => git(root, 'rev-parse', '--verify', `${r}^{commit}`).stdout.trim();

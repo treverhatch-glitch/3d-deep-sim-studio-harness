@@ -1,40 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/tester.mjs — the game tester. An agent session (role qa-playtester, a vision-capable model) that plays the
- * game's real build in a real browser the way a player would, checks the Game Bible against what is actually in the
- * game, and reports with screenshots. It works with the line producer and its runs never stop other production.
- *
- * Who starts it: the Line Producer (harness/line-producer.mjs testerPass, on the supervisor's loop), never a person by
- * hand: a run is due when BOTH STUDIO_TESTER_EVERY_HOURS (24) have passed since the last run (or since the tester's first
- * look) AND STUDIO_TESTER_MIN_LANDINGS (10) game landings (task.train.landed / lane.merged) happened since; or when anyone
- * asked (`npm run tester -- now`). STUDIO_TESTER=off stops the schedule (on demand still works). One run at a time.
- *
- * It never blocks production: it takes no machine:heavy slot and no train or gate slot, and waits (never preempts) while
- * the machine is starved (CPU over STUDIO_LINE_CPU_BUSY_PCT, no RAM room), every gate slot is taken, the train runs or
- * waits, or a quiet hold is on. Its session gets its own seat (the launcher's extra allowance), so a builder isn't
- * displaced. Its verdicts hold nothing (no task hold, gate, plan slice or landing); its output is information: a report,
- * bug tasks (P1, deduplicated), one inbox item, one Studio Status line.
- *
- * A run:
- *   1. the harness picks a plan from a seeded RNG over the game's (mode, style, goal) (docs/TESTER.md) and writes the
- *      brief (what landed, a rotating regression area, the Bible's features, every STUDIO_TESTER_COMPARE_EVERY (3)rd
- *      run the genre references) to .studio/tester/runs/<id>/brief.md;
- *   2. builds the game at the studio branch's commit in its own clean copy (.studio/tester-wt) as a normal child process
- *      (the game's "tester".build, else the cartridge's browser contract) and keeps the dist in the run folder;
- *   3. starts the agent through the launcher (harness/agent.mjs startAgent: a lane copy like a builder's; the tool from
- *      STUDIO_TESTER_TOOLS, default the studio's builder tool; "claude,agy" alternates runs between two model families);
- *   4. the agent drives the build with qa/tester-drive.mjs, writes report.md and summary.json, and runs
- *      `npm run tester -- finish` (a run whose session ended without it is finished on the next pass);
- *   5. finish publishes qa/reports/tester/<id>/ (report, summary.json, screenshots, action log), files each bug as a task
- *      (its images in studio/proof/<task>/ with the repro steps and the replay command), and tells the Producer, the
- *      Director and the orchestrator (studio/producer/INBOX.md, a tester.report event, a Studio Status notice).
- * Also (wirePass): a landed module no game code imports (a task.unwired note at its done-check) gets ONE follow-up "Wire
- * <module> into the game" task (P2, once per module; STUDIO_TESTER_WIRE_TASKS=off: none).
- *
- *   npm run tester -- status [--json]        last run, next due, last verdicts
- *   npm run tester -- now [--by <you>] [--seed <n>]   ask for a run (the Line starts it, or this does when no supervisor runs)
- *   npm run tester -- brief                  the current run's brief (the tester agent reads this first)
- *   npm run tester -- finish                 the tester agent's last step: publish, file bugs, notify
+ * harness/tester.mjs — the game tester: an agent session (role qa-playtester) that plays the game's real build in a
+ * real browser, checks the Game Bible against it, and reports with screenshots.
+ * Started by the Line Producer (harness/line-producer.mjs testerPass) when STUDIO_TESTER_EVERY_HOURS (24) have passed
+ * AND STUDIO_TESTER_MIN_LANDINGS (10) landings happened, or on request. STUDIO_TESTER=off stops the schedule. One run
+ * at a time; no machine:heavy, train or gate slot. Output: a report, bug tasks (P1), an inbox item.
+ * A run: the harness writes .studio/tester/runs/<id>/brief.md (STUDIO_TESTER_COMPARE_EVERY, 3), builds in
+ * .studio/tester-wt, starts the agent (STUDIO_TESTER_TOOLS); it drives with qa/tester-drive.mjs and runs finish,
+ * which publishes qa/reports/tester/<id>/ and files bugs. wirePass files one "Wire <module> into the game" task
+ * (STUDIO_TESTER_WIRE_TASKS=off: none).
+ *    npm run tester -- status [--json] | now [--by <you>] [--seed <n>] | brief | finish
  */
 import fs from 'node:fs';
 import path from 'node:path';

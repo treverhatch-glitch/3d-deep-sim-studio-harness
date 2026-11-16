@@ -1,22 +1,13 @@
 #!/usr/bin/env node
 /**
- * harness/holdout.mjs — 2.78.0 (PU-54): held-out checks the builders cannot read, run at the merge train only.
- *
- * Builders can read every visible check, so a builder can tune its work to them (special-case the golden seed). A held-out
- * case is a command whose expected result no builder has seen. The cases are JSON files in STUDIO_HOLDOUT_DIR (default
- * <main checkout's parent>/<main checkout's folder name>-holdout: outside every checkout, so no lane copy links to it;
- * harness/holdout-dir.mjs). The path guard hook denies builder and lane sessions reads of it. docs/HOLDOUT.md.
- *
- *   node harness/holdout.mjs run                  the `holdout` gate. Runs only at the train (STUDIO_GATE_PRIORITY=landing);
- *                                                 anywhere else it prints "runs at the train only" and passes.
- *                                                 No folder or no cases: passes, "no held-out cases".
- *                                                 A failing case prints its id and note, never its command or expected values.
- *   node harness/holdout.mjs list                 ids and notes only
+ * harness/holdout.mjs — held-out checks the builders cannot read, run at the merge train only (docs/HOLDOUT.md).
+ * A case is a command whose expected result no builder has seen: JSON files in STUDIO_HOLDOUT_DIR (default
+ * <main checkout>-holdout, outside every checkout; harness/holdout-dir.mjs). The path guard hook denies builder reads.
+ *   node harness/holdout.mjs run     the `holdout` gate; runs only at the train (STUDIO_GATE_PRIORITY=landing);
+ *      elsewhere it prints "runs at the train only" and passes. A failing case prints its id and note only.
+ *   node harness/holdout.mjs list    ids and notes only
  *   node harness/holdout.mjs add <id> --command "…" [--expect-exit N] [--expect-stdout-of-current] [--contains "…"]…
- *                                [--cwd rel] [--note "…"]
- *                                                 for the owner or Producer. --expect-stdout-of-current runs the command once
- *                                                 on the main checkout now and records the stdout's sha256.
- *
+ *                                [--cwd rel] [--note "…"]     for the owner or Producer
  * A case: { id, command, cwd?: "relative to the studio root", expect: { exit?, stdoutSha256?, contains?: [] }, note }.
  * stdout is compared after CRLF -> LF.
  */

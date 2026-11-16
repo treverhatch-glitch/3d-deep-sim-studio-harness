@@ -1,21 +1,14 @@
 /**
- * harness/train-fix-first.mjs — 2.73.2 (d, B-75): a lane that fixes the check main is stuck red on trains alone, first.
+ * harness/train-fix-first.mjs — a lane that fixes the check main is stuck red on trains alone, first.
  *
- * With main red on a check (a per-test timeout that the worker count outgrew), every combined train failed on that same
- * check, the train carrying the fix included: the fix was one lane among five, the train was red, nobody landed. It took
- * `task hold` on the other lanes by hand to let the fix ride alone. Now the train remembers its reds:
- *
- *   noteTrainRed      a train's red verify (the checks that failed) and a "main itself is red" verdict, in
- *                     .studio/train/red-streak.json (the last 6 trains; a train that lands anything clears it: noteTrainLanded)
- *   stuckChecks       the game checks main is stuck on: the checks of a "main itself is red" verdict since the last landing,
- *                     or a check that failed in the last two trains in a row
- *   fixFirstOrder     a queued lane whose diff changes that check's configuration (the game's test config: vitest / vite /
- *                     jest configs and workspaces, .npmrc, the game's studio.gates.json, the test entries of a game
- *                     package.json; harness/test-toolchain.mjs) goes first and alone (runAlone), logged with the reason
- *                     (task.train.fix_first). Once per lane head: a fix lane that trained alone and didn't land isn't put
- *                     first again until it changes.
- * It reorders only: a lane held for the owner (tier C) still waits for the owner, and every check still runs.
- * STUDIO_TRAIN_FIX_FIRST=off turns it off. Node built-ins and two harness helpers that import nothing back.
+ *   noteTrainRed      a red verify and a "main itself is red" verdict, in .studio/train/red-streak.json (last 6
+ *     trains; noteTrainLanded clears)
+ *   stuckChecks       checks of a "main itself is red" verdict since the last landing, or failed in the last two trains
+ *   fixFirstOrder     a queued lane whose diff changes that check's configuration (test configs, .npmrc, the game's
+ *     studio.gates.json, package.json test entries; harness/test-toolchain.mjs) goes first and alone (runAlone),
+ *     logged task.train.fix_first; once per lane head
+ * It reorders only: a tier-C lane still waits for the owner, and every check still runs. STUDIO_TRAIN_FIX_FIRST=off
+ * turns it off.
  */
 import fs from 'node:fs';
 import path from 'node:path';

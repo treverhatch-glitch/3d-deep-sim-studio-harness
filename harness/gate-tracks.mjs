@@ -1,19 +1,12 @@
 /**
- * harness/gate-tracks.mjs — 2.84 (x): gates run for the engine a task is on.
- *
- * Why (a crew, 2.83): every `npm run verify` ran the web game's gates (build, lint, tests, goldens, cartridge replay, the
- * web visual gate) for docs-only tasks and for Unity-track work, which they cannot affect.
- *
- * Every gate has a track: `web`, `engine:<name>` (or `engine:*`, any engine), `harness` (checks of the studio and the
- * harness itself), or `all` (every change but a docs-only one). GATE_TRACKS below is the one table; a gate it doesn't
- * name gets the default of its kind (a game check `game:<id>` from game|web/<name>/studio.gates.json is `web`, a Godot
- * project's engine gate `engine:<project>` is `engine:godot`, anything else is `all`: never silently skipped). A
- * `"track"` field on a gate in studio/gates.json or a game's studio.gates.json overrides the table (a string or a list).
- *
- * A verify covers a set of tracks (decideTracks): the tracks of the lane's changed paths (pathTracks), plus the track of
- * each task it is for (taskTracks: an engine pass's engine:<x>, or a task set back to web). A docs-only change covers
- * `docs`: only the gates that judge docs run (DOCS_GATES). No task and no diff, a path outside every track, --all or
- * STUDIO_GATES_BY_TRACK=off: every gate runs, as before 2.84.
+ * harness/gate-tracks.mjs — gates run for the engine a task is on, so docs-only or other-engine work skips web gates.
+ * Every gate has a track: `web`, `engine:<name>` (or `engine:*`), `harness`, or `all` (every change but a docs-only
+ * one). GATE_TRACKS is the one table; a gate it doesn't name gets its kind's default (`game:<id>` is `web`, a Godot
+ * project's `engine:<project>` is `engine:godot`, anything else `all`: never silently skipped). A `"track"` field
+ * (string or list) on a gate in studio/gates.json or a game's studio.gates.json overrides it.
+ * A verify covers a set of tracks (decideTracks): those of the changed paths (pathTracks) plus each task's
+ * (taskTracks). A docs-only change covers `docs`: only DOCS_GATES run. No task and no diff, a path outside every
+ * track, --all or STUDIO_GATES_BY_TRACK=off: every gate runs.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -115,13 +108,9 @@ function engineProjectOf(rel, root) {
 
 /**
  * The tracks one changed path needs: [track], or ['*'] (outside every track: everything runs).
- *   docs/, studio/ notes, logs and the board, a .md outside the game's and engines' folders   docs
- *   a file inside an engine project (project.godot, Unity, Unreal) engine:<that engine>
- *   engine/<game>/                                             engine:<the engine its engine.json names> (else engine:<game>
- *                                                              when that is an engine name the studio knows, else engine:*)
- *   game/<name>/, web/<name>/, cartridges/, src/, assets/, public/, qa/golden/, qa/regressions/   web
- *   harness/, scripts/, qa/, tools/, .github/                  harness
- *   studio/godot-unit.json                                     harness, engine:godot; any other studio/ .json: everything
+ * docs/, studio/ notes, logs, the board, .md outside game and engine folders: docs. A file inside an engine project:
+ * engine:<that engine>. engine/<game>/: the engine its engine.json names. game/<name>/, web/<name>/, cartridges/, src/,
+ * assets/, public/, qa/golden/, qa/regressions/: web. harness/, scripts/, qa/, tools/, .github/: harness.
  */
 export function pathTrack(file, { root = REPO_ROOT, engines = null } = {}) {
   const f = String(file || '').replace(/\\/g, '/').replace(/^\.\//, '');

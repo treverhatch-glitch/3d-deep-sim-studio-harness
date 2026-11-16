@@ -1,40 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/unity-cache.mjs — 2.67.1 (k): a warm Unity Library cache, so a fresh project copy skips the ~10 min import.
- *
- * Unity rebuilds a project's Library/ (its imported assets, compiled scripts, package cache) on the first editor run in
- * every new copy: a lane copy, a gate copy, a fresh clone. The editor runs the harness starts (harness/unity.mjs gate
- * and build) now reuse one warm Library per project, Unity version and branch base:
- *
- *   - before the editor runs, a copy without a Library/ gets the cached one (seed). A copy that already has a
- *     Library/ keeps its own (Unity brings it up to date itself);
- *   - after a green run (all tests passed, or the build passed) the copy's Library/ replaces the cached one (save).
- *
- * The cache is <STUDIO_UNITY_LIBRARY_CACHE>/<key>/Library (default <main checkout>/.studio/unity-cache; off: none). The
- * key is the project (its path in the checkout), the Unity version (ProjectSettings/ProjectVersion.txt), the branch
- * base (STUDIO_UNITY_LIBRARY_BASE, else studio/game.json engines.unity.target, else main) and a hash of
- * Packages/manifest.json and packages-lock.json: a version or package change starts fresh (a new key, a cold first
- * run). The newest STUDIO_UNITY_LIBRARY_CACHE_KEEP (2) keys per project are kept; older ones are deleted on save.
- *
- * Copied, never hard-linked or junctioned. The editor writes into Library files in place (its asset database is a
- * memory-mapped database file, rewritten under the same name): a hard link would write the lane's changes into the
- * cache, and a junction or symlink would make two editor runs share one live Library (on Windows a junction also
- * makes deleting the lane copy delete through into the cache with some tools). A copy costs a minute or two for a
- * few GB against a ~10 min import; lock files (*-lock, *.lock) are not copied. 2.70.0 (u): the copy runs up to
- * STUDIO_UNITY_CACHE_COPY_JOBS files at once (STUDIO_UNITY_CACHE_COPY=parallel, the default; serial: fs.cpSync).
- *
- * Never shared by two editor runs at once: each run works on its own copy, and the copy in or out takes
- * <cache>/<key>.lock (a live holder: the run goes cold, or doesn't save, and says so; it never waits or overwrites).
- * Editor runs already run one at a time under machine:heavy; the key lock covers STUDIO_HEAVY_SLOTS > 1 and land
- * scripts calling this CLI.
- *
+ * harness/unity-cache.mjs — a warm Unity Library cache, so a fresh project copy skips the ~10 min import.
+ * A copy without a Library/ gets the cached one (seed); after a green run its Library/ replaces the cache (save). The
+ * cache is <STUDIO_UNITY_LIBRARY_CACHE>/<key>/Library (default <main checkout>/.studio/unity-cache; off: none). The key
+ * is the project, the Unity version, the branch base (STUDIO_UNITY_LIBRARY_BASE, else studio/game.json
+ * engines.unity.target, else main) and a hash of Packages/manifest.json and packages-lock.json. The newest
+ * STUDIO_UNITY_LIBRARY_CACHE_KEEP (2) keys per project stay. Copied, never hard-linked or junctioned; lock files are
+ * not copied; STUDIO_UNITY_CACHE_COPY_JOBS files at once. A copy takes <cache>/<key>.lock.
  *   node harness/unity-cache.mjs status [<folder>] [--json]   the key for <folder> and what the cache holds
- *   node harness/unity-cache.mjs seed <folder>                copy the warm Library into <folder> (when it has none)
- *   node harness/unity-cache.mjs save <folder>                after a green run: <folder>'s Library becomes the warm one
- *   node harness/unity-cache.mjs clear [<folder>]             delete the cache (one project's keys, or all)
- *
- * A studio's own land script (harness/unity-gate.mjs runs it under machine:heavy) can call seed and save around its
- * editor steps in its gate worktree; the harness never touches the land script's files itself.
+ *   node harness/unity-cache.mjs seed <folder> | save <folder>   copy the warm Library in | after a green run, save it
+ *   node harness/unity-cache.mjs clear [<folder>]             delete the cache
  */
 import fs from 'node:fs';
 import path from 'node:path';

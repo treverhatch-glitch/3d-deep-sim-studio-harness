@@ -1,17 +1,13 @@
 /**
- * harness/yes-wait.mjs — 2.76.0 (j, B-87): agent-proposed tasks waiting on a dev's `task yes`, said out loud.
+ * harness/yes-wait.mjs — agent-proposed tasks waiting on a dev's `task yes`, said out loud.
  *
- * A task an agent proposes as a new mechanic waits for the dev's yes (studio/task-holds.json needsYes; harness/task.mjs
- * `task yes`). The supervisor's pass started nothing for hours while ten such tasks waited, and no status said why. The
- * list is now in `npm run studio:status` (the last-pass line), `npm run status -- --brief` (Blockers) and the War Room's
- * Needs a person:
- *
+ * A task an agent proposes as a new mechanic waits for the dev's yes (studio/task-holds.json needsYes). The list shows
+ * in `npm run studio:status`, `npm run status -- --brief` (Blockers) and the War Room.
  *   yesWaiting({ holds, queue })   -> { count, ids, items: [{ id, title, by, at }] }   (pure; open tasks only)
  *   readYesWaiting({ root?, env? }) the same from the board and holds, plus { beta, line }
  *   yesLine(w)                     "waiting on yes: 3 (T-166, T-167, T-168)" or ''
- *
- * In beta mode (harness/beta-mode.mjs readBeta().on) the line also says who beta mode lets give the yes (the named
- * agents and the planning roles): who may is decided by harness/delegation.mjs, not here.
+ * In beta mode (harness/beta-mode.mjs readBeta().on) the line also says who may give the yes; harness/delegation.mjs
+ * decides.
  */
 import fs from 'node:fs';
 import path from 'node:path';

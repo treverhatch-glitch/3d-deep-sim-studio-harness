@@ -1,31 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/unity.mjs — the Unity track's checks.
- *
- *   npm run engine:sim [-- <folder>]     the sim, no editor or licence: the purity check, then `dotnet test <folder>/tools/SimTests`
- *   node harness/unity.mjs gate <folder> [--platform EditMode|PlayMode]
- *                                        the editor's run: purity, the version pin, then Unity's test runner in batch mode for
- *                                        Edit Mode and Play Mode (results from its NUnit XML; a run where no test ran fails);
- *                                        Play Mode's controls test writes qa/reports/controls-unity.json
- *   npm run engine:build [-- <folder>] [--target windows|web]
- *                                        a playable build: a Windows .exe (default) or WebGL (Assets/Editor/StudioBuild.cs)
- *   node harness/unity.mjs purity <folder>
- *   node harness/unity.mjs version <folder>
+ *   npm run engine:sim [-- <folder>]     the sim, no editor: purity check, then `dotnet test <folder>/tools/SimTests`
+ *   node harness/unity.mjs gate <folder> [--platform EditMode|PlayMode]   purity, version pin, Unity's test runner
+ *   npm run engine:build [-- <folder>] [--target windows|web]   a Windows .exe (default) or WebGL
+ *   node harness/unity.mjs purity|version <folder>
  *   node harness/unity.mjs accelerator [<folder>]   does STUDIO_UNITY_ACCELERATOR answer (a TCP connect)
- *   gate and build exit 3 when machine:heavy (or free memory) stayed busy. gate also exits 3, "NOT RUN <kind>", for an
- *   infrastructure abort (the editor ran out of memory, was ended from outside, couldn't start, had no licence, or aborted
- *   before it wrote results; or free RAM under STUDIO_UNITY_MIN_FREE_GB): nothing was tested, so never a FAIL. A compile
- *   error or a failing test is always a FAIL (exit 1).
- *
- * The folder is a Unity project (ProjectSettings/ProjectVersion.txt): engine/<game> for an engine track, or game/<slug>
- * for an adopted Unity game. The editor: STUDIO_UNITY (its full path) or `unity` on the PATH.
- *
- * The sim is a pure C# assembly (Assets/Sim, Sim.asmdef with noEngineReferences), so .NET tests it anywhere without the
- * editor; the purity check keeps it that way (no UnityEngine, no Time, no unseeded Random, no wall clock).
- *
- * The editor's runs (`gate`'s tests, `build`) take the machine:heavy lock (harness/heavy.mjs; free memory under
- * STUDIO_RAM_FLOOR_GB holds them back too). Other editor batch work goes through `node harness/heavy.mjs run --label <what>
- * -- <command>`. When the lock stays busy the run doesn't start and the command exits 3 (not a failure).
+ * gate and build exit 3 when machine:heavy stayed busy; gate also exits 3, "NOT RUN <kind>", for an infrastructure
+ * abort (no licence, out of memory, no results; STUDIO_UNITY_MIN_FREE_GB): never a FAIL. A compile error or failing
+ * test is exit 1. Editor: STUDIO_UNITY or `unity` on the PATH. The sim (Assets/Sim) is pure C#: no UnityEngine, Time,
+ * unseeded Random or wall clock.
  */
 import fs from 'node:fs';
 import path from 'node:path';

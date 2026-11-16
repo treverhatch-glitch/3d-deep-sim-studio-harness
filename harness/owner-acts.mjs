@@ -1,17 +1,14 @@
 /**
- * harness/owner-acts.mjs — 2.79 (c): the one list of what stays the owner's own, always.
+ * harness/owner-acts.mjs — the one list of what stays the owner's own, always.
  *
- * The owner's words (2026-11-06): "make it so Patch can sign off on everything and not need me", with these left out:
- * deleting data, keys and credentials, publishing outside the PC, and turning beta mode off (2.79.1: and defining the
- * tools the harness launches, studio/tools.json). Beta mode
- * (harness/beta-mode.mjs), the owner proxy (harness/owner-proxy.mjs), an outside signer and every launched session are
- * refused these, with the reason; only a person's own terminal does them. This file is that list and nothing else (no
- * imports), so permission.mjs, beta-mode.mjs, owner-proxy.mjs, delegation.mjs and ask.mjs all read the same one.
- *
+ * Left to the owner: deleting data, keys and credentials, publishing outside the PC, turning beta mode off, and
+ * defining the tools the harness launches (studio/tools.json). Beta mode, the owner proxy (harness/owner-proxy.mjs),
+ * an outside signer and every launched session are refused these. No imports, so permission.mjs, beta-mode.mjs,
+ * owner-proxy.mjs, delegation.mjs and ask.mjs read the same list.
  *   act       the name a refusal and the decisions log use
  *   actions   delegation action names it covers (delegationFor refuses them to the proxy and beta mode)
  *   rx        how an ask's question (and why) names it: kept narrow, so a token budget or a protected file isn't one
- *   unless    (2.83) words that match rx but are plainly something else: returns why, or null (then it is the owner's)
+ *   unless    words that match rx but are plainly something else: returns why, or null (then it is the owner's)
  */
 // 2.83: what tells removing code from deleting data. A crew's owner was paged for a task that removed three unwired
 // modules: that is not what this list is for. The reading is narrow on purpose: the words must say what it is, and one

@@ -1,30 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/watch.mjs — the studio's watcher. A script, not a model: it costs no tokens.
- *
  *   npm run watch                        one pass: report, requeue abandoned work, ping the Producer if needed
  *   node harness/watch.mjs --loop 300    a pass every 5 minutes
  *   node harness/watch.mjs --dry-run     report only, change nothing
- *
- * Options: --stall <min> (default 30) silence before a working agent counts as stalled,
- *          --wait <min> (default 60) how long handed-back work may sit before the Producer hears.
- *
- * What it does on its own (safe, mechanical):
- *   - A task in progress whose claim expired or was never made goes back to the top of the queue,
- *     with a handoff note naming the last agent and when it was last heard from. 2.58.0 (P-054): only if the claim
- *     is still what the pass saw when it decided (checked again under the board lock).
- *   - 2.58.0 (P-053): a task claim on a task that is done, waiting or gone from the board (a killed `task done`,
- *     start or pause left it) is released after STUDIO_CLAIM_LEAK_GRACE_SEC (60) with the board quiet that long.
- *   - 2.58.0 (P-052): a task found in both NEXT.md and DONE.md (a board write cut off) is settled to one copy.
- *   - 2.58.0 (P-060): temp files killed writers left in studio/ and .studio/ (older than STUDIO_TEMP_SWEEP_MIN, 5)
- *     are removed.
- *   - 2.58.0 (PU-39): a launcher session whose process is alive but whose heartbeat is older than
- *     STUDIO_STALL_RELEASE_MIN (30; 0 = off) hands its task back, frees its claims and its slot. Nothing is killed.
- *   - Starting agents (the Producer check-in, filling idle slots) only with auto-start on
- *     (npm run mode -- autostart on --by <name>; off by default since 2.58.0).
- * What it hands to the Producer (one "Watch:" task at a time, never one per finding):
- *   - agents holding a task but silent past --stall, handed-back work nobody picked up past --wait,
- *     and providers that ran out (route.exhausted) in the last hour.
+ * Options: --stall <min> (default 30) before an agent counts as stalled; --wait <min> (default 60) before the Producer
+ * hears of handed-back work. On its own: an expired claim's task goes back to the top of the queue; a claim on a done,
+ * waiting or gone task is released after STUDIO_CLAIM_LEAK_GRACE_SEC (60); a task in both NEXT.md and DONE.md is
+ * settled; temp files older than STUDIO_TEMP_SWEEP_MIN (5) are removed; a session with a heartbeat older than
+ * STUDIO_STALL_RELEASE_MIN (30; 0 = off) hands its task back (nothing killed). Auto-start: npm run mode -- autostart
+ * on --by <name>.
  */
 import fs from 'node:fs';
 import { producerWake, producerLaunched } from './producer-wake.mjs';
@@ -92,15 +77,10 @@ export function stallReleaseMin(env = process.env) {
 }
 
 /**
- * 2.58.0 (PU-39, P-050): a launcher session whose process is alive but whose heartbeat is older than
- * STUDIO_STALL_RELEASE_MIN held its slot and its task forever: the launcher started no one in its place, nobody
- * else could hand the task back, and the watcher only reported "stalled". Past the threshold the watcher now saves
- * its uncommitted work (as a hand-back does), hands its tasks back with a note, frees its claims, marks the
- * session ended ("stalled") so its slot is free, and says so in an event. It kills NOTHING: the process is left
- * alone (a frozen machine that wakes up, or a pid that now belongs to something else, must not be killed).
- * A machine that slept stops every heartbeat and the watcher alike: when the watcher's own last pass
- * (`prevPassAt`, from .studio/watch-last.json) is older than the threshold, nothing is freed this pass; the
- * next pass, minutes later, sees whether the heartbeats came back.
+ * A launcher session whose process is alive but whose heartbeat is older than STUDIO_STALL_RELEASE_MIN: the watcher
+ * saves its uncommitted work, hands its tasks back, frees its claims, marks the session ended ("stalled") and emits an
+ * event. It kills NOTHING. If the watcher's own last pass (`prevPassAt`, .studio/watch-last.json) is older than the
+ * threshold (a machine that slept), nothing is freed.
  */
 export function releaseStalled({ now = Date.now(), dryRun = false, events = readRecentEvents(2000), list = sessions(), prevPassAt = lastPassAt() } = {}) {
   const min = stallReleaseMin();

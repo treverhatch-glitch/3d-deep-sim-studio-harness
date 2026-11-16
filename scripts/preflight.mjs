@@ -1,17 +1,13 @@
 #!/usr/bin/env node
 /**
  * scripts/preflight.mjs — is this clone ready for a test run? Checks, and with --fix makes it safe.
- *
- *   npm run preflight                 check only
- *   npm run preflight -- --fix        also: install the hooks, freeze the harness, turn off pushing,
- *                                     make .env from the example
- *   npm run preflight -- --quick      skip running the gates
- *
- * A test run builds a game in a clone and leaves the harness itself unchanged, so the results say
- * how the harness does as shipped. --fix makes that hold: the pre-commit hook refuses changes to
- * harness files (.studio/harness-frozen), and `git push` is turned off for this clone so nothing
- * reaches the public repo. Harness problems go in notes (npm run notes -- add --kind bad "...").
- * Undo after the run: delete .studio/harness-frozen; git remote set-url --push origin <url>.
+ * npm run preflight                 check only
+ * npm run preflight -- --fix        also: install the hooks, freeze the harness, turn off pushing, make .env
+ * npm run preflight -- --quick      skip running the gates
+ * A test run builds a game in a clone and leaves the harness unchanged. --fix: the pre-commit hook refuses changes to
+ * harness files (.studio/harness-frozen), and `git push` is turned off for this clone. Harness problems go in notes
+ * (npm run notes -- add --kind bad "..."). Undo: delete .studio/harness-frozen; git remote set-url --push origin
+ * <url>.
  */
 import fs from 'node:fs';
 import path from 'node:path';

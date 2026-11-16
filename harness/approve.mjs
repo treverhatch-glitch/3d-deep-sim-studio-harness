@@ -1,38 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/approve.mjs — 2.32.0: changes only the owner can approve, proved with the owner's signature.
- *
- * Agents can edit any file they can write, including the tests that judge them: in the Marina run a
- * protected-test list was re-initialised by agent commits, and changing a scenario's expected outcome
- * turned a broken game green. So some files are protected (studio/protected.json "globs"), and a change
- * to them lands only with an approval signed by the owner's key:
- *
- *   npm run approve -- keygen                       make the owner key pair, once, on the owner's own machine.
- *                                                   The private key goes to ~/.studio-owner/ (STUDIO_OWNER_KEY
- *                                                   to put it elsewhere), never into the repo and never on a
- *                                                   machine agents run on. Commit studio/keys/owner-ed25519.pub.pem.
+ * harness/approve.mjs — changes only the owner can approve, proved with the owner's signature.
+ * Protected files (studio/protected.json "globs") change only with an approval signed by the owner's key:
+ *   npm run approve -- keygen        once, on the owner's machine (key in ~/.studio-owner/ or STUDIO_OWNER_KEY)
  *   npm run approve -- show [--base <ref>]          the protected files this branch changes, and whether approved
  *   npm run approve -- protected --note "why" [--base <ref>]   sign exactly those changes (by content)
  *   npm run approve -- force <T-ID> --reason "why"  let task done --force / --accepted-by close that task
- *   npm run approve -- tests --note "why"           2.58.2 (PU-29): accept exactly the weakened tests listed now
- *                                                   (harness/test-weakening.mjs: a removed assert, a .skip, a wider tolerance…)
- *   npm run approve -- proposal <T-ID> --note "why" 2.65.0 (B-40): sign exactly the protected part of the lane's config
- *                                                   proposal (studio-proposals/<T-ID>.json in this checkout), so the
- *                                                   merge train applies it when the lane lands (harness/config-proposal.mjs)
- *   npm run approve -- hooks --note "why"           2.58.2 (PU-29): accept exactly the commits listed now that skipped
- *                                                   the git hooks (harness/hook-stamp.mjs), by commit and patch-id
- *
- * An approval is a file in studio/approvals/ (commit it with the change). It holds what was approved
- * (each protected file's path and content hash, or the task) and an Ed25519 signature. The check
- * (qa/protected-check.mjs) verifies it against the owner's public key read from the BASE branch, never
- * from the branch under review, so an agent can't swap in its own key; and the signed hashes must match
- * the files exactly, so an approval can't be reused for a different edit. Until the base branch has an
- * owner key, nothing is enforced (the check says so).
- *
- * PU-20: the check judges the working tree (committed, staged, unstaged and untracked protected files), also
- * when the base is at HEAD (nothing committed yet, or just pushed). With no base branch at all (no remote, on
- * the studio's own branch) it judges every change since the commit that set the owner key, file by file,
- * against the hashes the owner's approvals recorded, instead of passing.
+ *   npm run approve -- tests --note "why"           accept exactly the weakened tests listed now
+ *   npm run approve -- proposal <T-ID> --note "why" sign the protected part of the lane's config proposal
+ *   npm run approve -- hooks --note "why"           accept exactly the commits listed now that skipped the git hooks
+ * Approvals are files in studio/approvals/, checked (qa/protected-check.mjs) against the BASE branch's public key.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -140,19 +117,9 @@ function studioBranchOfLane(env = process.env) {
 
 /**
  * Which branch to compare with: STUDIO_PROTECT_BASE, the PR's base in CI, the lane's studio branch, else origin/main.
- * PU-20: a base at HEAD itself (nothing committed since, or just pushed) is still used, so uncommitted edits are
- * judged; with no other branch at all (no remote, on the studio's own branch) the base is the last commit that
- * set the owner key, and changes since then are judged by the approvals' recorded hashes ({ byHash: true }).
- *
- * 2.60.1 (B-30, B-32): this is THE base for every check that judges "since the base": the protected and weakened-tests
- * gates, the hooks gate and `npm run hooks -- restamp` (hook-stamp.mjs changeBase), and task done (which runs those).
- * Restamp used the lane's local main while the hooks check took a stale origin/main, so restamp said "nothing to do"
- * while the check flagged main's own commits. Now:
- *   - in a lane copy (STUDIO_MAIN_ROOT, or a worktree at <main>/.lanes/<x>: hook-stamp.mjs laneOf), the main
- *     checkout's own branch, local, even when the lane is at its tip (a stale origin/main never wins there);
- *   - elsewhere, local main before origin/main when origin/main is an ancestor of it (main is ahead: origin is only
- *     stale), unless HEAD is on main itself (there origin/main still names what isn't pushed yet).
- * Which commits count as stamped is unchanged; only the base is.
+ * A base at HEAD is still used (uncommitted edits are judged); with no other branch it is the last commit that set the
+ * owner key ({ byHash: true }). THE base for every "since the base" check (protected, weakened tests, hooks, restamp,
+ * task done). A lane copy uses the main checkout's local branch; elsewhere local main goes before origin/main if ahead.
  */
 export function resolveBase(envIn = process.env) {
   // 2.71.1 (A09, S01): in a lane copy a named base (STUDIO_PROTECT_BASE, GITHUB_BASE_REF) is ignored (gate-trust.mjs).
@@ -184,24 +151,10 @@ export function resolveBase(envIn = process.env) {
 }
 
 /**
- * 2.78.1 (B-120): the owner key that approvals are verified with for base `b` (resolveBase's answer): { pub, ref, from }.
- * The base's own key, as before. On the main checkout of a studio that doesn't push, the base is origin/main, which
- * never got the owner key (it was committed on main and never pushed), so `npm run approve -- hooks` wrote an approval
- * the hooks check could never verify ("2 commit(s) since origin/main skipped the git hooks"), while the train, whose
- * base is the local main, passed. Now, when the base has no key, the key-carrying base is used: the local main's
- * committed key, but only when the studio doesn't push there, which the harness reads from git itself (there is no
- * origin/main, or origin/main is an ancestor of main: main is ahead, origin is only stale) and only when the base is in
- * main's history (so main's key is the key of the history being judged). Which commits are judged is unchanged; only
- * which key verifies the owner's approvals of them. This is the key a train copy (base: the local main) reads, so
- * verify, the train and approve agree. A lane copy's base is the studio's branch (decisive), whose own key wins.
- * STUDIO_KEY_BASE=off: the base's key only (the 2.78.0 way).
- *
- * 2.78.2 (A-030): origin/main can hold commits local main doesn't (pull requests merged on GitHub, never pulled), so
- * "origin/main is an ancestor of main" missed, and so did "the base is in main's history" when the base came from
- * origin/main's side. The relation now: the key is always read from refs/heads/main (main's own history); the base
- * shares history with main; none of the base's commits that main lacks (main..base) touches the owner key file, so the
- * base's side never set or removed a key; and origin/main carries no other owner key (none, or main's). A base whose
- * own side changed the key, or an origin/main with a different key, gets none. STUDIO_KEY_BASE=ancestor: 2.78.1's rule.
+ * The owner key that approvals are verified with for base `b` (resolveBase's answer): { pub, ref, from }. The base's
+ * own key; if none, the local main's key, only when the studio doesn't push there and the base shares main's history
+ * (key read from refs/heads/main; no commit in main..base touches the key file; origin/main has no other key).
+ * STUDIO_KEY_BASE=off: the base's key only. STUDIO_KEY_BASE=ancestor: the older, stricter ancestor rule.
  */
 const pemKey = (p) => String(p || '').replace(/\r\n/g, '\n').trim();
 export function keyFor(b, env = process.env) {
@@ -230,24 +183,16 @@ export function keyFor(b, env = process.env) {
 }
 
 /**
- * 2.78.2 (B-120 again, A-030): THE base and key every approval kind is made and judged with: resolveBase's base and
- * keyFor's key ({ ...base, key }). `exact`: a kind whose enforcement starts with the key (protected files, weakened
- * tests). When the key came from local main (the base has none: a studio that doesn't push, or an origin/main with
- * merges main lacks), those are judged since the key-carrying base, local main (git merge-base HEAD main), the base a
- * lane copy and a train copy use. Without it `approve -- protected` on the main checkout (or in a checkout outside
- * .lanes/) signed the change set since origin/main, which also held main's own protected commits since then, so its
- * change id never matched the set the train judges since local main. The range only shrinks (merge-base HEAD main
- * descends from the old base): commits main already has are not judged again. The hooks gate keeps its base (it is
- * enforced without a key) and only takes the key. STUDIO_KEY_BASE=off: the 2.78.0 reading for every kind.
+ * THE base and key every approval kind is made and judged with: resolveBase's base and keyFor's key ({ ...base, key
+ * }). `exact`: a kind whose enforcement starts with the key (protected files, weakened tests); when the key came from
+ * local main, those are judged since git merge-base HEAD main, as a lane or train copy does. The hooks gate keeps its
+ * base and only takes the key. STUDIO_KEY_BASE=off: the base's key for every kind.
  */
 /**
- * 2.78.2: the owner's switch, STUDIO_MAIN_CHECKOUT_ENFORCE (default off). Where the base has no owner key and the key
- * comes from local main (keyFor from 'main': in practice the main checkout of a studio that doesn't push), 2.78.1 did
- * not enforce protected files, weakened tests or `task done --force` there ("not enforced"), and the owner kept that
- * call for himself. judgeBase still gives every approve kind one base and key (so an approval signed there is the one
- * the train accepts); this only decides whether those three checks enforce on such a checkout. on: they do, with main's
- * key. The hooks gate is unchanged (enforced without a key since 2.58.2; 2.78.1 verifies its approvals with main's key).
- * Returns the key to enforce with, or null (not enforced).
+ * The owner's switch, STUDIO_MAIN_CHECKOUT_ENFORCE (default off). Where the base has no owner key and it comes from
+ * local main (the main checkout of a studio that doesn't push), protected files, weakened tests and `task done
+ * --force` are not enforced; on: they are, with main's key. The hooks gate is unchanged. Returns the key to enforce
+ * with, or null.
  */
 export const mainCheckoutEnforce = (env = process.env) => /^(on|1|true|yes)$/i.test(String(env.STUDIO_MAIN_CHECKOUT_ENFORCE || '').trim());
 export function enforcingKey(b, env = process.env) {
@@ -341,14 +286,10 @@ export const OWNER_ONLY_FILES = Object.freeze({ 'studio/tools.json': 'tools' });
 export const ownerOnlyFileIn = (approval) => (approval?.files || []).map((f) => String(f?.path || '').replace(/\\/g, '/')).find((f) => OWNER_ONLY_FILES[f]) || null;
 export function verifyApproval(doc, publicPem) {
   if (!doc?.signature && ownerOnlyFileIn(doc?.approval)) return false;
-  // 2.73.1 (B-67): an approval the owner's proxy made (no signature; the owner-signed proxy grant embedded) counts while
-  // that grant is still the one on file and the owner's yes is recorded (harness/owner-proxy.mjs).
-  // A committed proxy approval also has to be the proxy's own commit (the commit-msg hook's Studio-Agent trailer: the
-  // proxy's name, or none for a person): a builder's lane can't carry one in.
-  // 2.78.2 (h; the 2.79 audit D1.1): a beta approval of any kind (protected files, weakened tests, hooks, a forced done)
-  // is judged by the one beta predicate (beta-mode.mjs betaRecordVerdict): committed exactly as written, under the beta
-  // session on now, not by a worker, and made by someone who may make that decision (permission.mjs mayDecide). Before,
-  // an uncommitted one (committedByAgent null) passed: a builder could drop one in studio/approvals/, which lanes share.
+  // An approval the owner's proxy made (no signature; the owner-signed proxy grant embedded) counts while that grant is
+  // the one on file and the owner's yes is recorded (harness/owner-proxy.mjs); a committed one must be the proxy's own
+  // commit (Studio-Agent trailer). A beta approval is judged by beta-mode.mjs betaRecordVerdict: committed as written,
+  // under the beta session now on, not by a worker, made by someone who may decide (permission.mjs mayDecide).
   if (!doc?.signature && doc?.beta) return betaVerdict(doc).ok;
   if (!doc?.signature && doc?.proxy) {
     if (!proxyApprovalOk(doc, publicPem)) return false;

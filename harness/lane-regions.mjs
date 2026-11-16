@@ -1,27 +1,14 @@
 /**
- * harness/lane-regions.mjs — 2.78.2 (item 9): region lanes on big shared files, opted in per file.
- *
- * The crew's run: lane overlap was file-level, so two lanes that both touch one 29k-line shared sim file never ran side
- * by side, and builders sat at 0-2 of 6. Now a lane entry may name a region of a file: `path/sim.ts#symbolName` (a
- * function, method, class or top-level name, as `npm run map -- find` reads them) or `path/sim.ts#L120-L340` (lines;
- * `#120-340` too). Several regions are several entries (`a/sim.ts#tickFlights,a/sim.ts#tickGates`). Set them where a
- * lane is set: `npm run task -- lane <ID> <entries> --by <you>`, `task add --paths …`, or a task's --scope.
- *
- * Two entries on the same file run side by side only when the file is opted in AND both name a region AND the regions
- * don't overlap (both resolved on the main checkout's copy of the file; a symbol that can't be found overlaps
- * everything). Anything else is file-level as before: a file not opted in, a whole-file entry, a folder that holds
- * the file. The lanes still land through the train, which rebases each on main; a real conflict hands the later lane
- * back as usual. Regions only decide who may start beside whom.
- *
- * Which files: STUDIO_REGION_FILES (globs, comma separated; "off" = none), else the game manifest's "regionFiles"
- * (<game>/studio.gates.json, as "sharedSim"), else none: off by default. To turn it on for one file:
- * STUDIO_REGION_FILES=web/<game>/src/sim/sim.ts in .env, then give its tasks region lanes.
- *
- * The readers: harness/task-hold.mjs lanesClash (the supervisor's side-by-side check, handout's lock check),
- * harness/lane-plan.mjs (shared sim stacking: a region task on an opted-in file is stacked only when the regions
- * overlap), harness/task-overlap.mjs (the lane-vs-lane note) and the launcher's path claims (harness/agent.mjs: a
- * region entry on an opted-in file isn't held as a file lock when the agent works in its own lane copy). Everything
- * that treats a lane as paths (laneList: sparse checkouts, gates, the drift watch) sees the file.
+ * harness/lane-regions.mjs — region lanes on big shared files, opted in per file.
+ * A lane entry may name a region: `path/sim.ts#symbolName` (as `npm run map -- find` reads them) or
+ * `path/sim.ts#L120-L340` (`#120-340` too). Several regions are several entries. Set them with `npm run task -- lane
+ * <ID> <entries> --by <you>`, `task add --paths …`, or a task's --scope. Two entries on one file run side by side only
+ * when the file is opted in AND both name a region AND the regions don't overlap (resolved on the main checkout's copy;
+ * a symbol that can't be found overlaps everything). Else it is file-level. Lanes still land through the train, which
+ * rebases each on main. Regions only decide who may start beside whom. Opt in: STUDIO_REGION_FILES (globs, comma
+ * separated; "off" = none), else the manifest's "regionFiles" (<game>/studio.gates.json); off by default. Readers:
+ * harness/task-hold.mjs lanesClash, harness/lane-plan.mjs, harness/task-overlap.mjs and the path claims in
+ * harness/agent.mjs. laneList (sparse checkouts, gates, the drift watch) sees the whole file.
  */
 import fs from 'node:fs';
 import path from 'node:path';

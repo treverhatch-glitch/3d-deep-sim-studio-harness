@@ -1,29 +1,14 @@
 /**
  * harness/fsafe.mjs — crash-safe studio state. Pure Node, no other studio modules.
- *
- *   writeAtomic(file, text)        readers see the old file or the new one, never half of one: the text goes to a
- *                                  temp file in the same folder, then is renamed over the target.
- *   createExclusive(file, text)    make a file only if none exists, already holding all of its text (a hard link
- *                                  from a temp file; where links aren't supported: exclusive create, one write).
- *   withFileLock(name, fn)         a short cross-process lock (<dir>/<name>.mutex: pid, host, time) around a
- *                                  synchronous read-modify-write. Re-entrant in one process. A dead holder's lock is
- *                                  broken at once; a live holder on this machine is waited for, never broken on age;
- *                                  after timeoutMs it throws (code ELOCKBUSY), never loops.
- *   appendLine(file, line)         append one line; a torn last line (a writer killed mid-line) is closed first, so
- *                                  it can't swallow this one.
- *   moveAside(file, dest, raw)     rename a file away only if it still holds `raw` (put back if another agent
- *                                  replaced it meanwhile).
- *   sweepTempsDeep(roots)          remove temp files killed writers left (the watcher runs it).
- *   onFsafeWarning(fn)             also send fsafe's warnings to `fn` (harness/lock.mjs logs them as events).
- *
- * Why: agents are killed at any moment, so no state file may ever be seen half-written: an empty lock file made every
- * claim recurse, concurrent starters lost each other's board moves, a half-written STOP read as "not stopped", and a
- * torn events line glued to the next event.
- *
- * Windows: renaming over a file another program holds open (an antivirus scan, an editor) can fail with
- * EPERM/EBUSY/EACCES. writeAtomic retries briefly with backoff (about 1 s, STUDIO_ATOMIC_RETRIES), then writes the
- * file in place with a warning (and a warning event) rather than lose the update. createExclusive retries
- * the same errors (a lock file that was just deleted stays "delete pending" while another program has it open).
+ * writeAtomic(file, text)      readers see the old file or the new one: temp file in the same folder, renamed over
+ * createExclusive(file, text)  make a file only if none exists, already holding all its text (hard link from a temp)
+ * withFileLock(name, fn)       short cross-process lock (<dir>/<name>.mutex) around a synchronous read-modify-write;
+ *                              a dead holder's lock is broken at once; after timeoutMs it throws (ELOCKBUSY)
+ * appendLine(file, line)       append one line; a torn last line is closed first
+ * moveAside(file, dest, raw)   rename a file away only if it still holds `raw`
+ * sweepTempsDeep(roots)        remove temp files killed writers left;  onFsafeWarning(fn): send warnings to `fn`
+ * Agents are killed at any moment, so no state file may be seen half-written. Windows: a rename over a file held open
+ * can fail (EPERM/EBUSY/EACCES); writeAtomic retries (STUDIO_ATOMIC_RETRIES), then writes in place.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -147,11 +132,10 @@ const permFallbacks = new Map();
 export const busyCode = (code) => (process.platform === 'win32' ? RETRY_CODES.has(code) : code === 'EBUSY');
 
 /**
- * Create `file` holding `text`, only if it doesn't exist yet. Returns true when created, false when it exists (or,
- * is still held busy after the retries: the caller treats that as taken and tries again later). The file
- * never appears empty: the text is written to a temp file first and hard-linked into place (link fails with EEXIST,
- * like exclusive create). Without hard links: exclusive create and the whole text in one write.
- * `link`, `open`, `busy`, `delays` and `platform` are for tests.
+ * Create `file` holding `text`, only if it doesn't exist yet. Returns true when created, false when it exists (or is
+ * still held busy after the retries: the caller treats that as taken). The file never appears empty: the text goes to
+ * a temp file first and is hard-linked into place (EEXIST like exclusive create); without hard links, one exclusive
+ * write. `link`, `open`, `busy`, `delays` and `platform` are for tests.
  */
 export function createExclusive(file, text, { link = fs.linkSync, open = fs.openSync, busy = busyCode, delays = retryDelays(), platform = process.platform } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -258,17 +242,10 @@ export function pidAlive(pid) {
 const held = new Map();
 
 /**
- * Run `fn` (synchronous) holding the lock `<dir>/<name>.mutex`. Other processes wait (polling, 2 → 50 ms) up to
- * timeoutMs (STUDIO_STATE_LOCK_WAIT_MS, 15 s), then get an error with code ELOCKBUSY. The sections it guards are a
- * read and a write of one small file: milliseconds. When a lock is broken:
- *   - its holder is on this machine and its process is gone: at once;
- *   - its holder is on this machine and alive: never on age (a holder paused 12 s, by a click in its Windows console, a
- *     sleeping laptop or a clock jump, would lose the lock and its update). Only past liveMaxMs
- *     (STUDIO_STATE_LOCK_LIVE_MAX_MS, 10 min), when the pid most likely belongs to another program now;
- *   - its holder is on another machine (a shared folder): when older than staleMs (STUDIO_STATE_LOCK_STALE_MS, 10 s);
- *   - it can't be read as a lock: after 2 s.
- * A holder whose lock was broken anyway finds out before it writes (assertLocksHeld in writeAtomic) and when it lets
- * go: it throws ELOCKLOST rather than pass silently.
+ * Run `fn` holding the lock `<dir>/<name>.mutex`. Others wait up to timeoutMs (STUDIO_STATE_LOCK_WAIT_MS, 15 s), then
+ * get ELOCKBUSY. A lock is broken: at once if its holder is on this machine and gone; never on age if alive, only past
+ * liveMaxMs (STUDIO_STATE_LOCK_LIVE_MAX_MS, 10 min); on another machine, past staleMs (STUDIO_STATE_LOCK_STALE_MS, 10
+ * s); if unreadable, after 2 s. A holder whose lock was broken throws ELOCKLOST.
  */
 export function withFileLock(name, fn, { dir = DEFAULT_LOCK_DIR, timeoutMs = num(process.env.STUDIO_STATE_LOCK_WAIT_MS, 15000), staleMs = num(process.env.STUDIO_STATE_LOCK_STALE_MS, 10000), liveMaxMs = num(process.env.STUDIO_STATE_LOCK_LIVE_MAX_MS, 600000), what = name } = {}) {
   const file = path.join(dir, `${name}.mutex`);

@@ -1,22 +1,14 @@
 /**
- * harness/engine-train-control.mjs — 2.84 (u): control of an engine train: which lanes it takes, stopping it, and its
- * automatic start.
- *
- * What a crew hit in one day: an art batch had to land apart from 16 queued ports and there was no way to pick lanes
- * (the overseer carried a local env-var patch); the automatic start began a port train 40 seconds after the overseer
- * stopped one; `task train cancel` covered only the game's own train; one risky branch stalled a 16-branch train.
- *
- *   selectBatch     the train's batch from the queue: --only ids / a --tag (else untagged lanes only), then an "alone"
- *                   lane rides by itself (2.83), then engines.<x>.batchGroup "play" keeps only the head lane's Play Mode
- *                   class (harness/engine-rules.mjs playSelection per lane), then the cap (--max, engines.<x>.batchMax,
- *                   STUDIO_ENGINE_BATCH_MAX). Its `why` says, in plain words, why the batch is what it is.
- *   cancelEngineTrain  `npm run task -- train cancel --engine <x> --by <name>`: the cancel file first, the train's tree
- *                   killed, the gate worktree put back at the target, the train's integration refs deleted, the lock
- *                   released; the queue is left as it was (nobody handed back, nobody blamed).
- *   setEngineAuto   `npm run task -- train auto off|on --engine <x> --by <name> [--hours N]`: the Line Producer's
- *                   automatic start for that engine (.studio/train/<x>-auto.json).
- * Who may cancel or switch: the board-decision verdict (harness/permission.mjs mayDecide('board')): the owner, the
- * owner's stand-ins and outside agents; never a launched worker session.
+ * harness/engine-train-control.mjs — control of an engine train: which lanes it takes, stopping it, its auto start.
+ *   selectBatch        the batch from the queue: --only ids / a --tag (else untagged lanes only), then an "alone" lane
+ *                      rides by itself, then engines.<x>.batchGroup "play" (head lane's Play Mode class), then the cap
+ *                      (--max, engines.<x>.batchMax, STUDIO_ENGINE_BATCH_MAX)
+ *   cancelEngineTrain  `npm run task -- train cancel --engine <x> --by <name>`: cancel file first, the train's tree
+ *                      killed, gate worktree reset to the target, integration refs deleted, lock released
+ *   setEngineAuto      `npm run task -- train auto off|on --engine <x> --by <name> [--hours N]`: the Line Producer's
+ *                      automatic start (.studio/train/<x>-auto.json)
+ * Who may cancel or switch: the board-decision verdict (harness/permission.mjs mayDecide('board')): the owner,
+ * stand-ins and outside agents; never a launched worker session.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -86,11 +78,10 @@ export function laneAloneWhy({ repo, target, cfg = {}, lane }) {
 }
 
 /**
- * 2.84 (u): this train's batch from the queue (in queue order). opts: only (task ids), tag, max (--max), batchMax,
- * group ('play' | null), classOf(lane) -> class. Order: --only and --tag first (a train with neither takes untagged lanes
- * only: a tagged lane is never swept into a general train), then an alone lane rides by itself, then grouping, then the
- * cap. { lanes, why, total, waiting, cls, alone, tagged } or { error: 'unknown', unknown, why } when an --only id is not
- * queued.
+ * This train's batch from the queue (in queue order). opts: only (task ids), tag, max (--max), batchMax, group ('play'
+ * | null), classOf(lane) -> class. Order: --only and --tag first (a train with neither takes untagged lanes only), then
+ * an alone lane rides by itself, then grouping, then the cap. { lanes, why, total, waiting, cls, alone, tagged } or {
+ * error: 'unknown', unknown, why } when an --only id is not queued.
  */
 export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 0, group = null, classOf = () => 'full', isVision = null, waits = null, aloneOf = null } = {}) {
   const q = Array.isArray(queue) ? queue.filter((e) => e && e.task) : [];

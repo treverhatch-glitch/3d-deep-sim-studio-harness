@@ -54,11 +54,10 @@ export function misplacedTrailerText(found, key = 'Golden-Reason') {
 }
 
 /**
- * 2.85 (B-138): put a misplaced `key:` line into the message's trailer block. Used by the commit-msg hook before it adds
- * the Studio-* trailers: a message whose "Golden-Reason:" sat in the body (or wrapped onto a second line) got those
- * trailers as a new last paragraph, and its Golden-Reason was left above a blank line where git doesn't read it. The line
- * (with its unindented wrapped lines up to a blank line or another "Key:" line) is joined into one line and moved to the
- * end, after a blank line, before the other trailers already there. Returns the message, unchanged when nothing is misplaced.
+ * Puts a misplaced `key:` line into the message's trailer block. Used by the commit-msg hook before it adds the
+ * Studio-* trailers: a "Golden-Reason:" in the body (or wrapped onto a second line) is joined into one line (with its
+ * unindented wrapped lines, up to a blank line or another "Key:" line) and moved to the end, after a blank line,
+ * before the other trailers. Returns the message, unchanged when nothing is misplaced.
  */
 export function fixTrailerBlock(message, key = 'Golden-Reason', { parse = (m) => git(process.cwd(), ['interpret-trailers', '--parse'], m) } = {}) {
   const msg = String(message || '').replace(/\r\n?/g, '\n');

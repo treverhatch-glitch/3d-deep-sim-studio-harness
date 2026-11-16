@@ -1,25 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/changes.mjs — 2.61.0: change records, the learning edge's measurement. A script: no model, no tokens.
- *
- *   npm run learn -- change add --kind harness|skill|pitfall|rule --target <file or line> --signature <sig> [--signature …]
- *                               --expect "<what should drop>" --risk "<what could go wrong>" --revert "<command>"
- *                               [--commit <sha>] [--title "…"] [--by <name>]
- *   npm run learn -- change list
- *   npm run learn -- change eval        evaluate the records that are due now (the HUB does it daily)
- *
- * Every change to the harness, a skill (studio/skills/), a pitfall (studio/PITFALLS.md) or a rule carries a small record,
- * studio/changes/C-<n>.json (committed): which failure signatures it should reduce (the signatures `npm run learn` shows
- * under "Keeps happening", e.g. sig-3fa9c2d1, or "task.not_done: <message>"), the expected effect, the risk and the
- * revert command. After STUDIO_CHANGE_EVAL_TASKS finished tasks (default 20) or STUDIO_CHANGE_EVAL_DAYS days (default
- * 7), the signature rate per task type is compared before and after the change. A type counts only with at least
- * STUDIO_CHANGE_MIN_SAMPLE finished tasks on each side (default 5); with none, the answer is "not enough data" and the
- * record keeps watching. A rise of STUDIO_CHANGE_MARGIN (default 0.1, ten points) in any type is "regressed", a drop
- * as large in some type is "kept", anything else "no effect".
- *
- * "regressed" files one question for the owner (harness/ask.mjs, no deadline, never on a timer): revert or keep.
- * Nothing here reverts anything: the record holds the command, a person decides. The proposer never grades: the verdict
- * is this script's arithmetic on the event log, not an agent's opinion.
+ * harness/changes.mjs — change records, the learning edge's measurement. A script: no model, no tokens.
+ *    npm run learn -- change add --kind harness|skill|pitfall|rule --target <file or line> --signature <sig> […]
+ *                                --expect "<what should drop>" --risk "<what could go wrong>" --revert "<command>"
+ *                                [--commit <sha>] [--title "…"] [--by <name>]
+ *    npm run learn -- change list   |   change eval     evaluate the records that are due (the HUB does it daily)
+ * Each change carries a record, studio/changes/C-<n>.json: the failure signatures it should reduce, the effect, the
+ * risk, the revert command. After STUDIO_CHANGE_EVAL_TASKS (20) tasks or STUDIO_CHANGE_EVAL_DAYS (7) days the rate
+ * per task type is compared before and after (STUDIO_CHANGE_MIN_SAMPLE 5 per side, else "not enough data"). A rise of
+ * STUDIO_CHANGE_MARGIN (0.1) is "regressed" (one question for the owner, harness/ask.mjs), a drop that large "kept",
+ * else "no effect". Nothing reverts anything.
  */
 import fs from 'node:fs';
 import path from 'node:path';

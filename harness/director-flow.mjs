@@ -1,21 +1,12 @@
 #!/usr/bin/env node
 /**
- * harness/director-flow.mjs — the Director keeps the builders working (2.30h, item 2).
- *
- *   npm run director -- flow [--json] [--no-fill]
- *
- * The Director owns the flow: every pass (the supervisor's loop, at most once a minute;
- * npm run director -- flow by hand) it looks at the whole board and the running sessions and
- *   1. hands back claims that ran out (in progress, nobody holds it, no running session on it); a task whose owner
- *      is still at work (harness/busy.mjs) is kept and its claim made again in the owner's name (2.58.5, H-5),
- *   2. counts idle builder slots against ready work across the whole backlog (every role, not one lane),
- *   3. refills idle slots through the launcher (the same caps, lanes and pace as always; a pace that
- *      doesn't start agents on its own gets a "starved" alert instead),
- *   4. sends back missing design-fidelity mechanics as builder work (harness/fidelity.mjs),
- *   5. writes .studio/director-flow.json (the War Room's Director card) and, when the studio has been
- *      starved for STUDIO_FLOW_IDLE_MIN (default 10) minutes, raises director.flow.starved (a phone alert
- *      when alerts are on) with the reasons the launcher gave.
- * A script, no model, no tokens; it never waits on anything, so it can't slow an agent down.
+ * harness/director-flow.mjs — the Director keeps the builders working. A script, no model, no tokens; never waits.
+ *    npm run director -- flow [--json] [--no-fill]
+ * Every pass (the supervisor's loop, at most once a minute) it: 1. hands back claims that ran out (a task whose owner
+ * is still at work, harness/busy.mjs, keeps its claim); 2. counts idle builder slots against ready work across the
+ * backlog; 3. refills idle slots through the launcher (a pace that doesn't start agents gets a "starved" alert); 4.
+ * sends back missing design-fidelity mechanics as builder work (harness/fidelity.mjs); 5. writes
+ * .studio/director-flow.json and, when starved for STUDIO_FLOW_IDLE_MIN (10) minutes, raises director.flow.starved.
  */
 import fs from 'node:fs';
 import path from 'node:path';

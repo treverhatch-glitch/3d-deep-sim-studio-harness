@@ -1,23 +1,14 @@
 /**
- * harness/attempts.mjs — the attempt ledger: one file per task (.studio/attempts/<task>.json) that remembers each
- * failed or owner-only hand-back, and one eligibility verdict (2.81 (b1), from the R2 trial; docs/RUN-UNATTENDED.md).
- *
- * Live studio: 244 sessions / 52.8 h strictly unsuccessful, 76 owner-only pauses, 50 claim-expired hand-backs; tasks were
- * relaunched against the same unchanged blocker. A relaunch can't do better when nothing it was waiting on changed.
+ * harness/attempts.mjs — the attempt ledger: one file per task (.studio/attempts/<task>.json) remembering each failed
+ * or owner-only hand-back, and one eligibility verdict (docs/RUN-UNATTENDED.md).
  *
  * An attempt = { n, at, agent, mainTip, laneHead, endLabel, reasonKey, blockers, ownerOnly, signature, cleared? }.
  * signature = first 16 hex of sha1(JSON of { reasonKey, mainTip, blockers (open ids, sorted, unique), ownerOnly }).
- * sameBlocker() computes that signature again from the CURRENT facts (the studio main branch's tip now, the task's holds
- * and what is done now, the attempt's reasonKey); equal = nothing changed, so a new session would meet the same wall.
- *
- * holdReason() (task-hold.mjs) asks sameBlocker(), so `task next`, `task start`, the supervisor and the Line Producer
- * agree. eligibility() adds the budget and round-cap refusals for the callers that offer tasks (nextFor, the supervisor);
- * startTask keeps its own refusals and stays the authority.
- *
- * Not recorded as a failure: a hand-back the harness or a person caused (busy.mjs harnessCaused/personCaused, a `cause`),
- * refreshes, session caps, usage stops: the breaker's own rule (breaker.mjs isFailureNote). No git (or no commit yet) =
- * no verdict. A task.done, `unblock` or `unpark` marks the last attempt cleared. STUDIO_ATTEMPTS=off disables it all.
- * The ledger only reads and writes its own files: it never releases a lock or a claim.
+ * sameBlocker() recomputes it from the CURRENT facts; equal = nothing changed. holdReason() (task-hold.mjs) asks it.
+ * eligibility() adds the budget and round-cap refusals; startTask stays the authority. Not recorded: a hand-back the
+ * harness or a person caused (busy.mjs), refreshes, session caps, usage stops (breaker.mjs isFailureNote). A
+ * task.done, `unblock` or `unpark` marks the last attempt cleared. STUDIO_ATTEMPTS=off disables it. It never releases
+ * a lock or a claim.
  */
 import fs from 'node:fs';
 import path from 'node:path';

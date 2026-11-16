@@ -1,33 +1,14 @@
 #!/usr/bin/env node
 /**
- * harness/task-budget.mjs — 2.31.0: a budget per task, across every session that works on it.
+ * harness/task-budget.mjs — a budget per task, across every session that works on it.
  *
- * The session cap (session-cap.mjs) refreshes a session at 40 turns or 120k context, and the stall check
- * (stall.mjs) ends one with no progress or past 90 min. Neither stops the same task being picked up
- * again and again: the launcher relaunches a refreshed session up to 5 times, the watchdog and the
- * Director's flow pass start new ones, and builders outside the harness re-claim it. A task could keep
- * one agent busy for 12 hours. This module adds up everything spent on one task since it was last
- * finished, reopened or unparked, and stops it when any limit is reached:
- *
- *   sessions  STUDIO_TASK_MAX_SESSIONS   6     launched sessions on the task, plus claims by agents the
- *                                              harness never launched (outside builders)
- *   minutes   STUDIO_TASK_MAX_MIN        240   time the task was claimed, summed over every claim
- *   tokens    STUDIO_TASK_MAX_TOKENS     10M   weighted tokens (cache reads at STUDIO_CACHE_READ_WEIGHT),
- *                                              from launched sessions and `task done --usage` reports
- *
- * 2.60.1 (B-39): the claim clock (minutes) doesn't run while the lane waits to land on purpose: from `task hold`
- * (task.held) or `task done --train` (task.train.queued) until `task unhold` (task.unheld) or the train hands it back
- * (task.train.dropped); and a task held or queued right now is never stopped for its minutes. Sessions and tokens
- * still count, and a lane that is neither held nor queued is clocked as before.
- *
- * 2.86: a session that ended for the harness's reason (handback-kind.mjs sessionEndKind: a refresh hand-off, a launch
- * failure, a `task done` refused for commits not the task's own) is not one of the task's sessions; its claim time counts
- * only when it did work (a refresh that committed or edited), since that time was spent on the task.
- *
- * 0 turns one limit off; STUDIO_TASK_BUDGET=off turns the whole check off. A task over budget is parked
- * (by "budget") with the numbers, the Producer and the War Room get "needs you", and it never starts
- * again until someone unparks it (`npm run task -- unpark <ID> --by <name>`), which also resets the count.
- *
+ * Adds up what is spent on a task since it was last finished, reopened or unparked, and stops it at any limit (0 turns
+ * one off; STUDIO_TASK_BUDGET=off the whole check):
+ *   STUDIO_TASK_MAX_SESSIONS 6    launched sessions, plus claims by agents the harness never launched
+ *   STUDIO_TASK_MAX_MIN 240       time the task was claimed, summed over every claim
+ *   STUDIO_TASK_MAX_TOKENS 10M    weighted tokens (cache reads at STUDIO_CACHE_READ_WEIGHT)
+ * The claim clock stops while the lane waits to land on purpose (`task hold`, `task done --train`). Over budget:
+ * parked (by "budget"); `npm run task -- unpark <ID> --by <name>` resets.
  *   node harness/task-budget.mjs <TASK_ID> [--json]     what the task has spent, against its limits
  */
 import path from 'node:path';

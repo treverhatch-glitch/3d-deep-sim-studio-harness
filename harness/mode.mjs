@@ -1,20 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/mode.mjs — how fast the studio works, chosen by the game dev, and the MAX SPEED lever.
- *
  *   npm run mode                                 show the mode and what it sets
  *   npm run mode -- set precise|budget|fast|prototype|extreme --by <name> [--why "…"]
  *   npm run mode -- boost on|off --by <name> [--hours 4 | --until HH:MM|ISO|off] [--builders-only]   the MAX SPEED lever
  *   npm run mode -- scope lite|full --by <name>  Lite: 6 gates in everyday verify and AGENTS.lite.md for agents
  *   npm run mode -- autostart on|off --by <name>  may the watcher and the supervisor start agents on their own (off by default)
- *
- * The mode (studio/mode.json) sets how many agents may run at once, which work needs a review from
- * another model family, whether the watcher starts agents on its own, how often the Director and the
- * Producer check in, and which models to prefer. Intake asks for it; changing it later is logged.
- *
- * MAX SPEED is a lever on top of any mode: twice the agents (up to 12), the watcher starts agents on
- * its own, and the Director and the Producer check in far more often, so going faster doesn't mean
- * drifting further. It can switch itself off after --hours.
+ * The mode (studio/mode.json) sets how many agents run at once, which work needs a review from another model family, whether
+ * the watcher starts agents, how often the Director and the Producer check in, and which models to prefer.
+ * MAX SPEED sits on top of any mode: twice the agents (up to 12), the watcher starts agents, the Director and the Producer
+ * check in far more often. It can switch itself off after --hours.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -106,11 +101,10 @@ function save(m) {
 }
 
 /**
- * 2.58.0 (crew report): auto-start is one explicit switch, off by default, recorded in studio/mode.json like the
- * pace, MAX SPEED and the scope (who, when). Off, the watcher, the supervisor's passes and the Director's flow start no
- * agent on their own, whatever the pace, MAX SPEED or away mode say: the Producer check-in still pings and logs.
- * Starting an agent by hand (npm run agent -- start / hire) and the supervisor
- * (npm run studio:start, itself started by hand) don't depend on it.
+ * Auto-start is one explicit switch, off by default, recorded in studio/mode.json like the pace, MAX SPEED and the scope.
+ * Off, the watcher, the supervisor's passes and the Director's flow start no agent on their own, whatever the pace, MAX SPEED
+ * or away mode say: the Producer check-in still pings and logs. Starting an agent by hand (npm run agent -- start / hire)
+ * and the supervisor (npm run studio:start) don't depend on it.
  */
 export const AUTOSTART_OFF = 'auto-start is off, so nothing starts on its own. Turn it on with npm run mode -- autostart on --by <name>, or start agents by hand (npm run agent -- start)';
 export const autostartOn = (m = readMode()) => Boolean(m.autostart?.on);

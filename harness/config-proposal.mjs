@@ -1,34 +1,14 @@
 /**
- * harness/config-proposal.mjs — a lane carries studio config changes through a sanctioned route.
- *
- * studio/ in a lane copy is the main checkout's (a link), so a lane's commits can never carry studio config and an edit
- * there lands in main's checkout, uncommitted (the edit guard refuses it). Instead the lane commits a proposal:
- *
+ * harness/config-proposal.mjs — a lane carries studio config changes through a sanctioned route: a committed proposal.
+ * studio/ in a lane copy is main's (a link), so a lane's commits can't carry studio config; the edit guard refuses an edit there.
  *   studio-proposals/<TASK-ID>.json
- *   { "changes": [ { "file": "studio/game.json", "set": { "engines.unity.land": "tools/land", "/gates/0/id": "x" } } ],
- *     "why": "what the change is for" }
- *
- *   - file: a top-level studio/*.json file (not the board's own records); a file that doesn't exist yet is created.
- *   - set: keys to set, each a dotted key (a.b.c) or a JSON pointer (/a/b/0, ~1 for "/", ~0 for "~"), to any JSON value
- *     (null included). Nothing is deleted: no whole file, no key. The root itself can't be set.
- *
- * When the lane lands (the merge train, or the old one-lane task done path), the harness applies it to main in the
- * commit right after the landing, with a `Config-From: <task>` trailer, and removes the proposal file. Rules:
- *   - a key whose value on main changed since the lane's base (and isn't already the proposed value) is a conflict:
- *     the lane is handed back with a note before it lands (checkProposal); found only at landing (a race), that part is
- *     held, never applied over main's newer value;
- *   - a protected file (studio/protected.json "globs" as main's tip has it, plus the shipped list) applies only with the
- *     owner's decision: with an owner key (studio/keys/owner-ed25519.pub.pem at main's tip), a signed approval of exactly
- *     its protected changes (npm run approve -- proposal <ID>); without a key, a person's release of the lane (a lane
- *     with such a proposal is tier C, harness/tiers.mjs, held until a person releases it). Otherwise the protected part
- *     is held: it stays on main in studio-proposals/<ID>.json (with "held" saying why), an event asks a person, and
- *     npm run task -- train config <ID> applies it once that is settled. Nothing is dropped silently.
- * In beta mode (harness/beta-mode.mjs) a beta stand-in's release of the lane (npm run task -- train release <ID>, whose hold
- * names the protected keys and values) decides the protected part as the owner's would, also with an owner key, while beta
- * mode is still on with the same studio/beta.json (betaReleaseOk).
- * The applying commit is the harness's own (commit-tree on main, landed by compare-and-swap like a lane), carries
- * `Studio-Harness: config-from` and changes only studio/*.json and studio-proposals/ (harness/hook-stamp.mjs exempts
- * exactly that). The train's verify can't see it first: a train copy's studio/ is main's live folder.
+ *   { "changes": [ { "file": "studio/game.json", "set": { "engines.unity.land": "tools/land" } } ], "why": "..." }
+ * file: a top-level studio/*.json (not the board's own records; created if missing). set: dotted keys (a.b.c) or JSON
+ * pointers (/a/b/0, ~1 for "/", ~0 for "~"), any JSON value; nothing is deleted, the root can't be set.
+ * After the lane lands, the harness applies it to main in the next commit (`Config-From: <task>` trailer), removes the file.
+ * A key changed on main since the lane's base is a conflict: the lane is handed back before landing (checkProposal).
+ * A protected file (studio/protected.json "globs") applies only with the owner's decision: a signed approval (npm run
+ * approve -- proposal <ID>) or a person's release of the lane (tier C); else it is held in studio-proposals/<ID>.json.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -276,10 +256,9 @@ function commitFiles(root, tip, files, message) {
 
 /**
  * Apply the proposal of `task` that main's tip now holds (after its lane landed; call under the land lock).
- *   base      the lane's base (merge-base of main and the lane before it landed), for conflicts; a held proposal keeps it
- *   released  a person's release of this lane ({ by, ... }) or null: without an owner key, what lets a protected part apply
- *   ff(root, main, sha)  moves main to the new commit (worktree.mjs landFastForward)
- * Returns null (no proposal) or { ok, applied: [file], held: [{ file, why }], commit, why }.
+ * base: the lane's base (merge-base of main and the lane before it landed), for conflicts; a held proposal keeps it.
+ * released: a person's release of this lane ({ by, ... }) or null; without an owner key it lets a protected part apply.
+ * ff(root, main, sha) moves main (worktree.mjs landFastForward). Returns null or { ok, applied, held, commit, why }.
  */
 export function landConfig(root, { task, main, base = null, released = null, ff, by = 'harness' }) {
   const tip = out(git(root, ['rev-parse', `refs/heads/${main}`]));

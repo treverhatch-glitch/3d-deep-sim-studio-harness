@@ -1,12 +1,10 @@
 /**
- * harness/producer-wake.mjs — the Producer starts only when something happened (2.30c, #11).
- *
- * A Producer session costs a fresh start each time (its kickoff, the briefing). Launched on a clock
- * it often found nothing new. Now the supervisor and the watcher's check-in start it only:
- *   - on an event since its last start: a task done, forced or parked by a breaker, a War Room card
- *     (an agent's ask, a Watch: task, an escalation, a question or intent card), or a task queued for it;
- *   - at most once per 15 min (STUDIO_PRODUCER_MIN_MIN), unless it is urgent (a P0 task for the
- *     Producer, an escalation, a stopped studio's cards);
+ * harness/producer-wake.mjs — the Producer starts only when something happened.
+ * The supervisor and the watcher's check-in start it only:
+ *   - on an event since its last start: a task done, forced or parked by a breaker, a War Room card (an agent's ask, a
+ *     Watch: task, an escalation, a question or intent card), or a task queued for it;
+ *   - at most once per 15 min (STUDIO_PRODUCER_MIN_MIN), unless urgent (a P0 task for the Producer, an escalation, a
+ *     stopped studio's cards);
  *   - when asked and nothing changed, the wait doubles (15, 30, 60 ... up to 4 h) until something does.
  * A person starting it from the War Room is never held back. State: .studio/producer-wake.json.
  * STUDIO_PRODUCER_WAKE=always turns this off.

@@ -1,49 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/contracts.mjs — per-task acceptance contracts ("what done means", agreed before coding).
- *
- * A task's title is one line; a builder can make every check green and still deliver less than was meant. A contract is a
- * small JSON per task (studio/contracts/<ID>.json, committed) listing checkable criteria, agreed before the work starts,
- * after which the builder may only flip `passes`:
- *
- *   { "task": "T-012", "criteria": [{ "id": "C1", "text": "…", "check": { "kind": "command", "command": "…" }, "passes": false },
- *                                   { "id": "C2", "text": "…", "check": { "kind": "file", "path": "…", "contains": "…" }, "passes": false },
- *                                   { "id": "C3", "text": "…", "check": { "kind": "manual" }, "passes": false }],
- *     "agreedBy": "<name>", "agreedAt": "<ISO time>" }
- *
- *   npm run task -- contract <ID> [show]
- *   npm run task -- contract <ID> add "<text>" [--check "<command>" | --file <path> [--contains "<text>"] | --manual]
- *   npm run task -- contract <ID> agree --by <name> [--permission "<the person's words or a link>"] [--why "…"]
- *   npm run task -- contract <ID> check                          runs every command and file check, sets `passes`
- *   npm run task -- contract <ID> sign <CID> pass|fail --by <name> [--permission "…"]     a manual criterion
- *   npm run task -- contract <ID> remove <CID> [--by <name> --why "…"]
- *
- * Who:
- *   - Agrees: a Producer or Director session, a person in their own terminal (the owner), or an agent outside the
- *     harness with a person's direct permission (harness/permission.mjs: --by <the person> --permission "…").
- *     A worker (builder, reviewer, …) never agrees, not even its own task's contract.
- *   - Adds: anyone. A worker's criterion lands as "proposed" and is not in force until someone above agrees the
- *     contract again (`agree --why "…"`). On an agreed contract the agreeing roles add criteria in force directly.
- *   - Sets `passes`: the harness, for command and file criteria (`contract check`; done-check also re-reads the
- *     evidence, so a `passes` typed by hand counts for nothing). A manual criterion is signed by a reviewer, a
- *     person, or the agreeing roles (`sign`), never by a builder.
- *   - Changes an agreed criterion's text or check, or removes it: only by agreeing again (an amendment with a reason,
- *     recorded in `amendments`), by the same roles.
- *
- * Enforced by:
- *   - The weakened-tests gate (harness/test-weakening.mjs, at verify and at every task done): the diff of
- *     studio/contracts/*.json since the base may change only `passes` (and a manual criterion's signature) on an
- *     agreed contract; new criteria in force, an agreement, an amendment and a manual pass must come from the right
- *     role (judged by the commit's Studio-Agent trailer, which the commit-msg hook writes for every agent). Findings
- *     are enforced with or without an owner key; the owner can approve one by content (npm run approve -- tests).
- *   - done-check (harness/done-check.mjs): a task with an agreed contract closes only when every criterion in force
- *     passes; a task without one is unaffected. studio/game.json "contracts": { "required": ["change", "bug"] }
- *     (protected: owner-approved) makes an agreed contract mandatory for those task types.
- *   - The reviewer (harness/review.mjs) gets the contract in its brief and grades the work against each criterion.
- *
- * Limits: a commit with no Studio-Agent trailer counts as a person's (an agent shell without STUDIO_LOCK_OWNER set writes
- * none; the hooks gate catches commits that skipped the hooks, not a missing name). Until the studio has an owner key
- * nothing an agent writes is proof; this is a speed bump that makes redefining done visible.
+ * A contract is a JSON per task (studio/contracts/<ID>.json, committed) of checkable criteria (command, file, manual),
+ * agreed before the work starts; after that the builder may only flip `passes`.
+ * npm run task -- contract <ID> [show]  |  <ID> check   (runs every command and file check, sets `passes`)
+ * npm run task -- contract <ID> add "<text>" [--check "<command>" | --file <path> [--contains "<text>"] | --manual]
+ * npm run task -- contract <ID> agree --by <name> [--permission "<the person's words or a link>"] [--why "…"]
+ * npm run task -- contract <ID> sign <CID> pass|fail --by <name> | remove <CID> [--by <name> --why "…"]
+ * Agreeing, amending or removing a criterion: Producer/Director sessions, a person, or an outside agent on a person's
+ * permission; never a worker (its additions land "proposed"). Enforced by harness/test-weakening.mjs,
+ * harness/done-check.mjs, harness/review.mjs.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -275,14 +241,10 @@ export function runChecks(id, { root = REPO_ROOT, env = process.env, log = () =>
 }
 
 /**
- * done-check's contract section: { checks: [{ label, ok, why }], notes: [], unverified: [] }. A task with no contract
- * (and whose type the studio doesn't require one for) gets nothing. Command criteria count from the last `contract check`
- * only when it ran on the work as it is now (workState) with the agreed command; file and test criteria are read now;
- * manual criteria need a reviewer's or a person's signature.
- * Every criterion tied to a command, a file or a test name is checked mechanically; the ones it can't verify (manual, not
- * signed yet) are listed as `unverified`, for the reviewer. With defer (the task lands through the merge train: a lane
- * copy with the train on), an unverified must-item doesn't block done: the train holds the lane as tier C until a
- * reviewer signs it (or a person releases it): unverifiedMust. A should-item ("must": false) never blocks; a signed fail always does.
+ * done-check's contract section: { checks: [{ label, ok, why }], notes: [], unverified: [] }. Command criteria count
+ * from the last `contract check` if it ran on the current work (workState) with the agreed command; file and test
+ * criteria are read now; manual ones need a signature. With defer (the merge train), an unverified must-item doesn't
+ * block: the train holds the lane as tier C. "must": false never blocks; a signed fail does.
  */
 export function contractChecks(task, type, { root = REPO_ROOT, defer = false } = {}) {
   const checks = [];

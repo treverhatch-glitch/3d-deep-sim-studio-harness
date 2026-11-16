@@ -1,30 +1,12 @@
 /**
- * harness/lane-sparse.mjs — sparse lanes. A lane copy leaves out the paths its task can't need (docs/ and media are
- * most of a game repo's bytes). Lanes already use a non-cone sparse checkout to leave studio/ and .studio/ out (they
- * are links to the main checkout's); this adds the game's own exclusions to those patterns.
- *
- *   What is left out   the game manifest's "laneExclude": ["<glob>", ...] (<game>/studio.gates.json, read as committed
- *                      in the main checkout: the manifest is protected) plus STUDIO_LANE_EXCLUDE (comma-separated
- *                      globs; =off turns lane exclusions off). Globs are repo-relative (** any depth, * one segment).
- *                      Off unless one of them names a glob. The harness's own folders (harness/, scripts/, qa/,
- *                      tools/), package files and the manifest itself are never left out.
- *   What a task keeps  every path of its declared scope (its lane: task add --paths/--lane, `task lane`, the studio
- *                      paths it names), re-included after the exclusions; a task on the asset track (or an art task)
- *                      keeps every file (media included).
- *   Widening           `npm run lanes -- widen <path|glob> [...] [--lane <agent>] [--why "..."]` adds paths to a lane
- *                      (git sparse-checkout add); every widening is a lane.widened event and is kept in
- *                      .studio/lanes/<agent>.sparse.json. Files an agent wrote into a left-out path (git hides an edit
- *                      to a left-out tracked file, and refuses to add a new one) are found at task done and before the
- *                      lane's checks, and the lane is widened over them so they show as changes.
- *   The checks         never see a partial tree: before the lane's own verify (scripts/run-gates.mjs) and the game's
- *                      checks (harness/game-gates.mjs), every left-out file a check about to run reads is put back
- *                      (widenForChecks), and the run says so. A check reads its "needs" globs (studio/gates.json or
- *                      manifest gate), else a game check's "paths", else the game's whole folder; harness checks have
- *                      CHECK_NEEDS. A verify in a lane that still leaves files out never writes the shared gate
- *                      cache. Train builds and the whole-game check use full scratch copies (only studio/ and
- *                      .studio/ left out) and don't read laneExclude.
- *
- * Imports only leaf modules (no worktree.mjs: it imports this one).
+ * harness/lane-sparse.mjs — sparse lanes: a lane copy leaves out the paths its task can't need (docs/ and media).
+ * Left out: the manifest's "laneExclude" globs (<game>/studio.gates.json) plus STUDIO_LANE_EXCLUDE (comma-separated;
+ * =off turns it off); off unless one names a glob. harness/, scripts/, qa/, tools/, package files and the manifest
+ * stay. Kept: every path of the task's declared scope; an asset-track (or art) task keeps all files. Widening: `npm
+ * run lanes -- widen <path|glob> [...] [--lane <agent>] [--why "..."]` (lane.widened event, kept in
+ * .studio/lanes/<agent>.sparse.json); files written into a left-out path are found at task done and the lane widened.
+ * Checks never see a partial tree: before verify and the game's checks the left-out files they read are put back
+ * (widenForChecks); such a lane never writes the shared gate cache. Imports only leaf modules (not worktree.mjs).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -175,12 +157,10 @@ export function laneSparseState(dir = REPO_ROOT) {
 }
 
 /**
- * A lane copy's studio/ and .studio/ are links (a symlink, or a junction on Windows) to the main checkout's, left out
- * by the sparse checkout so git never writes through them. If the entries lose skip-worktree, a merge of main sees
- * main's live board files through the link as local changes and could write main's files. Before any merge or rebase
- * in the lane: mark every tracked path under a linked folder skip-worktree again, and say whether the sparse patterns
- * still leave the folders out. Touches only this lane's index; the link and main's files are never opened. A real
- * folder (not a link) is left alone. Returns { links: [names], marked, sparseOk, why? }.
+ * A lane copy's studio/ and .studio/ are links to the main checkout's, left out by the sparse checkout. If their
+ * entries lose skip-worktree, a merge of main sees main's live board files as local changes. Before any merge or
+ * rebase in the lane: mark every tracked path under a linked folder skip-worktree again, and say whether the sparse
+ * patterns still leave the folders out. Only this lane's index is touched. Returns { links, marked, sparseOk, why? }.
  */
 export function protectSharedLinks(dir = REPO_ROOT) {
   const links = ['studio', '.studio'].filter((d) => { try { return fs.lstatSync(path.join(dir, d)).isSymbolicLink(); } catch { return false; } });

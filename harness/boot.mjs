@@ -1,42 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/boot.mjs — one command to bring the studio up after a restart.
- *
  *   npm run studio:boot [-- --until 46h] [--window 09:00-23:00] [--budget 50%] [--lanes auto] [--no-supervisor]
- *                                         (--hub/--no-hub: accepted and ignored, there is no hub since 2.80)
- *   npm run studio:boot -- --check        report only: nothing is cleared or started
- *   npm run studio:boot -- --shortcut     also write a Desktop file that runs `npm.cmd run studio:boot` here (Windows .cmd;
- *                                         elsewhere a .sh); prints its path
- *   --json                                the same as one JSON object
- *
- * Steps:
- *   1. preflight-lite: node against package.json engines, npm on the PATH (npm.cmd on Windows; a PowerShell execution
- *      policy blocking npm.ps1 is passed by typing npm.cmd), the .env: no session identity in it (harness/dotenv.mjs);
- *   2. the stale sweep: train.lock, land.lock, unity-train.lock, verify-running/full.json and train/daemon.json whose
- *      recorded process is gone are removed, and a supervisor.json still saying "running" for a gone process is marked
- *      stopped; one boot.stale_cleared event names each. Live, unreadable or pid-less files are left. Lane copies, claims,
- *      logs and work are never touched;
- *   3. the supervisor, started only when not already running (supervisor.json running with a live process that is still
- *      that supervisor, not another program holding a reused pid: supervisorAlive), detached and hidden
- *      (windowsHide), output in .studio/logs/supervisor.log. The train daemon runs inside each supervisor pass
- *      (harness/train-daemon.mjs), so it is up when the supervisor is; its switch is reported. The daemons get this
- *      shell's environment minus the session identity (STUDIO_LOCK_OWNER, STUDIO_ROLE, STUDIO_AGENT, STUDIO_MAIN_ROOT):
- *      they are the studio's, not an agent's;
- *   4. one status card: crew sessions, train, halts, what needs a person, outside agents seen lately (event log), lane
- *      copies and leftover folders in .lanes/ (listed, never removed).
- * Restarting outside orchestrators (chat sessions the harness doesn't launch) is not done here.
- *
- * After a reboot nothing starts the supervisor ("auto-start" only lets it start agents), so:
- *   npm run studio:boot -- install [--remove] [--dry-run]
- *     Windows: registers (or removes) a Task Scheduler task at logon that runs this file in this checkout
- *     (schtasks /Create /SC ONLOGON /TN "Studio boot (<folder>)" /TR "<node> <boot.mjs>" /F); Linux/macOS: prints the
- *     systemd user unit and the crontab @reboot line to add, and changes nothing. It prints what it will register first;
- *     --dry-run prints only. A person or a board-decision caller only (never a launched worker session).
- *   The sweep also clears every engine train's lock (.studio/locks/<engine>-train.lock) whose process is gone; the engine
- *   queues are left as they are and the card says how many branches wait, so the Line Producer's automatic start
- *   resumes them in the supervisor's next pass (unless `train auto off --engine <x>`).
- * UNTESTED on Windows: detached + windowsHide starts (same options as studio:start), `where npm.cmd`, the Desktop path
- * (%USERPROFILE%\Desktop, else %OneDrive%\Desktop) and the .cmd file.
+ *   npm run studio:boot -- --check        report only: nothing is cleared or started; --json: same as one JSON object
+ *   npm run studio:boot -- --shortcut     writes a Desktop file running `npm.cmd run studio:boot`; prints its path
+ *   npm run studio:boot -- install [--remove] [--dry-run]   after a reboot: Task Scheduler at logon (Windows) or prints
+ *     the systemd user unit and crontab line (Linux/macOS); person only, never a worker
+ * Steps: preflight (node engines, npm on PATH, no session identity in .env); sweep stale locks whose process is gone
+ * (train.lock, land.lock, verify-running/full.json, train/daemon.json, engine train locks); start the supervisor if not
+ * running (detached, windowsHide, .studio/logs/supervisor.log; env minus STUDIO_LOCK_OWNER, STUDIO_ROLE, STUDIO_AGENT,
+ * STUDIO_MAIN_ROOT); print a status card. Lane copies, claims and work are never touched. UNTESTED on Windows.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -118,11 +91,9 @@ export function staleSweep({ root = REPO_ROOT, dry = false, emit = emitEvent, al
 }
 
 /**
- * Is the supervisor that supervisor.json describes really running? The cheap test (the pid exists; on Linux its /proc
- * start matches) can't tell on Windows and macOS: the OS reuses pids, so a killed supervisor's number held by another
- * program looks alive. So a pid that exists is asked once what program it is (the kill-time query of
- * harness/proc-identity.mjs: its start time against the one on record). Same: running. Different: gone. Can't be read:
- * only a recent loop (lastLoop, as studio:stop judges it) counts.
+ * Is the supervisor that supervisor.json describes really running? The pid test can't tell on Windows and macOS (pids
+ * are reused), so an existing pid is asked what program it is (harness/proc-identity.mjs: its start time against the
+ * one on record). Same: running. Different: gone. Can't be read: only a recent loop (lastLoop) counts.
  */
 export function supervisorAlive(s, { alive = pidAlive, starts = readStarts, now = Date.now(), env = process.env } = {}) {
   if (!s || s.status !== 'running' || !s.pid) return false;

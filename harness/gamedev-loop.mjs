@@ -1,23 +1,14 @@
 /**
- * harness/gamedev-loop.mjs — 2.30o: the studio supervises itself; an attending game dev is optional.
- *
- * In the Marina run the watchdog only ran in away mode and the studio assumed a person (or the attending
- * agent) would notice an empty queue, judge the pictures and feed tasks. Nobody did for hours. Now, while a
- * studio has an active game, every watch pass (a few minutes apart) runs this loop:
+ * harness/gamedev-loop.mjs — the studio supervises itself: while a game is active, every watch pass runs this loop.
  *   stall   running sessions with no progress / a read-only burn / past their wall clock are ended
- *   (a)     fewer than 4 builder tasks open: the Producer refill (harness/producer-refill.mjs)
+ *   (a)     fewer than 4 builder tasks open: Producer refill (harness/producer-refill.mjs); (c) idle slots: fillAgents
  *   (b)     a milestone whose exit criteria are all met is closed for the Director and the next one opens
- *   (c)     idle builder slots with ready tasks are filled (fillAgents)
  *   (d)     after landings: the layout gate and visual results; failures become tasks
- *   (e)     spend guards: a tool at its guard is marked out like a quota error, so the next tool in the budget
- *           order takes over (harness/spend-guard.mjs), and a person is told
+ *   (e)     spend guards: a tool at its guard is marked out, the next tool in the budget order takes over
  *   (g)     the standing Director/Producer development cycle (harness/dev-cycle.mjs)
- *   (f)     every STUDIO_REVIEW_MIN (60) a zero-token game-dev review compares the newest captures with the last
- *           review's and files quality tasks (e.g. "scene unchanged"); with STUDIO_REVIEWER_TOOL set it also
- *           wakes a cheap reviewer session to judge the captures against the charter
- * Without the supervisor (2.80: it runs the pass every STUDIO_GAMEDEV_INTERVAL s): node harness/watchdog.mjs loop 180 (npm run gamedev) runs the pass on its own.
- * Steps are skipped one by one with STUDIO_GAMEDEV_SKIP=stall,refill,milestones,launch,landing,tiers,review,cycle.
- * State: .studio/gamedev.json. Every action is an event from "watchdog".
+ *   (f)     every STUDIO_REVIEW_MIN (60) a game-dev review compares the newest captures and files quality tasks
+ * Alone: node harness/watchdog.mjs loop 180 (npm run gamedev). STUDIO_GAMEDEV_SKIP=stall,refill,milestones,launch,
+ * landing,tiers,review,cycle skips steps. State: .studio/gamedev.json.
  */
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -53,11 +44,8 @@ const newestPngs = () => {
 };
 
 /**
- * 2.30q (#6): review and visual filings were the watchdog's main noise in the Marina run: 88 "filed"
- * actions named only 31 distinct tasks (a duplicate key returned the old task and was logged as filed again),
- * and every landing without a visual result filed its own task (22 in 9 h). Now a key files at most once per
- * STUDIO_REVIEW_FILE_MIN (60) minutes, a duplicate is never logged as filed, unchanged cameras are one task per
- * pass, and landings without visuals are one task per pass.
+ * A review or visual key files at most once per STUDIO_REVIEW_FILE_MIN (60) minutes, a duplicate is never logged as
+ * filed, unchanged cameras are one task per pass, and landings without visuals are one task per pass.
  */
 export function mayFile(st, key, now = Date.now(), env = process.env) {
   const win = Number(env.STUDIO_REVIEW_FILE_MIN ?? 60) * 60000;

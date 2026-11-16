@@ -1,20 +1,13 @@
 /**
- * harness/api-pool.mjs — 2.79 (f): builders that bill an API key, started when the plan's budget is high.
- *
+ * harness/api-pool.mjs — builders that bill an API key, started when the plan's budget is high.
  * STUDIO_API_POOL=builder-api2,builder-api3 names builders whose key mapping (STUDIO_KEYMAP_AGENT_<NAME>=
  * ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_LANE, harness/agent-env.mjs keymapFor) makes them bill the API key, not the plan.
- * The supervisor (harness/supervisor.mjs) reads the usage signal it already has: when it would start nothing new because
- * every tool with a known weekly budget is over its target for this point in the week (budget.mjs budgetStatus), or the
- * usage wind-down is on (STUDIO_USAGE_WINDDOWN_PCT, harness/winddown.mjs), it starts builders under these names instead
- * of waiting for headroom, up to the pool's size and the pace/RAM/rig caps, the Line Producer's holds included. When the
- * plan has headroom the pool is not used: plan builders (builder-s1 ...) start as before.
- *
- * A name with no key mapping in the environment would bill the plan, not the key, so it is never started from the pool
- * (and `agent start --pool api` says so). The key's own spend is limited as for any session: the spend guard
- * (STUDIO_SPEND_GUARD_AT, .studio/credit.json) and the daily token cap apply when the session starts.
- *
- * `npm run agent -- start --pool api [--task T-12]` starts one pool builder by hand, whatever the plan's budget.
- * Names only; values of keys are never read or printed here.
+ * When the supervisor would start nothing new because every tool with a known weekly budget is over its target
+ * (budget.mjs budgetStatus), or the usage wind-down is on (STUDIO_USAGE_WINDDOWN_PCT, harness/winddown.mjs), it starts
+ * builders under these names, up to the pool's size and the pace/RAM/rig caps. With plan headroom the pool is not used.
+ * A name with no key mapping would bill the plan, so it is never started from the pool. The key's spend is limited as
+ * for any session (STUDIO_SPEND_GUARD_AT, .studio/credit.json, the daily token cap). `npm run agent -- start --pool api
+ * [--task T-12]` starts one pool builder by hand. Key values are never read or printed.
  */
 import { keymapFor } from './agent-env.mjs';
 

@@ -1,19 +1,12 @@
 #!/usr/bin/env node
 /**
- * harness/art-adapt.mjs — adapt scouted art for the game.
+ * harness/art-adapt.mjs — adapts scouted art for the game.
  *
  *   npm run adapt -- <asset-id|file> [--palette <file.json>] [--max 1024] [--lod 3] [--by <who>]
  *
- * For PNG textures:
- * - Recolor to the nearest color in a palette.
- * - Downscale to a max dimension.
- *
- * For OBJ meshes:
- * - Fix common issues (degenerate faces, duplicate vertices).
- * - Generate level-of-detail (LOD) variants.
- *
- * Adapted assets are written to assets/adapted/, recorded in the asset manifest as derived from the
- * source, and credited if the source requires it.
+ * PNG textures: recolor to the nearest color in a palette; downscale to a max dimension. OBJ meshes: fix common issues
+ * (degenerate faces, duplicate vertices); generate level-of-detail (LOD) variants. Adapted assets are written to
+ * assets/adapted/, recorded in the asset manifest as derived from the source, and credited if the source requires it.
  */
 import fs from 'node:fs';
 import path from 'node:path';

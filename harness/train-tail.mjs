@@ -1,27 +1,14 @@
 /**
- * harness/train-tail.mjs — 2.67.0 (f): the proactive chain-tail fixer in the merge train (the owner's idea).
- *
- * A stacked chain (lanes linked by `task add --after` / `task block --until`, harness/train-deps.mjs) sometimes passes
- * only as a whole plus one more fix: train 13 bisected such a chain apart, handed back its first lane and landed one
- * lane; an outside agent then wrote the missing fix by hand (T-141). Now (STUDIO_TRAIN_CHAIN_TAIL, default on):
- *   1. when a train starts with a chain (or with lanes that declare pin moves, Pin-Moves:), BEFORE its verify it builds
- *      main + the chain in a second scratch copy and runs the chain's touched test files there (the 2.65.3 focus
- *      machinery: run-gates --only with STUDIO_GATE_FOCUS) and the pins' report on main and on the chain (the pin
- *      diff). Before, not beside: the verify is one blocking run holding a gate slot and, for a game, the
- *      machine:heavy lock, so a second suite beside it would wait for them or double the load (load-scaled timeouts,
- *      skewed ETAs) on the crew's 2-core-per-agent machines. The focused run is seconds to a minute, and the tail task
- *      is on the board before the verify starts, so a builder works on it while the verify runs;
- *   2. red there (and not something the train's own pin refresh fixes, tried in that copy): ONE "chain tail" task,
- *      a builder bug task stacked on the chain's last lane (--after it), its hand-off note naming the failing tests,
- *      the pin diff and how to bring the chain into the copy. Never a second one for the same chain and failure
- *      signature (.studio/train/chain-tails.json);
- *   3. the verify then red on exactly those tests: the whole chain is deferred, "waiting for its tail <ID>", nobody
- *      handed back, and later trains leave it out (no verify spent) until the tail is queued; then the chain and the
- *      tail go in together (the tail's --after keeps it behind the chain's last lane). Red on any other test: as
- *      before (pin refresh, prefix bisection).
- * The tail's own start is not held by its --after on the chain it fixes (harness/task-hold.mjs chainTail).
- * Code only: which tests failed, the signature and every decision come from the logs. Never imports train.mjs or
- * task.mjs (train.mjs imports this; the board operations come in as the train's deps).
+ * harness/train-tail.mjs — the proactive chain-tail fixer in the merge train. A stacked chain (`task add --after` /
+ * `task block --until`, harness/train-deps.mjs) sometimes passes only as a whole plus one more fix.
+ * STUDIO_TRAIN_CHAIN_TAIL (default on):
+ *   1. a train starting with a chain (or lanes declaring Pin-Moves:) first, BEFORE its verify, builds main + the chain
+ *      in a scratch copy and runs the chain's touched test files there (STUDIO_GATE_FOCUS) and the pin diff;
+ *   2. red there (not fixed by the pin refresh): ONE "chain tail" builder task, stacked on the chain's last lane
+ *      (--after). Never a second for the same chain and signature (.studio/train/chain-tails.json);
+ *   3. the verify then red on exactly those tests: the chain is deferred, "waiting for its tail <ID>", until the tail
+ *      is queued; then both go in together. Red elsewhere: pin refresh, prefix bisection.
+ * Code only. Never imports train.mjs or task.mjs (train.mjs imports this).
  */
 import fs from 'node:fs';
 import path from 'node:path';

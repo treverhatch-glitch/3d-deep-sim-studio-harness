@@ -1,22 +1,14 @@
 /**
  * harness/task-hold.mjs — why a waiting task must not start yet, and which folder (lane) it works in.
- *
  *   npm run task -- add "…" --after T-011[,T-012]          waits until those tasks are done
  *   npm run task -- block T-020 --until T-011|2026-10-22T09:00 --by <name> [--why "…"]
- *   npm run task -- park T-020 --by <name> --why "…"         parked: never starts until unparked
- *   npm run task -- unpark T-020 --by <name>
+ *   npm run task -- park T-020 --by <name> --why "…"  |  unpark T-020 --by <name>   parked: never starts until unparked
  *   npm run task -- lane T-020 game/next-floor/src/floors --by <name>   (or "none" to clear it)
- *   npm run task -- hold T-020 --by <name> --why "…"         2.60.1 (B-39): held for landing (a conductor or integrator
- *   npm run task -- unhold T-020 --by <name>                 parks the lane on purpose): no claim clock, no rescue
+ *   npm run task -- hold T-020 --by <name> --why "…" | unhold T-020 --by <name>   held for landing: no claim clock
  *   npm run agent -- stop|pause <agent>                      the task can't restart for STUDIO_STOP_COOLDOWN_MIN (15)
- *
- * Run #1: QA started on an unmerged build, Director-parked tasks still started, and a stopped agent's
- * task restarted within seconds under a new name. The supervisor, `task next` and `task start` all
- * ask holdReason() first. Holds live in studio/task-holds.json (a studio file: it travels with the game).
- *
- * Lanes: a task's folder comes from `task lane`, else `--lane` when it was added, else its part:
- * --part sim → cartridges/<game>, --part renderer → game/<game> (or web/<game>). A builder with no
- * lane works on the whole game, so no other builder runs beside it.
+ * The supervisor, `task next` and `task start` ask holdReason() first. Holds live in studio/task-holds.json. A task's
+ * lane: `task lane`, else `--lane` at add, else its part (sim → cartridges/<game>, renderer → game/<game> or
+ * web/<game>); a builder with no lane works on the whole game, so no other builder runs beside it.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -184,13 +176,10 @@ export function laneRefusal(by, env = process.env, { workerName = WORKER_NAME, d
 }
 
 /**
- * 2.77.3 (H5): who parked a task, as a rank: owner (4) > orchestrator (3) > producer/director (2) > anyone else (1).
- * A launched session's rank comes from STUDIO_ROLE (a name passed with --by can't raise it); outside a launched session
- * an agent's name (STUDIO_LOCK_OWNER, else --by) says it: opus-N or orchestrator-N is the orchestrator, producer-N and
- * director-N those roles, no name at all (a person's terminal) or the owner's proxy is the owner.
- * 2.84 (n): the owner's stand-ins outside a launched session (the owner's proxy, a beta-mode named agent, an outside
- * signer: permission.mjs ownerStandInRole) rank as the owner, as this said of the proxy; before, any name but opus-N ranked 2, so the
- * overseer was refused the owner's parks and the harness's owner-only parks (rank 3).
+ * Who parked a task, as a rank: owner (4) > orchestrator (3) > producer/director (2) > anyone else (1). A launched
+ * session's rank comes from STUDIO_ROLE (--by can't raise it); otherwise STUDIO_LOCK_OWNER, else --by: opus-N or
+ * orchestrator-N is the orchestrator, producer-N and director-N those roles, no name or the owner's proxy is the owner.
+ * The owner's stand-ins (permission.mjs ownerStandInRole) rank as the owner.
  */
 export function parkRank({ by = '', env = process.env } = {}) {
   const role = String(env.STUDIO_ROLE || '').trim().toLowerCase();

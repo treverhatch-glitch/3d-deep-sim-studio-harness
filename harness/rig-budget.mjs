@@ -1,26 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/rig-budget.mjs — 2.76.0 (j, B-89): what runs on this machine now and the share each kind of job would get.
- *
- * Test workers are shared across the jobs running at once (harness/heavy-budget.mjs coreShare: the train's verify,
- * then builders' verifies and lane checks, then soaks; Unity, art and playtest jobs take the threads they claim). This
- * file gathers the picture for the Line Producer and for people:
- *
- *   rigBudget({ root?, env?, now?, events? }) -> {
- *     cores, freeGb, totalGb, known,                       the last machine scan (known: false with none)
- *     running: [{ kind, label, workers, ramGb, threads, startedAt, etaMin, pid, owner, source }],
- *     shares: { train, verify, check, soak: { workers, why }, unity, art, playtest, other: { threads, ramGb } },
- *     coming: [{ kind: 'train', why }], weights, why }
- *
- *   kind     train | verify | check | soak | unity | art | playtest | other (heavy-budget.mjs rigKind)
- *   source   machine:heavy (a holder), gate slot (a lane's game check), verify-running (a verify record whose process
- *            lives but holds no machine:heavy slot: waiting for one, or a light run)
- *   etaMin   minutes left, from the median of the last finished jobs of that kind (job.done events), else null
- *   shares   what a job of that kind would get if it started now (the same functions the gates use)
- *
+ * harness/rig-budget.mjs — what runs on this machine now and the share each kind of job would get.
+ * Test workers are shared across the jobs running at once (harness/heavy-budget.mjs coreShare: the train's verify, then
+ * builders' verifies and lane checks, then soaks; Unity, art and playtest jobs take the threads they claim).
+ *   rigBudget({ root?, env?, now?, events? }) -> { cores, freeGb, totalGb, known, running: [{ kind, label, workers, ramGb,
+ *     threads, startedAt, etaMin, pid, owner, source }], shares: { train, verify, check, soak: { workers, why }, unity, art,
+ *     playtest, other: { threads, ramGb } }, coming: [{ kind: 'train', why }], weights, why }
+ *   kind: train | verify | check | soak | unity | art | playtest | other; source: machine:heavy, gate slot, verify-running;
+ *   etaMin: minutes left from the median of the last finished jobs of that kind (job.done events), else null
  *   node harness/rig-budget.mjs [--json]
- *
- * Read-only; never throws (a part it can't read is left out). Paths: the main checkout's .studio (lane copies share it).
+ * Read-only; never throws. Paths: the main checkout's .studio (lane copies share it).
  */
 import fs from 'node:fs';
 import path from 'node:path';

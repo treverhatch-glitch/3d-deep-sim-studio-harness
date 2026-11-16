@@ -1,19 +1,14 @@
 #!/usr/bin/env node
 /**
  * harness/builds.mjs — the last good build of the game, saved so anyone can play it while agents work.
- *
- *   npm run play [-- --port 4610] [--lan] [--build <id>]   serve the last build that passed the browser check
- *   npm run play -- list                                     the saved builds, newest first
- *   npm run play -- snapshot                                 save the current build now (after a pass)
- *
- * A dev server shows agents' half-finished edits. Instead, every time the browser play gate passes
- * (`npm run play:browser`), the build it played is copied to .studio/builds/<id>/ with what it did
- * (outcome, tick, commit). `npm run play` serves the newest one on a fixed port; --lan opens it to
- * phones on the same Wi-Fi. The War Room's Arcade view plays it in the page. The last 6 are kept.
- *
- * What a build is comes from the cartridge's `browser` contract (qa.mjs):
- *   { page: 'web/<game>/index.html' }                     the page's folder, cartridges/<game>/, assets/approved/
- *   { dist: 'game/<game>/dist', build: 'npm run build' }  a bundled game: run the build, copy dist/
+ * npm run play [-- --port 4610] [--lan] [--build <id>]   serve the last build that passed the browser check
+ * npm run play -- list   the saved builds, newest first   |   npm run play -- snapshot   save the current build now
+ * Each time the browser play gate passes (`npm run play:browser`), the build it played is copied to
+ * .studio/builds/<id>/ with what it did (outcome, tick, commit); the last 6 are kept. `npm run play` serves the newest
+ * on a fixed port; --lan opens it to the same Wi-Fi. The War Room's Arcade view plays it in the page.
+ * A build comes from the cartridge's `browser` contract (qa.mjs): { page: 'web/<game>/index.html' } (the page's
+ * folder, cartridges/<game>/, assets/approved/) or { dist: 'game/<game>/dist', build: 'npm run build' } (run the
+ * build, copy dist/).
  */
 import fs from 'node:fs';
 import os from 'node:os';

@@ -1,19 +1,14 @@
 /**
- * harness/control-effects.mjs — 2.39.0: what a control must change in the game, said in the Game Bible.
- *
- * Until 2.38 a control's "did it work" test was the game's own: the `expect` function an agent writes in
- * the cartridge's qa.mjs. A weak or wrong one (`expect: () => true`, or one that only checks the screen)
- * passes a buy button that buys nothing. The research pack's Hatchfield timeline has them: "Fire bell does
- * nothing", "Extra jet bridges ... buy nothing". The Game Bible is protected (only the owner signs changes),
- * so an effect written there is a check the builder can't weaken.
- *
- * In studio/bible/controls.json a control may carry `effect` (one or a list):
+ * harness/control-effects.mjs — what a control must change in the game, said in the Game Bible.
+ * A weak `expect` in a cartridge's qa.mjs (`expect: () => true`) passes a button that does nothing. The Game Bible is
+ * protected, so an effect written there is a check the builder can't weaken. In studio/bible/controls.json a control
+ * may carry `effect` (one or a list):
  *   { "path": "resources.credits", "change": "down" }
  *   { "path": "entities[kind=unit].length", "change": "up" }
  *   change: "up" | "down" | "changes" | "same" | a number (the exact difference after - before)
- *   { "path": "speed", "to": 0 }   (2.45.0: the value it must end at)
- * `path` reads the sim state: dotted keys, `.length` of a list, and `list[field=value]` to keep the items
- * whose field equals value. The web track checks it on the sim state before and after the real press.
+ *   { "path": "speed", "to": 0 }   (the value it must end at)
+ * `path` reads the sim state: dotted keys, `.length` of a list, and `list[field=value]` to keep the items whose field
+ * equals value. The web track checks it on the sim state before and after the real press.
  */
 import fs from 'node:fs';
 import path from 'node:path';

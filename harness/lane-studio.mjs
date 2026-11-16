@@ -1,22 +1,14 @@
 /**
- * harness/lane-studio.mjs — 2.60.1 (B-40): a lane copy's studio/ is the main checkout's.
- *
- * In a lane copy (.lanes/<agent>) `studio/` is a link (a junction on Windows) to the main checkout's studio/, so every
- * agent sees one board. That also means an edit to studio/game.json inside a lane lands straight in main's checkout,
- * uncommitted, and a lane's commits can never carry studio/ config. The rule: studio/ in a lane is main's; only the
- * board commands (npm run task, lock, proof, ...) write there; a config change is handed back with a note for the owner
- * or the Producer to make on main (a protected file needs the owner's signed approval as always).
- *
- *   - .claude/hooks/lane-studio-guard.mjs (a Claude Code PreToolUse hook) denies Edit/Write/MultiEdit/NotebookEdit of
- *     studio config (isStudioConfig) when the session runs in a lane copy (laneContext);
- *   - task done in a lane copy warns, naming the files, when main's studio config changed while the task was worked
- *     and isn't committed on main (mainConfigChanges).
- *
- * 2.65.0 (B-40 full): the sanctioned route is a config proposal file in the lane (studio-proposals/<task>.json: the JSON
- * keys to set) that the landing applies to main's studio/ right after the lane lands, under the protected-file rules
- * (harness/config-proposal.mjs). The guard's message names it.
- *
- * No imports from the rest of the harness: the hook loads this file on every edit.
+ * harness/lane-studio.mjs — a lane copy's studio/ is the main checkout's.
+ * In a lane copy (.lanes/<agent>) `studio/` is a link (a junction on Windows) to main's studio/, so every agent sees
+ * one board. An edit to studio/game.json in a lane lands in main's checkout, uncommitted, and a lane's commits never
+ * carry studio/ config. Only the board commands (npm run task, lock, proof, ...) write there; a config change is handed
+ * back with a note for the owner or Producer (a protected file needs the owner's signed approval).
+ *   - .claude/hooks/lane-studio-guard.mjs (a PreToolUse hook) denies Edit/Write/MultiEdit/NotebookEdit of studio config
+ *     (isStudioConfig) in a lane copy (laneContext);
+ *   - task done in a lane copy warns when main's studio config changed and isn't committed (mainConfigChanges).
+ * Sanctioned route: a config proposal file in the lane (studio-proposals/<task>.json: the JSON keys to set), applied to
+ * main's studio/ after the lane lands (harness/config-proposal.mjs). No imports from the rest of the harness.
  */
 import fs from 'node:fs';
 import path from 'node:path';

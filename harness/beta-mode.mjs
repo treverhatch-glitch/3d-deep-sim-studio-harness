@@ -1,42 +1,13 @@
 /**
- * harness/beta-mode.mjs — 2.76.0 (the owner's request, 2026-11-04): beta mode, the owner gates off while the harness is
- * built.
- *
- * The owner's words: "i kinda want us to drop these permission things for now actually. we are still in beta for the
- * harness build and these things really slow us down ... if we are patching things every 10 minutes and we need keys for
- * everything this becomes a full time job for me" and "allow [the orchestrator] to have the same permissions to get tasks
- * done as i would have". So one switch, set once:
- *
+ * harness/beta-mode.mjs — beta mode: one switch that lets named agents and planning sessions act as the owner.
  *   npm run beta -- on --by <owner> [--agents opus-1,patch] [--why "…"] [--permission "<the owner's words or a link>"]
- *   npm run beta -- off --by <owner>           2.79 (c): the owner's own (harness/owner-acts.mjs), in their own terminal
+ *   npm run beta -- off --by <owner>           the owner's own (harness/owner-acts.mjs), in their own terminal
  *   npm run beta -- status [--json]
- *
  * studio/beta.json { on, by, at, why, agents, roles, signature? | recordedBy+permission? } as committed in the main
- * checkout. While it is on, the named outside agents (the crew's orchestrator) and the planning roles' launched sessions
- * (Producer, Director) act as the owner without the owner key or the owner's words for each step: every owner action
- * (harness/delegation.mjs delegationFor), approvals of protected files, gates, tests, hooks and forced dones
- * (harness/approve.mjs, an approval that carries this file instead of a signature), answering owner asks, releasing a
- * golden re-record. Every use is logged (who, why) and shown in the daily digest and the War Room, so the owner reviews
- * afterwards instead of approving before. What stays on: the game's tests, the train's full verify, no deletes,
- * worker sessions never act as the owner.
- *
- * Who may turn it on: the owner in their own terminal (signed with the owner key when the private key is here), or the
- * owner proxy's own shell recording the owner's yes (--permission), like any proxy approval. A commit that set it from
- * a worker's session (Studio-Agent trailer naming a worker) doesn't count. No harness imports beyond owner-proxy.mjs,
- * hash.mjs, event.mjs and permission.mjs (its name lists and mayDecide; it imports this file back, used only inside
- * functions): approve.mjs, delegation.mjs and permission.mjs use it.
- *
- * 2.78.2 (h), the owner's rule (2026-11-05): which beta actor makes which decision is permission.mjs mayDecide. Board
- * decisions: the owner, the outside orchestrator, a Producer/Director session. Protected decisions (protected files,
- * weakened tests, hooks, task done --force, a protected config change): the owner and outside agents only, unless the
- * owner's switch STUDIO_PRODUCER_APPROVES=protected is on. Every beta record is judged by one predicate, betaRecordVerdict.
- *
- * 2.84 (q), the owner's decision (2026-11-12, away for a trip): the overseer (a beta-mode named agent) and an outside
- * signer get the same power, with no owner key and no quoted permission: release a tier-C lane, force a done (also
- * --force --train with a force approval on file), approve protected files, tests and hooks (their own change too, marked
- * self), unpark at any rank, resume a paused role, cancel an engine train or switch its auto mode. One rule: standInMay
- * (below). Each use is a beta.use event; the digest lists them and calls self-approvals out. Unchanged: the owner-only
- * list, launched and pinned sessions and workers never, nothing with beta mode off, and every check still runs.
+ * checkout. While on, named outside agents and launched Producer/Director sessions act as the owner without the key.
+ * Every use is logged. Stays on: the game's tests, the full verify, no deletes; workers never act as the owner.
+ * Who decides what: permission.mjs mayDecide; betaRecordVerdict judges every record; standInMay covers the overseer.
+ * Imports only owner-proxy.mjs, hash.mjs, event.mjs, permission.mjs (used inside functions).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -90,11 +61,10 @@ export function readBeta({ root = mainCheckout(), now = Date.now() } = {}) {
 export const betaWords = (doc) => `beta mode: set by ${doc.by} at ${short(doc.at)} (${BETA_REL}${doc.why ? `: ${String(doc.why).slice(0, 120)}` : ''})`;
 
 /**
- * Is this caller one beta mode lets act as the owner? { ok, who, via, doc, words, why }. A named outside agent
- * (STUDIO_LOCK_OWNER in agents, or the owner proxy's agent), or a launched Producer/Director session (STUDIO_ROLE);
- * never a worker's name or a worker session. A lane copy counts only with allowLane (approving that lane's own change).
- * 2.78.2 (h): `kind` is the decision (permission.mjs decisionClass; default a board decision): a protected one is refused
- * to a Producer/Director session unless the owner's switch is on (mayDecide), with { refused: true } and who to ask.
+ * Is this caller one beta mode lets act as the owner? { ok, who, via, doc, words, why }. A named outside agent or a
+ * launched Producer/Director session (STUDIO_ROLE); never a worker. A lane copy counts only with allowLane.
+ * `kind` is the decision (default a board decision): a protected one is refused to a Producer/Director session unless
+ * the owner's switch is on (mayDecide).
  */
 export function betaActor({ env = process.env, from = REPO_ROOT, allowLane = false, kind = 'board', by = '' } = {}) {
   let root = from;
@@ -138,20 +108,10 @@ export function betaActor({ env = process.env, from = REPO_ROOT, allowLane = fal
 }
 
 /**
- * 2.84 (q), the owner's decision (2026-11-12, before a trip abroad): while beta mode is on, a beta-mode named agent (the
- * overseer) and an outside signer (permission.mjs outsideSigners) make these owner decisions themselves, with no owner
- * key and no quoted permission line: 'release' (a tier-C lane from the train queue), 'force' (a force approval, task done
- * --force, --force --train), 'protected' (protected files, weakened tests, hooks; their own change included, marked
- * self), 'unpark' (any rank), 'crew-resume' (npm run crew -- resume) and 'engine-train' (cancel a running engine train,
- * its auto mode on/off). One rule for all of them: may this shell make this decision right now? { ok, via, who, why,
- * doc, words }; via is 'beta agent' or 'signer'.
- *
- * Never: an owner-only act (harness/owner-acts.mjs: deleting data, keys, publishing, an owner tool, beta mode off), a launched
- * session (STUDIO_ROLE) or a session pinned to a task (STUDIO_TASK_PIN) whatever --by says, a worker's name, a name beta
- * mode doesn't list, or anyone while beta mode is off or its record fails readBeta (set from a worker's commit, …). A
- * coding agent's markers (CLAUDECODE, AI_AGENT, …) don't matter: the overseer and the signers are coding agents. The
- * name is STUDIO_LOCK_OWNER, or --by in a shell that names nobody (selfNamingShell). A launched Producer/Director keeps its
- * own rules (betaActor, mayDecide): this function never answers yes for it. Log each use with recordStandInUse.
+ * Beta mode: a named agent (the overseer) or outside signer decides 'release', 'force', 'protected', 'unpark',
+ * 'crew-resume' or 'engine-train' without the owner key. { ok, via, who, why, doc, words }; via is 'beta agent' or
+ * 'signer'. Never: an owner-only act (harness/owner-acts.mjs), a launched or task-pinned session, a worker, beta mode
+ * off. The name is STUDIO_LOCK_OWNER, or --by in a shell naming nobody. Log each use with recordStandInUse.
  */
 export const STAND_IN_KINDS = Object.freeze(['release', 'force', 'protected', 'unpark', 'crew-resume', 'engine-train']);
 export function standInMay(kind, { by = '', env = process.env, root = REPO_ROOT, allowLane = true } = {}) {
@@ -214,20 +174,10 @@ export function recordRepo(root, rel) {
 }
 
 /**
- * 2.77.3 (B-111), 2.78.2 (h): the one predicate for every beta-format record (an approval with no signature and
- * studio/beta.json's by/at): task types and visual decisions (harness/reclassify.mjs), config proposal approvals
- * (harness/config-proposal.mjs signedProposal), and since 2.78.2 protected files, weakened tests, hooks and forced dones
- * (harness/approve.mjs verifyApproval, which before accepted one nobody committed). { ok, why, grandfathered }. It counts
- * when it is:
- *   - an approval betaApprovalOk accepts: the current beta session, recordedBy set and not a worker;
- *   - committed with exactly this content (git show HEAD:<rel> equals doc, the reader's `file` key aside) in the
- *     repository that holds it (recordRepo: the main checkout for a lane copy's linked studio/);
- *   - made by someone who may make that kind of decision (permission.mjs mayDecide, judged by recordTier: the role it
- *     was recorded under, who recorded it, the commit's Studio-Agent trailers): never a worker; a protected decision by a
- *     Producer/Director session only with STUDIO_PRODUCER_APPROVES=protected, or (grandfathered) one recorded before
- *     2.78.2 (no `decides` field) under the beta session still on: it stops counting when beta mode's session changes.
- * A file dropped in the folder, edited after its commit, or carried in by a worker proves nothing. The owner's switch is
- * read from the main checkout's .env (permission.mjs producerApprovesProtected). Never throws.
+ * The one predicate for every beta-format record (approval with no signature). { ok, why, grandfathered }. It counts
+ * when: betaApprovalOk accepts it (current beta session, recordedBy set, not a worker); it is committed with exactly
+ * this content in the repository that holds it; and its maker may decide that kind (permission.mjs mayDecide). Never
+ * throws.
  */
 export function betaRecordVerdict(root, rel, doc) {
   const no = (why) => ({ ok: false, why, grandfathered: false });

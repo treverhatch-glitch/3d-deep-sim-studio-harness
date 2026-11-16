@@ -1,27 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/gate-fix.mjs — 2.66.0 (d): one "Fix:" line under every gate failure.
- *
- * A red gate printed its id and its log, and the agent (or person) reading it had to guess the next step: rerun all of
- * verify, read the gate's script, or work around it. scripts/run-gates.mjs now prints one line after each failing
- * gate's FAIL (or WARN) line:
- *
+ * harness/gate-fix.mjs — one "Fix:" line under every gate failure, printed by scripts/run-gates.mjs after the FAIL
+ * line:
  *   [gates] FAIL golden
  *   [gates] Fix: a replay hash changed: … then rerun only this gate: npm run verify -- --only golden
- *
- * Where the text comes from, first match wins:
- *   1. the gate's own "fix" in studio/gates.json (a studio's own gate says its own next step);
- *   2. a failing check of the game gate: the first `[game-gates] FAIL <id>` line in its output picks that kind's entry
- *      (game:qa, game:layout, engine:<project>, a manifest check …);
- *   3. a timeout in the output (the gate was killed, not wrong): the load advice;
- *   4. the table below, by gate id;
- *   5. the fallback: read the log (named) and rerun only this gate.
- * Safety gates (protected, weakened-tests, hooks, secrets) never tell an agent to approve: they say to put it back or
- * hand the task back; only the owner approves.
- *
+ * Source, first match wins: 1. the gate's own "fix" in studio/gates.json; 2. the first `[game-gates] FAIL <id>` line in
+ * a game gate's output; 3. a timeout in the output: the load advice; 4. the table below, by gate id; 5. the fallback:
+ * read the log and rerun only this gate. Safety gates (protected, weakened-tests, hooks, secrets) never tell an agent
+ * to approve: they say to put it back or hand the task back; only the owner approves.
  *   node harness/gate-fix.mjs <gate-id>   print the Fix line for that gate
- *   node harness/gate-fix.mjs --check     exit 1 when a gate in studio/gates.json or a game gate kind (read from
- *                                         harness/game-gates.mjs) has no entry of its own (it would get the fallback)
+ *   node harness/gate-fix.mjs --check     exit 1 when a gate in studio/gates.json or a game gate kind has no entry
  */
 import fs from 'node:fs';
 import path from 'node:path';

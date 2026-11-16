@@ -1,17 +1,13 @@
 /**
- * harness/known-red.mjs — 2.77.0 (P9.3 + P9.6): tests that are red on main itself.
+ * harness/known-red.mjs — tests that are red on main itself.
  *
- * The crew's soak tests were red on main (one fails alone, one times out), so every train verify failed them, and the
- * one-full-green-verify rule cost ~23 minutes a round. Now a test the train found red on main ALONE (the prefix
- * bisection's "main itself is red", or a verify of main alone) is listed once in .studio/train/known-red.json with its
- * evidence { test (a sub-id naming a file: <gate>:<check>:<file>), gate, since, train, tree (main's), log, seen }.
- *
- * A later train verify still runs in full on the exact tree. When its ONLY red parts are listed tests, none of them in
- * a file the train's lanes change, the train re-runs just those test files on main's tip alone: red there too (they
- * still fail on main) -> the train lands, the reds reported (task.train.known_red), not blocking; green on main -> the
- * entries clear (main is green on them) and the red is the lanes', as before. A train that lands on a fully green
- * verify clears every entry (main is green on all of them now). `npm run task -- train status` and the War Room's train
- * card show the count. Never throws.
+ * A test the train found red on main ALONE (the bisection's "main itself is red", or a verify of main alone) is listed
+ * once in .studio/train/known-red.json with { test (<gate>:<check>:<file>), gate, since, train, tree, log, seen }. A
+ * later train verify still runs in full. When its ONLY red parts are listed tests, none in a file the lanes change,
+ * the train re-runs just those files on main's tip alone: red there too -> the train lands, reds reported
+ * (task.train.known_red), not blocking; green on main -> the entries clear and the red is the lanes'. A train that
+ * lands on a fully green verify clears every entry. `npm run task -- train status` and the War Room's train card show
+ * the count. Never throws.
  */
 import fs from 'node:fs';
 import path from 'node:path';

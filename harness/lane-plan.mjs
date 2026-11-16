@@ -1,29 +1,14 @@
 /**
- * harness/lane-plan.mjs — 2.78.1 (B-123): lanes for unscoped builder tasks, unscoped builders side by side, and shared
- * sim code stacked (phase awareness).
- *
- * The crew's run: every ready builder task had no lane in studio/task-holds.json, so a builder on any one of them
- * counted as "working on the whole game (no lane)" and the supervisor started no other builder (1-2 builders with 5
- * ready and a target of 6). Three parts here, each with a setting to turn it off:
- *
- *   1. lanePass (the Line Producer's pass, harness/line-producer.mjs, on the Producer's behalf): each READY builder task
- *      with no lane (and not the whole game on purpose: task add --lane all, or task lane <ID> all) gets one worked out
- *      from what it says it touches: its --scope globs (their folders), the code paths its title, asked text or its own
- *      hand-off note names (paths that exist, outside studio/, docs/ and the harness), the files its title points at
- *      (harness/task-hold.mjs inferLaneAtAdd) and plan-waves' predicted files (harness/plan-waves.mjs: its overlap
- *      history). The lane is written where the supervisor reads it (studio/task-holds.json "lane", as `task lane` does),
- *      logged as the Producer's decision (.studio/decisions.jsonl, a task.lane event). A task it can't scope is reported
- *      "unscoped" (the Line Producer's status and blockers). A running task is never re-scoped by the pass: only a
- *      person, the orchestrator or the Producer does that (npm run task -- lane <ID> <folders> --by <you>).
- *      STUDIO_LINE_LANES=on (default) | report (say what it would set, set nothing) | off.
- *   2. predictedApart (the supervisor's lane check, harness/supervisor.mjs): two builders where one or both have no lane
- *      run side by side when both have a prediction (a lane, else plan-waves' scope or overlap history) and the two
- *      don't overlap. No prediction on either side: the old rule (no lane = the whole game). STUDIO_UNSCOPED_PARALLEL=off
- *      turns it off.
- *   3. stackShared (phase awareness, in lanePass): a ready builder task whose lane or predicted files touch shared sim
- *      code waits (--after) for the open task before it (in progress first, then the Line Producer's order) that touches
- *      the same shared files, instead of running beside it. Shared sim code: STUDIO_SHARED_SIM (globs, comma separated;
- *      "off" turns stacking off), else the game manifest's "sharedSim" (<game>/studio.gates.json), else DEFAULT_SHARED_SIM.
+ * harness/lane-plan.mjs — gives unscoped builder tasks a lane, lets unscoped builders run side by side, and stacks
+ * shared sim code. Without lanes a builder counted as "the whole game" and no other builder started.
+ *   1. lanePass (the Line Producer's pass, harness/line-producer.mjs): each READY builder task with no lane (and not
+ *      `--lane all`) gets one from its --scope globs, the code paths its title, text or hand-off note names, and
+ *      plan-waves' predicted files (studio/task-holds.json "lane"). STUDIO_LINE_LANES=on|report|off.
+ *   2. predictedApart (the supervisor's lane check): two builders run side by side when both have a prediction and the
+ *      two don't overlap; with none, no lane = the whole game. STUDIO_UNSCOPED_PARALLEL=off.
+ *   3. stackShared (in lanePass): a ready task touching shared sim code waits (--after) for the open task before it
+ *      that touches the same files. Shared sim: STUDIO_SHARED_SIM (globs; "off"), else "sharedSim", else
+ *      DEFAULT_SHARED_SIM.
  */
 import fs from 'node:fs';
 import path from 'node:path';

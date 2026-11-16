@@ -1,32 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/delegation.mjs — the owner's standing delegation to one outside agent (the crew's orchestrator).
- *
- * An outside agent should do what a game dev can do, but recording the owner's words for every tier-C release
- * (--permission "…", harness/permission.mjs) costs an owner round-trip each time. Instead the owner, in their own
- * terminal, grants one named outside agent a short list of owner actions for a few hours:
- *
- *   npm run delegate -- grant <agent> --actions train-release,type,yes,hold --hours 12 --by <owner> [--why "…"] [--no-commit]
- *   npm run delegate -- list                       the delegation on file, whether it counts, and why
- *   npm run delegate -- revoke [--by <name>]       remove it (anyone may: it only takes power away)
- *   npm run delegate -- claude-settings [--write] [--remove] [--actions …]
- *                                                  the narrow Claude Code allow rules for exactly those commands
- *
- * studio/delegation.json holds { agent, actions, until, by, at, why } (and, with an owner key, the owner's signature).
- * It is on the shipped protected list (approve.mjs DEFAULT_PROTECTED, so tiers.mjs SHIPPED_PROTECTED), so a lane that
- * writes it is tier C and an agent can't grant itself one.
- *
- * When it counts (readDelegation): it is read as committed in the main checkout (HEAD), never from a lane copy.
- *   - The studio has an owner key (studio/keys/owner-ed25519.pub.pem): only with a valid signature by that key
- *     (signed where the private key is, STUDIO_OWNER_KEY / ~/.studio-owner/); a changed or unsigned file is ignored.
- *   - No owner key yet: only when the commit that set it is not an agent's (no Studio-Agent trailer), like the owner's
- *     type record (harness/reclassify.mjs). A speed bump, not a lock, until the owner key exists.
- *
- * What it covers (delegationFor): while it is valid, the named agent runs exactly the listed actions with
- * `--by <agent>` and no per-action permission words. Each use is recorded as before (who, why) with the words
- * "under delegation <at> by <owner>", plus one delegation.used event that the daily digest counts. Never covered:
- * signing protected-file approvals (npm run approve), gates or the protected list, the owner's own acts (harness/owner-acts.mjs); workers, launched sessions
- * (STUDIO_ROLE) and lane copies.
+ * The owner, in their own terminal, grants one named outside agent a short list of owner actions for a few hours:
+ *   npm run delegate -- grant <agent> --actions train-release,type,yes,hold --hours 12 --by <owner> [--why "…"]
+ *        [--no-commit]
+ *   npm run delegate -- list | revoke [--by <name>]   the delegation on file and whether it counts; remove it
+ *   npm run delegate -- claude-settings [--write] [--remove] [--actions …]   the narrow Claude Code allow rules
+ * studio/delegation.json is on the shipped protected list (approve.mjs DEFAULT_PROTECTED). It counts (readDelegation)
+ * as committed in the main checkout (HEAD), never from a lane copy: with an owner key only with a valid signature, with
+ * none only if its commit has no Studio-Agent trailer. Covered (delegationFor): the listed actions with
+ * `--by <agent>`. Never: protected-file approvals, gates, workers, STUDIO_ROLE sessions.
  */
 import fs from 'node:fs';
 import path from 'node:path';

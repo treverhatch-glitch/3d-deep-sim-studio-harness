@@ -1,18 +1,12 @@
 /**
- * harness/landed-content.mjs — 2.78.1 (d): is a branch's work already on main, whatever its commit hashes say?
- *
- * Two places asked "are these commits landed?" by hash only, and a landing under other hashes (a rescue or another task
- * carrying the work, a rebase, a merge of main after the check) kept a task or its dependants waiting:
- *   bringsNothing(root, { base, head })     head adds nothing to base: it is an ancestor of base; or every one of its
- *                                           own non-merge commits has an equal patch on base (git cherry: all "-"); or
- *                                           merging it into base changes nothing (git merge-tree --write-tree gives
- *                                           base's own tree; git 2.38+). { nothing, how, why }
- *   onlyMainMerges(root, { main, checked, head })
- *                                           after a landing of `checked`: the lane's commits not on main are merges
- *                                           only, each with a parent on main (merges of main), and together they bring
- *                                           nothing beyond main (bringsNothing by tree or ancestry). { ok, commits, why }
- *   gitMainRoot(root), mainRefOf(root)      the main checkout (from a lane copy too: git's common dir) and its branch.
+ * harness/landed-content.mjs — tells whether a branch's work is already on main, whatever its commit hashes say.
  * Read-only git (no index, no files). Never throws: a git error is "not shown", so the old wait stays.
+ *   bringsNothing(root, { base, head })  head adds nothing to base: it is an ancestor of base; or each of its non-merge
+ *       commits has an equal patch on base (git cherry: all "-"); or merging it changes nothing (git merge-tree
+ *       --write-tree). { nothing, how, why }
+ *   onlyMainMerges(root, { main, checked, head })  after a landing of `checked`: the lane's commits not on main are
+ *       merges only, each with a parent on main, together bringing nothing beyond main. { ok, commits, why }
+ *   gitMainRoot(root), mainRefOf(root)  the main checkout (from a lane copy too: git's common dir) and its branch.
  */
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';

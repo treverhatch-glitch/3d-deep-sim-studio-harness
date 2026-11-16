@@ -1,29 +1,13 @@
 /**
- * harness/proc-identity.mjs — PU-17 (P-039, P-045): is this process number still the program the launcher started?
- *
- * The OS reuses process numbers. A session record left "running" after a crash or a reboot can name a number that
- * another program has now, and killing by number (agent stop, pause, stop all, the stall and refresh checks,
- * studio:stop) would kill that program (on Windows with its whole tree). So the launcher writes down when each
- * process started, and a kill first checks the number still belongs to it.
- *
- * Each moment has its own cost, and only the kill pays for an OS query (P-045: a PowerShell call at every launch and
- * in every listing slowed the launcher on Windows and made five selftests fail there):
- *   launch   in-process, no child process: the launcher's own start (Date.now() - process.uptime(), or the spawn time
- *            its parent wrote) and each agent's spawn time (Date.now() right after spawn) with its program's name;
- *            on Linux also the /proc start ticks (a file read).
- *   listing  sessions(), task.mjs's holder check, the supervisor, the watcher and the HUD: no child process. A number
- *            in use counts as alive, as before; on Linux a /proc start that differs from the record means dead.
- *   kill     readStarts() asks the OS once (Linux /proc; macOS one ps; Windows one PowerShell Get-CimInstance, with a
- *            timeout) and sameProcess() compares. The recorded time is the spawn time, not the OS's creation time,
- *            so they may differ by STUDIO_PROC_START_TOLERANCE_SEC (default 3). Same: kill. Clearly different: don't.
- *            Unreadable: the caller's old rule (a fresh heartbeat).
- *
- * Test hooks (the Windows logic, tested on any OS):
- *   STUDIO_PROC_IDENTITY_STUB=<file.json>  readStarts answers from this map, { "<pid>": <start ms> | "error" | "gone" };
- *                                          other pids go to the real reader. Launches record no /proc ticks and
- *                                          listings use the Windows rule, as on Windows.
- *   STUDIO_PROC_IDENTITY_DELAY_MS=<ms>     every readStarts call waits this long first (a slow PowerShell).
- *   STUDIO_PROC_IDENTITY_LOG=<file>        every readStarts call appends one JSON line: when, which pids, who asked.
+ * harness/proc-identity.mjs — tells whether a process number is still the program the launcher started, before a kill.
+ * The OS reuses process numbers, so killing by number (agent stop, pause, stop all, stall and refresh checks, studio:stop)
+ * could hit another program (on Windows with its tree). The launcher records when each process started; a kill checks it.
+ * Only the kill pays for an OS query. launch: in-process, no child process (launcher and agent start times, program name;
+ * Linux also /proc ticks). listing: no child process; a number in use counts as alive; on Linux a differing /proc start
+ * means dead. kill: readStarts() asks the OS once (Linux /proc; macOS ps; Windows PowerShell Get-CimInstance, with a timeout),
+ * sameProcess() compares within STUDIO_PROC_START_TOLERANCE_SEC (default 3): same: kill; clearly different: don't; unreadable:
+ * the caller's old rule. Test hooks: STUDIO_PROC_IDENTITY_STUB=<file.json> ({ "<pid>": <start ms> | "error" | "gone" }),
+ * STUDIO_PROC_IDENTITY_DELAY_MS=<ms>, STUDIO_PROC_IDENTITY_LOG=<file> (each readStarts appends a JSON line).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -123,12 +107,10 @@ export function pidAlive(pid, recorded, { eperm = true } = {}) {
 }
 
 /**
- * 2.79 (b): is the process a record names still the one that wrote it? pidAlive, then (only when the record carries a
- * start identity) one OS query for the pid's start (readStarts) against the recorded one (sameProcess): Windows and
- * macOS reuse process numbers, and pidAlive alone there says "a number in use is alive" (a done-running marker or a gate
- * run's record whose pid became another program's kept a drain and a verify waiting for an hour). A record without
- * identity (2.78.2 and older) and a start that can't be read keep the old rule: alive while the number is in use.
- * `starts` is for tests.
+ * Is the process a record names still the one that wrote it? pidAlive, then (only when the record carries a start identity)
+ * one OS query for the pid's start (readStarts) against the recorded one (sameProcess): Windows and macOS reuse process
+ * numbers, so pidAlive alone ("a number in use is alive") can keep a marker or record alive for another program. A record
+ * without identity and a start that can't be read keep the old rule: alive while the number is in use. `starts` is for tests.
  */
 // A live pid's start doesn't change: one OS query per pid per minute (on Windows each query is a PowerShell start, and
 // the supervisor's stall check asks on every pass while a task done runs).
@@ -226,12 +208,10 @@ export function winStartsFrom(stdout, t0) {
 }
 
 /**
- * 2.84: the environment for powershell.exe. A process started with a cut-down environment (a scheduler's, a test's
- * `env: { ... }` without process.env) passes PowerShell only what Windows itself adds (PATH, SystemRoot, TEMP, the
- * user's profile). On the Windows CI runner every PowerShell query from such a process ran into its timeout (8 s, no
- * answer), while the same query from a process with the full environment answered: every pid's start was then
- * unreadable. The usual system variables are filled in with Windows' own defaults when missing; nothing set is
- * changed. Off Windows the environment is returned as it is.
+ * The environment for powershell.exe. A process started with a cut-down environment (a scheduler's, a test's `env: { ... }`
+ * without process.env) passes PowerShell only what Windows adds, and the query then times out (8 s, no answer), so every
+ * pid's start is unreadable. The usual system variables are filled in with Windows' own defaults when missing; nothing set
+ * is changed. Off Windows the environment is returned as it is.
  */
 export function psEnv(env = process.env, platform = process.platform) {
   const e = { ...env };

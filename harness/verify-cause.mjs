@@ -1,14 +1,13 @@
 /**
- * harness/verify-cause.mjs — 2.81 (b3), from the R2 trial (P3): one structured verdict per train verify.
+ * harness/verify-cause.mjs — one structured verdict per train verify.
  *
- * Live evidence (the R2 trial's crew data): 99 of 208 train verifies were red (15.2 h), and 37 of those reds carried no
- * gate id: the hand-back said "exit 1", "wrote no verify record" or "tested tree X, not Y", which the text parse
- * (train.mjs failLines) could not classify. Every train verify now records `exitCause` in the task.train.verify event's
- * meta and in the verify result, next to the gate list. A classification, not a saving: it is the input to the next step.
+ * Every train verify records `exitCause` in the task.train.verify event's meta and in the verify result, next to the
+ * gate list. A classification, not a saving: it is the input to the next step.
  *
  * exitCause: green | fail (red, gate ids known) | exit (red, no gate id: a crash or a non-zero exit before a FAIL line)
  * | signal (killed) | timeout | busy (ran no check: the machine was busy) | no-check (stopped before any gate)
- * | no-record (the run passed, no record written) | tree-mismatch (the record is of another tree) | not-clean (the record
+ * | no-record (the run passed, no record written) | tree-mismatch (the record is of another tree) | not-clean (the
+ * record
  * is not a clean full verify).
  */
 

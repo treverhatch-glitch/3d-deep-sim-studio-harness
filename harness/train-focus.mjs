@@ -1,25 +1,14 @@
 /**
- * harness/train-focus.mjs — 2.65.3 (B-43): a red merge train re-checks only the failing test FILES.
- *
- * Before 2.65.3 each re-check of a red train (prefix bisection, harness/train.mjs redPlan) ran the whole failing
- * studio gate again: for a game whose tests are one gate that was the whole suite, about 10 min a re-check. Now:
- *   - harness/game-gates.mjs names the failing test files of a failing check (failingTestFiles: vitest, jest,
- *     `node --test`, and plain "FAIL <file>" lines; Windows backslashes become forward slashes) in one line,
- *     "[game-gates] failing test files in <check>: [...]";
+ * harness/train-focus.mjs — a red merge train re-checks only the failing test FILES, not the whole failing gate.
+ *   - harness/game-gates.mjs names the failing files of a failing check (failingTestFiles: vitest, jest, `node --test`,
+ *     plain "FAIL <file>" lines) in "[game-gates] failing test files in <check>: [...]";
  *   - the train reads them from its verify log (focusFromLog) and gives each re-check STUDIO_GATE_FOCUS, a JSON map
  *     { "<check>": [files] } that scripts/run-gates.mjs passes on only in an --only run;
- *   - game-gates then runs a failing check on those files only (focusCommand): the manifest gate's "focus" command
- *     (a template with {files}), else, for a command that clearly runs vitest, jest or `node --test` as its last step,
- *     the files appended; else the whole check, saying why. Checks that passed in the verify are skipped. A focused
- *     run that fails without naming a failing test, or passes having run nothing, runs the whole check instead.
- * A focused re-check is a partial run (--only): it stands for no verify, and landing still needs a full verify of the
- * exact tree. Code only; the game's manifest is protected, the harness only reads "focus".
- *
- * 2.78.2 (f): a check with no "focus" whose command runs an npm script (npm test, npm run <script>, after any `cd`
- * steps) whose last step runs vitest or jest gets one inferred (inferFocus): the command's earlier steps, then
- * `npx vitest run {files}` / `npx jest {files}` (with the script's --config, if it names one). Without it every train
- * re-check re-ran the whole game suite (~20 min) and a timeout-only red "can't be run alone" stayed red.
- * STUDIO_FOCUS_INFER=off: no inference (the whole check runs, as before).
+ *   - game-gates runs the failing check on those files only (focusCommand): the gate's "focus" command ({files}), else
+ *     the files appended to a vitest, jest or `node --test` command, else inferFocus, else the whole check.
+ * A focused re-check is partial (--only): it stands for no verify; landing still needs a full verify. Code only.
+ * inferFocus: for an npm-script command whose last step runs vitest or jest, the earlier steps then
+ * `npx vitest run {files}` / `npx jest {files}`. STUDIO_FOCUS_INFER=off: no inference.
  */
 import { resolveRunner, configFlag } from './test-timeouts.mjs';
 import path from 'node:path';
@@ -43,11 +32,9 @@ export function normTestPath(p) {
 const looksLikeFile = (s) => Boolean(s) && FILE_EXT.test(s) && !/\s/.test(s) && !/^[a-z]+:[^/]/i.test(s.replace(/^[A-Za-z]:\//, ''));
 
 /**
- * The failing test files a runner's output names, in order, at most `max`: vitest ("FAIL  file > test",
- * "FAIL  |project| file", "❯ file (3 tests | 1 failed)"), jest ("FAIL file" / "FAIL file (5 s)"), `node --test`
- * (TAP "location: 'file:line:col'" under a "not ok", the spec reporter's "test at file:line:col"), and any plain
- * "FAIL <path>" line. Paths keep the form the runner printed (relative to where it ran, or absolute), with forward
- * slashes.
+ * The failing test files a runner's output names, in order, at most `max`: vitest ("FAIL  file > test"), jest
+ * ("FAIL file"), `node --test` (TAP "location: 'file:line:col'" under a "not ok"), and any plain "FAIL <path>" line.
+ * Paths keep the form the runner printed, with forward slashes.
  */
 export function failingTestFiles(output, { max = 50 } = {}) {
   const found = [];
@@ -120,11 +107,10 @@ export function focusCommand(gate, files = [], opts = {}) {
 export const focusInferOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_FOCUS_INFER ?? '').trim());
 
 /**
- * 2.78.2 (f): the focus command a check's command implies, { focus: '<command with {files}>', runner, why } or
- * { focus: null, why }. Only for a command whose last step runs an npm script (npm test / npm run <script>, read from the
- * package.json of the folder its `cd` steps lead to, from `root`) whose own last step runs vitest or jest; a command
- * that runs the runner itself already takes the files appended (clearRunner). The earlier steps of the command are kept
- * (a `cd`, an unpack step), then `npx vitest run` / `npx jest`, with the script's --config when it names one.
+ * The focus command a check's command implies, { focus: '<command with {files}>', runner, why } or { focus: null, why
+ * }. Only for a command whose last step runs an npm script (read from the package.json its `cd` steps lead to) whose
+ * own last step runs vitest or jest. The earlier steps are kept, then `npx vitest run` / `npx jest`, with the
+ * script's --config.
  */
 export function inferFocus(command, { root = HARNESS_ROOT, env = process.env } = {}) {
   if (!focusInferOn(env)) return { focus: null, why: 'STUDIO_FOCUS_INFER=off' };

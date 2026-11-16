@@ -1,23 +1,14 @@
 #!/usr/bin/env node
 /**
- * harness/dev-cycle.mjs — 2.30o: the Director and Producer develop the game continuously, not in one-shot plans.
- *
- * In the Marina run the early game landed, the plan ran out, and nobody knew where to go next. The game-dev
- * loop now runs a standing cycle:
- *   when    every STUDIO_DEV_CYCLE_MIN (45) minutes, when the builder queue drops below 4, or when a
- *           milestone closed since the last cycle
- *   what    writes .studio/briefs/dev-cycle.md (recent landings, newest captures, playtest reports, unmet
- *           exit criteria, bible gaps, the ladder's end) and wakes the Director, then the Producer, to
- *           review it against the bible and charter and turn it into new ideas and content tasks
+ * harness/dev-cycle.mjs — the Director and Producer develop the game continuously, in a standing cycle run by the loop.
+ *   when    every STUDIO_DEV_CYCLE_MIN (45) minutes, when the builder queue drops below 4, or when a milestone closed
+ *   what    writes .studio/briefs/dev-cycle.md (landings, captures, playtest reports, unmet exit criteria, bible gaps)
+ *           and wakes the Director, then the Producer, to turn it into new ideas and content tasks
  *   thin    a bible missing a core loop, feel, progression or late game gets a Director task to write it
- *   brief   from the reference game's mechanics and the genre, marked "Status: ASSUMPTION (dev to approve)";
- *           the studio proceeds on it without waiting
- *   ladder  when a ladder's last milestone is half met (or it has no open milestone left), the Director gets a
- *           task to propose the next one (content, depth, polish, port) and append it to the charter
- * Tasks go through fileTask (deduplicated). STUDIO_DEV_CYCLE=off turns it off.
- * 2.84: a regular cycle wakes a role only when the board changed since that role's last cycle session ended
- * (harness/wake-gate.mjs, STUDIO_CYCLE_QUIET_MAX_H); the change list opens .studio/briefs/dev-cycle-<role>.md.
- *
+ *   brief   from the reference game's mechanics, marked "Status: ASSUMPTION (dev to approve)"; no waiting
+ *   ladder  a ladder's last milestone half met (or none open): the Director gets a task to propose the next one
+ * Tasks go through fileTask (deduplicated). STUDIO_DEV_CYCLE=off turns it off. A cycle wakes a role only when the board
+ * changed since its last cycle session (harness/wake-gate.mjs, STUDIO_CYCLE_QUIET_MAX_H).
  *   node harness/dev-cycle.mjs [--force] [--json]
  */
 import fs from 'node:fs';

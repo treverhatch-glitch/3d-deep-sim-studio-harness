@@ -32,13 +32,11 @@ export const STUDIO_STATE_DIR = (() => {
   } catch { return own; }
 })();
 
-// Studio settings from .env (STUDIO_*, HUB_*, AGENT_*, PLAYTEST_*), so every command sees the same
-// backup folder, Producer name and caps, not only the supervisor. Keys are read only by the router.
-// A value already in the environment wins.
-// 2.73.1 (B-60): who a shell is (STUDIO_LOCK_OWNER, STUDIO_ROLE, ...) is never taken from the shared .env: a warning
-// names the line instead (harness/dotenv.mjs). The last non-empty line for a name wins, so a value added at the bottom
-// beats the example's empty one. 2.73.2 (B-74): the values taken from the file are noted (STUDIO_ENV_FROM_FILE), so the
-// long-running loops can re-read .env when it changes (harness/env-reload.mjs) without overriding what a person set.
+// Studio settings from .env (STUDIO_*, HUB_*, AGENT_*, PLAYTEST_*), so every command sees the same backup folder,
+// Producer name and caps. Keys are read only by the router. A value already in the environment wins. Who a shell is
+// (STUDIO_LOCK_OWNER, STUDIO_ROLE, ...) is never taken from the shared .env: a warning names the line instead
+// (harness/dotenv.mjs). The last non-empty line for a name wins. Values taken from the file are noted
+// (STUDIO_ENV_FROM_FILE) so long-running loops can re-read .env (harness/env-reload.mjs) without overriding a person.
 loadStudioEnvAtStart(path.join(REPO_ROOT, '.env'));
 /**
  * Who is acting, for attribution: an explicit name, then STUDIO_AGENT, then STUDIO_LOCK_OWNER (set by
@@ -52,15 +50,10 @@ export const DEFAULT_EVENTS_FILE = path.join(STUDIO_STATE_DIR, 'events.jsonl');
 const realOr = (p) => { try { const r = fs.realpathSync.native(p); return process.platform === 'win32' ? r.toLowerCase() : r; } catch { const r = path.resolve(p); return process.platform === 'win32' ? r.toLowerCase() : r; } };
 const boardMemo = new Map();
 /**
- * 2.78.2 (item 7c): the checkout whose board this one writes to. REPO_ROOT itself, except in a lane copy: a folder at
- * <main>/.lanes/<name> that is a git worktree of <main> (its .git file points into <main>/.git/worktrees/). There the
- * main checkout. Read from the files git keeps, no git process (this runs on every event), and never from
- * STUDIO_MAIN_ROOT, which a lane's own shell can set (2.71.1, G12).
- *
- * Why: a lane copy's .studio/ is a link to main's, so its events always reached main's log, but a copy made by hand
- * (git worktree add .lanes/<x> <branch>, as the crew rebuilt lanes and opened one to approve its protected step) has
- * no link: the first event made a .studio/ of its own there, and `approve -- protected` in it wrote approval.protected
- * to a log nobody reads, so the Line Producer kept holding the task. STUDIO_LANE_EVENTS=own: the copy's own log again.
+ * The checkout whose board this one writes to: REPO_ROOT itself, except in a lane copy (a folder at
+ * <main>/.lanes/<name> that is a git worktree of <main>), where it is the main checkout. Read from the files git keeps,
+ * no git process, and never from STUDIO_MAIN_ROOT, which a lane's own shell can set. A hand-made copy has no .studio/
+ * link to main's, so its events would go to a log nobody reads. STUDIO_LANE_EVENTS=own: the copy's own log.
  */
 export function boardRoot(root = REPO_ROOT, env = process.env) {
   if (/^own$/i.test(String(env.STUDIO_LANE_EVENTS || '').trim())) return root;
@@ -266,13 +259,10 @@ function tailLines(file, need, maxBytes = Infinity) {
 }
 
 /**
- * Read the last `limit` events from `.studio/events.jsonl` (`limit` <= 0: the whole current file).
- *
- * 2.58.0 (PU-41, P-058): when the log has rolled over (STUDIO_EVENTS_MAX_MB), the current file can hold only a few
- * events, and `task show`, the start commit for "no code changed", a task's lane and the watcher's "last heard"
- * lost everything before the roll-over. A reader asking for N events now goes on into the rolled files, newest
- * first and read from the end, until it has N; it reads at most twice STUDIO_EVENTS_MAX_MB of them, so asking for a
- * huge N can't pull the whole history into memory. Appends are unchanged (no copying at roll-over).
+ * Read the last `limit` events from `.studio/events.jsonl` (`limit` <= 0: the whole current file). When the log has
+ * rolled over (STUDIO_EVENTS_MAX_MB), a reader asking for N events goes on into the rolled files, newest first and read
+ * from the end, until it has N; it reads at most twice STUDIO_EVENTS_MAX_MB of them, so a huge N can't pull the whole
+ * history into memory. Appends are unchanged (no copying at roll-over).
  */
 export function readRecentEvents(limit = 100) {
   const { primary } = getEventPaths();

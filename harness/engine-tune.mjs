@@ -1,21 +1,12 @@
 #!/usr/bin/env node
 /**
- * harness/engine-tune.mjs — 2.77.0 (u, P5.4): an engine lane tunes its own engine settings without an owner gate.
- *
- * The owner (2026-11-04): the Unity lane "may adjust its own settings (quality level, HDRP volume, LOD bias, batch flags,
- * its RAM floor) without an owner gate, logged". So these keys (harness/engine-tracks.mjs TUNE_KEYS; the owner narrows
- * the list with studio/game.json engines.<x>.tune.allow) live in studio/engine/<engine>-tune.json, which is NOT a
- * protected file, and every change is logged: the decisions log (.studio/decisions.jsonl, action engine-tune, with its
- * undo), an engine.tuned event and a line in studio/engine/LOG.md. Anything else (the land command, the target, its
- * exits, the rig cost, a key not in the list) stays in studio/game.json, which only the owner changes: a tune of such a
- * key is refused and says so.
- *
- * Where they take effect: ram-floor is the free RAM the engine's land runs wait for (harness/unity-gate.mjs; the owner's
- * environment setting, e.g. STUDIO_UNITY_MIN_FREE_GB, still wins); batch-flags go to the land command as {flags} and
- * STUDIO_ENGINE_FLAGS; every value goes to it as STUDIO_ENGINE_TUNE (JSON) and STUDIO_ENGINE_TUNE_FILE, so the project's
- * own land or build script applies quality level, volume and LOD bias. The harness never edits the project's settings
- * files itself.
- *
+ * harness/engine-tune.mjs — an engine lane tunes its own engine settings without an owner gate, logged.
+ * The keys in harness/engine-tracks.mjs TUNE_KEYS (the owner narrows them with studio/game.json engines.<x>.tune.allow)
+ * live in studio/engine/<engine>-tune.json, NOT protected. Every change is logged: .studio/decisions.jsonl (action
+ * engine-tune, with undo), an engine.tuned event and studio/engine/LOG.md. Any other key stays in studio/game.json,
+ * owner only: a tune of it is refused. ram-floor is the free RAM the land waits for (STUDIO_UNITY_MIN_FREE_GB still
+ * wins); batch-flags go to the land command as {flags} and STUDIO_ENGINE_FLAGS; every value goes as STUDIO_ENGINE_TUNE
+ * (JSON) and STUDIO_ENGINE_TUNE_FILE. The harness never edits the project's settings files.
  *   npm run engine -- tune <engine>                                  the values and what may be tuned
  *   npm run engine -- tune <engine> <key> <value> --by <you> --why "…"
  *   npm run engine -- tune <engine> <key> --unset --by <you> --why "…"

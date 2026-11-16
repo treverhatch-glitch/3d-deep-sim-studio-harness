@@ -1,28 +1,14 @@
 /**
- * harness/review-ask.mjs — 2.84 (w, B-133): a review the HARNESS asks for, with no agent session.
- *
+ * harness/review-ask.mjs — a review the HARNESS asks for, with no agent session.
  *   npm run review -- ask <TASK_ID> --model <id> [--tool <tool>] [--for <review task>] [--no-commit]
- *
- * A crew's cross-family reviewer was a Vertex model, and a Vertex session (aider) only suggests commands: it cannot run
- * `npm run review -- record`, so no cross-family review happened all day and a task waited about 10 hours. Here the
- * harness does the review call itself:
- *   - it collects what a reviewer session is given: the task's title and spec/contract (harness/review.mjs gather and
- *     prompt), the done-check's summary (`node harness/done-check.mjs <ID>`), and the diff of the task's lane against its
- *     base (`git diff HEAD...<lane branch>`), or for an engine task its engine branch against the engine target, else the
- *     task's tagged commits; capped at STUDIO_REVIEW_DIFF_KB (200) with a note when cut;
- *   - it sends ONE request through the transport the studio has for that tool: Vertex's OpenAI-compatible endpoint with the
- *     key from the main checkout's .env as x-goog-api-key, exactly as the Vertex proxy sends it (harness/vertex.mjs
- *     vertexUpstream; usage logged to .studio/vertex-usage.jsonl as session "review-ask"); for claude, codex or agy their CLI
- *     with the read-only review command line (harness/review.mjs reviewArgv), the prompt on stdin. Only the text answer is used;
- *   - the answer must carry the verdict `review record` reads (VERDICT: APPROVE or VERDICT: CHANGES). It is recorded
- *     exactly as `review record` does (studio/reviews/<date>-<ID>-asked-<model>.md, model-family and implementer-family lines,
- *     a review.recorded event, the same family rules), with `via: harness-asked`, the model and the tool. An answer with no
- *     verdict is saved beside it as <date>-<ID>-asked-<model>.rejected.txt (not .md: the checks never read it) and nothing is
- *     recorded;
- *   - a network, quota or tool failure: exit 1 with one line, nothing recorded, a review.ask_failed event (no key, no token:
- *     every message is scrubbed), and the task is not blocked further than it was.
- * The launcher (harness/agent.mjs) starts this, detached, for a reviewer task whose planned model runs on a tool that cannot
- * run commands (harness/model-tool.mjs TOOL_CAPABILITIES): startReviewAsk.
+ * The harness collects the task's title and spec (harness/review.mjs gather and prompt), the done-check summary and the
+ * lane's diff against its base (capped at STUDIO_REVIEW_DIFF_KB (200)), then sends ONE request: Vertex's
+ * OpenAI-compatible endpoint with the .env key (harness/vertex.mjs vertexUpstream; usage in
+ * .studio/vertex-usage.jsonl), or for claude, codex or agy their CLI (harness/review.mjs reviewArgv, prompt on stdin).
+ * The answer must carry VERDICT: APPROVE or VERDICT: CHANGES; it is recorded as `review record` does
+ * (studio/reviews/<date>-<ID>-asked-<model>.md, review.recorded event, `via: harness-asked`). No verdict: saved as
+ * <date>-<ID>-asked-<model>.rejected.txt, nothing recorded. A network, quota or tool failure: exit 1, a
+ * review.ask_failed event, nothing recorded.
  */
 import fs from 'node:fs';
 import path from 'node:path';

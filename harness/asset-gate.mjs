@@ -1,57 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/asset-gate.mjs — the asset track's gate, and its hand-off to the engine track.
- *
- * An asset task (task add --track asset, or any task whose change adds or changes files under the game's declared
- * asset paths) is checked at `task done` before it lands. Every limit comes from the game's manifest, studio/game.json
- * (protected: only the owner changes it, so a branch can't loosen its own limits), with these defaults:
- *
- *   "assets": {
- *     "paths": ["assets", "public/assets"],          where asset files live (declaring it turns the gate on for
- *                                                     every task that touches them; without it only --track asset)
- *     "manifest": "studio/assets/manifest.json",     the rows (npm run asset -- add writes them): file, licence, credit
- *     "triangleBudget": { "lod0": 2500, "lod1": 1200, "lod2": 500 },   or one number, or [n0, n1, n2]
- *     "textureMaxPx": 2048,                          the longest side of any texture (PNG/JPEG, loose or in a .glb)
- *     "previewRequired": true,                       a model needs <name>.preview.png (or _preview / .jpg / .webp)
- *     "sizeTolerance": 0.15, "sizeRequired": false,  scale: the bounding box against the stated size
- *     "brandNames": [],                              no brand marks in file names, glTF names or the row
- *     "licences": { "allow": [...], "ask": [...], "block": [...] },   replace the defaults list by list
- *     "roundTrip": { "command": "blender -b --factory-startup -P tools/x.py -- {file}", "timeoutMin": 20 }
- *   }
- *
- * The checks (each failure names the file and a Fix line from harness/gate-fix.mjs ASSET_FIXES, and is kept for the task's
- * next hand-back facts):
- *   licence     a row for every new asset file; the licence on the allow list; CC-BY (or a row saying a credit is required)
- *               needs its credit line; NC / ND blocked; SA (copyleft) needs a game dev's yes (tier C: `node
- *               harness/asset-gate.mjs allow <file> --by <person> --permission "<their words>"`, which a worker can't
- *               record); an AI-made row needs its recorded terms and is listed for the Steam AI disclosure.
- *   triangles   per LOD (mesh or node name ending _LOD<n>, else LOD 0) from the glTF JSON, within triangleBudget.
- *   texture     PNG/JPEG headers (loose, or embedded in a .glb or data: URI): longest side within textureMaxPx.
- *   preview     a preview render next to each model when previewRequired.
- *   preview-*   the preview checks (harness/asset-review.mjs): blank, black, white, magenta, clipped, small; an up-axis
- *               warning. When all pass, `review` in the result lists each model with its previews' numbers and checksums:
- *               task done asks a session that can view images for a look and lands the asset only once it is answered
- *               (npm run asset -- review <asset> --pass|--fail "why" --by <name>).
- *   roundtrip   the configured export/re-import command (a Blender script, or a Unity batchmode run) runs under machine:heavy
- *               (a Blender command in the GPU area when the scan shows a GPU, one Blender job at a time, with -t <n> threads:
- *               harness/blender-job.mjs) and must exit 0. No command, or its program isn't installed: skipped with a
- *               note. {file} runs it once per model, else once with {files}.
- *   scale       the bounding box in metres (LOD 0 POSITION min/max through the nodes' world transforms) within the expected
- *               size ("size": { "w", "d", "h" } in its manifest row, else <name>.asset.json) ± sizeTolerance (default 15%).
- *               No size: a note, or a failure when "sizeRequired". glTF is Y-up: w = x, h = y, d = z. An engine-side model
- *               check can run as the roundTrip command.
- *   brand       no configured brand name (case-insensitive, punctuation ignored) in the file name, glTF names or the row.
- *   name        a file name with anything but letters, digits, . _ - and spaces is refused before any command runs.
- *
+ * harness/asset-gate.mjs — the asset track's gate, checked at `task done`, and its hand-off to the engine track.
+ * Runs for an asset task (task add --track asset, or a change under the game's asset paths). Limits come from
+ * studio/game.json "assets" (protected): paths, manifest, triangleBudget, textureMaxPx, previewRequired, sizeTolerance
+ * (0.15), sizeRequired, brandNames, licences { allow, ask, block }, roundTrip. Checks: licence, triangles, texture,
+ * preview, preview-* (asset-review.mjs), roundtrip (machine:heavy, exit 0), scale (glTF Y-up: w = x, h = y, d = z),
+ * brand, name. A failure names a Fix line (gate-fix.mjs ASSET_FIXES).
  *   node harness/asset-gate.mjs [--task T-012] [--files a.glb,b.png] [--no-round-trip] [--json]
  *        exit 0 pass or skipped, 1 a check failed, 3 the heavy lock stayed busy (try again later)
- *   node harness/asset-gate.mjs allow <file> --by <person> --permission "<their words or a link>"
- *        record a game dev's yes for a share-alike (SA) licence on that file (its current checksum)
- *
- * The asset ("make") task's brief template is studio/templates/asset-brief.md (ASSET_BRIEF_TEMPLATE).
- * When an asset task lands (task done, or the merge train), the harness files one engine-track task ("Wire in <asset>",
- * --track engine:unity for an engine-porter when the Unity engine is configured, else a builder task), --after the asset
- * task, naming the files. Never twice for the same asset task (an asset.handoff event).
+ *   node harness/asset-gate.mjs allow <file> --by <person> --permission "<their words or a link>"   (share-alike)
+ * A landed asset task files one engine-track task "Wire in <asset>" (an asset.handoff event).
  */
 import fs from 'node:fs';
 import path from 'node:path';

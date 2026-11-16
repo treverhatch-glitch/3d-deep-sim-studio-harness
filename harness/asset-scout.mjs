@@ -1,22 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/asset-scout.mjs — the art asset scout (2.30b, G7).
- *
- * Finds free art the game may ship and pulls it in with its licence on record. Only CC0 and CC-BY are
- * allowed for the game; anything else (CC-BY-SA, NC, ND, "free for personal use", unknown) is refused and
- * pointed at the reference library (npm run asset -- add <file> --use reference), which is never shipped.
- *
- *   npm run scout -- find "<what>"          search the CC0 sources with an API (Poly Haven, ambientCG) and
- *                                            list the per-item sources (Kenney, OpenGameArt, Sketchfab) to check
- *   npm run scout -- pull <url|file> --licence CC0|CC-BY-4.0 --author "<who>" --source <page> --title "<name>" [--by <you>]
- *   npm run scout -- find "<what>" --kind model|texture|palette|reference|any   (2.30e: textures, palettes, references)
- *   npm run scout -- palette <lospec-slug>   pull a CC0/CC-BY palette into the ledger; it becomes studio/art/palette.json
- *   npm run scout -- find "<what>" --min-quality 6 [--vision]   2.30e: every hit gets a 0-10 quality score (harness/scout-quality.mjs)
- *   npm run scout -- credits                 rewrite CREDITS.md from the asset ledger
- *
- * Agents may pull (the allowlist is the check; a person approved it). Pulled files go to assets/scouted/<source>/,
- * the ledger (studio/assets/manifest.json) marks them scouted: true, and CREDITS.md is regenerated.
- * scripts/check-assets.mjs fails on a disallowed licence, a CC-BY file with no author, or a stale CREDITS.md.
+ * harness/asset-scout.mjs — the art asset scout: finds free art the game may ship, pulled in with its licence on
+ * record.
+ * Only CC0 and CC-BY are allowed; anything else (CC-BY-SA, NC, ND, unknown) is refused and pointed at the reference
+ * library (npm run asset -- add <file> --use reference), never shipped.
+ * npm run scout -- find "<what>" [--kind model|texture|palette|reference|any] [--min-quality 6] [--vision]
+ * npm run scout -- pull <url|file> --licence CC0|CC-BY-4.0 --author "<who>" --source <page> --title "<name>"
+ * npm run scout -- palette <lospec-slug>  (becomes studio/art/palette.json)  |  credits  (rewrite CREDITS.md)
+ * Agents may pull (the allowlist is the check). Files go to assets/scouted/<source>/, marked scouted: true in
+ * studio/assets/manifest.json. scripts/check-assets.mjs fails on a disallowed licence, a CC-BY file with no author, or
+ * a stale CREDITS.md.
  */
 import fs from 'node:fs';
 import path from 'node:path';

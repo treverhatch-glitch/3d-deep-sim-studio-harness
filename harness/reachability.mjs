@@ -1,20 +1,13 @@
 /**
- * harness/reachability.mjs — 2.38.0: built but not wired. Is a code file reachable from the game?
- *
- * The research pack's Hatchfield audit (Oct 15) found about 43 systems that were built and unit-tested but
- * never connected: "nothing in the game imports it, only tests, scripts/*.html demos". Their tasks closed as
- * done because their own tests passed. This walks the game the way it runs, from its entry points, and says
- * which of a task's code files nothing reaches.
- *
- * Entry points:
- *   web     every index.html under web/ and game/ (its <script src> and inline module imports), every
- *           cartridges/<name>/index.mjs, package.json "main", and any "entries" a game's studio.gates.json lists;
- *   Godot   each project.godot's main scene and autoloads, then every res:// path a reached file names, and
- *           any script whose class_name a reached script uses.
+ * harness/reachability.mjs — built but not wired: is a code file reachable from the game? It walks the game from its
+ * entry points and says which of a task's code files nothing reaches.
+ * Entry points: web: every index.html under web/ and game/ (its <script src> and inline module imports), every
+ * cartridges/<name>/index.mjs, package.json "main", and any "entries" in a game's studio.gates.json; Godot: each
+ * project.godot's main scene and autoloads, then every res:// path a reached file names, and any script whose
+ * class_name a reached script uses.
  * Tests, test helpers, tools, demos and the harness itself are never entry points and never flagged.
- *
- * STUDIO_REACHABILITY: "warn" (default: the done-check prints a note), "fail" (an unreached file of a build
- * task fails the done-check: opt in), "off".
+ * STUDIO_REACHABILITY: "warn" (default: the done-check prints a note), "fail" (an unreached file of a build task
+ * fails the done-check: opt in), "off".
  */
 import fs from 'node:fs';
 import path from 'node:path';

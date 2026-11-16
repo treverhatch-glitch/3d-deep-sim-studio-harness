@@ -1,24 +1,14 @@
 /**
- * harness/det-math.mjs — 2.58.2 (PU-22): engine-dependent Math calls in sim code.
- *
- * Math.sin, cos, tan, asin, acos, atan, atan2, the hyperbolics, exp, expm1, log, log1p, log2, log10, pow,
- * hypot and cbrt (and the ** operator, which is pow) are only approximately specified: Node, a browser,
- * Jint on .NET and a C# port can give different last bits for the same input, so a replay that matches in
- * one engine can drift in another. Math.sqrt, + - * /, floor, ceil, round, trunc, abs, min, max, sign,
- * fround and imul are exact and fine. A sim that must replay the same everywhere calls a detMath module
- * (written to give the same bits in every engine) instead.
- *
- * This module finds those calls in sim code. scripts/check-sim-purity.mjs runs it (statically, on every
- * cartridge and on the studio game's sim paths) and scripts/sim-runtime-probe.mjs traps the same functions
- * while a cartridge plays, which catches what a static scan can't see.
- *
- * Per game, a mode: "off", "warn" (print, never fail: the default, so no existing game turns red) or
- * "required" (fail the purity gate). `npm run new-game` writes "required".
+ * harness/det-math.mjs — finds engine-dependent Math calls in sim code. Math.sin, cos, tan, asin, acos, atan, atan2,
+ * the hyperbolics, exp, expm1, log, log1p, log2, log10, pow, hypot, cbrt (and **) are only approximately specified,
+ * so a replay can drift between Node, a browser, Jint and a C# port. sqrt, + - * /, floor, ceil, round, trunc, abs,
+ * min, max, sign, fround and imul are exact. A sim that must replay everywhere calls a detMath module instead.
+ * scripts/check-sim-purity.mjs runs this statically; scripts/sim-runtime-probe.mjs traps the same functions at play
+ * time. Per game a mode: "off", "warn" (default: print, never fail) or "required" (fail the purity gate; `npm run
+ * new-game`).
  *   cartridges/<name>/cartridge.json   "detMath": "required"   or   { "mode": "required", "allow": ["lib/trig.mjs"] }
- *   game/<name>/studio.gates.json      "detMath": { "mode": "warn", "paths": ["src/sim"], "allow": ["src/sim/fastTrig.ts"] }
- *   studio/gates.json                  "detMath" for src/sim/ (when a studio keeps its sim there)
- * The detMath module itself may use Math: any file named detMath / det-math / det_math (any extension), any
- * file under a folder with that name, and every path in "allow".
+ *   game/<name>/studio.gates.json      "detMath": { "mode": "warn", "paths": ["src/sim"], "allow": ["x.ts"] }
+ *   studio/gates.json                  "detMath" for src/sim/. Files named detMath / det-math / det_math may use Math.
  */
 import fs from 'node:fs';
 import path from 'node:path';

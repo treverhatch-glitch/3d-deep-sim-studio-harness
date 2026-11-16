@@ -1,43 +1,14 @@
 /**
- * harness/train-daemon.mjs — 2.69.0 (r): the train daemon (the crew orchestrator's duty 3, now code).
- *
- * The orchestrator chose when to run merge trains, waited for a quiet PC, retried refusals, read the results and routed
- * hand-backs to fixers by hand. Now each supervisor pass (harness/supervisor.mjs; no model, no tokens) asks
- * trainDaemonPass() whether to start a train, and starts one when ALL hold:
- *   - the daemon is on: STUDIO_TRAIN_AUTO (default on while a supervisor runs) and no `train auto off` switch
- *     (.studio/train/auto.json, set by `npm run task -- train auto off|on --by <name>`: decider rules, harness/decider.mjs:
- *     a person, an agent under the owner's delegation, or a Producer/Director session or an outside agent on a
- *     person's permission; never a worker), and the train itself is on (STUDIO_TRAIN);
- *   - nothing stops it: no usage wind-down (2.68.0, harness/winddown.mjs), no "Stop all", no drain (2.73.1: `npm run
- *     task -- drain on`), and no halt other than the supervisor's builder halt. 2.73.1 (B-66): the supervisor's halt
- *     ("two sessions in a row ended with exit N", scope 'builders') stops new sessions, not the train: a lane already
- *     queued and verified still lands. A halt that names no scope still stops trains; studio:stop ends the supervisor
- *     and with it the daemon;
- *   - never two trains: no train lock held by a live process (.studio/locks/train.lock), no daemon train still running,
- *     no speculative train about to land (2.77.0, P9.6: harness/train-pipeline.mjs; while a train verifies the pass
- *     may start ONE speculative train behind it, pipelineKick);
- *   - the queue has ready lanes by the batch rules that already exist (STUDIO_TRAIN_MIN lanes not held for the owner or
- *     out of trains, or the oldest has waited STUDIO_TRAIN_WAIT_MIN);
- *   - the machine budget has room for a verify claim (harness/heavy-budget.mjs jobClaim('verify') + admit, the same
- *     admission machine:heavy uses; no machine scan: the slot count decides, as there). 2.77.3 (M6): when it hasn't,
- *     the pass leaves the train-wait marker (harness/heavy.mjs markTrainWait), so the next freed slot is kept for the
- *     train instead of going to a builder's verify (STUDIO_TRAIN_SLOT_PRIORITY_MIN, 15).
- * The train runs in a detached child (`node harness/train-daemon.mjs run`), so the supervisor's pass never waits on it.
- * After the train the child, for each handed-back lane whose task has no running session, makes sure the task is back
- * on the board for a builder with the hand-back facts block: the train's own hand-back (task.mjs pauseTask) normally
- * did it; a task still in progress is handed back, and a waiting task whose hand-back note has no facts block gets
- * one. Then ONE job.done (kind train, meta.auto) sums the train and what was re-queued.
- *
- * 2.85 (e): a crew's web lanes sat 2 h each for 16 hours, every train started by hand, because an agent had turned the
- * daemon off five days before (`train auto off`, no reason, to let an engine land through) and nobody turned it on again:
- * while off, the daemon said nothing (its waiting event needed it on) and `train status` never mentioned it. Now:
- *   - an off switch an agent records (anyone but a person in their own terminal) lapses after STUDIO_TRAIN_AUTO_OFF_HOURS
- *     (4; 0: never), or after `--hours N` when given; a person's off lasts until they turn it on. The deciders are the same.
- *   - why the daemon doesn't start a train is said once per distinct reason (train.daemon.waiting, and the older
- *     task.train.auto_waiting), off included, and `train status` prints "the automatic start is waiting: <reason>".
- *   - lanes that wait only for the owner (tier C) are named with the one command; the daemon never releases one.
- *   - an engine land does not stop a web train: the verify claim is admitted by the heavy budget beside it (an engine land
- *     takes no machine:heavy slot; its RAM counts), so the train starts when free RAM covers the web verify's need.
+ * harness/train-daemon.mjs — the train daemon: a supervisor pass may start a merge train (no model).
+ * It starts one when ALL hold: the daemon is on (STUDIO_TRAIN_AUTO, no `train auto off` switch in
+ * .studio/train/auto.json, set by `npm run task -- train auto off|on --by <name>`, never by a worker) and the train is
+ * on (STUDIO_TRAIN); no wind-down, "Stop all", drain or halt; no train lock (.studio/locks/train.lock), daemon train
+ * or speculative train about to land (harness/train-pipeline.mjs); ready lanes (STUDIO_TRAIN_MIN, or the oldest waited
+ * STUDIO_TRAIN_WAIT_MIN); room for a verify claim (harness/heavy-budget.mjs), else a train-wait marker is left
+ * (STUDIO_TRAIN_SLOT_PRIORITY_MIN, 15).
+ * It runs `node harness/train-daemon.mjs run` as a detached child. An agent's off switch lapses after
+ * STUDIO_TRAIN_AUTO_OFF_HOURS (4; 0: never) or `--hours N`; a person's does not. Why none starts is said once per
+ * reason (train.daemon.waiting, task.train.auto_waiting).
  */
 import fs from 'node:fs';
 import path from 'node:path';

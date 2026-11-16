@@ -1,15 +1,10 @@
 /**
- * harness/owner-only.mjs — 2.78.2 (d): a hand-back that names a step only the owner can do waits for the owner.
- *
- * Builders kept retrying steps nobody but the owner (or the orchestrator holding the owner's say-so) can do: a protected
- * file's re-pin, a qa.mjs expectation, a signed approval, a hooks restamp the hooks refuse. About ten sessions and a
- * million tokens went on it in the 2.78.1 run, each fresh session reading the same refusal. When a hand-back note, or the
- * end of a session's log, carries one of the harness's own refusals for such a step, the task is parked with reason
- * "owner-only" at the orchestrator's rank (task-hold.mjs parkRank 3: the orchestrator or the owner lifts it, a worker
- * can't), an event goes to the orchestrator (to: orchestrator; the Communicator turns it into an alert), and the
- * supervisor (which reads parks through holdReason) starts no builder on it until it is unparked.
- *
- * Nothing here lets a worker approve anything: it only stops the retries.
+ * harness/owner-only.mjs — a hand-back that names a step only the owner can do waits for the owner.
+ * When a hand-back note, or the end of a session's log, carries one of the harness's own refusals for such a step (a
+ * protected file's re-pin, a qa.mjs expectation, a signed approval, a hooks restamp the hooks refuse), the task is
+ * parked with reason "owner-only" at the orchestrator's rank (task-hold.mjs parkRank 3: the orchestrator or the owner
+ * lifts it, a worker can't), an event goes to the orchestrator (to: orchestrator), and the supervisor (holdReason)
+ * starts no builder on it until it is unparked. Nothing here lets a worker approve anything: it only stops the retries.
  */
 import { emitEvent } from './event.mjs';
 import { setHold, readHolds } from './task-hold.mjs';

@@ -1,19 +1,14 @@
 /**
- * harness/adopt.mjs — 2.43.0: bring a game that already exists under the studio, and send the studio's work back.
- *
- * Tested on a real half-built game (a 236k-line three.js airport tycoon): the read-only scan (npm run onboard)
- * wrote a good fact sheet, but afterwards nothing in the studio covered the game. Its checks never ran, lanes
- * didn't isolate its files, the whole-game and unwired-code checks didn't see it, and the scan had read a stale
- * branch (the repo's docs named another trunk). Adopting fixes that:
- *
+ * harness/adopt.mjs — brings a game that already exists under the studio, and sends the studio's work back. The
+ * read-only scan (npm run onboard) leaves the game's checks unrun and lanes not isolating its files; adopting fixes
+ * that.
  *   npm run onboard -- --path ../my-game --name "My Game" --adopt [--ref <branch>]
- *     copies the game's tracked files at <ref> (default: what is checked out) into game/<slug>/, makes it the
- *     studio's game (studio/game.json), declares its own checks from its scripts in game/<slug>/studio.gates.json
- *     (unless it has one), and records where it came from in studio/game/ORIGIN.json.
+ *     copies the game's tracked files at <ref> (default: what is checked out) into game/<slug>/, makes it the studio's
+ *     game (studio/game.json), declares its checks from its scripts in game/<slug>/studio.gates.json (unless it has
+ *     one), and records where it came from in studio/game/ORIGIN.json.
  *   npm run onboard -- --export
- *     the studio's committed changes to game/<slug>/ since it was adopted, as one patch for the game's own repo
- *     (studio/game/export-<time>.patch), with the commands to apply it on a branch there. The game's own review
- *     and CI stay in charge of its repo.
+ *     the studio's committed changes to game/<slug>/ since adoption, as one patch for the game's own repo
+ *     (studio/game/export-<time>.patch), with the commands to apply it on a branch there.
  */
 import fs from 'node:fs';
 import path from 'node:path';

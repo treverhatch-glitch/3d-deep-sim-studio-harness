@@ -1,17 +1,12 @@
 /**
- * harness/error-memory.mjs — 2.72.0 (c): error-signature memory. A red that was fixed once tells the next agent how.
- *
- * Every verify (scripts/run-gates.mjs) on a task (the one its owner, STUDIO_LOCK_OWNER, has claimed) is observed:
- *   - a failing required gate's signature (the gate, or the game check's sub-id, and its normalised first FAIL line:
- *     harness/handback-facts.mjs readGateLog + signatureKey, the same key the hand-back facts show as [sig …]) is kept
- *     as pending for that task, with the commit it failed on (.studio/error-memory-pending.json);
- *   - when a later verify on the same task runs that gate and it passes, the red counts as fixed: its signature is
- *     written to .studio/error-memory.jsonl with the fixing commit (HEAD then), its summary (the newest commit subject
- *     since the red) and the files changed since the red.
- * On a later red with the same signature, on any task, the hand-back facts and the kickoff say
- * "seen before: fixed in <commit> by changing <files> (<summary>)". The memory keeps the newest STUDIO_ERROR_MEMORY_MAX
- * (500) signatures (one line each, the newest fix of a signature wins). STUDIO_ERROR_MEMORY=off: nothing is observed
- * or shown. Plain files and git, no model calls; never blocks a verify.
+ * harness/error-memory.mjs — error-signature memory: a red that was fixed once tells the next agent how.
+ * Every verify (scripts/run-gates.mjs) on a claimed task is observed: a failing required gate's signature
+ * (harness/handback-facts.mjs readGateLog + signatureKey, the key the hand-back facts show as [sig …]) is kept as
+ * pending with its commit (.studio/error-memory-pending.json); when a later verify on that task passes the gate, the
+ * signature goes to .studio/error-memory.jsonl with the fixing commit, a summary and the files changed since the red.
+ * On a later red with the same signature, on any task, the hand-back facts and the kickoff say "seen before: fixed in
+ * <commit> by changing <files> (<summary>)". It keeps the newest STUDIO_ERROR_MEMORY_MAX (500) signatures.
+ * STUDIO_ERROR_MEMORY=off: nothing is observed or shown. Plain files and git, no model calls; never blocks a verify.
  */
 import fs from 'node:fs';
 import path from 'node:path';

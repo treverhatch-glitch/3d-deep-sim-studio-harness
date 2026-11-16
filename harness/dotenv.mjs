@@ -47,12 +47,10 @@ export function warnIdentityOnce(file, text, { write = (s) => process.stderr.wri
 }
 
 /*
- * 2.73.2 (B-74): the studio settings in .env (STUDIO_*, HUB_*, AGENT_*, PLAYTEST_*) and which of a process's values
- * came from that file. event.mjs loads them once at start (a value already in the environment wins, as before) and
- * notes the ones it took from the file in STUDIO_ENV_FROM_FILE: { f: the .env's path, sig: its mtime:size, k: { NAME:
- * hash of the value } }. A child started with this environment inherits the note, so it knows that, say, its
- * STUDIO_STALL_MIN came from .env through its parent, not from whoever started it. harness/env-reload.mjs re-reads the
- * file in the long-running loops and updates only those values (syncStudioEnv). Values are never written to the note.
+ * The studio settings in .env (STUDIO_*, HUB_*, AGENT_*, PLAYTEST_*) and which of a process's values came from that file.
+ * event.mjs loads them once at start (a value already in the environment wins) and notes the ones it took from the file in
+ * STUDIO_ENV_FROM_FILE: { f: the .env's path, sig: its mtime:size, k: { NAME: hash of the value } } (never the values).
+ * A child inherits the note. harness/env-reload.mjs re-reads the file in the long-running loops (syncStudioEnv).
  */
 export const ENV_FROM_FILE = 'STUDIO_ENV_FROM_FILE';
 const SETTINGS_LINE = /^\s*((?:STUDIO|HUB|AGENT|PLAYTEST)_[A-Z0-9_]+)\s*=\s*(.*?)\s*$/;

@@ -1,27 +1,14 @@
 /**
- * harness/decisions-log.mjs — 2.71.0 (x): one decision log, the autonomous review list, and what autonomous mode saves.
- *
- * Every decision the harness leaves to the owner or a game dev (train release, type, visual, yes, hold/unhold, asset
- * review, quarantine confirm/release, janitor lanes, train auto, upgrade auto, crew resume, wind-down end, studio
- * resume, a held config proposal, the autonomy level, the owner's delegation, autonomous mode itself) writes ONE record
- * to .studio/decisions.jsonl (the main checkout's) plus one `decision` event, at the place it is decided:
- *   { kind: 'decision', id, at, action, subject, by, as, why, evidence, undo }
- *   as: "person" | "delegation <grant time>" | "autonomous" | 'permission "<the person's words>"' | "agent" (a decision
- *       the harness lets an agent take on its own, such as a hold or an asset review under its own name)
- *   undo: { kind, text, ... } (how to revert it; the review list's revert runs it) or null.
- * The existing records (task-types.json, the train queue's release, the hold file, delegation.used) stay what they
- * are; this log points at them instead of repeating them, and a revert run from here never logs the decisions it undoes
- * again (suppressed while it runs).
- *
+ * harness/decisions-log.mjs — one decision log, the autonomous review list, and what autonomous mode saves.
+ * Every decision left to the owner or a game dev (train release, type, visual, yes, hold, asset review, quarantine,
+ * janitor lanes, train auto, upgrade auto, crew resume, autonomy level, delegation, autonomous mode) writes ONE record
+ * to .studio/decisions.jsonl plus one `decision` event: { kind, id, at, action, subject, by, as, why, evidence, undo }.
+ * as: "person" | "delegation <grant time>" | "autonomous" | 'permission "<words>"' | "agent".
  *   npm run decisions [-- --since 24h|7d|<ISO>] [--by <name>] [--action <a>] [--json]
- *   npm run decisions -- review                     autonomous decisions waiting for review, oldest first
- *   npm run decisions -- approve <id> --by <name> [--permission "…"]
- *   npm run decisions -- revert <id> --by <name> [--why "…"] [--permission "…"]   runs the record's undo
- *   npm run decisions -- edit <id> --note "what you changed" --by <name> [--permission "…"]
- *   npm run decisions -- stats [--days 14] [--json]  autonomous decisions per day, approved vs reverted, time saved
- * A review is a person's (or an agent's on a person's direct permission, harness/decider.mjs); never the agent that
- * took the decision, never in autonomous mode itself. Work never waits for the review.
- * (The CLI is harness/decisions.mjs. Modules import this one, never the CLI: see harness/policy-rules.mjs.)
+ *   npm run decisions -- review | approve <id> | revert <id> [--why "…"] | edit <id> --note "…"   (with --by <name>)
+ *   npm run decisions -- stats [--days 14] [--json]
+ * A review is a person's (or an agent's on a person's permission, harness/decider.mjs); never the deciding agent, never
+ * in autonomous mode. Work never waits for it. Import this module, never the CLI.
  */
 import fs from 'node:fs';
 import path from 'node:path';

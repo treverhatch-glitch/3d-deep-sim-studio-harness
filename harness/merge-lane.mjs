@@ -1,17 +1,11 @@
 /**
- * harness/merge-lane.mjs — 2.30p: path-scoped gates, reused lane verify results, and a short land lock.
+ * harness/merge-lane.mjs — path-scoped gates, reused lane verify results, and a short land lock.
  *
- * Found in a live run with two tracks (a browser build under web/ and an engine build under godot/):
- *  - every `task done` ran every game gate, so an engine-only change spent ~11.6 min in browser checks;
- *  - with no merge lock, `deliver` re-ran every gate whenever the studio's branch had moved, so each
- *    landing restarted every other in-flight done (one chain ran 23 min and then failed);
- *  - the board (studio/NEXT.md) was read at the start of done and written ~11 min later, so a done
- *    could overwrite tasks other agents queued in between.
- *
- * Gate scope: a gate in <game>/studio.gates.json may declare "paths" (globs, repo-relative) and a
- * "track" name. The manifest may declare "shared" globs: a change there runs every gate. A gate with no
- * "paths" always runs (old manifests behave exactly as before). Harness, scripts, studio/gates.json,
- * package files and the manifest itself are always shared.
+ * Gate scope: a gate in <game>/studio.gates.json may declare "paths" (globs, repo-relative) and a "track" name. The manifest
+ * may declare "shared" globs: a change there runs every gate. A gate with no "paths" always runs. Harness, scripts,
+ * studio/gates.json, package files and the manifest itself are always shared.
+ * The land lock keeps a landing from restarting every other in-flight done, and keeps a done from overwriting tasks queued on
+ * the board (studio/NEXT.md) between its read and its write.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -133,14 +127,9 @@ export function canReuse(rec, { head, incoming }) {
 // ---- a green verify standing in for task done's game checks (2.58.5, H-3) ------------------------
 
 /**
- * May this verify record stand in for the game checks task done would run now? Pure: the caller gathers the facts.
- *   rec       the verify record (scripts/run-gates.mjs)
- *   tree      the tree being landed (HEAD^{tree} of this copy); recTree the tree of rec.head (git), when it has one
- *   clean     no tracked change and no untracked file outside studio/ right now
- *   changed   the files task done would scope its game checks to (null = unknown: every check would run)
- *   needEngine / hadEngine   the Godot projects task done's engine gate would check / the verify's game gate checked
- *   relatedNow  whether task done would run related tests only (a verify that did, while done wouldn't, can't stand in)
- *   optIn     STUDIO_DONE_REUSE_VERIFY=on: a record from before 2.58.5 (no `tree`) may count by its commit's tree
+ * May this verify record stand in for the game checks task done would run now? Pure: the caller gathers the facts. rec: the
+ * verify record (scripts/run-gates.mjs); tree / recTree; clean: no tracked change, no untracked file outside studio/; changed:
+ * files done would scope to (null = every check runs); needEngine / hadEngine; relatedNow; optIn: STUDIO_DONE_REUSE_VERIFY=on.
  * Returns { ok, why }. A partial, fast-tier, dirty, old, other-tree, failing or narrower record never counts.
  */
 export function judgeVerifyReuse(rec, { tree, recTree = null, clean, changed = null, needEngine = [], hadEngine = [], relatedNow = false, optIn = false, now = Date.now(), maxAgeH = 24 } = {}) {
@@ -173,11 +162,10 @@ export function judgeVerifyReuse(rec, { tree, recTree = null, clean, changed = n
 }
 
 /**
- * The landing re-check after a rebase (harness/worktree.mjs deliver): when the lane's own pass was recorded for its
- * pre-rebase commit, the files main brought in are written to .studio/gate-pass/<task>.incoming.json and the env
- * names it (STUDIO_GATE_INCOMING_FILE), so harness/game-gates.mjs re-runs only the game checks whose inputs changed.
- * No valid pass: {} (everything in the lane's scope runs, as before). A file, not an env list: Windows caps the
- * environment at 32,767 characters.
+ * The landing re-check after a rebase (harness/worktree.mjs deliver): when the lane's own pass was recorded for its pre-rebase
+ * commit, the files main brought in go to .studio/gate-pass/<task>.incoming.json, named by STUDIO_GATE_INCOMING_FILE, so
+ * harness/game-gates.mjs re-runs only the game checks whose inputs changed. No valid pass: {} (everything in scope runs).
+ * A file, not an env list: Windows caps the environment at 32,767 characters.
  */
 export function landingRecheckEnv(root, taskId, rec, { preHead, incoming }) {
   if (!rec || !preHead || rec.head !== preHead || !Array.isArray(incoming)) return {};
@@ -197,27 +185,18 @@ export function landingRecheckEnv(root, taskId, rec, { preHead, incoming }) {
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /**
- * Run fn while holding <root>/.studio/locks/land.lock: only the final rebase check, the fast-forward and
- * the board write go in here (seconds), never the gates. A lock older than STUDIO_LAND_LOCK_STALE_MS
- * (120 s) or held by a dead process is broken. 2.58.0 (P-043): on Windows, creating or removing the lock file
- * while another process removes or creates it can fail with EPERM/EACCES/EBUSY ("delete pending"); that counts
- * as busy and is retried with a short backoff (it crashed about 2 Windows CI runs in 5). `busy` is for tests.
+ * Run fn while holding <root>/.studio/locks/land.lock: only the final rebase check, the fast-forward and the board write go
+ * in here (seconds), never the gates. A lock older than STUDIO_LAND_LOCK_STALE_MS (120 s) or held by a dead process is broken.
+ * On Windows, creating or removing the lock file while another process does the opposite can fail with EPERM/EACCES/EBUSY;
+ * that counts as busy and is retried with a short backoff. `busy` is for tests.
  */
 const held = new Map();
 
 /**
- * 2.31.0 (Gap 3): gate slots. Heavy game checks (the game's own gates, the Godot engine gate) take one of
- * STUDIO_GATE_SLOTS (2) box-wide slots in <root>/.studio/locks/gate-slot-<n>.lock while they run, so two
- * tracks (web and Godot) check in parallel but five lanes don't pile onto one machine and time out (the
- * Marina run: 600 s gate timeouts at load ~25 on 8 cores). The wait for a slot is logged and never counts
- * toward a gate's own timeout. A slot held by a dead process, or older than STUDIO_GATE_SLOT_STALE_MIN
- * (120), is taken over. After STUDIO_GATE_SLOT_WAIT_MIN (60) of waiting the gate runs anyway, with a note.
- * STUDIO_GATE_SLOTS=0 turns slots off.
- *
- * 2.58.5 (H-3): a landing goes first. A gate run with STUDIO_GATE_PRIORITY=landing (task done sets it for its game
- * checks and the re-check after a rebase) leaves a gate-slot-landing-<pid>.wait marker while it waits; any other
- * run (a verify) leaves a free slot to it until the marker is gone. Running gates are never stopped. A marker of a
- * dead process, or older than the stale limit, doesn't count.
+ * Gate slots: heavy game checks take one of STUDIO_GATE_SLOTS (2; 0 = off) box-wide slots, .studio/locks/gate-slot-<n>.lock;
+ * waiting never counts toward a gate's timeout. A slot of a dead process, or older than STUDIO_GATE_SLOT_STALE_MIN (120), is
+ * taken over; after STUDIO_GATE_SLOT_WAIT_MIN (60) the gate runs anyway, with a note. STUDIO_GATE_PRIORITY=landing (task done)
+ * leaves a gate-slot-landing-<pid>.wait marker; other runs leave a free slot to it. Running gates are never stopped.
  */
 const LANDING_WAIT = /^gate-slot-landing-(\d+)\.wait$/;
 /**

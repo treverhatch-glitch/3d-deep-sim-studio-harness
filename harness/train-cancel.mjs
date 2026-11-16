@@ -1,22 +1,13 @@
 /**
- * harness/train-cancel.mjs — 2.78.2 (a): `npm run task -- train cancel [<train id>] --by <you> [--why "…"]`.
- *
- * A red chain could hold the PC for two hours (train 125652) and the only ways out were waiting or killing processes
- * by hand, which left a dead train for the reaper. Cancel stops the running train cleanly, by the paths that already
- * exist for a stall (harness/train-watch.mjs, 2.77.3):
- *   1. the train's cancel marker (.studio/train/<id>.cancel.json, { cancel: true, by, why }; the marker `train leave`
- *      writes for one lane, 2.77.1) — the train stops at its next step (harness/train.mjs checkCancel): nothing more
- *      lands from that attempt, nobody is handed back, every lane still riding keeps (or gets) its place in the queue;
- *   2. its running checks are stopped (the stall watch's kill path: its whole tree below the train process), so a
- *      verify or a flake re-run it is blocked in returns at once;
- *   3. it waits up to STUDIO_TRAIN_CANCEL_WAIT_S (default 120) for the train to end by itself (its lock released, its
- *      life record's normal end). One that doesn't (a hang outside a child), and a speculative train (it never lands
- *      before its train A ended), is ended with its tree; its end is recorded here as cancelled (not "died"), its
- *      lock freed when it still names it, and its lanes kept as above;
- *   4. one task.train.cancelled event (to the Producer) with who, why and how it ended.
- * Who: as for `train leave` (a person, the orchestrator or another agent outside the harness, a Producer or Director
- * session; never a worker: harness/task-hold.mjs holdRefusal). The train daemon starts the next train at its next
- * pass as usual: `npm run task -- train auto off --by <name>` keeps trains from starting.
+ * harness/train-cancel.mjs — `npm run task -- train cancel [<train id>] --by <you> [--why "…"]`: stops it cleanly.
+ *   1. Writes the cancel marker .studio/train/<id>.cancel.json ({ cancel: true, by, why }); the train stops at its next
+ *      step (harness/train.mjs checkCancel): nothing more lands, nobody is handed back, every lane keeps its place;
+ *   2. stops its running checks (the stall watch's kill path: its whole tree);
+ *   3. waits up to STUDIO_TRAIN_CANCEL_WAIT_S (120) for the train to end; one that doesn't, and a speculative train, is
+ *      ended with its tree, recorded as cancelled (not "died"), its lock freed, its lanes kept;
+ *   4. emits one task.train.cancelled event (to the Producer) with who, why and how it ended.
+ * Who: as for `train leave` (never a worker: harness/task-hold.mjs holdRefusal). The next train starts at the daemon's
+ * next pass: `npm run task -- train auto off --by <name>` keeps trains from starting.
  */
 import fs from 'node:fs';
 import path from 'node:path';

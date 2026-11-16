@@ -1,25 +1,14 @@
 #!/usr/bin/env node
 /**
- * harness/test-config-check.mjs — 2.78.2 (f): does the game's test config honour what the harness tells it?
+ * harness/test-config-check.mjs — does the game's test config honour what the harness tells it?
  *
- * The crew's quarantine was a silent no-op: game-gates printed "3 quarantined test file(s) skipped by the game's runner
- * (STUDIO_TEST_QUARANTINE)" while the game's test config never read the variable, so the "skipped" tests ran and kept
- * failing trains. And a test check with no "focus" command made every train re-check re-run the whole suite (~20 min).
- *
- *   verifySkip({ root, gate, varName, files })   runs the runner's list mode (vitest: `npx --no vitest list --filesOnly`,
- *                      jest: `npx --no jest --listTests`; the check's `cd` steps and the script's --config kept) once
- *                      without the variable and once with it naming the probe files (the quarantined files, or the
- *                      first listed file): { state: 'honoured' | 'not-honoured' | 'unknown' | 'off', config, why, still }.
- *                      The verdict is cached per test config (a hash of the runner command, the config file and the
- *                      package.json) in <main checkout>/.studio/test-config-check.json, so it runs once per config.
- *                      STUDIO_QUARANTINE_VERIFY=off: not verified (game-gates then says "passed", never "skipped").
- *                      STUDIO_TEST_LIST_TIMEOUT_MS (120000): the bound on one list run.
- *   testCheckItems({ root })   the preflight's and onboarding's items for the studio game's checks (PASS / WARN / FAIL /
- *                      INFO, with a fix): a test check with neither a "focus" command nor a runner the harness can run
- *                      single files with (harness/train-focus.mjs focusCommand, inferFocus) FAILs; a test config that
- *                      doesn't drop a file named in STUDIO_TEST_QUARANTINE (and, when perf or slow-tier tests are
- *                      declared, STUDIO_TEST_EXCLUDE) FAILs.
- *
+ * verifySkip({ root, gate, varName, files }) runs the runner's list mode (vitest: `npx --no vitest list --filesOnly`,
+ * jest: `npx --no jest --listTests`) without the variable and with it naming the probe files: { state: 'honoured' |
+ * 'not-honoured' | 'unknown' | 'off', config, why, still }. Cached per test config in <main
+ * checkout>/.studio/test-config-check.json. STUDIO_QUARANTINE_VERIFY=off: not verified. STUDIO_TEST_LIST_TIMEOUT_MS
+ * (120000) bounds one list run. testCheckItems({ root }): preflight and onboarding items (PASS / WARN / FAIL / INFO):
+ * FAIL a test check with no "focus" command or single-file runner (harness/train-focus.mjs); FAIL a config that
+ * doesn't drop a file named in STUDIO_TEST_QUARANTINE (or STUDIO_TEST_EXCLUDE with perf/slow tests).
  *   node harness/test-config-check.mjs [--json]   the items (npm run onboard -- --check); exit 1 on a FAIL
  */
 import fs from 'node:fs';

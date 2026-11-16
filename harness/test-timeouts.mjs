@@ -1,35 +1,14 @@
 /**
- * harness/test-timeouts.mjs — 2.73.2 (d, B-71): per-test timeouts that fit the number of test workers.
- *
- * 2.68.0 sizes a game's test workers to the machine (heavy-budget.mjs testWorkers: 25 on a 28-thread box), but the game's
- * test config keeps the per-test timeout it was tuned with on a quiet run (a 15 s vitest testTimeout). With that many
- * workers every test runs slower (shared cores, efficiency cores, a lower all-core clock), so heavy tests failed on time
- * alone: false reds, main red. So when game-gates runs a check whose command clearly runs vitest, jest or node --test
- * (directly, or as the last step of the npm script it calls), it passes the runner a per-test timeout scaled for the load:
- *
+ * harness/test-timeouts.mjs — per-test timeouts that fit the number of test workers (quiet-tuned ones fail under load).
+ * When game-gates runs a check whose command runs vitest, jest or node --test, it passes a scaled per-test timeout:
  *   factor = ceil(4 x workers / logical cores), between 1 and 4      (workerFactor)
- *
- * 2.76.0 (j, B-89): "workers" there is every check's test workers on the machine (this check's share plus the others'
- * running now: heavy-budget.mjs testWorkers machineWorkers), so sharing the cores never shortens a timeout.
- *
- * A test's timeout is taken as fitting a box at a quarter load or less (one worker per four logical cores, about one per
- * physical core with room to spare); at full load a CPU-bound test takes up to about 4 x as long. (Measured on a
- * 28-thread box: a game's 15 s testTimeout went red at 25 workers and was raised to 60 s, x4, by hand.) The factor used is
- * the largest of that, the gate's own load factor (heavy.mjs loadFactor) and the manifest's slowTests minScale.
- * STUDIO_TEST_TIMEOUT_SCALE=<n> (>= 1) replaces the worker-derived factor; =off passes nothing (the game's own timeouts).
- *
- *   vitest   --testTimeout=<base x factor> --hookTimeout=<hook base x factor>
- *   jest     --testTimeout=<base x factor>
- *   node     --test-timeout=<base x factor>, only when the command sets one (node --test has no per-test timeout by default)
- *
- * The base is read from the game's config (vitest.config.* / vite.config.*, found upward from the command's folder as
- * vitest does, or the --config the command names; jest.config.* or package.json "jest"): the largest number literal
- * given for testTimeout (hookTimeout). None given: the runner's default (vitest 5 s / 10 s, jest 5 s). A timeout the
- * harness can't read as a number (an expression, a workspace or projects config, a flag already in the npm script) is
- * left alone, saying why: the result is never below what the game set. Only a runtime flag: no file changes, the test's
- * assertions are the same (the weakened-tests gate reads diffs, so it has nothing to flag), and the check's row records
- * it ("testTimeout": { ms, baseMs, factor, why, flags }) for a reviewer.
- * Node built-ins only.
+ * "workers" is every check's test workers on the machine (heavy-budget.mjs testWorkers). The factor used is the largest
+ * of that, the gate's load factor (heavy.mjs loadFactor) and the manifest's slowTests minScale.
+ * STUDIO_TEST_TIMEOUT_SCALE=<n> (>= 1) replaces it; =off passes nothing.
+ *   vitest --testTimeout=<base x factor> --hookTimeout=<hook base x factor>; jest --testTimeout=<base x factor>;
+ *   node --test-timeout=<base x factor>, only when the command sets one
+ * The base is the largest testTimeout (hookTimeout) in the game's vitest/vite/jest config, else the runner's default;
+ * one it can't read is left alone, saying why; never below the game's own.
  */
 import fs from 'node:fs';
 import path from 'node:path';

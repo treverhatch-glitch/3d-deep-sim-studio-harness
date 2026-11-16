@@ -1,22 +1,13 @@
 /**
- * harness/gate-trust.mjs — 2.71.1 (A): what the safety gates may trust about the checkout they judge.
- *
- * 1. Env overrides in a lane copy (A09, A16, A01b, G12, S01). STUDIO_PROTECT_BASE, GITHUB_BASE_REF, STUDIO_PROTECT_ROOT
- *    and STUDIO_WEAKENED_TESTS=off change what the protected and weakened-tests gates compare, or switch one off. They
- *    are for the owner's own checkout and CI (which runs the base branch's checker against the PR's checkout). A lane
- *    copy (a git worktree of a studio that uses lane copies: <main>/.lanes/<agent>, or any linked worktree once the main
- *    checkout has a .lanes/ folder) is judged against the studio's branch only, so there they are ignored and the gate
- *    says so. Nothing here reads CI=true or GITHUB_ACTIONS: anyone can set them (S01). STUDIO_MAIN_ROOT counts only
- *    when it names the main worktree `git worktree list` gives for this checkout's repository, never the checkout
- *    itself (G12).
- * 2. Verify records (D01/T04, G15/T02). A record stands in for task done's game checks or a train's verify only when
- *    scripts/run-gates.mjs wrote it: each full verify gets a run id and a run log (.studio/gates/runs/<id>.json) holding
- *    the digest of what it recorded, and a record whose digest doesn't match its run log (hand-written, or edited) is
- *    not reused. 2.73.0 (g): the run log is also signed (HMAC-SHA256) with the studio's verify key, kept outside every
- *    checkout (harness/verify-key.mjs); an unsigned or badly signed one is not reused (a record AND a matching run log
- *    written by hand used to pass). "Clean" also counts untracked files, and ignored files outside build and dependency output, under the
- *    game and the paths the checks read (hiddenInputs): a config left untracked or ignored changes what the checks do.
- *
+ * harness/gate-trust.mjs — what the safety gates may trust about the checkout they judge.
+ * 1. Env overrides in a lane copy: STUDIO_PROTECT_BASE, GITHUB_BASE_REF, STUDIO_PROTECT_ROOT and
+ *    STUDIO_WEAKENED_TESTS=off are for the owner's checkout and CI only; a lane copy (a worktree under
+ *    <main>/.lanes/<agent>, or any linked worktree once main has a .lanes/ folder) ignores them and says so. CI=true
+ *    and GITHUB_ACTIONS are never read. STUDIO_MAIN_ROOT counts only when it names the main worktree `git worktree
+ *    list` gives.
+ * 2. Verify records count only when scripts/run-gates.mjs wrote them: a run log (.studio/gates/runs/<id>.json) holds
+ *    the digest and an HMAC-SHA256 signature by the verify key kept outside every checkout (harness/verify-key.mjs).
+ *    "Clean" also counts untracked and ignored files the checks read (hiddenInputs).
  * Node built-ins only: approve.mjs, hook-stamp.mjs and test-weakening.mjs import this while their own top level runs.
  */
 import fs from 'node:fs';
@@ -312,14 +303,10 @@ export function writeGenerated(studioDir, root, before, after) {
 }
 
 /**
- * Untracked files, and ignored files outside build and dependency output, under `paths` (the game's folder, cartridges/,
- * qa/, harness/, scripts/…) and at the root when a runner reads them: the files a verify ran beside that no commit holds.
- * `skip` drops more (engine cache churn). Returns repo-relative paths ('/'-separated; a folder ends with '/'), or null
- * without git.
- * 2.76.0 (B-85): an ignored FOLDER entry (git lists a wholly ignored folder as one "dir/" line) is judged by the files in
- * it, so a folder holding only harmless files (*.tsbuildinfo) or generated output is not hidden; and an ignored file the
- * checks' own commands wrote (`generated(rel)`: remembered by an earlier verify in this checkout, unchanged since) or a
- * "generated" glob names counts as output. Never for untracked files, a root-level runner file or a config-like name.
+ * Untracked files, and ignored files outside build and dependency output, under `paths` (the game's folder,
+ * cartridges/, qa/, harness/, scripts/…) and at the root when a runner reads them; `skip` drops more. Returns
+ * repo-relative paths ('/'-separated; a folder ends with '/'), or null without git. An ignored folder is judged by the
+ * files in it; an ignored file the checks' commands wrote (`generated(rel)`) or a "generated" glob counts as output.
  */
 export function hiddenInputs(root, paths = [], opts = {}) {
   const r = hiddenReport(root, paths, opts);

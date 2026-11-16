@@ -1,17 +1,12 @@
 #!/usr/bin/env node
 /**
  * harness/map.mjs — a map of the repo, so an agent reads one short page instead of opening twenty files.
- *
- *   npm run map              write .studio/MAP.md and .studio/MAP.json (a script: no model, no tokens)
- *   npm run map -- --check   exit 1 when the map is older than the code it describes
- *   npm run map -- find <name> [--harness]   where a function, constant or key is, its arguments and line
- *                            range, in one call (2.29). The game's code by default; --harness adds the harness.
- *
- * For each code file: what it is (the first line of its header comment), its size, what it exports,
- * and which lane and agent hold it right now. Agents are told to read the map before searching.
- * Jed's run: Claude sessions read about 37.6M cached tokens and wrote about 0.24M, so the cost is
- * re-reading context, not writing code. The launcher refreshes the map before an agent starts, when
- * code changed; it is studio state (.studio/), never committed.
+ *    npm run map              write .studio/MAP.md and .studio/MAP.json (a script: no model, no tokens)
+ *    npm run map -- --check   exit 1 when the map is older than the code it describes
+ *    npm run map -- find <name> [--harness]   where a function, constant or key is, its arguments and line range
+ * The game's code by default; --harness adds the harness. For each code file: the first line of its header comment,
+ * size, exports, and which lane and agent hold it. The launcher refreshes the map before an agent starts, when code
+ * changed; it is studio state (.studio/), never committed.
  */
 import fs from 'node:fs';
 import path from 'node:path';

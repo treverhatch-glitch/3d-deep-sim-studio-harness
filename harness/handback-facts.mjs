@@ -1,33 +1,14 @@
 /**
- * harness/handback-facts.mjs — hand-back facts written by the harness, ahead of the agent's prose.
- *
- * Compressed hand-offs lose the artifact trail first (which files changed, what ran, what failed). So every hand-back (task pause, the merge train's drop, the watcher, a session that ended
- * holding its task) starts with a block the harness writes from git and the gate logs, never from the agent:
- *
- *   Hand-back facts (written by the harness from git and the gate logs; the note after them is the agent's or the train's):
- *   - Changed files since <base> (N): a, b, … (+K more)        git diff --name-only <task base>, plus untracked files
- *   - Gates run (<where>, <when>): PASS x, FAIL y               the newest gate run since the task started
- *   - Failure signature: <gate>: <first failing test line> [sig <hash>]
- *   - Failing sub-ids: game:test:<file>, golden:<file>, …        which parts failed (harness/gate-subids.mjs)
- *   - First divergence: tick N, <subsystem>.<field> a -> b      a red golden's (harness/divergence.mjs)
- *   - Timeout-flakes: <files>                                   timed out, passed alone at low load
- *   - Failing seed: <n>                                         only when the log names one
- *   - Test randomness (advisory|required): N finding(s): …      harness/test-rng.mjs, only when it finds any
- *   - Last verify log: <path>
- *   - Lane: <paths> (copy .lanes/<agent>, branch <b>)          from studio/task-holds.json / the task's add
- *   - Commits since <base> (N): <sha> <subject>; …; and K more  git log, the task's own copy (or --grep <ID>)
- *   - Last verify: green|red (<failing gate>) | not run         from the gate evidence above
- *   - Next command: <the exact command to run next>             from the above, never from the note
- *     (the last four lines (Lane to Next command) are left out of the merge train's drop note, whose reason names its own next step)
- *   End of hand-back facts.
- *
- * Where the gate evidence comes from, newest wins: a log the note itself names ("Full log: …" / "Log: …", the train's
- * verify), a refused `task done` (recordGateRefusal, .studio/handback-facts/<task>.json), the holder's own verify
- * record (.studio/gates/<owner>[-full].json with .studio/verify-running/<owner>.*.log or .studio/gates/out/<gate>.log).
- * Facts never block a hand-back: any failure leaves the note as it was. A note that already has the block is unchanged.
- * The block is compact (FACTS_MAX; at most FILES_SHOWN files and COMMITS_CAP commits listed, fewer when it doesn't fit,
- * the rest as "(+K more)" / "and K more"): task pause cuts the prose
- * after it so the whole entry stays under its cap (task.mjs HANDBACK_ENTRY_MAX).
+ * harness/handback-facts.mjs — hand-back facts written by the harness, ahead of the agent's prose (task pause, the
+ * train's drop, the watcher, a session that ended holding its task), from git and the gate logs, never from the agent:
+ *   Hand-back facts (...) / Changed files since <base> (N) / Gates run (<where>, <when>): PASS x, FAIL y / Failure
+ *   signature / Failing sub-ids / First divergence / Timeout-flakes / Failing seed / Test randomness / Last verify
+ *   log / Lane / Commits since <base> / Last verify: green|red|not run / Next command / End of hand-back facts.
+ *   (Lane to Next command are left out of the merge train's drop note.)
+ * Gate evidence, newest wins: a log the note names ("Full log: …" / "Log: …"), a refused `task done`
+ * (.studio/handback-facts/<task>.json), the holder's verify record (.studio/gates/<owner>[-full].json,
+ * .studio/verify-running/). Facts never block a hand-back; a note that already has the block is unchanged. Compact
+ * (FACTS_MAX, FILES_SHOWN, COMMITS_CAP); task pause cuts the prose after it to stay under task.mjs HANDBACK_ENTRY_MAX.
  */
 import fs from 'node:fs';
 import path from 'node:path';

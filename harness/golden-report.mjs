@@ -1,23 +1,13 @@
 /**
- * harness/golden-report.mjs — 2.73.0 (g, A13): a re-recorded golden needs the harness's first-divergence report and a
- * second signer.
+ * harness/golden-report.mjs — a re-recorded golden needs the harness's first-divergence report and a second signer.
  *
- * When a golden goes red (qa/check-golden.mjs, or a game's golden check with a "divergence" contract, harness/divergence.mjs)
- * or is re-recorded with a changed answer (npm run golden -- --update), the harness writes its first-divergence report:
- *   .studio/gates/divergence/<golden path, / as __>.json   { entries: [newest first, at most 8] }
- * Each entry names the golden (rel), the blob of the recorded answer it was red against (blob: what the re-record
- * replaces), the tick, subsystem and field where the run first went wrong, the reference commit, who ran it, and a
- * signature with the studio's verify key (harness/verify-key.mjs): an entry written by hand doesn't count.
- *
- * The merge train (rule golden-rerecord, tier C) finds, for each golden the lane re-records, the signed entry whose
- * blob is the golden as it was where the lane branched (main's recorded answer): the lane carries it in its queue
- * entry, the hold shows it to the releaser, and the release
- *   - needs a releaser who is not the lane's author (its agent, or a Studio-Agent trailer of its commits): a person, a
- *     delegation or autonomous review by another agent;
- *   - without a report (the divergence couldn't run, or no golden check ran before the re-record) says so and needs a
- *     person (a delegation or autonomous review is refused);
- *   - records each report's tick and field in the decision log.
- * The train's own re-records (pin refresh) and upgrade merges are not lane commits: unchanged.
+ * When a golden goes red (qa/check-golden.mjs, or a golden check with a "divergence" contract, harness/divergence.mjs)
+ * or is re-recorded (npm run golden -- --update), the harness writes .studio/gates/divergence/<golden path, / as
+ * __>.json { entries: [newest first, at most 8] }: the golden (rel), the blob of the recorded answer, the tick,
+ * subsystem and field of the first divergence, the reference commit, who ran it, and a signature with the studio's
+ * verify key (harness/verify-key.mjs); a hand-written entry doesn't count. The merge train (rule golden-rerecord, tier
+ * C) finds the signed entry whose blob is main's recorded answer; the release needs a releaser who is not the lane's
+ * author; with no report it needs a person. Pin refreshes and upgrade merges are not lane commits.
  */
 import fs from 'node:fs';
 import path from 'node:path';

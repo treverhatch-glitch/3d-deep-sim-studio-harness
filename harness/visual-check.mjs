@@ -1,30 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/visual-check.mjs — 2.77.0 (u, P5.5): the visual check, a gate for art and engine passes that a person (or a
- * reviewing agent) judges, never code.
+ * harness/visual-check.mjs — the visual check: a gate for art and engine passes that a person judges.
  *
- * Why: an engine pass passed every test with a generic library model, and the owner's first look at the screenshots was
- * "toyish ... not based off of a real plane". Tests can't see that. So a pass added with --visual-check (or --refs) closes
- * only when every one of these is on record (`task done` and `node harness/done-check.mjs <ID>` list what is missing):
- *   1. fixed-camera before/after screenshots: the same camera names before and after, in .studio/proof/<T>/visual/
- *      (harness/visual-proof.mjs: its capture, or `shots` below for an engine's own screenshots); its pixel check holds
- *      (not blank, not near-identical);
- *   2. per real-thing asset, a side-by-side of its shot with a reference photo the studio provides (a local file: the
- *      task's --refs, or the assets reference folder, studio/game.json engines.<x>.visual.refs, else assets/reference/).
- *      The harness never downloads a photo: a link is refused. Every --refs photo must be used by an asset;
- *   3. the builder looked at its own shots (`looked`, with what it saw) after the last shot changed;
- *   4. a review by someone who is not the builder (a person or a reviewer agent: never an agent that started the task,
- *      recorded its shots or said it looked), on the current shots: "looks real" or "looks toyish", with notes. Only
- *      "real" passes. Nothing in the harness scores a picture: the score is the reviewer's words, recorded as given.
- * The shots go to the owner as one path line through the Communicator (harness/communicator.mjs queueNotice: posted in
- * its next pass, tagging nobody), on every review and on `send`. The page: .studio/visual-checks/<T>/side-by-side.html.
- *
- *   npm run visual -- shots <T> --before a.png[,b.png] --after a.png[,b.png] [--by <you>]   (camera = file name)
- *   npm run visual -- asset <T> --name "<the real thing>" --shot <png> --ref <photo> [--by <you>]
- *   npm run visual -- looked <T> --by <builder> --note "what I saw in my own shots"
- *   npm run visual -- review <T> --by <reviewer> --score real|toyish --notes "why" [--asset "<name>"]
- *   npm run visual -- send <T>          the path line to the owner now (the Communicator's next pass)
- *   npm run visual -- status <T> [--json]
+ * A pass added with --visual-check (or --refs) closes only when on record (`task done` and `node
+ * harness/done-check.mjs <ID>` list what is missing): (1) fixed-camera before/after screenshots in
+ * .studio/proof/<T>/visual/ (harness/visual-proof.mjs); (2) per real-thing asset, a side-by-side with a local
+ * reference photo (a link is refused); (3) the builder `looked` at its shots; (4) a review by someone other than the
+ * builder: only "real" passes. Nothing scores a picture. The owner gets a path line (harness/communicator.mjs
+ * queueNotice); page: .studio/visual-checks/<T>/side-by-side.html.
+ * npm run visual -- shots <T> --before a.png --after a.png | asset <T> --name "<thing>" --shot <png> --ref <photo>
+ * npm run visual -- looked <T> --by <builder> --note "…" | review <T> --by <who> --score real|toyish --notes "why"
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,26 +1,13 @@
 /**
- * harness/engine-worktree.mjs — 2.86 (f): making an engine task's worktree, sparse when its role only needs a few folders.
- *
- * Why (a crew's PC, 2.85): each engine task got a full worktree of the engine repo at <studio>/.lanes/engine/<task>,
- * about 3.8 GB, 3.0 GB of it tracked art under one folder; 37 of them were 140 GB. Most were ports that only read and
- * write a few source folders and run a command-line test project, never the engine's editor.
- *
+ * harness/engine-worktree.mjs — makes an engine task's worktree, sparse when its role only needs a few folders.
  * studio/game.json engines.<x>.sparse = { "roles": ["engine-porter"], "paths": ["Assets/Rules", "tools/tests"] } (the
- * owner's file): a worktree made for a task whose role is listed is checked out with git's own cone-mode sparse checkout,
- * those folders plus every file at the repo's top level. Every other role gets a full worktree, as before.
- *
- * The git features this relies on (checked by running them on git 2.43): `git worktree add --no-checkout` (nothing is
- * written before the sparse rules are set), `git sparse-checkout set --cone` inside a linked worktree (it turns on
- * extensions.worktreeConfig and writes core.sparseCheckout into that worktree's own config.worktree, so the main
- * checkout and the other worktrees stay full), `git read-tree -mu HEAD` (fills the worktree honouring the rules),
- * `git sparse-checkout disable` (widens one worktree to full) and `reapply`. A merge in a sparse worktree (the ort
- * strategy) merges paths outside the cone in the index only; a conflict there writes that one file into the worktree.
- * Git older than SPARSE_MIN_GIT: a full worktree, with one line saying why.
- *
- * Creation is all or nothing: when any step fails, what this call made (the worktree's registration, its folder, a branch
- * it created) is removed again, so a failure (a long path, a locked file on Windows) never leaves a half-made worktree.
- *
- * No harness imports at load (engine-tracks.mjs and engine-clean.mjs import this).
+ * owner's file): a task whose role is listed gets a cone-mode sparse checkout of those folders plus every top-level
+ * file; other roles get a full worktree, at <studio>/.lanes/engine/<task>. Uses `git worktree add --no-checkout`, `git
+ * sparse-checkout set --cone` (per-worktree config.worktree, so the main checkout stays full), `git read-tree -mu
+ * HEAD`, `git sparse-checkout disable` and `reapply`. A merge in a sparse worktree (ort) merges paths outside the cone
+ * in the index only; a conflict writes that file. Git older than SPARSE_MIN_GIT: a full worktree. Creation is all or
+ * nothing: on any failure what this call made (registration, folder, branch) is removed again. No harness imports at
+ * load (engine-tracks.mjs and engine-clean.mjs import this).
  */
 import fs from 'node:fs';
 import path from 'node:path';

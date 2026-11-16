@@ -1,20 +1,13 @@
 /**
- * harness/handback-kind.mjs — 2.85: which hand-backs count against a task.
- *
- * A crew's first 16 hours on 2.84 had 73 hand-backs; 30 were the Director's flow pass "handing back" a task that was
- * finished and waiting in a train's queue, and three more were sessions refused by `task done` for the same harness
- * check none of them could fix. Both kinds counted toward the watchdog's "handed back 3 times in 2 h" park and the
- * scorecard. One answer, used by the watchdog's park (busy.mjs loopHandBacks), the crew breaker (crew-watch.mjs) and
- * the scorecard's hand-back line (score.mjs): handBackKind(). A hand-back is 'real' only when a session gave the work
- * back or failed; it is not real when
- *   - the harness caused it (the claim ran out, the land lock, a merge the main checkout refused): 'harness';
- *   - a person stopped or paused the session, or the session reported the task impossible: 'person';
+ * harness/handback-kind.mjs — which hand-backs count against a task: handBackKind(), used by the watchdog's park
+ * (busy.mjs loopHandBacks), the crew breaker (crew-watch.mjs) and the scorecard (score.mjs). A hand-back is 'real' only
+ * when a session gave the work back or failed; not real when
+ *   - the harness caused it (claim ran out, the land lock, a merge the main checkout refused): 'harness';
+ *   - a person stopped or paused the session, or it reported the task impossible: 'person';
  *   - the session stopped at its usage limit (the caller passes busy.mjs's LIMIT_STOP): 'limit';
  *   - its note says the work is ready and waits for a train: 'ready';
- *   - the session's `task done` was refused for the same reason as the session before it on the task, with no new
- *     commit in between (sameRefusalAgain): a harness refusal the session could not act on, 'refused'.
- * A claim released quietly while the task waits for a train (task.claim.released, director-flow.mjs) is no hand-back.
- * No imports: the supervisor and the crew watchdog load this.
+ *   - `task done` was refused for the same reason as the session before it, with no new commit: 'refused'.
+ * A claim released quietly while the task waits for a train (task.claim.released) is no hand-back. No imports.
  */
 
 /** A hand-back the harness caused, not the work: never counts toward parking. */
@@ -106,16 +99,10 @@ export const REFRESH_NOTE = /\bA fresh session continues from this hand-back\b/i
 export const refreshCaused = (e) => e?.meta?.cause === 'refresh' || REFRESH_NOTE.test(String(e?.msg || ''));
 
 /**
- * 2.86: sessions that end for the harness's reasons, not the task's. A crew's first day on 2.85 had 35 refresh hand-offs
- * (most with no work: the brief alone filled the old 60 % mark) and the watchdog parked brand-new tasks for them; hooks
- * refusals for a commit that was not the task's and sessions that died on a permission prompt counted too. These kinds
- * never count toward the watchdog's park, the same-refusal hold, the crew breaker or the task's session and minute
- * budget; the scorecard shows them by kind.
- *   refresh          the session handed off at a refresh check and had done work: a fresh session continues it
- *   refresh-no-work  the same, with no commit, no saved uncommitted work and no file edit
- *   launch           the session died before its first turn, on a permission prompt, or never started (spawn error)
- *   foreign-refusal  `task done` was refused by the hooks check only, for commits that are not the task's own
- *   no-lane-copy     a start refused because no lane copy could be made (agent.start_refused, no session ran)
+ * Sessions that end for the harness's reasons, not the task's: they never count toward the watchdog's park, the crew
+ * breaker or the task's budget; the scorecard shows them by kind. refresh, refresh-no-work (handed off at a refresh
+ * check, with or without work), launch (died before its first turn or on a permission prompt), foreign-refusal (`task
+ * done` refused by the hooks check for commits not the task's), no-lane-copy (start refused, no lane copy made)
  */
 export const HARNESS_KINDS = ['refresh', 'refresh-no-work', 'launch', 'foreign-refusal', 'no-lane-copy'];
 export const harnessKind = (kind) => HARNESS_KINDS.includes(kind);

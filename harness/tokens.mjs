@@ -1,18 +1,12 @@
 #!/usr/bin/env node
 /**
  * harness/tokens.mjs — measured token use, from the agent.session.end events the launcher writes.
- *
- *   npm run tokens [-- --since 5h|24h|today|all] [--by agent|role|model|tool|task] [--json]
- *
- * 2.79.1 (a): each row shows its dollars (reported, or estimated at the price table: a Vertex session's from the proxy's
- * usage log), so a task's tokens and dollars read the same for the Claude API lane and Vertex.
- * 2.71.1 (B): --by task groups by the task each session end names (the launcher records it since 2.71.1; older ends
- * and sessions with no task are "(no task)"), so the tokens a landed change took can be read per task.
- *
- * Every number here is what a tool reported at the end of a session (Claude's result usage, Codex's
- * turn totals, or a plain usage line). Nothing is estimated. Two things are not counted, and the output
- * says so: sessions whose tool reported no usage (listed by tool), and work outside the launcher, such as
- * a person's own chat or IDE sessions.
+ *    npm run tokens [-- --since 5h|24h|today|all] [--by agent|role|model|tool|task] [--json]
+ * Each row shows its dollars (reported, or estimated at the price table). --by task groups by the task each session
+ * end names (no task: "(no task)").
+ * Every number is what a tool reported at the end of a session; nothing is estimated. Not counted, and the output
+ * says so: sessions whose tool reported no usage (listed by tool), and work outside the launcher, such as a person's
+ * own chat or IDE sessions.
  */
 import { pathToFileURL } from 'node:url';
 import { readRecentEvents } from './event.mjs';

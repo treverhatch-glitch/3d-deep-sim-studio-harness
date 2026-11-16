@@ -1,26 +1,14 @@
 #!/usr/bin/env node
 /**
  * harness/scorecard.mjs — how each model is doing, from the event log. A script: no tokens.
- *
- *   npm run scorecard            table per model
- *   node harness/scorecard.mjs --json
- *
- * Per model:
- *   done, points      tasks it finished, and their difficulty (size 1-5; default by type, or --size on task add)
- *   bugs              confirmed: a bug task added with --caused-by <task it finished>, or a task of its reopened
- *   suspected         a closed-loop failure split across the models that finished code changes since the last pass
- *   per 10 points     confirmed bugs per 10 points of finished work, so hard work isn't punished for its size
- *   refused, forced   "done" refused by a done-check, and done forced past one
- *   handed back       tasks it handed back (out of usage, swapped, stuck)
- *
- * A model is whatever agents report (STUDIO_AGENT_MODEL, task start --model); "unknown" otherwise.
- *
- * 2.61.0, load/follow telemetry (measurement only, no approvals): when a launched session ends, recordFollow() notes
- * which skills it was given (named in its kickoff, plus its task's skill, whose steps its brief carries) and which
- * pitfall lines (studio/PITFALLS.md lines in its kickoff), whether its log shows it opened each skill (loaded), and
- * whether the log shows each skill's required steps (followed: the skill's optional `evidence:` front matter,
- * studio/skills/README.md; no evidence list: unknown). Counted per model in .studio/skill-follow.json (2.79.1; one
- * hourly skill.follow.summary event, STUDIO_TELEMETRY=full: one event per session); the scorecard shows the rates per model.
+ * npm run scorecard            table per model   |   node harness/scorecard.mjs --json
+ * Per model: done and points (size 1-5); bugs (confirmed: a bug task added with --caused-by, or a reopened task);
+ * suspected (a closed-loop failure split across the models); per 10 points; refused and forced (done-check); handed
+ * back. A model is whatever agents report (STUDIO_AGENT_MODEL, task start --model); "unknown" otherwise.
+ * Load/follow telemetry (measurement only): at session end recordFollow() notes the skills and studio/PITFALLS.md
+ * lines given, whether the log shows each skill opened (loaded) and its required steps (followed; the skill's
+ * `evidence:` front matter, studio/skills/README.md). Counted per model in .studio/skill-follow.json (hourly
+ * skill.follow.summary event; STUDIO_TELEMETRY=full: one per session).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -160,13 +148,10 @@ export function buildScorecard({ events = readRecentEvents(20000), queue = parse
 }
 
 /**
- * A skill's evidence patterns from its front matter (optional):
- *   ---
- *   evidence:
- *     - fails-before | check-regressions      one required step; " | " separates ways the log may show it
- *     - /npm run verify\b/                     /…/ is a regular expression, anything else a case-insensitive substring
- *   ---
- * or inline: `evidence: [fails-before, npm run verify]`. Null when the skill has none (its follow rate is "unknown").
+ * A skill's evidence patterns from its front matter (optional): `evidence:` with items such as `- fails-before |
+ * check-regressions` (one required step; " | " separates ways the log may show it) or `- /npm run verify\b/` (/…/ is a
+ * regular expression, anything else a case-insensitive substring); or inline `evidence: [fails-before, npm run
+ * verify]`. Null when none (follow rate "unknown").
  */
 export function skillEvidence(text) {
   const fm = String(text || '').replace(/\r\n/g, '\n').match(/^---\n([\s\S]*?)\n---(\n|$)/);

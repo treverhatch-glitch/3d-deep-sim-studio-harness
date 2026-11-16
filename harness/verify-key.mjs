@@ -1,20 +1,14 @@
 /**
- * harness/verify-key.mjs — 2.73.0 (g): the studio's local verify key, and the HMAC-SHA256 signatures made with it.
+ * harness/verify-key.mjs — the studio's local verify key, and the HMAC-SHA256 signatures made with it.
  *
  * A verify record (and its run log) and a golden's first-divergence report are reused only when the harness signed
- * them. The key is made on first use (a full verify, a red golden) and kept OUTSIDE every checkout and lane:
- *   ~/.studio-verify/<studio-id>.key   (STUDIO_VERIFY_KEY_DIR names another folder; mode 600 where the OS has modes)
- * <studio-id> is a hash of the repository's git common dir, which the main checkout, its lanes (.lanes/<agent>) and the
- * train's scratch copies share, so one key serves the whole studio; a folder that is not a git checkout uses its own
- * path. A key folder inside the studio's main checkout or any of its worktrees is refused (a lane could commit or read
- * it as a file): nothing is signed then, and nothing is reused. The key is never printed, logged or committed; only a
- * short key id (a hash of the key) appears in run logs and reports.
- *
- * What it stops: a record, run log or report written by hand (an agent's file write, a copy from another studio).
- * What it does not stop: a process running as the same user can read the key file and sign anything; lanes run
- * run-gates as that user. Records from before 2.73.0 carry no signature: they are simply not reused (no migration).
- *
- * Node built-ins only: harness/gate-trust.mjs imports it.
+ * them. The key is made on first use and kept OUTSIDE every checkout and lane: ~/.studio-verify/<studio-id>.key
+ * (STUDIO_VERIFY_KEY_DIR names another folder; mode 600). <studio-id> hashes the git common dir, shared by the main
+ * checkout, its lanes and the train's scratch copies; a non-git folder uses its own path. A key folder inside the main
+ * checkout or a worktree is refused: nothing is signed or reused. The key is never printed, logged or committed; only
+ * a short key id appears in logs.
+ * It stops a record written by hand; not a process running as the same user, which can read the key. Node built-ins
+ * only: harness/gate-trust.mjs imports it.
  */
 import fs from 'node:fs';
 import os from 'node:os';

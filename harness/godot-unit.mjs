@@ -1,16 +1,10 @@
 #!/usr/bin/env node
 /**
- * harness/godot-unit.mjs — runs headless Godot unit tests with gdUnit4.
- *
- * This module integrates gdUnit4 tests into the harness. It can be run as a gate,
- * checking for changes in specified project directories before running. It finds
- * the Godot binary, runs the tests, parses the JUnit output, and records the
- * results for briefings and reporting.
- *
+ * harness/godot-unit.mjs — runs headless Godot unit tests with gdUnit4, as a gate; records the results for briefings.
+ * It finds the Godot binary, runs the tests, and parses the JUnit output.
  *   node harness/godot-unit.mjs [--changed]   --changed: only when a watched folder changed (the gate)
- *
- * Opt-in per game (studio/godot-unit.json, 2.30g). Exit 0 passes; gdUnit4's 100 (test failures) and 105
- * (script or discovery error) block. Versions are pinned there: gdUnit4 v6.2.2, Godot 4.7.2.
+ * Opt-in per game (studio/godot-unit.json). Exit 0 passes; gdUnit4's 100 (test failures) and 105 (script or discovery
+ * error) block. Versions are pinned there: gdUnit4 v6.2.2, Godot 4.7.2.
  */
 import fs from 'node:fs';
 import path from 'node:path';

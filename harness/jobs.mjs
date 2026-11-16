@@ -1,35 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/jobs.mjs — 2.65.0: one completion event for every long job, and a way to wait for it.
- *
- * The crew's orchestrator (an agent outside the harness) polled logs to learn when a verify, a train or a Unity build
- * had finished. Each of those already logged its own event (gates.run, task.train.*, engine.land, agent.session.end),
- * each in its own shape. Now every long job also ends with ONE uniform event beside its own (nothing is removed):
- *
- *   { type: 'job.done', status: 'ok'|'warn'|'error', task?, durationMs,
- *     meta: { kind, id, code, result, ms, tail, log } }
- *
- *   kind        verify (a full verify: scripts/run-gates.mjs), train (harness/train.mjs runTrain), game-gates (the game's
- *               checks run on their own: harness/game-gates.mjs), heavy (node harness/heavy.mjs run), unity-gate (the
- *               Unity land gate, also each Unity train's land run), unity-test / unity-build (harness/unity.mjs gate /
- *               build), session (an agent session ended: harness/agent.mjs)
- *   id          which one: the verify's owner or head, the train id, the heavy label, the agent's name
- *   code        the exit code (null when there is none); result: pass | fail | busy | ... in words
- *   tail        the last lines that matter (at most 600 characters); log: where the whole output is, when kept
- *
- *   npm run events -- wait --type job.done [--match kind=train] [--match task=T-012] [--since <iso>|last|now]
- *                          [--timeout <min>] [--cursor <name>]
- *       blocks until a matching event is in .studio/events.jsonl and prints it as one JSON line (exit 0); prints
- *       {"timeout":true,...} and exits 2 when --timeout minutes (default 60) pass first. --type takes a trailing * (job.*).
- *       --match key=value compares the event's meta field (kind=train is meta.kind, id= is the job's id), else its
- *       own field (task=T-012), dotted paths too (meta.code=0); value a|b matches either. --since: events after that time; now (the default) only new ones;
- *       last: after the last event this cursor returned (--cursor, default STUDIO_LOCK_OWNER or "default"; kept in
- *       .studio/events-wait/<cursor>.json), so nothing that ended between two waits is missed.
+ * harness/jobs.mjs — one completion event for every long job, and a way to wait for it.
+ * Every job ends with ONE event: { type: 'job.done', status: 'ok'|'warn'|'error', task?, durationMs, meta: { kind, id,
+ *   code, result, ms, tail, log } }. kind: verify, train, game-gates, heavy, unity-gate, unity-test/-build, session;
+ *   code: exit code or null; result: pass | fail | busy; tail: at most 600 characters.
+ *   npm run events -- wait --type job.done [--match k=v] [--since <iso>|last|now] [--timeout <min>] [--cursor <n>]
+ *       prints the first matching event of .studio/events.jsonl as one JSON line (exit 0), or {"timeout":true,...} and
+ *       exit 2 after --timeout minutes (60). --type takes a trailing * (job.*). --match key=value (meta, else the
+ *       event's own field. --since: now (default) | last (after this --cursor's last; default STUDIO_LOCK_OWNER or
+ *       "default"; kept in .studio/events-wait/<cursor>.json). Polls every STUDIO_EVENTS_WAIT_POLL_MS (1000).
  *   npm run events -- tail [--type <t>] [--n 20]      the newest events, one JSON line each
- *
- * Polling is cheap: the log's size is checked every STUDIO_EVENTS_WAIT_POLL_MS (1000) and only the new bytes are read;
- * a roll-over (STUDIO_EVENTS_MAX_MB) is followed into the rolled file. No imports beyond event.mjs, so any CLI may use
- * jobDone() without an import cycle.
  */
 import fs from 'node:fs';
 import os from 'node:os';

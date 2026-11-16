@@ -1,17 +1,13 @@
 /**
- * harness/task-overlap.mjs — 2.69.0 (s): overlap checks when work is added or started.
+ * harness/task-overlap.mjs — overlap checks when work is added or started.
  *
- * The crew's orchestrator spotted two tasks editing the same sim line, and three sharing replays, only by eye. Now
- * `task add` and `task start` compare the task with the work already open:
- *   - its lane (declared with --paths/--lane, `task lane`, or guessed from the title: harness/task-hold.mjs laneOf)
- *     against what each lane in flight already changes (queued lanes and lane copies with unlanded commits, diffed
- *     against main: harness/hotspots.mjs laneChanges) and against the lanes of open tasks;
- *   - at start, its own lane's diff against main once it has one, line by line (hotspots.mjs overlaps);
- *   - its title against open tasks' titles (normalised word overlap of TITLE_MIN, 0.7, or more).
+ * `task add` and `task start` compare the task with the work already open: its lane (--paths/--lane, `task lane`, or
+ * guessed from the title: harness/task-hold.mjs laneOf) against what each lane in flight changes (harness/hotspots.mjs
+ * laneChanges) and against the lanes of open tasks; at start, its own lane's diff against main line by line
+ * (hotspots.mjs overlaps); its title against open tasks' titles (normalised word overlap of TITLE_MIN, 0.7, or more).
  * Each finding is printed ("T-132 already changes src/sim/sim.ts:120-140; consider stacking (--after T-132) or
- * splitting the scope") and recorded as one task.overlap event. Advisory: nothing is refused unless
- * STUDIO_OVERLAP=block (then add and start refuse while an overlap stands); STUDIO_OVERLAP=off skips the check.
- * Never throws: a failed check is a line, not a refused add.
+ * splitting the scope") and recorded as one task.overlap event. Advisory: STUDIO_OVERLAP=block makes add and start
+ * refuse while an overlap stands; STUDIO_OVERLAP=off skips the check. Never throws: a failed check is a line.
  */
 import { readRecentEvents } from './event.mjs';
 import { emitOnChange } from './telemetry.mjs';

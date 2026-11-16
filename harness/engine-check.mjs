@@ -1,24 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/engine-check.mjs — 2.79 (e): the engine porter's own quick check.
- *
+ * harness/engine-check.mjs — the engine porter's own quick check.
  *   npm run engine -- check [--engine unity] [--task <ID>] [--dir <folder>]
- *
- * Runs the engine config's "quickCheck" command (studio/game.json engines.<x>.quickCheck: e.g. a compile of the sim and
- * test assemblies without the editor) in the porter's lane copy (--dir, else .lanes/engine/<task>, else the current
- * folder), so a compile error shows up in the porter's session instead of at land time. One runs at a time per engine
- * on the machine (the lock .studio/locks/engine-check-<engine>.lock, named "engine-check:<engine>" inside); a second one
- * waits with a status line, up to STUDIO_ENGINE_CHECK_WAIT_MIN (20) minutes. `task done` runs it for an engine-porter
- * task when quickCheck is configured, and refuses on red.
- * 2.82: with no quickCheck but the owner's own "rules" command (engines.<x>.rules), `npm run engine -- check` is the rules
- * check itself (harness/engine-rules.mjs) on the lane's committed work as it would land on the target: in a throwaway
- * checkout with the rules' git-ignored inputs copied in, never in the lane's folder (the inputs are not there), and only
- * after the same check passed on the target (a check that is red on the target judges no lane). `task done` runs a check
- * only when quickCheck is set: a studio sets it to a compile and leaves the tests to the train's check of the batch.
- * 2.83: a task whose lane folder is gone is checked on its recorded engine branch, in a throwaway checkout (large files
- * not smudged), removed after; with no recorded branch it is skipped with the missing lane named. Never in the studio
- * repo's folder: a quick check run there came out falsely red ("Project file does not exist", B-125).
- * Exit: 0 pass (or nothing configured: skipped), 1 red, 3 busy (the wait ran out).
+ * Runs the engine config's "quickCheck" command (studio/game.json engines.<x>.quickCheck, e.g. a compile of the sim and
+ * test assemblies) in the porter's lane copy (--dir, else .lanes/engine/<task>, else the current folder). One runs at a
+ * time per engine (lock .studio/locks/engine-check-<engine>.lock); a second waits up to STUDIO_ENGINE_CHECK_WAIT_MIN
+ * (20). `task done` runs it for an engine-porter task when quickCheck is set, and refuses on red. With no quickCheck
+ * but the owner's "rules" command (engines.<x>.rules), it runs the rules check (harness/engine-rules.mjs) on the lane's
+ * committed work in a throwaway checkout, only after the same check passed on the target. A task whose lane folder is
+ * gone is checked on its recorded engine branch, else skipped. Never in the studio repo's folder (falsely red). Exit: 0
+ * pass (or nothing configured: skipped), 1 red, 3 busy (the wait ran out).
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,27 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/anchors.mjs — 2.81 (b2): the per-game anchor spec: reference games and the concrete features, behaviours,
- * numbers and screens the studio cross-checks its own design against for direction, with where that evidence comes
- * from and how a task proves it (docs/ANCHORS.md). An anchor records what an outside game DOES as a yardstick; it never
- * holds that game's code, art, text or names for use in ours.
- *
- * Game-agnostic: the harness never names a game; the owner (or the Director with the owner's references) fills
- * studio/references/anchors.json for THEIR game. One anchor:
- *
- *   { "id": "A1", "game": "<reference game>", "feature": "<what to match>",
- *     "behaviours": ["<what the player sees or can do>"], "numbers": { "<name>": "<value seen in the reference>" },
- *     "screens": ["<screen or flow>"],
- *     "evidence": { "kind": "video|screenshot|manual|wiki|owner|none", "path": "<file or url>", "provenance": "<who/when>",
- *                   "status": "verified|unknown|needs-reference" },
- *     "acceptance": ["<a checkable line the deliverable must show>"] }
- *
- * A task cites anchors (`task add … --anchors A1,A2`); the brief prints their acceptance lines under "Done means";
- * `task done` records, per anchor, met | unmet | unknown from the DELIVERABLE (files committed for the task, regression
- * records, test names, proof records that name the anchor id), never from the builder's note. An anchor whose evidence
- * is `unknown` or `needs-reference` is reported as unknown: it is never green, and it is never a refusal by itself
- * (STUDIO_ANCHORS=fail makes an unmet anchor with verified evidence a failing done check).
- *
- *   node harness/anchors.mjs list | show A1 | check <T-ID> | add --game "…" --feature "…" [--behaviour "…"]… [--acceptance "…"]… [--evidence <path|url> --kind video --provenance "…" --status verified|unknown|needs-reference]
+ * harness/anchors.mjs — the per-game anchor spec: reference games and the features, behaviours, numbers and screens
+ * the studio cross-checks its design against (docs/ANCHORS.md). An anchor records what an outside game DOES; it never
+ * holds that game's code, art, text or names. The owner (or the Director) fills studio/references/anchors.json.
+ *   { "id": "A1", "game": "<reference game>", "feature": "<what to match>", "behaviours": ["…"], "numbers": { "<n>": "<v>" },
+ *     "screens": ["…"], "acceptance": ["<checkable line>"], "evidence": { "kind": "video|screenshot|manual|wiki|owner|none",
+ *     "path": "<file or url>", "provenance": "<who/when>", "status": "verified|unknown|needs-reference" } }
+ * A task cites anchors (`task add … --anchors A1,A2`); the brief prints their acceptance lines under "Done means"; `task
+ * done` records met | unmet | unknown per anchor from the DELIVERABLE, never the builder's note. Evidence `unknown` or
+ * `needs-reference` is unknown: never green, never a refusal alone (STUDIO_ANCHORS=fail: unmet + verified evidence fails).
+ *   node harness/anchors.mjs list | show A1 | check <T-ID> | add --game "…" --feature "…" [--behaviour "…"]… [--acceptance "…"]…
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -105,13 +93,10 @@ const git = (args, cwd = REPO_ROOT) => {
 };
 
 /**
- * What the deliverable says about each anchor. Proof = something the harness can read, not the builder's note:
- *   - a committed file for this task (git log --name-only with Studio-Task: <id>, plus the lane's uncommitted edits)
- *     whose content or name carries the anchor id;
- *   - a regression record (qa/regressions/*.json) or a proof record (.studio/proof/<task>*.json) naming it;
- *   - a task-start-or-later test file naming it.
- * Verdicts: met (verified evidence + proof), unmet (verified evidence, no proof), unknown (evidence unknown or needs a
- * reference: the proof may exist but nobody checked the reference, so it is never green).
+ * What the deliverable says about each anchor. Proof = something the harness can read, not the builder's note: a committed
+ * file for this task (git log with Studio-Task: <id>, plus the lane's uncommitted edits) carrying the anchor id; a regression
+ * record (qa/regressions/*.json) or proof record (.studio/proof/<task>*.json) naming it; a test file naming it. Verdicts: met
+ * (verified evidence + proof), unmet (verified evidence, no proof), unknown (evidence unknown or needs a reference: never green).
  */
 export function judgeAnchors(taskId, { ids = null, anchors = readAnchors(), cwd = REPO_ROOT, since = 0 } = {}) {
   const cited = ids || taskAnchorIds(taskId);

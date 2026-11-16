@@ -1,27 +1,13 @@
 #!/usr/bin/env node
 /**
- * harness/layout-gate.mjs — 2.30o: check the presentation layout a game exports, against rules it declares.
- *
- * The sim was tested; where things are drawn was not. In the Marina run piers sat on the sand, boats were
- * tiny and parked on the beach, and every gate passed. A game may export its world layout as JSON (from a
- * test hook in the web build or a Godot tool script) and declare rules; this gate checks them. Generic:
- * it knows nothing about marinas.
- *
- * Layout JSON: { "objects": [ { "id", "kind", "x", "z", "w", "d", "size"?, "berth"?, "at"? } ],
- *                "depth": { "origin": [x0, z0], "cell": n, "rows": [[d, d, ...], ...] } | null,
- *                "shoreline"?: number }     x/z centre, w/d footprint (world units); depth > 0 is water depth
- * Rules JSON (studio.layout.json in the game folder):
- *   { "layout": "<file the hook writes>", "hook": "<command that writes it>",
- *     "rules": [
- *       { "type": "reach-depth",   "kind": "pier", "minDepth": 2 }          the far end of each reaches that depth
- *         ("referencedBy": { "kind": "berth", "field": "pier" } checks only piers some berth names)
- *       { "type": "on-water",      "kind": "boat", "minDepth": 0.5 }        its centre is in water at least that deep
- *       { "type": "at-anchor",     "kind": "boat", "anchor": "berth", "maxDist": 1.5, "when": "moored" }
- *       { "type": "no-overlap",    "kinds": ["pier", "building"], "tolerance": 0.05 }
- *       { "type": "scale",         "kind": "boat", "min": 3, "max": 30 }   size (or max(w,d)) in range
- *       { "type": "spread",        "kind": "boat", "by": "berthOf", "maxShare": 0.4, "when": "waiting" }
- *       { "type": "count",         "kind": "pier", "min": 2 } ] }
- *
+ * harness/layout-gate.mjs — checks the presentation layout a game exports against rules it declares. Generic.
+ * A game exports its world layout as JSON (from a test hook or a Godot tool script):
+ *   { "objects": [ { "id", "kind", "x", "z", "w", "d", "size"?, "berth"?, "at"? } ],
+ *     "depth": { "origin": [x0, z0], "cell": n, "rows": [[d, ...], ...] } | null, "shoreline"?: number }  (x/z centre)
+ * Rules JSON (studio.layout.json in the game folder): { "layout": "<file the hook writes>", "hook": "<command>",
+ * "rules": [...] } Rule types: reach-depth (kind, minDepth; "referencedBy": { kind, field }), on-water (kind,
+ * minDepth), at-anchor (kind, anchor, maxDist, when), no-overlap (kinds, tolerance), scale (kind, min, max), spread
+ * (kind, by, maxShare, when), count.
  *   node harness/layout-gate.mjs [--game-dir web/x] [--layout f.json] [--rules r.json] [--no-hook] [--json]
  */
 import fs from 'node:fs';

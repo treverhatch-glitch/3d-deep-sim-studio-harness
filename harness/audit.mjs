@@ -1,21 +1,14 @@
 /**
- * harness/audit.mjs — 2.73.0 (e): audit sampling. A fixed share of hands-free landings and autonomous decisions is
- * picked for an after-the-fact review by someone who didn't do the work. It never blocks work: an audit item waits on
- * the review list (npm run decisions -- review) and in the digest; a failed audit counts as a Redo in the autonomy
- * scorecard's redo rate and so in the L3 bar (harness/autonomy.mjs).
- *
- * The share: studio/policy.json "audit": { "rate": 0.1 } (a policy that counts: harness/policy-rules.mjs); with no rate
- * on file, 0.1 while autonomous mode is on, else 0 (no audits).
- * The draw is seeded, never random: sha256("studio-audit|<seed>") read as a fraction below the rate. The seed is the
- * decision's id for an autonomous decision, and the task id for a landing (landing events carry no commit id, and the
- * task id stays the same when the work is retried, so a retry can't draw again). The same log always picks the same
- * items, and anyone can check a pick: npm run decisions -- audit-draw <seed>.
- *
- * An audit's verdict: `npm run decisions -- audit <AU-id> pass|fail --by <name> [--note "…"] [--permission "…"]`: a
- * person, or an agent on a person's direct permission (harness/decider.mjs), and never one who worked on it (the
- * agents that claimed, ran sessions on or landed the task; the agent that took the decision). An audited autonomous
- * decision is also judged by its review: approved = pass, reverted or edited = fail. Each verdict is one `audit` record
- * in .studio/decisions.jsonl and one `audit.verdict` event (meta.of, meta.verdict) the scorecard reads.
+ * harness/audit.mjs — audit sampling: a fixed share of hands-free landings and autonomous decisions is picked for an
+ * after-the-fact review by someone who didn't do the work. It never blocks work: an audit waits on the review list
+ * (npm run decisions -- review); a failed one counts as a Redo in the scorecard (harness/autonomy.mjs).
+ * The share: studio/policy.json "audit": { "rate": 0.1 }; with no rate, 0.1 while autonomous mode is on, else 0. The
+ * draw is seeded, never random: sha256("studio-audit|<seed>") as a fraction below the rate; the seed is the
+ * decision's id, or the task id for a landing. Check: npm run decisions -- audit-draw <seed>.
+ * Verdict: `npm run decisions -- audit <AU-id> pass|fail --by <name> [--note "…"] [--permission "…"]`: a person, or
+ * an agent on a person's direct permission (harness/decider.mjs), never one who worked on it. An autonomous
+ * decision's review counts too: approved = pass, reverted or edited = fail. Each verdict is an `audit` record in
+ * .studio/decisions.jsonl and an `audit.verdict` event.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';

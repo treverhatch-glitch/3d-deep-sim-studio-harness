@@ -1,17 +1,14 @@
 /**
  * harness/cartridge.mjs — load any cartridge by name and drive it the same way everywhere.
  *
- * Every gate, playtest, replay, golden check, balance sweep and closed loop goes through
- * this file, so a new game only has to meet the contract in cartridges/README.md:
- *
- *   cartridges/<name>/index.mjs  createInitialState(seed, tuning?) · step(state, actions|null)
- *                                optional: invariants(state) · outcome(state) · hashState(state) · TUNING
- *   cartridges/<name>/qa.mjs     optional: scenarios { name: { seed, maxTicks, actions?, policy? } }
- *                                optional: createAdapter() for a custom or browser-backed adapter
- *   either file                  optional (2.66.0, npm run fuzz): actions(state, rand) · actionTypes (qa.mjs wins)
- *
- * Pick the cartridge with --cartridge <name>, STUDIO_CARTRIDGE, studio/game.json (new-game writes it),
- * or "cartridge" in studio/gates.json (the template's fallback).
+ * Every gate, playtest, replay, golden check, balance sweep and closed loop goes through this file, so a new game only
+ * has to meet the contract in cartridges/README.md:
+ * cartridges/<name>/index.mjs  createInitialState(seed, tuning?) · step(state, actions|null)
+ *                              optional: invariants(state) · outcome(state) · hashState(state) · TUNING
+ * cartridges/<name>/qa.mjs    optional: scenarios { name: { seed, maxTicks, actions?, policy? } } · createAdapter()
+ * either file                 optional (npm run fuzz): actions(state, rand) · actionTypes (qa.mjs wins)
+ * Pick the cartridge with --cartridge <name>, STUDIO_CARTRIDGE, studio/game.json (new-game writes it), or "cartridge"
+ * in studio/gates.json.
  */
 
 import fs from 'node:fs';

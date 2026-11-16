@@ -1,19 +1,14 @@
 #!/usr/bin/env node
 /**
  * harness/data-consent.mjs — the game dev's answer on sharing the studio's records.
- *
  *   npm run data                      show the question and the current answer
  *   npm run data -- allow --by <name>     confirm sharing is allowed
  *   npm run data -- decline --by <name>   turn sharing off
- *
- * The studio always keeps its own records on this computer (and in backups): it needs them to
- * work. This answer is only about sharing them outside the studio, scrubbed of keys and passwords,
- * with AI research partners. The box starts ticked: sharing is allowed unless the game dev declines.
- * Intake and the War Room's Game plan view show the question; every change is kept with who and
- * when, and every export records the answer it relied on, including whether it was only the
- * pre-ticked default or a confirmed yes.
- *
- * Stored in studio/data-consent.json. No file means the default: allowed, not yet shown.
+ * The studio always keeps its own records on this computer (and in backups). This answer is only about sharing them
+ * outside the studio, scrubbed of keys and passwords, with AI research partners. The box starts ticked: sharing is
+ * allowed unless the game dev declines. Every change is kept with who and when, and every export records the answer
+ * it relied on, including whether it was only the pre-ticked default. Stored in studio/data-consent.json. No file:
+ * allowed, not yet shown.
  */
 import fs from 'node:fs';
 import path from 'node:path';

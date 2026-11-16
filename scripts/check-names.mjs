@@ -1,16 +1,11 @@
 #!/usr/bin/env node
 /**
- * scripts/check-names.mjs — 2.86: no name that is used and defined nowhere.
+ * scripts/check-names.mjs — no name that is used and defined nowhere.
  *
  * A name read in a branch that few runs take (a hand-back text, an error path) and declared in another block, or
- * removed by a refactor, is a ReferenceError that waits for that branch. One shipped to a pull request in 2.86: the
- * engine train's "bisect stopped at its cap" hand-back named a variable declared in a block it could not see, and the
- * train would have ended there with a crash. No self-test of the new code took that branch; an older one did.
- *
- * The TypeScript compiler (already a dependency: the map and the size check parse with it) reads every JavaScript
- * file of harness/, scripts/, qa/ and the hooks as JavaScript and reports only three findings: a name it cannot find
- * (2304), a name it cannot find with a near miss (2552) and a shorthand property with no value in scope (18004).
- * Types are not checked: nothing else it says is shown.
+ * removed by a refactor, is a ReferenceError that waits for that branch. The TypeScript compiler reads every
+ * JavaScript file of harness/, scripts/, qa/ and the hooks and reports only three findings: a name it cannot find
+ * (2304), one with a near miss (2552) and a shorthand property with no value in scope (18004). Types are not checked.
  *
  * Usage: node scripts/check-names.mjs [--json] [--root <dir>] [<file> ...]
  *   --root  check <dir> instead of this repo (the self-test uses it)

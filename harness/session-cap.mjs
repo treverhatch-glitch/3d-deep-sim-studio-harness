@@ -1,38 +1,14 @@
 #!/usr/bin/env node
 /**
- * harness/session-cap.mjs — refresh context by default (2.29.2).
- *
- *   npm run session                                     every running session: turns, context, refresh state
- *   npm run session -- exception "<live repro>"          mid-debug: keep going past the refresh point (flagged)
- *   npm run session -- check <agent> continue|handoff --by <director or producer> [--note "…"]
- *
- * The studio's files are the memory, not the chat. A launched session refreshes at the task boundary
- * (one task per session) or when it passes the refresh point, ~120k tokens of context or 40 turns,
- * whichever comes first: it writes its hand-back (done / failed / next / standing rules, under 3k
- * characters), commits, and ends; a fresh session continues the same task from the hand-back.
- *
- * Exception: mid-debug with a live repro, an agent may go on to the ceiling. Using it flags the agent,
- * and the Director or Producer checks on it at every 20 turns / 40k tokens past the refresh point
- * (continue, or hand off now), so it never runs unchecked. A session past the refresh point without the
- * exception gets the same check. Nothing here waits: checks are cards, the agent keeps working.
- *
- * Limits (environment, 0 turns one off): STUDIO_SESSION_TURNS (40), STUDIO_SESSION_CONTEXT (120000; 2.78.1: per role
- * STUDIO_SESSION_CONTEXT_<ROLE>, STUDIO_SESSION_CONTEXT_EARLY 70000 for STUDIO_SESSION_EARLY_ROLES reviewer,engine-porter,
- * and a model factor STUDIO_SESSION_CONTEXT_FACTOR_<WORD>: contextPoint),
- * STUDIO_SESSION_CEILING_TURNS (80, passed to Claude Code as --max-turns), STUDIO_CHECK_TURNS (20),
- * STUDIO_CHECK_TOKENS (40000). Counts are the tool's own (Claude Code stream-json usage), named with
- * the model, since every model family counts tokens differently.
- *
- * 2.85: the check decides by rule (STUDIO_REFRESH_DECIDE=rule, the default): hand off when the context is at or over
- * STUDIO_REFRESH_HANDOFF_PCT (60) percent of the model's context window (harness/model-limits.mjs; unknown: twice the
- * refresh point), or when the session has made no commit and no verify for STUDIO_REFRESH_IDLE_TURNS (40) turns; else
- * continue. Recorded as a check by "rule" (agent.refresh.decided), no ask. A session flagged mid-debug asked for a person's
- * check, so it still gets the card. STUDIO_REFRESH_DECIDE=ask: every check is a card, as before. A person's
- * `session -- check` still decides at any time.
- *
- * 2.86: the percentage is of the room left after the session's start (the context its first commit or file edit was made
- * with), and a session that has done no work never hands off for its context unless within STUDIO_REFRESH_SAFETY_PCT (5)
- * of the window (refreshRuleDecision).
+ * harness/session-cap.mjs — refresh context by default: a session ends and a fresh one continues from its hand-back.
+ *    npm run session                                     every running session: turns, context, refresh state
+ *    npm run session -- exception "<live repro>"          mid-debug: keep going past the refresh point
+ *    npm run session -- check <agent> continue|handoff --by <director or producer> [--note "…"]
+ * A session refreshes at the task boundary or past ~120k tokens or 40 turns: it writes a hand-back (under 3k
+ * characters), commits, ends. Limits (0 turns one off): STUDIO_SESSION_TURNS (40), STUDIO_SESSION_CONTEXT (120000;
+ * _<ROLE>; STUDIO_SESSION_CONTEXT_EARLY 70000 for STUDIO_SESSION_EARLY_ROLES; STUDIO_SESSION_CONTEXT_FACTOR_<WORD>),
+ * STUDIO_SESSION_CEILING_TURNS (80), STUDIO_CHECK_TURNS (20), STUDIO_CHECK_TOKENS (40000).
+ * STUDIO_REFRESH_DECIDE=rule (default; =ask: cards): STUDIO_REFRESH_HANDOFF_PCT (60), STUDIO_REFRESH_IDLE_TURNS (40).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -50,12 +26,10 @@ export const EARLY_REFRESH_ROLES = 'reviewer,engine-porter';
 const envKey = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
 
 /**
- * The context refresh point for a role and model (2.78.1, e). In order: STUDIO_SESSION_CONTEXT_<ROLE> (e.g.
- * STUDIO_SESSION_CONTEXT_REVIEWER=60000); else, for a role in STUDIO_SESSION_EARLY_ROLES (reviewer,engine-porter),
- * STUDIO_SESSION_CONTEXT_EARLY (70000); else STUDIO_SESSION_CONTEXT (120000). Then a model factor: the first
- * STUDIO_SESSION_CONTEXT_FACTOR_<WORD> whose word is in the model's name (STUDIO_SESSION_CONTEXT_FACTOR_SONNET=0.8 moves
- * a Sonnet session's point to 80 %); none set: 1. 0 anywhere turns the context refresh off for that role.
- * Returns { context, from }.
+ * The context refresh point for a role and model. In order: STUDIO_SESSION_CONTEXT_<ROLE>; else, for a role in
+ * STUDIO_SESSION_EARLY_ROLES (reviewer,engine-porter), STUDIO_SESSION_CONTEXT_EARLY (70000); else
+ * STUDIO_SESSION_CONTEXT (120000). Then the first STUDIO_SESSION_CONTEXT_FACTOR_<WORD> whose word is in the model's
+ * name (=0.8: 80 %); none: 1. 0 anywhere turns the context refresh off for that role. Returns { context, from }.
  */
 export function contextPoint(env = process.env, { role = null, model = null } = {}) {
   const base = num(env.STUDIO_SESSION_CONTEXT, 120000);
@@ -146,18 +120,10 @@ export function sessionProgress(log) {
 export const refreshDecideMode = (env = process.env) => (/^ask$/i.test(String(env.STUDIO_REFRESH_DECIDE || '').trim()) ? 'ask' : 'rule');
 
 /**
- * 2.85: the rule a check point decides by: { decision: 'continue'|'handoff', why, pct, window }. The window is the
- * model's context size (harness/model-limits.mjs limitsFor); unknown: twice the refresh point.
- *
- * 2.86: the percentage is of the room the session had when it started, not of the whole window. A porter's brief and
- * first reads filled 65 to 70 % of a 200k window, so 2.85's "60 % of the window" handed it off at once, three times in
- * eight minutes, with no work done. Now:
- *   - start: the context the session's first commit or file edit was made with (sessionProgress startContext);
- *   - threshold: start + STUDIO_REFRESH_HANDOFF_PCT (60) % of (window - start);
- *   - before any work (no commit, no file edit) the context alone never hands off, unless it is within
- *     STUDIO_REFRESH_SAFETY_PCT (5) % of the window itself;
- *   - the idle-turns rule (STUDIO_REFRESH_IDLE_TURNS) is as before.
- * Returns also { start, threshold, worked, margin }.
+ * The rule a check decides by: { decision: 'continue'|'handoff', why, pct, window } (window: harness/model-limits.mjs
+ * limitsFor; unknown: twice the refresh point).
+ * Threshold: start (the context at the first commit or file edit) + STUDIO_REFRESH_HANDOFF_PCT (60) % of (window -
+ * start). Before any work it never hands off, unless within STUDIO_REFRESH_SAFETY_PCT (5) % of the window.
  */
 export function refreshRuleDecision({ turns = 0, context = 0, idleTurns = 0, model = null, point = 0, env = process.env, worked = true, start = 0 } = {}) {
   let window = 0;
@@ -282,12 +248,10 @@ export function heartbeatCheck(agent, { log, model = 'unknown', task = null, rol
 }
 
 /**
- * 2.78.1 (e): fresh session for a red on a different cause. A builder whose verify goes red on another cause (failing gate
- * and first failing line, harness/handback-facts.mjs verifyCause) than its previous red in this session, once its context
- * is past STUDIO_REFRESH_NEW_RED_SHARE (0.5) of its refresh point, hands off: a fresh session starts from the hand-back
- * (its facts carry the failure), not from a context full of the first red. STUDIO_REFRESH_ON_NEW_RED=off turns it off;
- * STUDIO_REFRESH_NEW_RED_ROLES (builder) names the roles. A session flagged mid-debug (npm run session -- exception)
- * keeps going: a long investigation still waits for its commit or breakpoint. Returns { handoff, why }.
+ * Fresh session for a red on a different cause (harness/handback-facts.mjs verifyCause) than the builder's previous
+ * red, once its context is past STUDIO_REFRESH_NEW_RED_SHARE (0.5) of its refresh point.
+ * STUDIO_REFRESH_ON_NEW_RED=off turns it off; STUDIO_REFRESH_NEW_RED_ROLES (builder) names the roles. A session
+ * flagged mid-debug (npm run session -- exception) keeps going. Returns { handoff, why }.
  */
 export function newRedDecision({ reds = [], red = null, context = 0, point = 0, exception = false, env = process.env } = {}) {
   if (/^(off|0|false|no)$/i.test(String(env.STUDIO_REFRESH_ON_NEW_RED || ''))) return { handoff: false, why: 'STUDIO_REFRESH_ON_NEW_RED=off' };

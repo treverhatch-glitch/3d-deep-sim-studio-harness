@@ -1,16 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/score.mjs — 2.81: the round scorecard. Fifteen fixed measures of one studio's run, from its logs, re-run every
- * round so two rounds can be compared. A script: no model, no tokens. docs/SCORECARD.md says what each measure means.
+ * harness/score.mjs — the round scorecard: fifteen fixed measures of one studio's run, from its logs, re-run every
+ * round so rounds compare.
  *
- *   npm run score                                   the last 7 days of this studio
- *   npm run score -- --days 8 [--now <ISO>] [--json]
- *   npm run score -- --events <a.jsonl,b.jsonl> [--machine <machine-history.jsonl>]   an exported log (now = its last event)
- *   npm run score -- --record <label> [--note "…"]  also write studio/scores/<label>.json and compare with the last one
- *
- * It measures; it changes nothing in how the studio runs. Hands-free, interventions, cost and reopen come from the
- * autonomy report (harness/autonomy.mjs: who is a person, what an intervention is), attempts from harness/metrics.mjs;
- * the rest is counted here from the event log and the machine samples.
+ * A script: no model, no tokens. docs/SCORECARD.md says what each measure means. Measures only; changes nothing.
+ * npm run score                                   the last 7 days of this studio
+ * npm run score -- --days 8 [--now <ISO>] [--json]
+ * npm run score -- --events <a.jsonl,b.jsonl> [--machine <machine-history.jsonl>]   an exported log
+ * npm run score -- --record <label> [--note "…"]   write studio/scores/<label>.json, compare with the last
+ * Hands-free, interventions, cost and reopen come from harness/autonomy.mjs, attempts from harness/metrics.mjs; the
+ * rest is counted here.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -109,14 +108,10 @@ export function countRest(events, { from, now, machine = [] } = {}) {
 }
 
 /**
- * 2.82: the engine's flow, beside the fifteen measures (it is one engine's queue, not the whole studio). events: sorted,
- * inside the window. { runs, landedLanes, passPct, refusedPct, minutesPerLanded, redMinutesPct, passMedianMin, redMedianMin,
- * waitMin, stages: [{ name, medianMin, runs, failedFirst }], rules: { checks, runs, minutes, refused } } or null (no land run).
- *   minutesPerLanded  every land-run minute (pass, red, refused waits) divided by the lanes that landed: what one landed
- *                     engine task costs the machine
- *   redMinutesPct     the share of those minutes spent in runs that ended red or in a conflict
- *   stages            from the land command's own stage report (unity-gate.mjs landStages), when it gives one
- *   rules             the rules check before the land run (engine-rules.mjs): lanes it refused never cost a land run
+ * The engine's flow, beside the fifteen measures. events: sorted, inside the window. { runs, landedLanes, passPct,
+ * refusedPct, minutesPerLanded, redMinutesPct, passMedianMin, redMedianMin, waitMin, stages: [{ name, medianMin, runs,
+ * failedFirst }], rules: { checks, runs, minutes, refused } } or null (no land run). stages come from unity-gate.mjs
+ * landStages; rules from engine-rules.mjs.
  */
 export function engineFlow(events) {
   const lands = events.filter((e) => e.type === 'engine.land' && e.meta?.status);
@@ -171,12 +166,10 @@ export function engineFlow(events) {
 }
 
 /**
- * 2.82: does the landed work follow the owner's design? events: sorted, the whole log up to the window's end (a task's
- * `task.added` may be older than the window); from: the window's start. A done task is traced when it says what it
- * serves (a Bible pillar or a kept layer: task add --serves), comes from an approved idea, was asked for by the owner
- * (origin dev-asked), or fixes, wires or rescues a task that is traced. { done, tracedPct, devAskedPct, agentProposedPct,
- * byServes: [{ serves, done }], untraced } or null (nothing done in the window). It measures the link, not the quality:
- * a pillar with no landed work, or a rising untraced share, is the Director's and the owner's signal.
+ * Does the landed work follow the owner's design? events: sorted, the whole log up to the window's end; from: the
+ * window's start. A done task is traced when it says what it serves (task add --serves), comes from an approved idea,
+ * was asked for by the owner (origin dev-asked), or fixes a traced task. { done, tracedPct, devAskedPct,
+ * agentProposedPct, byServes, untraced } or null.
  */
 export function visionFlow(events, { from = 0 } = {}) {
   const added = new Map();

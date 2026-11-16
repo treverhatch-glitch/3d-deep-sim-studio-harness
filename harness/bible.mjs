@@ -1,25 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/bible.mjs — the Game Bible: what the game is, as structured data a UI or an agent can use.
- *
  *   npm run bible                          show the Bible's state and what it still needs
  *   npm run bible -- check                 exit 1 while the Bible can't be signed yet
  *   npm run bible -- render                rewrite BIBLE.md and NOT-DOING.md from bible.json
  *   npm run bible -- layer <id> yes|explore|no [--phase 1|2|3] [--why "…"] --by <person>
  *   npm run bible -- sign --by <person>    a person signs it: pre-production ends, Phase 1 opens
- *   npm run bible -- phase open <2|3> --by <person> [--force "reason"]
- *   npm run bible -- phase open <2|3> --now "<the dev's words>" --by <dev>   the dev's call: opens at once, risk logged (2.30)
- *   npm run bible -- json                  the whole Bible plus the question and layer catalogs
- *   npm run bible -- voice [--tone "…"] [--do "…"] [--dont "…"] [--never "a, b"] [--example "…"]
- *                                          the game's voice: read by every agent writing what players see
- *
- * The authority is `studio/bible/bible.json`. `BIBLE.md` and `NOT-DOING.md` are written from it for
- * agents to read; edit the JSON through intake, this CLI, the Director, or the War Room, not by hand.
- * Free-form parts stay Markdown next to it: STORYBOARD.md, REFERENCES.md, reviews/, ideas/.
- *
- * Phases are parts of the game the player plays (1 early, 2 mid, 3 endgame). Layers are kinds of
- * progression or systems (levels, a tech tree, factions…). Every layer is answered yes, explore or
- * no; a "no" is crossed out and agents never build it.
+ *   npm run bible -- phase open <2|3> --by <person> [--force "reason"] | --now "<the dev's words>" --by <dev>
+ *   npm run bible -- json | voice [--tone "…"] [--do "…"] [--dont "…"] [--never "a, b"] [--example "…"]
+ * The authority is `studio/bible/bible.json`; BIBLE.md and NOT-DOING.md are written from it: edit the JSON through
+ * intake, this CLI, the Director or the War Room, not by hand. Layers are each yes, explore or no; "no" is never built.
  */
 import fs from 'node:fs';
 import path from 'node:path';

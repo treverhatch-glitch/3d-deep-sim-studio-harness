@@ -1,16 +1,11 @@
 /**
- * harness/permission.mjs — 2.59.1: an owner decision an agent records on a person's direct permission.
- *
- * The owner's rule (2026-11-01): agents may sign off when a person gives direct permission, and a high-level agent (a
- * Producer or Director session, or an agent outside the harness such as the crew's orchestrator) may change things
- * with a person's direct permission. So the owner-only commands (`npm run task -- type`, `npm run studio:resume`)
- * accept an agent caller when it says who gave permission (--by, a person's name) and where (--permission "<the
- * person's words, or a link to the message>", 10+ characters). The record keeps the permission and who recorded it,
- * and every output that shows the decision shows both. A builder or other worker session never qualifies, with or
- * without permission. Without --permission nothing changes: those commands still refuse agents.
- *
- * What this is not: proof. Until the studio has an owner key nothing an agent writes is proof; the permission line
- * is there so a person can check it. With an owner key, a decision that needs the key's signature still needs it.
+ * harness/permission.mjs — an owner decision an agent records on a person's direct permission. A high-level agent (a
+ * Producer or Director session, or an outside agent such as the crew's orchestrator) may use the owner-only commands
+ * (`npm run task -- type`, `npm run studio:resume`) when it says who gave permission (--by, a person's name) and where
+ * (--permission "<the person's words, or a link>", 10+ characters). The record keeps both and every output shows both.
+ * A builder or other worker never qualifies. Without --permission those commands still refuse agents.
+ * This is not proof: until the studio has an owner key nothing an agent writes is proof; with one, a decision that
+ * needs the key's signature still needs it.
  */
 
 import fs from 'node:fs';
@@ -62,14 +57,11 @@ export function agentOnPermission({ permission, env = process.env } = {}) {
 /** May an agent commit that set such a record count? (The commit-msg hook writes Studio-Agent: <name> for agents.) */
 export const permittedSetter = (agent) => !WORKER_NAME.test(String(agent || '').trim());
 
-// ---- 2.78.2 (h): who may make which beta decision (the owner's rule, 2026-11-05) ----
-//
-// "Every agent who isn't the outside agent has to keep the rules": board decisions (task type, visual off, lanes,
-// parks and unparks, stacking, a lane release, a non-protected config change) stay with the owner, the outside
-// orchestrator (an agent not launched by the harness) and a Producer/Director session; protected decisions (protected
-// files, weakened tests, hooks, task done --force, a protected config change) are the owner's and the outside agents'
-// only. STUDIO_PRODUCER_APPROVES=protected (the owner's switch, default off; docs/SECURITY.md) lets a Producer/Director
-// session make protected decisions too. Workers make neither. One answer, mayDecide; the lists above are its only lists.
+// ---- who may make which beta decision ----
+// Board decisions (task type, visual off, lanes, parks, stacking, a lane release, a non-protected config change): the
+// owner, the outside orchestrator and a Producer/Director session. Protected decisions (protected files, weakened
+// tests, hooks, task done --force, a protected config change): the owner and outside agents only, unless
+// STUDIO_PRODUCER_APPROVES=protected (default off; docs/SECURITY.md). Workers make neither. One answer: mayDecide.
 
 /** Decision kinds (approval kinds and the beta actions that decide one). Anything not listed is judged protected. */
 export const BOARD_DECISIONS = Object.freeze(['board', 'type', 'visual', 'lane', 'lanes', 'park', 'unpark', 'stack', 'config', 'train-release', 'hold', 'yes']);

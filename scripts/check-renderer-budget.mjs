@@ -5,12 +5,10 @@
  *   RENDER_URL=http://127.0.0.1:5173/?playtest=1 node scripts/check-renderer-budget.mjs   measure
  *   node scripts/check-renderer-budget.mjs                                                 static fallback
  *
- * Measured: opens RENDER_URL in Chromium (Playwright), waits for the game's `window.__render`
- * counters ({ drawCalls, triangles, lights, frameMs }, updated every frame; see
- * studio/rules/renderer-budget.md), samples them for RENDER_SAMPLE_MS (default 3000), and fails when
- * the worst sample is over the budget in the rule's ```json budget block.
- * Without RENDER_URL (or without Playwright) it falls back to scanning the code for light counts and
- * drawCalls hints, and says so.
+ * Measured: opens RENDER_URL in Chromium (Playwright), waits for the game's `window.__render` counters
+ * ({ drawCalls, triangles, lights, frameMs }; see studio/rules/renderer-budget.md), samples them for RENDER_SAMPLE_MS
+ * (default 3000), and fails when the worst sample is over the budget in the rule's ```json budget block.
+ * Without RENDER_URL (or without Playwright) it scans the code for light counts and drawCalls hints, and says so.
  */
 import fs from 'node:fs';
 import path from 'node:path';

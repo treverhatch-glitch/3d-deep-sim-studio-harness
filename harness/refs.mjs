@@ -1,23 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/refs.mjs — the reference library: games, features, videos and files to design from.
- *
  *   npm run ref -- add <url or file> --game "…" --feature "…" [--at 1:23] [--take "…"] [--avoid "…"] [--by <name>]
  *   npm run ref -- attach R-001 <file>          add your own copy (a clip you saved, a screenshot)
  *   npm run ref -- frames R-001 [--every 2] [--max 8]   pull stills from a video for agents that read images
  *   npm run ref -- list | show R-001
- *
- * Files are kept, not just linked: each reference gets a folder in the library with the media and a
- * note. The library lives in STUDIO_REFERENCE_DIR (point it at a Google Drive, Dropbox or OneDrive
- * folder on this computer so it syncs and stays reachable), or `references/` in the repo (ignored by
- * git, so big files never reach a public repo). The index of all references,
- * studio/references/library.json and LIBRARY.md, is small and committed in your private copy.
- *
- * A link to a file (video, image, audio, model) is downloaded. A link to a web page (a YouTube
- * video, a store page) is kept as a link with its timestamp: save the clip with the site's own
- * download or offline feature, or record it yourself, and `attach` it. Check a source's terms before
- * downloading from it. Everything here is a reference: it is never shipped in the game (the assets
- * gate makes sure).
+ * Files are kept, not just linked: each reference gets a folder with the media and a note. The library lives in
+ * STUDIO_REFERENCE_DIR (a synced folder such as Google Drive, Dropbox or OneDrive), or `references/` in the repo (git-ignored,
+ * so big files never reach a public repo). The index (studio/references/library.json and LIBRARY.md) is small and committed.
+ * A link to a file (video, image, audio, model) is downloaded; a web page link is kept as a link with its timestamp: save the
+ * clip yourself and `attach` it. Check a source's terms first. Everything here is a reference, never shipped in the game.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,27 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/landing-build.mjs — 2.70.0 (t): a playable build and a short clip after each landing.
- *
- * After a merge train lands (harness/train.mjs runTrain: task done's own train and the train daemon's), ONE low-priority
- * `build-clip` job is queued: it saves the landed main as a playable build (harness/builds.mjs snapshotBuild, what
- * `npm run play` serves) and records a short clip of it (qa/clip.mjs), then records
- *   build.snapshot  { meta: { train, tasks, build, unchanged, ok } }   and   clip.recorded  { meta: { train, tasks, file, ok } }
- * with the landed tasks. `npm run status -- --brief` and the daily digest show the latest.
- *
- *   - It never blocks or delays the train: queueing writes one file and starts a detached worker (below-normal
- *     priority) that ends by itself; any error is a log line, never a failed train.
- *   - At most one is queued (.studio/landing-build/pending.json). A newer landing replaces a queued one (its tasks are
- *     added: the newer main has both); one already running finishes, then the worker takes the queued one.
- *   - The job takes machine:heavy as kind build-clip (heavy-budget.mjs): the GPU area when the scan shows a GPU and the
- *     browser runs with GPU flags (STUDIO_BROWSER_GPU), else a slot like any job; one browser playtest at a time.
- *   - An adopted game (studio/game.json "game") is built from its "tester" { build, dist }; skipped when it declares none.
- *   - Skipped (with a log line) when the game has no browser build (its cartridge declares no browser.page or
- *     browser.dist), for the template cartridge, and with STUDIO_LANDING_BUILD=off.
- *   - STUDIO_LANDING_CLIP_SECONDS (15) sets the clip length; STUDIO_LANDING_CLIP_CMD replaces the clip command
- *     ({seconds}, {name} placeholders; default: node qa/clip.mjs --seconds {seconds} --name {name}); STUDIO_LANDING_CLIP_TIMEOUT_MIN (10).
- *
+ * harness/landing-build.mjs — a playable build and a short clip after each landing. After a merge train lands, ONE
+ * low-priority `build-clip` job saves landed main as a playable build (harness/builds.mjs snapshotBuild, what
+ * `npm run play` serves), records a clip (qa/clip.mjs), and emits build.snapshot and clip.recorded.
  *   node harness/landing-build.mjs run      the worker (started by the train; runs the queued job, then exits)
  *   node harness/landing-build.mjs status   what is queued or running, and the latest build and clip
+ * It never blocks the train: it writes one file and starts a detached worker. At most one job is queued
+ * (.studio/landing-build/pending.json); a newer landing replaces it. Takes machine:heavy as kind build-clip. An adopted
+ * game is built from its "tester" { build, dist }. Skipped when the game has no browser build, and with
+ * STUDIO_LANDING_BUILD=off. Settings: STUDIO_BROWSER_GPU, STUDIO_LANDING_CLIP_SECONDS (15), STUDIO_LANDING_CLIP_CMD,
+ * STUDIO_LANDING_CLIP_TIMEOUT_MIN.
  */
 import fs from 'node:fs';
 import os from 'node:os';

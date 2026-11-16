@@ -26,11 +26,10 @@ export function layoutPrompt({ stable, volatile }) {
 }
 
 /**
- * 2.30q (#8): anything session-specific in the stable prefix breaks the prompt cache for every later session of
- * the role. Returns what leaked: the agent's name, its model, a task id, a clock time or date.
- * 2.78.1 (e): text inside a marked block (studio/PITFALLS.md's lines, written by agents and people) is the same for every
- * session of the role until the file changes, so a clock time an agent wrote into a pitfall is not a per-session value
- * (2.78.0 warned "every builder session misses the prompt cache" for it). Each leak names the line it is on.
+ * Anything session-specific in the stable prefix breaks the prompt cache for every later session of the role. Returns
+ * what leaked: the agent's name, its model, a task id, a clock time or date. Text inside a marked block
+ * (studio/PITFALLS.md's lines) is the same for every session, so a clock time there is not a per-session value. Each
+ * leak names its line.
  */
 export function volatileLeaks(stable, { agent, model, task } = {}) {
   const out = [];

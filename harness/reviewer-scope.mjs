@@ -1,15 +1,11 @@
 /**
- * harness/reviewer-scope.mjs — 2.77.3 (M4): a reviewer reads, and writes one review file.
- *
- * A launched Gemini reviewer went beyond its brief: it queued a full `npm run verify` and held a lock on studio/reviews
- * for 90+ min, and the pre-commit lock check refused every main commit that carried a file from that folder. Now:
- *   - verifyRefusal: a reviewer session (STUDIO_ROLE=reviewer, or an agent named reviewer-…) can't start a verify or any
- *     other gate run (scripts/run-gates.mjs: npm run verify, npm run gates, --tier, --wait). It reads the verify record
- *     the builder's or the train's run left (`node harness/done-check.mjs <ID>` shows it) instead.
- *   - note folders (STUDIO_LOCK_NOTE_DIRS, default studio/reviews; off = none): each note there is its own file, so a
- *     lock on one can't protect anybody's edit. harness/lock.mjs refuses a by-hand claim of the whole folder (claim the
- *     one file you write), and the pre-commit check (checkStaged) notes, rather than refuses, another owner's lock on a
- *     file in one.
+ * harness/reviewer-scope.mjs — a reviewer reads, and writes one review file.
+ *   - verifyRefusal: a reviewer session (STUDIO_ROLE=reviewer, or an agent named reviewer-…) can't start a verify or
+ *     any other gate run (scripts/run-gates.mjs: npm run verify, npm run gates, --tier, --wait). It reads the verify
+ *     record the builder's or train's run left (`node harness/done-check.mjs <ID>`).
+ *   - note folders (STUDIO_LOCK_NOTE_DIRS, default studio/reviews; off = none): each note is its own file, so a lock on
+ *     one protects nobody's edit. harness/lock.mjs refuses a by-hand claim of the whole folder, and the pre-commit
+ *     check (checkStaged) notes, rather than refuses, another owner's lock on a file in one.
  */
 const REVIEWER_NAME = /^reviewer(-|_|\d|$)/i;
 const OFF = /^(off|0|false|no|none)$/i;

@@ -1,22 +1,12 @@
 /**
- * harness/train-parallel.mjs — 2.69.0 (q): a red merge train's prefix search checks several prefixes at once.
- *
- * Two red trains overnight bisected for 75-95 min each: 2.65.3 made each re-check short (the failing test files only)
- * but still asked one prefix per round. Zuul and Uber's SubmitQueue check candidate prefixes in parallel; here the
- * binary search becomes a K-ary search: [lo, hi] (lo green, hi red) is split into K+1 parts and the K boundary
- * prefixes are re-checked at once, each in its own scratch copy, each run-gates taking its own machine:heavy claim.
- * The answer is the same (the first red prefix: the smallest red boundary, the largest green one before it), in about
- * log_{K+1} N rounds instead of log2 N.
- *
- * K (bisectWidth) = how many focused re-check claims fit the machine budget NOW (harness/heavy-budget.mjs: the last
- * machine scan, the live heavy holders, the slot count, RAM, CPU), capped by STUDIO_TRAIN_BISECT_PARALLEL (default 4;
- * 1/off: one at a time). No scan (or a machine too busy for a second claim): K = 1, the 2.65.3 search unchanged.
- * A focused re-check runs a few test files: its claim (and its run) uses that many test workers (2..8), not a whole
- * verify's. If the estimate is off, run-gates still waits for its own claim: never two jobs past the budget.
- * 2.78.2 (b): K also leaves STUDIO_TRAIN_BISECT_SPARE (default 1) of the machine:heavy slots for builders: K is at most
- * max(1, slots - spare), slots as the heavy lock counts them now (harness/heavy.mjs heavySlotsAt: STUDIO_HEAVY_SLOTS, the
- * main checkout's .env, else the scan). The crew's bisect took all 3 slots and a builder's verify waited 858 s.
- * 0 or off: no slot kept back (2.78.1). Slots 0 (the lock off): nothing to keep back.
+ * harness/train-parallel.mjs — a red merge train's prefix search checks several prefixes at once.
+ * The binary search becomes K-ary: [lo, hi] (lo green, hi red) is split into K+1 parts and the K boundary prefixes are
+ * re-checked at once, each in its own scratch copy, each run-gates taking its own machine:heavy claim. Same answer
+ * (the first red prefix), in about log_{K+1} N rounds. K (bisectWidth) = how many focused re-check claims fit the
+ * machine budget NOW (harness/heavy-budget.mjs), capped by STUDIO_TRAIN_BISECT_PARALLEL (default 4; 1/off: one at a
+ * time); no scan or a busy machine: K = 1. A re-check uses 2..8 test workers; run-gates still waits for its own claim.
+ * K is at most max(1, slots - spare), spare = STUDIO_TRAIN_BISECT_SPARE (default 1; 0 or off: none), slots from
+ * harness/heavy.mjs heavySlotsAt (STUDIO_HEAVY_SLOTS, .env, else the scan); slots 0 (lock off): nothing kept back.
  * Imports nothing from train.mjs (no cycle); heavy.mjs only dynamically.
  */
 import { spawn } from 'node:child_process';

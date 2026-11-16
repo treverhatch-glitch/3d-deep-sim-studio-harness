@@ -1,28 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/machine.mjs — the machine scan, the resource monitor and the disk budget.
- *
  *   npm run machine [-- --json] [--cached]   scan now (or show the last scan), write .studio/machine.json, print it
  *
- * scanMachine() reads the hardware read-only, with one bounded probe per source (each with a timeout; a probe that
- * fails leaves its fields null and says why in `errors`, never a crash): OS and arch; cores (performance vs efficiency
- * where the OS says); RAM and the commit charge (Windows CIM, Linux /proc/meminfo, macOS vm_stat; no commit charge on
- * macOS); GPUs (nvidia-smi, macOS system_profiler, Windows Win32_VideoController names); the disk holding the studio
- * (fs.statfs); the power source; the CPU busy fraction (two os.cpus() samples); and the top 10 processes by memory:
- * names, MB, CPU% only (never command lines; nothing is stopped or touched).
- * Shape: { os, arch, osName, cores: { logical, physical, performance, efficiency, source }, cpu: { model, busy },
- *   ram: { totalGb, freeGb, commitUsedGb, commitLimitGb, pressure }, gpus: [{ name, vramGb, vramFreeGb, busy }],
- *   disk: { path, freeGb, totalGb }, power: { onBattery, percent, source }, processes: [{ name, mb, cpu }], errors, at }.
- *   busy values are fractions 0..1 (as heavy.mjs cpuBusy); null = not known.
- *
- * readMachine({ maxAgeMs }) gives the last scan (.studio/machine.json) or rescans when it is older; STUDIO_MACHINE_SCAN=off
- * turns all of it off (null profile: callers keep their old behaviour). sampleMachine() is the supervisor's resource
- * monitor: every STUDIO_MACHINE_SAMPLE_S (300) a scan, a compact machine.sample event and a line in
- * .studio/machine-history.jsonl (kept under STUDIO_MACHINE_HISTORY_KB, 256). diskBudget(): free space under
- * STUDIO_DISK_MIN_FREE_GB (default max(20, 5% of the disk)) is a machine.disk_low event, a digest line and a warning in
- * `task start` and train output, naming what the temp-file janitor can free when harness/janitor.mjs is there.
- *
- * No harness imports at load (ram.mjs imports this, and heavy.mjs and supervisor.mjs import ram.mjs).
+ * scanMachine() reads hardware read-only, one bounded probe per source (a failed one leaves null fields and says why
+ * in `errors`): { os, arch, osName, cores, cpu, ram: { totalGb, freeGb, commitUsedGb, commitLimitGb, pressure }, gpus:
+ * [{ name, vramGb, vramFreeGb, busy }], disk, power, processes (top 10, names/MB/CPU% only), errors, at }.
+ * readMachine({ maxAgeMs }) gives the last scan or rescans; STUDIO_MACHINE_SCAN=off: null profile. sampleMachine()
+ * (supervisor): every STUDIO_MACHINE_SAMPLE_S (300) a machine.sample event and a line in .studio/machine-history.jsonl
+ * (STUDIO_MACHINE_HISTORY_KB). diskBudget(): free space under STUDIO_DISK_MIN_FREE_GB (default max(20, 5% of the
+ * disk)) is a machine.disk_low event.
  */
 import fs from 'node:fs';
 import os from 'node:os';

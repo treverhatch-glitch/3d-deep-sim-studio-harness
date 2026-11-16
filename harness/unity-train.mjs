@@ -1,38 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/unity-train.mjs — the Unity merge train: several Unity branches land on ONE run of the studio's Unity land
- * command, one train at a time, always under machine:heavy, so Unity builds never pile up. It works like the web train
- * (harness/train.mjs) but never runs Unity itself and never touches the Unity repo's files.
- * 
- *   node harness/unity-train.mjs status [--json] [--engine <name>]
- *   node harness/unity-train.mjs queue --task <ID> [--engine x] [--agent a] [--branch b] [--alone]
- *   (npm run task -- train --unity runs a train; npm run task -- train status shows the queue and the running train)
- * 
- * Flow: `task done <ID> --train` (after the usual checks) queues the task's Unity branch (--branch, else the Unity folder's current
- * branch; it needs commits its target lacks) in .studio/train/unity-queue.json. `npm run task -- train --unity` takes the queue oldest
- * first (at most --max) and checks the branches against the target with `git merge-tree --write-tree` (objects only: no worktree,
- * index or ref moved): a conflict with the target is handed back; a conflict only with an earlier branch waits for the next train.
- * ONE land run for the rest: a land command that takes a list ("landMany", or {branches} in "land") gets the branches in order; one that
- * takes a single {branch} gets one integration branch, unity-train/<id>, built from refs only. Pass (0): the target must contain every
- * branch's head (else nothing closes: an error) and each task closes as in the web train. Red (1) or conflict (2): prefix bisection as the
- * web train's (about log2 N more runs): a green prefix LANDS, the first red prefix names the branch that breaks it (alone or with the
- * branches before it), handed back with the run's last lines; the rest train again. Refused (3: editor open, little memory, another
- * landing, machine:heavy busy), error (4, other, a timeout) or "not run" (infrastructure abort: out of memory, editor ended from
- * outside, no licence, free RAM under STUDIO_UNITY_MIN_FREE_GB): nobody is blamed; retried (STUDIO_UNITY_TRAIN_RETRIES, 2, every
- * STUDIO_UNITY_TRAIN_RETRY_MIN, 10 min), then the train stops, its branches stay queued and what landed stays landed.
- * 2.86: the order of steps after a red is one pure plan (nextStep): a red on listed flaky tests only is run again by name
- * (engines.<x>.flakyRetries), then on the target alone (a probe: no branch); red there, nobody is blamed and the lanes wait for the
- * target. The daily full run is its own run on the target alone. A culprit proved by its prefix is not run alone again.
- * 
- * One Unity train at a time (.studio/locks/unity-train.lock; a dead holder's lock is taken over); every land run takes
- * machine:heavy (harness/unity-gate.mjs), as a landing (STUDIO_GATE_PRIORITY=landing). This module never imports
- * harness/task.mjs: the board comes in as `deps`.
- * 
- * It serves ANY engine target (harness/engine-tracks.mjs): every function takes `engine` (default unity, whose file names
- * stay as they were). Engine <x>'s train has its own queue (.studio/train/<x>-queue.json), lock (.studio/locks/<x>-train.lock),
- * last result, integration refs (<x>-train/<id>), events (task.train.<x>.*) and land command (studio/game.json engines.<x>),
- * and runs beside the web train and every other engine's: they compete only for machine:heavy (and its RAM floor), which
- * the Line Producer schedules (harness/line-producer.mjs enginePass).
+ * command, one train at a time.
+ *    node harness/unity-train.mjs status [--json] [--engine <name>]
+ *    node harness/unity-train.mjs queue --task <ID> [--engine x] [--agent a] [--branch b] [--alone]
+ * `npm run task -- train --unity` runs a train, `train status` shows it. `task done <ID> --train` queues a branch in
+ * .studio/train/unity-queue.json; the train runs ONE land command and bisects by prefix on red. Refused, error or
+ * "not run" retries (STUDIO_UNITY_TRAIN_RETRIES, _RETRY_MIN).
+ * Runs under machine:heavy; lock .studio/locks/unity-train.lock; STUDIO_GATE_PRIORITY=landing;
+ * STUDIO_UNITY_MIN_FREE_GB. Never imports harness/task.mjs. Engine <x>: own queue, lock, events (task.train.<x>.*),
+ * land command (engines.<x>).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -311,12 +288,9 @@ function asmFolderOf(repo, ref, file, cache) {
 }
 
 /**
- * 2.85: which lanes are tied to which failing tests, by every evidence rule: the class rule (a changed file names the test's class,
- * which covers the lane that added the test), the namespace rule (a changed test file declares its namespace, or a file is named
- * after its class), the class file less "Tests" (ShopTests: Shop.cs), and the assembly folder (a changed file under the folder of the
- * .asmdef that holds the test's file, at the target or at the lane's head). (2.86: the loose folder rule 2.85 used to judge a
- * red full run is gone: the full run carries no branch.)
- * { byTest: { name: [task] }, byLane: Map task -> { lane, tests, files, rules }, unjudged: [task] } (unjudged: too many files to judge).
+ * Which lanes are tied to which failing tests, by every evidence rule: the class rule, the namespace rule, the class
+ * file less "Tests" (ShopTests: Shop.cs), and the assembly folder (.asmdef that holds the test's file). { byTest: {
+ * name: [task] }, byLane: Map task -> { lane, tests, files, rules }, unjudged: [task] } (unjudged: too many files).
  */
 export function tiesOf({ repo, tip, lanes = [], failures = [] } = {}) {
   const want = [...new Set(failures)].slice(0, 20).map(testParts);
@@ -513,20 +487,10 @@ export function waitingOnTarget(root, engine = 'unity', queue = null) {
 const LANDS = new Set(['land', 'retry', 'known-red', 'without', 'apart', 'bisect', 'confirm']);
 
 /**
- * 2.86: the next step of a round of a train (one set of lanes, from its first land run), from the results so far. Pure: no
- * git, no file. in: lanes (task ids, batch order); results [{ kind, group: [task], status, failures?, compileOnly?, lane?,
- * suspect?, tied?, byName? }]; ties (undefined: not asked yet; null: no evidence; { suspect, tied, untied }); flaky(name);
- * flakyRetries; stageRetry (the first red's stage is a retry stage and none was retried in this train); targetRed (names a probe
- * found red on this very target); knownRed (engines.<x>.knownRedHours is on); bisectMax; namesOk(names); byNameOk (the land
- * script honours STUDIO_LAND_PROBE: probeHonoured).
- * out: { step, group?, run: 'complete' | 'name', lands, ... }: land | retry | probe | known-red | wait-target | ties | without |
- * apart | bisect | confirm | handback | next-round | done. handback and next-round carry `rounds`: the lane lists of the rounds
- * that follow, in order (each starts with a complete land run).
- * The order: retries by name (a red on listed flaky tests only: up to flakyRetries; else one for a retry stage), then the target
- * alone (a probe of the same tests), then the suspect (without / apart), then the prefix search, then a culprit alone (confirm:
- * 2.83, no blame by elimination). When the red names its tests and byNameOk, every one of those narrowing steps runs only those
- * tests on its merged tree and lands nothing; the culprit is handed back on the same proof, and the survivors land on ONE
- * complete run (the next round). Otherwise every step is a complete run, and a green one lands, as before.
+ * The next step of a round of a train, from the results so far. Pure: no git, no file. in: lanes, results, ties and
+ * the retry and bisect settings. out: { step, group?, run: 'complete' | 'name', lands, ... }.
+ * The order: retries by name, the target alone (a probe), the suspect, the prefix search, a culprit alone (confirm).
+ * When the red names its tests and byNameOk, narrowing steps run only those tests.
  */
 export function nextStep({ lanes = [], results = [], ties = undefined, flaky = () => false, flakyRetries = 2, stageRetry = false, targetRed = [], knownRed = false, bisectMax = 3, namesOk = (n) => Boolean(retryNames(n)), byNameOk = false } = {}) {
   const C = { run: 'complete', lands: true };
@@ -599,11 +563,10 @@ export function nextStep({ lanes = [], results = [], ties = undefined, flaky = (
 }
 
 /**
- * 2.86: `bisect-plan`: the steps nextStep would take for made-up outcomes (read-only, nothing runs). lanes: task ids in order;
- * red: the lanes that break any group they are in; flakyRed: the batch is red on a listed flaky test only; targetRed: that test is
- * red on the target alone; passOnRetry: the flaky test passes on that retry (1, 2, ...); tied: the lanes the evidence ties;
- * byName: the land script honours STUDIO_LAND_PROBE; noNames: the red names no test. landMin / nameMin: minutes of a complete run
- * and of a run by name. [{ step, group, status, run, lands, minutes }].
+ * `bisect-plan`: the steps nextStep would take for made-up outcomes (read-only, nothing runs). lanes: task ids in
+ * order; red: lanes that break any group; flakyRed; targetRed; passOnRetry; tied; byName: the land script honours
+ * STUDIO_LAND_PROBE; noNames: the red names no test. landMin / nameMin: minutes of a complete run and of a run by
+ * name. [{ step, group, status, run, lands, minutes }].
  */
 export function bisectPlan({ lanes = [], red = [], flakyRed = false, targetRed = false, passOnRetry = 0, tied = [], flakyRetries = 2, bisectMax = 3, knownRed = false, byName = true, noNames = false, landMin = 60, nameMin = 5 } = {}) {
   const TF = 'Made.Up.Flaky.Test';
@@ -656,11 +619,10 @@ export function cancelledTrain(root, engine, id) {
 }
 
 /**
- * Is a full land run due? Every STUDIO_ENGINE_FULL_LAND_HOURS (engines.<x>.fullLandHours, 24; 0 or off: never), counted from the
- * last full run that passed ({ at, id } in .studio/engine/<engine>-full-land.json). With no record the clock starts now (unless
- * `start` is false) and nothing is due. 2.86: { why, overdue, hours, maxHours } (why '' when not due). A due full run waits for an
- * empty queue; past engines.<x>.fullLandMaxHours (default 2 x the hours) it is overdue and runs at the start of the next train,
- * before any lane. Either way it runs on the target alone.
+ * Is a full land run due? Every STUDIO_ENGINE_FULL_LAND_HOURS (engines.<x>.fullLandHours, 24; 0 or off: never),
+ * counted from the last full run that passed ({ at, id } in .studio/engine/<engine>-full-land.json). No record: the
+ * clock starts now. Returns { why, overdue, hours, maxHours }. Past engines.<x>.fullLandMaxHours (default 2 x the
+ * hours) it is overdue and runs at the start of the next train. It runs on the target alone.
  */
 const fullLandFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-full-land.json`);
 export function fullLandDue(root, engine, cfg = {}, env = process.env, now = Date.now(), { start = true } = {}) {
@@ -1181,11 +1143,10 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     return r;
   };
   /**
-   * 2.85: the daily full run against the target's own full-run failures (.studio/train/<engine>-full-baseline.json). Green: the
-   * baseline is cleared. Red with named tests: a baseline name the run no longer shows is cleared (only when the run went on past its
-   * first red stage, so the test did run). 2.86: the full run is the target alone, so every failing name is the target's own: the names
-   * go to the baseline, the director is told once per set of names (engine.full_red_on_target) and the full-run clock counts as served.
-   * (2.85's search for a branch tied to a full run's failure, and the batch's second, ordinary run, are gone with the batch.)
+   * The daily full run against the target's own full-run failures (.studio/train/<engine>-full-baseline.json). Green:
+   * the baseline is cleared. Red with named tests: the names go to the baseline, a name the run no longer shows is
+   * cleared, the director is told once per set of names (engine.full_red_on_target) and the full-run clock counts as
+   * served.
    */
   const fullRunVerdict = (r) => {
     const base = readFullBaseline(root, engine);

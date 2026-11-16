@@ -1,30 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/crew-watch.mjs — 2.68.0: the crew watchdog. The supervisor's loop asks it, every pass, whether a role is
- * burning sessions without landing anything, and stops launching that role until the cause clears or someone decides.
- *
+ * harness/crew-watch.mjs — the crew watchdog: pauses launching a role that burns sessions without landing anything.
  *   npm run crew                                              each role's last hour, and which roles are paused
  *   npm run crew -- resume <role> --by <name> [--why "…"] [--permission "<the person's words or a link>"]
- *
- * Per role, over the last hour (STUDIO_CREW_WINDOW_MIN, 60) of agent.session.start / agent.session.end events:
- * sessions, sessions with no commit (the session's outcome, harness/session-outcome.mjs), tokens spent per landed task
- * (weighted as the autonomy scorecard's tokenWork weighs them: harness/token-weight.mjs), repeated short exits (under
- * STUDIO_CREW_SHORT_SEC, 180 s) and tasks landed (task.done, train landings, lane merges of the role's tasks).
- * Unhealthy: more than STUDIO_CREW_MAX_SESSIONS (6) sessions in the window and 0 landed. Then the supervisor pauses
- * launching that role (running sessions go on), emits one crew.unhealthy (to the Producer, with the evidence) and the
- * digest and `status --brief` show it. It resumes:
- *   - when the cause clears: a task the role worked lands, or new work for the role appears (a task added, unparked or
- *     unheld since the pause); the window then starts again from the resume;
- *   - on `npm run crew -- resume <role> --by <name>`: a person, an agent under the owner's delegation for hold, or a
- *     Producer/Director session or an outside agent on a person's direct permission (harness/decider.mjs); never a
- *     worker. The supervisor's next pass picks it up and emits crew.resumed naming who.
- *   - 2.78.2 (c): by itself, STUDIO_CREW_BREAKER_RESUME_MIN (30; 0 or off: never) minutes after the pause, when the
- *     evidence that tripped it no longer trips it (the role's window, looked at as of now, is healthy: a pause the
- *     supervisor slept through, or one whose sessions have aged out), or else ONCE for that cause (the same tasks):
- *     the window starts again, and if the role trips again on the same cause it stays paused for a decider or real
- *     progress. Logged as crew.resumed (meta.auto). A landing or new work clears the cause and forgets "once".
- * STUDIO_CREW_WATCH=off turns it off. State: .studio/crew-paused.json (pauses), .studio/crew-resume.json (asks).
- * No model, no tokens. Only event.mjs, token-weight.mjs, fsafe.mjs and handback-kind.mjs are imported at load (the supervisor imports this file).
+ * Per role, over STUDIO_CREW_WINDOW_MIN (60) of agent.session.start / agent.session.end events: sessions, sessions with
+ * no commit, tokens per landed task (harness/token-weight.mjs), short exits (under STUDIO_CREW_SHORT_SEC, 180 s), tasks
+ * landed. Unhealthy: more than STUDIO_CREW_MAX_SESSIONS (6) sessions and 0 landed: the supervisor stops launching that
+ * role and emits crew.unhealthy. It resumes when a task lands or new work appears; on `resume` by a decider
+ * (harness/decider.mjs; never a worker; emits crew.resumed); or after STUDIO_CREW_BREAKER_RESUME_MIN (30; 0 or off:
+ * never) when the evidence no longer trips it, or ONCE for the same cause. STUDIO_CREW_WATCH=off turns it off. State:
+ * .studio/crew-paused.json, crew-resume.json.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -7,14 +7,10 @@ import os from 'node:os';
 import { readMachine, memHeadroomGb, sampleMs } from './machine.mjs';
 
 /**
- * 2.59.0 (#11c): is free memory under STUDIO_RAM_FLOOR_GB (3; 0 turns it off)? { low, freeGb, floorGb, why }.
- * Free memory is os.freemem() (on Linux the kernel's "available" figure; on Windows free physical memory).
- * 2.68.0 (m): on Windows the machine scan's commit headroom (commit limit - committed, harness/machine.mjs) counts too:
- * freeGb is the smaller of the two (the crew's PC had 5.8 GB "available" at 55/60 GB committed, so the floor never
- * tripped while allocations failed). The scan is the last one (.studio/machine.json, at most 2 x STUDIO_MACHINE_SAMPLE_S
- * old; on Windows a stale one is redone); STUDIO_MACHINE_SCAN=off or no scan: os.freemem alone, as before.
- * Test hooks, inert unless set: opts.freemem (a function giving bytes) or STUDIO_TEST_FREEMEM_MB; opts.machine (a profile,
- * or null for none).
+ * Is free memory under STUDIO_RAM_FLOOR_GB (3; 0 turns it off)? { low, freeGb, floorGb, why }. Free memory is
+ * os.freemem() (on Linux the kernel's "available" figure). On Windows the machine scan's commit headroom (commit limit
+ * - committed) counts too: freeGb is the smaller. The scan is .studio/machine.json (at most 2 x STUDIO_MACHINE_SAMPLE_S
+ * old; on Windows a stale one is redone); STUDIO_MACHINE_SCAN=off or no scan: os.freemem alone.
  */
 export function ramCheck(opts = {}, env = process.env) {
   const floorGb = env.STUDIO_RAM_FLOOR_GB === undefined || env.STUDIO_RAM_FLOOR_GB === '' ? 3 : Number(env.STUDIO_RAM_FLOOR_GB);

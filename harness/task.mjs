@@ -81,13 +81,10 @@ const UNREADABLE_NOTE = '_The harness couldn\'t read these lines as tasks, so it
 const MOVES_FILE = path.join(STUDIO_STATE_DIR, 'board-move.json');
 
 /**
- * The board: studio/NEXT.md (open work) and studio/DONE.md (finished). Non-enumerable extras: readIds (what this
- * snapshot saw), unreadable ({ next, done }: lines kept, see UNREADABLE_HEADING), duplicates (ids found open and done).
- *
- * A task moves between the two files in two writes; the file that GAINS it is written first (DONE.md on done, NEXT.md
- * on reopen), so a killed agent leaves it in both files, never neither. Read, it shows once: the copy the cut-off write
- * was moving it to wins. The direction is in .studio/board-move.json (written before the first write, removed after the
- * last). A task in both files with no such note (a hand edit, a merge) counts as done; `task reopen` brings it back.
+ * The board: studio/NEXT.md (open work) and studio/DONE.md (finished). Non-enumerable extras: readIds, unreadable
+ * ({ next, done }: see UNREADABLE_HEADING), duplicates (ids found open and done). A task moves between the files in two
+ * writes, the gaining file first, so a killed agent leaves it in both, never neither; read, it shows once (direction
+ * in .studio/board-move.json). A task in both files with no such note counts as done; `task reopen` brings it back.
  */
 export function parseNextQueue() {
   const files = readBoardFiles();

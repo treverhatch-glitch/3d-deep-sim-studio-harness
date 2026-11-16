@@ -1,51 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/workaround.mjs — 2.71.0 (z): the self-repair loop. Every time an agent or a person has to work around the
- * harness, it is recorded here, and repeats open ONE harness-improvement task for whoever maintains the harness.
- *
+ * harness/workaround.mjs — the self-repair loop: each workaround is recorded; repeats open ONE harness-improvement
+ * task.
  *   npm run workaround -- log "<what I had to do>" --why "<what the harness did wrong>" [--cmd "<command>"] [--by <agent>]
- *   npm run workaround -- list [--since 7d] [--json]       the records (newest last)
- *   npm run workaround -- tasks [--all] [--json]           the harness tasks (open; --all: closed too)
+ *   npm run workaround -- list [--since 7d] [--json] | tasks [--all] [--json] | export [--since 7d] | scan
  *   npm run workaround -- close <H-id> --by <name> --note "<what fixed it>"
- *   npm run workaround -- export [--since 7d]              one markdown file for the harness maintainer (secrets removed)
- *   npm run workaround -- scan                             run the detection pass now (the supervisor runs it every 10 min)
- *   npm run workaround -- repro <H-id> --by <agent> --harness-repo <clone>   2.73.0: a failing-test PR scaffold for the
- *                                                          harness (harness/overseer-repro.mjs; overseer stage 1+)
- *
- * Records: .studio/workarounds.jsonl, one line each { id, ts, what, why, cmd, cmdKey, by, detected, kind, evidence,
- * signature, sig }, plus one `harness.workaround` event. The signature (harness/workaround-stats.mjs) is the harness
- * command involved plus the normalised "what", so repeats group. Text is cleaned with the secret scanner's patterns
- * (harness/secrets.mjs scrub) before it is written anywhere.
- *
- * Detected workarounds (detected: true, with their evidence; only cheap, certain signals):
- *   hand-edit   a harness-owned record changed by something other than the harness. The harness stamps what it writes
- *               (.studio/write-stamps/: content hash and time, written BEFORE the file, so a reader never sees a new
- *               file with an old stamp): the board (studio/NEXT.md, studio/DONE.md, under the board lock) and the train
- *               queue (.studio/train/queue.json). A later file whose hash differs and whose mtime is after the stamp was
- *               changed outside the harness. Not counted: the file equals git's HEAD copy (a pull, a merge, an upgrade),
- *               or a harness upgrade or studio restart was logged since the stamp. Reported once per content.
- *   force       `--force` on a task or lock command.
- *   retry       the same harness command (task/lock, same subcommand and ids) run STUDIO_WORKAROUND_RETRIES (3) times
- *               within STUDIO_WORKAROUND_RETRY_MIN (10) minutes by the same agent, every earlier run having exited
- *               non-zero. Read-only commands (next, show, list, status) and `done --check` (made to be re-run) don't count.
- *   restart     `supervisor stop` (by hand: studio:stop, Ctrl+C, a kill signal) and a start within
- *               STUDIO_WORKAROUND_RESTART_MIN (5) minutes, unless a harness upgrade landed in between (that restart is
- *               the documented step).
- *   kill        the watcher found an agent session whose launcher process is gone with no stop asked through the
- *               harness, and the machine has not restarted since the session started (agent.mjs markGone records both
- *               times). A crash of the launcher itself reads the same; that is rare and still worth a look.
- * Left out as noisy: a session's tool process ending by a signal (an out-of-memory kill and the harness's own stops look
- * the same, and on Windows a kill is just exit 1), and every other record (written by many code paths without stamps).
- *
- * Harness tasks: a signature seen twice, or once with --why, opens ONE task (deduped by signature) in
- * studio/HARNESS-TASKS.md (state in .studio/harness-tasks.json): occurrences, evidence, commands. A separate queue: never
- * on studio/NEXT.md, never for game builders. A closed task seen again reopens. When a harness upgrade lands (an
- * upgrade.merged event, an Upgrade-Versions trailer, a package.json version bump, or the version this file last saw
- * changing) and a task's signature then doesn't occur for STUDIO_WORKAROUND_FIXED_DAYS (7) days, the task is marked
- * "maybe fixed in <version>"; seen again, the mark goes.
- *
- * STUDIO_WORKAROUND_DETECT=off turns detection off (logging by hand still works). The digest and the impact report
- * (`npm run autonomy -- impact`) show workarounds per day, the top 5 signatures and the trend after each upgrade.
+ *   npm run workaround -- repro <H-id> --by <agent> --harness-repo <clone>
+ * Records go to .studio/workarounds.jsonl; tasks to studio/HARNESS-TASKS.md (state .studio/harness-tasks.json), deduped
+ * by signature, never on studio/NEXT.md. Detected kinds: hand-edit, force, retry (STUDIO_WORKAROUND_RETRIES in
+ * STUDIO_WORKAROUND_RETRY_MIN), restart (STUDIO_WORKAROUND_RESTART_MIN), kill. STUDIO_WORKAROUND_DETECT=off turns
+ * detection off; STUDIO_WORKAROUND_FIXED_DAYS (7) marks a task "maybe fixed".
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -334,13 +298,10 @@ const relOf = (root, file) => path.relative(root, file).replace(/\\/g, '/');
 const realish = (p) => { try { return fs.realpathSync(p); } catch { try { return path.join(fs.realpathSync(path.dirname(p)), path.basename(p)); } catch { return path.resolve(p); } } };
 const inside = (rel) => rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 /**
- * 2.85 (e): where a file's stamp lives: { root, rel }, the same for every process that writes it. In 16 hours a crew got
- * 85 "hand-edited studio/NEXT.md" / "../../studio/NEXT.md" / "DONE.md" warnings while agents only used the board
- * commands: a board command in a lane copy (<main>/.lanes/<name>, its studio/ the main checkout's) stamped the main
- * checkout's board under the copy's own root, as "../../studio/NEXT.md", so the main checkout's stamp went stale (its
- * next pass saw "studio/NEXT.md" changed) and the copy's stamp went stale on the next write from main (it saw
- * "../../studio/NEXT.md" changed). Now a file is stamped in the checkout that holds it (its real path: under `root`,
- * else under the nearest folder above it with a .git), whichever checkout's process writes or checks it.
+ * Where a file's stamp lives: { root, rel }, the same for every process that writes it. A file is stamped in the
+ * checkout that holds it (its real path: under `root`, else under the nearest folder above it with a .git), whichever
+ * checkout's process writes or checks it, so a lane copy's board command doesn't leave a stale stamp
+ * ("../../studio/NEXT.md") in the main checkout.
  */
 export function stampHome(file, root = REPO_ROOT) {
   const real = realish(file);

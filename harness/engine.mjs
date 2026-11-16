@@ -1,33 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/engine.mjs — the engine track: a port of a proven web game to Godot, Unity or Unreal, run as
- * its own team beside the web game, linked to it only by a parity test. Never started on its own.
- *
- *   npm run engine                                   the options, and the track if there is one
+ * harness/engine.mjs — the engine track: a port of a web game to Godot, Unity or Unreal, linked to it only by a parity
+ * test.
+ *   npm run engine                                   the options, and the track if any
  *   npm run engine -- targets [--json]                every engine target: land command, queue, rig cost
- *   npm run engine -- merge <ID> [--continue|--abort] merge the engine's target into the task's own engine worktree;
- *                                                    a conflict is left there to resolve (engine-tracks.mjs)
- *   npm run engine -- tune <engine> [<key> <value>] --by <you> --why "…"   the lane's own settings
- *   npm run engine -- propose godot|unity|unreal --by <producer> [--why "…"]
- *                                                    a "Needs you" question for the game dev (Phase 1 must be proven)
- *   npm run engine -- start godot --by <person>      what a yes does (the War Room's yes calls it)
- *   npm run engine -- capture [--frames 120]         frames of the engine build to engine/<game>/captures/
- *   npm run engine -- port --from <sha> [--by <name>] pin the web rules the port follows to one commit: copies
- *                                                    cartridges/<game>/ at that commit to engine/<game>/port-src/
- *                                                    and records it in engine.json (portFrom), so a moving web game
- *                                                    doesn't block the port. `port` alone shows the pin.
- *
- * The engine's program: STUDIO_GODOT, STUDIO_UNITY or STUDIO_UNREAL (a full path), else godot, unity,
- * UnrealEditor-Cmd on the PATH. A Godot track starts from engine/_godot/: a worked port of the template
- * game with its gate (tests + a smoke run), its parity script and a capture command, all headless.
- *
- * The web version stays the design lab: a mechanic is proven there first (fast), then ported. The engine track gets
- * its own folder (engine/<game>/), department (Engine Bay), tasks tagged `engine:<name>` with that folder as their
- * lane, its own gate (npm run engine:gate, the engine's own headless test run), and its own recordings. The two
- * versions share the Bible, the phase exits and the sim's numbers, and `npm run parity` plays the same seeds in both.
- *
- * Why a gate on Phase 1: a port doubles the agents, and every open bug doubles with it. Keep it in web until
- * playtests show it plays the way the dev imagined.
+ *   npm run engine -- merge <ID> [--continue|--abort] merge the engine's target into the task's engine worktree
+ *   npm run engine -- tune <engine> [<key> <value>] --by <you> --why "…"   lane settings
+ *   npm run engine -- propose godot|unity|unreal --by <producer> [--why "…"]   a "Needs you" question
+ *   npm run engine -- start godot --by <person>      |  capture [--frames 120]  (frames to engine/<game>/captures/)
+ *   npm run engine -- port --from <sha> [--by <name>] pin the web rules to a commit (engine/<game>/port-src/)
+ * Program: STUDIO_GODOT, STUDIO_UNITY or STUDIO_UNREAL, else godot, unity, UnrealEditor-Cmd on PATH.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -192,12 +174,10 @@ export async function queueDrift({ by = actor() } = {}) {
 }
 
 /**
- * An engine port that lives in its own repo, beside the studio. Records engine/<game>/engine.json with the
- * port's folder (relative to the studio, e.g. ../hatchfield-unity-harness), its gate, its parity commands and
- * its build target. Nothing is copied into the port's repo: the porters work in it directly, on its own
- * branches. --build windows makes the Windows build the default and turns the browser export off (the Arcade
- * then lists native builds only). --web "<command>" is the web side of parity for a game that isn't a
- * cartridge: a command that prints one JSON line per seed, like the engine's.
+ * An engine port that lives in its own repo, beside the studio. Records engine/<game>/engine.json with the port's
+ * folder (relative to the studio), its gate, parity commands and build target. Nothing is copied into the port's repo.
+ * --build windows makes the Windows build the default and turns the browser export off. --web "<command>" is the web
+ * side of parity for a game that isn't a cartridge: a command that prints one JSON line per seed.
  */
 export async function linkEngine(engine, repo, { by = actor(), build = null, web = null, source = null } = {}) {
   const e = ENGINES[engine];

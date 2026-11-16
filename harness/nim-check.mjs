@@ -1,16 +1,11 @@
 /**
- * harness/nim-check.mjs — 2.60.1 (B-19): is a NIM model usable with this key, before a `--tool nim` session starts?
- *
- * NIM's model list shows models a key can't use: the crew's key got 404 "Function … Not found for account" for the
- * default model, and the session died after aider's retries. So the check is one tiny request (a 1-token chat
- * completion) per model, through an injectable fetch, and the answer is cached per model (and key fingerprint) in
- * .studio/nim-models.json for NIM_SESSION.checkHours (24; STUDIO_NIM_CHECK_HOURS, 0 = no cache).
- *
- * Verdicts: ok (2xx), missing (404/410, or a 400/403/422 that says not found / not entitled / end of life: the next
- * model in the list is tried), quota (429 or a quota/rate text: never a fallback here, that is the quota fallback's
- * job), skipped (network error, timeout, 401, 5xx, anything else: launch with the model as configured and say the
- * check was skipped). Only ok and missing are cached. The key is never printed: answers are trimmed and any
- * key-shaped text is replaced.
+ * harness/nim-check.mjs — is a NIM model usable with this key, before a `--tool nim` session starts? NIM's model list
+ * shows models a key can't use. One tiny request (a 1-token chat completion) per model, through an injectable fetch;
+ * the answer is cached per model (and key fingerprint) in .studio/nim-models.json for NIM_SESSION.checkHours (24;
+ * STUDIO_NIM_CHECK_HOURS, 0 = no cache). Verdicts: ok (2xx), missing (404/410, or a 400/403/422 saying not found / not
+ * entitled / end of life: the next model is tried), quota (429 or a quota/rate text: never a fallback here), skipped
+ * (network error, timeout, 401, 5xx, anything else: launch as configured and say the check was skipped). Only ok and
+ * missing are cached. The key is never printed: answers are trimmed and any key-shaped text is replaced.
  */
 import fs from 'node:fs';
 import path from 'node:path';

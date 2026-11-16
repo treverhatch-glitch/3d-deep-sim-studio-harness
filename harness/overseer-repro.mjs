@@ -1,24 +1,14 @@
 /**
- * harness/overseer-repro.mjs — 2.73.0 (f): `npm run workaround -- repro <H-id> --by <agent> --harness-repo <clone>
- * [--base <ref>] [--commit]`, the overseer's stage-1 work: a failing-test PR branch for the harness, from a harness task.
- *
- * In a SEPARATE clone of the harness repo (--harness-repo: never the studio, never inside it, never a lane copy; it must
- * look like the harness: harness/workaround.mjs and qa/selftest.mjs; its working tree clean) it makes the branch
- * repro/<h-id>-<sig> from --base (default: the clone's HEAD) and writes:
- *   qa/selftest-repro-<h-id>.mjs   a test in the harness's selftest style (export async function selftestRepro<H…>({ dir,
- *                                  run, report, tmpRoot })): a made-up studio copied from the harness, the task's evidence
- *                                  in its header, one check per recorded command of a safe shape (npm run <script> …, node
- *                                  harness|scripts|qa/<file>.mjs …: no shell operators) that it is accepted there, or one
- *                                  TODO check that fails when the task recorded none. A scaffold: whoever opens the PR
- *                                  makes it reproduce the evidence (it must FAIL on the current harness).
- *   .studio/repro/<H-id>-PR.md     the PR body: the task, its evidence, a checklist, and the trailers (Repro-Of,
- *                                  Repro-Signature, Overseer-By) that `npm run overseer` counts once the PR reaches the
- *                                  harness and the studio takes the update. (.studio/ is not committed.)
- * The test file is staged; --commit commits it with those trailers through the clone's hooks. Nothing is pushed.
- *
- * Who: an agent from overseer stage 1 (studio/overseer.json, as committed); a person (a harness maintainer) at any stage;
- * never a game-builder session (a worker STUDIO_ROLE). Records a harness.repro_scaffolded event in the studio.
- * Paperwork: no model, no network. UNTESTED on Windows: the clone's path checks use real paths, lower-cased there.
+ * harness/overseer-repro.mjs — the overseer's stage-1 failing-test PR branch for the harness.
+ *    npm run workaround -- repro <H-id> --by <agent> --harness-repo <clone> [--base <ref>] [--commit]
+ * In a SEPARATE clone of the harness repo (never the studio or a lane copy; it needs harness/workaround.mjs,
+ * qa/selftest.mjs and a clean tree) it makes branch repro/<h-id>-<sig> from --base (default: HEAD) and writes
+ * qa/selftest-repro-<h-id>.mjs (one check per recorded command of a safe shape, or one TODO check that fails; it must
+ * FAIL on the current harness) and .studio/repro/<H-id>-PR.md (the PR body, not committed; trailers Repro-Of,
+ * Repro-Signature, Overseer-By).
+ * --commit commits the staged test. Nothing is pushed. UNTESTED on Windows. Who: an agent from overseer stage 1
+ * (studio/overseer.json) or a person; never a game-builder session. Records harness.repro_scaffolded. No model, no
+ * network.
  */
 import fs from 'node:fs';
 import path from 'node:path';

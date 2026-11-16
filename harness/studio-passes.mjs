@@ -1,17 +1,13 @@
 /**
- * harness/studio-passes.mjs — 2.80 (b1): the studio's timed passes, run by the supervisor's loop.
+ * harness/studio-passes.mjs — the studio's timed passes, run by the supervisor's loop.
  *
- * Until 2.79.2 the War Room hub ran these on its own timers. The hub goes in 2.80, so the supervisor runs them:
- *   - "watch", every STUDIO_WATCH_INTERVAL s (300): the watch pass (harness/watch.mjs), the retro, the learn pass, the
- *     run report and the Director's daily ping (each *IfDue keeps its own due date);
- *   - "gamedev", every STUDIO_GAMEDEV_INTERVAL s (180; 0 turns it off): the watchdog pass (harness/watchdog.mjs).
- * 2.81: STUDIO_WATCH_INTERVAL=0 turns off the watch pass only. In the hub it also switched off the watchdog and the
- * retro, learn pass and run report (an accident of how the hub's timers were nested): the watchdog ends stalled
- * sessions and files rescues, and the others are how the studio learns and is measured, so quieting the watcher no
- * longer stops them; with the watch pass off they are checked every 300 s.
- * A group first runs one full interval after the supervisor started (short runs never run them), never in a dry run.
- * Each pass has its own try/catch: one that throws is logged and the others still run.
- * The flow pass is not here: the supervisor's own loop runs it (fill: false, it is the launcher).
+ * - "watch", every STUDIO_WATCH_INTERVAL s (300): the watch pass (harness/watch.mjs), the retro, the learn pass, the
+ * run report and the Director's daily ping (each *IfDue keeps its own due date);
+ * - "gamedev", every STUDIO_GAMEDEV_INTERVAL s (180; 0 turns it off): the watchdog pass (harness/watchdog.mjs).
+ * STUDIO_WATCH_INTERVAL=0 turns off the watch pass only; the watchdog (ends stalled sessions, files rescues), retro,
+ * learn pass and run report still run, checked every 300 s. A group first runs one full interval after the supervisor
+ * started, never in a dry run. Each pass has its own try/catch: one that throws is logged and the others still run.
+ * The flow pass is not here: the supervisor's own loop runs it (fill: false).
  */
 
 /**

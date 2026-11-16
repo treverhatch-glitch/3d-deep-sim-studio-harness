@@ -1,18 +1,12 @@
 /**
- * harness/train-busy.mjs — 2.67.2 (B-50): a train's verify that ran no check is "busy", never red.
- *
- * Train 15 ran six "verifies" in 118 s. Each was refused before any gate ran ("a full verify of this checkout is already
- * running: builder-s74's", a lane's verify seen through the shared .studio/verify-running/), the train read the
- * refusals as red ("the red verify names no failing check; each lane is verified alone") and concluded that main itself
- * was red. A run that ran no check says nothing about the tree it was given. Here:
- *
+ * harness/train-busy.mjs — a train's verify that ran no check is "busy", never red: a run refused before any gate ran
+ * (e.g. "a full verify of this checkout is already running") says nothing about the tree it was given.
  *   busyWhy(text)       why the run didn't start (a full verify of the same checkout running, the machine:heavy lock
  *                       still held past its wait, free memory under the floor), or '';
  *   ranNoCheck(text)    the run printed no gate result at all ([gates] PASS / FAIL);
- *   runGatesWaiting()   runs the gates; while the run is refused as busy it waits and runs again (STUDIO_TRAIN_BUSY_WAIT_MIN,
- *                       default 20 minutes in all, saying so each time), then returns the last run with
- *                       { busy, noCheck } so the train defers its lanes instead of judging anyone.
- *
+ *   runGatesWaiting()   runs the gates; while refused as busy it waits and runs again (STUDIO_TRAIN_BUSY_WAIT_MIN,
+ *                       default 20 minutes in all), then returns the last run with { busy, noCheck } so the train
+ *                       defers its lanes.
  * No imports from the rest of the harness: train.mjs loads it.
  */
 

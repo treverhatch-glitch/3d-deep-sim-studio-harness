@@ -1,26 +1,13 @@
 /**
- * harness/lane-orphans.mjs — 2.78.1 (e): finished work left on lane branches, and carrying a task's own commits.
- *
- * A task's implementation sat on an unmerged lane branch for days (its lane also carried other tasks' commits, so no
- * new copy merged it in); builders kept finding it but could not cherry-pick it.
+ * harness/lane-orphans.mjs — finished work left on lane branches, and carrying a task's own commits.
  *
  *   npm run lanes -- orphans [<ID>] [--all] [--json]
- *       Task commits on lane branches (refs/heads/lane/*) that main doesn't have (by patch: a commit already landed by
- *       cherry-pick or rebase is not listed), grouped by the task id their message names (ids on the board). One row
- *       per commit: task, lane branch, sha, subject, age; "next copy" says whether the task's next lane copy merges
- *       that branch in (.studio/lane-branches.json). A branch checked out in a live lane copy is left out (--all shows it).
- *
+ *       Task commits on lane branches (refs/heads/lane/*) that main doesn't have (by patch), grouped by task id. A
+ *         branch checked out in a live lane copy is left out (--all shows it).
  *   npm run lanes -- carry <ID> [--from <lane branch>] [--by <name>] [--json]
- *       Carries only the commits whose message names <ID> (cherry-picked oldest first; every other commit on the branch
- *       is left out and listed). Without --from: the one lane branch that holds the task's orphaned commits (several:
- *       refused, pass --from). A conflict stops it: the cherry-pick is aborted, the copy is put back as it was, and the
- *       commit and its files are named. Nothing is resolved, nothing lands: the task's own checks and the train still judge
- *       the work.
- *       A builder (a launched worker session) carries into its own lane copy, and only for the task it holds.
- *       The Producer or Director, a person, or an agent outside the harness carries from the main checkout: a fresh lane
- *       copy off main (.lanes/carry-<id>, branch lane/carry-<id>-<time>), remembered as the task's branch, so the next
- *       session's copy on the task merges exactly those commits in; the copy folder is removed, the branch kept.
- *
+ *       Cherry-picks (oldest first) only the commits whose message names <ID>; without --from, the one branch
+ *         holding them (several: refused). A conflict aborts and restores the copy; nothing lands. A builder carries
+ *         into its own lane copy; others into .lanes/carry-<id> (branch lane/carry-<id>-<time>).
  * Exit: 0 carried (or nothing to carry); 1 a conflict; 2 refused or bad usage.
  */
 import fs from 'node:fs';

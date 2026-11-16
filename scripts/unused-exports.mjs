@@ -1,28 +1,15 @@
 #!/usr/bin/env node
 /**
- * scripts/unused-exports.mjs — 2.86: a read-only report of exports and modules that nothing uses, and of exact duplicates.
- *
+ * scripts/unused-exports.mjs — a read-only report of exports and modules that nothing uses, and of exact duplicates.
  *   node scripts/unused-exports.mjs                    counts by class
- *   node scripts/unused-exports.mjs --list DEAD        one line per item: file:line name (size in lines); also USED, TEST-ONLY,
- *                                                      INTERNAL, UNREACHED
+ *   node scripts/unused-exports.mjs --list DEAD        file:line name (size); also USED, TEST-ONLY, INTERNAL, UNREACHED
  *   node scripts/unused-exports.mjs --json             everything as JSON
- *   node scripts/unused-exports.mjs --duplicates       functions of 6+ lines with identical bodies in 2+ harness files, and
- *                                                      whether one can be imported from the other without an import cycle
+ *   node scripts/unused-exports.mjs --duplicates       functions of 6+ lines with identical bodies in 2+ harness files
  *   node scripts/unused-exports.mjs --root <dir>       scan <dir> instead of this repo (the self-test uses it)
- *
- * 2.86: a plain search overstated what could be cut twice (56 "dead" settings were 2), so this tool is conservative on
- * purpose: every identifier token of every other code file, comments, strings and docs included, counts as a use. It
- * is a way to find CANDIDATES; nothing is removed on its word alone (each removal is then proved by the checks and units).
- *
- * Classes of an export in harness/ or scripts/:
- *   USED       its name is written in another file that is not under qa/ (code, package.json, a doc, a role page)
- *   TEST-ONLY  its name is written only under qa/
- *   INTERNAL   written nowhere else, but used inside its own file besides its definition (a module's own command-line part
- *              is such a use)
- *   DEAD       written nowhere else and not used in its own file
- * UNREACHED MODULE: a harness/ module whose file name ("x.mjs") no other file writes (no import, no dynamic import, no
- * package.json script, no doc, no hook). testOnly is true when only qa/ names it.
- * Exit 0 always (a report).
+ * Conservative on purpose: every identifier token of every other code file, comments, strings and docs included, counts
+ * as a use. It finds CANDIDATES; nothing is removed on its word alone. Classes: USED (named in a file not under qa/),
+ * TEST-ONLY (only under qa/), INTERNAL (own file only), DEAD. UNREACHED MODULE: no other file writes its file name.
+ * Exit 0.
  */
 import fs from 'node:fs';
 import path from 'node:path';

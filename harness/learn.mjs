@@ -1,29 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/learn.mjs — what the studio has learned, whether it stuck, and a safe copy of it all.
- *
- *   npm run learn                       write studio/memory/LEARNED.md and print the summary
- *   npm run learn -- backup [--to <folder>] [--no-media]   back up every learning file (only what changed)
- *   npm run learn -- restore --from <folder> --to <empty folder> [--at <time>]
- *   npm run learn -- prune [--from <folder>] [--keep 30]   keep the newest 30 and the first of each month
- *   npm run learn -- change add|list|eval …                change records (harness/changes.mjs, 2.61.0)
- *
- * A script: no model, no tokens. It joins the studio's memory into one page:
- *   - lessons from fixed bugs (studio/memory/failures.md) and the newest ones,
- *   - what keeps happening: the same failure on two or more days, and the lesson it matches if
- *     one exists (a lesson that didn't stick),
- *   - retro suggestions raised again and again without being handled,
- *   - the overseer's evaluations and the harness notes,
- *   - models by bugs per 10 points.
- * 2.61.0, the learning edge: `npm run learn` (and the HUB's daily pass) also grades the change records that are due
- * (harness/changes.mjs) and files one "Make the lesson a check" task per failure signature that repeated after its
- * lesson (the ladder, studio/changes/ladder.json). `--no-cycle` only writes the page.
- *
- * Backups go to --to, or STUDIO_BACKUP_DIR (point it at a Google Drive, Dropbox or OneDrive folder
- * on your computer and the copy syncs off the machine). The HUB runs both once a day. Backups are
- * deduplicated: each distinct file content is stored once, gzipped, so a daily backup adds only what
- * changed. latest/ holds plain copies and STUDIO-MEMORY.md, one file you can open anywhere or import
- * into a Google Doc. Also kept: the newest 50 playtest reports and 20 screenshots (STUDIO_BACKUP_MEDIA).
+ * harness/learn.mjs — what the studio has learned, whether it stuck, and a safe copy of it all. A script: no model,
+ * no tokens.
+ *    npm run learn                      write studio/memory/LEARNED.md and print the summary (--no-cycle: page only)
+ *    npm run learn -- backup [--to <folder>] [--no-media]   back up every learning file (only what changed)
+ *    npm run learn -- restore --from <folder> --to <empty folder> [--at <time>]  |  prune [--from <folder>] [--keep 30]
+ *    npm run learn -- change add|list|eval …                change records (harness/changes.mjs)
+ * The page joins lessons from fixed bugs (studio/memory/failures.md), repeated failures, retro suggestions,
+ * evaluations and harness notes. It also grades due change records and files a "Make the lesson a check" task per
+ * repeated failure signature (studio/changes/ladder.json). Backups go to --to or STUDIO_BACKUP_DIR, deduplicated;
+ * STUDIO_BACKUP_MEDIA keeps the newest 50 playtest reports and 20 screenshots.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -250,10 +236,9 @@ function studioSlug() {
 const dirBytes = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? dirBytes(path.join(dir, e.name)) : fs.statSync(path.join(dir, e.name)).size), 0) : 0);
 
 /**
- * Back up into one folder per studio that only grows by what changed:
- *   <dest>/latest/          plain copies of today's files plus STUDIO-MEMORY.md (open anywhere)
- *   <dest>/history/<at>.json   which file had which content at each backup (a few KB each)
- *   <dest>/objects/ab/<sha>    each distinct file content once, gzipped when that helps
+ * Back up into one folder per studio that only grows by what changed: <dest>/latest/ (plain copies plus
+ * STUDIO-MEMORY.md), <dest>/history/<at>.json (which file had which content), <dest>/objects/ab/<sha> (each distinct
+ * content once, gzipped when that helps).
  * A file that didn't change since the last backup costs nothing. Restore any point with `restore`.
  */
 export function backup(to = process.env.STUDIO_BACKUP_DIR, { media = true } = {}) {

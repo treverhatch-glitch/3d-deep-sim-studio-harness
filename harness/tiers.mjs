@@ -1,27 +1,14 @@
 /**
  * harness/tiers.mjs — blast-radius tiers for landing, decided by code from a lane's diff (never by a model).
- *
- * The merge train (harness/train.mjs) gives each lane a tier from what it changes, by how costly a wrong change is to
- * undo:
- *
- *   C  never lands by itself (a closed lane, not a threshold): protected files (studio/protected.json at main's tip and
- *      the shipped list), harness code (harness/, scripts/, qa/*.mjs), a deleted test or regression file, files
- *      the game declares irreversible (save/schema formats: manifest "irreversible"), an upgrade merge (Upgrade-Ref:
- *      trailer). Held in the train queue as "needs the owner" until a person releases it (train release).
- *   B  deterministic checks plus history: sim/behaviour (the game's sim paths, goldens, declared pin moves), shared
- *      utilities, the registry/import barrel, changed (not added) tests, and any file no rule names. The train
- *      verifies it with --all, a moved golden needs a Golden-Reason trailer, a changed pin file a Pin-Moves trailer,
- *      and a task handed back more than STUDIO_TRAIN_MAX_HANDBACKS (3) times waits for a person.
- *   A  contained: docs, added tests, the game's tools folders, assets, UI outside the sim paths. Lands in a train with
- *      the normal verify.
- *
- * A file's tier is the highest of every rule it matches (no rule: "default", B); the lane's is the highest of its files
- * and its lane-wide rules. The rules are data (DEFAULT_TIER_RULES). A game may extend or change them only through its
- * manifest (<game>/studio.gates.json, a protected file read from main's tip), "tiers":
- *   { "rules": [{ "id": "render", "tier": "A", "paths": ["src/render/**"], "why": "drawing only" }],
- *     "set": { "shared": "A" }, "default": "B" }
- * A rule marked `locked` (every C rule) can't be lowered or removed, by a manifest or anything else: only raised.
- * Pure: no git, no files. harness/train.mjs reads the diff and the manifest and calls classifyLane.
+ * The merge train (harness/train.mjs) gives each lane a tier by how costly a wrong change is to undo:
+ *   C  never lands by itself ("needs the owner" until released): protected files, harness code (harness/, scripts/,
+ *      qa/*.mjs), a deleted test or regression, "irreversible" files, an upgrade merge (Upgrade-Ref: trailer).
+ *   B  deterministic checks plus history: sim paths, goldens, shared utilities, registry, changed tests, unnamed files.
+ *      A moved golden needs Golden-Reason, a pin move Pin-Moves; over STUDIO_TRAIN_MAX_HANDBACKS (3) hand-backs waits.
+ *   A  contained: docs, added tests, the game's tools folders, assets, UI outside the sim paths.
+ * A file gets the highest tier of the rules it matches (none: "default", B); the lane, the highest of its files and
+ * lane-wide rules. Rules are data (DEFAULT_TIER_RULES); a game changes them only via "tiers" in
+ * <game>/studio.gates.json; a `locked` rule (every C rule) can only be raised. Pure: no git, no files.
  */
 import { matchAny } from './merge-lane.mjs';
 import { isGoldenPath, isTestPath } from './test-weakening.mjs';
@@ -46,15 +33,9 @@ export const higher = (a, b) => (rank(b) > rank(a) ? b : a);
 
 /**
  * The default rules. A rule matches a changed file by:
- *   paths     globs (harness/merge-lane.mjs globRe: ** any depth, * one segment)
- *   from      a manifest key whose globs are added to `paths` (simPaths, shared, unionFiles, registry, ui, irreversible)
- *   status    'A' added, 'M' changed, 'D' deleted (a rename is R: neither added nor deleted)
- *   kind      'test' (harness/test-weakening.mjs isTestPath), 'golden' (isGoldenPath), 'protected' (the protected list)
- *           'ratchet-grow' (a purity baseline that grew, f.ratchetGrew from harness/ratchet.mjs markGrowth)
- *           'proposal-protected' (a studio-proposals/ file whose targets, classifyLane's `proposals`, match the
- *           protected list, or can't be read)
- * or lane-wide by `trailer` (a key in the lane's own commits' trailers); `withTrailer` adds a trailer the lane must
- * carry to a file rule. Every condition given must hold.
+ *   paths  globs (merge-lane.mjs globRe: ** any depth, * one segment); from  a manifest key whose globs add to `paths`
+ *   status 'A' added, 'M' changed, 'D' deleted (rename: R); kind 'test', 'golden', 'protected', 'ratchet-grow',
+ *   'proposal-protected'; or lane-wide by `trailer` (`withTrailer`: one the lane must carry). All given must hold.
  */
 export const DEFAULT_TIER_RULES = [
   { id: 'protected', tier: 'C', locked: true, kind: 'protected', why: 'a protected file (studio/protected.json and the shipped list): only the owner approves it' },
@@ -132,16 +113,10 @@ export function tierRules(manifestTiers = null) {
 }
 
 /**
- * The tier of one lane. Pure.
- *   files     [{ status: 'A'|'M'|'D'|'R'|..., path }] (the lane's own diff: merge-base with main .. its head)
- *   trailers  { key: [values] } of the lane's own commits (Pin-Moves, Golden-Reason, Upgrade-Ref, ...)
- *   settings  the manifest's train settings (harness/train.mjs readTrainSettings): simPaths, shared, unionFiles,
- *             registry, ui, irreversible, pins.files, tiers, runAlone
- *   protectedGlobs  studio/protected.json "globs" at main's tip (the shipped list is always added)
- *   addOnly   protected globs where a NEW file is fine (a new regression replay)
- *   proposals { 'studio-proposals/<ID>.json': [target files] | null (unreadable) } for the lane's proposals
- * Returns { tier, why: [reasons for the tier], files: [{ path, status, tier, rules }], rules: [ids], needs: {...},
- *           runAlone: { yes, why }, notes }.
+ * The tier of one lane. Pure. files: [{ status: 'A'|'M'|'D'|'R'|..., path }] (merge-base with main .. its head);
+ * trailers: { key: [values] } of the lane's commits; settings: the manifest's train settings; protectedGlobs:
+ * studio/protected.json at main's tip; addOnly: globs where a NEW file is fine; proposals.
+ * Returns { tier, why, files: [{ path, status, tier, rules }], rules, needs, runAlone: { yes, why }, notes }.
  */
 export function classifyLane({ files = [], trailers = {}, settings = {}, protectedGlobs = [], addOnly = ['qa/regressions/**'], proposals = {} } = {}) {
   const { rules, fallback, notes } = tierRules(settings.tiers);

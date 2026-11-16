@@ -1,29 +1,14 @@
 /**
- * harness/rescue.mjs — 2.35.0: a task that used its budget climbs a ladder before it reaches a person, and
- * no step can gridlock the studio.
- *
- *   1. Rescue      on a stronger model from a different family than the ones that got stuck. It diagnoses
- *                  and decides: retry (blocker cleared), split (smaller tasks queued) or needs-person.
- *   2. Split       if the rescue is stuck too (its own budget ran out, nobody picked it up within
- *                  STUDIO_RESCUE_WAIT_MIN, 60, or it chose retry and the task got stuck again): a second
- *                  rescue whose only allowed outcomes are split or needs-person, on the next model on the list.
- *   3. Shelve      if that is stuck too: the task is parked as shelved with the diagnoses so far, the
- *                  Producer plans around it, and it is listed under "Needs you" in the morning report.
- *                  Nothing else waits for it.
- * STUDIO_RESCUE_LEVELS (2) sets how many rescue steps come before the shelf; STUDIO_RESCUE=off sends budget
- * stops straight to a person.
- *
- * The model at each step: the first available of STUDIO_RESCUE_MODEL, STUDIO_RESCUE_MODELS (comma-separated)
- * and STUDIO_TIER_TOP_MODEL whose family didn't work on the task (and, for step 2, isn't the step-1 model),
- * else one of those from the same family, else none (the launcher's own model and tier escalation). A model
- * whose tool or family is marked out (quota, spend guard: harness/budget.mjs) is skipped, so a rescue never
- * waits on one provider.
- *
- * A rescue writes studio/rescues/<T-ID>.md: "Diagnosis:" (40+ words) and one "Decision:" (studio/skills/rescue.md).
- *
- * 2.60.1 (B-39): a lane held for landing (`task hold`) or queued for the merge train is waiting on purpose, not stuck:
- * no rescue is filed or escalated for it, its open rescues can't start, and when a task lands (task done, a train)
- * its open rescues are closed with a note (closeRescuesFor; the watchdog's pass also sweeps any it missed).
+ * harness/rescue.mjs — a task that used its budget climbs a ladder before it reaches a person; no step can gridlock.
+ *   1. Rescue  on a stronger model of a different family than those that got stuck: retry, split or needs-person.
+ *   2. Split   if stuck too (budget out, untaken for STUDIO_RESCUE_WAIT_MIN (60), or retry stuck again): a second
+ *              rescue that may only split or say needs-person, on the next model.
+ *   3. Shelve  if stuck too: parked as shelved with the diagnoses, listed under "Needs you" in the morning report.
+ * STUDIO_RESCUE_LEVELS (2) sets the rescue steps before the shelf; STUDIO_RESCUE=off sends budget stops to a person.
+ * Model per step: first available of STUDIO_RESCUE_MODEL, STUDIO_RESCUE_MODELS (comma list), STUDIO_TIER_TOP_MODEL
+ * whose family didn't work on the task (step 2: not the step-1 model), else same family, else none; a tool or family
+ * marked out (harness/budget.mjs) is skipped. A rescue writes studio/rescues/<T-ID>.md ("Diagnosis:", one "Decision:").
+ * A lane held (`task hold`) or queued for the train gets no rescue.
  */
 import fs from 'node:fs';
 import { postAsk } from './ask-post.mjs';

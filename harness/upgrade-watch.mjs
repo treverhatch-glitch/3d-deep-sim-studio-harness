@@ -1,36 +1,14 @@
 /**
- * harness/upgrade-watch.mjs — 2.69.0 (s): watch for a newer harness, and take it in the owner's quiet hours.
- *
- * The crew's orchestrator watched for harness upgrades with one-shot timers, checked CI, upgraded and refreshed the
- * lanes by hand. Now:
- *
- *   npm run upgrade -- watch [--json]                one check now (fetch, compare versions, CI, decide)
+ * harness/upgrade-watch.mjs — watches for a newer harness and takes it in the owner's quiet hours.
+ *   npm run upgrade -- watch [--json]                one check now
  *   npm run upgrade -- watch auto on --by <person> [--permission "<their words or a link>"] [--ref <remote>/<branch>]
- *   npm run upgrade -- watch auto off [--by <name>]  (anyone: it only takes power away)
+ *   npm run upgrade -- watch auto off [--by <name>]  (anyone)
  *   npm run upgrade -- watch status                  the switch and the last check
- *
- * Which harness: the "ref" in studio/upgrade.json, else main on the remote of STUDIO_HARNESS_REF (the harness remote
- * the studio already uses), else upstream/main when the studio has an `upstream` remote. A check fetches that branch
- * (git, GIT_TERMINAL_PROMPT=0, STUDIO_UPGRADE_FETCH_MS, 60000) and compares its package.json version with the studio's.
- * A newer one has its CI read from the public GitHub API (combined status and check runs of that commit, no token).
- * Not a GitHub remote, the API unreachable, or CI not finished green: never upgraded automatically, only reported.
- *
- * It upgrades on its own only when all of these hold, else it reports or waits (an upgrade.watch event each time the
- * answer changes):
- *   - auto-upgrade is on: studio/upgrade.json { auto: true, by, … } as committed in the main checkout (the switch
- *     records who: a person in their own terminal, an agent outside the harness or a Producer/Director session with
- *     that person's --permission, or the agent the owner's delegation covers for "upgrade-auto"; workers never; the
- *     last commit that changed the file must not be a worker's);
- *   - CI on that commit is green;
- *   - now is inside STUDIO_UPGRADE_WINDOW ("03:00-05:00", local time; unset: report only);
- *   - no merge train runs (.studio/locks/train.lock), no heavy work (a verify) holds machine:heavy, and no agent session
- *     is running (lanes mid-session): it waits for the next check.
- * Then it runs `upgrade --merge` (harness/upgrade-guard.mjs: the board check, the backup, the hooks, the upgrade.merged
- * event, the 2.67.0 lanes refresh) for the person recorded in the switch, and files one builder task per lane the
- * refresh found conflicted. The supervisor runs a check every STUDIO_UPGRADE_WATCH_MIN (60; off: never). The running
- * supervisor keeps the old harness in memory: the result says to restart it.
- *
- * upgrade-guard.mjs's CLI uses top-level await: it is imported here only inside functions (no import cycle).
+ * Ref: "ref" in studio/upgrade.json, else main on STUDIO_HARNESS_REF's remote, else upstream/main. A check fetches it
+ * (STUDIO_UPGRADE_FETCH_MS, 60000), compares versions, reads CI. It upgrades alone only when auto is on
+ * (studio/upgrade.json, committed in main), CI is green, now is inside STUDIO_UPGRADE_WINDOW ("03:00-05:00"; unset:
+ * report only) and no train, heavy work or agent session runs; it then runs `upgrade --merge`
+ * (harness/upgrade-guard.mjs). Every STUDIO_UPGRADE_WATCH_MIN (60). Import upgrade-guard.mjs only inside functions.
  */
 import fs from 'node:fs';
 import path from 'node:path';

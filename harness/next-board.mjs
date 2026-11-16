@@ -1,20 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/next-board.mjs — 2.71.0 (y): the what's-next board, one screen (overseer duty 10).
- *
- *   npm run next-board [-- --n 3] [--json]
- *
- * The crew's overseer wrote "what's next" for the owner by hand each session. This prints it from the studio's own
- * files, under 150 words (NEXT_BOARD_MAX_WORDS), no model:
- *   - per role, the next N tasks that could start now (waiting, unclaimed, no hold: harness/task-hold.mjs holdReason,
- *     the same test `task next` and the supervisor use; no folder another agent holds: harness/handout.mjs), by
- *     priority then board order;
- *   - per role, what blocks the rest: holds, parks, --after chains ("waits for T-5"), a held folder;
- *   - overlaps 2.69's overlap check recorded for those tasks (task.overlap events: "T-7 with T-5"), never re-run here;
- *   - trains waiting: lanes queued for the merge train, the ones held for a person's release, a running train's step;
- *   - what needs a person (the digest's list, harness/digest.mjs needsPerson): the count and the first line.
- * Lists are cut ("+2") until the text fits. `npm run report -- post --what next` sends it to the owner's webhook
- * (harness/report-post.mjs). Read-only: it writes nothing and records nothing. Every source is optional.
+ * harness/next-board.mjs — the what's-next board, one screen, from the studio's own files, under 150 words
+ * (NEXT_BOARD_MAX_WORDS), no model.
+ *    npm run next-board [-- --n 3] [--json]
+ * Per role: the next N tasks that could start now (waiting, unclaimed, no hold: harness/task-hold.mjs holdReason; no
+ * folder another agent holds: harness/handout.mjs), by priority then board order; and what blocks the rest (holds,
+ * parks, --after chains, a held folder). Also overlaps recorded as task.overlap events (never re-run), trains waiting
+ * (queued, held for a release, a running step) and what needs a person (harness/digest.mjs needsPerson). Lists are
+ * cut ("+2") until the text fits.
+ * `npm run report -- post --what next` sends it to the owner's webhook (harness/report-post.mjs). Read-only. Every
+ * source is optional.
  */
 import fs from 'node:fs';
 import path from 'node:path';

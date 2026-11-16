@@ -1,27 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/assets.mjs — the game dev's own files (3D models, music, sound, maps, art), with a record
- * of whether each one may go in the game.
+ * harness/assets.mjs — the game dev's own files (models, music, sound, maps, art) and whether each may go in the game.
  *
- *   npm run asset -- add <file> --use game --owner "<who owns it>" --licence "<own work | licence name>" [--source "<where from>"] --by <person>
- *   npm run asset -- add <file or url> --use reference --game "…" --feature "…" [--by <name>]
- *   npm run asset -- add <file> --use game --generated "<tool>:<model>" --prompt <file> --terms "<plan or terms>" --by <person>
- *   npm run asset -- update <file> --by <person>                     re-record after a re-export (new checksum)
- *   npm run asset -- import-manifest <pack>/MANIFEST.json --by <person> [--pack <name>]   a whole pack at once
- *   npm run asset -- list
- *   npm run asset -- need "<what>" --for unity|web --budget <tris> [--size <m>] [--style <ref>] [--tags a,b]
- *   npm run asset -- needs [<id>] | library refresh <dir>      2.67.1: one asset flow (harness/asset-need.mjs)
- *   npm run asset -- review <asset> --pass|--fail "why" --by <name>   2.70.0: answer an asset's review request
- *   npm run asset -- reviews                                    assets waiting for a review (harness/asset-review.mjs)
- *
- * --use game: the person states they own it or hold a licence to use it in this game. The file is
- * copied to assets/ and recorded in studio/assets/manifest.json with who said so, when, the licence
- * and a checksum. The harness records the statement; it can't check it. (This is not legal advice:
- * a product built on this needs proper terms written by a lawyer.)
- * --use reference: it goes to the reference library (`npm run ref`), to design from, never shipped.
- *
- * The `assets` gate (scripts/check-assets.mjs) fails when a file in assets/ has no record, changed
- * since it was recorded, or when game code points at the reference library.
+ * npm run asset -- add <file> --use game --owner "<who>" --licence "<own work | licence>" [--source "<where>"] --by <p>
+ * npm run asset -- add <file or url> --use reference --game "…" --feature "…" [--by <name>]
+ * npm run asset -- add <file> --use game --generated "<tool>:<model>" --prompt <file> --terms "<terms>" --by <p>
+ * npm run asset -- update <file> | import-manifest <pack>/MANIFEST.json | list | review <asset> --pass|--fail "why"
+ * npm run asset -- need "<what>" --for unity|web --budget <tris> [--size <m>] [--style <ref>] [--tags a,b]
+ * --use game: the person states they own it or hold a licence; recorded in studio/assets/manifest.json with a checksum
+ * (not checked). --use reference: never shipped. The `assets` gate (scripts/check-assets.mjs) fails on an unrecorded
+ * or changed file in assets/, or game code pointing at the reference library.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -52,11 +40,9 @@ const IN_PLACE = /^(assets|public|web)\/|^cartridges\/[^/]+\/assets\//;
 const relOf = (abs) => path.relative(REPO_ROOT, abs).split(path.sep).join('/');
 
 /**
- * One ledger entry. Fields kept apart, because a CC0 author doesn't own the copy the game uses:
- * author (who made it), source (where from), licence, creditRequired + credit (the line to show),
- * declaredBy (the person who vouched), rightsHolder (who holds the right to ship it: the studio or
- * the dev), madeBy (the agent that made or fetched it), generated ({ tool, model, prompt, terms }
- * for AI-made art: the first thing a buyer or a store asks).
+ * One ledger entry. Fields kept apart, because a CC0 author doesn't own the copy the game uses: author, source,
+ * licence, creditRequired + credit (the line to show), declaredBy (who vouched), rightsHolder (who holds the right to
+ * ship it), madeBy (the agent that made or fetched it), generated ({ tool, model, prompt, terms } for AI-made art).
  */
 const inferKind = (file) => {
   const ext = path.extname(file).toLowerCase();

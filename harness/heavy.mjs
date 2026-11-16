@@ -2,62 +2,14 @@
 /**
  * harness/heavy.mjs — the machine:heavy lock, and the load a gate's timeout is scaled for.
  *
- * Full verifies, Unity editor runs (6-7 GB) and 3D browser playtests (about 5 GB each) overlapping on one PC cause e2e
- * timeouts and memory exhaustion. Heavy work takes one of STUDIO_HEAVY_SLOTS (1) slots in <main checkout>/.studio/locks/
- * machine-heavy-<n>.lock (every lane copy shares the main checkout's, like the gate slots; STUDIO_GATE_SLOTS only spreads
- * single game checks) while it runs:
- *   - a full verify (scripts/run-gates.mjs: the full set, or any run that includes a heavy gate: game, browser-play);
- *   - the Unity landing gate (harness/unity-gate.mjs);
- *   - anything wrapped in `node harness/heavy.mjs run --label <what> -- <command>` (a game's own browser playtest).
- * A full verify holds machine:heavy for its whole run while its game checks still take gate slots, so a landing's game
- * checks (task done) are not held up by it. STUDIO_HEAVY_SLOTS=0 turns the lock off.
- *
- *   node harness/heavy.mjs status                       who holds machine:heavy now (JSON with --json)
- *   node harness/heavy.mjs run --label <what> -- <cmd>  run a command under the lock; exits with its code
- *                                                       (also --kind/--ram-gb/--vram-gb/--gpu-only for its claim, --min-free-gb, --timeout-min)
- *   node harness/heavy.mjs stop [--label <x> | --all] --by <name>
- *                                                       kill a holder's whole process tree and free its slot
- *   node harness/heavy.mjs wait [--min-free-gb N] [--timeout-min M] [--kind K] [--hold <label>]
- *   node harness/heavy.mjs release --label <label>      for a studio's own scripts before Unity (heavyWaitCli)
- *
- * Holders and waiting: a holder records its pid and start identity (harness/proc-identity.mjs); a dead holder, a pid now
- * used by another program (Linux /proc start), or one older than STUDIO_HEAVY_STALE_MIN (240) is stale and taken over (a
- * live one past it is never killed by a take). A waiter names the holder (again every 5 min) and waits up to
- * STUDIO_HEAVY_WAIT_MIN (60), then fails with code HEAVY_BUSY: heavy work never runs on top of other heavy work just because
- * it waited. A landing (STUDIO_GATE_PRIORITY=landing) leaves a machine-heavy-landing-<pid>.wait marker and goes ahead of
- * other waiters. A running holder is never stopped by a waiter. The children of a holder (the gates a verify runs) see
- * STUDIO_HEAVY_HELD and don't wait for their own parent.
- *
- * Budgeted pool (harness/heavy-budget.mjs): each job declares a claim ({ ramGb, cpuThreads, gpu, label }; acquireHeavy's
- * kind: verify, unity, browser-playtest, gpu-playtest, blender-preview, asset-roundtrip, heavy) and starts when it fits the
- * free RAM, GPU and CPU of the last machine scan and a slot is free (STUDIO_HEAVY_SLOTS, computed from the scan; 1 with
- * none). Waiters queue (a landing first, then first come) and say what they wait for. Mostly-GPU kinds take the GPU area
- * beside CPU work when the scan shows a GPU. A command killed for memory runs once more (STUDIO_HEAVY_OOM_RETRY).
- *
- * Free-RAM floors (STUDIO_UNITY_* settings for Unity kinds): a Unity job (every Unity kind) also waits for live free RAM of at least STUDIO_UNITY_MIN_FREE_GB (12,
- * never above 60% of the RAM; heavy-budget.mjs unityMinFreeGb, floorFree here); --min-free-gb asks for a floor on any
- * kind. A wait that runs out throws HEAVY_BUSY with floor: true ("[heavy] NOT RUN <label>: ..."), exit 3. Not checked
- * when machine:heavy is off or inside a parent's hold. With no scan, acquireHeavy checks free memory against
- * STUDIO_HEAVY_RAM_FLOOR_GB, else STUDIO_RAM_FLOOR_GB (supervisor.mjs ramCheck, 3; 0 turns it off): under it the job waits
- * up to STUDIO_HEAVY_RAM_WAIT_MIN (10, at most STUDIO_HEAVY_WAIT_MIN), then fails HEAVY_BUSY.
- *
- * Process trees: a holder also records its process tree (its root pid and start, the POSIX process groups it runs its work
- * in, and how it is killed: taskkill /T /F on Windows, the process group elsewhere). `stop` kills the holder's tree, frees the
- * slot and records a heavy.stop event; it is refused in a worker session (harness/permission.mjs). Orphans a gone holder's
- * tree left running are killed at the next take (STUDIO_HEAVY_REAP=off only names them). `heavy.mjs run` runs its command in
- * a process group of its own (POSIX); a full verify re-runs itself as a group leader (heavyOwnGroup), so a stop gets its gates.
- *
- * Load scaling (loadFactor, scaledTimeout): STUDIO_CPU_BUSY_THRESHOLD (0.6), STUDIO_CPU_PROBE=off, STUDIO_HEAVY_PROGRAMS
- * (default Unity.exe,Unity: an implicit holder outside the lock), STUDIO_GAME_GATE_TIMEOUT_FLOOR (1.5) and
- * STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR (3); last quiet run times are in .studio/gates/game-gate-times.json (main checkout).
- *
- * Priority holds: a merge train waiting for a slot goes first (machine-heavy-train-wait.json, markTrainWait; up to
- * STUDIO_TRAIN_SLOT_PRIORITY_MIN, 15, 0 or off: none; 3 x STUDIO_SUPERVISOR_SEC freshness). The flake triager's quiet re-run
- * (harness/flakes.mjs) leaves machine-heavy-quiet-hold-<pid>.json (markQuietHold, bound STUDIO_FLAKE_HOLD_MIN): a waiter that
- * isn't a landing doesn't start until it ends. A landing is never held back; running holders are never stopped.
- * Test hooks: STUDIO_TEST_LOADAVG=<1-min load> stands in for os.loadavg()[0] in loadFactor (set: the CPU probe is not
- * used); STUDIO_TEST_CPU_BUSY=<0..1> stands in for the CPU probe; STUDIO_PROC_LIST_STUB (proc-identity.mjs) for the
- * process list; STUDIO_TEST_FREEMEM_MB for free memory (supervisor.mjs ramCheck).
+ * Heavy work (full verify, Unity runs, 3D browser playtests) takes one of STUDIO_HEAVY_SLOTS (1) slots in <main
+ * checkout>/.studio/locks/machine-heavy-<n>.lock, shared by every lane copy; STUDIO_HEAVY_SLOTS=0 turns it off.
+ * node harness/heavy.mjs status [--json] | run --label <what> -- <cmd> | stop [--label <x> | --all] --by <name>
+ * node harness/heavy.mjs wait [--min-free-gb N] [--timeout-min M] [--kind K] [--hold <label>] | release --label <label>
+ * A stale holder (dead, pid reused, older than STUDIO_HEAVY_STALE_MIN, 240) is taken over; a waiter fails HEAVY_BUSY
+ * after STUDIO_HEAVY_WAIT_MIN (60) and never stops a running holder. Floors: STUDIO_UNITY_MIN_FREE_GB (12),
+ * STUDIO_HEAVY_RAM_FLOOR_GB, STUDIO_RAM_FLOOR_GB. Load scaling: STUDIO_CPU_BUSY_THRESHOLD,
+ * STUDIO_GAME_GATE_TIMEOUT_FLOOR (1.5), STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR (3).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -256,15 +208,8 @@ export function holderGone(h) {
 
 /**
  * Which processes in `procs` (listProcesses) belong to holder `h`'s tree: { members: [pid], top: [pid] (members whose
- * parent isn't one: what taskkill /T is pointed at), groups: [pgid] (POSIX groups with members left), rootLive }.
- *  - root alive and the same process (start identity): it and every descendant (a child started before its parent
- *    can't be one: a reused parent number);
- *  - root gone, or its number reused: its orphans. Windows keeps a child's ParentProcessId after the parent ends, so
- *    those still naming the root's pid that started after the root (and before a reusing process) and their
- *    descendants; POSIX re-parents orphans, so there:
- *  - the recorded process groups: every live member that started after the root, and its descendants (a group's
- *    number isn't reused while it has members; a group whose leader number is now another program is skipped).
- * Never this process or its ancestors (a stop run from inside the tree).
+ * parent isn't one: what taskkill /T is pointed at), groups: [pgid], rootLive }. Root alive and the same process: it
+ * and its descendants. Root gone or reused: its orphans. Never this process or its ancestors.
  */
 export function holderTree(h, procs, { self = process.pid } = {}) {
   const list = (procs || []).filter((p) => p && Number.isInteger(Number(p.pid)));
@@ -470,11 +415,10 @@ export function stopHeavy(root, { label = null, all = false, by = '', env = proc
 }
 
 /**
- * POSIX: run this script again as the leader of a process group of its own and wait for it (its exit code), so
- * every process it starts can be killed with its group, even after it is killed itself (a full verify: npm, node,
- * vitest workers). null when that isn't needed: Windows (taskkill /T walks the tree, and orphans keep their parent's
- * pid), already a group leader, inside a parent's machine:heavy hold, STUDIO_HEAVY_SLOTS=0, or
- * STUDIO_HEAVY_OWN_GROUP=off. Signals this process gets (Ctrl+C, a SIGTERM) go on to the group.
+ * POSIX: run this script again as the leader of a process group of its own and wait for it (its exit code), so every
+ * process it starts can be killed with its group. null when not needed: Windows, already a group leader, inside a
+ * parent's machine:heavy hold, STUDIO_HEAVY_SLOTS=0, or STUDIO_HEAVY_OWN_GROUP=off. Signals it gets go on to the
+ * group.
  */
 export async function heavyOwnGroup({ env = process.env, argv = process.argv.slice(1) } = {}) {
   if (process.platform === 'win32' || off(env.STUDIO_HEAVY_OWN_GROUP)) return null;
@@ -511,14 +455,10 @@ export function heldClaim(root, env = process.env) {
 }
 
 /**
- * Take a machine:heavy slot (sync; waits). Returns { release(), held, waitedMs, claim, skipped?, inside? }. Throws an Error
- * with code HEAVY_BUSY when the wait limit passes. While held, process.env.STUDIO_HEAVY_HELD names the slot so the
- * processes this one starts don't wait for it. The job declares a claim (opts.kind: verify, unity, browser-playtest,
- * gpu-playtest, blender-preview, asset-roundtrip, heavy; or opts.claim) and starts when it fits the free RAM, GPU and CPU
- * areas of the last machine scan and a slot is free. Waiters queue in order (machine-heavy-queue-<pid>.wait: a landing
- * first, then first come), each class apart (a GPU-only job doesn't queue behind a CPU verify), and say what they wait for
- * ("waiting for RAM: needs 8 GB, 3.1 free"), up to STUDIO_HEAVY_WAIT_MIN. With no scan: one slot and the STUDIO_RAM_FLOOR_GB
- * floor (STUDIO_HEAVY_RAM_WAIT_MIN). The record keeps its claim (status shows it).
+ * Take a machine:heavy slot (sync; waits). Returns { release(), held, waitedMs, claim, skipped?, inside? }. Throws
+ * HEAVY_BUSY when the wait limit passes. While held, STUDIO_HEAVY_HELD names the slot so child processes don't wait.
+ * The job's claim (opts.kind or opts.claim) must fit the free RAM, GPU and CPU of the last machine scan, and a slot be
+ * free. Waiters queue (a landing first); with no scan: one slot and the STUDIO_RAM_FLOOR_GB floor.
  */
 export function acquireHeavy(root, label, { log = () => {}, env = process.env, owner = null, freemem = undefined, kind = 'heavy', claim: givenClaim = null, machine = undefined, ramGb, vramGb, gpuOnly, minFreeGb = undefined, waitMin = undefined, engine = null } = {}) {
   const profileNow = () => { try { return machineProfile(root, { env, machine }); } catch { return null; } };
@@ -874,13 +814,10 @@ function cpuOrLoad({ env, loadavg, cpuBusy: given, platform, cpus }) {
 }
 
 /**
- * How loaded the machine is, as a factor for a gate's timeout: 1 + 1 per other live machine:heavy holder (not the one this
- * process runs inside) + 1 per heavy program outside the lock (implicitHolders: a Unity editor) + 0.5 per other running
- * gate check + the 1-minute load above 1.5 per core; where there is no load average (Windows) the CPU's busy fraction over
- * STUDIO_CPU_BUSY_THRESHOLD (0.6) adds 0.5 at the threshold up to 2 at 100% busy. Capped at STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR
- * (3), never below 1. { factor, why, busy, busyThreshold, load, cores } (busy: the CPU's busy fraction the probe measured, or
- * null; load: the 1-min load average used, or null). Injectable: loadavg, cpus (core count), cpuBusy, cpuSample (os.cpus
- * for the probe), platform, procs, listProcs.
+ * How loaded the machine is, as a factor for a gate's timeout: 1 + 1 per other live machine:heavy holder + 1 per heavy
+ * program outside the lock (a Unity editor) + 0.5 per other running gate check + the 1-minute load above 1.5 per core;
+ * without a load average (Windows) the CPU busy fraction over STUDIO_CPU_BUSY_THRESHOLD (0.6) adds 0.5 up to 2. Capped
+ * at STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR (3), never below 1. { factor, why, busy, busyThreshold, load, cores }.
  */
 export function loadFactor(root, { env = process.env, loadavg = null, cpus = null, cpuBusy: busyGiven = null, cpuSample = null, platform = process.platform, procs = null, listProcs = undefined } = {}) {
   const dir = heavyDir(root);
@@ -946,13 +883,10 @@ export function recordGatePass(root, label, ms, factor = 1) {
 }
 
 /**
- * A timeout scaled for load: { ms, base, factor, why, floor }. Never shorter than the configured base;
- * STUDIO_GAME_GATE_TIMEOUT_SCALE=off keeps the base. With a `label`, never shorter than STUDIO_GAME_GATE_TIMEOUT_FLOOR (1.5;
- * 0 or off: none) times that check's last quiet run (lastQuietTime), capped at the same STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR
- * times the base as the load factor. floor: { lastMs, mult, capped, from, why } when it raised the timeout, else null.
- * The readings come back too, for the line the gate prints every time: busy, busyThreshold, load, cores, scaleOff,
- * floorMult (0: no floor), quiet (null when none is recorded; undefined without a label), lastPass, floorMs. While no quiet
- * run is recorded, the last pass of self-triage's re-run at the cap (lastPassTime) stands in for it (from: 'last pass').
+ * A timeout scaled for load: { ms, base, factor, why, floor }. Never shorter than the base;
+ * STUDIO_GAME_GATE_TIMEOUT_SCALE=off keeps the base. With a `label`, at least STUDIO_GAME_GATE_TIMEOUT_FLOOR (1.5; 0
+ * or off: none) times that check's last quiet run (lastQuietTime), capped at STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR times
+ * the base; lastPassTime stands in without one. floor is null if unused.
  */
 export function scaledTimeout(base, root, { env = process.env, label = null, ...rest } = {}) {
   if (off(env.STUDIO_GAME_GATE_TIMEOUT_SCALE)) return { ms: base, base, factor: 1, why: '', floor: null, scaleOff: true, label };
@@ -980,17 +914,10 @@ export function scaledTimeout(base, root, { env = process.env, label = null, ...
 }
 
 /**
- * For a studio's own scripts (a Unity landing script) before they start Unity, which the harness doesn't run for them:
- *   heavy wait [--min-free-gb N] [--timeout-min M] [--kind K]
- *       wait for the free-RAM floor (--min-free-gb, else STUDIO_UNITY_MIN_FREE_GB for a Unity kind; never above 60% of
- *       the RAM) and a free machine:heavy slot (the kind's claim, default unity); exit 0 when both were there (the slot is
- *       taken and given back at once: nothing is held), exit 3 when the wait ran out ("NOT RUN": nothing started).
- *   heavy wait --hold <label> [--hold-max-min H] [...]
- *       the same, then a background holder keeps the slot until `heavy release --label <label>` or H minutes (120,
- *       at most STUDIO_HEAVY_STALE_MIN); exit 0 once it holds.
- *   heavy release --label <label>   end a --hold (only holds made by wait --hold; `heavy stop` is for other holders).
- * `heavy run --kind unity [--min-free-gb N] [--timeout-min M] -- <command>` is better: the slot is let go when the
- * command ends, whatever happens to the script. Returns the exit code.
+ * For a studio's own scripts before they start Unity:
+ *   heavy wait [--min-free-gb N] [--timeout-min M] [--kind K]: wait for the free-RAM floor (STUDIO_UNITY_MIN_FREE_GB)
+ *     and a free machine:heavy slot (default kind unity); exit 0 when both were there, 3 when the wait ran out.
+ *   heavy wait --hold <label> [--hold-max-min H]: keep the slot until `heavy release --label <label>` or H min.
  */
 async function heavyWaitCli(root, argv, { preOpt, floorOpts }) {
   const cmd = argv[0];

@@ -1,29 +1,13 @@
 /**
- * harness/code-stamp.mjs — 2.86 (a, B-139): which harness code a long-running process runs, and whether that is still
- * the code installed in the checkout.
- *
- * A long-running Node process (the supervisor, a watcher loop) keeps the code it loaded at its start. After
- * `npm run upgrade -- --merge <ref>` a crew's supervisor ran the old code for 20 hours and nothing said so. So:
- *
- *   codeStamp({ root })    the installed harness: { version (package.json), head (the checkout's HEAD commit, read from
- *                          the .git files, no git process), harness (the tree id of harness/ at HEAD), at }. Cached for
- *                          STAMP_CACHE_MS (a minute); git runs only when HEAD moved since the last look.
- *   sameCode(a, b)         false when the code differs (the version, or the harness/ tree); true when it is the same;
- *                          null when it can't tell. HEAD alone moving (a board commit, a landed lane) is not new code.
- *   noticeNewCode(rec, …)  one harness.code_changed event per new installed stamp, said loudly once on the console.
- *   restartHow(…)          how the supervisor can restart itself where it runs: 'spawn' (it runs on its own: a fresh
- *                          detached supervisor waits for this one to end), 'exit' (a launchd job, or a systemd unit with
- *                          KillMode=process: exit 75 and the service manager starts it again), or null with the reason
- *                          (a terminal a person watches, an old systemd unit whose stop would end every agent session,
- *                          or STUDIO_SUPERVISOR_SELF_RESTART=off).
- *   writeHandoff / takeHandoff   what the supervisor keeps in memory that a restart must not lose (a halt, an extended
- *                          end time, the agents it started, back-offs, the timed passes' clocks), in
- *                          .studio/supervisor-handoff.json for the next supervisor.
- *   noteRunning / runningRecords  other long-running processes (the watcher loop) record their stamp in .studio/running/.
- *   oldCodeReport(…)       every long-running process that still runs old code, with what will happen to it: for
- *                          `upgrade --merge`, `npm run harness-health`, `npm run studio:status` and the daily digest.
- *
- * Only node's own modules at the top: `upgrade --merge` loads this file from a studio that may be older.
+ * harness/code-stamp.mjs — which harness code a long-running process runs, and whether it is still the installed code.
+ * A supervisor or watcher keeps the code it loaded, so after `npm run upgrade -- --merge <ref>` it must be told.
+ *   codeStamp({ root })    { version, head, harness (tree id of harness/ at HEAD), at }; cached for STAMP_CACHE_MS
+ *   sameCode(a, b)         false when the version or harness/ tree differs, true when same, null when unknown
+ *   noticeNewCode(rec, …)  one harness.code_changed event per new installed stamp
+ *   restartHow(…)          'spawn', 'exit' (exit 75, the service manager restarts it), or null with the reason
+ *   writeHandoff / takeHandoff   supervisor state a restart keeps (.studio/supervisor-handoff.json)
+ *   noteRunning / runningRecords   stamps in .studio/running/; oldCodeReport(…) lists processes on old code
+ * STUDIO_SUPERVISOR_SELF_RESTART=off stops self-restart. Only node's own modules at the top (an older studio loads it).
  */
 import fs from 'node:fs';
 import os from 'node:os';

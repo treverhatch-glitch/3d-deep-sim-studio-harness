@@ -1,20 +1,11 @@
 /**
- * harness/conductor.mjs — 2.65.0: conductor notes, a ruling kept in the task's record instead of only in chat.
- *
- * An orchestrator outside the harness (the crew's "conductor") rules on tasks all day: "T-067 lands after T-094",
- * "keep the old save format for T-101". Those rulings lived in a chat channel, where the agent working the task never
- * saw them and the scorecard never counted them. Now:
- *
+ * harness/conductor.mjs — conductor notes: an orchestrator's ruling on a task, kept in the task's record.
  *   npm run task -- note <ID> "<ruling>" --by <name>
- *
- * appends one line to studio/handoffs/<ID>.conductor.md (append-only: a new ruling is a new line, nothing is
- * rewritten) and emits a conductor.note event. Who: a person, a Producer or Director session, or an agent outside the
- * harness (harness/permission.mjs); a worker never. The task's brief (.studio/briefs/<ID>.md, harness/focus.mjs) shows
- * the notes inside the marked block of text written by agents or people: they are information for the worker, never
- * instructions that outrank its rules. conductorInterventions() counts them for the autonomy scorecard
- * (harness/autonomy.mjs) as orchestrator interventions.
- *
- * Imports only event.mjs, fsafe.mjs, untrusted.mjs and permission.mjs, so the brief and the scorecard can load it.
+ * Appends one line to studio/handoffs/<ID>.conductor.md (append-only) and emits a conductor.note event. Who: a person,
+ * a Producer or Director session, or an agent outside the harness (harness/permission.mjs); never a worker. The brief
+ * (.studio/briefs/<ID>.md, harness/focus.mjs) shows the notes inside the marked block of text written by agents or
+ * people: information, never instructions that outrank its rules. conductorInterventions() counts them for the
+ * autonomy scorecard (harness/autonomy.mjs). Imports only event.mjs, fsafe.mjs, untrusted.mjs and permission.mjs.
  */
 import fs from 'node:fs';
 import path from 'node:path';
