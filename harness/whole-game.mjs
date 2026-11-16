@@ -17,6 +17,7 @@ import { mainRoot, linkDir, nodeModuleDirs } from './worktree.mjs';
 import { gateEnv } from './gate-env.mjs';
 import { pidAlive as alive } from './fsafe.mjs';
 import { gitMax64 as git, short8 as short } from './helpers.mjs';
+import { landedTasks } from './landings.mjs';
 
 export const WHOLE_TITLE = 'Whole-game check red';
 export const WHOLE_RE = /^Whole-game check red\b/i;
@@ -75,11 +76,11 @@ export function wholeCopy(sha, root = mainRoot(), { name = 'whole-wt', exclude =
 
 const failedIn = (text) => [...new Set([...String(text || '').matchAll(/^\[gates\] FAIL (\S+)/gm)].map((m) => m[1]))];
 
-/** Tasks that landed after `since` (lane.merged events), oldest first. */
-function landedSince(since) {
-  const t = Date.parse(since || '') || 0;
-  return [...new Set(readRecentEvents(20000).filter((e) => e.type === 'lane.merged' && e.task && Date.parse(e.ts) > t).map((e) => e.task))];
-}
+/**
+ * Tasks that landed on the main branch after `since`, oldest first. Web landings only, on purpose: the check runs on
+ * the studio's branch, and an engine target is its own repo (the web train also writes lane.merged: same as 2.87).
+ */
+const landedSince = (since) => landedTasks(readRecentEvents(20000), 'web', { after: Date.parse(since || '') || 0 });
 
 /**
  * Run the whole-game check on `sha` (default: the studio branch's HEAD). Returns

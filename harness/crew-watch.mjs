@@ -19,6 +19,7 @@ import { weightedTokens } from './token-weight.mjs';
 import { readJson } from './fsafe.mjs';
 import { readyForTrain, sessionEndRefusedAgain, sessionEndKind, harnessKind } from './handback-kind.mjs';
 import { flagOf, numTrimDefault as num, tsMs as ts, writeJsonTmp as writeJson } from './helpers.mjs';
+import { tasksOf } from './landings.mjs';
 
 export const PAUSED_FILE = () => path.join(STUDIO_STATE_DIR, 'crew-paused.json');
 export const RESUME_FILE = () => path.join(STUDIO_STATE_DIR, 'crew-resume.json');
@@ -39,7 +40,8 @@ export function crewLimits(env = process.env) {
 // the one rule for which hand-backs count (the watchdog's park and the scorecard use it too); re-exported here.
 export { readyForTrain } from './handback-kind.mjs';
 
-const landingsOf = (e) => (e.type === 'task.done' || e.type === 'lane.merged' ? (e.task ? [e.task] : []) : e.type === 'task.train.landed' ? (Array.isArray(e.meta?.lanes) ? e.meta.lanes.map(String) : e.task ? [e.task] : []) : []);
+// A web landing or a close: a planning role that closes its tasks is not burning sessions for nothing (same as 2.87).
+const landingsOf = (e) => tasksOf(e, ['web', 'closed']);
 
 /**
  * Each role's last window: { [role]: { sessions, ended, noCommit, shortExits, tokens, landed, tokensPerLanded, tasks,

@@ -15,6 +15,7 @@ import { readRecentEvents } from './event.mjs';
 import { tierOf, escalationFor } from './model-tiers.mjs';
 import { readPolicy } from './policy-rules.mjs';
 import { tsMs as ts } from './helpers.mjs';
+import { tasksOf } from './landings.mjs';
 
 export const TIER_ORDER = ['cheap', 'mid', 'top'];
 export const HOLDOUT_NOTE = 'off (0): the owner deferred it until API credit is available, so cheap-first is not compared with the default tier on the same kind of task';
@@ -108,8 +109,8 @@ export function routingStats(events, { now = Date.now(), days = 14, typeOfTask =
   const ends = sorted.filter((e) => e.type === 'agent.session.end' && (e.task || e.meta?.task) && ts(e) >= from && ts(e) <= now);
   const landings = new Map();
   for (const e of sorted) {
-    const ids = e.type === 'task.done' || e.type === 'lane.merged' ? [e.task] : e.type === 'task.train.landed' ? (e.meta?.lanes || [e.task]) : [];
-    for (const t of ids.filter(Boolean).map(String)) { if (!landings.has(t)) landings.set(t, []); landings.get(t).push(ts(e)); }
+    // A session succeeds when its task lands or closes, as harness/model-pools.mjs counts it (same as 2.87).
+    for (const t of tasksOf(e, ['web', 'closed'])) { if (!landings.has(t)) landings.set(t, []); landings.get(t).push(ts(e)); }
   }
   const arms = new Map();
   for (const e of sorted) if (e.type === 'model.routed' && e.task) arms.set(e.task, e.meta?.arm || 'cheap-first');

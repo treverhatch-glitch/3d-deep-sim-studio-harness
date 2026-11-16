@@ -45,6 +45,7 @@ import { pathTracks, missingTracks } from './gate-tracks.mjs';
 import { visualCheckRows } from './visual-check.mjs';
 import { anchorCheckRows } from './anchors.mjs';
 import { gitInDirOf, isSha40 as isSha } from './helpers.mjs';
+import { landings } from './landings.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -541,9 +542,12 @@ function studioRecordOwner(rec) {
   }
   return null;
 }
-/** Other tasks finished (landed) after `ms`: [{ task, at }], oldest first. */
+/**
+ * Other tasks finished after `ms`: [{ task, at }], oldest first. Closes and forced closes, on purpose (same as 2.87):
+ * a task done in the main checkout moves main with no landing record (self-test 2583o).
+ */
 function landedSince(ms, taskId) {
-  return readRecentEvents(20000).filter((e) => (e.type === 'task.done' || e.type === 'task.forced') && e.task && e.task !== taskId && (Date.parse(e.ts) || 0) > ms).map((e) => ({ task: e.task, at: Date.parse(e.ts) }));
+  return landings(readRecentEvents(20000), ['closed', 'forced'], { after: ms }).filter((l) => l.task !== taskId).map((l) => ({ task: l.task, at: l.at }));
 }
 const landedText = (l) => `${l.slice(-2).map((x) => `${x.task} landed at ${hhmm(x.at)}`).join(', ')}${l.length > 2 ? ` and ${l.length - 2} more` : ''}`;
 /**

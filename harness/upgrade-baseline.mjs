@@ -18,7 +18,10 @@ const DAY = 86400000;
 const ts = (e) => Date.parse(e?.ts) || 0;
 const round = (x, d = 2) => (x === null || x === undefined || !Number.isFinite(x) ? null : Math.round(x * 10 ** d) / 10 ** d);
 const pctl = (xs, q) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.ceil(q * s.length) - 1)] : null; };
-const landingsOf = (e) => (e.type === 'task.done' || e.type === 'lane.merged' ? (e.task ? [e.task] : []) : e.type === 'task.train.landed' ? (Array.isArray(e.meta?.lanes) ? e.meta.lanes.map(String) : e.task ? [e.task] : []) : []);
+// harness/landings.mjs tasksOf(e, ['web', 'closed']), copied: this file imports no harness file. The self-test 288a
+// holds the two to the same answer; impact.mjs compares against this measure.
+const laneId = (x) => String(x && typeof x === 'object' ? x.task : x);
+const landingsOf = (e) => (e.type === 'task.done' || e.type === 'lane.merged' ? (e.task ? [String(e.task)] : []) : e.type === 'task.train.landed' ? (Array.isArray(e.meta?.lanes) ? e.meta.lanes.map(laneId) : e.task ? [String(e.task)] : []) : []);
 export const snapshotDays = (env = process.env) => (Number(env.STUDIO_UPGRADE_SNAPSHOT_DAYS) > 0 ? Number(env.STUDIO_UPGRADE_SNAPSHOT_DAYS) : 3);
 const cacheWeight = (env = process.env) => { const v = env.STUDIO_CACHE_READ_WEIGHT; return v === undefined || v === '' || !Number.isFinite(Number(v)) ? 0.1 : Math.max(0, Number(v)); };
 const weighted = (e, w) => (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0) + (Number(e.meta?.cacheRead ?? e.cacheRead) || 0) * w;

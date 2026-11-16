@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, getEventPaths } from './event.mjs';
 import { pidAlive, readJson } from './fsafe.mjs';
 import { bytesUnder, flagOf, mtimeMs as mtime, numTrimDefault as num } from './helpers.mjs';
+import { tasksOf } from './landings.mjs';
 
 const H = 3600000;
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
@@ -253,7 +254,7 @@ export function engineLandedTasks(root) {
     const text = fs.readFileSync(getEventPaths().primary, 'utf8');
     for (const l of text.slice(-8 * 1024 * 1024).split('\n')) {
       if (!l.includes('.landed"') || !l.includes('task.train.')) continue;
-      try { const e = JSON.parse(l); if (/^task\.train\.[a-z][a-z0-9-]*\.landed$/.test(e.type)) for (const t of e.meta?.lanes || []) tasks.add(String(t)); } catch {}
+      try { for (const t of tasksOf(JSON.parse(l), 'engine')) tasks.add(t); } catch {}
     }
   } catch {}
   return tasks;

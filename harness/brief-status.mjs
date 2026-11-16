@@ -17,6 +17,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { recordAlive } from './proc-identity.mjs';
 import { readTrainStatus, trainStatusLine } from './train-status.mjs';
 import { readJson } from './fsafe.mjs';
+import { landedMeasure, tasksOf } from './landings.mjs';
 
 export const BRIEF_MAX_WORDS = 99;
 export const BRIEF_MARK = () => path.join(STUDIO_STATE_DIR, 'brief-status.json');
@@ -33,7 +34,8 @@ function boardTitles(root) {
   }
   return t;
 }
-const landingsOf = (e) => (e.type === 'task.done' || e.type === 'lane.merged' || e.type === 'task.forced' ? (e.task ? [e.task] : []) : e.type === 'task.train.landed' ? (Array.isArray(e.meta?.lanes) ? e.meta.lanes.map(String) : e.task ? [e.task] : []) : []);
+// 2.88: "Landed" is what reached the main branch or an engine target; a task closed or forced with no landing is not
+// (a studio with no landing record at all: its closes, landedMeasure).
 
 /** The facts the brief is built from (deterministic for the same files, events and `now`). */
 export async function briefFacts({ root = REPO_ROOT, since = null, now = Date.now(), events = null, env = process.env } = {}) {
@@ -57,7 +59,8 @@ export async function briefFacts({ root = REPO_ROOT, since = null, now = Date.no
   const titles = boardTitles(root);
   const bugType = new Set(evs.filter((e) => e.type === 'task.added' && e.meta?.type === 'bug' && e.task).map((e) => e.task));
   const landed = [];
-  for (const e of evs) if (inWin(e)) for (const t of landingsOf(e)) if (!landed.includes(t)) landed.push(t);
+  const measure = landedMeasure(evs);
+  for (const e of evs) if (inWin(e)) for (const t of tasksOf(e, measure)) if (!landed.includes(t)) landed.push(t);
   const bugs = landed.filter((t) => bugType.has(t) || /^bug\b/i.test(titles[t] || ''));
   // Unity.
   const u = readJson(path.join(root, '.studio', 'gates', 'unity-last.json'));

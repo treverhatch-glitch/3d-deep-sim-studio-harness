@@ -5324,6 +5324,14 @@ if (inShard('selftest-287a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.88 (l): which tasks landed, read one way (harness/landings.mjs), and the callers that read it wrong.
+if (inShard('selftest-288a')) {
+  const dir = copyRepo();
+  const { selftest288A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-288a.mjs')).href);
+  await selftest288A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

@@ -16,6 +16,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, getEventPaths, rolledEve
 import { readHolds, lanesClash } from './task-hold.mjs';
 import { bringsNothing, gitMainRoot, mainRefOf } from './landed-content.mjs';
 import { readJsonOr as readJson } from './helpers.mjs';
+import { tasksOf } from './landings.mjs';
 
 const WAIT_FILE = () => path.join(STUDIO_STATE_DIR, 'handout-waiting.json');
 
@@ -27,14 +28,13 @@ const WAIT_FILE = () => path.join(STUDIO_STATE_DIR, 'handout-waiting.json');
 export function landedOnBoard(taskId, events = readRecentEvents(20000)) {
   return closingOnBoard(taskId, events) === true;
 }
+// A closing record's verdict: true for a web landing or a close, false for a forced close or a reopen, else null.
+// Same as 2.87: a done dependency always has its close, which is how an engine landing is seen here.
+const closingOf = (e, taskId) => (tasksOf(e, ['web', 'closed']).includes(taskId) ? true : tasksOf(e, 'forced').includes(taskId) || (e.type === 'task.reopened' && e.task === taskId) ? false : null);
 /** The board's last closing record for a task in `events`: true (a landing), false (forced or reopened), null (none). */
 function closingOnBoard(taskId, events) {
   let last = null;
-  for (const e of events) {
-    if (e.task !== taskId && !(e.type === 'task.train.landed' && Array.isArray(e.meta?.lanes) && e.meta.lanes.map(String).includes(taskId))) continue;
-    if (['task.done', 'task.train.landed', 'lane.merged'].includes(e.type)) last = true;
-    else if (['task.forced', 'task.reopened'].includes(e.type)) last = false;
-  }
+  for (const e of events) { const c = closingOf(e, taskId); if (c !== null) last = c; }
   return last;
 }
 
@@ -72,8 +72,8 @@ function closingsIn(file) {
     if (!CLOSING.test(line)) continue;
     let e = null;
     try { e = JSON.parse(line); } catch { continue; }
-    const ids = e.type === 'task.train.landed' && Array.isArray(e.meta?.lanes) ? e.meta.lanes.map(String) : e.task ? [String(e.task)] : [];
-    for (const id of ids) map.set(id, ['task.forced', 'task.reopened'].includes(e.type) ? false : true);
+    const ids = e.type === 'task.reopened' ? (e.task ? [String(e.task)] : []) : tasksOf(e, ['web', 'closed', 'forced']);
+    for (const id of ids) map.set(id, closingOf(e, id));
   }
   histCache.set(file, { key, map, size: st.size });
   return map;

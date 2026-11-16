@@ -19,6 +19,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './even
 import { weightedTokens, cacheReadWeight } from './token-weight.mjs';
 import { buildAttempts } from './metrics.mjs';
 import { escapeRe as reEsc, flagOf, pad2 as pad, pushToOf, tsMs as ts } from './helpers.mjs';
+import { tasksOf } from './landings.mjs';
 
 export const AUTONOMY_REL = 'studio/autonomy.json';
 export const DEFAULT_AUTONOMY = Object.freeze({
@@ -431,12 +432,9 @@ export function interventionKind(e, actor) {
   return null;
 }
 
-function landingsOf(e) {
-  if (e.type === 'task.done' || e.type === 'lane.merged') return e.task ? [e.task] : [];
-  if (e.type === 'task.forced') return e.task ? [e.task] : [];
-  if (e.type === 'task.train.landed') return Array.isArray(e.meta?.lanes) ? e.meta.lanes.map(String) : [];
-  return [];
-}
+// A task's end: a web landing, a close or a forced close (same as 2.87). An engine landing is seen through the
+// close that follows it. The score's measures 1, 3, 4 and 15 read this, so rounds stay comparable.
+const landingsOf = (e) => tasksOf(e, ['web', 'closed', 'forced']);
 
 /** Spans the supervisor ran: supervisor.start to supervisor.stop (an open one ends at the log's last event). */
 function supervisorSpans(events, end) {
@@ -630,7 +628,7 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   const causedBy = new Map();
   for (const e of sorted) {
     if (e.task) add(e.task, e);
-    if (e.type === 'task.train.landed') for (const t of (e.meta?.lanes || []).map(String)) if (t !== e.task) add(t, e);
+    if (e.type === 'task.train.landed') for (const t of tasksOf(e, 'web')) if (t !== e.task) add(t, e);
     if (e.type === 'task.added' && e.meta?.causedBy) { const k = String(e.meta.causedBy); if (!causedBy.has(k)) causedBy.set(k, []); causedBy.get(k).push(ts(e)); }
   }
   // Hands-free: no person event from the claim to the landing; a person running the train counts on each lane it landed.

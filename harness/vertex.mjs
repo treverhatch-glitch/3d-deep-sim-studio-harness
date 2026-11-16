@@ -16,6 +16,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
+import { tasksOf } from './landings.mjs';
 import { aiderProgram } from './aider-launch.mjs';
 import { endNotAFailure } from './busy.mjs';
 import { engineTask } from './engine-tracks.mjs';
@@ -196,7 +197,7 @@ export function vertexFailures(taskId, events) {
   let n = 0;
   for (const e of events) {
     if (e.task !== taskId) continue;
-    if (e.type === 'task.done' || e.type === 'lane.merged' || e.type === 'task.train.landed') n = 0;
+    if (tasksOf(e, ['web', 'closed']).length) n = 0; // a web landing or a close of this task (same as 2.87)
     else if (e.type === 'agent.session.end' && (e.meta?.tool === 'vertex') && !endNotAFailure(e) && (e.meta?.handed || []).some((h) => h?.task === taskId)) n += 1;
   }
   return n;

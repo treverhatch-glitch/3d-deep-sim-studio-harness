@@ -20,6 +20,7 @@ import { OWNER_STEP_PROTECTED } from './owner-only.mjs';
 import { readJson } from './fsafe.mjs';
 import { endNotAFailure } from './busy.mjs';
 import { tsMs as ts } from './helpers.mjs';
+import { tasksOf } from './landings.mjs';
 
 export const MODELS_REL = 'studio/models.json';
 export const ROUTING_DIR = () => path.join(STUDIO_STATE_DIR, 'routing');
@@ -225,8 +226,7 @@ export function buildOutcomes(events, { cfg, prev = [], sizeOf = () => 'normal',
       const task = e.task || s.task;
       if (!task) continue;
       sessions.push({ agent: e.agent, start: s.start, end: Math.max(s.start, Date.parse(e.meta?.endedAt || '') || ts(e)), model: e.model || s.model, tool: e.meta?.tool || s.tool, task: String(task), reason: String(e.meta?.reason || ''), handed: (e.meta?.handed || []).map((h) => h?.task).filter(Boolean), notFailure: endNotAFailure(e) });
-    } else if (e.type === 'task.done' || e.type === 'lane.merged') { if (e.task) add(landings, String(e.task), ts(e)); }
-    else if (e.type === 'task.train.landed') { for (const t of e.meta?.lanes || [e.task]) if (t) add(landings, String(typeof t === 'object' ? t.task : t), ts(e)); }
+    } else if (tasksOf(e, ['web', 'closed']).length) { for (const t of tasksOf(e, ['web', 'closed'])) add(landings, t, ts(e)); } // a session succeeds when its task lands or closes (same as 2.87)
     else if (e.type === 'task.paused' && e.task) add(pauses, String(e.task), { at: ts(e), agent: e.agent, msg: String(e.msg || ''), ownerStep: e.meta?.ownerStep || null });
   }
   const byTask = new Map();

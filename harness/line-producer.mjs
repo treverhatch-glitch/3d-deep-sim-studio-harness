@@ -20,6 +20,7 @@ import { writeAtomic, readJson } from './fsafe.mjs';
 import { OWNER_STEP_PROTECTED } from './owner-only.mjs';
 import { postAsk } from './ask-post.mjs';
 import { flagOf, numSplit as num } from './helpers.mjs';
+import { landings } from './landings.mjs';
 
 export const LINE_AGENT = 'line-producer';
 export const LINE_DIR = () => path.join(STUDIO_STATE_DIR, 'line');
@@ -991,7 +992,9 @@ export async function twinPass({ now = Date.now(), env = process.env, act = true
   const events = deps.events || readRecentEvents(20000);
   const since = Date.parse(st.since) || 0;
   const added = new Map(events.filter((e) => e.type === 'task.added' && e.task).map((e) => [e.task, e]));
-  const landed = [...new Map(events.filter((e) => e.type === 'task.done' && e.task && Date.parse(e.ts) >= since && !seen[e.task]).map((e) => [e.task, e])).values()];
+  // Every close (same as 2.87): its title is in the close's msg, an engine task is named so below, and a task that
+  // landed nothing finds no commit, so the git check, not the record kind, decides.
+  const landed = [...new Map(landings(events, 'closed', { since }).filter((l) => !seen[l.task]).map((l) => [l.task, l.e])).values()];
   const { globRe } = await import('./merge-lane.mjs');
   const board = deps.queue || (await import('./task.mjs')).parseNextQueue();
   const open = [...(board.inProgress || []), ...(board.backlog || [])];
