@@ -67,6 +67,7 @@ written to a temp file and renamed (`harness/fsafe.mjs`), and every board and ho
 - **Unreadable claim file**: "claimed (lock being written)" for `STUDIO_BROKEN_LOCK_GRACE_SEC` (10 s), then moved to
   `.studio/locks/broken/` (kept). Folder claims ignore case. An unreadable `STOP.json` counts as stopped; `npm run task -- resume
   --by <name>` clears it.
+  There are two stops, the studio's (`STOP.json`) and the supervisor's (`studio:stop`, or a halt); each resume command says when the other is still set.
 - **NEXT.md / DONE.md move**: the file gaining the task is written first, so a kill leaves it in both, never neither
   (`.studio/board-move.json`); both with no note counts as done; `task reopen` brings it back; `npm run watch` keeps one.
 - **Leaked claims** (on a task done, waiting or gone) are released by `npm run watch` after `STUDIO_CLAIM_LEAK_GRACE_SEC` (60) of

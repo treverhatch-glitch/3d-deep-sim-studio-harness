@@ -6,7 +6,8 @@
  * While on, every watch pass also:
  *   1. answers a refresh check nobody answered in STUDIO_WATCHDOG_CHECK_MIN (15) minutes: hand off;
  *   2. parks a task handed back STUDIO_WATCHDOG_HANDBACKS (3) times in 2 hours, with the reason;
- *   3. stops the studio if no task finished in STUDIO_WATCHDOG_IDLE_HOURS (2) while task sessions ran (0: off);
+ *   3. stops the studio if no task finished (done, landed or queued for a train) in STUDIO_WATCHDOG_IDLE_HOURS (2) while
+ *      task sessions ran (0: off);
  *   4. raises drift Checks (harness/stall.mjs driftCheck; `npm run watchdog -- drift` lists them), stopping nothing;
  *   5. runs the self-triage list and, daily at STUDIO_DIGEST_HOUR (9, local), writes the digest (harness/digest.mjs).
  */
@@ -17,6 +18,9 @@ import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { writeAtomic } from './fsafe.mjs';
 import { postAsk, closeStaleAsks } from './ask-post.mjs';
 import { reloadEnvIfChanged } from './env-reload.mjs';
+import { landings } from './landings.mjs';
+
+const ENGINE_QUEUED = /^task\.train\.[a-z][a-z0-9-]{1,30}\.queued$/;
 
 export const WATCHDOG_FILE = path.join(STUDIO_STATE_DIR, 'watchdog.json');
 export function readWatchdog() {
@@ -39,10 +43,9 @@ export function setWatchdog(on, by) {
 }
 
 /**
- * The idle stop. Stops the studio when sessions that held a task ran for the whole window and none finished. The window
- * starts no earlier than the studio's first event, the watchdog being switched on, or the last resume, so a young or
- * just-resumed studio is never stopped for hours it didn't run. Planning sessions (Producer, Director, any session that
- * never held a task) don't count: they don't finish tasks by design.
+ * The idle stop. Stops the studio when sessions that held a task ran for the whole window and none finished: no task
+ * done, no landing, no lane queued for a train. The window starts no earlier than the studio's first event, the
+ * watchdog being switched on, or the last resume. Planning sessions (any that never held a task) don't count.
  */
 export function idleStopReason(now, { events = [], lim = watchdogLimits(), w = {}, auto = false, supervisorStartedAt = 0 } = {}) {
   if (!(lim.idleHours > 0)) return null;
@@ -59,7 +62,9 @@ export function idleStopReason(now, { events = [], lim = watchdogLimits(), w = {
   const since = Math.max(studioStart, switchedOn, resumed, supStart);
   if (since > win) return null;
   const inWin = events.filter((e) => ts(e) >= win);
-  if (inWin.some((e) => e.type === 'task.done')) return null;
+  // 2.91: finished work is a task.done, a landing, or a lane its session queued for a train (web or engine).
+  if (inWin.some((e) => e.type === 'task.done' || e.type === 'task.train.queued' || e.type === 'task.done.queued' || ENGINE_QUEUED.test(e.type))) return null;
+  if (landings(inWin, 'landed').length) return null;
   const heldTask = new Set(inWin.filter((e) => /^task\.(start|paused|done|claimed)$/.test(e.type) && e.agent).map((e) => e.agent));
   const ran = inWin.filter((e) => e.type === 'agent.session.end' && (e.task || e.meta?.handed?.length || heldTask.has(e.agent))).length;
   return ran >= 2 ? { ran, hours: lim.idleHours } : null;

@@ -5364,6 +5364,14 @@ if (inShard('selftest-290c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.91 (w1, w2): the idle stop counts queued and landed work; each resume command names the other stop.
+if (inShard('selftest-291b')) {
+  const dir = copyRepo();
+  const { selftest291B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-291b.mjs')).href);
+  await selftest291B({ dir, report, tmpRoot, root, copyRepo });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
