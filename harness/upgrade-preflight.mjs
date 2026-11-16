@@ -5,7 +5,7 @@
  * One line per item (PASS / WARN / FAIL / INFO), a Fix line under each WARN and FAIL; exit 1 on any FAIL. Items: node,
  * git (STUDIO_PREFLIGHT_MIN_GIT, 2.34), checkout, board, owner-key (FAIL if studio/keys/owner-ed25519.pub.pem is not
  * committed), signatures (qa/protected-check.mjs), disk / ram (STUDIO_DISK_MIN_FREE_GB, STUDIO_PREFLIGHT_MIN_RAM_GB
- * 4), tools (STUDIO_UNITY, GODOT_BIN), webhook (STUDIO_REPORT_WEBHOOK, never printed; FAIL when .env is tracked),
+ * 4), pull-trap (WARN), tools (STUDIO_UNITY, GODOT_BIN), webhook (STUDIO_REPORT_WEBHOOK, never printed; FAIL when .env is tracked),
  * policy (studio/policy.json, delegation.json, autonomy.json, overseer.json must parse), dotenv-identity
  * (STUDIO_LOCK_OWNER, STUDIO_ROLE, STUDIO_AGENT, STUDIO_MAIN_ROOT in .env), lanes, long-run/…, game-tests/… (FAIL: no
  * "focus" command; a file named in STUDIO_TEST_QUARANTINE or STUDIO_TEST_EXCLUDE still listed). No harness imports.
@@ -115,6 +115,28 @@ function checkCheckout(root, ref, deps) {
     return item('checkout', 'PASS', `main checkout on ${branch}; ${ref} is ${sha.slice(0, 10)} (harness ${from} -> ${to})`);
   }
   return item('checkout', 'PASS', `main checkout on ${branch}`);
+}
+
+/**
+ * 2.90: { branch, upstream, detail, fix } when the studio's branch tracks a branch on the remote the harness release `ref`
+ * comes from (a plain `git pull` would then merge the harness into the studio), else null. Reads only; never throws.
+ */
+export function pullTrap(root, ref) {
+  try {
+    const branch = out1(git(['symbolic-ref', '-q', '--short', 'HEAD'], root));
+    const r = String(ref || '').replace(/^refs\/remotes\//, '');
+    if (!branch || !r) return null;
+    const remotes = out1(git(['remote'], root)).split(/\r?\n/).filter(Boolean);
+    const from = remotes.filter((n) => r.startsWith(`${n}/`)).sort((a, b) => b.length - a.length)[0];
+    const tracked = out1(git(['config', '--get', `branch.${branch}.remote`], root));
+    if (!from || tracked !== from) return null;
+    const upstream = out1(git(['rev-parse', '--abbrev-ref', `${branch}@{upstream}`], root)) || `${from}/${branch}`;
+    return { branch, upstream, detail: `${branch} tracks ${upstream}, on ${from}, the remote the harness release comes from: a plain git pull would merge the harness into the studio`, fix: 'git branch --unset-upstream' };
+  } catch { return null; }
+}
+function checkPullTrap(root, ref) {
+  const t = pullTrap(root, ref);
+  return t ? [item('pull-trap', 'WARN', t.detail, t.fix)] : [];
 }
 
 function checkBoard(root, deps) {
@@ -335,7 +357,7 @@ export async function preflight({ root, ref = null, env = process.env, deps = {}
   // The environment wins over .env, except where it is empty (an empty value is no value).
   const e = { ...readDotEnv(root) };
   for (const [k, v] of Object.entries(env)) if (String(v ?? '').trim() !== '' || !(k in e)) e[k] = v;
-  const items = [checkNode(root, ref), checkGit(e), checkCheckout(root, ref, deps), ...checkBoard(root, deps), ...checkOwnerKey(root, e), checkSignatures(root, env), ...(await checkMachine(root, e)), ...checkTools(e), ...checkWebhook(root, e), ...checkDotEnvIdentity(root), ...checkPolicy(root), ...checkLanes(root), ...(await checkGameTests(root, e)), ...(await longRunItems(root))];
+  const items = [checkNode(root, ref), checkGit(e), checkCheckout(root, ref, deps), ...checkPullTrap(root, ref), ...checkBoard(root, deps), ...checkOwnerKey(root, e), checkSignatures(root, env), ...(await checkMachine(root, e)), ...checkTools(e), ...checkWebhook(root, e), ...checkDotEnvIdentity(root), ...checkPolicy(root), ...checkLanes(root), ...(await checkGameTests(root, e)), ...(await longRunItems(root))];
   return { ok: !items.some((i) => i.status === 'FAIL'), items, lines: itemLines('preflight', items) };
 }
 

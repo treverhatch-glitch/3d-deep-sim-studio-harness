@@ -114,8 +114,9 @@ export function readLineStatus(root = REPO_ROOT, now = Date.now()) {
   const pick = (...ks) => { for (const k of ks) { const v = Number(b[k]); if (b[k] !== undefined && b[k] !== null && Number.isFinite(v)) return v; } return null; };
   const running = pick('running', 'busy', 'active', 'now');
   const target = pick('target', 'want', 'wanted', 'n', 'goal');
+  const ready = pick('ready');
   const blocked = (Array.isArray(s.blocked) ? s.blocked : []).slice(0, 5).map((x) => (typeof x === 'string' ? x : `${x?.task || x?.id || '?'}: ${x?.why || x?.reason || '?'}`)).map((x) => short(x, 100));
-  return { running, target, text: short(s.text || s.line || s.summary || '', 200), lead: short(typeof s.lead === 'string' ? s.lead : '', 260), blocked, at, fresh: now - at <= LINE_FRESH_MS && now - at >= -60000 };
+  return { running, target, ready, text: short(s.text || s.line || s.summary || '', 200), lead: short(typeof s.lead === 'string' ? s.lead : '', 260), blocked, at, fresh: now - at <= LINE_FRESH_MS && now - at >= -60000 };
 }
 
 /**
@@ -138,6 +139,7 @@ export async function commFacts({ root = REPO_ROOT, env = process.env, now = Dat
   f.trainLock = lock && lock.pid ? { ...lock, dead: !alive(lock.pid) } : null;
   // 2.85 (e): the rest of what is running (an engine train, an engine land or rules check, other heavy work).
   f.inProgress = deps.inProgress !== undefined ? deps.inProgress : await workInProgress(root, { env });
+  f.engines = deps.engines !== undefined ? deps.engines : await engineTrains(root);
   const starts = events.filter((e) => e.type === 'task.train.start' && e.meta?.train);
   const ends = events.filter((e) => /^task\.train\.(done|died|dead|crashed)$/.test(e.type) && e.meta?.train);
   const lastEnd = ends[ends.length - 1] || null;
@@ -185,6 +187,32 @@ export async function commFacts({ root = REPO_ROOT, env = process.env, now = Dat
   if (fs.existsSync(path.join(root, '.studio', 'supervisor-stop'))) f.stopFiles.push({ key: 'supervisor', text: 'npm run studio:stop was asked: the supervisor is stopping (agents finish their task)' });
   f.crewPaused = Object.entries(readJson(path.join(root, '.studio', 'crew-paused.json'), {})?.roles || {}).map(([role, p]) => ({ role, why: short(p?.why || '', 120) }));
   return f;
+}
+
+/**
+ * 2.90: each engine train: [{ engine, label, running, batch, queued, tasks }] (label from studio/game.json, queue and
+ * lock files as harness/unity-train.mjs writes them). Only engines that can land. Never throws.
+ */
+export async function engineTrains(root) {
+  try {
+    const et = await import('./engine-tracks.mjs');
+    return et.engineTargets({ root }).filter((t) => t.land).map((t) => {
+      const q = readJson(path.join(root, '.studio', 'train', et.engineFiles(t.name).queue), []);
+      const lock = readJson(path.join(root, '.studio', 'locks', et.engineFiles(t.name).lock), null);
+      const running = Boolean(lock && lock.pid && alive(lock.pid));
+      const batch = running && Array.isArray(lock.lanes) ? lock.lanes.map(String) : [];
+      const queued = (Array.isArray(q) ? q : []).filter((e) => e && e.task && !batch.includes(e.task)).map((e) => String(e.task));
+      return { engine: t.name, label: t.label || t.name, running, batch: batch.length, queued: queued.length, tasks: [...batch, ...queued] };
+    });
+  } catch { return []; }
+}
+
+/** 2.90: the tasks that wait on an engine train (queued or in its batch): { n, label } or null. */
+export function engineWait(f) {
+  const on = (f.engines || []).filter((e) => e.tasks?.length);
+  if (!on.length) return null;
+  const tasks = new Set(on.flatMap((e) => e.tasks));
+  return { n: tasks.size, label: on.map((e) => e.label).join(' and ') };
 }
 
 /**
@@ -258,6 +286,9 @@ export function alertsNow(f, { env = process.env, state = {}, passWhy = [] } = {
   let low = null;
   if (f.line?.fresh && Number.isFinite(f.line.target) && Number.isFinite(f.line.running) && f.line.running < f.line.target) low = { have: f.line.running, want: f.line.target, from: 'the Line Producer' };
   else if (!f.line?.fresh && s.minBuilders > 0 && f.supRunning && builders < s.minBuilders) low = { have: builders, want: s.minBuilders, from: 'STUDIO_COMM_MIN_BUILDERS' };
+  // 2.90: idle builders while the ready work waits on an engine train are not "low".
+  const wait = engineWait(f);
+  if (low && wait && !(f.line?.fresh && f.line.ready > 0)) low = null;
   if (low && !stopped && Date.parse(state.lowSince || '') && f.now - Date.parse(state.lowSince) >= LOW_BUILDERS_MS) add('builders-low', 'fix', f.line?.lead && low.from === 'the Line Producer' ? `${low.have} of ${low.want} builders busy for ${mins(f.now - Date.parse(state.lowSince))}: ${f.line.lead}.` : `Only ${low.have} of ${low.want} builders busy (${low.from}) for ${mins(f.now - Date.parse(state.lowSince))}${f.line?.blocked?.length ? `; blocked: ${f.line.blocked.slice(0, 3).join('; ')}` : ''}.`); // 2.83: the planner's own reason leads, when it has one
   f.lowNow = Boolean(low && !stopped);
   // The crew breaker, a halt, stop files.
@@ -311,9 +342,18 @@ export function statusText(f, { alerts = [] } = {}) {
   if (f.train) L.push(`Train ${f.train.train}${f.train.lanes ? ` (${f.train.lanes} lanes)` : ''}: ${short(String(f.train.text || f.train.step || '').split(';')[0], 80)}${f.train.since ? `, since ${hhmm(Date.parse(f.train.since))}` : ''}${f.train.eta?.text ? `; ${String(f.train.eta.text).replace(/\s*\(.*\)$/, '')}` : ''}${queue}`);
   else if (f.trainLock?.dead) L.push(`Train ${f.trainLock.id || '?'}: dead (its process is gone)${queue}`);
   else L.push(`Train: idle${queue}${f.lastTrain ? `; last ${f.lastTrain.id} ${f.lastTrain.died ? 'died' : 'ended'} ${hhmm(f.lastTrain.at)}${f.lastTrain.ms ? ` after ${mins(f.lastTrain.ms)}` : ''}${f.lastTrain.msg ? `: ${f.lastTrain.msg}` : ''}` : ''}`);
+  // 2.90: an engine train that runs or has branches queued, beside the web train (its name from studio/game.json).
+  const eng = (f.engines || []).filter((e) => e.running || e.queued || e.batch).map((e) => `${e.label} train: ${e.running ? 'running' : 'not running'}${e.batch ? `, ${e.batch} branch${e.batch === 1 ? '' : 'es'}` : ''}${e.queued ? `, ${e.queued} queued` : ''}`);
+  if (eng.length) L[L.length - 1] += `; ${eng.join('; ')}`;
   L.push(f.rigLine ? f.rigLine.replace(/^Machine:/, 'Rig:') : 'Rig: no recent machine scan');
   if (f.api) L.push(`API: $${f.api.usd.toFixed(2)} since ${hhmm(f.t0)} (${f.api.sessions} session${f.api.sessions === 1 ? '' : 's'}${f.api.unpriced ? `; ${f.api.unpriced} unpriced` : ''})`);
-  if (f.line && (f.line.text || Number.isFinite(f.line.target))) L.push(`Line Producer: ${f.line.text || `${f.line.running ?? '?'} of ${f.line.target} builders busy`}${f.line.fresh ? '' : ' (stale)'}`);
+  if (f.line && (f.line.text || Number.isFinite(f.line.target))) {
+    // 2.90: idle builders with the ready work queued for an engine train say so.
+    const w = engineWait(f);
+    const idle = w && Number.isFinite(f.line.target) && f.line.running < f.line.target && !(f.line.fresh && f.line.ready > 0);
+    const why = idle ? `${f.line.text ? '; ' : ': '}${w.n} task${w.n === 1 ? ' waits' : 's wait'} on the ${w.label} train` : '';
+    L.push(`Line Producer: ${f.line.text || `${f.line.running ?? '?'} of ${f.line.target} builders busy`}${why}${f.line.fresh ? '' : ' (stale)'}`);
+  }
   const bl = f.blockers.map((b) => (b.ids ? `${b.text}: ${cut(b.ids, 4)}` : b.text));
   for (const b of f.line?.blocked || []) bl.push(b);
   L.push(bl.length ? `Blocked: ${short(bl.join('; '), 400)}` : 'Blocked: nothing');

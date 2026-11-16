@@ -48,7 +48,7 @@ The studio's files are the memory, not the chat.
   the exception gets no card: at each check point the harness hands it off when its context is at or over
   `STUDIO_REFRESH_HANDOFF_PCT` (60) percent of its model's context window (the window `harness/model-limits.mjs` knows;
   unknown: twice the refresh point), or when it has made no commit and no verify for `STUDIO_REFRESH_IDLE_TURNS` (40)
-  turns, and otherwise lets it continue. The decision is recorded as a check by `rule` and logged as
+  turns (counted from its first commit or file edit; a session still reading is not idle), and otherwise lets it continue. The decision is recorded as a check by `rule` and logged as
   `agent.refresh.decided` (decision, why, turns, tokens, percent). A flagged mid-debug session still gets the card, and
   the Director or Producer can still run `session -- check` by hand at any time. `STUDIO_REFRESH_DECIDE=ask` sends every
   check as a card, as before 2.85.
