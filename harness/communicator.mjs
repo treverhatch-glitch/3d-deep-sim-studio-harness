@@ -342,6 +342,9 @@ export function statusText(f, { alerts = [] } = {}) {
   if (f.train) L.push(`Train ${f.train.train}${f.train.lanes ? ` (${f.train.lanes} lanes)` : ''}: ${short(String(f.train.text || f.train.step || '').split(';')[0], 80)}${f.train.since ? `, since ${hhmm(Date.parse(f.train.since))}` : ''}${f.train.eta?.text ? `; ${String(f.train.eta.text).replace(/\s*\(.*\)$/, '')}` : ''}${queue}`);
   else if (f.trainLock?.dead) L.push(`Train ${f.trainLock.id || '?'}: dead (its process is gone)${queue}`);
   else L.push(`Train: idle${queue}${f.lastTrain ? `; last ${f.lastTrain.id} ${f.lastTrain.died ? 'died' : 'ended'} ${hhmm(f.lastTrain.at)}${f.lastTrain.ms ? ` after ${mins(f.lastTrain.ms)}` : ''}${f.lastTrain.msg ? `: ${f.lastTrain.msg}` : ''}` : ''}`);
+  // 2.90: an engine train that runs or has branches queued, beside the web train (its name from studio/game.json).
+  const eng = (f.engines || []).filter((e) => e.running || e.queued || e.batch).map((e) => `${e.label} train: ${e.running ? 'running' : 'not running'}${e.batch ? `, ${e.batch} branch${e.batch === 1 ? '' : 'es'}` : ''}${e.queued ? `, ${e.queued} queued` : ''}`);
+  if (eng.length) L[L.length - 1] += `; ${eng.join('; ')}`;
   L.push(f.rigLine ? f.rigLine.replace(/^Machine:/, 'Rig:') : 'Rig: no recent machine scan');
   if (f.api) L.push(`API: $${f.api.usd.toFixed(2)} since ${hhmm(f.t0)} (${f.api.sessions} session${f.api.sessions === 1 ? '' : 's'}${f.api.unpriced ? `; ${f.api.unpriced} unpriced` : ''})`);
   if (f.line && (f.line.text || Number.isFinite(f.line.target))) {
