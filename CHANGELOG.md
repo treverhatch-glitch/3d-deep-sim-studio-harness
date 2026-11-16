@@ -6,7 +6,8 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ## [2.88.0] — 2026-11-16
 One reading of "landed", and one module of small helpers (the owner's order: the consolidation map's second step).
-About 200 lines more than 2.87, not fewer: the helpers saved 26 and the landing fix with its tests added 226.
+Code and tests are 200 lines larger than 2.87, not smaller: the helpers saved 26 and the landing fix with its tests
+added 226.
 Details: docs/RELEASE-2.88.0.md.
 - **Which tasks landed is read in one place** (`harness/landings.mjs`). On a crew's ten days, 140 tasks landed on the
   web main, 186 on the engine target and 404 were closed; some reports read only the web records and some counted

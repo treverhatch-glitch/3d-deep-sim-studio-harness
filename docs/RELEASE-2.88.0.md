@@ -33,7 +33,8 @@ that landed nothing.
 A studio with no lanes or trains closes tasks in the main checkout and writes no landing record. For such a log the
 changed reports count closes, as before (`landedMeasure`).
 
-Against 2.87.0: 191 files, about 200 lines more. This step was planned as a cut; it is a correction instead.
+Against 2.87.0: 187 files, 88 lines more (code and tests 200 more, rotated notes 112 fewer). This step was planned
+as a cut; it is a correction instead.
 
 ## Not changed, for the owner to decide
 
