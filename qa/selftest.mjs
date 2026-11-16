@@ -5340,6 +5340,14 @@ if (inShard('selftest-289a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.90: costs a studio's overseer wrote down running 2.86 (each item's checks are named 2.90 (<letter>)).
+if (inShard('selftest-290a')) {
+  const dir = copyRepo();
+  const { selftest290A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-290a.mjs')).href);
+  await selftest290A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

@@ -26,7 +26,7 @@ import { writeFocus, visionFor } from './focus.mjs';
 import { visionFixIds, visionFirst, mayFileVisionFix, parentIsVisionFix } from './vision-fix.mjs';
 import { PLAYER_TYPES } from './vision-card.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
-import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal, laneEntries } from './task-hold.mjs';
+import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal, laneEntries, proposalState } from './task-hold.mjs';
 import { stopIfOverBudget, overBudget as overBudgetOf } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
@@ -1423,7 +1423,9 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
  * (studio/NEXT.md or DONE.md; same test as harness/worktree.mjs taskOnBoard). A board that can't be read refuses nothing.
  */
 export function unknownAfter(ids) {
-  const bad = ids.filter((id) => !/^[A-Z]+-\d+$/.test(id) || taskOnBoard(id) === false);
+  // 2.90 (a): an open proposal is a valid wait too (promote moves the wait to the task it becomes).
+  const open = proposalState().open;
+  const bad = ids.filter((id) => !/^[A-Z]+-\d+$/.test(id) || (taskOnBoard(id) === false && !open.has(id)));
   return bad.length ? `${bad.join(', ')} ${bad.length > 1 ? 'are' : 'is'} not a task id on the board (studio/NEXT.md, studio/DONE.md): a task can't wait for it. Check the id (npm run task -- list).` : '';
 }
 

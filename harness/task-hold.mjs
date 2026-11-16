@@ -32,6 +32,20 @@ export function readHolds() {
     return {};
   }
 }
+/**
+ * 2.90 (a): the proposals in studio/proposed.json as { open: Set of ids, became: Map id -> task id }. Read here, not
+ * imported (harness/proposed.mjs imports this file); kept until the file's time or size changes.
+ */
+let proposalCache = { key: '', v: { open: new Set(), became: new Map() } };
+export function proposalState(file = path.join(REPO_ROOT, 'studio', 'proposed.json')) {
+  let key = '';
+  try { const s = fs.statSync(file); key = `${file}:${s.mtimeMs}:${s.size}`; } catch { return { open: new Set(), became: new Map() }; }
+  if (key === proposalCache.key) return proposalCache.v;
+  const items = (readJ(file)?.items || []).filter((i) => i && /^P-\d+$/.test(String(i.id)));
+  const v = { open: new Set(items.filter((i) => !i.promoted && !i.dropped).map((i) => String(i.id))), became: new Map(items.filter((i) => typeof i.promoted === 'string').map((i) => [String(i.id), i.promoted])) };
+  proposalCache = { key, v };
+  return v;
+}
 function writeHolds(tasks) {
   // 2.57.0 (PU-16): replaced whole, so a reader never sees half of it.
   writeAtomic(HOLDS_FILE, `${JSON.stringify({ tasks }, null, 2)}\n`);
@@ -238,6 +252,15 @@ export function holdReason(taskId, q, now = Date.now(), holds = readHolds(), rol
       return s.same ? `same blocker as attempt ${s.n} (${s.reasonKey || 'no reason'}): main unchanged since ${String(s.mainTip || '').slice(0, 7)} and nothing it waits for landed; fix it or npm run task -- unblock ${taskId} --by <name>` : null;
     } catch { return null; }
   };
+  // 2.90 (a): a task whose title or --after list names a proposal waits while it is a proposal, then for the task it became.
+  if (rt && !q.inProgress?.some((x) => x.id === taskId) && !/^(producer|director|planner|human)$/i.test(String(rt.role || ''))) {
+    const ps = proposalState();
+    const named = [...new Set([...(String(rt.title || '').match(/\bP-\d+\b/g) || []), ...(holds[taskId]?.after || []).filter((x) => /^P-\d+$/.test(x))])];
+    const open = named.filter((p) => ps.open.has(p));
+    if (open.length) return `waits for ${open.join(', ')}, still a proposal (studio/proposed.json): the Producer promotes it with npm run task -- promote ${open.join(',')} --by <name>`;
+    const became = named.filter((p) => ps.became.has(p) && !doneIds(q).has(ps.became.get(p))).map((p) => `${ps.became.get(p)} (was ${p})`);
+    if (became.length) return `waits for ${became.join(', ')}`;
+  }
   const h = holds[taskId];
   if (!h) return sameWall();
   const done = doneIds(q);
@@ -262,6 +285,7 @@ export function holdOwner(taskId, q, now = Date.now(), holds = readHolds(), hold
   const why = holdReason(taskId, q, now, holds);
   if (!why) return null;
   if (/trunk is red/.test(why)) return { owner: 'the trunk fix', why };
+  if (/still a proposal/.test(why)) return { owner: 'the Producer', why };
   const h = holds[taskId] || {};
   if (h.needsYes) return { owner: 'the dev', why };
   if (h.parked && !parkOver(h.parked.until, doneIds(q), now)) return { owner: h.parked.by || 'the Producer', why };
