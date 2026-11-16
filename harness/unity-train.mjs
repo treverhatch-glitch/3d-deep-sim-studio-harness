@@ -25,6 +25,7 @@ import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts,
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE } from './engine-rules.mjs';
+import { compileSearchOf, compileSearch, compileAt } from './engine-compile.mjs';
 import { removeLandedLane, pruneBuilds, buildsConfig } from './engine-clean.mjs';
 import { flagOf, foldRealOf, gitMax64 as git, numBlankDefault as num, realOrResolved as real, short8 as short, sleepSyncClamped as sleep, stdoutOf as out } from './helpers.mjs';
 
@@ -861,6 +862,23 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       else drop(l, `refused before the land run: ${pl.why}\nFix it on ${l.branch}, then task done ${l.task} --train again.`, { cause: 'precheck' });
     }
     set = kept;
+  }
+  // 2.90: the compile search (harness/engine-compile.mjs): the batch compiled with the cheap compile command before anything long.
+  // Lanes that do not compile with the ones before them are handed back with the compiler's lines (cause 'compile').
+  const cc = compileSearchOf(s.cfg);
+  if (cc && set.length > 1) {
+    update({ now: `compile search: ${set.map((l) => l.task).join(', ')}` });
+    const rc = (() => { try { return rulesConfig(engine, { root, env, repo, ref: target }); } catch { return null; } })();
+    const cs = compileSearch({ repo, tip: tip0, lanes: set, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine), at: (sha) => compileAt({ repo, sha, cmd: cc, root, id, engine, rules: rc, env, log }) });
+    log(`[unity-train] ${id}: compile search (engines.${engine}.${cc.source}): ${cs.why} (${cs.runs} compile run(s))`);
+    res.compile = { runs: cs.runs, left: cs.left.map((x) => x.lane.task), ...(cs.targetRed ? { targetRed: true } : {}) };
+    if (cs.left.length || cs.targetRed) ev('compile_search', id, `${cs.why}; ${cs.runs} compile run(s) of engines.${engine}.${cc.source}, no land run`, { agent: by, status: cs.left.length ? 'warn' : 'ok', meta: { runs: cs.runs, left: cs.left.map((x) => x.lane.task), kept: cs.kept.map((l) => l.task), ...(cs.targetRed ? { targetRed: true } : {}) } });
+    for (const x of cs.left) {
+      const w = x.with.map((l) => `${l.task} (${l.branch})`).join(', ');
+      const said = x.lines.length ? x.lines : (x.tail || '').split('\n').filter(Boolean).slice(-6);
+      drop(x.lane, `refused before the land run: it does not compile ${w ? `together with ${w}, which go on in this train` : `on ${target} by itself`} (engines.${engine}.${cc.source}: ${cc.command}). ${w ? `Once ${x.with.length === 1 ? 'it has' : 'they have'} landed, bring ${target} in (${targetMergeCommand(x.lane.task)}) and fix the lines below${x.lines.some((l) => /\bCS01(01|02|11)\b/.test(l)) ? ' (both branches declare the same member or type: keep one)' : ''}` : `Bring ${target} in (${targetMergeCommand(x.lane.task)}) and fix the lines below`}, then task done ${x.lane.task} --train again.\nThe compiler:\n${said.map((l) => `  ${l}`).join('\n')}`, { cause: 'compile', evidence: { files: x.files } });
+    }
+    set = set.filter((l) => !cs.left.some((x) => x.lane.task === l.task));
   }
   // The rules check on the batch as it would land (harness/engine-rules.mjs), before the long land run. A lane that turns the batch red is
   // handed back with cause 'rules'; a check that is red on the target itself judges nobody. The land run then gets STUDIO_RULES_GREEN=1 while it

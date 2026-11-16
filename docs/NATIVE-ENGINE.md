@@ -446,6 +446,24 @@ Around the train:
 - `node harness/unity-train.mjs queue --task <ID> [--engine x] [--branch b] [--alone]` queues a branch without closing
   a task; `npm run task -- train dequeue <ID>` takes one out.
 
+
+## The engine train from 2.90: compile search, blame by file, checks before queueing
+
+From a studio's day: a batch of three took four land runs (two hours) to find a branch that compiled alone but not with
+another, and a test that fails whenever a branch moves a pinned commit was found by a search of land runs twice.
+
+- **The compile search.** When `engines.<x>.quickCheck` is set (the compile a porter's `task done` already runs), a batch of
+  two or more branches is compiled as it would land, before the rules check and the land run, in a throwaway checkout of
+  the engine repo (the `rules.paths` sparse checkout and `rules.lfs` when set). Red there and green on the target: merged
+  prefixes find each branch that does not compile with the ones before it (a few one-minute runs, never a land run). Each
+  is handed back at once (cause `compile`) with the compiler's own lines (checkout folder taken out), the branch(es)
+  before it that change a file the compiler names, and the fix: once those have landed, bring the target in and fix the
+  lines. The rest go on to ONE land run. Red on the target itself: nobody is judged by it. Event
+  `task.train.<x>.compile_search`; the train's result has `compile: { runs, left }`. `engines.<x>.compileSearch`: `false`
+  turns it off; a command string uses that command instead of `quickCheck`. The time limit is `quickCheckTimeoutMin` (30).
+  Example: `"quickCheck": "dotnet build tools/SimTests --nologo"` alone is enough. Unlike `compileFirst` (the land
+  command with `STUDIO_LAND_ONLY=compile`, once per group), it needs nothing from the land script.
+
 ## The land's stage report
 
 A land command knows where its time went; the harness didn't. Now it names a file in `STUDIO_LAND_RESULT` and reads

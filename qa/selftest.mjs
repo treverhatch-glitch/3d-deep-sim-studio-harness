@@ -5340,6 +5340,14 @@ if (inShard('selftest-289a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.90 (t): the engine train's speed limit: the compile search, engines.<x>.blame, engines.<x>.preQueue, rules.first.
+if (inShard('selftest-290b')) {
+  const dir = copyRepo();
+  const { selftest290B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-290b.mjs')).href);
+  await selftest290B({ dir, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
