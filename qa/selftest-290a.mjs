@@ -85,18 +85,23 @@ console.log(JSON.stringify({ open, owner: owner && owner.owner, producer, viaAft
     fs.rmSync(path.join(S, 'studio', 'proposed.json'), { force: true });
     node(['harness/intake.mjs', '--answers', 'studio/templates/intake-example.json']);
     const sign = node(['harness/bible.mjs', 'sign', '--by', 'hatch']);
-    const p1 = task('add', 'Port (engine, batch 1): the rules of the store', '--role', 'engine-porter', '--agent', 'engine-porter-1', '--why', 'the next batch of the port plan');
-    const p2 = task('add', 'Port (engine, batch 2): the rules of the market', '--role', 'engine-porter', '--agent', 'engine-porter-1', '--why', 'the batch after it');
+    const p1 = task('add', 'Engine batch 1: the rules of the store', '--role', 'engine-porter', '--agent', 'engine-porter-1', '--why', 'the next batch of the port plan');
+    const p2 = task('add', 'Engine batch 2: the rules of the market', '--role', 'engine-porter', '--agent', 'engine-porter-1', '--why', 'the batch after it');
+    const p3 = task('add', 'Port (engine, batch 3): the rules of the yard', '--role', 'engine-porter', '--agent', 'engine-porter-1', '--why', 'a batch whose title says it is a port');
     const plain = task('promote', 'P-1', '--by', 'prod-1');
     const flagged = task('promote', 'P-1', '--by', 'prod-1', '--phase', '1', '--serves', 'pillar:Calm');
     const chore = task('promote', 'P-2', '--by', 'prod-1', '--type', 'chore');
     const badType = task('promote', 'P-2', '--by', 'prod-1', '--type', 'nonsense');
-    await guard('2.90 (b) a porter\'s "Port …" proposal: plain `task promote` still refuses it and says to promote with --phase and --serves (or --type chore); `promote P-1 --phase 1 --serves pillar:Calm` queues it, and `promote P-2 --type chore` queues it as "Chore: Port …"; an unknown --type is refused (fails on 2.89: promote took no flags, so both stayed refused and were re-added by hand)', () => [
+    const port = task('promote', 'P-3', '--by', 'prod-1');
+    await guard('2.90 (b) a porter\'s proposal that is a build task: plain `task promote` refuses it and says to promote with --phase and --serves (or --type chore); `promote P-1 --phase 1 --serves pillar:Calm` queues it, and `promote P-2 --type chore` queues it as "Chore: …"; an unknown --type is refused (fails on 2.89: promote took no flags, so both stayed refused and were re-added by hand)', () => [
       sign.status === 0 && /Proposed P-1/.test(out(p1)) && /Proposed P-2/.test(out(p2))
         && /Refused: P-1/.test(out(plain)) && /promote P-1 --by prod-1 --phase/.test(out(plain)) && /--type chore/.test(out(plain))
-        && /Queued P-1→T-\d+/.test(out(flagged)) && /Queued P-2→T-\d+/.test(out(chore)) && Boolean(idOf('Chore: Port (engine, batch 2)')) && Boolean(idOf('Port (engine, batch 1): the rules of the store'))
+        && /Queued P-1→T-\d+/.test(out(flagged)) && /Queued P-2→T-\d+/.test(out(chore)) && Boolean(idOf('Chore: Engine batch 2')) && Boolean(idOf('Engine batch 1: the rules of the store'))
         && badType.status !== 0 && /Unknown --type/.test(out(badType)),
       JSON.stringify({ sign: out(sign).slice(-200), p1: out(p1).slice(-200), plain: out(plain).slice(-600), flagged: out(flagged).slice(-300), chore: out(chore).slice(-300), badType: out(badType).slice(-200) })]);
+    await guard('2.90 (b) an engine porter\'s proposal titled "Port …" is a chore by its title: plain `task promote` queues it with no --phase or --serves', () => [
+      /Proposed P-3/.test(out(p3)) && /Queued P-3→T-\d+/.test(out(port)) && Boolean(idOf('Port (engine, batch 3): the rules of the yard')),
+      JSON.stringify({ p3: out(p3).slice(-200), port: out(port).slice(-500) })]);
   }
 
   // ================= c. unblock ends a time block =================
