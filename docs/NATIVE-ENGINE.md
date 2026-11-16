@@ -463,6 +463,13 @@ another, and a test that fails whenever a branch moves a pinned commit was found
   turns it off; a command string uses that command instead of `quickCheck`. The time limit is `quickCheckTimeoutMin` (30).
   Example: `"quickCheck": "dotnet build tools/SimTests --nologo"` alone is enough. Unlike `compileFirst` (the land
   command with `STUDIO_LAND_ONLY=compile`, once per group), it needs nothing from the land script.
+- **A failing test tied to the files that explain it.** `engines.<x>.blame`: a list of `{ "test": "<regex on the
+  failing test's full name>", "touches": "<path or glob, or a list>", "say": "<what to do>" }`. After a red land run
+  (and in the rules check, with `rules.first` too) a failing test an entry matches ties the branches that change a file
+  it names: exactly one, and the next run is the batch without it (the 2.83 suspect step, rule `blame`), no halving
+  search; it is handed back with the evidence and the `say` line. Several: they go apart from the rest (2.85). An entry
+  with a bad regex or a path outside the repo is left out. Example: `"blame": [ { "test": "PinTests\\.", "touches":
+  "Rules~/pin.json", "say": "Regenerate the vectors at the new pin in the same branch" } ]`.
 
 ## The land's stage report
 

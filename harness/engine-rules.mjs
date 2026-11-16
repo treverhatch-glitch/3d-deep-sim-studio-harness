@@ -23,6 +23,7 @@ import { readJson, writeAtomic } from './fsafe.mjs';
 import { splitPlan } from './rules-parts.mjs';
 import { peakFromHistory, readUsedHistory } from './engine-ram.mjs';
 import { flagOf, isOff as off, numFiniteFirst as num, pushToOf, stdoutOf as out } from './helpers.mjs';
+import { matchAny } from './merge-lane.mjs';
 
 const on = (v) => /^(1|true|yes|on)$/i.test(String(v ?? '').trim());
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
@@ -133,6 +134,43 @@ const autoFilterOf = (auto, name) => auto.filters?.[name.toLowerCase()] || auto.
 /** 2.86: is a path under auto's root or a template's fixed start (where a system would be)? */
 const underAuto = (p, auto) => { const pl = p.toLowerCase(); return [`${auto.root}/`, ...auto.paths.map((t) => t.split('{name}')[0])].some((x) => x && pl.startsWith(x.toLowerCase())); };
 
+/**
+ * 2.90: engines.<x>.blame, checked: [{ test, re, touches: [glob], say }]. An entry ties failing tests (a regex on the full
+ * name) to the files that explain them (a path or glob, or a list). { blame, errors: [plain sentence] }.
+ */
+export function blameList(v) {
+  if (v === undefined || v === null) return { blame: [], errors: [] };
+  if (!Array.isArray(v)) return { blame: [], errors: ['engines.<x>.blame is not usable: it must be a list of { "test": "<regex>", "touches": "<path or glob>" }; it is left out'] };
+  const blame = []; const errors = [];
+  for (const e of v) {
+    const touches = (Array.isArray(e?.touches) ? e.touches : [e?.touches]).filter((x) => typeof x === 'string' && relOk(x.trim().replace(/\\/g, '/'))).map((x) => x.trim().replace(/\\/g, '/'));
+    let re = null; try { re = typeof e?.test === 'string' && e.test ? new RegExp(e.test) : null; } catch { re = null; }
+    if (!re || !touches.length) { errors.push(`engines.<x>.blame entry ${JSON.stringify(e).slice(0, 120)} left out: "test" must be a valid regex and "touches" a path or glob inside the repo`); continue; }
+    blame.push({ test: e.test, re, touches, say: typeof e.say === 'string' ? e.say.trim().slice(0, 300) : '' });
+  }
+  return { blame, errors };
+}
+
+/**
+ * 2.90: the lane engines.<x>.blame names for a red: the failing tests an entry matches, and the lanes that change a file
+ * its "touches" names. { lane, tests, files, entry } when exactly one lane does; { tied: [lane], tests } when several do;
+ * null when no entry matches a failing test or no lane changes its files.
+ */
+export function blameSuspect({ repo, tip, lanes = [], failures = [], blame = [] } = {}) {
+  const hit = blame.map((b) => ({ b, tests: failures.filter((f) => b.re.test(String(f))) })).filter((x) => x.tests.length);
+  if (!hit.length) return null;
+  const by = new Map();
+  for (const lane of lanes) {
+    const changed = changedPaths(repo, tip, lane.head) || [];
+    for (const { b, tests } of hit) {
+      const files = changed.filter((f) => matchAny(f, b.touches));
+      if (files.length && !by.has(lane.task)) by.set(lane.task, { lane, tests, files: files.slice(0, 6), entry: b });
+    }
+  }
+  if (by.size === 1) return [...by.values()][0];
+  return by.size > 1 ? { tied: [...by.values()].map((x) => x.lane), tests: hit.flatMap((x) => x.tests) } : null;
+}
+
 /** The rules check of engine <x>: { command, inputs, timeoutMin, source, env, lfs, paths, focus, share, maxLanes } or null. repo/ref: the engine repo and branch that decide the default. */
 export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo = null, ref = null } = {}) {
   if (!ENGINE_NAME_RE.test(String(engine || '')) || off(env.STUDIO_ENGINE_RULES)) return null;
@@ -169,7 +207,10 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
     } : null;
   const maxLanes = Math.max(0, Math.floor(num(o.maxLanes, 0)));
   if (f && typeof f === 'object' && f.auto !== undefined && !(typeof f.test === 'string' && f.test.includes('{filter}'))) focusBad.push('rules.focus.auto needs rules.focus.test with {filter} in it');
-  const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes };
+  // 2.90: engines.<x>.blame.
+  const bl = blameList(cfg.blame);
+  focusBad.push(...bl.errors);
+  const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, blame: bl.blame };
   const test = typeof r === 'string' ? r.trim() : typeof o.test === 'string' ? o.test.trim() : '';
   if (test) return { command: withSdk(test), inputs, timeoutMin, source: `studio/game.json engines.${engine}.rules`, ...extra };
   const d = DEFAULTS[engine];
@@ -847,6 +888,17 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; for (const gr of Array.isArray(r.groups) ? r.groups : []) groupSecs.set(gr.filter, (groupSecs.get(gr.filter) || 0) + (gr.seconds || 0)); }
     return r;
   };
+  // 2.90: engines.<x>.blame on a red: the one lane that changes the files a failing test is tied to is left out first; green
+  // without it, it is the culprit (no prefix search). { lane, why } or null.
+  const byBlame = (set, r, atFn) => {
+    const bs = cfg.blame?.length && set.length > 1 ? blameSuspect({ repo, tip, lanes: set, failures: r.failures || [], blame: cfg.blame }) : null;
+    if (!bs?.lane) return null;
+    const rest = set.filter((l) => l.task !== bs.lane.task);
+    const c = chain(tip, rest);
+    const rw = c.error || !c.head ? null : atFn(c.head);
+    if (rw?.status !== 'pass') { log(`[engine-rules] ${engine}: engines.${engine}.blame named ${bs.lane.task}, but the batch without it is ${rw?.status || 'not buildable'}: narrowing as before`); return null; }
+    return { lane: bs.lane, why: `engines.${engine}.blame ties ${bs.tests.slice(0, 3).join(', ')} to ${bs.entry.touches.join(', ')}, which only ${bs.lane.branch} changes (${bs.files.slice(0, 3).join(', ')}), and the check is green without it${bs.entry.say ? `. ${bs.entry.say}` : ''}` };
+  };
   // The calibration: the target must be green with the same command. 2.86: per part, only the parts the target has
   // (a system the batch adds has no tests on the target to calibrate) and that have no kept green there.
   let base;
@@ -872,6 +924,12 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     if (r.status === 'pass') { res.green = whole.head; break; }
     if (r.status !== 'red') { res.why = `${r.why}: the land run decides`; break; }
     if (res.runs >= maxRuns) { res.why = `the rules check is red and its ${maxRuns} runs are used (STUDIO_ENGINE_RULES_MAX_RUNS): the land run decides for ${set.map((l) => l.task).join(', ')}`; break; }
+    const bb = byBlame(set, r, (sha) => at(sha));
+    if (bb) {
+      res.dropped.push({ lane: bb.lane, failures: r.failures || [], part: r.part?.filter || null, blame: true, why: `the rules check (${sel.command}) is red on the batch with ${bb.lane.branch}: ${bb.why}${r.failures?.length ? `. Failing: ${r.failures.slice(0, 8).join(', ')}` : ''}${r.tail ? `\n${r.tail.split('\n').map((x) => `  ${x}`).join('\n')}` : ''}` });
+      set = set.filter((l) => l.task !== bb.lane.task);
+      continue;
+    }
     // The smallest red prefix: its last lane turns the batch red.
     let lo = 0; // target + the first lo lanes is green
     let hi = set.length; // target + the first hi lanes is red

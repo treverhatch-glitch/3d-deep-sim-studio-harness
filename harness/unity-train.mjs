@@ -24,7 +24,7 @@ import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeComman
 import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
-import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE } from './engine-rules.mjs';
+import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect } from './engine-rules.mjs';
 import { compileSearchOf, compileSearch, compileAt } from './engine-compile.mjs';
 import { removeLandedLane, pruneBuilds, buildsConfig } from './engine-clean.mjs';
 import { flagOf, foldRealOf, gitMax64 as git, numBlankDefault as num, realOrResolved as real, short8 as short, sleepSyncClamped as sleep, stdoutOf as out } from './helpers.mjs';
@@ -1245,8 +1245,14 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     const redStage = firstRedStage(r);
     try {
       const tipNow = headOf(repo, target);
-      const byFile = namedFiles.length ? suspectsByFiles({ repo, tip: tipNow, lanes: left, files: namedFiles }) : [];
-      if (byFile.length === 1) { sp = byFile[0]; rule = 'compile-files'; what = `the file(s) the compiler names (${sp.files.slice(0, 3).join(', ')})`; }
+      // 2.90: engines.<x>.blame first: the studio's own tie from a failing test to the files that explain it.
+      const bl = namedTests.length ? blameList(s.cfg.blame).blame : [];
+      const bs = bl.length ? blameSuspect({ repo, tip: tipNow, lanes: left, failures: namedTests, blame: bl }) : null;
+      if (bs?.lane) { sp = { lane: bs.lane, tests: bs.tests, files: bs.files, say: bs.entry.say }; rule = 'blame'; what = `${bs.entry.touches.join(', ')}, which engines.${engine}.blame ties to ${bs.tests.slice(0, 3).join(', ')}`; }
+      else if (bs?.tied && left.some((l) => !bs.tied.includes(l))) apart = { tied: bs.tied, untied: left.filter((l) => !bs.tied.includes(l)), byTest: Object.fromEntries(bs.tests.map((t) => [t, bs.tied.map((l) => l.task)])) };
+      const byFile = sp || apart ? [] : namedFiles.length ? suspectsByFiles({ repo, tip: tipNow, lanes: left, files: namedFiles }) : [];
+      if (sp || apart) { /* engines.<x>.blame decided */ }
+      else if (byFile.length === 1) { sp = byFile[0]; rule = 'compile-files'; what = `the file(s) the compiler names (${sp.files.slice(0, 3).join(', ')})`; }
       else if (!byFile.length && namedTests.length) {
         const sus = suspectsOf({ repo, tip: tipNow, lanes: left, failures: namedTests });
         if (sus.length === 1 && sus[0].tests.length === Math.min(namedTests.length, 20)) { sp = sus[0]; rule = 'class'; what = `files naming the failing test(s) (${sp.tests.slice(0, 3).join(', ')}: ${sp.files.slice(0, 3).join(', ')})`; }
@@ -1407,7 +1413,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       const sp = ties?.sp || { tests: [], files: [], what: 'the evidence' };
       const wr = results.find((x) => x.kind === 'without');
       const rest = wr?.group || [];
-      for (const l of ls) drop(l, `${blame(red)}\nBlame by evidence: the batch was red${sp.stage ? ` in its ${sp.stage} stage` : ''} on ${sp.tests.length ? sp.tests.slice(0, 5).join(', ') : 'a compile error'}, ${l.branch} (${l.task}) is the only branch that changes ${sp.what}, and the batch without it ${wr?.byName ? 'was green on those tests by name (it lands on one complete run next)' : 'landed green'} (${rest.join(', ')}). The files that tie them: ${sp.files.slice(0, 6).join(', ')}. Fix it on ${l.branch} (bring ${target} in first: ${targetMergeCommand(l.task)}), then task done ${l.task} --train again.`, { cause: 'evidence', evidence: { tests: sp.tests, files: sp.files } });
+      for (const l of ls) drop(l, `${blame(red)}\nBlame by evidence: the batch was red${sp.stage ? ` in its ${sp.stage} stage` : ''} on ${sp.tests.length ? sp.tests.slice(0, 5).join(', ') : 'a compile error'}, ${l.branch} (${l.task}) is the only branch that changes ${sp.what}, and the batch without it ${wr?.byName ? 'was green on those tests by name (it lands on one complete run next)' : 'landed green'} (${rest.join(', ')}). The files that tie them: ${sp.files.slice(0, 6).join(', ')}.${sp.say ? ` ${sp.say}` : ''} Fix it on ${l.branch} (bring ${target} in first: ${targetMergeCommand(l.task)}), then task done ${l.task} --train again.`, { cause: 'evidence', evidence: { tests: sp.tests, files: sp.files } });
       return;
     }
     if (st.cause === 'capped') {

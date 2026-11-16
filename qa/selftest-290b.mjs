@@ -202,5 +202,34 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: 
       JSON.stringify(r).slice(0, 2500)]);
   }
 
+  // ================= B1. a red the pin file explains (engines.<x>.blame) =================
+  const BLAME = [{ test: 'PinTests\\.', touches: 'pins/*.json', say: 'Re-record the vectors at the new pin in the same branch' }];
+  const B4 = () => engineRepo({ 'feat/p': { 'p.txt': 'p\n' }, 'feat/pin': { 'pins/web.json': '{ "commit": "beef002" }\n' }, 'feat/q': { 'q.txt': 'q\n' }, 'feat/r': { 'r.txt': 'r\n' } });
+  {
+    resetState();
+    const E = B4();
+    const ctl = path.join(T, 'ctl-blame');
+    setEngines({ unity: cfgFor(E, ctl, { blame: BLAME }) });
+    queue(E, [['T-011', 'feat/p'], ['T-012', 'feat/pin'], ['T-013', 'feat/q'], ['T-014', 'feat/r']]);
+    const r = probe(TRAIN);
+    const be = evs(/^task\.train\.unity\.blame$/);
+    const note = r.handed?.find((h) => h.task === 'T-012')?.note || '';
+    await guard('2.90 (t) B1: four branches, the second moves the pin without re-recording the vectors; engines.unity.blame ties the pin test to pins/*.json: the blame plan is "without T-012" (rule blame), 2 land runs, T-011, T-013, T-014 land on the second, T-012 is handed back with the evidence and the studio\'s line (fails on 2.89: no lane was tied, 5 land runs)', () => [
+      r.runs === 2 && r.landed?.join() === 'T-011,T-013,T-014' && r.dropped?.map((d) => d.task).join() === 'T-012' && be[0]?.meta?.plan === 'without' && be[0].meta.rule === 'blame'
+        && /pins\/web\.json/.test(note) && /Re-record the vectors at the new pin/.test(note) && new RegExp(PIN.replace(/\./g, '\\.')).test(note),
+      JSON.stringify({ r, be: be.map((e) => e.meta) }).slice(0, 3000)]);
+  }
+  {
+    resetState();
+    const E = B4();
+    const ctl = path.join(T, 'ctl-blame-bad');
+    setEngines({ unity: cfgFor(E, ctl, { blame: [{ test: '(', touches: 'pins/*.json' }, { test: 'Other', touches: '../x' }] }) });
+    queue(E, [['T-015', 'feat/p'], ['T-016', 'feat/pin']]);
+    const r = probe(TRAIN);
+    await guard('2.90 (t) B1: blame entries that are not usable (a bad regex, a path outside the repo) are left out and change nothing: the search by land runs as before', () => [
+      r.landed?.join() === 'T-015' && r.dropped?.map((d) => d.task).join() === 'T-016' && r.runs >= 3 && evs(/^task\.train\.unity\.blame$/)[0]?.meta?.plan === 'bisect',
+      JSON.stringify(r).slice(0, 2500)]);
+  }
+
   void tipOf;
 }
