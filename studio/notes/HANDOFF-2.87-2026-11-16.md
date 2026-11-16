@@ -33,7 +33,7 @@ two newest handoffs and release notes are kept; older ones are in git history.
 3. **The harness's own helpers wait.** Replacing one-line definitions saves about 100 lines over 236 files. It goes
    with the next round's merges, where a shared module is needed anyway.
 4. **A fault found in the field goes out on its own.** 2.86.1 is a separate, small pull request so a crew can take it
-   without the 640-file trim.
+   without the 560-file trim.
 
 ## For the next round
 
