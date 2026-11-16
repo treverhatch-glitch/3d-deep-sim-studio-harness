@@ -1,5 +1,4 @@
-// Small helpers that several harness and scripts files used to define identically, kept once.
-// Rule for adding one:
+// Small helpers that several harness and scripts files defined identically, kept once. To add one:
 //  - only a body that 3 or more files define the same way (whitespace, comments and own names aside);
 //  - node: built-ins only, never an import from another harness file (a leaf: it cannot make a cycle);
 //  - a helper that read one local constant of its file is a factory taking it (flagOf(argv));
