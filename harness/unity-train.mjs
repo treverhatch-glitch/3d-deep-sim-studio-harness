@@ -20,12 +20,15 @@ import { mainRoot } from './worktree.mjs';
 import { withLandLock, matchAny } from './merge-lane.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
 import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, taskBranch } from './unity-gate.mjs';
-import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeCommand } from './engine-tracks.mjs';
+import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeCommand, engineFloor } from './engine-tracks.mjs';
 import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout } from './engine-rules.mjs';
 import { compileSearchOf, compileSearch, compileAt } from './engine-compile.mjs';
+import { parallelState, parallelUse, parallelLine, runGateChild } from './engine-gates.mjs';
+import { engineSlotsAt, heavySlotsAt, floorFree } from './heavy.mjs';
+import { maxConcurrent, capGroup } from './heavy-budget.mjs';
 import { removeLandedLane, pruneBuilds, buildsConfig } from './engine-clean.mjs';
 import { flagOf, foldRealOf, gitMax64 as git, numBlankDefault as num, realOrResolved as real, short8 as short, sleepSyncClamped as sleep, stdoutOf as out } from './helpers.mjs';
 
@@ -526,6 +529,25 @@ export function waitingOnTarget(root, engine = 'unity', queue = null) {
   return new Set(q.filter((e) => e?.waitTarget?.target && e.waitTarget.target === tip).map((e) => e.task));
 }
 
+/**
+ * 2.90: may this train use the second gate now (harness/engine-gates.mjs parallelUse)? The switch, a second gate, the probe
+ * record, and the machine budget: the engine line's, the heavy slots and the job kind's cap (the smallest), and free RAM against
+ * two runs' floor.
+ */
+export function parallelNow(root, engine, cfg = {}, env = process.env) {
+  const state = parallelState(root, engine);
+  let admit = null;
+  try {
+    const es = engineSlotsAt(root, env);
+    const kind = engineTarget(engine, { root })?.heavyKind || 'heavy';
+    const caps = [maxConcurrent(kind, { root, env }), maxConcurrent(capGroup(kind), { root, env })].filter((x) => Number.isFinite(x));
+    const slots = Math.min(es > 0 ? es : Infinity, heavySlotsAt(root, env), ...caps);
+    const needGb = 2 * (Number(engineFloor(engine, { env, root }).gb) || 0);
+    admit = { slots, needGb, freeGb: floorFree(needGb, { env }).freeGb };
+  } catch { admit = { slots: 1 }; }
+  return { ...parallelUse({ state, cfg, probeOk: probeHonoured(root, engine, cfg), admit, env }), state, admit };
+}
+
 // ---- 2.86: the order of steps after a red, as one pure plan ----
 
 /** Kinds of step whose pass lands its group, when it is a complete run (a by-name step lands nothing). */
@@ -537,7 +559,7 @@ const LANDS = new Set(['land', 'retry', 'known-red', 'without', 'apart', 'bisect
  * The order: retries by name, the target alone (a probe), the suspect, the prefix search, a culprit alone (confirm).
  * When the red names its tests and byNameOk, narrowing steps run only those tests.
  */
-export function nextStep({ lanes = [], results = [], ties = undefined, flaky = () => false, flakyRetries = 2, stageRetry = false, targetRed = [], knownRed = false, bisectMax = 3, namesOk = (n) => Boolean(retryNames(n)), byNameOk = false } = {}) {
+export function nextStep({ lanes = [], results = [], ties = undefined, flaky = () => false, flakyRetries = 2, stageRetry = false, targetRed = [], knownRed = false, bisectMax = 3, namesOk = (n) => Boolean(retryNames(n)), byNameOk = false, pair = false } = {}) {
   const C = { run: 'complete', lands: true };
   if (!results.length) return { step: 'land', group: lanes.slice(), ...C };
   const landed = new Set(results.filter((x) => x.status === 'pass' && LANDS.has(x.kind) && !x.byName).flatMap((x) => x.group || []));
@@ -592,9 +614,15 @@ export function nextStep({ lanes = [], results = [], ties = undefined, flaky = (
   let lo = apartGreen ? a.group.length : 0;
   let hi = order.length;
   let bad = main;
-  for (const b of bis) { const mid = Math.floor((lo + hi) / 2); if (b.status === 'pass') lo = mid; else { hi = mid; bad = b; } }
+  // 2.90: a step's prefix length (n) when every step has one (two steps of one round, on two gates); else the halving order.
+  if (bis.length && bis.every((b) => Number.isFinite(b.n))) {
+    for (const b of bis) if (b.status !== 'pass' && b.n > lo && b.n < hi) { hi = b.n; bad = b; }
+    for (const b of bis) if (b.status === 'pass' && b.n > lo && b.n < hi) lo = b.n;
+  } else for (const b of bis) { const mid = Math.floor((lo + hi) / 2); if (b.status === 'pass') lo = mid; else { hi = mid; bad = b; } }
   const after = (t) => (byName ? order.filter((x) => x !== t) : order.slice(order.indexOf(t) + 1));
   if (!byName && hi - lo > 1 && sig && bis.length >= bisectMax) return { step: 'handback', lanes: order.slice(lo, hi), cause: 'capped', red: bad, rounds: [order.slice(hi)], green: order.slice(0, lo), runs: bis.length };
+  // 2.90 (pair: a second gate): by name, two prefixes at a third and two thirds, run at once; neither lands.
+  if (pair && byName && hi - lo >= 3) { const a = lo + Math.round((hi - lo) / 3); const b = lo + Math.round((2 * (hi - lo)) / 3); return { step: 'bisect', group: order.slice(0, a), prefix: order.slice(0, a), ...N, also: { group: order.slice(0, b), prefix: order.slice(0, b) } }; }
   if (hi - lo > 1) { const mid = Math.floor((lo + hi) / 2); return { step: 'bisect', group: byName ? order.slice(0, mid) : order.slice(lo, mid), prefix: order.slice(0, mid), ...N }; }
   const culprit = order[hi - 1];
   const conf = of('confirm')[0];
@@ -1343,6 +1371,54 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     if (!told) { try { emitEvent({ type: 'engine.red_on_target', agent: by, to: 'planner', status: 'warn', track: `engine:${engine}`, msg: `${L} train ${id}: ${target} alone (no branch) is red on ${st.tests.slice(0, 5).join(', ')}${st.tests.length > 5 ? ', ...' : ''} (engines.${engine}.flakyTests lists ${st.tests.length === 1 ? 'it' : 'them'}). No branch is blamed; ${st.group.length} lane(s) wait for the target to move. A fix task for ${st.tests.length === 1 ? 'this test' : 'these tests'} is wanted.`.slice(0, 600), meta: { train: id, engine, tests: st.tests.slice(0, 20), target: tip, lanes: st.group, proof } }); } catch {} }
   };
 
+  /**
+   * 2.90: two narrowing steps by name at once, one per gate, each its own process (harness/unity-gate.mjs --gate k) with its own
+   * machine:heavy admission; neither lands (STUDIO_LAND_PROBE=1). { results: [r | null] } (null: no answer, that step runs again on
+   * one gate), or { moved } when the target moved under them (the land script ignored the probe: as landGroup, nobody is blamed).
+   */
+  const pairRun = async (steps, firstRun) => {
+    const tip = headOf(repo, target);
+    const refs = [];
+    const stage = firstRedStage(firstRun);
+    try {
+      const jobs = steps.map((st, k) => {
+        const c = chainOnTarget(repo, tip, st.lanes, id, engine);
+        if (c.error || c.conflictTarget.length || c.deferred.length) return Promise.resolve(null);
+        const tests = retryNames(st.tests) || [];
+        const kind = `name:${[...tests].sort().join(';')}`;
+        const tree = out(git(repo, 'rev-parse', `${c.head}^{tree}`));
+        const g0 = tree ? greenHas(root, engine, { tree, target: tip, kind }) : null;
+        if (g0) return Promise.resolve({ status: 'pass', ok: true, reused: g0, failures: [] });
+        const ref = `${UNITY_REF_PREFIX}${id}-g${k + 1}`;
+        if (git(repo, 'update-ref', `refs/heads/${ref}`, c.head, '').status !== 0) return Promise.resolve(null);
+        refs.push(ref);
+        const e = { ...env, STUDIO_MAIN_ROOT: root, STUDIO_GATE_PRIORITY: 'landing', STUDIO_LAND_PROBE: '1', STUDIO_LAND_RETRY: '1', STUDIO_HEAVY_WAIT_MIN: String(Math.min(num(env.STUDIO_HEAVY_WAIT_MIN, 2), 2)), ...(stage ? { STUDIO_LAND_RETRY_STAGE: stage } : {}), ...(tests.length ? { STUDIO_LAND_RETRY_TESTS: tests.join(';') } : {}), ...(firstRun?.play?.mode ? { STUDIO_PLAY_MODE: firstRun.play.mode } : {}) };
+        for (const x of ['STUDIO_LAND_ONLY', 'STUDIO_LAND_KNOWN_RED', 'STUDIO_LAND_FULL', 'STUDIO_RULES_GREEN', 'STUDIO_RULES_MODE', 'STUDIO_HEAVY_HELD', 'STUDIO_EDITOR_SERVICE', 'STUDIO_EDITOR_SERVICE_CLI', 'STUDIO_PLAY_FILTER', 'STUDIO_UNITY_PLAYMODE_ARGS']) delete e[x];
+        if (engine === 'unity' && String(stage || '').toLowerCase() === 'play' && tests.length) e.STUDIO_UNITY_PLAYMODE_ARGS = `-testFilter "${tests.join(';')}"`;
+        log(`[unity-train] ${id}: gate ${k + 1}: run ${st.group.join(', ')} on ${target} at ${short(tip)} through ${ref}; by name, does not land`);
+        return runGateChild({ root, engine, gate: k + 1, args: s.many ? ['--branches', ref] : ['--branch', ref], env: e }).then((r) => ({ ...r, tree, kind }));
+      });
+      const rs = await Promise.all(jobs);
+      const now = headOf(repo, target);
+      if (now !== tip) {
+        const why = `${target} moved (${short(tip)} -> ${short(now)}) during two runs that must land nothing (STUDIO_LAND_PROBE=1): a land script does not honour it`;
+        noteProbe(root, engine, { honoured: false, revoked: true, why, train: id });
+        ev('probe_moved_target', id, `${why}. Nobody is blamed; the lanes stay queued; by-name steps and the second gate are off until a person clears .studio/train/${engine}-probe.json (docs/NATIVE-ENGINE.md)`, { agent: by, to: 'producer', status: 'blocked', meta: { from: tip, to: now } });
+        return { moved: now, why };
+      }
+      return { results: rs.map((r) => {
+        if (!r || !['pass', 'red'].includes(r.status)) { if (r) log(`[unity-train] ${id}: gate ${r.gate || '?'} gave no answer (${r.status}: ${String(r.why || '').split('\n')[0]}); that step runs again on one gate`); return null; }
+        if (r.status === 'pass' && !r.reused && r.tree) noteGreen(root, engine, { tree: r.tree, target: tip, kind: r.kind, train: id });
+        if (r.probeAck) noteProbe(root, engine, { honoured: true, train: id });
+        return r;
+      }) };
+    } finally { for (const ref of refs) git(repo, 'update-ref', '-d', `refs/heads/${ref}`); }
+  };
+  // 2.90: whether this train may use the second gate (said once in the log when it is on and not used).
+  const par = parallelNow(root, engine, s.cfg, env);
+  if (par.state.on && !par.ok) log(`[unity-train] ${id}: two land runs at once are on, not used: ${par.why}`);
+  res.rounds = 0;
+
   try {
     // 2.86: one round per set of lanes; each step comes from nextStep (pure), the train runs it.
     let fullCancelled = false;
@@ -1375,7 +1451,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       for (let n = 0; n < 4 * set.length + 12; n += 1) {
         const first = results[0];
         const stage0 = first?.status === 'red' ? firstRedStage(first.r) : null;
-        const st = nextStep({ lanes: round.map((l) => l.task), results, ties, flaky: isFlaky, flakyRetries: fRetries, stageRetry: !stageRetried && Boolean(stage0 && again.includes(String(stage0).toLowerCase())), targetRed: targetRedAt(root, engine, headOf(repo, target)), knownRed: krOn, bisectMax, byNameOk: probeHonoured(root, engine, s.cfg) });
+        const st = nextStep({ lanes: round.map((l) => l.task), results, ties, flaky: isFlaky, flakyRetries: fRetries, stageRetry: !stageRetried && Boolean(stage0 && again.includes(String(stage0).toLowerCase())), targetRed: targetRedAt(root, engine, headOf(repo, target)), knownRed: krOn, bisectMax, byNameOk: probeHonoured(root, engine, s.cfg), pair: par.ok && probeHonoured(root, engine, s.cfg) });
         if (st.step === 'done') break;
         if (st.step === 'ties') { ties = tiesFor(lanesOf(round.map((l) => l.task).filter((t) => live.has(t))), st.red.r); continue; }
         if (st.step === 'next-round') {
@@ -1415,6 +1491,22 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         else if (st.step === 'confirm') what = `confirm ${st.group[0]}`;
         // 2.86: a narrowing step by name runs only the red's tests on its merged tree and lands nothing (STUDIO_LAND_PROBE=1).
         if (st.byName) { const nt = retryNames(st.tests); what = `${what}, by name`; o = { play: firstRun?.play || null, noLand: true, retry: { stage: firstRedStage(firstRun), tests: nt } }; }
+        // 2.90: two steps by name at once, one per gate (nextStep's pair); a step with no answer runs again below on one gate.
+        if (st.also && st.byName) {
+          res.rounds += 1;
+          const pr = await pairRun([{ ...st, lanes: lanesOf(st.group) }, { ...st, group: st.also.group, prefix: st.also.prefix, lanes: lanesOf(st.also.group) }], firstRun);
+          if (pr.moved) { hold(lanesOf(round.map((l) => l.task).filter((t) => live.has(t) && !res.landed.includes(t))), { status: 'error', why: pr.why }); stop = true; break; }
+          let got = 0;
+          pr.results.forEach((x, k) => {
+            if (!x) return;
+            got += 1; if (!x.reused) res.runs += 1;
+            const pre = k ? st.also.prefix : st.prefix;
+            results.push({ kind: 'bisect', group: pre.slice(), status: x.status, failures: (Array.isArray(x.failures) ? x.failures : []).filter((n) => !baseNames.has(n)), byName: true, compileOnly: false, n: pre.length, r: { ...x, play: firstRun?.play || null, noLand: true } });
+          });
+          if (got) { res.parallel = (res.parallel || 0) + 1; ev('parallel', id, `two steps by name at once on two gates: ${target} + ${st.prefix.join(' + ')}: ${pr.results[0]?.status || 'no answer'}; ${target} + ${st.also.prefix.join(' + ')}: ${pr.results[1]?.status || 'no answer'}; nothing landed`, { agent: by, meta: { groups: [st.prefix, st.also.prefix], status: pr.results.map((x) => x?.status || null) } }); continue; }
+          log(`[unity-train] ${id}: neither gate gave an answer: ${what} runs on one gate`);
+        }
+        res.rounds += 1;
         const r = await landGroup(group, what, o);
         // A run that should have landed nothing moved the target: stop, nobody is blamed (landGroup said why).
         if (r.moved) { hold(lanesOf(round.map((l) => l.task).filter((t) => live.has(t) && !res.landed.includes(t))), r); stop = true; break; }
@@ -1567,6 +1659,7 @@ export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'un
   if (st.last?.rules?.ran && !st.running) lines.push(`Last ${L} rules check: ${st.last.rules.mode || 'full'}${st.last.rules.why ? `: ${st.last.rules.why}` : ''}; ${st.last.rules.runs ?? 0} run(s), ${Math.round((st.last.rules.ms || 0) / 1000)} s${st.last.rules.parts > 1 ? `, ${st.last.rules.parts} parts, ${st.last.rules.splitAtOnce || 1} at once` : ''}`);
   if (st.last && !st.running) lines.push(`Last ${L} train ${st.last.id} (${String(st.last.at || '').slice(0, 16)}): ${st.last.message}${st.last.batch ? ` [batch ${st.last.batch}]` : ''}`);
   if (!quiet) { try { lines.push(autoLine(root, engine)); } catch { /* the queue lines stand */ } }
+  if (!quiet) { try { const s = unityTrainSettings(root, engine); if (!s.error) lines.push(parallelLine(root, engine, parallelNow(root, engine, s.cfg))); } catch { /* the queue lines stand */ } }
   return lines.join('\n');
 }
 

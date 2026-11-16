@@ -2,7 +2,7 @@
  * qa/selftest-290b.mjs — 2.90 (t): the engine train's speed limit, from two timelines of a studio's day. A batch where two
  * branches each compile alone but not together is searched with the cheap compile command, not land runs; a red that one
  * changed file explains (engines.<x>.blame) skips the search; engines.<x>.preQueue refuses a branch before it is queued;
- * rules.first runs one test filter before everything else in the rules check.
+ * rules.first runs one test filter before everything else in the rules check; two land runs at once on two gate copies.
  *
  * The scaffolding (a studio copy, a made-up engine repo, a stand-in land script that records what it was told) is
  * qa/selftest-286b.mjs's. The stand-ins for the compile command and the rules check behave like dotnet where it matters:
@@ -114,7 +114,10 @@ const [gw, ctl, ...srcs] = process.argv.slice(2);
 const E = process.env;
 const git = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8', windowsHide: true });
 const before = git(gw, 'rev-parse', 'HEAD').stdout.trim();
-fs.appendFileSync(ctl + '-runs.jsonl', JSON.stringify({ srcs, probe: E.STUDIO_LAND_PROBE ?? null, rulesGreen: E.STUDIO_RULES_GREEN ?? null }) + '\\n');
+const start = Date.now();
+process.on('exit', () => fs.appendFileSync(ctl + '-runs.jsonl', JSON.stringify({ srcs, probe: E.STUDIO_LAND_PROBE ?? null, rulesGreen: E.STUDIO_RULES_GREEN ?? null, start, end: Date.now() }) + '\\n'));
+if (E.STUDIO_LAND_PROBE === '1') console.log('[land-probe] honoured');
+if (Number(E.LAND_STUB_MS) > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(E.LAND_STUB_MS));
 for (const s of srcs) { const m = git(gw, 'merge', '--no-ff', '-m', 'land ' + s, 'refs/heads/' + s); if (m.status !== 0) { git(gw, 'merge', '--abort'); git(gw, 'reset', '-q', '--hard', before); console.log('conflict ' + s); process.exit(2); } }
 const stages = (bad) => { if (E.STUDIO_LAND_RESULT) fs.writeFileSync(E.STUDIO_LAND_RESULT, JSON.stringify({ gates: Object.fromEntries(['merge', 'dotnet', 'play'].map((n, i, o) => [n, bad && o.indexOf(bad) < i ? null : { status: n === bad ? 'fail' : 'pass', seconds: 10 }]).filter(([, v]) => v)) })); };
 const red = (text) => { git(gw, 'reset', '-q', '--hard', before); stages('dotnet'); console.log(text); process.exit(1); };
@@ -123,7 +126,8 @@ if (c.status !== 0) red(c.stdout);
 const rd = (f) => fs.readFileSync(path.join(gw, f), 'utf8');
 if (!rd('pins/web.json').includes(rd('vectors/pin.txt').trim())) red('  Failed Game.Rules.Tests.PinTests.VectorsMatchPin [3 ms]\\n1 test(s) failed');
 stages(null);
-if (E.STUDIO_LAND_PROBE === '1') { git(gw, 'reset', '-q', '--hard', before); console.log('[land-probe] honoured'); process.exit(0); }
+if (E.STUDIO_LAND_PROBE === '1' && fs.existsSync(ctl + '-moveonprobe')) { git(gw, 'update-ref', 'refs/heads/port/main', 'HEAD'); process.exit(0); }
+if (E.STUDIO_LAND_PROBE === '1') { git(gw, 'reset', '-q', '--hard', before); process.exit(0); }
 console.log('landed ' + srcs.join(' '));
 `);
   // The rules check's stand-in (dotnet test): any arguments; "--filter X" runs the tests whose name holds X; TestResults/ written.
@@ -146,7 +150,7 @@ console.log('Passed!  - Failed: 0, Passed: ' + tests.length);
   const TRAIN = `import { runUnityTrain } from ${u('harness/unity-train.mjs')};
 const handed = []; const logs = [];
 const r = await runUnityTrain({ root: process.cwd(), log: (m) => logs.push(String(m)), deps: { handBack: (lane, note, extra) => handed.push({ task: lane.task, note, extra: extra || null }) } });
-console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: r.dropped, handed, compile: r.compile || null, rules: r.rules || null, logs: logs.filter((l) => /compile search|blame plan|rules\\.first/.test(l)) }));`;
+console.log(JSON.stringify({ ok: r.ok, runs: r.runs, rounds: r.rounds, parallel: r.parallel, landed: r.landed, dropped: r.dropped, handed, compile: r.compile || null, rules: r.rules || null, logs: logs.filter((l) => /compile search|blame plan|rules\\.first/.test(l)) }));`;
   const PIN = 'Game.Rules.Tests.PinTests.VectorsMatchPin';
   const ONE = '  int X;\n';
 
@@ -315,6 +319,127 @@ console.log(JSON.stringify({ first: c.first, bad: c.focusBad || [] }));`);
       r.first === null && r.bad?.some((b) => /rules\.first needs rules\.focus\.test/.test(b)),
       JSON.stringify(r).slice(0, 1500)]);
     void E;
+  }
+
+  // ================= D. two land runs at once (engines.<x>.gates, train parallel) =================
+  // The second gate copy: its own detached worktree of the engine repo and its own land command (same stand-in, its own record).
+  const gate2Of = (E) => { const GW2 = `${E.GW}-two`; g(E.R, 'worktree', 'add', '-q', '--detach', GW2, 'port/main'); return GW2; };
+  const twoGates = (E, ctl, extra = {}) => { const GW2 = gate2Of(E); return cfgFor(E, ctl, { landProbe: true, gates: [{ land: `node "${fwd(landStub)}" "${fwd(GW2)}" "${fwd(ctl)}-two" {branch}`, cwd: fwd(E.R), gateWorktree: fwd(GW2) }], ...extra }); };
+  const D4 = () => engineRepo({ 'feat/p': { 'p.txt': 'p\n' }, 'feat/q': { 'q.txt': 'q\n' }, 'feat/r': { 'r.txt': 'r\n' }, 'feat/pin': { 'pins/web.json': '{ "commit": "beef002" }\n' } });
+  const PAR = { STUDIO_HEAVY_SLOTS: '2', STUDIO_ENGINE_SLOTS: '2', STUDIO_HEAVY_MAX_UNITY: '2', STUDIO_HEAVY_WAIT_MIN: '1', LAND_STUB_MS: '400' };
+  const parallelCmd = (args, env = {}) => spawnSync(process.execPath, [path.join(S, 'harness', 'task.mjs'), 'train', ...args], { windowsHide: true, cwd: S, env: envOf(env), encoding: 'utf8', timeout: 120000 });
+  const statusOf = (env = {}) => out(spawnSync(process.execPath, [path.join(S, 'harness', 'task.mjs'), 'train', 'status', '--engine', 'unity'], { windowsHide: true, cwd: S, env: envOf(env), encoding: 'utf8', timeout: 120000 }));
+  let oneGate = null;
+  {
+    resetState();
+    const E = D4();
+    const ctl = path.join(T, 'ctl-d-off');
+    setEngines({ unity: twoGates(E, ctl) });
+    queue(E, [['T-041', 'feat/p'], ['T-042', 'feat/q'], ['T-043', 'feat/r'], ['T-044', 'feat/pin']]);
+    const r = probe(TRAIN, PAR);
+    oneGate = r;
+    await guard('2.90 (t) parallel: off by default: with a second gate configured and room for two runs, the train uses one gate (no run on the second gate\'s record), T-044 is handed back, T-041..T-043 land; the rounds are counted (5: the batch, two steps by name, the confirm, the survivors)', () => [
+      runsOf(`${ctl}-two`).length === 0 && r.parallel === undefined && r.landed?.join() === 'T-041,T-042,T-043' && r.dropped?.map((d) => d.task).join() === 'T-044' && r.rounds === 5,
+      JSON.stringify(r).slice(0, 2500)]);
+  }
+  {
+    resetState();
+    const E = D4();
+    const ctl = path.join(T, 'ctl-d-refuse');
+    setEngines({ unity: twoGates(E, ctl) });
+    const w = parallelCmd(['parallel', 'on', '--engine', 'unity', '--by', 'builder-s2']);
+    const lp = parallelCmd(['parallel', 'on', '--engine', 'unity', '--by', 'line-producer'], { STUDIO_ROLE: 'line-producer', STUDIO_LOCK_OWNER: 'line-producer' });
+    const st = statusOf(PAR);
+    await guard('2.90 (t) parallel: `train parallel on` by a worker\'s name is refused with the reason and changes nothing; the Line Producer (its role and name) may; train status then says it is on, who set it and when, and that the next red search uses both gates', () => [
+      w.status !== 0 && /worker/.test(out(w)) && /not changed/.test(out(w)) && lp.status === 0 && /Two land runs at once: on \(by line-producer at \d{4}-/.test(st) && /uses both gates/.test(st),
+      JSON.stringify({ w: out(w), lp: out(lp), st }).slice(0, 2500)]);
+  }
+  {
+    resetState();
+    const E = D4();
+    const ctl = path.join(T, 'ctl-d-on');
+    setEngines({ unity: twoGates(E, ctl) });
+    parallelCmd(['parallel', 'on', '--engine', 'unity', '--by', 'producer']);
+    queue(E, [['T-045', 'feat/p'], ['T-046', 'feat/q'], ['T-047', 'feat/r'], ['T-048', 'feat/pin']]);
+    const r = probe(TRAIN, PAR);
+    const r1 = runsOf(ctl); const r2 = runsOf(`${ctl}-two`);
+    const pe = evs(/^task\.train\.unity\.parallel$/);
+    const overlap = r2.some((b) => r1.some((a) => a.probe === '1' && a.start < b.end && b.start < a.end));
+    await guard('2.90 (t) parallel: on, the land script honours the probe, two runs admitted: the search after the red runs two steps by name at once, one on each gate (their times overlap, both told STUDIO_LAND_PROBE=1, neither moved the target), and finishes in fewer rounds than one gate (4 against 5) while landing exactly what one gate lands (T-045..T-047; T-048 handed back) (fails before part D: one gate, no rounds counted)', () => [
+      r.landed?.join() === 'T-045,T-046,T-047' && r.dropped?.map((d) => d.task).join() === 'T-048' && oneGate?.landed?.join() === 'T-041,T-042,T-043'
+        && r.rounds === 4 && r.rounds < oneGate.rounds && r.parallel === 1 && r2.length === 1 && r2[0].probe === '1' && overlap && pe.length === 1,
+      JSON.stringify({ rounds: r.rounds, parallel: r.parallel, runs: r.runs, landed: r.landed, dropped: r.dropped?.map((d) => d.task), r1, r2, pe: pe.length, raw: String(r._raw || "").slice(0, 600) }).slice(0, 3000)]);
+  }
+  {
+    resetState();
+    const E = D4();
+    const ctl = path.join(T, 'ctl-d-revoked');
+    setEngines({ unity: twoGates(E, ctl, { landProbe: false }) });
+    parallelCmd(['parallel', 'on', '--engine', 'unity', '--by', 'producer']);
+    fs.mkdirSync(path.join(S, '.studio', 'train'), { recursive: true });
+    fs.writeFileSync(path.join(S, '.studio', 'train', 'unity-probe.json'), JSON.stringify({ honoured: false, revoked: true, why: 'made up' }));
+    queue(E, [['T-051', 'feat/p'], ['T-052', 'feat/pin']]);
+    const r = probe(TRAIN, PAR);
+    const st = statusOf(PAR);
+    await guard('2.90 (t) parallel: on but the probe record is revoked: one gate (no run on the second), the search by complete land runs as before, and train status says in one line why the second gate is not used', () => [
+      runsOf(`${ctl}-two`).length === 0 && r.parallel === undefined && r.dropped?.map((d) => d.task).join() === 'T-052' && /Two land runs at once: on .*not used now: the land script has not shown it honours STUDIO_LAND_PROBE/.test(st),
+      JSON.stringify({ r, st }).slice(0, 2500)]);
+  }
+  {
+    resetState();
+    const E = D4();
+    const ctl = path.join(T, 'ctl-d-oneslot');
+    setEngines({ unity: twoGates(E, ctl) });
+    parallelCmd(['parallel', 'on', '--engine', 'unity', '--by', 'producer']);
+    queue(E, [['T-055', 'feat/p'], ['T-056', 'feat/q'], ['T-057', 'feat/r'], ['T-058', 'feat/pin']]);
+    const r = probe(TRAIN, { ...PAR, STUDIO_ENGINE_SLOTS: '1' });
+    await guard('2.90 (t) parallel: on, but the machine budget admits one engine land run (STUDIO_ENGINE_SLOTS=1): one gate, the same result and rounds as with it off', () => [
+      runsOf(`${ctl}-two`).length === 0 && r.parallel === undefined && r.landed?.join() === 'T-055,T-056,T-057' && r.rounds === 5,
+      JSON.stringify(r).slice(0, 2500)]);
+  }
+  {
+    resetState();
+    const E = D4();
+    const ctl = path.join(T, 'ctl-d-kindcap');
+    setEngines({ unity: twoGates(E, ctl) });
+    parallelCmd(['parallel', 'on', '--engine', 'unity', '--by', 'producer']);
+    queue(E, [['T-061', 'feat/p'], ['T-062', 'feat/pin']]);
+    const { STUDIO_HEAVY_MAX_UNITY, ...noCap } = PAR; void STUDIO_HEAVY_MAX_UNITY;
+    const r = probe(TRAIN, noCap);
+    const st = statusOf(noCap);
+    await guard('2.90 (t) parallel: on, slots for two, but the Unity editor cap left at its default of one (STUDIO_HEAVY_MAX_UNITY): one gate, and train status names the cap', () => [
+      runsOf(`${ctl}-two`).length === 0 && r.parallel === undefined && r.dropped?.map((d) => d.task).join() === 'T-062' && /admits 1 engine land run.*STUDIO_HEAVY_MAX_UNITY/.test(st),
+      JSON.stringify({ r, st }).slice(0, 2500)]);
+  }
+  {
+    resetState();
+    const E = D4();
+    const ctl = path.join(T, 'ctl-d-crash');
+    const cfg = twoGates(E, ctl);
+    cfg.gates[0].land = 'node -e "process.exit(4)"';
+    setEngines({ unity: cfg });
+    parallelCmd(['parallel', 'on', '--engine', 'unity', '--by', 'producer']);
+    queue(E, [['T-065', 'feat/p'], ['T-066', 'feat/q'], ['T-067', 'feat/r'], ['T-068', 'feat/pin']]);
+    const r = probe(TRAIN, PAR);
+    await guard('2.90 (t) parallel: the second gate fails to run (its command errors): its step has no answer and runs again on one gate; the train lands exactly what one gate lands (T-065..T-067, T-068 handed back) and nothing is left half done (no queue entry, no integration ref)', () => [
+      r.landed?.join() === 'T-065,T-066,T-067' && r.dropped?.map((d) => d.task).join() === 'T-068'
+        && !g(E.R, 'for-each-ref', '--format=%(refname)', 'refs/heads/unity-train/').stdout.trim() && (() => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'unity-queue.json'), 'utf8')).length === 0; } catch { return true; } })(),
+      JSON.stringify(r).slice(0, 2500)]);
+  }
+  {
+    resetState();
+    const E = D4();
+    const ctl = path.join(T, 'ctl-d-moved');
+    setEngines({ unity: twoGates(E, ctl) });
+    fs.writeFileSync(`${ctl}-two-moveonprobe`, '1');
+    parallelCmd(['parallel', 'on', '--engine', 'unity', '--by', 'producer']);
+    queue(E, [['T-071', 'feat/p'], ['T-072', 'feat/q'], ['T-073', 'feat/r'], ['T-074', 'feat/pin']]);
+    const r = probe(TRAIN, PAR);
+    let pj = null; try { pj = JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'unity-probe.json'), 'utf8')); } catch { /* checked below */ }
+    const q = (() => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'unity-queue.json'), 'utf8')).map((e) => e.task); } catch { return []; } })();
+    await guard('2.90 (t) parallel: the second gate\'s script moves the target during a run that must land nothing: the train stops as a single run would (nobody handed back, every lane still queued), the probe record is revoked (so by-name steps and the second gate are off) and a probe_moved_target event is written', () => [
+      !r.dropped?.length && !r.landed?.length && q.join() === 'T-071,T-072,T-073,T-074' && pj?.revoked === true && evs(/^task\.train\.unity\.probe_moved_target$/).length === 1,
+      JSON.stringify({ r, q, pj }).slice(0, 2500)]);
   }
   void tipOf;
 }

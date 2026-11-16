@@ -488,6 +488,50 @@ another, and a test that fails whenever a branch moves a pinned commit was found
   (`task.train.<x>.pre_queue`). Example: `"preQueue": [ { "touches": "Rules~/pin.json", "run": "dotnet run --project tools/VectorCheck",
   "say": "Re-record the vectors at the new pin and commit them in this branch." } ]`.
 
+
+## Two land runs at once (2.90, off by default)
+
+One red branch should not hold the whole queue for a halving search of 45-minute runs. With a second gate copy the
+train can run two steps of that search at once. Whether to use it is the Line Producer's (or a person's) call; the
+harness never switches it by itself.
+
+- **The second gate.** `engines.<x>.gates`: a list; its first entry is the second gate, with its own `land` (and
+  `landMany` when used), `cwd` and `gateWorktree` (or `folder`); the engine's own keys stay the first gate. The copy
+  needs its own checkout of the engine repo (a detached worktree is enough) and its own editor cache (its own
+  `Library` folder for Unity: two editors never share one), and enough disk and RAM for a second editor. A second gate
+  with the same worktree and folder as the first is not used. No second gate configured: nothing changes. Example:
+  `"gates": [ { "land": "pwsh tools/land.ps1 -Branch {branch} -Gate two", "cwd": "../game-gate-two", "gateWorktree": "../game-gate-two" } ]`.
+- **The switch.** `npm run task -- train parallel on|off --engine <x> --by <name> [--why "…"]`, beside `train auto`
+  and by the same ranks (the owner, outside agents, Producer and Director sessions; never a worker's name), and the
+  Line Producer by its role. `.studio/train/<x>-parallel.json` keeps who set it and when (`task.train.<x>.parallel_on`
+  / `parallel_off`). `train status --engine <x>` (and `train parallel` with no word) says whether it is on, who set it,
+  and whether the next search would use the second gate or why not. Each Line Producer pass, when a second gate is
+  configured or the switch is on, its engine row carries one line: the switch, the second gate, the branches waiting,
+  whether the last train was red, free RAM against what two runs need, the engine slots, and the command.
+- **What it does.** When it is on, a second gate is usable, the land script has shown it honours `STUDIO_LAND_PROBE=1`
+  (the 2.86 probe record, or `"landProbe": true`) and the machine admits two engine land runs, a search by name after a
+  red runs two prefixes at once (at a third and two thirds of what is left), one on each gate, each as its own
+  `node harness/unity-gate.mjs --gate k` process with its own machine:heavy admission. Both are probes: neither lands.
+  A red search over four branches takes one round fewer (the batch, one pair, the confirm, the survivors' landing).
+  What lands is what one gate would land: the survivors still land on one complete run on the first gate. Event
+  `task.train.<x>.parallel`; the train's result has `parallel` (pairs) and `rounds`.
+- **The machine budget.** Two runs need two admissions. The pre-check takes the smallest of `STUDIO_ENGINE_SLOTS`, the
+  heavy slots (`STUDIO_HEAVY_SLOTS`) and the job kind's cap (Unity: `STUDIO_HEAVY_MAX_UNITY`, default 1, or the
+  budget's `maxConcurrent.unity`), and free RAM against twice the engine's floor. Each run is still admitted by the
+  machine:heavy lock on its own; a second run that is not admitted within 2 minutes gives no answer and its step runs
+  again on one gate. A train that runs inside another heavy hold never uses the second gate.
+- **When something goes wrong.** A gate that gives no answer (not admitted, crashed, refused, no result): that step
+  runs again on one gate, as before. The target moves during the pair: a land script ignored the probe; as in 2.86,
+  the train stops with every lane still queued, nobody handed back, and the probe record revoked (by-name steps and the
+  second gate are off until a person clears `.studio/train/<x>-probe.json`). A gate copy that is behind the target:
+  each run gets a ref of the tree it must test (the target's tip with the group merged), so the land script must
+  check that ref out or merge it, as the first gate does. The train process dying: the integration refs
+  (`<x>-train/...`) are removed at the next train's start, and no probe landed anything.
+- **What it does not do.** It never lands two groups at once, and it does not try the next batch on the second gate
+  while the first lands: only the land script moves the target, so a group found green on the old target would still
+  need a complete land run on the new one, a tree no run has seen as a whole. It is not used for complete runs (a
+  land script that does not honour the probe), for the compile search or for the rules check.
+
 ## The land's stage report
 
 A land command knows where its time went; the harness didn't. Now it names a file in `STUDIO_LAND_RESULT` and reads

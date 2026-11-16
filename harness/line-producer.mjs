@@ -790,6 +790,7 @@ export function summaryLine(s) {
     s.skip?.length ? `skipping lane-less ${s.skip.join(', ')}` : null,
     ...(s.twins?.checked || []).filter((r) => r.need).map((r) => `${r.engine} twin ${r.added || '(to add)'} for ${r.task}`),
     ...(s.engines || []).filter((e) => e.queued || e.running).map((e) => `${e.engine} train: ${e.running ? 'running' : e.started ? 'started' : `${e.queued} queued, waits (${e.why})`}`),
+    ...(s.engines || []).filter((e) => e.parallel && (e.queued || e.running)).map((e) => `${e.engine} ${e.parallel}`),
     s.tester?.line || null,
   ].filter(Boolean).join('; ');
 }
@@ -1208,6 +1209,12 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
       } else if (batchState[t.name]) { delete batchState[t.name]; batchChanged = true; }
     } else if (batchState[t.name] && !w.wait) { delete batchState[t.name]; batchChanged = true; }
     const row = { engine: t.name, queued: q.length, ...(taggedN ? { tagged: taggedN } : {}), ...(!ea.on && ea.source === 'file' ? { autoOff: true } : {}), running: Boolean(running), expectedMin: exp.minutes, expectedFrom: exp.from, floorGb: floor.gb, start: w.start, why: w.why, ...(batchWaiting ? { batchWait: true } : {}) };
+    // 2.90: the facts for `train parallel on|off` (two land runs at once), when a second gate is configured or it is on.
+    try {
+      const eg = await import('./engine-gates.mjs');
+      const ps = eg.parallelState(root, t.name); const g2 = eg.secondGate(t.cfg || {});
+      if (ps.on || g2.ok) { const last = ut.unityTrainStatus(root, t.name).last; row.parallel = eg.parallelBrief({ engine: t.name, state: ps, gate2: g2, waiting: qAll.length, lastRed: last ? Boolean(last.dropped?.length || last.ok === false) : null, freeGb: f.freeGb, needGb: 2 * (Number(floor.gb) || 0), slots: f.engineSlots ?? 0 }); }
+    } catch { /* the row stands without it */ }
     if (w.start && acting) {
       try {
         const r = deps.startTrain ? await deps.startTrain(t.name) : startEngineTrain(root, t.name, env);

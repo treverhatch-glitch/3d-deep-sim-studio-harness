@@ -2241,8 +2241,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'train') {
     // A word that is not a train subcommand starts nothing: usage, exit 2. A train starts with `train`, `train run` or
     // `train --engine <name>`.
-    if ((arg1 && !['run', 'status', 'release', 'leave', 'dequeue', 'auto', 'config', 'cancel'].includes(arg1)) || (typeof flags.unity === 'string' && flags.unity !== 'status')) {
-      console.error(`"${arg1 || flags.unity}" is not a train subcommand, so no train was started. Usage: npm run task -- train [run] [--engine <name> [--only T-a,T-b] [--tag <word>]] | train status [--engine <name>] | train release <ID> | train leave <ID> --by <name> --why "…" | train dequeue <ID> [--engine <name>] --by <name> | train cancel [--engine <name>] | train config <ID> | train auto [on|off] [--engine <name>]`);
+    if ((arg1 && !['run', 'status', 'release', 'leave', 'dequeue', 'auto', 'parallel', 'config', 'cancel'].includes(arg1)) || (typeof flags.unity === 'string' && flags.unity !== 'status')) {
+      console.error(`"${arg1 || flags.unity}" is not a train subcommand, so no train was started. Usage: npm run task -- train [run] [--engine <name> [--only T-a,T-b] [--tag <word>]] | train status [--engine <name>] | train release <ID> | train leave <ID> --by <name> --why "…" | train dequeue <ID> [--engine <name>] --by <name> | train cancel [--engine <name>] | train config <ID> | train auto [on|off] [--engine <name>] | train parallel [on|off] --engine <name> --by <name>`);
       process.exit(2);
     }
     const tr = await import('./train.mjs');
@@ -2324,6 +2324,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       if (!want) { console.log(ctl.autoLine(mainRoot(), eng)); process.exit(0); }
       if (!/^(on|off)$/.test(want) || typeof flags.by !== 'string') { console.error(`Usage: npm run task -- train auto off|on --engine ${eng} --by <name> [--why "…"] [--hours N]`); process.exit(1); }
       const r = await ctl.setEngineAuto(mainRoot(), { engine: eng, on: want === 'on', by: flags.by, why: typeof flags.why === 'string' ? flags.why : '', hours: flags.hours ?? null });
+      (r.ok ? console.log : console.error)(r.message);
+      process.exit(r.ok ? 0 : 1);
+    }
+    // 2.90: `train parallel [on|off] --engine <x> --by <name> [--why "…"]`: two land runs at once (harness/engine-gates.mjs).
+    if (arg1 === 'parallel') {
+      const eng = typeof flags.engine === 'string' ? flags.engine : 'unity';
+      const want = flags._[2];
+      const ut = await import('./unity-train.mjs');
+      const eg = await import('./engine-gates.mjs');
+      if (!want) { const s0 = ut.unityTrainSettings(mainRoot(), eng); console.log(eg.parallelLine(mainRoot(), eng, ut.parallelNow(mainRoot(), eng, s0.error ? {} : s0.cfg))); process.exit(0); }
+      if (!/^(on|off)$/.test(want) || typeof flags.by !== 'string') { console.error(`Usage: npm run task -- train parallel on|off --engine ${eng} --by <name> [--why "…"]`); process.exit(1); }
+      const r = await eg.setEngineParallel(mainRoot(), { engine: eng, on: want === 'on', by: flags.by, why: typeof flags.why === 'string' ? flags.why : '' });
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
