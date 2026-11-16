@@ -1006,8 +1006,8 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## USAGE_* (5)
 
 - `STUDIO_USAGE_FILE` · no simple default · harness/status.mjs · undocumented
-- `STUDIO_USAGE_FUNCTIONS` · no simple default · harness/event.mjs, harness/usage-functions.mjs, scripts/commands-run.mjs (+1 more) · [SCORECARD.md:107](SCORECARD.md)
-- `STUDIO_USAGE_FUNCTIONS_MIN` · no simple default · harness/usage-functions.mjs · [SCORECARD.md:107](SCORECARD.md)
+- `STUDIO_USAGE_FUNCTIONS` · no simple default · harness/event.mjs, harness/usage-functions.mjs, scripts/commands-run.mjs (+2 more) · [RELEASE-2.89.0.md:26](RELEASE-2.89.0.md)
+- `STUDIO_USAGE_FUNCTIONS_MIN` · no simple default · harness/usage-functions.mjs, qa/selftest-289a.mjs · [RELEASE-2.89.0.md:26](RELEASE-2.89.0.md)
 - `STUDIO_USAGE_MARKS` · no simple default · harness/event.mjs · [SCORECARD.md:98](SCORECARD.md)
 - `STUDIO_USAGE_WINDDOWN_PCT` · no simple default · harness/api-pool.mjs, harness/supervisor.mjs, harness/winddown.mjs (+4 more) · [AGENT-TOOLS.md:195](AGENT-TOOLS.md)
 

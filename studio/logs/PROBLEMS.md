@@ -115,6 +115,14 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Fix:** `harness/landings.mjs`: a caller names its measure. Six readers changed, each with a check that fails on 2.87 (`qa/selftest-288a.mjs`).
 - **Open:** the scorecard and the upgrade comparison still count closes (docs/RELEASE-2.88.0.md).
 
+### P-343 — a file that must load alone was given a shared import · fixed 2026-11-16 (2.88)
+- **Evidence:** 2.88's first online run: "2.85 (e6)" red on Linux and Windows. `harness/upgrade-guard.mjs` loads `harness/hooks-upgrade-hint.mjs` by path; with an import of `./helpers.mjs` it no longer loaded alone and the after-upgrade line went silent.
+- **Fix:** the file has its own one-line copy again; `harness/helpers.mjs` names the files that must load alone. The local run before the push had covered 16 units, not that one: the online run is the check of record.
+
+### P-344 — a check's failure was hidden by a pipe · lesson
+- **Evidence:** the comment check failed on a 7-line comment; the maintainer read `node scripts/check-comments.mjs | tail -1` in an `&&` chain, which takes `tail`'s exit code, and pushed. The online run was cancelled and the fix pushed minutes later.
+- **Fix:** read a check's own exit code. Never chain on a piped check.
+
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
 - **P-001** (reopened on purpose 2026-10-31: the owner made the harness and the game's repository public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist
