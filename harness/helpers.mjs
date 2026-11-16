@@ -4,6 +4,7 @@
 //  - node: built-ins only, never an import from another harness file (a leaf: it cannot make a cycle);
 //  - a helper that read one local constant of its file is a factory taking it (flagOf(argv));
 //  - a variant that differs in any token is its own export, never an option on an existing one.
+//  - a file that must load alone keeps its own copy (hooks-upgrade-hint, upgrade-baseline, upgrade-preflight).
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';

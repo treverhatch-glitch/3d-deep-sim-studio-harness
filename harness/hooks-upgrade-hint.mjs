@@ -11,7 +11,9 @@
  * beta mode a stand-in may, by harness/beta-mode.mjs standInMay('protected')).
  */
 import { spawnSync } from 'node:child_process';
-import { stdoutOf as ok1 } from './helpers.mjs';
+
+// Its own copy, no harness import: harness/upgrade-guard.mjs loads this file by path, and it must load alone.
+const ok1 = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 
 /** Paths a harness release owns (a release that touches anything else is not recognised: the hint stays silent). */
 export const HARNESS_OWNED = /^(harness|scripts|qa|tools|docs|hub|templates|\.github|\.claude)\/|^(package\.json|package-lock\.json|[^/]+\.md|\.gitignore|\.gitattributes|\.npmrc|\.nvmrc)$/;
