@@ -101,16 +101,17 @@ export function runPreLand(s, lane, { root, id, env = process.env, log = () => {
   } finally { cleanup(); }
 }
 
-/** 2.90: engines.<x>.preQueue, checked: [{ touches: [glob], run, say, timeoutMin }] (an entry without both is left out). */
+/** 2.90: engines.<x>.preQueue, checked: [{ touches: [glob], run, say, timeoutMin, env }] (an entry without both is left out). */
+const envVars = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.fromEntries(Object.entries(o).filter(([k, v]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof v === 'string')) : {});
 export function preQueueOf(cfg = {}) {
   const v = Array.isArray(cfg?.preQueue) ? cfg.preQueue : [];
-  return v.map((e) => ({ touches: (Array.isArray(e?.touches) ? e.touches : [e?.touches]).filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().replace(/\\/g, '/')), run: typeof e?.run === 'string' ? e.run.trim() : '', say: typeof e?.say === 'string' ? e.say.trim().slice(0, 300) : '', timeoutMin: Math.max(1, num(e?.timeoutMin, 10)) })).filter((e) => e.touches.length && e.run);
+  return v.map((e) => ({ touches: (Array.isArray(e?.touches) ? e.touches : [e?.touches]).filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().replace(/\\/g, '/')), run: typeof e?.run === 'string' ? e.run.trim() : '', say: typeof e?.say === 'string' ? e.say.trim().slice(0, 300) : '', timeoutMin: Math.max(1, num(e?.timeoutMin, 10)), env: envVars(e?.env) })).filter((e) => e.touches.length && e.run);
 }
 
 /**
  * 2.90: run the preQueue entries whose "touches" match a file the lane's branch changes (against its merge base with the
- * target), in one throwaway checkout of its head (STUDIO_LANE_COMMIT, STUDIO_LANE_DIR, STUDIO_ENGINE_REPO, and
- * STUDIO_ENGINE_LANE_DIR when the porter's lane folder exists). { ran: [run], files, refused?: text, skipped?: why }.
+ * target), in one throwaway checkout of its head (the entry's own "env", then STUDIO_LANE_COMMIT, STUDIO_LANE_DIR,
+ * STUDIO_ENGINE_REPO, and STUDIO_ENGINE_LANE_DIR when the porter's lane folder exists). { ran: [run], files, refused?: text, skipped?: why }.
  */
 export function runPreQueue(s, lane, { root, env = process.env } = {}) {
   const list = preQueueOf(s.cfg);
@@ -129,7 +130,7 @@ export function runPreQueue(s, lane, { root, env = process.env } = {}) {
   const laneDir = path.join(root, '.lanes', 'engine', String(lane.task));
   try {
     for (const { e, files } of due) {
-      const r = spawnSync(e.run, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout: e.timeoutMin * 60000, env: { ...env, STUDIO_LANE_COMMIT: lane.head, STUDIO_LANE_DIR: dir, STUDIO_ENGINE_REPO: s.repo, ...(fs.existsSync(laneDir) ? { STUDIO_ENGINE_LANE_DIR: laneDir } : {}) } });
+      const r = spawnSync(e.run, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout: e.timeoutMin * 60000, env: { ...env, ...e.env, STUDIO_LANE_COMMIT: lane.head, STUDIO_LANE_DIR: dir, STUDIO_ENGINE_REPO: s.repo, ...(fs.existsSync(laneDir) ? { STUDIO_ENGINE_LANE_DIR: laneDir } : {}) } });
       if (r.error && r.error.code !== 'ETIMEDOUT') return { ...res, skipped: `${e.run}: ${r.error.code || r.error.message}` };
       if (r.status === 0 && !r.error) { res.ran.push(e.run); continue; }
       const lines = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd().split('\n').slice(-8);

@@ -492,10 +492,11 @@ another, and a test that fails whenever a branch moves a pinned commit was found
   with a bad regex or a path outside the repo is left out. Example: `"blame": [ { "test": "PinTests\\.", "touches":
   "Rules~/pin.json", "say": "Regenerate the vectors at the new pin in the same branch" } ]`.
 - **Checks before queueing.** `engines.<x>.preQueue`: a list of `{ "touches": "<path or glob, or a list>", "run":
-  "<command>", "say": "<what to do>", "timeoutMin": 10 }`. When `task done --train` (or the harness's own queueing)
+  "<command>", "say": "<what to do>", "timeoutMin": 10, "env": { "<NAME>": "<value>" } }`. When `task done --train` (or the harness's own queueing)
   queues a branch that changes a matching file (against its merge base with the target), the command runs in a
   throwaway checkout of the branch's head (`STUDIO_LANE_COMMIT`, `STUDIO_LANE_DIR` the checkout, `STUDIO_ENGINE_REPO`,
-  and `STUDIO_ENGINE_LANE_DIR` the porter's lane folder when it exists). It exits non-zero: the branch is not queued,
+  and `STUDIO_ENGINE_LANE_DIR` the porter's lane folder when it exists; before those, the entry's own `env`, for a
+  command that needs what `rules.env` gives the rules check). It exits non-zero: the branch is not queued,
   and the porter reads the command's last 8 lines, the `say` line and the one command to run again. Not run again for a
   head already queued. A command that cannot start (or a checkout that fails) queues the branch with a warning event
   (`task.train.<x>.pre_queue`). Example: `"preQueue": [ { "touches": "Rules~/pin.json", "run": "dotnet run --project tools/VectorCheck",

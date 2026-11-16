@@ -254,14 +254,14 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, rounds: r.rounds, parallel:
     const pinCheck = path.join(T, 'pin-check.mjs');
     fs.writeFileSync(pinCheck, `import fs from 'node:fs'; import path from 'node:path';
 const cwd = process.cwd();
-fs.appendFileSync(${JSON.stringify(pqLog)}, JSON.stringify({ args: process.argv.slice(2), commit: process.env.STUDIO_LANE_COMMIT || null, dir: process.env.STUDIO_LANE_DIR || null }) + '\\n');
+fs.appendFileSync(${JSON.stringify(pqLog)}, JSON.stringify({ args: process.argv.slice(2), commit: process.env.STUDIO_LANE_COMMIT || null, dir: process.env.STUDIO_LANE_DIR || null, web: process.env.PIN_WEB || null, bad: process.env['BAD NAME'] || null }) + '\\n');
 fs.mkdirSync(path.join(cwd, 'obj'), { recursive: true }); fs.writeFileSync(path.join(cwd, 'obj', 'pin.txt'), 'x');
 const pin = JSON.parse(fs.readFileSync(path.join(cwd, 'pins/web.json'), 'utf8')).commit;
 const rec = fs.readFileSync(path.join(cwd, 'vectors/pin.txt'), 'utf8').trim();
 if (pin !== rec) { console.log('vectors recorded at ' + rec + ', the pin is ' + pin); console.log('re-record: Movement, Fees'); process.exit(1); }
 console.log('vectors match the pin');
 `);
-    setEngines({ unity: cfgFor(E, ctl, { preQueue: [{ touches: 'pins/*.json', run: `node "${fwd(pinCheck)}" --all-systems`, say: 'Re-record the vectors at the new pin and commit them in this branch.' }] }) });
+    setEngines({ unity: cfgFor(E, ctl, { preQueue: [{ touches: 'pins/*.json', run: `node "${fwd(pinCheck)}" --all-systems`, say: 'Re-record the vectors at the new pin and commit them in this branch.', env: { PIN_WEB: 'the/web/checkout', 'BAD NAME': 'x', N: 3 } }] }) });
     const Q = (task, branch) => `import { queueUnityTask } from ${u('harness/unity-train.mjs')};
 const r = queueUnityTask(process.cwd(), { engine: 'unity', task: ${JSON.stringify(task)}, branch: ${JSON.stringify(branch)}, agent: 'porter-a' });
 console.log(JSON.stringify({ ok: r.ok, error: r.error || null, message: r.message }));`;
@@ -281,6 +281,8 @@ console.log(JSON.stringify({ ok: r.ok, error: r.error || null, message: r.messag
       plain.ok === true && ok.ok === true && calls.length === 2 && calls[1].commit === E.heads['feat/pinok'] && q.join() === 'T-022,T-023'
         && !(fs.existsSync(path.join(S, '.studio', 'tmp')) && fs.readdirSync(path.join(S, '.studio', 'tmp')).some((x) => x.startsWith('prequeue-'))),
       JSON.stringify({ plain, ok, calls, q }).slice(0, 2500)]);
+    await guard('2.90 (t) B2: a preQueue entry\'s "env" reaches its command (the path to the web checkout a pin test reads), string values under plain names only (fails before this fix: the command got none of the studio\'s settings, so a test that needs one could not run before queueing)', () => [
+      calls1[0]?.web === 'the/web/checkout' && calls1[0]?.bad === null && calls[1]?.web === 'the/web/checkout', JSON.stringify({ calls }).slice(0, 800)]);
   }
 
   // ================= B3. rules.first: one test filter before everything else =================
