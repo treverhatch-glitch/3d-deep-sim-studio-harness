@@ -207,10 +207,15 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
     } : null;
   const maxLanes = Math.max(0, Math.floor(num(o.maxLanes, 0)));
   if (f && typeof f === 'object' && f.auto !== undefined && !(typeof f.test === 'string' && f.test.includes('{filter}'))) focusBad.push('rules.focus.auto needs rules.focus.test with {filter} in it');
-  // 2.90: engines.<x>.blame.
+  // 2.90: rules.first, a test filter run before anything else (with rules.focus.test), and engines.<x>.blame.
+  let first = null;
+  if (typeof o.first === 'string' && o.first.trim()) {
+    if (f && typeof f === 'object' && typeof f.test === 'string' && f.test.includes('{filter}')) first = { filter: o.first.trim(), command: withSdk(f.test.trim()).split('{filter}').join(o.first.trim()) };
+    else focusBad.push('rules.first needs rules.focus.test with {filter} in it (the command it runs its filter with); it is left out');
+  }
   const bl = blameList(cfg.blame);
   focusBad.push(...bl.errors);
-  const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, blame: bl.blame };
+  const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, first, blame: bl.blame };
   const test = typeof r === 'string' ? r.trim() : typeof o.test === 'string' ? o.test.trim() : '';
   if (test) return { command: withSdk(test), inputs, timeoutMin, source: `studio/game.json engines.${engine}.rules`, ...extra };
   const d = DEFAULTS[engine];
@@ -888,6 +893,19 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; for (const gr of Array.isArray(r.groups) ? r.groups : []) groupSecs.set(gr.filter, (groupSecs.get(gr.filter) || 0) + (gr.seconds || 0)); }
     return r;
   };
+  // 2.90: the smallest red prefix of `set` under atFn: { hi, bad } (set[hi - 1] turns it red), or { stuck }.
+  const redPrefix = (set, atFn, bad0) => {
+    let lo = 0; let hi = set.length; let bad = bad0;
+    while (hi - lo > 1) {
+      if (res.runs >= maxRuns) return { stuck: true };
+      const mid = Math.floor((lo + hi) / 2);
+      const part = chain(tip, set.slice(0, mid));
+      if (part.error || !part.head) return { stuck: true };
+      const rm = atFn(part.head);
+      if (rm.status === 'pass') lo = mid; else if (rm.status === 'red') { hi = mid; bad = rm; } else return { stuck: true };
+    }
+    return { hi, bad };
+  };
   // 2.90: engines.<x>.blame on a red: the one lane that changes the files a failing test is tied to is left out first; green
   // without it, it is the culprit (no prefix search). { lane, why } or null.
   const byBlame = (set, r, atFn) => {
@@ -899,6 +917,32 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     if (rw?.status !== 'pass') { log(`[engine-rules] ${engine}: engines.${engine}.blame named ${bs.lane.task}, but the batch without it is ${rw?.status || 'not buildable'}: narrowing as before`); return null; }
     return { lane: bs.lane, why: `engines.${engine}.blame ties ${bs.tests.slice(0, 3).join(', ')} to ${bs.entry.touches.join(', ')}, which only ${bs.lane.branch} changes (${bs.files.slice(0, 3).join(', ')}), and the check is green without it${bs.entry.say ? `. ${bs.entry.say}` : ''}` };
   };
+  // 2.90: rules.first, a test filter run before everything else: red, its culprit is refused at once with the failing names.
+  if (cfg.first) {
+    const fsel = { mode: 'first', filter: cfg.first.filter, command: cfg.first.command };
+    const atF = (sha) => { const r = run({ engine, repo, sha, cfg, from, extraFrom, sel: fsel, root, id: `${id}-first`, env, log, useCache }); if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; } return r; };
+    let onTip = null;
+    let left = lanes.slice();
+    while (left.length && res.runs < maxRuns) {
+      const c = chain(tip, left);
+      if (c.error || !c.head) break;
+      const r = atF(c.head);
+      log(`[engine-rules] ${engine}: rules.first (${cfg.first.filter}) on ${left.map((l) => l.task).join(' + ')}: ${r.status}`);
+      if (r.status !== 'red') break;
+      onTip = onTip || atF(tip);
+      if (onTip.status !== 'pass') { log(`[engine-rules] ${engine}: rules.first is ${onTip.status} on the target itself: it judges no lane`); break; }
+      const bb = byBlame(left, r, atF);
+      const p = bb ? null : redPrefix(left, atF, r);
+      if (!bb && p.stuck) break;
+      const culprit = bb ? bb.lane : left[p.hi - 1];
+      const bad = bb ? r : p.bad;
+      res.dropped.push({ lane: culprit, failures: bad.failures || [], first: true, why: `the first tests of the rules check (rules.first ${cfg.first.filter}) are red with ${culprit.branch}${bb ? `: ${bb.why}` : `${left.indexOf(culprit) ? ` on top of ${left.slice(0, left.indexOf(culprit)).map((l) => l.task).join(' + ')}` : ''}; it is green without it`}${bad.failures?.length ? `. Failing: ${bad.failures.slice(0, 8).join(', ')}` : ''}${bad.tail ? `\n${bad.tail.split('\n').map((x) => `  ${x}`).join('\n')}` : ''}` });
+      left = left.filter((l) => l.task !== culprit.task);
+    }
+    res.first = { filter: cfg.first.filter, dropped: res.dropped.length };
+    if (left.length !== lanes.length) { lanes = left; res.kept = left.slice(); first = left.length ? chain(tip, left) : null; }
+    if (!lanes.length) { res.kept = []; res.why = `${res.dropped.length} lane(s) refused by the first tests of the rules check (rules.first), none left`; return res; }
+  }
   // The calibration: the target must be green with the same command. 2.86: per part, only the parts the target has
   // (a system the batch adds has no tests on the target to calibrate) and that have no kept green there.
   let base;

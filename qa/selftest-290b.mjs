@@ -270,5 +270,51 @@ console.log(JSON.stringify({ ok: r.ok, error: r.error || null, message: r.messag
       JSON.stringify({ plain, ok, calls, q }).slice(0, 2500)]);
   }
 
+  // ================= B3. rules.first: one test filter before everything else =================
+  const rulesCfg = (ctl) => ({ test: `node "${fwd(rulesStub)}" "${fwd(ctl)}" --nologo`, first: 'PinTests', focus: { test: `node "${fwd(rulesStub)}" "${fwd(ctl)}" --nologo --filter "{filter}"` } });
+  const B3 = () => engineRepo({ 'feat/p': { 'p.txt': 'p\n' }, 'feat/pin': { 'pins/web.json': '{ "commit": "beef002" }\n' }, 'feat/q': { 'q.txt': 'q\n' } });
+  const rulesRuns = (ctl) => { try { return fs.readFileSync(`${ctl}-rules.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  {
+    resetState();
+    const E = B3();
+    const ctl = path.join(T, 'ctl-first');
+    setEngines({ unity: cfgFor(E, ctl, { rules: rulesCfg(ctl) }) });
+    queue(E, [['T-031', 'feat/p'], ['T-032', 'feat/pin'], ['T-033', 'feat/q']]);
+    const r = probe(TRAIN);
+    const rr = rulesRuns(ctl);
+    const why = r.dropped?.find((d) => d.task === 'T-032')?.why || '';
+    await guard('2.90 (t) B3: rules.first "PinTests": the rules check\'s very first run is that filter on the batch (red at once), then the target (green), then prefixes by that filter only; T-032 is refused naming rules.first and the failing test; the full command runs only on the target and on T-031 + T-033, never on a tree with T-032; one land run lands T-031, T-033 (fails on 2.89: the first rules run was the full command on the target)', () => [
+      rr[0]?.filter === 'PinTests' && rr[0].mode === 'first' && rr.filter((x) => x.filter === 'PinTests').length === 5 && rr.filter((x) => !x.filter).length === 2
+        && r.dropped?.map((d) => d.task).join() === 'T-032' && r.dropped[0].cause === 'rules' && /rules\.first PinTests/.test(why) && why.includes(PIN)
+        && r.runs === 1 && r.landed?.join() === 'T-031,T-033',
+      JSON.stringify({ r, rr }).slice(0, 3000)]);
+  }
+  {
+    resetState();
+    const E = B3();
+    const ctl = path.join(T, 'ctl-first-blame');
+    setEngines({ unity: cfgFor(E, ctl, { rules: rulesCfg(ctl), blame: BLAME }) });
+    queue(E, [['T-034', 'feat/p'], ['T-035', 'feat/pin'], ['T-036', 'feat/q']]);
+    const r = probe(TRAIN);
+    const rr = rulesRuns(ctl);
+    const why = r.dropped?.find((d) => d.task === 'T-035')?.why || '';
+    await guard('2.90 (t) B1+B3: with engines.unity.blame too, the rules check leaves the one branch that changes pins/*.json out at once: 3 runs of the first filter (batch red, target green, the batch without T-035 green), no prefix search; T-035 refused naming the blame entry and the studio\'s line; T-034 and T-036 land on one land run (fails on 2.89: no rules.first, no blame in the rules check)', () => [
+      rr.filter((x) => x.filter === 'PinTests').length === 3 && rr.filter((x) => !x.filter).length === 2 && r.dropped?.map((d) => d.task).join() === 'T-035'
+        && /engines\.unity\.blame ties/.test(why) && /Re-record the vectors/.test(why) && r.runs === 1 && r.landed?.join() === 'T-034,T-036',
+      JSON.stringify({ r, rr }).slice(0, 3000)]);
+  }
+  {
+    resetState();
+    const E = B3();
+    const ctl = path.join(T, 'ctl-first-nofocus');
+    setEngines({ unity: cfgFor(E, ctl, { rules: { test: `node "${fwd(rulesStub)}" "${fwd(ctl)}"`, first: 'PinTests' } }) });
+    const r = probe(`import { rulesConfig } from ${u('harness/engine-rules.mjs')};
+const c = rulesConfig('unity', { root: process.cwd() });
+console.log(JSON.stringify({ first: c.first, bad: c.focusBad || [] }));`);
+    await guard('2.90 (t) B3: rules.first without rules.focus.test (the command a filter runs with) is left out and said, not guessed', () => [
+      r.first === null && r.bad?.some((b) => /rules\.first needs rules\.focus\.test/.test(b)),
+      JSON.stringify(r).slice(0, 1500)]);
+    void E;
+  }
   void tipOf;
 }

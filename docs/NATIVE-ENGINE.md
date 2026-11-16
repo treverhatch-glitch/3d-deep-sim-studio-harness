@@ -133,6 +133,14 @@ half as much machine time as the land runs. Five settings, all optional, in the 
   skipped with a log line; `rules show` lists the patterns. `play.focus.ignore` does the same for the Play Mode focus
   (only ignored paths: `smoke` alone, or a full play stage). **An ignore pattern that is too wide hides a real change
   from the rules check**: a rules file it matches lands without its tests being run, so match folders, not suffixes.
+- `first` (2.90): one test filter run before everything else, with `focus.test` (it needs `focus.test` with
+  `{filter}`; without it the setting is left out and `rules show` says so). The rules check runs that filter on the
+  batch first; red there and green on the target, the branch that turns it red is found with that filter alone (the
+  short runs) and refused at once with the failing names, before the target's calibration or any full run. Green, or
+  red on the target itself: the check goes on as before. For a test that pins generated data to a commit, which fails
+  for every branch that moves the pin without regenerating:
+  `"rules": { "test": "dotnet test tools/SimTests", "first": "FullyQualifiedName~PinTests", "focus": { "test":
+  "dotnet test tools/SimTests --filter \"{filter}\"" } }`.
 - `focus.split` (2.84, B-134): `true` runs one command per filter group (each mapped filter, then `smoke`) in
   sequence instead of one joined command, so one test process holds one system's data at a time. Green when all are,
   red on the first red (its output kept); the result and the `engine.rules` event carry each group's seconds.
