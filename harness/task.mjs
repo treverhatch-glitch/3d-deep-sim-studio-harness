@@ -1125,6 +1125,25 @@ function trainNoTestReason(target) {
   try { const ev = rulesTestEvidence(taskChanges(target.id, startedAt(target.id))); return ev.sim.length && !ev.tests ? (ev.reason ? { noTestReason: ev.reason } : { noTest: true }) : null; } catch { return null; }
 }
 
+/** 2.90 (f): a landed slice: the task back to the backlog (ready), its claim freed, the slice mark cleared. */
+function sliceLanded(taskId, agent, { train, lock }) {
+  let target = null;
+  withBoard(() => {
+    const fresh = parseNextQueue();
+    target = fresh.inProgress.find((t) => t.id === taskId) || fresh.backlog.find((t) => t.id === taskId) || null;
+    if (!target) return;
+    fresh.inProgress = fresh.inProgress.filter((t) => t.id !== taskId);
+    if (!fresh.backlog.some((t) => t.id === taskId)) fresh.backlog.unshift({ ...target, status: 'backlog' });
+    writeNextQueue(fresh);
+  });
+  if (!target) return null;
+  if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
+  setHold(taskId, { slice: null });
+  clearAttempts(taskId);
+  emitEvent({ type: 'task.slice_landed', agent: agent || 'train', task: taskId, to: 'producer', msg: `${taskId}: a slice landed (merge train ${train}); the task stays open and the next session continues on the landed target (task done ${taskId} --train without --slice closes it with the last slice)`, meta: { train } });
+  return { id: taskId, sliceLanded: true };
+}
+
 /**
  * Close a task a merge train landed (harness/train.mjs): its lane's checked head is in the train's verified head, which
  * main now contains. The board move, claim, events and follow-ups are task done's; its checks ran in the train's lane
@@ -1149,6 +1168,8 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
   const mainTip = spawnSync('git', ['rev-parse', landTarget ? `refs/heads/${landTarget}` : 'HEAD'], { windowsHide: true, cwd: gitRoot, encoding: 'utf8' }).stdout.trim();
   if (!head || !laneHead || !anc(laneHead, head) || !anc(head, mainTip)) return { error: 'not-landed', message: `${taskId}'s lane (${String(laneHead).slice(0, 8)}) is not in the studio's branch through train ${train}` };
   if (record && (record.dirty !== false || record.partial || judgeRed((record.rows || []).map((r) => ({ ...r, required: r.required !== false })), readBaseline(taskId) || { red: [] }).fresh.length)) return { error: 'not-verified', message: `train ${train}'s verify record is not a clean, green full verify` };
+  // 2.90 (f): a slice (task done --train --slice) landed: the task goes back to ready, for a session on the landed target.
+  if (readHolds()[taskId]?.slice) return sliceLanded(taskId, agent, { train, lock });
   let target = null;
   let q = null;
   const writeBoard = () => withBoard(() => {
@@ -1273,6 +1294,7 @@ export function trainDeps(busyMod, { forDone = false } = {}) {
     close: (lane, ctx) => {
       const t = closeTrainTask(lane.task, lane.agent, { train: ctx.train, head: ctx.head, laneHead: lane.head, record: ctx.record, note: lane.note || '', repo: ctx.repo || null, target: ctx.target || null });
       if (t?.halfLanded) return { ok: true, half: true }; // 2.83: its engine half is still to land: the task stays open
+      if (t?.sliceLanded) return { ok: true, half: true }; // 2.90 (f): one slice landed; the task is ready for the next
       return t?.error ? { ok: false, message: t.message } : t ? { ok: true, target: t } : { ok: false, message: `${lane.task} is not on the board` };
     },
     handBack: (lane, note, o = {}) => pauseTask(lane.task, lane.agent, note, { force: true, handBackCause: o.cause }),
@@ -1349,7 +1371,7 @@ export function foreignHookCommits(output, taskId, { cwd = REPO_ROOT, lane = inL
   return shas;
 }
 
-export function pauseTask(taskId, agent = null, note = '', { force = false, expect, cause, handBackCause, ownerStep } = {}) {
+export function pauseTask(taskId, agent = null, note = '', { force = false, expect, cause, handBackCause, ownerStep, commits = 0 } = {}) {
   let lock = lockStatus(`task:${taskId}`);
   if (lock.locked && lock.lock.owner !== agent && !force && holderRunning(lock.lock.owner)) {
     return { error: 'locked', message: `Task ${taskId} is claimed by ${lock.lock.owner}, which is still running. Only that owner can hand it back (or stop it: npm run agent -- stop ${lock.lock.owner}).` };
@@ -1401,7 +1423,7 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Paused ${target.id}: ${note || 'handed back'}`);
   let ownerStepNow = ownerStep || null;
   if (!ownerStepNow && !cause) { try { ownerStepNow = ownerStepForHandBack(target.id, readRecentEvents(20000)); } catch { /* a hint, never a blocker */ } }
-  emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}`, meta: { ...(isFailureNote(note) ? { reasonKey: reasonKey(note) } : {}), ...(cause ? { cause } : {}), ...(handBackCause ? { handBackCause } : {}), ...(ownerStepNow ? { ownerStep: ownerStepNow } : {}) } });
+  emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}`, meta: { ...(isFailureNote(note) ? { reasonKey: reasonKey(note) } : {}), ...(cause ? { cause } : {}), ...(handBackCause ? { handBackCause } : {}), ...(ownerStepNow ? { ownerStep: ownerStepNow } : {}), ...(Number(commits) > 0 ? { commits: Number(commits) } : {}) } });
   if (!cause && isFailureNote(note)) { try { canaryEnd(target.id, 'handed-back', { agent: who }); } catch { /* a record, never a blocker */ } }
   // A hand-back that names a step only the owner can do waits for the owner (harness/owner-only.mjs), before the breaker.
   const ownerPark = cause ? null : parkIfOwnerOnly(target.id, `${given.prose || ''}\n${note || ''}`, { who });
@@ -2125,6 +2147,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.log(JSON.stringify({ train: 'check', ...res }));
       process.exit(res.ok ? 0 : 1);
     }
+    // 2.90 (f): --slice queues one committed slice of a big unit; the task stays open when it lands. Any other done clears it.
+    if (flags.slice && !flags.train) { console.error(`--slice goes with --train: npm run task -- done ${targetId} --train --slice queues this slice and keeps the task open.`); process.exit(1); }
+    if (flags.slice || readHolds()[targetId]?.slice) setHold(targetId, { slice: flags.slice ? { by: whoAmI(flags) || 'agent', at: new Date().toISOString() } : null });
     if (flags.train) {
       // --force --train with a force approval on file queues the lane forced (the train still runs its full verify and
       // the safety checks; a tier-C lane still waits for a release). Without one: refused.

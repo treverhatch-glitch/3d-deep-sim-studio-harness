@@ -5,6 +5,7 @@
  *   c  `task unblock` ends a time block (task block <ID> --until <time>)
  *   d  the crew breaker counts a session that committed to its task as progress
  *   e  the focus brief lists the line ranges a task names first, and says to read only those
+ *   f  a hand-back after commits is progress for every counter, and `task done --train --slice` lands a unit per slice
  * Scaffolding: a studio copy with its own git and events file, as in qa/selftest-286e.mjs.
  */
 import fs from 'node:fs';
@@ -140,6 +141,59 @@ console.log(JSON.stringify({ slices: h(mk(() => 1)), nothing: h(mk(() => 0)), on
       add.status === 0 && Boolean(id) && f.status === 0 && md.indexOf('## Read only these lines') > 0 && md.indexOf('## Read only these lines') < md.indexOf('## What this task is')
         && /`cartridges\/demo290\/sim\.ts` lines 120-180: offset 120, limit 61/.test(sec) && /lines 300-340: offset 300, limit 41/.test(sec) && !/nowhere/.test(sec),
       JSON.stringify({ add: out(add).slice(-300), id, sec, head: md.slice(0, 800) })]);
+  }
+  // ================= f. big units land per slice; a committed slice is progress =================
+  {
+    const r = probe(`import { spawnSync } from 'node:child_process';
+const hk = await import(${u('harness/handback-kind.mjs')});
+const busy = await import(${u('harness/busy.mjs')});
+const tb = await import(${u('harness/task-budget.mjs')});
+const br = await import(${u('harness/breaker.mjs')});
+const { emitEvent } = await import(${u('harness/event.mjs')});
+const now = Date.now(); const iso = (m) => new Date(now - m * 60000).toISOString();
+const paused = (task, m, commits, note = 'ported 10 of 53 methods; the rest next session') => ({ ts: iso(m), type: 'task.paused', agent: 'engine-porter-' + m, task, msg: 'Handed back ' + task + ': ' + note, meta: commits ? { commits } : {} });
+const ends = (task, m, commits) => [{ ts: iso(m + 1), type: 'agent.session.start', agent: 'p' + m, task, meta: { role: 'engine-porter' } }, { ts: iso(m - 0.5), type: 'agent.session.end', agent: 'p' + m, task, meta: { role: 'engine-porter', outcome: { task, commits, done: false, counts: true } } }];
+const slices = [paused('T-020', 30, 1), paused('T-020', 20, 2), paused('T-020', 10, 1)];
+const viaEnd = [...ends('T-021', 30, 1), { ...paused('T-021', 30, 0), agent: 'p30', ts: iso(30.6) }];
+const plain = [paused('T-022', 30, 0), paused('T-022', 20, 0), paused('T-022', 10, 0)];
+const sess = (task, k, commits) => { const out = []; for (let i = 0; i < k; i += 1) out.push(...ends(task, 60 - i * 8, commits)); return out; };
+const note = 'verify failed: golden mismatch in the store rules';
+for (const t of ['T-023', 'T-024']) for (let i = 0; i < 2; i += 1) emitEvent({ type: 'task.paused', agent: 'engine-porter-' + i, task: t, msg: 'Handed back ' + t + ': ' + note, meta: { reasonKey: br.reasonKey(note), ...(t === 'T-023' ? { commits: 1 } : {}) } });
+console.log(JSON.stringify({ kind: hk.handBackKind(slices[0], slices), kindEnd: hk.handBackKind(viaEnd[2], viaEnd), loopSlices: busy.loopHandBacks('T-020', slices).length, loopPlain: busy.loopHandBacks('T-022', plain).length,
+  budgetSlices: tb.taskSpend('T-025', sess('T-025', 6, 1), now).sessions, budgetPlain: tb.taskSpend('T-026', sess('T-026', 6, 0), now).sessions,
+  breakerSlices: br.checkBreaker('T-023', note), breakerPlain: br.checkBreaker('T-024', note) }));`);
+    await guard('2.90 (f) a hand-back that left commits on its task is progress: its kind is "progress" (from the hand-back\'s own commits or its session end\'s), three such hand-backs are 0 for the watchdog\'s park (three plain ones are 3), six committing sessions are 0 sessions of the task budget (six with no commit are 6), and two failure hand-backs with commits do not trip the circuit breaker (two without do) (fails on 2.89: "real", 3, 6 and parked)', () => [
+      r.kind === 'progress' && r.kindEnd === 'progress' && r.loopSlices === 0 && r.loopPlain === 3 && r.budgetSlices === 0 && r.budgetPlain === 6 && r.breakerSlices === null && /circuit breaker/.test(String(r.breakerPlain)),
+      JSON.stringify(r)]);
+  }
+  {
+    const r = probe(`import { spawnSync } from 'node:child_process';
+const tm = await import(${u('harness/task.mjs')});
+const th = await import(${u('harness/task-hold.mjs')});
+const hk = await import(${u('harness/handback-kind.mjs')});
+const { readRecentEvents } = await import(${u('harness/event.mjs')});
+const head = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
+const t = tm.addTask({ title: 'Docs: a big unit landed in slices', role: 'builder', priority: 'P2', agent: 'prod-1', meta: { promoted: true } });
+const id = t.id;
+const begin = () => tm.withBoard(() => { const q = tm.parseNextQueue(); const x = q.backlog.find((y) => y.id === id); if (x) { q.backlog = q.backlog.filter((y) => y.id !== id); q.inProgress.push({ ...x, status: 'in_progress' }); tm.writeNextQueue(q); } });
+const where = () => { const q = tm.parseNextQueue(); return q.inProgress.some((x) => x.id === id) ? 'in-progress' : q.backlog.some((x) => x.id === id) ? 'backlog' : q.done.some((x) => x.id === id) ? 'done' : 'gone'; };
+const slice = () => th.setHold(id, { slice: { by: 'engine-porter-1', at: new Date().toISOString() } });
+const out = {};
+begin(); slice(); out.r1 = tm.closeTrainTask(id, 'engine-porter-1', { train: 'tr-1', head, laneHead: head }); out.after1 = where(); out.mark1 = Boolean(th.readHolds()[id]?.slice);
+begin(); slice(); out.r2 = tm.closeTrainTask(id, 'engine-porter-2', { train: 'tr-2', head, laneHead: head }); out.after2 = where();
+begin(); slice(); tm.pauseTask(id, 'train', 'train tr-3: verify failed: the same member declared twice', { force: true }); out.red = where(); out.redMark = Boolean(th.readHolds()[id]?.slice);
+const evs = readRecentEvents(20000); const redEv = evs.filter((e) => e.type === 'task.paused' && e.task === id).pop(); out.redKind = hk.handBackKind(redEv, evs); out.redMsg = redEv && redEv.msg;
+th.setHold(id, { slice: null });
+begin(); out.r3 = tm.closeTrainTask(id, 'engine-porter-3', { train: 'tr-4', head, laneHead: head }); out.after3 = where();
+out.sliceEvents = readRecentEvents(20000).filter((e) => e.type === 'task.slice_landed' && e.task === id).length;
+out.doneEvents = readRecentEvents(20000).filter((e) => e.type === 'task.done' && e.task === id).length;
+out.parked = Boolean(th.readHolds()[id]?.parked);
+console.log(JSON.stringify({ id, ...out, r1: out.r1 && out.r1.sliceLanded, r2: out.r2 && out.r2.sliceLanded, r3: out.r3 && out.r3.id }));`);
+    const lone = task('done', String(r.id || 'T-999'), '--slice', '--agent', 'engine-porter-1');
+    await guard('2.90 (f) a unit task lands two slices (each a train close with the slice mark): after each it is back in the backlog with no slice mark and a task.slice_landed event, not done; a red slice comes back as a hand-back with its reason, keeps its mark and counts as a real hand-back; the last landing without a slice mark closes it (one task.done); nothing parks it; `task done --slice` without --train is refused (fails on 2.89: the first landing closed the task)', () => [
+      r.r1 === true && r.after1 === 'backlog' && r.mark1 === false && r.r2 === true && r.after2 === 'backlog' && r.red === 'backlog' && r.redMark === true && r.redKind === 'real' && /verify failed: the same member declared twice/.test(String(r.redMsg))
+        && r.r3 === r.id && r.after3 === 'done' && r.sliceEvents === 2 && r.doneEvents === 1 && r.parked === false && lone.status !== 0 && /--slice goes with --train/.test(out(lone)),
+      JSON.stringify({ r, lone: out(lone).slice(-300) })]);
   }
   try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep removes it */ }
 }

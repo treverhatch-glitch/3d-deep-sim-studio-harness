@@ -51,7 +51,9 @@ export function checkBreaker(taskId, note, who = 'launcher', now = Date.now()) {
   const harnessEnd = (e) => harnessKind(handBackKind(e, all));
   const newest = evs.filter((e) => e.type === 'task.paused').pop();
   if (newest && harnessEnd(newest)) return null;
-  const prior = evs.filter((e) => e.type === 'task.paused' && e.meta?.reasonKey && !harnessCaused(e) && !personCaused(e) && !harnessEnd(e) && (!reset || e.ts > reset.ts));
+  // 2.90 (f): a hand-back after commits to the task (a slice of a big unit) is progress: it is not one of the two.
+  if (newest && handBackKind(newest, all) === 'progress') return null;
+  const prior = evs.filter((e) => e.type === 'task.paused' && e.meta?.reasonKey && !harnessCaused(e) && !personCaused(e) && !harnessEnd(e) && handBackKind(e, all) !== 'progress' && (!reset || e.ts > reset.ts));
   const last = prior.at(-2); // the newest is this hand-back itself (emitted just before)
   if (!last || last.meta.reasonKey !== key) return null;
   if (readHolds()[taskId]?.parked) return null;

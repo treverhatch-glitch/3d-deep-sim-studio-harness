@@ -793,7 +793,9 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
     // the task for the owner (harness/owner-only.mjs) instead of relaunching a builder.
     const ownerSaid = !stop && !limit ? ownerOnlyStep(String(log).slice(-6000)) : null;
     const noteOut = ownerSaid ? `${note} Its last output said: "${ownerSaid.phrase}".` : note;
-    pauseTask(id, agent, af && !af.ok && af.output ? `${noteOut} Launcher verify: ${af.output.replace(/\n/g, ' ')}` : noteOut, { force: true });
+    // 2.90 (f): the session's own commits to the task ride on the hand-back (handback-kind.mjs: progress, not counted).
+    const sessCommits = (() => { try { const gl = spawnSync('git', ['log', `--since=${s0.startedAt || new Date(Date.now() - 86400000).toISOString()}`, '--grep', id, '--format=%h'], { windowsHide: true, cwd: copyDir && fs.existsSync(copyDir) ? copyDir : REPO_ROOT, encoding: 'utf8' }); return gl.status === 0 ? gl.stdout.split('\n').filter(Boolean).length : 0; } catch { return 0; } })();
+    pauseTask(id, agent, af && !af.ok && af.output ? `${noteOut} Launcher verify: ${af.output.replace(/\n/g, ' ')}` : noteOut, { force: true, commits: sessCommits });
     if (reasoningOnly) emitEvent({ type: 'agent.reasoning_only', agent, model, task: id, status: 'warn', msg: `${agent} (${model}) replied with reasoning only on ${id}: failed hand-off, the next session goes to another model family`, meta: { role, tool } });
     handed.push({ task: id, patch });
     if (!capped && !limit && !stop) parkIfLooping(id);

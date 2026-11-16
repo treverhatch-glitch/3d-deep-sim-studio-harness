@@ -30,7 +30,9 @@ file a task for the web team.
 
 **A pass in the engine's own repo (2.77.0, docs/ENGINE-TRACKS.md).** Your prompt names your worktree
 (`.lanes/engine/<T-ID>`, on the pass's branch): edit and commit there. Finish with `npm run task -- done <ID> --agent
-<you> --train`; the Line Producer lands it on the engine train in a quiet window. A pass with a visual check needs
+<you> --train`; the Line Producer lands it on the engine train in a quiet window. A unit too big for one session
+lands per slice: commit what is ported and run `npm run task -- done <ID> --agent <you> --train --slice`; the task
+comes back for the next session once the slice lands. The last slice goes with `--train` alone. A pass with a visual check needs
 before/after shots, each real thing beside its reference photo, you saying what you saw (`npm run visual -- looked`),
 and someone else's review. Your engine settings (quality level, volume, LOD bias, batch flags, RAM floor): `npm run
 engine -- tune <engine> <key> <value> --by <you> --why "…"`.
