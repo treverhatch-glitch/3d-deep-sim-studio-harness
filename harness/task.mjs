@@ -2673,7 +2673,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(0);
     }
     const ids = flags.all ? 'all' : flags._.slice(1).join(',').split(/[,\s]+/).filter(Boolean);
-    const r = promote(ids, { by: typeof flags.by === 'string' ? flags.by : actor(), drop: flags.drop ? String(flags.drop).split(',') : [], addTask });
+    const ptype = typeof flags.type === 'string' ? flags.type.toLowerCase() : '';
+    if (ptype && !['bug', 'chore', 'study', 'research', 'balance', 'fun', 'playtest', 'review', 'docs', 'idea', 'system'].includes(ptype)) { console.error(`Unknown --type "${flags.type}". Use bug, chore, study, research, balance, fun, playtest, review, docs, idea or system.`); process.exit(1); }
+    const set = { ...(ptype ? { type: ptype } : {}), ...(flags.phase !== undefined ? { phase: Number(flags.phase) } : {}), ...(typeof flags.serves === 'string' ? { serves: flags.serves } : {}) };
+    const r = promote(ids, { by: typeof flags.by === 'string' ? flags.by : actor(), drop: flags.drop ? String(flags.drop).split(',') : [], addTask, set });
     if (!r.ok) {
       console.error(r.message);
       process.exit(1);

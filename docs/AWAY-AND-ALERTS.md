@@ -14,7 +14,9 @@ A person, or a reviewer whose model family differs from the model that forced it
 
 The Director, Producer and planner (and people) add to `studio/NEXT.md`. Other roles' adds go to
 `studio/proposed.json` with a one-line `--why`; the Producer promotes them in batches
-(`npm run task -- promote P-3,P-4 --by producer` or `--all`, `--drop P-5`). The dev's own asks
+(`npm run task -- promote P-3,P-4 --by producer` or `--all`, `--drop P-5`; 2.90: `--phase 1 --serves pillar:<name>` or
+`--type chore` give a build proposal what the gate asks). A task whose title or `--after` names an open proposal waits
+until it is promoted, then for the task it became (2.90). The dev's own asks
 (`--origin dev --asked "…"`), and the watcher queue directly.
 
 ## Fun check in waves

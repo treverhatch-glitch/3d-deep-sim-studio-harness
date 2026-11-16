@@ -1,6 +1,7 @@
 /**
  * qa/selftest-290a.mjs — 2.90: costs a live studio's overseer wrote down while running 2.86.
  *   a  a task that names a proposal (its title or --after) waits while it is one, then for the task it became
+ *   b  `task promote` takes --phase, --serves and --type, so a porter's "Port …" proposal can be promoted
  * Scaffolding: a studio copy with its own git and events file, as in qa/selftest-286e.mjs.
  */
 import fs from 'node:fs';
@@ -71,6 +72,25 @@ console.log(JSON.stringify({ open, owner: owner && owner.owner, producer, viaAft
       const holds = JSON.parse(fs.readFileSync(path.join(S, 'studio', 'task-holds.json'), 'utf8')).tasks || {};
       return [add.status === 0 && Boolean(id) && (holds[id]?.after || []).includes('P-02') && bad.status !== 0 && /P-77 is not a task id/.test(out(bad)), JSON.stringify({ add: out(add).slice(-400), bad: out(bad).slice(-300), id, hold: id && holds[id] })];
     });
+  }
+
+  // ================= b. promote takes what the gate asks =================
+  {
+    fs.rmSync(path.join(S, 'studio', 'proposed.json'), { force: true });
+    node(['harness/intake.mjs', '--answers', 'studio/templates/intake-example.json']);
+    const sign = node(['harness/bible.mjs', 'sign', '--by', 'hatch']);
+    const p1 = task('add', 'Port (engine, batch 1): the rules of the store', '--role', 'engine-porter', '--agent', 'engine-porter-1', '--why', 'the next batch of the port plan');
+    const p2 = task('add', 'Port (engine, batch 2): the rules of the market', '--role', 'engine-porter', '--agent', 'engine-porter-1', '--why', 'the batch after it');
+    const plain = task('promote', 'P-1', '--by', 'prod-1');
+    const flagged = task('promote', 'P-1', '--by', 'prod-1', '--phase', '1', '--serves', 'pillar:Calm');
+    const chore = task('promote', 'P-2', '--by', 'prod-1', '--type', 'chore');
+    const badType = task('promote', 'P-2', '--by', 'prod-1', '--type', 'nonsense');
+    await guard('2.90 (b) a porter\'s "Port …" proposal: plain `task promote` still refuses it and says to promote with --phase and --serves (or --type chore); `promote P-1 --phase 1 --serves pillar:Calm` queues it, and `promote P-2 --type chore` queues it as "Chore: Port …"; an unknown --type is refused (fails on 2.89: promote took no flags, so both stayed refused and were re-added by hand)', () => [
+      sign.status === 0 && /Proposed P-1/.test(out(p1)) && /Proposed P-2/.test(out(p2))
+        && /Refused: P-1/.test(out(plain)) && /promote P-1 --by prod-1 --phase/.test(out(plain)) && /--type chore/.test(out(plain))
+        && /Queued P-1→T-\d+/.test(out(flagged)) && /Queued P-2→T-\d+/.test(out(chore)) && Boolean(idOf('Chore: Port (engine, batch 2)')) && Boolean(idOf('Port (engine, batch 1): the rules of the store'))
+        && badType.status !== 0 && /Unknown --type/.test(out(badType)),
+      JSON.stringify({ sign: out(sign).slice(-200), p1: out(p1).slice(-200), plain: out(plain).slice(-600), flagged: out(flagged).slice(-300), chore: out(chore).slice(-300), badType: out(badType).slice(-200) })]);
   }
 
   try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep removes it */ }
