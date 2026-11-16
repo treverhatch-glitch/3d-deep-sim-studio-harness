@@ -4,6 +4,24 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.90.0] — 2026-11-16
+The overseer's list (the owner's order: build what a live studio's overseer asked for after two days on 2.86). Its
+train logs showed more than the list: the rules check had timed out on every engine train for two days and judged
+nobody. Details: docs/RELEASE-2.90.0.md.
+- **The rules check's time limit follows the suite** when the studio set none, a timeout on the target is an event
+  and a line in `train status`, and the same cut-off run is not repeated.
+- **A compile error is searched with the compile command**, not with land runs; `engines.<x>.blame` ties a failing
+  test to the file that explains it; `engines.<x>.preQueue` checks a branch before it is queued; `rules.first` runs
+  one test filter first. Two logged batches: one land run where there were four, two where there were four or five.
+- **Two land runs at once:** a second gate copy (`engines.<x>.gates`), switched by the Line Producer
+  (`task train parallel on|off`), off by default. The second gate only tests.
+- **Slices:** `task done --train --slice` lands a big unit slice by slice; a hand-back after commits is progress for
+  every counter.
+- **Tasks and briefs:** a task waits for the proposal it names; `promote` takes `--phase`, `--serves`, `--type`;
+  `unblock` ends a time block; line ranges open the brief; an answered ask stays a must-do until followed.
+- **Status and guards:** builders idle because work waits on the engine train say so; both trains on the status
+  line; stale asks not counted; a session on a harness check is not stalled; the plain `git pull` trap is named.
+
 ## [2.89.0] — 2026-11-16
 Which functions a studio runs (the owner's word: cut what is not essential, by evidence). A crew's records show 92%
 of the code reachable from what it ran and 8% not, mostly setup tooling; what is unused inside used files, no record
@@ -19,7 +37,7 @@ showed. Details: docs/RELEASE-2.89.0.md.
 One reading of "landed", and one module of small helpers (the owner's order: the consolidation map's second step).
 Code and tests are 200 lines larger than 2.87, not smaller: the helpers saved 26 and the landing fix with its tests
 added 226.
-Details: docs/RELEASE-2.88.0.md.
+Details: the 2.88.0 release notes, in git history.
 - **Which tasks landed is read in one place** (`harness/landings.mjs`). On a crew's ten days, 140 tasks landed on the
   web main, 186 on the engine target and 404 were closed; some reports read only the web records and some counted
   every close. The health report, the brief status, the development cycle's brief and the game-dev loop now count
@@ -45,51 +63,10 @@ Details: the 2.87.0 release notes, in git history.
   p90 3.1 h (12.7 h), tasks landed with no overseer step 31.7% (25%).
 - **Not done:** shared helpers in `harness/` (about 100 lines, with the next release's merges).
 
-## [2.86.1] — 2026-11-16
-One fix, found in a crew's log of its first 31 hours on 2.86.0.
-- **A run of the target alone that moved the target was thrown away** (`harness/unity-train.mjs`): 2.86.0 runs the
-  daily full run and the probe of a flaky test with `STUDIO_LAND_PROBE=1` and treated any move of the target as a land
-  script that ignores it. A land script that commits its own record of every run moves the target each time: a
-  174-minute daily full run ended "could not run to its end" and by-name steps were withdrawn. A run that carries no
-  branch cannot land one, so its result now stands and one warning (`task.train.<x>.target_moved_alone`) says what
-  moved. A by-name step that carries a branch and moves the target stops the train as before. Three checks in
-  qa/selftest-286b.mjs (they fail on 2.86.0); one 2.86 check is rebuilt on a run that carries a branch.
-
-## [2.86.0] — 2026-11-14
-The engine train (the owner's order: more effective, unused and duplicate code out, the overseer's list). A crew's
-first 19.5 hours on 2.85: tasks landed with no overseer step 25% (0% on 2.84), hand-backs with a harness cause 34%
-(59.5%), engine land runs passing 35% (46.2%), engine queue wait p90 12.7 h. 67 files, +5,327 / −770 lines against
-2.85.0. Details: docs/RELEASE-2.86.0.md.
-- **New code takes effect:** a crew's supervisor ran 2.84 code for 20 hours after the 2.85 upgrade (32 false
-  hand-backs, the web train never started). A supervisor now notices new harness code and restarts itself
-  (`harness/code-stamp.mjs`, `STUDIO_SUPERVISOR_SELF_RESTART`); `upgrade --merge` commits the board itself under the
-  board lock and names what still runs old code.
-- **A red on a listed flaky test:** `flakyRetries` (2) by name, then a probe of the target alone; a red target blames
-  nobody (`engine.red_on_target`). **Narrowing by test name:** with a land script that honours `STUDIO_LAND_PROBE`,
-  narrowing and confirm steps run only the failing tests and land nothing; the survivors land on one complete run
-  (`npm run engine -- bisect-plan`). **The daily full run** runs alone on the target, never as a train step.
-  `batchAlone`; a flake record per test.
-- **The rules check:** a hand-written map entry that groups its prefixes matches again (a crew's 38 entries had never
-  matched, so every check ran everything); `rules.focus.auto` derives one entry per system from the tree; results are
-  kept per part, so the target is not run again and a new part is not run on it; `npm run engine -- rules-plan`.
-- **Sessions:** the refresh rule is measured from the session's first work (`STUDIO_REFRESH_SAFETY_PCT`); a refresh, a
-  launch failure, a foreign hooks refusal and a refused lane copy count against no task (one reading for the watchdog,
-  the budget, both breakers and the score); a refresh's successor keeps its lane copy; a claim ends with its session.
-  `STUDIO_LANE_ADD_MAIN_DIR` (off) for a tool's extra-directory flag.
-- **Disk:** `engines.<x>.sparse` gives listed roles a worktree of only their folders; one rule for when a worktree is
-  safe to remove, applied every 30 minutes; `STUDIO_DISK_WARN_GB` (60) on both volumes, no new worktree or lane copy
-  under the disk budget; `npm run engine -- lanes`.
-- **Smaller:** a merge of the target re-queues a conflict hand-back; the force approval answers `--force --train`; the
-  engine task file is written with retries; a promoted proposal's holds follow it; a pool's own `anyModel` flag.
-- **Unused code:** `npm run check:unused` classes every export by reading every text file of the checkout; 17 dead
-  exports removed, one duplicate folded, the count left (2) pinned by a test. Of 3,713 exports 20 were dead.
-- **Undefined names:** `npm run check:names` (a step of the online checks) reads every script for a name that is
-  defined nowhere. The online checks caught one in the engine train's capped hand-back (a ReferenceError); it is
-  fixed and was the only one in 656 files.
-- **Not measured:** nothing here has run on a live studio or a real editor yet.
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.86.1** (2026-11-16): a run of the engine target alone that moved the target is judged by its result (a daily full run had been thrown away).
+- **2.86.0** (2026-11-14): The engine train. New code takes effect (the supervisor restarts itself), engine batches by class, steps by test name, sparse porter lanes, the disk stop.
 - **2.85.0** (2026-11-13): Hands off. A task waiting in a train queue is never handed back; the web train starts by itself; engine lanes land in batches with blame by evidence; the overseer's list.
 - **2.84.0** (2026-11-12): Less waste. The documents an agent or a maintainer reads went from 1,672 KB to 958 KB; older log entries one line each; a record of which commands a studio runs (`npm run commands-run`).
 - **2.83.0** (2026-11-11): Flow. A session is accounted where its work is; the engine train blames by evidence and a branch can land alone; the rules check runs the lanes' systems; plan passes that changed nothing are skipped.
