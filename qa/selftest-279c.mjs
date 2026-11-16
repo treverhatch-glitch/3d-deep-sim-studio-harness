@@ -1,17 +1,14 @@
 /**
- * qa/selftest-279c.mjs — 2.79 (c): the orchestrator signs for the owner in beta mode (the owner, 2026-11-06: "make it so
- * Patch can sign off on everything and not need me"; "Grokbot and Patch can approve as me"), what stays the owner's own,
- * and asks that repost after they were acted on (the crew's item 2.15, "cut the fat" 5.4 and 5.6).
- *   c1  asks: the orchestrator answers every kind (a protected-file ask too) with --by <its name>, from a shell that sets
- *       no STUDIO_LOCK_OWNER; logged (decisions log, an event with the actor); a Producer can't answer a protected one,
- *       a builder none.
- *   c2  outside signer: STUDIO_OUTSIDE_SIGNERS (the main checkout's .env) lets grokbot answer and approve as itself.
- *   c3  the owner-only list (deleting data, keys, publishing, beta off) refuses the orchestrator.
- *   c4  a release survives a catch-up merge of main that leaves the released files alone; a lane commit to one voids it;
- *       a builder can't release.
- *   c5  goldens: a merge of main is nobody's authorship, so the orchestrator who only refreshed the lane second-signs.
- *   c6  a harness ask posts once per state change; one whose task is no longer parked closes (ask.closed) and the same
- *       question back is counted for the digest, not posted.
+ * qa/selftest-279c.mjs — the orchestrator signs for the owner in beta mode, what stays the owner's own, reposted asks.
+ * c1  the orchestrator answers every kind of ask (protected-file too) with --by <its name>, from a shell with no
+ *   STUDIO_LOCK_OWNER; logged; a Producer can't answer a protected one, a builder none.
+ * c2  STUDIO_OUTSIDE_SIGNERS (main's .env) lets an outside agent answer as itself. c3: the owner-only list (deleting
+ *   data, keys, publishing, beta off) refuses the orchestrator.
+ * c4  a release survives a catch-up merge of main that leaves the released files alone; a lane commit to one voids
+ *   it; a builder can't release.
+ * c5  goldens: a merge of main is nobody's authorship, so the orchestrator who only refreshed the lane second-signs.
+ * c6  a harness ask posts once per state change; one whose task is no longer parked closes (ask.closed); the same
+ *   question back is counted for the digest, not posted.
  */
 import fs from 'node:fs';
 import path from 'node:path';

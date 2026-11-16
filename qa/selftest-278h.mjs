@@ -1,15 +1,13 @@
 /**
- * qa/selftest-278h.mjs — 2.78.0 (helper h): B-105, a lane refresh must never write through the lane's studio/ link.
- *   The crew's evidence (2.77.1, Windows): the train dropped T-226 ("git merge failed: studio/task-holds.json"), and a
- *   builder's verify said "needs git rebase main ... then npm run hooks -- restamp, which I may not run". A lane copy's
- *   studio/ is a link (a junction on Windows, a symlink elsewhere) to the main checkout's; a merge of main saw main's live
- *   board files through it as local changes. Now the refresh marks the link's paths left out again first
- *   (lane-sparse.mjs protectSharedLinks), the harness refreshes a stale lane itself when a verify runs, and the
- *   message no longer sends a builder to restamp.
- *   (a) main moves (a harness file and a studio/ board file): the refresh brings the harness change in, main's live studio/
- *       files stay as they were (bytes and git status), the link is still a link
+ * qa/selftest-278h.mjs — a lane refresh must never write through the lane's studio/ link.
+ * A lane copy's studio/ is a link (junction on Windows, symlink elsewhere) to the main checkout's; a merge of main saw
+ * main's live board files through it as local changes. The refresh marks the link's paths left out first
+ * (lane-sparse.mjs protectSharedLinks); the harness refreshes a stale lane itself when a verify runs; the message never
+ * sends a builder to restamp.
+ *   (a) main moves (a harness file and a studio/ board file): the refresh brings the harness change in, main's live
+ *     studio/ files stay as they were (bytes and git status), the link is still a link
  *   (b) a real conflict in a non-studio file stops the refresh, names the file, leaves the lane as it was
- *   (c) a builder's verify refreshes its own lane (no restamp instruction), and the text never says restamp
+ *   (c) a builder's verify refreshes its own lane (no restamp instruction)
  */
 import fs from 'node:fs';
 import path from 'node:path';

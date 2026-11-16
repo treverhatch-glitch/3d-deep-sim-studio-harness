@@ -1,32 +1,15 @@
 #!/usr/bin/env node
 /**
- * qa/controls-play.mjs — 2.45.0: press a web game's real controls in a real browser and check what the Game
- * Bible says each one must change. For a game that isn't a cartridge (an adopted Vite/React/three.js game
- * under game/<slug>/), which qa/browser-play.mjs can't drive: it knows only window.__sim.
- *
- * The game says how to reach it in game/<slug>/studio.browser.json (onboarding writes a starter):
- *   {
- *     "serve":  { "command": "npx vite --port {port} --strictPort", "url": "http://127.0.0.1:{port}/" },
- *     "url":    "http://127.0.0.1:5173/"         // instead of serve, for a server that is already running
- *     "init":   "sessionStorage.setItem('screen','play')",   // runs in the page before the game's scripts
- *     "start":  [{ "click": "[data-testid=new-game]" }, { "wait": 500 }],   // from the first screen to play
- *     "ready":  "Boolean(window.__game)",        // true once the game can be played
- *     "state":  "({ cash: window.__game.cash, speed: window.__game.speed })",   // the values effects read
- *     "holdMs": 150,                             // how long a key is held down
- *     "settleMs": 3000,                          // the longest wait for an effect to show after a press
- *     "controls": { "speed.pause": { "key": "Space" }, "buy": { "click": "#buy" }, "map": { "click": { "x": 400, "y": 300 } } }
- *   }
- * A Bible control whose input reads "key X" needs no entry here. Each press: state before, press, then state
- * again every 100 ms until the Bible's effects hold or settleMs passes. A control with no effect in the Bible
- * is reported as not checked (ok: null), which the controls check treats as not a pass.
- *
- * Writes qa/reports/controls-web-<time>.json ({ controls: [{ id, ok, why, effects }] }), which qa/controls-check.mjs
- * reads for the web track like a browser-play report. The server it starts is stopped at the end, children
- * included. Exit 1 when a control failed or couldn't be checked.
- *
- *   npm run play:controls                 the active game
- *   npm run play:controls -- --only speed.pause,view.hall
- *   npm run play:controls -- --url http://127.0.0.1:5173/   a server that is already running
+ * qa/controls-play.mjs — press a web game's real controls in a real browser and check what the Game Bible says each one
+ * must change; for an adopted game (game/<slug>/) that qa/browser-play.mjs can't drive (it knows only window.__sim).
+ * The game's game/<slug>/studio.browser.json gives: serve { command, url } (or `url` for a running server), init (runs
+ * before the game's scripts), start (steps to reach play), ready, state (values effects read), holdMs (key hold),
+ * settleMs (longest wait for an effect), controls { id: { key | click } }. A Bible control "key X" needs no entry.
+ * Each press: state before, press, then state every 100 ms until the effects hold or settleMs passes. A control with no
+ * effect in the Bible is not checked (ok: null), which the controls check treats as not a pass.
+ * Writes qa/reports/controls-web-<time>.json ({ controls: [{ id, ok, why, effects }] }), read by qa/controls-check.mjs.
+ * The server it starts is stopped at the end, children included. Exit 1 when a control failed or couldn't be checked.
+ *   npm run play:controls   |   -- --only speed.pause,view.hall   |   -- --url http://127.0.0.1:5173/
  */
 import fs from 'node:fs';
 import net from 'node:net';

@@ -98,6 +98,14 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Evidence:** with 7 GB free, the supervisor in three checks of qa/selftest-pu19.mjs started nothing: STUDIO_DISK_MIN_FREE_GB (20 GB by default) had become a stop in 2.86.
 - **Fix:** the stop stays (its reason is in the pass's line); the self-test's clean environment turns the budget off as it does the memory floor, and qa/selftest-286f.mjs runs a real supervisor pass under the budget and with it off. docs/RELEASE-2.86.0.md says what a studio under its budget sees.
 
+### P-340 — the maintainer told the owner the harness kept no record of the commands a studio runs · lesson
+- **Evidence:** the consolidation map of 15 November said so and proposed a counter; `harness/event.mjs` has marked commands since 2.84 (`npm run commands-run`). The owner asked "didn't you already put this in?".
+- **Fix:** the map is corrected and no counter was added. Before saying the harness lacks something, search the code for it.
+
+### P-341 — line estimates for shared helpers were 4 to 10 times too high · lesson
+- **Evidence:** the map counted definitions (1,251 in tests, 511 in the harness) and estimated 2,000 to 3,100 and 600 to 800 lines. The helpers are one line each: the test kit removed 1,237 definitions and 263 lines.
+- **Fix:** estimate a merge from the lines the definitions occupy minus the imports that replace them, not from their count.
+
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
 - **P-001** (reopened on purpose 2026-10-31: the owner made the harness and the game's repository public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist

@@ -1,17 +1,14 @@
 /**
- * qa/selftest-258d.mjs — 2.58.0 part D: what reaches agents' prompts, a stalled agent's task, custom-command limits,
- * and auto-start as an opt-in.
- *   PU-36 (P-049): text planted in a task title, a hand-off note, an event, a --note and studio/PITFALLS.md reaches
- *          the prepared brief, the focus brief and the launch prompt only inside the block marked "written by agents
- *          or people"; a note is labelled with its real sender (--by, or "unknown"), never "the Producer".
- *   PU-39 (P-050): a session whose process is alive but whose heartbeat is 45 min old has its task handed back, its
- *          claims and its slot freed after one watcher pass, and its process still runs; a 10-min-old one is untouched;
- *          STUDIO_STALL_RELEASE_MIN=0 turns it off; right after the machine slept (the watcher's last pass as old) it waits.
- *   PU-40 (P-051): a usage limit on a custom command is saved per program (custom:<program>), and the next start of
- *          that command is held until the reset; another command still starts.
- *   Auto-start (crew report): off by default, the watcher's fill, the Producer check-in and the HUB's automatic
- *          wake-ups start nothing and say how to turn it on; by hand still starts; `npm run mode -- autostart on`
- *          lets the watcher start agents again.
+ * qa/selftest-258d.mjs — what reaches agents' prompts, a stalled agent's task, custom-command limits, auto-start opt-in.
+ * prompts  text in a task title, hand-off note, event, --note and studio/PITFALLS.md reaches the briefs and launch
+ *   prompt only inside the block marked "written by agents or people"; a note names its real sender (--by, or
+ *   "unknown").
+ * stall  a live session with a 45 min old heartbeat has its task handed back, claims and slot freed after one watcher
+ *   pass; a 10-min-old one is untouched; STUDIO_STALL_RELEASE_MIN=0 turns it off; after the machine slept it waits.
+ * limits  a usage limit on a custom command is saved per program (custom:<program>); that command is held until the
+ *   reset, another still starts.
+ * autostart  off by default: the watcher's fill, the Producer check-in and the HUB's wake-ups start nothing and say
+ *   how to turn it on; by hand still starts; `npm run mode -- autostart on` enables it.
  */
 import fs from 'node:fs';
 import path from 'node:path';

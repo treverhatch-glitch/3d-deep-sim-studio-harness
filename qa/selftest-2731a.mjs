@@ -1,16 +1,14 @@
 /**
- * qa/selftest-2731a.mjs — 2.73.1 (helper a): the stall watchdog vs a session's own verify, halts, the run clock.
- *   B-68     a session waiting on its own verify (.studio/verify-running/<agent>.json or a full*.json it owns, live
- *            process, no result) or its own background task done (.studio/done-running/, any task, by agent) is busy,
- *            not stalled: the stall clock is held and the wall-clock cap stretches, bounded by
- *            STUDIO_STALL_VERIFY_MAX_MIN (60); a finished, dead or too-old verify counts for nothing
- *   B-66 a   sessions that end within STUDIO_HALT_SAME_DEATH_SEC (5) of each other count as one end for the "two in a
- *            row" halt; ends the launcher caused itself (stall, idle, budget) never count
- *   B-66 b   agent.session.end records meta.exitCause (signal vs exit code vs the launcher's own kill)
- *   B-66 c   the supervisor's builder halt doesn't stop the train daemon; drain and "Stop all" still do
- *   extend   `npm run studio:extend -- --until …` moves a running supervisor's end time (no restart), logged; refused
- *            for a worker session and for an agent without a person's permission
- * Each check fails on 2.73.0.
+ * qa/selftest-2731a.mjs — the stall watchdog vs a session's own verify, halts, the run clock.
+ * stall  a session waiting on its own verify (.studio/verify-running/<agent>.json or a full*.json it owns, live
+ *   process, no result) or its own background task done (.studio/done-running/) is busy, not stalled: the stall clock
+ *   is held and the wall-clock cap stretches, bounded by STUDIO_STALL_VERIFY_MAX_MIN (60); a finished, dead or
+ *   too-old verify counts for nothing.
+ * halt  sessions ending within STUDIO_HALT_SAME_DEATH_SEC (5) of each other count as one end for the "two in a row"
+ *   halt; ends the launcher caused itself (stall, idle, budget) never count; agent.session.end records
+ *   meta.exitCause; the builder halt doesn't stop the train daemon, drain and "Stop all" still do.
+ * extend  `npm run studio:extend -- --until …` moves a running supervisor's end time (no restart), logged; refused
+ *   for a worker session and for an agent without a person's permission.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,15 +1,14 @@
 /**
- * qa/selftest-269s.mjs — 2.69.0 (helper s): overlap checks when work starts, a queue-depth target, the upgrade watch.
- *   overlap   `task add` and `task start` name the lanes in flight that already change the task's files (file and
- *             lines), open tasks working in the same folder, and near-duplicate titles; at start, the task's own lane
- *             diff line by line; each is one task.overlap event; advisory, except STUDIO_OVERLAP=block refuses.
- *   depth     fewer startable builder tasks than STUDIO_QUEUE_DEPTH (default: the session cap) asks the Producer once
- *             (queue.depth event and an inbox line naming the areas chains and holds block); no task is added.
- *   upgrade   `npm run upgrade -- watch` fetches the harness remote (a fake origin here), compares versions, reads CI (a
- *             fake status here), and upgrades only with the switch on, CI green, inside STUDIO_UPGRADE_WINDOW and with
- *             no session running; then refreshes the lanes and files one task per conflicted lane; the switch records
- *             who and refuses workers; the supervisor runs the check.
- * Made-up studios in temp folders; no network (the fake origin is a local bare repo, CI is passed in).
+ * qa/selftest-269s.mjs — overlap checks when work starts, a queue-depth target, the upgrade watch.
+ * overlap  `task add` and `task start` name lanes in flight already changing the task's files, open tasks in the same
+ *   folder, and near-duplicate titles; at start, the task's own lane diff; each is one task.overlap event; advisory,
+ *   except STUDIO_OVERLAP=block refuses.
+ * depth  fewer startable builder tasks than STUDIO_QUEUE_DEPTH (default: the session cap) asks the Producer once
+ *   (queue.depth event and an inbox line); no task is added.
+ * upgrade  `npm run upgrade -- watch` fetches the harness remote, compares versions, reads CI, and upgrades only with
+ *   the switch on, CI green, inside STUDIO_UPGRADE_WINDOW and with no session running; then refreshes the lanes and
+ *   files one task per conflicted lane; the switch records who and refuses workers; the supervisor runs the check.
+ * Made-up studios in temp folders; no network (fake origin is a local bare repo).
  */
 import fs from 'node:fs';
 import path from 'node:path';

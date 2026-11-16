@@ -1,16 +1,13 @@
 /**
- * qa/selftest-2792a.mjs — 2.79.2 (a): the launcher runs the builder protocol around aider (harness/aider-protocol.mjs), and
- * a Vertex request over STUDIO_VERTEX_MAX_PROMPT_TOKENS stops its session.
- *   1  the edit brief has the task and lane and no harness command; the ignore lines keep the map to the lane and leave
- *      out a tracked file over STUDIO_AIDER_MAX_FILE_KB unless the lane names it (pure).
- *   2  `agent start --tool aider` (a stand-in aider that edits the lane's file): the task is claimed before aider starts,
- *      aider gets the edit brief, --file <lane file>, --map-tokens and the lane's ignore file; the launcher commits the
- *      change with the Studio-Task / Studio-Agent trailers, runs the check and queues the lane; the session end says so.
- *   3  a stand-in that changes nothing: handed back (handBackCause no-change) with aider's last line, said on the session end.
- *   4  a change whose check fails (a bug task with no recorded verify): committed, then handed back (red) with the unmet item.
- *   5  --tool vertex with a fake "Vertex" answering 400,000 prompt tokens: the proxy refuses the session's next request, the
- *      launcher hands the task back (prompt-cap), the session end says so and vertexFailures counts it.
- * Stand-ins only (a node script as aider, a fake Vertex on 127.0.0.1): no real aider, key or network.
+ * qa/selftest-2792a.mjs — the launcher runs the builder protocol around aider (harness/aider-protocol.mjs).
+ * 1  the edit brief has the task and lane, no harness command; the ignore lines keep the map to the lane and leave
+ *   out a tracked file over STUDIO_AIDER_MAX_FILE_KB unless named.
+ * 2  `agent start --tool aider` (stand-in aider): the task is claimed before aider starts; aider gets the brief,
+ *   --file, --map-tokens and the ignore file; the launcher commits with Studio-Task / Studio-Agent trailers, runs the
+ *   check, queues the lane.
+ * 3  no change: handed back (handBackCause no-change). 4: a failing check: committed, handed back (red). 5: --tool
+ *   vertex over STUDIO_VERTEX_MAX_PROMPT_TOKENS: the proxy refuses the next request, the task is handed back
+ *   (prompt-cap), vertexFailures counts it. Stand-ins only: no real aider, key or network.
  */
 import fs from 'node:fs';
 import net from 'node:net';

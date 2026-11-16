@@ -1,21 +1,14 @@
 /**
- * qa/selftest-276k.mjs — 2.76.0 (helper k): the Line Producer (harness/line-producer.mjs, studio/roles/line-producer.md).
- *   blocked    `npm run line -- plan --json` says why each waiting task can't start (chain, park, yes, held, cooldown,
- *              lock) with a fix, and lists the ready ones; `line -- why <T-ID>` explains one task
- *   chain      a task 3+ open tasks wait on (one of them down a chain) is a chain-breaker: first in the order, on the top
- *              tier's model; size 1 routes cheap, size 3 mid, a red round one tier up, a started task keeps its model
- *   fixes      a pass frees a lock whose holder's session is over and clears a cooldown past due, logs both
- *              (.studio/line/actions.jsonl, line.fixed events) and writes .studio/line/status.json in lineStatus's shape
- *   lane       a lane queued for the train whose copy is gone is recreated from its branch (studio/ linked)
- *   rig        the builder target comes from the rig: CPU at STUDIO_LINE_CPU_BUSY_PCT holds new builders, RAM room
- *              caps them under the pace; no scan: the pace
- *   expansion  round(N x share) builders on research/expansion, the least-covered phase first; ONE "Director: next ranked
- *              slice" task when that queue is low, never a second one while it is open
- *   note       a plan that can't run writes one Producer note and one line.plan_blocked event (not again for the same reasons)
- *   supervise  the supervisor follows the plan: the chain-breaker starts first with its routed model; a full rig holds
- *              builders with the Line Producer's reason; STUDIO_LINE_PRODUCER=report/off change nothing
- *   roles      the role is in the planning roles, the Producer's division, the role cards and package.json
- * Each check fails on 2.75.0 (harness/line-producer.mjs and npm run line don't exist there).
+ * qa/selftest-276k.mjs — the Line Producer (harness/line-producer.mjs, studio/roles/line-producer.md).
+ *   blocked  `npm run line -- plan --json` says why each waiting task can't start, with a fix; `line -- why <T-ID>`
+ *     explains one
+ *   chain  a task 3+ open tasks wait on is a chain-breaker: first, on the top tier's model
+ *   fixes  a pass frees a lock whose holder's session is over, clears a past-due cooldown (.studio/line/actions.jsonl,
+ *     line.fixed events)
+ *   rig  CPU at STUDIO_LINE_CPU_BUSY_PCT holds new builders, RAM room caps them
+ *   expansion  round(N x share) builders on research/expansion; ONE "Director: next ranked slice" task when the queue
+ *     is low
+ *   note  an unrunnable plan writes one Producer note and one line.plan_blocked event
  */
 import fs from 'node:fs';
 import path from 'node:path';

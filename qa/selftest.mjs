@@ -133,13 +133,10 @@ function copyRepo() {
 if (templateTree().dir) gates = JSON.parse(fs.readFileSync(path.join(templateTree().dir, 'studio', 'gates.json'), 'utf8')).gates;
 const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readFileSync(path.join(dir, rel), 'utf8')));
 // A clean environment: nothing from the shell or .env (agent names, cartridge, keys, folders) leaks into a test.
-// 2.59.0: the supervisor starts no agent under STUDIO_RAM_FLOOR_GB free memory; checks run with it off so a busy test
-// machine doesn't change their result (qa/selftest-259d.mjs tests the floor with its own setting).
-// 2.60.1 (B-17, B-35): the same for heavy work's memory floor, the CPU probe (Windows) and an open Unity editor
-// counted as heavy work (qa/selftest-2601m.mjs tests them with its own settings).
-// 2.70.0 (t): no playable build + clip worker after a test train's landing (qa/selftest-270t.mjs turns it on).
-// 2.86.0 (f): under the disk budget the supervisor starts no new lane copy or engine worktree; checks run with it off so a
-// test machine with little free disk doesn't change their result (qa/selftest-286f.mjs tests the stop with its own setting).
+// Checks run with STUDIO_RAM_FLOOR_GB (no agent under that free memory), heavy work's memory floor, the CPU probe
+// (Windows), the open Unity editor count and the disk budget (no new lane copy or engine worktree) switched off, so a
+// busy test machine doesn't change results (qa/selftest-259d.mjs, -2601m.mjs, -286f.mjs test them with their own
+// settings). No playable build + clip worker after a test train's landing (qa/selftest-270t.mjs turns it on).
 const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_DISK_MIN_FREE_GB: '0', STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
   // 2.73.0 (g): the copies' verify keys (harness/verify-key.mjs) live in the self-test's temp folder, never in the user's home.
   STUDIO_VERIFY_KEY_DIR: path.join(tmpRoot, 'verify-keys') };
@@ -165,14 +162,12 @@ const report = (label, ok, detail = '') => {
   if (!ok) failed += 1;
 };
 
-// 2.72.0 (d): CI shards. Every check below sits in a unit that starts with `if (inShard(...)) {` (a top-level block,
-// or one gate of the sabotage loop). `--shard i/N` runs units i, i+N, i+2N, ... in file order (a group: every unit
-// with the same group name runs in the shard of its first unit, for checks that must stay together); nothing else
-// changes, so the shards' union is the whole self-test. `--list-shards N` runs no check: it prints the units and
-// their shard as JSON, plus any check that ran outside a unit ("strays": a new block without the guard), and exits 1
-// when there is one. A new block starts with `if (inShard()) {` (or `if (inShard('<label>', '<group>')) {`).
-// Each shard runs on its own CI runner; shards are balanced by count unless `--balance [file]` gives each unit's
-// recorded time (harness/selftest-timing.mjs); each shard prints its slowest units.
+// CI shards. Every check sits in a unit that starts with `if (inShard(...)) {` (a top-level block, or one gate of the
+// sabotage loop). `--shard i/N` runs units i, i+N, i+2N, ... in file order (units with the same group name run in the
+// shard of their first unit); the shards' union is the whole self-test. `--list-shards N` runs no check: it prints the
+// units and their shard as JSON plus any "stray" check outside a unit, and exits 1 on one. A new block starts with
+// `if (inShard()) {` (or `if (inShard('<label>', '<group>')) {`). Shards balance by count unless `--balance [file]`
+// gives unit times (harness/selftest-timing.mjs); each shard prints its slowest units.
 const SELFTEST_ARGS = process.argv.slice(2);
 const argValue = (name) => {
   const i = SELFTEST_ARGS.findIndex((a) => a === name || a.startsWith(`${name}=`));
@@ -1099,14 +1094,10 @@ if (inShard()) {
   git('init -q');
   git('add -A');
   git('commit -q -m init --no-verify');
-  // 2.58.5: laneless tasks keep the shared checkout here, as custom commands did before H-9 (a lane copy and a landing
-  // per session take seconds on Windows, and this checks the supervisor's sequence, not lanes; the lanes part below
-  // still uses copies). The fake agent commits in a copy anyway (qa/fixtures/agents/fake-agent.mjs).
-  // 2.81.0: until 2.80 `--no-hub` kept the hub's timed jobs (the watch pass, the watchdog) out of this run; they now
-  // run inside the supervisor's loop whatever the flag says, and on a Windows runner they and the machine probes
-  // (a process listing, a scan) made each pass slow enough that two sessions no longer fitted the window (red on and
-  // off since 2.79, most runs since 2.80). This checks the supervisor's sequence: those jobs and probes are switched
-  // off here, as the newer tests do, and the window and the assertions are unchanged.
+  // Laneless tasks keep the shared checkout here (a lane copy and a landing per session take seconds on Windows; this
+  // checks the supervisor's sequence, not lanes; the lanes part below still uses copies). The fake agent commits in a
+  // copy anyway (qa/fixtures/agents/fake-agent.mjs). The hub's timed jobs (watch pass, watchdog) and the machine probes
+  // (process listing, scan) are switched off here, as in the newer tests, so two sessions fit the window.
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1', STUDIO_LANELESS: 'shared', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok',
     STUDIO_WATCH_INTERVAL: '0', STUDIO_WATCHDOG: 'off', STUDIO_MACHINE_SCAN: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_CPU_PROBE: 'off' };
   for (const t of ['Tidy the HUD', 'Tidy the menu', 'Tidy the end screen']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);

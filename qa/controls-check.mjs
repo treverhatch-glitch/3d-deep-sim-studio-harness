@@ -1,23 +1,14 @@
 #!/usr/bin/env node
 /**
- * qa/controls-check.mjs — 2.32.0: every control in the Game Bible works, by real input, on every track
- * the game ships.
- *
- * The Bible owns the list: studio/bible/controls.json { tracks: ["web", "godot", ...], controls: [{ id,
- * name, input, expect, tracks? }] }. Each track's own input test presses the controls the way a player
- * does and reports one result per id:
- *   web    qa/browser-play.mjs (the cartridge's browser.controls, each with the Bible's id) → qa/reports/browser_*.json
- *   godot  tools/gate.gd + tools/controls.gd in the Godot project (harness/game-gates.mjs passes
- *          STUDIO_CONTROLS_OUT) → qa/reports/controls-godot-*.json
- *   other  any test that writes qa/reports/controls-<track>*.json as { controls: [{ id, ok }] }
- * This check fails when the list is missing for a real game, when a shipped track has no results, when
- * a listed control has no result on a track (never pressed), or when its result isn't a pass. A result
- * without a check (ok: null) is not a pass. Controls a test pressed that the Bible doesn't list are
- * reported so the Bible can catch up.
- *
- * Why: in the Marina run the Godot build passed every gate while its build buttons, dock placement and
- * world clicks did nothing, because no gate pressed them and no task listed them.
- *
+ * qa/controls-check.mjs — every control in the Game Bible works, by real input, on every track the game ships.
+ * The Bible owns the list: studio/bible/controls.json { tracks: ["web", "godot", ...], controls: [{ id, name, input,
+ * expect, tracks? }] }.
+ * Each track's own input test reports one result per id:
+ *   web  qa/browser-play.mjs (the cartridge's browser.controls) → qa/reports/browser_*.json
+ *   godot  tools/gate.gd + tools/controls.gd (STUDIO_CONTROLS_OUT) → qa/reports/controls-godot-*.json
+ *   other  any test writing qa/reports/controls-<track>*.json as { controls: [{ id, ok }] }
+ * Fails when the list is missing for a real game, a shipped track has no results, a listed control has no result, or
+ * its result isn't a pass (ok: null is not a pass).
  *   node qa/controls-check.mjs [--json]
  */
 import fs from 'node:fs';

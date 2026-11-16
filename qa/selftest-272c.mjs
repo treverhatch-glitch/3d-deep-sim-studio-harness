@@ -1,15 +1,14 @@
 /**
- * qa/selftest-272c.mjs — 2.72.0 (c): engine gates that prove they ran, the state probe, the completeness rubric and the
- * error-signature memory. A made-up studio, a made-up game, a stand-in Unity editor and a stand-in gdUnit4 runner;
- * every check fails on 2.71.1.
- *   1. Engine gates (harness/engine-proof.mjs, unity.mjs judgeRun, godot-unit.mjs judgeGodotRun): a stale results file,
- *      compile errors or a batch-mode abort next to green results, an exit code that disagrees with the results, and
- *      a reused gdUnit4 report folder are red, each with its own plain-words and Fix line; allowEmpty allows 0 tests.
- *   2. The state probe (harness/state-probe.mjs, game:state-probe): digests at the declared ticks against main's
- *      baseline; a change with no Golden-Reason is red with the first differing tick.
- *   3. The completeness rubric (harness/contracts.mjs): test-name criteria are checked, manual ones are listed as
- *      "unverified, for the reviewer"; in a lane they hold the lane at tier C until a reviewer signs them.
- *   4. Error-signature memory (harness/error-memory.mjs): a red fixed on one task shows as "seen before" on the next.
+ * qa/selftest-272c.mjs — engine gates that prove they ran, the state probe, the completeness rubric, error-signature memory.
+ * 1.  engine gates (harness/engine-proof.mjs, unity.mjs judgeRun, godot-unit.mjs judgeGodotRun): a stale results
+ *   file, compile errors or a batch-mode abort next to green results, an exit code that disagrees with the results, a
+ *   reused gdUnit4 report folder are red, each with a plain-words and Fix line; allowEmpty allows 0 tests.
+ * 2.  state probe (harness/state-probe.mjs, game:state-probe): digests at the declared ticks against main's baseline;
+ *   a change with no Golden-Reason is red with the first differing tick.
+ * 3.  completeness rubric (harness/contracts.mjs): test-name criteria are checked, manual ones listed "unverified,
+ *   for the reviewer"; in a lane they hold it at tier C until a reviewer signs.
+ * 4.  error-signature memory (harness/error-memory.mjs): a red fixed on one task shows as "seen before" on the next.
+ *   Made-up studio, game, Unity editor and gdUnit4 runner.
  */
 import fs from 'node:fs';
 import path from 'node:path';

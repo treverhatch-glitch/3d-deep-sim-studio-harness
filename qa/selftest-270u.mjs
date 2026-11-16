@@ -1,15 +1,14 @@
 /**
- * qa/selftest-270u.mjs — 2.70.0 (u): Unity speed, with a stand-in editor and a stand-in dotnet (node scripts).
- *   (1) the Unity Accelerator: STUDIO_UNITY_ACCELERATOR adds the cache-server arguments to every editor start (tests,
- *       build) when the endpoint answers; unreachable: the run goes on without them and says so; the summary says on/off;
- *   (2) no duplicate Edit Mode: the editor skips Edit Mode when the code-only dotnet step ran the same tests in this gate,
- *       or when Edit Mode passed earlier on the same clean tree with the same Unity; a changed tree runs it again;
- *   (3) one editor start (STUDIO_UNITY_ONE_EDITOR=on): one -executeMethod start with a harness script that is removed
- *       after; a run that doesn't write both results falls back to two starts;
- *   (4) the Graphics split: Graphics-tagged tests run in their own start with a device, the rest -nographics "!Graphics";
- *   (5) landing build options: -studioBuildSpeed fast / -studioCodeOptimization release for the build method, never a
- *       guessed editor flag, none for --release;
- *   (6) the Library cache copies in parallel (bounded, copied not linked), and says so with the file count.
+ * qa/selftest-270u.mjs — Unity speed, with a stand-in editor and a stand-in dotnet (node scripts).
+ *   (1) Unity Accelerator: STUDIO_UNITY_ACCELERATOR adds cache-server arguments to every editor start when the endpoint
+ *     answers
+ *   (2) no duplicate Edit Mode: skipped when the code-only dotnet step ran the same tests in this gate, or it passed
+ *     earlier on the same clean tree
+ *   (3) STUDIO_UNITY_ONE_EDITOR=on: one -executeMethod start with a harness script that is removed after; a run without
+ *     both results falls back to two starts
+ *   (4) Graphics-tagged tests run in their own start
+ *   (5) landing build: -studioBuildSpeed fast / -studioCodeOptimization release for the build method
+ *   (6) the Library cache copies in parallel (bounded)
  */
 import fs from 'node:fs';
 import net from 'node:net';

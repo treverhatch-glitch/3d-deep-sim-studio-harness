@@ -1,12 +1,8 @@
 /**
- * qa/selftest-260a.mjs — 2.60.0 (helper a): the merge train's pin refresh, prefix bisection and union files
- * (final brief items 1 and 2c).
- *   Lanes built in parallel each re-pin a seeded game's exact numbers against an old main, so the second to land failed
- *   on stale pins; a red train blamed "the last" lane when lanes passed alone but failed together; two lanes adding a
- *   line to the same import barrel conflicted every time. Now a red train re-runs only its failing checks on prefixes
- *   (main+A, main+A+B, ...), a red that is only declared pins is refreshed in one train commit (Pin-Refresh:) when
- *   every move was declared by its lane (Pin-Moves:) and none is an invariant, and a conflict only inside a manifest
- *   "unionFiles" entry is merged with git's union driver.
+ * qa/selftest-260a.mjs — the merge train's pin refresh, prefix bisection and union files.
+ * A red train re-runs only its failing checks on prefixes (main+A, main+A+B, ...); a red that is only declared pins is
+ * refreshed in one train commit (Pin-Refresh:) when every move was declared by its lane (Pin-Moves:) and none is an
+ * invariant; a conflict only inside a manifest "unionFiles" entry is merged with git's union driver.
  * A tiny studio: a made-up game whose "sim" sums small numbers in game/demo/tune/<pin>-*.txt into three pins, whose
  * check compares them to game/demo/pins.expected.json (printing FAIL pin:<name>), fails on a note that says BROKEN and
  * on two notes that clash; lane copies (git worktrees) with the commit hooks installed.

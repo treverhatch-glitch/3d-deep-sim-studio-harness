@@ -1,17 +1,14 @@
 /**
- * qa/selftest-2601n.mjs — 2.60.1 (helper n): the aider launch path (`--tool nim`, `--tool aider`).
- *   B-18: aider is found as STUDIO_AIDER_CMD, then <main>/.studio/aider-venv/{Scripts,bin}/aider(.exe), then PATH, by the
- *         preflight and the launched argv; a custom command for nim keeps nim's environment (the NIM key).
- *   B-19: before a nim session, its model is checked once (a stub fetch here); a not-found answer falls back through
- *         STUDIO_NIM_MODELS, the answer is cached in .studio/nim-models.json; 429 and network errors never change the
- *         model; none usable: not started.
- *   B-20: the session gets --aiderignore (the harness's folders and the protected paths, anchored) and the brief as
- *         --read; the ignore file and aider's .aider* files never show in the lane copy's git status.
- *   B-21: --no-pretty --no-fancy-input (and --no-gitignore) for both aider tools and in the kickoff's launch lines.
- *   B-37: a failed aider session keeps its lane copy and the last 200 lines of its output beside its log; Python
- *         output unbuffered; a bounded repo map (--map-tokens from config).
- * Stand-ins only: the "venv aider" is a node script (POSIX; on Windows a .cmd named by STUDIO_AIDER_CMD, UNTESTED here),
- * the model check uses STUDIO_NIM_CHECK_STUB or an injected fetch. No real aider, key or network.
+ * qa/selftest-2601n.mjs — the aider launch path (`--tool nim`, `--tool aider`); stand-ins only, no real aider, key or
+ * network.
+ *   find  aider is found as STUDIO_AIDER_CMD, then <main>/.studio/aider-venv/{Scripts,bin}/aider(.exe), then PATH; a
+ *     custom command for nim keeps nim's environment (the NIM key)
+ *   model  a nim session's model is checked once (STUDIO_NIM_CHECK_STUB or an injected fetch); not-found falls back
+ *     through STUDIO_NIM_MODELS, cached in .studio/nim-models.json; 429 and network errors never change the model
+ *   ignore  --aiderignore (harness folders and protected paths) and the brief as --read; .aider* files never show in
+ *     the lane copy's git status
+ *   flags  --no-pretty --no-fancy-input (and --no-gitignore) for both tools
+ *   failed  a failed session keeps its lane copy and the last 200 lines of output beside its log
  */
 import fs from 'node:fs';
 import path from 'node:path';

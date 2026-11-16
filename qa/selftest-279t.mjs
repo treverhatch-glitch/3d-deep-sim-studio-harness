@@ -1,27 +1,14 @@
 /**
- * qa/selftest-279t.mjs — 2.79 (t): the game tester (harness/tester.mjs, qa/tester-drive.mjs) on the Line Producer's
- * schedule, and the stage-1 playtest it replaces in a game studio.
- *   tester-schedule   a run is due only when BOTH STUDIO_TESTER_EVERY_HOURS (24) passed AND STUDIO_TESTER_MIN_LANDINGS
- *                     (10) landings happened since the last run; `now` asks for one anyway; STUDIO_TESTER=off stops the
- *                     schedule, not `now`
- *   tester-no-slot    the Line's testerPass waits on a starved rig and on a taken gate slot, starts the build when a slot
- *                     is free, launches qa-playtester with its own seat (extra 1, detached, tools alternate), and takes no
- *                     heavy slot, no train slot and no task hold, even after a red run
- *   tester-plan       the plan is picked from a seeded RNG over the game's modes/styles/goals, recorded in run.json, and
- *                     the same seed (now --seed) gives the same plan; defaults when the game lists none
- *   tester-brief      the brief lists what landed since the last run (ids and titles), the rotating regression area and
- *                     the Bible's features; the genre comparison only every STUDIO_TESTER_COMPARE_EVERY runs
- *   tester-drive      qa/tester-drive.mjs serves a temp dist folder and drives a tiny page in Chromium (click by testid,
- *                     key, shot, console, state) across separate calls; every action is logged; replay --to <step>
- *                     reproduces the state at that step and screenshots it (skipped with a note without Chromium)
- *   tester-report     finish publishes qa/reports/tester/<run>/ (report, summary.json of the documented shape, shots,
- *                     action log), files each bug as a P1 bug task with its images in studio/proof/<task>/ and the
- *                     replay command, dedupes a bug already open, and sends one inbox item, one tester.report event and
- *                     one Studio Status notice
- *   tester-wire       a landed task with a task.unwired note gets ONE "Wire <module> into the game" task (P2); a second
- *                     pass adds none; STUDIO_TESTER_WIRE_TASKS=off adds none
- *   tester-stage1     a game studio's playtest task passes its done-check with "replaced by the game tester (npm run
- *                     tester)" and the gate runner skips the template playtest gate; a template studio keeps both
+ * qa/selftest-279t.mjs — the game tester (harness/tester.mjs, qa/tester-drive.mjs) on the Line Producer's schedule.
+ *   schedule  due only when STUDIO_TESTER_EVERY_HOURS (24) passed AND STUDIO_TESTER_MIN_LANDINGS (10) landed; `now`
+ *     forces a run; STUDIO_TESTER=off stops the schedule, not `now`
+ *   no-slot  testerPass waits on a starved rig or taken gate slot, launches qa-playtester, takes no heavy/train slot or
+ *     hold
+ *   plan  seeded RNG over modes/styles/goals, in run.json; same seed (--seed) same plan
+ *   brief  what landed, regression area, Bible's features; genre comparison every STUDIO_TESTER_COMPARE_EVERY runs
+ *   drive  tester-drive serves a temp dist, drives Chromium, logs actions; replay --to <step>
+ *   report  qa/reports/tester/<run>/, P1 bug tasks (deduped), inbox item, tester.report event
+ *   wire  task.unwired makes ONE "Wire <module> into the game" task; STUDIO_TESTER_WIRE_TASKS=off none
  */
 import fs from 'node:fs';
 import path from 'node:path';

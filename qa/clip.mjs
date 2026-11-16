@@ -1,16 +1,13 @@
 #!/usr/bin/env node
 /**
  * qa/clip.mjs — a short gameplay video of the real build, to share or attach to a task.
- *
  *   npm run clip [-- --seconds 20] [--task T-012] [--name floor-3]
  *   npm run shot [-- --query "floor=3&cam=2,4,90"] [--wait 1500] [--task T-012]   one screenshot of the real build
- *
- * clip: plays the cartridge's scenario in the browser build with real input (the same run as
- * `npm run play:browser`), records it, and converts it to an mp4 under 10 MB with ffmpeg when ffmpeg
- * is installed (otherwise it keeps the .webm). Clips go to qa/reports/clips/ and show in the War Room's
- * Arcade view; with --task the clip is also copied to studio/proof/<task>/ so it travels with the commit.
- * shot: opens the build with extra query parameters (the game reads them in playtest mode to pick a
- * floor or pose the camera), waits, and saves a PNG to qa/reports/; add it as proof with npm run proof.
+ * clip: plays the cartridge's scenario in the browser build with real input (the same run as `npm run play:browser`),
+ * records it, and converts it to an mp4 under 10 MB with ffmpeg when installed (otherwise keeps the .webm). Clips go to
+ * qa/reports/clips/ and show in the War Room's Arcade view; with --task the clip is also copied to
+ * studio/proof/<task>/. shot: opens the build with extra query parameters (the game reads them in playtest mode to pick
+ * a floor or pose the camera), waits, and saves a PNG to qa/reports/; add it as proof with npm run proof.
  */
 import fs from 'node:fs';
 import os from 'node:os';

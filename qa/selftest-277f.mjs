@@ -1,17 +1,13 @@
 /**
- * qa/selftest-277f.mjs — 2.77.0 (helper f): three small parts of Patch #2.
- *   digest    P1.1: the daily digest has a "Beta mode" section for its 24 h: whether beta is on, who switched it and when,
- *             each use (who, action, subject, why), at most 30 lines with a count of the rest; nothing when beta is off
- *             and nothing was used; the section is not counted in the digest's 200 words; recordBetaUse keeps the subject
- *             and the reason in the event
- *   mixed     P2.4 / B-91: the launcher (carryTaskBranch, used by the lane copy, `task start` and the claim) does not merge
- *             an earlier branch whose commits carry another OPEN task's Studio-Task trailer; it says so (lane.mixed_skipped,
- *             the start output) and starts from main plus the task's own commits; a --after dependency's commits, a
- *             Rescue target's and a branch of only this task's commits still merge; STUDIO_TRAIN_MIXED=off turns it off
- *   rig       P4.2: the job catalog has an "art-bake" kind (RAM, CPU threads, minutes, all overridable in
- *             studio/machine-budget.json "jobs"); one RIG_PRIORITY table (train > verify/check > Unity/art > soak) that the
- *             weights come from, unchanged in value; docs name both
- * Every check fails on 2.76.0 (no betaDigestLines, no carryTaskBranchEx / mixed check, no art-bake, no RIG_PRIORITY).
+ * qa/selftest-277f.mjs — three small parts: beta digest, mixed-task branches, the art-bake job.
+ *   digest  the daily digest has a "Beta mode" section for its 24 h: whether beta is on, who switched it and when, each
+ *     use (who, action, subject, why), at most 30 lines plus a count; nothing when beta is off and unused
+ *   mixed  the launcher (carryTaskBranch) does not merge an earlier branch whose commits carry another OPEN task's
+ *     Studio-Task trailer; it says so (lane.mixed_skipped, the start output) and starts from main plus the task's own
+ *     commits; a --after dependency's, a Rescue target's and this task's own commits still merge;
+ *     STUDIO_TRAIN_MIXED=off turns it off
+ *   rig  the job catalog has an "art-bake" kind (RAM, CPU threads, minutes, overridable in studio/machine-budget.json
+ *     "jobs"); one RIG_PRIORITY table (train > verify/check > Unity/art > soak) that the weights come from
  */
 import fs from 'node:fs';
 import path from 'node:path';

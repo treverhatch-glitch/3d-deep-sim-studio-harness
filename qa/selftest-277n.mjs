@@ -1,23 +1,14 @@
 /**
- * qa/selftest-277n.mjs — 2.77.0 (helper n): Gemini as a first-class builder, with quota-aware routing that prefers it
- * (the owner's Priority 8).
- *   gemini     `agent start --tool agy --model <a Claude model>` is refused (agy ran Claude Sonnet inside agy);
- *              --force-model runs it; no --model still starts on the Gemini default
- *   pin        a session started with --task (any tool) is pinned: its kickoff says so, `task start` of another task
- *              and `task done --train` of another task are refused with a clear message, its own task starts (B-92)
- *   usage      an agy session with no usage line records usage "not reported" with an estimate marked estimated, never
- *              0; with Gemini usage objects in its output it records those tokens and the model agy names
- *   pools      model-pools routing: small -> Gemini Flash, normal -> Gemini Argon, hard and chain-breakers -> Claude Opus,
- *              after a Gemini failure -> Claude; a pool near its limit, marked out, or dropped for a size class falls to
- *              the next; a protected-heavy task never goes to a pool that just handed one back
- *   line       the Line Producer routes by pool with the tool (STUDIO_MODEL_ROUTING=on), writes
- *              .studio/routing/outcomes.json (landed vs handed back per pool and size), and the supervisor starts the
- *              routed tool and model
- *   protected  in beta mode a handed-back protected step is routed to the beta agent (a line.protected_routed event) and
- *              the task is held from new builders until an approval names it; without beta mode or a proxy: reported only
- *   status     `npm run models -- status` shows pools, use, success rates, and what routing would pick now and why;
- *              routing is on by itself once agy is enrolled (.studio/agy-settings.json)
- * Each check fails on 2.76.0.
+ * qa/selftest-277n.mjs — Gemini as a first-class builder, with quota-aware routing that prefers it.
+ * gemini  `agent start --tool agy --model <a Claude model>` is refused; --force-model runs it; no --model starts on
+ *   the Gemini default.
+ * pin  a session started with --task is pinned: `task start` or `task done --train` of another task is refused.
+ * usage  an agy session with no usage line records "not reported" with an estimate marked estimated, never 0.
+ * pools  small -> Gemini Flash, normal -> Gemini Argon, hard and chain-breakers -> Claude Opus, after a Gemini
+ *   failure -> Claude; a pool near its limit or marked out falls to the next; a protected-heavy task never goes to a
+ *   pool that just handed one back.
+ * line  the Line Producer routes by pool (STUDIO_MODEL_ROUTING=on), writes .studio/routing/outcomes.json; in beta
+ *   mode a handed-back protected step goes to the beta agent (line.protected_routed). `npm run models -- status`.
  */
 import fs from 'node:fs';
 import path from 'node:path';

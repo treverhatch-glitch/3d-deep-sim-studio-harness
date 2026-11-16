@@ -1,15 +1,13 @@
 /**
- * qa/selftest-263j.mjs — 2.63.0 (helper j): the Unity merge train (harness/unity-train.mjs).
- *   1. two Unity-track tasks queued with task done --train land on ONE run of the land command ({branches}), and close;
- *   2. a red train (a land command that takes one {branch}: the harness builds unity-train/<id> from refs only) hands
- *      back exactly the culprit by prefix bisection; green prefixes land and close;
- *   3. a conflict: two branches that conflict in git: the first lands, the second waits (stays queued, not handed
- *      back); a branch the land command reports as a conflict (exit 2) is handed back, the rest land;
- *   4. a refusal (exit 3) blames nobody: the branches stay queued; a refusal that clears is tried again and lands;
- *   5. one Unity train at a time (a second is refused, naming the first; train status shows it running and the queue
- *      length), and every land run of both trains holds machine:heavy.
- * The land command is a stub: it reads the branch list, refuses while a "busy" file exists, fails when a marked
- * branch is included, returns 2 for a marked conflict, else merges the branches in its own gate worktree.
+ * qa/selftest-263j.mjs — the Unity merge train (harness/unity-train.mjs).
+ *   1. two Unity-track tasks queued with task done --train land on ONE run of the land command ({branches}), and close
+ *   2. a red train hands back exactly the culprit by prefix bisection
+ *   3. two branches that conflict in git: the first lands, the second waits (queued); a branch the land command
+ *     reports as a conflict (exit 2) is handed back
+ *   4. a refusal (exit 3) blames nobody: the branches stay queued, then are tried again
+ *   5. one Unity train at a time (a second is refused, naming the first); land runs hold machine:heavy
+ * The land command is a stub: it reads the branch list, refuses while a "busy" file exists, fails on a marked branch,
+ * returns 2 for a marked conflict, else merges in its own gate worktree.
  */
 import fs from 'node:fs';
 import path from 'node:path';

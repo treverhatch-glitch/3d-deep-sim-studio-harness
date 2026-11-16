@@ -1,15 +1,14 @@
 /**
- * qa/selftest-265s.mjs — 2.65.0 (helper s):
- *   B-40 full: a lane carries studio config through studio-proposals/<ID>.json; the landing (merge train, and the old
- *     one-lane task done path) applies it to main in a Config-From commit and removes the file; a conflict with main's
- *     newer value hands the lane back; a protected target makes the lane tier C (held until a person releases it), and
- *     with an owner key only the owner's signed approval applies it (else it is held on main, asked of a person, and
- *     `train config` applies it later); the edit guard names the route; the hooks gate exempts exactly such a commit.
- *   Visual noise baseline: "before" is captured twice; a change must reach max(1%, k x the camera's noise), capped; a
- *     scene noisier than the cap is "too noisy to judge", never a pass; the noise goes into the verdict and done-check.
- *   Windows orphans of a full verify's gates: each gate's shell is recorded in the machine:heavy holder's tree while the
- *     run holds it, and heavy stop / the next take find what a finished shell left running (simulated process lists).
- * A tiny studio: a made-up game whose check fails on a note that says BROKEN; lane copies with the commit hooks.
+ * qa/selftest-265s.mjs — studio config from lanes, the visual noise baseline, Windows orphans. A tiny studio: a made-up
+ * game whose check fails on a note that says BROKEN; lane copies with the commit hooks.
+ *   config  a lane carries studio config through studio-proposals/<ID>.json; the landing applies it to main in a
+ *     Config-From commit and removes the file; a conflict with main's newer value hands the lane back; a protected
+ *     target makes the lane tier C, and with an owner key only the owner's signed approval applies it (else held on
+ *     main; `train config` applies it later); the hooks gate exempts exactly such a commit
+ *   visual  "before" is captured twice; a change must reach max(1%, k x the camera's noise), capped; a scene noisier
+ *     than the cap is "too noisy to judge", never a pass
+ *   orphans each gate's shell is recorded in the machine:heavy holder's tree while the run holds it; heavy stop / the
+ *     next take find what a finished shell left running
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,16 +1,14 @@
 /**
- * qa/selftest-273g.mjs — 2.73.0 (g): signed verify records, and golden re-records that need the harness's first-divergence
- * report plus a second signer (A13).
- *   1. A hand-written verify record AND a matching hand-written run log (the hole 2.71.1 left) are not reused: "not
- *      reused: unsigned record (hand-written or from an older harness)" (train and recordTrust, which task done uses).
- *   2. A real verify makes the studio's verify key outside the checkout (mode 600), never prints it, signs its run log;
- *      the train reuses that record; an edited signature, or the same files checked with another studio's key, are not.
- *   3. A key folder inside the checkout is refused: the verify says its record isn't signed, and it isn't reused.
- *   4. A red golden (and npm run golden -- --update on a changed answer) writes the signed first-divergence report
- *      .studio/gates/divergence/<golden>.json (tick, field, the recorded answer it replaces).
- *   5. The train holds a lane that re-records a golden with the report in its why; the lane's own agent can't release it
- *      (not even by delegation); another agent's delegation can, and the decision log records the tick and field.
- *   6. Without a report (none, or a hand-written one) the hold says so: a delegation is refused, a person releases it.
+ * qa/selftest-273g.mjs — signed verify records, and golden re-records that need the first-divergence report plus a
+ * second signer.
+ *   1. A hand-written verify record AND a matching hand-written run log are not reused ("not reused: unsigned
+ *     record").
+ *   2. A real verify makes the studio's verify key outside the checkout (mode 600), never prints it, signs its run
+ *     log; an edited signature, or another studio's key, is not reused.
+ *   3. A key folder inside the checkout is refused (the record isn't signed). 4. A red golden (and npm run golden --
+ *     --update on a changed answer) writes the signed first-divergence report .studio/gates/divergence/<golden>.json.
+ *   5. The train holds a lane that re-records a golden; its own agent can't release it (not even by delegation);
+ *     another agent's delegation can; without a report a delegation is refused and a person releases it.
  */
 import fs from 'node:fs';
 import path from 'node:path';

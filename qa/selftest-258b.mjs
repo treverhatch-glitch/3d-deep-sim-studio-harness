@@ -1,21 +1,13 @@
 /**
- * qa/selftest-258b.mjs — 2.58.0 part B (PU-37, PU-38, PU-42, PU-43): the board and the locks, from break tests round 2.
- *   P-052: `task done` killed between its two board writes made the task vanish. The file that gains a task is
- *          written first; a task in both files reads once (the move that was cut off counts as made).
- *   P-053: `task done` killed after the board write kept the claim forever. The watcher frees claims on tasks that
- *          are done, waiting or gone (after a grace); `task reopen` frees one left on the task it reopens.
- *   P-054: the watcher's requeue released a claim made a moment earlier. It re-checks the claim under the board lock.
- *   P-055: any error in `task start`'s board step leaked the claim. Released on every error; on Windows,
- *          EPERM/EACCES while creating a lock file are retried as "busy", and one failure no longer turns hard links off.
- *   P-056: a live but slow lock holder lost the lock after 10 s and its update was lost. Never broken on age while
- *          its process lives on this machine; a holder that lost it anyway throws ELOCKLOST before writing.
- *   P-057: board lines the parser couldn't read were dropped on the next write. Two common drifts are read as tasks;
- *          anything else is kept under "## UNREADABLE" with a warning.
- *   P-060: temp files from killed writes piled up in studio/ and .studio/. The watcher removes old ones.
- *   PU-43: path claims compared without regard to case; hook scripts kept LF; an in-place write logs an event.
- *   P-043: the land lock crashed on Windows with EPERM when land.lock was being deleted by another process at that
- *          instant (about 2 Windows CI runs in 5). EPERM/EACCES/EBUSY there count as busy and are retried.
- * Kill points use a preload that SIGKILLs the process at a chosen fs call (real kills, not mocks).
+ * qa/selftest-258b.mjs — the board and the locks under break tests (real SIGKILLs at chosen fs calls).
+ * `task done` killed between its two board writes: the file that gains a task is written first, a task in both files
+ *   reads once; killed after the board write: the watcher frees claims on tasks done, waiting or gone, and `task
+ *   reopen` frees one.
+ * The watcher's requeue re-checks the claim under the board lock; any `task start` board error releases the claim;
+ *   Windows EPERM/EACCES/EBUSY on lock files are retried as "busy".
+ * A live lock holder on this machine never loses the lock on age; one that lost it throws ELOCKLOST before writing.
+ * Unreadable board lines: two common drifts are read as tasks, the rest kept under "## UNREADABLE". The watcher
+ *   removes old temp files; path claims ignore case; hook scripts keep LF.
  */
 import fs from 'node:fs';
 import path from 'node:path';

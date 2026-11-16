@@ -1,15 +1,12 @@
 /**
- * qa/selftest-2585p.mjs — 2.58.5 (H-7): the hooks gate no longer reads a whole range's diffs into memory.
- *
- * Found on a studio whose base branch (the harness upstream) is far behind: the range since the base holds the game's
- * whole import with its binary art, and as soon as one commit needed the patch-id fallback (a lane rebased by task done,
- * a rebased commit on main) the gate ran `git log -p --binary` over all of it and Node threw ERR_STRING_TOO_LONG, so
- * every landing failed. Now only the commits that need a patch-id get one, streamed from git into git patch-id; the
- * grandfather list does the same, the weakened-tests gate reads only the files its rules judge, and an output too big
- * to read fails a gate instead of passing it on a list cut short.
- *
+ * qa/selftest-2585p.mjs — the hooks gate doesn't read a whole range's diffs into memory.
+ * Only the commits that need a patch-id (a lane rebased by task done, a rebased commit on main) get one, streamed
+ *   from git into git patch-id, instead of `git log -p --binary` over the whole range (which threw
+ *   ERR_STRING_TOO_LONG on a large base range); the grandfather list does the same, the weakened-tests gate reads
+ *   only the files its rules judge, and an output too big to read fails a gate instead of passing it on a list cut
+ *   short.
  * STUDIO_HOOKS_MAX_BUFFER (bytes) lowers the read limit so a few 3 MB files stand in for gigabytes of art; GIT_TRACE
- * shows which git commands ran.
+ *   shows which git commands ran.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,25 +1,14 @@
 /**
- * qa/selftest-271z.mjs — 2.71.0 (helper z): the self-repair loop (harness/workaround.mjs).
- *   log       `npm run workaround -- log "<what>" --why "<harness>" --cmd … --by …` writes .studio/workarounds.jsonl and a
- *             harness.workaround event with a signature; with --why it opens one harness task in studio/HARNESS-TASKS.md,
- *             never on studio/NEXT.md.
- *   group     the same trouble on different task ids is one signature: the first (no --why) opens nothing, the second
- *             opens ONE task; a third adds to it.
- *   force     `--force` on a task or lock command is a detected workaround.
- *   retry     the same refused task command run 3 times in 10 minutes by one agent is one detected workaround;
- *             `done --check` and another agent's runs don't count.
- *   hand-edit the board (studio/NEXT.md) and the train queue changed outside the harness are detected at the next harness
- *             write; the harness's own writes and a file put back to git's HEAD copy are not.
- *   restart   supervisor stop by hand and a start within 5 minutes is detected; with an upgrade between, or 20 minutes
- *             later, not.
- *   kill      a session whose launcher vanished with no stop asked, the machine up since it started, is detected; the
- *             watcher (markGone) records the times it needs.
- *   fixed     an open task whose signature isn't seen for 7 days after an upgrade is "maybe fixed in <version>"; close
- *             needs --by and --note, a builder session can't close; seen again, a closed task reopens.
- *   measure   the digest shows workarounds per day, top signatures and open harness tasks; the impact report shows
- *             workarounds before/after the upgrade and the trend ("fewer").
- *   export    `export --since 7d` writes one markdown file with the records and tasks and no secrets.
- * Made-up studios in temp folders; no network.
+ * qa/selftest-271z.mjs — the self-repair loop (harness/workaround.mjs), in made-up studios in temp folders; no network.
+ *   log  `npm run workaround -- log "<what>" --why "<harness>" --cmd … --by …` writes .studio/workarounds.jsonl and a
+ *     harness.workaround event; with --why opens one task in studio/HARNESS-TASKS.md, never studio/NEXT.md
+ *   group  one signature across task ids: first (no --why) opens nothing, second ONE task
+ *   detected  `--force` on a task or lock command; the same refused task command 3 times in 10 minutes by one agent;
+ *     studio/NEXT.md or the train queue hand-edited; supervisor stop and start within 5 minutes (not with an upgrade
+ *     between); a session whose launcher vanished with no stop asked
+ *   fixed  unseen 7 days after an upgrade is "maybe fixed"; close needs --by and --note; seen again reopens
+ *   measure  digest and impact report show workarounds per day, top signatures, trend; `export --since 7d` writes one
+ *     markdown file, no secrets
  */
 import fs from 'node:fs';
 import path from 'node:path';

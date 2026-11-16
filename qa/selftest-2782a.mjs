@@ -1,19 +1,14 @@
 /**
- * qa/selftest-2782a.mjs — 2.78.2 (a): a merge train outlives whoever started it, and a person can cancel one (W-0090).
- *   - A lane's plain `task done` runs the quick checks, queues the lane and exits 0 with "queued" and how to follow it,
- *     while the game check is still to run; the train lands it afterwards in a process of its own (no supervisor here:
- *     task done started one, detached). STUDIO_DONE_QUEUE=0 keeps the old inline train. With a supervisor and the train
- *     daemon on, task done starts nothing (the daemon's pass does).
- *   - `task train` from an agent's shell runs its train detached and follows it: ending the starter's whole process tree
- *     and group mid-verify (what Claude Code does at its 10-minute limit) doesn't stop the train: it lands, its life
- *     record ends "done", no task.train.died.
- *   - A session whose task done queued its lane ends without a launcher verify or hand-back for it (trainQueued).
- *   - `task train cancel [<id>] --by <you> [--why "…"]`: a person stops a running train in its verify: its checks are
- *     stopped, it ends, nothing lands, nobody is handed back, the lane stays queued, the lock is freed, one
- *     task.train.cancelled with who and why. A worker is refused. A train that doesn't end by itself in
- *     STUDIO_TRAIN_CANCEL_WAIT_S is ended and recorded as cancelled (not died).
- * A tiny studio: a game whose one check is a node script that sleeps TRAIN_SLEEP_MS and counts its runs; lane copies
- * (git worktrees) made by the harness. Windows' detach (taskkill /T on the starter) is not exercised here.
+ * qa/selftest-2782a.mjs — a merge train outlives whoever started it, and a person can cancel one.
+ * A lane's plain `task done` runs the quick checks, queues the lane and exits 0 ("queued"); the train lands it in its
+ *   own process. STUDIO_DONE_QUEUE=0 keeps the inline train; with the train daemon on, task done starts nothing.
+ * `task train` from an agent's shell runs its train detached: ending the starter's process tree mid-verify doesn't
+ *   stop it (it lands, life record "done", no task.train.died). A session whose task done queued its lane gets no
+ *   launcher verify or hand-back (trainQueued).
+ * `task train cancel [<id>] --by <you> [--why "…"]` (a worker is refused) stops a running train: nothing lands,
+ *   nobody is handed back, the lane stays queued, the lock is freed, one task.train.cancelled. A train not ending in
+ *   STUDIO_TRAIN_CANCEL_WAIT_S is ended and recorded as cancelled.
+ * Windows' detach (taskkill /T) is not exercised.
  */
 import fs from 'node:fs';
 import path from 'node:path';

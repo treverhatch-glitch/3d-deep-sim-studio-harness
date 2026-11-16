@@ -2,7 +2,7 @@
  * qa/selftest-287a.mjs — 2.87 (a): the length rule for comments (scripts/check-comments.mjs, npm run check:comments).
  * A file header over 12 lines and any other comment over 6 are named with file and line and the check exits 1; a header
  * of 12, a comment of 6, two short runs of // lines with code between them and comments at the end of code lines pass;
- * and harness/ and scripts/ themselves are within the rule.
+ * and harness/, scripts/ and qa/ themselves are within the rule.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,5 +35,5 @@ export async function selftest287A({ report, tmpRoot, root }) {
   const good = check('--root', T);
   await guard('2.87 (a) comments: a tree within the rule exits 0 and says how many files and comments it read (fails before this fix: no such check)', () => [good.status === 0 && /ok: 1 file\(s\), 4 comment\(s\)/.test(out(good)), out(good).slice(-1500)]);
   const own = check();
-  await guard("2.87 (a) comments: every comment of harness/ and scripts/ is within the rule (fails before this fix: 418 comments were over it, 7,727 lines)", () => [own.status === 0 && /\[check-comments\] ok: \d+ file\(s\)/.test(out(own)), out(own).slice(-2500)]);
+  await guard("2.87 (a) comments: every comment of harness/, scripts/ and qa/ is within the rule (fails before this fix: 525 comments were over it, 9,431 lines)", () => [own.status === 0 && /\[check-comments\] ok: \d+ file\(s\)/.test(out(own)), out(own).slice(-2500)]);
 }

@@ -1,16 +1,14 @@
 /**
- * qa/selftest-285d.mjs — 2.85 (d): finished work waiting for a train, and hand-backs that are not the session's.
- *
- *   1  a task queued for a train whose claim ran out is released quietly by the Director's flow pass (no hand-back); an
- *      ended session's bookkeeping events never make it "still working"; a task in no queue is still handed back
+ * qa/selftest-285d.mjs — finished work waiting for a train, and hand-backs that are not the session's (checks import a
+ * module from a repo copy or run the command in one).
+ *   1  a task queued for a train whose claim ran out is released quietly by the Director's flow pass; an ended
+ *     session's bookkeeping events never make it "still working"; a task in no queue is still handed back
  *   2  one rule for which hand-backs count (handback-kind.mjs): the watchdog's park, the crew breaker, the scorecard
- *   3  the same task done refusal twice (no new commit) holds the task for the overseer and the Producer; the hold lifts
- *      when task done --check no longer gives that reason
+ *   3  the same task done refusal twice (no new commit) holds the task for the overseer and the Producer; the hold
+ *     lifts when task done --check no longer gives that reason
  *   4  finished engine work handed back as ready is queued by the harness once; failing checks queue nothing
- *   5  (B-138) the trailer check from the main checkout judges only the task's own commits; the commit-msg hook's fixer
+ *   5  the trailer check from the main checkout judges only the task's own commits
  *   6  `node harness/unity-gate.mjs` with no task or branch runs no land and writes no engine.land error
- *
- * Each check imports a module from a copy of the repo, or runs the command in one.
  */
 import fs from 'node:fs';
 import path from 'node:path';

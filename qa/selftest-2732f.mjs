@@ -1,18 +1,14 @@
 /**
- * qa/selftest-2732f.mjs — 2.73.2 (helper f): a session end is recorded once; .env changes reach running processes.
- *   B-72 a   a session whose agent has exited while its launcher is still alive (wrapping up: handing the work back,
- *            maybe closing the task itself) lists as ending, not STALLED: the agent list, the watch pass and the
- *            silent-agent release leave it to the launcher
- *   B-72 b   the watchdog's stall end is logged and acted on once per session, not on every pass
- *   B-72 c   one agent.session.end per session, whoever records it (a stop's endAsDead, then the launcher's clean-up)
- *   B-72/76  the watchdog's stall end of a running launcher's agent records exitCause stall (by watchdog), so the
- *            "two sessions in a row" halt never counts it as the tool failing
- *   B-74 a   a running launcher's heartbeat picks up a stall limit changed in .env (the session is ended on the new
- *            limit), one env.reloaded event names the keys and never a secret's value, identity lines never load
- *   B-74 b   precedence in a child started by a process that loaded .env: a value inherited from .env follows the file,
- *            a value its starter set itself wins; the train daemon's pass reads the new STUDIO_TRAIN_AUTO
- *   B-74 c   `npm run studio:reload-env` makes a running supervisor reload now and says what changed
- * Each check fails on 2.73.1.
+ * qa/selftest-2732f.mjs — a session end is recorded once; .env changes reach running processes.
+ *   ending  a session whose agent exited while its launcher is alive lists as ending, not STALLED
+ *   once  the watchdog's stall end is acted on once per session; one agent.session.end per session, whoever records it
+ *   stall  the watchdog's stall end records exitCause stall (by watchdog), so the "two sessions in a row" halt never
+ *     counts it
+ *   env reload a running launcher's heartbeat picks up a stall limit changed in .env; one env.reloaded event names the
+ *     keys, never a secret's value; identity lines never load
+ *   precedence in a child of a process that loaded .env, an inherited .env value follows the file, a value its starter
+ *     set itself wins; the train daemon's pass reads the new STUDIO_TRAIN_AUTO
+ *   reload  `npm run studio:reload-env` makes a running supervisor reload now and says what changed
  */
 import fs from 'node:fs';
 import path from 'node:path';

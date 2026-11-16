@@ -1,19 +1,14 @@
 /**
- * qa/selftest-2731c.mjs — 2.73.1 (helper c, B-59): no console window flashes on Windows when the harness starts a process.
- *   static    every child_process call (spawn, spawnSync, exec, execSync, execFile, execFileSync, fork) in harness/,
- *             hub/, scripts/, tools/, qa/*.mjs, qa/fixtures/ and .claude/hooks/ passes `windowsHide: true` in an options
- *             object written at the call, except the few in VISIBLE (each with its reason; an entry that no longer
- *             matches exactly one call fails too, so the list can't go stale); the node snippets inside the git hooks too
- *   detached  every detached child (hub, supervisor, daemons, background passes) passes windowsHide
- *   launcher  harness/launch.mjs starts an agent's tool (spawnAgent, spawnAgentSync) with windowsHide, whatever the caller
- *             passed
- *   runtime   commands run in a copy under a recorder (node --import, the test's own process only) start every child
- *             with windowsHide
- *   docs      docs/SECURITY.md says the NODE_OPTIONS preload stopgap can go after 2.73.1, and how
- *   scrub     (not a fix: unchanged on purpose) gate-env still drops a code-loading NODE_OPTIONS and names the preload
- * windowsHide does nothing off Windows, so on Linux this checks the options, not the windows. Every check but `scrub`
- * fails on 2.73.0 (hundreds of calls without the option; the launcher and both commands start children without it; no
- * note in SECURITY.md).
+ * qa/selftest-2731c.mjs — no console window flashes on Windows when the harness starts a process (windowsHide).
+ *   static  every child_process call (spawn, spawnSync, exec, execSync, execFile, execFileSync, fork) in harness/,
+ *     hub/, scripts/, tools/, qa/*.mjs, qa/fixtures/, .claude/hooks/ and the git hooks' node snippets passes
+ *     `windowsHide: true` in an options object at the call, except the few in VISIBLE (each with a reason; a stale
+ *     entry fails too)
+ *   detached  every detached child passes windowsHide
+ *   launcher  harness/launch.mjs (spawnAgent, spawnAgentSync) uses it whatever the caller passed
+ *   runtime  commands run in a copy under a recorder (node --import) start every child with it
+ *   docs  docs/SECURITY.md says the NODE_OPTIONS preload stopgap can go
+ * windowsHide does nothing off Windows: on Linux this checks the options.
  */
 import fs from 'node:fs';
 import path from 'node:path';

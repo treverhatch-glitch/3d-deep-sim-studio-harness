@@ -1,21 +1,14 @@
 /**
- * qa/fun-probes.mjs — the real-input fun check (2.30b, J1) and the sim-to-screen wiring check (J4).
- * Called by qa/browser-play.mjs on the live page, with real keys and clicks.
- *
- * Probes a cartridge turns on in qa.mjs (export const browser = { probes: ['move', 'sprint', 'jump', 'aim', 'camera'] }):
- *   move    hold forward, then right: the player moves along the camera's forward and right (camera-relative WASD)
- *   sprint  the same hold with sprint covers at least 1.2x the ground
- *   jump    the player rises within 0.6 s of the jump key
- *   aim     with an enemy under the crosshair, one shot hits that enemy
- *   camera  the camera is never inside geometry during the whole play
- * They read window.__view(): player { x, y, z }, camera { forward: [x, z], inside }, crosshair { target },
- * hits { last, count }. A probe whose fields are missing fails as PROBE-UNWIRED: the feature isn't on screen.
- * Keys: browser.keys = { forward: 'w', right: 'd', sprint: 'Shift', jump: 'Space' }; browser.aim(view) may
- * return { move: [x, y] } to put an enemy under the crosshair.
- *
- * J4: cartridges list what the sim can do (export const simFeatures = ['sprint', 'jump', 'crane']). Each must
- * be a probe above or a browser.features[name] = { key | click, expect(viewBefore, viewAfter) }; one that
- * isn't bound or doesn't show fails as SIM-ONLY: "a sim feature is not done until the build shows it".
+ * qa/fun-probes.mjs — the real-input fun check and sim-to-screen wiring check, called by qa/browser-play.mjs.
+ * Real keys and clicks on the live page. A cartridge turns probes on in qa.mjs: export const browser = { probes: [...] }
+ *   move (hold forward, then right: moves along the camera's forward and right), sprint (covers at least 1.2x the ground),
+ *   jump (rises within 0.6 s), aim (an enemy under the crosshair is hit by one shot), camera (never inside geometry).
+ * They read window.__view(): player { x, y, z }, camera { forward: [x, z], inside }, crosshair { target }, hits { last, count }.
+ * Missing fields fail as PROBE-UNWIRED. Keys: browser.keys = { forward: 'w', right: 'd', sprint: 'Shift', jump: 'Space' };
+ * browser.aim(view) may return { move: [x, y] }.
+ * Sim features: export const simFeatures = ['sprint', 'jump', 'crane']; each must be a probe or a
+ *   browser.features[name] = { key | click, expect(viewBefore, viewAfter) }, else SIM-ONLY: "a sim feature is not
+ *   done until the build shows it".
  */
 export const PROBES = ['move', 'sprint', 'jump', 'aim', 'camera'];
 const DEFAULT_KEYS = { forward: 'w', back: 's', left: 'a', right: 'd', sprint: 'Shift', jump: 'Space' };

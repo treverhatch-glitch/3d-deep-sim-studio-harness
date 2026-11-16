@@ -1,15 +1,13 @@
 /**
- * qa/selftest-2672a.mjs — 2.67.2 (helper a): stop the false alarms.
- *   B-50  a lane's full verify no longer refuses another checkout's (the "already running" record is per checkout); a
- *         train's verify refused as busy waits and runs again, bounded; a train whose verifies ran no check defers its
- *         lanes: nobody handed back, never "main itself is red".
- *   hold  a task held for landing (task hold) stays out of trains; `task train leave` takes a lane out of the queue,
- *         recorded (who, why), never by a worker; npm run lanes and train status show both.
- *   health  a launched session's end records what it did for its task and why there was no work (task start refused,
- *         never claimed, ...); after STUDIO_NO_WORK_EXITS (2) no-work exits in a row the task is parked with that
- *         reason; a bug task's done-check refusal and brief name the regression file, its missing fields and the
- *         fails-before command.
- * A made-up studio: one sleeping gate, lane copies made with harness/worktree.mjs, a docs-only change per lane.
+ * qa/selftest-2672a.mjs — stopping false alarms in the train, holds and no-work exits.
+ * verify  a lane's full verify no longer refuses another checkout's (the "already running" record is per checkout); a
+ *   train's verify refused as busy waits and runs again, bounded; a train whose verifies ran no check defers its
+ *   lanes: nobody handed back, never "main itself is red".
+ * hold  a task held for landing (task hold) stays out of trains; `task train leave` takes a lane out of the queue,
+ *   recorded (who, why), never by a worker; npm run lanes and train status show both.
+ * health  a launched session's end records what it did and why there was no work; after STUDIO_NO_WORK_EXITS (2)
+ *   no-work exits in a row the task is parked with that reason; a bug task's done-check refusal and brief name the
+ *   regression file, its missing fields and the fails-before command.
  */
 import fs from 'node:fs';
 import path from 'node:path';

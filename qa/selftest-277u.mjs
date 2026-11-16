@@ -1,24 +1,14 @@
 /**
- * qa/selftest-277u.mjs — 2.77.0 (helper u, P5.1-P5.6 + P9.7): engine passes inside the harness, end to end, with a
- * made-up engine repo and a stand-in editor command (no real engine).
- *   P5.1 feed     an engine pass titled like real work, in the engine's own repo, queues for its train (2.76: refused
- *                 "no changes found" in the studio repo); its engine record survives the event log; a launched pass gets
- *                 a worktree of the engine repo on its branch; the Line Producer holds engine passes on a full rig
- *   P5.2/P9.7     the Line Producer starts the engine train itself: queue -> merge-tree check -> ONE land run (the
- *                 studio's land script, which runs the stand-in editor) -> the task closes; it waits while the web train
- *                 holds its lock and starts after; separate queue, lock and events
- *   P5.3          the land run is a machine:heavy "unity" job; its length is recorded and becomes the expected minutes;
- *                 the quiet-window rules (web train, same kind, RAM floor, CPU, web lanes first unless the engine queue
- *                 waited past the limit); an infrastructure abort stays NOT RUN (nobody handed back)
- *   P5.4          the lane tunes its listed settings itself (logged in the decisions log, undo given); a key outside the
- *                 list is refused as the owner's; its tuned ram-floor and batch flags reach the land run; the owner's
- *                 environment floor wins
- *   P5.5          the visual check: fixed-camera before/after shots, each real thing beside a reference photo (a link is
- *                 refused), the builder looked, a review by someone else (the builder can't grade itself; "toyish"
- *                 blocks), the path line queued for and posted by the Communicator
- *   P5.6          a second engine (made-up "godot") lands on its own train with its own files while the Unity train's
- *                 lock is held
- * Each check fails on 2.76.1.
+ * qa/selftest-277u.mjs — engine passes inside the harness, end to end, with a made-up engine repo and a stand-in editor
+ * command.
+ *   feed  an engine pass queues for its train in the engine's repo and gets a worktree there; held on a full rig
+ *   train  the Line Producer starts the engine train: queue -> merge-tree check -> ONE land run -> task closes; waits
+ *     while the web train holds its lock
+ *   land run a machine:heavy "unity" job; its length becomes the expected minutes; quiet-window rules (web train, same
+ *     kind, RAM floor, CPU); an infrastructure abort stays NOT RUN
+ *   tuning  the lane tunes its listed settings (logged, undo); an unlisted key is refused; the owner's floor wins
+ *   visual  fixed-camera before/after shots beside a reference photo (a link is refused), reviewed by someone else
+ *   second  a second engine ("godot") lands on its own train while the Unity train's lock is held
  */
 import fs from 'node:fs';
 import path from 'node:path';

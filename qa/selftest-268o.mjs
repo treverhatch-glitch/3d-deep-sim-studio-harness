@@ -1,19 +1,14 @@
 /**
- * qa/selftest-268o.mjs — 2.68.0 (helper o): the crew watchdog, the futility cap (shadow first), the usage wind-down,
- * the temp-file janitor and the release impact report.
- *   crew      a role with more sessions in the last hour than STUDIO_CREW_MAX_SESSIONS and nothing landed isn't
- *             launched (crew.unhealthy with the evidence; digest and status --brief show it); a worker can't resume it,
- *             a person can; new work for the role clears it on its own.
- *   futility  a running session past the p90 of its type's good runs raises one futility.check (shadow: nothing
- *             stopped; its end logs what a cap would have saved); under 20 samples no cap; =on hands it back.
- *   winddown  at STUDIO_USAGE_WINDDOWN_PCT nothing new starts, .studio/restart-log.md names the running, queued and held
- *             work, and the usage reset resumes with the log linked; --now does it on demand.
- *   janitor   a dry run by default; --yes deletes only the harness's temp files (dead train scratch, old .studio/tmp,
- *             logs over budget, marked test temp folders, caches over budget); a lane copy with work is never deleted
- *             and stale lanes need --lanes --yes --by <a decider>; train/verify jobs start it.
- *   impact    `autonomy -- impact` finds the upgrade (event or version bump) and compares before vs after, "not enough
- *             data" under 30 items; the digest names the verdict.
- * A made-up studio; events written straight into its log.
+ * qa/selftest-268o.mjs — the crew watchdog, futility cap, usage wind-down, temp-file janitor and release impact report.
+ * crew  a role with more sessions in the last hour than STUDIO_CREW_MAX_SESSIONS and nothing landed isn't launched
+ *   (crew.unhealthy; digest and status --brief show it); a worker can't resume it, a person can.
+ * futility  a session past the p90 of its type's good runs raises one futility.check (shadow: nothing stopped); under
+ *   20 samples no cap; =on hands it back.
+ * winddown  at STUDIO_USAGE_WINDDOWN_PCT nothing new starts and .studio/restart-log.md names running, queued and held
+ *   work; the usage reset resumes; --now does it on demand.
+ * janitor  dry run by default; --yes deletes only the harness's temp files; a lane copy with work is never deleted;
+ *   stale lanes need --lanes --yes --by <a decider>.
+ * impact  `autonomy -- impact` compares before vs after an upgrade, "not enough data" under 30 items.
  */
 import fs from 'node:fs';
 import path from 'node:path';

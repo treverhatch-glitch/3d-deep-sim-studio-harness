@@ -1,17 +1,12 @@
 /**
- * qa/selftest-2771c.mjs — 2.77.1 (helper c): three small issues from the crew's Windows PC.
- *   M1 (B-101)  (2.80: gone with the War Room) the War Room machine tile divided ALL used RAM by the running sessions ("10.2 GB per session, room for 0
- *               more, Limit: RAM" at 20.4 GB used and 2 sessions), counting the OS, browsers and Unity editors. Now
- *               (used now - used at the last idle sample) / sessions, "average incl. other apps" without a baseline,
- *               room-for-N from the scheduler's own per-session figure (STUDIO_SESSION_RAM_GB, 0.6), the sample's age.
- *   M4          `npm run comm -- test` (and `report -- post`) called process.exit() with fetch's socket still closing: on
- *               Windows node printed "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING) ... win\async.c, line 76".
- *               Now process.exitCode and a drained loop. UNTESTED ON WINDOWS: the libuv assertion itself; here the check is
- *               that process.exit is never called on the post path, the code is right and the command ends promptly.
- *   M5          studio:boot trusted "supervisor.json running + the pid exists"; the OS reuses pids, so another program on
- *               the dead supervisor's number made boot say "running" and start nothing. Now the pid is asked what program
- *               it is (start time against the record) and the stale sweep marks the old record stopped.
- *               UNTESTED ON WINDOWS: the PowerShell start-time query (readStarts) itself; here Linux /proc answers it.
+ * qa/selftest-2771c.mjs — three small Windows-PC issues.
+ *   machine tile  room-for-N uses (used now - used at the last idle sample) / sessions, "average incl. other apps"
+ *     without a baseline, the scheduler's per-session figure (STUDIO_SESSION_RAM_GB, 0.6) and the sample's age
+ *   comm exit  `npm run comm -- test` and `report -- post` never call process.exit() with fetch's socket still closing
+ *     (libuv assertion in win\async.c): process.exitCode and a drained loop; UNTESTED ON WINDOWS: the assertion itself
+ *   boot pid  studio:boot asks the pid what program it is (start time against the record), not "supervisor.json running
+ *     + the pid exists" (the OS reuses pids); the stale sweep marks the old record stopped (UNTESTED ON WINDOWS: the
+ *     PowerShell start-time query readStarts; here Linux /proc answers it)
  */
 import fs from 'node:fs';
 import path from 'node:path';

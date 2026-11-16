@@ -1,16 +1,14 @@
 /**
- * qa/selftest-277p.mjs — 2.77.0 (helper p, P9.6): pipelined merge trains and the batch cap.
- *   batch     a train takes at most STUDIO_TRAIN_BATCH ready lanes (default 4; with --max and STUDIO_TRAIN_MAX the
- *             smallest cap wins); the lanes past it wait for the next train
- *   pipeline  while train A verifies, ONE speculative train B verifies "A's tree + its lanes" in its own copy and lock
- *             and lands right after A without verifying again; B is discarded (its lanes keep their place, no hand-back)
- *             when A goes red or when main moves any other way, and its lanes then go in a normal train; a train that
- *             would start while B can land waits for it (never two landing at once)
- *   rules     B never holds, hands back or bisects: tier C, held, run-alone-behind-others, waiting and fix-first lanes
- *             are left for the next normal train (pickNextLanes); STUDIO_TRAIN_PIPELINE auto needs room on the machine
- *   status    task train status, .studio/train/status.json (`next`) and studio:status show both trains with their steps
- *   life      B has its own life record; a dead B's lock is freed by the reaper
- * Made-up lanes and a stand-in game check (a few seconds); every check fails on 2.76.1 (no pipeline, no batch cap).
+ * qa/selftest-277p.mjs — pipelined merge trains and the batch cap.
+ * batch  a train takes at most STUDIO_TRAIN_BATCH ready lanes (default 4; with --max and STUDIO_TRAIN_MAX the
+ *   smallest wins); the rest wait for the next train.
+ * pipeline  while train A verifies, ONE speculative train B verifies "A's tree + its lanes" in its own copy and lock
+ *   and lands right after A without verifying again; B is discarded (lanes keep their place, no hand-back) when A
+ *   goes red or main moves any other way; a train that would start while B can land waits for it.
+ * rules  B never holds, hands back or bisects: tier C, held, run-alone-behind-others, waiting and fix-first lanes are
+ *   left for the next normal train (pickNextLanes); STUDIO_TRAIN_PIPELINE auto needs room on the machine.
+ * status  task train status, .studio/train/status.json (`next`) and studio:status show both trains. life: B has its
+ *   own life record; a dead B's lock is freed by the reaper.
  */
 import fs from 'node:fs';
 import path from 'node:path';

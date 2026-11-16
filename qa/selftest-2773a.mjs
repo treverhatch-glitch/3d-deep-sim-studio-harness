@@ -1,15 +1,14 @@
 /**
- * qa/selftest-2773a.mjs — 2.77.3 (a): B-111, beta-mode owner records were accepted, then ignored.
- *   - In beta mode, with an owner key, the owner's stand-in (the orchestrator named in studio/beta.json) retypes a task
- *     (`task type`) or sets its visual proof (`task visual`): kept as a beta-format approval, it counts in done-check
- *     (whatever base the reader uses) and is logged "as beta"; once beta mode is off it no longer counts.
- *   - It never lets a worker approve for itself: a builder's shell is refused, and a beta-format approval dropped in the
- *     folder, or committed by a worker, counts for nothing.
- *   - Outside beta mode, with an owner key the writer couldn't see (origin/main behind the key commit), an unsigned
- *     record is refused up front (exit 1, "needs the owner's signature") instead of "recorded" and then ignored.
- *   - A beta release of a lane held for a protected config proposal (train release) decides the protected part at
- *     landing, as an owner's would.
- *   - Test files (panel.e2e.test.ts, *.spec.*, tests/) under a render path don't make a task a render task.
+ * qa/selftest-2773a.mjs — beta-mode owner records are accepted and then counted.
+ *   - In beta mode, with an owner key, the owner's stand-in (studio/beta.json) retypes a task (`task type`) or sets
+ *     its visual proof (`task visual`): kept as a beta-format approval, it counts in done-check and is logged "as
+ *     beta".
+ *   - It never lets a worker approve for itself: a builder's shell is refused, a worker's beta-format approval counts
+ *     for nothing.
+ *   - Outside beta mode, with an owner key the writer couldn't see, an unsigned record is refused up front (exit 1,
+ *     "needs the owner's signature").
+ *   - A beta release of a lane held for a protected config proposal decides the protected part at landing.
+ *   - Test files under a render path don't make a task a render task.
  */
 import fs from 'node:fs';
 import path from 'node:path';

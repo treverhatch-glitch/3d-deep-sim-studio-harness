@@ -1,16 +1,14 @@
 /**
- * qa/selftest-276g.mjs — 2.76.0 (the owner's request, 2026-11-04): beta mode, the owner gates off while the harness is
- * built, plus B-86 (the proxy answers owner asks), B-93 (approvals hash text with LF) and B-95 (owner allow rules for the
- * proxy's own session folder).
- *   switch    `beta on --by <owner>` (signed where the key is) / `beta off`; a worker or an agent's own shell can't
- *   covers    in beta mode the named agent and Producer/Director sessions act as the owner for every action but keys and
- *             deletes; workers and builder sessions never; the beta words stand in for --permission
- *   approve   an approval without the key or the owner's words that counts while beta mode is on, not from a worker's
- *             commit, and not after `beta off`
- *   asks      the proxy / a beta actor answers an owner ask for the owner (recorded)
- *   crlf      a protected file approved with CRLF still matches once checked out with LF
- *   settings  `delegate -- claude-settings --owner --dir <folder> --write` writes the owner's command rules there
- * Each check fails on 2.75.0 (no beta mode).
+ * qa/selftest-276g.mjs — beta mode: the owner's gates are off while the harness is built, and related approval fixes.
+ * switch  `beta on --by <owner>` (signed where the key is) / `beta off`; a worker or an agent's own shell can't.
+ * covers  in beta mode the named agent and Producer/Director sessions act as the owner for every action but keys and
+ *   deletes; workers and builder sessions never; the beta words stand in for --permission.
+ * approve  an approval without the key or the owner's words counts while beta mode is on, not from a worker's commit,
+ *   not after `beta off`.
+ * asks  the proxy or a beta actor answers an owner ask for the owner (recorded; the proxy answers owner asks).
+ * crlf  a protected file approved with CRLF still matches once checked out with LF (approvals hash text with LF).
+ * settings  `delegate -- claude-settings --owner --dir <folder> --write` writes the owner's command rules there
+ *   (owner allow rules for the proxy's own session folder).
  */
 import fs from 'node:fs';
 import path from 'node:path';

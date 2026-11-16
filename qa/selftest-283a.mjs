@@ -1,15 +1,10 @@
 /**
- * qa/selftest-283a.mjs — 2.83: an engine task's session is accounted where its work is.
- *
- * A crew ran 26 hours as a native-engine studio. 89 of its 227 sessions were recorded as "committed nothing" although
- * their work was committed in the engine repository; 25 tasks were parked for "2 sessions with no work"; the crew
- * breaker stopped launching builders for "0 landed" while their lanes waited in the engine train. These checks hold
- * the fixes:
- *   record    the branch a launch gives a task is the task's branch for task done (no --branch needed)
- *   work      engineWork reads commits and leftovers in the task's engine worktree
- *   session   a real launched session that commits in its engine worktree is not "no work", and its hand-back says
- *             what is in that worktree; one whose branch waits in the engine train is left to the train
- *   breaker   sessions that queued their lane for a train do not trip the crew breaker
+ * qa/selftest-283a.mjs — an engine task's session is accounted where its work is.
+ * record  the branch a launch gives a task is the task's branch for task done (no --branch needed).
+ * work  engineWork reads commits and leftovers in the task's engine worktree.
+ * session  a real launched session that commits in its engine worktree is not "no work", and its hand-back says what
+ *   is in that worktree; one whose branch waits in the engine train is left to the train.
+ * breaker  sessions that queued their lane for a train do not trip the crew breaker.
  */
 import fs from 'node:fs';
 import path from 'node:path';

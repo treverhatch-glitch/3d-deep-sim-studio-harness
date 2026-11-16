@@ -1,15 +1,14 @@
 /**
- * qa/selftest-2671j.mjs — 2.67.1 (helper j): the asset track (harness/asset-gate.mjs).
- *   1. triangles per LOD over budget fail (LOD0 by default, a _LOD1 mesh against its own budget); an asset in budget passes;
- *   2. a texture over textureMaxPx fails, loose or embedded in a .glb;
- *   3. a new asset file with no manifest row fails; 4. an NC licence is blocked; 5. CC-BY needs its credit line;
- *   6. a configured brand name in a glTF node name fails; 7. a model with no preview render fails;
- *   8. the round trip: a failing command fails, a passing one passes, none configured and a program that isn't
- *      installed are skips with a note;
- *   9. share-alike asks: refused until a game dev's yes, which a worker can't record;
- *  10. task done on --track asset runs the gate (a refusal with a Fix line, kept for the hand-back facts), then lands
- *      and files ONE "Wire in" task --after it (Unity track when Unity is configured), never twice.
- * Fixtures (tiny .glb and .png files) are written by the test; no binary file is committed.
+ * qa/selftest-2671j.mjs — the asset track (harness/asset-gate.mjs).
+ *   1. triangles per LOD over budget fail (LOD0 by default, a _LOD1 mesh against its own budget); 2. a texture over
+ *     textureMaxPx fails
+ *   3. a new asset file with no manifest row fails; 4. an NC licence is blocked; 5. CC-BY needs its credit line
+ *   6. a configured brand name in a glTF node name fails; 7. no preview render fails
+ *   8. the round trip: a failing command fails, a passing one passes, none configured or a program not installed skips
+ *     with a note
+ *   9. share-alike asks wait for a game dev's yes, which a worker can't record
+ *  10. task done on --track asset runs the gate (a refusal with a Fix line), then lands and files ONE "Wire in" task
+ *    --after it
  */
 import fs from 'node:fs';
 import path from 'node:path';

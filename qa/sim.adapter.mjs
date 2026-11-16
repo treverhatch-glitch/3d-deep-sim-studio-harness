@@ -1,19 +1,11 @@
 /**
- * qa/sim.adapter.mjs — Generic 3D Deep-Sim Playtest Adapter Contract
- *
- * Implements the "Recursive Game Creator" (arXiv:2610.08621) programmatic player
- * interface + `?playtest=1` (`window.__sim`) inspection bridge.
- *
- * Any 3D simulation cartridge mounted in this studio template only needs to
- * expose `window.__sim` (in browser mode) or export a module matching this
- * adapter interface (in headless Node mode):
- *
- *   - init(seed: number): SimState
- *   - step(ticks?: number): SimState
- *   - dispatch(action: object): { ok: boolean, reason?: string }
- *   - getState(): SimState
- *   - serialize(): string
- *   - deserialize(rawJson: string): SimState
+ * qa/sim.adapter.mjs — Generic 3D Deep-Sim Playtest Adapter Contract: the programmatic player interface + `?playtest=1`
+ * (`window.__sim`) inspection bridge.
+ * Any 3D simulation cartridge mounted in this studio template only needs to expose `window.__sim` (in browser mode) or
+ * export a module matching this adapter interface (in headless Node mode):
+ *   - init(seed: number): SimState - step(ticks?: number): SimState - dispatch(action: object): { ok: boolean,
+ *     reason?: string }
+ *   - getState(): SimState - serialize(): string - deserialize(rawJson: string): SimState
  *   - getHash(): string
  *   - invariants(state: SimState): Array<{ id: string, severity: 'P0'|'P1'|'P2', message: string }>
  */

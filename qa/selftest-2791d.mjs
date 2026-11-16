@@ -1,15 +1,12 @@
 /**
- * qa/selftest-2791d.mjs — 2.79.1 (d): a small trim of the event volume (the crew's 2.79.0 run wrote 3,349 events in 7.75 h).
- *   1. futility.shadow after a session end: one hourly summary (the record file keeps every one).
- *   2. skill.follow per session: counted per model (.studio/skill-follow.json, what the scorecard reads) + an hourly summary.
- *   3. lock.kept and director.flow "kept T-x (busy ...)": written on change only.
- *   4. task.overlap: once per task and set of overlaps.
+ * qa/selftest-2791d.mjs — a small trim of the event volume; probe scripts run in a temp studio copy.
+ *   1. futility.shadow after a session end: one hourly summary.
+ *   2. skill.follow per session: counted per model (.studio/skill-follow.json) + hourly summary.
+ *   3. lock.kept and director.flow "kept T-x (busy ...)": on change only. 4. task.overlap: once per task.
  *   5. agent.agy_continue: counted in the session end (followUps), not one event each.
- *   6. a game tester run (qa/reports/tester/<run>/summary.json) satisfies the "playtest of the current build" row.
+ *   6. a game tester run (qa/reports/tester/<run>/summary.json) satisfies the playtest row.
  *   7. STUDIO_VISUAL_GATE unset: off when the game has no capture command.
- *   8. agent.heartbeat: one event per STUDIO_HEARTBEAT_EVENT_MIN (10) minutes per session; metrics' stall gap follows it.
- *   9. the replay: a representative event mix through the old and the new emit paths.
- * A temp copy of the studio per check; probe scripts run in it.
+ *   8. agent.heartbeat: one event per STUDIO_HEARTBEAT_EVENT_MIN (10) minutes per session.
  */
 import fs from 'node:fs';
 import path from 'node:path';

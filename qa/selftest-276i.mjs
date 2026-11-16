@@ -1,24 +1,14 @@
 /**
- * qa/selftest-276i.mjs — 2.76.0 (helper i): the launcher and the agents.
- *   B-83 a  a relaunch under the same name (an appended log holding the last session's 900k tokens, its stall record)
- *           is never stall-killed for the old session's tokens; the session records where its part of the log starts
- *   B-83 b  logTokens counts the newest Claude session only; readLogFrom reads a session's part; a count that starts
- *           over (fewer tokens than last time) restarts the stall window instead of hiding a burn behind the old base
- *   B-82    a session the launcher ends (stall) records its own usage from the stream and an estimated cost
- *           (studio/prices.json, meta.costEstimated), never the previous session's result line
- *   W-0072/73, B-80  agy runs with --print-timeout 5400s (STUDIO_AGY_PRINT_TIMEOUT), --mode accept-edits
- *           (STUDIO_AGY_MODE=off drops it), --model; `--tool agy` with no --model starts on the Gemini default
- *   B-80 a  `allow agy` writes the write_file rule beside the command rules
- *   B-80 b  an agy builder in its lane copy: GEMINI.md with the shell rules (kept out of git status), the rules in its
- *           kickoff, and agy's jetski line in its hand-back and session end
- *   B-84 a  a builder started with no task works in its own lane copy, not the main checkout
- *   B-84 b  a launched builder claiming a task from the main checkout gets its lane copy at task start
- *   B-90    another task's event, or one the train wrote in the owner's name, is not the owner at work; a lane copy that
- *           is another agent's (the new builder's) is not the old owner's built work; an orchestrator's own copy still is
- *   B-81 a  the upgrade's lane refresh runs in the background and the upgrade waits at most STUDIO_UPGRADE_REFRESH_WAIT_S
- *   B-81 b  `lanes refresh` stops a lane's targeted tests at STUDIO_LANES_REFRESH_TEST_S (the merge kept)
- *   B-81 c  the train refreshes a lane whose harness is behind main (main merged in) instead of handing it back
- * Each check fails on 2.75.0.
+ * qa/selftest-276i.mjs — the launcher and the agents: stall, usage, agy settings, lane copies, lane refresh.
+ * stall  a relaunch under the same name is never stall-killed for the old session's tokens; logTokens counts the
+ *   newest Claude session only; a count that starts over restarts the stall window.
+ * usage  a session the launcher ends records its own usage and estimated cost (studio/prices.json,
+ *   meta.costEstimated).
+ * agy  --print-timeout 5400s (STUDIO_AGY_PRINT_TIMEOUT), --mode accept-edits (STUDIO_AGY_MODE=off drops it), --model;
+ *   `allow agy` writes the write_file rule; GEMINI.md with the shell rules in its lane copy.
+ * lanes  a builder with no task, or claiming from the main checkout, gets a lane copy. refresh: the upgrade's lane
+ *   refresh runs in the background (STUDIO_UPGRADE_REFRESH_WAIT_S); `lanes refresh` stops tests at
+ *   STUDIO_LANES_REFRESH_TEST_S.
  */
 import fs from 'node:fs';
 import path from 'node:path';

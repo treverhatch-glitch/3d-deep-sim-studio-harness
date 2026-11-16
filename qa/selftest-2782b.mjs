@@ -1,15 +1,12 @@
 /**
- * qa/selftest-2782b.mjs — 2.78.2 (b): a red merge train costs minutes, not hours, on one shared PC.
- *   Together  the flake triager ran each failing file alone, then again at quiet low load: ~20 min a file (4 files:
- *             80 min). A check's failing files now run TOGETHER at low load (one run), then the still-failing ones
- *             together on a quiet machine; each file is labelled from the run's own per-file result, per file when the
- *             output can't be split.
- *   Budget    one red cost 1-2 h (train 111009: 106 min, nothing landed). STUDIO_TRAIN_RED_BUDGET_MIN (30) caps the red
- *             chain: the newest lane is handed back, a prefix lands only on a green full verify, the rest re-queue.
- *   Perf      wall-clock tests (ms budgets) gate merges on a busy PC. A game:perf step runs them alone on a quiet machine;
- *             never quiet: "not run (busy)", a WARN, never red.
- *   Quiet     an engine-porter session counts as "not quiet" (the porter starts and stops Unity between steps).
- *   Spare     the parallel bisect took all 3 heavy slots (a builder verify waited 858 s): it leaves one.
+ * qa/selftest-2782b.mjs — a red merge train costs minutes, not hours, on one shared PC.
+ * together  a check's failing files run TOGETHER at low load (one run), then the still-failing ones together on a
+ *   quiet machine; each file is labelled from the run's own per-file result, per file when the output can't be split.
+ * budget  STUDIO_TRAIN_RED_BUDGET_MIN (30) caps the red chain: the newest lane is handed back, a prefix lands only on
+ *   a green full verify, the rest re-queue.
+ * perf  a game:perf step runs wall-clock tests (ms budgets) alone on a quiet machine; never quiet: "not run (busy)",
+ *   a WARN, never red.
+ * quiet  an engine-porter session counts as "not quiet". spare: the parallel bisect leaves one heavy slot free.
  */
 import fs from 'node:fs';
 import path from 'node:path';

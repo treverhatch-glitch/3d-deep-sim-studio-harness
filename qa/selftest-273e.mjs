@@ -1,26 +1,14 @@
 /**
- * qa/selftest-273e.mjs — 2.73.0 (helper e): autonomy, safely: confidence bounds on the L3 bar, audit sampling, and
- * cheap-first routing with the holdout off.
- *   bound      the L3 bar reads one-sided 90% Wilson bounds: 12 of 14 hands-free (0.86) with no reopen doesn't suggest L3
- *              and says how many more landings at this rate would clear it; 40 of 40 does; "confidence": 0 in
- *              studio/autonomy.json gives the old point-estimate verdict.
- *   demote     demotion stays on point estimates: a studio at L3 whose small sample misses the bound but whose rates
- *              hold isn't told to step down; one whose point estimate fails is.
- *   cli        `npm run autonomy` shows "hands-free 0.86 (lower bound 0.70 at 90%, n=14): not yet" and the landings needed.
- *   draw       audits pick hands-free landings and autonomous decisions by a draw seeded with the task / decision id
- *              (the same picks every time, at the policy's "audit.rate"; 0.1 by default while autonomous mode is on, 0
- *              when it is off).
- *   list       picked items are on `npm run decisions -- review` and in the digest; an audit is refused from one who
- *              worked on it (and the deciding agent); a person records it.
- *   redo       a failed audit counts as a Redo in the scorecard's redo rate and the L3 bar; an approved audited
- *              decision counts as a passed audit.
- *   route      cheap-first: a listed type starts on the cheapest tier the policy lists, one tier up per red round, never
- *              a model the policy doesn't list, never changes the model of a task already started; holdout 0 sends none
- *              to the default tier (a seeded share when the owner sets it); the launcher calls it.
- *   stats      success rate and tokens per landed change by type and tier, from session ends; the output says the
- *              holdout is off until API credit is available; `npm run policy` shows audits and routing.
- * A made-up studio (git checkout, events and a decision log of made-up tasks). Each check fails on 2.71.1 (no bound,
- * no harness/audit.mjs, no harness/routing.mjs).
+ * qa/selftest-273e.mjs — autonomy, safely: L3 confidence bounds, audit sampling, cheap-first routing.
+ * bound  the L3 bar reads one-sided 90% Wilson bounds (12 of 14 hands-free doesn't suggest L3; 40 of 40 does);
+ *   "confidence": 0 in studio/autonomy.json gives the point-estimate verdict; demotion stays on point estimates; `npm
+ *   run autonomy` shows the bound.
+ * draw  audits pick hands-free landings and autonomous decisions by a draw seeded with the task / decision id, at
+ *   "audit.rate" (0.1 while autonomous mode is on, 0 off); picked items are on `npm run decisions -- review` and in
+ *   the digest; a worker can't audit them; a failed audit counts in the redo rate and the L3 bar.
+ * route  a listed type starts on the cheapest tier the policy lists, one up per red round, never an unlisted model or
+ *   a started task's model; holdout 0 sends none to the default tier. stats: success rate and tokens per landed
+ *   change by type and tier; `npm run policy`.
  */
 import fs from 'node:fs';
 import path from 'node:path';

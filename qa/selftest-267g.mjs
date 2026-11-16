@@ -1,16 +1,14 @@
 /**
- * qa/selftest-267g.mjs — 2.67.0 (g): the owner's standing delegation to an outside agent, and --help never acts (B-47).
- *   1. `npm run delegate -- grant <agent> --actions … --hours N --by <owner>` from the owner's own terminal writes and
- *      commits studio/delegation.json; an agent's shell, a launched session or an agent's --by can't grant one.
- *   2. While it counts, the named agent runs train release, type, yes and hold with --by <agent> and no permission
- *      words; each use is recorded "under delegation <at> by <owner>", with a delegation.used event the digest counts.
- *   3. Expired, revoked, agent-committed, wrong agent, action not listed, a launched builder session or a worker:
- *      refused as before.
- *   4. With an owner key only the owner's signature counts: a signed grant works (also for type), a tampered one is ignored.
- *   5. `delegate -- claude-settings` prints (and --write merges) only the narrow rules; never broad, never deny.
- *   6. The file is on the shipped protected list (tier C).
- *   7. B-47: every task.mjs subcommand (walked from the code) and train, delegate, lanes, fuzz, denials with --help/-h
- *      print usage, exit 0, and write no file and no event (train --help starts no train).
+ * qa/selftest-267g.mjs — the owner's standing delegation to an outside agent, and --help never acts.
+ * 1.  `npm run delegate -- grant <agent> --actions … --hours N --by <owner>` from the owner's own terminal writes and
+ *   commits studio/delegation.json; an agent's shell, a launched session or an agent's --by can't.
+ * 2.  while it counts, the named agent runs train release, type, yes and hold with --by <agent> and no permission
+ *   words; each use is recorded "under delegation <at> by <owner>" with a delegation.used event.
+ * 3.  expired, revoked, agent-committed, wrong agent, unlisted action, builder session or worker: refused. 4. with an
+ *   owner key only the owner's signature counts.
+ * 5.  `delegate -- claude-settings` prints (--write merges) only the narrow rules. 6. the file is on the protected
+ *   list (tier C). 7. every task.mjs subcommand and train, delegate, lanes, fuzz, denials with --help/-h print usage,
+ *   exit 0, write no file or event.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,21 +1,14 @@
 /**
- * qa/selftest-286d.mjs — 2.86 (d): sessions that end for the harness's reasons do not cost the task.
- *
- *   1  the refresh rule is relative to where a session starts its work (harness/session-cap.mjs): a session whose brief
- *      and first reads fill 68 % of the window is not handed off before it has done work, nor until it has used the room
- *      the percentage gives; past the new threshold it is; a studio's own percentage (85) keeps a sensible meaning
- *   2  one reading of why a session ended (harness/handback-kind.mjs): refresh hand-offs with no work, launch failures and
- *      `task done` refusals for commits that are not the task's own count toward no park, hold, breaker or budget; real
- *      hand-backs still do; the scorecard's tally shows the harness kinds
- *   3  a claim whose session is gone is dropped: the lane-copy "still working" reading ignores an ended session, a claim
- *      the harness kept after the end is released by the sweep and taken by the next start; a train-queued task's claim
- *      and an outside owner's claim are untouched
- *   4  a lane session's command carries --add-dir <the main checkout> (not with STUDIO_LANE_ADD_MAIN_DIR=off, not in the
- *      main checkout)
- *   5  the supervisor's halt counts per task and cause: the same task failing twice holds that task (start back-off, one
- *      page), refresh hand-offs never halt, two different tasks failing the same way in a row do halt
- *
- * Each check imports a module from a copy of the repo (a probe script run in the copy).
+ * qa/selftest-286d.mjs — sessions that end for the harness's reasons do not cost the task (probe scripts run in a repo
+ * copy).
+ *   1  refresh rule is relative to where a session starts its work (harness/session-cap.mjs): a session whose brief and
+ *     first reads fill 68 % of the window isn't handed off before it has done work
+ *   2  harness/handback-kind.mjs: refresh hand-offs with no work, launch failures and `task done` refusals for commits
+ *     not the task's own count toward no park, hold, breaker or budget
+ *   3  a claim whose session is gone is dropped; a train-queued task's claim and an outside owner's claim are untouched
+ *   4  a lane session's command carries --add-dir <the main checkout> (not with STUDIO_LANE_ADD_MAIN_DIR=off, not in
+ *     main)
+ *   5  supervisor halt counts per task and cause: the same task failing twice holds it; refresh hand-offs never halt
  */
 import fs from 'node:fs';
 import path from 'node:path';

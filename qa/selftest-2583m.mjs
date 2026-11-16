@@ -1,16 +1,14 @@
 /**
- * qa/selftest-2583m.mjs — 2.58.3 launcher fixes from the crew's Windows logs (M1 to M5).
- *   M1: a session in a lane copy is told it may use the main checkout's real studio/ and .studio/ (Claude Code:
- *       --add-dir, each flag and path its own argument); outside a lane copy, nothing is added.
- *   M2: a code-writing role on a task with no lane gets its own copy (.lanes/<agent>) with a built-in tool (and since
- *       2.58.5, H-9, with a custom command too); a producer and STUDIO_LANELESS=shared stay in the main checkout.
- *   M3: `npm run agent -- allow agy` writes the studio's .studio/agy-settings.json by default (not agy's user file),
- *       --scope user still writes the user file, and toolCommand('agy') passes --settings <file> only when it exists.
- *   M4: a `nim` tool (aider on NVIDIA NIM): its argv, OPENAI_API_KEY set from NVIDIA_API_KEY for the child only (never
- *       in argv, the log, the session record or the events), and a clear refusal without a key or without aider.
- *   M5: the kickoff's allowed-commands note says one command per Bash call and to read files with the file tools.
- * The end-to-end checks start the real launcher with fake `claude`/`aider` programs first on PATH (POSIX: a node
- * script with a shebang; Windows: a .cmd wrapper, UNTESTED here). No real tool, key or network is used.
+ * qa/selftest-2583m.mjs — launcher fixes: lane copies, studio dirs, agy settings, the nim tool, kickoff command rules.
+ * M1:  a lane-copy session may use the main checkout's real studio/ and .studio/ (Claude Code: --add-dir per path).
+ * M2:  a code-writing role with no lane gets its own copy (.lanes/<agent>); a producer and STUDIO_LANELESS=shared
+ *   stay in main.
+ * M3:  `npm run agent -- allow agy` writes .studio/agy-settings.json by default; --scope user writes the user file;
+ *   toolCommand('agy') passes --settings only when it exists.
+ * M4:  a `nim` tool (aider on NVIDIA NIM): OPENAI_API_KEY set from NVIDIA_API_KEY for the child only (never in argv,
+ *   log, record or events); refused without a key or aider.
+ * M5:  the kickoff note says one command per Bash call, read files with the file tools.
+ * Fake `claude`/`aider` programs first on PATH (Windows UNTESTED); no real tool, key or network.
  */
 import fs from 'node:fs';
 import path from 'node:path';

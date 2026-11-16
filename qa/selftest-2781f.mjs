@@ -1,16 +1,14 @@
 /**
- * qa/selftest-2781f.mjs — 2.78.1 (f): the crew's run on 2.78.0 (B-121, B-117, M7) and the Line Producer's
- * "Unity twins", "rig-aware scheduling" and "chain-breaker push".
- *   B-121  the supervisor launched a builder on a task that was in a Unity train: a task in any train (an engine's queue,
- *          or a running train's lanes) counts as in progress for launching.
- *   B-117  (a) each heavy waiter admitted by its own copy of STUDIO_HEAVY_SLOTS (4-5 verifies ran with slots=2): the main
- *          checkout's .env counts too, the lower wins. (b) an engine land has its own line (STUDIO_ENGINE_SLOTS) and
- *          gives way to the game's merge train (its verify, its slot priority, a quiet hold).
- *   rig    a running engine train's RAM counts in the room for builders between its land runs.
- *   push   a chain-breaker queued for the train holds new builder verifies back (bounded).
- *   twins  a landed game task whose files have an engine twin gets one twin task (studio/game.json engines.<x>.twins).
- *   M7     playtest:stage1 stepped the template cartridge, not the studio's game, and passed in ~33 ms: it now says what it
- *          stepped and warns (STUDIO_PLAYTEST_GAME_CHECK warn, the default), or fails (fail); off is 2.78.0.
+ * qa/selftest-2781f.mjs — builders vs Unity trains, heavy slots, rig-aware scheduling, chain-breaker push, Unity twins.
+ * trains  a task in any train (an engine's queue, or a running train's lanes) counts as in progress for launching a
+ *   builder.
+ * slots  STUDIO_HEAVY_SLOTS: the main checkout's .env counts too, the lower wins; an engine land has its own line
+ *   (STUDIO_ENGINE_SLOTS) and gives way to the game's merge train.
+ * rig  a running engine train's RAM counts in the room for builders. push: a queued chain-breaker holds new builder
+ *   verifies back (bounded).
+ * twins  a landed game task whose files have an engine twin gets one twin task (studio/game.json engines.<x>.twins).
+ * M7  playtest:stage1 says what it stepped and warns (STUDIO_PLAYTEST_GAME_CHECK warn, the default) or fails (fail)
+ *   when it stepped the template cartridge, not the studio's game.
  */
 import fs from 'node:fs';
 import path from 'node:path';

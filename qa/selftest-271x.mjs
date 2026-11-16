@@ -1,24 +1,13 @@
 /**
- * qa/selftest-271x.mjs — 2.71.0 (helper x): one decision log, the studio policy file, autonomous mode, its review list.
- *   policy     `npm run policy` reads studio/policy.json (a missing file is today's behaviour); the file is on every
- *              shipped protected list, so a lane that writes it is tier C.
- *   log        a person's hold, unhold and reclassification each write exactly one record to .studio/decisions.jsonl
- *              (as "person", with an undo) and one `decision` event; `npm run decisions -- --action … --json` filters.
- *   self       an agent can't turn autonomous mode on for itself: `policy autonomous on` and `policy confirm` refuse an
- *              agent's shell, a policy.json an agent committed doesn't count, a worker can't propose, and a game dev's
- *              proposal changes nothing until the owner confirms it.
- *   autonomous after the owner confirms, the named overseer takes a listed decision (task type, yes) with --by itself
- *              and no permission words: recorded "autonomous", on the review list (`decisions -- review`).
- *   never      in autonomous mode the overseer can't delete lanes (janitor-lanes, even if the file lists it) nor release
- *              a lane held for a protected file; it may release a lane held after hand-backs (logged, with an undo).
- *   review     the deciding agent can't approve its own decision, a person can; revert runs the undo (the type goes
- *              back; a released lane is held again; a lane that already left the queue gets a revert task); edit
- *              needs a note; `mode autonomous off` pauses it at once (never a worker).
- *   digest     the War Room snapshot and the digest show the review count and the oldest; past reviewWithinH it goes
- *              to "Needs you"; a pending proposal is in "Needs you".
- *   measure    autonomous decisions per day, approved vs reverted (revert rate) and time saved against the median
- *              owner wait from events ("not enough data" under 10 waits).
- * A made-up studio in a git checkout. Each check fails on 2.70.0 (no policy file, no decision log, no autonomous mode).
+ * qa/selftest-271x.mjs — one decision log, the studio policy file, autonomous mode and its review list, in a made-up
+ * studio.
+ *   policy  `npm run policy` reads studio/policy.json (missing = default); it is on every protected list (tier C)
+ *   log  a person's hold, unhold, reclassification write one record to .studio/decisions.jsonl (with undo) and one
+ *     `decision` event
+ *   self  an agent can't turn autonomous mode on (`policy autonomous on`, `policy confirm`); a worker can't propose
+ *   autonomous  after owner confirm the overseer takes a listed decision, on `decisions -- review`; never deletes lanes
+ *     or releases a lane held for a protected file
+ *   review  can't approve its own decision; revert runs the undo; `mode autonomous off` pauses at once
  */
 import fs from 'node:fs';
 import path from 'node:path';

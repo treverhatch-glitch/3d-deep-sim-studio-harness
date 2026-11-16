@@ -1,15 +1,14 @@
 /**
- * qa/selftest-279e.mjs — 2.79 (e): the engine port's land, bisect, check, slot and pictures (harness side, any engine).
- *   preland   engines.<x>.preLand runs per lane in a checkout of the lane's commit before the long land run; a non-zero exit
- *             hands that lane back (cause precheck, the command's last lines) and the land run never sees it
- *   bisect    a red batch's failing test names are its signature; the bisect stops after STUDIO_ENGINE_BISECT_MAX runs and
- *             hands back the lanes still in the red range; with no readable names it is the full search it was
- *   check     npm run engine -- check runs engines.<x>.quickCheck in the lane copy under one machine-wide lock; task done
- *             of an engine-porter task runs it and refuses on red
- *   slot      an engine train starts while a web train runs when the engine slot is free; a taken slot, the line off or
- *             "window": "quiet" keep the old wait; an owner-set STUDIO_ENGINE_SLOTS opens the engine line with no scan
- *   shots     a green land with engines.<x>.shots writes before/after folders, a compare page and one notice; none: nothing
- * Fake engine commands (node scripts) stand in for the engine, as in selftest-277u.
+ * qa/selftest-279e.mjs — the engine port's land, bisect, check, slot and pictures (harness side, any engine).
+ * preland  engines.<x>.preLand runs per lane in a checkout of its commit before the land run; a non-zero exit hands
+ *   the lane back (cause precheck) and the land run never sees it.
+ * bisect  a red batch's failing test names are its signature; the bisect stops after STUDIO_ENGINE_BISECT_MAX runs
+ *   and hands back the lanes still in the red range.
+ * check  npm run engine -- check runs engines.<x>.quickCheck in the lane copy under one machine-wide lock; task done
+ *   of an engine-porter task runs it and refuses on red.
+ * slot  an engine train starts while a web train runs when the engine slot is free; a taken slot, the line off or
+ *   "window": "quiet" keep the wait; an owner-set STUDIO_ENGINE_SLOTS opens the line with no scan.
+ * shots  a green land with engines.<x>.shots writes before/after folders, a compare page and one notice.
  */
 import fs from 'node:fs';
 import path from 'node:path';

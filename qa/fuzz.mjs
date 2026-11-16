@@ -1,31 +1,15 @@
 #!/usr/bin/env node
 /**
- * qa/fuzz.mjs — 2.66.0: generated play for every game cartridge, failures shrunk to a short repro. Advisory (not a gate).
- *
+ * qa/fuzz.mjs — generated play for every game cartridge, failures shrunk to a short repro. Advisory (not a gate).
  *   npm run fuzz [-- --cartridge <name>] [--seeds N] [--ticks N] [--json]
- *   npm run fuzz -- --check                 read-only: no files, events or tasks; exit 1 on a finding (the soak-tier form)
- *   npm run fuzz -- --replay .studio/fuzz/findings/<id>.json      replay one finding (exit 1 while it still fails)
- *   npm run fuzz -- file <id> [--by <name>]                       file one suggested finding as a bug task now
- *
- * Per cartridge, seeded runs (STUDIO_FUZZ_SEEDS, default 20; STUDIO_FUZZ_TICKS, default 500; or "seeds"/"ticks" in
- * studio/fuzz.json). Actions come from the cartridge's optional `actions(state, rand)` export (qa.mjs, else index.mjs);
- * without it, a generic generator from its `actionTypes` declaration; with neither the cartridge is skipped with a note.
- * Each tick, with chance "rate" (0.25), the generator is asked for an action; everything played is recorded.
- * Checks: invariants() and a throwing step() every tick; every "saveEvery" (50) ticks a save/load round trip (the state
- * through JSON.stringify/parse must step to the same SHA-256 as the live state); determinism (the recorded run played
- * again from the same seed ends on the same SHA-256, and a step taken twice from one state agrees).
- * A failure is shrunk (ddmin over the recorded actions) and written to .studio/fuzz/findings/<id>.json in the
- * regression format (cartridge, seed, tick, actions), so a fixer can copy it into qa/regressions/. The id hashes the
- * cartridge, the check and the shrunk actions' types, so reruns update the same file instead of adding one.
- *
- * Filing (hands-off with a shadow week). studio/fuzz.json "mode":
- *   "suggest" (default)  new findings go to .studio/fuzz/suggestions.md and one fuzz.finding event (the daily digest
- *                        lists them); nothing is filed.
- *   "file"               one bug task per new finding id through the board (task.mjs addTask), never twice for an id.
- * "autoFileAfter": "<ISO date>" switches "suggest" to filing from that date. The first run writes it as first run + 7
- * days when it is absent; null keeps suggesting for good. studio/fuzz.ignore.json ([{ id, why }]) lists findings that
- * are intended behaviour: never suggested or filed (an entry with no why is not honoured).
- * Seeded RNG only (Mulberry32); no wall clock decides anything a run plays.
+ *   npm run fuzz -- --check | --replay .studio/fuzz/findings/<id>.json | file <id> [--by <name>]
+ * --check is read-only (no files, events or tasks), exit 1 on a finding; --replay exits 1 while it still fails.
+ * Seeded runs (STUDIO_FUZZ_SEEDS 20, STUDIO_FUZZ_TICKS 500, or "seeds"/"ticks" in studio/fuzz.json); actions from the
+ *   cartridge's actions(state, rand) export, else its actionTypes, else skipped. Checks: invariants(), a throwing
+ *   step(), save/load round trip every 50 ticks, determinism. A failure is shrunk (ddmin) to
+ *   .studio/fuzz/findings/<id>.json (regression format). studio/fuzz.json "mode": "suggest" (default) writes
+ *   .studio/fuzz/suggestions.md and a fuzz.finding event; "file" files one bug task per new id; "autoFileAfter" (ISO
+ *   date); studio/fuzz.ignore.json [{ id, why }]. Seeded RNG only.
  */
 import fs from 'node:fs';
 import path from 'node:path';

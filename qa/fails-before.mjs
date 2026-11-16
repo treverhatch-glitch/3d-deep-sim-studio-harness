@@ -1,28 +1,15 @@
 #!/usr/bin/env node
 /**
- * qa/fails-before.mjs — does a regression fail on the code before the fix? If it doesn't, it doesn't
- * guard anything.
- *
+ * qa/fails-before.mjs — does a regression fail on the code before the fix? If it doesn't, it doesn't guard anything.
  *   node qa/fails-before.mjs <regression.json> <commit>    replay it at <commit> (usually the fix's parent)
- *
- * Checks out <commit> into a temporary git worktree (your checkout is untouched), replays the
- * regression with that commit's cartridge, and hashes the end state with today's SHA-256. The
- * regression "fails before" when the old code breaks an invariant, throws, or ends in a different
- * state than the pinned sha256. Results are cached by regression and commit (.studio/cache/).
- *
- * 2.58.4: a run that never got to play the old code proves nothing, so it is an error (known: false), never a pass,
- * and never cached: the cartridge couldn't be loaded at that commit (not there yet, its build failed, a dependency
- * such as node_modules is missing in the worktree), or the run timed out, was killed or printed no result. Before,
- * every one of those counted as "the old code throws" and a regression that guards nothing passed the check.
- * STUDIO_FAILS_BEFORE_TIMEOUT_MS sets the time limit (default 120000).
- *
- * 2.59.0: a regression can also be a seeded game unit test ("kind": "test"; qa/regressions/README.md), for a bug in
- * a part of the game no cartridge replays. The command comes from the studio's own config, never from the regression
- * file: "regressionTest" in studio/game.json, else in the game's studio.gates.json (both protected files), with
- * {file} {name} {seed} {junit} filled in. The test must PASS on the current checkout (the control: the runner, the
- * file and the name work) and FAIL at <commit>, judged from the runner's JUnit result: the named test ran and failed.
- * A run with no JUnit file, no such test in it (the file didn't load: an import the old code doesn't have, a missing
- * dependency), a skipped test, a timeout or a kill is an error (known: false), as for a replay, never a pass.
+ * Checks <commit> out into a temporary git worktree, replays the regression with that commit's cartridge, and hashes
+ *   the end state with today's SHA-256. It "fails before" when the old code breaks an invariant, throws, or ends in a
+ *   different state than the pinned sha256. Cached by regression and commit (.studio/cache/).
+ * A run that never played the old code (cartridge not loadable, node_modules missing, timeout, kill, no result) is an
+ *   error (known: false), never a pass, never cached. STUDIO_FAILS_BEFORE_TIMEOUT_MS: limit (default 120000).
+ * A "kind": "test" regression runs "regressionTest" from studio/game.json, else the game's studio.gates.json
+ *   (protected), with {file} {name} {seed} {junit}; it must PASS now and FAIL at <commit> by JUnit; no JUnit file,
+ *   missing or skipped test, timeout or kill is an error.
  */
 import fs from 'node:fs';
 import os from 'node:os';

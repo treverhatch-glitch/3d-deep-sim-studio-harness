@@ -1,16 +1,14 @@
 /**
- * qa/selftest-267h.mjs — 2.67.0 (helper h): test hygiene and upgrade friction (B-48, B-49, B-29, B-38).
- *   B-48: harness/test-rng.mjs reads the game's "testRandomness" (studio.gates.json) and flags a test file that starts a
- *         seeded game while a setup file routes the sim's dice to the shared Math.random and the file never isolates,
- *         and an unseeded game in a test; the game gate lists it as game:test-rng, a WARN (STUDIO_TEST_RNG=required
- *         fails), and a hand-back carries the findings as a fact.
- *   B-49: `upgrade --merge` ends with `lanes refresh --all`: refreshed / conflicted / skipped (a running session is not
- *         touched); STUDIO_UPGRADE_REFRESH=off keeps the old behaviour.
- *   B-29: a commit on main of studio/NEXT.md, DONE.md and a hand-off during a train's verify keeps the verify (already
- *         true on 2.66.0, kept as a guard), and so does a hold record changed for a task outside the train (new); a hold
- *         changed for a lane of the train still means a new verify.
- *   B-38: an owner type outranks the title on a red trunk (only fix tasks start), in the hand-off's open bugs and in the
- *         token norms; `task visual <ID> off` exists and turns the render requirement off.
+ * qa/selftest-267h.mjs — test hygiene and upgrade friction.
+ *   rng  harness/test-rng.mjs reads the game's "testRandomness" (studio.gates.json) and flags a test file that starts a
+ *     seeded game while a setup file routes the sim's dice to the shared Math.random and the file never isolates, and
+ *     an unseeded game in a test; listed as game:test-rng, a WARN (STUDIO_TEST_RNG=required fails)
+ *   upgrade  `upgrade --merge` ends with `lanes refresh --all` (a running session is not touched);
+ *     STUDIO_UPGRADE_REFRESH=off keeps the old behaviour
+ *   verify  a commit on main of studio/NEXT.md, DONE.md and a hand-off during a train's verify keeps the verify, and so
+ *     does a hold record changed for a task outside the train; a hold changed for a lane of the train means a new
+ *     verify
+ *   type  an owner type outranks the title on a red trunk; `task visual <ID> off` turns the render requirement off
  */
 import fs from 'node:fs';
 import path from 'node:path';

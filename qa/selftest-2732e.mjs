@@ -1,21 +1,14 @@
 /**
- * qa/selftest-2732e.mjs — 2.73.2 (helper e, B-73): a Unity run waits for a free-RAM floor, and an infrastructure abort is
- * "not run", never a FAIL of the game's tests.
- *   floor     STUDIO_UNITY_MIN_FREE_GB (12) never above 60% of the RAM; `heavy run --kind unity` waits for it and exits 3
- *             ("NOT RUN") when the wait runs out, without starting the command
- *   cli       `npm run heavy -- wait` (floor + slot, exit 0 / 3), `wait --hold <label>` keeps the slot in the background
- *             until `release --label <label>`, so other heavy work waits meanwhile
- *   gate      harness/unity.mjs gate with a stand-in editor: out of memory, "Aborting batchmode" before any results and an
- *             editor ended from outside are NOT RUN (exit 3, "[engine-gate] NOT RUN <kind>" with a Fix line); a failing
- *             test or a compile error next to the same signs stays FAIL; free RAM under the floor never starts the editor
- *   land      harness/unity-gate.mjs: a red land run whose output shows an infrastructure abort is status not-run (exit 3)
- *             in unity-last.json, the engine.land event and studio/engine/LOG.md; a failing test keeps it red; under
- *             the floor the land command never starts
- *   train     the Unity train retries a not-run land run and then defers the branch: nobody is handed back
- *   rows      a verify gate that exits 3 with a NOT RUN line is "NOT RUN <id>: not run: <why>" in its row and the plain
- *             words, not FAILING; the Fix for "[engine-gate] NOT RUN out-of-memory" is that kind's own
- * Every check fails on 2.73.1 (no floor, no wait/hold/release, infrastructure aborts recorded as FAIL / red), except the
- * two "stays FAIL" guards, which pass on both (they keep the fix from hiding a real failure).
+ * qa/selftest-2732e.mjs — a Unity run waits for a free-RAM floor, and an infrastructure abort is "not run", never a
+ * FAIL.
+ *   floor  STUDIO_UNITY_MIN_FREE_GB (12, never above 60% of RAM): `heavy run --kind unity` waits, exits 3 ("NOT RUN")
+ *     when it runs out
+ *   cli  `npm run heavy -- wait` (floor + slot, exit 0 / 3); `wait --hold <label>` keeps the slot until `release
+ *     --label <label>`
+ *   gate  harness/unity.mjs gate: out of memory, "Aborting batchmode" before results, an editor ended from outside are
+ *     NOT RUN (exit 3, "[engine-gate] NOT RUN <kind>"); a failing test or compile error stays FAIL
+ *   land  harness/unity-gate.mjs: a red land run showing an infrastructure abort is not-run (exit 3); the Unity train
+ *     retries it, then defers the branch
  */
 import fs from 'node:fs';
 import path from 'node:path';

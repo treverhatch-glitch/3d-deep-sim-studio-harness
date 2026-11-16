@@ -1,17 +1,14 @@
 /**
- * qa/selftest-2781e.mjs — 2.78.1 (e): fresh sessions that stay cheap, and finished work that doesn't get lost.
- *   - The launch prompt's prefix is the same bytes for every session of a role (builder, engine-porter, reviewer, producer)
- *     at another time, under another name, model and task; a clock time an agent wrote into a pitfall is not called a
- *     cache miss; a launched session leaves studio/CURRENT_TASK.md (imported by CLAUDE.md ahead of the prompt) alone.
- *   - Refresh points per role (reviewers and engine-porters at 70k by default) with per-role and per-model overrides.
- *   - Every hand-back carries the lane, the commits made, the last verify (green/red, which gate) and the next command,
- *     written by the harness; a refresh relaunch's prompt carries them.
- *   - A builder red on a different cause past half its refresh point hands off to a fresh session (a setting turns it
- *     off; the mid-debug exception keeps going); a reviewer's launch never resumes a session.
- *   - `lanes orphans` lists task commits on lane branches that main lacks; `lanes carry <ID>` cherry-picks only the
- *     task's own commits onto a fresh lane, refuses a worker outside its own copy, and stops on a conflict.
- *   - `agent start` with a name whose lane copy is still in use suggests a fresh name; --auto-name uses it.
- *   - An engine pass whose branch is checked out in another clean worktree works there; a dirty one refuses the launch.
+ * qa/selftest-2781e.mjs — fresh sessions that stay cheap, and finished work that doesn't get lost.
+ *   - Launch prompt prefix is the same bytes for every session of a role at another time, name, model and task; a
+ *     launched session leaves studio/CURRENT_TASK.md alone.
+ *   - Refresh points per role (reviewers and engine-porters at 70k) with per-role and per-model overrides.
+ *   - Every hand-back carries the lane, commits, last verify and next command; a builder red on a different cause past
+ *     half its refresh point hands off to a fresh session.
+ *   - `lanes orphans` lists task commits on lane branches main lacks; `lanes carry <ID>` cherry-picks only the task's
+ *     own commits onto a fresh lane.
+ *   - `agent start` with a lane name in use suggests a fresh one (--auto-name uses it); an engine pass whose branch is
+ *     checked out in another clean worktree works there, a dirty one refuses.
  */
 import fs from 'node:fs';
 import path from 'node:path';

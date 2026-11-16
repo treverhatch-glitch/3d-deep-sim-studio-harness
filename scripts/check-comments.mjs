@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * scripts/check-comments.mjs — the length rule for comments in harness/ and scripts/ (npm run check:comments).
+ * scripts/check-comments.mjs — the length rule for comments in harness/, scripts/ and qa/ (npm run check:comments).
  * A file's header comment is at most 12 lines and any other comment at most 6, counting every line of it. A comment
  * says what the code does, how to run it and what would otherwise go wrong; how a subsystem works is in docs/, and
  * what changed when is in CHANGELOG.md and git. A run of `//` lines that each stand alone counts as one comment.
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 const HEADER_LINES = 12;
 const COMMENT_LINES = 6;
-const DIRS = ['harness', 'scripts'];
+const DIRS = ['harness', 'scripts', 'qa'];
 const SKIP = /(^|[\\/])(node_modules|fixtures)([\\/]|$)/;
 
 function codeFiles(root) {

@@ -1,19 +1,13 @@
 /**
- * qa/selftest-259h.mjs — P-066 (crew P-036): agents start with their arguments intact on Windows.
- *
- * The launcher used to start each tool with `shell: true` on Windows: Node joined the arguments unquoted and cmd.exe
- * split them again, so Claude Code lost its --allowedTools list and agy got its prompt word by word. Now every tool
- * starts through harness/launch.mjs with no shell. Checked here:
- *   - end to end, through `node harness/agent.mjs start` with stand-in programs first on PATH (an executable script
- *     on macOS and Linux; on Windows an npm-style .cmd shim for claude and agy and a plain .cmd for cursor's `agent`):
- *     Claude Code's allowed-tools patterns arrive one per argument, each with its spaces and parentheses; agy's
- *     prompt arrives as one argument with quotes, parentheses, &, %PATH%, ^ and non-ASCII text unchanged; the plain
- *     .cmd gets its arguments through cmd.exe intact (a prompt with line breaks goes by file there);
- *   - a custom command's {kickoff} (in a folder with a space) and {model} (quotes, parentheses, &, %, ^) arrive whole;
- *   - pure functions, everywhere: the Windows lookup (PATH x PATHEXT, npm shims of both cmd-shim forms, never the
- *     current folder), the prompt-by-file rule, cmd.exe quoting (a table, and a round trip through a model of cmd.exe),
- *     the custom-command filling;
- *   - on Windows only: the cmd.exe quoting round trip through the real cmd.exe, into a .cmd and straight to node.
+ * qa/selftest-259h.mjs — agents start with their arguments intact on Windows (every tool via harness/launch.mjs, no shell).
+ * -  end to end through `node harness/agent.mjs start` with stand-in programs first on PATH: Claude Code's
+ *   allowed-tools patterns arrive one per argument; agy's prompt as one argument with quotes, parentheses, &, %PATH%,
+ *   ^ and non-ASCII unchanged; a plain .cmd gets its arguments through cmd.exe intact (a prompt with line breaks goes
+ *   by file).
+ * -  a custom command's {kickoff} and {model} arrive whole.
+ * -  pure functions: the Windows lookup (PATH x PATHEXT, npm shims, never the current folder), the prompt-by-file
+ *   rule, cmd.exe quoting, the custom-command filling.
+ * -  Windows only: the cmd.exe quoting round trip through the real cmd.exe.
  */
 import fs from 'node:fs';
 import path from 'node:path';

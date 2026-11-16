@@ -1,18 +1,14 @@
 /**
- * qa/selftest-276j.mjs — 2.76.0 (helper j): machine sharing (B-89), "waiting on yes" said out loud (B-87), and the
- * first-divergence report for a cartridge that imports its loader from outside its folder (B-94).
- *   B-89 share     a lane check beside the train's verify gets its share of the cores (not 26 of 28), the game's row
- *                  keeps testWorkers { workers, share, why, machineWorkers } and the per-test timeout reads every
- *                  check's workers on the machine
- *   B-89 priority  the train's verify > a builder's verify > a soak beside the same jobs; a train coming (lanes queued)
- *                  keeps its share free; Unity's claimed threads come off the top; STUDIO_TEST_WORKERS still wins and
- *                  STUDIO_RIG_SHARE=off sizes by RAM only
- *   B-89 rig       rigBudget() lists what runs (a verify's own gate slot counted once) and the shares, for the Line Producer
- *   B-87           studio:status's last-pass line, status --brief and the War Room's Needs a person name the tasks
- *                  waiting on a dev's yes; in beta mode the line says who may give it
- *   B-94           a made-up game whose cartridge re-exports game/<name>/tools/cartridge-loader.mjs (which imports the
- *                  sim beside it and a package from node_modules) gets its first divergence (tick, field)
- * Each check fails on 2.75.0.
+ * qa/selftest-276j.mjs — machine sharing, "waiting on yes" said out loud, and the first-divergence report for an outside loader.
+ * share  a lane check beside the train's verify gets its share of the cores; the game's row keeps testWorkers {
+ *   workers, share, why, machineWorkers }; the per-test timeout reads every check's workers on the machine.
+ * priority  the train's verify > a builder's verify > a soak; a train coming keeps its share free; Unity's claimed
+ *   threads come off the top; STUDIO_TEST_WORKERS still wins; STUDIO_RIG_SHARE=off sizes by RAM only.
+ * rig  rigBudget() lists what runs (a verify's own gate slot counted once) and the shares, for the Line Producer.
+ * yes  studio:status, status --brief and the War Room's Needs a person name the tasks waiting on a dev's yes; in beta
+ *   mode the line says who may give it.
+ * loader  a cartridge that re-exports game/<name>/tools/cartridge-loader.mjs (importing the sim and a node_modules
+ *   package) still gets its first divergence (tick, field).
  */
 import fs from 'node:fs';
 import path from 'node:path';

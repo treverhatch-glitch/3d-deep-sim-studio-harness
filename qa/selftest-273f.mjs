@@ -1,19 +1,13 @@
 /**
- * qa/selftest-273f.mjs — 2.73.0 (helper f): taking an update safely, and the overseer-stage machinery.
- *   preflight  `upgrade --preflight` (read-only): PASS/WARN/FAIL per item with Fix lines, exit 1 on a FAIL; the board, the
- *              owner key, a tracked .env, a configured tool that isn't there, an unreadable policy file, a lane with
- *              unlanded work; the webhook never printed; nothing written; --ref checks node against the ref's engines
- *   smoke      `upgrade --smoke`: a tiny verify and train on a made-up task in a scratch copy (never the real board), the
- *              machine scan and a dry supervisor pass, an upgrade.smoke event, the copy removed; a broken harness FAILs
- *   snapshot   `upgrade --merge` writes .studio/upgrades/<from>-to-<to>.json (landed/h, false reds per train, tokens per
- *              landed change by task, red verify %, workarounds/day); `autonomy -- impact` takes its before side from it
- *   predict    `release -- predict --metric --expect` writes docs/releases/<version>.json; impact scores hit / miss
- *   overseer   studio/overseer.json (protected, read as committed): `npm run overseer` shows the stage and whether the next
- *              stage's criteria hold from git trailers and the logs; `overseer -- record` is a person's, never the overseer's
- *   repro      `workaround -- repro <H-id>`: refused below stage 1 and for the studio itself; in a separate clone a branch,
- *              a selftest-style failing test and a PR body with the trailers
- *   (2.84 (y): the weekly harness scout this file also covered is gone, and its two checks with it.)
- * Each check fails on 2.71.1 (none of these commands or files exist there).
+ * qa/selftest-273f.mjs — taking an update safely, and the overseer-stage machinery.
+ * preflight  `upgrade --preflight` (read-only): PASS/WARN/FAIL per item with Fix lines, exit 1 on a FAIL; the webhook
+ *   never printed; --ref checks node against the ref's engines.
+ * smoke  `upgrade --smoke`: a tiny verify and train on a made-up task in a scratch copy, a dry supervisor pass, an
+ *   upgrade.smoke event.
+ * snapshot  `upgrade --merge` writes .studio/upgrades/<from>-to-<to>.json, which `autonomy -- impact` reads; `release
+ *   -- predict --metric --expect` writes docs/releases/<version>.json.
+ * overseer  studio/overseer.json (protected): `npm run overseer` shows the stage and the next stage's criteria;
+ *   `overseer -- record` is a person's. repro: `workaround -- repro <H-id>` is refused below stage 1.
  */
 import fs from 'node:fs';
 import path from 'node:path';

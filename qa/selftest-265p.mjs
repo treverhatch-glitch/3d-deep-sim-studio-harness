@@ -1,17 +1,14 @@
 /**
- * qa/selftest-265p.mjs — 2.65.0 (helper p): the conductor's tools, for an orchestrator outside the harness.
- *   lanes:        `npm run lanes -- --json` lists every lane copy with ahead/behind, hook stamps, harness drift, queue,
- *                 hold, Pin-Moves, merge-tree conflicts with main and between queued lanes, and age, in seconds.
- *   refresh:      `npm run lanes -- refresh` refuses workers and busy lanes (unless --busy-ok), merges main (never a
- *                 rebase: the lane's own commit is kept), keeps the hooks gate green, runs the lane's targeted tests,
- *                 stops on a textual conflict (merge aborted, files listed) and reports a red targeted test.
- *   brief:        `npm run status -- --brief` is fixed-format, under 100 words with long lists, and deterministic.
- *   notes:        `npm run task -- note` appends a ruling (conductor.note) shown in the task's brief inside the
- *                 untrusted block; a worker is refused; conductorInterventions counts them.
- *   job.done:     a heavy run, the game's checks, a train and a full verify each end with a uniform job.done event.
- *   events wait:  blocks until a matching event, exits 2 on timeout, and --since last misses nothing between waits;
- *                 job.done alerts for train/verify only behind STUDIO_ALERT_JOBS.
- * Every check fails on 2.64.0 (no lanes.mjs, jobs.mjs, conductor.mjs, brief-status.mjs, task note, job.done).
+ * qa/selftest-265p.mjs — the conductor's tools, for an orchestrator outside the harness.
+ *   lanes:  `npm run lanes -- --json` lists every lane copy: ahead/behind, hook stamps, harness drift, queue, hold,
+ *     Pin-Moves, merge-tree conflicts, age in seconds
+ *   refresh:  `npm run lanes -- refresh` refuses workers and busy lanes (unless --busy-ok), merges main (never a
+ *     rebase), keeps the hooks gate green, runs targeted tests, stops on a textual conflict
+ *   brief:  `npm run status -- --brief` is fixed-format, under 100 words with long lists, deterministic
+ *   notes:  `npm run task -- note` appends a ruling (conductor.note) shown in the task's brief; a worker is refused
+ *   job.done:  a heavy run, the game's checks, a train and a full verify each end with a uniform job.done event
+ *   events wait: blocks until a matching event, exits 2 on timeout; job.done alerts for train/verify only behind
+ *     STUDIO_ALERT_JOBS
  */
 import fs from 'node:fs';
 import path from 'node:path';

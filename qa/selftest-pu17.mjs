@@ -1,17 +1,12 @@
 /**
- * qa/selftest-pu17.mjs — PU-17 (P-039, P-045): agent stop checks the process at kill time, with no extra process
- * calls on launch or in listings; a stop during start-up stops the launcher.
- *
- * A session record left "running" after a crash or a reboot can name a process number the OS has given to another
- * program since; stopping the agent killed that program (on Windows with its whole tree). The launcher now writes
- * down when each process started (in-process: the spawn time), and only the kill path asks the OS (once) what the
- * number's start time is now (harness/proc-identity.mjs). The first version asked the OS at every launch and in
- * every listing (PowerShell on Windows, about a second each) and failed five selftests on Windows CI (P-045).
- *
- * The OS reader is swapped for a stub (STUDIO_PROC_IDENTITY_STUB, a pid -> start map) where a test needs a given
- * answer or a slow one (STUDIO_PROC_IDENTITY_DELAY_MS); every read is counted (STUDIO_PROC_IDENTITY_LOG). Under the
- * stub the listings take the Windows rule on any OS, so the Windows logic is tested everywhere. A sleeping node
- * stands in for the unrelated program.
+ * qa/selftest-pu17.mjs — agent stop checks the process at kill time, with no extra process calls on launch or in
+ * listings; a stop during start-up stops the launcher.
+ * A session record left "running" after a crash or reboot can name a process number the OS has since given to another
+ * program. The launcher writes down when each process started (in-process: the spawn time), and only the kill path asks
+ * the OS (once) the number's start time (harness/proc-identity.mjs).
+ * The OS reader is swapped for a stub (STUDIO_PROC_IDENTITY_STUB, a pid -> start map) where a test needs a given answer
+ * or a slow one (STUDIO_PROC_IDENTITY_DELAY_MS); every read is counted (STUDIO_PROC_IDENTITY_LOG). Under the stub the
+ * listings take the Windows rule on any OS. A sleeping node stands in for the unrelated program.
  */
 import fs from 'node:fs';
 import path from 'node:path';

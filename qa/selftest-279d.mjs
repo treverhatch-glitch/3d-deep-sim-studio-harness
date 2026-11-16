@@ -1,16 +1,14 @@
 /**
- * qa/selftest-279d.mjs — 2.79 (d): the 2.78.2 crew's harness bugs (request section 2, items 2, 7-14).
- *   2.2   `npm run agent -- start` runs the session in the background (--attach keeps it in the shell), prints pid and log.
- *   2.7   idle lane copies: the janitor's automatic run and `npm run lanes -- prune --idle <hours> [--dry-run]` remove the
- *         worktree of a copy nobody needs (branch kept); never one with a queued task, a claim, unsaved or unlanded work.
- *   2.8   `npm run lanes` with no arguments reads git's worktree files (no git process per copy); --full or a name reads all.
- *   2.9   the protected-step router reads the hand-back's structured field (meta.ownerStep), not the words of its note.
- *   2.10  an approval signed in a lane copy is logged in the main checkout's events (already fixed in 2.78.2; regression).
- *   2.11  `review <ID>` from main finds the task's lane branch when the current branch has no tagged commit.
- *   2.12  the divergence reference is built under <repo>/.studio/tmp, not the system temp folder.
- *   2.13  a Director's or reviewer's task with no type set (its title typed it "bug") skips the game's checks on notes only.
- *   2.14  the quarantine line never says "skipped" for a test config that ignores the list (already fixed in 2.78.2).
- * A tiny studio per check (a copy of the harness, git, lane copies made by the harness); no network.
+ * qa/selftest-279d.mjs — harness bugs a crew reported, each in a tiny studio (harness copy, git, lane copies); no
+ * network.
+ *   agent start  `npm run agent -- start` runs the session in the background (--attach keeps it in the shell), prints
+ *     pid and log
+ *   idle lanes  the janitor's run and `npm run lanes -- prune --idle <hours> [--dry-run]` remove the worktree of a copy
+ *     nobody needs (branch kept); never one with a queued task, a claim, unsaved or unlanded work
+ *   lanes  no arguments reads git's worktree files (no git process per copy); --full or a name reads all
+ *   router  the protected-step router reads the hand-back's meta.ownerStep, not its note's words
+ *   review  `review <ID>` from main finds the task's lane branch when the current branch has no tagged commit
+ *   divergence  the reference is built under <repo>/.studio/tmp
  */
 import fs from 'node:fs';
 import path from 'node:path';

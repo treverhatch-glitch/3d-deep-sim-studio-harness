@@ -1,16 +1,14 @@
 /**
- * qa/selftest-2653a.mjs — 2.65.3 (a), B-43: a red merge train takes too long to find the lane that broke it.
- *   The crew's 9-lane train ran one verify, then 6+ re-checks of about 10 min each, every one the whole game gate, in
- *   an order that looked random (prefixes of a reduced set, never said), with no word on what each decided or how long
- *   was left. Now: (a) re-checks run only the failing test files (STUDIO_GATE_FOCUS, honoured only by an --only run);
- *   (b) the red event and the log name the failing tests, each re-check says its question, a new round says what it is,
- *   and the current step is in .studio/train/<id>/status.json for npm run lanes and status --brief; (c) once a culprit
- *   is named, the green prefix before it is verified in full and landed (STUDIO_TRAIN_LAND_PREFIX, default on) and the
- *   lanes after it go in the next train, which runs right away; (d) each re-check line, the status file and the event
- *   meta carry an ETA from this train's own timings ("ETA unknown (no timing yet)" before any).
- * A tiny studio: a made-up game whose test check is a node script that runs game/demo/tests/*.test.mjs (or the files
- * it is given), fails a file whose name a note in game/demo/notes "BREAKS", prints vitest-style lines and logs every
- * file it runs (RAN_LOG), so which files each run touched can be seen; lane copies with the commit hooks installed.
+ * qa/selftest-2653a.mjs — a red merge train finds the lane that broke it quickly and says what it is doing.
+ * (a)  re-checks run only the failing test files (STUDIO_GATE_FOCUS, honoured only by an --only run).
+ * (b)  the red event and log name the failing tests, each re-check says its question, a new round says what it is,
+ *   and the current step is in .studio/train/<id>/status.json for npm run lanes and status --brief.
+ * (c)  once a culprit is named, the green prefix before it is verified in full and landed (STUDIO_TRAIN_LAND_PREFIX,
+ *   default on) and the lanes after it go in the next train, which runs right away.
+ * (d)  each re-check line, the status file and the event meta carry an ETA from this train's own timings ("ETA
+ *   unknown (no timing yet)" before any).
+ * A tiny studio: a test check script runs game/demo/tests/*.test.mjs, fails a file a note in game/demo/notes says
+ *   "BREAKS", and logs every file it runs (RAN_LOG).
  */
 import fs from 'node:fs';
 import path from 'node:path';

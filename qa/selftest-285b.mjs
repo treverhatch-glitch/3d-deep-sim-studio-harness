@@ -79,17 +79,12 @@ export async function selftest285B({ dir, root, report, tmpRoot }) {
     }
     return { R, GW, heads };
   };
-  // The land script stand-in. It records each run (sources and every variable the harness tells a land script), merges
-  // the sources into the gate worktree and judges the merged tree:
-  //   "<stage>-bad.txt" (edit, play) makes that stage red with the test name it holds ("rev:" + the name reversed, so the
-  //     name itself appears in no file a lane changes); "compile-bad.txt" holds a compiler error line.
-  //   <ctl>-flaky "N stage name": the next N runs fail in that stage on that test. <ctl>-kill "N code": the next N runs
-  //   exit with that code. <ctl>-cancel: writes the train's cancel file (the id from the train lock), then exits 77.
-  //   <ctl>-names: how a red names its tests: "out" (default, a dotnet line), "xml" (an NUnit 3 results file in the gate
-  //   worktree and a summary only) or "json" (a "failures" list in the stage report and a summary only).
-  //   <ctl>-compile: what STUDIO_LAND_ONLY=compile does: "honour" (default: merge, compile, put the tree back, exit 0 or
-  //   1 with the compiler line), "unknown" (exit 9: a code the land contract does not know) or "ignore" (land as usual).
-  // A red run puts the gate worktree back where it was, as a real land script does.
+  // The land script stand-in: records each run (sources and every variable the harness tells a land script), merges the
+  // sources into the gate worktree and judges the merged tree. "<stage>-bad.txt" (edit, play) makes that stage red with the
+  // test name it holds ("rev:" + the name reversed); "compile-bad.txt" holds a compiler error line. <ctl>-flaky "N stage
+  // name": the next N runs fail there; <ctl>-kill "N code": the next N exit with that code; <ctl>-cancel: writes the train's
+  // cancel file, exits 77. <ctl>-names: "out" (default), "xml" (NUnit 3 file) or "json" ("failures" list). <ctl>-compile
+  // (STUDIO_LAND_ONLY=compile): "honour" (default), "unknown" (exit 9) or "ignore". A red run restores the gate worktree.
   const landStub = path.join(T, 'land-stub.mjs');
   fs.writeFileSync(landStub, `import fs from 'node:fs'; import path from 'node:path';
 import { spawnSync } from 'node:child_process';

@@ -1,16 +1,14 @@
 /**
- * qa/selftest-266c.mjs — 2.66.0 (helper c): hand-back facts written by the harness, and the blocked-command log.
- *   1. The merge train hands back a made-up lane whose game check fails: the hand-off entry starts with the facts
- *      block (the lane's changed files, every gate with PASS/FAIL, the failure signature from the failing test line,
- *      the seed, the train's verify log), then the train's prose.
- *   2. `task pause` from a lane copy: facts first (committed, uncommitted and untracked files; the holder's own verify
- *      record and its gate log), the agent's prose after; the task.paused event carries the prose only; the next
- *      agent's brief shows the facts before the notes. A refused task done's gates reach the next hand-back.
- *   3. Claude Code's permission_denials, read at session end from the result line(s), land in .studio/denials.jsonl
- *      with secrets redacted; a result line without the field records nothing.
- *   4. `npm run denials` lists the top commands and the count per task; the digest lists the allowlist candidates and
- *      says they are never added automatically; no settings or permission file changes.
- * Made-up studio ("demo"), made-up ids and secrets. Each check fails on 2.65.2.
+ * qa/selftest-266c.mjs — hand-back facts written by the harness, and the blocked-command log (made-up studio "demo").
+ *   1. The merge train hands back a lane whose game check fails: the hand-off entry starts with the facts block
+ *     (changed files, every gate PASS/FAIL, the failure signature, the seed, the train's verify log), then the train's
+ *     prose.
+ *   2. `task pause` from a lane copy: facts first (committed, uncommitted, untracked files; the holder's verify record
+ *     and gate log), then the agent's prose; the task.paused event carries the prose only. A refused task done's gates
+ *     reach the next hand-back.
+ *   3. Claude Code's permission_denials, read at session end, land in .studio/denials.jsonl with secrets redacted.
+ *   4. `npm run denials` lists the top commands and the count per task; the digest lists allowlist candidates and says
+ *     they are never added automatically.
  */
 import fs from 'node:fs';
 import path from 'node:path';

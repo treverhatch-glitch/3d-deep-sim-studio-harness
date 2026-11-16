@@ -1,21 +1,12 @@
 /**
- * qa/selftest-2711b.mjs — 2.71.1 (helper B): process hygiene against the red team's attacks (verifier report 2026-11-03).
- *   env        a gate's children run without code-loading NODE_OPTIONS (a memory flag stays), npm's node-options and
- *              GIT_DIR, with GIT_NO_REPLACE_OBJECTS=1 (S03); a verify started with a preload says so (T06).
- *   git        replace refs or a grafts file fail the protected check (G10/G16/T01); a clean repo passes.
- *   paths      a protected file under a non-ASCII folder and a case variant of a protected path are listed (G14, W01);
- *              the lane diff names non-ASCII paths unquoted; an unprotected file is not listed.
- *   lock       `lock release --owner alice` by bob (STUDIO_LOCK_OWNER=bob) is refused naming alice (K01); alice
- *              releases her own; a lock whose holder's session ended can be released.
- *   output     a gate that floods shows its first and last STUDIO_GATE_OUTPUT_LINES lines, the whole log on disk (L01);
- *              its lines shaped like `[gates] Fix:` / `[gates] PASS` / `[verify]` are shown as `| [gates] ...` (I01);
- *              a short passing gate's output is unchanged.
- *   sessions   the launcher's session end names the session's task (from its record, else its last claim); tokens
- *              --by task and the cost card count tokens per landed task.
- *   modules    node_modules that don't match package-lock.json (a version, a shim in .bin) are named (S04).
- *   rollback   `upgrade --rollback --by <person>` reverts the last update's merge, keeps later work and the branches,
- *              records an event and a decision; refused with an uncommitted board change.
- * Made-up studios in temp folders; no network.
+ * qa/selftest-2711b.mjs — process hygiene: gate environment, git tricks, protected paths, locks, output, rollback.
+ * env  a gate's children run without code-loading NODE_OPTIONS (a memory flag stays), npm's node-options and GIT_DIR.
+ * git  replace refs or a grafts file fail the protected check; non-ASCII and case-variant protected paths are listed.
+ * lock  `lock release --owner alice` by bob is refused; a lock whose holder's session ended can be released.
+ * output  a flooding gate shows its first and last STUDIO_GATE_OUTPUT_LINES lines (whole log on disk); `[gates] Fix:`
+ *   lines are shown as `| [gates] ...`.
+ * more  modules not matching package-lock.json are named; `upgrade --rollback --by <person>` reverts the last merge,
+ *   keeps later work, refused with an uncommitted board change.
  */
 import fs from 'node:fs';
 import path from 'node:path';

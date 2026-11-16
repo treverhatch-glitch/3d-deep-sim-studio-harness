@@ -1,12 +1,9 @@
 #!/usr/bin/env node
 /**
- * qa/browser.adapter.mjs — Unified `?playtest=1` adapter. The game exposes its playtest API on
- * `window.__sim` (or another global named by PLAYTEST_GLOBAL, for games that already use one).
- *
- * Bridges automated QA and agents directly to the simulation state (following the
- * Recursive Game Creator closed-loop pattern and OhMyGame open-loop critique:
- * agents inspect and step simulation state directly rather than blindly clicking GUI pixels).
- *
+ * qa/browser.adapter.mjs — Unified `?playtest=1` adapter. The game exposes its playtest API on `window.__sim` (or
+ * another global named by PLAYTEST_GLOBAL, for games that already use one).
+ * Bridges automated QA and agents directly to the simulation state: agents inspect and step simulation state directly
+ * rather than blindly clicking GUI pixels.
  * Supports:
  *   1. Browser-mounted `window.__sim` (or PLAYTEST_GLOBAL) when running with `?playtest=1`
  *   2. Headless Node cartridge (`cartridges/example-sim/index.mjs`)

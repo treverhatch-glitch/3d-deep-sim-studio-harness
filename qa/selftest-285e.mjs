@@ -1,15 +1,14 @@
 /**
- * qa/selftest-285e.mjs — 2.85 (e): six things a crew's overseer had to do by hand in its first 16 hours on 2.84.
- *
- *   1  the web train starts itself: an agent's `train auto off` lapses; why no train starts is said once per reason and in
- *      `train status`; it runs beside an engine land when RAM allows; tier C lanes are named with the one command
+ * qa/selftest-285e.mjs — six things an overseer had to do by hand. Every model call goes to a stand-in; every train
+ * start to a stand-in starter. No network.
+ *   1  the web train starts itself: an agent's `train auto off` lapses; why no train starts is said once per reason and
+ *     in `train status`; it runs beside an engine land when RAM allows; tier C lanes are named with the one command
  *   2  "everything is blocked" does not fire while an engine train, an engine land or a rules check runs
- *   3  `studio:reload-env` names the settings the harness no longer reads on every path (one line, the event, the answer)
+ *   3  `studio:reload-env` names the settings the harness no longer reads on every path (one line, the event, the
+ *     answer)
  *   4  a model's review carries its verdict: asked first, a larger output limit, one verdict-only follow-up
  *   5  a board command from a lane copy is not reported as a hand edit; a real edit still is, once
  *   6  unstamped commits from a harness release merged by a plain `git merge` get the one command that lists them
- *
- * Every model call goes to a stand-in; every train start to a stand-in starter. No network.
  */
 import fs from 'node:fs';
 import path from 'node:path';

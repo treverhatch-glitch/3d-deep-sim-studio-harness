@@ -1,26 +1,15 @@
 #!/usr/bin/env node
 /**
- * qa/tester-drive.mjs — 2.79 (t): the game tester's hands. A small CLI the tester agent calls one step at a time to play
- * the real build in a real browser (Playwright through qa/chromium.mjs launchChromium). The browser stays open between
- * calls: the first `serve` or `open` starts a background driver (a node process of its own, no window; its port, token
- * and pid in <run>/driver.json) that `close`, or STUDIO_TESTER_DRIVER_IDLE_MIN (20) minutes without a command, ends.
- *
- *   node qa/tester-drive.mjs serve [--dist <folder>]          serve the build (default: the run's dist/)
- *   node qa/tester-drive.mjs open [--query "<q>"] [--path <page>] [--url <url>] [--width 1280 --height 720]
- *   node qa/tester-drive.mjs click --testid <id> | --text "<label>" | --xy <x>,<y>
- *   node qa/tester-drive.mjs key <Key> [--times <n>]
- *   node qa/tester-drive.mjs drag --from <x>,<y> --to <x>,<y>
- *   node qa/tester-drive.mjs wait <ms> | --testid <id>
- *   node qa/tester-drive.mjs shot <name>                      <run>/shots/<name>.png
- *   node qa/tester-drive.mjs console                          page errors and console errors since the page opened
- *   node qa/tester-drive.mjs state                            window.__sim / window.__view, when the game exposes them
- *   node qa/tester-drive.mjs close
- *   node qa/tester-drive.mjs replay <actions.jsonl> [--to <step>] [--out <folder>]   replay a run to a step, screenshot it
- *
- * The run folder: --run <dir>, else STUDIO_TESTER_RUN_DIR, else the run going (.studio/tester/state.json, written by
- * harness/tester.mjs). Every action is appended with its step number and time to <run>/actions.jsonl; `replay` re-runs
- * the acting steps (open, click, key, drag, wait, shot) in a fresh browser up to --to and saves replay-<step>.png: the
- * repro a bug task carries.
+ * qa/tester-drive.mjs — the game tester's hands: a CLI to play the real build in a browser one step at a time.
+ * Playwright via qa/chromium.mjs launchChromium. The first `serve` or `open` starts a background driver (own node process,
+ * no window; port, token, pid in <run>/driver.json) that `close` or STUDIO_TESTER_DRIVER_IDLE_MIN (20) idle ends.
+ *   node qa/tester-drive.mjs serve [--dist <dir>] | open [--query <q>] [--path <page>] [--url <url>] [--width W]
+ *   node qa/tester-drive.mjs click --testid <id> | --text "<label>" | --xy <x>,<y>  |  key <Key> [--times <n>]
+ *   node qa/tester-drive.mjs drag --from <x>,<y> --to <x>,<y> | wait <ms> | shot <name> | console | state | close
+ *   node qa/tester-drive.mjs replay <actions.jsonl> [--to <step>] [--out <folder>]
+ * Run folder: --run <dir>, else STUDIO_TESTER_RUN_DIR, else .studio/tester/state.json. Actions go to
+ *   <run>/actions.jsonl, shots to <run>/shots/<name>.png; `replay` re-runs the acting steps and saves
+ *   replay-<step>.png.
  */
 import fs from 'node:fs';
 import http from 'node:http';

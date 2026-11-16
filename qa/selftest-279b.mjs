@@ -1,15 +1,14 @@
 /**
- * qa/selftest-279b.mjs — 2.79 (b): the 2.78.2 train and lane-copy regressions.
- *   - A queued lane keeps its copy when its session ends (agent.mjs dropCopies); an unqueued one is removed as before.
- *   - Nothing writes .lanes/<name>/.studio after the copy is gone (event.mjs boardRoot / STUDIO_STATE_DIR resolve <main>).
- *   - A lane folder with no .git is not a copy: laneNow says so (never "on main"), the train moves the folder to
- *     .studio/lane-leftovers/ and makes the copy again from the lane's branch.
+ * qa/selftest-279b.mjs — train and lane-copy regressions; a tiny studio (git repo from the harness copy) with
+ * harness-made lane copies.
+ *   - A queued lane keeps its copy when its session ends; an unqueued one is removed.
+ *   - Nothing writes .lanes/<name>/.studio after the copy is gone.
+ *   - A lane folder with no .git is not a copy: laneNow says so (never "on main"); the train moves it to
+ *     .studio/lane-leftovers/ and remakes the copy from the lane's branch.
  *   - Hand-backs the train tags infra (meta.handBackCause) never count toward STUDIO_TRAIN_MAX_HANDBACKS.
- *   - `train auto off` stops every automatic train start (task done's kick, the speculative train, the daemon's pass); a
- *     person's own `task train` still runs.
- *   - The queue write retries a rename that Windows (or anything) refuses for a moment (EPERM/EBUSY).
- *   - A record whose pid is now another program's (a different start identity) is not alive.
- * A tiny studio (a git repo made from the harness copy) with lane copies made by the harness, as selftest-2782a.
+ *   - `train auto off` stops every automatic train start (task done's kick, the speculative train, the daemon's pass);
+ *     a person's `task train` still runs.
+ *   - The queue write retries a rename refused for a moment (EPERM/EBUSY).
  */
 import fs from 'node:fs';
 import path from 'node:path';

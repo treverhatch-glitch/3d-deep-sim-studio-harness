@@ -1,16 +1,14 @@
 /**
- * qa/selftest-259e.mjs — 2.59.0, from the crew's final brief of 2026-11-01 (items #15, #14, #8):
- *   #15 `npm run studio:resume -- --by <name> [--why …]` clears a halted supervisor the way the War Room's "Fixed it: try
- *       again" does (no hub token), records who and why (supervisor.resumed meta.by), refuses agents' names and launched
- *       sessions, and does nothing when the supervisor isn't halted. STUDIO_RESUME_BY (off by default) narrows who may.
- *   #14 STUDIO_KEYMAP_<ROLE> / STUDIO_KEYMAP_AGENT_<NAME> give one launched child a key under another name (agent beats
- *       role); names are logged, values never (log, events, session record, kickoff); names that aren't key names are
- *       refused, a pasted key is never echoed, and a mapping set inside a launched session (not in .env) is refused.
- *   #8  the launcher no longer holds a too-broad lane (a game's folder or source root, lock.mjs tooBroad) as a 6-hour
- *       session lock: in a lane copy it starts without that lock; in the main checkout it refuses and says how to
- *       narrow the lane, unless a person kept that lane wide (task add --lane … --wide "<why>" --by <name>).
- * The launches use a stand-in agent (a node script given as STUDIO_BUILDER_CMD) that records booleans and lock keys,
- * never a key's value. The made-up key values below are looked for where they must not be.
+ * qa/selftest-259e.mjs — three launcher and supervisor behaviours; launches use a stand-in agent (STUDIO_BUILDER_CMD)
+ * that records booleans, never a key's value.
+ *   resume  `npm run studio:resume -- --by <name> [--why …]` clears a halted supervisor (no hub token), records who and
+ *     why (supervisor.resumed meta.by), refuses agents' names and launched sessions; STUDIO_RESUME_BY (off by default)
+ *     narrows who may
+ *   keymap  STUDIO_KEYMAP_<ROLE> / STUDIO_KEYMAP_AGENT_<NAME> give one launched child a key under another name (agent
+ *     beats role); names are logged, values never; non-key names are refused, a pasted key is never echoed, a mapping
+ *     set inside a launched session is refused
+ *   broad  the launcher doesn't hold a too-broad lane (lock.mjs tooBroad) as a 6-hour lock: a lane copy starts without
+ *     it; the main checkout refuses unless a person kept it wide (task add --lane … --wide "<why>" --by <name>)
  */
 import fs from 'node:fs';
 import path from 'node:path';

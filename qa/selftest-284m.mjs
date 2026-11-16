@@ -1,18 +1,14 @@
 /**
- * qa/selftest-284m.mjs — 2.84 (m): three faults from the first 100 minutes of a native-engine studio on 2.83.
- *
- *   merge    at launch the harness merges the engine's target into the task's engine worktree and, on a conflict, aborts
- *            and told the session to run `git -C <dir> merge <target>`, which a launched session may not run. Three
- *            sessions in a row on each of three tasks handed back "the merge needs a person". Now `npm run engine --
- *            merge <ID>` (harness/engine-tracks.mjs engineTargetMerge) leaves the conflict in the task's own worktree
- *            for the session to resolve, and a launch that meets the same conflict with no new commit since parks once
- *            instead of starting another session.
- *   phantom  a tracked file a `.gitattributes` filter rule makes look modified in every checkout refused `task done`
- *            ("1 uncommitted file(s) ... commit them first"). Now such a file (bytes = the committed blob) is left out of
- *            the dirty lists and named once (harness/eol-only.mjs splitPhantom).
- *   ignore   two branches that changed Play Mode tests and UI files forced the whole batch to the full rules command
- *            (28.5 minutes). Now rules.focus.ignore (and play.focus.ignore) leaves such paths out of the mapping.
- * Each check fails before this change.
+ * qa/selftest-284m.mjs — three faults of a native-engine studio: engine-target merge, phantom-modified files, focus ignore.
+ * merge  at launch the harness merges the engine's target into the task's engine worktree; on a conflict, `npm run
+ *   engine -- merge <ID>` (harness/engine-tracks.mjs engineTargetMerge) leaves it in the task's own worktree for the
+ *   session to resolve, and a launch meeting the same conflict with no new commit parks once instead of starting
+ *   another session.
+ * phantom  a tracked file a `.gitattributes` filter makes look modified in every checkout (bytes = the committed
+ *   blob) is left out of the dirty lists and named once (harness/eol-only.mjs splitPhantom), so `task done` isn't
+ *   refused.
+ * ignore  rules.focus.ignore (and play.focus.ignore) leaves Play Mode test and UI paths out of the mapping, so they
+ *   don't force the full rules command.
  */
 import fs from 'node:fs';
 import path from 'node:path';

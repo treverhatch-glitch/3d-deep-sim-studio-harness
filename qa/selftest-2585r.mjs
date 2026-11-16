@@ -1,20 +1,14 @@
 /**
- * qa/selftest-2585r.mjs — 2.58.5 launcher fixes from the crew's 2026-11-01 report (H-9, H-2, H-2b, H-1, H-8).
- *   H-9:  a custom tool command (STUDIO_TOOL_CLAUDE_CMD) on a laneless code task runs in its own lane copy, like the
- *         built-in claude argv, and its line can use {mainRoot} and {addDirs}; {addDirs} fills one argument per item.
- *   H-2:  agy gets its kickoff on stdin, not as a `-p <prompt>` argument that agy.exe split at its spaces
- *         ("unexpected argument "are""); STUDIO_AGY_PROMPT=arg brings -p back.
- *   H-2b: `npm run agent -- allow agy` writes exactly the owner's approved set (node, npm, npx, git status, diff, add,
- *         commit, log); --all writes the whole harness list; --prune takes extra harness rules back out.
- *   H-1:  a nim session never runs the role's model; the default is no longer the end-of-life model; a 410/404 for the
- *         model gives one clear launcher line and an event.
- *   H-8:  the NIM key reaches aider even when a .env (the template's empty OPENAI_API_KEY=) is loaded over the
- *         environment, as aider does; any other-cased OPENAI_ name is dropped (one variable on Windows); aider runs with
- *         --no-auto-commits.
- * Stand-in programs first on PATH (POSIX: a node script with a shebang; Windows: a .cmd wrapper, UNTESTED here). The
- * stand-in agy re-splits its arguments at whitespace, as agy.exe did on the crew's Windows PC; the stand-in aider loads
- * .env from its folder over its environment and then applies AIDER_OPENAI_API_KEY, as aider's docs describe. No real
- * tool, key or network is used; the stand-ins record booleans about the key, never a value.
+ * qa/selftest-2585r.mjs — launcher fixes: custom tool commands, agy kickoff and allow-list, nim model, aider key.
+ *   custom cmd  a STUDIO_TOOL_CLAUDE_CMD command on a laneless code task runs in its own lane copy; its line can use
+ *     {mainRoot} and {addDirs} ({addDirs} fills one argument per item)
+ *   agy  kickoff on stdin, not a `-p <prompt>` argument agy.exe split at spaces; STUDIO_AGY_PROMPT=arg brings -p back
+ *   allow  `npm run agent -- allow agy` writes exactly the approved set (node, npm, npx, git status, diff, add, commit,
+ *     log); --all writes the whole harness list; --prune takes extras back out
+ *   nim  never runs the role's model; a 410/404 gives one launcher line and an event
+ *   aider  the NIM key reaches aider even with a .env (empty OPENAI_API_KEY=) loaded over the environment; other-cased
+ *     OPENAI_ names are dropped; runs with --no-auto-commits
+ * Stand-ins first on PATH (POSIX node script; Windows .cmd wrapper, UNTESTED here); no real tool, key or network.
  */
 import fs from 'node:fs';
 import path from 'node:path';

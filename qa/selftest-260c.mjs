@@ -1,17 +1,12 @@
 /**
- * qa/selftest-260c.mjs — 2.60.0 (#3, #4): the upgrade path for an orchestrator, and the hooks gate vs an unmerged
- * harness ref.
- *
- * #3: `npm run upgrade -- --snapshot` didn't exist on the old main (it arrives with the upgrade); the documented merge
- * was refused by the main-checkout guard, so the orchestrator used the raw STUDIO_MAIN_COMMIT=allow override; a bundle
- * merge that brings goldens needs a Golden-Reason; an old stash's board rows had no helper. Now: a bootstrap one-liner
- * runs the new guard from the ref (and the guard finds the studio by git, not by its own folder); `--merge <ref> --by
- * <person> [--permission]` backs up, merges through the hooks with the guard opened for exactly that merge, and records
- * who and on whose permission; `--restore-stash <sha>` keeps both sides' rows and never drops.
- * #4: STUDIO_HARNESS_REF=<remote>/<branch> exempts the harness branch's own commits, as the remote has them.
- *
- * Fixture: the copied harness is the harness repo (H), a bare clone is its remote, the studio (S) is a clone of that
- * remote with the hooks installed and one lane copy (so the main-checkout guard is on). No network.
+ * qa/selftest-260c.mjs — the upgrade path for an orchestrator, and the hooks gate vs an unmerged harness ref.
+ * A bootstrap one-liner runs the new guard from the ref (the guard finds the studio by git, not by its own folder);
+ *   `--merge <ref> --by <person> [--permission]` backs up, merges through the hooks with the guard opened for exactly
+ *   that merge, and records who and on whose permission (a bundle merge that brings goldens needs a Golden-Reason);
+ *   `--restore-stash <sha>` keeps both sides' rows and never drops. STUDIO_HARNESS_REF=<remote>/<branch> exempts the
+ *   harness branch's own commits, as the remote has them.
+ * Fixture: the copied harness is the harness repo (H), a bare clone is its remote, the studio (S) is a clone of it
+ *   with the hooks installed and one lane copy (so the main-checkout guard is on). No network.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,20 +1,13 @@
 /**
- * qa/selftest-272b.mjs — 2.72.0 (helper b): the purity ratchet, must-fail canaries for game checks, the two-round cap.
- *   ratchet   `npm run purity -- baseline --write --by <person>` records a made-up cartridge's standing purity hits
- *             (keys: file + rule + source line, not line numbers); the purity check then passes on them, still passes
- *             after the code moves, fails on ONE new hit and prints only it (Fix line: the ratchet's); a fixed hit
- *             shrinks the baseline (committed), and coming back it fails; a worker, a coding agent without a person's
- *             words, and a lane copy can't grow it; in a lane a hit the lane added to its own baseline still fails;
- *             the train's tier for a lane that grows it is C ("ratchet-grow"), for one that shrinks it not.
- *   ratchet check  a game check with "ratchet": true and a baseline section fails only on new hits; a crash with no
- *             hit line still fails.
- *   canaries  `npm run gates -- --canaries`: a check whose canary makes it fail is proven (command and fixture), one
- *             that stays green is silently green (event, digest line, one task in studio/HARNESS-TASKS.md), one with
- *             no canary unproven; exit 1. The slow tier runs them too.
- *   round cap two full verifies red on the same sub-id + first FAIL line hand the task back with the summary and the
- *             restart note; a third attempt in the session (task start, verify) is refused; another signature, a green
- *             between, STUDIO_ROUND_CAP=0 or a new session don't cap; a train hand-back counts as a round.
- * Made-up games in temp folders; no network.
+ * qa/selftest-272b.mjs — the purity ratchet, must-fail canaries for game checks, the two-round cap.
+ * ratchet  `npm run purity -- baseline --write --by <person>` records standing hits (file + rule + source line); the
+ *   check fails on ONE new hit and prints only it; a worker, an agent without a person's words, or a lane copy can't
+ *   grow the baseline; the train's tier for growing it is C ("ratchet-grow"). A game check with "ratchet": true fails
+ *   only on new hits.
+ * canaries  `npm run gates -- --canaries`: a check whose canary makes it fail is proven; one that stays green is
+ *   silently green (event, digest line, a task in studio/HARNESS-TASKS.md); none is unproven; exit 1.
+ * round cap  two full verifies red on the same sub-id + first FAIL line hand the task back; a third attempt in the
+ *   session is refused; STUDIO_ROUND_CAP=0 or a new session don't cap.
  */
 import fs from 'node:fs';
 import path from 'node:path';

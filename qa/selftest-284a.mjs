@@ -1,17 +1,13 @@
 /**
- * qa/selftest-284a.mjs — 2.84 (a): a planning wake needs something that changed.
- *
- * In one crew's 26 hours the Director's regular cycle and the Producer's "queue is below its depth target" wake started
- * 83 sessions that left almost nothing on the board. harness/wake-gate.mjs fingerprints each of the two kinds of wake
- * and skips one whose situation did not change after a session that changed nothing, up to a ceiling; a cycle's brief
- * opens with what changed; a planning session's end records its board events; the scorecard counts both; and the
- * launcher no longer starts a session for a task whose `task start` would be refused.
- *
- *   pure       fingerprint, digest, verdict, outcome (inputs in, verdict out)
- *   queue      the real queueDepthPass with a stand-in wake: first, same, change, ceiling, off
- *   cycle      the real cyclePass with a stand-in wake: first, quiet, news (in the brief), ceiling, off
- *   score      the two planning lines
- *   launcher   a parked task: no session, task start's words, agent.start.refused
+ * qa/selftest-284a.mjs — a planning wake needs something that changed (harness/wake-gate.mjs).
+ * harness/wake-gate.mjs fingerprints the Director's regular cycle and the Producer's "queue is below its depth
+ *   target" wake and skips one whose situation did not change after a session that changed nothing, up to a ceiling;
+ *   a cycle's brief opens with what changed; a planning session's end records its board events; the scorecard counts
+ *   both; the launcher starts no session for a task whose `task start` would be refused.
+ * pure  fingerprint, digest, verdict, outcome. queue: the real queueDepthPass with a stand-in wake (first, same,
+ *   change, ceiling, off).
+ * cycle  the real cyclePass (first, quiet, news in the brief, ceiling, off). score: the two planning lines.
+ * launcher  a parked task: no session, task start's words, agent.start.refused.
  */
 import fs from 'node:fs';
 import path from 'node:path';

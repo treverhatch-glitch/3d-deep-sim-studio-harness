@@ -1,15 +1,13 @@
 /**
- * qa/selftest-2791b.mjs — 2.79.1 (b): the Line Producer never freezes the line, plans for engine lands, and the boost says
- * when it ends.
- *   freeze    a parked chain-breaker pages the orchestrator once and the line keeps filling; lane-less ready tasks are
- *             skipped while other work can run (the Producer is asked once); the chain-breaker verify hold ends when its
- *             train runs and never lasts past STUDIO_LINE_HOLD_MAX_MIN
- *   engine    a queued or near engine land holds new verifies (not the running ones, not the land), steps the builder
- *             target down one at a time, is released at once when the land holds its slot, is bounded by
- *             STUDIO_ENGINE_HOLD_MAX_MIN and reports why when it runs out; nothing is held without a land; the land's
- *             floor is learned from the peaks of its green runs
- *   boost     MAX SPEED saying so when it expires; `--until <time>` and `--until off`
- * A temp copy of the studio per check; probe scripts run in it. Each check fails on 2.79.0.
+ * qa/selftest-2791b.mjs — the Line Producer never freezes the line, plans for engine lands, and the boost says when it ends.
+ * freeze  a parked chain-breaker pages the orchestrator once and the line keeps filling; lane-less ready tasks are
+ *   skipped while other work can run; the chain-breaker verify hold ends when its train runs and never lasts past
+ *   STUDIO_LINE_HOLD_MAX_MIN.
+ * engine  a queued or near engine land holds new verifies (not running ones, not the land), steps the builder target
+ *   down one at a time, is released when the land holds its slot, is bounded by STUDIO_ENGINE_HOLD_MAX_MIN and
+ *   reports why when it runs out; nothing is held without a land; the land's floor is learned from its green runs'
+ *   peaks.
+ * boost  MAX SPEED says so when it expires; `--until <time>` and `--until off`. A temp copy of the studio per check.
  */
 import fs from 'node:fs';
 import path from 'node:path';

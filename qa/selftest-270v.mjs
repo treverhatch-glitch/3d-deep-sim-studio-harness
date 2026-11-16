@@ -1,19 +1,14 @@
 /**
- * qa/selftest-270v.mjs — 2.70.0 (v): a vision check on asset previews before an asset lands (harness/asset-review.mjs).
- *   1. the preview checks (pure Node, generated PNGs): blank, all-black, all-white, untextured magenta, clipped at the
- *      frame's edge and too small each fail the asset gate with a plain-words line and a Fix line; a good preview
- *      passes with its numbers recorded; a top-heavy front and 3/4 view is a warning, not a failure;
- *   2. thresholds come from studio/asset-review.json, and a lane changing that file is tier C (a silencer);
- *   3. task done on a passing asset writes ONE review request (.studio/asset-reviews/<asset>.md: previews, the brief's
- *      facts, the numbers, the four questions) and files ONE asset-review task for the art-director, and refuses until
- *      it is answered; a second task done files no second task; status --brief and the digest list the waiting assets
- *      oldest first;
- *   4. who answers: the maker can't pass its own review; a worker can't record a person's verdict without their words;
- *      another agent can, and then task done lands the asset and files its "Wire in" task; a re-export asks again;
- *      the owner's delegation for asset-review covers the outside agent;
- *   5. a failed review files a fix task with the reviewer's words, and task done names them;
- *   6. a hard preview failure at task done hands the asset straight back with the findings: no request, no review task.
- * Fixtures (tiny .glb files and generated PNGs) are written by the test; no binary file is committed.
+ * qa/selftest-270v.mjs — a vision check on asset previews before an asset lands (harness/asset-review.mjs).
+ * 1.  preview checks (generated PNGs): blank, all-black, all-white, untextured magenta, clipped and too small fail
+ *   the asset gate with a plain-words and a Fix line; a good preview passes; a top-heavy view only warns.
+ * 2.  thresholds are in studio/asset-review.json; a lane changing it is tier C. 3. task done on a passing asset
+ *   writes ONE request (.studio/asset-reviews/<asset>.md) and files ONE asset-review task for the art-director,
+ *   refusing until answered; status --brief and the digest list waiting assets.
+ * 4.  the maker can't pass its own review; a worker can't record a person's verdict without their words; another
+ *   agent can, then task done lands the asset and files its "Wire in" task; a re-export asks again.
+ * 5.  a failed review files a fix task with the reviewer's words; a hard preview failure hands the asset back with no
+ *   request.
  */
 import fs from 'node:fs';
 import path from 'node:path';

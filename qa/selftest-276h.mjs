@@ -1,21 +1,14 @@
 /**
- * qa/selftest-276h.mjs — 2.76.0 (helper h): the merge train.
- *   B-85    files the game's own build/test scripts write (git-ignored unpacked art, a .tsbuild/ folder, .vite-cache) no
- *           longer make a verify "dirty": the ignored files a verify's checks wrote are remembered as output, a
- *           "generated" glob (the game's studio.gates.json) names more, an ignored folder of harmless files is judged by
- *           its files; and a train verify whose gates are all green and whose only "dirt" is ignored non-config files is
- *           green with a trust note, never a hand-back. The other side (2.71.1) still holds: an untracked vitest.config,
- *           a config-like name under a "generated" glob, a generated file edited by hand and an ignored root .npmrc keep
- *           a verify dirty, and the train hands such a lane back.
- *   B-88    a train records its end on every exit path it can see (an exception in a step, an unhandled rejection, a
- *           signal), and a train whose process is gone is found (the next train, the daemon's pass): task.train.died with
- *           "died: <last step>", its status and lock cleared, its lanes kept moving.
- *   W-0081  a queued lane whose copy is missing is recreated from its branch, not handed back.
- *   beta    in beta mode the hand-back cap holds the lane for the beta actors (orchestrator, Producer) and files ONE
- *           Producer rescue task, never "a person looks"; infrastructure hand-backs (a missing copy, a CRLF/hash
- *           mismatch, a re-queue, a dead train, a timeout-only red) never count toward the cap and a release survives
- *           them for the same commit.
- *   B-91/92 a lane carrying another open task's commits (Studio-Task trailer) is refused before its verify, naming them.
+ * qa/selftest-276h.mjs — the merge train.
+ *   ignored output  files the game's scripts write (git-ignored art, .tsbuild/, .vite-cache) don't make a verify
+ *     "dirty"; a "generated" glob (studio.gates.json) names more; an untracked vitest.config, a config-like name under
+ *     "generated", a hand-edited generated file and an ignored root .npmrc keep it dirty
+ *   death  a train records its end on every exit path; a train whose process is gone is found: task.train.died with
+ *     "died: <last step>", status and lock cleared
+ *   copy  a queued lane whose copy is missing is recreated from its branch, not handed back
+ *   beta  the hand-back cap holds the lane for the beta actors and files ONE Producer rescue task; infrastructure
+ *     hand-backs (missing copy, CRLF/hash mismatch, re-queue, dead train, timeout-only red) never count
+ *   mixed  a lane carrying another open task's commits (Studio-Task trailer) is refused before its verify
  */
 import fs from 'node:fs';
 import path from 'node:path';

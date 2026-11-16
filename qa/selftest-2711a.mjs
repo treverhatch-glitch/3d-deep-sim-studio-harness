@@ -1,18 +1,14 @@
 /**
- * qa/selftest-2711a.mjs — 2.71.1 (A): the red team's holes in the protection gates, each attack shown caught with a clean
- * change beside it that stays green.
- *   1. Gate runners (A01b/A01d/A03): a lane that neuters qa/check-golden.mjs or the cartridge loader fails the protected gate.
- *   2. Test toolchain (H03/H04/S02): a game's vitest/vite config, the setup file it names, an .npmrc and the test script in
- *      its package.json are protected (the setup file and the script also make a lane tier C in the train); a new
- *      dependency is not.
- *   3. Weakened tests (H10/H13): skipIf on CI, an early return on CI, a shadowed or proxied expect are flagged; a new
- *      test that runs on one OS only (runIf) is not.
- *   4. Env overrides in a lane (A01b, A09, A16, G12): STUDIO_WEAKENED_TESTS=off, STUDIO_PROTECT_BASE, STUDIO_PROTECT_ROOT
- *      and STUDIO_MAIN_ROOT naming the lane itself are ignored there (and said so); the main checkout keeps them.
- *   5. Verify records (D01/T04, G15/T02): a hand-written record, an edited one and one from a verify beside an untracked
- *      config are not reused by the train; an honest one (build output ignored beside it) is.
- *   6. Golden re-record (A13): a lane that re-records a golden on its own Golden-Reason is tier C.
- * The words the weakened-test gate looks for are put together at run time, so this file never trips it.
+ * qa/selftest-2711a.mjs — holes in the protection gates, each attack shown caught with a clean change beside it that
+ * stays green.
+ *   1. A lane that neuters qa/check-golden.mjs or the cartridge loader fails the protected gate.
+ *   2. A game's vitest/vite config, setup file, .npmrc and package.json test script are protected. 3. Weakened tests
+ *     (skipIf on CI, early return on CI, shadowed or proxied expect) are flagged; runIf (one OS) is not.
+ *   4. In a lane STUDIO_WEAKENED_TESTS=off, STUDIO_PROTECT_BASE, STUDIO_PROTECT_ROOT, STUDIO_MAIN_ROOT are ignored;
+ *     the main checkout keeps them.
+ *   5. A hand-written, edited, or untracked-config verify record is not reused by the train. 6. A lane that re-records
+ *     a golden on its own Golden-Reason is tier C.
+ * The words the weakened-test gate looks for are put together at run time.
  */
 import fs from 'node:fs';
 import path from 'node:path';

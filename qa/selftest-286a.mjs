@@ -1,16 +1,14 @@
 /**
- * qa/selftest-286a.mjs — 2.86 (a, B-139): new harness code takes effect after an upgrade.
- *
- *   1  the code stamp: the installed version and HEAD (read from .git without git), the harness/ tree; a board-only commit
- *      is not new code
- *   2  a supervisor on old code says so once and hands over to exactly one successor with the same options; its halt, end
- *      time and agents carry over; a running session's record is untouched and still running; never two at once
- *   3  with STUDIO_SUPERVISOR_SELF_RESTART=off (or in a terminal, or an old systemd unit) it warns once and keeps running
- *   4  `upgrade --merge` with a board writer running commits the board itself through the hooks (stamped, accepted by the
- *      hooks gate) under the board lock, and ends naming the supervisor still on the old code
+ * qa/selftest-286a.mjs — new harness code takes effect after an upgrade. Stand-in supervisors, injected clocks; no
+ * network.
+ *   1  the code stamp: the installed version and HEAD (read from .git without git), harness/ tree; a board-only commit
+ *     is not new code
+ *   2  a supervisor on old code says so once and hands over to exactly one successor with the same options; its halt,
+ *     end time and agents carry over; never two at once
+ *   3  with STUDIO_SUPERVISOR_SELF_RESTART=off (or in a terminal) it warns once and keeps running
+ *   4  `upgrade --merge` with a board writer running commits the board itself through the hooks under the board lock,
+ *     and ends naming the supervisor still on the old code
  *   5  `npm run harness-health` and `npm run studio:status` show "supervisor runs <old>, installed <new>"
- *
- * Stand-ins for every spawn of a supervisor; no real waits (injected clocks and alive checks). No network.
  */
 import fs from 'node:fs';
 import path from 'node:path';

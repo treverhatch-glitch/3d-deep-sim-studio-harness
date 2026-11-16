@@ -1,17 +1,14 @@
 /**
- * qa/selftest-286f.mjs — 2.86 (f): an engine task's worktree should not cost the whole engine project, and the disk must
- * not fill silently (harness/engine-worktree.mjs, engine-tracks.mjs engineLaunch / merge / lane --full, engine-clean.mjs
- * laneRemoval, machine.mjs disk watch).
- *
- *   sparse     a listed role's worktree holds only the sparse folders and the repo's top files; another role's is full;
- *              its brief says so; git too old: full with one line
- *   merge      the target merges into a sparse worktree with a change outside the folders; a conflict outside them says
- *              how to widen; `npm run engine -- lane <ID> --full` fills it
- *   removal    a done or dropped task's worktree goes (branch kept); in progress, queued and uncommitted work keep it
- *   disk       one machine.disk_low a day under STUDIO_DISK_WARN_GB naming the biggest users; STUDIO_DISK_MIN_FREE_GB stops
- *   atomic     a failed creation leaves no folder, no registration and no branch
- *
- * Small throwaway git repos only (a made-up engine repo: Art/, Rules/, tools/tests/, docs/).
+ * qa/selftest-286f.mjs — an engine task's worktree doesn't cost the whole engine project, and the disk doesn't fill silently.
+ * sparse  a listed role's worktree holds only the sparse folders and the repo's top files
+ *   (harness/engine-worktree.mjs); another role's is full; its brief says so; git too old: full with one line.
+ * merge  the target merges into a sparse worktree with a change outside the folders; a conflict outside them says how
+ *   to widen; `npm run engine -- lane <ID> --full` fills it.
+ * removal  a done or dropped task's worktree goes (branch kept); in progress, queued and uncommitted work keep it
+ *   (engine-clean.mjs laneRemoval).
+ * disk  one machine.disk_low a day under STUDIO_DISK_WARN_GB naming the biggest users; STUDIO_DISK_MIN_FREE_GB stops
+ *   (machine.mjs disk watch).
+ * atomic  a failed creation leaves no folder, registration or branch. Small throwaway git repos only.
  */
 import fs from 'node:fs';
 import path from 'node:path';

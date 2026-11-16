@@ -1,16 +1,14 @@
 /**
- * qa/selftest-2601o.mjs — 2.60.1 (helper o): landing, stamps, goldens and the train (B-29 to B-33).
- *   B-29: a commit on main that changes only board/record files (harness/train-board.json) while a train is verified
- *         doesn't restart the verify: the lanes merge again onto the new main and land on the same verify. A move of
- *         anything else (studio/protected.json here) still means a new verify (a guard; 2.60.0 did that too).
- *   B-30: in a lane copy started without STUDIO_MAIN_ROOT, with origin/main stale and an unstamped commit on main itself,
- *         the hooks check judges from the main checkout's local main (main's own commit is not the lane's), and so do
- *         the protected check (approve show) and, outside a lane, a branch whose main is ahead of origin/main.
- *   B-32: the hooks check and restamp print the same "base <ref> <sha>".
- *   B-31: merging main into a lane, a golden staged exactly as main has it needs no Golden-Reason; one resolved to
- *         anything else still does (a guard; 2.60.0 refused both).
- *   B-33: task done --train refused for another check names that check (first line and the task.not_done event), and
- *         the verify row the train covers is marked so, not "[ ]".
+ * qa/selftest-2601o.mjs — landing, stamps, goldens and the train.
+ * -  a main commit changing only board/record files (harness/train-board.json) during a train's verify doesn't
+ *   restart it (lanes merge onto the new main); anything else (studio/protected.json) does.
+ * -  in a lane copy started without STUDIO_MAIN_ROOT, with origin/main stale and an unstamped commit on main, the
+ *   hooks check, the protected check (approve show) and, outside a lane, a branch whose main is ahead of origin/main
+ *   judge from the main checkout's local main.
+ * -  the hooks check and restamp print the same "base <ref> <sha>"; merging main into a lane, a golden staged as main
+ *   has it needs no Golden-Reason; one resolved otherwise does.
+ * -  task done --train refused for another check names that check (first line and the task.not_done event); the
+ *   verify row the train covers is marked so, not "[ ]".
  */
 import fs from 'node:fs';
 import path from 'node:path';

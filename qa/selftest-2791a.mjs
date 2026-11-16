@@ -1,17 +1,14 @@
 /**
- * qa/selftest-2791a.mjs — 2.79.1 (a): Vertex AI as a built-in tool, spend budgets per tool or key, owner-defined tools.
- *   1  the studio's Vertex proxy (harness/vertex-proxy.mjs): /v1/<sub> to the Vertex endpoint, x-goog-api-key, the session
- *      tag never forwarded, usage per session (out = total - prompt), 503 with the key renamed, the key written nowhere.
- *   2  `agent start --tool vertex` (the orchestrator's shell): aider on the proxy with the session tag; the session's
- *      environment and lane .env have no VERTEX_API_KEY; the proxy is started on demand; the session's tokens and dollars
- *      land on its agent.session.end and in `npm run tokens -- --by task`.
- *   3  the supervisor: Vertex before the paid API pool, its share of builder slots, the hard model, and a cut budget.
- *   4  spend budgets: none by default; set by the orchestrator on the owner's order; 75% pages once; 100% cuts (refused
- *      start, next tool) once; resume; workers and Producers refused; a key-name budget.
- *   5  the router's vertex-openai protocol (x-goog-api-key) and models:check's 404 as "listed: n/a".
- *   6  studio/tools.json: a person's entry launches like a built-in tool with only its key names; an agent's doesn't count;
- *      a change approved in beta mode by the orchestrator is refused (owner-only); the owner's signed approval counts.
- * A fake "Vertex" on 127.0.0.1 (no network). Each check names what 2.79.0 did.
+ * qa/selftest-2791a.mjs — Vertex AI as a built-in tool, spend budgets per tool or key, owner-defined tools.
+ * 1  the Vertex proxy (harness/vertex-proxy.mjs): /v1/<sub> to the endpoint, x-goog-api-key, session tag never
+ *   forwarded, usage per session, 503 with the key renamed, key written nowhere.
+ * 2  `agent start --tool vertex`: aider on the proxy; no VERTEX_API_KEY in the session environment or lane .env;
+ *   tokens and dollars land on agent.session.end and `npm run tokens -- --by task`.
+ * 3  the supervisor: Vertex before the paid API pool, its builder-slot share, the hard model. 4: spend budgets: none
+ *   by default; set by the orchestrator; 75% pages once; 100% cuts once; workers and Producers refused.
+ * 5  the router's vertex-openai protocol; models:check's 404 is "listed: n/a". 6: studio/tools.json: a person's entry
+ *   launches like a built-in tool; an agent's doesn't count; a change approved in beta mode by the orchestrator is
+ *   refused; the owner's signed approval counts.
  */
 import fs from 'node:fs';
 import net from 'node:net';

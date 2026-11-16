@@ -1,15 +1,13 @@
 /**
- * qa/selftest-2781a.mjs — 2.78.1 (a): B-123, unscoped ready tasks ran one at a time, and the Line Producer's lanes and
- * phase awareness.
- *   lane-running  `task lane` on a task already in progress reaches the supervisor: its builder works in that lane now
- *   lane-who      `task lane … --by` works for a Producer session and the orchestrator; a launched builder is refused
- *   line-lanes    the Line Producer's pass sets a lane on an unscoped ready builder task (from its --scope), logs it as the
- *                 Producer's decision, and reports a task it can't scope as "unscoped" (status, blockers, note)
- *   predicted     two builders with no lane run side by side when their predicted files don't overlap; an overlap, a
- *                 task with no prediction, or STUDIO_UNSCOPED_PARALLEL=off keeps the old rule
- *   shared-sim    a ready task on shared sim code waits (--after) for the open task on the same shared files; reported
- *                 in the plan; STUDIO_SHARED_SIM=off turns it off
- * Each check fails on 2.78.0.
+ * qa/selftest-2781a.mjs — unscoped ready tasks run in parallel, and the Line Producer's lanes and phase awareness.
+ * lane-running  `task lane` on a task already in progress reaches the supervisor: its builder works in that lane now.
+ * lane-who  `task lane … --by` works for a Producer session and the orchestrator; a launched builder is refused.
+ * line-lanes  the Line Producer's pass sets a lane on an unscoped ready builder task (from its --scope), logs it as
+ *   the Producer's decision, and reports a task it can't scope as "unscoped".
+ * predicted  two builders with no lane run side by side when their predicted files don't overlap; an overlap, no
+ *   prediction, or STUDIO_UNSCOPED_PARALLEL=off keeps the old rule.
+ * shared-sim  a ready task on shared sim code waits (--after) for the open task on the same files, reported in the
+ *   plan; STUDIO_SHARED_SIM=off turns it off.
  */
 import fs from 'node:fs';
 import path from 'node:path';

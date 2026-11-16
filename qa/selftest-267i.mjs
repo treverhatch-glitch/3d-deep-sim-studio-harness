@@ -1,18 +1,13 @@
 /**
- * qa/selftest-267i.mjs — 2.67.0 (helper i): the scorecard's gaps the crew found on day one. Made-up events only.
- *   1. Outside work counts: `npm run usage -- add` records a session (meta.outside) the scorecard and the budget read;
- *      `usage -- import` reads Claude Code transcripts (subagent files too) once per session and model, records only
- *      the growth on a re-import, and never prints or stores message text. An outside orchestrator's releases, lanes
- *      refreshes, holds and conductor notes are orchestrator interventions, split planned / unplanned.
- *   2. Default prices: studio/prices.json ships family rows with a "checked" stamp; a full model id is priced by its
- *      family and the card says "prices from <file>, checked <date>".
- *   3. Risk tiers: the train's task.train.tier events give the L3 bar's tierCUnsigned (it read n/a before).
- *   4. A stale halt: the card names the open halt (who, when, cause, how to clear); studio:resume clears one older
- *      than STUDIO_HALT_STALE_H whose supervisor isn't running (a person, or an outside agent on permission), and the
- *      card stops counting it; a younger one is left alone; a worker is still refused.
- *   5. Local days: daily rows and landing times in STUDIO_TZ, with the UTC span / date when it differs (TZ alone keeps
- *      UTC days and only feeds the hint).
- * Each check fails on 2.66.0.
+ * qa/selftest-267i.mjs — the scorecard's gaps: outside work, prices, risk tiers, a stale halt, local days.
+ * 1.  `npm run usage -- add` records an outside session (meta.outside); `usage -- import` reads Claude Code
+ *   transcripts (subagent files too) once per session and model, records only the growth on a re-import, never prints
+ *   or stores message text; an outside orchestrator's interventions are split planned / unplanned.
+ * 2.  studio/prices.json family rows; a full model id is priced by its family. 3. task.train.tier events give the L3
+ *   bar's tierCUnsigned. 4. the card names an open halt; studio:resume clears one older than STUDIO_HALT_STALE_H
+ *   whose supervisor isn't running (a person, or an outside agent on permission); a younger one is left alone; a
+ *   worker is refused.
+ * 5.  daily rows and landing times in STUDIO_TZ, with the UTC span when it differs (TZ alone keeps UTC days).
  */
 import fs from 'node:fs';
 import path from 'node:path';

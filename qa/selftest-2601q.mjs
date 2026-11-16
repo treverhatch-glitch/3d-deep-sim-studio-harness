@@ -1,16 +1,14 @@
 /**
- * qa/selftest-2601q.mjs — 2.60.1 (crew B-38, B-39, B-40).
- *   B-38: what makes a task a render task. A valid owner type that isn't render work outranks the title; an invalid one
- *         (a worker's commit) changes nothing; `task visual <ID> off|on` is recorded like `task type` (a person, or a
- *         Producer/Director/outside agent on permission; workers never) and shown in done-check; once the task has
- *         commits, evidence decides: a render-looking title whose changes touch no render path ("visualPaths") needs no
- *         visual result, one that does still needs it, and a non-render title that changes render files gets a warning
- *         (and needs the result only with the strict switch).
- *   B-39: a lane held for landing (`task hold`) or queued for the merge train doesn't run the claim clock, gets no
- *         rescue, its rescues can't start, holding closes its waiting rescues, and landing closes them; a lane that is
- *         neither is still stopped by its budget.
- *   B-40: in a lane copy the Claude Code hook denies edits to studio config (studio/ is main's), and task done in a
- *         lane warns, naming the files, when main's studio config changed uncommitted while the task was worked.
+ * qa/selftest-2601q.mjs — what makes a task a render task, hold/queue handling, and studio config edits in lane copies.
+ *   render  a valid owner type that isn't render work outranks the title; an invalid one (a worker's commit) changes
+ *     nothing; `task visual <ID> off|on` is recorded like `task type` (a person, or a Producer/Director/outside agent
+ *     on permission; never workers) and shown in done-check; once there are commits, evidence decides: a render-looking
+ *     title whose changes touch no "visualPaths" needs no visual result; a non-render title that changes render files
+ *     gets a warning (a need only with the strict switch)
+ *   hold  a lane held for landing (`task hold`) or queued for the merge train doesn't run the claim clock and gets no
+ *     rescue; holding closes its waiting rescues, landing closes them; other lanes are still stopped by budget
+ *   config  in a lane copy the Claude Code hook denies edits to studio config (studio/ is main's); task done in a lane
+ *     warns, naming the files, when main's studio config changed uncommitted
  */
 import fs from 'node:fs';
 import path from 'node:path';
