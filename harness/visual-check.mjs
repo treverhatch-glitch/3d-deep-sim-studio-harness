@@ -30,10 +30,9 @@ function checkVisualProof(task, root) {
 }
 import { engineTask, engineTarget } from './engine-tracks.mjs';
 import { readJson } from './fsafe.mjs';
+import { flagOf, relPosix as rel, writeJsonTmp as writeJson } from './helpers.mjs';
 
-const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(tmp, f); };
 const sha = (f) => { try { return crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex'); } catch { return null; } };
-const rel = (root, f) => path.relative(root, f).split(path.sep).join('/');
 const IMG = /\.(png|jpe?g|webp)$/i;
 const isLink = (s) => /^[a-z][a-z0-9+.-]*:\/\//i.test(String(s || '').trim());
 export const SCORES = ['real', 'toyish'];
@@ -238,7 +237,7 @@ export function statusLines(task, root = mainRoot()) {
 /** The CLI (npm run visual -- shots|asset|looked|review|send|status; harness/visual-proof.mjs forwards these). */
 export async function cli(argv) {
   const [cmd, task] = argv;
-  const opt = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const opt = flagOf(argv);
   const list = (k) => String(opt(k) || '').split(',').map((x) => x.trim()).filter(Boolean);
   const by = opt('by') || process.env.STUDIO_LOCK_OWNER || null;
   if (!task || !/^[A-Z]+-\d+$/.test(task)) { console.error('Usage: npm run visual -- shots|asset|looked|review|send|status <T-ID> …'); return 2; }

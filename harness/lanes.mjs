@@ -28,11 +28,10 @@ import { recordAlive } from './proc-identity.mjs';
 import { DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { protectSharedLinks } from './lane-sparse.mjs';
 import { readJson } from './fsafe.mjs';
+import { argAfterOf, cleanEnv, stdoutOf as out } from './helpers.mjs';
 
 const isSha = (s) => /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(String(s || ''));
-const cleanEnv = (extra = {}) => { const e = { ...process.env, ...extra }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/.test(k)) delete e[k]; return e; };
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', env: cleanEnv(), maxBuffer: 64 * 1024 * 1024, windowsHide: true });
-const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 const TASK_ID = /^[A-Z]+-\d+$/;
 
 export const REFRESH_FILE = (root = mainRoot()) => path.join(root, '.studio', 'lanes', 'refresh.json');
@@ -442,7 +441,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const argv = process.argv.slice(2);
   // --help / -h prints usage and never acts.
   if (argv.includes('--help') || argv.includes('-h')) { console.log('Usage: npm run lanes [-- --json] [--full] [--no-stamps] [<task|agent|branch>] | npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests] [--json] | npm run lanes -- prune --idle <hours> [--dry-run] | npm run lanes -- disk [--top N] [--json] | npm run lanes -- widen <path|glob> [...] [--lane <agent>] [--why "…"] | npm run lanes -- orphans [<ID>] [--all] [--json] | npm run lanes -- carry <ID> [--from <lane branch>] --by <you> [--json]'); process.exit(0); }
-  const opt = (k) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : null);
+  const opt = argAfterOf(argv);
   const json = argv.includes('--json');
   const root = mainRoot();
   if (argv[0] === 'prune') {

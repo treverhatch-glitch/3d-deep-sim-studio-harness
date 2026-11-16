@@ -12,8 +12,8 @@
  */
 import { emitEvent } from './event.mjs';
 import { PLANNING_ROLES } from './planning-roles.mjs';
+import { roleKey as key } from './helpers.mjs';
 
-const key = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
 const list = (v) => String(v || '').split(/[\s,]+/).filter(Boolean);
 
 // 2.58.3 (P-069): these agent CLIs use -p for --print (a prompt), never for a profile: `claude -p --permission-mode …`

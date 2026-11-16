@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
+import { readTextOrEmpty as read, relPosix as rel } from './helpers.mjs';
 
 const JS = /\.(m?js|cjs|jsx|ts|tsx|mts)$/;
 const GD = /\.gd$/;
@@ -27,8 +28,6 @@ export function reachMode(env = process.env) {
   return ['fail', 'off'].includes(v) ? v : 'warn';
 }
 
-const rel = (root, f) => path.relative(root, f).split(path.sep).join('/');
-const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
 function walk(dir, out = []) {
   let list = [];

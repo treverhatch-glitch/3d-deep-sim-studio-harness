@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mintGameId } from '../harness/game-id.mjs';
+import { flagOf } from '../harness/helpers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ALLOWED = [/^studio\/(roles|skills|presets|rules)\//, /^studio\/(divisions|budget|mode)\.json$/, /^cartridges\/[^/]+\//, /^web\/[^/]+\//, /^intake-answers\.json$/, /^settings\.env$/];
@@ -101,7 +102,7 @@ export function saveSetup(out, from = ROOT) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   if (argv[0] === 'apply' && argv[1]) {
     const r = applySetup(argv[1], path.resolve(flag('into') || ROOT));
     if (!r.ok) {

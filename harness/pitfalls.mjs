@@ -19,6 +19,7 @@ import { untrustedBlock } from './untrusted.mjs';
 import { isAgent } from './ask.mjs';
 import { WORKER_NAME } from './permission.mjs';
 import { FAILURE_KINDS, keywords, readAcceptedCauses } from './learning-edge.mjs';
+import { flagOf } from './helpers.mjs';
 
 export const PITFALLS = path.join(REPO_ROOT, 'studio', 'PITFALLS.md');
 export const PITFALLS_STATE = path.join(REPO_ROOT, 'studio', 'pitfalls.json');
@@ -271,7 +272,7 @@ export function pitfallPartsForRole(role, max = 5) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const VALUED = new Set(['by', 'scope', 'why', 'regression', 'cause']);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const words = argv.filter((x, i) => !x.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--') && VALUED.has(argv[i - 1].slice(2))));
   const by = flag('by') || actor();
   const finish = (r, line) => {

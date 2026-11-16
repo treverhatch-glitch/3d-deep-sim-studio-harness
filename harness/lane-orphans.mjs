@@ -18,11 +18,9 @@ import { mainRoot, mainBranch, boardIds, createLaneCopy, removeLaneCopy, remembe
 import { listLocks } from './lock.mjs';
 import { DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { readJson } from './fsafe.mjs';
+import { cleanEnv, escapeRe as esc, stdoutOf as out } from './helpers.mjs';
 
-const cleanEnv = (extra = {}) => { const e = { ...process.env, ...extra }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/.test(k)) delete e[k]; return e; };
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', env: cleanEnv(), maxBuffer: 64 * 1024 * 1024, windowsHide: true });
-const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
-const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Does a commit message name this task id (as a word: T-10 is not T-105)? */
 export const namesTask = (msg, id) => new RegExp(`(^|[^A-Za-z0-9-])${esc(id)}(?![0-9])`).test(String(msg || ''));
 const TASK_ID = /(?:^|[^A-Za-z0-9-])([A-Z]{1,5}-\d+)(?![0-9])/g;

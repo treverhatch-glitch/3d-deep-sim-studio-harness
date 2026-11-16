@@ -20,6 +20,7 @@ import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { mainCheckout, ownerPubAt, proxyShell, inLane } from './owner-proxy.mjs';
 import { WORKER_NAME as WORKER, AGENT_SHELL, mayDecide, actorOf, recordTier, decisionClass, outsideSigners, selfNamingShell } from './permission.mjs';
 import { OWNER_ONLY_ACTIONS, ownerOnlyAction, ownerOnlyWhy } from './owner-acts.mjs';
+import { optValueOf, shortIso16 as short } from './helpers.mjs';
 
 export const BETA_REL = 'studio/beta.json';
 export const BETA_ROLES = ['producer', 'director'];
@@ -29,7 +30,6 @@ export const BETA_NEVER = OWNER_ONLY_ACTIONS;
 const FIELDS = ['on', 'by', 'at', 'why', 'agents', 'roles'];
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true });
 const body = (d) => Object.fromEntries(FIELDS.map((k) => [k, d?.[k]]));
-const short = (iso) => String(iso || '').slice(0, 16).replace('T', ' ');
 const keyPath = (env) => env.STUDIO_OWNER_KEY || path.join(os.homedir(), '.studio-owner', 'owner-ed25519.pem');
 
 function verifyBeta(doc, pub) {
@@ -330,7 +330,7 @@ export async function betaDigestLines({ events = null, now = Date.now(), root = 
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const opt = (k) => { const i = argv.indexOf(k); return i >= 0 && argv[i + 1] !== undefined && !String(argv[i + 1]).startsWith('--') ? argv[i + 1] : null; };
+  const opt = optValueOf(argv);
   const cmd = argv[0] || 'status';
   if (argv.includes('--help') || argv.includes('-h')) {
     console.log('Usage: npm run beta -- on --by <owner> [--agents a,b] [--why "…"] [--permission "<the owner\'s yes>"] [--no-commit]\n       npm run beta -- off --by <name> [--why "…"] [--no-commit]\n       npm run beta -- status [--json]');

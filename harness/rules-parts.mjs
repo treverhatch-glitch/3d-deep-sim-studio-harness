@@ -14,8 +14,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readJson } from './fsafe.mjs';
 import { ramCheck } from './ram.mjs';
+import { numFiniteFirst as num } from './helpers.mjs';
 
-const num = (v, d) => (Number.isFinite(Number(v)) && String(v ?? '').trim() !== '' ? Number(v) : d);
 const r1 = (n) => Math.round(n * 10) / 10;
 
 /** The floor the free RAM is held against: STUDIO_RAM_FLOOR_GB (3 when unset; 0 is none). */

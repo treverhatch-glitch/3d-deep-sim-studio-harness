@@ -27,7 +27,6 @@ import { codeStamp, restartHow, noticeNewCode, writeHandoff, takeHandoff, waitGo
 export const STATUS_FILE = path.join(STUDIO_STATE_DIR, 'supervisor.json');
 const STOP_FILE = path.join(STUDIO_STATE_DIR, 'supervisor-stop');
 const LOOP_MS = Number(process.env.STUDIO_SUPERVISOR_SEC || 60) * 1000;
-const num = (v, d) => (Number.isFinite(Number(v)) && String(v ?? '').trim() !== '' ? Number(v) : d);
 /** One step of a pass, bounded: after `ms` it is reported (supervisor.step_timeout) and the pass goes on with `fallback`; the step itself is not killed. */
 // 2.86: steps whose work is still running (a step past its time goes on in the background); a restart waits for none.
 let stepsRunning = 0;
@@ -906,6 +905,7 @@ async function sessionCapNow(configured) {
 // top-level await). Re-exported for existing callers.
 export { ramCheck } from './ram.mjs';
 import { ramCheck } from './ram.mjs';
+import { flagOf, numFiniteFirst as num } from './helpers.mjs';
 
 /** Says so once per pass, as an event at most every STUDIO_RAM_NOTE_MIN (15) minutes while it stays low. */
 function ramNote(ram, now) {
@@ -916,7 +916,7 @@ function ramNote(ram, now) {
 }
 
 async function main(argv) {
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const budgetArg = flag('budget');
   const opts = {
     until: parseUntil(flag('until')),
@@ -1186,13 +1186,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   if (argv[0] === 'resume') {
-    const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+    const flag = flagOf(argv);
     const r = await resumeCli({ by: flag('by'), why: flag('why'), permission: flag('permission') });
     (r.code ? console.error : console.log)(r.text);
     process.exit(r.code);
   }
   if (argv[0] === 'extend') {
-    const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+    const flag = flagOf(argv);
     const r = await extendCli({ until: flag('until'), by: flag('by'), why: flag('why'), permission: flag('permission') });
     (r.code ? console.error : console.log)(r.text);
     process.exit(r.code);

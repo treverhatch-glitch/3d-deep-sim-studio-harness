@@ -16,6 +16,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
+import { failExit as fail } from './helpers.mjs';
 
 export const ANCHORS_FILE = path.join(REPO_ROOT, 'studio', 'references', 'anchors.json');
 export const EVIDENCE_STATUS = ['verified', 'unknown', 'needs-reference'];
@@ -158,7 +159,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const one = (k) => many(k)[0] || null;
   const pos = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--')));
   const [cmd = 'list', a1] = pos;
-  const fail = (m) => { console.error(m); process.exit(1); };
   if (cmd === 'add') {
     const r = addAnchor({ game: one('game') || '', feature: one('feature') || '', behaviours: many('behaviour'), screens: many('screen'), acceptance: many('acceptance'), numbers: Object.fromEntries(many('number').map((x) => x.split('=').map((s) => s.trim())).filter((p) => p[0])), evidence: { kind: one('kind') || (one('evidence') ? 'manual' : 'none'), path: one('evidence') || '', provenance: one('provenance') || '', status: one('status') || undefined }, by: one('by') || process.env.STUDIO_LOCK_OWNER || 'producer' });
     if (!r.ok) fail(r.message);

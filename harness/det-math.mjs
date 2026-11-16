@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT } from './event.mjs';
 import { readJson } from './fsafe.mjs';
+import { toPosix } from './helpers.mjs';
 
 export const INEXACT = Object.freeze(['sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh', 'exp', 'expm1', 'log', 'log1p', 'log2', 'log10', 'pow', 'hypot', 'cbrt']);
 const INEXACT_SET = new Set(INEXACT);
@@ -32,7 +33,6 @@ export function normMode(v, fallback = 'warn') {
   return MODES.includes(s) ? { mode: s, bad: null } : { mode: 'warn', bad: String(v) };
 }
 
-const toPosix = (p) => String(p).replace(/\\/g, '/');
 const relOf = (root, f) => toPosix(path.relative(root, f));
 
 /** A config path: repo-relative when it exists from the repo root, else relative to the game's folder. */

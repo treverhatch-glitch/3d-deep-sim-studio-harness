@@ -13,9 +13,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { emitEvent } from './event.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
+import { sleepSync as sleep } from './helpers.mjs';
 
 const writeJson = (f, j) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); writeAtomic(f, `${JSON.stringify(j, null, 2)}\n`); } catch {} };
-const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) && n >= 0 ? n : d; };
 /** STUDIO_TRAIN_CANCEL_WAIT_S in ms (default 120 s): how long cancel waits for the train to end by itself. */
 export const cancelWaitMs = (env = process.env) => num(env.STUDIO_TRAIN_CANCEL_WAIT_S, 120) * 1000;

@@ -15,8 +15,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
 import { readJson } from './fsafe.mjs';
+import { isOff as off } from './helpers.mjs';
 
-const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 const NAME_RE = /^[a-z][a-z0-9-]{1,30}$/;
 
 /** What native mode switches off, in plain words (docs/NATIVE-ENGINE.md lists the same). */

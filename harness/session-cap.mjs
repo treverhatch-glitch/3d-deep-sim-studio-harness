@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { verifyCause } from './handback-facts.mjs';
 import { limitsFor } from './model-limits.mjs';
+import { flagOf, jsonFileOf } from './helpers.mjs';
 
 export const REFRESH_DIR = path.join(STUDIO_STATE_DIR, 'refresh');
 const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
@@ -148,7 +149,7 @@ export function refreshRuleDecision({ turns = 0, context = 0, idleTurns = 0, mod
   return { decision: 'continue', why: `${room}; at ${pct} % of the window; last commit or verify ${idleTurns} turns ago (under ${idleAt})`, ...base };
 }
 
-const flagFile = (agent) => path.join(REFRESH_DIR, `${agent}.json`);
+const flagFile = jsonFileOf(REFRESH_DIR);
 export function readFlag(agent) {
   try {
     return JSON.parse(fs.readFileSync(flagFile(agent), 'utf8'));
@@ -324,7 +325,7 @@ export const HANDOFF_MAX = 3000;
 // 2.84: the command-line part is an async function, not a top-level await: an import cycle through a top-level await ends the process with exit 13.
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)))(async () => {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const words = argv.slice(1).filter((x, i, a) => !x.startsWith('--') && !(i > 0 && a[i - 1].startsWith('--')));
   if (argv[0] === 'exception') {
     const r = flagException(process.env.STUDIO_LOCK_OWNER || flag('agent'), words.join(' '));

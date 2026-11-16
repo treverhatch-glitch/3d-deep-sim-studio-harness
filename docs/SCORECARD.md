@@ -67,6 +67,10 @@ Two blocks print under the fifteen measures and are kept in a record (`engine`, 
 the fifteen: one is a single engine's queue, the other a link, and neither has a target yet. What each line counts is
 in [NATIVE-ENGINE.md](NATIVE-ENGINE.md).
 
+The fifteen measures count a task as landed when it is closed (`task.done`, or a forced close), with or without a
+branch; the engine flow counts lanes named in `task.train.<engine>.landed`, a hyphen in the engine's name included
+(2.88). `harness/landings.mjs` holds both readings.
+
 Baseline from the same log: 67 land runs, 11 lanes landed, 320.3 land-run minutes per landed lane, 16.4% of land runs
 passed, 25.4% refused or not run (495.4 minutes waiting), 53% of the minutes in red runs, a passing run 101 minutes
 (median). Design link: 57.3% of 358 done tasks trace to a pillar, a kept layer, an approved idea or the owner's ask;

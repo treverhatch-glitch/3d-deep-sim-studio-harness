@@ -15,11 +15,11 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { routeNow } from './threads.mjs';
+import { flagOf, sleepSync as sleep } from './helpers.mjs';
 
 export const CI_FILE = () => path.join(STUDIO_STATE_DIR, 'ci-watch.json');
 // STUDIO_GH may be a command line ("node fake-gh.mjs"); the arguments here never hold spaces or quotes.
 const gh = (args) => (process.env.STUDIO_GH ? spawnSync(`${process.env.STUDIO_GH} ${args.map((a) => `"${a}"`).join(' ')}`, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', shell: true }) : spawnSync('gh', args, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', shell: process.platform === 'win32' }));
-const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /** What to do with the runs seen so far: wait, rerun (once), green, red. Pure. */
 export function ciDecision(runs, { rerunDone = false } = {}) {
@@ -110,7 +110,7 @@ export function watchCi({ sha, timeoutMin = 60, pollSec = 30 } = {}) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   if (argv.includes('--detach')) {
     const c = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv.filter((a) => a !== '--detach')], { windowsHide: true, cwd: REPO_ROOT, detached: true, stdio: 'ignore' });
     c.unref();

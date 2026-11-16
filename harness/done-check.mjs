@@ -44,6 +44,8 @@ import { engineTask, engineRepo, engineTarget, configuredEngines } from './engin
 import { pathTracks, missingTracks } from './gate-tracks.mjs';
 import { visualCheckRows } from './visual-check.mjs';
 import { anchorCheckRows } from './anchors.mjs';
+import { gitInDirOf, isSha40 as isSha } from './helpers.mjs';
+import { landings } from './landings.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -369,7 +371,6 @@ export function taskBase(taskId) {
   return base;
 }
 
-const isSha = (s) => /^[0-9a-f]{40}$/.test(String(s || ''));
 const isAncestor = (a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { windowsHide: true, cwd: REPO_ROOT }).status === 0;
 /** The studio's main branch as this checkout can name it (a lane copy: the main checkout's branch), never HEAD's own. */
 function studioMainBranches() {
@@ -541,9 +542,12 @@ function studioRecordOwner(rec) {
   }
   return null;
 }
-/** Other tasks finished (landed) after `ms`: [{ task, at }], oldest first. */
+/**
+ * Other tasks finished after `ms`: [{ task, at }], oldest first. Closes and forced closes, on purpose (same as 2.87):
+ * a task done in the main checkout moves main with no landing record (self-test 2583o).
+ */
 function landedSince(ms, taskId) {
-  return readRecentEvents(20000).filter((e) => (e.type === 'task.done' || e.type === 'task.forced') && e.task && e.task !== taskId && (Date.parse(e.ts) || 0) > ms).map((e) => ({ task: e.task, at: Date.parse(e.ts) }));
+  return landings(readRecentEvents(20000), ['closed', 'forced'], { after: ms }).filter((l) => l.task !== taskId).map((l) => ({ task: l.task, at: l.at }));
 }
 const landedText = (l) => `${l.slice(-2).map((x) => `${x.task} landed at ${hhmm(x.at)}`).join(', ')}${l.length > 2 ? ` and ${l.length - 2} more` : ''}`;
 /**
@@ -687,7 +691,7 @@ export function engineWorkChecks(task) {
   if (!repo) return null;
   const t = engineTarget(rec.engine);
   const target = t?.cfg?.target || null;
-  const g = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8', windowsHide: true });
+  const g = gitInDirOf(repo);
   const rows = [];
   const br = rec.branch;
   let ahead = 0;

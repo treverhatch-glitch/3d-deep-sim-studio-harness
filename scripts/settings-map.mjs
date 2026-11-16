@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { mainBranch } from '../harness/worktree.mjs';
+import { readTextOrEmpty as read, relPosix as rel } from '../harness/helpers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NAME = /STUDIO_[A-Z0-9_]+/g;
@@ -36,8 +37,6 @@ export function topLists(root = ROOT) {
   } catch { return { top: [], passed: [] }; }
 }
 
-const rel = (root, f) => path.relative(root, f).split(path.sep).join('/');
-const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
 function walk(dir, test, out = []) {
   let entries = [];

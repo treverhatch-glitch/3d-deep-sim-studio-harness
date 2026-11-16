@@ -24,11 +24,10 @@ import { pushSlots } from './engine-ram.mjs';
 import { parseStudioEnv } from './dotenv.mjs';
 import { machineProfile, slotsFor, budgetState, jobClaim, admit, claimOf, describeBudget, oomSignature, maxConcurrent, capGroup, unityMinFreeGb, isUnityKind, scanFreeGb, engineLineRoom } from './heavy-budget.mjs';
 import { readJson } from './fsafe.mjs';
+import { argAfterOf, isOffRaw as off, numBlankDefault as num, sleepSync as sleep } from './helpers.mjs';
 
 const PREFIX = 'machine-heavy';
 const SLOT_RE = /^machine-heavy-(\d+)\.lock$/;
-const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const mins = (ms) => Math.max(0, Math.round(ms / 60000));
 const span = (ms) => (ms < 120000 ? `${Math.round(ms / 1000)} s` : `${mins(ms)} min`);
 
@@ -192,7 +191,6 @@ export function heavyHolders(root, { env = process.env } = {}) {
 // ---- a holder's process tree, and killing it ----
 
 const TREE_TOL_MS = 3000;
-const off = (v) => /^(off|0|false|no)$/i.test(String(v || ''));
 
 /** This process as a tree root: its pid, its POSIX process group when it leads one, and how its tree is killed. */
 export function selfTree({ platform = process.platform, group = undefined } = {}) {
@@ -997,10 +995,10 @@ async function heavyWaitCli(root, argv, { preOpt, floorOpts }) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const root = await heavyRoot();
-  const opt = (k) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : null);
+  const opt = argAfterOf(argv);
   // An option before `--` only (the wrapped command's own arguments are never read as ours).
   const pre = argv.indexOf('--') >= 0 ? argv.slice(0, argv.indexOf('--')) : argv;
-  const preOpt = (k) => (pre.includes(k) ? pre[pre.indexOf(k) + 1] : null);
+  const preOpt = argAfterOf(pre);
   const floorOpts = () => {
     const o = {};
     const mf = preOpt('--min-free-gb');

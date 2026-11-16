@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, emitEvent } from './event.mjs';
+import { flagOf } from './helpers.mjs';
 
 export const VERDICTS = path.join(REPO_ROOT, 'studio', 'playtest', 'verdicts.json');
 // The same agent-name shapes the launcher uses for hiring: agents never give a fun verdict.
@@ -104,7 +105,7 @@ export function phaseExitGaps(phase, sinceIso = null) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   if (['yes', 'not-yet'].includes(argv[0])) {
     const r = await addVerdict({ by: flag('by'), fun: argv[0], build: flag('build'), note: flag('note') || '', quote: flag('quote') || '', source: flag('source') || '', relayedBy: flag('relayed-by') });
     if (!r.ok) {

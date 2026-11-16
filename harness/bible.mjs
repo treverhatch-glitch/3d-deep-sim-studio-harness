@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { phaseExitGaps } from './verdict.mjs';
+import { flagValueOf, nowIso as now } from './helpers.mjs';
 
 export const BIBLE_DIR = path.join(REPO_ROOT, 'studio', 'bible');
 export const BIBLE_FILE = path.join(BIBLE_DIR, 'bible.json');
@@ -144,7 +145,6 @@ export function answerFollowup(b, key, a, by = 'game-dev') {
   return true;
 }
 
-const now = () => new Date().toISOString();
 const rel = (p) => path.relative(REPO_ROOT, p).split(path.sep).join('/');
 
 export function emptyBible() {
@@ -464,10 +464,7 @@ export function catalog() {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => {
-    const i = argv.indexOf(`--${k}`);
-    return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
-  };
+  const flag = flagValueOf(argv);
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i].startsWith('--')) {

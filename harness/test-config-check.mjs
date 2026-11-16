@@ -18,10 +18,10 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveRunner, configFlag, findUp, CONFIG_EXT } from './test-timeouts.mjs';
 import { normTestPath, focusCommand, clearRunner } from './train-focus.mjs';
+import { checkItem as item, isOff as off } from './helpers.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
-const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
 const rel = (root, f) => path.relative(root, f).split(path.sep).join('/') || '.';
 const q = (s) => (/^[\w./\\:-]+$/.test(s) ? s : `"${String(s).replace(/"/g, '\\"')}"`);
@@ -140,7 +140,6 @@ export function skipFix(config, runner = 'vitest') {
 }
 
 const looksLikeTests = (g) => /(^|[^a-z])(tests?|unit|spec|vitest|jest)([^a-z]|$)/i.test(`${g.id} ${g.command}`);
-const item = (id, status, detail, fix = '') => ({ id, status, detail, ...(fix ? { fix } : {}) });
 
 /**
  * The preflight's / onboarding's items for the studio game's test checks. deps: { game, gates, perfGlobs, slowGlobs }

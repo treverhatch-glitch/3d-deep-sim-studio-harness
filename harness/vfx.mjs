@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { readJson } from './fsafe.mjs';
+import { flagOf } from './helpers.mjs';
 
 export const SPEC_DIR = (root = REPO_ROOT) => path.join(root, 'studio', 'vfx');
 export const OUT_DIR = (id) => path.join(STUDIO_STATE_DIR, 'vfx', id);
@@ -198,7 +199,7 @@ export function readSpec(id, root = REPO_ROOT) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const [cmd, id] = argv;
   if (cmd === 'new' && id) {
     const f = path.join(SPEC_DIR(), `${id}.json`);

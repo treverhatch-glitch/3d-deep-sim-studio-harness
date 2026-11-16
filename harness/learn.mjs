@@ -13,7 +13,6 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
@@ -25,6 +24,7 @@ import { signature, shape, signatureKey, signatureId, FAILURE_TYPES, readChanges
 import { parseNextQueue, addTask, HANDOFF_DIR } from './task.mjs';
 import { taskType } from './done-check.mjs';
 import { ownerType } from './reclassify.mjs';
+import { doneExit as done, sha256Hex as sha } from './helpers.mjs';
 
 const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'into', 'task', 'tasks', 'after', 'since', 'when', 'not', 'was', 'has', 'have', 'its', 'are', 'but', 'agent']);
 const keywords = (s) => [...new Set(String(s).toLowerCase().match(/[a-z][a-z-]{3,}/g) || [])].filter((w) => !STOP.has(w));
@@ -210,7 +210,6 @@ const MEDIA = /\.(png|jpe?g|webp|gif)$/i;
 const MEDIA_KEEP = Number(process.env.STUDIO_BACKUP_MEDIA || 20);
 const MEDIA_MAX_BYTES = 5 * 1024 * 1024;
 const REPORTS_KEEP = 50;
-const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const stampNow = () => new Date().toISOString().replace(/[:.]/g, '-');
 
 /** Playtest reports and screenshots: the newest ones only, so a long project doesn't fill the drive. */
@@ -369,14 +368,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     return i >= 0 ? argv[i + 1] : undefined;
   };
   const kb = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
-  const done = (res, line) => {
-    if (!res.ok) {
-      console.error(res.message);
-      process.exit(1);
-    }
-    console.log(line(res));
-    process.exit(0);
-  };
   if (argv[0] === 'backup') done(backup(flag('to'), { media: !argv.includes('--no-media') }), (r) => `Backed up ${r.files} files to ${r.dest}: ${r.added} changed (+${kb(r.addedBytes)}), whole backup ${kb(r.totalBytes)}. Open latest/STUDIO-MEMORY.md for everything in one file.`);
   if (argv[0] === 'restore') done(restore({ from: flag('from'), at: flag('at') || 'latest', to: flag('to') }), (r) => `Restored ${r.files} files from the backup at ${r.at} into ${r.to}`);
   if (argv[0] === 'prune') done(pruneBackups({ from: flag('from'), keep: Number(flag('keep') || 30) }), (r) => `Kept ${r.kept} backups (the newest and the first of each month), removed ${r.removed}, freed ${kb(r.freedBytes)}; backup is now ${kb(r.totalBytes)}.`);

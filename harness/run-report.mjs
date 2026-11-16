@@ -25,6 +25,7 @@ import { describeMode } from './mode.mjs';
 import { sessions as agentSessions } from './agent.mjs';
 import { allAsks } from './ask.mjs';
 import { gateWords } from './gate-words.mjs';
+import { readJsonVia } from './helpers.mjs';
 
 const read = (rel) => {
   try {
@@ -33,13 +34,7 @@ const read = (rel) => {
     return '';
   }
 };
-const json = (rel) => {
-  try {
-    return JSON.parse(read(rel));
-  } catch {
-    return null;
-  }
-};
+const json = readJsonVia(read);
 const hours = (ms) => (ms / 3600000).toFixed(1);
 
 function slug() {

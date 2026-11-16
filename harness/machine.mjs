@@ -17,6 +17,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readJson } from './fsafe.mjs';
+import { isOff, numTrimDefault as numOr } from './helpers.mjs';
 
 export const MACHINE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const machineFile = (root = MACHINE_ROOT) => path.join(root, '.studio', 'machine.json');
@@ -25,8 +26,6 @@ const diskStateFile = (root) => path.join(root, '.studio', 'machine-disk.json');
 
 const GB = 1024 ** 3;
 const r1 = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
-const numOr = (v, d) => (v === undefined || v === null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? d : Number(v));
-const isOff = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 export const scanOff = (env = process.env) => isOff(env.STUDIO_MACHINE_SCAN);
 export const sampleMs = (env = process.env) => Math.max(10, numOr(env.STUDIO_MACHINE_SAMPLE_S, 300)) * 1000;
 const sleepSync = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch {} };

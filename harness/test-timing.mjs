@@ -16,9 +16,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isTestPath } from './test-weakening.mjs';
 import { matchAny } from './merge-lane.mjs';
+import { isOff as off, toPosix } from './helpers.mjs';
 
-const toPosix = (p) => String(p).replace(/\\/g, '/');
-const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 export const testTimingOn = (env = process.env) => !off(env.STUDIO_TEST_TIMING);
 
 const CODE = /\.(m?[jt]sx?|c[jt]s)$/i;

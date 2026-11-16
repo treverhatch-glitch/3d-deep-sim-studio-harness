@@ -14,13 +14,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { flagValueOf, pad2 as p } from '../harness/helpers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
-const opt = (k) => {
-  const i = args.indexOf(`--${k}`);
-  return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null;
-};
+const opt = flagValueOf(args);
 const name = opt('name');
 if (!name) {
   console.error('Usage: npm run studio:reset -- --name "<game name>" [--yes]');
@@ -100,7 +98,6 @@ fs.rmSync(path.join(root, '.studio', 'write-stamps'), { recursive: true, force: 
 for (const f of ['meeting.json', 'watch-last.json', 'gates-last.json', 'gates-last-full.json', 'last-seed-failure.json', 'closed-loop-state.json']) fs.rmSync(path.join(root, '.studio', f), { force: true });
 
 const date = new Date();
-const p = (n) => String(n).padStart(2, '0');
 const when = `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())} ${p(date.getHours())}:${p(date.getMinutes())}`;
 const write = (r, text) => {
   fs.mkdirSync(path.dirname(path.join(root, r)), { recursive: true });

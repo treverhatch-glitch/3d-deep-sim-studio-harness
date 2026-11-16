@@ -14,9 +14,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
 import { weightedTokens } from './budget.mjs';
+import { hhmm as hm } from './helpers.mjs';
 
 const M = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(Math.round(n)));
-const hm = (iso) => new Date(iso).toTimeString().slice(0, 5);
 const day = (t) => new Date(t).toLocaleDateString('sv'); // local date, YYYY-MM-DD
 
 export function buildOvernight({ from, to = Date.now(), events = readRecentEvents(200000), openCards = null } = {}) {

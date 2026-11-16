@@ -21,6 +21,7 @@ import { writeAtomic, withFileLock, pidAlive } from '../harness/fsafe.mjs';
 import { selfIdentity, liveAs as idAlive } from '../harness/proc-identity.mjs';
 import { applyGateEnv, nodeModulesDrift, porcelainZ } from '../harness/gate-env.mjs';
 import { createFence, fenceLine } from '../harness/gate-output.mjs';
+import { foldCase as norm } from '../harness/helpers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cfg = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8'));
@@ -484,7 +485,6 @@ function changedTracked(before, after) {
 /** This checkout's key for the full-verify record: { real, file }. The main checkout (own .studio/ folder) uses full.json; a lane or train copy (.studio/ is a link) uses full.<12 hex of sha1(real path)>.json. Windows paths compare case-insensitively. */
 function checkoutKey(dir) {
   const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
-  const norm = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
   const here = norm(real(dir));
   const own = norm(path.dirname(real(path.join(dir, '.studio')))) === here;
   return { real: here, file: own ? 'full.json' : `full.${crypto.createHash('sha1').update(here).digest('hex').slice(0, 12)}.json` };

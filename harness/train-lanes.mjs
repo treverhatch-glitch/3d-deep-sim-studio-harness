@@ -13,14 +13,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import { emitEvent } from './event.mjs';
 import { linkDir, nodeModuleDirs, ignoreLanes, LANES_DIR } from './worktree.mjs';
 import { writeAtomic } from './fsafe.mjs';
+import { gitMax64 as git, realOrResolved as real, stdoutOf as out } from './helpers.mjs';
 
-const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
-const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
 const norm = (p) => (process.platform === 'win32' ? String(p).toLowerCase() : String(p));
 
 // ---- W-0081: a missing lane copy, made again from its branch ----

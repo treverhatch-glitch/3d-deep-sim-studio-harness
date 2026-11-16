@@ -21,6 +21,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR, actor, emitEvent, readRecentEvents } from 
 import { appendLine, withFileLock, writeAtomic, readJson } from './fsafe.mjs';
 import { scrub, findSecrets } from './secrets.mjs';
 import { DAY, signatureOf, workaroundStats, workaroundTrend } from './workaround-stats.mjs';
+import { tsMs as ts } from './helpers.mjs';
 
 export const RECORDS_FILE = () => path.join(STUDIO_STATE_DIR, 'workarounds.jsonl');
 export const TASKS_STATE_FILE = () => path.join(STUDIO_STATE_DIR, 'harness-tasks.json');
@@ -389,7 +390,6 @@ const STOP_BY_HAND = /Supervisor stopped \((stopped by hand|stopped by the syste
 function detectFromEvents(events, { now = Date.now(), env = process.env } = {}) {
   if (off(env)) return [];
   const { restartMs } = settings(env);
-  const ts = (e) => Date.parse(e?.ts) || 0;
   const ev = events.filter((e) => ts(e) >= now - 7 * DAY && ts(e) <= now).sort((a, b) => ts(a) - ts(b));
   const out = [];
   let lastStop = null;

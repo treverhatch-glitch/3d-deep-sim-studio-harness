@@ -20,6 +20,7 @@ import { appendLine, withFileLock, writeAtomic } from './fsafe.mjs';
 import { listLocks } from './lock.mjs';
 import { oneLine } from './untrusted.mjs';
 import { DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
+import { flagOf } from './helpers.mjs';
 
 export const THREADS_FILE = () => path.join(STUDIO_STATE_DIR, 'threads.json');
 export const TRIGGERS_FILE = () => path.join(REPO_ROOT, 'studio', 'triggers.json');
@@ -505,7 +506,7 @@ export function inboxForBrief(id, { max = 10, sweep = true } = {}) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const pos = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--') && !['--peek', '--json'].includes(argv[i - 1])));
   const cmd = pos[0] || 'status';
   const by = flag('by') || null;

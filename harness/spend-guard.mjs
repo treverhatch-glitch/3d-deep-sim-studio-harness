@@ -16,9 +16,8 @@ import { pathToFileURL } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { readBudget, markExhausted, quotaMark, pickTool, usedSince, weekStart } from './budget.mjs';
 import { registeredTool } from './tool-registry.mjs';
+import { readJsonOr as read, roleKey as key } from './helpers.mjs';
 
-const read = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
-const key = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
 /**
  * A tool's own launch command: STUDIO_TOOL_<TOOL>_CMD (as before), else 2.79.1 (a) an owner-defined tool's command
  * (studio/tools.json as it counts, harness/tool-registry.mjs). The built-in vertex tool takes none: it runs aider on the

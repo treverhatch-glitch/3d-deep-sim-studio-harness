@@ -78,6 +78,7 @@ import { gateEnv } from './gate-env.mjs';
 import { vertexModel, vertexConfigured, ensureProxy, proxyBase, sessionKey, sessionUsage, overPromptCap, promptCap } from './vertex.mjs';
 import { registeredTool, registryPrice } from './tool-registry.mjs';
 import { spendPass, sessionKeyNames } from './spend-budget.mjs';
+import { flagOf, jsonFileOf, readJsonOrNull as readJson, roleKey } from './helpers.mjs';
 
 export const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
 const WIP_DIR = path.join(STUDIO_STATE_DIR, 'wip');
@@ -327,15 +328,7 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], a
   }
 }
 
-const roleKey = (role) => String(role || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
-const sessionFile = (agent) => path.join(AGENTS_DIR, `${agent}.json`);
-const readJson = (f) => {
-  try {
-    return JSON.parse(fs.readFileSync(f, 'utf8'));
-  } catch {
-    return null;
-  }
-};
+const sessionFile = jsonFileOf(AGENTS_DIR);
 // A heartbeat older than this many minutes is a stalled session (agent list and the watcher say so).
 const STALL_BEAT_MIN = Math.max(5, (HEARTBEAT_MS / 60000) * 3);
 
@@ -2534,7 +2527,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const { loadDotEnv } = await import('./dotenv.mjs');
   loadDotEnv(path.join(REPO_ROOT, '.env'));
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const cmd = argv[0];
   if (cmd === 'start' || cmd === 'hire') {
     // hire = start, from the Producer or the game dev, into a division, with a note; --loop keeps the

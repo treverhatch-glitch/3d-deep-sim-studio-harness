@@ -6,6 +6,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DECISIONS_REL, listDecisions, pendingReview, reviewSummary, reviewDecision, revertDecision, autonomyStats, sinceMs } from './decisions-log.mjs';
+import { optValueOf } from './helpers.mjs';
 
 /** 2.73.0 (e): the audit items on the review list (harness/audit.mjs). */
 async function auditLines() {
@@ -32,7 +33,7 @@ export const USAGE = `Usage: npm run decisions [-- --since 24h|7d|<ISO>] [--by <
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   if (argv.includes('--help') || argv.includes('-h')) { console.log(USAGE); process.exit(0); }
-  const opt = (k) => { const i = argv.indexOf(k); return i >= 0 && argv[i + 1] !== undefined && !String(argv[i + 1]).startsWith('--') ? argv[i + 1] : null; };
+  const opt = optValueOf(argv);
   const cmd = argv[0] && !argv[0].startsWith('--') ? argv[0] : 'list';
   const done = (r) => { (r.ok ? console.log : console.error)(r.message); process.exit(r.ok ? 0 : 1); };
   if (cmd === 'list') {

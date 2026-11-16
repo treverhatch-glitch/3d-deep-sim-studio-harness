@@ -24,6 +24,7 @@ import { betaRecordCommitted } from './beta-mode.mjs';
 import { delegationFor, recordUse, embeddedDelegationOk } from './delegation.mjs';
 import { logDecision, asOf } from './decisions-log.mjs';
 import { readJson } from './fsafe.mjs';
+import { mtimeMs as stamp } from './helpers.mjs';
 
 export const TYPE_RECORD_REL = 'studio/task-types.json';
 export const RETYPABLE = ['change', 'chore', 'bug', 'docs', 'system', 'balance', 'fun', 'playtest', 'study', 'research', 'review', 'direction', 'idea', 'art', 'whole'];
@@ -156,7 +157,6 @@ export function ownerVisual(taskId) { return ownerDecision(taskId, 'visual'); }
 function ownerDecision(taskId, kind) {
   if (!taskId) return null;
   const root = recordRoot();
-  const stamp = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
   const key = `${taskId}|${stamp(path.join(root, TYPE_RECORD_REL))}|${approvalDirs().map(({ dir }) => stamp(path.join(dir, approvalName(taskId, kind)))).join(',')}`;
   const hit = memo.get(`${kind}|${taskId}`);
   if (hit && hit.key === key && Date.now() - hit.at < 5000) return hit.value;

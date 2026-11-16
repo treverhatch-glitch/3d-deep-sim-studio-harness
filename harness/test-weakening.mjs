@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { protectRoot, trustedEnv } from './gate-trust.mjs';
 import { TASK_LINE_RE } from './board-line.mjs';
+import { isOffRaw as falsy } from './helpers.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // 2.71.1 (A16): STUDIO_PROTECT_ROOT is never used in a lane copy (harness/gate-trust.mjs).
@@ -284,7 +285,6 @@ export async function findWeakenings({ env = process.env } = {}) {
 }
 
 const truthy = (v) => /^(on|1|true|yes)$/i.test(String(v || ''));
-const falsy = (v) => /^(off|0|false|no)$/i.test(String(v || ''));
 
 /** The gate: { ok, enforced, off, base, findings (unapproved), approved, why }. */
 export async function checkWeakening({ env: envIn = process.env } = {}) {

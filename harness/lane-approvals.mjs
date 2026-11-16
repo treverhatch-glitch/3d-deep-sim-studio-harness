@@ -11,12 +11,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { gitMax64 as git, sha256Hex as sha } from './helpers.mjs';
 
-const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const gitBuf = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, maxBuffer: 256 * 1024 * 1024 });
-const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
 /** The protected approvals in the main checkout: [{ file, files: [{ path, sha256 }] }]. */
 function approvals(root) {

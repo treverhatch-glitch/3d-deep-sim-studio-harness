@@ -13,7 +13,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { testRngFacts } from './test-rng.mjs';
 import { subIdsFromLog } from './gate-subids.mjs';
@@ -23,6 +22,7 @@ import { seenBefore, seenLine } from './error-memory.mjs';
 import { laneOf } from './task-hold.mjs';
 import { readJson } from './fsafe.mjs';
 import { noteMissingPaths, noteMissingLine, recordNoteUnverified } from './said-vs-did.mjs';
+import { gitMax64 as git, mtimeMs as mtime, readTextOrNull as readText, slashPath as slash } from './helpers.mjs';
 
 export const FACTS_HEAD = 'Hand-back facts (written by the harness from git and the gate logs; the note after them is the agent\'s or the train\'s):';
 export const FACTS_END = 'End of hand-back facts.';
@@ -37,10 +37,6 @@ const LIST_STEPS = [[FILES_SHOWN, COMMITS_CAP], [8, 4], [5, 3], [3, 2]];
 const SUBJECT_MAX = 72;
 const REFUSALS_DIR = () => path.join(STUDIO_STATE_DIR, 'handback-facts');
 const BOOKKEEPING = /^(studio|\.studio|\.lanes|node_modules|qa\/reports)(\/|$)/;
-const slash = (p) => String(p || '').split(path.sep).join('/');
-const readText = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
-const mtime = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
-const git = (cwd, ...a) => spawnSync('git', a, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const mainRootOf = () => (process.env.STUDIO_MAIN_ROOT ? path.resolve(process.env.STUDIO_MAIN_ROOT) : REPO_ROOT);
 const safeName = (s) => String(s || '').replace(/[^\w.-]/g, '_');
 

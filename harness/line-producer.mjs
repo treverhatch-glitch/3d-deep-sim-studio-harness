@@ -19,6 +19,8 @@ import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { OWNER_STEP_PROTECTED } from './owner-only.mjs';
 import { postAsk } from './ask-post.mjs';
+import { flagOf, numSplit as num } from './helpers.mjs';
+import { landings } from './landings.mjs';
 
 export const LINE_AGENT = 'line-producer';
 export const LINE_DIR = () => path.join(STUDIO_STATE_DIR, 'line');
@@ -31,8 +33,6 @@ export const TIERS = ['cheap', 'mid', 'top'];
 const KIND_ORDER = ['trunk', 'chain', 'park', 'cooldown', 'blocked', 'budget', 'lock', 'busy', 'merge', 'yes', 'held', 'protected', 'lane', 'unscoped'];
 const OWNER_KINDS = new Set(['yes', 'park', 'held']);
 const PRI = (p) => { const m = String(p || '').match(/P(\d)/i); return m ? Number(m[1]) : 9; };
-const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
-const hhmm = (ms) => new Date(ms).toTimeString().slice(0, 5);
 
 /** on | report | off (STUDIO_LINE_PRODUCER, default on). */
 export function lineMode(env = process.env) {
@@ -992,7 +992,9 @@ export async function twinPass({ now = Date.now(), env = process.env, act = true
   const events = deps.events || readRecentEvents(20000);
   const since = Date.parse(st.since) || 0;
   const added = new Map(events.filter((e) => e.type === 'task.added' && e.task).map((e) => [e.task, e]));
-  const landed = [...new Map(events.filter((e) => e.type === 'task.done' && e.task && Date.parse(e.ts) >= since && !seen[e.task]).map((e) => [e.task, e])).values()];
+  // Every close (same as 2.87): its title is in the close's msg, an engine task is named so below, and a task that
+  // landed nothing finds no commit, so the git check, not the record kind, decides.
+  const landed = [...new Map(landings(events, 'closed', { since }).filter((l) => !seen[l.task]).map((l) => [l.task, l.e])).values()];
   const { globRe } = await import('./merge-lane.mjs');
   const board = deps.queue || (await import('./task.mjs')).parseNextQueue();
   const open = [...(board.inProgress || []), ...(board.backlog || [])];
@@ -1407,7 +1409,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const json = argv.includes('--json');
   if (cmd === 'auto-queue') {
     // 2.85: the engine pass's child (autoQueuePass): queue one ready engine task, or put why not on it.
-    const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+    const flag = flagOf(argv);
     const { mainRoot } = await import('./worktree.mjs');
     const r = await autoQueueReady(mainRoot(), { task: argv[1], engine: flag('engine') || 'unity', agent: flag('agent'), at: flag('at') });
     console.log(JSON.stringify(r));

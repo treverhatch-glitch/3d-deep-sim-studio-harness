@@ -22,6 +22,7 @@ import { pidAlive, liveAs, spawnedIdentity } from './proc-identity.mjs';
 import { unityBin } from './unity.mjs';
 import { runningUnityTrain, unityRepo } from './unity-train.mjs';
 import { safeRefName } from './unity-gate.mjs';
+import { gitMax64 as git, isOff, numBlankDefault as num, slashPath as fwd, stdoutOf as gitOut } from './helpers.mjs';
 
 const THIS_FILE = fileURLToPath(import.meta.url);
 export const KINDS = ['ping', 'refresh', 'compile', 'test', 'capture', 'quit'];
@@ -35,12 +36,7 @@ export const PROTOCOL_FIELDS = {
   args: ['-studioService', '-studioHeartbeatSec'],
 };
 
-const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
-const isOff = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
-const fwd = (p) => String(p || '').split(path.sep).join('/');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-const gitOut = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); writeAtomic(f, `${JSON.stringify(v, null, 2)}\n`); };
 const safeName = (s) => String(s || 'x').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80);
 let seq = 0;

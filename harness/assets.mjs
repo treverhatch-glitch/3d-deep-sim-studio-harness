@@ -17,6 +17,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { addRef } from './refs.mjs';
+import { failExit as fail, flagValueOf } from './helpers.mjs';
 
 export const MANIFEST = path.join(REPO_ROOT, 'studio', 'assets', 'manifest.json');
 const AGENTISH = /^(producer|director|builder|rnd|planner|reviewer|watch|agent|claude|codex|cursor|grok|gemini)(-|$)/i;
@@ -164,10 +165,7 @@ export function recordApproved({ file, by, licence, source = '', design, maker, 
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => {
-    const i = argv.indexOf(`--${k}`);
-    return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
-  };
+  const flag = flagValueOf(argv);
   const pos = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i].startsWith('--')) {
@@ -176,10 +174,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   const [cmd = 'list', a1] = pos;
   const gen = flag('generated') ? { tool: flag('generated').split(':')[0], model: flag('generated').split(':').slice(1).join(':') || null, prompt: flag('prompt') || null, terms: flag('terms') || null, at: new Date().toISOString().slice(0, 10) } : null;
-  const fail = (m) => {
-    console.error(m);
-    process.exit(1);
-  };
   if (cmd === 'add') {
     const r = await addAsset({ source: a1, use: flag('use'), owner: flag('owner') || '', licence: flag('licence') || flag('license') || '', origin: flag('source') || '', by: flag('by') || '', game: flag('game') || '', feature: flag('feature') || '', author: flag('author') || '', credit: flag('credit') || '', madeBy: flag('made-by') || '', generated: gen, pack: flag('pack') || 'own' });
     if (!r.ok) fail(r.message);

@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents } from './event.mjs';
 import { readJson } from './fsafe.mjs';
 import { TASK_LINE_RE } from './board-line.mjs';
+import { escapeRe as reEsc, ofTypeIn } from './helpers.mjs';
 
 export const OVERSEER_REL = 'studio/overseer.json';
 const DAY = 86400000;
@@ -53,7 +54,6 @@ export function readOverseer(root = REPO_ROOT) {
   return { stage, agent: doc?.agent ? String(doc.agent).trim() : null, setBy: doc?.setBy || null, setAt: doc?.setAt || null, criteria, source: committed ? 'committed' : 'default', notes };
 }
 
-const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Commits in history with Overseer-By: <agent>: [{ sha, at, reproOf }] and the shas reverted by later commits. */
 export function overseerCommits(root, agent, { since = 0 } = {}) {
   if (!agent) return { commits: [], reverted: new Set() };
@@ -228,7 +228,7 @@ export function roleText(r) {
 export async function overseerPass({ root = REPO_ROOT, now = Date.now(), hours = 24, events = null, records = null } = {}) {
   const from = now - hours * 3600000;
   const ev = (events || readRecentEvents(200000)).filter((e) => { const t = Date.parse(e.ts) || 0; return t >= from && t <= now; });
-  const T = (type) => ev.filter((e) => e.type === type);
+  const T = ofTypeIn(ev);
   const items = [];
   const claims = {};
   for (const e of T('task.start')) claims[e.task] = (claims[e.task] || 0) + 1;

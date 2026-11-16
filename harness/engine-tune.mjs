@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
 import { TUNE_KEYS, engineTarget, readTune, tunePath, ENGINE_NAME_RE } from './engine-tracks.mjs';
+import { flagOf } from './helpers.mjs';
 
 /** Set (or unset) one tunable value. { ok, why, from, to } — never touches a protected file. */
 export async function tuneEngine(engine, key, value, { by, why = '', unset = false, root = mainRoot() } = {}) {
@@ -53,7 +54,7 @@ export function tuneText(engine, root = mainRoot()) {
 }
 
 export async function tuneCli(argv) {
-  const opt = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const opt = flagOf(argv);
   const pos = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--') && !['--unset'].includes(argv[i - 1])));
   const [engine, key, value] = pos;
   if (!engine) { console.error('Usage: npm run engine -- tune <engine> [<key> <value>|--unset] --by <you> --why "…"'); return 2; }

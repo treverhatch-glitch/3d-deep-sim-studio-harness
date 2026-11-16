@@ -12,9 +12,9 @@
  */
 import { spawnSync } from 'node:child_process';
 import * as mt from './merge-tree.mjs';
+import { isSha40 as isSha } from './helpers.mjs';
 
 const { gitVersion, mergeTree } = mt;
-const isSha = (s) => /^[0-9a-f]{40}$/.test(String(s || ''));
 
 // 2.65.1: git's version, the merge-tree call, its parsing, the union-file exemption and the file:line places are
 // harness/merge-tree.mjs's, shared with npm run lanes (harness/lanes.mjs); the names stay exported here.

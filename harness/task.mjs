@@ -65,6 +65,7 @@ import { capRefusal } from './round-cap.mjs';
 import { eligibility, recordAttempt, clearAttempts, sameBlocker, startRefusalWords } from './attempts.mjs';
 import { pinRefusal } from './task-pin.mjs';
 import { TASK_LINE_RE } from './board-line.mjs';
+import { gitInRootOf, readTextOrNull as read } from './helpers.mjs';
 
 // The board is the main checkout's (boardRoot): a hand-made lane copy has no link to main's studio/ and would read its own git snapshot.
 export const NEXT_FILE = path.join(boardRoot(), 'studio', 'NEXT.md');
@@ -115,7 +116,6 @@ async function startDiskWarning() {
 }
 
 function readBoardFiles() {
-  const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
   let next = read(NEXT_FILE);
   let done = null;
   for (let i = 0; i < 5; i++) {
@@ -267,7 +267,6 @@ function renderDone(done, kept) {
 }
 
 function writeNextQueueRaw(tasks, kept = { next: [], done: [] }) {
-  const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
   const wasNext = read(NEXT_FILE);
   let wasDone = read(DONE_FILE);
   // A board file changed by something other than the harness since its last write (a hand edit) is a detected
@@ -1261,7 +1260,7 @@ export function engineHalfOpen(taskId, root = mainRoot()) {
   const repo = engineRepo(rec.engine);
   const target = engineTarget(rec.engine)?.cfg?.target || null;
   if (!repo || !target) return null;
-  const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd: repo, encoding: 'utf8' });
+  const g = gitInRootOf(repo);
   if (g('rev-parse', '--verify', '--quiet', `refs/heads/${rec.branch}^{commit}`).status !== 0 || g('rev-parse', '--verify', '--quiet', `refs/heads/${target}^{commit}`).status !== 0) return null;
   const ahead = Number(g('rev-list', '--count', `refs/heads/${target}..refs/heads/${rec.branch}`).stdout.trim()) || 0;
   void root;

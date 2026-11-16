@@ -16,11 +16,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { flagOf } from '../harness/helpers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const version = argv[0];
-const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+const flag = flagOf(argv);
 const has = (k) => argv.includes(`--${k}`);
 const dry = has('dry-run');
 const sh = (cmd, args, opts = {}) => spawnSync(cmd, args, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...opts });

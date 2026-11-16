@@ -18,7 +18,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const SKIP_DIRS = new Set(['node_modules', '.git', '.lanes', '.studio', '.worktrees']);
 const MIN_DUP_LINES = 6;
 
-const fwd = (p) => p.split(path.sep).join('/');
 
 function walk(root, rel, accept, out) {
   let ents;

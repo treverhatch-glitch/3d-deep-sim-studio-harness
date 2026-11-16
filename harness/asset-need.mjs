@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, actor } from './event.mjs';
 import { readManifest, writeManifest, entryFor, MANIFEST, sha256 } from './assets.mjs';
 import { readJson } from './fsafe.mjs';
+import { failExit as fail, flagValueOf, jsonFileOf, nowIso as now, posixOf as posix, writeJsonPretty as writeJson } from './helpers.mjs';
 
 export const NEEDS_DIR = path.join(STUDIO_STATE_DIR, 'assets', 'needs');
 export const LIBRARY_CACHE_DIR = path.join(STUDIO_STATE_DIR, 'assets', 'library');
@@ -26,11 +27,8 @@ const MODEL_EXT = ['.glb', '.gltf', '.fbx', '.obj', '.blend'];
 const INDEX_EXT = [...MODEL_EXT, '.png', '.jpg', '.jpeg', '.webp', '.tga', '.wav', '.ogg', '.mp3', '.flac'];
 const STOP = new Set(['a', 'an', 'the', 'of', 'for', 'with', 'and', 'in', 'on', 'to', 'asset', 'model']);
 
-const writeJson = (f, j) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${JSON.stringify(j, null, 2)}\n`); };
-const now = () => new Date().toISOString();
 const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'asset';
 const r6 = (x) => Math.round(x * 1e6) / 1e6;
-const posix = (p) => p.split(path.sep).join('/');
 
 /** studio/assets.json, with studio/game.json "assets" as a fallback for commands. */
 export function readConfig() {
@@ -316,7 +314,7 @@ const libraryShas = (cfg) => { const m = new Map(); for (const it of libraryItem
 
 // ---------- need records ----------
 
-const needFile = (id) => path.join(NEEDS_DIR, `${id}.json`);
+const needFile = jsonFileOf(NEEDS_DIR);
 export function readNeeds() {
   let names = []; try { names = fs.readdirSync(NEEDS_DIR).filter((n) => /^N-\d+\.json$/.test(n)); } catch {}
   return names.map((n) => readJson(path.join(NEEDS_DIR, n))).filter(Boolean).sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
@@ -598,11 +596,10 @@ export function needsText(id = null, { all = false } = {}) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => { const i = argv.indexOf(`--${k}`); return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null; };
+  const flag = flagValueOf(argv);
   const pos = [];
   for (let i = 0; i < argv.length; i++) { if (argv[i].startsWith('--')) { if (argv[i + 1] && !argv[i + 1].startsWith('--')) i++; } else pos.push(argv[i]); }
   const [cmd, a1, a2] = pos;
-  const fail = (m) => { console.error(m); process.exit(1); };
   if (cmd === 'need') {
     const r = await assetNeed({ what: a1, for: flag('for'), budget: flag('budget'), size: flag('size'), exactSize: argv.includes('--exact-size'), style: flag('style'), tags: flag('tags'), kind: flag('kind'), by: flag('by') }, { log: (x) => console.log(x) });
     if (!r.ok) fail(r.message);

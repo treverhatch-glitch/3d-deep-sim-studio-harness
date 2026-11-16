@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { isOff as off } from './helpers.mjs';
 
 export const MAX_WORKER_FACTOR = 4;
 export const RUNNER_DEFAULTS = {
@@ -20,7 +21,6 @@ export const RUNNER_DEFAULTS = {
   jest: { testMs: 5000, hookMs: null },
   'node --test': { testMs: Infinity, hookMs: null },
 };
-const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 const segs = (cmd) => String(cmd || '').split(/&&|\|\||;/);
 const toks = (s) => String(s || '').trim().split(/\s+/).filter(Boolean).map((t) => t.replace(/^["']|["']$/g, ''));
 const base = (t) => t.replace(/\\/g, '/').split('/').pop().replace(/\.(c?m?js|cmd|exe|ps1)$/i, '').toLowerCase();

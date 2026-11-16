@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT, emitEvent } from './event.mjs';
+import { pad2 as p } from './helpers.mjs';
 
 export const LOG_FILE = path.join(REPO_ROOT, 'studio', 'producer', 'LOG.md');
 const HEADER = `# Producer log (\`studio/producer/LOG.md\`)
@@ -14,7 +15,6 @@ const HEADER = `# Producer log (\`studio/producer/LOG.md\`)
 `;
 
 const stamp = (d = new Date()) => {
-  const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 

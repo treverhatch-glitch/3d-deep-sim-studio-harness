@@ -4,6 +4,21 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.88.0] — 2026-11-16
+One reading of "landed", and one module of small helpers (the owner's order: the consolidation map's second step).
+Code and tests are 200 lines larger than 2.87, not smaller: the helpers saved 26 and the landing fix with its tests
+added 226.
+Details: docs/RELEASE-2.88.0.md.
+- **Which tasks landed is read in one place** (`harness/landings.mjs`). On a crew's ten days, 140 tasks landed on the
+  web main, 186 on the engine target and 404 were closed; some reports read only the web records and some counted
+  every close. The health report, the brief status, the development cycle's brief and the game-dev loop now count
+  what reached main or an engine target. A studio with no lanes still counts its closes.
+- **The engine flow of the score** counts an engine whose name has a hyphen.
+- **One module of small helpers** (`harness/helpers.mjs`): 53 helpers that 170 files defined 323 times, each replaced
+  only where its body was the same.
+- **Not changed:** the scorecard's "landed" (measures 1, 3, 4 and 15) and the upgrade comparison still count closes,
+  so rounds stay comparable; the owner decides whether to narrow them.
+
 ## [2.87.0] — 2026-11-16
 Shorter, same behaviour (the owner's order: the consolidation map's first step). Nothing changes what a command prints,
 decides or writes. Tracked text 173,676 lines to about 168,500; `harness/` and `scripts/` 4.8% smaller by size.
@@ -95,73 +110,9 @@ and 0 of 26 landed tasks without an overseer step: 59.5% of hand-backs had a har
   files, code tokens proven unchanged.
 - **Not measured:** nothing here has run on a live studio or a real editor yet.
 
-## [2.84.0] — 2026-11-12
-Less waste (the owner's order: keep what moves the studio forward, cut what costs tokens). The documents an agent or
-a maintainer reads went from 1,672 KB to 958 KB and code comments from 1,557 KB to 1,439 KB; tracked lines stayed level
-(164,633 → 164,630) because the second pass added as much as the cuts removed.
-Details: docs/RELEASE-2.84.0.md.
-- **Planning wakes that change nothing** (`harness/wake-gate.mjs`): after a regular cycle or a queue-depth session that
-  changed nothing on the board, that role's next one waits twice as long, up to `STUDIO_CYCLE_QUIET_MAX_H` (12) and
-  `STUDIO_WAKE_SAME_MAX_H` (6); a person's answer, an owner order or a phase change ends the wait. On a crew's 26-hour
-  log: 66 of 113 planning wakes skipped, about $43 of $70. `meta.outcome.boardEvents` on a planning session's end; two
-  scorecard lines. A session is not started on a task whose `task start` would be refused (`agent.start.refused`).
-- **The same-family review switch** (`npm run review -- same-family on|off|auto`, `studio/review.json`): the owner or
-  the overseer decides whether a review by the implementer's own model family counts. Which families a studio has is
-  read from the main checkout's files, never from a session's environment.
-- **The overseer's sheet** (`npm run overseer -- sheet`): everything waiting on a person or the overseer, with the
-  reason and the command for each. Reads only.
-- **A real Unity editor in the online checks** (`scripts/unity-real.mjs`, job `engine-unity-real`): the Edit Mode
-  arguments the harness plans, a failing test's name and a compile error's file, checked against a real editor's
-  output. The test runner is pinned to v4.3.2. UNTESTED until the repository's Unity sign-in secrets work.
-- **A batch window for the engine train** (`engines.<x>.batchMin`, `batchWaitMin`; default off): the automatic start
-  waits a few minutes for more queued branches while sessions are still working on that engine's tasks.
-- **Play Mode focus** (`engines.<x>.play.focus`): the land command is told which Play Mode tests a batch needs
-  (`STUDIO_PLAY_MODE`, `STUDIO_PLAY_FILTER`, `STUDIO_UNITY_PLAYMODE_ARGS`); a full run once a day. UNVERIFIED on a
-  real editor.
-- **A check for commands that end before they run** (`npm run check:tla`, in the release gate): a module that awaits,
-  at top level, an import that reaches back to itself exits 13. Four more found and fixed (`ask`, `engine-tracks`,
-  `session-cap`, `waves`); `engine-tracks.mjs backfill` had been ending that way.
-- **From a studio's first hours on 2.83:** `npm run engine -- merge <ID> [--continue|--abort]` merges the engine target
-  into a task's worktree and leaves a conflict for the session to resolve (a session may not run `git merge`; three
-  tasks burned three sessions each); the same conflict twice parks the task once. A file git reports as modified
-  whose bytes equal the committed version is not "uncommitted work". `rules.focus.ignore` and `play.focus.ignore`:
-  paths that cannot affect the tests do not force the full run.
-- **Drift check:** files already changed in the main checkout when a session started are not counted as the session's.
-- **The Windows self-test in 8 shards** (was 4): about half the wait for every release.
-- **Which commands a studio runs** (`npm run commands-run`): an empty marker per command and month, so a feature is
-  cut on evidence.
-- **Second pass, from a crew's first day on 2.83** (4 of 15 scorecard targets; engine land runs passed 34.8%; 22% of
-  landed tasks without an overseer step) **and the overseer's list:**
-  - *Land runs:* failing tests and compiler errors are read from the results files a land run writes
-    (`engines.<x>.results`); a red stage is retried with only the tests that failed, and known-flaky names
-    (`flakyTests`) before anyone is blamed; `play.focus.skip`; `compileFirst`; a run the OS killed is retried, never
-    blamed; `rules.focus.split` and `rules.maxLanes` for the rules check's memory.
-  - *Train control:* `task train --engine <x> --only <ids> | --tag <name>`, `task tag`, `batchMax`, `batchGroup`,
-    `task train cancel --engine <x>`, `task train auto off|on --engine <x>`, `npm run studio:boot -- install`.
-  - *Gates by track* (`harness/gate-tracks.mjs`, on by default, `STUDIO_GATES_BY_TRACK=off`): a docs-only or
-    engine-only change no longer runs the web game's gates; the safety gates run on every change.
-  - *The reviewer:* the tool follows the planned model, a mismatch is refused before a process starts, a reviewer's
-    launch crash no longer halts the supervisor; `npm run review -- ask <ID> --model <id>` (the harness asks, records
-    and closes the review task).
-  - *Supervisor and crew:* a skipped task says why; a refusal about the crew is not counted against the task; the crew
-    breaker counts queued and ready work; the planning stall limit follows the model; `task start --dry-run`;
-    `studio:reload-env` names the settings it no longer reads.
-  - *Who decides:* the overseer and the signers were refused the engine merge and unparks, and their own decisions did
-    not end the planning back-off: fixed, with a table in docs/OVERSEER.md. **Beta powers, the owner's decision:** in
-    beta mode a beta-mode agent and an outside signer release tier-C lanes, force a done (with the train too), approve
-    protected files including their own change (marked `self`), resume a crew and control an engine train; each use
-    is a `beta.use` event and a digest line; the owner-only list, launched sessions and workers are unchanged; an
-    upgrade keeps `studio/beta.json`.
-  - *A harness-owned editor* (`npm run editor`, `harness/editor-service.mjs`, a C# service in the Unity template):
-    warm land runs and a compile-and-capture queue for sessions. Off by default. UNTESTED on a real editor.
-  - *Cut:* remote workers and the remote verify, the harness scout, signed results (14 settings); five more pages
-    shortened; code comments in the largest modules cut with a proof that no code token changed.
-- **Cut:** eleven old release notes, three old handoff notes, the 2.79 audit write-up; the changelog, the problems log
-  and the proposals log keep their newest entries in full and one line for each older one; README 18 KB → 4 KB;
-  docs/SECURITY.md 46 KB → 17 KB with every rule kept. One pattern for a board line (`harness/board-line.mjs`).
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.84.0** (2026-11-12): Less waste. The documents an agent or a maintainer reads went from 1,672 KB to 958 KB; older log entries one line each; a record of which commands a studio runs (`npm run commands-run`).
 - **2.83.0** (2026-11-11): Flow. A session is accounted where its work is; the engine train blames by evidence and a branch can land alone; the rules check runs the lanes' systems; plan passes that changed nothing are skipped.
 - **2.82.0** (2026-11-10): measured, then cut: the scorecard read against a crew's log, engine land runs batched, the rules check before the land run, duplicate helpers folded.
 - **2.81.0** (2026-11-10): grade, measure, cut again: the round scorecard (`npm run score`), the outside overseer's role, a faster self-test, duplicate helpers folded.

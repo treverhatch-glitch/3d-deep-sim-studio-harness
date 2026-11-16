@@ -18,6 +18,7 @@ import { focusFromLog, normTestPath } from './train-focus.mjs';
 import { testRngFacts, gameFolder } from './test-rng.mjs';
 import { portCollision, portCollisionWhy } from './test-ports.mjs';
 import { readJson } from './fsafe.mjs';
+import { flagOf, isOff as off } from './helpers.mjs';
 
 export const FLAKES_REL = '.studio/flakes.jsonl';
 export const QUARANTINE_REL = 'studio/quarantine.json';
@@ -27,7 +28,6 @@ export const FLAKY = Object.freeze(['load-flake', 'seed-flake', 'intermittent', 
 // quiet machine, so it is listed (LOAD_SENSITIVE_REL), never quarantined.
 export const LOAD_SENSITIVE_REL = '.studio/load-sensitive.json';
 const DAY = 86400000;
-const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 const num = (v, d) => (String(v ?? '').trim() !== '' && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : d);
 const writeAtomic = (f, text) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const t = `${f}.${process.pid}.tmp`; fs.writeFileSync(t, text); fs.renameSync(t, f); };
 
@@ -528,7 +528,7 @@ export function statusText(root, now = Date.now(), env = process.env) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const { mainRoot } = await import('./worktree.mjs');
   const root = mainRoot();
   if (!argv.length || argv[0] === 'status') { console.log(statusText(root)); process.exit(0); }

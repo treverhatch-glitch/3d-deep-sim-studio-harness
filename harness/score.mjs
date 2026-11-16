@@ -17,10 +17,11 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { visionFixFlow } from './vision-fix.mjs';
+import { ofTypeIn, tsMs as at } from './helpers.mjs';
+import { landings } from './landings.mjs';
 
 const DAY = 86400000;
 const HOUR = 3600000;
-const at = (e) => Date.parse(e?.ts) || 0;
 const r1 = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
 const pct = (k, n) => (n > 0 ? r1((100 * k) / n) : null);
 const quantile = (xs, p) => { const s = xs.filter(Number.isFinite).sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.floor(p * s.length))] : null; };
@@ -47,7 +48,7 @@ export const MEASURES = [
 
 /** Count the measures the autonomy report doesn't have. events: sorted, inside the window. machine: [{ at, cpu, ram }]. */
 export function countRest(events, { from, now, machine = [] } = {}) {
-  const T = (type) => events.filter((e) => e.type === type);
+  const T = ofTypeIn(events);
   const out = { notes: {} };
   // Spend by role (what each session's tool reported).
   const ends = T('agent.session.end');
@@ -62,7 +63,7 @@ export function countRest(events, { from, now, machine = [] } = {}) {
   const perDone = [...new Set(done.map((e) => e.task))].map((id) => claims[id] || 0).filter(Boolean);
   out.firstClaimDonePct = pct(perDone.filter((n) => n === 1).length, perDone.length);
   out.notes.firstClaimDonePct = perDone.length ? `${r1(perDone.reduce((a, b) => a + b, 0) / perDone.length)} claims per done task` : '';
-  // Trains.
+  // Trains: the web train's own records (measure 8, docs/SCORECARD.md), not landing events; unchanged in 2.88.
   const trains = T('task.train.done');
   const landed = trains.reduce((n, e) => n + (e.meta?.landed || []).length, 0);
   const dropped = trains.reduce((n, e) => n + (e.meta?.dropped || []).length, 0);
@@ -119,7 +120,8 @@ export function engineFlow(events) {
   const min = (e) => (Number(e.meta?.ms) || 0) / 60000;
   const by = (s) => lands.filter((e) => s.includes(e.meta.status));
   const total = lands.reduce((n, e) => n + min(e), 0);
-  const landedLanes = events.filter((e) => /^task\.train\.\w+\.landed$/.test(e.type)).reduce((n, e) => n + (Array.isArray(e.meta?.lanes) ? e.meta.lanes.length : 1), 0) || by(['pass']).length;
+  // 2.88: harness/landings.mjs reads engine landings; the old \w+ missed an engine name with a hyphen.
+  const landedLanes = landings(events, 'engine').length || by(['pass']).length;
   const stageMap = new Map();
   for (const e of lands) {
     const st = Array.isArray(e.meta.stages) ? e.meta.stages : [];

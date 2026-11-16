@@ -23,6 +23,7 @@ import { createExclusive, moveAside, onFsafeWarning, sweepTemps, withFileLock, w
 import { watchCommand } from './workaround.mjs';
 import { inNoteDir } from './reviewer-scope.mjs';
 import { actorOf, outsideSigners } from './permission.mjs';
+import { readJsonOrNull as readJson } from './helpers.mjs';
 
 // fsafe's warnings (a state file written in place because another program held it open) are logged as events too.
 // Every command that changes studio state loads this.
@@ -402,7 +403,6 @@ export function commitTasks({ owner = process.env.STUDIO_LOCK_OWNER || '', subje
     let branch = '';
     try { branch = execFileSync('git', ['symbolic-ref', '-q', '--short', 'HEAD'], { windowsHide: true, cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch {}
     const found = new Set();
-    const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
     if (branch) {
       const b = readJson(path.join(REPO_ROOT, '.studio', 'lane-branches.json')) || {};
       for (const [k, v] of Object.entries(b)) if (!k.includes(':') && v === branch) found.add(k);

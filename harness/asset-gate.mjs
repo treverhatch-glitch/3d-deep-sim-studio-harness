@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { agentOnPermission } from './permission.mjs';
 import { readJson } from './fsafe.mjs';
+import { flagOf, quoteArg as q } from './helpers.mjs';
 
 export const MODEL_EXT = ['.glb', '.gltf', '.fbx', '.obj', '.blend', '.dae', '.usd', '.usdz'];
 export const IMAGE_EXT = ['.png', '.jpg', '.jpeg', '.webp', '.tga', '.ktx2', '.exr', '.hdr'];
@@ -312,7 +313,6 @@ export async function runRoundTrip(root, cfg, models, { env, log }) {
   if (!models.length) return { skipped: true, note: 'no model file in the change: the round trip has nothing to run' };
   const inst = programInstalled(rt.command, env);
   if (!inst.ok) return { skipped: true, note: `the round-trip program "${inst.prog}" isn't installed here: export/re-import not checked (it runs on a machine that has it)` };
-  const q = (s) => (/[\s"]/.test(s) ? `"${String(s).replace(/"/g, '\\"')}"` : s);
   const cmds = rt.command.includes('{file}') ? models.map((f) => ({ f, cmd: rt.command.replaceAll('{file}', q(f)).replaceAll('{files}', q(f)) })) : [{ f: models.join(', '), cmd: rt.command.replaceAll('{files}', models.map(q).join(' ')) }];
   const timeoutMin = Number(rt.timeoutMin || 20);
   const { acquireHeavy, heavyRoot } = await import('./heavy.mjs');
@@ -560,7 +560,7 @@ export function fileAssetHandoff({ task, files = null, addTask, root = REPO_ROOT
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   if (argv[0] === 'allow') {
     const r = allowLicence(argv[1] || '', { by: flag('by') || '', permission: flag('permission') || '' });
     (r.ok ? console.log : console.error)(`[asset-gate] ${r.why}`);

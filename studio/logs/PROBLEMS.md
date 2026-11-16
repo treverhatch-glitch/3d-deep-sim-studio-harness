@@ -110,6 +110,11 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Evidence:** the map counted definitions (1,251 in tests, 511 in the harness) and estimated 2,000 to 3,100 and 600 to 800 lines. The helpers are one line each: the test kit removed 1,237 definitions and 263 lines.
 - **Fix:** estimate a merge from the lines the definitions occupy minus the imports that replace them, not from their count.
 
+### P-342 — reports disagreed on which tasks landed · fixed 2026-11-16 (2.88)
+- **Evidence:** a crew's ten days: 140 tasks landed on the web main, 186 on the engine target, 404 closed. The health report read `lane.merged` only (it missed the engine's 186); the development cycle's brief and the game-dev loop read every `task.done` (80 tasks that landed nothing). About twenty readers, five readings.
+- **Fix:** `harness/landings.mjs`: a caller names its measure. Six readers changed, each with a check that fails on 2.87 (`qa/selftest-288a.mjs`).
+- **Open:** the scorecard and the upgrade comparison still count closes (docs/RELEASE-2.88.0.md).
+
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
 - **P-001** (reopened on purpose 2026-10-31: the owner made the harness and the game's repository public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist

@@ -18,6 +18,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { protectRoot } from './gate-trust.mjs';
 import { readEnvFile } from './dotenv.mjs';
+import { foldRealOf, isOffRaw as falsy, realOrResolved } from './helpers.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = protectRoot(path.resolve(HERE, '..')) || path.resolve(HERE, '..'); // never in a lane copy
@@ -379,7 +380,6 @@ export async function stampMessage(msgFile, { cwd = process.cwd() } = {}) {
 }
 
 const truthy = (v) => /^(on|1|true|yes)$/i.test(String(v || ''));
-const falsy = (v) => /^(off|0|false|no)$/i.test(String(v || ''));
 
 /** Are the hooks installed in this checkout? */
 function hooksInstalled() {
@@ -549,8 +549,7 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
 
 /** Folders that hold the harness a lane copy runs (its gates, hooks and task done). */
 export const LANE_HARNESS_DIRS = ['harness', 'scripts'];
-const realOrResolved = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
-const samePath = (a, b) => { const n = (p) => (process.platform === 'win32' ? realOrResolved(p).toLowerCase() : realOrResolved(p)); return n(a) === n(b); };
+const samePath = (a, b) => { const n = foldRealOf(realOrResolved); return n(a) === n(b); };
 
 /**
  * Is this checkout a lane copy (a git worktree of the main checkout: <main>/.lanes/<agent>, or STUDIO_MAIN_ROOT set to

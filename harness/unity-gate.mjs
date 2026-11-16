@@ -24,6 +24,7 @@ import { infraAbort } from './engine-proof.mjs';
 import { landWaitMin, recordLandPeak } from './engine-ram.mjs';
 import { engineTarget, engineTask, engineFloor, recordDuration, readTune, tunePath } from './engine-tracks.mjs';
 import { readJson } from './fsafe.mjs';
+import { flagOf, quoteArg as q } from './helpers.mjs';
 
 export const UNITY_EXIT = { 0: 'pass', 1: 'red', 2: 'conflict', 3: 'refused', 4: 'error' };
 const WORDS = {
@@ -300,7 +301,6 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   }
   if (/\{task\}/.test(template) && !task) return finish({ status: 'error', ok: false, code: null, why: 'the land command needs {task}: pass --task <ID>' });
   if (/\{target\}/.test(template) && !safeRefName(cfg.target)) return finish({ status: 'error', ok: false, code: null, why: 'the land command needs {target}: set "target" (the branch it lands on) in studio/game.json engines.unity' });
-  const q = (s) => (/[\s"]/.test(s) ? `"${String(s).replace(/"/g, '\\"')}"` : s);
   // The lane's tuned settings go to the command ({flags}; STUDIO_ENGINE_TUNE*).
   const tune = (() => { try { return readTune(engine).values; } catch { return {}; } })();
   const flags = Array.isArray(tune['batch-flags']) && et.tune.includes('batch-flags') ? tune['batch-flags'].filter((f) => /^-{1,2}[A-Za-z][A-Za-z0-9_-]*(=[A-Za-z0-9_.:,/-]+)?$/.test(f)) : [];
@@ -415,7 +415,7 @@ export const unityLine = (res) => `[unity-gate] ${res.status === 'skipped' ? 'SK
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const json = argv.includes('--json');
   if (argv[0] === 'branch') {
     const r = setTaskBranch(argv[1], argv[2]);

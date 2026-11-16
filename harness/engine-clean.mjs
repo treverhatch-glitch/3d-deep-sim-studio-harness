@@ -19,11 +19,10 @@ import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { engineRepo, engineTarget, engineTargets, samePath } from './engine-tracks.mjs';
 import { readJson } from './fsafe.mjs';
 import { sparseState } from './engine-worktree.mjs';
+import { argAfterOf, bytesUnder, foldCase as fold, realOrResolved as real } from './helpers.mjs';
 
 const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', windowsHide: true, timeout: 120000 });
 const fwd = (p) => String(p).split(path.sep).join('/');
-const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
-const fold = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
 const say = (log, m) => { try { (log || (() => {}))(m); } catch {} };
 
 /** The worktrees git lists for `repo`: [{ dir, head, branch }]. null when git can't say. */
@@ -327,18 +326,7 @@ export function diskUsers({ root = REPO_ROOT, env = process.env, now = Date.now(
 }
 
 /** Bytes under p, not following links, stopping after 50000 entries (an estimate). */
-function capSize(p, max = 50000) {
-  let n = 0; let seen = 0;
-  const walk = (q) => {
-    if (seen++ > max) return;
-    let st; try { st = fs.lstatSync(q); } catch { return; }
-    if (st.isSymbolicLink() || !st.isDirectory()) { n += st.size || 0; return; }
-    let names = []; try { names = fs.readdirSync(q); } catch { return; }
-    for (const x of names) walk(path.join(q, x));
-  };
-  walk(p);
-  return n;
-}
+function capSize(p, max = 50000) { return bytesUnder(p, max); }
 
 /**
  * The supervisor's engine lane pass: every 30 minutes, a detached child (`node harness/engine-clean.mjs lanes`) removes
@@ -363,7 +351,7 @@ export function engineLanesPass({ root = REPO_ROOT, env = process.env, now = Dat
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const opt = (k) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : null);
+  const opt = argAfterOf(argv);
   const dry = argv.includes('--dry-run');
   const root = REPO_ROOT;
   const only = opt('--engine');

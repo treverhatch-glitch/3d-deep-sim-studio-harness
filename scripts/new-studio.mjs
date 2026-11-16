@@ -12,10 +12,11 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { applySetup, saveSetup } from './studio-setup.mjs';
+import { flagOf } from '../harness/helpers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
-const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+const flag = flagOf(argv);
 if (flag('save-setup')) {
   const r = saveSetup(flag('save-setup'), ROOT);
   console.log(r.ok ? `[new-studio] Saved this studio's setup (${r.saved} file(s), ${r.settings} setting(s), no keys) to ${r.dir}.\nStart a game with it: npm run new-studio -- --name "<game>" --setup ${r.dir}` : r.message);

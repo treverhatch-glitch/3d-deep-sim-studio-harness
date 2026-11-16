@@ -17,9 +17,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
 import { readJson } from './fsafe.mjs';
+import { gitCwdMax64 as git, slashPath as fwd } from './helpers.mjs';
 
-const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
-const fwd = (p) => String(p || '').split(path.sep).join('/');
 
 /** The studio game's folder (game/<name> or web/<name>) from studio/game.json "game" or STUDIO_GAME. */
 function gameRoot(root, env = process.env) {

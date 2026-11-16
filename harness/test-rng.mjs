@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { scrub, normMode } from './det-math.mjs';
 import { isTestPath } from './test-weakening.mjs';
 import { readJson } from './fsafe.mjs';
+import { toPosix } from './helpers.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(HERE, '..');
@@ -23,7 +24,6 @@ const CODE_EXT = /\.(m?[jt]sx?|c[jt]s)$/i;
 const SETUP_NAME = /(^|[._-])setup([._-]|$)|^setupTests?\./i;
 const UNSEEDED_ARG = /\bMath\s*\.\s*random\b|\bDate\s*\.\s*now\b|\bperformance\s*\.\s*now\b|\bcrypto\s*\.\s*(getRandomValues|randomUUID|randomInt)\b/;
 
-const toPosix = (p) => String(p).replace(/\\/g, '/');
 const list = (v) => (Array.isArray(v) ? v : v === undefined || v === null || v === '' ? [] : [v]).map(String).filter(Boolean);
 
 /** The studio game's folder under `root` (game/<name> or web/<name>), or null. Sync: hand-backs call it. */

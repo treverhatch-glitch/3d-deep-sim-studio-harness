@@ -7,15 +7,14 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { sha256Hex as sha256 } from './helpers.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE_FILE = path.join(REPO_ROOT, '.studio', 'gate-cache.json');
 const EXCLUSIONS = ['.studio/', 'studio/events', 'qa/reports/'];
 
-const sha256 = (data) => crypto.createHash('sha256').update(data).digest('hex');
 
 function readCache() {
   if (!fs.existsSync(CACHE_FILE)) return {};

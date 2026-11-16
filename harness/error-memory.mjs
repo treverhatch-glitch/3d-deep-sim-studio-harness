@@ -10,16 +10,15 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { STUDIO_STATE_DIR } from './event.mjs';
 import { readJson } from './fsafe.mjs';
+import { gitCwdMax64 as git, short8 as short } from './helpers.mjs';
 
 export const MEMORY_FILE = 'error-memory.jsonl';
 const PENDING_FILE = 'error-memory-pending.json';
 const BOOKKEEPING = /^(studio|\.studio|\.lanes|node_modules|qa\/reports)(\/|$)/;
 const off = (env = process.env) => /^(off|0|false|no)$/i.test(String(env.STUDIO_ERROR_MEMORY || '').trim());
 export const memoryMax = (env = process.env) => (Number(env.STUDIO_ERROR_MEMORY_MAX) > 0 ? Math.floor(Number(env.STUDIO_ERROR_MEMORY_MAX)) : 500);
-const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
 
 /** Every remembered fix, oldest first (one per signature key). */
 export function readMemory(stateDir = STUDIO_STATE_DIR) {
@@ -75,7 +74,6 @@ export function pendingReds(task, { stateDir = STUDIO_STATE_DIR } = {}) {
 /** The fix's commit, summary and files: what changed in `cwd` since the red's commit. */
 export function fixFacts(cwd, redHead) {
   const head = git(cwd, 'rev-parse', 'HEAD').stdout.trim() || null;
-  const short = (h) => String(h || '').slice(0, 8);
   const known = redHead && git(cwd, 'cat-file', '-e', `${redHead}^{commit}`).status === 0;
   const range = known && head && head !== redHead;
   const subjects = range ? git(cwd, 'log', '--format=%s', `${redHead}..HEAD`).stdout.split('\n').map((s) => s.trim()).filter(Boolean) : [];

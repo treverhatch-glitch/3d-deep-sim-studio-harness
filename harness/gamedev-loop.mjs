@@ -14,9 +14,10 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { STUDIO_STATE_DIR, REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
+import { readJsonOr as read } from './helpers.mjs';
+import { landedMeasure, landedTasks } from './landings.mjs';
 
 const FILE = () => path.join(STUDIO_STATE_DIR, 'gamedev.json');
-const read = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const skip = (k) => String(process.env.STUDIO_GAMEDEV_SKIP || '').split(',').map((s) => s.trim()).includes(k);
 
 /** Is a game active (so the loop runs without anyone turning it on)? */
@@ -89,7 +90,8 @@ export async function gamedevPass(now = Date.now(), { events = readRecentEvents(
   }
 
   if (!skip('landing')) {
-    const landed = events.filter((e) => e.type === 'task.done' && Date.parse(e.ts) > last).map((e) => e.task).filter(Boolean);
+    // 2.88: a landing on the main branch or an engine target; a close that landed nothing changed no layout or visual.
+    const landed = landedTasks(events, landedMeasure(events), { after: last });
     if (landed.length) {
       try {
         const { runLayoutGate } = await import('./layout-gate.mjs');

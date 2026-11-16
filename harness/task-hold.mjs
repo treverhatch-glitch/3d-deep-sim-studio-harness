@@ -19,7 +19,8 @@ import { withFileLock, writeAtomic, pidAlive } from './fsafe.mjs';
 import { WORKER_NAME, DECIDER_ROLES, ownerStandInRole } from './permission.mjs';
 import { ownerType } from './reclassify.mjs';
 import { entryPath, hasRegion, listsClash } from './lane-regions.mjs';
-import { sameBlocker, attemptsRefuse } from './attempts.mjs'; // a cycle (attempts.mjs reads the holds): only called at run time
+import { sameBlocker, attemptsRefuse } from './attempts.mjs';
+import { hhmm, readJsonOrNull as readJ } from './helpers.mjs'; // a cycle (attempts.mjs reads the holds): only called at run time
 
 export const HOLDS_FILE = path.join(REPO_ROOT, 'studio', 'task-holds.json');
 export const STOP_COOLDOWN_MIN = () => Number(process.env.STUDIO_STOP_COOLDOWN_MIN ?? 15);
@@ -76,7 +77,6 @@ export function setHold(id, patch, { by = 'producer', msg = '', meta = null } = 
 }
 
 const doneIds = (q) => new Set(q.done.map((t) => t.id));
-const hhmm = (iso) => new Date(iso).toTimeString().slice(0, 5);
 /** 2.77.3 (B-115): a clock time as UTC with the zone named, like every other time the studio prints. */
 export const utcHm = (iso) => `${new Date(iso).toISOString().slice(11, 16)} UTC`;
 
@@ -124,7 +124,6 @@ export function heldForLanding(taskId, { holds = readHolds(), queue = null } = {
  * Never throws.
  */
 export function inAnyTrain(taskId, { stateDir = STUDIO_STATE_DIR } = {}) {
-  const readJ = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
   const alive = pidAlive;
   let names = [];
   try { names = fs.readdirSync(path.join(stateDir, 'train')); } catch {}

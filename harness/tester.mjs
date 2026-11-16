@@ -19,15 +19,14 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { gameTesterConfig, DEFAULT_STYLES, DEFAULT_GOALS, DEFAULT_AREAS } from './tester-config.mjs';
 import { pidAlive as alive, readJson } from './fsafe.mjs';
+import { flagOf, numSplit as num, relPosix as rel, writeJsonTmp as writeJson } from './helpers.mjs';
+import { landings, tasksOf } from './landings.mjs';
 
 export const TESTER_AGENT = 'game-tester';
 export const TESTER_ROLE = 'qa-playtester';
 export const STATUSES = ['working', 'broken', 'missing', 'not-reached'];
 export const VERDICTS = ['green', 'amber', 'red'];
 const OFF = /^(off|0|false|no)$/i;
-const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
-const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(tmp, f); };
-const rel = (root, f) => path.relative(root, f).split(path.sep).join('/');
 const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', windowsHide: true });
 
 export const testerDir = (root) => path.join(root, '.studio', 'tester');
@@ -56,15 +55,13 @@ export function testerSettings(env = process.env) {
 export const readTesterState = (root) => readJson(stateFile(root), {}) || {};
 export const writeTesterState = (root, s) => writeJson(stateFile(root), s);
 
-/** Game landings since `since` (ms): [{ task, at }], one per task (a train landing names its lanes in meta.lanes). */
+/**
+ * Game landings since `since` (ms): [{ task, at }], one per task. Web landings only, on purpose: the tester builds and
+ * plays the web game from the main branch, and an engine landing goes to the engine's own repo.
+ */
 export function landingsSince(events, since = 0) {
   const out = new Map();
-  for (const e of events || []) {
-    const at = Date.parse(e.ts) || 0;
-    if (at < since) continue;
-    const ids = e.type === 'lane.merged' ? (e.task ? [String(e.task)] : []) : e.type === 'task.train.landed' ? (Array.isArray(e.meta?.lanes) ? e.meta.lanes.map((x) => String(typeof x === 'object' ? x?.task : x)) : e.task ? [String(e.task)] : []) : [];
-    for (const id of ids) if (/^T-\d+$/.test(id) && !out.has(id)) out.set(id, { task: id, at: e.ts });
-  }
+  for (const l of landings(events, 'web', { since })) if (/^T-\d+$/.test(l.task) && !out.has(l.task)) out.set(l.task, { task: l.task, at: l.ts });
   return [...out.values()];
 }
 
@@ -468,8 +465,9 @@ export async function wirePass({ root, now = Date.now(), env = process.env, act 
   const st = readTesterState(root);
   const wired = st.wired || {};
   const seen = st.wireSeen || {};
+  // A web landing or a close (same as 2.87): done-check notes task.unwired when the task closes.
   const landed = new Set(landingsSince(events, 0).map((l) => l.task));
-  for (const e of events) if (e.type === 'task.done' && e.task) landed.add(String(e.task));
+  for (const e of events) for (const t of tasksOf(e, 'closed')) landed.add(t);
   const notes = new Map();
   for (const e of events) if (e.type === 'task.unwired' && e.task && landed.has(e.task) && !seen[e.task]) notes.set(e.task, e);
   if (!notes.size) return { on: true, added: [], why: 'no landed task with unwired game code' };
@@ -520,7 +518,7 @@ export function statusText(t) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   try { (await import('./dotenv.mjs')).loadDotEnv(path.join(REPO_ROOT, '.env')); } catch {}
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const cmd = argv[0] || 'status';
   const root = await mainRootOf();
   if (cmd === 'build') { const r = await buildRun(root, flag('run')); console.log(r.ok ? r.why : `build failed: ${r.why}`); process.exitCode = r.ok ? 0 : 1; }

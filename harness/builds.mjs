@@ -18,18 +18,12 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { flagOf, readJsonOrNull as readJson } from './helpers.mjs';
 
 export const BUILDS_DIR = path.join(STUDIO_STATE_DIR, 'builds');
 const KEEP = 6;
 const TYPES = { '.html': 'text/html', '.mjs': 'text/javascript', '.js': 'text/javascript', '.json': 'application/json', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.wasm': 'application/wasm', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.mp4': 'video/mp4', '.webm': 'video/webm', '.woff2': 'font/woff2' };
 
-const readJson = (f) => {
-  try {
-    return JSON.parse(fs.readFileSync(f, 'utf8'));
-  } catch {
-    return null;
-  }
-};
 export function listBuilds() {
   if (!fs.existsSync(BUILDS_DIR)) return [];
   return fs.readdirSync(BUILDS_DIR).map((id) => readJson(path.join(BUILDS_DIR, id, 'build.json'))).filter(Boolean).sort((a, b) => b.at.localeCompare(a.at));
@@ -130,7 +124,7 @@ const lanAddress = () => Object.values(os.networkInterfaces()).flat().find((i) =
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   if (argv[0] === 'list') {
     const all = listBuilds();
     console.log(all.length ? all.map((b) => `${b.id}  ${b.at.slice(0, 16).replace('T', ' ')}  ${b.outcome || ''}${b.ticks != null ? ` at tick ${b.ticks}` : ''}${b.dirty ? '  (had uncommitted work)' : ''}`).join('\n') : 'No saved builds yet: one is saved each time npm run play:browser passes.');

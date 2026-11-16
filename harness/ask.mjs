@@ -20,6 +20,7 @@ import { betaActor } from './beta-mode.mjs';
 import { ownerOnlyTopic, ownerOnlyWhy, ownerOnlyReadAs } from './owner-acts.mjs';
 import { selfNamingShell, DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { logDecision } from './decisions-log.mjs';
+import { doneExit as out, flagOf, readJsonOrNull as read } from './helpers.mjs';
 
 export const ASKS_DIR = path.join(REPO_ROOT, 'studio', 'asks');
 const LOG = path.join(REPO_ROOT, 'studio', 'decisions', 'decided-without-you.md');
@@ -29,13 +30,6 @@ const PROTECTED_CORE = /\b(sign|re-?sign|signature|pillars?|crossed[- ]out|bring
 const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|scout|reference-scout|designer|balancer|agent|watch|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes)\b/i;
 export const isAgent = (by) => AGENTISH.test(by) || by === process.env.STUDIO_LOCK_OWNER || by === process.env.STUDIO_PRODUCER_NAME;
 
-const read = (f) => {
-  try {
-    return JSON.parse(fs.readFileSync(f, 'utf8'));
-  } catch {
-    return null;
-  }
-};
 export function allAsks() {
   if (!fs.existsSync(ASKS_DIR)) return [];
   return fs.readdirSync(ASKS_DIR).filter((f) => /^A-\d+\.json$/.test(f)).sort().map((f) => read(path.join(ASKS_DIR, f))).filter(Boolean);
@@ -247,18 +241,10 @@ export async function reverse(id, ans, by) {
 // 2.84: the command-line part is an async function, not a top-level await: an import cycle through a top-level await ends the process with exit 13.
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)))(async () => {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   // 2.85: --open and --help take no value, so the word after them is not theirs.
   const BOOL = new Set(['--open', '--help']);
   const pos = argv.filter((x, i) => !x.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--') && !BOOL.has(argv[i - 1])));
-  const out = (r, line) => {
-    if (!r.ok) {
-      console.error(r.message);
-      process.exit(1);
-    }
-    console.log(line(r));
-    process.exit(0);
-  };
   if (pos[0] === 'answer') {
     const r = answer(pos[1], pos[2], flag('by'));
     const act = r.ok ? await runAskAction(r.ask, flag('by')) : null;

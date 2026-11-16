@@ -22,12 +22,10 @@ import { failingTests } from './unity-gate.mjs';
 import { readJson, writeAtomic } from './fsafe.mjs';
 import { splitPlan } from './rules-parts.mjs';
 import { peakFromHistory, readUsedHistory } from './engine-ram.mjs';
+import { flagOf, isOff as off, numFiniteFirst as num, pushToOf, stdoutOf as out } from './helpers.mjs';
 
-const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 const on = (v) => /^(1|true|yes|on)$/i.test(String(v ?? '').trim());
-const num = (v, d) => (Number.isFinite(Number(v)) && String(v ?? '').trim() !== '' ? Number(v) : d);
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
-const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 const short = (sha) => String(sha || '').slice(0, 10);
 const safe = (s) => String(s).replace(/[^A-Za-z0-9._-]/g, '_');
 const sha1 = (s) => crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 12);
@@ -561,7 +559,7 @@ function ownersAt(ctx, sha) {
   if (ctx.owners.has(sha)) return ctx.owners.get(sha);
   const by = new Map();
   const files = treeFiles(ctx.repo, sha);
-  const add = (f, line) => { if (!by.has(f)) by.set(f, []); by.get(f).push(line); };
+  const add = pushToOf(by);
   for (const [p, id] of files || []) {
     let hit = false;
     for (const m of ctx.cfg.focus.map) { const f = mapFilterOf(m, p); if (f) { hit = true; add(f, `${p}\0${id}`); } }
@@ -989,7 +987,7 @@ export function rulesPlanText(r) {
 
 /** The command line. Not top-level await: unity-train.mjs imports this module, so that left evaluation unsettled (node exit 13). */
 async function cli(argv) {
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const engine = flag('engine') || 'unity';
   const root = mainRoot();
   const { unityTrainSettings } = await import('./unity-train.mjs');

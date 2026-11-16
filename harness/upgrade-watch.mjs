@@ -15,10 +15,10 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { emitEvent } from './event.mjs';
 import { pidAlive, readJson } from './fsafe.mjs';
+import { stdoutOf as out1 } from './helpers.mjs';
 
 export const UPGRADE_REL = 'studio/upgrade.json';
 const git = (root, args, opts = {}) => spawnSync('git', ['-c', 'core.quotePath=false', ...args], { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, ...opts });
-const out1 = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 const stateFile = (root) => path.join(root, '.studio', 'upgrade-watch.json');
 // upgrade-guard.mjs as its CLI passes itself in (a module whose top-level await is still running can't import itself back).
 const loadGuard = async (g) => g || import('./upgrade-guard.mjs');

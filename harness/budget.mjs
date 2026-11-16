@@ -19,17 +19,11 @@ import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { spawnAgentSync } from './launch.mjs';
 import { cacheReadWeight, weightedTokens } from './token-weight.mjs';
 import { cutFor } from './spend-budget.mjs';
+import { flagOf, readJsonOr as readJson } from './helpers.mjs';
 
 export const BUDGET_FILE = path.join(REPO_ROOT, 'studio', 'budget.json');
 export const QUOTA_FILE = path.join(STUDIO_STATE_DIR, 'tool-quota.json');
 const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-const readJson = (f, d) => {
-  try {
-    return JSON.parse(fs.readFileSync(f, 'utf8'));
-  } catch {
-    return d;
-  }
-};
 export const readBudget = () => readJson(BUDGET_FILE, { order: ['claude', 'codex', 'agy'], tools: {} });
 const saveBudget = (b) => {
   fs.mkdirSync(path.dirname(BUDGET_FILE), { recursive: true });
@@ -443,7 +437,7 @@ export function importCcusage({ run = spawnSync, now = Date.now() } = {}) {
 // below import modules that import those, so a top-level await left the cycle unsettled (exit 13, no output).
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) (async () => {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   // Spend budgets per tool or key (harness/spend-budget.mjs): set <name> <usd> | clear <name> | resume <name>,
   // each with --by <who> --why "<the owner's order>". `set <tool> --weekly ...` and `clear <tool>` without --by are the quota forms.
   const spendCmd = (argv[0] === 'set' && /^\$?\d+(\.\d+)?$/.test(String(argv[2] || ''))) || argv[0] === 'resume' || (argv[0] === 'clear' && flag('by') && (await import('./spend-budget.mjs')).readBudgets().budgets[argv[1]]);

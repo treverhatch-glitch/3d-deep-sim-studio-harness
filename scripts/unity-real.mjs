@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { editModePlan, parseNUnit } from '../harness/unity.mjs';
 import { failingTests, compileErrorFiles } from '../harness/unity-gate.mjs';
+import { flagOf } from '../harness/helpers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TEMPLATE = path.join(ROOT, 'engine', '_unity');
@@ -109,7 +110,7 @@ export function judgeCase(name, { xml = '', log = '', planArgs = [] } = {}) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const out = path.resolve(ROOT, flag('out') || '.unity-real');
   const cmd = argv[0];
   if (cmd === 'prepare') {

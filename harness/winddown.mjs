@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { readJson } from './fsafe.mjs';
+import { flagOf } from './helpers.mjs';
 
 export const WINDDOWN_FILE = () => path.join(STUDIO_STATE_DIR, 'winddown.json');
 export const RESTART_LOG = () => path.join(STUDIO_STATE_DIR, 'restart-log.md');
@@ -147,7 +148,7 @@ export async function winddownOff({ by, permission = '', env = process.env } = {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   let r;
   if (argv.includes('--now')) r = await winddownNow({ by: flag('by'), why: flag('why') || '', until: flag('until') });
   else if (argv.includes('--off')) r = await winddownOff({ by: flag('by'), permission: flag('permission') || '' });

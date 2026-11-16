@@ -16,10 +16,11 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { cycleDigest, digestHeader, gateWake, isStrongNews, readWakeGate, recordWake } from './wake-gate.mjs';
+import { readJsonOr as read } from './helpers.mjs';
+import { landedMeasure, landedTasks, tasksOf } from './landings.mjs';
 
 const FILE = () => path.join(STUDIO_STATE_DIR, 'dev-cycle.json');
 const BRIEF = () => path.join(STUDIO_STATE_DIR, 'briefs', 'dev-cycle.md');
-const read = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 
 /** Core design docs a bible should have: name -> what counts (file names or headings). */
 export const CORE_DOCS = {
@@ -89,7 +90,9 @@ export async function cyclePass({ now = Date.now(), force = false, events = read
     const r = await fileTask(`ladder:${l.ladder}:${l.next}`, `Propose ${l.next} for "${l.ladder}" (more content, depth, polish or a port) with measurable exit criteria and append it to studio/bible/CHARTER.md; ${l.last} is nearly done`, { role: 'director', priority: 'P1', by: 'dev-cycle' });
     if (r.id && !r.skipped) filed.push(r.id);
   }
-  const landed = events.filter((e) => e.type === 'task.done' && Date.parse(e.ts) > last).map((e) => `- ${e.task}: ${String(e.msg || '').slice(0, 140)}`);
+  // 2.88: what landed on the main branch or an engine target, not every close (a planning close changes no game).
+  const closeOf = (t) => events.filter((e) => tasksOf(e, 'closed').includes(t)).pop();
+  const landed = landedTasks(events, landedMeasure(events), { after: last }).map((t) => `- ${t}: ${String(closeOf(t)?.msg || 'landed').slice(0, 140)}`);
   const caps = [];
   const proof = path.join(STUDIO_STATE_DIR, 'proof');
   if (fs.existsSync(proof)) for (const t of fs.readdirSync(proof)) { const d = path.join(proof, t, 'visual', 'after'); if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) caps.push(`- ${path.relative(REPO_ROOT, path.join(d, f))}`); }

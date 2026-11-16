@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { classifyLane } from './tiers.mjs';
 import { isTestPath, isGoldenPath, isTestConfig } from './test-weakening.mjs';
+import { strList as strs } from './helpers.mjs';
 
 // Rules whose files are game logic or behaviour (a bug there keeps its replay).
 const LOGIC_RULES = new Set(['sim', 'golden', 'pin-files', 'irreversible', 'shared', 'registry', 'harness', 'test-deleted', 'golden-deleted', 'regression-deleted', 'protected-code']);
@@ -40,7 +41,6 @@ export function manifestSettings(root, gameName) {
     const f = path.join(root, top, gameName, 'studio.gates.json');
     let j = null;
     try { j = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { continue; }
-    const strs = (a) => (Array.isArray(a) ? a.map((x) => String(x).trim()).filter(Boolean) : []);
     const s = {};
     for (const k of ['simPaths', 'shared', 'registry', 'irreversible']) if (j?.[k] !== undefined) s[k] = strs(j[k]);
     if (j?.pins && typeof j.pins === 'object') s.pins = { files: strs(j.pins.files) };

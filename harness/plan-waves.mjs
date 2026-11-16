@@ -15,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { matchAny } from './merge-lane.mjs';
+import { normRel as norm } from './helpers.mjs';
 
 const num = (v, d) => (String(v ?? '').trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 export const wavesMinutes = (env = process.env) => Math.max(0, num(env.STUDIO_WAVES_MIN, 30));
@@ -23,7 +24,6 @@ export const wavesOff = (env = process.env) => /^(off|0|false|no)$/i.test(String
 const STATE = () => path.join(STUDIO_STATE_DIR, 'waves-shadow.json');
 
 const GLOB_CHARS = /[*?[\]{}]/;
-const norm = (p) => String(p || '').trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
 
 /**
  * `--scope "<glob>,<glob>"` as a list of globs. Free text (an engine pass's prose scope, words with spaces) is not a

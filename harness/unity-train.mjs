@@ -26,14 +26,10 @@ import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE } from './engine-rules.mjs';
 import { removeLandedLane, pruneBuilds, buildsConfig } from './engine-clean.mjs';
+import { flagOf, foldRealOf, gitMax64 as git, numBlankDefault as num, realOrResolved as real, short8 as short, sleepSyncClamped as sleep, stdoutOf as out } from './helpers.mjs';
 
-const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
-const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
-const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); writeAtomic(f, `${JSON.stringify(v, null, 2)}\n`); };
 const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
-const short = (s) => String(s || '').slice(0, 8);
 const labelOf = (engine) => engineTarget(engine)?.label || engine;
 const evTop = (type, id, msg, extra = {}) => { const e = extra.engine || 'unity'; try { emitEvent({ type: `task.train.${e}.${type}`, agent: extra.agent || `${e}-train`, task: extra.task, to: extra.to, status: extra.status, track: `engine:${e}`, msg: `${labelOf(e)} train ${id}: ${msg}`.slice(0, 600), meta: { train: id, engine: e, ...(extra.meta || {}) } }); } catch {} };
 
@@ -661,8 +657,7 @@ export function landScriptDrift(s, root = mainRoot()) {
       const top = out(git(dir, 'rev-parse', '--show-toplevel'));
       if (!top) continue;
       // Native real paths: on Windows git prints long names while a temp folder is often spelled with its 8.3 short name.
-      const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
-      const fold = (p) => (process.platform === 'win32' ? real(p).toLowerCase() : real(p));
+      const fold = foldRealOf(real);
       const common = (d) => { const c = out(git(d, 'rev-parse', '--git-common-dir')); return c ? fold(path.resolve(d, c)) : ''; };
       if (!common(dir) || common(dir) !== common(s.repo)) continue;
       const rel = path.relative(real(top), real(file)).split(path.sep).join('/');
@@ -1514,14 +1509,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   // `queue --task <ID> [--engine x] [--agent a] [--branch b] [--alone]`: queue a task's branch (what task done --train does after its checks).
   if (argv[0] === 'queue') {
-    const fl = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+    const fl = flagOf(argv);
     const r = queueUnityTask(mainRoot(), { engine: fl('engine') || 'unity', task: fl('task'), agent: fl('agent') || null, branch: fl('branch') || null, alone: argv.includes('--alone') ? true : null, again: argv.includes('--again') });
     console.log(JSON.stringify({ ok: r.ok, message: r.message, error: r.error || null }));
     process.exit(r.ok ? 0 : 1);
   }
   // 2.85: `play-plan [--engine x] [--branch b | --paths a,b] [--json]`: what a batch's Play Mode stage would run, and why (read-only).
   if (argv[0] === 'play-plan') {
-    const fl = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+    const fl = flagOf(argv);
     const r = playPlan(mainRoot(), { engine: fl('engine') || 'unity', branch: fl('branch'), paths: fl('paths') });
     if (argv.includes('--json')) console.log(JSON.stringify(r));
     else console.log(r.error ? r.message : playPlanText(r));
@@ -1531,7 +1526,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   // [--land-min 60] [--name-min 5] [--json]`: the steps a red train would take for made-up outcomes, with each step's kind of run and
   // its minutes (nextStep, read-only: nothing runs; only the engine's flakyRetries and knownRedHours are read).
   if (argv[0] === 'bisect-plan') {
-    const fl = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+    const fl = flagOf(argv);
     const list = (k) => String(fl(k) || '').split(',').map((x) => x.trim()).filter(Boolean);
     const cfg = unityConfig(mainRoot(), fl('engine') || 'unity') || {};
     const landMin = Number(fl('land-min')) > 0 ? Number(fl('land-min')) : 60;

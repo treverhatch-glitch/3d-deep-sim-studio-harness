@@ -17,6 +17,7 @@ import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { readEnvFile, vertexUpstream, vertexId, overPromptCap, promptCap, HEALTH_PATH, USAGE_REL, VERTEX_KEY_ENV, VERTEX_PROJECT_ENV, VERTEX_PORT_DEFAULT } from './vertex.mjs';
 import { priceFor } from './autonomy.mjs';
+import { flagOf } from './helpers.mjs';
 
 const TAG = /^session-([A-Za-z0-9][A-Za-z0-9._-]{0,79})$/;
 
@@ -108,7 +109,7 @@ export function createVertexProxy({ root, fetchImpl = globalThis.fetch } = {}) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   const root = path.resolve(flag('root') || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'));
   const port = Number(flag('port') || process.env.STUDIO_VERTEX_PROXY_PORT || VERTEX_PORT_DEFAULT);
   const server = createVertexProxy({ root });

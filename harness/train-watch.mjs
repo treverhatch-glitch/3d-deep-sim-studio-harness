@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isMainThread, workerData } from 'node:worker_threads';
 import { writeAtomic, readJson } from './fsafe.mjs';
+import { mtimeMs as mtime } from './helpers.mjs';
 
 const num = (v, d) => { const s = String(v ?? '').trim(); if (/^(off|no|false)$/i.test(s)) return 0; const n = Number(s); return s !== '' && Number.isFinite(n) && n >= 0 ? n : d; };
 /** STUDIO_TRAIN_STALL_MIN in ms (default 90 min; 0/off: no watch). */
@@ -24,7 +25,6 @@ export const stallGraceMs = (env = process.env) => num(env.STUDIO_TRAIN_STALL_GR
 export const RESTING = new Set(['ready', 'waiting', 'done', 'died', 'ended', 'stalled']);
 export const cancelPath = (root, id) => path.join(root, '.studio', 'train', `${id}.cancel.json`);
 const writeJson = (f, j) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); writeAtomic(f, `${JSON.stringify(j, null, 2)}\n`); } catch {} };
-const mtime = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
 // Loaded once the watch starts (a worker only), so a stall's event is written before its children are stopped.
 let events = null;
 

@@ -16,9 +16,9 @@ import { REPO_ROOT, boardRoot } from './event.mjs';
 import { matchAny } from './merge-lane.mjs';
 import { activeGame, isTemplateCartridge } from './cartridge.mjs';
 import { indexFile } from './codeindex.mjs';
+import { normRel as norm } from './helpers.mjs';
 
 const OFF = /^(off|0|false|no)$/i;
-const norm = (p) => String(p || '').trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
 
 /** One lane entry: { path, region: null | { lines: [start, end] } | { symbol }, raw }. */
 export function splitEntry(entry) {

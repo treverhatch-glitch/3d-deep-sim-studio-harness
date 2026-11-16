@@ -2,7 +2,7 @@
 /**
  * harness/health.mjs — how well the HARNESS is doing (not the game, not the models), from the event log. No model.
  *   npm run harness-health [-- --since 24h|7d|<ISO>] [--json] [--write <folder>]
- * Numbers: landings (lane.merged, else task.done); refusals per landing, with reasons; harness-caused (share of
+ * Numbers: landings (tasks landed on main or an engine target; task.done in a log with none: landings.mjs); refusals per landing, with reasons; harness-caused (share of
  * hand-backs the harness caused, near 0); forced dones, budget stops, stalled sessions; median full verify (scoped vs
  * unscoped, gates.run events) and done time (task.done.start to landed); weighted tokens per landing (builders with no
  * usage are counted apart as untracked); launches skipped.
@@ -18,6 +18,8 @@ import { spawnSync } from 'node:child_process';
 import { readRecentEvents } from './event.mjs';
 import { weightedTokens } from './budget.mjs';
 import { harnessCaused } from './busy.mjs';
+import { argAfterOf } from './helpers.mjs';
+import { landedMeasure, landedTasks } from './landings.mjs';
 
 export const TARGETS = { refusalsPerLanding: 1.5, harnessCausedShare: 0.05 };
 
@@ -43,9 +45,9 @@ export function parseSince(v, now = Date.now()) {
 
 export function health(events, { since = 0, now = Date.now() } = {}) {
   const evs = events.filter((e) => (Date.parse(e.ts) || 0) >= since && (Date.parse(e.ts) || 0) <= now);
-  const merged = evs.filter((e) => e.type === 'lane.merged');
   const doneEv = evs.filter((e) => e.type === 'task.done');
-  const landings = merged.length || doneEv.length;
+  // 2.88: engine landings count too (lane.merged alone missed every one); closes only in a log with no landing record.
+  const landings = landedTasks(evs, landedMeasure(events)).length;
   const refusals = evs.filter((e) => e.type === 'task.not_done');
   const reasons = {};
   for (const r of refusals) reasons[reasonOf(r.msg)] = (reasons[reasonOf(r.msg)] || 0) + 1;
@@ -129,8 +131,7 @@ export async function oldCodeLines() {
 
 /** What landed since, and what is waiting on a person: the second half of the morning report. */
 export async function needsYou(events, { since = 0 } = {}) {
-  const landed = events.filter((e) => e.type === 'lane.merged' && (Date.parse(e.ts) || 0) >= since).map((e) => e.task).filter(Boolean);
-  const out = { landed: [...new Set(landed)], parked: [], rescuing: [], pending: [], protectedChanges: null, stopped: null };
+  const out = { landed: landedTasks(events, landedMeasure(events), { since }), parked: [], rescuing: [], pending: [], protectedChanges: null, stopped: null };
   try {
     const { readHolds } = await import('./task-hold.mjs');
     for (const [id, h] of Object.entries(readHolds())) {
@@ -199,7 +200,7 @@ export function renderNeeds(n) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const a = process.argv.slice(2);
-  const flag = (n) => (a.includes(n) ? a[a.indexOf(n) + 1] : null);
+  const flag = argAfterOf(a);
   const events = readRecentEvents(0);
   const since = parseSince(flag('--since') || '24h');
   const h = health(events, { since });

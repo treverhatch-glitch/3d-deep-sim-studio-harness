@@ -18,6 +18,8 @@ import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
 import { weightedTokens, cacheReadWeight } from './token-weight.mjs';
 import { buildAttempts } from './metrics.mjs';
+import { escapeRe as reEsc, flagOf, pad2 as pad, pushToOf, tsMs as ts } from './helpers.mjs';
+import { tasksOf } from './landings.mjs';
 
 export const AUTONOMY_REL = 'studio/autonomy.json';
 export const DEFAULT_AUTONOMY = Object.freeze({
@@ -103,7 +105,6 @@ export function dollarsOf(ends, prices, multipliers = DEFAULT_PRICE_MULTIPLIERS)
   return { usd, unpriced, reported, priced };
 }
 const ESCAPE_DAYS = 7;
-const ts = (e) => Date.parse(e?.ts) || 0;
 const round = (x, d = 2) => (x === null || x === undefined || !Number.isFinite(x) ? null : Math.round(x * 10 ** d) / 10 ** d);
 
 export function readAutonomyConfig(root = REPO_ROOT) {
@@ -185,7 +186,6 @@ export function sampledRate(k, n, minSample = DEFAULT_MIN_SAMPLE) {
   const text = !(n > 0) ? 'no data (n=0)' : enough ? `${p1(k / n)} (95% interval ${p1(w[0])}-${p1(w[1])}, n=${round(n, 1)})` : `not enough data (n=${round(n, 1)}; 95% interval ${p1(w[0])}-${p1(w[1])})`;
   return { k: round(k, 2), n: round(n, 2), rate: n > 0 ? round(k / n, 4) : null, low: w ? round(w[0], 4) : null, high: w ? round(w[1], 4) : null, enough, text };
 }
-const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Tokens per landed change from sessions that name their task: { sessions, named, tasks, tokensPerLandedNamed, top: the five costliest }. */
 export function tokensByLandedTask(ends, landedTasks, weightOf) {
   const landed = new Set((landedTasks || []).map(String));
@@ -247,7 +247,7 @@ export function tokenWork(sorted, { from, now, judgedAt = null, keepDays = DEFAU
   const judged = Number.isFinite(judgedAt) && judgedAt ? judgedAt : Math.max(now, lastTs);
   const inWin = (t) => t >= from && t <= now;
   const byTask = new Map(); const redoneAt = new Map(); const tasks = new Map();
-  const push = (t, e) => { if (!byTask.has(t)) byTask.set(t, []); byTask.get(t).push(e); };
+  const push = pushToOf(byTask);
   for (const e of sorted) {
     if (e.task) push(e.task, e);
     for (const t of landingsOf(e)) if (t !== e.task) push(t, e);
@@ -311,7 +311,7 @@ export function tokenWork(sorted, { from, now, judgedAt = null, keepDays = DEFAU
   const endsByAgent = new Map();
   for (const e of sorted) if (e.type === 'agent.session.end') { const k = String(e.agent || ''); if (!endsByAgent.has(k)) endsByAgent.set(k, []); endsByAgent.get(k).push(e); }
   const held = new Map(); // session end event -> attempts
-  const hold = (s, a) => { if (!held.has(s)) held.set(s, []); held.get(s).push(a); };
+  const hold = pushToOf(held);
     const named = (e) => String(e.task || e.meta?.task || '');
   const claimed = new Set();
   for (const ends of endsByAgent.values()) for (const s of ends) {
@@ -432,12 +432,9 @@ export function interventionKind(e, actor) {
   return null;
 }
 
-function landingsOf(e) {
-  if (e.type === 'task.done' || e.type === 'lane.merged') return e.task ? [e.task] : [];
-  if (e.type === 'task.forced') return e.task ? [e.task] : [];
-  if (e.type === 'task.train.landed') return Array.isArray(e.meta?.lanes) ? e.meta.lanes.map(String) : [];
-  return [];
-}
+// A task's end: a web landing, a close or a forced close (same as 2.87). An engine landing is seen through the
+// close that follows it. The score's measures 1, 3, 4 and 15 read this, so rounds stay comparable.
+const landingsOf = (e) => tasksOf(e, ['web', 'closed', 'forced']);
 
 /** Spans the supervisor ran: supervisor.start to supervisor.stop (an open one ends at the log's last event). */
 function supervisorSpans(events, end) {
@@ -520,7 +517,6 @@ function localMidnight(y, mo, d, zone) {
   const first = guess - zoneOffsetMin(guess, zone) * 60000;
   return guess - zoneOffsetMin(first, zone) * 60000;
 }
-const pad = (x) => String(x).padStart(2, '0');
 export const localDate = (ms, zone) => { const w = zoneParts(ms, zone); return `${w.y}-${pad(w.mo + 1)}-${pad(w.d)}`; };
 export function localStamp(ms, zone) {
   const w = zoneParts(ms, zone); const off = zoneOffsetMin(ms, zone);
@@ -628,11 +624,11 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   }
   const landed = [...landedAt.entries()].map(([task, x]) => ({ task, ...x }));
   const byTask = new Map();
-  const add = (t, e) => { if (!byTask.has(t)) byTask.set(t, []); byTask.get(t).push(e); };
+  const add = pushToOf(byTask);
   const causedBy = new Map();
   for (const e of sorted) {
     if (e.task) add(e.task, e);
-    if (e.type === 'task.train.landed') for (const t of (e.meta?.lanes || []).map(String)) if (t !== e.task) add(t, e);
+    if (e.type === 'task.train.landed') for (const t of tasksOf(e, 'web')) if (t !== e.task) add(t, e);
     if (e.type === 'task.added' && e.meta?.causedBy) { const k = String(e.meta.causedBy); if (!causedBy.has(k)) causedBy.set(k, []); causedBy.get(k).push(ts(e)); }
   }
   // Hands-free: no person event from the claim to the landing; a person running the train counts on each lane it landed.
@@ -951,7 +947,7 @@ export async function autonomyCard({ now = Date.now() } = {}) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  const flag = flagOf(argv);
   if (argv[0] === 'level') {
     const r = await setLevel(argv[1], { by: flag('by'), why: flag('why') || '', permission: flag('permission') || '' });
     (r.ok ? console.log : console.error)(r.message);

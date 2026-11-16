@@ -18,8 +18,8 @@ import { emitEvent } from './event.mjs';
 import { parseNextQueue, addTask } from './task.mjs';
 import { readBible, writeBible, readIdeas, readIdea, writeIdea, renderBible, LAYERS, IDEAS_DIR } from './bible.mjs';
 import { pingDirector } from './director.mjs';
+import { flagValueOf, nowIso as now } from './helpers.mjs';
 
-const now = () => new Date().toISOString();
 const step = (idea, stage, by, note = '') => ({ ...idea, stage, history: [...(idea.history || []), { stage, at: now(), by, note }] });
 
 /** Where an idea came from, shown as a label on the board. Dev-confirmed ideas are routed first. */
@@ -116,10 +116,7 @@ export function decideIdea(id, verdict, { by, note = '' }) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
-  const flag = (k) => {
-    const i = argv.indexOf(`--${k}`);
-    return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
-  };
+  const flag = flagValueOf(argv);
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i].startsWith('--')) {

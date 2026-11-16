@@ -16,6 +16,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { REPO_ROOT, actor, emitEvent, readRecentEvents } from './event.mjs';
 import { ask } from './ask.mjs';
+import { jsonFileOf, numFiniteFirst as num, readJsonOrNull as readJson, writeJsonPretty as writeJson } from './helpers.mjs';
 
 export const CHANGES_DIR = path.join(REPO_ROOT, 'studio', 'changes');
 const LADDER_FILE = path.join(CHANGES_DIR, 'ladder.json');
@@ -42,7 +43,6 @@ export const signatureKey = (e) => `${e.type}: ${signature(e.msg)}`;
 /** A short, stable id for a signature key: what lessons, change records and ladder tasks name. */
 export const signatureId = (key) => `sig-${crypto.createHash('sha1').update(String(key)).digest('hex').slice(0, 8)}`;
 
-const num = (v, d) => (Number.isFinite(Number(v)) && String(v ?? '').trim() !== '' ? Number(v) : d);
 export function evalConfig(env = process.env) {
   return {
     tasks: num(env.STUDIO_CHANGE_EVAL_TASKS, 20),
@@ -52,18 +52,7 @@ export function evalConfig(env = process.env) {
   };
 }
 
-const readJson = (f) => {
-  try {
-    return JSON.parse(fs.readFileSync(f, 'utf8'));
-  } catch {
-    return null;
-  }
-};
-const writeJson = (f, v) => {
-  fs.mkdirSync(path.dirname(f), { recursive: true });
-  fs.writeFileSync(f, `${JSON.stringify(v, null, 2)}\n`);
-};
-const fileOf = (id) => path.join(CHANGES_DIR, `${id}.json`);
+const fileOf = jsonFileOf(CHANGES_DIR);
 
 export function readChanges() {
   if (!fs.existsSync(CHANGES_DIR)) return [];

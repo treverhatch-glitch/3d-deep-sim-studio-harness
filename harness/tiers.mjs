@@ -13,6 +13,7 @@
 import { matchAny } from './merge-lane.mjs';
 import { isGoldenPath, isTestPath } from './test-weakening.mjs';
 import { DEFAULT_PROTECTED } from './approve.mjs';
+import { strList as strs } from './helpers.mjs';
 
 export const TIERS = ['A', 'B', 'C'];
 /** Studio files that silence a check (the fuzz ignore list, the test quarantine list harness/flakes.mjs, the asset review thresholds harness/asset-review.mjs); a lane changing one is tier C (released by a game dev or an outside agent with permission). */
@@ -75,7 +76,6 @@ export const DEFAULT_TIER_RULES = [
 ];
 const DEFAULT_TIER = { tier: 'B', why: 'no tier rule names it (unclassified code)' };
 
-const strs = (a) => (Array.isArray(a) ? a.map((x) => String(x).trim()).filter(Boolean) : []);
 
 /**
  * The rules in force: the defaults, changed by the manifest's "tiers" (set: a rule's tier; rules: added rules;
