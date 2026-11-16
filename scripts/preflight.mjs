@@ -136,7 +136,7 @@ export function preflight() {
     row(edited.length ? 'fail' : 'ok', 'Harness files unedited since the freeze', edited.length ? `${edited.slice(0, 6).join(', ')}${edited.length > 6 ? ` and ${edited.length - 6} more` : ''} changed. Put them back (git checkout -- <file>) and record the problem instead: npm run notes -- add --kind bad "…"` : '');
     if (added.length) {
       const g = activeCartridge().name || '<game>';
-      row('fail', 'No new files in harness folders', `${added.slice(0, 6).join(', ')}${added.length > 6 ? ` and ${added.length - 6} more` : ''}: a game's own tools go in game/${g}/tools/ (move them there and fix their paths); harness ideas go in npm run notes`);
+      row('fail', 'No new files in harness folders', `${added.slice(0, 6).join(', ')}${added.length > 6 ? ` and ${added.length - 6} more` : ''}: a game's own tools go in game/${g}/tools/ (move them there, fix their paths, and change any studio/game.json command that points at them); harness ideas go in npm run notes`);
     }
   }
 
