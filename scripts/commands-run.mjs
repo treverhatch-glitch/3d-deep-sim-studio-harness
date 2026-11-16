@@ -3,6 +3,7 @@
  * scripts/commands-run.mjs — 2.84: which harness commands this studio has run, and which it never has.
  *
  *   npm run commands-run [-- --json]
+ *   npm run commands-run -- --functions [--all] [--json]   which functions ran (harness/usage-functions.mjs)
  *
  * Reads the monthly marker files harness/event.mjs makes (.studio/usage/<YYYY-MM>/<script>~<word>). Lists the commands
  * run in each month on record, then every harness/ and scripts/ file that can be run as a command and has no marker at
@@ -14,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR } from '../harness/event.mjs';
+import { functionsFile, readFunctions } from '../harness/usage-functions.mjs';
 
 /** { months: { 'YYYY-MM': { 'harness/task': ['add', 'done', …] } }, since } from the marker files. */
 export function usageMarks(stateDir = STUDIO_STATE_DIR) {
@@ -62,6 +64,61 @@ export function usageReport({ root = REPO_ROOT, stateDir = STUDIO_STATE_DIR } = 
   const used = new Set(Object.values(marks.months).flatMap((by) => Object.keys(by)));
   const files = commandFiles(root);
   return { since: marks.since, months: marks.months, used: [...used].sort(), never: files.filter((f) => !used.has(f.key)).sort((a, b) => b.lines - a.lines) };
+}
+
+/**
+ * Which functions of harness/ and scripts/ ran, from the record harness/usage-functions.mjs keeps for this version:
+ * { version, since, files: [{ file, lines, functions, ran, neverLines, never: [{ name, line, lines }] }], totals }.
+ * A function ran when a recorded start lies in its header (from its first token to its body). neverLines counts each
+ * line once, so a function inside one that never ran adds nothing. ts: the TypeScript module (the parser).
+ */
+export function functionsReport(ts, { root = REPO_ROOT, stateDir = STUDIO_STATE_DIR } = {}) {
+  const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+  const file = functionsFile(stateDir, version);
+  const rows = readFunctions(file);
+  let since = null; try { const st = fs.statSync(file); since = new Date(st.birthtimeMs > 1e12 ? st.birthtimeMs : st.mtimeMs).toISOString().slice(0, 10); } catch { since = null; }
+  const starts = new Map();
+  for (const r of rows) (starts.get(r.file) || starts.set(r.file, []).get(r.file)).push(r.offset);
+  const files = [];
+  for (const dir of ['harness', 'scripts']) {
+    let names = []; try { names = fs.readdirSync(path.join(root, dir)).filter((n) => n.endsWith('.mjs')).sort(); } catch { names = []; }
+    for (const n of names) {
+      const rel = `${dir}/${n}`;
+      let src = ''; try { src = fs.readFileSync(path.join(root, rel), 'utf8'); } catch { continue; }
+      const sf = ts.createSourceFile(rel, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+      const lineOf = (pos) => sf.getLineAndCharacterOfPosition(pos).line + 1;
+      const hits = starts.get(rel) || [];
+      const fns = []; const dead = new Set();
+      const visit = (node) => {
+        if (ts.isFunctionLike(node) && node.body) {
+          const from = node.getStart(sf); const to = node.body.getStart(sf);
+          const ran = hits.some((o) => o >= from && o <= to);
+          const first = lineOf(from); const last = lineOf(node.end);
+          if (!ran) for (let l = first; l <= last; l++) dead.add(l);
+          fns.push({ name: node.name?.getText(sf) || (node.parent?.name?.getText ? node.parent.name.getText(sf) : ''), line: first, lines: last - first + 1, ran });
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sf);
+      files.push({ file: rel, lines: src.split('\n').length, loaded: hits.length > 0, functions: fns.length, ran: fns.filter((f) => f.ran).length, neverLines: dead.size, never: fns.filter((f) => !f.ran).map(({ name, line, lines }) => ({ name, line, lines })) });
+    }
+  }
+  const sum = (k) => files.reduce((x, f) => x + f[k], 0);
+  return { version, since, rows: rows.length, files, totals: { files: files.length, loaded: files.filter((f) => f.loaded).length, lines: sum('lines'), functions: sum('functions'), ran: sum('ran'), neverLines: sum('neverLines') } };
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)) && process.argv.includes('--functions')) {
+  let ts = null;
+  try { ts = (await import('typescript')).default; } catch { console.error('[commands-run] typescript is not installed (npm ci): the functions page needs its parser.'); process.exit(2); }
+  const r = functionsReport(ts);
+  if (process.argv.includes('--json')) { console.log(JSON.stringify(r)); process.exit(0); }
+  if (!r.rows) { console.log(`No functions on record for ${r.version} yet (.studio/usage/functions/): they are recorded as commands run, from 2.89 on (STUDIO_USAGE_FUNCTIONS=off turns it off).`); process.exit(0); }
+  const t = r.totals;
+  console.log(`Functions run in this studio on ${r.version} (on record since ${r.since}): ${t.ran} of ${t.functions} in ${t.loaded} of ${t.files} file(s).`);
+  console.log(`Lines inside functions that never ran: ${t.neverLines} of ${t.lines} (${(100 * t.neverLines / Math.max(1, t.lines)).toFixed(1)}%). A record of days, not proof: a rare path (a restore, a new studio's setup) runs rarely.`);
+  console.log('\nFiles, most never-run lines first (file: functions run of all, never-run lines of lines):');
+  for (const f of [...r.files].sort((a, b) => b.neverLines - a.neverLines).slice(0, process.argv.includes('--all') ? r.files.length : 40)) console.log(`  ${f.file}: ${f.ran} of ${f.functions}, ${f.neverLines} of ${f.lines}${f.loaded ? '' : '  (never loaded)'}`);
+  process.exit(0);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

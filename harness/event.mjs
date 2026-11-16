@@ -15,6 +15,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { appendLine, readJson } from './fsafe.mjs';
 import { loadStudioEnvAtStart } from './dotenv.mjs';
+import { startFunctionRecord } from './usage-functions.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, '..');
@@ -38,6 +39,8 @@ export const STUDIO_STATE_DIR = (() => {
 // (harness/dotenv.mjs). The last non-empty line for a name wins. Values taken from the file are noted
 // (STUDIO_ENV_FROM_FILE) so long-running loops can re-read .env (harness/env-reload.mjs) without overriding a person.
 loadStudioEnvAtStart(path.join(REPO_ROOT, '.env'));
+// Which harness functions this studio runs (harness/usage-functions.mjs; STUDIO_USAGE_FUNCTIONS=off). After .env, so the file's setting counts.
+startFunctionRecord({ root: REPO_ROOT, stateDir: STUDIO_STATE_DIR });
 /**
  * Who is acting, for attribution: an explicit name, then STUDIO_AGENT, then STUDIO_LOCK_OWNER (set by
  * the launcher and kickoff), then the Producer's name. An agent's notes and tasks are its own, never
