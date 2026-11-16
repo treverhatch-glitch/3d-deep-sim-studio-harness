@@ -335,6 +335,10 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 - **Evidence:** with 7 GB free, the supervisor in three checks of qa/selftest-pu19.mjs started nothing: STUDIO_DISK_MIN_FREE_GB (20 GB by default) had become a stop in 2.86.
 - **Fix:** the stop stays (its reason is in the pass's line); the self-test's clean environment turns the budget off as it does the memory floor, and qa/selftest-286f.mjs runs a real supervisor pass under the budget and with it off. docs/RELEASE-2.86.0.md says what a studio under its budget sees.
 
+### P-339 — 2.86.0 threw away a daily full run whose land script records every run on the target · fixed in 2.86.1
+- **Evidence:** a crew's log, 15 November: the daily full run on the target alone ran 174 minutes, then `probe_moved_target`: the target had moved by one commit, the land script's own "record FAIL" of that run. The run was reported as "could not run to its end" and by-name steps were withdrawn. The 2.86 checks used a stand-in script that records nothing.
+- **Fix:** a run that carries no branch is judged by its result; the stop is kept for by-name steps that carry one. qa/selftest-286b.mjs has a stand-in that records every run. docs/NATIVE-ENGINE.md says what a land script should do.
+
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
 - **P-001** (reopened on purpose 2026-10-31: Hatch made the harness and hatchfield-game public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist
