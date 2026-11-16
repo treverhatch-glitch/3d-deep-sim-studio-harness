@@ -10,10 +10,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { guardOf, out } from './kit.mjs';
 
 export async function selftest281B4({ dir, run, report, root }) {
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const guard = guardOf(report);
   const state = path.join(dir, '.studio');
   const agentsDir = path.join(state, 'agents');
   const eventsFile = path.join(state, 'events.jsonl');

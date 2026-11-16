@@ -15,12 +15,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, gateRecOf, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest273G({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', '-c', 'core.hooksPath=.no-hooks', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
-  const writeIn = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const writeIn = writeInDirOf(dir);
   const KEYS = path.join(tmpRoot, 'vk-273g');
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off',
     STUDIO_OWNER_KEY: path.join(tmpRoot, 'no-owner-key-273g.pem'), STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '', GITHUB_BASE_REF: '',
@@ -35,7 +34,7 @@ export async function selftest273G({ dir, run, report, tmpRoot }) {
     fs.rmSync(f, { force: true });
     return { ...json(r), _out: out(r).slice(-1500) };
   };
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const u = fileUrlOf(dir);
   const keyFiles = () => { try { return fs.readdirSync(KEYS).filter((n) => n.endsWith('.key')); } catch { return []; } };
 
   // ---- a made-up studio: a one-check verify, the example cartridge's goldens, git on main ----
@@ -49,7 +48,7 @@ export async function selftest273G({ dir, run, report, tmpRoot }) {
   const gatesDir = path.join(dir, '.studio', 'gates');
   const fresh = () => { for (const d of [gatesDir, path.join(dir, '.studio', 'train'), path.join(dir, '.studio', 'gates-last-full.json'), path.join(dir, '.studio', 'gates-last.json')]) fs.rmSync(d, { recursive: true, force: true }); };
   const verify = (owner, extra = {}) => run(dir, 'node scripts/run-gates.mjs --no-detach', { ...env, STUDIO_LOCK_OWNER: owner, ...extra });
-  const recOf = (owner) => { try { return JSON.parse(fs.readFileSync(path.join(gatesDir, `${owner}-full.json`), 'utf8')); } catch { return null; } };
+  const recOf = gateRecOf(gatesDir);
   const train = (name, extra = {}) => probe(`vt-${name}`, `import { verifyTree } from ${u('harness/train.mjs')};
 import { recordTrust } from ${u('harness/gate-trust.mjs')};
 import fs from 'node:fs'; import path from 'node:path';

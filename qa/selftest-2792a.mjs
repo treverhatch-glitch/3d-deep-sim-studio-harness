@@ -17,18 +17,16 @@ import net from 'node:net';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileUrlIn as u, freePortOf, gEnvOf, gitEolLfOf, out, readText, writeIn } from './kit.mjs';
 
 const FAKE_KEY = 'fake-vertex-key-for-selftest-2792a';
 
 export async function selftest2792A({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const readText = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
+  const gEnv = gEnvOf(ident);
+  const g = gitEolLfOf(gEnv);
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), String(detail).split(FAKE_KEY).join('<KEY>')); } catch (e) { report(name, false, e.stack || String(e)); } };
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI|VERTEX|NVIDIA|XAI|GROQ|OPENROUTER|DEEPSEEK|GOOGLE)/i.test(k) || /_API_KEY|_TOKEN$/.test(k)) clean[k] = '';
@@ -52,9 +50,8 @@ export async function selftest2792A({ dir, report, tmpRoot, root }) {
   };
   const node = (S, args, env, timeout = 300000) => spawnSync(process.execPath, args, { windowsHide: true, cwd: S, encoding: 'utf8', env: { ...process.env, ...ident, ...env }, timeout });
   const probe = (S, code, env) => { const f = path.join(S, `.probe-2792a-${++n}.mjs`); fs.writeFileSync(f, code); const r = node(S, [f], env); fs.rmSync(f, { force: true }); const l = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop(); let j = null; try { j = JSON.parse(l); } catch {} return { ...r, j }; };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const events = (S) => readText(path.join(S, '.studio', 'events.jsonl')).split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-  const freePort = () => new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+  const freePort = freePortOf(net);
   const add = (S, title, env, extra = []) => (out(node(S, ['harness/task.mjs', 'add', title, '--role', 'builder', '--priority', 'P1', ...extra], env)).match(/"id":\s*"([A-Z]+-\d+)"/) || [])[1] || null;
 
   // ---- the stand-in aider: records its argv, whether its task was claimed before it ran, its message and ignore file;

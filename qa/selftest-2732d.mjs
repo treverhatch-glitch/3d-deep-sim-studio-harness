@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { eventsOf, fileUrlOf as fileUrlRelOf, guardOf, out, queueDoneOf, writeIn as write } from './kit.mjs';
 
 export async function selftest2732D({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,15 +21,13 @@ export async function selftest2732D({ dir, run, report, tmpRoot, root }) {
     try { fs.rmSync(path.join(dir, 'node_modules'), { force: true }); } catch {}
     fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   }
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: { ...process.env, ...ident } });
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
   const base = { ...clean, STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_REACHABILITY: 'off', STUDIO_HEAVY_SLOTS: '0', STUDIO_TEST_LOADAVG: '0', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_SELF_TRIAGE: 'off', STUDIO_TIMEOUT_RERUN: 'off', STUDIO_GAME_GATE_CI: 'off', npm_lifecycle_event: '', NODE_OPTIONS: '', npm_config_node_options: '', ...ident };
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const probe = (name, code, env = {}) => {
     const f = path.join(dir, `.probe-2732d-${name}.mjs`);
     fs.writeFileSync(f, code);
@@ -137,7 +136,7 @@ console.log(JSON.stringify({
     const events = path.join(S, '.studio', 'events-2732d.jsonl');
     const env = { ...base, STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_DONE_NOOP: 'allow', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_TRAIN: '', STUDIO_TRAIN_BISECT: '', STUDIO_TRAIN_MIN: '', STUDIO_TRAIN_MAX: '', STUDIO_TRAIN_WAIT_MIN: '', STUDIO_TRAIN_RIDE_ALONG: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-2732d-${process.pid}.pem`), AGENT_EVENTS_FILE: events };
     const person = { ...env, STUDIO_LOCK_OWNER: '' };
-    const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+    const evs = eventsOf(events);
     const board = () => `${fs.existsSync(path.join(S, 'studio/NEXT.md')) ? fs.readFileSync(path.join(S, 'studio/NEXT.md'), 'utf8') : ''}`;
     const doneBoard = () => `${fs.existsSync(path.join(S, 'studio/DONE.md')) ? fs.readFileSync(path.join(S, 'studio/DONE.md'), 'utf8') : ''}`;
     const isDone = (id) => new RegExp(`\\b${id}\\b`).test(doneBoard()) && !new RegExp(`\\b${id}\\b`).test(board().split(/^## Done/m)[0]);
@@ -175,7 +174,7 @@ console.log(JSON.stringify({
       const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${title}`], { windowsHide: true, cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
       return { id, agent, dir: ld, as, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0, log: `${out(st)}\n${out(c)}` };
     };
-    const queueIt = (l) => run(l.dir, `node harness/task.mjs done ${l.id} --agent ${l.agent} --train`, l.as);
+    const queueIt = queueDoneOf(run);
     const train = () => run(S, 'node harness/task.mjs train --by tester', env);
     const n1 = lane('doc-a', 'Docs: note a', { 'game/demo/notes/a.md': '# A\n' });
     const n2 = lane('doc-b', 'Docs: note b', { 'game/demo/notes/b.md': '# B\nHEAVY\n' });

@@ -15,16 +15,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitEolLfOf, guardOf, out as txt, writeIn } from './kit.mjs';
 
 export async function selftest2781F({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const gitIn = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const gitIn = gitEolLfOf(gEnv);
+  const guard = guardOf(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT)/i.test(k)) clean[k] = '';
   const base = {
@@ -46,7 +46,6 @@ export async function selftest2781F({ dir, report, tmpRoot, root }) {
     made.push(S);
     return { S, env: { ...base, AGENT_EVENTS_FILE: ev, STUDIO_MAIN_ROOT: S } };
   };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const probe = (S, code, env, ms = 60000) => {
     const f = path.join(S, `.probe-2781f-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -263,7 +262,6 @@ console.log(JSON.stringify({ none: none.on, first: first.checked.length, second:
     // --out: two runs in the same second share a report name (the run id is per second).
     const run = (extra, out) => spawnSync(process.execPath, ['qa/playtest.mjs', '--stage', '1', '--quiet', '--out', out], { cwd: S, windowsHide: true, encoding: 'utf8', env: { ...process.env, ...st.env, ...extra }, timeout: 60000 });
     const rep = (out) => { try { return JSON.parse(fs.readFileSync(path.join(S, out), 'utf8')); } catch { return null; } };
-    const txt = (r) => `${r.stdout || ''}${r.stderr || ''}`;
     await guard('2.78.1 (f, M7): by default (STUDIO_PLAYTEST_GAME_CHECK warn) stage 1 in a studio whose game (STUDIO_GAME demo, with its own checks) isn\'t a cartridge still passes, says it stepped 300 ticks of example-sim and not demo, prints "WARN QA-STAGE1-NOT-THE-GAME: stage 1 played the template, not the studio\'s game", records studioGame, ofStudioGame false and the warning, and task done\'s check for a playtest task shows it as WARN; without a studio game there is no warning (fails on 2.78.0: it passed on the template silently, nothing recorded)', async () => {
       const w = run({ STUDIO_GAME: 'demo' }, 'qa/out-2781f-warn.json');
       const t = run({ STUDIO_GAME: '' }, 'qa/out-2781f-none.json');

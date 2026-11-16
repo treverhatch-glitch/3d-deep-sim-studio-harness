@@ -8,10 +8,11 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { writeInDirOf } from './kit.mjs';
 
 export async function selftest2584A({ dir, run, report }) {
   const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
-  const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const w = writeInDirOf(dir);
   const fb = (file, rev, env = {}) => {
     const r = run(dir, `node --input-type=module -e "const { failsBefore } = await import('./qa/fails-before.mjs'); console.log(JSON.stringify(failsBefore('${file}', '${rev}')))"`, env);
     try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return { _raw: `${r.stdout}${r.stderr}`.slice(-1200) }; }

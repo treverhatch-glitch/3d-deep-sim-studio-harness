@@ -7,13 +7,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { guardCap3000Of, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest287A({ report, tmpRoot, root }) {
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
+  const guard = guardCap3000Of(report);
   const T = path.join(tmpRoot, `s287a-${process.pid}`);
-  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), text); };
+  const write = writeInDirOf(T);
   const check = (...args) => spawnSync(process.execPath, [path.join(root, 'scripts', 'check-comments.mjs'), ...args], { windowsHide: true, encoding: 'utf8', timeout: 240000 });
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const header = (n) => ['/**', ...Array.from({ length: n - 2 }, (_, i) => ` * line ${i + 1} of the header`), ' */'].join('\n');
   const slashes = (n, pad = '') => Array.from({ length: n }, (_, i) => `${pad}// note ${i + 1}`).join('\n');
 

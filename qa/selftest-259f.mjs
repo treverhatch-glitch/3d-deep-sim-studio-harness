@@ -9,12 +9,11 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, out } from './kit.mjs';
 
 export async function selftest259F({ dir, run, report }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_LOCK_OWNER: 'v259f', STUDIO_GAME: '', STUDIO_VISUAL_GATE: 'on' /* 2.79.1 (d): unset, the gate is off for a game with no capture command; this check is about its hint */ };
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const u = fileUrlOf(dir);
   let n = 0;
   const probe = (code) => {
     const f = path.join(dir, `.probe-259f-${n++}.mjs`);

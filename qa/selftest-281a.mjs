@@ -8,13 +8,13 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { gEnvOf, gitPlainOf, guardCap2500Of } from './kit.mjs';
 
 export async function selftest281A({ dir, run, report, tmpRoot }) {
   const u = (rel, base = dir) => pathToFileURL(path.join(base, rel)).href;
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n/g, '\n');
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 2500)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 2500)); } };
+  const guard = guardCap2500Of(report);
   const ident = { GIT_AUTHOR_NAME: 'Pat', GIT_AUTHOR_EMAIL: 'pat@example.invalid', GIT_COMMITTER_NAME: 'Pat', GIT_COMMITTER_EMAIL: 'pat@example.invalid' };
   const key = path.join(tmpRoot, `owner-281a-${process.pid}.pem`);
   const base = {
@@ -22,8 +22,8 @@ export async function selftest281A({ dir, run, report, tmpRoot }) {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_WATCHDOG: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_HOOKS_CHECK: 'off', STUDIO_MACHINE_SCAN: 'off', NODE_OPTIONS: '', GITHUB_BASE_REF: '', AGENT_EVENTS_FILE: '',
   };
   const owner = { ...base, STUDIO_OWNER_KEY: key };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { cwd, encoding: 'utf8', env: gEnv(), windowsHide: true });
+  const gEnv = gEnvOf(ident);
+  const g = gitPlainOf(gEnv);
   const made = [];
   const studio = (name) => {
     const S = path.join(tmpRoot, `281a-${name}-${process.pid}`);

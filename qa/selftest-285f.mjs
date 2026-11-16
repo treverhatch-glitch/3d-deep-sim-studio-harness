@@ -9,18 +9,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, guardCap3000Of, out } from './kit.mjs';
 
 export async function selftest285F({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
+  const guard = guardCap3000Of(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
   if (process.platform === 'win32') for (const k of Object.keys(process.env)) if (/^(SystemRoot|windir|SystemDrive|ComSpec|PATHEXT|PATH|TEMP|TMP|USERPROFILE|APPDATA|LOCALAPPDATA|ProgramData|ALLUSERSPROFILE|PUBLIC|ProgramFiles|ProgramFiles\(x86\)|ProgramW6432|CommonProgramFiles|CommonProgramW6432|PSModulePath|PROCESSOR_ARCHITECTURE|NUMBER_OF_PROCESSORS|OS|COMPUTERNAME|HOMEDRIVE|HOMEPATH|USERNAME)$/i.test(k)) clean[k] = process.env[k];
   const base = { ...clean, ...ident, STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_WATCHDOG: 'off', STUDIO_AUTO_TRICKS: '0', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-285f-${process.pid}.pem`), CI: '', GITHUB_ACTIONS: '', NODE_OPTIONS: '' };
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   let n = 0;
 
   const NEVER = 'Never punish the player for waiting. Never show a modal that blocks the view; never use fake spawns. Never sell power for money.';
@@ -55,7 +55,6 @@ export async function selftest285F({ dir, report, tmpRoot, root }) {
   };
   const probe = (S, code, env) => { const f = path.join(S, `.probe-285f-${++n}.mjs`); fs.writeFileSync(f, code); const r = spawnSync(process.execPath, [f], { windowsHide: true, cwd: S, encoding: 'utf8', env, timeout: 180000 }); try { fs.rmSync(f, { force: true }); } catch { /* left */ } const l = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop(); let j = null; try { j = JSON.parse(l); } catch { /* none */ } return { ...r, j }; };
   const cli = (S, env, args) => spawnSync(process.execPath, ['harness/task.mjs', ...args], { windowsHide: true, cwd: S, encoding: 'utf8', env, timeout: 180000 });
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const briefs = (S, env, ids) => probe(S, `import { buildFocus, renderFocus } from ${u(S, 'harness/focus.mjs')};
 const out = {};
 for (const id of ${JSON.stringify(ids)}) { const f = buildFocus(id, 'claude-a'); out[id] = f ? renderFocus(f) : null; }

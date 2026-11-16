@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { out } from './kit.mjs';
 
 const GB = 1024 ** 3;
 // The crew's PC (the 2.68 research): i7 20 cores / 28 threads, 32 GB with 55/60 GB committed, RTX 12 GB, 1 TB disk.
@@ -37,7 +38,6 @@ const winLiteral = () => ({ os: 'win32', arch: 'x64', osName: 'Windows 11 Pro', 
 
 export async function selftest268M({ dir, run, report, tmpRoot }) {
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off' };
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const guard = async (name, fn) => { try { const r = await fn(); report(name, r === true || r?.ok === true, r?.detail ?? JSON.stringify(r).slice(0, 2500)); } catch (e) { report(name, false, e.stack || e.message); } };
   const imp = (p) => import(pathToFileURL(path.join(dir, p)).href);
   const probe = (name, code, extra = {}) => {

@@ -16,15 +16,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { fileUrlOf, out, readInDirOf } from './kit.mjs';
 
 // Spelled out here so this file also runs (and fails) against the code before P-067.
 const HINT = 'agy has no allow-rules: run npm run agent -- allow agy --by <owner> (dry-run first)';
 const REL = ['.gemini', 'antigravity-cli', 'settings.json'];
 
 export async function selftest259I({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const read = (rel) => { try { return fs.readFileSync(path.join(dir, rel), 'utf8'); } catch { return ''; } };
+  const u = fileUrlOf(dir);
+  const read = readInDirOf(dir);
   const events = () => read('.studio/events.jsonl').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } });
   let n = 0;
   const home = (settings = null) => {

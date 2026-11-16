@@ -10,6 +10,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { gEnvOf, out } from './kit.mjs';
 
 export async function selftest283J({ dir, report, tmpRoot, root }) {
   const guard = async (name, fn) => { try { const [ok, d] = await fn(); report(name, ok, d); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 1500)); } };
@@ -76,12 +77,11 @@ export async function selftest283J({ dir, report, tmpRoot, root }) {
     writeIn('studio/keys/owner-ed25519.pub.pem', publicKey.export({ type: 'spki', format: 'pem' }));
     writeIn('studio/beta.json', `${JSON.stringify({ on: true, by: 'pat', at: '2026-11-05T01:00:00.000Z', why: 'beta for the selftest', agents: ['overseer-1'], roles: ['producer', 'director'] }, null, 2)}\n`);
     const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-    const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
+    const gEnv = gEnvOf(ident);
     const g = (...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: S, encoding: 'utf8', env: gEnv() });
     g('init', '-q', '-b', 'main'); g('add', '-A'); g('commit', '-qm', 'studio, owner key, beta on', '--no-verify');
     const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_OUTSIDE_SIGNERS: '', CLAUDECODE: '', AGENT_EVENTS_FILE: path.join(S, '.studio', 'events-283j.jsonl') };
     const node = (args, extra = {}) => spawnSync(process.execPath, args, { cwd: S, encoding: 'utf8', windowsHide: true, timeout: 120000, env: { ...process.env, ...ident, ...base, ...extra } });
-    const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
     const asked = [
       node(['harness/ask.mjs', 'Delete the save files of the old build?', '--by', 'builder-s1'], { STUDIO_LOCK_OWNER: 'builder-s1' }),
       node(['harness/ask.mjs', 'T-9 removes the unwired shop/ module with its tests: go ahead?', '--by', 'builder-s1'], { STUDIO_LOCK_OWNER: 'builder-s1' }),

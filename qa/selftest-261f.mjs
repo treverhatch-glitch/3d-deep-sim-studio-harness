@@ -13,12 +13,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { fileUrlOf, iso, out, readInDirOf, writeInDirOf } from './kit.mjs';
 
 export async function selftest261F({ dir, run, report }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const read = (rel) => { try { return fs.readFileSync(path.join(dir, rel), 'utf8'); } catch { return ''; } };
-  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const u = fileUrlOf(dir);
+  const read = readInDirOf(dir);
+  const write = writeInDirOf(dir);
   const env = { STUDIO_ROLE: '', STUDIO_LOCK_OWNER: '', STUDIO_AGENT: '', STUDIO_PRODUCER_NAME: 'prod-1', AGENT_EVENTS_FILE: '', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_CONSTRAINTS_K: '', STUDIO_CONSTRAINTS_LINE: '', STUDIO_PITFALLS_KEEP: '', STUDIO_DIRECTOR_CMD: '', STUDIO_DIRECTOR_TOOL: '', STUDIO_AGENT_TOOL: '' };
   const sh = (cmd, e = {}) => run(dir, cmd, { ...env, ...e });
   const probe = (name, code, e = {}) => {
@@ -34,7 +34,6 @@ export async function selftest261F({ dir, run, report }) {
   git('commit -q -m base --no-verify');
 
   const now = Date.now();
-  const iso = (ms) => new Date(ms).toISOString();
   const dayAgo = (n) => iso(now - n * 86400000);
   const events = [];
   const ev = (e) => events.push(JSON.stringify(e));

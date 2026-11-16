@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { eventsOf, gitAsT as g, out, queueDoneOf, readInDirOf, writeIn as write } from './kit.mjs';
 
 export async function selftest267F({ dir, run, report, tmpRoot, root }) {
   // The size rule reads JavaScript with the typescript package: a copy made without node_modules (the full selftest's
@@ -24,13 +25,10 @@ export async function selftest267F({ dir, run, report, tmpRoot, root }) {
     try { fs.rmSync(path.join(dir, 'node_modules'), { force: true }); } catch {}
     fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   }
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const events = path.join(dir, '.studio', 'events-267f.jsonl');
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_GATE_FOCUS: '', STUDIO_TRAIN: '', STUDIO_TRAIN_BISECT: '', STUDIO_TRAIN_LAND_PREFIX: '', STUDIO_TRAIN_MAX: '', STUDIO_TRAIN_CHAIN_TAIL: '', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_GAME_GATE_RETRY: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-267f-${process.pid}.pem`), AGENT_EVENTS_FILE: events, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const read = (rel) => { try { return fs.readFileSync(path.join(dir, rel), 'utf8'); } catch { return ''; } };
+  const evs = eventsOf(events);
+  const read = readInDirOf(dir);
   const isDone = (id) => Boolean(id) && new RegExp(`\\*\\*${id}\\*\\*`).test(read('studio/DONE.md') + (read('studio/NEXT.md').split(/^## DONE/im)[1] || ''));
   const handBack = (id) => read(`studio/handoffs/${id}.md`);
   const holds = () => { try { return JSON.parse(read('studio/task-holds.json')).tasks || {}; } catch { return {}; } };
@@ -95,7 +93,7 @@ export async function selftest267F({ dir, run, report, tmpRoot, root }) {
     for (let i = 1; i < k; i += 1) run(dir, `node harness/task.mjs block ${L[i].id} --until ${L[i - 1].id} --by tester`, env);
     return L;
   };
-  const queueIt = (l) => run(l.dir, `node harness/task.mjs done ${l.id} --agent ${l.agent} --train`, l.as);
+  const queueIt = queueDoneOf(run);
   const train = (extra = {}) => run(dir, 'node harness/task.mjs train --by tester --now', { ...env, ...extra });
   const of = (list, type, pred = () => true) => list.filter((e) => e.type === type && pred(e));
 

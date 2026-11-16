@@ -23,17 +23,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitArgsOf, guardOf, out, readAgentRec as readRec, readJsonl as events } from './kit.mjs';
 
 export async function selftest276I({ dir, run, report, tmpRoot, root }) {
   void run;
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = fs.existsSync(path.join(dir, 'node_modules')) ? path.join(dir, 'node_modules') : path.join(harnessRoot, 'node_modules');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitArgsOf(gEnv);
+  const guard = guardOf(report);
   const UNSET = ['STUDIO_STALL_MIN', 'STUDIO_STALL_PLAN_MIN', 'STUDIO_SESSION_MAX_MIN', 'STUDIO_STALL', 'STUDIO_STALL_RATIO', 'STUDIO_STALL_RATIO_WINDOW_TOKENS', 'STUDIO_AGY_MODE', 'STUDIO_AGY_PRINT_TIMEOUT', 'STUDIO_AGY_MODEL_FLAG', 'STUDIO_TOOL_AGY_MODEL', 'STUDIO_TOOL_AGY_CMD', 'STUDIO_AGY_PROMPT', 'STUDIO_AGY_BYPASS', 'STUDIO_ON_BEHALF', 'STUDIO_CLAIM_ACTIVE_MIN', 'STUDIO_CLAIM_LANE_MAX_H', 'STUDIO_UPGRADE_REFRESH', 'STUDIO_UPGRADE_REFRESH_WAIT_S', 'STUDIO_LANES_REFRESH_TEST_S', 'STUDIO_TRAIN_REFRESH', 'STUDIO_LANE_HARNESS', 'STUDIO_ENV_FROM_FILE', 'STUDIO_WORKTREES', 'STUDIO_BUILDER_MODEL', 'STUDIO_AGENT_MODEL', 'STUDIO_BUILDER_TOOL'];
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
@@ -59,8 +59,6 @@ export async function selftest276I({ dir, run, report, tmpRoot, root }) {
     made.push(S);
     return { S, ev, env: { AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const probe = (S, env, name, code, timeout = 120000) => {
     const f = path.join(tmpRoot, `probe-276i-${name}-${process.pid}-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -68,7 +66,6 @@ export async function selftest276I({ dir, run, report, tmpRoot, root }) {
     const t = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop();
     try { return { ...JSON.parse(t), _err: `${out(r)}`.slice(-1500) }; } catch { return { _err: `${out(r).slice(-2500)}` }; }
   };
-  const readRec = (S, agent) => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'agents', `${agent}.json`), 'utf8')); } catch { return null; } };
   const startFg = (S, env, args, timeout = 120000) => spawnSync(process.execPath, ['harness/agent.mjs', 'start', '--attach', ...args], { windowsHide: true, cwd: S, encoding: 'utf8', env: childEnv(env), timeout });
   const addTask = (S, env, title) => (out(spawnSync(process.execPath, ['harness/task.mjs', 'add', title, '--role', 'builder', '--priority', 'P1'], { windowsHide: true, cwd: S, encoding: 'utf8', env: childEnv(env) })).match(/"id": "(T-\d+)"/) || [])[1];
   const fwd = (p) => p.replace(/\\/g, '/');

@@ -12,11 +12,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, gitDirOf, out } from './kit.mjs';
 
 export async function selftestPU19({ dir, run, report }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlOf(dir);
   const probe = (name, code, env = {}) => {
     const f = path.join(dir, `.probe-pu19-${name}.mjs`);
     fs.writeFileSync(f, code);
@@ -93,7 +92,7 @@ console.log(JSON.stringify({ rows, negs, quoted, extra, zone: Intl.DateTimeForma
 
   // 2. End to end. A studio copy with git, a fast pace, one tool in the order, and stand-in agents. The real
   // claude is never called: its launch command is the fake, and the quota probe is off.
-  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
+  const g = gitDirOf(dir);
   if (!fs.existsSync(path.join(dir, '.git'))) {
     g('init', '-q', '-b', 'main');
     g('add', '-A');

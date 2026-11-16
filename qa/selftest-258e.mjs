@@ -10,7 +10,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, out } from './kit.mjs';
 
 /** A made-up crew log: tasks, starts, dones, hand-backs, questions, stalls, session ends across agents and hours. */
 function genEvents(n, seed = 1, t0 = Date.parse('2026-10-25T00:00:00Z')) {
@@ -214,8 +214,7 @@ function oldMetrics() {
 }
 
 export async function selftest258E({ dir, run, report }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlOf(dir);
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_LANE_INFER: 'off' };
   const probe = (name, code, extra = {}) => {
     const f = path.join(dir, `.probe-258e-${name}.mjs`);

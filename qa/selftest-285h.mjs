@@ -11,14 +11,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { gEnvOf, gitUserCrlfOf, guardCap3000Of, importInDirOf, out, writeIn as write } from './kit.mjs';
 
 export async function selftest285H({ dir, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const write = (b, rel, text) => { fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true }); fs.writeFileSync(path.join(b, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
+  const guard = guardCap3000Of(report);
   const T = path.join(tmpRoot, `s285h-${process.pid}`);
   fs.mkdirSync(T, { recursive: true });
-  const imp = (rel) => import(pathToFileURL(path.join(dir, rel)).href);
+  const imp = importInDirOf(dir);
 
   // ================= 1. settings nothing reads =================
   // Invented names are spelled @NAME@ here and become the real name when written, so this file adds none to the settings scan.
@@ -116,8 +115,8 @@ export async function selftest285H({ dir, report, tmpRoot }) {
   {
     const crypto = await import('node:crypto'); void crypto;
     const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-    const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-    const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
+    const gEnv = gEnvOf(ident);
+    const g = gitUserCrlfOf(gEnv);
     const S = path.join(tmpRoot, `285h-studio-${process.pid}`);
     fs.cpSync(dir, S, { recursive: true, filter: (src) => !/[\\/](\.git|\.lanes|node_modules)$/.test(src) });
     for (const x of ['.studio', '.env', 'studio/beta.json', 'studio/delegation.json', 'studio/approvals', 'studio/task-holds.json', 'studio/mode.json', 'studio/policy.json']) fs.rmSync(path.join(S, x), { recursive: true, force: true });

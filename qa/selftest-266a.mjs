@@ -15,11 +15,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, out } from './kit.mjs';
 
 export async function selftest266A({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlOf(dir);
   const events = path.join(dir, '.studio', 'events-266a.jsonl');
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_ROLE: '', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_CACHE_READ_WEIGHT: '', STUDIO_KEEP_DAYS: '', STUDIO_AUTONOMY_CACHE_S: '0', AGENT_EVENTS_FILE: events };
   let n = 0;

@@ -14,7 +14,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlIn as u, guardSyncBoolOf, out, readText, real } from './kit.mjs';
 
 const FAKE_LANE_KEY = 'fake-lane-key-for-selftest-259e';
 const FAKE_AGENT_KEY = 'fake-agent-key-for-selftest-259e';
@@ -25,8 +25,6 @@ const FAKE_PASTED = ['sk', 'ant', 'fake-pasted-key-259e'].join('-');
 const QUIET = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_HEARTBEAT_SEC: '1', STUDIO_ROLE: '', STUDIO_LOCK_OWNER: '', STUDIO_MAIN_ROOT: '', STUDIO_BUILDER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_REHEARSAL: '', STUDIO_TOOL_CLAUDE_CMD: '', STUDIO_LANELESS: '', STUDIO_WORKTREES: '', STUDIO_AGENT_ENV: '', STUDIO_RESUME_BY: '', STUDIO_KEYMAP_BUILDER: '', STUDIO_KEYMAP_AGENT_KM_1: '', ANTHROPIC_API_KEY: '', ANTHROPIC_API_KEY_LANE: '', STUDIO_AGENT_TOOL: '', STUDIO_BUILDER_TOOL: '' };
 
 export async function selftest259E({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (root, p) => JSON.stringify(pathToFileURL(path.join(root, p)).href);
   let n = 0;
   const probe = (root, code, env = {}) => {
     const f = path.join(root, `.probe-259e-${n++}.mjs`);
@@ -35,8 +33,7 @@ export async function selftest259E({ dir, run, report, tmpRoot }) {
     const line = String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{')).pop();
     try { return { ...JSON.parse(line), _raw: out(r).slice(-800) }; } catch { return { _raw: out(r).slice(-1500) }; }
   };
-  const guard = (name, fn) => { try { const [ok, detail] = fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const readText = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
+  const guard = guardSyncBoolOf(report);
 
   // ---------- #15: studio:resume ----------
   {
@@ -167,7 +164,6 @@ fs.writeFileSync(path.join(${JSON.stringify(rec)}, (e.STUDIO_LOCK_OWNER || 'x') 
     const add = (title, extra = '') => (run(repo, `node harness/task.mjs add "${title}" --role builder --priority P1 ${extra}`, QUIET).stdout.match(/"id": "(T-\d+)"/) || [])[1];
     const start = (agent, id, lane, env = {}) => run(repo, `node harness/agent.mjs start --attach --role builder --agent ${agent} --task ${id} --lane ${lane} --tool claude --model m-1`, { ...QUIET, STUDIO_BUILDER_CMD: `node "${fake}" {agent}`, ...env });
     const evs = () => readText(path.join(repo, '.studio', 'events.jsonl')).split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } });
-    const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
 
     if (!lanesOk) report('#8: lane-copy checks skipped, this machine can\'t make lane copies (git 2.42+ needed)', true, support.stdout);
     else {

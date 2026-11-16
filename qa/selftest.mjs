@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileUrlOf as fileUrlRelOf, pause } from './kit.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-selftest-'));
@@ -1183,7 +1184,6 @@ if (inShard()) {
   git('init -q');
   git('add -A');
   git('commit -q -m init --no-verify');
-  const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`], { windowsHide: true });
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1' };
   const id = (cmd) => JSON.parse(run(dir, cmd, env).stdout).id;
   const quotaFile = path.join(dir, '.studio/tool-quota.json');
@@ -1356,7 +1356,6 @@ if (inShard()) {
   git('init -q');
   git('add -A');
   git('commit -q -m init --no-verify');
-  const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`], { windowsHide: true });
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1' };
   const id = (cmd) => JSON.parse(run(dir, cmd, env).stdout).id;
   const quotaFile = path.join(dir, '.studio/tool-quota.json');
@@ -1581,7 +1580,6 @@ if (inShard()) {
   fs.writeFileSync(path.join(vb, 'build.json'), JSON.stringify({ id: '209901010000-vite', at: '2099-01-01T00:00:00Z', page: 'index.html', cartridge: 'tin-moon', outcome: 'won', ticks: 1 }));
   fs.writeFileSync(path.join(vb, 'index.html'), '<script type="module" src="/assets/index-abc.js"></script>\n');
   fs.writeFileSync(path.join(vb, 'assets/index-abc.js'), 'console.log("a bundled game");\n');
-  const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`], { windowsHide: true });
   // 2.80: the hub's Arcade is gone; npm run play (harness/builds.mjs) serves the build the same way.
   const hport = 3900 + Math.floor(Math.random() * 90);
   const playP = spawn(process.execPath, ['harness/builds.mjs', '--build', '209901010000-vite', '--port', String(hport)], { windowsHide: true, cwd: dir, env: { ...CLEAN_ENV }, stdio: 'ignore' });
@@ -2211,7 +2209,7 @@ if (inShard()) {
 // warning, the cheat sheet check. Each module is exercised in a copy; the launcher end to end with a fake agent.
 if (inShard()) {
   const dir = copyRepo();
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p2292-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -2309,7 +2307,7 @@ console.log(JSON.stringify({ dir: c.matchTricks('queue the next tasks with depen
 // drop/reorder, quota accuracy, the watchdog, the Arcade's what-changed, ccusage. Each in a copy.
 if (inShard()) {
   const dir = copyRepo();
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p230a-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -2414,7 +2412,7 @@ console.log(JSON.stringify({ off, still, on, parked: readHolds()['${t3.id}']?.pa
 // 2.30b: real-input fun probes (J1), sim features shown in the build (J4), the asset scout (G7). Each in a copy.
 if (inShard()) {
   const dir = copyRepo();
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p230b-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -2520,7 +2518,7 @@ console.log(JSON.stringify({ found, sa, noAuthor, cc0, ccby, lic: ['CC0', 'CC-BY
 // overnight summary (G6) and the release command. Each in a copy.
 if (inShard()) {
   const dir = copyRepo();
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p230c-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -2649,7 +2647,7 @@ console.log(JSON.stringify({ done: o.done.length, noDone: o.noDone.map((s) => s.
 // fun checks in waves, phone alerts (2.80: away mode, phone login and the kennel went with the War Room). Each in a copy.
 if (inShard()) {
   const dir = copyRepo();
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p230d-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -3049,7 +3047,7 @@ if (inShard()) {
 // norms flag (never cap), verdicts become notes in briefs, and the Godot unit gate skips or reports.
 if (inShard()) {
   const dir = copyRepo();
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p230g-${++n}.mjs`);
     fs.writeFileSync(f, code);

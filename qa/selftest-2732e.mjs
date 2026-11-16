@@ -20,15 +20,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { eventsOf as eventsFileOf, fileUrlOf, guardOf, out, readJsonFile as readJson, writeIn as w } from './kit.mjs';
 
 export async function selftest2732E({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const u = fileUrlOf(dir);
   const T = path.join(tmpRoot, `s2732e-${process.pid}`);
   fs.mkdirSync(T, { recursive: true });
-  const w = (root, rel, text) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); };
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const evFile = path.join(dir, '.studio', 'events-2732e.jsonl');
   fs.mkdirSync(path.dirname(evFile), { recursive: true });
@@ -40,7 +37,7 @@ export async function selftest2732E({ dir, run, report, tmpRoot }) {
     STUDIO_UNITY_TRAIN_RETRIES: '', STUDIO_UNITY_TRAIN_RETRY_MIN: '', STUDIO_UNITY_GATE_TIMEOUT_MIN: '', STUDIO_GAME: '', STUDIO_VERIFY_DETACH: 'off', STUDIO_VERIFY_RUN: '', STUDIO_COMPACT_OUTPUT: 'off', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-2732e-${process.pid}.pem`),
     npm_lifecycle_event: '', NODE_OPTIONS: '', AGENT_EVENTS_FILE: evFile, ...ident,
   };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   const probe = (name, code, env = {}) => {
     const f = path.join(dir, `.probe-2732e-${name}.mjs`);
     fs.writeFileSync(f, code);
@@ -49,7 +46,7 @@ export async function selftest2732E({ dir, run, report, tmpRoot }) {
     const line = String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{')).pop();
     try { return { ...JSON.parse(line), _out: out(r).slice(-1500) }; } catch { return { _raw: out(r).slice(-2500) }; }
   };
-  const events = () => { try { return fs.readFileSync(evFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const events = eventsFileOf(evFile);
   const locksDir = path.join(dir, '.studio', 'locks');
   const clearLocks = () => { try { for (const n of fs.readdirSync(locksDir)) if (/^machine-heavy/.test(n)) fs.rmSync(path.join(locksDir, n), { force: true }); } catch {} };
   clearLocks();

@@ -25,13 +25,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { guardOf, iso, napSync as sleep, out, readJsonl as events } from './kit.mjs';
 
 export async function selftest271Z({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const g = (cwd, args) => { const e = { ...process.env, ...ident }; for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete e[k]; return spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: e }); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  const guard = guardOf(report);
   const nm = path.join(dir, 'node_modules');
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
@@ -52,7 +51,6 @@ export async function selftest271Z({ dir, run, report, tmpRoot }) {
     g(S, ['add', '-A']); g(S, ['commit', '-qm', 'studio', '--no-verify']);
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const recs = (S) => { try { return fs.readFileSync(path.join(S, '.studio', 'workarounds.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const tasks = (S) => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'harness-tasks.json'), 'utf8')).tasks; } catch { return []; } };
   const md = (S) => { try { return fs.readFileSync(path.join(S, 'studio', 'HARNESS-TASKS.md'), 'utf8'); } catch { return ''; } };
@@ -68,7 +66,6 @@ export async function selftest271Z({ dir, run, report, tmpRoot }) {
   };
   const addEvents = (ev, list) => fs.appendFileSync(ev, list.map((e, i) => `${JSON.stringify({ id: `evt_z_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`, status: 'ok', msg: '', meta: {}, ...e })}\n`).join(''));
   const DAY = 86400000;
-  const iso = (ms) => new Date(ms).toISOString();
 
   // ---- A: logging, grouping, the separate queue, force, retries, hand edits --------------------------------------
   const A = studio('a');

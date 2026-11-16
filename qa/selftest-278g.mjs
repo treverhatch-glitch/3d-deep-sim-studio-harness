@@ -9,19 +9,18 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitEolLfOf, guardOf, out } from './kit.mjs';
 
 export async function selftest278G({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   if (!fs.existsSync(path.join(dir, 'node_modules')) && fs.existsSync(path.join(harnessRoot, 'node_modules'))) {
     try { fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction'); } catch {}
   }
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const gitIn = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const gitIn = gitEolLfOf(gEnv);
+  const guard = guardOf(report);
   const base = {
     STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '', STUDIO_WORKTREES: '',
     STUDIO_FUTILITY: '', STUDIO_FUTILITY_MIN_N: '', STUDIO_FUTILITY_AUTO_MAX_LATE: '', STUDIO_FUTILITY_AUTO_MIN_SHADOW: '', STUDIO_START_BACKOFF_MAX_MIN: '', STUDIO_SUPERVISOR_JITTER: '',
@@ -49,7 +48,6 @@ export async function selftest278G({ dir, run, report, tmpRoot, root }) {
     const l = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop();
     try { return { ...JSON.parse(l), _out: out(r).slice(-2000) }; } catch { return { _raw: out(r).slice(-2500) }; }
   };
-  const u = (S, p) => JSON.stringify(pathToFileURL(path.join(S, p)).href);
   const want = (k) => !process.env.ONLY_278G || process.env.ONLY_278G.split(',').includes(k);
 
   // ---- PU-62: futility auto ----

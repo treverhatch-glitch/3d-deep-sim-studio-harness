@@ -15,12 +15,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlIn as u, guardCap3000Of, out, readJsonl as events } from './kit.mjs';
 
 export async function selftest283G({ dir, run, report, tmpRoot }) {
   void run;
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
+  const guard = guardCap3000Of(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
   const base = {
@@ -38,8 +37,6 @@ export async function selftest283G({ dir, run, report, tmpRoot }) {
     fs.writeFileSync(ev, '');
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const cli = (S, env, cmd) => spawnSync(process.execPath, cmd, { windowsHide: true, cwd: S, env: { ...process.env, ...env }, encoding: 'utf8', timeout: 120000 });
   const probe = (S, env, code) => {
     const f = path.join(tmpRoot, `probe-283g-${process.pid}-${++n}.mjs`);

@@ -14,17 +14,16 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest2601Q({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const u = fileUrlOf(dir);
   const ident = { GIT_AUTHOR_NAME: 'hatch', GIT_AUTHOR_EMAIL: 'owner@example.com', GIT_COMMITTER_NAME: 'hatch', GIT_COMMITTER_EMAIL: 'owner@example.com' };
   const env = { ...ident, STUDIO_ROLE: '', STUDIO_LOCK_OWNER: '', STUDIO_AGENT: '', STUDIO_MAIN_ROOT: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', CLAUDE_PROJECT_DIR: '', STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_STRICT: '', STUDIO_VISUAL_GATE: 'on' /* 2.79.1 (d): unset, the gate is off for a game with no capture command; these checks are about the gate itself */, STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-2601q-${process.pid}.pem`) };
   const outside = { STUDIO_LOCK_OWNER: 'opus-bot', CLAUDECODE: '1' };
   const worker = { STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'builder-s3' };
   const git = (cmd, e = {}) => run(dir, `git -c user.name=hatch -c user.email=owner@example.com ${cmd}`, { ...env, ...e });
-  const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const w = writeInDirOf(dir);
   const task = (cmd, e = {}) => run(dir, `node harness/task.mjs ${cmd}`, { ...env, ...e });
   const add = (title, role = 'builder') => JSON.parse(task(`add "${title}" --role ${role}`).stdout).id;
   const gate = (id, title, e = {}) => run(dir, `node harness/verdict-split.mjs gate ${id} --title "${title}"`, { ...env, ...e });

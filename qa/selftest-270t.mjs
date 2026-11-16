@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileUrlOf, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest270T({ dir, run, report, tmpRoot, root }) {
   // The real-Chromium check imports playwright: a copy made without node_modules (the full selftest's copyRepo) gets the
@@ -16,9 +17,8 @@ export async function selftest270T({ dir, run, report, tmpRoot, root }) {
     try { fs.rmSync(path.join(dir, 'node_modules'), { force: true }); } catch {}
     fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   }
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const u = fileUrlOf(dir);
+  const write = writeInDirOf(dir);
   const evFile = path.join(dir, '.studio', 'events-270t.jsonl');
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_HEAVY_SLOTS: '', STUDIO_HEAVY_HELD: '', STUDIO_HEAVY_POLL_MS: '100', STUDIO_HEAVY_WAIT_MIN: '0.03', STUDIO_HEAVY_RAM_WAIT_MIN: '', STUDIO_GATE_PRIORITY: '', STUDIO_LOCK_OWNER: '', STUDIO_GAME: '', STUDIO_TEST_LOADAVG: '0', STUDIO_RAM_FLOOR_GB: '0', STUDIO_TEST_FREEMEM_MB: '', STUDIO_RESERVE_RAM_GB: '', STUDIO_GPU_RESERVE_GB: '', STUDIO_TEST_WORKERS: '', STUDIO_MACHINE_SCAN: '', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_BROWSER_GPU: '', STUDIO_GPU_AREA: '', STUDIO_BLENDER_THREADS: '', STUDIO_LANDING_BUILD: '', STUDIO_LANDING_CLIP_CMD: '', STUDIO_CARTRIDGE: '', STUDIO_TEST_MACHINE: '', AGENT_EVENTS_FILE: evFile };
   const machine = (o = {}) => JSON.stringify({ os: 'linux', cores: { logical: o.cores ?? 16 }, ram: { totalGb: o.total ?? 32, freeGb: o.free ?? 18, commitUsedGb: null, commitLimitGb: null }, gpus: o.gpus ?? [{ name: 'Test GPU', vramGb: 12, vramFreeGb: 11, busy: 0.03 }], disk: { freeGb: 100, totalGb: 500 }, power: { onBattery: false }, at: new Date(Date.now() - 60000).toISOString() });

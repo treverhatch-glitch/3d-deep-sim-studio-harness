@@ -14,18 +14,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitEolLfOf, guardOf, importInDirOf, killTree, readJsonFile as readJ, writeIn } from './kit.mjs';
 
 export async function selftest2782B({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
-  const imp = (rel) => import(pathToFileURL(path.join(dir, rel)).href);
+  const imp = importInDirOf(dir);
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const gitIn = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const readJ = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const gitIn = gitEolLfOf(gEnv);
+  const guard = guardOf(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT)/i.test(k)) clean[k] = '';
   const base = {
@@ -94,10 +93,6 @@ export async function selftest2782B({ dir, report, tmpRoot, root }) {
     st.flakes = () => { try { return fs.readFileSync(path.join(S, '.studio', 'flakes.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
     return st;
   };
-  const killTree = (child) => {
-    try { if (process.platform === 'win32') spawnSync('taskkill', ['/T', '/F', '/PID', String(child.pid)], { windowsHide: true, stdio: 'ignore' }); else process.kill(-child.pid, 'SIGKILL'); } catch {}
-    try { child.kill('SIGKILL'); } catch {}
-  };
   const probeAsync = (S, code, env, ms) => new Promise((resolve) => {
     const f = path.join(S, `.probe-2782b-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -113,7 +108,6 @@ export async function selftest2782B({ dir, report, tmpRoot, root }) {
       resolve({ code, signal, j, ms: Date.now() - t0, timedOut: Date.now() - t0 >= ms - 50, text: `${so}${se}` });
     });
   });
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   // runTrain with board stubs: close and hand-back are recorded.
   const trainProbe = (S) => `import { runTrain } from ${u(S, 'harness/train.mjs')};
 const calls = { handBack: [], close: [] }; const logs = [];

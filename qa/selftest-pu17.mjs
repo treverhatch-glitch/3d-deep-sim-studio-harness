@@ -17,12 +17,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { minAgo, napSync as nap, out, parseLastLine as parse, untilNap100Of } from './kit.mjs';
 
 export async function selftestPU17({ dir, run, report }) {
   const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === 'win32' ? 2.5 : 1);
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off' };
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   const stateDir = path.join(dir, '.studio');
   const agentsDir = path.join(stateDir, 'agents');
   fs.mkdirSync(agentsDir, { recursive: true });
@@ -73,11 +72,7 @@ export async function selftestPU17({ dir, run, report }) {
       return false;
     }
   };
-  const until = (fn, ms) => {
-    const t0 = Date.now();
-    while (Date.now() - t0 < ms && !fn()) nap(100);
-    return fn();
-  };
+  const until = untilNap100Of(nap);
   const task = (title, agent) => {
     const id = (run(dir, `node harness/task.mjs add "${title}" --role builder`, base).stdout.match(/"id":\s*"(T-\d+)"/) || [])[1];
     if (agent) {
@@ -86,7 +81,6 @@ export async function selftestPU17({ dir, run, report }) {
     }
     return id;
   };
-  const minAgo = (m) => new Date(Date.now() - m * 60000).toISOString();
   const record = (agent, fields) => fs.writeFileSync(path.join(agentsDir, `${agent}.json`), JSON.stringify({ agent, role: 'builder', tool: 'claude', model: 'fake-1', status: 'running', startedAt: minAgo(50), ...fields }, null, 2));
   const readRec = (agent) => {
     try {
@@ -285,7 +279,6 @@ console.log(JSON.stringify({ running, refused: handBack?.error || null }));`);
       const f = path.join(dir, '.probe-pu17-alive.mjs');
       fs.writeFileSync(f, `import { sessions } from ${JSON.stringify(pathToFileURL(path.join(dir, 'harness/agent.mjs')).href)};
 console.log(JSON.stringify(Object.fromEntries(sessions().filter((s) => s.agent.startsWith('ghost-')).map((s) => [s.agent, s.running]))));`);
-      const parse = (r) => { try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return {}; } };
       const stubbed = parse(run(dir, `node ${path.basename(f)}`, env({ [p.pid]: S + 3600000 }, 1500)));
       const real = parse(run(dir, `node ${path.basename(f)}`, env()));
       const linux = process.platform === 'linux';

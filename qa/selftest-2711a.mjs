@@ -18,13 +18,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, gateRecOf, out, writeIn } from './kit.mjs';
 
 export async function selftest2711A({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const gitIn = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const g = (...a) => gitIn(dir, ...a);
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
   const readIn = (cwd, rel) => fs.readFileSync(path.join(cwd, rel), 'utf8').replace(/\r\n/g, '\n');
   const editIn = (cwd, rel, from, to) => { const t = readIn(cwd, rel); if (!t.includes(from)) throw new Error(`${rel}: no "${from}"`); writeIn(cwd, rel, t.replace(from, to)); };
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off',
@@ -44,7 +42,7 @@ export async function selftest2711A({ dir, run, report, tmpRoot }) {
     fs.rmSync(f, { force: true });
     return { ...json(r), _out: out(r).slice(-1500) };
   };
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const u = fileUrlOf(dir);
   // Words the weakened-test gate looks for, built here.
   const W = { SKIPIF: ['.skip', 'If'].join(''), RUNIF: ['.run', 'If'].join(''), ENV: ['process', 'env'].join('.'), EXPECT: 'exp' + 'ect' };
 
@@ -191,7 +189,7 @@ console.log(JSON.stringify({ own: [own.tier, own.rules], none: [none.tier, none.
   const gatesDir = path.join(dir, '.studio', 'gates');
   const fresh = () => { for (const d of [gatesDir, path.join(dir, '.studio', 'train'), path.join(dir, '.studio', 'gates-last-full.json'), path.join(dir, '.studio', 'gates-last.json')]) fs.rmSync(d, { recursive: true, force: true }); };
   const verify = (owner, extra = {}) => run(dir, 'node scripts/run-gates.mjs --no-detach', { ...env, STUDIO_LOCK_OWNER: owner, ...extra });
-  const recOf = (owner) => { try { return JSON.parse(fs.readFileSync(path.join(gatesDir, `${owner}-full.json`), 'utf8')); } catch { return null; } };
+  const recOf = gateRecOf(gatesDir);
   const train = (name) => probe(dir, `vt-${name}`, `import { verifyTree } from ${u('harness/train.mjs')};
 const logs = [];
 const r = verifyTree({ root: process.cwd(), dir: process.cwd() }, { id: 'tt-${name}', n: 1, tree: ${JSON.stringify(tree)}, changed: [], all: false, seen: new Map(), log: (m) => logs.push(m) });

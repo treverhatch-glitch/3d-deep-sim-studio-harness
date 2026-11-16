@@ -6,19 +6,18 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf as fileUrlRelOf, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest230o({ dir, run, report, tmpRoot }) {
   let n = 0;
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlRelOf(dir);
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p230o-${++n}-${process.pid}.mjs`);
     fs.writeFileSync(f, code);
     const r = run(dir, `node "${f}"`, env);
     try { return JSON.parse(r.stdout.trim().split('\n').pop()); } catch { return { error: out(r) }; }
   };
-  const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const w = writeInDirOf(dir);
   // 2.79.1 (d): the visual gate turns itself off for a game with no capture command; these checks are about the gate itself.
   const base = { STUDIO_VISUAL_GATE: 'on', STUDIO_LOCK_OWNER: 'builder-o1', STUDIO_DONE_UNCOMMITTED: 'allow', STUDIO_DONE_NOOP: 'allow', STUDIO_REFILL_WAKE: 'off', STUDIO_WATCHDOG_LAUNCH: 'off', STUDIO_GAMEDEV_WAKE_DIRECTOR: 'off', STUDIO_DEV_CYCLE_WAKE: 'off' };
 

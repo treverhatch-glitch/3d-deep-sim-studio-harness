@@ -8,16 +8,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitArgsOf, guardOf, iso, nextLine as line, out } from './kit.mjs';
 
 export async function selftest2781G({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = fs.existsSync(path.join(dir, 'node_modules')) ? path.join(dir, 'node_modules') : path.join(harnessRoot, 'node_modules');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitArgsOf(gEnv);
+  const guard = guardOf(report);
   const UNSET = ['STUDIO_SHARED_SIM', 'STUDIO_LINE_LANES', 'STUDIO_LINE_PLAN_MAX_SEC', 'STUDIO_PRODUCER_NAME', 'STUDIO_WORKTREES', 'STUDIO_ENV_FROM_FILE'];
   const base = {
     STUDIO_WATCHDOG: 'off', STUDIO_WATCH_INTERVAL: '0', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '',
@@ -26,7 +26,6 @@ export async function selftest2781G({ dir, report, tmpRoot, root }) {
   };
   const childEnv = (extra = {}) => { const e = { ...process.env, ...base, ...extra }; for (const k of UNSET) if (!(k in extra)) delete e[k]; return e; };
   const now = Date.now();
-  const iso = (ms) => new Date(ms).toISOString();
   let n = 0;
   /** A studio copy with its own git, an events file, a board ({ id, title, ip?, role? }), holds and events. */
   const studio = (name, { tasks = [], events = [], holds = {}, status = null } = {}) => {
@@ -37,7 +36,6 @@ export async function selftest2781G({ dir, report, tmpRoot, root }) {
     const ev = path.join(S, '.studio', 'events-2781g.jsonl');
     fs.mkdirSync(path.dirname(ev), { recursive: true });
     fs.writeFileSync(ev, events.map((e, i) => JSON.stringify({ id: `evt_${i}`, status: 'ok', ts: iso(now - 2 * 3600000 + i * 1000), ...e })).join('\n') + (events.length ? '\n' : ''));
-    const line = (t) => `- [${t.ip ? '>' : ' '}] **${t.id}** [${t.p || 'P1'}] (\`${t.role || 'builder'}\`) — ${t.title}`;
     fs.writeFileSync(path.join(S, 'studio', 'NEXT.md'), `# Studio Task Queue (\`studio/NEXT.md\`)\n\n## IN_PROGRESS\n${tasks.filter((t) => t.ip).map(line).join('\n')}\n\n## BACKLOG\n${tasks.filter((t) => !t.ip).map(line).join('\n')}\n\n## DONE\n`);
     fs.writeFileSync(path.join(S, 'studio', 'task-holds.json'), `${JSON.stringify({ tasks: holds }, null, 2)}\n`);
     if (status) { fs.mkdirSync(path.join(S, '.studio', 'line'), { recursive: true }); fs.writeFileSync(path.join(S, '.studio', 'line', 'status.json'), `${JSON.stringify(status, null, 2)}\n`); }
@@ -45,7 +43,6 @@ export async function selftest2781G({ dir, report, tmpRoot, root }) {
     g(S, ['add', '-A']); g(S, ['commit', '-qm', 'studio', '--no-verify']);
     return { S, ev, env: { AGENT_EVENTS_FILE: ev } };
   };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const probe = (S, env, name, code, timeout = 120000) => {
     const f = path.join(tmpRoot, `probe-2781g-${name}-${process.pid}-${++n}.mjs`);
     fs.writeFileSync(f, code);

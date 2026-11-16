@@ -16,11 +16,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf as fileUrlRelSOf, guardCap3000Of, out } from './kit.mjs';
 
 export async function selftest284A({ dir, root, report, tmpRoot }) {
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const guard = guardCap3000Of(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
   // ---- a studio copy: its own .studio (state files, the event log) ----
@@ -31,7 +30,7 @@ export async function selftest284A({ dir, root, report, tmpRoot }) {
   for (const x of ['studio/task-holds.json']) fs.rmSync(path.join(S, x), { force: true });
   const evFile = path.join(S, '.studio', 'events-284a.jsonl');
   const env = { ...clean, AGENT_EVENTS_FILE: evFile, STUDIO_MAIN_ROOT: S, STUDIO_TASK_BUDGET: 'off', STUDIO_WATCHDOG: 'off', CI: '', NODE_OPTIONS: '' };
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
+  const u = fileUrlRelSOf(S);
   let pn = 0;
   const probe = (code, extra = {}) => {
     const f = path.join(S, `.probe-284a-${++pn}.mjs`);

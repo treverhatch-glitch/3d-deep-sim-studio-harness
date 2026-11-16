@@ -12,18 +12,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { eventsOf, fileUrlOf, gitAsT as g, out, queueDoneOf, readInDirOf, writeIn as write } from './kit.mjs';
 
 export async function selftest260B({ dir, run, report, tmpRoot, root }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
-  const read = (rel) => { try { return fs.readFileSync(path.join(dir, rel), 'utf8'); } catch { return ''; } };
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const read = readInDirOf(dir);
+  const u = fileUrlOf(dir);
   const events = path.join(dir, '.studio', 'events-260b.jsonl');
   const mark = path.join(tmpRoot, `train-runs-260b-${process.pid}.txt`);
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_TRAIN: '', STUDIO_TRAIN_PREDICT: 'off', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_HOTSPOT_ASK: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-260b-${process.pid}.pem`), AGENT_EVENTS_FILE: events, TRAIN_MARK: mark, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const lines = (n, f) => `${Array.from({ length: n }, (_, i) => f(i)).join('\n')}\n`;
   // The size check reads JavaScript with the harness's typescript; the selftest copy has no node_modules of its own
   // (CI found this), so link the harness's, as qa/selftest-2582k.mjs does.
@@ -138,7 +136,7 @@ export async function selftest260B({ dir, run, report, tmpRoot, root }) {
   };
   // 2.65.0: these lanes are queued with the queue-time conflict prediction off (STUDIO_TRAIN_PREDICT=off, in env), so
   // the train itself meets and counts each conflict, as before (qa/selftest-265r.mjs tests the prediction).
-  const queueIt = (l) => run(l.dir, `node harness/task.mjs done ${l.id} --agent ${l.agent} --train`, l.as);
+  const queueIt = queueDoneOf(run);
   const train = () => run(dir, 'node harness/task.mjs train --by tester', env);
   const reg = (who) => `# Registry\n\nentries: a, ${who}\n\nend\n`;
   const REL = 'game/demo/notes/reg.md';

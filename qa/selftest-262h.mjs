@@ -9,11 +9,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { addJsonOf, fileUrlOf, out } from './kit.mjs';
 
 export async function selftest262H({ dir, run, report }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const u = fileUrlOf(dir);
   const ident = { GIT_AUTHOR_NAME: 'hatch', GIT_AUTHOR_EMAIL: 'owner@example.com', GIT_COMMITTER_NAME: 'hatch', GIT_COMMITTER_EMAIL: 'owner@example.com' };
   const env = { ...ident, STUDIO_ROLE: '', STUDIO_LOCK_OWNER: '', STUDIO_AGENT: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_WEAKENED_TESTS: '', STUDIO_PROTECT_BASE: '', STUDIO_OWNER_KEY: '' };
   const PROD = { STUDIO_ROLE: 'producer', STUDIO_LOCK_OWNER: 'producer-s3' };
@@ -21,7 +20,7 @@ export async function selftest262H({ dir, run, report }) {
   const REVIEWER = { STUDIO_ROLE: 'reviewer', STUDIO_LOCK_OWNER: 'reviewer-s4' };
   const git = (cmd, e = {}) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`, { ...env, ...e });
   const task = (cmd, e = {}) => run(dir, `node harness/task.mjs ${cmd}`, { ...env, ...e });
-  const add = (title) => JSON.parse(task(`add "${title}" --role builder`).stdout).id;
+  const add = addJsonOf(task);
   const doneCheck = (id, e = {}) => out(run(dir, `node harness/done-check.mjs ${id}`, { ...env, ...e }));
   const gate = (e = {}) => run(dir, 'node harness/test-weakening.mjs --json', { ...env, STUDIO_PROTECT_BASE: 'main', ...e });
   const gateJson = (r) => { try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return { _raw: out(r).slice(-800) }; } };

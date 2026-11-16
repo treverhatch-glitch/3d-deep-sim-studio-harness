@@ -17,13 +17,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileUrlOf as fileUrlRelOf, guardOf, writeIn } from './kit.mjs';
 
 export async function selftest278I({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   void run; void harnessRoot;
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
+  const guard = guardOf(report);
+  const u = fileUrlRelOf(dir);
   // A person's terminal: no agent markers, no studio settings from the runner's own shell.
   const clean = {};
   for (const k of Object.keys(process.env)) if (!/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT)/i.test(k)) clean[k] = process.env[k];

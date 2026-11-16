@@ -8,10 +8,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { gitDirOf, out } from './kit.mjs';
 
 export async function selftestPU20({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
+  const g = gitDirOf(dir);
   const ownerKey = path.join(tmpRoot, `owner-pu20-${process.pid}.pem`);
   const env = { STUDIO_OWNER_KEY: ownerKey };
   const check = () => run(dir, 'node qa/protected-check.mjs', env);

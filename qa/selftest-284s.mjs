@@ -11,16 +11,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { eventsOf as eventsFileOf, fileUrlOf as fileUrlRelSOf, fwd, gEnvOf, gitUserCrlfOf, guardCap3000Of, out, readJsonlTrimmed as runsOf, sleep, writeIn as write } from './kit.mjs';
 
 export async function selftest284S({ dir, root, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const write = (b, rel, text) => { fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true }); fs.writeFileSync(path.join(b, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
-  const fwd = (p) => p.split(path.sep).join('/');
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const gEnv = gEnvOf(ident);
+  const g = gitUserCrlfOf(gEnv);
+  const guard = guardCap3000Of(report);
   // A process that ended after the probe that started it exited may linger as a zombie (Linux): that is not alive.
   const zombie = (pid) => { if (process.platform !== 'linux') return false; try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return st.slice(st.lastIndexOf(')') + 2).startsWith('Z'); } catch { return false; } };
   const alive = (pid) => { try { process.kill(pid, 0); return !zombie(pid); } catch (e) { return e.code === 'EPERM'; } };
@@ -52,8 +49,8 @@ export async function selftest284S({ dir, root, report, tmpRoot }) {
   const FAKE = path.join(S, 'qa', 'fixtures', 'fake-editor.mjs');
   const evFile = path.join(S, '.studio', 'events-284s.jsonl');
   const envOf = (extra = {}) => ({ ...base, AGENT_EVENTS_FILE: evFile, STUDIO_MAIN_ROOT: S, STUDIO_UNITY: FAKE, ...extra });
-  const events = () => { try { return fs.readFileSync(evFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
+  const events = eventsFileOf(evFile);
+  const u = fileUrlRelSOf(S);
   let pn = 0;
   const probe = (code, env = {}) => {
     const f = path.join(S, `.probe-284s-${++pn}.mjs`);
@@ -277,7 +274,6 @@ fs.appendFileSync(ctl, JSON.stringify({ only: E.STUDIO_LAND_ONLY ?? null, svc: E
 const m = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'merge', '--no-ff', '-m', 'land', 'refs/heads/' + br], { cwd: gw, encoding: 'utf8', windowsHide: true });
 process.exit(m.status === 0 ? 0 : 1);
 `);
-    const runsOf = (f) => { try { return fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
     const TRAIN = `import { runUnityTrain } from ${u('harness/unity-train.mjs')};
 const handed = [];
 const r = await runUnityTrain({ root: process.cwd(), log: () => {}, deps: { handBack: (lane, note) => handed.push({ task: lane.task, note }) } });

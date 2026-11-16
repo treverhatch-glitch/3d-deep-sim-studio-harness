@@ -18,17 +18,15 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
+import { eventsOf, fileUrlOf, gitAsT as g, guardOf, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest271Y({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const u = fileUrlOf(dir);
+  const write = writeInDirOf(dir);
+  const guard = guardOf(report);
   const events = path.join(dir, '.studio', 'events-271y.jsonl');
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const addEvent = (e) => fs.appendFileSync(events, `${JSON.stringify({ ts: new Date().toISOString(), agent: 't', ...e })}\n`);
   // A made-up token, long enough to look like a real one; the URL points at the local stand-in.
   const TOKEN = `tok${'Q7x2'.repeat(10)}Zr9w`;

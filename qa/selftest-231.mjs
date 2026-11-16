@@ -8,11 +8,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { out } from './kit.mjs';
 
 export async function selftest231({ dir, run, report, tmpRoot }) {
   let n = 0;
   const u = (rel, base = dir) => JSON.stringify(pathToFileURL(path.join(base, rel)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const probe = (code, env = {}, cwd = dir) => {
     const f = path.join(tmpRoot, `p231-${++n}-${process.pid}.mjs`);
     fs.writeFileSync(f, code);

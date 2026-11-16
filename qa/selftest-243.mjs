@@ -5,12 +5,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf as fileUrlRelOf, gitAsTShort as g, out } from './kit.mjs';
 
 export async function selftest243({ dir, run, report, tmpRoot }) {
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
+  const u = fileUrlRelOf(dir);
   const env = { AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-243.jsonl'), STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off' };
 
   // 1. Secrets: "AKIA" + 16 capitals inside a run of base64 is encoded data; the same standing alone is a key.

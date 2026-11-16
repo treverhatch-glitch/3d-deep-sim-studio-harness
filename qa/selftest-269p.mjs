@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { boardOf, doneBoardOf, eventsOf, gitAsT as g, guardOf, handBackOf, out, queueDoneOf, resetRanOf, writeIn as write } from './kit.mjs';
 
 export async function selftest269P({ dir, run, report, tmpRoot, root }) {
   // The size rule reads JavaScript with the typescript package: a copy made without node_modules (the full selftest's
@@ -24,21 +25,18 @@ export async function selftest269P({ dir, run, report, tmpRoot, root }) {
     try { fs.rmSync(path.join(dir, 'node_modules'), { force: true }); } catch {}
     fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   }
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const events = path.join(dir, '.studio', 'events-269p.jsonl');
   const ranLog = path.join(tmpRoot, `ran-269p-${process.pid}.log`);
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_GATE_FOCUS: '', STUDIO_GATE_RELATED: '', STUDIO_GATE_RELATED_ONLY: '', STUDIO_WHOLE_GAME: '', STUDIO_TRAIN: '', STUDIO_TRAIN_BISECT: '', STUDIO_TRAIN_LAND_PREFIX: '', STUDIO_TRAIN_MAX: '', STUDIO_TRAIN_RELATED_FIRST: '', STUDIO_SLOW_TIER: '', STUDIO_SLOW_HOUR: '', STUDIO_GATE_TIER: '', STUDIO_TEST_EXCLUDE: '', STUDIO_TEST_ONLY: '', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_GAME_GATE_RETRY: '', STUDIO_VERIFY_DETACH: 'off', STUDIO_LOCK_OWNER: '', npm_lifecycle_event: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-269p-${process.pid}.pem`), AGENT_EVENTS_FILE: events, RAN_LOG: ranLog, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const board = () => `${fs.existsSync(path.join(dir, 'studio/NEXT.md')) ? fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8') : ''}`;
-  const doneBoard = () => `${fs.existsSync(path.join(dir, 'studio/DONE.md')) ? fs.readFileSync(path.join(dir, 'studio/DONE.md'), 'utf8') : ''}`;
+  const evs = eventsOf(events);
+  const board = boardOf(dir);
+  const doneBoard = doneBoardOf(dir);
   const isDone = (id) => new RegExp(`\\b${id}\\b`).test(doneBoard()) && !new RegExp(`\\b${id}\\b`).test(board().split(/^## Done/m)[0]);
-  const handBack = (id) => { const f = path.join(dir, 'studio', 'handoffs', `${id}.md`); return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : ''; };
+  const handBack = handBackOf(dir);
   const droppedEv = (id) => evs().find((e) => e.type === 'task.train.dropped' && e.task === id);
   const ran = () => { try { return fs.readFileSync(ranLog, 'utf8').split('\n').filter(Boolean).map((l) => { const [owner, as, file, extra] = l.split('\t'); return { owner, as, file, extra }; }); } catch { return []; } };
-  const resetRan = () => { try { fs.rmSync(ranLog, { force: true }); } catch {} };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const resetRan = resetRanOf(ranLog);
+  const guard = guardOf(report);
 
   // ---- the studio and its made-up game ----
   write(dir, 'studio/gates.json', `${JSON.stringify({ gates: [
@@ -94,7 +92,7 @@ export async function selftest269P({ dir, run, report, tmpRoot, root }) {
     return { id, agent, dir: ld, as, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0, log: `${out(made)}\n${out(st)}\n${out(c)}` };
   };
   const verifyIn = (l) => run(l.dir, 'node scripts/run-gates.mjs --no-detach', l.as);
-  const queueIt = (l) => run(l.dir, `node harness/task.mjs done ${l.id} --agent ${l.agent} --train`, l.as);
+  const queueIt = queueDoneOf(run);
   const train = (extra = {}) => run(dir, 'node harness/task.mjs train --by tester --now', { ...env, ...extra });
   const trainVerifies = (rows) => rows.filter((r) => /^train-[\w-]+$/.test(r.owner) && !/-(re|rel|tail)$/.test(r.owner));
 

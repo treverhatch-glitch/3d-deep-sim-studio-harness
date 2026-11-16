@@ -3,9 +3,9 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { out } from './kit.mjs';
 
 export async function selftest249({ dir, run, report }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const d = path.join(dir, 'studio/logs');
   fs.rmSync(d, { recursive: true, force: true }); // the studio's own logs, if this copy has them: start from none
   const none = run(dir, 'node harness/logs.mjs');

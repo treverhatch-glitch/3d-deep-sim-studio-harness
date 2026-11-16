@@ -20,6 +20,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { guardOf } from './kit.mjs';
 
 export const CP_FUNCTIONS = ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork'];
 
@@ -127,7 +128,7 @@ export function windowsHideAudit(rows, allow = VISIBLE) {
 
 export async function selftest2731C({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   let ts = null;
   for (const base of [dir, harnessRoot]) {
     try { ts = createRequire(path.join(base, 'package.json'))('typescript'); break; } catch {}

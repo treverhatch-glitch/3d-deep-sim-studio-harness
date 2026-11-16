@@ -13,18 +13,15 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { eventsLenientOf, gitAsTShort as g, guardSyncBoolOf, napSync as nap, out, readJsonFile as readJson, untilNapOf } from './kit.mjs';
 
 export async function selftest263J({ dir, run, report, tmpRoot }) {
   const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === 'win32' ? 2.5 : 1);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-  const until = (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms && !fn()) nap(50); return fn(); };
-  const guard = (name, fn) => { try { const [ok, detail] = fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const until = untilNapOf(nap);
+  const guard = guardSyncBoolOf(report);
   const events = path.join(dir, '.studio', 'events-263j.jsonl');
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_HEAVY_SLOTS: '1', STUDIO_HEAVY_HELD: '', STUDIO_HEAVY_POLL_MS: '100', STUDIO_HEAVY_WAIT_MIN: '', STUDIO_GATE_PRIORITY: '', STUDIO_LOCK_OWNER: '', STUDIO_GAME: '', STUDIO_TRAIN: '', STUDIO_UNITY_TRAIN_RETRIES: '0', STUDIO_UNITY_TRAIN_RETRY_MIN: '0', STUDIO_DONE_GAME_GATES: 'skip', STUDIO_VISUAL_GATE: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_UNCOMMITTED: 'allow', STUDIO_REACHABILITY: 'off', STUDIO_HOOKS_CHECK: 'off', STUDIO_WEAKENED_TESTS: 'off', STUDIO_DONE_UNITY_GATE: '', npm_lifecycle_event: '', AGENT_EVENTS_FILE: events };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const h = (cwd, ref) => g(cwd, 'rev-parse', ref).stdout.trim();
   const anc = (cwd, a, b) => g(cwd, 'merge-base', '--is-ancestor', a, b).status === 0;
 
@@ -95,7 +92,7 @@ process.exit(0);
   };
   const doneMd = () => { try { return fs.readFileSync(path.join(dir, 'studio', 'DONE.md'), 'utf8'); } catch { return ''; } };
   const isDone = (id) => new RegExp(`\\*\\*${id}\\*\\*`).test(doneMd());
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return {}; } }); } catch { return []; } };
+  const evs = eventsLenientOf(events);
   const handedBack = () => evs().filter((e) => e.type === 'task.train.unity.dropped').map((e) => e.task);
   const queue = () => readJson(path.join(dir, '.studio', 'train', 'unity-queue.json')) || [];
   const leftRefs = () => g(uni, 'for-each-ref', '--format=%(refname)', 'refs/heads/unity-train/').stdout.trim();

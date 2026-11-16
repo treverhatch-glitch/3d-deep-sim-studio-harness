@@ -14,19 +14,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitEolLfOf, guardOf, nodeS120Of, out, readJsonIn as readIn, taskOf, writeIn } from './kit.mjs';
 
 export async function selftest2773A({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const readIn = (cwd, rel) => { try { return JSON.parse(fs.readFileSync(path.join(cwd, rel), 'utf8')); } catch { return null; } };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitEolLfOf(gEnv);
+  const guard = guardOf(report);
   // No agent markers of the shell running the selftest, no owner private key, no worker session.
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_WATCHDOG: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_TASK_BASE: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', GITHUB_BASE_REF: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-2773a-${process.pid}.pem`) };
   let n = 0;
@@ -47,12 +44,11 @@ export async function selftest2773A({ dir, report, tmpRoot, root }) {
     made.push(S);
     return { S, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const node = (S, args, env) => spawnSync(process.execPath, args, { windowsHide: true, cwd: S, encoding: 'utf8', env: { ...process.env, ...ident, ...env }, timeout: 120000 });
-  const task = (S, line, env) => node(S, ['harness/task.mjs', ...line], env);
+  const node = nodeS120Of(ident);
+  const task = taskOf(node);
   const add = (S, title, env) => { const r = task(S, ['add', title, '--role', 'builder'], env); return (out(r).match(/"id":\s*"([A-Z]+-\d+)"/) || [])[1] || null; };
   const doneCheck = (S, id, env) => out(node(S, ['harness/done-check.mjs', id], env));
   const probe = (S, code, env) => { const f = path.join(S, `.probe-2773a-${++n}.mjs`); fs.writeFileSync(f, code); const r = node(S, [f], env); const l = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop(); let j = null; try { j = JSON.parse(l); } catch {} return { ...r, j }; };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const pem = () => crypto.generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' });
   const betaOn = (S, agents = ['opus-1']) => { const at = new Date().toISOString(); writeIn(S, 'studio/beta.json', `${JSON.stringify({ on: true, by: 'pat', at, why: 'beta for the selftest', agents, roles: ['producer', 'director'] }, null, 2)}\n`); return at; };
   // The orchestrator's own shell: an outside coding agent named in studio/beta.json.

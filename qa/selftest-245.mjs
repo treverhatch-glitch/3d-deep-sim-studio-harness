@@ -5,12 +5,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { gitAsTShort as g, importInDirOf, out } from './kit.mjs';
 
 export async function selftest245({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const imp = (rel) => import(pathToFileURL(path.join(dir, rel)).href);
+  const imp = importInDirOf(dir);
   const env = { AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-245.jsonl'), STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off' };
 
   // 1. Adopting a Vite game writes a starter studio.browser.json and the controls task points at it.
@@ -18,7 +16,6 @@ export async function selftest245({ dir, run, report, tmpRoot }) {
   fs.mkdirSync(path.join(src, 'src'), { recursive: true });
   fs.writeFileSync(path.join(src, 'package.json'), JSON.stringify({ name: 'kite', scripts: { dev: 'vite', test: 'vitest run' }, devDependencies: { vite: '^8.0.0', vitest: '^5.0.0' } }));
   fs.writeFileSync(path.join(src, 'src/main.ts'), 'export const kite = 1;\n');
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   g(src, 'init', '-q', '-b', 'main'); g(src, 'add', '-A'); g(src, 'commit', '-qm', 'start');
   const ad = run(dir, `node scripts/onboard-game.mjs --path "${src}" --name Kite --adopt`, env);
   const bf = path.join(dir, 'game/kite/studio.browser.json');

@@ -10,16 +10,15 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { addJsonOf, fileUrlOf, out } from './kit.mjs';
 
 export async function selftest2591({ dir, run, report }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const u = fileUrlOf(dir);
   const ident = { GIT_AUTHOR_NAME: 'hatch', GIT_AUTHOR_EMAIL: 'owner@example.com', GIT_COMMITTER_NAME: 'hatch', GIT_COMMITTER_EMAIL: 'owner@example.com' };
   const env = { ...ident, STUDIO_ROLE: '', STUDIO_LOCK_OWNER: '', STUDIO_AGENT: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_RESUME_BY: '', STUDIO_OWNER_KEY: '' };
   const git = (cmd, e = {}) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`, { ...env, ...e });
   const task = (cmd, e = {}) => run(dir, `node harness/task.mjs ${cmd}`, { ...env, ...e });
-  const add = (title) => JSON.parse(task(`add "${title}" --role builder`).stdout).id;
+  const add = addJsonOf(task);
   const doneCheck = (id) => out(run(dir, `node harness/done-check.mjs ${id}`, env));
   const readRec = () => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'studio/task-types.json'), 'utf8')); } catch { return { tasks: {} }; } };
   const record = () => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'studio/task-types.json'), 'utf8')).tasks || {}; } catch { return {}; } };
