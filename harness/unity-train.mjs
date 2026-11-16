@@ -1155,7 +1155,13 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     // stop for this engine until a person clears .studio/train/<x>-probe.json.
     if (noLand && !dryRun) {
       const now = headOf(repo, target);
-      if (now !== tip) {
+      // 2.86.1: a run of the target alone merges no branch, so a target that moved during it cannot be a landing: a land script
+      // that commits its own record of every run moves it. The result stands for the tip that was run; one note says so.
+      if (now !== tip && !group.length) {
+        r = { ...r, movedAlone: now };
+        log(`[unity-train] ${id}: ${target} moved (${short(tip)} -> ${short(now)}) during ${what}; no branch was in that run, so nothing was landed by it and its result stands for ${short(tip)}`);
+        ev('target_moved_alone', id, `${target} moved (${short(tip)} -> ${short(now)}) during ${what}: no branch was in that run, so its result stands for ${short(tip)}. A land script that honours STUDIO_LAND_PROBE=1 writes nothing to the target (docs/NATIVE-ENGINE.md)`, { agent: by, to: 'producer', status: 'warn', meta: { from: tip, to: now } });
+      } else if (now !== tip) {
         r = { ...r, status: 'error', ok: false, moved: now, why: `${target} moved (${short(tip)} -> ${short(now)}) during ${what}, a run that must land nothing (STUDIO_LAND_PROBE=1): the land script does not honour it` };
         noteProbe(root, engine, { honoured: false, revoked: true, why: r.why, train: id });
         log(`[unity-train] ${id}: STOP: ${r.why}; nobody is blamed, the lanes stay queued; by-name steps are off for ${engine} until .studio/train/${engine}-probe.json is cleared`);
