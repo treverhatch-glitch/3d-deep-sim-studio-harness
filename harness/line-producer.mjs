@@ -1169,7 +1169,11 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     } catch { f.engineSlots = 0; }
     f.window = t.cfg?.window === 'quiet' ? 'quiet' : 'slot';
     // 2.86: the daily full run runs on the target alone when the queue is empty: a due one starts a train with no lane.
-    if (!q.length) { try { const fd = ut.fullLandDue(root, t.name, t.cfg || {}, env, now, { start: false }); if (fd.why) f.fullDue = fd.why; } catch { /* not due */ } }
+    // 2.91: so does the full rules run rules.focus.fullEveryHours owes (not while it is red on a target the rules tests see unchanged).
+    if (!q.length) {
+      try { const fd = ut.fullLandDue(root, t.name, t.cfg || {}, env, now, { start: false }); if (fd.why) f.fullDue = fd.why; } catch { /* not due */ }
+      try { const ow = ut.fullRulesOwedNow(root, t.name, env, now); if (ow.why) f.fullDue = f.fullDue ? `${f.fullDue}; the full rules run: ${ow.why}` : `the full rules run: ${ow.why}`; } catch { /* not owed */ }
+    }
     const w = engineWindow(f, env);
     if (autoOn && t.trainAuto && !ea.on && ea.source === 'file') {
       w.start = false; w.wait = false; w.why = ctl.autoOffWhy(ea, t.name);

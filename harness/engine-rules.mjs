@@ -4,7 +4,7 @@
  *   "engines": { "<x>": { "rules": "<command>" } }  or  "rules": { "test": "<command>", "inputs": ["<folder>", ...] }
  * Default for unity when "rules" is absent: `dotnet test tools/SimTests` when the target branch has that folder. "rules": false
  * or STUDIO_ENGINE_RULES=off: no check. Other keys: "inputs" (git-ignored files the tests read), "timeoutMin" (30), "env", "lfs",
- * "paths", "focus" (changed systems only, full run every fullEveryHours; "focus.auto", "focus.shared"), "share", "maxLanes",
+ * "paths", "ignore", "focus" (changed systems only, a full run every fullEveryHours; "focus.auto", "focus.shared"), "share", "maxLanes",
  * "play.focus" (docs/NATIVE-ENGINE.md). A batch is judged only after the target itself passed in the same kind of checkout;
  * a red target is skipped with the reason. Results are kept per tree, command and inputs (.studio/engine/<x>-rules.json).
  *   node harness/engine-rules.mjs [--engine unity] [--ref <branch|commit>] [--full] [--fresh] [--json] | show [--engine unity]
@@ -204,6 +204,8 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
       smoke: typeof f.smoke === 'string' ? f.smoke.trim() : '',
       join: typeof f.join === 'string' && f.join ? f.join : '|',
       fullEveryHours: Math.max(0, num(f.fullEveryHours, 24)),
+      // 2.91: past this the owed full run is overdue and runs at the end of a train (default 2 x fullEveryHours).
+      fullEveryMaxHours: Number(f.fullEveryMaxHours) >= Math.max(0, num(f.fullEveryHours, 24)) ? Number(f.fullEveryMaxHours) : 2 * Math.max(0, num(f.fullEveryHours, 24)),
       ignore: ignoreList(f.ignore),
       split: f.split === true,
       // 2.85: how many split parts run at once (null: 1) and the GB one test process is expected to take (null: 4, or the largest measured peak).
@@ -220,7 +222,11 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
   }
   const bl = blameList(cfg.blame);
   focusBad.push(...bl.errors);
-  const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, first, blame: bl.blame, timeoutSet, timeoutFrom };
+  // 2.91: rules.ignore, folders or files the rule tests never read: plain repo paths only (no glob, no `..`).
+  const ig0 = (Array.isArray(o.ignore) ? o.ignore : o.ignore === undefined ? [] : [o.ignore]).map((x) => String(x ?? '').trim());
+  const ignore = relList(ig0).filter((x) => !/[*?[\]{}!]/.test(x));
+  for (const x of ig0) if (x && !ignore.includes(x.replace(/\\/g, '/').replace(/\/+$/, ''))) focusBad.push(`rules.ignore ${JSON.stringify(x).slice(0, 80)} is not a plain repo path (no glob, no .., not absolute); it is left out`);
+  const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), ignore, focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, first, blame: bl.blame, timeoutSet, timeoutFrom };
   const test = typeof r === 'string' ? r.trim() : typeof o.test === 'string' ? o.test.trim() : '';
   if (test) return { command: withSdk(test), inputs, timeoutMin, source: `studio/game.json engines.${engine}.rules`, ...extra };
   const d = DEFAULTS[engine];
@@ -374,14 +380,15 @@ export function changedPaths(repo, a, b) {
  */
 export function rulesSelection({ changed = [], cfg, full = false, fullWhy = '', autoNames = null } = {}) {
   const paths = cfg?.paths || [];
-  const under = (p) => !paths.length || paths.some((x) => p === x || p.startsWith(`${x}/`));
+  const ign = cfg?.ignore || [];
+  const under = (p) => (!paths.length || paths.some((x) => p === x || p.startsWith(`${x}/`))) && !ign.some((x) => p === x || p.startsWith(`${x}/`));
   const ch0 = changed == null ? null : [...new Set(changed.map((p) => String(p || '').replace(/\\/g, '/')).filter(Boolean))].filter(under);
   // rules.focus.ignore paths (Play Mode, UI files) cannot affect the tests: left out before the "does every path map?" test.
   const ig = cfg?.focus && ch0 ? ignoreSplit(ch0, cfg.focus.ignore) : { kept: ch0, ignored: [], bad: [] };
   const ch = ig.kept;
   const more = { ...(ig.ignored.length ? { ignored: ig.ignored } : {}), ...(ig.bad.length ? { ignoreBad: ig.bad } : {}) };
   const fullSel = (why, extra = {}) => ({ mode: 'full', filter: '', command: cfg.command, changed: ch || [], why, ...more, ...extra });
-  if (ch && paths.length && !ch0.length) return fullSel('nothing under rules.paths changed: the target\'s kept result answers', { unchanged: true });
+  if (ch && (paths.length || ign.length) && !ch0.length) return fullSel(`nothing ${paths.length ? 'under rules.paths' : 'outside rules.ignore'} changed: the target's kept result answers`, { unchanged: true });
   if (!cfg?.focus) return fullSel(`no rules.focus${cfg?.focusBad?.length ? ` (${cfg.focusBad[0]})` : ''}`);
   // Only ignored paths changed: the smoke filter alone, else the target's kept result.
   if (ch && ch0.length && !ch.length) {
@@ -545,11 +552,16 @@ export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = 
   return { mode: 'focus', filter: ff.filter, why: `${ch.length} changed path(s), all mapped by play.focus${ig.ignored.length ? ` (${ig.ignored.length} more left out by play.focus.ignore)` : ''}`, ...bad };
 }
 
-/** Is a full run due (fullEveryHours, STUDIO_ENGINE_RULES_FULL, --full)? '' or why. */
-export function fullDue(root, engine, cfg, { env = process.env, full = false } = {}) {
+/**
+ * Is a full run due (fullEveryHours, STUDIO_ENGINE_RULES_FULL, --full)? '' or why. owe (2.91, the train): only what a person
+ * asked for (--full, STUDIO_ENGINE_RULES_FULL, fullEveryHours 0) makes the batch's check full; the hours owe a full run on
+ * the target alone instead (fullRulesOwed, fullRulesRun).
+ */
+export function fullDue(root, engine, cfg, { env = process.env, full = false, owe = false } = {}) {
   if (!cfg?.focus) return '';
   if (full) return 'a full run was asked for (--full)';
   if (on(env.STUDIO_ENGINE_RULES_FULL)) return 'a full run was asked for (STUDIO_ENGINE_RULES_FULL)';
+  if (owe && cfg.focus.fullEveryHours > 0) return '';
   const at = Date.parse(readCache(root, engine).lastFullAt || '');
   if (!Number.isFinite(at)) return 'no full pass is recorded yet';
   const h = cfg.focus.fullEveryHours;
@@ -558,7 +570,7 @@ export function fullDue(root, engine, cfg, { env = process.env, full = false } =
 
 const cmdKey = (c) => {
   const vars = Object.keys(c.env || {}).sort().map((k) => `${k}=${c.env[k]}`);
-  return sha1(`${c.command}\n${c.inputs.join('\n')}${vars.length ? `\nenv:${vars.join('\n')}` : ''}${c.paths?.length ? `\npaths:${c.paths.join('\n')}` : ''}${c.lfs ? '\nlfs' : ''}`);
+  return sha1(`${c.command}\n${c.inputs.join('\n')}${vars.length ? `\nenv:${vars.join('\n')}` : ''}${c.paths?.length ? `\npaths:${c.paths.join('\n')}` : ''}${c.ignore?.length ? `\nignore:${c.ignore.join('\n')}` : ''}${c.lfs ? '\nlfs' : ''}`);
 };
 const readCache = (root, engine) => { const j = readJson(rulesFile(root, engine), null); return j && typeof j === 'object' && j.trees && typeof j.trees === 'object' ? j : { trees: {}, runs: [] }; };
 function writeCache(root, engine, fn) {
@@ -705,11 +717,37 @@ function keepParts(root, engine, list) {
   });
 }
 
-/** The key a result is kept under: tree (or rules.paths ids), command, inputs, selection. */
+/**
+ * 2.91: an id of tree object `id` without the repo paths in `drop` (relative to it): one `git ls-tree` per tree on the way
+ * down each dropped path, never the whole tree. The id itself when nothing in it is dropped; null when nothing is left
+ * (a folder that held only dropped paths is no folder, as git sees it).
+ */
+function treeWithout(repo, id, drop) {
+  if (!drop.length) return id;
+  if (drop.includes('')) return null;
+  const ls = out(git(repo, 'ls-tree', '-z', id)).split('\0').filter(Boolean);
+  const lines = [];
+  for (const l of ls) {
+    const [meta, name] = [l.slice(0, l.indexOf('\t')), l.slice(l.indexOf('\t') + 1)];
+    if (drop.includes(name)) continue;
+    const below = drop.filter((d) => d.startsWith(`${name}/`)).map((d) => d.slice(name.length + 1));
+    const [mode, type, oid] = meta.split(' ');
+    const kept = below.length && type === 'tree' ? treeWithout(repo, oid, below) : oid;
+    if (kept) lines.push(`${mode} ${type} ${kept}\t${name}`);
+  }
+  return lines.length ? `less:${sha1(lines.join('\n'))}` : null;
+}
+
+/** The key a result is kept under: tree (or rules.paths ids; 2.91: less rules.ignore), command, inputs, selection. */
 export function rulesKey({ repo, sha, cfg, sel = null, print = '' }) {
   const s = sel || { mode: 'full', filter: '', command: cfg.command };
+  const ign = cfg.ignore || [];
   let base;
-  if (cfg.paths?.length) base = `paths:${sha1(cfg.paths.map((p) => `${p}\0${out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}:${p}`)) || 'none'}`).join('\n'))}`;
+  const at = (p) => out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}:${p}`));
+  // An ignored path inside a rules.paths entry is left out of that entry's id; one that holds the entry drops it.
+  const less = (p, id) => { if (!id || !ign.length) return id; const d = ign.filter((x) => x === p || x.startsWith(`${p}/`) || p.startsWith(`${x}/`)).map((x) => (x === p || p.startsWith(`${x}/`) ? '' : x.slice(p.length + 1))); return d.length ? treeWithout(repo, id, d) || 'dropped' : id; };
+  if (cfg.paths?.length) base = `paths:${sha1(cfg.paths.map((p) => `${p}\0${less(p, at(p)) || 'none'}`).join('\n'))}`;
+  else if (ign.length) { const t = out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}^{tree}`)); base = t ? treeWithout(repo, t, ign) || 'less:empty' : ''; }
   else base = out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}^{tree}`));
   return `${base}|${cmdKey({ ...cfg, command: s.command })}${print ? `|${print}` : ''}${s.mode === 'focus' ? `|focus:${sha1(s.filter)}` : ''}`;
 }
@@ -734,6 +772,51 @@ export function rulesTimeout(root, engine, cfg = {}, mode = 'full') {
 }
 /** 2.90: trains in a row whose rules check judged no lane because of the target: { n, minutes, why, fix, since } or null. */
 export function rulesNoJudge(root, engine) { const x = readCache(root, engine).noJudge; return x && x.n > 0 ? x : null; }
+
+/**
+ * 2.91: the full run rules.focus.fullEveryHours owes, run on the target alone (fullRulesRun), never as a batch's check.
+ * { why, overdue, hours, maxHours, blocked } ('' why: not owed now). Overdue past rules.focus.fullEveryMaxHours. blocked:
+ * the last owed run was red or timed out on this target's rules key: it is not run again until the target moves under what
+ * the tests read, fullEveryHours pass, or (a timeout) the timeout grew.
+ */
+export function fullRulesOwed(root, engine, cfg, { repo = null, tip = null, now = Date.now() } = {}) {
+  const no = { why: '', overdue: false, hours: null, maxHours: null, blocked: null };
+  const h = cfg?.focus?.fullEveryHours;
+  if (!(h > 0)) return no;
+  const maxHours = cfg.focus.fullEveryMaxHours || 2 * h;
+  const j = readCache(root, engine);
+  const at = Date.parse(j.lastFullAt || '');
+  const age = Number.isFinite(at) ? now - at : Infinity;
+  if (age < h * 3600000) return { ...no, hours: h, maxHours };
+  const overdue = age >= maxHours * 3600000;
+  const why = !Number.isFinite(at) ? 'no full pass is recorded yet' : overdue ? `the last full pass is older than ${maxHours} h (rules.focus.fullEveryMaxHours): overdue` : `the last full pass is older than ${h} h (rules.focus.fullEveryHours)`;
+  const fr = j.fullRed;
+  if (fr && repo && tip && now - Date.parse(fr.at || '') < h * 3600000 && !(fr.timeoutMin && rulesTimeout(root, engine, cfg, 'full').min > fr.timeoutMin)) {
+    let key = null;
+    try { key = rulesKey({ repo, sha: tip, cfg }); } catch { /* not blocked */ }
+    if (key && key === fr.key) return { ...no, hours: h, maxHours, blocked: { ...fr, owed: why } };
+  }
+  return { why, overdue, hours: h, maxHours, blocked: null };
+}
+
+/**
+ * 2.91: the owed full rules run on the target alone (the full command; a kept result of the same key counts). A pass writes
+ * lastFullAt. A red or a timeout judges no lane: it is kept as fullRed (this target's key, fullRulesOwed) for train status
+ * and the Line Producer; a timeout nobody set doubles the next one, as the 2.90 calibration does. Returns runRulesAt's result.
+ */
+export function fullRulesRun({ engine = 'unity', repo, tip, cfg, from = [], root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt } = {}) {
+  const r = run({ engine, repo, sha: tip, cfg, from, sel: { mode: 'full', filter: '', command: cfg.command }, root, id: `${id}-full`, env, log, useCache: true });
+  if (r.status === 'pass') { writeCache(root, engine, (j) => { j.lastFullAt = new Date().toISOString(); delete j.fullRed; }); return r; }
+  const tmo = Boolean(r.timedOut);
+  if (tmo && !r.notRun && !r.timeoutSet) writeCache(root, engine, (j) => { j.raise = { ...(j.raise || {}), full: { min: Math.min(Math.max(cfg.timeoutMin, TIMEOUT_CAP), min2(r.timeoutMin * 2)), from: r.timeoutMin, at: new Date().toISOString() } }; });
+  let key = null;
+  try { key = rulesKey({ repo, sha: tip, cfg }); } catch { /* kept without a key: not blocked */ }
+  writeCache(root, engine, (j) => { j.fullRed = { key, tip, status: r.status, why: String(r.why || '').slice(0, 200), failures: (r.failures || []).slice(0, 10), at: new Date().toISOString(), timeoutMin: tmo ? r.timeoutMin || null : null }; });
+  return r;
+}
+
+/** 2.91: the owed full rules run's red or timeout on the target, kept by fullRulesRun: { tip, status, why, failures, at } or null. */
+export function rulesFullRed(root, engine) { const x = readCache(root, engine).fullRed; return x && x.at ? x : null; }
 
 /**
  * Run the rules check on one commit in a throwaway checkout (never the land script's worktree or a lane).
@@ -853,7 +936,7 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
  * why, kept, dropped: [{ lane, why, failures }], runs, ms, green?, inputs, mode, filter }. A red batch is bisected by prefixes:
  * the first red prefix's last lane is dropped. STUDIO_ENGINE_RULES_MAX_RUNS (12) bounds the runs; past it the rest go unjudged.
  */
-export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], extraFrom = [], full = false, useCache = true, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt, slice = null } = {}) {
+export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], extraFrom = [], full = false, owe = false, useCache = true, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt, slice = null } = {}) {
   const src = [...from, ...extraFrom];
   const res = { ran: false, kept: lanes.slice(), dropped: [], runs: 0, ms: 0, why: '', inputs: inputsPrint(cfg, src), mode: 'full', filter: '' };
   if (!cfg) return { ...res, skipped: true, why: 'no rules check is configured' };
@@ -866,7 +949,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     for (let i = 0; i < n; i += 1) {
       const part = lanes.slice(i * cfg.maxLanes, (i + 1) * cfg.maxLanes);
       log(`[engine-rules] ${engine}: slice ${i + 1} of ${n} (rules.maxLanes ${cfg.maxLanes}): ${part.map((l) => l.task).join(', ')}`);
-      const r = rulesGate({ engine, repo, tip, lanes: part, chain, cfg, from, extraFrom, full, useCache, root, id: `${id}-s${i + 1}`, env, log, run, slice: { i: i + 1, n } });
+      const r = rulesGate({ engine, repo, tip, lanes: part, chain, cfg, from, extraFrom, full, owe, useCache, root, id: `${id}-s${i + 1}`, env, log, run, slice: { i: i + 1, n } });
       all.ran = all.ran || r.ran;
       if (r.splitAtOnce) all.splitAtOnce = Math.max(all.splitAtOnce || 0, r.splitAtOnce);
       if (r.selWhy) all.selWhy = all.selWhy ? `${all.selWhy}; ${r.selWhy}`.slice(0, 400) : r.selWhy;
@@ -883,7 +966,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
   }
   const maxRuns = Math.max(2, Math.floor(num(env.STUDIO_ENGINE_RULES_MAX_RUNS, 12)));
   let first = chain(tip, lanes);
-  const due = fullDue(root, engine, cfg, { env, full });
+  const due = fullDue(root, engine, cfg, { env, full, owe });
   const headOk = first && !first.error && first.head;
   // 2.86: the systems rules.focus.auto finds on the target and in the batch (a system the batch adds is one).
   const sys = cfg.focus?.auto ? autoSystems({ repo, shas: [headOk ? first.head : null, tip], auto: cfg.focus.auto, shared: cfg.focus.shared || [] }) : null;
@@ -1074,7 +1157,8 @@ export async function rulesPlan(root, { engine = 'unity', branches = [], env = p
   const c = chainOnTarget(s.repo, tip, lanes, 'rules-plan', engine);
   if (c.error || !c.head) return { error: 'chain', message: `The batch could not be built: ${c.error || 'no head'}` };
   const left = [...c.conflictTarget, ...c.deferred].map((l) => `${l.branch} (${l.why})`);
-  const due = fullDue(root, engine, cfg, { env });
+  // 2.91: as the train's check: the hours owe a full run on the target alone, they do not make this one full.
+  const due = fullDue(root, engine, cfg, { env, owe: true });
   const sys = cfg.focus?.auto ? autoSystems({ repo: s.repo, shas: [c.head, tip], auto: cfg.focus.auto, shared: cfg.focus.shared || [] }) : null;
   const sel = rulesSelection({ changed: changedPaths(s.repo, tip, c.head), cfg, full: Boolean(due), fullWhy: due, autoNames: sys ? sys.names : null });
   const from = [...new Set([s.folder, s.cfg.gateWorktree ? path.resolve(root, s.cfg.gateWorktree) : null, s.cfg.cwd ? path.resolve(root, s.cfg.cwd) : null, s.repo].filter(Boolean))];

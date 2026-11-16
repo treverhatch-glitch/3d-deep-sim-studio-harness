@@ -77,7 +77,9 @@ seconds once the rules are compiled code. So the engine train runs them first, o
 - **It judges a batch only after it passed on the target itself** in the same kind of checkout. A check that is red
   on the landed target (a missing input, no SDK) judges no lane: the train says why and the land run decides, as before.
 - A green batch goes to the land run with `STUDIO_RULES_GREEN=1`, as long as the land run lands exactly the checked
-  lanes on the checked target. A land script may use that to skip its own copy of the same tests.
+  lanes on the checked target. A land script may use that to skip its own copy of the same tests. 2.91: with
+  `rules.paths` or `rules.ignore` set, a target that moved only where the rules tests do not read (a land script's own
+  record commit) still counts as the checked target; one log line names the two tips. Without them any move loses it.
 - A red batch is narrowed with the same cheap check: the first prefix that is red names its last lane. That lane is
   handed back with cause `rules`, the failing test names and the command's last lines, and the rest is checked again.
   `STUDIO_ENGINE_RULES_MAX_RUNS` (12) bounds the runs for one batch; past it the lanes left go to the land run unjudged.
@@ -126,6 +128,9 @@ half as much machine time as the land runs. Five settings, all optional, in the 
 - `paths`: the repo folders or files the rule tests compile or read. Only those are checked out (a sparse checkout; a
   full one, said in the log, if that fails), and a kept result's key is those paths' git ids instead of the whole
   tree: a batch that changes nothing under them gets the target's kept result without a run.
+- `ignore` (2.91): the opposite list, folders or files the rule tests never read (the folder a land script commits its
+  run records to, docs). Plain repo paths only (no glob, no `..`). A change only under them is no change for the check:
+  the kept result's key is the tree without them (inside `paths` too, when both are set). The checkout stays full.
 - `inputs` are merged over every folder they are copied from: each file comes from the first folder that has it and
   never overwrites one already there, and the inputs' fingerprint is of that merged view. The train may add the
   lanes' own folders after the regular ones (`extraFrom`); `share` lists folders of content-addressed input files a
@@ -133,12 +138,18 @@ half as much machine time as the land runs. Five settings, all optional, in the 
 - `focus`: when every path a batch changes (under `paths`, when set) matches a `map` entry, the batch runs
   `focus.test` with `{filter}` replaced by the matching entries' filters (`$1`..`$9` are the regex groups; a group
   with anything but letters, digits, `.`, `_` or `-` counts as unmatched) plus `smoke`, joined by `join`. Otherwise,
-  and whenever the last full pass on the target is older than `fullEveryHours`, it runs the full `test`. The target's
+  and when a person asks for it (`STUDIO_ENGINE_RULES_FULL=1`, `--full`, or `fullEveryHours` 0), it runs the full `test`. The target's
   calibration and the narrowing of a red batch use the batch's same command. The command gets
   `STUDIO_RULES_MODE=focus` or `full`; the `engine.rules` event and the train's result say the mode and the filter.
   `STUDIO_ENGINE_RULES_FULL=1` forces a full run. **A focus-mode green is weaker than a full one**: a change in one
   system can break another system's test, which a focused run does not run; the full run every `fullEveryHours` is
   the backstop, and a land script that reads `STUDIO_RULES_MODE` can run the full tests itself after a focused green.
+- **2.91: the full run every `fullEveryHours` is owed, never the batch's check.** With lanes waiting, the train's check
+  runs as if it were not due. The owed full run is the full `test` on the target alone: when the queue is empty (the
+  Line Producer starts a train with no lane for it), or, once it is older than `focus.fullEveryMaxHours` (default twice
+  `fullEveryHours`), at the end of a train after the batch's rounds. A pass writes the last full pass. A red or a
+  timeout blames no lane: `task.train.<x>.rules_full` (warn) and `train status` say it, and it is not run again until
+  the target changes under what the tests read (or `fullEveryHours` pass, or a doubled timeout applies).
 - `focus.ignore` (2.84): a list of regexes; a changed path matching any of them is left out before the "does every
   path map?" test (Play Mode tests, UI files: what the rules tests cannot read), so it no longer forces the full
   command on the whole batch. When only ignored paths changed, the batch runs `smoke` alone (focus), or with no `smoke`
@@ -374,7 +385,9 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
 - **2.86: the full run is its own run, on the target alone.** It never carries a branch and is never a retry, bisect or
   confirm step. It runs when it is due and the train has no lane (the Line Producer starts a train for it when the
   queue is empty), or, when it is overdue by `engines.<x>.fullLandMaxHours` (default twice `fullLandHours`; counted from
-  the last full run that passed), at the start of the next train before any lane's land run. The land command gets a
+  the last full run that passed), 2.91: at the end of the next train, after the batch's rounds, on the target as it is
+  then. It never goes ahead of a waiting batch; `full_land` says when it runs or what it waits for. When the full rules
+  run is owed too, it goes first (it is shorter). The land command gets a
   ref at the target's tip as its branch and `STUDIO_LAND_FULL=1` with `STUDIO_LAND_PROBE=1`. A script that cannot run
   that (an error or conflict) is told in `task.train.<x>.full_land` (warn) and the full run is tried again at the next
   train. Every failing test of a full run is the target's own (below); 2.85's search for a branch tied to it, and the

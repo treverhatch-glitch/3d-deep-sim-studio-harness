@@ -5364,6 +5364,14 @@ if (inShard('selftest-290c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.91: a full run never goes ahead of a waiting batch; a rules pass survives a target move the rules tests cannot see.
+if (inShard('selftest-291a')) {
+  const dir = copyRepo();
+  const { selftest291A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-291a.mjs')).href);
+  await selftest291A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
