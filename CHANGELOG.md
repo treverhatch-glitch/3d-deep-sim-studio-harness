@@ -4,6 +4,20 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.91.0] — 2026-11-17
+No full run ahead of a waiting batch (the owner's order: the next version, from a live studio's first day on 2.90).
+A train of four small green branches took seven hours: two full rules runs and a daily full land run went ahead of
+it, and the land script's record commit then cost the batch its "rules are green". Details: docs/RELEASE-2.91.0.md.
+- **Full runs leave the train's path.** With lanes waiting, the batch goes first. A due full run (rules or land) waits
+  for an empty queue; an overdue one runs at the end of the train. `rules.focus.fullEveryMaxHours` (twice the hours).
+- **A rules pass survives a record commit:** `rules.ignore` names what the rule tests never read; a target that moved
+  only there (or only outside `rules.paths`) is still the checked target, for the kept result and for the land run.
+- **The idle stop counts work queued for a train and landings as finished**; each resume command says when the
+  other stop is still set.
+- **A read of a file the task names is progress** for the stall rule, for at most `STUDIO_STALL_READ_MAX_MIN`.
+TIMINGLINE
+- **Release rule:** a branch a studio may have merged goes into main with a merge commit, not a squash.
+
 ## [2.90.0] — 2026-11-16
 The overseer's list (the owner's order: build what a live studio's overseer asked for after two days on 2.86). Its
 train logs showed more than the list: the rules check had timed out on every engine train for two days and judged
@@ -25,7 +39,7 @@ nobody. Details: docs/RELEASE-2.90.0.md.
 ## [2.89.0] — 2026-11-16
 Which functions a studio runs (the owner's word: cut what is not essential, by evidence). A crew's records show 92%
 of the code reachable from what it ran and 8% not, mostly setup tooling; what is unused inside used files, no record
-showed. Details: docs/RELEASE-2.89.0.md.
+showed. Details: the 2.89.0 release notes, in git history.
 - **A record of the functions that run** (`harness/usage-functions.mjs`): each harness command in a studio notes the
   functions it called, names and positions only, in `.studio/usage/functions/<version>.tsv`. On by default
   (`STUDIO_USAGE_FUNCTIONS=off`); about 25 ms per command.
@@ -48,23 +62,9 @@ Details: the 2.88.0 release notes, in git history.
 - **Not changed:** the scorecard's "landed" (measures 1, 3, 4 and 15) and the upgrade comparison still count closes,
   so rounds stay comparable; the owner decides whether to narrow them.
 
-## [2.87.0] — 2026-11-16
-Shorter, same behaviour (the owner's order: the consolidation map's first step). Nothing changes what a command prints,
-decides or writes. Tracked text 173,676 lines to about 168,500; `harness/` and `scripts/` 4.8% smaller by size.
-Details: the 2.87.0 release notes, in git history.
-- **One length rule for comments:** a file header at most 12 lines, any other comment at most 6, in `harness/`,
-  `scripts/` and `qa/`. 525 comments were over it (9,431 lines, now 5,151). The code is unchanged
-  (`scripts/same-code.mjs`, 386 files). `npm run check:comments` keeps it, as a step of the online checks.
-- **One test kit:** `qa/kit.mjs` holds 81 helpers that 244 test files each defined for themselves (1,237 definitions).
-  No check changed.
-- **Notes:** finished notes and October's work-log rows removed, 39 older problem entries folded to one line, the
-  owner's game no longer named in harness text.
-- **Measured, a crew's first 31.4 hours on 2.86.0:** engine land runs passing 83.3% (35% on 2.85), engine queue wait
-  p90 3.1 h (12.7 h), tasks landed with no overseer step 31.7% (25%).
-- **Not done:** shared helpers in `harness/` (about 100 lines, with the next release's merges).
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.87.0** (2026-11-16): Shorter, same behaviour. One length rule for comments (9,431 lines to 5,151), one test kit for 244 test files, finished notes removed.
 - **2.86.1** (2026-11-16): a run of the engine target alone that moved the target is judged by its result (a daily full run had been thrown away).
 - **2.86.0** (2026-11-14): The engine train. New code takes effect (the supervisor restarts itself), engine batches by class, steps by test name, sparse porter lanes, the disk stop.
 - **2.85.0** (2026-11-13): Hands off. A task waiting in a train queue is never handed back; the web train starts by itself; engine lanes land in batches with blame by evidence; the overseer's list.

@@ -138,6 +138,32 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Fix:** the rule moved to the one place that needed it (the phase and pillar gate of `task add`); the task stays a build task. The compiler's line names the file as git does. No existing check changed.
 - **Rule:** after a change to a function many commands share (a task's type, a gate), run every unit that names the role or the command before the push.
 
+### P-348 — periodic full runs went ahead of a waiting batch · fixed 2.91
+- **Evidence:** a studio's train of four green branches, 16 November: about 100 min of full rules runs (target, then batch) and about 140 min of the daily full land run before its own land run began; about seven hours in all.
+- **Cause:** a full rules run that came due replaced the batch's check; an overdue full land run was put first.
+- **Fix:** with lanes waiting the batch goes first. Due full runs wait for an empty queue; overdue ones run at the end of the train. `qa/selftest-291a.mjs`.
+
+### P-349 — a record commit cost the batch its "rules are green" · fixed 2.91 (needs one setting)
+- **Evidence:** the same train: the land script committed its record of the full run to the target (two files in a docs folder); the batch's land run then ran the rules tests again, 47 min.
+- **Cause:** the land run was told green only when the target's tip was the checked commit.
+- **Fix:** `rules.ignore` (or `rules.paths`): a target that moved only where the rule tests do not read is still the checked target. A studio must set one of the two.
+
+### P-350 — the idle stop halted a studio whose work waited on a train · fixed 2.91
+- **Evidence:** "no task finished in 4 h while 6 task sessions ran" with 21 tasks queued for a running engine train.
+- **Cause:** only `task.done` counted as finished. **Fix:** a landing or a lane queued for a train counts too.
+
+### P-351 — two stops, and neither resume command named the other · fixed 2.91
+- **Evidence:** a person cleared the supervisor's stop; the studio stop stayed set and nothing said so.
+- **Fix:** each resume command prints one line when the other stop is still set. No command clears more than before.
+
+### P-352 — a session reading its task's files was ended as stalled · fixed 2.91 (bounded)
+- **Evidence:** a porter ended after 76 min with no write while reading its plan and the source it was to translate.
+- **Fix:** a read of a file the task names counts as progress for at most `STUDIO_STALL_READ_MAX_MIN` since the last write. Session logs in Claude Code's format only.
+
+### P-353 — the maintainer removed test scratch folders while other builds were running · process
+- **Evidence:** 17 November: `rm -rf /tmp/harness-selftest-*` during integration, with two agents' self-tests possibly in flight. Both were told at once; no wrong result was kept.
+- **Rule:** while other builds run on the same machine, remove only the scratch folders of the run just finished (by name), never the pattern.
+
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
 - **P-001** (reopened on purpose 2026-10-31: the owner made the harness and the game's repository public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist
