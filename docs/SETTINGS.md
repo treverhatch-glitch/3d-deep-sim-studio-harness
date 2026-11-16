@@ -1179,7 +1179,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_ROUND_CAP` · no simple default · harness/round-cap.mjs, scripts/run-gates.mjs, qa/selftest-272b.mjs · [WORK-ORGANIZATION.md:34](WORK-ORGANIZATION.md)
 - `STUDIO_SCENARIO_TIMEOUT_MS` · default `60000` · harness/floors.mjs, harness/verdict.mjs, qa/check-phase-scenarios.mjs (+1 more) · undocumented
 - `STUDIO_SCOUT_VISION` · no simple default · harness/asset-scout.mjs · undocumented
-- `STUDIO_SELFTEST_SLOW` · no simple default · qa/selftest-2583n.mjs, qa/selftest-258d.mjs, qa/selftest-259d.mjs (+10 more) · undocumented
+- `STUDIO_SELFTEST_SLOW` · no simple default · qa/selftest-2583n.mjs, qa/selftest-258d.mjs, qa/selftest-259d.mjs (+11 more) · undocumented
 - `STUDIO_SELF_TRIAGE` · no simple default · harness/self-triage.mjs, qa/selftest-2651a.mjs, qa/selftest-265t.mjs (+2 more) · [AUTONOMY.md:133](AUTONOMY.md)
 - `STUDIO_SETTINGS_BASE_REF` · no simple default · scripts/settings-map.mjs, qa/selftest-266e.mjs · [RELEASE.md:87](RELEASE.md)
 - `STUDIO_SILENT_GREEN` · default `'warn'` · harness/game-gates.mjs, harness/silent-green.mjs, qa/selftest-236.mjs (+3 more) · [DISCORD-CREW.md:182](DISCORD-CREW.md)

@@ -131,6 +131,7 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-346 — timing checks fail under load in the online runs · open
 - **Evidence:** 16 November, four runs queued at once: "task lane gives each builder its own folder", "the supervisor starts a fresh agent per task", "2.77.0 (p, P9.6)" and "2.69.0 (q, 1)" each failed once and passed on the re-run of the failed job. Each re-run costs about 40 minutes.
 - **Workaround:** re-run the failed job and note it on the pull request. Do not queue four runs at once.
+- **2.91:** three were given a hand-shake in place of a clock (`269q`, `2601m`, `277p` B-before-A). Left: the two supervisor-window checks, `2771a`, the tester drive, and two seen under load on 17 November (`290b` second gate, `277p` "someone moves main").
 
 ### P-347 — a rule added after the last local run broke a 2.85 check, and a Windows path · fixed 2.90
 - **Evidence:** pull request 92, first online run: "2.85 (f): an engine port gets the shorter port card" red on Linux (Node 22, 24) and Windows; "2.90 (t) A: the hand-back of T-003" red on Windows only (`Sim\State.cs`).

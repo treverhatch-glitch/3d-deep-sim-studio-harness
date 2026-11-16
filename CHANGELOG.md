@@ -15,7 +15,8 @@ it, and the land script's record commit then cost the batch its "rules are green
 - **The idle stop counts work queued for a train and landings as finished**; each resume command says when the
   other stop is still set.
 - **A read of a file the task names is progress** for the stall rule, for at most `STUDIO_STALL_READ_MAX_MIN`.
-TIMINGLINE
+- **Three timing checks no longer depend on the machine's load** (a hand-shake where a clock was compared); what
+  each proves is unchanged.
 - **Release rule:** a branch a studio may have merged goes into main with a merge commit, not a squash.
 
 ## [2.90.0] — 2026-11-16

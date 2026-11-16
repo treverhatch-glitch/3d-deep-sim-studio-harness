@@ -35,7 +35,9 @@ settings page):
    could run beside the first; not built.
 4. **The stall rule reads only one log format** (see the release note's limits).
 5. **Merging.** A branch a studio may have merged goes into `main` with a merge commit (docs/RELEASE.md).
-6. **Timing checks:** TIMINGHANDOFF
+6. **Timing checks:** three were given a hand-shake in place of a clock (`269q`, `2601m`, `277p` line 257). Left:
+   the two supervisor-window checks in `qa/selftest.mjs`, `2771a`, the tester drive, and two seen this round under
+   load (`290b` second gate, `277p` "someone moves main"). A re-run and a note on the pull request is still the rule.
 
 ## Open decisions for the owner
 

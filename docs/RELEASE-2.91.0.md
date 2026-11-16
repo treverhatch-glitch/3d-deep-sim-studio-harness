@@ -39,7 +39,18 @@ is told the rules are green, and the two full runs come after it has landed.
 
 ## What changed: the harness's own checks
 
-TIMING
+Three checks failed now and then on a loaded machine and passed on a re-run (P-346). Each compared clock readings
+or relied on a fixed sleep. Each now uses a hand-shake that proves the same thing:
+
+| Check | Before | Now |
+| --- | --- | --- |
+| `269q`: three re-checks run at the same time | their start and end times had to overlap inside a 1.2 s sleep | each run writes a marker and waits until all three exist; none may give up. Proved red with the re-checks forced to run one by one |
+| `2601m`: a second run finds the holder busy | the holder slept a fixed 8 s | the holder stays until the test releases it |
+| `277p`: B's verify starts before A lands | two clock readings, strictly less | the order of the two lines in the run's own log, and the readings may tie |
+
+No harness code changed for these. Two more load-dependent checks were seen during this round and left as they are:
+`290b` "the second gate's script moves the target" (one red in a 38-unit run beside other builds; 27 of 27 alone,
+three times) and `277p` "someone moves main by a code commit" (one red in four runs under load).
 
 ## Not built, and why
 
