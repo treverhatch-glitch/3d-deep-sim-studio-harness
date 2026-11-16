@@ -62,6 +62,7 @@ import { untrustedBlock, oneLine } from './untrusted.mjs';
 import { latestFacts } from './handback-facts.mjs';
 import { jobDone } from './jobs.mjs';
 import { isNim, providerConcurrency } from './families.mjs';
+import { namedFiles } from './focus.mjs';
 import { observe, logTokens, logStall, idleVerdict, readStall, stallEndOf, readLogFrom, resetStall, newestSessionPart, stallLimits } from './stall.mjs';
 import { readPrices, readPriceMultipliers, priceFor, dollarsOf } from './autonomy.mjs';
 import { reloadEnvIfChanged } from './env-reload.mjs';
@@ -1113,6 +1114,21 @@ export async function queuedCopy(agent, dirs = [], root = REPO_ROOT) {
   return null;
 }
 
+/** 2.91: the files a task names (harness/focus.mjs), kept for a minute: the stall check counts a read of one as progress. */
+const namedCache = { task: null, at: 0, files: [] };
+function namedOfTask(id) {
+  if (!id) return [];
+  if (namedCache.task === id && Date.now() - namedCache.at < 60000) return namedCache.files;
+  let files = [];
+  try {
+    const t = parseNextQueue().inProgress.find((x) => x.id === id);
+    const meta = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === id).pop()?.meta || {};
+    files = namedFiles({ title: t?.title, scope: meta.scope, paths: meta.paths, lane: meta.lane, holds: readHolds()[id]?.lane }, REPO_ROOT);
+  } catch { files = []; }
+  Object.assign(namedCache, { task: id, at: Date.now(), files });
+  return files;
+}
+
 /** Run one agent to the end, with heartbeats. Resolves with the cleanup result. */
 export async function runAgent({ role, agent, tool, model, fallback = [], task = null, lane = null, oneTask = false, division = null, note = '', by = null, refreshes = 0, reuseCopy = null, agyOneTurn = false }) {
   const opts2 = { refreshes };
@@ -1482,7 +1498,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     try {
       // A copy made when the session claimed its task (harness/lane-at-claim.mjs) is where its work is.
       const cwdNow = !copy && s.copy?.dir ? path.join(REPO_ROOT, s.copy.dir) : cwd;
-      stall = observe({ ...session, ...s }, { tokens: logTokens(tailOf(logFile, undefined, logFrom)), cwd: fs.existsSync(cwdNow) ? cwdNow : cwd });
+      stall = observe({ ...session, ...s }, { tokens: logTokens(tailOf(logFile, undefined, logFrom)), cwd: fs.existsSync(cwdNow) ? cwdNow : cwd, reads: { files: namedOfTask(s.task || task), log: logFile, from: logFrom, roots: [cwdNow, REPO_ROOT] } });
     } catch {
     }
     fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, lastBeat: now, wip, ...(stall?.stalled ? { stalled: stall } : {}), ...(progress ? { progress: { turns: progress.turns, context: progress.context, state: progress.state } } : {}) }, null, 2));
