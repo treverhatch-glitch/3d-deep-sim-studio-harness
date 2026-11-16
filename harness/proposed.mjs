@@ -61,7 +61,9 @@ export function propose({ title, role = 'builder', priority = 'P1', agent, meta 
 }
 
 /** The Producer (or Director, planner, a person) moves a batch onto the live queue. addTask is passed in (no import cycle). */
-export function promote(ids, { by, drop = [], addTask, env = process.env }) {
+// 2.90 (b): set gives every promoted item what the gate asks of a build task: promote P-3 --by producer --phase 1
+// --serves pillar:<name>, or --type chore.
+export function promote(ids, { by, drop = [], addTask, env = process.env, set = {} }) {
   if (!by || !isDecider(by, env)) return { ok: false, message: 'Only the Producer, Director, planner or a person promotes proposals: --by <name>.' };
   const p = readProposed();
   const open = p.items.filter((i) => !i.promoted && !i.dropped);
@@ -71,7 +73,10 @@ export function promote(ids, { by, drop = [], addTask, env = process.env }) {
   const refused = [];
   for (const i of pick) {
     if (drop.includes(i.id)) continue;
-    const t = addTask({ title: i.title, role: i.role, priority: i.priority, agent: by, meta: { ...i.meta, promoted: true, proposedBy: i.agent, proposal: i.id, origin: i.meta?.origin || 'agent' } });
+    const type = String(set.type || '').toLowerCase();
+    const title = type && !i.title.toLowerCase().startsWith(type) ? `${type[0].toUpperCase()}${type.slice(1)}: ${i.title}` : i.title;
+    const extra = { ...(set.phase !== undefined ? { phase: Number(set.phase) } : {}), ...(set.serves ? { serves: String(set.serves) } : {}) };
+    const t = addTask({ title, role: i.role, priority: i.priority, agent: by, meta: { ...i.meta, ...extra, promoted: true, proposedBy: i.agent, proposal: i.id, origin: i.meta?.origin || 'agent' } });
     if (t?.error) { refused.push(`${i.id}: ${t.message.split('.')[0]}`); continue; }
     Object.assign(i, { promoted: t.id, by, at2: new Date().toISOString() });
     queued.push(`${i.id}→${t.id}`);
@@ -81,5 +86,6 @@ export function promote(ids, { by, drop = [], addTask, env = process.env }) {
   for (const i of open.filter((x) => drop.includes(x.id))) Object.assign(i, { dropped: true, by });
   writeProposed(p);
   emitEvent({ type: 'proposed.promoted', agent: by, msg: `${by} promoted ${queued.length} proposal${queued.length === 1 ? '' : 's'}${queued.length ? `: ${queued.join(', ')}` : ''}${drop.length ? `; dropped ${drop.join(', ')}` : ''}`, meta: { queued, dropped: drop, refused } });
-  return { ok: true, queued, refused, message: `${queued.length ? `Queued ${queued.join(', ')}` : 'Nothing queued'}${refused.length ? `. Refused: ${refused.join('; ')}` : ''}${drop.length ? `. Dropped ${drop.join(', ')}` : ''}.` };
+  const flagHint = refused.some((r) => /Missing flags?:\s*$|--phase|--serves/m.test(r)) ? ` Promote them with what the gate asks: npm run task -- promote ${refused.map((r) => r.split(':')[0]).join(',')} --by ${by} --phase <1|2|3> --serves pillar:<name> (or --type chore for work that adds nothing to the game's design).` : '';
+  return { ok: true, queued, refused, message: `${queued.length ? `Queued ${queued.join(', ')}` : 'Nothing queued'}${refused.length ? `. Refused: ${refused.join('; ')}` : ''}${drop.length ? `. Dropped ${drop.join(', ')}` : ''}.${flagHint}` };
 }

@@ -294,7 +294,8 @@ Each supervisor pass (code only, no model) also does these.
 
 - **Crew watchdog** (`harness/crew-watch.mjs`): per role, over the last `STUDIO_CREW_WINDOW_MIN` (60) minutes, its sessions,
   sessions with no commit, short exits (under `STUDIO_CREW_SHORT_SEC`, 180 s), tokens and tasks landed. More than
-  `STUDIO_CREW_MAX_SESSIONS` (6) sessions and 0 landed: the role isn't launched (running sessions go on), one `crew.unhealthy`
+  `STUDIO_CREW_MAX_SESSIONS` (6) sessions with no commit to their task and 0 landed (2.90: a session that commits a slice
+  of a big unit counts as progress): the role isn't launched (running sessions go on), one `crew.unhealthy`
   event goes to the Producer with the evidence, and the digest and `npm run status -- --brief` show it. It resumes when a task
   the role worked lands or new work for it appears, or on `npm run crew -- resume <role> --by <name>` (a person, an agent
   under the owner's delegation for hold, or a Producer/Director session or outside agent with `--permission "<the person's

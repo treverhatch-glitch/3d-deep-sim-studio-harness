@@ -5,9 +5,9 @@
  *   npm run crew -- resume <role> --by <name> [--why "…"] [--permission "<the person's words or a link>"]
  * Per role, over STUDIO_CREW_WINDOW_MIN (60) of agent.session.start / agent.session.end events: sessions, sessions with
  * no commit, tokens per landed task (harness/token-weight.mjs), short exits (under STUDIO_CREW_SHORT_SEC, 180 s), tasks
- * landed. Unhealthy: more than STUDIO_CREW_MAX_SESSIONS (6) sessions and 0 landed: the supervisor stops launching that
- * role and emits crew.unhealthy. It resumes when a task lands or new work appears; on `resume` by a decider
- * (harness/decider.mjs; never a worker; emits crew.resumed); or after STUDIO_CREW_BREAKER_RESUME_MIN (30; 0 or off:
+ * landed. Unhealthy: more than STUDIO_CREW_MAX_SESSIONS (6) sessions with no commit to their task (2.90) and 0 landed:
+ * the supervisor stops launching that role and emits crew.unhealthy. It resumes when a task lands or new work appears;
+ * on `resume` by a decider (harness/decider.mjs; never a worker; emits crew.resumed); or after STUDIO_CREW_BREAKER_RESUME_MIN (30; 0 or off:
  * never) when the evidence no longer trips it, or ONCE for the same cause. STUDIO_CREW_WATCH=off turns it off. State:
  * .studio/crew-paused.json, crew-resume.json.
  */
@@ -53,7 +53,7 @@ export function crewHealth(events, { now = Date.now(), env = process.env, sinceB
   const startOf = new Map(); // agent -> latest start time
   const byHand = new Map(); // agent -> its latest session was started by a person or the overseer (2.84)
   const out = {};
-  const row = (role) => (out[role] ||= { sessions: 0, ended: 0, noCommit: 0, shortExits: 0, tokens: 0, landed: 0, queued: 0, tokensPerLanded: null, tasks: [], landedTasks: [], ready: 0, readyTasks: [], whys: [], agents: [], unhealthy: false, why: '' });
+  const row = (role) => (out[role] ||= { sessions: 0, ended: 0, committed: 0, noCommit: 0, shortExits: 0, tokens: 0, landed: 0, queued: 0, tokensPerLanded: null, tasks: [], landedTasks: [], ready: 0, readyTasks: [], whys: [], agents: [], unhealthy: false, why: '' });
   const sorted = [...events].sort((a, b) => ts(a) - ts(b));
   const from = (role) => Math.max(now - lim.windowMs, Number(sinceByRole[role]) || 0);
   for (const e of sorted) {
@@ -79,6 +79,8 @@ export function crewHealth(events, { now = Date.now(), env = process.env, sinceB
       // 2.83: a session whose task done queued its lane for a train did its job; the landing comes when the train runs
       // (an engine land takes most of an hour, so "0 landed in 60 min" tripped the breaker on productive builders).
       if (o?.queuedForTrain) r.queued += 1;
+      // 2.90 (d): a session that committed to its task (a slice of a big unit) made progress, landed or not.
+      if (Number(o?.commits) > 0) r.committed += 1;
       // 2.85: a session refused by task done for the same reason as the one before it (no new commit) met a harness check it
       // could not act on: not the crew burning sessions (handback-kind.mjs; the task is held for a planner instead).
       // 2.86: a session the harness ended (a refresh hand-off, a launch failure, a refusal for commits not the task's own:
@@ -114,8 +116,8 @@ export function crewHealth(events, { now = Date.now(), env = process.env, sinceB
   for (const r of Object.values(out)) {
     r.tokens = Math.round(r.tokens);
     r.tokensPerLanded = r.landed ? Math.round(r.tokens / r.landed) : null;
-    r.unhealthy = r.sessions > lim.maxSessions && r.landed === 0 && r.queued === 0 && r.ready === 0;
-    if (r.unhealthy) r.why = `${r.sessions} sessions in ${Math.round(lim.windowMs / 60000)} min and 0 landed (STUDIO_CREW_MAX_SESSIONS=${lim.maxSessions}): ${r.noCommit} with no commit, ${r.shortExits} short exit${r.shortExits === 1 ? '' : 's'} (under ${Math.round(lim.shortMs / 1000)} s), ${r.tokens.toLocaleString('en-US')} tokens for nothing landed`;
+    r.unhealthy = r.sessions - r.committed > lim.maxSessions && r.landed === 0 && r.queued === 0 && r.ready === 0;
+    if (r.unhealthy) r.why = `${r.sessions} sessions in ${Math.round(lim.windowMs / 60000)} min, ${r.sessions - r.committed} of them with no commit to their task, and 0 landed (STUDIO_CREW_MAX_SESSIONS=${lim.maxSessions}): ${r.noCommit} with no commit, ${r.shortExits} short exit${r.shortExits === 1 ? '' : 's'} (under ${Math.round(lim.shortMs / 1000)} s), ${r.tokens.toLocaleString('en-US')} tokens for nothing landed`;
   }
   return out;
 }

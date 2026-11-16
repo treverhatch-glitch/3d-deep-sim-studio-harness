@@ -85,6 +85,19 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   `inputs` are not in the tree, so their content is part of what a kept result is valid for; the train also looks at
   them again right before the land run and leaves `STUDIO_RULES_GREEN` out when they changed since the check.
   `STUDIO_ENGINE_RULES_TIMEOUT_MIN` overrides the time limit.
+- **The time limit follows the suite (2.90).** A limit the studio set (`rules.timeoutMin`, or
+  `STUDIO_ENGINE_RULES_TIMEOUT_MIN`; fractions of a minute are taken as they are) is used as it is. Unset, a run's
+  limit is the largest of the default (`STUDIO_ENGINE_RULES_DEFAULT_MIN`, 30), 1.5 times the longest passing run of the
+  same mode on record (`full`, `focus`, `first`), and, after a run timed out on the target, twice the limit it timed
+  out with; never over 120 min. The raise stays until a run of that mode passes. Every run's log line says which limit
+  applied and why (`up to 37.5 min (1.5 x the longest passing full run on record (25 min))`). A tree that timed out is
+  recorded with its limit, and is not run again while the limit is no larger: the log says "not run again" and the
+  land run decides. Example: a suite that passed in 22 min gets 33 min; one that timed out at 30 gets 60 next time.
+- **A check that judges no lane is seen (2.90).** When the check is red, not runnable or timed out on the target
+  itself, the train writes `task.train.<x>.rules_no_judge` (warn, to the producer) with the one change: for a timeout,
+  raise `engines.<x>.rules.timeoutMin` or make the run smaller with `rules.focus` (`map`, `auto`, `paths`); otherwise
+  fix the target or name the inputs. After two trains in a row, `train status --engine <x>` and the Line Producer's
+  status say how many trains and how many minutes it has cost; the count clears when the check judges again.
 - Each batch writes one `engine.rules` event (runs, minutes, lanes kept and refused).
 - **A lane's own check.** `task done` runs an engine check only when `"quickCheck"` is set: set it to a compile (for
   Unity `dotnet build tools/SimTests`), which takes seconds and stops a lane that does not compile outside the editor;
@@ -133,6 +146,14 @@ half as much machine time as the land runs. Five settings, all optional, in the 
   skipped with a log line; `rules show` lists the patterns. `play.focus.ignore` does the same for the Play Mode focus
   (only ignored paths: `smoke` alone, or a full play stage). **An ignore pattern that is too wide hides a real change
   from the rules check**: a rules file it matches lands without its tests being run, so match folders, not suffixes.
+- `first` (2.90): one test filter run before everything else, with `focus.test` (it needs `focus.test` with
+  `{filter}`; without it the setting is left out and `rules show` says so). The rules check runs that filter on the
+  batch first; red there and green on the target, the branch that turns it red is found with that filter alone (the
+  short runs) and refused at once with the failing names, before the target's calibration or any full run. Green, or
+  red on the target itself: the check goes on as before. For a test that pins generated data to a commit, which fails
+  for every branch that moves the pin without regenerating:
+  `"rules": { "test": "dotnet test tools/SimTests", "first": "FullyQualifiedName~PinTests", "focus": { "test":
+  "dotnet test tools/SimTests --filter \"{filter}\"" } }`.
 - `focus.split` (2.84, B-134): `true` runs one command per filter group (each mapped filter, then `smoke`) in
   sequence instead of one joined command, so one test process holds one system's data at a time. Green when all are,
   red on the first red (its output kept); the result and the `engine.rules` event carry each group's seconds.
@@ -445,6 +466,85 @@ Around the train:
   runs either by hand.
 - `node harness/unity-train.mjs queue --task <ID> [--engine x] [--branch b] [--alone]` queues a branch without closing
   a task; `npm run task -- train dequeue <ID>` takes one out.
+
+
+## The engine train from 2.90: compile search, blame by file, checks before queueing
+
+From a studio's day: a batch of three took four land runs (two hours) to find a branch that compiled alone but not with
+another, and a test that fails whenever a branch moves a pinned commit was found by a search of land runs twice.
+
+- **The compile search.** When `engines.<x>.quickCheck` is set (the compile a porter's `task done` already runs), a batch of
+  two or more branches is compiled as it would land, before the rules check and the land run, in a throwaway checkout of
+  the engine repo (the `rules.paths` sparse checkout and `rules.lfs` when set). Red there and green on the target: merged
+  prefixes find each branch that does not compile with the ones before it (a few one-minute runs, never a land run). Each
+  is handed back at once (cause `compile`) with the compiler's own lines (checkout folder taken out), the branch(es)
+  before it that change a file the compiler names, and the fix: once those have landed, bring the target in and fix the
+  lines. The rest go on to ONE land run. Red on the target itself: nobody is judged by it. Event
+  `task.train.<x>.compile_search`; the train's result has `compile: { runs, left }`. `engines.<x>.compileSearch`: `false`
+  turns it off; a command string uses that command instead of `quickCheck`. The time limit is `quickCheckTimeoutMin` (30).
+  Example: `"quickCheck": "dotnet build tools/SimTests --nologo"` alone is enough. Unlike `compileFirst` (the land
+  command with `STUDIO_LAND_ONLY=compile`, once per group), it needs nothing from the land script.
+- **A failing test tied to the files that explain it.** `engines.<x>.blame`: a list of `{ "test": "<regex on the
+  failing test's full name>", "touches": "<path or glob, or a list>", "say": "<what to do>" }`. After a red land run
+  (and in the rules check, with `rules.first` too) a failing test an entry matches ties the branches that change a file
+  it names: exactly one, and the next run is the batch without it (the 2.83 suspect step, rule `blame`), no halving
+  search; it is handed back with the evidence and the `say` line. Several: they go apart from the rest (2.85). An entry
+  with a bad regex or a path outside the repo is left out. Example: `"blame": [ { "test": "PinTests\\.", "touches":
+  "Rules~/pin.json", "say": "Regenerate the vectors at the new pin in the same branch" } ]`.
+- **Checks before queueing.** `engines.<x>.preQueue`: a list of `{ "touches": "<path or glob, or a list>", "run":
+  "<command>", "say": "<what to do>", "timeoutMin": 10, "env": { "<NAME>": "<value>" } }`. When `task done --train` (or the harness's own queueing)
+  queues a branch that changes a matching file (against its merge base with the target), the command runs in a
+  throwaway checkout of the branch's head (`STUDIO_LANE_COMMIT`, `STUDIO_LANE_DIR` the checkout, `STUDIO_ENGINE_REPO`,
+  and `STUDIO_ENGINE_LANE_DIR` the porter's lane folder when it exists; before those, the entry's own `env`, for a
+  command that needs what `rules.env` gives the rules check). It exits non-zero: the branch is not queued,
+  and the porter reads the command's last 8 lines, the `say` line and the one command to run again. Not run again for a
+  head already queued. A command that cannot start (or a checkout that fails) queues the branch with a warning event
+  (`task.train.<x>.pre_queue`). Example: `"preQueue": [ { "touches": "Rules~/pin.json", "run": "dotnet run --project tools/VectorCheck",
+  "say": "Re-record the vectors at the new pin and commit them in this branch." } ]`.
+
+
+## Two land runs at once (2.90, off by default)
+
+One red branch should not hold the whole queue for a halving search of 45-minute runs. With a second gate copy the
+train can run two steps of that search at once. Whether to use it is the Line Producer's (or a person's) call; the
+harness never switches it by itself.
+
+- **The second gate.** `engines.<x>.gates`: a list; its first entry is the second gate, with its own `land` (and
+  `landMany` when used), `cwd` and `gateWorktree` (or `folder`); the engine's own keys stay the first gate. The copy
+  needs its own checkout of the engine repo (a detached worktree is enough) and its own editor cache (its own
+  `Library` folder for Unity: two editors never share one), and enough disk and RAM for a second editor. A second gate
+  with the same worktree and folder as the first is not used. No second gate configured: nothing changes. Example:
+  `"gates": [ { "land": "pwsh tools/land.ps1 -Branch {branch} -Gate two", "cwd": "../game-gate-two", "gateWorktree": "../game-gate-two" } ]`.
+- **The switch.** `npm run task -- train parallel on|off --engine <x> --by <name> [--why "…"]`, beside `train auto`
+  and by the same ranks (the owner, outside agents, Producer and Director sessions; never a worker's name), and the
+  Line Producer by its role. `.studio/train/<x>-parallel.json` keeps who set it and when (`task.train.<x>.parallel_on`
+  / `parallel_off`). `train status --engine <x>` (and `train parallel` with no word) says whether it is on, who set it,
+  and whether the next search would use the second gate or why not. Each Line Producer pass, when a second gate is
+  configured or the switch is on, its engine row carries one line: the switch, the second gate, the branches waiting,
+  whether the last train was red, free RAM against what two runs need, the engine slots, and the command.
+- **What it does.** When it is on, a second gate is usable, the land script has shown it honours `STUDIO_LAND_PROBE=1`
+  (the 2.86 probe record, or `"landProbe": true`) and the machine admits two engine land runs, a search by name after a
+  red runs two prefixes at once (at a third and two thirds of what is left), one on each gate, each as its own
+  `node harness/unity-gate.mjs --gate k` process with its own machine:heavy admission. Both are probes: neither lands.
+  A red search over four branches takes one round fewer (the batch, one pair, the confirm, the survivors' landing).
+  What lands is what one gate would land: the survivors still land on one complete run on the first gate. Event
+  `task.train.<x>.parallel`; the train's result has `parallel` (pairs) and `rounds`.
+- **The machine budget.** Two runs need two admissions. The pre-check takes the smallest of `STUDIO_ENGINE_SLOTS`, the
+  heavy slots (`STUDIO_HEAVY_SLOTS`) and the job kind's cap (Unity: `STUDIO_HEAVY_MAX_UNITY`, default 1, or the
+  budget's `maxConcurrent.unity`), and free RAM against twice the engine's floor. Each run is still admitted by the
+  machine:heavy lock on its own; a second run that is not admitted within 2 minutes gives no answer and its step runs
+  again on one gate. A train that runs inside another heavy hold never uses the second gate.
+- **When something goes wrong.** A gate that gives no answer (not admitted, crashed, refused, no result): that step
+  runs again on one gate, as before. The target moves during the pair: a land script ignored the probe; as in 2.86,
+  the train stops with every lane still queued, nobody handed back, and the probe record revoked (by-name steps and the
+  second gate are off until a person clears `.studio/train/<x>-probe.json`). A gate copy that is behind the target:
+  each run gets a ref of the tree it must test (the target's tip with the group merged), so the land script must
+  check that ref out or merge it, as the first gate does. The train process dying: the integration refs
+  (`<x>-train/...`) are removed at the next train's start, and no probe landed anything.
+- **What it does not do.** It never lands two groups at once, and it does not try the next batch on the second gate
+  while the first lands: only the land script moves the target, so a group found green on the old target would still
+  need a complete land run on the new one, a tree no run has seen as a whole. It is not used for complete runs (a
+  land script that does not honour the probe), for the compile search or for the rules check.
 
 ## The land's stage report
 

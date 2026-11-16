@@ -427,12 +427,16 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
   const lanes = refreshLanesAfterUpgrade({ root, by: String(by).trim(), env });
   // 2.86 (B-139): which long-running processes still run the old code, and what happens to each.
   const old = await oldCodeAfterUpgrade({ root, since: now.getTime(), from, to, by, env });
+  // 2.90: the studio's branch still tracks the harness's remote: one line, and the one command (the config is not touched here).
+  let trap = null;
+  try { trap = (await loadHelper('upgrade-preflight.mjs', root))?.pullTrap?.(root, ref) || null; } catch { trap = null; }
   return {
     ok: true, code: 0, commit, backup, lanes, oldCode: old.processes, boardCommits: res.boardCommits || [],
     lines: [...lines, `[upgrade] PASS merged ${ref} (${sha.slice(0, 10)}, harness ${from} -> ${to}) into ${branch}: ${commit.slice(0, 10)}, recorded for ${String(by).trim()}${who.permission ? ` on their permission (recorded by ${who.recordedBy})` : ''}.`,
       ...(g.fromRef.length ? [`[upgrade] ${g.fromRef.length} golden file(s) came unchanged from ${ref}: Golden-Reason added for them only.`] : []),
       ...lanes.lines,
       ...old.lines,
+      ...(trap ? [`[upgrade] Note: ${trap.detail}. Remove the trap: ${trap.fix}`] : []),
       '[upgrade] Next: npm run verify -- --all, then npm run task -- drain off --by <you>. Undo: git reset --hard ' + backup + ' (only before anything else lands).'],
   };
 }

@@ -103,6 +103,7 @@ const M = 60000; const t0 = Date.parse('2026-11-13T19:00:00Z'); const iso = (t) 
 let k = 0;
 const ev = (at, type, agent, task, msg, meta) => ({ id: 'e' + (++k), ts: iso(t0 + at * M), type, agent, task, msg, ...(meta ? { meta } : {}) });
 // One session: start, claim, (a refusal), hand-back, end. kind: refresh-no-work | launch | foreign | real.
+// 2.90 (f): no session commits (a hand-back after commits is progress, never real).
 const session = (agent, task, at, kind) => {
   const st = [ev(at, 'agent.session.start', agent, task, agent + ' started', { role: 'engine-porter', tool: 'claude' }), ev(at + 0.2, 'task.start', agent, task, 'Picked up ' + task)];
   if (kind === 'foreign') st.push(ev(at + 2, 'task.not_done', agent, task, task + ' not done yet: the hooks check failed for 1 commit(s) that are not ' + task + "'s own (cf9efbe)", { refusal: ['hooks'], foreign: ['cf9efbe'] }));
@@ -111,7 +112,7 @@ const session = (agent, task, at, kind) => {
     : kind === 'foreign' ? 'Done: nothing new; the branch is complete | Failed/tried: task done refused by the hooks check for a board commit on main'
     : 'Failed: verify red on golden (seed 3, tick 120) after the crowd port';
   const paused = ev(at + 3, 'task.paused', agent, task, 'Handed back ' + task + ': ' + note);
-  const outcome = sessionOutcome({ agent, task, startedAt: iso(t0 + at * M), events: [...st, paused], commits: kind === 'real' ? 1 : 0, counts: kind === 'real' || kind === 'foreign' });
+  const outcome = sessionOutcome({ agent, task, startedAt: iso(t0 + at * M), events: [...st, paused], commits: 0, counts: kind === 'real' || kind === 'foreign' });
   const meta = { role: 'engine-porter', tool: 'claude', code: kind === 'real' || kind === 'foreign' ? 0 : 1, outcome,
     ...(kind === 'refresh-no-work' ? { refreshed: true, refreshNoWork: true, reason: 'refreshed (session cap): a fresh session continues', exitCause: { kind: 'refresh', ranSec: 180 } } : {}),
     ...(kind === 'launch' ? { launchFailure: { why: 'it stopped on a permission prompt (requested permissions to read)' }, exitCause: { kind: 'exit', ranSec: 20 } } : {}) };

@@ -26,7 +26,7 @@ import { writeFocus, visionFor } from './focus.mjs';
 import { visionFixIds, visionFirst, mayFileVisionFix, parentIsVisionFix } from './vision-fix.mjs';
 import { PLAYER_TYPES } from './vision-card.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
-import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal, laneEntries } from './task-hold.mjs';
+import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal, laneEntries, proposalState } from './task-hold.mjs';
 import { stopIfOverBudget, overBudget as overBudgetOf } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
@@ -1125,6 +1125,25 @@ function trainNoTestReason(target) {
   try { const ev = rulesTestEvidence(taskChanges(target.id, startedAt(target.id))); return ev.sim.length && !ev.tests ? (ev.reason ? { noTestReason: ev.reason } : { noTest: true }) : null; } catch { return null; }
 }
 
+/** 2.90 (f): a landed slice: the task back to the backlog (ready), its claim freed, the slice mark cleared. */
+function sliceLanded(taskId, agent, { train, lock }) {
+  let target = null;
+  withBoard(() => {
+    const fresh = parseNextQueue();
+    target = fresh.inProgress.find((t) => t.id === taskId) || fresh.backlog.find((t) => t.id === taskId) || null;
+    if (!target) return;
+    fresh.inProgress = fresh.inProgress.filter((t) => t.id !== taskId);
+    if (!fresh.backlog.some((t) => t.id === taskId)) fresh.backlog.unshift({ ...target, status: 'backlog' });
+    writeNextQueue(fresh);
+  });
+  if (!target) return null;
+  if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
+  setHold(taskId, { slice: null });
+  clearAttempts(taskId);
+  emitEvent({ type: 'task.slice_landed', agent: agent || 'train', task: taskId, to: 'producer', msg: `${taskId}: a slice landed (merge train ${train}); the task stays open and the next session continues on the landed target (task done ${taskId} --train without --slice closes it with the last slice)`, meta: { train } });
+  return { id: taskId, sliceLanded: true };
+}
+
 /**
  * Close a task a merge train landed (harness/train.mjs): its lane's checked head is in the train's verified head, which
  * main now contains. The board move, claim, events and follow-ups are task done's; its checks ran in the train's lane
@@ -1149,6 +1168,8 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
   const mainTip = spawnSync('git', ['rev-parse', landTarget ? `refs/heads/${landTarget}` : 'HEAD'], { windowsHide: true, cwd: gitRoot, encoding: 'utf8' }).stdout.trim();
   if (!head || !laneHead || !anc(laneHead, head) || !anc(head, mainTip)) return { error: 'not-landed', message: `${taskId}'s lane (${String(laneHead).slice(0, 8)}) is not in the studio's branch through train ${train}` };
   if (record && (record.dirty !== false || record.partial || judgeRed((record.rows || []).map((r) => ({ ...r, required: r.required !== false })), readBaseline(taskId) || { red: [] }).fresh.length)) return { error: 'not-verified', message: `train ${train}'s verify record is not a clean, green full verify` };
+  // 2.90 (f): a slice (task done --train --slice) landed: the task goes back to ready, for a session on the landed target.
+  if (readHolds()[taskId]?.slice) return sliceLanded(taskId, agent, { train, lock });
   let target = null;
   let q = null;
   const writeBoard = () => withBoard(() => {
@@ -1273,6 +1294,7 @@ export function trainDeps(busyMod, { forDone = false } = {}) {
     close: (lane, ctx) => {
       const t = closeTrainTask(lane.task, lane.agent, { train: ctx.train, head: ctx.head, laneHead: lane.head, record: ctx.record, note: lane.note || '', repo: ctx.repo || null, target: ctx.target || null });
       if (t?.halfLanded) return { ok: true, half: true }; // 2.83: its engine half is still to land: the task stays open
+      if (t?.sliceLanded) return { ok: true, half: true }; // 2.90 (f): one slice landed; the task is ready for the next
       return t?.error ? { ok: false, message: t.message } : t ? { ok: true, target: t } : { ok: false, message: `${lane.task} is not on the board` };
     },
     handBack: (lane, note, o = {}) => pauseTask(lane.task, lane.agent, note, { force: true, handBackCause: o.cause }),
@@ -1349,7 +1371,7 @@ export function foreignHookCommits(output, taskId, { cwd = REPO_ROOT, lane = inL
   return shas;
 }
 
-export function pauseTask(taskId, agent = null, note = '', { force = false, expect, cause, handBackCause, ownerStep } = {}) {
+export function pauseTask(taskId, agent = null, note = '', { force = false, expect, cause, handBackCause, ownerStep, commits = 0 } = {}) {
   let lock = lockStatus(`task:${taskId}`);
   if (lock.locked && lock.lock.owner !== agent && !force && holderRunning(lock.lock.owner)) {
     return { error: 'locked', message: `Task ${taskId} is claimed by ${lock.lock.owner}, which is still running. Only that owner can hand it back (or stop it: npm run agent -- stop ${lock.lock.owner}).` };
@@ -1401,7 +1423,7 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Paused ${target.id}: ${note || 'handed back'}`);
   let ownerStepNow = ownerStep || null;
   if (!ownerStepNow && !cause) { try { ownerStepNow = ownerStepForHandBack(target.id, readRecentEvents(20000)); } catch { /* a hint, never a blocker */ } }
-  emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}`, meta: { ...(isFailureNote(note) ? { reasonKey: reasonKey(note) } : {}), ...(cause ? { cause } : {}), ...(handBackCause ? { handBackCause } : {}), ...(ownerStepNow ? { ownerStep: ownerStepNow } : {}) } });
+  emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}`, meta: { ...(isFailureNote(note) ? { reasonKey: reasonKey(note) } : {}), ...(cause ? { cause } : {}), ...(handBackCause ? { handBackCause } : {}), ...(ownerStepNow ? { ownerStep: ownerStepNow } : {}), ...(Number(commits) > 0 ? { commits: Number(commits) } : {}) } });
   if (!cause && isFailureNote(note)) { try { canaryEnd(target.id, 'handed-back', { agent: who }); } catch { /* a record, never a blocker */ } }
   // A hand-back that names a step only the owner can do waits for the owner (harness/owner-only.mjs), before the breaker.
   const ownerPark = cause ? null : parkIfOwnerOnly(target.id, `${given.prose || ''}\n${note || ''}`, { who });
@@ -1423,7 +1445,9 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
  * (studio/NEXT.md or DONE.md; same test as harness/worktree.mjs taskOnBoard). A board that can't be read refuses nothing.
  */
 export function unknownAfter(ids) {
-  const bad = ids.filter((id) => !/^[A-Z]+-\d+$/.test(id) || taskOnBoard(id) === false);
+  // 2.90 (a): an open proposal is a valid wait too (promote moves the wait to the task it becomes).
+  const open = proposalState().open;
+  const bad = ids.filter((id) => !/^[A-Z]+-\d+$/.test(id) || (taskOnBoard(id) === false && !open.has(id)));
   return bad.length ? `${bad.join(', ')} ${bad.length > 1 ? 'are' : 'is'} not a task id on the board (studio/NEXT.md, studio/DONE.md): a task can't wait for it. Check the id (npm run task -- list).` : '';
 }
 
@@ -1528,6 +1552,9 @@ export function gateTask({ title, role = 'builder', meta = {} }) {
   if (meta.prototype || meta.infra || /^prototype\b/i.test(title)) return laneMissing ? { ok: false, message: `Missing flag: ${LANE_FLAG}. A builder task with no folders would count as working on the whole game and block every other builder.` } : { ok: true, warnings };
   if (b.signed && b.amended) return { ok: false, message: `The Game Bible changed after ${b.signed.by} signed it (${b.amended.changes.map((c) => c.field).join(', ')}). New build tasks wait until a person re-signs the new design: npm run bible -- sign --by <name> [--via "<where they approved>"]. Work already queued carries on.` };
   if (!b.signed) return { ok: false, message: 'The Game Bible is not signed yet, so this is still pre-production: build tasks wait. Allowed now: studies, storyboards, docs, throwaway prototypes (--prototype) and tooling that isn\'t game content (--infra). See npm run bible -- check.' };
+  // An engine porter's "Port ..." translates rules the web game already has (the web game is its spec, as its brief's
+  // port card says): it names no phase and no pillar. Its type and its checks stay a build task's.
+  if (role === 'engine-porter' && /^port\b/i.test(title)) return { ok: true, warnings };
   const phase = Number(meta.phase);
   const phaseBad = ![1, 2, 3].includes(phase);
   const serves = String(meta.serves || '');
@@ -2123,6 +2150,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.log(JSON.stringify({ train: 'check', ...res }));
       process.exit(res.ok ? 0 : 1);
     }
+    // 2.90 (f): --slice queues one committed slice of a big unit; the task stays open when it lands. Any other done clears it.
+    if (flags.slice && !flags.train) { console.error(`--slice goes with --train: npm run task -- done ${targetId} --train --slice queues this slice and keeps the task open.`); process.exit(1); }
+    if (flags.slice || readHolds()[targetId]?.slice) setHold(targetId, { slice: flags.slice ? { by: whoAmI(flags) || 'agent', at: new Date().toISOString() } : null });
     if (flags.train) {
       // --force --train with a force approval on file queues the lane forced (the train still runs its full verify and
       // the safety checks; a tier-C lane still waits for a release). Without one: refused.
@@ -2241,8 +2271,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'train') {
     // A word that is not a train subcommand starts nothing: usage, exit 2. A train starts with `train`, `train run` or
     // `train --engine <name>`.
-    if ((arg1 && !['run', 'status', 'release', 'leave', 'dequeue', 'auto', 'config', 'cancel'].includes(arg1)) || (typeof flags.unity === 'string' && flags.unity !== 'status')) {
-      console.error(`"${arg1 || flags.unity}" is not a train subcommand, so no train was started. Usage: npm run task -- train [run] [--engine <name> [--only T-a,T-b] [--tag <word>]] | train status [--engine <name>] | train release <ID> | train leave <ID> --by <name> --why "…" | train dequeue <ID> [--engine <name>] --by <name> | train cancel [--engine <name>] | train config <ID> | train auto [on|off] [--engine <name>]`);
+    if ((arg1 && !['run', 'status', 'release', 'leave', 'dequeue', 'auto', 'parallel', 'config', 'cancel'].includes(arg1)) || (typeof flags.unity === 'string' && flags.unity !== 'status')) {
+      console.error(`"${arg1 || flags.unity}" is not a train subcommand, so no train was started. Usage: npm run task -- train [run] [--engine <name> [--only T-a,T-b] [--tag <word>]] | train status [--engine <name>] | train release <ID> | train leave <ID> --by <name> --why "…" | train dequeue <ID> [--engine <name>] --by <name> | train cancel [--engine <name>] | train config <ID> | train auto [on|off] [--engine <name>] | train parallel [on|off] --engine <name> --by <name>`);
       process.exit(2);
     }
     const tr = await import('./train.mjs');
@@ -2324,6 +2354,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       if (!want) { console.log(ctl.autoLine(mainRoot(), eng)); process.exit(0); }
       if (!/^(on|off)$/.test(want) || typeof flags.by !== 'string') { console.error(`Usage: npm run task -- train auto off|on --engine ${eng} --by <name> [--why "…"] [--hours N]`); process.exit(1); }
       const r = await ctl.setEngineAuto(mainRoot(), { engine: eng, on: want === 'on', by: flags.by, why: typeof flags.why === 'string' ? flags.why : '', hours: flags.hours ?? null });
+      (r.ok ? console.log : console.error)(r.message);
+      process.exit(r.ok ? 0 : 1);
+    }
+    // 2.90: `train parallel [on|off] --engine <x> --by <name> [--why "…"]`: two land runs at once (harness/engine-gates.mjs).
+    if (arg1 === 'parallel') {
+      const eng = typeof flags.engine === 'string' ? flags.engine : 'unity';
+      const want = flags._[2];
+      const ut = await import('./unity-train.mjs');
+      const eg = await import('./engine-gates.mjs');
+      if (!want) { const s0 = ut.unityTrainSettings(mainRoot(), eng); console.log(eg.parallelLine(mainRoot(), eng, ut.parallelNow(mainRoot(), eng, s0.error ? {} : s0.cfg))); process.exit(0); }
+      if (!/^(on|off)$/.test(want) || typeof flags.by !== 'string') { console.error(`Usage: npm run task -- train parallel on|off --engine ${eng} --by <name> [--why "…"]`); process.exit(1); }
+      const r = await eg.setEngineParallel(mainRoot(), { engine: eng, on: want === 'on', by: flags.by, why: typeof flags.why === 'string' ? flags.why : '' });
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
@@ -2573,7 +2615,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         console.error('--until takes a task id (T-011) or a time (2026-10-22T09:00).');
         process.exit(1);
       }
-      console.log(`${arg1} is blocked until ${u}.`);
+      console.log(`${arg1} is blocked until ${u}.${/^[A-Z]+-\d+$/.test(u) ? '' : ` npm run task -- unblock ${arg1} --by <name> clears it sooner.`}`);
     } else {
       const folders = flags._.slice(2);
       const folder = folders.join(',');
@@ -2671,7 +2713,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(0);
     }
     const ids = flags.all ? 'all' : flags._.slice(1).join(',').split(/[,\s]+/).filter(Boolean);
-    const r = promote(ids, { by: typeof flags.by === 'string' ? flags.by : actor(), drop: flags.drop ? String(flags.drop).split(',') : [], addTask });
+    const ptype = typeof flags.type === 'string' ? flags.type.toLowerCase() : '';
+    if (ptype && !['bug', 'chore', 'study', 'research', 'balance', 'fun', 'playtest', 'review', 'docs', 'idea', 'system'].includes(ptype)) { console.error(`Unknown --type "${flags.type}". Use bug, chore, study, research, balance, fun, playtest, review, docs, idea or system.`); process.exit(1); }
+    const set = { ...(ptype ? { type: ptype } : {}), ...(flags.phase !== undefined ? { phase: Number(flags.phase) } : {}), ...(typeof flags.serves === 'string' ? { serves: flags.serves } : {}) };
+    const r = promote(ids, { by: typeof flags.by === 'string' ? flags.by : actor(), drop: flags.drop ? String(flags.drop).split(',') : [], addTask, set });
     if (!r.ok) {
       console.error(r.message);
       process.exit(1);

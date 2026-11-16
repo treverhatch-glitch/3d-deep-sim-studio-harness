@@ -19,6 +19,7 @@ import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents, boardRoot } from './event.mjs';
 import { tierOf } from './model-tiers.mjs';
 import { doneRunning } from './busy.mjs';
+import { heavyHolders } from './heavy.mjs';
 import { pidAlive } from './proc-identity.mjs';
 import { laneOf, laneList } from './task-hold.mjs';
 import { listLocks } from './lock.mjs';
@@ -89,6 +90,16 @@ export function busyWait(session, { dir = STUDIO_STATE_DIR, now = Date.now(), en
     const r = rd(path.join(vdir, f));
     if (r?.owner === agent && r.pid && fresh(r.startedAt) && alive(r.pid, r.identity)) return { kind: 'verify', since: r.startedAt, pid: r.pid, file: `verify-running/${f}` };
   }
+  // 2.90: a machine:heavy slot the session holds (a test or engine check it runs itself), or its task in a running engine train.
+  try {
+    for (const h of heavyHolders(path.dirname(dir), { env })) {
+      if (h.owner === agent && h.pid && fresh(new Date(Number(h.at) || 0).toISOString())) return { kind: 'check', since: new Date(Number(h.at)).toISOString(), pid: h.pid, file: `locks/${h.file}` };
+    }
+    for (const n of fs.readdirSync(path.join(dir, 'locks')).filter((x) => /^[a-z][a-z0-9-]*-train\.lock$/.test(x))) {
+      const r = rd(path.join(dir, 'locks', n));
+      if (session.task && Array.isArray(r?.lanes) && r.lanes.includes(session.task) && r.pid && fresh(new Date(Number(r.at) || 0).toISOString()) && alive(r.pid, r.identity)) return { kind: `${n.replace(/-train\.lock$/, '')} train`, since: new Date(Number(r.at)).toISOString(), pid: r.pid, file: `locks/${n}` };
+    }
+  } catch { /* no heavy holders or locks to read */ }
   const own = session.task ? doneRunning(session.task, { dir, now, env }) : null;
   if (own) return { kind: 'task done', since: own.at, pid: own.pid, file: `done-running/${own.task || session.task}.json` };
   let dones = [];

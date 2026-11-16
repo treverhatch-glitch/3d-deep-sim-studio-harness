@@ -31,7 +31,7 @@ export function taskBudgetLimits(env = process.env) {
 }
 
 /** Events that start the count again: the task finished, was reopened, or a person unparked it. */
-const isReset = (e) => ['task.done', 'task.forced', 'task.reopened', 'task.budget.reset'].includes(e.type) || (e.type === 'task.hold' && /unparked/.test(e.msg || ''));
+const isReset = (e) => ['task.done', 'task.forced', 'task.reopened', 'task.budget.reset', 'task.slice_landed'].includes(e.type) || (e.type === 'task.hold' && /unparked/.test(e.msg || ''));
 const ENDS_CLAIM = new Set(['task.paused', 'task.done', 'task.forced', 'task.reopened']);
 const PAUSES_CLOCK = new Set(['task.held', 'task.train.queued']);
 const RESUMES_CLOCK = new Set(['task.unheld', 'task.train.dropped']);
@@ -77,8 +77,9 @@ export function taskSpend(taskId, events = readRecentEvents(20000), now = Date.n
   const off = offPeriods(events);
   const span = (a, b) => Math.max(0, b - a - overlapMs(off, a, b)); // 2.83: the time the studio was off doesn't count
   // 2.86: how each launched session ended (its next agent.session.end), so one the harness ended costs the task nothing.
+  // 2.90 (f): 'progress', a session that committed to this task (a slice), is not counted as a session; its time and tokens are.
   const endKindAt = new Map();
-  { const pending = new Map(); events.forEach((e, i) => { if (e.type === 'agent.session.start') pending.set(e.agent, i); else if (e.type === 'agent.session.end' && pending.has(e.agent)) { endKindAt.set(pending.get(e.agent), sessionEndKind(e)); pending.delete(e.agent); } }); }
+  { const pending = new Map(); events.forEach((e, i) => { if (e.type === 'agent.session.start') pending.set(e.agent, i); else if (e.type === 'agent.session.end' && pending.has(e.agent)) { endKindAt.set(pending.get(e.agent), sessionEndKind(e) || (e.meta?.outcome?.task === taskId && (Number(e.meta.outcome.commits) || 0) + (Number(e.meta.outcome.engineCommits) || 0) > 0 ? 'progress' : null)); pending.delete(e.agent); } }); }
   const kindOf = new Map(); // launched agent -> how its current session ended
   for (let i = 0; i < events.length; i += 1) {
     const e = events[i];
@@ -88,7 +89,7 @@ export function taskSpend(taskId, events = readRecentEvents(20000), now = Date.n
       onTask.set(e.agent, e.task || null);
       kindOf.set(e.agent, endKindAt.get(i) || null);
       countedFor.set(e.agent, counted && e.task === taskId);
-      if (counted && e.task === taskId && !harnessKind(kindOf.get(e.agent))) sessions += 1;
+      if (counted && e.task === taskId && !harnessKind(kindOf.get(e.agent)) && kindOf.get(e.agent) !== 'progress') sessions += 1;
     }
     if (e.type === 'task.start' && e.agent) {
       if (launched.has(e.agent)) onTask.set(e.agent, e.task);
@@ -97,7 +98,7 @@ export function taskSpend(taskId, events = readRecentEvents(20000), now = Date.n
         // A launched session counts once, whether it started on the task or claimed it later; an outside
         // builder (never launched by the harness) counts each claim as a session.
         if (!launched.has(e.agent)) sessions += 1;
-        else if (!countedFor.get(e.agent)) { if (!harnessKind(k)) sessions += 1; countedFor.set(e.agent, true); }
+        else if (!countedFor.get(e.agent)) { if (!harnessKind(k) && k !== 'progress') sessions += 1; countedFor.set(e.agent, true); }
         // 2.86: the claim clock runs for the task's own sessions and for a refresh that did work, not for the rest.
         if (!open.has(e.agent) && (!harnessKind(k) || k === 'refresh')) open.set(e.agent, paused ? null : at);
       }

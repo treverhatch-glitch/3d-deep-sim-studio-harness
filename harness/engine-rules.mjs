@@ -23,6 +23,7 @@ import { readJson, writeAtomic } from './fsafe.mjs';
 import { splitPlan } from './rules-parts.mjs';
 import { peakFromHistory, readUsedHistory } from './engine-ram.mjs';
 import { flagOf, isOff as off, numFiniteFirst as num, pushToOf, stdoutOf as out } from './helpers.mjs';
+import { matchAny } from './merge-lane.mjs';
 
 const on = (v) => /^(1|true|yes|on)$/i.test(String(v ?? '').trim());
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
@@ -133,6 +134,43 @@ const autoFilterOf = (auto, name) => auto.filters?.[name.toLowerCase()] || auto.
 /** 2.86: is a path under auto's root or a template's fixed start (where a system would be)? */
 const underAuto = (p, auto) => { const pl = p.toLowerCase(); return [`${auto.root}/`, ...auto.paths.map((t) => t.split('{name}')[0])].some((x) => x && pl.startsWith(x.toLowerCase())); };
 
+/**
+ * 2.90: engines.<x>.blame, checked: [{ test, re, touches: [glob], say }]. An entry ties failing tests (a regex on the full
+ * name) to the files that explain them (a path or glob, or a list). { blame, errors: [plain sentence] }.
+ */
+export function blameList(v) {
+  if (v === undefined || v === null) return { blame: [], errors: [] };
+  if (!Array.isArray(v)) return { blame: [], errors: ['engines.<x>.blame is not usable: it must be a list of { "test": "<regex>", "touches": "<path or glob>" }; it is left out'] };
+  const blame = []; const errors = [];
+  for (const e of v) {
+    const touches = (Array.isArray(e?.touches) ? e.touches : [e?.touches]).filter((x) => typeof x === 'string' && relOk(x.trim().replace(/\\/g, '/'))).map((x) => x.trim().replace(/\\/g, '/'));
+    let re = null; try { re = typeof e?.test === 'string' && e.test ? new RegExp(e.test) : null; } catch { re = null; }
+    if (!re || !touches.length) { errors.push(`engines.<x>.blame entry ${JSON.stringify(e).slice(0, 120)} left out: "test" must be a valid regex and "touches" a path or glob inside the repo`); continue; }
+    blame.push({ test: e.test, re, touches, say: typeof e.say === 'string' ? e.say.trim().slice(0, 300) : '' });
+  }
+  return { blame, errors };
+}
+
+/**
+ * 2.90: the lane engines.<x>.blame names for a red: the failing tests an entry matches, and the lanes that change a file
+ * its "touches" names. { lane, tests, files, entry } when exactly one lane does; { tied: [lane], tests } when several do;
+ * null when no entry matches a failing test or no lane changes its files.
+ */
+export function blameSuspect({ repo, tip, lanes = [], failures = [], blame = [] } = {}) {
+  const hit = blame.map((b) => ({ b, tests: failures.filter((f) => b.re.test(String(f))) })).filter((x) => x.tests.length);
+  if (!hit.length) return null;
+  const by = new Map();
+  for (const lane of lanes) {
+    const changed = changedPaths(repo, tip, lane.head) || [];
+    for (const { b, tests } of hit) {
+      const files = changed.filter((f) => matchAny(f, b.touches));
+      if (files.length && !by.has(lane.task)) by.set(lane.task, { lane, tests, files: files.slice(0, 6), entry: b });
+    }
+  }
+  if (by.size === 1) return [...by.values()][0];
+  return by.size > 1 ? { tied: [...by.values()].map((x) => x.lane), tests: hit.flatMap((x) => x.tests) } : null;
+}
+
 /** The rules check of engine <x>: { command, inputs, timeoutMin, source, env, lfs, paths, focus, share, maxLanes } or null. repo/ref: the engine repo and branch that decide the default. */
 export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo = null, ref = null } = {}) {
   if (!ENGINE_NAME_RE.test(String(engine || '')) || off(env.STUDIO_ENGINE_RULES)) return null;
@@ -142,7 +180,12 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
   const o = r && typeof r === 'object' && !Array.isArray(r) ? r : {};
   const dotnet = String(env.STUDIO_DOTNET || '').trim();
   const withSdk = (cmd) => (dotnet && /^dotnet\s/.test(cmd) ? `${/\s/.test(dotnet) ? `"${dotnet}"` : dotnet}${cmd.slice(6)}` : cmd);
-  const timeoutMin = Math.max(1, num(env.STUDIO_ENGINE_RULES_TIMEOUT_MIN, num(o.timeoutMin, 30)));
+  // 2.90: a timeout the studio set (STUDIO_ENGINE_RULES_TIMEOUT_MIN, rules.timeoutMin) is used as it is; unset, the default
+  // (STUDIO_ENGINE_RULES_DEFAULT_MIN, 30) follows the suite (rulesTimeout).
+  const setRaw = String(env.STUDIO_ENGINE_RULES_TIMEOUT_MIN ?? '').trim() !== '' ? env.STUDIO_ENGINE_RULES_TIMEOUT_MIN : o.timeoutMin;
+  const timeoutSet = setRaw !== undefined && setRaw !== null && String(setRaw).trim() !== '' && Number(setRaw) > 0;
+  const timeoutMin = timeoutSet ? Math.max(0.05, Number(setRaw)) : Math.max(0.05, num(env.STUDIO_ENGINE_RULES_DEFAULT_MIN, 30));
+  const timeoutFrom = timeoutSet ? (String(env.STUDIO_ENGINE_RULES_TIMEOUT_MIN ?? '').trim() !== '' ? 'STUDIO_ENGINE_RULES_TIMEOUT_MIN' : `engines.${engine}.rules.timeoutMin`) : null;
   const inputs = relList(o.inputs);
   const vars = o.env && typeof o.env === 'object' && !Array.isArray(o.env)
     ? Object.fromEntries(Object.entries(o.env).filter(([k, v]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof v === 'string')) : {};
@@ -169,7 +212,15 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
     } : null;
   const maxLanes = Math.max(0, Math.floor(num(o.maxLanes, 0)));
   if (f && typeof f === 'object' && f.auto !== undefined && !(typeof f.test === 'string' && f.test.includes('{filter}'))) focusBad.push('rules.focus.auto needs rules.focus.test with {filter} in it');
-  const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes };
+  // 2.90: rules.first, a test filter run before anything else (with rules.focus.test), and engines.<x>.blame.
+  let first = null;
+  if (typeof o.first === 'string' && o.first.trim()) {
+    if (f && typeof f === 'object' && typeof f.test === 'string' && f.test.includes('{filter}')) first = { filter: o.first.trim(), command: withSdk(f.test.trim()).split('{filter}').join(o.first.trim()) };
+    else focusBad.push('rules.first needs rules.focus.test with {filter} in it (the command it runs its filter with); it is left out');
+  }
+  const bl = blameList(cfg.blame);
+  focusBad.push(...bl.errors);
+  const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, first, blame: bl.blame, timeoutSet, timeoutFrom };
   const test = typeof r === 'string' ? r.trim() : typeof o.test === 'string' ? o.test.trim() : '';
   if (test) return { command: withSdk(test), inputs, timeoutMin, source: `studio/game.json engines.${engine}.rules`, ...extra };
   const d = DEFAULTS[engine];
@@ -663,6 +714,27 @@ export function rulesKey({ repo, sha, cfg, sel = null, print = '' }) {
   return `${base}|${cmdKey({ ...cfg, command: s.command })}${print ? `|${print}` : ''}${s.mode === 'focus' ? `|focus:${sha1(s.filter)}` : ''}`;
 }
 
+/** 2.90: the ceiling of a timeout that follows the suite, in minutes. */
+const TIMEOUT_CAP = 120;
+const min2 = (x) => Math.round(x * 100) / 100;
+/**
+ * 2.90: the timeout of a run of this mode: { min, why, set }. The studio's value as it is; else the larger of the default,
+ * 1.5 times the longest passing run of the mode on record, and the raise a timeout on the target left (doubled), at most 120.
+ */
+export function rulesTimeout(root, engine, cfg = {}, mode = 'full') {
+  if (cfg.timeoutSet) return { min: cfg.timeoutMin, set: true, why: `${cfg.timeoutFrom}, the studio's` };
+  const j = readCache(root, engine);
+  const cap = Math.max(cfg.timeoutMin, TIMEOUT_CAP);
+  let min = cfg.timeoutMin; let why = `the default ${cfg.timeoutMin} min`;
+  const longest = Math.max(0, ...(j.runs || []).filter((r) => r.status === 'pass' && (r.mode || 'full') === mode && r.ms > 0).map((r) => r.ms)) / 60000;
+  if (longest > 0 && min2(Math.min(cap, longest * 1.5)) > min) { min = min2(Math.min(cap, longest * 1.5)); why = `1.5 x the longest passing ${mode} run on record (${min2(longest)} min)`; }
+  const rz = j.raise?.[mode];
+  if (rz && Number(rz.min) > min) { min = Math.min(cap, Number(rz.min)); why = `doubled: a ${mode} run timed out on the target after ${rz.from} min (${String(rz.at || '').slice(0, 16)})`; }
+  return { min, set: false, why };
+}
+/** 2.90: trains in a row whose rules check judged no lane because of the target: { n, minutes, why, fix, since } or null. */
+export function rulesNoJudge(root, engine) { const x = readCache(root, engine).noJudge; return x && x.n > 0 ? x : null; }
+
 /**
  * Run the rules check on one commit in a throwaway checkout (never the land script's worktree or a lane).
  * { status: 'pass' | 'red' | 'error', why, ms, failures?, tail?, cached?, mode }; 'error' (could not run, or timed out)
@@ -674,19 +746,24 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
   const src = [...from, ...extraFrom];
   const s = sel || { mode: 'full', filter: '', command: cfg.command };
   const key = rulesKey({ repo, sha, cfg, sel: s, print: inputsPrint(cfg, src) });
+  // 2.90: this run's timeout (rulesTimeout), said in the log; a tree that timed out with no smaller timeout is not run again.
+  const tmo = rulesTimeout(root, engine, cfg, s.mode);
+  cfg = { ...cfg, timeoutMin: tmo.min };
   if (useCache) {
     const hit = readCache(root, engine).trees[key];
     // 2.86: a kept whole pass of these parts is each part's green too.
     if (hit?.status === 'pass' && s.partKeys) keepParts(root, engine, Object.entries(s.partKeys).map(([filter, k]) => ({ key: k, filter })));
     if (hit && ['pass', 'red'].includes(hit.status)) return { ...hit, cached: true };
   }
+  const was = useCache ? readCache(root, engine).timedOut?.[key] : null;
+  if (was && Number(was.min) >= tmo.min) return { status: 'error', timedOut: true, notRun: true, timeoutMin: tmo.min, timeoutSet: tmo.set, mode: s.mode, ms: 0, why: `not run again: this tree timed out after ${was.min} min (${String(was.at || '').slice(0, 16)}) and the timeout is still ${tmo.min} min (${tmo.why})` };
   const dir = path.join(root, '.studio', 'tmp', `rules-${safe(id)}-${short(sha)}`);
   fs.mkdirSync(path.dirname(dir), { recursive: true });
   removeCheckout(repo, dir);
   const co = rulesCheckout({ repo, sha, dir, cfg, env, log, engine });
   if (!co.ok) return { status: 'error', why: `could not check ${short(sha)} out for the rules check: ${co.why}`, ms: 0 };
   const t0 = Date.now();
-  try {
+  const r9 = (() => { try {
     const missing = copyInputs(cfg, src, dir);
     if (missing.length) log(`[engine-rules] ${engine}: input(s) not found in the engine's folder: ${missing.join(', ')} (engines.${engine}.rules.inputs)`);
     const runEnv = { ...env, ...(cfg.env || {}), STUDIO_ENGINE: engine, STUDIO_RULES_COMMIT: sha, STUDIO_RULES_DIR: dir, STUDIO_ENGINE_REPO: repo, STUDIO_RULES_MODE: s.mode };
@@ -695,7 +772,7 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
     // Red on the first red (its output kept). The time limit covers the whole.
     if (Array.isArray(s.parts) && s.parts.length > 1) {
       const plan = splitPlan(cfg.focus || {}, { root, engine, env });
-      const timedOut = (n, filter) => `the rules check timed out after ${cfg.timeoutMin} min (engines.${engine}.rules.timeoutMin), ${filter ? `in group ${filter}` : `split: ${n} of ${s.parts.length} group(s) done`}`;
+      const timedOut = (n, filter) => `the rules check timed out after ${cfg.timeoutMin} min (${tmo.why}), ${filter ? `in group ${filter}` : `split: ${n} of ${s.parts.length} group(s) done`}`;
       const finish = (groups, texts, splitAtOnce) => {
         const ms = Date.now() - t0;
         // 2.86: each green part is kept under its own key (s.partKeys), also when a later part is red.
@@ -748,11 +825,11 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
       }
       return finish(groups, texts, 1);
     }
-    log(`[engine-rules] ${engine}: ${s.command} on ${short(sha)}${s.mode === 'focus' ? ' (focus)' : ''}${co.sparse ? ' (sparse checkout)' : ''}`);
+    log(`[engine-rules] ${engine}: ${s.command} on ${short(sha)}${s.mode === 'focus' ? ' (focus)' : ''}${co.sparse ? ' (sparse checkout)' : ''}; up to ${tmo.min} min (${tmo.why})`);
     const r = spawnSync(s.command, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: cfg.timeoutMin * 60000, env: runEnv });
     const ms = Date.now() - t0;
     const text = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd();
-    if (r.error) return { status: 'error', why: r.error.code === 'ETIMEDOUT' ? `the rules check timed out after ${cfg.timeoutMin} min (engines.${engine}.rules.timeoutMin)` : `the rules check could not run: ${r.error.code || r.error.message}`, ms, mode: s.mode };
+    if (r.error) return { status: 'error', why: r.error.code === 'ETIMEDOUT' ? `the rules check timed out after ${cfg.timeoutMin} min (${tmo.why})` : `the rules check could not run: ${r.error.code || r.error.message}`, ms, mode: s.mode };
     // 2.86: one joined command that passed passed every part in it.
     if (r.status === 0 && s.partKeys) { const ks = Object.entries(s.partKeys); const gb = ks.length === 1 ? peakFromHistory(readUsedHistory(root), t0, Date.now()) : null; keepParts(root, engine, ks.map(([filter, k]) => ({ key: k, filter, ...(ks.length === 1 ? { seconds: Math.round(ms / 1000), ...(gb > 0 ? { gb } : {}) } : {}) }))); }
     const rec = r.status === 0
@@ -760,7 +837,14 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
       : { status: 'red', why: `the rules check failed (exit ${r.status ?? r.signal ?? '?'}${s.mode === 'focus' ? ', focus' : ''})`, ms, at: new Date().toISOString(), mode: s.mode, failures: failingTests(text).slice(0, 40), tail: text.split('\n').slice(-12).join('\n') };
     keep(root, engine, key, rec);
     return rec;
-  } finally { removeCheckout(repo, dir); }
+  } finally { removeCheckout(repo, dir); } })();
+  // 2.90: a timeout is recorded for this tree; a pass of the mode clears the raise a timeout on the target left.
+  if (r9.status === 'error' && /timed out after/.test(String(r9.why || ''))) {
+    writeCache(root, engine, (j) => { j.timedOut = { ...(j.timedOut || {}), [key]: { min: tmo.min, at: new Date().toISOString(), mode: s.mode } }; const ks = Object.keys(j.timedOut); for (const k of ks.slice(0, Math.max(0, ks.length - 60))) delete j.timedOut[k]; });
+    return { ...r9, timedOut: true, timeoutMin: tmo.min, timeoutSet: tmo.set };
+  }
+  if (r9.status === 'pass' && !r9.cached && readCache(root, engine).raise?.[s.mode]) writeCache(root, engine, (j) => { delete j.raise[s.mode]; });
+  return r9;
 }
 
 /**
@@ -847,6 +931,56 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; for (const gr of Array.isArray(r.groups) ? r.groups : []) groupSecs.set(gr.filter, (groupSecs.get(gr.filter) || 0) + (gr.seconds || 0)); }
     return r;
   };
+  // 2.90: the smallest red prefix of `set` under atFn: { hi, bad } (set[hi - 1] turns it red), or { stuck }.
+  const redPrefix = (set, atFn, bad0) => {
+    let lo = 0; let hi = set.length; let bad = bad0;
+    while (hi - lo > 1) {
+      if (res.runs >= maxRuns) return { stuck: true };
+      const mid = Math.floor((lo + hi) / 2);
+      const part = chain(tip, set.slice(0, mid));
+      if (part.error || !part.head) return { stuck: true };
+      const rm = atFn(part.head);
+      if (rm.status === 'pass') lo = mid; else if (rm.status === 'red') { hi = mid; bad = rm; } else return { stuck: true };
+    }
+    return { hi, bad };
+  };
+  // 2.90: engines.<x>.blame on a red: the one lane that changes the files a failing test is tied to is left out first; green
+  // without it, it is the culprit (no prefix search). { lane, why } or null.
+  const byBlame = (set, r, atFn) => {
+    const bs = cfg.blame?.length && set.length > 1 ? blameSuspect({ repo, tip, lanes: set, failures: r.failures || [], blame: cfg.blame }) : null;
+    if (!bs?.lane) return null;
+    const rest = set.filter((l) => l.task !== bs.lane.task);
+    const c = chain(tip, rest);
+    const rw = c.error || !c.head ? null : atFn(c.head);
+    if (rw?.status !== 'pass') { log(`[engine-rules] ${engine}: engines.${engine}.blame named ${bs.lane.task}, but the batch without it is ${rw?.status || 'not buildable'}: narrowing as before`); return null; }
+    return { lane: bs.lane, why: `engines.${engine}.blame ties ${bs.tests.slice(0, 3).join(', ')} to ${bs.entry.touches.join(', ')}, which only ${bs.lane.branch} changes (${bs.files.slice(0, 3).join(', ')}), and the check is green without it${bs.entry.say ? `. ${bs.entry.say}` : ''}` };
+  };
+  // 2.90: rules.first, a test filter run before everything else: red, its culprit is refused at once with the failing names.
+  if (cfg.first) {
+    const fsel = { mode: 'first', filter: cfg.first.filter, command: cfg.first.command };
+    const atF = (sha) => { const r = run({ engine, repo, sha, cfg, from, extraFrom, sel: fsel, root, id: `${id}-first`, env, log, useCache }); if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; } return r; };
+    let onTip = null;
+    let left = lanes.slice();
+    while (left.length && res.runs < maxRuns) {
+      const c = chain(tip, left);
+      if (c.error || !c.head) break;
+      const r = atF(c.head);
+      log(`[engine-rules] ${engine}: rules.first (${cfg.first.filter}) on ${left.map((l) => l.task).join(' + ')}: ${r.status}`);
+      if (r.status !== 'red') break;
+      onTip = onTip || atF(tip);
+      if (onTip.status !== 'pass') { log(`[engine-rules] ${engine}: rules.first is ${onTip.status} on the target itself: it judges no lane`); break; }
+      const bb = byBlame(left, r, atF);
+      const p = bb ? null : redPrefix(left, atF, r);
+      if (!bb && p.stuck) break;
+      const culprit = bb ? bb.lane : left[p.hi - 1];
+      const bad = bb ? r : p.bad;
+      res.dropped.push({ lane: culprit, failures: bad.failures || [], first: true, why: `the first tests of the rules check (rules.first ${cfg.first.filter}) are red with ${culprit.branch}${bb ? `: ${bb.why}` : `${left.indexOf(culprit) ? ` on top of ${left.slice(0, left.indexOf(culprit)).map((l) => l.task).join(' + ')}` : ''}; it is green without it`}${bad.failures?.length ? `. Failing: ${bad.failures.slice(0, 8).join(', ')}` : ''}${bad.tail ? `\n${bad.tail.split('\n').map((x) => `  ${x}`).join('\n')}` : ''}` });
+      left = left.filter((l) => l.task !== culprit.task);
+    }
+    res.first = { filter: cfg.first.filter, dropped: res.dropped.length };
+    if (left.length !== lanes.length) { lanes = left; res.kept = left.slice(); first = left.length ? chain(tip, left) : null; }
+    if (!lanes.length) { res.kept = []; res.why = `${res.dropped.length} lane(s) refused by the first tests of the rules check (rules.first), none left`; return res; }
+  }
   // The calibration: the target must be green with the same command. 2.86: per part, only the parts the target has
   // (a system the batch adds has no tests on the target to calibrate) and that have no kept green there.
   let base;
@@ -858,8 +992,16 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     base = onTip.length ? at(tip, onTip, 'the target') : { status: 'pass', why: 'every part is new in the batch: nothing to calibrate', allKept: true };
   } else base = at(tip);
   if (base.status !== 'pass') {
-    return { ...res, skipped: true, calibration: base.status, why: `the rules check is ${base.status === 'red' ? 'red' : 'not runnable'} on the target itself (${base.why}${base.failures?.length ? `: ${base.failures.slice(0, 3).join(', ')}` : ''}), so it judges no lane: fix the target, or name the inputs its tests read in studio/game.json engines.${engine}.rules.inputs` };
+    // 2.90: a timeout on the target with a timeout nobody set doubles the next run's (rulesTimeout); every such train is counted.
+    const tmoOut = Boolean(base.timedOut);
+    if (tmoOut && !base.notRun && !base.timeoutSet) writeCache(root, engine, (j) => { j.raise = { ...(j.raise || {}), [sel.mode]: { min: Math.min(Math.max(cfg.timeoutMin, TIMEOUT_CAP), min2(base.timeoutMin * 2)), from: base.timeoutMin, at: new Date().toISOString() } }; });
+    const fix = tmoOut ? `raise engines.${engine}.rules.timeoutMin, or make the run smaller with rules.focus (map, auto, paths)` : `fix the target, or name the inputs its tests read in studio/game.json engines.${engine}.rules.inputs`;
+    const why = `the rules check ${tmoOut ? (base.notRun ? 'was not run on the target' : 'timed out on the target itself') : `is ${base.status === 'red' ? 'red' : 'not runnable'} on the target itself`} (${base.why}${base.failures?.length ? `: ${base.failures.slice(0, 3).join(', ')}` : ''}), so it judges no lane: ${fix}`;
+    let noJudge = null;
+    writeCache(root, engine, (j) => { const p = j.noJudge || {}; noJudge = { n: (p.n || 0) + 1, minutes: min2((p.minutes || 0) + res.ms / 60000), since: p.since || new Date().toISOString(), why: String(base.why || '').slice(0, 200), fix, timeout: tmoOut }; j.noJudge = noJudge; });
+    return { ...res, skipped: true, calibration: base.status, ...(tmoOut ? { timedOut: true } : {}), noJudge, why };
   }
+  if (rulesNoJudge(root, engine)) writeCache(root, engine, (j) => { delete j.noJudge; });
   // A full pass on the target is the backstop for focused runs (fullEveryHours).
   if (sel.mode === 'full' && cfg.focus) writeCache(root, engine, (j) => { j.lastFullAt = new Date().toISOString(); });
   res.ran = true;
@@ -872,6 +1014,12 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     if (r.status === 'pass') { res.green = whole.head; break; }
     if (r.status !== 'red') { res.why = `${r.why}: the land run decides`; break; }
     if (res.runs >= maxRuns) { res.why = `the rules check is red and its ${maxRuns} runs are used (STUDIO_ENGINE_RULES_MAX_RUNS): the land run decides for ${set.map((l) => l.task).join(', ')}`; break; }
+    const bb = byBlame(set, r, (sha) => at(sha));
+    if (bb) {
+      res.dropped.push({ lane: bb.lane, failures: r.failures || [], part: r.part?.filter || null, blame: true, why: `the rules check (${sel.command}) is red on the batch with ${bb.lane.branch}: ${bb.why}${r.failures?.length ? `. Failing: ${r.failures.slice(0, 8).join(', ')}` : ''}${r.tail ? `\n${r.tail.split('\n').map((x) => `  ${x}`).join('\n')}` : ''}` });
+      set = set.filter((l) => l.task !== bb.lane.task);
+      continue;
+    }
     // The smallest red prefix: its last lane turns the batch red.
     let lo = 0; // target + the first lo lanes is green
     let hi = set.length; // target + the first hi lanes is red

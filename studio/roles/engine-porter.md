@@ -27,10 +27,17 @@ file a task for the web team.
    textures) out of the sim.
 5. Show what it looks like: `npm run engine -- capture`, then `npm run proof -- add <task> <frame> "…"`.
 6. Tick the mechanic in `studio/engine/PARITY.md` when it is ported and parity passes.
+7. Shared state is declared once (2.90). When your unit needs a member of a type that other units also extend (the
+   sim's state, a shared enum, a shared table), don't declare it in your unit's files: two branches that each declare
+   it break the train when both land. If the plan gave you the shared-state chore, add it there; else stop and name
+   the member in your hand-back (`npm run task -- pause <ID> --agent <you> --note "needs shared member <Type>.<name>
+   (<its type>) in the shared-state chore"`). Plans for parallel units start from `studio/templates/port-plan.md`.
 
 **A pass in the engine's own repo (2.77.0, docs/ENGINE-TRACKS.md).** Your prompt names your worktree
 (`.lanes/engine/<T-ID>`, on the pass's branch): edit and commit there. Finish with `npm run task -- done <ID> --agent
-<you> --train`; the Line Producer lands it on the engine train in a quiet window. A pass with a visual check needs
+<you> --train`; the Line Producer lands it on the engine train in a quiet window. A unit too big for one session
+lands per slice: commit what is ported and run `npm run task -- done <ID> --agent <you> --train --slice`; the task
+comes back for the next session once the slice lands. The last slice goes with `--train` alone. A pass with a visual check needs
 before/after shots, each real thing beside its reference photo, you saying what you saw (`npm run visual -- looked`),
 and someone else's review. Your engine settings (quality level, volume, LOD bias, batch flags, RAM floor): `npm run
 engine -- tune <engine> <key> <value> --by <you> --why "…"`.

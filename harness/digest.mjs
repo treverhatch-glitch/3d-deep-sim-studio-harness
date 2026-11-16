@@ -25,6 +25,15 @@ const words = (s) => (String(s).match(/\S+/g) || []).length;
 export const localDate = (now = Date.now()) => { const d = new Date(now); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 export const digestFile = (date, root = REPO_ROOT) => path.join(root, DIGEST_DIR_REL, `${date}.md`);
 
+/** 2.90: close the open asks (both kinds) whose task is done, before they are counted. Never throws. */
+async function closeAsksOfDoneTasks(now) {
+  try {
+    const { parseNextQueue } = await import('./task.mjs');
+    const done = new Set(parseNextQueue().done.map((t) => t.id));
+    (await import('./ask-post.mjs')).closeStaleAsks({ done: (t) => done.has(t), now });
+  } catch { /* counted as they are */ }
+}
+
 /** What needs a person now: [{ kind, line }]. Each source is optional. */
 export async function needsPerson({ now = Date.now(), root = REPO_ROOT, events = null } = {}) {
   const out = [];
@@ -51,9 +60,11 @@ export async function needsPerson({ now = Date.now(), root = REPO_ROOT, events =
     if (b.hasBible() && !b.readBible().signed) out.push({ kind: 'bible', line: 'the Game Bible is waiting for your signature (npm run bible)' });
   });
   await tryAdd(async () => {
-    const { openAsks, askOwnerTopic } = await import('./ask.mjs');
+    const { waitingAsks, askOwnerTopic } = await import('./ask.mjs');
     // 2.85: the owner's own asks (harness/owner-acts.mjs: no stand-in and no timer answers them) are listed apart.
-    const all = openAsks();
+    // 2.90: only asks that still wait for a person: one whose default time has passed is applied by the watcher.
+    await closeAsksOfDoneTasks(now);
+    const all = waitingAsks(now);
     const owners = all.filter((a) => askOwnerTopic(a));
     const open = all.filter((a) => !askOwnerTopic(a));
     if (owners.length) out.push({ kind: 'bible', line: `${owners.length} ask${owners.length === 1 ? '' : 's'} waiting for the owner (only you answer these: ${[...new Set(owners.map((a) => askOwnerTopic(a).act))].join(', ')}): ${owners.slice(0, 6).map((a) => a.id).join(', ')}${owners.length > 6 ? ' …' : ''} (npm run ask -- list --open)` });
@@ -63,7 +74,7 @@ export async function needsPerson({ now = Date.now(), root = REPO_ROOT, events =
   // posted again, with how often each came back.
   await tryAdd(async () => {
     const ap = await import('./ask-post.mjs');
-    try { const { parseNextQueue } = await import('./task.mjs'); const done = new Set(parseNextQueue().done.map((t) => t.id)); ap.closeStaleAsks({ done: (t) => done.has(t), now }); } catch {}
+    await closeAsksOfDoneTasks(now);
     const open = ap.openPostedAsks();
     if (open.length) out.push({ kind: 'ask', line: `${open.length} open ask${open.length === 1 ? '' : 's'} from the harness (each posted once; repeats are counted here): ${open.slice(0, 3).map((x) => `${String(x.msg).slice(0, 90)}${x.repeats ? ` (again ${x.repeats}x)` : ''}`).join('; ')}${open.length > 3 ? ' …' : ''}` });
   });

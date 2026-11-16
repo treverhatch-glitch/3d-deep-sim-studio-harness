@@ -127,7 +127,8 @@ console.log(JSON.stringify({ after, working }));`);
 import { handBackKind, handBackTally } from ${u(S, 'harness/handback-kind.mjs')};
 import { crewHealth } from ${u(S, 'harness/crew-watch.mjs')};
 ${seqCode}
-const evs = [...session('builder-s80', 0, { commits: 1, why: 'task done was refused after 1 commit(s): ${REFUSAL.replace(/"/g, '\\"')}', note: 'Done: the compile error fixed (commit 274800c) | Not done: task done --train refused' }), ...session('builder-s81', 2), ...session('builder-s82', 4)];
+// 2.90 (f): the first refusal's session made no commit (one that committed would be progress, not a real hand-back).
+const evs = [...session('builder-s80', 0, { why: 'task done was refused: ${REFUSAL.replace(/"/g, '\\"')}', note: 'Done: the compile error was already fixed | Not done: task done --train refused' }), ...session('builder-s81', 2), ...session('builder-s82', 4)];
 const flow = { id: 'f1', ts: iso(t0 + 1 * M), type: 'task.paused', agent: 'director', task: 'T-9', msg: "Handed back T-9: The claim ran out with no running session on it: handed back by the Director's flow pass so a free builder can take it." };
 const ready = { id: 'r1', ts: iso(t0 + 1.5 * M), type: 'task.paused', agent: 'builder-s79', task: 'T-9', msg: 'Handed back T-9: all checks green; ready for the unity train, branch unity/t-9' };
 const all = [...evs, flow, ready, { id: 'c1', ts: iso(t0 + 6 * M), type: 'task.claim.released', agent: 'director', task: 'T-8', meta: { why: 'waits for the unity train' } }].sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));

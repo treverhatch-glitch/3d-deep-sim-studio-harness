@@ -6,7 +6,8 @@
  *   - a person stopped or paused the session, or it reported the task impossible: 'person';
  *   - the session stopped at its usage limit (the caller passes busy.mjs's LIMIT_STOP): 'limit';
  *   - its note says the work is ready and waits for a train: 'ready';
- *   - `task done` was refused for the same reason as the session before it, with no new commit: 'refused'.
+ *   - `task done` was refused for the same reason as the session before it, with no new commit: 'refused';
+ *   - 2.90: the session committed to the task (a slice of a big unit) before handing it back: 'progress'.
  * A claim released quietly while the task waits for a train (task.claim.released) is no hand-back. No imports.
  */
 
@@ -158,6 +159,7 @@ export function handBackKind(e, events = [], { limit = null } = {}) {
   if (limit && limit.test(String(e?.msg || ''))) return 'limit';
   if (READY_FOR_TRAIN.test(noteOf(e))) return 'ready';
   const end = endFor(e, events);
+  if (Number(e?.meta?.commits) > 0 || commitsOf(end?.meta?.outcome) > 0) return 'progress';
   if (end && sameRefusalAgain(end, events)) return 'refused';
   return 'real';
 }
