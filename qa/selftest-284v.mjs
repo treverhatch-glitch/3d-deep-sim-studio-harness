@@ -88,13 +88,13 @@ console.log(JSON.stringify({ text: e2.text || null, count: e2.count, words, inge
     const r = probe(S, env, `import { crewHealth } from ${u(S, 'harness/crew-watch.mjs')};
 const now = Date.now(); const M = 60000; const iso = (t) => new Date(t).toISOString();
 let id = 0;
-// k sessions of role builder, each on its own task with commits but no done: (agent, task) pairs.
+// k sessions of role builder, each on its own task with no commit and no done (2.90 (d): a commit is progress).
 const sessions = (prefix, k, { hand = false, at = 50 } = {}) => {
   const ev = [];
   for (let i = 1; i <= k; i++) {
     const agent = prefix + i; const task = 'T-' + prefix.toUpperCase().replace(/[^A-Z]/g, '') + i;
     ev.push({ id: 'e' + (++id), ts: iso(now - (at - i) * M), type: 'agent.session.start', agent, task, meta: { role: 'builder', ...(hand ? { byHand: true } : {}) } });
-    ev.push({ id: 'e' + (++id), ts: iso(now - (at - i - 0.5) * M), type: 'agent.session.end', agent, task, meta: { role: 'builder', outcome: { task, claimed: true, commits: 2, done: false, noWork: false, stuck: false, counts: true } } });
+    ev.push({ id: 'e' + (++id), ts: iso(now - (at - i - 0.5) * M), type: 'agent.session.end', agent, task, meta: { role: 'builder', outcome: { task, claimed: true, commits: 0, done: false, noWork: true, stuck: false, counts: true } } });
   }
   return ev;
 };

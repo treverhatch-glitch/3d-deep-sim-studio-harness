@@ -3,6 +3,7 @@
  *   a  a task that names a proposal (its title or --after) waits while it is one, then for the task it became
  *   b  `task promote` takes --phase, --serves and --type, so a porter's "Port …" proposal can be promoted
  *   c  `task unblock` ends a time block (task block <ID> --until <time>)
+ *   d  the crew breaker counts a session that committed to its task as progress
  * Scaffolding: a studio copy with its own git and events file, as in qa/selftest-286e.mjs.
  */
 import fs from 'node:fs';
@@ -108,6 +109,21 @@ console.log(JSON.stringify({ open, owner: owner && owner.owner, producer, viaAft
     await guard('2.90 (c) `task block <ID> --until <a later time>` then `task unblock <ID>`: the time block is cleared, unblock exits 0 and says so, and block\'s own line names unblock; a second unblock says there is nothing to unblock (fails on 2.89: unblock answered "isn\'t parked or tripped; nothing to unblock" and the block stayed)', () => [
       add.status === 0 && Boolean(id) && Boolean(before) && /task -- unblock/.test(out(block)) && un.status === 0 && /time block .* is cleared/.test(out(un)) && after === null && again.status !== 0 && /nothing to unblock/.test(out(again)),
       JSON.stringify({ id, before, after, block: out(block).slice(-300), un: out(un).slice(-300), again: out(again).slice(-300) })]);
+  }
+
+  // ================= d. a committed slice is progress =================
+  {
+    const r = probe(`const cw = await import(${u('harness/crew-watch.mjs')});
+const now = Date.parse('2026-11-11T05:00:00Z');
+const mk = (commitsOf) => { const evs = []; for (let i = 0; i < 8; i += 1) { const a = 'engine-porter-s' + i; const t0 = now - (50 - i * 5) * 60000;
+  evs.push({ ts: new Date(t0).toISOString(), type: 'agent.session.start', agent: a, task: 'T-010', meta: { role: 'engine-porter' } });
+  evs.push({ ts: new Date(t0 + 240000).toISOString(), type: 'agent.session.end', agent: a, task: 'T-010', tokensIn: 1000, tokensOut: 100, meta: { role: 'engine-porter', outcome: { task: 'T-010', done: false, commits: commitsOf(i), noWork: commitsOf(i) === 0, stuck: false, counts: true, why: commitsOf(i) ? 'it made 1 commit(s) but did not call task done' : 'no commit' } } }); }
+  return evs; };
+const h = (evs) => { const x = cw.crewHealth(evs, { now, env: { STUDIO_CREW_MAX_SESSIONS: '6' } })['engine-porter']; return { sessions: x.sessions, committed: x.committed, unhealthy: x.unhealthy, why: x.why }; };
+console.log(JSON.stringify({ slices: h(mk(() => 1)), nothing: h(mk(() => 0)), one: h(mk((i) => (i === 0 ? 1 : 0))) }));`);
+    await guard('2.90 (d) crew breaker: eight porter sessions in the hour on one big unit, each committing a slice and none landed, do not trip it; eight with no commit still trip it, and so do eight where only one committed (seven with nothing is over 6), whose reason counts the sessions with no commit (fails on 2.89: the eight committing sessions tripped it)', () => [
+      r.slices?.sessions === 8 && r.slices.committed === 8 && r.slices.unhealthy === false && r.nothing?.unhealthy === true && r.one?.unhealthy === true && /7 of them with no commit/.test(String(r.one.why)),
+      JSON.stringify(r)]);
   }
 
   try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep removes it */ }

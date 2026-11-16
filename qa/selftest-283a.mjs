@@ -139,14 +139,15 @@ if (mode === 'queue') {
     const { S, env } = studio('breaker');
     const r = probe(S, env, `const cw = await import(${u(S, 'harness/crew-watch.mjs')});
 const now = Date.parse('2026-11-11T05:00:00Z');
-const mk = (queued) => { const evs = []; for (let i = 0; i < 8; i += 1) { const a = 'builder-s' + i; const t0 = now - (50 - i * 5) * 60000;
+const mk = (queued) => { const evs = []; for (let i = 0; i < 10; i += 1) { const a = 'builder-s' + i; const t0 = now - (50 - i * 5) * 60000;
   evs.push({ ts: new Date(t0).toISOString(), type: 'agent.session.start', agent: a, task: 'T-' + (500 + i), meta: { role: 'builder' } });
-  evs.push({ ts: new Date(t0 + 240000).toISOString(), type: 'agent.session.end', agent: a, task: 'T-' + (500 + i), tokensIn: 1000, tokensOut: 100, meta: { role: 'builder', outcome: queued && i < 3 ? { task: 'T-' + (500 + i), done: true, commits: 1, noWork: false, stuck: false, counts: true, queuedForTrain: true } : { task: 'T-' + (500 + i), done: false, commits: 1, noWork: false, stuck: false, counts: true, why: 'it made 1 commit(s) but did not call task done' } } }); }
+  evs.push({ ts: new Date(t0 + 240000).toISOString(), type: 'agent.session.end', agent: a, task: 'T-' + (500 + i), tokensIn: 1000, tokensOut: 100, meta: { role: 'builder', outcome: queued && i < 3 ? { task: 'T-' + (500 + i), done: true, commits: 1, noWork: false, stuck: false, counts: true, queuedForTrain: true } : { task: 'T-' + (500 + i), done: false, commits: 0, noWork: true, stuck: false, counts: true, why: 'no commit' } } }); }
   return evs; };
 const h = (evs) => { const r = cw.crewHealth(evs, { now, env: { STUDIO_CREW_MAX_SESSIONS: '6' } }).builder; return { sessions: r.sessions, landed: r.landed, queued: r.queued, unhealthy: r.unhealthy }; };
 console.log(JSON.stringify({ withQueued: h(mk(true)), without: h(mk(false)) }));`);
-    await guard('2.83 crew breaker: eight builder sessions in the hour with nothing landed yet do not trip the breaker when three of them ended by queueing their lane for a train (the landing comes when the train runs); with none queued the breaker still trips (fails before this fix: productive engine builders were stopped for "0 landed" while their lanes waited in a train that takes most of an hour)', () => [
-      r.withQueued?.sessions === 8 && r.withQueued.queued === 3 && r.withQueued.unhealthy === false && r.without?.unhealthy === true && r.without.queued === 0,
+    // 2.90 (d): ten sessions, the seven not queued with no commit (a session that commits now counts as progress by itself).
+    await guard('2.83 crew breaker: ten builder sessions in the hour with nothing landed yet do not trip the breaker when three of them ended by queueing their lane for a train (the landing comes when the train runs); with none queued the breaker still trips (fails before this fix: productive engine builders were stopped for "0 landed" while their lanes waited in a train that takes most of an hour)', () => [
+      r.withQueued?.sessions === 10 && r.withQueued.queued === 3 && r.withQueued.unhealthy === false && r.without?.unhealthy === true && r.without.queued === 0,
       JSON.stringify(r).slice(0, 1500)]);
   }
 }
