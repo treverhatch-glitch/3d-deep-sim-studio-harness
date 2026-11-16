@@ -1,25 +1,14 @@
 /**
- * harness/impact.mjs — 2.68.0: did a harness upgrade help? `npm run autonomy -- impact [--release <version>] [--days 3]
- * [--json]`.
- *
- * Upgrade points: when each harness version reached the studio's branch. From the event log (upgrade.merged, meta.to)
- * and from git history (a commit with an Upgrade-Ref / Upgrade-Versions trailer, harness/upgrade-guard.mjs; or a
- * package.json "version" bump on the first-parent line), earliest time per version.
- *
- * For one upgrade (the latest, or --release), the same measures over the --days (3) before and after it:
- *   landed per hour, train verify minutes p50 / p90, red verify % (train verifies), hand-backs per landed, tokens per
- *   kept change (the scorecard's tokenWork), owner round-trips per landed (the scorecard's), no-work sessions (per
- *   session).
- * A measure with under STUDIO_IMPACT_MIN_N (30) items on either side reads "not enough data (n=…)" and has no verdict.
- * The verdict: better / worse / same (within 10%) per measure; overall "better" when more measures improved than got
- * worse, "worse" the other way, "mixed" otherwise, "not enough data" with no measure judged. The digest names the
- * latest upgrade's verdict once one measure has enough data. A script over the log and git: no model, no tokens.
- *
- * 2.73.0 (f): when `upgrade --merge` left a before snapshot for this release (.studio/upgrades/<from>-to-<to>.json,
- * harness/upgrade-baseline.mjs), its numbers are the before side (marked *), and false reds per train, tokens per landed
- * change (also by task) and workarounds per day are compared too (not in the verdict). A release's predictions
- * (docs/releases/<version>.json, `npm run release -- predict`, harness/release-predict.mjs) are scored: hit / miss with
- * the measured change, or not scored while a side has too little data.
+ * harness/impact.mjs — did a harness upgrade help? A script over the log and git: no model, no tokens.
+ * npm run autonomy -- impact [--release <version>] [--days 3] [--json]
+ * Upgrade points: the earliest time per version, from the event log (upgrade.merged, meta.to) and git history (an
+ * Upgrade-Ref / Upgrade-Versions trailer, harness/upgrade-guard.mjs; or a package.json "version" bump). For one
+ * upgrade (the latest, or --release), measures over the --days (3) before and after: landed per hour, train verify
+ * minutes p50 / p90, red verify %, hand-backs per landed, tokens per kept change, owner round-trips per landed,
+ * no-work sessions. Under STUDIO_IMPACT_MIN_N (30) items a side: no verdict. Verdict: better / worse / same (within
+ * 10%).
+ * A before snapshot from `upgrade --merge` (.studio/upgrades/<from>-to-<to>.json, harness/upgrade-baseline.mjs) is the
+ * before side. Predictions (docs/releases/<version>.json, harness/release-predict.mjs) are scored.
  */
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, readRecentEvents } from './event.mjs';

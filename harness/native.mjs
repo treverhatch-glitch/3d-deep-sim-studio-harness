@@ -1,26 +1,13 @@
 /**
- * harness/native.mjs — 2.82: native-engine mode. A studio whose game is presented and shipped in one engine builds each
- * feature once: the rules in plain code the engine's rules check tests without the editor (harness/engine-rules.mjs),
- * scenes and visuals in the engine. The web presentation and the web-to-engine porting steps are off and cost nothing.
- *
- * A studio is native <engine> when
- *   - studio/game.json says so: "native": "<engine>" (an engine it configures under "engines"; the owner's file), or
- *   - studio/game.json names a game and exactly one engine, and the studio has no web game (no "cartridge", no
- *     game/<name>, web/<name> or cartridges/<name> folder, no engine twins of web paths): there is nothing else the game
- *     could be presented in. A studio with no game of its own yet (the template) is never native by inference.
- * "native": false, or STUDIO_NATIVE=off, turns it off. STUDIO_NATIVE=<engine> (a configured engine) turns it on for a run.
- *
- * What native mode changes (each place says so once, in its own output):
- *   task add          a builder task with no --track goes on engine:<engine> (--track web keeps a web task, for the web
- *                     rules a studio is still moving out of); one that names web code (a path under the web game's
- *                     folder, a .ts/.tsx/.js/.mjs file) goes on the web track instead (webCodeNamed, 2.83)
- *   the Line Producer no game-tester runs on the web build, no engine twins of web tasks
- *   the game's train  no playable web build and clip after a landing
- *   engine drift      no port tasks from web commits (npm run engine -- drift --queue says why)
- *   kickoffs          the Producer, the Director and builders are told: one build per feature, rules in plain code, no
- *                     web presentation work, no port tasks
- * It adds no gate and removes none: a studio's own web checks still run for the web files a task changes.
- *
+ * harness/native.mjs — native-engine mode: a game presented and shipped in one engine builds each feature once.
+ * Rules go in plain code the engine's rules check tests without the editor (harness/engine-rules.mjs); scenes and
+ * visuals in the engine. The web presentation and web-to-engine porting steps are off. Native <engine> when
+ * studio/game.json says "native": "<engine>", or names a game and exactly one engine and the studio has no web game (no
+ * "cartridge", no game/<name>, web/<name> or cartridges/<name> folder). The template is never native by inference.
+ * "native": false, or STUDIO_NATIVE=off, turns it off; STUDIO_NATIVE=<engine> turns it on for a run. Changes: `task
+ * add` with no --track goes on engine:<engine> (--track web keeps a web task; one naming web code goes on the web
+ * track); no web game-tester, no engine twins of web tasks; no web build and clip after a landing; no port tasks from
+ * web commits; kickoffs say one build per feature. It adds and removes no gate.
  *   node harness/native.mjs [--json]      is this studio native, why, and what is off
  */
 import fs from 'node:fs';

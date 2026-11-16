@@ -1,29 +1,14 @@
 /**
- * harness/train-life.mjs — 2.76.0 (B-88): a merge train records how it ended, and a dead one is found.
+ * harness/train-life.mjs — a merge train records how it ended, and a dead one is found.
  *
- * Train 20261104-044849-34540 left .studio/train/<id>/status.json at "step": "verify" with no verify log and no end event;
- * its lanes went back to builders with no reason. A train runs in the process that asked for it (a `task done --train`
- * inside a builder's session, `task train`, the daemon's child): when that process ends mid-step (a crash in a step, an
- * unhandled rejection, Ctrl+C or a console closed, or the session's process tree killed by the launcher; on Windows that
- * is TerminateProcess and nothing in the process runs) nothing recorded the end.
- *
- * Now each train writes .studio/train/<id>/life.json { id, pid, by, at, lanes, ended } and a heartbeat file (beat, the
- * time, rewritten every 30 s by a worker thread, so a train blocked in a 30-minute verify still beats):
- *   - every exit path the process can see records the end with its cause: an exception in a step (runTrain's wrapper),
- *     an uncaught exception or unhandled rejection, SIGINT/SIGHUP/SIGBREAK (Ctrl+C, a closed console), process.exit
- *     mid-train; a SIGTERM or a kill ends it at once, as before, and the reaper records it;
- *   - reapDeadTrains (called before every train and by the train daemon's pass) finds a train that never recorded its
- *     end and whose process is gone (or whose heartbeat stopped for STUDIO_TRAIN_DEAD_MIN, 30, minutes on two looks
- *     in a row: Windows reuses process ids). It records task.train.died "died: <last step>" and a job.done (result
- *     died), marks its status "died", frees the train lock (2.77.0: or the speculative train's train-next.lock) if it
- *     still names that train, and keeps its lanes moving:
- *     a queued lane is still queued; a task done's own lane (not queued) is put in the queue once per head (a second
- *     death with the same head goes to the Producer instead). None of this is a hand-back, so it never counts toward
- *     STUDIO_TRAIN_MAX_HANDBACKS.
- * 2.77.3 (H2, B-112): a second worker watches the status (harness/train-watch.mjs, STUDIO_TRAIN_STALL_MIN, 90): a train
- * whose status hasn't changed that long while it works has its children stopped and ends its attempt (lanes kept).
- * Trains from before 2.76.0 have no life.json: a status.json that never reached "done" is judged by the process id in
- * the train id (<stamp>-<pid>).
+ * Each train writes .studio/train/<id>/life.json { id, pid, by, at, lanes, ended } and a heartbeat file (rewritten
+ * every 30 s by a worker thread). Every exit path the process can see records the end with its cause; a SIGTERM or
+ * kill does not. reapDeadTrains (before every train and in the daemon's pass) finds a train that never recorded its
+ * end and whose process is gone (or whose heartbeat stopped for STUDIO_TRAIN_DEAD_MIN, 30, on two looks): it records
+ * task.train.died and a job.done (result died), marks the status "died", frees the train lock (or train-next.lock) and
+ * keeps its lanes moving. Never a hand-back: not counted toward STUDIO_TRAIN_MAX_HANDBACKS.
+ * A second worker (harness/train-watch.mjs, STUDIO_TRAIN_STALL_MIN, 90) stops the children of a train whose status
+ * hasn't changed that long. Trains without life.json are judged by the pid in the id (<stamp>-<pid>).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -164,11 +149,10 @@ export function judgeTrain(root, id, { now = Date.now(), env = process.env } = {
 }
 
 /**
- * Find every train that died without recording its end, record it, free its lock and keep its lanes moving.
- * opts: { now, env, log, entryOf(task) -> queue entry|null, mark(task, patch), enqueue(lane), onMain(head) -> bool,
- * toProducer(lane, note) }. A lane still queued keeps its place (marked diedIn); a lane that wasn't queued (a task done's
- * own) is queued; a lane a train already died with at the same head goes to the Producer (toProducer) instead.
- * Returns [{ id, step, why, requeued: [task], producer: [task] }]. Never throws.
+ * Find trains that died without recording their end, record it, free the lock and keep the lanes moving. opts: { now,
+ * env, log, entryOf(task), mark(task, patch), enqueue(lane), onMain(head), toProducer(lane, note) }. A queued lane
+ * keeps its place (marked diedIn); an unqueued one is queued; a lane a train already died with at the same head goes
+ * to the Producer. Returns [{ id, step, why, requeued, producer }]. Never throws.
  */
 export function reapDeadTrains(root, { now = Date.now(), env = process.env, log = () => {}, entryOf = () => null, mark = () => {}, enqueue = () => {}, onMain = () => false, toProducer = () => {} } = {}) {
   const outp = [];

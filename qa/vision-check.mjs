@@ -1,19 +1,13 @@
 #!/usr/bin/env node
 /**
- * qa/vision-check.mjs — F15 vision check.
- *
- * Compares screenshots from a task's proof against the game's art reference using a vision model.
- *
+ * qa/vision-check.mjs — compares screenshots from a task's proof against the game's art reference using a vision model.
  *   node qa/vision-check.mjs <task> [--on] [--min <score>]
  *   node qa/vision-check.mjs --shot <file> [--on] [--min <score>]
- *
- * Opt-in: does nothing unless STUDIO_VISION=1 or --on is set.
- * Reads the screenshot from a task's proof file (studio/proof/<task>.json) or --shot <file>.
- * Reads the art reference from the bible (artReference.file) or studio/art/references.json.
- * Calls an OpenAI-compatible vision model to get a score and reasons.
- * Advisory by default (always exit 0); --min <score> makes it exit 1 below that score or when it can't check.
- * Without a task it checks the newest studio/proof/<task>.json (that's how the optional gate runs it).
- * A fake score can be injected with STUDIO_VISION_FAKE=<score> for testing.
+ * Opt-in: does nothing unless STUDIO_VISION=1 or --on is set. Reads the screenshot from studio/proof/<task>.json or
+ *   --shot <file>, and the art reference from the bible (artReference.file) or studio/art/references.json; calls an
+ *   OpenAI-compatible vision model for a score and reasons. Advisory by default (always exit 0); --min <score> exits
+ *   1 below it or when it can't check. Without a task it checks the newest studio/proof/<task>.json.
+ *   STUDIO_VISION_FAKE=<score> injects a fake score.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -6,13 +6,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, guardSyncOf, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest268N({ dir, run, report }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
-  const guard = (name, fn) => { try { const [ok, detail] = fn(); report(name, ok, detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const u = fileUrlOf(dir);
+  const write = writeInDirOf(dir);
+  const guard = guardSyncOf(report);
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_HEAVY_SLOTS: '', STUDIO_HEAVY_HELD: '', STUDIO_HEAVY_POLL_MS: '100', STUDIO_HEAVY_WAIT_MIN: '0.05', STUDIO_HEAVY_RAM_WAIT_MIN: '', STUDIO_GATE_PRIORITY: '', STUDIO_LOCK_OWNER: '', STUDIO_GAME: '', STUDIO_TEST_LOADAVG: '0', STUDIO_RAM_FLOOR_GB: '0', STUDIO_TEST_FREEMEM_MB: '', STUDIO_RESERVE_RAM_GB: '', STUDIO_GPU_RESERVE_GB: '', STUDIO_TEST_WORKERS: '', STUDIO_SESSION_RAM_GB: '', STUDIO_HEAVY_OOM_RETRY: '', STUDIO_MACHINE_SCAN: '', STUDIO_HEAVY_PROGRAMS: 'off', AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-268n.jsonl') };
   const machine = (o = {}) => JSON.stringify({ os: 'linux', cores: { logical: o.cores ?? 16 }, ram: { totalGb: o.total ?? 32, freeGb: o.free ?? 18, commitUsedGb: null, commitLimitGb: null }, gpus: o.gpus ?? [{ name: 'Test GPU', vramGb: 12, vramFreeGb: 11, busy: 1 }], disk: { freeGb: 100, totalGb: 500 }, power: { onBattery: false }, at: new Date(Date.now() - 60000).toISOString() });
   let n = 0;

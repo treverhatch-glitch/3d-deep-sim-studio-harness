@@ -1,31 +1,14 @@
 /**
  * harness/heavy-budget.mjs — the machine:heavy lock as a budgeted pool, test workers and agent sessions sized to the
- * machine, and the out-of-memory retry. Imports only machine.mjs, a leaf (heavy.mjs, game-gates.mjs and the supervisor
- * all import this; the supervisor's CLI uses top-level await, so nothing here may import it back).
+ * machine, and the out-of-memory retry. Imports only machine.mjs (a leaf).
  *
- * The machine profile is the scan harness/machine.mjs readMachine() writes to <studio>/.studio/machine.json:
- *   { os, cores: { logical, performance, efficiency }, ram: { totalGb, freeGb, commitUsedGb, commitLimitGb },
- *     gpus: [{ name, vramGb, vramFreeGb, busy }], disk, power, at }
- * Admission reads the last scan only (it never runs a scan itself: a heavy take must not wait on PowerShell) and
- * ignores one older than STUDIO_MACHINE_MAX_AGE_MIN (15). No scan (or STUDIO_MACHINE_SCAN=off): one slot and the
- * STUDIO_RAM_FLOOR_GB floor.
- *
- * Areas (a claim must fit every one it names):
- *   RAM  free = commit headroom on Windows (commitLimitGb - commitUsedGb), else freeGb (MemAvailable), minus
- *        STUDIO_RESERVE_RAM_GB (default max(4, 10% of RAM)) and the claims of holders that started after the scan;
- *        never more than total - reserve - every live claim.
- *   GPU  the largest GPU's free VRAM minus STUDIO_GPU_RESERVE_GB (2.5 when it drives the display; 0 for a GPU the scan
- *        marks display: false), minus GPU claims the same way. No GPU in the scan: GPU claims aren't held back.
- *   CPU  the threads every non-GPU-only holder claims stay within STUDIO_CPU_OVERCOMMIT (1.5) x logical cores.
- *   slots  at most STUDIO_HEAVY_SLOTS holders (default min(total RAM / 10 GB, cores / 4), 1..6; 1 with no scan). A
- *        GPU-only claim (Blender preview, a GPU playtest) uses the GPU area and no slot or CPU share, so it runs beside
- *        a CPU verify.
- * A claim bigger than its whole area can never fit: it runs alone (no other holder in that area) rather than waiting
- * for ever. Test hook: STUDIO_TEST_MACHINE (a profile as JSON, a path to one, or "none" for a failed scan).
- *
- * GPU area for jobs: kinds that are mostly GPU work (GPU_AREA_KINDS) claim VRAM plus a small RAM/CPU share instead of a
- * slot when the scan shows a GPU. No GPU, no scan, or STUDIO_GPU_AREA=off: the plain claims. Per-kind caps count by
- * group (CAP_GROUPS: one Unity, one browser playtest, one harness Blender job unless raised).
+ * Reads the last scan (.studio/machine.json), never scans; ignores one older than STUDIO_MACHINE_MAX_AGE_MIN (15). No
+ * scan (or STUDIO_MACHINE_SCAN=off): one slot and the STUDIO_RAM_FLOOR_GB floor. A claim must fit every area it names:
+ *   RAM  free (Windows: commit headroom) minus STUDIO_RESERVE_RAM_GB (default max(4, 10% of RAM))
+ *   GPU  free VRAM minus STUDIO_GPU_RESERVE_GB (2.5 if it drives the display, else 0); CPU  threads within
+ *        STUDIO_CPU_OVERCOMMIT (1.5) x logical cores
+ *   slots  STUDIO_HEAVY_SLOTS (default min(RAM / 10 GB, cores / 4), 1..6)
+ * A claim bigger than its area runs alone; GPU-only claims use no slot (STUDIO_GPU_AREA=off: plain claims).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -264,18 +247,10 @@ const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 
 // ---- test workers shared by cores too, by priority ----
 /**
- * A job that sizes its own test workers (a full verify, a lane's game check, a soak) gets only its share of the logical
- * cores, counting the other jobs running (machine:heavy holders, the gate slots of lane checks) and the train's verify
- * when one is coming:
- *
- *   share = floor((cores - threads of fixed-size jobs) x weight / (weight + the weights of the other sizing jobs))
- *   workers = min(share, the RAM figure, the CPU headroom: STUDIO_CPU_OVERCOMMIT x cores - the others' threads)
- *
- * Weights (studio/machine-budget.json "priority" overrides): the train's verify 4, a builder's verify or lane check 2, a
- * soak 1. Jobs with a fixed claim (Unity, Blender and asset jobs, playtests, a generic heavy command) take their threads
- * off the top and are never squeezed. The train's verify is "coming" (counted as if running) while a train holds its
- * lock or lanes wait in its queue (STUDIO_TRAIN_RESERVE=off: not counted). STUDIO_TEST_WORKERS still wins;
- * STUDIO_RIG_SHARE=off sizes by RAM only. Always between 2 and cores - 2.
+ * A job that sizes its own test workers gets its share of the logical cores, counting other jobs and the train's
+ * verify when one is coming (STUDIO_TRAIN_RESERVE=off: not counted): min(share by weight, RAM figure, CPU headroom),
+ * 2..cores - 2. Weights (studio/machine-budget.json "priority"): train verify 4, builder verify or lane check 2, soak
+ * 1. STUDIO_TEST_WORKERS wins; STUDIO_RIG_SHARE=off: RAM only.
  */
 /**
  * The rig's priority order, in ONE table: train > builder verifies (a verify, a lane's check) > Unity/art > soaks.
@@ -432,12 +407,10 @@ export function jobClaim(kind, { root = process.cwd(), env = process.env, label 
 }
 
 /**
- * Does the scanned machine have room for the engine line? An engine land on its own line runs beside the game's work, so
- * the machine must hold both at full size: the engine land's claim plus one game job (the `heavy` kind's claim,
- * studio/machine-budget.json jobs.heavy) within the usable RAM (total - STUDIO_RESERVE_RAM_GB) and the logical cores
- * with no overcommit. The moment's free figures aren't enough (a small machine would let a big Unity land in beside a
- * heavy job). No room: the land shares the game's slots, as with no scan. { ok, why }. STUDIO_ENGINE_LINE_ROOM=off: any
- * fresh scan opens the line.
+ * Does the scanned machine have room for the engine line? An engine land runs beside the game's work, so the machine
+ * must hold both at full size: the engine land's claim plus one game job (studio/machine-budget.json jobs.heavy) within
+ * the usable RAM (total - STUDIO_RESERVE_RAM_GB) and the logical cores with no overcommit. No room: the land shares
+ * the game's slots, as with no scan. { ok, why }. STUDIO_ENGINE_LINE_ROOM=off: any fresh scan opens the line.
  */
 export function engineLineRoom(p, engineClaim, { root = process.cwd(), env = process.env } = {}) {
   if (!p) return { ok: false, why: 'no machine scan' };
@@ -541,11 +514,10 @@ export function sessionRamGb({ env = process.env, root = process.cwd() } = {}) {
 }
 
 /**
- * The RAM a running engine train will take again between its land runs (merge-tree checks, a refusal's retry wait, the
- * next bisection run), which no machine:heavy claim shows then. Every live <root>/.studio/locks/<engine>-train.lock
- * (not the web train's train.lock) counts its recorded ramGb (unity-train.mjs writes it; an older lock: the engine
- * kind's claim), unless a live holder is that engine's land right now (its claim already counts). { gb, trains: [{ engine, id, ramGb }], why }. Never throws.
- * STUDIO_ENGINE_TRAIN_RESERVE=off: { gb: 0 }.
+ * The RAM a running engine train will take again between its land runs (no machine:heavy claim shows it then). Every
+ * live <root>/.studio/locks/<engine>-train.lock (not the web train's) counts its recorded ramGb (else the engine
+ * kind's claim), unless a live holder is that engine's land now. Returns { gb, trains: [{ engine, id, ramGb }], why }.
+ * Never throws. STUDIO_ENGINE_TRAIN_RESERVE=off: { gb: 0 }.
  */
 export function engineTrainReserve(root, holders = [], { env = process.env, now = Date.now() } = {}) {
   const none = { gb: 0, trains: [], why: '' };

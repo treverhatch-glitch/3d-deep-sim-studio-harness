@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { guardCap3000Of, writeIn as write } from './kit.mjs';
 
 // 2.86: the number of DEAD exports left in the repo. Lower it when you remove more; the check below fails when the
 // tool finds more than this, so a new export that nothing uses cannot be added unnoticed. Print the list with
@@ -16,8 +17,7 @@ import { spawnSync } from 'node:child_process';
 export const DEAD_EXPORTS_ALLOWED = 2;
 
 export async function selftest286G({ dir, report, tmpRoot }) {
-  const write = (b, rel, text) => { fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true }); fs.writeFileSync(path.join(b, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
+  const guard = guardCap3000Of(report);
   const T = path.join(tmpRoot, `s286g-${process.pid}`);
   fs.mkdirSync(T, { recursive: true });
   const tool = path.join(dir, 'scripts', 'unused-exports.mjs');

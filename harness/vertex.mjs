@@ -1,26 +1,14 @@
 /**
- * harness/vertex.mjs — 2.79.1 (a): Vertex AI as a built-in builder tool (`--tool vertex`), on the owner's Google Cloud credit.
- *
- * A `vertex` session is aider (the same aider `--tool aider` and `--tool nim` start: harness/aider-launch.mjs) talking to a
- * harness-owned proxy on this machine (harness/vertex-proxy.mjs, 127.0.0.1:STUDIO_VERTEX_PROXY_PORT, 8787). The proxy holds
- * the key: it re-reads the main checkout's .env on every request (VERTEX_API_KEY, VERTEX_PROJECT_ID), sends the key to
- * Vertex's OpenAI-compatible endpoint as x-goog-api-key (Vertex refuses it as a Bearer token), and logs each answer's usage
- * to .studio/vertex-usage.jsonl. The session never sees the key: its environment has no VERTEX_ name (harness/agent-env.mjs),
- * its lane copy's .env has no VERTEX_API_KEY line (harness/worktree.mjs), and aider gets `--openai-api-key session-<agent>`,
- * which the proxy reads as the session's tag (never forwarded), so every usage line names a session and so a task.
- *
- * Settings (the main checkout's .env; the key and project are read from the file only, so renaming the key pauses Vertex):
- *   VERTEX_API_KEY, VERTEX_PROJECT_ID   the owner's key and project (names only are ever printed)
- *   STUDIO_VERTEX_MODEL                 a normal builder task's model (google/gemini-3-flash-preview)
- *   STUDIO_VERTEX_HARD_MODEL            a hard task's model: size 4-5 or a chain-breaker (google/gemini-3.1-pro-preview)
- *   STUDIO_VERTEX_SHARE                 the share of builder slots Vertex may take while the plan has headroom (0.5)
- *   STUDIO_VERTEX_ENGINE                on: an engine-track task may run on Vertex too (off by default: aider can't open the engine repo's worktree)
- *   STUDIO_VERTEX_PROXY_PORT            the proxy's port (8787)
- *   STUDIO_VERTEX_MAX_PROMPT_TOKENS     a request over this many prompt tokens stops its session (150000; 0 = no cap)
- *   STUDIO_VERTEX_BASE_URL              the OpenAI-compatible base (default: the global endpoint of VERTEX_PROJECT_ID); https,
- *                                       or http on 127.0.0.1/localhost only; read from the .env file only
- * Spend is always logged and reported (npm run budget, npm run tokens -- --by task); a cap is a budget someone allowed sets
- * (harness/spend-budget.mjs: npm run budget -- set vertex <usd> --by <who> --why "<the owner's order>"). There is none by default.
+ * harness/vertex.mjs — Vertex AI as a built-in builder tool (`--tool vertex`), on the owner's Google Cloud credit.
+ * A `vertex` session is aider (harness/aider-launch.mjs) talking to a harness-owned proxy (harness/vertex-proxy.mjs,
+ * 127.0.0.1:STUDIO_VERTEX_PROXY_PORT, 8787). The proxy re-reads the main checkout's .env each request (VERTEX_API_KEY,
+ * VERTEX_PROJECT_ID), sends the key as x-goog-api-key, and logs usage to .studio/vertex-usage.jsonl. The session never
+ * sees the key. Settings (key and project are read from the .env file only; names only are ever printed):
+ *   STUDIO_VERTEX_MODEL (google/gemini-3-flash-preview), STUDIO_VERTEX_HARD_MODEL (size 4-5 or chain-breaker),
+ *   STUDIO_VERTEX_SHARE (0.5 of builder slots), STUDIO_VERTEX_ENGINE (on: engine-track tasks too; off by default),
+ *   STUDIO_VERTEX_PROXY_PORT (8787), STUDIO_VERTEX_MAX_PROMPT_TOKENS (150000; 0 = no cap),
+ *   STUDIO_VERTEX_BASE_URL (https, or http on 127.0.0.1/localhost only; from the .env file only).
+ * Spend is logged (npm run budget, npm run tokens -- --by task); there is no cap by default.
  */
 import fs from 'node:fs';
 import path from 'node:path';

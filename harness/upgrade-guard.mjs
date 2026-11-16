@@ -1,38 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/upgrade-guard.mjs — the board is committed before a harness upgrade, never stashed (a stash hides the board
- * files other agents write all day; a merge keeps both sides).
- *
- *   npm run upgrade -- --check      exit 1 while a board file is uncommitted (names them and the commit command); also
- *                                   names stash entries that hold board changes
+ * harness/upgrade-guard.mjs — commits the board before a harness upgrade, never stashes it, and merges the update.
+ *   npm run upgrade -- --check      exit 1 while a board file is uncommitted; also names stashes with board changes
  *   npm run upgrade -- --snapshot   copy the board files to .studio/board-snapshots/<time>/ (gitignored), then check
  *   npm run upgrade -- --merge <ref> --by <person> [--permission "<their words or a link>"] [--golden-reason "<why>"]
- *       refuses unless --check passes, backs the branch up as backup/pre-<version>, merges <ref> in the main checkout
- *       through the hooks, with the main-checkout guard opened for exactly this merge (STUDIO_UPGRADE_MERGE = the merged
- *       commit; scripts/hooks/pre-commit checks MERGE_HEAD). The merge commit records Upgrade-By / -Permission /
- *       -Recorded-By / -Ref / -Versions / -Backup trailers and an upgrade.merged event. A person in their own terminal
- *       needs no --permission; an agent needs it (harness/permission.mjs); a worker is refused. A conflict stops with
- *       the files listed and `git merge --abort` advice; nothing is resolved for anyone. `--continue` commits a merge a
- *       person resolved. Goldens: `Golden-Reason: from <ref> (upgrade)` is added for qa/golden files exactly as on
- *       <ref>; a golden combined with the studio's own change needs --golden-reason (a person's).
- *   npm run upgrade -- --restore-stash <sha> --by <person>
- *       three-way merges a stash's board files into the committed board, keeping both sides' rows (studio/NEXT.md,
- *       studio/DONE.md); any other conflict refuses, writing nothing. Commits; never drops the stash.
- *   npm run upgrade -- --rollback --by <person> [--permission "…"]   revert the last update's merge commit, never a reset
- *   npm run upgrade -- --preflight [--ref <ref>]   before an update (harness/upgrade-preflight.mjs, read-only)
- *   npm run upgrade -- --smoke [--keep]            right after one (harness/upgrade-smoke.mjs)
- *   `--merge` also writes the "before" snapshot .studio/upgrades/<from>-to-<to>.json (harness/upgrade-baseline.mjs)
- *   that `npm run autonomy -- impact` compares against.
- *
- * A merged update ends with `npm run lanes -- refresh --all`, reported per lane: refreshed / conflicted / red / skipped.
- * STUDIO_UPGRADE_REFRESH=off skips it; =no-tests skips the targeted tests.
- *
- * Bootstrap: an old studio has no --merge, so docs/RELEASE.md runs this guard from the ref (`git show
- * <ref>:harness/upgrade-guard.mjs` into .studio/). So it finds the studio by git from the current folder, never by
- * its own location, and loads harness/permission.mjs from beside it, the studio, or the ref.
- *
- * Board files: studio/NEXT.md, studio/DONE.md, studio/task-holds.json, studio/pending-review.json, studio/handoffs/.
- * --check and --snapshot never stash, commit or change a tracked file. docs/RELEASE.md "Taking a harness update" has the steps.
+ *       needs --check to pass; backs up as backup/pre-<version>; merges <ref> through the hooks (STUDIO_UPGRADE_MERGE)
+ *   npm run upgrade -- --restore-stash <sha> --by <person>   three-way merges a stash's board files back, keeps it
+ *   npm run upgrade -- --rollback --by <person> [--permission "…"]   revert the last update's merge commit, no reset
+ *   npm run upgrade -- --preflight [--ref <ref>] | --smoke [--keep]   before / right after an update
+ * Board files: studio/NEXT.md, studio/DONE.md, studio/task-holds.json, studio/pending-review.json, studio/handoffs/. A
+ * merge ends with `npm run lanes -- refresh --all`; STUDIO_UPGRADE_REFRESH=off skips it, =no-tests skips the tests.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -461,11 +438,9 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
 }
 
 /**
- * 2.86 (B-139): after a merge, the long-running processes that still run the code they loaded before it (harness/code-
- * stamp.mjs oldCodeReport: the supervisor, a watcher loop) with what will happen to each (it restarts itself at its next
- * pass, or the command to restart it), and the work that finishes on the old code, which is fine (agent sessions, a running
- * train: each new one starts on the new code). One upgrade.old_code event when anything still runs old code.
- * { lines, processes }.
+ * After a merge: the long-running processes still on the code they loaded before it (harness/code-stamp.mjs
+ * oldCodeReport), with what happens to each (restarts itself, or the command to restart it). Work that finishes on the
+ * old code is fine. One upgrade.old_code event when anything still runs old code. { lines, processes }.
  */
 export async function oldCodeAfterUpgrade({ root, since = Date.now(), from = '?', to = '?', by = '', env = process.env } = {}) {
   try {
@@ -581,10 +556,9 @@ export function lastUpgradeMerge(root = ROOT, { depth = 2000 } = {}) {
 
 /**
  * `--rollback`: git revert -m 1 of the last update's merge (the studio's own work stays), through the hooks with the
- * guard opened for it (STUDIO_UPGRADE_REVERT = the merge, checked against REVERT_HEAD); then refreshes the lanes and
- * records an upgrade.rolled_back event and a decision-log entry. Refuses with uncommitted tracked changes, in a lane
- * copy, mid-merge or mid-revert, and on a conflict (undone, files named). Who may: as --merge.
- * Returns { ok, code, lines, commit?, merge?, backup? }.
+ * guard opened (STUDIO_UPGRADE_REVERT = the merge); then refreshes the lanes and records an upgrade.rolled_back event.
+ * Refuses with uncommitted tracked changes, in a lane copy, mid-merge or mid-revert, and on a conflict. Who may: as
+ * --merge. Returns { ok, code, lines, commit?, merge?, backup? }.
  */
 export async function upgradeRollback({ by, permission = '', root = ROOT, env = process.env } = {}) {
   const lines = [];

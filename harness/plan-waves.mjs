@@ -1,19 +1,14 @@
 #!/usr/bin/env node
 /**
- * harness/plan-waves.mjs — 2.78.0 (PU-60): plan-time scope and waves, in SHADOW mode. A script: no model, no tokens.
- *
- *   node harness/plan-waves.mjs [--json]     the ready queue as waves, which running lanes overlap which ready tasks, and the serialized share
+ * harness/plan-waves.mjs — plan-time scope and waves, in SHADOW mode. A script: no model, no tokens.
+ *   node harness/plan-waves.mjs [--json]     ready queue as waves, lane overlaps, serialized share
  *   node harness/plan-waves.mjs replay --events <events.jsonl> --days 14 [--json]
- *                                       how many recorded overlaps waves would have avoided, and roughly how much extra wall time
- *
- * A task may carry a scope: the globs of the files it expects to touch (`task add --scope "src/sim/**,docs/A.md"`; stored
- * as `scope` in the task.added event's meta, see parseScope). A task with no scope borrows the files its hotspot.overlap
- * and task.overlap history names. Tasks whose files overlap are joined in a graph and coloured greedily, in queue order,
- * into waves: tasks in one wave never overlap. A task in wave 2 or later is "serialized"; the serialized share is those
- * over all ready tasks. Over STUDIO_WAVES_MAX_SHARE (0.6) waves would over-serialize the crew (the stop rule).
- *
- * Shadow mode only: `shadowPass` (called from the watcher, harness/watch.mjs) logs one waves.shadow event at most every
- * STUDIO_WAVES_MIN minutes (30; STUDIO_WAVES=off skips it). Nothing here changes which task starts, blocks or holds.
+ * A task's scope is the globs it expects to touch (`task add --scope "src/sim/**,docs/A.md"`; `scope` in the task.added
+ * meta, parseScope); with none it borrows the files its hotspot.overlap and task.overlap history names. Overlapping
+ * tasks are coloured greedily, in queue order, into waves: tasks in one wave never overlap. Wave 2 or later is
+ * "serialized". Over STUDIO_WAVES_MAX_SHARE (0.6) serialized, waves would over-serialize the crew (the stop rule).
+ * Shadow only: `shadowPass` (harness/watch.mjs) logs one waves.shadow event at most every STUDIO_WAVES_MIN minutes (30;
+ * STUDIO_WAVES=off skips it). Nothing here changes which task starts, blocks or holds.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,19 +1,13 @@
 /**
- * harness/timeout-rerun.mjs — 2.72.0 (a): a red whose ONLY failures are per-test timeouts re-runs just those files.
- *
- * On a clean game copy the red runs were timeouts in long sim suites (4 of 6). Before 2.72.0 such a red blamed the
- * lane (the train's flake triager labelled it afterwards, labels only). Now, in a game check (harness/game-gates.mjs):
- *   - timeoutOnly(output) reads the runner's failures (vitest "Test timed out in N ms", jest "Exceeded timeout of N ms",
- *     node --test failureType 'testTimeoutFailure' / "test timed out after N ms", in TAP or the spec reporter) and says
- *     whether EVERY failure is a timeout, each in a named file, and the runner's own failure count agrees (a count it
- *     can't read, a failure it can't place, a file-level error, or any non-timeout failure: not timeout-only);
- *   - then each timed-out file runs once more ALONE at low load (one test worker: STUDIO_TEST_WORKERS=1,
- *     VITEST_MAX_WORKERS=1, as the 2.69 flake triager's second run), through the check's focus command (2.65.3);
- *   - every file green alone: the check counts green, each file labelled "timeout-flake" in .studio/flakes.jsonl (and
- *     in the digest); any file red alone: the check stays red, and only the red files are its failing files. A mixed
- *     red (a timeout and a real failure) is a real red, as before. A file that was not re-run green never counts green.
- * STUDIO_TIMEOUT_RERUN=off keeps 2.71.1's behaviour (no re-run). The flake triager's own runs set it off: it wants the
- * raw answer.
+ * harness/timeout-rerun.mjs — a red whose ONLY failures are per-test timeouts re-runs just those files. In a game
+ * check (harness/game-gates.mjs):
+ * - timeoutOnly(output) reads the runner's failures (vitest, jest, node --test) and says whether EVERY failure is a
+ *   timeout in a named file and the runner's failure count agrees (otherwise: not timeout-only);
+ * - each timed-out file runs once more ALONE at low load (STUDIO_TEST_WORKERS=1, VITEST_MAX_WORKERS=1), through the
+ *   check's focus command;
+ * - every file green alone: the check counts green, each file labelled "timeout-flake" in .studio/flakes.jsonl; any
+ *   file red alone: the check stays red, with only the red files as failing files. A mixed red is a real red.
+ * STUDIO_TIMEOUT_RERUN=off means no re-run; the flake triager's own runs set it off.
  */
 import { normTestPath, failingTestFiles } from './train-focus.mjs';
 

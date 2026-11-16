@@ -6,11 +6,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { importInDirOf, out } from './kit.mjs';
 
 export async function selftest246({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const imp = (rel) => import(pathToFileURL(path.join(dir, rel)).href);
+  const imp = importInDirOf(dir);
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off' };
   const u = await imp('harness/unity.mjs');
 

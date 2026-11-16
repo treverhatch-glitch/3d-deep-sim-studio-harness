@@ -1,21 +1,14 @@
 /**
- * harness/learning-edge.mjs — 2.61 (the learning edge): what past failures say about how to plan and cut the work.
- *
- * A script: no model, no tokens. It reads the same files `npm run learn` reads, without importing harness/learn.mjs
- * (that file is someone else's to change, and pulls in the scorecard):
- *   - lessons from fixed bugs (studio/memory/failures.md), each with its "How to avoid it next time" rule,
- *   - what keeps happening: the same failure on two or more days (.studio/events.jsonl), merged into the lesson it
- *     matches (a lesson that didn't stick counts its repeats),
- *   - causes a person accepted (studio/decisions/accepted-causes.json, from `npm run causes -- accept`),
- *   - retro suggestions the Producer accepted and ticked (`- [x]` in studio/memory/retros/*.md).
- * Each becomes one line with its source id, ranked by repeat count × recency (half-life
- * STUDIO_CONSTRAINTS_HALFLIFE_DAYS, default 14). The top STUDIO_CONSTRAINTS_K (default 5) lines, each cut to
- * STUDIO_CONSTRAINTS_LINE characters (default 200), go into the Director's brief, the Producer's handoff, the
- * planner's prepared brief and the planning roles' kickoffs as "constraints from past failures": rules for how the
- * work is planned and cut, not only for the worker who does it. The text was written by agents and people, so it
- * sits in the marked block (harness/untrusted.mjs).
- *
- * The same matching (keywords, failure kinds) measures how useful a pitfall line is (harness/pitfalls.mjs).
+ * harness/learning-edge.mjs — what past failures say about how to plan and cut the work.
+ * A script: no model, no tokens. It reads the same files `npm run learn` reads, without importing harness/learn.mjs: lessons
+ * from fixed bugs (studio/memory/failures.md, each with its "How to avoid it next time" rule), repeats (the same failure on two
+ * or more days, .studio/events.jsonl), causes a person accepted (studio/decisions/accepted-causes.json, `npm run causes --
+ * accept`), and retro suggestions the Producer ticked (`- [x]` in studio/memory/retros/*.md). Each becomes one line with its
+ * source id, ranked by repeat count x recency (half-life STUDIO_CONSTRAINTS_HALFLIFE_DAYS, default 14). The top
+ * STUDIO_CONSTRAINTS_K (default 5) lines, each cut to STUDIO_CONSTRAINTS_LINE characters (default 200), go into the Director's
+ * brief, the Producer's handoff, the planner's prepared brief and the planning roles' kickoffs as "constraints from past
+ * failures". The text was written by agents and people, so it sits in the marked block (harness/untrusted.mjs). The same
+ * matching measures how useful a pitfall line is (harness/pitfalls.mjs).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -91,11 +84,10 @@ export function readRepeats(events) {
 }
 
 /**
- * 2.61: lessons a person accepted for planning (studio/decisions/accepted-lessons.json, `npm run lessons -- accept`).
- * Lessons are written by agents (a fixer's "How to avoid it next time"), and planning prompts (Director, Producer,
- * planner) are read as plans by the next sessions, so a lesson reaches them only once a person accepted that exact
- * text (the CSA note of 2026-08 on agent-written text loaded later as instructions). Worker briefs still show related
- * lessons inside the marked block, as before. { [id]: { hash, by, why, at, permission?, recordedBy? } }
+ * Lessons a person accepted for planning (studio/decisions/accepted-lessons.json, `npm run lessons -- accept`). Lessons are
+ * written by agents, and planning prompts are read as plans by the next sessions, so a lesson reaches them only once a
+ * person accepted that exact text. Worker briefs still show related lessons inside the marked block.
+ * { [id]: { hash, by, why, at, permission?, recordedBy? } }
  */
 export const ACCEPTED_LESSONS = 'studio/decisions/accepted-lessons.json';
 export function readAcceptedLessons() {

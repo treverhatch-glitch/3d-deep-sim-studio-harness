@@ -12,11 +12,10 @@
  */
 
 /**
- * 2.60.1 (B-19): the `--tool nim` session model check (harness/nim-check.mjs). Before a nim session starts, the
- * launcher asks NIM for one token from the session's model; when NIM says the model is not found or not available
- * to this key (404, 410, "Not found for account"), it tries the next model here. STUDIO_NIM_MODELS (comma-separated)
- * replaces this list; STUDIO_NIM_CHECK_HOURS the cache time; STUDIO_NIM_CHECK=off turns the check off.
- * UNVERIFIED from here: the crew's reading of NIM's public list on 2026-11-01; check with npm run models:check.
+ * The `--tool nim` session model check (harness/nim-check.mjs). Before a nim session starts, the launcher asks NIM for
+ * one token from the session's model; when it is not found or not available to this key (404, 410), it tries the next
+ * model here. STUDIO_NIM_MODELS (comma-separated) replaces this list; STUDIO_NIM_CHECK_HOURS the cache time;
+ * STUDIO_NIM_CHECK=off turns the check off. UNVERIFIED from here; check with npm run models:check.
  */
 export const NIM_SESSION = {
   fallbackModels: ['moonshotai/kimi-k2.6', 'deepseek-ai/deepseek-v4.1-flash', 'z-ai/glm-5.3-flash'],

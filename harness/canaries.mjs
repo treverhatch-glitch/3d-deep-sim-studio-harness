@@ -1,23 +1,14 @@
 /**
- * harness/canaries.mjs — 2.72.0 (b): must-fail canaries for the game's own checks.
- *
- * The harness's own gates are each shown to fail when broken (qa/selftest.mjs ends "every required gate was shown to
- * fail when broken"); a game's checks had nothing like it, and an outside review found 4 checks that stayed green
- * whatever they were given. A check in <game>/studio.gates.json may declare a canary, input built to make it fail:
- *
- *   "canary": "<command>"         a command that runs the check on something broken (exit 0 = the check didn't fail)
- *   "canary": "<path>"            a fixture file or folder in the repo: the check runs on it, through its "focus"
- *                                 command with {files}, else with the path appended when its command clearly runs
- *                                 vitest, jest or node --test (harness/train-focus.mjs focusCommand); the run also gets
- *                                 STUDIO_CANARY=<absolute path> for a script that reads it
- *
+ * harness/canaries.mjs — must-fail canaries for the game's own checks: a check in <game>/studio.gates.json may declare one:
+ *   "canary": "<command>"   a command that runs the check on something broken (exit 0 = the check didn't fail)
+ *   "canary": "<path>"      a fixture file or folder: the check runs on it through its "focus" command with {files}, else with
+ *      the path appended when its command runs vitest, jest or node --test (harness/train-focus.mjs focusCommand);
+ *      the run also gets STUDIO_CANARY=<absolute path>
  *   npm run gates -- --canaries [--json]     runs every check's canary (also the nightly slow tier, after its run)
- *
- * Each check is reported as proven (its canary made it fail), silently green (its canary passed: a
- * gate.silently_green event, a line in the digest and, through the workaround queue (harness/workaround.mjs), one task in
- * studio/HARNESS-TASKS.md), unproven (no canary, or a fixture its command can't take) or broken (the canary itself
- * couldn't run: not found, killed, timed out). Report only: it never runs in a verify and never blocks a landing; the
- * command exits 1 when a check is silently green, so a scheduled run shows red.
+ * Each check is reported as proven (its canary made it fail), silently green (its canary passed: a gate.silently_green event,
+ * a digest line and one task in studio/HARNESS-TASKS.md via harness/workaround.mjs), unproven (no canary, or a fixture its
+ * command can't take) or broken (the canary couldn't run). Report only: never runs in a verify, never blocks a landing; exits 1
+ * when a check is silently green.
  */
 import fs from 'node:fs';
 import path from 'node:path';

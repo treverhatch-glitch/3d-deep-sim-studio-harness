@@ -1,33 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/verdict-split.mjs — 2.30o: a task's proof as separate results, with what was never checked.
- *
- * "It built" is not "it plays", and a passing sim is not "it looks right". Each task's proof records
- * five results separately: build, logic (sim/scenarios), runtime (it ran with no errors), visual (fixed-
- * camera captures, harness/visual-proof.mjs) and viewport (desktop and mobile sizes). Any part with no
- * result is listed as **unchecked**, never counted as a pass. A render task (Godot, graphics, visuals, a
- * scene, models, water, lighting, camera, piers ...) can't finish until its visual result passed.
- *
- *   .studio/proof/<TASK>/verdict.json   { parts: { build: {ok, why, at, by, evidence[]}, ... } }
- *
- *   node harness/verdict-split.mjs set <TASK> <part> pass|fail [--why "..."] [--evidence "a|b"]
- *   node harness/verdict-split.mjs show <TASK> [--json]
- *   node harness/verdict-split.mjs gate <TASK> [--title "..."]   exit 1 when the task can't finish
- * STUDIO_VISUAL_GATE=off turns the render-task requirement off; unset, it is off by itself when the game has no capture command
- * (2.79.1, visualGate in harness/visual-capture.mjs); =on keeps it.
- *
- * 2.60.1 (B-38): what makes a task a render task, in order (renderDecision):
- *   1. the owner's visual-proof decision (npm run task -- visual <ID> off|on, harness/reclassify.mjs), when valid;
- *   2. the board's own visual flag, the role (only build work renders), a godot track or a visual/art/render type;
- *   3. a valid owner type that isn't render work (change, chore, docs, ...: not art, bug or whole) outranks the title;
- *   4. evidence, once the task has commits: the files it changed (done-check's list) against the game's render paths
- *      ("visualPaths" globs in studio/game.json, else in the game's studio.gates.json). A render-looking title whose
- *      changes touch no render path needs no visual result ("no render files changed: …"); one that does still needs
- *      it. A title that doesn't look like render work but changes render files gets a warning ("a visual result is
- *      recommended"), and needs the result only with "visualStrict": true (studio/game.json) or STUDIO_VISUAL_STRICT=on.
- *      No render paths configured, or no commits yet: the title decides, as before.
- *      2.77.3 (B-111): test files are never render files, even under a render path: a unit, spec or end-to-end test
- *      (panel.e2e.test.ts, *.spec.*, *.e2e.*, tests/, e2e/ ...; isRenderTestFile) checks the screen, it doesn't change it.
+ * harness/verdict-split.mjs — a task's proof as separate results (build, logic, runtime, visual, viewport); a part
+ * with no result is **unchecked**, never a pass. A render task can't finish until its visual result passed.
+ *    .studio/proof/<TASK>/verdict.json   { parts: { build: {ok, why, at, by, evidence[]}, ... } }
+ *    node harness/verdict-split.mjs set <TASK> <part> pass|fail [--why "..."] [--evidence "a|b"]
+ *    node harness/verdict-split.mjs show <TASK> [--json]
+ *    node harness/verdict-split.mjs gate <TASK> [--title "..."]   exit 1 when the task can't finish
+ * STUDIO_VISUAL_GATE=off turns the requirement off (unset, it is off when the game has no capture command); =on keeps
+ * it. renderDecision, in order: the owner's visual-proof decision (harness/reclassify.mjs); board flag, role, godot
+ * track or visual type; a valid owner type; then changed files against "visualPaths" in studio/game.json (tests never
+ * render). "visualStrict" or STUDIO_VISUAL_STRICT=on requires it.
  */
 import fs from 'node:fs';
 import path from 'node:path';

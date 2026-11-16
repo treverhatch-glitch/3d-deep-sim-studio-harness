@@ -1,38 +1,30 @@
 /**
- * qa/selftest-276h.mjs — 2.76.0 (helper h): the merge train.
- *   B-85    files the game's own build/test scripts write (git-ignored unpacked art, a .tsbuild/ folder, .vite-cache) no
- *           longer make a verify "dirty": the ignored files a verify's checks wrote are remembered as output, a
- *           "generated" glob (the game's studio.gates.json) names more, an ignored folder of harmless files is judged by
- *           its files; and a train verify whose gates are all green and whose only "dirt" is ignored non-config files is
- *           green with a trust note, never a hand-back. The other side (2.71.1) still holds: an untracked vitest.config,
- *           a config-like name under a "generated" glob, a generated file edited by hand and an ignored root .npmrc keep
- *           a verify dirty, and the train hands such a lane back.
- *   B-88    a train records its end on every exit path it can see (an exception in a step, an unhandled rejection, a
- *           signal), and a train whose process is gone is found (the next train, the daemon's pass): task.train.died with
- *           "died: <last step>", its status and lock cleared, its lanes kept moving.
- *   W-0081  a queued lane whose copy is missing is recreated from its branch, not handed back.
- *   beta    in beta mode the hand-back cap holds the lane for the beta actors (orchestrator, Producer) and files ONE
- *           Producer rescue task, never "a person looks"; infrastructure hand-backs (a missing copy, a CRLF/hash
- *           mismatch, a re-queue, a dead train, a timeout-only red) never count toward the cap and a release survives
- *           them for the same commit.
- *   B-91/92 a lane carrying another open task's commits (Studio-Task trailer) is refused before its verify, naming them.
+ * qa/selftest-276h.mjs — the merge train.
+ *   ignored output  files the game's scripts write (git-ignored art, .tsbuild/, .vite-cache) don't make a verify
+ *     "dirty"; a "generated" glob (studio.gates.json) names more; an untracked vitest.config, a config-like name under
+ *     "generated", a hand-edited generated file and an ignored root .npmrc keep it dirty
+ *   death  a train records its end on every exit path; a train whose process is gone is found: task.train.died with
+ *     "died: <last step>", status and lock cleared
+ *   copy  a queued lane whose copy is missing is recreated from its branch, not handed back
+ *   beta  the hand-back cap holds the lane for the beta actors and files ONE Producer rescue task; infrastructure
+ *     hand-backs (missing copy, CRLF/hash mismatch, re-queue, dead train, timeout-only red) never count
+ *   mixed  a lane carrying another open task's commits (Studio-Task trailer) is refused before its verify
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gateRecOf, gEnvOf, gitCrlfOf, guardOf, lastJsonOf, out, readJsonl as events, writeIn } from './kit.mjs';
 
 export async function selftest276H({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   if (!fs.existsSync(path.join(dir, 'node_modules')) && fs.existsSync(path.join(harnessRoot, 'node_modules'))) {
     try { fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction'); } catch {}
   }
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const gitIn = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const gitIn = gitCrlfOf(gEnv);
+  const guard = guardOf(report);
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
     STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_COMPACT_OUTPUT: '', STUDIO_VERIFY_DETACH: 'off', STUDIO_VERIFY_RUN: '', STUDIO_HEAVY_SLOTS: '0', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '',
@@ -53,8 +45,7 @@ export async function selftest276H({ dir, run, report, tmpRoot, root }) {
     gitIn(S, 'add', '-A'); gitIn(S, 'commit', '-qm', 'studio', '--no-verify');
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const lastJson = (r) => { const t = String(r.stdout || '').trim(); const l = t.split('\n').filter((x) => x.startsWith('{')).pop(); try { return JSON.parse(l); } catch { return { _raw: out(r).slice(-2000) }; } };
+  const lastJson = lastJsonOf(out);
   const probe = (S, env, name, code) => {
     const f = path.join(tmpRoot, `probe-276h-${name}-${process.pid}-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -62,7 +53,6 @@ export async function selftest276H({ dir, run, report, tmpRoot, root }) {
     fs.rmSync(f, { force: true });
     return { ...lastJson(r), _out: out(r).slice(-2500) };
   };
-  const u = (S, p) => JSON.stringify(pathToFileURL(path.join(S, p)).href);
 
   // ONLY_276H=b85,b88,… runs some parts (a maintainer's shortcut; the full selftest runs them all).
   const want = (k) => !process.env.ONLY_276H || process.env.ONLY_276H.split(',').includes(k);
@@ -87,7 +77,7 @@ process.exit(process.env.FAIL_276H ? 1 : 0);
     });
     const gatesDir = path.join(S, '.studio', 'gates');
     const verify = (owner, extra = {}) => run(S, 'node scripts/run-gates.mjs --no-detach', { ...env, STUDIO_LOCK_OWNER: owner, ...extra });
-    const recOf = (owner) => { try { return JSON.parse(fs.readFileSync(path.join(gatesDir, `${owner}-full.json`), 'utf8')); } catch { return null; } };
+    const recOf = gateRecOf(gatesDir);
     const tree = gitIn(S, 'rev-parse', 'HEAD^{tree}').stdout.trim();
     const fresh = () => { for (const d of [path.join(gatesDir, 'trees'), path.join(S, '.studio', 'train'), path.join(S, '.studio', 'gates-last-full.json'), path.join(S, '.studio', 'gates-last.json')]) fs.rmSync(d, { recursive: true, force: true }); for (const f of fs.existsSync(gatesDir) ? fs.readdirSync(gatesDir) : []) if (f.endsWith('.json')) fs.rmSync(path.join(gatesDir, f), { force: true }); };
     const trainVerify = (name) => { fresh(); return probe(S, env, `vt-${name}`, `import { verifyTree } from ${u(S, 'harness/train.mjs')};

@@ -1,27 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/supervisor.mjs — keep the studio running without anyone at the keyboard.
- *
+ * harness/supervisor.mjs — keeps the studio running without anyone at the keyboard (code only: no model, no tokens).
  *   npm run studio:start [-- --until 23:00 | --until 8h] [--window 09:00-23:00] [--budget 50% | --budget 3000000]
- *                        [--lanes auto] [--foreground]   (runs on its own unless --foreground; --hub/--no-hub are ignored)
- *   npm run studio:start -- --install [same options]    start it at login (launchd, systemd --user, Task Scheduler)
- *   npm run studio:start -- --uninstall
- *   npm run studio:stop                                  stop the supervisor (agents finish their task)
- *   npm run studio:status
- *   npm run studio:resume -- --by <your name> [--why "…"] [--permission "<the person's words or a link>"]   clear a halt
- *   npm run studio:extend -- --until <time|+8h|none> --by <your name> [--why "…"] [--permission "…"]   move the end time
- *
- * Every minute it stops starting work outside the time window, past --until, past the budget, or while "Stop all" is on;
- * starts one agent per task for each role (and lane) with waiting tasks and no agent, within the pace's caps (with --budget
- * and the plan under its target, studio/budget.json, up to two extra; over it, none); skips a tool that ran out of quota until
- * its reset and uses the next in the budget's order; and halts when two sessions in a row end the same bad way (a cause on the
- * self-triage list, harness/self-triage.mjs: the tool isn't on PATH and another is, is fixed by "self-triage"; any other halt
- * waits for a person: studio:resume or the War Room). Each pass also runs the crew watchdog (harness/crew-watch.mjs), the
- * futility cap (harness/futility.mjs, shadow mode by default), the usage wind-down (harness/winddown.mjs,
- * STUDIO_USAGE_WINDDOWN_PCT) and the train daemon (harness/train-daemon.mjs, STUDIO_TRAIN_AUTO, default on; npm run task --
- * train auto off|on --by). Code only: no model, no tokens.
- * With --lanes auto, tasks that name a lane (task add --lane game/x/src/floors) get one agent per lane, each holding that folder.
- * Status: .studio/supervisor.json, the War Room's Ops view, and the run report.
+ *                        [--lanes auto] [--foreground]   (runs on its own unless --foreground; --hub/--no-hub ignored)
+ *   npm run studio:start -- --install [same options] | --uninstall     npm run studio:stop | studio:status
+ *   npm run studio:resume -- --by <your name> [--why "…"] [--permission "<the person's words or a link>"]
+ *   npm run studio:extend -- --until <time|+8h|none> --by <your name> [--why "…"] [--permission "…"]
+ * Each minute it stops starting work outside the window, past --until or the budget, or on "Stop all"; starts one agent
+ * per task per role (and lane) within the pace's caps; halts when two sessions in a row end the same bad way
+ * (studio:resume clears it). Runs the crew watchdog, futility cap, usage wind-down (STUDIO_USAGE_WINDDOWN_PCT) and
+ * train daemon (STUDIO_TRAIN_AUTO) each pass. Status: .studio/supervisor.json.
  */
 import { visionFixIds, visionFirst } from './vision-fix.mjs';
 import fs from 'node:fs';
@@ -158,11 +146,9 @@ export async function resumeCli({ by = null, why = null, permission = null, env 
 }
 /**
  * `npm run studio:extend -- --until <time|+8h|none> --by <name> [--why "…"] [--permission "…"]` moves a running
- * supervisor's end time (--until) without a restart: it writes .studio/supervisor-extend.json, which the next pass applies
- * (applyExtend: a supervisor.extended event); "none" removes the end time. Who may: the decider rules (harness/decider.mjs,
- * action 'supervisor-extend'): a person; an agent the owner's delegation covers (harness/delegation.mjs delegationFor); a
- * Producer or Director session or an outside agent on a person's direct permission (--permission); never a worker session
- * or a worker's name.
+ * supervisor's end time without a restart: it writes .studio/supervisor-extend.json, which the next pass applies
+ * (applyExtend); "none" removes it. Who may (harness/decider.mjs 'supervisor-extend'): a person; an agent under the
+ * owner's delegation; a Producer, Director or outside agent with --permission; never a worker.
  */
 export const EXTEND_FILE = path.join(STUDIO_STATE_DIR, 'supervisor-extend.json');
 export async function extendCli({ until = null, by = null, why = null, permission = null, env = process.env, now = Date.now() } = {}) {
@@ -826,14 +812,10 @@ export async function trainDaemonTick(state, r = {}, opts = {}) {
 }
 
 /**
- * 2.86 (B-139): new harness code under a running supervisor. Each pass compares the code this supervisor started with
- * (state.code) with the installed one (harness/code-stamp.mjs): one harness.code_changed event when they first differ;
- * then, when it may restart itself (restartHow: on its own, a launchd job, a systemd unit with KillMode=process; not in a
- * terminal a person watches, nor with STUDIO_SUPERVISOR_SELF_RESTART=off) and nothing of this pass still runs (idle), it
- * writes its in-memory state for the successor (.studio/supervisor-handoff.json) and either starts a fresh supervisor
- * with the same options, detached, which waits for this one to end (--after <pid>), or returns exit 75 for the service
- * manager. Agent sessions and trains are processes of their own and are not touched. Returns { restart, exitCode?,
- * successor?, pending?, first? }; the loop ends the process when restart is set.
+ * New harness code under a running supervisor. Each pass compares state.code with the installed code
+ * (harness/code-stamp.mjs): one harness.code_changed event when they differ; then, if it may restart itself
+ * (restartHow; not with STUDIO_SUPERVISOR_SELF_RESTART=off) and the pass is idle, it writes
+ * .studio/supervisor-handoff.json and starts a detached successor (--after <pid>) or returns exit 75.
  */
 export function codeChangePass(state, { installed, how, argv = [], idle = true, pid = process.pid, stateDir = STUDIO_STATE_DIR, emit = emitEvent, log = console.error, spawnFn = spawn, script = fileURLToPath(import.meta.url), env = process.env, now = Date.now() } = {}) {
   const n = noticeNewCode(state, { name: 'supervisor', pid, running: state.code, installed, how, emit, log, now });

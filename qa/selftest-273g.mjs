@@ -1,26 +1,23 @@
 /**
- * qa/selftest-273g.mjs — 2.73.0 (g): signed verify records, and golden re-records that need the harness's first-divergence
- * report plus a second signer (A13).
- *   1. A hand-written verify record AND a matching hand-written run log (the hole 2.71.1 left) are not reused: "not
- *      reused: unsigned record (hand-written or from an older harness)" (train and recordTrust, which task done uses).
- *   2. A real verify makes the studio's verify key outside the checkout (mode 600), never prints it, signs its run log;
- *      the train reuses that record; an edited signature, or the same files checked with another studio's key, are not.
- *   3. A key folder inside the checkout is refused: the verify says its record isn't signed, and it isn't reused.
- *   4. A red golden (and npm run golden -- --update on a changed answer) writes the signed first-divergence report
- *      .studio/gates/divergence/<golden>.json (tick, field, the recorded answer it replaces).
- *   5. The train holds a lane that re-records a golden with the report in its why; the lane's own agent can't release it
- *      (not even by delegation); another agent's delegation can, and the decision log records the tick and field.
- *   6. Without a report (none, or a hand-written one) the hold says so: a delegation is refused, a person releases it.
+ * qa/selftest-273g.mjs — signed verify records, and golden re-records that need the first-divergence report plus a
+ * second signer.
+ *   1. A hand-written verify record AND a matching hand-written run log are not reused ("not reused: unsigned
+ *     record").
+ *   2. A real verify makes the studio's verify key outside the checkout (mode 600), never prints it, signs its run
+ *     log; an edited signature, or another studio's key, is not reused.
+ *   3. A key folder inside the checkout is refused (the record isn't signed). 4. A red golden (and npm run golden --
+ *     --update on a changed answer) writes the signed first-divergence report .studio/gates/divergence/<golden>.json.
+ *   5. The train holds a lane that re-records a golden; its own agent can't release it (not even by delegation);
+ *     another agent's delegation can; without a report a delegation is refused and a person releases it.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, gateRecOf, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest273G({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', '-c', 'core.hooksPath=.no-hooks', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
-  const writeIn = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const writeIn = writeInDirOf(dir);
   const KEYS = path.join(tmpRoot, 'vk-273g');
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off',
     STUDIO_OWNER_KEY: path.join(tmpRoot, 'no-owner-key-273g.pem'), STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '', GITHUB_BASE_REF: '',
@@ -35,7 +32,7 @@ export async function selftest273G({ dir, run, report, tmpRoot }) {
     fs.rmSync(f, { force: true });
     return { ...json(r), _out: out(r).slice(-1500) };
   };
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const u = fileUrlOf(dir);
   const keyFiles = () => { try { return fs.readdirSync(KEYS).filter((n) => n.endsWith('.key')); } catch { return []; } };
 
   // ---- a made-up studio: a one-check verify, the example cartridge's goldens, git on main ----
@@ -49,7 +46,7 @@ export async function selftest273G({ dir, run, report, tmpRoot }) {
   const gatesDir = path.join(dir, '.studio', 'gates');
   const fresh = () => { for (const d of [gatesDir, path.join(dir, '.studio', 'train'), path.join(dir, '.studio', 'gates-last-full.json'), path.join(dir, '.studio', 'gates-last.json')]) fs.rmSync(d, { recursive: true, force: true }); };
   const verify = (owner, extra = {}) => run(dir, 'node scripts/run-gates.mjs --no-detach', { ...env, STUDIO_LOCK_OWNER: owner, ...extra });
-  const recOf = (owner) => { try { return JSON.parse(fs.readFileSync(path.join(gatesDir, `${owner}-full.json`), 'utf8')); } catch { return null; } };
+  const recOf = gateRecOf(gatesDir);
   const train = (name, extra = {}) => probe(`vt-${name}`, `import { verifyTree } from ${u('harness/train.mjs')};
 import { recordTrust } from ${u('harness/gate-trust.mjs')};
 import fs from 'node:fs'; import path from 'node:path';

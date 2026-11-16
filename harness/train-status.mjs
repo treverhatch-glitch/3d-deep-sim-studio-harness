@@ -1,20 +1,13 @@
 /**
- * harness/train-status.mjs — 2.65.3 (B-43): what a running merge train is doing now, and when it should end.
+ * harness/train-status.mjs — what a running merge train is doing now, and when it should end.
  *
- * The crew watched a 9-lane red train run re-check after re-check for an hour with no word on what each one decided
- * or how long was left. Now each step of a train (verify, re-check, round, prefix landing) is written to
- * .studio/train/<id>/status.json: { train, at, step, text, lanes, round, eta: { ms, text } }. `npm run lanes` and
- * `status --brief` read it while that train holds .studio/locks/train.lock (readTrainStatus), and mention
- * STUDIO_TRAIN_MAX when the running train has more than 6 lanes (capNote).
- *
- * The ETA (trainEta) comes from this train's own measured durations: the bisection's re-checks left x the mean
- * re-check time, plus one full verify (the last verify's duration, else the game checks' recorded quiet runs). Before
- * any re-check is timed the verify's duration stands in for one, and says so; with nothing measured at all it says
- * "ETA unknown (no timing yet)". Imports nothing from train.mjs (no cycle).
- *
- * 2.77.0 (p, P9.6): with a pipelined speculative train (harness/train-pipeline.mjs) the running train's status carries
- * `next` (the speculative train's own status: train, step, text, eta, lanes, after, base, speculative: true), and every
- * write also refreshes .studio/train/status.json, a snapshot of readTrainStatus() (the same fields, plus next).
+ * Each step (verify, re-check, round, prefix landing) is written to .studio/train/<id>/status.json: { train, at, step,
+ * text, lanes, round, eta: { ms, text } }. `npm run lanes` and `status --brief` read it while that train holds
+ * .studio/locks/train.lock (readTrainStatus), and mention STUDIO_TRAIN_MAX when it has more than 6 lanes (capNote).
+ * The ETA (trainEta) is re-checks left x the mean re-check time plus one full verify; before any re-check is timed the
+ * verify's duration stands in for one, and says so; with nothing measured: "ETA unknown (no timing yet)". With a
+ * speculative train (harness/train-pipeline.mjs) the status carries `next` and every write refreshes
+ * .studio/train/status.json. Imports nothing from train.mjs (no cycle).
  */
 import fs from 'node:fs';
 import path from 'node:path';

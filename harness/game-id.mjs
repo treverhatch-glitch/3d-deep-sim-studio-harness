@@ -1,22 +1,14 @@
 #!/usr/bin/env node
 /**
  * harness/game-id.mjs — every game gets an ID of its own, made once, without anyone asking.
- *
  *   npm run game-id                 show this studio's game and its ID (and make one if it has none)
  *   npm run game-id -- --all        every cartridge
- *
- * The ID (gid_ + 26 characters, 128 random bits) lives in cartridges/<game>/cartridge.json with the
- * game's name, when it was made, the harness version, and its parent's ID when it was started from
- * another game (a setup or a copy), so a game's family tree can be followed.
- *
- * It is stamped on goldens, regressions and saved builds, and on events. A golden or
- * regression whose gameId isn't its cartridge's fails the gates: results from another game (two games
- * built side by side, a copied folder, a marketplace upload) can't pass as this one's.
- *
- * It is public on purpose and is not mixed into seeds or state hashes: anyone must be able to replay
- * a game from its code and a seed and get the same hash, including a port to another engine. Proving
- * who made a game is the job of a signature, not of a secret.
- * Template cartridges (example-sim, _template) have no ID.
+ * The ID (gid_ + 26 characters, 128 random bits) lives in cartridges/<game>/cartridge.json with the game's name, when
+ * it was made, the harness version, and its parent's ID when started from another game, so a family tree can be
+ * followed. It is stamped on goldens, regressions, saved builds and events. A golden or regression whose gameId isn't
+ * its cartridge's fails the gates. It is public on purpose and not mixed into seeds or state hashes, so anyone can
+ * replay a game from its code and a seed and get the same hash, including a port. Proving who made a game is a
+ * signature's job. Template cartridges (example-sim, _template) have no ID.
  */
 import fs from 'node:fs';
 import path from 'node:path';

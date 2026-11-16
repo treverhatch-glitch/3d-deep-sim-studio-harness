@@ -1,24 +1,14 @@
 /**
- * harness/review-family.mjs — 2.83: a review in a crew that has only one model family.
- *
- * A review must come from another model family than the implementer's. A crew whose configured tools are all one
- * family could never satisfy that: two sessions started on such a review, each read the rule and handed back. Now:
- *   - a review is launched on a model of another family when one is configured and not out of quota (as before);
- *   - when NO other family is configured, it is launched on a different MODEL of the same family if one exists (else
- *     the same one), with one line in its brief saying so, and the reviewer writes `same-family: no other family
- *     available` in the review header;
- *   - the checks of a review (harness/done-check.mjs, `npm run review -- record`) accept that header only while no other
- *     family is configured. When one is configured, the header changes nothing and a same-family review is refused.
- * 2.84: "which families are configured" is no longer the calling session's environment alone (a session controls its
- * own environment, so unsetting the variables made "no other family" true). It is the UNION of the main checkout's .env
- * (only the model/tool settings), studio/models.json there, and the environment: the environment can add a family, never
- * remove one. The main checkout is found by git (owner-proxy.mjs mainCheckout), never from STUDIO_MAIN_ROOT.
- * 2.84 (g): the studio's switch (studio/review.json in the main checkout, `npm run review -- same-family on|off|auto`), the
- * owner's decision: "Patch should be allowed to choose to turn off and on the same-family review ... we are still in beta
- * and with limited resources". auto: the rules above. on: a same-family review counts whether or not another family is
- * configured (header still required, so every one is visible); a review may be planned on the implementer's own family when
- * no other-family model is live. off: a same-family review never counts. The file is read from the main checkout only and no
- * environment variable can turn it on; who may change it is the harness's board-decision verdict (harness/review.mjs).
+ * harness/review-family.mjs — picks the reviewer's model when a crew has only one model family.
+ * A review must come from another model family than the implementer's. It is launched on another family when one is
+ * configured and not out of quota; when NO other family is configured, on a different MODEL of the same family (else the
+ * same), with one line in its brief, and the reviewer writes `same-family: no other family available` in the review header.
+ * The checks (harness/done-check.mjs, `npm run review -- record`) accept that header only while no other family is configured.
+ * Configured families are the UNION of the main checkout's .env (model/tool settings only), studio/models.json there, and the
+ * environment: the environment can add a family, never remove one. The main checkout is found by git (owner-proxy.mjs
+ * mainCheckout), never from STUDIO_MAIN_ROOT. The owner's switch is studio/review.json there (`npm run review -- same-family
+ * on|off|auto`): auto: the rules above; on: a same-family review counts whether or not another family is configured (header
+ * still required); off: it never counts. No environment variable can turn it on; harness/review.mjs decides who may change it.
  */
 import { modelFamily } from './families.mjs';
 import { budgetStopFor } from './budget.mjs';
@@ -174,12 +164,10 @@ export function sameFamilyRefusal(implementer, env = process.env, { root, text =
 }
 
 /**
- * Which model a review of `implementer`'s work runs on. { model, tool, kind, note }:
- *   kind 'other'  a configured model of another family that isn't out of quota
- *   kind 'kept'   another family is configured but out of quota now: the review stays as it is and waits (no note)
- *   kind 'same'   no other family configured: a different model of the implementer's family, else the same; `note` is the
- *                 line for the task's brief
- *   kind 'none'   the implementer's family is unknown: nothing to decide
+ * Which model a review of `implementer`'s work runs on. { model, tool, kind, note }: kind 'other': a configured model of
+ * another family that isn't out of quota; 'kept': another family is configured but out of quota now, the review stays and
+ * waits (no note); 'same': no other family configured, a different model of the implementer's family, else the same, `note`
+ * is the line for the task's brief; 'none': the implementer's family is unknown, nothing to decide.
  */
 export function reviewerPlan({ implementer, current = null, env = process.env, now = Date.now(), root } = {}) {
   const impl = modelFamily(implementer);

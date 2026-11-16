@@ -1,31 +1,23 @@
 /**
- * qa/selftest-272b.mjs — 2.72.0 (helper b): the purity ratchet, must-fail canaries for game checks, the two-round cap.
- *   ratchet   `npm run purity -- baseline --write --by <person>` records a made-up cartridge's standing purity hits
- *             (keys: file + rule + source line, not line numbers); the purity check then passes on them, still passes
- *             after the code moves, fails on ONE new hit and prints only it (Fix line: the ratchet's); a fixed hit
- *             shrinks the baseline (committed), and coming back it fails; a worker, a coding agent without a person's
- *             words, and a lane copy can't grow it; in a lane a hit the lane added to its own baseline still fails;
- *             the train's tier for a lane that grows it is C ("ratchet-grow"), for one that shrinks it not.
- *   ratchet check  a game check with "ratchet": true and a baseline section fails only on new hits; a crash with no
- *             hit line still fails.
- *   canaries  `npm run gates -- --canaries`: a check whose canary makes it fail is proven (command and fixture), one
- *             that stays green is silently green (event, digest line, one task in studio/HARNESS-TASKS.md), one with
- *             no canary unproven; exit 1. The slow tier runs them too.
- *   round cap two full verifies red on the same sub-id + first FAIL line hand the task back with the summary and the
- *             restart note; a third attempt in the session (task start, verify) is refused; another signature, a green
- *             between, STUDIO_ROUND_CAP=0 or a new session don't cap; a train hand-back counts as a round.
- * Made-up games in temp folders; no network.
+ * qa/selftest-272b.mjs — the purity ratchet, must-fail canaries for game checks, the two-round cap.
+ * ratchet  `npm run purity -- baseline --write --by <person>` records standing hits (file + rule + source line); the
+ *   check fails on ONE new hit and prints only it; a worker, an agent without a person's words, or a lane copy can't
+ *   grow the baseline; the train's tier for growing it is C ("ratchet-grow"). A game check with "ratchet": true fails
+ *   only on new hits.
+ * canaries  `npm run gates -- --canaries`: a check whose canary makes it fail is proven; one that stays green is
+ *   silently green (event, digest line, a task in studio/HARNESS-TASKS.md); none is unproven; exit 1.
+ * round cap  two full verifies red on the same sub-id + first FAIL line hand the task back; a third attempt in the
+ *   session is refused; STUDIO_ROUND_CAP=0 or a new session don't cap.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlIn as u, guardOf, out, readJsonFile as readJson, readJsonl as events } from './kit.mjs';
 
 export async function selftest272B({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const g = (cwd, args) => { const e = { ...process.env, ...ident }; for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete e[k]; return spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: e }); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   const nm = path.join(dir, 'node_modules');
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
@@ -45,7 +37,6 @@ export async function selftest272B({ dir, run, report, tmpRoot }) {
     g(S, ['add', '-A']); g(S, ['commit', '-qm', 'studio', '--no-verify']);
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const probe = (S, code, env) => {
     const f = path.join(S, `.probe-272b-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -55,9 +46,7 @@ export async function selftest272B({ dir, run, report, tmpRoot }) {
     try { j = JSON.parse(String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{')).pop()); } catch {}
     return { ...(j || {}), _out: out(r).slice(-2500) };
   };
-  const u = (S, p) => JSON.stringify(pathToFileURL(path.join(S, p)).href);
   const have = (S, p) => fs.existsSync(path.join(S, p));
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
   const entries = (S, rel, sec = 'purity') => readJson(path.join(S, rel))?.hits?.[sec] || [];
 
   // ---- A: the purity ratchet on a made-up cartridge ------------------------------------------------------------------

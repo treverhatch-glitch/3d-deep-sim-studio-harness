@@ -1,26 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/health.mjs — 2.34.0: how well the HARNESS is doing (not the game, not the models), from the event
- * log. A script: no model, no tokens.
- *
+ * harness/health.mjs — how well the HARNESS is doing (not the game, not the models), from the event log. No model.
  *   npm run harness-health [-- --since 24h|7d|<ISO>] [--json] [--write <folder>]
- *
- * The numbers the Marina run needed and had to dig out by hand:
- *   landings          work that reached the studio's branch (lane.merged, else task.done)
- *   refusals/landing  task done refusals per landing, and the reasons, grouped
- *   harness-caused    the share of hand-backs the harness caused (claim ran out under a running done, the
- *                     main checkout refused a merge, …), which should be near 0
- *   forced, budget    dones forced past a check; tasks stopped by their budget; stalled sessions
- *   verify time       median full verify, scoped vs unscoped (gates.run events, 2.34.0)
- *   done time         median from task done started to landed (task.done.start, 2.34.0)
- *   tokens/landing    weighted tokens of launched sessions plus self-reported usage, per landing; dones by
- *                     builders with no usage at all are counted apart (untracked)
- *   launches skipped  budget stops, over-budget tasks
- * --morning adds what landed and what needs a person: parked tasks (budget, breaker, watchdog), forced work
- * waiting for review, protected changes waiting for the owner's approval, a stopped studio, a red CI on main
- * (when the GitHub CLI is signed in; STUDIO_HEALTH_CI=off skips it).
- * --write puts HEALTH-<date>.md in the folder (STUDIO_RESULTS_DIR works).
- * Targets (a release must not make these worse): refusals per landing ≤ 1.5, harness-caused hand-backs ≤ 5%.
+ * Numbers: landings (lane.merged, else task.done); refusals per landing, with reasons; harness-caused (share of
+ * hand-backs the harness caused, near 0); forced dones, budget stops, stalled sessions; median full verify (scoped vs
+ * unscoped, gates.run events) and done time (task.done.start to landed); weighted tokens per landing (builders with no
+ * usage are counted apart as untracked); launches skipped.
+ * --morning adds what landed and what needs a person: parked tasks, forced work awaiting review, protected changes
+ * awaiting approval, a stopped studio, a red CI on main (STUDIO_HEALTH_CI=off skips it).
+ * --write puts HEALTH-<date>.md in the folder (STUDIO_RESULTS_DIR works). Targets: refusals per landing ≤ 1.5,
+ * harness-caused ≤ 5%.
  */
 import fs from 'node:fs';
 import path from 'node:path';

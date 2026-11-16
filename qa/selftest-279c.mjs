@@ -1,39 +1,33 @@
 /**
- * qa/selftest-279c.mjs — 2.79 (c): the orchestrator signs for the owner in beta mode (the owner, 2026-11-06: "make it so
- * Patch can sign off on everything and not need me"; "Grokbot and Patch can approve as me"), what stays the owner's own,
- * and asks that repost after they were acted on (the crew's item 2.15, "cut the fat" 5.4 and 5.6).
- *   c1  asks: the orchestrator answers every kind (a protected-file ask too) with --by <its name>, from a shell that sets
- *       no STUDIO_LOCK_OWNER; logged (decisions log, an event with the actor); a Producer can't answer a protected one,
- *       a builder none.
- *   c2  outside signer: STUDIO_OUTSIDE_SIGNERS (the main checkout's .env) lets grokbot answer and approve as itself.
- *   c3  the owner-only list (deleting data, keys, publishing, beta off) refuses the orchestrator.
- *   c4  a release survives a catch-up merge of main that leaves the released files alone; a lane commit to one voids it;
- *       a builder can't release.
- *   c5  goldens: a merge of main is nobody's authorship, so the orchestrator who only refreshed the lane second-signs.
- *   c6  a harness ask posts once per state change; one whose task is no longer parked closes (ask.closed) and the same
- *       question back is counted for the digest, not posted.
+ * qa/selftest-279c.mjs — the orchestrator signs for the owner in beta mode, what stays the owner's own, reposted asks.
+ * c1  the orchestrator answers every kind of ask (protected-file too) with --by <its name>, from a shell with no
+ *   STUDIO_LOCK_OWNER; logged; a Producer can't answer a protected one, a builder none.
+ * c2  STUDIO_OUTSIDE_SIGNERS (main's .env) lets an outside agent answer as itself. c3: the owner-only list (deleting
+ *   data, keys, publishing, beta off) refuses the orchestrator.
+ * c4  a release survives a catch-up merge of main that leaves the released files alone; a lane commit to one voids
+ *   it; a builder can't release.
+ * c5  goldens: a merge of main is nobody's authorship, so the orchestrator who only refreshed the lane second-signs.
+ * c6  a harness ask posts once per state change; one whose task is no longer parked closes (ask.closed); the same
+ *   question back is counted for the digest, not posted.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitEolLfUserOf, guardOf, nodeCwd180Of, out, writeIn } from './kit.mjs';
 
 export async function selftest279C({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
+  const gEnv = gEnvOf(ident);
+  const g = gitEolLfUserOf(gEnv);
   const head = (cwd) => String(g(cwd, 'rev-parse', 'HEAD').stdout || '').trim();
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_WATCHDOG: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_TASK_BASE: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', GITHUB_BASE_REF: '', GITHUB_EVENT_NAME: '', STUDIO_HARNESS_REF: '', STUDIO_KEY_BASE: '', STUDIO_LANE_EVENTS: '', STUDIO_PRODUCER_APPROVES: '', STUDIO_OUTSIDE_SIGNERS: '', STUDIO_ASK_DIGEST_HOURS: '', STUDIO_MAIN_CHECKOUT_ENFORCE: '', STUDIO_PRODUCER_NAME: '', STUDIO_HOOKS_CHECK: 'off', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-279c-${process.pid}.pem`) };
   let n = 0;
-  const node = (cwd, args, env) => spawnSync(process.execPath, args, { windowsHide: true, cwd, encoding: 'utf8', env: { ...process.env, ...ident, ...env }, timeout: 180000 });
+  const node = nodeCwd180Of(ident);
   const probe = (cwd, code, env) => { const f = path.join(cwd, `.probe-279c-${++n}.mjs`); fs.writeFileSync(f, code); const r = node(cwd, [f], env); fs.rmSync(f, { force: true }); const l = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop(); let j = null; try { j = JSON.parse(l); } catch {} return { ...r, j }; };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const PROT = 'qa/controls-check.mjs';
   const BETA_AT = '2026-11-05T01:00:00.000Z';
   const events = (S) => { try { return fs.readFileSync(path.join(S, '.studio', 'events-279c.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; } };

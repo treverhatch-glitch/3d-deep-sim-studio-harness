@@ -1,34 +1,27 @@
 /**
- * qa/selftest-286d.mjs — 2.86 (d): sessions that end for the harness's reasons do not cost the task.
- *
- *   1  the refresh rule is relative to where a session starts its work (harness/session-cap.mjs): a session whose brief
- *      and first reads fill 68 % of the window is not handed off before it has done work, nor until it has used the room
- *      the percentage gives; past the new threshold it is; a studio's own percentage (85) keeps a sensible meaning
- *   2  one reading of why a session ended (harness/handback-kind.mjs): refresh hand-offs with no work, launch failures and
- *      `task done` refusals for commits that are not the task's own count toward no park, hold, breaker or budget; real
- *      hand-backs still do; the scorecard's tally shows the harness kinds
- *   3  a claim whose session is gone is dropped: the lane-copy "still working" reading ignores an ended session, a claim
- *      the harness kept after the end is released by the sweep and taken by the next start; a train-queued task's claim
- *      and an outside owner's claim are untouched
- *   4  a lane session's command carries --add-dir <the main checkout> (not with STUDIO_LANE_ADD_MAIN_DIR=off, not in the
- *      main checkout)
- *   5  the supervisor's halt counts per task and cause: the same task failing twice holds that task (start back-off, one
- *      page), refresh hand-offs never halt, two different tasks failing the same way in a row do halt
- *
- * Each check imports a module from a copy of the repo (a probe script run in the copy).
+ * qa/selftest-286d.mjs — sessions that end for the harness's reasons do not cost the task (probe scripts run in a repo
+ * copy).
+ *   1  refresh rule is relative to where a session starts its work (harness/session-cap.mjs): a session whose brief and
+ *     first reads fill 68 % of the window isn't handed off before it has done work
+ *   2  harness/handback-kind.mjs: refresh hand-offs with no work, launch failures and `task done` refusals for commits
+ *     not the task's own count toward no park, hold, breaker or budget
+ *   3  a claim whose session is gone is dropped; a train-queued task's claim and an outside owner's claim are untouched
+ *   4  a lane session's command carries --add-dir <the main checkout> (not with STUDIO_LANE_ADD_MAIN_DIR=off, not in
+ *     main)
+ *   5  supervisor halt counts per task and cause: the same task failing twice holds it; refresh hand-offs never halt
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitEolLfUserOf, guardCap3000Of, out, readJsonl as events } from './kit.mjs';
 
 export async function selftest286D({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const gitIn = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
+  const gEnv = gEnvOf(ident);
+  const gitIn = gitEolLfUserOf(gEnv);
+  const guard = guardCap3000Of(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
   if (process.platform === 'win32') for (const k of Object.keys(process.env)) if (/^(SystemRoot|windir|SystemDrive|ComSpec|PATHEXT|PATH|TEMP|TMP|USERPROFILE|APPDATA|LOCALAPPDATA|ProgramData|ALLUSERSPROFILE|PUBLIC|ProgramFiles|ProgramFiles\(x86\)|ProgramW6432|CommonProgramFiles|CommonProgramW6432|PSModulePath|PROCESSOR_ARCHITECTURE|NUMBER_OF_PROCESSORS|OS|COMPUTERNAME|HOMEDRIVE|HOMEPATH|USERNAME)$/i.test(k)) clean[k] = process.env[k];
@@ -53,8 +46,6 @@ export async function selftest286D({ dir, report, tmpRoot, root }) {
     made.push(S);
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const probe = (S, env, code) => {
     const f = path.join(S, `.probe-286d-${++n}.mjs`);
     fs.writeFileSync(f, code);

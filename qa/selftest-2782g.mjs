@@ -13,16 +13,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { gEnvExtraOf, guardOf, out, readJsonl as events, runsCountOf, writeIn } from './kit.mjs';
 
 export async function selftest2782G({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = (extra = {}) => { const e = { ...process.env, ...ident, ...extra }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
+  const gEnv = gEnvExtraOf(ident);
   const g = (cwd, args, extra = {}) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', ...args], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv(extra) });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT)/i.test(k)) clean[k] = '';
   const base = {
@@ -32,7 +31,6 @@ export async function selftest2782G({ dir, run, report, tmpRoot, root }) {
   let n = 0;
   const made = [];
   const node = (S, args, env) => spawnSync(process.execPath, args, { windowsHide: true, cwd: S, encoding: 'utf8', env: { ...process.env, ...env }, timeout: 240000 });
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   // A studio of its own (the repo as it is), its own git (made before `dir` becomes one).
   const studio = (name) => {
     const S = path.join(tmpRoot, `2782g-${name}-${process.pid}-${++n}`);
@@ -58,7 +56,7 @@ export async function selftest2782G({ dir, run, report, tmpRoot, root }) {
     const moveSpec = path.join(tmpRoot, `train-move-2782g-${process.pid}.json`);
     const evFile = path.join(dir, '.studio', 'events-2782g.jsonl');
     const env = { ...base, STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_MAIN_ROOT: '', AGENT_EVENTS_FILE: evFile, TRAIN_MARK: mark, TRAIN_MOVE: moveSpec };
-    const runs = () => { try { return fs.readFileSync(mark, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
+    const runs = runsCountOf(mark);
     const evs = () => events(evFile);
     const mainHas = (rel) => g(dir, ['cat-file', '-e', `main:${rel}`]).status === 0;
     writeIn(dir, 'studio/gates.json', `${JSON.stringify({ gates: [

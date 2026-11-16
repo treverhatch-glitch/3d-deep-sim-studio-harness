@@ -1,29 +1,26 @@
 /**
- * qa/selftest-2731a.mjs — 2.73.1 (helper a): the stall watchdog vs a session's own verify, halts, the run clock.
- *   B-68     a session waiting on its own verify (.studio/verify-running/<agent>.json or a full*.json it owns, live
- *            process, no result) or its own background task done (.studio/done-running/, any task, by agent) is busy,
- *            not stalled: the stall clock is held and the wall-clock cap stretches, bounded by
- *            STUDIO_STALL_VERIFY_MAX_MIN (60); a finished, dead or too-old verify counts for nothing
- *   B-66 a   sessions that end within STUDIO_HALT_SAME_DEATH_SEC (5) of each other count as one end for the "two in a
- *            row" halt; ends the launcher caused itself (stall, idle, budget) never count
- *   B-66 b   agent.session.end records meta.exitCause (signal vs exit code vs the launcher's own kill)
- *   B-66 c   the supervisor's builder halt doesn't stop the train daemon; drain and "Stop all" still do
- *   extend   `npm run studio:extend -- --until …` moves a running supervisor's end time (no restart), logged; refused
- *            for a worker session and for an agent without a person's permission
- * Each check fails on 2.73.0.
+ * qa/selftest-2731a.mjs — the stall watchdog vs a session's own verify, halts, the run clock.
+ * stall  a session waiting on its own verify (.studio/verify-running/<agent>.json or a full*.json it owns, live
+ *   process, no result) or its own background task done (.studio/done-running/) is busy, not stalled: the stall clock
+ *   is held and the wall-clock cap stretches, bounded by STUDIO_STALL_VERIFY_MAX_MIN (60); a finished, dead or
+ *   too-old verify counts for nothing.
+ * halt  sessions ending within STUDIO_HALT_SAME_DEATH_SEC (5) of each other count as one end for the "two in a row"
+ *   halt; ends the launcher caused itself (stall, idle, budget) never count; agent.session.end records
+ *   meta.exitCause; the builder halt doesn't stop the train daemon, drain and "Stop all" still do.
+ * extend  `npm run studio:extend -- --until …` moves a running supervisor's end time (no restart), logged; refused
+ *   for a worker session and for an agent without a person's permission.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitArgsOf, guardOf, out, readJsonl as events } from './kit.mjs';
 
 export async function selftest2731A({ dir, run, report, tmpRoot, root }) {
   void run; void root;
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitArgsOf(gEnv);
+  const guard = guardOf(report);
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
     STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_COMPACT_OUTPUT: '', STUDIO_VERIFY_DETACH: 'off', STUDIO_VERIFY_RUN: '', STUDIO_HEAVY_SLOTS: '0', STUDIO_HOOKS_CHECK: 'off',
@@ -46,8 +43,6 @@ export async function selftest2731A({ dir, run, report, tmpRoot, root }) {
     made.push(S);
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   // A probe script lives outside the studio copy (so it never changes the copy's git status) and runs with cwd = copy.
   const probe = (S, env, name, code) => {
     const f = path.join(tmpRoot, `probe-2731a-${name}-${process.pid}-${++n}.mjs`);

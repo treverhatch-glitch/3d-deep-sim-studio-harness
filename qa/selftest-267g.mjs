@@ -1,33 +1,30 @@
 /**
- * qa/selftest-267g.mjs — 2.67.0 (g): the owner's standing delegation to an outside agent, and --help never acts (B-47).
- *   1. `npm run delegate -- grant <agent> --actions … --hours N --by <owner>` from the owner's own terminal writes and
- *      commits studio/delegation.json; an agent's shell, a launched session or an agent's --by can't grant one.
- *   2. While it counts, the named agent runs train release, type, yes and hold with --by <agent> and no permission
- *      words; each use is recorded "under delegation <at> by <owner>", with a delegation.used event the digest counts.
- *   3. Expired, revoked, agent-committed, wrong agent, action not listed, a launched builder session or a worker:
- *      refused as before.
- *   4. With an owner key only the owner's signature counts: a signed grant works (also for type), a tampered one is ignored.
- *   5. `delegate -- claude-settings` prints (and --write merges) only the narrow rules; never broad, never deny.
- *   6. The file is on the shipped protected list (tier C).
- *   7. B-47: every task.mjs subcommand (walked from the code) and train, delegate, lanes, fuzz, denials with --help/-h
- *      print usage, exit 0, and write no file and no event (train --help starts no train).
+ * qa/selftest-267g.mjs — the owner's standing delegation to an outside agent, and --help never acts.
+ * 1.  `npm run delegate -- grant <agent> --actions … --hours N --by <owner>` from the owner's own terminal writes and
+ *   commits studio/delegation.json; an agent's shell, a launched session or an agent's --by can't.
+ * 2.  while it counts, the named agent runs train release, type, yes and hold with --by <agent> and no permission
+ *   words; each use is recorded "under delegation <at> by <owner>" with a delegation.used event.
+ * 3.  expired, revoked, agent-committed, wrong agent, unlisted action, builder session or worker: refused. 4. with an
+ *   owner key only the owner's signature counts.
+ * 5.  `delegate -- claude-settings` prints (--write merges) only the narrow rules. 6. the file is on the protected
+ *   list (tier C). 7. every task.mjs subcommand and train, delegate, lanes, fuzz, denials with --help/-h print usage,
+ *   exit 0, write no file or event.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { eventsOf, gitAsT as g, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest267G({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const write = writeInDirOf(dir);
   const events = path.join(dir, '.studio', 'events-267g.jsonl');
   const noKey = path.join(tmpRoot, `no-owner-key-267g-${process.pid}.pem`);
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_AGENT_MODEL: '', STUDIO_OWNER_KEY: noKey, AGENT_EVENTS_FILE: events, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const person = { ...env, CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', STUDIO_LOCK_OWNER: '' };
   const agent = { ...person, CLAUDECODE: '1', STUDIO_LOCK_OWNER: 'opus-bot' };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const qf = path.join(dir, '.studio', 'train', 'queue.json');
   const queue = () => { try { return JSON.parse(fs.readFileSync(qf, 'utf8')); } catch { return []; } };
   const holdLane = (id) => {

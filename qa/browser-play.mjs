@@ -1,33 +1,15 @@
 #!/usr/bin/env node
 /**
  * qa/browser-play.mjs — play the game's browser build like a player, and check the screen matches the sim.
- *
- *   node qa/browser-play.mjs [--cartridge name] [--url http://127.0.0.1:5173/?playtest=1] [--shots]
- *   npm run play:browser
- *
- * "Green but broken" is a sim that passes every gate while the game in the browser is blank, frozen,
- * or shows the wrong numbers. This gate opens the browser build in Chromium and:
- *   1. fails on script errors, a blank canvas, or a clock that doesn't move;
- *   2. plays the cartridge's scenario (start-to-win by default) with real key presses and clicks,
- *      chosen by the scenario's own policy and turned into input by the cartridge's `browser.input`;
- *   3. reads window.__sim (the sim) and window.__view() (what the page shows) in the same instant and
- *      fails on any mismatch the cartridge's `browser.wiring(state, view)` reports, or when the
- *      camera is inside geometry (`view.camera.inside`);
- *   4. requires the expected outcome before `browser.maxMs`. Real input against a 60 Hz sim lands on
- *      different ticks each run, so a bot that can die sometimes loses (Jed's test #2: 3 wins, 1 loss on
- *      one build). A loss with the screen matching the sim at every check passes with a note, unless
- *      the cartridge sets `browser.mustWin: true`. Every input is recorded with its tick
- *      (qa/reports/<run>-inputs.json, or the sim's own log when window.__sim.getActions() exists),
- *      so a loss can be replayed with harness/replay.mjs --trace;
- *   5. runs the browser regressions in qa/regressions/browser/*.mjs (renderer bugs, see docs/BUGS.md).
- * It saves start, middle and end screenshots and a report to qa/reports/.
- *
- * The cartridge declares its build in qa.mjs: export const browser = { page | url, query, scenario,
- * input, wiring, maxMs, controls }. `controls` lists every button, key and clickable spot with what it
- * should do ({ name, key | click | mouse, when?, expect(before, after) }); each one is tried before the
- * play, and one that does nothing fails (CONTROL-DEAD). `page` is served from this repo on 127.0.0.1; `url` (or --url, PLAYTEST_URL)
- * points at your own dev server. A cartridge without `browser` passes with a note. When Chromium is
- * missing it fails for a real game, and only notes it for the template cartridge.
+ *   node qa/browser-play.mjs [--cartridge name] [--url http://127.0.0.1:5173/?playtest=1] [--shots]   |   npm run
+ *     play:browser
+ * In Chromium: (1) fails on script errors, a blank canvas, a stopped clock; (2) plays the scenario with real keys and
+ * clicks (cartridge `browser.input`); (3) compares window.__sim with window.__view(), failing on any
+ * `browser.wiring(state, view)` mismatch or `view.camera.inside`; (4) requires the outcome before `browser.maxMs` (a
+ * loss with matching screens passes with a note unless `browser.mustWin`; inputs go to qa/reports/<run>-inputs.json for
+ * harness/replay.mjs --trace); (5) runs qa/regressions/browser/*.mjs. qa.mjs exports `browser = { page | url, query,
+ * scenario, input, wiring, maxMs, controls }`; a dead control fails (CONTROL-DEAD). `url` (or --url, PLAYTEST_URL) is
+ * your own server. No `browser`: passes with a note.
  */
 import fs from 'node:fs';
 import http from 'node:http';
@@ -85,12 +67,10 @@ async function canvasColours(page) {
 }
 
 /**
- * 2.85 (g): which game the browser check plays. It used to take the first cartridge when studio/game.json named an adopted
- * game ("game": "<name>" under game/ or web/) with no cartridge: a crew's check played the template's sample four times
- * and reported on a game that was not theirs. Now: an explicit name (--cartridge, STUDIO_CARTRIDGE) is played as asked;
- * otherwise the studio's active game: a cartridge of that name is played; a game with no cartridge manifest cannot be
- * driven here, so the answer is { skip } with the reason and the game's own play check; never the sample.
- * The sample plays only when it is the active game (nothing else set, or named).
+ * Which game the browser check plays: an explicit name (--cartridge, STUDIO_CARTRIDGE) as asked; otherwise the studio's
+ * active game if a cartridge of that name exists. A game with no cartridge manifest can't be driven here: the answer is
+ * { skip } with the reason and the game's own play check, never the sample (which plays only when it is the active
+ * game).
  */
 export function resolvePlayTarget({ cartridge = null, env = process.env } = {}) {
   if (cartridge) return { cartridge };

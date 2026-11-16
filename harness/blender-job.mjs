@@ -1,18 +1,13 @@
 /**
- * harness/blender-job.mjs — 2.70.0 (t): the harness's own Blender jobs (the asset round trip, preview renders) out of
- * the single machine:heavy slot.
- *
- * The asset round trip took machine:heavy, the slot a 30-minute full verify holds, so a seconds-long .glb import/export
- * waited up to an hour. Now:
- *   - its claim kind follows the program it runs (blenderKind): Blender -> asset-roundtrip (or blender-preview for a
- *     preview render), which heavy-budget.mjs puts in the GPU area when the machine scan shows a GPU (beside a verify);
- *     a Unity batchmode command -> unity (the one-editor cap). No GPU in the scan: the 2.69 claim (a slot).
- *   - at most one Blender job of the harness's own at a time (heavy-budget.mjs cap group "blender", 1;
- *     STUDIO_HEAVY_MAX_BLENDER raises it). A Blender someone opened by hand is never counted, closed or taken over:
- *     nothing here lists or touches other processes.
- *   - a Blender command gets `-t <n>` (render threads) unless it names its own: STUDIO_BLENDER_THREADS, else from the
- *     machine scan (logical cores / 3, 1..8), never 0 (Blender's 0 means every core). Placed before the first
- *     -P/--python/-f/-a/-- argument so it applies to what follows (UNVERIFIED against a real Blender here: tests use a stub).
+ * harness/blender-job.mjs — the harness's own Blender jobs (the asset round trip, preview renders) kept out of
+ * machine:heavy.
+ *   - the claim kind follows the program (blenderKind): Blender -> asset-roundtrip (or blender-preview), which
+ *     heavy-budget.mjs puts in the GPU area when the machine scan shows a GPU; a Unity batchmode command -> unity.
+ *   - at most one harness Blender job at a time (heavy-budget.mjs cap group "blender", 1; STUDIO_HEAVY_MAX_BLENDER
+ *     raises it). A Blender opened by hand is never counted, closed or taken over.
+ *   - a Blender command gets `-t <n>` unless it names its own: STUDIO_BLENDER_THREADS, else logical cores / 3 (1..8),
+ *     never 0 (Blender's 0 means every core). Placed before the first -P/--python/-f/-a/-- argument. UNVERIFIED against
+ *     a real Blender.
  * No harness imports at load (asset-gate.mjs imports this inside a function).
  */
 import os from 'node:os';

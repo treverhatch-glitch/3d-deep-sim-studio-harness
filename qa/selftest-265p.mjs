@@ -1,33 +1,29 @@
 /**
- * qa/selftest-265p.mjs — 2.65.0 (helper p): the conductor's tools, for an orchestrator outside the harness.
- *   lanes:        `npm run lanes -- --json` lists every lane copy with ahead/behind, hook stamps, harness drift, queue,
- *                 hold, Pin-Moves, merge-tree conflicts with main and between queued lanes, and age, in seconds.
- *   refresh:      `npm run lanes -- refresh` refuses workers and busy lanes (unless --busy-ok), merges main (never a
- *                 rebase: the lane's own commit is kept), keeps the hooks gate green, runs the lane's targeted tests,
- *                 stops on a textual conflict (merge aborted, files listed) and reports a red targeted test.
- *   brief:        `npm run status -- --brief` is fixed-format, under 100 words with long lists, and deterministic.
- *   notes:        `npm run task -- note` appends a ruling (conductor.note) shown in the task's brief inside the
- *                 untrusted block; a worker is refused; conductorInterventions counts them.
- *   job.done:     a heavy run, the game's checks, a train and a full verify each end with a uniform job.done event.
- *   events wait:  blocks until a matching event, exits 2 on timeout, and --since last misses nothing between waits;
- *                 job.done alerts for train/verify only behind STUDIO_ALERT_JOBS.
- * Every check fails on 2.64.0 (no lanes.mjs, jobs.mjs, conductor.mjs, brief-status.mjs, task note, job.done).
+ * qa/selftest-265p.mjs — the conductor's tools, for an orchestrator outside the harness.
+ *   lanes:  `npm run lanes -- --json` lists every lane copy: ahead/behind, hook stamps, harness drift, queue, hold,
+ *     Pin-Moves, merge-tree conflicts, age in seconds
+ *   refresh:  `npm run lanes -- refresh` refuses workers and busy lanes (unless --busy-ok), merges main (never a
+ *     rebase), keeps the hooks gate green, runs targeted tests, stops on a textual conflict
+ *   brief:  `npm run status -- --brief` is fixed-format, under 100 words with long lists, deterministic
+ *   notes:  `npm run task -- note` appends a ruling (conductor.note) shown in the task's brief; a worker is refused
+ *   job.done:  a heavy run, the game's checks, a train and a full verify each end with a uniform job.done event
+ *   events wait: blocks until a matching event, exits 2 on timeout; job.done alerts for train/verify only behind
+ *     STUDIO_ALERT_JOBS
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { eventsOf, gEnvUnsetThreeOf, gitExtraOf, guardAsyncPlainOf, headRefOf, out, writeIn as write } from './kit.mjs';
 
 export async function selftest265P({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = (extra = {}) => { const e = { ...process.env, ...ident, ...extra }; for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete e[k]; return e; };
-  const g = (cwd, args, extra = {}) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv(extra) });
-  const head = (cwd, ref = 'HEAD') => g(cwd, ['rev-parse', ref]).stdout.trim();
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, ok, detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvUnsetThreeOf(ident);
+  const g = gitExtraOf(gEnv);
+  const head = headRefOf(g);
+  const guard = guardAsyncPlainOf(report);
   const events = path.join(dir, '.studio', 'events-265p.jsonl');
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const env = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '', GITHUB_BASE_REF: '', GITHUB_EVENT_NAME: '', STUDIO_TASK_BASE: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT_MODEL: '', STUDIO_HARNESS_REF: '', STUDIO_COMPACT_OUTPUT: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-265p-${process.pid}.pem`), STUDIO_MAIN_COMMIT: '',
     STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_GATE_RELATED: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_RAM_FLOOR_GB: '0', STUDIO_ALERT_JOBS: '', AGENT_EVENTS_FILE: events,

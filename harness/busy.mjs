@@ -1,28 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/busy.mjs — 2.30q (#6): "no session on it" is not "stalled".
+ * harness/busy.mjs — "no session on it" is not "stalled": when a task counts as busy.
  *
- * In the Marina run (2.30.0-o) the Director's flow pass handed back tasks whose builder was inside
- * `task done` (gates take 10-23 min) or whose lane was waiting to land, because the builder runs outside
- * the harness (no session record) and its task claim ran out during the gates. 13 of 83 hand-backs were
- * "The claim ran out with no running session on it"; three of those tasks were then parked by the watchdog
- * for "handed back 3 times in 2 h". Here a task counts as busy when:
- *   - a `task done` for it is running (.studio/done-running/<T>.json, written by task done, live pid), or
- *   - its lane branch has commits the studio's branch lacks and the lane copy is live (worktree laneLive).
- * And a hand-back the harness caused (claim ran out, the main checkout refused the merge, the land lock,
- * the branch kept moving) never counts toward parking.
- *
- * 2.58.3 (N2): a task also counts as busy when the owner of its last claim (an agent working outside the launcher,
- * such as a chat bot that claims with `task start` and works in its own copy) was heard from within
- * STUDIO_CLAIM_ACTIVE_MIN (30) minutes, or its lane copy changed in that time (claimActive). Its claim running out
- * is not the owner leaving: the Director's flow pass, the watcher's requeue and the supervisor's pick all keep away.
- * (N1, N3): a person's stop is never a loop either (PERSON_CAUSE), and one rule counts hand-backs for every parker
- * (loopHandBacks: since the last done, unblock or unpark), and a park is written once (parkOnce).
- *
- * 2.58.5 (H-5): on 2.58.3 a kept task was still left with no claim (a crew builder's `task start` took it), an owner
- * with built but unlanded work went quiet for 30 min and lost it, and the breaker parked tasks for hand-backs the harness
- * caused. Now a lane copy with the task's commits ahead of the studio's branch keeps it (laneAhead), a kept claim is
- * made again in the owner's name (keepClaim), and `task start` itself refuses a live owner's task (task.mjs).
+ * A task is busy when: a `task done` for it runs (.studio/done-running/<T>.json, live pid); its lane branch has
+ * commits the studio's branch lacks and the lane copy is live (laneLive, laneAhead); or the owner of its last claim
+ * (an agent outside the launcher) was heard from within STUDIO_CLAIM_ACTIVE_MIN (30) minutes or its lane copy changed
+ * (claimActive). A kept claim is made again in the owner's name (keepClaim); `task start` refuses a live owner's task
+ * (task.mjs).
+ * A hand-back the harness caused (claim ran out, refused merge, land lock, moving branch) or a person's stop
+ * (PERSON_CAUSE) never counts toward parking; loopHandBacks counts for every parker; a park is written once
+ * (parkOnce).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -142,11 +129,10 @@ export function deadClaimOwner(owner, { dir = null, now = Date.now(), env = proc
 }
 
 /**
- * 2.58.3 (N2): is the owner of this task's last claim still working on it, though its claim ran out? Busy when the
- * owner has any event (other than ones saying it has gone, and the claim's own start) in the last STUDIO_CLAIM_ACTIVE_MIN (30) minutes, or its
- * lane copy (.lanes/<owner>, .lanes/<owner>-*, or the copy on the task's remembered lane branch) has a commit or a
- * file change in that time. Synchronous (the watcher's pass is). `root` is the main checkout (worktree.mainRoot()).
- * Returns { busy, why, owner }.
+ * Is the owner of this task's last claim still working on it, though its claim ran out? Busy when the owner has any
+ * event (other than ones saying it has gone, and the claim's own start) in the last STUDIO_CLAIM_ACTIVE_MIN (30)
+ * minutes, or its lane copy (.lanes/<owner>, .lanes/<owner>-*, or the task's remembered lane branch) has a commit or
+ * file change in that time. `root` is the main checkout. Returns { busy, why, owner }.
  */
 export function claimActive(task, { root = null, now = Date.now(), env = process.env, events = null, orphaned = false, asker = null } = {}) {
   const win = claimWindowMs(env);

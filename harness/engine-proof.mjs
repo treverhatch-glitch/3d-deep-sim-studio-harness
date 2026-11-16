@@ -1,23 +1,14 @@
 /**
- * harness/engine-proof.mjs — 2.72.0 (c): an engine gate (Unity, Godot) passes only when it proves it ran.
- *
- * A test runner that exits 0 is not proof: an editor can exit 0 having compiled nothing, a results file left by an
- * earlier run can stand in for one this run never wrote, and a crash after the results were written leaves a green
- * file behind a red run. So an engine gate's run counts only when all of these hold:
- *
- *   fresh results   the results file was written by THIS run: its name carries this run's nonce (Unity) or it is a
- *                   report folder that didn't exist before the run (gdUnit4 numbers its own), and its mtime is not older
- *                   than the run's start;
- *   tests ran       more than 0 test cases counted, unless the engine's manifest says "allowEmpty" (Unity:
- *                   studio/game.json engines.unity.allowEmpty: true or ["PlayMode"]; Godot: studio/godot-unit.json
- *                   "allowEmpty": true);
+ * harness/engine-proof.mjs — an engine gate (Unity, Godot) passes only when it proves it ran.
+ * A run counts only when all of these hold:
+ *   fresh results   the results file was written by THIS run (its name carries the run's nonce, or it is a report
+ *                   folder that didn't exist before) and its mtime is not older than the run's start;
+ *   tests ran       more than 0 test cases, unless the manifest says "allowEmpty" (Unity: studio/game.json
+ *                   engines.unity.allowEmpty: true or ["PlayMode"]; Godot: studio/godot-unit.json "allowEmpty": true);
  *   a clean log     no compile error, licence or "Aborting batchmode" signature in the editor's log;
- *   one story       the exit code agrees with the results (exit 0 with failing tests, or a non-zero exit, a kill or a
- *                   timeout behind results that say every test passed, is not a pass).
- *
- * Each kind of failure has its own plain-words line ([engine-gate] FAIL <kind>: …) and Fix line (harness/gate-fix.mjs
- * ENGINE_FIXES), so the reader knows whether to fix a test, the compile, the licence, or the run itself.
- * Pure helpers; the gates (harness/unity.mjs judgeRun, harness/godot-unit.mjs) call them.
+ *   one story       the exit code agrees with the results (a non-zero exit, a kill or a timeout is not a pass).
+ * Each failure kind has a plain line ([engine-gate] FAIL <kind>: …) and a Fix line (gate-fix.mjs ENGINE_FIXES). Pure
+ * helpers; harness/unity.mjs judgeRun and harness/godot-unit.mjs call them.
  */
 import fs from 'node:fs';
 import crypto from 'node:crypto';

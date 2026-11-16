@@ -10,14 +10,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { eventsOf, fileUrlOf as fileUrlRelOf, gitAsT as g, guardCap3000Of as guardCap3000DOf, out, parseLastLine as parse, writeIn as write } from './kit.mjs';
 
 export async function selftest284Y({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const guard = async (name, fn) => { try { const [ok, d] = await fn(); report(name, Boolean(ok), ok ? '' : String(d || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
-  const href = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
-  const parse = (r) => { try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return {}; } };
+  const guard = guardCap3000DOf(report);
+  const href = fileUrlRelOf(dir);
 
   // ---- 1. the modules are gone, and nothing live names them ----
   const GONE = ['harness/remote-workers.mjs', 'harness/remote-verify.mjs', 'harness/harness-scout.mjs', 'harness/sign.mjs'];
@@ -84,9 +81,8 @@ console.log(JSON.stringify({ builders: p.builders, order: p.order, skip: p.skip,
   // The studio and its made-up game are qa/selftest-269q.mjs's: a game check that logs each run to RAN_LOG.
   const ranLog = path.join(tmpRoot, `ran-284y-${process.pid}.log`);
   const events = path.join(dir, '.studio', 'events-284y.jsonl');
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_TRAIN: '', STUDIO_TRAIN_BISECT: '', STUDIO_TRAIN_LAND_PREFIX: 'off', STUDIO_TRAIN_MAX: '', STUDIO_TRAIN_BATCH: 'off', STUDIO_TRAIN_PIPELINE: 'off', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_HEAVY_SLOTS: '', STUDIO_TEST_WORKERS: '', STUDIO_MACHINE_SCAN: '', STUDIO_TEST_MACHINE: 'none', GH_TOKEN: '', GITHUB_TOKEN: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-284y-${process.pid}.pem`), AGENT_EVENTS_FILE: events, RAN_LOG: ranLog, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const ran = () => { try { return fs.readFileSync(ranLog, 'utf8').split('\n').filter(Boolean).map((l) => { const [owner, file] = l.split('\t'); return { owner, file }; }); } catch { return []; } };
   write(dir, 'studio/gates.json', `${JSON.stringify({ gates: [
     { id: 'secrets', command: 'node scripts/secret-scan.mjs', required: true, lite: true },

@@ -1,19 +1,13 @@
 /**
- * harness/lane-at-claim.mjs — 2.76.0 (B-84): a builder gets its lane copy when it claims a task, not only at launch.
- *
- * The crew's evidence: builder-s141, builder-s144 and builder-api3 were started with `agent start --role builder` and no
- * --task. The launcher made no copy (a copy was made only for a task or a lane), so each ran in the main checkout,
- * claimed T-158 with `task start`, staged a game file in MAIN's index and was refused by the pre-commit hook ("this
- * session has no lane copy"). The launcher now gives such a session a copy at launch (worktree.mjs lanelessWantsCopy);
- * this covers a code-writing session that still claims from the main checkout (one its launcher started before an
- * update, or one whose copy couldn't be made at launch): `task start` makes its copy (.lanes/<agent>, the task's earlier
- * unlanded work merged in), records it on the session (so its launcher's clean-up keeps or removes it as usual) and
- * tells it to work there. If the copy can't be made the claim is handed back: a builder session never works in the main
- * checkout.
- *
- * Who it is for: a launched session (STUDIO_ROLE) of a role that writes code (not the Producer, the Director, a
- * planner or a person: worktree.mjs MAIN_CHECKOUT_ROLES). Not in a lane copy already, not the rehearsal
- * agent, and not when copies are off (STUDIO_WORKTREES=off; STUDIO_LANELESS=shared for a task with no lane).
+ * harness/lane-at-claim.mjs — a builder gets its lane copy when it claims a task, not only at launch. A code-writing
+ * session that still claims from the main checkout (its launcher started it before an update, or its copy couldn't be
+ * made at launch) gets its copy from `task start` (.lanes/<agent>, the task's earlier unlanded work merged in); it is
+ * recorded on the session (so the launcher's clean-up keeps or removes it as usual) and the session is told to work
+ * there. If the copy can't be made the claim is handed back: a builder session never works in the main checkout
+ * (staging a game file in MAIN's index is refused by the pre-commit hook).
+ * For: a launched session (STUDIO_ROLE) of a role that writes code (not the Producer, the Director, a planner or a
+ * person: worktree.mjs MAIN_CHECKOUT_ROLES). Not in a lane copy already, not the rehearsal agent, and not when copies
+ * are off (STUDIO_WORKTREES=off; STUDIO_LANELESS=shared for a task with no lane).
  */
 import fs from 'node:fs';
 import path from 'node:path';

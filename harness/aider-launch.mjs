@@ -1,17 +1,12 @@
 /**
- * harness/aider-launch.mjs — 2.60.1: how the launcher starts aider (`--tool nim`, `--tool aider`).
- *
- * B-18: which aider. STUDIO_AIDER_CMD (a path to the program), else the studio's own venv
- * (<main checkout>/.studio/aider-venv/Scripts/aider.exe on Windows, bin/aider elsewhere), else aider on PATH. The same
- * answer serves the preflight and the launched argv, so "installed in the venv" never reads as "not installed".
- *
- * B-20: what aider may see. aider offers to add every repo file a message names ("Add file to the chat?"), and
- * --yes-always says yes, so the kickoff's `node harness/task.mjs …` lines pulled harness files into its chat. A
- * per-agent ignore file (.studio/aider/<agent>.aiderignore, passed with --aiderignore) leaves out the harness's folders
- * (harness/, scripts/, tools/, studio/, qa/*.mjs) and every protected path in studio/protected.json: aider neither
- * offers nor edits a file that matches. It lives in .studio/ (git-ignored, and excluded in a lane copy), so it never
- * becomes part of a lane's change. Patterns are anchored at the repo root (`/tools/`, not `tools/`), so a game's own
- * game/<name>/tools/ stays editable.
+ * harness/aider-launch.mjs — how the launcher starts aider (`--tool nim`, `--tool aider`).
+ * Which aider: STUDIO_AIDER_CMD (a path), else the studio's own venv (<main
+ * checkout>/.studio/aider-venv/Scripts/aider.exe on Windows, bin/aider elsewhere), else aider on PATH; the preflight
+ * and the launched argv use the same answer. What aider may see: a per-agent ignore file
+ * (.studio/aider/<agent>.aiderignore, passed with --aiderignore) leaves out harness/, scripts/, tools/, studio/,
+ * qa/*.mjs and every protected path in studio/protected.json, so aider neither offers nor edits them (--yes-always
+ * would otherwise add every repo file a message names). It lives in .studio/ (git-ignored, excluded in a lane copy).
+ * Patterns are anchored at the repo root (`/tools/`), so a game's own game/<name>/tools/ stays editable.
  */
 import fs from 'node:fs';
 import path from 'node:path';

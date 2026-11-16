@@ -1,28 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/ask.mjs — questions for the game dev, with a deadline and a default the Producer stands behind.
- *
  *   npm run ask -- "<question>" --options "a,b,c" --default b --timeout 4h [--why "…"] [--by producer-1] [--task T-1]
  *   npm run ask -- answer A-001 "<option or words>" --by <name>
  *   npm run ask -- reverse A-001 "<option or words>" --by <name>   undo a decision made without you
- *   npm run ask -- list [--open]
- *   npm run ask -- show A-001 | help
- *
- * A question shows under "Needs you" in every War Room view and in the Game plan, where the game dev
- * answers with one click. If nobody answers by the deadline, the default is applied: it is logged as
- * decision.timeout with the asker's reason, written to studio/decisions/decided-without-you.md, listed
- * in the run report, and the dev can reverse it later (which queues the change for the Producer).
- *
- * Never on a timer: signing the Bible, changing pillars, bringing back a crossed-out layer, or deleting anything.
- * Questions about those wait for a person, however long it takes.
- *
- * 2.85 (B-136, item 3): every ask resolves or is escalated. An ask with a --default and no --timeout gets
- * STUDIO_ASK_TIMEOUT_H (4) hours, then its default applies as with --timeout. An ask that cannot decide itself (no default,
- * or a protected subject) is escalated once at STUDIO_ASK_STALE_H (8) hours: ask.stale to the Producer and the overseer,
- * with the one command that answers it. The owner's own asks (harness/owner-acts.mjs) never get a deadline and are never
- * escalated as stale: the digest lists them as waiting for the owner. The watcher's pass (harness/watch.mjs, every
- * STUDIO_WATCH_INTERVAL from the supervisor's timed passes) runs expireAsks. --task links an ask to a task (an ask
- * asked with --task closes when that task is done: harness/ask-post.mjs).
+ *   npm run ask -- list [--open] | show A-001 | help
+ * A question shows under "Needs you" in every War Room view and in the Game plan. If nobody answers by the deadline, the
+ * default is applied: logged as decision.timeout, written to studio/decisions/decided-without-you.md; the dev can reverse it.
+ * Never on a timer: signing the Bible, changing pillars, bringing back a crossed-out layer, or deleting anything. An ask with
+ * a --default and no --timeout gets STUDIO_ASK_TIMEOUT_H (4) hours; one that cannot decide itself is escalated once at
+ * STUDIO_ASK_STALE_H (8) hours (ask.stale). The owner's own asks (harness/owner-acts.mjs) get no deadline.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -2,22 +2,14 @@
 /**
  * harness/done-check.mjs — a task is done when the check for its kind of work passes.
  *
- * `node harness/task.mjs done <ID>` runs this first and refuses while something is missing.
- * `--force` finishes anyway: it writes a task.forced event and queues a P1 check for the Producer.
- *
+ * `node harness/task.mjs done <ID>` runs this first and refuses while something is missing. `--force` finishes anyway:
+ * it writes a task.forced event and queues a P1 check for the Producer.
  *   node harness/done-check.mjs <TASK_ID>    show the type, what is checked and what is missing
- *
- * The type comes from a title prefix (Bug:, Fix, Chore:, Study:, Balance:, Fun:, Playtest:, Review:, Docs:)
- * and otherwise from the role. Each type is described in studio/skills/ (the table in studio/skills/README.md).
- * The owner can reclassify a task (npm run task -- type <ID> <type> --by <owner> --why "…", harness/reclassify.mjs);
- * that type wins over the title's. A bug's regression is a cartridge replay or a seeded game unit test
- * ("kind": "test", qa/regressions/README.md).
- * A task with an agreed acceptance contract (studio/contracts/<ID>.json) also needs every criterion in force passing
- * (harness/contracts.mjs contractChecks).
- * A "bug" whose commits are only tests, docs or config is judged a "change" (evidenceType, harness/type-evidence.mjs,
- * logged as task.type.evidence). An engine pass in the engine's own repo (harness/engine-tracks.mjs engineRepo) is judged
- * there (engineWorkChecks) and its land run stands for the studio's verify.
- * A task added with --visual-check or --refs also needs the visual check (harness/visual-check.mjs visualCheckRows).
+ * The type comes from a title prefix (Bug:, Fix, Chore:, Study:, Balance:, Fun:, Playtest:, Review:, Docs:), else from
+ * the role (studio/skills/README.md); an owner reclassification (harness/reclassify.mjs) wins. A bug's regression is a
+ * cartridge replay or a seeded game unit test ("kind": "test", qa/regressions/README.md). An acceptance contract
+ * (studio/contracts/<ID>.json) needs every criterion passing. A "bug" whose commits are only tests, docs or config is
+ * judged a "change" (harness/type-evidence.mjs). --visual-check or --refs tasks also need visualCheckRows.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -76,11 +68,10 @@ export const NO_GAME_CODE_TYPES = ['direction', 'review', 'docs', 'idea', 'resea
 /** Roles whose tasks write notes, reviews and plans, never game code (a title like "Fix …" doesn't change that). */
 export const NO_GAME_CODE_ROLES = ['director', 'reviewer'];
 /**
- * May `task done` skip the game's own checks (the whole game test suite)? Yes when the type is in NO_GAME_CODE_TYPES and
- * every file its lane changes (or claims, or has dirty) is a Markdown file or under studio/, docs/ or .studio/. Any
- * other file, or a type that can write code, runs them. The docs and board checks always run. Returns { skip, why }.
- * A task of a NO_GAME_CODE_ROLES role is judged the same way even when its title typed it "bug" or "change", unless an
- * owner reclassified it (ownerTyped): its files decide.
+ * May `task done` skip the game's own checks (the whole game test suite)? Yes when the type is in NO_GAME_CODE_TYPES
+ * and every file its lane changes (or claims, or has dirty) is Markdown or under studio/, docs/ or .studio/. Otherwise
+ * they run; the docs and board checks always run. Returns { skip, why }. A NO_GAME_CODE_ROLES role is judged the same
+ * way unless an owner reclassified it (ownerTyped).
  */
 export function skipGameChecks(type, files, env = process.env, { role = null, ownerTyped = false } = {}) {
   const byRole = !ownerTyped && NO_GAME_CODE_ROLES.includes(String(role || '').toLowerCase());
@@ -717,11 +708,10 @@ export function engineWorkChecks(task) {
 const ENGINE_WORK_TYPES = new Set(['change', 'chore', 'bug', 'system', 'whole', 'docs']);
 
 /**
- * 2.85 (g): a change to the game's sim or rules comes with a test, or says why it has none. The sim files are the ones
- * harness/tiers.mjs calls "sim" (game/<g>/sim, web/<g>/sim, cartridges/, the manifest's simPaths; judgeFiles); a test is
- * a file isTestPath reads as one. When the task's files hold sim code and no test, a commit of the task must carry a
- * "No-Test-Reason: <20+ characters>" trailer. Docs, assets and tooling are not sim files: nothing is asked of them.
- * Returns { sim: [files], tests: n, reason } ('reason' is the first trailer found, '' when none).
+ * A change to the game's sim or rules comes with a test, or says why it has none. Sim files are those
+ * harness/tiers.mjs calls "sim" (game/<g>/sim, web/<g>/sim, cartridges/, the manifest's simPaths; judgeFiles); a test
+ * is a file isTestPath reads as one. Sim code and no test: a commit must carry a "No-Test-Reason: <20+ characters>"
+ * trailer. Returns { sim: [files], tests: n, reason } ('reason': first trailer found, '').
  */
 /** 2.85 (g): STUDIO_RULES_TEST=warn|require (default warn: measured first, refused only when a studio asks). */
 export const rulesTestMode = (env = process.env) => (/^(require|strict|on|1)$/i.test(String(env.STUDIO_RULES_TEST || '').trim()) ? 'require' : 'warn');

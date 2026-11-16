@@ -1,34 +1,28 @@
 /**
- * qa/selftest-284m.mjs — 2.84 (m): three faults from the first 100 minutes of a native-engine studio on 2.83.
- *
- *   merge    at launch the harness merges the engine's target into the task's engine worktree and, on a conflict, aborts
- *            and told the session to run `git -C <dir> merge <target>`, which a launched session may not run. Three
- *            sessions in a row on each of three tasks handed back "the merge needs a person". Now `npm run engine --
- *            merge <ID>` (harness/engine-tracks.mjs engineTargetMerge) leaves the conflict in the task's own worktree
- *            for the session to resolve, and a launch that meets the same conflict with no new commit since parks once
- *            instead of starting another session.
- *   phantom  a tracked file a `.gitattributes` filter rule makes look modified in every checkout refused `task done`
- *            ("1 uncommitted file(s) ... commit them first"). Now such a file (bytes = the committed blob) is left out of
- *            the dirty lists and named once (harness/eol-only.mjs splitPhantom).
- *   ignore   two branches that changed Play Mode tests and UI files forced the whole batch to the full rules command
- *            (28.5 minutes). Now rules.focus.ignore (and play.focus.ignore) leaves such paths out of the mapping.
- * Each check fails before this change.
+ * qa/selftest-284m.mjs — three faults of a native-engine studio: engine-target merge, phantom-modified files, focus ignore.
+ * merge  at launch the harness merges the engine's target into the task's engine worktree; on a conflict, `npm run
+ *   engine -- merge <ID>` (harness/engine-tracks.mjs engineTargetMerge) leaves it in the task's own worktree for the
+ *   session to resolve, and a launch meeting the same conflict with no new commit parks once instead of starting
+ *   another session.
+ * phantom  a tracked file a `.gitattributes` filter makes look modified in every checkout (bytes = the committed
+ *   blob) is left out of the dirty lists and named once (harness/eol-only.mjs splitPhantom), so `task done` isn't
+ *   refused.
+ * ignore  rules.focus.ignore (and play.focus.ignore) leaves Play Mode test and UI paths out of the mapping, so they
+ *   don't force the full rules command.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, fwd, gEnvOf, gitUserCrlfOf, guardCap3500Of, out, readJsonl as events, writeIn as write } from './kit.mjs';
 
 export async function selftest284M({ dir, root, report, tmpRoot }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = fs.existsSync(path.join(dir, 'node_modules')) ? path.join(dir, 'node_modules') : path.join(harnessRoot, 'node_modules');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3500)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 2500)); } };
-  const fwd = (p) => p.split(path.sep).join('/');
-  const write = (b, rel, text) => { fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true }); fs.writeFileSync(path.join(b, rel), text); };
+  const gEnv = gEnvOf(ident);
+  const g = gitUserCrlfOf(gEnv);
+  const guard = guardCap3500Of(report);
   const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
@@ -63,8 +57,6 @@ export async function selftest284M({ dir, root, report, tmpRoot }) {
     const env = { ...process.env, ...base, AGENT_EVENTS_FILE: ev, STUDIO_MAIN_ROOT: S };
     return { S, R, GW, ev, env };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const probe = (S, env, code) => {
     const f = path.join(S, `.probe-284m-${++n}.mjs`);
     fs.writeFileSync(f, code);

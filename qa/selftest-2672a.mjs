@@ -1,33 +1,26 @@
 /**
- * qa/selftest-2672a.mjs — 2.67.2 (helper a): stop the false alarms.
- *   B-50  a lane's full verify no longer refuses another checkout's (the "already running" record is per checkout); a
- *         train's verify refused as busy waits and runs again, bounded; a train whose verifies ran no check defers its
- *         lanes: nobody handed back, never "main itself is red".
- *   hold  a task held for landing (task hold) stays out of trains; `task train leave` takes a lane out of the queue,
- *         recorded (who, why), never by a worker; npm run lanes and train status show both.
- *   health  a launched session's end records what it did for its task and why there was no work (task start refused,
- *         never claimed, ...); after STUDIO_NO_WORK_EXITS (2) no-work exits in a row the task is parked with that
- *         reason; a bug task's done-check refusal and brief name the regression file, its missing fields and the
- *         fails-before command.
- * A made-up studio: one sleeping gate, lane copies made with harness/worktree.mjs, a docs-only change per lane.
+ * qa/selftest-2672a.mjs — stopping false alarms in the train, holds and no-work exits.
+ * verify  a lane's full verify no longer refuses another checkout's (the "already running" record is per checkout); a
+ *   train's verify refused as busy waits and runs again, bounded; a train whose verifies ran no check defers its
+ *   lanes: nobody handed back, never "main itself is red".
+ * hold  a task held for landing (task hold) stays out of trains; `task train leave` takes a lane out of the queue,
+ *   recorded (who, why), never by a worker; npm run lanes and train status show both.
+ * health  a launched session's end records what it did and why there was no work; after STUDIO_NO_WORK_EXITS (2)
+ *   no-work exits in a row the task is parked with that reason; a bug task's done-check refusal and brief name the
+ *   regression file, its missing fields and the fails-before command.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
+import { eventsOf, fileUrlOf, gitAsT as g, guardSyncBoolOf, napSync as nap, out, readJsonFile as readJson, untilNapOf, writeIn as write } from './kit.mjs';
 
 export async function selftest2672A({ dir, run, report, tmpRoot }) {
   const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === 'win32' ? 2.5 : 1);
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-  const until = (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms && !fn()) nap(50); return fn(); };
-  const guard = (name, fn) => { try { const [ok, detail] = fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const u = fileUrlOf(dir);
+  const until = untilNapOf(nap);
+  const guard = guardSyncBoolOf(report);
   const events = path.join(dir, '.studio', 'events-2672a.jsonl');
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const env = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '',
     STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: '', STUDIO_REACHABILITY: 'off', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '',

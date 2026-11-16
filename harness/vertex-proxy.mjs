@@ -1,24 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/vertex-proxy.mjs — 2.79.1 (a): the studio's Vertex AI proxy (folded from the crew's local .studio/vertex-proxy.mjs).
+ * harness/vertex-proxy.mjs — the studio's Vertex AI proxy.
  *
- *   node harness/vertex-proxy.mjs --root <main checkout> [--port 8787]    (the launcher starts it: harness/vertex.mjs ensureProxy)
+ *   node harness/vertex-proxy.mjs --root <main checkout> [--port 8787]    (started by harness/vertex.mjs ensureProxy)
  *
- * Listens on 127.0.0.1 only. For each request:
- *   - GET /__studio/health answers { studio: 'vertex-proxy', pid, root } (how the launcher knows the port is this proxy).
- *   - The client's key must be a session tag, `session-<agent>` (aider's --openai-api-key), naming a running session whose
- *     tool goes through this proxy (its .studio/agents/<agent>.json: tool vertex, or proxy "vertex"); otherwise 401/403. The
- *     tag is never forwarded.
- *   - The main checkout's .env is read again (VERTEX_API_KEY, VERTEX_PROJECT_ID, STUDIO_VERTEX_BASE_URL): no key or no project
- *     is 503 "Vertex is paused or not configured", so renaming the key in .env pauses Vertex at once.
- *   - /v1/<sub> goes to <the Vertex OpenAI-compatible base>/<sub>, with the key as x-goog-api-key (Vertex answers 401 to a
- *     Bearer key); a bare model name in the body gets the google/ prefix; a ?key= from the client is dropped.
- *   - The upstream status and body come back as they are; each answer's usage is appended to .studio/vertex-usage.jsonl as
- *     { ts, session, task, tool, model, in: prompt_tokens, out: total_tokens - prompt_tokens (Gemini's thinking tokens are
- *     billed as output), total, usd (at studio/prices.json) }. The key is never logged, printed or written anywhere.
- *   - 2.79.2 (a): once a session's request was over STUDIO_VERTEX_MAX_PROMPT_TOKENS (150000), its next request is 403 (not
- *     forwarded); the launcher stops the session.
- *   - Anything that goes wrong in the proxy is 502, with the key scrubbed from the message.
+ * Listens on 127.0.0.1 only. GET /__studio/health answers { studio: 'vertex-proxy', pid, root }. The client's key must
+ * be a session tag `session-<agent>` naming a running session that uses this proxy (.studio/agents/<agent>.json), else
+ * 401/403; the tag is never forwarded. The main checkout's .env is read again (VERTEX_API_KEY, VERTEX_PROJECT_ID,
+ * STUDIO_VERTEX_BASE_URL): none is 503. /v1/<sub> goes to the Vertex base with x-goog-api-key; a client ?key= is
+ * dropped. Usage goes to .studio/vertex-usage.jsonl (prices: studio/prices.json). The key is never logged. A session
+ * over STUDIO_VERTEX_MAX_PROMPT_TOKENS (150000) gets 403 next. Proxy errors are 502.
  */
 import fs from 'node:fs';
 import path from 'node:path';

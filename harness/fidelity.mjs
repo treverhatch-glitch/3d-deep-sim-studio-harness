@@ -1,32 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/fidelity.mjs — the design-fidelity gate (2.30h, item 1): score the build against the reference
- * game's mechanics, one by one, and send missing ones back as work.
- *
- *   npm run fidelity                 score now: a report the Director reads (exit 0; 1 only for a bad checklist)
- *   npm run fidelity -- --strict     exit 1 when a required mechanic is missing (opt-in; it is not a hard gate)
- *   npm run fidelity -- --json
+ * harness/fidelity.mjs — the design-fidelity gate: score the build against the reference game's mechanics one by one.
+ *   npm run fidelity [-- --strict | --json]   exit 1 for a bad checklist; --strict: also for a missing required mechanic
  *   npm run fidelity -- send-back [--by director]   queue a builder task per missing mechanic (once each)
  *   npm run fidelity -- list         the checklist
- *
- * The checklist is the game's own, read from the Game Bible (studio/bible/bible.json, its "fidelity"
- * section, same shape as below); studio/fidelity.json is the fallback:
- *   { "reference": "Youda Marina",
- *     "minScore": 0.8,                          optional: the share of scored mechanics that must pass
- *     "mechanics": [
- *       { "id": "lose-money", "says": "the player can lose money (upkeep and bad contracts drain it)",
- *         "probe": "qa/fidelity/lose-money.mjs", "required": true },
- *       { "id": "varied-paths", "says": "ships take varied paths to their docks" } ] }
- * A probe is `export default async ({ cartridge, loadCartridge, runScenario }) => ({ ok, why })`: it plays
- * the game's pure sim (or reads its content data) and says whether the mechanic is there. The probe for a
- * mechanic defaults to qa/fidelity/<id>.mjs. A mechanic with no probe yet is listed "not scored" (it never
- * fails the gate on its own; the send-back asks for its probe).
- *
- * Mechanics only, never code or art: an entry that asks to copy the reference's code, art, sprites,
- * models, textures, sounds or text is refused.
- *
- * Without studio/fidelity.json the gate passes with a note. Read-only: the gate writes only
- * .studio/fidelity-last.json; sending back is a separate step the Director's flow pass runs.
+ * The checklist is the Game Bible "fidelity" section (studio/bible/bible.json); studio/fidelity.json is the fallback:
+ *   { "reference": "...", "minScore": 0.8, "mechanics": [ { "id": "lose-money", "says": "...",
+ *   "probe": "qa/fidelity/lose-money.mjs", "required": true } ] }
+ * A probe is `export default async ({ cartridge, loadCartridge, runScenario }) => ({ ok, why })` (default
+ * qa/fidelity/<id>.mjs); no probe: "not scored". Mechanics only, never code or art: copying the reference's code, art,
+ * models, sounds or text is refused. No studio/fidelity.json: the gate passes with a note.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,33 +1,30 @@
 /**
- * qa/selftest-277p.mjs — 2.77.0 (helper p, P9.6): pipelined merge trains and the batch cap.
- *   batch     a train takes at most STUDIO_TRAIN_BATCH ready lanes (default 4; with --max and STUDIO_TRAIN_MAX the
- *             smallest cap wins); the lanes past it wait for the next train
- *   pipeline  while train A verifies, ONE speculative train B verifies "A's tree + its lanes" in its own copy and lock
- *             and lands right after A without verifying again; B is discarded (its lanes keep their place, no hand-back)
- *             when A goes red or when main moves any other way, and its lanes then go in a normal train; a train that
- *             would start while B can land waits for it (never two landing at once)
- *   rules     B never holds, hands back or bisects: tier C, held, run-alone-behind-others, waiting and fix-first lanes
- *             are left for the next normal train (pickNextLanes); STUDIO_TRAIN_PIPELINE auto needs room on the machine
- *   status    task train status, .studio/train/status.json (`next`) and studio:status show both trains with their steps
- *   life      B has its own life record; a dead B's lock is freed by the reaper
- * Made-up lanes and a stand-in game check (a few seconds); every check fails on 2.76.1 (no pipeline, no batch cap).
+ * qa/selftest-277p.mjs — pipelined merge trains and the batch cap.
+ * batch  a train takes at most STUDIO_TRAIN_BATCH ready lanes (default 4; with --max and STUDIO_TRAIN_MAX the
+ *   smallest wins); the rest wait for the next train.
+ * pipeline  while train A verifies, ONE speculative train B verifies "A's tree + its lanes" in its own copy and lock
+ *   and lands right after A without verifying again; B is discarded (lanes keep their place, no hand-back) when A
+ *   goes red or main moves any other way; a train that would start while B can land waits for it.
+ * rules  B never holds, hands back or bisects: tier C, held, run-alone-behind-others, waiting and fix-first lanes are
+ *   left for the next normal train (pickNextLanes); STUDIO_TRAIN_PIPELINE auto needs room on the machine.
+ * status  task train status, .studio/train/status.json (`next`) and studio:status show both trains. life: B has its
+ *   own life record; a dead B's lock is freed by the reaper.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { eventsOf, gEnvOf, gitCrlfUserOf, guardOf, out, writeIn as write } from './kit.mjs';
 
 export async function selftest277P({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   if (!fs.existsSync(path.join(dir, 'node_modules')) && fs.existsSync(path.join(harnessRoot, 'node_modules'))) {
     try { fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction'); } catch {}
   }
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitCrlfUserOf(gEnv);
+  const guard = guardOf(report);
   const href = (base, rel) => JSON.stringify(pathToFileURL(path.join(base, rel)).href);
   const lastJson = (r) => { const l = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop(); try { return JSON.parse(l); } catch { return { _raw: out(r).slice(-2500) }; } };
   let n = 0;
@@ -223,7 +220,7 @@ console.log(JSON.stringify({ same: nextBaseVerdict(R, { assumed: ${JSON.stringif
       const q = run(ld, `node harness/task.mjs done ${id} --agent ${agent} --train`, as);
       return { id, agent, ok: st.status === 0 && c.status === 0 && q.status === 0, log: `${out(st)}\n${out(c)}\n${out(q)}`.slice(-1500) };
     };
-    const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+    const evs = eventsOf(events);
     const onMain = (rel) => g(S, 'cat-file', '-e', `main:${rel}`).status === 0;
     const queue = () => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'queue.json'), 'utf8')).map((e) => e.task); } catch { return []; } };
     const ran = () => { try { return fs.readFileSync(path.join(mark, 'ran.log'), 'utf8').split('\n').filter(Boolean).map((l) => { const [owner, what, at] = l.split('\t'); return { owner, what, at: Number(at) }; }); } catch { return []; } };

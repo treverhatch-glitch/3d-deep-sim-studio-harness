@@ -1,37 +1,31 @@
 /**
- * qa/selftest-279d.mjs — 2.79 (d): the 2.78.2 crew's harness bugs (request section 2, items 2, 7-14).
- *   2.2   `npm run agent -- start` runs the session in the background (--attach keeps it in the shell), prints pid and log.
- *   2.7   idle lane copies: the janitor's automatic run and `npm run lanes -- prune --idle <hours> [--dry-run]` remove the
- *         worktree of a copy nobody needs (branch kept); never one with a queued task, a claim, unsaved or unlanded work.
- *   2.8   `npm run lanes` with no arguments reads git's worktree files (no git process per copy); --full or a name reads all.
- *   2.9   the protected-step router reads the hand-back's structured field (meta.ownerStep), not the words of its note.
- *   2.10  an approval signed in a lane copy is logged in the main checkout's events (already fixed in 2.78.2; regression).
- *   2.11  `review <ID>` from main finds the task's lane branch when the current branch has no tagged commit.
- *   2.12  the divergence reference is built under <repo>/.studio/tmp, not the system temp folder.
- *   2.13  a Director's or reviewer's task with no type set (its title typed it "bug") skips the game's checks on notes only.
- *   2.14  the quarantine line never says "skipped" for a test config that ignores the list (already fixed in 2.78.2).
- * A tiny studio per check (a copy of the harness, git, lane copies made by the harness); no network.
+ * qa/selftest-279d.mjs — harness bugs a crew reported, each in a tiny studio (harness copy, git, lane copies); no
+ * network.
+ *   agent start  `npm run agent -- start` runs the session in the background (--attach keeps it in the shell), prints
+ *     pid and log
+ *   idle lanes  the janitor's run and `npm run lanes -- prune --idle <hours> [--dry-run]` remove the worktree of a copy
+ *     nobody needs (branch kept); never one with a queued task, a claim, unsaved or unlanded work
+ *   lanes  no arguments reads git's worktree files (no git process per copy); --full or a name reads all
+ *   router  the protected-step router reads the hand-back's meta.ownerStep, not its note's words
+ *   review  `review <ID>` from main finds the task's lane branch when the current branch has no tagged commit
+ *   divergence  the reference is built under <repo>/.studio/tmp
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvExtraOf, gitEolLfOf, guardOf, nodeCwd240Of, out, readJsonIn as readIn, readTextIn as textIn, sleep as wait, taskCwdOf, untilWaitOf, writeIn } from './kit.mjs';
 
 export async function selftest279D({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
   const OLD = '2026-10-01T00:00:00Z';
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = (extra = {}) => { const e = { ...process.env, ...ident, ...extra }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const readIn = (cwd, rel) => { try { return JSON.parse(fs.readFileSync(path.join(cwd, rel), 'utf8')); } catch { return null; } };
-  const textIn = (cwd, rel) => { try { return fs.readFileSync(path.join(cwd, rel), 'utf8'); } catch { return ''; } };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const until = async (fn, ms) => { const t0 = Date.now(); for (;;) { let v = false; try { v = fn(); } catch {} if (v) return true; if (Date.now() - t0 > ms) return false; await wait(200); } };
+  const gEnv = gEnvExtraOf(ident);
+  const g = gitEolLfOf(gEnv);
+  const guard = guardOf(report);
+  const until = untilWaitOf(wait);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT)/i.test(k)) clean[k] = '';
   const base = {
@@ -74,10 +68,9 @@ export async function selftest279D({ dir, report, tmpRoot, root }) {
     const runs = () => textIn(S, '.studio/runs-279d.txt').split('\n').filter(Boolean).length;
     return { S, env, ev, evs, runs };
   };
-  const node = (cwd, args, env, timeout = 240000) => spawnSync(process.execPath, args, { windowsHide: true, cwd, encoding: 'utf8', env: { ...process.env, ...ident, ...env }, timeout });
-  const task = (cwd, line, env, timeout) => node(cwd, ['harness/task.mjs', ...line], env, timeout);
+  const node = nodeCwd240Of(ident);
+  const task = taskCwdOf(node);
   const probe = (S, code, env, cwd = S) => { const f = path.join(cwd, `.probe-279d-${++n}.mjs`); fs.writeFileSync(f, code); const r = node(cwd, [f], env); fs.rmSync(f, { force: true }); const l = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop(); let j = null; try { j = JSON.parse(l); } catch {} return { ...r, j }; };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const addTask = (st, title, role = 'builder') => (out(task(st.S, ['add', title, '--role', role, '--priority', 'P1'], st.env)).match(/"id":\s*"(T-\d+)"/) || [])[1];
   /** A task, its lane copy (.lanes/<agent>) made by the harness, the task started there, one note committed. */
   const lane = (st, agent, title, rel, text, { role = 'builder' } = {}) => {

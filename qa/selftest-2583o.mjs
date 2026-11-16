@@ -12,15 +12,13 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { gitAsT as gIn, headOf, out } from './kit.mjs';
 
 export async function selftest2583O({ dir, run, report, tmpRoot }) {
   const u = (p, base = dir) => JSON.stringify(pathToFileURL(path.join(base, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const gIn = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const g = (...a) => gIn(dir, ...a);
-  const head = () => g('rev-parse', 'HEAD').stdout.trim();
+  const head = headOf(g);
   const write = (rel, text, base = dir) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_DONE_GAME_GATES: 'skip', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'pier', STUDIO_REACHABILITY: 'off', AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events.jsonl') };
   const as = (agent, extra = {}) => ({ ...env, STUDIO_LOCK_OWNER: agent, ...extra });

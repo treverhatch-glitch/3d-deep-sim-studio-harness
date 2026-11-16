@@ -1,33 +1,14 @@
 /**
- * harness/policy-rules.mjs — the studio policy file and autonomous mode (the overseer's duties 19 and 20).
- *
- * studio/policy.json is the owner's plain rules, read by agents (npm run policy) and enforced by the harness:
- *   {
- *     "autonomous": { "allowed": false, "agent": null, "actions": ["train-release", "type", ...], "reviewWithinH": 72,
- *                     "by": "<the owner who set it>", "at": "<ISO time>" },
- *     "never": ["delete-lanes", "protected-files", "gates"],
- *     "notes": ["free text rules the owner wants every agent to read"]
- *   }
- * A missing file means no autonomous mode. The file is protected (a lane that writes it is tier C). It counts the way
- * the owner's delegation does (harness/delegation.mjs): as committed in the main checkout (HEAD); with an owner key
- * only with a valid signature by it; without one only when the commit that set it has no Studio-Agent trailer.
- * Anything else reads as the defaults, with the reason shown by `npm run policy`.
- *
- * Autonomous mode: while the policy counts and says `autonomous.allowed: true`, the named overseer agent may take the
- * listed game-dev decisions (default: train-release, type, yes, hold, visual, asset-review, quarantine) with
- * `--by <agent>` and no per-decision permission. Each is recorded with `as: "autonomous"` in the decision log
- * (harness/decisions.mjs) and goes on a review list that never blocks work. Never in autonomous mode, whatever the
- * file says (NEVER_AUTONOMOUS): protected files, gates (harness code, silencers, deleted tests) and this file,
- * deletes (janitor-lanes, any rm), visibility, keys. A train release is refused for a lane held for any of those.
- *
- * Who turns it on: the owner, in their own terminal (`npm run policy -- autonomous on --agent <name> --by <owner>`), or
- * a game dev proposes it (`npm run autonomy -- mode autonomous on --agent <name> --by <game dev>`, a proposal in
- * .studio/policy-proposal.json) and the owner confirms it (`npm run policy -- confirm --by <owner>`). An agent never
- * turns it on: confirm and `autonomous on` refuse agents' shells, lanes and launched sessions, and a policy.json an
- * agent commits doesn't count. Anyone but a worker may pause it at once (`npm run autonomy -- mode autonomous off`);
- * that only takes power away (.studio/autonomy-paused.json; the owner's next confirm or `autonomous on` clears it).
- * harness/policy.mjs is the CLI. Modules import this one, never the CLI: a module the CLI's imports load back would
- * wait on its top-level await (a load deadlock).
+ * harness/policy-rules.mjs — the studio policy file (studio/policy.json) and autonomous mode.
+ * studio/policy.json holds the owner's plain rules: "autonomous" { allowed, agent, actions, reviewWithinH, by, at },
+ * "never" [...], "notes" [...]. It is protected (tier C) and counts only as committed in the main checkout (HEAD): with
+ * an owner key, with a valid signature; without one, when the commit has no Studio-Agent trailer. While
+ * `autonomous.allowed: true`, the named overseer agent may take the listed decisions (default: train-release, type,
+ * yes, hold, visual, asset-review, quarantine) with `--by <agent>`, each logged `as: "autonomous"`. Never autonomous
+ * (NEVER_AUTONOMOUS): protected files, gates, this file, deletes, visibility, keys. On: the owner (`npm run policy --
+ * autonomous on --agent <name> --by <owner>`), or a game dev proposes it (`npm run autonomy -- mode autonomous on ...`)
+ * and the owner confirms (`npm run policy -- confirm --by <owner>`). Never an agent. Anyone but a worker may pause it
+ * (`npm run autonomy -- mode autonomous off`). Import this module, never the CLI policy.mjs.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -85,14 +66,10 @@ function shapeError(d) {
 }
 
 /**
- * The policy's "audit" and "routing" blocks.
- *   "audit": { "rate": 0.1 }   the share of hands-free landings and autonomous decisions picked for an after-the-fact
- *                              audit (harness/audit.mjs); default 0.1 while autonomous mode is on, else 0.
- *   "routing": { "cheapFirst": ["chore", "docs", "test"], "tiers": { "cheap": "<model>", "mid": "<model>", "top":
- *                "<model>" }, "models": ["<model>", …], "holdout": 0 }   cheap-first routing (harness/routing.mjs): the
- *                listed task types/tracks start on the cheapest listed tier; the router never picks a model the policy
- *                doesn't list. "holdout" (default 0, OFF until the owner has API credit) sends that share of matching
- *                tasks to the default tier to measure the difference.
+ * The policy's "audit" and "routing" blocks. "audit": { "rate": 0.1 } is the share of landings and autonomous decisions
+ * picked for audit (default 0.1 while autonomous). "routing": { "cheapFirst": [types], "tiers": { "cheap", "mid", "top"
+ * }, "models": [...], "holdout": 0 } is cheap-first routing (harness/routing.mjs): listed types start on the cheapest
+ * tier; the router never picks an unlisted model. "holdout" (default 0, OFF): share of tasks sent to the default tier.
  */
 function auditRoutingShapeError(d) {
   const au = d.audit;

@@ -1,21 +1,11 @@
 #!/usr/bin/env node
 /**
- * harness/engine-tracks.mjs — one table for every engine target (Unity, Godot, Unreal, or any engine a studio names), so
- * its lane, land gate, merge train and rig cost come from data, not Unity-only code paths.
- *
- * An engine pass has its own record (this file), is judged in the engine's repo (harness/done-check.mjs
- * engineWorkChecks), has its train started by the Line Producer in a quiet window (harness/line-producer.mjs
- * enginePass), and gets an engine worktree per launched pass (engineLaunch below, used by harness/agent.mjs). The track
- * lives in .studio/engine/tasks.json, not only in the task.added event (which can scroll out of the last 20000 events).
- *
- * The table: ENGINE_TARGETS (defaults), merged with studio/game.json "engines": { "<name>": { ... } } (protected: the
- * owner's). A studio can name any engine there; an unknown name gets the generic defaults.
- *   heavyKind   the machine:heavy job kind its land run takes (unity: the "unity" kind and its cap; else "heavy")
- *   rig         { ramGb, cpuThreads, minutes }: the expected cost of ONE land run (minutes: until durations exist)
- *   floor       { env, gb }: the free-RAM floor a land run waits for (env wins; then the lane's tuned ram-floor)
- *   tune        the settings the engine lane may change itself (harness/engine-tune.mjs); engines.<x>.tune.allow narrows
- *   files       queue/lock/last files of its train and gate (unity-queue.json, …)
- *
+ * harness/engine-tracks.mjs — one table for every engine target (Unity, Godot, Unreal, or any a studio names).
+ * Its lane, land gate, merge train and rig cost come from data. The track lives in .studio/engine/tasks.json; the table
+ * is ENGINE_TARGETS (defaults) merged with studio/game.json "engines": { "<name>": { ... } } (protected: the owner's).
+ *   heavyKind  the machine:heavy job kind its land run takes   rig    { ramGb, cpuThreads, minutes } of ONE land run
+ *   floor      { env, gb }: the free-RAM floor a land run waits for (env wins; then the lane's tuned ram-floor)
+ *   tune       the settings the engine lane may change (harness/engine-tune.mjs); files  queue/lock/last files
  *   node harness/engine-tracks.mjs [list] [--json]       every engine target, its land command, queue and cost
  *   node harness/engine-tracks.mjs task <T-ID> [--json]   the engine record of one task
  *   node harness/engine-tracks.mjs backfill [--dry-run] [--by <name>]   open engine-porter tasks get their track
@@ -218,10 +208,9 @@ export function engineTrainVerdict(taskId, { role = null, root = mainRoot(), env
 
 /**
  * On upgrade, open engine-porter tasks with no engine track get one when the studio configures exactly one engine
- * (inferred: { from: 'upgrade backfill' } plus an engine.track_backfilled event); with several they are listed for a
- * person (npm run task -- track <ID> engine:<name>), as is a track that names no engine. Bare names are normalized.
- * `open`: [{ id, role }] (default: the board's open tasks). Returns { changed: [{ task, track, how }], ambiguous: [task],
- * unknown: [{ task, track }], engines, lines }. dryRun: nothing written.
+ * (inferred: { from: 'upgrade backfill' }, event engine.track_backfilled); with several they are listed for a person
+ * (npm run task -- track <ID> engine:<name>). `open`: [{ id, role }] (default: the board's open tasks). Returns {
+ * changed: [{ task, track, how }], ambiguous, unknown, engines, lines }. dryRun: no writes.
  */
 export async function backfillEngineTracks({ root = mainRoot(), by = 'upgrade', dryRun = false, env = process.env, open = null } = {}) {
   let tasks = open;
@@ -513,19 +502,10 @@ export function engineLaunch({ task, agent = null, role = null, root = mainRoot(
 }
 
 /**
- * The engine target merge a session can run itself. At launch the harness merges the engine's target into the task's
- * engine worktree and, on a conflict, aborts. A launched session may not run `git merge` (harness/allowlist.mjs: only
- * add, commit, status, diff, log, show; a session must not merge lanes into the target), so this command merges the
- * TARGET into the task's OWN engine worktree, found from its engine record, and nothing else:
- *   npm run engine -- merge <ID>             merge (no fast-forward, no commit); clean: committed at once with the launch
- *                                            merge's message; a conflict is LEFT in the worktree with each file named
- *   npm run engine -- merge <ID> --continue  refused while a conflicted file still holds <<<<<<< or >>>>>>> lines or git
- *                                            still lists unmerged paths; else git commit --no-edit
- *   npm run engine -- merge <ID> --abort     git merge --abort
- * A caller that works as an agent (STUDIO_AGENT, or STUDIO_LOCK_OWNER as a launched session has) must hold the task's
- * claim; a launched session pinned to another task is refused. A shell with neither is a person's and may run it.
- * So may the owner's stand-ins outside the harness (targetMergeStandIn), for any task; meta.via says how.
- * Events: engine.target_merge with meta.step started | conflict (meta.files) | done | aborted.
+ * The engine target merge a session can run itself: merges the TARGET into the task's OWN engine worktree and nothing
+ * else (a launched session may not run `git merge`, harness/allowlist.mjs).
+ *   npm run engine -- merge <ID> [--continue | --abort]   a conflict is LEFT in the worktree; --continue is refused
+ *   while conflict markers remain. An agent caller must hold the task's claim. Events: engine.target_merge (meta.step).
  */
 export const targetMergeCommand = (task) => `npm run engine -- merge ${task}`;
 export const targetMergeMessage = (target, rec, task) => `Merge ${target} into ${rec?.branch || task} (engine pass ${task})`;

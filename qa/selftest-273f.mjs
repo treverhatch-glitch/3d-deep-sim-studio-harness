@@ -1,25 +1,20 @@
 /**
- * qa/selftest-273f.mjs — 2.73.0 (helper f): taking an update safely, and the overseer-stage machinery.
- *   preflight  `upgrade --preflight` (read-only): PASS/WARN/FAIL per item with Fix lines, exit 1 on a FAIL; the board, the
- *              owner key, a tracked .env, a configured tool that isn't there, an unreadable policy file, a lane with
- *              unlanded work; the webhook never printed; nothing written; --ref checks node against the ref's engines
- *   smoke      `upgrade --smoke`: a tiny verify and train on a made-up task in a scratch copy (never the real board), the
- *              machine scan and a dry supervisor pass, an upgrade.smoke event, the copy removed; a broken harness FAILs
- *   snapshot   `upgrade --merge` writes .studio/upgrades/<from>-to-<to>.json (landed/h, false reds per train, tokens per
- *              landed change by task, red verify %, workarounds/day); `autonomy -- impact` takes its before side from it
- *   predict    `release -- predict --metric --expect` writes docs/releases/<version>.json; impact scores hit / miss
- *   overseer   studio/overseer.json (protected, read as committed): `npm run overseer` shows the stage and whether the next
- *              stage's criteria hold from git trailers and the logs; `overseer -- record` is a person's, never the overseer's
- *   repro      `workaround -- repro <H-id>`: refused below stage 1 and for the studio itself; in a separate clone a branch,
- *              a selftest-style failing test and a PR body with the trailers
- *   (2.84 (y): the weekly harness scout this file also covered is gone, and its two checks with it.)
- * Each check fails on 2.71.1 (none of these commands or files exist there).
+ * qa/selftest-273f.mjs — taking an update safely, and the overseer-stage machinery.
+ * preflight  `upgrade --preflight` (read-only): PASS/WARN/FAIL per item with Fix lines, exit 1 on a FAIL; the webhook
+ *   never printed; --ref checks node against the ref's engines.
+ * smoke  `upgrade --smoke`: a tiny verify and train on a made-up task in a scratch copy, a dry supervisor pass, an
+ *   upgrade.smoke event.
+ * snapshot  `upgrade --merge` writes .studio/upgrades/<from>-to-<to>.json, which `autonomy -- impact` reads; `release
+ *   -- predict --metric --expect` writes docs/releases/<version>.json.
+ * overseer  studio/overseer.json (protected): `npm run overseer` shows the stage and the next stage's criteria;
+ *   `overseer -- record` is a person's. repro: `workaround -- repro <H-id>` is refused below stage 1.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { gEnvOf, gitArgsOf, guardOf, out, readJsonl as events } from './kit.mjs';
 
 export async function selftest273F({ dir, run, report, tmpRoot, root }) {
   // The smoke's train runs the size check, which needs typescript: a copy made without node_modules (the full
@@ -29,11 +24,10 @@ export async function selftest273F({ dir, run, report, tmpRoot, root }) {
     try { fs.rmSync(path.join(dir, 'node_modules'), { force: true }); } catch {}
     fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   }
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitArgsOf(gEnv);
+  const guard = guardOf(report);
   const nm = path.join(dir, 'node_modules');
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
@@ -56,7 +50,6 @@ export async function selftest273F({ dir, run, report, tmpRoot, root }) {
     made.push(S);
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const put = (ev, list) => fs.appendFileSync(ev, list.map((e) => `${JSON.stringify({ id: `evt_${++n}`, status: 'ok', ...e, ts: new Date(e.at).toISOString() })}\n`).join(''));
   const lastJson = (r) => { const t = String(r.stdout || '').trim(); try { return JSON.parse(t); } catch { const l = t.split('\n').filter((x) => x.startsWith('{')).pop(); try { return JSON.parse(l); } catch { return null; } } };
   const has = (S, rel) => fs.existsSync(path.join(S, rel));

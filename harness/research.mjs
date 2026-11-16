@@ -1,16 +1,12 @@
 /**
- * harness/research.mjs — 2.71.0 (y): the research job type (overseer duty 16, the paperwork only).
- *
+ * harness/research.mjs — the research job type (the paperwork only; this file never fetches anything).
  *   npm run task -- add "<question>" --type research [--role …]
- *
- * The crew's overseer wrote its research up by hand, with no fixed shape and sometimes no sources. A research task's
- * title starts "Research:" (the --type adds it). Its write-up goes to docs/research/<ID>.md, or to the game's own docs
- * folder (game/<name>/docs/research/<ID>.md) when the game has one. `task start` writes the template there when the
- * file doesn't exist yet: the question, sources with links, findings, what is UNVERIFIED, a recommendation.
- * `task done` refuses the task while the write-up has no Sources section, or no link (http(s)://…) in it; a missing
- * write-up gets the template written and is refused. Nothing else is checked: research is paperwork (no verify).
- * The digest lists research finished in the last 24 h with its file and the first line of its recommendation.
- * The research itself (reading, browsing) stays with whoever does the task; this file never fetches anything.
+ * A research task's title starts "Research:" (the --type adds it). Its write-up goes to docs/research/<ID>.md, or the
+ * game's own docs folder (game/<name>/docs/research/<ID>.md). `task start` writes the template there when the file
+ * doesn't exist: the question, sources with links, findings, what is UNVERIFIED, a recommendation. `task done` refuses
+ * while the write-up has no Sources section or no http(s):// link; a missing write-up gets the template and is refused.
+ * Nothing else is checked (no verify). The digest lists research finished in the last 24 h with its file and the first
+ * line of its recommendation.
  */
 import fs from 'node:fs';
 import path from 'node:path';

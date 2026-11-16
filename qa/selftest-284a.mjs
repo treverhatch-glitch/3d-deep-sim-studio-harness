@@ -1,26 +1,21 @@
 /**
- * qa/selftest-284a.mjs — 2.84 (a): a planning wake needs something that changed.
- *
- * In one crew's 26 hours the Director's regular cycle and the Producer's "queue is below its depth target" wake started
- * 83 sessions that left almost nothing on the board. harness/wake-gate.mjs fingerprints each of the two kinds of wake
- * and skips one whose situation did not change after a session that changed nothing, up to a ceiling; a cycle's brief
- * opens with what changed; a planning session's end records its board events; the scorecard counts both; and the
- * launcher no longer starts a session for a task whose `task start` would be refused.
- *
- *   pure       fingerprint, digest, verdict, outcome (inputs in, verdict out)
- *   queue      the real queueDepthPass with a stand-in wake: first, same, change, ceiling, off
- *   cycle      the real cyclePass with a stand-in wake: first, quiet, news (in the brief), ceiling, off
- *   score      the two planning lines
- *   launcher   a parked task: no session, task start's words, agent.start.refused
+ * qa/selftest-284a.mjs — a planning wake needs something that changed (harness/wake-gate.mjs).
+ * harness/wake-gate.mjs fingerprints the Director's regular cycle and the Producer's "queue is below its depth
+ *   target" wake and skips one whose situation did not change after a session that changed nothing, up to a ceiling;
+ *   a cycle's brief opens with what changed; a planning session's end records its board events; the scorecard counts
+ *   both; the launcher starts no session for a task whose `task start` would be refused.
+ * pure  fingerprint, digest, verdict, outcome. queue: the real queueDepthPass with a stand-in wake (first, same,
+ *   change, ceiling, off).
+ * cycle  the real cyclePass (first, quiet, news in the brief, ceiling, off). score: the two planning lines.
+ * launcher  a parked task: no session, task start's words, agent.start.refused.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf as fileUrlRelSOf, guardCap3000Of, out } from './kit.mjs';
 
 export async function selftest284A({ dir, root, report, tmpRoot }) {
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const guard = guardCap3000Of(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
   // ---- a studio copy: its own .studio (state files, the event log) ----
@@ -31,7 +26,7 @@ export async function selftest284A({ dir, root, report, tmpRoot }) {
   for (const x of ['studio/task-holds.json']) fs.rmSync(path.join(S, x), { force: true });
   const evFile = path.join(S, '.studio', 'events-284a.jsonl');
   const env = { ...clean, AGENT_EVENTS_FILE: evFile, STUDIO_MAIN_ROOT: S, STUDIO_TASK_BUDGET: 'off', STUDIO_WATCHDOG: 'off', CI: '', NODE_OPTIONS: '' };
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
+  const u = fileUrlRelSOf(S);
   let pn = 0;
   const probe = (code, extra = {}) => {
     const f = path.join(S, `.probe-284a-${++pn}.mjs`);

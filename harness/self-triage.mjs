@@ -1,29 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/self-triage.mjs — 2.65.0 (hands-off by default): routine stops fixed from a fixed list, without a person.
- *
+ * harness/self-triage.mjs — routine stops fixed from a fixed list, without a person or a model.
  *   node harness/self-triage.mjs status        the list, and what it did in the last 24 h
  *   node harness/self-triage.mjs pass          one pass now (the watchdog runs it on every pass)
- *
- * The list is data (harness/self-triage.json). Each fix is deterministic (a script, no model), is logged as one
- * selftriage.<fix> event naming its cause (agent "self-triage"), and runs at most once per cause per "onceHours" (6):
- * a cause that comes back inside that window was not routine, so it stays stopped for a person (one
- * selftriage.declined event says so). A stop whose cause is not on the list is never touched. STUDIO_SELF_TRIAGE=off
- * turns the whole list off; "on": false one fix.
- *   reap-orphans   a machine:heavy holder whose root died with its tree still running: kill the leftovers
- *                  (heavy.mjs killHolderTree, the same kill as `heavy.mjs stop`) and free the slot.
- *   rerun-timeout  a game check that timed out under load (its load factor was above 1: the B-17 timeout line), or
- *                  (2.65.1) with no quiet passing run recorded for it yet while the floor is on, runs once more at the
- *                  cap, STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR (3) x its base; never past the cap (harness/game-gates.mjs
- *                  asks timeoutRerun).
- *   switch-tool    the supervisor halted because two sessions ended with exit 127/9009 (the tool isn't on PATH): when
- *                  another tool of the budget order is on PATH and not out of quota, the missing one is marked out for
- *                  onceHours (budget.mjs's quota file, so pickTool takes the next) and the halt is cleared as
- *                  `npm run studio:resume` clears it, by "self-triage" with the cause. A custom command (STUDIO_<ROLE>_CMD)
- *                  has no other tool: it stays halted.
- *   close-rescues  rescue tasks of a task that has landed are closed (task done does it on landing; this is the sweep).
- * Only static imports of event.mjs and fsafe.mjs: supervisor.mjs, game-gates.mjs and watchdog.mjs import this module,
- * and everything else is imported inside the functions (no import cycle with a CLI that uses top-level await).
+ * The list is data (harness/self-triage.json). Each fix logs one selftriage.<fix> event and runs at most once per cause
+ * per "onceHours" (6); a cause that comes back inside that window stays stopped for a person (selftriage.declined).
+ * STUDIO_SELF_TRIAGE=off turns the list off. Fixes: reap-orphans (kill a dead machine:heavy holder's leftovers),
+ * rerun-timeout (a timed-out game check runs once more, up to STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR (3) x base),
+ * switch-tool (halt from two exit 127/9009 sessions: the missing tool is marked out for onceHours; a custom
+ * STUDIO_<ROLE>_CMD stays halted), close-rescues. Only static imports of event.mjs and fsafe.mjs: supervisor.mjs,
+ * game-gates.mjs and watchdog.mjs import this module.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -89,12 +75,10 @@ export function declineFix(fix, cause, why, { root = REPO_ROOT, now = Date.now()
 // ---- rerun-timeout (asked by harness/game-gates.mjs) ----
 
 /**
- * A game check timed out: run it once more? { rerun, ms, why, reason }. Under load (timing.factor > 1: the B-17 line
- * printed it), or (2.65.1) with no quiet passing run recorded for the check yet while the floor is on
- * (timing.quiet === null and timing.floorMult > 0, from heavy.mjs scaledTimeout): a suite whose quiet time is near its
- * base would otherwise time out at the base every time and never get a floor. Only up to the cap
- * (STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR x base): a check that already ran at the cap gets nothing longer. Records the
- * fix (once per check per onceHours) when it says yes.
+ * A game check timed out: run it once more? { rerun, ms, why, reason }. Yes when under load (timing.factor > 1), or
+ * with no quiet passing run recorded for the check while the floor is on (timing.quiet === null and timing.floorMult >
+ * 0, from heavy.mjs scaledTimeout). Only up to the cap (STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR x base): a check that
+ * already ran at the cap gets nothing longer. Records the fix (once per check per onceHours) when it says yes.
  */
 export function timeoutRerun({ gate, timing, base, root = REPO_ROOT, env = process.env, now = Date.now() } = {}) {
   const cfg = readTriage(env);

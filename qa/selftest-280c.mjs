@@ -1,33 +1,24 @@
 /**
- * qa/selftest-280c.mjs — 2.80 (c): the fixes the trim can't deliver (part c).
- *
- * N1 (P0): a stale .studio/machine.json (the supervisor off > 15 min) made machineProfile() null, the game check fell back
- * to 2 test workers and blew the gate timeout: a train of 3 good lanes ran 35 min and landed nothing. The profile is now
- * scanned inline when the stored one is missing or stale.
- *
- * Patch #24 / R3-14 (P1): a lock whose owner's session had ended could be taken by nobody until it expired (a P0 "fix
- * main" waited an hour), and `lock release <key> --owner X` from the orchestrator was refused by its STUDIO_LOCK_OWNER.
- *
- * Patch #14 / R3-7 (P1): a manual wind-down ("everything off") still started API-pool and Vertex builders; a usage
- * wind-down outlived removing STUDIO_USAGE_WINDDOWN_PCT; an agent's `winddown --now` had no end only a person could --off.
- *
- * Patch #25 (P1): after task.train.red_main the train daemon started the same lanes again at once (~30 min each, 6 times in
- * a day) while the fix was in progress. It now waits while main is red at the same head, unless a queued lane fixes it.
- *
- * Patch #18 (P2): the owner asked twice for a builder order; the orchestrator hand-started paid builders every tick.
- * STUDIO_BUILDER_ORDER (api, vertex, plan) is the order the supervisor fills a builder slot in; unset, nothing changes.
+ * qa/selftest-280c.mjs — fixes for a stale machine profile, orphan locks, wind-down, a red-main train loop, builder order.
+ * -  a stale .studio/machine.json (supervisor off > 15 min) no longer makes machineProfile() null (the game check
+ *   fell back to 2 test workers); the profile is scanned inline when missing or stale.
+ * -  a lock whose owner's session ended can be taken; `lock release <key> --owner X` from the orchestrator isn't
+ *   refused by its STUDIO_LOCK_OWNER.
+ * -  a manual wind-down starts no API-pool or Vertex builders; a usage wind-down ends when STUDIO_USAGE_WINDDOWN_PCT
+ *   is removed; an agent's `winddown --now` has an end.
+ * -  after task.train.red_main the train daemon waits while main is red at the same head, unless a queued lane fixes
+ *   it. STUDIO_BUILDER_ORDER (api, vertex, plan) is the order the supervisor fills a builder slot in; unset, nothing
+ *   changes.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { guardCap2500Of, hrefInDirOf } from './kit.mjs';
 
 export async function selftest280C({ dir, report, tmpRoot }) {
-  const u = (rel) => pathToFileURL(path.join(dir, rel)).href;
-  const guard = async (name, fn) => {
-    try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 2500)); }
-    catch (e) { report(name, false, String(e?.stack || e).slice(0, 2500)); }
-  };
+  const u = hrefInDirOf(dir);
+  const guard = guardCap2500Of(report);
   let n = 0;
   const scratch = (tag) => { const d = path.join(tmpRoot || dir, `st-280c-${tag}-${process.pid}-${++n}`); fs.mkdirSync(path.join(d, '.studio'), { recursive: true }); return d; };
 

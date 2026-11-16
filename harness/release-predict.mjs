@@ -1,22 +1,14 @@
 /**
- * harness/release-predict.mjs — 2.73.0 (f): a release says what it expects to move, and the impact report scores it.
- *
- *   npm run release -- predict --metric <name> --expect "-30%" [--release <version>] [--why "<what should move it>"] [--by <name>]
+ * harness/release-predict.mjs — a release says what it expects to move; the impact report scores it.
+ *   npm run release -- predict --metric <name> --expect "-30%" [--release <version>] [--why "<what should move it>"]
+ *     [--by <name>]
  *   npm run release -- predict --list [--release <version>]
- *
- * The prediction goes in the release file docs/releases/<version>.json (the version: --release, else package.json's), one
- * entry per metric (a second predict for the same metric replaces it): { metric, expect, by, at, why }. It ships with the
- * harness, so a studio that takes the update has it, and `npm run autonomy -- impact` (harness/impact.mjs) scores each
- * prediction of the release it reports on: hit / miss with the measured change, or "not scored" while either side has
- * too little data (STUDIO_IMPACT_MIN_N). The CHANGELOG is not edited by this.
- *
- * Metrics: the impact report's measures (landedPerHour, verifyP50Min, verifyP90Min, redVerifyPct, handBacksPerLanded,
- * tokensPerKept, roundTripsPerLanded, noWorkPct) and the before snapshot's (falseRedsPerTrain, tokensPerLanded,
- * workaroundsPerDay), or the short names below. Expect: a signed percent change after vs before:
- *   "-30%"   hit when the change is -30% or lower (at least the drop predicted); "+10%": +10% or higher
- *   "<=-30%" / "<-30%" / ">=+10%" / ">+10%"   the bound as written
- *   "~0%" (or "0%")   hit when the change is within 10 points of it (the impact report's "same" band)
- * Paperwork: no model, no network.
+ * Stored in docs/releases/<version>.json (--release, else package.json's): { metric, expect, by, at, why }. `npm run
+ * autonomy -- impact` (harness/impact.mjs) scores each (hit / miss, "not scored" while data is short:
+ * STUDIO_IMPACT_MIN_N). Metrics: landedPerHour, verifyP50Min, verifyP90Min, redVerifyPct, handBacksPerLanded,
+ * tokensPerKept, roundTripsPerLanded, noWorkPct, falseRedsPerTrain, tokensPerLanded, workaroundsPerDay. Expect is a
+ * signed percent change: "-30%" hits at -30% or lower, "+10%" at +10% or higher, "<=-30%" / ">=+10%" as written, "~0%"
+ * within 10 points.
  */
 import fs from 'node:fs';
 import path from 'node:path';

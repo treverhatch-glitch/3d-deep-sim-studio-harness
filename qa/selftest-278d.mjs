@@ -8,8 +8,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { gEnvOf, gitEolLfOf, guardOf, out } from './kit.mjs';
 
 export async function selftest278D({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -17,11 +17,10 @@ export async function selftest278D({ dir, run, report, tmpRoot, root }) {
   if (!fs.existsSync(nm) && fs.existsSync(path.join(harnessRoot, 'node_modules'))) {
     try { fs.symlinkSync(path.join(harnessRoot, 'node_modules'), nm, 'junction'); } catch {}
   }
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const gitIn = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const gitIn = gitEolLfOf(gEnv);
+  const guard = guardOf(report);
   const env = { STUDIO_CARTRIDGE: '', STUDIO_GAME: '', TICK_BUDGET_MS_PER_TICK: '', NODE_OPTIONS: '', ...ident };
   let n = 0;
   const fixture = (name, edit = () => {}) => {

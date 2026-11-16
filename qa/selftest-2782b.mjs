@@ -1,31 +1,27 @@
 /**
- * qa/selftest-2782b.mjs — 2.78.2 (b): a red merge train costs minutes, not hours, on one shared PC.
- *   Together  the flake triager ran each failing file alone, then again at quiet low load: ~20 min a file (4 files:
- *             80 min). A check's failing files now run TOGETHER at low load (one run), then the still-failing ones
- *             together on a quiet machine; each file is labelled from the run's own per-file result, per file when the
- *             output can't be split.
- *   Budget    one red cost 1-2 h (train 111009: 106 min, nothing landed). STUDIO_TRAIN_RED_BUDGET_MIN (30) caps the red
- *             chain: the newest lane is handed back, a prefix lands only on a green full verify, the rest re-queue.
- *   Perf      wall-clock tests (ms budgets) gate merges on a busy PC. A game:perf step runs them alone on a quiet machine;
- *             never quiet: "not run (busy)", a WARN, never red.
- *   Quiet     an engine-porter session counts as "not quiet" (the porter starts and stops Unity between steps).
- *   Spare     the parallel bisect took all 3 heavy slots (a builder verify waited 858 s): it leaves one.
+ * qa/selftest-2782b.mjs — a red merge train costs minutes, not hours, on one shared PC.
+ * together  a check's failing files run TOGETHER at low load (one run), then the still-failing ones together on a
+ *   quiet machine; each file is labelled from the run's own per-file result, per file when the output can't be split.
+ * budget  STUDIO_TRAIN_RED_BUDGET_MIN (30) caps the red chain: the newest lane is handed back, a prefix lands only on
+ *   a green full verify, the rest re-queue.
+ * perf  a game:perf step runs wall-clock tests (ms budgets) alone on a quiet machine; never quiet: "not run (busy)",
+ *   a WARN, never red.
+ * quiet  an engine-porter session counts as "not quiet". spare: the parallel bisect leaves one heavy slot free.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitEolLfOf, guardOf, importInDirOf, killTree, readJsonFile as readJ, writeIn } from './kit.mjs';
 
 export async function selftest2782B({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
-  const imp = (rel) => import(pathToFileURL(path.join(dir, rel)).href);
+  const imp = importInDirOf(dir);
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const gitIn = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const readJ = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const gitIn = gitEolLfOf(gEnv);
+  const guard = guardOf(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT)/i.test(k)) clean[k] = '';
   const base = {
@@ -94,10 +90,6 @@ export async function selftest2782B({ dir, report, tmpRoot, root }) {
     st.flakes = () => { try { return fs.readFileSync(path.join(S, '.studio', 'flakes.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
     return st;
   };
-  const killTree = (child) => {
-    try { if (process.platform === 'win32') spawnSync('taskkill', ['/T', '/F', '/PID', String(child.pid)], { windowsHide: true, stdio: 'ignore' }); else process.kill(-child.pid, 'SIGKILL'); } catch {}
-    try { child.kill('SIGKILL'); } catch {}
-  };
   const probeAsync = (S, code, env, ms) => new Promise((resolve) => {
     const f = path.join(S, `.probe-2782b-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -113,7 +105,6 @@ export async function selftest2782B({ dir, report, tmpRoot, root }) {
       resolve({ code, signal, j, ms: Date.now() - t0, timedOut: Date.now() - t0 >= ms - 50, text: `${so}${se}` });
     });
   });
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   // runTrain with board stubs: close and hand-back are recorded.
   const trainProbe = (S) => `import { runTrain } from ${u(S, 'harness/train.mjs')};
 const calls = { handBack: [], close: [] }; const logs = [];

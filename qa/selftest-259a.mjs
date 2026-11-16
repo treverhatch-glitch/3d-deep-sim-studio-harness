@@ -11,22 +11,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { boardOf, doneBoardOf, eventsOf, gitAsT as g, out, queueDoneOf, queueTasksOf, runsCountOf, writeIn as write } from './kit.mjs';
 
 export async function selftest259A({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const mark = path.join(tmpRoot, `train-runs-259a-${process.pid}.txt`);
   const events = path.join(dir, '.studio', 'events-259a.jsonl');
   // 2.78.2: these checks are about the inline task done (STUDIO_DONE_QUEUE=0); the queued path is checked in selftest-2782a.
   const env = { STUDIO_DONE_QUEUE: '0', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_TRAIN: '', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-259a-${process.pid}.pem`), AGENT_EVENTS_FILE: events, TRAIN_MARK: mark, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const runs = () => { try { return fs.readFileSync(mark, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const runs = runsCountOf(mark);
+  const evs = eventsOf(events);
   const mainHas = (rel) => g(dir, 'cat-file', '-e', `main:${rel}`).status === 0;
-  const board = () => `${fs.existsSync(path.join(dir, 'studio/NEXT.md')) ? fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8') : ''}`;
-  const doneBoard = () => `${fs.existsSync(path.join(dir, 'studio/DONE.md')) ? fs.readFileSync(path.join(dir, 'studio/DONE.md'), 'utf8') : ''}`;
+  const board = boardOf(dir);
+  const doneBoard = doneBoardOf(dir);
   const isDone = (id) => new RegExp(`\\b${id}\\b`).test(doneBoard()) && !new RegExp(`\\b${id}\\b`).test(board().split(/^## Done/m)[0]);
-  const queue = () => { try { return JSON.parse(fs.readFileSync(path.join(dir, '.studio', 'train', 'queue.json'), 'utf8')).map((e) => e.task); } catch { return []; } };
+  const queue = queueTasksOf(dir);
 
   // ---- the studio ----
   write(dir, 'studio/gates.json', `${JSON.stringify({ gates: [
@@ -63,7 +61,7 @@ export async function selftest259A({ dir, run, report, tmpRoot }) {
     const c = spawnSync('git', ['commit', '-qm', `${id}: ${title}`, ...(noVerify ? ['--no-verify'] : [])], { windowsHide: true, cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
     return { id, agent, dir: ld, as, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0, log: `${out(made)}\n${out(st)}\n${out(c)}` };
   };
-  const queueIt = (l) => run(l.dir, `node harness/task.mjs done ${l.id} --agent ${l.agent} --train`, l.as);
+  const queueIt = queueDoneOf(run);
   const train = (extra = '', more = {}) => run(dir, `node harness/task.mjs train --by tester ${extra}`, { ...env, ...more });
 
   // ---- 1. two lanes that don't overlap land in one train on ONE verify ----

@@ -1,25 +1,19 @@
 /**
- * qa/selftest-2585r.mjs — 2.58.5 launcher fixes from the crew's 2026-11-01 report (H-9, H-2, H-2b, H-1, H-8).
- *   H-9:  a custom tool command (STUDIO_TOOL_CLAUDE_CMD) on a laneless code task runs in its own lane copy, like the
- *         built-in claude argv, and its line can use {mainRoot} and {addDirs}; {addDirs} fills one argument per item.
- *   H-2:  agy gets its kickoff on stdin, not as a `-p <prompt>` argument that agy.exe split at its spaces
- *         ("unexpected argument "are""); STUDIO_AGY_PROMPT=arg brings -p back.
- *   H-2b: `npm run agent -- allow agy` writes exactly the owner's approved set (node, npm, npx, git status, diff, add,
- *         commit, log); --all writes the whole harness list; --prune takes extra harness rules back out.
- *   H-1:  a nim session never runs the role's model; the default is no longer the end-of-life model; a 410/404 for the
- *         model gives one clear launcher line and an event.
- *   H-8:  the NIM key reaches aider even when a .env (the template's empty OPENAI_API_KEY=) is loaded over the
- *         environment, as aider does; any other-cased OPENAI_ name is dropped (one variable on Windows); aider runs with
- *         --no-auto-commits.
- * Stand-in programs first on PATH (POSIX: a node script with a shebang; Windows: a .cmd wrapper, UNTESTED here). The
- * stand-in agy re-splits its arguments at whitespace, as agy.exe did on the crew's Windows PC; the stand-in aider loads
- * .env from its folder over its environment and then applies AIDER_OPENAI_API_KEY, as aider's docs describe. No real
- * tool, key or network is used; the stand-ins record booleans about the key, never a value.
+ * qa/selftest-2585r.mjs — launcher fixes: custom tool commands, agy kickoff and allow-list, nim model, aider key.
+ *   custom cmd  a STUDIO_TOOL_CLAUDE_CMD command on a laneless code task runs in its own lane copy; its line can use
+ *     {mainRoot} and {addDirs} ({addDirs} fills one argument per item)
+ *   agy  kickoff on stdin, not a `-p <prompt>` argument agy.exe split at spaces; STUDIO_AGY_PROMPT=arg brings -p back
+ *   allow  `npm run agent -- allow agy` writes exactly the approved set (node, npm, npx, git status, diff, add, commit,
+ *     log); --all writes the whole harness list; --prune takes extras back out
+ *   nim  never runs the role's model; a 410/404 gives one launcher line and an event
+ *   aider  the NIM key reaches aider even with a .env (empty OPENAI_API_KEY=) loaded over the environment; other-cased
+ *     OPENAI_ names are dropped; runs with --no-auto-commits
+ * Stand-ins first on PATH (POSIX node script; Windows .cmd wrapper, UNTESTED here); no real tool, key or network.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { fileUrlIn as u, out, real } from './kit.mjs';
 
 const spawnSyncSleep = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(() => {}, ${ms})`], { windowsHide: true });
 
@@ -28,8 +22,6 @@ const FAKE_KEY = 'fake-nim-key-for-selftest-2585r';
 const QUIET = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_HEARTBEAT_SEC: '1', STUDIO_ROLE: '', STUDIO_MAIN_ROOT: '', STUDIO_BUILDER_CMD: '', STUDIO_PRODUCER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_REHEARSAL: '', STUDIO_TOOL_CLAUDE_CMD: '', STUDIO_TOOL_AGY_CMD: '', STUDIO_TOOL_NIM_CMD: '', STUDIO_AGY_PROMPT: '', STUDIO_NIM_MODEL: '', STUDIO_BUILDER_MODEL: '', STUDIO_AGENT_MODEL: '', STUDIO_LANELESS: '', STUDIO_WORKTREES: '', NVIDIA_API_KEY: '', NVIDIA_API_KEY_2: '', OPENAI_API_KEY: '', AIDER_OPENAI_API_KEY: '', STUDIO_NIM_CHECK: 'off' };
 
 export async function selftest2585R({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (root, p) => JSON.stringify(pathToFileURL(path.join(root, p)).href);
   let n = 0;
   const probe = (root, code, env = {}) => {
     const f = path.join(root, `.probe-2585r-${n++}.mjs`);
@@ -37,7 +29,6 @@ export async function selftest2585R({ dir, run, report, tmpRoot }) {
     const r = run(root, `node ${path.basename(f)}`, { ...QUIET, ...env });
     try { return { ...JSON.parse(String(r.stdout).trim().split('\n').pop()), raw: out(r) }; } catch { return { raw: out(r) }; }
   };
-  const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
   // ---------- stand-ins first on PATH ----------

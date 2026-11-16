@@ -1,24 +1,14 @@
 /**
- * harness/merge-tree.mjs — 2.65.1: the one place that asks git whether two commits would conflict.
- *
- * `npm run lanes` (harness/lanes.mjs, the conductor's table) and the queue-time prediction of `task done --train`
- * (harness/train-predict.mjs) each ran `git merge-tree --write-tree --name-only` with their own version check and
- * parsing, so the table and the queue could disagree about the same pair (a conflict only in the manifest's
- * "unionFiles", which the train merges with git's union driver, was a conflict in one and none in the other). Both use
- * this module now:
- *
+ * harness/merge-tree.mjs — the one place that asks git whether two commits would conflict.
+ * `npm run lanes` (harness/lanes.mjs) and the queue-time prediction of `task done --train` (harness/train-predict.mjs) both
+ * use it, so they agree about a pair (a conflict only in the manifest's "unionFiles", merged by git's union driver, is clean).
  *   gitVersion(cwd)          git's version, read once per process ([major, minor, patch] or null)
  *   mergeTreeSupport(cwd)    { ok, version, why }: merge-tree --write-tree needs git 2.38+
- *   mergeTree(root, a, b, { unionFiles })
- *                            in memory, no index, no files: { clean, tree, files, union, error }; a conflict only inside
- *                            unionFiles is clean (listed in `union`)
- *   placesFor(root, ours, theirs, files)
- *                            file:line places of those conflicted files (hotspots.mjs conflictPlaces), at most 12
+ *   mergeTree(root, a, b, { unionFiles })   in memory, no index, no files: { clean, tree, files, union, error }
+ *   placesFor(root, ours, theirs, files)    file:line places of the conflicted files (hotspots.mjs conflictPlaces), at most 12
  *   placeText(c)             "file:line, ..." (or the file names), for one line of output
- *
- * Test hook: STUDIO_TEST_GIT_VERSION=<"git version x.y.z"> stands in for `git version` (not cached).
- * Only static imports of merge-lane.mjs and hotspots.mjs, neither of which imports a module whose CLI uses top-level
- * await.
+ * Test hook: STUDIO_TEST_GIT_VERSION=<"git version x.y.z"> stands in for `git version` (not cached). Only static imports of
+ * merge-lane.mjs and hotspots.mjs, neither of which imports a module whose CLI uses top-level await.
  */
 import { spawnSync } from 'node:child_process';
 import { matchAny } from './merge-lane.mjs';

@@ -12,13 +12,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { fileUrlOf as fileUrlRelOf, guardCap3000Of, writeIn as write } from './kit.mjs';
 
 export async function selftest283I({ dir, root, report, tmpRoot }) {
-  const write = (b, rel, text) => { fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true }); fs.writeFileSync(path.join(b, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
+  const guard = guardCap3000Of(report);
   const T = path.join(tmpRoot, `s283i-${process.pid}`);
   fs.mkdirSync(T, { recursive: true });
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   let pn = 0;
   const probe = (code) => {
     const f = path.join(dir, `.probe-283i-${++pn}.mjs`);

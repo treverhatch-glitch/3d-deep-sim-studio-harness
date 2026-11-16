@@ -1,18 +1,12 @@
 /**
- * harness/godot-version.mjs — 2.42.0: the Godot pieces that must be the same version, checked together.
- *
- * The research pack's Marina run: "godot451 (4.5.1); export templates on box are 4.7.2 only", and a gdUnit4
- * set up for one Godot while the gate ran another. A Godot binary newer than the project silently upgrades
- * it on import; export templates for another version can't export it; gdUnit4 is built for one version.
- *
- * Checked for each Godot project the engine gate runs:
- *   - the binary's version (`godot --version`, major.minor.patch) against the project's own
- *     (project.godot config/features, major.minor);
- *   - when the project has export presets (export_presets.cfg): export templates installed for the binary's
- *     exact version (the user's Godot data folder, or STUDIO_GODOT_TEMPLATES);
+ * harness/godot-version.mjs — the Godot pieces that must be the same version, checked together.
+ * A Godot binary newer than the project silently upgrades it on import; export templates for another version can't export
+ * it; gdUnit4 is built for one version. Checked for each Godot project the engine gate runs:
+ *   - the binary's version (`godot --version`) against the project's own (project.godot config/features, major.minor);
+ *   - when the project has export presets (export_presets.cfg): export templates installed for the binary's exact version
+ *     (the user's Godot data folder, or STUDIO_GODOT_TEMPLATES);
  *   - the version studio/godot-unit.json says gdUnit4 was set up for.
- * STUDIO_GODOT_PIN: "warn" (default: notes in the engine gate's output), "fail" (a mismatch fails the gate:
- * opt in), "off".
+ * STUDIO_GODOT_PIN: "warn" (default: notes in the engine gate's output), "fail" (a mismatch fails the gate: opt in), "off".
  */
 import fs from 'node:fs';
 import os from 'node:os';

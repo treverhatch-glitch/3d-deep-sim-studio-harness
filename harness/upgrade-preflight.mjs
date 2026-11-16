@@ -1,43 +1,14 @@
 /**
- * harness/upgrade-preflight.mjs — `npm run upgrade -- --preflight [--ref <ref>] [--json]`, before taking a
- * harness update. Read-only: it changes no file, commit, branch or lock (the machine scan is read, never written).
+ * harness/upgrade-preflight.mjs — `npm run upgrade -- --preflight [--ref <ref>] [--json]`: read-only checks before a
+ * harness update.
  *
- * One line per item, PASS / WARN / FAIL / INFO, with a Fix line under each WARN and FAIL; exit 1 on any FAIL:
- *   node          this node against the engines of the ref's package.json (--ref), else the studio's
- *   git           git --version against STUDIO_PREFLIGHT_MIN_GIT (2.34)
- *   checkout      the studio's main checkout, on a branch, no merge/revert in progress; --ref names a commit here
- *   board         the board committed (upgrade --check); stash entries holding board rows are named (WARN)
- *   owner-key     studio/keys/owner-ed25519.pub.pem committed (FAIL without: protected files aren't enforced); WARN when
- *                 the private key is on this machine (STUDIO_OWNER_KEY or ~/.studio-owner/), where agents run
- *   signatures    the studio's protected check (qa/protected-check.mjs): every protected change carries a valid signature
- *   disk / ram    from the machine scan (harness/machine.mjs scanMachine, never written); disk under
- *                 STUDIO_DISK_MIN_FREE_GB (default max(20 GB, 5% of the disk)) FAILs; memory headroom under
- *                 STUDIO_PREFLIGHT_MIN_RAM_GB (4) WARNs. A studio without machine.mjs: node's own numbers.
- *   tools         STUDIO_UNITY and GODOT_BIN, when set (environment or .env), must resolve (FAIL otherwise); Unity,
- *                 Blender and ffmpeg on the PATH are reported (INFO)
- *   webhook       STUDIO_REPORT_WEBHOOK set (never printed): an http(s) URL PASSes, anything else FAILs, unset WARNs;
- *                 FAIL when .env is tracked by git (the webhook is a secret)
- *   policy        studio/policy.json, studio/delegation.json, studio/autonomy.json, studio/overseer.json: each one there
- *                 must parse (FAIL otherwise); missing: INFO (defaults)
- *   dotenv-identity a .env line setting STUDIO_LOCK_OWNER, STUDIO_ROLE, STUDIO_AGENT or STUDIO_MAIN_ROOT
- *                 (WARN, the line numbers): identity settings belong to a session; the harness ignores them in .env
- *   lanes         lane copies (.lanes/<name>) with uncommitted work or commits not on the studio's branch (WARN, listed):
- *                 the update's lane refresh skips a lane with uncommitted work. A lane is a registered worktree of this
- *                 repo (git worktree list) with its own .git; any other folder there is a "leftover folder (not a
- *                 lane)" (INFO), never asked for git status (git would answer for the main checkout)
- *   long-run/…    "before a long run" (WARN only): .env workarounds a later release made unnecessary (the list is
- *                 harness/upgrade-leftovers.json: version, key, value, why), ready builder tasks with no lane (the
- *                 studio's own harness/task.mjs and task-hold.mjs read the board, when it has them), uncommitted changes
- *                 in harness/ or scripts/ (a local patch), and trains (.studio/train/<id>/life.json) or gate runs
- *                 (.studio/verify-running) still running from before the harness last changed
- *   game-tests/…  the studio game's test checks (the studio's own harness/test-config-check.mjs, when it has one): FAIL
- *                 a test check with neither a "focus" command nor a vitest/jest runner the harness can run single files
- *                 with (every train re-check re-runs the whole suite); FAIL a test config whose list mode still lists a
- *                 file named in STUDIO_TEST_QUARANTINE (or, with perf / slow-tier tests declared, STUDIO_TEST_EXCLUDE);
- *                 WARN when that can't be told. Runs the runner's list mode; writes nothing.
- *
- * No harness imports (only node's): an old studio runs this from the ref through the upgrade guard (docs/RELEASE.md).
- * The guard passes its own checkUpgrade / isMainCheckout in. UNTESTED on Windows: `where` for the PATH lookups.
+ * One line per item (PASS / WARN / FAIL / INFO), a Fix line under each WARN and FAIL; exit 1 on any FAIL. Items: node,
+ * git (STUDIO_PREFLIGHT_MIN_GIT, 2.34), checkout, board, owner-key (FAIL if studio/keys/owner-ed25519.pub.pem is not
+ * committed), signatures (qa/protected-check.mjs), disk / ram (STUDIO_DISK_MIN_FREE_GB, STUDIO_PREFLIGHT_MIN_RAM_GB
+ * 4), tools (STUDIO_UNITY, GODOT_BIN), webhook (STUDIO_REPORT_WEBHOOK, never printed; FAIL when .env is tracked),
+ * policy (studio/policy.json, delegation.json, autonomy.json, overseer.json must parse), dotenv-identity
+ * (STUDIO_LOCK_OWNER, STUDIO_ROLE, STUDIO_AGENT, STUDIO_MAIN_ROOT in .env), lanes, long-run/…, game-tests/… (FAIL: no
+ * "focus" command; a file named in STUDIO_TEST_QUARANTINE or STUDIO_TEST_EXCLUDE still listed). No harness imports.
  */
 import fs from 'node:fs';
 import os from 'node:os';

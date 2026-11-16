@@ -1,45 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/lanes.mjs — the conductor's lane table, and refreshing a lane with main as one mechanical job.
- *
- *   npm run lanes [-- --json] [--full] [--no-stamps] [<task|agent|branch>]
- *       With no name and no --full the listing is cheap: task, agent, branch, queue, hold, last result and whether a
- *       session runs, read from git's worktree files and the studio's records (no git process per copy). Ahead/behind,
- *       dirty, hook stamps, conflicts and harness drift are read with --full (progress on stderr) or for the one lane a
- *       name picks.
- *       One row per lane copy (.lanes/<agent>) and per lane branch with unlanded work (.studio/lane-branches.json, the
- *       train queue): task, agent, branch, ahead/behind main, hook stamps (harness/hook-stamp.mjs on the lane's own
- *       commits, within STUDIO_LANES_STAMP_MS, 4000 ms in all; past that "not checked"), whether main changed harness/
- *       or scripts/ since the lane branched, queued for the train (with its tier), held (npm run task -- hold) or held
- *       for the owner (tier C), the last targeted-test or verify result recorded for the lane, its declared Pin-Moves,
- *       predicted conflicts (git merge-tree with main, and pairwise among queued lanes that touch the same files; git
- *       older than 2.38: the hotspots overlap, with a note), and its age. Also a running merge train's current step and
- *       ETA (harness/train-status.mjs), with a note on STUDIO_TRAIN_MAX when it has more than 6 lanes.
- *       Read-only: nothing is written, nothing is merged.
- *
- *   npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests] [--json]
- *       Per lane, in its own copy: refuses when its session is running (a launched session alive, a process working in
- *       the copy, a claim renewed in the last STUDIO_LANE_LIVE_MIN minutes) unless --busy-ok, with uncommitted work, or
- *       mid-merge/rebase; re-stamps through the real hooks first if a commit's stamp no longer matches (hook-stamp.mjs
- *       restamp, judged from the main checkout's local branch); merges main into it (git merge, never a rebase: the
- *       lane's commits and their stamps stay as they are); and runs the lane's targeted tests (harness/game-gates.mjs on
- *       the lane's own files, related tests only, STUDIO_GATE_RELATED=on, as task done scopes them). A textual conflict
- *       stops it: `git merge --abort`, the files are listed, nothing is resolved. Goldens and pins change only as the
- *       merge brings them from main. Events: lanes.refresh.ok, lanes.refresh.conflict, lanes.refresh.red,
- *       lanes.refresh.refused; the result is kept in .studio/lanes/refresh.json for the table.
- *       Who: a person, a Producer or Director session, or an agent outside the harness (harness/permission.mjs); a
- *       worker never. --busy-ok is theirs too.
- *
- *   npm run lanes -- prune --idle <hours> [--dry-run] [--by <name>]   remove idle lane copies now (the janitor's rule: session
- *                                                        ended, no queued task, nobody in it, nothing unsaved or unlanded; branch kept)
- *   npm run lanes -- disk [--top N] [--json]            each lane copy's size, the total, what laneExclude saves (harness/lane-disk.mjs)
- *   npm run lanes -- widen <path|glob> [...] [--lane <agent>] [--why "…"]   put left-out paths back into a sparse lane copy,
- *                                                        logged (harness/lane-sparse.mjs)
- *   npm run lanes -- orphans [<ID>] [--all] [--json]   task commits on lane branches not on main
- *   npm run lanes -- carry <ID> [--from <lane branch>] --by <you>   cherry-pick only a task's own commits onto a fresh lane
- *                                                        (harness/lane-orphans.mjs)
- *
- * Exit: 0 all fine; 1 a conflict or red; 2 refused or bad usage.
+ * harness/lanes.mjs — the conductor's lane table, and refreshing a lane with main as one mechanical job. Exit 0 fine,
+ * 1 conflict or red, 2 refused.
+ *    npm run lanes [-- --json] [--full] [--no-stamps] [<task|agent|branch>]   read-only
+ *    npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests] [--json]
+ * One row per lane copy and lane branch. --full adds ahead/behind, hook stamps (STUDIO_LANES_STAMP_MS), conflicts.
+ * refresh, per lane in its own copy (.lanes/<agent>): refuses when its session runs (STUDIO_LANE_LIVE_MIN), with
+ * uncommitted work, or mid-merge/rebase; merges main (never a rebase); runs targeted tests; a conflict stops it with
+ * `git merge --abort`. Events lanes.refresh.ok|conflict|red|refused; .studio/lanes/refresh.json. Never by a worker.
+ *    npm run lanes -- prune --idle <hours> [--dry-run] [--by <name>] | disk [--top N] [--json] | orphans [<ID>] [--all]
+ *    npm run lanes -- widen <path|glob> [...] [--lane <agent>] [--why "…"] | carry <ID> [--from <branch>] --by <you>
  */
 import fs from 'node:fs';
 import path from 'node:path';

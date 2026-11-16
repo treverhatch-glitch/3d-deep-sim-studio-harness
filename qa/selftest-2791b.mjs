@@ -1,29 +1,27 @@
 /**
- * qa/selftest-2791b.mjs — 2.79.1 (b): the Line Producer never freezes the line, plans for engine lands, and the boost says
- * when it ends.
- *   freeze    a parked chain-breaker pages the orchestrator once and the line keeps filling; lane-less ready tasks are
- *             skipped while other work can run (the Producer is asked once); the chain-breaker verify hold ends when its
- *             train runs and never lasts past STUDIO_LINE_HOLD_MAX_MIN
- *   engine    a queued or near engine land holds new verifies (not the running ones, not the land), steps the builder
- *             target down one at a time, is released at once when the land holds its slot, is bounded by
- *             STUDIO_ENGINE_HOLD_MAX_MIN and reports why when it runs out; nothing is held without a land; the land's
- *             floor is learned from the peaks of its green runs
- *   boost     MAX SPEED saying so when it expires; `--until <time>` and `--until off`
- * A temp copy of the studio per check; probe scripts run in it. Each check fails on 2.79.0.
+ * qa/selftest-2791b.mjs — the Line Producer never freezes the line, plans for engine lands, and the boost says when it ends.
+ * freeze  a parked chain-breaker pages the orchestrator once and the line keeps filling; lane-less ready tasks are
+ *   skipped while other work can run; the chain-breaker verify hold ends when its train runs and never lasts past
+ *   STUDIO_LINE_HOLD_MAX_MIN.
+ * engine  a queued or near engine land holds new verifies (not running ones, not the land), steps the builder target
+ *   down one at a time, is released when the land holds its slot, is bounded by STUDIO_ENGINE_HOLD_MAX_MIN and
+ *   reports why when it runs out; nothing is held without a land; the land's floor is learned from its green runs'
+ *   peaks.
+ * boost  MAX SPEED says so when it expires; `--until <time>` and `--until off`. A temp copy of the studio per check.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitArgsOf, guardOf, iso, nextLine as line, out, readJsonl as events } from './kit.mjs';
 
 export async function selftest2791B({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = fs.existsSync(path.join(dir, 'node_modules')) ? path.join(dir, 'node_modules') : path.join(harnessRoot, 'node_modules');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitArgsOf(gEnv);
+  const guard = guardOf(report);
   const UNSET = ['STUDIO_UNSCOPED_PARALLEL', 'STUDIO_SHARED_SIM', 'STUDIO_LINE_LANES', 'STUDIO_REQUIRE_LANE', 'STUDIO_MODEL_ROUTING', 'STUDIO_BUILDER_TOOL', 'STUDIO_WORKTREES', 'STUDIO_ENV_FROM_FILE', 'STUDIO_WAVES',
     'STUDIO_LINE_HOLD_MAX_MIN', 'STUDIO_LINE_CHAIN_HOLD_MIN', 'STUDIO_ENGINE_HOLD_MAX_MIN', 'STUDIO_ENGINE_RAM_RUNS', 'STUDIO_ENGINE_RAM_MARGIN_GB', 'STUDIO_ENGINE_RAM_MIN_GB', 'STUDIO_ENGINE_LAND_WAIT_MIN', 'STUDIO_UNITY_MIN_FREE_GB',
     'STUDIO_ENGINE_VERIFY_TYPICAL_MIN', 'STUDIO_ENGINE_WAIT_SOON_MIN', 'STUDIO_ENGINE_SCALE_STEP_MIN', 'STUDIO_ENGINE_NEAR_MIN'];
@@ -39,7 +37,6 @@ export async function selftest2791B({ dir, report, tmpRoot, root }) {
   };
   const childEnv = (extra = {}) => { const e = { ...process.env, ...base, ...extra }; for (const k of UNSET) if (!(k in extra)) delete e[k]; return e; };
   const now = Date.now();
-  const iso = (ms) => new Date(ms).toISOString();
   let n = 0;
   const made = [];
   const studio = (name, { tasks = [], holds = {}, events = [], mode = 'extreme' } = {}) => {
@@ -50,7 +47,6 @@ export async function selftest2791B({ dir, report, tmpRoot, root }) {
     const ev = path.join(S, '.studio', 'events-2791b.jsonl');
     fs.mkdirSync(path.dirname(ev), { recursive: true });
     fs.writeFileSync(ev, events.map((e, i) => JSON.stringify({ id: `evt_${i}`, status: 'ok', ts: iso(now - 2 * 3600000 + i * 1000), ...e })).join('\n') + (events.length ? '\n' : ''));
-    const line = (t) => `- [${t.ip ? '>' : ' '}] **${t.id}** [${t.p || 'P1'}] (\`${t.role || 'builder'}\`) — ${t.title}`;
     fs.writeFileSync(path.join(S, 'studio', 'NEXT.md'), `# Studio Task Queue (\`studio/NEXT.md\`)\n\n## IN_PROGRESS\n${tasks.filter((t) => t.ip).map(line).join('\n')}\n\n## BACKLOG\n${tasks.filter((t) => !t.ip).map(line).join('\n')}\n\n## DONE\n`);
     fs.writeFileSync(path.join(S, 'studio', 'task-holds.json'), `${JSON.stringify({ tasks: holds }, null, 2)}\n`);
     fs.writeFileSync(path.join(S, 'studio', 'mode.json'), `${JSON.stringify({ mode, history: [] }, null, 2)}\n`);
@@ -59,7 +55,6 @@ export async function selftest2791B({ dir, report, tmpRoot, root }) {
     made.push(S);
     return { S, ev, env: { AGENT_EVENTS_FILE: ev } };
   };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const probe = (S, env, name, code, timeout = 120000) => {
     const f = path.join(tmpRoot, `probe-2791b-${name}-${process.pid}-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -67,7 +62,6 @@ export async function selftest2791B({ dir, report, tmpRoot, root }) {
     const t = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop();
     try { return { ...JSON.parse(t), _err: `${out(r)}`.slice(-1500) }; } catch { return { _err: `${out(r).slice(-2500)}` }; }
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const added = (task, meta = {}) => ({ type: 'task.added', agent: 'producer', task, msg: `Queued ${task} [P1] (builder): t`, meta });
   /** One supervise() pass with fake sessions; the starts it made. */
   const superviseCode = (S, sessions) => `const sup = await import(${u(S, 'harness/supervisor.mjs')});

@@ -1,23 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/intake.mjs — pre-production starts here: questions about the game that write the Game Bible.
- *
  *   npm run intake                          ask in the terminal (only what is still unanswered; --all for everything)
  *   npm run intake -- --answers game.json   apply answers from a file (an agent, a script or a future UI)
  *   npm run intake -- --questions           print the questions and the layer catalog as JSON
  *   npm run intake -- --ask < answers.txt   ask without a terminal (one answer per line; for scripts and tests)
- *   npm run intake -- --followups            follow-up questions about the phases and each kept or explore layer
- *   npm run intake -- --followups --model    also let a cheap model write extra questions from your answers (checked)
- *   npm run intake -- --followups --json     the unanswered follow-ups as JSON (for a UI or the Producer)
- *   npm run intake -- --followups --answers f.json   answers as { "<key>": "<answer>" }
- *
- * Answers file: { "answers": { "title": "…", "playLength": "demo", "pillars": ["name: rules out"],
- * "phase1": "…", … }, "layers": { "tech-tree": "no", "levels-xp": { "answer": "yes", "phase": 1 } } }
- *
- * Shorter games are much easier to finish: a demo (15 to 30 minutes) is the recommended start.
- * Longer games need more of the game dev's own time, and the intake says so.
- * When the Bible is complete enough, it queues the pre-production work once: reference studies,
- * storyboards, an R&D task per "explore" layer, and a sign-off task for the person.
+ *   npm run intake -- --followups [--model | --json | --answers f.json]   follow-up questions on phases and layers
+ * Answers file: { "answers": { "title": "…", "playLength": "demo", "pillars": ["name: rules out"], "phase1": "…" },
+ * "layers": { "tech-tree": "no", "levels-xp": { "answer": "yes", "phase": 1 } } }. --model: a cheap model adds
+ * questions. A demo (15 to 30 minutes) is the recommended start. A complete Bible queues the pre-production work once:
+ * reference studies, storyboards, an R&D task per "explore" layer, a sign-off task.
  */
 import fs from 'node:fs';
 import path from 'node:path';

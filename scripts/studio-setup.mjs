@@ -1,22 +1,15 @@
 #!/usr/bin/env node
 /**
- * scripts/studio-setup.mjs — a studio setup: the reusable parts of a studio, in one folder you can keep,
- * share, or hand to a new game.
+ * scripts/studio-setup.mjs — a studio setup: the reusable parts of a studio in one folder.
  *
  *   npm run new-studio -- --name "<game>" --setup <folder>|this     start a new game from a setup
  *   npm run new-studio -- --save-setup <folder>                       save this studio's setup to a folder
  *   node scripts/studio-setup.mjs apply <folder> [--into <studio>]    apply a setup to a studio
  *
- * A setup folder mirrors the studio. Only these paths are used; anything else is skipped and named:
- *   studio/roles/**, studio/skills/**, studio/presets/**, studio/rules/**   your own roles, skills, presets, rules
- *   studio/divisions.json, studio/budget.json, studio/mode.json           departments, plan limits, pace
- *   cartridges/<id>/**, web/<id>/**                                        a game template to start from
- *   intake-answers.json                                                    answers for `npm run intake --answers`
- *   settings.env                                                           STUDIO_*, HUB_*, AGENT_*, PLAYTEST_* lines
- * Never in a setup: keys, tokens or passwords (lines that look like one are dropped and named), the
- * harness itself (harness/, qa/, scripts/), or a game's progress (the board, events, locks).
- * `this` (or --save-setup) takes the current studio's roles, skills, presets, rules, departments,
- * budget and pace, and never its game, its Bible or its .env.
+ * Only these paths are used (others are skipped and named): studio/roles/**, skills/**, presets/**, rules/**,
+ * studio/divisions.json, budget.json, mode.json, cartridges/<id>/**, web/<id>/**, intake-answers.json, settings.env.
+ * Never keys, tokens or passwords (dropped and named), the harness itself, or a game's progress. `this` never takes
+ * the game, its Bible or its .env.
  */
 import fs from 'node:fs';
 import path from 'node:path';

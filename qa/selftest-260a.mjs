@@ -1,12 +1,8 @@
 /**
- * qa/selftest-260a.mjs — 2.60.0 (helper a): the merge train's pin refresh, prefix bisection and union files
- * (final brief items 1 and 2c).
- *   Lanes built in parallel each re-pin a seeded game's exact numbers against an old main, so the second to land failed
- *   on stale pins; a red train blamed "the last" lane when lanes passed alone but failed together; two lanes adding a
- *   line to the same import barrel conflicted every time. Now a red train re-runs only its failing checks on prefixes
- *   (main+A, main+A+B, ...), a red that is only declared pins is refreshed in one train commit (Pin-Refresh:) when
- *   every move was declared by its lane (Pin-Moves:) and none is an invariant, and a conflict only inside a manifest
- *   "unionFiles" entry is merged with git's union driver.
+ * qa/selftest-260a.mjs — the merge train's pin refresh, prefix bisection and union files.
+ * A red train re-runs only its failing checks on prefixes (main+A, main+A+B, ...); a red that is only declared pins is
+ * refreshed in one train commit (Pin-Refresh:) when every move was declared by its lane (Pin-Moves:) and none is an
+ * invariant; a conflict only inside a manifest "unionFiles" entry is merged with git's union driver.
  * A tiny studio: a made-up game whose "sim" sums small numbers in game/demo/tune/<pin>-*.txt into three pins, whose
  * check compares them to game/demo/pins.expected.json (printing FAIL pin:<name>), fails on a note that says BROKEN and
  * on two notes that clash; lane copies (git worktrees) with the commit hooks installed.
@@ -15,22 +11,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { boardOf, doneBoardOf, droppedOf, eventsOf, gitAsT as g, handBackOf, out, queueDoneOf, queueTasksOf, writeIn as write } from './kit.mjs';
 
 export async function selftest260A({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const events = path.join(dir, '.studio', 'events-260a.jsonl');
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_TRAIN: '', STUDIO_TRAIN_BISECT: '', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_GAME_GATE_RETRY: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-260a-${process.pid}.pem`), AGENT_EVENTS_FILE: events, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const mainHas = (rel) => g(dir, 'cat-file', '-e', `main:${rel}`).status === 0;
   const mainFile = (rel) => g(dir, 'show', `main:${rel}`).stdout || '';
-  const board = () => `${fs.existsSync(path.join(dir, 'studio/NEXT.md')) ? fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8') : ''}`;
-  const doneBoard = () => `${fs.existsSync(path.join(dir, 'studio/DONE.md')) ? fs.readFileSync(path.join(dir, 'studio/DONE.md'), 'utf8') : ''}`;
+  const board = boardOf(dir);
+  const doneBoard = doneBoardOf(dir);
   const isDone = (id) => new RegExp(`\\b${id}\\b`).test(doneBoard()) && !new RegExp(`\\b${id}\\b`).test(board().split(/^## Done/m)[0]);
-  const queue = () => { try { return JSON.parse(fs.readFileSync(path.join(dir, '.studio', 'train', 'queue.json'), 'utf8')).map((e) => e.task); } catch { return []; } };
-  const handBack = (id) => { const f = path.join(dir, 'studio', 'handoffs', `${id}.md`); return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : ''; };
-  const dropped = (id) => evs().some((e) => e.type === 'task.train.dropped' && e.task === id);
+  const queue = queueTasksOf(dir);
+  const handBack = handBackOf(dir);
+  const dropped = droppedOf(evs);
   const mainLog = () => g(dir, 'log', '--format=%B%x00', 'main').stdout || '';
   const expected = () => { try { return JSON.parse(mainFile('game/demo/pins.expected.json')); } catch { return {}; } };
 
@@ -107,7 +101,7 @@ export async function selftest260A({ dir, run, report, tmpRoot }) {
       fs.writeFileSync(f, `{\n${Object.keys(e).sort().map((k) => `  ${JSON.stringify(k)}: ${JSON.stringify(e[k])}`).join(',\n\n')}\n}\n`);
     },
   });
-  const queueIt = (l) => run(l.dir, `node harness/task.mjs done ${l.id} --agent ${l.agent} --train`, l.as);
+  const queueIt = queueDoneOf(run);
   const train = (extra = '') => run(dir, `node harness/task.mjs train --by tester ${extra}`, env);
   const pinsRecords = () => { const d = path.join(dir, '.studio', 'train'); const outR = []; try { for (const n of fs.readdirSync(d)) { const f = path.join(d, n, 'pins.json'); if (fs.existsSync(f)) outR.push(JSON.parse(fs.readFileSync(f, 'utf8'))); } } catch {} return outR; };
 

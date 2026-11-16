@@ -1,30 +1,13 @@
 /**
- * harness/divergence.mjs — where a red golden first went wrong.
- *
- * On a red golden (never in a routine run: per-tick hashing of the whole state roughly doubles a run) the harness re-runs
- * the golden twice in lockstep, on this tree and on a reference tree, with a cheap per-subsystem digest per tick (FNV-1a of
- * each top-level state key's canonical JSON), stops at the first tick where a digest differs and names the first field that
- * differs there:
- *
- *   [golden] first divergence: tick 23, resources.credits 101 -> 102 (subsystem resources; example-1337.json vs 3f2a1b4c, ...)
- *   [golden] divergence-json {"file":"example-1337.json","tick":23,"subsystem":"resources","field":"resources.credits",...}
- *
- * The reference is the commit that last changed the golden file (it recorded the hash; STUDIO_DIVERGENCE_REF names
- * another). Its cartridge folder is read with `git show` into a temp folder and loaded with loadCartridge({ dir }), with
- * every file it imports from outside its folder as it was in that commit and the checkout's node_modules linked
- * (materializeClosure). It is run to its end: when its sha256 is not the golden's, the line says the reference does not
- * reproduce the golden (the divergence is against that commit, not the recording). It LOCATES a bug; the golden check
- * still decides red or green. STUDIO_GOLDEN_DIVERGENCE=off turns it off.
- *
- * Generic contract for a studio game (not a cartridge): its studio.gates.json may declare
- *   "divergence": { "command": "<prints per-tick digests as JSON lines>", "gate": "<check id, default: any id with
- *                   'golden'>", "state": "<optional: prints the state at {tick} of {run} as one JSON object>",
- *                   "goldens": ["<paths whose last commit is the reference>"] }
- * Each line the command prints: { "run": "<name, optional>", "tick": <n>, "digests": { "<subsystem>": "<hash>" },
- * "fields": { "<subsystem>": { ...values, optional } } }. When that check fails, the harness runs the command on this
- * tree and on the reference commit (a detached git worktree in the temp folder, node_modules linked), compares the
- * lines and prints the same two lines (prefix [game-gates]). The harness does the comparison; the game only prints.
- * Results are events (golden.divergence) and are read back from a log by divergenceFromLog (hand-back facts, gates.run).
+ * harness/divergence.mjs — finds where a red golden first went wrong, by re-running it in lockstep with a reference.
+ * Only on a red golden: it runs on this tree and on a reference with a per-subsystem digest per tick (FNV-1a of each
+ * top-level state key's canonical JSON), and names the first differing tick and field:
+ *   [golden] first divergence: tick 23, resources.credits 101 -> 102 (subsystem resources; example-1337.json)
+ *   [golden] divergence-json {"file":"example-1337.json","tick":23,"subsystem":"resources","field":"resources.credits"}
+ * The reference is the commit that last changed the golden file (STUDIO_DIVERGENCE_REF names another), read with
+ * `git show` into a temp folder (materializeClosure). It LOCATES a bug; the golden check decides red or green.
+ * STUDIO_GOLDEN_DIVERGENCE=off turns it off. A game may declare "divergence" { command, gate, state, goldens } in
+ * studio.gates.json; the command prints per-tick JSON lines { run?, tick, digests, fields? }.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -171,11 +154,10 @@ export function relativeSpecifiers(text) {
 const objType = (root, ref, rel) => { const r = git(root, ['cat-file', '-t', `${ref}:${rel}`]); return r.status === 0 ? r.stdout.trim() : ''; };
 
 /**
- * Write a cartridge folder of a commit under `dest` (as materialize does) and, following its relative imports, every
- * file it needs from outside that folder (a game's own loader beside its sim, the sim's sources, a package.json that
- * sets the module type), each as it was in that commit, at the same repo path. Then link the checkout's node_modules
- * (the repo root's, and any under a folder a needed file is in) so bare imports resolve. A `.js` import that is a `.ts`
- * file in that commit (TypeScript's convention) takes the `.ts`. { files, outside: [rel], missing: [{ rel, from }] }.
+ * Write a cartridge folder of a commit under `dest` and, following its relative imports, every file it needs from
+ * outside that folder (the game's loader, the sim's sources, a package.json that sets the module type), each as in
+ * that commit, at the same repo path. Then link the checkout's node_modules. A `.js` import that is a `.ts` file in
+ * that commit takes the `.ts`. { files, outside: [rel], missing: [{ rel, from }] }.
  */
 export function materializeClosure(root, ref, rel, dest, { maxFiles = 4000 } = {}) {
   const have = new Set();

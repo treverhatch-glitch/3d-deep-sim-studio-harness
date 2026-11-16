@@ -1,18 +1,14 @@
 /**
- * harness/telemetry.mjs — 2.79 (f): per-session / per-tick diagnostics keep their data, not their event noise.
+ * harness/telemetry.mjs — per-session / per-tick diagnostics keep their data, not their event noise.
  *
- * A diagnostic nobody reads one event at a time (a gate timeout that was scaled for load, a machine sample, a prompt
- * prefix that leaks something volatile) used to write one events.jsonl line per occurrence: over 6 days that was 1739,
- * 629 and 436 lines of the 35,600 the crew's run wrote. emitSampled() counts them in .studio/telemetry/<type>.json
- * (count, top keys, the last one's facts) and writes ONE `<type>.summary` event per STUDIO_TELEMETRY_HOUR_MIN (60)
- * minutes, with the count, the top keys and the last one. The summary is written by the first occurrence after the hour,
- * or by flushTelemetry() (the supervisor's pass calls it), so a quiet type still reports.
- *
- * Only types NOTHING reads per event are routed here (see docs/METRICS.md "Telemetry"): hotspot.overlap, task.overlap,
- * skill.follow, watch.report and agent.heartbeat are read by plan-waves,
- * next-board, scorecard, retro and metrics, so they stay one event each.
- *
- * STUDIO_TELEMETRY=full writes the per-event lines again (for debugging), and the counter files are left alone.
+ * A diagnostic nobody reads one event at a time (a gate timeout scaled for load, a machine sample, a prompt prefix
+ * that leaks something volatile) would write one events.jsonl line per occurrence. emitSampled() counts them in
+ * .studio/telemetry/<type>.json (count, top keys, the last one's facts) and writes ONE `<type>.summary` event per
+ * STUDIO_TELEMETRY_HOUR_MIN (60) minutes: by the first occurrence after the hour, or by flushTelemetry() (the
+ * supervisor's pass), so a quiet type still reports.
+ * Only types NOTHING reads per event are routed here (docs/METRICS.md "Telemetry"); hotspot.overlap, task.overlap,
+ * skill.follow, watch.report and agent.heartbeat are read by plan-waves, next-board, scorecard, retro and metrics, so
+ * they stay one event each. STUDIO_TELEMETRY=full writes the per-event lines again; counter files are left alone.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -92,12 +88,10 @@ export function emitSampled(ev, key = '', { env = process.env, now = Date.now(),
 }
 
 /**
- * 2.79.1 (d): write `ev` only when it says something new. State: .studio/emit-seen.json { <key>: { sig, at } }.
- * Written when `key` has no record, when its `sig` (what the event says, with the numbers that tick every pass left out)
- * changed, or when the record is older than `repeatMin` minutes (0: never repeat). Used for events a reader needs ONE of
- * (lock.kept carries a claim's owner on for busy.mjs; task.overlap names files for plan-waves and the next board), where
- * a counter would hide the fact: they stay real events, one per change instead of one per pass.
- * STUDIO_TELEMETRY=full (or state that can't be kept) writes every one, as before. Returns true when it wrote the event.
+ * Write `ev` only when it says something new. State: .studio/emit-seen.json { <key>: { sig, at } }. Written when `key`
+ * has no record, when its `sig` (what the event says, minus numbers that tick every pass) changed, or when the record
+ * is older than `repeatMin` minutes (0: never repeat). For events a reader needs ONE of (lock.kept, task.overlap).
+ * STUDIO_TELEMETRY=full (or state that can't be kept) writes every one. Returns true when it wrote the event.
  */
 export function emitOnChange(ev, key, sig = '', { repeatMin = 0, repeatEnv = false, env = process.env, now = Date.now(), emit = emitEvent } = {}) {
   if (telemetryFull(env)) { emit(ev); return true; }

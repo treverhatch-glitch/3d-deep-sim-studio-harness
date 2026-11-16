@@ -1,25 +1,13 @@
 #!/usr/bin/env node
 /**
- * harness/prepare-brief.mjs — cheap prepare, strong act.
- *
- *   npm run brief -- [<ID>]              prepare a brief for a task (default: the first one in progress)
- *   npm run brief -- T-012 --model       let a cheap model draft it (local or free tier only)
- *   npm run brief -- T-012 --template    never call a model
- *   npm run brief -- T-012 --force       prepare even when the history is already short
- *   npm run brief -- builder [--write]   2.71.0: the builder role's brief from the studio's rule files (harness/role-brief.mjs)
- *
- * The shape follows draft-then-verify and bounded replay:
- *   1. Gather a bounded window, never the full history: this task's last events, its hand-off notes,
- *      the lessons that match it, the newest QA result, and the files it has touched.
- *   2. Short history (under STUDIO_PREPARE_MIN_WORDS, default 500): skip the model; the strong agent
- *      reads the window as is.
- *   3. Otherwise a cheap model drafts a brief of at most 300 words: Goal, Relevant history, Known
- *      pitfalls, Files to touch, Verify. Only local and free providers are tried (or
- *      STUDIO_PREPARE_CHAIN). With no cheap provider, or with --template, a script writes it.
- *   4. The script verifies the draft: the five sections, the word cap, files that exist, task IDs
- *      that exist. A draft that fails is thrown away and the script's version is used, with the reason.
- * The strong agent gets `.studio/briefs/<ID>.prepared.md` instead of the history, and the Producer
- * sees it in the event log. Words in and out are counted; token savings are not claimed.
+ * harness/prepare-brief.mjs — cheap prepare, strong act: prepares a task brief from a bounded window of history.
+ * npm run brief -- [<ID>] [--model (cheap local/free model) | --template (no model) | --force] | builder [--write]
+ * 1. Gather a bounded window, never the full history: the task's last events, hand-off notes, matching lessons, the
+ * newest QA result, files touched. 2. Under STUDIO_PREPARE_MIN_WORDS (500): skip the model. 3. Else a cheap local or
+ * free model (or STUDIO_PREPARE_CHAIN) drafts at most 300 words: Goal, Relevant history, Known pitfalls, Files to
+ * touch, Verify; with none, or --template, a script writes it. 4. The script verifies the draft (five sections, word
+ * cap, files and task IDs exist); a failing draft is replaced by the script's version.
+ * The strong agent gets `.studio/briefs/<ID>.prepared.md` instead of the history. Token savings are not claimed.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,27 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/producer-refill.mjs — 2.30o: the queue never runs dry while the game has unmet goals.
- *
- * In the Marina run the queue emptied after the early game and builders sat idle for hours: nothing told
- * the Producer to plan again, and its last plan re-listed finished work. Now, when fewer than
- * STUDIO_REFILL_MIN (4) builder tasks are open, a refill pass derives tasks from what is computably unmet:
- *   1. the charter's milestone exit criteria (studio/bible/CHARTER.md), next unmet milestone of each ladder;
- *   2. the asset list (studio/bible/ASSETS.md lines "- [ ] <asset> -> <path>") whose file is missing;
- *   3. failed visual results (.studio/proof/<T>/verdict.json) and failed layout checks
- *      (.studio/layout-last.json).
- * Each candidate is refused when an open or done task already covers it (same key, or 60% of its words),
- * so done work is never re-listed. Then the Producer is woken for anything the pass can't derive.
- *
- * Charter format: a milestone line "- M2 Name: ..." (or "### M2 ...") then "Exit: a; b; c" (or "- [ ] a"
- * items under it). A milestone marked DONE, or whose criteria are all ticked "- [x]" or recorded met in
- * .studio/milestones.json, is closed; `milestone close M2 --by director` records it.
- *
- *   node harness/producer-refill.mjs [--dry-run] [--json]       one pass
- *   node harness/producer-refill.mjs milestones                  the ladder and what is unmet
- *   node harness/producer-refill.mjs met M2 <n> --by <who> --evidence <file|commit|event id> [...]
- *                                                                record exit criterion n of M2 as met, with the proof
- *                                                                (a person may give --evidence none --why "<reason>")
- *   node harness/producer-refill.mjs close M2 --by director      close a milestone (opens the next)
+ * harness/producer-refill.mjs — the queue never runs dry while the game has unmet goals. When fewer than
+ * STUDIO_REFILL_MIN (4) builder tasks are open, a pass derives tasks from: the charter's next unmet milestone exit
+ * criteria (studio/bible/CHARTER.md); asset lines "- [ ] <asset> -> <path>" in studio/bible/ASSETS.md whose file is
+ * missing; failed visual results (.studio/proof/<T>/verdict.json) and layout checks (.studio/layout-last.json). A
+ * candidate an open or done task covers (same key, or 60% of its words) is refused. Then the Producer is woken.
+ * Charter: a line "- M2 Name: ..." (or "### M2 ...") then "Exit: a; b; c" (or "- [ ] a" items). A milestone marked
+ * DONE, all ticked, or met in .studio/milestones.json is closed.
+ *    node harness/producer-refill.mjs [--dry-run] [--json]  |  milestones
+ *    node harness/producer-refill.mjs met M2 <n> --by <who> --evidence <file|commit|event id> [--why "…"]
+ *    node harness/producer-refill.mjs close M2 --by director      close a milestone (opens the next)
  */
 import fs from 'node:fs';
 import path from 'node:path';

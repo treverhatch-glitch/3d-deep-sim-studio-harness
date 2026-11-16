@@ -1,31 +1,14 @@
 /**
- * harness/session-outcome.mjs — 2.67.2: what a launched session did for its task, and the no-work rule.
- *
- * A supervisor run started 20 sessions in 35 minutes, landed nothing and used 1.24M tokens. Sessions ended within 36 s to
- * 3 min; one ended "pass (exit 0)" with no work. From the code, a session ends with no work when:
- *   - its `task start` is refused for a reason the supervisor's pre-launch filter doesn't see (the claim is another
- *     owner's live work, the board lock is busy, the studio is stopped, the task's budget is spent): the agent is told
- *     "If it refuses, pick another task" and, as a one-task session, stops;
- *   - it never runs task start at all (it decides the task is already done, or blocked, and stops);
- *   - it claims the task but commits nothing, or commits but its task done is refused by the done-check (a bug task's
- *     "Regression saved") and it stops at the blocker.
- * Before 2.67.2 a session that never claimed its task left no hand-back, so the loop park (STUDIO_LOOP_HANDBACKS, hand-
- * backs only) never counted it, and the supervisor started the same task again a minute later.
- *
+ * harness/session-outcome.mjs — what a launched session did for its task, and the no-work rule.
+ * A session ends with no work when its `task start` is refused for a reason the supervisor's pre-launch filter doesn't
+ * see (another owner's live claim, busy board lock, studio stopped, budget spent), it never runs task start, or it claims
+ * but commits nothing (or its task done is refused by the done-check and it stops at the blocker).
  * sessionOutcome() reads the session's own evidence (events since it started, commits tagged with the task) and says
- * { task, claimed, commits, done, noWork, stuck, why }; agent.mjs cleanUp records it on agent.session.end
- * (meta.outcome). noWorkInARow() counts a task's no-work exits in a row (since its last done or unpark); at
- * STUDIO_NO_WORK_EXITS (default 2; 0 turns it off) the launcher parks the task with the reason for the Producer or an
- * outside agent (npm run task -- unpark <ID> --by <name>) instead of relaunching it blindly.
- *
- * No imports beyond handback-kind.mjs (none of its own): agent.mjs passes the events, the commit count and the park in.
- *
- * 2.85: holdIfSameRefusal(). Three sessions in four minutes were started on one task, each refused by `task done` for the
- * same harness check none of them could fix, each handed it back; then the watchdog parked it "handed back 3 times".
- * Now, when a session's `task done` is refused for the same reason as the session before it on the task, and it made no
- * new commit, the task is held at once for the overseer and the Producer (rank 2: a planner, the overseer or the owner
- * lifts it; never a worker). The Director's flow pass lifts it by itself once `task done --check` no longer gives that
- * reason (director-flow.mjs liftSameRefusalHolds).
+ * { task, claimed, commits, done, noWork, stuck, why }; agent.mjs cleanUp records it on agent.session.end (meta.outcome).
+ * noWorkInARow() counts a task's no-work exits in a row; at STUDIO_NO_WORK_EXITS (default 2; 0 turns it off) the launcher
+ * parks the task (npm run task -- unpark <ID> --by <name>). Imports only handback-kind.mjs. holdIfSameRefusal(): a `task
+ * done` refused for the same reason as the session before it, with no new commit, holds the task (a planner, the overseer
+ * or the owner lifts it, never a worker; the Director's flow pass lifts it once `task done --check` is clean).
  */
 import { sameRefusalAgain } from './handback-kind.mjs';
 

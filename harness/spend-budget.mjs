@@ -1,26 +1,14 @@
 /**
- * harness/spend-budget.mjs — 2.79.1 (a): spend per API key or tool, always measured; a budget only where someone set one.
- *
- * The owner's words (2026-11-06): "As far as the vertex budget you shouldn't cap that but allow for setting to be placed for
- * API keys to be budgeted and monitored and cut so it doesn't over charge. So allow Patch to set and change budget
- * allocations upon my orders (or orders of the user of the harness)". So:
- *   - Spend is measured for every tool and key, with or without a budget: the dollars each session reported or was priced at
- *     (agent.session.end meta.costUsd; the session record names the key names it got, meta.keys), and Vertex's live usage
- *     log (.studio/vertex-usage.jsonl, harness/vertex.mjs) for sessions on the Vertex proxy. `npm run budget` shows it.
- *   - A budget is per name: a tool (vertex, claude, a tool from studio/tools.json) or a key name (VERTEX_API_KEY,
- *     ANTHROPIC_API_KEY_LANE …). There is none by default. It lives in .studio/spend-budgets.json with its history (who,
- *     when, old -> new, why: the order it carries out).
- *       npm run budget -- set <name> <usd> --by <who> --why "<the owner's order>" [--since all|now|<ISO>]
- *       npm run budget -- clear <name> --by <who> --why "…"         (no budget: measured only)
- *       npm run budget -- resume <name> --by <who> --why "…"        (after a cut: counting starts again from now)
- *   - At 75% of a budget: one page to the orchestrator and one Studio Status line. At 100%: new sessions on that tool or key
- *     are refused with one clear line (agent.mjs launchStop through budget.mjs budgetStopFor; budget.mjs pickTool gives the
- *     supervisor the next tool), and it is said once; running sessions finish. It stays cut until someone allowed raises
- *     the budget or resumes it.
- *   - Who may set, change, clear or resume one: the owner, the orchestrator or the owner's proxy, an outside signer — each on
- *     the owner's order, which --why records; a Producer or Director session only with the owner's switch
- *     STUDIO_PRODUCER_APPROVES=protected; never a worker, a launched worker session or a lane copy. Not an owner-only act.
- * Names and dollars only: no key value is read or printed here.
+ * harness/spend-budget.mjs — spend per API key or tool, always measured; a budget only where someone set one.
+ * - Measured for every tool and key: dollars per session (agent.session.end meta.costUsd, meta.keys) and Vertex's live
+ *   usage log (.studio/vertex-usage.jsonl). `npm run budget` shows it.
+ * - A budget is per name (a tool, or a key name like VERTEX_API_KEY); none by default; in .studio/spend-budgets.json.
+ *     npm run budget -- set <name> <usd> --by <who> --why "<the owner's order>" [--since all|now|<ISO>]
+ *     npm run budget -- clear <name> --by <who> --why "…"    npm run budget -- resume <name> --by <who> --why "…"
+ * - At 75%: one page to the orchestrator and one Studio Status line. At 100%: new sessions on that tool or key are
+ *   refused (agent.mjs launchStop, budget.mjs budgetStopFor); running ones finish; cut until raised or resumed.
+ * - Who may change one: the owner, the orchestrator, the owner's proxy or an outside signer, on the owner's order; a
+ *   Producer or Director only with STUDIO_PRODUCER_APPROVES=protected; never a worker or lane copy.
  */
 import fs from 'node:fs';
 import path from 'node:path';

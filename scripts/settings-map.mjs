@@ -1,25 +1,15 @@
 #!/usr/bin/env node
 /**
- * scripts/settings-map.mjs — 2.66.0 (d): the map of every STUDIO_* setting, and a ratchet on undocumented ones.
- *
- * About 390 STUDIO_* names are read across harness/, scripts/ and qa/, most explained only in a code comment
- * (OpenHands' settings sprawl forced its rewrite at 140+). This scans harness/ and scripts/ (their code files,
- * recursively, git hooks included) and qa/*.mjs for the names, and writes docs/SETTINGS.md: one line per name, grouped by its first word,
- * with its default (when a simple `?? x`, `|| x` or `name', x)` sits right next to it in the code), the files using
- * it, and the first docs/ page that mentions it, or "undocumented". A name ending in `_` is a family
- * (STUDIO_TIER_<x>), shown as `STUDIO_TIER_*`.
- *
+ * scripts/settings-map.mjs — the map of every STUDIO_* setting, and a ratchet on undocumented ones. It scans harness/,
+ * scripts/ and qa/*.mjs and writes docs/SETTINGS.md: one line per name with its default, the files using it, and the
+ * first docs/ page that mentions it, or "undocumented". A name ending in `_` is a family.
  *   node scripts/settings-map.mjs                  write docs/SETTINGS.md
- *   node scripts/settings-map.mjs --check          exit 1 when a name used in the code is neither mentioned in a docs/
- *                                                  page (docs/SETTINGS.md itself doesn't count) nor listed in
- *                                                  docs/settings-baseline.json (the debt frozen on 2.66.0); the docs
- *                                                  gate (scripts/check-docs.mjs) runs it
- *   node scripts/settings-map.mjs --prune-baseline drop baseline names that are now documented or no longer used
- *   node scripts/settings-map.mjs --init-baseline  write the baseline when there is none (never adds to an existing one)
+ *   node scripts/settings-map.mjs --check          exit 1 when a name used in the code is neither in a docs/ page
+ *                                                  (docs/SETTINGS.md doesn't count) nor in docs/settings-baseline.json
+ *   node scripts/settings-map.mjs --prune-baseline drop baseline names now documented or no longer used
+ *   node scripts/settings-map.mjs --init-baseline  write the baseline when there is none (never adds to one)
  *   --json                                         the map (or the check) as JSON
- *
- * The baseline only shrinks from here: a new setting is documented in docs/ (one line: what it does, its default)
- * in the same change, and --prune-baseline removes a name once its page exists.
+ * The docs gate (scripts/check-docs.mjs) runs --check. The baseline only shrinks: document a new setting in docs/.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,19 +1,12 @@
 /**
- * harness/breaker.mjs — circuit breakers on hand-backs (2.30c, #8).
- *
- * A task handed back twice in a row for the same reason won't be fixed by a third fresh session
- * (test #2: one task went to 12 sessions, each refused by the same command). After one failed
- * hand-back, a second with the same reason parks the task with that reason and raises a War Room
- * card. Nothing else waits: other tasks and lanes keep starting. `npm run task -- unblock <ID>`
- * (or Unblock on the card) clears it.
- *
- * Not failures, so never counted: refreshes (session cap, context), a person's stop or pause, and (2.58.5, H-5) a
- * hand-back the harness caused (the claim ran out, the land lock, a merge the main checkout refused: busy.mjs
- * harnessCaused). On 2.58.3 two "claim ran out" hand-backs by the Director's flow pass parked T-060, T-061 and T-064.
+ * harness/breaker.mjs — circuit breakers on hand-backs.
+ * A task handed back twice in a row for the same reason won't be fixed by a third fresh session. After one failed hand-back,
+ * a second with the same reason parks the task with that reason and raises a War Room card. Nothing else waits: other tasks
+ * and lanes keep starting. `npm run task -- unblock <ID>` (or Unblock on the card) clears it.
+ * Never counted (not failures): refreshes (session cap, context), a person's stop or pause, a hand-back the harness caused
+ * (the claim ran out, the land lock, a merge the main checkout refused: busy.mjs harnessCaused), and one that handback-kind.mjs
+ * handBackKind gives a harness kind (a refresh hand-off, a launch failure, a `task done` refused for commits not the task's own).
  * STUDIO_BREAKER=off turns it off.
- *
- * 2.86: and not a hand-back the one reading (handback-kind.mjs handBackKind) gives a harness kind: a refresh hand-off, a
- * launch failure, a `task done` refused for commits that are not the task's own.
  */
 import { emitEvent, readRecentEvents } from './event.mjs';
 import { setHold, readHolds, unparkRefusal } from './task-hold.mjs';

@@ -1,23 +1,13 @@
 /**
- * harness/drift-baseline.mjs — 2.84 (j): which uncommitted files are the SESSION's, for the drift check's
- * "edited files outside its scope" signal (harness/stall.mjs driftCheck).
- *
- * The overseer's report: drift.check said two builders edited "137 files outside scope" (.gitignore, harness/*.mjs,
- * scripts/...): the overseer's own uncommitted patches in the main checkout. The check lists `git status` of the folder
- * it is given. A session that starts in the main checkout (before `task start` gives it a lane copy, 2.76.0) is
- * observed there first, so every file the overseer had changed in main counted as the session's, and the Check is
- * raised once and never taken back. A lane copy is made from the studio branch's HEAD and never carries main's
- * uncommitted files, but a file the overseer pushed into a lane by hand would count the same way.
- *
- * Now the check skips a file the session did not touch:
- *   - a session in the main checkout: the dirty paths and their content hashes are recorded at its first observation
- *     (drift state `dirty0`); a path with the same content as then is not the session's. No record (a session that began
- *     before 2.84): as before.
- *   - a lane copy: createLaneCopy records the main checkout's dirty paths and hashes at creation
- *     (.studio/lanes/<agent>.dirty.json); a lane file whose content is the same as that record is not the session's.
- *     No record (a lane made before 2.84): a lane file whose content is identical to the main checkout's uncommitted
- *     content for the same path is not the session's.
- * Only the candidates (files already outside the scope) are hashed, in one git call; nothing here changes what a lane copies.
+ * harness/drift-baseline.mjs — which uncommitted files are the SESSION's, for the drift check's "edited files outside
+ * its scope" signal (harness/stall.mjs driftCheck). The check skips a file the session did not touch:
+ *   - a session in the main checkout: the dirty paths and content hashes are recorded at its first observation (drift
+ *     state `dirty0`); a path with the same content as then is not the session's;
+ *   - a lane copy: createLaneCopy records main's dirty paths and hashes (.studio/lanes/<agent>.dirty.json);
+ *     a lane file with the same content is not the session's; with no record, one identical to the main checkout's
+ *     uncommitted content for that path is not the session's.
+ * Only the candidates (files already outside the scope) are hashed, in one git call; nothing here changes what a lane
+ * copies.
  */
 import fs from 'node:fs';
 import path from 'node:path';

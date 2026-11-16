@@ -1,41 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/overseer.mjs — 2.73.0 (f): the outside overseer's stage, and whether the next one's entry criteria hold.
- *
- *   npm run overseer [-- --json]          the stage the owner set, what it allows, and the next stage's criteria (each
- *                                         with its evidence): a suggestion only. The owner changes the stage.
+ * harness/overseer.mjs — the outside overseer's stage (studio/overseer.json, PROTECTED) and whether the next stage's
+ * entry criteria hold. No file or unparsable: stage 0. Read from git's HEAD copy: an uncommitted edit is ignored.
+ *   npm run overseer [-- --json]          the stage, what it allows, and the next stage's criteria with evidence
  *   npm run overseer -- record <kind> <subject> --by <person> [--note "…"] [--permission "…"]
- *       an outcome the harness can't see for itself, into the decision log (action overseer-<kind>): repro-accepted,
- *       repro-rejected, pr-merged, pr-reverted, protected-attempt. A person's (or an agent's on a person's direct
- *       permission, as `upgrade --merge` takes it); never the overseer itself.
- *
- *   npm run overseer -- role [--by <agent>]            2.81: the overseer's official role as this studio stands: what it
- *       does, what it signs as the owner (and under which grant), what stays human-only. docs/OVERSEER.md.
- *   npm run overseer -- can <action> [--by <agent>]    one verdict, by script: yes / ask / human-only, with the rule.
- *       The model proposes an action; this (and the command's own check, which uses the same rules) decides.
- *   npm run overseer -- sheet [--json]                 2.84: everything waiting on a person or the overseer now, each with its reason
- *       and the command that resolves it. Reads state only; changes nothing.
- *   npm run overseer -- pass [--hours 24] [--json]     the facts for one pass of the overseer's loop: blockers, tasks
- *       claimed again and again, repeated workarounds, stalls and reds, each with the kind of attention it needs.
- *
- * Stages (studio/overseer.json, PROTECTED: the owner changes it, with a signed approval like any protected file):
- *   0 reporter     logs workarounds (npm run workaround -- log)
- *   1 repro tests  also writes failing reproduction tests as harness PRs (npm run workaround -- repro <H-id>)
- *   2 small fixes  also small non-gate harness fixes, reviewed and merged by someone else
- *   3 own releases also merges its own non-gate releases
- * At every stage gates and protected files stay the owner's.
- * The file counts as committed (git's HEAD copy): an uncommitted edit is shown and ignored, so a working-copy edit can't
- * raise a stage. No file, or one that doesn't parse: stage 0 with the default criteria.
- *
- * Evidence, counted since the stage was set (setAt; all history without one), for the overseer named in the file:
- *   workarounds logged   its own `workaround -- log` records (.studio/workarounds.jsonl, not detected ones)
- *   accepted repros      distinct Repro-Of: <H-id> trailers on commits in the studio's history with Overseer-By: <agent>
- *                        (its repro PRs that reached the harness and came in with an update), plus repro-accepted records
- *   merged PRs           commits with Overseer-By: <agent> in the studio's history, plus pr-merged records
- *   revert rate          those commits reverted ("This reverts commit <sha>") plus pr-reverted records, over merged
- *   protected attempts   events by the agent about protected files (type or message), its workaround records naming a
- *                        protected file, and protected-attempt records
- * Code over the logs and git: no model, no network.
+ *       an outcome the harness can't see (action overseer-<kind>): repro-accepted, repro-rejected, pr-merged,
+ *       pr-reverted, protected-attempt. Never by the overseer itself.
+ *   npm run overseer -- role|can <action>|sheet|pass [--hours 24] [--by <agent>] [--json]   (docs/OVERSEER.md)
+ * Stages: 0 reporter, 1 repro tests, 2 small fixes, 3 own releases. Gates and protected files stay the owner's.
+ * Evidence since setAt: workarounds logged (.studio/workarounds.jsonl), accepted repros (Repro-Of: <H-id> trailers),
+ * merged PRs (Overseer-By: <agent>), revert rate, protected attempts. Code over logs and git: no model, no network.
  */
 import fs from 'node:fs';
 import path from 'node:path';

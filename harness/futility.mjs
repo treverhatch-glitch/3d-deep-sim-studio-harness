@@ -1,27 +1,13 @@
 /**
- * harness/futility.mjs — 2.68.0: the futility cap, shadow first.
- *
- * Failed runs are the expensive ones and agents notice too late (research 2026-11-01, F3: stopping hopeless runs early
- * saved 28-64% of their tokens; on this studio's own log a cap at the p90 of successful runs saved 32% of all tokens and
- * cut 4 good runs short). So: per task type (the task's type, an owner's retype, else the session's role), the 90th
- * percentile of SUCCESSFUL sessions' weighted tokens and wall time (a session whose task landed in it). With fewer than
- * STUDIO_FUTILITY_MIN_N (20) successful sessions of that type there is no cap.
- *
- * The supervisor's loop calls futilityPass() each pass. A running session past either p90 raises one Check event
- * (futility.check, to the Producer: "past the p90 of good runs"). STUDIO_FUTILITY:
- *   auto (default)    2.78.0 (PU-62): per type, enforcing (as `on`) once the type has STUDIO_FUTILITY_MIN_N good runs AND its
- *                     shadow record (at least STUDIO_FUTILITY_AUTO_MIN_SHADOW, 5, ended flagged sessions) shows at most
- *                     STUDIO_FUTILITY_AUTO_MAX_LATE (0.10) of the sessions the cap would have stopped went on to succeed
- *                     anyway (their task was done by the end); without that data the type stays in shadow. Each type that
- *                     switches on emits one futility.auto_on event;
- *   shadow            only the Check event; when the session ends, futility.shadow (one hourly futility.shadow.summary since
- *                     2.79.1; STUDIO_TELEMETRY=full: one each) logs what the cap would have saved
- *                     (its tokens and minutes after the check) and whether it would have cut a good run short
- *                     (.studio/futility-log.jsonl too), so the owner can judge the cap on real data;
- *   on                also hands the task back (the launcher's pause: the diff is saved and the lane copy kept, never
- *                     deleted) so a fresh session continues from it;
- *   off               nothing.
- * No harness imports but event.mjs and token-weight.mjs.
+ * harness/futility.mjs — the futility cap: stops hopeless runs early, shadow first.
+ * Per task type (the task's type, an owner's retype, else the session's role), the p90 of SUCCESSFUL sessions' weighted
+ * tokens and wall time; under STUDIO_FUTILITY_MIN_N (20) successful sessions there is no cap. The supervisor calls
+ * futilityPass() each pass; a session past either p90 raises one futility.check event to the Producer. STUDIO_FUTILITY:
+ *   auto (default)  per type, as `on` once it has MIN_N good runs AND STUDIO_FUTILITY_AUTO_MIN_SHADOW (5) flagged
+ *                   sessions, at most STUDIO_FUTILITY_AUTO_MAX_LATE (0.10) of them went on to succeed
+ *   shadow          only the Check event plus futility.shadow (hourly futility.shadow.summary; STUDIO_TELEMETRY=full:
+ *                   each; .studio/futility-log.jsonl): what the cap would have saved
+ *   on              also hands the task back (diff saved, lane copy kept)      off  nothing
  */
 import fs from 'node:fs';
 import path from 'node:path';

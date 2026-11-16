@@ -5,12 +5,10 @@
  *   npm run retro                  write studio/memory/retros/<today>.md from the last 24 hours
  *   node harness/retro.mjs --hours 72
  *
- * It reads what actually happened (refused and forced "done"s, hand-backs, watcher findings, bugs,
- * closed-loop failures, gate results, meetings, the model scorecard) and turns repeating patterns into
- * suggestions: which skill to tighten, which tasks are too big, which model to route away from.
- * The Producer reads them in the briefing and accepts or rejects each one in its log. That is how
- * the studio improves itself without spending tokens on watching.
- *
+ * It reads what happened (refused and forced "done"s, hand-backs, watcher findings, bugs, closed-loop failures, gate
+ * results, meetings, the model scorecard) and turns repeating patterns into suggestions: which skill to tighten, which
+ * tasks are too big, which model to route away from. The Producer reads them in the briefing and accepts or rejects
+ * each.
  * The HUB writes one a day on its own; npm run session:start writes one if today's is missing.
  */
 import fs from 'node:fs';

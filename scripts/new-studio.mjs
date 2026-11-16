@@ -1,18 +1,11 @@
 #!/usr/bin/env node
 /**
  * scripts/new-studio.mjs — start another game next to this one, inside the harness.
- *
- *   npm run new-studio -- --name "Moss Garden" [--dir ../moss-garden] [--port 3848] [--from origin|local] [--no-install]
+ * npm run new-studio -- --name "Moss Garden" [--dir ../moss-garden] [--port 3848] [--from origin|local] [--no-install]
  *   (--port: the studio's slot, its play port is 4610 + slot - 3847; the next free one by default)
- *
- * One studio is one clone: its Game Bible, task board, locks and agents belong to one game.
- * A second game started in a new folder by hand runs without any of that (run #1: a side-by-side game
- * "started" and never used the harness). This makes the second studio properly:
- *   1. clones the harness next to this folder (from GitHub, or from this clone with --from local);
- *   2. copies this studio's .env (keys and settings stay on this machine) with its own play port (npm run play);
- *   3. installs, runs setup, makes it safe (preflight --fix), and starts a fresh studio with the name;
- *   4. writes START-HERE.md in it with the exact next commands (intake, the Producer's kickoff, the supervisor).
- * Nothing in this studio changes.
+ * It clones the harness next to this folder (from GitHub, or this clone with --from local); copies this studio's .env
+ * with its own play port (npm run play); installs, runs setup, makes it safe (preflight --fix) and starts a fresh
+ * studio with the name; writes START-HERE.md with the exact next commands. Nothing in this studio changes.
  */
 import fs from 'node:fs';
 import path from 'node:path';

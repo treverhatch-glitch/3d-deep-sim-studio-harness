@@ -1,27 +1,24 @@
 /**
- * qa/selftest-272c.mjs — 2.72.0 (c): engine gates that prove they ran, the state probe, the completeness rubric and the
- * error-signature memory. A made-up studio, a made-up game, a stand-in Unity editor and a stand-in gdUnit4 runner;
- * every check fails on 2.71.1.
- *   1. Engine gates (harness/engine-proof.mjs, unity.mjs judgeRun, godot-unit.mjs judgeGodotRun): a stale results file,
- *      compile errors or a batch-mode abort next to green results, an exit code that disagrees with the results, and
- *      a reused gdUnit4 report folder are red, each with its own plain-words and Fix line; allowEmpty allows 0 tests.
- *   2. The state probe (harness/state-probe.mjs, game:state-probe): digests at the declared ticks against main's
- *      baseline; a change with no Golden-Reason is red with the first differing tick.
- *   3. The completeness rubric (harness/contracts.mjs): test-name criteria are checked, manual ones are listed as
- *      "unverified, for the reviewer"; in a lane they hold the lane at tier C until a reviewer signs them.
- *   4. Error-signature memory (harness/error-memory.mjs): a red fixed on one task shows as "seen before" on the next.
+ * qa/selftest-272c.mjs — engine gates that prove they ran, the state probe, the completeness rubric, error-signature memory.
+ * 1.  engine gates (harness/engine-proof.mjs, unity.mjs judgeRun, godot-unit.mjs judgeGodotRun): a stale results
+ *   file, compile errors or a batch-mode abort next to green results, an exit code that disagrees with the results, a
+ *   reused gdUnit4 report folder are red, each with a plain-words and Fix line; allowEmpty allows 0 tests.
+ * 2.  state probe (harness/state-probe.mjs, game:state-probe): digests at the declared ticks against main's baseline;
+ *   a change with no Golden-Reason is red with the first differing tick.
+ * 3.  completeness rubric (harness/contracts.mjs): test-name criteria are checked, manual ones listed "unverified,
+ *   for the reviewer"; in a lane they hold it at tier C until a reviewer signs.
+ * 4.  error-signature memory (harness/error-memory.mjs): a red fixed on one task shows as "seen before" on the next.
+ *   Made-up studio, game, Unity editor and gdUnit4 runner.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, out, writeIn as w } from './kit.mjs';
 
 export async function selftest272C({ dir, run, report, tmpRoot }) {
   const TRAIN_QUEUE = path.join('.studio', 'train', 'queue.json');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const u = fileUrlOf(dir);
   const T = path.join(tmpRoot, `s272c-${process.pid}`);
   fs.mkdirSync(T, { recursive: true });
-  const w = (root, rel, text) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); };
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_HEAVY_SLOTS: '1', STUDIO_HEAVY_HELD: '', STUDIO_HEAVY_POLL_MS: '100', STUDIO_HEAVY_WAIT_MIN: '0.5', STUDIO_HEAVY_REAP: '', STUDIO_GATE_PRIORITY: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', STUDIO_RAM_FLOOR_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_TEST_LOADAVG: '0', STUDIO_MACHINE_SCAN: 'off', STUDIO_UNITY: '', STUDIO_UNITY_PIN: '', STUDIO_UNITY_LIBRARY_CACHE: 'off', STUDIO_UNITY_CODE_ONLY: '', STUDIO_DOTNET: '', STUDIO_UNITY_ACCELERATOR: '', STUDIO_UNITY_EDITMODE_REUSE: '', STUDIO_UNITY_ONE_EDITOR: '', STUDIO_UNITY_GRAPHICS_SPLIT: '', STUDIO_SILENT_GREEN: '', STUDIO_GAME: '', STUDIO_TRAIN: '', STUDIO_ERROR_MEMORY: '', STUDIO_ERROR_MEMORY_MAX: '', STUDIO_STATE_PROBE_BASE: '', STUDIO_VERIFY_DETACH: 'off', STUDIO_VERIFY_RUN: '', STUDIO_COMPACT_OUTPUT: 'off', STUDIO_WEAKENED_TESTS: '', STUDIO_PROTECT_BASE: '', STUDIO_OWNER_KEY: '', npm_lifecycle_event: '', AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-272c.jsonl'), GIT_AUTHOR_NAME: 'hatch', GIT_AUTHOR_EMAIL: 'owner@example.com', GIT_COMMITTER_NAME: 'hatch', GIT_COMMITTER_EMAIL: 'owner@example.com' };
   const probe = (name, code, env = {}) => {
     const f = path.join(dir, `.probe-272c-${name}.mjs`);

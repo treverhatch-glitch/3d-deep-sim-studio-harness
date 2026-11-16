@@ -1,30 +1,25 @@
 /**
- * qa/selftest-2601n.mjs — 2.60.1 (helper n): the aider launch path (`--tool nim`, `--tool aider`).
- *   B-18: aider is found as STUDIO_AIDER_CMD, then <main>/.studio/aider-venv/{Scripts,bin}/aider(.exe), then PATH, by the
- *         preflight and the launched argv; a custom command for nim keeps nim's environment (the NIM key).
- *   B-19: before a nim session, its model is checked once (a stub fetch here); a not-found answer falls back through
- *         STUDIO_NIM_MODELS, the answer is cached in .studio/nim-models.json; 429 and network errors never change the
- *         model; none usable: not started.
- *   B-20: the session gets --aiderignore (the harness's folders and the protected paths, anchored) and the brief as
- *         --read; the ignore file and aider's .aider* files never show in the lane copy's git status.
- *   B-21: --no-pretty --no-fancy-input (and --no-gitignore) for both aider tools and in the kickoff's launch lines.
- *   B-37: a failed aider session keeps its lane copy and the last 200 lines of its output beside its log; Python
- *         output unbuffered; a bounded repo map (--map-tokens from config).
- * Stand-ins only: the "venv aider" is a node script (POSIX; on Windows a .cmd named by STUDIO_AIDER_CMD, UNTESTED here),
- * the model check uses STUDIO_NIM_CHECK_STUB or an injected fetch. No real aider, key or network.
+ * qa/selftest-2601n.mjs — the aider launch path (`--tool nim`, `--tool aider`); stand-ins only, no real aider, key or
+ * network.
+ *   find  aider is found as STUDIO_AIDER_CMD, then <main>/.studio/aider-venv/{Scripts,bin}/aider(.exe), then PATH; a
+ *     custom command for nim keeps nim's environment (the NIM key)
+ *   model  a nim session's model is checked once (STUDIO_NIM_CHECK_STUB or an injected fetch); not-found falls back
+ *     through STUDIO_NIM_MODELS, cached in .studio/nim-models.json; 429 and network errors never change the model
+ *   ignore  --aiderignore (harness folders and protected paths) and the brief as --read; .aider* files never show in
+ *     the lane copy's git status
+ *   flags  --no-pretty --no-fancy-input (and --no-gitignore) for both tools
+ *   failed  a failed session keeps its lane copy and the last 200 lines of output beside its log
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { fileUrlIn as u, guardSyncOf, out, real } from './kit.mjs';
 
 const FAKE_KEY = 'fake-nim-key-for-selftest-2601n';
 const QUIET = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_HEARTBEAT_SEC: '1', STUDIO_ROLE: '', STUDIO_MAIN_ROOT: '', STUDIO_BUILDER_CMD: '', STUDIO_PRODUCER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_REHEARSAL: '', STUDIO_TOOL_NIM_CMD: '', STUDIO_TOOL_AIDER_CMD: '', STUDIO_NIM_MODEL: '', STUDIO_NIM_MODELS: '', STUDIO_BUILDER_MODEL: '', STUDIO_AGENT_MODEL: '', STUDIO_LANELESS: '', STUDIO_WORKTREES: '', NVIDIA_API_KEY: '', NVIDIA_API_KEY_2: '', OPENAI_API_KEY: '', AIDER_OPENAI_API_KEY: '', STUDIO_AIDER_CMD: '', STUDIO_NIM_CHECK: '', STUDIO_NIM_CHECK_STUB: '', STUDIO_NIM_CHECK_HOURS: '', STUDIO_AIDER_MAP_TOKENS: '', STUDIO_AIDER_MAP_REFRESH: '', STUDIO_KEEP_FAILED_LANE: '', STUDIO_FAILED_TAIL_LINES: '', PYTHONUNBUFFERED: '', PYTHONIOENCODING: '', STUDIO_NIM_FALLBACK: '', STUDIO_TAKEOVER: 'off' };
 
 export async function selftest2601N({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (root, p) => JSON.stringify(pathToFileURL(path.join(root, p)).href);
-  const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
-  const guard = (name, fn) => { try { const [ok, detail] = fn(); report(name, ok, detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardSyncOf(report);
   let n = 0;
   const probe = (root, code, env = {}) => {
     const f = path.join(root, `.probe-2601n-${n++}.mjs`);

@@ -1,31 +1,14 @@
 #!/usr/bin/env node
 /**
- * harness/lane-create.mjs — 2.77.0 (o): a proper lane copy for a task, from chosen branches, in one command.
- *
- * The crew's orchestrator rebuilt clean lanes by hand with `git worktree add` (a lane for one task carried another
- * task's commits, so it built one off main with only the task's own). A bare worktree's studio/ is the branch's own
- * copy of the board, not main's, so `task done` there said 'Task "T-181" not found'. This makes the copy the way the
- * launcher makes one (harness/worktree.mjs createLaneCopy: studio/ and .studio/ linked to main, node_modules linked,
- * .env copied, the sparse plan of harness/lane-sparse.mjs and its record), then merges the branches given, in order:
- *
- *   npm run lane -- create <T-ID> [--from <branch>...] [--agent <name>] [--by <name>] [--allow-mixed] [--json]
- *
- *   --from     a local branch, a remote-tracking branch (origin/x) or a commit; repeat it, merged in that order (a
- *              merge commit only when it isn't a fast-forward). None given: the task's own unlanded branch is carried
- *              in, as the launcher does (.studio/lane-branches.json).
- *   --agent    the copy's name: .lanes/<agent> (default lane-<t-id>). Work there as that agent:
- *              `npm run task -- start <T-ID> --agent <agent>` from the copy, then `task done` from the copy.
- *   --allow-mixed  take a branch carrying commits of another OPEN task anyway (a Studio-Task trailer naming it, or the
- *              branch recorded as that task's in .studio/lane-branches.json). Without it such a branch is refused:
- *              it would train under the wrong task id (B-92).
- *
- * The lane record: .studio/lanes/<agent>.lane.json { agent, task, dir, branch, from: [{ ref, head }], by, at } and a
- * lane.created event; the task's branch is remembered (.studio/lane-branches.json), so the next agent on the task gets
- * it. A conflict merging a branch aborts the merge and removes the copy (nothing half-made is left); the files are named.
- *
- * Who: a person, a Producer or Director session, or an agent outside the harness (the conductor), as for
- * `npm run lanes -- refresh` (harness/lanes.mjs refreshRefusal); a launched worker session never.
- * Exit: 0 made; 1 refused or failed; 2 bad usage.
+ * harness/lane-create.mjs — a proper lane copy for a task, from chosen branches, in one command.
+ * Makes the copy as the launcher does (harness/worktree.mjs createLaneCopy: studio/, .studio/, node_modules linked to
+ * main, .env copied), then merges the branches in order; a bare worktree has its own board.
+ * npm run lane -- create <T-ID> [--from <branch>...] [--agent <name>] [--by <name>] [--allow-mixed] [--json]
+ * --from  a branch or commit, merged in order; none: the task's own unlanded branch.
+ * --agent  the copy's name: .lanes/<agent> (default lane-<t-id>); run `task start <T-ID> --agent <agent>` there.
+ * --allow-mixed  take a branch with commits of another OPEN task (refused otherwise: wrong task id on the train).
+ * Record: .studio/lanes/<agent>.lane.json, a lane.created event, .studio/lane-branches.json. A conflict removes the
+ * copy. Who: a person, Producer/Director or outside agent; never a launched worker. Exit: 0 made; 1 refused; 2 usage.
  */
 import fs from 'node:fs';
 import path from 'node:path';

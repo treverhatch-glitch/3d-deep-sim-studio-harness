@@ -1,38 +1,14 @@
 /**
- * harness/agy-stream.mjs — an agy builder's session stays open across turns.
- *
- * `agy -p` (and agy with the prompt on stdin) runs ONE turn. A Gemini builder that started a background shell command ended
- * that turn, went idle and agy exited minutes later with the task unfinished (a GEMINI.md "run every command in the
- * foreground" rule was ignored). `--input-format stream-json` (needs `--output-format stream-json`) reads one NDJSON
- * message per line from stdin and runs a turn for each, so the session lives while stdin is open. The launcher:
- *   1. starts agy with AGY_STREAM_FLAGS, writes the kickoff as the first NDJSON user message and keeps stdin open;
- *   2. reads agy's stream-json output from the session's log and, at each turn end (a `result` event, or another
- *      turn-end shape: classifyEvent), asks taskStillOpen whether the session's task is still in progress (it still holds
- *      the claim, or its pinned task isn't claimed yet; not done, paused, handed back or impossible; no stop asked);
- *   3. if it is, waits STUDIO_AGY_CONTINUE_WAIT_SEC (15) so a background command can finish, asks again, and sends one
- *      follow-up user message (continueText: check the background command's result in the FOREGROUND, then carry on),
- *      at most STUDIO_AGY_CONTINUE_MAX (8) times a session;
- *   4. otherwise (or at the cap) closes stdin, and agy exits as `-p` did.
- * A session silent for STUDIO_AGY_STREAM_IDLE_SEC (1800; 0 = never) with no tool call pending gets its stdin closed, so an
- * agy that ends turns in an unrecognised shape can't wait forever; one that printed no stream-json event in its first
- * STUDIO_AGY_STREAM_FIRST_SEC (180; 0 = never) is taken to run as one turn (stdin closed).
- * Event parsing is tolerant: a line that isn't JSON is agy's own text; an event type not known here is noted once in the
- * log ("[launcher] agy stream: …") and ignored, never fatal.
- *
- * agy keys its stream input on "event", not "type": userLine sends {"event":"user","message":{"role":"user","content":[…]}},
- * the shape probed on real agy. ON BY DEFAULT: STUDIO_AGY_STREAM=0 keeps the one-turn launch (prompt on stdin, closed
- * at once), and so does STUDIO_AGY_PROMPT=arg (-p <prompt>). Roles whose session is one turn by design (reviewer,
- * Producer, Director: ONE_TURN_ROLES) keep that launch as well.
- * Safety net: an agy session that exits before its first turn ends, with an input-format error in its own output or no
- * stream-json event at all (streamFailure), is recorded once in .studio/agy-stream.json (agy's program, size, time and
- * --version) and relaunched in the one-turn mode; later launches skip the stream mode while that record matches the agy
- * on PATH (delete the file, or a new agy, and stream mode is tried again).
- * Progress nudge: a stream session with no tool-call event and no file write (the stall check's progress) for
- * STUDIO_AGY_NUDGE_MIN (10) minutes while its task is in progress gets the follow-up too (it counts toward
- * STUDIO_AGY_CONTINUE_MAX); kept below STUDIO_STALL_MIN so it comes before the stall end.
- *
- * Turn ends are read tolerantly: a turn-end word in the event's type, event or kind field. UNTESTED on real agy: which
- * output event ends a turn (a full cycle showed the session lived; the selftest drives a stand-in agy that speaks this shape).
+ * harness/agy-stream.mjs — keeps an agy builder's session open across turns, so a task is not left unfinished.
+ * `agy -p` runs ONE turn. `--input-format stream-json` (with `--output-format stream-json`) reads one NDJSON message
+ * per line from stdin and runs a turn each. The launcher starts agy with AGY_STREAM_FLAGS and sends the kickoff; at
+ * each turn end it asks taskStillOpen; if open it waits STUDIO_AGY_CONTINUE_WAIT_SEC (15) and sends one follow-up, at
+ * most STUDIO_AGY_CONTINUE_MAX (8) times; otherwise it closes stdin. Stdin also closes after STUDIO_AGY_STREAM_IDLE_SEC
+ * (1800; 0 = never) silent, or with no event in STUDIO_AGY_STREAM_FIRST_SEC (180; 0 = never). No progress for
+ * STUDIO_AGY_NUDGE_MIN (10) minutes also gets the follow-up (kept below STUDIO_STALL_MIN). Unknown events are logged
+ * once, never fatal. agy keys input on "event": {"event":"user","message":{"role":"user","content":[…]}}. On by
+ * default: STUDIO_AGY_STREAM=0 or STUDIO_AGY_PROMPT=arg keeps the one-turn launch, as do ONE_TURN_ROLES. A session that
+ * fails on the stream mode (streamFailure) is recorded in .studio/agy-stream.json and relaunched one-turn.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -108,11 +84,9 @@ export function classifyEvent(o) {
 
 /**
  * Is the session's task still in progress, so its turn ending isn't the end of its work? { open, task, why }.
- *   locks     the lock list (harness/lock.mjs listLocks); the claim is the truth: done, pause, hand-back and
- *             impossible all release it
- *   events    recent events (task.start by this agent since the session started: it claimed the task, then let go)
- *   doneIds   ids on the board's done list
- *   studioStop / agentStop   the studio's stop (task.mjs readStop) and this agent's (agent.mjs stopMark)
+ *   locks     the lock list; the claim is the truth: done, pause, hand-back and impossible all release it
+ *   events    recent events (task.start by this agent since the session started)
+ *   doneIds   ids on the board's done list;  studioStop / agentStop   the studio's stop and this agent's
  */
 export function taskStillOpen({ agent, role = '', task = null, startedAt = null, locks = [], events = [], doneIds = [], studioStop = null, agentStop = null, refresh = null } = {}) {
   if (studioStop) return { open: false, task, why: `the studio is stopped${studioStop.by ? ` (by ${studioStop.by})` : ''}` };
@@ -145,13 +119,10 @@ export function continueText({ agent = '', task = null, n = 1, max = 8, why = ''
 }
 
 /**
- * Drive one agy stream session for `agent`. child: the spawned agy (stdin a pipe). logFile/from: where its output lands (the
- * session's log from that byte). decide(): taskStillOpen's answer now. note(line): one line for the log (written at a
- * line boundary of agy's output). onContinue({ n, task, why, nudge }) / onClose(why): for events. Returns { state, stop }.
- * progressAt(): the stall check's last progress (a file write, commit or task change; its own verify running counts), in
- * ms; stallMin(): the stall check's no-progress limit (STUDIO_STALL_MIN) the nudge stays below.
- * Options for tests: settings (agyContinueSettings), pollMs, now, timers { setTimeout, clearTimeout, setInterval,
- * clearInterval }.
+ * Drive one agy stream session for `agent`. child: the spawned agy. logFile/from: where its output lands. decide():
+ * taskStillOpen's answer now. note(line): one line for the log. onContinue({ n, task, why, nudge }) / onClose(why): for
+ * events. Returns { state, stop }. progressAt(): the stall check's last progress, in ms; stallMin(): the stall check's
+ * no-progress limit (STUDIO_STALL_MIN) the nudge stays below. Options for tests: settings, pollMs, now, timers.
  */
 export function driveAgyStream({ agent = '', child, logFile, from = 0, firstMessage, decide, note = () => {}, onContinue = () => {}, onClose = () => {}, progressAt = () => 0, stallMin = () => 15, settings = null, pollMs = 250, now = () => Date.now(), timers = globalThis } = {}) {
   const cfg = () => settings || agyContinueSettings();
@@ -282,11 +253,10 @@ export function driveAgyStream({ agent = '', child, logFile, from = 0, firstMess
 }
 
 /**
- * Did this stream session fail on the stream mode itself? { failed, why, line }. A session that ended a
- * turn worked; one the launcher (or a person) ended didn't fail on the format. Otherwise: an input-format error in agy's
- * own output (a plain line, or an error event: "stream input message is missing the "event" field", an unknown or
- * unexpected --input-format argument), or no stream-json event at all before it exited.
- * state: driveAgyStream's state; log: the session's own part of its log; ended: the launcher's or a person's end.
+ * Did this stream session fail on the stream mode itself? { failed, why, line }. A session that ended a turn worked;
+ * one the launcher (or a person) ended didn't fail on the format. Otherwise: an input-format error in agy's own output,
+ * or no stream-json event at all before it exited. state: driveAgyStream's state; log: its log; ended: the launcher's
+ * or a person's end.
  */
 export const STREAM_FORMAT_ERROR = /missing the "?\w*"? field|stream input|input[ _-]?format|unknown (flag|option|argument)|unexpected (argument|flag|option)|unrecognized (flag|option|argument)|invalid (stream|input) message/i;
 export function streamFailure({ state = null, log = '', ended = null } = {}) {

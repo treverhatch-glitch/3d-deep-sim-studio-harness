@@ -10,11 +10,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf as fileUrlRelSOf, guardCap3000Of, out } from './kit.mjs';
 
 export async function selftest284B({ dir, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
+  const guard = guardCap3000Of(report);
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const git = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: { ...process.env, ...ident } });
   const clean = {};
@@ -31,7 +30,7 @@ export async function selftest284B({ dir, report, tmpRoot }) {
   fs.writeFileSync(ev, '');
   const env = { ...base, AGENT_EVENTS_FILE: ev };
   const cli = (e, cmd) => spawnSync(process.execPath, cmd, { windowsHide: true, cwd: S, env: { ...process.env, ...env, ...e }, encoding: 'utf8', timeout: 180000 });
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
+  const u = fileUrlRelSOf(S);
   const SECRET = 'sk-test-284b-not-a-real-secret-value';
   const ENVF = path.join(S, '.env');
   const MODELS = path.join(S, 'studio', 'models.json');

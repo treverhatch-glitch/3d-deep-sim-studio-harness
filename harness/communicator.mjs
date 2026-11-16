@@ -1,46 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/communicator.mjs — 2.76.0 (l): the Communicator. The owner (2026-11-04): "a new role of a 'communicator' so its
- * job is to update in our discord chat every 30 minutes and also message when emergencies happen or things are needed
- * right away ... with the ability to tag [the orchestrator] directly and [the key holder] and me".
- *
- * Harness code that posts, not an AI session that talks: two extra chat sessions confused names and answered things they
- * couldn't. It never reads the chat and spends no model tokens. The supervisor calls communicatorPass() once per pass.
- *
+ * harness/communicator.mjs — the Communicator: harness code (no AI session, no model tokens, never reads the chat) that
+ * posts a status to the chat every STUDIO_COMM_STATUS_MIN (30) minutes and alerts at once, tagging who must act.
+ * The supervisor calls communicatorPass() once per pass. State: .studio/comm/state.json.
  *   npm run comm -- status [--json]     the set-up (webhook shown masked), what was sent, what is held, what is due
- *   npm run comm -- preview [--json]    what it would post now (status + every open alert), mentions as @names; sends nothing
+ *   npm run comm -- preview [--json]    what it would post now (status + every open alert); sends nothing
  *   npm run comm -- test                posts one line (no one tagged), to check the webhook
- *
- * Status, every STUDIO_COMM_STATUS_MIN (30) minutes: one fixed-format post from the harness's own data, the same facts
- * `status -- --brief` reads (harness/brief-status.mjs briefFacts, the event stream): agents and tasks, landed since the
- * run's T0 (the supervisor's start) and per hour, the train (running step and ETA, or the last one's end and length, the
- * queue), the rig (harness/machine.mjs), API $ when tracked (harness/autonomy.mjs dollarsOf), what is blocked and why,
- * what waits on a yes (harness/digest.mjs needsPerson), beta mode (harness/beta-mode.mjs), the Line Producer's line.
- *
- * Alerts, at once, each tagging exactly who must act (studio/communicator.json "mentions": Discord user ids, not
- * secrets):
- *   orchestrator  a train died (its lock's process is gone, or it started and never ended) or is red on real failures
- *                 (main red; a red train that isn't flaky or infrastructure); fewer builders busy than the Line
- *                 Producer's target (.studio/line/status.json, for 10 min; else STUDIO_COMM_MIN_BUILDERS); the crew
- *                 breaker or a supervisor halt; a stop file; a stuck lane (queued past STUDIO_COMM_STUCK_MIN, or a stalled
- *                 session); a harness error (the supervisor's pass threw, the whole-game check errored, the hub keeps
- *                 restarting); in beta mode also what the orchestrator may now do itself (releases, ordinary asks).
- *   keys          an owner-key step (a lane held for the owner's release, protected files changed without approval);
- *                 never in beta mode, nor when the orchestrator holds a delegation for it (harness/delegation.mjs).
- *   owner         only owner decisions (asks; in beta mode only those about deleting, direction or scope; spend over
- *                 budget; a policy proposal) and disasters (disk under STUDIO_COMM_DISK_GB 30, STUDIO_COMM_CRASHES 3 crashes
- *                 in an hour, everything blocked over STUDIO_COMM_BLOCKED_MIN 60). A disaster tags the orchestrator too.
- * Rules: one alert at most once per STUDIO_COMM_DEDUP_MIN (30); one still open is tagged again at most every
- * STUDIO_COMM_REPEAT_MIN (120; disasters every DEDUP_MIN; 2.79 (c): an open question at most every STUDIO_ASK_DIGEST_HOURS, 24); a pass's alerts go in one post (with the status when it is
- * due); an alert the orchestrator can fix never tags the owner; STUDIO_COMM_QUIET "23:00-07:00" (local time) holds
- * owner-only alerts that aren't disasters until it ends. Alerts that closed are named once ("Cleared: …").
- *
- * One identity: the webhook's username (studio/communicator.json "username", default "Studio Status"); plain text,
- * parts of at most 2000 characters cut at line ends (never inside a mention); Discord allowed_mentions lists only the
- * ids tagged in that part (no @everyone). The webhook is STUDIO_COMM_WEBHOOK, else STUDIO_REPORT_WEBHOOK (environment or
- * the studio's .env), never printed, logged or put in an event (harness/report-post.mjs masks and scrubs it; its postOnce
- * sends). On: STUDIO_COMM_WEBHOOK set, or the report webhook with studio/communicator.json or STUDIO_COMM=on;
- * STUDIO_COMM=off turns it off. A failed post is tried again after 5 minutes. State: .studio/comm/state.json.
+ * Alerts tag orchestrator, keys or owner (studio/communicator.json "mentions"). Settings: STUDIO_COMM_DEDUP_MIN (30),
+ * STUDIO_COMM_REPEAT_MIN (120), STUDIO_COMM_QUIET, STUDIO_COMM_STUCK_MIN, STUDIO_COMM_MIN_BUILDERS,
+ * STUDIO_COMM_DISK_GB, STUDIO_COMM_CRASHES, STUDIO_COMM_BLOCKED_MIN, STUDIO_COMM=on|off. Webhook:
+ * STUDIO_COMM_WEBHOOK, else STUDIO_REPORT_WEBHOOK.
  */
 import fs from 'node:fs';
 import path from 'node:path';

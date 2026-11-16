@@ -1,37 +1,14 @@
 #!/usr/bin/env node
 /**
- * harness/test-rng.mjs — 2.67.0 (B-48, B-45): a test that starts a seeded game but rolls the shared dice.
- *
- * A crew's main went red twice from tests that looked seeded: `beginNew(seed)` in a test file, while the test setup
- * file routed the sim's dice to the worker's shared Math.random, so the result depended on which tests ran before it.
- * Another test started a game with no seed at all. Both pass alone and fail in a full run, now and then.
- *
- * The game says what its calls look like, in its manifest (game/<name>/studio.gates.json; the harness only reads it,
- * and the manifest is a protected file):
- *
- *   "testRandomness": {
- *     "mode": "warn",                                       warn (default) | required | off
- *     "seededCalls": ["\\bbeginNew\\s*\\("],                regexes: a call that starts a seeded game (its argument
- *                                                           list follows the match)
- *     "sharedRandomSetup": ["\\bforceSimRandom\\s*\\(\\s*Math\\.random"],
- *                                                           regexes: a line that routes the sim's dice to Math.random
- *     "isolateCall": "forceSimRandom(null)",                text (or a list): what gives a test file its own dice
- *     "setupFiles": ["src/test/setup.ts"],                  optional; default: files named *setup* under "paths"
- *     "paths": ["src"]                                      optional; where tests live (default: the game's folder)
- *   }
- *
- * Findings, one per test file (harness/test-weakening.mjs isTestPath names test files):
- *   shared-random   a seeded call while a setup file (or the test file itself) routes the dice to the shared
- *                   Math.random, and the test file never isolates (no isolateCall in it)
- *   unseeded-game   a seeded call with no argument, or one built from Math.random / Date.now / performance.now
- *
- * Advisory first: the game gate lists it as `game:test-rng`, a WARN in verify that never fails it, and a hand-back
- * carries the findings as a fact (harness/handback-facts.mjs). "mode": "required" in the manifest, or
- * STUDIO_TEST_RNG=required, makes it a failing check. The setting can only raise the manifest's mode (never turn a
- * required check off). Comments are ignored; it reads text, not types: a seeded call through a helper with another
- * name, or a setup that reaches Math.random another way, isn't seen.
- *
- *   node harness/test-rng.mjs [--json]     exit 1 when there are findings (the gate's "required" decides FAIL or WARN)
+ * harness/test-rng.mjs — finds a test that starts a seeded game but rolls the shared dice.
+ * Such tests pass alone and fail in a full run: `beginNew(seed)` while the setup file routes the sim's dice to the
+ * shared Math.random, or a game started with no seed. The manifest (game/<name>/studio.gates.json, protected) gives
+ * "testRandomness": { mode: warn (default) | required | off, seededCalls, sharedRandomSetup, isolateCall, setupFiles,
+ * paths }. Findings per test file: shared-random (a seeded call while a setup file or the test routes dice to
+ * Math.random and the test never isolates); unseeded-game (no argument, or built from Math.random / Date.now /
+ * performance.now). Advisory first: `game:test-rng` is a WARN in verify; "mode": "required" or
+ * STUDIO_TEST_RNG=required fails it (only raises the manifest's mode). Reads text, not types; ignores comments.
+ *   node harness/test-rng.mjs [--json]     exit 1 when there are findings
  */
 import fs from 'node:fs';
 import path from 'node:path';

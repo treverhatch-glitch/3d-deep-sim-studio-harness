@@ -1,29 +1,27 @@
 /**
- * qa/selftest-269s.mjs — 2.69.0 (helper s): overlap checks when work starts, a queue-depth target, the upgrade watch.
- *   overlap   `task add` and `task start` name the lanes in flight that already change the task's files (file and
- *             lines), open tasks working in the same folder, and near-duplicate titles; at start, the task's own lane
- *             diff line by line; each is one task.overlap event; advisory, except STUDIO_OVERLAP=block refuses.
- *   depth     fewer startable builder tasks than STUDIO_QUEUE_DEPTH (default: the session cap) asks the Producer once
- *             (queue.depth event and an inbox line naming the areas chains and holds block); no task is added.
- *   upgrade   `npm run upgrade -- watch` fetches the harness remote (a fake origin here), compares versions, reads CI (a
- *             fake status here), and upgrades only with the switch on, CI green, inside STUDIO_UPGRADE_WINDOW and with
- *             no session running; then refreshes the lanes and files one task per conflicted lane; the switch records
- *             who and refuses workers; the supervisor runs the check.
- * Made-up studios in temp folders; no network (the fake origin is a local bare repo, CI is passed in).
+ * qa/selftest-269s.mjs — overlap checks when work starts, a queue-depth target, the upgrade watch.
+ * overlap  `task add` and `task start` name lanes in flight already changing the task's files, open tasks in the same
+ *   folder, and near-duplicate titles; at start, the task's own lane diff; each is one task.overlap event; advisory,
+ *   except STUDIO_OVERLAP=block refuses.
+ * depth  fewer startable builder tasks than STUDIO_QUEUE_DEPTH (default: the session cap) asks the Producer once
+ *   (queue.depth event and an inbox line); no task is added.
+ * upgrade  `npm run upgrade -- watch` fetches the harness remote, compares versions, reads CI, and upgrades only with
+ *   the switch on, CI green, inside STUDIO_UPGRADE_WINDOW and with no session running; then refreshes the lanes and
+ *   files one task per conflicted lane; the switch records who and refuses workers; the supervisor runs the check.
+ * Made-up studios in temp folders; no network (fake origin is a local bare repo).
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { gEnvUnsetThreeOf, gitAsT as gg, gitExtraOf, guardOf, headRefOf, out, writeIn as write } from './kit.mjs';
 
 export async function selftest269S({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = (extra = {}) => { const e = { ...process.env, ...ident, ...extra }; for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete e[k]; return e; };
-  const g = (cwd, args, extra = {}) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv(extra) });
-  const head = (cwd, ref = 'HEAD') => g(cwd, ['rev-parse', ref]).stdout.trim();
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvUnsetThreeOf(ident);
+  const g = gitExtraOf(gEnv);
+  const head = headRefOf(g);
+  const guard = guardOf(report);
   const lastJson = (r) => { try { return JSON.parse(String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{')).pop()); } catch { return null; } };
   const u = (base, rel) => JSON.stringify(pathToFileURL(path.join(base, rel)).href);
   const base = {
@@ -304,7 +302,6 @@ console.log(JSON.stringify({ states: Object.fromEntries(Object.entries(r).map(([
     const base = fs.mkdtempSync(path.join(tmpRoot, 'imc-'));
     const real = path.join(base, 'real');
     fs.mkdirSync(real);
-    const gg = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
     gg(real, 'init', '-q'); fs.writeFileSync(path.join(real, 'a.txt'), 'a\n'); gg(real, 'add', '-A'); gg(real, 'commit', '-qm', 'a', '--no-verify');
     const link = path.join(base, 'link');
     let linked = true;

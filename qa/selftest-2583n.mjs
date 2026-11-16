@@ -10,20 +10,14 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf as fileUrlRelOf, guardSyncOf, minAgo, napSync as nap, out, readJsonFile as readJson, untilNap100Of } from './kit.mjs';
 
 export async function selftest2583N({ dir, run, report, tmpRoot }) {
   const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === 'win32' ? 2.5 : 1);
   // No tool set for any role: a supervise() pass in a probe can never start a real agent.
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_AGENT_TOOL: '', STUDIO_BUILDER_TOOL: '', STUDIO_BUILDER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_WATCHDOG_LAUNCH: 'off', STUDIO_GAMEDEV_WAKE_DIRECTOR: 'off', STUDIO_DEV_CYCLE_WAKE: 'off' };
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-  const until = (fn, ms) => {
-    const t0 = Date.now();
-    while (Date.now() - t0 < ms && !fn()) nap(100);
-    return fn();
-  };
+  const u = fileUrlRelOf(dir);
+  const until = untilNap100Of(nap);
   let n = 0;
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p2583n-${++n}-${process.pid}.mjs`);
@@ -33,12 +27,10 @@ export async function selftest2583N({ dir, run, report, tmpRoot }) {
   };
   const stateDir = path.join(dir, '.studio');
   const agentsDir = path.join(stateDir, 'agents');
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
   const readEvents = (f = path.join(stateDir, 'events.jsonl')) => { try { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const task = (title, env = {}) => (run(dir, `node harness/task.mjs add "${title}" --role builder`, { ...base, ...env }).stdout.match(/"id":\s*"(T-\d+)"/) || [])[1];
   const locksOf = (agent, env = {}) => (JSON.parse(run(dir, 'node harness/lock.mjs list', { ...base, ...env }).stdout || '{}').locks || []).filter((l) => l.owner === agent).map((l) => l.key);
-  const guard = (name, fn) => { try { const [ok, detail] = fn(); report(name, ok, detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const minAgo = (m) => new Date(Date.now() - m * 60000).toISOString();
+  const guard = guardSyncOf(report);
 
   // ---------- N1: a person's stop is a stop, not a crash ----------
   {

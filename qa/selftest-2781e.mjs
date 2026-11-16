@@ -1,34 +1,27 @@
 /**
- * qa/selftest-2781e.mjs — 2.78.1 (e): fresh sessions that stay cheap, and finished work that doesn't get lost.
- *   - The launch prompt's prefix is the same bytes for every session of a role (builder, engine-porter, reviewer, producer)
- *     at another time, under another name, model and task; a clock time an agent wrote into a pitfall is not called a
- *     cache miss; a launched session leaves studio/CURRENT_TASK.md (imported by CLAUDE.md ahead of the prompt) alone.
- *   - Refresh points per role (reviewers and engine-porters at 70k by default) with per-role and per-model overrides.
- *   - Every hand-back carries the lane, the commits made, the last verify (green/red, which gate) and the next command,
- *     written by the harness; a refresh relaunch's prompt carries them.
- *   - A builder red on a different cause past half its refresh point hands off to a fresh session (a setting turns it
- *     off; the mid-debug exception keeps going); a reviewer's launch never resumes a session.
- *   - `lanes orphans` lists task commits on lane branches that main lacks; `lanes carry <ID>` cherry-picks only the
- *     task's own commits onto a fresh lane, refuses a worker outside its own copy, and stops on a conflict.
- *   - `agent start` with a name whose lane copy is still in use suggests a fresh name; --auto-name uses it.
- *   - An engine pass whose branch is checked out in another clean worktree works there; a dirty one refuses the launch.
+ * qa/selftest-2781e.mjs — fresh sessions that stay cheap, and finished work that doesn't get lost.
+ *   - Launch prompt prefix is the same bytes for every session of a role at another time, name, model and task; a
+ *     launched session leaves studio/CURRENT_TASK.md alone.
+ *   - Refresh points per role (reviewers and engine-porters at 70k) with per-role and per-model overrides.
+ *   - Every hand-back carries the lane, commits, last verify and next command; a builder red on a different cause past
+ *     half its refresh point hands off to a fresh session.
+ *   - `lanes orphans` lists task commits on lane branches main lacks; `lanes carry <ID>` cherry-picks only the task's
+ *     own commits onto a fresh lane.
+ *   - `agent start` with a lane name in use suggests a fresh one (--auto-name uses it); an engine pass whose branch is
+ *     checked out in another clean worktree works there, a dirty one refuses.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitEolLfOf, guardOf, nodeS180Of, out, readJsonIn as readIn, readTextIn as textIn, taskOf, writeIn } from './kit.mjs';
 
 export async function selftest2781E({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const readIn = (cwd, rel) => { try { return JSON.parse(fs.readFileSync(path.join(cwd, rel), 'utf8')); } catch { return null; } };
-  const textIn = (cwd, rel) => { try { return fs.readFileSync(path.join(cwd, rel), 'utf8'); } catch { return ''; } };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitEolLfOf(gEnv);
+  const guard = guardOf(report);
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_WATCHDOG: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_TASK_BASE: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', GITHUB_BASE_REF: '', STUDIO_TASK_PIN: '', STUDIO_REHEARSAL: '', STUDIO_AUTO_NAME: '', STUDIO_CURRENT_TASK_FILE: '', STUDIO_REFRESH_ON_NEW_RED: '', STUDIO_SESSION_CONTEXT: '', STUDIO_SESSION_CONTEXT_EARLY: '', STUDIO_SESSION_EARLY_ROLES: '', STUDIO_LANE_LIVE_MIN: '' };
   let n = 0;
   const made = [];
@@ -45,11 +38,10 @@ export async function selftest2781E({ dir, report, tmpRoot, root }) {
     made.push(S);
     return { S, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const node = (S, args, env) => spawnSync(process.execPath, args, { windowsHide: true, cwd: S, encoding: 'utf8', env: { ...process.env, ...ident, ...env }, timeout: 180000 });
-  const task = (S, line, env) => node(S, ['harness/task.mjs', ...line], env);
+  const node = nodeS180Of(ident);
+  const task = taskOf(node);
   const add = (S, title, env, extra = []) => { const r = task(S, ['add', title, '--role', 'builder', ...extra], env); return (out(r).match(/"id":\s*"([A-Z]+-\d+)"/) || [])[1] || null; };
   const probe = (S, code, env) => { const f = path.join(S, `.probe-2781e-${++n}.mjs`); fs.writeFileSync(f, code); const r = node(S, [f], env); const l = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop(); let j = null; try { j = JSON.parse(l); } catch {} return { ...r, j }; };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const commit = (cwd, rel, text, msg) => { writeIn(cwd, rel, text); g(cwd, 'add', '--', rel); return g(cwd, 'commit', '-qm', msg, '--no-verify'); };
   // What Claude Code reads ahead of the launch prompt: CLAUDE.md with its @imports filled in.
   const claudeContext = (S) => textIn(S, 'CLAUDE.md').split(/\r?\n/).map((l) => (/^@\S+$/.test(l.trim()) ? textIn(S, l.trim().slice(1)) : l)).join('\n');

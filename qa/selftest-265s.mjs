@@ -1,21 +1,21 @@
 /**
- * qa/selftest-265s.mjs — 2.65.0 (helper s):
- *   B-40 full: a lane carries studio config through studio-proposals/<ID>.json; the landing (merge train, and the old
- *     one-lane task done path) applies it to main in a Config-From commit and removes the file; a conflict with main's
- *     newer value hands the lane back; a protected target makes the lane tier C (held until a person releases it), and
- *     with an owner key only the owner's signed approval applies it (else it is held on main, asked of a person, and
- *     `train config` applies it later); the edit guard names the route; the hooks gate exempts exactly such a commit.
- *   Visual noise baseline: "before" is captured twice; a change must reach max(1%, k x the camera's noise), capped; a
- *     scene noisier than the cap is "too noisy to judge", never a pass; the noise goes into the verdict and done-check.
- *   Windows orphans of a full verify's gates: each gate's shell is recorded in the machine:heavy holder's tree while the
- *     run holds it, and heavy stop / the next take find what a finished shell left running (simulated process lists).
- * A tiny studio: a made-up game whose check fails on a note that says BROKEN; lane copies with the commit hooks.
+ * qa/selftest-265s.mjs — studio config from lanes, the visual noise baseline, Windows orphans. A tiny studio: a made-up
+ * game whose check fails on a note that says BROKEN; lane copies with the commit hooks.
+ *   config  a lane carries studio config through studio-proposals/<ID>.json; the landing applies it to main in a
+ *     Config-From commit and removes the file; a conflict with main's newer value hands the lane back; a protected
+ *     target makes the lane tier C, and with an owner key only the owner's signed approval applies it (else held on
+ *     main; `train config` applies it later); the hooks gate exempts exactly such a commit
+ *   visual  "before" is captured twice; a change must reach max(1%, k x the camera's noise), capped; a scene noisier
+ *     than the cap is "too noisy to judge", never a pass
+ *   orphans each gate's shell is recorded in the machine:heavy holder's tree while the run holds it; heavy stop / the
+ *     next take find what a finished shell left running
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { doneBoardOf, eventsOf, fileUrlOf as fileUrlRelOf, gitAsT as g, out, readJsonInDirOf, writeIn as write } from './kit.mjs';
 
 export async function selftest265S({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -23,19 +23,16 @@ export async function selftest265S({ dir, run, report, tmpRoot, root }) {
     try { fs.rmSync(path.join(dir, 'node_modules'), { force: true }); } catch {}
     fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   }
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const events = path.join(dir, '.studio', 'events-265s.jsonl');
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_TRAIN: '', STUDIO_TRAIN_BISECT: '', STUDIO_TRAIN_MIN: '', STUDIO_TRAIN_MAX: '', STUDIO_TRAIN_WAIT_MIN: '', STUDIO_TRAIN_POLL_S: '', STUDIO_TRAIN_LOCK_WAIT_MIN: '', STUDIO_TRAIN_RIDE_ALONG: '', STUDIO_TRAIN_MAX_HANDBACKS: '', STUDIO_ROLE: '', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_GAME_GATE_RETRY: '', STUDIO_GATE_SPAWN: '', STUDIO_VISUAL_NOISE: '', STUDIO_VISUAL_NOISE_K: '', STUDIO_VISUAL_NOISE_CAP: '', STUDIO_VISUAL_DIFF_MIN: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-265s-${process.pid}.pem`), AGENT_EVENTS_FILE: events, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const person = { ...env, CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', STUDIO_LOCK_OWNER: '' };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const mainHas = (rel) => g(dir, 'cat-file', '-e', `main:${rel}`).status === 0;
   const mainJson = (rel) => { try { return JSON.parse(g(dir, 'show', `main:${rel}`).stdout); } catch { return null; } };
-  const diskJson = (rel) => { try { return JSON.parse(fs.readFileSync(path.join(dir, rel), 'utf8')); } catch { return null; } };
+  const diskJson = readJsonInDirOf(dir);
   const queueRaw = () => { try { return JSON.parse(fs.readFileSync(path.join(dir, '.studio', 'train', 'queue.json'), 'utf8')); } catch { return []; } };
-  const doneBoard = () => `${fs.existsSync(path.join(dir, 'studio/DONE.md')) ? fs.readFileSync(path.join(dir, 'studio/DONE.md'), 'utf8') : ''}`;
+  const doneBoard = doneBoardOf(dir);
   const isDone = (id) => new RegExp(`\\b${id}\\b`).test(doneBoard());
   const probe = (name, code, e = env) => {
     const f = path.join(tmpRoot, `probe-265s-${name}-${process.pid}.mjs`);

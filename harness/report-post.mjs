@@ -1,29 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/report-post.mjs — 2.71.0 (y): the owner's reports, posted to a webhook (overseer duty 9).
- *
- *   npm run report -- post [--what status|next|digest] [--dry-run]
- *
- * The crew's overseer pasted the studio's status and "what's next" into the owner's chat by hand. Now the harness
- * builds the text from what already exists (status: `npm run status -- --brief`'s text, harness/brief-status.mjs,
- * read with peek so the brief's "since" mark doesn't move; next: the what's-next board, harness/next-board.mjs;
- * digest: today's studio/digest/<date>.md, else the digest built now, harness/digest.mjs) and POSTs it as JSON:
- *   - discord: { content } (split into parts of at most 2000 characters, at line ends where it can; mentions off),
- *   - slack:   { text },
- *   - json:    { what, text, at }.
- * STUDIO_REPORT_FORMAT=discord|slack|json picks one; unset, the URL's host decides (discord.com, hooks.slack.com),
- * else json. One retry on a 5xx or 429, after Retry-After (seconds or a date; at most 30 s; 1 s when absent).
- *
- * The webhook is a secret: STUDIO_REPORT_WEBHOOK from the environment or the studio's .env (never committed: .env is
- * ignored and the secrets gate flags Discord and Slack webhook URLs). It is never printed: output and logs say
- * "webhook ...<last 4>", events carry no part of it, and any error text is scrubbed of it. Launched agents never get it
- * (harness/agent-env.mjs). postReport() never throws: a failure is a result ({ ok: false, why }) and a report.posted
- * event with status error.
- *
- * The supervisor (reportPass) posts the digest once a day at or after STUDIO_REPORT_HOUR local time (unset: never),
- * and the what's-next board when the queue changed a lot (3 tasks or trains in or out since the last post, or half of
- * a smaller board) and STUDIO_REPORT_NEXT_MIN (120) minutes have passed since it (off: never). Nothing posts
- * without a webhook. Each post is one report.posted event: { what, format, parts, attempts, status, ok, auto }.
+ * harness/report-post.mjs — the owner's reports, posted to a webhook.
+ * npm run report -- post [--what status|next|digest] [--dry-run]
+ * Builds text from what exists (status: `npm run status -- --brief`, read with peek; next: harness/next-board.mjs;
+ * digest: studio/digest/<date>.md, else built now) and POSTs JSON: discord { content } (parts of at most 2000
+ * characters, mentions off), slack { text }, json { what, text, at }. STUDIO_REPORT_FORMAT=discord|slack|json, else
+ * the URL host decides, else json. One retry on 5xx or 429 after Retry-After (at most 30 s; 1 s absent).
+ * The webhook is a secret: STUDIO_REPORT_WEBHOOK from the environment or .env, never printed, committed or given to
+ * launched agents (harness/agent-env.mjs). postReport() never throws: it returns { ok: false, why } and a
+ * report.posted event. The supervisor (reportPass) posts the digest daily at STUDIO_REPORT_HOUR (unset: never) and the
+ * next board when the queue changed a lot and STUDIO_REPORT_NEXT_MIN (120) passed (off: never). No webhook: no post.
  */
 import fs from 'node:fs';
 import path from 'node:path';

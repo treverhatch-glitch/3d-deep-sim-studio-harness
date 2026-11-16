@@ -1,29 +1,27 @@
 /**
- * qa/selftest-285d.mjs — 2.85 (d): finished work waiting for a train, and hand-backs that are not the session's.
- *
- *   1  a task queued for a train whose claim ran out is released quietly by the Director's flow pass (no hand-back); an
- *      ended session's bookkeeping events never make it "still working"; a task in no queue is still handed back
+ * qa/selftest-285d.mjs — finished work waiting for a train, and hand-backs that are not the session's (checks import a
+ * module from a repo copy or run the command in one).
+ *   1  a task queued for a train whose claim ran out is released quietly by the Director's flow pass; an ended
+ *     session's bookkeeping events never make it "still working"; a task in no queue is still handed back
  *   2  one rule for which hand-backs count (handback-kind.mjs): the watchdog's park, the crew breaker, the scorecard
- *   3  the same task done refusal twice (no new commit) holds the task for the overseer and the Producer; the hold lifts
- *      when task done --check no longer gives that reason
+ *   3  the same task done refusal twice (no new commit) holds the task for the overseer and the Producer; the hold
+ *     lifts when task done --check no longer gives that reason
  *   4  finished engine work handed back as ready is queued by the harness once; failing checks queue nothing
- *   5  (B-138) the trailer check from the main checkout judges only the task's own commits; the commit-msg hook's fixer
+ *   5  the trailer check from the main checkout judges only the task's own commits
  *   6  `node harness/unity-gate.mjs` with no task or branch runs no land and writes no engine.land error
- *
- * Each check imports a module from a copy of the repo, or runs the command in one.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitEolLfUserOf, guardCap3000Of, out, readJsonl as events } from './kit.mjs';
 
 export async function selftest285D({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const gitIn = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
+  const gEnv = gEnvOf(ident);
+  const gitIn = gitEolLfUserOf(gEnv);
+  const guard = guardCap3000Of(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
   if (process.platform === 'win32') for (const k of Object.keys(process.env)) if (/^(SystemRoot|windir|SystemDrive|ComSpec|PATHEXT|PATH|TEMP|TMP|USERPROFILE|APPDATA|LOCALAPPDATA|ProgramData|ALLUSERSPROFILE|PUBLIC|ProgramFiles|ProgramFiles\(x86\)|ProgramW6432|CommonProgramFiles|CommonProgramW6432|PSModulePath|PROCESSOR_ARCHITECTURE|NUMBER_OF_PROCESSORS|OS|COMPUTERNAME|HOMEDRIVE|HOMEPATH|USERNAME)$/i.test(k)) clean[k] = process.env[k];
@@ -48,8 +46,6 @@ export async function selftest285D({ dir, run, report, tmpRoot, root }) {
     made.push(S);
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const probe = (S, env, code) => {
     const f = path.join(S, `.probe-285d-${++n}.mjs`);
     fs.writeFileSync(f, code);

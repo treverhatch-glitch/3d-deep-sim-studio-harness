@@ -5,9 +5,8 @@
  *   - a licence file (Unity_lic.ulf, *.ulf, *.alf, signing keystores)
  *   - part of the private studio harness (its folders, its files, its markers)
  *   - marked private or proprietary
- * Runs as the git pre-push hook (.githooks/pre-push; turn it on once: git config core.hooksPath .githooks)
- * and in CI on every push and pull request (.github/workflows/public-guard.yml), so a skipped hook is still
- * caught before a merge. Prints the file and the reason, never the secret itself.
+ * Runs as the git pre-push hook (.githooks/pre-push; once: git config core.hooksPath .githooks) and in CI on every push
+ * and pull request (.github/workflows/public-guard.yml). Prints the file and the reason, never the secret itself.
  *
  *   node tools/public-guard/check.mjs            every tracked file
  *   node tools/public-guard/check.mjs --staged   only what is staged (fast, for a pre-commit check)

@@ -1,29 +1,13 @@
 /**
- * harness/ratchet.mjs — 2.72.0 (b): the purity ratchet. Standing hits are recorded once; only new ones fail.
- *
- * Turning the sim purity check on for a real game gave 611 reds on day one, so it stayed off; an outside replay that
- * only hid the old hits saw the standing count grow from 143 to 543, because nothing blocked new ones. The ratchet:
- *
- *   - A committed baseline per game, `<game>/purity-baseline.json` (a cartridge's: cartridges/<name>/purity-baseline.json),
- *     records the standing hits of the sim purity check ("purity": scripts/check-sim-purity.mjs, its static rules and
- *     required deterministic math) and of any game check that declares "ratchet": true in its studio.gates.json (the
- *     section is the check's id, e.g. "game:lint"). A hit's key is its file, its rule and its source line with the
- *     spaces normalised, never the line number, so a hit that only moves keeps its key. Same key twice: a count.
- *   - A check run sees only the hits the baseline doesn't cover (the hits a lane's diff added): ANY new hit fails, and
- *     only the new ones are printed. Standing hits are counted in one line.
- *   - The baseline never grows from a lane: in a lane copy a key counts as standing only up to its count in the
- *     baseline as the studio's branch has it (the merge base), and the merge train holds a lane whose baseline grew as
- *     tier C (harness/tiers.mjs "ratchet-grow"). A person grows it on the studio's branch:
- *       npm run purity -- baseline --write --by <person>      (an agent: --permission "<their words>", or a delegation
- *                                                              for "purity-baseline"; a worker never)
- *   - A fixed hit shrinks it: task done rewrites the baseline smaller and commits that in the task's own copy
- *     (shrinkAtDone), and `npm run purity -- baseline --shrink` does it by hand. Shrinking needs nobody.
- *   - No baseline file: today's behaviour (every hit fails; a ratchet check's own exit code decides).
- *
- * A hit is a line of the check's output in one of these shapes (file paths relative to the repo root):
- *   <file>:<line>[:<col>] [<RULE>] <message>              (the purity check's own lines, prefixed "x " or "! ")
- *   <file>:<line>:<col>: <message> [<rule>]                (ESLint's unix formatter and similar)
- *
+ * harness/ratchet.mjs — the purity ratchet: standing hits are recorded once, only new ones fail.
+ * A committed baseline per game (`<game>/purity-baseline.json`; a cartridge's: cartridges/<name>/purity-baseline.json)
+ * records the standing hits of the sim purity check (scripts/check-sim-purity.mjs) and of any game check with
+ * "ratchet": true in studio.gates.json. A hit's key is its file, rule and source line (spaces normalised), never the
+ * line number. A check run prints only hits the baseline doesn't cover; ANY new hit fails. No baseline: every hit
+ * fails. The baseline never grows from a lane (tier C, "ratchet-grow"). A person grows it:
+ *   npm run purity -- baseline --write --by <person>   (an agent: --permission "<their words>", or a delegation for
+ *                                                       "purity-baseline"; a worker never)
+ * A fixed hit shrinks it: task done rewrites it smaller (shrinkAtDone), or `npm run purity -- baseline --shrink`.
  *   npm run purity [-- list [--json]]                      the standing, new and fixed hits per baseline
  */
 import fs from 'node:fs';

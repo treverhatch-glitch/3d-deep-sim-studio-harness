@@ -1,29 +1,14 @@
 /**
- * harness/brief-status.mjs — 2.65.0: `npm run status -- --brief`, the studio in under 100 words for a chat channel.
+ * harness/brief-status.mjs — `npm run status -- --brief`: the studio in under 100 words for a chat channel.
  *
- * The crew's orchestrator hand-assembled this every 30 minutes. It is a fixed format now, built by code from the
- * event log and the state files (no model, no tokens), so the same state always gives the same text:
- *
- *   Studio 14:30 UTC, since 14:00.
- *   Workers (2): builder T-012, qa-playtester T-015.
- *   Landed (2): T-010, T-011. Bugs fixed (1): T-011.
- *   Unity: land pass 13:50 (T-009).
- *   Blockers: halted (two sessions in a row ended with exit 1); owner hold C: T-020; asks: A-003.
- *   PC: 5.2 GB free; heavy: full verify (builder-2).
- *
- *   npm run status -- --brief [--since <iso>] [--now <iso>] [--peek] [--json]
- *
- * "Since": --since, else the last brief (.studio/brief-status.json; --peek doesn't move it), else 30 minutes
- * (STUDIO_BRIEF_DEFAULT_MIN). Workers: launched sessions running now (role and task). Landed: task.done, train
- * landings and lane merges in the window; bugs fixed: those whose board title starts "Bug" or that were added as
- * --type bug. Unity: the last Unity land gate (.studio/gates/unity-last.json). Blockers: a halted supervisor, a
- * stopped studio (.studio/STOP.json), lanes held in the train queue for the owner (tier C), open asks for a person, 2.76.0 (B-87) tasks
- * waiting on the dev's `task yes` ("waiting on yes (N): T-1, T-2"). PC: free memory and who
- * holds machine:heavy. 2.68.0 (m): a "Machine: RAM …, CPU …, GPU …, disk … free" line (harness/machine.mjs); 2.68.0 (o): blockers also name roles
- * the crew watchdog paused and a usage wind-down. 2.65.3: a running merge train's step and ETA (harness/train-status.mjs), and STUDIO_TRAIN_MAX
- * when it has more than 6 lanes. 2.70.0 (t): the latest playable build and clip after a landing ("Playable build <id>
- * (T-1, T-2); clip <file>", harness/landing-build.mjs). 2.70.0 (v): blockers name assets waiting for a review of their
- * previews, oldest first (harness/asset-review.mjs). Lists are cut ("+3 more") until the whole text is under 100 words (BRIEF_MAX_WORDS).
+ * A fixed format built by code from the event log and state files (no model, no tokens). Lines: Workers (launched
+ * sessions); Landed and bugs fixed; Unity (.studio/gates/unity-last.json); Blockers (halted supervisor,
+ * .studio/STOP.json, lanes held for the owner, open asks, tasks waiting on `task yes`, paused roles, usage wind-down,
+ * assets awaiting review); PC (free memory, machine:heavy holder; harness/machine.mjs); a running train's step and
+ * ETA.
+ * npm run status -- --brief [--since <iso>] [--now <iso>] [--peek] [--json]
+ * "Since": --since, else the last brief (.studio/brief-status.json; --peek doesn't move it), else
+ * STUDIO_BRIEF_DEFAULT_MIN (30). Lists are cut ("+3 more") to fit BRIEF_MAX_WORDS (100).
  */
 import fs from 'node:fs';
 import os from 'node:os';

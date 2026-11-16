@@ -1,34 +1,26 @@
 /**
- * qa/selftest-271y.mjs — 2.71.0 (helper y): the overseer's paperwork in the harness.
- *   board     `npm run next-board`: per role the tasks that can start, their blockers (an --after chain, a park), the
- *             overlaps 2.69 recorded, lanes waiting for the train (held ones named), what needs a person; under 150 words.
- *   post      `npm run report -- post` sends the report as JSON to STUDIO_REPORT_WEBHOOK: discord { content } split at
- *             2000 characters, slack { text }, json { what, text, at }; the host picks the format; --dry-run sends nothing.
- *   retry     one retry on a 5xx or 429 after Retry-After (capped at 30 s); a 4xx is not retried; a failure is a
- *             result and a report.posted error event, never a throw.
- *   secret    the webhook never appears in output, events, logs or state; launched agents don't get it.
- *   pass      the supervisor's pass posts the digest once a day at STUDIO_REPORT_HOUR and the board when it changed a
- *             lot (STUDIO_REPORT_NEXT_MIN); nothing without a webhook.
- *   brief     `npm run brief -- builder --write` composes the builder's brief from the real rules (under 800 words, its
- *             sources' hash, what it cut, the policy file when present); the kickoff uses it and rewrites it when a
- *             source changed or it was edited by hand.
- *   research  `task add --type research`: the template at task start, done refuses a write-up without a Sources section
- *             or a link, the game's docs folder when it has one, the digest lists finished research.
- * A local HTTP server (a separate process) stands in for the webhook: no network, no paid service.
+ * qa/selftest-271y.mjs — the overseer's paperwork; a local HTTP server stands in for the webhook (no network).
+ *   board  `npm run next-board`: per role startable tasks, blockers, overlaps, lanes waiting for the train; <150 words
+ *   post  `npm run report -- post` sends JSON to STUDIO_REPORT_WEBHOOK: discord { content } split at 2000 chars, slack
+ *     { text }, json { what, text, at }; --dry-run sends nothing
+ *   retry  one retry on 5xx or 429 after Retry-After (max 30 s); a 4xx isn't retried; a failure is a report.posted
+ *     error event, never a throw
+ *   secret  the webhook never appears in output, events, logs or state; launched agents don't get it
+ *   pass  supervisor posts the digest daily at STUDIO_REPORT_HOUR, the board when it changed a lot
+ *     (STUDIO_REPORT_NEXT_MIN)
+ *   brief  `npm run brief -- builder --write` composes the brief (<800 words)
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
+import { eventsOf, fileUrlOf, gitAsT as g, guardOf, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest271Y({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const u = fileUrlOf(dir);
+  const write = writeInDirOf(dir);
+  const guard = guardOf(report);
   const events = path.join(dir, '.studio', 'events-271y.jsonl');
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const addEvent = (e) => fs.appendFileSync(events, `${JSON.stringify({ ts: new Date().toISOString(), agent: 't', ...e })}\n`);
   // A made-up token, long enough to look like a real one; the URL points at the local stand-in.
   const TOKEN = `tok${'Q7x2'.repeat(10)}Zr9w`;

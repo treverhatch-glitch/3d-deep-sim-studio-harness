@@ -1,26 +1,13 @@
 #!/usr/bin/env node
 /**
- * harness/env-reload.mjs — 2.73.2 (B-74): settings changed in .env reach the processes that are already running.
- *
- * event.mjs loads the studio's .env once, when a process starts. The overseer raised STUDIO_STALL_MIN to 40 in .env, and
- * the sessions already running kept 15 (s126 was ended on 15 min). Now the long-running loops call reloadEnvIfChanged()
- * every pass: the supervisor's pass (with the train daemon's pass in it), the launcher's heartbeat (the stall check and
- * the idle exit), the watchdog's pass and the watch pass. When the .env's mtime or size changed since the process last
- * looked (one stat call), or someone ran `npm run studio:reload-env`, the file is read again and the values that came
- * from it are updated in that process.
- *
- * Precedence (unchanged for a fresh process): a variable in the environment a process was started with wins over
- * .env, as before. A value that came from .env, in this process or through its parent (a launcher started by the
- * supervisor inherits the supervisor's .env values; the note STUDIO_ENV_FROM_FILE says which), follows the file. The
- * session identity (STUDIO_LOCK_OWNER, STUDIO_ROLE, STUDIO_AGENT, STUDIO_MAIN_ROOT) is never taken from .env
- * (harness/dotenv.mjs, 2.73.1 B-60). A few numbers are read once when a process starts and still need a restart: the
- * supervisor's loop interval (STUDIO_SUPERVISOR_SEC), the heartbeat interval (STUDIO_HEARTBEAT_SEC) and the hub's port.
- *
- * Each change is logged once (one env.reloaded event per version of the file, whichever process saw it first), naming
- * the keys; the values of keys that look secret (*_TOKEN, *_KEY, *_SECRET, *PASSWORD*, webhooks) are never written.
- *
- *   node harness/env-reload.mjs [--by <name>]     (npm run studio:reload-env) ask every running loop to reload now; a
- *                                                 running supervisor answers within seconds with what changed
+ * harness/env-reload.mjs — settings changed in .env reach the processes that are already running. The long-running
+ * loops (supervisor, launcher heartbeat, watchdog, watch pass) call reloadEnvIfChanged() every pass; when the .env's
+ * mtime or size changed, or someone ran `npm run studio:reload-env`, the values that came from it are updated.
+ * A variable in the environment a process started with wins over .env; a value that came from .env (note
+ * STUDIO_ENV_FROM_FILE) follows the file. STUDIO_LOCK_OWNER, STUDIO_ROLE, STUDIO_AGENT and STUDIO_MAIN_ROOT never
+ * come from .env (harness/dotenv.mjs). STUDIO_SUPERVISOR_SEC, STUDIO_HEARTBEAT_SEC and the hub's port need a restart.
+ * One env.reloaded event per file version names the keys; values of secret-looking keys are never written.
+ *    node harness/env-reload.mjs [--by <name>]     (npm run studio:reload-env) ask every running loop to reload now
  */
 import fs from 'node:fs';
 import path from 'node:path';

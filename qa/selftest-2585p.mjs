@@ -1,33 +1,30 @@
 /**
- * qa/selftest-2585p.mjs — 2.58.5 (H-7): the hooks gate no longer reads a whole range's diffs into memory.
- *
- * Found on a studio whose base branch (the harness upstream) is far behind: the range since the base holds the game's
- * whole import with its binary art, and as soon as one commit needed the patch-id fallback (a lane rebased by task done,
- * a rebased commit on main) the gate ran `git log -p --binary` over all of it and Node threw ERR_STRING_TOO_LONG, so
- * every landing failed. Now only the commits that need a patch-id get one, streamed from git into git patch-id; the
- * grandfather list does the same, the weakened-tests gate reads only the files its rules judge, and an output too big
- * to read fails a gate instead of passing it on a list cut short.
- *
+ * qa/selftest-2585p.mjs — the hooks gate doesn't read a whole range's diffs into memory.
+ * Only the commits that need a patch-id (a lane rebased by task done, a rebased commit on main) get one, streamed
+ *   from git into git patch-id, instead of `git log -p --binary` over the whole range (which threw
+ *   ERR_STRING_TOO_LONG on a large base range); the grandfather list does the same, the weakened-tests gate reads
+ *   only the files its rules judge, and an output too big to read fails a gate instead of passing it on a list cut
+ *   short.
  * STUDIO_HOOKS_MAX_BUFFER (bytes) lowers the read limit so a few 3 MB files stand in for gigabytes of art; GIT_TRACE
- * shows which git commands ran.
+ *   shows which git commands ran.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { headOf, lastLineJsonOf, out } from './kit.mjs';
 
 export async function selftest2585P({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '',
     GITHUB_BASE_REF: '', GITHUB_EVENT_NAME: '', GITHUB_SHA: '', STUDIO_HOOKS_CHECK: '', STUDIO_WEAKENED_TESTS: '', STUDIO_LOCK_OWNER: '', STUDIO_HOOKS_MAX_BUFFER: '', GIT_TRACE: '' };
   const SMALL = String(1024 * 1024); // 1 MB: each art file below is 3 MB, its binary diff about 4 MB
   const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
   const write = (rel, data) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), data); };
   const commit = (msg, flags = [], extra = {}) => { g('add', '-A'); return spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '-m', msg, ...flags], { windowsHide: true, cwd: dir, encoding: 'utf8', env: { ...process.env, ...env, ...extra } }); };
-  const head = () => g('rev-parse', 'HEAD').stdout.trim();
+  const head = headOf(g);
   const stampOf = (rev) => (g('log', '-1', '--format=%B', rev).stdout.match(/^Studio-Hooks: v[0-9a-f]{8} t([0-9a-f]{12}) ([ps])([0-9a-f]{12})$/m) || []);
-  const json = (r) => { try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return { _raw: out(r).slice(-1500) }; } };
+  const json = lastLineJsonOf(out);
   let traceN = 0;
   const traced = (cmd, extra = {}) => {
     const trace = path.join(tmpRoot, `trace-2585p-${process.pid}-${++traceN}.log`);

@@ -1,33 +1,27 @@
 /**
- * qa/selftest-276j.mjs — 2.76.0 (helper j): machine sharing (B-89), "waiting on yes" said out loud (B-87), and the
- * first-divergence report for a cartridge that imports its loader from outside its folder (B-94).
- *   B-89 share     a lane check beside the train's verify gets its share of the cores (not 26 of 28), the game's row
- *                  keeps testWorkers { workers, share, why, machineWorkers } and the per-test timeout reads every
- *                  check's workers on the machine
- *   B-89 priority  the train's verify > a builder's verify > a soak beside the same jobs; a train coming (lanes queued)
- *                  keeps its share free; Unity's claimed threads come off the top; STUDIO_TEST_WORKERS still wins and
- *                  STUDIO_RIG_SHARE=off sizes by RAM only
- *   B-89 rig       rigBudget() lists what runs (a verify's own gate slot counted once) and the shares, for the Line Producer
- *   B-87           studio:status's last-pass line, status --brief and the War Room's Needs a person name the tasks
- *                  waiting on a dev's yes; in beta mode the line says who may give it
- *   B-94           a made-up game whose cartridge re-exports game/<name>/tools/cartridge-loader.mjs (which imports the
- *                  sim beside it and a package from node_modules) gets its first divergence (tick, field)
- * Each check fails on 2.75.0.
+ * qa/selftest-276j.mjs — machine sharing, "waiting on yes" said out loud, and the first-divergence report for an outside loader.
+ * share  a lane check beside the train's verify gets its share of the cores; the game's row keeps testWorkers {
+ *   workers, share, why, machineWorkers }; the per-test timeout reads every check's workers on the machine.
+ * priority  the train's verify > a builder's verify > a soak; a train coming keeps its share free; Unity's claimed
+ *   threads come off the top; STUDIO_TEST_WORKERS still wins; STUDIO_RIG_SHARE=off sizes by RAM only.
+ * rig  rigBudget() lists what runs (a verify's own gate slot counted once) and the shares, for the Line Producer.
+ * yes  studio:status, status --brief and the War Room's Needs a person name the tasks waiting on a dev's yes; in beta
+ *   mode the line says who may give it.
+ * loader  a cartridge that re-exports game/<name>/tools/cartridge-loader.mjs (importing the sim and a node_modules
+ *   package) still gets its first divergence (tick, field).
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { gEnvOf, gitUserCrlfOf, guardOf, out, writeIn as write } from './kit.mjs';
 
 export async function selftest276J({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   void harnessRoot;
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const write = (b, rel, text) => { fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true }); fs.writeFileSync(path.join(b, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitUserCrlfOf(gEnv);
+  const guard = guardOf(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
   const base = { ...clean, STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_REACHABILITY: 'off', STUDIO_TEST_LOADAVG: '0', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_SELF_TRIAGE: 'off', STUDIO_TIMEOUT_RERUN: 'off', STUDIO_GAME_GATE_CI: 'off', STUDIO_MACHINE_SCAN: '', npm_lifecycle_event: '', NODE_OPTIONS: '', npm_config_node_options: '', ...ident };

@@ -10,13 +10,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { guardCap3000Of, out } from './kit.mjs';
 
 export async function selftest286H({ report, tmpRoot, root }) {
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
+  const guard = guardCap3000Of(report);
   const T = path.join(tmpRoot, `s286h-${process.pid}`);
   const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true }); fs.writeFileSync(path.join(T, rel), text); };
   const check = (...args) => spawnSync(process.execPath, [path.join(root, 'scripts', 'check-names.mjs'), ...args], { windowsHide: true, encoding: 'utf8', timeout: 240000 });
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
 
   write('harness/a.mjs', ['export function handBack(st) {', '  if (st.capped) { const cap = 3; return cap; }', '  return `stopped at ${cap}`;', '}', 'export const card = () => ({ missing });', ''].join('\n'));
   write('scripts/b.mjs', ['import { handBack } from "../harness/a.mjs";', 'console.log(handBack({}), helperr);', 'function helper() {}', 'helper();', ''].join('\n'));

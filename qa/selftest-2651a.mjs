@@ -14,16 +14,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { eventsOf, fileUrlOf, guardSyncOf, out, readJsonFile as readJson, writeInDirOf } from './kit.mjs';
 
 export async function selftest2651A({ dir, run, report, tmpRoot }) {
   const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === 'win32' ? 2.5 : 1);
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const guard = (name, fn) => { try { const [ok, detail] = fn(); report(name, ok, detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const u = fileUrlOf(dir);
+  const write = writeInDirOf(dir);
+  const guard = guardSyncOf(report);
   const events = path.join(dir, '.studio', 'events-2651a.jsonl');
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_HEAVY_SLOTS: '1', STUDIO_HEAVY_HELD: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_GAME: '', STUDIO_COMPACT_OUTPUT: 'off', STUDIO_GAME_GATE_CI: 'off', STUDIO_GAME_GATE_TIMEOUT_MS: '', STUDIO_GAME_GATE_TIMEOUT_SCALE: '', STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR: '', STUDIO_GAME_GATE_TIMEOUT_FLOOR: '', STUDIO_GAME_GATE_RETRY: '', STUDIO_TEST_TIMEOUT_SCALE: '', STUDIO_TEST_LOADAVG: '0', STUDIO_TEST_CPU_BUSY: '', STUDIO_CPU_PROBE: '', STUDIO_CPU_BUSY_THRESHOLD: '', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_PROC_LIST_STUB: '', STUDIO_SELF_TRIAGE: '', STUDIO_SILENT_GREEN: 'off', STUDIO_GATE_RELATED: '', STUDIO_WHOLE_GAME: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_TEST_GIT_VERSION: '', STUDIO_TRAIN_PREDICT: '', npm_lifecycle_event: '', AGENT_EVENTS_FILE: events };
   let n = 0;
   const probe = (code, env = {}) => {

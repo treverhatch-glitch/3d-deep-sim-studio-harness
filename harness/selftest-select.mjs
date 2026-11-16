@@ -1,20 +1,12 @@
 /**
  * harness/selftest-select.mjs — which self-test units run: `--only <patterns>` and `--changed [ref]`.
  *
- * The self-test (qa/selftest.mjs) is ~290 units, an hour in one process. A developer editing one module needs the
- * units that exercise it, not the hour; the full run stays the default and is what CI runs.
+ *   --only a,b      units whose label, line (L1234 or 1234), group or source block mentions a pattern
+ *   --changed [ref] units affected by files changed since `ref` (default: merge base with origin/main, else HEAD~1):
+ *     a block mentioning a changed file or a test naming it (--deep: also importers), a block with a diff hunk, every
+ *     unit when a shared file changed (package.json, studio/gates.json, the fixture)
  *
- *   --only a,b      run the units whose label, line (L1234 or 1234), group or source block mentions a pattern
- *                   (case-insensitive; `230h` matches the block that imports qa/selftest-230h.mjs)
- *   --changed [ref] run the units affected by the files changed since `ref` (default: the merge base with
- *                   origin/main, else HEAD~1), committed or not: a unit whose block mentions a changed file (its
- *                   path or basename) or a test file that names it (with --deep: also one hop through the modules
- *                   that import it), a unit whose block has a diff hunk, every
- *                   unit when a shared file changed (package.json, studio/gates.json, the fixture, the runner's
- *                   preamble)
- *
- * A unit's block is the text from its `inShard(` line to the one before the next; a sabotage unit's text is its
- * label plus the gate's command. Pure functions plus `buildSelection` (reads the repo); nothing here asserts.
+ * A unit's block is the text from its `inShard(` line to the one before the next.
  */
 import fs from 'node:fs';
 import path from 'node:path';

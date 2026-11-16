@@ -1,21 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/lane-disk.mjs — 2.70.0 (w): the lane disk report, and stale-lane proposals someone actually sees.
- *
+ * harness/lane-disk.mjs — the lane disk report, and stale-lane proposals someone actually sees.
  *   npm run lanes -- disk [--top N] [--json]
- *       Each lane copy's size on disk (.lanes/<x>, train scratch copies included; links such as node_modules, studio/
- *       and .studio/ count as themselves), the top N (10), the total, and the share the lane exclusions would save
- *       (harness/lane-sparse.mjs: the tracked bytes under the laneExclude globs, for each lane that still has them; with
- *       no laneExclude declared, the biggest tracked folders, to choose globs from). Kept in .studio/lanes/disk.json;
- *       the machine scan's disk line names the lanes' total from it. Over STUDIO_LANES_MAX_GB (default 25% of the
- *       disk) a lanes.disk_over warning (at most every 6 h).
- *
- *   The supervisor's lane pass (lanesPass), at most every STUDIO_JANITOR_LANES_MIN (360) minutes, in a detached child
- *   (`node harness/lane-disk.mjs pass`): the janitor's lane proposals as a dry run (harness/janitor.mjs laneProposals;
- *   it never deletes) into .studio/lanes/proposals.json and one janitor.lanes_proposed event, then the disk report.
- *   The daily digest, `status --brief` and the War Room snapshot show "N stale lane copies (X GB) proposed: npm run
- *   janitor -- --lanes --yes --by <name>". Deleting stays a decider's action (a person, or an agent under the owner's
- *   delegation for janitor-lanes, or on a person's direct permission).
+ *       Each lane copy's size on disk (.lanes/<x>, train scratch copies included), the top N (10), the total, and the
+ *       share the lane exclusions would save (harness/lane-sparse.mjs). Kept in .studio/lanes/disk.json. Over
+ *       STUDIO_LANES_MAX_GB (default 25% of the disk) a lanes.disk_over warning (at most every 6 h).
+ * The supervisor's lane pass (lanesPass), at most every STUDIO_JANITOR_LANES_MIN (360) minutes, in a detached child
+ * (`node harness/lane-disk.mjs pass`): the janitor's lane proposals as a dry run (harness/janitor.mjs laneProposals; it
+ * never deletes) into .studio/lanes/proposals.json and one janitor.lanes_proposed event, then the disk report. The
+ * digest and War Room show "N stale lane copies (X GB) proposed: npm run janitor -- --lanes --yes --by <name>".
+ * Deleting is a decider's action (a person, or an agent under the owner's delegation or a person's direct permission).
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,28 +1,25 @@
 /**
- * qa/selftest-277f.mjs — 2.77.0 (helper f): three small parts of Patch #2.
- *   digest    P1.1: the daily digest has a "Beta mode" section for its 24 h: whether beta is on, who switched it and when,
- *             each use (who, action, subject, why), at most 30 lines with a count of the rest; nothing when beta is off
- *             and nothing was used; the section is not counted in the digest's 200 words; recordBetaUse keeps the subject
- *             and the reason in the event
- *   mixed     P2.4 / B-91: the launcher (carryTaskBranch, used by the lane copy, `task start` and the claim) does not merge
- *             an earlier branch whose commits carry another OPEN task's Studio-Task trailer; it says so (lane.mixed_skipped,
- *             the start output) and starts from main plus the task's own commits; a --after dependency's commits, a
- *             Rescue target's and a branch of only this task's commits still merge; STUDIO_TRAIN_MIXED=off turns it off
- *   rig       P4.2: the job catalog has an "art-bake" kind (RAM, CPU threads, minutes, all overridable in
- *             studio/machine-budget.json "jobs"); one RIG_PRIORITY table (train > verify/check > Unity/art > soak) that the
- *             weights come from, unchanged in value; docs name both
- * Every check fails on 2.76.0 (no betaDigestLines, no carryTaskBranchEx / mixed check, no art-bake, no RIG_PRIORITY).
+ * qa/selftest-277f.mjs — three small parts: beta digest, mixed-task branches, the art-bake job.
+ *   digest  the daily digest has a "Beta mode" section for its 24 h: whether beta is on, who switched it and when, each
+ *     use (who, action, subject, why), at most 30 lines plus a count; nothing when beta is off and unused
+ *   mixed  the launcher (carryTaskBranch) does not merge an earlier branch whose commits carry another OPEN task's
+ *     Studio-Task trailer; it says so (lane.mixed_skipped, the start output) and starts from main plus the task's own
+ *     commits; a --after dependency's, a Rescue target's and this task's own commits still merge;
+ *     STUDIO_TRAIN_MIXED=off turns it off
+ *   rig  the job catalog has an "art-bake" kind (RAM, CPU threads, minutes, overridable in studio/machine-budget.json
+ *     "jobs"); one RIG_PRIORITY table (train > verify/check > Unity/art > soak) that the weights come from
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { gEnvOf, guardOf, out, readJsonl as evs } from './kit.mjs';
 
 export async function selftest277F({ dir, report, tmpRoot }) {
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
+  const gEnv = gEnvOf(ident);
   const g = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '',
     CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', NODE_OPTIONS: '', STUDIO_TRAIN_MIXED: '', STUDIO_DIGEST: 'off', STUDIO_MACHINE_SCAN: 'off', STUDIO_HOOKS_CHECK: 'off',
@@ -41,10 +38,8 @@ export async function selftest277F({ dir, report, tmpRoot }) {
     made.push(S);
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const evs = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const node = (S, env, code) => spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: S, encoding: 'utf8', windowsHide: true, env: { ...process.env, ...env } });
   const imp = (S, f) => JSON.stringify(pathToFileURL(path.join(S, 'harness', f)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
 
   // ---- digest ----
   const mk = (i, over = {}) => ({ ts: new Date(Date.UTC(2026, 10, 4, 6, i)).toISOString(), type: 'delegation.used', agent: 'opus-1', status: 'ok', msg: `opus-1 train-release T-${i} in beta mode: reason ${i}`, meta: { beta: true, action: 'train-release', subject: `T-${i}`, why: `reason ${i}`, via: 'beta' }, ...over });

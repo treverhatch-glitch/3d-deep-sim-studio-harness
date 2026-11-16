@@ -1,24 +1,14 @@
 #!/usr/bin/env node
 /**
- * harness/watchdog.mjs — the overnight watchdog (2.30, G1). Opt-in: off until the dev turns it on,
- * for runs nobody is watching. A script, not a model: it costs no tokens and never slows a build.
- *
- *   npm run watchdog -- on --by <dev> | off --by <dev> | status
- *   (or the switch in the War Room's Ops view)
- *
- * While it is on, every watch pass also:
- *   1. answers a refresh check nobody answered in STUDIO_WATCHDOG_CHECK_MIN (15) minutes: hand off, so a
- *      flagged session can't run on unchecked;
+ * harness/watchdog.mjs — the overnight watchdog: opt-in (off until the dev turns it on), a script not a model, so it
+ * costs no tokens. Every action is an event with "watchdog" as the agent.
+ *   npm run watchdog -- on --by <dev> | off --by <dev> | status      (or the switch in the War Room's Ops view)
+ * While on, every watch pass also:
+ *   1. answers a refresh check nobody answered in STUDIO_WATCHDOG_CHECK_MIN (15) minutes: hand off;
  *   2. parks a task handed back STUDIO_WATCHDOG_HANDBACKS (3) times in 2 hours, with the reason;
- *   3. stops the studio when no task finished in STUDIO_WATCHDOG_IDLE_HOURS (2) while sessions that held a task
- *      ran (planning sessions don't count; the window never starts before the studio, a switch-on or a resume).
- *      0 turns the idle stop off.
- *   4. (2.64.0) raises drift Checks for running sessions (harness/stall.mjs driftCheck: the same gate failing the
- *      same way 3 times, verify runs with no new diff, edits outside the task's lane and claims). A Check is an event
- *      to the Producer, once per session per signal; nothing is stopped. `npm run watchdog -- drift` lists them.
- *   5. (2.65.0) runs the self-triage list (harness/self-triage.mjs) and, once a day at STUDIO_DIGEST_HOUR (9, local
- *      time), writes the daily digest (harness/digest.mjs): what still needs a person, in under 200 words.
- * Every action is an event with "watchdog" as the agent, so the morning report shows what it did.
+ *   3. stops the studio if no task finished in STUDIO_WATCHDOG_IDLE_HOURS (2) while task sessions ran (0: off);
+ *   4. raises drift Checks (harness/stall.mjs driftCheck; `npm run watchdog -- drift` lists them), stopping nothing;
+ *   5. runs the self-triage list and, daily at STUDIO_DIGEST_HOUR (9, local), writes the digest (harness/digest.mjs).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -49,11 +39,10 @@ export function setWatchdog(on, by) {
 }
 
 /**
- * 2.54.0: the idle stop. Stops the studio when sessions that held a task ran for the whole window and none
- * finished. The window starts no earlier than the studio's first event, the watchdog being switched on, or
- * the last resume, so a young or just-resumed studio is never stopped for hours it didn't run (P-022).
- * Planning sessions (Producer, Director, any session that never held a task) don't count: they don't
- * finish tasks by design (P-023).
+ * The idle stop. Stops the studio when sessions that held a task ran for the whole window and none finished. The window
+ * starts no earlier than the studio's first event, the watchdog being switched on, or the last resume, so a young or
+ * just-resumed studio is never stopped for hours it didn't run. Planning sessions (Producer, Director, any session that
+ * never held a task) don't count: they don't finish tasks by design.
  */
 export function idleStopReason(now, { events = [], lim = watchdogLimits(), w = {}, auto = false, supervisorStartedAt = 0 } = {}) {
   if (!(lim.idleHours > 0)) return null;
@@ -275,11 +264,10 @@ export async function driftPass(now = Date.now(), { events = readRecentEvents(50
 }
 
 /**
- * 2.40.0: log the watchdog's actions as watchdog.action events. With STUDIO_WATCHDOG_QUIET_MIN (opt-in) the
- * same action (kind, task and message, numbers ignored) is logged once per window; when it shows again after
- * the window, its line says how many times it repeated meanwhile. The actions themselves still happen every
- * pass; only the log is quieter (the research pack counted 11-23 watchdog events per finished task).
- * Returns the actions that were logged.
+ * Log the watchdog's actions as watchdog.action events. With STUDIO_WATCHDOG_QUIET_MIN (opt-in) the same action (kind,
+ * task and message, numbers ignored) is logged once per window; when it shows again after the window, its line says how
+ * many times it repeated meanwhile. The actions still happen every pass; only the log is quieter. Returns the actions
+ * that were logged.
  */
 export function logActions(actions, { now = Date.now(), env = process.env, file = path.join(STUDIO_STATE_DIR, 'watchdog-quiet.json') } = {}) {
   const quietMs = Number(env.STUDIO_WATCHDOG_QUIET_MIN || 0) * 60000;

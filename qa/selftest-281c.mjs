@@ -9,14 +9,11 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { guardCap2500Of, hrefInDirOf } from './kit.mjs';
 
 export async function selftest281C({ dir, run, report, tmpRoot }) {
-  const u = (rel) => pathToFileURL(path.join(dir, rel)).href;
-  const guard = async (name, fn) => {
-    try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 2500)); }
-    catch (e) { report(name, false, String(e?.stack || e).slice(0, 2500)); }
-  };
+  const u = hrefInDirOf(dir);
+  const guard = guardCap2500Of(report);
   const git = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
   const sel = await import(u('harness/selftest-select.mjs'));
   const tim = await import(u('harness/selftest-timing.mjs'));

@@ -1,18 +1,14 @@
 #!/usr/bin/env node
 /**
  * harness/said-vs-did.mjs — what a builder SAYS it ran and changed, checked against what the harness can see.
- *
- * `task done <ID> --claim "<command> => <last line>"` (repeatable) names a command the builder ran and the last line it
- * printed. The command is re-run here from an allowlist (the studio's own read-only checks: verify, selftest units,
- * goldens, regressions, done-check, docs and purity checks; never one that writes, such as --update) and its last
- * non-empty line is compared with the claim. A command outside the allowlist is not re-run: it is reported as
- * unverifiable, never as green. With at least one --claim (2.81: a done with no claim is judged as before), file paths
- * in the --note that are not in the task's diff (commits tagged Studio-Task: <ID>, the lane's unlanded commits, uncommitted edits) are reported
- * as claimed-but-unchanged. Any mismatch emits review.verdict {verdict: 'claim-mismatch'} and task done refuses with
- * the label `claim`. The builder's prose is never evidence; only the re-run and git are.
- *
- * Settings: STUDIO_CLAIM_TIMEOUT_S (default 900) per re-run; STUDIO_CLAIMS=off skips the re-run (the note's file
- * claims are still diffed).
+ * `task done <ID> --claim "<command> => <last line>"` (repeatable) names a command the builder ran and its last printed
+ * line. The command is re-run here from an allowlist (the studio's own read-only checks: verify, selftest units, goldens,
+ * regressions, done-check, docs and purity checks; never one that writes, such as --update) and its last non-empty line is
+ * compared with the claim. A command outside the allowlist is reported as unverifiable, never as green. With at least one
+ * --claim, file paths in the --note that are not in the task's diff (commits tagged Studio-Task: <ID>, the lane's unlanded
+ * commits, uncommitted edits) are reported as claimed-but-unchanged. Any mismatch emits review.verdict {verdict:
+ * 'claim-mismatch'} and task done refuses with the label `claim`. The builder's prose is never evidence.
+ * Settings: STUDIO_CLAIM_TIMEOUT_S (default 900) per re-run; STUDIO_CLAIMS=off skips the re-run (file claims are still diffed).
  */
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';

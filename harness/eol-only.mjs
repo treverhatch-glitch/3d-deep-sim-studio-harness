@@ -66,14 +66,10 @@ export function splitEolOnly(cwd, lines, { limit = 200 } = {}) {
 export const eolNote = (eol) => `${eol.length} file${eol.length === 1 ? '' : 's'} differ${eol.length === 1 ? 's' : ''} in line endings only, ignored (${eol.slice(0, 3).join(', ')}${eol.length > 3 ? ` and ${eol.length - 3} more` : ''}); add \`* text=auto\` or \`*.snap text eol=lf\` to .gitattributes to stop it`;
 
 /**
- * 2.84 (m): PHANTOM entries. A tracked file that a `.gitattributes` line routes through a filter (Git LFS, a clean
- * filter) while it was committed as a plain blob shows as modified in every checkout although nobody touched it: git
- * cleans the working file before comparing, and the cleaned bytes are not the committed blob. `task done` refused a
- * crew's task for one such file ("1 uncommitted file(s) ... URP.png: commit them first"). A path counts as phantom
- * only when it is reported as modified (` M`, `M `, `MM`; never added, deleted, untracked, renamed or conflicted) and its
- * working-tree bytes, unfiltered, hash to the blob HEAD holds for it (git hash-object --no-filters = HEAD:<path>).
- * At most `limit` paths are hashed; beyond that every line counts as real (never a silent pass). Never throws.
- * { real: [line…], phantom: [path…] }: real keeps the input lines; phantom holds repo-relative paths.
+ * PHANTOM entries: a tracked file that a `.gitattributes` filter (Git LFS, a clean filter) routes while committed as a
+ * plain blob shows as modified in every checkout. Phantom only when reported modified (` M`, `M `, `MM`) and its
+ * unfiltered bytes hash to HEAD's blob (git hash-object --no-filters). At most `limit` paths are hashed; beyond that
+ * every line counts as real. Never throws. { real: [line…], phantom: [path…] } (phantom: repo-relative paths).
  */
 export function splitPhantom(cwd, lines, { limit = 200 } = {}) {
   const all = (lines || []).filter(Boolean);

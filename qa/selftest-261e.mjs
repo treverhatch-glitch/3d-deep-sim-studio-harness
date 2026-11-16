@@ -10,11 +10,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, iso, out } from './kit.mjs';
 
 export async function selftest261E({ dir, run, report }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlOf(dir);
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_ROLE: '', STUDIO_LOCK_OWNER: '', STUDIO_AGENT_MODEL: '', AGENT_EVENTS_FILE: '', AGENT_EVENTS_MIRROR: '', STUDIO_CHANGE_EVAL_TASKS: '10', STUDIO_CHANGE_EVAL_DAYS: '7', STUDIO_CHANGE_MIN_SAMPLE: '5', STUDIO_CHANGE_MARGIN: '0.1', STUDIO_AUTO_TRICKS: '0' };
   const probe = (name, code, e = {}) => {
     const f = path.join(dir, `.probe-261e-${name}.mjs`);
@@ -32,7 +31,6 @@ export async function selftest261E({ dir, run, report }) {
   const clearChanges = () => { for (const f of fs.existsSync(path.join(dir, 'studio/changes')) ? fs.readdirSync(path.join(dir, 'studio/changes')) : []) fs.rmSync(path.join(dir, 'studio/changes', f)); };
   const day = 86400000;
   const now = Date.now();
-  const iso = (ms) => new Date(ms).toISOString();
 
   // Synthetic task histories: n finished "change" tasks around a moment; `hits` of them hit the failure message first.
   let tid = 500;

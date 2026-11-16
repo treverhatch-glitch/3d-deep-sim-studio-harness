@@ -1,29 +1,27 @@
 /**
- * qa/selftest-2781a.mjs — 2.78.1 (a): B-123, unscoped ready tasks ran one at a time, and the Line Producer's lanes and
- * phase awareness.
- *   lane-running  `task lane` on a task already in progress reaches the supervisor: its builder works in that lane now
- *   lane-who      `task lane … --by` works for a Producer session and the orchestrator; a launched builder is refused
- *   line-lanes    the Line Producer's pass sets a lane on an unscoped ready builder task (from its --scope), logs it as the
- *                 Producer's decision, and reports a task it can't scope as "unscoped" (status, blockers, note)
- *   predicted     two builders with no lane run side by side when their predicted files don't overlap; an overlap, a
- *                 task with no prediction, or STUDIO_UNSCOPED_PARALLEL=off keeps the old rule
- *   shared-sim    a ready task on shared sim code waits (--after) for the open task on the same shared files; reported
- *                 in the plan; STUDIO_SHARED_SIM=off turns it off
- * Each check fails on 2.78.0.
+ * qa/selftest-2781a.mjs — unscoped ready tasks run in parallel, and the Line Producer's lanes and phase awareness.
+ * lane-running  `task lane` on a task already in progress reaches the supervisor: its builder works in that lane now.
+ * lane-who  `task lane … --by` works for a Producer session and the orchestrator; a launched builder is refused.
+ * line-lanes  the Line Producer's pass sets a lane on an unscoped ready builder task (from its --scope), logs it as
+ *   the Producer's decision, and reports a task it can't scope as "unscoped".
+ * predicted  two builders with no lane run side by side when their predicted files don't overlap; an overlap, no
+ *   prediction, or STUDIO_UNSCOPED_PARALLEL=off keeps the old rule.
+ * shared-sim  a ready task on shared sim code waits (--after) for the open task on the same files, reported in the
+ *   plan; STUDIO_SHARED_SIM=off turns it off.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitArgsOf, guardOf, iso, nextLine as line, out } from './kit.mjs';
 
 export async function selftest2781A({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = fs.existsSync(path.join(dir, 'node_modules')) ? path.join(dir, 'node_modules') : path.join(harnessRoot, 'node_modules');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitArgsOf(gEnv);
+  const guard = guardOf(report);
   const UNSET = ['STUDIO_UNSCOPED_PARALLEL', 'STUDIO_SHARED_SIM', 'STUDIO_LINE_LANES', 'STUDIO_REQUIRE_LANE', 'STUDIO_MODEL_ROUTING', 'STUDIO_BUILDER_TOOL', 'STUDIO_WORKTREES', 'STUDIO_ENV_FROM_FILE', 'STUDIO_WAVES'];
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_WATCH_INTERVAL: '0', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
@@ -37,7 +35,6 @@ export async function selftest2781A({ dir, report, tmpRoot, root }) {
   };
   const childEnv = (extra = {}) => { const e = { ...process.env, ...base, ...extra }; for (const k of UNSET) if (!(k in extra)) delete e[k]; return e; };
   const now = Date.now();
-  const iso = (ms) => new Date(ms).toISOString();
   let n = 0;
   const made = [];
   /** A studio copy with its own git, an events file, a board ({ id, title, ip? }) and events. */
@@ -49,7 +46,6 @@ export async function selftest2781A({ dir, report, tmpRoot, root }) {
     const ev = path.join(S, '.studio', 'events-2781a.jsonl');
     fs.mkdirSync(path.dirname(ev), { recursive: true });
     fs.writeFileSync(ev, events.map((e, i) => JSON.stringify({ id: `evt_${i}`, status: 'ok', ts: iso(now - 2 * 3600000 + i * 1000), ...e })).join('\n') + (events.length ? '\n' : ''));
-    const line = (t) => `- [${t.ip ? '>' : ' '}] **${t.id}** [${t.p || 'P1'}] (\`${t.role || 'builder'}\`) — ${t.title}`;
     fs.writeFileSync(path.join(S, 'studio', 'NEXT.md'), `# Studio Task Queue (\`studio/NEXT.md\`)\n\n## IN_PROGRESS\n${tasks.filter((t) => t.ip).map(line).join('\n')}\n\n## BACKLOG\n${tasks.filter((t) => !t.ip).map(line).join('\n')}\n\n## DONE\n`);
     fs.writeFileSync(path.join(S, 'studio', 'task-holds.json'), `${JSON.stringify({ tasks: {} }, null, 2)}\n`);
     fs.writeFileSync(path.join(S, 'studio', 'mode.json'), `${JSON.stringify({ mode: 'extreme', history: [] }, null, 2)}\n`);
@@ -58,7 +54,6 @@ export async function selftest2781A({ dir, report, tmpRoot, root }) {
     made.push(S);
     return { S, ev, env: { AGENT_EVENTS_FILE: ev } };
   };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const probe = (S, env, name, code, timeout = 120000) => {
     const f = path.join(tmpRoot, `probe-2781a-${name}-${process.pid}-${++n}.mjs`);
     fs.writeFileSync(f, code);

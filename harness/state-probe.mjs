@@ -1,31 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/state-probe.mjs — 2.72.0 (c): the state probe. A game prints its sim's state digest at a few ticks,
- * headless, and the gate compares them with main's.
- *
- * Goldens catch a changed final hash; they don't say when the run first went another way, and an engine port (a C#
- * sim next to the TS one) has no golden of its own. A game declares a probe in its manifest (<game>/studio.gates.json,
- * the owner's file), and the game's checks (harness/game-gates.mjs) then run it as game:state-probe:
- *
+ * harness/state-probe.mjs — the state probe: a game prints its sim's state digest at a few ticks, headless, and the gate
+ * compares. Declared in the manifest (<game>/studio.gates.json, owner's file); harness/game-gates.mjs runs game:state-probe:
  *   "stateProbe": { "command": "node game/<name>/tools/probe.mjs --ticks {ticks}", "ticks": [0, 100, 1000],
  *                   "baseline": "game/<name>/qa/state-probe.json", "timeoutMin": 10 }
- *
- * The command runs from the checkout's root ({ticks} becomes "0,100,1000") and prints one line per tick:
- * `tick <n> <digest>` (or a JSON line {"tick": n, "digest": "…"}). The baseline (default <game>/qa/state-probe.json) is
- * the digests recorded on main: `node harness/state-probe.mjs record` writes it from this checkout's build.
- *
- *   node harness/state-probe.mjs [check]   the gate (game:state-probe in the game's checks): run the probe on this
- *                                          checkout and compare with the baseline as main has it (git show <main>:<file>)
- *   node harness/state-probe.mjs record    write the baseline from this checkout (commit it; a change needs a
- *                                          Golden-Reason trailer, like a golden)
- *   node harness/state-probe.mjs show      the probe, the baseline on main and this checkout's digests
- *
- * The verdict: the same digests as main's: PASS. Different, and no commit since main carries a Golden-Reason trailer:
- * FAIL with the first differing tick. Different with a Golden-Reason: PASS only when this checkout's baseline file holds
- * the new digests (re-recorded and committed with the change), else FAIL "record it". A probe that fails, times out
- * or leaves a tick out: FAIL. No baseline on main yet: PASS with a note (record one). No probe declared: nothing to do.
- * Main is STUDIO_STATE_PROBE_BASE, else the main checkout's branch (harness/worktree.mjs mainBranch).
- * Engine-agnostic: the digests are strings, so a second engine's probe can later be compared with the same baseline.
+ * The command prints `tick <n> <digest>` per tick; the baseline (default <game>/qa/state-probe.json) holds main's digests.
+ *   node harness/state-probe.mjs [check]   the gate: run the probe and compare with the baseline as main has it
+ *   node harness/state-probe.mjs record    write the baseline from this checkout (a change needs a Golden-Reason trailer)
+ *   node harness/state-probe.mjs show      the probe, main's baseline and this checkout's digests
+ * Same digests as main's: PASS. Different: FAIL, unless a Golden-Reason trailer and this baseline holds the new digests.
+ * A probe that fails, times out or leaves a tick out: FAIL. No baseline on main: PASS. Main: STUDIO_STATE_PROBE_BASE.
  */
 import fs from 'node:fs';
 import path from 'node:path';

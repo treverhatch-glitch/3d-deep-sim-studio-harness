@@ -1,36 +1,25 @@
 /**
- * qa/selftest-268o.mjs — 2.68.0 (helper o): the crew watchdog, the futility cap (shadow first), the usage wind-down,
- * the temp-file janitor and the release impact report.
- *   crew      a role with more sessions in the last hour than STUDIO_CREW_MAX_SESSIONS and nothing landed isn't
- *             launched (crew.unhealthy with the evidence; digest and status --brief show it); a worker can't resume it,
- *             a person can; new work for the role clears it on its own.
- *   futility  a running session past the p90 of its type's good runs raises one futility.check (shadow: nothing
- *             stopped; its end logs what a cap would have saved); under 20 samples no cap; =on hands it back.
- *   winddown  at STUDIO_USAGE_WINDDOWN_PCT nothing new starts, .studio/restart-log.md names the running, queued and held
- *             work, and the usage reset resumes with the log linked; --now does it on demand.
- *   janitor   a dry run by default; --yes deletes only the harness's temp files (dead train scratch, old .studio/tmp,
- *             logs over budget, marked test temp folders, caches over budget); a lane copy with work is never deleted
- *             and stale lanes need --lanes --yes --by <a decider>; train/verify jobs start it.
- *   impact    `autonomy -- impact` finds the upgrade (event or version bump) and compares before vs after, "not enough
- *             data" under 30 items; the digest names the verdict.
- * A made-up studio; events written straight into its log.
+ * qa/selftest-268o.mjs — the crew watchdog, futility cap, usage wind-down, temp-file janitor and release impact report.
+ * crew  a role with more sessions in the last hour than STUDIO_CREW_MAX_SESSIONS and nothing landed isn't launched
+ *   (crew.unhealthy; digest and status --brief show it); a worker can't resume it, a person can.
+ * futility  a session past the p90 of its type's good runs raises one futility.check (shadow: nothing stopped); under
+ *   20 samples no cap; =on hands it back.
+ * winddown  at STUDIO_USAGE_WINDDOWN_PCT nothing new starts and .studio/restart-log.md names running, queued and held
+ *   work; the usage reset resumes; --now does it on demand.
+ * janitor  dry run by default; --yes deletes only the harness's temp files; a lane copy with work is never deleted;
+ *   stale lanes need --lanes --yes --by <a decider>.
+ * impact  `autonomy -- impact` compares before vs after an upgrade, "not enough data" under 30 items.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { eventsOf, fileUrlOf, gitAsT as g, guardOf, iso, out, readJsonFile as readJson, writeIn as write } from './kit.mjs';
 
 export async function selftest268O({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const u = fileUrlOf(dir);
+  const guard = guardOf(report);
   const events = path.join(dir, '.studio', 'events-268o.jsonl');
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const addEv = (list) => fs.appendFileSync(events, list.map((e) => JSON.stringify(e)).join('\n') + '\n');
-  const iso = (ms) => new Date(ms).toISOString();
   const env = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '',
     STUDIO_ROLE: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', STUDIO_RAM_FLOOR_GB: '0', STUDIO_QUOTA_PROBE: 'off',

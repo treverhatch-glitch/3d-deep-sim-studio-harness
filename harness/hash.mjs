@@ -1,18 +1,13 @@
 /**
- * harness/hash.mjs — state hashes, in two tiers. Both hash the same bytes: canonical JSON (keys
- * sorted, no spaces) encoded as UTF-8.
- *
- *   hash64(state)     fast display hash: FNV-1a 64-bit, 16 hex chars. Pure JS, runs in a browser
- *                     and inside a cartridge (no imports). For the HUD, playtest reports and quick
- *                     "did it change?" checks. Not tamper-resistant: never use it to prove anything.
- *   sha256(state)     verification hash: SHA-256, 64 hex chars. For golden files, regressions,
- *                     exported trajectories and anything another party has to trust. Uses Node's
- *                     built-in crypto, loaded only when called, so this file stays browser-safe.
- *
- * tools/golden.py implements both, and `node qa/run-python.mjs qa/test-golden.py` proves Node and
- * Python agree on every golden file. Changing either function changes every golden: regenerate them
- * in the same commit (`npm run golden -- --update`, `node qa/check-regressions.mjs --update`).
- * See docs/HASH.md.
+ * harness/hash.mjs — state hashes, in two tiers. Both hash the same bytes: canonical JSON (keys sorted, no spaces) as
+ * UTF-8.
+ * hash64(state): FNV-1a 64-bit, 16 hex chars. Pure JS, runs in a browser and a cartridge (no imports). For the HUD
+ * and quick "did it change?" checks. Not tamper-resistant.
+ * sha256(state): SHA-256, 64 hex chars. For goldens, regressions, exported trajectories, anything another party must
+ * trust. Node crypto is loaded only when called, so the file stays browser-safe.
+ * tools/golden.py implements both; `node qa/run-python.mjs qa/test-golden.py` proves Node and Python agree on every
+ * golden. Changing either function changes every golden: regenerate them in the same commit (`npm run golden --
+ * --update`, `node qa/check-regressions.mjs --update`). See docs/HASH.md.
  */
 
 /** Object keys in Unicode code-point order (Python's order), not UTF-16 unit order. */
@@ -27,11 +22,9 @@ export function compareKeys(a, b) {
 }
 
 /**
- * Canonical JSON text, built directly so nothing reorders it. JSON.stringify on an object puts
- * integer-like keys ("0", "2", "10") first in numeric order whatever order they were added in, so
- * the text is built here: keys in code-point order, no spaces, numbers as JavaScript writes them
- * (tools/golden.py writes numbers the same way), -0 as 0, NaN and Infinity as null, undefined
- * object fields left out and undefined array items as null.
+ * Canonical JSON text, built directly so nothing reorders it (JSON.stringify puts integer-like keys first): keys in
+ * code-point order, no spaces, numbers as JavaScript writes them (tools/golden.py writes them the same way), -0 as 0,
+ * NaN and Infinity as null, undefined object fields left out and undefined array items as null.
  */
 export function canonicalJson(value) {
   if (value === null || value === undefined) return 'null';

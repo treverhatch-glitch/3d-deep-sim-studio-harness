@@ -1,24 +1,13 @@
 /**
- * harness/train-detach.mjs — 2.78.2 (a, W-0090): a merge train outlives whoever started it.
- *
- * A lane's plain `task done` ran its train inline (harness/task.mjs viaTrain -> runTrain), in the builder's shell. Claude
- * Code ends a shell command after 10 minutes and the watchdog ends a session at its cap, so every train over ~10 minutes
- * died with its builder (6 deaths in one morning). Now:
- *   - `task done` in a lane (the train path) runs the quick checks, queues the lane and exits 0 with "queued"
- *     (STUDIO_DONE_QUEUE, default on; =0/off: the old inline train). The train itself is the train daemon's
- *     (harness/train-daemon.mjs, each supervisor pass) when a supervisor runs and train auto is on; otherwise
- *     kickTrain starts one train, detached, that waits for a running train first (STUDIO_TRAIN_LOCK_WAIT_MIN).
- *   - spawnDetached: a train process is started through a launcher process that starts it detached and exits at once,
- *     so the train's parent is gone before its starter can be killed: a kill of the starter's process tree (taskkill /T
- *     on Windows walks parent ids; a process-group kill elsewhere) doesn't reach it. Its output goes to a log file
- *     (stdio never tied to the starter's console), windowsHide on Windows.
- *   - `npm run task -- train` run from an agent's shell (a launched session, or a shell Claude Code, Codex, Gemini or
- *     another agent runs: STUDIO_ROLE, an agent's STUDIO_LOCK_OWNER, CLAUDECODE, AI_AGENT, …) runs its train that way
- *     too and follows it (its output and exit code, as before); if the shell is ended, the train goes on
- *     (`npm run task -- train status` shows it). STUDIO_TRAIN_DETACH: auto (default: only from an agent's shell), on,
- *     off; `--foreground` / `--detach` for one run. A person's terminal keeps the inline train (Ctrl+C stops it).
- * The train's own life record (harness/train-life.mjs) holds the train process's pid, its heartbeat and its lock, so a
- * train whose starter died is alive by every check (reapDeadTrains, the communicator, the daemon's lock test).
+ * harness/train-detach.mjs — a merge train outlives whoever started it (a builder's shell ends after 10 minutes).
+ *   - `task done` in a lane queues the lane and exits 0 "queued" (STUDIO_DONE_QUEUE, default on; =0/off: inline train).
+ *     The train is the train daemon's (harness/train-daemon.mjs) when a supervisor runs and train auto is on; else
+ *     kickTrain starts one detached, waiting for a running train (STUDIO_TRAIN_LOCK_WAIT_MIN).
+ *   - spawnDetached starts a train through a launcher that exits at once, so killing the starter's process tree doesn't
+ *     reach it. Output goes to a log file, windowsHide on Windows.
+ *   - `npm run task -- train` from an agent's shell runs that way and follows it; if the shell ends, the train goes on
+ *     (`npm run task -- train status`). STUDIO_TRAIN_DETACH: auto (default: agent shells only), on, off;
+ *     `--foreground` / `--detach` for one run. A person's terminal keeps the inline train.
  */
 import fs from 'node:fs';
 import path from 'node:path';

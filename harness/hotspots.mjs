@@ -1,24 +1,13 @@
 /**
- * harness/hotspots.mjs — 2.60.0: lines that several lanes change at once, and lines that keep conflicting.
- *
- * Crew report: every lane appended its module import to the same joined line of one big file, so every landing
- * conflicted with every other lane's (two lanes conflicted three times in a row on that one line). Nobody saw it coming.
- *
- *   Overlaps. The lanes in flight are the train queue (.studio/train/queue.json) and the lane copies with commits the
- *   studio's main branch doesn't have. Each is diffed against main (-U0, from its merge-base, its hunks mapped onto
- *   main's lines); two or more lanes whose hunks touch or meet on the same lines of the same file are an overlap: the
- *   one that lands second will conflict there. `task start`, `task done --train` and the merge train's start log warn,
- *   naming the file, the line and the lanes; each overlap is posted to the Producer once (a hotspot.overlap event and
- *   a line in studio/producer/INBOX.md, which the Producer's briefing shows under "Needs you first").
- *
- *   Conflicts. Each merge train that finds a lane conflicting (with the lanes before it, or with main) records the
- *   file and line (.studio/hotspots.json: one count per train, lines within 2 of each other count as one place). At
- *   STUDIO_HOTSPOT_ASK conflicts (default 3) on one place the Producer gets ONE ask: "hotspot: restructure
- *   <file>:<line> (registry/barrel pattern)" (a hotspot.ask event and an inbox line), never again for that place.
- *
+ * harness/hotspots.mjs — lines that several lanes change at once, and lines that keep conflicting.
+ *   Overlaps. Lanes in flight (train queue .studio/train/queue.json, lane copies with commits main lacks) are diffed
+ *   against main (-U0, from the merge-base); lanes whose hunks touch or meet on the same lines of a file overlap: the
+ *   one landing second will conflict. `task start`, `task done --train` and the train's start log warn; each overlap
+ *   goes to the Producer once (hotspot.overlap event, studio/producer/INBOX.md).
+ *   Conflicts. Each train records the file and line a lane conflicts on (.studio/hotspots.json; within 2 lines is one
+ *   place). At STUDIO_HOTSPOT_ASK (3) conflicts on one place the Producer gets ONE ask (hotspot.ask event).
  *   node harness/hotspots.mjs [--json]     the overlaps now, and the conflict counts
- *
- * Code only (git diffs), no model. Nothing here blocks a start, a queue or a train: it warns and asks.
+ * Code only (git diffs), no model. Nothing here blocks a start, a queue or a train.
  */
 import fs from 'node:fs';
 import path from 'node:path';

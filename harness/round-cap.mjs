@@ -1,19 +1,14 @@
 /**
- * harness/round-cap.mjs — 2.72.0 (b): the two-round cap. Red twice in a row on the same failure: hand back, restart.
- *
- * Patching the last attempt has diminishing returns (Stripe's practice is "one or two rounds"). A round is one
- * verify of a task (a full `npm run verify` by the agent that holds it; --only and --tier fast runs don't count) or one
- * merge-train result for its lane: a task.round event { task, agent, ok, source, sig }. The signature is the failing
- * check's sub-id (a game check's id, "game:unit", else the gate's id) and its first FAIL line
- * (harness/handback-facts.mjs signatureKey), until verify sub-ids exist.
- *
- * When the last STUDIO_ROUND_CAP (2) rounds of a task by one agent in one session are red with the same signature, the
- * task is handed back (task pause) with the mechanical summary: the harness's hand-back facts (files touched, gates,
- * failure signature), the sub-id, the red signatures, the decisions logged on the task, and a note to restart from the
- * spec instead of patching the last attempt; one task.round_cap event. The next attempt in that session is refused: a
- * verify while the agent still holds the task, and `task start` of it again. A new session (agent.session.start or
- * .end after the cap) may take it. A session is the agent's time since its newest agent.session.start/end; an agent
- * with neither (outside the launcher) counts the last 12 hours. STUDIO_ROUND_CAP=0 turns the cap off.
+ * harness/round-cap.mjs — the two-round cap. Red twice in a row on the same failure: hand back, restart.
+ * A round is one verify of a task (a full `npm run verify` by the agent that holds it; --only and --tier fast runs don't
+ * count) or one merge-train result for its lane: a task.round event { task, agent, ok, source, sig }. The signature is the
+ * failing check's sub-id (a game check's id, "game:unit", else the gate's id) and its first FAIL line (handback-facts.mjs
+ * signatureKey).
+ * When the last STUDIO_ROUND_CAP (2) rounds of a task by one agent in one session are red with the same signature, the task
+ * is handed back (task pause) with the mechanical summary and a note to restart from the spec instead of patching the last
+ * attempt; one task.round_cap event. The next attempt in that session is refused: a verify while the agent still holds the
+ * task, and `task start` of it again. A new session (agent.session.start or .end after the cap) may take it; an agent with
+ * neither counts the last 12 hours. STUDIO_ROUND_CAP=0 turns the cap off.
  */
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';

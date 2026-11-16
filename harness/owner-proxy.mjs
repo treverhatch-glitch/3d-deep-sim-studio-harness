@@ -1,26 +1,14 @@
 /**
- * harness/owner-proxy.mjs — 2.73.1 (B-67, the owner's emergency request): a standing owner-proxy grant.
- *
- * The owner's words (2026-11-03): "give discord opus full permissions to do everything. We can't run the harness if
- * opus discord isn't able to run it", and "just make Opus be able to do everything if I say yes via discord". So the
- * owner can sign ONE standing grant that makes one named outside agent (the crew's orchestrator) their proxy:
- *
+ * harness/owner-proxy.mjs — a standing owner-proxy grant: the owner signs ONE grant that makes a named outside agent
+ * (the crew's orchestrator) their proxy.
  *   npm run delegate -- proxy <agent> --by <owner> [--days N] [--why "…"]     (the owner, once, where the key is)
- *
  * studio/delegation.json then holds { agent, actions: ["*"], proxy: true, until, by, at, why, signature }. While it
- * counts, the proxy agent (its shell sets STUDIO_LOCK_OWNER=<agent>) may do everything the owner can in the harness:
- *   - every delegable action (delegationFor covers any action, with --by <agent> or --by <owner>);
- *   - every command that takes a person's permission (--by <owner>): the grant stands in for --permission;
- *   - signing approvals (protected files, gates and the protected list, weakened tests, hooks, forced dones) without the
- *     owner's private key: `npm run approve -- protected --note "…" --by <owner> --permission "<the owner's yes on
- *     Discord: words or a message link>"` writes an approval that carries the signed grant instead of a signature. The
- *     owner's yes is required for these (10+ characters), and kept in the approval and the decision log.
- * Never: the owner's own acts (harness/owner-acts.mjs), a worker or launched session (STUDIO_ROLE), a lane copy, granting itself
- * another delegation. `npm run delegate -- revoke` (anyone) ends it at once: proxy approvals count only while the grant
- * that made them is still the one on file, so revoking also voids approvals not yet landed.
- *
- * This module has no harness imports beyond hash.mjs, event.mjs and owner-acts.mjs (a list, no imports) on purpose: permission.mjs, approve.mjs and
- * delegation.mjs all use it, and they import each other.
+ * counts, the proxy agent (STUDIO_LOCK_OWNER=<agent>) may do everything the owner can: every delegable action, every
+ * command that takes a person's permission, and sign approvals without the owner's key: `npm run approve -- protected
+ * --note "…" --by <owner> --permission "<the owner's yes on Discord>"` (10+ characters). Never: the owner's own acts
+ * (harness/owner-acts.mjs), a worker or launched session (STUDIO_ROLE), a lane copy, self-delegation. `npm run delegate
+ * -- revoke` (anyone) ends it. No harness imports beyond hash.mjs, event.mjs and owner-acts.mjs (permission.mjs,
+ * approve.mjs and delegation.mjs use it and import each other).
  */
 import fs from 'node:fs';
 import path from 'node:path';

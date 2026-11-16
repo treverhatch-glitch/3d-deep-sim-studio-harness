@@ -1,32 +1,27 @@
 /**
- * qa/selftest-286f.mjs — 2.86 (f): an engine task's worktree should not cost the whole engine project, and the disk must
- * not fill silently (harness/engine-worktree.mjs, engine-tracks.mjs engineLaunch / merge / lane --full, engine-clean.mjs
- * laneRemoval, machine.mjs disk watch).
- *
- *   sparse     a listed role's worktree holds only the sparse folders and the repo's top files; another role's is full;
- *              its brief says so; git too old: full with one line
- *   merge      the target merges into a sparse worktree with a change outside the folders; a conflict outside them says
- *              how to widen; `npm run engine -- lane <ID> --full` fills it
- *   removal    a done or dropped task's worktree goes (branch kept); in progress, queued and uncommitted work keep it
- *   disk       one machine.disk_low a day under STUDIO_DISK_WARN_GB naming the biggest users; STUDIO_DISK_MIN_FREE_GB stops
- *   atomic     a failed creation leaves no folder, no registration and no branch
- *
- * Small throwaway git repos only (a made-up engine repo: Art/, Rules/, tools/tests/, docs/).
+ * qa/selftest-286f.mjs — an engine task's worktree doesn't cost the whole engine project, and the disk doesn't fill silently.
+ * sparse  a listed role's worktree holds only the sparse folders and the repo's top files
+ *   (harness/engine-worktree.mjs); another role's is full; its brief says so; git too old: full with one line.
+ * merge  the target merges into a sparse worktree with a change outside the folders; a conflict outside them says how
+ *   to widen; `npm run engine -- lane <ID> --full` fills it.
+ * removal  a done or dropped task's worktree goes (branch kept); in progress, queued and uncommitted work keep it
+ *   (engine-clean.mjs laneRemoval).
+ * disk  one machine.disk_low a day under STUDIO_DISK_WARN_GB naming the biggest users; STUDIO_DISK_MIN_FREE_GB stops
+ *   (machine.mjs disk watch).
+ * atomic  a failed creation leaves no folder, registration or branch. Small throwaway git repos only.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { eventsOf as eventsFileOf, fwd, gEnvOf, gitUserCrlfOf, guardCap3000Of, out, writeIn as write } from './kit.mjs';
 
 export async function selftest286F({ dir, root, run, report, tmpRoot }) {
   void root;
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const write = (b, rel, text) => { fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true }); fs.writeFileSync(path.join(b, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
-  const fwd = (p) => p.split(path.sep).join('/');
+  const gEnv = gEnvOf(ident);
+  const g = gitUserCrlfOf(gEnv);
+  const guard = guardCap3000Of(report);
   const T = path.join(tmpRoot, `s286f-${process.pid}`);
   fs.mkdirSync(T, { recursive: true });
   const clean = {};
@@ -41,7 +36,7 @@ export async function selftest286F({ dir, root, run, report, tmpRoot }) {
   fs.mkdirSync(path.join(S, '.studio'), { recursive: true });
   const evFile = path.join(S, '.studio', 'events-286f.jsonl');
   const envOf = (extra = {}) => ({ ...base, AGENT_EVENTS_FILE: evFile, STUDIO_MAIN_ROOT: S, ...extra });
-  const events = () => { try { return fs.readFileSync(evFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const events = eventsFileOf(evFile);
   const href = (f) => JSON.stringify(pathToFileURL(path.join(S, 'harness', f)).href);
   let pn = 0;
   const probe = (code, extra = {}) => {

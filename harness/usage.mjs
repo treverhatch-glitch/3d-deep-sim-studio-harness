@@ -1,25 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/usage.mjs — 2.67.0: work done outside the harness counts on the scorecard and the budget.
- *
- * An orchestrator outside the harness (the crew's Claude Code session and its subagents) did the integration,
- * rulings, refreshes and research, and none of its tokens showed: the scorecard and the budget only read the sessions
- * the harness launched (agent.session.end). Now:
- *
- *   npm run usage -- add --agent <name> --tokens-in N --tokens-out N [--cache-read N] [--cache-write N]
- *                        [--cost-usd X] [--task T-1] [--model m] [--tool t] --why "what the work was"
- *   npm run usage -- import <file or folder> [...] [--agent <name>] [--tool claude] [--dry-run]
- *
- * `add` appends one agent.session.end event marked meta.outside: true, which the scorecard (harness/autonomy.mjs),
- * the budget meter and the ledger read like a launched session's (cache writes go into tokensIn, as the launcher
- * records them). `import` reads Claude Code session transcripts (.jsonl; a folder is walked for them, subagent files
- * included, with no shell glob) and records the usage of the assistant messages per session (a subagent file is its
- * own session: the session id plus its agent id) and model, once: a key (session, model) already imported with the
- * same last message id is skipped; one that grew since is recorded for the difference only. Only the usage numbers,
- * ids, model names and timestamps are read: no message text is kept or printed.
- *
- * Who: anyone outside a launched worker session (a launched builder, qa, ... session is already counted by its
- * launcher, so a second record would count it twice).
+ * harness/usage.mjs — work done outside the harness counts on the scorecard and the budget.
+ * npm run usage -- add --agent <name> --tokens-in N --tokens-out N [--cache-read N] [--cache-write N]
+ *                      [--cost-usd X] [--task T-1] [--model m] [--tool t] --why "what the work was"
+ * npm run usage -- import <file or folder> [...] [--agent <name>] [--tool claude] [--dry-run]
+ * `add` appends one agent.session.end event marked meta.outside: true, read like a launched session's by the scorecard
+ * (harness/autonomy.mjs), the budget meter and the ledger (cache writes go into tokensIn). `import` reads Claude Code
+ * session transcripts (.jsonl; a folder is walked, subagent files included), recording usage per session and model
+ * once: an already imported (session, model) with the same last message id is skipped, one that grew is recorded for
+ * the difference. Only usage numbers, ids, model names and timestamps are read.
+ * Who: anyone outside a launched worker session (a launched one is already counted).
  */
 import fs from 'node:fs';
 import path from 'node:path';

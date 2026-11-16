@@ -1,15 +1,11 @@
 /**
- * harness/gate-subids.mjs — 2.72.0 (a): which part of a gate failed, as sub-ids.
- *
- * 83 of 91 failed gate runs on the owner's PC carried the single id `game`: every red looked the same to the stall
- * watcher, the train and the hand-back. A sub-id names the part: `<check>:<test file>` for a game check that names its
- * failing test files (game-gates' "failing test files in <check>: [...]", from vitest, jest, node --test or plain FAIL
- * lines: the 2.65.3 parsers), `<check>` for one that doesn't, `golden:<file>` for a red golden file
- * (qa/check-golden.mjs "[golden] FAIL <file>: ..."), `<gate>:<file>` for any other gate whose output names failing test
- * files, else the gate id. Examples: `game:test:src/econ/fees.test.ts`, `game:layout`, `golden:example-1337.json`.
- * run-gates puts them in each failed row (`sub`) and in the gates.run event (`meta.subIds`, beside `meta.failed`,
- * unchanged); the hand-back facts list them ("Failing sub-ids"); the train's red event carries them. Read only from the
- * output; never decides red or green.
+ * harness/gate-subids.mjs — names which part of a gate failed, as sub-ids.
+ * A sub-id is `<check>:<test file>` for a game check that names its failing test files (game-gates' "failing test
+ * files in <check>: [...]"), `<check>` for one that doesn't, `golden:<file>` for a red golden file
+ * (qa/check-golden.mjs "[golden] FAIL <file>: ..."), `<gate>:<file>` for any other gate whose output names failing
+ * test files, else the gate id. Example: `game:test:src/econ/fees.test.ts`. run-gates puts them in each failed row
+ * (`sub`) and in the gates.run event (`meta.subIds`, beside `meta.failed`); the hand-back facts list them ("Failing
+ * sub-ids"); the train's red event carries them. Read only from the output; never decides red or green.
  */
 import { failingTestFiles, focusFromLog, normTestPath } from './train-focus.mjs';
 

@@ -7,12 +7,9 @@
  *   npm run budget -- order claude,codex,agy         which tool takes over when one runs out
  *   npm run budget -- probe [tool]                   ask the tool with one tiny call; clears a wrong mark
  *   npm run budget -- clear <tool>                   drop a tool's quota mark by hand
- *
- * Target: e.g. 100% of the week's tokens by the reset. Usage is what agents reported in agent.session.end events,
- * per tool, since its weekly reset. --weekly is the owner's own estimate (plans publish no counts); without it
- * the studio shows tokens used and can't pace.
- * The supervisor (npm run studio:start) reads this: under target it may start up to two extra lanes; over target
- * nothing new; a tool at its limit (usage limit, 429) is skipped until its reset and its lanes move to the next in `order`.
+ * Usage is what agents reported in agent.session.end events since the weekly reset. The supervisor (npm run
+ * studio:start) reads this: under target it may start up to two extra lanes; over target nothing new; a tool at its
+ * limit (usage limit, 429) is skipped until its reset and its lanes move to the next in `order`.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -118,12 +115,10 @@ function clock(hs, ms, ap) {
 }
 
 /**
- * When a provider's limit resets, from its own words: "Resets in 80h54m54s", "try again in 45 minutes",
- * "resets 06:12", "try again at 3pm", or an ISO time. Null when it doesn't say.
- * Also Claude Code's forms: "usage limit reached|1761962400" (unix seconds, or milliseconds with 13 digits), a weekday
- * ("resets Mon 9am": the next one after now), a date ("resets Nov 3, 9am", "3 Nov 9am"; more than 45 days off is not
- * believed) and a zone in brackets ("resets 3pm (Asia/Bangkok)"). Without a zone a clock time is read in this machine's
- * local time. A reset time already past is null. The wording of Claude Code's limit lines is not verified against a live run.
+ * When a provider's limit resets, from its own words ("Resets in 80h54m54s", "try again in 45 minutes", "resets 06:12",
+ * "try again at 3pm", an ISO time, "usage limit reached|1761962400" in unix seconds or 13-digit ms, a weekday, a date
+ * more than 45 days off is not believed, a zone in brackets). Without a zone a clock time is read in local time.
+ * Null when it doesn't say or the time is past. The wording of Claude Code's limit lines is not verified live.
  */
 export function parseReset(text = '', now = Date.now()) {
   const t = String(text);
@@ -358,10 +353,9 @@ export function customKey(cmd = '') {
 }
 
 /**
- * Is this launch stopped by a budget mark? A role's custom command can wrap another tool (it runs as tool "custom"),
- * so a mark on "gemini" must also match by model family or a word of the command. A launch is stopped when any
- * active mark (quota or spend guard) names its tool, its tool:model, its model's family (gemini-3.1-pro-preview ->
- * gemini) or a word of its launch command, or a .studio/credit.json meter for one of those is at its guard.
+ * Is this launch stopped by a budget mark? A launch is stopped when any active mark (quota or spend guard) names its
+ * tool, its tool:model, its model's family (gemini-3.1-pro-preview -> gemini) or a word of its launch command (a custom
+ * command can wrap another tool), or a .studio/credit.json meter for one of those is at its guard.
  * Returns { stopped, by, until, why } (stopped false when nothing applies).
  */
 export function budgetStopFor({ tool = '', model = '', cmd = '', keys = [] } = {}, now = Date.now(), env = process.env) {

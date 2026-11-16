@@ -1,24 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/review.mjs — a second opinion from a model made by another company, in one command.
- *
  *   npm run review -- <TASK_ID> [--local] [--implementer <model>] [--dry-run] [--router-only]
  *   npm run review -- same-family [on|off|auto] --by <who> [--why "..."]   whether a same-family review counts
- *   npm run review -- ask <TASK_ID> --model <id> [--tool <tool>] [--for <review task>] [--no-commit]   the harness
- *                     asks the model itself, no session (harness/review-ask.mjs)
+ *   npm run review -- ask <TASK_ID> --model <id> [--tool <tool>] [--for <review task>] [--no-commit]  (review-ask.mjs)
  *   npm run review -- record <TASK_ID> --by <reviewer name> --family <xai|deepseek|openai|google|anthropic|…>
  *                     --file <review.md> [--model <m>] [--implementer <model>] [--no-commit]
- *
- * Gathers the task, its spec (for system tasks) and the diff of every commit tagged with it, sends
- * them to the reviewer chain through the router (--local: only your Ollama model, free and offline),
- * and writes studio/reviews/<date>-<ID>-<model>.md with `model-family:` and `implementer-family:`
- * lines and one verdict. The done-check for system tasks and the reviewer gate read that file.
- * It refuses when the reviewer would be the same family as the builder.
- * A task with an agreed acceptance contract (studio/contracts/<ID>.json) sends it too, and the reviewer grades the work
- * against each criterion (a criterion not met means CHANGES).
- *
- * Small local models miss things: treat an approval as a second look, not proof. A person can always
- * write a review by hand instead (studio/skills/review.md).
+ * Sends the task, its spec, its contract (studio/contracts/<ID>.json, graded per criterion) and its diff to the
+ * reviewer chain (--local: only Ollama), and writes studio/reviews/<date>-<ID>-<model>.md with `model-family:` and
+ * `implementer-family:` lines and one verdict. Refuses a reviewer of the builder's family. An approval is a second
+ * look, not proof.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,23 +1,20 @@
 /**
- * qa/selftest-276g.mjs — 2.76.0 (the owner's request, 2026-11-04): beta mode, the owner gates off while the harness is
- * built, plus B-86 (the proxy answers owner asks), B-93 (approvals hash text with LF) and B-95 (owner allow rules for the
- * proxy's own session folder).
- *   switch    `beta on --by <owner>` (signed where the key is) / `beta off`; a worker or an agent's own shell can't
- *   covers    in beta mode the named agent and Producer/Director sessions act as the owner for every action but keys and
- *             deletes; workers and builder sessions never; the beta words stand in for --permission
- *   approve   an approval without the key or the owner's words that counts while beta mode is on, not from a worker's
- *             commit, and not after `beta off`
- *   asks      the proxy / a beta actor answers an owner ask for the owner (recorded)
- *   crlf      a protected file approved with CRLF still matches once checked out with LF
- *   settings  `delegate -- claude-settings --owner --dir <folder> --write` writes the owner's command rules there
- * Each check fails on 2.75.0 (no beta mode).
+ * qa/selftest-276g.mjs — beta mode: the owner's gates are off while the harness is built, and related approval fixes.
+ * switch  `beta on --by <owner>` (signed where the key is) / `beta off`; a worker or an agent's own shell can't.
+ * covers  in beta mode the named agent and Producer/Director sessions act as the owner for every action but keys and
+ *   deletes; workers and builder sessions never; the beta words stand in for --permission.
+ * approve  an approval without the key or the owner's words counts while beta mode is on, not from a worker's commit,
+ *   not after `beta off`.
+ * asks  the proxy or a beta actor answers an owner ask for the owner (recorded; the proxy answers owner asks).
+ * crlf  a protected file approved with CRLF still matches once checked out with LF (approvals hash text with LF).
+ * settings  `delegate -- claude-settings --owner --dir <folder> --write` writes the owner's command rules there
+ *   (owner allow rules for the proxy's own session folder).
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { gEnvOf, gitPlainOf, guardOf, out } from './kit.mjs';
 
 export async function selftest276G({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 'Pat', GIT_AUTHOR_EMAIL: 'pat@example.invalid', GIT_COMMITTER_NAME: 'Pat', GIT_COMMITTER_EMAIL: 'pat@example.invalid' };
   const key = path.join(tmpRoot, `owner-276g-${process.pid}.pem`);
   const base = {
@@ -28,9 +25,9 @@ export async function selftest276G({ dir, run, report, tmpRoot }) {
   const owner = { ...base, STUDIO_OWNER_KEY: key };
   const noKey = path.join(tmpRoot, 'no-owner-key-276g.pem');
   const patch = { ...base, STUDIO_LOCK_OWNER: 'opus-1', STUDIO_OWNER_KEY: noKey };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { cwd, encoding: 'utf8', env: gEnv(), windowsHide: true });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitPlainOf(gEnv);
+  const guard = guardOf(report);
 
   const S = path.join(tmpRoot, `276g-${process.pid}`);
   fs.cpSync(dir, S, { recursive: true, filter: (src) => !/[\\/](\.git|\.lanes|node_modules)$/.test(src) });

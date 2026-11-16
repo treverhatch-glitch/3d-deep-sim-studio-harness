@@ -1,37 +1,25 @@
 /**
- * qa/selftest-271z.mjs — 2.71.0 (helper z): the self-repair loop (harness/workaround.mjs).
- *   log       `npm run workaround -- log "<what>" --why "<harness>" --cmd … --by …` writes .studio/workarounds.jsonl and a
- *             harness.workaround event with a signature; with --why it opens one harness task in studio/HARNESS-TASKS.md,
- *             never on studio/NEXT.md.
- *   group     the same trouble on different task ids is one signature: the first (no --why) opens nothing, the second
- *             opens ONE task; a third adds to it.
- *   force     `--force` on a task or lock command is a detected workaround.
- *   retry     the same refused task command run 3 times in 10 minutes by one agent is one detected workaround;
- *             `done --check` and another agent's runs don't count.
- *   hand-edit the board (studio/NEXT.md) and the train queue changed outside the harness are detected at the next harness
- *             write; the harness's own writes and a file put back to git's HEAD copy are not.
- *   restart   supervisor stop by hand and a start within 5 minutes is detected; with an upgrade between, or 20 minutes
- *             later, not.
- *   kill      a session whose launcher vanished with no stop asked, the machine up since it started, is detected; the
- *             watcher (markGone) records the times it needs.
- *   fixed     an open task whose signature isn't seen for 7 days after an upgrade is "maybe fixed in <version>"; close
- *             needs --by and --note, a builder session can't close; seen again, a closed task reopens.
- *   measure   the digest shows workarounds per day, top signatures and open harness tasks; the impact report shows
- *             workarounds before/after the upgrade and the trend ("fewer").
- *   export    `export --since 7d` writes one markdown file with the records and tasks and no secrets.
- * Made-up studios in temp folders; no network.
+ * qa/selftest-271z.mjs — the self-repair loop (harness/workaround.mjs), in made-up studios in temp folders; no network.
+ *   log  `npm run workaround -- log "<what>" --why "<harness>" --cmd … --by …` writes .studio/workarounds.jsonl and a
+ *     harness.workaround event; with --why opens one task in studio/HARNESS-TASKS.md, never studio/NEXT.md
+ *   group  one signature across task ids: first (no --why) opens nothing, second ONE task
+ *   detected  `--force` on a task or lock command; the same refused task command 3 times in 10 minutes by one agent;
+ *     studio/NEXT.md or the train queue hand-edited; supervisor stop and start within 5 minutes (not with an upgrade
+ *     between); a session whose launcher vanished with no stop asked
+ *   fixed  unseen 7 days after an upgrade is "maybe fixed"; close needs --by and --note; seen again reopens
+ *   measure  digest and impact report show workarounds per day, top signatures, trend; `export --since 7d` writes one
+ *     markdown file, no secrets
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { guardOf, iso, napSync as sleep, out, readJsonl as events } from './kit.mjs';
 
 export async function selftest271Z({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const g = (cwd, args) => { const e = { ...process.env, ...ident }; for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete e[k]; return spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: e }); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  const guard = guardOf(report);
   const nm = path.join(dir, 'node_modules');
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
@@ -52,7 +40,6 @@ export async function selftest271Z({ dir, run, report, tmpRoot }) {
     g(S, ['add', '-A']); g(S, ['commit', '-qm', 'studio', '--no-verify']);
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const recs = (S) => { try { return fs.readFileSync(path.join(S, '.studio', 'workarounds.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const tasks = (S) => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'harness-tasks.json'), 'utf8')).tasks; } catch { return []; } };
   const md = (S) => { try { return fs.readFileSync(path.join(S, 'studio', 'HARNESS-TASKS.md'), 'utf8'); } catch { return ''; } };
@@ -68,7 +55,6 @@ export async function selftest271Z({ dir, run, report, tmpRoot }) {
   };
   const addEvents = (ev, list) => fs.appendFileSync(ev, list.map((e, i) => `${JSON.stringify({ id: `evt_z_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`, status: 'ok', msg: '', meta: {}, ...e })}\n`).join(''));
   const DAY = 86400000;
-  const iso = (ms) => new Date(ms).toISOString();
 
   // ---- A: logging, grouping, the separate queue, force, retries, hand edits --------------------------------------
   const A = studio('a');

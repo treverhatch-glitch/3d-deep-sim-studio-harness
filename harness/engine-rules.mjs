@@ -1,27 +1,14 @@
 /**
- * harness/engine-rules.mjs — the engine's rules check, run before the long land run.
- *
- * A game's rules in plain code (Unity: a C# assembly with no engine types, `dotnet test`) can be judged without the
- * editor. This runs that cheap check first, on the batch as it would land, and bisects a red batch with it.
- *
- *   studio/game.json (the owner's, protected):
- *     "engines": { "<x>": { "rules": "<command>" } }                      one command, run at the top of a checkout
- *     "engines": { "<x>": { "rules": { "test": "<command>", "inputs": ["<folder>", ...], "timeoutMin": 30 } } }
- *   Default for unity when "rules" is absent: `dotnet test tools/SimTests` when the target branch has that folder.
- *   "rules": false, or STUDIO_ENGINE_RULES=off: no rules check. "inputs": git-ignored files or folders the tests read,
- *   copied into the throwaway checkout. Also "env", "lfs" (true: smudge large files), "paths" (a sparse checkout, and
- *   the kept result's key), "focus" (only the tests of the systems a batch changed, a full run every fullEveryHours),
- *   "share" (shareInputs), "maxLanes", "play.focus". 2.86: "focus.auto" (one map entry per system folder, derived from
- *   the tree), "focus.shared" (paths every part reads), and with either, results kept per part (partKey).
- *   docs/NATIVE-ENGINE.md has the shapes.
- *
- * A batch is judged only after the target itself passed in the same kind of checkout (the calibration); a red target
- * (a missing input or SDK) blames nobody and is skipped with the reason. Results are kept per tree, command and inputs
- * (.studio/engine/<x>-rules.json); the inputs' content is part of the key (inputsPrint).
- *
- *   node harness/engine-rules.mjs [--engine unity] [--ref <branch|commit>] [--full] [--fresh] [--json]   run it on one commit
- *   node harness/engine-rules.mjs show [--engine unity]                                 the command and where it comes from
- *   node harness/engine-rules.mjs plan --branch <b> [--branch <c>] [--json]              2.86: what a batch's check would run (runs nothing)
+ * harness/engine-rules.mjs — the engine's rules check (plain-code rules, e.g. `dotnet test`), run before the long land run.
+ * It judges the batch as it would land, without the editor, and bisects a red batch. studio/game.json (owner's, protected):
+ *   "engines": { "<x>": { "rules": "<command>" } }  or  "rules": { "test": "<command>", "inputs": ["<folder>", ...] }
+ * Default for unity when "rules" is absent: `dotnet test tools/SimTests` when the target branch has that folder. "rules": false
+ * or STUDIO_ENGINE_RULES=off: no check. Other keys: "inputs" (git-ignored files the tests read), "timeoutMin" (30), "env", "lfs",
+ * "paths", "focus" (changed systems only, full run every fullEveryHours; "focus.auto", "focus.shared"), "share", "maxLanes",
+ * "play.focus" (docs/NATIVE-ENGINE.md). A batch is judged only after the target itself passed in the same kind of checkout;
+ * a red target is skipped with the reason. Results are kept per tree, command and inputs (.studio/engine/<x>-rules.json).
+ *   node harness/engine-rules.mjs [--engine unity] [--ref <branch|commit>] [--full] [--fresh] [--json] | show [--engine unity]
+ *   node harness/engine-rules.mjs plan --branch <b> [--branch <c>] [--json]   (what a batch's check would run; runs nothing)
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -60,11 +47,10 @@ const relOk = (s) => Boolean(s) && !s.startsWith('/') && !/^[A-Za-z]:/.test(s) &
 const NAME_SAFE = /^[A-Za-z0-9._-]+$/;
 
 /**
- * 2.86: rules.focus.auto = { root, paths, filter, filters?, inputs? }, checked. root: a folder whose child folders are the
- * rule systems; paths: templates with {name} (a changed path is the system's when it starts with one, letter case aside);
- * filter: the test filter with {name}; filters: { <name>: <filter> } for a system whose tests are named otherwise;
- * inputs: templates with {name} under rules.inputs (a part's key then holds only its own input files and the unattributed
- * ones). { auto, errors: [plain sentence] }; auto null when absent or bad.
+ * rules.focus.auto = { root, paths, filter, filters?, inputs? }, checked. root: a folder whose child folders are the rule
+ * systems; paths: templates with {name} (a changed path is the system's when it starts with one, letter case aside); filter:
+ * the test filter with {name}; filters: { <name>: <filter> } for a system whose tests are named otherwise; inputs: templates
+ * with {name} under rules.inputs. Returns { auto, errors: [plain sentence] }; auto null when absent or bad.
  */
 export function autoConfig(a) {
   if (a === undefined || a === null) return { auto: null, errors: [] };
@@ -549,13 +535,10 @@ export function rulesMinutes(root, engine) {
   return runs.length ? Math.round(runs[Math.floor(runs.length / 2)] / 6000) / 10 : null;
 }
 
-// ---- 2.86: results kept per part ----
-//
-// With rules.focus.auto or rules.focus.shared, a focused check is a list of parts (one per filter: a map entry's, an
-// auto system's, the smoke filter). A part's green is kept under what the part reads: the blob ids of its own files
-// (the files its map entries or auto system take), the tree ids of rules.focus.shared, the command, and its own input
-// files when rules.focus.auto.inputs attributes them (else all inputs). The smoke part reads everything: it is keyed by
-// the whole tree (or rules.paths), as a whole run is. Only greens are kept; a red is always run again.
+// Results kept per part. With rules.focus.auto or rules.focus.shared, a focused check is a list of parts (one per filter).
+// A part's green is kept under the blob ids of its own files, the tree ids of rules.focus.shared, the command, and its own
+// input files when rules.focus.auto.inputs attributes them (else all inputs). The smoke part reads everything: it is keyed by
+// the whole tree (or rules.paths). Only greens are kept; a red is always run again.
 
 const PART_KEEP = 600;
 /** Per-part usage is only on with the 2.86 settings: without them the keys and runs are 2.85's. */
@@ -784,10 +767,9 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
 
 /**
  * The batch check before a land run. lanes: the train's lanes in order ({ task, branch, head }); chain(tip, lanes) ->
- * { head } | { error } builds the commit the batch would land as (unity-train.mjs chainOnTarget). Returns { ran,
- * skipped?, why, kept, dropped: [{ lane, why, failures }], runs, ms, green? (the commit the kept lanes passed as), inputs, mode, filter }.
- * A red batch is bisected by prefixes: the first red prefix names its last lane, which is dropped.
- * STUDIO_ENGINE_RULES_MAX_RUNS (12) bounds the runs: past it the lanes left go to the land run unjudged.
+ * { head } | { error } builds the commit the batch would land as (unity-train.mjs chainOnTarget). Returns { ran, skipped?,
+ * why, kept, dropped: [{ lane, why, failures }], runs, ms, green?, inputs, mode, filter }. A red batch is bisected by prefixes:
+ * the first red prefix's last lane is dropped. STUDIO_ENGINE_RULES_MAX_RUNS (12) bounds the runs; past it the rest go unjudged.
  */
 export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], extraFrom = [], full = false, useCache = true, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt, slice = null } = {}) {
   const src = [...from, ...extraFrom];

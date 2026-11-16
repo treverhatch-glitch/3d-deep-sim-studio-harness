@@ -1,58 +1,14 @@
 /**
- * harness/train.mjs: the merge train, the standard way lanes land (2.59).
+ * harness/train.mjs: the merge train, the standard way lanes land.
  *
- * A train lands several lanes on ONE full verify instead of one serial verify and rebase per lane.
- *
- *   1. pick: the queue (.studio/train/queue.json; `task done <ID> --train` puts a lane there once every check of task
- *      done but the game's checks passes), oldest first, at most --max;
- *   2. re-check each lane in its own copy (board, done-check, protected files, secrets, hooks, weakened tests;
- *      uncommitted work refuses);
- *   3. build train/<id> = main + each lane, in order, in a scratch copy (.lanes/_train-<id>, made like a lane copy).
- *      A lane is merged as it is (fast-forward or a merge commit the hooks stamp); its commits are never rewritten.
- *      A lane that conflicts with earlier lanes waits for the next train; one that conflicts with main is handed back;
- *   4. ONE full verify (scripts/run-gates.mjs, scoped to the files the lanes change; --all for a "whole" task). A green
- *      full verify already recorded for exactly that tree stands for it;
- *   5. green: under the land lock main moves (compare-and-swap, harness/worktree.mjs landFastForward) to the train's
- *      tip, and each task closes (board, claim, events) as task done closes it;
- *   6. red (prefix bisection): only the failing checks run again (run-gates --only), first on main (red there: main is
- *      red, nobody is handed back), then on prefixes main+A, main+A+B, ... by binary search. The first red prefix names
- *      the lane that breaks them; it is handed back and the rest train again. STUDIO_TRAIN_BISECT=alone: each lane is
- *      verified alone on main; one failing alone is handed back, and if all pass alone the last one waits;
- *   7. pins: when the red is only the game's pin tests (studio.gates.json "pins"), the pins' report runs on every prefix
- *      and each moved pin is attributed to the lane(s) that changed it. If every move is declared (Pin-Moves: trailer on
- *      the lane's own commits) and no invariant pin moved, the pins' refresh runs on the combined tree and ONE extra
- *      commit ("pin refresh", Pin-Refresh: <lanes>) is verified and lands with the lanes; the report is kept in
- *      .studio/train/<id>/pins.json. An undeclared move or a moved invariant hands back its lane; pins red on main is a
- *      regression on main (nobody handed back). All of this is code, no model decides;
- *   8. unionFiles: lanes that conflict ONLY inside files the manifest lists as "unionFiles" (one-import-per-line
- *      barrels) are merged with git's union driver (both sides' added lines, ours first); the merge commit says
- *      Union-Merge:;
- *   9. tiers (harness/tiers.mjs): each lane gets a tier from its own diff. C (protected files, harness code, deleted
- *      tests, irreversible files, upgrade merges) is held as "needs the owner" until a person releases it (releaseLane;
- *      never a worker); B (sim, goldens, pins, shared code) makes the verify --all, is handed back for a golden without
- *      Golden-Reason or a pin file without Pin-Moves, and is held after more than 3 hand-backs; A lands normally;
- *  10. batching: a queued train waits up to STUDIO_TRAIN_WAIT_MIN for STUDIO_TRAIN_MIN lanes and takes at most
- *      STUDIO_TRAIN_MAX; a "runAlone" lane (manifest) gets its own train; a lone task done takes queued lanes along;
- *  11. re-checks run only the failing test files (harness/train-focus.mjs, STUDIO_GATE_FOCUS); each says its question
- *      and an ETA (harness/train-status.mjs); the step is in .studio/train/<id>/status.json. Once a culprit at position
- *      k > 1 is named, the green prefix is verified and lands at once (landPrefixEarly; STUDIO_TRAIN_LAND_PREFIX=off
- *      disables it);
- *  12. chain tails (harness/train-tail.mjs, STUDIO_TRAIN_CHAIN_TAIL): before the verify, a stacked chain (or a lane
- *      declaring pin moves) is built alone in a second scratch copy and its touched tests and pins run; red: ONE "chain
- *      tail" builder task stacked on the last lane. A verify red on exactly those tests defers the chain "waiting for
- *      its tail" (no bisection, nobody handed back); chain + tail land together;
- *  13. parallel prefixes (harness/train-parallel.mjs): the search re-checks K boundary prefixes at once, each in its
- *      own scratch copy (K from the machine budget, STUDIO_TRAIN_BISECT_PARALLEL; no scan: 1).
- *
- * Safety: main moves only after a green full verify of exactly the tree it ends at, and only from the tip the train
- * was built on (if main moved, the train is rebuilt and verified again); one train at a time (.studio/locks/train.lock);
- * drain and stop are respected; the verify takes gate slots as a landing (STUDIO_GATE_PRIORITY=landing). A lane that
- * gained commits after its check lands as checked and stays queued (unless they are only merges of main). A tier-A
- * lane whose tip changes no file against main lands without a verify (empty_diff; STUDIO_TRAIN_EMPTY_DIFF=off: it rides
- * the verify).
- *
- * `task done <ID>` in a lane copy is a one-lane train (STUDIO_TRAIN=off: the old deliver path). This module never
- * imports harness/task.mjs (its CLI imports this one): the board operations come in as `deps`.
+ * Lands several lanes on ONE full verify: picks from .studio/train/queue.json (oldest first, at most --max), re-checks
+ * each lane in its own copy, builds train/<id> = main + each lane in .lanes/_train-<id>, runs ONE full verify
+ * (scripts/run-gates.mjs), then moves main (compare-and-swap, landFastForward) and closes each task. Red: prefix
+ * bisection hands back the first lane that breaks it (STUDIO_TRAIN_BISECT=alone: each lane alone). Tiers
+ * (harness/tiers.mjs): C is held for the owner, B makes the verify --all. Knobs: STUDIO_TRAIN_WAIT_MIN,
+ * STUDIO_TRAIN_MIN, STUDIO_TRAIN_MAX, STUDIO_TRAIN_CHAIN_TAIL, STUDIO_TRAIN_BISECT_PARALLEL, STUDIO_TRAIN_LAND_PREFIX,
+ * STUDIO_TRAIN_EMPTY_DIFF, STUDIO_GATE_FOCUS. One train at a time (.studio/locks/train.lock). Never imports
+ * harness/task.mjs (cycle): board operations come in as `deps`.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -360,12 +316,9 @@ function goldenReasons(root, base, head) {
 
 /**
  * The train's part of a game manifest (pure; see docs/ONBOARDING-A-GAME.md "Pins and union files"):
- *   "pins": { "tests": [<test names or globs>], "report": "<cmd with {out}>", "refresh": "<cmd with {in}>",
- *             "invariants": [<pin names or globs never auto-refreshed>] }
- *   "unionFiles": [<repo-relative paths or globs of one-import-per-line files>]
- * Also: pins.files, "simPaths", "shared", "registry", "ui", "irreversible" (globs), "tiers" ({ rules, set, default }:
- * harness/tiers.mjs), "runAlone" ({ maxFiles, paths }).
- * Returns { pins: {...} | null, unionFiles: [], notes: [problems], ...those keys }. A pins block with a problem is off (noted).
+ *   "pins": { "tests", "report": "<cmd with {out}>", "refresh": "<cmd with {in}>", "invariants" }, "unionFiles":
+ *     [paths]
+ * Also: pins.files, "simPaths", "shared", "registry", "ui", "irreversible", "tiers", "runAlone" ({ maxFiles, paths }).
  */
 export function readTrainSettings(j = {}) {
   const notes = [];
@@ -682,13 +635,10 @@ export function trainOnlyGates(dir) {
 }
 
 /**
- * A reused verify record whose game:perf step said "not run (busy)" (run-gates marks the game gate's row
- * "perfNotRun") stood for a tree whose perf tests never ran. The train re-runs only that step on the same tree:
- * run-gates --only <the game gates> with STUDIO_GATE_FOCUS { "game:perf": <the perf globs> } (game-gates skips every
- * other check; a landing run waits STUDIO_PERF_WAIT_MIN for a quiet machine, holding new verifies back). Still busy:
- * a busy refusal, read by runGatesWaiting (it waits STUDIO_TRAIN_BUSY_WAIT_MIN, then the train defers its lanes,
- * judging nobody). Returns null (nothing to re-run), { ok: true }, { ok: false, ... } (red) or
- * { ok: false, noCheck: true, busy }.
+ * Re-runs only the game:perf step when a reused verify record says "not run (busy)": run-gates --only the game gates
+ * with STUDIO_GATE_FOCUS { "game:perf": <perf globs> }; a landing run waits STUDIO_PERF_WAIT_MIN for a quiet machine.
+ * Still busy: a busy refusal (runGatesWaiting waits STUDIO_TRAIN_BUSY_WAIT_MIN, then the train defers its lanes).
+ * Returns null, { ok: true }, { ok: false, ... } or { ok: false, noCheck: true, busy }.
  */
 export function perfRerun(sc, { id, tree, rec, log = () => {} }) {
   const row = (rec?.rows || []).find((r) => r && r.perfNotRun);
@@ -915,13 +865,10 @@ export function trainVerifyParts(text, ok, roots = []) {
 
 const flakeSeen = new Map();
 /**
- * After a red verify or re-check: each failing test file runs ALONE on this tree (run-gates --only the game's gates,
- * STUDIO_GATE_FOCUS; the second, low-load run with STUDIO_TEST_WORKERS=1), at most once per train, and is labelled
- * real / seed-flake / load-flake / intermittent in .studio/flakes.jsonl. Labels only: the train's next step is decided
- * as before. Never throws (a stall or a lane leaving still stops the train). Each run shows in the status ("flake check
- * k of n: <file> alone") and waits at most STUDIO_FLAKE_WAIT_MIN (10) for a machine:heavy slot (STUDIO_HEAVY_WAIT_MIN);
- * a run refused as busy or stopped before any gate is "not run" (no label), never "real"; triage ends at the first
- * real label. A red whose every failing file is a port collision is not the lanes' (trainBody defers them).
+ * After a red verify or re-check: each failing test file runs ALONE (STUDIO_GATE_FOCUS; the second run with
+ * STUDIO_TEST_WORKERS=1), at most once per train, and is labelled real / seed-flake / load-flake / intermittent in
+ * .studio/flakes.jsonl. Labels only; never throws. Waits at most STUDIO_FLAKE_WAIT_MIN (10) for a machine:heavy slot
+ * (STUDIO_HEAVY_WAIT_MIN); a busy run is "not run", never "real". Only port collisions: not the lanes' fault.
  */
 export function flakeTriage(sc, { id, tree, text, log }) {
   if (!triageOn()) return null;
@@ -1006,14 +953,10 @@ function pinReport(sc, pins, { id, k, tree, cache, log }) {
 }
 
 /**
- * What a red train does next (all code, no judgement): { kind } is
- *   redMain      the failing checks fail on main itself: nobody is handed back
- *   refreshed    pins only, every move declared: the scratch copy holds main + lanes + one pin-refresh commit
- *                ({ built, info }), to be verified in full before main moves
- *   pinBlocked   pins only, but a move is undeclared or an invariant: { blocked: [{ lane, why }] }
- *   culprit      the first red prefix: { lane, why }
- *   flaky        the failing checks pass when run again on the train's own tree: nobody is handed back
- *   alone        no failing check is named (or a prefix doesn't build): the lane-alone way decides
+ * What a red train does next (all code): { kind } is redMain (fails on main itself: nobody handed back), refreshed
+ * (pins only, every move declared: { built, info } holds main + lanes + one pin-refresh commit), pinBlocked
+ * (undeclared move or invariant: { blocked: [{ lane, why }] }), culprit (first red prefix: { lane, why }), flaky
+ * (passes on the train's own tree), alone (no failing check named: the lane-alone way decides).
  */
 async function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
   const { sc, tip, set, built, v, id, log, res, settings, all, cache, main } = ctx;
@@ -1668,16 +1611,9 @@ export function precheckChild(root, lane) {
 const changedVs = (dir, tip, head) => out(git(dir, 'diff', '--name-only', `${tip}..${head}`)).split('\n').filter(Boolean);
 
 /**
- * Run one train. opts:
- *   lanes       explicit lanes ([{ task, agent, dir, branch, head, all, prechecked }]); default: the queue
- *   max         at most this many lanes from the queue
- *   dryRun      check and plan only: nothing verified, nothing lands, nothing handed back
- *   by          who runs it (events)
- *   oneLane     task done's own one-lane train: a failure is returned to the caller, not handed back
- *   waitMs      how long to wait for a running train (task done waits; `task train` doesn't)
- *   deps        { close(lane, ctx) -> { ok, message? }, handBack(lane, note), stopped() -> reason|null,
- *                 waitForDrain() -> { ok, message }, markRunning(task, agent), clearRunning(task), precheck(lane) }
- *   log         progress lines
+ * Run one train. opts: lanes (default the queue), max, dryRun (plan only), by, oneLane (failure returned, not handed
+ * back), waitMs, log, and
+ *   deps { close, handBack, stopped, waitForDrain, markRunning, clearRunning, precheck }
  * Returns { ok, id, landed: [task], dropped: [{ task, why }], deferred: [{ task, why }], verifies, reused, message }.
  */
 /** The disk-low warning in the train's output (harness/machine.mjs diskWarning). */
@@ -1837,11 +1773,10 @@ function depContext(root, deps = {}) {
 }
 
 /**
- * Which of these lanes wait, before anything is spent on them: [{ lane, why, key, kind: 'after'|'deps'|'stuck' }].
- *   after  queued after a predicted conflict with another queued lane (train-predict.mjs) still in the queue and
- *          not done: it goes in a train after that one;
- *   deps   an --after dependency that isn't done and isn't among this train's lanes;
- *   stuck  a dependency dropped from the board or not on it: handed back with a note (never waits forever).
+ * Which of these lanes wait: [{ lane, why, key, kind: 'after'|'deps'|'stuck' }].
+ *   after  queued after a predicted conflict with another queued lane still in the queue: goes in a later train
+ *   deps   an --after dependency that isn't done and isn't among this train's lanes
+ *   stuck  a dependency dropped from the board or not on it: handed back with a note (never waits forever)
  */
 export function laneWaits(root, lanes, deps = {}) {
   const ctx = depContext(root, deps);
@@ -2175,11 +2110,10 @@ function fixFirst(root, lanes, { id, by, dryRun, log }) {
 }
 
 /**
- * The red chain ran past its budget (STUDIO_TRAIN_RED_BUDGET_MIN). The newest lane (the most likely cause) is handed
- * back with the red's summary. Of the others, the longest prefix whose exact tree a full verify already passed (this
- * train's own or a trusted record: verifyTree noRun runs no verify) is returned as the verdict to land; the rest keep
- * their queue place (keepOrHold: held for the Producer a second time at the same head). None passed: nothing lands.
- * Logs task.train.red_budget. Returns { built, v } or null.
+ * The red chain ran past STUDIO_TRAIN_RED_BUDGET_MIN. The newest lane is handed back with the red's summary. Of the
+ * others, the longest prefix whose exact tree a full verify already passed is returned as the verdict to land; the rest
+ * keep their queue place (keepOrHold). None passed: nothing lands. Logs task.train.red_budget. Returns { built, v } or
+ * null.
  */
 function redBudgetEnd({ marker, sc, tip, set, id, log, res, seen, by, unionFiles, drop, keepOrHold }) {
   redClock.delete(String(id));
@@ -3008,12 +2942,10 @@ export function mainNonCodeCommits(root, tip, now, ctx) {
 }
 
 /**
- * Main moved after a green verify of the train's tree T and rebuildOverBoardMove can't take it (a deleted or renamed
- * board file, a pin-refresh commit, ...). If every new main commit touches only files no check reads
- * (mainNonCodeCommits), merge them onto T in the train's copy (`git merge`, hooks on: parents T, then main) and land
- * that under the land lock without a new verify. Git checks first: a clean merge-tree whose tree is T plus main's
- * versions of those files, and secret-scan --since T on the new commits. Any doubt: { ok: false, why }, copy back at T,
- * and the caller verifies again.
+ * Main moved after a green verify of tree T and rebuildOverBoardMove can't take it. If every new main commit touches
+ * only files no check reads (mainNonCodeCommits), merge them onto T (`git merge`, hooks on) and land under the land
+ * lock without a new verify, after a clean merge-tree and secret-scan --since T. Any doubt: { ok: false, why }, the
+ * copy goes back to T, and the caller verifies again.
  */
 function landOverNonCode(root, sc, { tip, now, verified, id }) {
   const ctx = { board: boardPaths(), rechecks: recheckPaths(), records: taskRecordPaths(), addOnly: addOnlyPaths(), game: gameReadGlobs(root, now) };
@@ -3174,12 +3106,10 @@ export function nextBaseVerdict(root, { assumed, now, lanes = [] }) {
 const nextPollMs = () => 1000;
 
 /**
- * Run the speculative train behind train `after` (opts: { root, after, deps, log, by, quietJob }). It takes queue lanes
- * (not A's; held, tier-C, run-alone-behind-others, waiting and refused lanes wait for the next normal train), builds on
- * A's verified head in its own scratch copy, runs ONE verify, then waits for A. If A landed exactly that tree (or plus
- * record files) B lands under the train lock without verifying again; else it is discarded (lanes untouched,
- * task.train.next_discarded event). Lock: .studio/locks/train-next.lock; own life record.
- * Returns the train result plus { speculative: true, after, discarded?: why }.
+ * Run the speculative train behind train `after` (opts: { root, after, deps, log, by, quietJob }). Takes queue lanes
+ * (not held, tier-C, waiting or refused ones), builds on A's verified head in its own copy, runs ONE verify, then
+ * waits for A. A landed that tree: B lands without verifying again; else discarded (task.train.next_discarded). Lock:
+ * .studio/locks/train-next.lock. Returns the train result plus { speculative: true, after, discarded? }.
  */
 export async function runNextTrain(opts = {}) {
   const root = opts.root || mainRoot();

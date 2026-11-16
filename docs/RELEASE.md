@@ -69,6 +69,10 @@ The file ships with the harness; a studio's `npm run autonomy -- impact` scores 
   name that is defined nowhere: a variable declared in another block, a name a refactor removed, a typo. It is the
   TypeScript compiler reading the files as JavaScript and showing only those three findings; types are not checked. About
   15 seconds. One such name reached the 2.86 pull request in a hand-back text of the engine train.
+- **Comment rule (2.87).** `npm run check:comments` (`scripts/check-comments.mjs`, a step after the names check) fails when
+  a file's header comment in `harness/`, `scripts/` or `qa/` is over 12 lines, or any other comment over 6. A comment says
+  what the code does, how to run it and what would otherwise go wrong; how a subsystem works belongs in `docs/`, and what
+  changed when in `CHANGELOG.md`.
 - **Settings map (2.66.0).** `node scripts/settings-map.mjs` writes `docs/SETTINGS.md`: every `STUDIO_*` name the code reads,
   with its default, files and the docs page that explains it. The docs gate runs `--check`: a name used in the code must be
   mentioned on a docs/ page or listed in `docs/settings-baseline.json` (the undocumented ones of 2.66.0, frozen; it only

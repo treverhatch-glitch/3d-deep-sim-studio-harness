@@ -1,33 +1,30 @@
 /**
- * qa/selftest-278h.mjs — 2.78.0 (helper h): B-105, a lane refresh must never write through the lane's studio/ link.
- *   The crew's evidence (2.77.1, Windows): the train dropped T-226 ("git merge failed: studio/task-holds.json"), and a
- *   builder's verify said "needs git rebase main ... then npm run hooks -- restamp, which I may not run". A lane copy's
- *   studio/ is a link (a junction on Windows, a symlink elsewhere) to the main checkout's; a merge of main saw main's live
- *   board files through it as local changes. Now the refresh marks the link's paths left out again first
- *   (lane-sparse.mjs protectSharedLinks), the harness refreshes a stale lane itself when a verify runs, and the
- *   message no longer sends a builder to restamp.
- *   (a) main moves (a harness file and a studio/ board file): the refresh brings the harness change in, main's live studio/
- *       files stay as they were (bytes and git status), the link is still a link
+ * qa/selftest-278h.mjs — a lane refresh must never write through the lane's studio/ link.
+ * A lane copy's studio/ is a link (junction on Windows, symlink elsewhere) to the main checkout's; a merge of main saw
+ * main's live board files through it as local changes. The refresh marks the link's paths left out first
+ * (lane-sparse.mjs protectSharedLinks); the harness refreshes a stale lane itself when a verify runs; the message never
+ * sends a builder to restamp.
+ *   (a) main moves (a harness file and a studio/ board file): the refresh brings the harness change in, main's live
+ *     studio/ files stay as they were (bytes and git status), the link is still a link
  *   (b) a real conflict in a non-studio file stops the refresh, names the file, leaves the lane as it was
- *   (c) a builder's verify refreshes its own lane (no restamp instruction), and the text never says restamp
+ *   (c) a builder's verify refreshes its own lane (no restamp instruction)
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitCrlfOf, guardOf, lastJsonOf, out, writeIn } from './kit.mjs';
 
 export async function selftest278H({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   if (!fs.existsSync(path.join(dir, 'node_modules')) && fs.existsSync(path.join(harnessRoot, 'node_modules'))) {
     try { fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction'); } catch {}
   }
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const gitIn = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const gitIn = gitCrlfOf(gEnv);
+  const guard = guardOf(report);
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
     STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_COMPACT_OUTPUT: '', STUDIO_VERIFY_DETACH: 'off', STUDIO_VERIFY_RUN: '', STUDIO_HEAVY_SLOTS: '0', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '',
@@ -36,8 +33,7 @@ export async function selftest278H({ dir, run, report, tmpRoot, root }) {
   };
   const nm = path.join(dir, 'node_modules');
   let n = 0;
-  const lastJson = (r) => { const t = String(r.stdout || '').trim(); const l = t.split('\n').filter((x) => x.startsWith('{')).pop(); try { return JSON.parse(l); } catch { return { _raw: out(r).slice(-2000) }; } };
-  const u = (S, p) => JSON.stringify(pathToFileURL(path.join(S, p)).href);
+  const lastJson = lastJsonOf(out);
 
   // A studio fixture (a git repo of the harness) whose lane copies are made by createLaneCopy, as a real run does.
   const S = path.join(tmpRoot, `278h-${process.pid}-${++n}`);

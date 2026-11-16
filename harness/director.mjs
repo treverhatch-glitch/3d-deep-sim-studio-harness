@@ -1,24 +1,14 @@
 #!/usr/bin/env node
 /**
  * harness/director.mjs — the Director (of Knowledge) keeps the studio on the game the Bible describes.
- *
- *   npm run director -- ping --reason "new tasks for Phase 1" [--from producer]
- *   npm run director -- review [--phase 1]   start a dated review for the Director agent to fill in
- *   npm run director -- drift [--json]       the free drift report (a script, no tokens)
- *   npm run director -- brief                rewrite the Director's brief only
- *   npm run director -- flow [--json]        the flow pass: idle builders, expired claims, refill (2.30h)
- *
- * A ping means: a "Director review" task is queued (or the open one gets the new reason), the
- * Director's brief is written to .studio/briefs/director.md (the docs to read first, the open phase,
- * kept and crossed-out layers, what finished since the last review, the drift report, ideas waiting
- * for a decision), and the Director agent is woken. If STUDIO_DIRECTOR_CMD is set (a launch line from
- * `npm run kickoff -- --role director --agent director-1 --tool …`), the ping starts it, at most once
- * per STUDIO_DIRECTOR_COOLDOWN_MIN (default 60) and under the spend cap. If not, the Producer and the
- * person are told a Director is needed.
- *
- * Pinged: daily by the supervisor, by the Producer before it generates tasks, on a phase change, and when
- * an idea is placed and waits for a decision. The Director reviews and edits the Bible; the Producer
- * still creates and assigns every task.
+ * npm run director -- ping --reason "new tasks for Phase 1" [--from producer] | review [--phase 1] | brief
+ * npm run director -- drift [--json] (free report, no tokens) | flow [--json] (idle builders, expired claims, refill)
+ * A ping queues a "Director review" task (or adds the reason to the open one), writes the brief to
+ * .studio/briefs/director.md, and wakes the Director. If STUDIO_DIRECTOR_CMD is set (a launch line from `npm run
+ * kickoff -- --role director --agent director-1 --tool …`) the ping starts it, at most once per
+ * STUDIO_DIRECTOR_COOLDOWN_MIN (60) and under the spend cap; else the Producer and the person are told one is needed.
+ * Pinged daily by the supervisor, by the Producer before it generates tasks, on a phase change, and when an idea waits
+ * for a decision. The Director edits the Bible; the Producer still creates and assigns every task.
  */
 import fs from 'node:fs';
 import path from 'node:path';

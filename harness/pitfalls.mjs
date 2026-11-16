@@ -1,36 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/pitfalls.mjs — "pitfalls seen here": one-line rules for this game that every agent reads.
- *
- *   npm run pitfall -- "never put the ceiling texture on the floors" [--by <name>] [--scope all|builder|producer|…]
- *                      [--why "…"] [--regression <qa/regressions file>] [--cause "<accepted cause>"]
- *   npm run pitfall                 the list (and proposals waiting); --scores adds each line's measured usefulness
- *   npm run pitfall -- proposed     lines agents proposed, waiting for the Producer or a person
- *   npm run pitfall -- accept PP-3 --by <producer or person> [--scope builder]    (or: accept all)
- *   npm run pitfall -- reject PP-3 --by <producer or person> [--why "…"]
- *   npm run pitfall -- remove 3     drop line 3 (or PF-7) when it no longer holds; a line tied to a regression or an
- *                                   accepted cause only by a person (--by <your name>)
- *   npm run pitfall -- tie 3 --regression <file> | --cause "<cause>" --by <producer or person>
- *   npm run pitfall -- evict [--dry-run]   bring the list back under its budget now
- *
- * The fix for "the AI forgot what I asked": the rule lives in a file every agent's prompt includes
- * (studio/PITFALLS.md), not in a chat. A harness note of kind "bad" that reads as a rule ("don't…",
- * "never…", "always…", "must…", "avoid…") is added here too. SendIt kept the same list in its AGENTS.md,
- * and every mistake there became a line.
- *
- * 2.61 (pitfall hygiene, the learning edge):
- *   - A line an agent adds lands as a proposal (studio/pitfalls.json) until the Producer or a person accepts it; a
- *     person's or the Producer's own line goes straight on. A launched worker session never accepts, whatever --by says.
- *   - Accepted lines carry a role scope (all, or roles such as builder,qa). A launch prompt shows the lines for all
- *     plus its role; briefs show their role's own lines. In the file a scoped line starts with "[builder] ".
- *   - The list keeps STUDIO_PITFALLS_KEEP lines (default 40). Past that, the least useful line moves to the archive:
- *     usefulness = how often a matching failure (same keywords as `npm run learn`) happened while the line was in
- *     the failing agent's context (its session started after the line was accepted, and the line's scope covers the
- *     session's role). With no data that is 0 for every line, and the oldest goes, as before. The line just added stays.
- *   - A line tied to a regression (qa/regressions/, named with --regression or in its text) or to an accepted cause
- *     (studio/decisions/accepted-causes.json) is never evicted: the output says a person has to remove it.
- * studio/PITFALLS.md is the list (a person may edit it by hand); studio/pitfalls.json keeps each line's scope, who
- * accepted it, its ties, and the proposals. The lines stay untrusted text: prompts carry them in the marked block.
+ * harness/pitfalls.mjs — "pitfalls seen here": one-line rules every agent reads (studio/PITFALLS.md; scopes, ties,
+ * proposals: studio/pitfalls.json).
+ *    npm run pitfall -- "never put the ceiling texture on the floors" [--by <name>] [--scope all|builder|producer|…]
+ *                       [--why "…"] [--regression <qa/regressions file>] [--cause "<accepted cause>"]
+ *    npm run pitfall [-- proposed | --scores]    the list, proposals waiting, usefulness
+ *    npm run pitfall -- accept PP-3 [--scope builder] | reject PP-3 [--why "…"] --by <producer or person>
+ *    npm run pitfall -- remove 3 --by <you> | tie 3 --regression <file> | --cause "<c>" --by <who> | evict
+ * An agent's line is a proposal until accepted (a launched worker never accepts). The list keeps STUDIO_PITFALLS_KEEP
+ * (40) lines, evicting the least useful, never one tied to a regression or accepted cause
+ * (studio/decisions/accepted-causes.json).
  */
 import fs from 'node:fs';
 import path from 'node:path';

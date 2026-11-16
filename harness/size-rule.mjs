@@ -1,24 +1,13 @@
 /**
- * harness/size-rule.mjs — 2.60.0: what a game's manifest may say about the size ratchet (harness/done-check.mjs).
- *
- * The ratchet: a game file over 400 lines (or 30 KB) can't grow, so every lane that registered a module appended to the
- * same joined line of the one big file, and every landing conflicted with every other lane. A game may now declare, in
- * its check manifest (<game root>/studio.gates.json; studio/gates.json for the whole studio):
- *
+ * harness/size-rule.mjs — what a game's manifest may say about the size ratchet (harness/done-check.mjs).
+ * A game file over 400 lines (or 30 KB) can't grow. A game may declare in its check manifest (<game
+ * root>/studio.gates.json; studio/gates.json for the whole studio):
  *   "sizeRule": { "exempt": ["src/game/modules.ts"], "importLinesFree": true, "exemptMaxLines": 800, "exemptMaxKb": 60 }
- *
- *   exempt           files (relative to the manifest's folder, or repo-relative; globs as in "paths") that skip the
- *                    no-growth rule. They still have a hard cap: exemptMaxLines (default twice the file limit, 800) and
- *                    exemptMaxKb (default twice the KB limit), so a barrel can't become the next crammed file. Functions in them keep their limit.
- *   importLinesFree  added lines that are only an import or re-export (import … from '…', import '…', export … from '…',
- *                    export * from '…', several on one line, or a whole multi-line import block) don't count as growth,
- *                    net of import lines removed, in any file the manifest covers. Any other added line still does.
- *
- * Only the owner decides this: the manifest counts only where studio/protected.json covers it (game/<name>/ and
- * web/<name>/ manifests and studio/gates.json by default), and it is read as committed on the studio's main branch
- * (else the commit the task's growth is measured from), never from the working copy or the task's own branch. An
- * exemption written anywhere else (a lane's own edit of the manifest, another file, a comment) is ignored, and the
- * refusal says so.
+ *   exempt           files (manifest- or repo-relative; globs as in "paths") that skip no-growth but keep a hard
+ *                    cap: exemptMaxLines (default twice the file limit, 800), exemptMaxKb (default twice the KB limit)
+ *   importLinesFree  added lines that are only an import or re-export don't count as growth, net of imports removed
+ * Only the owner decides this: the manifest counts only where studio/protected.json covers it, read as committed on the
+ * studio's main branch, never from the working copy or the task's branch.
  */
 import fs from 'node:fs';
 import path from 'node:path';

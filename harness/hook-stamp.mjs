@@ -1,72 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/hook-stamp.mjs: find commits that skipped the git hooks.
- *
- * A hook can't stop `git commit --no-verify` (or `git -c core.hooksPath=… commit`): it simply doesn't run. So the hooks
- * leave a stamp on every commit they passed, and a gate looks for commits without a valid one afterwards.
- *
- *   pre-commit          when every check passed, writes the tree it checked to .git/studio-hooks-pass
- *   prepare-commit-msg  (runs even with --no-verify) notes whether this commit amends HEAD
- *   commit-msg          adds the trailer   Studio-Hooks: v<hooks version> t<tree> p<patch-id>
- *                       (`s<id>` with an old git that has no `patch-id --verbatim`; `empty` for an empty commit;
- *                       `merge` for a merge commit, which only commit-msg runs for). Only when pre-commit passed on
- *                       exactly this tree, and never when the commit replaces (amends) a HEAD that wasn't checked.
- *                       Also the trailer   Studio-Patch-U0: p<id>   (s<id> with an old git; none for an empty commit
- *                       or a merge): the patch-id of the change without context (`git diff -U0`).
- *
- * The gate (`node harness/hook-stamp.mjs check`, the `hooks` gate and every `task done`) lists the commits since the
- * base branch (approve.mjs resolveBase) whose stamp is missing or doesn't match the commit: its tree (the same commit)
- * or its patch-id (the same change after a clean rebase or cherry-pick) must match. A commit whose tree and context
- * patch-id no longer match also passes when its -U0 patch-id does: exactly the same added and removed lines, in the
- * same files, in the same order (a context patch-id changes when a rebase moves lines near a hunk). A stamp without
- * the U0 trailer keeps the old rule. A -U0 match can't see where in a file the lines sit; that comes from the commit's
- * base, judged on its own, and the gates and task done judge the final tree whatever the stamps say. The U0 trailer is
- * separate from Studio-Hooks (an older harness still reads the stamp) and not named Studio-Hooks-<x>, because
- * git interpret-trailers matches a key by its prefix.
- *
- * Exempt: commits made before the stamping hooks existed (their parent's scripts/hooks/commit-msg doesn't stamp),
- * commits the harness makes without hooks marked `Studio-Harness: <kind>` (a known kind only), and commits the owner
- * approved (`npm run approve -- hooks --note "why"`). CI's own merge commit of a pull request is not judged, its PR
- * head is.
- *
- * Enforced when the hooks are installed in this checkout (core.hooksPath=scripts/hooks), or the base branch's recent
- * history carries stamps, or STUDIO_HOOKS_CHECK=on. STUDIO_HOOKS_CHECK=off turns it off.
- *
- * Upgrading: commits a checkout already had when it took the stamping hooks (lane branches, local work not yet pushed)
- * are listed once, by patch-id, in <git common dir>/studio-hooks-grandfather.json. The first stamping hook run writes
- * it (the upgrade's own merge commit), and `node harness/hook-stamp.mjs grandfather` adds to it by hand. Those commits
- * stay exempt after a clean rebase onto the upgrade; a commit made after the list was written is not in it. An
- * update's own merge commits (`grandfather --ref`, upgrade --merge: grandfatherRange) are listed too, by sha.
- *
- * Limits: a stamp is plain text, so a deliberate forger who computes one by hand passes (the weakened-test and
- * protected-file gates still judge the content); `git revert`, `git rebase` with conflicts or squashes, and an amend
- * with `-m` that is later rebased onto a moved base are flagged until re-committed with the hooks.
- *
- * Size: only the commits that need a patch-id get one (a stamp whose tree doesn't match, the grandfather list, the
- * commits listed), and every diff streams from git into git patch-id, so a range holding a game's binary art costs
- * time, not memory. A commit list too big to read fails the gate, never passes it.
- *
- * Re-stamp: `npm run hooks -- restamp`, in a lane copy only, re-commits the lane's commits since the studio's branch
- * through the real hooks (from the oldest one whose stamp no longer matches), keeping the same trees, messages and
- * authors, after saving the old head as backup/<lane>-pre-restamp-<time>. It never writes a stamp itself: a commit the
- * hooks refuse stops it and the lane goes back to where it was. task done runs it (--auto) after its own rebase when a
- * commit's stamp was valid before the rebase and isn't after it (STUDIO_HOOKS_RESTAMP=off: never).
- *
- * Lane harness: a lane copy runs its own committed harness/ and scripts/. When the studio's branch changed files there
- * since the lane branched, `check` refuses (it would judge with the old code) and names the files and the fix: rebase
- * on the studio's branch. STUDIO_LANE_HARNESS=own runs the lane's own copy anyway. The hooks only print that note at
- * commit; they never block on it.
- *
- * Harness ref: a studio that took an unmerged harness branch on the owner's say-so (its commits aren't on the base
- * branch yet, and the harness's own release commit carries no stamp) sets STUDIO_HARNESS_REF=<remote>/<branch> in
- * .env. Commits reachable from that branch as the remote reports it (git ls-remote; never a local branch or a
- * remote-tracking ref moved by hand) are exempt, and the output names the ref and commit used, or why it wasn't used.
- *
+ * harness/hook-stamp.mjs: find commits that skipped the git hooks (`git commit --no-verify` makes a hook not run).
+ * Hooks stamp each commit they passed with the trailer Studio-Hooks: v<hooks version> t<tree> p<patch-id> (commit-msg
+ * adds it only when pre-commit passed on this tree) and Studio-Patch-U0: p<id> (patch-id of `git diff -U0`). The gate
+ * lists commits since the base branch whose stamp is missing or doesn't match. Exempt: commits made without hooks
+ * marked `Studio-Harness: <kind>`, and owner-approved ones (`npm run approve -- hooks --note "why"`). Enforced when the
+ * hooks are installed or STUDIO_HOOKS_CHECK=on; STUDIO_HOOKS_CHECK=off turns it off.
  *   node harness/hook-stamp.mjs check [--json]
  *   node harness/hook-stamp.mjs stamp <message-file>      (the commit-msg hook)
- *   node harness/hook-stamp.mjs grandfather [--json]      (list the commits this checkout already has as exempt)
- *   node harness/hook-stamp.mjs grandfather --ref <remote ref>  (an update's commits, merged by an older guard)
- *   node harness/hook-stamp.mjs restamp [--json]          (npm run hooks -- restamp; in a lane copy)
+ *   node harness/hook-stamp.mjs grandfather [--json]  |  grandfather --ref <remote ref>
+ *   node harness/hook-stamp.mjs restamp [--json]          (npm run hooks -- restamp; in a lane copy only)
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -469,12 +412,10 @@ function headToJudge(env) {
 }
 
 /**
- * STUDIO_HARNESS_REF=<remote>/<branch> (set in .env by a person; for example upstream/claude/2591) names an unmerged
- * harness ref the owner told the studio to take. Its commits are exempt like the base branch's, but only as the
- * remote itself has them: <remote> must be a configured remote, refs/remotes/<remote>/<branch> must exist (a local
- * branch of that name doesn't count), and `git ls-remote` must confirm <branch> on <remote>; the exempt commits are
- * those reachable from the commit the remote reports. Asked only when a commit is unstamped. Can't reach the remote:
- * not used, and the output says why (the gate fails closed). Returns { declared, ref, ok, why, sha, shas }.
+ * STUDIO_HARNESS_REF=<remote>/<branch> (set in .env by a person) names an unmerged harness ref the owner told the
+ * studio to take. Commits reachable from it are exempt, but only as the remote reports them: <remote> must be
+ * configured, refs/remotes/<remote>/<branch> must exist, and `git ls-remote` must confirm <branch>. Unreachable remote:
+ * not used (the gate fails closed). Returns { declared, ref, ok, why, sha, shas }.
  */
 export function declaredHarnessRef(env = process.env, root = ROOT) {
   if (String(env.STUDIO_HARNESS_REF || '').trim()) return String(env.STUDIO_HARNESS_REF).trim();
@@ -679,16 +620,10 @@ export function laneDriftText(d, { builder = false } = {}) {
 // ---- re-stamp a lane's commits through the real hooks ----
 
 /**
- * Re-commit a lane copy's commits since the studio's branch through the real git hooks, from the oldest one whose stamp
- * is no longer valid (all of them with all=true): each commit's own tree, message and author, committed with
- * `git -c core.hooksPath=<this checkout>/scripts/hooks commit -C <commit>`, so pre-commit checks it and commit-msg
- * stamps it. Nothing is stamped by hand: a commit the hooks refuse (or leave unstamped) stops it, and the lane goes
- * back to where it was. The old head is kept as backup/<lane>-pre-restamp-<time> (auto: removed again on success).
- *
- * Refuses in the main checkout, with uncommitted changes, during a rebase/merge/cherry-pick, and over a merge commit.
- * auto (task done, after its rebase): only when the hooks gate is enforced here and every commit in was (the lane
- * before the rebase: { base, head }) had a valid stamp, so nothing that skipped the hooks is re-committed unasked.
- * Returns { ok, replayed, backup, why, ... }.
+ * Re-commit a lane copy's commits since the studio's branch through git hooks, from the oldest with an invalid stamp:
+ * `git -c core.hooksPath=<this checkout>/scripts/hooks commit -C <commit>`. Nothing is stamped by hand: a refused
+ * commit stops it and the lane goes back (old head: backup/<lane>-pre-restamp-<time>). Refuses in the main checkout,
+ * with uncommitted changes, mid rebase/merge, over a merge commit. auto (task done): if stamps were valid.
  */
 export async function restamp({ cwd = ROOT, auto = false, all = false, base: givenBase = null, was = null, env = process.env, now = new Date() } = {}) {
   const g = (args, opts = {}) => git(args, { cwd, ...opts });

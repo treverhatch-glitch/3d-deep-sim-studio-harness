@@ -1,29 +1,14 @@
 /**
- * harness/routing.mjs — 2.73.0 (e): cheap-first routing (holdout off) and what each tier costs per landed change.
- *
- * Where the harness picks a writer's model (harness/agent.mjs startAgent: --model, else STUDIO_<ROLE>_MODEL, else
- * STUDIO_AGENT_MODEL, then the rescue model, the 2.30d tier-up after a failed hand-back and the reasoning-only reroute),
- * a counted studio/policy.json may say:
- *   "routing": { "cheapFirst": ["chore", "docs", "test"], "tiers": { "cheap": "<model>", "mid": "<model>", "top": "<model>" },
- *                "models": ["<model>", …], "holdout": 0 }
- * A task whose type (done-check's typeOf), track (task add --track) or role is listed starts on the cheapest tier the
- * policy names a model for, and goes one tier up per red round (a failed hand-back as 2.30d's escalationFor counts
- * them: not a usage limit, a person's stop or a hand-back the harness caused), capped at the top tier listed.
- *   - Only a model the policy lists (a "tiers" value or "models") is ever picked; a tier with no listed model is skipped
- *     (STUDIO_TIER_<TIER>_MODEL counts only when the policy lists that model too).
- *   - The model never changes mid-task: the route is picked when a session starts, a task already started on another
- *     model (before the policy, or by hand) keeps it, and the tier only moves after a red round.
- *   - --model on the launch always wins (a person's or the Producer's explicit choice).
- *   - The holdout (a seeded share of matching tasks sent to the default tier, to measure the difference): 2.78.0 (PU-62)
- *     defaults to 0.1 whenever routing is on and the policy sets no "holdout"; "holdout": 0 turns it off. With routing
- *     off nothing changes (holdout 0, no routing).
- * Each routed start is one `model.routed` event (meta: task, type, arm 'cheap-first' | 'holdout', tier, model, failed).
- *
- * routingStats(): per task type and tier, from agent.session.end events (they name their task since 2.71.1): sessions,
- * tasks, landed (each landing is credited to its task's last session that started before it), the
- * success rate (landed / sessions) and the tokens per landed change (all the tier's tokens on that type / its landings).
- *
- *   npm run autonomy -- routing [--days 14] [--json]
+ * harness/routing.mjs — cheap-first routing and what each tier costs per landed change. studio/policy.json may say:
+ *    "routing": { "cheapFirst": ["chore", "docs", "test"],
+ *      "tiers": { "cheap": "<model>", "mid": "<model>", "top": "<model>" }, "models": ["<model>", …], "holdout": 0 }
+ * A task whose type, track (task add --track) or role is listed starts on the cheapest tier with a listed model and
+ * goes one tier up per red round, capped at the top. Only a model the policy lists is picked
+ * (STUDIO_TIER_<TIER>_MODEL counts only then). The model never changes mid-task; --model on the launch wins. The
+ * holdout (a seeded share sent to the default tier) defaults to 0.1 when routing is on; 0 turns it off. Each routed
+ * start is a `model.routed` event. routingStats() gives sessions, tasks, landed, success rate and tokens per landed
+ * change by type and tier.
+ *    npm run autonomy -- routing [--days 14] [--json]
  */
 import crypto from 'node:crypto';
 import { readRecentEvents } from './event.mjs';

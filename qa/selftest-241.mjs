@@ -4,11 +4,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf as fileUrlRelOf, out } from './kit.mjs';
 
 export async function selftest241({ dir, run, report, tmpRoot }) {
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlRelOf(dir);
   const reports = path.join(dir, 'qa', 'reports');
   fs.mkdirSync(reports, { recursive: true });
   fs.mkdirSync(path.join(dir, 'qa', 'regressions', 'browser'), { recursive: true });

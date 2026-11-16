@@ -1,32 +1,25 @@
 /**
- * qa/selftest-270w.mjs — 2.70.0 (helper w): sparse lanes, the lane disk report, stale-lane proposals surfaced.
- *   sparse    a lane copy leaves out the game manifest's laneExclude paths, keeps its task's declared paths; an
- *             asset-track task keeps every file; STUDIO_LANE_EXCLUDE=off keeps every file.
- *   widen     `lanes widen <path> --lane <agent>` puts a path back and logs it (lane.widened, the copy's record).
- *   strays    a file written into a left-out path (git hides it) is found at task done and the lane widened over it.
- *   checks    the game's checks and the lane's verify (run-gates) widen over the left-out files a check about to run
- *             reads before running it, and a verify that still leaves files out doesn't write the gate cache.
- *   disk      `lanes disk` lists each lane copy's size, the total and what laneExclude would save; over
- *             STUDIO_LANES_MAX_GB a lanes.disk_over warning; the machine line names the lanes' total.
- *   proposals the supervisor runs the janitor's lane proposals (dry run) and the digest, status --brief and the War Room
- *             show "N stale lane copies (X GB) proposed: …"; a landed lane is stale after STUDIO_JANITOR_LANDED_H.
- *   delegate  janitor-lanes is a delegable action: a delegation for it lets the named outside agent delete stale lanes;
- *             a delegation for hold no longer does.
- * A made-up game (game/crate-yard) in a git checkout; lanes are real git worktrees.
+ * qa/selftest-270w.mjs — sparse lanes, the lane disk report, stale-lane proposals surfaced.
+ * sparse  a lane copy leaves out laneExclude paths, keeps its task's declared paths; asset-track tasks and
+ *   STUDIO_LANE_EXCLUDE=off keep all.
+ * widen  `lanes widen <path> --lane <agent>` puts a path back (lane.widened). strays: a file written into a left-out
+ *   path is found at task done and widened.
+ * checks  a check about to run widens the lane over the files it reads; a verify still leaving files out doesn't
+ *   write the gate cache. disk: `lanes disk` lists each lane copy's size, the total and what laneExclude would save;
+ *   over STUDIO_LANES_MAX_GB a lanes.disk_over warning.
+ * proposals  the supervisor runs the janitor's lane proposals (dry run), shown in digest, status --brief and War
+ *   Room; a landed lane is stale after STUDIO_JANITOR_LANDED_H. janitor-lanes is delegable to an outside agent.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { eventsOf, fileUrlOf, gitAsT as g, guardOf, out, writeIn as write } from './kit.mjs';
 
 export async function selftest270W({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const u = fileUrlOf(dir);
+  const guard = guardOf(report);
   const events = path.join(dir, '.studio', 'events-270w.jsonl');
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const env = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '',
     STUDIO_ROLE: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', STUDIO_AGENT: '', STUDIO_RAM_FLOOR_GB: '0', STUDIO_QUOTA_PROBE: 'off',

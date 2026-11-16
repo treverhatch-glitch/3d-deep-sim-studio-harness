@@ -1,31 +1,14 @@
 /**
- * harness/gate-env.mjs — 2.71.1 (B): the environment the gates run in, and two things about the checkout they judge.
- *
- * A red team showed a verify could be turned green from outside the code it judges (verifier report, 2026-11-03):
- *   - S03/T06: NODE_OPTIONS (or npm's node-options) preloading a script into every node process a gate starts, so a
- *     failing check exits 0;
- *   - G10/G16/T01: `git replace` (or .git/info/grafts) swapping the base branch's commit or studio/protected.json for
- *     another one, in the git folder every lane copy shares; the GIT_* variables that point git at another repository,
- *     index or object store do the same per process;
- *   - S04: node_modules that no longer match package-lock.json (a stale install, or a test runner swapped for a script
- *     that prints "passed").
- * So:
- *   gateEnv(env)       the env without code-loading NODE_OPTIONS (harmless memory and warning flags are kept, named in
- *                      SAFE_NODE_OPTIONS) and npm_config_node_options, and with gitEnv's changes: what run-gates and
- *                      game-gates give every child, and what the harness's own launchers (task done, the train, the
- *                      launcher's verify, the whole-game check) start a verify with.
- *   gitEnv(env)        GIT_NO_REPLACE_OBJECTS=1 and no GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY,
- *                      GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_COMMON_DIR, GIT_NAMESPACE, GIT_GRAFT_FILE,
- *                      GIT_REPLACE_REF_BASE, GIT_SHALLOW_FILE or GIT_CONFIG* (git finds the repository from the folder).
- *   applyGateEnv()     the same, in place, for the process that runs the gates (so every git call it and its children
- *                      make is covered, whichever helper makes it). Returns what it dropped (names, never values).
- *   gitRedirects(dir)  { replace: [refs], grafts: [files] }: replace refs or a grafts file in the checkout's git folder.
- *                      The protected gate fails on either (harness/approve.mjs checkProtected).
- *   nodeModulesDrift(dir)  why node_modules doesn't match package-lock.json there, or null: versions that differ,
- *                      packages missing or extra, and (POSIX) a node_modules/.bin entry that isn't npm's link.
- * Not covered: a person who starts `NODE_OPTIONS=... npm run verify` by hand preloads code into run-gates itself
- * before any of this runs; the gates' children still run clean and the record says so (nodeOptionsPreload).
- * Never imports another harness module: run-gates, game-gates, approve.mjs and the launchers import it freely.
+ * harness/gate-env.mjs — the environment the gates run in, and two checks on the checkout they judge, so a verify
+ * can't be turned green from outside.
+ *    gateEnv(env)   env without code-loading NODE_OPTIONS (SAFE_NODE_OPTIONS kept) and npm_config_node_options
+ *    gitEnv(env)    GIT_NO_REPLACE_OBJECTS=1; no GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY,
+ *                   GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_COMMON_DIR, GIT_NAMESPACE, GIT_GRAFT_FILE,
+ *                   GIT_REPLACE_REF_BASE, GIT_SHALLOW_FILE or GIT_CONFIG*
+ * applyGateEnv() does the same in place and returns what it dropped (names, never values). gitRedirects(dir) returns
+ * { replace: [refs], grafts: [files] }; the protected gate fails on either (harness/approve.mjs).
+ * nodeModulesDrift(dir) says why node_modules doesn't match package-lock.json, or null.
+ * Never imports another harness module.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,19 +1,14 @@
 /**
- * harness/train-predict.mjs — 2.65.0 (B-34): conflict prediction when a lane is queued for the merge train.
+ * harness/train-predict.mjs — conflict prediction when a lane is queued for the merge train.
  *
- * Crew report: T-099 was deferred only after a full verify of its train had started; a 2-second merge-tree at queue
- * time would have said "conflicts with T-092". `task done <ID> --train` now asks git, with no index and no files
- * touched (git merge-tree --write-tree --name-only, git >= 2.38):
- *
- *   - the lane against main: a textual conflict refuses the queue, naming the files (and file:line where cheap,
- *     hotspots.mjs conflictPlaces). The lane merges main first (git merge <main>, or npm run lanes -- refresh <lane>);
- *   - the lane against every lane already queued (main + that lane, then this one, as the train would merge them): a
- *     conflict only with a queued lane queues it marked `after: <that task>` (the queue entry's `after` field), so the
- *     train leaves it for a later train instead of finding the conflict after its verify started (train.mjs).
- *
- * Files listed in the game's manifest as "unionFiles" (2.60.0) merge with git's union driver in the train, so a
- * conflict only there counts as none. Older git: no prediction; the queue keeps 2.60's line-overlap warning
- * (hotspots.mjs) and says why. Events: task.train.predicted_conflict. Code only (git), no model.
+ * `task done <ID> --train` asks git at queue time, with no index and no files touched (git merge-tree --write-tree
+ * --name-only, git 2.38+), instead of after a full verify has started:
+ * - the lane against main: a textual conflict refuses the queue, naming the files (file:line where cheap, hotspots.mjs
+ * conflictPlaces). The lane merges main first (git merge <main>, or npm run lanes -- refresh <lane>);
+ * - the lane against every queued lane: a conflict only with one queues it marked `after: <that task>`, so the train
+ * leaves it for a later train (train.mjs).
+ * Files in the manifest "unionFiles" merge with git's union driver: a conflict only there counts as none. Older git:
+ * no prediction (line-overlap warning, hotspots.mjs). Event: task.train.predicted_conflict. Code only.
  */
 import { spawnSync } from 'node:child_process';
 import * as mt from './merge-tree.mjs';

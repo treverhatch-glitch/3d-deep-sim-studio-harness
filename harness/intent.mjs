@@ -1,17 +1,10 @@
 #!/usr/bin/env node
 /**
- * harness/intent.mjs — what the dev asked for, said back before work starts (2.30, J2), and the dev's
- * "do it now" (J3).
- *
- *   npm run intent -- echo --asked "add sprint" --wont "jump, stamina" --tasks T-160,T-161 --by producer
- *   npm run intent -- confirm E-001 --by <dev>        the dev confirms a card
- *   npm run intent -- list
- *   npm run task -- yes T-161 --by <dev>             an agent-proposed mechanic may start
- *
- * Every task is tagged dev-asked or agent-proposed when it is queued (task add --origin dev|agent; an
- * agent's add defaults to agent-proposed). An agent-proposed mechanic waits for the dev's yes; other
- * work starts at once, so nothing slows down. Test #4: "add sprint/jump" became two phased tasks the dev
- * never asked for.
+ * harness/intent.mjs — what the dev asked for, said back before work starts, and the dev's "do it now".
+ * npm run intent -- echo --asked "add sprint" --wont "jump, stamina" --tasks T-160,T-161 --by producer
+ * npm run intent -- confirm E-001 --by <dev>   |   npm run intent -- list   |   npm run task -- yes T-161 --by <dev>
+ * Every task is tagged dev-asked or agent-proposed when queued (task add --origin dev|agent; an agent's add defaults
+ * to agent-proposed). An agent-proposed mechanic waits for the dev's yes (`task yes`); other work starts at once.
  */
 import fs from 'node:fs';
 import path from 'node:path';

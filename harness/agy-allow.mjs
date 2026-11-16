@@ -1,45 +1,14 @@
 /**
- * harness/agy-allow.mjs — an owner-approved step that writes agy's headless allow-rules.
- *
+ * harness/agy-allow.mjs — an owner-approved step that writes agy's headless allow-rules (permissions.allow).
  *   npm run agent -- allow agy --dry-run                       the rules and the file, nothing written
  *   npm run agent -- allow agy --by <owner>                    merge them into the studio's .studio/agy-settings.json
  *   npm run agent -- allow agy --by <owner> --scope user       merge them into agy's own (user-level) settings.json
- *   … --all                                                    the whole harness list, beyond the approved set (owner)
- *   … --prune                                                  remove harness rules beyond the set being written
- *
- * The default set is the owner's approval for agy: node, npm, npx and git status, diff, add, commit, log (AGY_APPROVED),
- * not the whole harness list. More needs --all and the owner; --prune takes extra harness rules back out (the file is
- * backed up first; the owner's own rules are never touched).
- * Claude agents get the harness's command list (harness/allowlist.mjs) on their command line (--allowedTools). Antigravity
- * CLI (agy) has no such flag: in headless mode (-p) a shell command is "Ask" by default and is soft-denied (the run goes
- * on, exits 0, and prints "add an allow-rule under permissions.allow in settings.json"), so a launched agy agent couldn't
- * run node, npm or git. This writes the owner-approved part of that list as agy rules, once, with the owner's OK. It
- * never adds a skip-all setting (toolPermission, --dangerously-skip-permissions): that stays for a frozen test clone
- * (STUDIO_AGY_BYPASS=1, harness/agent.mjs).
- *
- * What agy reads (checked 2026-11-01 against Google's docs, see docs/AGENT-TOOLS.md):
- *   - the user's settings file: ~/.gemini/antigravity-cli/settings.json (%USERPROFILE%\.gemini\... on Windows).
- *     No workspace-level settings.json is documented (a workspace has .agents/hooks.json, .agents/mcp_config.json and
- *     plugins only).
- *   - agy also takes a session settings file, `agy --settings <file>`. So the default target is the studio's own file,
- *     .studio/agy-settings.json (written by the harness, never committed: .studio/ is ignored), and the launcher passes
- *     `--settings <it>` to agy when it exists (harness/agent.mjs toolCommand). The user-level file stays available with
- *     --scope user, said out loud. UNTESTED: whether agy merges --settings with the user file or uses it alone.
- *   - rules: permissions.allow / ask / deny, each an "action(target)" string; deny > ask > allow.
- *     command(<words>) matches a command by its leading words ("word-by-word literally"); regex:<re> instead
- *     matches a regular expression. On Windows (PowerShell, cmd) a line that can't be split into words needs an
- *     exact match, and Google's docs say to use regex: there. So each entry gets both forms (AGY_RULES below).
- *     Observed on Windows: agy matched exact commands only. `command(node --version)` was allowed; `command(node *)`,
- *     `command(node*)`, `command(node**)`, `command(node:*)` and `command(node)` were all denied for `node --version`. So on
- *     Windows the word-prefix form does nothing, and the regex form is UNTESTED on real agy (kept: it is the documented
- *     way). UNCONFIRMED too: whether a CLI regex is anchored, and against which text; ours carry their own ^ and $. If
- *     agy's format turns out different, agyRulesFor() is the one place to change.
- *
- * Safety: the file is backed up first (<file>.bak-<time>, never deleted), written atomically (fsafe.writeAtomic),
- * and only ever gains rules: other keys and the user's own allow, ask and deny rules stay as they were. A file that
- * isn't plain JSON is left alone (the rules are printed to add by hand). An agent can't approve it (an agent-like
- * --by, or a launched session, is refused). That is a speed bump, not a lock: node and npm on the list run any
- * code, as they do for Claude, so these rules spare prompts, they don't sandbox anything.
+ *   … --all (the whole harness list, beyond the approved set; owner)    … --prune (remove harness rules beyond the set)
+ * The default set is node, npm, npx and git status, diff, add, commit, log (AGY_APPROVED). In headless mode (-p) agy
+ * soft-denies a shell command by default. Never adds a skip-all setting (STUDIO_AGY_BYPASS=1 stays for a test clone).
+ * Each entry gets a command(<words>) and a regex: form (AGY_RULES; agyRulesFor() is the one place to change). The file
+ * is backed up first (<file>.bak-<time>), written atomically, and only gains rules. An agent can't approve it. These
+ * rules spare prompts; they don't sandbox anything (node and npm run any code).
  */
 import fs from 'node:fs';
 import os from 'node:os';

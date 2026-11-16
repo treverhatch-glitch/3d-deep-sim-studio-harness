@@ -1,17 +1,13 @@
 /**
- * harness/flake-quiet.mjs — 2.78.0 (PU-56): wait for a quiet machine before the flake triager's confirming re-run.
- *
- * A test that fails "alone" while other verifies still run may only need a quiet machine (the crew's 2 ms timing test:
- * 2.2-2.5 ms under load, 0.7-1.1 ms alone). The re-run at low load waits until no other heavy job runs: no live
- * machine:heavy holder (a verify, a Unity run, ...), no other game check holding a gate slot, no heavy program (Unity)
- * outside the lock. The holder this process runs inside (STUDIO_HEAVY_HELD) and this process are not "other".
- * Bounded by STUDIO_FLAKE_QUIET_WAIT_MIN (harness/flakes.mjs quietWaitMin, default 10). Never throws: when the
- * machine can't be read it counts as quiet (there is no evidence of load to wait for).
- * 2.78.2 (b): a live agent session in a role that drives a game engine (STUDIO_QUIET_BUSY_ROLES, default
- * engine-porter,engine-worker: a Unity porter starts and stops the editor between steps, so "no Unity process right
- * now" didn't mean quiet) counts as other work too, whether or not its engine is running at that moment; the session
- * this process runs in (STUDIO_LOCK_OWNER) doesn't. off: roles don't count (a Unity process still does, as before).
- * The game:perf step (harness/game-gates.mjs) waits on the same test.
+ * harness/flake-quiet.mjs — waits for a quiet machine before the flake triager's confirming re-run. A test that fails
+ * "alone" while other verifies run may only need quiet: the re-run waits until no live machine:heavy holder, no other
+ * game check holding a gate slot, no heavy program (Unity) outside the lock. The holder this process runs inside
+ * (STUDIO_HEAVY_HELD) and this process are not "other". Bounded by STUDIO_FLAKE_QUIET_WAIT_MIN (harness/flakes.mjs
+ * quietWaitMin, default 10). Never throws: when the machine can't be read it counts as quiet.
+ * A live agent session in a role that drives a game engine (STUDIO_QUIET_BUSY_ROLES, default
+ * engine-porter,engine-worker) counts as other work too, whether or not its engine is running; the session this
+ * process runs in (STUDIO_LOCK_OWNER) doesn't. off: roles don't count. The game:perf step (harness/game-gates.mjs)
+ * waits on the same test.
  */
 import fs from 'node:fs';
 import path from 'node:path';

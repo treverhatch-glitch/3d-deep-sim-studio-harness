@@ -1,16 +1,13 @@
 /**
- * harness/profile-guard.mjs — 2.30o: check the account profile before a session starts.
- *
- * In the Marina run the Director's planning pass was put on the builders' shared profile (all dedicated
- * ones were busy) and used that profile's allowance with no cap. Now, before any launch:
- *   - the session's profile is read from STUDIO_<ROLE>_PROFILE, or from the launch command
- *     (`-p <name>` / `--profile <name>` / `--profile=<name>`; for claude, agy, cursor's agent, grok, gemini and codex only
- *     --profile, since their -p is --print), else "default";
- *   - a Producer, Director or planner never starts on a profile listed in STUDIO_SHARED_PROFILES or
- *     STUDIO_BUILDER_PROFILES, nor on one a running builder is using (only once profiles are set up: with none,
- *     every session shares the one account and that rule would only starve planning);
- *   - a profile never runs more than STUDIO_PROFILE_MAX_SESSIONS (default: no limit) sessions at once,
- *     and STUDIO_PROFILE_<NAME>_MAX overrides it per profile.
+ * harness/profile-guard.mjs — checks the account profile before a session starts.
+ * Before any launch:
+ *   - the profile is read from STUDIO_<ROLE>_PROFILE, or the launch command (`-p <name>` / `--profile <name>` /
+ *     `--profile=<name>`; for claude, agy, cursor's agent, grok, gemini and codex only --profile, since -p is --print),
+ *     else "default";
+ *   - a Producer, Director or planner never starts on a profile in STUDIO_SHARED_PROFILES or STUDIO_BUILDER_PROFILES,
+ *     nor one a running builder uses (only once profiles are set up);
+ *   - a profile never runs more than STUDIO_PROFILE_MAX_SESSIONS (default: no limit) sessions at once;
+ *     STUDIO_PROFILE_<NAME>_MAX overrides it per profile.
  * A refusal is a plain message and a profile.refused event; nothing starts.
  */
 import { emitEvent } from './event.mjs';

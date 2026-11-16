@@ -1,21 +1,13 @@
 /**
- * harness/ask-post.mjs — 2.79 (c, the crew's item 2.15 and "cut the fat" 5.6): one post per state change for the asks
- * the harness sends (agent.ask events: "T-xxx is parked: …", "Needs you: …").
- *
- * The crew's run (6 days): 252 agent.ask events against 20 ask.answered, most of them the same "T-xxx is parked: 2
- * sessions in a row ended with no work" again after the orchestrator had acted on it. Each harness emitter posted on
- * every new occurrence, with nothing that remembered it had asked, or that the thing it asked about was over. Now every
- * harness agent.ask goes through postAsk:
- *   - an ask is (task, subject); it posts once. While it is open, the same ask again is counted, not posted: it shows in
- *     the daily digest (harness/digest.mjs needsPerson) instead, and posts again at most once per
- *     STUDIO_ASK_DIGEST_HOURS (24) since its last post;
- *   - it closes by itself (an ask.closed event, once) when what it asked about is over: the task is done, or the state
- *     it was asked in is gone (the park it reported was lifted or replaced, the train hold released). closeStaleAsks runs
- *     on every watchdog pass and before each post. A closed ask that comes back within STUDIO_ASK_DIGEST_HOURS of its last
- *     post is the same question again (the same task parked for the same reason after an unpark): it reopens counted,
- *     not posted, and the digest lists it with how often it came back;
- *   - an answered formal ask (studio/asks, harness/ask.mjs) is never open again; one asked with --task closes (status
- *     closed, ask.closed) when that task is done.
+ * harness/ask-post.mjs — one post per state change for the asks the harness sends (agent.ask events). Every harness
+ * agent.ask goes through postAsk:
+ * - an ask is (task, subject); it posts once. While open, the same ask again is counted, not posted: it shows in the
+ *   daily digest (harness/digest.mjs needsPerson) and posts again at most once per STUDIO_ASK_DIGEST_HOURS (24);
+ * - it closes by itself (an ask.closed event, once) when what it asked about is over (the task is done, or the state
+ *   it was asked in is gone); closeStaleAsks runs on every watchdog pass and before each post. A closed ask that
+ *   comes back within STUDIO_ASK_DIGEST_HOURS reopens counted, not posted;
+ * - an answered formal ask (studio/asks, harness/ask.mjs) is never open again; one asked with --task closes when that
+ *   task is done.
  * State: .studio/asks-posted.json in the main checkout. No harness imports beyond event.mjs and fsafe.mjs.
  */
 import fs from 'node:fs';

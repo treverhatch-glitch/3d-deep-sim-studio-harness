@@ -1,19 +1,13 @@
 /**
- * harness/baseline.mjs — 2.54.0 (PU-06): what was already red when a task was claimed, and a red trunk.
- *
- * Why: in the first crew run on Hatchfield, the game's own trunk had 8 browser tests failing (red on GitHub since
- * Oct 17). Every task's done-check then failed on checks the task never touched, and the only way out was --force.
- * Following SWE-bench's pass-to-pass rule (a task must keep green what was green; it isn't blamed for what was
- * already red):
- *
- *   1. task start records the last full check run as the task's baseline: each required check that was red, with
- *      the failing test names when the check printed them (.studio/baseline/<task>.json);
- *   2. the done-check then fails only on checks that were green at claim, or on failing tests that are new. A
- *      check that was red with no test names to compare stays excused, with a note saying so;
- *   3. a red trunk: `npm run task -- trunk red --by <name> --why "<why>"` (for example the game's GitHub CI), or
- *      the whole-game check (STUDIO_WHOLE_GAME=on) last finishing red. While it is red, only fix tasks start
- *      (a title starting Fix/Bug/Hotfix/Repair/Revert, a [fix] or [bug] tag, or a whole-game red task); work
- *      already in progress carries on. `npm run task -- trunk green --by <name>` ends it.
+ * harness/baseline.mjs — what was already red when a task was claimed, and a red trunk (a task must keep green what was
+ * green; it isn't blamed for what was already red).
+ *   1. task start records the last full check run as the task's baseline: each required check that was red, with the
+ *      failing test names when printed (.studio/baseline/<task>.json);
+ *   2. the done-check then fails only on checks that were green at claim, or on new failing tests;
+ *   3. a red trunk: `npm run task -- trunk red --by <name> --why "<why>"`, or the whole-game check
+ *      (STUDIO_WHOLE_GAME=on) last finishing red. While red, only fix tasks start (a title starting
+ *      Fix/Bug/Hotfix/Repair/Revert, a [fix] or [bug] tag, or a whole-game red task). `npm run task -- trunk green --by
+ *      <name>` ends it.
  */
 import fs from 'node:fs';
 import path from 'node:path';

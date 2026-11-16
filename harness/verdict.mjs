@@ -1,26 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/verdict.mjs — "Is it fun?" A person's answer after playing a real build, and the thing that
- * lets a phase close.
- *
+ * harness/verdict.mjs — "Is it fun?" A person's answer after playing a real build, which lets a phase close.
  *   npm run verdict -- yes|not-yet --by <person> [--build <id>] [--note "…"]
- *   npm run verdict -- yes --by jed --quote "<their words>" --source "<where they said it>" --relayed-by <agent>
+ *   npm run verdict -- yes --by <person> --quote "<their words>" --source "<where they said it>" --relayed-by <agent>
  *                                           a person's verdict given in chat, relayed by the lead
  *   npm run verdict                         the verdicts so far
- *
- * Both runs so far went green on every gate while the game was wrong for the person playing it
- * (Next Floor: WASD inverted, no elevator; Solar Outpost: pads that couldn't be clicked, a phase gone in
- * 15 s). So the next phase opens only when:
- *   1. the Director says the phase is ready (as before),
- *   2. every item in studio/bible/PHASE-<n>-EXIT.md is ticked, if the file exists, and
- *   3. a person said "yes, it's fun" in the Arcade (or here) about a build played since the phase opened.
- * `npm run bible -- phase open <n> --force "reason"` still overrides, and the reason is logged.
- * The War Room's Arcade has the two buttons; a "not yet" goes to the Producer's inbox with its note.
- * Agents can't give a verdict: it has to come from someone who played. Owners often answer in chat, not in
- * the Arcade (test #2: "love the burgers… now might be time to move on to next floors" on Discord), so an
- * agent may relay one: the person's own words, word for word (--quote), where they said it (--source),
- * and who relayed it (--relayed-by). It is marked as relayed, and the person is told so they can undo it.
- * Verdicts live in studio/playtest/verdicts.json, each with the build it was about.
+ * The next phase opens only when the Director says it is ready, every item in studio/bible/PHASE-<n>-EXIT.md is ticked
+ * (if it exists), and a person said "yes, it's fun" about a build played since the phase opened. `npm run bible --
+ * phase open <n> --force "reason"` overrides (logged). A "not yet" goes to the Producer's inbox. Agents can't give a
+ * verdict; a relay carries the person's own words (--quote), where said (--source) and who relayed it, is marked
+ * relayed, and the person is told. Stored in studio/playtest/verdicts.json.
  */
 import fs from 'node:fs';
 import path from 'node:path';

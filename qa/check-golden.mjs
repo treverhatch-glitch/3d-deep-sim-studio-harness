@@ -1,20 +1,15 @@
 #!/usr/bin/env node
 /**
- * qa/check-golden.mjs — replay every qa/golden/*.json against its cartridge and compare hashes:
- * SHA-256 (the verification hash) and the 16-hex display hash. See docs/HASH.md.
- *
+ * qa/check-golden.mjs — replay every qa/golden/*.json against its cartridge and compare SHA-256 and the 16-hex display hash.
+ * See docs/HASH.md.
  *   node qa/check-golden.mjs            check (fails on mismatch, stub hash, or a game with no golden)
  *   node qa/check-golden.mjs --update   rewrite hashes after an intended sim change (commit them together)
- *
- * 2.72.0 (a): a sha256 red also prints where the run first went wrong (harness/divergence.mjs): "first divergence:
- *   tick N, <subsystem>.<field> a -> b", against the commit that recorded the golden. STUDIO_GOLDEN_DIVERGENCE=off: not.
- * 2.73.0 (g, A13): that result is also the golden's signed first-divergence report (.studio/gates/divergence/, harness/
- *   golden-report.mjs), written on a red and by --update before it overwrites a changed answer: the merge train shows it
- *   to whoever releases the lane's re-record, and without it only a person can release.
- *
- * Golden shapes:
- *   replay:   { "cartridge", "seed", "tick", "actions": [{ "tick", "action" }], "hash" }
- *   scenario: { "cartridge", "scenario": "start-to-win", "seed"?, "expect": { "outcome", "tick" }, "hash" }
+ * A sha256 red also prints "first divergence: tick N, <subsystem>.<field> a -> b" against the commit that recorded
+ *   the golden (harness/divergence.mjs; STUDIO_GOLDEN_DIVERGENCE=off: not). It is also the golden's signed report
+ *   (.studio/gates/divergence/, harness/golden-report.mjs), written on a red and by --update before it overwrites a
+ *   changed answer; the merge train shows it to whoever releases the re-record, without it only a person can release.
+ * Shapes: replay { "cartridge", "seed", "tick", "actions": [{ "tick", "action" }], "hash" }; scenario { "cartridge",
+ *   "scenario": "start-to-win", "seed"?, "expect": { "outcome", "tick" }, "hash" }.
  */
 
 import fs from 'node:fs';

@@ -1,23 +1,12 @@
 /**
- * harness/whole-game.mjs — 2.37.0: after work lands, every required check runs on the whole game.
- *
- * Why: per-task checks are scoped to what the task touched (2.31.0), which keeps verify fast but misses a
- * change that breaks something elsewhere. In the research pack's Marina experiment the standard checks caught
- * 1 of 7 planted drift edits; running every check on the whole project after each landing caught 7 of 7,
- * for about 36% more time. A path-scoped run also missed a UI bug made in another file.
- *
- * Opt-in: STUDIO_WHOLE_GAME=on. Then the watchdog (every pass) starts a run in the background whenever the
- * studio's branch has a commit the check hasn't seen; `npm run whole-game` runs it by hand.
- *
- * Each run:
- *   - checks out that exact commit in its own clean copy (.studio/whole-wt), never the main checkout, with
- *     the shared studio/ and .studio/ linked in like a lane copy;
- *   - runs `node scripts/run-gates.mjs --all --full --required-only` (every gate a Full studio runs, whatever the studio's scope) (STUDIO_WHOLE_CMD overrides) in a gate slot;
- *   - re-runs anything that failed once, alone: a check that passes alone is logged as "environment" (a
- *     flaky or overloaded box), not as a break;
- *   - when still red: a P0 task "Whole-game check red at <commit> ..." naming the checks and the tasks that
- *     landed since the last green run. One such task at a time. It closes only with a full, unscoped verify.
- * State: .studio/whole-game.json { lastGreen, last, running }.
+ * harness/whole-game.mjs — after work lands, every required check runs on the whole game (per-task checks are scoped).
+ * Opt-in: STUDIO_WHOLE_GAME=on. Then the watchdog starts a background run whenever the studio's branch has a commit the
+ * check hasn't seen; `npm run whole-game` runs it by hand. Each run:
+ *   - checks out that commit in its own clean copy (.studio/whole-wt), never the main checkout;
+ *   - runs `node scripts/run-gates.mjs --all --full --required-only` in a gate slot (STUDIO_WHOLE_CMD overrides);
+ *   - re-runs anything that failed once, alone: a pass alone is logged "environment" (flaky box), not a break;
+ *   - when still red: a P0 task "Whole-game check red at <commit> ..." naming the checks and the tasks landed since
+ *     the last green run. One at a time; it closes only with a full, unscoped verify. State: .studio/whole-game.json.
  */
 import fs from 'node:fs';
 import path from 'node:path';

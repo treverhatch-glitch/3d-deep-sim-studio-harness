@@ -1,20 +1,15 @@
 #!/usr/bin/env node
 /**
  * scripts/run-gates.mjs — run every gate in studio/gates.json and report.
- *   node scripts/run-gates.mjs [--required-only] [--only id,id] [--except id,id] [--deep] [--full] [--tier fast|merge|slow] [--no-cache] [--all]
+ *   node scripts/run-gates.mjs [--required-only] [--only id,id] [--except id,id] [--deep] [--full]
+ *        [--tier fast|merge|slow] [--no-cache] [--all]
  * In a lane copy the game checks are scoped to the lane's changes; --all runs every one.
  * Exit 1 when a required gate fails. Optional gates are reported as WARN and never fail the run.
- *
- * --tier fast (in-session): only the `lite` gates; a gate whose command and input files are unchanged since its last pass is
- *   skipped (cache keyed by content hash). A fast run never counts as a full verify.
- * --tier merge: a full, deep verify that never reads the cache (same as --full --deep).
- * --tier slow: the game's slow tier only (harness/slow-tier.mjs; nightly). --canaries: each game check on its must-fail
- *   canary (harness/canaries.mjs); report only.
- * --deep (or STUDIO_VERIFY_DEEP=1) runs harness self-checks (npm run release and CI do); --full runs every gate a Full studio
- *   would. An everyday verify (no tier) skips the deep gates and never reads the cache.
- *
- * `npm run verify` runs the gates in a process of its own and shows its log, so killing this one leaves the run going; `--wait`
- *   re-attaches, `--no-detach` runs in this process. Every verify names the tracked files it changed (changedByVerify).
+ * --tier fast: only the `lite` gates, skipping one whose command and inputs are unchanged since its last pass (content-
+ * hash cache); never a full verify. --tier merge: full and deep, no cache. --tier slow: the game's slow tier (nightly).
+ * --canaries: each game check on its must-fail canary. --deep (or STUDIO_VERIFY_DEEP=1) runs harness self-checks;
+ * --full runs every gate a Full studio would. `npm run verify` runs in its own process (`--wait` re-attaches,
+ * `--no-detach` runs here); every verify names the tracked files it changed.
  */
 import fs from 'node:fs';
 import path from 'node:path';

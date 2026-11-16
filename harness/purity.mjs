@@ -1,19 +1,13 @@
 #!/usr/bin/env node
 /**
- * harness/purity.mjs — 2.72.0 (b): `npm run purity`, the purity ratchet's baselines (harness/ratchet.mjs).
- *
- *   npm run purity [-- list] [--json]       standing, new and fixed hits per baseline (the purity check's; a ratchet
- *                                           check's from its last run on this tree)
+ * harness/purity.mjs — `npm run purity`, the purity ratchet's baselines (harness/ratchet.mjs).
+ *   npm run purity [-- list] [--json]       standing, new and fixed hits per baseline
  *   npm run purity -- baseline --write --by <person> [--permission "<their words>"] [--check <id>] [--no-commit]
- *                                           record today's hits as the standing ones: cartridges/<name>/ and the studio
- *                                           game's purity-baseline.json ("purity"), plus each game check with
- *                                           "ratchet": true (it is run; --check names one). Growing a baseline (or
- *                                           creating one) is a person's decision: from a person's terminal, an agent on
- *                                           a person's --permission (a Producer/Director or an outside agent), or an
- *                                           outside agent under a delegation for "purity-baseline". Never a worker,
- *                                           never in a lane copy. Committed (only these files) unless --no-commit.
- *   npm run purity -- baseline --shrink [--no-commit]
- *                                           drop the hits that are fixed (anyone; task done does this itself)
+ *       record today's hits as the standing ones: cartridges/<name>/, the studio game's purity-baseline.json, and each
+ *       game check with "ratchet": true. Growing or creating a baseline is a person's decision (a person's terminal, an
+ *       agent on a person's --permission, or an outside agent with a delegation for "purity-baseline"); never a worker,
+ *       never in a lane copy.
+ *   npm run purity -- baseline --shrink [--no-commit]     drop the fixed hits (anyone; task done does this itself)
  */
 import fs from 'node:fs';
 import path from 'node:path';

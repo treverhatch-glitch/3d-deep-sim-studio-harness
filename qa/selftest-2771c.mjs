@@ -1,35 +1,29 @@
 /**
- * qa/selftest-2771c.mjs — 2.77.1 (helper c): three small issues from the crew's Windows PC.
- *   M1 (B-101)  (2.80: gone with the War Room) the War Room machine tile divided ALL used RAM by the running sessions ("10.2 GB per session, room for 0
- *               more, Limit: RAM" at 20.4 GB used and 2 sessions), counting the OS, browsers and Unity editors. Now
- *               (used now - used at the last idle sample) / sessions, "average incl. other apps" without a baseline,
- *               room-for-N from the scheduler's own per-session figure (STUDIO_SESSION_RAM_GB, 0.6), the sample's age.
- *   M4          `npm run comm -- test` (and `report -- post`) called process.exit() with fetch's socket still closing: on
- *               Windows node printed "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING) ... win\async.c, line 76".
- *               Now process.exitCode and a drained loop. UNTESTED ON WINDOWS: the libuv assertion itself; here the check is
- *               that process.exit is never called on the post path, the code is right and the command ends promptly.
- *   M5          studio:boot trusted "supervisor.json running + the pid exists"; the OS reuses pids, so another program on
- *               the dead supervisor's number made boot say "running" and start nothing. Now the pid is asked what program
- *               it is (start time against the record) and the stale sweep marks the old record stopped.
- *               UNTESTED ON WINDOWS: the PowerShell start-time query (readStarts) itself; here Linux /proc answers it.
+ * qa/selftest-2771c.mjs — three small Windows-PC issues.
+ *   machine tile  room-for-N uses (used now - used at the last idle sample) / sessions, "average incl. other apps"
+ *     without a baseline, the scheduler's per-session figure (STUDIO_SESSION_RAM_GB, 0.6) and the sample's age
+ *   comm exit  `npm run comm -- test` and `report -- post` never call process.exit() with fetch's socket still closing
+ *     (libuv assertion in win\async.c): process.exitCode and a drained loop; UNTESTED ON WINDOWS: the assertion itself
+ *   boot pid  studio:boot asks the pid what program it is (start time against the record), not "supervisor.json running
+ *     + the pid exists" (the OS reuses pids); the stale sweep marks the old record stopped (UNTESTED ON WINDOWS: the
+ *     PowerShell start-time query readStarts; here Linux /proc answers it)
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitEolLfOf, guardOf, lastJsonOf, out, writeIn } from './kit.mjs';
 
 export async function selftest2771C({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   if (!fs.existsSync(path.join(dir, 'node_modules')) && fs.existsSync(path.join(harnessRoot, 'node_modules'))) {
     try { fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction'); } catch {}
   }
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const gitIn = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const gitIn = gitEolLfOf(gEnv);
+  const guard = guardOf(report);
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
     STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '', STUDIO_COMPACT_OUTPUT: '', STUDIO_VERIFY_DETACH: 'off', STUDIO_VERIFY_RUN: '', STUDIO_HEAVY_SLOTS: '0', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '',
@@ -52,7 +46,7 @@ export async function selftest2771C({ dir, run, report, tmpRoot, root }) {
     gitIn(S, 'add', '-A'); gitIn(S, 'commit', '-qm', 'studio', '--no-verify');
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const lastJson = (r) => { const t = String(r.stdout || '').trim(); const l = t.split('\n').filter((x) => x.startsWith('{')).pop(); try { return JSON.parse(l); } catch { return { _raw: out(r).slice(-2000) }; } };
+  const lastJson = lastJsonOf(out);
   const probe = (S, env, name, code) => {
     const f = path.join(tmpRoot, `probe-2771c-${name}-${process.pid}-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -60,7 +54,6 @@ export async function selftest2771C({ dir, run, report, tmpRoot, root }) {
     fs.rmSync(f, { force: true });
     return { ...lastJson(r), _out: out(r).slice(-2500) };
   };
-  const u = (S, p) => JSON.stringify(pathToFileURL(path.join(S, p)).href);
   const want = (k) => !process.env.ONLY_2771C || process.env.ONLY_2771C.split(',').includes(k);
 
   // 2.80: M1 (the War Room's machine tile) went with the War Room.

@@ -1,26 +1,14 @@
 #!/usr/bin/env node
 /**
- * harness/test-ports.mjs — 2.77.3 (C2, B-108): fixed test ports, and the failures they cause.
- *
- * Every browser e2e file of a crew's game started its own vite server on a hard-coded port (strictPort). Two verifies
- * running the same file at once (a train and a builder, or two trains) collided: the second server failed ("Port 46117
- * is already in use", "listen EADDRINUSE"), or the test drove the other tree's server. The flake triager (harness/
- * flakes.mjs) called those "load-flake" or "real", a different file each run. Here:
- *
- *   portCollision(text, { file })  the first port-collision line in a run's output, as { port, line }, or null:
- *                                  EADDRINUSE, "address already in use", vite's "Port N is already in use" (strictPort),
- *                                  Playwright's "<url> is already used". With `file`, a line near a mention of that file
- *                                  wins. The triager labels such a red "port-collision" (its own kind: not real, not a
- *                                  timing flake, never quarantined).
- *   fixedPortFindings(root, dirs)  test files and test-runner configs that start a server on a literal port with
- *                                  strictPort (or Playwright's reuseExistingServer, which drives whatever already
- *                                  listens there): [{ file, line, port, text }]. Advisory only: the game gate prints
- *                                  them as `[game-gates] WARN game:test-ports: …` (shown even when the check passes);
- *                                  it never fails a check.
- *
- * The rule (studio/rules/test-ports.md): a test asks the OS for a free port (listen on port 0, or a helper that does)
- * and passes it on; a fixed port is fine only for a server no two runs ever start at once.
- *
+ * harness/test-ports.mjs — fixed test ports, and the failures they cause.
+ * Two verifies running the same browser e2e file at once collide on a hard-coded port (strictPort): the second server fails or
+ * the test drives the other tree's server.
+ *   portCollision(text, { file })  the first port-collision line in a run's output, { port, line } or null: EADDRINUSE, "address
+ *      already in use", vite's "Port N is already in use", Playwright's "<url> is already used". The flake triager
+ *      (harness/flakes.mjs) labels such a red "port-collision" (not real, not a timing flake, never quarantined).
+ *   fixedPortFindings(root, dirs)  test files and runner configs that start a server on a literal port with strictPort (or
+ *      reuseExistingServer): [{ file, line, port, text }]. Advisory: the game gate prints `[game-gates] WARN game:test-ports: …`.
+ * The rule (studio/rules/test-ports.md): a test asks the OS for a free port (listen on port 0) and passes it on.
  *   node harness/test-ports.mjs [--json] [<dir> ...]   the findings (default: the studio game's folder); exit 0 always
  */
 import fs from 'node:fs';

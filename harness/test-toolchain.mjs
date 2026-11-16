@@ -1,16 +1,11 @@
 /**
- * harness/test-toolchain.mjs — 2.71.1 (A, H03/H04/S02): each game's test toolchain is protected.
- *
- * A lane could leave every test file alone and still change what the game's checks run: a vitest/vite/jest config that
- * narrows `include` (H03), a setup file the config names that mocks the code under test (H04), an .npmrc whose
- * node-options preloads a module that forces exit code 0 (S02), or the package.json script the check calls. So:
- *   - the config files and .npmrc are on the shipped protected list (TOOLCHAIN_GLOBS, approve.mjs DEFAULT_PROTECTED);
- *   - the setup files a config names (setupFiles, setupFilesAfterEnv, globalSetup, globalTeardown; in a vitest, vite or
- *     jest config, or package.json "jest") at the base are protected too (setupFilesAt);
+ * harness/test-toolchain.mjs — protects each game's test toolchain, so a lane can't change what the checks run.
+ *   - config files and .npmrc are on the shipped protected list (TOOLCHAIN_GLOBS, approve.mjs DEFAULT_PROTECTED);
+ *   - the setup files a config names at the base (setupFiles, setupFilesAfterEnv, globalSetup, globalTeardown; in a
+ *     vitest, vite or jest config, or package.json "jest") are protected too (setupFilesAt);
  *   - in a game's package.json only the test entries are (testKeys): scripts named test / test:* / pretest / posttest,
- *     the scripts the game's manifest commands run (npm run <name>, npm test), and the "jest" key. Adding a dependency
- *     stays a normal change. A change to those keys is listed as "<path>#test-scripts" with the hash of just those keys,
- *     so an owner approval signs exactly them.
+ *     the scripts the manifest commands run, and the "jest" key. A dependency change stays normal. A change to those
+ *     keys is listed as "<path>#test-scripts" with the hash of just those keys, so an approval signs exactly them.
  * Node built-ins only (approve.mjs imports it).
  */
 import path from 'node:path';
@@ -68,13 +63,10 @@ export function testKeys(text, scripts = new Set()) {
 const keyHash = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
 
 /**
- * The toolchain part of the protected changes, given a reader:
- *   show(rev, file) -> text | null      (git show rev:file)
- *   names(rev) -> [files]               (git ls-tree -r --name-only rev -- game web)
- *   now(file) -> text | null            (the working tree)
- *   base                                the base commit
- *   changed                             files changed since the base (committed or not)
- * Returns { globs: [setup files the base's configs name], keyed: [{ path: '<pkg>#test-scripts', sha256 }] }.
+ * The toolchain part of the protected changes, given a reader: show(rev, file) -> text | null (git show rev:file);
+ * names(rev) -> [files] (git ls-tree -r --name-only rev -- game web); now(file) -> text | null (the working tree);
+ * base (the base commit); changed (files changed since the base). Returns
+ * { globs: [setup files the base's configs name], keyed: [{ path: '<pkg>#test-scripts', sha256 }] }.
  */
 export function toolchainProtected({ show, names, now, base, changed = [] }) {
   const tracked = (names(base) || []).filter(inGame);

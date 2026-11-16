@@ -1,14 +1,11 @@
 /**
- * harness/train-deps.mjs — 2.65.0 (crew feedback 3.3): the merge train honours task dependencies.
- *
- * `task add … --after T-067,T-094` and `task block <ID> --until T-x` (studio/task-holds.json, "after") used to gate
- * only a task's start (harness/task-hold.mjs). A lane queued for the train now also waits for them:
+ * harness/train-deps.mjs — the merge train honours task dependencies.
+ * `task add … --after <ID>,<ID>` and `task block <ID> --until <ID>` (studio/task-holds.json, "after"): a lane queued
+ * for the train waits for them too:
  *   - a dependency that is done (landed) is met;
- *   - one queued in the same train is met by order: within a train lanes merge in dependency order, and a lane whose
- *     dependency drops out of the train (conflict, hand-back) leaves with it;
+ *   - one queued in the same train is met by order (a lane whose dependency drops out leaves too);
  *   - one still open and not in this train: the lane waits for a later train (deferred, says which);
- *   - one that was dropped from the board, or isn't on it at all: the lane is handed back with a note (it would
- *     otherwise wait forever). `npm run task -- unblock <ID>` clears the dependency if the Producer decides so.
+ *   - one dropped from the board, or not on it: the lane is handed back with a note (`task -- unblock <ID>` clears it).
  * Code only. Imports nothing from task.mjs (its CLI imports train.mjs, which imports this).
  */
 import fs from 'node:fs';

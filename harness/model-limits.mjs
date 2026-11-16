@@ -1,17 +1,13 @@
 #!/usr/bin/env node
 /**
- * harness/model-limits.mjs — what each model can take, for the Director to know (2.30h, item 4).
- *
+ * harness/model-limits.mjs — what each model can take, for the Director to know.
  *   npm run models:limits [-- --json]
- *
- * Awareness, never a lock: nothing here blocks or skips a model. Each model's context size and rate
- * limits (requests per minute and per day, tokens per minute) come from a built-in table of published
- * free-tier figures, overridden or extended by studio/model-limits.json:
- *   { "models": { "<model name or /regex/>": { "context": 1048576, "rpm": 5, "rpd": 100, "tpm": 250000, "note": "…" } } }
- * The Director's brief and the War Room show the table with what the last 24 h used and any limit
- * trouble (429s, quota errors, reasoning-only replies, a day's requests near the cap), so the Director
- * decides routing: which model gets a long task, which family takes over. The figures change; when a
- * provider publishes new ones, edit studio/model-limits.json.
+ * Awareness, never a lock: nothing blocks or skips a model. Each model's context size and rate limits (rpm, rpd, tpm)
+ * come from a built-in table of published free-tier figures, overridden or extended by studio/model-limits.json:
+ *   { "models": { "<name or /regex/>": { "context": 1048576, "rpm": 5, "rpd": 100, "tpm": 250000, "note": "…" } } }
+ * The Director's brief and the War Room show the table with the last 24 h of use and any limit trouble (429s, quota
+ * errors, reasoning-only replies, requests near the daily cap), so the Director decides routing. Edit the json when
+ * figures change.
  */
 import fs from 'node:fs';
 import path from 'node:path';

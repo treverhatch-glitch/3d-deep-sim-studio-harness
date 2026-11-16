@@ -1,26 +1,25 @@
 /**
- * qa/selftest-2671j.mjs — 2.67.1 (helper j): the asset track (harness/asset-gate.mjs).
- *   1. triangles per LOD over budget fail (LOD0 by default, a _LOD1 mesh against its own budget); an asset in budget passes;
- *   2. a texture over textureMaxPx fails, loose or embedded in a .glb;
- *   3. a new asset file with no manifest row fails; 4. an NC licence is blocked; 5. CC-BY needs its credit line;
- *   6. a configured brand name in a glTF node name fails; 7. a model with no preview render fails;
- *   8. the round trip: a failing command fails, a passing one passes, none configured and a program that isn't
- *      installed are skips with a note;
- *   9. share-alike asks: refused until a game dev's yes, which a worker can't record;
- *  10. task done on --track asset runs the gate (a refusal with a Fix line, kept for the hand-back facts), then lands
- *      and files ONE "Wire in" task --after it (Unity track when Unity is configured), never twice.
- * Fixtures (tiny .glb and .png files) are written by the test; no binary file is committed.
+ * qa/selftest-2671j.mjs — the asset track (harness/asset-gate.mjs).
+ *   1. triangles per LOD over budget fail (LOD0 by default, a _LOD1 mesh against its own budget); 2. a texture over
+ *     textureMaxPx fails
+ *   3. a new asset file with no manifest row fails; 4. an NC licence is blocked; 5. CC-BY needs its credit line
+ *   6. a configured brand name in a glTF node name fails; 7. no preview render fails
+ *   8. the round trip: a failing command fails, a passing one passes, none configured or a program not installed skips
+ *     with a note
+ *   9. share-alike asks wait for a game dev's yes, which a worker can't record
+ *  10. task done on --track asset runs the gate (a refusal with a Fix line), then lands and files ONE "Wire in" task
+ *    --after it
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { eventsLenientOf, guardSyncBoolOf, out } from './kit.mjs';
 
 export async function selftest2671J({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const guard = (name, fn) => { try { const [ok, detail] = fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardSyncBoolOf(report);
   const events = path.join(dir, '.studio', 'events-2671j.jsonl');
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_HEAVY_SLOTS: '1', STUDIO_HEAVY_HELD: '', STUDIO_GATE_PRIORITY: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_GAME: '', STUDIO_TRAIN: 'off', STUDIO_GATE_CHANGED: '', STUDIO_DONE_GAME_GATES: 'skip', STUDIO_VISUAL_GATE: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_UNCOMMITTED: 'allow', STUDIO_REACHABILITY: 'off', STUDIO_HOOKS_CHECK: 'off', STUDIO_WEAKENED_TESTS: 'off', STUDIO_DONE_UNITY_GATE: 'skip', npm_lifecycle_event: '', AGENT_EVENTS_FILE: events, CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '' };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return {}; } }); } catch { return []; } };
+  const evs = eventsLenientOf(events);
   const w = (rel, data) => { const f = path.join(dir, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, data); return rel; };
 
   // ---------- fixtures ----------

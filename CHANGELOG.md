@@ -4,6 +4,21 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.87.0] — 2026-11-16
+Shorter, same behaviour (the owner's order: the consolidation map's first step). Nothing changes what a command prints,
+decides or writes. Tracked text 173,676 lines to about 168,500; `harness/` and `scripts/` 4.8% smaller by size.
+Details: docs/RELEASE-2.87.0.md.
+- **One length rule for comments:** a file header at most 12 lines, any other comment at most 6, in `harness/`,
+  `scripts/` and `qa/`. 525 comments were over it (9,431 lines, now 5,151). The code is unchanged
+  (`scripts/same-code.mjs`, 386 files). `npm run check:comments` keeps it, as a step of the online checks.
+- **One test kit:** `qa/kit.mjs` holds 81 helpers that 244 test files each defined for themselves (1,237 definitions).
+  No check changed.
+- **Notes:** finished notes and October's work-log rows removed, 39 older problem entries folded to one line, the
+  owner's game no longer named in harness text.
+- **Measured, a crew's first 31.4 hours on 2.86.0:** engine land runs passing 83.3% (35% on 2.85), engine queue wait
+  p90 3.1 h (12.7 h), tasks landed with no overseer step 31.7% (25%).
+- **Not done:** shared helpers in `harness/` (about 100 lines, with the next release's merges).
+
 ## [2.86.1] — 2026-11-16
 One fix, found in a crew's log of its first 31 hours on 2.86.0.
 - **A run of the target alone that moved the target was thrown away** (`harness/unity-train.mjs`): 2.86.0 runs the
@@ -51,7 +66,7 @@ first 19.5 hours on 2.85: tasks landed with no overseer step 25% (0% on 2.84), h
 Hands off (the owner's order: fix the overseer's list, make it better, clean up, start on the plan). A crew's first
 16.3 hours on 2.84 measured 46.2% of engine land runs passing (34.8% on 2.83) and a 32.9-minute passing run (51.1),
 and 0 of 26 landed tasks without an overseer step: 59.5% of hand-backs had a harness or machine cause. 106 files,
-+5,813 / −1,401 lines against 2.84.0; tracked lines 164,719 to 169,131. Details: docs/RELEASE-2.85.0.md.
++5,813 / −1,401 lines against 2.84.0; tracked lines 164,719 to 169,131. Details: the 2.85.0 release notes, in git history.
 - **False hand-backs:** a task whose branch waits in a train queue is never handed back (30 of 73 hand-backs in the
   crew's log were that); one reading of hand-backs for the watchdog, the crew breaker and the score
   (`harness/handback-kind.mjs`); the same `task done` refusal twice holds the task until the check stops giving it; a
@@ -76,7 +91,7 @@ and 0 of 26 landed tasks without an overseer step: 59.5% of hand-backs had a har
   (`STUDIO_GOLDEN_REASON`); a rules change with no test is noted and counted (`STUDIO_RULES_TEST=require` refuses);
   the browser check plays the studio's own game, never the sample; a hand-back note's file claims are checked.
 - **Cut:** two settings nothing read; `check-docs` now fails on a documented or tested setting with no production
-  reader. The plan's larger cuts did not survive a proper check (docs/RELEASE-2.85.0.md). Comments shortened in 30
+  reader. The plan's larger cuts did not survive a proper check (the 2.85.0 release notes, in git history). Comments shortened in 30
   files, code tokens proven unchanged.
 - **Not measured:** nothing here has run on a live studio or a real editor yet.
 
@@ -145,47 +160,9 @@ Details: docs/RELEASE-2.84.0.md.
   and the proposals log keep their newest entries in full and one line for each older one; README 18 KB → 4 KB;
   docs/SECURITY.md 46 KB → 17 KB with every rule kept. One pattern for a board line (`harness/board-line.mjs`).
 
-## [2.83.0] — 2026-11-11
-Flow (the owner's "next harness upgrade", with the overseer's notes from 26 hours on 2.82). 2.82 fixed the engine's
-land run (65% of runs passed against 18%; 30 land minutes per landed lane against 290) and the records then showed
-where the time went instead: sessions scored "no work" in the wrong repository (89 session ends, 25 parks), a plan
-that reported itself blocked 166 times for two causes, a rules check that ran everything every time (514 minutes),
-and a train that blamed by elimination. 72 files, +4,078 / −823 lines (net +3,255) against 2.82.0. Details: docs/RELEASE-2.83.0.md.
-- **A session is accounted where its work is** (`harness/engine-tracks.mjs` `engineWork`, `harness/agent.mjs`): an
-  engine task's commits and unsaved files are counted in its engine worktree; a task in the engine train is "queued",
-  not "no work"; the crew breaker counts queued work.
-- **The engine train** (`harness/unity-train.mjs`): a branch that lands alone (`task alone <ID> on`, `task done
-  --train --alone`); one more run before blame when a load-sensitive stage is red; blame by evidence (the failing
-  test's class, or the file a compiler error names, in the lanes' changes); a lane found by elimination is run by itself first; a handed-back lane leaves
-  the train at once; a full land run once a day (`STUDIO_LAND_FULL=1`); `engines.unity.editModeArgs`; a warning when
-  the land command runs another copy of its script; a task whose engine half has not landed stays open.
-- **A cheaper rules check** (`harness/engine-rules.mjs`): `rules.env`, `rules.paths` (sparse checkout, no LFS
-  download), `rules.focus` (only the touched systems' tests plus a smoke set; the full command every
-  `fullEveryHours`), inputs merged from every lane in the batch, `rules.share`. `npm run engine -- rules` no longer
-  hangs (it exited 13 on 2.82), and the porter's check never runs in the studio repo.
-- **The planner** (`harness/line-producer.mjs`): a dangling `--after` asks once; `line.chain_gate` when one task gates
-  3 or more builder tasks for an hour; the builders-low alert leads with the reason; the Producer is not woken again
-  for the same blocker within an hour.
-- **Models and slots**: `routeRoles` in `studio/models.json` (pool routes apply to builders and porters only); a
-  refresh, stop or usage limit is not a route failure; planning sessions don't take builder slots; no engine tasks on
-  Vertex; `npm run mode -- boost on --builders-only`.
-- **The board**: `task after <ID> --remove|--set|--clear`; unknown `--after` ids refused; `task train dequeue <ID>`;
-  an unknown `task train <word>` starts nothing; train status shows the running batch and the queue; `task track <ID>
-  web`; in a native studio a task that names web code goes to the web track.
-- **Watching**: no "stalled" for a lane in a train; the same unchanged-shots review is retried once a day; a review
-  falls back to the same model family when no other is available (and says so); the idle stop and claim minutes skip
-  downtime; a dead session's claim is handed back after 30 minutes.
-- **The owner-only list** (`harness/owner-acts.mjs`): code removed in a lane is not deleted data; anything that
-  names data stays the owner's.
-- **Cleanup**: landed engine worktrees are removed; `engines.<x>.builds` keeps the newest builds
-  (`harness/engine-clean.mjs`); `lanes prune` covers engine lanes.
-- **Scorecard**: the CPU measure reads the hourly summaries; `engines.<x>.progress` prints a progress line;
-  `studio/allowlist.json` adds a studio's own commands.
-- **Cut**: `harness/token-norms.mjs` and `harness/ledger.mjs` (382 lines; nothing imported them, no run on record)
-  with their two npm scripts and their checks.
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.83.0** (2026-11-11): Flow. A session is accounted where its work is; the engine train blames by evidence and a branch can land alone; the rules check runs the lanes' systems; plan passes that changed nothing are skipped.
 - **2.82.0** (2026-11-10): measured, then cut: the scorecard read against a crew's log, engine land runs batched, the rules check before the land run, duplicate helpers folded.
 - **2.81.0** (2026-11-10): grade, measure, cut again: the round scorecard (`npm run score`), the outside overseer's role, a faster self-test, duplicate helpers folded.
 - **2.80.0** (2026-11-10): the trim: the hub and other unused parts cut, tracked lines 175,491 to 157,794, the timed passes moved into the supervisor.

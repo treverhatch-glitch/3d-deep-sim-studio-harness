@@ -1,23 +1,14 @@
 /**
- * harness/asset-need.mjs — 2.67.1 (l): one asset flow. `npm run asset -- need "<what>"` asks for an asset once and the
- * harness looks for it in order, logging what each step found and why it moved on:
- *
- *   npm run asset -- need "<what>" --for unity|web --budget <tris> [--size <m>] [--style <ref image or words>] [--tags a,b] [--kind model] [--by <you>]
- *   npm run asset -- needs [<id>] [--all]          open needs (or one need's trail and brief)
- *   npm run asset -- library refresh <dir>         index a shared folder (sha256 per file; append-only, never deletes)
- *
- *   (a) library first: the studio's own ledger, other ledgers and folder indexes listed in studio/assets.json "libraries";
- *       matched by words/tags, kind, triangles, size and the licence policy; an optional configured `scorer` adds an
- *       advisory style score (ranking only, never a gate).
- *   (b) reuse first: the same need again (same words, target and budget) answers "already in library: <id>" and stops.
- *   (c) internet scout (asset-scout.mjs's sources and licence rules, CC0/CC-BY only) plus configured offer lists and
- *       Sketchfab where a key is configured (the key is never printed).
- *   (d) pull + adapt: the existing pull, then a target profile. Unity: scale and pivot normalised to metres (bottom
- *       centre) in the glTF JSON, a box collider, a prefab stub, the licence row; LOD1-2, FBX conversion and HDRP mask
- *       maps are configured commands run under machine:heavy, skipped with a note when not installed.
- *   (e) else make: ONE make task for the asset role with the brief, deduped by need id.
- *
- * Need records live in .studio/assets/needs/<id>.json. Every source and command comes from studio/assets.json.
+ * harness/asset-need.mjs — one asset flow: `asset -- need` asks for an asset once and the harness looks for it in
+ * order.
+ * npm run asset -- need "<what>" --for unity|web --budget <tris> [--size <m>] [--style <ref>] [--tags a,b]
+ * npm run asset -- needs [<id>] [--all]  |  library refresh <dir>   (index a shared folder, append-only)
+ * (a) library first: studio ledger and studio/assets.json "libraries", matched by words/tags, kind, triangles, size
+ * and licence policy. (b) the same need again answers "already in library: <id>". (c) internet scout (asset-scout.mjs
+ * rules, CC0/CC-BY only), offer lists, Sketchfab (key never printed). (d) pull + adapt: Unity gets metre scale and
+ * pivot, a box collider, a prefab stub; LOD, FBX and HDRP mask maps run under machine:heavy. (e) else ONE make task,
+ * deduped by need id.
+ * Needs live in .studio/assets/needs/<id>.json; every source and command comes from studio/assets.json.
  */
 import fs from 'node:fs';
 import path from 'node:path';

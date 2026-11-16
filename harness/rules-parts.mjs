@@ -1,16 +1,13 @@
 /**
- * harness/rules-parts.mjs — 2.85: the parts of a split rules check, run within the memory there is.
- *
- * rules.focus.split (2.84) runs one test command per filter group. Each test process holds one system's data (a crew's
- * machine showed 7.3, 4.1 and 2.4 GB for three), so how many run at once is a decision about free RAM, not a constant:
- *   a part starts only while (free RAM - the floor) >= splitGb; always at least one runs; the check is made again
- *   before every start. rules.focus.splitMax caps the number; unset means 1 (the 2.84 behaviour: in sequence).
- *   rules.focus.splitGb is the GB one test process is expected to take (default 4, raised to the largest peak
- *   .studio/engine-ram.json holds: the one RAM measurer the harness has).
- *
- * runParts is async and takes everything it reads (the RAM reader, the clock, the starter) as arguments, so a test
- * can inject them. The runner is synchronous (engine-rules.mjs runRulesAt), so it calls this file as a script:
- * `node harness/rules-parts.mjs` reads one JSON job on stdin and writes one JSON result on stdout.
+ * harness/rules-parts.mjs — the parts of a split rules check, run within the memory there is. rules.focus.split runs
+ * one test command per filter group; each test process holds one system's data, so how many run at once depends on
+ * free RAM: a part starts only while (free RAM - the floor) >= splitGb; always at least one runs; checked again
+ * before every start.
+ * rules.focus.splitMax caps the number (unset: 1, in sequence). rules.focus.splitGb is the GB one test process is
+ * expected to take (default 4, raised to the largest peak in .studio/engine-ram.json).
+ * runParts is async and takes everything it reads (RAM reader, clock, starter) as arguments, so a test can inject
+ * them. The runner is synchronous (engine-rules.mjs runRulesAt), so it calls this file as a script: `node
+ * harness/rules-parts.mjs` reads one JSON job on stdin and writes one JSON result on stdout.
  */
 import path from 'node:path';
 import { spawn } from 'node:child_process';

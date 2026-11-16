@@ -1,41 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/unity-gate.mjs — the Unity engine track's landing gate (harness side only).
- *
- * Runs the studio's configured land command for a Unity port under the machine:heavy lock (harness/heavy.mjs) and reads its exit code:
- *   0 pass (landed)   1 red (a test or the build failed)   2 conflict (the merge didn't apply)
- *   3 refused (busy: an editor open, too little memory, another landing; not a failure of the work)
- *   4 error (the script itself failed)   anything else, a signal or a timeout: error
- *
- * Configured in studio/game.json (protected, so a branch can't swap in a command that always passes):
- *   "engines": { "unity": { "land": "<command>", "cwd": "<folder>", "timeoutMin": 120 } }
- * The command may use {branch}, {task}, {folder}, {branches}, {target}, {flags}; it runs in "cwd", else the folder, else
- * the studio. No land command: skipped with a note.
- *   - {branch}: --branch, else the task's Unity branch (task add --track engine:unity --branch <b>, or
- *     `node harness/unity-gate.mjs branch <ID> <b>`). With neither the gate refuses: the folder's checked-out branch
- *     (main) is never used, it would land main into itself.
- *   - {folder}: "folder" in the settings, else the track's folder (engine/<game>/engine.json); a missing one is an error.
- *   - "exits": { "<code>": { "status": "pass|red|conflict|refused|error|not-run", "why": "<meaning>" } } (or just
- *     "<why>", status error) replaces the default contract; an unlisted code is an error naming it.
- *   - Merge train (harness/unity-train.mjs, docs/UNITY-TRACK.md): {branches} is a space-separated list; "landMany" is a
- *     second command for a list when "land" takes one {branch}; "target" is the branch landed on ({target});
- *     "gateWorktree" is the land script's own worktree (the harness never touches its files). Names other than
- *     letters, digits, . _ / - are refused: the command line goes through a shell.
- *
- *   node harness/unity-gate.mjs [--task T-012] [--branch <name>] [--json]
- *      exit 0 pass or skipped, 3 refused or not run (try again later), 1 red, conflict or error
- *   node harness/unity-gate.mjs branch <T-ID> <branch>     record the task's Unity branch (task.unity_branch)
- *
- * `task done` runs it for a Unity-track task (closes only on a pass). Each run is recorded in .studio/gates/unity-last.json, an engine.land event, and studio/engine/LOG.md.
- *
- * The run waits for the free-RAM floor (STUDIO_UNITY_MIN_FREE_GB, 12, never above 60% of the RAM); an unmet floor is
- * status "not-run" (exit 3). A red or error exit whose output shows an infrastructure abort (harness/engine-proof.mjs
- * infraAbort) is also "not-run", never red; a compile error or failing test keeps it red. The train retries it later.
- *
- * Any engine: runUnityGate({ engine }): settings studio/game.json engines.<engine>, files
- * .studio/gates/<engine>-last.json and out/<engine>.log; job kind, RAM and floor from harness/engine-tracks.mjs. Run
- * lengths go to .studio/engine/durations.json. The command gets STUDIO_ENGINE_TUNE (JSON), STUDIO_ENGINE_TUNE_FILE and
- * STUDIO_ENGINE_FLAGS. A task's engine and branch come from .studio/engine/tasks.json first.
+ * Runs the configured land command under the machine:heavy lock (harness/heavy.mjs). Exit: 0 pass, 1 red, 2 conflict,
+ * 3 refused (busy, low memory, another landing: not a failure), 4 error; anything else: error. Configured in protected
+ * studio/game.json: "engines": { "unity": { "land": "<command>", "cwd", "timeoutMin": 120 } } (also "exits",
+ * "landMany", "target", "gateWorktree"); the command may use {branch}, {task}, {folder}, {branches}, {target},
+ * {flags}. No land command: skipped. {branch} is --branch, else the task's Unity branch (never the checked-out main).
+ * node harness/unity-gate.mjs [--task T-012] [--branch <name>] [--json]  |  branch <T-ID> <branch>
+ * `task done` runs it for a Unity-track task. Records: .studio/gates/unity-last.json, engine.land event,
+ * studio/engine/LOG.md. Waits for STUDIO_UNITY_MIN_FREE_GB (12); an unmet floor or infrastructure abort is "not-run"
+ * (exit 3).
  */
 import fs from 'node:fs';
 import path from 'node:path';

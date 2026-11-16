@@ -1,30 +1,24 @@
 /**
- * qa/selftest-2711a.mjs — 2.71.1 (A): the red team's holes in the protection gates, each attack shown caught with a clean
- * change beside it that stays green.
- *   1. Gate runners (A01b/A01d/A03): a lane that neuters qa/check-golden.mjs or the cartridge loader fails the protected gate.
- *   2. Test toolchain (H03/H04/S02): a game's vitest/vite config, the setup file it names, an .npmrc and the test script in
- *      its package.json are protected (the setup file and the script also make a lane tier C in the train); a new
- *      dependency is not.
- *   3. Weakened tests (H10/H13): skipIf on CI, an early return on CI, a shadowed or proxied expect are flagged; a new
- *      test that runs on one OS only (runIf) is not.
- *   4. Env overrides in a lane (A01b, A09, A16, G12): STUDIO_WEAKENED_TESTS=off, STUDIO_PROTECT_BASE, STUDIO_PROTECT_ROOT
- *      and STUDIO_MAIN_ROOT naming the lane itself are ignored there (and said so); the main checkout keeps them.
- *   5. Verify records (D01/T04, G15/T02): a hand-written record, an edited one and one from a verify beside an untracked
- *      config are not reused by the train; an honest one (build output ignored beside it) is.
- *   6. Golden re-record (A13): a lane that re-records a golden on its own Golden-Reason is tier C.
- * The words the weakened-test gate looks for are put together at run time, so this file never trips it.
+ * qa/selftest-2711a.mjs — holes in the protection gates, each attack shown caught with a clean change beside it that
+ * stays green.
+ *   1. A lane that neuters qa/check-golden.mjs or the cartridge loader fails the protected gate.
+ *   2. A game's vitest/vite config, setup file, .npmrc and package.json test script are protected. 3. Weakened tests
+ *     (skipIf on CI, early return on CI, shadowed or proxied expect) are flagged; runIf (one OS) is not.
+ *   4. In a lane STUDIO_WEAKENED_TESTS=off, STUDIO_PROTECT_BASE, STUDIO_PROTECT_ROOT, STUDIO_MAIN_ROOT are ignored;
+ *     the main checkout keeps them.
+ *   5. A hand-written, edited, or untracked-config verify record is not reused by the train. 6. A lane that re-records
+ *     a golden on its own Golden-Reason is tier C.
+ * The words the weakened-test gate looks for are put together at run time.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, gateRecOf, out, writeIn } from './kit.mjs';
 
 export async function selftest2711A({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const gitIn = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const g = (...a) => gitIn(dir, ...a);
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
   const readIn = (cwd, rel) => fs.readFileSync(path.join(cwd, rel), 'utf8').replace(/\r\n/g, '\n');
   const editIn = (cwd, rel, from, to) => { const t = readIn(cwd, rel); if (!t.includes(from)) throw new Error(`${rel}: no "${from}"`); writeIn(cwd, rel, t.replace(from, to)); };
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off',
@@ -44,7 +38,7 @@ export async function selftest2711A({ dir, run, report, tmpRoot }) {
     fs.rmSync(f, { force: true });
     return { ...json(r), _out: out(r).slice(-1500) };
   };
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const u = fileUrlOf(dir);
   // Words the weakened-test gate looks for, built here.
   const W = { SKIPIF: ['.skip', 'If'].join(''), RUNIF: ['.run', 'If'].join(''), ENV: ['process', 'env'].join('.'), EXPECT: 'exp' + 'ect' };
 
@@ -191,7 +185,7 @@ console.log(JSON.stringify({ own: [own.tier, own.rules], none: [none.tier, none.
   const gatesDir = path.join(dir, '.studio', 'gates');
   const fresh = () => { for (const d of [gatesDir, path.join(dir, '.studio', 'train'), path.join(dir, '.studio', 'gates-last-full.json'), path.join(dir, '.studio', 'gates-last.json')]) fs.rmSync(d, { recursive: true, force: true }); };
   const verify = (owner, extra = {}) => run(dir, 'node scripts/run-gates.mjs --no-detach', { ...env, STUDIO_LOCK_OWNER: owner, ...extra });
-  const recOf = (owner) => { try { return JSON.parse(fs.readFileSync(path.join(gatesDir, `${owner}-full.json`), 'utf8')); } catch { return null; } };
+  const recOf = gateRecOf(gatesDir);
   const train = (name) => probe(dir, `vt-${name}`, `import { verifyTree } from ${u('harness/train.mjs')};
 const logs = [];
 const r = verifyTree({ root: process.cwd(), dir: process.cwd() }, { id: 'tt-${name}', n: 1, tree: ${JSON.stringify(tree)}, changed: [], all: false, seen: new Map(), log: (m) => logs.push(m) });

@@ -1,18 +1,14 @@
 /**
- * harness/train-lanes.mjs — 2.76.0 (helper h): the merge train's lane mechanics that were costing the crew hand-backs.
- *
- *   W-0081  recreateLaneCopy: a queued lane whose copy (.lanes/<name>) is gone is made again from its branch (the copy's
- *           links, sparse checkout and exclude file as harness/worktree.mjs makes them) instead of being handed back.
- *           Only a folder under <main>/.lanes/, only when the branch still holds the queued head (or moved forward from
- *           it), and never while another worktree has that branch checked out.
- *   infra   infraHandBack: the hand-backs the harness or the machine caused (a missing lane copy, a CRLF/hash mismatch, a
- *           re-queue, a dead train, a timeout-only red already re-run alone, a mixed lane) never count toward
- *           STUDIO_TRAIN_MAX_HANDBACKS. Releases are also kept by task and head (.studio/train/releases.json), so a
- *           release survives the lane leaving and re-entering the queue for the same commit.
- *   B-91/92 mixedLane: the lane's own commits (main..head, patch-equal commits main already has left out) that carry
- *           another OPEN task's Studio-Task trailer and not this one's: such a lane is refused before its verify, naming
- *           the commits and how to split them off.
- * No import of train.mjs (it imports this).
+ * harness/train-lanes.mjs — the merge train's lane mechanics that were costing hand-backs. Does not import train.mjs
+ * (it imports this).
+ * recreateLaneCopy: a queued lane whose copy (.lanes/<name>) is gone is made again from its branch (as
+ * harness/worktree.mjs makes it); only under <main>/.lanes/, only when the branch still holds the queued head (or
+ * moved forward), never while another worktree has it checked out.
+ * infraHandBack: hand-backs the harness or machine caused (missing copy, CRLF/hash mismatch, re-queue, dead train,
+ * timeout-only red re-run alone, mixed lane) never count toward STUDIO_TRAIN_MAX_HANDBACKS. Releases are kept by task
+ * and head (.studio/train/releases.json).
+ * mixedLane: a lane whose own commits carry another OPEN task's Studio-Task trailer is refused before its verify,
+ * naming the commits.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -128,13 +124,10 @@ export function keptRelease(root, task, head, { tip = null } = {}) {
   return null;
 }
 
-// ---- 2.79 (c): a release keyed on the lane's own content, not its raw head ----
-//
-// The crew's run (18:50): the train's precheck merged main into a released lane (a new head), and the owner's release
-// was void: a release loop whenever main moved. A release now also records the lane's content: each file the lane changes
-// against its merge-base with main, with that file's blob at the merge-base and at the lane's head. A new head with the
-// same content (a re-queue, a catch-up merge of main that touches none of those files) is still covered; a lane commit
-// that changes one of them, adds another file, or a main change merged into one of them is not (the key differs).
+// A release keyed on the lane's own content, not its raw head: it records each file the lane changes against its
+// merge-base with main, with that file's blob at the merge-base and at the lane's head. A new head with the same
+// content (a re-queue, a catch-up merge of main touching none of those files) is still covered; a lane commit that
+// changes one of them, adds another file, or a main change merged into one of them is not (the key differs).
 
 /** The lane's content against main's tip: { key, files, base } or null (unreadable). Never throws. */
 export function laneContent(root, { head, tip }) {

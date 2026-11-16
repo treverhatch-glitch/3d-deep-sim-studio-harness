@@ -1,25 +1,14 @@
 /**
- * harness/train-watch.mjs — 2.77.3 (H2, B-112): a train whose status stops moving ends its attempt.
- *
- * Train 20261104-203215-38488 printed a flake verdict, then sat for 35+ min holding train.lock with its status still at
- * "verify 1 … ETA ~4 min": its process was blocked in a child (a focused run waiting for a machine:heavy slot), and
- * nothing in it could look up. A train runs its checks with spawnSync, so its own code can't watch the clock; a worker
- * thread can (harness/train-life.mjs starts this one beside the heartbeat, for every train that records its life).
- *
- * Every few seconds the worker reads .studio/train/<id>/status.json. When it hasn't changed for STUDIO_TRAIN_STALL_MIN
- * (default 90 minutes, well above a normal verify; 0 or off: no watch) while the train works (any step but a
- * speculative train's wait for train A: "ready", "waiting"; a check of the train waiting in the machine:heavy queue,
- * a wait bounded by STUDIO_HEAVY_WAIT_MIN, counts as moving), the worker:
- *   1. writes the train's cancel marker (.studio/train/<id>.cancel.json, { stall: true }) and life.json's "stalled";
- *   2. stops the train's running children (its whole process tree below the train: harness/heavy.mjs killHolderTree:
- *      taskkill /T /F on Windows, SIGTERM then SIGKILL elsewhere), so the blocked spawnSync returns;
- *   3. sets the status to "stalled: …" and records a task.train.stalled event (to the Producer) saying why.
- * The train then stops at its next step (harness/train.mjs checkCancel): nothing lands from that attempt, nobody is
- * handed back, its lanes keep their place in the queue; a lane that stalls a second train at the same head is held
- * for the Producer (never counted toward STUDIO_TRAIN_MAX_HANDBACKS). The lock is released as at any train end.
- * If the train still hasn't moved STUDIO_TRAIN_STALL_GRACE_S (default 300) later (a hang that isn't a child), the
- * worker ends the train's process; harness/train-life.mjs reapDeadTrains then records it, frees the lock and keeps
- * its lanes moving, as for any train that died.
+ * harness/train-watch.mjs — a train whose status stops moving ends its attempt.
+ * A worker thread (started by harness/train-life.mjs) watches .studio/train/<id>/status.json, since the train's own
+ * code blocks in spawnSync. Unchanged for STUDIO_TRAIN_STALL_MIN (default 90; 0 or off: no watch) while the train works
+ * (not "ready"/"waiting"; a machine:heavy queue wait, bounded by STUDIO_HEAVY_WAIT_MIN, counts as moving), the worker:
+ *   1. writes the cancel marker (.studio/train/<id>.cancel.json, { stall: true }) and life.json's "stalled";
+ *   2. stops the train's running children (harness/heavy.mjs killHolderTree);
+ *   3. sets the status to "stalled: …" and records a task.train.stalled event (to the Producer).
+ * The train stops at its next step (checkCancel): nothing lands, nobody is handed back, lanes keep their queue place; a
+ * lane that stalls a second train at the same head is held for the Producer. Still unmoved after
+ * STUDIO_TRAIN_STALL_GRACE_S (300): the worker ends the process; train-life.mjs reapDeadTrains frees the lock.
  */
 import fs from 'node:fs';
 import path from 'node:path';

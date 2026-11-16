@@ -1,44 +1,14 @@
 #!/usr/bin/env node
 /**
- * harness/test-weakening.mjs — 2.58.2 (PU-29): tests weakened to make a check pass need the owner's OK.
- *
- * Before 2.58.2 a weakened test (a `.skip`, a removed assert, a wider tolerance) was forbidden only by the rules text.
- * This reads the diff since the base branch (approve.mjs resolveBase; committed and not) in test files (*.test.*,
- * *.spec.*, tests/, test/, __tests__/, qa/, specs/, C# *.Tests/ and *Tests/ folders, test_*.py, *_test.*, *Test(s).cs|gd)
- * and test-runner configs (vitest/jest/playwright config, .mocharc, pytest.ini, *.runsettings), and flags:
- *
- *   assert-removed      assertion lines removed (expect, assert*, Assert.*, should, t.is, require.*, assert_* …) beyond
- *                       the ones added in the same place (hunk); new tests elsewhere don't make up for them; an assert
- *                       commented out counts as removed; one moved unchanged (to another file too) doesn't
- *   skip-added          .skip / .todo / xit / xdescribe / test.todo / [Ignore] / [Explicit] / Skip = "…" / @Disabled /
- *                       @Ignore / pytest skip and xfail / t.Skip / gdUnit do_skip / { skip: true } / #[ignore], added
- *                       (2.71.1: also chained, it.concurrent.skip; and skipIf / runIf added to an existing test or on an
- *                       env/CI condition: a new test that runs on one OS only is fine)
- *   env-skip            2.71.1: an early return on CI or an env variable (`if (process.env.CI) return`)
- *   expect-shadowed     2.71.1: expect/assert redefined, renamed on import, wrapped in a Proxy or the library mocked
- *   only-added          .only / fit / fdescribe (every other test stops running)
- *   timeout-raised      a test timeout raised (same line, bigger number after the word timeout)
- *   tolerance-widened   toBeCloseTo / places / precision / digits lowered; eps, tol, delta, margin, atol, rtol, approx,
- *                       an abs() bound or a 3-argument AreEqual raised (the last number on the same line)
- *   seed-special-case   a condition on a literal seed (`if (seed === 7)`, `[7, 9].includes(seed)`, `switch (seed)`), or
- *                       on a literal tick/frame/step that returns, continues, breaks or skips
- *   test-deleted        a test file deleted (a rename is not a delete)
- *   contract-*          2.62.0 (H): an agreed acceptance contract (studio/contracts/<ID>.json, harness/contracts.mjs) changed
- *                       beyond `passes`, agreed or extended by a worker, or a manual criterion passed without a
- *                       reviewer's or a person's signature; enforced with or without an owner key
- *   golden-edited       a golden or snapshot file (golden/, goldens/, __snapshots__/, *.snap, *.golden.*) changed or
- *                       deleted by a commit without a Golden-Reason trailer (a new snapshot is fine)
- *
- * Each finding names file:line, the kind and the line. Enforced once the base branch has an owner key (like the protected
- * files); before that the findings are a warning. Only the owner approves an intended change, by content:
- * `npm run approve -- tests --note "why"` signs exactly the findings listed now. STUDIO_WEAKENED_TESTS=off turns the
- * gate off, =on enforces it even without an owner key.
- *
- * Limits: it reads lines, not meaning. A weaker assert written in the same count (toBe → toBeTruthy), a helper that
- * always passes, a special case in the game code rather than the test, an assert removed and an unrelated one added in
- * the same place, and test files outside the names above aren't caught.
- *
- *   node harness/test-weakening.mjs [--json]
+ * harness/test-weakening.mjs — flags tests weakened to make a check pass, which need the owner's OK.
+ * Reads the diff since the base branch (approve.mjs resolveBase) in test files and runner configs and flags:
+ * assert-removed, skip-added (.skip, .todo, xit, [Ignore], @Disabled, skipIf/runIf ...), env-skip, expect-shadowed,
+ * only-added, timeout-raised, tolerance-widened, seed-special-case, test-deleted, contract-*
+ * (studio/contracts/<ID>.json changed beyond `passes`), golden-edited (no Golden-Reason trailer).
+ * Each finding names file:line, the kind and the line. Enforced once the base branch has an owner key, else a
+ * warning. Only the owner approves: `npm run approve -- tests --note "why"`. STUDIO_WEAKENED_TESTS=off turns the gate
+ * off, =on enforces it without an owner key. It reads lines, not meaning.
+ *    node harness/test-weakening.mjs [--json]
  */
 import fs from 'node:fs';
 import path from 'node:path';

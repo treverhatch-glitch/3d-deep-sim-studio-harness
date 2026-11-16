@@ -1,24 +1,15 @@
 #!/usr/bin/env node
 /**
- * scripts/release-ship.mjs — ship a release in one command (2.30c).  `npm run release -- <version>`
- *
- *   npm run release -- 2.30.0-c [--notes notes.md] [--title "…"] [--backup-dir <dir>] [--dry-run] [--no-ci]
- *
- * What a person used to do by hand for every release, in order; it stops at the first red step and
- * leaves the work uncommitted (nothing is pushed):
+ * scripts/release-ship.mjs — ship a release in one command.  `npm run release -- <version>`
+ *   npm run release -- <version> [--notes notes.md] [--title "…"] [--backup-dir <dir>] [--dry-run] [--no-ci]
+ * In order; it stops at the first red step and leaves the work uncommitted (nothing is pushed):
  *   1. on main, in step with origin/main (fetched), and the version is new;
- *   2. bumps package.json and package-lock.json, and writes the CHANGELOG entry from --notes (unless
- *      the CHANGELOG already has one for this version);
- *   3. makes ONE squashed commit of the whole working tree on top of origin/main (local only);
- *   4. clones that commit fresh into a temp folder, installs, and runs verify --deep there (every
- *      required gate, including the self-test);
- *   5. bundles origin/main (the state before this release) into the backup folder, and checks the bundle;
- *   6. pushes the commit to main (never forced: a moved main is refused, and you rebase);
- *   7. waits for CI on that commit; a failed job is re-run once (known flaky timing checks) and both
- *      results are reported;
- *   8. reports in plain words, failing first, "not run" apart from "pass".
- * No branches are made. --dry-run does 1-5 and stops before the push (the commit is undone, the work
- * stays). Without the gh CLI, step 7 says "CI not checked", never "green".
+ *   2. bumps package.json and package-lock.json, writes the CHANGELOG entry from --notes (unless one exists);
+ *   3. makes ONE squashed commit of the working tree on top of origin/main (local only);
+ *   4. clones it into a temp folder, installs, and runs verify --deep there; 5. bundles origin/main into the backup
+ *      folder and checks the bundle; 6. pushes the commit to main (never forced: a moved main is refused);
+ *   7. waits for CI (a failed job is re-run once); 8. reports in plain words, failing first.
+ * No branches are made. --dry-run does 1-5 and stops before the push. Without the gh CLI, step 7 says "CI not checked".
  */
 import fs from 'node:fs';
 import os from 'node:os';

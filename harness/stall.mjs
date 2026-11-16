@@ -1,25 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/stall.mjs — end a session that has stopped producing work.
- *
- * session-cap only counts context and turns, so a session that keeps re-reading never tripped it. Every heartbeat (and
- * every watchdog pass) now asks:
+ * harness/stall.mjs — end a session that has stopped producing work (it keeps re-reading but writes nothing).
+ * Every heartbeat and watchdog pass asks:
  *   - progress: did the session write a file, commit, or change a task's state since its last progress?
- *     (fingerprint = HEAD + `git status --porcelain` of its working copy + its task.* events)
- *   - stall: no progress for STUDIO_STALL_MIN minutes (15; Producer/Director/planner: STUDIO_STALL_PLAN_MIN: 8, or 20 for
- *     a top-tier or slow-thinking model; see planStallFor)
- *   - burn: over the last STUDIO_STALL_RATIO_WINDOW_TOKENS (300000) input tokens the input:output ratio passed
- *     STUDIO_STALL_RATIO (120:1) with no progress in that window. Input counts uncached input plus cache creation only
- *     (a cache read is context re-read, not new work). None in the first STUDIO_STALL_GRACE_MIN (15) minutes.
- *     STUDIO_STALL_RATIO=0 turns the check off.
- *   - wall clock: longer than STUDIO_SESSION_MAX_MIN (90; planning roles STUDIO_SESSION_PLAN_MAX_MIN, 25)
- * A stalled session is ended and its task handed back with the reason (event session.stall). 0 turns a limit off;
- * STUDIO_STALL=off turns the whole check off. A session waiting on its own verify or `task done` is busy, not stalled
- * (busyWait: the stall clock is held and the wall-clock cap stretches, bounded by STUDIO_STALL_VERIFY_MAX_MIN (60) for a
- * verify and STUDIO_DONE_RUNNING_MAX_MIN (90) for a done, so a hung verify can't keep a session alive). Each
- * observation also runs the drift checks (driftCheck below), which only raise a Check to the Producer.
- *
- *   node harness/stall.mjs check [--json]     every running session's stall state and drift Checks (read-only)
+ *   - stall: no progress for STUDIO_STALL_MIN minutes (15; planners STUDIO_STALL_PLAN_MIN: 8, or 20 for slow models)
+ *   - burn: over STUDIO_STALL_RATIO_WINDOW_TOKENS (300000) input tokens the input:output ratio passed
+ *     STUDIO_STALL_RATIO (120:1) with no progress (cache reads don't count; STUDIO_STALL_GRACE_MIN (15); 0: off)
+ *   - wall clock: over STUDIO_SESSION_MAX_MIN (90; planning roles STUDIO_SESSION_PLAN_MAX_MIN, 25)
+ * A stalled session is ended and its task handed back (session.stall). 0 turns a limit off; STUDIO_STALL=off turns all
+ * off. Waiting on its own verify or `task done` is busy: STUDIO_STALL_VERIFY_MAX_MIN, STUDIO_DONE_RUNNING_MAX_MIN.
+ *   node harness/stall.mjs check [--json]
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -280,21 +270,10 @@ export function stallEndOf(agent, startedAt) {
 }
 
 /*
- * Deterministic drift checks. Per running session, signals that it is going in circles or off its brief, each raised
- * ONCE per session as a "Check" event to the Producer (drift.check). They never stop, kill, hand back or edit anything,
- * and no model judges (a model-based monitor hurt structured tasks). An optional advisory hook (setDriftAdvisor, only
- * with STUDIO_DRIFT_ADVISOR=on) may add a note to a Check already raised; it can't raise, stop or clear one.
- *   gate-loop       the same gate failed with the same signature (gate id + its normalised output) STUDIO_DRIFT_SAME_FAIL
- *                   (3) times in the session's own verify runs
- *   verify-no-diff  STUDIO_DRIFT_SAME_DIFF (2) verify runs in a row with no change to its working copy since the verify
- *                   before (files dated after a verify or rewritten by it are "unknown", never "unchanged")
- *   out-of-scope    a file it edited (uncommitted, or committed under its own Studio-Agent trailer) outside its task's
- *                   lane and its claimed paths. No lane and no claim (the whole game) is not judged.
- *   no-heartbeat      listed running, but its record has no heartbeat at all STUDIO_DRIFT_NOHEARTBEAT_MIN (5) minutes
- *                     after it started (its tool never started, e.g. not on PATH)
- *   borrowed-commits  its lane holds commits of another OPEN task's unlanded lane (merged wholesale, or tagged
- *                     Studio-Task: <that task>): its work now depends on unlanded work
- * STUDIO_DRIFT=off turns them off. State: .studio/drift/<agent>.json.
+ * Deterministic drift checks: signals that a session goes in circles or off its brief, each raised ONCE as a
+ * drift.check event to the Producer; nothing is stopped, no model judges. gate-loop (STUDIO_DRIFT_SAME_FAIL (3)),
+ * verify-no-diff (STUDIO_DRIFT_SAME_DIFF (2)), out-of-scope, no-heartbeat (STUDIO_DRIFT_NOHEARTBEAT_MIN (5)),
+ * borrowed-commits. STUDIO_DRIFT=off turns them off; STUDIO_DRIFT_ADVISOR=on. State: .studio/drift/<agent>.json.
  */
 // Files the harness writes for any task, and regression replays: never "out of scope".
 const DRIFT_SCOPE_ALWAYS = ['studio/NEXT.md', 'studio/DONE.md', 'studio/CURRENT_TASK.md', 'studio/handoffs', 'studio/notes', 'studio/daily', 'studio/logs', 'studio/producer', 'qa/regressions'];

@@ -11,16 +11,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { eventsOf as eventsFileOf, eventTypesOf, fileUrlOf as fileUrlRelSOf, fwd, gEnvOf, gitUserCrlfOf, guardCap3000Of, out, queueUnityOf, readJsonlTrimmed as rulesRuns, readRunsJsonl as runsOf, writeIn as write } from './kit.mjs';
 
 export async function selftest286C({ dir, root, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const write = (b, rel, text) => { fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true }); fs.writeFileSync(path.join(b, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
-  const fwd = (p) => p.split(path.sep).join('/');
+  const gEnv = gEnvOf(ident);
+  const g = gitUserCrlfOf(gEnv);
+  const guard = guardCap3000Of(report);
   const T = path.join(tmpRoot, `s286c-${process.pid}`);
   fs.mkdirSync(T, { recursive: true });
   const harnessRoot = root || dir;
@@ -45,9 +42,9 @@ export async function selftest286C({ dir, root, report, tmpRoot }) {
   g(S, 'init', '-q', '-b', 'main'); g(S, 'add', '-A'); g(S, 'commit', '-qm', 'studio', '--no-verify');
   const evFile = path.join(S, '.studio', 'events-286c.jsonl');
   const envOf = (extra = {}) => ({ ...base, AGENT_EVENTS_FILE: evFile, STUDIO_MAIN_ROOT: S, ...extra });
-  const events = () => { try { return fs.readFileSync(evFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const evs = (re) => events().filter((e) => re.test(e.type));
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
+  const events = eventsFileOf(evFile);
+  const evs = eventTypesOf(events);
+  const u = fileUrlRelSOf(S);
   let pn = 0;
   const probe = (code, env = {}) => {
     const f = path.join(S, `.probe-286c-${++pn}.mjs`);
@@ -82,17 +79,12 @@ export async function selftest286C({ dir, root, report, tmpRoot }) {
     }
     return { R, GW, heads };
   };
-  // The land script stand-in. It records each run (sources and every variable the harness tells a land script), merges
-  // the sources into the gate worktree and judges the merged tree:
-  //   "<stage>-bad.txt" (edit, play) makes that stage red with the test name it holds ("rev:" + the name reversed, so the
-  //     name itself appears in no file a lane changes); "compile-bad.txt" holds a compiler error line.
-  //   <ctl>-flaky "N stage name": the next N runs fail in that stage on that test. <ctl>-kill "N code": the next N runs
-  //   exit with that code. <ctl>-cancel: writes the train's cancel file (the id from the train lock), then exits 77.
-  //   <ctl>-names: how a red names its tests: "out" (default, a dotnet line), "xml" (an NUnit 3 results file in the gate
-  //   worktree and a summary only) or "json" (a "failures" list in the stage report and a summary only).
-  //   <ctl>-compile: what STUDIO_LAND_ONLY=compile does: "honour" (default: merge, compile, put the tree back, exit 0 or
-  //   1 with the compiler line), "unknown" (exit 9: a code the land contract does not know) or "ignore" (land as usual).
-  // A red run puts the gate worktree back where it was, as a real land script does.
+  // The land script stand-in: records each run (sources, every variable the harness tells a land script), merges the
+  // sources into the gate worktree and judges the merged tree. "<stage>-bad.txt" (edit, play) makes that stage red with
+  // the test name it holds ("rev:" + the name reversed); "compile-bad.txt" holds a compiler error line. Controls:
+  // <ctl>-flaky "N stage name", <ctl>-kill "N code", <ctl>-cancel (writes the train's cancel file, exits 77),
+  // <ctl>-names (out | xml | json), <ctl>-compile (STUDIO_LAND_ONLY=compile: honour | unknown (exit 9) | ignore). A red
+  // run puts the gate worktree back, as a real land script does.
   const landStub = path.join(T, 'land-stub.mjs');
   fs.writeFileSync(landStub, `import fs from 'node:fs'; import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -139,14 +131,12 @@ for (const st of ['edit', 'play']) { const f = path.join(gw, st + '-bad.txt'); i
 stages(null);
 console.log('landed ' + srcs.join(' '));
 `);
-  const runsOf = (ctl) => { try { return fs.readFileSync(`${ctl}-runs.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const cfgFor = (E, ctl, extra = {}) => ({ land: `node "${fwd(landStub)}" "${fwd(E.GW)}" "${fwd(ctl)}" {branch}`, target: 'port/main', cwd: fwd(E.R), gateWorktree: fwd(E.GW), timeoutMin: 5, rules: false, ...extra });
-  const queue = (E, lanes) => { fs.mkdirSync(path.join(S, '.studio', 'train'), { recursive: true }); fs.writeFileSync(path.join(S, '.studio', 'train', 'unity-queue.json'), JSON.stringify(lanes.map(([task, branch], i) => ({ task, agent: `porter-${i}`, branch, head: E.heads[branch], at: new Date(Date.now() + i).toISOString() })))); };
+  const queue = queueUnityOf(S);
   const TRAIN = `import { runUnityTrain } from ${u('harness/unity-train.mjs')};
 const handed = []; const logs = [];
 const r = await runUnityTrain({ root: process.cwd(), log: (m) => logs.push(String(m)), deps: { handBack: (lane, note, extra) => handed.push({ task: lane.task, note, extra: extra || null }) } });
 console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: r.dropped, rules: r.rules || null, handed, logs: logs.filter((l) => /rules|split|part|cached|kept/i.test(l)) }));`;
-  const rulesRuns = (f) => { try { return fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   // The rules test stand-in: it records its filter and the system folders of the checkout it ran in; it is red when a
   // system folder holds rules-bad.txt whose text is the filter it was given.
   const rulesStub = path.join(T, 'rules-stub.mjs');

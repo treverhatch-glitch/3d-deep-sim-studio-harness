@@ -1,30 +1,27 @@
 /**
- * qa/selftest-259i.mjs — P-067 (crew P-037): an owner-approved step writes agy's headless allow-rules.
- *   Antigravity CLI (agy) soft-denies shell commands in headless mode unless its settings.json allows them; Claude
- *   gets the harness list on its command line, agy got nothing. `npm run agent -- allow agy` translates the list
- *   (harness/allowlist.mjs) into agy rules and merges them into agy's user-level settings file, with the owner's OK.
- *   Every check runs with a fake HOME and USERPROFILE (no real agy, no real settings touched):
+ * qa/selftest-259i.mjs — an owner-approved step writes agy's headless allow-rules: `npm run agent -- allow agy`
+ * translates the harness list (harness/allowlist.mjs) into agy rules in agy's user-level settings file. Checks run with
+ * a fake HOME and USERPROFILE.
  *   - --dry-run prints the target file and every rule and writes nothing;
- *   - the user-level file is written only with --scope user (agy has no project-level file), only with --by, and
- *     never with an agent's name or from inside a launched session;
+ *   - the file is written only with --scope user, only with --by, and never with an agent's name or from inside a
+ *     launched session;
  *   - a real run keeps the user's other keys and rules, backs the file up, and adds only the harness rules;
- *   - a second run adds nothing (no write, no second backup); a file that isn't plain JSON is left alone;
- *   - no skip-all setting is ever written; the Windows (regex) rule refuses chained commands;
- *   - `npm run agent -- start … --tool agy` prints one line naming the command while nothing is enrolled, and
- *     still starts; once enrolled it doesn't.
+ *   - a second run adds nothing; a file that isn't plain JSON is left alone; no skip-all setting is ever written;
+ *   - `npm run agent -- start … --tool agy` prints one line naming the command while nothing is enrolled, and still
+ *     starts.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { fileUrlOf, out, readInDirOf } from './kit.mjs';
 
 // Spelled out here so this file also runs (and fails) against the code before P-067.
 const HINT = 'agy has no allow-rules: run npm run agent -- allow agy --by <owner> (dry-run first)';
 const REL = ['.gemini', 'antigravity-cli', 'settings.json'];
 
 export async function selftest259I({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const read = (rel) => { try { return fs.readFileSync(path.join(dir, rel), 'utf8'); } catch { return ''; } };
+  const u = fileUrlOf(dir);
+  const read = readInDirOf(dir);
   const events = () => read('.studio/events.jsonl').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } });
   let n = 0;
   const home = (settings = null) => {

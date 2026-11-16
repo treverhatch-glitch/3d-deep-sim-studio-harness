@@ -1,24 +1,14 @@
 /**
- * harness/agent-env.mjs — 2.33.0: what a launched agent's process may see of the environment.
+ * harness/agent-env.mjs — what a launched agent's process may see of the environment.
  *
- * Before, every agent got the launcher's whole environment, so every key in .env (other providers' API
- * keys, HUB_TOKEN that writes to the War Room, GitHub tokens, the owner key's path) was one `env` away
- * from any agent and from anything a prompt injection made it run. Now an agent gets:
- *   - the system basics (PATH, HOME, locale, temp, proxy and certificate settings, display),
- *   - the studio's own settings (STUDIO_, AGENT_, PLAYTEST_, PLAYWRIGHT_, NODE_, npm_ names), minus
- *     STUDIO_OWNER_KEY, (2.71.0) STUDIO_REPORT_WEBHOOK and (2.76.0) STUDIO_COMM_WEBHOOK,
- *   - the credentials of the tool it runs on and nothing else (claude: ANTHROPIC_ and CLAUDE_
- *     names, codex: OPENAI_ and CODEX_, grok: XAI_ and GROK_, agy: GEMINI_ and GOOGLE_, cursor: CURSOR_, aider: OLLAMA_;
- *     nim (2.58.3, aider on NVIDIA NIM): only OPENAI_API_KEY, set from NVIDIA_API_KEY (the first key of a list, else
- *     NVIDIA_API_KEY_2), never the owner's own OPENAI_ names, which would go to NVIDIA's endpoint; H-8 (2.58.5): also
- *     AIDER_OPENAI_API_KEY, the same key, because aider loads .env files (home, repo, current folder; a lane copy has a
- *     copy of the studio's .env) over the environment, and the template's empty `OPENAI_API_KEY=` blanked the key,
- *     while aider applies AIDER_OPENAI_API_KEY (its --openai-api-key) after those files),
- *     (a custom launcher gets its model family's: a gemini model gets GEMINI_ and GOOGLE_, a grok model XAI_ and GROK_),
- *   - names listed in STUDIO_AGENT_ENV_PASS (comma-separated, for every agent) or STUDIO_<ROLE>_ENV
- *     (for one role; a custom launcher lists what its command needs here).
- * STUDIO_AGENT_ENV=full gives the old behaviour (everything).
- * 2.59.0 (#14): an owner-set key mapping per role or agent (STUDIO_KEYMAP_<ROLE>, STUDIO_KEYMAP_AGENT_<NAME>): see keyMapped().
+ * An agent gets: the system basics (PATH, HOME, locale, temp, proxy and certificate settings, display); the studio's
+ * own settings (STUDIO_, AGENT_, PLAYTEST_, PLAYWRIGHT_, NODE_, npm_ names) minus STUDIO_OWNER_KEY,
+ * STUDIO_REPORT_WEBHOOK and STUDIO_COMM_WEBHOOK; the credentials of the tool it runs on and nothing else (claude:
+ * ANTHROPIC_ and CLAUDE_, codex: OPENAI_ and CODEX_, grok: XAI_ and GROK_, agy: GEMINI_ and GOOGLE_, cursor: CURSOR_,
+ * aider: OLLAMA_; nim: only OPENAI_API_KEY and AIDER_OPENAI_API_KEY, set from NVIDIA_API_KEY, never the owner's own
+ * OPENAI_ names); names in STUDIO_AGENT_ENV_PASS (every agent) or STUDIO_<ROLE>_ENV (one role). STUDIO_AGENT_ENV=full
+ * gives everything. A per-role or per-agent key mapping (STUDIO_KEYMAP_<ROLE>, STUDIO_KEYMAP_AGENT_<NAME>): see
+ * keyMapped().
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -165,16 +155,10 @@ export function launchedSession(env = process.env) {
 }
 
 /**
- * 2.59.0 (#14, planned in 2.58.5 P-092): the owner's per-agent key mapping. STUDIO_KEYMAP_<ROLE> and
- * STUDIO_KEYMAP_AGENT_<NAME> (NAME as the agent's name in capitals, `-` as `_`: STUDIO_KEYMAP_AGENT_BUILDER_S3) hold
- * `TARGET:SOURCE[,TARGET:SOURCE]`: that one child gets SOURCE's value under the name TARGET (for example
- * `ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_LANE`, so one lane bills to its own key). For the same TARGET the agent's
- * mapping beats the role's. Both names must be key names (…_API_KEY or …_TOKEN, capitals, an optional suffix such as
- * _LANE or _2), never STUDIO_, HUB_ (HUB_TOKEN writes to the War Room) or the owner key. SOURCE unset or empty: TARGET
- * is left unset for that child (never quietly the shared key). Inside a launched session (an agent hiring an agent) a
- * mapping counts only as written in the studio's .env: one set in the session's shell is refused. Names go to `notes`
- * (the launcher's log); values never do, and text that isn't a name is never echoed (a pasted key stays unprinted).
- * The STUDIO_KEYMAP_ settings themselves are not passed to the child.
+ * The owner's per-agent key mapping. STUDIO_KEYMAP_<ROLE> and STUDIO_KEYMAP_AGENT_<NAME> (NAME in capitals, `-` as
+ * `_`) hold `TARGET:SOURCE[,TARGET:SOURCE]`: that child gets SOURCE's value under TARGET. The agent's mapping beats
+ * the role's. Names must be …_API_KEY or …_TOKEN, never STUDIO_, HUB_ or the owner key. SOURCE unset or empty: TARGET
+ * is left unset. In a launched session only a mapping in the studio's .env counts. Names go to `notes`, values never.
  */
 export const KEY_NAME = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_(?:API_KEY|TOKEN)(?:_[A-Z0-9]+)*$/;
 const KEY_NEVER = /^(STUDIO_|HUB_|AGENT_|NODE_|npm_)/;

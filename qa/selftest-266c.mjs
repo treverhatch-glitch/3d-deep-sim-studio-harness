@@ -1,32 +1,28 @@
 /**
- * qa/selftest-266c.mjs — 2.66.0 (helper c): hand-back facts written by the harness, and the blocked-command log.
- *   1. The merge train hands back a made-up lane whose game check fails: the hand-off entry starts with the facts
- *      block (the lane's changed files, every gate with PASS/FAIL, the failure signature from the failing test line,
- *      the seed, the train's verify log), then the train's prose.
- *   2. `task pause` from a lane copy: facts first (committed, uncommitted and untracked files; the holder's own verify
- *      record and its gate log), the agent's prose after; the task.paused event carries the prose only; the next
- *      agent's brief shows the facts before the notes. A refused task done's gates reach the next hand-back.
- *   3. Claude Code's permission_denials, read at session end from the result line(s), land in .studio/denials.jsonl
- *      with secrets redacted; a result line without the field records nothing.
- *   4. `npm run denials` lists the top commands and the count per task; the digest lists the allowlist candidates and
- *      says they are never added automatically; no settings or permission file changes.
- * Made-up studio ("demo"), made-up ids and secrets. Each check fails on 2.65.2.
+ * qa/selftest-266c.mjs — hand-back facts written by the harness, and the blocked-command log (made-up studio "demo").
+ *   1. The merge train hands back a lane whose game check fails: the hand-off entry starts with the facts block
+ *     (changed files, every gate PASS/FAIL, the failure signature, the seed, the train's verify log), then the train's
+ *     prose.
+ *   2. `task pause` from a lane copy: facts first (committed, uncommitted, untracked files; the holder's verify record
+ *     and gate log), then the agent's prose; the task.paused event carries the prose only. A refused task done's gates
+ *     reach the next hand-back.
+ *   3. Claude Code's permission_denials, read at session end, land in .studio/denials.jsonl with secrets redacted.
+ *   4. `npm run denials` lists the top commands and the count per task; the digest lists allowlist candidates and says
+ *     they are never added automatically.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { eventsOf, fileUrlOf, gitAsT as g, out, readInDirOf, writeIn as write } from './kit.mjs';
 
 export async function selftest266C({ dir, run, report, tmpRoot, root }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
-  const read = (rel) => { try { return fs.readFileSync(path.join(dir, rel), 'utf8'); } catch { return ''; } };
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const read = readInDirOf(dir);
+  const u = fileUrlOf(dir);
   const events = path.join(dir, '.studio', 'events-266c.jsonl');
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_TRAIN: '', STUDIO_TRAIN_PREDICT: 'off', STUDIO_TRAIN_MIN: '', STUDIO_TRAIN_MAX: '', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_HOTSPOT_ASK: '', STUDIO_ROLE: '', STUDIO_LOCK_OWNER: '', STUDIO_THREADS: '', STUDIO_BUILDER_CMD: '', STUDIO_PRODUCER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_AGENT_TOOL: '', STUDIO_REHEARSAL: '', STUDIO_LANELESS: 'shared', STUDIO_DIGEST: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-266c-${process.pid}.pem`), AGENT_EVENTS_FILE: events, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   if (!fs.existsSync(path.join(dir, 'node_modules', 'typescript')) && fs.existsSync(path.join(harnessRoot, 'node_modules', 'typescript'))) {
     try { fs.rmSync(path.join(dir, 'node_modules'), { force: true }); } catch {}

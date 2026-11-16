@@ -1,29 +1,14 @@
 /**
- * harness/engine-ram.mjs: what an engine land needs in free RAM, and how the Line Producer makes room for it (2.79.1, 3.2).
- *
- * 2.79.0 held 12 GB free for a Unity land by making the land wait 60 min for it, then refuse, while six builders kept
- * starting verifies. The owner's direction: no permanent reservation (idle reserved RAM is wasted); account for the land
- * only while one is queued or near, and release at once when it starts. So:
- *
- *   1. The need. The engine table's floor (engine-tracks.mjs engineFloor), or better the peak RAM measured in the last
- *      green land runs of that engine plus a margin, never under a small minimum. A run keeps its peak in
- *      .studio/engine-ram.json (recordLandPeak: the machine monitor's history samples taken while it ran). The owner's
- *      environment floor and the lane's tuned ram-floor still win (engineFloor).
- *   2. The hold (engineHoldPlan, pure; engineHoldPass reads the machine). While a land is queued, or near (an engine
- *      porter ran `task done --check`), and its slot isn't taken yet: new heavy starts wait (a quiet hold tagged
- *      "engine-land": builders keep coding; running verifies finish; the land itself ignores this hold). If the running
- *      verifies are about to finish (their elapsed against the typical verify time), that is the natural gap: wait. If
- *      not, and free RAM still isn't enough, the builder target steps down one at a time (never a kill). The moment the land
- *      holds its slot the hold is released and builders refill.
- *   3. Bounded: STUDIO_ENGINE_HOLD_MAX_MIN (30; 0: no hold). Past it the hold is released, the land stays queued, one
- *      line.engine_hold_expired event says why (free RAM, the need, the holders), and the hold comes back at the next
- *      natural gap (no verify running, or free RAM at the need).
- *
- * Settings: STUDIO_ENGINE_HOLD_MAX_MIN (30), STUDIO_ENGINE_RAM_MARGIN_GB (1.5), STUDIO_ENGINE_RAM_MIN_GB (4),
- * STUDIO_ENGINE_RAM_RUNS (3: green runs before the measured need replaces the table's; 0: always the table),
- * STUDIO_ENGINE_VERIFY_TYPICAL_MIN (10), STUDIO_ENGINE_WAIT_SOON_MIN (5), STUDIO_ENGINE_SCALE_STEP_MIN (3),
- * STUDIO_ENGINE_NEAR_MIN (30: how long a porter's `task done --check` counts as "a land is near"),
- * STUDIO_ENGINE_LAND_WAIT_MIN (20: how long a land waits for RAM when no Line Producer runs).
+ * harness/engine-ram.mjs — what an engine land needs in free RAM, and how the Line Producer makes room for it.
+ * No permanent reservation: the land counts only while one is queued or near, and is released at once when it starts.
+ *   1. The need: the engine floor (engine-tracks.mjs engineFloor) or the peak RAM of green land runs plus a margin.
+ *   2. The hold (engineHoldPlan, pure; engineHoldPass reads the machine): while a land is queued or near (an engine
+ *      porter ran `task done --check`), new heavy starts wait (a quiet hold tagged "engine-land"; the land ignores it).
+ *      If free RAM is short and running verifies aren't about to finish, the builder target steps down (never a kill).
+ *   3. Bounded by STUDIO_ENGINE_HOLD_MAX_MIN (30; 0: no hold): past it the hold is released (line.engine_hold_expired).
+ * Settings: STUDIO_ENGINE_RAM_MARGIN_GB (1.5), STUDIO_ENGINE_RAM_MIN_GB (4), STUDIO_ENGINE_RAM_RUNS (3; 0: always the
+ * table), STUDIO_ENGINE_VERIFY_TYPICAL_MIN (10), STUDIO_ENGINE_WAIT_SOON_MIN (5), STUDIO_ENGINE_SCALE_STEP_MIN (3),
+ * STUDIO_ENGINE_NEAR_MIN (30), STUDIO_ENGINE_LAND_WAIT_MIN (20: how long a land waits for RAM with no Line Producer).
  */
 import fs from 'node:fs';
 import os from 'node:os';

@@ -1,34 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/vfx.mjs — 2.56.0 (PU-15): a spec, stepped capture and frame checks for visual effects (particles,
- * VFX, UI feedback such as hit flashes and button presses), in any genre, 2D or 3D.
+ * harness/vfx.mjs — a spec, stepped capture and frame checks for visual effects, 2D or 3D.
  *
  *   npm run vfx -- new <id> [--kind one-shot|loop] [--ms 400]   write a starter spec: studio/vfx/<id>.json
  *   npm run vfx -- validate <id>                                 check the spec itself
  *   npm run vfx -- check <id> [--url <page>] [--task T-12]       capture stills, a contact sheet, run the checks
  *   npm run vfx -- list                                          specs and their last result
- *
- * The idea (from the effect-authoring pattern reviewed in studio/logs/research/PIXELFX-REVIEW-2026-10-31.md;
- * ideas only, no code taken): an effect is judged from stills taken at fixed effect times, never by recording
- * in real time. A headless browser with no GPU can draw a 3D scene at a fraction of a frame per second, but a
- * handful of small stills still takes about a minute.
- *
- * The game's side: a page (in playtest mode, never in a player build) exposes
- *   window.__studioVfx = {
- *     render(id, { tMs, seed, w, h }),   // draw effect `id` as it looks `tMs` after it starts; tMs < 0 clears it
- *   }
- * drawing into an element with id "studio-vfx-stage" of w x h pixels on a fixed background. It may return a
- * promise. Engines (Godot, Unity): not built; 2.85: the planned capture command setting was dropped, nothing read it.
- *
- * Checks (by rule, on the captured frames; taste is left to the art review):
- *   ends-empty     a one-shot's last frame is back to the background
- *   loop-seam      a loop's frame at the end matches its frame at the start (no jump where it wraps)
- *   stays-inside   nothing touches the stage edge (an effect clipped by, or spilling past, its bounds)
- *   flash-rate     no more than spec.flash.maxPerSecond (default 3) full-stage flashes a second
- *   same-seed      the same seed draws the same frame twice (no unseeded randomness)
- *   draws          something is drawn at all (a blank effect isn't a pass)
- * Results: .studio/vfx/<id>/report.json, contact.png, frames/; an event vfx.checked; --task copies the contact
- * sheet and report to studio/proof/<task>/ for the reviewer.
+ * The game's page (playtest mode only) exposes window.__studioVfx = { render(id, { tMs, seed, w, h }) } drawing into
+ * "studio-vfx-stage". Checks: ends-empty, loop-seam, stays-inside, flash-rate (spec.flash.maxPerSecond, default 3),
+ * same-seed, draws. Results: .studio/vfx/<id>/report.json, contact.png, frames/; event vfx.checked; --task copies them
+ * to studio/proof/<task>/.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -95,11 +76,9 @@ export function flashTimes(spec) {
 
 /**
  * Judge an effect from frame measurements. stats = {
- *   frames: [{ t, changed, edge, lum }],   changed: share of stage pixels differing from the background; edge:
- *                                         changed pixels on the stage border; lum: mean luminance 0..1
- *   dense: [{ t, changed, lum }],          the flash pass
- *   seam: share differing between t = 0 and t = end (loops), same: share differing between two renders of one
- *   time with one seed }
+ *   frames: [{ t, changed, edge, lum }],  changed: share of stage pixels differing from the background; edge: changed
+ *     pixels on the stage border; lum: mean luminance 0..1; dense: [{ t, changed, lum }] (flash pass);
+ *   seam: differing share between t = 0 and t = end (loops); same: between two renders of one time and seed }
  */
 export function judge(spec, stats) {
   const checks = [];

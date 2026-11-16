@@ -2,29 +2,14 @@
 /**
  * scripts/secret-scan.mjs [root] [--staged | --since <ref> | --no-history] — fail if a key-shaped string would be
  * published.
- *
- *   (no flag)       what git would publish: tracked files plus untracked files that are not ignored, AND every
- *                   commit not on the base branch yet (the `secrets` gate in verify). A key committed and then
- *                   cleaned from the file is still in a commit, so the gate reads those commits too.
- *   --staged        what is staged, read from the index (the pre-commit hook), not the file on disk: a token
- *                   staged and then cleaned only in the file is what the commit would hold.
- *   --since <ref>   only the commits in <ref>..HEAD: the lines each one adds and its message.
- *   --no-history    only the files.
- *
- * The base for the commits: origin/$GITHUB_BASE_REF (CI), origin/HEAD, origin/main, origin/master, then the
- * studio's branch (a lane's main checkout), main or master when HEAD is on another branch; the commits since the
- * merge-base with the first one found. With none, the last 50 commits. Outside git it scans the folder. Your own
- * .env (ignored) never trips it, so private clones stay green.
- *
- * Text files in UTF-8, UTF-8 with a BOM, or UTF-16 LE/BE with a BOM (Windows PowerShell 5's `>`) are read;
- * other files with a NUL byte are binary and skipped. What counts as a secret lives in harness/secrets.mjs,
- * shared with scrub(). Pure Node plus git, so it runs the same on Windows, macOS and Linux. Values are never
- * printed: a hit is reported as file:line, the kind (for example discord-bot-token) and the sha256 of the value,
- * with the commit's short id for one in history.
- *
- * A true false alarm (not a key) can be allowed by the owner only: an entry in studio/secrets-allow.json (protected,
- * so it needs the owner's signed approval) with path, kind, fingerprint (that sha256) and optionally the commit
- * ("*": the files). It is then listed as "allowed (reason)" and doesn't fail. A real key is rotated, never allowed.
+ *   (no flag)       tracked files plus untracked files not ignored, AND every commit not on the base branch yet
+ *   --staged        what is staged, read from the index (the pre-commit hook)
+ *   --since <ref>   only the commits in <ref>..HEAD: the lines each one adds and its message
+ *   --no-history    only the files
+ * Base: origin/$GITHUB_BASE_REF, origin/HEAD, origin/main, origin/master, then main or master; with none, the last 50
+ * commits. Outside git it scans the folder. Your own .env (ignored) never trips it. What counts as a secret lives in
+ * harness/secrets.mjs. Values are never printed: a hit is file:line, the kind and the sha256 of the value.
+ * Only the owner can allow a false alarm: studio/secrets-allow.json (protected). A real key is rotated, never allowed.
  */
 import fs from 'node:fs';
 import path from 'node:path';

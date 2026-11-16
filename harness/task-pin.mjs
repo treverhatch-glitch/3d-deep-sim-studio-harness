@@ -1,15 +1,12 @@
 /**
- * harness/task-pin.mjs — 2.77.0 (n, B-92 launcher side): a session started with --task works only that task.
+ * harness/task-pin.mjs — a session started with --task works only that task.
  *
- * The crew's evidence: builder-agy10 was started with `--task T-152`, took a P0 rescue (T-183) instead and ran
- * `task done --train` for it, with T-152's unlanded commits in its lane. The launcher (harness/agent.mjs runAgent)
- * now gives every session it starts on a task (any tool: claude, agy, codex, a custom command) STUDIO_TASK_PIN=<task>
- * in its environment, records `pinned` on the session, and says so in the kickoff. From such a session:
- *   - `task start <other>` is refused (task.start_refused, meta.pin), and so is
- *   - `task done <other>` in every form that closes or queues it (plain, --train); --check and --train-check (read
- *     only, and the train's own lane check) are not.
- * The pinned task itself is never refused. A rescue or a P0 for another task is someone else's session.
- * STUDIO_TASK_PIN is set only by the launcher; a person's shell has none, so nothing changes there.
+ * The launcher (harness/agent.mjs runAgent) gives every session it starts on a task (any tool) STUDIO_TASK_PIN=<task>
+ * in its environment, records `pinned` on the session, and says so in the kickoff. From such a session `task start
+ * <other>` is refused (task.start_refused, meta.pin), and so is `task done <other>` in every form that closes or
+ * queues it (plain, --train); --check and --train-check (read only) are not.
+ * The pinned task itself is never refused. STUDIO_TASK_PIN is set only by the launcher; a person's shell has none, so
+ * nothing changes there.
  */
 
 const ID = /^[A-Za-z][\w.-]{0,40}$/;

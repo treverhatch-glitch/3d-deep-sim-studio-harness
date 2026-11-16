@@ -1,32 +1,23 @@
 /**
- * qa/selftest-2711b.mjs — 2.71.1 (helper B): process hygiene against the red team's attacks (verifier report 2026-11-03).
- *   env        a gate's children run without code-loading NODE_OPTIONS (a memory flag stays), npm's node-options and
- *              GIT_DIR, with GIT_NO_REPLACE_OBJECTS=1 (S03); a verify started with a preload says so (T06).
- *   git        replace refs or a grafts file fail the protected check (G10/G16/T01); a clean repo passes.
- *   paths      a protected file under a non-ASCII folder and a case variant of a protected path are listed (G14, W01);
- *              the lane diff names non-ASCII paths unquoted; an unprotected file is not listed.
- *   lock       `lock release --owner alice` by bob (STUDIO_LOCK_OWNER=bob) is refused naming alice (K01); alice
- *              releases her own; a lock whose holder's session ended can be released.
- *   output     a gate that floods shows its first and last STUDIO_GATE_OUTPUT_LINES lines, the whole log on disk (L01);
- *              its lines shaped like `[gates] Fix:` / `[gates] PASS` / `[verify]` are shown as `| [gates] ...` (I01);
- *              a short passing gate's output is unchanged.
- *   sessions   the launcher's session end names the session's task (from its record, else its last claim); tokens
- *              --by task and the cost card count tokens per landed task.
- *   modules    node_modules that don't match package-lock.json (a version, a shim in .bin) are named (S04).
- *   rollback   `upgrade --rollback --by <person>` reverts the last update's merge, keeps later work and the branches,
- *              records an event and a decision; refused with an uncommitted board change.
- * Made-up studios in temp folders; no network.
+ * qa/selftest-2711b.mjs — process hygiene: gate environment, git tricks, protected paths, locks, output, rollback.
+ * env  a gate's children run without code-loading NODE_OPTIONS (a memory flag stays), npm's node-options and GIT_DIR.
+ * git  replace refs or a grafts file fail the protected check; non-ASCII and case-variant protected paths are listed.
+ * lock  `lock release --owner alice` by bob is refused; a lock whose holder's session ended can be released.
+ * output  a flooding gate shows its first and last STUDIO_GATE_OUTPUT_LINES lines (whole log on disk); `[gates] Fix:`
+ *   lines are shown as `| [gates] ...`.
+ * more  modules not matching package-lock.json are named; `upgrade --rollback --by <person>` reverts the last merge,
+ *   keeps later work, refused with an uncommitted board change.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { gEnvOf, gitArgsOf, guardOf, out, readJsonl as events } from './kit.mjs';
 
 export async function selftest2711B({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitArgsOf(gEnv);
+  const guard = guardOf(report);
   const nm = path.join(dir, 'node_modules');
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
@@ -48,7 +39,6 @@ export async function selftest2711B({ dir, run, report, tmpRoot }) {
     made.push(S);
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const addGate = (S, gate) => { const f = path.join(S, 'studio', 'gates.json'); const c = JSON.parse(fs.readFileSync(f, 'utf8')); c.gates.push(gate); fs.writeFileSync(f, JSON.stringify(c, null, 2)); };
   const node = (S, code, env) => { const f = path.join(S, `.probe-2711b-${++n}.mjs`); fs.writeFileSync(f, code); return run(S, `node ${path.basename(f)}`, env); };
   const lastJson = (r) => { const l = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop(); try { return JSON.parse(l); } catch { return null; } };

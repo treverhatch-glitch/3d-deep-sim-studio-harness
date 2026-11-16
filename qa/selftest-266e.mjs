@@ -10,11 +10,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { gitDirOf, out } from './kit.mjs';
 
 export async function selftest266E({ dir, run, report }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const { classifyLane } = await import(pathToFileURL(path.join(dir, 'harness', 'tiers.mjs')).href);
   const direct = classifyLane({ files: [{ path: 'studio/fuzz.ignore.json', status: 'M' }] });
   const viaProposal = classifyLane({ files: [{ path: 'studio-proposals/T-1.json', status: 'A' }], proposals: { 'studio-proposals/T-1.json': ['studio/fuzz.ignore.json'] } });
@@ -25,7 +24,7 @@ export async function selftest266E({ dir, run, report }) {
     JSON.stringify({ direct: direct.tier, viaProposal: viaProposal.tier, other: other.tier, lowered: lowered.tier }));
 
   // The baseline ratchet: a git copy whose main has the baseline; a branch that adds a name fails check-docs.
-  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
+  const g = gitDirOf(dir);
   g('init', '-q', '-b', 'main'); g('add', '-A'); g('commit', '-qm', 'base', '--no-verify');
   const before = run(dir, 'node scripts/settings-map.mjs --check', { STUDIO_SETTINGS_BASE_REF: '' });
   const bf = path.join(dir, 'docs', 'settings-baseline.json');

@@ -1,27 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/role-brief.mjs — 2.71.0 (y): the builder role's brief, generated from the studio's real rules (duty 12).
- *
+ * harness/role-brief.mjs — the builder role's brief, generated from the studio's real rules.
  *   npm run brief -- builder            print the brief composed now, and whether the saved one is current
  *   npm run brief -- builder --write    write it to .studio/briefs/role-builder.md
- *
- * The crew's overseer rewrote its builders' briefs by hand every session, and they drifted from the rules the gates
- * enforce. This composes one from the files that ARE the rules, under ROLE_BRIEF_MAX_WORDS (800):
- *   - the agent rules for the studio's scope: AGENTS.lite.md in Lite, AGENTS.md in Full (harness/mode.mjs scopeOf):
- *     every bullet and numbered rule, "Never" sections first;
- *   - studio/PITFALLS.md: the lines for all roles and for builders (lessons, never commands);
- *   - studio/protected.json: the globs only the owner's signed approval changes;
- *   - the gates the scope's verify runs (studio/gates.json: lite gates in Lite, required ones in Full, plus the game's
- *     own checks from its studio.gates.json) with the first clause of each one's Fix line (harness/gate-fix.mjs);
- *   - studio/policy.json, when the studio has one (the owner's rules: "never", notes, autonomous mode): read if present;
- *   - the claim, lane and done commands.
- * Sections are cut from their ends to fit, and the brief says what it cut and where the whole text is.
- *
- * The file starts with a header holding a hash of its sources and of its own body. It is never written by an agent:
- * only this module writes it (this command, or the kickoff refreshing a saved one: ensureRoleBrief). When a source
- * changes, or the body no longer matches its hash (someone edited the file), the kickoff writes it again from the
- * sources (one brief.role.written event, saying why). The kickoff points builders at it only while one exists
- * (harness/kickoff.mjs). It lives in .studio/ (not committed, not protected): it is derived, never a source.
+ * It is composed under ROLE_BRIEF_MAX_WORDS (800) from: the scope's agent rules (AGENTS.lite.md in Lite, AGENTS.md in
+ * Full; "Never" first), studio/PITFALLS.md, the globs in studio/protected.json, the scope's gates (studio/gates.json
+ * plus the game's studio.gates.json) with each Fix line's first clause (harness/gate-fix.mjs), studio/policy.json if
+ * present, and the claim, lane and done commands. Sections are cut from their ends to fit, and the brief says what it
+ * cut. Only this module writes the file (this command, or the kickoff: ensureRoleBrief); a header holds a hash of the
+ * sources and body, so a changed source or an edited body makes the kickoff write it again (one brief.role.written
+ * event). It lives in .studio/ (not committed, not protected): derived, never a source.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';

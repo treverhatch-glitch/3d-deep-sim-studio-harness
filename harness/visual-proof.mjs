@@ -1,34 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/visual-proof.mjs — a render task proves itself with pictures. A render task (Godot, graphics, visuals, a
- * scene, a model) needs before/after captures from fixed, named cameras, because such tasks can pass with no visible
- * change:
- *
- *   .studio/proof/<TASK>/visual/before/<camera>.png     taken when the task starts (or by `capture`)
- *   .studio/proof/<TASK>/visual/after/<camera>.png      taken before `task done`
- *
- * The check fails when a capture is missing, a frame is blank (almost no luminance variation, or almost
- * fully transparent), or a before/after pair is near-identical (mean luminance change below
- * STUDIO_VISUAL_DIFF_MIN, 0.01 = 1%; or STUDIO_VISUAL_NOISE_K times the camera's measured noise, see
- * visualLimits). The result is written as the `visual` part of the task's verdict
- * (harness/verdict-split.mjs).
- *
- * Godot capture (a real frame, not an editor check): import headless, then run the main scene with a
- * window under OpenGL (`--rendering-driver opengl3`; the dummy headless renderer draws nothing), through
- * xvfb-run when there is no display, and save one PNG per camera. Cameras: Camera3D/Camera2D nodes named in
- * --cams (or the project's studio.cameras list, or every camera in the group "studio_capture").
- *
+ * harness/visual-proof.mjs — a render task proves itself with before/after pictures from fixed, named cameras.
+ * .studio/proof/<TASK>/visual/before/<camera>.png and .../after/<camera>.png. Fails when a capture is missing, a frame
+ * is blank, or a pair is near-identical (mean luminance change below STUDIO_VISUAL_DIFF_MIN, 0.01; or
+ * STUDIO_VISUAL_NOISE_K times the camera's noise).
  *   node harness/visual-proof.mjs capture <TASK> before|after --godot <project> [--cams a,b] [--frames 30]
- *   node harness/visual-proof.mjs capture <TASK> before|after [--cams a,b]   (the game's own capture command)
+ *   node harness/visual-proof.mjs capture <TASK> before|after [--cams a,b]
  *   node harness/visual-proof.mjs check <TASK> [--json]           exit 1 when the visual proof fails
- *   node harness/visual-proof.mjs stats <file.png>                  blank-frame numbers for one image
- *   node harness/visual-proof.mjs diff <a.png> <b.png>              mean change between two images
- *
- * A game that isn't a Godot project (a web game, any engine) names its own capture command in its check
- * manifest, <game root>/studio.gates.json: "visual": { "capture": "node tools/capture.mjs {out} {cams}" }. The
- * command writes one <camera>.png per camera into {out}; the same before/after check applies. The manifest is a
- * protected file, so the owner approves the command once. Placeholders: {out} (absolute folder), {cams} (comma
- * list, may be empty), {task}, {phase} (before|after).
+ *   node harness/visual-proof.mjs stats <file.png> | diff <a.png> <b.png>   numbers | change
+ * A non-Godot game names its command in <game root>/studio.gates.json "visual": { "capture": "<command with {out}
+ * {cams} {task} {phase}>" }.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -42,12 +23,9 @@ import { gameCapture } from './visual-capture.mjs';
 
 const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 /**
- * The noise baseline. Two captures of unchanged code differ a little, so a small real change might not clear the
- * "near-identical" line. So "before" is captured twice per camera
- * (before/ and before-noise/), and a camera's change must reach max(diffMin, noiseK x its measured noise)
- * (STUDIO_VISUAL_NOISE_K, 2). That bar is capped (STUDIO_VISUAL_NOISE_CAP, 0.05): a camera whose bar would pass the
- * cap is too noisy to judge, an error naming it, never a pass. A camera with no second before capture is judged
- * against diffMin as before (and the check says no noise was measured).
+ * The noise baseline. "before" is captured twice per camera (before/ and before-noise/), and a camera's change must
+ * reach max(diffMin, noiseK x its measured noise) (STUDIO_VISUAL_NOISE_K, 2). The bar is capped
+ * (STUDIO_VISUAL_NOISE_CAP, 0.05): a camera whose bar would pass the cap is too noisy to judge, an error, never a pass.
  */
 export const visualLimits = (env = process.env) => ({
   diffMin: num(env.STUDIO_VISUAL_DIFF_MIN, 0.01),
@@ -68,16 +46,10 @@ export function noiseBar(noise, limits = visualLimits()) {
 export const proofDir = (task) => path.join(STUDIO_STATE_DIR, 'proof', task, 'visual');
 
 /**
- * Which renderer drew a capture side: <side>.renderer.json beside the side's folder (the folder keeps only the
- * pictures), written by a browser capture through qa/chromium.mjs rendererReport (STUDIO_RENDERER_FILE, set by
- * captureWithCommand), else captureWithCommand's own record of the browser GPU setting. A renderer change (SwiftShader
- * to a GPU, STUDIO_BROWSER_GPU) shifts pixels, so:
- *   - two "before" captures on different renderers: the noise is the renderer's, not the scene's; the noise baseline
- *     is dropped with a note (judged against the minimum), never "too noisy";
- *   - before and after on different renderers: the pair can't be compared (it would pass or fail on the renderer, not
- *     the change): a problem naming both that asks for a new before. `capture after` runs with the GPU setting the
- *     before was taken with (STUDIO_BROWSER_GPU pinned, said in its log).
- * The tolerance is never loosened: no record on either side compares as before.
+ * Which renderer drew a capture side: <side>.renderer.json (written through qa/chromium.mjs rendererReport,
+ * STUDIO_RENDERER_FILE), else captureWithCommand's record of the GPU setting. Two "before" captures on different
+ * renderers: the noise baseline is dropped. Before and after on different renderers: a problem asking for a new before
+ * (`capture after` pins STUDIO_BROWSER_GPU). The tolerance is never loosened.
  */
 export const RENDERER_SUFFIX = '.renderer.json';
 const rendererFile = (sideDir) => `${path.resolve(sideDir)}${RENDERER_SUFFIX}`;

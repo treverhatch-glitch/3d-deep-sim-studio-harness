@@ -1,35 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/threads.mjs — thread subscription, pass-through and the trigger table.
- *
- *   npm run thread -- status                              mode, live sources, keys, last sweep
- *   npm run thread -- sweep                               index and route the events since the last sweep
- *   npm run thread -- resolve <key>                       which task a key belongs to (exact match only)
+ *   npm run thread -- status                              mode, live sources, keys
+ *   npm run thread -- sweep | resolve <key>               index and route new events | which task a key belongs to
  *   npm run thread -- inbox <ID> [--peek]                 a task's inbox (studio/handoffs/<ID>.inbox.md)
- *   npm run thread -- link <key> <ID> --by <name>         a bot ties a Discord message or a PR/issue to a task
+ *   npm run thread -- link <key> <ID> --by <name>         a bot ties a Discord message or PR/issue to a task
  *   npm run thread -- unlink <key> --by <name>
- *   npm run thread -- post <key> "<text>" --source discord|github --by <name> [--ref <id>] [--author <sender id>]
- *
- * The index (.studio/threads.json) maps exact keys to tasks. It is built by code from the events the studio
- * already writes: a task id, its lane branch (.studio/lane-branches.json, task.train.queued), the commits a lane
- * queued or a train landed (sha), a merge train's id and its lanes (task.train.start), an old confirmed brief (B-), an ask
- * (A-), an away item (AW-), a fun-check wave (W-), a closed-loop bug (BUG-), and, registered by a bot with
- * `link`, a Discord message id or a PR/issue number. Nothing is guessed: no similar titles, no fuzzy matches.
- *
- * studio/triggers.json sets, per source (ci, train, discord, github), a policy applied by code:
- *   respond    a match goes to the task's inbox, and the session holding the task is told at its next tool call;
- *   candidate  a match goes to the task's inbox (read in the brief and with `inbox`), no notice;
- *   ignore     dropped.
- * An event with no thread (or whose tasks are all done) goes to the Producer: one line in studio/producer/INBOX.md,
- * which the Producer reads at its next start. Pass-through never adds a task and never edits the board (studio/NEXT.md):
- * the Producer stays the only writer to the live queue.
- *
- * "senders" in studio/triggers.json: a discord or github event responds only when its author id (--author, the id the bot
- * got from Discord or GitHub; the harness can't verify it) is listed as owner or trusted; any other author's event, or one
- * with no author, is at most a candidate. Empty lists: all candidates.
- *
- * STUDIO_THREADS (or "mode" in studio/triggers.json): on routes the sources listed in "live" (ci and train by default; the
- * others are left alone until listed); off does nothing. "shadow" (the old default) now behaves as off.
+ *   npm run thread -- post <key> "<text>" --source discord|github --by <name> [--ref <id>] [--author <id>]
+ * The index (.studio/threads.json) maps exact keys to tasks; nothing is guessed. studio/triggers.json sets per source
+ * (ci, train, discord, github): respond, candidate or ignore. No thread: studio/producer/INBOX.md. Never edits
+ * studio/NEXT.md. A discord/github event responds only from an author id listed as owner or trusted.
  */
 import fs from 'node:fs';
 import path from 'node:path';

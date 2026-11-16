@@ -1,32 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/digest.mjs — 2.65.0 (hands-off by default): one daily digest instead of approval pings.
- *
+ * harness/digest.mjs — one daily digest of what still needs a person, instead of approval pings (no model, no tokens).
  *   npm run digest [-- --print] [--date YYYY-MM-DD]   write studio/digest/<date>.md now (--print: also show it)
- *
- * The watchdog writes it once a day by itself, on its first pass at or after STUDIO_DIGEST_HOUR (9) local time
- * (STUDIO_DIGEST=off: never automatically). It lists only what still needs a person, in under 200 words:
- *   - safety-gate and protected-file changes waiting: lanes the merge train holds for a person's release (tier C:
- *     protected files, harness code, deleted tests ...), and protected files changed on main without the owner's
- *     approval;
- *   - Bible and phase decisions: an unsigned Bible, open questions for the game dev (npm run ask);
- *   - spend: a tool over its weekly target (npm run budget);
- *   - stops: a halted supervisor whose cause isn't on the self-triage list, and causes self-triage left for a person;
- *   - 2.66.0: fuzz findings suggested in the last 24 h (npm run fuzz's shadow week); filed ones get a count line;
- *   - 2.67.1: Unity Play Mode flakes (a test that failed, then passed on its one retry) in the last 24 h, as a line;
- *   - 2.70.0: the latest playable build and clip made after a landing in the last 24 h, as a line;
- *   - 2.68.0: roles the crew watchdog paused (harness/crew-watch.mjs), and the latest harness upgrade's verdict once
- *     both sides have enough data (npm run autonomy -- impact), as a line;
- *   - 2.70.0 (v): assets waiting for a review of their previews, oldest first (harness/asset-review.mjs);
- *   - 2.71.0 (x): autonomous decisions waiting for review past the policy's reviewWithinH, and a proposal of
- *     autonomous mode waiting for the owner; then a line with the autonomous decisions (harness/decisions.mjs);
- *   - 2.71.0 (y): research tasks finished in the last 24 h, each with its write-up and recommendation, as a line;
- *   - 2.71.0 (z): workarounds per day, the top 5 signatures, the trend after the latest upgrade and the open harness
- *     tasks (harness/workaround.mjs), as a line;
- * then (2.66.0) the top 5 blocked commands as allowlist candidates (harness/denials.mjs; never added to any settings or
- * permission file: a person decides), the autonomy scorecard's line and what self-triage fixed in the last 24 h. Nothing needing a person: one line
- * says so. One digest.written event. A script: no model, no tokens. Every source is read-only and optional (a source
- * that fails to read is skipped, never a crash).
+ * The watchdog writes it once a day, on its first pass at or after STUDIO_DIGEST_HOUR (9) local time
+ * (STUDIO_DIGEST=off: never automatically), in under 200 words: safety-gate and protected-file changes waiting; Bible
+ * and phase decisions (npm run ask); spend over a weekly target (npm run budget); stops; fuzz findings; Unity Play
+ * Mode flakes; the latest build and clip; paused roles and the latest upgrade's verdict; assets awaiting review
+ * (harness/asset-review.mjs); autonomous decisions (harness/decisions.mjs); research tasks; workarounds
+ * (harness/workaround.mjs); the top 5 blocked commands as allowlist candidates (harness/denials.mjs; never added to
+ * any settings file); the autonomy scorecard and self-triage fixes. Nothing needing a person: one line says so. One
+ * digest.written event. Every source is read-only and optional.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -10,11 +10,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { eventsOf, fileUrlOf, out } from './kit.mjs';
 
 export async function selftest2652A({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlOf(dir);
   const events = path.join(dir, '.studio', 'events-2652a.jsonl');
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_ROLE: '', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_BUILDER_CMD: '', STUDIO_PRODUCER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_AGENT_TOOL: '', STUDIO_REHEARSAL: '', STUDIO_LONG_CACHE: '', STUDIO_CACHE_READ_WEIGHT: '', STUDIO_AUTONOMY_CACHE_S: '0', STUDIO_LANELESS: 'shared', STUDIO_WORKTREES: 'off', AGENT_EVENTS_FILE: events };
   let n = 0;
@@ -26,7 +25,7 @@ export async function selftest2652A({ dir, run, report, tmpRoot }) {
     const line = String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{')).pop();
     try { return { ...JSON.parse(line), _out: out(r).slice(-1500) }; } catch { return { _out: out(r).slice(-2000) }; }
   };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const near = (a, b) => typeof a === 'number' && Math.abs(a - b) < 1e-9;
 
   // ---- 1a. the session end records the write split and the TTL asked for ----

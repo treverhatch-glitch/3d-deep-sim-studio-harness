@@ -4,12 +4,11 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf as fileUrlRelOf, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest242({ dir, run, report, tmpRoot }) {
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const u = fileUrlRelOf(dir);
+  const w = writeInDirOf(dir);
   let n = 0;
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p242-${++n}-${process.pid}.mjs`);

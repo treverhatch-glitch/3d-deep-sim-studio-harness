@@ -1,19 +1,14 @@
 /**
- * harness/type-evidence.mjs — 2.65.0 (hands-off by default): a task's type decided from its diff, never by asking.
- *
- * A "bug"-titled task whose changes are only tests, docs or config (a flaky test, a typo, a timeout setting) has no
- * game behaviour to replay, yet done-check asked it for a regression that fails before the fix, so the crew had to
- * ask the owner to retype it (B-36). Now done-check reads the task's changed files (done-check.mjs taskChanges, the
- * same list the render decision reads) and, when every file is a test, a doc or a config file and none is game logic,
- * judges it a "change" task, says why ("type: change (evidence: only tests/config changed: …)") and records one
- * task.type.evidence event. A file is game logic, so the task stays a bug and still needs its replay, when it is:
- *   - in the game's sim paths: harness/tiers.mjs's "sim" rule (game/<g>/sim, web/<g>/sim, cartridges/) plus the game
- *     manifest's "simPaths", "pins.files", "irreversible", "shared" and "registry" globs (<game>/studio.gates.json);
- *   - a golden or snapshot (behaviour), a deleted test, or the studio's own code (harness/, scripts/, qa/*.mjs);
- *   - anything else that isn't a test (harness/test-weakening.mjs isTestPath), a doc (*.md, docs/) or a config file
- *     (json/yaml/toml/ini settings, *.config.*, dotfile settings; package files are shared code, not config).
- * An owner or permission record (harness/reclassify.mjs) always outranks the evidence; no commits yet: the title
- * decides as before. Pure classification here; done-check.mjs reads the files and writes the event.
+ * harness/type-evidence.mjs — decides a task's type from its diff, never by asking. A "bug"-titled task whose changes
+ * are only tests, docs or config has no game behaviour to replay, so done-check (done-check.mjs taskChanges) judges
+ * it a "change" task, says why ("type: change (evidence: only tests/config changed: …)") and records one
+ * task.type.evidence event. The task stays a bug and still needs its replay when a changed file is:
+ *   - in the game's sim paths: harness/tiers.mjs's "sim" rule plus the manifest's "simPaths", "pins.files",
+ *     "irreversible", "shared" and "registry" globs (<game>/studio.gates.json);
+ *   - a golden or snapshot, a deleted test, or the studio's own code (harness/, scripts/, qa/*.mjs);
+ *   - not a test (harness/test-weakening.mjs isTestPath), a doc (*.md, docs/) or a config file (json/yaml/toml/ini,
+ *     *.config.*, dotfile settings; package files are shared code).
+ * An owner or permission record (harness/reclassify.mjs) outranks the evidence; no commits yet: the title decides.
  */
 import fs from 'node:fs';
 import path from 'node:path';

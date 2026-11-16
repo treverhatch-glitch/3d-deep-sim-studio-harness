@@ -1,26 +1,23 @@
 /**
- * qa/selftest-283g.mjs — 2.83 (g): five false alarms and loops a crew hit in a 26-hour run.
- *
- *   train     a builder whose task is queued for a merge train (game or engine) or in a running train is not "stalled"
- *             (harness/watch.mjs); a silent one with no train still is
- *   review    the game review for the same set of unchanged shots is tried once a day, not every cycle (the board
- *             refused it 37 times in 26 h); one quiet telemetry line (harness/gamedev-loop.mjs)
- *   family    a review in a crew with one model family: launched on a different model of that family with one brief line,
- *             the same-family header is accepted only while no other family is configured (harness/review-family.mjs)
- *   idle      the watchdog's "no task finished in N h" clock starts no earlier than the supervisor's own start
- *             (harness/watchdog.mjs)
- *   dead      a claim whose owner's process is gone for STUDIO_DEAD_CLAIM_MIN is handed back, not kept, and a task's
- *             claimed minutes skip the time no supervisor ran, so no rescue for age alone (harness/busy.mjs, task-budget.mjs)
+ * qa/selftest-283g.mjs — five false alarms and loops from a long run of a crew.
+ * train  a builder whose task is queued for a merge train (game or engine) or in a running train is not "stalled"
+ *   (harness/watch.mjs); a silent one with no train still is.
+ * review  the game review for the same unchanged shots is tried once a day, not every cycle
+ *   (harness/gamedev-loop.mjs).
+ * family  a review in a one-family crew is launched on a different model of that family with one brief line; the
+ *   same-family header is accepted only while no other family is configured (harness/review-family.mjs).
+ * idle  the watchdog's "no task finished in N h" clock starts no earlier than the supervisor's start.
+ * dead  a claim whose owner's process is gone for STUDIO_DEAD_CLAIM_MIN is handed back; claimed minutes skip the time
+ *   no supervisor ran (harness/busy.mjs).
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlIn as u, guardCap3000Of, out, readJsonl as events } from './kit.mjs';
 
 export async function selftest283G({ dir, run, report, tmpRoot }) {
   void run;
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 3000)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 3000)); } };
+  const guard = guardCap3000Of(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
   const base = {
@@ -38,8 +35,6 @@ export async function selftest283G({ dir, run, report, tmpRoot }) {
     fs.writeFileSync(ev, '');
     return { S, ev, env: { ...base, AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const cli = (S, env, cmd) => spawnSync(process.execPath, cmd, { windowsHide: true, cwd: S, env: { ...process.env, ...env }, encoding: 'utf8', timeout: 120000 });
   const probe = (S, env, code) => {
     const f = path.join(tmpRoot, `probe-283g-${process.pid}-${++n}.mjs`);

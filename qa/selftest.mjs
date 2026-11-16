@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileUrlOf as fileUrlRelOf, pause } from './kit.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-selftest-'));
@@ -132,13 +133,10 @@ function copyRepo() {
 if (templateTree().dir) gates = JSON.parse(fs.readFileSync(path.join(templateTree().dir, 'studio', 'gates.json'), 'utf8')).gates;
 const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readFileSync(path.join(dir, rel), 'utf8')));
 // A clean environment: nothing from the shell or .env (agent names, cartridge, keys, folders) leaks into a test.
-// 2.59.0: the supervisor starts no agent under STUDIO_RAM_FLOOR_GB free memory; checks run with it off so a busy test
-// machine doesn't change their result (qa/selftest-259d.mjs tests the floor with its own setting).
-// 2.60.1 (B-17, B-35): the same for heavy work's memory floor, the CPU probe (Windows) and an open Unity editor
-// counted as heavy work (qa/selftest-2601m.mjs tests them with its own settings).
-// 2.70.0 (t): no playable build + clip worker after a test train's landing (qa/selftest-270t.mjs turns it on).
-// 2.86.0 (f): under the disk budget the supervisor starts no new lane copy or engine worktree; checks run with it off so a
-// test machine with little free disk doesn't change their result (qa/selftest-286f.mjs tests the stop with its own setting).
+// Checks run with STUDIO_RAM_FLOOR_GB (no agent under that free memory), heavy work's memory floor, the CPU probe
+// (Windows), the open Unity editor count and the disk budget (no new lane copy or engine worktree) switched off, so a
+// busy test machine doesn't change results (qa/selftest-259d.mjs, -2601m.mjs, -286f.mjs test them with their own
+// settings). No playable build + clip worker after a test train's landing (qa/selftest-270t.mjs turns it on).
 const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_DISK_MIN_FREE_GB: '0', STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
   // 2.73.0 (g): the copies' verify keys (harness/verify-key.mjs) live in the self-test's temp folder, never in the user's home.
   STUDIO_VERIFY_KEY_DIR: path.join(tmpRoot, 'verify-keys') };
@@ -164,14 +162,12 @@ const report = (label, ok, detail = '') => {
   if (!ok) failed += 1;
 };
 
-// 2.72.0 (d): CI shards. Every check below sits in a unit that starts with `if (inShard(...)) {` (a top-level block,
-// or one gate of the sabotage loop). `--shard i/N` runs units i, i+N, i+2N, ... in file order (a group: every unit
-// with the same group name runs in the shard of its first unit, for checks that must stay together); nothing else
-// changes, so the shards' union is the whole self-test. `--list-shards N` runs no check: it prints the units and
-// their shard as JSON, plus any check that ran outside a unit ("strays": a new block without the guard), and exits 1
-// when there is one. A new block starts with `if (inShard()) {` (or `if (inShard('<label>', '<group>')) {`).
-// Each shard runs on its own CI runner; shards are balanced by count unless `--balance [file]` gives each unit's
-// recorded time (harness/selftest-timing.mjs); each shard prints its slowest units.
+// CI shards. Every check sits in a unit that starts with `if (inShard(...)) {` (a top-level block, or one gate of the
+// sabotage loop). `--shard i/N` runs units i, i+N, i+2N, ... in file order (units with the same group name run in the
+// shard of their first unit); the shards' union is the whole self-test. `--list-shards N` runs no check: it prints the
+// units and their shard as JSON plus any "stray" check outside a unit, and exits 1 on one. A new block starts with
+// `if (inShard()) {` (or `if (inShard('<label>', '<group>')) {`). Shards balance by count unless `--balance [file]`
+// gives unit times (harness/selftest-timing.mjs); each shard prints its slowest units.
 const SELFTEST_ARGS = process.argv.slice(2);
 const argValue = (name) => {
   const i = SELFTEST_ARGS.findIndex((a) => a === name || a.startsWith(`${name}=`));
@@ -1098,14 +1094,10 @@ if (inShard()) {
   git('init -q');
   git('add -A');
   git('commit -q -m init --no-verify');
-  // 2.58.5: laneless tasks keep the shared checkout here, as custom commands did before H-9 (a lane copy and a landing
-  // per session take seconds on Windows, and this checks the supervisor's sequence, not lanes; the lanes part below
-  // still uses copies). The fake agent commits in a copy anyway (qa/fixtures/agents/fake-agent.mjs).
-  // 2.81.0: until 2.80 `--no-hub` kept the hub's timed jobs (the watch pass, the watchdog) out of this run; they now
-  // run inside the supervisor's loop whatever the flag says, and on a Windows runner they and the machine probes
-  // (a process listing, a scan) made each pass slow enough that two sessions no longer fitted the window (red on and
-  // off since 2.79, most runs since 2.80). This checks the supervisor's sequence: those jobs and probes are switched
-  // off here, as the newer tests do, and the window and the assertions are unchanged.
+  // Laneless tasks keep the shared checkout here (a lane copy and a landing per session take seconds on Windows; this
+  // checks the supervisor's sequence, not lanes; the lanes part below still uses copies). The fake agent commits in a
+  // copy anyway (qa/fixtures/agents/fake-agent.mjs). The hub's timed jobs (watch pass, watchdog) and the machine probes
+  // (process listing, scan) are switched off here, as in the newer tests, so two sessions fit the window.
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1', STUDIO_LANELESS: 'shared', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok',
     STUDIO_WATCH_INTERVAL: '0', STUDIO_WATCHDOG: 'off', STUDIO_MACHINE_SCAN: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_CPU_PROBE: 'off' };
   for (const t of ['Tidy the HUD', 'Tidy the menu', 'Tidy the end screen']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
@@ -1183,7 +1175,6 @@ if (inShard()) {
   git('init -q');
   git('add -A');
   git('commit -q -m init --no-verify');
-  const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`], { windowsHide: true });
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1' };
   const id = (cmd) => JSON.parse(run(dir, cmd, env).stdout).id;
   const quotaFile = path.join(dir, '.studio/tool-quota.json');
@@ -1356,7 +1347,6 @@ if (inShard()) {
   git('init -q');
   git('add -A');
   git('commit -q -m init --no-verify');
-  const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`], { windowsHide: true });
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1' };
   const id = (cmd) => JSON.parse(run(dir, cmd, env).stdout).id;
   const quotaFile = path.join(dir, '.studio/tool-quota.json');
@@ -1581,7 +1571,6 @@ if (inShard()) {
   fs.writeFileSync(path.join(vb, 'build.json'), JSON.stringify({ id: '209901010000-vite', at: '2099-01-01T00:00:00Z', page: 'index.html', cartridge: 'tin-moon', outcome: 'won', ticks: 1 }));
   fs.writeFileSync(path.join(vb, 'index.html'), '<script type="module" src="/assets/index-abc.js"></script>\n');
   fs.writeFileSync(path.join(vb, 'assets/index-abc.js'), 'console.log("a bundled game");\n');
-  const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`], { windowsHide: true });
   // 2.80: the hub's Arcade is gone; npm run play (harness/builds.mjs) serves the build the same way.
   const hport = 3900 + Math.floor(Math.random() * 90);
   const playP = spawn(process.execPath, ['harness/builds.mjs', '--build', '209901010000-vite', '--port', String(hport)], { windowsHide: true, cwd: dir, env: { ...CLEAN_ENV }, stdio: 'ignore' });
@@ -2211,7 +2200,7 @@ if (inShard()) {
 // warning, the cheat sheet check. Each module is exercised in a copy; the launcher end to end with a fake agent.
 if (inShard()) {
   const dir = copyRepo();
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p2292-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -2309,7 +2298,7 @@ console.log(JSON.stringify({ dir: c.matchTricks('queue the next tasks with depen
 // drop/reorder, quota accuracy, the watchdog, the Arcade's what-changed, ccusage. Each in a copy.
 if (inShard()) {
   const dir = copyRepo();
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p230a-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -2414,7 +2403,7 @@ console.log(JSON.stringify({ off, still, on, parked: readHolds()['${t3.id}']?.pa
 // 2.30b: real-input fun probes (J1), sim features shown in the build (J4), the asset scout (G7). Each in a copy.
 if (inShard()) {
   const dir = copyRepo();
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p230b-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -2520,7 +2509,7 @@ console.log(JSON.stringify({ found, sa, noAuthor, cc0, ccby, lic: ['CC0', 'CC-BY
 // overnight summary (G6) and the release command. Each in a copy.
 if (inShard()) {
   const dir = copyRepo();
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p230c-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -2649,7 +2638,7 @@ console.log(JSON.stringify({ done: o.done.length, noDone: o.noDone.map((s) => s.
 // fun checks in waves, phone alerts (2.80: away mode, phone login and the kennel went with the War Room). Each in a copy.
 if (inShard()) {
   const dir = copyRepo();
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p230d-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -3049,7 +3038,7 @@ if (inShard()) {
 // norms flag (never cap), verdicts become notes in briefs, and the Godot unit gate skips or reports.
 if (inShard()) {
   const dir = copyRepo();
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const u = fileUrlRelOf(dir);
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p230g-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -5324,6 +5313,14 @@ if (inShard('selftest-286h')) {
   const dir = copyRepo();
   const { selftest286H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-286h.mjs')).href);
   await selftest286H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.87 (a): the length rule for comments (scripts/check-comments.mjs, npm run check:comments).
+if (inShard('selftest-287a')) {
+  const dir = copyRepo();
+  const { selftest287A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-287a.mjs')).href);
+  await selftest287A({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

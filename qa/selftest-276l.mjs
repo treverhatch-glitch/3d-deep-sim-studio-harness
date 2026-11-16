@@ -1,45 +1,30 @@
 /**
- * qa/selftest-276l.mjs — 2.76.0 (helper l): the Communicator (harness/communicator.mjs), harness code that posts the
- * studio's status and alerts to the chat's webhook and tags who must act. No network: a local stand-in webhook.
- *   status    one fixed-format post from the harness's own data (agents and tasks, landed since the run's T0 and per hour,
- *             the train, the rig line, blocked, waiting on yes, beta mode), as "Studio Status", tagging no one; not again
- *             before STUDIO_COMM_STATUS_MIN; again after it
- *   alerts    a dead train, a stop file, the crew breaker and a harness error tag the orchestrator; a lane held for the
- *             owner's release tags the key holder; an ask tags the owner; all in one post, allowed_mentions only those ids
- *   dedup     the same alert isn't posted again within STUDIO_COMM_DEDUP_MIN; an open one is tagged again only after
- *             STUDIO_COMM_REPEAT_MIN; a closed one is named "Cleared" once
- *   beta      in beta mode the held lane and an ordinary ask go to the orchestrator (no key holder, no owner); an ask
- *             about scope still tags the owner
- *   quiet     STUDIO_COMM_QUIET holds an owner-only ask; a disaster (disk under STUDIO_COMM_DISK_GB) still tags the owner
- *             (and the orchestrator); after the quiet hours the held ask is posted
- *   disaster  3 crashes in an hour, everything blocked over STUDIO_COMM_BLOCKED_MIN (only with a supervisor running)
- *   line      the Line Producer's .studio/line/status.json: fewer builders than its target for 10 min tags the
- *             orchestrator; its absence is fine
- *   secret    comm -- status, preview and test never print the webhook or its token (masked "webhook ...<last 4>"); no
- *             event or state file holds it; preview shows mentions as @names; test posts one line tagging no one;
- *             launched agents don't get STUDIO_COMM_WEBHOOK
- *   failing   a webhook that refuses: the pass doesn't throw, tries again only after 5 minutes; the supervisor calls the
- *             pass each loop (source)
- *   split     a long post is cut into parts of at most 2000 characters at line ends, never inside a mention, each part's
- *             allowed_mentions naming only its own ids
- * Every check fails on 2.75.0 (no harness/communicator.mjs, no npm run comm).
+ * qa/selftest-276l.mjs — Communicator (harness/communicator.mjs): posts status and alerts to a webhook, tags who acts.
+ * No network (stand-in webhook). status: one "Studio Status" post, tags no one, not again before
+ *   STUDIO_COMM_STATUS_MIN. alerts: dead train, stop file, crew breaker, harness error tag the orchestrator; a held
+ *   lane tags the key holder; an ask tags the owner; allowed_mentions only those ids. dedup: STUDIO_COMM_DEDUP_MIN;
+ *   an open alert is re-tagged after STUDIO_COMM_REPEAT_MIN; a closed one is "Cleared" once. beta: held lane and
+ *   ordinary ask go to the orchestrator; a scope ask tags the owner. quiet: STUDIO_COMM_QUIET holds an owner-only
+ *   ask; a disaster (disk under STUDIO_COMM_DISK_GB, 3 crashes an hour, STUDIO_COMM_BLOCKED_MIN all blocked) still
+ *   tags. line: .studio/line/status.json under target builders for 10 min tags the orchestrator. secret: output,
+ *   events and state files never hold the webhook; agents don't get STUDIO_COMM_WEBHOOK. failing: a refusing webhook
+ *   doesn't throw, retry after 5 min. split: parts of at most 2000 characters at line ends, never inside a mention.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { eventsOf, fileUrlOf, gEnvOf, guardOf, iso, out } from './kit.mjs';
 
 export async function selftest276L({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlOf(dir);
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
+  const gEnv = gEnvOf(ident);
   const g = (...a) => spawnSync('git', a, { cwd: dir, encoding: 'utf8', env: gEnv(), windowsHide: true });
   const write = (rel, v) => { const f = path.join(dir, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, typeof v === 'string' ? v : JSON.stringify(v, null, 2)); };
   const rm = (rel) => fs.rmSync(path.join(dir, rel), { recursive: true, force: true });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   const events = path.join(dir, '.studio', 'events-276l.jsonl');
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const addEvent = (e) => fs.appendFileSync(events, `${JSON.stringify({ agent: 't', status: 'ok', meta: {}, ...e })}\n`);
   const TOKEN = `tok${'Wq8z'.repeat(10)}Ab3c`;
   const env = {
@@ -82,7 +67,6 @@ http.createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; })
   const posts = () => reqs().map((r) => r.json);
   const clear = () => fs.writeFileSync(hookLog, '');
   const deadPid = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8', windowsHide: true }).stdout.trim();
-  const iso = (ms) => new Date(ms).toISOString();
   const fresh = () => {
     for (const x of ['.studio/comm', '.studio/locks', '.studio/train', '.studio/line', '.studio/agents', '.studio/STOP.json', '.studio/supervisor-stop', '.studio/crew-paused.json', '.studio/supervisor.json', 'studio/asks']) rm(x);
     fs.writeFileSync(events, ''); clear();

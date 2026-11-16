@@ -1,29 +1,26 @@
 /**
- * qa/selftest-278i.mjs — 2.78.0 (C2c): the flake triager's quiet re-run holds other heavy work back while it runs.
- *   The crew: "the alone re-run isn't alone if another verify is on the same port: PU-56 should also hold other
- *   verifies, not just wait for low CPU." PU-56's quiet re-run waited for the machine to be quiet, but a builder's verify
- *   could start the moment it began (and collide on a fixed test port, or load the machine again). Now, from the start
- *   of the quiet wait to the end of the re-run, a hold marker (.studio/locks/machine-heavy-quiet-hold-<pid>.json) keeps
- *   new non-landing heavy work (builder and lane verifies) waiting in the heavy queue, as for M6's train priority.
- *   It is bounded (STUDIO_FLAKE_HOLD_MIN, default the quiet wait + STUDIO_FLAKE_WAIT_MIN + the game check's timeout),
- *   released when the re-run ends, and ignored (removed) once past its bound or when its train's process is gone.
- *   (a) a live hold: a builder's verify doesn't take a free slot (it waits, naming the quiet re-run), a landing check
- *       takes one and the hold stays; once cleared, the builder takes a slot
- *   (b) a stale hold (past its bound, or its process gone) blocks nobody and is removed
- *   (c) the bound: STUDIO_FLAKE_HOLD_MIN, its default, and off
- *   (d) the train: flakeTriage holds during the quiet re-run only (not the first alone run) and releases it after
+ * qa/selftest-278i.mjs — the flake triager's quiet re-run holds other heavy work back while it runs.
+ * From the start of the quiet wait to the end of the re-run, a hold marker
+ *   (.studio/locks/machine-heavy-quiet-hold-<pid>.json) keeps new non-landing heavy work (builder and lane verifies)
+ *   waiting in the heavy queue. It is bounded (STUDIO_FLAKE_HOLD_MIN, default the quiet wait + STUDIO_FLAKE_WAIT_MIN
+ *   + the game check's timeout), released when the re-run ends, and removed once past its bound or when its train's
+ *   process is gone.
+ * (a)  a live hold: a builder's verify waits (naming the quiet re-run), a landing check takes a slot and the hold
+ *   stays; once cleared, the builder takes a slot.
+ * (b)  a stale hold blocks nobody and is removed. (c) the bound: STUDIO_FLAKE_HOLD_MIN, its default, and off.
+ * (d)  flakeTriage holds during the quiet re-run only (not the first alone run) and releases it after.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileUrlOf as fileUrlRelOf, guardOf, writeIn } from './kit.mjs';
 
 export async function selftest278I({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   void run; void harnessRoot;
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
+  const guard = guardOf(report);
+  const u = fileUrlRelOf(dir);
   // A person's terminal: no agent markers, no studio settings from the runner's own shell.
   const clean = {};
   for (const k of Object.keys(process.env)) if (!/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT)/i.test(k)) clean[k] = process.env[k];

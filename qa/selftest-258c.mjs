@@ -1,26 +1,23 @@
 /**
- * qa/selftest-258c.mjs — 2.58.0 (PU-33, P-046): a token can no longer reach a commit, or sit in one, unseen.
- *   1. The pre-commit hook scans what is staged (the index), not the file on disk: staged, then cleaned only in
- *      the file, still fails.
- *   2. Verify's secrets gate reads the commits not on the base branch yet (lines added and messages), so a token
- *      committed and then cleaned still fails; once the base has moved past it, it passes.
- *   3. A UTF-16 file with a BOM (what Windows PowerShell 5's `>` writes) or a UTF-8 BOM file is read, not skipped.
- *   4. The skip list is tied to real paths: harness/secrets.mjs and the root package-lock.json are skipped, any
- *      other secrets.mjs or *.lock is scanned.
- *   5. scrub() (trajectory exports, reviews) removes every PU-18 kind: it shares the scan's list.
- *   6. The owner's allowlist (studio/secrets-allow.json, protected): a finding shows the sha256 of its value, and an
- *      entry (path, kind, fingerprint, commit) allows that one false alarm and nothing else.
- * Every token is built at run time from random characters, so this file holds none and the scan over the repo
- * stays clean. No output may hold a token's value.
+ * qa/selftest-258c.mjs — a token can no longer reach a commit, or sit in one, unseen. Tokens are built at run time, so
+ * this file holds none.
+ *   1. The pre-commit hook scans what is staged (the index), not the file on disk.
+ *   2. Verify's secrets gate reads the commits not on the base branch yet (added lines and messages), so a token
+ *     committed then cleaned still fails.
+ *   3. A UTF-16 file with a BOM (Windows PowerShell 5's `>`) or a UTF-8 BOM file is read, not skipped.
+ *   4. Skip list: harness/secrets.mjs and the root package-lock.json are skipped, any other secrets.mjs or *.lock is
+ *     scanned.
+ *   5. scrub() (trajectory exports, reviews) removes every kind the scan lists. 6. The owner's allowlist
+ *     (studio/secrets-allow.json): a finding shows the sha256 of its value; an entry allows that one false alarm only.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { out } from './kit.mjs';
 
 export async function selftest258C({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const AZ = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   const D = '0123456789';
   const B62 = `${AZ}${AZ.toLowerCase()}${D}`;

@@ -1,32 +1,25 @@
 /**
- * qa/selftest-265t.mjs — 2.65.0 (hands-off by default): decisions from evidence, self-triage, the daily digest, the
- * autonomy level command, cost per merged change.
- *   1. A "bug"-titled task whose commits change only tests/config is judged a "change" (no replay; one
- *      task.type.evidence event); one that changes a sim path stays a bug and needs its replay; an owner's type record
- *      outranks the evidence.
- *   2. Self-triage: a supervisor halt for a tool not on PATH is fixed (the tool marked out, the next tool takes over,
- *      the halt cleared by "self-triage") once per cause per window, then left for a person; unknown causes and custom
- *      commands stay halted; a dead heavy holder's orphans are killed and its slot freed; a game check that timed out
- *      under load runs once more at the cap (not without load, not twice); rescues of landed tasks are closed.
- *   3. `npm run digest` writes studio/digest/<date>.md (under 200 words) with what needs a person, the scorecard line
- *      and what self-triage did, and one event; nothing waiting: one line; the watchdog's daily run at the hour.
+ * qa/selftest-265t.mjs — hands-off by default: decisions from evidence, self-triage, daily digest, autonomy level, cost
+ * per change.
+ *   1. A "bug"-titled task whose commits change only tests/config is a "change" (one task.type.evidence event); one
+ *     changing a sim path stays a bug and needs its replay; an owner's type record outranks the evidence.
+ *   2. Self-triage: a halt for a tool not on PATH is fixed (tool marked out, next takes over) once per cause per
+ *     window; unknown causes and custom commands stay halted; a dead heavy holder's orphans are killed.
+ *   3. `npm run digest` writes studio/digest/<date>.md (<200 words), one event.
  *   4. `npm run autonomy -- level` sets the level for a person, a Producer session, or an outside agent on permission;
- *      workers and an outside agent without permission are refused; one autonomy.level event.
- *   5. The scorecard: tokens per landed task (and the window before), tokens only without a price table (dollars with
- *      studio/prices.json), person round-trips per landed task, conductor notes, and a self-triage resume is no
- *      person's intervention.
+ *     workers are refused.
+ *   5. Scorecard: tokens per landed task (dollars with studio/prices.json), person round-trips, conductor notes.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest265T({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const u = fileUrlOf(dir);
   const ident = { GIT_AUTHOR_NAME: 'hatch', GIT_AUTHOR_EMAIL: 'owner@example.com', GIT_COMMITTER_NAME: 'hatch', GIT_COMMITTER_EMAIL: 'owner@example.com' };
   const env = { ...ident, STUDIO_ROLE: '', STUDIO_LOCK_OWNER: '', STUDIO_AGENT: '', STUDIO_MAIN_ROOT: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', CLAUDE_PROJECT_DIR: '', STUDIO_GAME: '', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_SELF_TRIAGE: '', STUDIO_DIGEST: '', STUDIO_DIGEST_HOUR: '', STUDIO_TEST_ON_PATH: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-265t-${process.pid}.pem`) };
   const git = (cmd, e = {}) => run(dir, `git -c user.name=hatch -c user.email=owner@example.com ${cmd}`, { ...env, ...e });
-  const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const w = writeInDirOf(dir);
   const task = (cmd, e = {}) => run(dir, `node harness/task.mjs ${cmd}`, { ...env, ...e });
   const add = (title, role = 'builder') => JSON.parse(task(`add "${title}" --role ${role}`).stdout).id;
   const doneCheck = (id, e = {}) => out(run(dir, `node harness/done-check.mjs ${id}`, { ...env, ...e }));

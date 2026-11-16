@@ -1,34 +1,24 @@
 /**
- * qa/selftest-2732e.mjs — 2.73.2 (helper e, B-73): a Unity run waits for a free-RAM floor, and an infrastructure abort is
- * "not run", never a FAIL of the game's tests.
- *   floor     STUDIO_UNITY_MIN_FREE_GB (12) never above 60% of the RAM; `heavy run --kind unity` waits for it and exits 3
- *             ("NOT RUN") when the wait runs out, without starting the command
- *   cli       `npm run heavy -- wait` (floor + slot, exit 0 / 3), `wait --hold <label>` keeps the slot in the background
- *             until `release --label <label>`, so other heavy work waits meanwhile
- *   gate      harness/unity.mjs gate with a stand-in editor: out of memory, "Aborting batchmode" before any results and an
- *             editor ended from outside are NOT RUN (exit 3, "[engine-gate] NOT RUN <kind>" with a Fix line); a failing
- *             test or a compile error next to the same signs stays FAIL; free RAM under the floor never starts the editor
- *   land      harness/unity-gate.mjs: a red land run whose output shows an infrastructure abort is status not-run (exit 3)
- *             in unity-last.json, the engine.land event and studio/engine/LOG.md; a failing test keeps it red; under
- *             the floor the land command never starts
- *   train     the Unity train retries a not-run land run and then defers the branch: nobody is handed back
- *   rows      a verify gate that exits 3 with a NOT RUN line is "NOT RUN <id>: not run: <why>" in its row and the plain
- *             words, not FAILING; the Fix for "[engine-gate] NOT RUN out-of-memory" is that kind's own
- * Every check fails on 2.73.1 (no floor, no wait/hold/release, infrastructure aborts recorded as FAIL / red), except the
- * two "stays FAIL" guards, which pass on both (they keep the fix from hiding a real failure).
+ * qa/selftest-2732e.mjs — a Unity run waits for a free-RAM floor, and an infrastructure abort is "not run", never a
+ * FAIL.
+ *   floor  STUDIO_UNITY_MIN_FREE_GB (12, never above 60% of RAM): `heavy run --kind unity` waits, exits 3 ("NOT RUN")
+ *     when it runs out
+ *   cli  `npm run heavy -- wait` (floor + slot, exit 0 / 3); `wait --hold <label>` keeps the slot until `release
+ *     --label <label>`
+ *   gate  harness/unity.mjs gate: out of memory, "Aborting batchmode" before results, an editor ended from outside are
+ *     NOT RUN (exit 3, "[engine-gate] NOT RUN <kind>"); a failing test or compile error stays FAIL
+ *   land  harness/unity-gate.mjs: a red land run showing an infrastructure abort is not-run (exit 3); the Unity train
+ *     retries it, then defers the branch
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { eventsOf as eventsFileOf, fileUrlOf, guardOf, out, readJsonFile as readJson, writeIn as w } from './kit.mjs';
 
 export async function selftest2732E({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const u = fileUrlOf(dir);
   const T = path.join(tmpRoot, `s2732e-${process.pid}`);
   fs.mkdirSync(T, { recursive: true });
-  const w = (root, rel, text) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); };
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const evFile = path.join(dir, '.studio', 'events-2732e.jsonl');
   fs.mkdirSync(path.dirname(evFile), { recursive: true });
@@ -40,7 +30,7 @@ export async function selftest2732E({ dir, run, report, tmpRoot }) {
     STUDIO_UNITY_TRAIN_RETRIES: '', STUDIO_UNITY_TRAIN_RETRY_MIN: '', STUDIO_UNITY_GATE_TIMEOUT_MIN: '', STUDIO_GAME: '', STUDIO_VERIFY_DETACH: 'off', STUDIO_VERIFY_RUN: '', STUDIO_COMPACT_OUTPUT: 'off', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-2732e-${process.pid}.pem`),
     npm_lifecycle_event: '', NODE_OPTIONS: '', AGENT_EVENTS_FILE: evFile, ...ident,
   };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   const probe = (name, code, env = {}) => {
     const f = path.join(dir, `.probe-2732e-${name}.mjs`);
     fs.writeFileSync(f, code);
@@ -49,7 +39,7 @@ export async function selftest2732E({ dir, run, report, tmpRoot }) {
     const line = String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{')).pop();
     try { return { ...JSON.parse(line), _out: out(r).slice(-1500) }; } catch { return { _raw: out(r).slice(-2500) }; }
   };
-  const events = () => { try { return fs.readFileSync(evFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const events = eventsFileOf(evFile);
   const locksDir = path.join(dir, '.studio', 'locks');
   const clearLocks = () => { try { for (const n of fs.readdirSync(locksDir)) if (/^machine-heavy/.test(n)) fs.rmSync(path.join(locksDir, n), { force: true }); } catch {} };
   clearLocks();

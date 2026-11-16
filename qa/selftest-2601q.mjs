@@ -1,30 +1,27 @@
 /**
- * qa/selftest-2601q.mjs — 2.60.1 (crew B-38, B-39, B-40).
- *   B-38: what makes a task a render task. A valid owner type that isn't render work outranks the title; an invalid one
- *         (a worker's commit) changes nothing; `task visual <ID> off|on` is recorded like `task type` (a person, or a
- *         Producer/Director/outside agent on permission; workers never) and shown in done-check; once the task has
- *         commits, evidence decides: a render-looking title whose changes touch no render path ("visualPaths") needs no
- *         visual result, one that does still needs it, and a non-render title that changes render files gets a warning
- *         (and needs the result only with the strict switch).
- *   B-39: a lane held for landing (`task hold`) or queued for the merge train doesn't run the claim clock, gets no
- *         rescue, its rescues can't start, holding closes its waiting rescues, and landing closes them; a lane that is
- *         neither is still stopped by its budget.
- *   B-40: in a lane copy the Claude Code hook denies edits to studio config (studio/ is main's), and task done in a
- *         lane warns, naming the files, when main's studio config changed uncommitted while the task was worked.
+ * qa/selftest-2601q.mjs — what makes a task a render task, hold/queue handling, and studio config edits in lane copies.
+ *   render  a valid owner type that isn't render work outranks the title; an invalid one (a worker's commit) changes
+ *     nothing; `task visual <ID> off|on` is recorded like `task type` (a person, or a Producer/Director/outside agent
+ *     on permission; never workers) and shown in done-check; once there are commits, evidence decides: a render-looking
+ *     title whose changes touch no "visualPaths" needs no visual result; a non-render title that changes render files
+ *     gets a warning (a need only with the strict switch)
+ *   hold  a lane held for landing (`task hold`) or queued for the merge train doesn't run the claim clock and gets no
+ *     rescue; holding closes its waiting rescues, landing closes them; other lanes are still stopped by budget
+ *   config  in a lane copy the Claude Code hook denies edits to studio config (studio/ is main's); task done in a lane
+ *     warns, naming the files, when main's studio config changed uncommitted
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest2601Q({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
+  const u = fileUrlOf(dir);
   const ident = { GIT_AUTHOR_NAME: 'hatch', GIT_AUTHOR_EMAIL: 'owner@example.com', GIT_COMMITTER_NAME: 'hatch', GIT_COMMITTER_EMAIL: 'owner@example.com' };
   const env = { ...ident, STUDIO_ROLE: '', STUDIO_LOCK_OWNER: '', STUDIO_AGENT: '', STUDIO_MAIN_ROOT: '', CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', CLAUDE_PROJECT_DIR: '', STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_STRICT: '', STUDIO_VISUAL_GATE: 'on' /* 2.79.1 (d): unset, the gate is off for a game with no capture command; these checks are about the gate itself */, STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-2601q-${process.pid}.pem`) };
   const outside = { STUDIO_LOCK_OWNER: 'opus-bot', CLAUDECODE: '1' };
   const worker = { STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'builder-s3' };
   const git = (cmd, e = {}) => run(dir, `git -c user.name=hatch -c user.email=owner@example.com ${cmd}`, { ...env, ...e });
-  const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const w = writeInDirOf(dir);
   const task = (cmd, e = {}) => run(dir, `node harness/task.mjs ${cmd}`, { ...env, ...e });
   const add = (title, role = 'builder') => JSON.parse(task(`add "${title}" --role ${role}`).stdout).id;
   const gate = (id, title, e = {}) => run(dir, `node harness/verdict-split.mjs gate ${id} --title "${title}"`, { ...env, ...e });

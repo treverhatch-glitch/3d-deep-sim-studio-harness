@@ -1,35 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/art.mjs — the Asset studio: the art department makes assets in rounds, the game dev
- * approves them or says what to change, and the Producer steps in when the dev is away.
- *
- *   npm run art                                     every asset: number, round, status
- *   npm run art -- propose <file> --title "…" [--kind asset|style|concept] [--task T-012] [--pack props]
- *                  [--licence "own work | CC0 | CC-BY 4.0"] [--source "<url or tool>"] [--author "…"]
- *                  [--generated "<tool>:<model>" --prompt <file> --terms "…"] [--thumb <png>]
- *                  [--round-of 4 | --replaces D-007] --by <agent>
- *   npm run art -- approve 4 --by <person>           thumbs up: it moves to assets/approved/
- *   npm run art -- changes 4 "<what to change>" --by <person>
- *   (Asset numbers go without the # on a command line, where # starts a comment; in quoted text #4 is fine.)
- *   npm run art -- say "yellow gun #4 is still clunky, #7 is great" --by <person>
- *   npm run art -- ref <file> --label "…" --kind look|use --by <person>   a reference for the art department
- *
- * How it works:
- * - Every asset has a number (#4) that stays the same through its rounds. A new round of #4 is a new
- *   file proposed with --round-of 4. The art department runs as many rounds as it likes without
- *   waiting for anyone; the Asset studio (War Room view 4) always shows the latest round.
- * - Work in progress lives in assets/staging/. A thumbs up moves the file to assets/approved/ (the same
- *   path below it), records it in the asset ledger with who approved it, and queues a renderer task
- *   to wire it in. Game code may load assets/approved/ only; the assets gate fails on staging paths.
- * - The dev can type feedback naming assets by number ("#4 is still clunky"): each named asset gets
- *   an art task with the dev's words. Feedback without a number goes to the art department as a note.
- * - When a design waits longer than the pace allows (precise 24 h, fast 8 h, extreme 4 h, half that
- *   with MAX SPEED), the Producer approves it provisionally. It is logged under "Decided without you",
- *   marked provisional in the Asset studio, and the dev can still ask for changes. The style sheet
- *   (the game's art reference, signed with the Bible) always waits for the dev.
- * - References from the dev: "look" (look like this, kept in the reference library, never shipped) or
- *   "use" (the dev's own asset, recorded for the game). Both are listed in studio/art/references.json
- *   with the dev's label, for the art department to read.
+ * harness/art.mjs — the Asset studio: art makes assets in rounds, the game dev approves or asks for changes, the
+ * Producer steps in when the dev is away.
+ *    npm run art -- propose <file> --title "…" [--kind asset|style|concept] [--task T-012] [--pack props]
+ *       [--licence "…"] [--source "<url or tool>"] [--author "…"] [--thumb <png>]
+ *       [--generated "<tool>:<model>" --prompt <file> --terms "…"] [--round-of 4 | --replaces D-007] --by <agent>
+ *    npm run art -- approve 4 | changes 4 "<what>" | say "#4 is clunky" | ref <file> --label "…" --kind look|use
+ *       (each with --by <person>)
+ * `npm run art` lists every asset. Assets keep their number (no # on a command line). Work lives in assets/staging/;
+ * approval moves it to assets/approved/; game code loads assets/approved/ only. A design waiting past the pace
+ * (precise 24 h, fast 8 h, extreme 4 h) is approved provisionally by the Producer; the style sheet waits.
  */
 import fs from 'node:fs';
 import path from 'node:path';

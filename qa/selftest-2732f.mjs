@@ -1,31 +1,26 @@
 /**
- * qa/selftest-2732f.mjs — 2.73.2 (helper f): a session end is recorded once; .env changes reach running processes.
- *   B-72 a   a session whose agent has exited while its launcher is still alive (wrapping up: handing the work back,
- *            maybe closing the task itself) lists as ending, not STALLED: the agent list, the watch pass and the
- *            silent-agent release leave it to the launcher
- *   B-72 b   the watchdog's stall end is logged and acted on once per session, not on every pass
- *   B-72 c   one agent.session.end per session, whoever records it (a stop's endAsDead, then the launcher's clean-up)
- *   B-72/76  the watchdog's stall end of a running launcher's agent records exitCause stall (by watchdog), so the
- *            "two sessions in a row" halt never counts it as the tool failing
- *   B-74 a   a running launcher's heartbeat picks up a stall limit changed in .env (the session is ended on the new
- *            limit), one env.reloaded event names the keys and never a secret's value, identity lines never load
- *   B-74 b   precedence in a child started by a process that loaded .env: a value inherited from .env follows the file,
- *            a value its starter set itself wins; the train daemon's pass reads the new STUDIO_TRAIN_AUTO
- *   B-74 c   `npm run studio:reload-env` makes a running supervisor reload now and says what changed
- * Each check fails on 2.73.1.
+ * qa/selftest-2732f.mjs — a session end is recorded once; .env changes reach running processes.
+ *   ending  a session whose agent exited while its launcher is alive lists as ending, not STALLED
+ *   once  the watchdog's stall end is acted on once per session; one agent.session.end per session, whoever records it
+ *   stall  the watchdog's stall end records exitCause stall (by watchdog), so the "two sessions in a row" halt never
+ *     counts it
+ *   env reload a running launcher's heartbeat picks up a stall limit changed in .env; one env.reloaded event names the
+ *     keys, never a secret's value; identity lines never load
+ *   precedence in a child of a process that loaded .env, an inherited .env value follows the file, a value its starter
+ *     set itself wins; the train daemon's pass reads the new STUDIO_TRAIN_AUTO
+ *   reload  `npm run studio:reload-env` makes a running supervisor reload now and says what changed
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitArgsOf, guardOf, out, readAgentRec as readRec, readJsonl as events, sleep } from './kit.mjs';
 
 export async function selftest2732F({ dir, run, report, tmpRoot, root }) {
   void run; void root;
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitArgsOf(gEnv);
+  const guard = guardOf(report);
   // Names these checks set from .env or rely on being unset: never inherited from the shell running the self-test.
   const UNSET = ['STUDIO_STALL_MIN', 'STUDIO_STALL_PLAN_MIN', 'STUDIO_SESSION_MAX_MIN', 'STUDIO_STALL', 'STUDIO_TRAIN_AUTO', 'STUDIO_TRAIN_MIN', 'STUDIO_TRAIN_WAIT_MIN', 'STUDIO_TRAIN', 'HUB_TOKEN', 'STUDIO_ENV_FROM_FILE', 'STUDIO_STALL_RELEASE_MIN', 'STUDIO_DONE_RUNNING_MAX_MIN'];
   const base = {
@@ -49,8 +44,6 @@ export async function selftest2732F({ dir, run, report, tmpRoot, root }) {
     g(S, ['add', '-A']); g(S, ['commit', '-qm', 'studio', '--no-verify']);
     return { S, ev, env: { AGENT_EVENTS_FILE: ev } };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const probe = (S, env, name, code, timeout = 120000) => {
     const f = path.join(tmpRoot, `probe-2732f-${name}-${process.pid}-${++n}.mjs`);
     fs.writeFileSync(f, code);
@@ -58,9 +51,7 @@ export async function selftest2732F({ dir, run, report, tmpRoot, root }) {
     const t = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop();
     try { return { ...JSON.parse(t), _err: r.stderr?.slice(-1500) }; } catch { return { _err: `${out(r).slice(-2500)}` }; }
   };
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await sleep(250); } return fn(); };
-  const readRec = (S, agent) => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'agents', `${agent}.json`), 'utf8')); } catch { return null; } };
   // A stand-in agent that does nothing for `secs` seconds (outside the studio copy, so it never changes its git status).
   const sleeper = path.join(tmpRoot, `sleeper-2732f-${process.pid}.mjs`);
   fs.writeFileSync(sleeper, "setTimeout(() => process.exit(0), Number(process.argv[2] || 30) * 1000);\n");

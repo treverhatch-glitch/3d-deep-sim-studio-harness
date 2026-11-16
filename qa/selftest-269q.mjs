@@ -11,14 +11,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { droppedOf, eventsOf, fileUrlOf as fileUrlRelOf, gitAsT as g, out, parseLastLine as parse, resetRanOf, writeIn as write } from './kit.mjs';
 
 export async function selftest269Q({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
-  const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
-  const href = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
-  const parse = (r) => { try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return {}; } };
+  const href = fileUrlRelOf(dir);
 
   // ---- 1-2. the pure pieces: the K-ary search and the width from the machine budget ----
   const pure = path.join(tmpRoot, `pure-269q-${process.pid}.mjs`);
@@ -66,9 +62,9 @@ console.log(JSON.stringify({ res, w, pts: [karyPoints(0, 9, 3), karyPoints(0, 5,
   const ranLog = path.join(tmpRoot, `ran-269q-${process.pid}.log`);
   const events = path.join(dir, '.studio', 'events-269q.jsonl');
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_GATE_FOCUS: '', STUDIO_TRAIN: '', STUDIO_TRAIN_BISECT: '', STUDIO_TRAIN_LAND_PREFIX: 'off', STUDIO_TRAIN_MAX: '', STUDIO_TRAIN_BATCH: 'off', STUDIO_TRAIN_PIPELINE: 'off', STUDIO_TRAIN_CHAIN_TAIL: '', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_GAME_GATE_RETRY: '', STUDIO_HEAVY_SLOTS: '', STUDIO_TEST_WORKERS: '', STUDIO_RESERVE_RAM_GB: '', STUDIO_MACHINE_SCAN: '', STUDIO_TEST_MACHINE: 'none', STUDIO_TRAIN_BISECT_PARALLEL: '', GH_TOKEN: '', GITHUB_TOKEN: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-269q-${process.pid}.pem`), AGENT_EVENTS_FILE: events, RAN_LOG: ranLog, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const ran = () => { try { return fs.readFileSync(ranLog, 'utf8').split('\n').filter(Boolean).map((l) => { const [owner, file, start, end] = l.split('\t'); return { owner, file, start: Number(start), end: Number(end) }; }); } catch { return []; } };
-  const resetRan = () => { try { fs.rmSync(ranLog, { force: true }); } catch {} };
+  const resetRan = resetRanOf(ranLog);
   write(dir, 'studio/gates.json', `${JSON.stringify({ gates: [
     // A stand-in for qa/protected-check.mjs (a real violation is held at tier C before any verify): red when a note says VIOLATES-PROTECTED.
     { id: 'protected', command: 'node game/demo/protected-sim.mjs', required: true, lite: true },
@@ -113,7 +109,7 @@ console.log(JSON.stringify({ res, w, pts: [karyPoints(0, 9, 3), karyPoints(0, 5,
     const q = run(ld, `node harness/task.mjs done ${id} --agent ${agent} --train`, as);
     return { id, agent, ok: st.status === 0 && c.status === 0, log: `${out(st)}\n${out(c)}\n${out(q)}` };
   };
-  const dropped = (id) => evs().some((e) => e.type === 'task.train.dropped' && e.task === id);
+  const dropped = droppedOf(evs);
   const onMain = (rel) => g(dir, 'cat-file', '-e', `main:${rel}`).status === 0;
 
   // ---- 3. a red train of 5 lanes, the third breaks b.test.mjs, K = 3 from a roomy machine scan ----

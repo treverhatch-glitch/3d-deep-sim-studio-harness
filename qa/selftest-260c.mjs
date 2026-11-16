@@ -1,23 +1,18 @@
 /**
- * qa/selftest-260c.mjs — 2.60.0 (#3, #4): the upgrade path for an orchestrator, and the hooks gate vs an unmerged
- * harness ref.
- *
- * #3: `npm run upgrade -- --snapshot` didn't exist on the old main (it arrives with the upgrade); the documented merge
- * was refused by the main-checkout guard, so the orchestrator used the raw STUDIO_MAIN_COMMIT=allow override; a bundle
- * merge that brings goldens needs a Golden-Reason; an old stash's board rows had no helper. Now: a bootstrap one-liner
- * runs the new guard from the ref (and the guard finds the studio by git, not by its own folder); `--merge <ref> --by
- * <person> [--permission]` backs up, merges through the hooks with the guard opened for exactly that merge, and records
- * who and on whose permission; `--restore-stash <sha>` keeps both sides' rows and never drops.
- * #4: STUDIO_HARNESS_REF=<remote>/<branch> exempts the harness branch's own commits, as the remote has them.
- *
- * Fixture: the copied harness is the harness repo (H), a bare clone is its remote, the studio (S) is a clone of that
- * remote with the hooks installed and one lane copy (so the main-checkout guard is on). No network.
+ * qa/selftest-260c.mjs — the upgrade path for an orchestrator, and the hooks gate vs an unmerged harness ref.
+ * A bootstrap one-liner runs the new guard from the ref (the guard finds the studio by git, not by its own folder);
+ *   `--merge <ref> --by <person> [--permission]` backs up, merges through the hooks with the guard opened for exactly
+ *   that merge, and records who and on whose permission (a bundle merge that brings goldens needs a Golden-Reason);
+ *   `--restore-stash <sha>` keeps both sides' rows and never drops. STUDIO_HARNESS_REF=<remote>/<branch> exempts the
+ *   harness branch's own commits, as the remote has them.
+ * Fixture: the copied harness is the harness repo (H), a bare clone is its remote, the studio (S) is a clone of it
+ *   with the hooks installed and one lane copy (so the main-checkout guard is on). No network.
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { out, writeIn as write } from './kit.mjs';
 
 export async function selftest260C({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const q = (p) => JSON.stringify(p);
   const base = path.join(tmpRoot, `c260-${process.pid}`);
   fs.mkdirSync(base, { recursive: true });
@@ -36,7 +31,6 @@ export async function selftest260C({ dir, run, report, tmpRoot }) {
   // Quoted: cmd.exe (Windows) treats ^ as its escape character, so HEAD^2 would reach git as HEAD2.
   const head = (rev = 'HEAD') => sg(`rev-parse "${rev}"`).stdout.trim();
   const body = (rev = 'HEAD') => sg(`log -1 --format=%B ${rev}`).stdout;
-  const write = (root, rel, text) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); };
   const read = (rel) => fs.readFileSync(path.join(S, rel), 'utf8');
   const golden = (n) => `${JSON.stringify(Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`k${i}`, i === 1 ? n.a : i === 10 ? n.b : i])), null, 2)}\n`;
   const PERM = 'Hatch on Discord 2026-11-01 19:09, take the harness update now';

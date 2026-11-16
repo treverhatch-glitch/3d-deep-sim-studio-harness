@@ -1,58 +1,14 @@
 /**
- * harness/flakes.mjs — the flake triager and the test quarantine.
- *
- * When a merge train's verify or re-check is red, each failing test FILE (harness/train-focus.mjs reads them from the log) is
- * run again ALONE on the same tree (a focused run: run-gates --only with STUDIO_GATE_FOCUS), up to twice, and labelled:
- *   real           it fails alone; the triage stops at the first one (the train goes on to name the lane);
- *   seed-flake     it passes alone and the file uses randomness without a fixed seed (harness/test-rng.mjs findings);
- *   load-flake     it passes alone, and again under low load (STUDIO_TEST_WORKERS=1: one test worker);
- *   intermittent   it passes alone once, then fails alone under low load (flaky with no named cause);
- *   load-sensitive it fails alone, then passes alone at low load once the machine is quiet (no other heavy job:
- *                  harness/flake-quiet.mjs; waits up to STUDIO_FLAKE_QUIET_WAIT_MIN, 10). Listed in .studio/load-sensitive.json,
- *                  never quarantined. Fails there too: real. Quiet not reached in time: real, "unconfirmed under load" (never a
- *                  pass without evidence). A file with at least STUDIO_LOAD_SENSITIVE_TRUST (2) quiet-confirmed labels in
- *                  STUDIO_FLAKE_WINDOW_DAYS and no "real" since (loadSensitiveTrust) skips the quiet wait: a pass at low load
- *                  at once is "trusted: true" (it never counts toward trust); a fail goes on to the quiet re-run. 0/off: never trusted.
- *   timeout-flake  a game check's timeout-only red whose file passed when re-run alone at low load (harness/game-gates.mjs
- *                  timeoutOnlyRerun, recordTimeoutFlakes); the check counted green for it;
- *   port-collision the output shows a test server that couldn't take its port (EADDRINUSE, "Port N is already in use",
- *                  strictPort; harness/test-ports.mjs): another verify used the same fixed port. Not real, not flaky (never
- *                  quarantined); the why names the port.
- * Order for one file: fails alone -> a port collision in that output is "port-collision" (no quiet wait spent); else the quiet
- * low-load re-run (it counts as an alone-run and waits at most STUDIO_FLAKE_WAIT_MIN for a machine:heavy slot) gives
- * load-sensitive / real / real "unconfirmed under load" (a collision in its own output is "port-collision"). Passes alone ->
- * a collision in the red run's output is "port-collision", else seed-flake / load-flake / intermittent. A run refused as busy
- * (no slot within STUDIO_FLAKE_WAIT_MIN, 10) is "not run", never "real": no label, and the triage stops.
- * What the train does with the labels: any "real" -> a real red (the lane is named). Every failing part load-sensitive ->
- * it lands and reports them. Every failing file a port collision, or a mix of collisions and load-sensitive files with at
- * least one collision (portCollisionWait; every failed gate must have a file part) -> nobody is handed back and the lanes
- * wait for the next train: a collision means that test never really ran on this tree.
- *
- * Settings: STUDIO_FLAKE_TRIAGE=off turns the triage off; STUDIO_FLAKE_MAX_FILES (5) caps the files triaged per red run;
- * STUDIO_FLAKE_QUARANTINE_AFTER (3) in STUDIO_FLAKE_WINDOW_DAYS (7); STUDIO_FLAKE_HOLD_MIN (default the quiet wait +
- * STUDIO_FLAKE_WAIT_MIN + STUDIO_GAME_GATE_TIMEOUT_MS; 0/off: no hold): from the start of its quiet wait to the end of its run
- * the quiet re-run holds new non-landing heavy work back in the heavy queue (harness/heavy.mjs markQuietHold), so "alone"
- * stays alone; running verifies are never stopped. STUDIO_FLAKE_TOGETHER=off: one file at a time (see togetherOn); by default
- * a check with two or more failing files is triaged TOGETHER when the caller can (triageRed's `together`): ONE run of all of them
- * at low load, then ONE quiet low-load re-run of those still failing, labelled from the run's per-file result (game-gates'
- * "failing test files in <check>" line). A file that fails the quiet re-run beside others is "real" only once it fails by
- * itself (one at a time, up to the first real). A run that can't be split by file (names no failing file or one outside the
- * group, timed out, fell back to the whole check, or a port collision with several files failing) falls back to one run per file.
- *
- * Files: every label is a line in .studio/flakes.jsonl ({ at, test, check, label, why, train, tree, runs, rng }). A test
- * labelled flaky (any label but "real") STUDIO_FLAKE_QUARANTINE_AFTER times in the window goes on studio/quarantine.json
- * ([{ test, label, since, why, by, evidence, task, status }]) as PROPOSED: the harness never silences a test on its own
- * authority, so a proposed entry is not skipped; it is listed by the digest and `npm run flakes` until a person, an agent under
- * the owner's delegation, or an outside agent (or a Producer/Director session) on a person's permission confirms it
- * (`npm run flakes -- confirm <test> --by <name>`, harness/decider.mjs; never a worker). Then it is active: game checks get the
- * active entries as STUDIO_TEST_QUARANTINE (a JSON list of test files) for the game's runner to skip. "autoQuarantine": true in
- * studio/quarantine.json ({ "autoQuarantine": true, "tests": [...] }) or in the game's studio.gates.json (the owner's or a game
- * dev's choice; both files are guarded) makes the harness's entries active at once, still with evidence. ONE fix task is
- * filed either way. A real failure is never quarantined. The list silences a check, so a lane that changes it is tier C
- * (harness/tiers.mjs SILENCERS): a game dev releases an entry (`npm run flakes -- release <test> --by <name>`), or an outside
- * agent, or a Producer/Director session, on a person's recorded permission; never a worker. The harness's own additions are
- * recorded with their evidence (a test.quarantined event) and shown in the daily digest.
- * Imports only small modules (train.mjs and game-gates.mjs import this one).
+ * harness/flakes.mjs — the flake triager and the test quarantine for red merge-train verifies.
+ * Each failing test FILE is re-run ALONE on the same tree (run-gates --only, STUDIO_GATE_FOCUS), up to twice, and
+ * labelled: real (fails alone; triage stops), seed-flake, load-flake (STUDIO_TEST_WORKERS=1), intermittent,
+ * timeout-flake, load-sensitive (quiet re-run, STUDIO_FLAKE_QUIET_WAIT_MIN; never quarantined), port-collision
+ * (EADDRINUSE; never quarantined). Settings: STUDIO_FLAKE_TRIAGE=off, STUDIO_FLAKE_MAX_FILES,
+ * STUDIO_FLAKE_QUARANTINE_AFTER, STUDIO_FLAKE_WINDOW_DAYS, STUDIO_FLAKE_WAIT_MIN, STUDIO_FLAKE_HOLD_MIN,
+ * STUDIO_FLAKE_TOGETHER=off, STUDIO_LOAD_SENSITIVE_TRUST. Labels go to .studio/flakes.jsonl. A flaky test goes on
+ * studio/quarantine.json as PROPOSED; a person confirms it (`npm run flakes -- confirm <test> --by <name>`, never a
+ * worker). Active entries reach game checks as STUDIO_TEST_QUARANTINE. The list silences a check: a lane changing it is
+ * tier C. Imports only small modules (train.mjs and game-gates.mjs import this one).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -144,12 +100,10 @@ export function flakeHoldMin(env = process.env) {
 }
 
 /**
- * Label one failing test file: runAlone({ check, file, lowLoad, quiet?, quietWaitMin? }) -> { ok, text?, notRun?, quietUnreached? }
- * runs it alone on the same tree (notRun: refused before it ran, e.g. no machine:heavy slot: no label). A caller that supports
- * `quiet` waits (up to quietWaitMin) for a quiet machine first and returns { ok: false, quietUnreached: true } without running
- * when it never came; one that doesn't ignores the flag. redText: the red run's output (a port collision there makes a file
- * that passes alone "port-collision", not a load flake). The label order is in the header. A notRun from any run: label null,
- * the triage stops. Returns { label, why, runs: [{ ok, lowLoad, quiet? }], rng, port? } (label null with notRun when it didn't run).
+ * Label one failing test file: runAlone({ check, file, lowLoad, quiet?, quietWaitMin? }) -> { ok, text?, notRun?,
+ * quietUnreached? } runs it alone on the same tree (notRun: refused before it ran: no label). redText: the red run's
+ * output (a port collision there makes a file that passes alone "port-collision"). A notRun: label null, triage stops.
+ * Returns { label, why, runs: [{ ok, lowLoad, quiet? }], rng, port? }.
  */
 export function labelTest({ check, file, runAlone, rng = null, env = process.env, redText = '', trust = null }) {
   const runs = [];
@@ -344,13 +298,10 @@ export function labelGroup({ check, files, runAlone, rng = null, env = process.e
 const quietWhy = (m) => `fails alone at low load while other work runs, passes alone at low load (one test worker${m > 1 ? `, with ${m - 1} other failing file(s) of its check` : ''}) on a quiet machine: it needs a quiet machine (load-sensitive)`;
 
 /**
- * After a red verify or re-check: label each failing test file (at most STUDIO_FLAKE_MAX_FILES; each once per `seen` set,
- * usually one per train), record the labels, and quarantine a test flaky `after` times in the window.
- * opts: { root, dir (the tree's checkout), text (the red run's output), train, tree, runAlone, seen, now, env, log, emit, rng
- * (test-rng facts; default: scanned in dir), together (runAlone takes { files: [...] }: see labelGroup) }. runAlone also gets
- * { k, of }. Returns { labels: [row], quarantined: [entry] }, plus real (the first file labelled real: the triage stops
- * there), notRun ({ test, why }: a run refused as busy; stops there too), allPortCollision (every failing file was a
- * port-collision), portCollisionWait (every failing file was a port-collision or load-sensitive, at least one port-collision).
+ * After a red verify or re-check: label each failing test file (at most STUDIO_FLAKE_MAX_FILES; each once per `seen`
+ * set), record the labels, and quarantine a test flaky `after` times in the window. opts: { root, dir, text (the red
+ * run's output), train, tree, runAlone, seen, now, env, log, emit, rng, together }. Returns { labels, quarantined },
+ * plus real (the first file labelled real: triage stops), notRun, allPortCollision, portCollisionWait.
  */
 export function triageRed({ root, dir = root, text, train = '', tree = '', runAlone, seen = new Set(), now = Date.now(), env = process.env, log = () => {}, emit = emitEvent, rng, together = false } = {}) {
   const out = { labels: [], quarantined: [] }; // also real, notRun, skipped, allPortCollision, portCollisionWait

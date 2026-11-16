@@ -1,28 +1,15 @@
 #!/usr/bin/env node
 /**
  * scripts/check-sim-purity.mjs — the sim must be pure: same seed + actions, same result, anywhere.
- *
- * 1. Static scan of src/sim/ and cartridges/ for presentation imports, DOM, randomness, wall clock,
- *    timers and global escapes (eval, Function, globalThis).
- * 2. Runtime probe (scripts/sim-runtime-probe.mjs): plays every cartridge with those globals trapped,
- *    which catches aliases a regex cannot see.
- * Fails on 0 files and on 0 cartridges, so an empty or moved sim cannot pass by accident.
- *
- * 2.58.2 (PU-22): deterministic math (harness/det-math.mjs). Math.sin, cos, atan2, hypot, pow, exp, log and
- * the other inexact functions (and **) give different last bits in different engines, so a sim that must
- * replay the same in a port can't call them. Each game has a mode: "warn" (the default: printed, never
- * fails), "required" (fails here; npm run new-game writes it) or "off". Cartridges set it in
- * cartridges/<name>/cartridge.json "detMath", a studio game that isn't a cartridge in its studio.gates.json
- * "detMath" (with "paths" for where its sim lives; default <game>/sim). The detMath module itself is exempt.
- *
- *   node scripts/check-sim-purity.mjs [--det-math-only] [--all]
- *     --det-math-only  only the deterministic-math rule, every scope (the game:det-math check runs this)
- *     --all            print every warning, not the first 25
- *     --hits-json      print every failing hit as JSON ({ lines }), no baseline and no runtime probe (npm run purity)
- *
- * 2.72.0 (b): the ratchet (harness/ratchet.mjs). A game with a committed purity-baseline.json (cartridges/<name>/ or the
- * studio game's folder) fails only on hits that baseline doesn't list; only those are printed, the standing ones are
- * counted. No baseline: every hit fails, as before.
+ * 1. Static scan of src/sim/ and cartridges/ for presentation imports, DOM, randomness, wall clock, timers, global escapes.
+ * 2. Runtime probe (scripts/sim-runtime-probe.mjs): plays every cartridge with those globals trapped. Fails on 0 files or 0
+ *    cartridges.
+ * Deterministic math (harness/det-math.mjs): Math.sin, cos, atan2, hypot, pow, exp, log, the other inexact functions and **
+ * differ in the last bits across engines, so a sim that must replay in a port can't call them. Each game has a mode: "warn"
+ * (default: printed, never fails), "required" (fails; npm run new-game writes it) or "off", set in cartridge.json "detMath"
+ * (cartridges/<name>/) or a studio game's studio.gates.json "detMath" (with "paths"; default <game>/sim). detMath is exempt.
+ * The ratchet (harness/ratchet.mjs): a game with a committed purity-baseline.json fails only on hits it doesn't list.
+ *   node scripts/check-sim-purity.mjs [--det-math-only] [--all] [--hits-json]   (hits as JSON: no baseline, no probe)
  */
 
 import fs from 'node:fs';

@@ -11,15 +11,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { gEnvOf, gitEolLfOf, guardCap2500Of, out as text, writeIn } from './kit.mjs';
 
 export async function selftest280F({ dir, run, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const gitIn = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), ok ? '' : String(detail || '').slice(0, 2500)); } catch (e) { report(name, false, String(e?.stack || e).slice(0, 2500)); } };
+  const gEnv = gEnvOf(ident);
+  const gitIn = gitEolLfOf(gEnv);
+  const guard = guardCap2500Of(report);
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT)/i.test(k)) clean[k] = '';
   const base = {
@@ -104,7 +104,6 @@ export async function selftest280F({ dir, run, report, tmpRoot, root }) {
   const env = { STUDIO_LOCK_OWNER: 'builder-f1', STUDIO_DONE_UNCOMMITTED: 'allow', ...ident };
   gitIn(D, 'init', '-q', '-b', 'main'); gitIn(D, 'add', '-A'); gitIn(D, 'commit', '-qm', 'base', '--no-verify');
   const addTask = (title, type) => (run(D, `node harness/task.mjs add "${title}" --role builder --type ${type} --size 2 --origin dev --asked "test"`, env).stdout.match(/T-\d+/) || [])[0];
-  const text = (r) => `${r.stdout || ''}${r.stderr || ''}`;
 
   await guard('2.80 (f, N14): done-check prints "[done-check] replaying 1 regression(s) on the commit before the fix ...: this can take minutes" before it replays the bug\'s regression on the old code (fails on 2.79.2: silent until the result)', () => {
     const id = addTask('Bug: crates stack on one tile', 'bug');

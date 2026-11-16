@@ -1,19 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/ideas.mjs — the Idea Board. Ideas never go straight to builders.
- *
- *   npm run idea -- add "<title>" [--detail "…"] [--by <name>] [--source dev-confirmed|dev-pitched|agent|playtest]   captured
+ *   npm run idea -- add "<title>" [--detail "…"] [--by <name>] [--source dev-confirmed|dev-pitched|agent|playtest]
  *   npm run idea -- route <id>                                          Producer: queue R&D to shape it
  *   npm run idea -- shape <id> --notes "…"                              R&D: shaped (queues placing)
- *   npm run idea -- place <id> --phase 1|2|3 [--layer <id>] --unlock "…" --schedule "…"
- *                                                                        planner: placed (pings the Director)
+ *   npm run idea -- place <id> --phase 1|2|3 [--layer <id>] --unlock "…" --schedule "…"   planner: placed
  *   npm run idea -- decide <id> approve|park|reject --by <name> [--note "…"]   Director decides
  *   npm run idea -- list [--stage placed] | show <id> | collect
- *
- * After approval the Producer schedules it: `task add "…" --idea I-001 --phase n` (refused for any
- * idea that isn't approved). The watcher's regular pass runs `collect`: new ideas give the Producer
- * one "Ideas: N new" task, never one per idea. Ideas live in studio/bible/ideas/I-001.json, so a UI
- * can read and write them the same way.
+ * After approval the Producer schedules it: `task add "…" --idea I-001 --phase n` (refused for an idea that isn't
+ * approved). The watcher's pass runs `collect`: new ideas give the Producer one "Ideas: N new" task. Ideas live in
+ * studio/bible/ideas/I-001.json.
  */
 import fs from 'node:fs';
 import path from 'node:path';

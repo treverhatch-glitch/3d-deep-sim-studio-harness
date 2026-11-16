@@ -1,25 +1,20 @@
 /**
- * qa/selftest-266a.mjs — 2.66.0 (helper a): tokens that do work (research 2026-11-02, metrics M1; dev plan row
- * "Effective-token ratio"). A made-up event log; every number below is worked out by hand in the comments.
+ * qa/selftest-266a.mjs — tokens that do work, on a made-up event log.
  *   1: a landing is kept, pending, reopened or reverted/redone (a revert commit naming it, a train hand-back after it
- *      landed, a task added --caused-by it or titled "Redo of <it>"), judged over keepDays.
+ *     landed, a task added --caused-by it or titled "Redo of <it>"), judged over keepDays.
  *   2: the waste split: each session's tokens and dollars go to the attempts it held (shared by wall time): kept,
- *      reopened, reverted or redone, handed back, dropped, no task; pending apart.
- *   3: the effective-token ratio (kept / judged tokens) and the cost per kept change, overall and per task type.
+ *     reopened, reverted or redone, handed back, dropped, no task; pending apart.
+ *   3: the effective-token ratio (kept / judged tokens) and cost per kept change, overall and per task type.
  *   4: any rate on fewer than minSample (30) items reads "not enough data (n=…)" with a Wilson 95% interval.
- *   5: the CLI: --since sets the window, --json carries card.tokenWork, the text has a "Tokens" block;
- *      STUDIO_KEEP_DAYS changes keepDays.
+ *   5: the CLI: --since sets the window, --json carries card.tokenWork; STUDIO_KEEP_DAYS changes keepDays.
  *   6: revert commits are read from git (`Revert "…"` subjects) and name a task as a whole word (T-1 is not T-12).
- *   6b: a session end that names its task (meta.task) holds that task's attempt (one agent name, two parallel tasks).
- *   7: keepDays / minSample come from studio/autonomy.json (STUDIO_KEEP_DAYS first).
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, out } from './kit.mjs';
 
 export async function selftest266A({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlOf(dir);
   const events = path.join(dir, '.studio', 'events-266a.jsonl');
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_ROLE: '', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_CACHE_READ_WEIGHT: '', STUDIO_KEEP_DAYS: '', STUDIO_AUTONOMY_CACHE_S: '0', AGENT_EVENTS_FILE: events };
   let n = 0;

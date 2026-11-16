@@ -1,16 +1,14 @@
 /**
- * harness/scout-quality.mjs — 2.30e: judge scouted art on quality, not just volume.
- *
+ * harness/scout-quality.mjs — judge scouted art on quality, not just volume.
  * qualityScore(result) gives 0-10 from what the source tells us:
  *   resolution      longest side: 4k+ full marks, 2k good, 1k some, below that none
  *   maps            textures: albedo/diffuse, normal, roughness present (each a third)
  *   poly count      models: 500 to 200k triangles is sane for a game; over 500k or under 50 is not
  *   source rating   a rating (0-5) when the source has one, else downloads on a log scale (1M = full)
  *   tags            up to six descriptive tags
- * Only the parts the source reports count, so a missing field neither helps nor hurts; with nothing
- * known the score is 5 and says "unknown". An optional vision judge (STUDIO_VISION_URL, an
- * OpenAI-compatible endpoint, STUDIO_VISION_MODEL, STUDIO_VISION_KEY) looks at the thumbnail and its
- * 0-10 is averaged in; its tokens go to studio/ledger/scout-vision.jsonl, which the token ledger reads.
+ * Only reported parts count; with nothing known the score is 5 and says "unknown". An optional vision judge
+ * (STUDIO_VISION_URL, STUDIO_VISION_MODEL, STUDIO_VISION_KEY) rates the thumbnail 0-10, averaged in; its tokens go to
+ * studio/ledger/scout-vision.jsonl.
  */
 import fs from 'node:fs';
 import path from 'node:path';

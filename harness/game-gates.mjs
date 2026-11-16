@@ -1,53 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/game-gates.mjs: the gates follow the studio's game, not the bundled cartridge.
- *
- * When a game is set (`task game <name>`, studio/game.json "game", STUDIO_GAME) and it is not a cartridge, its own
- * checks run:
- *
+ * harness/game-gates.mjs: runs the studio game's own checks, so the gates follow the game, not the bundled cartridge.
+ * When a game is set (`task game <name>`, studio/game.json "game", STUDIO_GAME) and is not a cartridge:
  *   <game>/studio.gates.json   { "gates": [{ "id": "playtest", "command": "node tools/x.mjs", "required": true }] }
- *                              commands run from the repo root
- *   else, by convention:       <sim>/qa.mjs (scenarios; exit 1 fails), <sim>/playtest.mjs, <sim>/golden.mjs
- *
- * Engine gate: a task whose files are in a Godot project (a folder with project.godot) also runs Godot headless:
- * --import, then tools/gate.gd when the project has one. A non-zero exit or a SCRIPT ERROR / Parse Error / ERROR:
- * line fails it. Godot binary: STUDIO_GODOT, else godot on PATH.
- *
+ *   else, by convention:       <sim>/qa.mjs (exit 1 fails), <sim>/playtest.mjs, <sim>/golden.mjs
+ * Files in a Godot project (project.godot) also run Godot headless (--import, tools/gate.gd); binary STUDIO_GODOT,
+ * else PATH.
  *   node harness/game-gates.mjs [--paths a,b] [--changed a,b] [--json]   exit 1 when a required check fails
- *
- * No game set (or the game is a cartridge): nothing extra runs, the cartridge gates cover it.
- *
- * Manifest keys and settings:
- * - "paths" (globs) and "track" per gate, "shared" globs for the manifest. With --changed (or STUDIO_GATE_CHANGED) only
- *   gates whose paths the change touches run; skipped gates are logged with the reason. A gate without paths always
- *   runs; no --changed means every gate runs. The checks run with CI=true (test runners never write snapshots).
- * - Timeouts: "slowTests" and the load factor give STUDIO_TEST_TIMEOUT_SCALE (slowTestsOf, testTimeoutScale); a vitest,
- *   jest or node --test check also gets a per-test timeout scaled for its workers (harness/test-timeouts.mjs, row
- *   field "testTimeout"; STUDIO_TEST_TIMEOUT_SCALE=off: nothing passed). A check's timeout is scaled by load
- *   (harness/heavy.mjs scaledTimeout, loadReading); one that times out under load runs once more at the cap
- *   (STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR x the base, harness/self-triage.mjs timeoutRerun). Details at runGameGates.
- * - STUDIO_GATE_FOCUS ({ "<check>": [test files] }, a merge train's re-check; honoured only in a run-gates --only run):
- *   a failing check runs on those files only (its manifest "focus" command with {files}, else the files appended to a
- *   command that clearly runs vitest, jest or node --test, else an inferred focus (harness/train-focus.mjs inferFocus;
- *   "focus inferred: ..." once), else the whole check, saying why). Checks not in the map are skipped, and a failing
- *   check's test files are printed ("failing test files in <check>: [...]").
- * - "ratchet": true (with a section in <game>/purity-baseline.json it fails only on new hits, harness/ratchet.mjs) and
- *   "canary": "<command or fixture path>" (input that must make it fail; npm run gates -- --canaries,
- *   harness/canaries.mjs).
- * - The game:perf step. Wall-clock tests flake on a busy machine. A studio lists their globs in studio/game.json
- *   "perfTests" (["src/**\/*.perf.test.ts", ...]; the file is protected: the owner adds the key) or STUDIO_PERF_TESTS
- *   (comma list; off: none). The test checks (a "related" or "focus" command, "slowTests": true, or a command that
- *   clearly runs vitest, jest or node --test) leave them out (STUDIO_TEST_EXCLUDE) and, after the other checks, a
- *   game:perf step runs only them (STUDIO_TEST_ONLY, one test worker) once the machine is quiet (harness/flake-quiet.mjs).
- *   A landing run (a merge train's) waits up to STUDIO_PERF_WAIT_MIN (10) and holds new builder and lane verifies back
- *   (harness/heavy.mjs markQuietHold); any other verify runs it only if the machine is quiet already. Never quiet:
- *   "not run (busy)", a WARN, never red; in a train's focused re-check of game:perf it is a busy refusal. Quiet: its
- *   result counts like any required check. docs/ONBOARDING-A-GAME.md "Perf tests".
- * - The quarantine line says "skipped" only once verified (harness/test-config-check.mjs verifySkip, once per test
- *   config, cached in .studio/test-config-check.json); a config that still lists them is "WARN game:quarantine:
- *   quarantine NOT honoured by the game's test config (<file>): N quarantined tests still run". Test files outside the
- *   perf globs that assert on wall-clock time print "WARN game:test-timing" (harness/test-timing.mjs; advisory,
- *   STUDIO_TEST_TIMING=off).
+ * No game set (or a cartridge): nothing extra runs. Manifest keys: "paths", "track", "shared", "slowTests", "tier",
+ * "ratchet", "canary", "perfTests". Settings: STUDIO_GATE_CHANGED, STUDIO_GATE_FOCUS, STUDIO_TEST_TIMEOUT_SCALE,
+ * STUDIO_PERF_TESTS, STUDIO_PERF_WAIT_MIN (10), STUDIO_TEST_EXCLUDE, STUDIO_TEST_TIMING=off. Details at runGameGates.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -139,12 +101,9 @@ export function slowTestsOf(game) {
 }
 
 /**
- * The game's slow tier, or null. The manifest marks test globs slow ("slowTests": ["<glob>", ...], e.g. a soak-test
- * file glob; the object form, { "pattern", "timeoutScale" }, only scales timeouts unless it also says "tier": "slow")
- * and/or whole checks ("tier": "slow" on a gate). Verifies and trains skip them (STUDIO_TEST_EXCLUDE for the game's
- * test config); the nightly slow tier (npm run gates -- --tier slow, harness/slow-tier.mjs) runs only them, on main.
- * The manifest is protected, so only the owner moves a test out of landing. STUDIO_SLOW_TIER=off runs everything in
- * every verify.
+ * The game's slow tier, or null. The manifest marks test globs ("slowTests") or whole checks ("tier": "slow") slow.
+ * Verifies and trains skip them (STUDIO_TEST_EXCLUDE); the nightly slow tier (npm run gates -- --tier slow,
+ * harness/slow-tier.mjs) runs only them, on main. The manifest is protected. STUDIO_SLOW_TIER=off runs everything.
  */
 export function slowTierOf(game) {
   if (!game?.root) return null;
@@ -260,13 +219,8 @@ function runGodot(project) {
 
 /**
  * Which of the game's checks a change runs, and the scope a pass covers, without running anything:
- * { game, all, shared, gates, skipped, scope, layout, layoutPaths, engine, why }. runGameGates runs this plan; task
- * done uses it to record the right scope when a verify stands in for the checks.
- *
- * incoming (the landing re-check after a rebase onto a moved main, STUDIO_GATE_INCOMING_FILE): the files main brought
- * in. The lane's own pass on its pre-rebase commit stands for a check whose declared inputs ("paths", layoutPaths, a
- * Godot project's folder) none of them touch; such a check is skipped with that reason. A check with no declared
- * paths, or any incoming file that is shared (harness/, scripts/, the manifest, its "shared" globs), runs again.
+ * { game, all, shared, gates, skipped, scope, layout, layoutPaths, engine, why }. runGameGates runs this plan.
+ * incoming (STUDIO_GATE_INCOMING_FILE): files main brought in; a check none of them touches is skipped.
  */
 export async function planGameGates({ paths = [], changed = null, incoming = null } = {}) {
   const game = await studioGame();

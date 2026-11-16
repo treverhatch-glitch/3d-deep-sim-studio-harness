@@ -1,28 +1,24 @@
 /**
- * qa/selftest-2583m.mjs — 2.58.3 launcher fixes from the crew's Windows logs (M1 to M5).
- *   M1: a session in a lane copy is told it may use the main checkout's real studio/ and .studio/ (Claude Code:
- *       --add-dir, each flag and path its own argument); outside a lane copy, nothing is added.
- *   M2: a code-writing role on a task with no lane gets its own copy (.lanes/<agent>) with a built-in tool (and since
- *       2.58.5, H-9, with a custom command too); a producer and STUDIO_LANELESS=shared stay in the main checkout.
- *   M3: `npm run agent -- allow agy` writes the studio's .studio/agy-settings.json by default (not agy's user file),
- *       --scope user still writes the user file, and toolCommand('agy') passes --settings <file> only when it exists.
- *   M4: a `nim` tool (aider on NVIDIA NIM): its argv, OPENAI_API_KEY set from NVIDIA_API_KEY for the child only (never
- *       in argv, the log, the session record or the events), and a clear refusal without a key or without aider.
- *   M5: the kickoff's allowed-commands note says one command per Bash call and to read files with the file tools.
- * The end-to-end checks start the real launcher with fake `claude`/`aider` programs first on PATH (POSIX: a node
- * script with a shebang; Windows: a .cmd wrapper, UNTESTED here). No real tool, key or network is used.
+ * qa/selftest-2583m.mjs — launcher fixes: lane copies, studio dirs, agy settings, the nim tool, kickoff command rules.
+ * M1:  a lane-copy session may use the main checkout's real studio/ and .studio/ (Claude Code: --add-dir per path).
+ * M2:  a code-writing role with no lane gets its own copy (.lanes/<agent>); a producer and STUDIO_LANELESS=shared
+ *   stay in main.
+ * M3:  `npm run agent -- allow agy` writes .studio/agy-settings.json by default; --scope user writes the user file;
+ *   toolCommand('agy') passes --settings only when it exists.
+ * M4:  a `nim` tool (aider on NVIDIA NIM): OPENAI_API_KEY set from NVIDIA_API_KEY for the child only (never in argv,
+ *   log, record or events); refused without a key or aider.
+ * M5:  the kickoff note says one command per Bash call, read files with the file tools.
+ * Fake `claude`/`aider` programs first on PATH (Windows UNTESTED); no real tool, key or network.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlIn as u, out, real } from './kit.mjs';
 
 // A made-up value: the checks look for it where it must not be.
 const FAKE_KEY = 'fake-nim-key-for-selftest-2583m';
 const QUIET = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_HEARTBEAT_SEC: '1', STUDIO_ROLE: '', STUDIO_MAIN_ROOT: '', STUDIO_BUILDER_CMD: '', STUDIO_PRODUCER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_REHEARSAL: '', STUDIO_NIM_CHECK: 'off' };
 
 export async function selftest2583M({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const u = (root, p) => JSON.stringify(pathToFileURL(path.join(root, p)).href);
   let n = 0;
   const probe = (root, code, env = {}) => {
     const f = path.join(root, `.probe-2583m-${n++}.mjs`);
@@ -30,7 +26,6 @@ export async function selftest2583M({ dir, run, report, tmpRoot }) {
     const r = run(root, `node ${path.basename(f)}`, { ...QUIET, ...env });
     try { return { ...JSON.parse(String(r.stdout).trim().split('\n').pop()), raw: out(r) }; } catch { return { raw: out(r) }; }
   };
-  const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
 
   // ---------- fake tools first on PATH: they record their argv, cwd and the key names they were given ----------
   const bin = path.join(tmpRoot, 'bin-2583m');

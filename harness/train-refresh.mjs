@@ -1,18 +1,12 @@
 /**
- * harness/train-refresh.mjs — 2.76.0 (B-81): the train refreshes a lane whose harness is behind main, instead of
- * handing it back.
- *
- * The crew's evidence: `upgrade --merge` printed "lanes: not refreshed (lanes refresh gave no result (exit 143))", and the
- * next train handed T-155 back: "[hooks] FAIL this lane copy runs its own harness, and main has changed 122 harness
- * file(s) since the lane branched from it". Nothing was wrong with the lane; its refresh hadn't run. Now, before a lane's
- * checks, the train looks at its harness (hook-stamp.mjs laneHarnessDrift, run in the lane copy) and, when main has
- * changed harness files since the lane branched, refreshes it the way `npm run lanes -- refresh` does (main merged in,
- * never a rebase; its commits re-stamped through the hooks; a conflict aborted and named), without the targeted tests:
+ * harness/train-refresh.mjs — the train refreshes a lane whose harness is behind main, instead of handing it back.
+ * Before a lane's checks, the train looks at its harness (hook-stamp.mjs laneHarnessDrift, run in the lane copy) and, when
+ * main has changed harness files since the lane branched, refreshes it the way `npm run lanes -- refresh` does (main merged
+ * in, never a rebase; its commits re-stamped through the hooks; a conflict aborted and named), without the targeted tests:
  * the train's full verify runs right after. Only a real conflict (or a failed re-stamp) hands the lane back, with that
- * reason. A lane with uncommitted work is left alone (its agent is at it). STUDIO_TRAIN_REFRESH=off turns it off.
- *
- * 2.78.0 (B-105): the merge leaves the lane's studio/ link out (lanes.mjs protectSharedLinks), and a builder's verify
- * (scripts/run-gates.mjs) calls this too (by: 'harness') instead of telling the builder to rebase and restamp.
+ * reason. A lane with uncommitted work is left alone. STUDIO_TRAIN_REFRESH=off turns it off.
+ * The merge leaves the lane's studio/ link out (lanes.mjs protectSharedLinks), and a builder's verify
+ * (scripts/run-gates.mjs) calls this too (by: 'harness').
  */
 import fs from 'node:fs';
 import path from 'node:path';

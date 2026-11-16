@@ -1,33 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/line-producer.mjs — the Line Producer, the studio's flow desk. Code on the supervisor's loop, no model and no
- * tokens for the routine part. The Director ranks the plan, the Producer approves it (studio/roles/line-producer.md);
- * this executes it and never changes direction: a plan that can't run becomes one Producer note.
- *
- * Each supervisor pass (lineProducerPass, before the supervisor picks what to start):
- *   a. builders the rig can carry (harness/rig-budget.mjs rigBudget(), else harness/heavy-budget.mjs; STUDIO_LINE_RIG=heavy
- *      forces the second) against the pace's count; it only ever lowers the starts;
- *   b. why each waiting task can't start, and the mechanical fixes it makes, logged (.studio/line/actions.jsonl, line.fixed
- *      events): dead locks, lost lane copies queued for the train, past-due cooldowns/blocks/parks;
- *   c. chain-breakers (STUDIO_LINE_CHAIN_MIN (3) or more open tasks wait on it) start first, on the strongest model;
- *   d. a model per task by size (harness/routing.mjs tierModels, else STUDIO_TIER_<TIER>_MODEL), one tier up per red round;
- *   e. STUDIO_LINE_EXPANSION_SHARE (1/6) of the builders on research and expansion work, balanced across the Bible's phases;
- *      under STUDIO_LINE_EXPANSION_MIN (2) such tasks it files ONE "Director: next ranked slice for phase <n>" task;
- *   f. one Producer note (.studio/line/producer-note.md, a line.plan_blocked event when its reasons change);
- *   h. engine trains (harness/unity-train.mjs, harness/engine-tracks.mjs): enginePass starts `task train --engine <x>`
- *      detached when the engine slot is free (STUDIO_ENGINE_SLOTS), or in a quiet window (STUDIO_ENGINE_WINDOW=quiet).
- *      STUDIO_ENGINE_TRAIN_AUTO=off (or engines.<x>.trainAuto false) leaves it to a person;
- *   i. the game tester (testerPass, harness/tester.mjs; STUDIO_TESTER_EVERY_HOURS (24), STUDIO_TESTER_MIN_LANDINGS (10),
- *      STUDIO_TESTER_WIRE_TASKS).
- * It writes .studio/line/status.json (lineStatus(): what the Communicator posts and the supervisor reads for its order).
- *
- * STUDIO_LINE_PRODUCER: on (default) | report (status only: no fixes, no task filed, the supervisor ignores the plan) |
- * off. Its fixes are routine housekeeping, never an owner decision; what needs the owner (a yes, an unpark, an unhold) is
- * only reported, naming who may act (harness/delegation.mjs delegationFor; beta mode's agents).
- *
- *   npm run line -- status [--json]      the last pass (or a dry one when there is none)
- *   npm run line -- plan [--json]        a dry pass now: the order, the routes, what it would fix
- *   npm run line -- why <T-ID>           why that task isn't running, and what would start it
+ * harness/line-producer.mjs — the Line Producer: supervisor-loop code that executes the Director's ranked plan.
+ * Each pass (lineProducerPass; never changes direction): a. caps builders to the rig (harness/rig-budget.mjs, else
+ * heavy-budget.mjs; STUDIO_LINE_RIG=heavy); b. mechanical fixes (.studio/line/actions.jsonl, line.fixed); c. starts
+ * chain-breakers first (STUDIO_LINE_CHAIN_MIN, 3); d. picks a model per task by size (harness/routing.mjs); e.
+ * STUDIO_LINE_EXPANSION_SHARE (1/6) of builders on research/expansion (one Director task under
+ * STUDIO_LINE_EXPANSION_MIN, 2); f. one Producer note (.studio/line/producer-note.md, line.plan_blocked); h. engine
+ * trains (STUDIO_ENGINE_SLOTS, STUDIO_ENGINE_WINDOW=quiet, STUDIO_ENGINE_TRAIN_AUTO=off); i. game tester
+ * (STUDIO_TESTER_EVERY_HOURS, STUDIO_TESTER_MIN_LANDINGS, STUDIO_TESTER_WIRE_TASKS).
+ * Writes .studio/line/status.json. STUDIO_LINE_PRODUCER: on (default) | report (status only) | off. npm run line --
+ * status|plan [--json] | why <T-ID>
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -1243,13 +1225,10 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
 }
 
 /**
- * 2.85 (item 7): finished engine work is queued by the harness, not by a rule in the task's text. Sessions handed finished
- * work back as READY two or three times because a planner had written "queue only when the queue is short" into the task
- * (the train's batchMax and batchGroup are the real limit). The engine pass now looks at recent hand-backs of engine tasks
- * whose note says the work is done or ready (handback-kind.mjs saysReady) and, once per hand-back, starts
- * `node harness/line-producer.mjs auto-queue <ID> --engine <x>` (autoQueueReady): the checks `task done --train` runs, then
- * the same queue call, with meta.auto 'ready hand-back' on its task.train.<x>.queued event; failing checks queue nothing
- * and the reason goes on the task once. STUDIO_ENGINE_AUTO_QUEUE=off turns it off.
+ * Finished engine work is queued by the harness, not by a rule in the task's text. The engine pass finds recent
+ * hand-backs of engine tasks whose note says done or ready (handback-kind.mjs saysReady) and, once per hand-back,
+ * starts `node harness/line-producer.mjs auto-queue <ID> --engine <x>`: the `task done --train` checks, then the queue
+ * call; failing checks queue nothing and the reason goes on the task once. STUDIO_ENGINE_AUTO_QUEUE=off turns it off.
  */
 const ENGINE_AUTO_QUEUED = () => path.join(LINE_DIR(), 'engine-auto-queued.json');
 export const engineAutoQueueOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_AUTO_QUEUE ?? '').trim());

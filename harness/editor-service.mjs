@@ -1,52 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/editor-service.mjs — 2.84 (s): one harness-owned engine editor that stays open, used two ways.
- *
- * UNTESTED ON A REAL EDITOR. Everything here is checked against a stand-in editor (qa/fixtures/fake-editor.mjs, a node
- * process speaking the same file protocol); the Unity side (engine/_unity/Assets/Editor/StudioService/
- * StudioEditorService.cs) has never been compiled or run. Everything is OFF by default, and any failure of the service
- * falls back to today's cold path (a land script starts its own editor; an agent's art waits for the train).
- *
- * Why (a crew's field notes): every engine land step started the editor cold and re-imported; and builder and porter
- * sessions cannot run the editor at all, so art and UI work was never compiled or looked at before the train.
- *
- *   1. A WARM editor for land runs (engines.<x>.warm: true or "land"): the train starts the "land" instance on the land
- *      tree (the gate worktree) before its first land run, keeps it between runs, and only OFFERS it to the land script:
- *      STUDIO_EDITOR_SERVICE=<folder> and STUDIO_EDITOR_SERVICE_CLI=<a command line> in the land command's environment
- *      (harness/unity-train.mjs). Not healthy: the variables are not set, engine.warm.fallback says why.
- *   2. An EDITOR SERVICE for agents (engines.<x>.service.check: true): `npm run editor -- check` from any session queues a
- *      compile (+ capture) of the caller's own branch; the supervisor's pass (editorServicePass) runs the oldest request
- *      in the "check" instance's own checkout (never a lane's folder, never the train's), writes the compiler errors
- *      and PNGs under .studio/editor-service/out/<lane>/<head8>/ and emits editor.check. Never while that engine's train
- *      runs (they would fight for CPU and RAM).
- *
- * The protocol is files, no sockets (no firewall prompt on Windows; survives a harness restart). In the service folder
- * (<project>/Temp/StudioService/, inside the editor's own project, never committed):
- *   requests/<id>.json   written atomically by the harness: { id, kind, ...args, at }
- *                        kind: ping | refresh | compile | test | capture | quit
- *                        test: { mode: EditMode|PlayMode, filter?, assemblyNames?, resultsPath }
- *                        capture: { scene, camera?, width, height, out }
- *   responses/<id>.json  written atomically by the editor: { id, ok, kind, ms, errors: [{ file, line, code, message }],
- *                        results?, images?, log?, why? }
- *   heartbeat.json       { pid, at, busy, unityVersion, domainReloads }, rewritten every few seconds.
- * The editor is started with `-batchmode -projectPath <dir> -studioService <folder> -studioHeartbeatSec <n> -logFile
- * <file>` (no -quit; no -nographics: a capture needs a GPU). Without -studioService the editor script does nothing, so a
- * person's own editor is never affected.
- *
- *   npm run editor -- start  [--engine x] [--instance check|land] [--project <dir>]
- *   npm run editor -- status [--engine x] [--json]
- *   npm run editor -- stop   [--engine x] [--instance check|land]
- *   npm run editor -- request <kind> [--engine x] [--instance check|land] [--mode EditMode] [--filter f]
- *                     [--assemblies a;b] [--results <file>] [--scene s] [--camera c] [--width w] [--height h] [--out f]
- *                     prints the response as JSON; exit 1 on ok:false, 3 when no healthy editor answers (fall back)
- *   npm run editor -- check  [--engine x] [--lane <agent>] [--branch b] [--capture <scene>[:<camera>]] [--wait]
- *   npm run editor -- result [--engine x] [--lane <agent>] [--json]
- *   npm run editor -- pass   (one queue pass by hand; the supervisor runs it when the queue is on)
- *
- * Settings (studio/game.json engines.<x>): warm (false | true | "land"); service = { check: false, dir, heartbeatSec: 5,
- * requestTimeoutMin: 30, recycleAfter: 20, recycleMin: 240, startTimeoutMin: 15, graceSec: 30 }. STUDIO_EDITOR_SERVICE=off
- * is the master switch. The editor binary is STUDIO_UNITY (harness/unity.mjs unityBin); a path ending in .mjs or .js is run
- * with node (the stand-in editor of the self-test).
+ * harness/editor-service.mjs — one harness-owned engine editor that stays open: warm for land runs, a service for agents.
+ * UNTESTED ON A REAL EDITOR (only a stand-in, qa/fixtures/fake-editor.mjs). OFF by default; a failure falls back to cold.
+ * WARM (engines.<x>.warm: true or "land"): the train keeps a "land" instance and only OFFERS it to the land script via
+ * STUDIO_EDITOR_SERVICE=<folder> and STUDIO_EDITOR_SERVICE_CLI=<command line> (harness/unity-train.mjs); not healthy: unset.
+ * SERVICE (engines.<x>.service.check: true): `npm run editor -- check` queues a compile (+ capture) of the caller's branch; the
+ * supervisor's editorServicePass runs the oldest in the "check" instance's own checkout, writes errors and PNGs to
+ * .studio/editor-service/out/<lane>/<head8>/, emits editor.check; never while that engine's train runs.
+ * Protocol: files in <project>/Temp/StudioService/ (never committed): requests/<id>.json, responses/<id>.json, heartbeat.json.
+ *   npm run editor -- start|status|stop|request <kind>|check|result|pass [--engine x] [--instance check|land] [--lane <agent>]
+ * request exits 1 on ok:false, 3 when no healthy editor. STUDIO_EDITOR_SERVICE=off is the master switch; binary: STUDIO_UNITY.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -277,13 +240,9 @@ const STOPPED = { pid: null, identity: null };
 
 /**
  * A `quit` request, then (still alive after graceSec) a kill of the pid THIS harness started. Never another process.
- * 2.84: who the recorded pid is, before anything is sent:
- *  - its start differs from the recorded one, or it is gone: another program now; nothing sent, nothing killed;
- *  - its start matches (liveAs strict): ours; quit, then the kill;
- *  - its start can't be read (on Windows a PowerShell that failed or timed out): the editor's own heartbeat decides
- *    whether the quit is sent (a fresh heartbeat in the recorded folder naming this very pid: the editor says it is
- *    this process). A quit request only reaches the editor serving that folder. The kill still needs a confirmed
- *    start, so an unconfirmed pid is never killed; it is reported instead.
+ * Before anything is sent: recorded start differs or pid gone: another program, nothing sent or killed; start matches
+ * (liveAs strict): ours, quit then kill; start unreadable (e.g. a failed PowerShell on Windows): the editor's own heartbeat
+ * decides whether quit is sent. The kill still needs a confirmed start: an unconfirmed pid is reported, never killed.
  */
 export async function stopEditor(engine = 'unity', { root = mainRoot(), instance = 'check', env = process.env, log = () => {}, why = 'stopped' } = {}) {
   const s = serviceSettings(root, engine, env);

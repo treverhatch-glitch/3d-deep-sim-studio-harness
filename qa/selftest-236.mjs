@@ -4,11 +4,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf as fileUrlRelOf, out } from './kit.mjs';
 
 export async function selftest236({ dir, run, report, tmpRoot }) {
-  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
+  const u = fileUrlRelOf(dir);
   const evFile = path.join(dir, '.studio', 'events-236.jsonl');
   const base = { AGENT_EVENTS_FILE: evFile, STUDIO_GATE_SLOTS: '0' };
 

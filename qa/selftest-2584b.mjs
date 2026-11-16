@@ -9,10 +9,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { out, writeInDirOf } from './kit.mjs';
 
 export async function selftest2584B({ dir, run, report }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const w = writeInDirOf(dir);
   const env = { STUDIO_LOCK_OWNER: 'builder-b1', STUDIO_GAME: 'zz-owner' };
   w('web/zz-owner/index.html', '<!doctype html>\n');
   w('web/zz-owner/studio.gates.json', JSON.stringify({ gates: [{ id: 'unit', command: 'node -e "process.exit(0)"' }] }));

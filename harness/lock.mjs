@@ -1,19 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/lock.mjs — atomic claim/release locks so two agents never edit the same thing.
- *
  *   node harness/lock.mjs claim   task:T-001        --owner cursor-win2 [--ttl 3600]
  *   node harness/lock.mjs claim   path:src/sim/     --owner codex-a      (a folder lock covers everything under it)
  *   node harness/lock.mjs release <key>             --owner <same owner>
  *   node harness/lock.mjs status  <key>
  *   node harness/lock.mjs list
  *   node harness/lock.mjs check-staged [--owner me]  (pre-commit: refuse staged files locked by someone else)
- *
- * Owners must be unique per running agent: tool and role names that several agents share are refused.
- * A by-hand claim on a game's (source) root or a folder of more than STUDIO_LOCK_MAX_FILES (50) tracked files needs --wide.
- * In a lane copy another agent's lock only warns at commit (checked when the lane lands); a merge commit is judged on
- * its own diff. `file:` is an alias of `path:`. Paths are compared without regard to case: on Windows `game/Branding`
- * and `game/branding` are one folder, so two agents can't hold it under two spellings.
+ * Owners must be unique per running agent: tool and role names that several agents share are refused. A by-hand claim
+ * on a game's (source) root or a folder of over STUDIO_LOCK_MAX_FILES (50) tracked files needs --wide. In a lane copy
+ * another agent's lock only warns at commit. `file:` is an alias of `path:`. Paths compare case-insensitively.
  */
 
 import crypto from 'node:crypto';
@@ -395,9 +391,8 @@ export function laneCopyName(root = REPO_ROOT) {
 
 /**
  * The task a commit is for, for the commit-msg hook's Studio-Task trailer (one task, not every task the agent holds).
- * In order: 1. in a lane copy, the lane's own task (the task whose branch in .studio/lane-branches.json is this copy's
- * branch, or the session record .studio/agents/<lane>.json); 2. the subject's leading task id ("T-093: ...") when the
- * agent holds it; 3. the agent's only task lock; 4. none, with a note saying how to name it.
+ * In order: the lane's own task (.studio/lane-branches.json, or the session record .studio/agents/<lane>.json); the
+ * subject's leading task id ("T-093: ...") when the agent holds it; the agent's only task lock; none, with a note.
  * Returns { tasks: [ids], from: 'lane'|'subject'|'only-lock'|null, note }.
  */
 export function commitTasks({ owner = process.env.STUDIO_LOCK_OWNER || '', subject = '', root = REPO_ROOT, locks = null } = {}) {

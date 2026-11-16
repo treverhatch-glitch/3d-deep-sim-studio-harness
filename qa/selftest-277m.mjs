@@ -8,15 +8,14 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { gEnvOf, gitPlainOf, guardOf, out } from './kit.mjs';
 
 export async function selftest277M({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 'Pat', GIT_AUTHOR_EMAIL: 'pat@example.invalid', GIT_COMMITTER_NAME: 'Pat', GIT_COMMITTER_EMAIL: 'pat@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { cwd, encoding: 'utf8', env: gEnv(), windowsHide: true });
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const gEnv = gEnvOf(ident);
+  const g = gitPlainOf(gEnv);
+  const guard = guardOf(report);
   const imp = (rel) => import(`${pathToFileURL(path.join(dir, rel)).href}?m=${Date.now()}`);
   const NEW_CMDS = ['agent -- stop', 'agent -- pause', 'task -- park', 'task -- block', 'task -- unblock', 'task -- pause', 'beta -- on', 'beta -- off'];
 

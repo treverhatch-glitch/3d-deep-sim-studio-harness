@@ -1,22 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/winddown.mjs — 2.68.0: usage wind-down. Stop starting work before the plan runs out, not at the wall.
- *
+ * harness/winddown.mjs — usage wind-down: stop starting work before the plan runs out, not at the wall.
  *   npm run studio:winddown                       is the studio winding down, and why
  *   npm run studio:winddown -- --now --by <name> [--until <time>] [--why "…"]   wind down now, on demand (an agent: --until)
  *   npm run studio:winddown -- --off --by <name> [--permission "…"]   end a wind-down before the reset
- *
- * STUDIO_USAGE_WINDDOWN_PCT (unset: off), e.g. 90. The usage figure is the one the harness already tracks
- * (harness/budget.mjs budgetStatus): the highest share of a tool's week used (tools with --weekly set), and a tool
- * marked out of quota (its provider's limit line) counts as 100% until its reset. At or above the setting the
- * supervisor starts no new sessions, lets the running ones finish, writes .studio/restart-log.md (what was running,
- * queued and held, and the next steps) and emits studio.winddown. When the usage resets (the figure falls back under
- * the setting, or a wind-down asked with --now reaches the soonest reset), the supervisor resumes on its own and its
- * studio.winddown_resumed event links the restart log.
- * Who: --now, anyone but a worker (it only stops new starts; 2.80 (c), #14: an agent must say --until <time>, when it ends
- * by itself, since only a person may --off); --off, a person, an agent under the owner's delegation for
- * hold, or a Producer/Director session or outside agent on a person's permission (harness/decider.mjs).
- * State: .studio/winddown.json. Only event.mjs is imported at load (the supervisor imports this file).
+ * STUDIO_USAGE_WINDDOWN_PCT (unset: off), e.g. 90, against the highest share of a tool's week used (harness/budget.mjs
+ * budgetStatus; a tool marked out of quota counts as 100% until its reset). At or above it the supervisor starts no new
+ * sessions, lets running ones finish, writes .studio/restart-log.md and emits studio.winddown; when usage resets it resumes on
+ * its own (studio.winddown_resumed links the restart log). Who: --now, anyone but a worker (an agent must say --until);
+ * --off, a person, an agent under the owner's delegation, or a Producer/Director/outside agent on a person's permission
+ * (harness/decider.mjs). State: .studio/winddown.json. Only event.mjs is imported at load.
  */
 import fs from 'node:fs';
 import path from 'node:path';

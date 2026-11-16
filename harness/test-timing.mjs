@@ -1,22 +1,14 @@
 #!/usr/bin/env node
 /**
- * harness/test-timing.mjs — 2.78.2 (f): millisecond budgets hiding in the normal test suites.
- *
- * Tests that assert on wall-clock time ("each kind averages under 2 ms", a 40 ms layout budget, a frame budget) go red
- * on a busy machine with nothing wrong in the code. 2.78.2 (b) gave them a place (the perf tests: studio/game.json
- * "perfTests" / STUDIO_PERF_TESTS, run alone on a quiet machine in game:perf), but nothing found the ones outside it.
- *
+ * harness/test-timing.mjs — finds millisecond budgets hiding in normal test suites: wall-clock tests go red on a busy
+ * machine. The perf tests (studio/game.json "perfTests" / STUDIO_PERF_TESTS) run alone in game:perf; this finds the
+ * rest.
  *   timingFindings(root, dirs, { perfGlobs, gameRoot })   test files (not matching the perf globs) where a wall-clock
- *                       value is ASSERTED against a bound: [{ file, line, text }]. A wall-clock value is an elapsed time
- *                       taken from performance.now(), Date.now() or process.hrtime (a difference with a start time, or
- *                       a variable assigned one, or anything computed from it: an average, a total); an assertion is
- *                       expect(<it>).toBeLessThan / toBeLessThanOrEqual / toBeWithin / .below / .lessThan / .most,
- *                       expect(<it> < n) / assert(<it> < n) / assert.ok(<it> <= n) (or n > <it>). Taking a time without
- *                       asserting on it (logging, a seed) is never flagged. Comment lines are skipped.
+ *     value (an elapsed time from performance.now(), Date.now() or process.hrtime, or computed from one) is ASSERTED
+ *     against a bound (toBeLessThan, expect(<it> < n), assert(<it> < n), …): [{ file, line, text }]. Merely taking a
+ *     time is never flagged.
  *   timingWarnings(root, dirs, { perfGlobs, gameRoot })   the advisory lines game-gates prints
- *                       ("[game-gates] WARN game:test-timing: <file>:<line> …"); never a FAIL, no row.
- *                       STUDIO_TEST_TIMING=off turns the scan off.
- *
+ *     ("[game-gates] WARN game:test-timing: <file>:<line> …"); never a FAIL. STUDIO_TEST_TIMING=off turns the scan off.
  *   node harness/test-timing.mjs [--json] [<dir> ...]   the findings (default: the studio game's folder); exit 0 always
  */
 import fs from 'node:fs';

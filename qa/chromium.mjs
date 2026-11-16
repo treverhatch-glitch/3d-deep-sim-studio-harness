@@ -12,11 +12,10 @@ import { spawnSync } from 'node:child_process';
 import { browserGpuMode, machineProfile } from '../harness/heavy-budget.mjs';
 
 /**
- * 2.70.0 (t): headless Chromium renders WebGL on the CPU (SwiftShader) unless told otherwise, so browser playtests
- * kept the CPU busy while the GPU sat at 1-7%. STUDIO_BROWSER_GPU=on|off|auto (default off; auto = on when the machine
- * scan shows a GPU) adds these flags. UNVERIFIED on the crew's PC: whether they give a hardware renderer there is not
- * known yet, so the run's report records the renderer the page actually got (pageRenderer) and says once when the
- * flags are on but a CPU renderer (SwiftShader, llvmpipe) is in use.
+ * Headless Chromium renders WebGL on the CPU (SwiftShader) unless told otherwise. STUDIO_BROWSER_GPU=on|off|auto
+ * (default off; auto = on when the machine scan shows a GPU) adds these flags. UNVERIFIED: whether they give a
+ * hardware renderer is not known, so the run's report records the renderer the page got (pageRenderer) and says once
+ * when the flags are on but a CPU renderer (SwiftShader, llvmpipe) is in use.
  */
 export function browserGpuFlags(platform = process.platform) {
   if (platform === 'win32') return ['--enable-gpu', '--use-angle=d3d11'];

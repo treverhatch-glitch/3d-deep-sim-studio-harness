@@ -1,35 +1,15 @@
 #!/usr/bin/env node
 /**
  * harness/agent.mjs — start agents, watch them, and clean up when one dies.
- *
- *   npm run agent -- start --role builder --agent builder-1 --tool claude|codex|agy|cursor|grok|aider|nim|custom --model <model> [--force-model]
- *                       [--fallback codex:gpt-6-sol,claude:claude-sonnet-5-5] [--task T-012] [--lane <folder>] [--one-task] [--detach]
- *   npm run agent -- now "<what I'm doing>"   an agent's one-line status, sent with its heartbeat (event log)
- *   npm run agent -- hire --role <role> [--division sound] [--task T-012 | --next] [--lane <folder>] [--note "…"]
- *                        [--loop until-empty|N] [--by <producer or person>] [--open] [--foreground]   the same as start, as a hire
- *                        (in the background unless --foreground):
- *                        the Producer hires on its own up to studio/budget.json producerMayHireUpTo (default 4), past
- *                        that the game dev is asked; --open switches the division on
- *   npm run agent -- pause <agent> [--note "…"]   its task goes back to the queue, then it stops
- *   npm run agent -- logs <agent> [--tail 60] [--raw]   a Claude session reads as a conversation
- *   npm run agent -- list          who is running, last heartbeat, task, tool, model
- *   npm run agent -- stop <agent>  end one agent (it is cleaned up like any other exit)
- *   npm run agent -- fill          start agents for waiting tasks, within the mode's caps (the watcher runs this)
- *   npm run agent -- allow agy [--dry-run] | --by <owner> [--scope user] [--all] [--prune]   the owner writes agy's
- *                                  headless allow-rules (the approved set) into .studio/agy-settings.json, which the launcher passes to agy
- *                                  with --settings (--scope user: agy's own settings.json instead; harness/agy-allow.mjs)
- *
- * A start refuses if the studio is stopped, the mode's caps are full, or the daily token cap is spent. It writes the agent's
- * kickoff with its real model and starts the tool with no shell (harness/launch.mjs; the prompt goes in on stdin or as one
- * argument, so the same line works on Windows, macOS and Linux). STUDIO_<ROLE>_CMD (or STUDIO_AGENT_CMD) overrides it with
- * your own command; {kickoff}, {agent}, {model} and {role} are filled in, quoted for the shell.
- * Events: agent.session.start, agent.heartbeat every 2 minutes, agent.session.end (exit code, reason, tokens reported).
- * When it ends badly (non-zero exit, usage limit, 429, auth error) while holding a task, it hands the task back with a note,
- * saves the uncommitted changes under its claims to .studio/wip/<task>-<agent>.patch, and frees its claims. With --fallback
- * it starts the next tool and model in the list on the same task.
- *
- * Tools and models per role come from --tool/--model, or STUDIO_<ROLE>_TOOL / STUDIO_<ROLE>_MODEL, or STUDIO_AGENT_TOOL /
- * STUDIO_AGENT_MODEL (.env). Output goes to .studio/agents/<agent>.log.
+ *  npm run agent -- start --role builder --agent builder-1 --tool claude|codex|agy|cursor|grok|aider|nim|custom
+ *     --model <model> [--force-model] [--fallback tool:model,tool:model] [--task T-012] [--lane <folder>] [--one-task] [--detach]
+ *  npm run agent -- hire --role <role> [--division sound] [--task T-012 | --next] [--lane <folder>] [--note "…"]
+ *     [--loop until-empty|N] [--by <who>] [--open] [--foreground]  (producer hires up to studio/budget.json producerMayHireUpTo)
+ *  npm run agent -- now "<status>" | pause <agent> [--note "…"] | stop <agent> | logs <agent> [--tail 60] [--raw] | list | fill
+ *  npm run agent -- allow agy [--dry-run] | --by <owner> [--scope user] [--all] [--prune]  (.studio/agy-settings.json)
+ * A start refuses if the studio is stopped, the mode's caps are full, or the daily token cap is spent. No shell is used
+ * (harness/launch.mjs); STUDIO_<ROLE>_CMD or STUDIO_AGENT_CMD overrides the command; tool/model: STUDIO_<ROLE>_TOOL / _MODEL,
+ * STUDIO_AGENT_TOOL / _MODEL. Log: .studio/agents/<agent>.log. Events: agent.session.start, agent.heartbeat, agent.session.end.
  */
 import fs from 'node:fs';
 import { postAsk } from './ask-post.mjs';
@@ -207,11 +187,10 @@ export function toolPreflight(tool, env = process.env, platform = process.platfo
 }
 
 /**
- * The arguments every aider session (nim, aider) gets after its model and message file: --no-pretty --no-fancy-input
- * (stdout is a log file), --no-gitignore (aider would edit the tracked .gitignore), --aiderignore <file> (harness folders
- * and protected paths are never edited), --read <brief> (read-only), --map-tokens / --map-refresh (AIDER_SESSION in
- * models.config.mjs; STUDIO_AIDER_MAP_TOKENS, STUDIO_AIDER_MAP_REFRESH) and --file <path> for each lane file of a driven
- * session (harness/aider-protocol.mjs). --subtree-only is not used: a session's folder is the repo root.
+ * The arguments every aider session (nim, aider) gets after its model and message file: --no-pretty --no-fancy-input,
+ * --no-gitignore, --aiderignore <file> (harness folders and protected paths are never edited), --read <brief> (read-only),
+ * --map-tokens / --map-refresh (STUDIO_AIDER_MAP_TOKENS, STUDIO_AIDER_MAP_REFRESH) and --file <path> per lane file of a
+ * driven session (harness/aider-protocol.mjs). --subtree-only is not used: a session's folder is the repo root.
  */
 export function aiderTail({ ignoreFile = null, reads = [], files = [], env = process.env } = {}) {
   const mt = String(env.STUDIO_AIDER_MAP_TOKENS ?? '').trim();
@@ -230,13 +209,10 @@ function agySettingsArg(file) {
 }
 
 /**
- * agy's options before --settings:
- *   --print-timeout STUDIO_AGY_PRINT_TIMEOUT (5400s): a builder session runs up to 90 min (STUDIO_SESSION_MAX_MIN).
- *   --mode STUDIO_AGY_MODE (accept-edits; off drops it): agy's analogue of acceptEdits; a headless session ends at its
- *       first refused tool. Commands stay on the --settings allow-list.
- *   --model <model> when one is given (STUDIO_AGY_MODEL_FLAG names the flag; off drops it). UNTESTED on real agy: the
- *       flag's name (agy models lists the names).
- * A value that isn't one plain word is ignored (the default is used).
+ * agy's options before --settings: --print-timeout STUDIO_AGY_PRINT_TIMEOUT (5400s; a builder session runs up to 90 min,
+ * STUDIO_SESSION_MAX_MIN); --mode STUDIO_AGY_MODE (accept-edits; off drops it; a headless session ends at its first refused
+ * tool); --model <model> when given (STUDIO_AGY_MODEL_FLAG names the flag; off drops it; the flag name is UNTESTED on real
+ * agy). A value that isn't one plain word is ignored (the default is used).
  */
 export const AGY_DEFAULT_MODEL = 'gemini-4-argon-high';
 /**
@@ -582,14 +558,10 @@ export function trainQueued(id, { agent = null, branch = null, stateDir = STUDIO
 }
 
 /**
- * How a session's process ended: { kind, code, signal, at, by?, why? }, kind being
- *   stopped      a person or the Producer stopped or paused it (stopAgent's mark)
- *   stall|idle|budget  this launcher ended it (stall watchdog, idle exit, task budget)
- *   spawn-error  its program never started
- *   signal       killed from outside (OOM killer, SIGTERM to its tree, ...)
- *   exit         it exited by itself. On Windows a kill from outside (taskkill /F) reads as exit 1 (no signals there).
- * ranSec: how long its process ran (the halt rule merges only sessions that got going, harness/supervisor.mjs).
- * A session whose launcher died too is ended later by markGone/endAsDead with reason 'process gone' (no exit cause).
+ * How a session's process ended: { kind, code, signal, at, by?, why? }. kind: stopped (a person or the Producer stopped or
+ * paused it), stall|idle|budget (this launcher ended it), spawn-error (program never started), signal (killed from outside),
+ * exit (exited by itself; on Windows a kill from outside reads as exit 1). ranSec: how long its process ran (the halt rule
+ * merges only sessions that got going, harness/supervisor.mjs). A session whose launcher died too ends later as 'process gone'.
  */
 export function exitCause({ code, exit = {}, stop = null } = {}) {
   const base = { code: code ?? null, signal: exit.signal || null, at: exit.at || new Date().toISOString(), ...(Number.isFinite(exit.ranMs) ? { ranSec: Math.round(exit.ranMs / 1000) } : {}) };
@@ -650,12 +622,10 @@ export function agyStopLine(log) {
 }
 
 /**
- * What an agy session used, from its own output (agy -p prints no usage line), newest session part only: Gemini usage
- * objects usageMetadata { promptTokenCount, candidatesTokenCount, cachedContentTokenCount } (one per response id, the
- * last counts), or a stats.models.<model>.tokens { prompt, candidates, cached } summary (Gemini CLI --output-format json);
- * a plain `usage` line is tokensFrom's. The model comes from modelVersion, model, or the stats.models key.
- * { reported: true, tokensIn, tokensOut, cacheRead, model } or an estimate from text length (~4 characters a token):
- * { reported: false, estimated: true, ... }, recorded as usage "not reported", never as 0.
+ * What an agy session used, from its own output (agy -p prints no usage line), newest session part only: Gemini usageMetadata
+ * { promptTokenCount, candidatesTokenCount, cachedContentTokenCount } (the last per response id counts), or a
+ * stats.models.<model>.tokens { prompt, candidates, cached } summary; a plain `usage` line is tokensFrom's. Returns
+ * { reported: true, tokensIn, tokensOut, cacheRead, model } or { reported: false, estimated: true, ... } (~4 characters a token).
  */
 export function agyUsage(log, { kickoffChars = 0 } = {}) {
   const part = newestSessionPart(String(log || ''));
@@ -1720,14 +1690,10 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
 /** The copy the ended session under this name used, to work on in: { dir, branch, laneless, reused }, or null when it is
  * gone or isn't this agent's lane worktree (then a new copy is made). */
 /**
- * 2.86: a refresh's successor takes over the lane copy of the session it continues. All seven "no lane copy could be made
- * for <name> (.lanes/<name> is still in use)" in a crew's log came right after a refresh ended that same name: the
- * launcher dropped the copy and made a new one, and on Windows the removal of a copy the exiting session's processes still
- * held left the folder behind, which the new copy then saw as "changed 0 min ago" (worktree.mjs laneLive). Now, when the
- * copy is the predecessor's own (.lanes/<agent>) and holds the same task, the successor works on in it once the
- * predecessor's process is confirmed gone (proc-identity.mjs liveAs, strict: a reused pid is not it); while it is still
- * alive the launcher waits and checks again (tries x waitMs), and only then falls back to a new copy. Returns the copy
- * (reusableCopy's shape) or null.
+ * A refresh's successor takes over the lane copy of the session it continues, when the copy is the predecessor's own
+ * (.lanes/<agent>) and holds the same task, once the predecessor's process is confirmed gone (proc-identity.mjs liveAs,
+ * strict: a reused pid is not it). While it is still alive the launcher waits and checks again (tries x waitMs), then falls
+ * back to a new copy. Returns the copy (reusableCopy's shape) or null.
  */
 export function takeOverOwnCopy(agent, prev, { sameTask = false, rec = null, alive = (pid, id) => liveAs(Number(pid), id || null, { strict: true }), tries = 6, waitMs = 5000, sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {
   if (!prev?.dir || !sameTask) return null;
@@ -1885,12 +1851,9 @@ function dropStarting(agent) {
 
 /**
  * What a stop does with a session's process, decided at kill time. `cur` is what the OS says about the target now
- * (harness/proc-identity.mjs readStarts, read once by the caller): { start, proc?, cmd? }, { error }, or null when the
- * number is free. The target is the agent's process, or the launcher while the session is still starting.
- *   kill: kill the target and its tree. end: mark the session ended and hand its work back here (no live launcher is left).
- *   Same start (within the tolerance): kill. Clearly different: the number is another program's; nothing is killed.
- *   Nothing to compare (unreadable, or an old record): a heartbeat within the stall threshold means kill; an older one:
- *   kill nothing and treat the session as dead. Wrongly sparing a dead record is free; wrongly killing hits a stranger's program.
+ * (proc-identity.mjs readStarts): { start, proc?, cmd? }, { error }, or null when the number is free. kill: kill the target and
+ * its tree. end: mark the session ended, hand its work back. Same start (within the tolerance): kill. Clearly different:
+ * another program's number, nothing killed. Nothing to compare: a fresh heartbeat means kill; older: kill nothing, treat as dead.
  */
 export function killVerdict(s, cur, now = Date.now()) {
   const beat = Date.parse(s.lastBeat || s.startedAt || '');
@@ -2399,13 +2362,12 @@ export function startAgent(opts, { detach = false } = {}) {
       emitEvent({ type: rr.applied ? 'model.rerouted' : 'model.reroute_suggested', agent: 'director', to: 'producer', task: opts.task, msg: `${opts.task}: ${rr.fromModel} (${rr.fromFamily}) replied with reasoning only; ${rr.applied ? `rerouted to ${rr.model}${rr.tool ? ` on ${rr.tool}` : ''}` : 'route it to another model family (set STUDIO_REROUTE_MODELS, e.g. codex:gpt-5)'}`, meta: rr });
     }
   }
-  // A review must come from another model family than the implementer's. Another family configured and not out of quota: the
-  // review runs on it. None: a different model of the same family (else the same), and one line in the brief says the reviewer
-  // writes the same-family header (harness/review-family.mjs). An explicit --model is respected.
-  // The plan's model decides its tool (harness/model-tool.mjs toolForModel), over the supervisor's default (opts.toolDefault);
-  // a tool a person named (--tool, no toolDefault) is kept, and a plan model it cannot run is not taken. A model no tool is
-  // known for is refused with one line. A tool whose sessions cannot run commands (vertex) cannot review: the harness asks
-  // the model itself (harness/review-ask.mjs, `npm run review -- ask`) and no session starts.
+  // A review must come from another model family than the implementer's. Another family configured and not out of quota:
+  // the review runs on it. None: a different model of the same family (else the same), and one line in the brief says the
+  // reviewer writes the same-family header (harness/review-family.mjs). An explicit --model is respected.
+  // The plan's model decides its tool (harness/model-tool.mjs toolForModel) over opts.toolDefault; a tool a person named is
+  // kept. A model no tool is known for is refused with one line. A tool whose sessions cannot run commands (vertex) cannot
+  // review: the harness asks the model itself (harness/review-ask.mjs, `npm run review -- ask`) and no session starts.
   if (role === 'reviewer' && opts.task && !opts.model) {
     let plan = null;
     try {

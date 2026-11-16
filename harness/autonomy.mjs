@@ -1,35 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/autonomy.mjs — the autonomy scorecard. How much the studio needs a person, from the event log.
- *
- *   npm run autonomy                     the last 7 days, with daily buckets and the level badge
- *   npm run autonomy -- --days 14 --json
- *   npm run autonomy -- --now 2026-11-08T00:00:00Z   the window ending then (a replay of an older week)
- *   npm run autonomy -- --since 2026-11-01T00:00:00Z  the window from then to now (or to --now)
- *   npm run autonomy -- level <L1|L2|L3|L4> --by <name> [--why "…"] [--permission "…"]   set the level (setLevel)
- *   npm run autonomy -- mode autonomous on|off --by <game dev> [--agent <name>]   propose autonomous mode (the owner
- *     confirms: npm run policy -- confirm) or pause it at once (harness/policy.mjs)
- *   npm run autonomy -- impact [--release <version>] [--days 3] [--json]   a harness upgrade's before vs after
- *     (harness/impact.mjs)
- *   npm run autonomy -- routing [--days 14] [--json]   cheap-first routing's success rate and tokens per landed change
- *     by task type and tier (harness/routing.mjs); the holdout is off
- *
- * A script over .studio/events.jsonl (no model, no tokens). Over the window it measures: supervisor hours (minus halted
- * time) per UNPLANNED person intervention (resuming a halted supervisor, forcing a task done, stopping an agent,
- * reopening, dropping or reordering a task, unblocking a parked one, stopping the studio, retyping a task, sending an
- * away decision back with "redo"; planned reviews such as "great"/"comment", fun verdicts, the dev's yes, Bible signing
- * and approvals are counted apart); the hands-free land rate (landed tasks not forced, no person event between claim and
- * landing); the forced-done and reopen/escape rates (a bug added --caused-by it within 7 days); hand-backs by failure
- * label (harness/metrics.mjs); the halt wait; gate catches per landed task; the owner's Great/Redo verdicts; cost per
- * landed task (tokens; dollars only with a studio/prices.json table); orchestrator interventions (conductor.note); and
- * the "Tokens" block (tokenWork; --json: card.tokenWork): effective-token ratio, cost per kept change, waste split.
- * Who is a person: verdict.mjs isPerson, reclassify.mjs isAgentName and the harness's own scripts. A decision an agent
- * recorded on a person's direct permission (meta.permission + meta.recordedBy) is the PERSON's intervention.
- *
- * The level badge: the level the owner set (studio/autonomy.json "level", default L2) and whether the window meets the
- * L3 bar in that file. The L3 rates are judged at a one-sided Wilson bound ("confidence", default 0.9) for a promotion
- * and as point estimates for a demotion; a failed audit (harness/audit.mjs) counts as a Redo. Moving up is only a
- * suggestion shown to the owner. Nothing here changes how the studio runs.
+ * harness/autonomy.mjs — the autonomy scorecard: how much the studio needs a person, from the event log.
+ *    npm run autonomy [-- --days 14 --json]      the last 7 days, with daily buckets and the level badge
+ *    npm run autonomy -- --now 2026-11-08T00:00:00Z | --since 2026-11-01T00:00:00Z   the window ending / starting then
+ *    npm run autonomy -- level <L1|L2|L3|L4> --by <name> [--why "…"] [--permission "…"]   set the level (setLevel)
+ *    npm run autonomy -- mode autonomous on|off --by <game dev> [--agent <name>]   (harness/policy.mjs)
+ *    npm run autonomy -- impact [--release <version>] [--days 3] [--json]   (harness/impact.mjs)
+ *    npm run autonomy -- routing [--days 14] [--json]   (harness/routing.mjs)
+ * A script over .studio/events.jsonl (no model, no tokens): person interventions, hands-free land rate, forced-done
+ * and reopen rates, hand-backs, cost per landed task, the "Tokens" block. The level badge: studio/autonomy.json
+ * "level" (default L2) against its L3 bar. Changes nothing.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -135,11 +115,10 @@ export function readAutonomyConfig(root = REPO_ROOT) {
 }
 
 /**
- * A landed change is KEPT when, within keepDays of landing, it was not reopened, reverted (a later `Revert "…<task>…"`
- * commit, or a merge-train hand-back of it) or redone (a task naming it: --caused-by, meta.redoOf / meta.fixes, or "redo
- * of <task>" / "fixes <task>" in its title); a younger clean landing is PENDING. keepDays: STUDIO_KEEP_DAYS, else
- * studio/autonomy.json "keepDays", else 7. A rate on fewer than minSample items (autonomy.json "minSample", 30) reads
- * "not enough data (n=…)".
+ * A landed change is KEPT when, within keepDays of landing, it was not reopened, reverted or redone (a task naming it:
+ * --caused-by, meta.redoOf / meta.fixes, or "redo of <task>" / "fixes <task>" in its title); a younger clean landing is
+ * PENDING. keepDays: STUDIO_KEEP_DAYS, else studio/autonomy.json "keepDays", else 7. A rate on fewer than minSample
+ * items (autonomy.json "minSample", 30) reads "not enough data (n=…)".
  */
 export const DEFAULT_KEEP_DAYS = 7;
 export const DEFAULT_MIN_SAMPLE = 30;
@@ -257,10 +236,9 @@ function defaultTypeOf(t) {
 
 /**
  * The Tokens block. sorted: the whole log by time; the window is [from, now]. Each agent.session.end in the window is
- * shared among the task attempts it held (metrics.mjs buildAttempts), each in one bucket: kept / reopened /
- * revertedOrRedone · pending (landing younger than keepDays, or attempt open) · handedBack · dropped · noTask (Producer,
- * Director, reviews). Effective-token ratio = kept / (all minus pending). Cost per kept change = judged tokens and $ /
- * kept landings (also per task type).
+ * shared among the task attempts it held, each in one bucket: kept / reopened / revertedOrRedone · pending ·
+ * handedBack · dropped · noTask. Effective-token ratio = kept / (all minus pending). Cost per kept change = judged
+ * tokens and $ / kept landings.
  */
 export function tokenWork(sorted, { from, now, judgedAt = null, keepDays = DEFAULT_KEEP_DAYS, minSample = DEFAULT_MIN_SAMPLE, weight = null, prices = null, priceMultipliers = null, reverts = [], typeOfTask = null } = {}) {
   const K = keepDays * DAY;
@@ -880,11 +858,9 @@ export function tokenBlock(w) {
 }
 
 /**
- * Sets "level" in studio/autonomy.json; agents then make every decision that level allows, and the scorecard only
- * suggests. Who (harness/permission.mjs): a person in their own terminal; a launched Producer or Director session; an
- * agent outside the harness on a person's direct permission (--permission, 10+ characters). A worker (a launched
- * builder, qa, ... session, or a worker's name in STUDIO_LOCK_OWNER or --by) never. One autonomy.level event names who
- * and why. Returns { ok, message, from, to }.
+ * Sets "level" in studio/autonomy.json. Who (harness/permission.mjs): a person in their own terminal; a launched
+ * Producer or Director session; an agent outside the harness on a person's direct permission (--permission, 10+
+ * characters). A worker never. One autonomy.level event names who and why. Returns { ok, message, from, to }.
  */
 export async function setLevel(level, { by, why = '', permission = '', env = process.env, root = REPO_ROOT } = {}) {
   const to = String(level || '').toUpperCase();

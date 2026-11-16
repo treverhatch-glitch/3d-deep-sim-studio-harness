@@ -1,18 +1,14 @@
 #!/usr/bin/env node
 /**
- * harness/public-guard.mjs — U-005 (2.51.0): a guard for a PUBLIC game repo, so nothing private leaves the studio.
- *
+ * harness/public-guard.mjs — a guard for a PUBLIC game repo, so nothing private leaves the studio.
  *   npm run public-guard -- install <path to a game repo>   copy the guard in, turn its hooks on, add its CI check
  *   npm run public-guard -- check <path to a game repo>     run it now (every tracked file)
  *   npm run public-guard -- status <path to a game repo>    is it installed, current, and are its hooks on?
- *
- * The guard (harness/public-guard/check.mjs, copied to the repo's tools/public-guard/check.mjs) blocks keys and
- * tokens, licence files (Unity_lic.ulf), files and text from this private harness, and files marked private:
- * as a pre-push hook (.githooks/pre-push; Git LFS's hooks are kept working beside it) and in the repo's CI
- * (.github/workflows/public-guard.yml), so a skipped hook is still caught before a merge. Installing again
- * updates the copies to this harness's version. Never copies anything else from the harness.
- * 2.53.0: a repo adds its own private markers in tools/public-guard/private-markers.json (file-name and text
- * patterns only its private code has, such as a game's packed rules file); install never overwrites that file.
+ * The guard (harness/public-guard/check.mjs, copied to tools/public-guard/check.mjs) blocks keys and tokens, licence
+ * files (Unity_lic.ulf), files and text from this private harness, and files marked private: as a pre-push hook
+ * (.githooks/pre-push; Git LFS's hooks keep working) and in CI (.github/workflows/public-guard.yml). Installing again
+ * updates the copies; nothing else is copied from the harness. A repo adds its own private markers in
+ * tools/public-guard/private-markers.json (file-name and text patterns); install never overwrites that file.
  */
 import fs from 'node:fs';
 import path from 'node:path';

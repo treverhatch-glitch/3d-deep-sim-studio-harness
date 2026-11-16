@@ -1,22 +1,20 @@
 /**
- * qa/selftest-2731b.mjs — 2.73.1 (helper b): identity never from the shared .env (B-60), leftover folders in .lanes/ are
- * not lanes (B-51), and the one-command boot (B-69).
- *   env      .env's STUDIO_LOCK_OWNER / STUDIO_ROLE / STUDIO_AGENT / STUDIO_MAIN_ROOT are ignored by every loader (event.mjs,
- *            route.mjs, dotenv.mjs) with one stderr line naming the line; other settings still load; the owner's own
- *            studio:resume is no longer refused as "an agent's shell"; the upgrade preflight WARNs with a Fix line
- *   lanes    an emptied .lanes/<name> folder (no worktree) is a "leftover folder (not a lane)" (INFO) in the preflight,
- *            not a lane with main's dirty files as its "unlanded work"; laneCopies leaves it out; lanes refresh refuses it
- *            without running git in it
- *   boot     `studio:boot --check` reports and changes nothing; the sweep clears dead-pid lock/status files with one
- *            event each and leaves live ones, claims and lanes alone (2.80: no hub to start any more); the supervisor only
- *            when none runs, with --foreground and the passed options (--no-hub accepted and not passed on); the Windows npm.cmd hint; --shortcut writes the Desktop file
- * Each check fails on 2.73.0 (the loaders took identity from .env, the preflight counted leftover folders, no boot).
+ * qa/selftest-2731b.mjs — identity never from the shared .env, leftover folders in .lanes/ are not lanes, the
+ * one-command boot.
+ *   env  .env's STUDIO_LOCK_OWNER / STUDIO_ROLE / STUDIO_AGENT / STUDIO_MAIN_ROOT are ignored by every loader
+ *     (event.mjs, route.mjs, dotenv.mjs) with one stderr line; other settings still load
+ *   lanes  an emptied .lanes/<name> folder (no worktree) is a "leftover folder (not a lane)" (INFO) in the preflight;
+ *     laneCopies leaves it out; lanes refresh refuses it
+ *   boot  `studio:boot --check` reports and changes nothing; the sweep clears dead-pid lock/status files with one event
+ *     each and leaves live ones, claims and lanes alone; the supervisor starts only when none runs, with --foreground
+ *     and the passed options (--no-hub accepted, not passed on); --shortcut writes the Desktop file
  */
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { freePortOf, guardOf, out, readJsonl as events } from './kit.mjs';
 
 export async function selftest2731B({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -32,8 +30,7 @@ export async function selftest2731B({ dir, report, tmpRoot, root }) {
   };
   const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: cleanEnv() });
   const node = (cwd, args, extra = {}, opts = {}) => spawnSync(process.execPath, args, { windowsHide: true, cwd, encoding: 'utf8', env: cleanEnv(extra), timeout: 120000, ...opts });
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const guard = guardOf(report);
   let n = 0;
   const made = [];
   const studio = (name) => {
@@ -48,12 +45,11 @@ export async function selftest2731B({ dir, report, tmpRoot, root }) {
     made.push(S);
     return { S, ev };
   };
-  const events = (ev) => { try { return fs.readFileSync(ev, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const lastJson = (r) => { const l = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop(); try { return JSON.parse(l); } catch { return null; } };
   // Harness modules of a copy are imported in a child, never here: their event.mjs would load the copy's .env into this
   // process (the full selftest runs every unit in one process).
   const js = (S, code, E) => { const r = node(S, ['--input-type=module', '-e', code], E); return { r, j: lastJson(r) }; };
-  const freePort = () => new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+  const freePort = freePortOf(net);
   const DEAD = 2147483000; // a pid no process has
 
   // ---- env (B-60) ----

@@ -1,26 +1,24 @@
 /**
- * qa/selftest-270u.mjs — 2.70.0 (u): Unity speed, with a stand-in editor and a stand-in dotnet (node scripts).
- *   (1) the Unity Accelerator: STUDIO_UNITY_ACCELERATOR adds the cache-server arguments to every editor start (tests,
- *       build) when the endpoint answers; unreachable: the run goes on without them and says so; the summary says on/off;
- *   (2) no duplicate Edit Mode: the editor skips Edit Mode when the code-only dotnet step ran the same tests in this gate,
- *       or when Edit Mode passed earlier on the same clean tree with the same Unity; a changed tree runs it again;
- *   (3) one editor start (STUDIO_UNITY_ONE_EDITOR=on): one -executeMethod start with a harness script that is removed
- *       after; a run that doesn't write both results falls back to two starts;
- *   (4) the Graphics split: Graphics-tagged tests run in their own start with a device, the rest -nographics "!Graphics";
- *   (5) landing build options: -studioBuildSpeed fast / -studioCodeOptimization release for the build method, never a
- *       guessed editor flag, none for --release;
- *   (6) the Library cache copies in parallel (bounded, copied not linked), and says so with the file count.
+ * qa/selftest-270u.mjs — Unity speed, with a stand-in editor and a stand-in dotnet (node scripts).
+ *   (1) Unity Accelerator: STUDIO_UNITY_ACCELERATOR adds cache-server arguments to every editor start when the endpoint
+ *     answers
+ *   (2) no duplicate Edit Mode: skipped when the code-only dotnet step ran the same tests in this gate, or it passed
+ *     earlier on the same clean tree
+ *   (3) STUDIO_UNITY_ONE_EDITOR=on: one -executeMethod start with a harness script that is removed after; a run without
+ *     both results falls back to two starts
+ *   (4) Graphics-tagged tests run in their own start
+ *   (5) landing build: -studioBuildSpeed fast / -studioCodeOptimization release for the build method
+ *   (6) the Library cache copies in parallel (bounded)
  */
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileUrlOf, guardSyncOf, out } from './kit.mjs';
 
 export async function selftest270U({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const guard = (name, fn) => { try { const [ok, detail] = fn(); report(name, ok, detail); } catch (e) { report(name, false, e.stack || String(e)); } };
+  const u = fileUrlOf(dir);
+  const guard = guardSyncOf(report);
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_HEAVY_SLOTS: '1', STUDIO_HEAVY_HELD: '', STUDIO_HEAVY_POLL_MS: '100', STUDIO_HEAVY_WAIT_MIN: '0.5', STUDIO_HEAVY_REAP: '', STUDIO_GATE_PRIORITY: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_RAM_FLOOR_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_TEST_LOADAVG: '0', STUDIO_MACHINE_SCAN: 'off', STUDIO_UNITY: '', STUDIO_UNITY_PIN: '', STUDIO_UNITY_LIBRARY_CACHE: 'off', STUDIO_UNITY_LIBRARY_BASE: '', STUDIO_UNITY_CODE_ONLY: '', STUDIO_DOTNET: '', STUDIO_UNITY_ACCELERATOR: '', STUDIO_UNITY_ACCELERATOR_TIMEOUT_MS: '', STUDIO_UNITY_EDITMODE_REUSE: '', STUDIO_UNITY_ONE_EDITOR: '', STUDIO_UNITY_GRAPHICS_SPLIT: '', STUDIO_UNITY_LANDING_BUILD: '', STUDIO_UNITY_CODE_OPT: '', STUDIO_UNITY_CACHE_COPY: '', STUDIO_UNITY_CACHE_COPY_JOBS: '', npm_lifecycle_event: '', AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-270u.jsonl') };
   const T = path.join(tmpRoot, `u270-${process.pid}`);
   fs.mkdirSync(T, { recursive: true });

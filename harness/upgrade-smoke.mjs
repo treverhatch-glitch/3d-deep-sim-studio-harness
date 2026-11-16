@@ -1,19 +1,14 @@
 /**
- * harness/upgrade-smoke.mjs — 2.73.0 (f): `npm run upgrade -- --smoke [--keep] [--json]`, right after taking a harness
- * update. Does the updated harness work here, before the crew starts on it?
+ * harness/upgrade-smoke.mjs — `npm run upgrade -- --smoke [--keep] [--json]`: does the updated harness work here?
  *
- *   copy         a scratch copy of the studio's harness (harness/, scripts/, qa/*.mjs, studio/ without the board, keys or
- *                approvals, the top-level files) in the OS temp folder, its own git repo, node_modules linked; a fresh
- *                empty board and a made-up game ("smoke": one source file, one test). Never the real board.
- *   verify       a tiny verify there: scripts/run-gates.mjs with four gates (protected, secrets, hooks, the made-up game's test)
- *   train        a tiny train there: a throwaway made-up task added, started in its own lane copy, one commit through the
- *                hooks, `task done --train`, then `task train --now`; PASS when it lands (studio/DONE.md of the copy)
- *   machine      the machine scan in the studio (npm run machine: writes .studio/machine.json, the scan's own cache)
- *   supervisor   one supervisor pass in dry run in the copy (no agent is started: the launcher is stubbed)
- * PASS / FAIL per item with a Fix line under each FAIL, exit 1 on any FAIL, and one `upgrade.smoke` event in the studio's
- * log (meta: the items, the harness version, the time it took). The copy is removed at the end (--keep keeps it and
- * prints where); links are unlinked first, so the studio's node_modules is never touched.
- * Code only: no model, no tokens, no network. UNTESTED on Windows: the junction for node_modules and its removal.
+ *   copy         a scratch copy of the harness (harness/, scripts/, qa/*.mjs, studio/ without board, keys or
+ *     approvals) in the OS temp folder, own git repo, empty board, a made-up game. Never the real board.
+ *   verify       scripts/run-gates.mjs with four gates (protected, secrets, hooks, the made-up game's test)
+ *   train        a throwaway task, one commit, `task done --train`, `task train --now`; PASS when it lands
+ *   machine      the machine scan (npm run machine)
+ *   supervisor   one dry-run supervisor pass in the copy (launcher stubbed)
+ * PASS / FAIL per item with a Fix line under each FAIL, exit 1 on any FAIL, one `upgrade.smoke` event. The copy is
+ * removed at the end (--keep keeps it). No model, no network. UNTESTED on Windows: the node_modules junction.
  */
 import fs from 'node:fs';
 import os from 'node:os';

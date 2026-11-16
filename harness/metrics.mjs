@@ -1,32 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/metrics.mjs — 2.54.0 (PU-02, PU-03): one data row per task attempt, with a failure label.
- *
+ * harness/metrics.mjs — one data row per task attempt, with a failure label.
  *   npm run metrics                     write .studio/metrics/attempts.jsonl and .csv, print medians and p90
  *   npm run metrics -- --since 2026-10-31T10:00:00Z [--json]
- *
- * An attempt is one claim of a task: from `task.start` to the first of task done, hand-back (task.paused),
- * forced done, dropped/shelved, the claiming agent's session ending, or the next claim of the same task.
- * Its wall time is split into:
- *   - checks:  `npm run verify` runs by that agent inside the attempt (gates.run meta.ms);
- *   - person:  questions to the game dev from that agent until answered, and time the studio was stopped;
- *   - stalled: heartbeat gaps over 5 minutes (heartbeats come every 2) and idle stalls the watchdog ended;
- *   - agent:   the rest.
- * Plus tokens (in, out, cache reads), reported cost (an estimate from the CLI), sessions, earlier attempts on
- * the same task (retries), hand-backs, rescues, refusals, and whether it was reopened after done.
- *
- * Failure labels (PU-03) for every attempt that didn't end in a done, from a fixed list based on the MAST
- * taxonomy of multi-agent failures (arXiv 2503.13657) plus three of our own. Assigned by rules, never by a model:
- *   repetition      (MAST step repetition) a burn/loop stall, or parked after repeated hand-backs
- *   premature-stop  (MAST premature termination) the session ended without done or a hand-back
- *   no-stop         (MAST unaware of termination) over its task budget, or a refresh check left unanswered
- *   verify-missing  (MAST no or incomplete verification) forced done, or "not done" for a missing verify
- *   verify-wrong    (MAST incorrect verification) reopened after it was done
- *   spec-ignored    (MAST disobey task specification) refused for scope, or a review said it missed the task
- *   env-harness     the harness or the machine: harness-caused hand-back, flaky check, studio stopped, merge refused
- *   quota           a usage limit, rate limit or budget stop on the tool
- *   lane-conflict   lost the task lock or the lane to another agent
- *   unknown         none of the above matched
+ * An attempt is one claim of a task, from `task.start` to the first of task done, hand-back (task.paused), forced done,
+ * dropped/shelved, the claiming agent's session ending, or the next claim. Wall time is split into checks (`npm run verify`
+ * runs), person (questions to the game dev, studio stopped), stalled (heartbeat gaps over 5 minutes, idle stalls the watchdog
+ * ended) and agent (the rest). Plus tokens, cost, sessions, retries, hand-backs, rescues, refusals, reopened after done.
+ * Failure labels, for every attempt that didn't end in a done, assigned by rules, never by a model (from the MAST taxonomy):
+ * repetition, premature-stop, no-stop, verify-missing, verify-wrong, spec-ignored, env-harness (the harness or the machine),
+ * quota, lane-conflict, unknown.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,17 +1,13 @@
 #!/usr/bin/env node
 /**
- * harness/spend-guard.mjs — 2.30o: a spend guard hands over to the next tool exactly like a quota error.
+ * harness/spend-guard.mjs — a spend guard hands over to the next tool exactly like a quota error.
  *
- * The takeover already existed (studio/budget.json `order`, quota marks in .studio/tool-quota.json), but only
- * a CLI's own quota error set a mark. In the Marina run a pooled credit stop was enforced outside the
- * harness, so builders simply stopped. Now any tool in the order can carry a guard:
+ * Any tool in the order (studio/budget.json `order`; quota marks in .studio/tool-quota.json) can carry a guard:
  *   STUDIO_SPEND_GUARD_TOKENS_<TOOL>=n         tokens this budget week (the launcher's own counts)
  *   .studio/credit.json { "<tool>": { "used": n, "guard": n } }   any meter's numbers (its own units)
  * At STUDIO_SPEND_GUARD_AT (0.95) of a guard the tool gets a quota mark (until its weekly reset, or
- * STUDIO_SPEND_GUARD_HOURS, 24), so pickTool() moves the next session to the next tool in the order, and a
- * tool.takeover event goes to the War Room and the human. Tools such as hermes, gemini or grokbot join the
- * order with a launch command: STUDIO_TOOL_<TOOL>_CMD (with {kickoff}, {agent}, {model}, {role}, {task}).
- *
+ * STUDIO_SPEND_GUARD_HOURS, 24), so pickTool() moves the next session to the next tool and a tool.takeover event goes
+ * out. Other tools join the order with STUDIO_TOOL_<TOOL>_CMD (with {kickoff}, {agent}, {model}, {role}, {task}).
  *   node harness/spend-guard.mjs [status|pass]
  */
 import fs from 'node:fs';

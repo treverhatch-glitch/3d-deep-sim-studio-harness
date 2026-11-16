@@ -9,9 +9,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { out } from './kit.mjs';
 
 export async function selftestPU18({ dir, run, report, tmpRoot }) {
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   let seed = 40218;
   const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
   const AZ = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';

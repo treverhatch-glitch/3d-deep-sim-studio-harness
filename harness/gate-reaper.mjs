@@ -1,24 +1,14 @@
 /**
- * harness/gate-reaper.mjs — 2.78.1: end gate runs nobody waits for any more.
+ * harness/gate-reaper.mjs — ends gate runs nobody waits for any more.
  *
- * A `run-gates.mjs --only protected` ran 13 h on the crew's main checkout with no live parent: whoever started it (a
- * task done, a train, a verify's shell) was gone, and nothing ever ended it. The supervisor's pass now asks this
- * module (at most every STUDIO_ORPHAN_GATE_SCAN_MIN, default 10, minutes): every node process running
- * scripts/run-gates.mjs whose parent is gone and that has run longer than STUDIO_ORPHAN_GATE_MIN (default 60) minutes is
- * ended with its whole tree (harness/heavy.mjs killHolderTree: taskkill /T on Windows, the process group and children
- * on POSIX), and a gate.orphan_ended event says which, how old, and its command line. STUDIO_ORPHAN_GATE_MIN=0/off:
- * never.
- *
- * "Parent gone" (harness/proc-identity.mjs listProcesses, one OS query; Windows keeps the dead parent's pid):
- *   - no process has the parent's pid, or the process that has it started after this one (Windows reuses pids);
- *   - POSIX: the parent is pid 1 or an init/systemd reaper the orphan was re-parented to;
- *   - the same, one level up, through the shells and npm wrappers that started it (cmd.exe, sh, npm: a shell waiting for
- *     its gate run stays alive after its own parent is gone);
- *   - `npm run verify`'s host (run-gates.mjs --verify-stage host <status file>) is started parentless on purpose (so a
- *     killed shell doesn't stop the verify): it counts as having a live parent while its verify record still names it
- *     (hostPid) as running, no longer than STUDIO_VERIFY_MAX_MIN (360), as `npm run verify -- --wait` judges it. Its
- *     gates (run-gates.mjs --no-detach) have it as their parent. The short-lived hop (--verify-stage hop) is never ended.
- * Never this process or its ancestors. Returns { scanned, ended: [{ pid, ageMin, args, why }], skipped, why }.
+ * The supervisor's pass asks this module (at most every STUDIO_ORPHAN_GATE_SCAN_MIN, default 10): every node process
+ * running scripts/run-gates.mjs whose parent is gone and that has run longer than STUDIO_ORPHAN_GATE_MIN (default 60;
+ * 0/off: never) is ended with its whole tree (harness/heavy.mjs killHolderTree), and a gate.orphan_ended event says
+ * which. "Parent gone" (harness/proc-identity.mjs listProcesses): no process has the parent's pid or it started later;
+ * POSIX: the parent is pid 1 or an init reaper; the same one level up through shells and npm wrappers. `npm run
+ * verify`'s host (run-gates.mjs --verify-stage host) is parentless on purpose: it counts as live while its verify
+ * record names it (hostPid) as running, up to STUDIO_VERIFY_MAX_MIN (360). Never the hop stage, this process or its
+ * ancestors. Returns { scanned, ended: [{ pid, ageMin, args, why }], skipped, why }.
  */
 import fs from 'node:fs';
 import path from 'node:path';

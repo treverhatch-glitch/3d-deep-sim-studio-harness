@@ -1,16 +1,13 @@
 /**
- * harness/tester-config.mjs — 2.79 (t): what the game tester (harness/tester.mjs) needs to know about the game, read
- * synchronously so the done-check and the gate runner can ask it too.
- *
+ * harness/tester-config.mjs — what the game tester (harness/tester.mjs) needs to know about the game, read synchronously.
  * studio/game.json "tester" (docs/TESTER.md):
  *   { "build": "<command>", "dist": "<folder>", "url"?: "<own dev server>", "testids"?: true,
  *     "modes": [...], "styles": [...], "goals": [...], "areas": [...] }
  * Absent: the tester falls back to the cartridge's browser contract (qa.mjs { dist, build } or { page }), and says so.
- *
  * stage1Replaced(): a studio whose game has its own build (game.json "tester".build or .url) or its own checks (its
- * studio.gates.json, or <sim>/qa.mjs|playtest.mjs|golden.mjs) no longer runs the template cartridge's stage-1 playtest
- * per task: the done-check's playtest rows and the "playtest" gate say "replaced by the game tester (npm run tester)".
- * A template studio (no game, or the game is a cartridge) keeps it as before.
+ * studio.gates.json, or <sim>/qa.mjs|playtest.mjs|golden.mjs) no longer runs the template cartridge's stage-1 playtest per
+ * task: the done-check's playtest rows and the "playtest" gate say "replaced by the game tester (npm run tester)". A
+ * template studio (no game, or the game is a cartridge) keeps it.
  */
 import fs from 'node:fs';
 import path from 'node:path';

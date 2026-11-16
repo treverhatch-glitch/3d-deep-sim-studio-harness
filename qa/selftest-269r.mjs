@@ -1,34 +1,30 @@
 /**
- * qa/selftest-269r.mjs — 2.69.0 (r): the train daemon and the flake triager (the crew orchestrator's duties 3 and 8).
- *   The orchestrator chose when to run trains, waited for a quiet PC, retried refusals and routed hand-backs by hand;
- *   it re-ran failing tests alone to decide "load or real" (game:test red in 81 of 200 runs). Now:
- *   (a) the supervisor's train daemon (harness/train-daemon.mjs) starts a train when lanes are ready by the existing
- *       STUDIO_TRAIN_MIN / WAIT_MIN rules AND the machine budget has room for a verify; never beside another train,
- *       never while halted or winding down; `train auto off|on --by` follows the decider rules;
- *   (b) after a daemon train, each handed-back lane with no running session is back on the board with the facts block
- *       (only what is missing is added), and ONE job.done (kind train, meta.auto) sums it;
- *   (c) a red verify or re-check runs each failing test file alone on the same tree (real run-gates focused runs in a
- *       made-up game) and labels it real / seed-flake / load-flake / intermittent in .studio/flakes.jsonl;
- *   (d) flaky 3 times in 7 days: studio/quarantine.json, STUDIO_TEST_QUARANTINE for the game's runner, ONE fix task;
- *       a real failure is never quarantined; the list is tier C; a game dev releases it, a worker can't; the digest
- *       shows the harness's additions.
+ * qa/selftest-269r.mjs — the train daemon and the flake triager.
+ *   (a) the supervisor's train daemon (harness/train-daemon.mjs) starts a train when lanes are ready by the
+ *     STUDIO_TRAIN_MIN / WAIT_MIN rules AND the machine budget has room for a verify; never beside another train, never
+ *     while halted or winding down; `train auto off|on --by` follows the decider rules
+ *   (b) after a daemon train, each handed-back lane with no running session is back on the board with the facts block,
+ *     and ONE job.done (kind train, meta.auto) sums it
+ *   (c) a red verify or re-check runs each failing test file alone on the same tree and labels it real / seed-flake /
+ *     load-flake / intermittent in .studio/flakes.jsonl
+ *   (d) flaky 3 times in 7 days: studio/quarantine.json, STUDIO_TEST_QUARANTINE for the game's runner, ONE fix task; a
+ *     real failure is never quarantined; the list is tier C; a game dev releases it, a worker can't
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { eventsOf, fileUrlOf, out, writeInDirOf } from './kit.mjs';
 
 export async function selftest269R({ dir, run, report, tmpRoot }) {
-  const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const u = fileUrlOf(dir);
+  const write = writeInDirOf(dir);
   const events = path.join(dir, '.studio', 'events-269r.jsonl');
   const ranLog = path.join(tmpRoot, `ran-269r-${process.pid}.log`);
   // A person's terminal: no agent markers (the runner itself may run inside an agent's shell).
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI)/i.test(k)) clean[k] = '';
   const env = { ...clean, STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_MACHINE_SCAN: 'off', STUDIO_GAME_GATE_RETRY: '', AGENT_EVENTS_FILE: events, RAN_LOG: ranLog, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const evs = eventsOf(events);
   const probe = (name, code, extra = {}) => {
     const f = path.join(dir, `.probe-269r-${name}.mjs`);
     fs.writeFileSync(f, code);

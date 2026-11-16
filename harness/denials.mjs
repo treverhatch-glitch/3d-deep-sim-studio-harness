@@ -1,21 +1,15 @@
 #!/usr/bin/env node
 /**
- * harness/denials.mjs — 2.66.0 (c): the blocked-command log.
- *
+ * harness/denials.mjs — the blocked-command log.
  *   npm run denials [-- --days 7] [--json]    top blocked commands by count, and per task
- *
- * Claude Code's result line (`{"type":"result",…}`, one per result in a stream-json log) carries
- * `permission_denials`: [{ tool_name, tool_use_id, tool_input }], the tool calls the session's permissions refused
- * (checked on the crew's own logs, 2026-11-02: every result line has the field). At session end (harness/agent.mjs
- * cleanUp) each denial is appended to .studio/denials.jsonl: { ts, task, agent, role, tool, command, key, why }.
- * `command` is a redacted summary (harness/secrets.mjs scrub(), then anything that looks like a password, token or
- * key flag/assignment/header, capped at 200 characters); `key` groups it (Bash(npm run x *), Read(dir/**), the tool);
- * `why` says whether the call was off the list or on it but chained, prefixed or using a variable.
- * A result line without the field records nothing.
- *
- * The digest (harness/digest.mjs) shows the top 5 keys that are off the list as allowlist CANDIDATES. Nothing here
- * ever writes a settings or permission file (.claude/settings*.json, harness/allowlist.mjs, --allowedTools): a person
- * reads the candidates and decides.
+ * Claude Code's result line (`{"type":"result",…}` in a stream-json log) carries `permission_denials`: [{ tool_name,
+ * tool_use_id, tool_input }], the tool calls the session's permissions refused. At session end (harness/agent.mjs cleanUp)
+ * each is appended to .studio/denials.jsonl: { ts, task, agent, role, tool, command, key, why }. `command` is a redacted
+ * summary (harness/secrets.mjs scrub(), then anything that looks like a password, token or key, capped at 200 characters);
+ * `key` groups it (Bash(npm run x *), Read(dir/**), the tool); `why` says whether the call was off the list or on it but
+ * chained, prefixed or using a variable. A result line without the field records nothing.
+ * The digest (harness/digest.mjs) shows the top 5 off-list keys as allowlist CANDIDATES. Nothing here ever writes a settings
+ * or permission file (.claude/settings*.json, harness/allowlist.mjs, --allowedTools): a person reads and decides.
  */
 import fs from 'node:fs';
 import path from 'node:path';

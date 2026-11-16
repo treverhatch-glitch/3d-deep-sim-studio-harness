@@ -1,26 +1,14 @@
 #!/usr/bin/env node
 /**
- * qa/journey.mjs — 2.78.0 (PU-55): a player-journey gate. Agent-built games often compile and pass their checks and still
- * don't play; this plays a whole journey through the game's public inputs and sets two traps for a game that only looks done.
- *
- * A journey is studio/journeys/<cartridge>/<id>.json:
- *   { id, seed, steps: [{ tick, action, args }], goal: { path, op: "eq|gte|lte|truthy", value }, saveAt, maxTicks, note }
- * "action" must be one of the cartridge's public controls (an action type the cartridge declares in actionTypes, one a real
- * input performs: qa.mjs browser.input(), or one the Game Bible's controls.json names in an "action" field). Anything else is
- * refused. For each journey:
- *   (a) play it from the seed with its inputs to maxTicks: the goal must hold;
- *   (b) no-input control: the same seed and ticks with no actions: the goal must NOT hold ("reached without playing");
- *   (c) fresh-process reopen: play to saveAt, save the state as the cartridge saves it (saveState/loadState exports, else
- *       canonical JSON), then in a NEW node process load it and continue to maxTicks: the SHA-256 state digest must equal (a)'s;
- *   (d) the sim stays inside the tick budget scripts/check-tick-budget.mjs uses (cartridge.json tickBudgetMs, else
- *       TICK_BUDGET_MS_PER_TICK, else 1 ms per tick), measured on the steps of this journey.
- * Each run (a, b, c's two halves) is its own node process, so nothing a module remembers in memory leaks between them.
- *
- * A game that isn't a cartridge gives { "command": "<runs one journey, prints one JSON line>" } instead; the line is
- * { goalMet, noInputGoalMet, digestA, digestReopen } and is judged the same way (docs/JOURNEYS.md).
- *
+ * qa/journey.mjs — a player-journey gate: plays a journey through public inputs, with traps for a game that looks done
+ * A journey is studio/journeys/<cartridge>/<id>.json: { id, seed, steps: [{ tick, action, args }], goal: { path, op:
+ * eq|gte|lte|truthy, value }, saveAt, maxTicks }
+ * "action" must be a public control (actionTypes, qa.mjs browser.input(), or Bible controls.json "action").
+ * Each run is its own node process. (a) play from the seed: the goal must hold; (b) no actions: it must NOT hold; (c)
+ * play to saveAt, save, reload in a NEW process, continue: SHA-256 digest = (a)'s; (d) stay inside the tick budget
+ * (tickBudgetMs, else TICK_BUDGET_MS_PER_TICK, else 1 ms).
+ * Non-cartridge game: { "command": "<prints one JSON line>" } ({ goalMet, noInputGoalMet, digestA, digestReopen }).
  *   node qa/journey.mjs [--cartridge <name>] [--json]
- * No journeys: passes with a WARN ("no journeys yet"). Exit 1 on any failure.
  */
 import fs from 'node:fs';
 import path from 'node:path';

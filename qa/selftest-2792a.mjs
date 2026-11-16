@@ -1,34 +1,29 @@
 /**
- * qa/selftest-2792a.mjs — 2.79.2 (a): the launcher runs the builder protocol around aider (harness/aider-protocol.mjs), and
- * a Vertex request over STUDIO_VERTEX_MAX_PROMPT_TOKENS stops its session.
- *   1  the edit brief has the task and lane and no harness command; the ignore lines keep the map to the lane and leave
- *      out a tracked file over STUDIO_AIDER_MAX_FILE_KB unless the lane names it (pure).
- *   2  `agent start --tool aider` (a stand-in aider that edits the lane's file): the task is claimed before aider starts,
- *      aider gets the edit brief, --file <lane file>, --map-tokens and the lane's ignore file; the launcher commits the
- *      change with the Studio-Task / Studio-Agent trailers, runs the check and queues the lane; the session end says so.
- *   3  a stand-in that changes nothing: handed back (handBackCause no-change) with aider's last line, said on the session end.
- *   4  a change whose check fails (a bug task with no recorded verify): committed, then handed back (red) with the unmet item.
- *   5  --tool vertex with a fake "Vertex" answering 400,000 prompt tokens: the proxy refuses the session's next request, the
- *      launcher hands the task back (prompt-cap), the session end says so and vertexFailures counts it.
- * Stand-ins only (a node script as aider, a fake Vertex on 127.0.0.1): no real aider, key or network.
+ * qa/selftest-2792a.mjs — the launcher runs the builder protocol around aider (harness/aider-protocol.mjs).
+ * 1  the edit brief has the task and lane, no harness command; the ignore lines keep the map to the lane and leave
+ *   out a tracked file over STUDIO_AIDER_MAX_FILE_KB unless named.
+ * 2  `agent start --tool aider` (stand-in aider): the task is claimed before aider starts; aider gets the brief,
+ *   --file, --map-tokens and the ignore file; the launcher commits with Studio-Task / Studio-Agent trailers, runs the
+ *   check, queues the lane.
+ * 3  no change: handed back (handBackCause no-change). 4: a failing check: committed, handed back (red). 5: --tool
+ *   vertex over STUDIO_VERTEX_MAX_PROMPT_TOKENS: the proxy refuses the next request, the task is handed back
+ *   (prompt-cap), vertexFailures counts it. Stand-ins only: no real aider, key or network.
  */
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileUrlIn as u, freePortOf, gEnvOf, gitEolLfOf, out, readText, writeIn } from './kit.mjs';
 
 const FAKE_KEY = 'fake-vertex-key-for-selftest-2792a';
 
 export async function selftest2792A({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const readText = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
+  const gEnv = gEnvOf(ident);
+  const g = gitEolLfOf(gEnv);
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), String(detail).split(FAKE_KEY).join('<KEY>')); } catch (e) { report(name, false, e.stack || String(e)); } };
   const clean = {};
   for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CURSOR|AIDER|GEMINI|STUDIO_|AGENT_|AI_AGENT|ANTHROPIC|OPENAI|VERTEX|NVIDIA|XAI|GROQ|OPENROUTER|DEEPSEEK|GOOGLE)/i.test(k) || /_API_KEY|_TOKEN$/.test(k)) clean[k] = '';
@@ -52,9 +47,8 @@ export async function selftest2792A({ dir, report, tmpRoot, root }) {
   };
   const node = (S, args, env, timeout = 300000) => spawnSync(process.execPath, args, { windowsHide: true, cwd: S, encoding: 'utf8', env: { ...process.env, ...ident, ...env }, timeout });
   const probe = (S, code, env) => { const f = path.join(S, `.probe-2792a-${++n}.mjs`); fs.writeFileSync(f, code); const r = node(S, [f], env); fs.rmSync(f, { force: true }); const l = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop(); let j = null; try { j = JSON.parse(l); } catch {} return { ...r, j }; };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   const events = (S) => readText(path.join(S, '.studio', 'events.jsonl')).split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-  const freePort = () => new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+  const freePort = freePortOf(net);
   const add = (S, title, env, extra = []) => (out(node(S, ['harness/task.mjs', 'add', title, '--role', 'builder', '--priority', 'P1', ...extra], env)).match(/"id":\s*"([A-Z]+-\d+)"/) || [])[1] || null;
 
   // ---- the stand-in aider: records its argv, whether its task was claimed before it ran, its message and ignore file;

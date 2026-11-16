@@ -1,38 +1,29 @@
 /**
- * qa/selftest-2782a.mjs — 2.78.2 (a): a merge train outlives whoever started it, and a person can cancel one (W-0090).
- *   - A lane's plain `task done` runs the quick checks, queues the lane and exits 0 with "queued" and how to follow it,
- *     while the game check is still to run; the train lands it afterwards in a process of its own (no supervisor here:
- *     task done started one, detached). STUDIO_DONE_QUEUE=0 keeps the old inline train. With a supervisor and the train
- *     daemon on, task done starts nothing (the daemon's pass does).
- *   - `task train` from an agent's shell runs its train detached and follows it: ending the starter's whole process tree
- *     and group mid-verify (what Claude Code does at its 10-minute limit) doesn't stop the train: it lands, its life
- *     record ends "done", no task.train.died.
- *   - A session whose task done queued its lane ends without a launcher verify or hand-back for it (trainQueued).
- *   - `task train cancel [<id>] --by <you> [--why "…"]`: a person stops a running train in its verify: its checks are
- *     stopped, it ends, nothing lands, nobody is handed back, the lane stays queued, the lock is freed, one
- *     task.train.cancelled with who and why. A worker is refused. A train that doesn't end by itself in
- *     STUDIO_TRAIN_CANCEL_WAIT_S is ended and recorded as cancelled (not died).
- * A tiny studio: a game whose one check is a node script that sleeps TRAIN_SLEEP_MS and counts its runs; lane copies
- * (git worktrees) made by the harness. Windows' detach (taskkill /T on the starter) is not exercised here.
+ * qa/selftest-2782a.mjs — a merge train outlives whoever started it, and a person can cancel one.
+ * A lane's plain `task done` runs the quick checks, queues the lane and exits 0 ("queued"); the train lands it in its
+ *   own process. STUDIO_DONE_QUEUE=0 keeps the inline train; with the train daemon on, task done starts nothing.
+ * `task train` from an agent's shell runs its train detached: ending the starter's process tree mid-verify doesn't
+ *   stop it (it lands, life record "done", no task.train.died). A session whose task done queued its lane gets no
+ *   launcher verify or hand-back (trainQueued).
+ * `task train cancel [<id>] --by <you> [--why "…"]` (a worker is refused) stops a running train: nothing lands,
+ *   nobody is handed back, the lane stays queued, the lock is freed, one task.train.cancelled. A train not ending in
+ *   STUDIO_TRAIN_CANCEL_WAIT_S is ended and recorded as cancelled.
+ * Windows' detach (taskkill /T) is not exercised.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileUrlIn as u, gEnvOf, gitEolLfOf, guardOf, nodeCwd240Of, out, readJsonIn as readIn, readTextIn as textIn, sleep as wait, taskCwdOf, writeIn } from './kit.mjs';
 
 export async function selftest2782A({ dir, report, tmpRoot, root }) {
   const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const nm = path.join(harnessRoot, 'node_modules');
   const SLOW = process.platform === 'win32' ? 3 : 1;
-  const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
-  const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
-  const writeIn = (cwd, rel, text) => { fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true }); fs.writeFileSync(path.join(cwd, rel), text); };
-  const readIn = (cwd, rel) => { try { return JSON.parse(fs.readFileSync(path.join(cwd, rel), 'utf8')); } catch { return null; } };
-  const textIn = (cwd, rel) => { try { return fs.readFileSync(path.join(cwd, rel), 'utf8'); } catch { return ''; } };
-  const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const gEnv = gEnvOf(ident);
+  const g = gitEolLfOf(gEnv);
+  const guard = guardOf(report);
   const until = async (fn, ms) => { const t0 = Date.now(); for (;;) { let v = false; try { v = fn(); } catch {} if (v) return true; if (Date.now() - t0 > ms) return false; await wait(250); } };
   const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); } catch (e) { if (e.code !== 'EPERM') return false; } try { if (/\)\s+Z\s/.test(fs.readFileSync(`/proc/${pid}/stat`, 'utf8'))) return false; } catch {} return true; };
   const clean = {};
@@ -83,10 +74,9 @@ export async function selftest2782A({ dir, report, tmpRoot, root }) {
     const queue = () => (readIn(S, '.studio/train/queue.json') || []).map((e) => e.task);
     return { S, env, evs, runs, mainHas, isDone, queue };
   };
-  const node = (cwd, args, env, timeout = 240000) => spawnSync(process.execPath, args, { windowsHide: true, cwd, encoding: 'utf8', env: { ...process.env, ...ident, ...env }, timeout });
-  const task = (cwd, line, env, timeout) => node(cwd, ['harness/task.mjs', ...line], env, timeout);
+  const node = nodeCwd240Of(ident);
+  const task = taskCwdOf(node);
   const probe = (S, code, env) => { const f = path.join(S, `.probe-2782a-${++n}.mjs`); fs.writeFileSync(f, code); const r = node(S, [f], env); const l = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop(); let j = null; try { j = JSON.parse(l); } catch {} return { ...r, j }; };
-  const u = (S, rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
   /** A task, its lane copy (.lanes/<agent>) made by the harness, the task started there, one note committed. */
   const lane = (st, agent, title, rel, text) => {
     const { S, env } = st;
