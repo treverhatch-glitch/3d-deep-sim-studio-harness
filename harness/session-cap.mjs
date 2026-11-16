@@ -89,6 +89,7 @@ export function sessionProgress(log) {
   let workTurn = 0;
   let worked = false;
   let startContext = null;
+  let firstWork = 0;
   for (const l of String(log || '').split(/\r?\n/)) {
     const s = l.trim();
     if (!s.startsWith('{')) continue;
@@ -110,11 +111,11 @@ export function sessionProgress(log) {
       const landing = uses.some((c) => WORK_CMD.test(String(c.input?.command || '')));
       if (landing) workTurn = turns;
       // The first commit or edit: the context it was made with (the brief and every read so far) is where the work starts.
-      if (!worked && (landing || uses.some((c) => EDIT_TOOLS.has(c.name)))) { worked = true; startContext = context; }
+      if (!worked && (landing || uses.some((c) => EDIT_TOOLS.has(c.name)))) { worked = true; startContext = context; firstWork = turns; }
     } else if (o.type === 'result' && o.num_turns != null) resultTurns = Number(o.num_turns);
   }
-  // 2.85: idleTurns: turns since the last commit or verify in this log (all of them when there was none).
-  return { turns: resultTurns ?? turns, context, idleTurns: Math.max(0, turns - workTurn), worked, startContext };
+  // 2.85: idleTurns: turns since the last commit or verify in this log. 2.90: counted from the first commit or file edit; 0 before it.
+  return { turns: resultTurns ?? turns, context, idleTurns: worked ? Math.max(0, turns - Math.max(workTurn, firstWork)) : 0, worked, startContext };
 }
 
 /** 2.85: STUDIO_REFRESH_DECIDE: 'rule' (default) or 'ask'. */
@@ -144,7 +145,7 @@ export function refreshRuleDecision({ turns = 0, context = 0, idleTurns = 0, mod
     if (worked && context >= threshold) return { decision: 'handoff', why: `context ${context.toLocaleString()} tokens is past ${k(threshold)}: it started its work at ${k(s0)} and has used ${pctAt} % of the room left in ${from} (STUDIO_REFRESH_HANDOFF_PCT ${pctAt} %)`, ...base };
     if (!worked && context >= margin) return { decision: 'handoff', why: `context ${context.toLocaleString()} tokens is ${pct} % of ${from}, within STUDIO_REFRESH_SAFETY_PCT (${safetyPct} %) of the window, though it has done no work yet`, ...base };
   }
-  if (idleAt > 0 && idleTurns >= idleAt) return { decision: 'handoff', why: `no commit and no verify in its last ${idleTurns} turns (STUDIO_REFRESH_IDLE_TURNS ${idleAt})`, ...base };
+  if (idleAt > 0 && worked && idleTurns >= idleAt) return { decision: 'handoff', why: `no commit and no verify in its last ${idleTurns} turns (STUDIO_REFRESH_IDLE_TURNS ${idleAt})`, ...base };
   const room = !worked ? `no work yet (a commit or a file edit), so the context alone hands off only within ${safetyPct} % of ${from}` : `context ${k(context)}, under ${k(threshold)} (it started its work at ${k(s0)}; ${pctAt} % of the room left in ${from})`;
   return { decision: 'continue', why: `${room}; at ${pct} % of the window; last commit or verify ${idleTurns} turns ago (under ${idleAt})`, ...base };
 }

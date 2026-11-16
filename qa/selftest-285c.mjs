@@ -136,7 +136,7 @@ const evs = () => fs.readFileSync(process.env.AGENT_EVENTS_FILE, 'utf8').split('
 const run = (agent, l, model, env = {}) => { const h = m.heartbeatCheck(agent, { log: l, model, task: 'T-1', role: 'builder', env: { ...process.env, ...env } }); const f = m.readFlag(agent); return { decided: h.decided || null, checks: (f.checks || []).map((c) => ({ by: c.by, decision: c.decision })), endedBy: f.endedBy || null, asks: evs().filter((e) => e.type === 'agent.ask' && e.msg.includes('Check ' + agent + ':')).length, dec: evs().filter((e) => e.type === 'agent.refresh.decided' && e.agent === agent).map((e) => e.meta) }; };
 const under = run('rule-under', log(61, 100000, 50), 'claude-opus-5-5');
 const over = run('rule-over', log(61, 138110, 50), 'claude-opus-5-5');
-const idle = run('rule-idle', log(61, 50000), 'claude-opus-5-5');
+const idle = run('rule-idle', log(61, 50000, 10), 'claude-opus-5-5'); // 2.90: idle turns count from the first commit or edit
 const unknown = run('rule-unknown', log(61, 138110, 55), 'some-new-model');
 const asked = run('ask-mode', log(61, 138110, 50), 'claude-opus-5-5', { STUDIO_REFRESH_DECIDE: 'ask' });
 console.log(JSON.stringify({ under, over, idle, unknown, asked }));`);
@@ -146,7 +146,7 @@ console.log(JSON.stringify({ under, over, idle, unknown, asked }));`);
         && j.under.dec.length === 1 && j.under.dec[0].decision === 'continue' && j.under.dec[0].turns === 61 && j.under.dec[0].tokens === 100010 && j.under.dec[0].pct === 50 && typeof j.under.dec[0].why === 'string'
         && j.unknown?.decided?.decision === 'continue' && j.unknown.dec[0]?.window === 240000 && j.unknown.asks === 0,
       JSON.stringify(j).slice(0, 3000)]);
-    await guard('2.85 (c) refresh, by rule: over 60 % of the model\'s window (138k of 200k) the session hands off, and with no commit and no verify in 61 turns (STUDIO_REFRESH_IDLE_TURNS 40) it hands off too: each recorded as a hand-off check by "rule" with endedBy set (the launcher ends it as a refresh), no ask (fails before this fix: a card waited for a person, 4 of 45 never answered)', () => [
+    await guard('2.85 (c) refresh, by rule: over 60 % of the model\'s window (138k of 200k) the session hands off, and with no commit and no verify in its last 50 turns after its first commit (STUDIO_REFRESH_IDLE_TURNS 40) it hands off too: each recorded as a hand-off check by "rule" with endedBy set (the launcher ends it as a refresh), no ask (fails before this fix: a card waited for a person, 4 of 45 never answered)', () => [
       j.over?.decided?.decision === 'handoff' && /60 %/.test(j.over.decided.why) && j.over.asks === 0 && j.over.checks[0]?.by === 'rule' && j.over.checks[0].decision === 'handoff' && /by the rule/.test(j.over.endedBy || '')
         && j.idle?.decided?.decision === 'handoff' && /no commit and no verify/.test(j.idle.decided.why) && j.idle.asks === 0 && j.idle.endedBy,
       JSON.stringify(j).slice(0, 3000)]);
