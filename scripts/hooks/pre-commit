@@ -9,6 +9,13 @@ cd "$ROOT"
 
 node scripts/secret-scan.mjs --staged
 
+# 2.90 (s7): a NEW file under scripts/ or tools/ is usually a game's own script in the wrong place: say where it goes.
+tool_hint() {
+  if [ -n "$(git diff --cached --name-only --diff-filter=A | grep -E '^(scripts|tools)/' || true)" ]; then
+    echo "  A game's own script goes in game/<name>/tools/ (not scripts/ or tools/); a studio/game.json command that points at it (an engine's progress command, for example) must be changed to the new path."
+  fi
+}
+
 # Test runs freeze the harness (npm run preflight -- --fix writes .studio/harness-frozen): the game
 # changes, the harness that judges it doesn't. Record harness problems as notes instead.
 if [ -f .studio/harness-frozen ]; then
@@ -17,6 +24,7 @@ if [ -f .studio/harness-frozen ]; then
     echo "[pre-commit] FAIL the harness is frozen for this test run. Unstage these and record the problem instead:"
     echo "$frozen" | sed 's/^/  /'
     echo '  npm run notes -- add --kind bad "<what broke and where>"'
+    tool_hint
     exit 1
   fi
 fi
@@ -44,6 +52,7 @@ if [ "$(git rev-parse --git-dir)" = "$(git rev-parse --git-common-dir)" ] && [ "
     echo "[pre-commit] FAIL this studio works in lanes: game work lands through task done in a lane copy, not a commit on the main checkout:"
     echo "$outside" | head -10 | sed 's/^/  /'
     echo "  (only studio/ notes and the board are committed here; a person can override with STUDIO_MAIN_COMMIT=allow)"
+    tool_hint
     exit 1
   fi
 fi

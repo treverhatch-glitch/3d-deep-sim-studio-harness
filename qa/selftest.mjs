@@ -5348,6 +5348,14 @@ if (inShard('selftest-290b')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.90 (s1 .. s6): the overseer's list: engine train in the status line, stale asks, stall and refresh rules, the pull trap.
+if (inShard('selftest-290c')) {
+  const dir = copyRepo();
+  const { selftest290C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-290c.mjs')).href);
+  await selftest290C({ dir, report, tmpRoot, root, copyRepo });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
