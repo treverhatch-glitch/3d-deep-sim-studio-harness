@@ -85,6 +85,19 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   `inputs` are not in the tree, so their content is part of what a kept result is valid for; the train also looks at
   them again right before the land run and leaves `STUDIO_RULES_GREEN` out when they changed since the check.
   `STUDIO_ENGINE_RULES_TIMEOUT_MIN` overrides the time limit.
+- **The time limit follows the suite (2.90).** A limit the studio set (`rules.timeoutMin`, or
+  `STUDIO_ENGINE_RULES_TIMEOUT_MIN`; fractions of a minute are taken as they are) is used as it is. Unset, a run's
+  limit is the largest of the default (`STUDIO_ENGINE_RULES_DEFAULT_MIN`, 30), 1.5 times the longest passing run of the
+  same mode on record (`full`, `focus`, `first`), and, after a run timed out on the target, twice the limit it timed
+  out with; never over 120 min. The raise stays until a run of that mode passes. Every run's log line says which limit
+  applied and why (`up to 37.5 min (1.5 x the longest passing full run on record (25 min))`). A tree that timed out is
+  recorded with its limit, and is not run again while the limit is no larger: the log says "not run again" and the
+  land run decides. Example: a suite that passed in 22 min gets 33 min; one that timed out at 30 gets 60 next time.
+- **A check that judges no lane is seen (2.90).** When the check is red, not runnable or timed out on the target
+  itself, the train writes `task.train.<x>.rules_no_judge` (warn, to the producer) with the one change: for a timeout,
+  raise `engines.<x>.rules.timeoutMin` or make the run smaller with `rules.focus` (`map`, `auto`, `paths`); otherwise
+  fix the target or name the inputs. After two trains in a row, `train status --engine <x>` and the Line Producer's
+  status say how many trains and how many minutes it has cost; the count clears when the check judges again.
 - Each batch writes one `engine.rules` event (runs, minutes, lanes kept and refused).
 - **A lane's own check.** `task done` runs an engine check only when `"quickCheck"` is set: set it to a compile (for
   Unity `dotnet build tools/SimTests`), which takes seconds and stops a lane that does not compile outside the editor;

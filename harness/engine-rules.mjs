@@ -180,7 +180,12 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
   const o = r && typeof r === 'object' && !Array.isArray(r) ? r : {};
   const dotnet = String(env.STUDIO_DOTNET || '').trim();
   const withSdk = (cmd) => (dotnet && /^dotnet\s/.test(cmd) ? `${/\s/.test(dotnet) ? `"${dotnet}"` : dotnet}${cmd.slice(6)}` : cmd);
-  const timeoutMin = Math.max(1, num(env.STUDIO_ENGINE_RULES_TIMEOUT_MIN, num(o.timeoutMin, 30)));
+  // 2.90: a timeout the studio set (STUDIO_ENGINE_RULES_TIMEOUT_MIN, rules.timeoutMin) is used as it is; unset, the default
+  // (STUDIO_ENGINE_RULES_DEFAULT_MIN, 30) follows the suite (rulesTimeout).
+  const setRaw = String(env.STUDIO_ENGINE_RULES_TIMEOUT_MIN ?? '').trim() !== '' ? env.STUDIO_ENGINE_RULES_TIMEOUT_MIN : o.timeoutMin;
+  const timeoutSet = setRaw !== undefined && setRaw !== null && String(setRaw).trim() !== '' && Number(setRaw) > 0;
+  const timeoutMin = timeoutSet ? Math.max(0.05, Number(setRaw)) : Math.max(0.05, num(env.STUDIO_ENGINE_RULES_DEFAULT_MIN, 30));
+  const timeoutFrom = timeoutSet ? (String(env.STUDIO_ENGINE_RULES_TIMEOUT_MIN ?? '').trim() !== '' ? 'STUDIO_ENGINE_RULES_TIMEOUT_MIN' : `engines.${engine}.rules.timeoutMin`) : null;
   const inputs = relList(o.inputs);
   const vars = o.env && typeof o.env === 'object' && !Array.isArray(o.env)
     ? Object.fromEntries(Object.entries(o.env).filter(([k, v]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof v === 'string')) : {};
@@ -215,7 +220,7 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
   }
   const bl = blameList(cfg.blame);
   focusBad.push(...bl.errors);
-  const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, first, blame: bl.blame };
+  const extra = { env: vars, lfs: o.lfs === true, paths: relList(o.paths), focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, first, blame: bl.blame, timeoutSet, timeoutFrom };
   const test = typeof r === 'string' ? r.trim() : typeof o.test === 'string' ? o.test.trim() : '';
   if (test) return { command: withSdk(test), inputs, timeoutMin, source: `studio/game.json engines.${engine}.rules`, ...extra };
   const d = DEFAULTS[engine];
@@ -709,6 +714,27 @@ export function rulesKey({ repo, sha, cfg, sel = null, print = '' }) {
   return `${base}|${cmdKey({ ...cfg, command: s.command })}${print ? `|${print}` : ''}${s.mode === 'focus' ? `|focus:${sha1(s.filter)}` : ''}`;
 }
 
+/** 2.90: the ceiling of a timeout that follows the suite, in minutes. */
+const TIMEOUT_CAP = 120;
+const min2 = (x) => Math.round(x * 100) / 100;
+/**
+ * 2.90: the timeout of a run of this mode: { min, why, set }. The studio's value as it is; else the larger of the default,
+ * 1.5 times the longest passing run of the mode on record, and the raise a timeout on the target left (doubled), at most 120.
+ */
+export function rulesTimeout(root, engine, cfg = {}, mode = 'full') {
+  if (cfg.timeoutSet) return { min: cfg.timeoutMin, set: true, why: `${cfg.timeoutFrom}, the studio's` };
+  const j = readCache(root, engine);
+  const cap = Math.max(cfg.timeoutMin, TIMEOUT_CAP);
+  let min = cfg.timeoutMin; let why = `the default ${cfg.timeoutMin} min`;
+  const longest = Math.max(0, ...(j.runs || []).filter((r) => r.status === 'pass' && (r.mode || 'full') === mode && r.ms > 0).map((r) => r.ms)) / 60000;
+  if (longest > 0 && min2(Math.min(cap, longest * 1.5)) > min) { min = min2(Math.min(cap, longest * 1.5)); why = `1.5 x the longest passing ${mode} run on record (${min2(longest)} min)`; }
+  const rz = j.raise?.[mode];
+  if (rz && Number(rz.min) > min) { min = Math.min(cap, Number(rz.min)); why = `doubled: a ${mode} run timed out on the target after ${rz.from} min (${String(rz.at || '').slice(0, 16)})`; }
+  return { min, set: false, why };
+}
+/** 2.90: trains in a row whose rules check judged no lane because of the target: { n, minutes, why, fix, since } or null. */
+export function rulesNoJudge(root, engine) { const x = readCache(root, engine).noJudge; return x && x.n > 0 ? x : null; }
+
 /**
  * Run the rules check on one commit in a throwaway checkout (never the land script's worktree or a lane).
  * { status: 'pass' | 'red' | 'error', why, ms, failures?, tail?, cached?, mode }; 'error' (could not run, or timed out)
@@ -720,19 +746,24 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
   const src = [...from, ...extraFrom];
   const s = sel || { mode: 'full', filter: '', command: cfg.command };
   const key = rulesKey({ repo, sha, cfg, sel: s, print: inputsPrint(cfg, src) });
+  // 2.90: this run's timeout (rulesTimeout), said in the log; a tree that timed out with no smaller timeout is not run again.
+  const tmo = rulesTimeout(root, engine, cfg, s.mode);
+  cfg = { ...cfg, timeoutMin: tmo.min };
   if (useCache) {
     const hit = readCache(root, engine).trees[key];
     // 2.86: a kept whole pass of these parts is each part's green too.
     if (hit?.status === 'pass' && s.partKeys) keepParts(root, engine, Object.entries(s.partKeys).map(([filter, k]) => ({ key: k, filter })));
     if (hit && ['pass', 'red'].includes(hit.status)) return { ...hit, cached: true };
   }
+  const was = useCache ? readCache(root, engine).timedOut?.[key] : null;
+  if (was && Number(was.min) >= tmo.min) return { status: 'error', timedOut: true, notRun: true, timeoutMin: tmo.min, timeoutSet: tmo.set, mode: s.mode, ms: 0, why: `not run again: this tree timed out after ${was.min} min (${String(was.at || '').slice(0, 16)}) and the timeout is still ${tmo.min} min (${tmo.why})` };
   const dir = path.join(root, '.studio', 'tmp', `rules-${safe(id)}-${short(sha)}`);
   fs.mkdirSync(path.dirname(dir), { recursive: true });
   removeCheckout(repo, dir);
   const co = rulesCheckout({ repo, sha, dir, cfg, env, log, engine });
   if (!co.ok) return { status: 'error', why: `could not check ${short(sha)} out for the rules check: ${co.why}`, ms: 0 };
   const t0 = Date.now();
-  try {
+  const r9 = (() => { try {
     const missing = copyInputs(cfg, src, dir);
     if (missing.length) log(`[engine-rules] ${engine}: input(s) not found in the engine's folder: ${missing.join(', ')} (engines.${engine}.rules.inputs)`);
     const runEnv = { ...env, ...(cfg.env || {}), STUDIO_ENGINE: engine, STUDIO_RULES_COMMIT: sha, STUDIO_RULES_DIR: dir, STUDIO_ENGINE_REPO: repo, STUDIO_RULES_MODE: s.mode };
@@ -741,7 +772,7 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
     // Red on the first red (its output kept). The time limit covers the whole.
     if (Array.isArray(s.parts) && s.parts.length > 1) {
       const plan = splitPlan(cfg.focus || {}, { root, engine, env });
-      const timedOut = (n, filter) => `the rules check timed out after ${cfg.timeoutMin} min (engines.${engine}.rules.timeoutMin), ${filter ? `in group ${filter}` : `split: ${n} of ${s.parts.length} group(s) done`}`;
+      const timedOut = (n, filter) => `the rules check timed out after ${cfg.timeoutMin} min (${tmo.why}), ${filter ? `in group ${filter}` : `split: ${n} of ${s.parts.length} group(s) done`}`;
       const finish = (groups, texts, splitAtOnce) => {
         const ms = Date.now() - t0;
         // 2.86: each green part is kept under its own key (s.partKeys), also when a later part is red.
@@ -794,11 +825,11 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
       }
       return finish(groups, texts, 1);
     }
-    log(`[engine-rules] ${engine}: ${s.command} on ${short(sha)}${s.mode === 'focus' ? ' (focus)' : ''}${co.sparse ? ' (sparse checkout)' : ''}`);
+    log(`[engine-rules] ${engine}: ${s.command} on ${short(sha)}${s.mode === 'focus' ? ' (focus)' : ''}${co.sparse ? ' (sparse checkout)' : ''}; up to ${tmo.min} min (${tmo.why})`);
     const r = spawnSync(s.command, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: cfg.timeoutMin * 60000, env: runEnv });
     const ms = Date.now() - t0;
     const text = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd();
-    if (r.error) return { status: 'error', why: r.error.code === 'ETIMEDOUT' ? `the rules check timed out after ${cfg.timeoutMin} min (engines.${engine}.rules.timeoutMin)` : `the rules check could not run: ${r.error.code || r.error.message}`, ms, mode: s.mode };
+    if (r.error) return { status: 'error', why: r.error.code === 'ETIMEDOUT' ? `the rules check timed out after ${cfg.timeoutMin} min (${tmo.why})` : `the rules check could not run: ${r.error.code || r.error.message}`, ms, mode: s.mode };
     // 2.86: one joined command that passed passed every part in it.
     if (r.status === 0 && s.partKeys) { const ks = Object.entries(s.partKeys); const gb = ks.length === 1 ? peakFromHistory(readUsedHistory(root), t0, Date.now()) : null; keepParts(root, engine, ks.map(([filter, k]) => ({ key: k, filter, ...(ks.length === 1 ? { seconds: Math.round(ms / 1000), ...(gb > 0 ? { gb } : {}) } : {}) }))); }
     const rec = r.status === 0
@@ -806,7 +837,14 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
       : { status: 'red', why: `the rules check failed (exit ${r.status ?? r.signal ?? '?'}${s.mode === 'focus' ? ', focus' : ''})`, ms, at: new Date().toISOString(), mode: s.mode, failures: failingTests(text).slice(0, 40), tail: text.split('\n').slice(-12).join('\n') };
     keep(root, engine, key, rec);
     return rec;
-  } finally { removeCheckout(repo, dir); }
+  } finally { removeCheckout(repo, dir); } })();
+  // 2.90: a timeout is recorded for this tree; a pass of the mode clears the raise a timeout on the target left.
+  if (r9.status === 'error' && /timed out after/.test(String(r9.why || ''))) {
+    writeCache(root, engine, (j) => { j.timedOut = { ...(j.timedOut || {}), [key]: { min: tmo.min, at: new Date().toISOString(), mode: s.mode } }; const ks = Object.keys(j.timedOut); for (const k of ks.slice(0, Math.max(0, ks.length - 60))) delete j.timedOut[k]; });
+    return { ...r9, timedOut: true, timeoutMin: tmo.min, timeoutSet: tmo.set };
+  }
+  if (r9.status === 'pass' && !r9.cached && readCache(root, engine).raise?.[s.mode]) writeCache(root, engine, (j) => { delete j.raise[s.mode]; });
+  return r9;
 }
 
 /**
@@ -954,8 +992,16 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     base = onTip.length ? at(tip, onTip, 'the target') : { status: 'pass', why: 'every part is new in the batch: nothing to calibrate', allKept: true };
   } else base = at(tip);
   if (base.status !== 'pass') {
-    return { ...res, skipped: true, calibration: base.status, why: `the rules check is ${base.status === 'red' ? 'red' : 'not runnable'} on the target itself (${base.why}${base.failures?.length ? `: ${base.failures.slice(0, 3).join(', ')}` : ''}), so it judges no lane: fix the target, or name the inputs its tests read in studio/game.json engines.${engine}.rules.inputs` };
+    // 2.90: a timeout on the target with a timeout nobody set doubles the next run's (rulesTimeout); every such train is counted.
+    const tmoOut = Boolean(base.timedOut);
+    if (tmoOut && !base.notRun && !base.timeoutSet) writeCache(root, engine, (j) => { j.raise = { ...(j.raise || {}), [sel.mode]: { min: Math.min(Math.max(cfg.timeoutMin, TIMEOUT_CAP), min2(base.timeoutMin * 2)), from: base.timeoutMin, at: new Date().toISOString() } }; });
+    const fix = tmoOut ? `raise engines.${engine}.rules.timeoutMin, or make the run smaller with rules.focus (map, auto, paths)` : `fix the target, or name the inputs its tests read in studio/game.json engines.${engine}.rules.inputs`;
+    const why = `the rules check ${tmoOut ? (base.notRun ? 'was not run on the target' : 'timed out on the target itself') : `is ${base.status === 'red' ? 'red' : 'not runnable'} on the target itself`} (${base.why}${base.failures?.length ? `: ${base.failures.slice(0, 3).join(', ')}` : ''}), so it judges no lane: ${fix}`;
+    let noJudge = null;
+    writeCache(root, engine, (j) => { const p = j.noJudge || {}; noJudge = { n: (p.n || 0) + 1, minutes: min2((p.minutes || 0) + res.ms / 60000), since: p.since || new Date().toISOString(), why: String(base.why || '').slice(0, 200), fix, timeout: tmoOut }; j.noJudge = noJudge; });
+    return { ...res, skipped: true, calibration: base.status, ...(tmoOut ? { timedOut: true } : {}), noJudge, why };
   }
+  if (rulesNoJudge(root, engine)) writeCache(root, engine, (j) => { delete j.noJudge; });
   // A full pass on the target is the backstop for focused runs (fullEveryHours).
   if (sel.mode === 'full' && cfg.focus) writeCache(root, engine, (j) => { j.lastFullAt = new Date().toISOString(); });
   res.ran = true;

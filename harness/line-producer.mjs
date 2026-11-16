@@ -791,6 +791,7 @@ export function summaryLine(s) {
     ...(s.twins?.checked || []).filter((r) => r.need).map((r) => `${r.engine} twin ${r.added || '(to add)'} for ${r.task}`),
     ...(s.engines || []).filter((e) => e.queued || e.running).map((e) => `${e.engine} train: ${e.running ? 'running' : e.started ? 'started' : `${e.queued} queued, waits (${e.why})`}`),
     ...(s.engines || []).filter((e) => e.parallel && (e.queued || e.running)).map((e) => `${e.engine} ${e.parallel}`),
+    ...(s.engines || []).filter((e) => e.rulesIdle).map((e) => e.rulesIdle),
     s.tester?.line || null,
   ].filter(Boolean).join('; ');
 }
@@ -1209,6 +1210,8 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
       } else if (batchState[t.name]) { delete batchState[t.name]; batchChanged = true; }
     } else if (batchState[t.name] && !w.wait) { delete batchState[t.name]; batchChanged = true; }
     const row = { engine: t.name, queued: q.length, ...(taggedN ? { tagged: taggedN } : {}), ...(!ea.on && ea.source === 'file' ? { autoOff: true } : {}), running: Boolean(running), expectedMin: exp.minutes, expectedFrom: exp.from, floorGb: floor.gb, start: w.start, why: w.why, ...(batchWaiting ? { batchWait: true } : {}) };
+    // 2.90: a rules check that judged no lane on 2+ trains in a row (the time it costs each train).
+    try { const idle = ut.rulesIdleLine(root, t.name); if (idle) row.rulesIdle = idle; } catch { /* the row stands without it */ }
     // 2.90: the facts for `train parallel on|off` (two land runs at once), when a second gate is configured or it is on.
     try {
       const eg = await import('./engine-gates.mjs');

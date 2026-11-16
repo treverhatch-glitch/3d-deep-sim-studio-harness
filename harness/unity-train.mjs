@@ -24,7 +24,7 @@ import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeComman
 import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
-import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout } from './engine-rules.mjs';
+import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge } from './engine-rules.mjs';
 import { compileSearchOf, compileSearch, compileAt } from './engine-compile.mjs';
 import { parallelState, parallelUse, parallelLine, runGateChild } from './engine-gates.mjs';
 import { engineSlotsAt, heavySlotsAt, floorFree } from './heavy.mjs';
@@ -529,6 +529,11 @@ export function waitingOnTarget(root, engine = 'unity', queue = null) {
   return new Set(q.filter((e) => e?.waitTarget?.target && e.waitTarget.target === tip).map((e) => e.task));
 }
 
+/** 2.90: one line when the rules check judged no lane on 2 or more trains in a row (engine-rules.mjs rulesNoJudge), else ''. */
+export function rulesIdleLine(root, engine = 'unity') {
+  try { const nj = rulesNoJudge(root, engine); return nj && nj.n >= 2 ? `The ${labelOf(engine)} rules check judged no lane on the last ${nj.n} trains (${Math.round(nj.minutes)} min spent on it since ${String(nj.since).slice(0, 16)}): ${nj.why}. Change: ${nj.fix}.` : ''; } catch { return ''; }
+}
+
 /**
  * 2.90: may this train use the second gate now (harness/engine-gates.mjs parallelUse)? The switch, a second gate, the probe
  * record, and the machine budget: the engine line's, the heavy slots and the job kind's cap (the smallest), and free RAM against
@@ -970,6 +975,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       const extraFrom = set.map((l) => path.join(root, '.lanes', 'engine', String(l.task))).filter((d) => fs.existsSync(d));
       const rg = (deps.rulesGate || rulesGate)({ engine, repo, tip: tip0, lanes: set, cfg: rc, from, extraFrom, root, id, env, log, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine) });
       log(`[unity-train] ${id}: rules check: ${rg.why}${rg.runs ? ` (${rg.runs} run(s), ${Math.round(rg.ms / 1000)} s)` : ''}`);
+      // 2.90: a check that judged no lane because of the target is said where people look (event; train status after 2 in a row).
+      if (rg.noJudge) ev('rules_no_judge', id, `the rules check judged no lane${rg.noJudge.n > 1 ? ` (${rg.noJudge.n} trains in a row, ${Math.round(rg.noJudge.minutes)} min spent)` : ''}: ${rg.why}`, { agent: by, to: 'producer', status: 'warn', meta: { n: rg.noJudge.n, minutes: rg.noJudge.minutes, timeout: Boolean(rg.timedOut), fix: rg.noJudge.fix } });
       for (const d of rg.dropped) drop(d.lane, `refused before the land run: ${d.why}\nFix it on ${d.lane.branch} (bring ${target} in first: ${targetMergeCommand(d.lane.task)}), then task done ${d.lane.task} --train again.`, { cause: 'rules' });
       set = rg.kept;
       res.rules = { ran: rg.ran, runs: rg.runs, ms: rg.ms, dropped: rg.dropped.map((d) => d.lane.task), ...(rg.skipped ? { skipped: rg.why } : {}), ...(rg.mode ? { mode: rg.mode } : {}), ...(rg.selWhy ? { why: rg.selWhy } : {}), ...(rg.parts ? { parts: rg.parts } : {}), ...(rg.splitAtOnce ? { splitAtOnce: rg.splitAtOnce } : {}), ...(rg.filter ? { filter: rg.filter } : {}), ...(rg.groups ? { groups: rg.groups } : {}), ...(rg.reused ? { reused: rg.reused } : {}), ...(rg.sliced ? { sliced: rg.sliced, slices: rg.slices } : {}) };
@@ -1659,6 +1666,7 @@ export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'un
   if (st.last?.rules?.ran && !st.running) lines.push(`Last ${L} rules check: ${st.last.rules.mode || 'full'}${st.last.rules.why ? `: ${st.last.rules.why}` : ''}; ${st.last.rules.runs ?? 0} run(s), ${Math.round((st.last.rules.ms || 0) / 1000)} s${st.last.rules.parts > 1 ? `, ${st.last.rules.parts} parts, ${st.last.rules.splitAtOnce || 1} at once` : ''}`);
   if (st.last && !st.running) lines.push(`Last ${L} train ${st.last.id} (${String(st.last.at || '').slice(0, 16)}): ${st.last.message}${st.last.batch ? ` [batch ${st.last.batch}]` : ''}`);
   if (!quiet) { try { lines.push(autoLine(root, engine)); } catch { /* the queue lines stand */ } }
+  { const nj = rulesIdleLine(root, engine); if (nj) lines.push(nj); }
   if (!quiet) { try { const s = unityTrainSettings(root, engine); if (!s.error) lines.push(parallelLine(root, engine, parallelNow(root, engine, s.cfg))); } catch { /* the queue lines stand */ } }
   return lines.join('\n');
 }
