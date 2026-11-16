@@ -137,7 +137,7 @@ const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readF
 // (Windows), the open Unity editor count and the disk budget (no new lane copy or engine worktree) switched off, so a
 // busy test machine doesn't change results (qa/selftest-259d.mjs, -2601m.mjs, -286f.mjs test them with their own
 // settings). No playable build + clip worker after a test train's landing (qa/selftest-270t.mjs turns it on).
-const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_DISK_MIN_FREE_GB: '0', STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
+const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_DISK_MIN_FREE_GB: '0', STUDIO_USAGE_FUNCTIONS: 'off', STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
   // 2.73.0 (g): the copies' verify keys (harness/verify-key.mjs) live in the self-test's temp folder, never in the user's home.
   STUDIO_VERIFY_KEY_DIR: path.join(tmpRoot, 'verify-keys') };
 // Per-unit counters for --timing (harness/selftest-timing.mjs): subprocesses started and checks reported.
@@ -5329,6 +5329,14 @@ if (inShard('selftest-288a')) {
   const dir = copyRepo();
   const { selftest288A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-288a.mjs')).href);
   await selftest288A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.89 (a): which functions a studio runs (harness/usage-functions.mjs) and its page.
+if (inShard('selftest-289a')) {
+  const dir = copyRepo();
+  const { selftest289A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-289a.mjs')).href);
+  await selftest289A({ dir, report, tmpRoot, root, copyRepo });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
