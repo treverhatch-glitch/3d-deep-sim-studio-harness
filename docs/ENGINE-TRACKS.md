@@ -136,6 +136,9 @@ npm run task -- add "Pass 11: realism pass on the hangar" --role engine-porter -
   slice comes back as any red branch does. `task done <ID> --train` without `--slice` queues the last slice and closes
   the task when it lands. A hand-back that left commits on the task is progress: the watchdog's park
   (`STUDIO_LOOP_HANDBACKS`), the circuit breaker, the task budget's session count and the crew breaker don't count it.
+  Parallel units of one system start from `studio/templates/port-plan.md`: one chore declares the members several units
+  share, first, and every unit waits for it (`--after`); a unit never declares a shared member itself (two branches
+  declaring the same member pass each lane's check and break the train).
 
 ## The train as the landing path (P5.2, P9.7)
 

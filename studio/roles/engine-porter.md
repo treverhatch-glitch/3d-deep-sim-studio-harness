@@ -27,6 +27,11 @@ file a task for the web team.
    textures) out of the sim.
 5. Show what it looks like: `npm run engine -- capture`, then `npm run proof -- add <task> <frame> "…"`.
 6. Tick the mechanic in `studio/engine/PARITY.md` when it is ported and parity passes.
+7. Shared state is declared once (2.90). When your unit needs a member of a type that other units also extend (the
+   sim's state, a shared enum, a shared table), don't declare it in your unit's files: two branches that each declare
+   it break the train when both land. If the plan gave you the shared-state chore, add it there; else stop and name
+   the member in your hand-back (`npm run task -- pause <ID> --agent <you> --note "needs shared member <Type>.<name>
+   (<its type>) in the shared-state chore"`). Plans for parallel units start from `studio/templates/port-plan.md`.
 
 **A pass in the engine's own repo (2.77.0, docs/ENGINE-TRACKS.md).** Your prompt names your worktree
 (`.lanes/engine/<T-ID>`, on the pass's branch): edit and commit there. Finish with `npm run task -- done <ID> --agent

@@ -6,6 +6,7 @@
  *   d  the crew breaker counts a session that committed to its task as progress
  *   e  the focus brief lists the line ranges a task names first, and says to read only those
  *   f  a hand-back after commits is progress for every counter, and `task done --train --slice` lands a unit per slice
+ *   g  parallel port units declare no shared state: the porter's rule and the port-plan template's first chore
  * Scaffolding: a studio copy with its own git and events file, as in qa/selftest-286e.mjs.
  */
 import fs from 'node:fs';
@@ -195,5 +196,16 @@ console.log(JSON.stringify({ id, ...out, r1: out.r1 && out.r1.sliceLanded, r2: o
         && r.r3 === r.id && r.after3 === 'done' && r.sliceEvents === 2 && r.doneEvents === 1 && r.parked === false && lone.status !== 0 && /--slice goes with --train/.test(out(lone)),
       JSON.stringify({ r, lone: out(lone).slice(-300) })]);
   }
+  // ================= g. parallel units declare no shared state =================
+  {
+    const role = fs.readFileSync(path.join(S, 'studio', 'roles', 'engine-porter.md'), 'utf8');
+    const plan = (() => { try { return fs.readFileSync(path.join(S, 'studio', 'templates', 'port-plan.md'), 'utf8'); } catch { return ''; } })();
+    const steps = plan.split(/^## /m).slice(1).map((x) => x.split('\n')[0]);
+    await guard('2.90 (g) the engine porter\'s role says a unit never declares a member of a type other units extend (it adds it in the shared-state chore it was given, or stops and names it), and studio/templates/port-plan.md exists with the shared-state chore as its first step and every unit after it (fails on 2.89: no such rule, no plan template)', () => [
+      /Shared state is declared once/.test(role) && /don't declare it in your unit's files/.test(role) && /stop and name\s+the member/.test(role) && /port-plan\.md/.test(role)
+        && /^1\. Shared state \(one chore, first\)/.test(steps[0] || '') && /--after/.test(plan) && /A unit declares nothing in a shared type/.test(plan),
+      JSON.stringify({ steps, role: role.slice(-900) })]);
+  }
+
   try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep removes it */ }
 }
