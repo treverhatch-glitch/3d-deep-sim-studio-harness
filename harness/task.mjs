@@ -2575,7 +2575,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         console.error('--until takes a task id (T-011) or a time (2026-10-22T09:00).');
         process.exit(1);
       }
-      console.log(`${arg1} is blocked until ${u}.`);
+      console.log(`${arg1} is blocked until ${u}.${/^[A-Z]+-\d+$/.test(u) ? '' : ` npm run task -- unblock ${arg1} --by <name> clears it sooner.`}`);
     } else {
       const folders = flags._.slice(2);
       const folder = folders.join(',');

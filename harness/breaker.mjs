@@ -80,11 +80,14 @@ export function failingTasks(evs = readRecentEvents(20000)) {
 /** Clear a breaker (or any park): the task can start again, and the hand-back count starts over. */
 export function unblockTask(taskId, by = 'human', note = '') {
   const h = readHolds()[taskId];
+  // 2.90 (c): unblock also ends a time block (task block <ID> --until <time>), the same as anyone may set one.
+  const timed = h?.until && Date.parse(h.until) > Date.now() ? h.until : null;
+  if (timed && !h.parked) { setHold(taskId, { until: null }, { by, msg: `${by} unblocked ${taskId}: its time block (until ${timed}) is cleared${note ? `: ${note}` : ''}` }); clearAttempts(taskId); emitEvent({ type: 'task.unblocked', agent: by, task: taskId, msg: `${by} unblocked ${taskId} (time block until ${timed} cleared)${note ? `: ${note}` : ''}` }); return { ok: true, message: `${taskId} can start again: its time block (until ${timed}) is cleared.` }; }
   // 2.81 (b1): a task held back only by the attempt ledger ("same blocker as attempt n") has no park: unblock clears the ledger.
-  if (!h?.parked) return clearAttempts(taskId) ? (emitEvent({ type: 'task.unblocked', agent: by, task: taskId, msg: `${by} unblocked ${taskId} (attempt ledger cleared)${note ? `: ${note}` : ''}` }), { ok: true, message: `${taskId} can start again; the attempt ledger is cleared.` }) : { ok: false, message: `${taskId} isn't parked or tripped; nothing to unblock.` };
+  if (!h?.parked) return clearAttempts(taskId) ? (emitEvent({ type: 'task.unblocked', agent: by, task: taskId, msg: `${by} unblocked ${taskId} (attempt ledger cleared)${note ? `: ${note}` : ''}` }), { ok: true, message: `${taskId} can start again; the attempt ledger is cleared.` }) : { ok: false, message: `${taskId} isn't parked, tripped or blocked until a time; nothing to unblock.${h?.after?.length ? ` It waits for ${h.after.join(', ')}: npm run task -- after ${taskId} --remove <id> takes one off.` : ''}` };
   const refused = unparkRefusal(taskId, { by });
   if (refused) return { ok: false, message: refused };
-  setHold(taskId, { parked: null }, { by, msg: `${by} unblocked ${taskId}${note ? `: ${note}` : ''}` });
+  setHold(taskId, { parked: null, ...(timed ? { until: null } : {}) }, { by, msg: `${by} unblocked ${taskId}${note ? `: ${note}` : ''}` });
   clearAttempts(taskId);
   emitEvent({ type: 'task.unblocked', agent: by, task: taskId, msg: `${by} unblocked ${taskId}${h.parked.breaker ? ` (breaker: ${h.parked.reason})` : ''}${note ? `: ${note}` : ''}` });
   return { ok: true, message: `${taskId} can start again${h.parked.breaker ? '; the breaker count starts over' : ''}.` };

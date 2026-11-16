@@ -2,6 +2,7 @@
  * qa/selftest-290a.mjs — 2.90: costs a live studio's overseer wrote down while running 2.86.
  *   a  a task that names a proposal (its title or --after) waits while it is one, then for the task it became
  *   b  `task promote` takes --phase, --serves and --type, so a porter's "Port …" proposal can be promoted
+ *   c  `task unblock` ends a time block (task block <ID> --until <time>)
  * Scaffolding: a studio copy with its own git and events file, as in qa/selftest-286e.mjs.
  */
 import fs from 'node:fs';
@@ -91,6 +92,22 @@ console.log(JSON.stringify({ open, owner: owner && owner.owner, producer, viaAft
         && /Queued P-1→T-\d+/.test(out(flagged)) && /Queued P-2→T-\d+/.test(out(chore)) && Boolean(idOf('Chore: Port (engine, batch 2)')) && Boolean(idOf('Port (engine, batch 1): the rules of the store'))
         && badType.status !== 0 && /Unknown --type/.test(out(badType)),
       JSON.stringify({ sign: out(sign).slice(-200), p1: out(p1).slice(-200), plain: out(plain).slice(-600), flagged: out(flagged).slice(-300), chore: out(chore).slice(-300), badType: out(badType).slice(-200) })]);
+  }
+
+  // ================= c. unblock ends a time block =================
+  {
+    const add = task('add', 'Docs: notes for the time block', '--agent', 'prod-1');
+    const id = idOf('notes for the time block');
+    const later = new Date(Date.now() + 3 * 3600000).toISOString();
+    const block = task('block', String(id), '--until', later, '--by', 'prod-1');
+    const holds = () => (JSON.parse(fs.readFileSync(path.join(S, 'studio', 'task-holds.json'), 'utf8')).tasks || {})[id] || {};
+    const before = holds().until || null;
+    const un = task('unblock', String(id), '--by', 'prod-1');
+    const after = holds().until || null;
+    const again = task('unblock', String(id), '--by', 'prod-1');
+    await guard('2.90 (c) `task block <ID> --until <a later time>` then `task unblock <ID>`: the time block is cleared, unblock exits 0 and says so, and block\'s own line names unblock; a second unblock says there is nothing to unblock (fails on 2.89: unblock answered "isn\'t parked or tripped; nothing to unblock" and the block stayed)', () => [
+      add.status === 0 && Boolean(id) && Boolean(before) && /task -- unblock/.test(out(block)) && un.status === 0 && /time block .* is cleared/.test(out(un)) && after === null && again.status !== 0 && /nothing to unblock/.test(out(again)),
+      JSON.stringify({ id, before, after, block: out(block).slice(-300), un: out(un).slice(-300), again: out(again).slice(-300) })]);
   }
 
   try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep removes it */ }
