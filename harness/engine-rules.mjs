@@ -20,6 +20,7 @@ import { mainRoot } from './worktree.mjs';
 import { engineTarget, ENGINE_NAME_RE } from './engine-tracks.mjs';
 import { failingTests } from './unity-gate.mjs';
 import { readJson, writeAtomic } from './fsafe.mjs';
+import { targetRedTask, targetRedClear } from './engine-target-red.mjs';
 import { splitPlan } from './rules-parts.mjs';
 import { peakFromHistory, readUsedHistory } from './engine-ram.mjs';
 import { flagOf, isOff as off, numFiniteFirst as num, pushToOf, stdoutOf as out } from './helpers.mjs';
@@ -806,12 +807,13 @@ export function fullRulesOwed(root, engine, cfg, { repo = null, tip = null, now 
  */
 export function fullRulesRun({ engine = 'unity', repo, tip, cfg, from = [], root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt } = {}) {
   const r = run({ engine, repo, sha: tip, cfg, from, sel: { mode: 'full', filter: '', command: cfg.command }, root, id: `${id}-full`, env, log, useCache: true });
-  if (r.status === 'pass') { writeCache(root, engine, (j) => { j.lastFullAt = new Date().toISOString(); delete j.fullRed; }); return r; }
+  if (r.status === 'pass') { writeCache(root, engine, (j) => { j.lastFullAt = new Date().toISOString(); delete j.fullRed; }); targetRedClear(root, engine, 'full-rules'); return r; }
   const tmo = Boolean(r.timedOut);
   if (tmo && !r.notRun && !r.timeoutSet) writeCache(root, engine, (j) => { j.raise = { ...(j.raise || {}), full: { min: Math.min(Math.max(cfg.timeoutMin, TIMEOUT_CAP), min2(r.timeoutMin * 2)), from: r.timeoutMin, at: new Date().toISOString() } }; });
   let key = null;
   try { key = rulesKey({ repo, sha: tip, cfg }); } catch { /* kept without a key: not blocked */ }
   writeCache(root, engine, (j) => { j.fullRed = { key, tip, status: r.status, why: String(r.why || '').slice(0, 200), failures: (r.failures || []).slice(0, 10), at: new Date().toISOString(), timeoutMin: tmo ? r.timeoutMin || null : null }; });
+  if (r.status === 'red' && !tmo) targetRedTask(root, { engine, target: engineTarget(engine, { root })?.cfg?.target, source: 'full-rules', tests: r.failures, why: r.why, train: id });
   return r;
 }
 
@@ -1082,7 +1084,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     const why = `the rules check ${tmoOut ? (base.notRun ? 'was not run on the target' : 'timed out on the target itself') : `is ${base.status === 'red' ? 'red' : 'not runnable'} on the target itself`} (${base.why}${base.failures?.length ? `: ${base.failures.slice(0, 3).join(', ')}` : ''}), so it judges no lane: ${fix}`;
     let noJudge = null;
     writeCache(root, engine, (j) => { const p = j.noJudge || {}; noJudge = { n: (p.n || 0) + 1, minutes: min2((p.minutes || 0) + res.ms / 60000), since: p.since || new Date().toISOString(), why: String(base.why || '').slice(0, 200), fix, timeout: tmoOut }; j.noJudge = noJudge; });
-    return { ...res, skipped: true, calibration: base.status, ...(tmoOut ? { timedOut: true } : {}), noJudge, why };
+    return { ...res, skipped: true, calibration: base.status, ...(tmoOut ? { timedOut: true } : {}), noJudge, why, ...(base.status === 'red' ? { redTests: (base.failures || []).slice(0, 40) } : {}) };
   }
   if (rulesNoJudge(root, engine)) writeCache(root, engine, (j) => { delete j.noJudge; });
   // A full pass on the target is the backstop for focused runs (fullEveryHours).

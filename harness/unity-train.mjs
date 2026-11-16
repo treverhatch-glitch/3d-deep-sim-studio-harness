@@ -31,6 +31,7 @@ import { engineSlotsAt, heavySlotsAt, floorFree } from './heavy.mjs';
 import { maxConcurrent, capGroup } from './heavy-budget.mjs';
 import { removeLandedLane, pruneBuilds, buildsConfig } from './engine-clean.mjs';
 import { flagOf, foldRealOf, gitMax64 as git, numBlankDefault as num, realOrResolved as real, short8 as short, sleepSyncClamped as sleep, stdoutOf as out } from './helpers.mjs';
+import { targetRedTask, targetRedClear, targetRedLine } from './engine-target-red.mjs';
 
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); writeAtomic(f, `${JSON.stringify(v, null, 2)}\n`); };
 const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
@@ -1006,6 +1007,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       log(`[unity-train] ${id}: rules check: ${rg.why}${rg.runs ? ` (${rg.runs} run(s), ${Math.round(rg.ms / 1000)} s)` : ''}`);
       // 2.90: a check that judged no lane because of the target is said where people look (event; train status after 2 in a row).
       if (rg.noJudge) ev('rules_no_judge', id, `the rules check judged no lane${rg.noJudge.n > 1 ? ` (${rg.noJudge.n} trains in a row, ${Math.round(rg.noJudge.minutes)} min spent)` : ''}: ${rg.why}`, { agent: by, to: 'producer', status: 'warn', meta: { n: rg.noJudge.n, minutes: rg.noJudge.minutes, timeout: Boolean(rg.timedOut), fix: rg.noJudge.fix } });
+      if (rg.noJudge && rg.calibration === 'red' && !rg.timedOut) targetRedTask(root, { engine, target, source: 'rules', tests: rg.redTests, why: rg.noJudge.why, train: id }); else if (rg.ran) targetRedClear(root, engine, 'rules');
       for (const d of rg.dropped) drop(d.lane, `refused before the land run: ${d.why}\nFix it on ${d.lane.branch} (bring ${target} in first: ${targetMergeCommand(d.lane.task)}), then task done ${d.lane.task} --train again.`, { cause: 'rules' });
       set = rg.kept;
       res.rules = { ran: rg.ran, runs: rg.runs, ms: rg.ms, dropped: rg.dropped.map((d) => d.lane.task), ...(rg.skipped ? { skipped: rg.why } : {}), ...(rg.mode ? { mode: rg.mode } : {}), ...(rg.selWhy ? { why: rg.selWhy } : {}), ...(rg.parts ? { parts: rg.parts } : {}), ...(rg.splitAtOnce ? { splitAtOnce: rg.splitAtOnce } : {}), ...(rg.filter ? { filter: rg.filter } : {}), ...(rg.groups ? { groups: rg.groups } : {}), ...(rg.reused ? { reused: rg.reused } : {}), ...(rg.sliced ? { sliced: rg.sliced, slices: rg.slices } : {}) };
@@ -1287,6 +1289,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     const emitB = (type, status, msg, meta) => { try { emitEvent({ type, agent: by, to: 'director', status, track: `engine:${engine}`, msg: `${L} train ${id}: ${msg}`.slice(0, 600), meta: { train: id, engine, ...meta } }); } catch {} };
     const save = (failing, extra = {}) => { try { writeJson(baselineFile(root, engine), { at: new Date().toISOString(), target: headOf(repo, target), failing, source: `the full land run of ${L} train ${id}`, ...(base.told ? { told: base.told } : {}), ...extra }); } catch { /* asked again next time */ } };
     const clear = (gone) => { if (!gone.length) return; emitB('engine.full_baseline_cleared', 'ok', `the daily full run no longer fails ${gone.length} test(s) the target was red on: ${gone.slice(0, 5).join(', ')}${gone.length > 5 ? ', ...' : ''}; removed from the known-red list`, { tests: gone.slice(0, 20) }); log(`[unity-train] ${id}: full-run baseline: ${gone.length} name(s) pass again: ${gone.slice(0, 5).join(', ')}`); };
+    if (r.status === 'pass') targetRedClear(root, engine, 'full-land');
     if (r.status === 'pass') { if (base.failing.length) { save([], { told: '' }); clear(base.failing); } return; }
     const names = r.status === 'red' && !r.compileOnly && Array.isArray(r.failures) ? [...new Set(r.failures)] : [];
     if (!names.length) return;
@@ -1301,6 +1304,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     save(failing, { told: key });
     clear(gone);
     if (!told) emitB('engine.full_red_on_target', 'warn', `the daily full land run, on ${target} alone with no branch, is red on ${names.length} test(s): ${names.slice(0, 5).join(', ')}${names.length > 5 ? ', ...' : ''}. They fail on the target itself; no branch is counted against them. A fix task for them is wanted.`, { tests: names.slice(0, 20), failing: failing.slice(0, 50), lanes: [] });
+    targetRedTask(root, { engine, target, source: 'full-land', tests: failing, why: `the full land run is red on ${names[0]}`, train: id });
     // The full-run clock counts as served: the next full run is due after the usual hours.
     try { const prev = readJson(fullLandFile(root, engine)) || {}; writeJson(fullLandFile(root, engine), { ...prev, at: new Date().toISOString(), id, served: 'red only on the target\'s own tests' }); } catch { /* due again next time */ }
     log(`[unity-train] ${id}: the full run of ${target} alone is red on ${names.slice(0, 5).join(', ')}: known red on the target; nobody is blamed`);
@@ -1725,6 +1729,7 @@ export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'un
   if (st.last && !st.running) lines.push(`Last ${L} train ${st.last.id} (${String(st.last.at || '').slice(0, 16)}): ${st.last.message}${st.last.batch ? ` [batch ${st.last.batch}]` : ''}`);
   if (!quiet) { try { lines.push(autoLine(root, engine)); } catch { /* the queue lines stand */ } }
   { const nj = rulesIdleLine(root, engine); if (nj) lines.push(nj); }
+  { const tr = targetRedLine(root, engine); if (tr) lines.push(tr); }
   if (!quiet) { try { const s = unityTrainSettings(root, engine); if (!s.error) lines.push(parallelLine(root, engine, parallelNow(root, engine, s.cfg))); } catch { /* the queue lines stand */ } }
   return lines.join('\n');
 }

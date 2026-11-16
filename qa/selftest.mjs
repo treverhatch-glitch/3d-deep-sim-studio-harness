@@ -5388,6 +5388,14 @@ if (inShard('selftest-291c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.92 (b): the target red by itself files one task to fix it, once per distinct red.
+if (inShard('selftest-292b')) {
+  const dir = copyRepo();
+  const { selftest292B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-292b.mjs')).href);
+  await selftest292B({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

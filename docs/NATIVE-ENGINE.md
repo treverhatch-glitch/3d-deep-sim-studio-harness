@@ -100,6 +100,13 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   raise `engines.<x>.rules.timeoutMin` or make the run smaller with `rules.focus` (`map`, `auto`, `paths`); otherwise
   fix the target or name the inputs. After two trains in a row, `train status --engine <x>` and the Line Producer's
   status say how many trains and how many minutes it has cost; the count clears when the check judges again.
+- **A red target gets a fix task (2.92).** When the target is red by itself (the rules check, the daily full land run or
+  the owed full rules run), no branch is blamed, and the harness files one task: `Fix: <target> is red by itself on <n>
+  rule test(s): <first test>`, role `engine-porter`, P1, on the engine track, with the failing names in its handoff note,
+  and writes `task.train.<x>.target_red_task` (warn). It is filed once per distinct red: a list that shares half or more
+  of its names with an open red is the same red. The record is `.studio/engine/<x>-target-red.json`; a green result from
+  the same source clears it, a done or dropped task lets the next red file a new one. `train status` shows
+  `Target red: T-xxx`. `STUDIO_ENGINE_TARGET_RED_TASK=off` files nothing.
 - Each batch writes one `engine.rules` event (runs, minutes, lanes kept and refused).
 - **A lane's own check.** `task done` runs an engine check only when `"quickCheck"` is set: set it to a compile (for
   Unity `dotnet build tools/SimTests`), which takes seconds and stops a lane that does not compile outside the editor;
