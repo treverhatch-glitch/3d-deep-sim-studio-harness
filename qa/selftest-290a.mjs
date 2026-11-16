@@ -99,9 +99,10 @@ console.log(JSON.stringify({ open, owner: owner && owner.owner, producer, viaAft
         && /Queued P-1→T-\d+/.test(out(flagged)) && /Queued P-2→T-\d+/.test(out(chore)) && Boolean(idOf('Chore: Engine batch 2')) && Boolean(idOf('Engine batch 1: the rules of the store'))
         && badType.status !== 0 && /Unknown --type/.test(out(badType)),
       JSON.stringify({ sign: out(sign).slice(-200), p1: out(p1).slice(-200), plain: out(plain).slice(-600), flagged: out(flagged).slice(-300), chore: out(chore).slice(-300), badType: out(badType).slice(-200) })]);
-    await guard('2.90 (b) an engine porter\'s proposal titled "Port …" is a chore by its title: plain `task promote` queues it with no --phase or --serves', () => [
-      /Proposed P-3/.test(out(p3)) && /Queued P-3→T-\d+/.test(out(port)) && Boolean(idOf('Port (engine, batch 3): the rules of the yard')),
-      JSON.stringify({ p3: out(p3).slice(-200), port: out(port).slice(-500) })]);
+    const portShow = (() => { try { return JSON.parse(task('show', idOf('Port (engine, batch 3): the rules of the yard') || 'T-0', '--json').stdout || '{}'); } catch { return {}; } })();
+    await guard('2.90 (b) an engine porter\'s proposal titled "Port …" names no phase and no pillar (the web game is its spec): plain `task promote` queues it, and it stays a build task (type change, the port card in its brief)', () => [
+      /Proposed P-3/.test(out(p3)) && /Queued P-3→T-\d+/.test(out(port)) && Boolean(idOf('Port (engine, batch 3): the rules of the yard')) && portShow.type === 'change' && portShow.vision?.kind === 'port',
+      JSON.stringify({ p3: out(p3).slice(-200), port: out(port).slice(-500), type: portShow.type, vision: portShow.vision })]);
   }
 
   // ================= c. unblock ends a time block =================

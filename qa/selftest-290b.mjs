@@ -184,6 +184,13 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, rounds: r.rounds, parallel:
       JSON.stringify({ left, wt: g(E.R, 'worktree', 'list').stdout })]);
   }
   {
+    const { compilerLines } = await import('../harness/engine-compile.mjs');
+    const win = compilerLines('C:\\ws\\compile-1\\Sim\\State.cs(13,7): error CS0102: The type \'State\' already contains a definition for \'X\' [C:\\ws\\compile-1\\Sim\\Sim.csproj]\n', 'C:\\ws\\compile-1');
+    const nix = compilerLines('/ws/compile-1/Sim/State.cs(13,7): error CS0102: The type \'State\' already contains a definition for \'X\' [/ws/compile-1/Sim/Sim.csproj]\n', '/ws/compile-1');
+    await guard('2.90 (t) A: the compiler\'s line names the file as git does on every system: a Windows compiler\'s Sim\\State.cs is given as Sim/State.cs, the message after it untouched (fails before this fix: the hand-back on Windows said Sim\\State.cs, a path no branch changed)', () => [
+      win.length === 1 && win[0] === 'Sim/State.cs(13,7): error CS0102: The type \'State\' already contains a definition for \'X\'' && nix[0] === win[0], JSON.stringify({ win, nix })]);
+  }
+  {
     resetState();
     const E = engineRepo({ 'feat/a': { 'a.txt': 'a\n' }, 'feat/b': { 'Sim/State.cs': STATE(ONE, '') }, 'feat/c': { 'Sim/State.cs': STATE('', ONE) } });
     const ctl = path.join(T, 'ctl-compile-off');

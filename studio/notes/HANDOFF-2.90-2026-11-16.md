@@ -26,8 +26,8 @@ per-pool model switch) and got a check or nothing.
    does. So the second gate runs search steps as probes, and never the next batch.
 4. **Progress is commits on the task's branch.** A session that commits and hands back is not a failure for any
    counter. The task budget still counts its minutes and tokens.
-5. **"Port ..." is a chore only for the engine-porter role.** A builder's task with that word stays a build task and
-   keeps its gates.
+5. **An engine porter's "Port ..." names no phase and no pillar** (the web game is its spec). It stays a build task:
+   same type, same done check, the port card in its brief. A builder's task with that word keeps the full gate.
 6. **No git config is changed from code** for the pull trap: a warning and the one command.
 7. **A game's script stays out of the harness.** The hook's refusal now says where it goes.
 

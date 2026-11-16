@@ -26,7 +26,8 @@ export function compilerLines(text, dir = '') {
   const strip = (l) => {
     let x = l.trim().replace(/\s*\[[^\]]*\.(cs|fs|vb)proj\]\s*$/i, '');
     for (const d of [dir, dir.split(path.sep).join('/')].filter(Boolean)) x = x.split(`${d}/`).join('').split(`${d}\\`).join('');
-    return x;
+    // The file as git names it (Sim/State.cs, also from a Windows compiler's Sim\State.cs): the path the branch changed.
+    return x.replace(/^[^(\n]+(?=\(\d+(?:,\d+)*\)\s*:)/, (f) => f.replace(/\\/g, '/'));
   };
   const seen = new Set();
   for (const l of String(text || '').replace(/\r\n?/g, '\n').split('\n')) {

@@ -132,6 +132,12 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Evidence:** 16 November, four runs queued at once: "task lane gives each builder its own folder", "the supervisor starts a fresh agent per task", "2.77.0 (p, P9.6)" and "2.69.0 (q, 1)" each failed once and passed on the re-run of the failed job. Each re-run costs about 40 minutes.
 - **Workaround:** re-run the failed job and note it on the pull request. Do not queue four runs at once.
 
+### P-347 — a rule added after the last local run broke a 2.85 check, and a Windows path · fixed 2.90
+- **Evidence:** pull request 92, first online run: "2.85 (f): an engine port gets the shorter port card" red on Linux (Node 22, 24) and Windows; "2.90 (t) A: the hand-back of T-003" red on Windows only (`Sim\State.cs`).
+- **Cause:** typing an engine porter's "Port ..." as a chore (so `promote` would take it) changed its type everywhere: no port card, a lighter done check. The compiler's line kept Windows separators. Only the units thought affected had been run locally.
+- **Fix:** the rule moved to the one place that needed it (the phase and pillar gate of `task add`); the task stays a build task. The compiler's line names the file as git does. No existing check changed.
+- **Rule:** after a change to a function many commands share (a task's type, a gate), run every unit that names the role or the command before the push.
+
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
 - **P-001** (reopened on purpose 2026-10-31: the owner made the harness and the game's repository public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist

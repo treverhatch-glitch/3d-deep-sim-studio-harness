@@ -1552,6 +1552,9 @@ export function gateTask({ title, role = 'builder', meta = {} }) {
   if (meta.prototype || meta.infra || /^prototype\b/i.test(title)) return laneMissing ? { ok: false, message: `Missing flag: ${LANE_FLAG}. A builder task with no folders would count as working on the whole game and block every other builder.` } : { ok: true, warnings };
   if (b.signed && b.amended) return { ok: false, message: `The Game Bible changed after ${b.signed.by} signed it (${b.amended.changes.map((c) => c.field).join(', ')}). New build tasks wait until a person re-signs the new design: npm run bible -- sign --by <name> [--via "<where they approved>"]. Work already queued carries on.` };
   if (!b.signed) return { ok: false, message: 'The Game Bible is not signed yet, so this is still pre-production: build tasks wait. Allowed now: studies, storyboards, docs, throwaway prototypes (--prototype) and tooling that isn\'t game content (--infra). See npm run bible -- check.' };
+  // An engine porter's "Port ..." translates rules the web game already has (the web game is its spec, as its brief's
+  // port card says): it names no phase and no pillar. Its type and its checks stay a build task's.
+  if (role === 'engine-porter' && /^port\b/i.test(title)) return { ok: true, warnings };
   const phase = Number(meta.phase);
   const phaseBad = ![1, 2, 3].includes(phase);
   const serves = String(meta.serves || '');

@@ -35,7 +35,7 @@ or one with the check before queueing.
 | | What |
 | --- | --- |
 | Slices | `task done <ID> --train --slice` queues a slice; landed, the task is ready again and its budget starts over. A hand-back from a session that committed to its task is progress: not counted by the watchdog park, the circuit breaker, the crew breaker or the scorecard. |
-| Proposals | A task that names an open proposal (title or `--after`) waits for it, then for the task it became. `task promote` takes `--phase`, `--serves`, `--type`; an engine porter's "Port ..." is a chore by its title. |
+| Proposals | A task that names an open proposal (title or `--after`) waits for it, then for the task it became. `task promote` takes `--phase`, `--serves`, `--type`; an engine porter's "Port ..." needs neither flag and stays a build task. |
 | Holds | `task unblock` ends a time block. |
 | Briefs | Line ranges a task names (`path:120-180`) open the brief as "Read only these lines". An answered ask stays a must-do for the asker and the Director until `ask -- followed <id> --task <ID>` or `--none "why"`. |
 | Porters | The role says a unit declares no member of a shared type; `studio/templates/port-plan.md` starts with the shared-state chore. |

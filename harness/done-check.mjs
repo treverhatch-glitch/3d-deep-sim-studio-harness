@@ -180,8 +180,6 @@ function titleRule(task) {
   const title = String(task?.title || '');
   // A [chore] tag retypes a "Fix …" or a plain build task, never a review, study, rescue...
   const tagged = choreTagged(task);
-  // An engine porter's "Port ..." translates rules the game already has: a chore, not a new build (no --phase, --serves).
-  if (task?.role === 'engine-porter' && /^port\b/i.test(title)) return { type: 'chore', by: 'title' };
   for (const [re, type] of PREFIX) if (re.test(title)) return { type: type === 'bug' && tagged ? 'chore' : type, by: 'title' };
   const byRole = BY_ROLE[task?.role] || 'change';
   return { type: byRole === 'change' && tagged ? 'chore' : byRole, by: 'role' };
