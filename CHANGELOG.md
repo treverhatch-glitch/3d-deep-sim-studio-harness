@@ -4,6 +4,17 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.89.0] — 2026-11-16
+Which functions a studio runs (the owner's word: cut what is not essential, by evidence). A crew's records show 92%
+of the code reachable from what it ran and 8% not, mostly setup tooling; what is unused inside used files, no record
+showed. Details: docs/RELEASE-2.89.0.md.
+- **A record of the functions that run** (`harness/usage-functions.mjs`): each harness command in a studio notes the
+  functions it called, names and positions only, in `.studio/usage/functions/<version>.tsv`. On by default
+  (`STUDIO_USAGE_FUNCTIONS=off`); about 25 ms per command.
+- **The page:** `npm run commands-run -- --functions` lists, per file, the functions that ran and the lines inside
+  functions that never did.
+- **Dropped:** the consolidation map's remaining merges. They save too few lines for their risk.
+
 ## [2.88.0] — 2026-11-16
 One reading of "landed", and one module of small helpers (the owner's order: the consolidation map's second step).
 Code and tests are 200 lines larger than 2.87, not smaller: the helpers saved 26 and the landing fix with its tests
@@ -22,7 +33,7 @@ Details: docs/RELEASE-2.88.0.md.
 ## [2.87.0] — 2026-11-16
 Shorter, same behaviour (the owner's order: the consolidation map's first step). Nothing changes what a command prints,
 decides or writes. Tracked text 173,676 lines to about 168,500; `harness/` and `scripts/` 4.8% smaller by size.
-Details: docs/RELEASE-2.87.0.md.
+Details: the 2.87.0 release notes, in git history.
 - **One length rule for comments:** a file header at most 12 lines, any other comment at most 6, in `harness/`,
   `scripts/` and `qa/`. 525 comments were over it (9,431 lines, now 5,151). The code is unchanged
   (`scripts/same-code.mjs`, 386 files). `npm run check:comments` keeps it, as a step of the online checks.
@@ -77,41 +88,9 @@ first 19.5 hours on 2.85: tasks landed with no overseer step 25% (0% on 2.84), h
   fixed and was the only one in 656 files.
 - **Not measured:** nothing here has run on a live studio or a real editor yet.
 
-## [2.85.0] — 2026-11-13
-Hands off (the owner's order: fix the overseer's list, make it better, clean up, start on the plan). A crew's first
-16.3 hours on 2.84 measured 46.2% of engine land runs passing (34.8% on 2.83) and a 32.9-minute passing run (51.1),
-and 0 of 26 landed tasks without an overseer step: 59.5% of hand-backs had a harness or machine cause. 106 files,
-+5,813 / −1,401 lines against 2.84.0; tracked lines 164,719 to 169,131. Details: the 2.85.0 release notes, in git history.
-- **False hand-backs:** a task whose branch waits in a train queue is never handed back (30 of 73 hand-backs in the
-  crew's log were that); one reading of hand-backs for the watchdog, the crew breaker and the score
-  (`harness/handback-kind.mjs`); the same `task done` refusal twice holds the task until the check stops giving it; a
-  ready engine hand-back queues itself (`STUDIO_ENGINE_AUTO_QUEUE`).
-- **The trailer check** reads the task's own commits wherever `task done` runs; the commit-msg hook puts a
-  `Golden-Reason:` line in the trailer block.
-- **The owner-only list** is deleting data, keys, publishing, tool definitions and turning beta off; an ask is read
-  for meaning in one case only (code removed in a lane is not deleted data).
-- **Every ask resolves:** `STUDIO_ASK_TIMEOUT_H` (4) decides by the default, `STUDIO_ASK_STALE_H` (8) escalates once;
-  an owner-only ask is never timed. "Continue or hand off" is decided by rule (`STUDIO_REFRESH_DECIDE`).
-- **Engine land runs:** the daily full run is announced and kept out of the compile check; a full run red only on
-  tests no branch is tied to lands the branches and records a baseline; a failing test's suspect is tried first; an
-  unchanged red is not queued again (`--again`); Play Mode filters per panel, `npm run engine -- play-plan`; the rules
-  split is memory-aware (`harness/rules-parts.mjs`).
-- **The web train's switch:** an agent's `train auto off` lapses (`STUDIO_TRAIN_AUTO_OFF_HOURS`, 4); the daemon says
-  why it waits. A running engine train counts as work. Review answers give the verdict first. A lane copy's board
-  write is not a hand edit. The hooks gate names the upgrade command after a plain merge.
-- **The vision card** (`harness/vision-card.mjs`): every player-facing brief carries the signed Bible's lines for the
-  task (the pillar, up to six "never" lines, the feel line, the phase goal). **Vision fixes** (`task add
-  --vision-fix`) start and land first.
-- **Gaps closed:** a milestone criterion is met with evidence; a `Golden-Reason` is 20+ characters and names a task
-  (`STUDIO_GOLDEN_REASON`); a rules change with no test is noted and counted (`STUDIO_RULES_TEST=require` refuses);
-  the browser check plays the studio's own game, never the sample; a hand-back note's file claims are checked.
-- **Cut:** two settings nothing read; `check-docs` now fails on a documented or tested setting with no production
-  reader. The plan's larger cuts did not survive a proper check (the 2.85.0 release notes, in git history). Comments shortened in 30
-  files, code tokens proven unchanged.
-- **Not measured:** nothing here has run on a live studio or a real editor yet.
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.85.0** (2026-11-13): Hands off. A task waiting in a train queue is never handed back; the web train starts by itself; engine lanes land in batches with blame by evidence; the overseer's list.
 - **2.84.0** (2026-11-12): Less waste. The documents an agent or a maintainer reads went from 1,672 KB to 958 KB; older log entries one line each; a record of which commands a studio runs (`npm run commands-run`).
 - **2.83.0** (2026-11-11): Flow. A session is accounted where its work is; the engine train blames by evidence and a branch can land alone; the rules check runs the lanes' systems; plan passes that changed nothing are skipped.
 - **2.82.0** (2026-11-10): measured, then cut: the scorecard read against a crew's log, engine land runs batched, the rules check before the land run, duplicate helpers folded.
