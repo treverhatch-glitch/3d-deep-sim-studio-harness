@@ -13,7 +13,7 @@ Details: docs/RELEASE-2.92.0.md.
 - **The check before queueing judges the branch merged with the target**, and runs again when the target moved.
 - **A land run red on a compiler error hands back the branch that changed that file** (`engines.<x>.logs`).
 - **A target red by itself files one fix task**, once per distinct red.
-- **Two more self-test checks wait for the thing itself**, not a fixed window (P-346).
+- **One more self-test check waits for the thing itself**, not a fixed window (P-346).
 - **Size:** harness code is 181 lines larger, scripts unchanged. No dead file was found to remove; a planned tool was not built because the
   self-test already has it.
 

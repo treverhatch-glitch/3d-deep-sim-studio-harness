@@ -6,7 +6,7 @@
 - **Done:** 2.91 is on `main` (no full run ahead of a waiting batch). The one studio on record still runs 2.90.
 - **In progress:** 2.92 (checks at the queue door, a red compile names its branch, a red target gets a fix task) on a branch, merged when its online checks pass. Notes: docs/RELEASE-2.92.0.md, studio/notes/HANDOFF-2.92-2026-11-17.md.
 - **Untested:** 2.91 and 2.92 have not run on a real engine. The studio's first trains on them are the test.
-- **Open problems:** P-346 (timing checks under load: five fixed, six known left), P-005 (GPU model), P-009 (no Unity on the maintainer's side).
+- **Open problems:** P-346 (timing checks under load: four fixed, seven known left), P-005 (GPU model), P-009 (no Unity on the maintainer's side).
 - **Waiting for your OK:** which unused features to remove (the list is in docs/RELEASE-2.92.0.md, "Size"); whether the scorecard's "landed" should stop counting a close; whether the next batch's rules check may run beside a land run.
 
 ## The files

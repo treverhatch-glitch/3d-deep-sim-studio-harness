@@ -13,7 +13,7 @@ two newest handoffs and release notes are kept; older ones are in git history.
 
 The studio's overnight event log was read first, then its overseer's list (two new items, both matching the log).
 Scoped agents, each in its own checkout: two read-only searches for code to remove, one design build (the queue
-door and the compile blame, `292a`), two mechanical builds (the red-target task `292b`; two timing checks).
+door and the compile blame, `292a`), two mechanical builds (the red-target task `292b`; the timing checks).
 
 ## What the next session should know
 
@@ -30,6 +30,10 @@ door and the compile blame, `292a`), two mechanical builds (the red-target task 
 5. **Two notes sit on the studio's machine for its overseer** (outside this repo): the 2.91 upgrade note with the
    corrected `rules.ignore`, and the four edits that make its land script honour `STUDIO_LAND_PROBE=1`.
 6. **Do not remove test scratch folders by pattern** while other builds run (P-353). Agents were told so this round.
+
+7. **One timing fix was withdrawn.** Making "the supervisor starts a fresh agent per task" wait for its condition
+   (two supervisor runs in a row) made the next check in the unit, "--lanes auto", fail 2 runs in 8: one lane never
+   got its agent. Cause not found; it may be a real race after `supervisor stop`. Worth a look before retrying.
 
 ## Open decisions for the owner
 
