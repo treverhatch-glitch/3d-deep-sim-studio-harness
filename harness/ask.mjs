@@ -35,6 +35,16 @@ export function allAsks() {
   return fs.readdirSync(ASKS_DIR).filter((f) => /^A-\d+\.json$/.test(f)).sort().map((f) => read(path.join(ASKS_DIR, f))).filter(Boolean);
 }
 export const openAsks = () => allAsks().filter((a) => a.status === 'open');
+/** 2.90: when an open ask's default applies (ms), or null when it never does (the owner's, protected, or no default). */
+export function askDueAt(a, now = Date.now(), env = process.env) {
+  if (askOwnerTopic(a) || a.protected) return null;
+  const set = a.deadline ? Date.parse(a.deadline) : null;
+  const H = askTimeoutMs(env);
+  if (set != null) return Number.isFinite(set) ? set : null;
+  return a.default && H > 0 && (!a.options?.length || a.options.includes(a.default)) ? (Date.parse(a.at) || now) + H : null;
+}
+/** 2.90: the open asks that still wait for a person: not past the time their default applies (expireAsks decides those). */
+export const waitingAsks = (now = Date.now(), env = process.env) => openAsks().filter((a) => { const due = askDueAt(a, now, env); return due == null || due > now; });
 const write = (a) => {
   fs.mkdirSync(ASKS_DIR, { recursive: true });
   fs.writeFileSync(path.join(ASKS_DIR, `${a.id}.json`), `${JSON.stringify(a, null, 2)}\n`);
@@ -202,8 +212,7 @@ export function expireAsks(now = Date.now(), env = process.env) {
   for (const a of openAsks()) {
     if (askOwnerTopic(a)) continue;
     const at = Date.parse(a.at) || now;
-    const set = a.deadline ? Date.parse(a.deadline) : null;
-    const due = a.protected ? null : set != null ? set : a.default && H > 0 && (!a.options?.length || a.options.includes(a.default)) ? at + H : null;
+    const due = askDueAt(a, now, env);
     if (due == null) {
       if (stale > 0 && !a.staleAt && now - at >= stale) {
         const cmd = `npm run ask -- answer ${a.id} "<answer>" --by <you>`;
