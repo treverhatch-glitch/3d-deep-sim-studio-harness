@@ -231,5 +231,44 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, dropped: 
       JSON.stringify(r).slice(0, 2500)]);
   }
 
+  // ================= B2. engines.<x>.preQueue: refused before it is queued =================
+  {
+    resetState();
+    const E = engineRepo({ 'feat/p': { 'p.txt': 'p\n' }, 'feat/pin': { 'pins/web.json': '{ "commit": "beef002" }\n' }, 'feat/pinok': { 'pins/web.json': '{ "commit": "beef003" }\n', 'vectors/pin.txt': 'beef003\n' } });
+    const ctl = path.join(T, 'ctl-prequeue');
+    const pqLog = path.join(T, 'prequeue-log.jsonl');
+    // The pin check's stand-in: any arguments, its own output folder, and the systems to re-record named on red.
+    const pinCheck = path.join(T, 'pin-check.mjs');
+    fs.writeFileSync(pinCheck, `import fs from 'node:fs'; import path from 'node:path';
+const cwd = process.cwd();
+fs.appendFileSync(${JSON.stringify(pqLog)}, JSON.stringify({ args: process.argv.slice(2), commit: process.env.STUDIO_LANE_COMMIT || null, dir: process.env.STUDIO_LANE_DIR || null }) + '\\n');
+fs.mkdirSync(path.join(cwd, 'obj'), { recursive: true }); fs.writeFileSync(path.join(cwd, 'obj', 'pin.txt'), 'x');
+const pin = JSON.parse(fs.readFileSync(path.join(cwd, 'pins/web.json'), 'utf8')).commit;
+const rec = fs.readFileSync(path.join(cwd, 'vectors/pin.txt'), 'utf8').trim();
+if (pin !== rec) { console.log('vectors recorded at ' + rec + ', the pin is ' + pin); console.log('re-record: Movement, Fees'); process.exit(1); }
+console.log('vectors match the pin');
+`);
+    setEngines({ unity: cfgFor(E, ctl, { preQueue: [{ touches: 'pins/*.json', run: `node "${fwd(pinCheck)}" --all-systems`, say: 'Re-record the vectors at the new pin and commit them in this branch.' }] }) });
+    const Q = (task, branch) => `import { queueUnityTask } from ${u('harness/unity-train.mjs')};
+const r = queueUnityTask(process.cwd(), { engine: 'unity', task: ${JSON.stringify(task)}, branch: ${JSON.stringify(branch)}, agent: 'porter-a' });
+console.log(JSON.stringify({ ok: r.ok, error: r.error || null, message: r.message }));`;
+    const bad = probe(Q('T-021', 'feat/pin'));
+    const n1 = runsOf(pqLog.replace(/-log\.jsonl$/, '')).length;
+    const calls1 = (() => { try { return fs.readFileSync(pqLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } })();
+    const plain = probe(Q('T-022', 'feat/p'));
+    const ok = probe(Q('T-023', 'feat/pinok'));
+    const calls = (() => { try { return fs.readFileSync(pqLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } })();
+    const q = (() => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'unity-queue.json'), 'utf8')).map((e) => e.task); } catch { return []; } })();
+    void n1;
+    await guard('2.90 (t) B2: engines.unity.preQueue: a branch that changes pins/web.json without the vectors is refused at queueing, with the check\'s own last lines (the systems to re-record) and the studio\'s line, and the one command; the check ran once in a throwaway checkout of the branch\'s head (STUDIO_LANE_COMMIT, its own arguments), not in the engine repo (fails on 2.89: the branch was queued and found red by a land run)', () => [
+      bad.ok === false && bad.error === 'pre-queue' && /changes pins\/web\.json/.test(bad.message) && /re-record: Movement, Fees/.test(bad.message) && /Re-record the vectors at the new pin and commit them in this branch, then task done T-021 --train again\./.test(bad.message)
+        && calls1.length === 1 && calls1[0].commit === E.heads['feat/pin'] && calls1[0].args.join() === '--all-systems' && calls1[0].dir && !calls1[0].dir.startsWith(fwd(E.R)) && evs(/^task\.train\.unity\.pre_queue$/).some((e) => e.status === 'blocked' && e.task === 'T-021'),
+      JSON.stringify({ bad, calls1 }).slice(0, 2500)]);
+    await guard('2.90 (t) B2: a branch that changes no matching file is queued without running the check; one that moves the pin and re-records the vectors passes it and is queued; the queue holds T-022 and T-023, not T-021; no checkout is left in .studio/tmp', () => [
+      plain.ok === true && ok.ok === true && calls.length === 2 && calls[1].commit === E.heads['feat/pinok'] && q.join() === 'T-022,T-023'
+        && !(fs.existsSync(path.join(S, '.studio', 'tmp')) && fs.readdirSync(path.join(S, '.studio', 'tmp')).some((x) => x.startsWith('prequeue-'))),
+      JSON.stringify({ plain, ok, calls, q }).slice(0, 2500)]);
+  }
+
   void tipOf;
 }

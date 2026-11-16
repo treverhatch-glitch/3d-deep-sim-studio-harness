@@ -17,14 +17,14 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
-import { withLandLock } from './merge-lane.mjs';
+import { withLandLock, matchAny } from './merge-lane.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
 import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, taskBranch } from './unity-gate.mjs';
 import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeCommand } from './engine-tracks.mjs';
 import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
-import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect } from './engine-rules.mjs';
+import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout } from './engine-rules.mjs';
 import { compileSearchOf, compileSearch, compileAt } from './engine-compile.mjs';
 import { removeLandedLane, pruneBuilds, buildsConfig } from './engine-clean.mjs';
 import { flagOf, foldRealOf, gitMax64 as git, numBlankDefault as num, realOrResolved as real, short8 as short, sleepSyncClamped as sleep, stdoutOf as out } from './helpers.mjs';
@@ -98,6 +98,44 @@ export function runPreLand(s, lane, { root, id, env = process.env, log = () => {
   } finally { cleanup(); }
 }
 
+/** 2.90: engines.<x>.preQueue, checked: [{ touches: [glob], run, say, timeoutMin }] (an entry without both is left out). */
+export function preQueueOf(cfg = {}) {
+  const v = Array.isArray(cfg?.preQueue) ? cfg.preQueue : [];
+  return v.map((e) => ({ touches: (Array.isArray(e?.touches) ? e.touches : [e?.touches]).filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().replace(/\\/g, '/')), run: typeof e?.run === 'string' ? e.run.trim() : '', say: typeof e?.say === 'string' ? e.say.trim().slice(0, 300) : '', timeoutMin: Math.max(1, num(e?.timeoutMin, 10)) })).filter((e) => e.touches.length && e.run);
+}
+
+/**
+ * 2.90: run the preQueue entries whose "touches" match a file the lane's branch changes (against its merge base with the
+ * target), in one throwaway checkout of its head (STUDIO_LANE_COMMIT, STUDIO_LANE_DIR, STUDIO_ENGINE_REPO, and
+ * STUDIO_ENGINE_LANE_DIR when the porter's lane folder exists). { ran: [run], files, refused?: text, skipped?: why }.
+ */
+export function runPreQueue(s, lane, { root, env = process.env } = {}) {
+  const list = preQueueOf(s.cfg);
+  const res = { ran: [], files: [] };
+  if (!list.length) return res;
+  const base = out(git(s.repo, 'merge-base', `refs/heads/${s.target}`, lane.head));
+  const changed = base ? changedPaths(s.repo, base, lane.head) || [] : [];
+  const due = list.map((e) => ({ e, files: changed.filter((f) => matchAny(f, e.touches)) })).filter((x) => x.files.length);
+  if (!due.length) return res;
+  res.files = [...new Set(due.flatMap((x) => x.files))];
+  const dir = path.join(root, '.studio', 'tmp', `prequeue-${String(lane.task).replace(/[^A-Za-z0-9._-]/g, '_')}`);
+  fs.mkdirSync(path.dirname(dir), { recursive: true });
+  removeCheckout(s.repo, dir);
+  const co = rulesCheckout({ repo: s.repo, sha: lane.head, dir, cfg: {}, env });
+  if (!co.ok) return { ...res, skipped: `could not check ${short(lane.head)} out: ${co.why}` };
+  const laneDir = path.join(root, '.lanes', 'engine', String(lane.task));
+  try {
+    for (const { e, files } of due) {
+      const r = spawnSync(e.run, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout: e.timeoutMin * 60000, env: { ...env, STUDIO_LANE_COMMIT: lane.head, STUDIO_LANE_DIR: dir, STUDIO_ENGINE_REPO: s.repo, ...(fs.existsSync(laneDir) ? { STUDIO_ENGINE_LANE_DIR: laneDir } : {}) } });
+      if (r.error && r.error.code !== 'ETIMEDOUT') return { ...res, skipped: `${e.run}: ${r.error.code || r.error.message}` };
+      if (r.status === 0 && !r.error) { res.ran.push(e.run); continue; }
+      const lines = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd().split('\n').slice(-8);
+      return { ...res, refused: `${lane.branch} changes ${files.slice(0, 3).join(', ')}, and the check for it (engines.${s.engine || 'unity'}.preQueue: ${e.run}) ${r.error ? `timed out after ${e.timeoutMin} min` : `exited ${r.status ?? r.signal ?? '?'}`}:\n${lines.map((x) => `  ${x}`).join('\n')}\n${e.say ? e.say.replace(/[.\s]+$/, '') : `Fix it on ${lane.branch}`}, then task done ${lane.task} --train again.` };
+    }
+    return res;
+  } finally { removeCheckout(s.repo, dir); }
+}
+
 // ---- the queue ----
 
 export function readUnityQueue(root = mainRoot(), engine = 'unity') {
@@ -138,6 +176,16 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
     const rec = (() => { try { return unchangedSinceRed(s, readHandbacks(root, engine)[task], br, head); } catch { return null; } })();
     if (rec && !again) return { ok: false, error: 'unchanged', handback: rec, message: `${task} was not queued: nothing changed since ${L} train ${rec.train} handed ${br} back for ${rec.reason}: the same red would repeat (since then ${br} has only merges of ${s.target}${(rec.files || []).length ? `, and ${s.target} changed none of ${rec.files.slice(0, 4).join(', ')}` : `, and ${s.target} has not moved`}). Fix it, or \`npm run task -- impossible ${task} --why "<what contradicts what>"\`. (add --again if a person wants it run again as it is).` };
     if (rec && again) evTop('requeued_unchanged', 'queue', `${task}: ${br} at ${short(head)} queued again with --again though nothing changed since train ${rec.train} handed it back (${rec.reason})`, { engine, agent: agent || `${engine}-train`, task, to: 'producer', status: 'warn', meta: { branch: br, head, handback: rec.train, reason: String(rec.reason).slice(0, 200) } });
+  }
+  // 2.90: engines.<x>.preQueue: the checks keyed to the files this branch changes, before it is queued (not again for the same head).
+  const inQueue = readUnityQueue(root, engine).find((e) => e.task === task);
+  if (!inQueue || inQueue.head !== head) {
+    const pq = runPreQueue(s, { task, branch: br, head }, { root });
+    if (pq.refused) {
+      evTop('pre_queue', 'queue', `${task}: not queued: ${pq.refused.split('\n')[0]}`, { engine, agent: agent || `${engine}-train`, task, to: agent || 'producer', status: 'blocked', meta: { branch: br, head, files: pq.files.slice(0, 10) } });
+      return { ok: false, error: 'pre-queue', message: `${task} was not queued: ${pq.refused}` };
+    }
+    if (pq.ran.length || pq.skipped) evTop('pre_queue', 'queue', `${task}: ${pq.skipped ? `the pre-queue check could not run (${pq.skipped}); queued without it` : `pre-queue check(s) passed: ${pq.ran.join('; ')}`}`, { engine, agent: agent || `${engine}-train`, task, status: pq.skipped ? 'warn' : 'ok', meta: { branch: br, head, ran: pq.ran.length } });
   }
   const entry = withQueue(root, (q) => {
     const i = q.findIndex((e) => e.task === task);
