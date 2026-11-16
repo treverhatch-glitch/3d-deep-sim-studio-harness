@@ -7,6 +7,7 @@
  *   e  the focus brief lists the line ranges a task names first, and says to read only those
  *   f  a hand-back after commits is progress for every counter, and `task done --train --slice` lands a unit per slice
  *   g  parallel port units declare no shared state: the porter's rule and the port-plan template's first chore
+ *   h  an answered ask stays on the asker's and the Director's brief until `ask -- followed` records its follow-up
  * Scaffolding: a studio copy with its own git and events file, as in qa/selftest-286e.mjs.
  */
 import fs from 'node:fs';
@@ -207,5 +208,26 @@ console.log(JSON.stringify({ id, ...out, r1: out.r1 && out.r1.sliceLanded, r2: o
       JSON.stringify({ steps, role: role.slice(-900) })]);
   }
 
+  // ================= h. an answered ask stays a must-do until its follow-up is recorded =================
+  {
+    const add = task('add', 'Docs: notes on the store port', '--role', 'engine-porter', '--agent', 'prod-1', '--track', 'engine:unity', '--phase', '1', '--serves', 'pillar:Calm');
+    const id = idOf('notes on the store port');
+    const made = node(['harness/ask.mjs', 'Do parallel units declare the shared fields?', '--options', 'slices-and-field-chore-first,each-unit', '--by', 'engine-porter-7', '--task', String(id)]);
+    const aid = (out(made).match(/\bA-\d+\b/) || [])[0] || 'A-000';
+    const ans = node(['harness/ask.mjs', 'answer', aid, 'slices-and-field-chore-first', '--by', 'hatch']);
+    const focus1 = out(node(['harness/focus.mjs', String(id)]));
+    node(['harness/director.mjs', 'brief']);
+    const dir1 = (() => { try { return fs.readFileSync(path.join(S, '.studio', 'briefs', 'director.md'), 'utf8'); } catch { return ''; } })();
+    const bad = node(['harness/ask.mjs', 'followed', aid, '--by', 'engine-porter-7']);
+    const fol = node(['harness/ask.mjs', 'followed', aid, '--task', 'T-077', '--by', 'engine-porter-7']);
+    const focus2 = out(node(['harness/focus.mjs', String(id)]));
+    node(['harness/director.mjs', 'brief']);
+    const dir2 = (() => { try { return fs.readFileSync(path.join(S, '.studio', 'briefs', 'director.md'), 'utf8'); } catch { return ''; } })();
+    const must = (t) => new RegExp(`## Must do first: answered asks[\\s\\S]*${aid} was answered[\\s\\S]*ask -- followed ${aid} --task`).test(t);
+    await guard('2.90 (h) an answered ask is on the asking role\'s next focus brief and the Director\'s brief as a must-do (file the work, then `ask -- followed <id> --task <ID>` or `--none "why"`), with the answer quoted in the marked block; `followed` with neither is refused; once followed, neither brief lists it (fails on 2.89: no brief listed an answered ask, and there was no followed verb)', () => [
+      add.status === 0 && Boolean(id) && /A-\d+/.test(aid) && ans.status === 0 && must(focus1) && must(dir1) && /slices-and-field-chore-first/.test(focus1) && bad.status !== 0 && /--task <the task you filed> or --none/.test(out(bad))
+        && fol.status === 0 && /filed T-077/.test(out(fol)) && !new RegExp(`${aid} was answered`).test(focus2) && !new RegExp(`${aid} was answered`).test(dir2),
+      JSON.stringify({ add: out(add).slice(-200), aid, made: out(made).slice(-200), ans: out(ans).slice(-300), focus1: focus1.slice(0, 1200), dir1: dir1.slice(0, 900), bad: out(bad).slice(-200), fol: out(fol).slice(-200) })]);
+  }
   try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep removes it */ }
 }

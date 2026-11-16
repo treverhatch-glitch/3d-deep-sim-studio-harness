@@ -39,6 +39,10 @@ sweeps them. A formal question (`npm run ask -- "…" --task T-x`) closes the sa
 answered one is never open again. The Communicator tags an open question again at most every `STUDIO_ASK_DIGEST_HOURS`.
 Before, every occurrence posted (the crew counted 252 asks against 20 answers in six days).
 
+An answered (or decided) question stays a must-do on the asking role's next focus brief and on the Director's brief
+until its follow-up is recorded (2.90): file the work it names, then `npm run ask -- followed A-001 --task T-x --by
+<you>`, or `npm run ask -- followed A-001 --none "<why no work>" --by <you>`.
+
 ## Phone alerts (ntfy or Telegram)
 
 - ntfy: `npm run alerts -- on --channel ntfy --topic <long-random-topic> [--server https://ntfy.sh] --by <you>`;

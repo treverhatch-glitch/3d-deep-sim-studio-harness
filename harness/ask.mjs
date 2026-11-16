@@ -4,7 +4,7 @@
  *   npm run ask -- "<question>" --options "a,b,c" --default b --timeout 4h [--why "…"] [--by producer-1] [--task T-1]
  *   npm run ask -- answer A-001 "<option or words>" --by <name>
  *   npm run ask -- reverse A-001 "<option or words>" --by <name>   undo a decision made without you
- *   npm run ask -- list [--open] | show A-001 | help
+ *   npm run ask -- list [--open] | show A-001 | help | followed A-001 --task T-1 | --none "why" --by <name> (2.90)
  * A question shows under "Needs you" in every War Room view and in the Game plan. If nobody answers by the deadline, the
  * default is applied: logged as decision.timeout, written to studio/decisions/decided-without-you.md; the dev can reverse it.
  * Never on a timer: signing the Bible, changing pillars, bringing back a crossed-out layer, or deleting anything. An ask with
@@ -190,6 +190,32 @@ export function answer(id, ans, by) {
 }
 
 /**
+ * 2.90 (h): answered (or decided) asks whose follow-up is not recorded yet, oldest first. With role: those its sessions
+ * asked (an asker name that starts with the role) or tied to task; without: all (the Director's brief lists every one).
+ */
+export function toFollow({ role = null, task = null } = {}) {
+  const mine = (a) => !role || String(a.by || '').toLowerCase().startsWith(String(role).toLowerCase()) || (task && a.task === task);
+  return allAsks().filter((a) => ['answered', 'decided'].includes(a.status) && !a.followed && mine(a));
+}
+/** 2.90 (h): the must-do lines for toFollow()'s asks (the words of the asks themselves go in the caller's marked block). */
+export const followLines = (list) => list.map((a) => `- ${a.id} was answered. If it needs work, file it now: \`npm run task -- add "<title>" …\`; then \`npm run ask -- followed ${a.id} --task <ID> --by <you>\`, or \`npm run ask -- followed ${a.id} --none "<why no work>" --by <you>\`.`);
+export const followQuoted = (list) => list.map((a) => `${a.id}: "${String(a.question).slice(0, 200)}" answered "${String(a.answer).slice(0, 300)}"`).join('\n');
+
+/** 2.90 (h): record that an answered ask's follow-up is filed (a task) or needs none (why). */
+export function followed(id, { task = null, none = null, by = null } = {}) {
+  const a = allAsks().find((x) => x.id === String(id || '').toUpperCase());
+  if (!a) return { ok: false, message: `No question ${id || ''}.` };
+  if (!['answered', 'decided'].includes(a.status)) return { ok: false, message: `${a.id} is ${a.status}: only an answered ask has a follow-up.` };
+  const t = typeof task === 'string' && /^[A-Z]+-\d+$/.test(task) ? task : null;
+  const why = typeof none === 'string' ? none.trim() : '';
+  if (!t && why.length < 5) return { ok: false, message: `Say what followed: --task <the task you filed> or --none "<why no work is needed>".` };
+  if (!by) return { ok: false, message: 'Say who: --by <name>.' };
+  const b = write({ ...a, followed: { ...(t ? { task: t } : { none: why.slice(0, 300) }), by, at: new Date().toISOString() } });
+  emitEvent({ type: 'ask.followed', agent: by, msg: `${a.id} followed up by ${by}: ${t ? `filed ${t}` : `no work (${why.slice(0, 160)})`}`, meta: { ask: a.id, ...(t ? { task: t } : { none: true }) } });
+  return { ok: true, ask: b };
+}
+
+/**
  * Apply defaults to questions past their deadline. Run by the watcher (harness/watch.mjs watchPass, from the supervisor's
  * timed passes). 2.85: an ask with a default and no deadline of its own (made before 2.85, or by a module) gets
  * STUDIO_ASK_TIMEOUT_H from when it was asked; an ask that cannot decide itself is escalated once at STUDIO_ASK_STALE_H
@@ -250,6 +276,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const act = r.ok ? await runAskAction(r.ask, flag('by')) : null;
     out(r, (x) => `${x.ask.id} answered: ${x.ask.answer}${act ? `. ${act.next}` : ''}`);
   }
+  if (pos[0] === 'followed') out(followed(pos[1], { task: flag('task'), none: flag('none'), by: flag('by') }), (r) => `${r.ask.id}: follow-up recorded (${r.ask.followed.task ? `filed ${r.ask.followed.task}` : 'no work needed'}).`);
   if (pos[0] === 'reverse') out(await reverse(pos[1], pos[2], flag('by')), (r) => `${r.ask.id} reversed; the Producer has ${r.task} to undo it.`);
   if (pos[0] === 'expire') {
     const d = expireAsks();
@@ -257,7 +284,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   // 2.80 (d, A10): `show <id>` and `help` are read-only; a lone lowercase word is a mistyped subcommand, not a question.
-  const usage = 'Usage: npm run ask -- "<question>" --options "a,b" --default a --timeout 4h [--why "…"] [--task <ID>] | show <id> | list [--open] | answer <id> "<answer>" --by <name> | reverse <id> "<answer>" --by <name> | expire | help';
+  const usage = 'Usage: npm run ask -- "<question>" --options "a,b" --default a --timeout 4h [--why "…"] [--task <ID>] | show <id> | list [--open] | answer <id> "<answer>" --by <name> | reverse <id> "<answer>" --by <name> | followed <id> --task <ID> | --none "<why>" --by <name> | expire | help';
   if (argv.includes('--help') || argv.includes('-h') || pos[0] === 'help') { console.log(usage); process.exit(0); }
   if (pos[0] === 'show') {
     const a = allAsks().find((x) => x.id === String(pos[1] || '').toUpperCase());

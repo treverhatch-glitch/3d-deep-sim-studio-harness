@@ -37,6 +37,7 @@ import { regressionHowTo } from './regression-howto.mjs';
 import { visionCard, visionSection } from './vision-card.mjs';
 import { taskType } from './done-check.mjs';
 import { readHolds } from './task-hold.mjs';
+import { toFollow, followLines, followQuoted } from './ask.mjs';
 
 const read = (rel) => {
   try {
@@ -161,8 +162,9 @@ export function buildFocus(taskId, agent = null) {
   const historyWords = events.filter((e) => e.task === taskId && e.msg).reduce((n, e) => n + String(e.msg).split(/\s+/).length, 0);
   const vision = safe(() => visionFor(task, events)) || { card: null, reviewed: null };
   const lane = (() => { try { return readHolds()[taskId]?.lane || ''; } catch { return ''; } })();
+  const follow = safe(() => toFollow({ role: task.role, task: taskId })) || [];
   const ranges = namedRanges([task.title, added?.meta?.scope, (added?.meta?.paths || []).join(','), added?.meta?.lane, lane]);
-  return { ranges, vision, task, check, skill, size, causedBy, anchors, handoff: readTaskHandoff(taskId), tricks: readAttached(taskId)?.tricks || [], tricksBy: readAttached(taskId)?.preapproved?.approvedBy || null, mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice, verdictNotes: safe(() => notesForBrief({ id: task.id, title: task.title, role: task.role })), godotFailures: safe(() => godotFailuresForBrief()), inbox: safe(() => inboxForBrief(task.id)) || null, conductor: safe(() => conductorForBrief(task.id)) || null };
+  return { follow, ranges, vision, task, check, skill, size, causedBy, anchors, handoff: readTaskHandoff(taskId), tricks: readAttached(taskId)?.tricks || [], tricksBy: readAttached(taskId)?.preapproved?.approvedBy || null, mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice, verdictNotes: safe(() => notesForBrief({ id: task.id, title: task.title, role: task.role })), godotFailures: safe(() => godotFailuresForBrief()), inbox: safe(() => inboxForBrief(task.id)) || null, conductor: safe(() => conductorForBrief(task.id)) || null };
 }
 
 export function renderVoice(v) {
@@ -181,6 +183,7 @@ export function renderFocus(f) {
   const told = untrustedBlock([
     { label: `Hand-back facts from the newest hand-back${facts?.heading ? ` (${facts.heading})` : ''}, written by the harness from git and the gate logs`, text: facts ? facts.block.split('\n').slice(1, -1).join('\n') : '' },
     { label: `Task title (${f.task.id})`, text: f.task.title },
+    { label: 'Answered asks whose follow-up is not filed yet (studio/asks/)', text: f.follow?.length ? followQuoted(f.follow) : '' },
     // 2.29.2: the carry-forward is the newest notes, at most 3k characters (test #4: hand-offs had a median of 21k).
     { label: `Notes from whoever worked on this before, newest last (${handoff.length > HANDOFF_MAX ? `the newest ${Math.round(HANDOFF_MAX / 1000)}k characters. Older notes in studio/handoffs/${f.task.id}.md` : `studio/handoffs/${f.task.id}.md`})`, text: handoff.length > HANDOFF_MAX ? `…${handoff.slice(-HANDOFF_MAX)}` : handoff },
     // 2.64.0: follow-ups routed to this task (harness/threads.mjs): CI and merge-train results, messages tied to it.
@@ -196,6 +199,8 @@ export function renderFocus(f) {
   ]);
   L.push(`# Focus: ${f.task.id}`, '');
   L.push(`${f.task.priority}, size ${f.size} of 5, a "${f.check.type}" task for \`${f.task.role}\`${f.causedBy ? `. It is a bug traced to ${f.causedBy}` : ''}. Read this page instead of the repo; open other files only when a step needs them.`);
+  // 2.90 (h): an answered ask stays a must-do until its follow-up is recorded (npm run ask -- followed).
+  if (f.follow?.length) L.push('', '## Must do first: answered asks', 'Their questions and answers are in the marked block below.', ...followLines(f.follow));
   if (f.ranges?.length) L.push('', '## Read only these lines', 'This task names the parts of the files it needs. Read only these lines (your Read tool\'s offset and limit, or `sed -n \'<from>,<to>p\' <file>`); never read a whole file to find them.', ...f.ranges.map((r) => `- \`${r.file}\` lines ${r.from}-${r.to}: offset ${r.from}, limit ${r.to - r.from + 1}`));
   if (told) L.push('', '## What this task is, and what others left on it', told.trimEnd());
   // 2.85 (f): the designer's vision for this task (the signed Bible's pillar, never list, feel and phase goal), between

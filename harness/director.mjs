@@ -29,6 +29,7 @@ import { constraintsBlock } from './learning-edge.mjs';
 import { pitfallPartsForRole } from './pitfalls.mjs';
 import { untrustedBlock } from './untrusted.mjs';
 import { flagValueOf } from './helpers.mjs';
+import { toFollow, followLines, followQuoted } from './ask.mjs';
 
 const BRIEF = path.join(STUDIO_STATE_DIR, 'briefs', 'director.md');
 const PHASE_NAMES = { 1: 'early game', 2: 'mid game', 3: 'endgame' };
@@ -77,6 +78,9 @@ export function writeDirectorBrief(reasons = []) {
   const c = b ? checkBible(b) : null;
   const L = ['# Director brief', '', '> Written by `npm run director`. You guard the Game Bible; the Producer creates and assigns tasks. Read this, then the docs below, then answer.', ''];
   L.push('## Why you were pinged', ...(reasons.length ? reasons.map((x) => `- ${x}`) : ['- Routine check.']), '');
+  // 2.90 (h): every answered ask whose follow-up work is not filed yet, until npm run ask -- followed records it.
+  const follow = (() => { try { return toFollow(); } catch { return []; } })();
+  if (follow.length) L.push('## Must do first: answered asks', 'Their questions and answers are in the marked block below.', ...followLines(follow), untrustedBlock([{ label: 'Answered asks whose follow-up is not filed yet (studio/asks/)', text: followQuoted(follow) }]).trimEnd(), '');
   L.push('## 1. Read first', '- `studio/bible/BIBLE.md` (the game: pitch, pillars, phases, layers)', '- `studio/bible/NOT-DOING.md` (crossed out: never suggest these)', '- `studio/bible/STORYBOARD.md`', '- `studio/PLAN.md` and `studio/VISION_LOCK.md`', r ? `- Your last review: \`${r.file}\` (${r.verdict || 'no verdict'}, Phase ${r.phase || '?'})` : '- No earlier review.', '');
   if (b) {
     L.push('## Where the game is', `- ${b.answers.title || '(untitled)'}: ${b.signed ? `signed; Phase ${b.phase.open} (${PHASE_NAMES[b.phase.open]}) is open` : 'not signed (pre-production)'}`, `- Kept layers: ${c.kept.join(', ') || 'none'}`, `- Crossed out: ${c.crossed.join(', ') || 'none'}`, '');
