@@ -1101,9 +1101,24 @@ if (inShard()) {
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1', STUDIO_LANELESS: 'shared', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok',
     STUDIO_WATCH_INTERVAL: '0', STUDIO_WATCHDOG: 'off', STUDIO_MACHINE_SCAN: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_CPU_PROBE: 'off' };
   for (const t of ['Tidy the HUD', 'Tidy the menu', 'Tidy the end screen']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
-  const sup = run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(9)} --foreground`, env);
-  const st = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8'));
-  report('the supervisor starts a fresh agent per task, one after another, and stops at its time', st.status === 'stopped' && /time is up/.test(st.stopReason) && st.sessions >= 2 && st.tasksDone >= 2, sup.stdout + sup.stderr + JSON.stringify(st));
+  // Two claims, each proven without a window that load can shrink. The count: a long --until is only a safety limit, and
+  // the supervisor is stopped once two sessions and two tasks are done. The stop at its time: a second run with a short
+  // --until (queued work is left, so it only ends when the time is up) must end with "time is up".
+  const supLog = path.join(dir, 'sup1.log');
+  const supFd = fs.openSync(supLog, 'w');
+  const sup1 = spawn(process.execPath, ['harness/supervisor.mjs', '--no-hub', '--until', secs(300), '--foreground'], { windowsHide: true, cwd: dir, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env }, stdio: ['ignore', supFd, supFd] });
+  const sup1Exit = new Promise((r) => sup1.on('exit', r));
+  const readSup = () => { try { return JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8')); } catch { return {}; } };
+  const t01 = Date.now();
+  while (Date.now() - t01 < 120000 * SLOW && !((readSup().sessions >= 2) && (readSup().tasksDone >= 2))) pause(300);
+  const counted = readSup();
+  run(dir, 'node harness/supervisor.mjs stop', env);
+  const exited1 = await Promise.race([sup1Exit.then(() => true), new Promise((r) => setTimeout(() => r(false), 60000 * SLOW))]);
+  if (!exited1) sup1.kill('SIGKILL');
+  fs.closeSync(supFd);
+  const sup = run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(4)} --foreground`, env);
+  const st = readSup();
+  report('the supervisor starts a fresh agent per task, one after another, and stops at its time', exited1 && counted.sessions >= 2 && counted.tasksDone >= 2 && st.status === 'stopped' && /time is up/.test(st.stopReason), sup.stdout + sup.stderr + fs.readFileSync(supLog, 'utf8').slice(-800) + JSON.stringify(counted).slice(0, 300) + JSON.stringify(st));
   report('npm run studio:status says what it did', /sessions started: \d+; tasks done: \d+/i.test(run(dir, 'node harness/supervisor.mjs status', env).stdout));
   // Lanes: two builders at once, each holding its own folder. The check starts from builder work that names a lane
   // only: builder tasks the first run left open (how many depends on the machine's speed: a slower Windows runner
@@ -1235,9 +1250,16 @@ if (inShard()) {
   // Other waiting builder tasks have no lane, so one of them would take the whole game: park them.
   for (const t of JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.filter((x) => x.role === 'builder' && ![l1, l2].includes(x.id))) run(dir, `node harness/task.mjs park ${t.id} --by prod-1 --why "not this round"`, env);
   fs.writeFileSync(path.join(dir, 'studio/task-holds.json'), JSON.stringify({ tasks: Object.fromEntries(Object.entries(JSON.parse(fs.readFileSync(path.join(dir, 'studio/task-holds.json'), 'utf8')).tasks).map(([k, v]) => [k, { ...v, cooldownUntil: undefined }])) }));
-  run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(5)} --foreground`, wenv);
+  // Waited for, not timed: the long --until is a safety limit; the supervisor is stopped once two agents are live together.
+  const sup2 = spawn(process.execPath, ['harness/supervisor.mjs', '--no-hub', '--until', secs(300), '--foreground'], { windowsHide: true, cwd: dir, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...wenv }, stdio: 'ignore' });
+  const sup2Exit = new Promise((r) => sup2.on('exit', r));
+  const t3 = Date.now();
+  let together = [];
+  while (Date.now() - t3 < 90000 * SLOW && together.length < 2) { pause(400); together = live(); }
+  run(dir, 'node harness/supervisor.mjs stop', env);
+  if (!(await Promise.race([sup2Exit.then(() => true), new Promise((r) => setTimeout(() => r(false), 30000 * SLOW))]))) sup2.kill('SIGKILL');
   const two = live();
-  report('task lane gives each builder its own folder, and then they run side by side', two.length === 2, `l1=${l1} l2=${l2} q0=${JSON.stringify(q0.backlog.map((t) => t.id))} inprog=${JSON.stringify(q0.inProgress.map((t) => t.id))} ` + JSON.stringify(two) + JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8')).last) + run(dir, 'node harness/task.mjs holds', env).stdout + JSON.stringify(JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.map((t) => t.id + t.role)));
+  report('task lane gives each builder its own folder, and then they run side by side', together.length === 2 && two.length === 2, `l1=${l1} l2=${l2} q0=${JSON.stringify(q0.backlog.map((t) => t.id))} inprog=${JSON.stringify(q0.inProgress.map((t) => t.id))} ` + JSON.stringify(two) + JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8')).last) + run(dir, 'node harness/task.mjs holds', env).stdout + JSON.stringify(JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.map((t) => t.id + t.role)));
   const names = fs.readdirSync(path.join(dir, '.studio/agents')).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, ''));
   report('agent names never repeat across supervisor restarts', names.length === new Set(names).size && names.filter((n) => /^builder-s\d+$/.test(n)).length >= 3, names.join(', '));
   for (const s of two) run(dir, `node harness/agent.mjs stop ${s}`, env);
