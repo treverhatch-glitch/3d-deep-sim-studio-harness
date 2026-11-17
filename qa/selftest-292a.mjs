@@ -51,7 +51,8 @@ export async function selftest292A({ dir, report, tmpRoot }) {
     const l = String(r.stdout || '').split('\n').filter((x) => x.startsWith('{')).pop();
     try { return { ...JSON.parse(l), _out: out(r).slice(-1500) }; } catch { return { _raw: out(r).slice(-2500) }; }
   };
-  const resetState = () => { for (const x of ['train', 'engine', 'comm', 'gates', 'tmp', 'locks']) fs.rmSync(path.join(S, '.studio', x), { recursive: true, force: true }); fs.writeFileSync(evFile, ''); };
+  // Retries: on Windows a compile stand-in that outlived the door's time limit still holds its checkout for a while.
+  const resetState = () => { for (const x of ['train', 'engine', 'comm', 'gates', 'tmp', 'locks']) fs.rmSync(path.join(S, '.studio', x), { recursive: true, force: true, maxRetries: 80, retryDelay: 500 }); fs.writeFileSync(evFile, ''); };
   const queueFile = () => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'unity-queue.json'), 'utf8')); } catch { return []; } };
   const jsonl = (f) => { try { return fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 

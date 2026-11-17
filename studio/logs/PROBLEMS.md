@@ -186,6 +186,14 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Evidence:** 17 November: a "units for this change" command was briefed although `npm run selftest:changed` exists (stopped before it landed); a note for a studio named one folder for `rules.ignore` where its land script writes two (corrected before anyone applied it).
 - **Rule:** before building a maintainer tool, search `package.json` and docs/RELEASE.md for it. Before naming a studio's paths in a note, read the script that writes them, not a shortened diff line.
 
+### P-359 — a path taken from a URL broke the red-target task on Windows · fixed 2.92 (before the merge)
+- **Evidence:** pull request 94, online run: `292b` red on Windows ("no fix task was filed: ... loader"), and the 2.35 rule "no script finds its own path from a URL pathname" red on every system, naming `harness/engine-target-red.mjs`. The runner's temp folder has `~` in its name, which a URL writes as `%7E`.
+- **Fix:** `fileURLToPath`. The 2.35 rule runs in the self-test only, so it was not among the static checks run before the push; the maintainer's list now includes its unit.
+
+### P-360 — a compile command that outlives its time limit keeps running on Windows · open
+- **Evidence:** the same run: `292a` crashed on Windows (EPERM removing `.studio/tmp`) right after the check whose compile stand-in runs past the queue door's time limit. The time-out ends the shell, not the command below it, which keeps its checkout folder open until it ends.
+- **Workaround:** the test waits for the folder. In a studio the command ends by itself and the janitor removes the checkout later. A real fix ends the command's whole process tree; not built.
+
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
 - **P-001** (reopened on purpose 2026-10-31: the owner made the harness and the game's repository public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist

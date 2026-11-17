@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { emitEvent } from './event.mjs';
 import { isOff, readJsonOr, writeJsonTmp } from './helpers.mjs';
 
@@ -30,7 +31,7 @@ export function targetRedTask(root, { engine = 'unity', target = 'the target', s
     const hit = reds.find((r) => same(now, { key: r.key, tests: r.tests || [] }));
     if (hit) { if (names.length) { hit.tests = names; hit.key = now.key; } save(root, engine, reds); return { task: hit.task, already: true }; }
     const title = (names.length ? `Fix: ${target} is red by itself on ${names.length} rule test(s): ${names[0]}` : `Fix: ${target} is red by itself: the rules check fails to build`).slice(0, 200);
-    const task = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), 'task.mjs');
+    const task = path.join(path.dirname(fileURLToPath(import.meta.url)), 'task.mjs');
     const r = spawnSync(process.execPath, [task, 'add', title, '--role', 'engine-porter', '--priority', 'P1', '--track', `engine:${engine}`, '--agent', process.env.STUDIO_PRODUCER_NAME || 'producer'], { windowsHide: true, cwd: root, encoding: 'utf8', timeout: 60000 });
     const id = /"id":\s*"([A-Z]+-\d+)"/.exec(String(r.stdout || ''))?.[1];
     if (!id) throw new Error(String(r.stderr || r.stdout || `exit ${r.status}`).trim().split('\n')[0].slice(0, 200));
