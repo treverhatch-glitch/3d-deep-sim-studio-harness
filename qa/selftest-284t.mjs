@@ -328,8 +328,8 @@ console.log(JSON.stringify({
     const runs = runsOf(ctl);
     const full = runs.filter((x) => x.only === null);
     const d = (r.dropped || [])[0] || {};
-    await guard('2.84 (t) compile first, red: the compile run of the batch is red on a compiler error in a file only T-357 changes; T-357 is handed back by evidence naming the file and the compile check, and the only full land run is T-356\'s, alone (fails before this fix: the batch\'s compile error cost a full land run)', () => [
-      r.landed?.join() === 'T-356' && d.task === 'T-357' && d.cause === 'evidence' && /compile check/.test(d.why) && /Broken\.cs/.test(d.why) && full.length === 1 && full[0].srcs.join() === 'feat/a' && r.runs === 1,
+    await guard('2.84 (t) compile first, red: the compile run of the batch is red on a compiler error in a file only T-357 changes; T-357 is handed back (2.92: cause compile, at once) naming the file and the compile check, and the only full land run is T-356\'s, alone (fails before this fix: the batch\'s compile error cost a full land run)', () => [
+      r.landed?.join() === 'T-356' && d.task === 'T-357' && d.cause === 'compile' && /compile check/.test(d.why) && /Broken\.cs/.test(d.why) && full.length === 1 && full[0].srcs.join() === 'feat/a' && r.runs === 1,
       JSON.stringify({ r, runs }).slice(0, 2500)]);
   }
   {

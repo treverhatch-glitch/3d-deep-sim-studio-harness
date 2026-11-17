@@ -100,6 +100,13 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   raise `engines.<x>.rules.timeoutMin` or make the run smaller with `rules.focus` (`map`, `auto`, `paths`); otherwise
   fix the target or name the inputs. After two trains in a row, `train status --engine <x>` and the Line Producer's
   status say how many trains and how many minutes it has cost; the count clears when the check judges again.
+- **A red target gets a fix task (2.92).** When the target is red by itself (the rules check, the daily full land run or
+  the owed full rules run), no branch is blamed, and the harness files one task: `Fix: <target> is red by itself on <n>
+  rule test(s): <first test>`, role `engine-porter`, P1, on the engine track, with the failing names in its handoff note,
+  and writes `task.train.<x>.target_red_task` (warn). It is filed once per distinct red: a list that shares half or more
+  of its names with an open red is the same red. The record is `.studio/engine/<x>-target-red.json`; a green result from
+  the same source clears it, a done or dropped task lets the next red file a new one. `train status` shows
+  `Target red: T-xxx`. `STUDIO_ENGINE_TARGET_RED_TASK=off` files nothing.
 - Each batch writes one `engine.rules` event (runs, minutes, lanes kept and refused).
 - **A lane's own check.** `task done` runs an engine check only when `"quickCheck"` is set: set it to a compile (for
   Unity `dotnet build tools/SimTests`), which takes seconds and stops a lane that does not compile outside the editor;
@@ -332,6 +339,14 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
   `artifacts/*.xml` in the gate worktree. After a red run the newest of them (20 files, 20 MB at most) that were
   written after the run started are read: every `<test-case>` with `result="Failed"` or `result="Error"`. A
   `"failures"` list in the stage report (`STUDIO_LAND_RESULT`) counts too.
+- **The engine's own logs (2.92).** `engines.<x>.logs` lists the engine's log files the land run leaves (the editor's
+  log, say), found the same way as `results` (no default). After a red run, those written after the run started are
+  read (their last 4 MB in all) with the run's own output, for compiler error lines (`Path/File.cs(12,5): error
+  CS0234: ...`, either slash). When each file they name is added or changed by exactly one branch of the batch, and
+  not every branch is named, those branches are handed back at once (cause `compile`, with the compiler's lines) and the
+  rest run again as the next round, with no halving search. A file no branch changed (a branch deleted what another
+  file uses), a file two branches change (they may only clash together), or every branch named: the search as before.
+  Example: `"logs": ["Logs/Editor.log"]`.
 - **Retry only what failed (2.84).** When the red stage is a retry stage and the failing tests are known, the retry is
   told to re-run only those: `STUDIO_LAND_RETRY=1`, `STUDIO_LAND_RETRY_STAGE`, `STUDIO_LAND_RETRY_TESTS` (names joined
   by `;`) and, for a Unity play stage, `STUDIO_UNITY_PLAYMODE_ARGS=-testFilter "<names>"` in place of any focus filter.
@@ -497,6 +512,18 @@ another, and a test that fails whenever a branch moves a pinned commit was found
   turns it off; a command string uses that command instead of `quickCheck`. The time limit is `quickCheckTimeoutMin` (30).
   Example: `"quickCheck": "dotnet build tools/SimTests --nologo"` alone is enough. Unlike `compileFirst` (the land
   command with `STUDIO_LAND_ONLY=compile`, once per group), it needs nothing from the land script.
+- **The compile search at the queue door (2.92).** With the compile search on, `task done --train` compiles the branch
+  merged with the target before it is queued. Red there: not queued, with the compiler's lines (a merge that
+  conflicts: not queued, with the files). Then the target, the untagged branches queued ahead of it (not those that land
+  alone or wait for the target) and the branch: red although the branch alone compiled, the same search names the
+  queued branch(es) it does not compile with. The branch is still queued (a refusal would send the porter away from
+  work that only needs the other branch to land first, and a hand-back counts toward the watchdog's park); the porter
+  reads which branch, the compiler's lines and what to do, and the queue entry keeps the clash. A train leaves it out of
+  a batch with that branch (event `task.train.<x>.deferred`) and checks it again once that branch has landed or left the
+  queue (the compile search then runs even on a batch of one). At most `STUDIO_QUEUE_COMPILE_RUNS` (6) compile runs for
+  this second step and `STUDIO_QUEUE_COMPILE_MIN` (10) minutes in all; a bound reached, a command that cannot run or a
+  time-out queues the branch as before, with one line saying so. One `task.train.<x>.queue_compile` event per verdict
+  (`meta.verdict`: pass, red, conflict, clash, unfinished, not-run). It takes no machine slot, as the train's search.
 - **A failing test tied to the files that explain it.** `engines.<x>.blame`: a list of `{ "test": "<regex on the
   failing test's full name>", "touches": "<path or glob, or a list>", "say": "<what to do>" }`. After a red land run
   (and in the rules check, with `rules.first` too) a failing test an entry matches ties the branches that change a file
@@ -507,12 +534,16 @@ another, and a test that fails whenever a branch moves a pinned commit was found
 - **Checks before queueing.** `engines.<x>.preQueue`: a list of `{ "touches": "<path or glob, or a list>", "run":
   "<command>", "say": "<what to do>", "timeoutMin": 10, "env": { "<NAME>": "<value>" } }`. When `task done --train` (or the harness's own queueing)
   queues a branch that changes a matching file (against its merge base with the target), the command runs in a
-  throwaway checkout of the branch's head (`STUDIO_LANE_COMMIT`, `STUDIO_LANE_DIR` the checkout, `STUDIO_ENGINE_REPO`,
+  throwaway checkout of the branch's head merged with the target's tip (2.92: the branch as it would land; a merge that
+  conflicts refuses the queue and names the files, and nothing runs). `STUDIO_LANE_COMMIT` is the branch's head and
+  `STUDIO_TARGET_COMMIT` the tip it was merged with (`STUDIO_LANE_DIR` the checkout, `STUDIO_ENGINE_REPO`,
   and `STUDIO_ENGINE_LANE_DIR` the porter's lane folder when it exists; before those, the entry's own `env`, for a
   command that needs what `rules.env` gives the rules check). It exits non-zero: the branch is not queued,
   and the porter reads the command's last 8 lines, the `say` line and the one command to run again. Not run again for a
   head already queued. A command that cannot start (or a checkout that fails) queues the branch with a warning event
-  (`task.train.<x>.pre_queue`). Example: `"preQueue": [ { "touches": "Rules~/pin.json", "run": "dotnet run --project tools/VectorCheck",
+  (`task.train.<x>.pre_queue`). The queue keeps the tip it passed on; a train that starts on another tip runs the
+  check again on the branch merged with its tip, before the compile search and the rules check, and a failure there
+  hands that branch back (cause `pre-queue`) while the rest go on. Example: `"preQueue": [ { "touches": "Rules~/pin.json", "run": "dotnet run --project tools/VectorCheck",
   "say": "Re-record the vectors at the new pin and commit them in this branch." } ]`.
 
 

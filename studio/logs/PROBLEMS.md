@@ -131,6 +131,7 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-346 — timing checks fail under load in the online runs · open
 - **Evidence:** 16 November, four runs queued at once: "task lane gives each builder its own folder", "the supervisor starts a fresh agent per task", "2.77.0 (p, P9.6)" and "2.69.0 (q, 1)" each failed once and passed on the re-run of the failed job. Each re-run costs about 40 minutes.
 - **Workaround:** re-run the failed job and note it on the pull request. Do not queue four runs at once.
+- **2.92:** "task lane gives each builder its own folder" now waits for the thing itself. The same change to "the supervisor starts a fresh agent per task" was withdrawn (the next check, "--lanes auto", then failed 2 runs in 8: only one lane got its agent, even with a 90 s wait; cause not found). Left: that check, `2771a`, the tester drive, `290b` second gate, `277p` "someone moves main", "two builders without lanes", "--lanes auto".
 - **2.91:** three were given a hand-shake in place of a clock (`269q`, `2601m`, `277p` B-before-A). Left: the two supervisor-window checks, `2771a`, the tester drive, and two seen under load on 17 November (`290b` second gate, `277p` "someone moves main").
 
 ### P-347 — a rule added after the last local run broke a 2.85 check, and a Windows path · fixed 2.90
@@ -164,6 +165,34 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-353 — the maintainer removed test scratch folders while other builds were running · process
 - **Evidence:** 17 November: `rm -rf /tmp/harness-selftest-*` during integration, with two agents' self-tests possibly in flight. Both were told at once; no wrong result was kept.
 - **Rule:** while other builds run on the same machine, remove only the scratch folders of the run just finished (by name), never the pattern.
+
+### P-354 — compile clashes were found only when the train started · fixed 2.92
+- **Evidence:** a studio's two trains of 16 to 17 November handed back 6 of 12 branches as "does not compile together with ...", hours after each was queued.
+- **Fix:** the same compile search runs at `task done --train`, against the target and the branches queued ahead. A clash is told at once; the branch is queued and kept apart from its partner. `qa/selftest-292a.mjs` B.
+
+### P-355 — the check before queueing judged the branch alone · fixed 2.92
+- **Evidence:** a branch passed `preQueue`, three branches landed, the merged tree failed the same test in the train.
+- **Fix:** the check runs on the branch merged with the target, and again when a train starts on another tip. `292a` A.
+
+### P-356 — a red compile in the engine's own log sent the search to the wrong branch · fixed 2.92 (needs `engines.<x>.logs`)
+- **Evidence:** an editor compile error (a namespace its assembly did not reference) in a 3-branch land run; the search tried a different branch alone first.
+- **Fix:** compiler error lines from the land output and the engine's logs name the branch that changed the file. `292a` C.
+
+### P-357 — a target red by itself was nobody's task · fixed 2.92
+- **Evidence:** "the rules check is red on the target itself", train after train.
+- **Fix:** one `Fix:` task per distinct red, shown in `train status`. `qa/selftest-292b.mjs`.
+
+### P-358 — the maintainer planned a tool the harness already had, and gave a wrong setting in a note · process
+- **Evidence:** 17 November: a "units for this change" command was briefed although `npm run selftest:changed` exists (stopped before it landed); a note for a studio named one folder for `rules.ignore` where its land script writes two (corrected before anyone applied it).
+- **Rule:** before building a maintainer tool, search `package.json` and docs/RELEASE.md for it. Before naming a studio's paths in a note, read the script that writes them, not a shortened diff line.
+
+### P-359 — a path taken from a URL broke the red-target task on Windows · fixed 2.92 (before the merge)
+- **Evidence:** pull request 94, online run: `292b` red on Windows ("no fix task was filed: ... loader"), and the 2.35 rule "no script finds its own path from a URL pathname" red on every system, naming `harness/engine-target-red.mjs`. The runner's temp folder has `~` in its name, which a URL writes as `%7E`.
+- **Fix:** `fileURLToPath`. The 2.35 rule runs in the self-test only, so it was not among the static checks run before the push; the maintainer's list now includes its unit.
+
+### P-360 — a compile command that outlives its time limit keeps running on Windows · open
+- **Evidence:** the same run: `292a` crashed on Windows (EPERM removing `.studio/tmp`) right after the check whose compile stand-in runs past the queue door's time limit. The time-out ends the shell, not the command below it, which keeps its checkout folder open until it ends.
+- **Workaround:** the test waits for the folder. In a studio the command ends by itself and the janitor removes the checkout later. A real fix ends the command's whole process tree; not built.
 
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 

@@ -1235,9 +1235,16 @@ if (inShard()) {
   // Other waiting builder tasks have no lane, so one of them would take the whole game: park them.
   for (const t of JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.filter((x) => x.role === 'builder' && ![l1, l2].includes(x.id))) run(dir, `node harness/task.mjs park ${t.id} --by prod-1 --why "not this round"`, env);
   fs.writeFileSync(path.join(dir, 'studio/task-holds.json'), JSON.stringify({ tasks: Object.fromEntries(Object.entries(JSON.parse(fs.readFileSync(path.join(dir, 'studio/task-holds.json'), 'utf8')).tasks).map(([k, v]) => [k, { ...v, cooldownUntil: undefined }])) }));
-  run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(5)} --foreground`, wenv);
+  // Waited for, not timed: the long --until is a safety limit; the supervisor is stopped once two agents are live together.
+  const sup2 = spawn(process.execPath, ['harness/supervisor.mjs', '--no-hub', '--until', secs(300), '--foreground'], { windowsHide: true, cwd: dir, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...wenv }, stdio: 'ignore' });
+  const sup2Exit = new Promise((r) => sup2.on('exit', r));
+  const t3 = Date.now();
+  let together = [];
+  while (Date.now() - t3 < 90000 * SLOW && together.length < 2) { pause(400); together = live(); }
+  run(dir, 'node harness/supervisor.mjs stop', env);
+  if (!(await Promise.race([sup2Exit.then(() => true), new Promise((r) => setTimeout(() => r(false), 30000 * SLOW))]))) sup2.kill('SIGKILL');
   const two = live();
-  report('task lane gives each builder its own folder, and then they run side by side', two.length === 2, `l1=${l1} l2=${l2} q0=${JSON.stringify(q0.backlog.map((t) => t.id))} inprog=${JSON.stringify(q0.inProgress.map((t) => t.id))} ` + JSON.stringify(two) + JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8')).last) + run(dir, 'node harness/task.mjs holds', env).stdout + JSON.stringify(JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.map((t) => t.id + t.role)));
+  report('task lane gives each builder its own folder, and then they run side by side', together.length === 2 && two.length === 2, `l1=${l1} l2=${l2} q0=${JSON.stringify(q0.backlog.map((t) => t.id))} inprog=${JSON.stringify(q0.inProgress.map((t) => t.id))} ` + JSON.stringify(two) + JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8')).last) + run(dir, 'node harness/task.mjs holds', env).stdout + JSON.stringify(JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.map((t) => t.id + t.role)));
   const names = fs.readdirSync(path.join(dir, '.studio/agents')).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, ''));
   report('agent names never repeat across supervisor restarts', names.length === new Set(names).size && names.filter((n) => /^builder-s\d+$/.test(n)).length >= 3, names.join(', '));
   for (const s of two) run(dir, `node harness/agent.mjs stop ${s}`, env);
@@ -5385,6 +5392,22 @@ if (inShard('selftest-291c')) {
   const dir = copyRepo();
   const { selftest291C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-291c.mjs')).href);
   await selftest291C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.92 (a): preQueue on the branch as it would land; the compile search at the queue door; a red compile names its branch.
+if (inShard('selftest-292a')) {
+  const dir = copyRepo();
+  const { selftest292A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-292a.mjs')).href);
+  await selftest292A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.92 (b): the target red by itself files one task to fix it, once per distinct red.
+if (inShard('selftest-292b')) {
+  const dir = copyRepo();
+  const { selftest292B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-292b.mjs')).href);
+  await selftest292B({ dir, report, tmpRoot });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

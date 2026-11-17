@@ -2,12 +2,12 @@
 
 **2-minute read for the owner: the latest summary is first. Then open problems, then proposals waiting for you.**
 
-## Latest summary — 2026-11-17
-- **Done:** harness 2.90 is merged and a crew runs it. On a real engine its compile search put two clashing branches out in one minute and the test run first named a stale-pin branch in minutes.
-- **In progress:** 2.91 (no full run ahead of a waiting batch; a rules pass that survives a record commit; the idle stop, the two stops and the stall rule) on a branch, merged when its online checks pass. Notes: docs/RELEASE-2.91.0.md, studio/notes/HANDOFF-2.91-2026-11-17.md.
-- **Untested:** 2.91's train rules ran against stand-in land scripts only. The crew's logs are the first real test.
-- **Open problems:** P-346 (timing checks under load: three made independent of load in 2.91, six known left), P-005 (GPU model), P-009 (no Unity on the maintainer's side: the online job is the fix once it signs in).
-- **Waiting for your OK:** U-007 (last, only when nothing else waits). Two decisions: whether the scorecard's "landed" should stop counting a close; whether the next batch's rules check may run beside a land run.
+## Latest summary — 2026-11-17 (2.92)
+- **Done:** 2.91 is on `main` (no full run ahead of a waiting batch). The one studio on record still runs 2.90.
+- **In progress:** 2.92 (checks at the queue door, a red compile names its branch, a red target gets a fix task) on a branch, merged when its online checks pass. Notes: docs/RELEASE-2.92.0.md, studio/notes/HANDOFF-2.92-2026-11-17.md.
+- **Untested:** 2.91 and 2.92 have not run on a real engine. The studio's first trains on them are the test.
+- **Open problems:** P-346 (timing checks under load: four fixed, seven known left), P-005 (GPU model), P-009 (no Unity on the maintainer's side).
+- **Waiting for your OK:** which unused features to remove (the list is in docs/RELEASE-2.92.0.md, "Size"); whether the scorecard's "landed" should stop counting a close; whether the next batch's rules check may run beside a land run.
 
 ## The files
 | File | What | Format |
