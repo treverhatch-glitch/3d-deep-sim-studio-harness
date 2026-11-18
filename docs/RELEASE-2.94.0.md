@@ -57,7 +57,8 @@ units). One setting fewer.
   train process that is killed outright while the check ahead runs (the next train ends what it finds). Ending the
   check ahead's process tree on Windows is run by the online Windows checks only.
 - **Caught before the merge:** on Windows the check ahead ended with the train that started it (P-369); it is now
-  started detached on every system.
+  started detached on every system. The cancel check then failed twice on Windows because its helpers lacked Windows'
+  own system variables and the process list timed out (P-370, open: why the harness's own fill-in did not suffice).
 - **It is pure cost when the landed tree is not the checked tree:** a land script that commits files outside
   `rules.ignore` and `rules.paths`, a lane dropped by the next train's own pre-queue check or compile search, or new
   shared input files (`rules.share`). The result is then not used and the next train checks as before.
