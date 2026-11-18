@@ -58,6 +58,17 @@ export const flagValueOf = (argv) => (k) => {
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
 };
 
+// The words of argv that are not a --flag or its value. Local names it replaced: pos, positional.
+export function positionalOf(argv) {
+  const out = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i].startsWith('--')) {
+      if (argv[i + 1] && !argv[i + 1].startsWith('--')) i++;
+    } else out.push(argv[i]);
+  }
+  return out;
+}
+
 // Local names it replaced: fold, norm.
 export const foldCase = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
 
@@ -195,6 +206,21 @@ export const stdoutOf = (r) => (r.status === 0 ? String(r.stdout || '').trim() :
 
 // Local names it replaced: strs.
 export const strList = (a) => (Array.isArray(a) ? a.map((x) => String(x).trim()).filter(Boolean) : []);
+
+// The code files under root/rel (relative paths, posix style) whose name matches `code`; stops 12 folders deep.
+export function walkCodeFiles(root, rel, out, code, depth = 0) {
+  if (depth > 12) return out;
+  let st;
+  try { st = fs.statSync(path.join(root, rel)); } catch { return out; }
+  if (st.isFile()) { if (code.test(rel)) out.push(toPosix(rel)); return out; }
+  let list = [];
+  try { list = fs.readdirSync(path.join(root, rel), { withFileTypes: true }); } catch { return out; }
+  for (const e of list) {
+    if (['node_modules', '.git', 'dist', 'build', '.lanes', '.studio', 'coverage'].includes(e.name)) continue;
+    walkCodeFiles(root, path.join(rel, e.name), out, code, depth + 1);
+  }
+  return out;
+}
 
 // Local names it replaced: toPosix.
 export const toPosix = (p) => String(p).replace(/\\/g, '/');

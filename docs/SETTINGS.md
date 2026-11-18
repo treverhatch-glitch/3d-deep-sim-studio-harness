@@ -930,7 +930,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_TRAIN_BISECT` · no simple default · harness/train.mjs, qa/selftest-259a.mjs, qa/selftest-260a.mjs (+16 more) · [WORK-ORGANIZATION.md:226](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_BISECT_PARALLEL` · no simple default · harness/train-parallel.mjs, harness/train.mjs, qa/selftest-269q.mjs (+2 more) · [WORK-ORGANIZATION.md:230](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_BISECT_SPARE` · no simple default · harness/train-parallel.mjs, qa/selftest-2782b.mjs · [WORK-ORGANIZATION.md:230](WORK-ORGANIZATION.md)
-- `STUDIO_TRAIN_BUSY_WAIT_MIN` · no simple default · harness/train-busy.mjs, harness/train-parallel.mjs, harness/train.mjs (+2 more) · [WORK-ORGANIZATION.md:235](WORK-ORGANIZATION.md)
+- `STUDIO_TRAIN_BUSY_WAIT_MIN` · no simple default · harness/train-busy.mjs, harness/train.mjs, qa/selftest-2672a.mjs (+1 more) · [WORK-ORGANIZATION.md:235](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_CANCEL_WAIT_S` · no simple default · harness/train-cancel.mjs, qa/selftest-2782a.mjs · [WORK-ORGANIZATION.md:291](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_CHAIN_TAIL` · no simple default · harness/train-tail.mjs, harness/train.mjs, qa/selftest-267f.mjs (+2 more) · [WORK-ORGANIZATION.md:212](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_CLOSE_MAIN_MERGES` · no simple default · harness/train.mjs · [WATCH-2.78.1.md:26](WATCH-2.78.1.md)

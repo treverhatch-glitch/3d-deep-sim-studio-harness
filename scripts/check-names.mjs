@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { jsFilesUnder } from './check-comments.mjs';
 
 const CODES = new Set([2304, 2552, 18004]);
 const DIRS = ['harness', 'scripts', 'qa', 'tools', '.claude/hooks'];
@@ -21,19 +22,7 @@ const SKIP = /(^|[\\/])(node_modules|fixtures|\.lanes|\.studio)([\\/]|$)/;
 
 /** Every .mjs/.js/.cjs file under the checked folders of root (not node_modules, fixtures or state folders). */
 function nameCheckFiles(root) {
-  const out = [];
-  const walk = (d) => {
-    let list = [];
-    try { list = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
-    for (const e of list) {
-      const f = path.join(d, e.name);
-      if (SKIP.test(f)) continue;
-      if (e.isDirectory()) walk(f);
-      else if (/\.(mjs|cjs|js)$/.test(e.name)) out.push(f);
-    }
-  };
-  for (const d of DIRS) walk(path.join(root, d));
-  return out.sort();
+  return jsFilesUnder(root, DIRS, SKIP);
 }
 
 /** [{ file, line, col, code, text }] for the files given: names used and defined nowhere. */

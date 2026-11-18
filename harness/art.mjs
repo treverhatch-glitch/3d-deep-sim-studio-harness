@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { isAgent } from './ask.mjs';
-import { doneExit as done, flagValueOf, nowIso as now } from './helpers.mjs';
+import { doneExit as done, flagValueOf, nowIso as now, positionalOf } from './helpers.mjs';
 
 export const DESIGNS = path.join(REPO_ROOT, 'studio', 'art', 'designs.json');
 export const ART_REFS = path.join(REPO_ROOT, 'studio', 'art', 'references.json');
@@ -285,12 +285,7 @@ export async function addArtReference({ file, label, kind = 'look', by }) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const flag = flagValueOf(argv);
-  const pos = [];
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i].startsWith('--')) {
-      if (argv[i + 1] && !argv[i + 1].startsWith('--')) i++;
-    } else pos.push(argv[i]);
-  }
+  const pos = positionalOf(argv);
   const [cmd = 'list', a1, a2] = pos;
   const gen = flag('generated') ? { tool: flag('generated').split(':')[0], model: flag('generated').split(':').slice(1).join(':') || null, prompt: flag('prompt') || null, terms: flag('terms') || null, at: now().slice(0, 10) } : null;
   if (cmd === 'propose') done(propose({ file: a1, title: flag('title'), kind: flag('kind') || 'asset', task: flag('task'), licence: flag('licence') || flag('license') || '', source: flag('source') || '', author: flag('author') || '', generated: gen, thumb: flag('thumb'), pack: flag('pack') || '', roundOf: flag('round-of'), replaces: flag('replaces'), by: flag('by') || undefined }), (r) => `#${numberOf(r.design)} ${r.design.title}${r.design.round > 1 ? ` round ${r.design.round}` : ''} (${r.design.id}) is in the Asset studio. Keep going: more rounds don't need the dev's answer.`);

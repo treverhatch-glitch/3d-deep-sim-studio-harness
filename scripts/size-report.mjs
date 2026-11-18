@@ -14,23 +14,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { scanCode } from './settings-map.mjs';
+import { scanCode, walk } from './settings-map.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CODE = /\.(mjs|cjs|js|ts|tsx|jsx|mts)$/;
-const SKIP = new Set(['node_modules', 'dist', 'build', 'coverage', '.vite', '.git']);
-
-function walk(dir, test, out = []) {
-  let entries = [];
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
-  for (const e of entries) {
-    if (SKIP.has(e.name)) continue;
-    const full = path.join(dir, e.name);
-    if (e.isDirectory()) walk(full, test, out);
-    else if (e.isFile() && test(e.name)) out.push(full);
-  }
-  return out;
-}
 
 /** Lines of a file: its newline count, plus one when the last line has no newline. */
 export function lineCount(file) {

@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, actor } from './event.mjs';
 import { readManifest, writeManifest, entryFor, MANIFEST, sha256 } from './assets.mjs';
 import { readJson } from './fsafe.mjs';
-import { failExit as fail, flagValueOf, jsonFileOf, nowIso as now, posixOf as posix, writeJsonPretty as writeJson } from './helpers.mjs';
+import { failExit as fail, flagValueOf, jsonFileOf, nowIso as now, posixOf as posix, writeJsonPretty as writeJson, positionalOf } from './helpers.mjs';
 
 export const NEEDS_DIR = path.join(STUDIO_STATE_DIR, 'assets', 'needs');
 export const LIBRARY_CACHE_DIR = path.join(STUDIO_STATE_DIR, 'assets', 'library');
@@ -597,8 +597,7 @@ export function needsText(id = null, { all = false } = {}) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const flag = flagValueOf(argv);
-  const pos = [];
-  for (let i = 0; i < argv.length; i++) { if (argv[i].startsWith('--')) { if (argv[i + 1] && !argv[i + 1].startsWith('--')) i++; } else pos.push(argv[i]); }
+  const pos = positionalOf(argv);
   const [cmd, a1, a2] = pos;
   if (cmd === 'need') {
     const r = await assetNeed({ what: a1, for: flag('for'), budget: flag('budget'), size: flag('size'), exactSize: argv.includes('--exact-size'), style: flag('style'), tags: flag('tags'), kind: flag('kind'), by: flag('by') }, { log: (x) => console.log(x) });
