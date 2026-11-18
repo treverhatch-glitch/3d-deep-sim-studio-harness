@@ -203,8 +203,9 @@ console.log(JSON.stringify({ ok: r.ok, landed: r.landed, dropped: r.dropped, han
     queue(E, [['T-141', 'feat/a'], ['T-142', 'feat/b']]);
     fs.writeFileSync(`${ctl}-wait`, 'any');
     const r1 = probe(TRAIN, { STUDIO_TEST_FREEMEM_MB: '1000' });
-    await guard('2.94 (d) free RAM minus the floor under what one rules run takes (1 GB against the default 4): the check ahead is not started and the train\'s log says so; one rules run in all, no event (fails before this fix: no check ahead existed)', () => [
-      r1.landed?.join() === 'T-141' && rulesRuns(ctl).length === 1 && !outcomes().length && !aheadFiles().length
+    // 2.95: changed on purpose: a check ahead that does not start is an event (outcome not-started, with the reason).
+    await guard('2.94 (d) free RAM minus the floor under what one rules run takes (1 GB against the default 4): the check ahead is not started and the train\'s log says so; one rules run in all; 2.95: one rules_ahead event, outcome not-started, with the memory reason (fails before this fix: no check ahead existed)', () => [
+      r1.landed?.join() === 'T-141' && rulesRuns(ctl).length === 1 && outcomes().join() === 'not-started' && /under the 4 GB one rules run takes/.test(evs(/^task\.train\.unity\.rules_ahead$/)[0]?.meta?.why || '') && !aheadFiles().length
         && r1.logs?.some((l) => /the check ahead was not started: free RAM minus the floor is 1 GB with the land run going, under the 4 GB one rules run takes/.test(l)), J({ r1 })]);
   }
 

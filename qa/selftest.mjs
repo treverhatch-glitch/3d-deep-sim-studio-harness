@@ -5382,6 +5382,14 @@ if (inShard('selftest-294a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.95 (a): the full rules check as shards, measured memory, systems named by files, the check ahead by shard.
+if (inShard('selftest-295a')) {
+  const dir = copyRepo();
+  const { selftest295A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-295a.mjs')).href);
+  await selftest295A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

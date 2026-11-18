@@ -89,6 +89,11 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   it). Landed, the next train takes that same set when its lanes are unchanged, finds the kept result (its rules log
   line says so) or waits for the run still going. A red ahead is only a red for that tree: it hands nobody back.
   Event `task.train.<x>.rules_ahead` (`started`, `kept-green`, `kept-red`, `dropped`); `train status` shows it running.
+  2.95: when it does not start (memory, the land run ended first, no rules check) the event says `not-started` and why.
+  With `rules.shards` it goes command by command instead of deciding once: each shard starts when its measured peak
+  (`rules.peak`, else the plan's number) fits beside the land run, waits when it does not (within its time limit), and
+  none starts once the land run answered. Stopped between shards it is `kept-partial`: under the same rule (kept only
+  when the land run landed the batch unchanged) its finished shards are kept and the next train runs only the rest.
 - A green batch goes to the land run with `STUDIO_RULES_GREEN=1`, as long as the land run lands exactly the checked
   lanes on the checked target. A land script may use that to skip its own copy of the same tests. 2.91: with
   `rules.paths` or `rules.ignore` set, a target that moved only where the rules tests do not read (a land script's own
@@ -253,6 +258,51 @@ half as much machine time as the land runs. Five settings, all optional, in the 
 - `npm run engine -- rules-plan --branch <b> [--branch <c>] [--json]` (2.86) prints, without running a test: full or
   focus and why, the parts, which have a kept green on the target and the batch, which are new in the batch, a part's
   last recorded peak when it is over `splitGb`, and the minutes the recorded runs suggest.
+- `focus.auto` from files and as a list (2.95): besides `root` (child folders are the systems), `from` is a path
+  template whose last part holds `{name}`; the files (or folders) that fit it name the systems. `{name}` from a file
+  holds no dot, so with `"from": "Game/Core/Unit.{name}.cs"` the file `Unit.Fees.Extra.cs` names nothing of its own and
+  belongs to `Fees` through `paths` (`Game/Core/Unit.{name}.`). `auto` may also be a list of such descriptions, so
+  system folders and system files work at once; a bad entry is named and left out, the others stay. The object form
+  is read as before.
+- `shards` (2.95): a full rules check run as parts, one test command per shard (`focus.test` with `{filter}`), instead
+  of one `test` command that holds every system at once. The shards are the smoke filter, one per filter that
+  `focus.map` and `focus.auto` give the tree's files (one per system), the filters listed in `shards.filters`, and
+  `shards.rest`, the filter for the tests no other shard runs. `"shards": true` takes only the derived ones; a plain
+  list (`"shards": ["<f1>", "<f2>"]`) is `{ "filters": [...] }`. They run one at a time (the peak is one shard's);
+  `focus.splitMax` allows more, each start decided on free RAM as for split parts. Every full run is sharded: the
+  batch's, the target's when a red batch asks it, the owed full run, `npm run engine -- rules --full`.
+  - A shard's green is kept, so it is not run again: after a red in another shard, on a retry, after a cancel, in a
+    narrowing step (a red batch is narrowed with its red shard alone) and for the check ahead. A red shard hands back
+    by name, with its filter, command and failing tests. `keep` says for what a green is kept. `"tree"` (the default)
+    is the exact tree, command and inputs: always sound. `"reads"` keeps it under what the shard reads (2.86's part
+    key: its own files, `shared`, the command, its inputs) plus the files no shard owns, so a batch that touches only
+    other shards' files keeps it. That trusts the studio's `paths`, `shared` and filters; the backstop is
+    `freshEveryHours` (default 24): once that long has passed since a sharded run that reused nothing from another
+    tree, the next one reuses nothing from another tree. The log, the result and the `engine.rules` event's
+    `meta.shards` (`n`, `kept`, `keptOther`, `ran`, `complete`) say how many were kept and how many came from another tree.
+  - **A sharded run is a full run only with `rest`.** Without it a test that no filter matches never ran: the run's mode
+    is `shards`, the land run is told `STUDIO_RULES_MODE=focus` (never `full`), no last full pass is written, and the
+    owed full run passes as shards but stays owed (`rules_full` says so, `meta.notFull`). `rules show` says it in plain
+    words. With `rest` the run is `full`: green, it is kept as the tree's full pass, as one `test` run would be. The
+    harness cannot check that `rest` really is the rest: write it as the negation of the other filters.
+  - Each shard command gets `STUDIO_RULES_MODE=shard`. `rules show` and `rules-plan` list the shards, which have a kept
+    green (on this tree or from another tree) and each one's measured peak.
+- `peak` (2.95): the file the test command writes its own peak memory to, a path or glob relative to the test checkout
+  (`"peak": "tools/SimTests/bin/**/peak.txt"`), or `{ "file": "...", "match": "<regex>" }` whose first group is the GB
+  (default: the first number followed by `GB`, as in `working set 6.71 GB`). The file is removed before every test
+  command (so a stale one is never read) and read after it; the number is kept per shard, part or filter (`(full run)`
+  for the whole command) beside each part's seconds in `.studio/engine/<x>-rules.json` (`partStats`). With `splitGb`
+  unset, a measured number replaces the guess: a part or shard starts when its own peak fits in free RAM, `splitPlan`
+  and the check ahead use the full run's peak, and `rules-plan` and `rules show` print it. With no file configured or
+  none readable, memory is guessed as before. Parts that ran at the same time share the file, so none of them is read.
+
+```json
+"rules": { "test": "dotnet test tools/SimTests", "peak": "tools/SimTests/bin/**/peak.txt", "ahead": true,
+  "shards": { "filters": ["FullyQualifiedName~Tests.Pins"], "rest": "FullyQualifiedName!~Tests.Sim&FullyQualifiedName!~Tests.Core&FullyQualifiedName!~Tests.Pins", "keep": "tree" },
+  "focus": { "test": "dotnet test tools/SimTests --filter \"{filter}\"", "smoke": "Category=Smoke",
+    "auto": [ { "root": "Game/Sim", "paths": ["Game/Sim/{name}/"], "filter": "FullyQualifiedName~Tests.Sim.{name}" },
+              { "from": "Game/Core/Unit.{name}.cs", "paths": ["Game/Core/Unit.{name}.", "tools/port/core-{name}/"], "filter": "FullyQualifiedName~Tests.Core.{name}" } ] } }
+```
 - `maxLanes` (2.84, B-134; default 0, off): a batch with more lanes is checked in consecutive slices of that many,
   each merged on the same target. A red slice is narrowed within itself, so only its lanes can be refused; one
   `engine.rules` event per slice. The whole batch was never one tree in the check, so a sliced check never sends
@@ -318,7 +368,7 @@ scorecard's Play stage line counts skipped runs.
 | Variable | What to do with it |
 | --- | --- |
 | `STUDIO_RULES_GREEN` | `1`: the rules check passed on exactly this batch and target; the script may skip its own copy of those tests. |
-| `STUDIO_RULES_MODE` | `focus` or `full`: how that green was reached; after a `focus` green the script may still run the full rules tests. |
+| `STUDIO_RULES_MODE` | `focus` or `full`: how that green was reached; after a `focus` green the script may still run the full rules tests. 2.95: shards without `rules.shards.rest` are `focus`. |
 | `STUDIO_LAND_FULL` | `1`: the daily full run; skip nothing, ignore every shortcut. |
 | `STUDIO_UNITY_EDITMODE_ARGS` | Edit Mode arguments to add after the .NET tests passed (`SKIP`: no Edit Mode run needed). Unset on a full run. |
 | `STUDIO_PLAY_MODE` | `full`, `focus` or `skip`: run every Play Mode test, only the filter, or none. |
