@@ -2708,9 +2708,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   if (cmd === 'allow') process.exit(allowCli(argv.slice(1))); // P-067: the owner enrols agy's allow-rules (harness/agy-allow.mjs)
-  const list = sessions();
+  // 2.95: running sessions first, then ended ones, the latest end first; an ended line carries its refusal (else its reason).
+  const list = sessions().sort((a, b) => (b.running - a.running) || (b.running ? 0 : String(b.endedAt || '').localeCompare(String(a.endedAt || ''))));
+  if (argv.includes('--json')) { console.log(JSON.stringify(list.map((s) => ({ agent: s.agent, role: s.role, tool: s.tool, model: s.model, task: s.task || null, status: s.status, running: s.running, endedAt: s.endedAt || null, reason: s.reason || null, refusal: s.refusal || null })), null, 2)); process.exit(0); }
   if (!list.length) console.log('No agents started by the launcher yet. npm run agent -- start --role builder --agent builder-1 --tool claude --model claude-sonnet-5-5');
-  for (const s of list) console.log(`${s.running ? (s.ending ? 'ending ' : s.stalled ? 'STALLED' : 'running') : 'ended  '}  ${s.agent.padEnd(18)} ${String(s.role).padEnd(14)} ${s.tool}/${s.model}${s.task ? `  ${s.task}` : ''}${s.running ? `  heartbeat ${s.beatAgeMin} min ago${s.ending ? ` (${s.ending.why})` : ''}` : `  ${s.reason || ''}`}${s.running && s.copy ? `  own copy ${s.copy.dir} (${s.copy.branch})` : ''}`);
+  for (const s of list) console.log(`${s.running ? (s.ending ? 'ending ' : s.stalled ? 'STALLED' : 'running') : 'ended  '}  ${s.agent.padEnd(18)} ${String(s.role).padEnd(14)} ${s.tool}/${s.model}${s.task ? `  ${s.task}` : ''}${s.running ? `  heartbeat ${s.beatAgeMin} min ago${s.ending ? ` (${s.ending.why})` : ''}` : `  ${String(s.refusal || s.reason || '').replace(/\s+/g, ' ').slice(0, 160)}`}${s.running && s.copy ? `  own copy ${s.copy.dir} (${s.copy.branch})` : ''}`);
   const others = otherAgents();
   for (const o of others.list) console.log(`outside  pid ${String(o.pid).padEnd(12)} not started by the launcher: ${o.command}`);
   if (others.list.length) console.log('  Agents outside the launcher keep no heartbeat and don\'t see Stop all until they next run a harness command. Prefer npm run agent -- hire.');

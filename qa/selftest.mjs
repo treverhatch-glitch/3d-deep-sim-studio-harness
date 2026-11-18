@@ -5382,6 +5382,14 @@ if (inShard('selftest-294a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.95 (c): an engine porter from the API pool and one on agy reach their engine lane; agent list says why a start died.
+if (inShard('selftest-295c')) {
+  const dir = copyRepo();
+  const { selftest295C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-295c.mjs')).href);
+  await selftest295C({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
