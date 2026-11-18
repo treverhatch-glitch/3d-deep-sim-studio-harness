@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
- * harness/engine.mjs — the engine track: a port of a web game to Godot, Unity or Unreal, linked to it only by a parity
- * test.
+ * harness/engine.mjs — the engine track: a port of a web game to Godot, Unity or Unreal, linked to it by a parity test.
  *   npm run engine                                   the options, and the track if any
  *   npm run engine -- targets [--json]                every engine target: land command, queue, rig cost
  *   npm run engine -- merge <ID> [--continue|--abort] merge the engine's target into the task's engine worktree
@@ -9,6 +8,7 @@
  *   npm run engine -- propose godot|unity|unreal --by <producer> [--why "…"]   a "Needs you" question
  *   npm run engine -- start godot --by <person>      |  capture [--frames 120]  (frames to engine/<game>/captures/)
  *   npm run engine -- port --from <sha> [--by <name>] pin the web rules to a commit (engine/<game>/port-src/)
+ *   switches: systems ON n of m; playtest: promote the newest playable build (harness/switches.mjs, playtest.mjs)
  * Program: STUDIO_GODOT, STUDIO_UNITY or STUDIO_UNREAL, else godot, unity, UnrealEditor-Cmd on PATH.
  */
 import fs from 'node:fs';
@@ -294,6 +294,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const r = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), mod), ...argv.slice(1)], { stdio: 'inherit', windowsHide: true, cwd: process.cwd() });
     process.exit(r.status ?? 1);
   }
+  // 2.95 (b): the rule systems switched ON in the engine (harness/switches.mjs) and the playtest build (harness/playtest.mjs).
+  // Their own processes: they import modules that import this file, which waits here.
+  if (argv[0] === 'switches' || argv[0] === 'playtest') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', `${argv[0]}.mjs`), ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
   if (argv[0] === 'start') {
     const r = await startEngine(argv[1], { by: flag('by') || actor() });
     console[r.ok ? 'log' : 'error'](r.ok ? (r.already ? 'The engine track already exists.' : `Started: ${r.track.folder} (${r.track.label}); ${r.tasks.join(', ')} queued.`) : r.message);

@@ -5382,6 +5382,38 @@ if (inShard('selftest-294a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.95 (c): an engine porter from the API pool and one on agy reach their engine lane; agent list says why a start died.
+if (inShard('selftest-295c')) {
+  const dir = copyRepo();
+  const { selftest295C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-295c.mjs')).href);
+  await selftest295C({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.95 (d): no session starts on a task whose queued engine branch is held by task after.
+if (inShard('selftest-295d')) {
+  const dir = copyRepo();
+  const { selftest295D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-295d.mjs')).href);
+  await selftest295D({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.95 (b): "Systems ON: n of m" (engines.<x>.switches) and the playtest build in one command (engines.<x>.playtest).
+if (inShard('selftest-295b')) {
+  const dir = copyRepo();
+  const { selftest295B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-295b.mjs')).href);
+  await selftest295B({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.95 (a): the full rules check as shards, measured memory, systems named by files, the check ahead by shard.
+if (inShard('selftest-295a')) {
+  const dir = copyRepo();
+  const { selftest295A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-295a.mjs')).href);
+  await selftest295A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

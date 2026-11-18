@@ -4,6 +4,20 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.95.0] — 2026-11-18
+The full rules check in shards and a playtest build in one command (the overseer's list, the last upgrade before the
+owner's playtest). One full run of a live studio's rules tests had grown to 18.9 GB in one process.
+Details: docs/RELEASE-2.95.0.md.
+- **`rules.shards`:** a full rules check runs one test command per shard, one at a time, with a green kept per shard
+  (for the exact tree by default; `keep: "reads"` across batches that touch other shards). Full only with `rest`.
+- **`rules.peak`:** the test command's own peak memory, read from the file it writes, replaces the 4 GB guess.
+- **`focus.auto`** takes names from files and may be a list. **`rules.ahead`** goes shard by shard and says when it
+  did not start.
+- **`npm run engine -- playtest`:** the newest green land run's build in one fixed folder, with `PLAYTEST.md` and a
+  shortcut. **`engines.<x>.switches`:** `Systems ON: n of m` on the status pages.
+- **No new session on a task whose queued branch waits for another task.** `agent list` shows why a start died.
+- **Size:** harness code is 866 lines larger than 2.94; nothing was removed this round.
+
 ## [2.94.0] — 2026-11-18
 The next batch is checked while the current one lands (the owner's three answers of 2026-11-18). An engine train was
 one rules check, then one land run, with the next batch's lanes waiting unchecked through both.
@@ -19,7 +33,7 @@ Details: docs/RELEASE-2.94.0.md.
 ## [2.93.0] — 2026-11-18
 One rules check per train, and no run of the harness's own in a land run's way (the owner's order: do the overseer's
 list, clean up old code and duplicate lines). On 2.92 a live studio's trains landed what they carried, but the median
-train took 209 minutes, nearly all of it tests that passed, run twice. Details: docs/RELEASE-2.93.0.md.
+train took 209 minutes, nearly all of it tests that passed, run twice. Details: the 2.93.0 release notes, in git history.
 - **The rules check runs the batch first.** Green ends the check; the target is asked only after a red, and a kept
   result answers when there is one. A landed tree keeps its green (`rules.landGate`), so the next train starts with it.
 - **A rules run started outside the train waits like a verify** and never turns full because hours are due, so it no
@@ -46,23 +60,9 @@ Details: the 2.92.0 release notes, in git history.
 - **Size:** harness code is 181 lines larger, scripts unchanged. No dead file was found to remove; a planned tool was not built because the
   self-test already has it.
 
-## [2.91.0] — 2026-11-17
-No full run ahead of a waiting batch (the owner's order: the next version, from a live studio's first day on 2.90).
-A train of four small green branches took seven hours: two full rules runs and a daily full land run went ahead of
-it, and the land script's record commit then cost the batch its "rules are green". Details: the 2.91.0 release notes, in git history.
-- **Full runs leave the train's path.** With lanes waiting, the batch goes first. A due full run (rules or land) waits
-  for an empty queue; an overdue one runs at the end of the train. `rules.focus.fullEveryMaxHours` (twice the hours).
-- **A rules pass survives a record commit:** `rules.ignore` names what the rule tests never read; a target that moved
-  only there (or only outside `rules.paths`) is still the checked target, for the kept result and for the land run.
-- **The idle stop counts work queued for a train and landings as finished**; each resume command says when the
-  other stop is still set.
-- **A read of a file the task names is progress** for the stall rule, for at most `STUDIO_STALL_READ_MAX_MIN`.
-- **Three timing checks no longer depend on the machine's load** (a hand-shake where a clock was compared); what
-  each proves is unchanged.
-- **Release rule:** a branch a studio may have merged goes into main with a merge commit, not a squash.
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.91.0** (2026-11-17): No full run ahead of a waiting batch. A due full run waits for an empty queue; `rules.ignore` lets a rules pass survive a record commit; release branches merge with a merge commit.
 - **2.90.0** (2026-11-16): The overseer's list. The rules check's time limit follows the suite; a compile error is searched with the compile command; `preQueue`, `blame`, `rules.first`; two land runs at once; slices.
 - **2.89.0** (2026-11-16): Which functions a studio runs. Each harness command records the functions it called (`.studio/usage/functions/<version>.tsv`); `npm run commands-run -- --functions` shows what ran and what did not.
 - **2.88.0** (2026-11-16): One reading of "landed" for every count (web train, engine train, both, closes), and one module of small helpers.

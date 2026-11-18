@@ -5,7 +5,7 @@
  * Default for unity when "rules" is absent: `dotnet test tools/SimTests` when the target branch has that folder. "rules": false
  * or STUDIO_ENGINE_RULES=off: no check. Other keys: "inputs" (git-ignored files the tests read), "timeoutMin" (30), "env", "lfs",
  * "paths", "ignore", "focus" (changed systems only, a full run every fullEveryHours; "focus.auto", "focus.shared"), "share", "maxLanes",
- * "play.focus", "landGate", "ahead" (docs/NATIVE-ENGINE.md). The batch runs first; a red batch asks the target, and a red target
+ * "play.focus", "landGate", "ahead", "shards", "peak" (docs/NATIVE-ENGINE.md). The batch runs first; a red batch asks the target, and a red target
  * judges no lane. Results are kept per tree, command and inputs (.studio/engine/<x>-rules.json).
  *   node harness/engine-rules.mjs [--engine unity] [--ref <branch|commit>] [--full] [--fresh] [--json] | show [--engine unity]
  *   node harness/engine-rules.mjs plan --branch <b> [--branch <c>] [--json]   (what a batch's check would run; runs nothing)
@@ -22,7 +22,7 @@ import { engineTarget, ENGINE_NAME_RE } from './engine-tracks.mjs';
 import { failingTests } from './unity-gate.mjs';
 import { readJson, writeAtomic } from './fsafe.mjs';
 import { targetRedTask, targetRedClear } from './engine-target-red.mjs';
-import { splitPlan } from './rules-parts.mjs';
+import { splitPlan, peakClear, peakRead } from './rules-parts.mjs';
 import { peakFromHistory, readUsedHistory } from './engine-ram.mjs';
 import { flagOf, isOff as off, numFiniteFirst as num, pushToOf, stdoutOf as out } from './helpers.mjs';
 import { matchAny } from './merge-lane.mjs';
@@ -49,19 +49,36 @@ const relOk = (s) => Boolean(s) && !s.startsWith('/') && !/^[A-Za-z]:/.test(s) &
 const NAME_SAFE = /^[A-Za-z0-9._-]+$/;
 
 /**
- * rules.focus.auto = { root, paths, filter, filters?, inputs? }, checked. root: a folder whose child folders are the rule
- * systems; paths: templates with {name} (a changed path is the system's when it starts with one, letter case aside); filter:
- * the test filter with {name}; filters: { <name>: <filter> } for a system whose tests are named otherwise; inputs: templates
- * with {name} under rules.inputs. Returns { auto, errors: [plain sentence] }; auto null when absent or bad.
+ * rules.focus.auto = { root, from?, paths, filter, filters?, inputs? } or (2.95) a list of them, checked. root: a folder whose
+ * child folders are the systems; from (2.95): a template whose matching files name them; paths: templates with {name} (a
+ * changed path is the system's when it starts with one, letter case aside); filter: the test filter with {name}; filters:
+ * { <name>: <filter> }; inputs: templates under rules.inputs. { auto, errors: [plain sentence] }; auto null when absent or bad.
  */
 export function autoConfig(a) {
   if (a === undefined || a === null) return { auto: null, errors: [] };
-  const bad = (why) => ({ auto: null, errors: [`rules.focus.auto is not usable: ${why}; it is left out (the shape: { "root": "<folder whose child folders are the systems>", "paths": ["<folder>/{name}/", ...], "filter": "<filter with {name}>" })`] });
-  if (typeof a !== 'object' || Array.isArray(a)) return bad('it is not an object');
+  // 2.95: a list of descriptions (a studio with system folders and system files at once); the bad ones are left out.
+  if (Array.isArray(a)) {
+    const list = []; const errors = [];
+    for (const [i, x] of a.entries()) { const r = autoOne(x, `rules.focus.auto[${i}]`); if (r.auto) list.push(r.auto); errors.push(...r.errors); }
+    return { auto: list.length ? list : null, errors };
+  }
+  return autoOne(a, 'rules.focus.auto');
+}
+
+function autoOne(a, label) {
+  const bad = (why) => ({ auto: null, errors: [`${label} is not usable: ${why}; it is left out (the shape: { "root": "<folder whose child folders are the systems>", "paths": ["<folder>/{name}/", ...], "filter": "<filter with {name}>" })`] });
+  if (!a || typeof a !== 'object' || Array.isArray(a)) return bad('it is not an object');
   const norm = (s) => String(s).trim().replace(/\\/g, '/');
-  if (typeof a.root !== 'string' || !norm(a.root).replace(/\/+$/, '')) return bad('"root" is missing (a folder in the repo whose child folders are the rule systems)');
-  const root = norm(a.root).replace(/\/+$/, '');
-  if (!relOk(root)) return bad(`"root" ${JSON.stringify(a.root)} is not a folder inside the repo (no absolute path, no ..)`);
+  // 2.95: "from", a path template whose last part holds {name}: the files (or folders) it matches name the systems.
+  let from = '';
+  if (a.from !== undefined) {
+    from = typeof a.from === 'string' ? norm(a.from) : '';
+    const last = from.split('/').pop();
+    if (!from.includes('{name}') || from.split('{name}').length !== 2 || !last.includes('{name}') || !relOk(from)) return bad(`"from" ${JSON.stringify(a.from)} must be a path inside the repo with {name} once, in its last part (for example "Game/Core/Unit.{name}.cs")`);
+  }
+  if (!from && (typeof a.root !== 'string' || !norm(a.root).replace(/\/+$/, ''))) return bad('"root" is missing (a folder in the repo whose child folders are the rule systems)');
+  const root = typeof a.root === 'string' ? norm(a.root).replace(/\/+$/, '') : '';
+  if (root && !relOk(root)) return bad(`"root" ${JSON.stringify(a.root)} is not a folder inside the repo (no absolute path, no ..)`);
   if (!Array.isArray(a.paths) || !a.paths.length) return bad('"paths" must be a non-empty list of path templates, each with {name}');
   const paths = [];
   for (const p of a.paths) {
@@ -86,8 +103,14 @@ export function autoConfig(a) {
       inputs.push(norm(p));
     }
   }
-  return { auto: { root, paths, filter: a.filter.trim(), filters, inputs }, errors: [] };
+  return { auto: { root, paths, filter: a.filter.trim(), filters, inputs, ...(from ? { from } : {}) }, errors: [] };
 }
+
+/** 2.95: rules.focus.auto as a list (the object form is a list of one). */
+const autosOf = (a) => (Array.isArray(a) ? a : a ? [a] : []);
+/** 2.95: a system's id: its name for the first auto description (as before), `<name>@<i>` for the others (names may repeat). */
+const sysId = (name, i) => (i ? `${name}@${i}` : name);
+const sysOf = (id) => { const k = String(id).lastIndexOf('@'); return k > 0 ? { name: id.slice(0, k), i: Number(id.slice(k + 1)) || 0 } : { name: String(id), i: 0 }; };
 
 /** 2.86: rules.focus.shared, checked: { shared: [repo paths], errors }. */
 function sharedList(v) {
@@ -109,14 +132,26 @@ export function autoSystems({ repo, shas = [], auto, shared = [] } = {}) {
   const seen = new Map();
   const skipped = [];
   if (!auto || !repo) return { names: [], skipped };
+  const add = (name, i, full) => {
+    if (!name || name.includes('/') || shared.some((x) => underPath(full, x))) return;
+    if (!NAME_SAFE.test(name)) { if (!skipped.includes(name)) skipped.push(name); return; }
+    if (!seen.has(sysId(name, i).toLowerCase())) seen.set(sysId(name, i).toLowerCase(), sysId(name, i));
+  };
   for (const sha of shas.filter(Boolean)) {
-    const r = git(repo, '-c', 'core.quotePath=false', 'ls-tree', '-d', '--name-only', '-z', sha, '--', `${auto.root}/`);
-    if (r.status !== 0) continue;
-    for (const full of String(r.stdout || '').split('\0').filter(Boolean)) {
-      const name = full.slice(auto.root.length + 1);
-      if (!name || name.includes('/') || shared.some((x) => underPath(full, x))) continue;
-      if (!NAME_SAFE.test(name)) { if (!skipped.includes(name)) skipped.push(name); continue; }
-      if (!seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
+    for (const [i, a] of autosOf(auto).entries()) {
+      if (a.root) {
+        const r = git(repo, '-c', 'core.quotePath=false', 'ls-tree', '-d', '--name-only', '-z', sha, '--', `${a.root}/`);
+        if (r.status === 0) for (const full of String(r.stdout || '').split('\0').filter(Boolean)) add(full.slice(a.root.length + 1), i, full);
+      }
+      // 2.95: names from files: the entries of the template's folder whose name fits its last part ({name}: no dot, no slash).
+      if (a.from) {
+        const k = a.from.lastIndexOf('/');
+        const folder = k >= 0 ? a.from.slice(0, k) : '';
+        const [pre, post] = a.from.slice(k + 1).split('{name}');
+        const re = new RegExp(`^${pre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([A-Za-z0-9_-]+)${post.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+        const r = git(repo, '-c', 'core.quotePath=false', 'ls-tree', '--name-only', '-z', sha, '--', folder ? `${folder}/` : '.');
+        if (r.status === 0) for (const full of String(r.stdout || '').split('\0').filter(Boolean)) { const m = re.exec(full.slice(folder ? folder.length + 1 : 0)); if (m) add(m[1], i, full); }
+      }
     }
   }
   return { names: [...seen.values()].sort(), skipped };
@@ -125,17 +160,21 @@ export function autoSystems({ repo, shas = [], auto, shared = [] } = {}) {
 /** 2.86: the auto system a path belongs to (the longest matching template expansion wins: Sim/MapNav... is MapNav, not Map), or null. */
 export function autoNameOf(p, auto, names = []) {
   const pl = String(p).toLowerCase();
+  const autos = autosOf(auto);
   let best = null;
   let len = -1;
-  for (const t of auto?.paths || []) for (const n of names) {
-    const e = t.split('{name}').join(n).toLowerCase();
-    if (e.length > len && pl.startsWith(e)) { best = n; len = e.length; }
+  for (const id of names) {
+    const { name, i } = sysOf(id);
+    for (const t of autos[i]?.paths || []) {
+      const e = t.split('{name}').join(name).toLowerCase();
+      if (e.length > len && pl.startsWith(e)) { best = id; len = e.length; }
+    }
   }
   return best;
 }
-const autoFilterOf = (auto, name) => auto.filters?.[name.toLowerCase()] || auto.filter.split('{name}').join(name);
+const autoFilterOf = (auto, id) => { const { name, i } = sysOf(id); const a = autosOf(auto)[i]; return a.filters?.[name.toLowerCase()] || a.filter.split('{name}').join(name); };
 /** 2.86: is a path under auto's root or a template's fixed start (where a system would be)? */
-const underAuto = (p, auto) => { const pl = p.toLowerCase(); return [`${auto.root}/`, ...auto.paths.map((t) => t.split('{name}')[0])].some((x) => x && pl.startsWith(x.toLowerCase())); };
+const underAuto = (p, auto) => { const pl = p.toLowerCase(); return autosOf(auto).some((a) => [a.root ? `${a.root}/` : '', a.from ? a.from.split('{name}')[0] : '', ...a.paths.map((t) => t.split('{name}')[0])].some((x) => x && pl.startsWith(x.toLowerCase()))); };
 
 /**
  * 2.90: engines.<x>.blame, checked: [{ test, re, touches: [glob], say }]. An entry ties failing tests (a regex on the full
@@ -225,19 +264,54 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
   }
   const bl = blameList(cfg.blame);
   focusBad.push(...bl.errors);
+  // 2.95: rules.shards (a full run as one command per shard) and rules.peak (the file a test command writes its peak memory to).
+  const sd = shardsConfig(o.shards, f, withSdk);
+  const pk = peakConfig(o.peak);
+  focusBad.push(...sd.errors, ...pk.errors);
   // 2.91: rules.ignore, folders or files the rule tests never read: plain repo paths only (no glob, no `..`).
   const ig0 = (Array.isArray(o.ignore) ? o.ignore : o.ignore === undefined ? [] : [o.ignore]).map((x) => String(x ?? '').trim());
   const ignore = relList(ig0).filter((x) => !/[*?[\]{}!]/.test(x));
   for (const x of ig0) if (x && !ignore.includes(x.replace(/\\/g, '/').replace(/\/+$/, ''))) focusBad.push(`rules.ignore ${JSON.stringify(x).slice(0, 80)} is not a plain repo path (no glob, no .., not absolute); it is left out`);
   // 2.93: rules.landGate, the land run's gate that runs these tests, spelled as harness/unity-gate.mjs landStages reads names.
   const landGate = typeof o.landGate === 'string' ? o.landGate.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, 24) : '';
-  const extra = { landGate, env: vars, lfs: o.lfs === true, paths: relList(o.paths), ignore, focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, first, blame: bl.blame, timeoutSet, timeoutFrom, ahead: o.ahead === true };
+  const extra = { landGate, env: vars, lfs: o.lfs === true, paths: relList(o.paths), ignore, focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, first, blame: bl.blame, timeoutSet, timeoutFrom, ahead: o.ahead === true, ...(sd.shards ? { shards: sd.shards } : {}), ...(pk.peak ? { peak: pk.peak } : {}) };
   const test = typeof r === 'string' ? r.trim() : typeof o.test === 'string' ? o.test.trim() : '';
   if (test) return { command: withSdk(test), inputs, timeoutMin, source: `studio/game.json engines.${engine}.rules`, ...extra };
   const d = DEFAULTS[engine];
   if (!d || !repo || !ref) return null;
   if (git(repo, 'cat-file', '-e', `${ref}:${d.has}`).status !== 0) return null;
   return { command: withSdk(d.test), inputs, timeoutMin, source: `the ${engine} default (${ref} has ${d.has})`, ...extra };
+}
+
+/**
+ * 2.95: rules.shards, checked: true, a list of filters, or { filters, rest, keep, freshEveryHours }. It needs rules.focus.test
+ * with {filter}. { shards: { test, filters, rest, keep, freshEveryHours }, errors }; shards null when unset or bad.
+ */
+function shardsConfig(v, f, withSdk) {
+  if (v === undefined || v === null || v === false) return { shards: null, errors: [] };
+  const bad = (why) => ({ shards: null, errors: [`rules.shards is not usable: ${why}; it is left out (a full run stays one command)`] });
+  const o = v === true ? {} : Array.isArray(v) ? { filters: v } : v && typeof v === 'object' ? v : null;
+  if (!o) return bad('it must be true, a list of test filters, or { "filters": [...], "rest": "<filter>", "keep": "tree" or "reads" }');
+  if (!(f && typeof f === 'object' && typeof f.test === 'string' && f.test.includes('{filter}'))) return bad('it needs rules.focus.test with {filter} in it (the command each shard runs its filter with)');
+  const filters = o.filters === undefined ? [] : o.filters;
+  if (!Array.isArray(filters) || filters.some((x) => typeof x !== 'string' || !x.trim())) return bad('"filters" must be a list of test filters');
+  if (o.rest !== undefined && (typeof o.rest !== 'string' || !o.rest.trim())) return bad('"rest" must be a test filter (the tests no other shard runs)');
+  if (o.keep !== undefined && !['tree', 'reads'].includes(o.keep)) return bad('"keep" is "tree" (the default) or "reads"');
+  return { shards: { test: withSdk(f.test.trim()), filters: [...new Set(filters.map((x) => x.trim()))], rest: typeof o.rest === 'string' ? o.rest.trim() : '', keep: o.keep || 'tree', freshEveryHours: Math.max(0, num(o.freshEveryHours, 24)) }, errors: [] };
+}
+
+/** 2.95: rules.peak, checked: "<file or glob>" or { file, match }. { peak: { file, match }, errors }. */
+function peakConfig(v) {
+  if (v === undefined || v === null) return { peak: null, errors: [] };
+  const bad = (why) => ({ peak: null, errors: [`rules.peak is not usable: ${why}; it is left out (memory is guessed as before)`] });
+  const o = typeof v === 'string' ? { file: v } : v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+  const file = typeof o?.file === 'string' ? o.file.trim().replace(/\\/g, '/') : '';
+  if (!file || !relOk(file)) return bad('"file" must be a path or glob inside the test checkout (no absolute path, no ..)');
+  if (o.match !== undefined) {
+    let re = null; try { re = typeof o.match === 'string' ? new RegExp(o.match, 'i') : null; } catch { re = null; }
+    if (!re || !/\((?!\?)/.test(o.match)) return bad('"match" must be a valid regex whose first group is the GB');
+  }
+  return { peak: { file, match: typeof o.match === 'string' ? o.match : '' }, errors: [] };
 }
 
 /** The files of one input merged over the folders it is copied from (the first folder with a file wins). { found, files: [[name, abs]] } sorted by name. */
@@ -636,12 +710,17 @@ function ownersAt(ctx, sha) {
   const by = new Map();
   const files = treeFiles(ctx.repo, sha);
   const add = pushToOf(by);
+  // 2.95: what gave each filter (a map entry, auto systems) and the files no filter takes, for rules.shards.
+  const kinds = new Map();
+  const kind = (f) => { if (!kinds.has(f)) kinds.set(f, { map: false, names: new Set() }); return kinds.get(f); };
+  const loose = [];
   for (const [p, id] of files || []) {
     let hit = false;
-    for (const m of ctx.cfg.focus.map) { const f = mapFilterOf(m, p); if (f) { hit = true; add(f, `${p}\0${id}`); } }
-    if (!hit && ctx.auto && underAuto(p, ctx.auto)) { const n = autoNameOf(p, ctx.auto, ctx.names); if (n) add(autoFilterOf(ctx.auto, n), `${p}\0${id}`); }
+    for (const m of ctx.cfg.focus?.map || []) { const f = mapFilterOf(m, p); if (f) { hit = true; add(f, `${p}\0${id}`); kind(f).map = true; } }
+    if (!hit && ctx.auto && underAuto(p, ctx.auto)) { const n = autoNameOf(p, ctx.auto, ctx.names); if (n) { hit = true; add(autoFilterOf(ctx.auto, n), `${p}\0${id}`); kind(autoFilterOf(ctx.auto, n)).names.add(n); } }
+    if (!hit) loose.push(p);
   }
-  const res = files ? by : null;
+  const res = files ? Object.assign(by, { kinds, loose }) : null;
   ctx.owners.set(sha, res);
   return res;
 }
@@ -694,14 +773,146 @@ export function partKey(ctx, sha, part) {
   }
   const shared = (cfg.focus.shared || []).map((p) => `${p}\0${out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}:${p}`)) || 'none'}`).join('\n');
   // Inputs: only the part's own (auto.inputs) and the unattributed, else all of them.
-  const tpl = ctx.auto?.inputs || [];
-  const attributed = tpl.length && !part.smoke && !part.map.length && part.names.length;
+  const tpl = autosOf(ctx.auto).map((a) => ({ paths: a.inputs || [] }));
+  const attributed = !part.smoke && !part.map.length && part.names.length && part.names.every((id) => tpl[sysOf(id).i]?.paths.length);
   const ins = ctx.inputs.filter((x) => {
     if (!attributed || x.missing) return true;
-    const owner = autoNameOf(x.name, { paths: tpl }, ctx.names);
+    const owner = autoNameOf(x.name, tpl, ctx.names);
     return !owner || part.names.some((n) => n.toLowerCase() === owner.toLowerCase());
   }).map((x) => (x.missing ? `${x.rel}\0missing` : `${x.name}\0${x.digest}`));
   return { key: `part:${sha1(part.filter)}|${own}|shared:${sha1(shared)}|${cmdKey({ ...cfg, command: part.command })}|in:${sha1(ins.join('\n'))}`, exists };
+}
+
+/** 2.95: the name the peak of a whole run (no filter) is kept under in partStats. */
+const FULL_STAT = '(full run)';
+/** 2.95: the GB rules.peak measured for a filter (null: the whole command), or null (no rules.peak, splitGb set, not measured). */
+export function rulesPeakGb(root, engine, cfg, filter = null) {
+  if (!cfg?.peak || cfg.focus?.splitGb) return null;
+  return Number(partStats(root, engine)[filter || FULL_STAT]?.peakGb) || null;
+}
+
+/**
+ * 2.95: the shards of a full run at a commit: the smoke filter, each filter focus.map and focus.auto give the commit's files
+ * (one per system), the listed filters, then rest. [{ filter, command, smoke, map, names, whole }] (whole: keyed by the
+ * whole tree; no files of its own), or null when the commit cannot be read.
+ */
+export function shardList(ctx, sha) {
+  const { cfg } = ctx;
+  const cmd = (f) => cfg.shards.test.split('{filter}').join(f);
+  const list = [];
+  const add = (p) => { if (p.filter && !list.some((x) => x.filter === p.filter)) list.push({ command: cmd(p.filter), smoke: false, map: [], names: [], whole: true, ...p }); };
+  if (cfg.focus?.smoke) add({ filter: cfg.focus.smoke, smoke: true });
+  if (cfg.focus) {
+    const by = ownersAt(ctx, sha);
+    if (!by) return null;
+    for (const f of [...by.keys()].sort()) { const k = by.kinds.get(f); add({ filter: f, map: k?.map ? [0] : [], names: [...(k?.names || [])], whole: false }); }
+  }
+  for (const f of cfg.shards.filters) add({ filter: f });
+  if (cfg.shards.rest) add({ filter: cfg.shards.rest, rest: true });
+  return list;
+}
+
+/** 2.95: the files no shard takes, under rules.paths and outside rules.ignore, focus.ignore and focus.shared: a hash. */
+function looseKey(ctx, sha) {
+  const { cfg } = ctx;
+  const ig = ignoreSplit(ownersAt(ctx, sha)?.loose || [], cfg.focus?.ignore || []).kept;
+  const under = (p, list) => list.some((x) => underPath(p, x));
+  const lines = ig.filter((p) => (!cfg.paths?.length || under(p, cfg.paths)) && !under(p, cfg.ignore || []) && !under(p, cfg.focus?.shared || []));
+  const ids = new Map(treeFiles(ctx.repo, sha) || []);
+  return sha1(lines.map((p) => `${p}\0${ids.get(p)}`).join('\n'));
+}
+
+/**
+ * 2.95: the key a shard's green is kept under. "tree" (the default): the exact tree, command and inputs. "reads": a shard
+ * with files of its own is keyed by what it reads (the 2.86 part key) plus the files no shard takes, so a batch that
+ * changes only other shards' files keeps it; a shard without files of its own is keyed by the whole tree either way.
+ */
+function shardKey(ctx, sha, part, print) {
+  if (ctx.cfg.shards.keep === 'reads' && !part.whole) { const k = partKey(ctx, sha, part); return k.key ? `shard:reads:${k.key}|loose:${looseKey(ctx, sha)}` : null; }
+  return `shard:tree:${rulesKey({ repo: ctx.repo, sha, cfg: ctx.cfg, sel: { mode: 'focus', filter: part.filter, command: part.command }, print })}`;
+}
+
+/** 2.95: with rules.shards.keep "reads", is the backstop due (a sharded run that reuses no green from another tree)? '' or why. */
+function shardsFreshDue(root, engine, cfg, now = Date.now()) {
+  if (cfg?.shards?.keep !== 'reads') return '';
+  const h = cfg.shards.freshEveryHours;
+  const at = Date.parse(readCache(root, engine).shardsFreshAt || '');
+  if (!Number.isFinite(at)) return 'no sharded run has yet reused nothing from another tree';
+  return now - at >= h * 3600000 ? `the last sharded run that reused nothing from another tree is older than ${h} h (rules.shards.freshEveryHours)` : '';
+}
+
+/**
+ * 2.95: a full rules check as shards (rules.shards) on one commit. A shard with a kept green is not run; the others run one
+ * command each in one checkout (runRulesAt's split runner: one at a time unless splitMax and free RAM allow more). Full
+ * (mode 'full') only with rules.shards.rest; else mode 'shards', never a full pass. only: the filters to run (a narrowing
+ * step). The result is runRulesAt's plus shards: { n, kept, keptOther, ran, complete, keep, fresh? }.
+ */
+export function shardsRun({ engine = 'unity', repo, sha, cfg, from = [], extraFrom = [], only = null, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, useCache = true, admit = null, run = runRulesAt } = {}) {
+  const tree = out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}^{tree}`));
+  if (!tree) return { status: 'error', why: `${short(sha)} is not a commit of the ${engine} repo`, ms: 0 };
+  const src = [...from, ...extraFrom];
+  const print = inputsPrint(cfg, src);
+  const complete = Boolean(cfg.shards.rest) && !only;
+  const mode = complete ? 'full' : 'shards';
+  const sys = cfg.focus?.auto ? autoSystems({ repo, shas: [sha], auto: cfg.focus.auto, shared: cfg.focus.shared || [] }) : null;
+  const ctx = partContext({ repo, cfg, names: sys?.names || [], src });
+  let list = shardList(ctx, sha);
+  if (!list) return { status: 'error', why: `the files of ${short(sha)} could not be read for rules.shards`, ms: 0, mode };
+  if (only) list = only.map((f) => list.find((p) => p.filter === f) || { filter: f, command: cfg.shards.test.split('{filter}').join(f), smoke: false, map: [], names: [], whole: true });
+  const fresh = useCache ? shardsFreshDue(root, engine, cfg) : '';
+  const info = { n: list.length, kept: 0, keptOther: 0, ran: 0, complete, keep: cfg.shards.keep, ...(fresh ? { fresh } : {}) };
+  const whole = keptFull(root, engine, { repo, sha, cfg, print });
+  if (useCache && whole && !(fresh && whole.reads)) { info.kept = list.length; log(`[engine-rules] ${engine}: a kept full pass of ${short(sha)} answers every shard: not run again`); return { status: 'pass', why: 'a kept full pass of this tree', cached: true, allKept: true, mode, shards: info }; }
+  if (fresh) log(`[engine-rules] ${engine}: rules.shards: this run reuses no green from another tree (${fresh})`);
+  const stats = cfg.peak && !cfg.focus?.splitGb ? partStats(root, engine) : {};
+  const todo = [];
+  const keys = {};
+  for (const p of list) {
+    const key = shardKey(ctx, sha, p, print);
+    const hit = useCache ? keptPart(root, engine, key) : null;
+    if (hit && !(fresh && hit.tree !== tree)) {
+      info.kept += 1;
+      if (hit.tree !== tree) info.keptOther += 1;
+      log(`[engine-rules] ${engine}: rules shard ${p.filter} pass kept for ${short(sha)} (${hit.tree !== tree ? 'a green of what it reads, from another tree' : 'this tree'}): not run again`);
+      continue;
+    }
+    todo.push({ filter: p.filter, command: p.command, ...(stats[p.filter]?.peakGb ? { gb: stats[p.filter].peakGb } : {}) });
+    if (key) keys[p.filter] = key;
+  }
+  log(`[engine-rules] ${engine}: ${list.length} shard(s) on ${short(sha)}: ${info.kept} kept${info.keptOther ? ` (${info.keptOther} from another tree)` : ''}, ${todo.length} to run; ${complete ? 'with rules.shards.rest this is a full run' : only ? 'a narrowing step' : 'not a full run: rules.shards has no rest, so a test no shard filter matches does not run'}`);
+  const sel = { mode, filter: complete ? '' : list.map((p) => p.filter).join(cfg.focus?.join || '|'), command: cfg.command, parts: todo, partKeys: keys, shards: true, shardTree: tree };
+  const markFresh = () => { if (!only && cfg.shards.keep === 'reads' && !info.keptOther) writeCache(root, engine, (j) => { j.shardsFreshAt = new Date().toISOString(); }); };
+  if (!todo.length) {
+    const rec = { status: 'pass', why: `every shard has a kept green (${list.length})`, ms: 0, at: new Date().toISOString(), mode, ...(info.keptOther ? { reads: true } : {}) };
+    if (useCache) keep(root, engine, rulesKey({ repo, sha, cfg, sel, print }), rec, false);
+    markFresh();
+    return { ...rec, cached: true, allKept: true, shards: info };
+  }
+  // A whole answer kept for this tree that leans on another tree's greens is not asked when the backstop is due.
+  const r = run({ engine, repo, sha, cfg, from, extraFrom, sel, root, id, env, log, useCache: useCache && !fresh, admit });
+  info.ran = (r.groups || []).length;
+  if (r.status === 'pass' && !r.cached) {
+    if (info.keptOther) writeCache(root, engine, (j) => { const k = rulesKey({ repo, sha, cfg, sel, print }); if (j.trees[k]) j.trees[k].reads = true; });
+    markFresh();
+  }
+  return { ...r, mode: r.mode || mode, shards: info };
+}
+
+/** 2.95: each shard at a commit, for rules-plan and rules show: [{ filter, kept ('this tree', 'another tree' or ''), peakGb?, seconds? }]. */
+function shardsState(root, engine, { repo, cfg, sha, src = [] }) {
+  const tree = out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}^{tree}`));
+  const sys = cfg.focus?.auto ? autoSystems({ repo, shas: [sha], auto: cfg.focus.auto, shared: cfg.focus.shared || [] }) : null;
+  const ctx = partContext({ repo, cfg, names: sys?.names || [], src });
+  const print = inputsPrint(cfg, src);
+  const fresh = shardsFreshDue(root, engine, cfg);
+  const whole = keptFull(root, engine, { repo, sha, cfg, print });
+  const stats = partStats(root, engine);
+  return (shardList(ctx, sha) || []).map((p) => {
+    const hit = whole && !(fresh && whole.reads) ? { tree } : keptPart(root, engine, shardKey(ctx, sha, p, print));
+    const kept = hit && !(fresh && hit.tree !== tree) ? (hit.tree === tree ? 'this tree' : 'another tree') : '';
+    const st = stats[p.filter] || {};
+    return { filter: p.filter, kept, ...(st.peakGb ? { peakGb: st.peakGb } : {}), ...(st.seconds ? { seconds: st.seconds } : {}) };
+  });
 }
 
 /** A part's kept green at a key, or null. */
@@ -712,7 +923,7 @@ export function keptPart(root, engine, key) {
 /** The last measured seconds and GB of each part filter: { <filter>: { seconds, gb?, at } }. */
 export const partStats = (root, engine) => readCache(root, engine).partStats || {};
 
-/** Keep parts' greens (bounded) and their measurements. list: [{ key, filter, seconds, gb? }]. */
+/** Keep parts' greens (bounded) and their measurements. list: [{ key, filter, seconds, gb?, peakGb?, tree? }]. 2.95: tree, the tree it ran on; peakGb, rules.peak's number. */
 function keepParts(root, engine, list) {
   if (!list.length) return;
   writeCache(root, engine, (j) => {
@@ -720,8 +931,11 @@ function keepParts(root, engine, list) {
     j.partStats = j.partStats && typeof j.partStats === 'object' ? j.partStats : {};
     const at = new Date().toISOString();
     for (const x of list) {
-      if (x.key) { delete j.parts[x.key]; j.parts[x.key] = { status: 'pass', at, filter: x.filter, ...(Number.isFinite(x.seconds) ? { seconds: x.seconds } : {}) }; }
-      if (Number.isFinite(x.seconds)) { const gb0 = j.partStats[x.filter]?.gb; delete j.partStats[x.filter]; j.partStats[x.filter] = { seconds: x.seconds, ...(Number(x.gb) > 0 ? { gb: x.gb } : gb0 ? { gb: gb0 } : {}), at }; }
+      if (x.key) { delete j.parts[x.key]; j.parts[x.key] = { status: 'pass', at, filter: x.filter, ...(Number.isFinite(x.seconds) ? { seconds: x.seconds } : {}), ...(x.tree ? { tree: x.tree } : {}) }; }
+      const o = j.partStats[x.filter] || {};
+      const pk = Number(x.peakGb) > 0 ? { peakGb: x.peakGb, peakAt: at } : o.peakGb ? { peakGb: o.peakGb, peakAt: o.peakAt } : {};
+      if (Number.isFinite(x.seconds)) { const gb0 = o.gb; delete j.partStats[x.filter]; j.partStats[x.filter] = { seconds: x.seconds, ...(Number(x.gb) > 0 ? { gb: x.gb } : gb0 ? { gb: gb0 } : {}), at, ...pk }; }
+      else if (pk.peakGb && pk.peakAt === at) j.partStats[x.filter] = { ...o, ...pk };
     }
     const keys = Object.keys(j.parts);
     for (const k of keys.slice(0, Math.max(0, keys.length - PART_KEEP))) delete j.parts[k];
@@ -762,7 +976,7 @@ export function rulesKey({ repo, sha, cfg, sel = null, print = '' }) {
   if (cfg.paths?.length) base = `paths:${sha1(cfg.paths.map((p) => `${p}\0${less(p, at(p)) || 'none'}`).join('\n'))}`;
   else if (ign.length) { const t = out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}^{tree}`)); base = t ? treeWithout(repo, t, ign) || 'less:empty' : ''; }
   else base = out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}^{tree}`));
-  return `${base}|${cmdKey({ ...cfg, command: s.command })}${print ? `|${print}` : ''}${s.mode === 'focus' ? `|focus:${sha1(s.filter)}` : ''}`;
+  return `${base}|${cmdKey({ ...cfg, command: s.command })}${print ? `|${print}` : ''}${s.mode === 'focus' ? `|focus:${sha1(s.filter)}` : ''}${s.mode === 'shards' ? `|shards:${sha1(s.filter)}` : ''}`;
 }
 
 /** 2.93: the kept full pass of a commit's tree, or null. A full pass answers a narrower question too (every subset passed). */
@@ -841,9 +1055,11 @@ export function fullRulesOwed(root, engine, cfg, { repo = null, tip = null, now 
  * 2.91: the owed full rules run on the target alone (the full command; a kept result of the same key counts). A pass writes
  * lastFullAt. A red or a timeout judges no lane: it is kept as fullRed (this target's key, fullRulesOwed) for train status
  * and the Line Producer; a timeout nobody set doubles the next one, as the 2.90 calibration does. Returns runRulesAt's result.
+ * 2.95: with rules.shards it runs as shards; green without rules.shards.rest it is not the full run (notFull): still owed.
  */
 export function fullRulesRun({ engine = 'unity', repo, tip, cfg, from = [], root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt } = {}) {
-  const r = run({ engine, repo, sha: tip, cfg, from, sel: { mode: 'full', filter: '', command: cfg.command }, root, id: `${id}-full`, env, log, useCache: true });
+  const r = cfg.shards ? shardsRun({ engine, repo, sha: tip, cfg, from, root, id: `${id}-full`, env, log, run }) : run({ engine, repo, sha: tip, cfg, from, sel: { mode: 'full', filter: '', command: cfg.command }, root, id: `${id}-full`, env, log, useCache: true });
+  if (r.status === 'pass' && r.mode === 'shards') return { ...r, notFull: true };
   if (r.status === 'pass') { writeCache(root, engine, (j) => { j.lastFullAt = new Date().toISOString(); delete j.fullRed; }); targetRedClear(root, engine, 'full-rules'); return r; }
   const tmo = Boolean(r.timedOut);
   if (tmo && !r.notRun && !r.timeoutSet) writeCache(root, engine, (j) => { j.raise = { ...(j.raise || {}), full: { min: Math.min(Math.max(cfg.timeoutMin, TIMEOUT_CAP), min2(r.timeoutMin * 2)), from: r.timeoutMin, at: new Date().toISOString() } }; });
@@ -876,9 +1092,10 @@ export function outsideTrain(root, engine, fn, { env = process.env, log = () => 
 /**
  * Run the rules check on one commit in a throwaway checkout (never the land script's worktree or a lane).
  * { status: 'pass' | 'red' | 'error', why, ms, failures?, tail?, cached?, mode }; 'error' (could not run, or timed out)
- * blames nobody. from / extraFrom: input source folders; sel: default the full command.
+ * blames nobody. from / extraFrom: input source folders; sel: default the full command. 2.95: admit({ filter }) before each
+ * test command (true, or why it may not start: the run stops there, its greens kept); rules.peak read after each one.
  */
-export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraFrom = [], sel = null, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, useCache = true, freeGb = null } = {}) {
+export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraFrom = [], sel = null, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, useCache = true, freeGb = null, admit = null } = {}) {
   const tree = out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}^{tree}`));
   if (!tree) return { status: 'error', why: `${short(sha)} is not a commit of the ${engine} repo`, ms: 0 };
   const src = [...from, ...extraFrom];
@@ -886,7 +1103,8 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
   const print = inputsPrint(cfg, src);
   const key = rulesKey({ repo, sha, cfg, sel: s, print });
   // 2.90: this run's timeout (rulesTimeout), said in the log; a tree that timed out with no smaller timeout is not run again.
-  const tmo = rulesTimeout(root, engine, cfg, s.mode);
+  // 2.95: shards without rules.shards.rest run what a full run runs: they get its time limit.
+  const tmo = rulesTimeout(root, engine, cfg, s.mode === 'shards' ? 'full' : s.mode);
   const cfg0 = cfg;
   cfg = { ...cfg, timeoutMin: tmo.min };
   if (useCache) {
@@ -906,32 +1124,44 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
   const r9 = (() => { try {
     const missing = copyInputs(cfg, src, dir);
     if (missing.length) log(`[engine-rules] ${engine}: input(s) not found in the engine's folder: ${missing.join(', ')} (engines.${engine}.rules.inputs)`);
-    const runEnv = { ...env, ...(cfg.env || {}), STUDIO_ENGINE: engine, STUDIO_RULES_COMMIT: sha, STUDIO_RULES_DIR: dir, STUDIO_ENGINE_REPO: repo, STUDIO_RULES_MODE: s.mode };
+    const runEnv = { ...env, ...(cfg.env || {}), STUDIO_ENGINE: engine, STUDIO_RULES_COMMIT: sha, STUDIO_RULES_DIR: dir, STUDIO_ENGINE_REPO: repo, STUDIO_RULES_MODE: s.shards ? 'shard' : s.mode };
+    const stopped = (why, extra = {}) => ({ status: 'error', stopped: true, why: `stopped before ${why}`, ms: Date.now() - t0, mode: s.mode, ...extra });
     // rules.focus.split: one command per group. 2.85: how many run at once is decided by free RAM (harness/rules-parts.mjs): at least
     // one, more only while free RAM - the floor holds another splitGb, never over rules.focus.splitMax (unset: 1, in sequence).
     // Red on the first red (its output kept). The time limit covers the whole.
-    if (Array.isArray(s.parts) && s.parts.length > 1) {
+    // 2.95: rules.shards runs here too, one shard or more (s.shards); a part's measured peak (rules.peak) is what it needs.
+    if (Array.isArray(s.parts) && (s.parts.length > 1 || (s.shards && s.parts.length))) {
       const plan = splitPlan(cfg.focus || {}, { root, engine, env });
+      const stats = cfg.peak && !cfg.focus?.splitGb ? partStats(root, engine) : null;
+      const parts = s.parts.map((p) => (stats?.[p.filter]?.peakGb ? { ...p, gb: stats[p.filter].peakGb } : p));
+      const what = s.shards ? 'shard' : 'focus, group';
       const timedOut = (n, filter) => `the rules check timed out after ${cfg.timeoutMin} min (${tmo.why}), ${filter ? `in group ${filter}` : `split: ${n} of ${s.parts.length} group(s) done`}`;
+      // 2.86: each green part is kept under its own key (s.partKeys), also when a later part is red; 2.95: with the tree it ran on and its peak.
+      const keepGreens = (groups) => {
+        const list = groups.filter((gr) => (gr.status === 'pass' && s.partKeys?.[gr.filter]) || gr.peakGb).map((gr) => (gr.status === 'pass' && s.partKeys?.[gr.filter]
+          ? { key: s.partKeys[gr.filter], filter: gr.filter, seconds: gr.seconds, ...(gr.gb ? { gb: gr.gb } : {}), ...(gr.peakGb ? { peakGb: gr.peakGb } : {}), ...(s.shardTree ? { tree: s.shardTree } : {}) }
+          : { key: null, filter: gr.filter, peakGb: gr.peakGb }));
+        if (list.length) keepParts(root, engine, list);
+      };
       const finish = (groups, texts, splitAtOnce) => {
         const ms = Date.now() - t0;
-        // 2.86: each green part is kept under its own key (s.partKeys), also when a later part is red.
-        if (s.partKeys) keepParts(root, engine, groups.filter((gr) => gr.status === 'pass' && s.partKeys[gr.filter]).map((gr) => ({ key: s.partKeys[gr.filter], filter: gr.filter, seconds: gr.seconds, ...(gr.gb ? { gb: gr.gb } : {}) })));
+        keepGreens(groups);
         const redAt = groups.findIndex((gr) => gr.status === 'red');
         if (redAt >= 0) {
           const part = s.parts.find((x) => x.filter === groups[redAt].filter) || s.parts[redAt];
           const text = texts[redAt] || '';
-          const rec = { status: 'red', why: `the rules check failed (exit ${groups[redAt].code ?? '?'}, focus, group ${part.filter})`, ms, at: new Date().toISOString(), mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce, part: { filter: part.filter, command: part.command }, failures: failingTests(text).slice(0, 40), tail: text.split('\n').slice(-12).join('\n') };
+          const rec = { status: 'red', why: `the rules check failed (exit ${groups[redAt].code ?? '?'}, ${what} ${part.filter})`, ms, at: new Date().toISOString(), mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce, part: { filter: part.filter, command: part.command }, failures: failingTests(text).slice(0, 40), tail: text.split('\n').slice(-12).join('\n') };
           keep(root, engine, key, rec);
           return rec;
         }
-        const rec = { status: 'pass', why: `the rules check passed (${Math.round(ms / 1000)} s, focus, ${groups.length} groups${splitAtOnce > 1 ? `, up to ${splitAtOnce} at once` : ''})`, ms, at: new Date().toISOString(), mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce };
+        const rec = { status: 'pass', why: `the rules check passed (${Math.round(ms / 1000)} s, ${s.shards ? `${groups.length} shard(s)` : `focus, ${groups.length} groups`}${splitAtOnce > 1 ? `, up to ${splitAtOnce} at once` : ''})`, ms, at: new Date().toISOString(), mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce };
         keep(root, engine, key, rec);
         return rec;
       };
       let ran = null;
-      if (plan.max > 1) {
-        const job = { parts: s.parts, cwd: dir, env: runEnv, timeoutMs: cfg.timeoutMin * 60000, max: plan.max, gb: plan.gb, floorGb: plan.floorGb, ...(typeof freeGb === 'function' && Number.isFinite(Number(freeGb())) ? { freeGb: Number(freeGb()) } : {}) };
+      // admit decides before every start, so its runs go one at a time.
+      if (plan.max > 1 && !admit) {
+        const job = { parts, cwd: dir, env: runEnv, timeoutMs: cfg.timeoutMin * 60000, max: plan.max, gb: plan.gb, floorGb: plan.floorGb, ...(cfg.peak ? { peak: cfg.peak } : {}), ...(typeof freeGb === 'function' && Number.isFinite(Number(freeGb())) ? { freeGb: Number(freeGb()) } : {}) };
         log(`[engine-rules] ${engine}: split of ${s.parts.length} part(s) on ${short(sha)}: ${plan.why}`);
         const w = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'rules-parts.mjs')], { input: JSON.stringify(job), encoding: 'utf8', windowsHide: true, maxBuffer: 256 * 1024 * 1024, timeout: cfg.timeoutMin * 60000 + 30000 });
         try { ran = JSON.parse(String(w.stdout || '').trim().split('\n').pop()); } catch { ran = null; }
@@ -939,35 +1169,48 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
         else {
           for (const d of ran.decisions || []) log(`[engine-rules] ${engine}: ${d}`);
           const rs = ran.results.map((r) => r).filter(Boolean);
-          const groups = rs.map((r) => ({ filter: r.filter, seconds: r.seconds, status: r.status === 'error' ? 'error' : r.status, code: r.code }));
+          const groups = rs.map((r) => ({ filter: r.filter, seconds: r.seconds, status: r.status === 'error' ? 'error' : r.status, code: r.code, ...(r.peakGb ? { peakGb: r.peakGb } : {}) }));
           const bad = rs.find((r) => r.status === 'error');
+          if (bad && (s.shards || cfg.peak)) keepGreens(groups);
           if (bad) return { status: 'error', why: bad.timedOut ? timedOut(rs.filter((r) => r.status === 'pass').length, bad.filter) : `the rules check could not run: ${bad.errorCode || bad.why || '?'}`, ms: Date.now() - t0, mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce: ran.atOnce };
           return finish(groups, ran.results.map((r) => String(r?.text || '').replace(/\r\n?/g, '\n').trimEnd()), ran.atOnce);
         }
       }
       // One at a time (splitMax 1 or unset, the 2.84 way).
-      log(`[engine-rules] ${engine}: split of ${s.parts.length} part(s) on ${short(sha)}: one at a time (${plan.max > 1 ? 'the parallel runner failed' : 'rules.focus.splitMax is not set or 1'})`);
+      log(`[engine-rules] ${engine}: split of ${s.parts.length} part(s) on ${short(sha)}: one at a time (${admit ? 'each start waits for its memory' : plan.max > 1 ? 'the parallel runner failed' : 'rules.focus.splitMax is not set or 1'})`);
       const groups = [];
       const texts = [];
-      for (const part of s.parts) {
+      for (const part of parts) {
         const left = cfg.timeoutMin * 60000 - (Date.now() - t0);
         if (left <= 0) return { status: 'error', why: timedOut(groups.length), ms: Date.now() - t0, mode: s.mode, groups, splitAtOnce: 1 };
-        log(`[engine-rules] ${engine}: ${part.command} on ${short(sha)} (focus, group ${groups.length + 1} of ${s.parts.length})${co.sparse ? ' (sparse checkout)' : ''}`);
+        const ok = admit ? admit({ filter: part.filter }) : true;
+        if (ok !== true) { keepGreens(groups); return stopped(`${what} ${part.filter}: ${ok}`, { groups: groups.map(({ code, ...gr }) => gr), splitAtOnce: 1 }); }
+        log(`[engine-rules] ${engine}: ${part.command} on ${short(sha)} (${what} ${groups.length + 1} of ${s.parts.length})${co.sparse ? ' (sparse checkout)' : ''}`);
         const g0 = Date.now();
+        if (cfg.peak) peakClear(dir, cfg.peak);
         const rp = runLimitedSync(part.command, { cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: left, env: runEnv });
         const gs = { filter: part.filter, seconds: Math.round((Date.now() - g0) / 1000), status: rp.error ? 'error' : rp.status === 0 ? 'pass' : 'red', code: rp.status ?? rp.signal };
         // 2.86: one part at a time, so the machine monitor's samples while it ran are its own peak (none: nothing is guessed).
         if (s.partKeys) { const gb = peakFromHistory(readUsedHistory(root), g0, Date.now()); if (gb > 0) gs.gb = gb; }
+        const pg = cfg.peak ? peakRead(dir, cfg.peak) : null;
+        if (pg) gs.peakGb = pg;
         groups.push(gs);
         texts.push(`${rp.stdout || ''}${rp.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd());
-        if (rp.error) return { status: 'error', why: rp.error.code === 'ETIMEDOUT' ? timedOut(0, part.filter) : `the rules check could not run: ${rp.error.code || rp.error.message}`, ms: Date.now() - t0, mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce: 1 };
+        if (rp.error) { if (s.shards || cfg.peak) keepGreens(groups); return { status: 'error', why: rp.error.code === 'ETIMEDOUT' ? timedOut(0, part.filter) : `the rules check could not run: ${rp.error.code || rp.error.message}`, ms: Date.now() - t0, mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce: 1 }; }
         if (rp.status !== 0) return finish(groups, texts, 1);
       }
       return finish(groups, texts, 1);
     }
+    const statOf = s.mode === 'full' ? FULL_STAT : s.filter;
+    const ok = admit ? admit({ filter: statOf }) : true;
+    if (ok !== true) return stopped(`${s.mode === 'full' ? 'the full run' : statOf}: ${ok}`);
     log(`[engine-rules] ${engine}: ${s.command} on ${short(sha)}${s.mode === 'focus' ? ' (focus)' : ''}${co.sparse ? ' (sparse checkout)' : ''}; up to ${tmo.min} min (${tmo.why})`);
+    if (cfg.peak) peakClear(dir, cfg.peak);
     const r = runLimitedSync(s.command, { cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: cfg.timeoutMin * 60000, env: runEnv });
     const ms = Date.now() - t0;
+    // 2.95: the peak the test command wrote (rules.peak), kept per filter ('(full run)' for the whole command).
+    const pg = cfg.peak ? peakRead(dir, cfg.peak) : null;
+    if (pg) { keepParts(root, engine, [{ key: null, filter: statOf, peakGb: pg }]); log(`[engine-rules] ${engine}: ${statOf} took ${pg} GB at its peak (rules.peak)`); }
     const text = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd();
     if (r.error) return { status: 'error', why: r.error.code === 'ETIMEDOUT' ? `the rules check timed out after ${cfg.timeoutMin} min (${tmo.why})` : `the rules check could not run: ${r.error.code || r.error.message}`, ms, mode: s.mode };
     // 2.86: one joined command that passed passed every part in it.
@@ -990,10 +1233,10 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
 /**
  * The batch check before a land run. lanes: the train's lanes in order ({ task, branch, head }); chain(tip, lanes) ->
  * { head } | { error } builds the commit the batch would land as (unity-train.mjs chainOnTarget). Returns { ran, skipped?,
- * why, kept, dropped, runs, ms, green?, inputs, mode, filter }. 2.93: the batch runs first; only a red asks the target (a
- * kept result, else a run), then is bisected by prefixes. STUDIO_ENGINE_RULES_MAX_RUNS (12) bounds the runs.
+ * why, kept, dropped, runs, ms, green?, inputs, mode, filter }. The batch runs first; a red asks the target, then is bisected
+ * (STUDIO_ENGINE_RULES_MAX_RUNS, 12). 2.95: a full selection runs as rules.shards; admit goes to every run (the check ahead).
  */
-export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], extraFrom = [], full = false, owe = false, useCache = true, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt, slice = null, batchOnly = false } = {}) {
+export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], extraFrom = [], full = false, owe = false, useCache = true, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt, slice = null, batchOnly = false, admit = null } = {}) {
   const src = [...from, ...extraFrom];
   const res = { ran: false, kept: lanes.slice(), dropped: [], runs: 0, ms: 0, why: '', inputs: inputsPrint(cfg, src), mode: 'full', filter: '' };
   if (!cfg) return { ...res, skipped: true, why: 'no rules check is configured' };
@@ -1006,7 +1249,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     for (let i = 0; i < n; i += 1) {
       const part = lanes.slice(i * cfg.maxLanes, (i + 1) * cfg.maxLanes);
       log(`[engine-rules] ${engine}: slice ${i + 1} of ${n} (rules.maxLanes ${cfg.maxLanes}): ${part.map((l) => l.task).join(', ')}`);
-      const r = rulesGate({ engine, repo, tip, lanes: part, chain, cfg, from, extraFrom, full, owe, useCache, root, id: `${id}-s${i + 1}`, env, log, run, slice: { i: i + 1, n }, batchOnly });
+      const r = rulesGate({ engine, repo, tip, lanes: part, chain, cfg, from, extraFrom, full, owe, useCache, root, id: `${id}-s${i + 1}`, env, log, run, slice: { i: i + 1, n }, batchOnly, admit });
       if (batchOnly) all.ahead = all.ahead && all.ahead !== 'pass' ? all.ahead : r.ahead;
       all.ran = all.ran || r.ran;
       if (r.splitAtOnce) all.splitAtOnce = Math.max(all.splitAtOnce || 0, r.splitAtOnce);
@@ -1029,12 +1272,15 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
   // 2.86: the systems rules.focus.auto finds on the target and in the batch (a system the batch adds is one).
   const sys = cfg.focus?.auto ? autoSystems({ repo, shas: [headOk ? first.head : null, tip], auto: cfg.focus.auto, shared: cfg.focus.shared || [] }) : null;
   for (const b of cfg.focusBad || []) log(`[engine-rules] ${engine}: ${b}`);
-  if (sys?.skipped.length) log(`[engine-rules] ${engine}: rules.focus.auto: folder(s) ${sys.skipped.slice(0, 5).join(', ')} under ${cfg.focus.auto.root} are not systems (a name may hold only letters, digits, . _ -)`);
+  if (sys?.skipped.length) log(`[engine-rules] ${engine}: rules.focus.auto: folder(s) ${sys.skipped.slice(0, 5).join(', ')} under ${autosOf(cfg.focus.auto).map((a) => a.root || a.from).join(', ')} are not systems (a name may hold only letters, digits, . _ -)`);
   const sel = rulesSelection({ changed: headOk ? changedPaths(repo, tip, first.head) : null, cfg, full: Boolean(due), fullWhy: due, autoNames: sys ? sys.names : null });
   res.mode = sel.mode;
   res.filter = sel.filter.slice(0, 300);
   res.selWhy = String(sel.why || '').slice(0, 400);
   res.parts = Array.isArray(sel.parts) ? sel.parts.length : 1;
+  // 2.95: a full selection with rules.shards runs as shards; without rules.shards.rest it is not a full run (mode 'shards').
+  const sharded = sel.mode === 'full' && Boolean(cfg.shards);
+  if (sharded && !cfg.shards.rest) { res.mode = 'shards'; res.selWhy = `${res.selWhy}; run as shards without rules.shards.rest: not a full run`.slice(0, 400); }
   if (cfg.focus || sel.unchanged) log(`[engine-rules] ${engine}: ${sel.mode} run: ${sel.why}${sel.filter ? ` (${res.filter})` : ''}`);
   for (const b of sel.ignoreBad || []) log(`[engine-rules] ${engine}: rules.focus.ignore pattern ${JSON.stringify(b).slice(0, 120)} is not a valid regex; skipped`);
   // rules.focus.split: seconds of each group over this batch's uncached runs.
@@ -1060,12 +1306,21 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
       if (k.key) keys[p.filter] = k.key;
     }
     if (!todo.length) return { status: 'pass', why: `every part has a kept green (${ps.length})`, cached: true, mode: 'focus', allKept: true };
-    const r = run({ engine, repo, sha, cfg, from, extraFrom, sel: { ...subSel(todo), partKeys: keys }, root, id, env, log, useCache });
+    const r = run({ engine, repo, sha, cfg, from, extraFrom, sel: { ...subSel(todo), partKeys: keys }, root, id, env, log, useCache, admit });
     // One part run alone is named as the red part (a run of several parts names its own red group when split).
     return r.status === 'red' && !r.part && todo.length === 1 ? { ...r, part: { filter: todo[0].filter, command: todo[0].command } } : r;
   };
+  const atShards = (sha, ps) => {
+    const r = shardsRun({ engine, repo, sha, cfg, from, extraFrom, only: ps ? ps.map((p) => p.filter) : null, root, id, env, log, useCache, admit, run });
+    const x = r.shards || {};
+    const t = res.shards || { n: 0, kept: 0, keptOther: 0, ran: 0, complete: Boolean(cfg.shards.rest), keep: cfg.shards.keep };
+    res.shards = { ...t, n: Math.max(t.n, x.n || 0), kept: t.kept + (x.kept || 0), keptOther: t.keptOther + (x.keptOther || 0), ran: t.ran + (x.ran || 0), ...(x.fresh ? { fresh: true } : {}) };
+    res.parts = Math.max(res.parts || 1, x.n || 0);
+    res.reused += x.kept || 0;
+    return r;
+  };
   const at = (sha, ps = null, what = 'the batch') => {
-    const r = perPart ? atParts(sha, ps || allParts, what) : run({ engine, repo, sha, cfg, from, extraFrom, sel, root, id, env, log, useCache });
+    const r = perPart ? atParts(sha, ps || allParts, what) : sharded ? atShards(sha, ps) : run({ engine, repo, sha, cfg, from, extraFrom, sel, root, id, env, log, useCache, admit });
     if (r.allKept) return r;
     // 2.85: a kept result is said in the log (a restarted train reusing a green tree is not a silent skip).
     if (r.cached) log(`[engine-rules] ${engine}: rules ${r.status} cached for ${short(sha)} (${r.mode || sel.mode}, kept result of this tree: not run again)`);
@@ -1100,7 +1355,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
   // 2.90: rules.first, a test filter run before everything else: red, its culprit is refused at once with the failing names.
   if (cfg.first) {
     const fsel = { mode: 'first', filter: cfg.first.filter, command: cfg.first.command };
-    const atF = (sha) => { const r = run({ engine, repo, sha, cfg, from, extraFrom, sel: fsel, root, id: `${id}-first`, env, log, useCache }); if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; } return r; };
+    const atF = (sha) => { const r = run({ engine, repo, sha, cfg, from, extraFrom, sel: fsel, root, id: `${id}-first`, env, log, useCache, admit }); if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; } return r; };
     let onTip = null;
     let left = lanes.slice();
     while (left.length && res.runs < maxRuns) {
@@ -1109,7 +1364,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
       const r = atF(c.head);
       log(`[engine-rules] ${engine}: rules.first (${cfg.first.filter}) on ${left.map((l) => l.task).join(' + ')}: ${r.status}`);
       // 2.94: a check ahead runs the batch only and judges no lane.
-      if (batchOnly && r.status !== 'pass') return { ...res, ahead: r.status, why: r.why };
+      if (batchOnly && r.status !== 'pass') return { ...res, ahead: r.status, why: r.why, ...(r.stopped ? { stopped: true } : {}) };
       if (batchOnly) break;
       if (r.status !== 'red') break;
       onTip = onTip || atF(tip);
@@ -1147,7 +1402,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     first = null;
     if (whole.error || !whole.head) { res.why = `the batch could not be built for the rules check (${whole.error || 'no head'})`; break; }
     const r = at(whole.head);
-    if (batchOnly) return { ...res, ahead: r.status, why: r.why, ...(r.status === 'pass' ? { green: whole.head } : {}) };
+    if (batchOnly) return { ...res, ahead: r.status, why: r.why, ...(r.status === 'pass' ? { green: whole.head } : {}), ...(r.stopped ? { stopped: true } : {}) };
     if (r.status === 'pass') { res.green = whole.head; break; }
     // The first batch run that timed out or could not run judges no lane and is counted, as a red target is.
     const tmoBatch = rounds++ === 0 && r.status !== 'red';
@@ -1156,7 +1411,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
       base = onTarget();
       log(`[engine-rules] ${engine}: the batch is red; on the target itself the check is ${base.status}${base.cached || base.allKept ? ' (a kept result)' : ''}`);
       // A full pass on the target is the backstop for focused runs (fullEveryHours).
-      if (base.status === 'pass' && sel.mode === 'full' && cfg.focus && !perPart) writeCache(root, engine, (j) => { j.lastFullAt = new Date().toISOString(); });
+      if (base.status === 'pass' && sel.mode === 'full' && (base.mode || 'full') === 'full' && cfg.focus && !perPart) writeCache(root, engine, (j) => { j.lastFullAt = new Date().toISOString(); });
     }
     const no = tmoBatch ? { ...r, where: 'the batch' } : base.status !== 'pass' ? { ...base, where: 'the target itself' } : null;
     if (no) {
@@ -1181,7 +1436,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     let bad = r;
     let stuck = false;
     // 2.86: per part, a prefix runs only the red part's filter (the other parts were green on the whole batch).
-    const redPart = perPart && r.part?.filter ? allParts.filter((p) => p.filter === r.part.filter) : null;
+    const redPart = perPart && r.part?.filter ? allParts.filter((p) => p.filter === r.part.filter) : sharded && r.part?.filter ? [{ filter: r.part.filter }] : null;
     while (hi - lo > 1) {
       if (res.runs >= maxRuns) { stuck = true; break; }
       const mid = Math.floor((lo + hi) / 2);
@@ -1202,7 +1457,8 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
   if (groupSecs.size) res.groups = [...groupSecs.entries()].map(([filter, seconds]) => ({ filter, seconds }));
   if (!res.why) res.why = res.dropped.length ? `${res.dropped.length} lane(s) refused by the rules check, ${set.length} go to the land run` : `the rules check is green for ${set.map((l) => l.task).join(', ')}`;
   if (sel.mode === 'focus') res.why += ` (focus: ${res.filter})`;
-  try { emitEvent({ type: 'engine.rules', agent: env.STUDIO_LOCK_OWNER || 'gates', track: `engine:${engine}`, status: res.dropped.length ? 'warn' : 'ok', msg: `${engine} rules check: ${res.why}`.slice(0, 400), meta: { engine, runs: res.runs, ms: res.ms, kept: set.map((l) => l.task), dropped: res.dropped.map((d) => d.lane.task), green: Boolean(res.green), mode: res.mode, why: res.selWhy, parts: res.parts, ...(perPart ? { reused: res.reused, newParts: res.newParts || 0 } : {}), splitAtOnce: res.splitAtOnce || 1, filter: res.filter, ...(res.groups ? { groups: res.groups } : {}), ...(slice ? { slice: `${slice.i}/${slice.n}` } : {}) } }); } catch { /* the check's result stands without its event */ }
+  if (res.shards) res.why += ` (${res.shards.n} shard(s), ${res.shards.kept} kept${res.shards.keptOther ? `, ${res.shards.keptOther} from another tree` : ''}${res.shards.complete ? '' : '; no rules.shards.rest: not a full run'})`;
+  try { emitEvent({ type: 'engine.rules', agent: env.STUDIO_LOCK_OWNER || 'gates', track: `engine:${engine}`, status: res.dropped.length ? 'warn' : 'ok', msg: `${engine} rules check: ${res.why}`.slice(0, 400), meta: { engine, runs: res.runs, ms: res.ms, kept: set.map((l) => l.task), dropped: res.dropped.map((d) => d.lane.task), green: Boolean(res.green), mode: res.mode, why: res.selWhy, parts: res.parts, ...(perPart ? { reused: res.reused, newParts: res.newParts || 0 } : {}), splitAtOnce: res.splitAtOnce || 1, filter: res.filter, ...(res.groups ? { groups: res.groups } : {}), ...(slice ? { slice: `${slice.i}/${slice.n}` } : {}), ...(res.shards ? { shards: res.shards } : {}) } }); } catch { /* the check's result stands without its event */ }
   return res;
 }
 
@@ -1256,6 +1512,20 @@ export async function rulesPlan(root, { engine = 'unity', branches = [], env = p
     }
     res.minutes = unknown ? null : Math.round(secs / 6) / 10;
     res.unknownRuns = unknown;
+  } else if (sel.mode === 'full' && cfg.shards) {
+    // 2.95: a full run as shards: each shard on the target and the batch, kept or not, and its measured peak.
+    const onTip = new Map(shardsState(root, engine, { repo: s.repo, cfg, sha: tip, src: from }).map((x) => [x.filter, x]));
+    const onHead = shardsState(root, engine, { repo: s.repo, cfg, sha: c.head, src: from });
+    let secs = 0; let unknown = 0;
+    res.shards = { complete: Boolean(cfg.shards.rest), keep: cfg.shards.keep, fresh: shardsFreshDue(root, engine, cfg), list: [] };
+    for (const x of onHead) {
+      const t = onTip.get(x.filter);
+      if (!x.kept) { if (x.seconds) secs += x.seconds; else unknown += 1; }
+      res.shards.list.push({ filter: x.filter, target: !t ? 'new in the batch' : t.kept ? `kept green (${t.kept})` : 'runs', batch: x.kept ? `kept green (${x.kept})` : 'runs', ...(x.peakGb ? { peakGb: x.peakGb } : {}), ...(x.seconds ? { seconds: x.seconds } : {}) });
+    }
+    res.parts = res.shards.list.map((x) => ({ filter: x.filter }));
+    res.minutes = unknown ? null : Math.round(secs / 6) / 10;
+    res.unknownRuns = unknown;
   } else {
     // A whole run: the target's kept result (this tree, command, inputs) answers its half.
     const print = inputsPrint(cfg, from);
@@ -1268,7 +1538,10 @@ export async function rulesPlan(root, { engine = 'unity', branches = [], env = p
     res.parts = (Array.isArray(sel.parts) ? sel.parts : [{ filter: sel.filter || '(all)' }]).map((p) => ({ filter: p.filter }));
     res.minutes = median === null ? null : Math.round(runs * median * 10) / 10;
     res.runs = runs;
+    const fp = rulesPeakGb(root, engine, cfg);
+    if (fp) res.fullPeakGb = fp;
   }
+  if (plan && cfg.peak) res.planGb = splitPlan(cfg.focus, { root, engine, env, peakGb: rulesPeakGb(root, engine, cfg) }).gb;
   res.median = median;
   return res;
 }
@@ -1278,13 +1551,18 @@ export function rulesPlanText(r) {
   const L = [`Rules check plan for ${r.branches.join(' + ') || 'no branch'} on ${r.target} at ${short(r.tip)}: ${sel.mode}${sel.mode === 'focus' ? ` (${sel.filter.slice(0, 200)})` : ''}`, `  why: ${sel.why}`];
   for (const b of r.focusBad) L.push(`  setting problem: ${b}`);
   if (r.left.length) L.push(`  not in this batch: ${r.left.join('; ')}`);
-  if (r.perPart) {
+  if (r.shards) {
+    L.push(`  a full run as ${r.shards.list.length} shard(s) (rules.shards, keep "${r.shards.keep}")${r.shards.complete ? ' with rules.shards.rest: a full run' : ': rules.shards has no rest, so this is NOT a full run (a test no shard filter matches does not run; the land run is not told full and the owed full run stays owed)'}${r.shards.fresh ? `; this run reuses no green from another tree (${r.shards.fresh})` : ''}:`);
+    for (const x of r.shards.list) L.push(`    ${x.filter}: target ${x.target}; batch ${x.batch}${x.seconds ? `; last ${Math.round(x.seconds / 6) / 10} min` : ''}${x.peakGb ? `; measured peak ${x.peakGb} GB` : '; peak not measured'}`);
+    L.push(`  expected: ${r.minutes === null ? `unknown (${r.unknownRuns} shard run(s) with no recorded time)` : `about ${r.minutes} min`} of rules check before the land run`);
+  } else if (r.perPart) {
     L.push(`  parts (${r.parts.length}), results kept per part:`);
     for (const p of r.parts) L.push(`    ${p.filter}: target ${p.target}; batch ${p.batch}${p.seconds ? `; last ${Math.round(p.seconds / 6) / 10} min` : ''}${p.gb ? `; peak ${p.gb} GB` : ''}${p.overGb ? ` (over the ${p.overGb} GB a part is planned for: rules.focus.splitGb)` : ''}`);
     L.push(`  expected: ${r.minutes === null ? `unknown (${r.unknownRuns} part run(s) with no recorded time)` : `about ${r.minutes} min`} of rules check before the land run`);
   } else {
     L.push(`  ${r.parts.length > 1 ? `parts (${r.parts.length}): ${r.parts.map((p) => p.filter).join(', ')}` : 'one run per commit'}; batch: ${r.batchKept ? 'kept result' : 'runs'}; target (asked only if the batch is red): ${r.targetKept ? 'kept green' : 'runs'}`);
     L.push(`  expected: ${r.minutes === null ? 'unknown (no recorded run yet)' : `about ${r.minutes} min (${r.runs} run(s) at the ${r.median} min median of recorded runs)`}`);
+    if (r.fullPeakGb) L.push(`  measured peak of a full run: ${r.fullPeakGb} GB (rules.peak)`);
   }
   L.push('  (nothing was run; a red batch adds runs on the target and to find the branch)');
   return L.join('\n');
@@ -1315,10 +1593,18 @@ async function cli(argv) {
     // Variable names only: their values may be private.
     console.log(`[engine-rules] env: ${vars.join(', ') || 'none'}; paths: ${cfg.paths.join(', ') || 'the whole tree'}; large files: ${cfg.lfs ? 'checked out' : 'skipped'}; share: ${cfg.share.join(', ') || 'none'}`);
     console.log(`[engine-rules] focus: ${cfg.focus ? `${cfg.focus.test} with ${cfg.focus.map.length} map entr${cfg.focus.map.length === 1 ? 'y' : 'ies'}${cfg.focus.smoke ? `, smoke ${cfg.focus.smoke}` : ''}; a full run every ${cfg.focus.fullEveryHours} h (last full pass: ${readCache(root, engine).lastFullAt || 'none'})` : 'off (every run is the full command)'}`);
-    if (cfg.focus?.auto) console.log(`[engine-rules] auto: systems are the folders under ${cfg.focus.auto.root}; paths ${cfg.focus.auto.paths.join(', ')}; filter ${cfg.focus.auto.filter}${Object.keys(cfg.focus.auto.filters).length ? `; ${Object.keys(cfg.focus.auto.filters).length} filter(s) by name` : ''}${cfg.focus.auto.inputs.length ? `; inputs ${cfg.focus.auto.inputs.join(', ')}` : ''}`);
+    for (const a of autosOf(cfg.focus?.auto)) console.log(`[engine-rules] auto: systems are ${[a.root ? `the folders under ${a.root}` : '', a.from ? `the names that fit ${a.from}` : ''].filter(Boolean).join(' and ')}; paths ${a.paths.join(', ')}; filter ${a.filter}${Object.keys(a.filters).length ? `; ${Object.keys(a.filters).length} filter(s) by name` : ''}${a.inputs.length ? `; inputs ${a.inputs.join(', ')}` : ''}`);
     if (cfg.focus?.shared) console.log(`[engine-rules] shared (every part reads them; a change runs in full): ${cfg.focus.shared.join(', ')}`);
     for (const b of cfg.focusBad || []) console.log(`[engine-rules] ${b}`);
     if (cfg.focus) console.log(`[engine-rules] ignore: ${cfg.focus.ignore.length ? cfg.focus.ignore.map((p) => { try { new RegExp(p); return p; } catch { return `${p} (not a valid regex: skipped)`; } }).join(', ') : 'none'}`);
+    // 2.95: the shards (each with its kept green on the target and its measured peak) and the peak file.
+    if (cfg.peak) console.log(`[engine-rules] peak: read from ${cfg.peak.file} in the test checkout after each test command${cfg.peak.match ? ` (match ${cfg.peak.match})` : ''}; a full run's measured peak: ${partStats(root, engine)[FULL_STAT]?.peakGb ? `${partStats(root, engine)[FULL_STAT].peakGb} GB` : 'none yet'}${cfg.focus?.splitGb ? ' (rules.focus.splitGb is set: that number is used)' : ''}`);
+    if (cfg.shards) {
+      const fresh = shardsFreshDue(root, engine, cfg);
+      console.log(`[engine-rules] shards: a full run is one command per shard (${cfg.shards.test}); ${cfg.shards.rest ? `rest ${cfg.shards.rest}: a sharded run is a full run` : 'no rest: a sharded run is NOT a full run (a test no shard filter matches never runs), so it never tells the land run STUDIO_RULES_MODE=full and never counts as the owed full run; set rules.shards.rest'}; keep "${cfg.shards.keep}"${cfg.shards.keep === 'reads' ? ` (a run that reuses nothing from another tree at least every ${cfg.shards.freshEveryHours} h; ${fresh ? `due: ${fresh}` : `last ${readCache(root, engine).shardsFreshAt}`})` : ' (a green is kept for the exact tree it ran on)'}`);
+      const tipS = out(git(s.repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${s.target}^{commit}`));
+      if (tipS) for (const x of shardsState(root, engine, { repo: s.repo, cfg, sha: tipS, src: [s.folder, s.repo].filter(Boolean) })) console.log(`[engine-rules]   shard ${x.filter}: ${x.kept ? `kept green on ${s.target} (${x.kept})` : `no kept green on ${s.target}`}; ${x.peakGb ? `measured peak ${x.peakGb} GB` : 'peak not measured'}`);
+    }
     return 0;
   }
   const sha = out(git(s.repo, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`));
@@ -1330,10 +1616,10 @@ async function cli(argv) {
   const sel = rulesSelection({ changed: tip ? changedPaths(s.repo, tip, sha) : null, cfg, full: Boolean(due), fullWhy: due, autoNames: sys ? sys.names : null });
   for (const b of sel.ignoreBad || []) console.error(`[engine-rules] ${engine}: rules.focus.ignore pattern ${JSON.stringify(b).slice(0, 120)} is not a valid regex; skipped`);
   const log = (m) => console.error(m);
-  const res = outsideTrain(root, engine, () => runRulesAt({ engine, repo: s.repo, sha, cfg, sel, from: [s.folder, s.repo].filter(Boolean), root, id: 'cli', log, useCache: !argv.includes('--fresh') }), { log });
-  if (argv.includes('--json')) console.log(JSON.stringify({ ...res, mode: sel.mode, filter: sel.filter.slice(0, 300) }));
+  const res = outsideTrain(root, engine, () => (sel.mode === 'full' && cfg.shards ? shardsRun : runRulesAt)({ engine, repo: s.repo, sha, cfg, sel, from: [s.folder, s.repo].filter(Boolean), root, id: 'cli', log, useCache: !argv.includes('--fresh') }), { log });
+  if (argv.includes('--json')) console.log(JSON.stringify({ ...res, mode: res.shards ? res.mode : sel.mode, filter: sel.filter.slice(0, 300) }));
   else {
-    console.log(`[engine-rules] ${res.status.toUpperCase()} ${engine} at ${short(sha)} (${sel.mode}${sel.filter ? `: ${sel.filter.slice(0, 300)}` : ''}): ${res.why}${res.cached ? ' (kept result for this tree)' : ''}`);
+    console.log(`[engine-rules] ${res.status.toUpperCase()} ${engine} at ${short(sha)} (${res.shards ? `${res.mode}, ${res.shards.n} shard(s), ${res.shards.kept} kept` : sel.mode}${sel.filter ? `: ${sel.filter.slice(0, 300)}` : ''}): ${res.why}${res.cached ? ' (kept result for this tree)' : ''}`);
     if (res.failures?.length) console.log(`[engine-rules] failing: ${res.failures.join(', ')}`);
     if (res.tail) console.log(`[engine-rules] its last lines:\n${res.tail}`);
   }

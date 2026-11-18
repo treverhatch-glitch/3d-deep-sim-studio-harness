@@ -26,7 +26,7 @@ import { writeFocus, visionFor } from './focus.mjs';
 import { visionFixIds, visionFirst, mayFileVisionFix, parentIsVisionFix } from './vision-fix.mjs';
 import { PLAYER_TYPES } from './vision-card.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
-import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal, laneEntries, proposalState } from './task-hold.mjs';
+import { inferLaneAtAdd, laneRequired, holdReason, queuedHeldWhy, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal, laneEntries, proposalState } from './task-hold.mjs';
 import { stopIfOverBudget, overBudget as overBudgetOf } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
@@ -460,6 +460,11 @@ export function startTask(taskId, agent = null, { model = null, force = false, d
   if (stop) return { error: 'stopped', message: `The studio is stopped (by ${stop.by}${stop.reason ? `: ${stop.reason}` : ''}). Don't start work: finish or hand back what you hold (task pause <ID> --note "..."), then wait. A person resumes it with: npm run task -- resume --by <name>` };
   // Dependencies, parking and a stop's cooldown (harness/task-hold.mjs). Work already in progress may continue.
   const held = holdReason(taskId, parseNextQueue(), Date.now(), undefined, process.env.STUDIO_ROLE || null);
+  if (held && !force) {
+    // 2.95 (d): a queued branch that waits for another task is refused even when the task is in progress.
+    const qh = queuedHeldWhy(taskId, parseNextQueue());
+    if (qh) return { error: 'held', message: startRefusalWords(taskId, { kind: 'held', why: qh }) };
+  }
   if (held && !force && !parseNextQueue().inProgress.some((t) => t.id === taskId)) return { error: 'held', message: startRefusalWords(taskId, { kind: 'held', why: held }) }; // 2.84: the launcher says the same words
   // A task in progress whose lane is queued for the merge train is its lane agent's until it lands or leaves the queue
   // (--force: a person).
@@ -2199,7 +2204,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         const pre = completeTask(targetId, '', whoAmI(flags), { unityTrainCheck: true, noop: noopFlag });
         if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
         if (pre.error) { console.error(pre.message); process.exit(1); }
-        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { engine: trainEngine, task: pre.id, agent: whoAmI(flags), alone: flags.alone ? true : null, branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '', tag: doneTag === null ? null : doneTag, again: Boolean(flags.again), title: (() => { try { const q1 = parseNextQueue(); return [...q1.inProgress, ...q1.backlog].find((t) => t.id === pre.id)?.title || ''; } catch { return ''; } })() });
+        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { engine: trainEngine, task: pre.id, agent: whoAmI(flags), alone: flags.alone ? true : null, branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '', tag: doneTag === null ? null : doneTag, again: Boolean(flags.again), waits: (await import('./task-hold.mjs')).afterWaits(pre.id, parseNextQueue()), title: (() => { try { const q1 = parseNextQueue(); return [...q1.inProgress, ...q1.backlog].find((t) => t.id === pre.id)?.title || ''; } catch { return ''; } })() });
         // 2.85: --again queues a branch the engine train handed back unchanged (logged as task.train.<x>.requeued_unchanged).
         (r.ok ? console.log : console.error)(r.message);
         const wait = r.ok ? (await import('./task-hold.mjs')).afterWaits(pre.id, parseNextQueue()) : [];

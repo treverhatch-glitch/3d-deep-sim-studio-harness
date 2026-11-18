@@ -18,6 +18,7 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-346 — timing checks fail under load in the online runs · open
 - **Evidence:** 16 November, four runs queued at once: "task lane gives each builder its own folder", "the supervisor starts a fresh agent per task", "2.77.0 (p, P9.6)" and "2.69.0 (q, 1)" each failed once and passed on the re-run of the failed job. Each re-run costs about 40 minutes.
 - **Workaround:** re-run the failed job and note it on the pull request. Do not queue four runs at once.
+- **2.95:** "with --lanes auto, each lane gets its own agent holding that folder" failed in two of the three online runs of 2.94 (Windows) and passed on the re-run each time.
 - **2.94:** seen once more, on main's run after the 2.93 merge, on Windows: "a ping starts STUDIO_DIRECTOR_CMD once, then waits out the cooldown" (starts=0). It passed on the same tree in the pull request's run an hour earlier.
 - **2.92:** "task lane gives each builder its own folder" now waits for the thing itself. The same change to "the supervisor starts a fresh agent per task" was withdrawn (the next check, "--lanes auto", then failed 2 runs in 8: only one lane got its agent, even with a 90 s wait; cause not found). Left: that check, `2771a`, the tester drive, `290b` second gate, `277p` "someone moves main", "two builders without lanes", "--lanes auto".
 - **2.91:** three were given a hand-shake in place of a clock (`269q`, `2601m`, `277p` B-before-A). Left: the two supervisor-window checks, `2771a`, the tester drive, and two seen under load on 17 November (`290b` second gate, `277p` "someone moves main").
@@ -89,8 +90,20 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 
 ### P-370 — on Windows a train cancel started from a cut-down environment could not read the process list · open (the unit fixed 2.94, before the merge)
 - **Evidence:** pull request 96, second online run and its re-run, Windows only: `294a` (g) red twice the same way. `train cancel` said "the process list could not be read: ETIMEDOUT" (the one PowerShell call took over 16 s), so the train was not ended and neither was the check ahead. `284u` runs the same cancel on the same runner and passes: it passes Windows' own system variables through to its helpers (2.84), and `294a` did not.
-- **Fix:** `294a` passes them through, as the fifteen engine units since 2.84 do. Nothing in `harness/` changed.
+- **Fix:** `294a` passes them through, as the fifteen engine units since 2.84 do. Nothing in `harness/` changed. The third online run passed with them, every check of `294a` green on Windows.
 - **Open:** `psEnv` (2.84) is meant to give PowerShell those variables when they are missing, and here it did not suffice; which variable is missing is not known. A cancel run from a real shell has them all. Not looked into further: no Windows machine to try it on.
+
+### P-371 — one full rules run was one process that outgrew the machine · fixed 2.95 (as settings)
+- **Evidence:** a live studio, 18 November: 6.7, 14 and 18.9 GB for one full run of its rules tests, on 31.8 GB where a land run needs about 21 GB free. Land runs waited, the owed full run stood in the trains' way, the check ahead could not start. The cause on the game side (every test fixture kept its data for the whole run) was found the same day.
+- **Fix:** `rules.shards` runs a full check one shard at a time with a green kept per shard; `rules.peak` reads the test run's own peak. `qa/selftest-295a.mjs`. Full only with `rest`; the harness cannot check that filter.
+
+### P-372 — a held, queued branch kept getting new porter sessions · fixed 2.95
+- **Evidence:** a live studio: a task whose branch was queued for the engine train and waited for another task (`task after`) was started again and again; each session queued the same branch and the train left it out. A task stays in progress after `task done --train`, and a start on a task in progress skipped the hold.
+- **Fix:** no session is started on it, `task start` refuses it in plain words, and queueing the same branch at the same head changes nothing. `qa/selftest-295d.mjs`.
+
+### P-373 — git allow-rules for a studio path with a space are not quoted · open (untested)
+- **Evidence:** found while writing `295c`: the `git -C <dir> ...` rules a start builds for agy and for Claude hold the lane's path unquoted. Whether the real tools match them against a quoted path is not known. A studio path without spaces is not affected.
+- **Workaround:** keep the studio in a path without spaces.
 
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 

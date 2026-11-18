@@ -103,8 +103,11 @@ export async function briefFacts({ root = REPO_ROOT, since = null, now = Date.no
     // 2.70.0 (w): stale lane copies the janitor proposed (harness/lane-disk.mjs).
   let staleLanes = '';
   try { staleLanes = (await import('./lane-disk.mjs')).staleLanesLine({ root, now }); } catch { staleLanes = ''; }
+  // 2.95 (b): "Systems ON: n of m" for each engine that sets engines.<x>.switches (harness/switches.mjs).
+  let switches = [];
+  try { switches = await (await import('./switches.mjs')).switchesLines({ root }); } catch { switches = []; }
   const lc = landedCounts(evs.filter(inWin), evs);
-  return { now, from: fromMs, workers, landed, landedWord: lc.measure, closedWithoutLanding: lc.closedWithoutLanding, bugs, unity, blockers, freeGb, heavy, ...(train ? { train } : {}), ...(machine ? { machine } : {}), ...(build ? { build } : {}), ...(staleLanes ? { staleLanes } : {}) };
+  return { now, from: fromMs, workers, landed, landedWord: lc.measure, closedWithoutLanding: lc.closedWithoutLanding, bugs, unity, blockers, freeGb, heavy, ...(train ? { train } : {}), ...(machine ? { machine } : {}), ...(build ? { build } : {}), ...(staleLanes ? { staleLanes } : {}), ...(switches.length ? { switches } : {}) };
 }
 
 const cut = (ids, k) => (ids.length <= k ? ids.join(', ') : `${ids.slice(0, k).join(', ')} +${ids.length - k} more`);
@@ -117,6 +120,7 @@ export function briefText(f, { maxWords = BRIEF_MAX_WORDS } = {}) {
     L.push(f.workers.length ? `Workers (${f.workers.length}): ${cut(f.workers.map((w) => `${w.role}${w.task ? ` ${w.task}` : ''}`), k)}.` : 'Workers: none running.');
     L.push(`${f.landedWord === 'closed' ? 'Closed' : 'Landed'} (${f.landed.length})${f.landed.length ? `: ${cut(f.landed, k)}` : ''}${f.closedWithoutLanding > 0 ? `; closed without a landing (${f.closedWithoutLanding})` : ''}. Bugs fixed (${f.bugs.length})${f.bugs.length ? `: ${cut(f.bugs, k)}` : ''}.`);
     L.push(f.unity ? `Unity: land ${f.unity.status}${f.unity.at ? ` ${String(f.unity.at).slice(11, 16)}` : ''}${f.unity.task ? ` (${cut(String(f.unity.task).split(','), Math.max(1, Math.min(k, 2)))})` : ''}.` : 'Unity: no land run recorded.');
+    for (const sw of f.switches || []) L.push(`${sw}.`);
     if (f.train) L.push(`${trainStatusLine(f.train, { short: true }).replace(/^Train \S+/, 'Train')}${Number(f.train.lanes) > 6 ? ' (STUDIO_TRAIN_MAX caps lanes)' : ''}.`);
     L.push(f.blockers.length ? `Blockers: ${f.blockers.map((b) => (b.ids ? `${b.text}: ${cut(b.ids, k)}` : b.text)).join('; ')}.` : 'Blockers: none.');
     if (f.machine) L.push(`${f.machine}.`);
