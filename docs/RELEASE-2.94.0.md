@@ -2,7 +2,7 @@
 
 The owner's three answers of 2026-11-18, to the questions 2.93 left open: yes to a rules check beside a land run, yes
 to removing the old status snapshot, and "up to you" on what the scorecard calls landed. Built on 2.93.0. Only this
-page and the one for 2.93.0 are kept; older release notes are in git history.
+page and the one for 2.95.0 are kept; older release notes are in git history.
 
 ## What the records said
 

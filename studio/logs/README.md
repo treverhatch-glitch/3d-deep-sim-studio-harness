@@ -2,11 +2,11 @@
 
 **2-minute read for the owner: the latest summary is first. Then open problems, then proposals waiting for you.**
 
-## Latest summary — 2026-11-18 (2.94)
-- **Done:** 2.93 is on `main` (one rules check per train, rules runs outside the train wait, the API pool and agy as engine porters, queue holds, slices and duplicates, a time limit ends the whole tree). The one studio on record still runs 2.92; its overseer has the upgrade note.
-- **In progress:** 2.94 (the next batch's rules check beside the land run, as a setting; "landed" on the scorecards is train work only; the old status snapshot and role loader removed) on a branch, merged when its online checks pass. Notes: docs/RELEASE-2.94.0.md, studio/notes/HANDOFF-2.94-2026-11-18.md.
-- **Untested:** 2.93 and 2.94 have not run on a real engine, on real agy or with a real API pool. `rules.ahead` is off by default for that reason.
-- **Open problems:** P-346 (timing checks under load), P-005 (GPU model), P-009 (no Unity on the maintainer's side).
+## Latest summary — 2026-11-18 (2.95)
+- **Done:** 2.94 (the next batch's rules check beside the land run, as a setting; "landed" is train work only) is built and its online checks pass. The one studio on record runs it, taken from the branch.
+- **In progress:** 2.95 on a branch, merged when its online checks pass: the full rules check in shards with a kept green per shard, the test run's own peak memory, a playtest build in one command with `PLAYTEST.md`, `Systems ON: n of m`, no session on a held and queued branch, a check that starts pool and agy porters end to end. Notes: docs/RELEASE-2.95.0.md, studio/notes/HANDOFF-2.95-2026-11-18.md.
+- **Untested:** 2.93, 2.94 and 2.95 have not run on a real engine, on real agy or with a real API pool. Every new setting is off until a studio sets it.
+- **Open problems:** P-370 (a train cancel from a cut-down environment on Windows), P-346 (timing checks under load), P-005 (GPU model), P-009 (no Unity on the maintainer's side).
 - **Waiting for your OK:** nothing from this round.
 
 ## The files
