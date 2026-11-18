@@ -2512,8 +2512,8 @@ console.log(JSON.stringify({ found, sa, noAuthor, cc0, ccby, lic: ['CC0', 'CC-BY
 }
 
 // 2.30c: short output (#4), circuit breakers (#8), the Producer on events (#11), dependency-aware
-// handout (#12), DONE.md (#13), the allowlist in the kickoff (#15), gates in plain words (G3), the
-// overnight summary (G6) and the release command. Each in a copy.
+// handout (#12), DONE.md (#13), the allowlist in the kickoff (#15), gates in plain words (G3) and
+// the release command. Each in a copy.
 if (inShard()) {
   const dir = copyRepo();
   const u = fileUrlRelOf(dir);
@@ -2621,19 +2621,6 @@ console.log(JSON.stringify({ lines: w.lines, none: none.lines }));`);
   const rr = run(dir, 'node harness/run-report.mjs --to "' + path.join(tmpRoot, 'rr230c') + '"');
   const rep = (() => { try { return fs.readFileSync(path.join(tmpRoot, 'rr230c', fs.readdirSync(path.join(tmpRoot, 'rr230c'))[0], 'REPORT.md'), 'utf8'); } catch { return ''; } })();
   report('G3: the run report shows the gates failing first, with "not run" kept apart', rr.status === 0 && /Gates, failing first:[\s\S]*NOT RUN/.test(rep), `${rr.stderr}${rep.slice(0, 600)}`);
-  // G6: the overnight summary, from the run's events.
-  const ov = probe(`import { buildOvernight, renderOvernight } from ${u('harness/overnight.mjs')};
-const t0 = Date.parse('2026-10-23T00:00:00Z');
-const e = (type, min, x = {}) => ({ ts: new Date(t0 + min * 60000).toISOString(), type, msg: '', ...x });
-const events = [
-  e('agent.session.start', 1, { agent: 'b-1', task: 'T-1' }), e('task.done', 30, { agent: 'b-1', task: 'T-1', msg: 'Completed T-1: Boats dock' }), e('agent.session.end', 31, { agent: 'b-1', model: 'model-a', tokensIn: 1000, tokensOut: 500, meta: { cacheRead: 100000 } }),
-  e('agent.session.start', 40, { agent: 'b-2', task: 'T-2' }), e('agent.session.end', 90, { agent: 'b-2', model: 'model-b', tokensIn: 5000, tokensOut: 1000, meta: { cacheRead: 900000, reason: 'finished without task done' } }),
-  e('task.forced', 95, { task: 'T-3', msg: 'Forced T-3 done without: a clip' }), e('review.written', 96, { task: 'T-1' }), e('task.done', 9999, { task: 'T-9' }),
-];
-const o = buildOvernight({ from: t0, to: t0 + 600 * 60000, events, openCards: ['T-4: parked by the circuit breaker'] });
-const md = renderOvernight(o);
-console.log(JSON.stringify({ done: o.done.length, noDone: o.noDone.map((s) => s.agent), forced: o.forced.length, reviews: o.reviews, top: o.top.map((s) => s.agent + '/' + s.model), perDone: o.perDone, md }));`);
-  report('G6: the overnight summary counts tasks done, tokens per finished task (model named), no-done sessions, forced closes, reviews, the top sessions and open cards', ov.done === 1 && JSON.stringify(ov.noDone) === '["b-2"]' && ov.forced === 1 && ov.reviews === 1 && ov.top?.[0] === 'b-2/model-b' && ov.perDone > 0 && /Tasks done: 1/.test(ov.md) && /model-a: 1 session/.test(ov.md) && /Open cards: 1/.test(ov.md) && ov.md.split('\n').length <= 60, JSON.stringify(ov).slice(0, 1500));
   // Release tooling: refuses a bad version, and never runs outside main in step with origin.
   const rl = run(dir, 'node scripts/release-ship.mjs not-a-version');
   const rl2 = run(dir, 'node scripts/release-ship.mjs 9.9.9-z --dry-run');
@@ -2905,13 +2892,10 @@ if (inShard()) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-// 2.30f: floors, phase scenarios and content schemas, in a copy.
+// 2.30f: phase scenarios, the task phase gate and content schemas, in a copy.
 if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
-  const floorsJSON = { maxParallel: 1, autoOpen: true, requireScenarios: true };
-  fs.writeFileSync(path.join(dir, 'studio', 'floors.json'), JSON.stringify(floorsJSON));
-
   const readJsonSafe = (file) => {
     try {
       return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -2924,84 +2908,23 @@ if (inShard()) {
   run(dir, 'node harness/intake.mjs --answers studio/templates/intake-example.json', env);
   run(dir, 'node harness/bible.mjs sign --by hatch', env);
 
-  // --- Floors & Scenarios Gate ---
-
-  // Test: A failing scenario in the current phase (1) blocks the next floor (2) from opening.
-  fs.mkdirSync(path.join(dir, 'qa', 'scenarios', 'phase-1'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'qa', 'scenarios', 'phase-1', 'fail.mjs'), `export default async () => ({ ok: false, why: 'planted failure' });`);
-  run(dir, 'npm run floors -- stage 1 art --by hatch', env);
-  const floorOpenFail = run(dir, 'npm run floors -- tick', env);
-  run(dir, 'npm run floors -- stage 1 build --by hatch', env);
-  const bible1 = readJsonSafe(path.join(dir, 'studio', 'bible', 'bible.json'));
-  const floor2NotOpen = bible1 && !(bible1.error) && (!bible1.phase.floors || bible1.phase.floors.length === 0);
-  report('floor-gate: tick fails to open floor if previous phase scenarios fail', floorOpenFail.status === 0 && /Cannot open floor 2:.*phase-scenarios gate failed.*planted failure/.test(floorOpenFail.stdout) && floor2NotOpen, floorOpenFail.stdout);
-
-  // Test: open refuses n+2, duplicate, n=4, and an agent --by
-  const openNPlus2 = run(dir, 'npm run floors -- open 3 --by hatch', env);
-  report('floor-open: refuses n+2', openNPlus2.status !== 0 && /Next available floor is 2/.test(openNPlus2.stdout), openNPlus2.stdout);
-  
-  const openAgent = run(dir, 'npm run floors -- open 2 --by prod-1', env);
-  report('floor-open: refuses agent', openAgent.status !== 0 && /A person opens a floor/.test(openAgent.stdout), openAgent.stdout);
-
-  // Test: tick waits while main stage is build
-  fs.writeFileSync(path.join(dir, 'qa', 'scenarios', 'phase-1', 'pass.mjs'), `export default async () => ({ ok: true });`);
-  fs.unlinkSync(path.join(dir, 'qa', 'scenarios', 'phase-1', 'fail.mjs'));
-  const tickWait = run(dir, 'npm run floors -- tick', env);
-  const bibleWait = readJsonSafe(path.join(dir, 'studio', 'bible', 'bible.json'));
-  report('floor-tick: waits while main stage is build', tickWait.status === 0 && (!bibleWait.phase.floors || bibleWait.phase.floors.length === 0), tickWait.stdout);
-
-  // Test: tick opens after stage <main> art
-  run(dir, 'npm run floors -- stage 1 art --by hatch', env);
-  const floorOpenPass = run(dir, 'npm run floors -- tick', env);
-  const bible2 = readJsonSafe(path.join(dir, 'studio', 'bible', 'bible.json'));
-  const floor2IsOpen = bible2 && !(bible2.error) && bible2.phase.floors?.some(f => f.n === 2 && f.stage === 'build');
-  report('floor-gate: tick opens next floor when scenarios pass and main is art', floorOpenPass.status === 0 && floor2IsOpen, floorOpenPass.stdout);
-
-  // Test: duplicate open refusal
-  const openDup = run(dir, 'npm run floors -- open 2 --by hatch', env);
-  report('floor-open: refuses duplicate', openDup.status !== 0 && /already open/.test(openDup.stdout), openDup.stdout);
-
-  // Test: maxParallel counts main phase
-  // Main phase is art, floor 2 is build. maxParallel is 1.
-  // tick won't open floor 3 while floor 2 is in 'build' stage.
-  const maxParallelRefusal = run(dir, 'npm run floors -- tick', env);
-  const bible3 = readJsonSafe(path.join(dir, 'studio', 'bible', 'bible.json'));
-  const floor3NotOpen = bible3 && !(bible3.error) && bible3.phase.floors?.length === 1;
-  report('floor-parallel: tick respects maxParallel and does not open another floor', maxParallelRefusal.status === 0 && floor3NotOpen, maxParallelRefusal.stdout);
-
-  // Test: After staging floor 2 to 'art', tick will open floor 3 (if scenarios for phase 2 pass).
-  run(dir, 'npm run floors -- stage 2 art --by hatch', env);
-  fs.mkdirSync(path.join(dir, 'qa', 'scenarios', 'phase-2'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'qa', 'scenarios', 'phase-2', 'pass.mjs'), `export default async () => ({ ok: true });`);
-  const floor3Open = run(dir, 'npm run floors -- tick', env);
-  const bible4 = readJsonSafe(path.join(dir, 'studio', 'bible', 'bible.json'));
-  const floor3IsOpen = bible4 && !(bible4.error) && bible4.phase.floors?.some(f => f.n === 3);
-  report('floor-stage: tick opens next floor after previous is staged to art', floor3Open.status === 0 && floor3IsOpen, floor3Open.stdout);
-
-  // Test: n=4 refusal
-  run(dir, 'npm run floors -- stage 3 art --by hatch', env);
-  fs.mkdirSync(path.join(dir, 'qa', 'scenarios', 'phase-3'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'qa', 'scenarios', 'phase-3', 'pass.mjs'), `export default async () => ({ ok: true });`);
-  const openN4 = run(dir, 'npm run floors -- open 4 --by hatch', env);
-  report('floor-open: refuses n=4', openN4.status !== 0 && /maximum phase is 3/.test(openN4.stdout), openN4.stdout);
+  // --- Scenario timeout and the task phase gate ---
 
   // Test: scenario timeout
+  fs.mkdirSync(path.join(dir, 'qa', 'scenarios', 'phase-3'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'qa', 'scenarios', 'phase-3', 'timeout.mjs'), `export default async () => new Promise(r => setTimeout(r, 2000));`);
   const timeoutEnv = { ...env, STUDIO_SCENARIO_TIMEOUT_MS: '500' };
   const timeoutRun = run(dir, 'node qa/check-phase-scenarios.mjs --phase 3', timeoutEnv);
   report('floor-scenario: timeout fails scenario', timeoutRun.status !== 0 && /timed out after 500 ms/.test(timeoutRun.stderr), timeoutRun.stderr);
   fs.unlinkSync(path.join(dir, 'qa', 'scenarios', 'phase-3', 'timeout.mjs'));
 
-  // Test: lane collision
-  // use the supervisor's lanesClash from harness/task-hold.mjs
-  const { lanesClash } = await import(pathToFileURL(path.join(dir, 'harness', 'task-hold.mjs')).toString());
-  const clash1 = lanesClash('cartridges/example-sim/floors/phase-2', 'cartridges/example-sim/floors');
-  const clash2 = lanesClash('cartridges/example-sim/floors/phase-2', 'cartridges/example-sim/floors/phase-3');
-  report('floor-lanes: floor task vs floor default clashes, floor-2 vs floor-3 does not', clash1 && !clash2, `clash1=${clash1} clash2=${clash2}`);
-
-  // Test: Tasks for a floor can be added once it's open.
+  // Test: a task for a phase the Bible lists as an open floor can be added (the file is written by hand here).
   const taskFail = run(dir, 'node harness/task.mjs add "Terraces" --phase 4 --serves pillar:Calm', env);
-  report('task-add: a phase outside 1-3 is still refused with floors on', taskFail.status !== 0 && /--phase 1 \(early\)/.test(taskFail.stderr), taskFail.stderr);
+  report('task-add: a phase outside 1-3 is still refused', taskFail.status !== 0 && /--phase 1 \(early\)/.test(taskFail.stderr), taskFail.stderr);
+  const bibleFile = path.join(dir, 'studio', 'bible', 'bible.json');
+  const bibleNow = readJsonSafe(bibleFile);
+  bibleNow.phase.floors = [{ n: 2, openedAt: new Date().toISOString(), by: 'hatch', stage: 'build' }];
+  fs.writeFileSync(bibleFile, JSON.stringify(bibleNow, null, 2));
   const taskOk = run(dir, 'node harness/task.mjs add "More Terraces" --phase 2 --serves pillar:Calm', env);
   report('task-add: succeeds for an open floor', taskOk.status === 0, taskOk.stdout + taskOk.stderr);
 

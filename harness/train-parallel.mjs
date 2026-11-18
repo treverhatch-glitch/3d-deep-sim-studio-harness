@@ -10,7 +10,7 @@
  * Imports nothing from train.mjs (no cycle); heavy.mjs only dynamically.
  */
 import { spawn } from 'node:child_process';
-import { busyWhy, ranNoCheck, busyWaitMs } from './train-busy.mjs';
+import { busyVerdict, busyWaitMs } from './train-busy.mjs';
 import { machineProfile, slotsFor, budgetState, jobClaim, admit, maxConcurrent } from './heavy-budget.mjs';
 import { isOff } from './helpers.mjs';
 
@@ -153,15 +153,9 @@ export async function runGatesWaitingAsync(once, { log = () => {}, label = 're-c
   for (;;) {
     tries += 1;
     const r = await once();
-    const text = `${r.stdout || ''}${r.stderr || ''}`;
-    const busy = r.status !== 0 ? busyWhy(text) : '';
-    const noCheck = r.status !== 0 && ranNoCheck(text);
-    const waited = now() - t0;
-    if (!busy || waited >= limit) {
-      if (busy) log(`${label}: still busy after ${Math.round(waited / 1000)} s (STUDIO_TRAIN_BUSY_WAIT_MIN): ${busy}`);
-      return { r, text, busy, noCheck: noCheck || Boolean(busy), tries, waitedMs: waited };
-    }
-    const step = Math.min(30000, Math.max(1000, Math.round(limit / 10)), Math.max(0, limit - waited));
+    const v = busyVerdict(r, { t0, limit, tries, label, now, log });
+    if (v.out) return v.out;
+    const { busy, step } = v;
     log(`${label}: busy, not red (${busy}); waiting ${Math.round(step / 1000)} s and running it again`);
     await sleep(step);
   }

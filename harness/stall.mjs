@@ -26,6 +26,7 @@ import { listLocks } from './lock.mjs';
 import { boardStates } from './train-deps.mjs';
 import { mainOf, snapshotDirty, notTheSessions } from './drift-baseline.mjs';
 
+import { streamUsages } from './futility.mjs';
 import { PLANNING_ROLES } from './planning-roles.mjs';
 import { jsonFileOf, numBlankDefault as num, readJsonOr as readJson, readJsonOrNull as rd } from './helpers.mjs';
 export { PLANNING_ROLES };
@@ -290,15 +291,8 @@ export function resetStall(agent) {
 
 /** Cumulative tokens from a stream-json log, newest Claude session only. */
 export function logTokens(log) {
-  let tin = 0; let tfresh = 0; let tout = 0; const seen = new Set();
-  for (const l of newestSessionPart(log).split(/\r?\n/)) {
-    const t = l.trim();
-    if (!t.startsWith('{')) continue;
-    let o; try { o = JSON.parse(t); } catch { continue; }
-    const u = o.message?.usage || o.usage;
-    if (!u) continue;
-    const id = o.message?.id;
-    if (id) { if (seen.has(id)) continue; seen.add(id); }
+  let tin = 0; let tfresh = 0; let tout = 0;
+  for (const u of streamUsages(newestSessionPart(log))) {
     const plain = (u.input_tokens ?? u.prompt_tokens ?? 0) + (u.cache_creation_input_tokens || 0);
     tfresh += plain;
     tin += plain + (u.cache_read_input_tokens || u.cached_input_tokens || 0);

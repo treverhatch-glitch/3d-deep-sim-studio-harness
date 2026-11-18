@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
-import { doneExit as out, flagValueOf, jsonFileOf, nowIso as now } from './helpers.mjs';
+import { doneExit as out, flagValueOf, jsonFileOf, nowIso as now, positionalOf } from './helpers.mjs';
 
 export const PROOF_DIR = path.join(REPO_ROOT, 'studio', 'proof');
 const file = jsonFileOf(PROOF_DIR);
@@ -94,12 +94,7 @@ export function proofStatus(id, since = 0) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const flag = flagValueOf(argv);
-  const pos = [];
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i].startsWith('--')) {
-      if (argv[i + 1] && !argv[i + 1].startsWith('--')) i++;
-    } else pos.push(argv[i]);
-  }
+  const pos = positionalOf(argv);
   const [cmd, id, a, b] = pos;
   if (cmd === 'add') out(addShot(id, a, b, flag('by') || undefined), (r) => `${id}: ${r.proof.shots.length} screenshot(s). Someone other than the builder checks them: npm run proof -- check ${id} --by <name> --verdict matches|wrong`);
   if (cmd === 'check') out(checkProof(id, { by: flag('by'), verdict: flag('verdict'), note: flag('note') || '' }), (r) => `${id}: ${r.proof.checks[r.proof.checks.length - 1].verdict}. See studio/proof/${id}.md`);

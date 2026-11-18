@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isTestPath, isTestConfig } from './test-weakening.mjs';
-import { toPosix } from './helpers.mjs';
+import { toPosix, walkCodeFiles } from './helpers.mjs';
 
 
 // One regex per message shape; the port is the first group that matched.
@@ -75,19 +75,7 @@ const PORT_LIT = [
   /\b(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{4,5})\b/,
 ];
 
-function walk(root, rel, out, depth = 0) {
-  if (depth > 12) return out;
-  let st;
-  try { st = fs.statSync(path.join(root, rel)); } catch { return out; }
-  if (st.isFile()) { if (CODE.test(rel)) out.push(toPosix(rel)); return out; }
-  let list = [];
-  try { list = fs.readdirSync(path.join(root, rel), { withFileTypes: true }); } catch { return out; }
-  for (const e of list) {
-    if (['node_modules', '.git', 'dist', 'build', '.lanes', '.studio', 'coverage'].includes(e.name)) continue;
-    walk(root, path.join(rel, e.name), out, depth + 1);
-  }
-  return out;
-}
+const walk = (root, rel, out) => walkCodeFiles(root, rel, out, CODE);
 
 /**
  * Test files and test-runner configs under `dirs` (relative to root) that hard-code a server port with strictPort or

@@ -99,9 +99,9 @@ export function successNorms(events, { weight = (e) => weightedTokens(e) } = {})
   return out;
 }
 
-/** A live session's weighted tokens from its stream-json log (cache reads at the meters' weight). */
-export function logWeightedTokens(text, w = cacheReadWeight()) {
-  let tin = 0; let tout = 0; let cache = 0; const seen = new Set();
+/** The usage record of each message in a stream-json log, a message counted once (by its id). */
+export function streamUsages(text) {
+  const out = []; const seen = new Set();
   for (const l of String(text || '').split(/\r?\n/)) {
     const t = l.trim();
     if (!t.startsWith('{')) continue;
@@ -110,6 +110,15 @@ export function logWeightedTokens(text, w = cacheReadWeight()) {
     if (!u) continue;
     const id = o.message?.id;
     if (id) { if (seen.has(id)) continue; seen.add(id); }
+    out.push(u);
+  }
+  return out;
+}
+
+/** A live session's weighted tokens from its stream-json log (cache reads at the meters' weight). */
+export function logWeightedTokens(text, w = cacheReadWeight()) {
+  let tin = 0; let tout = 0; let cache = 0;
+  for (const u of streamUsages(text)) {
     tin += (u.input_tokens ?? u.prompt_tokens ?? 0) + (u.cache_creation_input_tokens || 0);
     cache += u.cache_read_input_tokens || u.cached_input_tokens || 0;
     tout += u.output_tokens ?? u.completion_tokens ?? 0;

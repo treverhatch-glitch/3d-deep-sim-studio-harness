@@ -17,7 +17,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { addRef } from './refs.mjs';
-import { failExit as fail, flagValueOf } from './helpers.mjs';
+import { failExit as fail, flagValueOf, positionalOf } from './helpers.mjs';
 
 export const MANIFEST = path.join(REPO_ROOT, 'studio', 'assets', 'manifest.json');
 const AGENTISH = /^(producer|director|builder|rnd|planner|reviewer|watch|agent|claude|codex|cursor|grok|gemini)(-|$)/i;
@@ -166,12 +166,7 @@ export function recordApproved({ file, by, licence, source = '', design, maker, 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const flag = flagValueOf(argv);
-  const pos = [];
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i].startsWith('--')) {
-      if (argv[i + 1] && !argv[i + 1].startsWith('--')) i++;
-    } else pos.push(argv[i]);
-  }
+  const pos = positionalOf(argv);
   const [cmd = 'list', a1] = pos;
   const gen = flag('generated') ? { tool: flag('generated').split(':')[0], model: flag('generated').split(':').slice(1).join(':') || null, prompt: flag('prompt') || null, terms: flag('terms') || null, at: new Date().toISOString().slice(0, 10) } : null;
   if (cmd === 'add') {

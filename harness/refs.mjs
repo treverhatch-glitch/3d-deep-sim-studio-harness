@@ -16,7 +16,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
-import { failExit as fail, flagValueOf, nowIso as now } from './helpers.mjs';
+import { failExit as fail, flagValueOf, nowIso as now, positionalOf } from './helpers.mjs';
 
 const INDEX = path.join(REPO_ROOT, 'studio', 'references', 'library.json');
 export const libraryDir = () => path.resolve(REPO_ROOT, process.env.STUDIO_REFERENCE_DIR || 'references');
@@ -140,12 +140,7 @@ export function framesRef(id, { every = 2, max = 8 } = {}) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const flag = flagValueOf(argv);
-  const pos = [];
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i].startsWith('--')) {
-      if (argv[i + 1] && !argv[i + 1].startsWith('--')) i++;
-    } else pos.push(argv[i]);
-  }
+  const pos = positionalOf(argv);
   const [cmd = 'list', a1, a2] = pos;
   if (cmd === 'add') {
     const r = await addRef({ source: a1, game: flag('game') || '', feature: flag('feature') || '', at: flag('at') || '', take: flag('take') || '', avoid: flag('avoid') || '', by: flag('by') || process.env.STUDIO_LOCK_OWNER || 'game-dev' });

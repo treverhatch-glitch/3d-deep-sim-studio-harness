@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isTestPath } from './test-weakening.mjs';
 import { matchAny } from './merge-lane.mjs';
-import { isOff as off, toPosix } from './helpers.mjs';
+import { isOff as off, toPosix, walkCodeFiles } from './helpers.mjs';
 
 export const testTimingOn = (env = process.env) => !off(env.STUDIO_TEST_TIMING);
 
@@ -27,19 +27,7 @@ const CLOCK_G = /\b(?:performance\.now|Date\.now|process\.hrtime(?:\.bigint)?|hr
 const UPPER_MATCHER = /\.\s*(?:toBeLessThan|toBeLessThanOrEqual|toBeWithin|below|lessThan|most|lt|lte|isBelow|isAtMost)\s*\(/;
 const ASSIGN = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w<>[\]\s|]+)?=\s*([^;]+)|^\s*([A-Za-z_$][\w$.]*)\s*(?:\+|-)?=\s*(?!=)([^;]+)/;
 
-function walk(root, rel, out, depth = 0) {
-  if (depth > 12) return out;
-  let st;
-  try { st = fs.statSync(path.join(root, rel)); } catch { return out; }
-  if (st.isFile()) { if (CODE.test(rel)) out.push(toPosix(rel)); return out; }
-  let list = [];
-  try { list = fs.readdirSync(path.join(root, rel), { withFileTypes: true }); } catch { return out; }
-  for (const e of list) {
-    if (['node_modules', '.git', 'dist', 'build', '.lanes', '.studio', 'coverage'].includes(e.name)) continue;
-    walk(root, path.join(rel, e.name), out, depth + 1);
-  }
-  return out;
-}
+const walk = (root, rel, out) => walkCodeFiles(root, rel, out, CODE);
 
 const word = (name) => new RegExp(`(^|[^\\w$.])${name.replace(/[$.]/g, '\\$&')}(?![\\w$])`);
 

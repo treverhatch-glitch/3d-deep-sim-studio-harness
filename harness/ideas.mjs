@@ -18,7 +18,7 @@ import { emitEvent } from './event.mjs';
 import { parseNextQueue, addTask } from './task.mjs';
 import { readBible, writeBible, readIdeas, readIdea, writeIdea, renderBible, LAYERS, IDEAS_DIR } from './bible.mjs';
 import { pingDirector } from './director.mjs';
-import { flagValueOf, nowIso as now } from './helpers.mjs';
+import { flagValueOf, nowIso as now, positionalOf } from './helpers.mjs';
 
 const step = (idea, stage, by, note = '') => ({ ...idea, stage, history: [...(idea.history || []), { stage, at: now(), by, note }] });
 
@@ -117,12 +117,7 @@ export function decideIdea(id, verdict, { by, note = '' }) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const flag = flagValueOf(argv);
-  const positional = [];
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i].startsWith('--')) {
-      if (argv[i + 1] && !argv[i + 1].startsWith('--')) i++;
-    } else positional.push(argv[i]);
-  }
+  const positional = positionalOf(argv);
   const [cmd = 'list', a1, a2] = positional;
   if (argv.includes('--help') || argv.includes('-h') || cmd === 'help') {
     console.log('Usage: npm run idea -- add "<title>" | route <id> | shape <id> --notes "…" | place <id> --phase n [--layer id] --unlock "…" --schedule "…" | decide <id> approve|park|reject --by <name> | list | show <id> | collect');
