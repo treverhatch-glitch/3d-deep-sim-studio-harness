@@ -50,6 +50,26 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Workaround:** the test waits for the folder. In a studio the command ends by itself and the janitor removes the checkout later. A real fix ends the command's whole process tree; not built.
 - **Fix:** `harness/run-limited.mjs` runs the engine commands (compile, rules, pre-queue, pre-land, quick check, land) and ends the whole tree at the limit. The web game's timed commands are unchanged.
 
+### P-361 — every engine train ran its rules check twice · fixed 2.93
+- **Evidence:** a studio's trains on 2.92: the rules check ran on the target, then on the batch, 90 to 150 minutes of a train of 4 to 6 branches; once two full runs (62 and 107 minutes). The target had just landed through a train.
+- **Fix:** the batch runs first; green ends the check. The target is asked only after a red, and a landed tree keeps its green (`rules.landGate`). `qa/selftest-293a.mjs`.
+
+### P-362 — a rules run started outside the train took the memory a land run needed · fixed 2.93
+- **Evidence:** 18 November, twice: a full rules run from a done-time check (hours due) held 6.7 GB, then 14 GB; a train with green branches waited 30 to 60 minutes for its land run.
+- **Fix:** such a run takes a machine:heavy slot as a verify does and waits behind a queued engine land; it never turns full because hours are due. `qa/selftest-293a.mjs`.
+
+### P-363 — the API pool and agy could not do engine work · fixed 2.93 (untested on the real tools)
+- **Evidence:** `--pool api --role <engine role>` started a plain builder with no lane, gone in 30 seconds with no output, and two starts took one name; an engine pass on agy was refused `git -C <its worktree>` by agy's own permission check and handed back with nothing.
+- **Fix:** the pool takes the role, makes its lanes and uses the first free name; a start that dies leaves a record; agy gets allow-rules for the engine pass's folders (`STUDIO_AGY_REACH_RULES`); the refusal is a harness cause (`tool-permission`), not a mark against the task. `qa/selftest-293b.mjs`, `qa/selftest-293e.mjs`. Why the pool start died was not found.
+
+### P-364 — a queued branch could not be held, marked a slice or closed as a duplicate · fixed 2.93
+- **Evidence:** the overseer took one held unit out of the queue five times; slices queued before an upgrade closed their units; a repeat of a finished task was closed as `impossible`; two wire tasks closed on partial work.
+- **Fix:** `task after` keeps a queued branch out of a train; `train slice`; `task duplicate`; `preQueue` entries by task title, for a studio's own completeness check. `qa/selftest-293c.mjs`.
+
+### P-365 — a cleanup removed a folder that other checkouts linked to · process
+- **Evidence:** 18 November: the maintainer removed an old checkout that held the `node_modules` the agents' checkouts linked to; three agents' test runs failed on a missing module until the link was pointed at the main checkout.
+- **Rule:** before removing a checkout, search the other checkouts for links into it (`find -lname`). With P-353: remove by name, never by pattern, and never while other builds run.
+
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
 - **P-001** (reopened on purpose 2026-10-31: the owner made the harness and the game's repository public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist
