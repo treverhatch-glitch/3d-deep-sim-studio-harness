@@ -2918,15 +2918,15 @@ if (inShard()) {
   report('floor-scenario: timeout fails scenario', timeoutRun.status !== 0 && /timed out after 500 ms/.test(timeoutRun.stderr), timeoutRun.stderr);
   fs.unlinkSync(path.join(dir, 'qa', 'scenarios', 'phase-3', 'timeout.mjs'));
 
-  // Test: a task for a phase the Bible lists as an open floor can be added (the file is written by hand here).
+  // Test: only the open phase takes build tasks (2.93: the "open floor" exception went with the floors feature).
   const taskFail = run(dir, 'node harness/task.mjs add "Terraces" --phase 4 --serves pillar:Calm', env);
   report('task-add: a phase outside 1-3 is still refused', taskFail.status !== 0 && /--phase 1 \(early\)/.test(taskFail.stderr), taskFail.stderr);
   const bibleFile = path.join(dir, 'studio', 'bible', 'bible.json');
   const bibleNow = readJsonSafe(bibleFile);
   bibleNow.phase.floors = [{ n: 2, openedAt: new Date().toISOString(), by: 'hatch', stage: 'build' }];
   fs.writeFileSync(bibleFile, JSON.stringify(bibleNow, null, 2));
-  const taskOk = run(dir, 'node harness/task.mjs add "More Terraces" --phase 2 --serves pillar:Calm', env);
-  report('task-add: succeeds for an open floor', taskOk.status === 0, taskOk.stdout + taskOk.stderr);
+  const taskLater = run(dir, 'node harness/task.mjs add "More Terraces" --phase 2 --serves pillar:Calm', env);
+  report('task-add: a phase past the open one is refused, also with an old "floors" list left in the Bible', taskLater.status !== 0 && /Phase 2 isn't open yet \(open: 1\)/.test(taskLater.stderr + taskLater.stdout), taskLater.stdout + taskLater.stderr);
 
   // --- Content Schema Gate ---
 

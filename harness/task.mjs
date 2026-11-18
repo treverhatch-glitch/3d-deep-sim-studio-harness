@@ -1571,10 +1571,8 @@ export function gateTask({ title, role = 'builder', meta = {} }) {
     if (laneMissing) parts.push(LANE_FLAG);
     return { ok: false, message: parts.length === 1 && phaseBad ? 'Build tasks say which part of the game they are for: --phase 1 (early), 2 (mid) or 3 (endgame).' : parts.length === 1 && servesBad ? `Say what this serves: ${parts[0]}.` : `Missing flag${parts.length > 1 ? 's' : ''}:\n${parts.map((x) => `  ${x}`).join('\n')}` };
   }
-  const openFloors = (b.phase?.floors || []).map(f => f.n);
-  if (phase > (b.phase?.open || 1) && !openFloors.includes(phase)) {
-    const openList = [b.phase?.open || 1, ...openFloors].filter(Boolean).sort();
-    return { ok: false, message: `Phase ${phase} isn't open yet (open: ${[...new Set(openList)].join(', ')}). Finish and prove the earlier phase first; designing later phases is fine as a study or docs task.` };
+  if (phase > (b.phase?.open || 1)) {
+    return { ok: false, message: `Phase ${phase} isn't open yet (open: ${b.phase?.open || 1}). Finish and prove the earlier phase first; designing later phases is fine as a study or docs task.` };
   }
   const r = latestReview();
   const since = r ? r.at : 0;

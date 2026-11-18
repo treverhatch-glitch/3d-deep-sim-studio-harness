@@ -148,7 +148,7 @@ export function answerFollowup(b, key, a, by = 'game-dev') {
 const rel = (p) => path.relative(REPO_ROOT, p).split(path.sep).join('/');
 
 export function emptyBible() {
-  return { version: 1, answers: {}, pillars: [], phases: { 1: {}, 2: {}, 3: {} }, layers: {}, signed: null, phase: { open: 0, history: [], floors: [] }, updatedAt: now() };
+  return { version: 1, answers: {}, pillars: [], phases: { 1: {}, 2: {}, 3: {} }, layers: {}, signed: null, phase: { open: 0, history: [] }, updatedAt: now() };
 }
 
 export function hasBible() {
