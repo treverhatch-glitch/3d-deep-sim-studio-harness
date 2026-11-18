@@ -62,3 +62,15 @@ export const landedMeasure = (events) => ((events || []).some((e) => ['web', 'en
 
 /** The distinct task ids of landings(events, measure, window), first seen first. */
 export const landedTasks = (events, measure, window = {}) => [...new Set(landings(events, measure, window).map((l) => l.task))];
+
+/** { measure, count, closedWithoutLanding }: the window's count by landedMeasure(all), and the closes that landed nothing in it. */
+export function landedCounts(events, all = events) {
+  const measure = landedMeasure(all);
+  const count = landedTasks(events, measure);
+  if (measure === 'closed') return { measure, count: count.length, closedWithoutLanding: 0 };
+  const landed = new Set(count);
+  return { measure, count: count.length, closedWithoutLanding: landedTasks(events, 'closed').filter((t) => !landed.has(t)).length };
+}
+
+/** "landed: 3; closed without a landing: 2" (second part only above 0); "closed: 7" in a log with no landing. */
+export const landedText = (events, all = events) => { const c = landedCounts(events, all); return `${c.measure}: ${c.count}${c.closedWithoutLanding > 0 ? `; closed without a landing: ${c.closedWithoutLanding}` : ''}`; };

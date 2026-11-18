@@ -19,7 +19,7 @@ import { readRecentEvents } from './event.mjs';
 import { weightedTokens } from './budget.mjs';
 import { harnessCaused } from './busy.mjs';
 import { argAfterOf } from './helpers.mjs';
-import { landedMeasure, landedTasks } from './landings.mjs';
+import { landedMeasure, landedTasks, landedCounts, landedText } from './landings.mjs';
 
 export const TARGETS = { refusalsPerLanding: 1.5, harnessCausedShare: 0.05 };
 
@@ -68,6 +68,8 @@ export function health(events, { since = 0, now = Date.now() } = {}) {
   const out = {
     since: new Date(since).toISOString(),
     landings,
+    closedWithoutLanding: landedCounts(evs, events).closedWithoutLanding,
+    landedText: landedText(evs, events),
     refusals: refusals.length,
     refusalsPerLanding: landings ? +(refusals.length / landings).toFixed(2) : null,
     reasons: Object.fromEntries(Object.entries(reasons).sort((a, b) => b[1] - a[1])),
@@ -106,7 +108,7 @@ export function renderHealth(h) {
     '',
     h.misses.length ? `**Off target:** ${h.misses.join('; ')}.` : '**On target** (refusals per landing, harness-caused hand-backs, usage tracked).',
     '',
-    `- Landings: ${h.landings}; refusals: ${h.refusals}${h.refusalsPerLanding !== null ? ` (${h.refusalsPerLanding} per landing)` : ''}`,
+    `- ${h.landedText ? h.landedText.replace(/^./, (c) => c.toUpperCase()) : `Landings: ${h.landings}`}; refusals: ${h.refusals}${h.refusalsPerLanding !== null ? ` (${h.refusalsPerLanding} per landing)` : ''}`,
     `- Why refused: ${Object.entries(h.reasons).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`,
     `- Hand-backs: ${h.handBacks}, of which the harness caused ${h.harnessCaused} (${Math.round(h.harnessCausedShare * 100)}%)`,
     `- Forced dones: ${h.forced}; stopped by budget: ${h.budgetStops}; stalled sessions: ${h.stalls}; launches skipped: ${h.launchesSkipped}`,
@@ -131,7 +133,8 @@ export async function oldCodeLines() {
 
 /** What landed since, and what is waiting on a person: the second half of the morning report. */
 export async function needsYou(events, { since = 0 } = {}) {
-  const out = { landed: landedTasks(events, landedMeasure(events), { since }), parked: [], rescuing: [], pending: [], protectedChanges: null, stopped: null };
+  const inWin = events.filter((e) => (Date.parse(e.ts) || 0) >= since);
+  const out = { landed: landedTasks(events, landedMeasure(events), { since }), closedWithoutLanding: landedCounts(inWin, events).closedWithoutLanding, landedWord: landedCounts(inWin, events).measure, parked: [], rescuing: [], pending: [], protectedChanges: null, stopped: null };
   try {
     const { readHolds } = await import('./task-hold.mjs');
     for (const [id, h] of Object.entries(readHolds())) {
@@ -171,7 +174,7 @@ export async function briefLines(h, n, { since = '24h' } = {}) {
   try { board = (await import('./task.mjs')).parseNextQueue(); } catch {}
   try { running = (await import('./agent.mjs')).sessions().filter((s) => s.running); } catch {}
   try { game = (await import('./cartridge.mjs')).activeGame().name || ''; } catch {}
-  lines.push(`${game ? `${game}: ` : ''}${n.landed.length} landed in ${since}${n.landed.length ? ` (${n.landed.slice(-5).join(', ')})` : ''} · ${board.inProgress.length} in progress · ${board.backlog.length} queued`);
+  lines.push(`${game ? `${game}: ` : ''}${n.landed.length} ${n.landedWord || 'landed'} in ${since}${n.closedWithoutLanding > 0 ? `, ${n.closedWithoutLanding} closed without a landing` : ''}${n.landed.length ? ` (${n.landed.slice(-5).join(', ')})` : ''} · ${board.inProgress.length} in progress · ${board.backlog.length} queued`);
   lines.push(running.length ? `Running: ${running.slice(0, 6).map((s) => `${s.agent}${s.task ? ` on ${s.task}` : ''}${s.stalled ? ' (stalled)' : ''}`).join(', ')}${running.length > 6 ? ` +${running.length - 6}` : ''}` : 'Running: nobody');
   const ci = n.ci ? (n.ci.status === 'completed' ? `CI ${n.ci.conclusion}` : `CI ${n.ci.status}`) : null;
   const v = h.verifyMedianSec || {};

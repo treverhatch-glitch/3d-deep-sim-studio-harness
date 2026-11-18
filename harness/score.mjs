@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { visionFixFlow } from './vision-fix.mjs';
 import { ofTypeIn, tsMs as at } from './helpers.mjs';
-import { landings } from './landings.mjs';
+import { landings, landedText, landedCounts } from './landings.mjs';
 
 const DAY = 86400000;
 const HOUR = 3600000;
@@ -364,15 +364,15 @@ export async function roundScore({ events = null, machine = null, now = null, da
   };
   const notes = {
     ...rest.notes,
-    handsFreePct: `${card.handsFree} of ${card.landed} landed`,
+    handsFreePct: `${card.handsFree} of ${card.landed} tasks ended (landed or closed)`,
     hoursBetweenInterventions: `${card.interventions?.unplanned ?? 0} unplanned in ${card.supervisorHours} supervisor hour(s)`,
     overseerStepsPerLanded: `${card.orchestrator?.interventions || 0} step(s) by an outside agent`,
     costPerLandedUsd: `${Math.round((card.tokensPerLanded || 0) / 1000)}k tokens per landed task`,
     harnessHandBackPct: `${card.handBacks?.count ?? 0} of ${card.handBacks?.attempts ?? 0} attempt(s) were handed back in all${hb ? `; ${hb.real} real hand-back(s) (a session gave the work back or failed); ${hb.released} released while waiting for a train; attempts ended for a harness reason, by kind: ${kindWords ? kindWords(hb.harness) : 'none'}` : ''}`,
-    landedPerDay: `${rest.doneCount} done in ${r1(supDays)} supervisor day(s)`,
-    escapedPct: `${card.escaped} of ${card.landed}`,
+    landedPerDay: `${rest.doneCount} done in ${r1(supDays)} supervisor day(s) (${landedText(inWin, all)})`,
+    escapedPct: `${card.escaped} of ${card.landed} tasks ended`,
   };
-  return { window: { from: new Date(from).toISOString(), to: new Date(end).toISOString(), days, events: inWin.length }, values, notes, measures: MEASURES.map(([id, label, unit, better, target]) => ({ id, label, unit, better, target })), engine: engineFlow(inWin), rulesTests: rulesTestFlow(inWin), planning: await planningFlow(inWin), vision: visionFlow(all.filter((e) => at(e) <= end), { from }), visionCards: visionCardFlow(inWin), visionFixes: visionFixFlow(all.filter((e) => at(e) <= end), { from }), progress: engineProgress(root, { timeoutMs: progressTimeoutMs }) };
+  return { window: { from: new Date(from).toISOString(), to: new Date(end).toISOString(), days, events: inWin.length }, landed: landedCounts(inWin, all), values, notes, measures: MEASURES.map(([id, label, unit, better, target]) => ({ id, label, unit, better, target })), engine: engineFlow(inWin), rulesTests: rulesTestFlow(inWin), planning: await planningFlow(inWin), vision: visionFlow(all.filter((e) => at(e) <= end), { from }), visionCards: visionCardFlow(inWin), visionFixes: visionFixFlow(all.filter((e) => at(e) <= end), { from }), progress: engineProgress(root, { timeoutMs: progressTimeoutMs }) };
 }
 
 /** Does this value meet its target? null when there is no value. */

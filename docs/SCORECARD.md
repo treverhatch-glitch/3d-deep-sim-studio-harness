@@ -71,6 +71,11 @@ The fifteen measures count a task as landed when it is closed (`task.done`, or a
 branch; the engine flow counts lanes named in `task.train.<engine>.landed`, a hyphen in the engine's name included
 (2.88). `harness/landings.mjs` holds both readings.
 
+A count the scorecards and status lines print as "landed" (the done-per-day note, the health report, the brief) is work that
+went to main or an engine target only (2.94). Tasks that were only closed (planning, watch and director tasks, duplicate,
+impossible, forced) show as `closed without a landing: N`, only when N is above 0. A studio with no landing anywhere in its
+log says "closed". `--json` has the same numbers (`landed`, `closedWithoutLanding`).
+
 Baseline from the same log: 67 land runs, 11 lanes landed, 320.3 land-run minutes per landed lane, 16.4% of land runs
 passed, 25.4% refused or not run (495.4 minutes waiting), 53% of the minutes in red runs, a passing run 101 minutes
 (median). Design link: 57.3% of 358 done tasks trace to a pillar, a kept layer, an approved idea or the owner's ask;

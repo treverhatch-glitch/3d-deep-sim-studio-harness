@@ -5366,6 +5366,14 @@ if (inShard('selftest-293e')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.94 (c): "landed" on the scorecards counts only work that went to main or an engine target; closes with no landing have their own count.
+if (inShard('selftest-294c')) {
+  const dir = copyRepo();
+  const { selftest294C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-294c.mjs')).href);
+  await selftest294C({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
