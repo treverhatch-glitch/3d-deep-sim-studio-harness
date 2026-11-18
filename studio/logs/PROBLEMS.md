@@ -15,156 +15,11 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
   sends the Console text; CI runs the Windows build once the licence secrets exist.
 - **Harness fix?** Later: a bot on Hatch's PC runs `npm run engine:gate` and posts the result.
 
-### P-319 — the rules check took 12.7 GB on a 17-branch batch · mitigated in 2.84.0
-- **Evidence:** the overseer's note: one test process for the whole batch on a 31.8 GB machine.
-- **Fix:** `rules.focus.split`, `rules.maxLanes`, `batchMax`. qa/selftest-284t.mjs, 284u. Not measured on a live studio.
-
-### P-320 — a reviewer planned on another family's model was started with the wrong tool, and two crashes halted the supervisor · fixed in 2.84.0
-- **Evidence:** a launch of the default tool with a `google/…` model id exited 1 twice; the supervisor's two-identical-failures halt fired.
-- **Fix:** harness/model-tool.mjs `toolForModel`; a mismatch is refused before start; a reviewer's launch crash backs that role off. qa/selftest-284w.mjs.
-
-### P-321 — the overseer was refused decisions beta mode had given it · fixed in 2.84.0
-- **Evidence:** unpark of an owner-rank park refused to every stand-in name but one; the engine merge needed the task's claim; `--force` with `--train` always refused while a tier-C lane must use the train; an upgrade could remove `studio/beta.json`.
-- **Fix:** `ownerStandInRole`, `standInMay`, the owner's decision on beta powers (docs/SECURITY.md). qa/selftest-284n.mjs, 284q.
-
-### P-322 — a start refused for a full crew put the task to sleep for up to 30 minutes · fixed in 2.84.0
-- **Evidence:** the start back-off keyed on the refusal text with numbers removed, so "N agents already running" repeated.
-- **Fix:** harness/supervisor.mjs `crewWideRefusal`. qa/selftest-284v.mjs.
-
-### P-323 — every verify ran every gate · fixed in 2.84.0
-- **Evidence:** docs-only and engine-only tasks ran the web game's build, tests and replays.
-- **Fix:** harness/gate-tracks.mjs. qa/selftest-284x.mjs.
-
-### P-324 — 2.83 was projected to raise the engine pass rate and did not · measured again in P-325
-- **Evidence:** projected about 75% of land runs passing and 65% of tasks without an overseer step; measured 34.8% and 22% on a crew's first day.
-- **Lesson:** a projection is not a measurement; a release's notes give the measured numbers of the release before it, and nothing built without a real editor is called an improvement until a crew's log says so.
-
-### P-325 — 2.84 landed nothing without an overseer step · fixes in 2.85.0, not measured
-- **Evidence:** a crew's first 16.3 hours on 2.84: land runs passing 46.2% (34.8% on 2.83), passing run 32.9 min (51.1), 0 of 26 landed tasks with no overseer step, 59.5% of hand-backs with a harness or machine cause, 3 of 15 scorecard targets.
-- **Lesson:** faster land runs did not make the studio hands-free; the overseer's steps came from the harness's own false alarms (P-326 to P-330).
-
-### P-326 — a task waiting in a train queue was handed back for "no running session" · fixed in 2.85.0
-- **Evidence:** 30 of 73 hand-backs in that log; three in two hours parked a task (9 parks, 12 unparks by the overseer).
-- **Fix:** harness/director-flow.mjs releases the claim quietly; harness/handback-kind.mjs is the one reading. qa/selftest-285d.mjs.
-
-### P-327 — `task done` from the main checkout judged other roles' commits · fixed in 2.85.0
-- **Evidence:** a `Golden-Reason:` line above a blank line in another role's commit refused every task's done; three sessions looped in four minutes; the crew patched it locally.
-- **Fix:** the check reads the task's own commits; the hook moves the line into the trailer block; the same refusal twice holds the task. qa/selftest-285d.mjs.
-
-### P-328 — a game-rules question was refused as the owner's only · fixed in 2.85.0
-- **Evidence:** an ask about a price rule in the game could be answered by nobody but the owner, even with the owner's permission quoted.
-- **Fix:** the owner-only list is deleting data, keys, publishing, tool definitions and beta-off; a word list that guessed at a question's subject is gone. qa/selftest-285c.mjs.
-
-### P-329 — the daily full land run was invisible and blamed its branches · fixed in 2.85.0
-- **Evidence:** it fell on a one-branch train after a 37 s compile check and was reported as the compile check running everything; its failures on the target handed the branch back.
-- **Fix:** announced, a baseline for target failures, suspect first. qa/selftest-285a.mjs. No real editor.
-
-### P-330 — the web train's automatic mode stayed off for a week · fixed in 2.85.0
-- **Evidence:** an agent ran `train auto off` on 2026-11-06 "until the engine land holds the lock"; nothing turned it on and the daemon wrote nothing while off.
-- **Fix:** an agent's off switch lapses; the daemon says why it waits. qa/selftest-285e.mjs.
-
-### P-331 — the maintainer's inventory overstated what could be cut · lesson
-- **Evidence:** "56 settings with no reader" was 2; three "noise" event kinds had readers; a "duplicate" module was not one.
-- **Lesson:** a cut needs proof per item; `check-docs` now proves the settings case on every run.
-
-### P-332 — a running supervisor kept the old code after an upgrade · fixed in 2.86.0, not measured
-- **Evidence:** a crew's supervisor started the day before its 2.85 upgrade and was never restarted: 32 of 91 hand-backs were the false "claim ran out" kind 2.85 removed, no `task.claim.released` event, the web train's off switch never lapsed.
-- **Fix:** harness/code-stamp.mjs; the supervisor restarts itself on new code; `upgrade --merge` names what still runs old code. qa/selftest-286a.mjs.
-- **Lesson:** a fix is not shipped until the process that runs it has loaded it. Read the process's start time before judging a release.
-
-### P-333 — hand-written rules map entries never matched · fixed in 2.86.0
-- **Evidence:** every rules check for two days ran in full mode, twice per train (40 min); `focusFilters` refused any entry whose pattern grouped its prefixes although the filter used no group. Confirmed against the crew's own settings on both versions.
-- **Fix:** harness/engine-rules.mjs; `rules.focus.auto`; results kept per part. qa/selftest-286c.mjs.
-- **Lesson:** a feature's tests used the maintainer's own style of pattern; the first real configuration was never run through it.
-
-### P-334 — one listed flaky test cost an engine train 6.5 hours · fixed in 2.86.0, not measured
-- **Evidence:** a test that fails about half the time: red, one retry, red, two branches tied to it by file rules, five more land runs, one of them the daily full run; the branch handed back was the fix for the test.
-- **Fix:** retries by name, a probe of the target alone, narrowing by test name, the full run alone on the target. qa/selftest-286b.mjs. No real editor; by-name narrowing needs the land script to honour `STUDIO_LAND_PROBE`.
-
-### P-335 — the 2.85 refresh rule handed off sessions that had done nothing · fixed in 2.86.0
-- **Evidence:** 35 hand-offs at 60% of the window by sessions that start at 65 to 70%; three in two hours parked new tasks.
-- **Fix:** the rule is measured from the session's first work; harness-caused ends count against no task. qa/selftest-286d.mjs.
-- **Lesson:** a threshold on an absolute number was shipped without one reading of where real sessions start.
-
-### P-336 — the dead-code tool's first file list missed a hook · caught before release
-- **Evidence:** a list of files by extension called a function dead that scripts/hooks/commit-msg (no extension) imports; removing it would have broken every commit. A search of all tracked files caught it.
-- **Fix:** scripts/unused-exports.mjs reads every text file of the checkout. qa/selftest-286g.mjs.
-
-### P-337 — a name defined nowhere, in a branch no new check took · caught by the online checks
-- **Evidence:** harness/unity-train.mjs read `bisectMax` in the capped hand-back, outside the block that declared it; qa/selftest-279e.mjs took that branch on the online run and the train ended with a ReferenceError. The local run before the push covered the 2.83 to 2.86 units only.
-- **Fix:** the cap is read through a function in scope. scripts/check-names.mjs (`npm run check:names`, a step of the online checks) reads every script for such a name. qa/selftest-286h.mjs.
-
-### P-338 — the disk stop used the warning's level and stopped a small test machine · caught before release
-- **Evidence:** with 7 GB free, the supervisor in three checks of qa/selftest-pu19.mjs started nothing: STUDIO_DISK_MIN_FREE_GB (20 GB by default) had become a stop in 2.86.
-- **Fix:** the stop stays (its reason is in the pass's line); the self-test's clean environment turns the budget off as it does the memory floor, and qa/selftest-286f.mjs runs a real supervisor pass under the budget and with it off. docs/RELEASE-2.86.0.md says what a studio under its budget sees.
-
-### P-339 — 2.86.0 threw away a daily full run whose land script records every run on the target · fixed in 2.86.1
-- **Evidence:** a crew's log, 15 November: the daily full run on the target alone ran 174 minutes, then `probe_moved_target`: the target had moved by one commit, the land script's own "record FAIL" of that run. The run was reported as "could not run to its end" and by-name steps were withdrawn. The 2.86 checks used a stand-in script that records nothing.
-- **Fix:** a run that carries no branch is judged by its result; the stop is kept for by-name steps that carry one. qa/selftest-286b.mjs has a stand-in that records every run. docs/NATIVE-ENGINE.md says what a land script should do.
-
-### P-340 — the maintainer told the owner the harness kept no record of the commands a studio runs · lesson
-- **Evidence:** the consolidation map of 15 November said so and proposed a counter; `harness/event.mjs` has marked commands since 2.84 (`npm run commands-run`). The owner asked "didn't you already put this in?".
-- **Fix:** the map is corrected and no counter was added. Before saying the harness lacks something, search the code for it.
-
-### P-341 — line estimates for shared helpers were 4 to 10 times too high · lesson
-- **Evidence:** the map counted definitions (1,251 in tests, 511 in the harness) and estimated 2,000 to 3,100 and 600 to 800 lines. The helpers are one line each: the test kit removed 1,237 definitions and 263 lines.
-- **Fix:** estimate a merge from the lines the definitions occupy minus the imports that replace them, not from their count.
-
-### P-342 — reports disagreed on which tasks landed · fixed 2026-11-16 (2.88)
-- **Evidence:** a crew's ten days: 140 tasks landed on the web main, 186 on the engine target, 404 closed. The health report read `lane.merged` only (it missed the engine's 186); the development cycle's brief and the game-dev loop read every `task.done` (80 tasks that landed nothing). About twenty readers, five readings.
-- **Fix:** `harness/landings.mjs`: a caller names its measure. Six readers changed, each with a check that fails on 2.87 (`qa/selftest-288a.mjs`).
-- **Open:** the scorecard and the upgrade comparison still count closes (docs/RELEASE-2.88.0.md).
-
-### P-343 — a file that must load alone was given a shared import · fixed 2026-11-16 (2.88)
-- **Evidence:** 2.88's first online run: "2.85 (e6)" red on Linux and Windows. `harness/upgrade-guard.mjs` loads `harness/hooks-upgrade-hint.mjs` by path; with an import of `./helpers.mjs` it no longer loaded alone and the after-upgrade line went silent.
-- **Fix:** the file has its own one-line copy again; `harness/helpers.mjs` names the files that must load alone. The local run before the push had covered 16 units, not that one: the online run is the check of record.
-
-### P-344 — a check's failure was hidden by a pipe · lesson
-- **Evidence:** the comment check failed on a 7-line comment; the maintainer read `node scripts/check-comments.mjs | tail -1` in an `&&` chain, which takes `tail`'s exit code, and pushed. The online run was cancelled and the fix pushed minutes later.
-- **Fix:** read a check's own exit code. Never chain on a piped check.
-
-### P-345 — the rules check judged nobody for two days and nobody saw it · fixed 2026-11-16 (2.90)
-- **Evidence:** a crew's train logs, 15 and 16 November: "the rules check timed out after 30 min ... so it judges no lane" on every engine train; no `engine.rules` event since 15 November 06:54. The suite had passed in 22 minutes on the 13th and grew past the default limit. Each train spent 30 minutes and then found its red by land runs.
-- **Fix:** the default limit follows the suite's recorded time and doubles after a timeout on the target; the path writes an event and a `train status` line; a cut-off tree is not run again with the same limit.
-- **Lesson:** a path that gives up must write an event, not only a log line.
-
 ### P-346 — timing checks fail under load in the online runs · open
 - **Evidence:** 16 November, four runs queued at once: "task lane gives each builder its own folder", "the supervisor starts a fresh agent per task", "2.77.0 (p, P9.6)" and "2.69.0 (q, 1)" each failed once and passed on the re-run of the failed job. Each re-run costs about 40 minutes.
 - **Workaround:** re-run the failed job and note it on the pull request. Do not queue four runs at once.
 - **2.92:** "task lane gives each builder its own folder" now waits for the thing itself. The same change to "the supervisor starts a fresh agent per task" was withdrawn (the next check, "--lanes auto", then failed 2 runs in 8: only one lane got its agent, even with a 90 s wait; cause not found). Left: that check, `2771a`, the tester drive, `290b` second gate, `277p` "someone moves main", "two builders without lanes", "--lanes auto".
 - **2.91:** three were given a hand-shake in place of a clock (`269q`, `2601m`, `277p` B-before-A). Left: the two supervisor-window checks, `2771a`, the tester drive, and two seen under load on 17 November (`290b` second gate, `277p` "someone moves main").
-
-### P-347 — a rule added after the last local run broke a 2.85 check, and a Windows path · fixed 2.90
-- **Evidence:** pull request 92, first online run: "2.85 (f): an engine port gets the shorter port card" red on Linux (Node 22, 24) and Windows; "2.90 (t) A: the hand-back of T-003" red on Windows only (`Sim\State.cs`).
-- **Cause:** typing an engine porter's "Port ..." as a chore (so `promote` would take it) changed its type everywhere: no port card, a lighter done check. The compiler's line kept Windows separators. Only the units thought affected had been run locally.
-- **Fix:** the rule moved to the one place that needed it (the phase and pillar gate of `task add`); the task stays a build task. The compiler's line names the file as git does. No existing check changed.
-- **Rule:** after a change to a function many commands share (a task's type, a gate), run every unit that names the role or the command before the push.
-
-### P-348 — periodic full runs went ahead of a waiting batch · fixed 2.91
-- **Evidence:** a studio's train of four green branches, 16 November: about 100 min of full rules runs (target, then batch) and about 140 min of the daily full land run before its own land run began; about seven hours in all.
-- **Cause:** a full rules run that came due replaced the batch's check; an overdue full land run was put first.
-- **Fix:** with lanes waiting the batch goes first. Due full runs wait for an empty queue; overdue ones run at the end of the train. `qa/selftest-291a.mjs`.
-
-### P-349 — a record commit cost the batch its "rules are green" · fixed 2.91 (needs one setting)
-- **Evidence:** the same train: the land script committed its record of the full run to the target (two files in a docs folder); the batch's land run then ran the rules tests again, 47 min.
-- **Cause:** the land run was told green only when the target's tip was the checked commit.
-- **Fix:** `rules.ignore` (or `rules.paths`): a target that moved only where the rule tests do not read is still the checked target. A studio must set one of the two.
-
-### P-350 — the idle stop halted a studio whose work waited on a train · fixed 2.91
-- **Evidence:** "no task finished in 4 h while 6 task sessions ran" with 21 tasks queued for a running engine train.
-- **Cause:** only `task.done` counted as finished. **Fix:** a landing or a lane queued for a train counts too.
-
-### P-351 — two stops, and neither resume command named the other · fixed 2.91
-- **Evidence:** a person cleared the supervisor's stop; the studio stop stayed set and nothing said so.
-- **Fix:** each resume command prints one line when the other stop is still set. No command clears more than before.
-
-### P-352 — a session reading its task's files was ended as stalled · fixed 2.91 (bounded)
-- **Evidence:** a porter ended after 76 min with no write while reading its plan and the source it was to translate.
-- **Fix:** a read of a file the task names counts as progress for at most `STUDIO_STALL_READ_MAX_MIN` since the last write. Session logs in Claude Code's format only.
-
-### P-353 — the maintainer removed test scratch folders while other builds were running · process
-- **Evidence:** 17 November: `rm -rf /tmp/harness-selftest-*` during integration, with two agents' self-tests possibly in flight. Both were told at once; no wrong result was kept.
-- **Rule:** while other builds run on the same machine, remove only the scratch folders of the run just finished (by name), never the pattern.
 
 ### P-354 — compile clashes were found only when the train started · fixed 2.92
 - **Evidence:** a studio's two trains of 16 to 17 November handed back 6 of 12 branches as "does not compile together with ...", hours after each was queued.
@@ -512,3 +367,37 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **P-316** (fixed in 2.84.0): the documents cost more to read than the code they describe
 - **P-317** (worked around in 2.84.0): the Unity test runner's floating tag cannot activate a Personal licence
 - **P-318** (fixed in 2.84.0): the engine train's evidence never saw a crew's results
+- **P-319** (mitigated in 2.84.0): The rules check took 12.7 GB on a 17-branch batch
+- **P-320** (fixed in 2.84.0): A reviewer planned on another family's model was started with the wrong tool, and two crashes halted the supervisor
+- **P-321** (fixed in 2.84.0): The overseer was refused decisions beta mode had given it
+- **P-322** (fixed in 2.84.0): A start refused for a full crew put the task to sleep for up to 30 minutes
+- **P-323** (fixed in 2.84.0): Every verify ran every gate
+- **P-324** (measured again in P-325): 2.83 was projected to raise the engine pass rate and did not
+- **P-325** (fixes in 2.85.0, not measured): 2.84 landed nothing without an overseer step
+- **P-326** (fixed in 2.85.0): A task waiting in a train queue was handed back for "no running session"
+- **P-327** (fixed in 2.85.0): `task done` from the main checkout judged other roles' commits
+- **P-328** (fixed in 2.85.0): A game-rules question was refused as the owner's only
+- **P-329** (fixed in 2.85.0): The daily full land run was invisible and blamed its branches
+- **P-330** (fixed in 2.85.0): The web train's automatic mode stayed off for a week
+- **P-331** (lesson): The maintainer's inventory overstated what could be cut
+- **P-332** (fixed in 2.86.0, not measured): A running supervisor kept the old code after an upgrade
+- **P-333** (fixed in 2.86.0): Hand-written rules map entries never matched
+- **P-334** (fixed in 2.86.0, not measured): One listed flaky test cost an engine train 6.5 hours
+- **P-335** (fixed in 2.86.0): The 2.85 refresh rule handed off sessions that had done nothing
+- **P-336** (caught before release): The dead-code tool's first file list missed a hook
+- **P-337** (caught by the online checks): A name defined nowhere, in a branch no new check took
+- **P-338** (caught before release): The disk stop used the warning's level and stopped a small test machine
+- **P-339** (fixed in 2.86.1): 2.86.0 threw away a daily full run whose land script records every run on the target
+- **P-340** (lesson): The maintainer told the owner the harness kept no record of the commands a studio runs
+- **P-341** (lesson): Line estimates for shared helpers were 4 to 10 times too high
+- **P-342** (fixed 2026-11-16 (2.88)): Reports disagreed on which tasks landed
+- **P-343** (fixed 2026-11-16 (2.88)): A file that must load alone was given a shared import
+- **P-344** (lesson): A check's failure was hidden by a pipe
+- **P-345** (fixed 2026-11-16 (2.90)): The rules check judged nobody for two days and nobody saw it
+- **P-347** (fixed 2.90): A rule added after the last local run broke a 2.85 check, and a Windows path
+- **P-348** (fixed 2.91): Periodic full runs went ahead of a waiting batch
+- **P-349** (fixed 2.91 (needs one setting)): A record commit cost the batch its "rules are green"
+- **P-350** (fixed 2.91): The idle stop halted a studio whose work waited on a train
+- **P-351** (fixed 2.91): Two stops, and neither resume command named the other
+- **P-352** (fixed 2.91 (bounded)): A session reading its task's files was ended as stalled
+- **P-353** (process): The maintainer removed test scratch folders while other builds were running
