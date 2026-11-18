@@ -18,6 +18,7 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-346 — timing checks fail under load in the online runs · open
 - **Evidence:** 16 November, four runs queued at once: "task lane gives each builder its own folder", "the supervisor starts a fresh agent per task", "2.77.0 (p, P9.6)" and "2.69.0 (q, 1)" each failed once and passed on the re-run of the failed job. Each re-run costs about 40 minutes.
 - **Workaround:** re-run the failed job and note it on the pull request. Do not queue four runs at once.
+- **2.94:** seen once more, on main's run after the 2.93 merge, on Windows: "a ping starts STUDIO_DIRECTOR_CMD once, then waits out the cooldown" (starts=0). It passed on the same tree in the pull request's run an hour earlier.
 - **2.92:** "task lane gives each builder its own folder" now waits for the thing itself. The same change to "the supervisor starts a fresh agent per task" was withdrawn (the next check, "--lanes auto", then failed 2 runs in 8: only one lane got its agent, even with a 90 s wait; cause not found). Left: that check, `2771a`, the tester drive, `290b` second gate, `277p` "someone moves main", "two builders without lanes", "--lanes auto".
 - **2.91:** three were given a hand-shake in place of a clock (`269q`, `2601m`, `277p` B-before-A). Left: the two supervisor-window checks, `2771a`, the tester drive, and two seen under load on 17 November (`290b` second gate, `277p` "someone moves main").
 
@@ -73,6 +74,23 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-366 — the new time-limit wrapper started two processes without the hidden-window option · fixed 2.93 (before the merge)
 - **Evidence:** pull request 95, first online run: the 2.73.1 rule "every child_process call passes windowsHide: true" red on all three systems, naming `harness/run-limited.mjs` lines 17 and 19. On Windows each engine command could have flashed a console window.
 - **Fix:** both calls pass it. Like the 2.35 path rule (P-359), this rule runs in the self-test only: the maintainer's list before a push now has units `235` and `2731c`.
+
+### P-367 — the next batch waited unchecked through the whole train before it · fixed 2.94 (`rules.ahead`, off by default, untested on a real engine)
+- **Evidence:** a studio's trains: one rules check (about an hour), then one land run (one to two hours); the lanes queued for the next train were checked only after both.
+- **Fix:** with `rules.ahead` the next batch's rules check runs beside the land run when free memory allows; kept only when the land run lands the batch unchanged. `qa/selftest-294a.mjs`.
+
+### P-368 — the scorecards called a closed task "landed" · fixed 2.94
+- **Evidence:** `npm run score` and the brief counted every `task.done` under "landed", so planning and watch tasks, duplicates and forced closes read as landed work.
+- **Fix:** "landed" is work that went through a train; "closed without a landing" is its own number. `qa/selftest-294c.mjs`. The autonomy badge still counts closes (its bars were set on that number).
+
+### P-369 — on Windows the check ahead ended with the train that started it · fixed 2.94 (before the merge)
+- **Evidence:** pull request 96, first online run, Windows only: `294a` (e) red. The check ahead was started and then dropped, the next train ran the same tests again, and the unit crashed removing a folder a leftover process held. On Windows a child that is not started detached ends when its parent's process ends; the check ahead was detached everywhere else.
+- **Fix:** it is started detached on every system. The unit's clean-up retries a held folder, as `292a` does.
+
+### P-370 — on Windows a train cancel started from a cut-down environment could not read the process list · open (the unit fixed 2.94, before the merge)
+- **Evidence:** pull request 96, second online run and its re-run, Windows only: `294a` (g) red twice the same way. `train cancel` said "the process list could not be read: ETIMEDOUT" (the one PowerShell call took over 16 s), so the train was not ended and neither was the check ahead. `284u` runs the same cancel on the same runner and passes: it passes Windows' own system variables through to its helpers (2.84), and `294a` did not.
+- **Fix:** `294a` passes them through, as the fifteen engine units since 2.84 do. Nothing in `harness/` changed.
+- **Open:** `psEnv` (2.84) is meant to give PowerShell those variables when they are missing, and here it did not suffice; which variable is missing is not known. A cancel run from a real shell has them all. Not looked into further: no Windows machine to try it on.
 
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 

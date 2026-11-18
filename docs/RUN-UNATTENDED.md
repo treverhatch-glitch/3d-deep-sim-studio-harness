@@ -127,7 +127,7 @@ npm run studio:status
     `npm run janitor -- --lanes` and deleted only with `--lanes --yes --by <name>`. A copy whose work landed (its task done
     in `studio/DONE.md`, or a `lane.merged` event) is stale after `STUDIO_JANITOR_LANDED_H` (6). The supervisor runs these
     proposals as a dry run (never deleting) at most every `STUDIO_JANITOR_LANES_MIN` (360; `off`/0: never), in a detached
-    child (`harness/lane-disk.mjs`); the digest, `status --brief` and `npm run status -- --json` (`staleLanes`) then show
+    child (`harness/lane-disk.mjs`); the digest and `status --brief` then show
     "N stale lane copies (X GB) proposed: npm run janitor -- --lanes --yes --by <name>" (`janitor.lanes_proposed`). Deleting
     is a decider's action: a person, a Producer/Director session or outside agent on a person's permission, or an agent
     under the owner's delegation for `janitor-lanes` (`npm run delegate -- grant <agent> --actions janitor-lanes …`; a `hold`

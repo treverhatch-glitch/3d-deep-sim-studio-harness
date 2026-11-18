@@ -337,6 +337,8 @@ export async function cancelEngineTrain(root, { engine = 'unity', by = '', why =
     try { emit({ type: `task.train.${engine}.cancel_failed`, agent: who, to: 'producer', track: `engine:${engine}`, status: 'blocked', msg: m.slice(0, 600), meta: { train: h.id, engine, pid: h.pid } }); } catch {}
     return { ok: false, id: h.id, message: m };
   }
+  // 2.94: a check ahead of the next batch ends with the train (harness/rules-ahead.mjs), its whole process tree.
+  try { await (await import('./rules-ahead.mjs')).aheadEnd(root, engine, `the train was cancelled by ${who}`); } catch { /* it ends at its time limit */ }
   // 3. The gate worktree back at the target, and the train's own integration refs.
   const s = ut.unityTrainSettings(root, engine);
   let gate = { done: false, steps: [], why: s.error ? s.message : '' };

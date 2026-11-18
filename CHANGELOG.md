@@ -4,6 +4,18 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.94.0] — 2026-11-18
+The next batch is checked while the current one lands (the owner's three answers of 2026-11-18). An engine train was
+one rules check, then one land run, with the next batch's lanes waiting unchecked through both.
+Details: docs/RELEASE-2.94.0.md.
+- **`rules.ahead` (off by default):** while a green batch's land run runs, the next batch's rules check runs beside
+  it, when free memory allows. Landed unchanged, the next train finds the result and goes to its land run; otherwise
+  the check ahead is ended with its process tree and nothing of it is kept. A red ahead hands nobody back.
+- **"Landed" on the scorecards is work that went through a train.** Tasks closed with no landing have their own count.
+- **Removed:** the old status snapshot and the role loader (`harness/status.mjs`, `harness/agents.mjs`, `npm run
+  agents`). `npm run status` now prints the brief that `npm run status -- --brief` printed.
+- **Size:** harness code is 229 lines smaller than 2.93 with the new check in it.
+
 ## [2.93.0] — 2026-11-18
 One rules check per train, and no run of the harness's own in a land run's way (the owner's order: do the overseer's
 list, clean up old code and duplicate lines). On 2.92 a live studio's trains landed what they carried, but the median
@@ -24,7 +36,7 @@ train took 209 minutes, nearly all of it tests that passed, run twice. Details: 
 ## [2.92.0] — 2026-11-17
 Bad news at the queue door, not hours later (the owner's order: upgrade, and take lines away where that is right).
 A live studio's trains handed back half their branches for clashes found only when the train started.
-Details: docs/RELEASE-2.92.0.md.
+Details: the 2.92.0 release notes, in git history.
 - **The compile search runs when a branch is queued**, against the target and the branches queued ahead. A clash is
   told to the porter at once; the branch is queued and trains keep the two apart.
 - **The check before queueing judges the branch merged with the target**, and runs again when the target moved.
@@ -49,26 +61,9 @@ it, and the land script's record commit then cost the batch its "rules are green
   each proves is unchanged.
 - **Release rule:** a branch a studio may have merged goes into main with a merge commit, not a squash.
 
-## [2.90.0] — 2026-11-16
-The overseer's list (the owner's order: build what a live studio's overseer asked for after two days on 2.86). Its
-train logs showed more than the list: the rules check had timed out on every engine train for two days and judged
-nobody. Details: the 2.90.0 release notes, in git history.
-- **The rules check's time limit follows the suite** when the studio set none, a timeout on the target is an event
-  and a line in `train status`, and the same cut-off run is not repeated.
-- **A compile error is searched with the compile command**, not with land runs; `engines.<x>.blame` ties a failing
-  test to the file that explains it; `engines.<x>.preQueue` checks a branch before it is queued; `rules.first` runs
-  one test filter first. Two logged batches: one land run where there were four, two where there were four or five.
-- **Two land runs at once:** a second gate copy (`engines.<x>.gates`), switched by the Line Producer
-  (`task train parallel on|off`), off by default. The second gate only tests.
-- **Slices:** `task done --train --slice` lands a big unit slice by slice; a hand-back after commits is progress for
-  every counter.
-- **Tasks and briefs:** a task waits for the proposal it names; `promote` takes `--phase`, `--serves`, `--type`;
-  `unblock` ends a time block; line ranges open the brief; an answered ask stays a must-do until followed.
-- **Status and guards:** builders idle because work waits on the engine train say so; both trains on the status
-  line; stale asks not counted; a session on a harness check is not stalled; the plain `git pull` trap is named.
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.90.0** (2026-11-16): The overseer's list. The rules check's time limit follows the suite; a compile error is searched with the compile command; `preQueue`, `blame`, `rules.first`; two land runs at once; slices.
 - **2.89.0** (2026-11-16): Which functions a studio runs. Each harness command records the functions it called (`.studio/usage/functions/<version>.tsv`); `npm run commands-run -- --functions` shows what ran and what did not.
 - **2.88.0** (2026-11-16): One reading of "landed" for every count (web train, engine train, both, closes), and one module of small helpers.
 - **2.87.0** (2026-11-16): Shorter, same behaviour. One length rule for comments (9,431 lines to 5,151), one test kit for 244 test files, finished notes removed.

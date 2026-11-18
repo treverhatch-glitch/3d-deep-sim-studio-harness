@@ -126,12 +126,6 @@ export function staleLanesLine({ root = studioMain(), now = Date.now() } = {}) {
   if (!rec || now - (Date.parse(rec.at) || 0) > 2 * 86400000) return '';
   return staleLine(rec);
 }
-/** For the War Room snapshot: { stale, bytes, at, line } or null. */
-export function staleLanesCard(root = studioMain()) {
-  const rec = readJson(PROPOSALS_FILE(root));
-  if (!rec) return null;
-  return { at: rec.at, stale: (rec.stale || []).length, bytes: rec.bytes || 0, lanes: (rec.stale || []).map((l) => l.agent), line: staleLine(rec), disk: readJson(DISK_FILE(root)) };
-}
 
 /** The whole pass (the detached child runs this): proposals, then the disk report. */
 export async function runLanesPass({ root = studioMain(), env = process.env, now = Date.now(), emit = emitEvent } = {}) {

@@ -149,17 +149,16 @@ export async function selftest268M({ dir, run, report, tmpRoot }) {
     return { ok, detail: JSON.stringify({ first: first.sampled, again: again.sampled, samples: samples.length, low: low.map((e) => e.msg), size, lines: lines.length, meta: samples[0]?.meta }) };
   });
 
-  await guard('2.68.0 (m): `status --brief` and `npm run lanes` print the machine line from the last scan ("Machine: RAM 26/32 GB (commit 55/60), CPU 32%, GPU 1% (1.8/12 GB), disk 130 GB free"), the brief stays under 100 words, and the War Room snapshot carries the fields (fails on 2.67.2: no machine line)', async () => {
+  await guard('2.68.0 (m): `status --brief` and `npm run lanes` print the machine line from the last scan ("Machine: RAM 26/32 GB (commit 55/60), CPU 32%, GPU 1% (1.8/12 GB), disk 130 GB free"), the brief stays under 100 words (fails on 2.67.2: no machine line)', async () => {
     fs.mkdirSync(path.dirname(mfile), { recursive: true });
     fs.writeFileSync(mfile, JSON.stringify(winLiteral()));
     const want = 'Machine: RAM 26/32 GB (commit 55/60), CPU 32%, GPU 1% (1.8/12 GB), disk 130 GB free';
-    const b = run(dir, 'node harness/status.mjs --brief --peek --json', { ...env, STUDIO_TEST_FREEMEM_MB: '5300' });
+    const b = run(dir, 'node harness/brief-status.mjs --brief --peek --json', { ...env, STUDIO_TEST_FREEMEM_MB: '5300' });
     let j = null; try { j = JSON.parse(b.stdout.trim().split('\n').pop()); } catch {}
     const lanes = run(dir, 'node harness/lanes.mjs --full --no-stamps', env);
-    const snap = probe('snap', "const { buildStudioSnapshot } = await import('./harness/status.mjs'); const s = buildStudioSnapshot(); console.log(JSON.stringify({ m: s.machine }));");
     fs.rmSync(mfile, { force: true });
-    const ok = j && j.text.includes(`${want}.`) && j.words < 100 && /PC: 5\.2 GB free/.test(j.text) && out(lanes).includes(want) && snap.m?.line === want && snap.m.ram.commitLimitGb === 60 && snap.m.headroomGb === 5 && snap.m.gpus[0].vramGb === 12;
-    return { ok, detail: `${j?.text}\n--- lanes:\n${out(lanes).slice(-800)}\n--- snap: ${JSON.stringify(snap).slice(0, 600)}` };
+    const ok = j && j.text.includes(`${want}.`) && j.words < 100 && /PC: 5\.2 GB free/.test(j.text) && out(lanes).includes(want);
+    return { ok, detail: `${j?.text}\n--- lanes:\n${out(lanes).slice(-800)}` };
   });
 
   await guard('2.68.0 (m): the disk budget: under STUDIO_DISK_MIN_FREE_GB `task start` warns "disk low: N GB free", the train hook says what the janitor can free, the default floor is max(20 GB, 5% of the disk), and the digest has a line for a machine.disk_low event (fails on 2.67.2)', async () => {

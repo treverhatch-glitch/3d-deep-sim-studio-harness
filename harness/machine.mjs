@@ -327,14 +327,6 @@ export function machineLine(p) {
   return `Machine: ${parts.join(', ')}`;
 }
 
-/** The fields the War Room card shows (from the last scan only; never scans: the hub snapshot is built often). */
-export function machineCard(root = MACHINE_ROOT, env = process.env) {
-  if (scanOff(env)) return null;
-  const p = readJson(machineFile(root));
-  if (!p?.at) return null;
-  return { at: p.at, line: machineLine(p), os: p.os, cores: p.cores, cpuBusy: p.cpu?.busy ?? null, ram: p.ram, headroomGb: memHeadroomGb(p), gpus: p.gpus, disk: p.disk, power: p.power, processes: (p.processes || []).slice(0, 10), disk_low: diskBudget({ root, env, profile: p }).low };
-}
-
 // ---- the disk budget -----------------------------------------------------------------------------------------------
 
 /** Free space on the studio's disk against STUDIO_DISK_MIN_FREE_GB (default max(20, 5% of the disk)). Cheap: one statfs. */

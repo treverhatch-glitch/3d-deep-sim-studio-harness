@@ -5,7 +5,7 @@
  * Default for unity when "rules" is absent: `dotnet test tools/SimTests` when the target branch has that folder. "rules": false
  * or STUDIO_ENGINE_RULES=off: no check. Other keys: "inputs" (git-ignored files the tests read), "timeoutMin" (30), "env", "lfs",
  * "paths", "ignore", "focus" (changed systems only, a full run every fullEveryHours; "focus.auto", "focus.shared"), "share", "maxLanes",
- * "play.focus", "landGate" (docs/NATIVE-ENGINE.md). The batch runs first; a red batch asks the target, and a red target
+ * "play.focus", "landGate", "ahead" (docs/NATIVE-ENGINE.md). The batch runs first; a red batch asks the target, and a red target
  * judges no lane. Results are kept per tree, command and inputs (.studio/engine/<x>-rules.json).
  *   node harness/engine-rules.mjs [--engine unity] [--ref <branch|commit>] [--full] [--fresh] [--json] | show [--engine unity]
  *   node harness/engine-rules.mjs plan --branch <b> [--branch <c>] [--json]   (what a batch's check would run; runs nothing)
@@ -231,7 +231,7 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
   for (const x of ig0) if (x && !ignore.includes(x.replace(/\\/g, '/').replace(/\/+$/, ''))) focusBad.push(`rules.ignore ${JSON.stringify(x).slice(0, 80)} is not a plain repo path (no glob, no .., not absolute); it is left out`);
   // 2.93: rules.landGate, the land run's gate that runs these tests, spelled as harness/unity-gate.mjs landStages reads names.
   const landGate = typeof o.landGate === 'string' ? o.landGate.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, 24) : '';
-  const extra = { landGate, env: vars, lfs: o.lfs === true, paths: relList(o.paths), ignore, focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, first, blame: bl.blame, timeoutSet, timeoutFrom };
+  const extra = { landGate, env: vars, lfs: o.lfs === true, paths: relList(o.paths), ignore, focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, first, blame: bl.blame, timeoutSet, timeoutFrom, ahead: o.ahead === true };
   const test = typeof r === 'string' ? r.trim() : typeof o.test === 'string' ? o.test.trim() : '';
   if (test) return { command: withSdk(test), inputs, timeoutMin, source: `studio/game.json engines.${engine}.rules`, ...extra };
   const d = DEFAULTS[engine];
@@ -594,6 +594,13 @@ function keep(root, engine, key, rec, run = true) {
     for (const k of keys.slice(0, Math.max(0, keys.length - 60))) delete j.trees[k];
     if (run) j.runs = [...(Array.isArray(j.runs) ? j.runs : []), { at: rec.at, status: rec.status, ms: rec.ms, mode: rec.mode }].slice(-40);
   });
+}
+
+/** 2.94: the keys of the kept results now (trees, parts, timeouts), and forgetting the ones added since such a list. */
+export function rulesCacheKeys(root, engine) { const j = readCache(root, engine); return { trees: Object.keys(j.trees), parts: Object.keys(j.parts || {}), timedOut: Object.keys(j.timedOut || {}) }; }
+export function rulesCacheForget(root, engine, before) {
+  if (!before) return;
+  writeCache(root, engine, (j) => { for (const k of ['trees', 'parts', 'timedOut']) for (const x of Object.keys(j[k] || {})) if (!(before[k] || []).includes(x)) delete j[k][x]; });
 }
 
 /** Median minutes of the last recorded runs that ran to the end, or null. */
@@ -986,7 +993,7 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
  * why, kept, dropped, runs, ms, green?, inputs, mode, filter }. 2.93: the batch runs first; only a red asks the target (a
  * kept result, else a run), then is bisected by prefixes. STUDIO_ENGINE_RULES_MAX_RUNS (12) bounds the runs.
  */
-export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], extraFrom = [], full = false, owe = false, useCache = true, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt, slice = null } = {}) {
+export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], extraFrom = [], full = false, owe = false, useCache = true, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt, slice = null, batchOnly = false } = {}) {
   const src = [...from, ...extraFrom];
   const res = { ran: false, kept: lanes.slice(), dropped: [], runs: 0, ms: 0, why: '', inputs: inputsPrint(cfg, src), mode: 'full', filter: '' };
   if (!cfg) return { ...res, skipped: true, why: 'no rules check is configured' };
@@ -999,7 +1006,8 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     for (let i = 0; i < n; i += 1) {
       const part = lanes.slice(i * cfg.maxLanes, (i + 1) * cfg.maxLanes);
       log(`[engine-rules] ${engine}: slice ${i + 1} of ${n} (rules.maxLanes ${cfg.maxLanes}): ${part.map((l) => l.task).join(', ')}`);
-      const r = rulesGate({ engine, repo, tip, lanes: part, chain, cfg, from, extraFrom, full, owe, useCache, root, id: `${id}-s${i + 1}`, env, log, run, slice: { i: i + 1, n } });
+      const r = rulesGate({ engine, repo, tip, lanes: part, chain, cfg, from, extraFrom, full, owe, useCache, root, id: `${id}-s${i + 1}`, env, log, run, slice: { i: i + 1, n }, batchOnly });
+      if (batchOnly) all.ahead = all.ahead && all.ahead !== 'pass' ? all.ahead : r.ahead;
       all.ran = all.ran || r.ran;
       if (r.splitAtOnce) all.splitAtOnce = Math.max(all.splitAtOnce || 0, r.splitAtOnce);
       if (r.selWhy) all.selWhy = all.selWhy ? `${all.selWhy}; ${r.selWhy}`.slice(0, 400) : r.selWhy;
@@ -1100,6 +1108,9 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
       if (c.error || !c.head) break;
       const r = atF(c.head);
       log(`[engine-rules] ${engine}: rules.first (${cfg.first.filter}) on ${left.map((l) => l.task).join(' + ')}: ${r.status}`);
+      // 2.94: a check ahead runs the batch only and judges no lane.
+      if (batchOnly && r.status !== 'pass') return { ...res, ahead: r.status, why: r.why };
+      if (batchOnly) break;
       if (r.status !== 'red') break;
       onTip = onTip || atF(tip);
       if (onTip.status !== 'pass') { log(`[engine-rules] ${engine}: rules.first is ${onTip.status} on the target itself: it judges no lane`); break; }
@@ -1136,6 +1147,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     first = null;
     if (whole.error || !whole.head) { res.why = `the batch could not be built for the rules check (${whole.error || 'no head'})`; break; }
     const r = at(whole.head);
+    if (batchOnly) return { ...res, ahead: r.status, why: r.why, ...(r.status === 'pass' ? { green: whole.head } : {}) };
     if (r.status === 'pass') { res.green = whole.head; break; }
     // The first batch run that timed out or could not run judges no lane and is counted, as a red target is.
     const tmoBatch = rounds++ === 0 && r.status !== 'red';

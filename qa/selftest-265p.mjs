@@ -160,6 +160,8 @@ export async function selftest265P({ dir, run, report, tmpRoot }) {
     const lines = [];
     for (let i = 0; i < 40; i += 1) {
       const ts = new Date(now - 20 * 60000 + i * 1000).toISOString();
+      // 2.94: a landing is a lane merged by a train (a close alone reads "Closed"), so each of the 40 lands and then closes.
+      lines.push(JSON.stringify({ id: `evt_m${i}`, ts, type: 'lane.merged', agent: 'train', task: `T-${500 + i}`, msg: 'merged', meta: {} }));
       lines.push(JSON.stringify({ id: `evt_b${i}`, ts, type: 'task.done', agent: 'bld', task: `T-${500 + i}`, msg: 'done', meta: {} }));
       if (i % 3 === 0) lines.push(JSON.stringify({ id: `evt_a${i}`, ts: new Date(now - 86400000).toISOString(), type: 'task.added', agent: 'p', task: `T-${500 + i}`, msg: 'added', meta: { type: 'bug' } }));
     }
@@ -170,8 +172,8 @@ export async function selftest265P({ dir, run, report, tmpRoot }) {
     write(dir, '.studio/supervisor.json', JSON.stringify({ status: 'running', pid: process.pid, halted: { why: 'two sessions in a row ended with exit 1 (builder-1, builder-2): check the provider' } }));
     const iso = new Date(now).toISOString();
     const since = new Date(now - 30 * 60000).toISOString();
-    const b1 = run(dir, `node harness/status.mjs --brief --peek --json --now ${iso} --since ${since}`, { ...env, AGENT_EVENTS_FILE: bev, STUDIO_TEST_FREEMEM_MB: '5300' });
-    const b2 = run(dir, `node harness/status.mjs --brief --peek --now ${iso} --since ${since}`, { ...env, AGENT_EVENTS_FILE: bev, STUDIO_TEST_FREEMEM_MB: '5300' });
+    const b1 = run(dir, `node harness/brief-status.mjs --brief --peek --json --now ${iso} --since ${since}`, { ...env, AGENT_EVENTS_FILE: bev, STUDIO_TEST_FREEMEM_MB: '5300' });
+    const b2 = run(dir, `node harness/brief-status.mjs --brief --peek --now ${iso} --since ${since}`, { ...env, AGENT_EVENTS_FILE: bev, STUDIO_TEST_FREEMEM_MB: '5300' });
     for (let i = 0; i < 12; i += 1) fs.rmSync(path.join(dir, `.studio/agents/brief-w${i}.json`), { force: true });
     fs.rmSync(path.join(dir, '.studio/supervisor.json'), { force: true });
     let j = null; try { j = JSON.parse(b1.stdout.trim().split('\n').pop()); } catch {}

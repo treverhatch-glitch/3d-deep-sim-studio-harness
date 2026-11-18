@@ -138,7 +138,7 @@ console.log(JSON.stringify(b));`, { STUDIO_TEST_MACHINE: machine });
     g(S, 'init', '-q', '-b', 'main'); g(S, 'add', '-A'); g(S, 'commit', '-qm', 'studio', '--no-verify');
     const env = { AGENT_EVENTS_FILE: path.join(S, '.studio', 'events-276j.jsonl'), STUDIO_MAIN_ROOT: S, STUDIO_TEST_FREEMEM_MB: '8000', STUDIO_MACHINE_SCAN: 'off' };
     const sup = run(S, 'node harness/supervisor.mjs status', { ...base, ...env });
-    const brief = run(S, 'node harness/status.mjs --brief --peek', { ...base, ...env });
+    const brief = run(S, 'node harness/brief-status.mjs --brief --peek', { ...base, ...env });
     // Beta mode on (set by a person, naming the crew's orchestrator): the line says who may give the yes.
     write(S, 'studio/beta.json', `${JSON.stringify({ on: true, by: 'owner', at: '2026-11-04T06:00:00.000Z', why: 'beta', agents: ['opus-1'], roles: ['producer', 'director'] }, null, 2)}\n`);
     g(S, 'add', '-A'); g(S, 'commit', '-qm', 'beta on', '--no-verify');

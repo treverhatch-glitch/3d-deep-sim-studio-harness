@@ -140,13 +140,13 @@ console.log(JSON.stringify({ p }));`, penv);
   const pev = evs().filter((x) => x.type === 'janitor.lanes_proposed');
   const p2 = pass(now + 60000);
   const pev2 = evs().filter((x) => x.type === 'janitor.lanes_proposed');
-  const surf = probe(`import { buildDigest } from ${u('harness/digest.mjs')}; import { briefFacts } from ${u('harness/brief-status.mjs')}; import { buildStudioSnapshot } from ${u('harness/status.mjs')};
-const d = await buildDigest({ root: process.cwd(), events: [] }); const b = await briefFacts({ root: process.cwd(), events: [] }); const s = buildStudioSnapshot();
-console.log(JSON.stringify({ d: (typeof d === 'string' ? d : d.text || JSON.stringify(d)), b: b.staleLanes || '', s: s.staleLanes || null }));`, penv);
+  const surf = probe(`import { buildDigest } from ${u('harness/digest.mjs')}; import { briefFacts } from ${u('harness/brief-status.mjs')};
+const d = await buildDigest({ root: process.cwd(), events: [] }); const b = await briefFacts({ root: process.cwd(), events: [] });
+console.log(JSON.stringify({ d: (typeof d === 'string' ? d : d.text || JSON.stringify(d)), b: b.staleLanes || '' }));`, penv);
   const want = /1 stale lane copy \([\d.]+ [KMG]B\) proposed: npm run janitor -- --lanes --yes --by <name>/;
-  await guard('270w proposals: the supervisor runs the janitor\'s lane proposals (dry run: nothing deleted), at most every STUDIO_JANITOR_LANES_MIN; a lane whose task landed is stale after STUDIO_JANITOR_LANDED_H while an unlanded one is kept; the digest, status --brief and the War Room snapshot show "1 stale lane copy (X) proposed: npm run janitor -- --lanes --yes --by <name>" (fails on 2.69.0: nothing runs or shows them)', () => [
+  await guard('270w proposals: the supervisor runs the janitor\'s lane proposals (dry run: nothing deleted), at most every STUDIO_JANITOR_LANES_MIN; a lane whose task landed is stale after STUDIO_JANITOR_LANDED_H while an unlanded one is kept; the digest and status --brief show "1 stale lane copy (X) proposed: npm run janitor -- --lanes --yes --by <name>" (fails on 2.69.0: nothing runs or shows them)', () => [
     p1.p?.stale?.length === 1 && p1.p.stale[0].agent === 'builder-f' && p1.p.stale[0].landed === true && pev.length === 1 && pev2.length === 1 && fs.existsSync(lane('builder-f')) && fs.existsSync(lane('builder-e'))
-      && want.test(surf.d || '') && want.test(surf.b || '') && want.test(surf.s?.line || '') && surf.s?.stale === 1,
+      && want.test(surf.d || '') && want.test(surf.b || ''),
     JSON.stringify({ p1: p1.p || p1._out, pev: pev.length, pev2: pev2.length, p2: p2.p?.at, surf }).slice(0, 3000)]);
 
   // ---- janitor-lanes is delegable; hold no longer covers deleting lanes ----
