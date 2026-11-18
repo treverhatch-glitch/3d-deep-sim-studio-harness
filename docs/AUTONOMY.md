@@ -273,8 +273,8 @@ npm run decisions -- stats [--days 14]
   `policy confirm` refuse agents' shells, lanes and launched sessions; a policy.json an agent committed doesn't count; a worker can't propose.
 - **Review**: a person (or an agent on a person's permission), never the deciding agent. `revert` runs the record's undo (unhold or hold
   again, the type or visual proof back, the dev's yes taken back, a quarantine released, an asset review reopened, a released lane held
-  again); a lane that already landed gets a revert task. Shown in `npm run status -- --json` (`decisions`: count, oldest, overdue) and
-  the digest; past `reviewWithinH` (72) they go under "Needs you".
+  again); a lane that already landed gets a revert task. Shown in the
+  digest; past `reviewWithinH` (72) they go under "Needs you".
 - **Audits** (2.73.0, `harness/audit.mjs`): a fixed share of hands-free landings and autonomous decisions is picked for after-the-fact
   review by someone who didn't do the work: `"audit": { "rate": 0.1 }` (no rate: 0.1 while autonomous mode is on, else 0). The draw is
   seeded (sha256 of `studio-audit|<seed>`, the seed the decision id or the landing's task id; `npm run decisions -- audit-draw <id>`

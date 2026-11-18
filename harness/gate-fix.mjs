@@ -170,7 +170,7 @@ export function gateFix(gate, { output = '', compact = false } = {}) {
   // 2.72.0 (c): an engine gate's failure kind (harness/engine-proof.mjs) picks its own Fix.
   const esub = text.match(/\[engine-gate\] (?:FAIL|NOT RUN) ([\w-]+)(?: \((\w+)\))?:/m);
   if (esub && ENGINE_FIXES[esub[1]]) return { text: `engine ${esub[1]}: ${engineFix(esub[1], esub[2] || 'unity')}; ${rerun}`, source: 'engine-check' };
-  if (TIMEOUT.test(text)) return { text: `it timed out, which is often load rather than a wrong result: check what else is running (npm run status), wait for heavy work to finish, ${rerun}; a timeout on a quiet machine is a slow check to fix (${log})`, source: 'timeout' };
+  if (TIMEOUT.test(text)) return { text: `it timed out, which is often load rather than a wrong result: check what else is running (npm run studio:status), wait for heavy work to finish, ${rerun}; a timeout on a quiet machine is a slow check to fix (${log})`, source: 'timeout' };
   if (GATE_FIXES[id]) return { text: `${GATE_FIXES[id]}; ${rerun}${compact ? ` (full log: ${log})` : ''}`, source: 'table' };
   const kind = gameKindFix(id);
   if (kind) return { text: `${kind}; then rerun: npm run verify -- --only game`, source: 'table' };

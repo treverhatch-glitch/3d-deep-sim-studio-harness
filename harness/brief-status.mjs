@@ -11,6 +11,7 @@
  * STUDIO_BRIEF_DEFAULT_MIN (30). Lists are cut ("+3 more") to fit BRIEF_MAX_WORDS (100).
  */
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
@@ -135,4 +136,13 @@ export async function briefStatus({ since = null, now = Date.now(), peek = false
   const text = briefText(facts);
   if (!peek) { try { fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true }); fs.writeFileSync(BRIEF_MARK(), `${JSON.stringify({ at: new Date(now).toISOString() })}\n`); } catch {} }
   return { text, words: wordCount(text), facts };
+}
+
+// Run as a script: `npm run status` prints the brief (with or without --brief).
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  const opt = (k) => (process.argv.includes(k) ? process.argv[process.argv.indexOf(k) + 1] : null);
+  const nowArg = Date.parse(opt('--now') || '');
+  const b = await briefStatus({ since: opt('--since'), now: Number.isFinite(nowArg) ? nowArg : Date.now(), peek: process.argv.includes('--peek') });
+  console.log(process.argv.includes('--json') ? JSON.stringify({ text: b.text, words: b.words, facts: b.facts }) : b.text);
+  process.exit(0);
 }

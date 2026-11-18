@@ -130,7 +130,7 @@ export async function reviewSummary({ root = mainRoot(), now = Date.now() } = {}
   return { mode, pending: p.length, overdue: overdue.length, reviewWithinH: h, oldest: o ? { id: o.id, at: o.at, action: o.action, subject: o.subject, ageH: Math.round(((now - Date.parse(o.at)) / H) * 10) / 10 } : null, overdueList: overdue.slice(0, 5).map((d) => ({ id: d.id, action: d.action, subject: d.subject, at: d.at })) };
 }
 
-/** A synchronous card for the War Room snapshot (harness/status.mjs is sync): no policy lookups beyond the file. */
+/** A synchronous card (count, oldest, overdue): no policy lookups beyond the file. */
 export function reviewCard({ root = mainRoot(), now = Date.now() } = {}) {
   const p = pendingReview(root);
   let h = 72;

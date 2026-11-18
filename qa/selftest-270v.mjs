@@ -172,7 +172,7 @@ export async function selftest270V({ dir, run, report, tmpRoot }) {
     const rec = path.join(dir, '.studio', 'asset-reviews', 'dock-crate.json');
     if (fs.existsSync(rec)) { const back = rj('.studio/asset-reviews/dock-crate.json'); back.requestedAt = '2026-01-01T00:00:00.000Z'; fs.writeFileSync(rec, JSON.stringify(back)); }
     task(`done ${B.id} --agent artist-270v-b`);
-    const brief = run(dir, 'node harness/status.mjs --brief --peek --json', base);
+    const brief = run(dir, 'node harness/brief-status.mjs --brief --peek --json', base);
     let bj = null; try { bj = JSON.parse(String(brief.stdout).trim().split('\n').pop()); } catch {}
     const dig = run(dir, 'node harness/digest.mjs --all', base);
     const listed = run(dir, 'node harness/assets.mjs reviews', base);

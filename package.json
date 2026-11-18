@@ -9,7 +9,6 @@
   },
   "scripts": {
     "setup": "node scripts/setup.mjs",
-    "agents": "node harness/agents.mjs",
     "route": "node harness/route.mjs",
     "brief": "node harness/prepare-brief.mjs",
     "replay": "node harness/replay.mjs",
@@ -21,7 +20,7 @@
     "reach": "node harness/reachability.mjs",
     "next": "node harness/task.mjs next",
     "event": "node harness/event.mjs",
-    "status": "node harness/status.mjs",
+    "status": "node harness/brief-status.mjs",
     "machine": "node harness/machine.mjs",
     "heavy": "node harness/heavy.mjs",
     "handoff": "node harness/handoff.mjs",
