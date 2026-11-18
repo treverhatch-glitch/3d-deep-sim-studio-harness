@@ -85,7 +85,7 @@ function main() {
 
   const contentFiles = fs.readdirSync(contentDir).filter(f => f.endsWith('.json'));
   let totalErrors = 0;
-  const newestOpenPhase = Math.max(bible.phase.open, ...(bible.phase.floors || []).map(f => f.n));
+  const newestOpenPhase = bible.phase.open;
 
   for (const file of contentFiles) {
     const layerId = path.basename(file, '.json');

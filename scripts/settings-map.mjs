@@ -38,7 +38,7 @@ export function topLists(root = ROOT) {
 }
 
 
-function walk(dir, test, out = []) {
+export function walk(dir, test, out = []) {
   let entries = [];
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
   for (const e of entries) {

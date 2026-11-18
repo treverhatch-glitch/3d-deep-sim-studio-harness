@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { phaseExitGaps } from './verdict.mjs';
-import { flagValueOf, nowIso as now } from './helpers.mjs';
+import { flagValueOf, nowIso as now, positionalOf } from './helpers.mjs';
 
 export const BIBLE_DIR = path.join(REPO_ROOT, 'studio', 'bible');
 export const BIBLE_FILE = path.join(BIBLE_DIR, 'bible.json');
@@ -148,7 +148,7 @@ export function answerFollowup(b, key, a, by = 'game-dev') {
 const rel = (p) => path.relative(REPO_ROOT, p).split(path.sep).join('/');
 
 export function emptyBible() {
-  return { version: 1, answers: {}, pillars: [], phases: { 1: {}, 2: {}, 3: {} }, layers: {}, signed: null, phase: { open: 0, history: [], floors: [] }, updatedAt: now() };
+  return { version: 1, answers: {}, pillars: [], phases: { 1: {}, 2: {}, 3: {} }, layers: {}, signed: null, phase: { open: 0, history: [] }, updatedAt: now() };
 }
 
 export function hasBible() {
@@ -465,12 +465,7 @@ export function catalog() {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const flag = flagValueOf(argv);
-  const positional = [];
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i].startsWith('--')) {
-      if (argv[i + 1] && !argv[i + 1].startsWith('--')) i++;
-    } else positional.push(argv[i]);
-  }
+  const positional = positionalOf(argv);
   const [cmd = 'show', ...rest] = positional;
   const b = readBible();
   if (cmd === 'json') {

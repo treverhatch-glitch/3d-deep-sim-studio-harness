@@ -74,8 +74,11 @@ seconds once the rules are compiled code. So the engine train runs them first, o
 - It runs in a throwaway checkout of the engine repo (never a lane, never the land script's own worktree), with
   `STUDIO_RULES_COMMIT`, `STUDIO_RULES_DIR`, `STUDIO_ENGINE` and `STUDIO_ENGINE_REPO` set. `inputs` are git-ignored
   files or folders the tests read: they are copied in from the engine's folder or the land script's worktree.
-- **It judges a batch only after it passed on the target itself** in the same kind of checkout. A check that is red
-  on the landed target (a missing input, no SDK) judges no lane: the train says why and the land run decides, as before.
+- **The batch runs first (2.93).** Green: the check is over and nothing runs on the target. Red: the target's answer
+  tells a red the batch brings from one the target already has: a kept result for the target's tree answers, else the
+  target runs now in the same kind of checkout. A check that is red on the target itself (a missing input, no SDK)
+  judges no lane: the train says why and the land run decides, as before. With no `rules.focus` a green train costs one
+  full run, not two.
 - A green batch goes to the land run with `STUDIO_RULES_GREEN=1`, as long as the land run lands exactly the checked
   lanes on the checked target. A land script may use that to skip its own copy of the same tests. 2.91: with
   `rules.paths` or `rules.ignore` set, a target that moved only where the rules tests do not read (a land script's own
@@ -83,18 +86,25 @@ seconds once the rules are compiled code. So the engine train runs them first, o
 - A red batch is narrowed with the same cheap check: the first prefix that is red names its last lane. That lane is
   handed back with cause `rules`, the failing test names and the command's last lines, and the rest is checked again.
   `STUDIO_ENGINE_RULES_MAX_RUNS` (12) bounds the runs for one batch; past it the lanes left go to the land run unjudged.
-- Results are kept per tree, command and inputs in `.studio/engine/<engine>-rules.json`: a tree is run once. The
+- Results are kept per tree, command and inputs in `.studio/engine/<engine>-rules.json`: a tree is run once. A kept
+  full pass also answers a focus or `first` question on the same tree (2.93). A batch head that lands with the same
+  rules key is the next target, so its kept result is the next train's answer for the target. The
   `inputs` are not in the tree, so their content is part of what a kept result is valid for; the train also looks at
   them again right before the land run and leaves `STUDIO_RULES_GREEN` out when they changed since the check.
   `STUDIO_ENGINE_RULES_TIMEOUT_MIN` overrides the time limit.
 - **The time limit follows the suite (2.90).** A limit the studio set (`rules.timeoutMin`, or
   `STUDIO_ENGINE_RULES_TIMEOUT_MIN`; fractions of a minute are taken as they are) is used as it is. Unset, a run's
   limit is the largest of the default (`STUDIO_ENGINE_RULES_DEFAULT_MIN`, 30), 1.5 times the longest passing run of the
-  same mode on record (`full`, `focus`, `first`), and, after a run timed out on the target, twice the limit it timed
+  same mode on record (`full`, `focus`, `first`), and, after a run timed out (the batch or the target), twice the limit it timed
   out with; never over 120 min. The raise stays until a run of that mode passes. Every run's log line says which limit
   applied and why (`up to 37.5 min (1.5 x the longest passing full run on record (25 min))`). A tree that timed out is
   recorded with its limit, and is not run again while the limit is no larger: the log says "not run again" and the
   land run decides. Example: a suite that passed in 22 min gets 33 min; one that timed out at 30 gets 60 next time.
+- **A command past its time limit is ended with everything it started (2.93).** The engine commands (compile, rules,
+  pre-queue and pre-land checks, the quick check, the land command) run through `harness/run-limited.mjs`. At the limit it
+  ends the whole process tree (Windows `taskkill /T /F`, elsewhere the process group), not only the shell, so a compiler or
+  editor no longer keeps its folder open. The caller sees a time-out as before. The web game's own timed commands
+  (`harness/train.mjs`, `game-gates.mjs` and others) are unchanged.
 - **A check that judges no lane is seen (2.90).** When the check is red, not runnable or timed out on the target
   itself, the train writes `task.train.<x>.rules_no_judge` (warn, to the producer) with the one change: for a timeout,
   raise `engines.<x>.rules.timeoutMin` or make the run smaller with `rules.focus` (`map`, `auto`, `paths`); otherwise
@@ -129,6 +139,10 @@ half as much machine time as the land runs. Five settings, all optional, in the 
              "smoke": "Category=Smoke", "join": "|", "fullEveryHours": 24 } } }
 ```
 
+- `landGate` (2.93): the name of the gate in the land run's result file (`STUDIO_LAND_RESULT`) that runs the same tests
+  as `test`. When a land run lands and that gate passed (not skipped), the landed tree gets a kept full pass and the
+  last full pass is written. A gate skipped because the land run was told green needs nothing: the check's own kept
+  result answers.
 - `env`: variables (strings) for the command, over the process's own and under the harness's `STUDIO_RULES_*`.
   `rules show` prints their names only. A changed value is a new kept-result key.
 - Large files: the throwaway checkout skips Git LFS smudging (`GIT_LFS_SKIP_SMUDGE=1`) unless `"lfs": true`.
@@ -154,7 +168,12 @@ half as much machine time as the land runs. Five settings, all optional, in the 
 - **2.91: the full run every `fullEveryHours` is owed, never the batch's check.** With lanes waiting, the train's check
   runs as if it were not due. The owed full run is the full `test` on the target alone: when the queue is empty (the
   Line Producer starts a train with no lane for it), or, once it is older than `focus.fullEveryMaxHours` (default twice
-  `fullEveryHours`), at the end of a train after the batch's rounds. A pass writes the last full pass. A red or a
+  `fullEveryHours`), at the end of a train after the batch's rounds. The last full pass is also written by a full
+  green of the target, by a full green of the batch head that lands unchanged, and by a `landGate` pass (2.93). A rules
+  run started outside the train (`npm run engine -- rules`, the done-time check) never turns full because the hours are
+  due (`--full` or `STUDIO_ENGINE_RULES_FULL=1` still do), and takes a machine:heavy slot as a verify does: while an
+  engine land is queued the Line Producer's hold (`line.engine_hold`) keeps it waiting, and one log line says for what.
+  A pass writes the last full pass. A red or a
   timeout blames no lane: `task.train.<x>.rules_full` (warn) and `train status` say it, and it is not run again until
   the target changes under what the tests read (or `fullEveryHours` pass, or a doubled timeout applies).
 - `focus.ignore` (2.84): a list of regexes; a changed path matching any of them is left out before the "does every
@@ -532,7 +551,10 @@ another, and a test that fails whenever a branch moves a pinned commit was found
   with a bad regex or a path outside the repo is left out. Example: `"blame": [ { "test": "PinTests\\.", "touches":
   "Rules~/pin.json", "say": "Regenerate the vectors at the new pin in the same branch" } ]`.
 - **Checks before queueing.** `engines.<x>.preQueue`: a list of `{ "touches": "<path or glob, or a list>", "run":
-  "<command>", "say": "<what to do>", "timeoutMin": 10, "env": { "<NAME>": "<value>" } }`. When `task done --train` (or the harness's own queueing)
+  "<command>", "say": "<what to do>", "timeoutMin": 10, "env": { "<NAME>": "<value>" } }`. 2.93: an entry may also
+  have `"titles": ["<regex>", ...]` (case-insensitive, tested against the task's title) for a check on one KIND of
+  task. An entry applies when every condition it gives is met; it needs `touches` or `titles`. A bad regex leaves the
+  entry out and the command's output says so. The command also gets `STUDIO_TASK_ID` and `STUDIO_TASK_TITLE`. When `task done --train` (or the harness's own queueing)
   queues a branch that changes a matching file (against its merge base with the target), the command runs in a
   throwaway checkout of the branch's head merged with the target's tip (2.92: the branch as it would land; a merge that
   conflicts refuses the queue and names the files, and nothing runs). `STUDIO_LANE_COMMIT` is the branch's head and
@@ -678,3 +700,13 @@ turn on `service.check` and run one `check` end to end, and only then `warm`.
 - `STUDIO_UNITY_EDITMODE_ARGS` with a real land script.
 - A live studio in native mode.
 - The editor service (above) on any real editor.
+
+## Held and slice lanes (2.93)
+
+- **`task after` holds a queued branch.** A queued lane whose task waits (`task after <ID> --set T-x`) for a task that is
+  not done is left out of a train, like a lane that clashes (event `task.train.<x>.deferred`: "it waits for T-x (task
+  after)"). It rides the next train once T-x is done or the hold is removed. `task done --train` still queues it and says so.
+- **`npm run task -- train slice <ID> --engine <x> --by <name> [--off]`** marks a queued branch as a slice (what
+  `task done --train --slice` does): its task stays open when it lands. `--off` removes the mark. Nothing else about the
+  entry changes. It refuses when the task is not in that queue or its train is running with it. Same actors as `train auto`.
+  Event `task.train.<x>.slice_marked`.

@@ -31,6 +31,22 @@ export function busyWaitMs(env = process.env) {
   return Number.isFinite(v) && v > 0 ? v * 60000 : 0;
 }
 
+/**
+ * Judge one run of a waiting loop: { out } when the loop is over (the result to return), else { busy, waited, step },
+ * the busy reason, the ms waited so far and the ms to wait before the next run.
+ */
+export function busyVerdict(r, { t0, limit, tries, label, now, log }) {
+  const text = `${r.stdout || ''}${r.stderr || ''}`;
+  const busy = r.status !== 0 ? busyWhy(text) : '';
+  const noCheck = r.status !== 0 && ranNoCheck(text);
+  const waited = now() - t0;
+  if (!busy || waited >= limit) {
+    if (busy) log(`${label}: still busy after ${Math.round(waited / 1000)} s (STUDIO_TRAIN_BUSY_WAIT_MIN): ${busy}`);
+    return { out: { r, text, busy, noCheck: noCheck || Boolean(busy), tries, waitedMs: waited } };
+  }
+  return { busy, waited, step: Math.min(30000, Math.max(1000, Math.round(limit / 10)), Math.max(0, limit - waited)) };
+}
+
 const nap = (ms) => { if (ms > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); };
 
 /**
@@ -44,16 +60,10 @@ export function runGatesWaiting(once, { log = () => {}, label = 'verify', env = 
   for (;;) {
     tries += 1;
     const r = once();
-    const text = `${r.stdout || ''}${r.stderr || ''}`;
-    const busy = r.status !== 0 ? busyWhy(text) : '';
-    const noCheck = r.status !== 0 && ranNoCheck(text);
-    const waited = now() - t0;
-    if (!busy || waited >= limit) {
-      if (busy) log(`${label}: still busy after ${Math.round(waited / 1000)} s (STUDIO_TRAIN_BUSY_WAIT_MIN): ${busy}`);
-      return { r, text, busy, noCheck: noCheck || Boolean(busy), tries, waitedMs: waited };
-    }
-    const step = Math.min(30000, Math.max(1000, Math.round(limit / 10)), Math.max(0, limit - waited));
-    log(`${label}: busy, not red (${busy}); waiting ${Math.round(step / 1000)} s and running it again (${Math.round((limit - waited) / 1000)} s of STUDIO_TRAIN_BUSY_WAIT_MIN left)`);
+    const v = busyVerdict(r, { t0, limit, tries, label, now, log });
+    if (v.out) return v.out;
+    const { busy, step } = v;
+    log(`${label}: busy, not red (${busy}); waiting ${Math.round(step / 1000)} s and running it again (${Math.round((limit - v.waited) / 1000)} s of STUDIO_TRAIN_BUSY_WAIT_MIN left)`);
     nap(step);
   }
 }

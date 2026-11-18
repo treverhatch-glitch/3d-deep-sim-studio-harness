@@ -155,6 +155,19 @@ export function getRouterMatrix(role = 'producer') {
   });
 }
 
+// Read an HTTP reply: its JSON body, or an Error carrying the status and the retry-after wait.
+async function readReply(res, provider) {
+  const retryAfterSec = Number(res.headers.get('retry-after') || 0);
+  const bodyText = await res.text();
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status} from ${provider.id}: ${bodyText.slice(0, 240)}`);
+    err.status = res.status;
+    err.retryAfterMs = retryAfterSec > 0 ? retryAfterSec * 1000 : 0;
+    throw err;
+  }
+  return JSON.parse(bodyText);
+}
+
 async function callChannel(channel, { messages, temperature = 0.2, maxTokens = 2048 }) {
   const { provider, apiKey } = channel;
   const controller = new AbortController();
@@ -184,16 +197,7 @@ async function callChannel(channel, { messages, temperature = 0.2, maxTokens = 2
         }),
       });
 
-      const retryAfterSec = Number(res.headers.get('retry-after') || 0);
-      const bodyText = await res.text();
-      if (!res.ok) {
-        const err = new Error(`HTTP ${res.status} from ${provider.id}: ${bodyText.slice(0, 240)}`);
-        err.status = res.status;
-        err.retryAfterMs = retryAfterSec > 0 ? retryAfterSec * 1000 : 0;
-        throw err;
-      }
-
-      const data = JSON.parse(bodyText);
+      const data = await readReply(res, provider);
       const content = Array.isArray(data.content)
         ? data.content.map((c) => c.text || '').join('')
         : '';
@@ -230,16 +234,7 @@ async function callChannel(channel, { messages, temperature = 0.2, maxTokens = 2
       }),
     });
 
-    const retryAfterSec = Number(res.headers.get('retry-after') || 0);
-    const bodyText = await res.text();
-    if (!res.ok) {
-      const err = new Error(`HTTP ${res.status} from ${provider.id}: ${bodyText.slice(0, 240)}`);
-      err.status = res.status;
-      err.retryAfterMs = retryAfterSec > 0 ? retryAfterSec * 1000 : 0;
-      throw err;
-    }
-
-    const data = JSON.parse(bodyText);
+    const data = await readReply(res, provider);
     const msg = data.choices?.[0]?.message || {};
     const choice = msg.content ?? '';
     // 2.79.1 (a): Vertex spend is measured wherever the key is used: the router's calls go in the proxy's usage log too

@@ -189,6 +189,18 @@ export async function loadCartridge(name = defaultCartridgeName(), { dir: fromDi
   return cart;
 }
 
+/** One step, then the invariants: { state, stepped, findings } (findings is null when all is well). */
+function stepChecked(cart, state, acts, t) {
+  let next;
+  try {
+    next = cart.step(state, acts);
+  } catch (err) {
+    return { state, stepped: false, findings: [{ id: 'STEP_THREW', severity: 'P0', summary: String(err?.message || err), tick: t }] };
+  }
+  const found = cart.invariants(next);
+  return { state: next, stepped: true, findings: found.length ? found.map((f) => ({ ...f, tick: t })) : null };
+}
+
 /** One deterministic run: seed + actions to `tick`. Stops at the first tick that throws or breaks an invariant. */
 export function replay(cart, { seed = 1, tick = 100, actions = [], tuning } = {}) {
   let state = cart.init(seed, tuning);
@@ -197,20 +209,10 @@ export function replay(cart, { seed = 1, tick = 100, actions = [], tuning } = {}
   let findings = [];
   let ticksRun = 0;
   for (let t = 1; t <= tick; t++) {
-    try {
-      state = cart.step(state, byTick.get(t) || null);
-    } catch (err) {
-      failingTick = t;
-      findings = [{ id: 'STEP_THREW', severity: 'P0', summary: String(err?.message || err), tick: t }];
-      break;
-    }
-    ticksRun = t;
-    const found = cart.invariants(state);
-    if (found.length) {
-      failingTick = t;
-      findings = found.map((f) => ({ ...f, tick: t }));
-      break;
-    }
+    const r = stepChecked(cart, state, byTick.get(t) || null, t);
+    state = r.state;
+    if (r.stepped) ticksRun = t;
+    if (r.findings) { failingTick = t; findings = r.findings; break; }
   }
   return { cartridge: cart.name, seed, tick, ticksRun, failingTick, findings, outcome: cart.outcome(state), hash: cart.hash(state), sha256: cart.sha256(state), state };
 }
@@ -235,20 +237,10 @@ export function runScenario(cart, scenarioName, { seed, tuning } = {}) {
       if (extra) acts.push(...(Array.isArray(extra) ? extra : [extra]));
     }
     for (const action of acts) actions.push({ tick: t, action });
-    try {
-      state = cart.step(state, acts);
-    } catch (err) {
-      failingTick = t;
-      findings = [{ id: 'STEP_THREW', severity: 'P0', summary: String(err?.message || err), tick: t }];
-      break;
-    }
-    ticksRun = t;
-    const found = cart.invariants(state);
-    if (found.length) {
-      failingTick = t;
-      findings = found.map((f) => ({ ...f, tick: t }));
-      break;
-    }
+    const r = stepChecked(cart, state, acts, t);
+    state = r.state;
+    if (r.stepped) ticksRun = t;
+    if (r.findings) { failingTick = t; findings = r.findings; break; }
     outcome = cart.outcome(state);
     if (outcome) break;
   }

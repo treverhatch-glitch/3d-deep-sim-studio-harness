@@ -15,11 +15,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runLimitedSync } from './run-limited.mjs';
 import { mainRoot } from './worktree.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
 import { engineTarget, engineTask } from './engine-tracks.mjs';
 import { readJson } from './fsafe.mjs';
-import { rulesConfig, runRulesAt, rulesCheckout, removeCheckout } from './engine-rules.mjs';
+import { rulesConfig, runRulesAt, rulesCheckout, removeCheckout, outsideTrain } from './engine-rules.mjs';
 import { unityTrainSettings, chainOnTarget, unityRepo } from './unity-train.mjs';
 import { taskBranch } from './unity-gate.mjs';
 import { flagOf, numBlankDefault as num, sleepSyncClamped as sleep } from './helpers.mjs';
@@ -80,9 +81,10 @@ export function runEngineQuickCheck({ engine = 'unity', root = mainRoot(), task 
   }
   const waitMin = num(env.STUDIO_ENGINE_CHECK_WAIT_MIN, 20);
   if (!quick) {
-    const got = withEngineCheckLock(root, engine, () => rulesAsQuickCheck({ engine, root, cwd, task, env, log, onBranch }), { waitMs: waitMin * 60000, log, env });
+    // 2.93: under machine:heavy as a verify, so a queued engine land's hold keeps it from starting (engine-rules.mjs outsideTrain).
+    const got = withEngineCheckLock(root, engine, () => outsideTrain(root, engine, () => rulesAsQuickCheck({ engine, root, cwd, task, env, log, onBranch }), { env, log, label: 'done-time rules check' }), { waitMs: waitMin * 60000, log, env });
     if (got.busy) return { status: 'busy', why: `another ${engine} check held the machine's check lock (${got.busy.by || '?'}, pid ${got.busy.pid || '?'}) for the whole ${waitMin} min wait (STUDIO_ENGINE_CHECK_WAIT_MIN): run it again later` };
-    return got.value;
+    return got.value.notRun ? { status: 'busy', why: got.value.why } : got.value;
   }
   const got = withEngineCheckLock(root, engine, () => {
     let at = cwd;
@@ -96,7 +98,7 @@ export function runEngineQuickCheck({ engine = 'unity', root = mainRoot(), task 
     try {
       const t0 = Date.now();
       log(`[engine-check] ${engine}: ${cmd} (in ${fwd(at)}${onBranch ? `, a throwaway checkout of ${onBranch.branch}` : ''})`);
-      const r = spawnSync(cmd, { shell: true, cwd: at, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: num(t.cfg.quickCheckTimeoutMin, 30) * 60000, env: { ...env, STUDIO_ENGINE: engine, STUDIO_ENGINE_LANE_DIR: at } });
+      const r = runLimitedSync(cmd, { cwd: at, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: num(t.cfg.quickCheckTimeoutMin, 30) * 60000, env: { ...env, STUDIO_ENGINE: engine, STUDIO_ENGINE_LANE_DIR: at } });
       return { r, ms: Date.now() - t0 };
     } finally { if (onBranch) removeCheckout(onBranch.repo, at); }
   }, { waitMs: waitMin * 60000, log, env });

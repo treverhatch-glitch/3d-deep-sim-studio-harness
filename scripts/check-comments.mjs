@@ -18,20 +18,25 @@ const COMMENT_LINES = 6;
 const DIRS = ['harness', 'scripts', 'qa'];
 const SKIP = /(^|[\\/])(node_modules|fixtures)([\\/]|$)/;
 
-function codeFiles(root) {
+/** The .mjs/.cjs/.js files under the folders `dirs` of root, skipping paths that match `skip`. Sorted. */
+export function jsFilesUnder(root, dirs, skip) {
   const out = [];
   const walk = (d) => {
     let list = [];
     try { list = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
     for (const e of list) {
       const f = path.join(d, e.name);
-      if (SKIP.test(f)) continue;
+      if (skip.test(f)) continue;
       if (e.isDirectory()) walk(f);
       else if (/\.(mjs|cjs|js)$/.test(e.name)) out.push(f);
     }
   };
-  for (const d of DIRS) walk(path.join(root, d));
+  for (const d of dirs) walk(path.join(root, d));
   return out.sort();
+}
+
+function codeFiles(root) {
+  return jsFilesUnder(root, DIRS, SKIP);
 }
 
 /** The comments of one file that stand on their own lines: [{ line, lines, header }]. */

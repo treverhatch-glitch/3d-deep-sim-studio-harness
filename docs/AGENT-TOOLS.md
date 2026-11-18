@@ -40,7 +40,8 @@ with a `[launcher]` line when a Windows tool was started as an npm shim or throu
 - **Lane copies**: in `.lanes/<agent>`, `studio/` and `.studio/` are links to the main checkout, so only the board commands write in
   `studio/` and the `lane-studio-guard` hook refuses Edit/Write of studio config there (`docs/WORK-ORGANIZATION.md`). Claude Code
   refuses a link's target as "outside the allowed working directories", so the launcher adds `--add-dir <main>/studio --add-dir
-  <main>/.studio` for Claude and Codex (an older Codex refuses the flag: update it); agy, Cursor and Grok get nothing extra. A code lane
+  <main>/.studio` for Claude and Codex (an older Codex refuses the flag: update it); agy gets them as allow-rules on an engine pass
+  (below); Cursor and Grok get nothing extra. A code lane
   gets a copy, and so does a code-writing role (anyone but the Producer, Director and planner) on a task with no lane or no task; a
   session that still claims from the main checkout gets its copy at `task start` (`harness/lane-at-claim.mjs`). If no copy can be made
   the claim is handed back: a builder never works in the main checkout. Don't use a tool's own worktree mode (`claude -w`).
@@ -129,6 +130,14 @@ npm run agent -- allow agy --by <your name> --prune         # also take out harn
   atomically, and left alone with the rules printed if it isn't plain JSON. `--scope project` writes nothing; `--scope user` applies to
   every agy run on the machine. agy reviews are read-only and get no `--settings`. If agy's format changes, `agyRulesFor()` in
   `harness/agy-allow.mjs` is the one place to change. Not confirmed: whether agy merges `--settings` with the user file.
+- **An engine pass on agy** (2.93): agy has no `--add-dir`, and a porter was auto-denied its engine worktree. The launcher writes the
+  session its own `.studio/agy-settings/<agent>.json`: the studio's file (else only the permissions of the user file, never written)
+  plus `read_file(<folder>)` and `read_file(<folder>/**)` for each folder a Claude session gets with `--add-dir` (the main checkout's
+  `studio/` and `.studio/`, the engine worktree) and `git -C <worktree> status|diff|log|add|commit`. Nothing wider. A session with
+  no engine worktree launches as before. Untested on real agy: the rule format. `STUDIO_AGY_REACH_RULES` sets the templates as a JSON
+  list (`{dir}` each folder; `{engine}`, `{engineRe}`, `{verb}` the worktree's git rules; `{rest}` the argument regex), or `off`.
+- **Auto-denied** (2.93): a session agy ended with "required the … permissions that headless mode cannot prompt for" ends with
+  "agy could not use its tools: … (this session's folders: …)" in its record, session end, job record and hand-back.
 - It never turns on a skip-all mode (`always-proceed`, `--dangerously-skip-permissions`); that stays for a frozen test clone
   (`STUDIO_AGY_BYPASS=1`).
 - Until enrolled, `npm run agent -- start … --tool agy` prints `agy has no allow-rules: run npm run agent -- allow agy --by <owner>
@@ -194,7 +203,9 @@ STUDIO_KEYMAP_AGENT_BUILDER_S3=ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_S3   # builde
 it is ignored). When the plan's budget is high (every tool with a known weekly budget over its target, `npm run budget`, or the usage
 wind-down is on, `STUDIO_USAGE_WINDDOWN_PCT`, which also counts a tool out of quota) the supervisor starts builders under these names,
 up to the pool's size and the pace, RAM and Line Producer caps; with headroom the pool stays idle. During a wind-down only the pool
-starts builders. The spend guard and the daily token cap apply. `npm run agent -- start --pool api [--task T-12]` starts one by hand. A
+starts builders. The spend guard and the daily token cap apply. `npm run agent -- start --pool api [--role R] [--task T-12]` starts one by
+hand (2.93): any role a plain start takes (builder by default), recorded as that role, with the lanes that role gets (an engine pass
+gets its engine worktree), under the first pool name with no live session; all names busy is refused in one line. A
 tool out of quota through a provider limit (a 429 mark) still holds every session on that tool.
 
 `STUDIO_BUILDER_ORDER` (2.80; unset: the choice above) is the owner's order for filling a builder slot, e.g. `api,vertex,plan`: `api` (a

@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runLimitedSync } from './run-limited.mjs';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
 import { withLandLock, matchAny } from './merge-lane.mjs';
@@ -24,7 +25,7 @@ import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeComman
 import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
-import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey } from './engine-rules.mjs';
+import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey, rulesLanded } from './engine-rules.mjs';
 import { compileSearchOf, compileSearch, compileAt, compilerLines } from './engine-compile.mjs';
 import { parallelState, parallelUse, parallelLine, runGateChild } from './engine-gates.mjs';
 import { engineSlotsAt, heavySlotsAt, floorFree } from './heavy.mjs';
@@ -94,7 +95,7 @@ export function runPreLand(s, lane, { root, id, env = process.env, log = () => {
   if (add.status !== 0) return { error: `could not check ${short(lane.head)} out for the pre-land check: ${String(add.stderr || '').trim().split('\n').pop()}` };
   try {
     log(`[unity-train] ${id}: pre-land check for ${lane.task} (${lane.branch} at ${short(lane.head)}): ${cmd}`);
-    const r = spawnSync(cmd, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout: Math.max(1, num(s.cfg.preLandTimeoutMin, 10)) * 60000, env: { ...env, STUDIO_LANE_COMMIT: lane.head, STUDIO_LANE_DIR: dir, STUDIO_ENGINE_REPO: s.repo } });
+    const r = runLimitedSync(cmd, { cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeoutMs: Math.max(1, num(s.cfg.preLandTimeoutMin, 10)) * 60000, env: { ...env, STUDIO_LANE_COMMIT: lane.head, STUDIO_LANE_DIR: dir, STUDIO_ENGINE_REPO: s.repo } });
     if (r.error) return { error: `the pre-land command could not run: ${r.error.code || r.error.message}` };
     if (r.status === 0) return { ok: true };
     const lines = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd().split('\n').slice(-8).join('\n');
@@ -102,12 +103,16 @@ export function runPreLand(s, lane, { root, id, env = process.env, log = () => {
   } finally { cleanup(); }
 }
 
-/** 2.90: engines.<x>.preQueue, checked: [{ touches: [glob], run, say, timeoutMin, env }] (an entry without both is left out). */
+/** 2.90: engines.<x>.preQueue, checked: [{ touches: [glob], titles: [regex], run, say, timeoutMin, env }]; an entry needs a run and touches or titles (2.93); a bad regex leaves it out and is added to `bad`. */
 const envVars = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.fromEntries(Object.entries(o).filter(([k, v]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof v === 'string')) : {});
-export function preQueueOf(cfg = {}) {
+export function preQueueOf(cfg = {}, bad = []) {
   const v = Array.isArray(cfg?.preQueue) ? cfg.preQueue : [];
-  return v.map((e) => ({ touches: (Array.isArray(e?.touches) ? e.touches : [e?.touches]).filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().replace(/\\/g, '/')), run: typeof e?.run === 'string' ? e.run.trim() : '', say: typeof e?.say === 'string' ? e.say.trim().slice(0, 300) : '', timeoutMin: Math.max(1, num(e?.timeoutMin, 10)), env: envVars(e?.env) })).filter((e) => e.touches.length && e.run);
+  const res = (x) => { try { return new RegExp(x, 'i'); } catch { bad.push(x); return null; } };
+  const strs = (a) => (Array.isArray(a) ? a : [a]).filter((x) => typeof x === 'string' && x.trim());
+  return v.map((e) => ({ titles: strs(e?.titles).map(res), touches: (Array.isArray(e?.touches) ? e.touches : [e?.touches]).filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().replace(/\\/g, '/')), run: typeof e?.run === 'string' ? e.run.trim() : '', say: typeof e?.say === 'string' ? e.say.trim().slice(0, 300) : '', timeoutMin: Math.max(1, num(e?.timeoutMin, 10)), env: envVars(e?.env) })).filter((e) => (e.touches.length || e.titles.length) && !e.titles.includes(null) && e.run);
 }
+
+const badWords = (bad, engine) => (bad.length ? `\nLeft out of engines.${engine}.preQueue: an entry whose "titles" has ${bad.map((x) => `"${x}"`).join(', ')}, not a valid regular expression.` : '');
 
 /** 2.92: the lane's head merged with the target tip, a commit object only (no ref): { tip, head } | { tip, conflict } | { tip, error }. */
 function mergedOnTarget(s, lane) {
@@ -124,12 +129,13 @@ function mergedOnTarget(s, lane) {
  * STUDIO_ENGINE_LANE_DIR when the porter's lane folder exists. { ran: [run], files, target, refused?: text, skipped?: why }.
  */
 export function runPreQueue(s, lane, { root, env = process.env } = {}) {
-  const list = preQueueOf(s.cfg);
-  const res = { ran: [], files: [] };
+  const bad = [];
+  const list = preQueueOf(s.cfg, bad);
+  const res = { ran: [], files: [], bad };
   if (!list.length) return res;
   const base = out(git(s.repo, 'merge-base', `refs/heads/${s.target}`, lane.head));
   const changed = base ? changedPaths(s.repo, base, lane.head) || [] : [];
-  const due = list.map((e) => ({ e, files: changed.filter((f) => matchAny(f, e.touches)) })).filter((x) => x.files.length);
+  const due = list.map((e) => ({ e, files: e.touches.length ? changed.filter((f) => matchAny(f, e.touches)) : [] })).filter((x) => (!x.e.touches.length || x.files.length) && (!x.e.titles.length || x.e.titles.some((t) => t.test(lane.title || ''))));
   if (!due.length) return res;
   res.files = [...new Set(due.flatMap((x) => x.files))];
   const m = mergedOnTarget(s, lane);
@@ -144,11 +150,11 @@ export function runPreQueue(s, lane, { root, env = process.env } = {}) {
   const laneDir = path.join(root, '.lanes', 'engine', String(lane.task));
   try {
     for (const { e, files } of due) {
-      const r = spawnSync(e.run, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout: e.timeoutMin * 60000, env: { ...env, ...e.env, STUDIO_LANE_COMMIT: lane.head, STUDIO_TARGET_COMMIT: m.tip, STUDIO_LANE_DIR: dir, STUDIO_ENGINE_REPO: s.repo, ...(fs.existsSync(laneDir) ? { STUDIO_ENGINE_LANE_DIR: laneDir } : {}) } });
+      const r = runLimitedSync(e.run, { cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeoutMs: e.timeoutMin * 60000, env: { ...env, ...e.env, STUDIO_TASK_ID: String(lane.task), STUDIO_TASK_TITLE: lane.title || '', STUDIO_LANE_COMMIT: lane.head, STUDIO_TARGET_COMMIT: m.tip, STUDIO_LANE_DIR: dir, STUDIO_ENGINE_REPO: s.repo, ...(fs.existsSync(laneDir) ? { STUDIO_ENGINE_LANE_DIR: laneDir } : {}) } });
       if (r.error && r.error.code !== 'ETIMEDOUT') return { ...res, skipped: `${e.run}: ${r.error.code || r.error.message}` };
       if (r.status === 0 && !r.error) { res.ran.push(e.run); continue; }
       const lines = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd().split('\n').slice(-8);
-      return { ...res, refused: `${lane.branch} changes ${files.slice(0, 3).join(', ')}, and the check for it (engines.${s.engine || 'unity'}.preQueue: ${e.run}) ${r.error ? `timed out after ${e.timeoutMin} min` : `exited ${r.status ?? r.signal ?? '?'}`}:\n${lines.map((x) => `  ${x}`).join('\n')}\n${e.say ? e.say.replace(/[.\s]+$/, '') : `Fix it on ${lane.branch}`}, then task done ${lane.task} --train again.` };
+      return { ...res, refused: `${lane.branch}${files.length ? ` changes ${files.slice(0, 3).join(', ')}` : ` is for ${lane.task}`}, and the check for it (engines.${s.engine || 'unity'}.preQueue: ${e.run}) ${r.error ? `timed out after ${e.timeoutMin} min` : `exited ${r.status ?? r.signal ?? '?'}`}:\n${lines.map((x) => `  ${x}`).join('\n')}\n${e.say ? e.say.replace(/[.\s]+$/, '') : `Fix it on ${lane.branch}`}, then task done ${lane.task} --train again.` };
     }
     return res;
   } finally { removeCheckout(s.repo, dir); }
@@ -169,7 +175,7 @@ export const setQueueTag = (root, task, tag, engine = 'unity') => withQueue(root
  * Queue a Unity-track task's branch (task done <ID> --train, after its checks). { ok, entry, message } or { ok: false, error,
  * message }. The branch: `branch`, else the task's recorded Unity branch, else the Unity folder's current branch (never the target).
  */
-export function queueUnityTask(root, { engine = 'unity', task, agent = null, branch = null, note = '', alone = null, tag = null, again = false, meta = null } = {}) {
+export function queueUnityTask(root, { engine = 'unity', task, agent = null, branch = null, note = '', alone = null, tag = null, again = false, meta = null, title = '' } = {}) {
   const s = unityTrainSettings(root, engine);
   const L = labelOf(engine);
   const UNITY_REF_PREFIX = refPrefix(engine);
@@ -202,10 +208,11 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
   let kept = inQueue && inQueue.head === head ? { ...(inQueue.preQueue ? { preQueue: inQueue.preQueue } : {}), ...(inQueue.clash ? { clash: inQueue.clash } : {}) } : {};
   let say = '';
   if (!inQueue || inQueue.head !== head) {
-    const pq = runPreQueue(s, { task, branch: br, head }, { root });
+    const pq = runPreQueue(s, { task, branch: br, head, title }, { root });
+    say += badWords(pq.bad, engine);
     if (pq.refused) {
       evTop('pre_queue', 'queue', `${task}: not queued: ${pq.refused.split('\n')[0]}`, { engine, agent: agent || `${engine}-train`, task, to: agent || 'producer', status: 'blocked', meta: { branch: br, head, files: pq.files.slice(0, 10) } });
-      return { ok: false, error: 'pre-queue', message: `${task} was not queued: ${pq.refused}` };
+      return { ok: false, error: 'pre-queue', message: `${task} was not queued: ${pq.refused}${say}` };
     }
     if (pq.ran.length || pq.skipped) evTop('pre_queue', 'queue', `${task}: ${pq.skipped ? `the pre-queue check could not run (${pq.skipped}); queued without it` : `pre-queue check(s) passed: ${pq.ran.join('; ')}`}`, { engine, agent: agent || `${engine}-train`, task, status: pq.skipped ? 'warn' : 'ok', meta: { branch: br, head, ran: pq.ran.length } });
     kept = pq.ran.length && !pq.skipped ? { preQueue: { target: pq.target, head } } : {};
@@ -964,6 +971,10 @@ export async function runUnityTrain(opts = {}) {
 }
 
 async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, update, max = 0, dryRun = false, env = process.env, only = [], tag = null }) {
+  // 2.93: where the train's time went, in ms: compile, rules, wait (for the machine before a land run), land (the runs themselves).
+  const t0 = Date.now();
+  const spent = { compile: 0, rules: 0, wait: 0, land: 0 };
+  let landRuns = 0;
   const res = { ok: true, id, engine, landed: [], dropped: [], deferred: [], runs: 0, message: '' };
   const L = labelOf(engine);
   const UNITY_REF_PREFIX = refPrefix(engine);
@@ -1031,9 +1042,15 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   };
   const defer = (lane, why) => { res.deferred.push({ task: lane.task, why }); if (!dryRun) ev('deferred', id, `${lane.task} waits for the next ${L} train: ${why.split('\n')[0]}`, { task: lane.task, agent: by, to: lane.agent, status: 'warn' }); };
 
+  // 2.93: the board gives a lane's task title (preQueue "titles") and the "task after" holds that keep a lane out of a batch.
+  const board = (() => { try { return deps.board?.() || null; } catch { return null; } })();
+  const holdMod = board ? await import('./task-hold.mjs') : null;
+  const titleOf = (t) => [...(board?.inProgress || []), ...(board?.backlog || []), ...(board?.done || [])].find((x) => x.id === t)?.title || '';
   // (a) Each branch as it is now.
   const ready = [];
   for (const lane of lanes) {
+    const held = holdMod ? holdMod.afterWaits(lane.task, board) : [];
+    if (held.length) { defer(lane, `it waits for ${held.join(', ')} (task after)`); continue; }
     // 2.92: the queue door found it does not compile with a lane of this batch: it waits, as a lane that conflicts with one.
     const clash = (lane.clash?.with || []).filter((t) => lanes.some((l) => l.task === t));
     if (clash.length) { defer(lane, `it does not compile with ${clash.join(', ')} in this train (found when it was queued); it is checked again once ${clash.length === 1 ? 'that lane has' : 'they have'} landed or left the queue`); continue; }
@@ -1067,9 +1084,13 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   // 2.92: a lane's preQueue check that judged another target tip (or head) runs again on the lane merged with this tip.
   if (preQueueOf(s.cfg).length) {
     const kept = [];
+    let told = false;
     for (const l of set) {
       if (l.preQueue && l.preQueue.target === tip0 && l.preQueue.head === l.head) { kept.push(l); continue; }
-      const pq = runPreQueue(s, l, { root, env });
+      const q0 = Date.now();
+      const pq = runPreQueue(s, { ...l, title: titleOf(l.task) }, { root, env });
+      spent.rules += Date.now() - q0;
+      if (pq.bad.length && !told) { told = true; log(`[unity-train] ${id}:${badWords(pq.bad, engine).replace(/\n/g, ' ')}`); }
       if (pq.refused) { drop(l, `refused before the land run: ${pq.refused}`, { cause: 'pre-queue', evidence: { files: pq.files } }); continue; }
       if (pq.ran.length || pq.skipped) log(`[unity-train] ${id}: pre-queue check of ${l.task} on ${target} at ${short(tip0)}: ${pq.skipped ? `could not run (${pq.skipped}); it goes on` : 'passed'}`);
       kept.push(l);
@@ -1083,7 +1104,9 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   if (cc && (set.length > 1 || set.some((l) => l.clash))) {
     update({ now: `compile search: ${set.map((l) => l.task).join(', ')}` });
     const rc = (() => { try { return rulesConfig(engine, { root, env, repo, ref: target }); } catch { return null; } })();
+    const cs0 = Date.now();
     const cs = compileSearch({ repo, tip: tip0, lanes: set, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine), at: (sha) => compileAt({ repo, sha, cmd: cc, root, id, engine, rules: rc, env, log }) });
+    spent.compile += Date.now() - cs0;
     log(`[unity-train] ${id}: compile search (engines.${engine}.${cc.source}): ${cs.why} (${cs.runs} compile run(s))`);
     res.compile = { runs: cs.runs, left: cs.left.map((x) => x.lane.task), ...(cs.targetRed ? { targetRed: true } : {}) };
     if (cs.left.length || cs.targetRed) ev('compile_search', id, `${cs.why}; ${cs.runs} compile run(s) of engines.${engine}.${cc.source}, no land run`, { agent: by, status: cs.left.length ? 'warn' : 'ok', meta: { runs: cs.runs, left: cs.left.map((x) => x.lane.task), kept: cs.kept.map((l) => l.task), ...(cs.targetRed ? { targetRed: true } : {}) } });
@@ -1103,7 +1126,9 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       // Each lane's new shared input files first (rules.share), and the lanes' own folders as further input sources.
       for (const l of set) { try { shareLaneInputs(root, engine, s, l.task, log); } catch { /* the check says what is missing */ } }
       const extraFrom = set.map((l) => path.join(root, '.lanes', 'engine', String(l.task))).filter((d) => fs.existsSync(d));
+      const rg0 = Date.now();
       const rg = (deps.rulesGate || rulesGate)({ engine, repo, tip: tip0, lanes: set, cfg: rc, from, extraFrom, owe: true, root, id, env, log, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine) });
+      spent.rules += Date.now() - rg0;
       log(`[unity-train] ${id}: rules check: ${rg.why}${rg.runs ? ` (${rg.runs} run(s), ${Math.round(rg.ms / 1000)} s)` : ''}`);
       // 2.90: a check that judged no lane because of the target is said where people look (event; train status after 2 in a row).
       if (rg.noJudge) ev('rules_no_judge', id, `the rules check judged no lane${rg.noJudge.n > 1 ? ` (${rg.noJudge.n} trains in a row, ${Math.round(rg.noJudge.minutes)} min spent)` : ''}: ${rg.why}`, { agent: by, to: 'producer', status: 'warn', meta: { n: rg.noJudge.n, minutes: rg.noJudge.minutes, timeout: Boolean(rg.timedOut), fix: rg.noJudge.fix } });
@@ -1113,7 +1138,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       res.rules = { ran: rg.ran, runs: rg.runs, ms: rg.ms, dropped: rg.dropped.map((d) => d.lane.task), ...(rg.skipped ? { skipped: rg.why } : {}), ...(rg.mode ? { mode: rg.mode } : {}), ...(rg.selWhy ? { why: rg.selWhy } : {}), ...(rg.parts ? { parts: rg.parts } : {}), ...(rg.splitAtOnce ? { splitAtOnce: rg.splitAtOnce } : {}), ...(rg.filter ? { filter: rg.filter } : {}), ...(rg.groups ? { groups: rg.groups } : {}), ...(rg.reused ? { reused: rg.reused } : {}), ...(rg.sliced ? { sliced: rg.sliced, slices: rg.slices } : {}) };
       // 2.91: keeps(tip): with rules.paths or rules.ignore, a target that moved only where the rules tests do not read keeps the green.
       const scope = rc.paths?.length ? 'outside rules.paths' : rc.ignore?.length ? 'under rules.ignore' : '';
-      if (rg.green) rulesGreen = { tip: tip0, tasks: set.map((l) => l.task).join(','), mode: rg.mode || 'full', scope, same: () => { try { return inputsPrint(rc, [...from, ...extraFrom]) === (rg.inputs ?? inputsPrint(rc, [...from, ...extraFrom])); } catch { return false; } }, keeps: (t) => { if (!scope) return false; try { const k = rulesKey({ repo, sha: tip0, cfg: rc }); return Boolean(k) && k === rulesKey({ repo, sha: t, cfg: rc }); } catch { return false; } } };
+      if (rg.green) rulesGreen = { head: rg.green, tip: tip0, tasks: set.map((l) => l.task).join(','), mode: rg.mode || 'full', scope, same: () => { try { return inputsPrint(rc, [...from, ...extraFrom]) === (rg.inputs ?? inputsPrint(rc, [...from, ...extraFrom])); } catch { return false; } }, keeps: (t) => { if (!scope) return false; try { const k = rulesKey({ repo, sha: tip0, cfg: rc }); return Boolean(k) && k === rulesKey({ repo, sha: t, cfg: rc }); } catch { return false; } } };
     }
   }
   for (const l of set) deps.markRunning?.(l.task, l.agent);
@@ -1269,6 +1294,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
           for (const k of Object.keys(compileEnv)) if (/^STUDIO_(LAND_(FULL|RETRY.*)|RULES_(GREEN|MODE)|PLAY_FILTER|UNITY_(PLAYMODE|EDITMODE)_ARGS)$/.test(k)) delete compileEnv[k];
           const rc = await land({ engine, ...arg, task: gkey, label: `${label} compile`, env: compileEnv, log, only: 'compile', timeoutMin: compileMin });
           const secs = Math.round((Date.now() - c0) / 1000);
+          spent.compile += Date.now() - c0;
           res.compileRuns += 1;
           const notHonoured = (why) => {
             compileOff = true;
@@ -1298,6 +1324,11 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
           const l0 = Date.now();
           r = await land({ engine, ...arg, task: gkey, label, env: landEnv, log, ...(stagesBefore.length ? { stagesBefore } : {}) });
           res.runs += 1;
+          landRuns += 1;
+          // The run says how long it waited (waitMs); else the wall time not in its own ms.
+          const wall = Date.now() - l0;
+          spent.wait += Math.max(0, Number(r.waitMs ?? (wall - (r.ms ?? wall))));
+          spent.land += Math.max(0, Number(r.ms ?? wall) - Number(r.waitMs ?? 0));
           if (fullWhy) {
             res.fullLand = (res.fullLand || 0) + 1;
             // 2.85: the full run's minutes are kept for the next one's "expect about N min" (a run that ran to the end only).
@@ -1423,6 +1454,11 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       if (!dryRun && !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_LANE_CLEAN || ''))) { try { const rm = removeLandedLane({ root, engine, task: lane.task, log }); if (rm && !rm.removed && rm.why && rm.dir && rm.why !== 'no such folder') log(`[unity-train] ${id}: kept ${lane.task}'s engine worktree: ${rm.why}`); } catch (e) { log(`[unity-train] ${id}: could not clean ${lane.task}'s engine worktree: ${e.message}`); } }
     }
     liveNow();
+    // 2.93: the landed tree's rules answer (rules.landGate's pass, or the checked full green landed unchanged) for the next train.
+    if (!dryRun && rc0) {
+      const gk = group.map((l) => l.task).join(',');
+      try { const how = rulesLanded({ root, engine, repo, cfg: rc0, tip: r.newTip, head: rulesGreen?.tasks === gk ? rulesGreen.head : null, mode: rulesGreen?.mode, stages: r.stages, from: fromAll }); if (how) log(`[unity-train] ${id}: ${how === 'gate' ? `the land run's ${rc0.landGate} gate passed: kept as a full rules pass of ${short(r.newTip)}` : `the checked full rules pass landed unchanged: it is the full pass of ${short(r.newTip)}`}`); } catch { /* the next train asks again */ }
+    }
     // Old gate builds are pruned (engines.<x>.builds; absent: nothing is touched).
     if (!dryRun) { try { const bc = buildsConfig(engine, { root, env }); if (bc) { const pb = pruneBuilds({ ...bc, root, log }); if (pb?.removed?.length) log(`[unity-train] ${id}: pruned ${pb.removed.length} old build(s) in ${String(bc.dir).split(path.sep).join('/')}; kept ${pb.kept.length}`); } } catch (e) { log(`[unity-train] ${id}: could not prune old builds: ${e.message}`); } }
     // Before/after pictures of a green land (engines.<x>.shots); no shots: nothing happens.
@@ -1761,8 +1797,10 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
 
   function finish() {
     res.message = res.message || summary(res);
-    try { writeJson(lastFile(root, engine), { ...res, by, at: new Date().toISOString() }); } catch {}
-    ev('done', id, res.message, { agent: by, status: res.landed.length ? 'ok' : 'warn', meta: { landed: res.landed, dropped: res.dropped.map((d) => d.task), deferred: res.deferred.map((d) => d.task), runs: res.runs, refused: Boolean(res.refused), notRun: Boolean(res.notRun), ...(res.killed ? { killed: true } : {}), ...(res.cancelled ? { cancelled: true } : {}), ...(res.compileRuns ? { compileRuns: res.compileRuns } : {}), ...(res.fullLand ? { fullLand: res.fullLand } : {}), ...(res.fullRedOnTarget ? { fullRedOnTarget: res.fullRedOnTarget } : {}), ...(res.playUnmatched ? { playUnmatched: res.playUnmatched } : {}), ...(res.waitTarget ? { waitTarget: res.waitTarget.tests } : {}) } });
+    const one = (x) => Math.round(x / 6000) / 10;
+    const minutes = { total: one(Date.now() - t0), compile: one(spent.compile), rules: one(spent.rules), wait: one(spent.wait), land: one(spent.land) };
+    try { writeJson(lastFile(root, engine), { ...res, minutes, landRuns, by, at: new Date().toISOString() }); } catch {}
+    ev('done', id, res.message, { agent: by, status: res.landed.length ? 'ok' : 'warn', meta: { landed: res.landed, dropped: res.dropped.map((d) => d.task), deferred: res.deferred.map((d) => d.task), runs: res.runs, minutes, landRuns, refused: Boolean(res.refused), notRun: Boolean(res.notRun), ...(res.killed ? { killed: true } : {}), ...(res.cancelled ? { cancelled: true } : {}), ...(res.compileRuns ? { compileRuns: res.compileRuns } : {}), ...(res.fullLand ? { fullLand: res.fullLand } : {}), ...(res.fullRedOnTarget ? { fullRedOnTarget: res.fullRedOnTarget } : {}), ...(res.playUnmatched ? { playUnmatched: res.playUnmatched } : {}), ...(res.waitTarget ? { waitTarget: res.waitTarget.tests } : {}) } });
     return res;
   }
 }
@@ -1841,6 +1879,13 @@ export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'un
   if (st.running?.batch) lines.push(`Running ${L} train's batch: ${st.running.batch}`);
   // 2.85: the last rules check: its mode and why (a full run names the unmapped paths), what it cost and how many parts ran at once.
   if (st.last?.rules?.ran && !st.running) lines.push(`Last ${L} rules check: ${st.last.rules.mode || 'full'}${st.last.rules.why ? `: ${st.last.rules.why}` : ''}; ${st.last.rules.runs ?? 0} run(s), ${Math.round((st.last.rules.ms || 0) / 1000)} s${st.last.rules.parts > 1 ? `, ${st.last.rules.parts} parts, ${st.last.rules.splitAtOnce || 1} at once` : ''}`);
+  // 2.93: where the last train's time went (parts of 0 are left out; "the rest" is what the named parts do not cover).
+  if (st.last?.minutes && !st.running) {
+    const m = st.last.minutes;
+    const named = [['compile', m.compile], ['rules check', m.rules], ['waiting for the machine', m.wait], [`land runs`, m.land, st.last.landRuns]].filter((p) => Math.round(p[1] || 0) > 0);
+    const rest = Math.round(m.total - named.reduce((n, p) => n + p[1], 0));
+    lines.push(`Last train took ${Math.round(m.total)} min: ${named.map((p) => `${p[0]} ${Math.round(p[1])}${p[2] ? ` (${p[2]})` : ''}`).join(', ') || 'no named part'}${rest >= 1 ? `; the rest ${rest}` : ''}.`);
+  }
   if (st.last && !st.running) lines.push(`Last ${L} train ${st.last.id} (${String(st.last.at || '').slice(0, 16)}): ${st.last.message}${st.last.batch ? ` [batch ${st.last.batch}]` : ''}`);
   if (!quiet) { try { lines.push(autoLine(root, engine)); } catch { /* the queue lines stand */ } }
   { const nj = rulesIdleLine(root, engine); if (nj) lines.push(nj); }

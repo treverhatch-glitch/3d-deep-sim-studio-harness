@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runLimitedSync } from './run-limited.mjs';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { jobDone } from './jobs.mjs';
 import { acquireHeavy, heavyRoot } from './heavy.mjs';
@@ -269,6 +270,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   // only 'compile': the train's compile-only run (STUDIO_LAND_ONLY=compile in env); it lands nothing, so no
   // engine.land event or duration. stagesBefore: the train's earlier stages, first in the report.
   const t0 = Date.now();
+  let ranAt = 0;
   const et = engineTarget(engine) || engineTarget('unity');
   const L = et.label;
   if (task && onlyUnityTask) {
@@ -331,6 +333,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   }
   let r;
   const landStart = Date.now();
+  ranAt = landStart;
   // The land command may write its stages' results there (landStages).
   const stageFile = path.join(REPO_ROOT, '.studio', 'gates', `${engine}-land-stages${gs}.json`);
   try { fs.mkdirSync(path.dirname(stageFile), { recursive: true }); fs.rmSync(stageFile, { force: true }); } catch { /* an old file is only ever read after a run that wrote it again */ }
@@ -350,7 +353,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
       }
     } catch { /* a help for the script, never a condition of the land run */ }
   }
-  const landOnce = () => spawnSync(cmd, { cwd, shell: true, encoding: 'utf8', env: { ...env, ...tuneEnv, STUDIO_HEAVY_HELD: process.env.STUDIO_HEAVY_HELD || '' }, maxBuffer: 256 * 1024 * 1024, timeout: timeoutMin * 60000, windowsHide: true });
+  const landOnce = () => runLimitedSync(cmd, { cwd, encoding: 'utf8', env: { ...env, ...tuneEnv, STUDIO_HEAVY_HELD: process.env.STUDIO_HEAVY_HELD || '' }, maxBuffer: 256 * 1024 * 1024, timeoutMs: timeoutMin * 60000, windowsHide: true });
   try {
     log(`[unity-gate] running the studio's ${L} land command${task ? ` for ${task}` : ''}${many ? ` (branches ${many.join(' ')})` : br ? ` (branch ${br})` : ''} in ${path.relative(REPO_ROOT, cwd) || '.'}; up to ${timeoutMin} min`);
     r = landOnce();
@@ -409,7 +412,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(probeAck ? { probeAck: true } : {}), ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), ...(errorFiles.length ? { errorFiles, errorLines } : {}), ...(stages.length ? { stages } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
 
   function finish(res) {
-    const full = { ...res, engine, ms: Date.now() - t0, ...(task ? { task } : {}), ...(br ? { branch: br } : {}), ...(many ? { branches: many } : {}), at: new Date().toISOString() };
+    const full = { ...res, engine, ms: Date.now() - t0, ...(ranAt ? { waitMs: ranAt - t0 } : {}), ...(task ? { task } : {}), ...(br ? { branch: br } : {}), ...(many ? { branches: many } : {}), at: new Date().toISOString() };
     try { fs.mkdirSync(path.join(REPO_ROOT, '.studio', 'gates'), { recursive: true }); fs.writeFileSync(path.join(REPO_ROOT, '.studio', 'gates', withGs(et.files.gateLast)), JSON.stringify({ ...full, engine }, null, 2)); } catch {}
     // A run that ran to the end keeps its length for the Line Producer's schedule.
     if (!only && ['pass', 'red', 'conflict'].includes(full.status)) { try { recordDuration(engine, { kind: 'land', ms: full.ms, status: full.status }); } catch {} }

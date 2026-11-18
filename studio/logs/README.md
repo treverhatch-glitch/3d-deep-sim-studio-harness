@@ -2,12 +2,12 @@
 
 **2-minute read for the owner: the latest summary is first. Then open problems, then proposals waiting for you.**
 
-## Latest summary — 2026-11-17 (2.92)
-- **Done:** 2.91 is on `main` (no full run ahead of a waiting batch). The one studio on record still runs 2.90.
-- **In progress:** 2.92 (checks at the queue door, a red compile names its branch, a red target gets a fix task) on a branch, merged when its online checks pass. Notes: docs/RELEASE-2.92.0.md, studio/notes/HANDOFF-2.92-2026-11-17.md.
-- **Untested:** 2.91 and 2.92 have not run on a real engine. The studio's first trains on them are the test.
-- **Open problems:** P-346 (timing checks under load: four fixed, seven known left), P-005 (GPU model), P-009 (no Unity on the maintainer's side).
-- **Waiting for your OK:** which unused features to remove (the list is in docs/RELEASE-2.92.0.md, "Size"); whether the scorecard's "landed" should stop counting a close; whether the next batch's rules check may run beside a land run.
+## Latest summary — 2026-11-18 (2.93)
+- **Done:** 2.92 is on `main` and the one studio on record runs it: compile clashes are found at the queue door, no studio stop and no stalled session since, 1.1 land runs per train (2.2 on 2.83).
+- **In progress:** 2.93 (one rules check per train, rules runs outside the train wait, the API pool and agy as engine porters, queue holds, slices and duplicates, a time limit ends the whole tree, train times; floors and the overnight summary removed) on a branch, merged when its online checks pass. Notes: docs/RELEASE-2.93.0.md, studio/notes/HANDOFF-2.93-2026-11-18.md.
+- **Untested:** 2.93 has not run on a real engine, on real agy or with a real API pool. The studio's first trains on it are the test.
+- **Open problems:** P-346 (timing checks under load), P-005 (GPU model), P-009 (no Unity on the maintainer's side).
+- **Waiting for your OK:** remove the old status snapshot and its role loader; whether the scorecard's "landed" should stop counting a close; whether the next batch's rules check may run beside a land run.
 
 ## The files
 | File | What | Format |

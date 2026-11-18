@@ -7,7 +7,7 @@
  * builders under these names, up to the pool's size and the pace/RAM/rig caps. With plan headroom the pool is not used.
  * A name with no key mapping would bill the plan, so it is never started from the pool. The key's spend is limited as
  * for any session (STUDIO_SPEND_GUARD_AT, .studio/credit.json, the daily token cap). `npm run agent -- start --pool api
- * [--task T-12]` starts one pool builder by hand. Key values are never read or printed.
+ * [--role R] [--task T-12]` starts one pool session by hand. Key values are never read or printed.
  */
 import { keymapFor } from './agent-env.mjs';
 
@@ -54,10 +54,14 @@ export function builderOrder(env = process.env) {
 /** The first kind in `order` that can start now (can: { api, vertex, plan } booleans), or null. */
 export const builderKind = (order, can) => order.find((k) => can[k]) || null;
 
-/** The pool name `agent start --pool api` takes by hand: the first one not running, or null with a reason. */
-export function pickManual({ live = [], env = process.env } = {}) {
+/**
+ * The pool name `agent start --pool api` takes by hand: the first one with no live session and whose lane copy is not in
+ * use (busy(name) gives why, or ''), or null with a reason. The key map is per name, so any role takes a pool name.
+ */
+export function pickManual({ live = [], env = process.env, busy = () => '' } = {}) {
   const p = poolPlan({ usage: { over: true }, live, env });
   if (!p.on) return { name: null, why: p.why || 'STUDIO_API_POOL is not set' };
-  if (!p.free.length) return { name: null, why: `every API-pool builder is running (${p.all.join(', ')})` };
-  return { name: p.free[0], why: '' };
+  const name = p.free.find((n) => !busy(n));
+  if (!name) return { name: null, why: `every API-pool name is busy (${p.all.map((n) => `${n}: ${p.free.includes(n) ? 'its lane copy is in use' : 'running'}`).join(', ')})` };
+  return { name, why: '' };
 }

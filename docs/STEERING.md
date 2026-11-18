@@ -18,6 +18,7 @@ skipped phase) is written to the event log as the risk (`bible.phase_override`).
 
 ## Steering the queue (J11)
 - `npm run task -- drop <ID> --why "…" --by <name>` takes a waiting task off the queue; the why goes in the event log and the task's notes. In-progress work is paused first.
+- `npm run task -- duplicate <ID> --of <T-x> --by <name> [--why "…"]` closes a waiting task that repeats another one (2.93). It is never started, so it is no failure and no landed work. It refuses when T-x is not on the board or in the done list, when the task is T-x, in progress, or queued for a train.
 - `npm run task -- reorder <ID> --to top|bottom|<n> | --before <ID> --by <name>` moves a waiting task.
 - Scope checks against crossed-out layers match phrases, not single words: "fix the licence text" and "warm mood lighting" pass, "add a licence system" and "crew mood meter" are caught.
 

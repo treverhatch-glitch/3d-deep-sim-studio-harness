@@ -91,6 +91,8 @@ export function setHold(id, patch, { by = 'producer', msg = '', meta = null } = 
 }
 
 const doneIds = (q) => new Set(q.done.map((t) => t.id));
+/** The tasks a task's "after" hold still waits for (not done; a chain tail does not wait for its own chain). */
+export const afterWaits = (taskId, q, holds = readHolds()) => (holds[taskId]?.after || []).filter((id) => !doneIds(q).has(id) && !(holds[taskId]?.chainTail?.chain || []).includes(id));
 /** 2.77.3 (B-115): a clock time as UTC with the zone named, like every other time the studio prints. */
 export const utcHm = (iso) => `${new Date(iso).toISOString().slice(11, 16)} UTC`;
 
@@ -269,7 +271,7 @@ export function holdReason(taskId, q, now = Date.now(), holds = readHolds(), rol
   if (h.parked && !parkOver(h.parked.until, done, now)) return `parked by ${h.parked.by}${h.parked.why ? `: ${h.parked.why}` : ''}${h.parked.until ? ` (until ${h.parked.until})` : ''}${h.parked.note ? ` (don't unpark until: ${h.parked.note})` : ''}`;
   // 2.67.0 (f): a chain tail (filed by the merge train) is stacked on the chain it fixes, which waits for it: that
   // --after orders the landing (harness/train-deps.mjs), it doesn't hold the tail's start.
-  const waiting = (h.after || []).filter((id) => !done.has(id) && !(h.chainTail?.chain || []).includes(id));
+  const waiting = afterWaits(taskId, q, holds);
   if (waiting.length) return `waits for ${waiting.join(', ')}`;
   if (h.until && Date.parse(h.until) > now) return `blocked until ${hhmm(h.until)}${h.why ? `: ${h.why}` : ''}`;
   // 2.77.3 (B-115): a stop's cooldown keeps the stopped role from restarting at once; another role (a reviewer) can start.
@@ -289,7 +291,7 @@ export function holdOwner(taskId, q, now = Date.now(), holds = readHolds(), hold
   const h = holds[taskId] || {};
   if (h.needsYes) return { owner: 'the dev', why };
   if (h.parked && !parkOver(h.parked.until, doneIds(q), now)) return { owner: h.parked.by || 'the Producer', why };
-  const waiting = (h.after || []).filter((id) => !doneIds(q).has(id) && !(h.chainTail?.chain || []).includes(id));
+  const waiting = afterWaits(taskId, q, holds);
   if (waiting.length) return { owner: holders.get(waiting[0]) || (q.inProgress.some((t) => t.id === waiting[0]) ? 'its builder' : 'the queue (not started yet)'), why };
   if (h.cooldownUntil && Date.parse(h.cooldownUntil) > now) return { owner: h.cooldownBy || 'the Producer', why };
   return { owner: h.by || 'the clock', why };

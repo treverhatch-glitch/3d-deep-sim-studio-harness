@@ -4,6 +4,23 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.93.0] — 2026-11-18
+One rules check per train, and no run of the harness's own in a land run's way (the owner's order: do the overseer's
+list, clean up old code and duplicate lines). On 2.92 a live studio's trains landed what they carried, but the median
+train took 209 minutes, nearly all of it tests that passed, run twice. Details: docs/RELEASE-2.93.0.md.
+- **The rules check runs the batch first.** Green ends the check; the target is asked only after a red, and a kept
+  result answers when there is one. A landed tree keeps its green (`rules.landGate`), so the next train starts with it.
+- **A rules run started outside the train waits like a verify** and never turns full because hours are due, so it no
+  longer takes the memory a land run needs.
+- **Any agent can port for the engine:** `--pool api --role <role>` makes that role's lane under the next free pool
+  name; an engine pass on agy gets allow-rules for its worktree; a refused or crashed start leaves a record.
+- **Held, slice and duplicate:** `task after` keeps a queued branch out of a train; `train slice` marks a queued
+  branch as a slice; `task duplicate <ID> --of <T-x>` closes a repeat; a `preQueue` entry can match by task title.
+- **A command past its time limit is ended with everything it started** (P-360), each train records where its minutes
+  went, and a session refused its tools by the tool's own permission check is not blamed on the task.
+- **Removed:** the "floors" way to split work, the overnight summary, and 12 copied functions. Harness code is 6 lines
+  smaller than 2.92 with all of the above in it; scripts are 19 lines smaller.
+
 ## [2.92.0] — 2026-11-17
 Bad news at the queue door, not hours later (the owner's order: upgrade, and take lines away where that is right).
 A live studio's trains handed back half their branches for clashes found only when the train started.
@@ -20,7 +37,7 @@ Details: docs/RELEASE-2.92.0.md.
 ## [2.91.0] — 2026-11-17
 No full run ahead of a waiting batch (the owner's order: the next version, from a live studio's first day on 2.90).
 A train of four small green branches took seven hours: two full rules runs and a daily full land run went ahead of
-it, and the land script's record commit then cost the batch its "rules are green". Details: docs/RELEASE-2.91.0.md.
+it, and the land script's record commit then cost the batch its "rules are green". Details: the 2.91.0 release notes, in git history.
 - **Full runs leave the train's path.** With lanes waiting, the batch goes first. A due full run (rules or land) waits
   for an empty queue; an overdue one runs at the end of the train. `rules.focus.fullEveryMaxHours` (twice the hours).
 - **A rules pass survives a record commit:** `rules.ignore` names what the rule tests never read; a target that moved
@@ -50,19 +67,9 @@ nobody. Details: the 2.90.0 release notes, in git history.
 - **Status and guards:** builders idle because work waits on the engine train say so; both trains on the status
   line; stale asks not counted; a session on a harness check is not stalled; the plain `git pull` trap is named.
 
-## [2.89.0] — 2026-11-16
-Which functions a studio runs (the owner's word: cut what is not essential, by evidence). A crew's records show 92%
-of the code reachable from what it ran and 8% not, mostly setup tooling; what is unused inside used files, no record
-showed. Details: the 2.89.0 release notes, in git history.
-- **A record of the functions that run** (`harness/usage-functions.mjs`): each harness command in a studio notes the
-  functions it called, names and positions only, in `.studio/usage/functions/<version>.tsv`. On by default
-  (`STUDIO_USAGE_FUNCTIONS=off`); about 25 ms per command.
-- **The page:** `npm run commands-run -- --functions` lists, per file, the functions that ran and the lines inside
-  functions that never did.
-- **Dropped:** the consolidation map's remaining merges. They save too few lines for their risk.
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.89.0** (2026-11-16): Which functions a studio runs. Each harness command records the functions it called (`.studio/usage/functions/<version>.tsv`); `npm run commands-run -- --functions` shows what ran and what did not.
 - **2.88.0** (2026-11-16): One reading of "landed" for every count (web train, engine train, both, closes), and one module of small helpers.
 - **2.87.0** (2026-11-16): Shorter, same behaviour. One length rule for comments (9,431 lines to 5,151), one test kit for 244 test files, finished notes removed.
 - **2.86.1** (2026-11-16): a run of the engine target alone that moved the target is judged by its result (a daily full run had been thrown away).
