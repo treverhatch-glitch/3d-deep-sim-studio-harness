@@ -53,9 +53,11 @@ units). One setting fewer.
   and its first real runs are in a studio. That is why it is off by default.
 - **Memory is a guess until measured.** With no recorded peak the harness assumes 4 GB for one rules run; a real test
   process can take several times that. A studio should set `focus.splitGb` to what it has seen before turning this on.
-- **Not covered by a check:** the out-of-memory path (the land run dies, the check ahead is ended, the retry); ending
-  the process tree on Windows for this child; a train process that is killed outright while the check ahead runs (the
-  next train ends what it finds).
+- **Not covered by a check:** the out-of-memory path (the land run dies, the check ahead is ended, the retry), and a
+  train process that is killed outright while the check ahead runs (the next train ends what it finds). Ending the
+  check ahead's process tree on Windows is run by the online Windows checks only.
+- **Caught before the merge:** on Windows the check ahead ended with the train that started it (P-369); it is now
+  started detached on every system.
 - **It is pure cost when the landed tree is not the checked tree:** a land script that commits files outside
   `rules.ignore` and `rules.paths`, a lane dropped by the next train's own pre-queue check or compile search, or new
   shared input files (`rules.share`). The result is then not used and the next train checks as before.
