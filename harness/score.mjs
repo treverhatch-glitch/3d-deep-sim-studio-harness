@@ -372,7 +372,7 @@ export async function roundScore({ events = null, machine = null, now = null, da
     landedPerDay: `${rest.doneCount} done in ${r1(supDays)} supervisor day(s) (${landedText(inWin, all)})`,
     escapedPct: `${card.escaped} of ${card.landed} tasks ended`,
   };
-  return { window: { from: new Date(from).toISOString(), to: new Date(end).toISOString(), days, events: inWin.length }, landed: landedCounts(inWin, all), values, notes, measures: MEASURES.map(([id, label, unit, better, target]) => ({ id, label, unit, better, target })), engine: engineFlow(inWin), rulesTests: rulesTestFlow(inWin), planning: await planningFlow(inWin), vision: visionFlow(all.filter((e) => at(e) <= end), { from }), visionCards: visionCardFlow(inWin), visionFixes: visionFixFlow(all.filter((e) => at(e) <= end), { from }), progress: engineProgress(root, { timeoutMs: progressTimeoutMs }) };
+  return { window: { from: new Date(from).toISOString(), to: new Date(end).toISOString(), days, events: inWin.length }, landed: landedCounts(inWin, all), values, notes, measures: MEASURES.map(([id, label, unit, better, target]) => ({ id, label, unit, better, target })), engine: engineFlow(inWin), rulesTests: rulesTestFlow(inWin), planning: await planningFlow(inWin), vision: visionFlow(all.filter((e) => at(e) <= end), { from }), visionCards: visionCardFlow(inWin), visionFixes: visionFixFlow(all.filter((e) => at(e) <= end), { from }), progress: engineProgress(root, { timeoutMs: progressTimeoutMs }), switches: await (await import('./switches.mjs')).switchesLines({ root }) };
 }
 
 /** Does this value meet its target? null when there is no value. */
@@ -395,6 +395,7 @@ export function scoreText(score, prev = null, prevEngine = null, prevVision = nu
   L.push(...planningText(score.planning));
   L.push(...engineText(score.engine, prevEngine));
   L.push(...(score.progress || []).map((p) => (p.line ? `Progress (${p.engine}): ${p.line}` : `Progress (${p.engine}): not available (${p.why})`)));
+  L.push(...(score.switches || []));
   L.push(...visionText(score.vision, prevVision));
   L.push(...visionCardText(score.visionCards, score.visionFixes));
   L.push(...rulesTestText(score.rulesTests));
