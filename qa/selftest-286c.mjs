@@ -166,9 +166,21 @@ console.log('Passed!');
     await guard('2.86 (c) rules.focus.auto: a batch that adds a new system folder (Sim/Academy, its .meta, its test file and its port folder; no map entry names it) runs in focus with Category=Academy and the smoke filter, each a part, and the land run is told the rules are green (fails before this fix: the new folder matched no rules.focus.map entry, so every port ran the full command twice)', () => [
       r.landed?.join() === 'T-601' && re.mode === 'focus' && /Category=Academy/.test(re.filter || '') && rr.every((x) => x.filter !== 'ALL') && rr.some((x) => x.filter === 'Category=Academy') && runsOf(ctl)[0]?.rulesGreen === '1',
       JSON.stringify({ r, rr, re }).slice(0, 2500)]);
-    await guard('2.86 (c) a part new in the batch is not run on the target: Category=Academy ran only in a checkout that has Sim/Academy; the target ran the smoke part alone, and the log says the new part was not run there (fails before this fix: the target was always run first with the batch\'s whole command)', () => [
-      rr.filter((x) => x.filter === 'Category=Academy').length === 1 && rr.filter((x) => x.filter === 'Category=Academy').every((x) => x.sims.includes('Academy'))
-        && rr.filter((x) => !x.sims.includes('Academy')).map((x) => x.filter).join() === 'Category=Smoke' && r.logs.some((l) => /Category=Academy are new in the batch/.test(l)) && re.newParts === 1,
+  }
+  {
+    // 2.93: the target is asked only for a red batch, so this batch adds the new system with a red test.
+    resetState(); freshFull();
+    const E = engineRepo({ 'feat/academy': { 'Sim/Academy/academy.cs': 'a\n', 'Sim/Academy/rules-bad.txt': 'Category=Academy\n', 'Sim/Academy.meta': 'm\n', 'Tests/Sim/AcademyTests.cs': 't\n', 'tools/port/academy/v.json': '{}\n' } }, { shared: startFiles });
+    const ctl = path.join(T, 'ctl-new-red');
+    const rlog = path.join(T, 'rules-new-red.jsonl');
+    setEngines({ unity: cfgFor(E, ctl, { rules: rulesCfg(rlog, { auto: AUTO }) }) });
+    queue(E, [['T-602', 'feat/academy']]);
+    const r = probe(TRAIN);
+    const rr = rulesRuns(rlog);
+    const re = evs(/^engine\.rules$/)[0]?.meta || {};
+    await guard('2.86 (c) a part new in the batch is not run on the target: Category=Academy ran only in a checkout that has Sim/Academy; the target (asked because the batch is red, 2.93) ran the smoke part alone, and the log says the new part was not run there (fails before this fix: the target was always run first with the batch\'s whole command)', () => [
+      rr.filter((x) => x.filter === 'Category=Academy').length >= 1 && rr.filter((x) => x.filter === 'Category=Academy').every((x) => x.sims.includes('Academy'))
+        && rr.filter((x) => !x.sims.includes('Academy')).map((x) => x.filter).join() === 'Category=Smoke' && r.logs.some((l) => /Category=Academy are new in the batch/.test(l)) && re.newParts === 1 && r.dropped?.map((d) => d.task).join() === 'T-602',
       JSON.stringify({ rr, logs: r.logs }).slice(0, 2500)]);
   }
 
@@ -224,14 +236,14 @@ console.log(JSON.stringify({ ui: [ui.mode, ui.why], mixed: [mixed.mode, mixed.wh
     const n1 = rulesRuns(rlog).length;
     // Another system's inputs change (a port elsewhere), then a second branch of the same system on the new target.
     write(E.R, 'Rules~/loans/l.json', '{"rate":2}\n');
-    g(E.R, 'checkout', '-q', '-B', 'feat/b', 'port/main'); write(E.R, 'Sim/Fees/b.cs', 'b\n'); g(E.R, 'add', '-A'); g(E.R, 'commit', '-qm', 'b'); g(E.R, 'checkout', '-q', 'dev');
+    g(E.R, 'checkout', '-q', '-B', 'feat/b', 'port/main'); write(E.R, 'Sim/Fees/b.cs', 'b\n'); write(E.R, 'Sim/Loans/rules-bad.txt', 'Category=Smoke\n'); g(E.R, 'add', '-A'); g(E.R, 'commit', '-qm', 'b'); g(E.R, 'checkout', '-q', 'dev');
     E.heads['feat/b'] = g(E.R, 'rev-parse', 'feat/b').stdout.trim();
     fs.writeFileSync(evFile, '');
     queue(E, [['T-612', 'feat/b']]);
     const r2 = probe(TRAIN);
     const rr2 = rulesRuns(rlog).slice(n1);
-    await guard('2.86 (c) a second train on the same target runs no calibration for a kept part although the inputs changed for another system: the first train ran Category=Fees on the target and the batch; after Rules~/loans changed, the second train runs Category=Fees once (its batch) and says the target\'s Fees part is kept; the smoke part (it reads everything) runs again (fails before this fix: the key held every input, so the target was run again in full every train)', () => [
-      r1.landed?.join() === 'T-611' && r2.landed?.join() === 'T-612' && rr2.filter((x) => x.filter === 'Category=Fees').length === 1 && rr2.filter((x) => x.filter === 'ALL').length === 0
+    await guard('2.86 (c) a second train on the same target runs no calibration for a kept part although the inputs changed for another system: the first train ran Category=Fees on the batch, which landed; after Rules~/loans changed, the second train (red in its smoke part, so the target is asked, 2.93) runs Category=Fees once (its batch) and says the target\'s Fees part is kept; the smoke part (it reads everything) runs again (fails before this fix: the key held every input, so the target was run again in full every train)', () => [
+      r1.landed?.join() === 'T-611' && r2.dropped?.map((d) => d.task).join() === 'T-612' && rr2.filter((x) => x.filter === 'Category=Fees').length === 1 && rr2.filter((x) => x.filter === 'ALL').length === 0
         && r2.logs.some((l) => /rules part Category=Fees pass kept for .*the target/.test(l)) && (r2.rules?.reused || 0) >= 1,
       JSON.stringify({ n1, rr2, r2 }).slice(0, 2500)]);
   }
@@ -248,10 +260,13 @@ console.log(JSON.stringify({ ui: [ui.mode, ui.why], mixed: [mixed.mode, mixed.wh
     const rr = rulesRuns(rlog);
     // The batch's run is the first one with Sim/Bonds in it; the narrowing runs are the ones without Sim/Bonds after it.
     const firstBatch = rr.findIndex((x) => x.sims.includes('Bonds'));
-    const narrowing = rr.slice(firstBatch).filter((x) => !x.sims.includes('Bonds'));
+    // 2.93: the target's parts (Fees, Loans, smoke) run right after the red batch; the narrowing comes after them.
+    const afterBatch = rr.slice(firstBatch).filter((x) => !x.sims.includes('Bonds'));
+    const onTarget = afterBatch.slice(0, 3).map((x) => x.filter).sort().join();
+    const narrowing = afterBatch.slice(3);
     await guard('2.86 (c) a red batch re-runs only the red part while narrowing: the batch is red in Category=Fees; every prefix runs Category=Fees alone (never Loans, Bonds or the smoke filter), T-623 is handed back naming the part, the other three land; after the drop the parts kept green are not run again (fails before this fix: every prefix ran the whole check)', () => [
       r.dropped?.length === 1 && r.dropped[0].task === 'T-623' && /part Category=Fees/.test(r.dropped[0].why) && r.landed?.join() === 'T-621,T-622,T-624'
-        && narrowing.length >= 1 && narrowing.every((x) => x.filter === 'Category=Fees') && rr.filter((x) => x.filter === 'Category=Bonds').length === 1,
+        && onTarget === 'Category=Fees,Category=Loans,Category=Smoke' && narrowing.length >= 1 && narrowing.every((x) => x.filter === 'Category=Fees') && rr.filter((x) => x.filter === 'Category=Bonds').length === 1,
       JSON.stringify({ rr, r }).slice(0, 2500)]);
   }
 
@@ -282,8 +297,8 @@ console.log(JSON.stringify({ ui: [ui.mode, ui.why], mixed: [mixed.mode, mixed.wh
     const r = probe(TRAIN);
     const rr = rulesRuns(rlog);
     const kept = JSON.parse(fs.readFileSync(path.join(S, '.studio', 'engine', 'unity-rules.json'), 'utf8'));
-    await guard('2.86 (c) without rules.focus.auto or rules.focus.shared nothing changes: the map-only check runs the target then the batch with the same parts as 2.85 (Fees, smoke; twice), keeps whole-tree keys only (no per-part results), and the event has no reuse count (a guard of unchanged behaviour: it holds before and after this change)', () => [
-      r.landed?.join() === 'T-631' && rr.map((x) => x.filter).join() === 'Category=Fees,Category=Smoke,Category=Fees,Category=Smoke' && !kept.parts && Object.keys(kept.trees).length === 2
+    await guard('2.86 (c) without rules.focus.auto or rules.focus.shared nothing changes: the map-only check runs the batch with the same parts as 2.85 (Fees, smoke; once: 2.93 runs nothing on the target for a green batch), keeps whole-tree keys only (no per-part results), and the event has no reuse count (a guard of unchanged behaviour: it holds before and after this change)', () => [
+      r.landed?.join() === 'T-631' && rr.map((x) => x.filter).join() === 'Category=Fees,Category=Smoke' && !kept.parts && Object.keys(kept.trees).length === 1
         && Object.keys(kept.trees).every((x) => /^[0-9a-f]{40}\|[0-9a-f]{12}\|focus:[0-9a-f]{12}$/.test(x)) && evs(/^engine\.rules$/)[0]?.meta?.reused === undefined,
       JSON.stringify({ rr, keys: Object.keys(kept.trees), r }).slice(0, 2500)]);
   }

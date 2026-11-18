@@ -5411,6 +5411,14 @@ if (inShard('selftest-292b')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.93 (a): the batch first, a kept green for the landed tree, rules runs outside the train held for a land.
+if (inShard('selftest-293a')) {
+  const dir = copyRepo();
+  const { selftest293A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-293a.mjs')).href);
+  await selftest293A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

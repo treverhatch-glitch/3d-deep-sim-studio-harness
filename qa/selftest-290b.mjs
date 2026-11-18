@@ -298,8 +298,8 @@ console.log(JSON.stringify({ ok: r.ok, error: r.error || null, message: r.messag
     const r = probe(TRAIN);
     const rr = rulesRuns(ctl);
     const why = r.dropped?.find((d) => d.task === 'T-032')?.why || '';
-    await guard('2.90 (t) B3: rules.first "PinTests": the rules check\'s very first run is that filter on the batch (red at once), then the target (green), then prefixes by that filter only; T-032 is refused naming rules.first and the failing test; the full command runs only on the target and on T-031 + T-033, never on a tree with T-032; one land run lands T-031, T-033 (fails on 2.89: the first rules run was the full command on the target)', () => [
-      rr[0]?.filter === 'PinTests' && rr[0].mode === 'first' && rr.filter((x) => x.filter === 'PinTests').length === 5 && rr.filter((x) => !x.filter).length === 2
+    await guard('2.90 (t) B3: rules.first "PinTests": the rules check\'s very first run is that filter on the batch (red at once), then the target (green), then prefixes by that filter only; T-032 is refused naming rules.first and the failing test; the full command runs only on T-031 + T-033 (2.93: that batch is green, so never on the target), never on a tree with T-032; one land run lands T-031, T-033 (fails on 2.89: the first rules run was the full command on the target)', () => [
+      rr[0]?.filter === 'PinTests' && rr[0].mode === 'first' && rr.filter((x) => x.filter === 'PinTests').length === 5 && rr.filter((x) => !x.filter).length === 1
         && r.dropped?.map((d) => d.task).join() === 'T-032' && r.dropped[0].cause === 'rules' && /rules\.first PinTests/.test(why) && why.includes(PIN)
         && r.runs === 1 && r.landed?.join() === 'T-031,T-033',
       JSON.stringify({ r, rr }).slice(0, 3000)]);
@@ -313,8 +313,8 @@ console.log(JSON.stringify({ ok: r.ok, error: r.error || null, message: r.messag
     const r = probe(TRAIN);
     const rr = rulesRuns(ctl);
     const why = r.dropped?.find((d) => d.task === 'T-035')?.why || '';
-    await guard('2.90 (t) B1+B3: with engines.unity.blame too, the rules check leaves the one branch that changes pins/*.json out at once: 3 runs of the first filter (batch red, target green, the batch without T-035 green), no prefix search; T-035 refused naming the blame entry and the studio\'s line; T-034 and T-036 land on one land run (fails on 2.89: no rules.first, no blame in the rules check)', () => [
-      rr.filter((x) => x.filter === 'PinTests').length === 3 && rr.filter((x) => !x.filter).length === 2 && r.dropped?.map((d) => d.task).join() === 'T-035'
+    await guard('2.90 (t) B1+B3: with engines.unity.blame too, the rules check leaves the one branch that changes pins/*.json out at once: 3 runs of the first filter (batch red, target green, the batch without T-035 green), no prefix search; the full command once, on T-034 + T-036 (2.93: green, so not on the target); T-035 refused naming the blame entry and the studio\'s line; T-034 and T-036 land on one land run (fails on 2.89: no rules.first, no blame in the rules check)', () => [
+      rr.filter((x) => x.filter === 'PinTests').length === 3 && rr.filter((x) => !x.filter).length === 1 && r.dropped?.map((d) => d.task).join() === 'T-035'
         && /engines\.unity\.blame ties/.test(why) && /Re-record the vectors/.test(why) && r.runs === 1 && r.landed?.join() === 'T-034,T-036',
       JSON.stringify({ r, rr }).slice(0, 3000)]);
   }
@@ -483,9 +483,9 @@ console.log(JSON.stringify({ first: c.first, bad: c.focusBad || [] }));`);
     queue(E, [['T-083', 'feat/q'], ['T-084', 'feat/pin2']]);
     const r2 = probe(TRAIN, SLOW);
     const rr = rulesRuns(ctl);
-    await guard('2.90 (t) rules timeout: (b) unset, the default timed out on the target (3 s against a 4.5 s suite): that train judges no lane, says so in a warn event with the timeout advice (not the inputs advice), and the next run\'s timeout is doubled; the next train\'s check runs with it, passes on the target and judges the lanes: T-084 (the pin moved, vectors not re-recorded) is refused by the rules check, T-083 lands on one land run (fails on 2.89: every train timed out the same way and judged no lane)', () => [
+    await guard('2.90 (t) rules timeout: (b) unset, the default timed out on the batch (2.93: it runs first; 3 s against a 4.5 s suite): that train judges no lane, says so in a warn event with the timeout advice (not the inputs advice), and the next run\'s timeout is doubled; the next train\'s check runs with it, passes on the target and judges the lanes: T-084 (the pin moved, vectors not re-recorded) is refused by the rules check, T-083 lands on one land run (fails on 2.89: every train timed out the same way and judged no lane)', () => [
       r1.rules?.skipped && raised?.min === 0.1 && raised.from === 0.05 && ne.length === 1 && ne[0].status === 'warn' && /raise engines\.unity\.rules\.timeoutMin, or make the run smaller with rules\.focus/.test(ne[0].msg) && !/rules\.inputs/.test(ne[0].msg)
-        && r2.logs?.some((l) => /up to 0\.1 min \(doubled: a full run timed out on the target after 0\.05 min/.test(l)) && r2.rules?.ran === true && r2.dropped?.map((d) => `${d.task}:${d.cause}`).join() === 'T-084:rules' && r2.landed?.join() === 'T-083' && r2.runs === 1
+        && r2.logs?.some((l) => /up to 0\.1 min \(doubled: a full run timed out on the batch after 0\.05 min/.test(l)) && r2.rules?.ran === true && r2.dropped?.map((d) => `${d.task}:${d.cause}`).join() === 'T-084:rules' && r2.landed?.join() === 'T-083' && r2.runs === 1
         && !cacheOf().raise?.full && !cacheOf().noJudge && rr.length >= 3,
       JSON.stringify({ r1: r1.rules, raised, r2: { rules: r2.rules, landed: r2.landed, dropped: r2.dropped, runs: r2.runs, logs: r2.logs }, ne: ne.map((e) => e.msg) }).slice(0, 3000)]);
   }
@@ -497,16 +497,16 @@ console.log(JSON.stringify({ first: c.first, bad: c.focusBad || [] }));`);
     queue(E, [['T-085', 'feat/pin']]);
     const r1 = probe(TRAIN, { RULES_STUB_MS: '4500' });
     const n1 = rulesRuns(ctl).length;
-    queue(E, [['T-086', 'feat/pin2']]);
+    queue(E, [['T-086', 'feat/pin']]);
     const r2 = probe(TRAIN, { RULES_STUB_MS: '4500' });
     const n2 = rulesRuns(ctl).length;
     const ne = evs(/^task\.train\.unity\.rules_no_judge$/);
     const st = out(spawnSync(process.execPath, [path.join(S, 'harness', 'task.mjs'), 'train', 'status', '--engine', 'unity'], { windowsHide: true, cwd: S, env: envOf(), encoding: 'utf8', timeout: 120000 }));
     const lp = probe(`import { rulesIdleLine } from ${u('harness/unity-train.mjs')};\nconsole.log(JSON.stringify({ line: rulesIdleLine(process.cwd(), 'unity') }));`);
-    await guard('2.90 (t) rules timeout: (c) a timeout the studio set (rules.timeoutMin 0.05) is used as it is: it timed out on the target and no raise was recorded, the log says "the studio\'s" (fails on 2.89: a value under 1 min was raised to 1)', () => [
+    await guard('2.90 (t) rules timeout: (c) a timeout the studio set (rules.timeoutMin 0.05) is used as it is: it timed out on the batch and no raise was recorded, the log says "the studio\'s" (fails on 2.89: a value under 1 min was raised to 1)', () => [
       r1.rules?.skipped && !cacheOf().raise && r1.logs?.some((l) => /up to 0\.05 min \(engines\.unity\.rules\.timeoutMin, the studio's\)/.test(l)),
       JSON.stringify({ r1: r1.rules, logs: r1.logs, cache: cacheOf().raise || null }).slice(0, 2500)]);
-    await guard('2.90 (t) rules timeout: (d) the same target tree with the same timeout is not run a second time: the next train does not run the rules command (its record unchanged), says "not run again" and the land run decides (fails on 2.89: the same 30 minutes were spent on every train)', () => [
+    await guard('2.90 (t) rules timeout: (d) the same tree with the same timeout is not run a second time (2.93: the batch runs first, so the same branch is queued again on the same target): the next train does not run the rules command (its record unchanged), says "not run again" and the land run decides (fails on 2.89: the same 30 minutes were spent on every train)', () => [
       n1 >= 1 && n2 === n1 && r2.rules?.skipped && /not run again: this tree timed out after 0\.05 min/.test(r2.rules.skipped) && r2.runs >= 1,
       JSON.stringify({ n1, n2, r2: r2.rules }).slice(0, 2500)]);
     await guard('2.90 (t) rules timeout: (e) after two trains in a row that judged no lane: two rules_no_judge events (warn, to the producer), the second saying "2 trains in a row"; train status says the rules check judged no lane on the last 2 trains with the minutes spent and the one change; the Line Producer reads the same line (fails on 2.89: only the train\'s log said it)', () => [

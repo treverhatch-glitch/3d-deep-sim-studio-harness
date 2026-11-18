@@ -426,8 +426,8 @@ console.log('Passed!');
     const r = probe(TRAIN);
     const rr = rulesRuns(rlog);
     const re = evs(/^engine\.rules$/)[0];
-    await guard('2.84 (t) rules.focus.split: in focus mode the rules check runs one command per filter group (Category=Fees, Category=Loans, then smoke) in sequence, never the joined filter; the result and the engine.rules event carry per-group seconds; the batch lands with the rules green (fails before this fix: one command with "Category=Fees|Category=Loans|Category=Smoke" held every system\'s data at once)', () => [
-      r.landed?.join() === 'T-381,T-382' && rr.length === 6 && rr.every((x) => x.filter && !x.filter.includes('|')) && rr.slice(3).map((x) => x.filter).join() === 'Category=Fees,Category=Loans,Category=Smoke'
+    await guard('2.84 (t) rules.focus.split: in focus mode the rules check runs one command per filter group (Category=Fees, Category=Loans, then smoke) in sequence, never the joined filter (2.93: on the batch only, a green batch runs nothing on the target); the result and the engine.rules event carry per-group seconds; the batch lands with the rules green (fails before this fix: one command with "Category=Fees|Category=Loans|Category=Smoke" held every system\'s data at once)', () => [
+      r.landed?.join() === 'T-381,T-382' && rr.length === 3 && rr.every((x) => x.filter && !x.filter.includes('|')) && rr.map((x) => x.filter).join() === 'Category=Fees,Category=Loans,Category=Smoke'
         && r.rules?.groups?.length === 3 && r.rules.groups.every((x) => Number.isFinite(x.seconds)) && re?.meta?.groups?.length === 3 && runsOf(ctl)[0]?.rulesGreen === '1',
       JSON.stringify({ r, rr, re: re?.meta }).slice(0, 2500)]);
   }

@@ -188,8 +188,8 @@ console.log(JSON.stringify({ row: rows.find((x) => x.engine === 'unity') || null
     const r = probe(TRAIN);
     const rr = rulesRuns(ctl);
     const re = evs(/^task\.train\.unity\.rules_full$/);
-    await guard('2.91 full rules run due (30 h, fullEveryHours 24) with a lane waiting: the train\'s rules check is the focus run the batch maps to (MoveTests on the target and on the batch), never the full suite; lastFullAt unchanged; the lane lands told green; a rules_full event says the full run waits for an empty queue (fails before this fix: the check became the full suite on the target and again on the batch head)', () => [
-      rr.length === 2 && rr.every((x) => x.mode === 'focus' && x.filter === 'MoveTests') && cacheOf().lastFullAt === at0 && r.landed?.join() === 'T-011' && runsOf(ctl)[0]?.rulesGreen === '1'
+    await guard('2.91 full rules run due (30 h, fullEveryHours 24) with a lane waiting: the train\'s rules check is the focus run the batch maps to (MoveTests, on the batch only: 2.93 runs nothing on the target when the batch is green), never the full suite; lastFullAt unchanged; the lane lands told green; a rules_full event says the full run waits for an empty queue (fails before this fix: the check became the full suite on the target and again on the batch head)', () => [
+      rr.length === 1 && rr.every((x) => x.mode === 'focus' && x.filter === 'MoveTests') && cacheOf().lastFullAt === at0 && r.landed?.join() === 'T-011' && runsOf(ctl)[0]?.rulesGreen === '1'
         && re.length === 1 && re[0].meta?.waits === 'empty-queue' && !r.fullRules,
       J({ r, rr, re: re.map((e) => e.meta) })]);
     const lp1 = probe(LP);
@@ -197,7 +197,7 @@ console.log(JSON.stringify({ row: rows.find((x) => x.engine === 'unity') || null
     const rr2 = rulesRuns(ctl);
     const lp2 = probe(LP);
     await guard('2.91 the owed full rules run at idle: with the queue empty the Line Producer would start a train with no lane for it; that train runs the full command on the target alone, passes, writes lastFullAt; then nothing is owed and the Line Producer starts nothing (fails before this fix: an owed full rules run never ran outside a batch)', () => [
-      lp1.row?.start === true && lp1.row?.queued === 0 && rr2.length === 3 && rr2[2].mode === 'full' && rr2[2].filter === '' && rr2[2].commit === tipOf(E)
+      lp1.row?.start === true && lp1.row?.queued === 0 && rr2.length === 2 && rr2[1].mode === 'full' && rr2[1].filter === '' && rr2[1].commit === tipOf(E)
         && r2.fullRules?.status === 'pass' && r2.fullRules?.when === 'idle' && Date.now() - Date.parse(cacheOf().lastFullAt) < 600000 && lp2.row?.start === false,
       J({ lp1: lp1.row, r2, rr2, lp2: lp2.row })]);
   }
@@ -212,7 +212,7 @@ console.log(JSON.stringify({ row: rows.find((x) => x.engine === 'unity') || null
     const r = probe(TRAIN);
     const rr = rulesRuns(ctl);
     await guard('2.91 full rules run overdue (60 h, past rules.focus.fullEveryMaxHours = 2 x 24): the batch\'s check is focus, the lane lands told green, and after it the full command runs once on the target as the landing left it; lastFullAt written (fails before this fix: the full suite ran twice ahead of the batch)', () => [
-      rr.length === 3 && rr.slice(0, 2).every((x) => x.mode === 'focus') && rr[2].mode === 'full' && rr[2].commit === tipOf(E) && tipOf(E) !== tip0
+      rr.length === 2 && rr[0].mode === 'focus' && rr[1].mode === 'full' && rr[1].commit === tipOf(E) && tipOf(E) !== tip0
         && r.landed?.join() === 'T-012' && runsOf(ctl)[0]?.rulesGreen === '1' && r.fullRules?.when === 'end' && r.fullRules?.status === 'pass' && Date.now() - Date.parse(cacheOf().lastFullAt) < 600000,
       J({ r, rr })]);
   }
@@ -267,9 +267,10 @@ console.log(JSON.stringify({ row: rows.find((x) => x.engine === 'unity') || null
   await moved('ignore-out', { ignore: ['docs/runs'] }, { 'docs/runs/1.md': 'run\n', 'notes.txt': 'n2\n' }, false, '2.91 rules.ignore ["docs/runs"], a move that also changes notes.txt (outside it): no STUDIO_RULES_GREEN, no log line (as before this fix: the contrast)');
 
   // After a landing whose only extra commit is the land script's record, the next train reuses the kept result for the target.
+  // 2.93: the target is asked only for a red batch, so the second lane breaks the pin (PinTests red).
   const kept = async (name, rules, extra, want, why) => {
     resetState();
-    const E = engineRepo({ 'feat/m': { 'Sim/Move.cs': 'class Move { int x; }\n' }, 'feat/f': { 'Sim/Fees.cs': 'class Fees { int y; }\n' } });
+    const E = engineRepo({ 'feat/m': { 'Sim/Move.cs': 'class Move { int x; }\n' }, 'feat/f': { 'Sim/Fees.cs': 'class Fees { int y; }\n', 'vectors/pin.txt': 'beef000\n' } });
     const ctl = path.join(T, `ctl-kept-${name}`);
     setEngines({ unity: cfgFor(E, ctl, { rules: fullRules(ctl, rules) }) });
     fs.writeFileSync(`${ctl}-record`, '1');
@@ -282,12 +283,12 @@ console.log(JSON.stringify({ row: rows.find((x) => x.engine === 'unity') || null
     const r2 = probe(TRAIN);
     const rr = rulesRuns(ctl).slice(n1);
     await guard(why, () => [
-      r1.landed?.join() === 'T-031' && r2.landed?.join() === 'T-032' && (want ? rr.length === 1 && rr.every((x) => x.commit !== t1) && r2.logs?.some((l) => l.includes(`cached for ${t1.slice(0, 10)}`)) : rr.length === 2 && rr[0].commit === t1),
+      r1.landed?.join() === 'T-031' && r2.dropped?.map((d) => d.task).join() === 'T-032' && (want ? rr.length === 1 && rr.every((x) => x.commit !== t1) && r2.logs?.some((l) => l.includes(`cached for ${t1.slice(0, 10)}`)) : rr.length === 2 && rr[1].commit === t1),
       J({ r1: r1.landed, r2, rr, t1 })]);
   };
-  await kept('paths', { paths: ['Sim', 'pins', 'vectors'] }, null, true, '2.91 kept result with rules.paths: the land script committed its own record under docs/runs after the landing; the next train reuses the kept pass for the target (the rules command runs only on the new batch) (passes before this fix too: it proves the rules.paths key already did so)');
-  await kept('ignore', { ignore: ['docs/runs'] }, null, true, '2.91 kept result with rules.ignore ["docs/runs"]: the record-only commit keeps the kept pass of the target, no second run (fails before this fix: no rules.ignore, the target ran again)');
-  await kept('ignore-out', { ignore: ['docs/runs'] }, { 'notes.txt': 'n3\n' }, false, '2.91 kept result with rules.ignore: a further commit outside docs/runs (notes.txt) makes the target a new tree for the check: it runs on the target again (as before this fix: the contrast)');
+  await kept('paths', { paths: ['Sim', 'pins', 'vectors'] }, null, true, '2.91 kept result with rules.paths: the land script committed its own record under docs/runs after the landing; the next train, red on its batch, reuses the kept pass for the target (the rules command runs only on the new batch) (passes before this fix too: it proves the rules.paths key already did so)');
+  await kept('ignore', { ignore: ['docs/runs'] }, null, true, '2.91 kept result with rules.ignore ["docs/runs"]: the record-only commit keeps the kept pass of the target: the next red batch asks it and runs nothing on the target (fails before this fix: no rules.ignore, the target ran again)');
+  await kept('ignore-out', { ignore: ['docs/runs'] }, { 'notes.txt': 'n3\n' }, false, '2.91 kept result with rules.ignore: a further commit outside docs/runs (notes.txt) makes the target a new tree for the check: the red batch runs it on the target (as before this fix: the contrast)');
   {
     resetState();
     const E = engineRepo({});
