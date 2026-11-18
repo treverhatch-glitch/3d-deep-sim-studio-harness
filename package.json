@@ -118,6 +118,7 @@
     "playtest": "node qa/playtest.mjs",
     "playtest:stage1": "node qa/playtest.mjs --stage 1",
     "playtest:stage2": "node qa/playtest.mjs --stage 2",
+    "playtest:build": "node harness/engine.mjs playtest",
     "qa:visual": "node qa/visual-check.mjs",
     "check:purity": "node scripts/check-sim-purity.mjs",
     "check:isolation": "node scripts/check-sim-isolation.mjs",

@@ -5382,6 +5382,14 @@ if (inShard('selftest-294a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.95 (b): "Systems ON: n of m" (engines.<x>.switches) and the playtest build in one command (engines.<x>.playtest).
+if (inShard('selftest-295b')) {
+  const dir = copyRepo();
+  const { selftest295B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-295b.mjs')).href);
+  await selftest295B({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
