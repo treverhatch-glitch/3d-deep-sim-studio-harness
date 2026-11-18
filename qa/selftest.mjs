@@ -5374,6 +5374,14 @@ if (inShard('selftest-294c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.94 (a): the next batch's rules check runs beside the current land run (rules.ahead).
+if (inShard('selftest-294a')) {
+  const dir = copyRepo();
+  const { selftest294A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-294a.mjs')).href);
+  await selftest294A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

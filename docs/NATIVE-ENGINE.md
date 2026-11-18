@@ -79,6 +79,16 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   target runs now in the same kind of checkout. A check that is red on the target itself (a missing input, no SDK)
   judges no lane: the train says why and the land run decides, as before. With no `rules.focus` a green train costs one
   full run, not two.
+- **The next batch is checked beside the land run (2.94, `rules.ahead`, off by default).** With `"rules": { ...,
+  "ahead": true }`, while a green batch's land run runs, the lanes the next train would take (the train's own batch
+  selection) are merged on this batch's checked head and run as the next train's batch run would (same mode, filters,
+  `first`, time limit; never the target). It starts once the land run holds its machine:heavy slot and only while free
+  RAM minus the floor holds what one rules run takes (`focus.splitGb`, else the largest measured peak, else 4 GB);
+  never with a second gate in use. Unless the land run lands the batch unchanged, it is ended with its process tree and
+  nothing of it is kept (also on `train cancel`, or a land run that dies out of memory, which is then retried without
+  it). Landed, the next train takes that same set when its lanes are unchanged, finds the kept result (its rules log
+  line says so) or waits for the run still going. A red ahead is only a red for that tree: it hands nobody back.
+  Event `task.train.<x>.rules_ahead` (`started`, `kept-green`, `kept-red`, `dropped`); `train status` shows it running.
 - A green batch goes to the land run with `STUDIO_RULES_GREEN=1`, as long as the land run lands exactly the checked
   lanes on the checked target. A land script may use that to skip its own copy of the same tests. 2.91: with
   `rules.paths` or `rules.ignore` set, a target that moved only where the rules tests do not read (a land script's own
