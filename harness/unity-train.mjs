@@ -102,12 +102,16 @@ export function runPreLand(s, lane, { root, id, env = process.env, log = () => {
   } finally { cleanup(); }
 }
 
-/** 2.90: engines.<x>.preQueue, checked: [{ touches: [glob], run, say, timeoutMin, env }] (an entry without both is left out). */
+/** 2.90: engines.<x>.preQueue, checked: [{ touches: [glob], titles: [regex], run, say, timeoutMin, env }]; an entry needs a run and touches or titles (2.93); a bad regex leaves it out and is added to `bad`. */
 const envVars = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.fromEntries(Object.entries(o).filter(([k, v]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof v === 'string')) : {});
-export function preQueueOf(cfg = {}) {
+export function preQueueOf(cfg = {}, bad = []) {
   const v = Array.isArray(cfg?.preQueue) ? cfg.preQueue : [];
-  return v.map((e) => ({ touches: (Array.isArray(e?.touches) ? e.touches : [e?.touches]).filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().replace(/\\/g, '/')), run: typeof e?.run === 'string' ? e.run.trim() : '', say: typeof e?.say === 'string' ? e.say.trim().slice(0, 300) : '', timeoutMin: Math.max(1, num(e?.timeoutMin, 10)), env: envVars(e?.env) })).filter((e) => e.touches.length && e.run);
+  const res = (x) => { try { return new RegExp(x, 'i'); } catch { bad.push(x); return null; } };
+  const strs = (a) => (Array.isArray(a) ? a : [a]).filter((x) => typeof x === 'string' && x.trim());
+  return v.map((e) => ({ titles: strs(e?.titles).map(res), touches: (Array.isArray(e?.touches) ? e.touches : [e?.touches]).filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().replace(/\\/g, '/')), run: typeof e?.run === 'string' ? e.run.trim() : '', say: typeof e?.say === 'string' ? e.say.trim().slice(0, 300) : '', timeoutMin: Math.max(1, num(e?.timeoutMin, 10)), env: envVars(e?.env) })).filter((e) => (e.touches.length || e.titles.length) && !e.titles.includes(null) && e.run);
 }
+
+const badWords = (bad, engine) => (bad.length ? `\nLeft out of engines.${engine}.preQueue: an entry whose "titles" has ${bad.map((x) => `"${x}"`).join(', ')}, not a valid regular expression.` : '');
 
 /** 2.92: the lane's head merged with the target tip, a commit object only (no ref): { tip, head } | { tip, conflict } | { tip, error }. */
 function mergedOnTarget(s, lane) {
@@ -124,12 +128,13 @@ function mergedOnTarget(s, lane) {
  * STUDIO_ENGINE_LANE_DIR when the porter's lane folder exists. { ran: [run], files, target, refused?: text, skipped?: why }.
  */
 export function runPreQueue(s, lane, { root, env = process.env } = {}) {
-  const list = preQueueOf(s.cfg);
-  const res = { ran: [], files: [] };
+  const bad = [];
+  const list = preQueueOf(s.cfg, bad);
+  const res = { ran: [], files: [], bad };
   if (!list.length) return res;
   const base = out(git(s.repo, 'merge-base', `refs/heads/${s.target}`, lane.head));
   const changed = base ? changedPaths(s.repo, base, lane.head) || [] : [];
-  const due = list.map((e) => ({ e, files: changed.filter((f) => matchAny(f, e.touches)) })).filter((x) => x.files.length);
+  const due = list.map((e) => ({ e, files: e.touches.length ? changed.filter((f) => matchAny(f, e.touches)) : [] })).filter((x) => (!x.e.touches.length || x.files.length) && (!x.e.titles.length || x.e.titles.some((t) => t.test(lane.title || ''))));
   if (!due.length) return res;
   res.files = [...new Set(due.flatMap((x) => x.files))];
   const m = mergedOnTarget(s, lane);
@@ -144,11 +149,11 @@ export function runPreQueue(s, lane, { root, env = process.env } = {}) {
   const laneDir = path.join(root, '.lanes', 'engine', String(lane.task));
   try {
     for (const { e, files } of due) {
-      const r = spawnSync(e.run, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout: e.timeoutMin * 60000, env: { ...env, ...e.env, STUDIO_LANE_COMMIT: lane.head, STUDIO_TARGET_COMMIT: m.tip, STUDIO_LANE_DIR: dir, STUDIO_ENGINE_REPO: s.repo, ...(fs.existsSync(laneDir) ? { STUDIO_ENGINE_LANE_DIR: laneDir } : {}) } });
+      const r = spawnSync(e.run, { shell: true, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout: e.timeoutMin * 60000, env: { ...env, ...e.env, STUDIO_TASK_ID: String(lane.task), STUDIO_TASK_TITLE: lane.title || '', STUDIO_LANE_COMMIT: lane.head, STUDIO_TARGET_COMMIT: m.tip, STUDIO_LANE_DIR: dir, STUDIO_ENGINE_REPO: s.repo, ...(fs.existsSync(laneDir) ? { STUDIO_ENGINE_LANE_DIR: laneDir } : {}) } });
       if (r.error && r.error.code !== 'ETIMEDOUT') return { ...res, skipped: `${e.run}: ${r.error.code || r.error.message}` };
       if (r.status === 0 && !r.error) { res.ran.push(e.run); continue; }
       const lines = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd().split('\n').slice(-8);
-      return { ...res, refused: `${lane.branch} changes ${files.slice(0, 3).join(', ')}, and the check for it (engines.${s.engine || 'unity'}.preQueue: ${e.run}) ${r.error ? `timed out after ${e.timeoutMin} min` : `exited ${r.status ?? r.signal ?? '?'}`}:\n${lines.map((x) => `  ${x}`).join('\n')}\n${e.say ? e.say.replace(/[.\s]+$/, '') : `Fix it on ${lane.branch}`}, then task done ${lane.task} --train again.` };
+      return { ...res, refused: `${lane.branch}${files.length ? ` changes ${files.slice(0, 3).join(', ')}` : ` is for ${lane.task}`}, and the check for it (engines.${s.engine || 'unity'}.preQueue: ${e.run}) ${r.error ? `timed out after ${e.timeoutMin} min` : `exited ${r.status ?? r.signal ?? '?'}`}:\n${lines.map((x) => `  ${x}`).join('\n')}\n${e.say ? e.say.replace(/[.\s]+$/, '') : `Fix it on ${lane.branch}`}, then task done ${lane.task} --train again.` };
     }
     return res;
   } finally { removeCheckout(s.repo, dir); }
@@ -169,7 +174,7 @@ export const setQueueTag = (root, task, tag, engine = 'unity') => withQueue(root
  * Queue a Unity-track task's branch (task done <ID> --train, after its checks). { ok, entry, message } or { ok: false, error,
  * message }. The branch: `branch`, else the task's recorded Unity branch, else the Unity folder's current branch (never the target).
  */
-export function queueUnityTask(root, { engine = 'unity', task, agent = null, branch = null, note = '', alone = null, tag = null, again = false, meta = null } = {}) {
+export function queueUnityTask(root, { engine = 'unity', task, agent = null, branch = null, note = '', alone = null, tag = null, again = false, meta = null, title = '' } = {}) {
   const s = unityTrainSettings(root, engine);
   const L = labelOf(engine);
   const UNITY_REF_PREFIX = refPrefix(engine);
@@ -202,10 +207,11 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
   let kept = inQueue && inQueue.head === head ? { ...(inQueue.preQueue ? { preQueue: inQueue.preQueue } : {}), ...(inQueue.clash ? { clash: inQueue.clash } : {}) } : {};
   let say = '';
   if (!inQueue || inQueue.head !== head) {
-    const pq = runPreQueue(s, { task, branch: br, head }, { root });
+    const pq = runPreQueue(s, { task, branch: br, head, title }, { root });
+    say += badWords(pq.bad, engine);
     if (pq.refused) {
       evTop('pre_queue', 'queue', `${task}: not queued: ${pq.refused.split('\n')[0]}`, { engine, agent: agent || `${engine}-train`, task, to: agent || 'producer', status: 'blocked', meta: { branch: br, head, files: pq.files.slice(0, 10) } });
-      return { ok: false, error: 'pre-queue', message: `${task} was not queued: ${pq.refused}` };
+      return { ok: false, error: 'pre-queue', message: `${task} was not queued: ${pq.refused}${say}` };
     }
     if (pq.ran.length || pq.skipped) evTop('pre_queue', 'queue', `${task}: ${pq.skipped ? `the pre-queue check could not run (${pq.skipped}); queued without it` : `pre-queue check(s) passed: ${pq.ran.join('; ')}`}`, { engine, agent: agent || `${engine}-train`, task, status: pq.skipped ? 'warn' : 'ok', meta: { branch: br, head, ran: pq.ran.length } });
     kept = pq.ran.length && !pq.skipped ? { preQueue: { target: pq.target, head } } : {};
@@ -1031,9 +1037,15 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   };
   const defer = (lane, why) => { res.deferred.push({ task: lane.task, why }); if (!dryRun) ev('deferred', id, `${lane.task} waits for the next ${L} train: ${why.split('\n')[0]}`, { task: lane.task, agent: by, to: lane.agent, status: 'warn' }); };
 
+  // 2.93: the board gives a lane's task title (preQueue "titles") and the "task after" holds that keep a lane out of a batch.
+  const board = (() => { try { return deps.board?.() || null; } catch { return null; } })();
+  const holdMod = board ? await import('./task-hold.mjs') : null;
+  const titleOf = (t) => [...(board?.inProgress || []), ...(board?.backlog || []), ...(board?.done || [])].find((x) => x.id === t)?.title || '';
   // (a) Each branch as it is now.
   const ready = [];
   for (const lane of lanes) {
+    const held = holdMod ? holdMod.afterWaits(lane.task, board) : [];
+    if (held.length) { defer(lane, `it waits for ${held.join(', ')} (task after)`); continue; }
     // 2.92: the queue door found it does not compile with a lane of this batch: it waits, as a lane that conflicts with one.
     const clash = (lane.clash?.with || []).filter((t) => lanes.some((l) => l.task === t));
     if (clash.length) { defer(lane, `it does not compile with ${clash.join(', ')} in this train (found when it was queued); it is checked again once ${clash.length === 1 ? 'that lane has' : 'they have'} landed or left the queue`); continue; }
@@ -1067,9 +1079,11 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   // 2.92: a lane's preQueue check that judged another target tip (or head) runs again on the lane merged with this tip.
   if (preQueueOf(s.cfg).length) {
     const kept = [];
+    let told = false;
     for (const l of set) {
       if (l.preQueue && l.preQueue.target === tip0 && l.preQueue.head === l.head) { kept.push(l); continue; }
-      const pq = runPreQueue(s, l, { root, env });
+      const pq = runPreQueue(s, { ...l, title: titleOf(l.task) }, { root, env });
+      if (pq.bad.length && !told) { told = true; log(`[unity-train] ${id}:${badWords(pq.bad, engine).replace(/\n/g, ' ')}`); }
       if (pq.refused) { drop(l, `refused before the land run: ${pq.refused}`, { cause: 'pre-queue', evidence: { files: pq.files } }); continue; }
       if (pq.ran.length || pq.skipped) log(`[unity-train] ${id}: pre-queue check of ${l.task} on ${target} at ${short(tip0)}: ${pq.skipped ? `could not run (${pq.skipped}); it goes on` : 'passed'}`);
       kept.push(l);

@@ -1298,6 +1298,7 @@ export function trainDeps(busyMod, { forDone = false } = {}) {
       return t?.error ? { ok: false, message: t.message } : t ? { ok: true, target: t } : { ok: false, message: `${lane.task} is not on the board` };
     },
     handBack: (lane, note, o = {}) => pauseTask(lane.task, lane.agent, note, { force: true, handBackCause: o.cause }),
+    board: () => parseNextQueue(),
     stopped: () => { const s = readStop(); return s ? `by ${s.by}${s.reason ? `: ${s.reason}` : ''}` : null; },
     taskStates: () => { const q = parseNextQueue(); return { open: new Set([...q.inProgress, ...q.backlog].map((t) => t.id)), done: new Set(q.done.map((t) => t.id)) }; },
     // The chain-tail task the train files (harness/train-tail.mjs): its start isn't held by --after (task-hold.mjs chainTail).
@@ -1767,6 +1768,25 @@ export function dropTask(id, { by = actor(), why } = {}) {
   return { ok: true, message: `${id} is off the queue. Its title and why are in the event log; re-add it with task add if needed.` };
 }
 
+/**
+ * 2.93: close a waiting task as a duplicate of another, without starting it. It goes through dropTask: no session
+ * attempt (so no failure) and no DONE line (so not landed work). Refused: unknown or same T-x, in progress, queued.
+ */
+export async function duplicateTask(id, { of, by = actor(), why = '' } = {}) {
+  const q = parseNextQueue();
+  if (!id || !of) return { ok: false, message: 'Usage: npm run task -- duplicate <TASK_ID> --of <T-x> --by <name> [--why "…"]' };
+  if (id === of) return { ok: false, message: `${id} cannot be a duplicate of itself.` };
+  if (![...q.inProgress, ...q.backlog, ...q.done].some((x) => x.id === of)) return { ok: false, message: `${of} is not on the board or in the done list, so ${id} was not closed.` };
+  if (q.inProgress.some((x) => x.id === id)) return { ok: false, message: `${id} is in progress, so it was not closed. Pause it first (npm run task -- pause ${id} --note "…"), then close it as a duplicate.` };
+  const eng = (() => { try { return engineTaskOf(id)?.engine || null; } catch { return null; } })();
+  const queued = (eng && (await import('./unity-train.mjs')).readUnityQueue(mainRoot(), eng).some((e) => e.task === id)) || (await import('./train.mjs')).readQueue(mainRoot()).some((e) => e.task === id);
+  if (queued) return { ok: false, message: `${id} is queued for a train, so it was not closed. Take it out first (npm run task -- train dequeue ${id}), then close it as a duplicate.` };
+  const r = dropTask(id, { by, why: `duplicate of ${of}${String(why).trim() ? `: ${String(why).trim()}` : ''}` });
+  if (!r.ok) return r;
+  emitEvent({ type: 'task.duplicate', agent: by, task: id, msg: `${by} closed ${id} as a duplicate of ${of}${String(why).trim() ? `: ${String(why).trim()}` : ''}`.slice(0, 600), meta: { of, why: String(why).trim() } });
+  return { ok: true, message: `${id} is closed as a duplicate of ${of}. It was never started: not a failure, not landed work.` };
+}
+
 /** Move a waiting task: --to top|bottom|<position from 1>, or --before <T-ID>. */
 export function reorderTask(id, { to, before, by = actor() } = {}) {
   let q = null;
@@ -2181,9 +2201,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         const pre = completeTask(targetId, '', whoAmI(flags), { unityTrainCheck: true, noop: noopFlag });
         if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
         if (pre.error) { console.error(pre.message); process.exit(1); }
-        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { engine: trainEngine, task: pre.id, agent: whoAmI(flags), alone: flags.alone ? true : null, branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '', tag: doneTag === null ? null : doneTag, again: Boolean(flags.again) });
+        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { engine: trainEngine, task: pre.id, agent: whoAmI(flags), alone: flags.alone ? true : null, branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '', tag: doneTag === null ? null : doneTag, again: Boolean(flags.again), title: (() => { try { const q1 = parseNextQueue(); return [...q1.inProgress, ...q1.backlog].find((t) => t.id === pre.id)?.title || ''; } catch { return ''; } })() });
         // 2.85: --again queues a branch the engine train handed back unchanged (logged as task.train.<x>.requeued_unchanged).
         (r.ok ? console.log : console.error)(r.message);
+        const wait = r.ok ? (await import('./task-hold.mjs')).afterWaits(pre.id, parseNextQueue()) : [];
+        if (wait.length) console.log(`It waits for ${wait.join(', ')} (task after): a train leaves it out until then.`);
         process.exit(r.ok ? 0 : 1);
       }
       process.exit(await queueLaneForTrain(targetId, flags, noopFlag, { forced: flags.force ? forceApproval : null }));
@@ -2272,8 +2294,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'train') {
     // A word that is not a train subcommand starts nothing: usage, exit 2. A train starts with `train`, `train run` or
     // `train --engine <name>`.
-    if ((arg1 && !['run', 'status', 'release', 'leave', 'dequeue', 'auto', 'parallel', 'config', 'cancel'].includes(arg1)) || (typeof flags.unity === 'string' && flags.unity !== 'status')) {
-      console.error(`"${arg1 || flags.unity}" is not a train subcommand, so no train was started. Usage: npm run task -- train [run] [--engine <name> [--only T-a,T-b] [--tag <word>]] | train status [--engine <name>] | train release <ID> | train leave <ID> --by <name> --why "…" | train dequeue <ID> [--engine <name>] --by <name> | train cancel [--engine <name>] | train config <ID> | train auto [on|off] [--engine <name>] | train parallel [on|off] --engine <name> --by <name>`);
+    if ((arg1 && !['run', 'status', 'release', 'leave', 'dequeue', 'auto', 'parallel', 'slice', 'config', 'cancel'].includes(arg1)) || (typeof flags.unity === 'string' && flags.unity !== 'status')) {
+      console.error(`"${arg1 || flags.unity}" is not a train subcommand, so no train was started. Usage: npm run task -- train [run] [--engine <name> [--only T-a,T-b] [--tag <word>]] | train status [--engine <name>] | train release <ID> | train leave <ID> --by <name> --why "…" | train dequeue <ID> [--engine <name>] --by <name> | train cancel [--engine <name>] | train config <ID> | train auto [on|off] [--engine <name>] | train parallel [on|off] --engine <name> --by <name> | train slice <ID> --engine <name> --by <name> [--off]`);
       process.exit(2);
     }
     const tr = await import('./train.mjs');
@@ -2367,6 +2389,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       if (!want) { const s0 = ut.unityTrainSettings(mainRoot(), eng); console.log(eg.parallelLine(mainRoot(), eng, ut.parallelNow(mainRoot(), eng, s0.error ? {} : s0.cfg))); process.exit(0); }
       if (!/^(on|off)$/.test(want) || typeof flags.by !== 'string') { console.error(`Usage: npm run task -- train parallel on|off --engine ${eng} --by <name> [--why "…"]`); process.exit(1); }
       const r = await eg.setEngineParallel(mainRoot(), { engine: eng, on: want === 'on', by: flags.by, why: typeof flags.why === 'string' ? flags.why : '' });
+      (r.ok ? console.log : console.error)(r.message);
+      process.exit(r.ok ? 0 : 1);
+    }
+    // 2.93: `train slice <ID> --engine <x> --by <name> [--off]`: mark a queued branch as a slice (its task stays open when it lands), or take the mark off.
+    if (arg1 === 'slice') {
+      const eng = typeof flags.engine === 'string' ? flags.engine : 'unity';
+      const tid = flags._[2];
+      if (!tid || typeof flags.by !== 'string') { console.error(`Usage: npm run task -- train slice <TASK_ID> --engine ${eng} --by <name> [--off]`); process.exit(1); }
+      const r = await (await import('./engine-train-control.mjs')).setQueuedSlice(mainRoot(), { engine: eng, task: tid, on: !flags.off, by: flags.by });
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
@@ -2666,6 +2697,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(`${arg1} can start.`);
     process.exit(0);
   }
+  if (cmd === 'duplicate') {
+    const r = await duplicateTask(arg1, { of: typeof flags.of === 'string' ? flags.of : '', by: typeof flags.by === 'string' ? flags.by : actor(), why: typeof flags.why === 'string' ? flags.why : '' });
+    (r.ok ? console.log : console.error)(r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
   if (cmd === 'drop' || cmd === 'reorder') {
     const by = typeof flags.by === 'string' ? flags.by : actor();
     const r = cmd === 'drop' ? dropTask(arg1, { by, why: flags.why }) : reorderTask(arg1, { to: flags.to, before: flags.before, by });
@@ -2869,7 +2905,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
-  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | impossible <ID> --why "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | track <ID> engine:<name>|web | after <ID> <T-x>|--remove|--set|--clear | holds | note <ID> "<ruling>" --by <name> | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
+  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | impossible <ID> --why "..." | duplicate <ID> --of <T-x> --by <name> | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | track <ID> engine:<name>|web | after <ID> <T-x>|--remove|--set|--clear | holds | note <ID> "<ruling>" --by <name> | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
 }
 
 /**

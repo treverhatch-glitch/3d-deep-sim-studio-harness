@@ -532,7 +532,10 @@ another, and a test that fails whenever a branch moves a pinned commit was found
   with a bad regex or a path outside the repo is left out. Example: `"blame": [ { "test": "PinTests\\.", "touches":
   "Rules~/pin.json", "say": "Regenerate the vectors at the new pin in the same branch" } ]`.
 - **Checks before queueing.** `engines.<x>.preQueue`: a list of `{ "touches": "<path or glob, or a list>", "run":
-  "<command>", "say": "<what to do>", "timeoutMin": 10, "env": { "<NAME>": "<value>" } }`. When `task done --train` (or the harness's own queueing)
+  "<command>", "say": "<what to do>", "timeoutMin": 10, "env": { "<NAME>": "<value>" } }`. 2.93: an entry may also
+  have `"titles": ["<regex>", ...]` (case-insensitive, tested against the task's title) for a check on one KIND of
+  task. An entry applies when every condition it gives is met; it needs `touches` or `titles`. A bad regex leaves the
+  entry out and the command's output says so. The command also gets `STUDIO_TASK_ID` and `STUDIO_TASK_TITLE`. When `task done --train` (or the harness's own queueing)
   queues a branch that changes a matching file (against its merge base with the target), the command runs in a
   throwaway checkout of the branch's head merged with the target's tip (2.92: the branch as it would land; a merge that
   conflicts refuses the queue and names the files, and nothing runs). `STUDIO_LANE_COMMIT` is the branch's head and
@@ -678,3 +681,13 @@ turn on `service.check` and run one `check` end to end, and only then `warm`.
 - `STUDIO_UNITY_EDITMODE_ARGS` with a real land script.
 - A live studio in native mode.
 - The editor service (above) on any real editor.
+
+## Held and slice lanes (2.93)
+
+- **`task after` holds a queued branch.** A queued lane whose task waits (`task after <ID> --set T-x`) for a task that is
+  not done is left out of a train, like a lane that clashes (event `task.train.<x>.deferred`: "it waits for T-x (task
+  after)"). It rides the next train once T-x is done or the hold is removed. `task done --train` still queues it and says so.
+- **`npm run task -- train slice <ID> --engine <x> --by <name> [--off]`** marks a queued branch as a slice (what
+  `task done --train --slice` does): its task stays open when it lands. `--off` removes the mark. Nothing else about the
+  entry changes. It refuses when the task is not in that queue or its train is running with it. Same actors as `train auto`.
+  Event `task.train.<x>.slice_marked`.

@@ -5411,6 +5411,14 @@ if (inShard('selftest-292b')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.93 (c): a pre-queue check by task title, a task-after hold keeps a queued branch out of a batch, train slice, duplicate.
+if (inShard('selftest-293c')) {
+  const dir = copyRepo();
+  const { selftest293C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-293c.mjs')).href);
+  await selftest293C({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

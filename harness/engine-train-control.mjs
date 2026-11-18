@@ -228,6 +228,27 @@ export async function setEngineAuto(root, { engine, on, by = '', why = '', hours
     : `The ${L} train's automatic start is off${until ? ` until ${until.slice(0, 16)} UTC (then on by itself)` : ''}: the Line Producer starts no ${L} train; a person's npm run task -- train --engine ${engine} still does. npm run task -- train auto on --engine ${engine} --by <name> turns it back on.` };
 }
 
+/**
+ * 2.93: `train slice <ID> --engine <x> --by <name> [--off]`: the slice mark of `task done --train --slice` (the task's hold
+ * "slice", read when the branch lands) put on or taken off a queued branch. Nothing else about the entry changes.
+ * Same actors as the other train controls (mayControl). One event: task.train.<x>.slice_marked.
+ */
+export async function setQueuedSlice(root, { engine, task, on = true, by = '', env = process.env, emit = emitEvent } = {}) {
+  const L = labelOf(engine);
+  const who = String(by || '').trim().slice(0, 60);
+  if (!who) return { ok: false, message: `Say who marks it: npm run task -- train slice ${task} --engine ${engine} --by <name>.` };
+  const may = await mayControl({ by: who, env, root, what: `mark a queued ${L} branch as a slice` });
+  if (!may.ok) return { ok: false, message: `${task} was not changed. ${may.why}` };
+  const ut = await import('./unity-train.mjs');
+  if (!ut.readUnityQueue(root, engine).some((e) => e.task === task)) return { ok: false, message: `${task} is not in the ${L} queue, so nothing was changed. Queue it first: npm run task -- done ${task} --train${on ? ' --slice' : ''}.` };
+  if ((ut.runningUnityTrain(root, engine)?.lanes || []).includes(task)) return { ok: false, message: `${task} is in a ${L} train that is running right now, so nothing was changed. Wait for the train, or stop it: npm run task -- train cancel --engine ${engine} --by <name>.` };
+  const { setHold } = await import('./task-hold.mjs');
+  setHold(task, { slice: on ? { by: who, at: new Date().toISOString() } : null });
+  try { emit({ type: `task.train.${engine}.slice_marked`, agent: who, task, to: 'producer', track: `engine:${engine}`, status: 'ok', msg: `${who} ${on ? 'marked' : 'took the slice mark off'} ${task} in the ${L} queue${on ? ': its task stays open when it lands' : ': its task closes when it lands'}`, meta: { engine, slice: on, by: who } }); } catch { /* the mark stands */ }
+  await noteStandIn({ by: who, env, root, msg: `${who} changed the slice mark of ${task} in beta mode`, why: '' });
+  return { ok: true, message: on ? `${task} is marked as a slice: when its ${L} branch lands, the task stays open for the next slice.` : `${task} is no longer a slice: when its ${L} branch lands, the task closes.` };
+}
+
 // ---- cancel -----------------------------------------------------------------------------------------------------
 
 export const cancelFile = (root, engine) => path.join(root, '.studio', 'train', `${engine}-cancel.json`);
