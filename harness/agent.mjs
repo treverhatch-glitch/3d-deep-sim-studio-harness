@@ -18,7 +18,7 @@ import crypto from 'node:crypto';
 import { allowedToolsList } from './allowlist.mjs';
 import { fillCommand, localizeCommand, launchPlan, spawnPlan, spawnAgentSync, describePlan, resolveCommand, envValue } from './launch.mjs';
 import { pinKickoff } from './task-pin.mjs';
-import { agyAllowHint, noteAgyHint, allowCli, agyStudioSettings, AGY_SHELL_RULES, writeAgyLaneRules } from './agy-allow.mjs';
+import { agyAllowHint, noteAgyHint, allowCli, agyStudioSettings, AGY_SHELL_RULES, writeAgyLaneRules, agyReachRules, writeAgySessionSettings } from './agy-allow.mjs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -274,7 +274,7 @@ export function laneAddDirs({ copy = null, engineDir = null, env = process.env, 
  * harness/launch.mjs starts the argv with no shell on every OS. The prompt goes on stdin for claude, codex and agy;
  * cursor and grok take it as one argument; a prompt too long for the command line becomes an instruction to read the kickoff file.
  */
-export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], aider = {}, stream = false, engineDir = null, agent = null }) {
+export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], aider = {}, stream = false, engineDir = null, agent = null, agySettings = null }) {
   const m = model && model !== 'unknown' ? model : null;
   // A session in a lane copy (.lanes/<agent>) reads studio/ and .studio/ through links to the main checkout; Claude Code
   // refuses a link target outside its working directory, so the launcher names the main checkout's real folders
@@ -298,8 +298,9 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], a
     case 'agy': {
       // agy needs a print timeout and closed stdin or it exits early. STUDIO_AGY_BYPASS=1 skips its permission prompts in a frozen test clone.
       const bypass = process.env.STUDIO_AGY_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
-      // agy takes a session settings file (--settings): the studio's .studio/agy-settings.json (`npm run agent -- allow agy`) when it exists.
-      const settings = agySettingsArg(agyStudioSettings());
+      // agy takes a session settings file (--settings): an engine pass's own (agySettings, 2.93), else the studio's
+      // .studio/agy-settings.json (`npm run agent -- allow agy`) when it exists.
+      const settings = agySettingsArg(agySettings || agyStudioSettings());
       const tail = [...agyOptions(m), ...(settings ? ['--settings', settings] : []), ...(bypass ? ['--dangerously-skip-permissions'] : [])];
       // On Windows agy.exe split an argument prompt at its spaces, so the kickoff goes on stdin (agy reads stdin too).
       // STUDIO_AGY_PROMPT=arg brings back `-p <prompt>` (UNTESTED on real agy: which works for your agy).
@@ -460,7 +461,7 @@ export function markGone() {
 function caps(role, extra = 0) {
   const mode = { ...effectiveMode() };
   mode.maxAgents = Math.min(12, mode.maxAgents + extra);
-  const live = sessions().filter((s) => s.running);
+  const live = sessions().filter((s) => s.running && !ownStarting(s));
   const ofRole = live.filter((s) => s.role === role).length;
   const perRole = (mode.perRole[role] ?? Math.max(1, Math.floor(mode.maxAgents / 2))) + (extra ? 1 : 0);
   if (live.length >= mode.maxAgents) return { ok: false, why: `${live.length} agents already running; the ${mode.label}${mode.boost ? ' + MAX SPEED' : ''} mode allows ${mode.maxAgents}` };
@@ -664,6 +665,17 @@ export function agyCutShort({ tool, code, log }) {
   return null;
 }
 
+/**
+ * 2.93: agy's "required the "read_file", "command" permissions that headless mode cannot prompt for" as a hand-back
+ * reason naming the folders the session was given (its record's reach), or null for any other stop line.
+ */
+export function agyDeniedWhy(line, reach = []) {
+  const m = String(line || '').match(/required the (.+?) permissions? that headless mode cannot prompt for/i);
+  if (!m) return null;
+  const perms = [...m[1].matchAll(/"([\w-]+)"/g)].map((x) => x[1]);
+  return `agy could not use its tools: headless mode denied the ${perms.join(', ') || 'needed'} permission(s) for lack of an allow-rule${reach.length ? ` (this session's folders: ${reach.join(', ')})` : ''}`;
+}
+
 // 2.86 (B-140): what Claude Code prints when a headless session needs a permission it was not given.
 const PERMISSION_PROMPT = /requested permissions to (?:read|write|edit|use|access)(?: from| to)?\b|haven't granted it yet/i;
 /** 2.86: the folder a permission prompt asked for ("… to read from <folder>, but you haven't granted it yet"), or null. */
@@ -748,6 +760,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   const tasks = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
   const handed = [];
   const s0 = readJson(sessionFile(agent)) || {};
+  const agyDenied = agyCut === 'denied' ? agyDeniedWhy(agyLine, s0.reach || []) : null;
   const copyDir = s0.copy?.dir ? path.join(REPO_ROOT, s0.copy.dir) : null;
   const ahead = s0.copy?.branch ? unmerged(s0.copy.branch) : 0;
   const finished = [];
@@ -788,7 +801,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
       : limit
       ? `${agent} (${tool}, ${model}) stopped at its usage limit: the provider said "${String(limit.line || limit.text).replace(/^"|"$/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)}".${limitMark ? ` ${limitMark.on} is out until ${limitMark.until}${limitMark.resetKnown ? '' : ' (no reset time given: 1 h assumed)'}.` : ''} Not a failure: the task goes back to the queue for the next tool in the order, or for after the reset.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : bad
-      ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : reasoningOnly ? 'it replied with reasoning only (no answer, no work): a failed hand-off; the Director routes this task to another model family' : agyCut ? (agyCut === 'denied' ? 'agy ended the session mid-task: one shell command was refused in headless mode (one plain command per call; see GEMINI.md)' : 'agy ended the session mid-task: its agent went idle while a background command (a test run) was still running (run commands in the foreground)') : launchFail ? `it never got going (launch failure: ${launchFail}; exit code ${code})` : `exit code ${code}`}.${agySaid}${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
+      ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : agyDenied ? agyDenied : reasoningOnly ? 'it replied with reasoning only (no answer, no work): a failed hand-off; the Director routes this task to another model family' : agyCut ? (agyCut === 'denied' ? 'agy ended the session mid-task: one shell command was refused in headless mode (one plain command per call; see GEMINI.md)' : 'agy ended the session mid-task: its agent went idle while a background command (a test run) was still running (run commands in the foreground)') : launchFail ? `it never got going (launch failure: ${launchFail}; exit code ${code})` : `exit code ${code}`}.${agySaid}${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${agySaid}${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work ${copyDir ? 'was in its copy and is' : 'is in the tree and'} saved to ${patch}.` : ' No uncommitted work.'}${onBranch} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
     // The harness's own refusal of an owner-only step in the session's output goes into the hand-back, where pauseTask parks
     // the task for the owner (harness/owner-only.mjs) instead of relaunching a builder.
@@ -868,7 +881,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   const prefixHash = (readJson(sessionFile(agent)) || {}).prefixHash || null;
   const cause = exitCause({ code, exit, stop });
   const firstEnd = claimSessionEnd(agent, s0.startedAt, 'launcher');
-  const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : cause.kind === 'prompt-cap' ? `exit ${code}, ended by the launcher (prompt-cap: ${cause.why})` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget', 'prompt-cap'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
+  const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : agyDenied ? `exit ${code}, ${agyDenied}` : cause.kind === 'prompt-cap' ? `exit ${code}, ended by the launcher (prompt-cap: ${cause.why})` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget', 'prompt-cap'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
   if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${aider?.line && !outcome?.why ? `; aider: ${aider.line}` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(aider ? { aider } : {}), ...(followUps ? { followUps, ...(nudges ? { nudges } : {}) } : {}), ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(Array.isArray(s0.keys) && s0.keys.length ? { keys: s0.keys } : {}), ...(vertexUse?.requests ? { usageFrom: 'vertex-proxy', requests: vertexUse.requests } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, ...(capped ? { refreshNoWork: refreshDidNoWork({ outcome, handed, flag: refresh }) } : {}), ...(launchFail ? { launchFailure: { why: launchFail, ...(launchFolder ? { folder: launchFolder } : {}) } } : {}), usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
   if ((outcome?.counts || outcome?.foreignRefusal) && (outcome.noWork || outcome.stuck)) {
     // 2.85: the same task done refusal as the session before it, no new commit: held for the overseer and the Producer.
@@ -1332,7 +1345,17 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (held.holds) { agyStream = false; launchNotes.push(`agy stream mode skipped: .studio/${STREAM_RECORD} records that this agy refused it (${held.rec?.why || 'no reason recorded'}); ${held.why}. Delete .studio/${STREAM_RECORD} to try stream mode again; it is tried again by itself when agy changes.`); }
   }
   if (agyOneTurn && tool === 'agy') launchNotes.push('agy one-turn launch: the stream session before this one failed on its input format (see the line above); this session runs as one turn');
-  const cmd = custom ? null : toolCommand(tool, { model, file: editFile || file, prompt, effort, addDirs: laneAddDirs({ copy, engineDir: engineLane?.dir || null }), engineDir: engineLane?.dir || null, aider, stream: agyStream, agent });
+  const addDirs = laneAddDirs({ copy, engineDir: engineLane?.dir || null });
+  // 2.93: agy has no --add-dir. An engine pass on agy gets the same folders as allow-rules in its own settings file
+  // (agy-allow.mjs agyReachRules, STUDIO_AGY_REACH_RULES); a session with no engine worktree launches as before.
+  let agySettings = null;
+  if (!custom && tool === 'agy' && engineLane?.dir) {
+    const reach = agyReachRules({ dirs: addDirs, engineDir: engineLane.dir });
+    agySettings = writeAgySessionSettings({ agent, rules: reach.rules });
+    if (reach.bad) launchNotes.push(reach.bad);
+    launchNotes.push(agySettings ? `agy reach: ${reach.rules.length} allow-rule(s) for ${addDirs.length} folder(s) in ${path.relative(REPO_ROOT, agySettings).split(path.sep).join('/')} (${reach.from}; STUDIO_AGY_REACH_RULES changes them)` : `agy reach: no allow-rules written (${reach.from === 'off' ? 'STUDIO_AGY_REACH_RULES=off' : 'nothing to add or the file could not be written'}); agy may be denied its engine worktree`);
+  }
+  const cmd = custom ? null : toolCommand(tool, { model, file: editFile || file, prompt, effort, addDirs, engineDir: engineLane?.dir || null, aider, stream: agyStream, agent, agySettings });
   if (!custom && !cmd) dropStarting(agent);
   if (!custom && !cmd) {
     let regWhy = '';
@@ -1476,8 +1499,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   clearFlag(agent);
   let billKeys = [];
   try { billKeys = sessionKeyNames({ tool, role, agent, keys: regRun ? reg.keyEnv : null, proxy: viaProxy ? 'vertex' : null }); } catch {}
-  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, ...(viaProxy ? { proxy: 'vertex' } : {}), keys: billKeys, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, ...(task ? { pinned: task } : {}), lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, logFrom, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
-  fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
+  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, ...(viaProxy ? { proxy: 'vertex' } : {}), keys: billKeys, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, ...(task ? { pinned: task } : {}), lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, logFrom, ...(addDirs.length ? { reach: addDirs.map((d) => d.split(path.sep).join('/')) } : {}), ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
+  writeAtomic(sessionFile(agent), JSON.stringify(session, null, 2), { fsync: false });
   resetStall(agent); // the last session's stall record never judges this one
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane, ...(STARTED_BY_HAND ? { byHand: true } : {}) } });
   let killedBy = null;
@@ -1852,12 +1875,40 @@ function holdStarting({ agent, role, tool, model, task, lane }) {
   try {
     if (sessions().some((x) => x.agent === agent && x.running && !(x.starting && x.supervisor === process.pid))) return;
     fs.mkdirSync(AGENTS_DIR, { recursive: true });
-    fs.writeFileSync(sessionFile(agent), JSON.stringify({ agent, role, tool, model, task: task || null, lane: lane || null, status: 'running', starting: true, supervisor: process.pid, identity: { supervisor: launcherIdentity() }, startedAt: new Date().toISOString() }, null, 2));
+    writeAtomic(sessionFile(agent), JSON.stringify({ agent, role, tool, model, task: task || null, lane: lane || null, status: 'running', starting: true, supervisor: process.pid, identity: { supervisor: launcherIdentity() }, startedAt: new Date().toISOString() }, null, 2), { fsync: false });
   } catch {}
 }
 /** Takes back this launcher's own "starting" record when the session never starts. */
 function dropStarting(agent) {
-  try { const p = readJson(sessionFile(agent)); if (p?.starting && p.supervisor === process.pid) fs.rmSync(sessionFile(agent), { force: true }); } catch {}
+  try { const p = readJson(sessionFile(agent)); if (ownStarting(p)) fs.rmSync(sessionFile(agent), { force: true }); } catch {}
+}
+/** This launcher's own "starting" record (its placeholder): never counted as another session. */
+function ownStarting(s) { return Boolean(s?.starting && s.supervisor === process.pid); }
+
+/**
+ * 2.93: a detached launch that never started its agent ends its record with the reason (status ended, refusal) and one
+ * job.done "refused". Its output went nowhere, so before this the watcher only saw "its process is gone". A record that
+ * is a running session (not absent, not this launcher's placeholder) is left alone. Never throws.
+ */
+function recordNotStarted(agent, why, { role = null, task = null, tool = null, model = null } = {}) {
+  try {
+    if (!agent) return false;
+    const cur = readJson(sessionFile(agent));
+    if (cur && cur.status === 'running' && !ownStarting(cur)) return false;
+    const line = `not started: ${String(why || 'no reason given').replace(new RegExp(`^(?:${String(agent).replace(/[^\w-]/g, '')}\\s+)?not started:\\s*`, 'i'), '').replace(/\s+/g, ' ').trim()}`.slice(0, 600);
+    const at = new Date().toISOString();
+    fs.mkdirSync(AGENTS_DIR, { recursive: true });
+    fs.writeFileSync(sessionFile(agent), JSON.stringify({ agent, role: cur?.role || role, tool: cur?.tool || tool, model: cur?.model || model, task: cur?.task || task || null, status: 'ended', startedAt: cur?.startedAt || at, endedAt: at, reason: line, refusal: line }, null, 2));
+    jobDone({ kind: 'session', id: agent, agent, task: cur?.task || task || null, result: 'refused', tail: line, log: null, extra: { role: cur?.role || role || null } });
+    return true;
+  } catch { return false; }
+}
+
+/** A crash of the detached launcher before its agent started goes in the job record (recordNotStarted), then it exits. */
+function launcherCrashRecord(agent, opts) {
+  const crash = (e) => { recordNotStarted(agent, `the launcher crashed: ${String(e?.stack || e).split('\n').slice(0, 3).join(' ').slice(0, 400)}`, opts); process.exit(1); };
+  process.on('uncaughtException', crash);
+  process.on('unhandledRejection', crash);
 }
 
 /**
@@ -2241,16 +2292,15 @@ export function startAgent(opts, { detach = false } = {}) {
   const agent = opts.agent || (role ? nextAgentName(role) : null);
   opts = { ...opts, agent };
   if (!role || !agent) return { ok: false, message: 'Usage: npm run agent -- start --role <role> --agent <unique-name> --tool <tool> --model <model>' };
-  // The detached supervisor clears the placeholder its launcher wrote for it (so its own record doesn't count against its
-  // caps) but keeps its spawn time; it writes the real record when the agent starts.
-  try { const p = readJson(sessionFile(agent)); if (p?.starting && p.supervisor === process.pid) { if (p.identity?.supervisor?.start) LAUNCHER_ID = p.identity.supervisor; fs.rmSync(sessionFile(agent), { force: true }); } } catch {}
+  // The detached supervisor keeps the placeholder its launcher wrote for it and its spawn time (2.93: deleting it left the
+  // name free until the real record, and a second `--pool api` start took the same name). Its own record is not counted.
+  try { const p = readJson(sessionFile(agent)); if (ownStarting(p) && p.identity?.supervisor?.start) LAUNCHER_ID = p.identity.supervisor; } catch {}
   if (readStop()) return { ok: false, message: 'The studio is stopped; resume it first (npm run task -- resume --by <name>).' };
-  // The placeholder a detached launch writes is this very supervisor, not a second session.
-  const already = sessions().find((s) => s.agent === agent && s.running && !(s.starting && s.supervisor === process.pid));
+  const already = sessions().find((s) => s.agent === agent && s.running && !ownStarting(s));
   if (already) return { ok: false, message: `${agent} is already running (pid ${already.pid}).` };
   // Never two sessions on one task.
   if (opts.task) {
-    const busy = sessions().find((s) => s.running && s.task === opts.task);
+    const busy = sessions().find((s) => s.running && s.task === opts.task && !ownStarting(s));
     // 2.86: a claim whose holder's launched session is over (lock.mjs holderGone) does not stop the start: task start takes it over.
     const held = listLocks().find((l) => l.key === `task:${opts.task}` && l.owner !== agent && holderGone(l) !== true);
     if (busy) return { ok: false, message: `Not started: ${busy.agent} is already on ${opts.task}.` };
@@ -2275,6 +2325,7 @@ export function startAgent(opts, { detach = false } = {}) {
       if (!auto) return { ok: false, message: `Not started: ${clash} Start it under a fresh name: --agent ${fresh} (or add --auto-name to use one automatically).`, suggest: fresh };
       emitEvent({ type: 'agent.renamed', agent: fresh, task: opts.task || undefined, msg: `${agent} → ${fresh}: ${clash}`.slice(0, 400), meta: { was: agent } });
       opts = { ...opts, agent: fresh };
+      dropStarting(agent);
       return startAgent(opts, { detach });
     }
   }
@@ -2308,7 +2359,7 @@ export function startAgent(opts, { detach = false } = {}) {
   // Profile check: a planning role never shares a builder's profile; per-profile limits.
   {
     const profile = profileOf(role, toolCmd(tool) || process.env[`STUDIO_${roleKey(role)}_CMD`] || (tool === 'custom' ? process.env.STUDIO_AGENT_CMD : ''));
-    const running = sessions().filter((x) => x.running).map((x) => ({ agent: x.agent, role: x.role, profile: x.profile || 'default' }));
+    const running = sessions().filter((x) => x.running && !ownStarting(x)).map((x) => ({ agent: x.agent, role: x.role, profile: x.profile || 'default' }));
     const g = profileGuard({ role, profile, running });
     if (!g.ok) {
       emitEvent({ type: 'profile.refused', agent: 'launcher', to: 'producer', status: 'blocked', msg: `Not started (${role} on ${profile}): ${g.why}` });
@@ -2441,7 +2492,7 @@ export function startAgent(opts, { detach = false } = {}) {
   // NIM's free tier serves one session at a time (parallel NIM sessions all got 429).
   if (isNim(model, tool)) {
     const limit = providerConcurrency(model, tool, process.env);
-    const nimRunning = sessions().filter((s) => s.running && isNim(s.model, s.tool));
+    const nimRunning = sessions().filter((s) => s.running && !ownStarting(s) && isNim(s.model, s.tool));
     if (nimRunning.length >= limit) return { ok: false, message: `Not started: NIM allows ${limit} session(s) at a time; ${nimRunning[0]?.agent || 'an agent'} is on it.` };
   }
   // The Director watches for drift and files corrections; the Producer decides staffing.
@@ -2458,7 +2509,7 @@ export function startAgent(opts, { detach = false } = {}) {
   if (opts.next && !opts.task) opts = { ...opts, task: nextFor({ role }, parseNextQueue()).task?.id || null };
   if (detach) {
     // A supervisor process of its own, so the agent outlives this command (the supervisor and the watcher use this).
-    const args = [fileURLToPath(import.meta.url), 'start', '--attach', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : []), ...(STARTED_BY_HAND ? ['--by-hand'] : []), ...(opts.forceModel || (tool === 'agy' && !isGeminiModel(model)) ? ['--force-model'] : [])];
+    const args = [fileURLToPath(import.meta.url), 'start', '--attach', '--from-detach', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : []), ...(STARTED_BY_HAND ? ['--by-hand'] : []), ...(opts.forceModel || (tool === 'agy' && !isGeminiModel(model)) ? ['--force-model'] : [])];
     // The launcher is not the pinned session that may have started it (its agent gets its own pin).
     const sup = spawn(process.execPath, args, { windowsHide: true, cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: { ...process.env, STUDIO_TASK_PIN: '' } });
     sup.unref();
@@ -2469,7 +2520,7 @@ export function startAgent(opts, { detach = false } = {}) {
     try {
       if (!fs.existsSync(sessionFile(agent)) || !sessions().some((x) => x.agent === agent && x.running)) {
         fs.mkdirSync(AGENTS_DIR, { recursive: true });
-        fs.writeFileSync(sessionFile(agent), JSON.stringify({ agent, role, tool, model, task: opts.task || null, lane: opts.lane || null, status: 'running', starting: true, supervisor: sup.pid, ...(supId ? { identity: { supervisor: supId } } : {}), startedAt: new Date().toISOString() }, null, 2));
+        writeAtomic(sessionFile(agent), JSON.stringify({ agent, role, tool, model, task: opts.task || null, lane: opts.lane || null, status: 'running', starting: true, supervisor: sup.pid, ...(supId ? { identity: { supervisor: supId } } : {}), startedAt: new Date().toISOString() }, null, 2), { fsync: false });
       }
     } catch {}
     return { ok: true, detached: true, agent, role, tool, model, supervisor: sup.pid };
@@ -2556,15 +2607,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const d = listDivisions().find((x) => x.id === division);
       if (d && !d.active) setDivision(division, true, flag('by') || 'producer');
     }
-    // `--pool api` starts one builder of STUDIO_API_POOL (billed to its mapped API key) by hand (harness/api-pool.mjs).
+    // `--pool api` starts one session under a free STUDIO_API_POOL name (billed to its mapped API key) by hand
+    // (harness/api-pool.mjs): any role (builder by default), recorded as that role, through the normal start below.
     let poolAgent = null;
     if (flag('pool')) {
       if (String(flag('pool')).toLowerCase() !== 'api') { console.error('--pool takes "api" (the builders named in STUDIO_API_POOL)'); process.exit(1); }
-      const pm = (await import('./api-pool.mjs')).pickManual({ live: sessions() });
+      const pm = (await import('./api-pool.mjs')).pickManual({ live: sessions(), busy: laneNameClash });
       if (!pm.name) { console.error(`No API-pool builder to start: ${pm.why}`); process.exit(1); }
       poolAgent = pm.name;
     }
-    const base = { autoName: argv.includes('--auto-name'), role: poolAgent ? 'builder' : flag('role'), agent: poolAgent || flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), next: argv.includes('--next'), lane: flag('lane'), oneTask: argv.includes('--one-task') || Boolean(flag('loop')), extra: Number(flag('extra')) || 0, division, note: flag('note') || '', by: flag('by') || (cmd === 'hire' ? process.env.STUDIO_LOCK_OWNER || null : null), loop: flag('loop'), approved: argv.includes('--approved'), forceModel: argv.includes('--force-model') };
+    // 2.93: the detached launcher (--from-detach) has no terminal: a start it refuses, or a crash, goes in the job record.
+    if (argv.includes('--from-detach')) launcherCrashRecord(flag('agent'), { role: flag('role'), task: flag('task') });
+    const base = { autoName: argv.includes('--auto-name'), role: flag('role') || (poolAgent ? 'builder' : null), agent: poolAgent || flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), next: argv.includes('--next'), lane: flag('lane'), oneTask: argv.includes('--one-task') || Boolean(flag('loop')), extra: Number(flag('extra')) || 0, division, note: flag('note') || '', by: flag('by') || (cmd === 'hire' ? process.env.STUDIO_LOCK_OWNER || null : null), loop: flag('loop'), approved: argv.includes('--approved'), forceModel: argv.includes('--force-model') };
     // A hire and a `start` run in the background unless --foreground (or --attach, for a script or test that wants the session
     // in this process): tied to the starter's shell, a session died with it and its record stayed "running" with its claims held.
     const attach = argv.includes('--attach') || argv.includes('--foreground');
@@ -2580,6 +2634,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         console.error(`${r.message} ${q.ok ? `Asked as ${q.ask.id}; it starts when the game dev says yes.` : ''}`);
         process.exit(2);
       }
+      if (argv.includes('--from-detach')) recordNotStarted(base.agent, r.message, base);
       console.error(r.message);
       process.exit(1);
     }
@@ -2600,6 +2655,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       res = await again.run;
     }
     if (!res.ok) {
+      if (argv.includes('--from-detach')) recordNotStarted(r.agent, res.message, base);
       console.error(res.message);
       process.exit(1);
     }

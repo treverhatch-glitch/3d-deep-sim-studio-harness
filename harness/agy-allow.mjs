@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ALLOWED } from './allowlist.mjs';
+import { ALLOWED, engineGitVerbs } from './allowlist.mjs';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { writeAtomic } from './fsafe.mjs';
 import { betaActor, recordBetaUse } from './beta-mode.mjs';
@@ -101,6 +101,59 @@ export function writeAgyLaneRules(dir, { excludeFile = null } = {}) {
     }
     return true;
   } catch { return false; }
+}
+
+/**
+ * 2.93: the reach a Claude session gets with --add-dir (agent.mjs laneAddDirs), as agy allow-rules, for an engine pass.
+ * {dir} is each of the session's folders; {engine} and {engineRe} (as a regex) its engine worktree, once per {verb} of
+ * the engine git verbs (allowlist.mjs: no push, no reset). STUDIO_AGY_REACH_RULES: a JSON list of templates in place of
+ * these (agy's rule format may differ between versions), or off. A template with no folder in it is dropped.
+ */
+export const AGY_REACH_RULES = ['read_file({dir})', 'read_file({dir}/**)', 'command(git -C {engine} {verb})', 'command(regex:^git -C {engineRe} {verb}(?: {rest})?$)'];
+export function agyReachRules({ dirs = [], engineDir = null, env = process.env } = {}) {
+  const raw = String(env.STUDIO_AGY_REACH_RULES ?? '').trim();
+  if (/^(off|0|false|no|none)$/i.test(raw)) return { rules: [], from: 'off' };
+  let tpl = AGY_REACH_RULES;
+  let bad = null;
+  if (raw) {
+    let j = null;
+    try { j = JSON.parse(raw); } catch { j = null; }
+    if (Array.isArray(j) && j.length && j.every((x) => typeof x === 'string' && x.trim())) tpl = j;
+    else bad = 'STUDIO_AGY_REACH_RULES is not a JSON list of rule templates: the default rules are used';
+  }
+  // A folder with a parenthesis would break agy's action(target) form: it gets no rule.
+  const norm = (d) => String(d || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  const ok = (d) => d && !/[()]/.test(d);
+  const folders = [...new Set(dirs.map(norm))].filter(ok);
+  const eng = ok(norm(engineDir)) ? norm(engineDir) : null;
+  const rules = [];
+  for (const t of tpl) {
+    if (/\{engine(Re)?\}/.test(t)) {
+      if (!eng) continue;
+      for (const v of t.includes('{verb}') ? engineGitVerbs : ['']) rules.push(t.replaceAll('{engineRe}', escapeRe(eng)).replaceAll('{engine}', eng).replaceAll('{verb}', v).replaceAll('{rest}', REST));
+    } else if (t.includes('{dir}')) for (const d of folders) rules.push(t.replaceAll('{dir}', d).replaceAll('{rest}', REST));
+  }
+  return { rules: [...new Set(rules)], from: tpl === AGY_REACH_RULES ? 'default' : 'STUDIO_AGY_REACH_RULES', ...(bad ? { bad } : {}) };
+}
+
+/**
+ * 2.93: write a session's own agy settings (.studio/agy-settings/<agent>.json): the allow-rules agy reads today (the
+ * studio's file whole, else only the permissions of agy's user-level file, which is never written) plus `rules`. The
+ * launcher passes it with --settings. Returns the file, or null when there is nothing to add or it can't be written.
+ */
+export function writeAgySessionSettings({ agent, rules = [], home = os.homedir(), stateDir = STUDIO_STATE_DIR } = {}) {
+  if (!agent || !rules.length || !/^[\w.-]+$/.test(agent)) return null;
+  const studio = agyStudioSettings({ stateDir });
+  const s = readSettings(studio || settingsFile('user', { home }));
+  const data = s.error ? {} : studio ? s.data : (s.data.permissions ? { permissions: s.data.permissions } : {});
+  const permissions = { ...(data.permissions || {}) };
+  permissions.allow = [...new Set([...(Array.isArray(permissions.allow) ? permissions.allow.map(String) : []), ...rules])];
+  const file = path.join(stateDir, 'agy-settings', `${agent}.json`);
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    writeAtomic(file, `${JSON.stringify({ ...data, permissions }, null, 2)}\n`);
+    return file;
+  } catch { return null; }
 }
 
 /** The settings file for a scope, or null when agy reads none there. */

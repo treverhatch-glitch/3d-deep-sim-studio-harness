@@ -5419,6 +5419,14 @@ if (inShard('selftest-293c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.93 (b): what a session may reach (the API pool's roles and names, agy's engine folders), and why one could not start.
+if (inShard('selftest-293b')) {
+  const dir = copyRepo();
+  const { selftest293B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-293b.mjs')).href);
+  await selftest293B({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
