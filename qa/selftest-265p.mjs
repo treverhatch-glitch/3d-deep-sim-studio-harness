@@ -160,6 +160,8 @@ export async function selftest265P({ dir, run, report, tmpRoot }) {
     const lines = [];
     for (let i = 0; i < 40; i += 1) {
       const ts = new Date(now - 20 * 60000 + i * 1000).toISOString();
+      // 2.94: a landing is a lane merged by a train (a close alone reads "Closed"), so each of the 40 lands and then closes.
+      lines.push(JSON.stringify({ id: `evt_m${i}`, ts, type: 'lane.merged', agent: 'train', task: `T-${500 + i}`, msg: 'merged', meta: {} }));
       lines.push(JSON.stringify({ id: `evt_b${i}`, ts, type: 'task.done', agent: 'bld', task: `T-${500 + i}`, msg: 'done', meta: {} }));
       if (i % 3 === 0) lines.push(JSON.stringify({ id: `evt_a${i}`, ts: new Date(now - 86400000).toISOString(), type: 'task.added', agent: 'p', task: `T-${500 + i}`, msg: 'added', meta: { type: 'bug' } }));
     }

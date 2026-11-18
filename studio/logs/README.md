@@ -2,12 +2,12 @@
 
 **2-minute read for the owner: the latest summary is first. Then open problems, then proposals waiting for you.**
 
-## Latest summary — 2026-11-18 (2.93)
-- **Done:** 2.92 is on `main` and the one studio on record runs it: compile clashes are found at the queue door, no studio stop and no stalled session since, 1.1 land runs per train (2.2 on 2.83).
-- **In progress:** 2.93 (one rules check per train, rules runs outside the train wait, the API pool and agy as engine porters, queue holds, slices and duplicates, a time limit ends the whole tree, train times; floors and the overnight summary removed) on a branch, merged when its online checks pass. Notes: docs/RELEASE-2.93.0.md, studio/notes/HANDOFF-2.93-2026-11-18.md.
-- **Untested:** 2.93 has not run on a real engine, on real agy or with a real API pool. The studio's first trains on it are the test.
+## Latest summary — 2026-11-18 (2.94)
+- **Done:** 2.93 is on `main` (one rules check per train, rules runs outside the train wait, the API pool and agy as engine porters, queue holds, slices and duplicates, a time limit ends the whole tree). The one studio on record still runs 2.92; its overseer has the upgrade note.
+- **In progress:** 2.94 (the next batch's rules check beside the land run, as a setting; "landed" on the scorecards is train work only; the old status snapshot and role loader removed) on a branch, merged when its online checks pass. Notes: docs/RELEASE-2.94.0.md, studio/notes/HANDOFF-2.94-2026-11-18.md.
+- **Untested:** 2.93 and 2.94 have not run on a real engine, on real agy or with a real API pool. `rules.ahead` is off by default for that reason.
 - **Open problems:** P-346 (timing checks under load), P-005 (GPU model), P-009 (no Unity on the maintainer's side).
-- **Waiting for your OK:** remove the old status snapshot and its role loader; whether the scorecard's "landed" should stop counting a close; whether the next batch's rules check may run beside a land run.
+- **Waiting for your OK:** nothing from this round.
 
 ## The files
 | File | What | Format |
