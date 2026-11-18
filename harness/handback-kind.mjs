@@ -105,10 +105,12 @@ export const refreshCaused = (e) => e?.meta?.cause === 'refresh' || REFRESH_NOTE
  * check, with or without work), launch (died before its first turn or on a permission prompt), foreign-refusal (`task
  * done` refused by the hooks check for commits not the task's), no-lane-copy (start refused, no lane copy made)
  */
-export const HARNESS_KINDS = ['refresh', 'refresh-no-work', 'launch', 'foreign-refusal', 'no-lane-copy'];
+export const HARNESS_KINDS = ['refresh', 'refresh-no-work', 'launch', 'foreign-refusal', 'no-lane-copy', 'tool-permission'];
 export const harnessKind = (kind) => HARNESS_KINDS.includes(kind);
 /** 2.86: the words a launch failure's hand-back carries (agent.mjs), so a reader without the session end still knows it. */
 export const LAUNCH_NOTE = /\bit never got going \(launch failure\b/i;
+/** 2.93: agy's tools were refused by headless mode (agent.mjs agyDeniedWhy): a permission the harness did not give, not the task's fault. */
+export const TOOL_DENIED_NOTE = /\bagy could not use its tools: headless mode denied\b/i;
 const commitsOf = (o) => (Number(o?.commits) || 0) + (Number(o?.engineCommits) || 0);
 
 /**
@@ -120,6 +122,7 @@ export function sessionEndKind(end) {
   const m = end?.meta || {};
   const o = m.outcome || null;
   if (m.launchFailure) return 'launch';
+  if (m.toolDenied) return 'tool-permission';
   if (m.refreshed || /^refreshed \(session cap\)/.test(String(m.reason || ''))) {
     if (typeof m.refreshNoWork === 'boolean') return m.refreshNoWork ? 'refresh-no-work' : 'refresh';
     return o && !o.done && !commitsOf(o) && !/Uncommitted work saved/.test(String(end?.msg || '')) ? 'refresh-no-work' : 'refresh';
@@ -138,6 +141,7 @@ function harnessKindOf(e, events) {
   const k = end ? sessionEndKind(end) : null;
   if (k) return k;
   if (LAUNCH_NOTE.test(noteOf(e)) || e?.meta?.cause === 'launch') return 'launch';
+  if (TOOL_DENIED_NOTE.test(noteOf(e))) return 'tool-permission';
   if (refreshCaused(e)) return /Uncommitted work saved/.test(noteOf(e)) ? 'refresh' : 'refresh-no-work';
   const t = ts(e);
   const nd = events.filter((x) => x.type === 'task.not_done' && x.task === e.task && x.agent === e.agent && ts(x) <= t && t - ts(x) <= 3 * 3600000).sort((a, b) => ts(a) - ts(b)).pop();
@@ -195,5 +199,5 @@ export function handBackTally(events = [], { from = 0, to = Infinity, limit = nu
 }
 
 /** 2.86: the words for the scorecard: "refresh 3, refresh with no work 2, launch failure 1" (none: "none"). */
-const KIND_WORDS = { refresh: 'refresh', 'refresh-no-work': 'refresh with no work', launch: 'launch failure', 'foreign-refusal': 'refused for commits not its own', 'no-lane-copy': 'no lane copy' };
+const KIND_WORDS = { refresh: 'refresh', 'refresh-no-work': 'refresh with no work', launch: 'launch failure', 'foreign-refusal': 'refused for commits not its own', 'no-lane-copy': 'no lane copy', 'tool-permission': 'tool permission problem' };
 export const harnessKindWords = (harness = {}) => HARNESS_KINDS.filter((k) => harness[k]).map((k) => `${KIND_WORDS[k]} ${harness[k]}`).join(', ') || 'none';

@@ -100,6 +100,11 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   applied and why (`up to 37.5 min (1.5 x the longest passing full run on record (25 min))`). A tree that timed out is
   recorded with its limit, and is not run again while the limit is no larger: the log says "not run again" and the
   land run decides. Example: a suite that passed in 22 min gets 33 min; one that timed out at 30 gets 60 next time.
+- **A command past its time limit is ended with everything it started (2.93).** The engine commands (compile, rules,
+  pre-queue and pre-land checks, the quick check, the land command) run through `harness/run-limited.mjs`. At the limit it
+  ends the whole process tree (Windows `taskkill /T /F`, elsewhere the process group), not only the shell, so a compiler or
+  editor no longer keeps its folder open. The caller sees a time-out as before. The web game's own timed commands
+  (`harness/train.mjs`, `game-gates.mjs` and others) are unchanged.
 - **A check that judges no lane is seen (2.90).** When the check is red, not runnable or timed out on the target
   itself, the train writes `task.train.<x>.rules_no_judge` (warn, to the producer) with the one change: for a timeout,
   raise `engines.<x>.rules.timeoutMin` or make the run smaller with `rules.focus` (`map`, `auto`, `paths`); otherwise

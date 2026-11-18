@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runLimitedSync } from './run-limited.mjs';
 import { mainRoot } from './worktree.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
 import { engineTarget, engineTask } from './engine-tracks.mjs';
@@ -97,7 +98,7 @@ export function runEngineQuickCheck({ engine = 'unity', root = mainRoot(), task 
     try {
       const t0 = Date.now();
       log(`[engine-check] ${engine}: ${cmd} (in ${fwd(at)}${onBranch ? `, a throwaway checkout of ${onBranch.branch}` : ''})`);
-      const r = spawnSync(cmd, { shell: true, cwd: at, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: num(t.cfg.quickCheckTimeoutMin, 30) * 60000, env: { ...env, STUDIO_ENGINE: engine, STUDIO_ENGINE_LANE_DIR: at } });
+      const r = runLimitedSync(cmd, { cwd: at, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: num(t.cfg.quickCheckTimeoutMin, 30) * 60000, env: { ...env, STUDIO_ENGINE: engine, STUDIO_ENGINE_LANE_DIR: at } });
       return { r, ms: Date.now() - t0 };
     } finally { if (onBranch) removeCheckout(onBranch.repo, at); }
   }, { waitMs: waitMin * 60000, log, env });

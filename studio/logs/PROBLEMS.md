@@ -45,9 +45,10 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Evidence:** pull request 94, online run: `292b` red on Windows ("no fix task was filed: ... loader"), and the 2.35 rule "no script finds its own path from a URL pathname" red on every system, naming `harness/engine-target-red.mjs`. The runner's temp folder has `~` in its name, which a URL writes as `%7E`.
 - **Fix:** `fileURLToPath`. The 2.35 rule runs in the self-test only, so it was not among the static checks run before the push; the maintainer's list now includes its unit.
 
-### P-360 — a compile command that outlives its time limit keeps running on Windows · open
+### P-360 — a compile command that outlives its time limit keeps running on Windows · fixed 2.93 (engine commands)
 - **Evidence:** the same run: `292a` crashed on Windows (EPERM removing `.studio/tmp`) right after the check whose compile stand-in runs past the queue door's time limit. The time-out ends the shell, not the command below it, which keeps its checkout folder open until it ends.
 - **Workaround:** the test waits for the folder. In a studio the command ends by itself and the janitor removes the checkout later. A real fix ends the command's whole process tree; not built.
+- **Fix:** `harness/run-limited.mjs` runs the engine commands (compile, rules, pre-queue, pre-land, quick check, land) and ends the whole tree at the limit. The web game's timed commands are unchanged.
 
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
