@@ -5390,6 +5390,14 @@ if (inShard('selftest-295c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.95 (d): no session starts on a task whose queued engine branch is held by task after.
+if (inShard('selftest-295d')) {
+  const dir = copyRepo();
+  const { selftest295D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-295d.mjs')).href);
+  await selftest295D({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

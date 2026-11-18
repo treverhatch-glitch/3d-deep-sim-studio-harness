@@ -176,7 +176,7 @@ export const setQueueTag = (root, task, tag, engine = 'unity') => withQueue(root
  * Queue a Unity-track task's branch (task done <ID> --train, after its checks). { ok, entry, message } or { ok: false, error,
  * message }. The branch: `branch`, else the task's recorded Unity branch, else the Unity folder's current branch (never the target).
  */
-export function queueUnityTask(root, { engine = 'unity', task, agent = null, branch = null, note = '', alone = null, tag = null, again = false, meta = null, title = '' } = {}) {
+export function queueUnityTask(root, { engine = 'unity', task, agent = null, branch = null, note = '', alone = null, tag = null, again = false, meta = null, title = '', waits = [] } = {}) {
   const s = unityTrainSettings(root, engine);
   const L = labelOf(engine);
   const UNITY_REF_PREFIX = refPrefix(engine);
@@ -201,6 +201,11 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
     const rec = (() => { try { return unchangedSinceRed(s, readHandbacks(root, engine)[task], br, head); } catch { return null; } })();
     if (rec && !again) return { ok: false, error: 'unchanged', handback: rec, message: `${task} was not queued: nothing changed since ${L} train ${rec.train} handed ${br} back for ${rec.reason}: the same red would repeat (since then ${br} has only merges of ${s.target}${(rec.files || []).length ? `, and ${s.target} changed none of ${rec.files.slice(0, 4).join(', ')}` : `, and ${s.target} has not moved`}). Fix it, or \`npm run task -- impossible ${task} --why "<what contradicts what>"\`. (add --again if a person wants it run again as it is).` };
     if (rec && again) evTop('requeued_unchanged', 'queue', `${task}: ${br} at ${short(head)} queued again with --again though nothing changed since train ${rec.train} handed it back (${rec.reason})`, { engine, agent: agent || `${engine}-train`, task, to: 'producer', status: 'warn', meta: { branch: br, head, handback: rec.train, reason: String(rec.reason).slice(0, 200) } });
+  }
+  // 2.95 (d): the same branch at the same head, already queued, and the task waits for another task: nothing to do again.
+  const queued = readUnityQueue(root, engine).find((e) => e.task === task);
+  if (queued && queued.head === head && queued.branch === br && alone == null && tag == null) {
+    if (waits.length) return { ok: true, entry: queued, message: `${task} is already queued; it waits for ${waits.join(', ')} (task after); nothing changed.` };
   }
   // 2.90: engines.<x>.preQueue: the checks keyed to the files this branch changes, before it is queued (not again for the same head).
   const q0 = readUnityQueue(root, engine);

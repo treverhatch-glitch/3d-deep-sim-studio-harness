@@ -16,7 +16,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
-import { readHolds, holdReason } from './task-hold.mjs';
+import { readHolds, holdReason, queuedHeldWhy } from './task-hold.mjs';
 import { overBudget } from './task-budget.mjs';
 import { capRefusal } from './round-cap.mjs';
 import { withFileLock, writeAtomic } from './fsafe.mjs';
@@ -160,6 +160,8 @@ export function startRefusal(taskId, { agent = null, role = null, q, now = Date.
   try {
     const inProgress = Boolean(q?.inProgress?.some((t) => t.id === taskId));
     let v = eligibility(taskId, { agent, q, role, now, holds, events });
+    const qh = inProgress ? queuedHeldWhy(taskId, q, holds) : null; // 2.95 (d): in progress is no way round a queued, waiting branch
+    if (qh) return { kind: 'held', why: qh, message: startRefusalWords(taskId, { kind: 'held', why: qh }) };
     if (v?.kind === 'held' && inProgress) {
       const b = overBudget(taskId, { events, now });
       const cap = !b.over && agent ? capRefusal(taskId, agent, { events, now }) : '';
