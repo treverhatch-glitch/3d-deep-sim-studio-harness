@@ -220,6 +220,17 @@ export function unparkRefusal(taskId, { by = '', env = process.env, holds = read
   return `Refused: ${taskId} was parked by ${p.by || 'someone'} (${RANK_NAME[p.rank] || 'a higher rank'})${p.why ? `: ${p.why}` : ''}${p.note ? ` [don't unpark until: ${p.note}]` : ''}${p.until ? ` [until ${p.until}]` : ''}. Undoing it takes the same rank or higher (${RANK_NAME[p.rank] || 'a higher rank'}); you are ${RANK_NAME[me.rank]}. Ask ${p.by || 'them'}.`;
 }
 
+/**
+ * 2.95 (d): why a task whose branch is queued for an engine train gets no new session while it waits for another task
+ * (task after): the train leaves the branch out, so a session would find nothing to do. Null when it is not both.
+ */
+export function queuedHeldWhy(taskId, q, holds = readHolds()) {
+  const wait = afterWaits(taskId, q, holds);
+  if (!wait.length || !inAnyTrain(taskId)?.engine) return null;
+  const w = wait.join(', ');
+  return `it waits for ${w} (task after); its branch stays queued; no session is started until ${w} closes`;
+}
+
 /** Why this task can't start now, or null. `q` is parseNextQueue(). */
 export function holdReason(taskId, q, now = Date.now(), holds = readHolds(), role = null) {
   // 2.54.0 (PU-06): a red trunk starts only fix tasks (work in progress carries on).
@@ -237,6 +248,8 @@ export function holdReason(taskId, q, now = Date.now(), holds = readHolds(), rol
     const hl = heldForLanding(stuck, { holds });
     if (hl) return `a rescue for ${stuck}, which is ${heldWords(hl)}; it closes when ${stuck} lands`;
   }
+  const qh = queuedHeldWhy(taskId, q, holds);
+  if (qh) return qh;
   // 2.77.0 (P9.2): a task whose lane is queued for the merge train (checked, maybe released) doesn't start again: a new
   // session would fork its lane and re-queue it (builder-p77a on T-134). Work in progress (its claim) carries on.
   if (!q?.inProgress?.some((x) => x.id === taskId)) {
