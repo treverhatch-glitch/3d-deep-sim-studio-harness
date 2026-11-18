@@ -409,13 +409,6 @@ export function currentLane(s, holds = {}) {
 
 export async function supervise(opts, state, now = Date.now()) {
   const { parseNextQueue, readStop } = await import('./task.mjs');
-  if (!opts.watcher) {
-    const floorsConfig = readJson(path.join(REPO_ROOT, 'studio', 'floors.json'));
-    if (floorsConfig?.autoOpen) {
-      const { tick: tickFloors } = await import('./floors.mjs');
-      await tickFloors({ by: 'supervisor', silent: true });
-    }
-  }
   // The watcher passes the launcher's functions in: agent.mjs run as a command can't import itself again.
   const { sessions, startAgent, launchableRoles, nextAgentName } = opts.deps || (await import('./agent.mjs'));
   const { laneOf, lanesClash, laneList } = await import('./task-hold.mjs');
@@ -583,9 +576,6 @@ export async function supervise(opts, state, now = Date.now()) {
   let predict = null;
   try { lanePlan = await import('./lane-plan.mjs'); if (lanePlan.unscopedParallelOn()) predict = lanePlan.predictor(evs); } catch { lanePlan = null; }
   const groups = new Map();
-  const floorsConfig = readJson(path.join(REPO_ROOT, 'studio', 'floors.json'));
-  const gameCartridge = readJson(path.join(REPO_ROOT, 'studio', 'game.json'))?.cartridge ?? readJson(path.join(REPO_ROOT, 'studio', 'gates.json'))?.cartridge;
-  const { taskType } = await import('./done-check.mjs');
 
   // A task whose start was refused for the same reason as last time waits out a doubling backoff.
   const sigOf = (id) => taskStateSig(evs, id, lockStatus(`task:${id}`).locked);
@@ -606,12 +596,6 @@ export async function supervise(opts, state, now = Date.now()) {
     }
     // A task's own lane, `task lane`, or its --part (harness/task-hold.mjs).
     let lane = laneOf(t.id, evs) || null;
-    if (!lane && floorsConfig && gameCartridge && ['change', 'system'].includes(taskType(t))) {
-      const meta = evs.find((e) => e.task === t.id && e.type === 'task.added')?.meta;
-      if (meta?.phase) {
-        lane = `cartridges/${gameCartridge}/floors/phase-${meta.phase}`;
-      }
-    }
     // A laneless task with a prediction is its own group, so two of them can start in one pass.
     const own = !lane && predict && predict(t.id).length ? `|pred:${t.id}` : '';
     const key = `${t.role}|${lane || ''}${own}`;
@@ -1000,11 +984,7 @@ async function main(argv) {
     save();
     const mins = Math.round((Date.now() - state.startedAt) / 60000);
     emitEvent({ type: 'supervisor.stop', agent: 'supervisor', to: 'producer', msg: `Supervisor stopped (${why}) after ${mins >= 120 ? `${Math.round(mins / 60)} h` : `${mins} min`}: ${state.sessions} sessions started, ${parseNextQueue().done.length - state.doneAtStart} tasks done, ${(state.tokens || 0).toLocaleString()} tokens reported` });
-    // At --until, a one-page overnight summary (studio/daily/overnight-<date>.md).
-    const summary = opts.until ? import('./overnight.mjs').then(({ writeOvernight }) => writeOvernight({ from: state.startedAt })).catch(() => {}) : Promise.resolve();
-    summary.finally(() => {
-      setTimeout(() => process.exit(0), 300);
-    });
+    setTimeout(() => process.exit(0), 300);
   };
   process.on('SIGINT', () => finish('stopped by hand'));
   process.on('SIGTERM', () => finish('stopped by the system'));

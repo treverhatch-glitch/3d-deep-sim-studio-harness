@@ -4,7 +4,7 @@
  *      planned person interventions, supervisor hours minus halts, hands-free, forced, reopen/escape, halt wait, gate
  *      catches, hand-backs by label, verdicts, tokens per landed task, daily buckets); a decision an agent recorded on a
  *      person's permission counts as the person's; the L3 suggestion only when every bar holds, a demotion suggestion
- *      when the studio is at L3 and a bar fails, and the level is never changed by the script; the overnight line.
+ *      when the studio is at L3 and a bar fails, and the level is never changed by the script.
  *   2. Deterministic drift checks (harness/stall.mjs driftCheck, via observe and the watchdog's driftPass): the same
  *      gate failing the same way 3 times, verify runs with no new diff, edits outside the lane and claims. Each raises
  *      exactly one Check per session, a clean session raises none, and nothing is stopped or killed.
@@ -126,7 +126,7 @@ console.log(JSON.stringify({ g: { hb: g.hoursBetweenInterventions, hf: g.handsFr
       && lv.g?.landed === 12 && lv.g?.hf === 1 && lv.g?.hb > 8,
     JSON.stringify(lv).slice(0, 3000));
 
-  // The CLI and the overnight line, end to end on the good week; studio/autonomy.json is never rewritten.
+  // The CLI, end to end on the good week; studio/autonomy.json is never rewritten.
   fs.writeFileSync(evFile, good.map((e) => JSON.stringify(e)).join('\n') + '\n');
   const readCfg = () => { try { return fs.readFileSync(path.join(dir, 'studio', 'autonomy.json'), 'utf8'); } catch { return ''; } };
   const cfgBefore = readCfg();
@@ -134,16 +134,13 @@ console.log(JSON.stringify({ g: { hb: g.hoursBetweenInterventions, hf: g.handsFr
   const cli = run(dir, `node harness/autonomy.mjs --now ${NOW}`, env);
   const cliJson = run(dir, `node harness/autonomy.mjs --now ${NOW} --json`, env);
   let cj = null; try { cj = JSON.parse(cliJson.stdout); } catch {}
-  const ov = probe('overnight', `import { writeOvernight } from ${u('harness/overnight.mjs')};
-const r = await writeOvernight({ from: Date.parse('2026-11-07T16:00:00Z'), to: Date.parse(${JSON.stringify(NOW)}) });
-console.log(JSON.stringify({ md: r.md }));`);
   const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
-  report('2.64.0 (autonomy): npm run autonomy prints the badge, the bars and the suggestion (--json too), the overnight page carries the one-line summary, and studio/autonomy.json is left as the owner wrote it',
+  report('2.64.0 (autonomy): npm run autonomy prints the badge, the bars and the suggestion (--json too), and studio/autonomy.json is left as the owner wrote it',
     pkg.scripts.autonomy === 'node harness/autonomy.mjs' && cli.status === 0 && /^Autonomy \(7 d\): L2, meets the L3 bar/m.test(cli.stdout) && /suggest L3 \(your call\)/.test(cli.stdout) && /Move to L3|move to L3/.test(cli.stdout)
       && cj?.badge?.suggestion?.kind === 'promote' && cj?.card?.landed === 12
-      && /^Autonomy \(7 d\): L2/m.test(ov.md || '') && readCfg() === cfgBefore
+      && readCfg() === cfgBefore
       && cfg0.level === 'L2' && cfg0.l3?.hoursBetweenInterventions === 8,
-    `${out(cli)}\n---\n${String(cliJson.stdout).slice(0, 400)}\n---\n${ov.md || ov._raw}`);
+    `${out(cli)}\n---\n${String(cliJson.stdout).slice(0, 400)}`);
 
   // 2. Drift checks. Two lane copies (git repos), fake session records, synthetic verify events.
   const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: { ...process.env, GIT_COMMITTER_DATE: '2026-11-01T09:00:00Z', GIT_AUTHOR_DATE: '2026-11-01T09:00:00Z' } });

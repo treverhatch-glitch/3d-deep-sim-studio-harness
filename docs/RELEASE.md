@@ -320,6 +320,3 @@ to the message>"`; the record keeps the permission and who recorded it. Builders
   studio/gates.json), ending with `npm run verify -- --only <gate>`. Safety gates never say "approve": they say to put it back
   or hand the task back. `node harness/gate-fix.mjs --check` fails when a gate or game check kind has no entry of its own; the
   selftest runs it.
-- **Overnight summary.** At `--until` the supervisor writes `studio/daily/overnight-<date>.md`: tasks done, tokens per finished
-  task (model named), sessions that finished nothing, forced closes, reviews, the top 5 sessions by tokens, open cards.
-  `npm run overnight -- --since 8h` writes one by hand.

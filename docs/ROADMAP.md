@@ -15,7 +15,7 @@ code and `CHANGELOG.md` showed no clear key name either way.
 ## Content and craft
 
 - **C1 Content pipeline.** Content as data under `cartridges/<game>/content/` (JSON, a schema per kept layer, tagged by phase).
-  The schema gate is done (2.30f, `docs/FLOORS.md`); still planned: generators that write the content, and a sweep for the
+  The schema gate is done (2.30f); still planned: generators that write the content, and a sweep for the
   economy and unlock curve across the phases (`scripts/balance-sweep.mjs` exists; whether it covers this: status not checked).
 - **C2 Art, audio and narrative tools.** One tool each that an agent drives and a gate checks when the layer is kept: art
   through Blender presets plus a budget check, audio through a sound preset generator plus loudness and length checks,

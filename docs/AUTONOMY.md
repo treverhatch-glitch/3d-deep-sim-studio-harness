@@ -14,8 +14,6 @@ npm run autonomy -- --now 2026-11-08T00:00:00Z     # the window ending then (sco
 npm run autonomy -- --since 2026-11-01T00:00:00Z   # the window from then to now
 ```
 
-The same line is at the top of the overnight page (`npm run overnight`).
-
 | Measure | How it is counted |
 | --- | --- |
 | Hours between interventions | supervisor running time (halted time taken out) over unplanned person interventions; the longest stretch is shown too |
