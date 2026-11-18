@@ -33,6 +33,7 @@ import { maxConcurrent, capGroup } from './heavy-budget.mjs';
 import { removeLandedLane, pruneBuilds, buildsConfig } from './engine-clean.mjs';
 import { flagOf, foldRealOf, gitMax64 as git, numBlankDefault as num, realOrResolved as real, short8 as short, sleepSyncClamped as sleep, stdoutOf as out } from './helpers.mjs';
 import { targetRedTask, targetRedClear, targetRedLine } from './engine-target-red.mjs';
+import { aheadStart, aheadVerdict, aheadFor, aheadLine } from './rules-ahead.mjs';
 
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); writeAtomic(f, `${JSON.stringify(v, null, 2)}\n`); };
 const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
@@ -937,6 +938,37 @@ export function chainOnTarget(repo, base, lanes, id, engine = 'unity') {
 
 // ---- the train ----
 
+/** The batch a train takes from `queued` (harness/engine-train-control.mjs selectBatch with this engine's settings). */
+function pickBatch(root, engine, s, queued, { only = [], tag = null, max = 0, env = process.env } = {}) {
+  const { repo, target } = s;
+  // 2.86: lanes a train left waiting for the target (red on it alone) sit out until it moves; engines.<x>.batchAlone paths land alone.
+  return selectBatch(queued, { only, tag, max, ...batchLimits(s.cfg, env), classOf: (l) => laneClass({ repo, target, cfg: s.cfg, lane: l }), waits: waitingOnTarget(root, engine, queued), aloneOf: (l) => laneAloneWhy({ repo, target, cfg: s.cfg, lane: l }) });
+}
+
+/** Each lane of a batch as it is now: { lane, defer } or { lane, drop } (nobody blamed), else { lane (its head now), moved }. */
+function laneStates(lanes, { repo, target, board, holdMod, L }) {
+  return lanes.map((lane) => {
+    const held = holdMod ? holdMod.afterWaits(lane.task, board) : [];
+    if (held.length) return { lane, defer: `it waits for ${held.join(', ')} (task after)` };
+    // 2.92: the queue door found it does not compile with a lane of this batch: it waits, as a lane that conflicts with one.
+    const clash = (lane.clash?.with || []).filter((t) => lanes.some((l) => l.task === t));
+    if (clash.length) return { lane, defer: `it does not compile with ${clash.join(', ')} in this train (found when it was queued); it is checked again once ${clash.length === 1 ? 'that lane has' : 'they have'} landed or left the queue` };
+    const head = headOf(repo, lane.branch);
+    if (!head) return { lane, drop: `its branch ${lane.branch} is gone from the ${L} repo; queue it again` };
+    const moved = head !== lane.head ? head : null;
+    if (isAncestor(repo, head, `refs/heads/${target}`)) return { lane, moved, drop: `${lane.branch} has no commits that ${target} doesn't have; task done ${lane.task} closes it` };
+    return { lane: { ...lane, head }, moved };
+  });
+}
+
+/** 2.94: a kept check ahead's lanes, all queued and unchanged, when the target is the tree it was built on: { train, lanes } or null. */
+function aheadSet(root, engine, queued, { repo, tip, cfg }) {
+  const m = readJson(path.join(root, '.studio', 'engine', `${engine}-rules-ahead.json`));
+  if (m?.verdict !== 'kept' || !Array.isArray(m.tasks) || readJson(path.join(root, '.studio', 'engine', `${engine}-rules-ahead-out.json`))?.state === 'not-started') return null;
+  const ls = m.tasks.map((t, i) => queued.find((e) => e.task === t && e.head === m.heads[i]));
+  try { return ls.every(Boolean) && rulesKey({ repo, sha: tip, cfg }) === m.baseKey ? { train: m.train, lanes: ls } : null; } catch { return null; }
+}
+
 /**
  * Run one Unity train. opts: root, by, max, dryRun, waitMs (for a running Unity train; default 0: busy at once),
  * log, env, deps { close(lane, ctx{ train, head, repo, target }) -> { ok, message?, target? }, handBack(lane, note),
@@ -985,8 +1017,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   // The batch (harness/engine-train-control.mjs selectBatch): --only / --tag first (a train with neither takes untagged lanes only), then an alone
   // lane, then engines.<x>.batchGroup "play", then the cap (--max, engines.<x>.batchMax). Everything else stays queued.
   const queued = readUnityQueue(root, engine);
-  // 2.86: lanes a train left waiting for the target (red on it alone) sit out until it moves; engines.<x>.batchAlone paths land alone.
-  const sel = selectBatch(queued, { only, tag, max, ...batchLimits(s.cfg, env), classOf: (l) => laneClass({ repo, target, cfg: s.cfg, lane: l }), waits: waitingOnTarget(root, engine, queued), aloneOf: (l) => laneAloneWhy({ repo, target, cfg: s.cfg, lane: l }) });
+  const sel = pickBatch(root, engine, s, queued, { only, tag, max, env });
   if (sel.error) { res.ok = false; res.message = `No ${L} branch landed: ${sel.why} (--only takes queued tasks).`; return finish(); }
   let lanes = sel.lanes;
   res.batch = sel.why;
@@ -994,6 +1025,13 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   // alone and never go ahead of a waiting batch: due, they run when this train has no lane; overdue, after the batch's rounds.
   const fullDue = dryRun ? { why: '' } : fullLandDue(root, engine, s.cfg, env, Date.now());
   const rc0 = dryRun ? null : (() => { try { return rulesConfig(engine, { root, env, repo, ref: target }); } catch { return null; } })();
+  // 2.94: the set a check ahead ran for, when every one of its lanes is unchanged (rules.ahead; harness/rules-ahead.mjs).
+  const pref = rc0?.ahead && !only.length && !tag ? aheadSet(root, engine, queued, { repo, tip: headOf(repo, target), cfg: rc0 }) : null;
+  if (pref && pref.lanes.map((l) => l.task).join() !== lanes.map((l) => l.task).join()) {
+    log(`[unity-train] ${id}: takes the set the check ahead of train ${pref.train} ran for: ${pref.lanes.map((l) => l.task).join(', ')}${queued.length > pref.lanes.length ? `; the ${queued.length - pref.lanes.length} other queued lane(s) ride the train after` : ''}`);
+    lanes = pref.lanes;
+    res.batch = `${sel.why}; the set checked ahead`;
+  }
   const owed0 = rc0 ? fullRulesOwed(root, engine, rc0, { repo, tip: headOf(repo, target) }) : { why: '' };
   const fullFirst = Boolean(fullDue.why && !lanes.length);
   const fullLast = Boolean(fullDue.why && fullDue.overdue && lanes.length);
@@ -1048,17 +1086,11 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   const titleOf = (t) => [...(board?.inProgress || []), ...(board?.backlog || []), ...(board?.done || [])].find((x) => x.id === t)?.title || '';
   // (a) Each branch as it is now.
   const ready = [];
-  for (const lane of lanes) {
-    const held = holdMod ? holdMod.afterWaits(lane.task, board) : [];
-    if (held.length) { defer(lane, `it waits for ${held.join(', ')} (task after)`); continue; }
-    // 2.92: the queue door found it does not compile with a lane of this batch: it waits, as a lane that conflicts with one.
-    const clash = (lane.clash?.with || []).filter((t) => lanes.some((l) => l.task === t));
-    if (clash.length) { defer(lane, `it does not compile with ${clash.join(', ')} in this train (found when it was queued); it is checked again once ${clash.length === 1 ? 'that lane has' : 'they have'} landed or left the queue`); continue; }
-    const head = headOf(repo, lane.branch);
-    if (!head) { drop(lane, `its branch ${lane.branch} is gone from the ${L} repo; queue it again`, { handBack: false }); continue; }
-    if (head !== lane.head) log(`[unity-train] ${id}: ${lane.task}'s branch ${lane.branch} moved since it was queued (${short(lane.head)} -> ${short(head)}); the branch as it is now goes in`);
-    if (isAncestor(repo, head, `refs/heads/${target}`)) { drop(lane, `${lane.branch} has no commits that ${target} doesn't have; task done ${lane.task} closes it`, { handBack: false }); continue; }
-    ready.push({ ...lane, head });
+  for (const x of laneStates(lanes, { repo, target, board, holdMod, L })) {
+    if (x.moved) log(`[unity-train] ${id}: ${x.lane.task}'s branch ${x.lane.branch} moved since it was queued (${short(lanes.find((l) => l.task === x.lane.task).head)} -> ${short(x.moved)}); the branch as it is now goes in`);
+    if (x.defer) defer(x.lane, x.defer);
+    else if (x.drop) drop(x.lane, x.drop, { handBack: false });
+    else ready.push(x.lane);
   }
   // (b) Conflicts against the target and between branches, from refs only.
   const tip0 = headOf(repo, target);
@@ -1126,10 +1158,14 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       // Each lane's new shared input files first (rules.share), and the lanes' own folders as further input sources.
       for (const l of set) { try { shareLaneInputs(root, engine, s, l.task, log); } catch { /* the check says what is missing */ } }
       const extraFrom = set.map((l) => path.join(root, '.lanes', 'engine', String(l.task))).filter((d) => fs.existsSync(d));
+      // 2.94: a check ahead for exactly this batch's tree is waited for (never run twice); one for another tree is ended.
+      const aw0 = Date.now();
+      const aw = await aheadFor(root, engine, { train: id, log: (m) => log(`[unity-train] ${id}: the check ahead ${m}`), key: () => { try { const c = chainOnTarget(repo, tip0, set, id, engine); return c.head ? rulesKey({ repo, sha: c.head, cfg: rc }) : null; } catch { return null; } } });
+      spent.rules += Date.now() - aw0;
       const rg0 = Date.now();
       const rg = (deps.rulesGate || rulesGate)({ engine, repo, tip: tip0, lanes: set, cfg: rc, from, extraFrom, owe: true, root, id, env, log, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine) });
       spent.rules += Date.now() - rg0;
-      log(`[unity-train] ${id}: rules check: ${rg.why}${rg.runs ? ` (${rg.runs} run(s), ${Math.round(rg.ms / 1000)} s)` : ''}`);
+      log(`[unity-train] ${id}: rules check: ${rg.why}${rg.runs ? ` (${rg.runs} run(s), ${Math.round(rg.ms / 1000)} s)` : ''}${aw && ['pass', 'red'].includes(aw.status) ? `; the batch's result came from the check ahead of train ${aw.train}${aw.waitedMs >= 1000 ? ` (waited ${Math.round(aw.waitedMs / 6000) / 10} min for it)` : ''}` : ''}`);
       // 2.90: a check that judged no lane because of the target is said where people look (event; train status after 2 in a row).
       if (rg.noJudge) ev('rules_no_judge', id, `the rules check judged no lane${rg.noJudge.n > 1 ? ` (${rg.noJudge.n} trains in a row, ${Math.round(rg.noJudge.minutes)} min spent)` : ''}: ${rg.why}`, { agent: by, to: 'producer', status: 'warn', meta: { n: rg.noJudge.n, minutes: rg.noJudge.minutes, timeout: Boolean(rg.timedOut), fix: rg.noJudge.fix } });
       if (rg.noJudge && rg.calibration === 'red' && !rg.timedOut) targetRedTask(root, { engine, target, source: 'rules', tests: rg.redTests, why: rg.noJudge.why, train: id }); else if (rg.ran) targetRedClear(root, engine, 'rules');
@@ -1152,6 +1188,30 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   const compiledGroups = new Set();
   const compiledLanes = new Set();
   res.compileRuns = 0;
+  // 2.94: the check ahead (harness/rules-ahead.mjs): started once per train, settled when the land run answers.
+  let ahead = null;
+  let aheadTried = false;
+  const aheadSay = (m) => log(`[unity-train] ${id}: the check ahead ${m}`);
+  const aheadBegin = (group, landLabel) => {
+    if (par.ok) { aheadSay(`is not started: a second gate (engines.${engine}.gates) is in use`); return null; }
+    const inIt = new Set(group.map((l) => l.task));
+    const nx = pickBatch(root, engine, s, readUnityQueue(root, engine).filter((e) => !inIt.has(e.task)), { env });
+    const ok = nx.error ? [] : laneStates(nx.lanes, { repo, target, board, holdMod, L }).filter((x) => !x.defer && !x.drop).map((x) => x.lane);
+    const c = ok.length ? chainOnTarget(repo, rulesGreen.head, ok, `${id}-ahead`, engine) : { included: [] };
+    if (c.error || !c.included.length) { aheadSay(`is not started: no lane waits for the next train${c.error ? ` (${c.error})` : ''}`); return null; }
+    const extraFrom = c.included.map((l) => path.join(root, '.lanes', 'engine', String(l.task))).filter((d) => fs.existsSync(d));
+    try { return aheadStart({ root, engine, repo, target, head: rulesGreen.head, next: c.head, lanes: c.included, cfg: rc0, from: fromAll, extraFrom, train: id, landLabel, env, log: aheadSay }); } catch (e) { aheadSay(`is not started: ${e.message}`); return null; }
+  };
+  // Kept only when this land run landed the batch unchanged (the landed target has the checked head's rules key).
+  const aheadSettle = async (r, why = '') => {
+    if (!ahead) return;
+    const h = ahead;
+    ahead = null;
+    let keep = false;
+    if (!why) { try { keep = r?.status === 'pass' && Boolean(r.newTip) && rulesKey({ repo, sha: r.newTip, cfg: rc0 }) === h.baseKey; } catch { keep = false; } }
+    const w = why || (r?.status === 'pass' ? `${target} did not land as the checked batch` : `the land run ended ${r?.status || 'without an answer'}`);
+    for (const l of await aheadVerdict(root, engine, { keep, why: w })) aheadSay(l);
+  };
   // A land killed from outside is tried once more after STUDIO_ENGINE_KILLED_RETRY_SEC (60 s).
   let killedRetried = false;
   const killedWaitMs = Math.max(0, num(env.STUDIO_ENGINE_KILLED_RETRY_SEC, 60)) * 1000;
@@ -1321,8 +1381,10 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         }
         if (decided) r = decided;
         else {
+          // 2.94: the next batch's rules check beside this land run (rules.ahead), once per train, only for the checked batch.
+          if (rc0?.ahead && checked && !aheadTried && !dryRun) { aheadTried = true; ahead = aheadBegin(group, label); }
           const l0 = Date.now();
-          r = await land({ engine, ...arg, task: gkey, label, env: landEnv, log, ...(stagesBefore.length ? { stagesBefore } : {}) });
+          r = await land({ engine, ...arg, task: gkey, label, env: landEnv, log, ...(stagesBefore.length ? { stagesBefore } : {}), ...(ahead ? { onOom: () => aheadSettle(null, 'the land run died out of memory; it is ended before the land run is tried once more, and not started again in this train') } : {}) });
           res.runs += 1;
           landRuns += 1;
           // The run says how long it waited (waitMs); else the wall time not in its own ms.
@@ -1718,6 +1780,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         }
         res.rounds += 1;
         const r = await landGroup(group, what, o);
+        await aheadSettle(r);
         // A run that should have landed nothing moved the target: stop, nobody is blamed (landGroup said why).
         if (r.moved) { hold(lanesOf(round.map((l) => l.task).filter((t) => live.has(t) && !res.landed.includes(t))), r); stop = true; break; }
         // The target's own full-run failures are never counted against a lane (2.85), nor narrowed on.
@@ -1748,6 +1811,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       else if (await fullsOnTarget('end')) res.cancelled = res.cancelled || { at: new Date().toISOString(), why: 'the train was cancelled during the full run at its end' };
     }
   } finally {
+    await aheadSettle(null, 'the train ended before its land run answered');
     for (const l of set) deps.clearRunning?.(l.task);
     await Promise.all(shotJobs);
   }
@@ -1889,6 +1953,7 @@ export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'un
   if (st.last && !st.running) lines.push(`Last ${L} train ${st.last.id} (${String(st.last.at || '').slice(0, 16)}): ${st.last.message}${st.last.batch ? ` [batch ${st.last.batch}]` : ''}`);
   if (!quiet) { try { lines.push(autoLine(root, engine)); } catch { /* the queue lines stand */ } }
   { const nj = rulesIdleLine(root, engine); if (nj) lines.push(nj); }
+  { const ah = aheadLine(root, engine); if (ah) lines.push(ah); }
   { const tr = targetRedLine(root, engine); if (tr) lines.push(tr); }
   if (!quiet) { try { const s = unityTrainSettings(root, engine); if (!s.error) lines.push(parallelLine(root, engine, parallelNow(root, engine, s.cfg))); } catch { /* the queue lines stand */ } }
   return lines.join('\n');

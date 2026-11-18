@@ -266,7 +266,7 @@ export function mapUnityExit(code, { signal = null, timedOut = false, timeoutMin
  * Run the landing gate. { status: pass|red|conflict|refused|error|not-run|killed|skipped, ok, code, why, ms, log }.
  * onlyUnityTask: a task not on the engine's track is skipped. A busy lock is a refusal, never a throw.
  */
-export async function runUnityGate({ engine = 'unity', task = null, branch = null, branches = null, label = null, env = process.env, log = () => {}, onlyUnityTask = false, only = null, timeoutMin: timeoutOverride = null, stagesBefore = [], gate = 1 } = {}) {
+export async function runUnityGate({ engine = 'unity', task = null, branch = null, branches = null, label = null, env = process.env, log = () => {}, onlyUnityTask = false, only = null, timeoutMin: timeoutOverride = null, stagesBefore = [], gate = 1, onOom = null } = {}) {
   // only 'compile': the train's compile-only run (STUDIO_LAND_ONLY=compile in env); it lands nothing, so no
   // engine.land event or duration. stagesBefore: the train's earlier stages, first in the report.
   const t0 = Date.now();
@@ -367,6 +367,8 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   const oom = !/^(off|0|false|no)$/i.test(String(env.STUDIO_HEAVY_OOM_RETRY || '')) ? oomSignature(r) : '';
   if (oom) {
     log(`[unity-gate] the Unity land command died out of memory (${oom}): queued once more for the machine:heavy budget`);
+    // 2.94: the train ends its check ahead first (harness/rules-ahead.mjs), so the retry has the memory.
+    if (onOom) { try { await onOom(oom); } catch { /* the retry goes on */ } }
     try { emitEvent({ type: 'heavy.oom_retry', agent: env.STUDIO_LOCK_OWNER || 'gates', status: 'warn', msg: `Unity land${task ? ` for ${task}` : ''} died out of memory (${oom}); re-queued once`, meta: { signature: oom } }); } catch {}
     try {
       lk = acquireHeavy(await heavyRoot(), landLabel, heavyOpts);
