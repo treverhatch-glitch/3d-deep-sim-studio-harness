@@ -232,9 +232,9 @@ console.log(JSON.stringify({
   cant: { skipped: cant.skipped === true, kept: cant.kept.length, why: cant.why }, none: { skipped: none.skipped === true, kept: none.kept.length },
   off: rulesConfig('unity', { root: process.cwd(), env: { STUDIO_ENGINE_RULES: 'off' } }),
 }));`);
-    await guard('2.82 rules check, narrowing: with two culprits among five lanes both are found with the cheap check and the other three are green together (never more than 12 runs); a green batch takes two runs (the target, the batch); at the run limit the lanes left go to the land run unjudged, nobody else dropped; a check that can\'t run on the target, or no check at all, keeps every lane; STUDIO_ENGINE_RULES=off: no check', () => [
+    await guard('2.82 rules check, narrowing: with two culprits among five lanes both are found with the cheap check and the other three are green together (never more than 12 runs); a green batch takes one run (2.93: the batch only; the target is asked only for a red); at the run limit the lanes left go to the land run unjudged, nobody else dropped; a check that can\'t run on the target, or no check at all, keeps every lane; STUDIO_ENGINE_RULES=off: no check', () => [
       r.two?.kept.join() === 'T-A,T-C,T-E' && r.two.dropped.join() === 'T-B,T-D' && r.two.green === 'T+A+C+E' && r.two.runs <= 12 && /is red with feat\/b on top of T-A/.test(r.two.why0) && /Suite\.B/.test(r.two.why0)
-        && r.green?.kept === 5 && r.green.dropped === 0 && r.green.green === 'T+A+B+C+D+E' && r.green.runs === 2
+        && r.green?.kept === 5 && r.green.dropped === 0 && r.green.green === 'T+A+B+C+D+E' && r.green.runs === 1
         && r.capped?.runs === 3 && r.capped.green === null && /the land run decides/.test(r.capped.why) && r.capped.kept.length + r.capped.dropped.length === 5
         && r.cant?.skipped && r.cant.kept === 5 && /judges no lane/.test(r.cant.why) && r.none?.skipped && r.none.kept === 5 && r.off === null,
       JSON.stringify(r).slice(0, 2500)]);

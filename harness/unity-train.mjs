@@ -24,7 +24,7 @@ import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeComman
 import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
-import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey } from './engine-rules.mjs';
+import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey, rulesLanded } from './engine-rules.mjs';
 import { compileSearchOf, compileSearch, compileAt, compilerLines } from './engine-compile.mjs';
 import { parallelState, parallelUse, parallelLine, runGateChild } from './engine-gates.mjs';
 import { engineSlotsAt, heavySlotsAt, floorFree } from './heavy.mjs';
@@ -1127,7 +1127,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       res.rules = { ran: rg.ran, runs: rg.runs, ms: rg.ms, dropped: rg.dropped.map((d) => d.lane.task), ...(rg.skipped ? { skipped: rg.why } : {}), ...(rg.mode ? { mode: rg.mode } : {}), ...(rg.selWhy ? { why: rg.selWhy } : {}), ...(rg.parts ? { parts: rg.parts } : {}), ...(rg.splitAtOnce ? { splitAtOnce: rg.splitAtOnce } : {}), ...(rg.filter ? { filter: rg.filter } : {}), ...(rg.groups ? { groups: rg.groups } : {}), ...(rg.reused ? { reused: rg.reused } : {}), ...(rg.sliced ? { sliced: rg.sliced, slices: rg.slices } : {}) };
       // 2.91: keeps(tip): with rules.paths or rules.ignore, a target that moved only where the rules tests do not read keeps the green.
       const scope = rc.paths?.length ? 'outside rules.paths' : rc.ignore?.length ? 'under rules.ignore' : '';
-      if (rg.green) rulesGreen = { tip: tip0, tasks: set.map((l) => l.task).join(','), mode: rg.mode || 'full', scope, same: () => { try { return inputsPrint(rc, [...from, ...extraFrom]) === (rg.inputs ?? inputsPrint(rc, [...from, ...extraFrom])); } catch { return false; } }, keeps: (t) => { if (!scope) return false; try { const k = rulesKey({ repo, sha: tip0, cfg: rc }); return Boolean(k) && k === rulesKey({ repo, sha: t, cfg: rc }); } catch { return false; } } };
+      if (rg.green) rulesGreen = { head: rg.green, tip: tip0, tasks: set.map((l) => l.task).join(','), mode: rg.mode || 'full', scope, same: () => { try { return inputsPrint(rc, [...from, ...extraFrom]) === (rg.inputs ?? inputsPrint(rc, [...from, ...extraFrom])); } catch { return false; } }, keeps: (t) => { if (!scope) return false; try { const k = rulesKey({ repo, sha: tip0, cfg: rc }); return Boolean(k) && k === rulesKey({ repo, sha: t, cfg: rc }); } catch { return false; } } };
     }
   }
   for (const l of set) deps.markRunning?.(l.task, l.agent);
@@ -1437,6 +1437,11 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       if (!dryRun && !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_LANE_CLEAN || ''))) { try { const rm = removeLandedLane({ root, engine, task: lane.task, log }); if (rm && !rm.removed && rm.why && rm.dir && rm.why !== 'no such folder') log(`[unity-train] ${id}: kept ${lane.task}'s engine worktree: ${rm.why}`); } catch (e) { log(`[unity-train] ${id}: could not clean ${lane.task}'s engine worktree: ${e.message}`); } }
     }
     liveNow();
+    // 2.93: the landed tree's rules answer (rules.landGate's pass, or the checked full green landed unchanged) for the next train.
+    if (!dryRun && rc0) {
+      const gk = group.map((l) => l.task).join(',');
+      try { const how = rulesLanded({ root, engine, repo, cfg: rc0, tip: r.newTip, head: rulesGreen?.tasks === gk ? rulesGreen.head : null, mode: rulesGreen?.mode, stages: r.stages, from: fromAll }); if (how) log(`[unity-train] ${id}: ${how === 'gate' ? `the land run's ${rc0.landGate} gate passed: kept as a full rules pass of ${short(r.newTip)}` : `the checked full rules pass landed unchanged: it is the full pass of ${short(r.newTip)}`}`); } catch { /* the next train asks again */ }
+    }
     // Old gate builds are pruned (engines.<x>.builds; absent: nothing is touched).
     if (!dryRun) { try { const bc = buildsConfig(engine, { root, env }); if (bc) { const pb = pruneBuilds({ ...bc, root, log }); if (pb?.removed?.length) log(`[unity-train] ${id}: pruned ${pb.removed.length} old build(s) in ${String(bc.dir).split(path.sep).join('/')}; kept ${pb.kept.length}`); } } catch (e) { log(`[unity-train] ${id}: could not prune old builds: ${e.message}`); } }
     // Before/after pictures of a green land (engines.<x>.shots); no shots: nothing happens.

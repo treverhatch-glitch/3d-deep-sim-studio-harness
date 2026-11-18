@@ -248,8 +248,8 @@ console.log(JSON.stringify({ status: x.status, atOnce: x.splitAtOnce, groups: (x
     const r2 = probe(TRAIN);
     const n2 = rulesRuns(rlog).length;
     const land = runsOf(ctl);
-    await guard('2.85 (b) the same tree is not checked twice: a train cancelled during its land run is started again with the same batch on the same target tip: the rules check is not run again (the kept result in .studio/engine answers, "cached" in the log), and the land run is told STUDIO_RULES_GREEN=1 and STUDIO_RULES_MODE=full (the first run was green in full mode on exactly this tree)', () => [
-      n1 === 2 && n2 === n1 && r1.landed?.length === 0 && land.length === 2 && land[0].rulesGreen === '1' && land[1].rulesGreen === '1' && land[1].rulesMode === 'full' && r2.landed?.join() === 'T-511,T-512' && r2.logs.some((l) => /cached/.test(l)),
+    await guard('2.85 (b) the same tree is not checked twice: a train cancelled during its land run is started again with the same batch on the same target tip: the rules check (one run, 2.93: the batch only) is not run again (the kept result in .studio/engine answers, "cached" in the log), and the land run is told STUDIO_RULES_GREEN=1 and STUDIO_RULES_MODE=full (the first run was green in full mode on exactly this tree)', () => [
+      n1 === 1 && n2 === n1 && r1.landed?.length === 0 && land.length === 2 && land[0].rulesGreen === '1' && land[1].rulesGreen === '1' && land[1].rulesMode === 'full' && r2.landed?.join() === 'T-511,T-512' && r2.logs.some((l) => /cached/.test(l)),
       JSON.stringify({ n1, n2, r1: r1.landed, r2, land }).slice(0, 2500)]);
   }
 
