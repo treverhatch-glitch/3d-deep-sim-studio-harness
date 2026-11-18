@@ -5358,6 +5358,14 @@ if (inShard('selftest-293a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.93 (e): a command past its time limit is ended with its whole tree; each train records its minutes; agy's denied tools are a harness cause.
+if (inShard('selftest-293e')) {
+  const dir = copyRepo();
+  const { selftest293E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-293e.mjs')).href);
+  await selftest293E({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

@@ -12,6 +12,7 @@
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { RUN_LIMITED } from './run-limited.mjs';
 import { readJson } from './fsafe.mjs';
 import { ramCheck } from './ram.mjs';
 import { numFiniteFirst as num } from './helpers.mjs';
@@ -105,11 +106,12 @@ async function cli() {
     const keep = (d) => { buf += d.toString('utf8'); if (buf.length > 4e6) buf = buf.slice(-2e6); };
     let done = false;
     const fin = (r) => { if (done) return; done = true; clearTimeout(timer); resolve({ filter: part.filter, seconds: Math.round((Date.now() - g0) / 1000), text: buf, ...r }); };
-    const child = spawn(part.command, { shell: true, cwd: job.cwd, env: job.env, windowsHide: true });
-    const timer = setTimeout(() => { try { child.kill(); } catch { /* it ended */ } fin({ status: 'error', timedOut: true }); }, left);
+    const child = spawn(process.execPath, [RUN_LIMITED, String(left), '--', part.command], { cwd: job.cwd, env: job.env, windowsHide: true });
+    // The wrapper ends the tree at `left`; this timer is only the safety net.
+    const timer = setTimeout(() => { try { child.kill(); } catch { /* it ended */ } fin({ status: 'error', timedOut: true }); }, left + 15000);
     child.stdout.on('data', keep); child.stderr.on('data', keep);
     child.on('error', (e) => fin({ status: 'error', errorCode: e.code || e.message }));
-    child.on('close', (code, signal) => fin({ status: code === 0 ? 'pass' : 'red', code, signal }));
+    child.on('close', (code, signal) => fin(code === 124 && buf.includes('[run-limited] ended after') ? { status: 'error', timedOut: true } : { status: code === 0 ? 'pass' : 'red', code, signal }));
   });
   const r = await runParts({ parts: job.parts, start, max: job.max, gb: job.gb, floorGb: job.floorGb, freeGb, log: (m) => logs.push(m), pollMs: job.pollMs || 1000 });
   process.stdout.write(`${JSON.stringify({ ...r, logs })}\n`);

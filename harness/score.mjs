@@ -147,7 +147,13 @@ export function engineFlow(events) {
   const flakyCount = new Map();
   for (const e of flakyEvents) for (const t of new Set(Array.isArray(e.meta?.tests) ? e.meta.tests : Array.isArray(e.meta?.failures) ? e.meta.failures : [])) flakyCount.set(t, (flakyCount.get(t) || 0) + 1);
   const flakyTop = [...flakyCount.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0] || null;
+  // 2.93: each engine train's own minutes (the done event's meta.minutes); a train without them is only counted.
+  const tr = events.filter((e) => /^task\.train\.[\w-]+\.done$/.test(e.type));
+  const timed = tr.filter((e) => Number.isFinite(e.meta?.minutes?.total));
+  const med = (k) => r1(quantile(timed.map((e) => Number(e.meta.minutes[k]) || 0), 0.5));
+  const trains = tr.length ? { n: timed.length, medianMin: med('total'), rulesMin: med('rules'), landMin: med('land'), waitMin: med('wait'), ...(tr.length > timed.length ? { untimed: tr.length - timed.length } : {}) } : null;
   return {
+    trains,
     flaky: flakyEvents.length ? { retries: flakyEvents.length, top: flakyTop ? { test: flakyTop[0], times: flakyTop[1] } : null } : null,
     branchesPerRun: perRun.length ? { median: r1(quantile(perRun, 0.5)), runs: perRun.length } : null,
     play: playRows.length || playSkipped ? { focused: playRows.filter((x) => x.mode === 'focus').length, full: playRows.filter((x) => x.mode === 'full').length, skipped: playSkipped, focusMedianMin: r1(quantile(playMins('focus'), 0.5)), fullMedianMin: r1(quantile(playMins('full'), 0.5)) } : null,
@@ -295,6 +301,7 @@ export function engineText(en, prev = null) {
   if (en.branchesPerRun) L.push(`  Branches per land run: median ${en.branchesPerRun.median ?? 'n/a'} (${en.branchesPerRun.runs} runs)`);
   if (en.play) L.push(`  Play stage: ${en.play.focused} focused, ${en.play.full} full${en.play.skipped ? `, ${en.play.skipped} skipped` : ''}; median minutes focused ${en.play.focusMedianMin ?? 'n/a'}, full ${en.play.fullMedianMin ?? 'n/a'}`);
   if (en.flaky) L.push(`  Flaky retries: ${en.flaky.retries}${en.flaky.top ? ` (top: ${en.flaky.top.test} ×${en.flaky.top.times})` : ''}`);
+  if (en.trains) L.push(`  trains: ${en.trains.n}${en.trains.n ? `, median ${en.trains.medianMin} min (rules check ${en.trains.rulesMin}, land runs ${en.trains.landMin}, waiting ${en.trains.waitMin})` : ''}${en.trains.untimed ? `${en.trains.n ? '; ' : ', '}${en.trains.untimed} earlier train(s) have no times` : ''}`);
   L.push(en.rules.checks ? `  Rules check before the land run: ${en.rules.checks} batch(es), ${en.rules.runs} run(s), ${en.rules.minutes} min; ${en.rules.refused} lane(s) refused before they cost a land run` : '  Rules check before the land run: none ran');
   return L;
 }
