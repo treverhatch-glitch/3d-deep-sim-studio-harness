@@ -1170,16 +1170,17 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       const rg0 = Date.now();
       const rg = (deps.rulesGate || rulesGate)({ engine, repo, tip: tip0, lanes: set, cfg: rc, from, extraFrom, owe: true, root, id, env, log, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine) });
       spent.rules += Date.now() - rg0;
-      log(`[unity-train] ${id}: rules check: ${rg.why}${rg.runs ? ` (${rg.runs} run(s), ${Math.round(rg.ms / 1000)} s)` : ''}${aw && ['pass', 'red'].includes(aw.status) ? `; the batch's result came from the check ahead of train ${aw.train}${aw.waitedMs >= 1000 ? ` (waited ${Math.round(aw.waitedMs / 6000) / 10} min for it)` : ''}` : ''}`);
+      log(`[unity-train] ${id}: rules check: ${rg.why}${rg.runs ? ` (${rg.runs} run(s), ${Math.round(rg.ms / 1000)} s)` : ''}${aw && ['pass', 'red'].includes(aw.status) ? `; the batch's result came from the check ahead of train ${aw.train}${aw.waitedMs >= 1000 ? ` (waited ${Math.round(aw.waitedMs / 6000) / 10} min for it)` : ''}` : ''}${aw?.status === 'partial' ? `; the check ahead of train ${aw.train} finished some shards, this train ran the rest` : ''}`);
       // 2.90: a check that judged no lane because of the target is said where people look (event; train status after 2 in a row).
       if (rg.noJudge) ev('rules_no_judge', id, `the rules check judged no lane${rg.noJudge.n > 1 ? ` (${rg.noJudge.n} trains in a row, ${Math.round(rg.noJudge.minutes)} min spent)` : ''}: ${rg.why}`, { agent: by, to: 'producer', status: 'warn', meta: { n: rg.noJudge.n, minutes: rg.noJudge.minutes, timeout: Boolean(rg.timedOut), fix: rg.noJudge.fix } });
       if (rg.noJudge && rg.calibration === 'red' && !rg.timedOut) targetRedTask(root, { engine, target, source: 'rules', tests: rg.redTests, why: rg.noJudge.why, train: id }); else if (rg.ran) targetRedClear(root, engine, 'rules');
       for (const d of rg.dropped) drop(d.lane, `refused before the land run: ${d.why}\nFix it on ${d.lane.branch} (bring ${target} in first: ${targetMergeCommand(d.lane.task)}), then task done ${d.lane.task} --train again.`, { cause: 'rules' });
       set = rg.kept;
-      res.rules = { ran: rg.ran, runs: rg.runs, ms: rg.ms, dropped: rg.dropped.map((d) => d.lane.task), ...(rg.skipped ? { skipped: rg.why } : {}), ...(rg.mode ? { mode: rg.mode } : {}), ...(rg.selWhy ? { why: rg.selWhy } : {}), ...(rg.parts ? { parts: rg.parts } : {}), ...(rg.splitAtOnce ? { splitAtOnce: rg.splitAtOnce } : {}), ...(rg.filter ? { filter: rg.filter } : {}), ...(rg.groups ? { groups: rg.groups } : {}), ...(rg.reused ? { reused: rg.reused } : {}), ...(rg.sliced ? { sliced: rg.sliced, slices: rg.slices } : {}) };
+      res.rules = { ran: rg.ran, runs: rg.runs, ms: rg.ms, dropped: rg.dropped.map((d) => d.lane.task), ...(rg.skipped ? { skipped: rg.why } : {}), ...(rg.mode ? { mode: rg.mode } : {}), ...(rg.selWhy ? { why: rg.selWhy } : {}), ...(rg.parts ? { parts: rg.parts } : {}), ...(rg.splitAtOnce ? { splitAtOnce: rg.splitAtOnce } : {}), ...(rg.filter ? { filter: rg.filter } : {}), ...(rg.groups ? { groups: rg.groups } : {}), ...(rg.reused ? { reused: rg.reused } : {}), ...(rg.sliced ? { sliced: rg.sliced, slices: rg.slices } : {}), ...(rg.shards ? { shards: rg.shards } : {}) };
       // 2.91: keeps(tip): with rules.paths or rules.ignore, a target that moved only where the rules tests do not read keeps the green.
       const scope = rc.paths?.length ? 'outside rules.paths' : rc.ignore?.length ? 'under rules.ignore' : '';
-      if (rg.green) rulesGreen = { head: rg.green, tip: tip0, tasks: set.map((l) => l.task).join(','), mode: rg.mode || 'full', scope, same: () => { try { return inputsPrint(rc, [...from, ...extraFrom]) === (rg.inputs ?? inputsPrint(rc, [...from, ...extraFrom])); } catch { return false; } }, keeps: (t) => { if (!scope) return false; try { const k = rulesKey({ repo, sha: tip0, cfg: rc }); return Boolean(k) && k === rulesKey({ repo, sha: t, cfg: rc }); } catch { return false; } } };
+      // 2.95: shards without rules.shards.rest did not run every test: the land run is told focus, never full.
+      if (rg.green) rulesGreen = { head: rg.green, tip: tip0, tasks: set.map((l) => l.task).join(','), mode: rg.mode === 'shards' ? 'focus' : rg.mode || 'full', scope, same: () => { try { return inputsPrint(rc, [...from, ...extraFrom]) === (rg.inputs ?? inputsPrint(rc, [...from, ...extraFrom])); } catch { return false; } }, keeps: (t) => { if (!scope) return false; try { const k = rulesKey({ repo, sha: tip0, cfg: rc }); return Boolean(k) && k === rulesKey({ repo, sha: t, cfg: rc }); } catch { return false; } } };
     }
   }
   for (const l of set) deps.markRunning?.(l.task, l.agent);
@@ -1686,12 +1687,13 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       update({ now: `the full rules run on ${target} alone (${ow.why})` });
       log(`[unity-train] ${id}: the full rules run on ${target} alone at ${short(tipN)} (${ow.why}); it ${say}`);
       const fr = (deps.fullRulesRun || fullRulesRun)({ engine, repo, tip: tipN, cfg: rc0, from: fromAll, root, id, env, log });
-      res.fullRules = { status: fr.status, why: ow.why, overdue: Boolean(ow.overdue), when, tip: tipN, ...(fr.cached ? { cached: true } : {}) };
+      res.fullRules = { status: fr.status, ...(fr.notFull ? { notFull: true } : {}), why: ow.why, overdue: Boolean(ow.overdue), when, tip: tipN, ...(fr.cached ? { cached: true } : {}) };
       const ok = fr.status === 'pass';
-      const m = ok ? `the full rules run on ${target} alone at ${short(tipN)} passed${fr.cached ? ' (a kept result of this tree)' : ''} (${ow.why}; it ${say}): the next one is owed in ${ow.hours} h`
+      const m = ok && fr.notFull ? `the rules shards on ${target} alone at ${short(tipN)} passed (${ow.why}; it ${say}), but rules.shards has no rest, so a test no shard filter matches did not run: this is not the full run and it stays owed. Set rules.shards.rest`
+        : ok ? `the full rules run on ${target} alone at ${short(tipN)} passed${fr.cached ? ' (a kept result of this tree)' : ''} (${ow.why}; it ${say}): the next one is owed in ${ow.hours} h`
         : `the full rules run on ${target} alone at ${short(tipN)} ${fr.timedOut ? 'timed out' : `is ${fr.status}`} (${String(fr.why || '').split('\n')[0]}${fr.failures?.length ? `: ${fr.failures.slice(0, 3).join(', ')}` : ''}): no lane is blamed; it is not run again until ${target} changes under what the rules tests read${fr.timedOut && !fr.timeoutSet ? ' or the doubled timeout applies' : ''}. A fix task is wanted`;
       log(`[unity-train] ${id}: ${m}`);
-      ev('rules_full', id, m, { agent: by, to: 'producer', status: ok ? 'ok' : 'warn', meta: { status: fr.status, why: ow.why, overdue: Boolean(ow.overdue), when, tip: tipN, ...(fr.failures?.length ? { failures: fr.failures.slice(0, 10) } : {}), ...(fr.timedOut ? { timeout: true } : {}) } });
+      ev('rules_full', id, m, { agent: by, to: 'producer', status: ok && !fr.notFull ? 'ok' : 'warn', meta: { status: fr.status, ...(fr.notFull ? { notFull: true } : {}), why: ow.why, overdue: Boolean(ow.overdue), when, tip: tipN, ...(fr.failures?.length ? { failures: fr.failures.slice(0, 10) } : {}), ...(fr.timedOut ? { timeout: true } : {}) } });
       if (cancelledTrain(root, engine, id)) return true;
     }
     if (when === 'idle' ? !fullFirst : !fullLast) return false;
