@@ -14,9 +14,9 @@ export const RUN_LIMITED = fileURLToPath(import.meta.url);
 const MARK = '[run-limited] ended after';
 
 export function runLimitedSync(command, { timeoutMs, ...options } = {}) {
-  if (!(Number(timeoutMs) > 0)) return spawnSync(command, { shell: true, ...options });
+  if (!(Number(timeoutMs) > 0)) return spawnSync(command, { shell: true, ...options, windowsHide: true });
   const { shell, timeout, ...rest } = options;
-  const r = spawnSync(process.execPath, [RUN_LIMITED, String(timeoutMs), '--', command], { ...rest, timeout: timeoutMs + 60000 });
+  const r = spawnSync(process.execPath, [RUN_LIMITED, String(timeoutMs), '--', command], { ...rest, timeout: timeoutMs + 60000, windowsHide: true });
   const hit = (r.status === 124 && (r.stderr == null || String(r.stderr).includes(MARK))) || r.error?.code === 'ETIMEDOUT';
   if (hit) Object.assign(r, { error: Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' }), signal: 'SIGTERM', status: null });
   return r;

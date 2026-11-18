@@ -32,7 +32,9 @@ five, removed the last use of floors in the task gate, folded the problems log a
 5. **Two unused features are still in:** the old status snapshot with its role loader, and the second scorecard.
    This round added the train times to the scorecard, so removing it now would lose those lines.
 6. **A cleanup removed a folder other checkouts linked to** (P-365). Before removing a checkout, look for links into it.
-7. **The larger cut by evidence** still waits for a month of function records (from about 14 December).
+7. **Two rules about the code run only in the self-test:** unit `235` (no path from a URL) and unit `2731c` (every
+   process call hides its window). Run both before a push; each has now cost one online run (P-359, P-366).
+8. **The larger cut by evidence** still waits for a month of function records (from about 14 December).
 
 ## Open decisions for the owner
 

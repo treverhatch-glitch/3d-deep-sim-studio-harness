@@ -70,6 +70,10 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Evidence:** 18 November: the maintainer removed an old checkout that held the `node_modules` the agents' checkouts linked to; three agents' test runs failed on a missing module until the link was pointed at the main checkout.
 - **Rule:** before removing a checkout, search the other checkouts for links into it (`find -lname`). With P-353: remove by name, never by pattern, and never while other builds run.
 
+### P-366 — the new time-limit wrapper started two processes without the hidden-window option · fixed 2.93 (before the merge)
+- **Evidence:** pull request 95, first online run: the 2.73.1 rule "every child_process call passes windowsHide: true" red on all three systems, naming `harness/run-limited.mjs` lines 17 and 19. On Windows each engine command could have flashed a console window.
+- **Fix:** both calls pass it. Like the 2.35 path rule (P-359), this rule runs in the self-test only: the maintainer's list before a push now has units `235` and `2731c`.
+
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
 - **P-001** (reopened on purpose 2026-10-31: the owner made the harness and the game's repository public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist
