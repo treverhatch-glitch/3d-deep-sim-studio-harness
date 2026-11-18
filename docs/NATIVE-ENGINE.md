@@ -524,6 +524,53 @@ Around the train:
 - `node harness/unity-train.mjs queue --task <ID> [--engine x] [--branch b] [--alone]` queues a branch without closing
   a task; `npm run task -- train dequeue <ID>` takes one out.
 
+### The playtest build and "Systems ON" (2.95)
+
+**The contract for a land script:** after a green land run that built a player, write the built executable's path as
+`gates.build.output` in the land result (the file named in `STUDIO_LAND_RESULT`), with `gates.build.status` and the
+`commit` the land run made. The harness keeps that path in `.studio/engine/<x>-land-builds.json`. It only reads the
+build folders; `engines.<x>.builds` still prunes them.
+
+`engines.<x>.playtest` keeps the newest playable build in one fixed folder, with a note beside it:
+
+```json
+"playtest": { "dir": "D:/Playtest", "exe": "Game.exe", "build": "powershell -File BuildPlayer.ps1 -Out {out}",
+  "shortcut": true, "feedback": "Say what you found in the studio chat.", "keep": 3, "nightly": true }
+```
+
+- `npm run engine -- playtest [--engine <x>] [--if-moved] [--dry-run] [--json]` (also `npm run playtest:build`)
+  takes the newest green land build still on disk. If it is of the target's tip (or the tip moved only in
+  `engines.<x>.rules.ignore` paths), it is promoted. If the target moved past it: with `build` set and no engine train
+  running, the tip is built (in the engine's `cwd`, holding the train lock and the machine:heavy slot as a land run
+  does, `{out}` a new folder in `dir`, `STUDIO_PLAYTEST_COMMIT` the tip). Without `build`, or while a train runs, the
+  newest build is promoted and the output says how many landings it is behind, and which.
+- Promote copies the build into `<dir>/<date>-<short commit>/` (never over a folder: the owner may be playing it),
+  writes `PLAYTEST.md` there and in `dir`, writes the shortcut (`Playtest <Label>.cmd` on Windows, `playtest-<x>.sh`
+  elsewhere; the same name every time) in `dir` and on the Desktop (`shortcut: true`), or in the folder given, and
+  records `.studio/engine/<x>-playtest.json` and one `engine.playtest` event. The newest `keep` promoted folders stay;
+  one in use is left and named.
+- `PLAYTEST.md` says what the build is (commit, when built, when the target last moved, how far behind), Systems ON
+  with the names on and off, what landed since the previous playtest build, what is known red or open (the target-red
+  and full-run lines, flaky tests, tasks the engine train handed back), and the `feedback` line.
+- `--if-moved` does nothing when the promoted build is already the newest there is. `nightly: true`: the watchdog's
+  once-a-day tick (the digest's) starts `playtest --if-moved` for that engine on its own (log in
+  `.studio/engine/<x>-playtest.log`).
+
+`engines.<x>.switches` counts the rule systems switched ON in the engine. It is read from the engine target with git
+(nothing is checked out): one file per system matching `files`, its name from `name` (group 1; else the file's name),
+on when `on` matches.
+
+```json
+"switches": { "files": "Game/Sim/Systems/**/*.switch.cs", "name": "Name\\s*=>\\s*\"(\\w+)\"", "on": "On\\s*=>\\s*true",
+  "total": 64, "task": "switch .*\\b{name}\\b" }
+```
+
+`npm run score`, `npm run status` and `npm run studio:status` show `Systems ON: 16 of 64` (`total` is the larger of
+the planned number and the systems found; the rest are not in the engine yet). `npm run engine -- switches [--engine
+<x>] [--json]` lists the systems still off, each with the open task that switches it: by default one whose title has
+the word "switch" and the name as a whole word; `task` (a regex with `{name}`) replaces that. Unset: no line, nothing
+read. A bad setting shows as one line naming it.
+
 
 ## The engine train from 2.90: compile search, blame by file, checks before queueing
 

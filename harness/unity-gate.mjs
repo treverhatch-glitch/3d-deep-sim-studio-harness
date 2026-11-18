@@ -263,6 +263,20 @@ export function mapUnityExit(code, { signal = null, timedOut = false, timeoutMin
 }
 
 /**
+ * How a land run takes the machine:heavy slot: the engine table's job kind, RAM and floor (unity: STUDIO_UNITY_MIN_FREE_GB),
+ * the engine line (STUDIO_ENGINE_SLOTS) and the RAM wait (the Line Producer's hold, else STUDIO_ENGINE_LAND_WAIT_MIN).
+ * 2.95 (b): the playtest build takes it the same way. { hroot, heavyOpts }.
+ */
+export async function landHeavyOpts(engine, { env = process.env, log = () => {} } = {}) {
+  const et = engineTarget(engine) || engineTarget('unity');
+  const floor = engineFloor(engine, { env });
+  const hroot = await heavyRoot();
+  const landWait = (() => { try { return landWaitMin(hroot, env); } catch { return undefined; } })();
+  const heavyOpts = { log, env, kind: et.heavyKind, engine, ...(landWait && !(env.STUDIO_HEAVY_WAIT_MIN) ? { waitMin: landWait } : {}),...(et.heavyKind === 'unity' ? {} : { ramGb: et.rig.ramGb }), ...(et.heavyKind === 'unity' ? (/tuned|measured/.test(floor.from) ? { minFreeGb: floor.gb } : {}) : floor.gb > 0 ? { minFreeGb: floor.gb } : {}) };
+  return { hroot, heavyOpts };
+}
+
+/**
  * Run the landing gate. { status: pass|red|conflict|refused|error|not-run|killed|skipped, ok, code, why, ms, log }.
  * onlyUnityTask: a task not on the engine's track is skipped. A busy lock is a refusal, never a throw.
  */
@@ -315,12 +329,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   const flags = Array.isArray(tune['batch-flags']) && et.tune.includes('batch-flags') ? tune['batch-flags'].filter((f) => /^-{1,2}[A-Za-z][A-Za-z0-9_-]*(=[A-Za-z0-9_.:,/-]+)?$/.test(f)) : [];
   const cmd = template.replaceAll('{flags}', flags.join(' ')).replaceAll('{branches}', many ? many.join(' ') : '').replaceAll('{branch}', br ? q(br) : '').replaceAll('{task}', task ? q(task) : '').replaceAll('{target}', cfg.target ? q(cfg.target) : '').replaceAll('{folder}', folder ? q(folder) : '');
   const timeoutMin = Number(timeoutOverride || cfg.timeoutMin || env.STUDIO_UNITY_GATE_TIMEOUT_MIN || 120);
-  // The engine table's job kind, RAM and floor (unity: STUDIO_UNITY_MIN_FREE_GB).
-  const floor = engineFloor(engine, { env });
-  // The land takes the engine line (STUDIO_ENGINE_SLOTS); it waits for RAM per the Line Producer's hold, else STUDIO_ENGINE_LAND_WAIT_MIN.
-  const hroot = await heavyRoot();
-  const landWait = (() => { try { return landWaitMin(hroot, env); } catch { return undefined; } })();
-  const heavyOpts = { log, env, kind: et.heavyKind, engine, ...(landWait && !(env.STUDIO_HEAVY_WAIT_MIN) ? { waitMin: landWait } : {}),...(et.heavyKind === 'unity' ? {} : { ramGb: et.rig.ramGb }), ...(et.heavyKind === 'unity' ? (/tuned|measured/.test(floor.from) ? { minFreeGb: floor.gb } : {}) : floor.gb > 0 ? { minFreeGb: floor.gb } : {}) };
+  const { hroot, heavyOpts } = await landHeavyOpts(engine, { env, log });
   const landLabel = label || `${engine} land${task ? ` (${task})` : ''}`;
   let lk;
   try {
@@ -390,6 +399,8 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
     m = { status: 'not-run', why: `not run (${infra.kind}): ${infra.text}; the land command exited ${r.status ?? r.signal ?? '?'} (${m.status} by its contract), but nothing in its output shows a failing test or a compile error: ${WORDS['not-run']}` };
   } else if (m.status === 'not-run') m = { ...m, why: `not run: ${m.why}` };
   keepPeak(m.status);
+  // 2.95 (b): a green land run's built player (gates.build.output in its result) is kept for npm run engine -- playtest.
+  if (m.status === 'pass' && !only && env.STUDIO_LAND_PROBE !== '1') { try { (await import('./playtest.mjs')).recordLandBuild(engine, stageFile, { cwd, tasks: task ? String(task).split(',') : [] }); } catch { /* a record only */ } }
   const tail = text.trimEnd().split('\n').slice(-12).join('\n');
   // A red run's failing test names: from the output, results files (engines.<x>.results) and the stage report.
   const gw = cfg.gateWorktree ? path.resolve(REPO_ROOT, cfg.gateWorktree) : cwd;

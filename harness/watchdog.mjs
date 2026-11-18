@@ -237,6 +237,8 @@ export async function watchdogPass(now = Date.now(), { events = readRecentEvents
     const { digestIfDue } = await import('./digest.mjs');
     const d = await digestIfDue({ now });
     if (d) actions.push({ kind: 'digest', msg: `wrote the daily digest ${d.file}: ${d.need.length ? `${d.need.length} thing(s) need a person` : 'nothing needs a person'}` });
+    // 2.95 (b): the same once-a-day tick starts `playtest --if-moved` for each engine with playtest.nightly.
+    if (d) { try { for (const p of (await import('./playtest.mjs')).nightlyPlaytests()) actions.push({ kind: 'playtest', msg: `started the nightly playtest build check for ${p.engine} (pid ${p.pid})` }); } catch (e) { actions.push({ kind: 'error', msg: `playtest: ${e.message}` }); } }
   } catch (e) {
     actions.push({ kind: 'error', msg: `digest: ${e.message}` });
   }
