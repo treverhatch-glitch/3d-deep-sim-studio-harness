@@ -83,6 +83,10 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Evidence:** `npm run score` and the brief counted every `task.done` under "landed", so planning and watch tasks, duplicates and forced closes read as landed work.
 - **Fix:** "landed" is work that went through a train; "closed without a landing" is its own number. `qa/selftest-294c.mjs`. The autonomy badge still counts closes (its bars were set on that number).
 
+### P-369 — on Windows the check ahead ended with the train that started it · fixed 2.94 (before the merge)
+- **Evidence:** pull request 96, first online run, Windows only: `294a` (e) red. The check ahead was started and then dropped, the next train ran the same tests again, and the unit crashed removing a folder a leftover process held. On Windows a child that is not started detached ends when its parent's process ends; the check ahead was detached everywhere else.
+- **Fix:** it is started detached on every system. The unit's clean-up retries a held folder, as `292a` does.
+
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
 - **P-001** (reopened on purpose 2026-10-31: the owner made the harness and the game's repository public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist

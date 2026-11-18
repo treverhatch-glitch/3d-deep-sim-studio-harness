@@ -34,7 +34,8 @@ export function aheadStart({ root, engine, repo, target, head, next, lanes, cfg,
   const job = { root, engine, repo, target, head, lanes: lanes.map(({ task, branch, head: h }) => ({ task, branch, head: h })), from, extraFrom, train, landLabel };
   for (const k of ['', '-out']) fs.rmSync(fileOf(root, engine, k), { force: true });
   put(fileOf(root, engine, '-job'), job);
-  const c = spawn(process.execPath, [SELF, fileOf(root, engine, '-job')], { cwd: root, env, detached: process.platform !== 'win32', stdio: 'ignore', windowsHide: true });
+  // Detached on every system: on Windows a child that is not detached ends with the train's process, and this one must outlive it.
+  const c = spawn(process.execPath, [SELF, fileOf(root, engine, '-job')], { cwd: root, env, detached: true, stdio: 'ignore', windowsHide: true });
   c.on('error', () => {}); c.unref();
   const m = { train, pid: c.pid, tasks: job.lanes.map((l) => l.task), heads: job.lanes.map((l) => l.head), head, next, key: rulesKey({ repo, sha: next, cfg }), baseKey: rulesKey({ repo, sha: head, cfg }), at: new Date().toISOString(), told: 0 };
   put(fileOf(root, engine, ''), m);
