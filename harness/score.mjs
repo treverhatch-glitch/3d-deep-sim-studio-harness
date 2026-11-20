@@ -311,13 +311,13 @@ export function engineText(en, prev = null) {
  * (engines.<x>.cwd, else the studio root), 30 s at most, and its first non-empty output line (200 characters at most) is
  * kept. Returns [{ engine, line }] or [{ engine, line: null, why }]; never throws, never fails the score.
  */
-export function engineProgress(root = REPO_ROOT, { timeoutMs = 30000 } = {}) {
+export function engineProgress(root = REPO_ROOT, { timeoutMs = 30000, only = null } = {}) {
   let engines = {};
   try { engines = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'game.json'), 'utf8').replace(/^\uFEFF/, ''))?.engines || {}; } catch { return []; }
   const out = [];
   for (const [engine, cfg] of Object.entries(engines)) {
     const cmd = typeof cfg?.progress === 'string' ? cfg.progress.trim() : '';
-    if (!cmd) continue;
+    if (!cmd || (only && engine !== only)) continue;
     try {
       const cwd = typeof cfg.cwd === 'string' && cfg.cwd ? path.resolve(root, cfg.cwd) : root;
       const r = spawnSync(cmd, { shell: true, cwd, encoding: 'utf8', windowsHide: true, timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024 });

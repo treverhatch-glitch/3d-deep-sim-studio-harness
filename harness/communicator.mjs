@@ -19,6 +19,7 @@ import { loadDotEnv } from './dotenv.mjs';
 import { webhookFrom, maskWebhook, scrub, formatFor, postOnce, DISCORD_MAX } from './report-post.mjs';
 import { digestHours as askDigestHours } from './ask-post.mjs';
 import { pidAlive as alive, readJson } from './fsafe.mjs';
+import { pendingLandings, landingText } from './landing-post.mjs';
 
 export const CONFIG_REL = 'studio/communicator.json';
 export const ROLES = ['orchestrator', 'keys', 'owner'];
@@ -451,15 +452,22 @@ export async function communicatorPass({ now = Date.now(), dryRun = false, env =
     // 2.77.0 (u, P5.5): notices other harness parts queued (the visual check's shots for the owner): one path line each,
     // posted once, tagging nobody (harness/visual-check.mjs postShots writes .studio/comm/notices.jsonl).
     const notices = retryOk ? pendingNotices(root, st) : [];
+    // 2.96 (d): each engine-train landing is posted once, after the alerts (engines.<x>.announce: false turns it off).
+    const lands = dryRun || !retryOk ? [] : pendingLandings(f.events, st.landings, { now, root });
+    const marked = lands.filter((x) => x.off).map((x) => x.key);
+    const landTexts = [];
+    for (const l of lands.filter((x) => !x.off).slice(-5)) landTexts.push(quiet(await landingText(l, { events: f.events, now, root, deps: deps.landing })));
     const L = [];
     if (doAlerts) { L.push(`Studio alert ${hhmm(now)}`); for (const a of due) L.push(alertLine(a, cfg)); }
     if (notices.length) { if (L.length) L.push(''); L.push(`Studio notice ${hhmm(now)}`); for (const n of notices) L.push(quiet(short(n.text, 600))); }
     if ((doAlerts || doStatus) && cleared.length) L.push(`Cleared: ${cut(cleared, 6)}`);
+    for (const t of landTexts) { if (L.length) L.push(''); L.push(t); }
     if (doStatus) { if (L.length) L.push(''); L.push(statusText(f, { alerts: open })); }
     const text = L.join('\n');
-    const kind = doAlerts && doStatus ? 'alerts+status' : doAlerts ? 'alerts' : doStatus ? 'status' : notices.length ? 'notices' : null;
+    const kind = doAlerts && doStatus ? 'alerts+status' : doAlerts ? 'alerts' : doStatus ? 'status' : notices.length ? 'notices' : landTexts.length ? 'landing' : null;
     const result = { posted: false, kind, alerts: due.map((a) => ({ key: a.key, kind: a.kind, who: routeAlert(a) })), held, cleared, open: open.length };
     if (dryRun) return { ...result, dryRun: true, text, enabled: en };
+    if (!kind && marked.length) st.landings = [...(st.landings || []), ...marked].slice(-200);
     if (kind) {
       const r = await send(hook, text, { kind, env, cfg, now, deps });
       result.posted = r.ok; result.parts = r.parts; result.why = r.why || '';
@@ -469,6 +477,7 @@ export async function communicatorPass({ now = Date.now(), dryRun = false, env =
         for (const a of due) st.sent[a.key] = { at: new Date(now).toISOString(), kind: a.kind, who: routeAlert(a), count: (st.sent[a.key]?.count || 0) + 1, cleared: false };
         for (const k of cleared) st.sent[k].cleared = true;
         st.notices = [...(st.notices || []), ...notices.map((n) => n.key)].slice(-200);
+        st.landings = [...(st.landings || []), ...lands.map((x) => x.key)].slice(-200);
       } else st.failedAt = new Date(now).toISOString();
       st.lastPost = { at: new Date(now).toISOString(), kind, ok: r.ok, parts: r.parts, sent: r.sent, why: r.why || null };
       try { emitEvent({ type: 'comm.posted', agent: 'communicator', to: 'human', status: r.ok ? 'ok' : 'error', msg: r.ok ? `Posted ${kind}${due.length ? ` (${due.length} alert${due.length === 1 ? '' : 's'}: ${cut(due.map((a) => a.key), 4)})` : ''}` : `Couldn't post ${kind}: ${r.why}`, meta: { kind, ok: r.ok, parts: r.parts, sent: r.sent, alerts: due.map((a) => a.key), tagged: [...new Set(due.flatMap(routeAlert))], held, source: hook.source } }); } catch {}
