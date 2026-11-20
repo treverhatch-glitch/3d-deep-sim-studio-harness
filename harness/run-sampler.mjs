@@ -8,7 +8,6 @@
  */
 import fs from 'node:fs';
 import os from 'node:os';
-import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { psEnv } from './proc-identity.mjs';
 
@@ -28,31 +27,38 @@ export function parseHelperLine(line, cores = os.cpus().length || 1) {
 }
 
 /**
- * The Windows helper: one PowerShell loop over CIM classes (names aren't localized). Ends when `parent` is gone. The
- * first line marks it (`studio-sampler <rootPid>`) so a check finds it by its command line. No double quotes in it:
- * Node's quoting of them on a Windows command line is a known trap.
+ * The Windows helper: one PowerShell loop of two WMI queries a sample (class names aren't localized). Ends when `parent`
+ * is gone. A line marks it (`studio-sampler <rootPid>`) so a check finds it by its command line. No double quotes in
+ * it: Node's quoting of them on a Windows command line is a known trap.
  */
 export const helperMark = (rootPid) => `studio-sampler ${Number(rootPid)}`;
 export function windowsHelperScript(rootPid, parentPid, everyMs) {
+  // .NET and [wmisearcher] only, no cmdlet: a cmdlet makes PowerShell search every module folder first, which took
+  // longer than the run (or hung) on a machine with a long PSModulePath; two queries a sample, about 0.1 s of work.
   return [
-    `$mark='${helperMark(rootPid)}'`,
     "$ErrorActionPreference='SilentlyContinue'",
-    `$root=${Number(rootPid)}; $parent=${Number(parentPid)}; $ms=${Math.max(200, Number(everyMs))}`,
+    '[Threading.Thread]::CurrentThread.CurrentCulture=[Globalization.CultureInfo]::InvariantCulture',
+    `$mark='${helperMark(rootPid)}'`,
+    `$root=${Number(rootPid)}; $parent=${Number(parentPid)}; $ms=${Math.max(200, Number(everyMs))}; $cores=[Math]::Max(1,[Environment]::ProcessorCount)`,
+    '$prev=@{}; $prevT=$null',
     'while ($true) {',
-    ' if (-not (Get-Process -Id $parent)) { break }',
-    ' $ps=@(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,WorkingSetSize,CreationDate)',
-    ' $by=@{}; $kids=@{}; foreach ($p in $ps) { $by[[int]$p.ProcessId]=$p; $k=[int]$p.ParentProcessId; if (-not $kids.ContainsKey($k)) { $kids[$k]=@() }; $kids[$k]+=$p }',
-    ' $in=@{}; $q=New-Object System.Collections.Queue; if ($by.ContainsKey($root)) { $in[$root]=1; $q.Enqueue($by[$root]) }',
-    ' while ($q.Count) { $x=$q.Dequeue(); foreach ($c in @($kids[[int]$x.ProcessId])) { if ($c -and -not $in.ContainsKey([int]$c.ProcessId) -and $c.CreationDate -ge $x.CreationDate) { $in[[int]$c.ProcessId]=1; $q.Enqueue($c) } } }',
-    ' $ws=0; foreach ($id in $in.Keys) { $ws+=[double]$by[$id].WorkingSetSize }',
-    // Performance data of the tree's processes only (one filtered query); a tree of over 40 reads every process's.
-    " $pf=@{ Property='IDProcess','PercentProcessorTime' }; if ($in.Count -le 40) { $pf.Filter=(@($in.Keys | ForEach-Object { 'IDProcess=' + $_ }) -join ' OR ') }",
-    ' $cpu=0; if ($in.Count) { foreach ($pp in @(Get-CimInstance Win32_PerfFormattedData_PerfProc_Process @pf)) { if ($in.ContainsKey([int]$pp.IDProcess)) { $cpu+=[double]$pp.PercentProcessorTime } } }',
-    ' $m=Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory -Property AvailableBytes,CommittedBytes,CommitLimit',
-    " $t=(Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter 'Name=''_Total''' -Property PercentProcessorTime).PercentProcessorTime",
+    ' try { $null=[Diagnostics.Process]::GetProcessById($parent) } catch { break }',
+    " $ps=@(([wmisearcher]'SELECT ProcessId,ParentProcessId,WorkingSetSize,CreationDate,KernelModeTime,UserModeTime FROM Win32_Process').Get())",
     ' $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
-    " [Console]::Out.WriteLine(('S|{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}' -f $now,$m.AvailableBytes,$m.CommittedBytes,$m.CommitLimit,$t,$ws,$cpu,$in.Count)); [Console]::Out.Flush()",
-    ' Start-Sleep -Milliseconds $ms',
+    ' $by=@{}; $kids=@{}; foreach ($p in $ps) { $by[[int]$p.ProcessId]=$p; $k=[int]$p.ParentProcessId; if (-not $kids.ContainsKey($k)) { $kids[$k]=@() }; $kids[$k]+=$p }',
+    ' $in=@{}; $q=[Collections.Queue]::new(); if ($by.ContainsKey($root)) { $in[$root]=1; $q.Enqueue($by[$root]) }',
+    ' while ($q.Count) { $x=$q.Dequeue(); foreach ($c in @($kids[[int]$x.ProcessId])) { if ($c -and -not $in.ContainsKey([int]$c.ProcessId) -and [string]$c.CreationDate -ge [string]$x.CreationDate) { $in[[int]$c.ProcessId]=1; $q.Enqueue($c) } } }',
+    ' $ws=0; foreach ($id in $in.Keys) { $ws+=[double]$by[$id].WorkingSetSize }',
+    // CPU from each process's own kernel and user time (100 ns units) since the last sample; pid 0 is the idle time.
+    ' $cur=@{}; $all=0; $tree=0',
+    ' foreach ($p in $ps) { $id=[int]$p.ProcessId; if ($id -eq 0) { continue }; $t=[double]$p.KernelModeTime+[double]$p.UserModeTime; $cur[$id]=$t; if ($prev.ContainsKey($id) -and $t -ge $prev[$id]) { $d=$t-$prev[$id]; $all+=$d; if ($in.ContainsKey($id)) { $tree+=$d } } }',
+    " $cpu=''; $tcpu=''",
+    ' if ($prevT -ne $null -and $now -gt $prevT) { $wall=($now-$prevT)*10000; $cpu=[Math]::Min(100,[Math]::Round(100*$all/($wall*$cores),1)); $tcpu=[Math]::Round(100*$tree/$wall,1) }',
+    ' $prev=$cur; $prevT=$now',
+    " $o=@(([wmisearcher]'SELECT FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory FROM Win32_OperatingSystem').Get())[0]",
+    ' $avail=[double]$o.FreePhysicalMemory*1024; $limit=[double]$o.TotalVirtualMemorySize*1024; $commit=$limit-[double]$o.FreeVirtualMemory*1024',
+    " [Console]::Out.WriteLine(('S|{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}' -f $now,$avail,$commit,$limit,$cpu,$ws,$tcpu,$in.Count)); [Console]::Out.Flush()",
+    ' [Threading.Thread]::Sleep($ms)',
     '}',
   ].join('\n');
 }
@@ -94,44 +100,23 @@ export function startSampler({ file, meta = {}, rootPid, everyMs = 10000, helper
   const write = (text) => { if (dead) return; try { fs.appendFileSync(file, text); } catch { dead = true; } };
   const row = (s) => { if (rows >= MAX_ROWS) return; rows += 1; write(`${[s.t, r2(s.availGb), r2(s.commitUsedGb), r2(s.commitLimitGb), r2(s.cpuPct), r2(s.treeGb), r2(s.treeCpuPct), s.procs ?? ''].join(',')}\n`); };
   try { write(`# ${JSON.stringify({ v: 1, ...meta, pid: process.pid, ppid: process.ppid, root: rootPid, at: Date.now(), everyMs, cores, platform })}\n${CSV_HEAD}\n`); } catch { dead = true; }
-  const dbg = (x) => { try { fs.appendFileSync(path.join(os.tmpdir(), 'studio-sampler-dbg.log'), `${new Date().toISOString()} pid ${process.pid} root ${rootPid} every ${everyMs} helper ${helper || '-'}: ${x}\n`); } catch { /* debug */ } };
-  dbg(`startSampler file ${file} cwd ${process.cwd()}`);
   try {
     if (helper || platform === 'win32') later = setTimeout(() => { try {
-      dbg('timer fired');
       // Started after one interval: a run shorter than that never starts a helper.
       if (dead) return;
       const args = helper ? [helper, String(rootPid), String(process.pid), String(everyMs)] : ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', windowsHelperScript(rootPid, process.pid, everyMs)];
       const env = helper ? process.env : psEnv(process.env);
-      proc = spawn(helper ? process.execPath : 'powershell.exe', args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env });
-      if (!helper) {
-        dbg(`ENV NAMES ${Object.keys(env).join(' ')}`);
-        for (const k of Object.keys(env)) if (/^(systemroot|windir|psmodulepath|temp|tmp|home|userprofile|appdata|localappdata|pathext|comspec|systemdrive|programdata|msystem|shell|term)$/i.test(k)) dbg(`ENV ${k}=${String(env[k]).slice(0, 260)}`);
-        for (const [label, script] of [
-          ['wmisearcher', "$sw=[Diagnostics.Stopwatch]::StartNew(); $p=@(([wmisearcher]'SELECT ProcessId,ParentProcessId,WorkingSetSize FROM Win32_Process').Get()); [Console]::Out.WriteLine(('wmisearcher procs {0} in {1} ms' -f $p.Count,$sw.ElapsedMilliseconds))"],
-          ['hello', "[Console]::Out.WriteLine('hello from powershell')"],
-          ['cim', "$sw=[Diagnostics.Stopwatch]::StartNew(); $p=@(Get-CimInstance Win32_Process -Property ProcessId); [Console]::Out.WriteLine(('cim procs {0} in {1} ms' -f $p.Count,$sw.ElapsedMilliseconds))"],
-        ]) {
-          const a = Date.now();
-          const x = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env });
-          x.stdout.on('data', (d) => dbg(`TEST ${label} after ${Date.now() - a} ms OUT ${JSON.stringify(d.toString().slice(0, 300))}`));
-          x.stderr.on('data', (d) => dbg(`TEST ${label} after ${Date.now() - a} ms ERR ${JSON.stringify(d.toString().slice(0, 600))}`));
-          x.on('exit', (c) => dbg(`TEST ${label} exit ${c} after ${Date.now() - a} ms`));
-        }
-      }
-      dbg(`spawned ${proc.pid} PATH ${String(env.PATH || env.Path || '').slice(0, 200)} SystemRoot ${env.SystemRoot}`);
-      proc.stderr.on('data', (d) => dbg(`STDERR ${d.toString().slice(0, 1200)}`));
-      proc.on('error', (e) => { dbg(`ERROR ${e.code} ${e.message}`); proc = null; });
+      proc = spawn(helper ? process.execPath : 'powershell.exe', args, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, env });
+      proc.on('error', () => { proc = null; });
       let buf = '';
       proc.stdout.on('data', (d) => {
-        dbg(`OUT ${JSON.stringify(d.toString().slice(0, 200))}`);
         buf = (buf + d.toString('utf8')).slice(-65536);
         const lines = buf.split(/\r?\n/); buf = lines.pop();
         for (const l of lines) { const s = parseHelperLine(l, cores); if (s) row(s); }
       });
-      proc.on('exit', (c, sg) => { dbg(`exit ${c} ${sg}`); proc = null; });
+      proc.on('exit', () => { proc = null; });
       proc.unref(); proc.stdout.unref?.();
-    } catch (e) { dbg(`THROW ${e.message}`); proc = null; } }, Math.max(100, everyMs));
+    } catch { proc = null; } }, Math.max(100, everyMs));
     if (later) later.unref();
     else if (platform === 'linux') {
       let last = null;
@@ -156,7 +141,6 @@ export function startSampler({ file, meta = {}, rootPid, everyMs = 10000, helper
   } catch { /* no samples: the run goes on */ }
   return {
     stop({ code = null, signal = null } = {}) {
-      dbg(`stop code ${code} signal ${signal} rows ${rows} proc ${proc ? proc.pid : null}`);
       try { if (timer) clearInterval(timer); if (later) clearTimeout(later); } catch { /* gone */ }
       try { if (proc) proc.kill(); } catch { /* gone */ }
       write(`# end ${JSON.stringify({ at: Date.now(), code, signal, rows })}\n`);
