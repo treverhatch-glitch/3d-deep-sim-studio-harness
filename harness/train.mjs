@@ -24,6 +24,7 @@ import { studioCheckReaders } from './check-reads.mjs';
 import { recordTrust } from './gate-trust.mjs';
 import { beginTrainLife, reapDeadTrains } from './train-life.mjs';
 import { processHarness, chainGuard, copyHarnessDrift } from './harness-version.mjs';
+import { trainGate, gateResult } from './train-gate.mjs';
 import { cancelPath } from './train-watch.mjs';
 import { recreateLaneCopy, ownWorktree, infraHandBack, INFRA_HANDBACK, keepRelease, keptRelease, forgetRelease, mixedLane, mayCarry, noteMixed, laneContent, carriedRelease } from './train-lanes.mjs';
 import { readBeta, betaActor, recordBetaUse, standInMay, recordStandInUse } from './beta-mode.mjs';
@@ -1610,7 +1611,7 @@ const changedVs = (dir, tip, head) => out(git(dir, 'diff', '--name-only', `${tip
 /**
  * Run one train. opts: lanes (default the queue), max, dryRun (plan only), by, oneLane (failure returned, not handed
  * back), waitMs, log, and
- *   deps { close, handBack, stopped, waitForDrain, markRunning, clearRunning, precheck }
+ *   deps { close, handBack, stopped, drained, restart, markRunning, clearRunning, precheck }
  * Returns { ok, id, landed: [task], dropped: [{ task, why }], deferred: [{ task, why }], verifies, reused, message }.
  */
 /** The disk-low warning in the train's output (harness/machine.mjs diskWarning). */
@@ -1664,10 +1665,9 @@ export async function runTrain(opts = {}) {
   const stopped = deps.stopped?.();
   if (stopped) return { ok: false, id, message: `The studio is stopped (${stopped}); no train runs until npm run task -- resume.`, landed: [], dropped: [], deferred: [] };
   if (!opts.dryRun) await trainDiskWarning(root, log);
-  if (!opts.dryRun && deps.waitForDrain) {
-    const w = await deps.waitForDrain();
-    if (!w.ok) return { ok: false, id, message: w.message, landed: [], dropped: [], deferred: [] };
-  }
+  // 2.97 (d): no train starts during a drain; the gate runs again as the lock is taken (after every wait).
+  const gateEnd = (g) => gateResult(g, { id, deps, log });
+  if (!opts.dryRun) { const dl = await deps.drained?.(); if (dl) return gateEnd({ drain: dl }); }
   // A queued train waits up to STUDIO_TRAIN_WAIT_MIN for STUDIO_TRAIN_MIN lanes (--now: it doesn't).
   if (!opts.lanes && !opts.dryRun && !opts.now) waitForBatch(root, { log, id });
   // A train that died without recording its end (its process gone) is recorded now, before this one.
@@ -1678,7 +1678,9 @@ export async function runTrain(opts = {}) {
   const one = async (tid, extra = {}, waitMs = opts.waitMs ?? 0) => {
     const until = Date.now() + waitMs;
     for (;;) {
-      const r = await withTrainLock(root, { id: tid, by }, () => {
+      const r = await withTrainLock(root, { id: tid, by }, async () => {
+        const g = opts.dryRun ? null : await trainGate(deps);
+        if (g) return { gate: g };
         const nb = opts.dryRun ? null : nextBusy(root, { tip: tipNow(), self: tid });
         return nb ? { yieldTo: nb } : livedTrain(root, { id: tid, by, dryRun: opts.dryRun }, (life) => trainBody({ ...opts, ...extra, root, log, deps, id: tid, by, life }));
       }, { waitMs: Math.max(0, until - Date.now()), log });
@@ -1689,6 +1691,7 @@ export async function runTrain(opts = {}) {
     }
   };
   let locked = await one(id);
+  if (locked?.gate) return gateEnd(locked.gate);
   if (locked?.busy) return { ok: false, id, busy: locked.busy, message: `Another train is running (${locked.busy.id || '?'}, by ${locked.busy.by || '?'}); run this again when it ends.`, landed: [], dropped: [], deferred: [] };
   // Lanes that waited because a lane ran alone get the next train(s) now, one after another.
   const trains = [locked.id];
@@ -1706,7 +1709,8 @@ export async function runTrain(opts = {}) {
       break;
     }
     const next = await one(`${id}-${k}`, opts.lanes ? { lanes: undefined, oneLane: false, rideAlong: false } : {}, Number(process.env.STUDIO_TRAIN_STALE_MIN || 360) * 60000);
-    if (next?.busy) break;
+    if (next?.gate) log(`[train] ${id}: the next train is not started: ${next.gate.drain || next.gate.line}`);
+    if (next?.busy || next?.gate) break;
     trains.push(next.id);
     const later = new Set([...next.landed, ...next.dropped.map((d) => d.task), ...next.held.map((h) => h.task)]);
     locked = {

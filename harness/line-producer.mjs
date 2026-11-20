@@ -1048,6 +1048,7 @@ export function engineWindow(f, env = process.env) {
   if (!f.auto) return { start: false, wait: false, why: `starting the ${L} train is left to a person (STUDIO_ENGINE_TRAIN_AUTO=off or engines.${f.engine}.trainAuto false): npm run task -- train --engine ${f.engine}` };
   if (!f.queued && !f.fullDue) return { start: false, wait: false, why: `no ${L} branch queued` };
   if (f.running) return { start: false, wait: false, why: `the ${L} train is running` };
+  if (f.drain) return { start: false, wait: false, why: `the drain is on (${f.drain}): no ${L} train starts until npm run task -- drain off` }; // 2.97 (d)
   if (f.startedRecently) return { start: false, wait: false, why: `started it ${f.startedRecently} min ago` };
   // The engine's own slot (STUDIO_ENGINE_SLOTS, heavy.mjs engineSlotsAt): the train starts when that slot is free, whatever
   // the game's trains and verifies are doing. Free RAM and CPU are the land's own heavy wait. The quiet window below is
@@ -1123,6 +1124,8 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
   let webTrain = Boolean(rig?.train?.running);
   try { if (!webTrain && !deps.rig) webTrain = Boolean((await import('./train-daemon.mjs')).trainLockHeld(root, env, now)); } catch {}
   if (deps.webTrain !== undefined) webTrain = deps.webTrain;
+  let drain = deps.drain;
+  if (drain === undefined) { try { const d = await (await import('./busy.mjs')).readDrain(); drain = d?.on ? `by ${d.by || '?'}${d.why ? `: ${d.why}` : ''}` : null; } catch { drain = null; } }
   const webQ = (readJson(path.join(root, '.studio', 'train', 'queue.json'), []) || []).filter((e) => e?.task && !(e.held && !(e.released && e.released.head === e.head)));
   const starts = readJson(ENGINE_STARTS(), {}) || {};
   // The batch window: the running sessions (who may still queue a branch) and the waits already announced.
@@ -1159,7 +1162,7 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     const exp = et.expectedMinutes(t.name, { root });
     const last = starts[t.name];
     const since = last ? Math.round((now - Date.parse(last.at)) / 60000) : null;
-    const f = { engine: t.name, label: t.label, heavyKind: t.heavyKind, queued: q.length, oldestAt: q[0]?.at || null, running: Boolean(running), startedRecently: since !== null && since < num(env.STUDIO_ENGINE_TRAIN_COOLDOWN_MIN, 3) ? Math.max(0, since) : 0, auto: autoOn && t.trainAuto && (ea.on || ea.source !== 'file'), webTrain, webQueued: webQ.length, heavy, freeGb: Number.isFinite(rb?.freeGb) ? rb.freeGb : Number.isFinite(rig?.freeRamGb) ? rig.freeRamGb : null, floorGb: floor.gb, floorFrom: floor.from, cpuBusy, expectedMin: exp.minutes, now };
+    const f = { engine: t.name, label: t.label, heavyKind: t.heavyKind, queued: q.length, oldestAt: q[0]?.at || null, running: Boolean(running), startedRecently: since !== null && since < num(env.STUDIO_ENGINE_TRAIN_COOLDOWN_MIN, 3) ? Math.max(0, since) : 0, auto: autoOn && t.trainAuto && (ea.on || ea.source !== 'file'), webTrain, webQueued: webQ.length, heavy, freeGb: Number.isFinite(rb?.freeGb) ? rb.freeGb : Number.isFinite(rig?.freeRamGb) ? rig.freeRamGb : null, floorGb: floor.gb, floorFrom: floor.from, cpuBusy, expectedMin: exp.minutes, now, drain };
     try {
       const hv = await import('./heavy.mjs');
       f.engineSlots = hv.engineSlotsAt(root, env);

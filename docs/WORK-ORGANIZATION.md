@@ -135,7 +135,10 @@ A lane copy's work reaches the studio's branch through a train, so landing does 
   read when unset). Tier C is queued and held (exit 1). `STUDIO_DONE_QUEUE=0|off`, `STUDIO_TRAIN=off`, `--force`, or a copy with no
   commits: the old path (train inside `task done`).
 - `npm run task -- train [--max N] [--dry-run] [--by <name>] [--wait <min>] [--now]` lands the queue oldest first; one train at a time
-  (`.studio/locks/train.lock`; waits only with `--wait`); none while stopped; drain on makes it wait. An unknown subcommand prints
+  (`.studio/locks/train.lock`; waits only with `--wait`); none while stopped; while drain is on it ends at once (exit 3), and `drain off` starts the queued lanes' train (2.97). A train
+  (web or engine) that waited before its lock while the harness changed starts the same command again on the new code as it
+  takes the lock, once: `STUDIO_TRAIN_RESTARTED` (set by the harness, never by hand; default unset) marks the second process,
+  which ends with one line (exit 3) if the harness changed again. An unknown subcommand prints
   usage (exit 2). `train status --engine <name>` lists an engine's batch and queue.
 - **Detached starts**: trains started for someone else go through a launcher that exits at once, so killing the starter's tree doesn't
   reach them; `train` from an agent's shell (a launched session, `CLAUDECODE`, `AI_AGENT`, `CODEX_SANDBOX`, `GEMINI_CLI`, an agent's

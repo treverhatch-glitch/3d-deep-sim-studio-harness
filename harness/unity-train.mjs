@@ -37,6 +37,8 @@ import { targetRedTask, targetRedClear, targetRedLine } from './engine-target-re
 import { aheadStart, aheadVerdict, aheadFor, aheadLine } from './rules-ahead.mjs';
 import { unionGlobs, unionMerge } from './merge-union.mjs';
 import { runningLines } from './run-cost.mjs';
+import { processHarness } from './harness-version.mjs';
+import { trainGate, gateResult } from './train-gate.mjs';
 
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); writeAtomic(f, `${JSON.stringify(v, null, 2)}\n`); };
 const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
@@ -1051,7 +1053,7 @@ function aheadSet(root, engine, queued, { repo, tip, cfg }) {
 /**
  * Run one Unity train. opts: root, by, max, dryRun, waitMs (for a running Unity train; default 0: busy at once),
  * log, env, deps { close(lane, ctx{ train, head, repo, target }) -> { ok, message?, target? }, handBack(lane, note),
- * stopped() -> reason|null, waitForDrain(), markRunning(task, agent), clearRunning(task) }.
+ * stopped() -> reason|null, drained() -> line|'', restart() -> pid, markRunning(task, agent), clearRunning(task) }.
  * Returns { ok, id, landed, dropped: [{ task, why }], deferred: [{ task, why }], runs, refused?, busy?, message }.
  */
 export async function runUnityTrain(opts = {}) {
@@ -1070,13 +1072,13 @@ export async function runUnityTrain(opts = {}) {
   // --only ids (STUDIO_UNITY_TRAIN_ONLY, deprecated, is its alias) must all be queued: refused before anything starts.
   const only = onlyList(opts.only ?? (opts.env || process.env).STUDIO_UNITY_TRAIN_ONLY ?? '');
   { const miss = only.filter((t) => !readUnityQueue(root, engine).some((e) => e.task === t)); if (miss.length) return { ...empty, ok: false, unknown: miss, message: `No ${L} train was started: ${miss.join(', ')} ${miss.length === 1 ? 'is' : 'are'} not in the ${L} queue (--only takes queued tasks; npm run task -- train status --engine ${engine} lists them).` }; }
-  if (!opts.dryRun && deps.waitForDrain) {
-    const w = await deps.waitForDrain();
-    if (!w.ok) return { ...empty, ok: false, message: w.message };
-  }
+  // 2.97 (d): no train starts during a drain; the gate (drain, then harness) runs again as the lock is taken.
+  const gateEnd = (g) => gateResult(g, { id, deps, log: (m) => log(m.replace(/^\[train\]/, '[unity-train]')), extra: { engine, runs: 0 } });
+  if (!opts.dryRun) { processHarness(); const dl = await deps.drained?.(); if (dl) return gateEnd({ drain: dl }); }
   // The lock names its engine and the RAM a land run takes, so room for builders counts it between runs (heavy-budget.mjs engineTrainReserve).
   const rigRam = Number(engineTarget(engine)?.rig?.ramGb) || null;
-  const locked = await withUnityTrainLock(root, { id, by, lanes: [], engine, ...(rigRam ? { ramGb: rigRam } : {}) }, (update) => unityTrainBody({ ...opts, only, engine, root, log, deps, id, by, s, update }), { waitMs: opts.waitMs ?? 0, log, engine });
+  const locked = await withUnityTrainLock(root, { id, by, lanes: [], engine, ...(rigRam ? { ramGb: rigRam } : {}) }, async (update) => { const g = opts.dryRun ? null : await trainGate(deps); return g ? { gate: g } : unityTrainBody({ ...opts, only, engine, root, log, deps, id, by, s, update }); }, { waitMs: opts.waitMs ?? 0, log, engine });
+  if (locked?.gate) return gateEnd(locked.gate);
   if (locked?.busy) return { ...empty, ok: false, busy: locked.busy, message: `Another ${L} train is running (${locked.busy.id || '?'}, by ${locked.busy.by || '?'}, pid ${locked.busy.pid || '?'}); one ${L} train at a time: run this again when it ends (npm run task -- train status shows it).` };
   return locked;
 }

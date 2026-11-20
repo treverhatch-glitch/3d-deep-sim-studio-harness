@@ -98,10 +98,10 @@ export async function selftest260C({ dir, run, report, tmpRoot }) {
 
   // ---- 3b: who may merge ----
   const before = head();
-  const worker = upgrade(`--merge origin/claude/260 --by hatch --permission "${PERM}"`, { STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'builder-s3' });
-  const workerShell = upgrade(`--merge origin/claude/260 --by hatch --permission "${PERM}"`, { STUDIO_LOCK_OWNER: 'builder-s3' });
-  const noPerm = upgrade('--merge origin/claude/260 --by hatch', { CLAUDECODE: '1' });
-  const agentBy = upgrade(`--merge origin/claude/260 --by opus-bot --permission "${PERM}"`, { CLAUDECODE: '1' });
+  const worker = upgrade(`--merge origin/claude/260 --not-main --by hatch --permission "${PERM}"`, { STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'builder-s3' });
+  const workerShell = upgrade(`--merge origin/claude/260 --not-main --by hatch --permission "${PERM}"`, { STUDIO_LOCK_OWNER: 'builder-s3' });
+  const noPerm = upgrade('--merge origin/claude/260 --not-main --by hatch', { CLAUDECODE: '1' });
+  const agentBy = upgrade(`--merge origin/claude/260 --not-main --by opus-bot --permission "${PERM}"`, { CLAUDECODE: '1' });
   report('2.60.0 (#3b): upgrade --merge refuses a worker (a builder session or a worker\'s shell) even with --permission, an agent without --permission, and --by naming an agent; nothing merged, no backup made',
     worker.status === 1 && /builder session can't/.test(out(worker)) && workerShell.status === 1 && /builder-s3 is a worker agent/.test(out(workerShell))
       && noPerm.status === 1 && /needs the person's direct permission/.test(out(noPerm)) && agentBy.status === 1 && /agent's name/.test(out(agentBy))
@@ -114,10 +114,10 @@ export async function selftest260C({ dir, run, report, tmpRoot }) {
   sg('merge --abort');
 
   // A golden the merge combined with the studio's own change needs a person's reason; a golden straight from the ref doesn't.
-  const combined = upgrade('--merge origin/claude/260 --by hatch');
+  const combined = upgrade('--merge origin/claude/260 --not-main --by hatch');
   const afterCombined = { head: head(), merging: sg('rev-parse -q --verify MERGE_HEAD').status === 0 };
   const sha260 = sg('rev-parse origin/claude/260').stdout.trim();
-  const person = upgrade('--merge origin/claude/260 --by hatch --golden-reason "the 2.60.0 sim fix moves k10; k1 stays the studio\'s"');
+  const person = upgrade('--merge origin/claude/260 --not-main --by hatch --golden-reason "the 2.60.0 sim fix moves k10; k1 stays the studio\'s"');
   const msg1 = body();
   const fromRefLine = (msg1.match(/^Golden-Reason: from origin\/claude\/260 \(upgrade\):.*$/m) || [''])[0];
   const events = (() => { try { return fs.readFileSync(path.join(S, '.studio', 'events.jsonl'), 'utf8'); } catch { return ''; } })();
@@ -144,7 +144,7 @@ export async function selftest260C({ dir, run, report, tmpRoot }) {
 
   // An agent outside the harness, on the owner's permission.
   const before2 = head();
-  const bot = upgrade(`--merge origin/claude/260b --by hatch --permission "${PERM}"`, { CLAUDECODE: '1' });
+  const bot = upgrade(`--merge origin/claude/260b --not-main --by hatch --permission "${PERM}"`, { CLAUDECODE: '1' });
   const msg2 = body();
   report('2.60.0 (#3b): an agent outside the harness merges on the owner\'s permission: Upgrade-Permission and Upgrade-Recorded-By (the coding agent) are in the merge commit; backup/pre-2.60.1 made',
     bot.status === 0 && head('HEAD^1') === before2 && head('backup/pre-2.60.1') === before2 && new RegExp(`^Upgrade-Permission: ${PERM}$`, 'm').test(msg2)
@@ -155,7 +155,7 @@ export async function selftest260C({ dir, run, report, tmpRoot }) {
   write(S, 'README.md', `studio readme line one\n${read('README.md')}`);
   sg('commit -q -am "studio readme"', { STUDIO_MAIN_COMMIT: 'allow' });
   const before3 = head();
-  const clash = upgrade('--merge origin/claude/260c --by hatch');
+  const clash = upgrade('--merge origin/claude/260c --not-main --by hatch');
   const stillMerging = sg('rev-parse -q --verify MERGE_HEAD').status === 0;
   const markers = /^<<<<<<< /m.test(read('README.md'));
   sg('merge --abort');

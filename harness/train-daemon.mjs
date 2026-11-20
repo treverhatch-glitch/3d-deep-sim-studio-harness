@@ -348,6 +348,11 @@ export async function runDaemonTrain({ root, env = process.env, runTrain = null,
     // 2.78.2 (a): a train a queued task done started (harness/train-detach.mjs kickTrain) waits for a running train first.
     res = await (runTrain || tr.runTrain)({ root, by: DAEMON_BY, now: true, quietJob: true, deps, log: (m) => console.error(m), ...(waitMs > 0 ? { waitMs } : {}) });
   } catch (e) { res = { ok: false, id: `daemon-${t0}`, message: `the train failed to run: ${e.message}`, landed: [], dropped: [], deferred: [], held: [] }; }
+  // 2.97 (d): it started again on the new harness (that process records its own train), or the drain stopped it.
+  if (res.restarted || res.drained) {
+    if (res.drained) { try { const r = readJson(DAEMON_FILE(root)); if (r?.pid === process.pid) fs.rmSync(DAEMON_FILE(root), { force: true }); } catch {} }
+    return { res, routed: { requeued: [], noted: [], ok: [], skipped: [] } };
+  }
   let routed = { requeued: [], noted: [], ok: [], skipped: [] };
   if (!res.busy && (res.dropped || []).length) { try { routed = afterTrain(res, board || (await boardDeps())); } catch {} }
   const tail = [routed.requeued.length ? `re-queued ${routed.requeued.join(', ')}` : '', routed.noted.length ? `facts added for ${routed.noted.join(', ')}` : '', res.busy ? 'another train was running' : ''].filter(Boolean).join('; ');
@@ -399,7 +404,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const waitMin = wi >= 0 ? Number(argv[wi + 1]) : 0;
     const { res } = await runDaemonTrain({ root, waitMs: Number.isFinite(waitMin) && waitMin > 0 ? waitMin * 60000 : 0 });
     console.log(res.message || '');
-    process.exit(res.ok ? 0 : 1);
+    process.exit(res.ok ? 0 : res.drained || res.notRun ? 3 : 1);
   }
   console.log(autoStatusText(root));
   process.exit(0);
