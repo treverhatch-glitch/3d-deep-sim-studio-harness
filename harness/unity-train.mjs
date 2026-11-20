@@ -26,6 +26,7 @@ import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts,
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey, rulesLanded } from './engine-rules.mjs';
+import { noteUnmatched, proposeGaps } from './play-gaps.mjs';
 import { compileSearchOf, compileSearch, compileAt, compilerLines } from './engine-compile.mjs';
 import { parallelState, parallelUse, parallelLine, runGateChild } from './engine-gates.mjs';
 import { engineSlotsAt, heavySlotsAt, floorFree } from './heavy.mjs';
@@ -1405,7 +1406,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         else if (play.mode === 'focus') log(`[unity-train] ${id}: play focus: ${play.why} (${play.filter})`);
         else if (play.mode === 'skip') log(`[unity-train] ${id}: play stage skipped: ${play.why}`);
         // 2.85: a full play stage says why, naming the paths no play.focus.map entry takes.
-        else if (play.unmatched?.length) { log(`[unity-train] ${id}: play stage in full: ${play.why}`); res.playUnmatched = play.unmatched; }
+        else if (play.unmatched?.length) { log(`[unity-train] ${id}: play stage in full: ${play.why}`); res.playUnmatched = play.unmatched; if (!dryRun) noteUnmatched(root, engine, { train: id, paths: play.unmatchedAll }); }
         const playEnv = { STUDIO_PLAY_MODE: play.mode, ...(play.mode === 'focus' ? { STUDIO_PLAY_FILTER: play.filter, ...(engine === 'unity' ? { STUDIO_UNITY_PLAYMODE_ARGS: `-testFilter "${play.filter}"` } : {}) } : {}) };
         const landEnv = { ...env, STUDIO_GATE_PRIORITY: 'landing', ...(fullWhy ? { STUDIO_LAND_FULL: '1' } : checked ? { STUDIO_RULES_GREEN: '1', STUDIO_RULES_MODE: rulesGreen.mode } : {}), ...playEnv };
         if (play.mode !== 'focus') { delete landEnv.STUDIO_PLAY_FILTER; delete landEnv.STUDIO_UNITY_PLAYMODE_ARGS; }
@@ -2095,6 +2096,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   // 2.85: `play-plan [--engine x] [--branch b | --paths a,b] [--json]`: what a batch's Play Mode stage would run, and why (read-only).
   if (argv[0] === 'play-plan') {
     const fl = flagOf(argv);
+    // 2.96 (d): --propose names the paths no play.focus.map entry takes and proposes an entry for each (harness/play-gaps.mjs).
+    if (argv.includes('--propose')) {
+      const eng = fl('engine') || 'unity';
+      const pl = fl('branch') || fl('paths') ? playPlan(mainRoot(), { engine: eng, branch: fl('branch'), paths: fl('paths') }) : null;
+      const pr = proposeGaps(mainRoot(), { engine: eng, plan: pl, cfg: unityConfig(mainRoot(), eng) || {}, json: argv.includes('--json') });
+      console.log(pr.text);
+      process.exit(pr.code);
+    }
     const r = playPlan(mainRoot(), { engine: fl('engine') || 'unity', branch: fl('branch'), paths: fl('paths') });
     if (argv.includes('--json')) console.log(JSON.stringify(r));
     else console.log(r.error ? r.message : playPlanText(r));

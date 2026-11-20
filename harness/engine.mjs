@@ -8,7 +8,7 @@
  *   npm run engine -- propose godot|unity|unreal --by <producer> [--why "…"]   a "Needs you" question
  *   npm run engine -- start godot --by <person>      |  capture [--frames 120]  (frames to engine/<game>/captures/)
  *   npm run engine -- port --from <sha> [--by <name>] pin the web rules to a commit (engine/<game>/port-src/)
- *   switches: systems ON n of m; playtest: promote the newest playable build (harness/switches.mjs, playtest.mjs)
+ *   switches: systems ON n of m; playtest: promote the newest build; test-cost: the slowest rules tests (switches.mjs, playtest.mjs, rules-times.mjs)
  * Program: STUDIO_GODOT, STUDIO_UNITY or STUDIO_UNREAL, else godot, unity, UnrealEditor-Cmd on PATH.
  */
 import fs from 'node:fs';
@@ -296,6 +296,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   // 2.95 (b): the rule systems switched ON in the engine (harness/switches.mjs) and the playtest build (harness/playtest.mjs).
   // Their own processes: they import modules that import this file, which waits here.
+  // 2.96 (d): what the rules tests cost (harness/rules-times.mjs).
+  if (argv[0] === 'test-cost') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'rules-times.mjs'), ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
   if (argv[0] === 'switches' || argv[0] === 'playtest') { const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', `${argv[0]}.mjs`), ...argv.slice(1)], { stdio: 'inherit', windowsHide: true }); process.exit(r.status ?? 1); }
   if (argv[0] === 'start') {
     const r = await startEngine(argv[1], { by: flag('by') || actor() });

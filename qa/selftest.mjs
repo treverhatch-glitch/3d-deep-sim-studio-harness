@@ -5423,6 +5423,14 @@ if (inShard('selftest-296c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.96 (d): landings posted by themselves, the test-cost report, Play Mode map gaps, a refill that sees what can start.
+if (inShard('selftest-296d')) {
+  const dir = copyRepo();
+  const { selftest296D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-296d.mjs')).href);
+  await selftest296D({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
