@@ -143,7 +143,9 @@ process.stdin.resume();
   // ================= record: a start that cannot launch says why =================
   {
     // A refusal inside the detached launcher: aider is not installed.
+    const dbg0 = { t: Date.now(), rec2: rec('builder-api2'), rec3: rec('builder-api3'), locks: (() => { try { return fs.readdirSync(path.join(S, '.studio', 'locks')); } catch { return []; } })(), agents: (() => { try { return fs.readdirSync(path.join(S, '.studio', 'agents')); } catch { return []; } })() };
     const a = agent(['start', '--pool', 'api', '--role', 'engine-porter', '--task', 'T-13', '--tool', 'aider', '--model', 'qwen'], { STUDIO_AIDER_CMD: path.join(T, 'no-such-aider') });
+    console.log('[dbg]', JSON.stringify({ ms: Date.now() - dbg0.t, outA: out(a), before: { s2: dbg0.rec2?.status, e2: dbg0.rec2?.endedAt, st2: dbg0.rec2?.startedAt, task2: dbg0.rec2?.task, pid2: dbg0.rec2?.pid, sup2: dbg0.rec2?.supervisor, s3: dbg0.rec3?.status, e3: dbg0.rec3?.endedAt, locks: dbg0.locks, agents: dbg0.agents }, after: { rec2: rec('builder-api2'), rec3: rec('builder-api3') } }).slice(0, 5500));
     ended('builder-api2');
     const r = rec('builder-api2');
     const j = jobs('builder-api2').pop();
