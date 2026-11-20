@@ -695,6 +695,18 @@ another, and a test that fails whenever a branch moves a pinned commit was found
   a system's `rules.focus` filter takes (`map` or `auto`; the reader judges `FullyQualifiedName`, `Name` and
   `ClassName` with `= != ~ !~ & |`, never `Category`) makes the lanes that change that system's files the first
   suspects, when they are fewer than the batch. A wrong suspect costs one run by name, never a hand-back.
+- **A red first test is read by its own words, with no setting (2.97).** When `rules.first` is red and no `blame`
+  entry names a lane, the failure's lines (the failing names, lines with FAIL, error, differs, expected, and the last
+  lines) are read for the lanes' own names: a lane's own names are the folder names and file base names (no extension,
+  at least 3 characters) of the paths it changes that no other lane of the batch changes. A lane with one of them as a
+  whole word of the failure (letter case aside) is a suspect, and the road above follows: suspects left out at once,
+  the first test run without them, each put back in turn (red with it, handed back; green, it stays). No suspect, or
+  every lane a suspect: the search by prefixes as before. The log says what was found, e.g. `rules.first is red and
+  its failure names Fees, which only feat/b changes (...): trying without T-b first`. A wrong suspect costs one run of
+  the first test. A name every test carries (a top folder like `Game`, changed by one lane only) makes a wrong suspect:
+  an entry with `test`, `names` and `touches` makes it exact, and `rules show` says which of the two applies. Only
+  `rules.first` is read this way: a red of the whole check has many failures and whole runs, where a wrong guess costs
+  a full run.
 - **Checks before queueing.** `engines.<x>.preQueue`: a list of `{ "touches": "<path or glob, or a list>", "run":
   "<command>", "say": "<what to do>", "timeoutMin": 10, "env": { "<NAME>": "<value>" } }`. 2.93: an entry may also
   have `"titles": ["<regex>", ...]` (case-insensitive, tested against the task's title) for a check on one KIND of
