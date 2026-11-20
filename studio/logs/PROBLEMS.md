@@ -124,6 +124,10 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Evidence:** 20 November: the overseer drained to upgrade; a train process had started 30 seconds earlier and waited in memory; after `drain off` it took its lock and ran with 2.95 modules over 2.96 files (its 41 shard runs wrote no samples). The 2.96 guard reads train locks, and a waiting train holds none. The upgrade merged `origin/<branch>` as last fetched hours before: a commit already replaced, whose Windows checks then failed.
 - **Fix:** no train starts during a drain and `drain off` starts the waiting one; a train compares the harness it loaded with the one on disk as it takes its lock and starts again once; `--merge <remote>/<branch>` fetches first and a branch other than main needs `--not-main`. `qa/selftest-297d.mjs`. Untested on Windows: the detached restart.
 
+### P-384 — a lane-live window of 0 still called a lane "in use" for a few milliseconds · fixed 2.97 (cause not proven)
+- **Evidence:** pull request 99: on Windows `293b` "record" failed in both full online runs and passed in eight runs alone or after `290b`. The start after a session's end did not get the free pool name. `laneLive` read the clock, asked git, then compared the folder's time: with `STUDIO_LANE_LIVE_MIN=0` a write in between gave a time later than the clock, and "live". No run caught the state itself.
+- **Fix:** a window of 0 means none (`harness/worktree.mjs`); the check prints the lane folder's age when it fails, so a repeat shows the evidence.
+
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
 - **P-001** (reopened on purpose 2026-10-31: the owner made the harness and the game's repository public so the online checks run free; they go private again once their checks pass (Hatch decides)): The harness repo is public, and two old public copies exist

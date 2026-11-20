@@ -68,6 +68,9 @@ set by the harness itself). This round adds more than it removes.
 - **A kind with no passed sampled run** still falls back to the old learned number, and the line says so.
 - **A one-lane batch whose branch moved after the check loses the green** even when the inputs are the same.
 - `290b` "the second gate's script moves the target" failed once under load and passed alone (P-346).
+- **Caught in the online runs:** a `rules show` line had lost a space an older check reads (`284m`). On Windows,
+  `293b` "record" failed twice in the full run and never alone: `laneLive` with a window of 0 could still call a
+  lane in use for a few milliseconds (P-384). Fixed as the likely cause; the state itself was not caught.
 
 ## For a studio taking it
 
