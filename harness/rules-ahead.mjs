@@ -6,8 +6,8 @@
  * ends it with its whole process tree unless the land run landed the batch unchanged; then the next train finds its
  * result, or waits for it when it still runs for the tree that train wants. A red ahead judges no lane. 2.95: with
  * rules.shards each test command starts when its measured peak fits beside the land run (docs/NATIVE-ENGINE.md).
- * Files in .studio/engine: <x>-rules-ahead.json (the train's: pid, lanes, keys, verdict), <x>-rules-ahead-out.json (the
- * child's: state, decisions, the kept results before it ran), <x>-rules-ahead-job.json (what to run).
+ * Files in .studio/engine: <x>-rules-ahead.json (the train's), -out.json (the child's state and decisions), -job.json (what
+ * to run); 2.97: <x>-ahead-last.json (the last outcome: time, train, started, kept, dropped or not started, and why).
  *   node harness/rules-ahead.mjs <job file>   (the child; the train starts it)
  */
 import fs from 'node:fs';
@@ -28,7 +28,12 @@ const put = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); writ
 const pause = (ms) => new Promise((r) => { setTimeout(r, ms); });
 const short = (x) => String(x || '').slice(0, 10);
 const live = (m, o) => Boolean(m?.pid) && pidAlive(m.pid, o?.pid === m.pid ? o.identity : undefined) && holderLive({ pid: m.pid, at: Date.now() });
-const tell = (root, engine, m, outcome, why = '') => { try { emitEvent({ type: `task.train.${engine}.rules_ahead`, agent: `${engine}-train`, track: `engine:${engine}`, status: ['dropped', 'kept-red', 'not-started'].includes(outcome) ? 'warn' : 'ok', msg: `the check ahead of ${m.tasks.join(', ')}: ${outcome}${why ? ` (${why})` : ''}`.slice(0, 600), meta: { train: m.train, engine, tasks: m.tasks, head: m.head, tree: m.key, outcome, why: String(why).slice(0, 300) } }); } catch { /* the log says it */ } };
+/** 2.97: the last outcome, for `rules show`; a check ahead that never started says why. */
+const lastFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-ahead-last.json`);
+const note = (root, engine, train, outcome, why = '') => { try { put(lastFile(root, engine), { at: new Date().toISOString(), train, outcome, why: String(why).slice(0, 300) }); } catch { /* the log says it */ } };
+export const aheadNotStarted = (root, engine, train, why) => note(root, engine, train, 'not-started', why);
+export const aheadLast = (root, engine) => readJson(lastFile(root, engine));
+const tell = (root, engine, m, outcome, why = '') => { note(root, engine, m.train, outcome, why); try { emitEvent({ type: `task.train.${engine}.rules_ahead`, agent: `${engine}-train`, track: `engine:${engine}`, status: ['dropped', 'kept-red', 'not-started'].includes(outcome) ? 'warn' : 'ok', msg: `the check ahead of ${m.tasks.join(', ')}: ${outcome}${why ? ` (${why})` : ''}`.slice(0, 600), meta: { train: m.train, engine, tasks: m.tasks, head: m.head, tree: m.key, outcome, why: String(why).slice(0, 300) } }); } catch { /* the log says it */ } };
 const clear = (root, engine) => { for (const k of ['', '-out', '-job']) { try { fs.rmSync(fileOf(root, engine, k), { force: true }); } catch { /* gone */ } } };
 
 /** Start the child for `lanes` merged on `head` (its merged head is `next`). The record, after one log line. */
@@ -41,6 +46,7 @@ export function aheadStart({ root, engine, repo, target, head, next, lanes, cfg,
   c.on('error', () => {}); c.unref();
   const m = { train, pid: c.pid, tasks: job.lanes.map((l) => l.task), heads: job.lanes.map((l) => l.head), head, next, key: rulesKey({ repo, sha: next, cfg }), baseKey: rulesKey({ repo, sha: head, cfg }), at: new Date().toISOString(), told: 0 };
   put(fileOf(root, engine, ''), m);
+  note(root, engine, train, 'started', `${m.tasks.join(', ')} on ${short(head)}`);
   log(`of ${m.tasks.join(', ')} on ${short(head)} waits for this land run to hold the machine, then for free memory (pid ${c.pid})`);
   return m;
 }
@@ -58,7 +64,7 @@ async function endIt(root, engine, m, o, why) {
   // A run ended mid-way leaves its throwaway checkout (runRulesAt's own clean-up did not run).
   const job = readJson(fileOf(root, engine, '-job')); const tmp = path.join(root, '.studio', 'tmp');
   try { for (const d of fs.readdirSync(tmp)) if (job?.repo && d.startsWith(`rules-${m.train}-ahead`)) removeCheckout(job.repo, path.join(tmp, d)); } catch { /* none */ }
-  if (o?.state === 'running' || o?.state === 'done') tell(root, engine, m, 'dropped', why);
+  if (o?.state === 'running' || o?.state === 'done') tell(root, engine, m, 'dropped', why); else note(root, engine, m.train, 'dropped', why);
   clear(root, engine);
 }
 
@@ -90,6 +96,7 @@ export async function aheadVerdict(root, engine, { keep, why = '' }) {
   const { o, lines } = news(root, engine, m);
   if (o.state === 'not-started') { clear(root, engine); return lines; }
   if (!keep) { await endIt(root, engine, m, o, why); return [...lines, `was ended: ${why}; nothing of it is kept`]; }
+  if (o.state !== 'done') note(root, engine, m.train, 'kept', 'the land run landed the batch unchanged; the next train takes its result');
   return o.state === 'done' ? lines : [...lines, 'goes on: this land run landed the batch unchanged; the next train takes its result'];
 }
 

@@ -401,7 +401,11 @@ function peakConfig(v) {
   return { peak: { file, match: typeof o.match === 'string' ? o.match : '' }, errors: [] };
 }
 
-/** The files of one input merged over the folders it is copied from (the first folder with a file wins). { found, files: [[name, abs]] } sorted by name. */
+/**
+ * The files of one input merged over its sources (the first source with a file wins). { found, files: [[name, src]] } sorted by
+ * name. A source is a folder (its files as they are now) or 2.97's { dir, sha }: a git checkout read at a commit, never its
+ * working files (a lane copy: what lands is its commit). src: a file path, or { dir, sha, oid, size } for a blob of that commit.
+ */
 export function inputFiles(rel, from = []) {
   const files = new Map();
   let found = false;
@@ -412,12 +416,35 @@ export function inputFiles(rel, from = []) {
     if (!files.has(name)) files.set(name, p);
   };
   for (const f of from) {
+    if (typeof f !== 'string') {
+      const r = git(f.dir, 'ls-tree', '-r', '-l', '-z', '--full-tree', f.sha, '--', rel.replace(/\/+$/, ''));
+      for (const l of r.status === 0 ? r.stdout.split('\0') : []) {
+        const m = /^100\d{3} blob ([0-9a-f]+) +(\d+)\t(.+)$/s.exec(l);
+        if (!m) continue;
+        found = true;
+        if (!files.has(m[3])) files.set(m[3], { dir: f.dir, sha: f.sha, oid: m[1], size: Number(m[2]) });
+      }
+      continue;
+    }
     const src = path.join(f, ...rel.split('/'));
     if (!fs.existsSync(src)) continue;
     found = true;
     walk(src, rel);
   }
   return { found, files: [...files.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)) };
+}
+
+const BIG = 64 * 1024 * 1024;
+const inputBytes = (src) => (typeof src === 'string' ? fs.readFileSync(src) : spawnSync('git', ['cat-file', 'blob', src.oid], { cwd: src.dir, windowsHide: true, maxBuffer: BIG + 1024 }).stdout);
+const inputWhere = (src) => (typeof src === 'string' ? src.split(path.sep).join('/') : `${src.dir.split(path.sep).join('/')} at ${short(src.sha)}`);
+
+/** Feed one input file's size and bytes to h (a very large one: its time, or its blob id). false when it is gone. */
+function feedInput(h, src) {
+  let size; let big;
+  if (typeof src === 'string') { let st; try { st = fs.statSync(src); } catch { return false; } size = st.size; big = String(Math.floor(st.mtimeMs)); } else { size = src.size; big = src.oid; }
+  h.update(`${size}\0`);
+  if (size > BIG) h.update(big); else { try { h.update(inputBytes(src)); } catch { h.update('unreadable'); } }
+  return true;
 }
 
 /** A fingerprint of the git-ignored inputs ('' with none), over inputFiles' merged view. They are not in the tree, so a kept result and STUDIO_RULES_GREEN are valid only for the same inputs. */
@@ -427,12 +454,7 @@ export function inputsPrint(cfg, from = []) {
   for (const rel of cfg.inputs) {
     const { found, files } = inputFiles(rel, from);
     if (!found) { h.update(`${rel}\0missing\n`); continue; }
-    for (const [name, p] of files) {
-      let st; try { st = fs.statSync(p); } catch { h.update(`${name}\0gone\n`); continue; }
-      h.update(`${name}\0${st.size}\0`);
-      // Content for ordinary sizes; a very large file by size and time.
-      if (st.size <= 64 * 1024 * 1024) { try { h.update(fs.readFileSync(p)); } catch { h.update('unreadable'); } } else h.update(String(Math.floor(st.mtimeMs)));
-    }
+    for (const [name, p] of files) { h.update(`${name}\0`); if (!feedInput(h, p)) h.update('gone\n'); }
   }
   return h.digest('hex').slice(0, 12);
 }
@@ -447,7 +469,7 @@ function copyInputs(cfg, from, dir) {
       const dest = path.join(dir, ...name.split('/'));
       if (fs.existsSync(dest)) continue;
       fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.copyFileSync(src, dest);
+      if (typeof src === 'string') fs.copyFileSync(src, dest); else fs.writeFileSync(dest, inputBytes(src));
     }
   }
   return missing;
@@ -817,21 +839,33 @@ function ownersAt(ctx, sha) {
   return res;
 }
 
-/** The input files' digests, once per check: [{ rel, name, digest }] plus missing inputs as { rel, missing }. */
-function inputIndex(cfg, src) {
+/** The input files' digests, once per check: [{ rel, name, digest, where }] plus missing inputs as { rel, missing }. */
+export function inputIndex(cfg, src) {
   const list = [];
   for (const rel of cfg?.inputs || []) {
     const { found, files } = inputFiles(rel, src);
     if (!found) { list.push({ rel, missing: true }); continue; }
     for (const [name, p] of files) {
       const h = crypto.createHash('sha1');
-      let st; try { st = fs.statSync(p); } catch { list.push({ rel, name, digest: 'gone' }); continue; }
-      h.update(`${st.size}\0`);
-      if (st.size <= 64 * 1024 * 1024) { try { h.update(fs.readFileSync(p)); } catch { h.update('unreadable'); } } else h.update(String(Math.floor(st.mtimeMs)));
-      list.push({ rel, name, digest: h.digest('hex') });
+      list.push({ rel, name, digest: feedInput(h, p) ? h.digest('hex') : 'gone', where: inputWhere(p) });
     }
   }
   return list;
+}
+
+/** 2.97: the first input that differs from an inputIndex taken before ('<name> changed (<where>)'), or '' when none does. */
+export function inputsChanged(cfg, src, before = []) {
+  const k = (x) => x.name || x.rel;
+  const was = new Map(before.map((x) => [k(x), x]));
+  for (const x of inputIndex(cfg, src)) {
+    const b = was.get(k(x));
+    was.delete(k(x));
+    if (x.missing) { if (!b?.missing) return `${x.rel} is missing now`; continue; }
+    if (!b || b.missing) return `${x.name} is new (${x.where})`;
+    if (b.digest !== x.digest) return `${x.name} changed (${x.where}${b.where !== x.where ? `; it was read from ${b.where}` : ''})`;
+  }
+  const gone = [...was.values()][0];
+  return gone ? `${k(gone)} is gone (it was read from ${gone.where || 'the input folders'})` : '';
 }
 
 /**
@@ -1819,6 +1853,9 @@ async function cli(argv) {
     if (cfg.peak) console.log(`[engine-rules] peak: read from ${cfg.peak.file} in the test checkout after each test command${cfg.peak.match ? ` (match ${cfg.peak.match})` : ''}; a full run's measured peak: ${partStats(root, engine)[FULL_STAT]?.peakGb ? `${partStats(root, engine)[FULL_STAT].peakGb} GB` : 'none yet'}${cfg.focus?.splitGb ? ' (rules.focus.splitGb is set: that number is used)' : ''}`);
     // 2.96 (a): measured cost per kind (rules commands and land runs: the number a land script's own wait can use).
     for (const l of costLines(root, engine)) console.log(`[engine-rules] ${l}`);
+    // 2.97: the check ahead: on or off, and its last outcome (started, kept, dropped, or why it did not start).
+    const al = (await import('./rules-ahead.mjs')).aheadLast(root, engine);
+    console.log(`[engine-rules] check ahead (rules.ahead): ${cfg.ahead ? 'on' : 'off'}; last: ${al ? `${al.outcome === 'not-started' ? `did not start: ${al.why}` : `${al.outcome}${al.why ? ` (${al.why})` : ''}`}, train ${al.train || '?'}, ${String(al.at).slice(0, 16)}` : 'none yet'}`);
     if (cfg.shards) {
       const fresh = shardsFreshDue(root, engine, cfg);
       console.log(`[engine-rules] shards: a full run is one command per shard (${cfg.shards.test}); ${cfg.shards.rest ? `rest ${cfg.shards.rest}: a sharded run is a full run` : 'no rest: a sharded run is NOT a full run (a test no shard filter matches never runs), so it never tells the land run STUDIO_RULES_MODE=full and never counts as the owed full run; set rules.shards.rest'}; keep "${cfg.shards.keep}"${cfg.shards.keep === 'reads' ? ` (a run that reuses nothing from another tree at least every ${cfg.shards.freshEveryHours} h; ${fresh ? `due: ${fresh}` : `last ${readCache(root, engine).shardsFreshAt}`})` : ' (a green is kept for the exact tree it ran on)'}`);

@@ -25,7 +25,7 @@ import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeComman
 import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
-import { rulesConfig, rulesGate, inputsPrint, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey, rulesLanded, keptFull, allRatchets } from './engine-rules.mjs';
+import { rulesConfig, rulesGate, inputsPrint, inputIndex, inputsChanged, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey, rulesLanded, keptFull, allRatchets } from './engine-rules.mjs';
 import { noteUnmatched, proposeGaps } from './play-gaps.mjs';
 import { compileSearchOf, compileSearch, compileAt, compilerLines } from './engine-compile.mjs';
 import { parallelState, parallelUse, parallelLine, runGateChild } from './engine-gates.mjs';
@@ -34,7 +34,7 @@ import { maxConcurrent, capGroup } from './heavy-budget.mjs';
 import { removeLandedLane, pruneBuilds, buildsConfig } from './engine-clean.mjs';
 import { flagOf, foldRealOf, gitMax64 as git, numBlankDefault as num, realOrResolved as real, short8 as short, sleepSyncClamped as sleep, stdoutOf as out } from './helpers.mjs';
 import { targetRedTask, targetRedClear, targetRedLine } from './engine-target-red.mjs';
-import { aheadStart, aheadVerdict, aheadFor, aheadLine } from './rules-ahead.mjs';
+import { aheadStart, aheadVerdict, aheadFor, aheadLine, aheadNotStarted } from './rules-ahead.mjs';
 import { unionGlobs, unionMerge, unionWhy } from './merge-union.mjs';
 import { runningLines } from './run-cost.mjs';
 
@@ -834,6 +834,11 @@ export function fullLandDue(root, engine, cfg = {}, env = process.env, now = Dat
 
 /** The folders the rules check copies its inputs from: the engine's folder, the land worktree, its cwd, the repo. */
 const rulesFromOf = (root, s) => [...new Set([s.folder, s.cfg.gateWorktree ? path.resolve(root, s.cfg.gateWorktree) : null, s.cfg.cwd ? path.resolve(root, s.cfg.cwd) : null, s.repo].filter(Boolean))];
+/**
+ * 2.97: the lanes' own input sources for the rules check. A lane copy that is a git checkout is read at the lane's head (what
+ * lands), never from its working files, which a session may still be editing; any other lane folder is read as it is.
+ */
+const laneSources = (root, lanes) => lanes.map((l) => { const d = path.join(root, '.lanes', 'engine', String(l.task)); return fs.existsSync(path.join(d, '.git')) && l.head ? { dir: d, sha: l.head } : fs.existsSync(d) ? d : null; }).filter(Boolean);
 
 /** 2.91: is the full rules run owed now on the target as it is (engine-rules.mjs fullRulesOwed)? { why, overdue, blocked }. */
 export function fullRulesOwedNow(root, engine = 'unity', env = process.env, now = Date.now()) {
@@ -1264,7 +1269,9 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       const from = fromAll;
       // Each lane's new shared input files first (rules.share), and the lanes' own folders as further input sources.
       for (const l of set) { try { shareLaneInputs(root, engine, s, l.task, log); } catch { /* the check says what is missing */ } }
-      const extraFrom = set.map((l) => path.join(root, '.lanes', 'engine', String(l.task))).filter((d) => fs.existsSync(d));
+      const checkedOn = set.map((l) => ({ ...l }));
+      const extraFrom = laneSources(root, checkedOn);
+      const idx0 = inputIndex(rc, [...from, ...extraFrom]);
       // 2.94: a check ahead for exactly this batch's tree is waited for (never run twice); one for another tree is ended.
       const aw0 = Date.now();
       const aw = await aheadFor(root, engine, { train: id, log: (m) => log(`[unity-train] ${id}: the check ahead ${m}`), key: () => { try { const c = chainOnTarget(repo, tip0, set, id, engine, { union }); return c.head ? rulesKey({ repo, sha: c.head, cfg: rc }) : null; } catch { return null; } } });
@@ -1279,10 +1286,22 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       for (const d of rg.dropped) drop(d.lane, `refused before the land run: ${d.why}\nFix it on ${d.lane.branch} (bring ${target} in first: ${targetMergeCommand(d.lane.task)}), then task done ${d.lane.task} --train again.`, { cause: d.ratchet ? 'ratchet' : 'rules' });
       set = rg.kept;
       res.rules = { ran: rg.ran, runs: rg.runs, ms: rg.ms, dropped: rg.dropped.map((d) => d.lane.task), ...(rg.skipped ? { skipped: rg.why } : {}), ...(rg.mode ? { mode: rg.mode } : {}), ...(rg.selWhy ? { why: rg.selWhy } : {}), ...(rg.parts ? { parts: rg.parts } : {}), ...(rg.splitAtOnce ? { splitAtOnce: rg.splitAtOnce } : {}), ...(rg.filter ? { filter: rg.filter } : {}), ...(rg.groups ? { groups: rg.groups } : {}), ...(rg.reused ? { reused: rg.reused } : {}), ...(rg.sliced ? { sliced: rg.sliced, slices: rg.slices, ...(rg.wholeCheck ? { whole: rg.wholeCheck } : {}) } : {}), ...(rg.shards ? { shards: rg.shards } : {}), ...(rg.filtered?.runs ? { filtered: rg.filtered, wholeRuns: rg.wholeRuns } : {}) };
-      // 2.91: keeps(tip): with rules.paths or rules.ignore, a target that moved only where the rules tests do not read keeps the green.
+      // 2.91: with rules.paths or rules.ignore, a target that moved only where the rules tests do not read keeps the green.
       const scope = rc.paths?.length ? 'outside rules.paths' : rc.ignore?.length ? 'under rules.ignore' : '';
+      const keeps = (t) => { if (!scope) return false; try { const k = rulesKey({ repo, sha: tip0, cfg: rc }); return Boolean(k) && k === rulesKey({ repo, sha: t, cfg: rc }); } catch { return false; } };
+      // 2.97: lost(group, tip): '' while the green holds for this land run, else why not. The inputs are read as the run lands
+      // them: a branch landed by name at its head now, else the checked heads; a lane copy at its commit, not its working files.
       // 2.95: shards without rules.shards.rest did not run every test: the land run is told focus, never full.
-      if (rg.green) rulesGreen = { head: rg.green, tip: tip0, tasks: set.map((l) => l.task).join(','), mode: rg.mode === 'shards' ? 'focus' : rg.mode || 'full', scope, same: () => { try { return inputsPrint(rc, [...from, ...extraFrom]) === (rg.inputs ?? inputsPrint(rc, [...from, ...extraFrom])); } catch { return false; } }, keeps: (t) => { if (!scope) return false; try { const k = rulesKey({ repo, sha: tip0, cfg: rc }); return Boolean(k) && k === rulesKey({ repo, sha: t, cfg: rc }); } catch { return false; } } };
+      if (rg.green) rulesGreen = { head: rg.green, tip: tip0, tasks: set.map((l) => l.task).join(','), mode: rg.mode === 'shards' ? 'focus' : rg.mode || 'full', scope, lost: (group, tip) => {
+        const gk = group.map((l) => l.task).join(',');
+        if (gk !== rulesGreen.tasks) return `the batch changed (checked: ${rulesGreen.tasks}; this land run: ${gk || `${target} alone`})`;
+        if (tip !== tip0 && !keeps(tip)) return `${target} moved (${short(tip0)} -> ${short(tip)}) in files the rules tests read`;
+        const byName = s.many || group.length === 1;
+        const now = checkedOn.map((l) => (byName && group.some((x) => x.task === l.task) ? { ...l, head: headOf(repo, l.branch) || l.head } : l));
+        try { const ch = inputsChanged(rc, [...from, ...laneSources(root, now)], idx0); if (ch) return `an input changed since the check: ${ch}`; } catch (e) { return `the inputs could not be read again (${e.message})`; }
+        const i = now.findIndex((l, k) => l.head !== checkedOn[k].head);
+        return i < 0 ? '' : `${now[i].task}'s branch ${now[i].branch} moved since the check (${short(checkedOn[i].head)} -> ${short(now[i].head)}): this land run would land commits that were not checked`;
+      } };
     }
   }
   for (const l of set) deps.markRunning?.(l.task, l.agent);
@@ -1300,15 +1319,16 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   let ahead = null;
   let aheadTried = false;
   const aheadSay = (m) => log(`[unity-train] ${id}: the check ahead ${m}`);
+  // 2.97: every way it does not start is one log line and the check ahead's last outcome (rules show).
+  const aheadNot = (why, keep = true) => { aheadSay(`did not start: ${why}`); if (keep) aheadNotStarted(root, engine, id, why); return null; };
   const aheadBegin = (group, landLabel) => {
-    if (par.ok) { aheadSay(`is not started: a second gate (engines.${engine}.gates) is in use`); return null; }
+    if (par.ok) return aheadNot(`a second gate (engines.${engine}.gates) is in use`);
     const inIt = new Set(group.map((l) => l.task));
     const nx = pickBatch(root, engine, s, readUnityQueue(root, engine).filter((e) => !inIt.has(e.task)), { env, held: heldPick });
     const ok = nx.error ? [] : laneStates(nx.lanes, { repo, target, board, holdMod, L }).filter((x) => !x.defer && !x.drop).map((x) => x.lane);
     const c = ok.length ? chainOnTarget(repo, rulesGreen.head, ok, `${id}-ahead`, engine, { union }) : { included: [] };
-    if (c.error || !c.included.length) { aheadSay(`is not started: no lane waits for the next train${c.error ? ` (${c.error})` : ''}`); return null; }
-    const extraFrom = c.included.map((l) => path.join(root, '.lanes', 'engine', String(l.task))).filter((d) => fs.existsSync(d));
-    try { return aheadStart({ root, engine, repo, target, head: rulesGreen.head, next: c.head, lanes: c.included, cfg: rc0, from: fromAll, extraFrom, train: id, landLabel, env, log: aheadSay }); } catch (e) { aheadSay(`is not started: ${e.message}`); return null; }
+    if (c.error || !c.included.length) return aheadNot(`no lane waits for the next train${c.error ? ` (${c.error})` : ''}`);
+    try { return aheadStart({ root, engine, repo, target, head: rulesGreen.head, next: c.head, lanes: c.included, cfg: rc0, from: fromAll, extraFrom: laneSources(root, c.included), train: id, landLabel, env, log: aheadSay }); } catch (e) { return aheadNot(`it could not be started (${e.message})`); }
   };
   // Kept only when this land run landed the batch unchanged (the landed target has the checked head's rules key).
   const aheadSettle = async (r, why = '') => {
@@ -1329,8 +1349,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     try {
       const c = chainOnTarget(repo, tip, group, `${id}-green`, engine);
       if (c.error || !c.head || c.conflictTarget.length || c.deferred.length) return null;
-      const extra = group.map((l) => path.join(root, '.lanes', 'engine', String(l.task))).filter((d) => fs.existsSync(d));
-      return keptFull(root, engine, { repo, sha: c.head, cfg: rc0, print: inputsPrint(rc0, [...fromAll, ...extra]) });
+      return keptFull(root, engine, { repo, sha: c.head, cfg: rc0, print: inputsPrint(rc0, [...fromAll, ...laneSources(root, group)]) });
     } catch { return null; }
   };
   /**
@@ -1404,13 +1423,17 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     const kept0 = !noLand && rc0 && !opts.full && !(rulesGreen && rulesGreen.tasks === group.map((l) => l.task).join(',')) ? treeGreen(group, tip) : null;
     try {
       for (let a = 0; ; a += 1) {
-        const checked = !noLand && ((rulesGreen && rulesGreen.tasks === group.map((l) => l.task).join(',') && (rulesGreen.tip === tip || rulesGreen.keeps(tip)) && rulesGreen.same()) || Boolean(kept0));
+        // 2.97: a rules check that passed in this train and is not used here is said once, with why.
+        const fullWhy = alone && opts.full ? String(opts.full) : '';
+        const lost = !rulesGreen ? 'no rules check passed in this train' : fullWhy ? `a full land run is due (${fullWhy})` : noLand ? 'this run lands nothing' : rulesGreen.lost(group, tip);
+        const greenUsed = !noLand && !lost;
+        const checked = greenUsed || (!noLand && Boolean(kept0));
+        if (rulesGreen && lost && !kept0 && a === 0 && (!noLand || fullWhy)) log(`[unity-train] ${id}: the rules check passed in this train, but this land run is not told the rules are green: ${lost}; it runs its own rules stage`);
         if (kept0 && a === 0) log(`[unity-train] ${id}: ${group.map((l) => l.task).join(' + ')} on ${target} at ${short(tip)} is a tree with a kept full rules pass (${String(kept0.at || '').slice(0, 16)}): the land run is told the rules are green`);
         if (checked && !kept0 && a === 0 && rulesGreen.tip !== tip) log(`[unity-train] ${id}: the rules green stands: ${target} moved (${short(rulesGreen.tip)} -> ${short(tip)}) only ${rulesGreen.scope}, where the rules tests do not read`);
         // Once a day (STUDIO_ENGINE_FULL_LAND_HOURS) a land run is told nothing that lets it skip its own tests (no STUDIO_RULES_GREEN, no Edit Mode
         // plan, STUDIO_LAND_FULL=1): the shortcuts rest on tests run outside the editor, and this run would see a difference between the runtimes.
-        // 2.86: only ever a run of the target alone (opts.full: its why), never a batch's run or a step of a red.
-        const fullWhy = alone && opts.full ? String(opts.full) : '';
+        // 2.86: only ever a run of the target alone (opts.full: its why), never a batch's run or a step of a red (fullWhy above).
         // 2.85 (B-137): the daily full run is said wherever a person looks: the train's "now" line, train status, an event at its start.
         const fullMin = fullWhy ? Number(readJson(fullLandFile(root, engine))?.minutes) || null : null;
         const runText = fullWhy ? `${what}, the daily full run: every test runs, expect about ${fullMin ? `${fullMin} min` : 'the longest land run of the day'}` : what;
@@ -1505,7 +1528,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         if (decided) r = decided;
         else {
           // 2.94: the next batch's rules check beside this land run (rules.ahead), once per train, only for the checked batch.
-          if (rc0?.ahead && checked && !aheadTried && !dryRun) { aheadTried = true; ahead = aheadBegin(group, label); }
+          // 2.97: with rules.ahead on, every land run says whether it started and why not (rc0 is null on a dry run).
+          if (rc0?.ahead) { if (aheadTried) aheadNot('it was already tried in this train', false); else if (!greenUsed) aheadNot(`the rules green was not used: ${kept0 && rulesGreen ? 'a kept full pass told this land run instead' : lost}`); else { aheadTried = true; ahead = aheadBegin(group, label); } }
           const l0 = Date.now();
           r = await land({ engine, ...arg, task: gkey, label, env: landEnv, log, ...(stagesBefore.length ? { stagesBefore } : {}), ...(ahead ? { onOom: () => aheadSettle(null, 'the land run died out of memory; it is ended before the land run is tried once more, and not started again in this train') } : {}) });
           res.runs += 1;

@@ -5482,6 +5482,14 @@ if (inShard('selftest-297c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.97 (a): the rules green and the check ahead survive a changed lane copy; each says why when it is not used.
+if (inShard('selftest-297a')) {
+  const dir = copyRepo();
+  const { selftest297A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-297a.mjs')).href);
+  await selftest297A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
