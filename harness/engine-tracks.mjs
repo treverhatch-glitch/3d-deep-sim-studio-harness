@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
 import { learnedNeed } from './engine-ram.mjs';
+import { landNeed } from './run-cost.mjs';
 import { readJson, writeAtomic } from './fsafe.mjs';
 import { splitPhantom, phantomNote } from './eol-only.mjs';
 import { addEngineWorktree, sparsePathsFor, sparseState, sparseLine, outsideSparse, widenHint, widenEngineWorktree, reapplySparse } from './engine-worktree.mjs';
@@ -367,17 +368,22 @@ const tuneFile = (root, engine) => path.join(root, 'studio', 'engine', `${engine
 export function readTune(engine, root = mainRoot()) { const j = readJson(tuneFile(root, engine), null); return j && typeof j === 'object' ? { values: j.values && typeof j.values === 'object' ? j.values : {}, log: Array.isArray(j.log) ? j.log : [] } : { values: {}, log: [] }; }
 export const tunePath = tuneFile;
 
-/** The free-RAM floor of an engine's land run: { gb, from }. The owner's environment wins, then the lane's tuned ram-floor, then the table. */
-export function engineFloor(engine, { env = process.env, root = mainRoot() } = {}) {
+/**
+ * The free-RAM floor of an engine's land run: { gb, from, src }. The owner's environment wins, then the lane's tuned ram-floor,
+ * then the measured need of `kind` (run-cost.mjs landNeed; no kind: the heaviest land kind), then the old numbers.
+ */
+export function engineFloor(engine, { env = process.env, root = mainRoot(), kind = null } = {}) {
   const t = engineTarget(engine, { root: REPO_ROOT }) || engineTarget(engine, { root });
   if (!t) return { gb: 0, from: 'no such engine' };
   const raw = t.floor.env ? env[t.floor.env] : undefined;
   if (raw !== undefined && String(raw).trim() !== '') return off(raw) ? { gb: 0, from: `${t.floor.env}=${raw} (the owner's setting)` } : { gb: num(raw, t.floor.gb), from: `${t.floor.env} (the owner's setting)` };
   const tuned = readTune(engine, root).values['ram-floor'];
-  if (Number.isFinite(Number(tuned)) && t.tune.includes('ram-floor')) return { gb: Number(tuned), from: `the ${t.label} lane's tuned ram-floor (studio/engine/${engine}-tune.json)` };
-  // The RAM the last green land runs really took (engine-ram.mjs), plus a margin, once there are enough of them.
-  try { const l = learnedNeed(engine, { root, env }); if (l) return { gb: l.gb, from: l.from }; } catch { /* the table's */ }
-  return { gb: t.floor.gb, from: `the engine table (${t.label}: ${t.floor.gb} GB)` };
+  if (Number.isFinite(Number(tuned)) && t.tune.includes('ram-floor')) return { gb: Number(tuned), src: 'tuned', from: `the ${t.label} lane's tuned ram-floor (studio/engine/${engine}-tune.json)` };
+  try { const k = landNeed(engine, kind, { root, env }); if (k) return { gb: k.gb, from: k.from, src: 'kind' }; } catch { /* the old numbers */ }
+  // No passed sampled run of this kind: the whole machine's peaks of the last green land runs, else the table.
+  const why = kind ? `no passed sampled run of ${kind} yet; ` : '';
+  try { const l = learnedNeed(engine, { root, env }); if (l) return { gb: l.gb, from: `${why}${l.from}`, src: 'learned' }; } catch { /* the table's */ }
+  return { gb: t.floor.gb, from: `${why}the engine table (${t.label}: ${t.floor.gb} GB)` };
 }
 
 // ---- launching an engine pass --------------------------------------------------------------------------------

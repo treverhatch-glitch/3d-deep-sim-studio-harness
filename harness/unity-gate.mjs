@@ -270,10 +270,11 @@ export function mapUnityExit(code, { signal = null, timedOut = false, timeoutMin
  */
 export async function landHeavyOpts(engine, { env = process.env, log = () => {} } = {}) {
   const et = engineTarget(engine) || engineTarget('unity');
-  const floor = engineFloor(engine, { env });
+  const floor = engineFloor(engine, { env, kind: landKind(env) });
   const hroot = await heavyRoot();
   const landWait = (() => { try { return landWaitMin(hroot, env); } catch { return undefined; } })();
-  const heavyOpts = { log, env, kind: et.heavyKind, engine, ...(landWait && !(env.STUDIO_HEAVY_WAIT_MIN) ? { waitMin: landWait } : {}),...(et.heavyKind === 'unity' ? {} : { ramGb: et.rig.ramGb }), ...(et.heavyKind === 'unity' ? (/tuned|measured/.test(floor.from) ? { minFreeGb: floor.gb } : {}) : floor.gb > 0 ? { minFreeGb: floor.gb } : {}) };
+  const unity = et.heavyKind === 'unity';
+  const heavyOpts = { log, env, kind: et.heavyKind, engine, ...(landWait && !(env.STUDIO_HEAVY_WAIT_MIN) ? { waitMin: landWait } : {}), ...(unity ? {} : { ramGb: et.rig.ramGb }), ...(unity ? floor.src : floor.gb > 0) ? { minFreeGb: floor.gb, floorWhy: floor.from } : {} };
   return { hroot, heavyOpts };
 }
 
