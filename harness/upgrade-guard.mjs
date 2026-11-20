@@ -3,8 +3,8 @@
  * harness/upgrade-guard.mjs — commits the board before a harness upgrade, never stashes it, and merges the update.
  *   npm run upgrade -- --check      exit 1 while a board file is uncommitted; also names stashes with board changes
  *   npm run upgrade -- --snapshot   copy the board files to .studio/board-snapshots/<time>/ (gitignored), then check
- *   npm run upgrade -- --merge <ref> --by <person> [--permission "<their words or a link>"] [--golden-reason "<why>"] [--during-train]
- *       needs --check to pass; backs up as backup/pre-<version>; merges <ref> through the hooks (STUDIO_UPGRADE_MERGE)
+ *   npm run upgrade -- --merge <ref> --by <person> [--permission "…"] [--golden-reason "<why>"] [--during-train] [--not-main] [--no-fetch]
+ *       needs --check to pass; fetches a <remote>/<branch> first; backs up as backup/pre-<version>; merges through the hooks
  *   npm run upgrade -- --restore-stash <sha> --by <person>   three-way merges a stash's board files back, keeps it
  *   npm run upgrade -- --rollback --by <person> [--permission "…"]   revert the last update's merge commit, no reset
  *   npm run upgrade -- --preflight [--ref <ref>] | --smoke [--keep]   before / right after an update
@@ -383,8 +383,21 @@ async function releaseRefs(root, env) {
   return refs;
 }
 
+/** Why a git fetch failed: its first "fatal:" line, else its last line. */
+const fetchWhy = (f) => { const ls = String(f.stderr || f.error?.message || `exit ${f.status}`).trim().split(/\r?\n/); return (ls.find((l) => /^fatal:/.test(l)) || ls.pop() || '').replace(/^fatal:\s*/, '').slice(0, 200); };
+
+/** A <remote>/<branch> ref: { remote, branch, main (the remote's default branch, else 'main') }, or null (a local ref, a commit). */
+export function remoteRef(root, ref) {
+  const r = String(ref || '').replace(/^refs\/remotes\//, '');
+  const i = r.indexOf('/');
+  if (i <= 0 || !out1(git(['remote'], root)).split(/\r?\n/).includes(r.slice(0, i))) return null;
+  const remote = r.slice(0, i);
+  const head = out1(git(['symbolic-ref', '-q', '--short', `refs/remotes/${remote}/HEAD`], root));
+  return { remote, branch: r.slice(i + 1), main: head.startsWith(`${remote}/`) ? head.slice(remote.length + 1) : 'main' };
+}
+
 /** `--merge` (see the header; `cont` = --continue). Returns { ok, code, lines, commit?, backup?, conflicts? }. */
-export async function upgradeMerge({ ref, by, permission = '', goldenReason = '', cont = false, duringTrain = false, root = ROOT, env = process.env, now = new Date(), deps = {} } = {}) {
+export async function upgradeMerge({ ref, by, permission = '', goldenReason = '', cont = false, duringTrain = false, notMain = false, noFetch = false, root = ROOT, env = process.env, now = new Date(), deps = {} } = {}) {
   const lines = [];
   const stop = (why, extra = {}) => ({ ok: false, code: 1, lines: [...lines, `[upgrade] Not merged: ${why}`], ...extra });
   if (!root || !repoRoot(root)) return stop('this isn\'t a git checkout; run it in the studio\'s main checkout');
@@ -392,8 +405,16 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
   if (!isMainCheckout(root)) return stop('this is a lane copy; take the update in the studio\'s main checkout (the board and main live there)');
   const branch = out1(git(['symbolic-ref', '-q', '--short', 'HEAD'], root));
   if (!branch) return stop('HEAD is not on a branch; check out the studio\'s branch (main) first');
+  // 2.97 (d): a <remote>/<branch> is fetched first (the copy here may be hours old) and must be the remote's main.
+  const rr = cont ? null : remoteRef(root, ref);
+  if (rr && !notMain && rr.branch !== rr.main && !(await releaseRefs(root, env)).has(ref)) return stop(`${ref} is not ${rr.remote}/${rr.main}: a branch can change, or fail its checks, after you take it. Take ${rr.remote}/${rr.main}, or add --not-main if you mean it.`);
+  if (rr && !noFetch) {
+    const f = git(['fetch', '--quiet', '--no-tags', rr.remote, `+refs/heads/${rr.branch}:refs/remotes/${rr.remote}/${rr.branch}`], root, { timeout: Math.max(1000, Number(env.STUDIO_UPGRADE_FETCH_MS) || 60000), env: { ...process.env, ...env, GIT_TERMINAL_PROMPT: '0' } });
+    if (f.status !== 0) return stop(`couldn't fetch ${ref} (${fetchWhy(f)}); nothing was merged; \`--no-fetch\` merges the copy that is here`);
+  }
   const sha = out1(git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], root));
-  if (!sha) return stop(`"${ref}" doesn't name a commit here. Fetch it first (git fetch <remote>), then give it as <remote>/<branch>`);
+  if (!sha) return stop(`"${ref}" doesn't name a commit here. Give it as <remote>/<branch> (fetched first), a local branch or a commit id`);
+  if (!cont) lines.push(`[upgrade] ${ref}${rr ? (noFetch ? ' (not fetched: the copy here)' : ' (fetched now)') : ''} is ${out1(git(['log', '-1', '--format=%h (%cs) %s', sha], root))}`);
   const who = await whoActs({ by, permission, env, root, ref });
   if (!who.ok) return stop(who.why);
   const mergeHead = out1(git(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], root));
@@ -412,7 +433,7 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
   // 2.96: a train loads some modules late, so an upgrade under it leaves it on half of each version.
   const trains = cont || duringTrain ? [] : runningTrains(root, env, now.getTime());
   if (trains.length) return stop(`${trains.map((t) => `a ${t.kind === 'next' ? 'next (speculative)' : t.kind} train is running (train ${t.id || '?'}, pid ${t.pid}, since ${t.at ? t.at.slice(0, 16).replace('T', ' ') : 'a time not recorded'} UTC)`).join('; ')}. Nothing was merged. Wait for it to end (npm run lanes shows it), then run this again. To take the update anyway: add --during-train.`);
-  if (!cont && !(await releaseRefs(root, env)).has(ref)) lines.push('[upgrade] this is not main: a branch can still change and its online checks may not have finished');
+  if (!cont && !(rr && rr.branch === rr.main) && !(await releaseRefs(root, env)).has(ref)) lines.push('[upgrade] this is not main: a branch can still change and its online checks may not have finished');
   // The scorecard just before the update (.studio/upgrades/<from>-to-<to>.json; kept on --continue).
   const snap = await beforeSnapshot({ root, from, to, ref, sha, by, env, now });
   lines.push(...snap.lines);
@@ -835,7 +856,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF)) {
   if (a.includes('--help') || a.includes('-h')) {
     console.log([
       'Usage: npm run upgrade -- --check | --snapshot   (before taking a harness update: the board must be committed, never stashed)',
-      '       npm run upgrade -- --merge <ref> --by <person> [--permission "<their words or a link>"] [--golden-reason "<why>"] [--continue] [--during-train]',
+      '       npm run upgrade -- --merge <ref> --by <person> [--permission "<their words or a link>"] [--golden-reason "<why>"] [--continue] [--during-train] [--not-main] [--no-fetch]',
+      '         (2.97: a <remote>/<branch> is fetched first; a branch other than the remote\'s main needs --not-main; --no-fetch merges the copy here)',
       '       npm run upgrade -- --restore-stash <sha> --by <person>',
       '       npm run upgrade -- --rollback --by <person> [--permission "<their words or a link>"]   (2.71.1: reverts the last update\'s merge; never resets or deletes)',
       '       npm run upgrade -- --preflight [--ref <ref>] [--json]   (2.73.0: before an update, read-only: PASS/WARN/FAIL per item, exit 1 on a FAIL)',
@@ -878,7 +900,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF)) {
     process.exit(r.status === 'failed' ? 1 : 0);
   }
   if (a.includes('--merge')) {
-    show(await upgradeMerge({ ref: flag('--merge'), by: flag('--by'), permission: flag('--permission') || '', goldenReason: flag('--golden-reason') || '', cont: a.includes('--continue'), duringTrain: a.includes('--during-train') }));
+    show(await upgradeMerge({ ref: flag('--merge'), by: flag('--by'), permission: flag('--permission') || '', goldenReason: flag('--golden-reason') || '', cont: a.includes('--continue'), duringTrain: a.includes('--during-train'), notMain: a.includes('--not-main'), noFetch: a.includes('--no-fetch') }));
   }
   if (a.includes('--rollback')) {
     show(await upgradeRollback({ by: flag('--by'), permission: flag('--permission') || '' }));

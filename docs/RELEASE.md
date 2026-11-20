@@ -149,7 +149,11 @@ node can't run, so use the line above there.) The guard finds the studio by git 
      `STUDIO_HEAVY_SLOTS`; flagged once the studio's harness is at that version; values never printed), ready builder tasks
      with no lane, uncommitted changes in `harness/` or `scripts/` (a local patch), and trains or verifies still running from
      before the harness last changed. Run it again after the update, before a long run.
-1. `npm run task -- drain on --by <you>`, then `npm run task -- drain wait` (no landing mid-update).
+1. `npm run task -- drain on --by <you>`, then `npm run task -- drain wait` (no landing mid-update). 2.97: while the drain
+   is on no train starts: a train command ends at once (exit 3, one line), `task done` queues its lane without starting
+   one, and the Line Producer starts no engine train. `drain off` starts the queued lanes' train (the train daemon's, else
+   one detached). A train that was already waiting for another train's lock when the harness changed starts again on the
+   new code as it takes the lock (once; the line says "the harness changed while this train waited").
 2. **Commit the board first.** `npm run upgrade -- --check` refuses (exit 1) while `studio/NEXT.md`, `studio/DONE.md`,
    `studio/task-holds.json`, `studio/pending-review.json` or `studio/handoffs/` has uncommitted changes, and prints the
    `git add` / `git commit` to run. `--snapshot` also copies them to `.studio/board-snapshots/<time>/`.
@@ -158,7 +162,10 @@ node can't run, so use the line above there.) The guard finds the studio by git 
    board with `--no-verify`. It waits up to `STUDIO_UPGRADE_LOCK_WAIT_MS` (120000) for the board lock.
 3. Other uncommitted work: commit it on a branch, or set it aside with a named stash
    (`git stash push -u -m "<unique-tag>" -- <paths>`) that leaves `studio/` out. Never `git stash` the whole checkout.
-4. **Merge:** `npm run upgrade -- --merge <ref> --by <you>`. **Not during a train (2.96):** it refuses while a web or engine train runs (a train loads some modules late, so it would run half of each version), saying which train and since when; `--during-train` takes the update anyway. A ref that is not main is merged, with one line saying a branch can still change. After it: `npm run agent -- smoke` proves each start path. **Running processes (2.86):** nothing running is stopped. A
+4. **Merge:** `npm run upgrade -- --merge <ref> --by <you>`. **Not during a train (2.96):** it refuses while a web or engine train runs (a train loads some modules late, so it would run half of each version), saying which train and since when; `--during-train` takes the update anyway. 2.97: a `<remote>/<branch>` is fetched from its remote first, and the merge says what it takes (short id, date,
+   subject); a fetch that fails merges nothing (`--no-fetch` merges the copy that is here). A branch other than the remote's
+   main (or the ref the upgrade watcher watches) is refused: add `--not-main` if you mean it. A local branch or a commit id
+   needs neither. After it: `npm run agent -- smoke` proves each start path. **Running processes (2.86):** nothing running is stopped. A
    supervisor on 2.86 or later notices the new code and restarts itself at its next pass (`harness.code_changed`), keeping
    its halt, end time and back-offs; agent sessions and a running train finish on the code they started with, and each new
    one starts on the new code. The merge ends by naming what still runs old code and what happens to it (an older
