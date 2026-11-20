@@ -13,12 +13,13 @@ jobs:
           node-version: '24'
       - name: install
         run: npm ci
-      - name: unit 293b, six times
+      - name: units 290b then 293b, twice
         shell: bash
         run: |
-          for i in 1 2 3 4 5 6; do
-            node qa/selftest.mjs --only 293b > out$i.log 2>&1 || true
+          for i in 1 2; do
+            node qa/selftest.mjs --only 290b,293b > out$i.log 2>&1 || true
             echo "run $i: pass $(grep -c '\[selftest\] PASS' out$i.log) fail $(grep -c '\[selftest\] FAIL' out$i.log)"
-            if grep -q '\[selftest\] FAIL' out$i.log; then grep -E "\[dbg\]" out$i.log | cut -c1-6000; fi
+            grep -E "\[selftest\] FAIL" out$i.log | cut -c1-200
+            grep -E "\[dbg\]" out$i.log | cut -c1-6000
           done
           exit 0
