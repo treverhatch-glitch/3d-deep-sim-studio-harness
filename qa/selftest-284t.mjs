@@ -442,10 +442,10 @@ console.log('Passed!');
     const rr = rulesRuns(rlog);
     const re = evs(/^engine\.rules$/);
     const land = runsOf(ctl);
-    await guard('2.84 (t) rules.maxLanes: a batch of three with maxLanes 2 is checked as two slices on the same target (T-391+T-392, then T-393); no rules run ever holds all three; the red slice hands back only its own lane (cause rules); the rest lands, without STUDIO_RULES_GREEN (a sliced check never saw the batch as one tree); one engine.rules event per slice (fails before this fix: one run held the whole batch)', () => [
+    await guard('2.84 (t) rules.maxLanes: a batch of three with maxLanes 2 is checked as two slices on the same target (T-391+T-392, then T-393); no rules run ever holds all three; the red slice hands back only its own lane (cause rules); one engine.rules event per slice; 2.96: the lanes left are then checked once as one tree (here the tree of slice 1, a kept green: no run, a third event) and the rest lands with STUDIO_RULES_GREEN=1 (fails before this fix: one run held the whole batch)', () => [
       rr.length >= 3 && rr.every((x) => x.lanes.length <= 2) && rr.some((x) => x.lanes.join() === 'lane-a.txt,lane-b.txt') && rr.some((x) => x.lanes.join() === 'lane-c.txt')
-        && r.dropped?.length === 1 && r.dropped[0].task === 'T-393' && r.dropped[0].cause === 'rules' && r.landed?.join() === 'T-391,T-392' && land.length === 1 && land[0].rulesGreen === null
-        && re.length === 2 && re.map((e) => e.meta?.slice).join() === '1/2,2/2' && r.rules?.sliced === 2,
+        && r.dropped?.length === 1 && r.dropped[0].task === 'T-393' && r.dropped[0].cause === 'rules' && r.landed?.join() === 'T-391,T-392' && land.length === 1 && land[0].rulesGreen === '1'
+        && re.length === 3 && re.map((e) => e.meta?.slice || '').join() === '1/2,2/2,' && r.rules?.sliced === 2 && r.rules?.whole?.green === true,
       JSON.stringify({ r, rr, re: re.map((e) => e.meta), land }).slice(0, 2500)]);
   }
 }

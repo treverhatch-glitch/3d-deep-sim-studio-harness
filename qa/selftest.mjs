@@ -5414,6 +5414,14 @@ if (inShard('selftest-295a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.96 (b): a red rules check narrowed by its failing tests, one green per tree, blame by the failure's words, ratchets.
+if (inShard('selftest-296b')) {
+  const dir = copyRepo();
+  const { selftest296B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-296b.mjs')).href);
+  await selftest296B({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

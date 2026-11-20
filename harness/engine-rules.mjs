@@ -5,8 +5,8 @@
  * Default for unity when "rules" is absent: `dotnet test tools/SimTests` when the target branch has that folder. "rules": false
  * or STUDIO_ENGINE_RULES=off: no check. Other keys: "inputs" (git-ignored files the tests read), "timeoutMin" (30), "env", "lfs",
  * "paths", "ignore", "focus" (changed systems only, a full run every fullEveryHours; "focus.auto", "focus.shared"), "share", "maxLanes",
- * "play.focus", "landGate", "ahead", "shards", "peak" (docs/NATIVE-ENGINE.md). The batch runs first; a red batch asks the target, and a red target
- * judges no lane. Results are kept per tree, command and inputs (.studio/engine/<x>-rules.json).
+ * "play.focus", "landGate", "ahead", "shards", "peak", "byName", "ratchets" (docs/NATIVE-ENGINE.md). The batch runs first; a red batch asks the
+ * target, a red target judges no lane, and a red is narrowed by its failing tests by name. Results are kept per tree, command and inputs.
  *   node harness/engine-rules.mjs [--engine unity] [--ref <branch|commit>] [--full] [--fresh] [--json] | show [--engine unity]
  *   node harness/engine-rules.mjs plan --branch <b> [--branch <c>] [--json]   (what a batch's check would run; runs nothing)
  */
@@ -188,29 +188,63 @@ export function blameList(v) {
     const touches = (Array.isArray(e?.touches) ? e.touches : [e?.touches]).filter((x) => typeof x === 'string' && relOk(x.trim().replace(/\\/g, '/'))).map((x) => x.trim().replace(/\\/g, '/'));
     let re = null; try { re = typeof e?.test === 'string' && e.test ? new RegExp(e.test) : null; } catch { re = null; }
     if (!re || !touches.length) { errors.push(`engines.<x>.blame entry ${JSON.stringify(e).slice(0, 120)} left out: "test" must be a valid regex and "touches" a path or glob inside the repo`); continue; }
-    blame.push({ test: e.test, re, touches, say: typeof e.say === 'string' ? e.say.trim().slice(0, 300) : '' });
+    // 2.96: "names", a regex on the failure's own words whose group 1 names a system; "touches" may hold {name}.
+    let names = null;
+    if (e.names !== undefined) {
+      try { names = typeof e.names === 'string' && /\((?!\?)/.test(e.names) ? new RegExp(e.names, 'g') : null; } catch { names = null; }
+      if (!names) { errors.push(`engines.<x>.blame entry ${JSON.stringify(e).slice(0, 120)} left out: "names" must be a valid regex whose group 1 is a name`); continue; }
+    }
+    blame.push({ test: e.test, re, touches, say: typeof e.say === 'string' ? e.say.trim().slice(0, 300) : '', ...(names ? { names } : {}) });
   }
   return { blame, errors };
 }
 
+/** 2.96: the names a blame entry's "names" regex reads in a red's words (group 1, letters, digits, . _ - only), at most 10. */
+const namesIn = (re, text) => [...new Set([...String(text || '').matchAll(new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`))].map((m) => m[1]).filter((n) => n && NAME_SAFE.test(n)))].slice(0, 10);
+
 /**
  * 2.90: the lane engines.<x>.blame names for a red: the failing tests an entry matches, and the lanes that change a file
  * its "touches" names. { lane, tests, files, entry } when exactly one lane does; { tied: [lane], tests } when several do;
- * null when no entry matches a failing test or no lane changes its files.
+ * null when no entry matches a failing test or no lane changes its files. 2.96: an entry with "names" reads the names in
+ * `text` (the red's words) and fills {name} in "touches" (letter case aside); several lanes so named: { tied, byWords }.
  */
-export function blameSuspect({ repo, tip, lanes = [], failures = [], blame = [] } = {}) {
-  const hit = blame.map((b) => ({ b, tests: failures.filter((f) => b.re.test(String(f))) })).filter((x) => x.tests.length);
+export function blameSuspect({ repo, tip, lanes = [], failures = [], blame = [], text = '' } = {}) {
+  const hit = blame.map((b) => ({ b, tests: failures.filter((f) => b.re.test(String(f))), names: b.names ? namesIn(b.names, text) : null })).filter((x) => x.tests.length && (!x.names || x.names.length));
   if (!hit.length) return null;
   const by = new Map();
   for (const lane of lanes) {
     const changed = changedPaths(repo, tip, lane.head) || [];
-    for (const { b, tests } of hit) {
-      const files = changed.filter((f) => matchAny(f, b.touches));
-      if (files.length && !by.has(lane.task)) by.set(lane.task, { lane, tests, files: files.slice(0, 6), entry: b });
+    for (const { b, tests, names } of hit) {
+      const globs = names ? names.flatMap((n) => b.touches.map((t) => t.split('{name}').join(n).toLowerCase())) : b.touches;
+      const files = changed.filter((f) => matchAny(names ? f.toLowerCase() : f, globs));
+      if (files.length && !by.has(lane.task)) by.set(lane.task, { lane, tests, files: files.slice(0, 6), entry: b, ...(names ? { names } : {}) });
     }
   }
   if (by.size === 1) return [...by.values()][0];
-  return by.size > 1 ? { tied: [...by.values()].map((x) => x.lane), tests: hit.flatMap((x) => x.tests) } : null;
+  const words = [...by.values()].every((x) => x.names);
+  return by.size > 1 ? { tied: [...by.values()].map((x) => x.lane), tests: hit.flatMap((x) => x.tests), ...(words ? { byWords: [...by.values()] } : {}) } : null;
+}
+
+/**
+ * 2.96: does a test filter (dotnet test's --filter: `|`, `&`, `=`, `!=`, `~`, `!~` on FullyQualifiedName, Name or
+ * ClassName; a bare value is FullyQualifiedName~) take this test name? A property it cannot judge (Category) or a
+ * bracket answers false: a system named this way is only a first suspect, never a verdict.
+ */
+export function filterTakes(filter, test) {
+  const t = String(test || '');
+  const k = t.lastIndexOf('.');
+  const props = { fullyqualifiedname: t, name: k >= 0 ? t.slice(k + 1) : t, classname: k >= 0 ? t.slice(0, k) : '' };
+  if (!filter || /[()]/.test(filter)) return false;
+  const term = (x) => {
+    const m = /^\s*(?:([A-Za-z]+)\s*(!?[=~]))?\s*(.+?)\s*$/.exec(x);
+    if (!m) return false;
+    const v = props[(m[1] || 'FullyQualifiedName').toLowerCase()];
+    if (v === undefined) return false;
+    const op = m[2] || '~';
+    const yes = op.endsWith('~') ? v.includes(m[3]) : v === m[3];
+    return op.startsWith('!') ? !yes : yes;
+  };
+  return filter.split('|').some((or) => or.split('&').every(term));
 }
 
 /** The rules check of engine <x>: { command, inputs, timeoutMin, source, env, lfs, paths, focus, share, maxLanes } or null. repo/ref: the engine repo and branch that decide the default. */
@@ -268,13 +302,17 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
   const sd = shardsConfig(o.shards, f, withSdk);
   const pk = peakConfig(o.peak);
   focusBad.push(...sd.errors, ...pk.errors);
+  // 2.96: rules.byName (failing test names as a filter, for narrowing a red) and rules.ratchets (count-ratchet tests).
+  const bn = byNameConfig(o.byName, f, withSdk);
+  const rt = ratchetList(o.ratchets);
+  focusBad.push(...bn.errors, ...rt.errors);
   // 2.91: rules.ignore, folders or files the rule tests never read: plain repo paths only (no glob, no `..`).
   const ig0 = (Array.isArray(o.ignore) ? o.ignore : o.ignore === undefined ? [] : [o.ignore]).map((x) => String(x ?? '').trim());
   const ignore = relList(ig0).filter((x) => !/[*?[\]{}!]/.test(x));
   for (const x of ig0) if (x && !ignore.includes(x.replace(/\\/g, '/').replace(/\/+$/, ''))) focusBad.push(`rules.ignore ${JSON.stringify(x).slice(0, 80)} is not a plain repo path (no glob, no .., not absolute); it is left out`);
   // 2.93: rules.landGate, the land run's gate that runs these tests, spelled as harness/unity-gate.mjs landStages reads names.
   const landGate = typeof o.landGate === 'string' ? o.landGate.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, 24) : '';
-  const extra = { landGate, env: vars, lfs: o.lfs === true, paths: relList(o.paths), ignore, focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, first, blame: bl.blame, timeoutSet, timeoutFrom, ahead: o.ahead === true, ...(sd.shards ? { shards: sd.shards } : {}), ...(pk.peak ? { peak: pk.peak } : {}) };
+  const extra = { landGate, env: vars, lfs: o.lfs === true, paths: relList(o.paths), ignore, focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, first, blame: bl.blame, timeoutSet, timeoutFrom, ahead: o.ahead === true, ...(sd.shards ? { shards: sd.shards } : {}), ...(pk.peak ? { peak: pk.peak } : {}), ...(bn.byName ? { byName: bn.byName } : {}), ...(rt.ratchets.length ? { ratchets: rt.ratchets } : {}) };
   const test = typeof r === 'string' ? r.trim() : typeof o.test === 'string' ? o.test.trim() : '';
   if (test) return { command: withSdk(test), inputs, timeoutMin, source: `studio/game.json engines.${engine}.rules`, ...extra };
   const d = DEFAULTS[engine];
@@ -299,6 +337,53 @@ function shardsConfig(v, f, withSdk) {
   if (o.keep !== undefined && !['tree', 'reads'].includes(o.keep)) return bad('"keep" is "tree" (the default) or "reads"');
   return { shards: { test: withSdk(f.test.trim()), filters: [...new Set(filters.map((x) => x.trim()))], rest: typeof o.rest === 'string' ? o.rest.trim() : '', keep: o.keep || 'tree', freshEveryHours: Math.max(0, num(o.freshEveryHours, 24)) }, errors: [] };
 }
+
+/**
+ * 2.96: rules.byName, how failing test names become one filter for rules.focus.test: "<each with {test}>" or { each, join }.
+ * Unset, it is on (FullyQualifiedName~{test} joined by |) when rules.focus.test is `dotnet test`, the runner that default
+ * fits; true turns that default on for another runner, false off. { byName: { test, each, join }, errors }.
+ */
+function byNameConfig(v, f, withSdk) {
+  if (v === false) return { byName: null, errors: [] };
+  const bad = (why) => ({ byName: null, errors: [`rules.byName is not usable: ${why}; it is left out (a red is narrowed by whole runs)`] });
+  const set = v !== undefined && v !== null && v !== true;
+  const unset = v === undefined || v === null;
+  if (!(f && typeof f === 'object' && typeof f.test === 'string' && f.test.includes('{filter}'))) return unset ? { byName: null, errors: [] } : bad('it needs rules.focus.test with {filter} in it (the command the failing tests run with)');
+  if (unset && !/(^|[\\/"\s])dotnet(\.exe)?"?\s+test\b/i.test(f.test)) return { byName: null, errors: [] };
+  const o = !set ? {} : typeof v === 'string' ? { each: v } : v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+  if (!o) return bad('it must be "<filter with {test}>" or { "each": "<filter with {test}>", "join": "|" }');
+  const each = o.each === undefined ? 'FullyQualifiedName~{test}' : o.each;
+  if (typeof each !== 'string' || !each.includes('{test}')) return bad('"each" must be a filter with {test} in it');
+  if (o.join !== undefined && (typeof o.join !== 'string' || !o.join)) return bad('"join" must be a string');
+  return { byName: { test: withSdk(f.test.trim()), each: each.trim(), join: o.join || '|' }, errors: [] };
+}
+
+/** 2.96: rules.ratchets, tests that assert a count is at least N: a list of names or regexes. { ratchets: [RegExp], errors }. */
+function ratchetList(v) {
+  if (v === undefined || v === null) return { ratchets: [], errors: [] };
+  const list = Array.isArray(v) ? v : [v];
+  const ratchets = []; const errors = [];
+  for (const x of list) { try { if (typeof x !== 'string' || !x.trim()) throw new Error('empty'); ratchets.push(new RegExp(x.trim())); } catch { errors.push(`rules.ratchets ${JSON.stringify(x).slice(0, 80)} is not a test name or valid regex; it is left out`); } }
+  return { ratchets, errors };
+}
+
+/** 2.96: the characters a failing test's name may hold to reach a filter (a parameter list is cut off first: ~ still takes it). */
+const TEST_SAFE = /^[A-Za-z0-9_.+-]+$/;
+/**
+ * 2.96: the run of only these failing tests (rules.byName): { mode: 'names', filter, command, tests } or null when no filter
+ * can be built (no rules.byName, no name, more than 40, a name unsafe on a command line, a filter over 3000 characters).
+ */
+export function nameFilter(cfg, tests = []) {
+  const b = cfg?.byName;
+  if (!b) return null;
+  const names = [...new Set((tests || []).map((t) => String(t).replace(/\(.*$/s, '').trim()).filter(Boolean))];
+  if (!names.length || names.length > 40 || names.some((n) => !TEST_SAFE.test(n))) return null;
+  const filter = names.map((n) => b.each.split('{test}').join(n)).join(b.join);
+  return filter.length > 3000 ? null : { mode: 'names', filter, command: b.test.split('{filter}').join(filter), tests: names };
+}
+
+/** 2.96: is every failing test a count ratchet (rules.ratchets)? */
+export const allRatchets = (cfg, failures = []) => Boolean(cfg?.ratchets?.length) && failures.length > 0 && failures.every((t) => cfg.ratchets.some((re) => re.test(String(t))));
 
 /** 2.95: rules.peak, checked: "<file or glob>" or { file, match }. { peak: { file, match }, errors }. */
 function peakConfig(v) {
@@ -670,16 +755,21 @@ function keep(root, engine, key, rec, run = true) {
   });
 }
 
-/** 2.94: the keys of the kept results now (trees, parts, timeouts), and forgetting the ones added since such a list. */
+/**
+ * 2.94: the keys of the kept results now (trees, parts, timeouts), and forgetting the ones added since such a list. 2.96:
+ * keepTree keeps the greens of an exact tree (a whole pass not leaning on another tree's shards, an exact-tree shard): a fact
+ * about that tree whatever the land run did. Greens kept by what they read, reds and timeouts are forgotten as before.
+ */
 export function rulesCacheKeys(root, engine) { const j = readCache(root, engine); return { trees: Object.keys(j.trees), parts: Object.keys(j.parts || {}), timedOut: Object.keys(j.timedOut || {}) }; }
-export function rulesCacheForget(root, engine, before) {
+export function rulesCacheForget(root, engine, before, { keepTree = false } = {}) {
   if (!before) return;
-  writeCache(root, engine, (j) => { for (const k of ['trees', 'parts', 'timedOut']) for (const x of Object.keys(j[k] || {})) if (!(before[k] || []).includes(x)) delete j[k][x]; });
+  const exact = (k, x, v) => keepTree && v?.status === 'pass' && (k === 'trees' ? !v.reads : k === 'parts' && x.startsWith('shard:tree:'));
+  writeCache(root, engine, (j) => { for (const k of ['trees', 'parts', 'timedOut']) for (const x of Object.keys(j[k] || {})) if (!(before[k] || []).includes(x) && !exact(k, x, j[k][x])) delete j[k][x]; });
 }
 
 /** Median minutes of the last recorded runs that ran to the end, or null. */
 export function rulesMinutes(root, engine) {
-  const runs = (readCache(root, engine).runs || []).filter((r) => ['pass', 'red'].includes(r.status) && r.ms > 0).slice(-12).map((r) => r.ms).sort((a, b) => a - b);
+  const runs = (readCache(root, engine).runs || []).filter((r) => ['pass', 'red'].includes(r.status) && r.ms > 0 && r.mode !== 'names').slice(-12).map((r) => r.ms).sort((a, b) => a - b);
   return runs.length ? Math.round(runs[Math.floor(runs.length / 2)] / 6000) / 10 : null;
 }
 
@@ -976,7 +1066,7 @@ export function rulesKey({ repo, sha, cfg, sel = null, print = '' }) {
   if (cfg.paths?.length) base = `paths:${sha1(cfg.paths.map((p) => `${p}\0${less(p, at(p)) || 'none'}`).join('\n'))}`;
   else if (ign.length) { const t = out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}^{tree}`)); base = t ? treeWithout(repo, t, ign) || 'less:empty' : ''; }
   else base = out(git(repo, 'rev-parse', '--verify', '--quiet', `${sha}^{tree}`));
-  return `${base}|${cmdKey({ ...cfg, command: s.command })}${print ? `|${print}` : ''}${s.mode === 'focus' ? `|focus:${sha1(s.filter)}` : ''}${s.mode === 'shards' ? `|shards:${sha1(s.filter)}` : ''}`;
+  return `${base}|${cmdKey({ ...cfg, command: s.command })}${print ? `|${print}` : ''}${s.mode === 'focus' ? `|focus:${sha1(s.filter)}` : ''}${s.mode === 'shards' ? `|shards:${sha1(s.filter)}` : ''}${s.mode === 'names' ? `|names:${sha1(s.filter)}` : ''}`;
 }
 
 /** 2.93: the kept full pass of a commit's tree, or null. A full pass answers a narrower question too (every subset passed). */
@@ -1029,13 +1119,14 @@ export function rulesNoJudge(root, engine) { const x = readCache(root, engine).n
  * 2.91: the full run rules.focus.fullEveryHours owes, run on the target alone (fullRulesRun), never as a batch's check.
  * { why, overdue, hours, maxHours, blocked } ('' why: not owed now). Overdue past rules.focus.fullEveryMaxHours. blocked:
  * the last owed run was red or timed out on this target's rules key: it is not run again until the target moves under what
- * the tests read, fullEveryHours pass, or (a timeout) the timeout grew.
+ * the tests read, fullEveryHours pass, or (a timeout) the timeout grew. 2.96: a kept full pass of the tip's tree: not owed.
  */
-export function fullRulesOwed(root, engine, cfg, { repo = null, tip = null, now = Date.now() } = {}) {
+export function fullRulesOwed(root, engine, cfg, { repo = null, tip = null, now = Date.now(), from = null } = {}) {
   const no = { why: '', overdue: false, hours: null, maxHours: null, blocked: null };
   const h = cfg?.focus?.fullEveryHours;
   if (!(h > 0)) return no;
   const maxHours = cfg.focus.fullEveryMaxHours || 2 * h;
+  if (repo && tip && from) { try { const k = keptFull(root, engine, { repo, sha: tip, cfg, print: inputsPrint(cfg, from) }); if (k && !k.reads) return { ...no, hours: h, maxHours, kept: k }; } catch { /* asked as before */ } }
   const j = readCache(root, engine);
   const at = Date.parse(j.lastFullAt || '');
   const age = Number.isFinite(at) ? now - at : Infinity;
@@ -1088,6 +1179,15 @@ export function outsideTrain(root, engine, fn, { env = process.env, log = () => 
   }
   try { return fn(); } finally { lk.release(); }
 }
+
+/** 2.96: output that says a filtered run ran no test (dotnet test, NUnit, a plain count of 0). */
+const NO_TESTS = /No test matches the given testcase filter|No test is available in|Total tests: 0\b|Test Count: 0\b|\b0 tests? (?:ran|run|passed)\b/i;
+/** 2.96: a red's lines that a blame "names" regex reads (at most 40), kept with the red so its words can name lanes later. */
+const saidOf = (cfg, text) => {
+  const res = (cfg?.blame || []).filter((b) => b.names).map((b) => new RegExp(b.names.source));
+  const lines = res.length ? String(text || '').split('\n').filter((l) => res.some((re) => re.test(l))).slice(0, 40) : [];
+  return lines.length ? { said: lines.map((l) => l.slice(0, 300)) } : {};
+};
 
 /**
  * Run the rules check on one commit in a throwaway checkout (never the land script's worktree or a lane).
@@ -1150,7 +1250,7 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
         if (redAt >= 0) {
           const part = s.parts.find((x) => x.filter === groups[redAt].filter) || s.parts[redAt];
           const text = texts[redAt] || '';
-          const rec = { status: 'red', why: `the rules check failed (exit ${groups[redAt].code ?? '?'}, ${what} ${part.filter})`, ms, at: new Date().toISOString(), mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce, part: { filter: part.filter, command: part.command }, failures: failingTests(text).slice(0, 40), tail: text.split('\n').slice(-12).join('\n') };
+          const rec = { status: 'red', why: `the rules check failed (exit ${groups[redAt].code ?? '?'}, ${what} ${part.filter})`, ms, at: new Date().toISOString(), mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce, part: { filter: part.filter, command: part.command }, failures: failingTests(text).slice(0, 40), tail: text.split('\n').slice(-12).join('\n'), ...saidOf(cfg, text) };
           keep(root, engine, key, rec);
           return rec;
         }
@@ -1213,11 +1313,13 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
     if (pg) { keepParts(root, engine, [{ key: null, filter: statOf, peakGb: pg }]); log(`[engine-rules] ${engine}: ${statOf} took ${pg} GB at its peak (rules.peak)`); }
     const text = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd();
     if (r.error) return { status: 'error', why: r.error.code === 'ETIMEDOUT' ? `the rules check timed out after ${cfg.timeoutMin} min (${tmo.why})` : `the rules check could not run: ${r.error.code || r.error.message}`, ms, mode: s.mode };
+    // 2.96: a run of the failing tests by name that ran no test proves nothing: an error, never a green.
+    if (s.mode === 'names' && r.status === 0 && NO_TESTS.test(text)) return { status: 'error', noTests: true, why: 'the filter of the failing tests ran no test (rules.byName does not fit how the test runner names them)', ms, mode: s.mode };
     // 2.86: one joined command that passed passed every part in it.
     if (r.status === 0 && s.partKeys) { const ks = Object.entries(s.partKeys); const gb = ks.length === 1 ? peakFromHistory(readUsedHistory(root), t0, Date.now()) : null; keepParts(root, engine, ks.map(([filter, k]) => ({ key: k, filter, ...(ks.length === 1 ? { seconds: Math.round(ms / 1000), ...(gb > 0 ? { gb } : {}) } : {}) }))); }
     const rec = r.status === 0
       ? { status: 'pass', why: `the rules check passed (${Math.round(ms / 1000)} s${s.mode === 'focus' ? ', focus' : ''})`, ms, at: new Date().toISOString(), mode: s.mode }
-      : { status: 'red', why: `the rules check failed (exit ${r.status ?? r.signal ?? '?'}${s.mode === 'focus' ? ', focus' : ''})`, ms, at: new Date().toISOString(), mode: s.mode, failures: failingTests(text).slice(0, 40), tail: text.split('\n').slice(-12).join('\n') };
+      : { status: 'red', why: `the rules check failed (exit ${r.status ?? r.signal ?? '?'}${s.mode === 'focus' ? ', focus' : s.mode === 'names' ? ', the failing tests by name' : ''})`, ms, at: new Date().toISOString(), mode: s.mode, failures: failingTests(text).slice(0, 40), tail: text.split('\n').slice(-12).join('\n'), ...saidOf(cfg, text) };
     keep(root, engine, key, rec);
     return rec;
   } finally { removeCheckout(repo, dir); } })();
@@ -1236,14 +1338,14 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
  * why, kept, dropped, runs, ms, green?, inputs, mode, filter }. The batch runs first; a red asks the target, then is bisected
  * (STUDIO_ENGINE_RULES_MAX_RUNS, 12). 2.95: a full selection runs as rules.shards; admit goes to every run (the check ahead).
  */
-export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], extraFrom = [], full = false, owe = false, useCache = true, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt, slice = null, batchOnly = false, admit = null } = {}) {
+export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], extraFrom = [], full = false, owe = false, useCache = true, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt, slice = null, batchOnly = false, admit = null, noSlice = false } = {}) {
   const src = [...from, ...extraFrom];
   const res = { ran: false, kept: lanes.slice(), dropped: [], runs: 0, ms: 0, why: '', inputs: inputsPrint(cfg, src), mode: 'full', filter: '' };
   if (!cfg) return { ...res, skipped: true, why: 'no rules check is configured' };
   if (!lanes.length) return { ...res, skipped: true, why: 'no lane to check' };
   // rules.maxLanes (0: off): a bigger batch is checked in slices on the same target, a red slice narrowed within itself.
-  // Never "green" for the land run (no STUDIO_RULES_GREEN): the batch was not checked as one tree.
-  if (!slice && cfg.maxLanes > 0 && lanes.length > cfg.maxLanes) {
+  // 2.96: then once as the whole batch (noSlice), so a green tells the land run the rules are green.
+  if (!slice && !noSlice && cfg.maxLanes > 0 && lanes.length > cfg.maxLanes) {
     const n = Math.ceil(lanes.length / cfg.maxLanes);
     const all = { ...res, ran: false, kept: [], sliced: n, slices: [] };
     for (let i = 0; i < n; i += 1) {
@@ -1261,8 +1363,22 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
       if (i === 0) { all.mode = r.mode; all.filter = r.filter; }
       else if (r.mode !== all.mode) all.mode = 'mixed';
     }
+    // 2.96: the lanes left are checked once more as one tree (kept results and shards reused); a check ahead only when every slice passed.
+    let w = null;
+    if (all.kept.length && (!batchOnly || all.ahead === 'pass')) {
+      log(`[engine-rules] ${engine}: the ${n} slices are done; one check of the whole batch left (${all.kept.map((l) => l.task).join(', ')}) decides what the land run is told`);
+      w = rulesGate({ engine, repo, tip, lanes: all.kept, chain, cfg, from, extraFrom, full, owe, useCache, root, id: `${id}-whole`, env, log, run, batchOnly, admit, noSlice: true });
+      if (batchOnly) all.ahead = w.ahead;
+      all.ran = all.ran || w.ran; all.runs += w.runs; all.ms += w.ms;
+      all.dropped.push(...w.dropped); all.kept = w.kept;
+      for (const k of ['filtered', 'wholeRuns']) if (w[k]) all[k] = { runs: (all[k]?.runs || 0) + w[k].runs, ms: (all[k]?.ms || 0) + w[k].ms };
+      if (w.green) all.green = w.green;
+      if (w.shards) all.shards = w.shards;
+      if (w.runsSaid) all.runsSaid = w.runsSaid;
+      all.wholeCheck = { lanes: all.kept.map((l) => l.task), why: w.why, green: Boolean(w.green), ...(w.skipped ? { skipped: true } : {}) };
+    }
     if (!all.ran) all.skipped = true;
-    all.why = `${n} slices of at most ${cfg.maxLanes} lanes (rules.maxLanes): ${all.dropped.length} lane(s) refused, ${all.kept.length} go to the land run (a sliced check does not tell the land run the rules are green)`;
+    all.why = `${n} slices of at most ${cfg.maxLanes} lanes (rules.maxLanes), then ${w ? `one check of the whole batch (${w.green ? 'green: the land run is told the rules are green' : w.why})` : 'no whole-batch check (no lane left)'}: ${all.dropped.length} lane(s) refused, ${all.kept.length} go to the land run`;
     return all;
   }
   const maxRuns = Math.max(2, Math.floor(num(env.STUDIO_ENGINE_RULES_MAX_RUNS, 12)));
@@ -1325,6 +1441,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     // 2.85: a kept result is said in the log (a restarted train reusing a green tree is not a silent skip).
     if (r.cached) log(`[engine-rules] ${engine}: rules ${r.status} cached for ${short(sha)} (${r.mode || sel.mode}, kept result of this tree: not run again)`);
     if (Number(r.splitAtOnce) > 0) res.splitAtOnce = Math.max(res.splitAtOnce || 0, Number(r.splitAtOnce));
+    if (!r.cached && res.wholeRuns) { res.wholeRuns.runs += 1; res.wholeRuns.ms += r.ms || 0; }
     if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; for (const gr of Array.isArray(r.groups) ? r.groups : []) groupSecs.set(gr.filter, (groupSecs.get(gr.filter) || 0) + (gr.seconds || 0)); }
     return r;
   };
@@ -1393,10 +1510,71 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     res.newParts = fresh.length;
     return onTip.length ? at(tip, onTip, 'the target') : { status: 'pass', why: 'every part is new in the batch: nothing to calibrate', allKept: true };
   };
+  // 2.96: the lanes a red's own evidence names: engines.<x>.blame (by files; by the names in the failure's words), else the
+  // lanes that change the files of a system whose rules.focus filter takes a failing test (by name only, fewer than the batch).
+  // { kind, lanes, why(lane), say } or null.
+  const suspectsOf = (set, r, nf) => {
+    if (set.length < 2) return null;
+    const fails = r.failures || [];
+    const bs = cfg.blame?.length ? blameSuspect({ repo, tip, lanes: set, failures: fails, blame: cfg.blame, text: (r.said || []).join('\n') }) : null;
+    const wordsWhy = (x, l) => `engines.${engine}.blame reads ${x.names.join(', ')} in the failure of ${x.tests.slice(0, 3).join(', ')} and ties it to ${x.entry.touches.flatMap((t) => x.names.map((n) => t.split('{name}').join(n))).slice(0, 4).join(', ')}, which ${l.branch} changes (${x.files.slice(0, 3).join(', ')})`;
+    if (bs?.lane) return { kind: bs.names ? 'words' : 'blame', lanes: [bs.lane], say: bs.entry.say, why: (l) => (bs.names ? wordsWhy(bs, l) : `engines.${engine}.blame ties ${bs.tests.slice(0, 3).join(', ')} to ${bs.entry.touches.join(', ')}, which only ${l.branch} changes (${bs.files.slice(0, 3).join(', ')})`) };
+    if (bs?.byWords) { const m = new Map(bs.byWords.map((x) => [x.lane.task, x])); return { kind: 'words', lanes: bs.tied, say: bs.byWords[0].entry.say, why: (l) => wordsWhy(m.get(l.task), l) }; }
+    if (bs || !nf || !cfg.focus) return null;
+    const hits = new Map();
+    for (const lane of set) {
+      for (const p of changedPaths(repo, tip, lane.head) || []) {
+        const ff = focusFilters({ changed: [p], map: cfg.focus.map, auto: sys ? cfg.focus.auto : null, names: sys?.names || [] });
+        for (const f of ff.ok ? ff.filters : []) {
+          const tests = f === cfg.focus.smoke ? [] : fails.filter((t) => filterTakes(f, t));
+          if (!tests.length) continue;
+          const h = hits.get(lane.task) || { lane, filters: new Set(), tests: new Set(), files: [] };
+          h.filters.add(f); for (const t of tests) h.tests.add(t); if (!h.files.includes(p)) h.files.push(p);
+          hits.set(lane.task, h);
+        }
+      }
+    }
+    if (!hits.size || hits.size >= set.length) return null;
+    return { kind: 'system', lanes: [...hits.values()].map((h) => h.lane), say: '', why: (l) => { const h = hits.get(l.task); return `${[...h.tests].slice(0, 3).join(', ')} ${h.tests.size > 1 ? 'are' : 'is'} taken by the rules.focus filter ${[...h.filters].slice(0, 2).join(', ')}, whose files ${l.branch} changes (${h.files.slice(0, 3).join(', ')})`; } };
+  };
+  // 2.96: the suspects left out at once; green without them, each is added back in batch order: red with it, it is handed
+  // back; green, it stays. One suspect: one run (red with it is the batch's own red). [{ lane, without }].
+  const confirmSuspects = (set, r, sus, atStep) => {
+    const ids = new Set(sus.lanes.map((l) => l.task));
+    let kept = set.filter((l) => !ids.has(l.task));
+    const c = chain(tip, kept);
+    const rw = c.error || !c.head ? null : atStep(c.head, `without ${[...ids].join(', ')}`, null);
+    if (rw?.status !== 'pass') { log(`[engine-rules] ${engine}: ${sus.kind === 'system' ? 'the rules.focus filter of the failing tests' : `engines.${engine}.blame`} named ${[...ids].join(', ')}, but the batch without ${ids.size > 1 ? 'them' : 'it'} is ${rw?.status || 'not buildable'}: narrowing as before`); return []; }
+    const got = [];
+    for (const one of set.filter((l) => ids.has(l.task))) {
+      const cand = set.filter((l) => l === one || kept.includes(l));
+      let rc = r;
+      if (cand.length < set.length) { if (res.runs >= maxRuns) break; const cc = chain(tip, cand); rc = cc.error || !cc.head ? null : atStep(cc.head, `with ${one.task}`, null); }
+      if (rc?.status === 'red') got.push({ lane: one, without: kept.map((l) => l.task) });
+      else if (rc?.status === 'pass') kept = cand;
+      else break;
+    }
+    return got;
+  };
   res.ran = true;
+  // 2.96: a red whose failing tests are named is narrowed by runs of those tests only (rules.byName); whole runs are counted
+  // apart, for the saved-minutes line. A filter that ran no test turns this off for the rest of the check.
+  res.filtered = { runs: 0, ms: 0 };
+  res.wholeRuns = { runs: 0, ms: 0 };
+  let nfOff = '';
+  const atN = (sha, nfx, what, fallback) => {
+    if (nfOff || !nfx) return fallback();
+    const r = run({ engine, repo, sha, cfg, from, extraFrom, sel: nfx, root, id: `${id}-names`, env, log, useCache, admit });
+    if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; res.filtered.runs += 1; res.filtered.ms += r.ms || 0; }
+    if (r.noTests) { nfOff = r.why; log(`[engine-rules] ${engine}: ${r.why}: the narrowing goes on with whole runs`); return fallback(); }
+    log(`[engine-rules] ${engine}: the failing tests by name on ${short(sha)} (${what}): ${r.status}${r.cached ? ' (a kept result of this tree)' : ''}`);
+    return r;
+  };
+  const asked = new Set();
   let base = null;
   let rounds = 0;
   let set = lanes.slice();
+  const dropWhy = (d, r) => `${d}${r.failures?.length ? `. Failing: ${r.failures.slice(0, 8).join(', ')}` : ''}${r.tail ? `\n${r.tail.split('\n').map((x) => `  ${x}`).join('\n')}` : ''}`;
   while (set.length) {
     const whole = first || chain(tip, set);
     first = null;
@@ -1407,11 +1585,18 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     // The first batch run that timed out or could not run judges no lane and is counted, as a red target is.
     const tmoBatch = rounds++ === 0 && r.status !== 'red';
     if (r.status !== 'red' && !tmoBatch) { raiseOn(r, 'the batch'); res.why = `${r.why}: the land run decides`; break; }
-    if (r.status === 'red' && !base) {
-      base = onTarget();
-      log(`[engine-rules] ${engine}: the batch is red; on the target itself the check is ${base.status}${base.cached || base.allKept ? ' (a kept result)' : ''}`);
+    const nf = r.status === 'red' && !nfOff ? nameFilter(cfg, r.failures || []) : null;
+    if (nf) log(`[engine-rules] ${engine}: the batch is red on ${nf.tests.length} named test(s): each narrowing step runs only them (rules.byName: ${nf.filter.slice(0, 200)})`);
+    // The target is asked once in whole, or (2.96) by name for each failing test it was not asked about yet.
+    if (r.status === 'red' && !(base?.status === 'pass' && (base.whole || (nf && nf.tests.every((t) => asked.has(t)))))) {
+      const nfx = nf ? nameFilter(cfg, nf.tests.filter((t) => !asked.has(t))) : null;
+      const b0 = nfx ? atN(tip, nfx, 'the target', onTarget) : onTarget();
+      const byName = Boolean(nfx) && !nfOff;
+      if (byName) for (const t of nfx.tests) asked.add(t);
+      base = { ...b0, whole: !byName };
+      log(`[engine-rules] ${engine}: the batch is red; on the target itself the check is ${base.status}${base.cached || base.allKept ? ' (a kept result)' : ''}${byName ? ' (the failing tests by name)' : ''}`);
       // A full pass on the target is the backstop for focused runs (fullEveryHours).
-      if (base.status === 'pass' && sel.mode === 'full' && (base.mode || 'full') === 'full' && cfg.focus && !perPart) writeCache(root, engine, (j) => { j.lastFullAt = new Date().toISOString(); });
+      if (!byName && base.status === 'pass' && sel.mode === 'full' && (base.mode || 'full') === 'full' && cfg.focus && !perPart) writeCache(root, engine, (j) => { j.lastFullAt = new Date().toISOString(); });
     }
     const no = tmoBatch ? { ...r, where: 'the batch' } : base.status !== 'pass' ? { ...base, where: 'the target itself' } : null;
     if (no) {
@@ -1424,10 +1609,25 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
       return { ...res, ran: false, kept: set.slice(), skipped: true, ...(tmoBatch ? {} : { calibration: no.status }), ...(tmoOut ? { timedOut: true } : {}), noJudge, why, ...(no.status === 'red' && !tmoBatch ? { redTests: (no.failures || []).slice(0, 40) } : {}) };
     }
     if (res.runs >= maxRuns) { res.why = `the rules check is red and its ${maxRuns} runs are used (STUDIO_ENGINE_RULES_MAX_RUNS): the land run decides for ${set.map((l) => l.task).join(', ')}`; break; }
-    const bb = byBlame(set, r, (sha) => at(sha));
-    if (bb) {
-      res.dropped.push({ lane: bb.lane, failures: r.failures || [], part: r.part?.filter || null, blame: true, why: `the rules check (${sel.command}) is red on the batch with ${bb.lane.branch}: ${bb.why}${r.failures?.length ? `. Failing: ${r.failures.slice(0, 8).join(', ')}` : ''}${r.tail ? `\n${r.tail.split('\n').map((x) => `  ${x}`).join('\n')}` : ''}` });
-      set = set.filter((l) => l.task !== bb.lane.task);
+    // 2.86: per part, a prefix runs only the red part's filter (the other parts were green on the whole batch).
+    const redPart = perPart && r.part?.filter ? allParts.filter((p) => p.filter === r.part.filter) : sharded && r.part?.filter ? [{ filter: r.part.filter }] : null;
+    const atStep = (sha, what, ps = redPart) => atN(sha, nf, what, () => at(sha, ps?.length ? ps : null, `narrowing ${ps?.length ? `part ${ps[0].filter}` : 'the batch'}`));
+    // 2.96: a count ratchet (rules.ratchets) is named for what it is; it is still red and still handed back.
+    const ratchet = allRatchets(cfg, r.failures || []);
+    const said = ratchet ? `a count ratchet tripped (${r.failures.slice(0, 3).join(', ')}): this is not a behaviour regression; raise the count in this branch and queue again. ` : '';
+    const by = nf ? 'the failing tests by name are' : 'the check is';
+    // 2.90 / 2.96: suspects from engines.<x>.blame (by files, or by the names in the failure's words), else from the system
+    // whose focus filter takes the failing tests. Left out at once; each is handed back only when the failing tests are
+    // green without it and red with it. A wrong suspect costs one run, never a hand-back.
+    const sus = suspectsOf(set, r, nf);
+    const got = sus ? confirmSuspects(set, r, sus, atStep) : [];
+    if (got.length) {
+      for (const g of got) {
+        const head = sus.kind === 'blame' && !nf ? `the rules check (${sel.command}) is red on the batch with ${g.lane.branch}: ${sus.why(g.lane)}, and the check is green without it${sus.say ? `. ${sus.say}` : ''}` : `the rules check (${sel.command}) is red on the batch with ${g.lane.branch}: ${sus.why(g.lane)}; ${by} green without it (${g.without.join(' + ') || 'the target alone'}) and red with it${sus.say ? `. ${sus.say}` : ''}`;
+        res.dropped.push({ lane: g.lane, failures: r.failures || [], part: r.part?.filter || null, blame: true, ...(ratchet ? { ratchet: true } : {}), why: dropWhy(`${said}${head}`, r) });
+      }
+      set = set.filter((l) => !got.some((g) => g.lane.task === l.task));
+      if (nf) log(`[engine-rules] ${engine}: ${got.map((g) => g.lane.task).join(', ')} left out by name; one whole check of the lanes left decides`);
       continue;
     }
     // The smallest red prefix: its last lane turns the batch red.
@@ -1435,30 +1635,35 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     let hi = set.length; // target + the first hi lanes is red
     let bad = r;
     let stuck = false;
-    // 2.86: per part, a prefix runs only the red part's filter (the other parts were green on the whole batch).
-    const redPart = perPart && r.part?.filter ? allParts.filter((p) => p.filter === r.part.filter) : sharded && r.part?.filter ? [{ filter: r.part.filter }] : null;
     while (hi - lo > 1) {
       if (res.runs >= maxRuns) { stuck = true; break; }
       const mid = Math.floor((lo + hi) / 2);
       const part = chain(tip, set.slice(0, mid));
       if (part.error || !part.head) { stuck = true; break; }
-      const rm = at(part.head, redPart?.length ? redPart : null, `narrowing ${redPart?.length ? `part ${redPart[0].filter}` : 'the batch'}`);
+      const rm = atStep(part.head, `the first ${mid} lane(s)`);
       if (rm.status === 'pass') lo = mid;
       else if (rm.status === 'red') { hi = mid; bad = rm; } else { stuck = true; break; }
     }
     if (stuck) { res.why = `the rules check is red for ${set.map((l) => l.task).join(' + ')} and could not be narrowed: the land run decides`; break; }
     const culprit = set[hi - 1];
     const before = set.slice(0, hi - 1).map((l) => l.task);
-    res.dropped.push({ lane: culprit, failures: bad.failures || [], part: bad.part?.filter || null, why: `the rules check (${bad.part ? `${bad.part.command}, part ${bad.part.filter} of ${res.parts}` : sel.command}${slice ? `, slice ${slice.i} of ${slice.n}` : ''}) is red with ${culprit.branch}${before.length ? ` on top of ${before.join(' + ')}` : ''}; it is green without it${bad.failures?.length ? `. Failing${bad.part ? ` in part ${bad.part.filter}` : ''}: ${bad.failures.slice(0, 8).join(', ')}${bad.failures.length > 8 ? ', ...' : ''}` : bad.part ? `. Part ${bad.part.filter} failed; no test name was read from its output` : ''}${bad.tail ? `\n${bad.tail.split('\n').map((x) => `  ${x}`).join('\n')}` : ''}` });
+    // A by-name red names no part: the evidence of the batch's own red is kept with it.
+    if (bad.mode === 'names') bad = { ...r, failures: bad.failures?.length ? bad.failures : r.failures };
+    res.dropped.push({ lane: culprit, failures: bad.failures || [], part: bad.part?.filter || null, ...(ratchet ? { ratchet: true } : {}), why: `${said}the rules check (${bad.part ? `${bad.part.command}, part ${bad.part.filter} of ${res.parts}` : sel.command}${slice ? `, slice ${slice.i} of ${slice.n}` : ''}) is red with ${culprit.branch}${before.length ? ` on top of ${before.join(' + ')}` : ''}; it is green without it${nf ? ' (the failing tests by name)' : ''}${bad.failures?.length ? `. Failing${bad.part ? ` in part ${bad.part.filter}` : ''}: ${bad.failures.slice(0, 8).join(', ')}${bad.failures.length > 8 ? ', ...' : ''}` : bad.part ? `. Part ${bad.part.filter} failed; no test name was read from its output` : ''}${bad.tail ? `\n${bad.tail.split('\n').map((x) => `  ${x}`).join('\n')}` : ''}` });
     set = set.filter((l) => l.task !== culprit.task);
+    if (nf) log(`[engine-rules] ${engine}: ${culprit.task} left out by name; one whole check of the lanes left decides`);
   }
   res.kept = set;
+  for (const d of res.dropped.filter((x) => x.ratchet)) { try { emitEvent({ type: 'engine.ratchet', agent: env.STUDIO_LOCK_OWNER || 'gates', track: `engine:${engine}`, task: d.lane.task, status: 'warn', msg: `${engine} rules check: a count ratchet tripped with ${d.lane.task} (${(d.failures || []).slice(0, 3).join(', ')}): raise the count in that branch`.slice(0, 400), meta: { engine, lane: d.lane.task, tests: (d.failures || []).slice(0, 10) } }); } catch { /* counted where it can be */ } }
   if ((res.green || base?.status === 'pass') && rulesNoJudge(root, engine)) writeCache(root, engine, (j) => { delete j.noJudge; });
   if (groupSecs.size) res.groups = [...groupSecs.entries()].map(([filter, seconds]) => ({ filter, seconds }));
   if (!res.why) res.why = res.dropped.length ? `${res.dropped.length} lane(s) refused by the rules check, ${set.length} go to the land run` : `the rules check is green for ${set.map((l) => l.task).join(', ')}`;
   if (sel.mode === 'focus') res.why += ` (focus: ${res.filter})`;
   if (res.shards) res.why += ` (${res.shards.n} shard(s), ${res.shards.kept} kept${res.shards.keptOther ? `, ${res.shards.keptOther} from another tree` : ''}${res.shards.complete ? '' : '; no rules.shards.rest: not a full run'})`;
-  try { emitEvent({ type: 'engine.rules', agent: env.STUDIO_LOCK_OWNER || 'gates', track: `engine:${engine}`, status: res.dropped.length ? 'warn' : 'ok', msg: `${engine} rules check: ${res.why}`.slice(0, 400), meta: { engine, runs: res.runs, ms: res.ms, kept: set.map((l) => l.task), dropped: res.dropped.map((d) => d.lane.task), green: Boolean(res.green), mode: res.mode, why: res.selWhy, parts: res.parts, ...(perPart ? { reused: res.reused, newParts: res.newParts || 0 } : {}), splitAtOnce: res.splitAtOnce || 1, filter: res.filter, ...(res.groups ? { groups: res.groups } : {}), ...(slice ? { slice: `${slice.i}/${slice.n}` } : {}), ...(res.shards ? { shards: res.shards } : {}) } }); } catch { /* the check's result stands without its event */ }
+  // 2.96: what narrowing by name cost, beside the whole runs (said only when it ran).
+  const mins = (ms) => Math.round(ms / 6000) / 10;
+  if (res.filtered.runs) { res.runsSaid = `${res.filtered.runs} run(s) of the failing tests by name (${mins(res.filtered.ms)} min), ${res.wholeRuns.runs} whole run(s) (${mins(res.wholeRuns.ms)} min)`; log(`[engine-rules] ${engine}: rules runs: ${res.runsSaid}`); }
+  try { emitEvent({ type: 'engine.rules', agent: env.STUDIO_LOCK_OWNER || 'gates', track: `engine:${engine}`, status: res.dropped.length ? 'warn' : 'ok', msg: `${engine} rules check: ${res.why}${res.runsSaid ? `; ${res.runsSaid}` : ''}`.slice(0, 400), meta: { engine, runs: res.runs, ms: res.ms, kept: set.map((l) => l.task), dropped: res.dropped.map((d) => d.lane.task), green: Boolean(res.green), mode: res.mode, why: res.selWhy, parts: res.parts, ...(perPart ? { reused: res.reused, newParts: res.newParts || 0 } : {}), splitAtOnce: res.splitAtOnce || 1, filter: res.filter, ...(res.groups ? { groups: res.groups } : {}), ...(slice ? { slice: `${slice.i}/${slice.n}` } : {}), ...(res.shards ? { shards: res.shards } : {}), ...(res.filtered.runs ? { filtered: res.filtered, whole: res.wholeRuns } : {}), ...(res.dropped.some((d) => d.ratchet) ? { ratchets: res.dropped.filter((d) => d.ratchet).map((d) => d.lane.task) } : {}) } }); } catch { /* the check's result stands without its event */ }
   return res;
 }
 
@@ -1596,6 +1801,10 @@ async function cli(argv) {
     for (const a of autosOf(cfg.focus?.auto)) console.log(`[engine-rules] auto: systems are ${[a.root ? `the folders under ${a.root}` : '', a.from ? `the names that fit ${a.from}` : ''].filter(Boolean).join(' and ')}; paths ${a.paths.join(', ')}; filter ${a.filter}${Object.keys(a.filters).length ? `; ${Object.keys(a.filters).length} filter(s) by name` : ''}${a.inputs.length ? `; inputs ${a.inputs.join(', ')}` : ''}`);
     if (cfg.focus?.shared) console.log(`[engine-rules] shared (every part reads them; a change runs in full): ${cfg.focus.shared.join(', ')}`);
     for (const b of cfg.focusBad || []) console.log(`[engine-rules] ${b}`);
+    // 2.96: a batch bigger than rules.maxLanes costs the slices and then one more whole run.
+    const bm = Number(s.cfg.batchMax);
+    if (cfg.maxLanes > 0 && bm > cfg.maxLanes) console.log(`[engine-rules] WARNING: engines.${engine}.batchMax ${bm} is above rules.maxLanes ${cfg.maxLanes}: a batch that big is checked in slices and then once more as a whole (one more whole run) before the land run is told the rules are green. Set batchMax to ${cfg.maxLanes} or raise maxLanes.`);
+    console.log(`[engine-rules] narrowing a red: ${cfg.byName ? `the failing tests by name (rules.byName: ${cfg.byName.each} joined by ${cfg.byName.join})` : 'whole runs (rules.byName is off or rules.focus.test is not set)'}${cfg.ratchets?.length ? `; ${cfg.ratchets.length} count ratchet(s) (rules.ratchets)` : ''}`);
     if (cfg.focus) console.log(`[engine-rules] ignore: ${cfg.focus.ignore.length ? cfg.focus.ignore.map((p) => { try { new RegExp(p); return p; } catch { return `${p} (not a valid regex: skipped)`; } }).join(', ') : 'none'}`);
     // 2.95: the shards (each with its kept green on the target and its measured peak) and the peak file.
     if (cfg.peak) console.log(`[engine-rules] peak: read from ${cfg.peak.file} in the test checkout after each test command${cfg.peak.match ? ` (match ${cfg.peak.match})` : ''}; a full run's measured peak: ${partStats(root, engine)[FULL_STAT]?.peakGb ? `${partStats(root, engine)[FULL_STAT].peakGb} GB` : 'none yet'}${cfg.focus?.splitGb ? ' (rules.focus.splitGb is set: that number is used)' : ''}`);
