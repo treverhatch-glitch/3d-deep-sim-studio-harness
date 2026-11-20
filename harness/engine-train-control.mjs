@@ -77,11 +77,11 @@ export function laneAloneWhy({ repo, target, cfg = {}, lane }) {
 
 /**
  * This train's batch from the queue (in queue order). opts: only (task ids), tag, max (--max), batchMax, group ('play'
- * | null), classOf(lane) -> class. Order: --only and --tag first (a train with neither takes untagged lanes only), then
- * an alone lane rides by itself, then grouping, then the cap. { lanes, why, total, waiting, cls, alone, tagged } or {
- * error: 'unknown', unknown, why } when an --only id is not queued.
+ * | null), classOf(lane) -> class, held (2.96: Map task -> why; left out first, even with --only). Order: --only and
+ * --tag (neither: untagged lanes only), held, an alone lane by itself, grouping, the cap. { lanes, why, total, waiting,
+ * cls, alone, tagged, held } or { error: 'unknown', unknown, why } when an --only id is not queued.
  */
-export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 0, group = null, classOf = () => 'full', isVision = null, waits = null, aloneOf = null } = {}) {
+export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 0, group = null, classOf = () => 'full', isVision = null, waits = null, aloneOf = null, held = null } = {}) {
   const q = Array.isArray(queue) ? queue.filter((e) => e && e.task) : [];
   const ids = onlyList(only);
   const unknown = ids.filter((id) => !q.some((e) => e.task === id));
@@ -93,6 +93,8 @@ export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 
   else pool = q;
   if (tag) { pool = pool.filter((e) => e.tag === tag); parts.push(`tag ${tag}`); }
   else if (!ids.length) { pool = pool.filter((e) => !e.tag); if (tagged) parts.push(`untagged lanes only (${tagged} tagged wait for train --tag)`); }
+  const heldOut = held?.size ? pool.filter((l) => held.has(l.task)).map((l) => l.task) : [];
+  if (heldOut.length) { pool = pool.filter((l) => !held.has(l.task)); parts.push(`${heldOut.length} held: ${heldOut.map((t) => `${t} ${held.get(t)}`).join('; ')}`); }
   // 2.85 (f): a vision fix (harness/vision-fix.mjs; isVision, else read from the event log) goes to the front before
   // the alone lane, the grouping and the cap, so the batch forms around it: its class is the batch's class.
   if (!ids.length) {
@@ -120,7 +122,7 @@ export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 
   if (cap && pool.length > cap) pool = pool.slice(0, cap);
   if (cap) parts.push(`cap ${cap}`);
   const taken = new Set(pool.map((l) => l.task));
-  const left = q.filter((e) => !taken.has(e.task));
+  const left = q.filter((e) => !taken.has(e.task) && !heldOut.includes(e.task));
   let byClass = '';
   if (group === 'play' && left.length) {
     const n = {};
@@ -128,7 +130,7 @@ export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 
     byClass = ` (${Object.entries(n).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([k, v]) => `${v} ${k}`).join(', ')})`;
   }
   const why = `${pool.length} of ${q.length} queued${parts.length ? `: ${parts.join(', ')}` : ''}; ${left.length} wait${byClass}`;
-  return { lanes: pool, why, total: q.length, waiting: left.length, cls: head, alone, tagged, classes: Object.fromEntries(classes) };
+  return { lanes: pool, why, total: q.length, waiting: left.length, cls: head, alone, tagged, classes: Object.fromEntries(classes), held: heldOut };
 }
 
 /** Tags in a queue: { <tag>: n } (untagged lanes left out). */
