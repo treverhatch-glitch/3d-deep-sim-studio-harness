@@ -18,4 +18,4 @@ jobs:
         run: |
           node qa/selftest.mjs --only 296a > out.log 2>&1 || true
           grep -E "\[selftest\] (FAIL|PASS) 2.96 \(a(1|2|16|18|19)\)" out.log | cut -c1-120
-          echo "--- sampler debug log"; cat "$(node -e "console.log(require('os').tmpdir())")/studio-sampler-dbg.log" | cut -c1-700 | head -80
+          echo "--- sampler debug log"; cat "$(node -e "console.log(require('os').tmpdir())")/studio-sampler-dbg.log" | cut -c1-1500 | grep -v 'helper [a-z]*-helper' | head -60

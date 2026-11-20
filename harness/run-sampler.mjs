@@ -104,6 +104,21 @@ export function startSampler({ file, meta = {}, rootPid, everyMs = 10000, helper
       const args = helper ? [helper, String(rootPid), String(process.pid), String(everyMs)] : ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', windowsHelperScript(rootPid, process.pid, everyMs)];
       const env = helper ? process.env : psEnv(process.env);
       proc = spawn(helper ? process.execPath : 'powershell.exe', args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env });
+      if (!helper) {
+        dbg(`ENV NAMES ${Object.keys(env).join(' ')}`);
+        for (const k of Object.keys(env)) if (/^(systemroot|windir|psmodulepath|temp|tmp|home|userprofile|appdata|localappdata|pathext|comspec|systemdrive|programdata|msystem|shell|term)$/i.test(k)) dbg(`ENV ${k}=${String(env[k]).slice(0, 260)}`);
+        for (const [label, script] of [
+          ['wmisearcher', "$sw=[Diagnostics.Stopwatch]::StartNew(); $p=@(([wmisearcher]'SELECT ProcessId,ParentProcessId,WorkingSetSize FROM Win32_Process').Get()); [Console]::Out.WriteLine(('wmisearcher procs {0} in {1} ms' -f $p.Count,$sw.ElapsedMilliseconds))"],
+          ['hello', "[Console]::Out.WriteLine('hello from powershell')"],
+          ['cim', "$sw=[Diagnostics.Stopwatch]::StartNew(); $p=@(Get-CimInstance Win32_Process -Property ProcessId); [Console]::Out.WriteLine(('cim procs {0} in {1} ms' -f $p.Count,$sw.ElapsedMilliseconds))"],
+        ]) {
+          const a = Date.now();
+          const x = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env });
+          x.stdout.on('data', (d) => dbg(`TEST ${label} after ${Date.now() - a} ms OUT ${JSON.stringify(d.toString().slice(0, 300))}`));
+          x.stderr.on('data', (d) => dbg(`TEST ${label} after ${Date.now() - a} ms ERR ${JSON.stringify(d.toString().slice(0, 600))}`));
+          x.on('exit', (c) => dbg(`TEST ${label} exit ${c} after ${Date.now() - a} ms`));
+        }
+      }
       dbg(`spawned ${proc.pid} PATH ${String(env.PATH || env.Path || '').slice(0, 200)} SystemRoot ${env.SystemRoot}`);
       proc.stderr.on('data', (d) => dbg(`STDERR ${d.toString().slice(0, 1200)}`));
       proc.on('error', (e) => { dbg(`ERROR ${e.code} ${e.message}`); proc = null; });
