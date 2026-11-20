@@ -5414,6 +5414,14 @@ if (inShard('selftest-295a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.96 (e): a real smoke start for every pool and tool, the engine porters' spending order, an upgrade that waits for the train.
+if (inShard('selftest-296e')) {
+  const dir = copyRepo();
+  const { selftest296E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-296e.mjs')).href);
+  await selftest296E({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
