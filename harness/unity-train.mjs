@@ -36,6 +36,7 @@ import { flagOf, foldRealOf, gitMax64 as git, numBlankDefault as num, realOrReso
 import { targetRedTask, targetRedClear, targetRedLine } from './engine-target-red.mjs';
 import { aheadStart, aheadVerdict, aheadFor, aheadLine } from './rules-ahead.mjs';
 import { unionGlobs, unionMerge } from './merge-union.mjs';
+import { runningLines } from './run-cost.mjs';
 
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); writeAtomic(f, `${JSON.stringify(v, null, 2)}\n`); };
 const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
@@ -2072,6 +2073,8 @@ export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'un
   if (!quiet) { try { lines.push(autoLine(root, engine)); } catch { /* the queue lines stand */ } }
   { const nj = rulesIdleLine(root, engine); if (nj) lines.push(nj); }
   { const ah = aheadLine(root, engine); if (ah) lines.push(ah); }
+  // 2.96 (a): each sampled run going on now, with its numbers and its reservation.
+  try { lines.push(...runningLines(root)); } catch { /* the queue lines stand */ }
   { const tr = targetRedLine(root, engine); if (tr) lines.push(tr); }
   if (!quiet) { try { const s = unityTrainSettings(root, engine); if (!s.error) lines.push(parallelLine(root, engine, parallelNow(root, engine, s.cfg))); } catch { /* the queue lines stand */ } }
   return lines.join('\n');

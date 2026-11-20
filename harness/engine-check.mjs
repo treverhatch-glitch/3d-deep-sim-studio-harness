@@ -24,6 +24,8 @@ import { rulesConfig, runRulesAt, rulesCheckout, removeCheckout, outsideTrain } 
 import { unityTrainSettings, chainOnTarget, unityRepo } from './unity-train.mjs';
 import { taskBranch } from './unity-gate.mjs';
 import { flagOf, numBlankDefault as num, sleepSyncClamped as sleep } from './helpers.mjs';
+import { runSample, waitAdmit } from './run-cost.mjs';
+import { heavyHolders } from './heavy.mjs';
 
 
 export const checkLockFile = (root, engine) => path.join(root, '.studio', 'locks', `engine-check-${engine}.lock`);
@@ -96,13 +98,17 @@ export function runEngineQuickCheck({ engine = 'unity', root = mainRoot(), task 
       if (!co.ok) return { error: `could not check ${onBranch.branch} out for the quick check: ${co.why}` };
     }
     try {
+      // 2.96 (a): with measured admission on, it starts when its measured need fits beside what runs (else as before).
+      const md = waitAdmit({ root, engine, kind: 'quick', label: `the ${engine} quick test`, env, log: (m) => log(`[engine-check] ${m}`), holders: () => heavyHolders(root, { env }), waitMs: waitMin * 60000, pollMs: num(env.STUDIO_HEAVY_POLL_MS, 2000) });
+      if (md.timedOut) return { error: `it waited ${waitMin} min (STUDIO_ENGINE_CHECK_WAIT_MIN) and still ${md.line}`, busy: true };
       const t0 = Date.now();
       log(`[engine-check] ${engine}: ${cmd} (in ${fwd(at)}${onBranch ? `, a throwaway checkout of ${onBranch.branch}` : ''})`);
-      const r = runLimitedSync(cmd, { cwd: at, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: num(t.cfg.quickCheckTimeoutMin, 30) * 60000, env: { ...env, STUDIO_ENGINE: engine, STUDIO_ENGINE_LANE_DIR: at } });
+      const r = runLimitedSync(cmd, { sample: runSample(root, engine, 'quick', { label: `${engine} quick test${task ? ` (${task})` : ''}` }), cwd: at, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: num(t.cfg.quickCheckTimeoutMin, 30) * 60000, env: { ...env, STUDIO_ENGINE: engine, STUDIO_ENGINE_LANE_DIR: at } });
       return { r, ms: Date.now() - t0 };
     } finally { if (onBranch) removeCheckout(onBranch.repo, at); }
   }, { waitMs: waitMin * 60000, log, env });
   if (got.busy) return { status: 'busy', why: `another ${engine} check held the machine's check lock (${got.busy.by || '?'}, pid ${got.busy.pid || '?'}) for the whole ${waitMin} min wait (STUDIO_ENGINE_CHECK_WAIT_MIN): run it again later` };
+  if (got.value.busy) return { status: 'busy', why: `the ${engine} quick check did not start: ${got.value.error}` };
   if (got.value.error) return { status: 'skipped', why: `the ${engine} quick check judged nothing: ${got.value.error}` };
   const { r, ms } = got.value;
   const text = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd();

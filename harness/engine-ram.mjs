@@ -84,7 +84,7 @@ export function recordLandPeak(engine, { root, startMs, endMs, status, samples =
     const all = readJson(ramFile(root), {}) || {};
     const list = Array.isArray(all[engine]?.peaks) ? all[engine].peaks : [];
     list.push({ gb, status: status || null, at: new Date(endMs).toISOString() });
-    all[engine] = { peaks: list.slice(-20) };
+    all[engine] = { ...(all[engine] || {}), peaks: list.slice(-20) };
     fs.mkdirSync(path.dirname(ramFile(root)), { recursive: true });
     fs.writeFileSync(ramFile(root), `${JSON.stringify(all, null, 2)}\n`);
     return gb;
