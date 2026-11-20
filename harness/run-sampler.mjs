@@ -26,9 +26,15 @@ export function parseHelperLine(line, cores = os.cpus().length || 1) {
   return { t: n[0], availGb: n[1] / GB, commitUsedGb: n[2] / GB, commitLimitGb: n[3] / GB, cpuPct: n[4], treeGb: n[5] / GB, treeCpuPct: Number.isFinite(n[6]) ? n[6] / Math.max(1, cores) : NaN, procs: n[7] };
 }
 
-/** The Windows helper: one PowerShell loop over CIM classes (names aren't localized). Ends when `parent` is gone. */
+/**
+ * The Windows helper: one PowerShell loop over CIM classes (names aren't localized). Ends when `parent` is gone. The
+ * first line marks it (`studio-sampler <rootPid>`) so a check finds it by its command line. No double quotes in it:
+ * Node's quoting of them on a Windows command line is a known trap.
+ */
+export const helperMark = (rootPid) => `studio-sampler ${Number(rootPid)}`;
 export function windowsHelperScript(rootPid, parentPid, everyMs) {
   return [
+    `$mark='${helperMark(rootPid)}'`,
     "$ErrorActionPreference='SilentlyContinue'",
     `$root=${Number(rootPid)}; $parent=${Number(parentPid)}; $ms=${Math.max(200, Number(everyMs))}`,
     'while ($true) {',
@@ -38,9 +44,11 @@ export function windowsHelperScript(rootPid, parentPid, everyMs) {
     ' $in=@{}; $q=New-Object System.Collections.Queue; if ($by.ContainsKey($root)) { $in[$root]=1; $q.Enqueue($by[$root]) }',
     ' while ($q.Count) { $x=$q.Dequeue(); foreach ($c in @($kids[[int]$x.ProcessId])) { if ($c -and -not $in.ContainsKey([int]$c.ProcessId) -and $c.CreationDate -ge $x.CreationDate) { $in[[int]$c.ProcessId]=1; $q.Enqueue($c) } } }',
     ' $ws=0; foreach ($id in $in.Keys) { $ws+=[double]$by[$id].WorkingSetSize }',
-    ' $cpu=0; foreach ($pp in @(Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Property IDProcess,PercentProcessorTime)) { if ($in.ContainsKey([int]$pp.IDProcess)) { $cpu+=[double]$pp.PercentProcessorTime } }',
+    // Performance data of the tree's processes only (one filtered query); a tree of over 40 reads every process's.
+    " $pf=@{ Property='IDProcess','PercentProcessorTime' }; if ($in.Count -le 40) { $pf.Filter=(@($in.Keys | ForEach-Object { 'IDProcess=' + $_ }) -join ' OR ') }",
+    ' $cpu=0; if ($in.Count) { foreach ($pp in @(Get-CimInstance Win32_PerfFormattedData_PerfProc_Process @pf)) { if ($in.ContainsKey([int]$pp.IDProcess)) { $cpu+=[double]$pp.PercentProcessorTime } } }',
     ' $m=Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory -Property AvailableBytes,CommittedBytes,CommitLimit',
-    " $t=(Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter \"Name='_Total'\" -Property PercentProcessorTime).PercentProcessorTime",
+    " $t=(Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter 'Name=''_Total''' -Property PercentProcessorTime).PercentProcessorTime",
     ' $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
     " [Console]::Out.WriteLine(('S|{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}' -f $now,$m.AvailableBytes,$m.CommittedBytes,$m.CommitLimit,$t,$ws,$cpu,$in.Count)); [Console]::Out.Flush()",
     ' Start-Sleep -Milliseconds $ms',
@@ -80,13 +88,15 @@ const memAvailGb = () => { const m = fs.readFileSync('/proc/meminfo', 'utf8').ma
  * platform }. Returns { stop({ code, signal }) }; never throws.
  */
 export function startSampler({ file, meta = {}, rootPid, everyMs = 10000, helper = null, platform = process.platform }) {
-  let rows = 0; let dead = false; let timer = null; let proc = null;
+  let rows = 0; let dead = false; let timer = null; let proc = null; let later = null;
   const cores = os.cpus().length || 1;
   const write = (text) => { if (dead) return; try { fs.appendFileSync(file, text); } catch { dead = true; } };
   const row = (s) => { if (rows >= MAX_ROWS) return; rows += 1; write(`${[s.t, r2(s.availGb), r2(s.commitUsedGb), r2(s.commitLimitGb), r2(s.cpuPct), r2(s.treeGb), r2(s.treeCpuPct), s.procs ?? ''].join(',')}\n`); };
   try { write(`# ${JSON.stringify({ v: 1, ...meta, pid: process.pid, ppid: process.ppid, root: rootPid, at: Date.now(), everyMs, cores, platform })}\n${CSV_HEAD}\n`); } catch { dead = true; }
   try {
-    if (helper || platform === 'win32') {
+    if (helper || platform === 'win32') later = setTimeout(() => { try {
+      // Started after one interval: a run shorter than that never starts a helper.
+      if (dead) return;
       const args = helper ? [helper, String(rootPid), String(process.pid), String(everyMs)] : ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', windowsHelperScript(rootPid, process.pid, everyMs)];
       const env = helper ? process.env : psEnv(process.env);
       proc = spawn(helper ? process.execPath : 'powershell.exe', args, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, env });
@@ -99,7 +109,9 @@ export function startSampler({ file, meta = {}, rootPid, everyMs = 10000, helper
       });
       proc.on('exit', () => { proc = null; });
       proc.unref(); proc.stdout.unref?.();
-    } else if (platform === 'linux') {
+    } catch { proc = null; } }, Math.max(100, everyMs));
+    if (later) later.unref();
+    else if (platform === 'linux') {
       let last = null;
       const tick = () => {
         try {
@@ -122,7 +134,7 @@ export function startSampler({ file, meta = {}, rootPid, everyMs = 10000, helper
   } catch { /* no samples: the run goes on */ }
   return {
     stop({ code = null, signal = null } = {}) {
-      try { if (timer) clearInterval(timer); } catch { /* gone */ }
+      try { if (timer) clearInterval(timer); if (later) clearTimeout(later); } catch { /* gone */ }
       try { if (proc) proc.kill(); } catch { /* gone */ }
       write(`# end ${JSON.stringify({ at: Date.now(), code, signal, rows })}\n`);
       dead = true;

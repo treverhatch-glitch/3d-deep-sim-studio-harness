@@ -724,8 +724,9 @@ harness never switches it by itself.
 Every land run, rules command (whole, part or shard), compile check and quick test the harness starts is sampled while
 it runs: free RAM, commit charge (Windows), total CPU, and the working set and CPU of the run's whole process tree. The
 samples are in `.studio/engine/<x>-samples/<run>.csv` (newest 60 per engine, none older than 14 days). Linux reads
-`/proc`; Windows runs one PowerShell helper per run that prints one line per sample and ends with the run (or by itself
-when the run's wrapper is gone); elsewhere nothing is sampled. A sampler that fails never changes the run.
+`/proc`; elsewhere nothing is sampled. On Windows sampling starts one PowerShell helper for each run that lasts longer
+than one sample interval; it prints one line per sample and ends with the run (or by itself when the run's wrapper is
+gone); `"machine": { "sample": false }` in `studio/game.json` turns sampling off. A sampler that fails never changes the run.
 
 Each ended run is folded into `.studio/engine-ram.json` (`<x>.kinds`, beside the land peaks): its peak GB, mean CPU %,
 minutes, when the peak came (start, middle, end, throughout) and which kinds ran beside it. Kinds: `land with-rules` or

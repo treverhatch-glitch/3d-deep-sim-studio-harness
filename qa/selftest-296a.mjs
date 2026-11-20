@@ -85,10 +85,43 @@ const cmd = process.execPath + ' -e "setTimeout(() => console.log(42), 1200)"';
 const a = runLimitedSync(cmd, { sample: { file: 'a.csv', meta: { kind: 'x', engine: 'unity' }, everyMs: 100, helper: 'rubbish-helper.mjs' }, encoding: 'utf8', timeoutMs: 60000 });
 const b = runLimitedSync(cmd, { sample: { file: 'no-such-dir/b.csv', meta: { kind: 'x' }, everyMs: 100 }, encoding: 'utf8', timeoutMs: 60000 });
 const c = runLimitedSync(cmd, { sample: { file: 'c.csv', meta: { kind: 'x', engine: 'unity' }, everyMs: 100, helper: 'good-helper.mjs' }, encoding: 'utf8', timeoutMs: 60000 });
+fs.writeFileSync('touch-helper.mjs', "import fs from 'node:fs'; fs.writeFileSync('helper-started.txt', 'yes');");
+const d = runLimitedSync(process.execPath + ' -e "setTimeout(() => {}, 200)"', { sample: { file: 'd.csv', meta: { kind: 'x' }, everyMs: 2000, helper: 'touch-helper.mjs' }, encoding: 'utf8', timeoutMs: 60000 });
+await new Promise((res) => setTimeout(res, 2500));
+const short = { status: d.status, started: fs.existsSync('helper-started.txt'), end: Boolean(readRun('d.csv')?.end) };
 const ra = readRun('a.csv'); const rc = readRun('c.csv');
-console.log(JSON.stringify({ a: [a.status, String(a.stdout).trim()], b: [b.status, String(b.stdout).trim()], c: [c.status, String(c.stdout).trim()], aRows: ra?.rows.length, aEnd: Boolean(ra?.end), cRows: rc?.rows.length, cRow: rc?.rows[0] }));`);
+console.log(JSON.stringify({ a: [a.status, String(a.stdout).trim()], b: [b.status, String(b.stdout).trim()], c: [c.status, String(c.stdout).trim()], aRows: ra?.rows.length, aEnd: Boolean(ra?.end), cRows: rc?.rows.length, cRow: rc?.rows[0], short }));`);
     await guard('2.96 (a3) a sampler helper that prints rubbish and dies, or a samples file that cannot be written, never fails the run: same exit code and output; a helper\'s one-line-per-sample protocol is read (Windows\' helper stands in: 1 GB tree, 8 GB free, commit 16 of 32 GB) (fails before this fix: no sampler)', () => [
       R3.a?.[0] === 0 && R3.a[1] === '42' && R3.b?.[0] === 0 && R3.b[1] === '42' && R3.c?.[0] === 0 && R3.c[1] === '42' && R3.aRows === 0 && R3.aEnd && R3.cRows >= 3 && Math.abs(R3.cRow.treeGb - 1) < 0.01 && Math.abs(R3.cRow.availGb - 8) < 0.01 && Math.abs(R3.cRow.commitLimitGb - 32) < 0.01, JSON.stringify(R3)]);
+
+    await guard('2.96 (a19) a run shorter than one sample interval never starts the helper (Windows\' PowerShell): its file still gets its end line (fails before this fix: no sampler)', () => [
+      R3.short?.status === 0 && R3.short.started === false && R3.short.end === true, JSON.stringify(R3.short)]);
+
+    // The real Windows helper (PowerShell): a grandchild holds 300 MB for 12 s, one sample a second.
+    const winName = '2.96 (a18) Windows: the real PowerShell helper samples a run whose grandchild holds 300 MB: 3+ rows, peak tree 0.25+ GB, 2+ processes, free RAM and CPU read, the end line written, no helper left 5 s after the run, and a median gap between samples under 8 s at sampleSec 1 (fails before this fix: no sampler)';
+    if (process.platform !== 'win32') report(`${winName}: Windows only: skipped here`, true, '');
+    else {
+      const W = probe(`import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { runLimitedSync } from ${u('harness/run-limited.mjs')};
+import { readRun } from ${u('harness/run-cost.mjs')};
+import { helperMark } from ${u('harness/run-sampler.mjs')};
+import { psEnv } from ${u('harness/proc-identity.mjs')};
+const inner = "const b = Buffer.alloc(300 * 1024 * 1024, 1); setTimeout(() => { b[0] = 2; }, 12000)";
+const cmd = JSON.stringify(process.execPath) + ' -e ' + JSON.stringify("require('child_process').spawnSync(process.execPath, ['-e', " + JSON.stringify(inner) + "], { stdio: 'inherit', windowsHide: true })");
+const r = runLimitedSync(cmd, { sample: { file: 'win.csv', meta: { kind: 'quick', engine: 'unity' }, everyMs: 1000 }, encoding: 'utf8', timeoutMs: 120000 });
+const run = readRun('win.csv');
+await new Promise((res) => setTimeout(res, 5000));
+const q = "@(Get-CimInstance Win32_Process -Filter 'Name=''powershell.exe''' | Where-Object { $_.CommandLine -like '*" + helperMark(run?.meta?.root || 0) + "*' }).Count";
+const left = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', q], { env: psEnv(), encoding: 'utf8', windowsHide: true, timeout: 60000 });
+const rows = run?.rows || [];
+const gaps = rows.slice(1).map((x, i) => x.t - rows[i].t).sort((a, b) => a - b);
+fs.rmSync('win.csv', { force: true });
+console.log(JSON.stringify({ status: r.status, rows: rows.length, peak: Math.max(0, ...rows.map((x) => x.treeGb)), procs: Math.max(0, ...rows.map((x) => Number(x.procs) || 0)), avail: rows.some((x) => Number.isFinite(x.availGb)), cpu: rows.some((x) => Number.isFinite(x.cpuPct)), end: Boolean(run?.end), left: String(left.stdout || '').trim(), leftErr: String(left.stderr || '').slice(0, 300), medianGapMs: gaps.length ? gaps[Math.floor(gaps.length / 2)] : null }));`);
+      // The median gap goes in the name, so a PASS line in the log shows what one sample costs.
+      await guard(`${winName}; median gap ${W.medianGapMs} ms`, () => [
+        W.status === 0 && W.rows >= 3 && W.peak >= 0.25 && W.procs >= 2 && W.avail && W.cpu && W.end && W.left === '0' && W.medianGapMs !== null && W.medianGapMs <= 8000, `median gap between samples ${W.medianGapMs} ms; ${JSON.stringify(W)}`]);
+    }
 
     // ---- 2. costs per kind, pruning ----
     resetCosts();

@@ -70,7 +70,7 @@ export function readRun(file) {
     const f = l.split(',');
     if (f.length < 8 || !/^\d+$/.test(f[0])) continue;
     const v = f.map((x) => (x === '' ? NaN : Number(x)));
-    if (Number.isFinite(v[5])) rows.push({ t: v[0], availGb: v[1], commitUsedGb: v[2], commitLimitGb: v[3], cpuPct: v[4], treeGb: v[5], treeCpuPct: v[6] });
+    if (Number.isFinite(v[5])) rows.push({ t: v[0], availGb: v[1], commitUsedGb: v[2], commitLimitGb: v[3], cpuPct: v[4], treeGb: v[5], treeCpuPct: v[6], procs: v[7] });
   }
   return meta ? { file, id: path.basename(file, '.csv'), meta, rows, end } : null;
 }
