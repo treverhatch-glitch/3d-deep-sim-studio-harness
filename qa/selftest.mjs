@@ -1216,10 +1216,21 @@ if (inShard()) {
   run(dir, 'node harness/mode.mjs set fast --by hatch', env);
   for (const t of ['Fix the elevator doors', 'Fix the gun direction']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
   const wenv = { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' };
-  run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(5)} --foreground`, wenv);
   const live = () => JSON.parse(run(dir, 'node -e "import(\'./harness/agent.mjs\').then(m=>console.log(JSON.stringify(m.sessions().filter(s=>s.running).map(s=>s.agent))))"', env).stdout || '[]');
-  const one = live();
-  report('two builders without lanes never run at once, even in a fast pace (run #1: they edited the same files)', one.length === 1, JSON.stringify(one));
+  // Waited for, not timed: the long --until is a safety limit. Once one agent is live the supervisor is watched for a fixed
+  // window, and never more than one may be live at any look (its start time under load decides nothing).
+  const sup1 = spawn(process.execPath, ['harness/supervisor.mjs', '--no-hub', '--until', secs(300), '--foreground'], { windowsHide: true, cwd: dir, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...wenv }, stdio: 'ignore' });
+  const sup1Exit = new Promise((r) => sup1.on('exit', r));
+  const tUp = Date.now();
+  let one = [];
+  while (Date.now() - tUp < 90000 * SLOW && !one.length) { pause(400); one = live(); }
+  let most = one.length;
+  const tWatch = Date.now();
+  while (Date.now() - tWatch < 6000 * SLOW) { pause(400); most = Math.max(most, live().length); }
+  run(dir, 'node harness/supervisor.mjs stop', env);
+  if (!(await Promise.race([sup1Exit.then(() => true), new Promise((r) => setTimeout(() => r(false), 30000 * SLOW))]))) sup1.kill('SIGKILL');
+  one = live();
+  report('two builders without lanes never run at once, even in a fast pace (run #1: they edited the same files)', most === 1 && one.length === 1, `most=${most} ${JSON.stringify(one)}`);
   for (const s of one) run(dir, `node harness/agent.mjs stop ${s}`, env);
   // Wait for the launcher to hand the stopped agent's task back.
   const t1 = Date.now();
