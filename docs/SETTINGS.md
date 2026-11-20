@@ -467,7 +467,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## HARNESS_* (2)
 
-- `STUDIO_HARNESS_REF` · no simple default · harness/hook-stamp.mjs, harness/upgrade-smoke.mjs, harness/upgrade-watch.mjs (+11 more) · [RELEASE.md:117](RELEASE.md)
+- `STUDIO_HARNESS_REF` · no simple default · harness/hook-stamp.mjs, harness/upgrade-guard.mjs, harness/upgrade-smoke.mjs (+12 more) · [RELEASE.md:117](RELEASE.md)
 - `STUDIO_HARNESS_REF_TIMEOUT_MS` · default `'3000'` · harness/hook-stamp.mjs, harness/lane-orphans.mjs, harness/lanes.mjs · undocumented
 
 ## HEARTBEAT_* (2)
@@ -965,7 +965,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_TRAIN_RESERVE` · no simple default · harness/heavy-budget.mjs, qa/selftest-276j.mjs, qa/selftest-277p.mjs · [WORK-ORGANIZATION.md:354](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_RIDE_ALONG` · no simple default · harness/task.mjs, qa/selftest-263i.mjs, qa/selftest-265s.mjs (+1 more) · [WORK-ORGANIZATION.md:147](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_SLOT_PRIORITY_MIN` · no simple default · harness/heavy.mjs, harness/train-daemon.mjs · [WORK-ORGANIZATION.md:341](WORK-ORGANIZATION.md)
-- `STUDIO_TRAIN_STALE_MIN` · default `360` · harness/heavy-budget.mjs, harness/janitor.mjs, harness/train-daemon.mjs (+3 more) · undocumented
+- `STUDIO_TRAIN_STALE_MIN` · default `360` · harness/heavy-budget.mjs, harness/janitor.mjs, harness/train-daemon.mjs (+4 more) · undocumented
 - `STUDIO_TRAIN_STALL_GRACE_S` · no simple default · harness/train-watch.mjs, qa/selftest-2773b.mjs · [WORK-ORGANIZATION.md:287](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_STALL_MIN` · no simple default · harness/train-life.mjs, harness/train-watch.mjs, qa/selftest-2773b.mjs · [WATCH-2.78.1.md:27](WATCH-2.78.1.md)
 - `STUDIO_TRAIN_TRIES` · default `3` · harness/train.mjs · undocumented
@@ -996,7 +996,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_UNITY_TRAIN_ONLY` · no simple default · harness/unity-train.mjs, qa/selftest-284u.mjs · [ENGINE-TRACKS.md:208](ENGINE-TRACKS.md)
 - `STUDIO_UNITY_TRAIN_RETRIES` · no simple default · harness/unity-train.mjs, qa/selftest-263j.mjs, qa/selftest-2732e.mjs (+23 more) · [UNITY-TRACK.md:169](UNITY-TRACK.md)
 - `STUDIO_UNITY_TRAIN_RETRY_MIN` · no simple default · harness/unity-train.mjs, qa/selftest-263j.mjs, qa/selftest-2732e.mjs (+23 more) · [UNITY-TRACK.md:169](UNITY-TRACK.md)
-- `STUDIO_UNITY_TRAIN_STALE_MIN` · no simple default · harness/heavy-budget.mjs, harness/unity-train.mjs · undocumented
+- `STUDIO_UNITY_TRAIN_STALE_MIN` · no simple default · harness/heavy-budget.mjs, harness/unity-train.mjs, harness/upgrade-guard.mjs · undocumented
 
 ## UNREAL_* (2)
 
@@ -1009,7 +1009,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_UPGRADE_LOCK_WAIT_MS` · no simple default · harness/upgrade-guard.mjs · [RELEASE.md:158](RELEASE.md)
 - `STUDIO_UPGRADE_MERGE` · no simple default · harness/upgrade-guard.mjs, scripts/hooks/pre-commit, qa/selftest-260c.mjs · [SECURITY.md:116](SECURITY.md)
 - `STUDIO_UPGRADE_MSG` · no simple default · harness/upgrade-guard.mjs · undocumented
-- `STUDIO_UPGRADE_REFRESH` · no simple default · harness/upgrade-guard.mjs, harness/upgrade-smoke.mjs, qa/selftest-267h.mjs (+8 more) · [RELEASE.md:184](RELEASE.md)
+- `STUDIO_UPGRADE_REFRESH` · no simple default · harness/upgrade-guard.mjs, harness/upgrade-smoke.mjs, qa/selftest-267h.mjs (+9 more) · [RELEASE.md:184](RELEASE.md)
 - `STUDIO_UPGRADE_REFRESH_WAIT_S` · default `120` · harness/upgrade-guard.mjs, qa/selftest-276i.mjs · [RELEASE.md:187](RELEASE.md)
 - `STUDIO_UPGRADE_REVERT` · no simple default · harness/upgrade-guard.mjs, scripts/hooks/pre-commit · [RELEASE.md:217](RELEASE.md)
 - `STUDIO_UPGRADE_SNAPSHOT_DAYS` · no simple default · harness/upgrade-baseline.mjs, qa/selftest-273f.mjs · [RELEASE.md:199](RELEASE.md)

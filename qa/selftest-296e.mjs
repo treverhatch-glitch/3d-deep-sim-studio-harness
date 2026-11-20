@@ -5,7 +5,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { eventsOf as eventsFileOf, gEnvOf, gitUserCrlfOf, guardCap3000Of, napSync, npmShim, out, writeIn as write } from './kit.mjs';
 
@@ -197,6 +197,60 @@ console.log(JSON.stringify({ starts, why: r.why }));`);
       s6.status === 0 && lines.length === 2 && /^PASS .*engine-porter on the api pool/.test(lines[0]) && /^PASS .*engine-porter on the plan \(claude\)/.test(lines[1]) && !board().includes('Smoke test') && branches(R) === engineBranches0 && !o.includes(SECRET),
       JSON.stringify({ status: s6.status, out: o.slice(-900) })]);
   }
+
+  // ================= (e7, e8) an upgrade waits for a running train; a ref that is not main is said once =================
+  const holders = [];
+  const holder = () => { const k = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)'], { windowsHide: true, stdio: 'ignore' }); holders.push(k); return k.pid; };
+  let un = 0;
+  const upStudio = (name) => {
+    const U = path.join(T, `up-${name}-${++un}`);
+    fs.cpSync(dir, U, { recursive: true, filter: (src) => !/[\\/](\.git|\.lanes|node_modules)$/.test(src) });
+    fs.rmSync(path.join(U, '.studio'), { recursive: true, force: true });
+    fs.writeFileSync(path.join(U, '.env'), '');
+    write(U, '.studio/events-296e.jsonl', '');
+    g(U, 'init', '-q', '-b', 'main'); g(U, 'config', 'core.autocrlf', 'false'); g(U, 'add', '-A'); g(U, 'commit', '-qm', 'studio', '--no-verify');
+    g(U, 'checkout', '-q', '-b', 'release');
+    fs.writeFileSync(path.join(U, 'harness', 'zz-296e-update.mjs'), 'export const updated = true;\n');
+    const pkg = JSON.parse(fs.readFileSync(path.join(U, 'package.json'), 'utf8'));
+    fs.writeFileSync(path.join(U, 'package.json'), `${JSON.stringify({ ...pkg, version: '9.9.9' }, null, 2)}\n`);
+    g(U, 'add', '-A'); g(U, 'commit', '-qm', 'release 9.9.9', '--no-verify');
+    const bare = path.join(T, `up-remote-${un}`);
+    g(T, 'init', '-q', '--bare', '-b', 'main', bare);
+    g(U, 'remote', 'add', 'origin', bare); g(U, 'push', '-q', 'origin', 'release:main');
+    g(U, 'checkout', '-q', 'main');
+    return U;
+  };
+  const upgrade = (U, args) => spawnSync(process.execPath, ['harness/upgrade-guard.mjs', ...args], { windowsHide: true, cwd: U, encoding: 'utf8', env: { ...childEnv(), AGENT_EVENTS_FILE: path.join(U, '.studio', 'events-296e.jsonl'), STUDIO_UPGRADE_REFRESH: 'off', STUDIO_MAIN_ROOT: '' }, timeout: 240000 });
+  const lock = (U, file, rec) => write(U, `.studio/locks/${file}`, JSON.stringify({ at: Date.now(), by: 'train-daemon', ...rec }));
+  const head = (U) => g(U, 'rev-parse', 'HEAD').stdout.trim();
+  {
+    const U = upStudio('train');
+    const h0 = head(U);
+    lock(U, 'train.lock', { id: '20260101-120000-4242', pid: holder() });
+    const web = upgrade(U, ['--merge', 'origin/main', '--by', 'Dana']);
+    fs.rmSync(path.join(U, '.studio', 'locks', 'train.lock'), { force: true });
+    lock(U, 'unity-train.lock', { id: '20260101-130000-77', pid: holder() });
+    const eng = upgrade(U, ['--merge', 'origin/main', '--by', 'Dana']);
+    const untouched = head(U) === h0 && !fs.existsSync(path.join(U, 'harness', 'zz-296e-update.mjs'));
+    const over = upgrade(U, ['--merge', 'origin/main', '--by', 'Dana', '--during-train']);
+    fs.rmSync(path.join(U, '.studio', 'locks', 'unity-train.lock'), { force: true });
+    await guard('2.96 (e7) upgrade: `--merge` refuses (exit 1, nothing merged) while a web train or an engine train runs, saying which train, its pid and since when, and that --during-train takes the update anyway; with --during-train it merges (exit 0) (fails before this fix: it merged under a running train, which then ran half of each version)', () => [
+      web.status === 1 && /a web train is running \(train 20260101-120000-4242, pid \d+, since \d{4}-\d\d-\d\d \d\d:\d\d UTC\)/.test(out(web)) && /Nothing was merged/.test(out(web)) && /--during-train/.test(out(web))
+        && eng.status === 1 && /a unity train is running \(train 20260101-130000-77, pid \d+/.test(out(eng)) && untouched
+        && over.status === 0 && /PASS merged origin\/main/.test(out(over)) && fs.existsSync(path.join(U, 'harness', 'zz-296e-update.mjs')),
+      JSON.stringify({ web: [web.status, out(web).slice(-400)], eng: [eng.status, out(eng).slice(-300)], untouched, over: [over.status, out(over).slice(-500)] })]);
+  }
+  {
+    const A = upStudio('notmain');
+    const B = upStudio('main');
+    const odd = upgrade(A, ['--merge', 'release', '--by', 'Dana']);
+    const norm = upgrade(B, ['--merge', 'origin/main', '--by', 'Dana']);
+    const said = (r) => out(r).split('\n').filter((l) => /this is not main: a branch can still change and its online checks may not have finished/.test(l)).length;
+    await guard('2.96 (e8) upgrade: merging a ref that is not the release branch (a local branch, not origin/main) says once, before it merges, "this is not main: a branch can still change and its online checks may not have finished", and still merges; origin/main says nothing of the kind (fails before this fix: no word of it)', () => [
+      odd.status === 0 && said(odd) === 1 && /PASS merged release/.test(out(odd)) && out(odd).indexOf('this is not main') < out(odd).indexOf('PASS merged') && norm.status === 0 && said(norm) === 0 && /PASS merged origin\/main/.test(out(norm)),
+      JSON.stringify({ odd: [odd.status, out(odd).slice(-500)], norm: [norm.status, out(norm).slice(-300)] })]);
+  }
+  for (const k of holders) { try { if (WIN) spawnSync('taskkill', ['/pid', String(k.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); else k.kill('SIGKILL'); } catch { /* gone */ } }
   void idOf; void napSync;
 
   for (const p of [S, T]) { try { fs.rmSync(p, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* swept later */ } }

@@ -3,7 +3,7 @@
  * harness/upgrade-guard.mjs — commits the board before a harness upgrade, never stashes it, and merges the update.
  *   npm run upgrade -- --check      exit 1 while a board file is uncommitted; also names stashes with board changes
  *   npm run upgrade -- --snapshot   copy the board files to .studio/board-snapshots/<time>/ (gitignored), then check
- *   npm run upgrade -- --merge <ref> --by <person> [--permission "<their words or a link>"] [--golden-reason "<why>"]
+ *   npm run upgrade -- --merge <ref> --by <person> [--permission "<their words or a link>"] [--golden-reason "<why>"] [--during-train]
  *       needs --check to pass; backs up as backup/pre-<version>; merges <ref> through the hooks (STUDIO_UPGRADE_MERGE)
  *   npm run upgrade -- --restore-stash <sha> --by <person>   three-way merges a stash's board files back, keeps it
  *   npm run upgrade -- --rollback --by <person> [--permission "…"]   revert the last update's merge commit, no reset
@@ -354,8 +354,37 @@ function mergeSection({ root, ref, sha, by, who, cont, from, to, branch, now, en
   return { lines, backup, g, head, boardCommits };
 }
 
+/**
+ * Merge trains running now (a live holder of .studio/locks/train.lock, <engine>-train.lock or train-next.lock, not past its
+ * stale age): [{ kind: 'web' | <engine> | 'next', id, pid, at, by }]. 2.96: a train loads some modules late.
+ */
+export function runningTrains(root, env = process.env, now = Date.now()) {
+  const dir = path.join(root, '.studio', 'locks');
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((f) => /^(.+-)?train(-next)?\.lock$/.test(f)); } catch { return []; }
+  const found = [];
+  for (const f of names) {
+    let h = null;
+    try { h = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch { continue; }
+    const web = /^train(-next)?\.lock$/.test(f);
+    const stale = Number(env[web ? 'STUDIO_TRAIN_STALE_MIN' : 'STUDIO_UNITY_TRAIN_STALE_MIN'] || (web ? 360 : 1440)) * 60000;
+    const at = typeof h?.at === 'number' ? h.at : Date.parse(h?.at);
+    if (!h?.pid || now - at > stale) continue;
+    try { process.kill(Number(h.pid), 0); } catch (e) { if (e.code !== 'EPERM') continue; }
+    found.push({ kind: f === 'train-next.lock' ? 'next' : web ? 'web' : f.replace(/-train\.lock$/, ''), id: h.id || null, pid: h.pid, at: Number.isFinite(at) ? new Date(at).toISOString() : null, by: h.by || null });
+  }
+  return found;
+}
+
+/** The refs an upgrade normally takes: origin/main and the one the watcher watches (studio/upgrade.json, STUDIO_HARNESS_REF, upstream). */
+async function releaseRefs(root, env) {
+  const refs = new Set(['origin/main']);
+  try { const w = await (await import('./upgrade-watch.mjs')).watchRef(root, env); if (w.ref) refs.add(w.ref); } catch { /* origin/main only */ }
+  return refs;
+}
+
 /** `--merge` (see the header; `cont` = --continue). Returns { ok, code, lines, commit?, backup?, conflicts? }. */
-export async function upgradeMerge({ ref, by, permission = '', goldenReason = '', cont = false, root = ROOT, env = process.env, now = new Date(), deps = {} } = {}) {
+export async function upgradeMerge({ ref, by, permission = '', goldenReason = '', cont = false, duringTrain = false, root = ROOT, env = process.env, now = new Date(), deps = {} } = {}) {
   const lines = [];
   const stop = (why, extra = {}) => ({ ok: false, code: 1, lines: [...lines, `[upgrade] Not merged: ${why}`], ...extra });
   if (!root || !repoRoot(root)) return stop('this isn\'t a git checkout; run it in the studio\'s main checkout');
@@ -380,6 +409,10 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
   const to = versionAt(root, sha);
   if (!cont && git(['merge-base', '--is-ancestor', sha, 'HEAD'], root).status === 0) return { ok: true, code: 0, lines: [...lines, `[upgrade] ${branch} already has ${ref} (${sha.slice(0, 10)}): nothing to merge.`] };
 
+  // 2.96: a train loads some modules late, so an upgrade under it leaves it on half of each version.
+  const trains = cont || duringTrain ? [] : runningTrains(root, env, now.getTime());
+  if (trains.length) return stop(`${trains.map((t) => `a ${t.kind === 'next' ? 'next (speculative)' : t.kind} train is running (train ${t.id || '?'}, pid ${t.pid}, since ${t.at ? t.at.slice(0, 16).replace('T', ' ') : 'a time not recorded'} UTC)`).join('; ')}. Nothing was merged. Wait for it to end (npm run lanes shows it), then run this again. To take the update anyway: add --during-train.`);
+  if (!cont && !(await releaseRefs(root, env)).has(ref)) lines.push('[upgrade] this is not main: a branch can still change and its online checks may not have finished');
   // The scorecard just before the update (.studio/upgrades/<from>-to-<to>.json; kept on --continue).
   const snap = await beforeSnapshot({ root, from, to, ref, sha, by, env, now });
   lines.push(...snap.lines);
@@ -802,7 +835,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF)) {
   if (a.includes('--help') || a.includes('-h')) {
     console.log([
       'Usage: npm run upgrade -- --check | --snapshot   (before taking a harness update: the board must be committed, never stashed)',
-      '       npm run upgrade -- --merge <ref> --by <person> [--permission "<their words or a link>"] [--golden-reason "<why>"] [--continue]',
+      '       npm run upgrade -- --merge <ref> --by <person> [--permission "<their words or a link>"] [--golden-reason "<why>"] [--continue] [--during-train]',
       '       npm run upgrade -- --restore-stash <sha> --by <person>',
       '       npm run upgrade -- --rollback --by <person> [--permission "<their words or a link>"]   (2.71.1: reverts the last update\'s merge; never resets or deletes)',
       '       npm run upgrade -- --preflight [--ref <ref>] [--json]   (2.73.0: before an update, read-only: PASS/WARN/FAIL per item, exit 1 on a FAIL)',
@@ -845,7 +878,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF)) {
     process.exit(r.status === 'failed' ? 1 : 0);
   }
   if (a.includes('--merge')) {
-    show(await upgradeMerge({ ref: flag('--merge'), by: flag('--by'), permission: flag('--permission') || '', goldenReason: flag('--golden-reason') || '', cont: a.includes('--continue') }));
+    show(await upgradeMerge({ ref: flag('--merge'), by: flag('--by'), permission: flag('--permission') || '', goldenReason: flag('--golden-reason') || '', cont: a.includes('--continue'), duringTrain: a.includes('--during-train') }));
   }
   if (a.includes('--rollback')) {
     show(await upgradeRollback({ by: flag('--by'), permission: flag('--permission') || '' }));
