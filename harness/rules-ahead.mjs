@@ -53,7 +53,8 @@ async function endIt(root, engine, m, o, why) {
     for (const until = Date.now() + 15000; live(m, o) && Date.now() < until;) await pause(100);
     if (live(m, o) && process.platform !== 'win32') { try { process.kill(-m.pid, 'SIGKILL'); } catch { /* gone */ } }
   }
-  if (o?.before) rulesCacheForget(root, engine, o.before);
+  // 2.96: an exact-tree green it finished stays kept (a fact about that tree); the rest it added is forgotten.
+  if (o?.before) rulesCacheForget(root, engine, o.before, { keepTree: true });
   // A run ended mid-way leaves its throwaway checkout (runRulesAt's own clean-up did not run).
   const job = readJson(fileOf(root, engine, '-job')); const tmp = path.join(root, '.studio', 'tmp');
   try { for (const d of fs.readdirSync(tmp)) if (job?.repo && d.startsWith(`rules-${m.train}-ahead`)) removeCheckout(job.repo, path.join(tmp, d)); } catch { /* none */ }

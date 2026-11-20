@@ -5,9 +5,9 @@
  *   - the harness caused it (claim ran out, the land lock, a merge the main checkout refused): 'harness';
  *   - a person stopped or paused the session, or it reported the task impossible: 'person';
  *   - the session stopped at its usage limit (the caller passes busy.mjs's LIMIT_STOP): 'limit';
- *   - its note says the work is ready and waits for a train: 'ready';
- *   - `task done` was refused for the same reason as the session before it, with no new commit: 'refused';
- *   - 2.90: the session committed to the task (a slice of a big unit) before handing it back: 'progress'.
+ *   - its note says the work is ready and waits for a train: 'ready'; `task done` refused as before, no new commit: 'refused';
+ *   - 2.90: the session committed to the task (a slice of a big unit) before handing it back: 'progress';
+ *   - 2.96: an engine train handed it back on a count ratchet only: 'ratchet'.
  * A claim released quietly while the task waits for a train (task.claim.released) is no hand-back. No imports.
  */
 
@@ -149,8 +149,12 @@ function harnessKindOf(e, events) {
   return null;
 }
 
+/** 2.96: the words and cause an engine train gives a hand-back on a count ratchet (engines.<x>.rules.ratchets). */
+const RATCHET_NOTE = /\ba count ratchet tripped\b/i;
+const ratchetCaused = (e) => e?.meta?.handBackCause === 'ratchet' || RATCHET_NOTE.test(noteOf(e));
+
 /**
- * 2.85: what kind of hand-back a task.paused event is: 'real' | 'harness' | 'person' | 'limit' | 'ready' | 'refused', and
+ * 2.85: what kind of hand-back a task.paused event is: 'real' | 'harness' | 'person' | 'limit' | 'ready' | 'ratchet' | 'refused', and
  * (2.86) one of HARNESS_KINDS. events: the log around it (for the session's end). limit: the usage-limit note (busy.mjs passes
  * budget.mjs LIMIT_STOP).
  */
@@ -162,6 +166,7 @@ export function handBackKind(e, events = [], { limit = null } = {}) {
   if (personCaused(e)) return 'person';
   if (limit && limit.test(String(e?.msg || ''))) return 'limit';
   if (READY_FOR_TRAIN.test(noteOf(e))) return 'ready';
+  if (ratchetCaused(e)) return 'ratchet';
   const end = endFor(e, events);
   if (Number(e?.meta?.commits) > 0 || commitsOf(end?.meta?.outcome) > 0) return 'progress';
   if (end && sameRefusalAgain(end, events)) return 'refused';

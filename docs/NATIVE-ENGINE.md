@@ -101,8 +101,32 @@ seconds once the rules are compiled code. So the engine train runs them first, o
 - A red batch is narrowed with the same cheap check: the first prefix that is red names its last lane. That lane is
   handed back with cause `rules`, the failing test names and the command's last lines, and the rest is checked again.
   `STUDIO_ENGINE_RULES_MAX_RUNS` (12) bounds the runs for one batch; past it the lanes left go to the land run unjudged.
+- **Narrowing by the failing tests only (2.96).** When the red run names its failing tests, every narrowing step (the
+  target alone, a run without a suspect, the prefix search) runs only those tests, through `rules.focus.test`'s
+  `{filter}`. `rules.byName` says how the names become one filter. Unset, it is on when `rules.focus.test` is `dotnet test`
+  (the runner its default fits): `"FullyQualifiedName~{test}"` for each name, joined by `|`. `true` turns that default
+  on for another runner; `{ "each": "<filter with {test}>", "join": "|" }` or a string sets your own; `false` turns it
+  off. Off (any other runner, unset), a red is narrowed by whole runs as before. A parameter list is cut off a name first (`~` still takes it). No filter is
+  built (narrowing by whole runs, as before) when a name holds anything but letters, digits and `_ . + -`, when there
+  are more than 40, or when the filter is over 3000 characters. A by-name run that says it ran no test (`No test
+  matches the given testcase filter`, `Total tests: 0`) is an error, never a green: the check says so and goes on with
+  whole runs. Once the culprits are out, ONE whole check (as shards when `rules.shards` is set, kept shards reused) on
+  the lanes left decides; a new failing test there is narrowed again the same way, and the target is asked about it
+  by name. A lane is handed back only after a run shows the failing tests green without it, with the batch's whole
+  run red with it; a batch is called green only by a whole check. The `engine.rules` event's `meta.filtered` and
+  `meta.whole` (`{ runs, ms }`), its message and the train's log say how many runs were by name and how many whole,
+  with the minutes of each: `rules runs: 3 run(s) of the failing tests by name (0.4 min), 2 whole run(s) (161 min)`.
+- **Count ratchets (2.96).** `rules.ratchets`: a list of test names or regexes, tests that assert a count is at least
+  N (a branch that adds items without raising N trips one). When every failing test is a ratchet, narrowing is as
+  above and the lane is handed back with cause `ratchet` and the words "a count ratchet tripped (<test>): this is not a
+  behaviour regression; raise the count in this branch and queue again". It is still red and still handed back.
+  Each trip is one `engine.ratchet` event (task, tests); `handBackKind` reads the hand-back as `ratchet`, not `real`.
+  A red land run whose failing tests are all ratchets is handed back the same way.
 - Results are kept per tree, command and inputs in `.studio/engine/<engine>-rules.json`: a tree is run once. A kept
-  full pass also answers a focus or `first` question on the same tree (2.93). A batch head that lands with the same
+  full pass also answers a focus, `first` or by-name question on the same tree (2.93, 2.96). 2.96: it is used
+  everywhere: the owed full run is not owed on a target tree that has one; a check ahead that is ended (its batch did
+  not land unchanged) keeps the exact-tree greens it finished, while greens kept by what they read, reds and timeouts
+  are forgotten as before; and a land run of a group whose tree has one is told `STUDIO_RULES_GREEN=1`. A batch head that lands with the same
   rules key is the next target, so its kept result is the next train's answer for the target. The
   `inputs` are not in the tree, so their content is part of what a kept result is valid for; the train also looks at
   them again right before the land run and leaves `STUDIO_RULES_GREEN` out when they changed since the check.
@@ -305,8 +329,12 @@ half as much machine time as the land runs. Five settings, all optional, in the 
 ```
 - `maxLanes` (2.84, B-134; default 0, off): a batch with more lanes is checked in consecutive slices of that many,
   each merged on the same target. A red slice is narrowed within itself, so only its lanes can be refused; one
-  `engine.rules` event per slice. The whole batch was never one tree in the check, so a sliced check never sends
-  `STUDIO_RULES_GREEN`: it only refuses lanes before they cost a land run.
+  `engine.rules` event per slice. 2.96: the lanes the slices leave are then checked once more as one tree (kept
+  results and shards reused); green, the land run gets `STUDIO_RULES_GREEN=1`. Before, a sliced check never told the
+  land run, which then ran the whole suite itself, silently. This costs one more whole run than the slices; it saves the
+  land run's own copy of the suite (and its memory). The train's start event and log, the running train's "now" line
+  and `train status` say it; `rules show` warns when `engines.<x>.batchMax` is above `maxLanes` (set them equal to
+  check each batch once).
 
 **Play Mode focus (2.84).** The Play Mode stage became the longest stage of a land (20 to 40 minutes). The same idea,
 as a hint the land script may use: `engines.<x>.play.focus`.
@@ -367,7 +395,7 @@ scorecard's Play stage line counts skipped runs.
 
 | Variable | What to do with it |
 | --- | --- |
-| `STUDIO_RULES_GREEN` | `1`: the rules check passed on exactly this batch and target; the script may skip its own copy of those tests. |
+| `STUDIO_RULES_GREEN` | `1`: the rules check passed on exactly this batch and target; the script may skip its own copy of those tests. 2.96: also any group whose tree as it would land has a kept whole rules pass (same command and inputs), for example after a land search dropped a lane. |
 | `STUDIO_RULES_MODE` | `focus` or `full`: how that green was reached; after a `focus` green the script may still run the full rules tests. 2.95: shards without `rules.shards.rest` are `focus`. |
 | `STUDIO_LAND_FULL` | `1`: the daily full run; skip nothing, ignore every shortcut. |
 | `STUDIO_UNITY_EDITMODE_ARGS` | Edit Mode arguments to add after the .NET tests passed (`SKIP`: no Edit Mode run needed). Unset on a full run. |
@@ -657,6 +685,16 @@ another, and a test that fails whenever a branch moves a pinned commit was found
   search; it is handed back with the evidence and the `say` line. Several: they go apart from the rest (2.85). An entry
   with a bad regex or a path outside the repo is left out. Example: `"blame": [ { "test": "PinTests\\.", "touches":
   "Rules~/pin.json", "say": "Regenerate the vectors at the new pin in the same branch" } ]`.
+- **Blame by the failure's own words (2.96).** An entry may add `"names": "<regex on the failure message, group 1 =
+  a name>"` and use `{name}` in `touches`: `{ "test": "DataTests\\.", "names": "data of system (\\w+) differs",
+  "touches": ["tools/port/{name}/"], "say": "..." }`. The names the regex reads in the red's output (letters, digits,
+  `. _ -`; letter case aside in the paths) name the lanes that change those paths: in the rules check they are left out
+  at once, the failing tests run by name without them (no search), and each is put back in batch order: red with it,
+  it is handed back; green, it stays. One suspect costs one run. In a land run they are the suspect (one) or the tied
+  lanes (several), from the run's last lines. Without a matching `blame` entry, in the rules check: a failing test that
+  a system's `rules.focus` filter takes (`map` or `auto`; the reader judges `FullyQualifiedName`, `Name` and
+  `ClassName` with `= != ~ !~ & |`, never `Category`) makes the lanes that change that system's files the first
+  suspects, when they are fewer than the batch. A wrong suspect costs one run by name, never a hand-back.
 - **Checks before queueing.** `engines.<x>.preQueue`: a list of `{ "touches": "<path or glob, or a list>", "run":
   "<command>", "say": "<what to do>", "timeoutMin": 10, "env": { "<NAME>": "<value>" } }`. 2.93: an entry may also
   have `"titles": ["<regex>", ...]` (case-insensitive, tested against the task's title) for a check on one KIND of

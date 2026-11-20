@@ -190,8 +190,9 @@ console.log(JSON.stringify({ ok: r.ok, landed: r.landed, dropped: r.dropped, han
     fs.writeFileSync(`${ctl}-wait`, 'done'); fs.writeFileSync(`${ctl}-red`, '1');
     const r1 = probe(TRAIN);
     const trees = cacheTrees();
-    await guard('2.94 (c) a check ahead that finished green before the land run turned red keeps no result: the rules file holds only the batch\'s own result, the event says dropped (fails before this fix: no check ahead existed)', () => [
-      r1.handed?.map((h) => h.task).join() === 'T-131' && rulesRuns(ctl).length === 2 && trees.length === 1 && outcomes().join() === 'started,dropped' && !aheadFiles().length, J({ r1, trees, ev: outcomes() })]);
+    const kept = Object.values(readJson(path.join(S, '.studio', 'engine', 'unity-rules.json'))?.trees || {});
+    await guard('2.94 (c) a check ahead that finished green before the land run turned red is dropped (the event says so, the next train does not wait for it); 2.96: its exact-tree green stays kept as a fact about that tree, so the rules file holds the batch\'s own result and that green (fails before this fix: no check ahead existed)', () => [
+      r1.handed?.map((h) => h.task).join() === 'T-131' && rulesRuns(ctl).length === 2 && trees.length === 2 && kept.every((x) => x.status === 'pass') && outcomes().join() === 'started,dropped' && !aheadFiles().length, J({ r1, trees, kept, ev: outcomes() })]);
   }
 
   // ================= (d) not enough memory =================
