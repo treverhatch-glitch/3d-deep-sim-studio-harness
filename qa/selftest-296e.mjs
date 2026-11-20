@@ -175,21 +175,23 @@ console.log(JSON.stringify({ starts, why: r.why }));`);
     try { fs.rmSync(f, { force: true }); } catch { /* swept later */ }
     try { return JSON.parse(String(r.stdout).split('\n').filter((l) => l.startsWith('{')).pop()); } catch { return { raw: out(r).slice(-1500) }; }
   };
-  const ordered = { STUDIO_BUILDER_ORDER: 'api,plan' };
+  const ordered = { STUDIO_BUILDER_ORDER: 'api,plan', STUDIO_BUILDER_ORDER_ROLES: 'builder,engine-porter' };
+  const buildersOnlyP = pass([], { STUDIO_BUILDER_ORDER: 'api,plan' });
   const firstP = pass([], ordered);
   const busyP = pass([{ agent: 'builder-api2', role: 'builder', running: true, task: 'T-0', lane: 'game/other' }], ordered);
   const unsetP = pass([], {});
   const outP = pass([{ agent: 'builder-api2', role: 'builder', running: true, task: 'T-0', lane: 'game/other' }], ordered, 'agy');
-  await guard('2.96 (e5) order: with STUDIO_BUILDER_ORDER=api,plan, STUDIO_ENGINE_PORTER_TOOL=agy and the budget order agy,claude an engine porter starts first under the API-pool name on claude (never agy), then on agy when the pool name is busy, then on claude when agy is out of quota; with no order set it never takes the pool name (fails before this fix: the order only filled builder slots, so an engine porter never used the API pool)', () => [
+  await guard('2.96 (e5) order: with STUDIO_BUILDER_ORDER=api,plan, STUDIO_BUILDER_ORDER_ROLES=builder,engine-porter, STUDIO_ENGINE_PORTER_TOOL=agy and the budget order agy,claude an engine porter starts first under the API-pool name on claude (never agy), then on agy when the pool name is busy, then on claude when agy is out of quota; with no order set, or the order set for builders only (no STUDIO_BUILDER_ORDER_ROLES), it never takes the pool name (fails before this fix: the order only filled builder slots, so an engine porter never used the API pool)', () => [
     added.status === 0 && firstP.starts?.length === 1 && firstP.starts[0].agent === 'builder-api2' && firstP.starts[0].tool === 'claude' && firstP.starts[0].role === 'engine-porter'
       && busyP.starts?.length === 1 && busyP.starts[0].agent !== 'builder-api2' && busyP.starts[0].tool === 'agy'
       && outP.starts?.length === 1 && outP.starts[0].agent !== 'builder-api2' && outP.starts[0].tool === 'claude'
-      && unsetP.starts?.length === 1 && unsetP.starts[0].agent !== 'builder-api2' && unsetP.starts[0].tool === 'agy',
-    JSON.stringify({ add: out(added).slice(-300), firstP, busyP, outP, unsetP }).slice(0, 2500)]);
+      && unsetP.starts?.length === 1 && unsetP.starts[0].agent !== 'builder-api2' && unsetP.starts[0].tool === 'agy'
+      && buildersOnlyP.starts?.length === 1 && buildersOnlyP.starts[0].agent !== 'builder-api2' && buildersOnlyP.starts[0].tool === 'agy',
+    JSON.stringify({ add: out(added).slice(-300), firstP, busyP, outP, unsetP, buildersOnlyP }).slice(0, 2500)]);
 
   // ================= (e6) no flags: one smoke per path in the owner's order, one line each =================
   fs.writeFileSync(path.join(S, 'studio', 'budget.json'), `${JSON.stringify({ order: ['claude'], tools: {} })}\n`);
-  const s6 = smoke(['--role', 'engine-porter', '--engine', 'unity', '--minutes', '3'], { STUDIO_BUILDER_ORDER: 'api,plan', STUDIO_ENGINE_PORTER_TOOL: 'claude' });
+  const s6 = smoke(['--role', 'engine-porter', '--engine', 'unity', '--minutes', '3'], { STUDIO_BUILDER_ORDER: 'api,plan', STUDIO_BUILDER_ORDER_ROLES: 'builder,engine-porter', STUDIO_ENGINE_PORTER_TOOL: 'claude' });
   {
     const o = out(s6);
     const lines = String(s6.stdout).split('\n').filter((l) => /^(PASS|FAIL)/.test(l));

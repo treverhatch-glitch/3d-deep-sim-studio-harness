@@ -51,8 +51,11 @@ export function builderOrder(env = process.env) {
   const o = [...new Set(String(env.STUDIO_BUILDER_ORDER || '').toLowerCase().split(/[\s,]+/).filter((k) => ['api', 'vertex', 'plan'].includes(k)))];
   return o.length ? o : null;
 }
-/** 2.96: the roles whose slot STUDIO_BUILDER_ORDER fills: builders and engine porters (one order, one pool). */
-export const orderedRole = (role) => role === 'builder' || role === 'engine-porter';
+/**
+ * 2.96: the roles whose slot STUDIO_BUILDER_ORDER fills. Builders always; an engine porter only when the owner adds it
+ * (STUDIO_BUILDER_ORDER_ROLES=builder,engine-porter), so an upgrade never moves porters onto API credit by itself.
+ */
+export const orderedRole = (role, env = process.env) => role === 'builder' || (role === 'engine-porter' && String(env.STUDIO_BUILDER_ORDER_ROLES || '').toLowerCase().split(/[\s,]+/).includes('engine-porter'));
 /** The tool an API-pool session runs: the role's tool, but agy never (an API key does not pay for agy): claude. */
 export const apiTool = (tool) => (tool === 'agy' ? 'claude' : tool);
 /** The first kind in `order` that can start now (can: { api, vertex, plan } booleans), or null. */
