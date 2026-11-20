@@ -1,0 +1,20 @@
+name: win-debug (temporary, never merged)
+on:
+  push:
+    branches: [claude/296-windbg]
+jobs:
+  sampler:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: the helper, raw
+        run: node .dbg/win-sampler.mjs
+      - name: install
+        run: npm ci
+      - name: unit 296a
+        shell: bash
+        run: node qa/selftest.mjs --only 296a 2>&1 | grep -E "\[selftest\] (FAIL|PASS) 2.96 \(a(1|2|16|18|19)\)" -A1 | cut -c1-1800 || true
