@@ -1866,7 +1866,7 @@ async function cli(argv) {
     const fv = cfg.first?.filter.replace(/^\s*\w+\s*!?[=~]\s*/, '');
     const fe = cfg.first ? cfg.blame.filter((b) => b.names && (b.re.test(fv) || b.test.replace(/\\(.)/g, '$1').includes(fv))) : [];
     if (cfg.first) console.log(`[engine-rules] rules.first ${cfg.first.filter}: ${fe.length ? fe.map((b) => `blame entry test ${b.test}, names ${b.names.source}, touches ${b.touches.join(', ')}`).join('; ') : `a red first test is narrowed by the words of its failure (a name only one lane changes), then by search; an engines.${engine}.blame entry with test, names and touches makes it exact (docs/NATIVE-ENGINE.md, blame by the failure's own words)`}`);
-    if (cfg.focus) console.log(`[engine-rules] ignore:${cfg.focus.ignore.length ? cfg.focus.ignore.map((p) => { try { new RegExp(p); return p; } catch { return `${p} (not a valid regex: skipped)`; } }).join(', ') : 'none'}`);
+    if (cfg.focus) console.log(`[engine-rules] ignore: ${cfg.focus.ignore.length ? cfg.focus.ignore.map((p) => { try { new RegExp(p); return p; } catch { return `${p} (not a valid regex: skipped)`; } }).join(', ') : 'none'}`);
     // 2.95: the shards (each with its kept green on the target and its measured peak) and the peak file.
     if (cfg.peak) console.log(`[engine-rules] peak: read from ${cfg.peak.file} in the test checkout after each test command${cfg.peak.match ? ` (match ${cfg.peak.match})` : ''}; a full run's measured peak: ${partStats(root, engine)[FULL_STAT]?.peakGb ? `${partStats(root, engine)[FULL_STAT].peakGb} GB` : 'none yet'}${cfg.focus?.splitGb ? ' (rules.focus.splitGb is set: that number is used)' : ''}`);
     // 2.96 (a): measured cost per kind (rules commands and land runs: the number a land script's own wait can use).
