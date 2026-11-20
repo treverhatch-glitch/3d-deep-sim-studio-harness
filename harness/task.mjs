@@ -2313,7 +2313,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const trainEng = typeof flags.engine === 'string' ? flags.engine : flags.unity ? 'unity' : engineOfTrack(flags.track);
     if (trainEng && (!arg1 || arg1 === 'run' || arg1 === 'status')) {
       const ut = await import('./unity-train.mjs');
-      if (arg1 === 'status' || flags.unity === 'status' || flags.status) { console.log(ut.unityStatusText(mainRoot(), { engine: trainEng })); process.exit(0); }
+      if (arg1 === 'status' || flags.unity === 'status' || flags.status) { console.log(ut.unityStatusText(mainRoot(), { engine: trainEng, held: await ut.heldNow(mainRoot(), trainEng, parseNextQueue()) })); process.exit(0); }
       // --only T-a,T-b (only those queued tasks) and --tag <word> (only lanes with that tag); neither: untagged lanes only.
       let trainTag = null;
       if (flags.tag !== undefined) {

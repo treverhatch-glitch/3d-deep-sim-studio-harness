@@ -34,6 +34,7 @@ import { removeLandedLane, pruneBuilds, buildsConfig } from './engine-clean.mjs'
 import { flagOf, foldRealOf, gitMax64 as git, numBlankDefault as num, realOrResolved as real, short8 as short, sleepSyncClamped as sleep, stdoutOf as out } from './helpers.mjs';
 import { targetRedTask, targetRedClear, targetRedLine } from './engine-target-red.mjs';
 import { aheadStart, aheadVerdict, aheadFor, aheadLine } from './rules-ahead.mjs';
+import { unionGlobs, unionMerge } from './merge-union.mjs';
 
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); writeAtomic(f, `${JSON.stringify(v, null, 2)}\n`); };
 const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
@@ -118,7 +119,7 @@ const badWords = (bad, engine) => (bad.length ? `\nLeft out of engines.${engine}
 /** 2.92: the lane's head merged with the target tip, a commit object only (no ref): { tip, head } | { tip, conflict } | { tip, error }. */
 function mergedOnTarget(s, lane) {
   const tip = headOf(s.repo, s.target);
-  const c = chainOnTarget(s.repo, tip, [lane], 'queue', s.engine || 'unity');
+  const c = chainOnTarget(s.repo, tip, [lane], 'queue', s.engine || 'unity', { union: unionOf(s.cfg) });
   if (c.error) return { tip, error: c.error };
   return c.conflictTarget[0] ? { tip, conflict: `${lane.branch}: ${c.conflictTarget[0].why}` } : { tip, head: c.head };
 }
@@ -291,7 +292,7 @@ function queueCompile(s, lane, { root, engine, ahead = [], env = process.env }) 
       memo.set(tree, r);
       return r;
     };
-    const chain = (t, ls) => chainOnTarget(s.repo, t, ls, 'queue', engine);
+    const chain = (t, ls) => chainOnTarget(s.repo, t, ls, 'queue', engine, { union: unionOf(s.cfg) });
     const one = compileSearch({ repo: s.repo, tip: m.tip, lanes: [lane], chain, at, maxRuns: 99 });
     const ctx = { target: s.target, engine, cc };
     if (one.left.length) return { verdict: 'red', runs, refused: true, say: `${lane.branch}: ${noCompileText(one.left[0], { ...ctx, where: '' })}` };
@@ -911,31 +912,37 @@ const BOT = { GIT_AUTHOR_NAME: 'launcher', GIT_AUTHOR_EMAIL: 'launcher@studio.lo
 /** The files a `git merge-tree --write-tree` conflict names (its "<mode> <oid> <stage>\t<path>" lines). */
 const conflictFiles = (text) => [...new Set(String(text || '').split('\n').filter((l) => /^\d{6} [0-9a-f]+ [123]\t/.test(l)).map((l) => l.split('\t')[1]))];
 
+/** 2.96 (c4): the merge.union globs a train uses: none when a landMany command merges the branches itself. */
+export const unionOf = (cfg) => (cfg && !landManyCommand(cfg) ? unionGlobs(cfg) : []);
+
 /**
  * target + each lane, in order, as commit objects only (no worktree, no index, no ref moved). A lane already in the
  * chain is `already`; one whose merge conflicts is `conflictTarget` (it conflicts with the target alone) or `deferred`
- * (only with lanes before it). { head, included, deferred, conflictTarget, already } or { error }.
+ * (only with lanes before it). 2.96 (c4): a conflict only in merge.union files that both sides only grow is merged as a
+ * union (merge-union.mjs; `union`: [{ task, files }]). { head, included, deferred, conflictTarget, already, union } or { error }.
  */
-export function chainOnTarget(repo, base, lanes, id, engine = 'unity') {
+export function chainOnTarget(repo, base, lanes, id, engine = 'unity', { union = unionOf(unityConfig(REPO_ROOT, engine)) } = {}) {
   let tip = base;
-  const res = { included: [], deferred: [], conflictTarget: [], already: [] };
+  const res = { included: [], deferred: [], conflictTarget: [], already: [], union: [] };
   for (const lane of lanes) {
     if (isAncestor(repo, lane.head, tip)) { (tip === base ? res.already : res.included).push({ ...lane }); continue; }
     if (isAncestor(repo, tip, lane.head)) { tip = lane.head; res.included.push({ ...lane }); continue; }
     const mt = git(repo, 'merge-tree', '--write-tree', tip, lane.head);
-    if (mt.status === 0) {
-      const tree = String(mt.stdout).split('\n')[0].trim();
-      const msg = `${engine} train ${id}: land ${lane.task} (${lane.branch})\n\nStudio-Train: ${id} ${lane.task}`;
+    const un = mt.status === 1 ? unionMerge(repo, tip, lane.head, union) : null;
+    if (mt.status === 0 || un) {
+      const tree = un ? un.tree : String(mt.stdout).split('\n')[0].trim();
+      const msg = `${engine} train ${id}: land ${lane.task} (${lane.branch})\n\n${un ? `Union-Merge: ${un.files.join(', ')} (engines.${engine}.merge.union: both sides only added lines)\n` : ''}Studio-Train: ${id} ${lane.task}`;
       const c = spawnSync('git', ['commit-tree', tree, '-p', tip, '-p', lane.head, '-m', msg], { windowsHide: true, cwd: repo, encoding: 'utf8', env: { ...process.env, ...BOT } });
       if (c.status !== 0) return { error: `git commit-tree failed: ${String(c.stderr || '').trim().split('\n').pop()}` };
+      if (un) res.union.push({ task: lane.task, files: un.files, with: tip === base ? 'the target' : res.included.map((l) => l.task).join(', ') || 'the target' });
       tip = c.stdout.trim();
-      res.included.push({ ...lane });
+      res.included.push({ ...lane, ...(un ? { union: un.files } : {}) });
       continue;
     }
     if (mt.status !== 1) return { error: `git merge-tree --write-tree failed (git 2.38 or newer is needed): ${String(mt.stderr || '').trim().split('\n').pop()}` };
     const files = conflictFiles(mt.stdout);
     const alone = tip === base ? mt : git(repo, 'merge-tree', '--write-tree', base, lane.head);
-    if (alone.status === 0) res.deferred.push({ ...lane, files, why: `it conflicts with ${res.included.map((l) => `${l.task} (${l.branch})`).join(', ') || 'the branches before it'} in this train${files.length ? ` in ${files.slice(0, 5).join(', ')}` : ''}; it goes in the next ${labelOf(engine)} train` });
+    if (alone.status === 0 || (tip !== base && unionMerge(repo, base, lane.head, union))) res.deferred.push({ ...lane, files, why: `it conflicts with ${res.included.map((l) => `${l.task} (${l.branch})`).join(', ') || 'the branches before it'} in this train${files.length ? ` in ${files.slice(0, 5).join(', ')}` : ''}; it goes in the next ${labelOf(engine)} train` });
     else res.conflictTarget.push({ ...lane, files: conflictFiles(alone.stdout), why: `it conflicts with the target${conflictFiles(alone.stdout).length ? ` in ${conflictFiles(alone.stdout).slice(0, 5).join(', ')}` : ''}: bring the target into it with ${targetMergeCommand(lane.task)} (it leaves the conflicts in the task's worktree to resolve; small conflicts in project files usually want both sides kept), then task done --train again` });
   }
   return { ...res, head: tip };
@@ -944,10 +951,38 @@ export function chainOnTarget(repo, base, lanes, id, engine = 'unity') {
 // ---- the train ----
 
 /** The batch a train takes from `queued` (harness/engine-train-control.mjs selectBatch with this engine's settings). */
-function pickBatch(root, engine, s, queued, { only = [], tag = null, max = 0, env = process.env } = {}) {
+function pickBatch(root, engine, s, queued, { only = [], tag = null, max = 0, env = process.env, held = null } = {}) {
   const { repo, target } = s;
   // 2.86: lanes a train left waiting for the target (red on it alone) sit out until it moves; engines.<x>.batchAlone paths land alone.
-  return selectBatch(queued, { only, tag, max, ...batchLimits(s.cfg, env), classOf: (l) => laneClass({ repo, target, cfg: s.cfg, lane: l }), waits: waitingOnTarget(root, engine, queued), aloneOf: (l) => laneAloneWhy({ repo, target, cfg: s.cfg, lane: l }) });
+  return selectBatch(queued, { only, tag, max, ...batchLimits(s.cfg, env), classOf: (l) => laneClass({ repo, target, cfg: s.cfg, lane: l }), waits: waitingOnTarget(root, engine, queued), aloneOf: (l) => laneAloneWhy({ repo, target, cfg: s.cfg, lane: l }), held });
+}
+
+/** 2.96 (c1): queued lanes whose task waits for another task (task after), as the train reads the board now: Map task -> why. */
+function heldLanes(queued, board, holdMod) {
+  const m = new Map();
+  if (!board || !holdMod) return m;
+  for (const e of queued) { let w = []; try { w = holdMod.afterWaits(e.task, board); } catch { w = []; } if (w.length) m.set(e.task, `waits for ${w.join(', ')} (task after)`); }
+  return m;
+}
+/** 2.96 (c1): the same for `train status` (task.mjs passes the board); null without one (status then shows the last train's record). */
+export async function heldNow(root, engine, board) {
+  if (!board) return null;
+  try { return heldLanes(readUnityQueue(root, engine), board, await import('./task-hold.mjs')); } catch { return null; }
+}
+const heldFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-held.json`);
+/**
+ * 2.96 (c1): record the lanes left out as held; one event per lane the first time (again only after its hold cleared or
+ * its reason changed). add: keep the others (a lane left out before a land run), else the record is this pick's set.
+ */
+function noteHeld(root, engine, held, { id, by, queued, add = false, when = 'when the batch was picked' }) {
+  const prev = readJson(heldFile(root, engine)) || {};
+  const next = add ? { ...prev } : {};
+  for (const [task, why] of held) {
+    if (prev[task]?.why === why) { next[task] = prev[task]; continue; }
+    next[task] = { why, since: new Date().toISOString(), train: id };
+    evTop('held', id, `${task} held: ${why}; left out ${when}: it stays queued, takes no seat and is not handed back; the first train after the hold clears takes it`, { engine, task, agent: by, to: queued.find((e) => e.task === task)?.agent, status: 'warn', meta: { why, when: add ? 'land' : 'pick' } });
+  }
+  try { writeJson(heldFile(root, engine), next); } catch { /* the event stands */ }
 }
 
 /** Each lane of a batch as it is now: { lane, defer } or { lane, drop } (nobody blamed), else { lane (its head now), moved }. */
@@ -964,6 +999,40 @@ function laneStates(lanes, { repo, target, board, holdMod, L }) {
     if (isAncestor(repo, head, `refs/heads/${target}`)) return { lane, moved, drop: `${lane.branch} has no commits that ${target} doesn't have; task done ${lane.task} closes it` };
     return { lane: { ...lane, head }, moved };
   });
+}
+
+/**
+ * 2.96 (c2): the lanes as they are now (laneStates) and their merge on the target (chainOnTarget). A lane that cannot go
+ * (deferred, dropped, a conflict) is an `out` and, with `repick`, the batch is picked again without it (at most 3 times),
+ * so it decides no class and takes no seat. { sel, lanes, outs: [{ lane, kind, why, files? }], moved, pre, repicked } | { error }.
+ */
+function formBatch(sel0, { repick, repo, target, tip, board, holdMod, L, id, engine, union }) {
+  let sel = sel0;
+  const outs = [];
+  const moved = new Map();
+  const skip = new Set();
+  for (let pass = 0; ; pass += 1) {
+    const now = [];
+    const ready = [];
+    for (const x of laneStates(sel.lanes, { repo, target, board, holdMod, L })) {
+      if (x.moved) moved.set(x.lane.task, { lane: x.lane, from: sel.lanes.find((l) => l.task === x.lane.task).head, to: x.moved });
+      if (x.defer) now.push({ lane: x.lane, kind: 'defer', why: x.defer });
+      else if (x.drop) now.push({ lane: x.lane, kind: 'gone', why: x.drop });
+      else ready.push(x.lane);
+    }
+    const pre = chainOnTarget(repo, tip, ready, id, engine, { union });
+    if (pre.error) return { error: pre.error };
+    for (const l of pre.conflictTarget) now.push({ lane: l, kind: 'conflictTarget', why: l.why, files: l.files });
+    for (const l of pre.deferred) now.push({ lane: l, kind: 'defer', why: l.why });
+    for (const l of pre.already) now.push({ lane: l, kind: 'already' });
+    outs.push(...now);
+    if (!now.length || !repick || pass >= 3) return { sel, lanes: sel.lanes, outs, moved, pre, repicked: pass };
+    for (const o of now) skip.add(o.lane.task);
+    const nx = repick(skip);
+    const keep = new Set(pre.included.map((l) => l.task));
+    if (nx.error || nx.lanes.every((l) => keep.has(l.task))) return { sel, lanes: sel.lanes, outs, moved, pre, repicked: pass };
+    sel = { ...nx, why: `${nx.why}; picked again without ${[...skip].join(', ')} (${skip.size === 1 ? 'it' : 'they'} could not go)` };
+  }
 }
 
 /** 2.94: a kept check ahead's lanes, all queued and unchanged, when the target is the tree it was built on: { train, lanes } or null. */
@@ -1022,16 +1091,24 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   // The batch (harness/engine-train-control.mjs selectBatch): --only / --tag first (a train with neither takes untagged lanes only), then an alone
   // lane, then engines.<x>.batchGroup "play", then the cap (--max, engines.<x>.batchMax). Everything else stays queued.
   const queued = readUnityQueue(root, engine);
-  const sel = pickBatch(root, engine, s, queued, { only, tag, max, env });
+  // 2.93: the board gives a lane's task title (preQueue "titles") and the "task after" holds; 2.96 (c1): a held lane is left out before the pick.
+  const board = (() => { try { return deps.board?.() || null; } catch { return null; } })();
+  const holdMod = board ? await import('./task-hold.mjs') : null;
+  const heldPick = heldLanes(queued, board, holdMod);
+  if (!dryRun) noteHeld(root, engine, heldPick, { id, by, queued });
+  if (heldPick.size) log(`[unity-train] ${id}: left out, held: ${[...heldPick].map(([t, w]) => `${t} (${w})`).join('; ')}; they stay queued`);
+  let sel = pickBatch(root, engine, s, queued, { only, tag, max, env, held: heldPick });
   if (sel.error) { res.ok = false; res.message = `No ${L} branch landed: ${sel.why} (--only takes queued tasks).`; return finish(); }
   let lanes = sel.lanes;
   res.batch = sel.why;
+  if (heldPick.size) res.held = [...heldPick].map(([task, why]) => ({ task, why }));
   // 2.91: the periodic full runs (the full rules run rules.focus.fullEveryHours owes, the daily full land run) are runs of the target
   // alone and never go ahead of a waiting batch: due, they run when this train has no lane; overdue, after the batch's rounds.
   const fullDue = dryRun ? { why: '' } : fullLandDue(root, engine, s.cfg, env, Date.now());
   const rc0 = dryRun ? null : (() => { try { return rulesConfig(engine, { root, env, repo, ref: target }); } catch { return null; } })();
   // 2.94: the set a check ahead ran for, when every one of its lanes is unchanged (rules.ahead; harness/rules-ahead.mjs).
-  const pref = rc0?.ahead && !only.length && !tag ? aheadSet(root, engine, queued, { repo, tip: headOf(repo, target), cfg: rc0 }) : null;
+  const pref0 = rc0?.ahead && !only.length && !tag ? aheadSet(root, engine, queued, { repo, tip: headOf(repo, target), cfg: rc0 }) : null;
+  const pref = pref0 && !pref0.lanes.some((l) => heldPick.has(l.task)) ? pref0 : null;
   if (pref && pref.lanes.map((l) => l.task).join() !== lanes.map((l) => l.task).join()) {
     log(`[unity-train] ${id}: takes the set the check ahead of train ${pref.train} ran for: ${pref.lanes.map((l) => l.task).join(', ')}${queued.length > pref.lanes.length ? `; the ${queued.length - pref.lanes.length} other queued lane(s) ride the train after` : ''}`);
     lanes = pref.lanes;
@@ -1043,8 +1120,14 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   const rulesFirst = Boolean(owed0.why && !lanes.length);
   if (owed0.blocked) log(`[unity-train] ${id}: the full rules run is owed (${owed0.blocked.owed}) but was ${owed0.blocked.status} on ${target} at ${short(owed0.blocked.tip)} (${String(owed0.blocked.at).slice(0, 16)}) and the rules tests see no change since: not run again yet`);
   if (!lanes.length && !fullFirst && !rulesFirst) { res.message = queued.length ? `No ${L} branch for this train (${sel.why}).` : `No ${L} branch is waiting to land (task done <ID> --train on a ${L}-track task queues one).`; return finish(); }
+  // 2.96 (c2): a lane that cannot go (deferred, dropped, a conflict) is taken out and the batch picked again without it.
+  const union = unionOf(s.cfg);
+  const tip0 = headOf(repo, target);
+  const formed = formBatch(pref ? { ...sel, lanes } : sel, { repick: pref || only.length ? null : (skip) => pickBatch(root, engine, s, queued.filter((e) => !skip.has(e.task)), { only, tag, max, env, held: heldPick }), repo, target, tip: tip0, board, holdMod, L, id, engine, union });
+  if (formed.error) { res.ok = false; res.message = `The ${L} train could not check the branches: ${formed.error}. Nothing ran; the queue is kept.`; return finish(); }
+  if (formed.repicked) { sel = formed.sel; lanes = formed.lanes; res.batch = sel.why; }
   if (sel.alone) res.alone = sel.alone;
-  if (sel.waiting) log(`[unity-train] ${id}: batch ${sel.why}`);
+  if (sel.waiting || formed.repicked) log(`[unity-train] ${id}: batch ${sel.why}`);
   if (lanes.length && fullDue.why) {
     const m = `the daily full land run is due (${fullDue.why}) and ${lanes.length} lane(s) wait: it does not go ahead of them; ${fullLast ? `it runs at the end of this train, after the batch's rounds, on ${target} as it is then` : `it waits for an empty queue (past engines.${engine}.fullLandMaxHours it runs at the end of a train)`}`;
     log(`[unity-train] ${id}: ${m}`);
@@ -1083,27 +1166,37 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     ev('dropped', id, `${lane.task} handed back: ${why.split('\n')[0]}`, { task: lane.task, agent: by, to: lane.agent, status: 'blocked', ...(cause ? { meta: { cause } } : {}) });
     if (handBack) { try { deps.handBack?.(lane, `Not landed by ${L} train ${id}: ${why}`, cause ? { cause } : undefined); } catch (e) { log(`[unity-train] ${id}: could not hand ${lane.task} back: ${e.message}`); } }
   };
+  // 2.96 (c3): lanes whose hold was set after the pick: out of this train, still queued, nobody blamed.
+  const leaveOutHeld = (now) => {
+    for (const [task, why] of now) {
+      live.delete(task);
+      res.held = [...(res.held || []), { task, why, at: 'land' }];
+      log(`[unity-train] ${id}: ${task} held: ${why}; set after this train started, so it is left out before the land run: it stays queued and is not handed back`);
+      try { deps.clearRunning?.(task); } catch { /* the finally clears it too */ }
+    }
+    liveNow();
+    noteHeld(root, engine, now, { id, by, queued, add: true, when: 'before the land run (the hold was set after the train started)' });
+  };
   const defer = (lane, why) => { res.deferred.push({ task: lane.task, why }); if (!dryRun) ev('deferred', id, `${lane.task} waits for the next ${L} train: ${why.split('\n')[0]}`, { task: lane.task, agent: by, to: lane.agent, status: 'warn' }); };
 
-  // 2.93: the board gives a lane's task title (preQueue "titles") and the "task after" holds that keep a lane out of a batch.
-  const board = (() => { try { return deps.board?.() || null; } catch { return null; } })();
-  const holdMod = board ? await import('./task-hold.mjs') : null;
   const titleOf = (t) => [...(board?.inProgress || []), ...(board?.backlog || []), ...(board?.done || [])].find((x) => x.id === t)?.title || '';
-  // (a) Each branch as it is now.
-  const ready = [];
-  for (const x of laneStates(lanes, { repo, target, board, holdMod, L })) {
-    if (x.moved) log(`[unity-train] ${id}: ${x.lane.task}'s branch ${x.lane.branch} moved since it was queued (${short(lanes.find((l) => l.task === x.lane.task).head)} -> ${short(x.moved)}); the branch as it is now goes in`);
-    if (x.defer) defer(x.lane, x.defer);
-    else if (x.drop) drop(x.lane, x.drop, { handBack: false });
-    else ready.push(x.lane);
+  // (a) Each branch as it is now and (b) its conflicts against the target and between branches, from refs only (formBatch).
+  for (const m of formed.moved.values()) log(`[unity-train] ${id}: ${m.lane.task}'s branch ${m.lane.branch} moved since it was queued (${short(m.from)} -> ${short(m.to)}); the branch as it is now goes in`);
+  for (const o of formed.outs) {
+    if (o.kind === 'defer') defer(o.lane, o.why);
+    else if (o.kind === 'gone') drop(o.lane, o.why, { handBack: false });
+    else if (o.kind === 'conflictTarget') drop(o.lane, o.why, { evidence: { files: o.files || [] } });
+    else drop(o.lane, `${o.lane.branch} is already in ${target}; task done ${o.lane.task} closes it`, { handBack: false });
   }
-  // (b) Conflicts against the target and between branches, from refs only.
-  const tip0 = headOf(repo, target);
-  const pre = chainOnTarget(repo, tip0, ready, id, engine);
-  if (pre.error) { res.ok = false; res.message = `The ${L} train could not check the branches: ${pre.error}. Nothing ran; the queue is kept.`; return finish(); }
-  for (const l of pre.conflictTarget) drop(l, l.why, { evidence: { files: l.files || [] } });
-  for (const l of pre.deferred) defer(l, l.why);
-  for (const l of pre.already) drop(l, `${l.branch} is already in ${target}; task done ${l.task} closes it`, { handBack: false });
+  const pre = formed.pre;
+  // 2.96 (c4): files merged as a union, in the log, one event and the summary.
+  if (pre.union.length) {
+    res.union = pre.union;
+    const m = `merged as a union (engines.${engine}.merge.union; both sides only added lines): ${pre.union.map((u) => `${u.files.join(', ')} (${u.task} with ${u.with})`).join('; ')}; the compile check and the tests decide`;
+    log(`[unity-train] ${id}: ${m}`);
+    if (!dryRun) ev('union', id, m, { agent: by, meta: { union: pre.union } });
+    update({ union: [...new Set(pre.union.flatMap((u) => u.files))] });
+  }
   let set = pre.included;
   if (dryRun) { res.message = `Dry run: ${set.length} branch(es) would land on ONE ${L} land run (${set.map((l) => l.task).join(', ') || 'none'}) on ${target} at ${short(tip0)}${s.many ? ' (the land command takes the list)' : set.length > 1 ? ` (through one integration branch, ${UNITY_REF_PREFIX}${id})` : ''}; ${summary(res)}`; return finish(); }
   // The engine's per-lane pre-land check (engines.<x>.preLand), before the long land run: a lane that fails it is handed back with cause
@@ -1142,7 +1235,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     update({ now: `compile search: ${set.map((l) => l.task).join(', ')}` });
     const rc = (() => { try { return rulesConfig(engine, { root, env, repo, ref: target }); } catch { return null; } })();
     const cs0 = Date.now();
-    const cs = compileSearch({ repo, tip: tip0, lanes: set, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine), at: (sha) => compileAt({ repo, sha, cmd: cc, root, id, engine, rules: rc, env, log }) });
+    const cs = compileSearch({ repo, tip: tip0, lanes: set, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine, { union }), at: (sha) => compileAt({ repo, sha, cmd: cc, root, id, engine, rules: rc, env, log }) });
     spent.compile += Date.now() - cs0;
     log(`[unity-train] ${id}: compile search (engines.${engine}.${cc.source}): ${cs.why} (${cs.runs} compile run(s))`);
     res.compile = { runs: cs.runs, left: cs.left.map((x) => x.lane.task), ...(cs.targetRed ? { targetRed: true } : {}) };
@@ -1165,10 +1258,10 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       const extraFrom = set.map((l) => path.join(root, '.lanes', 'engine', String(l.task))).filter((d) => fs.existsSync(d));
       // 2.94: a check ahead for exactly this batch's tree is waited for (never run twice); one for another tree is ended.
       const aw0 = Date.now();
-      const aw = await aheadFor(root, engine, { train: id, log: (m) => log(`[unity-train] ${id}: the check ahead ${m}`), key: () => { try { const c = chainOnTarget(repo, tip0, set, id, engine); return c.head ? rulesKey({ repo, sha: c.head, cfg: rc }) : null; } catch { return null; } } });
+      const aw = await aheadFor(root, engine, { train: id, log: (m) => log(`[unity-train] ${id}: the check ahead ${m}`), key: () => { try { const c = chainOnTarget(repo, tip0, set, id, engine, { union }); return c.head ? rulesKey({ repo, sha: c.head, cfg: rc }) : null; } catch { return null; } } });
       spent.rules += Date.now() - aw0;
       const rg0 = Date.now();
-      const rg = (deps.rulesGate || rulesGate)({ engine, repo, tip: tip0, lanes: set, cfg: rc, from, extraFrom, owe: true, root, id, env, log, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine) });
+      const rg = (deps.rulesGate || rulesGate)({ engine, repo, tip: tip0, lanes: set, cfg: rc, from, extraFrom, owe: true, root, id, env, log, chain: (t, ls) => chainOnTarget(repo, t, ls, id, engine, { union }) });
       spent.rules += Date.now() - rg0;
       log(`[unity-train] ${id}: rules check: ${rg.why}${rg.runs ? ` (${rg.runs} run(s), ${Math.round(rg.ms / 1000)} s)` : ''}${aw && ['pass', 'red'].includes(aw.status) ? `; the batch's result came from the check ahead of train ${aw.train}${aw.waitedMs >= 1000 ? ` (waited ${Math.round(aw.waitedMs / 6000) / 10} min for it)` : ''}` : ''}${aw?.status === 'partial' ? `; the check ahead of train ${aw.train} finished some shards, this train ran the rest` : ''}`);
       // 2.90: a check that judged no lane because of the target is said where people look (event; train status after 2 in a row).
@@ -1201,9 +1294,9 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   const aheadBegin = (group, landLabel) => {
     if (par.ok) { aheadSay(`is not started: a second gate (engines.${engine}.gates) is in use`); return null; }
     const inIt = new Set(group.map((l) => l.task));
-    const nx = pickBatch(root, engine, s, readUnityQueue(root, engine).filter((e) => !inIt.has(e.task)), { env });
+    const nx = pickBatch(root, engine, s, readUnityQueue(root, engine).filter((e) => !inIt.has(e.task)), { env, held: heldPick });
     const ok = nx.error ? [] : laneStates(nx.lanes, { repo, target, board, holdMod, L }).filter((x) => !x.defer && !x.drop).map((x) => x.lane);
-    const c = ok.length ? chainOnTarget(repo, rulesGreen.head, ok, `${id}-ahead`, engine) : { included: [] };
+    const c = ok.length ? chainOnTarget(repo, rulesGreen.head, ok, `${id}-ahead`, engine, { union }) : { included: [] };
     if (c.error || !c.included.length) { aheadSay(`is not started: no lane waits for the next train${c.error ? ` (${c.error})` : ''}`); return null; }
     const extraFrom = c.included.map((l) => path.join(root, '.lanes', 'engine', String(l.task))).filter((d) => fs.existsSync(d));
     try { return aheadStart({ root, engine, repo, target, head: rulesGreen.head, next: c.head, lanes: c.included, cfg: rc0, from: fromAll, extraFrom, train: id, landLabel, env, log: aheadSay }); } catch (e) { aheadSay(`is not started: ${e.message}`); return null; }
@@ -1243,7 +1336,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     const kind = alone ? (opts.full ? 'full' : `probe:${named}`) : noLand ? `name:${named}` : null;
     if (noLand) {
       let head0 = tip;
-      if (!alone) { const c = chainOnTarget(repo, tip, group, id, engine); if (c.error) return { status: 'error', why: c.error }; const bad = [...c.conflictTarget, ...c.deferred][0]; if (bad) return { status: 'conflict', why: bad.why, lane: bad }; head0 = c.head; }
+      let u1 = false;
+      if (!alone) { const c = chainOnTarget(repo, tip, group, id, engine, { union }); if (c.error) return { status: 'error', why: c.error }; const bad = [...c.conflictTarget, ...c.deferred][0]; if (bad) return { status: 'conflict', why: bad.why, lane: bad }; head0 = c.head; u1 = c.union.length > 0; }
       const tree = out(git(repo, 'rev-parse', `${head0}^{tree}`));
       const g0 = kind !== 'full' && tree ? greenHas(root, engine, { tree, target: tip, kind }) : null;
       if (g0) {
@@ -1257,7 +1351,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         if (git(repo, 'update-ref', `refs/heads/${ref}`, tip, '').status !== 0) return { status: 'error', why: `could not make the ref ${ref} at the target` };
         arg = s.many ? { branches: [ref] } : { branch: ref };
       } else if (s.many) { merged = head0; arg = { branches: group.map((l) => l.branch) }; }
-      else if (group.length === 1) { merged = head0; arg = { branch: group[0].branch }; }
+      else if (group.length === 1 && !u1) { merged = head0; arg = { branch: group[0].branch }; }
       else {
         ref = `${UNITY_REF_PREFIX}${id}`;
         merged = head0;
@@ -1265,10 +1359,12 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         arg = { branch: ref };
       }
     } else if (s.many) arg = { branches: group.map((l) => l.branch) };
-    else if (group.length === 1) arg = { branch: group[0].branch };
+    // 2.96 (c4): one lane merged with the target as a union lands through the integration branch (its own merge would conflict).
+    else if (group.length === 1 && (!union.length || !(chainOnTarget(repo, tip, group, id, engine, { union }).union || []).length)) arg = { branch: group[0].branch };
     else {
-      const c = chainOnTarget(repo, tip, group, id, engine);
+      const c = chainOnTarget(repo, tip, group, id, engine, { union });
       if (c.error) return { status: 'error', why: c.error };
+      if (c.union.length) log(`[unity-train] ${id}: ${what}: merged as a union: ${c.union.map((u) => `${u.files.join(', ')} (${u.task})`).join('; ')}`);
       const bad = [...c.conflictTarget, ...c.deferred][0];
       if (bad) return { status: 'conflict', why: bad.why, lane: bad };
       ref = `${UNITY_REF_PREFIX}${id}`;
@@ -1280,7 +1376,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     const batchPaths = () => {
       try {
         let head = merged;
-        if (!head) { const c = chainOnTarget(repo, tip, group, id, engine); head = c.error ? null : c.head; }
+        if (!head) { const c = chainOnTarget(repo, tip, group, id, engine, { union }); head = c.error ? null : c.head; }
         return head ? changedPaths(repo, tip, head) : null;
       } catch { return null; }
     };
@@ -1641,7 +1737,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     const stage = firstRedStage(firstRun);
     try {
       const jobs = steps.map((st, k) => {
-        const c = chainOnTarget(repo, tip, st.lanes, id, engine);
+        const c = chainOnTarget(repo, tip, st.lanes, id, engine, { union });
         if (c.error || c.conflictTarget.length || c.deferred.length) return Promise.resolve(null);
         const tests = retryNames(st.tests) || [];
         const kind = `name:${[...tests].sort().join(';')}`;
@@ -1785,6 +1881,12 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
           if (got) { res.parallel = (res.parallel || 0) + 1; ev('parallel', id, `two steps by name at once on two gates: ${target} + ${st.prefix.join(' + ')}: ${pr.results[0]?.status || 'no answer'}; ${target} + ${st.also.prefix.join(' + ')}: ${pr.results[1]?.status || 'no answer'}; nothing landed`, { agent: by, meta: { groups: [st.prefix, st.also.prefix], status: pr.results.map((x) => x?.status || null) } }); continue; }
           log(`[unity-train] ${id}: neither gate gave an answer: ${what} runs on one gate`);
         }
+        // 2.96 (c3): a hold set since the pick counts until the land run starts: the lane is left out (not handed back, not blamed)
+        // and the round starts again with the lanes left, as any changed set (its rules green no longer stands).
+        if (!st.byName && st.step !== 'probe' && holdMod) {
+          const now = heldLanes(group, (() => { try { return deps.board?.() || null; } catch { return null; } })(), holdMod);
+          if (now.size) { leaveOutHeld(now); const rest = round.filter((l) => live.has(l.task) && !res.landed.includes(l.task)); if (rest.length) pending.unshift(rest); break; }
+        }
         res.rounds += 1;
         const r = await landGroup(group, what, o);
         await aheadSettle(r);
@@ -1881,6 +1983,9 @@ function summary(res) {
   if (res.landed.length) parts.push(`landed ${res.landed.join(', ')} with ${res.runs} ${labelOf(res.engine || 'unity')} land run(s)`);
   if (res.dropped.length) parts.push(`handed back ${res.dropped.map((d) => `${d.task} (${d.why.split('\n')[0]})`).join('; ')}`);
   if (res.deferred.length) parts.push(`waiting for the next ${labelOf(res.engine || 'unity')} train: ${res.deferred.map((d) => `${d.task} (${d.why.split('\n')[0]})`).join('; ')}`);
+  // 2.96 (c1, c3, c4): lanes left out as held, and files merged as a union.
+  if (res.held?.length) parts.push(`left out, held (still queued): ${res.held.map((h) => `${h.task} (${h.why})`).join('; ')}`);
+  if (res.union?.length) parts.push(`merged as a union: ${[...new Set(res.union.flatMap((u) => u.files))].join(', ')}`);
   return parts.join('. ') || 'nothing to land';
 }
 
@@ -1925,17 +2030,22 @@ export function unityTrainStatus(root = mainRoot(), engine = 'unity') {
 }
 
 /** Lines for people; '' when there is nothing to say and quiet is set. */
-export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'unity' } = {}) {
+export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'unity', held = null } = {}) {
   const st = unityTrainStatus(root, engine);
   const L = labelOf(engine);
   if (quiet && !st.queue.length && !st.running) return '';
   const lines = [];
   // The running train's batch and the waiting queue are two lists: a queue entry whose task rides the running train is on the first only.
+  // 2.96 (c1): a held lane is a third, listed once (held: from the board now, else the last train's record).
   const inTrain = new Set(st.running?.lanes || []);
-  const waiting = st.queue.filter((e) => !inTrain.has(e.task));
+  const hd = held || new Map(Object.entries(readJson(heldFile(root, engine)) || {}).map(([t, h]) => [t, h?.why || 'held']));
+  const heldQ = st.queue.filter((e) => hd.has(e.task) && !inTrain.has(e.task));
+  const waiting = st.queue.filter((e) => !inTrain.has(e.task) && !hd.has(e.task));
   const row = (e) => `  ${e.task}  ${e.agent || '?'}  ${e.branch} at ${short(e.head)} (queued ${String(e.at).slice(0, 16)})${e.tag ? `  tag ${e.tag}` : ''}${e.alone ? '  alone' : ''}`;
   if (st.running?.lanes?.length) lines.push(`Running ${L} train batch (${st.running.lanes.length}): ${st.running.lanes.join(', ')}`);
   lines.push(waiting.length ? `${waiting.length} ${L} branch(es) wait in the queue for the next ${L} train (npm run task -- train --engine ${engine}):\n${waiting.map(row).join('\n')}` : `No ${L} branch waits for a ${L} train (task done <ID> --train on a ${L}-track task queues one).`);
+  for (const e of heldQ) lines.push(`${e.task} held: ${hd.get(e.task)}; its branch stays queued and takes no seat in a batch`);
+  if (st.running?.union?.length) lines.push(`Running ${L} train: merged as a union: ${st.running.union.join(', ')}`);
   if (st.running) lines.push(`${L} train running: ${st.running.id} by ${st.running.by || '?'} (pid ${st.running.pid}, since ${new Date(st.running.at).toISOString().slice(11, 16)} UTC)${st.running.lanes?.length ? `, ${st.running.lanes.join(', ')}` : ''}${st.running.now ? `; now: ${st.running.now}` : ''}`);
   // 2.85 (B-137): the daily full run is said plainly while it runs.
   if (st.running?.full) lines.push(`This ${L} land run is the daily full run (${st.running.full.why}): every test runs, expect about ${st.running.full.minutes ? `${st.running.full.minutes} min` : 'the longest land run of the day'}.`);

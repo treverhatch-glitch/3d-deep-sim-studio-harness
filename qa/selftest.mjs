@@ -5414,6 +5414,15 @@ if (inShard('selftest-295a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.96 (c): held lanes are left out before the pick, a lane that cannot go decides no class, a hold counts until the land
+// run, list files that only grow merge as a union (engines.<x>.merge.union).
+if (inShard('selftest-296c')) {
+  const dir = copyRepo();
+  const { selftest296C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-296c.mjs')).href);
+  await selftest296C({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
