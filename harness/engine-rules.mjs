@@ -27,6 +27,7 @@ import { peakFromHistory, readUsedHistory } from './engine-ram.mjs';
 import { flagOf, isOff as off, numFiniteFirst as num, pushToOf, stdoutOf as out } from './helpers.mjs';
 import { matchAny } from './merge-lane.mjs';
 import { acquireHeavy, quietHolding } from './heavy.mjs';
+import { rulesKind, runSample, runNumbers, costLines } from './run-cost.mjs';
 
 const on = (v) => /^(1|true|yes|on)$/i.test(String(v ?? '').trim());
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
@@ -1161,7 +1162,7 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
       let ran = null;
       // admit decides before every start, so its runs go one at a time.
       if (plan.max > 1 && !admit) {
-        const job = { parts, cwd: dir, env: runEnv, timeoutMs: cfg.timeoutMin * 60000, max: plan.max, gb: plan.gb, floorGb: plan.floorGb, ...(cfg.peak ? { peak: cfg.peak } : {}), ...(typeof freeGb === 'function' && Number.isFinite(Number(freeGb())) ? { freeGb: Number(freeGb()) } : {}) };
+        const job = { parts, root, engine, ...(Number(cfg.focus?.splitGb) > 0 ? { handGb: Number(cfg.focus.splitGb) } : {}), cwd: dir, env: runEnv, timeoutMs: cfg.timeoutMin * 60000, max: plan.max, gb: plan.gb, floorGb: plan.floorGb, ...(cfg.peak ? { peak: cfg.peak } : {}), ...(typeof freeGb === 'function' && Number.isFinite(Number(freeGb())) ? { freeGb: Number(freeGb()) } : {}) };
         log(`[engine-rules] ${engine}: split of ${s.parts.length} part(s) on ${short(sha)}: ${plan.why}`);
         const w = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'rules-parts.mjs')], { input: JSON.stringify(job), encoding: 'utf8', windowsHide: true, maxBuffer: 256 * 1024 * 1024, timeout: cfg.timeoutMin * 60000 + 30000 });
         try { ran = JSON.parse(String(w.stdout || '').trim().split('\n').pop()); } catch { ran = null; }
@@ -1169,7 +1170,7 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
         else {
           for (const d of ran.decisions || []) log(`[engine-rules] ${engine}: ${d}`);
           const rs = ran.results.map((r) => r).filter(Boolean);
-          const groups = rs.map((r) => ({ filter: r.filter, seconds: r.seconds, status: r.status === 'error' ? 'error' : r.status, code: r.code, ...(r.peakGb ? { peakGb: r.peakGb } : {}) }));
+          const groups = rs.map((r) => ({ filter: r.filter, seconds: r.seconds, status: r.status === 'error' ? 'error' : r.status, code: r.code, ...(r.peakGb ? { peakGb: r.peakGb } : {}), ...(r.measured ? { measured: r.measured } : {}) }));
           const bad = rs.find((r) => r.status === 'error');
           if (bad && (s.shards || cfg.peak)) keepGreens(groups);
           if (bad) return { status: 'error', why: bad.timedOut ? timedOut(rs.filter((r) => r.status === 'pass').length, bad.filter) : `the rules check could not run: ${bad.errorCode || bad.why || '?'}`, ms: Date.now() - t0, mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce: ran.atOnce };
@@ -1188,8 +1189,9 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
         log(`[engine-rules] ${engine}: ${part.command} on ${short(sha)} (${what} ${groups.length + 1} of ${s.parts.length})${co.sparse ? ' (sparse checkout)' : ''}`);
         const g0 = Date.now();
         if (cfg.peak) peakClear(dir, cfg.peak);
-        const rp = runLimitedSync(part.command, { cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: left, env: runEnv });
-        const gs = { filter: part.filter, seconds: Math.round((Date.now() - g0) / 1000), status: rp.error ? 'error' : rp.status === 0 ? 'pass' : 'red', code: rp.status ?? rp.signal };
+        const smp = runSample(root, engine, rulesKind(part.filter), { label: `${engine} rules ${part.filter}` });
+        const rp = runLimitedSync(part.command, { sample: smp, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: left, env: runEnv });
+        const gs = { filter: part.filter, seconds: Math.round((Date.now() - g0) / 1000), status: rp.error ? 'error' : rp.status === 0 ? 'pass' : 'red', code: rp.status ?? rp.signal, ...(runNumbers(smp) ? { measured: runNumbers(smp) } : {}) };
         // 2.86: one part at a time, so the machine monitor's samples while it ran are its own peak (none: nothing is guessed).
         if (s.partKeys) { const gb = peakFromHistory(readUsedHistory(root), g0, Date.now()); if (gb > 0) gs.gb = gb; }
         const pg = cfg.peak ? peakRead(dir, cfg.peak) : null;
@@ -1206,8 +1208,10 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
     if (ok !== true) return stopped(`${s.mode === 'full' ? 'the full run' : statOf}: ${ok}`);
     log(`[engine-rules] ${engine}: ${s.command} on ${short(sha)}${s.mode === 'focus' ? ' (focus)' : ''}${co.sparse ? ' (sparse checkout)' : ''}; up to ${tmo.min} min (${tmo.why})`);
     if (cfg.peak) peakClear(dir, cfg.peak);
-    const r = runLimitedSync(s.command, { cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: cfg.timeoutMin * 60000, env: runEnv });
+    const smp = runSample(root, engine, rulesKind(statOf), { label: `${engine} rules ${statOf}` });
+    const r = runLimitedSync(s.command, { sample: smp, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: cfg.timeoutMin * 60000, env: runEnv });
     const ms = Date.now() - t0;
+    const measured = runNumbers(smp);
     // 2.95: the peak the test command wrote (rules.peak), kept per filter ('(full run)' for the whole command).
     const pg = cfg.peak ? peakRead(dir, cfg.peak) : null;
     if (pg) { keepParts(root, engine, [{ key: null, filter: statOf, peakGb: pg }]); log(`[engine-rules] ${engine}: ${statOf} took ${pg} GB at its peak (rules.peak)`); }
@@ -1216,8 +1220,8 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
     // 2.86: one joined command that passed passed every part in it.
     if (r.status === 0 && s.partKeys) { const ks = Object.entries(s.partKeys); const gb = ks.length === 1 ? peakFromHistory(readUsedHistory(root), t0, Date.now()) : null; keepParts(root, engine, ks.map(([filter, k]) => ({ key: k, filter, ...(ks.length === 1 ? { seconds: Math.round(ms / 1000), ...(gb > 0 ? { gb } : {}) } : {}) }))); }
     const rec = r.status === 0
-      ? { status: 'pass', why: `the rules check passed (${Math.round(ms / 1000)} s${s.mode === 'focus' ? ', focus' : ''})`, ms, at: new Date().toISOString(), mode: s.mode }
-      : { status: 'red', why: `the rules check failed (exit ${r.status ?? r.signal ?? '?'}${s.mode === 'focus' ? ', focus' : ''})`, ms, at: new Date().toISOString(), mode: s.mode, failures: failingTests(text).slice(0, 40), tail: text.split('\n').slice(-12).join('\n') };
+      ? { status: 'pass', why: `the rules check passed (${Math.round(ms / 1000)} s${s.mode === 'focus' ? ', focus' : ''})`, ms, at: new Date().toISOString(), mode: s.mode, ...(measured ? { measured } : {}) }
+      : { status: 'red', why: `the rules check failed (exit ${r.status ?? r.signal ?? '?'}${s.mode === 'focus' ? ', focus' : ''})`, ms, at: new Date().toISOString(), mode: s.mode, ...(measured ? { measured } : {}), failures: failingTests(text).slice(0, 40), tail: text.split('\n').slice(-12).join('\n') };
     keep(root, engine, key, rec);
     return rec;
   } finally { removeCheckout(repo, dir); } })();
@@ -1285,6 +1289,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
   for (const b of sel.ignoreBad || []) log(`[engine-rules] ${engine}: rules.focus.ignore pattern ${JSON.stringify(b).slice(0, 120)} is not a valid regex; skipped`);
   // rules.focus.split: seconds of each group over this batch's uncached runs.
   const groupSecs = new Map();
+  const measuredRuns = []; // 2.96 (a): each sampled run's numbers, for the engine.rules event
   // 2.86: results kept per part (perPartOn): a part with a kept green at a commit is not run there again.
   const perPart = perPartOn(cfg) && sel.mode === 'focus';
   const ctx = perPart ? partContext({ repo, cfg, names: sys?.names || [], src }) : null;
@@ -1325,7 +1330,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     // 2.85: a kept result is said in the log (a restarted train reusing a green tree is not a silent skip).
     if (r.cached) log(`[engine-rules] ${engine}: rules ${r.status} cached for ${short(sha)} (${r.mode || sel.mode}, kept result of this tree: not run again)`);
     if (Number(r.splitAtOnce) > 0) res.splitAtOnce = Math.max(res.splitAtOnce || 0, Number(r.splitAtOnce));
-    if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; for (const gr of Array.isArray(r.groups) ? r.groups : []) groupSecs.set(gr.filter, (groupSecs.get(gr.filter) || 0) + (gr.seconds || 0)); }
+    if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; for (const gr of Array.isArray(r.groups) ? r.groups : []) groupSecs.set(gr.filter, (groupSecs.get(gr.filter) || 0) + (gr.seconds || 0)); measuredRuns.push(...[r, ...(Array.isArray(r.groups) ? r.groups : [])].map((x) => x.measured).filter(Boolean)); }
     return r;
   };
   // 2.90: the smallest red prefix of `set` under atFn: { hi, bad } (set[hi - 1] turns it red), or { stuck }.
@@ -1458,7 +1463,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
   if (!res.why) res.why = res.dropped.length ? `${res.dropped.length} lane(s) refused by the rules check, ${set.length} go to the land run` : `the rules check is green for ${set.map((l) => l.task).join(', ')}`;
   if (sel.mode === 'focus') res.why += ` (focus: ${res.filter})`;
   if (res.shards) res.why += ` (${res.shards.n} shard(s), ${res.shards.kept} kept${res.shards.keptOther ? `, ${res.shards.keptOther} from another tree` : ''}${res.shards.complete ? '' : '; no rules.shards.rest: not a full run'})`;
-  try { emitEvent({ type: 'engine.rules', agent: env.STUDIO_LOCK_OWNER || 'gates', track: `engine:${engine}`, status: res.dropped.length ? 'warn' : 'ok', msg: `${engine} rules check: ${res.why}`.slice(0, 400), meta: { engine, runs: res.runs, ms: res.ms, kept: set.map((l) => l.task), dropped: res.dropped.map((d) => d.lane.task), green: Boolean(res.green), mode: res.mode, why: res.selWhy, parts: res.parts, ...(perPart ? { reused: res.reused, newParts: res.newParts || 0 } : {}), splitAtOnce: res.splitAtOnce || 1, filter: res.filter, ...(res.groups ? { groups: res.groups } : {}), ...(slice ? { slice: `${slice.i}/${slice.n}` } : {}), ...(res.shards ? { shards: res.shards } : {}) } }); } catch { /* the check's result stands without its event */ }
+  try { emitEvent({ type: 'engine.rules', agent: env.STUDIO_LOCK_OWNER || 'gates', track: `engine:${engine}`, status: res.dropped.length ? 'warn' : 'ok', msg: `${engine} rules check: ${res.why}`.slice(0, 400), meta: { engine, runs: res.runs, ms: res.ms, kept: set.map((l) => l.task), dropped: res.dropped.map((d) => d.lane.task), green: Boolean(res.green), mode: res.mode, why: res.selWhy, parts: res.parts, ...(perPart ? { reused: res.reused, newParts: res.newParts || 0 } : {}), splitAtOnce: res.splitAtOnce || 1, filter: res.filter, ...(res.groups ? { groups: res.groups } : {}), ...(slice ? { slice: `${slice.i}/${slice.n}` } : {}), ...(res.shards ? { shards: res.shards } : {}), ...(measuredRuns.length ? { peakGb: Math.max(...measuredRuns.map((x) => x.peakGb)), cpuPct: Math.round(measuredRuns.reduce((a, x) => a + (x.cpuPct || 0), 0) / measuredRuns.length), minutes: Math.round(measuredRuns.reduce((a, x) => a + x.minutes, 0) * 10) / 10 } : {}) } }); } catch { /* the check's result stands without its event */ }
   return res;
 }
 
@@ -1599,6 +1604,8 @@ async function cli(argv) {
     if (cfg.focus) console.log(`[engine-rules] ignore: ${cfg.focus.ignore.length ? cfg.focus.ignore.map((p) => { try { new RegExp(p); return p; } catch { return `${p} (not a valid regex: skipped)`; } }).join(', ') : 'none'}`);
     // 2.95: the shards (each with its kept green on the target and its measured peak) and the peak file.
     if (cfg.peak) console.log(`[engine-rules] peak: read from ${cfg.peak.file} in the test checkout after each test command${cfg.peak.match ? ` (match ${cfg.peak.match})` : ''}; a full run's measured peak: ${partStats(root, engine)[FULL_STAT]?.peakGb ? `${partStats(root, engine)[FULL_STAT].peakGb} GB` : 'none yet'}${cfg.focus?.splitGb ? ' (rules.focus.splitGb is set: that number is used)' : ''}`);
+    // 2.96 (a): measured cost per kind (rules commands and land runs: the number a land script's own wait can use).
+    for (const l of costLines(root, engine)) console.log(`[engine-rules] ${l}`);
     if (cfg.shards) {
       const fresh = shardsFreshDue(root, engine, cfg);
       console.log(`[engine-rules] shards: a full run is one command per shard (${cfg.shards.test}); ${cfg.shards.rest ? `rest ${cfg.shards.rest}: a sharded run is a full run` : 'no rest: a sharded run is NOT a full run (a test no shard filter matches never runs), so it never tells the land run STUDIO_RULES_MODE=full and never counts as the owed full run; set rules.shards.rest'}; keep "${cfg.shards.keep}"${cfg.shards.keep === 'reads' ? ` (a run that reuses nothing from another tree at least every ${cfg.shards.freshEveryHours} h; ${fresh ? `due: ${fresh}` : `last ${readCache(root, engine).shardsFreshAt}`})` : ' (a green is kept for the exact tree it ran on)'}`);

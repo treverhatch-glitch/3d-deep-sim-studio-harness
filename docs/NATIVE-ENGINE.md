@@ -719,6 +719,46 @@ harness never switches it by itself.
   need a complete land run on the new one, a tree no run has seen as a whole. It is not used for complete runs (a
   land script that does not honour the probe), for the compile search or for the rules check.
 
+## Measured runs and admission by measured RAM and CPU (2.96)
+
+Every land run, rules command (whole, part or shard), compile check and quick test the harness starts is sampled while
+it runs: free RAM, commit charge (Windows), total CPU, and the working set and CPU of the run's whole process tree. The
+samples are in `.studio/engine/<x>-samples/<run>.csv` (newest 60 per engine, none older than 14 days). Linux reads
+`/proc`; Windows runs one PowerShell helper per run that prints one line per sample and ends with the run (or by itself
+when the run's wrapper is gone); elsewhere nothing is sampled. A sampler that fails never changes the run.
+
+Each ended run is folded into `.studio/engine-ram.json` (`<x>.kinds`, beside the land peaks): its peak GB, mean CPU %,
+minutes, when the peak came (start, middle, end, throughout) and which kinds ran beside it. Kinds: `land with-rules` or
+`land no-rules` (`STUDIO_RULES_GREEN`), plus ` play-<mode>` with `STUDIO_PLAY_MODE`; `rules` (the whole command) and
+`rules <filter>` (a part or shard); `compile`; `quick`. A kind's need is the peak of its last 5 runs plus
+max(0.5 GB, 10%), once at least one of them passed.
+
+`studio/game.json` (the owner's file):
+
+```json
+"machine": { "admit": "measured", "cpuCapPct": 85, "slowerPct": 10, "sampleSec": 10, "sample": true }
+```
+
+- `admit` (default unset: off). Off, every decision is 2.95's. `"measured"`: a land run (the machine:heavy wait), a
+  part of a split rules check, the check ahead and a quick test start when free RAM minus the floor
+  (`STUDIO_RAM_FLOOR_GB`) minus what the running jobs still have to grow (their need minus what they use now; a heavy
+  job with no samples counts its whole claim) holds the job's own need, and CPU now plus the job's measured share stays
+  under `cpuCapPct`. The measured need replaces the claim's RAM and CPU, the land floor and `rules.peak`;
+  `rules.focus.splitGb` set by hand still wins. Slots, per-kind caps, the queue and holds stay. A job that waits says it
+  in numbers: `waits for memory: needs 12.7 GB, 17 GB free above the floor; land no-rules still has 5.1 GB to grow`.
+- When a number is missing (a kind never measured or never passed), stale (a running job's last sample is old) or looks
+  wrong (a running job uses more than its own need), today's rule decides, and the log says why. The first run of a
+  kind measures it.
+- Overlap that does not pay: after 3 passing runs of a kind alone and 3 beside another kind, if it took more than
+  `slowerPct` longer beside it, that pair is not run together for 24 hours (`machine.overlap_stopped`, with the numbers),
+  then tried again on fresh runs.
+- `npm run engine -- rules show` lists each kind's measured peak, need, CPU and minutes, including the land kinds: the
+  number a land script's own wait for free RAM can use. `train status` shows each running job's RAM and CPU now, its
+  peak so far and its reservation. The land result line and the `engine.land` and `engine.rules` events carry
+  `peakGb`, `cpuPct` and `minutes`.
+- Untested on Windows: the PowerShell helper (its process tree, CPU per process and commit charge) has only been run
+  through a stand-in that speaks its one-line protocol.
+
 ## The land's stage report
 
 A land command knows where its time went; the harness didn't. Now it names a file in `STUDIO_LAND_RESULT` and reads

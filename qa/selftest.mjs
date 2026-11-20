@@ -5414,6 +5414,14 @@ if (inShard('selftest-295a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.96 (a): every run measured; admission by measured RAM and CPU (machine.admit "measured").
+if (inShard('selftest-296a')) {
+  const dir = copyRepo();
+  const { selftest296A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-296a.mjs')).href);
+  await selftest296A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

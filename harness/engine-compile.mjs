@@ -12,6 +12,7 @@ import { runLimitedSync } from './run-limited.mjs';
 import { rulesCheckout, removeCheckout, changedPaths } from './engine-rules.mjs';
 import { compileErrorFiles } from './unity-gate.mjs';
 import { numBlankDefault as num } from './helpers.mjs';
+import { runSample } from './run-cost.mjs';
 
 /** The compile search's command: { command, timeoutMin, source } or null (off, or nothing to run). */
 export function compileSearchOf(cfg = {}) {
@@ -49,7 +50,7 @@ export function compileAt({ repo, sha, cmd, root, id = 'compile', engine = 'unit
   const t0 = Date.now();
   try {
     log(`[engine-compile] ${engine}: ${cmd.command} on ${String(sha).slice(0, 10)}${co.sparse ? ' (sparse checkout)' : ''}`);
-    const r = runLimitedSync(cmd.command, { cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: cmd.timeoutMin * 60000, env: { ...env, STUDIO_ENGINE: engine, STUDIO_ENGINE_LANE_DIR: dir, STUDIO_ENGINE_REPO: repo } });
+    const r = runLimitedSync(cmd.command, { sample: runSample(root, engine, 'compile', { label: `${engine} compile check` }), cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: cmd.timeoutMin * 60000, env: { ...env, STUDIO_ENGINE: engine, STUDIO_ENGINE_LANE_DIR: dir, STUDIO_ENGINE_REPO: repo } });
     const ms = Date.now() - t0;
     const text = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd();
     if (r.error) return { status: 'error', why: r.error.code === 'ETIMEDOUT' ? `the compile command timed out after ${cmd.timeoutMin} min (engines.${engine}.quickCheckTimeoutMin)` : `the compile command could not run: ${r.error.code || r.error.message}`, lines: [], files: [], ms };
