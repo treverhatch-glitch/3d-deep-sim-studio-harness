@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileUrlOf as fileUrlRelSOf, fwd, gEnvOf, gitUserCrlfOf, guardCap3000Of, out, writeIn as write } from './kit.mjs';
+import { eventsOf as eventsFileOf, fileUrlOf as fileUrlRelSOf, fwd, gEnvOf, gitUserCrlfOf, guardCap3000Of, out, queueUnityOf, writeIn as write } from './kit.mjs';
 
 export async function selftest296D({ dir, report, tmpRoot }) {
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
@@ -176,6 +176,59 @@ console.log(JSON.stringify({ block, words: d.words, max: MAX_WORDS }));`);
       digestP.block?.length === 1 && /Test cost \(unity, 24 h\): slowest Rounding 2\.5 min \(75%\); 1 ran twice in a train; npm run engine -- test-cost/.test(digestP.block[0]) && digestP.words < digestP.max, JSON.stringify(digestP)]);
     const cli = node(['harness/engine.mjs', 'test-cost', '--engine', 'unity']);
     await guard('2.96 (d10) npm run engine -- test-cost --engine unity prints the long form', () => [cli.status === 0 && /Test cost for unity/.test(out(cli)) && /Slowest tests:/.test(out(cli)) && /Ran more than once in one train \(1\):/.test(out(cli)), out(cli).slice(0, 600)]);
+
+    // ---- (3) Play Mode map gaps ----
+    const E1 = path.join(T, 'repo-train');
+    const GW = path.join(T, 'gate-train');
+    fs.mkdirSync(E1, { recursive: true });
+    g(E1, 'init', '-q', '-b', 'port/main');
+    write(E1, 'base.txt', 'base\n');
+    g(E1, 'add', '-A'); g(E1, 'commit', '-qm', 'start');
+    g(E1, 'checkout', '-q', '-b', 'dev');
+    g(E1, 'worktree', 'add', '-q', GW, 'port/main');
+    g(E1, 'checkout', '-q', '-B', 'feat/gap', 'port/main');
+    for (const f of ['Game/Net/Sync.cs', 'Game/Net/Client.cs', 'Game/Net/Server.cs', 'Game/Net/Pack.cs', 'Docs2/a.txt', 'Docs2/b.txt', 'Game/Ui/Hud.cs']) write(E1, f, `${f}\n`);
+    g(E1, 'add', '-A'); g(E1, 'commit', '-qm', 'gap work');
+    const gapHead = g(E1, 'rev-parse', 'feat/gap').stdout.trim();
+    g(E1, 'checkout', '-q', 'dev');
+    const landStub = path.join(T, 'land-stub.mjs');
+    fs.writeFileSync(landStub, `import { spawnSync } from 'node:child_process';
+const [gw, ...srcs] = process.argv.slice(2);
+const git = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: gw, encoding: 'utf8', windowsHide: true });
+for (const s of srcs) { const m = git('merge', '--no-ff', '-m', 'land ' + s, 'refs/heads/' + s); if (m.status !== 0) process.exit(2); }
+console.log('landed ' + srcs.join(' '));
+`);
+    const playFocus = { map: [{ match: '^Game/Ui/', filter: 'Game.PlayTests.Ui' }], smoke: 'Game.PlayTests.Smoke', skip: ['^Sim/Rules/'] };
+    const trainCfg = (extra = {}) => ({ unity: { land: `node "${fwd(landStub)}" "${fwd(GW)}" {branch}`, target: 'port/main', cwd: fwd(E1), gateWorktree: fwd(GW), timeoutMin: 5, rules: false, play: { focus: playFocus }, ...extra } });
+    setEngines(trainCfg());
+    fs.rmSync(path.join(S, '.studio', 'engine'), { recursive: true, force: true });
+    queueUnityOf(S)({ heads: { 'feat/gap': gapHead } }, [['T-961', 'feat/gap']]);
+    const train = probe(`import { runUnityTrain } from ${u('harness/unity-train.mjs')};
+const logs = [];
+const r = await runUnityTrain({ root: process.cwd(), log: (m) => logs.push(String(m)), deps: { handBack: () => {} } });
+console.log(JSON.stringify({ ok: r.ok, landed: r.landed, logs: logs.filter((l) => /play stage/.test(l)) }));`, { STUDIO_ENGINE_FULL_LAND_HOURS: 'off', STUDIO_UNITY_EDITMODE_PLAN: 'off' });
+    const gaps = (() => { try { return fs.readFileSync(path.join(S, '.studio', 'engine', 'unity-play-gaps.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } })();
+    await guard('2.96 (d11) a train whose Play Mode stage ran in full for unmapped paths keeps all of them (6 here, not the 5 the log names) with its train id (fails before this fix: only 5 paths were named and none was kept)', () => [
+      train.landed?.join() === 'T-961' && train.logs?.some((l) => /play stage in full/.test(l)) && gaps.length === 1 && /^[\w-]+$/.test(gaps[0].train) && gaps[0].paths.length === 6 && !gaps[0].paths.includes('Game/Ui/Hud.cs') && gaps[0].paths.includes('Docs2/b.txt'), JSON.stringify({ train, gaps })]);
+    const digestG = probe(`import { buildDigest, MAX_WORDS } from ${u('harness/digest.mjs')};
+const d = await buildDigest({ events: [] });
+console.log(JSON.stringify({ line: d.text.split('\\n').filter((l) => /^Play Mode ran in full/.test(l)), words: d.words, max: MAX_WORDS }));`);
+    await guard('2.96 (d12) the digest says how often Play Mode ran in full for unmapped paths in 24 h, names the top 3 folders and the command, within the word cap', () => [
+      digestG.line?.length === 1 && digestG.line[0] === 'Play Mode ran in full 1 time in 24 h for unmapped paths: Game/Net/, Docs2/; npm run engine -- play-plan --propose' && digestG.words < digestG.max, JSON.stringify(digestG)]);
+
+    // --propose: skip where the rules tests judge the folder (a map entry or an auto folder) or play.focus.skip takes it, else a map entry to fill in
+    setEngines(trainCfg({ rules: { test: 'node -e "0"', focus: { test: 'node -e "0" {filter}', map: [{ match: '^Sim/Fees/', filter: 'Cat=Fees' }], auto: [{ root: 'Sim/Core', paths: ['Sim/Core/{name}/'], filter: 'Core.{name}' }] } } }));
+    const propPaths = ['Sim/Fees/Fees.cs', 'Sim/Fees/Round.cs', 'Sim/Core/Bank/Bank.cs', 'Sim/Rules/A.cs', 'Game/Net/Sync.cs', 'Game/Net/Client.cs', 'Game/Net/Pack.cs', 'Docs2/x.md', 'Game/Ui/Hud.cs'];
+    const prop = node(['harness/engine.mjs', 'play-plan', '--propose', '--paths', propPaths.join(',')]);
+    const propJson = node(['harness/engine.mjs', 'play-plan', '--propose', '--json', '--paths', propPaths.join(',')]);
+    let groups = []; try { groups = JSON.parse(String(propJson.stdout).trim().split('\n').pop()); } catch { /* checked below */ }
+    const grp = (f) => groups.find((x) => x.folder === f) || {};
+    await guard('2.96 (d13) play-plan --propose groups the unmapped paths by folder with counts and proposes skip (rules map, rules auto folder, play.focus.skip) or a map entry with the filter left to fill in; a mapped folder is not listed (fails before this fix: the command had no --propose)', () => [
+      prop.status === 0 && groups.length === 5 && grp('Sim/Fees/').kind === 'skip' && grp('Sim/Fees/').count === 2 && grp('Sim/Core/Bank/').kind === 'skip' && grp('Sim/Rules/').kind === 'skip'
+        && grp('Game/Net/').kind === 'map' && grp('Game/Net/').count === 3 && grp('Game/Net/').entry?.match === '^Game/Net/' && grp('Game/Net/').entry?.filter === '<the Play Mode tests for this folder>' && grp('Docs2/').kind === 'map' && !groups.some((x) => x.folder === 'Game/Ui/')
+        && /Game\/Net\/ \(3 paths; /.test(out(prop)) && /add to engines\.unity\.play\.focus\.map: \{"match":"\^Game\/Net\/","filter":"<the Play Mode tests for this folder>"\}/.test(out(prop)) && /add to engines\.unity\.play\.focus\.skip: "\^Sim\/Fees\/"/.test(out(prop)), JSON.stringify({ out: out(prop).slice(0, 1500), groups })]);
+    const propRec = node(['harness/engine.mjs', 'play-plan', '--propose']);
+    await guard('2.96 (d14) without --paths or --branch --propose reads the paths the trains kept (the 6 from the run above)', () => [propRec.status === 0 && /Play Mode map gaps for unity \(the Play Mode stages of the last 7 days\): 6 path\(s\) in 2 folder\(s\)\./.test(out(propRec)) && /Game\/Net\/ \(4 paths/.test(out(propRec)), out(propRec).slice(0, 800)]);
     // ---- (A) end ----
   } finally {
     try { fs.rmSync(T, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep */ }

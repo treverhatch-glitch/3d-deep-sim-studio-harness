@@ -625,7 +625,7 @@ export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = 
     const um = unmappedPaths(ch, pf.map);
     const sk = pf.skip.length ? new Set(ignoreSplit(um, pf.skip).ignored) : new Set();
     const shown = um.slice(0, 5).map((p) => (sk.has(p) ? `${p} (play.focus.skip, in a batch with other paths)` : p));
-    return fullSel(`${um.length} changed path(s) match no play.focus.map entry: ${shown.join(', ')}${um.length > 5 ? ', ...' : ''}${pf.map.length ? '' : ' (play.focus has no map)'}`, { unmatched: um.slice(0, 5), unmatchedCount: um.length, ...bad });
+    return fullSel(`${um.length} changed path(s) match no play.focus.map entry: ${shown.join(', ')}${um.length > 5 ? ', ...' : ''}${pf.map.length ? '' : ' (play.focus has no map)'}`, { unmatched: um.slice(0, 5), unmatchedAll: um, unmatchedCount: um.length, ...bad });
   }
   if (!ff.filter) return fullSel('the filter is empty', bad);
   if (!PLAY_FILTER_SAFE.test(ff.filter)) return fullSel(`refused the filter "${ff.filter.slice(0, 120)}": only letters, digits, space and _ . ; | ~ = ! ( ) * - may reach the land command`, { refused: true, ...bad });

@@ -832,3 +832,9 @@ turn on `service.check` and run one `check` end to end, and only then `warm`.
   gets up to two short lines. `npm run engine -- test-cost [--engine <x>]` prints the long form: the 10 slowest tests
   with their share of the test time, tests that ran in two commands of one train, the shards with the most measured
   memory (`partStats[...].peakGb`) and the hand-backs of kind `ratchet` in the last 24 hours.
+- **Play Mode map gaps.** A land run whose Play Mode stage ran in full because paths match no `play.focus.map` entry
+  keeps all of those paths (`.studio/engine/<x>-play-gaps.jsonl`). The digest says how often that happened in 24 hours
+  and for which folders. `npm run engine -- play-plan --propose [--engine <x>] [--branch <b> | --paths a,b] [--json]`
+  groups the paths by folder (without `--branch` or `--paths`, the paths of the last 7 days) and proposes an entry for
+  each: `skip` when the rules tests already judge the folder (a `rules.focus` map entry or auto folder) or
+  `play.focus.skip` takes every path, else a `map` entry whose filter you fill in. Nothing is written to `studio/game.json`.
