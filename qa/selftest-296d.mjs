@@ -109,6 +109,73 @@ console.log(JSON.stringify({ r1: { posted: r1.posted, kind: r1.kind, why: r1.why
     const textB = String(posts()[0]?.body?.text || '');
     await guard('2.96 (d4) a progress command that fails is left out of the post, which is still posted with the rest', () => [
       posts().length === 1 && /Systems ON: 1 of 3/.test(textB) && !/Fees ported/.test(textB) && !/exit 3/.test(textB), JSON.stringify({ badProg, textB })]);
+
+    // ---- (2) the test-cost report ----
+    const trx = (rows) => `<?xml version="1.0" encoding="UTF-8"?>\r\n<TestRun id="x" xmlns="http://example.invalid/trx">\r\n<Results>\r\n${rows.map(([n, d]) => `  <UnitTestResult executionId="e" duration="${d}"\r\n    testName="${n}" outcome="Passed" />`).join('\r\n')}\r\n</Results>\r\n</TestRun>\r\n`;
+    const TRX = trx([['Game.Sim.FeesTests.Rounding', '00:34:36.5000000'], ['Game.Sim.MapNavTests.Costs &amp; Tolls', '00:13:36.0000000'], ['Game.Sim.FeesTests.Quick', '00:00:00.0120000']]);
+    const NUNIT = '<test-run><test-suite><test-case id="1" name="Rounding" fullname="Game.Sim.FeesTests.Rounding" duration="12.5" result="Passed"/><test-case name="Old" time="3"/></test-suite></test-run>';
+    const JUNIT = '<testsuite><testcase classname="Game.Sim.Ticks" name="Order" time="7.25"/><testcase name="Alone" time="0.5"/></testsuite>';
+    const parsed = probe(`import { parseTimes } from ${u('harness/rules-times.mjs')};
+console.log(JSON.stringify({ trx: parseTimes(${JSON.stringify(TRX)}), nunit: parseTimes(${JSON.stringify(NUNIT)}), junit: parseTimes(${JSON.stringify(JUNIT)}) }));`);
+    const has = (list, name, sec) => (list || []).some((x) => x.name === name && Math.abs(x.seconds - sec) < 0.001);
+    await guard('2.96 (d5) times are read from .trx (CRLF, attributes over two lines, &amp;), NUnit (duration or time) and JUnit (classname and name) with small regexes (fails before this fix: no test time was read from any result file)', () => [
+      has(parsed.trx, 'Game.Sim.FeesTests.Rounding', 2076.5) && has(parsed.trx, 'Game.Sim.MapNavTests.Costs & Tolls', 816) && has(parsed.trx, 'Game.Sim.FeesTests.Quick', 0.012) && parsed.trx.length === 3
+        && has(parsed.nunit, 'Game.Sim.FeesTests.Rounding', 12.5) && has(parsed.nunit, 'Old', 3) && has(parsed.junit, 'Game.Sim.Ticks.Order', 7.25) && has(parsed.junit, 'Alone', 0.5), JSON.stringify(parsed)]);
+
+    const stub = path.join(T, 'tests-stub.mjs');
+    fs.writeFileSync(stub, `import fs from 'node:fs'; import path from 'node:path';
+fs.mkdirSync(path.join('out', 'results'), { recursive: true });
+fs.writeFileSync(path.join('out', 'results', 'run.trx'), ${JSON.stringify(TRX)});
+console.log('  Passed Game.Sim.FeesTests.Rounding [3 ms]');
+`);
+    setEngines({ unity: { ...engineCfg().unity, rules: { test: `node "${fwd(stub)}"`, times: 'out/**/*.trx' } } });
+    fs.rmSync(path.join(S, '.studio', 'engine'), { recursive: true, force: true });
+    const shaR = g(R, 'rev-parse', 'port/main').stdout.trim();
+    const ran = probe(`import { rulesConfig, runRulesAt } from ${u('harness/engine-rules.mjs')};
+const cfg = rulesConfig('unity', { root: process.cwd() });
+const r = runRulesAt({ engine: 'unity', repo: ${JSON.stringify(fwd(R))}, sha: ${JSON.stringify(shaR)}, cfg, root: process.cwd(), id: 'train-296', useCache: false });
+console.log(JSON.stringify({ status: r.status, why: r.why }));`);
+    const kept = (() => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'engine', 'unity-times.json'), 'utf8')); } catch { return null; } })();
+    await guard('2.96 (d6) after a rules run the tests are kept for the day with the train and the command (fails before this fix: nothing was kept)', () => [
+      ran.status === 'pass' && kept?.runs?.length === 1 && kept.runs[0].train === 'train-296' && kept.runs[0].tests[0][0] === 'Game.Sim.FeesTests.Rounding' && kept.runs[0].tests[0][1] === 2076.5 && kept.runs[0].count === 3, JSON.stringify({ ran, kept })]);
+
+    // an old result file (older than the command) is never counted; a name used in two commands of one train is listed
+    const oldDir = path.join(T, 'old-checkout');
+    write(oldDir, 'out/old.trx', TRX);
+    const past = new Date(Date.now() - 3600000);
+    fs.utimesSync(path.join(oldDir, 'out', 'old.trx'), past, past);
+    const reportP = probe(`import fs from 'node:fs'; import path from 'node:path'; import { timesRead, recordTimes, costReport, costText, costDigestLines } from ${u('harness/rules-times.mjs')};
+const root = process.cwd();
+const stale = timesRead(${JSON.stringify(oldDir)}, 'out/*.trx', { since: Date.now() - 60000 }).length;
+const fresh = timesRead(${JSON.stringify(oldDir)}, 'out/*.trx', { since: 0 }).length;
+fs.rmSync(path.join(root, '.studio', 'engine', 'unity-times.json'), { force: true });
+const dirA = ${JSON.stringify(path.join(T, 'ck-a'))}; const dirB = ${JSON.stringify(path.join(T, 'ck-b'))}; const dirC = ${JSON.stringify(path.join(T, 'ck-c'))};
+const put = (d, n, rows) => { fs.mkdirSync(path.join(d, 'out'), { recursive: true }); fs.writeFileSync(path.join(d, 'out', 'r.trx'), rows.map(([t, s]) => '<UnitTestResult testName="' + t + '" duration="00:00:' + String(s).padStart(2, '0') + '.0000000" />').join('\\n')); };
+put(dirA, 'a', [['Fees.Rounding', 50], ['Fees.Other', 10]]);
+put(dirB, 'b', [['Fees.Rounding', 50], ['MapNav.Costs', 40]]);
+put(dirC, 'c', [['Fees.Rounding', 50]]);
+const g = 'out/*.trx';
+recordTimes(root, 'unity', { dir: dirA, train: 'tr1', command: 'rules.first', since: 0 });
+recordTimes(root, 'unity', { dir: dirB, train: 'tr1', command: 'Cat=Fees', since: 0 });
+recordTimes(root, 'unity', { dir: dirC, train: 'tr2', command: 'Cat=Fees', since: 0 });
+fs.writeFileSync(path.join(root, '.studio', 'engine', 'unity-rules.json'), JSON.stringify({ trees: {}, partStats: { 'Cat=Fees': { peakGb: 2.25 }, 'Cat=Move': { peakGb: 7 }, Rest: { seconds: 5 } } }));
+const r = await costReport(root, 'unity', { events: [] });
+const lines = await costDigestLines(root, { events: [] });
+console.log(JSON.stringify({ stale, fresh, r, text: costText(r), lines }));`);
+    const rp = reportP.r || {};
+    await guard('2.96 (d7) a result file older than the command is not counted (fails before this fix: a stale file from an earlier run would be)', () => [reportP.stale === 0 && reportP.fresh === 3, JSON.stringify({ stale: reportP.stale, fresh: reportP.fresh })]);
+    await guard('2.96 (d8) the long report lists the slowest tests with their share of the test time (Fees.Rounding 150 s of 200 s is 75%), the test that ran in two commands of one train (tr1, not tr2), the shards by measured memory (7 GB first), and zero ratchet hand-backs', () => [
+      rp.slowest?.[0]?.name === 'Fees.Rounding' && rp.slowest[0].seconds === 150 && rp.slowest[0].share === 75 && rp.slowest.length === 3 && rp.twice?.length === 1 && rp.twice[0].train === 'tr1' && rp.twice[0].name === 'Fees.Rounding' && rp.twice[0].commands.join() === 'rules.first,Cat=Fees'
+        && rp.heavy?.[0]?.filter === 'Cat=Move' && rp.heavy[0].peakGb === 7 && rp.heavy.length === 2 && rp.ratchets === 0 && /Hand-backs of kind ratchet in the last 24 hours: 0\./.test(reportP.text || '') && /75%\) Fees\.Rounding/.test(reportP.text || ''), JSON.stringify(reportP)]);
+    // the digest: the block is short and the whole digest stays under the cap
+    const digestP = probe(`import { buildDigest, MAX_WORDS } from ${u('harness/digest.mjs')};
+const d = await buildDigest({ events: [] });
+const block = d.text.split('\\n').filter((l) => /^Test cost/.test(l));
+console.log(JSON.stringify({ block, words: d.words, max: MAX_WORDS }));`);
+    await guard('2.96 (d9) the daily digest gets the test-cost block, at most 3 lines, pointing to npm run engine -- test-cost, and the digest stays under its 200-word cap', () => [
+      digestP.block?.length === 1 && /Test cost \(unity, 24 h\): slowest Rounding 2\.5 min \(75%\); 1 ran twice in a train; npm run engine -- test-cost/.test(digestP.block[0]) && digestP.words < digestP.max, JSON.stringify(digestP)]);
+    const cli = node(['harness/engine.mjs', 'test-cost', '--engine', 'unity']);
+    await guard('2.96 (d10) npm run engine -- test-cost --engine unity prints the long form', () => [cli.status === 0 && /Test cost for unity/.test(out(cli)) && /Slowest tests:/.test(out(cli)) && /Ran more than once in one train \(1\):/.test(out(cli)), out(cli).slice(0, 600)]);
     // ---- (A) end ----
   } finally {
     try { fs.rmSync(T, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep */ }

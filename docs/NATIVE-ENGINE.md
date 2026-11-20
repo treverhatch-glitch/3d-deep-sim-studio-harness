@@ -817,3 +817,18 @@ turn on `service.check` and run one `check` end to end, and only then `warm`.
   `task done --train --slice` does): its task stays open when it lands. `--off` removes the mark. Nothing else about the
   entry changes. It refuses when the task is not in that queue or its train is running with it. Same actors as `train auto`.
   Event `task.train.<x>.slice_marked`.
+
+
+## 2.96 (d): landings posted, what the tests cost, Play Mode gaps, a busy line
+
+- **A landing is posted by itself.** When an engine train lands a batch (`task.train.<x>.landed`) the Communicator posts
+  one message to the same webhook as the status: the tasks with their titles (8 at most, then "and n more"), how many
+  landed in the last 24 hours, the first line `engines.<x>.progress` prints (a command that fails is left out), and
+  `Systems ON: n of m` when `engines.<x>.switches` is set. It is on wherever a webhook is set;
+  `engines.<x>.announce: false` turns it off. A landing is posted once; only the Communicator posts it.
+- **`rules.times`** is the result file the test command writes with a time per test (a glob inside the test checkout;
+  `.trx`, NUnit or JUnit XML): `"times": "tools/SimTests/**/*.trx"`. Only files written since the command started are
+  read. The slowest 200 tests of each command are kept for 48 hours in `.studio/engine/<x>-times.json`. The daily digest
+  gets up to two short lines. `npm run engine -- test-cost [--engine <x>]` prints the long form: the 10 slowest tests
+  with their share of the test time, tests that ran in two commands of one train, the shards with the most measured
+  memory (`partStats[...].peakGb`) and the hand-backs of kind `ratchet` in the last 24 hours.

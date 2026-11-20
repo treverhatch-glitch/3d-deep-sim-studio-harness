@@ -189,12 +189,16 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   // (harness/workaround.mjs; the harness maintainer's queue, never a game task).
   let workMod = null; let workPts = []; let workLine = '';
   try { workMod = await import('./workaround.mjs'); workPts = await workMod.upgradesSeen({ events: ev, now, root }); workLine = workMod.workaroundDigestLine({ events: ev, now, points: workPts }); } catch { workLine = ''; }
-  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(canaryLine ? [canaryLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(researchLine ? [researchLine] : []), ...(workLine ? [workLine] : []), ...(delegLine ? [delegLine] : []), ...(autoLine ? [autoLine] : []), ...(auditLine ? [auditLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
+  // 2.96 (d): what the rules tests cost (harness/rules-times.mjs): at most 2 lines, the long form is a command.
+  let costLines = [];
+  try { let mroot = root; try { mroot = (await import('./worktree.mjs')).mainRoot(); } catch {} costLines = await (await import('./rules-times.mjs')).costDigestLines(mroot, { now, events: ev }); } catch { costLines = []; }
+  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(canaryLine ? [canaryLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(researchLine ? [researchLine] : []), ...(workLine ? [workLine] : []), ...(delegLine ? [delegLine] : []), ...(autoLine ? [autoLine] : []), ...(auditLine ? [auditLine] : []), ...costLines, ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
   // Under MAX_WORDS: drop list items from the end, then shorten the scorecard line.
   let items = [...need];
   let text = compose(items);
   if (words(text) >= MAX_WORDS && workLine && workMod) { workLine = workMod.workaroundDigestLine({ events: ev, now, points: workPts, brief: true }); text = compose(items); }
   if (words(text) >= MAX_WORDS && candLine) { candLine = `Allowlist candidates: ${cands.length} (npm run denials; never added automatically).`; text = compose(items); }
+  if (words(text) >= MAX_WORDS && costLines.length > 1) { costLines = costLines.slice(0, 1); text = compose(items); }
   while (words(text) >= MAX_WORDS && items.length > 1) { items = items.slice(0, -1); text = compose(items).replace(/Needs you \((\d+)\):/, `Needs you ($1; ${need.length - items.length} more: npm run digest -- --all):`); }
   if (words(text) >= MAX_WORDS) { line = line.split(' · ').slice(0, 3).join(' · '); text = compose(items); }
   const coreWords = words(text);

@@ -27,6 +27,7 @@ import { peakFromHistory, readUsedHistory } from './engine-ram.mjs';
 import { flagOf, isOff as off, numFiniteFirst as num, pushToOf, stdoutOf as out } from './helpers.mjs';
 import { matchAny } from './merge-lane.mjs';
 import { acquireHeavy, quietHolding } from './heavy.mjs';
+import { recordTimes } from './rules-times.mjs';
 
 const on = (v) => /^(1|true|yes|on)$/i.test(String(v ?? '').trim());
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
@@ -1165,6 +1166,7 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
         log(`[engine-rules] ${engine}: split of ${s.parts.length} part(s) on ${short(sha)}: ${plan.why}`);
         const w = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'rules-parts.mjs')], { input: JSON.stringify(job), encoding: 'utf8', windowsHide: true, maxBuffer: 256 * 1024 * 1024, timeout: cfg.timeoutMin * 60000 + 30000 });
         try { ran = JSON.parse(String(w.stdout || '').trim().split('\n').pop()); } catch { ran = null; }
+        if (ran) recordTimes(root, engine, { dir, train: id, command: parts.map((x) => x.filter).join('+'), since: t0 });
         if (!ran) log(`[engine-rules] ${engine}: the parallel runner gave no result (${lastLine(w) || `exit ${w.status}`}); the parts run in sequence`);
         else {
           for (const d of ran.decisions || []) log(`[engine-rules] ${engine}: ${d}`);
@@ -1194,6 +1196,7 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
         if (s.partKeys) { const gb = peakFromHistory(readUsedHistory(root), g0, Date.now()); if (gb > 0) gs.gb = gb; }
         const pg = cfg.peak ? peakRead(dir, cfg.peak) : null;
         if (pg) gs.peakGb = pg;
+        recordTimes(root, engine, { dir, train: id, command: part.filter, since: g0 });
         groups.push(gs);
         texts.push(`${rp.stdout || ''}${rp.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd());
         if (rp.error) { if (s.shards || cfg.peak) keepGreens(groups); return { status: 'error', why: rp.error.code === 'ETIMEDOUT' ? timedOut(0, part.filter) : `the rules check could not run: ${rp.error.code || rp.error.message}`, ms: Date.now() - t0, mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce: 1 }; }
@@ -1209,6 +1212,7 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
     const r = runLimitedSync(s.command, { cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: cfg.timeoutMin * 60000, env: runEnv });
     const ms = Date.now() - t0;
     // 2.95: the peak the test command wrote (rules.peak), kept per filter ('(full run)' for the whole command).
+    recordTimes(root, engine, { dir, train: id, command: statOf, since: t0 });
     const pg = cfg.peak ? peakRead(dir, cfg.peak) : null;
     if (pg) { keepParts(root, engine, [{ key: null, filter: statOf, peakGb: pg }]); log(`[engine-rules] ${engine}: ${statOf} took ${pg} GB at its peak (rules.peak)`); }
     const text = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd();
