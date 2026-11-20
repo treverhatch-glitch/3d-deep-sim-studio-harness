@@ -5490,6 +5490,14 @@ if (inShard('selftest-297a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.97 (e): a red rules.first is narrowed by the words of its failure, with no setting; rules show says how.
+if (inShard('selftest-297e')) {
+  const dir = copyRepo();
+  const { selftest297E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-297e.mjs')).href);
+  await selftest297E({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
