@@ -18,35 +18,12 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-346 — timing checks fail under load in the online runs · open
 - **Evidence:** 16 November, four runs queued at once: "task lane gives each builder its own folder", "the supervisor starts a fresh agent per task", "2.77.0 (p, P9.6)" and "2.69.0 (q, 1)" each failed once and passed on the re-run of the failed job. Each re-run costs about 40 minutes.
 - **Workaround:** re-run the failed job and note it on the pull request. Do not queue four runs at once.
+- **2.97:** `290b` "the second gate's script moves the target" failed once among 11 units run together on a 2-core machine with other tests running, and passed three times out of three alone.
 - **2.96:** the two supervisor-window checks ("two builders without lanes never run at once", "agent names never repeat across supervisor restarts") failed on Windows in the first online run of 2.95 and passed on the re-run; they now wait until one agent is live and then watch a window.
 - **2.95:** "with --lanes auto, each lane gets its own agent holding that folder" failed in two of the three online runs of 2.94 (Windows) and passed on the re-run each time.
 - **2.94:** seen once more, on main's run after the 2.93 merge, on Windows: "a ping starts STUDIO_DIRECTOR_CMD once, then waits out the cooldown" (starts=0). It passed on the same tree in the pull request's run an hour earlier.
 - **2.92:** "task lane gives each builder its own folder" now waits for the thing itself. The same change to "the supervisor starts a fresh agent per task" was withdrawn (the next check, "--lanes auto", then failed 2 runs in 8: only one lane got its agent, even with a 90 s wait; cause not found). Left: that check, `2771a`, the tester drive, `290b` second gate, `277p` "someone moves main", "two builders without lanes", "--lanes auto".
 - **2.91:** three were given a hand-shake in place of a clock (`269q`, `2601m`, `277p` B-before-A). Left: the two supervisor-window checks, `2771a`, the tester drive, and two seen under load on 17 November (`290b` second gate, `277p` "someone moves main").
-
-### P-354 — compile clashes were found only when the train started · fixed 2.92
-- **Evidence:** a studio's two trains of 16 to 17 November handed back 6 of 12 branches as "does not compile together with ...", hours after each was queued.
-- **Fix:** the same compile search runs at `task done --train`, against the target and the branches queued ahead. A clash is told at once; the branch is queued and kept apart from its partner. `qa/selftest-292a.mjs` B.
-
-### P-355 — the check before queueing judged the branch alone · fixed 2.92
-- **Evidence:** a branch passed `preQueue`, three branches landed, the merged tree failed the same test in the train.
-- **Fix:** the check runs on the branch merged with the target, and again when a train starts on another tip. `292a` A.
-
-### P-356 — a red compile in the engine's own log sent the search to the wrong branch · fixed 2.92 (needs `engines.<x>.logs`)
-- **Evidence:** an editor compile error (a namespace its assembly did not reference) in a 3-branch land run; the search tried a different branch alone first.
-- **Fix:** compiler error lines from the land output and the engine's logs name the branch that changed the file. `292a` C.
-
-### P-357 — a target red by itself was nobody's task · fixed 2.92
-- **Evidence:** "the rules check is red on the target itself", train after train.
-- **Fix:** one `Fix:` task per distinct red, shown in `train status`. `qa/selftest-292b.mjs`.
-
-### P-358 — the maintainer planned a tool the harness already had, and gave a wrong setting in a note · process
-- **Evidence:** 17 November: a "units for this change" command was briefed although `npm run selftest:changed` exists (stopped before it landed); a note for a studio named one folder for `rules.ignore` where its land script writes two (corrected before anyone applied it).
-- **Rule:** before building a maintainer tool, search `package.json` and docs/RELEASE.md for it. Before naming a studio's paths in a note, read the script that writes them, not a shortened diff line.
-
-### P-359 — a path taken from a URL broke the red-target task on Windows · fixed 2.92 (before the merge)
-- **Evidence:** pull request 94, online run: `292b` red on Windows ("no fix task was filed: ... loader"), and the 2.35 rule "no script finds its own path from a URL pathname" red on every system, naming `harness/engine-target-red.mjs`. The runner's temp folder has `~` in its name, which a URL writes as `%7E`.
-- **Fix:** `fileURLToPath`. The 2.35 rule runs in the self-test only, so it was not among the static checks run before the push; the maintainer's list now includes its unit.
 
 ### P-360 — a compile command that outlives its time limit keeps running on Windows · fixed 2.93 (engine commands)
 - **Evidence:** the same run: `292a` crashed on Windows (EPERM removing `.studio/tmp`) right after the check whose compile stand-in runs past the queue door's time limit. The time-out ends the shell, not the command below it, which keeps its checkout folder open until it ends.
@@ -107,7 +84,7 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Evidence:** found while writing `295c`: the `git -C <dir> ...` rules a start builds for agy and for Claude hold the lane's path unquoted. Whether the real tools match them against a quoted path is not known. A studio path without spaces is not affected.
 - **Workaround:** keep the studio in a path without spaces.
 
-### P-374 — nobody had measured what a land run or a shard takes · fixed 2.96 (sampling), open until a studio's first samples are read
+### P-374 — nobody had measured what a land run or a shard takes · fixed 2.96 (sampling); a studio's first samples were read on 20 November (2.97)
 - **Evidence:** a live studio, 19 and 20 November: heavy work admitted by slots and fixed claims; a sampler made by hand summed every test process on the machine and blamed the wrong test (11.5 GB); the test run's own per-fixture table showed one fixture at 14.2 GB. The land run waited for 18.8 GB, the size of a test stage it skips when the rules are green.
 - **Fix:** every run's own process tree is sampled; a cost per job kind; `machine.admit: "measured"`. `qa/selftest-296a.mjs`. The first Windows helper (four `Get-CimInstance` queries a sample) wrote no sample at all in the online run: see P-370. It now uses two `[wmisearcher]` queries and no cmdlet; on an online Windows machine it found a 300 MB grandchild, and a sample costs about 0.1 s.
 
@@ -126,6 +103,30 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-378 — upgrades were merged while a train was running, twice from a branch · fixed 2.96
 - **Evidence:** a live studio, 18 November: three upgrades during trains; two took a release branch before its online checks had finished, one 26 minutes after a real fault was fixed on it.
 - **Fix:** `npm run upgrade` refuses while a train runs and says when the ref is not main. `qa/selftest-296e.mjs`.
+
+### P-379 — a rules green was judged by a lane copy's working files and lost without a word · fixed 2.97
+- **Evidence:** a live studio, 20 November: a train's sharded check was green for four lanes; a porter session then edited the lane copy of one of them; the land run was not told, ran the whole rules stage again (about 50 minutes), and `rules.ahead` started nothing. No line said why. A lane copy is a checkout of the lane's branch, and the land run never sees its uncommitted files.
+- **Fix:** inputs from a lane copy are read at the lane's commit. A green that is not used and a check ahead that does not start each say why; `rules show` prints the check ahead's last outcome. A branch landed by name that moved after the check loses the green, on purpose. `qa/selftest-297a.mjs`.
+
+### P-380 — the union merge refused without saying why · fixed 2.97
+- **Evidence:** the same day: two lanes were deferred "conflicts ... in" two files both listed in `merge.union`. The rule had run and refused: in one file both lanes lengthen the same single line (a quoted list), and the rule took added lines only. The overseer read the silence as "the rule does not reach the batch's conflict check".
+- **Fix:** a line both sides only lengthen (one insertion each) is merged, ours' text then theirs'; a refusal names the file and line in the lane's `why`. `qa/selftest-297b.mjs`.
+
+### P-381 — a land run waited for the memory of a stage it skips · fixed 2.97
+- **Evidence:** the learned floor was 18.8 GB, from land runs that ran the rules stage and from the whole machine's used memory. A land run told the rules are green peaks near 10 GB in its own tree. With 14 GB always in use, 18.8 GB free never came: refused after 35 minutes. The overseer tuned the floor by hand.
+- **Fix:** the floor is the need of the kind about to run, from that kind's passed sampled runs; the owner's setting and the tuned floor still win. `qa/selftest-297c.mjs`. The old whole-machine learning stays as the fallback for a kind with no sampled run and for a studio with sampling off.
+
+### P-382 — a run too short to sample was stored as a peak of 0 GB · fixed 2.97
+- **Evidence:** 16 of 41 shards finish inside one 10 s sample interval; each was stored as `gb: 0`. With measured admission on, a 0 would admit anything.
+- **Fix:** stored as unknown (`gb: null`, `short: true`); old entries read the same way; admission falls back to the plan's number and says "too short to sample". `qa/selftest-297c.mjs`.
+
+### P-383 — a train that waited on a drain ran the old release over the new files; the upgrade merged a stale ref · fixed 2.97
+- **Evidence:** 20 November: the overseer drained to upgrade; a train process had started 30 seconds earlier and waited in memory; after `drain off` it took its lock and ran with 2.95 modules over 2.96 files (its 41 shard runs wrote no samples). The 2.96 guard reads train locks, and a waiting train holds none. The upgrade merged `origin/<branch>` as last fetched hours before: a commit already replaced, whose Windows checks then failed.
+- **Fix:** no train starts during a drain and `drain off` starts the waiting one; a train compares the harness it loaded with the one on disk as it takes its lock and starts again once; `--merge <remote>/<branch>` fetches first and a branch other than main needs `--not-main`. `qa/selftest-297d.mjs`. Untested on Windows: the detached restart.
+
+### P-384 — a lane-live window of 0 still called a lane "in use" for a few milliseconds · fixed 2.97 (cause not proven)
+- **Evidence:** pull request 99: on Windows `293b` "record" failed in both full online runs and passed in eight runs alone or after `290b`. The start after a session's end did not get the free pool name. `laneLive` read the clock, asked git, then compared the folder's time: with `STUDIO_LANE_LIVE_MIN=0` a write in between gave a time later than the clock, and "live". No run caught the state itself.
+- **Fix:** a window of 0 means none (`harness/worktree.mjs`); the check prints the lane folder's age when it fails, so a repeat shows the evidence.
 
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
@@ -479,3 +480,9 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **P-351** (fixed 2.91): Two stops, and neither resume command named the other
 - **P-352** (fixed 2.91 (bounded)): A session reading its task's files was ended as stalled
 - **P-353** (process): The maintainer removed test scratch folders while other builds were running
+- **P-354** (fixed 2.92): compile clashes were found only when the train started
+- **P-355** (fixed 2.92): the check before queueing judged the branch alone
+- **P-356** (fixed 2.92): a red compile in the engine's own log sent the search to the wrong branch
+- **P-357** (fixed 2.92): a target red by itself was nobody's task
+- **P-358** (process): the maintainer planned a tool the harness already had, and gave a wrong setting in a note
+- **P-359** (fixed 2.92): a path taken from a URL broke the red-target task on Windows

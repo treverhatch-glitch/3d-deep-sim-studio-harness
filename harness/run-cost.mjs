@@ -16,7 +16,7 @@ import { ramFile } from './engine-ram.mjs';
 import { claimOf } from './heavy-budget.mjs';
 import { sampleCpuBusy } from './machine.mjs';
 import { readFreeGb, floorGbOf } from './rules-parts.mjs';
-import { sleepSync } from './helpers.mjs';
+import { sleepSync, numSplit as num } from './helpers.mjs';
 import { emitEvent } from './event.mjs';
 
 const r1 = (x) => Math.round(x * 10) / 10;
@@ -27,6 +27,10 @@ const KEEP_DAYS = 14;
 const PAIR_RUNS = 3;
 const RETRY_HOURS = 24;
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+const avg = (xs) => { const m = mean(xs.filter(Number.isFinite)); return m === null ? null : r1(m); };
+/** A run too short for one sample (2.97): no peak is known. 2.96 stored it as 0 GB with no CPU and no peak time. */
+export const unknownRun = (r) => r.short === true || r.gb == null || (r.gb === 0 && r.cpu == null && r.when == null);
+export const shortText = (minutes) => `too short to sample${Number.isFinite(minutes) ? ` (${minutes} min)` : ''}`;
 
 /** studio/game.json "machine", with defaults. */
 export function machineCfg(root) {
@@ -145,7 +149,8 @@ export function foldRuns(root, engine, { now = Date.now(), emit = emitEvent } = 
       const [a0, a1] = span(run);
       const beside = [...new Set(runs.filter((o) => o !== run && o.meta.pid !== run.meta.pid && span(o)[0] < a1 && (runAlive(o, now) ? now : span(o)[1]) > a0).map((o) => o.meta.kind))].sort();
       const list = (e.kinds[run.meta.kind] || []).filter((x) => x.id !== run.id);
-      list.push({ id: run.id, at: s.at, gb: s.peakGb, cpu: s.cpuPct, minutes: s.minutes, when: s.when, code: s.code, ...(beside.length ? { with: beside } : {}) });
+      const short = !run.rows.length;
+      list.push({ id: run.id, at: s.at, gb: short ? null : s.peakGb, ...(short ? { short: true } : {}), cpu: s.cpuPct, minutes: s.minutes, when: s.when, code: s.code, ...(beside.length ? { with: beside } : {}) });
       e.kinds[run.meta.kind] = list.slice(-KEEP_RUNS);
       seen.add(run.id);
       changed = true;
@@ -176,16 +181,36 @@ export function foldRuns(root, engine, { now = Date.now(), emit = emitEvent } = 
   return e;
 }
 
-/** A kind's cost from its kept runs: { kind, runs, measured, peakGb, needGb, cpuPct, minutes, when } or null. */
+/**
+ * A kind's cost from its kept runs: { kind, runs, measured, peakGb, needGb, passPeakGb, passN, cpuPct, minutes, when } or
+ * null. A run too short to sample is unknown: it adds no peak. A kind with only such runs has unknown: true and no peak.
+ */
 export function kindCost(entry, kind) {
   const list = (entry?.kinds?.[kind] || []).slice(-PEAK_RUNS);
   if (!list.length) return null;
-  const peak = Math.max(...list.map((r) => Number(r.gb) || 0));
-  const top = list.find((r) => Number(r.gb) === peak);
+  const known = list.filter((r) => !unknownRun(r));
   const passed = list.filter((r) => r.code === 0);
-  const cpu = mean(list.map((r) => r.cpu).filter(Number.isFinite));
-  const mins = passed.map((r) => r.minutes).filter(Number.isFinite);
-  return { kind, runs: list.length, measured: passed.length > 0 && peak > 0, peakGb: peak, needGb: r1(peak + Math.max(0.5, peak * 0.1)), cpuPct: cpu === null ? null : r1(cpu), minutes: mins.length ? r1(mean(mins)) : null, when: top?.when || null };
+  if (!known.length) return { kind, runs: list.length, unknown: true, measured: false, peakGb: null, needGb: null, passPeakGb: null, passN: 0, cpuPct: null, minutes: avg(list.map((r) => r.minutes)), when: null };
+  const peak = Math.max(...known.map((r) => Number(r.gb)));
+  const passedKnown = known.filter((r) => r.code === 0);
+  return { kind, runs: list.length, measured: passedKnown.length > 0 && peak > 0, peakGb: peak, needGb: r1(peak + Math.max(0.5, peak * 0.1)), passPeakGb: passedKnown.length ? Math.max(...passedKnown.map((r) => Number(r.gb))) : null, passN: passedKnown.length, cpuPct: avg(known.map((r) => r.cpu)), minutes: avg(passed.map((r) => r.minutes)), when: known.find((r) => Number(r.gb) === peak)?.when || null };
+}
+
+/**
+ * 2.97: the free RAM a land run of `kind` waits for, from that kind's own passed sampled runs: the peak of the last
+ * ones plus STUDIO_ENGINE_RAM_MARGIN_GB (1.5), at least STUDIO_ENGINE_RAM_MIN_GB (4). No kind: the heaviest land kind
+ * measured, and the text says so. { gb, kind, n, from } or null (no such run, or STUDIO_ENGINE_RAM_RUNS=0).
+ */
+export function landNeed(engine, kind, { root, env = process.env } = {}) {
+  if (!(num(env.STUDIO_ENGINE_RAM_RUNS, 3) > 0)) return null;
+  const entry = (readJson(ramFile(root), {}) || {})[engine];
+  const margin = Math.max(0, num(env.STUDIO_ENGINE_RAM_MARGIN_GB, 1.5));
+  const min = Math.max(0, num(env.STUDIO_ENGINE_RAM_MIN_GB, 4));
+  const one = (k) => { const c = kindCost(entry, k); return c?.passN > 0 ? { kind: k, n: c.passN, gb: Math.max(min, Math.ceil((c.passPeakGb + margin) * 10) / 10), peak: c.passPeakGb } : null; };
+  const all = kind ? [one(kind)] : Object.keys(entry?.kinds || {}).filter((k) => k.startsWith('land')).map(one);
+  const top = all.filter(Boolean).sort((x, y) => y.gb - x.gb)[0];
+  if (!top) return null;
+  return { ...top, from: `${kind ? '' : 'no kind given, so the heaviest land kind measured: '}need of ${top.kind} (peak of its last ${top.n} passed run${top.n > 1 ? 's' : ''} plus ${margin} GB)` };
 }
 
 /**
@@ -197,13 +222,13 @@ export function admitPlan(f) {
   const back = (why) => ({ decided: false, why: `${why}: today's rule decides` });
   const L = f.label || f.kind;
   const need = Number(f.handGb) > 0 ? Number(f.handGb) : f.own?.measured ? f.own.needGb : null;
-  if (need === null) return back(`${L} has no measured peak yet (this run measures it)`);
+  if (need === null) return back(f.own?.unknown ? `${L} is ${shortText(f.own.minutes)}, so it has no measured peak` : `${L} has no measured peak yet (this run measures it)`);
   if (!Number.isFinite(f.freeGb)) return back('free RAM is not known');
   let grow = 0;
   const growing = [];
   for (const r of f.running || []) {
     const rl = `${r.label || r.kind}`;
-    if (!r.cost?.measured) return back(`${rl} is running and has no measured peak yet`);
+    if (!r.cost?.measured) return back(r.cost?.unknown ? `${rl} is running and is ${shortText(r.cost.minutes)}, so it has no measured peak` : `${rl} is running and has no measured peak yet`);
     if (r.ageMs > Math.max(3 * (r.everyMs || 10000), 60000)) return back(`${rl}'s last sample is ${Math.round(r.ageMs / 1000)} s old`);
     if (r.nowGb > r.cost.needGb) return back(`${rl} uses ${r.nowGb} GB now, more than its measured ${r.cost.needGb} GB: the number looks wrong`);
     const g = r1(r.cost.needGb - r.nowGb);
@@ -287,7 +312,7 @@ export function runningLines(root, now = Date.now()) {
   const entries = {};
   return liveRuns(root, now).map((r) => {
     const c = kindCost((entries[r.engine] = entries[r.engine] || foldRuns(root, r.engine, { now })), r.kind);
-    return `Running ${r.label}: ${r.nowGb} GB and ${r.cpuPct ?? '?'}% CPU now, ${r.peakGb} GB at most so far; reservation ${c?.measured ? `${c.needGb} GB (peak ${c.peakGb} GB of its last ${c.runs} run(s) plus margin)` : 'not measured yet (today\'s rule)'}`;
+    return `Running ${r.label}: ${r.nowGb} GB and ${r.cpuPct ?? '?'}% CPU now, ${r.peakGb} GB at most so far; reservation ${c?.unknown ? shortText(c.minutes) : c?.measured ? `${c.needGb} GB (peak ${c.peakGb} GB of its last ${c.runs} run(s) plus margin)` : 'not measured yet (today\'s rule)'}`;
   });
 }
 
@@ -298,7 +323,8 @@ export function costLines(root, engine, prefixes = ['rules', 'land']) {
   const lines = [`measured admission: ${cfg.measured ? 'on' : 'off'} (studio/game.json machine.admit "measured"); CPU cap ${cfg.cpuCapPct}%; samples ${cfg.sample ? `every ${cfg.everyMs / 1000} s` : 'off'}`];
   for (const kind of Object.keys(e.kinds).filter((k) => prefixes.some((p) => k === p || k.startsWith(`${p} `))).sort()) {
     const c = kindCost(e, kind);
-    if (c) lines.push(`  ${kind}: peak ${c.peakGb} GB (reserves ${c.needGb} GB${c.measured ? '' : '; no run passed yet, so not used'}), CPU ${c.cpuPct ?? '?'}%, ${c.minutes ?? '?'} min, peak ${c.when === 'throughout' ? 'throughout' : `at the ${c.when || '?'}`}; ${c.runs} run(s)`);
+    if (c?.unknown) lines.push(`  ${kind}: ${shortText(c.minutes)}, no peak known; ${c.runs} run(s)`);
+    else if (c) lines.push(`  ${kind}: peak ${c.peakGb} GB (reserves ${c.needGb} GB${c.measured ? '' : '; no run passed yet, so not used'}), CPU ${c.cpuPct ?? '?'}%, ${c.minutes ?? '?'} min, peak ${c.when === 'throughout' ? 'throughout' : `at the ${c.when || '?'}`}; ${c.runs} run(s)`);
   }
   for (const [k, p] of Object.entries(e.pairs)) lines.push(`  not run together: ${k} until ${new Date(p.stoppedAt + RETRY_HOURS * 3600000).toISOString().slice(0, 16)} UTC (${p.why})`);
   return lines;

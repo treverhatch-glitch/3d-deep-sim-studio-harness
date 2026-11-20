@@ -459,7 +459,7 @@ export function heldClaim(root, env = process.env) {
  * The claim must fit the last scan's free RAM, GPU and CPU, and a slot be free; waiters queue (a landing first). 2.96
  * (a) measure { engine, kind }: measured admission (run-cost.mjs) replaces the claim's RAM/CPU and the floors.
  */
-export function acquireHeavy(root, label, { log = () => {}, env = process.env, owner = null, freemem = undefined, kind = 'heavy', claim: givenClaim = null, machine = undefined, ramGb, vramGb, gpuOnly, minFreeGb = undefined, waitMin = undefined, engine = null, measure = null } = {}) {
+export function acquireHeavy(root, label, { log = () => {}, env = process.env, owner = null, freemem = undefined, kind = 'heavy', claim: givenClaim = null, machine = undefined, ramGb, vramGb, gpuOnly, minFreeGb = undefined, floorWhy = null, waitMin = undefined, engine = null, measure = null } = {}) {
   const profileNow = () => { try { return machineProfile(root, { env, machine }); } catch { return null; } };
   let profile = profileNow();
   // The slot count as it stands now (heavySlotsAt: the main checkout's .env counts too), looked at again each poll.
@@ -511,7 +511,8 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   // A Unity editor run (every Unity kind) waits for a free-RAM floor (STUDIO_UNITY_MIN_FREE_GB, 12, never above 60% of the RAM); minFreeGb (heavy.mjs wait/run --min-free-gb) asks for one on any kind.
   const explicitFloor = minFreeGb !== undefined && minFreeGb !== null && minFreeGb !== '';
   const floorCfg = explicitFloor ? unityMinFreeGb({ env: { ...env, STUDIO_UNITY_MIN_FREE_GB: String(minFreeGb) }, profile }) : isUnityKind(firstClaim.kind || kind) ? unityMinFreeGb({ env, profile }) : { gb: 0 };
-  const floorVar = explicitFloor ? '--min-free-gb' : 'STUDIO_UNITY_MIN_FREE_GB';
+  // floorWhy (a land run's own number, engine-tracks.mjs engineFloor) says where the floor came from; "need of <kind>" reads as a need.
+  const floorText = `${floorCfg.gb} GB ${/^need of/.test(floorWhy || '') ? floorWhy : `floor (${floorWhy || (explicitFloor ? `--min-free-gb ${minFreeGb}` : floorCfg.why)})`}`;
   let floor = { low: false };
   let floorTold = 0;
   let md = null;
@@ -564,7 +565,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
       }
       if (mine) break;
       // Only the free-RAM floor holds it back: wait for memory, then "not run" (never a red) on timeout.
-      const floorLine = floor.low ? `free RAM is ${floor.freeGb} GB${floor.src ? ` (${floor.src})` : ''}, under the ${floorCfg.gb} GB floor (${floorVar === '--min-free-gb' ? `--min-free-gb ${minFreeGb}` : floorCfg.why})` : '';
+      const floorLine = floor.low ? `free RAM is ${floor.freeGb} GB${floor.src ? ` (${floor.src})` : ''}, under the ${floorText}` : '';
       if (floor.low && adm.ok && !ram.low) {
         if (Date.now() - t0 >= waitMs) {
           throw Object.assign(new Error(`[heavy] NOT RUN ${label}: ${floorLine}, and it stayed there for ${span(Date.now() - t0)} (the wait limit: --timeout-min or STUDIO_HEAVY_WAIT_MIN). Not a failure of the work: it did not start, so nothing was tested. Close what holds the memory (a web verify's test workers, a browser playtest, an open editor) or run it again later; STUDIO_UNITY_MIN_FREE_GB=0 turns the floor off.`), { code: 'HEAVY_BUSY', floor: true, notRun: 'ram-floor', freeGb: floor.freeGb, floorGb: floorCfg.gb, holders });
@@ -595,7 +596,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   const waitedMs = Date.now() - t0;
   if (gameLanding) clearTrainWait(root); // the train has its slot (not an engine land's take)
   if (toldAt) log(`[heavy] ${label} got the machine:heavy lock after ${Math.round(waitedMs / 1000)} s`);
-  if (floorCfg.gb > 0) log(`[heavy] ${label}: free RAM ${floor.freeGb ?? '?'} GB, over the ${floorCfg.gb} GB floor (${floorVar === '--min-free-gb' ? `--min-free-gb ${minFreeGb}` : floorCfg.why})`);
+  if (floorCfg.gb > 0) log(`[heavy] ${label}: free RAM ${floor.freeGb ?? '?'} GB, over the ${floorText}`);
   if (adm.line) log(`[heavy] ${label}: ${adm.line}`);
   // One line naming the area a mostly-GPU job took and why (heavy-budget.mjs gpuAreaClaim).
   if (claim?.areaWhy) log(`[heavy] ${label} took ${claim.areaWhy}`);

@@ -48,6 +48,7 @@ import { checkBreaker, isFailureNote, reasonKey, unblockTask } from './breaker.m
 import { parkIfOwnerOnly, ownerStepOfChecks, ownerStepForHandBack } from './owner-only.mjs';
 import { canaryEnd, isCanary, recordCanary, modelFor } from './canary.mjs';
 import { claimActive, claimOwner } from './busy.mjs';
+import { restartSelf as restartTrain, drainLine } from './train-gate.mjs';
 import { startSummary, carryForward } from './carry.mjs';
 import { openPending, readPending } from './pending-review.mjs';
 import { isDecider, propose, SIZE_CAP } from './proposed.mjs';
@@ -1315,8 +1316,10 @@ export function trainDeps(busyMod, { forDone = false } = {}) {
     // ONE fix task per test the flake triager quarantined (harness/flakes.mjs; the board dedupes by title).
     fileFlakeTask: ({ title, test, label }) => addTask({ title, role: 'builder', priority: 'P1', agent: 'train', meta: { type: 'bug', promoted: true, origin: 'harness', flake: { test, label } } }),
     fileRescue: ({ task, n, why }) => addTask({ title: `Rescue ${task}: handed back ${n} times`, role: 'producer', priority: 'P0', agent: 'train', meta: { promoted: true, origin: 'harness', handBackCap: { task, n, why: String(why || '').slice(0, 300) } } }),
+    // 2.97 (d): no train starts during a drain; one that waited while the harness changed starts again (not task done's own).
+    drained: () => drainLine(),
     ...(forDone ? {} : {
-      waitForDrain: () => busyMod.waitForDrain(),
+      restart: () => restartTrain(),
       markRunning: (t, a) => { busyMod.markDoneRunning(t, a).catch(() => {}); },
       clearRunning: (t) => { busyMod.clearDoneRunning(t).catch(() => {}); },
     }),
@@ -1904,9 +1907,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const sub = arg1 || 'status';
     if (sub === 'on' || sub === 'off') {
       const r = await b.setDrain(sub === 'on', typeof flags.by === 'string' ? flags.by : process.env.STUDIO_LOCK_OWNER || 'human', typeof flags.why === 'string' ? flags.why : '');
-      emitEvent({ type: 'studio.drain', agent: r.by, to: 'producer', msg: `Drain ${sub} (${r.by})${sub === 'on' ? ': new task done landings wait; running ones finish' : ': landings resume'}` });
+      emitEvent({ type: 'studio.drain', agent: r.by, to: 'producer', msg: `Drain ${sub} (${r.by})${sub === 'on' ? ': no new train starts and new task done landings wait; running ones finish' : ': trains and landings resume'}` });
       const run = await b.runningDones();
-      console.log(`Drain ${sub}.${sub === 'on' ? ` ${run.length} done(s) still running${run.length ? `: ${run.map((x) => x.task).join(', ')}` : ''}; npm run task -- drain wait blocks until none.` : ''}`);
+      console.log(`Drain ${sub}.${sub === 'on' ? ` No new train starts. ${run.length} done(s) still running${run.length ? `: ${run.map((x) => x.task).join(', ')}` : ''}; npm run task -- drain wait blocks until none.` : ''}`);
+      // 2.97 (d): queued lanes get their train from the usual starter (train-gate.mjs drainResume).
+      if (sub === 'off') { const k = await (await import('./train-gate.mjs')).drainResume(mainRoot(), { by: r.by }); if (k) console.log(k); }
       process.exit(0);
     }
     if (sub === 'wait') {
@@ -2222,17 +2227,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       if (trainOn() && lb && unmerged(lb) > 0) process.exit(await queueLaneForTrain(targetId, flags, noopFlag, { kick: true }));
     }
     const busyMod = await import('./busy.mjs');
-    { const w = await busyMod.waitForDrain(); if (!w.ok) { console.error(w.message); process.exit(1); } }
+    // In a lane copy with commits to land, task done is a one-lane merge train (harness/train.mjs): main moves only
+    // after a green full verify of the tree it ends at. STUDIO_TRAIN=off, --force, or no own commits: the old path (deliver).
+    const { trainOn } = await import('./train.mjs');
+    let laneBranch = '';
+    try { laneBranch = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim(); } catch {}
+    const viaTrain = inLaneCopy() && trainOn() && !flags.force && !flags['accepted-by'] && laneBranch && unmerged(laneBranch) > 0;
+    // 2.97 (d): its own train does not start during a drain (refused at once); the old path still waits for drain off.
+    if (viaTrain) { const dl = await drainLine('train'); if (dl) { console.error(`${dl} Nothing was closed: run task done ${targetId} again after drain off.`); process.exit(3); } }
+    else { const w = await busyMod.waitForDrain(); if (!w.ok) { console.error(w.message); process.exit(1); } }
     await busyMod.markDoneRunning(targetId, whoAmI(flags)).catch(() => {});
     emitEvent({ type: 'task.done.start', agent: whoAmI(flags), task: targetId, msg: `${targetId}: task done started`, meta: { at: Date.now() } });
     let done;
     try {
-      // In a lane copy with commits to land, task done is a one-lane merge train (harness/train.mjs): main moves only
-      // after a green full verify of the tree it ends at. STUDIO_TRAIN=off, --force, or no own commits: the old path (deliver).
-      const { trainOn } = await import('./train.mjs');
-      let laneBranch = '';
-      try { laneBranch = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim(); } catch {}
-      const viaTrain = inLaneCopy() && trainOn() && !flags.force && !flags['accepted-by'] && laneBranch && unmerged(laneBranch) > 0;
       // A tier C lane (harness code, protected files, deleted tests or regressions, irreversible files, upgrade merges)
       // lands only through the merge train after a person releases it. STUDIO_TRAIN=off, --force and --accepted-by take
       // the old path, which has no tiers, so they must not carry a tier C lane past that hold.
@@ -2302,6 +2309,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(2);
     }
     const tr = await import('./train.mjs');
+    // 2.97 (d): a train command during a drain ends at once, before it detaches or waits (a dry run still plans).
+    if ((!arg1 || arg1 === 'run') && !flags.status && !flags['dry-run'] && flags.unity !== 'status') {
+      const dl = await (await import('./train-gate.mjs')).drainLine();
+      if (dl) { console.error(dl); process.exit(3); }
+    }
     // From an agent's shell the train runs detached and this command follows it (harness/train-detach.mjs;
     // STUDIO_TRAIN_DETACH auto|on|off, --detach / --foreground).
     if ((!arg1 || arg1 === 'run') && !flags.status) {
@@ -2325,7 +2337,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const r = await ut.runUnityTrain({ engine: trainEng, root: mainRoot(), ...(typeof flags.only === 'string' ? { only: flags.only } : {}), ...(trainTag ? { tag: trainTag } : {}), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), by: typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human', waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
       (r.ok ? console.log : console.error)(r.message);
       console.log(JSON.stringify({ unityTrain: r.id, engine: trainEng, landed: r.landed, dropped: r.dropped, deferred: r.deferred, runs: r.runs ?? 0, ...(r.refused ? { refused: r.refused } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
-      process.exit(r.ok ? 0 : r.refused ? 3 : 1);
+      process.exit(r.ok ? 0 : r.refused || r.drained || r.notRun ? 3 : 1);
     }
     if (arg1 === 'status' || flags.status) {
       const qd = tr.readQueue(mainRoot());
@@ -2441,6 +2453,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const by = typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human';
     const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), now: Boolean(flags.now), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
     (r.ok ? console.log : console.error)(r.message);
+    if (r.drained || r.notRun || r.restarted) process.exit(r.ok ? 0 : 3); // 2.97 (d): one line, nothing ran here
     console.log(JSON.stringify({ train: r.id, ...(r.trains ? { trains: r.trains } : {}), landed: r.landed, dropped: r.dropped, deferred: r.deferred, ...(r.held?.length ? { held: r.held.map(({ fresh, ...h }) => h) } : {}), ...(r.tiers && Object.keys(r.tiers).length ? { tiers: r.tiers } : {}), verifies: r.verifies ?? 0, reused: r.reused ?? 0, ...(r.rechecks ? { rechecks: r.rechecks } : {}), ...(r.pinRefresh ? { pinRefresh: r.pinRefresh } : {}), ...(r.union ? { union: r.union } : {}), ...(r.redMain ? { redMain: true } : {}), ...(r.noCheck ? { noCheck: r.noCheck } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
     process.exit(r.ok ? 0 : 1);
   }

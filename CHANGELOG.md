@@ -4,6 +4,23 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.97.0] — 2026-11-21
+What a day on the real machine showed (the overseer's 7 items after 2.96 ran for a day: 18 tasks landed in 8 hours).
+A green rules check was thrown away because a session edited a lane copy, and the land run ran the suite again.
+Details: docs/RELEASE-2.97.0.md.
+- **The rules green is judged by what lands:** a lane copy is read at the lane's commit, never from its working files.
+  A green that is not used, and a check ahead that does not start, each say why in one line; `rules show` prints the
+  check ahead's last outcome.
+- **The union merge accepts a line both lanes only lengthen** (a one-line list), and a refusal names the file and line.
+- **A land run waits for the memory of the kind it runs** (`land no-rules ...` or `land with-rules ...`), from that
+  kind's own sampled runs. A run too short to sample is stored as unknown, never as 0 GB.
+- **A red first test is narrowed by the words of its failure** with no setting: a name only one lane changes makes it
+  the first suspect. An `engines.<x>.blame` entry with `names` still wins.
+- **A drain means no new train,** and `drain off` starts the waiting one. A train that finds the harness changed
+  before it takes its lock starts again on the new code, once.
+- **The upgrade fetches before it merges,** and a branch other than the remote's main needs `--not-main`.
+- Harness code is 271 lines larger than 2.96 (18 files, one new module); no feature removed.
+
 ## [2.96.0] — 2026-11-20
 Measured memory and CPU, and each test once per tree (the overseer's 16 items; the owner: use 32 GB well first).
 Red rules checks had taken up to 413 minutes because every narrowing step re-ran the whole suite.
@@ -21,7 +38,7 @@ Details: docs/RELEASE-2.96.0.md.
 ## [2.95.0] — 2026-11-18
 The full rules check in shards and a playtest build in one command (the overseer's list, the last upgrade before the
 owner's playtest). One full run of a live studio's rules tests had grown to 18.9 GB in one process.
-Details: docs/RELEASE-2.95.0.md.
+Details: the 2.95.0 release notes, in git history.
 - **`rules.shards`:** a full rules check runs one test command per shard, one at a time, with a green kept per shard
   (for the exact tree by default; `keep: "reads"` across batches that touch other shards). Full only with `rest`.
 - **`rules.peak`:** the test command's own peak memory, read from the file it writes, replaces the 4 GB guess.
@@ -44,25 +61,9 @@ Details: the 2.94.0 release notes, in git history.
   agents`). `npm run status` now prints the brief that `npm run status -- --brief` printed.
 - **Size:** harness code is 229 lines smaller than 2.93 with the new check in it.
 
-## [2.93.0] — 2026-11-18
-One rules check per train, and no run of the harness's own in a land run's way (the owner's order: do the overseer's
-list, clean up old code and duplicate lines). On 2.92 a live studio's trains landed what they carried, but the median
-train took 209 minutes, nearly all of it tests that passed, run twice. Details: the 2.93.0 release notes, in git history.
-- **The rules check runs the batch first.** Green ends the check; the target is asked only after a red, and a kept
-  result answers when there is one. A landed tree keeps its green (`rules.landGate`), so the next train starts with it.
-- **A rules run started outside the train waits like a verify** and never turns full because hours are due, so it no
-  longer takes the memory a land run needs.
-- **Any agent can port for the engine:** `--pool api --role <role>` makes that role's lane under the next free pool
-  name; an engine pass on agy gets allow-rules for its worktree; a refused or crashed start leaves a record.
-- **Held, slice and duplicate:** `task after` keeps a queued branch out of a train; `train slice` marks a queued
-  branch as a slice; `task duplicate <ID> --of <T-x>` closes a repeat; a `preQueue` entry can match by task title.
-- **A command past its time limit is ended with everything it started** (P-360), each train records where its minutes
-  went, and a session refused its tools by the tool's own permission check is not blamed on the task.
-- **Removed:** the "floors" way to split work, the overnight summary, and 12 copied functions. Harness code is 6 lines
-  smaller than 2.92 with all of the above in it; scripts are 19 lines smaller.
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.93.0** (2026-11-18): One rules check per train. The check runs the batch first and a landed tree keeps its green; any agent can port for the engine; `task after`, `train slice`, `task duplicate`; a command past its time limit is ended with everything it started.
 - **2.92.0** (2026-11-17): Bad news at the queue door, not hours later. The compile search runs when a branch is queued; the check before queueing judges the branch merged with the target; a land run red on a compiler error hands back the branch that changed that file.
 - **2.91.0** (2026-11-17): No full run ahead of a waiting batch. A due full run waits for an empty queue; `rules.ignore` lets a rules pass survive a record commit; release branches merge with a merge commit.
 - **2.90.0** (2026-11-16): The overseer's list. The rules check's time limit follows the suite; a compile error is searched with the compile command; `preQueue`, `blame`, `rules.first`; two land runs at once; slices.

@@ -227,6 +227,25 @@ export function blameSuspect({ repo, tip, lanes = [], failures = [], blame = [],
   return by.size > 1 ? { tied: [...by.values()].map((x) => x.lane), tests: hit.flatMap((x) => x.tests), ...(words ? { byWords: [...by.values()] } : {}) } : null;
 }
 
+/** 2.97: a path's own names: its folder names and its file's base name (no extension), each at least 3 characters. */
+const pathNames = (p) => { const s = String(p).split('/'); const f = s.pop().replace(/\.[^.]*$/, ''); return [...s, f].filter((n) => n.length >= 3); };
+const wordIn = (t, w) => new RegExp(`(?<![\\p{L}\\p{N}_])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_])`, 'u').test(t);
+
+/**
+ * 2.97: with no blame entry, the lanes a red's own words name. A lane's own names are those of its changed paths
+ * (pathNames) that no other lane of the batch changes; one that is a whole word of `text` (letter case aside) makes the
+ * lane a suspect. [{ lane, names, files }] when some lanes are named but not all, else null.
+ */
+function ownSuspects({ repo, tip, lanes, text }) {
+  const per = lanes.map((lane) => ({ lane, names: new Map((changedPaths(repo, tip, lane.head) || []).flatMap((f) => pathNames(f).map((n) => [n.toLowerCase(), { n, f }]))) }));
+  const t = String(text || '').toLowerCase();
+  const hits = per.map((x) => {
+    const own = [...x.names].filter(([k]) => per.every((y) => y === x || !y.names.has(k)) && wordIn(t, k)).map(([, v]) => v);
+    return { lane: x.lane, names: [...new Set(own.map((v) => v.n))].slice(0, 5), files: [...new Set(own.map((v) => v.f))].slice(0, 3) };
+  }).filter((h) => h.names.length);
+  return hits.length && hits.length < lanes.length ? hits : null;
+}
+
 /**
  * 2.96: does a test filter (dotnet test's --filter: `|`, `&`, `=`, `!=`, `~`, `!~` on FullyQualifiedName, Name or
  * ClassName; a bare value is FullyQualifiedName~) take this test name? A property it cannot judge (Category) or a
@@ -401,7 +420,11 @@ function peakConfig(v) {
   return { peak: { file, match: typeof o.match === 'string' ? o.match : '' }, errors: [] };
 }
 
-/** The files of one input merged over the folders it is copied from (the first folder with a file wins). { found, files: [[name, abs]] } sorted by name. */
+/**
+ * The files of one input merged over its sources (the first source with a file wins). { found, files: [[name, src]] } sorted by
+ * name. A source is a folder (its files as they are now) or 2.97's { dir, sha }: a git checkout read at a commit, never its
+ * working files (a lane copy: what lands is its commit). src: a file path, or { dir, sha, oid, size } for a blob of that commit.
+ */
 export function inputFiles(rel, from = []) {
   const files = new Map();
   let found = false;
@@ -412,12 +435,35 @@ export function inputFiles(rel, from = []) {
     if (!files.has(name)) files.set(name, p);
   };
   for (const f of from) {
+    if (typeof f !== 'string') {
+      const r = git(f.dir, 'ls-tree', '-r', '-l', '-z', '--full-tree', f.sha, '--', rel.replace(/\/+$/, ''));
+      for (const l of r.status === 0 ? r.stdout.split('\0') : []) {
+        const m = /^100\d{3} blob ([0-9a-f]+) +(\d+)\t(.+)$/s.exec(l);
+        if (!m) continue;
+        found = true;
+        if (!files.has(m[3])) files.set(m[3], { dir: f.dir, sha: f.sha, oid: m[1], size: Number(m[2]) });
+      }
+      continue;
+    }
     const src = path.join(f, ...rel.split('/'));
     if (!fs.existsSync(src)) continue;
     found = true;
     walk(src, rel);
   }
   return { found, files: [...files.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)) };
+}
+
+const BIG = 64 * 1024 * 1024;
+const inputBytes = (src) => (typeof src === 'string' ? fs.readFileSync(src) : spawnSync('git', ['cat-file', 'blob', src.oid], { cwd: src.dir, windowsHide: true, maxBuffer: BIG + 1024 }).stdout);
+const inputWhere = (src) => (typeof src === 'string' ? src.split(path.sep).join('/') : `${src.dir.split(path.sep).join('/')} at ${short(src.sha)}`);
+
+/** Feed one input file's size and bytes to h (a very large one: its time, or its blob id). false when it is gone. */
+function feedInput(h, src) {
+  let size; let big;
+  if (typeof src === 'string') { let st; try { st = fs.statSync(src); } catch { return false; } size = st.size; big = String(Math.floor(st.mtimeMs)); } else { size = src.size; big = src.oid; }
+  h.update(`${size}\0`);
+  if (size > BIG) h.update(big); else { try { h.update(inputBytes(src)); } catch { h.update('unreadable'); } }
+  return true;
 }
 
 /** A fingerprint of the git-ignored inputs ('' with none), over inputFiles' merged view. They are not in the tree, so a kept result and STUDIO_RULES_GREEN are valid only for the same inputs. */
@@ -427,12 +473,7 @@ export function inputsPrint(cfg, from = []) {
   for (const rel of cfg.inputs) {
     const { found, files } = inputFiles(rel, from);
     if (!found) { h.update(`${rel}\0missing\n`); continue; }
-    for (const [name, p] of files) {
-      let st; try { st = fs.statSync(p); } catch { h.update(`${name}\0gone\n`); continue; }
-      h.update(`${name}\0${st.size}\0`);
-      // Content for ordinary sizes; a very large file by size and time.
-      if (st.size <= 64 * 1024 * 1024) { try { h.update(fs.readFileSync(p)); } catch { h.update('unreadable'); } } else h.update(String(Math.floor(st.mtimeMs)));
-    }
+    for (const [name, p] of files) { h.update(`${name}\0`); if (!feedInput(h, p)) h.update('gone\n'); }
   }
   return h.digest('hex').slice(0, 12);
 }
@@ -447,7 +488,7 @@ function copyInputs(cfg, from, dir) {
       const dest = path.join(dir, ...name.split('/'));
       if (fs.existsSync(dest)) continue;
       fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.copyFileSync(src, dest);
+      if (typeof src === 'string') fs.copyFileSync(src, dest); else fs.writeFileSync(dest, inputBytes(src));
     }
   }
   return missing;
@@ -817,21 +858,33 @@ function ownersAt(ctx, sha) {
   return res;
 }
 
-/** The input files' digests, once per check: [{ rel, name, digest }] plus missing inputs as { rel, missing }. */
-function inputIndex(cfg, src) {
+/** The input files' digests, once per check: [{ rel, name, digest, where }] plus missing inputs as { rel, missing }. */
+export function inputIndex(cfg, src) {
   const list = [];
   for (const rel of cfg?.inputs || []) {
     const { found, files } = inputFiles(rel, src);
     if (!found) { list.push({ rel, missing: true }); continue; }
     for (const [name, p] of files) {
       const h = crypto.createHash('sha1');
-      let st; try { st = fs.statSync(p); } catch { list.push({ rel, name, digest: 'gone' }); continue; }
-      h.update(`${st.size}\0`);
-      if (st.size <= 64 * 1024 * 1024) { try { h.update(fs.readFileSync(p)); } catch { h.update('unreadable'); } } else h.update(String(Math.floor(st.mtimeMs)));
-      list.push({ rel, name, digest: h.digest('hex') });
+      list.push({ rel, name, digest: feedInput(h, p) ? h.digest('hex') : 'gone', where: inputWhere(p) });
     }
   }
   return list;
+}
+
+/** 2.97: the first input that differs from an inputIndex taken before ('<name> changed (<where>)'), or '' when none does. */
+export function inputsChanged(cfg, src, before = []) {
+  const k = (x) => x.name || x.rel;
+  const was = new Map(before.map((x) => [k(x), x]));
+  for (const x of inputIndex(cfg, src)) {
+    const b = was.get(k(x));
+    was.delete(k(x));
+    if (x.missing) { if (!b?.missing) return `${x.rel} is missing now`; continue; }
+    if (!b || b.missing) return `${x.name} is new (${x.where})`;
+    if (b.digest !== x.digest) return `${x.name} changed (${x.where}${b.where !== x.where ? `; it was read from ${b.where}` : ''})`;
+  }
+  const gone = [...was.values()][0];
+  return gone ? `${k(gone)} is gone (it was read from ${gone.where || 'the input folders'})` : '';
 }
 
 /**
@@ -1184,10 +1237,15 @@ export function outsideTrain(root, engine, fn, { env = process.env, log = () => 
 
 /** 2.96: output that says a filtered run ran no test (dotnet test, NUnit, a plain count of 0). */
 const NO_TESTS = /No test matches the given testcase filter|No test is available in|Total tests: 0\b|Test Count: 0\b|\b0 tests? (?:ran|run|passed)\b/i;
-/** 2.96: a red's lines that a blame "names" regex reads (at most 40), kept with the red so its words can name lanes later. */
+/**
+ * 2.96: a red's lines that a blame "names" regex reads (at most 40), kept with the red so its words can name lanes later.
+ * 2.97: also the lines that say what failed (FAIL, error, differs, expected), the words a rules.first red is read by.
+ */
+const FAIL_SAID = /\b(?:fail\w*|error\w*|differs?|expected|assert\w*|mismatch\w*)\b/i;
 const saidOf = (cfg, text) => {
   const res = (cfg?.blame || []).filter((b) => b.names).map((b) => new RegExp(b.names.source));
-  const lines = res.length ? String(text || '').split('\n').filter((l) => res.some((re) => re.test(l))).slice(0, 40) : [];
+  const all = String(text || '').split('\n');
+  const lines = [...new Set([...all.filter((l) => res.some((re) => re.test(l))), ...all.filter((l) => FAIL_SAID.test(l))])].slice(0, 40);
   return lines.length ? { said: lines.map((l) => l.slice(0, 300)) } : {};
 };
 
@@ -1462,73 +1520,27 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
       const mid = Math.floor((lo + hi) / 2);
       const part = chain(tip, set.slice(0, mid));
       if (part.error || !part.head) return { stuck: true };
-      const rm = atFn(part.head);
+      const rm = atFn(part.head, mid);
       if (rm.status === 'pass') lo = mid; else if (rm.status === 'red') { hi = mid; bad = rm; } else return { stuck: true };
     }
     return { hi, bad };
   };
-  // 2.90: engines.<x>.blame on a red: the one lane that changes the files a failing test is tied to is left out first; green
-  // without it, it is the culprit (no prefix search). { lane, why } or null.
-  const byBlame = (set, r, atFn) => {
-    const bs = cfg.blame?.length && set.length > 1 ? blameSuspect({ repo, tip, lanes: set, failures: r.failures || [], blame: cfg.blame }) : null;
-    if (!bs?.lane) return null;
-    const rest = set.filter((l) => l.task !== bs.lane.task);
-    const c = chain(tip, rest);
-    const rw = c.error || !c.head ? null : atFn(c.head);
-    if (rw?.status !== 'pass') { log(`[engine-rules] ${engine}: engines.${engine}.blame named ${bs.lane.task}, but the batch without it is ${rw?.status || 'not buildable'}: narrowing as before`); return null; }
-    return { lane: bs.lane, why: `engines.${engine}.blame ties ${bs.tests.slice(0, 3).join(', ')} to ${bs.entry.touches.join(', ')}, which only ${bs.lane.branch} changes (${bs.files.slice(0, 3).join(', ')}), and the check is green without it${bs.entry.say ? `. ${bs.entry.say}` : ''}` };
-  };
-  // 2.90: rules.first, a test filter run before everything else: red, its culprit is refused at once with the failing names.
-  if (cfg.first) {
-    const fsel = { mode: 'first', filter: cfg.first.filter, command: cfg.first.command };
-    const atF = (sha) => { const r = run({ engine, repo, sha, cfg, from, extraFrom, sel: fsel, root, id: `${id}-first`, env, log, useCache, admit }); if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; } return r; };
-    let onTip = null;
-    let left = lanes.slice();
-    while (left.length && res.runs < maxRuns) {
-      const c = chain(tip, left);
-      if (c.error || !c.head) break;
-      const r = atF(c.head);
-      log(`[engine-rules] ${engine}: rules.first (${cfg.first.filter}) on ${left.map((l) => l.task).join(' + ')}: ${r.status}`);
-      // 2.94: a check ahead runs the batch only and judges no lane.
-      if (batchOnly && r.status !== 'pass') return { ...res, ahead: r.status, why: r.why, ...(r.stopped ? { stopped: true } : {}) };
-      if (batchOnly) break;
-      if (r.status !== 'red') break;
-      onTip = onTip || atF(tip);
-      if (onTip.status !== 'pass') { log(`[engine-rules] ${engine}: rules.first is ${onTip.status} on the target itself: it judges no lane`); break; }
-      const bb = byBlame(left, r, atF);
-      const p = bb ? null : redPrefix(left, atF, r);
-      if (!bb && p.stuck) break;
-      const culprit = bb ? bb.lane : left[p.hi - 1];
-      const bad = bb ? r : p.bad;
-      res.dropped.push({ lane: culprit, failures: bad.failures || [], first: true, why: `the first tests of the rules check (rules.first ${cfg.first.filter}) are red with ${culprit.branch}${bb ? `: ${bb.why}` : `${left.indexOf(culprit) ? ` on top of ${left.slice(0, left.indexOf(culprit)).map((l) => l.task).join(' + ')}` : ''}; it is green without it`}${bad.failures?.length ? `. Failing: ${bad.failures.slice(0, 8).join(', ')}` : ''}${bad.tail ? `\n${bad.tail.split('\n').map((x) => `  ${x}`).join('\n')}` : ''}` });
-      left = left.filter((l) => l.task !== culprit.task);
-    }
-    res.first = { filter: cfg.first.filter, dropped: res.dropped.length };
-    if (left.length !== lanes.length) { lanes = left; res.kept = left.slice(); first = left.length ? chain(tip, left) : null; }
-    if (!lanes.length) { res.kept = []; res.why = `${res.dropped.length} lane(s) refused by the first tests of the rules check (rules.first), none left`; return res; }
-  }
-  // 2.90: a timeout nobody set doubles the next run of that mode (rulesTimeout), on the batch or on the target.
-  const raiseOn = (r, where = 'the target') => { if (r.timedOut && !r.notRun && !r.timeoutSet) writeCache(root, engine, (j) => { j.raise = { ...(j.raise || {}), [r.mode || sel.mode]: { min: Math.min(Math.max(cfg.timeoutMin, TIMEOUT_CAP), min2(r.timeoutMin * 2)), from: r.timeoutMin, at: new Date().toISOString(), where } }; }); };
-  // 2.93: the target is asked only when the batch is red, to tell a red the batch brings from one the target has (a kept
-  // result answers first). 2.86: per part, only the parts the target has and that have no kept green there.
-  const onTarget = () => {
-    if (!perPart) return at(tip, null, 'the target');
-    const onTip = allParts.filter((p) => partKey(ctx, tip, p).exists);
-    const fresh = allParts.filter((p) => !onTip.includes(p));
-    if (fresh.length) log(`[engine-rules] ${engine}: rules part(s) ${fresh.map((p) => p.filter).join(', ')} are new in the batch (the target has none of their files): not run on the target`);
-    res.newParts = fresh.length;
-    return onTip.length ? at(tip, onTip, 'the target') : { status: 'pass', why: 'every part is new in the batch: nothing to calibrate', allKept: true };
-  };
   // 2.96: the lanes a red's own evidence names: engines.<x>.blame (by files; by the names in the failure's words), else the
   // lanes that change the files of a system whose rules.focus filter takes a failing test (by name only, fewer than the batch).
-  // { kind, lanes, why(lane), say } or null.
-  const suspectsOf = (set, r, nf) => {
+  // 2.97: own (rules.first): with no blame entry, the lanes the failure's own words name (ownSuspects). { kind, lanes,
+  // why(lane), say } or null.
+  const suspectsOf = (set, r, nf, own = false) => {
     if (set.length < 2) return null;
     const fails = r.failures || [];
     const bs = cfg.blame?.length ? blameSuspect({ repo, tip, lanes: set, failures: fails, blame: cfg.blame, text: (r.said || []).join('\n') }) : null;
     const wordsWhy = (x, l) => `engines.${engine}.blame reads ${x.names.join(', ')} in the failure of ${x.tests.slice(0, 3).join(', ')} and ties it to ${x.entry.touches.flatMap((t) => x.names.map((n) => t.split('{name}').join(n))).slice(0, 4).join(', ')}, which ${l.branch} changes (${x.files.slice(0, 3).join(', ')})`;
     if (bs?.lane) return { kind: bs.names ? 'words' : 'blame', lanes: [bs.lane], say: bs.entry.say, why: (l) => (bs.names ? wordsWhy(bs, l) : `engines.${engine}.blame ties ${bs.tests.slice(0, 3).join(', ')} to ${bs.entry.touches.join(', ')}, which only ${l.branch} changes (${bs.files.slice(0, 3).join(', ')})`) };
     if (bs?.byWords) { const m = new Map(bs.byWords.map((x) => [x.lane.task, x])); return { kind: 'words', lanes: bs.tied, say: bs.byWords[0].entry.say, why: (l) => wordsWhy(m.get(l.task), l) }; }
+    if (own && !bs) {
+      const o = ownSuspects({ repo, tip, lanes: set, text: [...fails, ...(r.said || []), r.tail || ''].join('\n') });
+      const m = new Map((o || []).map((h) => [h.lane.task, h]));
+      return o && { kind: 'own', lanes: o.map((h) => h.lane), say: '', why: (l) => `its failure names ${m.get(l.task).names.join(', ')}, which only ${l.branch} changes (${m.get(l.task).files.join(', ')})` };
+    }
     if (bs || !nf || !cfg.focus) return null;
     const hits = new Map();
     for (const lane of set) {
@@ -1553,7 +1565,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     let kept = set.filter((l) => !ids.has(l.task));
     const c = chain(tip, kept);
     const rw = c.error || !c.head ? null : atStep(c.head, `without ${[...ids].join(', ')}`, null);
-    if (rw?.status !== 'pass') { log(`[engine-rules] ${engine}: ${sus.kind === 'system' ? 'the rules.focus filter of the failing tests' : `engines.${engine}.blame`} named ${[...ids].join(', ')}, but the batch without ${ids.size > 1 ? 'them' : 'it'} is ${rw?.status || 'not buildable'}: narrowing as before`); return []; }
+    if (rw?.status !== 'pass') { log(`[engine-rules] ${engine}: ${sus.kind === 'system' ? 'the rules.focus filter of the failing tests' : sus.kind === 'own' ? "the failure's own words" : `engines.${engine}.blame`} named ${[...ids].join(', ')}, but the batch without ${ids.size > 1 ? 'them' : 'it'} is ${rw?.status || 'not buildable'}: narrowing as before`); return []; }
     const got = [];
     for (const one of set.filter((l) => ids.has(l.task))) {
       const cand = set.filter((l) => l === one || kept.includes(l));
@@ -1564,6 +1576,52 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
       else break;
     }
     return got;
+  };
+  // 2.90: rules.first, a test filter run before everything else: red, its culprit is refused at once with the failing names.
+  if (cfg.first) {
+    const fsel = { mode: 'first', filter: cfg.first.filter, command: cfg.first.command };
+    const atF = (sha) => { const r = run({ engine, repo, sha, cfg, from, extraFrom, sel: fsel, root, id: `${id}-first`, env, log, useCache, admit }); if (!r.cached) { res.runs += 1; res.ms += r.ms || 0; } return r; };
+    let onTip = null;
+    let left = lanes.slice();
+    while (left.length && res.runs < maxRuns) {
+      const c = chain(tip, left);
+      if (c.error || !c.head) break;
+      const r = atF(c.head);
+      log(`[engine-rules] ${engine}: rules.first (${cfg.first.filter}) on ${left.map((l) => l.task).join(' + ')}: ${r.status}`);
+      // 2.94: a check ahead runs the batch only and judges no lane.
+      if (batchOnly && r.status !== 'pass') return { ...res, ahead: r.status, why: r.why, ...(r.stopped ? { stopped: true } : {}) };
+      if (batchOnly) break;
+      if (r.status !== 'red') break;
+      onTip = onTip || atF(tip);
+      if (onTip.status !== 'pass') { log(`[engine-rules] ${engine}: rules.first is ${onTip.status} on the target itself: it judges no lane`); break; }
+      // 2.97: no blame entry names suspects: the lanes the failure's own words name are tried first (no setting).
+      const sus = suspectsOf(left, r, null, true);
+      if (sus?.kind === 'own') log(`[engine-rules] ${engine}: rules.first is red and ${sus.lanes.map((l) => sus.why(l)).join('; ')}: trying without ${sus.lanes.map((l) => l.task).join(', ')} first (an engines.${engine}.blame entry with names makes this exact)`);
+      const got = sus ? confirmSuspects(left, r, sus, atF) : [];
+      const p = got.length ? null : redPrefix(left, atF, r);
+      if (p?.stuck) break;
+      const out = p ? [{ lane: left[p.hi - 1], bad: p.bad }] : got.map((g) => ({ ...g, bad: r }));
+      for (const { lane, bad, without } of out) {
+        const how = without ? `: ${sus.why(lane)}; they are green without it (${without.join(' + ') || 'the target alone'}) and red with it${sus.say ? `. ${sus.say}` : ''}` : `${left.indexOf(lane) ? ` on top of ${left.slice(0, left.indexOf(lane)).map((l) => l.task).join(' + ')}` : ''}; it is green without it`;
+        res.dropped.push({ lane, failures: bad.failures || [], first: true, why: `the first tests of the rules check (rules.first ${cfg.first.filter}) are red with ${lane.branch}${how}${bad.failures?.length ? `. Failing: ${bad.failures.slice(0, 8).join(', ')}` : ''}${bad.tail ? `\n${bad.tail.split('\n').map((x) => `  ${x}`).join('\n')}` : ''}` });
+      }
+      left = left.filter((l) => !out.some((o) => o.lane.task === l.task));
+    }
+    res.first = { filter: cfg.first.filter, dropped: res.dropped.length };
+    if (left.length !== lanes.length) { lanes = left; res.kept = left.slice(); first = left.length ? chain(tip, left) : null; }
+    if (!lanes.length) { res.kept = []; res.why = `${res.dropped.length} lane(s) refused by the first tests of the rules check (rules.first), none left`; return res; }
+  }
+  // 2.90: a timeout nobody set doubles the next run of that mode (rulesTimeout), on the batch or on the target.
+  const raiseOn = (r, where = 'the target') => { if (r.timedOut && !r.notRun && !r.timeoutSet) writeCache(root, engine, (j) => { j.raise = { ...(j.raise || {}), [r.mode || sel.mode]: { min: Math.min(Math.max(cfg.timeoutMin, TIMEOUT_CAP), min2(r.timeoutMin * 2)), from: r.timeoutMin, at: new Date().toISOString(), where } }; }); };
+  // 2.93: the target is asked only when the batch is red, to tell a red the batch brings from one the target has (a kept
+  // result answers first). 2.86: per part, only the parts the target has and that have no kept green there.
+  const onTarget = () => {
+    if (!perPart) return at(tip, null, 'the target');
+    const onTip = allParts.filter((p) => partKey(ctx, tip, p).exists);
+    const fresh = allParts.filter((p) => !onTip.includes(p));
+    if (fresh.length) log(`[engine-rules] ${engine}: rules part(s) ${fresh.map((p) => p.filter).join(', ')} are new in the batch (the target has none of their files): not run on the target`);
+    res.newParts = fresh.length;
+    return onTip.length ? at(tip, onTip, 'the target') : { status: 'pass', why: 'every part is new in the batch: nothing to calibrate', allKept: true };
   };
   res.ran = true;
   // 2.96: a red whose failing tests are named is narrowed by runs of those tests only (rules.byName); whole runs are counted
@@ -1640,20 +1698,10 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
       continue;
     }
     // The smallest red prefix: its last lane turns the batch red.
-    let lo = 0; // target + the first lo lanes is green
-    let hi = set.length; // target + the first hi lanes is red
-    let bad = r;
-    let stuck = false;
-    while (hi - lo > 1) {
-      if (res.runs >= maxRuns) { stuck = true; break; }
-      const mid = Math.floor((lo + hi) / 2);
-      const part = chain(tip, set.slice(0, mid));
-      if (part.error || !part.head) { stuck = true; break; }
-      const rm = atStep(part.head, `the first ${mid} lane(s)`);
-      if (rm.status === 'pass') lo = mid;
-      else if (rm.status === 'red') { hi = mid; bad = rm; } else { stuck = true; break; }
-    }
-    if (stuck) { res.why = `the rules check is red for ${set.map((l) => l.task).join(' + ')} and could not be narrowed: the land run decides`; break; }
+    const p = redPrefix(set, (h, mid) => atStep(h, `the first ${mid} lane(s)`), r);
+    if (p.stuck) { res.why = `the rules check is red for ${set.map((l) => l.task).join(' + ')} and could not be narrowed: the land run decides`; break; }
+    const { hi } = p;
+    let { bad } = p;
     const culprit = set[hi - 1];
     const before = set.slice(0, hi - 1).map((l) => l.task);
     // A by-name red names no part: the evidence of the batch's own red is kept with it.
@@ -1814,11 +1862,18 @@ async function cli(argv) {
     const bm = Number(s.cfg.batchMax);
     if (cfg.maxLanes > 0 && bm > cfg.maxLanes) console.log(`[engine-rules] WARNING: engines.${engine}.batchMax ${bm} is above rules.maxLanes ${cfg.maxLanes}: a batch that big is checked in slices and then once more as a whole (one more whole run) before the land run is told the rules are green. Set batchMax to ${cfg.maxLanes} or raise maxLanes.`);
     console.log(`[engine-rules] narrowing a red: ${cfg.byName ? `the failing tests by name (rules.byName: ${cfg.byName.each} joined by ${cfg.byName.join})` : 'whole runs (rules.byName is off or rules.focus.test is not set)'}${cfg.ratchets?.length ? `; ${cfg.ratchets.length} count ratchet(s) (rules.ratchets)` : ''}`);
+    // 2.97: how a red rules.first is narrowed: by the blame entries with names that match its filter, else by its own words.
+    const fv = cfg.first?.filter.replace(/^\s*\w+\s*!?[=~]\s*/, '');
+    const fe = cfg.first ? cfg.blame.filter((b) => b.names && (b.re.test(fv) || b.test.replace(/\\(.)/g, '$1').includes(fv))) : [];
+    if (cfg.first) console.log(`[engine-rules] rules.first ${cfg.first.filter}: ${fe.length ? fe.map((b) => `blame entry test ${b.test}, names ${b.names.source}, touches ${b.touches.join(', ')}`).join('; ') : `a red first test is narrowed by the words of its failure (a name only one lane changes), then by search; an engines.${engine}.blame entry with test, names and touches makes it exact (docs/NATIVE-ENGINE.md, blame by the failure's own words)`}`);
     if (cfg.focus) console.log(`[engine-rules] ignore: ${cfg.focus.ignore.length ? cfg.focus.ignore.map((p) => { try { new RegExp(p); return p; } catch { return `${p} (not a valid regex: skipped)`; } }).join(', ') : 'none'}`);
     // 2.95: the shards (each with its kept green on the target and its measured peak) and the peak file.
     if (cfg.peak) console.log(`[engine-rules] peak: read from ${cfg.peak.file} in the test checkout after each test command${cfg.peak.match ? ` (match ${cfg.peak.match})` : ''}; a full run's measured peak: ${partStats(root, engine)[FULL_STAT]?.peakGb ? `${partStats(root, engine)[FULL_STAT].peakGb} GB` : 'none yet'}${cfg.focus?.splitGb ? ' (rules.focus.splitGb is set: that number is used)' : ''}`);
     // 2.96 (a): measured cost per kind (rules commands and land runs: the number a land script's own wait can use).
     for (const l of costLines(root, engine)) console.log(`[engine-rules] ${l}`);
+    // 2.97: the check ahead: on or off, and its last outcome (started, kept, dropped, or why it did not start).
+    const al = (await import('./rules-ahead.mjs')).aheadLast(root, engine);
+    console.log(`[engine-rules] check ahead (rules.ahead): ${cfg.ahead ? 'on' : 'off'}; last: ${al ? `${al.outcome === 'not-started' ? `did not start: ${al.why}` : `${al.outcome}${al.why ? ` (${al.why})` : ''}`}, train ${al.train || '?'}, ${String(al.at).slice(0, 16)}` : 'none yet'}`);
     if (cfg.shards) {
       const fresh = shardsFreshDue(root, engine, cfg);
       console.log(`[engine-rules] shards: a full run is one command per shard (${cfg.shards.test}); ${cfg.shards.rest ? `rest ${cfg.shards.rest}: a sharded run is a full run` : 'no rest: a sharded run is NOT a full run (a test no shard filter matches never runs), so it never tells the land run STUDIO_RULES_MODE=full and never counts as the owed full run; set rules.shards.rest'}; keep "${cfg.shards.keep}"${cfg.shards.keep === 'reads' ? ` (a run that reuses nothing from another tree at least every ${cfg.shards.freshEveryHours} h; ${fresh ? `due: ${fresh}` : `last ${readCache(root, engine).shardsFreshAt}`})` : ' (a green is kept for the exact tree it ran on)'}`);

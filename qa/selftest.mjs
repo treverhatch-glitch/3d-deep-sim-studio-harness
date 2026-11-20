@@ -5466,6 +5466,46 @@ if (inShard('selftest-296e')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.97 (b): the union merge also takes a line both lanes only lengthen, and a refusal says why.
+if (inShard('selftest-297b')) {
+  const dir = copyRepo();
+  const { selftest297B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-297b.mjs')).href);
+  await selftest297B({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.97 (c): a land run waits for the memory of its own kind; a run too short to sample is unknown, not 0 GB.
+if (inShard('selftest-297c')) {
+  const dir = copyRepo();
+  const { selftest297C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-297c.mjs')).href);
+  await selftest297C({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.97 (a): the rules green and the check ahead survive a changed lane copy; each says why when it is not used.
+if (inShard('selftest-297a')) {
+  const dir = copyRepo();
+  const { selftest297A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-297a.mjs')).href);
+  await selftest297A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.97 (e): a red rules.first is narrowed by the words of its failure, with no setting; rules show says how.
+if (inShard('selftest-297e')) {
+  const dir = copyRepo();
+  const { selftest297E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-297e.mjs')).href);
+  await selftest297E({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.97 (d): a drain means no new train; a train that waited while the harness changed starts again; the upgrade fetches first.
+if (inShard('selftest-297d')) {
+  const dir = copyRepo();
+  const { selftest297D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-297d.mjs')).href);
+  await selftest297D({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

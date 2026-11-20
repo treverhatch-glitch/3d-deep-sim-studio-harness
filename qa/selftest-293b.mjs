@@ -143,6 +143,8 @@ process.stdin.resume();
   // ================= record: a start that cannot launch says why =================
   {
     // A refusal inside the detached launcher: aider is not installed.
+    // What the start below saw of builder-api2's lane copy (shown when the check fails): its folder's age in ms.
+    const laneAge = (() => { try { return Math.round(Date.now() - fs.statSync(path.join(S, '.lanes', 'builder-api2')).mtimeMs); } catch { return null; } })();
     const a = agent(['start', '--pool', 'api', '--role', 'engine-porter', '--task', 'T-13', '--tool', 'aider', '--model', 'qwen'], { STUDIO_AIDER_CMD: path.join(T, 'no-such-aider') });
     ended('builder-api2');
     const r = rec('builder-api2');
@@ -160,7 +162,7 @@ process.stdin.resume();
       a.status === 0 && r?.status === 'ended' && /^not started: .*aider/.test(r.refusal || '') && j?.meta?.result === 'refused' && /aider/.test(j.meta.tail || '')
         && b.status === 0 && rc?.status === 'ended' && /^not started: the launcher crashed: /.test(rc.refusal || '') && jc?.meta?.result === 'refused' && /launcher crashed/.test(jc.meta.tail || '')
         && gone.status === 0 && !String(gone.stdout).includes('builder-api2') && !jobs('builder-api2').some((e) => e.meta?.result === 'gone'),
-      JSON.stringify({ r: r && { status: r.status, refusal: r.refusal }, j: j?.meta && { result: j.meta.result, tail: String(j.meta.tail).slice(0, 160) }, rc: rc && { status: rc.status, refusal: String(rc.refusal).slice(0, 160) }, jc: jc?.meta && { result: jc.meta.result, tail: String(jc.meta.tail).slice(0, 160) }, gone: out(gone).slice(-300), outs: [out(a), out(b)].map((x) => x.slice(-200)) })]);
+      JSON.stringify({ laneAge, r: r && { status: r.status, refusal: r.refusal }, j: j?.meta && { result: j.meta.result, tail: String(j.meta.tail).slice(0, 160) }, rc: rc && { status: rc.status, refusal: String(rc.refusal).slice(0, 160) }, jc: jc?.meta && { result: jc.meta.result, tail: String(jc.meta.tail).slice(0, 160) }, gone: out(gone).slice(-300), outs: [out(a), out(b)].map((x) => x.slice(-200)) })]);
   }
 
   // ================= agy: an engine porter gets allow-rules for exactly its folders =================

@@ -87,6 +87,7 @@ export async function followDetached({ root, argv, env = process.env, outStream 
   for (;;) {
     copy(out, 'out', outStream);
     copy(err, 'err', errStream);
+    try { const nx = Number(fs.readFileSync(`${codeFile}.next`, 'utf8')); if (nx && nx !== s.pid) s.pid = nx; } catch {} // 2.97 (d): it started again
     const ended = fs.existsSync(codeFile) || !pidAlive(s.pid);
     if (ended) {
       await new Promise((r) => setTimeout(r, pollMs));
@@ -94,7 +95,7 @@ export async function followDetached({ root, argv, env = process.env, outStream 
       copy(err, 'err', errStream);
       let code = null;
       try { code = Number(fs.readFileSync(codeFile, 'utf8')); } catch {}
-      try { fs.rmSync(codeFile, { force: true }); } catch {}
+      for (const f of [codeFile, `${codeFile}.next`]) { try { fs.rmSync(f, { force: true }); } catch {} }
       if (!Number.isInteger(code)) { errStream.write(`[train] the detached train (pid ${s.pid}) ended without an exit code (killed?); npm run task -- train status\n`); return 1; }
       return code;
     }
@@ -106,16 +107,20 @@ export async function followDetached({ root, argv, env = process.env, outStream 
 export function recordFollowedExit(env = process.env) {
   const f = String(env.STUDIO_TRAIN_FOLLOWED || '').trim();
   if (!f || !path.isAbsolute(f)) return;
-  process.on('exit', (code) => { try { fs.writeFileSync(f, String(code ?? 0)); } catch {} });
+  // 2.97 (d): a train that started itself again (train-gate.mjs restartSelf) leaves the exit code to the new process.
+  process.on('exit', (code) => { try { if (Number(fs.readFileSync(`${f}.next`, 'utf8')) !== process.pid) return; } catch {} try { fs.writeFileSync(f, String(code ?? 0)); } catch {} });
 }
 
 /**
  * After a queued task done: make sure a train will run. A supervisor running with the train daemon on: its next pass
  * starts it (by the batch and machine-room rules). Otherwise one train starts now, detached (train-daemon.mjs run
- * --wait <min>), and waits for a running train first. Returns { how: 'daemon'|'spawned'|'off'|'failed', pid?, line }.
- * deps (tests): { supervisor(root) -> record|null, auto(root, env) -> { on, why }, trainOn(env), spawn(opts) }.
+ * --wait <min>), and waits for a running train first. Returns { how: 'daemon'|'spawned'|'off'|'drain'|'failed', pid?, line }.
+ * deps (tests): { supervisor(root) -> record|null, auto(root, env) -> { on, why }, trainOn(env), spawn(opts), drainLine() }.
  */
 export async function kickTrain(root, { by = '', env = process.env, waitMin = 120, deps = {} } = {}) {
+  // 2.97 (d): no train starts during a drain; the lane stays queued and drain off starts its train.
+  const dl = await (deps.drainLine || (await import('./train-gate.mjs')).drainLine)();
+  if (dl) return { how: 'drain', line: dl };
   const td = await import('./train-daemon.mjs');
   const tr = await import('./train.mjs');
   let sup = null;

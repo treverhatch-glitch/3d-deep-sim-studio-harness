@@ -1,7 +1,7 @@
 /**
  * harness/engine-ram.mjs — what an engine land needs in free RAM, and how the Line Producer makes room for it.
  * No permanent reservation: the land counts only while one is queued or near, and is released at once when it starts.
- *   1. The need: the engine floor (engine-tracks.mjs engineFloor) or the peak RAM of green land runs plus a margin.
+ *   1. The need: the owner/tuned floor, else the passed sampled runs of the land kind (run-cost.mjs landNeed), else this file's peaks.
  *   2. The hold (engineHoldPlan, pure; engineHoldPass reads the machine): while a land is queued or near (an engine
  *      porter ran `task done --check`), new heavy starts wait (a quiet hold tagged "engine-land"; the land ignores it).
  *      If free RAM is short and running verifies aren't about to finish, the builder target steps down (never a kill).

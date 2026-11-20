@@ -358,7 +358,7 @@ export function parkOnce(task, parked, { by = 'watchdog', msg = '', to = null, s
  * 2.30q: drain. `task drain on --by <name>` makes new `task done` landings wait (they poll until drain is off,
  * up to STUDIO_DRAIN_WAIT_MIN, 120, then refuse with nothing closed); dones already running finish.
  * `task drain wait` blocks until no done is running (for upgrades); `task drain status` exits 3 while on,
- * so builder wait scripts can check it before calling done.
+ * so builder wait scripts can check it before calling done. 2.97 (d): no train starts while it is on (train-gate.mjs).
  */
 export async function readDrain() { return read(path.join(await stateDir(), 'drain.json'), { on: false }); }
 export async function setDrain(on, by, why = '') {

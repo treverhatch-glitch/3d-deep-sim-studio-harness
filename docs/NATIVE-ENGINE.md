@@ -90,6 +90,9 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   line says so) or waits for the run still going. A red ahead is only a red for that tree: it hands nobody back.
   Event `task.train.<x>.rules_ahead` (`started`, `kept-green`, `kept-red`, `dropped`); `train status` shows it running.
   2.95: when it does not start (memory, the land run ended first, no rules check) the event says `not-started` and why.
+  2.97: with `ahead` on, every land run logs that it started or one line saying why not (the rules green was not
+  used and why, no lane waits, already tried, a second gate). `npm run engine -- rules show` prints `ahead` on or off
+  and the last outcome (started, kept, dropped, or "did not start: <why>") with its train and time.
   With `rules.shards` it goes command by command instead of deciding once: each shard starts when its measured peak
   (`rules.peak`, else the plan's number) fits beside the land run, waits when it does not (within its time limit), and
   none starts once the land run answered. Stopped between shards it is `kept-partial`: under the same rule (kept only
@@ -193,7 +196,9 @@ half as much machine time as the land runs. Five settings, all optional, in the 
   the kept result's key is the tree without them (inside `paths` too, when both are set). The checkout stays full.
 - `inputs` are merged over every folder they are copied from: each file comes from the first folder that has it and
   never overwrites one already there, and the inputs' fingerprint is of that merged view. The train may add the
-  lanes' own folders after the regular ones (`extraFrom`); `share` lists folders of content-addressed input files a
+  lanes' own folders after the regular ones (`extraFrom`). 2.97: a lane copy that is a git checkout is read at the
+  lane's commit (what lands), never its working files, so a session still editing it does not cost the land run its
+  rules green. A branch that moved to changed inputs still does: one log line names the input and where; `share` lists folders of content-addressed input files a
   lane adds, which `shareInputs` copies (missing files only, nothing overwritten or deleted) where the next check finds them.
 - `focus`: when every path a batch changes (under `paths`, when set) matches a `map` entry, the batch runs
   `focus.test` with `{filter}` replaced by the matching entries' filters (`$1`..`$9` are the regex groups; a group
@@ -695,6 +700,18 @@ another, and a test that fails whenever a branch moves a pinned commit was found
   a system's `rules.focus` filter takes (`map` or `auto`; the reader judges `FullyQualifiedName`, `Name` and
   `ClassName` with `= != ~ !~ & |`, never `Category`) makes the lanes that change that system's files the first
   suspects, when they are fewer than the batch. A wrong suspect costs one run by name, never a hand-back.
+- **A red first test is read by its own words, with no setting (2.97).** When `rules.first` is red and no `blame`
+  entry names a lane, the failure's lines (the failing names, lines with FAIL, error, differs, expected, and the last
+  lines) are read for the lanes' own names: a lane's own names are the folder names and file base names (no extension,
+  at least 3 characters) of the paths it changes that no other lane of the batch changes. A lane with one of them as a
+  whole word of the failure (letter case aside) is a suspect, and the road above follows: suspects left out at once,
+  the first test run without them, each put back in turn (red with it, handed back; green, it stays). No suspect, or
+  every lane a suspect: the search by prefixes as before. The log says what was found, e.g. `rules.first is red and
+  its failure names Fees, which only feat/b changes (...): trying without T-b first`. A wrong suspect costs one run of
+  the first test. A name every test carries (a top folder like `Game`, changed by one lane only) makes a wrong suspect:
+  an entry with `test`, `names` and `touches` makes it exact, and `rules show` says which of the two applies. Only
+  `rules.first` is read this way: a red of the whole check has many failures and whole runs, where a wrong guess costs
+  a full run.
 - **Checks before queueing.** `engines.<x>.preQueue`: a list of `{ "touches": "<path or glob, or a list>", "run":
   "<command>", "say": "<what to do>", "timeoutMin": 10, "env": { "<NAME>": "<value>" } }`. 2.93: an entry may also
   have `"titles": ["<regex>", ...]` (case-insensitive, tested against the task's title) for a check on one KIND of
