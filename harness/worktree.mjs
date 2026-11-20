@@ -400,7 +400,7 @@ export function laneLive(agent, root = mainRoot()) {
     }
   } catch {}
   try {
-    const held = listLocks().filter((l) => l.owner === agent && Date.parse(l.expiresAt) > now && now - Date.parse(l.renewedAt || l.claimedAt) < win);
+    const held = win <= 0 ? [] : listLocks().filter((l) => l.owner === agent && Date.parse(l.expiresAt) > now && now - Date.parse(l.renewedAt || l.claimedAt) < win);
     if (held.length) return { live: true, why: `${agent} holds ${held[0].key}, renewed ${Math.round((now - Date.parse(held[0].renewedAt || held[0].claimedAt)) / 60000)} min ago` };
   } catch {}
   try {
@@ -408,7 +408,8 @@ export function laneLive(agent, root = mainRoot()) {
     const idx = fs.existsSync(path.join(dir, '.git')) ? git(dir, 'rev-parse', '--git-path', 'index').stdout?.trim() : '';
     const times = [fs.statSync(dir).mtimeMs, idx ? fs.statSync(path.resolve(dir, idx)).mtimeMs : 0];
     const t = Math.max(...times);
-    if (now - t < win) return { live: true, why: `changed ${Math.round((now - t) / 60000)} min ago` };
+    // 2.97: a window of 0 means none. `now` is read before git answers, so a write in between gave t > now and "live".
+    if (win > 0 && now - t < win) return { live: true, why: `changed ${Math.round((now - t) / 60000)} min ago` };
   } catch {}
   return { live: false };
 }
