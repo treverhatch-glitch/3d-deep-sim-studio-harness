@@ -19,6 +19,7 @@ import { loadDotEnv } from './dotenv.mjs';
 import { webhookFrom, maskWebhook, scrub, formatFor, postOnce, DISCORD_MAX } from './report-post.mjs';
 import { digestHours as askDigestHours } from './ask-post.mjs';
 import { pidAlive as alive, readJson } from './fsafe.mjs';
+import { pendingLandings, landingText } from './landing-post.mjs';
 
 export const CONFIG_REL = 'studio/communicator.json';
 export const ROLES = ['orchestrator', 'keys', 'owner'];
@@ -180,6 +181,8 @@ export async function commFacts({ root = REPO_ROOT, env = process.env, now = Dat
   else if (f.config.agents.orchestrator) {
     try { const d = await import('./delegation.mjs'); f.delegatedRelease = Boolean(d.delegationFor({ action: 'train-release', by: f.config.agents.orchestrator, env: { STUDIO_LOCK_OWNER: f.config.agents.orchestrator }, root, now, lane: false, autonomy: false }).ok); } catch {}
   }
+  // 2.96 (d): how many open builder tasks can start now (harness/producer-refill.mjs); null when it cannot be read.
+  try { f.stuck = deps.stuck !== undefined ? deps.stuck : await (await import('./producer-refill.mjs')).stuckCounts(); } catch { f.stuck = null; }
   f.line = readLineStatus(root, now);
   f.stopFiles = [];
   const stopJson = readJson(path.join(root, '.studio', 'STOP.json'), null) || (fs.existsSync(path.join(root, '.studio', 'STOP.json')) ? { by: 'unknown' } : null);
@@ -289,7 +292,10 @@ export function alertsNow(f, { env = process.env, state = {}, passWhy = [] } = {
   // 2.90: idle builders while the ready work waits on an engine train are not "low".
   const wait = engineWait(f);
   if (low && wait && !(f.line?.fresh && f.line.ready > 0)) low = null;
-  if (low && !stopped && Date.parse(state.lowSince || '') && f.now - Date.parse(state.lowSince) >= LOW_BUILDERS_MS) add('builders-low', 'fix', f.line?.lead && low.from === 'the Line Producer' ? `${low.have} of ${low.want} builders busy for ${mins(f.now - Date.parse(state.lowSince))}: ${f.line.lead}.` : `Only ${low.have} of ${low.want} builders busy (${low.from}) for ${mins(f.now - Date.parse(state.lowSince))}${f.line?.blocked?.length ? `; blocked: ${f.line.blocked.slice(0, 3).join('; ')}` : ''}.`); // 2.83: the planner's own reason leads, when it has one
+  // 2.96 (d): when no open task can start, say so: idle builders are then no fault.
+  const noStart = Boolean(f.stuck && f.stuck.open > 0 && f.stuck.startable === 0);
+  if (low && !stopped && noStart && Date.parse(state.lowSince || '') && f.now - Date.parse(state.lowSince) >= LOW_BUILDERS_MS) add('builders-low', 'fix', `${low.have} of ${low.want} builders busy for ${mins(f.now - Date.parse(state.lowSince))}: nothing can start. ${f.stuck.open} open task${f.stuck.open === 1 ? ' waits' : 's wait'} for the engine train or for another task, so this is not a fault. The Producer is asked for new work.`);
+  else if (low && !stopped && Date.parse(state.lowSince || '') && f.now - Date.parse(state.lowSince) >= LOW_BUILDERS_MS) add('builders-low', 'fix', f.line?.lead && low.from === 'the Line Producer' ? `${low.have} of ${low.want} builders busy for ${mins(f.now - Date.parse(state.lowSince))}: ${f.line.lead}.` : `Only ${low.have} of ${low.want} builders busy (${low.from}) for ${mins(f.now - Date.parse(state.lowSince))}${f.line?.blocked?.length ? `; blocked: ${f.line.blocked.slice(0, 3).join('; ')}` : ''}.`); // 2.83: the planner's own reason leads, when it has one
   f.lowNow = Boolean(low && !stopped);
   // The crew breaker, a halt, stop files.
   for (const c of f.crewPaused) add(`breaker:${c.role}`, 'fix', `Crew breaker: launching ${c.role} is paused${c.why ? ` (${c.why})` : ''}. New work clears it, or: npm run crew -- resume ${c.role} --by <name>`);
@@ -451,15 +457,22 @@ export async function communicatorPass({ now = Date.now(), dryRun = false, env =
     // 2.77.0 (u, P5.5): notices other harness parts queued (the visual check's shots for the owner): one path line each,
     // posted once, tagging nobody (harness/visual-check.mjs postShots writes .studio/comm/notices.jsonl).
     const notices = retryOk ? pendingNotices(root, st) : [];
+    // 2.96 (d): each engine-train landing is posted once, after the alerts (engines.<x>.announce: false turns it off).
+    const lands = dryRun || !retryOk ? [] : pendingLandings(f.events, st.landings, { now, root });
+    const marked = lands.filter((x) => x.off).map((x) => x.key);
+    const landTexts = [];
+    for (const l of lands.filter((x) => !x.off).slice(-5)) landTexts.push(quiet(await landingText(l, { events: f.events, now, root, deps: deps.landing })));
     const L = [];
     if (doAlerts) { L.push(`Studio alert ${hhmm(now)}`); for (const a of due) L.push(alertLine(a, cfg)); }
     if (notices.length) { if (L.length) L.push(''); L.push(`Studio notice ${hhmm(now)}`); for (const n of notices) L.push(quiet(short(n.text, 600))); }
     if ((doAlerts || doStatus) && cleared.length) L.push(`Cleared: ${cut(cleared, 6)}`);
+    for (const t of landTexts) { if (L.length) L.push(''); L.push(t); }
     if (doStatus) { if (L.length) L.push(''); L.push(statusText(f, { alerts: open })); }
     const text = L.join('\n');
-    const kind = doAlerts && doStatus ? 'alerts+status' : doAlerts ? 'alerts' : doStatus ? 'status' : notices.length ? 'notices' : null;
+    const kind = doAlerts && doStatus ? 'alerts+status' : doAlerts ? 'alerts' : doStatus ? 'status' : notices.length ? 'notices' : landTexts.length ? 'landing' : null;
     const result = { posted: false, kind, alerts: due.map((a) => ({ key: a.key, kind: a.kind, who: routeAlert(a) })), held, cleared, open: open.length };
     if (dryRun) return { ...result, dryRun: true, text, enabled: en };
+    if (!kind && marked.length) st.landings = [...(st.landings || []), ...marked].slice(-200);
     if (kind) {
       const r = await send(hook, text, { kind, env, cfg, now, deps });
       result.posted = r.ok; result.parts = r.parts; result.why = r.why || '';
@@ -469,6 +482,7 @@ export async function communicatorPass({ now = Date.now(), dryRun = false, env =
         for (const a of due) st.sent[a.key] = { at: new Date(now).toISOString(), kind: a.kind, who: routeAlert(a), count: (st.sent[a.key]?.count || 0) + 1, cleared: false };
         for (const k of cleared) st.sent[k].cleared = true;
         st.notices = [...(st.notices || []), ...notices.map((n) => n.key)].slice(-200);
+        st.landings = [...(st.landings || []), ...lands.map((x) => x.key)].slice(-200);
       } else st.failedAt = new Date(now).toISOString();
       st.lastPost = { at: new Date(now).toISOString(), kind, ok: r.ok, parts: r.parts, sent: r.sent, why: r.why || null };
       try { emitEvent({ type: 'comm.posted', agent: 'communicator', to: 'human', status: r.ok ? 'ok' : 'error', msg: r.ok ? `Posted ${kind}${due.length ? ` (${due.length} alert${due.length === 1 ? '' : 's'}: ${cut(due.map((a) => a.key), 4)})` : ''}` : `Couldn't post ${kind}: ${r.why}`, meta: { kind, ok: r.ok, parts: r.parts, sent: r.sent, alerts: due.map((a) => a.key), tagged: [...new Set(due.flatMap(routeAlert))], held, source: hook.source } }); } catch {}

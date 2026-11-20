@@ -101,8 +101,32 @@ seconds once the rules are compiled code. So the engine train runs them first, o
 - A red batch is narrowed with the same cheap check: the first prefix that is red names its last lane. That lane is
   handed back with cause `rules`, the failing test names and the command's last lines, and the rest is checked again.
   `STUDIO_ENGINE_RULES_MAX_RUNS` (12) bounds the runs for one batch; past it the lanes left go to the land run unjudged.
+- **Narrowing by the failing tests only (2.96).** When the red run names its failing tests, every narrowing step (the
+  target alone, a run without a suspect, the prefix search) runs only those tests, through `rules.focus.test`'s
+  `{filter}`. `rules.byName` says how the names become one filter. Unset, it is on when `rules.focus.test` is `dotnet test`
+  (the runner its default fits): `"FullyQualifiedName~{test}"` for each name, joined by `|`. `true` turns that default
+  on for another runner; `{ "each": "<filter with {test}>", "join": "|" }` or a string sets your own; `false` turns it
+  off. Off (any other runner, unset), a red is narrowed by whole runs as before. A parameter list is cut off a name first (`~` still takes it). No filter is
+  built (narrowing by whole runs, as before) when a name holds anything but letters, digits and `_ . + -`, when there
+  are more than 40, or when the filter is over 3000 characters. A by-name run that says it ran no test (`No test
+  matches the given testcase filter`, `Total tests: 0`) is an error, never a green: the check says so and goes on with
+  whole runs. Once the culprits are out, ONE whole check (as shards when `rules.shards` is set, kept shards reused) on
+  the lanes left decides; a new failing test there is narrowed again the same way, and the target is asked about it
+  by name. A lane is handed back only after a run shows the failing tests green without it, with the batch's whole
+  run red with it; a batch is called green only by a whole check. The `engine.rules` event's `meta.filtered` and
+  `meta.whole` (`{ runs, ms }`), its message and the train's log say how many runs were by name and how many whole,
+  with the minutes of each: `rules runs: 3 run(s) of the failing tests by name (0.4 min), 2 whole run(s) (161 min)`.
+- **Count ratchets (2.96).** `rules.ratchets`: a list of test names or regexes, tests that assert a count is at least
+  N (a branch that adds items without raising N trips one). When every failing test is a ratchet, narrowing is as
+  above and the lane is handed back with cause `ratchet` and the words "a count ratchet tripped (<test>): this is not a
+  behaviour regression; raise the count in this branch and queue again". It is still red and still handed back.
+  Each trip is one `engine.ratchet` event (task, tests); `handBackKind` reads the hand-back as `ratchet`, not `real`.
+  A red land run whose failing tests are all ratchets is handed back the same way.
 - Results are kept per tree, command and inputs in `.studio/engine/<engine>-rules.json`: a tree is run once. A kept
-  full pass also answers a focus or `first` question on the same tree (2.93). A batch head that lands with the same
+  full pass also answers a focus, `first` or by-name question on the same tree (2.93, 2.96). 2.96: it is used
+  everywhere: the owed full run is not owed on a target tree that has one; a check ahead that is ended (its batch did
+  not land unchanged) keeps the exact-tree greens it finished, while greens kept by what they read, reds and timeouts
+  are forgotten as before; and a land run of a group whose tree has one is told `STUDIO_RULES_GREEN=1`. A batch head that lands with the same
   rules key is the next target, so its kept result is the next train's answer for the target. The
   `inputs` are not in the tree, so their content is part of what a kept result is valid for; the train also looks at
   them again right before the land run and leaves `STUDIO_RULES_GREEN` out when they changed since the check.
@@ -305,8 +329,12 @@ half as much machine time as the land runs. Five settings, all optional, in the 
 ```
 - `maxLanes` (2.84, B-134; default 0, off): a batch with more lanes is checked in consecutive slices of that many,
   each merged on the same target. A red slice is narrowed within itself, so only its lanes can be refused; one
-  `engine.rules` event per slice. The whole batch was never one tree in the check, so a sliced check never sends
-  `STUDIO_RULES_GREEN`: it only refuses lanes before they cost a land run.
+  `engine.rules` event per slice. 2.96: the lanes the slices leave are then checked once more as one tree (kept
+  results and shards reused); green, the land run gets `STUDIO_RULES_GREEN=1`. Before, a sliced check never told the
+  land run, which then ran the whole suite itself, silently. This costs one more whole run than the slices; it saves the
+  land run's own copy of the suite (and its memory). The train's start event and log, the running train's "now" line
+  and `train status` say it; `rules show` warns when `engines.<x>.batchMax` is above `maxLanes` (set them equal to
+  check each batch once).
 
 **Play Mode focus (2.84).** The Play Mode stage became the longest stage of a land (20 to 40 minutes). The same idea,
 as a hint the land script may use: `engines.<x>.play.focus`.
@@ -367,7 +395,7 @@ scorecard's Play stage line counts skipped runs.
 
 | Variable | What to do with it |
 | --- | --- |
-| `STUDIO_RULES_GREEN` | `1`: the rules check passed on exactly this batch and target; the script may skip its own copy of those tests. |
+| `STUDIO_RULES_GREEN` | `1`: the rules check passed on exactly this batch and target; the script may skip its own copy of those tests. 2.96: also any group whose tree as it would land has a kept whole rules pass (same command and inputs), for example after a land search dropped a lane. |
 | `STUDIO_RULES_MODE` | `focus` or `full`: how that green was reached; after a `focus` green the script may still run the full rules tests. 2.95: shards without `rules.shards.rest` are `focus`. |
 | `STUDIO_LAND_FULL` | `1`: the daily full run; skip nothing, ignore every shortcut. |
 | `STUDIO_UNITY_EDITMODE_ARGS` | Edit Mode arguments to add after the .NET tests passed (`SKIP`: no Edit Mode run needed). Unset on a full run. |
@@ -657,6 +685,16 @@ another, and a test that fails whenever a branch moves a pinned commit was found
   search; it is handed back with the evidence and the `say` line. Several: they go apart from the rest (2.85). An entry
   with a bad regex or a path outside the repo is left out. Example: `"blame": [ { "test": "PinTests\\.", "touches":
   "Rules~/pin.json", "say": "Regenerate the vectors at the new pin in the same branch" } ]`.
+- **Blame by the failure's own words (2.96).** An entry may add `"names": "<regex on the failure message, group 1 =
+  a name>"` and use `{name}` in `touches`: `{ "test": "DataTests\\.", "names": "data of system (\\w+) differs",
+  "touches": ["tools/port/{name}/"], "say": "..." }`. The names the regex reads in the red's output (letters, digits,
+  `. _ -`; letter case aside in the paths) name the lanes that change those paths: in the rules check they are left out
+  at once, the failing tests run by name without them (no search), and each is put back in batch order: red with it,
+  it is handed back; green, it stays. One suspect costs one run. In a land run they are the suspect (one) or the tied
+  lanes (several), from the run's last lines. Without a matching `blame` entry, in the rules check: a failing test that
+  a system's `rules.focus` filter takes (`map` or `auto`; the reader judges `FullyQualifiedName`, `Name` and
+  `ClassName` with `= != ~ !~ & |`, never `Category`) makes the lanes that change that system's files the first
+  suspects, when they are fewer than the batch. A wrong suspect costs one run by name, never a hand-back.
 - **Checks before queueing.** `engines.<x>.preQueue`: a list of `{ "touches": "<path or glob, or a list>", "run":
   "<command>", "say": "<what to do>", "timeoutMin": 10, "env": { "<NAME>": "<value>" } }`. 2.93: an entry may also
   have `"titles": ["<regex>", ...]` (case-insensitive, tested against the task's title) for a check on one KIND of
@@ -718,6 +756,47 @@ harness never switches it by itself.
   while the first lands: only the land script moves the target, so a group found green on the old target would still
   need a complete land run on the new one, a tree no run has seen as a whole. It is not used for complete runs (a
   land script that does not honour the probe), for the compile search or for the rules check.
+
+## Measured runs and admission by measured RAM and CPU (2.96)
+
+Every land run, rules command (whole, part or shard), compile check and quick test the harness starts is sampled while
+it runs: free RAM, commit charge (Windows), total CPU, and the working set and CPU of the run's whole process tree. The
+samples are in `.studio/engine/<x>-samples/<run>.csv` (newest 60 per engine, none older than 14 days). Linux reads
+`/proc`; elsewhere nothing is sampled. On Windows sampling starts one PowerShell helper for each run that lasts longer
+than one sample interval; it prints one line per sample and ends with the run (or by itself when the run's wrapper is
+gone); `"machine": { "sample": false }` in `studio/game.json` turns sampling off. A sampler that fails never changes the run.
+
+Each ended run is folded into `.studio/engine-ram.json` (`<x>.kinds`, beside the land peaks): its peak GB, mean CPU %,
+minutes, when the peak came (start, middle, end, throughout) and which kinds ran beside it. Kinds: `land with-rules` or
+`land no-rules` (`STUDIO_RULES_GREEN`), plus ` play-<mode>` with `STUDIO_PLAY_MODE`; `rules` (the whole command) and
+`rules <filter>` (a part or shard); `compile`; `quick`. A kind's need is the peak of its last 5 runs plus
+max(0.5 GB, 10%), once at least one of them passed.
+
+`studio/game.json` (the owner's file):
+
+```json
+"machine": { "admit": "measured", "cpuCapPct": 85, "slowerPct": 10, "sampleSec": 10, "sample": true }
+```
+
+- `admit` (default unset: off). Off, every decision is 2.95's. `"measured"`: a land run (the machine:heavy wait), a
+  part of a split rules check, the check ahead and a quick test start when free RAM minus the floor
+  (`STUDIO_RAM_FLOOR_GB`) minus what the running jobs still have to grow (their need minus what they use now; a heavy
+  job with no samples counts its whole claim) holds the job's own need, and CPU now plus the job's measured share stays
+  under `cpuCapPct`. The measured need replaces the claim's RAM and CPU, the land floor and `rules.peak`;
+  `rules.focus.splitGb` set by hand still wins. Slots, per-kind caps, the queue and holds stay. A job that waits says it
+  in numbers: `waits for memory: needs 12.7 GB, 17 GB free above the floor; land no-rules still has 5.1 GB to grow`.
+- When a number is missing (a kind never measured or never passed), stale (a running job's last sample is old) or looks
+  wrong (a running job uses more than its own need), today's rule decides, and the log says why. The first run of a
+  kind measures it.
+- Overlap that does not pay: after 3 passing runs of a kind alone and 3 beside another kind, if it took more than
+  `slowerPct` longer beside it, that pair is not run together for 24 hours (`machine.overlap_stopped`, with the numbers),
+  then tried again on fresh runs.
+- `npm run engine -- rules show` lists each kind's measured peak, need, CPU and minutes, including the land kinds: the
+  number a land script's own wait for free RAM can use. `train status` shows each running job's RAM and CPU now, its
+  peak so far and its reservation. The land result line and the `engine.land` and `engine.rules` events carry
+  `peakGb`, `cpuPct` and `minutes`.
+- On Windows the helper calls no cmdlet (two WMI queries a sample, about 0.1 s of work): it has run on online Windows
+  machines, not yet in a studio. CPU is each process's own kernel and user time since the last sample.
 
 ## The land's stage report
 
@@ -817,3 +896,31 @@ turn on `service.check` and run one `check` end to end, and only then `warm`.
   `task done --train --slice` does): its task stays open when it lands. `--off` removes the mark. Nothing else about the
   entry changes. It refuses when the task is not in that queue or its train is running with it. Same actors as `train auto`.
   Event `task.train.<x>.slice_marked`.
+
+
+## 2.96 (d): landings posted, what the tests cost, Play Mode gaps, a busy line
+
+- **A landing is posted by itself.** When an engine train lands a batch (`task.train.<x>.landed`) the Communicator posts
+  one message to the same webhook as the status: the tasks with their titles (8 at most, then "and n more"), how many
+  landed in the last 24 hours, the first line `engines.<x>.progress` prints (a command that fails is left out), and
+  `Systems ON: n of m` when `engines.<x>.switches` is set. It is on wherever a webhook is set;
+  `engines.<x>.announce: false` turns it off. A landing is posted once; only the Communicator posts it.
+- **`rules.times`** is the result file the test command writes with a time per test (a glob inside the test checkout;
+  `.trx`, NUnit or JUnit XML): `"times": "tools/SimTests/**/*.trx"`. Only files written since the command started are
+  read. The slowest 200 tests of each command are kept for 48 hours in `.studio/engine/<x>-times.json`. The daily digest
+  gets up to two short lines. `npm run engine -- test-cost [--engine <x>]` prints the long form: the 10 slowest tests
+  with their share of the test time, tests that ran in two commands of one train, the rules runs with the most memory
+  (sampled peaks where runs were sampled, else the test command's own `rules.peak`), the most memory per test group when
+  `rules.memory` names the table the test run writes (`{ "file": "<glob>", "name": "<column>", "mb": "<column>" }`, or `gb`;
+  tab or comma separated with a header line) and the hand-backs of kind `ratchet` in the last 24 hours.
+- **Play Mode map gaps.** A land run whose Play Mode stage ran in full because paths match no `play.focus.map` entry
+  keeps all of those paths (`.studio/engine/<x>-play-gaps.jsonl`). The digest says how often that happened in 24 hours
+  and for which folders. `npm run engine -- play-plan --propose [--engine <x>] [--branch <b> | --paths a,b] [--json]`
+  groups the paths by folder (without `--branch` or `--paths`, the paths of the last 7 days) and proposes an entry for
+  each: `skip` when the rules tests already judge the folder (a `rules.focus` map entry or auto folder) or
+  `play.focus.skip` takes every path, else a `map` entry whose filter you fill in. Nothing is written to `studio/game.json`.
+- **A busy line.** The refill counts the open builder tasks that can start now (not held, parked, over budget, waiting
+  for another task or queued for a train). When fewer than `STUDIO_REFILL_MIN` can start, it wakes the Producer with
+  the cause ("nothing can start: n open tasks wait for the engine train or for another task. Propose the next ready work
+  from the plan.") at most once an hour, even while many tasks are open. The `builders-low` alert gives the same cause
+  and says it is not a fault.

@@ -148,6 +148,20 @@ every engine queue and starts `task train --engine <name>` detached in a quiet w
 what it did before: a merge-tree check against the target, ONE land run (the studio's land script), bisection when
 the run is red, then it closes the tasks.
 
+2.96: list files that only grow merge as a union. Wiring tasks often each add a line to the same registry array or
+test list; every pair conflicts, so the train took one per train. `"merge": { "union": ["Game/Sim/registry.cs",
+"tools/SimTests/*.txt"] }` in `studio/game.json` engines.<x> lets the train merge such a file when two lanes (or a lane
+and the target) conflict ONLY in files those globs name, and in each such file both sides only ADDED lines to the
+common base. The merged file has, at each place, the target's (earlier lanes') added lines first, then the lane's; a
+line both added there is kept once (a line with no letter or digit, such as `},`, is always kept). It is done on git
+blobs with a temporary index, never a worktree. Anything else stays a conflict as before: a removed or changed line,
+a file not listed, a binary file, a rename or a mode change. The train's log, one `task.train.<x>.union` event,
+`train status` and the summary name each file ("merged as a union: Game/Sim/registry.cs"); the commit says
+`Union-Merge:`. The queue's own compile check and the rules check see the same merged tree, and the compile check
+and the tests decide. What it cannot know: two lanes that add the same key with different values both stay, and a
+line both add on purpose twice is kept once. With no `merge.union` every merge is as before. A `landMany` command
+merges the branches itself, so the train does not use `merge.union` with one.
+
 2.78.2 (item 18): `task done --train` on an engine pass it can't queue says why and exits 1 (a
 `task.train.not_queued` event), never going on as a studio lane in silence. The reasons
 (`harness/engine-tracks.mjs engineTrainVerdict`) are: an engine-porter task whose track names no engine (or with
@@ -219,6 +233,16 @@ The land run itself still takes `machine:heavy` as that engine's job kind, with 
   `play.focus` every lane is class `full` and nothing changes. A lane marked alone still lands alone. Order: `--only` and
   `--tag`, then alone, then grouping, then the cap. The train's start event and `train status --engine <x>` say why the
   batch is what it is ("6 of 14 queued: class focus, cap 6; 8 wait (5 full, 3 focus)").
+- 2.96: a held lane is left out before the batch is picked. A queued lane whose task waits for another task
+  (`task after`) is not a candidate, even with `--only`: it sets no class, takes no seat and is not deferred. It stays
+  queued. `train status --engine <x>` lists it once ("T-12 held: waits for T-9 (task after)"), and a
+  `task.train.<x>.held` event says so the first time only. The first train after the hold clears takes it.
+  A hold set after a train started still counts: before each land run the train reads the holds again. A lane held by
+  then leaves this train (still queued, not handed back, not blamed); the other lanes run as a new set, so a rules
+  green for the old set does not stand.
+- 2.96: a lane that cannot go does not decide the batch. A lane deferred or handed back after the pick (it conflicts
+  with the target or with a lane before it, or does not compile with one) is taken out and the batch is picked again
+  without it, at most three times. So its class and seat go to lanes that can ride ("picked again without T-21").
 - 2.85: `npm run engine -- play-plan --branch <b>` (or `--paths a,b`) prints which class and Play Mode filter a branch
   would get and names the paths no `play.focus.map` entry takes; `train status --engine <x>` says when the running land
   run is the daily full run and lists the tests the target itself fails in it (see docs/NATIVE-ENGINE.md, "The

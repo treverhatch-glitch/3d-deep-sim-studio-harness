@@ -24,6 +24,7 @@ import { pushSlots } from './engine-ram.mjs';
 import { parseStudioEnv } from './dotenv.mjs';
 import { machineProfile, slotsFor, budgetState, jobClaim, admit, claimOf, describeBudget, oomSignature, maxConcurrent, capGroup, unityMinFreeGb, isUnityKind, scanFreeGb, engineLineRoom } from './heavy-budget.mjs';
 import { readJson } from './fsafe.mjs';
+import { measuredAdmit } from './run-cost.mjs';
 import { argAfterOf, isOffRaw as off, numBlankDefault as num, sleepSync as sleep } from './helpers.mjs';
 
 const PREFIX = 'machine-heavy';
@@ -455,10 +456,10 @@ export function heldClaim(root, env = process.env) {
 /**
  * Take a machine:heavy slot (sync; waits). Returns { release(), held, waitedMs, claim, skipped?, inside? }. Throws
  * HEAVY_BUSY when the wait limit passes. While held, STUDIO_HEAVY_HELD names the slot so child processes don't wait.
- * The job's claim (opts.kind or opts.claim) must fit the free RAM, GPU and CPU of the last machine scan, and a slot be
- * free. Waiters queue (a landing first); with no scan: one slot and the STUDIO_RAM_FLOOR_GB floor.
+ * The claim must fit the last scan's free RAM, GPU and CPU, and a slot be free; waiters queue (a landing first). 2.96
+ * (a) measure { engine, kind }: measured admission (run-cost.mjs) replaces the claim's RAM/CPU and the floors.
  */
-export function acquireHeavy(root, label, { log = () => {}, env = process.env, owner = null, freemem = undefined, kind = 'heavy', claim: givenClaim = null, machine = undefined, ramGb, vramGb, gpuOnly, minFreeGb = undefined, waitMin = undefined, engine = null } = {}) {
+export function acquireHeavy(root, label, { log = () => {}, env = process.env, owner = null, freemem = undefined, kind = 'heavy', claim: givenClaim = null, machine = undefined, ramGb, vramGb, gpuOnly, minFreeGb = undefined, waitMin = undefined, engine = null, measure = null } = {}) {
   const profileNow = () => { try { return machineProfile(root, { env, machine }); } catch { return null; } };
   let profile = profileNow();
   // The slot count as it stands now (heavySlotsAt: the main checkout's .env counts too), looked at again each poll.
@@ -513,11 +514,17 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   const floorVar = explicitFloor ? '--min-free-gb' : 'STUDIO_UNITY_MIN_FREE_GB';
   let floor = { low: false };
   let floorTold = 0;
+  let md = null;
+  let mdTold = '';
   try {
     while (!mine) {
       profile = profileNow();
       n = heavySlotsAt(root, env, profile);
-      if (!profile) {
+      holders = collectHolders(dir, { staleMs, log, env });
+      md = measure ? measuredAdmit({ root, engine: measure.engine, kind: measure.kind, label, holders, env }) : null;
+      if (md && !md.decided && !md.off && md.why !== mdTold) { log(`[heavy] ${label}: ${md.why}`); mdTold = md.why; }
+      if (md?.decided) ram = { low: false };
+      else if (!profile) {
         try { ram = ramCheck(freemem ? { freemem } : {}, ramEnv); } catch { ram = { low: false }; }
       } else ram = { low: false };
       const ramWhy = ram.low ? `free memory is ${ram.freeGb} GB, under the floor (${ramVar}=${ram.floorGb})` : '';
@@ -530,7 +537,6 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
         toldAt = Date.now();
       }
       if (!ram.low && ramTold) { log(`[heavy] ${label}: free memory is back over the floor (${ram.freeGb ?? '?'} GB)`); ramTold = false; }
-      holders = collectHolders(dir, { staleMs, log, env });
       const state = budgetState(profile, holders, { env });
       // A verify's share of the cores also counts the lane checks running (gate slots).
       claim = withEngine(givenClaim || jobClaim(kind, { root, env, label, profile, state, ramGb, vramGb, gpuOnly, extraJobs: kind === 'verify' && profile ? laneCheckSlots(root, env).map(() => ({ kind: 'check', workers: null, threads: 0 })) : [] }));
@@ -541,13 +547,15 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
       if (!gameLanding && !(profile && claim.gpuOnly)) { const tw = trainWaiting(root, { env }); if (tw) ahead.push({ pid: tw.pid || 0, label: `a merge train waiting for the next free slot${tw.why ? ` (${tw.why.slice(0, 120)})` : ''}; STUDIO_TRAIN_SLOT_PRIORITY_MIN`, landing: true, train: true }); }
       // A flake triager's quiet re-run is running: nothing but a landing starts (any class: quiet means quiet).
       if (!gameLanding) { const qh = quietHolding(root, engine ? { skipTags: ['engine-land'] } : {}); if (qh) ahead.push({ pid: qh.pid || 0, label: `${qh.tag ? `${qh.why || 'a quiet hold'}${qh.owner ? ` (${qh.owner})` : ''}` : `a flake check's quiet re-run${qh.file ? ` of ${qh.file}` : ''}${qh.owner ? ` by ${qh.owner}` : ''}`} holds new heavy work back until it ends (at most until ${new Date(Number(qh.until)).toISOString().slice(11, 19)} UTC, STUDIO_FLAKE_HOLD_MIN)`, landing: true, hold: true }); }
-      adm = ahead.length ? { ok: false, area: 'queue', line: '' } : admit(claim, state, { slots: n, holders, kindMax: maxConcurrent(claim.kind, { root, env }), groupMax: maxConcurrent(capGroup(claim.kind), { root, env }), engineSlots });
-      floor = floorCfg.gb > 0 ? floorFree(floorCfg.gb, { env, freemem, profile }) : { low: false };
+      // Measured: the claim's RAM and CPU areas and the floors give way to the measured need; the rest of admit stays.
+      adm = ahead.length ? { ok: false, area: 'queue', line: '' } : admit(md?.decided ? { ...claim, ramGb: 0, cpuThreads: 0 } : claim, state, { slots: n, holders, kindMax: maxConcurrent(claim.kind, { root, env }), groupMax: maxConcurrent(capGroup(claim.kind), { root, env }), engineSlots });
+      if (md?.decided && adm.ok) adm = md.ok ? { ...adm, line: [adm.line, md.line].filter(Boolean).join('; ') } : { ok: false, area: md.area, line: md.line };
+      floor = floorCfg.gb > 0 && !md?.decided ? floorFree(floorCfg.gb, { env, freemem, profile }) : { low: false };
       if (adm.ok && !ram.low && !floor.low) {
         for (let i = 1; i <= n + 16 && !mine; i += 1) {
           const f = path.join(dir, `${PREFIX}-${i}.lock`);
           try {
-            fs.writeFileSync(f, JSON.stringify({ pid: process.pid, identity: selfIdentity(), at: Date.now(), label, owner: owner || env.STUDIO_LOCK_OWNER || null, tree: selfTree(), ...(landing ? { landing: true } : {}), ...(profile ? { claim } : { claim: { ...claim, unscanned: true } }) }), { flag: 'wx' });
+            fs.writeFileSync(f, JSON.stringify({ pid: process.pid, identity: selfIdentity(), at: Date.now(), label, owner: owner || env.STUDIO_LOCK_OWNER || null, tree: selfTree(), ...(landing ? { landing: true } : {}), ...(measure ? { measure } : {}), ...(profile ? { claim } : { claim: { ...claim, unscanned: true } }) }), { flag: 'wx' });
             mine = f;
           } catch (err) {
             if (err.code !== 'EEXIST') throw err;
@@ -569,7 +577,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
       // With holders running, a hold or the train that also keeps this one back is named too.
       const keptBy = ahead.filter((w) => w.hold || w.yieldTo || w.train);
       const busyWith = holders.length ? `${holders.map(describeHolder).join('; ')}${keptBy.length ? `; and ${keptBy.map((w) => w.label).join(', ')}` : ''}` : ahead.length ? `${ahead.some((w) => w.hold) && !gameLanding ? 'a quiet hold on the machine' : ahead.some((w) => w.yieldTo) ? "the game's merge train" : ahead.some((w) => w.landing) && !gameLanding ? 'a landing waiting first' : 'earlier waiters'} (${ahead.map((w) => w.label).join(', ')})` : 'nobody';
-      const why = [['ram', 'gpu', 'cpu', 'kind'].includes(adm.area) || (adm.area === 'slots' && claim?.engine) ? adm.line : '', floorLine].filter(Boolean).join('; ');
+      const why = [['ram', 'gpu', 'cpu', 'kind', 'pair'].includes(adm.area) || (adm.area === 'slots' && claim?.engine) ? adm.line : '', floorLine].filter(Boolean).join('; ');
       if (Date.now() - t0 >= waitMs) {
         throw Object.assign(new Error(`[heavy] waited ${span(Date.now() - t0)} for the machine:heavy lock and it is still held: ${why ? `${why}; ` : ''}${busyWith}. ${label} did not run (it never runs on top of other heavy work). Run it again when that ends (node harness/heavy.mjs status shows the holder); STUDIO_HEAVY_WAIT_MIN sets the wait.`), { code: 'HEAVY_BUSY', holders, ...(why ? { area: adm.area } : {}) });
       }

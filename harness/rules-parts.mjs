@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { RUN_LIMITED } from './run-limited.mjs';
+import { limitedArgs } from './run-limited.mjs';
 import { readJson } from './fsafe.mjs';
 import { ramCheck } from './ram.mjs';
 import { numFiniteFirst as num } from './helpers.mjs';
@@ -93,9 +93,10 @@ export function peakRead(dir, peak) {
 /**
  * Run parts[i] through start(part, i) -> Promise<{ status: 'pass' | 'red' | 'error', ... }>, at most `max` at once and only
  * while free RAM - floor >= gb, or the part's own measured gb (at least one always). After a part is not 'pass' no new part starts; the ones running finish.
+ * 2.96 (a): admitPart(part) -> a run-cost.mjs decision; a decided one replaces the free-RAM test.
  * { results (in part order; a part never started is null), atOnce (the most that ran together), decisions: [line] }.
  */
-export async function runParts({ parts, start, max = 1, gb = 4, floorGb = 3, freeGb = () => null, log = () => {}, pollMs = 1000 } = {}) {
+export async function runParts({ parts, start, max = 1, gb = 4, floorGb = 3, freeGb = () => null, log = () => {}, pollMs = 1000, admitPart = null } = {}) {
   const results = parts.map(() => null);
   const decisions = [];
   const say = (m) => { decisions.push(m); log(m); };
@@ -108,11 +109,15 @@ export async function runParts({ parts, start, max = 1, gb = 4, floorGb = 3, fre
   while (true) {
     while (!stop && next < parts.length) {
       let why;
+      let md = null;
       // 2.95: a part with a measured peak (rules.peak) needs that, not the plan's guess.
       const need = Number(parts[next]?.gb) > 0 ? Number(parts[next].gb) : gb;
       if (!running.size) why = 'none is running: the first part always starts';
       else if (running.size >= max) { if (lastWait !== 'max') say(`part ${next + 1} of ${parts.length} waits: ${running.size} running is the most at once (rules.focus.splitMax ${max})`); lastWait = 'max'; break; }
-      else {
+      else if ((md = admitPart ? admitPart(parts[next]) : null)?.decided) {
+        if (md.ok) why = md.line;
+        else { if (lastWait !== md.line) say(`part ${next + 1} of ${parts.length} ${md.line}; ${running.size} running`); lastWait = md.line; break; }
+      } else {
         const f = freeGb();
         if (Number.isFinite(f) && f - floorGb >= need) why = `${r1(f)} GB free - ${floorGb} GB floor >= ${need} GB ${need === gb ? 'per part' : 'measured for this part'}`;
         else {
@@ -142,6 +147,8 @@ async function cli() {
   let text = '';
   for await (const c of process.stdin) text += c;
   const job = JSON.parse(text);
+  // 2.96 (a): loaded here, not at the top: run-cost.mjs imports this file.
+  const cost = job.root ? await import('./run-cost.mjs').catch(() => null) : null;
   const t0 = Date.now();
   const logs = [];
   const freeGb = Number.isFinite(job.freeGb) ? () => job.freeGb : () => readFreeGb(job.env || process.env);
@@ -153,15 +160,18 @@ async function cli() {
     const keep = (d) => { buf += d.toString('utf8'); if (buf.length > 4e6) buf = buf.slice(-2e6); };
     let done = false;
     if (job.peak) peakClear(job.cwd, job.peak);
-    const fin = (r) => { if (done) return; done = true; clearTimeout(timer); const pg = job.peak && !shared() ? peakRead(job.cwd, job.peak) : null; resolve({ filter: part.filter, seconds: Math.round((Date.now() - g0) / 1000), text: buf, ...(pg ? { peakGb: pg } : {}), ...r }); };
-    const child = spawn(process.execPath, [RUN_LIMITED, String(left), '--', part.command], { cwd: job.cwd, env: job.env, windowsHide: true });
+    const fin = (r) => { if (done) return; done = true; clearTimeout(timer); const pg = job.peak && !shared() ? peakRead(job.cwd, job.peak) : null; const mz = smp ? cost.runNumbers(smp) : null; resolve({ filter: part.filter, seconds: Math.round((Date.now() - g0) / 1000), text: buf, ...(pg ? { peakGb: pg } : {}), ...(mz ? { measured: mz } : {}), ...r }); };
+    const smp = cost && job.root ? cost.runSample(job.root, job.engine, cost.rulesKind(part.filter), { label: `${job.engine} rules ${part.filter}` }) : null;
+    const child = spawn(process.execPath, limitedArgs(left, part.command, smp), { cwd: job.cwd, env: job.env, windowsHide: true });
     // The wrapper ends the tree at `left`; this timer is only the safety net.
     const timer = setTimeout(() => { try { child.kill(); } catch { /* it ended */ } fin({ status: 'error', timedOut: true }); }, left + 15000);
     child.stdout.on('data', keep); child.stderr.on('data', keep);
     child.on('error', (e) => fin({ status: 'error', errorCode: e.code || e.message }));
     child.on('close', (code, signal) => fin(code === 124 && buf.includes('[run-limited] ended after') ? { status: 'error', timedOut: true } : { status: code === 0 ? 'pass' : 'red', code, signal }));
   });
-  const r = await runParts({ parts: job.parts, start, max: job.max, gb: job.gb, floorGb: job.floorGb, freeGb, log: (m) => logs.push(m), pollMs: job.pollMs || 1000 });
+  const heavy = job.root ? await import('./heavy.mjs').catch(() => null) : null;
+  const admitPart = cost && heavy && job.root ? (part) => cost.measuredAdmit({ root: job.root, engine: job.engine, kind: cost.rulesKind(part.filter), handGb: job.handGb || null, holders: heavy.heavyHolders(job.root, { env: job.env }), env: job.env }) : null;
+  const r = await runParts({ parts: job.parts, start, max: job.max, gb: job.gb, floorGb: job.floorGb, freeGb, log: (m) => logs.push(m), pollMs: job.pollMs || 1000, admitPart });
   process.stdout.write(`${JSON.stringify({ ...r, logs })}\n`);
 }
 

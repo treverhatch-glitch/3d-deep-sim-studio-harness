@@ -15,7 +15,7 @@ import { eventsOf, fileUrlOf, out } from './kit.mjs';
 export async function selftest2652A({ dir, run, report, tmpRoot }) {
   const u = fileUrlOf(dir);
   const events = path.join(dir, '.studio', 'events-2652a.jsonl');
-  const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_ROLE: '', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_BUILDER_CMD: '', STUDIO_PRODUCER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_AGENT_TOOL: '', STUDIO_REHEARSAL: '', STUDIO_LONG_CACHE: '', STUDIO_CACHE_READ_WEIGHT: '', STUDIO_AUTONOMY_CACHE_S: '0', STUDIO_LANELESS: 'shared', STUDIO_WORKTREES: 'off', AGENT_EVENTS_FILE: events };
+  const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_ROLE: '', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_BUILDER_CMD: '', STUDIO_PRODUCER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_AGENT_TOOL: '', STUDIO_REHEARSAL: '', STUDIO_LONG_CACHE: '', STUDIO_CACHE_READ_WEIGHT: '', STUDIO_LANELESS: 'shared', STUDIO_WORKTREES: 'off', AGENT_EVENTS_FILE: events };
   let n = 0;
   const probe = (code, env = {}) => {
     const f = path.join(tmpRoot, `p2652a-${++n}-${process.pid}.mjs`);

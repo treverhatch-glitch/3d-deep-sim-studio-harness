@@ -112,7 +112,7 @@ const { trainDeps } = await import(${u('harness/task.mjs')});
 const handed = []; const logs = [];
 const d = trainDeps({}, { forDone: true });
 const r = await runUnityTrain({ root: process.cwd(), log: (m) => logs.push(String(m)), deps: { ...d, handBack: (lane, note) => handed.push({ task: lane.task, note }) } });
-console.log(JSON.stringify({ ok: r.ok, landed: r.landed, dropped: r.dropped, deferred: r.deferred, handed, logs: logs.filter((l) => /pre-queue|regular/.test(l)) }));`;
+console.log(JSON.stringify({ ok: r.ok, landed: r.landed, dropped: r.dropped, deferred: r.deferred, held: r.held || null, handed, logs: logs.filter((l) => /pre-queue|regular/.test(l)) }));`;
   const ctlRun = (id, args) => task(['train', 'slice', id, '--engine', 'unity', ...args]);
 
   // ================= 1. preQueue by title =================
@@ -179,9 +179,10 @@ console.log(JSON.stringify({ ok: r.ok, landed: r.landed, dropped: r.dropped, def
     queueUnityOf(S)(E, [['T-201', 'feat/a'], ['T-202', 'feat/b']]);
     const af = task(['after', 'T-201', '--set', 'T-203', '--by', 'overseer']);
     const r1 = probe(TRAIN);
-    const dEv = evs().filter((e) => e.type === 'task.train.unity.deferred' && e.task === 'T-201');
-    await guard('293c 2: a queued lane whose task waits (task after) for an open task is left out of the batch with the reason "it waits for T-203 (task after)" and the other lane lands (fails before this fix: the held lane rode the train)', () => [
-      af.status === 0 && r1.landed?.join() === 'T-202' && r1.deferred?.some((x) => x.task === 'T-201' && /it waits for T-203 \(task after\)/.test(x.why)) && dEv.length === 1 && queueFile().some((e) => e.task === 'T-201'),
+    // 2.96 (c): changed on purpose: a held lane is left out before the pick (a held event, not a deferral).
+    const dEv = evs().filter((e) => e.type === 'task.train.unity.held' && e.task === 'T-201');
+    await guard('293c 2: a queued lane whose task waits (task after) for an open task is left out of the batch with the reason "waits for T-203 (task after)" and the other lane lands; 2.96: left out before the pick (one held event, not deferred) (fails before this fix: the held lane rode the train)', () => [
+      af.status === 0 && r1.landed?.join() === 'T-202' && !r1.deferred?.length && r1.held?.some((x) => x.task === 'T-201' && /^waits for T-203 \(task after\)$/.test(x.why)) && dEv.length === 1 && queueFile().some((e) => e.task === 'T-201'),
       JSON.stringify({ af: out(af), r1, dEv: dEv.length, q: queueFile().map((e) => e.task) }).slice(0, 2500)]);
     board([['T-201', 'Held lane', 'open'], ['T-203', 'First task', 'done']]);
     const r2 = probe(TRAIN);
@@ -201,8 +202,8 @@ console.log(JSON.stringify({ ok: r.ok, landed: r.landed, dropped: r.dropped, def
       q.some((e) => e.task === 'T-211') && /It waits for T-212 \(task after\): a train leaves it out until then\./.test(out(d)),
       out(d).slice(-1500)]);
     const cli1 = task(['train', '--engine', 'unity', '--by', 'overseer', '--foreground']);
-    await guard('293c 2: the real command (task train --engine unity) leaves the held lane out with the reason and does not crash (fails before this fix: the held lane rode the train)', () => [
-      /it waits for T-212 \(task after\)/.test(out(cli1)) && queueFile().some((e) => e.task === 'T-211') && !/unsettled|ERR_/.test(out(cli1)), out(cli1).slice(-1500)]);
+    await guard('293c 2: the real command (task train --engine unity) leaves the held lane out with the reason and does not crash; 2.96: the batch line says "T-211 waits for T-212 (task after)" (fails before this fix: the held lane rode the train)', () => [
+      /T-211 waits for T-212 \(task after\)/.test(out(cli1)) && queueFile().some((e) => e.task === 'T-211') && !/unsettled|ERR_/.test(out(cli1)), out(cli1).slice(-1500)]);
     task(['after', 'T-211', '--clear', '--by', 'overseer']);
     const cli2 = task(['train', '--engine', 'unity', '--by', 'overseer', '--foreground']);
     await guard('293c 2: when the hold is released the lane rides the next train, run as the real command (fails before this fix: n/a)', () => [cli2.status === 0 && !queueFile().some((e) => e.task === 'T-211'), out(cli2).slice(-1500)]);

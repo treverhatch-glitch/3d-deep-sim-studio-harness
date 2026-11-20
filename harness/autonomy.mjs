@@ -932,19 +932,6 @@ export async function autonomyReport({ now = Date.now(), days = null, since = nu
   return { card, badge, line: autonomyLine(card, badge), config: { file: cfg.file, exists: cfg.exists, level: cfg.level, l3: cfg.l3, confidence: badge.confidence, keepDays: cfg.keepDays, minSample: cfg.minSample, protected: await configProtected() } };
 }
 
-let cached = null;
-/** The War Room's card (GET /api/autonomy): the report without per-task rows, recomputed at most every STUDIO_AUTONOMY_CACHE_S (300) s. */
-export async function autonomyCard({ now = Date.now() } = {}) {
-  const ttl = Number(process.env.STUDIO_AUTONOMY_CACHE_S ?? 300) * 1000;
-  if (cached && now - cached.at < ttl) return cached.card;
-  const r = await autonomyReport({ now });
-  const { tasks, ...card } = r.card;
-  if (card.tokenWork) card.tokenWork = { ...card.tokenWork, landings: card.tokenWork.landings.filter((l) => l.fate !== 'kept').slice(-8) };
-  card.interventions = { ...card.interventions, list: card.interventions.list.slice(-8) };
-  cached = { at: now, card: { ...card, badge: r.badge, line: r.line, config: r.config } };
-  return cached.card;
-}
-
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const flag = flagOf(argv);

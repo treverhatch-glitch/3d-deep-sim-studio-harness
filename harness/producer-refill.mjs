@@ -149,12 +149,37 @@ export function candidates({ list = milestones() } = {}) {
   return out;
 }
 
-/** One refill pass. deps for tests: { queue, add, wake }. */
+const STUCK_GAP_MS = 3600000;
+/** Can this open task start a session now? Not held, parked, over budget, waiting for another task or queued for a train. */
+async function canStartNow(t, q) {
+  const { startRefusal } = await import('./attempts.mjs');
+  const { inAnyTrain } = await import('./task-hold.mjs');
+  return !startRefusal(t.id, { role: t.role, q }) && !inAnyTrain(t.id);
+}
+/** { open, startable } builder task counts; canStart (tests) replaces the real check. */
+export async function stuckCounts({ queue = null, canStart = null } = {}) {
+  const q = queue || (await import('./task.mjs')).parseNextQueue();
+  const open = [...q.inProgress, ...q.backlog].filter((t) => t.role === 'builder');
+  let startable = 0;
+  for (const t of open) if (canStart ? await canStart(t, q) : await canStartNow(t, q)) startable += 1;
+  return { open: open.length, startable };
+}
+export const stuckWords = ({ open, startable }) => (startable === 0
+  ? `nothing can start: ${open} open task${open === 1 ? '' : 's'} wait${open === 1 ? 's' : ''} for the engine train or for another task. Propose the next ready work from the plan.`
+  : `only ${startable} of ${open} open tasks can start: the other ${open - startable} wait for the engine train or for another task. Propose the next ready work from the plan.`);
+
+/** One refill pass. deps for tests: { queue, add, wake, canStart, events }. */
 export async function refillPass({ dryRun = false, min = Number(process.env.STUDIO_REFILL_MIN ?? 4), deps = {} } = {}) {
   const task = await import('./task.mjs');
   const q = deps.queue || task.parseNextQueue();
   const open = [...q.inProgress, ...q.backlog].filter((t) => t.role === 'builder');
-  if (open.length >= min) return { refilled: [], why: `${open.length} builder tasks open (min ${min})` };
+  // 2.96 (d): open tasks that cannot start (they wait for the engine train or another task) do not keep the line busy.
+  const c = await stuckCounts({ queue: q, canStart: deps.canStart });
+  const stuck = c.startable < min && c.startable < c.open ? c : null;
+  if (open.length >= min) {
+    if (!stuck) return { refilled: [], why: `${open.length} builder tasks open (min ${min})` };
+    return stuckPass({ c, dryRun, deps });
+  }
   const known = [...q.inProgress, ...q.backlog, ...q.done];
   const keys = new Set(known.map((t) => (t.title.match(KEY) || [])[1]).filter(Boolean));
   const refused = []; const picked = [];
@@ -173,7 +198,7 @@ export async function refillPass({ dryRun = false, min = Number(process.env.STUD
   let woke = null;
   if (!dryRun && process.env.STUDIO_REFILL_WAKE !== 'off') {
     const wake = deps.wake || (async (why) => (await import('./agent.mjs')).wake('producer', { why, auto: true }));
-    try { woke = await wake(`the queue is low (${open.length} open): plan forward from the next unmet milestone; never re-list done work`); } catch {}
+    try { woke = await wake(stuck && c.startable === 0 ? stuckWords(c) : `the queue is low (${open.length} open${stuck ? `, ${c.startable} can start` : ''}): plan forward from the next unmet milestone; never re-list done work`); } catch {}
   }
   const msg = `Queue low (${open.length} builder tasks open): ${dryRun ? 'would add' : 'added'} ${picked.length} from unmet goals${refused.length ? `, refused ${refused.length} already covered` : ''}`;
   // 2.54.0 (P-027): a pass that adds nothing and wakes nobody is logged once an hour, not every minute.
@@ -187,6 +212,21 @@ export async function refillPass({ dryRun = false, min = Number(process.env.STUD
   }
   if (!quiet) emitEvent({ type: 'producer.refill', agent: 'watchdog', to: 'producer', msg, meta: { picked: picked.map((p) => p.key), refused: refused.map((r) => r.key) } });
   return { refilled: picked, added, refused, woke, why: `${open.length} open < ${min}` };
+}
+
+/** Every open task waits: wake the Producer once an hour with the cause. */
+async function stuckPass({ c, dryRun, deps }) {
+  let events = [];
+  try { events = deps.events || readRecentEvents(2000); } catch { events = []; }
+  const last = events.filter((e) => e.type === 'producer.refill' && e.meta?.stuck).pop();
+  if (dryRun || (last && Date.now() - Date.parse(last.ts) < STUCK_GAP_MS)) return { refilled: [], stuck: true, why: `${c.startable} of ${c.open} open tasks can start${dryRun ? '' : '; the Producer was asked less than an hour ago'}` };
+  let woke = null;
+  if (process.env.STUDIO_REFILL_WAKE !== 'off') {
+    const wake = deps.wake || (async (why) => (await import('./agent.mjs')).wake('producer', { why, auto: true }));
+    try { woke = await wake(stuckWords(c)); } catch {}
+  }
+  emitEvent({ type: 'producer.refill', agent: 'watchdog', to: 'producer', msg: `Queue not low but stuck: ${stuckWords(c)}`, meta: { stuck: true, open: c.open, startable: c.startable } });
+  return { refilled: [], stuck: true, woke, why: `${c.startable} of ${c.open} open tasks can start` };
 }
 
 async function main() {

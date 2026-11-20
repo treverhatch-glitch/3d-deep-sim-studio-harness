@@ -2,12 +2,12 @@
 
 **2-minute read for the owner: the latest summary is first. Then open problems, then proposals waiting for you.**
 
-## Latest summary — 2026-11-18 (2.95)
-- **Done:** 2.94 (the next batch's rules check beside the land run, as a setting; "landed" is train work only) is built and its online checks pass. The one studio on record runs it, taken from the branch.
-- **In progress:** 2.95 on a branch, merged when its online checks pass: the full rules check in shards with a kept green per shard, the test run's own peak memory, a playtest build in one command with `PLAYTEST.md`, `Systems ON: n of m`, no session on a held and queued branch, a check that starts pool and agy porters end to end. Notes: docs/RELEASE-2.95.0.md, studio/notes/HANDOFF-2.95-2026-11-18.md.
-- **Untested:** 2.93, 2.94 and 2.95 have not run on a real engine, on real agy or with a real API pool. Every new setting is off until a studio sets it.
-- **Open problems:** P-370 (a train cancel from a cut-down environment on Windows), P-346 (timing checks under load), P-005 (GPU model), P-009 (no Unity on the maintainer's side).
-- **Waiting for your OK:** nothing from this round.
+## Latest summary — 2026-11-20 (2.96)
+- **Done:** 2.95 (the full rules check in shards, the playtest build, Systems ON) is on main and in use in the one studio on record.
+- **In progress:** 2.96 on a branch, merged when its online checks pass: every run sampled, admission by measured RAM and CPU (a setting), narrowing by the failing tests only, one green per tree, held lanes left out of the batch, union merge for list files, landing posts, the test-cost report, a smoke start for every pool, an upgrade that waits for the train. Notes: docs/RELEASE-2.96.0.md, studio/notes/HANDOFF-2.96-2026-11-20.md.
+- **Untested:** nothing of 2.93 to 2.96 has run on a real engine from the maintainer's side; the Windows sampler runs for real only in one online check; measured admission has decided nothing on a real machine yet.
+- **Open problems:** P-374 (first real samples needed), P-370, P-373, P-346, P-005, P-009.
+- **Waiting for your OK:** whether a count ratchet may land with a fix task filed; which unused features to retire.
 
 ## The files
 | File | What | Format |

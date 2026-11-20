@@ -158,7 +158,7 @@ node can't run, so use the line above there.) The guard finds the studio by git 
    board with `--no-verify`. It waits up to `STUDIO_UPGRADE_LOCK_WAIT_MS` (120000) for the board lock.
 3. Other uncommitted work: commit it on a branch, or set it aside with a named stash
    (`git stash push -u -m "<unique-tag>" -- <paths>`) that leaves `studio/` out. Never `git stash` the whole checkout.
-4. **Merge:** `npm run upgrade -- --merge <ref> --by <you>`. **Running processes (2.86):** nothing running is stopped. A
+4. **Merge:** `npm run upgrade -- --merge <ref> --by <you>`. **Not during a train (2.96):** it refuses while a web or engine train runs (a train loads some modules late, so it would run half of each version), saying which train and since when; `--during-train` takes the update anyway. A ref that is not main is merged, with one line saying a branch can still change. After it: `npm run agent -- smoke` proves each start path. **Running processes (2.86):** nothing running is stopped. A
    supervisor on 2.86 or later notices the new code and restarts itself at its next pass (`harness.code_changed`), keeping
    its halt, end time and back-offs; agent sessions and a running train finish on the code they started with, and each new
    one starts on the new code. The merge ends by naming what still runs old code and what happens to it (an older

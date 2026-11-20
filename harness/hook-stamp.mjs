@@ -23,7 +23,6 @@ import { foldRealOf, isOffRaw as falsy, realOrResolved } from './helpers.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = protectRoot(path.resolve(HERE, '..')) || path.resolve(HERE, '..'); // never in a lane copy
 export const TRAILER = 'Studio-Hooks';
-export const HARNESS_TRAILER = 'Studio-Harness';
 /** Commits the harness itself makes without the hooks: the kind, and a trailer such a commit always carries too. */
 export const HARNESS_KINDS = { 'config-from': /^Config-From:\s*\S/m };
 /**

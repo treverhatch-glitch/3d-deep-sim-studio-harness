@@ -208,10 +208,24 @@ hand (2.93): any role a plain start takes (builder by default), recorded as that
 gets its engine worktree), under the first pool name with no live session; all names busy is refused in one line. A
 tool out of quota through a provider limit (a 429 mark) still holds every session on that tool.
 
+`npm run agent -- smoke [--role R] [--pool api] [--tool T] [--engine x] [--minutes 10] [--dry-run]` (2.96) proves one start path for real, and
+SPENDS REAL TOKENS (it says so in its first line). It adds a throwaway task (one line in `docs/smoke/<agent>.md`, committed in the session's own
+lane), starts the session through the normal start, waits up to `--minutes`, and says: lane made (where), first tool call allowed (the commit is
+on the lane's branch), how the session ended (with its refusal or reason when it died). Then the task is dropped (never queued for a train, never
+landed) and the lane removed. Exit 0 only when the commit exists. With no `--pool` or `--tool` it runs one smoke per path the role has, in the
+owner's order (`STUDIO_BUILDER_ORDER`, else the API pool then the role's tool, then the tools in `npm run budget -- order`), one line each: run it
+after an upgrade. `--dry-run` starts nothing.
+
 `STUDIO_BUILDER_ORDER` (2.80; unset: the choice above) is the owner's order for filling a builder slot, e.g. `api,vertex,plan`: `api` (a
 free pool name), `vertex` (its budget cut, prompt and failure rules and `STUDIO_VERTEX_SHARE=0` still apply; its share cap only when it
 comes after `plan`) and `plan` (the plan's tool, not while the plan's budget is high). The first kind that can start now is taken; a kind
 left out is never used.
+
+Engine porters (2.96) take the same order once the owner adds them: `STUDIO_BUILDER_ORDER_ROLES=builder,engine-porter` (unset: builders
+only, as before, so an upgrade never moves porters onto API credit by itself). For the owner's order, API credit first, then agy, then the
+plan: `STUDIO_API_POOL=<names>` with their key mappings, `STUDIO_BUILDER_ORDER=api,plan`, `STUDIO_BUILDER_ORDER_ROLES=builder,engine-porter`,
+`STUDIO_ENGINE_PORTER_TOOL=agy` and `npm run budget -- order agy,claude`. A free pool name starts first (on claude: an API key does not pay for agy),
+then agy, and claude (the plan) once agy is out of quota. `npm run agent -- smoke --role engine-porter` proves each step.
 
 ## Vertex AI as a builder (`--tool vertex`, 2.79.1)
 

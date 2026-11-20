@@ -1,7 +1,7 @@
 # 2.95.0: the full rules check in shards, a playtest build in one command (`docs/RELEASE-2.95.0.md`)
 
 The overseer's list of 2026-11-18, passed on by the owner the same evening as the last upgrade before his playtest.
-Built on 2.94.0. Only this page and the one for 2.94.0 are kept; older release notes are in git history.
+Built on 2.94.0. Only this page and the one for 2.96.0 are kept; older release notes are in git history.
 
 ## What the records said
 

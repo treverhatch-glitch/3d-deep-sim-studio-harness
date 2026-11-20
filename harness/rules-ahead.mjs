@@ -20,6 +20,7 @@ import { rulesConfig, rulesGate, rulesKey, rulesTimeout, rulesCacheKeys, rulesCa
 import { splitPlan, readFreeGb } from './rules-parts.mjs';
 import { heavyHolders, holderLive } from './heavy.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
+import { measuredAdmit, rulesKind } from './run-cost.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const fileOf = (root, engine, k) => path.join(root, '.studio', 'engine', `${engine}-rules-ahead${k}.json`);
@@ -52,7 +53,8 @@ async function endIt(root, engine, m, o, why) {
     for (const until = Date.now() + 15000; live(m, o) && Date.now() < until;) await pause(100);
     if (live(m, o) && process.platform !== 'win32') { try { process.kill(-m.pid, 'SIGKILL'); } catch { /* gone */ } }
   }
-  if (o?.before) rulesCacheForget(root, engine, o.before);
+  // 2.96: an exact-tree green it finished stays kept (a fact about that tree); the rest it added is forgotten.
+  if (o?.before) rulesCacheForget(root, engine, o.before, { keepTree: true });
   // A run ended mid-way leaves its throwaway checkout (runRulesAt's own clean-up did not run).
   const job = readJson(fileOf(root, engine, '-job')); const tmp = path.join(root, '.studio', 'tmp');
   try { for (const d of fs.readdirSync(tmp)) if (job?.repo && d.startsWith(`rules-${m.train}-ahead`)) removeCheckout(job.repo, path.join(tmp, d)); } catch { /* none */ }
@@ -155,14 +157,18 @@ async function child(jobFile) {
   // 2.95: a rules run's own measured peak (rules.peak) is what one run takes, when it is known.
   const plan = splitPlan(cfg.focus || {}, { root, engine, env, peakGb: rulesPeakGb(root, engine, cfg) });
   const roomNow = () => { const free = readFreeGb(env); return free === null ? null : Math.round((free - plan.floorGb) * 10) / 10; };
+  // 2.96 (a): measured admission (studio/game.json machine.admit) beside the land run's remaining growth; undecided: as before.
+  const measured = (filter) => measuredAdmit({ root, engine, kind: rulesKind(filter), label: `the rules ${filter || 'run'} ahead`, handGb: Number(cfg.focus?.splitGb) > 0 ? Number(cfg.focus.splitGb) : null, holders: heavyHolders(root, { env }), env });
   const { chainOnTarget } = await import('./unity-train.mjs');
   const gate = (admit) => rulesGate({ engine, repo, tip: job.head, lanes: job.lanes, cfg, from: job.from, extraFrom: job.extraFrom, owe: true, root, id: `${train}-ahead`, env, chain: (t, ls) => chainOnTarget(repo, t, ls, `${train}-ahead`, engine), batchOnly: true, admit });
   let rg;
   let started = 0;
   if (!cfg.shards) {
+    const md = measured(null);
+    if (md.decided && !md.ok) return notStarted(md.line);
     const room = roomNow();
-    if (room === null || room < plan.gb) return notStarted(room === null ? 'free RAM is not known' : `free RAM minus the floor is ${room} GB with the land run going, under the ${plan.gb} GB one rules run takes`);
-    save({ state: 'running', before: rulesCacheKeys(root, engine) }, `started: ${me.tasks.join(', ')} on ${short(job.head)}, ${room} GB free over the floor (${plan.gb} GB for one rules run)`);
+    if (!md.decided && (room === null || room < plan.gb)) return notStarted(room === null ? 'free RAM is not known' : `free RAM minus the floor is ${room} GB with the land run going, under the ${plan.gb} GB one rules run takes`);
+    save({ state: 'running', before: rulesCacheKeys(root, engine) }, `started: ${me.tasks.join(', ')} on ${short(job.head)}, ${md.decided ? md.line : `${room} GB free over the floor (${plan.gb} GB for one rules run)`}`);
     tell(root, engine, me, 'started');
     rg = gate(null);
   } else {
@@ -175,14 +181,15 @@ async function child(jobFile) {
       let lack = '';
       for (;;) {
         if (verdict()) return `the land run answered${lack ? ` while ${filter} waited for memory (${lack})` : ''}`;
+        const md = measured(filter);
         const room = roomNow();
-        if (room !== null && room >= need) {
-          if (!started++) { save({ state: 'running' }, `started: ${me.tasks.join(', ')} on ${short(job.head)}, shard by shard; ${filter} first: ${room} GB free over the floor (${need} GB)`); tell(root, engine, me, 'started'); }
-          else save({}, `${filter} starts: ${room} GB free over the floor (${need} GB)`);
+        if (md.decided ? md.ok : room !== null && room >= need) {
+          if (!started++) { save({ state: 'running' }, `started: ${me.tasks.join(', ')} on ${short(job.head)}, shard by shard; ${filter} first: ${md.decided ? md.line : `${room} GB free over the floor (${need} GB)`}`); tell(root, engine, me, 'started'); }
+          else save({}, `${filter} starts: ${md.decided ? md.line : `${room} GB free over the floor (${need} GB)`}`);
           return true;
         }
         if (Date.now() - t0 >= limitMs) return `free RAM minus the floor stayed under the ${need} GB ${filter} takes for the time limit`;
-        lack = room === null ? 'free RAM is not known' : `${room} GB free over the floor, ${need} GB needed`;
+        lack = md.decided ? md.line : room === null ? 'free RAM is not known' : `${room} GB free over the floor, ${need} GB needed`;
         if (!waited.has(filter)) { waited.add(filter); save({}, `${filter} waits for memory: ${lack}`); }
         sleep(poll);
       }

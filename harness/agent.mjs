@@ -2662,6 +2662,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(`${flag('agent') || r.agent || ''} ended: ${res.reason}${res.handed?.length ? `; handed back ${res.handed.map((h) => `${h.task}${h.patch ? ` (work in ${h.patch})` : ''}`).join(', ')}` : ''}`);
     process.exit(res.bad ? 1 : 0);
   }
+  if (cmd === 'smoke') process.exit(await (await import('./agent-smoke.mjs')).smokeCli(argv.slice(1), { sessions, laneNameClash }));
   if (cmd === 'pause') {
     const r = pauseAgent(argv[1], flag('note') || '', flag('by') || 'human');
     if (!r.ok) {

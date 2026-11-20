@@ -28,6 +28,7 @@ import { readJson } from './fsafe.mjs';
 import { gateConfig } from './engine-gates.mjs';
 import { flagOf, quoteArg as q } from './helpers.mjs';
 import { compilerLines } from './engine-compile.mjs';
+import { landKind, runSample, runNumbers, numbersText } from './run-cost.mjs';
 
 export const UNITY_EXIT = { 0: 'pass', 1: 'red', 2: 'conflict', 3: 'refused', 4: 'error' };
 const WORDS = {
@@ -331,6 +332,9 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   const timeoutMin = Number(timeoutOverride || cfg.timeoutMin || env.STUDIO_UNITY_GATE_TIMEOUT_MIN || 120);
   const { hroot, heavyOpts } = await landHeavyOpts(engine, { env, log });
   const landLabel = label || `${engine} land${task ? ` (${task})` : ''}`;
+  // 2.96 (a): the run is sampled and its kind (rules stage or not, Play Mode) is what the measured reservation is for.
+  const runKind = only === 'compile' ? 'compile' : landKind(env);
+  heavyOpts.measure = { engine, kind: runKind };
   let lk;
   try {
     lk = acquireHeavy(await heavyRoot(), landLabel, heavyOpts);
@@ -362,7 +366,8 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
       }
     } catch { /* a help for the script, never a condition of the land run */ }
   }
-  const landOnce = () => runLimitedSync(cmd, { cwd, encoding: 'utf8', env: { ...env, ...tuneEnv, STUDIO_HEAVY_HELD: process.env.STUDIO_HEAVY_HELD || '' }, maxBuffer: 256 * 1024 * 1024, timeoutMs: timeoutMin * 60000, windowsHide: true });
+  let sample = null;
+  const landOnce = () => runLimitedSync(cmd, { sample: (sample = runSample(hroot, engine, runKind, { label: landLabel })), cwd, encoding: 'utf8', env: { ...env, ...tuneEnv, STUDIO_HEAVY_HELD: process.env.STUDIO_HEAVY_HELD || '' }, maxBuffer: 256 * 1024 * 1024, timeoutMs: timeoutMin * 60000, windowsHide: true });
   try {
     log(`[unity-gate] running the studio's ${L} land command${task ? ` for ${task}` : ''}${many ? ` (branches ${many.join(' ')})` : br ? ` (branch ${br})` : ''} in ${path.relative(REPO_ROOT, cwd) || '.'}; up to ${timeoutMin} min`);
     r = landOnce();
@@ -370,6 +375,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
     lk.release();
   }
   const landEnd = Date.now();
+  const measured = runNumbers(sample);
   // Keep this run's RAM peak for the next land's floor.
   const keepPeak = (status) => { if (only) return; try { recordLandPeak(engine, { root: hroot, startMs: landStart, endMs: landEnd, status }); } catch { /* the table's floor stays */ } };
   // A run killed for memory (heavy-budget.mjs oomSignature) queues once more.
@@ -422,14 +428,14 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   // 2.86: a land script told STUDIO_LAND_PROBE=1 (land nothing) says it honoured that: an output line "[land-probe] honoured", or
   // "probe": true in its stage report. The engine train runs by-name steps on lanes only for a script that said so.
   const probeAck = env.STUDIO_LAND_PROBE === '1' && (/^\[land-probe\]\s+honoured\b/m.test(text) || (() => { try { return JSON.parse(fs.readFileSync(stageFile, 'utf8').replace(/^\uFEFF/, ''))?.probe === true; } catch { return false; } })());
-  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(probeAck ? { probeAck: true } : {}), ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), ...(errorFiles.length ? { errorFiles, errorLines } : {}), ...(stages.length ? { stages } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
+  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(measured ? { measured } : {}), ...(probeAck ? { probeAck: true } : {}), ...(infra ? { infra } : {}), ...(failures.length ? { failures } : {}), ...(errorFiles.length ? { errorFiles, errorLines } : {}), ...(stages.length ? { stages } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
 
   function finish(res) {
     const full = { ...res, engine, ms: Date.now() - t0, ...(ranAt ? { waitMs: ranAt - t0 } : {}), ...(task ? { task } : {}), ...(br ? { branch: br } : {}), ...(many ? { branches: many } : {}), at: new Date().toISOString() };
     try { fs.mkdirSync(path.join(REPO_ROOT, '.studio', 'gates'), { recursive: true }); fs.writeFileSync(path.join(REPO_ROOT, '.studio', 'gates', withGs(et.files.gateLast)), JSON.stringify({ ...full, engine }, null, 2)); } catch {}
     // A run that ran to the end keeps its length for the Line Producer's schedule.
     if (!only && ['pass', 'red', 'conflict'].includes(full.status)) { try { recordDuration(engine, { kind: 'land', ms: full.ms, status: full.status }); } catch {} }
-    if (!only) try { emitEvent({ type: 'engine.land', agent: env.STUDIO_LOCK_OWNER || 'gates', task: task && !String(task).includes(',') ? task : undefined, track: `engine:${engine}`, status: full.ok ? 'ok' : full.status === 'refused' || full.status === 'not-run' || full.status === 'killed' ? 'warn' : 'blocked', msg: `${L} land${task ? ` for ${task}` : ''}: ${full.status} (${full.why})`.slice(0, 400), meta: { engine, status: full.status, code: full.code ?? null, ms: full.ms, ...(full.infra ? { infra: full.infra.kind } : {}), ...(full.stages ? { stages: full.stages } : {}), ...(many ? { branches: many } : {}), ...(String(task || '').includes(',') ? { tasks: String(task).split(',') } : {}), ...(env.STUDIO_PLAY_MODE ? { playMode: env.STUDIO_PLAY_MODE, playFilter: env.STUDIO_PLAY_FILTER || '' } : {}), ...(env.STUDIO_LAND_FULL === '1' ? { full: true } : {}) } }); } catch {}
+    if (!only) try { emitEvent({ type: 'engine.land', agent: env.STUDIO_LOCK_OWNER || 'gates', task: task && !String(task).includes(',') ? task : undefined, track: `engine:${engine}`, status: full.ok ? 'ok' : full.status === 'refused' || full.status === 'not-run' || full.status === 'killed' ? 'warn' : 'blocked', msg: `${L} land${task ? ` for ${task}` : ''}: ${full.status} (${full.why})`.slice(0, 400), meta: { engine, status: full.status, code: full.code ?? null, ms: full.ms, ...(full.infra ? { infra: full.infra.kind } : {}), ...(full.stages ? { stages: full.stages } : {}), ...(many ? { branches: many } : {}), ...(String(task || '').includes(',') ? { tasks: String(task).split(',') } : {}), ...(env.STUDIO_PLAY_MODE ? { playMode: env.STUDIO_PLAY_MODE, playFilter: env.STUDIO_PLAY_FILTER || '' } : {}), ...(env.STUDIO_LAND_FULL === '1' ? { full: true } : {}), ...(full.measured ? { kind: runKind, ...full.measured } : {}) } }); } catch {}
     // playMode / playFilter: what the train told the Play Mode stage. 2.85 (B-137): full, the daily full land run (STUDIO_LAND_FULL=1). job.done (harness/jobs.mjs) goes beside engine.land.
     if (full.status !== 'skipped') jobDone({ kind: `${engine}-gate`, id: task || br || null, code: full.code ?? null, result: full.status, ms: full.ms, tail: full.tail || full.why || '', log: full.log || null, task: task && !String(task).includes(',') ? task : null, agent: env.STUDIO_LOCK_OWNER || 'gates' });
     try { logEngine(`${engine} land${task ? ` ${task}` : ''}: ${full.status === 'not-run' ? `not run${full.infra ? ` (${full.infra.kind})` : ''}` : full.status}${full.code !== null && full.code !== undefined ? ` (exit ${full.code})` : ''}`, env.STUDIO_LOCK_OWNER || undefined); } catch {}
@@ -438,7 +444,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
 }
 
 /** One line for people: "PASS unity: ..." etc. */
-export const unityLine = (res) => `[unity-gate] ${res.status === 'skipped' ? 'SKIP' : res.status === 'not-run' ? 'NOT RUN' : res.status === 'killed' ? 'KILLED' : res.status.toUpperCase()} ${res.engine || 'unity'}: ${res.why}${res.ms && res.status !== 'skipped' ? ` (${Math.round(res.ms / 1000)} s)` : ''}`;
+export const unityLine = (res) => `[unity-gate] ${res.status === 'skipped' ? 'SKIP' : res.status === 'not-run' ? 'NOT RUN' : res.status === 'killed' ? 'KILLED' : res.status.toUpperCase()} ${res.engine || 'unity'}: ${res.why}${res.ms && res.status !== 'skipped' ? ` (${Math.round(res.ms / 1000)} s${res.measured ? `; ${numbersText(res.measured)}` : ''})` : ''}`;
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);

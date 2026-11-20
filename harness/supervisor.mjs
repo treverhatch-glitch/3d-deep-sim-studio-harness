@@ -18,7 +18,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
-import { poolPlan, builderOrder, builderKind } from './api-pool.mjs';
+import { poolPlan, builderOrder, builderKind, orderedRole, apiTool } from './api-pool.mjs';
 const poolPlanNow = (usage, live) => poolPlan({ usage, live });
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { selfIdentity, pidAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
@@ -666,7 +666,7 @@ export async function supervise(opts, state, now = Date.now()) {
   for (const g of ordered) {
     const planning = isPlanningRole(g.role);
     if (ramRoom <= 0 || (room <= 0 && !planning)) continue;
-    if (poolMode && g.role !== 'builder') continue; // the pool is builders only; other roles wait for headroom
+    if (poolMode && !orderedRole(g.role)) continue; // the pool is for builders and engine porters; other roles wait for headroom
     if (crewPaused[g.role]) {
       why.push(`${g.role}: paused by the crew watchdog (${String(crewPaused[g.role].why || '').slice(0, 120)}; npm run crew -- resume ${g.role} --by <name>)`);
       continue;
@@ -743,9 +743,9 @@ export async function supervise(opts, state, now = Date.now()) {
       const pick = (await import('./vertex.mjs')).vertexPick({ role: g.role, taskId: g.tasks[0]?.id, tier: lr.tier || null, live, cap: ramCap.cap, high: Boolean(poolMode) || !tool || vxFirst, events: evs, ready: vertexReady });
       if (pick.tool) vx = pick; else if (pick.skip && (poolMode || !tool)) why.push(`${g.tasks[0]?.id}: ${pick.skip}`);
     }
-    const kind = bOrder && g.role === 'builder' && !custom ? builderKind(bOrder, { api: Boolean(tool) && poolFree.length > 0, vertex: Boolean(vx) || lr.tool === 'vertex', plan: Boolean(tool) && !poolMode }) : null;
+    const kind = bOrder && orderedRole(g.role) && !custom ? builderKind(bOrder, { api: Boolean(tool) && poolFree.length > 0, vertex: Boolean(vx) || lr.tool === 'vertex', plan: Boolean(tool) && !poolMode }) : null;
     if (kind !== null && kind !== 'vertex') { vx = null; if (lr.tool === 'vertex') { lr.tool = null; lr.model = null; } }
-    if (bOrder && g.role === 'builder' && !custom && !kind) { why.push(`${g.tasks[0]?.id}: no builder in STUDIO_BUILDER_ORDER (${bOrder.join(',')}) can start now`); continue; }
+    if (bOrder && orderedRole(g.role) && !custom && !kind) { why.push(`${g.tasks[0]?.id}: no builder in STUDIO_BUILDER_ORDER (${bOrder.join(',')}) can start now`); continue; }
     if (!custom && !tool && !vx) {
       why.push(`${g.role}: every tool is out of quota (npm run budget)`);
       continue;
@@ -781,7 +781,7 @@ export async function supervise(opts, state, now = Date.now()) {
       continue;
     }
     // toolDefault: this tool is the supervisor's default, not a decision; a reviewer plan's model picks its own tool.
-    const r = startAgent({ role: g.role, agent, tool: vx ? 'vertex' : lr.tool || tool, toolDefault: !vx && !lr.tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra, ...(vx ? { model: vx.model } : lr.model ? { model: lr.model } : {}) }, { detach: true });
+    const r = startAgent({ role: g.role, agent, tool: vx ? 'vertex' : kind === 'api' ? apiTool(lr.tool || tool) : lr.tool || tool, toolDefault: !vx && !lr.tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra, ...(vx ? { model: vx.model } : lr.model ? { model: lr.model } : {}) }, { detach: true });
     if (r.ok && vx) emitEvent({ type: 'model.routed', agent: 'supervisor', task: taskId, msg: `${taskId}: starts on ${vx.model} (vertex): ${vx.why}`.slice(0, 400), meta: { task: taskId, arm: 'vertex', tier: vx.size, model: vx.model, tool: 'vertex' } });
     else if (r.ok && lr.model) emitEvent({ type: 'model.routed', agent: 'line-producer', task: taskId, msg: `${taskId}: starts on ${lr.model}${lr.tool ? ` (${lr.tool})` : ''} (${lr.tier} ${lr.tool ? 'task' : 'tier'}, the Line Producer): ${lr.why}`.slice(0, 400), meta: { task: taskId, arm: 'line-producer', tier: lr.tier, model: lr.model, ...(lr.tool ? { tool: lr.tool } : {}), failed: lr.failed || 0 } });
     if (r.ok) {
