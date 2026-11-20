@@ -229,6 +229,47 @@ console.log(JSON.stringify({ line: d.text.split('\\n').filter((l) => /^Play Mode
         && /Game\/Net\/ \(3 paths; /.test(out(prop)) && /add to engines\.unity\.play\.focus\.map: \{"match":"\^Game\/Net\/","filter":"<the Play Mode tests for this folder>"\}/.test(out(prop)) && /add to engines\.unity\.play\.focus\.skip: "\^Sim\/Fees\/"/.test(out(prop)), JSON.stringify({ out: out(prop).slice(0, 1500), groups })]);
     const propRec = node(['harness/engine.mjs', 'play-plan', '--propose']);
     await guard('2.96 (d14) without --paths or --branch --propose reads the paths the trains kept (the 6 from the run above)', () => [propRec.status === 0 && /Play Mode map gaps for unity \(the Play Mode stages of the last 7 days\): 6 path\(s\) in 2 folder\(s\)\./.test(out(propRec)) && /Game\/Net\/ \(4 paths/.test(out(propRec)), out(propRec).slice(0, 800)]);
+
+    // ---- (4) a busy line: the refill looks at what can start ----
+    const tasks5 = Array.from({ length: 5 }, (_, i) => ({ id: `T-97${i}`, title: `Port item ${i}`, role: 'builder' }));
+    const refill = (canStart, extra = '') => probe(`import { refillPass } from ${u('harness/producer-refill.mjs')};
+const wakes = []; const added = [];
+const deps = { queue: { inProgress: [], backlog: ${JSON.stringify(tasks5)}, done: [] }, canStart: ${canStart}, events: [], add: (x) => { added.push(x.title); return { id: 'T-new' }; }, wake: async (why) => { wakes.push(why); return { started: true }; } };
+const r1 = await refillPass({ min: 4, deps });
+${extra}
+console.log(JSON.stringify({ wakes, added, why: r1.why, stuck: Boolean(r1.stuck) }));`, { STUDIO_REFILL_WAKE: '' });
+    const none = refill('async () => false', "const r2 = await refillPass({ min: 4, deps: { ...deps, events: undefined } });");
+    await guard('2.96 (d15) with 5 open builder tasks and none that can start, the refill wakes the Producer with "nothing can start: 5 open tasks wait for the engine train or for another task. Propose the next ready work from the plan." and adds no task; a second pass in the same hour does not wake again (fails before this fix: 5 open tasks counted as enough and nobody was asked)', () => [
+      none.wakes?.length === 1 && none.wakes[0] === 'nothing can start: 5 open tasks wait for the engine train or for another task. Propose the next ready work from the plan.' && none.added?.length === 0 && none.stuck === true, JSON.stringify(none)]);
+    const can = refill('async () => true');
+    await guard('2.96 (d16) when the open tasks can start the refill does nothing, as before', () => [can.wakes?.length === 0 && can.added?.length === 0 && /5 builder tasks open \(min 4\)/.test(can.why || '') && can.stuck === false, JSON.stringify(can)]);
+    const some = refill('async (t) => t.id === "T-970"');
+    await guard('2.96 (d17) when only 1 of 5 open tasks can start the Producer is asked with the count and the cause', () => [some.wakes?.length === 1 && some.wakes[0].startsWith('only 1 of 5 open tasks can start: the other 4 wait for the engine train or for another task.'), JSON.stringify(some)]);
+
+    // the real check: a task queued for the engine train, one that waits for another task, one parked, one free
+    fs.mkdirSync(path.join(S, '.studio', 'train'), { recursive: true });
+    fs.writeFileSync(path.join(S, '.studio', 'train', 'unity-queue.json'), JSON.stringify([{ task: 'T-971', agent: 'porter-0', branch: 'feat/gap', head: gapHead, at: new Date().toISOString() }]));
+    write(S, 'studio/task-holds.json', JSON.stringify({ tasks: { 'T-972': { after: ['T-970'] }, 'T-973': { parked: { by: 'producer', why: 'later' } } } }));
+    const real = probe(`import { stuckCounts } from ${u('harness/producer-refill.mjs')};
+const q = { inProgress: [], backlog: ${JSON.stringify(tasks5.slice(0, 4))}, done: [] };
+console.log(JSON.stringify(await stuckCounts({ queue: q })));`);
+    await guard('2.96 (d18) a task queued for an engine train, a task waiting for another task and a parked task are not counted as able to start (4 open, 1 can start)', () => [real.open === 4 && real.startable === 1, JSON.stringify(real)]);
+    fs.rmSync(path.join(S, 'studio', 'task-holds.json'), { force: true });
+    fs.rmSync(path.join(S, '.studio', 'train'), { recursive: true, force: true });
+
+    // the alert says the same cause
+    const linePath = path.join(S, '.studio', 'line');
+    fs.mkdirSync(linePath, { recursive: true });
+    const alertP = (stuck) => probe(`import fs from 'node:fs'; import { commFacts, alertsNow } from ${u('harness/communicator.mjs')};
+const now = Date.now();
+fs.writeFileSync('.studio/line/status.json', JSON.stringify({ at: new Date(now).toISOString(), builders: { running: 0, target: 5 } }));
+const f = await commFacts({ root: process.cwd(), now, state: {}, deps: { events: [], needs: [], beta: { on: false }, machine: null, delegated: false, inProgress: [], engines: [], stuck: ${JSON.stringify(stuck)} } });
+const a = alertsNow(f, { state: { lowSince: new Date(now - 20 * 60000).toISOString() } });
+console.log(JSON.stringify({ text: a.find((x) => x.key === 'builders-low')?.text || null }));`);
+    const al1 = alertP({ open: 5, startable: 0 });
+    const al2 = alertP({ open: 5, startable: 3 });
+    await guard('2.96 (d19) the builders-low alert says "nothing can start" and that it is not a fault when no open task can start, and keeps its old words when some can', () => [
+      /^0 of 5 builders busy for 20 min: nothing can start\. 5 open tasks wait for the engine train or for another task, so this is not a fault\./.test(al1.text || '') && /^Only 0 of 5 builders busy/.test(al2.text || '') && !/nothing can start/.test(al2.text || ''), JSON.stringify({ al1, al2 })]);
     // ---- (A) end ----
   } finally {
     try { fs.rmSync(T, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep */ }

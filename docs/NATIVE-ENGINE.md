@@ -838,3 +838,8 @@ turn on `service.check` and run one `check` end to end, and only then `warm`.
   groups the paths by folder (without `--branch` or `--paths`, the paths of the last 7 days) and proposes an entry for
   each: `skip` when the rules tests already judge the folder (a `rules.focus` map entry or auto folder) or
   `play.focus.skip` takes every path, else a `map` entry whose filter you fill in. Nothing is written to `studio/game.json`.
+- **A busy line.** The refill counts the open builder tasks that can start now (not held, parked, over budget, waiting
+  for another task or queued for a train). When fewer than `STUDIO_REFILL_MIN` can start, it wakes the Producer with
+  the cause ("nothing can start: n open tasks wait for the engine train or for another task. Propose the next ready work
+  from the plan.") at most once an hour, even while many tasks are open. The `builders-low` alert gives the same cause
+  and says it is not a fault.

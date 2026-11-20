@@ -181,6 +181,8 @@ export async function commFacts({ root = REPO_ROOT, env = process.env, now = Dat
   else if (f.config.agents.orchestrator) {
     try { const d = await import('./delegation.mjs'); f.delegatedRelease = Boolean(d.delegationFor({ action: 'train-release', by: f.config.agents.orchestrator, env: { STUDIO_LOCK_OWNER: f.config.agents.orchestrator }, root, now, lane: false, autonomy: false }).ok); } catch {}
   }
+  // 2.96 (d): how many open builder tasks can start now (harness/producer-refill.mjs); null when it cannot be read.
+  try { f.stuck = deps.stuck !== undefined ? deps.stuck : await (await import('./producer-refill.mjs')).stuckCounts(); } catch { f.stuck = null; }
   f.line = readLineStatus(root, now);
   f.stopFiles = [];
   const stopJson = readJson(path.join(root, '.studio', 'STOP.json'), null) || (fs.existsSync(path.join(root, '.studio', 'STOP.json')) ? { by: 'unknown' } : null);
@@ -290,7 +292,10 @@ export function alertsNow(f, { env = process.env, state = {}, passWhy = [] } = {
   // 2.90: idle builders while the ready work waits on an engine train are not "low".
   const wait = engineWait(f);
   if (low && wait && !(f.line?.fresh && f.line.ready > 0)) low = null;
-  if (low && !stopped && Date.parse(state.lowSince || '') && f.now - Date.parse(state.lowSince) >= LOW_BUILDERS_MS) add('builders-low', 'fix', f.line?.lead && low.from === 'the Line Producer' ? `${low.have} of ${low.want} builders busy for ${mins(f.now - Date.parse(state.lowSince))}: ${f.line.lead}.` : `Only ${low.have} of ${low.want} builders busy (${low.from}) for ${mins(f.now - Date.parse(state.lowSince))}${f.line?.blocked?.length ? `; blocked: ${f.line.blocked.slice(0, 3).join('; ')}` : ''}.`); // 2.83: the planner's own reason leads, when it has one
+  // 2.96 (d): when no open task can start, say so: idle builders are then no fault.
+  const noStart = Boolean(f.stuck && f.stuck.open > 0 && f.stuck.startable === 0);
+  if (low && !stopped && noStart && Date.parse(state.lowSince || '') && f.now - Date.parse(state.lowSince) >= LOW_BUILDERS_MS) add('builders-low', 'fix', `${low.have} of ${low.want} builders busy for ${mins(f.now - Date.parse(state.lowSince))}: nothing can start. ${f.stuck.open} open task${f.stuck.open === 1 ? ' waits' : 's wait'} for the engine train or for another task, so this is not a fault. The Producer is asked for new work.`);
+  else if (low && !stopped && Date.parse(state.lowSince || '') && f.now - Date.parse(state.lowSince) >= LOW_BUILDERS_MS) add('builders-low', 'fix', f.line?.lead && low.from === 'the Line Producer' ? `${low.have} of ${low.want} builders busy for ${mins(f.now - Date.parse(state.lowSince))}: ${f.line.lead}.` : `Only ${low.have} of ${low.want} builders busy (${low.from}) for ${mins(f.now - Date.parse(state.lowSince))}${f.line?.blocked?.length ? `; blocked: ${f.line.blocked.slice(0, 3).join('; ')}` : ''}.`); // 2.83: the planner's own reason leads, when it has one
   f.lowNow = Boolean(low && !stopped);
   // The crew breaker, a halt, stop files.
   for (const c of f.crewPaused) add(`breaker:${c.role}`, 'fix', `Crew breaker: launching ${c.role} is paused${c.why ? ` (${c.why})` : ''}. New work clears it, or: npm run crew -- resume ${c.role} --by <name>`);
