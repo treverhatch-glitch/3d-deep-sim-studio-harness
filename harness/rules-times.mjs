@@ -15,7 +15,7 @@ import { enginesConfig } from './engine-tracks.mjs';
 import { globRe } from './merge-lane.mjs';
 import { readJson, writeAtomic } from './fsafe.mjs';
 import { ramFile } from './engine-ram.mjs';
-import { kindCost } from './run-cost.mjs';
+import { kindCost, shortText } from './run-cost.mjs';
 import { flagOf } from './helpers.mjs';
 
 const DAY = 86400000;
@@ -134,7 +134,7 @@ export async function costReport(root, engine, { now = Date.now(), events = null
   const twice = [...seen].filter(([, c]) => c.length > 1).map(([k, c]) => ({ train: k.split('\n')[0], name: k.split('\n').slice(1).join('\n'), commands: c })).slice(0, 20);
   // Sampled peaks (2.96, run-cost.mjs) where a rules kind has them; else the test command's own report (rules.peak).
   const ram = readJson(ramFile(root), null)?.[engine];
-  const sampled = Object.keys(ram?.kinds || {}).filter((k) => k === 'rules' || k.startsWith('rules ')).map((k) => ({ filter: k === 'rules' ? '(the whole command)' : k.slice(6), peakGb: kindCost(ram, k)?.peakGb || 0, sampled: true }));
+  const sampled = Object.keys(ram?.kinds || {}).filter((k) => k === 'rules' || k.startsWith('rules ')).map((k) => ({ filter: k === 'rules' ? '(the whole command)' : k.slice(6), peakGb: kindCost(ram, k)?.peakGb || 0, minutes: kindCost(ram, k)?.minutes, unknown: Boolean(kindCost(ram, k)?.unknown), sampled: true }));
   const stats = readJson(rulesFile(root, engine), null)?.partStats || {};
   const own = Object.entries(stats).filter(([, v]) => Number(v?.peakGb) > 0).map(([filter, v]) => ({ filter, peakGb: Number(v.peakGb) }));
   const heavy = (sampled.some((x) => x.peakGb > 0) ? sampled : own).filter((x) => x.peakGb > 0).sort((a, b) => b.peakGb - a.peakGb).slice(0, 5);
@@ -147,7 +147,7 @@ export async function costReport(root, engine, { now = Date.now(), events = null
   const mm = new Map();
   for (const r of runs) for (const [name, gb] of r.mem || []) mm.set(name, Math.max(mm.get(name) || 0, gb));
   const memory = [...mm].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 10).map(([name, gb]) => ({ name, gb }));
-  return { engine, runs: runs.length, total, slowest, twice, heavy, memory, ratchets };
+  return { engine, runs: runs.length, total, slowest, twice, heavy, short: sampled.filter((x) => x.unknown).slice(0, 5), memory, ratchets };
 }
 
 const mins = (s) => (s >= 90 ? `${Math.round(s / 6) / 10} min` : `${s} s`);
@@ -158,6 +158,7 @@ export function costText(r) {
   for (const x of r.twice.slice(0, 10)) L.push(`  ${x.name} (train ${x.train}: ${x.commands.join(' and ')})`);
   L.push(r.heavy.length ? `Heaviest rules runs by ${r.heavy[0].sampled ? 'sampled memory' : "the test command's own peak file (rules.peak)"}:` : 'No rules run has a measured peak yet.');
   for (const x of r.heavy) L.push(`  ${x.peakGb} GB ${x.filter}`);
+  for (const x of r.short || []) L.push(`  ${shortText(x.minutes)}: ${x.filter}`);
   if (r.memory?.length) { L.push("Most memory in the test run's own table (rules.memory):"); for (const x of r.memory) L.push(`  ${x.gb} GB ${x.name}`); }
   L.push(`Hand-backs of kind ratchet in the last 24 hours: ${r.ratchets}.`);
   return L.join('\n');
