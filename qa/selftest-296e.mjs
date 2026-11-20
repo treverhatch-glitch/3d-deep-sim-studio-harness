@@ -148,7 +148,56 @@ process.stdin.resume();
         && board() === before.board && standIns() === before.n && events().length === before.events && branches(R) === engineBranches0,
       JSON.stringify({ status: s5.status, out: o.slice(-500) })]);
   }
-  void idOf; void napSync; void pathToFileURL;
+
+  // ================= (e5) the spending order for engine porters: api pool, then agy, then the plan =================
+  // STUDIO_BUILDER_ORDER=api,plan + STUDIO_ENGINE_PORTER_TOOL=agy + `npm run budget -- order agy,claude`: a supervisor pass
+  // with a stand-in start function says which tool and name each start gets.
+  fs.writeFileSync(path.join(S, 'studio', 'budget.json'), `${JSON.stringify({ order: ['agy', 'claude'], tools: {} })}\n`);
+  const task = (args) => spawnSync(process.execPath, ['harness/task.mjs', ...args], { windowsHide: true, cwd: S, encoding: 'utf8', env: childEnv() });
+  // The studio copy's own waiting tasks would start too: leave only the engine porter's.
+  const nf = path.join(S, 'studio', 'NEXT.md');
+  fs.writeFileSync(nf, fs.readFileSync(nf, 'utf8').split('\n').filter((l) => !/^- \[ \] \*\*T-/.test(l)).join('\n'));
+  const added = task(['add', 'Port rule one', '--role', 'engine-porter', '--track', 'engine:unity', '--agent', 'producer']);
+  const url = (rel) => JSON.stringify(pathToFileURL(path.join(S, rel)).href);
+  let pn = 0;
+  const pass = (live, extra = {}, mark = '') => {
+    // A pass claims a launch lock per task (two minutes): the next pass starts from none.
+    const ld = path.join(S, '.studio', 'locks');
+    for (const x of fs.existsSync(ld) ? fs.readdirSync(ld) : []) if (/launch/.test(x)) fs.rmSync(path.join(ld, x), { recursive: true, force: true });
+    const f = path.join(S, `.probe-296e-${++pn}.mjs`);
+    fs.writeFileSync(f, `import { supervise } from ${url('harness/supervisor.mjs')};
+${mark ? `import { markExhausted } from ${url('harness/budget.mjs')};\nmarkExhausted(${JSON.stringify(mark)}, 'probe');` : ''}
+const starts = [];
+const deps = { sessions: () => ${JSON.stringify(live)}, startAgent: (o) => { starts.push({ agent: o.agent, tool: o.tool, role: o.role }); return { ok: true }; }, launchableRoles: (r) => r, nextAgentName: (role, p) => p + role + '-' + (starts.length + 1) };
+const r = await supervise({ watcher: true, dryRun: true, prefix: 'o-', deps }, { startedAt: Date.now(), names: [] });
+console.log(JSON.stringify({ starts, why: r.why }));`);
+    const r = spawnSync(process.execPath, [f], { windowsHide: true, cwd: S, encoding: 'utf8', env: childEnv({ STUDIO_ENGINE_PORTER_TOOL: 'agy', ...extra }), timeout: 120000 });
+    try { fs.rmSync(f, { force: true }); } catch { /* swept later */ }
+    try { return JSON.parse(String(r.stdout).split('\n').filter((l) => l.startsWith('{')).pop()); } catch { return { raw: out(r).slice(-1500) }; }
+  };
+  const ordered = { STUDIO_BUILDER_ORDER: 'api,plan' };
+  const firstP = pass([], ordered);
+  const busyP = pass([{ agent: 'builder-api2', role: 'builder', running: true, task: 'T-0', lane: 'game/other' }], ordered);
+  const unsetP = pass([], {});
+  const outP = pass([{ agent: 'builder-api2', role: 'builder', running: true, task: 'T-0', lane: 'game/other' }], ordered, 'agy');
+  await guard('2.96 (e5) order: with STUDIO_BUILDER_ORDER=api,plan, STUDIO_ENGINE_PORTER_TOOL=agy and the budget order agy,claude an engine porter starts first under the API-pool name on claude (never agy), then on agy when the pool name is busy, then on claude when agy is out of quota; with no order set it never takes the pool name (fails before this fix: the order only filled builder slots, so an engine porter never used the API pool)', () => [
+    added.status === 0 && firstP.starts?.length === 1 && firstP.starts[0].agent === 'builder-api2' && firstP.starts[0].tool === 'claude' && firstP.starts[0].role === 'engine-porter'
+      && busyP.starts?.length === 1 && busyP.starts[0].agent !== 'builder-api2' && busyP.starts[0].tool === 'agy'
+      && outP.starts?.length === 1 && outP.starts[0].agent !== 'builder-api2' && outP.starts[0].tool === 'claude'
+      && unsetP.starts?.length === 1 && unsetP.starts[0].agent !== 'builder-api2' && unsetP.starts[0].tool === 'agy',
+    JSON.stringify({ add: out(added).slice(-300), firstP, busyP, outP, unsetP }).slice(0, 2500)]);
+
+  // ================= (e6) no flags: one smoke per path in the owner's order, one line each =================
+  fs.writeFileSync(path.join(S, 'studio', 'budget.json'), `${JSON.stringify({ order: ['claude'], tools: {} })}\n`);
+  const s6 = smoke(['--role', 'engine-porter', '--engine', 'unity', '--minutes', '3'], { STUDIO_BUILDER_ORDER: 'api,plan', STUDIO_ENGINE_PORTER_TOOL: 'claude' });
+  {
+    const o = out(s6);
+    const lines = String(s6.stdout).split('\n').filter((l) => /^(PASS|FAIL)/.test(l));
+    await guard('2.96 (e6) smoke: with no --pool or --tool and STUDIO_BUILDER_ORDER=api,plan it runs one smoke for the API pool, then one for the plan\'s tool, prints one PASS line each in that order and exits 0 (fails before this fix: there was no smoke command)', () => [
+      s6.status === 0 && lines.length === 2 && /^PASS .*engine-porter on the api pool/.test(lines[0]) && /^PASS .*engine-porter on the plan \(claude\)/.test(lines[1]) && !board().includes('Smoke test') && branches(R) === engineBranches0 && !o.includes(SECRET),
+      JSON.stringify({ status: s6.status, out: o.slice(-900) })]);
+  }
+  void idOf; void napSync;
 
   for (const p of [S, T]) { try { fs.rmSync(p, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* swept later */ } }
 }

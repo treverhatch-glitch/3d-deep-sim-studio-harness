@@ -221,6 +221,11 @@ free pool name), `vertex` (its budget cut, prompt and failure rules and `STUDIO_
 comes after `plan`) and `plan` (the plan's tool, not while the plan's budget is high). The first kind that can start now is taken; a kind
 left out is never used.
 
+Engine porters (2.96) take the same order: `STUDIO_BUILDER_ORDER` fills an `engine-porter` slot as it does a builder's. For the owner's order, API
+credit first, then agy, then the plan: `STUDIO_API_POOL=<names>` with their key mappings, `STUDIO_BUILDER_ORDER=api,plan`,
+`STUDIO_ENGINE_PORTER_TOOL=agy` and `npm run budget -- order agy,claude`. A free pool name starts first (on claude: an API key does not pay for agy),
+then agy, and claude (the plan) once agy is out of quota. `npm run agent -- smoke --role engine-porter` proves each step.
+
 ## Vertex AI as a builder (`--tool vertex`, 2.79.1)
 
 Vertex carries builder work on the owner's Google Cloud credit. In `.env`: `VERTEX_API_KEY=<the key>` (works on
