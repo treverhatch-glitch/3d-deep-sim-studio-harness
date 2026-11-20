@@ -35,7 +35,7 @@ import { removeLandedLane, pruneBuilds, buildsConfig } from './engine-clean.mjs'
 import { flagOf, foldRealOf, gitMax64 as git, numBlankDefault as num, realOrResolved as real, short8 as short, sleepSyncClamped as sleep, stdoutOf as out } from './helpers.mjs';
 import { targetRedTask, targetRedClear, targetRedLine } from './engine-target-red.mjs';
 import { aheadStart, aheadVerdict, aheadFor, aheadLine } from './rules-ahead.mjs';
-import { unionGlobs, unionMerge } from './merge-union.mjs';
+import { unionGlobs, unionMerge, unionWhy } from './merge-union.mjs';
 import { runningLines } from './run-cost.mjs';
 
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); writeAtomic(f, `${JSON.stringify(v, null, 2)}\n`); };
@@ -947,8 +947,9 @@ export function chainOnTarget(repo, base, lanes, id, engine = 'unity', { union =
     if (mt.status !== 1) return { error: `git merge-tree --write-tree failed (git 2.38 or newer is needed): ${String(mt.stderr || '').trim().split('\n').pop()}` };
     const files = conflictFiles(mt.stdout);
     const alone = tip === base ? mt : git(repo, 'merge-tree', '--write-tree', base, lane.head);
-    if (alone.status === 0 || (tip !== base && unionMerge(repo, base, lane.head, union))) res.deferred.push({ ...lane, files, why: `it conflicts with ${res.included.map((l) => `${l.task} (${l.branch})`).join(', ') || 'the branches before it'} in this train${files.length ? ` in ${files.slice(0, 5).join(', ')}` : ''}; it goes in the next ${labelOf(engine)} train` });
-    else res.conflictTarget.push({ ...lane, files: conflictFiles(alone.stdout), why: `it conflicts with the target${conflictFiles(alone.stdout).length ? ` in ${conflictFiles(alone.stdout).slice(0, 5).join(', ')}` : ''}: bring the target into it with ${targetMergeCommand(lane.task)} (it leaves the conflicts in the task's worktree to resolve; small conflicts in project files usually want both sides kept), then task done --train again` });
+    const noUnion = (from) => { const w = unionWhy(repo, from, lane.head, union); return w ? `; merge.union did not apply: ${w}` : ''; };
+    if (alone.status === 0 || (tip !== base && unionMerge(repo, base, lane.head, union))) res.deferred.push({ ...lane, files, why: `it conflicts with ${res.included.map((l) => `${l.task} (${l.branch})`).join(', ') || 'the branches before it'} in this train${files.length ? ` in ${files.slice(0, 5).join(', ')}` : ''}${noUnion(tip)}; it goes in the next ${labelOf(engine)} train` });
+    else res.conflictTarget.push({ ...lane, files: conflictFiles(alone.stdout), why: `it conflicts with the target${conflictFiles(alone.stdout).length ? ` in ${conflictFiles(alone.stdout).slice(0, 5).join(', ')}` : ''}${noUnion(base)}: bring the target into it with ${targetMergeCommand(lane.task)} (it leaves the conflicts in the task's worktree to resolve; small conflicts in project files usually want both sides kept), then task done --train again` });
   }
   return { ...res, head: tip };
 }

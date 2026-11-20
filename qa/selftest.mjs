@@ -5466,6 +5466,14 @@ if (inShard('selftest-296e')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.97 (b): the union merge also takes a line both lanes only lengthen, and a refusal says why.
+if (inShard('selftest-297b')) {
+  const dir = copyRepo();
+  const { selftest297B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-297b.mjs')).href);
+  await selftest297B({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

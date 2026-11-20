@@ -152,14 +152,15 @@ the run is red, then it closes the tasks.
 test list; every pair conflicts, so the train took one per train. `"merge": { "union": ["Game/Sim/registry.cs",
 "tools/SimTests/*.txt"] }` in `studio/game.json` engines.<x> lets the train merge such a file when two lanes (or a lane
 and the target) conflict ONLY in files those globs name, and in each such file both sides only ADDED lines to the
-common base. The merged file has, at each place, the target's (earlier lanes') added lines first, then the lane's; a
+common base, or LENGTHENED a line (2.97: one run of text put into it, such as a name appended to one quoted list; a line
+both lengthen keeps the target's text, then the lane's; the same text once). The merged file has, at each place, the target's (earlier lanes') added lines first, then the lane's; a
 line both added there is kept once (a line with no letter or digit, such as `},`, is always kept). It is done on git
-blobs with a temporary index, never a worktree. Anything else stays a conflict as before: a removed or changed line,
+blobs with a temporary index, never a worktree. Anything else stays a conflict as before: a removed or rewritten line,
 a file not listed, a binary file, a rename or a mode change. The train's log, one `task.train.<x>.union` event,
 `train status` and the summary name each file ("merged as a union: Game/Sim/registry.cs"); the commit says
 `Union-Merge:`. The queue's own compile check and the rules check see the same merged tree, and the compile check
 and the tests decide. What it cannot know: two lanes that add the same key with different values both stay, and a
-line both add on purpose twice is kept once. With no `merge.union` every merge is as before. A `landMany` command
+line both add on purpose twice is kept once. When it refuses, the lane's reason (`deferred` or `conflicts with the target`) ends "merge.union did not apply: <file> line <n> was rewritten, not only lengthened" (or names a file not listed). With no `merge.union` every merge is as before. A `landMany` command
 merges the branches itself, so the train does not use `merge.union` with one.
 
 2.78.2 (item 18): `task done --train` on an engine pass it can't queue says why and exits 1 (a
