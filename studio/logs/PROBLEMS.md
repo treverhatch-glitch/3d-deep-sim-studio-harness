@@ -18,6 +18,7 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-346 — timing checks fail under load in the online runs · open
 - **Evidence:** 16 November, four runs queued at once: "task lane gives each builder its own folder", "the supervisor starts a fresh agent per task", "2.77.0 (p, P9.6)" and "2.69.0 (q, 1)" each failed once and passed on the re-run of the failed job. Each re-run costs about 40 minutes.
 - **Workaround:** re-run the failed job and note it on the pull request. Do not queue four runs at once.
+- **2.96:** the two supervisor-window checks ("two builders without lanes never run at once", "agent names never repeat across supervisor restarts") failed on Windows in the first online run of 2.95 and passed on the re-run; they now wait until one agent is live and then watch a window.
 - **2.95:** "with --lanes auto, each lane gets its own agent holding that folder" failed in two of the three online runs of 2.94 (Windows) and passed on the re-run each time.
 - **2.94:** seen once more, on main's run after the 2.93 merge, on Windows: "a ping starts STUDIO_DIRECTOR_CMD once, then waits out the cooldown" (starts=0). It passed on the same tree in the pull request's run an hour earlier.
 - **2.92:** "task lane gives each builder its own folder" now waits for the thing itself. The same change to "the supervisor starts a fresh agent per task" was withdrawn (the next check, "--lanes auto", then failed 2 runs in 8: only one lane got its agent, even with a 90 s wait; cause not found). Left: that check, `2771a`, the tester drive, `290b` second gate, `277p` "someone moves main", "two builders without lanes", "--lanes auto".
@@ -104,6 +105,26 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-373 — git allow-rules for a studio path with a space are not quoted · open (untested)
 - **Evidence:** found while writing `295c`: the `git -C <dir> ...` rules a start builds for agy and for Claude hold the lane's path unquoted. Whether the real tools match them against a quoted path is not known. A studio path without spaces is not affected.
 - **Workaround:** keep the studio in a path without spaces.
+
+### P-374 — nobody had measured what a land run or a shard takes · fixed 2.96 (sampling), open until a studio's first samples are read
+- **Evidence:** a live studio, 19 and 20 November: heavy work admitted by slots and fixed claims; a sampler made by hand summed every test process on the machine and blamed the wrong test (11.5 GB); the test run's own per-fixture table showed one fixture at 14.2 GB. The land run waited for 18.8 GB, the size of a test stage it skips when the rules are green.
+- **Fix:** every run's own process tree is sampled; a cost per job kind; `machine.admit: "measured"`. `qa/selftest-296a.mjs`. The Windows helper has run only in the online check written for it.
+
+### P-375 — a red rules check re-ran the whole suite at every narrowing step · fixed 2.96
+- **Evidence:** a live studio: 169, 316 and 413 minutes of rules for red batches, 87 to 90 for green ones; a count ratchet cost about 6 hours over two trains; naming two lanes from a failure that names its system took 8 runs.
+- **Fix:** narrowing runs the failing tests only, one whole check decides; `blame` reads the failure's words; ratchets have their own hand-back kind. `qa/selftest-296b.mjs`.
+
+### P-376 — a held lane at the head of the queue set the batch class and took a seat, train after train · fixed 2.96
+- **Evidence:** a live studio: one lane that waited for another task headed four trains in a row; thirteen lanes of the other class waited, one over 30 hours.
+- **Fix:** a held lane is left out before the pick; a lane that cannot go does not decide the batch. `qa/selftest-296c.mjs`.
+
+### P-377 — a batch above `rules.maxLanes` left the land run without a green, silently · fixed 2.96
+- **Evidence:** a live studio: a 7-lane batch with `maxLanes` 6 was checked in two slices, the land run was not told, and the land script ran the whole suite again.
+- **Fix:** the lanes the slices leave are checked once as one tree; `rules show` warns. `qa/selftest-296b.mjs`, `284t`.
+
+### P-378 — upgrades were merged while a train was running, twice from a branch · fixed 2.96
+- **Evidence:** a live studio, 18 November: three upgrades during trains; two took a release branch before its online checks had finished, one 26 minutes after a real fault was fixed on it.
+- **Fix:** `npm run upgrade` refuses while a train runs and says when the ref is not main. `qa/selftest-296e.mjs`.
 
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 

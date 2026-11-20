@@ -4,6 +4,20 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.96.0] — 2026-11-20
+Measured memory and CPU, and each test once per tree (the overseer's 16 items; the owner: use 32 GB well first).
+Red rules checks had taken up to 413 minutes because every narrowing step re-ran the whole suite.
+Details: docs/RELEASE-2.96.0.md.
+- **Every run is sampled** (its own process tree and the machine); a cost per job kind; `machine.admit: "measured"`
+  admits by reservation against measured RAM and a CPU cap, and stops pairs that are slower together. Off by default.
+- **A red rules check narrows with the failing tests only;** one whole check decides. One green per tree is used by
+  the owed run, the check ahead and the land run. A sliced check ends with a whole one.
+- **`blame` reads the failure's words; `rules.ratchets`** get their own hand-back kind.
+- **Held lanes are left out before the batch is picked; `merge.union`** merges list files that only grow.
+- **Landings post themselves; `npm run engine -- test-cost`; `play-plan --propose`; the refill counts startable tasks.**
+- **`npm run agent -- smoke`; `npm run upgrade` refuses while a train runs.**
+- **Size:** harness code is 1,497 lines larger than 2.95; a War Room remnant and two dead exports removed.
+
 ## [2.95.0] — 2026-11-18
 The full rules check in shards and a playtest build in one command (the overseer's list, the last upgrade before the
 owner's playtest). One full run of a live studio's rules tests had grown to 18.9 GB in one process.
@@ -21,7 +35,7 @@ Details: docs/RELEASE-2.95.0.md.
 ## [2.94.0] — 2026-11-18
 The next batch is checked while the current one lands (the owner's three answers of 2026-11-18). An engine train was
 one rules check, then one land run, with the next batch's lanes waiting unchecked through both.
-Details: docs/RELEASE-2.94.0.md.
+Details: the 2.94.0 release notes, in git history.
 - **`rules.ahead` (off by default):** while a green batch's land run runs, the next batch's rules check runs beside
   it, when free memory allows. Landed unchanged, the next train finds the result and goes to its land run; otherwise
   the check ahead is ended with its process tree and nothing of it is kept. A red ahead hands nobody back.
@@ -47,21 +61,9 @@ train took 209 minutes, nearly all of it tests that passed, run twice. Details: 
 - **Removed:** the "floors" way to split work, the overnight summary, and 12 copied functions. Harness code is 6 lines
   smaller than 2.92 with all of the above in it; scripts are 19 lines smaller.
 
-## [2.92.0] — 2026-11-17
-Bad news at the queue door, not hours later (the owner's order: upgrade, and take lines away where that is right).
-A live studio's trains handed back half their branches for clashes found only when the train started.
-Details: the 2.92.0 release notes, in git history.
-- **The compile search runs when a branch is queued**, against the target and the branches queued ahead. A clash is
-  told to the porter at once; the branch is queued and trains keep the two apart.
-- **The check before queueing judges the branch merged with the target**, and runs again when the target moved.
-- **A land run red on a compiler error hands back the branch that changed that file** (`engines.<x>.logs`).
-- **A target red by itself files one fix task**, once per distinct red.
-- **One more self-test check waits for the thing itself**, not a fixed window (P-346).
-- **Size:** harness code is 181 lines larger, scripts unchanged. No dead file was found to remove; a planned tool was not built because the
-  self-test already has it.
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.92.0** (2026-11-17): Bad news at the queue door, not hours later. The compile search runs when a branch is queued; the check before queueing judges the branch merged with the target; a land run red on a compiler error hands back the branch that changed that file.
 - **2.91.0** (2026-11-17): No full run ahead of a waiting batch. A due full run waits for an empty queue; `rules.ignore` lets a rules pass survive a record commit; release branches merge with a merge commit.
 - **2.90.0** (2026-11-16): The overseer's list. The rules check's time limit follows the suite; a compile error is searched with the compile command; `preQueue`, `blame`, `rules.first`; two land runs at once; slices.
 - **2.89.0** (2026-11-16): Which functions a studio runs. Each harness command records the functions it called (`.studio/usage/functions/<version>.tsv`); `npm run commands-run -- --functions` shows what ran and what did not.
