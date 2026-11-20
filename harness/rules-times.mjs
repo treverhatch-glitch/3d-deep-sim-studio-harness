@@ -14,6 +14,8 @@ import { REPO_ROOT } from './event.mjs';
 import { enginesConfig } from './engine-tracks.mjs';
 import { globRe } from './merge-lane.mjs';
 import { readJson, writeAtomic } from './fsafe.mjs';
+import { ramFile } from './engine-ram.mjs';
+import { kindCost } from './run-cost.mjs';
 import { flagOf } from './helpers.mjs';
 
 const DAY = 86400000;
@@ -76,17 +78,42 @@ export function timesRead(dir, glob, { since = 0 } = {}) {
   return [...all].map(([name, seconds]) => ({ name, seconds })).sort((a, b) => b.seconds - a.seconds || a.name.localeCompare(b.name));
 }
 
-/** Keep one rules command's times. Never throws; does nothing when rules.times is not set. */
+/** engines.<x>.rules.memory: { file (glob), name (column), mb | gb (column) } of a table the test run writes, or null. */
+export function memoryConfig(root, engine) {
+  const v = enginesConfig(root)[engine]?.rules?.memory;
+  const f = typeof v?.file === 'string' ? v.file.trim().replace(/\\/g, '/') : '';
+  const col = typeof v?.gb === 'string' ? v.gb : typeof v?.mb === 'string' ? v.mb : '';
+  return relOk(f) && typeof v?.name === 'string' && col ? { file: f, name: v.name, col, perGb: typeof v.gb === 'string' ? 1 : 1024 } : null;
+}
+
+/** The table's rows as [{ name, gb }], most memory first: tab or comma separated, a header line names the columns. */
+export function memoryRead(dir, m, { since = 0 } = {}) {
+  const all = new Map();
+  for (const f of filesOf(dir, m.file)) {
+    try {
+      const st = fs.statSync(f);
+      if (st.mtimeMs < since || st.size > MAX_FILE) continue;
+      const rows = fs.readFileSync(f, 'utf8').split(/\r?\n/).filter(Boolean).map((l) => l.split(l.includes('\t') ? '\t' : ','));
+      const ni = rows[0].indexOf(m.name); const vi = rows[0].indexOf(m.col);
+      if (ni < 0 || vi < 0) continue;
+      for (const r of rows.slice(1)) { const gb = Number(r[vi]) / m.perGb; if (r[ni] && gb > 0) all.set(r[ni], Math.max(all.get(r[ni]) || 0, Math.round(gb * 100) / 100)); }
+    } catch { /* an unreadable file is skipped */ }
+  }
+  return [...all].map(([name, gb]) => ({ name, gb })).sort((a, b) => b.gb - a.gb || a.name.localeCompare(b.name));
+}
+
+/** Keep one rules command's times. Never throws; does nothing when neither rules.times nor rules.memory is set. */
 export function recordTimes(root, engine, { dir, train = '', command = '', since = 0, now = Date.now() } = {}) {
   try {
     const glob = timesConfig(root, engine);
-    if (!glob) return null;
-    const tests = timesRead(dir, glob, { since: since - 2000 });
-    if (!tests.length) return null;
+    const mc = memoryConfig(root, engine);
+    const tests = glob ? timesRead(dir, glob, { since: since - 2000 }) : [];
+    const mem = mc ? memoryRead(dir, mc, { since: since - 2000 }) : [];
+    if (!tests.length && !mem.length) return null;
     const f = timesFile(root, engine);
     const j = readJson(f, null);
     const runs = (Array.isArray(j?.runs) ? j.runs : []).filter((r) => now - (Date.parse(r.at) || 0) < 2 * DAY);
-    const run = { at: new Date(now).toISOString(), train: String(train || ''), command: String(command || '(full run)'), count: tests.length, seconds: Math.round(tests.reduce((a, x) => a + x.seconds, 0)), tests: tests.slice(0, KEEP_TESTS).map((x) => [x.name, x.seconds]) };
+    const run = { at: new Date(now).toISOString(), train: String(train || ''), command: String(command || '(full run)'), count: tests.length, seconds: Math.round(tests.reduce((a, x) => a + x.seconds, 0)), tests: tests.slice(0, KEEP_TESTS).map((x) => [x.name, x.seconds]), ...(mem.length ? { mem: mem.slice(0, 20).map((x) => [x.name, x.gb]) } : {}) };
     fs.mkdirSync(path.dirname(f), { recursive: true });
     writeAtomic(f, `${JSON.stringify({ runs: [...runs, run].slice(-60) }, null, 1)}\n`);
     return run;
@@ -105,14 +132,22 @@ export async function costReport(root, engine, { now = Date.now(), events = null
   const seen = new Map();
   for (const r of runs) if (r.train) for (const [name] of r.tests || []) { const k = `${r.train}\n${name}`; seen.set(k, [...(seen.get(k) || []), r.command]); }
   const twice = [...seen].filter(([, c]) => c.length > 1).map(([k, c]) => ({ train: k.split('\n')[0], name: k.split('\n').slice(1).join('\n'), commands: c })).slice(0, 20);
+  // Sampled peaks (2.96, run-cost.mjs) where a rules kind has them; else the test command's own report (rules.peak).
+  const ram = readJson(ramFile(root), null)?.[engine];
+  const sampled = Object.keys(ram?.kinds || {}).filter((k) => k === 'rules' || k.startsWith('rules ')).map((k) => ({ filter: k === 'rules' ? '(the whole command)' : k.slice(6), peakGb: kindCost(ram, k)?.peakGb || 0, sampled: true }));
   const stats = readJson(rulesFile(root, engine), null)?.partStats || {};
-  const heavy = Object.entries(stats).filter(([, v]) => Number(v?.peakGb) > 0).map(([filter, v]) => ({ filter, peakGb: Number(v.peakGb) })).sort((a, b) => b.peakGb - a.peakGb).slice(0, 5);
+  const own = Object.entries(stats).filter(([, v]) => Number(v?.peakGb) > 0).map(([filter, v]) => ({ filter, peakGb: Number(v.peakGb) }));
+  const heavy = (sampled.some((x) => x.peakGb > 0) ? sampled : own).filter((x) => x.peakGb > 0).sort((a, b) => b.peakGb - a.peakGb).slice(0, 5);
   let ratchets = 0;
   try {
     const ev = events || (await import('./event.mjs')).readRecentEvents(20000);
     ratchets = (await import('./handback-kind.mjs')).handBackTally(ev, { from: now - DAY, to: now }).byKind.ratchet || 0;
   } catch { ratchets = 0; }
-  return { engine, runs: runs.length, total, slowest, twice, heavy, ratchets };
+  // The most memory the test run's own table shows after a test group (rules.memory), the largest of the day per name.
+  const mm = new Map();
+  for (const r of runs) for (const [name, gb] of r.mem || []) mm.set(name, Math.max(mm.get(name) || 0, gb));
+  const memory = [...mm].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 10).map(([name, gb]) => ({ name, gb }));
+  return { engine, runs: runs.length, total, slowest, twice, heavy, memory, ratchets };
 }
 
 const mins = (s) => (s >= 90 ? `${Math.round(s / 6) / 10} min` : `${s} s`);
@@ -121,8 +156,9 @@ export function costText(r) {
   for (const x of r.slowest) L.push(`  ${mins(x.seconds)} (${x.share}%) ${x.name}`);
   L.push(r.twice.length ? `Ran more than once in one train (${r.twice.length}):` : 'No test ran more than once in one train.');
   for (const x of r.twice.slice(0, 10)) L.push(`  ${x.name} (train ${x.train}: ${x.commands.join(' and ')})`);
-  L.push(r.heavy.length ? 'Heaviest shards by measured memory:' : 'No shard has a measured peak yet (rules.peak).');
+  L.push(r.heavy.length ? `Heaviest rules runs by ${r.heavy[0].sampled ? 'sampled memory' : "the test command's own peak file (rules.peak)"}:` : 'No rules run has a measured peak yet.');
   for (const x of r.heavy) L.push(`  ${x.peakGb} GB ${x.filter}`);
+  if (r.memory?.length) { L.push("Most memory in the test run's own table (rules.memory):"); for (const x of r.memory) L.push(`  ${x.gb} GB ${x.name}`); }
   L.push(`Hand-backs of kind ratchet in the last 24 hours: ${r.ratchets}.`);
   return L.join('\n');
 }
@@ -135,7 +171,7 @@ export async function costDigestLines(root, { now = Date.now(), events = null } 
     if (r?.slowest.length) out.push(r);
   }
   out.sort((a, b) => b.total - a.total);
-  return out.slice(0, 2).map((r) => `Test cost (${r.engine}, 24 h): slowest ${r.slowest[0].name.split('.').pop().slice(0, 40)} ${mins(r.slowest[0].seconds)} (${r.slowest[0].share}%)${r.twice.length ? `; ${r.twice.length} ran twice in a train` : ''}; npm run engine -- test-cost`);
+  return out.slice(0, 2).map((r) => `Test cost (${r.engine}, 24 h): slowest ${r.slowest[0].name.split('.').pop().slice(0, 40)} ${mins(r.slowest[0].seconds)} (${r.slowest[0].share}%)${r.twice.length ? `; ${r.twice.length} ran twice in a train` : ''}${r.memory?.length ? `; most memory ${r.memory[0].name.split('.').pop().slice(0, 40)} ${r.memory[0].gb} GB` : ''}; npm run engine -- test-cost`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

@@ -909,8 +909,10 @@ turn on `service.check` and run one `check` end to end, and only then `warm`.
   `.trx`, NUnit or JUnit XML): `"times": "tools/SimTests/**/*.trx"`. Only files written since the command started are
   read. The slowest 200 tests of each command are kept for 48 hours in `.studio/engine/<x>-times.json`. The daily digest
   gets up to two short lines. `npm run engine -- test-cost [--engine <x>]` prints the long form: the 10 slowest tests
-  with their share of the test time, tests that ran in two commands of one train, the shards with the most measured
-  memory (`partStats[...].peakGb`) and the hand-backs of kind `ratchet` in the last 24 hours.
+  with their share of the test time, tests that ran in two commands of one train, the rules runs with the most memory
+  (sampled peaks where runs were sampled, else the test command's own `rules.peak`), the most memory per test group when
+  `rules.memory` names the table the test run writes (`{ "file": "<glob>", "name": "<column>", "mb": "<column>" }`, or `gb`;
+  tab or comma separated with a header line) and the hand-backs of kind `ratchet` in the last 24 hours.
 - **Play Mode map gaps.** A land run whose Play Mode stage ran in full because paths match no `play.focus.map` entry
   keeps all of those paths (`.studio/engine/<x>-play-gaps.jsonl`). The digest says how often that happened in 24 hours
   and for which folders. `npm run engine -- play-plan --propose [--engine <x>] [--branch <b> | --paths a,b] [--json]`

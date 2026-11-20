@@ -161,12 +161,25 @@ recordTimes(root, 'unity', { dir: dirC, train: 'tr2', command: 'Cat=Fees', since
 fs.writeFileSync(path.join(root, '.studio', 'engine', 'unity-rules.json'), JSON.stringify({ trees: {}, partStats: { 'Cat=Fees': { peakGb: 2.25 }, 'Cat=Move': { peakGb: 7 }, Rest: { seconds: 5 } } }));
 const r = await costReport(root, 'unity', { events: [] });
 const lines = await costDigestLines(root, { events: [] });
-console.log(JSON.stringify({ stale, fresh, r, text: costText(r), lines }));`);
+fs.writeFileSync(path.join(root, '.studio', 'engine-ram.json'), JSON.stringify({ unity: { kinds: { 'rules Cat=Fees': [{ id: 'a', gb: 11.5, cpu: 5, minutes: 14, code: 0 }], 'rules': [{ id: 'b', gb: 1.2, cpu: 5, minutes: 80, code: 0 }], 'land no-rules': [{ id: 'c', gb: 9, cpu: 40, minutes: 45, code: 0 }] } } }));
+const rs = await costReport(root, 'unity', { events: [] });
+fs.rmSync(path.join(root, '.studio', 'engine-ram.json'), { force: true });
+const { memoryRead } = await import(${u('harness/rules-times.mjs')});
+const dirM = ${JSON.stringify(path.join(T, 'ck-m'))}; fs.mkdirSync(path.join(dirM, 'out'), { recursive: true });
+fs.writeFileSync(path.join(dirM, 'out', 'mem.tsv'), 'heap_mb\\tset_mb\\tgroup\\n35\\t117\\tFees.RoundingTests\\n52\\t14541\\tMapNav.SeamTests\\n40\\t300\\tFees.OtherTests\\n');
+const memRows = memoryRead(dirM, { file: 'out/*.tsv', name: 'group', col: 'set_mb', perGb: 1024 }, { since: 0 });
+const memStale = memoryRead(dirM, { file: 'out/*.tsv', name: 'group', col: 'set_mb', perGb: 1024 }, { since: Date.now() + 60000 }).length;
+const memBad = memoryRead(dirM, { file: 'out/*.tsv', name: 'nope', col: 'set_mb', perGb: 1024 }, { since: 0 }).length;
+console.log(JSON.stringify({ stale, fresh, r, text: costText(r), lines, sampled: rs.heavy, sampledText: costText(rs), memRows, memStale, memBad }));`);
     const rp = reportP.r || {};
     await guard('2.96 (d7) a result file older than the command is not counted (fails before this fix: a stale file from an earlier run would be)', () => [reportP.stale === 0 && reportP.fresh === 3, JSON.stringify({ stale: reportP.stale, fresh: reportP.fresh })]);
     await guard('2.96 (d8) the long report lists the slowest tests with their share of the test time (Fees.Rounding 150 s of 200 s is 75%), the test that ran in two commands of one train (tr1, not tr2), the shards by measured memory (7 GB first), and zero ratchet hand-backs', () => [
       rp.slowest?.[0]?.name === 'Fees.Rounding' && rp.slowest[0].seconds === 150 && rp.slowest[0].share === 75 && rp.slowest.length === 3 && rp.twice?.length === 1 && rp.twice[0].train === 'tr1' && rp.twice[0].name === 'Fees.Rounding' && rp.twice[0].commands.join() === 'rules.first,Cat=Fees'
         && rp.heavy?.[0]?.filter === 'Cat=Move' && rp.heavy[0].peakGb === 7 && rp.heavy.length === 2 && rp.ratchets === 0 && /Hand-backs of kind ratchet in the last 24 hours: 0\./.test(reportP.text || '') && /75%\) Fees\.Rounding/.test(reportP.text || ''), JSON.stringify(reportP)]);
+    await guard('2.96 (d8c) rules.memory: the table the test run writes (a header names the columns) is read, most memory first: 14.2 GB after MapNav.SeamTests; a file older than the command and a column that is not there give nothing (fails before this fix: the report had no memory per test group at all)', () => [
+      reportP.memRows?.length === 3 && reportP.memRows[0].name === 'MapNav.SeamTests' && reportP.memRows[0].gb === 14.2 && reportP.memStale === 0 && reportP.memBad === 0, JSON.stringify({ rows: reportP.memRows, stale: reportP.memStale, bad: reportP.memBad })]);
+    await guard('2.96 (d8b) with sampled runs the memory list is the sampled peaks of the rules kinds (11.5 GB first, the land run left out), not the test command\'s own peak file (fails before this fix: the list read only rules.peak, which counts one process, not the run\'s whole tree)', () => [
+      reportP.sampled?.length === 2 && reportP.sampled[0].filter === 'Cat=Fees' && reportP.sampled[0].peakGb === 11.5 && reportP.sampled[1].filter === '(the whole command)' && /by sampled memory:/.test(reportP.sampledText || '') && /own peak file/.test(reportP.text || ''), JSON.stringify({ s: reportP.sampled, t: (reportP.sampledText || '').split('\n').slice(-4) })]);
     // the digest: the block is short and the whole digest stays under the cap
     const digestP = probe(`import { buildDigest, MAX_WORDS } from ${u('harness/digest.mjs')};
 const d = await buildDigest({ events: [] });
