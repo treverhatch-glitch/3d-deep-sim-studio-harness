@@ -1,38 +1,50 @@
-// Debug only (never merged): why does a sampled run get no rows on Windows?
+// Debug only (never merged): the wrapper flow on Windows, with a command that really runs.
 import fs from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { runLimitedSync } from '../harness/run-limited.mjs';
-import { windowsHelperScript } from '../harness/run-sampler.mjs';
+import { startSampler, windowsHelperScript } from '../harness/run-sampler.mjs';
 import { psEnv } from '../harness/proc-identity.mjs';
 
 const t0 = Date.now();
 const say = (s) => console.log(`[${String(Date.now() - t0).padStart(6)} ms] ${s}`);
+fs.writeFileSync('grand.cjs', "const b = Buffer.alloc(300 * 1024 * 1024, 1); setTimeout(function () { b[0] = 2; }, 14000);");
+fs.writeFileSync('mid.cjs', "require('child_process').spawnSync(process.execPath, ['grand.cjs'], { stdio: 'inherit', windowsHide: true }); console.log('done-ok');");
+const cmd = JSON.stringify(process.execPath) + ' mid.cjs';
 const KEEP = /^(SystemRoot|windir|SystemDrive|ComSpec|PATHEXT|PATH|TEMP|TMP|USERPROFILE|APPDATA|LOCALAPPDATA|ProgramData|ALLUSERSPROFILE|PUBLIC|ProgramFiles|ProgramFiles\(x86\)|ProgramW6432|CommonProgramFiles|CommonProgramW6432|PSModulePath|NUMBER_OF_PROCESSORS|PROCESSOR_ARCHITECTURE|PROCESSOR_IDENTIFIER|OS|COMPUTERNAME|USERNAME|USERDOMAIN|HOMEDRIVE|HOMEPATH)$/i;
 const cut = Object.fromEntries(Object.entries(process.env).filter(([k]) => KEEP.test(k)));
-say(`full env has ${Object.keys(process.env).length} names; the cut-down one ${Object.keys(cut).length}`);
 
-const inner = "const b = Buffer.alloc(300 * 1024 * 1024, 1); setTimeout(() => { b[0] = 2; }, 9000)";
-const cmd = JSON.stringify(process.execPath) + ' -e ' + JSON.stringify("require('child_process').spawnSync(process.execPath, ['-e', " + JSON.stringify(inner) + "], { stdio: 'inherit', windowsHide: true })");
-say(`command: ${cmd}`);
+say('--- 1. startSampler in THIS process (as run-limited does), rows?');
+{
+  const child = spawn(process.execPath, ['mid.cjs'], { stdio: 'ignore', windowsHide: true });
+  fs.rmSync('one.csv', { force: true });
+  const s = startSampler({ file: 'one.csv', meta: { kind: 'x' }, rootPid: child.pid, everyMs: 1000 });
+  await new Promise((r) => child.on('exit', r));
+  s.stop({ code: 0 });
+  say(fs.readFileSync('one.csv', 'utf8'));
+}
 for (const [label, env] of [['full env', process.env], ['cut-down env', cut]]) {
   const f = `dbg-${label.replace(/\W+/g, '-')}.csv`;
   fs.rmSync(f, { force: true });
   const a = Date.now();
   const r = runLimitedSync(cmd, { sample: { file: f, meta: { kind: 'quick', engine: 'unity' }, everyMs: 1000 }, encoding: 'utf8', timeoutMs: 120000, env });
-  say(`--- runLimitedSync, ${label}: status ${r.status}, ${Date.now() - a} ms, stderr ${JSON.stringify(String(r.stderr || '').slice(0, 400))}${r.error ? ', error ' + r.error.code : ''}`);
+  say(`--- 2. runLimitedSync, ${label}: status ${r.status}, ${Date.now() - a} ms, out ${JSON.stringify(String(r.stdout || '').trim())}, stderr ${JSON.stringify(String(r.stderr || '').slice(0, 300))}`);
   say(fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '(no file)');
 }
-
-say('--- the helper direct, cut-down env through psEnv, stderr shown, 8 s');
-const child = spawn(process.execPath, ['-e', 'setTimeout(()=>{},15000)'], { stdio: 'ignore', windowsHide: true });
-await new Promise((done) => {
-  const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', windowsHelperScript(child.pid, process.pid, 1000).replace("$ErrorActionPreference='SilentlyContinue'", "$ErrorActionPreference='Continue'")], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: psEnv(cut) });
-  p.stdout.on('data', (d) => say(`OUT ${JSON.stringify(d.toString())}`));
-  p.stderr.on('data', (d) => say(`ERR ${JSON.stringify(d.toString().slice(0, 1200))}`));
-  p.on('exit', (c, s) => { say(`helper exit ${c} ${s}`); done(); });
-  p.on('error', (e) => { say(`helper error ${e.code}`); done(); });
-  setTimeout(() => { try { p.kill(); } catch { /* gone */ } }, 8000);
-});
-try { child.kill(); } catch { /* gone */ }
+say('--- 3. the same queries without modules: [wmisearcher], timed in one PowerShell, cut-down env');
+const q = [
+  "$sw=[Diagnostics.Stopwatch]::StartNew()",
+  "$p=@(([wmisearcher]'SELECT ProcessId,ParentProcessId,WorkingSetSize,CreationDate,KernelModeTime,UserModeTime FROM Win32_Process').Get())",
+  "$a=$sw.ElapsedMilliseconds",
+  "$o=@(([wmisearcher]'SELECT FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory FROM Win32_OperatingSystem').Get())[0]",
+  "$b=$sw.ElapsedMilliseconds",
+  "$p2=@(([wmisearcher]'SELECT ProcessId,ParentProcessId,WorkingSetSize,CreationDate,KernelModeTime,UserModeTime FROM Win32_Process').Get())",
+  "$c=$sw.ElapsedMilliseconds",
+  "[Console]::Out.WriteLine(('procs {0} first {1} ms, os {2} ms, second {3} ms; free {4} KB, vtotal {5} KB, vfree {6} KB; sample {7} {8} {9} {10}' -f $p.Count,$a,($b-$a),($c-$b),$o.FreePhysicalMemory,$o.TotalVirtualMemorySize,$o.FreeVirtualMemory,$p[5].ProcessId,$p[5].ParentProcessId,$p[5].CreationDate,$p[5].KernelModeTime))",
+].join('; ');
+for (const [label, env] of [['cut-down env', psEnv(cut)], ['full env', process.env]]) {
+  const a = Date.now();
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', q], { encoding: 'utf8', windowsHide: true, env, timeout: 60000 });
+  say(`${label}: whole call ${Date.now() - a} ms: ${String(r.stdout).trim()} ${JSON.stringify(String(r.stderr).trim().slice(0, 400))}`);
+}
 say('done');
 process.exit(0);

@@ -11,11 +11,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: install
-        run: npm ci
-      - name: unit 296a
-        shell: bash
-        run: |
-          node qa/selftest.mjs --only 296a > out.log 2>&1 || true
-          grep -E "\[selftest\] (FAIL|PASS) 2.96 \(a(1|2|16|18|19)\)" -A1 out.log | cut -c1-2200
-          grep -c "\[selftest\] PASS" out.log; grep -c "\[selftest\] FAIL" out.log || true
+      - name: the wrapper flow
+        run: node .dbg/win-sampler.mjs
