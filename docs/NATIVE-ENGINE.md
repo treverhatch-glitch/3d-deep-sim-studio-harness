@@ -90,6 +90,9 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   line says so) or waits for the run still going. A red ahead is only a red for that tree: it hands nobody back.
   Event `task.train.<x>.rules_ahead` (`started`, `kept-green`, `kept-red`, `dropped`); `train status` shows it running.
   2.95: when it does not start (memory, the land run ended first, no rules check) the event says `not-started` and why.
+  2.97: with `ahead` on, every land run logs that it started or one line saying why not (the rules green was not
+  used and why, no lane waits, already tried, a second gate). `npm run engine -- rules show` prints `ahead` on or off
+  and the last outcome (started, kept, dropped, or "did not start: <why>") with its train and time.
   With `rules.shards` it goes command by command instead of deciding once: each shard starts when its measured peak
   (`rules.peak`, else the plan's number) fits beside the land run, waits when it does not (within its time limit), and
   none starts once the land run answered. Stopped between shards it is `kept-partial`: under the same rule (kept only
@@ -193,7 +196,9 @@ half as much machine time as the land runs. Five settings, all optional, in the 
   the kept result's key is the tree without them (inside `paths` too, when both are set). The checkout stays full.
 - `inputs` are merged over every folder they are copied from: each file comes from the first folder that has it and
   never overwrites one already there, and the inputs' fingerprint is of that merged view. The train may add the
-  lanes' own folders after the regular ones (`extraFrom`); `share` lists folders of content-addressed input files a
+  lanes' own folders after the regular ones (`extraFrom`). 2.97: a lane copy that is a git checkout is read at the
+  lane's commit (what lands), never its working files, so a session still editing it does not cost the land run its
+  rules green. A branch that moved to changed inputs still does: one log line names the input and where; `share` lists folders of content-addressed input files a
   lane adds, which `shareInputs` copies (missing files only, nothing overwritten or deleted) where the next check finds them.
 - `focus`: when every path a batch changes (under `paths`, when set) matches a `map` entry, the batch runs
   `focus.test` with `{filter}` replaced by the matching entries' filters (`$1`..`$9` are the regex groups; a group
