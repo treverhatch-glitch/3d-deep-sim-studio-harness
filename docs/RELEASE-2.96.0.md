@@ -1,7 +1,7 @@
 # 2.96.0: measured memory and CPU, each test once per tree (`docs/RELEASE-2.96.0.md`)
 
 The overseer's brief of 2026-11-20 (16 items) with the owner's direction: make the harness use 32 GB well before the
-machine gets 64. Built on 2.95.0. Only this page and the one for 2.95.0 are kept; older release notes are in git history.
+machine gets 64. Built on 2.95.0. Only this page and the one for 2.97.0 are kept; older release notes are in git history.
 
 ## What the records said
 

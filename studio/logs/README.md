@@ -2,11 +2,11 @@
 
 **2-minute read for the owner: the latest summary is first. Then open problems, then proposals waiting for you.**
 
-## Latest summary — 2026-11-20 (2.96)
-- **Done:** 2.95 (the full rules check in shards, the playtest build, Systems ON) is on main and in use in the one studio on record.
-- **In progress:** 2.96 on a branch, merged when its online checks pass: every run sampled, admission by measured RAM and CPU (a setting), narrowing by the failing tests only, one green per tree, held lanes left out of the batch, union merge for list files, landing posts, the test-cost report, a smoke start for every pool, an upgrade that waits for the train. Notes: docs/RELEASE-2.96.0.md, studio/notes/HANDOFF-2.96-2026-11-20.md.
-- **Untested:** nothing of 2.93 to 2.96 has run on a real engine from the maintainer's side; the Windows sampler runs for real only in one online check; measured admission has decided nothing on a real machine yet.
-- **Open problems:** P-374 (first real samples needed), P-370, P-373, P-346, P-005, P-009.
+## Latest summary — 2026-11-21 (2.97)
+- **Done:** 2.96 (every run sampled, narrowing by the failing tests, one green per tree, held lanes, union merge) is on main and ran a day in the one studio on record: 18 tasks landed in about 8 hours.
+- **In progress:** 2.97 on a branch, merged when its online checks pass: the rules green judged by what lands and never lost in silence, a union merge for a line both lanes lengthen, the memory floor of the land kind, "too short to sample" in place of 0 GB, a red first test narrowed by its own words, a drain that means no new train, a train that starts again when the harness changed under it, an upgrade that fetches first. Notes: docs/RELEASE-2.97.0.md, studio/notes/HANDOFF-2.97-2026-11-21.md.
+- **Untested:** nothing of 2.97 has run on Windows or a real engine before the online checks; the train's restart is checked for the web train only; measured admission is still off in the studio.
+- **Open problems:** P-370, P-373, P-346, P-005, P-009.
 - **Waiting for your OK:** whether a count ratchet may land with a fix task filed; which unused features to retire.
 
 ## The files
