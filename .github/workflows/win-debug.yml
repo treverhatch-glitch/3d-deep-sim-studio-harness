@@ -11,5 +11,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: the wrapper flow
-        run: node .dbg/win-sampler.mjs
+      - name: install
+        run: npm ci
+      - name: unit 296a
+        shell: bash
+        run: |
+          node qa/selftest.mjs --only 296a > out.log 2>&1 || true
+          grep -E "\[selftest\] (FAIL|PASS) 2.96 \(a(1|2|16|18|19)\)" out.log | cut -c1-120
+          echo "--- sampler debug log"; cat "$(node -e "console.log(require('os').tmpdir())")/studio-sampler-dbg.log" | cut -c1-700 | head -80

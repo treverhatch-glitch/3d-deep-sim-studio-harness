@@ -8,6 +8,7 @@
  */
 import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { psEnv } from './proc-identity.mjs';
 
@@ -93,23 +94,29 @@ export function startSampler({ file, meta = {}, rootPid, everyMs = 10000, helper
   const write = (text) => { if (dead) return; try { fs.appendFileSync(file, text); } catch { dead = true; } };
   const row = (s) => { if (rows >= MAX_ROWS) return; rows += 1; write(`${[s.t, r2(s.availGb), r2(s.commitUsedGb), r2(s.commitLimitGb), r2(s.cpuPct), r2(s.treeGb), r2(s.treeCpuPct), s.procs ?? ''].join(',')}\n`); };
   try { write(`# ${JSON.stringify({ v: 1, ...meta, pid: process.pid, ppid: process.ppid, root: rootPid, at: Date.now(), everyMs, cores, platform })}\n${CSV_HEAD}\n`); } catch { dead = true; }
+  const dbg = (x) => { try { fs.appendFileSync(path.join(os.tmpdir(), 'studio-sampler-dbg.log'), `${new Date().toISOString()} pid ${process.pid} root ${rootPid} every ${everyMs} helper ${helper || '-'}: ${x}\n`); } catch { /* debug */ } };
+  dbg(`startSampler file ${file} cwd ${process.cwd()}`);
   try {
     if (helper || platform === 'win32') later = setTimeout(() => { try {
+      dbg('timer fired');
       // Started after one interval: a run shorter than that never starts a helper.
       if (dead) return;
       const args = helper ? [helper, String(rootPid), String(process.pid), String(everyMs)] : ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', windowsHelperScript(rootPid, process.pid, everyMs)];
       const env = helper ? process.env : psEnv(process.env);
-      proc = spawn(helper ? process.execPath : 'powershell.exe', args, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, env });
-      proc.on('error', () => { proc = null; });
+      proc = spawn(helper ? process.execPath : 'powershell.exe', args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env });
+      dbg(`spawned ${proc.pid} PATH ${String(env.PATH || env.Path || '').slice(0, 200)} SystemRoot ${env.SystemRoot}`);
+      proc.stderr.on('data', (d) => dbg(`STDERR ${d.toString().slice(0, 1200)}`));
+      proc.on('error', (e) => { dbg(`ERROR ${e.code} ${e.message}`); proc = null; });
       let buf = '';
       proc.stdout.on('data', (d) => {
+        dbg(`OUT ${JSON.stringify(d.toString().slice(0, 200))}`);
         buf = (buf + d.toString('utf8')).slice(-65536);
         const lines = buf.split(/\r?\n/); buf = lines.pop();
         for (const l of lines) { const s = parseHelperLine(l, cores); if (s) row(s); }
       });
-      proc.on('exit', () => { proc = null; });
+      proc.on('exit', (c, sg) => { dbg(`exit ${c} ${sg}`); proc = null; });
       proc.unref(); proc.stdout.unref?.();
-    } catch { proc = null; } }, Math.max(100, everyMs));
+    } catch (e) { dbg(`THROW ${e.message}`); proc = null; } }, Math.max(100, everyMs));
     if (later) later.unref();
     else if (platform === 'linux') {
       let last = null;
@@ -134,6 +141,7 @@ export function startSampler({ file, meta = {}, rootPid, everyMs = 10000, helper
   } catch { /* no samples: the run goes on */ }
   return {
     stop({ code = null, signal = null } = {}) {
+      dbg(`stop code ${code} signal ${signal} rows ${rows} proc ${proc ? proc.pid : null}`);
       try { if (timer) clearInterval(timer); if (later) clearTimeout(later); } catch { /* gone */ }
       try { if (proc) proc.kill(); } catch { /* gone */ }
       write(`# end ${JSON.stringify({ at: Date.now(), code, signal, rows })}\n`);
