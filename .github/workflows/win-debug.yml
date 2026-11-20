@@ -13,8 +13,3 @@ jobs:
           node-version: '24'
       - name: the helper, raw
         run: node .dbg/win-sampler.mjs
-      - name: install
-        run: npm ci
-      - name: unit 296a
-        shell: bash
-        run: node qa/selftest.mjs --only 296a 2>&1 | grep -E "\[selftest\] (FAIL|PASS) 2.96 \(a(1|2|16|18|19)\)" -A1 | cut -c1-1800 || true
