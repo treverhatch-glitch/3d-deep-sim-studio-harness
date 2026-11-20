@@ -63,8 +63,13 @@ more. Tests 1,404 lines larger (five new units). One setting name more. This rou
 ## Limits, said plainly
 
 - **Nothing here ran on a real engine, a real test suite, real agy or a real API key.**
-- **The Windows sampler** runs for real only in the online Windows check added for it (`296a` a18). On a studio's
-  machine it is new: one PowerShell helper per run longer than one interval. `"machine": { "sample": false }` turns it off.
+- **The Windows sampler** has run for real on online Windows machines only (`296a` a18: it found a 300 MB grandchild in
+  the run's tree, read free RAM and CPU, about 0.1 s of work a sample, and no helper was left after the run). On a
+  studio's machine it is new: one hidden PowerShell per run longer than one interval. `"machine": { "sample": false }`
+  turns it off.
+- **Caught before the merge:** the first helper used `Get-CimInstance` and wrote no sample at all in the online
+  Windows run (P-370: a cmdlet from a module can take longer than the run to load). It now calls no cmdlet. The check
+  that caught it had itself a command `cmd.exe` could not run (an arrow function's `>` read as a redirect).
 - **Measured admission is off by default** and has never decided anything on a real machine. With it on, each wait
   re-reads the samples files every 2 s.
 - **A filtered run never calls a batch green and never hands a lane back alone;** the "no test ran" detection reads

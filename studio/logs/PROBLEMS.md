@@ -92,7 +92,8 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-370 — on Windows a train cancel started from a cut-down environment could not read the process list · open (the unit fixed 2.94, before the merge)
 - **Evidence:** pull request 96, second online run and its re-run, Windows only: `294a` (g) red twice the same way. `train cancel` said "the process list could not be read: ETIMEDOUT" (the one PowerShell call took over 16 s), so the train was not ended and neither was the check ahead. `284u` runs the same cancel on the same runner and passes: it passes Windows' own system variables through to its helpers (2.84), and `294a` did not.
 - **Fix:** `294a` passes them through, as the fifteen engine units since 2.84 do. Nothing in `harness/` changed. The third online run passed with them, every check of `294a` green on Windows.
-- **Open:** `psEnv` (2.84) is meant to give PowerShell those variables when they are missing, and here it did not suffice; which variable is missing is not known. A cancel run from a real shell has them all. Not looked into further: no Windows machine to try it on.
+- **2.96, measured on an online Windows machine:** from a unit started under a bash shell, a PowerShell that calls no cmdlet answers in 0.3 s and a `[wmisearcher]` query in 0.1 s, while `Get-CimInstance Win32_Process` printed nothing in 19 s. `PSModulePath` there begins with a large module folder; a cmdlet from a module makes PowerShell search those folders first, which is the likely cause. No variable was missing.
+- **Open:** `harness/proc-identity.mjs` still reads the process list and start times with `Get-CimInstance`. It works from a studio's normal shell. Moving it to `[wmisearcher]` needs a check that both give the same start time to the millisecond, because locks compare it.
 
 ### P-371 — one full rules run was one process that outgrew the machine · fixed 2.95 (as settings)
 - **Evidence:** a live studio, 18 November: 6.7, 14 and 18.9 GB for one full run of its rules tests, on 31.8 GB where a land run needs about 21 GB free. Land runs waited, the owed full run stood in the trains' way, the check ahead could not start. The cause on the game side (every test fixture kept its data for the whole run) was found the same day.
@@ -108,7 +109,7 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 
 ### P-374 — nobody had measured what a land run or a shard takes · fixed 2.96 (sampling), open until a studio's first samples are read
 - **Evidence:** a live studio, 19 and 20 November: heavy work admitted by slots and fixed claims; a sampler made by hand summed every test process on the machine and blamed the wrong test (11.5 GB); the test run's own per-fixture table showed one fixture at 14.2 GB. The land run waited for 18.8 GB, the size of a test stage it skips when the rules are green.
-- **Fix:** every run's own process tree is sampled; a cost per job kind; `machine.admit: "measured"`. `qa/selftest-296a.mjs`. The Windows helper has run only in the online check written for it.
+- **Fix:** every run's own process tree is sampled; a cost per job kind; `machine.admit: "measured"`. `qa/selftest-296a.mjs`. The first Windows helper (four `Get-CimInstance` queries a sample) wrote no sample at all in the online run: see P-370. It now uses two `[wmisearcher]` queries and no cmdlet; on an online Windows machine it found a 300 MB grandchild, and a sample costs about 0.1 s.
 
 ### P-375 — a red rules check re-ran the whole suite at every narrowing step · fixed 2.96
 - **Evidence:** a live studio: 169, 316 and 413 minutes of rules for red batches, 87 to 90 for green ones; a count ratchet cost about 6 hours over two trains; naming two lanes from a failure that names its system took 8 runs.

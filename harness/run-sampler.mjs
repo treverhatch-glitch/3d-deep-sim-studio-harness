@@ -27,31 +27,38 @@ export function parseHelperLine(line, cores = os.cpus().length || 1) {
 }
 
 /**
- * The Windows helper: one PowerShell loop over CIM classes (names aren't localized). Ends when `parent` is gone. The
- * first line marks it (`studio-sampler <rootPid>`) so a check finds it by its command line. No double quotes in it:
- * Node's quoting of them on a Windows command line is a known trap.
+ * The Windows helper: one PowerShell loop of two WMI queries a sample (class names aren't localized). Ends when `parent`
+ * is gone. A line marks it (`studio-sampler <rootPid>`) so a check finds it by its command line. No double quotes in
+ * it: Node's quoting of them on a Windows command line is a known trap.
  */
 export const helperMark = (rootPid) => `studio-sampler ${Number(rootPid)}`;
 export function windowsHelperScript(rootPid, parentPid, everyMs) {
+  // .NET and [wmisearcher] only, no cmdlet: a cmdlet makes PowerShell search every module folder first, which took
+  // longer than the run (or hung) on a machine with a long PSModulePath; two queries a sample, about 0.1 s of work.
   return [
-    `$mark='${helperMark(rootPid)}'`,
     "$ErrorActionPreference='SilentlyContinue'",
-    `$root=${Number(rootPid)}; $parent=${Number(parentPid)}; $ms=${Math.max(200, Number(everyMs))}`,
+    '[Threading.Thread]::CurrentThread.CurrentCulture=[Globalization.CultureInfo]::InvariantCulture',
+    `$mark='${helperMark(rootPid)}'`,
+    `$root=${Number(rootPid)}; $parent=${Number(parentPid)}; $ms=${Math.max(200, Number(everyMs))}; $cores=[Math]::Max(1,[Environment]::ProcessorCount)`,
+    '$prev=@{}; $prevT=$null',
     'while ($true) {',
-    ' if (-not (Get-Process -Id $parent)) { break }',
-    ' $ps=@(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,WorkingSetSize,CreationDate)',
-    ' $by=@{}; $kids=@{}; foreach ($p in $ps) { $by[[int]$p.ProcessId]=$p; $k=[int]$p.ParentProcessId; if (-not $kids.ContainsKey($k)) { $kids[$k]=@() }; $kids[$k]+=$p }',
-    ' $in=@{}; $q=New-Object System.Collections.Queue; if ($by.ContainsKey($root)) { $in[$root]=1; $q.Enqueue($by[$root]) }',
-    ' while ($q.Count) { $x=$q.Dequeue(); foreach ($c in @($kids[[int]$x.ProcessId])) { if ($c -and -not $in.ContainsKey([int]$c.ProcessId) -and $c.CreationDate -ge $x.CreationDate) { $in[[int]$c.ProcessId]=1; $q.Enqueue($c) } } }',
-    ' $ws=0; foreach ($id in $in.Keys) { $ws+=[double]$by[$id].WorkingSetSize }',
-    // Performance data of the tree's processes only (one filtered query); a tree of over 40 reads every process's.
-    " $pf=@{ Property='IDProcess','PercentProcessorTime' }; if ($in.Count -le 40) { $pf.Filter=(@($in.Keys | ForEach-Object { 'IDProcess=' + $_ }) -join ' OR ') }",
-    ' $cpu=0; if ($in.Count) { foreach ($pp in @(Get-CimInstance Win32_PerfFormattedData_PerfProc_Process @pf)) { if ($in.ContainsKey([int]$pp.IDProcess)) { $cpu+=[double]$pp.PercentProcessorTime } } }',
-    ' $m=Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory -Property AvailableBytes,CommittedBytes,CommitLimit',
-    " $t=(Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter 'Name=''_Total''' -Property PercentProcessorTime).PercentProcessorTime",
+    ' try { $null=[Diagnostics.Process]::GetProcessById($parent) } catch { break }',
+    " $ps=@(([wmisearcher]'SELECT ProcessId,ParentProcessId,WorkingSetSize,CreationDate,KernelModeTime,UserModeTime FROM Win32_Process').Get())",
     ' $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
-    " [Console]::Out.WriteLine(('S|{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}' -f $now,$m.AvailableBytes,$m.CommittedBytes,$m.CommitLimit,$t,$ws,$cpu,$in.Count)); [Console]::Out.Flush()",
-    ' Start-Sleep -Milliseconds $ms',
+    ' $by=@{}; $kids=@{}; foreach ($p in $ps) { $by[[int]$p.ProcessId]=$p; $k=[int]$p.ParentProcessId; if (-not $kids.ContainsKey($k)) { $kids[$k]=@() }; $kids[$k]+=$p }',
+    ' $in=@{}; $q=[Collections.Queue]::new(); if ($by.ContainsKey($root)) { $in[$root]=1; $q.Enqueue($by[$root]) }',
+    ' while ($q.Count) { $x=$q.Dequeue(); foreach ($c in @($kids[[int]$x.ProcessId])) { if ($c -and -not $in.ContainsKey([int]$c.ProcessId) -and [string]$c.CreationDate -ge [string]$x.CreationDate) { $in[[int]$c.ProcessId]=1; $q.Enqueue($c) } } }',
+    ' $ws=0; foreach ($id in $in.Keys) { $ws+=[double]$by[$id].WorkingSetSize }',
+    // CPU from each process's own kernel and user time (100 ns units) since the last sample; pid 0 is the idle time.
+    ' $cur=@{}; $all=0; $tree=0',
+    ' foreach ($p in $ps) { $id=[int]$p.ProcessId; if ($id -eq 0) { continue }; $t=[double]$p.KernelModeTime+[double]$p.UserModeTime; $cur[$id]=$t; if ($prev.ContainsKey($id) -and $t -ge $prev[$id]) { $d=$t-$prev[$id]; $all+=$d; if ($in.ContainsKey($id)) { $tree+=$d } } }',
+    " $cpu=''; $tcpu=''",
+    ' if ($prevT -ne $null -and $now -gt $prevT) { $wall=($now-$prevT)*10000; $cpu=[Math]::Min(100,[Math]::Round(100*$all/($wall*$cores),1)); $tcpu=[Math]::Round(100*$tree/$wall,1) }',
+    ' $prev=$cur; $prevT=$now',
+    " $o=@(([wmisearcher]'SELECT FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory FROM Win32_OperatingSystem').Get())[0]",
+    ' $avail=[double]$o.FreePhysicalMemory*1024; $limit=[double]$o.TotalVirtualMemorySize*1024; $commit=$limit-[double]$o.FreeVirtualMemory*1024',
+    " [Console]::Out.WriteLine(('S|{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}' -f $now,$avail,$commit,$limit,$cpu,$ws,$tcpu,$in.Count)); [Console]::Out.Flush()",
+    ' [Threading.Thread]::Sleep($ms)',
     '}',
   ].join('\n');
 }

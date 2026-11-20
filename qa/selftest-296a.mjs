@@ -65,14 +65,18 @@ export async function selftest296A({ dir, report, tmpRoot }) {
     const R1 = probe(`import { runLimitedSync } from ${u('harness/run-limited.mjs')};
 import { runSample, readRun, summarize } from ${u('harness/run-cost.mjs')};
 const sample = runSample(process.cwd(), 'unity', 'quick', { label: 'a quick test' });
-sample.everyMs = 200;
-// A shell, a node, and its child that holds the memory (a child of a child).
-const inner = "const b = Buffer.alloc(300 * 1024 * 1024, 1); setTimeout(() => { b[0] = 2; }, 2500)";
-const r = runLimitedSync(process.execPath + ' -e ' + JSON.stringify("require('child_process').spawnSync(process.execPath, ['-e', " + JSON.stringify(inner) + "], { stdio: 'inherit', windowsHide: true }); console.log('done-ok')"), { sample, encoding: 'utf8', timeoutMs: 120000 });
+// A shell, a node, and its child that holds the memory (a child of a child). Script files, not -e text: cmd.exe reads
+// the ">" of an arrow function in a nested-quoted command as a redirect. Windows' helper takes seconds to its first sample.
+const fs = await import('node:fs');
+const win = process.platform === 'win32';
+sample.everyMs = win ? 1000 : 200;
+fs.writeFileSync('grand-296a.cjs', "const b = Buffer.alloc(300 * 1024 * 1024, 1); setTimeout(function () { b[0] = 2; }, " + (win ? 14000 : 2500) + ");");
+fs.writeFileSync('mid-296a.cjs', "require('child_process').spawnSync(process.execPath, ['grand-296a.cjs'], { stdio: 'inherit', windowsHide: true }); console.log('done-ok');");
+const r = runLimitedSync(JSON.stringify(process.execPath) + ' mid-296a.cjs', { sample, encoding: 'utf8', timeoutMs: 120000 });
 const run = readRun(sample.file);
 console.log(JSON.stringify({ status: r.status, out: String(r.stdout), file: sample.file.split('unity-samples')[1], kind: run?.meta?.kind, rows: run?.rows?.length, ended: Boolean(run?.end), code: run?.end?.code, sum: run ? summarize(run) : null}));`);
     await guard('2.96 (a1) a run started with runSample is sampled into .studio/engine/unity-samples/<run>.csv: its kind, rows while it ran and an end line with its exit code; the run itself is unchanged (fails before this fix: nothing sampled a run)', () => [
-      R1.status === 0 && /done-ok/.test(R1.out || '') && R1.kind === 'quick' && R1.rows >= 3 && R1.ended && R1.code === 0, JSON.stringify(R1)]);
+      R1.status === 0 && /done-ok/.test(R1.out || '') && R1.kind === 'quick' && R1.rows >= (process.platform === 'win32' ? 2 : 3) && R1.ended && R1.code === 0, JSON.stringify(R1)]);
     await guard('2.96 (a2) the tree\'s peak is found when a child of a child holds the memory (300 MB in a grandchild of the run: peak over 0.2 GB) (fails before this fix: the test command\'s own peak file was the only number, and it was wrong)', () => [
       R1.sum && R1.sum.peakGb >= 0.2 && R1.sum.peakGb < 2, JSON.stringify(R1.sum)]);
 
@@ -97,7 +101,7 @@ console.log(JSON.stringify({ a: [a.status, String(a.stdout).trim()], b: [b.statu
     await guard('2.96 (a19) a run shorter than one sample interval never starts the helper (Windows\' PowerShell): its file still gets its end line (fails before this fix: no sampler)', () => [
       R3.short?.status === 0 && R3.short.started === false && R3.short.end === true, JSON.stringify(R3.short)]);
 
-    // The real Windows helper (PowerShell): a grandchild holds 300 MB for 12 s, one sample a second.
+    // The real Windows helper (PowerShell): a grandchild holds 300 MB for 20 s, one sample a second.
     const winName = '2.96 (a18) Windows: the real PowerShell helper samples a run whose grandchild holds 300 MB: 3+ rows, peak tree 0.25+ GB, 2+ processes, free RAM and CPU read, the end line written, no helper left 5 s after the run, and a median gap between samples under 8 s at sampleSec 1 (fails before this fix: no sampler)';
     if (process.platform !== 'win32') report(`${winName}: Windows only: skipped here`, true, '');
     else {
@@ -107,12 +111,13 @@ import { runLimitedSync } from ${u('harness/run-limited.mjs')};
 import { readRun } from ${u('harness/run-cost.mjs')};
 import { helperMark } from ${u('harness/run-sampler.mjs')};
 import { psEnv } from ${u('harness/proc-identity.mjs')};
-const inner = "const b = Buffer.alloc(300 * 1024 * 1024, 1); setTimeout(() => { b[0] = 2; }, 12000)";
-const cmd = JSON.stringify(process.execPath) + ' -e ' + JSON.stringify("require('child_process').spawnSync(process.execPath, ['-e', " + JSON.stringify(inner) + "], { stdio: 'inherit', windowsHide: true })");
+fs.writeFileSync('grand-win.cjs', "const b = Buffer.alloc(300 * 1024 * 1024, 1); setTimeout(function () { b[0] = 2; }, 20000);");
+fs.writeFileSync('mid-win.cjs', "require('child_process').spawnSync(process.execPath, ['grand-win.cjs'], { stdio: 'inherit', windowsHide: true });");
+const cmd = JSON.stringify(process.execPath) + ' mid-win.cjs';
 const r = runLimitedSync(cmd, { sample: { file: 'win.csv', meta: { kind: 'quick', engine: 'unity' }, everyMs: 1000 }, encoding: 'utf8', timeoutMs: 120000 });
 const run = readRun('win.csv');
 await new Promise((res) => setTimeout(res, 5000));
-const q = "@(Get-CimInstance Win32_Process -Filter 'Name=''powershell.exe''' | Where-Object { $_.CommandLine -like '*" + helperMark(run?.meta?.root || 0) + "*' }).Count";
+const q = "@(Get-CimInstance Win32_Process -Filter 'Name=''powershell.exe''' | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*" + helperMark(run?.meta?.root || 0) + "*' }).Count";
 const left = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', q], { env: psEnv(), encoding: 'utf8', windowsHide: true, timeout: 60000 });
 const rows = run?.rows || [];
 const gaps = rows.slice(1).map((x, i) => x.t - rows[i].t).sort((a, b) => a - b);
@@ -228,7 +233,10 @@ console.log(JSON.stringify({ running: runningLines(process.cwd()), costs: costLi
       /Running quick: 0\.2 GB and 5% CPU now, 0\.2 GB at most so far; reservation 1 GB/.test(R15.status || '') && R15.costs?.some((l) => /^ {2}rules: peak 1 GB \(reserves 1\.5 GB\), CPU 5%, [\d.]+ min/.test(l)) && /measured admission: on/.test(R15.costs?.[0] || '') && R15.costs.some((l) => /not run together: quick \+ rules/.test(l)) && /\(61 s; peak 9\.6 GB, CPU 31%, 47 min\)/.test(R15.line || ''), JSON.stringify(R15)]);
 
     // The land run itself: sampled, its numbers in the result and the engine.land event.
-    setGame({ engines: { unity: { land: `${JSON.stringify(process.execPath)} -e "const b = Buffer.alloc(200 * 1024 * 1024, 1); setTimeout(() => { b[0] = 1; }, 1500)"`, timeoutMin: 5 } }, machine: { sampleSec: 0.2 } });
+    // A script file, not -e text (cmd.exe and ">"); on Windows the helper's first sample takes seconds, so the run is longer.
+    const winLand = process.platform === 'win32';
+    fs.writeFileSync(path.join(S, 'land-296a.cjs'), `const b = Buffer.alloc(200 * 1024 * 1024, 1); setTimeout(function () { b[0] = 1; }, ${winLand ? 14000 : 1500});`);
+    setGame({ engines: { unity: { land: `${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(S, 'land-296a.cjs'))}`, timeoutMin: 5 } }, machine: { sampleSec: winLand ? 1 : 0.2 } });
     const R16 = probe(`import { runUnityGate } from ${u('harness/unity-gate.mjs')};
 const r = await runUnityGate({ engine: 'unity', branch: 'feat-a', env: { ...process.env, STUDIO_RULES_GREEN: '1' } });
 console.log(JSON.stringify({ status: r.status, measured: r.measured }));`, { STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_HEAVY_SLOTS: '1' });

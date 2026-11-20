@@ -795,8 +795,8 @@ max(0.5 GB, 10%), once at least one of them passed.
   number a land script's own wait for free RAM can use. `train status` shows each running job's RAM and CPU now, its
   peak so far and its reservation. The land result line and the `engine.land` and `engine.rules` events carry
   `peakGb`, `cpuPct` and `minutes`.
-- Untested on Windows: the PowerShell helper (its process tree, CPU per process and commit charge) has only been run
-  through a stand-in that speaks its one-line protocol.
+- On Windows the helper calls no cmdlet (two WMI queries a sample, about 0.1 s of work): it has run on online Windows
+  machines, not yet in a studio. CPU is each process's own kernel and user time since the last sample.
 
 ## The land's stage report
 
