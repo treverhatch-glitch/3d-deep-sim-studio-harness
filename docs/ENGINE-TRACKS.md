@@ -267,7 +267,8 @@ The land run itself still takes `machine:heavy` as that engine's job kind, with 
 - `npm run task -- train cancel --engine <x> --by <name> [--why "…"]`: writes `.studio/train/<x>-cancel.json` (the train
   id from its lock) first, kills the train's process tree (its land run with it; `taskkill /T /F` on Windows) and waits
   up to 30 s, puts the gate worktree back (`git merge --abort`, `git reset --hard <target>`, `git clean -fd`; only a
-  linked worktree of the engine repo, never its main checkout or a lane), deletes the train's integration refs and
+  linked worktree of the engine repo, never its main checkout or a lane), deletes the train's integration refs, removes its rules
+  checkouts (`.studio/tmp/rules-<train>-*`, about 1.3 GB each; the message says how much it freed) and
   releases its lock. The queue is left as it was: nobody is handed back or blamed (`task.train.<x>.cancelled`). It does
   not turn the automatic start off; it prints the command that does.
 - `npm run task -- train auto off|on --engine <x> --by <name> [--why "…"] [--hours N]`: the Line Producer's automatic

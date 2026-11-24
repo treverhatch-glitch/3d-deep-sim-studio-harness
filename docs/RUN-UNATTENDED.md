@@ -141,6 +141,15 @@ npm run studio:status
     no commit not on main. The branch is kept. `npm run lanes -- prune --idle <hours> [--dry-run] [--by <name>]` applies the
     rule now (`lanes.pruned` event). `npm run lanes` alone is a cheap listing; `--full` or a task/agent/branch name reads
     ahead/behind, dirty and stamps.
+  - Prune when short (2.98): off unless `studio/game.json` has `"disk": { "pruneUnderGb": 60, "idleHours": 1 }` (`idleHours`
+    defaults to 1). When free disk on the studio's drive is under `pruneUnderGb`, the supervisor (at most every 10 minutes, in
+    a detached child, `harness/lane-disk.mjs`) calls `pruneWhenShort` (`harness/janitor.mjs`). It removes a lane copy or an
+    engine worktree only when ALL hold: its work has landed (task done, branch merged; an engine copy's commit is on the
+    target), it is clean, nothing its branch lacks, unused for `idleHours`, no live session or claim, not queued, not in a
+    running train. Oldest first; it stops once free disk is over the line. One `disk.pruned` event per copy (what, size, why
+    it was safe) and one `disk.short` event naming each copy it kept and the test it failed. The branches stay.
+  - Sizes (2.98): the lane copies' size in the machine line and the disk users is measured when shown (a walk capped at 2 s,
+    a measure under 5 minutes old is reused) and always carries its age: "133 GB, measured 2 min ago", "at least" when cut short.
 - **Orphaned gate runs** (2.78.1, `harness/gate-reaper.mjs`): each pass (at most every `STUDIO_ORPHAN_GATE_SCAN_MIN`, 10) ends
   every `scripts/run-gates.mjs` process whose parent is gone and that is older than `STUDIO_ORPHAN_GATE_MIN` (60) minutes,
   with its whole tree, and logs `gate.orphan_ended` (pid, age, why, command line). "Parent gone": no process has its parent's
