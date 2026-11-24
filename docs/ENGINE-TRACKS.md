@@ -226,6 +226,10 @@ The land run itself still takes `machine:heavy` as that engine's job kind, with 
   entry; a `task.tag` event). `npm run task -- train --engine <x> --tag <word>` takes only lanes with that tag. A train
   with neither `--only` nor `--tag` (the automatic start, a plain `train --engine <x>`) takes only untagged lanes: a
   tagged lane (an art batch) is never swept into a general train.
+  2.98: when no untagged lane waits and tagged lanes do, the automatic start runs a train for the tag whose oldest lane
+  was queued first, as `train --tag` does. It decides this before any full land run of the target alone. Set
+  `"tagsWhenIdle": false` in the engine's config to leave tagged lanes to a person. `train status --engine <x>` says
+  which rule applies on its tagged-lanes line.
 - A batch cap: `"batchMax": 6` in the engine's config (`STUDIO_ENGINE_BATCH_MAX` overrides it; 0, the default, is no
   cap): a train takes at most that many lanes, the rest wait for the next train.
 - Grouping by risk: `"batchGroup": "play"` groups lanes by the Play Mode class of what each lane changes (the
@@ -234,6 +238,17 @@ The land run itself still takes `machine:heavy` as that engine's job kind, with 
   `play.focus` every lane is class `full` and nothing changes. A lane marked alone still lands alone. Order: `--only` and
   `--tag`, then alone, then grouping, then the cap. The train's start event and `train status --engine <x>` say why the
   batch is what it is ("6 of 14 queued: class focus, cap 6; 8 wait (5 full, 3 focus)").
+- 2.98: quick lanes first. With `batchGroup` "play", when the head of the queue is class `full` and at least
+  `"batchSkipFirst"` lanes of class `skip` wait (default 4; 0 turns it off), the train takes the skip batch first and
+  says so ("the head T-1 is class full and 14 skip lanes wait: the skip batch goes first"). A full head is passed over
+  at most twice in a row (the count is kept on its queue entry), then it goes.
+- 2.98: an empty lane is refused. A branch whose commits change no file (only a merge of the target, say) is refused at
+  the queue door, and a train hands such a lane back with "empty lane: nothing to land (its tree adds nothing over
+  <target>)". Its task stays open.
+- 2.98: the train reads `engines.<x>` again before each step: the batch, the compile search, the rules check, each round,
+  each land run and the full run. A change is one log line and a `task.train.<x>.config_changed` event ("config changed
+  while this train ran: rules.focus.splitMax 3 -> 1"). A step already running keeps its values; the repo and target do
+  not change during a train.
 - 2.96: a held lane is left out before the batch is picked. A queued lane whose task waits for another task
   (`task after`) is not a candidate, even with `--only`: it sets no class, takes no seat and is not deferred. It stays
   queued. `train status --engine <x>` lists it once ("T-12 held: waits for T-9 (task after)"), and a

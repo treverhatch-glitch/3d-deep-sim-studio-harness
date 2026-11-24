@@ -138,7 +138,8 @@ console.log(JSON.stringify({ ok: r.ok, runs: r.runs, landed: r.landed, message: 
     resetState();
     const E = engineRepo(lanes4);
     const ctl = path.join(T, 'ctl-tag');
-    setEngines({ unity: cfgFor(E, ctl) });
+    // 2.98 (b): tagsWhenIdle false keeps 2.84's "only a person starts a tag train" (the default now starts the oldest group).
+    setEngines({ unity: cfgFor(E, ctl, { tagsWhenIdle: false }) });
     queue(E, [['T-201', 'feat/a'], ['T-202', 'feat/b', { tag: 'art' }], ['T-203', 'feat/c']]);
     const plain = probe(TRAIN());
     const PASS = `const lp = await import(${u('harness/line-producer.mjs')}); const started = [];
