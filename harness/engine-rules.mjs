@@ -5,7 +5,7 @@
  * Default for unity when "rules" is absent: `dotnet test tools/SimTests` when the target branch has that folder. "rules": false
  * or STUDIO_ENGINE_RULES=off: no check. Other keys: "inputs" (git-ignored files the tests read), "timeoutMin" (30), "env", "lfs",
  * "paths", "ignore", "focus" (changed systems only, a full run every fullEveryHours; "focus.auto", "focus.shared"), "share", "maxLanes",
- * "play.focus", "landGate", "ahead", "shards", "peak", "byName", "ratchets", "build", "infra" (docs/NATIVE-ENGINE.md). The batch runs first; a red batch asks the
+ * "play.focus", "landGate", "ahead", "shards", "byName", "ratchets", "build", "infra" (docs/NATIVE-ENGINE.md). The batch runs first; a red batch asks the
  * target, a red target judges no lane, and a red is narrowed by its failing tests by name. Results are kept per tree, command and inputs.
  *   node harness/engine-rules.mjs [--engine unity] [--ref <branch|commit>] [--full] [--fresh] [--json] | show [--engine unity]
  *   node harness/engine-rules.mjs plan --branch <b> [--branch <c>] [--json]   (what a batch's check would run; runs nothing)

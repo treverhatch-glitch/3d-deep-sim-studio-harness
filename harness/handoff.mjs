@@ -29,15 +29,9 @@ import { repeats, staleSuggestions } from './learn.mjs';
 import { buildConstraints, constraintsBlock } from './learning-edge.mjs';
 import { listPitfallProposals, pitfallPartsForRole } from './pitfalls.mjs';
 import { untrustedBlock } from './untrusted.mjs';
-import { readJsonVia } from './helpers.mjs';
+import { readJsonVia, readTextLf } from './helpers.mjs';
 
-const read = (rel) => {
-  try {
-    return fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
-  } catch {
-    return null;
-  }
-};
+const read = (rel) => readTextLf(path.join(REPO_ROOT, rel));
 const readJson = readJsonVia(read);
 const mtime = (rel) => {
   try {

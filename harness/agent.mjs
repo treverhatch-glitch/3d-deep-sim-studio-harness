@@ -42,7 +42,7 @@ import { engineLaunch, syncEngineTarget, engineWork, targetMergeCommand, engineT
 import { mainRoot, laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport, isLaneWorktree, LANES_DIR, laneLive } from './worktree.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { ownerOnlyStep } from './owner-only.mjs';
-import { markExhausted, markText, reachedModel, quotaKeyFor, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
+import { markExhausted, markText, reachedModel, quotaKeyFor, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, customKey } from './budget.mjs';
 import { sessionLimits, sessionProgress, heartbeatCheck, newRedCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
 import { agentEnv, nimKeyMissing, nimModel, NIM_DEFAULT_MODEL, agentLikeName } from './agent-env.mjs';
@@ -82,7 +82,6 @@ import { spendPass, sessionKeyNames } from './spend-budget.mjs';
 import { flagOf, jsonFileOf, readJsonOrNull as readJson, roleKey } from './helpers.mjs';
 
 export const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
-const WIP_DIR = path.join(STUDIO_STATE_DIR, 'wip');
 const HEARTBEAT_MS = Number(process.env.STUDIO_HEARTBEAT_SEC || 120) * 1000;
 // The heartbeat renews the claim and writes lastBeat into the session record every beat (the War Room, `agent list` and
 // the stall watch read it); the agent.heartbeat EVENT is written once per STUDIO_HEARTBEAT_EVENT_MIN (10) minutes per

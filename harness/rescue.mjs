@@ -15,7 +15,7 @@ import { postAsk } from './ask-post.mjs';
 import path from 'node:path';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { modelFamily } from './families.mjs';
-import { setHold, readHolds, heldForLanding, heldWords } from './task-hold.mjs';
+import { setHold, readHolds, heldForLanding } from './task-hold.mjs';
 import { budgetStopFor } from './budget.mjs';
 
 export const RESCUE_RE = /^Rescue:\s*(T-\d+)\b/;

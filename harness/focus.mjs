@@ -39,14 +39,9 @@ import { taskType } from './done-check.mjs';
 import { readHolds, laneList } from './task-hold.mjs';
 import { itemsOf, progress, itemLines } from './task-checklist.mjs';
 import { toFollow, followLines, followQuoted } from './ask.mjs';
+import { readTextLf } from './helpers.mjs';
 
-const read = (rel) => {
-  try {
-    return fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
-  } catch {
-    return null;
-  }
-};
+const read = (rel) => readTextLf(path.join(REPO_ROOT, rel));
 const part = (text, label) => (text?.match(new RegExp(`\\*\\*${label}\\.?\\*\\*\\s*([\\s\\S]*?)(?=\\n\\*\\*[A-Z][^*]*\\*\\*|$)`)) || [, ''])[1].trim();
 const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'into', 'that', 'this', 'when', 'then', 'task', 'tasks', 'add', 'fix', 'bug', 'study', 'docs', 'review', 'balance', 'playtest', 'our', 'your', 'run', 'one', 'new']);
 

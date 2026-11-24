@@ -350,7 +350,7 @@ half as much machine time as the land runs. Five settings, all optional, in the 
   readable: nothing is left out. Only the fingerprint changes; what is copied into the checkout does not.
 
 ```json
-"rules": { "test": "dotnet test tools/SimTests", "peak": "tools/SimTests/bin/**/peak.txt", "ahead": true,
+"rules": { "test": "dotnet test tools/SimTests", "ahead": true,
   "shards": { "filters": ["FullyQualifiedName~Tests.Pins"], "rest": "FullyQualifiedName!~Tests.Sim&FullyQualifiedName!~Tests.Core&FullyQualifiedName!~Tests.Pins", "keep": "tree" },
   "focus": { "test": "dotnet test tools/SimTests --filter \"{filter}\"", "smoke": "Category=Smoke",
     "auto": [ { "root": "Game/Sim", "paths": ["Game/Sim/{name}/"], "filter": "FullyQualifiedName~Tests.Sim.{name}" },
@@ -814,7 +814,7 @@ samples are in `.studio/engine/<x>-samples/<run>.csv` (newest 60 per engine, non
 than one sample interval; it prints one line per sample and ends with the run (or by itself when the run's wrapper is
 gone); `"machine": { "sample": false }` in `studio/game.json` turns sampling off. A sampler that fails never changes the run.
 
-Each ended run is folded into `.studio/engine-ram.json` (`<x>.kinds`, beside the land peaks): its peak GB, mean CPU %,
+Each ended run is folded into `.studio/engine-ram.json` (`<x>.kinds`): its peak GB, mean CPU %,
 minutes, when the peak came (start, middle, end, throughout) and which kinds ran beside it. Kinds: `land with-rules` or
 `land no-rules` (`STUDIO_RULES_GREEN`), plus ` play-<mode>` with `STUDIO_PLAY_MODE`; `rules` (the whole command) and
 `rules <filter>` (a part or shard); `compile`; `quick`. A kind's need is the peak of its last 5 runs plus
@@ -832,7 +832,7 @@ max(0.5 GB, 10%), once at least one of them passed.
   part of a split rules check, the check ahead and a quick test start when free RAM minus the floor
   (`STUDIO_RAM_FLOOR_GB`) minus what the running jobs still have to grow (their need minus what they use now; a heavy
   job with no samples counts its whole claim) holds the job's own need, and CPU now plus the job's measured share stays
-  under `cpuCapPct`. The measured need replaces the claim's RAM and CPU, the land floor and the old whole-machine peaks;
+  under `cpuCapPct`. The measured need replaces the claim's RAM and CPU and the land floor;
   `rules.focus.splitGb` set by hand still wins. Slots, per-kind caps, the queue and holds stay. A job that waits says it
   in numbers: `waits for memory: needs 12.7 GB, 17 GB free above the floor; land no-rules still has 5.1 GB to grow`.
 - When a number is missing (a kind never measured or never passed), stale (a running job's last sample is old) or looks
