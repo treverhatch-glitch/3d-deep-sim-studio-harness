@@ -5506,6 +5506,14 @@ if (inShard('selftest-297d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.98 (d): each rules part's own recent sampled peak, a part that slowed down, rules.pins, rules.peak no longer read.
+if (inShard('selftest-298d')) {
+  const dir = copyRepo();
+  const { selftest298D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298d.mjs')).href);
+  await selftest298D({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

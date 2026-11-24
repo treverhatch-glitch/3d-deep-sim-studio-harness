@@ -4,7 +4,8 @@
  * .studio/engine/<x>-samples/<run>.csv (newest 60 per engine, none older than 14 days). Ended runs are folded into
  * .studio/engine-ram.json <x>.kinds (the last 20 per kind): peak GB, mean CPU %, minutes, when the peak comes, and
  * which kinds ran beside it. studio/game.json "machine": { "admit": "measured" } turns measured admission on (default
- * off: 2.95's rules); "cpuCapPct" (85), "sample" (true; false: no samples), "sampleSec" (10), "slowerPct" (10).
+ * off: 2.95's rules); "cpuCapPct" (85), "sample" (true; false: no samples, so the table and hand-set floors only), "sampleSec" (10), "slowerPct" (10),
+ * "peakDays" (7: runs older than that do not count for a part's memory).
  * A job starts when free RAM - the floor - what running jobs still have to grow holds its own need, and CPU now plus
  * its share stays under the cap. Need = the peak of its last 5 runs + max(0.5 GB, 10%), with at least one of them exit 0.
  * Anything missing, stale or wrong (a run above its own need) falls back to today's rule, and says so.
@@ -37,7 +38,7 @@ export function machineCfg(root) {
   const m = readJson(path.join(root, 'studio', 'game.json'), null)?.machine;
   const c = m && typeof m === 'object' ? m : {};
   const n = (v, d, lo, hi) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Math.min(hi, Math.max(lo, Number(v))) : d);
-  return { measured: c.admit === 'measured', sample: c.sample !== false, everyMs: n(c.sampleSec, 10, 0.2, 600) * 1000, cpuCapPct: n(c.cpuCapPct, 85, 1, 100), slowerPct: n(c.slowerPct, 10, 0, 1000) };
+  return { measured: c.admit === 'measured', sample: c.sample !== false, everyMs: n(c.sampleSec, 10, 0.2, 600) * 1000, cpuCapPct: n(c.cpuCapPct, 85, 1, 100), slowerPct: n(c.slowerPct, 10, 0, 1000), peakDays: n(c.peakDays, 7, 1, 365) };
 }
 
 /** The kind of a land run from what the train told it: rules stage skipped or run, Play Mode or none. */
@@ -184,9 +185,10 @@ export function foldRuns(root, engine, { now = Date.now(), emit = emitEvent } = 
 /**
  * A kind's cost from its kept runs: { kind, runs, measured, peakGb, needGb, passPeakGb, passN, cpuPct, minutes, when } or
  * null. A run too short to sample is unknown: it adds no peak. A kind with only such runs has unknown: true and no peak.
+ * since (ms): runs that started before it do not count.
  */
-export function kindCost(entry, kind) {
-  const list = (entry?.kinds?.[kind] || []).slice(-PEAK_RUNS);
+export function kindCost(entry, kind, { since = 0 } = {}) {
+  const list = (entry?.kinds?.[kind] || []).filter((r) => !(Number(r.at) < since)).slice(-PEAK_RUNS);
   if (!list.length) return null;
   const known = list.filter((r) => !unknownRun(r));
   const passed = list.filter((r) => r.code === 0);
@@ -202,7 +204,7 @@ export function kindCost(entry, kind) {
  * measured, and the text says so. { gb, kind, n, from } or null (no such run, or STUDIO_ENGINE_RAM_RUNS=0).
  */
 export function landNeed(engine, kind, { root, env = process.env } = {}) {
-  if (!(num(env.STUDIO_ENGINE_RAM_RUNS, 3) > 0)) return null;
+  if (!(num(env.STUDIO_ENGINE_RAM_RUNS, 3) > 0) || !machineCfg(root).sample) return null;
   const entry = (readJson(ramFile(root), {}) || {})[engine];
   const margin = Math.max(0, num(env.STUDIO_ENGINE_RAM_MARGIN_GB, 1.5));
   const min = Math.max(0, num(env.STUDIO_ENGINE_RAM_MIN_GB, 4));
@@ -211,6 +213,26 @@ export function landNeed(engine, kind, { root, env = process.env } = {}) {
   const top = all.filter(Boolean).sort((x, y) => y.gb - x.gb)[0];
   if (!top) return null;
   return { ...top, from: `${kind ? '' : 'no kind given, so the heaviest land kind measured: '}need of ${top.kind} (peak of its last ${top.n} passed run${top.n > 1 ? 's' : ''} plus ${margin} GB)` };
+}
+
+/**
+ * 2.98: each part's memory from its own kind's passed sampled runs of the last machine.peakDays days (the largest peak).
+ * A part with none takes the largest of the parts that have one; no part has one (or machine.sample is false): 4 GB.
+ * { list: [{ filter, gb, measured }], gb (what an unmeasured part takes), line }. filter null: the whole command.
+ */
+export function partMemory(root, engine, filters, { now = Date.now() } = {}) {
+  const cfg = machineCfg(root);
+  const entry = (readJson(ramFile(root), {}) || {})[engine];
+  const since = now - cfg.peakDays * 86400000;
+  const own = filters.map((f) => ({ filter: f, gb: cfg.sample ? kindCost(entry, rulesKind(f), { since })?.passPeakGb || 0 : 0 }));
+  const top = Math.max(0, ...own.map((x) => x.gb));
+  const gb = top || 4;
+  const name = (x) => x.filter || '(the whole command)';
+  const done = own.filter((x) => x.gb > 0);
+  const rest = own.filter((x) => !x.gb);
+  const line = !done.length ? `no part has a passed sampled run in the last ${cfg.peakDays} days: ${gb} GB per part (the default)`
+    : `measured from each part's own runs of the last ${cfg.peakDays} days: ${done.map((x) => `${name(x)} ${x.gb} GB`).join(', ')}${rest.length ? `; not measured, so the largest of those (${gb} GB): ${rest.map(name).join(', ')}` : ''}`;
+  return { list: own.map((x) => ({ filter: x.filter, gb: x.gb || gb, measured: x.gb > 0 })), gb, line };
 }
 
 /**

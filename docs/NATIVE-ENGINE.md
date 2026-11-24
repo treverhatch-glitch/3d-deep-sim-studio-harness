@@ -94,7 +94,7 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   used and why, no lane waits, already tried, a second gate). `npm run engine -- rules show` prints `ahead` on or off
   and the last outcome (started, kept, dropped, or "did not start: <why>") with its train and time.
   With `rules.shards` it goes command by command instead of deciding once: each shard starts when its measured peak
-  (`rules.peak`, else the plan's number) fits beside the land run, waits when it does not (within its time limit), and
+  (its own recent sampled peak, else the plan's number) fits beside the land run, waits when it does not (within its time limit), and
   none starts once the land run answered. Stopped between shards it is `kept-partial`: under the same rule (kept only
   when the land run landed the batch unchanged) its finished shards are kept and the next train runs only the rest.
 - A green batch goes to the land run with `STUDIO_RULES_GREEN=1`, as long as the land run lands exactly the checked
@@ -240,8 +240,8 @@ half as much machine time as the land runs. Five settings, all optional, in the 
   red on the first red (its output kept); the result and the `engine.rules` event carry each group's seconds.
 - `focus.splitMax` and `focus.splitGb` (2.85): how many split parts run at once is a decision about free RAM
   (`harness/rules-parts.mjs`). A part starts only while free RAM minus the floor (`STUDIO_RAM_FLOOR_GB`, 3) holds
-  `splitGb` (the GB one test process is expected to take; default 4, or the largest peak `.studio/engine-ram.json`
-  has measured); at least one part always runs, the check is made again before every start, and `splitMax` is the
+  `splitGb` (the GB one test process is expected to take; unset: each part's own recent sampled peak, see
+  "A part's memory" below, 4 GB when no part has one); at least one part always runs, the check is made again before every start, and `splitMax` is the
   most at once. `splitMax` unset means 1: in sequence, as 2.84 ran. Each decision is one log line, and the
   `engine.rules` event carries `splitAtOnce`. The result is the same either way; only the time and the memory differ.
 - What the rules check cost and why (2.85): the `engine.rules` event's `meta` has `mode` (`focus` or `full`), `why`
@@ -316,14 +316,19 @@ half as much machine time as the land runs. Five settings, all optional, in the 
     harness cannot check that `rest` really is the rest: write it as the negation of the other filters.
   - Each shard command gets `STUDIO_RULES_MODE=shard`. `rules show` and `rules-plan` list the shards, which have a kept
     green (on this tree or from another tree) and each one's measured peak.
-- `peak` (2.95): the file the test command writes its own peak memory to, a path or glob relative to the test checkout
-  (`"peak": "tools/SimTests/bin/**/peak.txt"`), or `{ "file": "...", "match": "<regex>" }` whose first group is the GB
-  (default: the first number followed by `GB`, as in `working set 6.71 GB`). The file is removed before every test
-  command (so a stale one is never read) and read after it; the number is kept per shard, part or filter (`(full run)`
-  for the whole command) beside each part's seconds in `.studio/engine/<x>-rules.json` (`partStats`). With `splitGb`
-  unset, a measured number replaces the guess: a part or shard starts when its own peak fits in free RAM, `splitPlan`
-  and the check ahead use the full run's peak, and `rules-plan` and `rules show` print it. With no file configured or
-  none readable, memory is guessed as before. Parts that ran at the same time share the file, so none of them is read.
+- **A part's memory (2.98).** Every part, shard and whole command is sampled as its own kind (`rules <filter>`, see the
+  samples below), so `rules.peak` (2.95: a file the test command wrote) is gone: a config that still sets it runs, and
+  `rules show` says `rules.peak is no longer read: every run is sampled`. With `splitGb` unset, a part or shard takes
+  the largest peak of its own passed runs of the last `machine.peakDays` days (default 7). A part with no such run
+  takes the largest of its sibling parts, and the plan line says which parts were measured and which were not; with no
+  measured part at all it is 4 GB. The split plan, the shard plan, `rules-plan` and the check ahead use these numbers.
+  A studio with `"machine": { "sample": false }` has no samples: it gets the engine table, the hand-set floors and 4 GB
+  per part only.
+- `pins` (2.98): `{ "file": "<JSON file in the tree>", "key": "fingerprint", "folder": "<inputs folder with {pin}>" }`.
+  Rule packs a lane adds under `folder` (one sub-folder per pin) change the inputs' fingerprint even when this tree never
+  loads them. With `pins`, a file of `inputs` under `folder` whose `{pin}` is not the value any checked tree pins in
+  `file` (read from each folder, or from the commit of a `{ dir, sha }` source) is left out of the fingerprint. No pin
+  readable: nothing is left out. Only the fingerprint changes; what is copied into the checkout does not.
 
 ```json
 "rules": { "test": "dotnet test tools/SimTests", "peak": "tools/SimTests/bin/**/peak.txt", "ahead": true,
@@ -792,14 +797,16 @@ max(0.5 GB, 10%), once at least one of them passed.
 `studio/game.json` (the owner's file):
 
 ```json
-"machine": { "admit": "measured", "cpuCapPct": 85, "slowerPct": 10, "sampleSec": 10, "sample": true }
+"machine": { "admit": "measured", "cpuCapPct": 85, "slowerPct": 10, "sampleSec": 10, "sample": true, "peakDays": 7 }
 ```
 
+- `peakDays` (2.98, default 7): runs older than this do not count for a part's memory (see "A part's memory"). `sample`
+  false: no samples, so the table and the hand-set floors only.
 - `admit` (default unset: off). Off, every decision is 2.95's. `"measured"`: a land run (the machine:heavy wait), a
   part of a split rules check, the check ahead and a quick test start when free RAM minus the floor
   (`STUDIO_RAM_FLOOR_GB`) minus what the running jobs still have to grow (their need minus what they use now; a heavy
   job with no samples counts its whole claim) holds the job's own need, and CPU now plus the job's measured share stays
-  under `cpuCapPct`. The measured need replaces the claim's RAM and CPU, the land floor and `rules.peak`;
+  under `cpuCapPct`. The measured need replaces the claim's RAM and CPU, the land floor and the old whole-machine peaks;
   `rules.focus.splitGb` set by hand still wins. Slots, per-kind caps, the queue and holds stay. A job that waits says it
   in numbers: `waits for memory: needs 12.7 GB, 17 GB free above the floor; land no-rules still has 5.1 GB to grow`.
 - When a number is missing (a kind never measured or never passed), stale (a running job's last sample is old) or looks
@@ -927,9 +934,12 @@ turn on `service.check` and run one `check` end to end, and only then `warm`.
   read. The slowest 200 tests of each command are kept for 48 hours in `.studio/engine/<x>-times.json`. The daily digest
   gets up to two short lines. `npm run engine -- test-cost [--engine <x>]` prints the long form: the 10 slowest tests
   with their share of the test time, tests that ran in two commands of one train, the rules runs with the most memory
-  (sampled peaks where runs were sampled, else the test command's own `rules.peak`), the most memory per test group when
+  (sampled peaks), the most memory per test group when
   `rules.memory` names the table the test run writes (`{ "file": "<glob>", "name": "<column>", "mb": "<column>" }`, or `gb`;
-  tab or comma separated with a header line) and the hand-backs of kind `ratchet` in the last 24 hours.
+  tab or comma separated with a header line) and the hand-backs of kind `ratchet` in the last 24 hours. 2.98: `rules show` and
+  `test-cost` also name a part whose last passed run took over twice the median of its earlier runs (at least 3) and 5+ minutes
+  more, with both times and its slowest tests; with `rules.times` set, a part none of whose tests the times file names says
+  `no test times for this part (the times file names none of its tests)`.
 - **Play Mode map gaps.** A land run whose Play Mode stage ran in full because paths match no `play.focus.map` entry
   keeps all of those paths (`.studio/engine/<x>-play-gaps.jsonl`). The digest says how often that happened in 24 hours
   and for which folders. `npm run engine -- play-plan --propose [--engine <x>] [--branch <b> | --paths a,b] [--json]`

@@ -16,7 +16,6 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
-import { learnedNeed } from './engine-ram.mjs';
 import { landNeed } from './run-cost.mjs';
 import { readJson, writeAtomic } from './fsafe.mjs';
 import { splitPhantom, phantomNote } from './eol-only.mjs';
@@ -370,7 +369,7 @@ export const tunePath = tuneFile;
 
 /**
  * The free-RAM floor of an engine's land run: { gb, from, src }. The owner's environment wins, then the lane's tuned ram-floor,
- * then the measured need of `kind` (run-cost.mjs landNeed; no kind: the heaviest land kind), then the old numbers.
+ * then the measured need of `kind` (run-cost.mjs landNeed; no kind: the heaviest land kind), then the table.
  */
 export function engineFloor(engine, { env = process.env, root = mainRoot(), kind = null } = {}) {
   const t = engineTarget(engine, { root: REPO_ROOT }) || engineTarget(engine, { root });
@@ -379,10 +378,9 @@ export function engineFloor(engine, { env = process.env, root = mainRoot(), kind
   if (raw !== undefined && String(raw).trim() !== '') return off(raw) ? { gb: 0, from: `${t.floor.env}=${raw} (the owner's setting)` } : { gb: num(raw, t.floor.gb), from: `${t.floor.env} (the owner's setting)` };
   const tuned = readTune(engine, root).values['ram-floor'];
   if (Number.isFinite(Number(tuned)) && t.tune.includes('ram-floor')) return { gb: Number(tuned), src: 'tuned', from: `the ${t.label} lane's tuned ram-floor (studio/engine/${engine}-tune.json)` };
-  try { const k = landNeed(engine, kind, { root, env }); if (k) return { gb: k.gb, from: k.from, src: 'kind' }; } catch { /* the old numbers */ }
-  // No passed sampled run of this kind: the whole machine's peaks of the last green land runs, else the table.
+  try { const k = landNeed(engine, kind, { root, env }); if (k) return { gb: k.gb, from: k.from, src: 'kind' }; } catch { /* the table's */ }
+  // No passed sampled run of this kind (or machine.sample is false): the table.
   const why = kind ? `no passed sampled run of ${kind} yet; ` : '';
-  try { const l = learnedNeed(engine, { root, env }); if (l) return { gb: l.gb, from: `${why}${l.from}`, src: 'learned' }; } catch { /* the table's */ }
   return { gb: t.floor.gb, from: `${why}the engine table (${t.label}: ${t.floor.gb} GB)` };
 }
 
