@@ -65,6 +65,8 @@ export const allowed = (root = REPO_ROOT) => [...ALLOWED, ...studioAllowed(root)
  * nothing else: no push, no checkout or switch of another branch, no reset).
  */
 export const engineGitVerbs = ['status', 'diff', 'log', 'add', 'commit'];
+/** 2.98: git verbs that only read, for an agy porter's engine worktree (agy-allow.mjs, regex form only). */
+export const engineGitReadVerbs = ['show', 'rev-parse', 'merge-base', 'ls-files', 'grep'];
 export const engineGitPatterns = (dir) => {
   const d = String(dir || '').replace(/\\/g, '/').replace(/\/+$/, '');
   return d ? engineGitVerbs.flatMap((v) => [`git -C ${d} ${v}`, `git -C ${d} ${v} *`]) : [];

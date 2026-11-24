@@ -5554,6 +5554,14 @@ if (inShard('selftest-298c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.98 (d): a quota mark needs evidence; agy writes in its own folders and reads with git; the API pool takes the task's role.
+if (inShard('selftest-298f')) {
+  const dir = copyRepo();
+  const { selftest298F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298f.mjs')).href);
+  await selftest298F({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

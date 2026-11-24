@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ALLOWED, engineGitVerbs } from './allowlist.mjs';
+import { ALLOWED, engineGitReadVerbs, engineGitVerbs } from './allowlist.mjs';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { writeAtomic } from './fsafe.mjs';
 import { betaActor, recordBetaUse } from './beta-mode.mjs';
@@ -104,13 +104,19 @@ export function writeAgyLaneRules(dir, { excludeFile = null } = {}) {
 }
 
 /**
- * 2.93: the reach a Claude session gets with --add-dir (agent.mjs laneAddDirs), as agy allow-rules, for an engine pass.
- * {dir} is each of the session's folders; {engine} and {engineRe} (as a regex) its engine worktree, once per {verb} of
- * the engine git verbs (allowlist.mjs: no push, no reset). STUDIO_AGY_REACH_RULES: a JSON list of templates in place of
- * these (agy's rule format may differ between versions), or off. A template with no folder in it is dropped.
+ * 2.93: an engine pass's reach as agy rules. {dir}: each --add-dir folder (read). {own}: its lane copy and engine worktree
+ * (2.98: write, nothing else). {engine}: the worktree, per {verb} (engineGitVerbs) or {readVerb} (engineGitReadVerbs,
+ * regex only). STUDIO_AGY_REACH_RULES: a JSON list of templates instead, or off. A template with no folder, a path of
+ * its own, or write_file on a folder but {own} is dropped.
  */
-export const AGY_REACH_RULES = ['read_file({dir})', 'read_file({dir}/**)', 'command(git -C {engine} {verb})', 'command(regex:^git -C {engineRe} {verb}(?: {rest})?$)'];
-export function agyReachRules({ dirs = [], engineDir = null, env = process.env } = {}) {
+export const AGY_REACH_RULES = ['read_file({dir})', 'read_file({dir}/**)', 'write_file({own})', 'write_file({own}/**)', 'command(git -C {engine} {verb})', 'command(regex:^git -C {engineRe} {verb}(?: {rest})?$)', 'command(regex:^git -C {engineRe} {readVerb}(?: {readArgs})?$)'];
+// A read verb's arguments: plain words only. No quote, escape, glob, comma, chain or redirect; no word that starts with
+// \ or ^ (a shell could turn it into a flag); no -O (git grep runs it as a pager), no --o... (--open-files-in-pager,
+// --output) and no --no-i... (--no-index reads outside the worktree). ( and ) as \x28 \x29 for agy's parser.
+const NOT = String.raw`\s;&|$<>"'%,{}*?\[\]\x28\x29` + '`';
+const WORD = String.raw`(?:[^-\\^${NOT}][^${NOT}]*|-[^-O${NOT}][^O${NOT}]*|--(?:[^on${NOT}][^${NOT}]*|n(?:[^o${NOT}][^${NOT}]*)?|no(?:[^-${NOT}][^${NOT}]*)?|no-(?:[^i${NOT}][^${NOT}]*)?)?)`;
+const READ_ARGS = `${WORD}(?: ${WORD})*`;
+export function agyReachRules({ dirs = [], engineDir = null, laneDir = null, env = process.env } = {}) {
   const raw = String(env.STUDIO_AGY_REACH_RULES ?? '').trim();
   if (/^(off|0|false|no|none)$/i.test(raw)) return { rules: [], from: 'off' };
   let tpl = AGY_REACH_RULES;
@@ -126,12 +132,18 @@ export function agyReachRules({ dirs = [], engineDir = null, env = process.env }
   const ok = (d) => d && !/[()]/.test(d);
   const folders = [...new Set(dirs.map(norm))].filter(ok);
   const eng = ok(norm(engineDir)) ? norm(engineDir) : null;
+  const own = [...new Set([laneDir, engineDir].map(norm))].filter(ok);
   const rules = [];
   for (const t of tpl) {
+    // 2.98: the template's own text names no path, and only {own} folders are written.
+    const bare = t.replace(/\{\w+\}/g, '').replace(/\/\*\*/g, '');
+    if (/[/\\]|\.\.|\b[A-Za-z]:(?![a-z^])/.test(bare) || (/write/i.test(t) && /\{(?:dir|engine|engineRe)\}/.test(t))) continue;
     if (/\{engine(Re)?\}/.test(t)) {
       if (!eng) continue;
-      for (const v of t.includes('{verb}') ? engineGitVerbs : ['']) rules.push(t.replaceAll('{engineRe}', escapeRe(eng)).replaceAll('{engine}', eng).replaceAll('{verb}', v).replaceAll('{rest}', REST));
-    } else if (t.includes('{dir}')) for (const d of folders) rules.push(t.replaceAll('{dir}', d).replaceAll('{rest}', REST));
+      const verbs = t.includes('{readVerb}') ? engineGitReadVerbs : t.includes('{verb}') ? engineGitVerbs : [''];
+      for (const v of verbs) rules.push(t.replaceAll('{engineRe}', escapeRe(eng)).replaceAll('{engine}', eng).replaceAll('{verb}', v).replaceAll('{readVerb}', v).replaceAll('{rest}', REST).replaceAll('{readArgs}', READ_ARGS));
+    } else if (t.includes('{own}')) for (const d of own) rules.push(t.replaceAll('{own}', d));
+    else if (t.includes('{dir}')) for (const d of folders) rules.push(t.replaceAll('{dir}', d).replaceAll('{rest}', REST));
   }
   return { rules: [...new Set(rules)], from: tpl === AGY_REACH_RULES ? 'default' : 'STUDIO_AGY_REACH_RULES', ...(bad ? { bad } : {}) };
 }

@@ -58,9 +58,11 @@ export async function smokeOne({ role, entry, engine = null, minutes = 10, deps,
   } else agent = `smoke-${Date.now().toString(36)}`;
   const file = `docs/smoke/${agent}.md`;
   const title = `Smoke test ${agent}: add one line to ${file} and commit it`;
-  const startArgs = ['start', '--attach', '--role', role, ...(entry.pool ? ['--pool', entry.pool] : ['--agent', agent]), ...(entry.tool ? ['--tool', entry.tool] : [])];
+  // 2.98: an engine pass from the pool starts with no --role: the pool takes engine-porter from the task (api-pool.mjs poolRole).
+  const byTask = Boolean(entry.pool) && role === 'engine-porter';
+  const startArgs = ['start', '--attach', ...(byTask ? [] : ['--role', role]), ...(entry.pool ? ['--pool', entry.pool] : ['--agent', agent]), ...(entry.tool ? ['--tool', entry.tool] : [])];
   const note = `This is a harness smoke test, not real work. Add one line to ${file} in your working folder (an engine pass: its engine worktree), commit it there, then stop. Do not run task done or verify.`;
-  if (dryRun) return { ok: true, lines: [`would add a smoke task "${title}" (${engine ? `engine:${engine}` : 'lane docs/smoke'}) and run: agent ${[...startArgs, '--task', '<its id>'].join(' ')} (waits up to ${minutes} min)`] };
+  if (dryRun) return { ok: true, lines: [`would add a smoke task "${title}" (${engine ? `engine:${engine}` : 'lane docs/smoke'}) and run: agent ${[...startArgs, '--task', '<its id>'].join(' ')} (waits up to ${minutes} min)${byTask ? '; no --role: the pool takes engine-porter from the engine task' : ''}`] };
   const lines = [];
   // The producer adds to the live queue; --lane keeps a builder in its own folder, an engine pass gets its engine's worktree.
   const where = engine ? ['--track', `engine:${engine}`] : role === 'engine-porter' ? [] : ['--lane', 'docs/smoke'];
