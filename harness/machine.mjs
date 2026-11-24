@@ -269,7 +269,7 @@ export function scanMachine({ root = MACHINE_ROOT, env = process.env, platform =
   if (p.ram.freeGb === null) p.ram.freeGb = probe('ram', () => r1(freemem() / GB));
   probe('disk', () => { const s = statfs(root); p.disk.freeGb = r1((Number(s.bavail) * Number(s.bsize)) / GB); p.disk.totalGb = r1((Number(s.blocks) * Number(s.bsize)) / GB); return true; });
   // The lane copies' size, measured (a bounded walk, or a measure under 5 min old) with its age (harness/lane-disk.mjs).
-  { let l = null; try { l = laneCopiesSize({ root, now }); } catch {} if (l) p.disk.lanes = { bytes: l.bytes, atLeast: l.atLeast, at: l.at }; }
+  { let l = null; try { l = laneCopiesSize({ root, now, write: false }); } catch {} if (l) p.disk.lanes = { bytes: l.bytes, atLeast: l.atLeast, at: l.at }; }
   p.at = new Date(now).toISOString();
   return p;
 }

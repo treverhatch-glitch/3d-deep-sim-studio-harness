@@ -1183,12 +1183,13 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
 }
 
 /** Move an open task to done (the note on its title) under the board lock. { target, q }; target null when not open. */
-function boardToDone(taskId, note, fallback = null) {
+function boardToDone(taskId, note, given = null) {
   let target = null;
   let q = null;
   withBoard(() => {
     q = parseNextQueue();
-    target = q.inProgress.find((t) => t.id === taskId) || q.backlog.find((t) => t.id === taskId) || fallback;
+    // A caller that holds the task (task done) gets that same object moved and marked: it prints it afterwards.
+    target = given || q.inProgress.find((t) => t.id === taskId) || q.backlog.find((t) => t.id === taskId) || null;
     if (!target) return;
     for (const k of ['inProgress', 'backlog', 'done']) q[k] = q[k].filter((t) => t.id !== taskId);
     target.status = 'done';

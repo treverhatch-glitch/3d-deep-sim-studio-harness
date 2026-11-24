@@ -52,15 +52,16 @@ export const sizeWithAge = (bytes, atLeast, at, now = Date.now()) => `${atLeast 
 
 /**
  * The lane copies' size now: the last measure when it is under maxAgeMs old (default 5 min), else a new bounded walk
- * (capMs, default 2 s) written to disk.json. { bytes, gb, atLeast, at, text }, null with no .lanes folder (engine worktrees are not lane copies).
+ * (capMs, default 2 s) written to disk.json (write: false for a caller that must write nothing: the machine scan).
+ * { bytes, gb, atLeast, at, text }, null with no .lanes folder (engine worktrees are not lane copies).
  */
-export function laneCopiesSize({ root = studioMain(), now = Date.now(), maxAgeMs = 300000, capMs = 2000 } = {}) {
+export function laneCopiesSize({ root = studioMain(), now = Date.now(), maxAgeMs = 300000, capMs = 2000, write = true } = {}) {
   if (!fs.existsSync(path.join(root, '.lanes'))) return null;
   const c = readJson(DISK_FILE(root), {}) || {};
   const at = Date.parse(c.sizedAt || '');
   if (Number.isFinite(c.sizedBytes) && Number.isFinite(at) && now >= at && now - at < maxAgeMs) return { bytes: c.sizedBytes, gb: r2(c.sizedBytes / GB), atLeast: Boolean(c.sizedAtLeast), at, text: sizeWithAge(c.sizedBytes, c.sizedAtLeast, at, now) };
   const m = lanesTotal(root, Date.now() + capMs);
-  writeJson(DISK_FILE(root), { ...c, sizedBytes: m.bytes, sizedAtLeast: m.atLeast, sizedAt: new Date(now).toISOString() });
+  if (write) writeJson(DISK_FILE(root), { ...c, sizedBytes: m.bytes, sizedAtLeast: m.atLeast, sizedAt: new Date(now).toISOString() });
   return { bytes: m.bytes, gb: r2(m.bytes / GB), atLeast: m.atLeast, at: now, text: sizeWithAge(m.bytes, m.atLeast, now, now) };
 }
 

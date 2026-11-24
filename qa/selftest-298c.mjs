@@ -221,7 +221,7 @@ const c = rulesConfig('unity', { root: process.cwd() });
 console.log(JSON.stringify({ build: c.build, infra: c.infra }));`);
       await guard('2.98 (c5) with rules.build false the three parts run `dotnet test` as before (no build, no --no-build); a node test command gets no build and no infra patterns; a dotnet one gets the default build (test-only options dropped) and its infra patterns plus rules.infra (a guard of unchanged behaviour where it is off)', () => [
         Boolean(r.green) && c.length === 3 && c.every((x) => x.verb === 'test' && !x.noBuild) && other.build === null && Array.isArray(other.infra) && other.infra.length === 0
-          && /dotnet build "x" -c Release$/.test(dn.build?.command || '') && dn.infra?.includes('error CS2012') && dn.infra?.includes('MSB4018'), J({ r, c, other, dn })]);
+          && /dotnet(?:\.cmd)? build "x" -c Release$/.test(dn.build?.command || '') && dn.infra?.includes('error CS2012') && dn.infra?.includes('MSB4018'), J({ r, c, other, dn })]);
     }
 
     // ================= (c6) a by-name run after a red uses --no-build in a built checkout =================
