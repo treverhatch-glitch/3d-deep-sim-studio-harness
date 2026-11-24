@@ -5506,6 +5506,14 @@ if (inShard('selftest-297d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.98 (h): a session's record is written whole (temp file renamed over it) and read as busy, never absent, while it is being written.
+if (inShard('selftest-298h')) {
+  const dir = copyRepo();
+  const { selftest298H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298h.mjs')).href);
+  await selftest298H({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

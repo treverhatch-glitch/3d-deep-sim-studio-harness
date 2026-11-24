@@ -73,7 +73,7 @@ import { STOP_NOTE, loopHandBacks, parkOnce } from './busy.mjs';
 import { sessionOutcome, parkIfNoWork, holdIfSameRefusal } from './session-outcome.mjs';
 import { PLANNING_OUTCOME_ROLES, boardEventsBy } from './wake-gate.mjs';
 import { startRefusal, sameBlocker, recordAttempt } from './attempts.mjs';
-import { writeAtomic } from './fsafe.mjs';
+import { sleepMs, writeAtomic } from './fsafe.mjs';
 import { selfIdentity, spawnedIdentity, pidAlive, recordAlive, pidExists, readStarts, sameProcess, liveAs } from './proc-identity.mjs';
 import { gateEnv } from './gate-env.mjs';
 import { vertexModel, vertexConfigured, ensureProxy, proxyBase, sessionKey, sessionUsage, overPromptCap, promptCap } from './vertex.mjs';
@@ -331,6 +331,32 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], a
 }
 
 const sessionFile = jsonFileOf(AGENTS_DIR);
+
+/** A record file: the parsed record, null when there is no file, { unreadable: true } when it exists but won't parse (read twice). */
+function readRecord(file) {
+  for (let i = 0; i < 2; i++) {
+    if (i) sleepMs(15);
+    try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (err) { if (err.code === 'ENOENT') return null; }
+  }
+  return { unreadable: true };
+}
+/** A session's record, or null when it has none or it can't be read right now. */
+const readSession = (agent) => { const r = readRecord(sessionFile(agent)); return r?.unreadable ? null : r; };
+/** The only way a session's record is written: a temp file renamed over it, so a reader sees the old record or the new one. */
+const writeSession = (agent, record) => writeAtomic(sessionFile(agent), JSON.stringify(record, null, 2), { fsync: false });
+/**
+ * Change a session's record in one read and one write: `change(record)` returns the new record, or a falsy value to
+ * leave it. `base` stands in when there is no file. A record that exists but is unreadable is never written over.
+ * Returns the new record, or null when nothing was written.
+ */
+function patchSession(agent, change, base = null) {
+  const found = readRecord(sessionFile(agent));
+  if (found?.unreadable) return null;
+  const next = (found || base) && change(found || base);
+  if (!next) return null;
+  writeSession(agent, next);
+  return next;
+}
 // A heartbeat older than this many minutes is a stalled session (agent list and the watcher say so).
 const STALL_BEAT_MIN = Math.max(5, (HEARTBEAT_MS / 60000) * 3);
 
@@ -340,7 +366,9 @@ const STALL_BEAT_MIN = Math.max(5, (HEARTBEAT_MS / 60000) * 3);
  */
 export function sessions() {
   if (!fs.existsSync(AGENTS_DIR)) return [];
-  return fs.readdirSync(AGENTS_DIR).filter((f) => f.endsWith('.json')).map((f) => readJson(path.join(AGENTS_DIR, f))).filter(Boolean).map((s) => {
+  return fs.readdirSync(AGENTS_DIR).filter((f) => f.endsWith('.json')).map((f) => ({ f, s: readRecord(path.join(AGENTS_DIR, f)) })).filter((x) => x.s).map(({ f, s }) => {
+    // A record that exists but won't read is being written: its session is there and running, its name is not free.
+    if (s.unreadable) return { agent: f.slice(0, -'.json'.length), status: 'running', running: true, unreadable: true, beatAgeMin: null, stalled: false };
     const running = s.status === 'running' && recordAlive(s);
     const beatAge = s.lastBeat ? Math.round((Date.now() - Date.parse(s.lastBeat)) / 60000) : null;
     const ending = running ? wrappingUp(s) : null;
@@ -366,9 +394,7 @@ export function wrappingUp(s, now = Date.now(), env = process.env) {
 /** The launcher notes at once that its agent exited (before its clean-up, which can take minutes). */
 function markAgentExited(agent, startedAt, info) {
   try {
-    const cur = readJson(sessionFile(agent));
-    if (!cur || cur.status !== 'running' || (cur.startedAt && cur.startedAt !== startedAt)) return;
-    writeAtomic(sessionFile(agent), JSON.stringify({ ...cur, agentExited: { startedAt, ...info }, lastBeat: new Date().toISOString() }, null, 2), { fsync: false });
+    patchSession(agent, (cur) => cur.status === 'running' && (!cur.startedAt || cur.startedAt === startedAt) && { ...cur, agentExited: { startedAt, ...info }, lastBeat: new Date().toISOString() });
   } catch { /* the listing still sees the agent's pid gone */ }
 }
 
@@ -443,7 +469,7 @@ export function markGone() {
     const graceS = Number(process.env.STUDIO_GONE_GRACE_S ?? 120);
     const lastSeen = Date.parse(s.lastBeat || '') || Date.parse(s.startedAt || '') || null;
     const endedAt = lastSeen === null ? at : new Date(Math.min(Date.now(), lastSeen + (Number.isFinite(graceS) && graceS >= 0 ? graceS : 120) * 1000)).toISOString();
-    fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...s, running: undefined, stalled: undefined, beatAgeMin: undefined, ending: undefined, status: 'ended', endedAt: at, reason: 'its process is gone (killed, crashed or the machine restarted)' }, null, 2));
+    patchSession(s.agent, (cur) => ({ ...cur, status: 'ended', endedAt: at, reason: 'its process is gone (killed, crashed or the machine restarted)' }), s);
     if (claimSessionEnd(s.agent, s.startedAt, 'watch')) emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, task: sessionTask(s) || claimedSince(s.agent, s.startedAt) || undefined, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone', ...(PLANNING_OUTCOME_ROLES.includes(s.role) ? { outcome: { counts: false, boardEvents: boardEventsBy(s.agent, readRecentEvents(20000), { from: Date.parse(s.startedAt || '') || 0 }) } } : {}), endedAt, detectedAt: at, startedAt: s.startedAt || undefined, bootAt: new Date(Date.now() - os.uptime() * 1000).toISOString() } }); // 2.71.0 (z): times for harness/workaround.mjs
     // The uniform job.done (harness/jobs.mjs) beside agent.session.end.
     jobDone({ kind: 'session', id: s.agent, agent: s.agent, task: s.task || null, result: 'gone', ms: Date.parse(s.startedAt) ? Date.now() - Date.parse(s.startedAt) : null, tail: `its process is gone (last heartbeat ${s.lastBeat || 'never'})`, log: s.log || null, extra: { role: s.role || null } });
@@ -759,7 +785,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   const mine = listLocks().filter((l) => l.owner === agent);
   const tasks = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
   const handed = [];
-  const s0 = readJson(sessionFile(agent)) || {};
+  const s0 = readSession(agent) || {};
   const agyDenied = agyCut === 'denied' ? agyDeniedWhy(agyLine, s0.reach || []) : null;
   const copyDir = s0.copy?.dir ? path.join(REPO_ROOT, s0.copy.dir) : null;
   const ahead = s0.copy?.branch ? unmerged(s0.copy.branch) : 0;
@@ -878,7 +904,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
     if (est !== null) { tok = { ...tok, costUsd: est }; costEstimated = true; }
   }
   const cache = cacheStats(log);
-  const prefixHash = (readJson(sessionFile(agent)) || {}).prefixHash || null;
+  const prefixHash = (readSession(agent) || {}).prefixHash || null;
   const cause = exitCause({ code, exit, stop });
   const firstEnd = claimSessionEnd(agent, s0.startedAt, 'launcher');
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : agyDenied ? `exit ${code}, ${agyDenied}` : cause.kind === 'prompt-cap' ? `exit ${code}, ended by the launcher (prompt-cap: ${cause.why})` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget', 'prompt-cap'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
@@ -896,8 +922,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   try { recordFollow({ agent, model, role, task: s0.task || tasks[0] || null, log }); } catch { /* telemetry, never a blocker */ }
   // Claude Code's permission_denials into .studio/denials.jsonl (redacted; candidates only, never allowed).
   try { recordDenials({ log, logFile: s0.log ? path.join(REPO_ROOT, s0.log) : null, from: s0.logFrom || 0, task: s0.task || tasks[0] || null, agent, role }); } catch { /* evidence, never a blocker */ }
-  const s = readJson(sessionFile(agent)) || {};
-  fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: s.status === 'ended' && s.endedAt ? s.endedAt : new Date().toISOString(), code, reason, exitCause: cause, handed, ...(outcome ? { outcome } : {}), ...(stop ? { stoppedBy: stop.by } : {}), ...tok }, null, 2));
+  patchSession(agent, (s) => ({ ...s, status: 'ended', endedAt: s.status === 'ended' && s.endedAt ? s.endedAt : new Date().toISOString(), code, reason, exitCause: cause, handed, ...(outcome ? { outcome } : {}), ...(stop ? { stoppedBy: stop.by } : {}), ...tok }), {});
   fs.rmSync(stopFile(agent), { force: true });
   return { bad, trouble, troubleKind: t?.kind || (agyCut ? 'agy-cut' : undefined), agyCut, handed, finished, reason, capped, usageLimit: Boolean(limit), stoppedBy: stop?.by || null };
 }
@@ -1500,7 +1525,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   let billKeys = [];
   try { billKeys = sessionKeyNames({ tool, role, agent, keys: regRun ? reg.keyEnv : null, proxy: viaProxy ? 'vertex' : null }); } catch {}
   const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, ...(viaProxy ? { proxy: 'vertex' } : {}), keys: billKeys, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, ...(task ? { pinned: task } : {}), lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, logFrom, ...(addDirs.length ? { reach: addDirs.map((d) => d.split(path.sep).join('/')) } : {}), ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
-  writeAtomic(sessionFile(agent), JSON.stringify(session, null, 2), { fsync: false });
+  writeSession(agent, session);
   resetStall(agent); // the last session's stall record never judges this one
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane, ...(STARTED_BY_HAND ? { byHand: true } : {}) } });
   let killedBy = null;
@@ -1509,7 +1534,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     // Limits changed in .env since this launcher started (STUDIO_STALL_MIN, ...) apply from this beat.
     reloadEnvIfChanged({ by: `launcher ${agent}` });
     const now = new Date().toISOString();
-    const s = readJson(sessionFile(agent)) || session;
+    const s = readSession(agent) || session;
     const wip = wipSummary(agent);
     let progress = null;
     try {
@@ -1524,7 +1549,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
       stall = observe({ ...session, ...s }, { tokens: logTokens(tailOf(logFile, undefined, logFrom)), cwd: fs.existsSync(cwdNow) ? cwdNow : cwd, reads: { files: namedOfTask(s.task || task), log: logFile, from: logFrom, roots: [cwdNow, REPO_ROOT] } });
     } catch {
     }
-    fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, lastBeat: now, wip, ...(stall?.stalled ? { stalled: stall } : {}), ...(progress ? { progress: { turns: progress.turns, context: progress.context, state: progress.state } } : {}) }, null, 2));
+    patchSession(agent, (cur) => ({ ...cur, lastBeat: now, wip, ...(stall?.stalled ? { stalled: stall } : {}), ...(progress ? { progress: { turns: progress.turns, context: progress.context, state: progress.state } } : {}) }), session);
     renewOwner(agent);
     // An idle session exits and frees its slot: no task claimed for STUDIO_IDLE_EXIT_MIN (5) minutes.
     let idle = null;
@@ -1533,11 +1558,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
       const lastProg = readStall(agent)?.lastProgressAt;
       const since = holds ? null : [s.idleSince || now, lastProg].filter(Boolean).sort().pop();
       idle = idleVerdict({ role, startedAt, idleSince: since });
-      fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...readJson(sessionFile(agent)), idleSince: holds ? null : s.idleSince || now }, null, 2));
+      patchSession(agent, (cur) => ({ ...cur, idleSince: holds ? null : s.idleSince || now }));
     } catch {
     }
     if (idle?.exit && !s.idleExit) {
-      fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...readJson(sessionFile(agent)), idleExit: idle.why }, null, 2));
+      patchSession(agent, (cur) => ({ ...cur, idleExit: idle.why }));
       emitEvent({ type: 'agent.idle_exit', agent, to: 'producer', msg: `${agent} ended: ${idle.why}; its slot is free (a new session starts only when a task is ready)` });
       killedBy ||= { kind: 'idle', why: idle.why, at: new Date().toISOString() };
       stopChild(child);
@@ -1572,7 +1597,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
       if (heldTask && !s.budgetStop) {
         const over = stopIfOverBudget(heldTask, { by: 'launcher' });
         if (over) {
-          fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...readJson(sessionFile(agent)), budgetStop: over }, null, 2));
+          patchSession(agent, (cur) => ({ ...cur, budgetStop: over }));
           emitEvent({ type: 'agent.budget_stop', agent, task: heldTask, to: 'producer', msg: `${agent} ended: ${over.split('. ')[0]}` });
           killedBy ||= { kind: 'budget', why: over.split('. ')[0], at: new Date().toISOString() };
           stopChild(child);
@@ -1630,7 +1655,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
       emitEvent({ type: 'agent.model_gone', agent, to: 'human', task: task || undefined, status: 'error', msg: `${agent}: ${gone}`.slice(0, 400), meta: { tool: 'nim', model } });
     }
   }
-  const atClaim = !copy ? (readJson(sessionFile(agent)) || {}).copy || null : null; // made at task start
+  const atClaim = !copy ? (readSession(agent) || {}).copy || null : null; // made at task start
   // An agy stream session that exited before its first turn ended, on an input-format error or with no stream-json: recorded
   // once (.studio/agy-stream.json) and relaunched below in the one-turn mode.
   let streamFail = null;
@@ -1731,7 +1756,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
  */
 export function takeOverOwnCopy(agent, prev, { sameTask = false, rec = null, alive = (pid, id) => liveAs(Number(pid), id || null, { strict: true }), tries = 6, waitMs = 5000, sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {
   if (!prev?.dir || !sameTask) return null;
-  const r = rec || readJson(sessionFile(agent)) || {};
+  const r = rec || readSession(agent) || {};
   for (let i = 0; i < Math.max(1, tries); i += 1) {
     const live = r.pid ? alive(r.pid, r.identity?.pid) : false;
     if (!live) return reusableCopy(agent, prev);
@@ -1875,12 +1900,12 @@ function holdStarting({ agent, role, tool, model, task, lane }) {
   try {
     if (sessions().some((x) => x.agent === agent && x.running && !(x.starting && x.supervisor === process.pid))) return;
     fs.mkdirSync(AGENTS_DIR, { recursive: true });
-    writeAtomic(sessionFile(agent), JSON.stringify({ agent, role, tool, model, task: task || null, lane: lane || null, status: 'running', starting: true, supervisor: process.pid, identity: { supervisor: launcherIdentity() }, startedAt: new Date().toISOString() }, null, 2), { fsync: false });
+    writeSession(agent, { agent, role, tool, model, task: task || null, lane: lane || null, status: 'running', starting: true, supervisor: process.pid, identity: { supervisor: launcherIdentity() }, startedAt: new Date().toISOString() });
   } catch {}
 }
 /** Takes back this launcher's own "starting" record when the session never starts. */
 function dropStarting(agent) {
-  try { const p = readJson(sessionFile(agent)); if (ownStarting(p)) fs.rmSync(sessionFile(agent), { force: true }); } catch {}
+  try { const p = readSession(agent); if (ownStarting(p)) fs.rmSync(sessionFile(agent), { force: true }); } catch {}
 }
 /** This launcher's own "starting" record (its placeholder): never counted as another session. */
 function ownStarting(s) { return Boolean(s?.starting && s.supervisor === process.pid); }
@@ -1893,12 +1918,12 @@ function ownStarting(s) { return Boolean(s?.starting && s.supervisor === process
 function recordNotStarted(agent, why, { role = null, task = null, tool = null, model = null } = {}) {
   try {
     if (!agent) return false;
-    const cur = readJson(sessionFile(agent));
+    const cur = readSession(agent);
     if (cur && cur.status === 'running' && !ownStarting(cur)) return false;
     const line = `not started: ${String(why || 'no reason given').replace(new RegExp(`^(?:${String(agent).replace(/[^\w-]/g, '')}\\s+)?not started:\\s*`, 'i'), '').replace(/\s+/g, ' ').trim()}`.slice(0, 600);
     const at = new Date().toISOString();
     fs.mkdirSync(AGENTS_DIR, { recursive: true });
-    fs.writeFileSync(sessionFile(agent), JSON.stringify({ agent, role: cur?.role || role, tool: cur?.tool || tool, model: cur?.model || model, task: cur?.task || task || null, status: 'ended', startedAt: cur?.startedAt || at, endedAt: at, reason: line, refusal: line }, null, 2));
+    writeSession(agent, { agent, role: cur?.role || role, tool: cur?.tool || tool, model: cur?.model || model, task: cur?.task || task || null, status: 'ended', startedAt: cur?.startedAt || at, endedAt: at, reason: line, refusal: line });
     jobDone({ kind: 'session', id: agent, agent, task: cur?.task || task || null, result: 'refused', tail: line, log: null, extra: { role: cur?.role || role || null } });
     return true;
   } catch { return false; }
@@ -1953,14 +1978,13 @@ export function recordStop(s, by, kind = 'stop') {
   try {
     fs.mkdirSync(AGENTS_DIR, { recursive: true });
     writeAtomic(stopFile(s.agent), `${JSON.stringify(mark)}\n`, { fsync: false });
-    const cur = readJson(sessionFile(s.agent));
-    if (cur && cur.startedAt === s.startedAt) writeAtomic(sessionFile(s.agent), JSON.stringify({ ...cur, stopRequested: mark }, null, 2), { fsync: false });
+    patchSession(s.agent, (cur) => cur.startedAt === s.startedAt && { ...cur, stopRequested: mark });
   } catch {
     // the stop goes ahead; at worst it reads as a crash
   }
   return mark;
 }
-export function stopMark(agent, s = readJson(sessionFile(agent))) {
+export function stopMark(agent, s = readSession(agent)) {
   if (!s) return null;
   const ok = (m) => m && m.by && (!s.startedAt || !m.startedAt || m.startedAt === s.startedAt) && (!s.startedAt || Date.parse(m.at) >= Date.parse(s.startedAt) - 1000);
   const side = readJson(stopFile(agent));
@@ -1973,7 +1997,7 @@ export function stopMark(agent, s = readJson(sessionFile(agent))) {
  * watcher ends a dead one: record marked ended, uncommitted work saved, tasks back to the queue with a note, claims freed.
  */
 function endAsDead(s, v, by) {
-  const cur = readJson(sessionFile(s.agent));
+  const cur = readSession(s.agent);
   if (!cur || cur.status !== 'running') return false; // already ended (its launcher got there first)
   // A new session has taken the name since; unless it is the launcher just killed, which wrote its real record.
   if (cur.startedAt && s.startedAt && cur.startedAt !== s.startedAt && !(v.kill && v.target === 'launcher' && cur.supervisor === s.supervisor)) return false;
@@ -1981,7 +2005,7 @@ function endAsDead(s, v, by) {
   const reason = v.kill ? what : `ended by ${by}: ${v.why}`;
   // A stop someone asked for (agent stop, pause, stop all) is a stop, not a crash.
   const stop = stopMark(s.agent, cur);
-  fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...cur, running: undefined, stalled: undefined, beatAgeMin: undefined, ending: undefined, status: 'ended', endedAt: new Date().toISOString(), reason, ...(stop ? { stoppedBy: stop.by } : {}) }, null, 2));
+  patchSession(s.agent, (c) => ({ ...c, status: 'ended', endedAt: new Date().toISOString(), reason, ...(stop ? { stoppedBy: stop.by } : {}) }));
   fs.rmSync(stopFile(s.agent), { force: true });
   const mine = listLocks().filter((l) => l.owner === s.agent);
   const held = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
@@ -2023,7 +2047,7 @@ export function stopAgent(target, { by = 'launcher', starts = null, record = nul
  * task's commits touched), and when the last verify ran. Git only. */
 export function wipSummary(agent) {
   const paths = listLocks().filter((l) => l.owner === agent && l.key.startsWith('path:')).map((l) => l.key.slice(5));
-  const copy = readJson(sessionFile(agent))?.copy;
+  const copy = readSession(agent)?.copy;
   const cwd = copy?.dir && fs.existsSync(path.join(REPO_ROOT, copy.dir)) ? path.join(REPO_ROOT, copy.dir) : REPO_ROOT;
   const r = spawnSync('git', ['diff', '--numstat', 'HEAD', '--', ...(paths.length && cwd === REPO_ROOT ? paths : ['.'])], { windowsHide: true, cwd, encoding: 'utf8' });
   if (r.status !== 0) return null;
@@ -2046,8 +2070,7 @@ export function wipSummary(agent) {
 export function sayNow(agent, text) {
   const t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 160);
   if (!agent || !t) return { ok: false, message: 'npm run agent -- now "<what you are doing>" (with STUDIO_LOCK_OWNER set)' };
-  const s = readJson(sessionFile(agent));
-  if (s) fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, now: t, nowAt: new Date().toISOString() }, null, 2));
+  patchSession(agent, (s) => ({ ...s, now: t, nowAt: new Date().toISOString() }));
   emitEvent({ type: 'agent.now', agent, msg: t });
   return { ok: true };
 }
@@ -2104,7 +2127,7 @@ export function freshAgentName(role, agent) {
 
 /** Save an agent's work on a task before its hand-back: in its own copy the uncommitted files (unmerged commits stay on its
  * branch for the next agent), otherwise the files under its claims in the shared checkout. */
-export function saveWorkOf(agent, task, mine, s = readJson(sessionFile(agent))) {
+export function saveWorkOf(agent, task, mine, s = readSession(agent)) {
   const copyDir = s?.copy?.dir ? path.join(REPO_ROOT, s.copy.dir) : null;
   if (copyDir && fs.existsSync(copyDir)) {
     if (unmerged(s.copy.branch) > 0) rememberTaskBranch(task, s.copy.branch);
@@ -2294,7 +2317,7 @@ export function startAgent(opts, { detach = false } = {}) {
   if (!role || !agent) return { ok: false, message: 'Usage: npm run agent -- start --role <role> --agent <unique-name> --tool <tool> --model <model>' };
   // The detached supervisor keeps the placeholder its launcher wrote for it and its spawn time (2.93: deleting it left the
   // name free until the real record, and a second `--pool api` start took the same name). Its own record is not counted.
-  try { const p = readJson(sessionFile(agent)); if (ownStarting(p) && p.identity?.supervisor?.start) LAUNCHER_ID = p.identity.supervisor; } catch {}
+  try { const p = readSession(agent); if (ownStarting(p) && p.identity?.supervisor?.start) LAUNCHER_ID = p.identity.supervisor; } catch {}
   if (readStop()) return { ok: false, message: 'The studio is stopped; resume it first (npm run task -- resume --by <name>).' };
   const already = sessions().find((s) => s.agent === agent && s.running && !ownStarting(s));
   if (already) return { ok: false, message: `${agent} is already running (pid ${already.pid}).` };
@@ -2520,7 +2543,7 @@ export function startAgent(opts, { detach = false } = {}) {
     try {
       if (!fs.existsSync(sessionFile(agent)) || !sessions().some((x) => x.agent === agent && x.running)) {
         fs.mkdirSync(AGENTS_DIR, { recursive: true });
-        writeAtomic(sessionFile(agent), JSON.stringify({ agent, role, tool, model, task: opts.task || null, lane: opts.lane || null, status: 'running', starting: true, supervisor: sup.pid, ...(supId ? { identity: { supervisor: supId } } : {}), startedAt: new Date().toISOString() }, null, 2), { fsync: false });
+        writeSession(agent, { agent, role, tool, model, task: opts.task || null, lane: opts.lane || null, status: 'running', starting: true, supervisor: sup.pid, ...(supId ? { identity: { supervisor: supId } } : {}), startedAt: new Date().toISOString() });
       }
     } catch {}
     return { ok: true, detached: true, agent, role, tool, model, supervisor: sup.pid };
