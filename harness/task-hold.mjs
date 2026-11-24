@@ -250,6 +250,9 @@ export function holdReason(taskId, q, now = Date.now(), holds = readHolds(), rol
   }
   const qh = queuedHeldWhy(taskId, q, holds);
   if (qh) return qh;
+  // 2.98 (c): a task split into parts (task split) starts no session; it closes by itself when its parts are done.
+  const parts = q && !q.inProgress?.some((x) => x.id === taskId) ? (holds[taskId]?.split?.children || []).filter((c) => !(q.done || []).some((t) => t.id === c)) : [];
+  if (parts.length) return `it is split into ${parts.join(', ')}: work on those; it closes by itself when they are done`;
   // 2.77.0 (P9.2): a task whose lane is queued for the merge train (checked, maybe released) doesn't start again: a new
   // session would fork its lane and re-queue it (builder-p77a on T-134). Work in progress (its claim) carries on.
   if (!q?.inProgress?.some((x) => x.id === taskId)) {

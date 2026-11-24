@@ -5506,6 +5506,14 @@ if (inShard('selftest-297d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.98 (c): a task with a checklist lands in slices until its list is empty; task split makes child tasks of its items.
+if (inShard('selftest-298e')) {
+  const dir = copyRepo();
+  const { selftest298E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298e.mjs')).href);
+  await selftest298E({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
