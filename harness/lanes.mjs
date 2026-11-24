@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { emitEvent, readRecentEvents, STUDIO_STATE_DIR } from './event.mjs';
+import { emitEvent, readRecentEvents } from './event.mjs';
 import { mainRoot, mainBranch, laneCopies, laneLive, unmerged, isLaneWorktree, LANES_DIR, cheapLaneCopies, refSha, mainBranchCheap } from './worktree.mjs';
 import { readQueue, heldNow, pinMoves, trainManifest, readLeft } from './train.mjs';
 import { readTrainStatus, trainStatusLine, capNote } from './train-status.mjs';

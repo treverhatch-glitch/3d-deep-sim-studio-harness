@@ -22,7 +22,7 @@ import { mainRoot, inLaneCopy } from './worktree.mjs';
 import { OWNER_PUB_REL, ownerKeyPath, verifyApproval, OWNER_KEY_HOWTO } from './approve.mjs';
 import { WORKER_NAME, AGENT_SHELL } from './permission.mjs';
 import { agentLikeName, launchedSession } from './agent-env.mjs';
-import { autonomousFor, policyNeverWhy, embeddedAutonomyOk } from './policy-rules.mjs';
+import { autonomousFor, ownerPub, policyNeverWhy, embeddedAutonomyOk } from './policy-rules.mjs';
 import { logDecision } from './decisions-log.mjs';
 import { grantBody, isProxyGrant, PROXY_MAX_DAYS, PROXY_DEFAULT_DAYS, PROXY_NEVER } from './owner-proxy.mjs';
 import { betaActor, BETA_NEVER, recordBetaUse, readBeta } from './beta-mode.mjs';
@@ -77,12 +77,6 @@ export function ownerShellRefusal({ env = process.env, lane = inLaneCopy() } = {
   const lockOwner = String(env.STUDIO_LOCK_OWNER || '').trim();
   if (lockOwner && (WORKER_NAME.test(lockOwner) || agentLikeName(lockOwner, { stateDir: path.join(mainRoot(), '.studio') }))) return `this shell works as an agent (STUDIO_LOCK_OWNER=${lockOwner.slice(0, 40)})`;
   return launchedSession(env) || '';
-}
-
-function ownerPub(root) {
-  const r = git(root, 'show', `HEAD:${OWNER_PUB_REL}`);
-  const pem = r.status === 0 ? r.stdout : (fs.existsSync(path.join(root, OWNER_PUB_REL)) ? fs.readFileSync(path.join(root, OWNER_PUB_REL), 'utf8') : '');
-  return /BEGIN PUBLIC KEY/.test(pem || '') ? pem : null;
 }
 
 function shapeError(d) {
