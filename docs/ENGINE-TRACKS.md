@@ -134,11 +134,28 @@ npm run task -- add "Pass 11: realism pass on the hangar" --role engine-porter -
   2.90: a big unit lands per slice. `task done <ID> --train --slice` queues the committed slice; when it lands the task
   goes back to ready (not done, a `task.slice_landed` event) and the next session continues on the landed target. A red
   slice comes back as any red branch does. `task done <ID> --train` without `--slice` queues the last slice and closes
-  the task when it lands. A hand-back that left commits on the task is progress: the watchdog's park
+  the task when it lands (unless its checklist still has open items: below). A hand-back that left commits on the task is progress: the watchdog's park
   (`STUDIO_LOOP_HANDBACKS`), the circuit breaker, the task budget's session count and the crew breaker don't count it.
   Parallel units of one system start from `studio/templates/port-plan.md`: one chore declares the members several units
   share, first, and every unit waits for it (`--after`); a unit never declares a shared member itself (two branches
   declaring the same member pass each lane's check and break the train).
+  2.98: a unit carries its list as a checklist, and the list decides when it closes:
+  - `npm run task -- add "<title>" --checklist-file <file>` (one item a line), or
+    `npm run task -- checklist <ID> add "<item>" ...`; `... done "<item>"` (a porter does this from its lane; an item is
+    named by its words or its number in `list`), `... skip "<item>" --why "<reason>"` (a reason is required), `... list`.
+  - While an item is open, every landing is a slice: plain `task done <ID> --train` queues it and says "N checklist
+    item(s) are still open: queued as a slice". The landing that finds the list empty (done or skipped) closes the task.
+    `task done <ID> --train --final` closes it now; the open items go on its done line. A task with open items is not
+    closed by a direct `task done` (no train) without `--final`.
+  - `task show`, `task list` and the session brief say "7 of 12 done". The board lines in `studio/NEXT.md` do not (other
+    readers parse the title).
+  - `npm run task -- split <ID> --every <n> --by <name>` makes child tasks from the open items, n a child: each a normal
+    task on the same engine track with its own lane and branch, its items as its own checklist. Use it when a second
+    porter should work while the unit's slice waits for a train. The parent starts no new session, its queued slice still
+    lands, and it closes by itself when its last part closes (event `task.split`; the parent's done line says "its parts
+    landed"). Parts that change the same files clash at the queue door like any two lanes.
+  - One rule decides whether a landing closes a task (`harness/task-checklist.mjs` landingKeepsOpen): `--final` closes;
+    open items, open parts of a split, or the slice mark keep it open. The `--slice` mark stays for a task with no list.
 
 ## The train as the landing path (P5.2, P9.7)
 

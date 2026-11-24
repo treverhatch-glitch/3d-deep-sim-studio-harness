@@ -945,7 +945,8 @@ turn on `service.check` and run one `check` end to end, and only then `warm`.
 - **`npm run task -- train slice <ID> --engine <x> --by <name> [--off]`** marks a queued branch as a slice (what
   `task done --train --slice` does): its task stays open when it lands. `--off` removes the mark. Nothing else about the
   entry changes. It refuses when the task is not in that queue or its train is running with it. Same actors as `train auto`.
-  Event `task.train.<x>.slice_marked`.
+  Event `task.train.<x>.slice_marked`. 2.98: `--off` on a task whose checklist still has open items says the landing
+  still keeps it open (the checklist rule, docs/ENGINE-TRACKS.md); `task done --train --final` closes it.
 
 
 ## 2.96 (d): landings posted, what the tests cost, Play Mode gaps, a busy line

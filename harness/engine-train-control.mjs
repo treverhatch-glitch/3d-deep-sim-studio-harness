@@ -272,7 +272,7 @@ export async function setEngineAuto(root, { engine, on, by = '', why = '', hours
 
 /**
  * 2.93: `train slice <ID> --engine <x> --by <name> [--off]`: the slice mark of `task done --train --slice` (the task's hold
- * "slice", read when the branch lands) put on or taken off a queued branch. Nothing else about the entry changes.
+ * "slice", read with the checklist by landingKeepsOpen when the branch lands) put on or taken off a queued branch. Nothing else about the entry changes.
  * Same actors as the other train controls (mayControl). One event: task.train.<x>.slice_marked.
  */
 export async function setQueuedSlice(root, { engine, task, on = true, by = '', env = process.env, emit = emitEvent } = {}) {
@@ -288,7 +288,9 @@ export async function setQueuedSlice(root, { engine, task, on = true, by = '', e
   setHold(task, { slice: on ? { by: who, at: new Date().toISOString() } : null });
   try { emit({ type: `task.train.${engine}.slice_marked`, agent: who, task, to: 'producer', track: `engine:${engine}`, status: 'ok', msg: `${who} ${on ? 'marked' : 'took the slice mark off'} ${task} in the ${L} queue${on ? ': its task stays open when it lands' : ': its task closes when it lands'}`, meta: { engine, slice: on, by: who } }); } catch { /* the mark stands */ }
   await noteStandIn({ by: who, env, root, msg: `${who} changed the slice mark of ${task} in beta mode`, why: '' });
-  return { ok: true, message: on ? `${task} is marked as a slice: when its ${L} branch lands, the task stays open for the next slice.` : `${task} is no longer a slice: when its ${L} branch lands, the task closes.` };
+  // 2.98 (c): the mark is one of the reasons a landing keeps the task open (harness/task-checklist.mjs); say if another stays.
+  const still = on ? null : (await import('./task-checklist.mjs')).landingKeepsOpen(task);
+  return { ok: true, message: on ? `${task} is marked as a slice: when its ${L} branch lands, the task stays open for the next slice.` : still ? `${task} is no longer marked as a slice, but its landing still keeps the task open: ${still} (task done ${task} --train --final closes it with them listed).` : `${task} is no longer a slice: when its ${L} branch lands, the task closes.` };
 }
 
 // ---- cancel -----------------------------------------------------------------------------------------------------
