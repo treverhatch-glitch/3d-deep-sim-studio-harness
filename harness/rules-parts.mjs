@@ -7,7 +7,7 @@
  * expected to take (default 4, raised to the largest peak in .studio/engine-ram.json). 2.95: a part with a measured peak
  * (rules.peak, the file the test command writes) needs that instead; peakClear/peakRead handle the file.
  * runParts is async and takes everything it reads (RAM reader, clock, starter) as arguments, so a test can inject
- * them. The runner is synchronous (engine-rules.mjs runRulesAt), so it calls this file as a script: `node
+ * them. 2.98: judged() reads every rules command's result; a build fault (rules.infra) runs once more, alone. The runner is synchronous (engine-rules.mjs runRulesAt), so it calls this file as a script: `node
  * harness/rules-parts.mjs` reads one JSON job on stdin and writes one JSON result on stdout.
  */
 import fs from 'node:fs';
@@ -90,10 +90,26 @@ export function peakRead(dir, peak) {
   return best;
 }
 
+/** 2.98: output lines that say a build fault, not a test result: a file another build holds (rules.infra adds to these for dotnet). */
+export const INFRA_DOTNET = ['error CS2012', 'MSB3021', 'MSB3026', 'MSB3027', 'being used by another process', 'locked by'];
+/** 2.98: the first line of `text` that one of `infra` (regex sources, any case) matches, trimmed, or ''. */
+function infraLine(text, infra = []) {
+  const res = infra.map((x) => { try { return new RegExp(x, 'i'); } catch { return null; } }).filter(Boolean);
+  if (!res.length) return '';
+  const l = String(text || '').split(/\r?\n/).find((x) => res.some((re) => re.test(x)));
+  return l ? l.trim().slice(0, 300) : '';
+}
+/** 2.98: a rules command's result, the one reading for every run: { status: 'pass' | 'red' } or { status: 'infra', line }. */
+export function judged(code, text, infra = []) {
+  if (code === 0) return { status: 'pass' };
+  const line = infraLine(text, infra);
+  return line ? { status: 'infra', line } : { status: 'red' };
+}
+
 /**
  * Run parts[i] through start(part, i) -> Promise<{ status: 'pass' | 'red' | 'error', ... }>, at most `max` at once and only
  * while free RAM - floor >= gb, or the part's own measured gb (at least one always). After a part is not 'pass' no new part starts; the ones running finish.
- * 2.96 (a): admitPart(part) -> a run-cost.mjs decision; a decided one replaces the free-RAM test.
+ * 2.96 (a): admitPart(part) -> a run-cost.mjs decision. 2.98: 'infra' (judged) runs once more alone; again, 'error' + notJudged.
  * { results (in part order; a part never started is null), atOnce (the most that ran together), decisions: [line] }.
  */
 export async function runParts({ parts, start, max = 1, gb = 4, floorGb = 3, freeGb = () => null, log = () => {}, pollMs = 1000, admitPart = null } = {}) {
@@ -106,8 +122,26 @@ export async function runParts({ parts, start, max = 1, gb = 4, floorGb = 3, fre
   let atOnce = 0;
   let stop = false;
   let lastWait = '';
+  const again = [];
+  const tried = new Set();
+  let solo = -1;
+  const launch = (i, why) => {
+    // 2.95: a part that ran beside another cannot tell its own peak from the file they share.
+    if (running.size) { overlap.add(i); for (const k of running.keys()) overlap.add(k); }
+    say(`part ${i + 1} of ${parts.length} starts (${running.size + 1} at once): ${why}`);
+    const p = Promise.resolve().then(() => start(parts[i], i, () => overlap.has(i))).catch((e) => ({ status: 'error', why: String(e?.message || e) })).then((r) => {
+      running.delete(i);
+      if (solo === i) solo = -1;
+      if (r.status === 'infra' && !tried.has(i)) { tried.add(i); again.push(i); say(`part ${i + 1} of ${parts.length} met a build fault, not a test result (${r.line}): it runs once more, alone`); return; }
+      results[i] = r.status === 'infra' ? { ...r, status: 'error', notJudged: r.line } : r;
+      if (results[i].status !== 'pass') stop = true;
+    });
+    running.set(i, p);
+    atOnce = Math.max(atOnce, running.size);
+  };
   while (true) {
-    while (!stop && next < parts.length) {
+    if (again.length && !running.size && !stop) { solo = again.shift(); launch(solo, 'alone, after a build fault'); }
+    while (!stop && !again.length && solo < 0 && next < parts.length) {
       let why;
       let md = null;
       // 2.95: a part with a measured peak (rules.peak) needs that, not the plan's guess.
@@ -128,13 +162,7 @@ export async function runParts({ parts, start, max = 1, gb = 4, floorGb = 3, fre
         }
       }
       lastWait = '';
-      const i = next++;
-      // 2.95: a part that ran beside another cannot tell its own peak from the file they share.
-      if (running.size) { overlap.add(i); for (const k of running.keys()) overlap.add(k); }
-      say(`part ${i + 1} of ${parts.length} starts (${running.size + 1} at once): ${why}`);
-      const p = Promise.resolve().then(() => start(parts[i], i, () => overlap.has(i))).catch((e) => ({ status: 'error', why: String(e?.message || e) })).then((r) => { results[i] = r; running.delete(i); if (r.status !== 'pass') stop = true; });
-      running.set(i, p);
-      atOnce = Math.max(atOnce, running.size);
+      launch(next++, why);
     }
     if (!running.size) break;
     await Promise.race([...running.values(), new Promise((res) => setTimeout(res, pollMs))]);
@@ -142,7 +170,7 @@ export async function runParts({ parts, start, max = 1, gb = 4, floorGb = 3, fre
   return { results, atOnce, decisions };
 }
 
-/** The script: one JSON job on stdin ({ parts: [{ filter, command }], cwd, env, timeoutMs, max, gb, floorGb, freeGb? }), one result on stdout. */
+/** The script: one JSON job on stdin ({ parts: [{ filter, command }], cwd, env, timeoutMs, max, gb, floorGb, freeGb?, infra? }), one result on stdout. */
 async function cli() {
   let text = '';
   for await (const c of process.stdin) text += c;
@@ -167,7 +195,7 @@ async function cli() {
     const timer = setTimeout(() => { try { child.kill(); } catch { /* it ended */ } fin({ status: 'error', timedOut: true }); }, left + 15000);
     child.stdout.on('data', keep); child.stderr.on('data', keep);
     child.on('error', (e) => fin({ status: 'error', errorCode: e.code || e.message }));
-    child.on('close', (code, signal) => fin(code === 124 && buf.includes('[run-limited] ended after') ? { status: 'error', timedOut: true } : { status: code === 0 ? 'pass' : 'red', code, signal }));
+    child.on('close', (code, signal) => fin(code === 124 && buf.includes('[run-limited] ended after') ? { status: 'error', timedOut: true } : { ...judged(code, buf, job.infra), code, signal }));
   });
   const heavy = job.root ? await import('./heavy.mjs').catch(() => null) : null;
   const admitPart = cost && heavy && job.root ? (part) => cost.measuredAdmit({ root: job.root, engine: job.engine, kind: cost.rulesKind(part.filter), handGb: job.handGb || null, holders: heavy.heavyHolders(job.root, { env: job.env }), env: job.env }) : null;

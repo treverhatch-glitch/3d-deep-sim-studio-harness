@@ -244,6 +244,25 @@ half as much machine time as the land runs. Five settings, all optional, in the 
   has measured); at least one part always runs, the check is made again before every start, and `splitMax` is the
   most at once. `splitMax` unset means 1: in sequence, as 2.84 ran. Each decision is one log line, and the
   `engine.rules` event carries `splitAtOnce`. The result is the same either way; only the time and the memory differ.
+- `build`, `testAfterBuild` and `infra` (2.98): build once, then test without building. Each `dotnet test` builds
+  first, so parts that ran at once in one checkout wrote the same output together ("error CS2012: Cannot open
+  ...dll for writing ... locked by 'VBCSCompiler'"), and the train took that for a red of a lane. Now the rules check
+  runs `build` once per checkout, before its first part, and every part, shard, `first` and by-name run in that
+  checkout gets `--no-build`. Unset, `build` is the `dotnet test` command of `test` with `test` made `build` and the
+  test-only options (`--filter`, `--logger`, `--settings`, `--blame`, `-- <settings>`, ...) left out. A `build` for
+  another tool can set `testAfterBuild`, the test command after the build with `{command}` for the usual one (for
+  example `"{command} --no-compile"`). `"build": false` keeps the old way (each test command builds). A checkout's
+  git folder holds a mark (`studio-rules-built`: the tree and the build command), so a kept checkout is not built twice.
+  - A build that fails is a compile red of the batch: the compile search (`harness/engine-compile.mjs`) finds the lane
+    that does not build, by builds alone, and hands it back as cause `compile` with the compiler's lines. No test runs
+    to narrow it. A build red on the target itself judges no lane.
+  - A build fault is not a red. A command (the build, a part, a shard, the whole run, a by-name or `first` run) whose
+    output has an `infra` line is run once more, alone. A second time, the check ends "not judged: <the line>": no lane
+    is narrowed, blamed or handed back, the batch stays queued (each lane `deferred`), and the train writes
+    `task.train.<x>.rules_not_judged` to the producer. The check ahead ends without an answer the same way. The
+    `dotnet` patterns are `error CS2012`, `MSB3021`, `MSB3026`, `MSB3027`, `being used by another process` and
+    `locked by`; `infra` (a list of regexes) adds to them, `"infra": false` turns it off.
+  - Not this round: starting a check ahead beside a rules check that still runs (it waits for the land run, as before).
 - What the rules check cost and why (2.85): the `engine.rules` event's `meta` has `mode` (`focus` or `full`), `why`
   (a full run because of unmapped paths names up to 5 of them, so you can extend `focus.map`), `parts`, `ms` and
   `splitAtOnce`; `train status` prints the last check's mode, why, runs, seconds and parts. A green full check on
