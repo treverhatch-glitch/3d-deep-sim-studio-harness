@@ -3,7 +3,7 @@
  * ahead by shard. One full run of the rules tests was one test process that grew to 18.9 GB; a studio's land run needs
  * about 21 GB free, so land runs waited for memory and the check ahead never started. Here: rules.shards runs one command
  * per shard and keeps a green per shard (exact tree, or by what it reads); without rules.shards.rest it is not a full run;
- * rules.peak reads the peak a test command writes and uses it where 4 GB was guessed; focus.auto takes names from a file
+ * memory per part is its own recent sampled peak (2.98; 2.95 read a file the test command wrote); focus.auto takes names from a file
  * template and as a list; the check ahead goes shard by shard and says when it does not start.
  * Scaffolding as qa/selftest-294a.mjs (a studio copy, a made-up engine repo, stand-ins for the land script and the tests).
  */
@@ -51,7 +51,9 @@ export async function selftest295A({ dir, report, tmpRoot }) {
     const l = String(r.stdout || '').split('\n').filter((x) => x.startsWith('{')).pop();
     try { return { ...JSON.parse(l), _out: out(r).slice(-1500) }; } catch { return { _raw: out(r).slice(-2500) }; }
   };
-  const resetState = () => { for (const x of ['train', 'engine', 'comm', 'gates', 'tmp', 'locks', 'line']) fs.rmSync(path.join(S, '.studio', x), { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); fs.writeFileSync(evFile, ''); };
+  const resetState = () => { for (const x of ['train', 'engine', 'comm', 'gates', 'tmp', 'locks', 'line', 'engine-ram.json']) fs.rmSync(path.join(S, '.studio', x), { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); fs.writeFileSync(evFile, ''); };
+  // Sampled runs of rules kinds kept as passed: { <filter or ''>: gb }.
+  const seedKinds = (gbs) => fs.writeFileSync(path.join(S, '.studio', 'engine-ram.json'), JSON.stringify({ unity: { kinds: Object.fromEntries(Object.entries(gbs).map(([f, gb]) => [f ? `rules ${f}` : 'rules', [{ id: `seed-${f}`, at: Date.now(), gb, cpu: 5, minutes: 1, when: 'middle', code: 0 }]])) } }));
   const cache = () => readJson(path.join(S, '.studio', 'engine', 'unity-rules.json')) || {};
 
   // The engine repo: two system folders (Sim/Fees, Sim/Move), one system named by files (Game/Core/Unit.Bank.cs, its
@@ -105,19 +107,17 @@ for (const s of srcs) { const m = git(gw, 'merge', '--no-ff', '-m', 'land ' + s,
 console.log('landed ' + srcs.join(' '));
 `);
   // The tests' stand-in: one filter per run (ALL for the whole command). Cat=Fees (and ALL) fail when Sim/Fees holds BAD.
-  // It writes its peak to out/run/peak.txt (PEAK_<filter> or PEAK_DEFAULT GB) and records whether a peak file was there
-  // before it ran. A run of the check ahead takes AHEAD_STUB_MS.
+  // It writes its peak to out/run/peak.txt (PEAK_<filter> or PEAK_DEFAULT GB; a config that still sets rules.peak must not read it). A run of the check ahead takes AHEAD_STUB_MS.
   const rulesStub = path.join(T, 'rules-stub.mjs');
   fs.writeFileSync(rulesStub, `import fs from 'node:fs'; import path from 'node:path';
 const [ctl, filter = 'ALL'] = process.argv.slice(2);
 const t0 = Date.now();
 const ahead = /-ahead-/.test(process.env.STUDIO_RULES_DIR || '');
-const stale = fs.existsSync(path.join('out', 'peak.txt')) || fs.existsSync(path.join('out', 'run', 'peak.txt'));
 if (ahead && Number(process.env.AHEAD_STUB_MS) > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.AHEAD_STUB_MS));
 const bad = (filter === 'ALL' || filter === 'Cat=Fees') && fs.readFileSync(path.join('Sim', 'Fees', 'Fees.cs'), 'utf8').includes('BAD');
 const peak = process.env['PEAK_' + filter.replace(/[^A-Za-z0-9]/g, '_')] || process.env.PEAK_DEFAULT;
 if (peak) { fs.mkdirSync(path.join('out', 'run'), { recursive: true }); fs.writeFileSync(path.join('out', 'run', 'peak.txt'), 'max working set ' + peak + ' GB\\n'); }
-fs.appendFileSync(ctl + '-rules.jsonl', JSON.stringify({ filter, ahead, mode: process.env.STUDIO_RULES_MODE || null, commit: process.env.STUDIO_RULES_COMMIT || null, stale, t0, t1: Date.now() }) + '\\n');
+fs.appendFileSync(ctl + '-rules.jsonl', JSON.stringify({ filter, ahead, mode: process.env.STUDIO_RULES_MODE || null, commit: process.env.STUDIO_RULES_COMMIT || null, t0, t1: Date.now() }) + '\\n');
 console.log('  ' + (bad ? 'Failed' : 'Passed') + ' Game.Rules.Tests.FeesTests.Charges [3 ms]');
 process.exit(bad ? 1 : 0);
 `);
@@ -125,7 +125,7 @@ process.exit(bad ? 1 : 0);
   const rulesOf = (ctl, { shards = { filters: ['Listed'], rest: 'Rest' }, focus = {}, ...extra } = {}) => ({
     test: `node "${fwd(rulesStub)}" "${fwd(ctl)}" ALL`,
     focus: { test: `node "${fwd(rulesStub)}" "${fwd(ctl)}" "{filter}"`, smoke: 'Smoke', auto: AUTOS, fullEveryHours: 0, ...focus },
-    ...(shards ? { shards } : {}), peak: 'out/**/peak.txt', ...extra,
+    ...(shards ? { shards } : {}), ...extra,
   });
   const cfgFor = (E, ctl, rules) => ({ land: `node "${fwd(landStub)}" "${fwd(E.GW)}" "${fwd(ctl)}" {branch}`, target: 'port/main', cwd: fwd(E.R), gateWorktree: fwd(E.GW), timeoutMin: 5, batchMax: 1, rules });
   const rulesRuns = (ctl) => { try { return fs.readFileSync(`${ctl}-rules.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
@@ -178,7 +178,7 @@ console.log(JSON.stringify({ isObj: !Array.isArray(a.auto), names: autoSystems({
     resetState();
     const E = engineRepo({ 'feat/a': { 'Sim/Move/Move.cs': 'class Move { int a; }\n' } });
     const ctl = ctlOf('full');
-    setEngines({ unity: cfgFor(E, ctl, rulesOf(ctl)) });
+    setEngines({ unity: cfgFor(E, ctl, rulesOf(ctl, { peak: 'out/**/peak.txt' })) });
     queue(E, [['T-201', 'feat/a']]);
     const r1 = probe(TRAIN, { PEAK_DEFAULT: '1.5', PEAK_Cat_Fees: '2.25' });
     const rr = rulesRuns(ctl);
@@ -189,8 +189,8 @@ console.log(JSON.stringify({ isObj: !Array.isArray(a.auto), names: autoSystems({
     await guard('2.95 (b1) with rules.shards and rest, the full batch check runs one command per shard, one at a time (smoke, Cat=Fees, Cat=Move, Core.Bank, Listed, Rest; never the whole command), each told STUDIO_RULES_MODE=shard; all green, the land run is told STUDIO_RULES_GREEN=1 and STUDIO_RULES_MODE=full, and the engine.rules event carries the shards (fails before this fix: a full check was one test process holding every system at once)', () => [
       r1.landed?.join() === 'T-201' && rr.map((x) => x.filter).join() === ALL6.join() && seq && rr.every((x) => x.mode === 'shard') && land.green === '1' && land.mode === 'full'
         && ev.meta?.mode === 'full' && ev.meta?.shards?.n === 6 && ev.meta?.shards?.complete === true && ev.meta?.shards?.ran === 6, J({ r1, rr, land, ev: ev.meta })]);
-    await guard('2.95 (b2) rules.peak: each shard\'s peak is read from the file its command wrote (out/**/peak.txt) and kept per shard (2.25 GB for Cat=Fees, 1.5 for the others); the committed stale peak file (99 GB) was removed before every command and never read (fails before this fix: memory was only guessed, 4 GB per run)', () => [
-      measured['Cat=Fees']?.peakGb === 2.25 && measured['Cat=Move']?.peakGb === 1.5 && measured.Rest?.peakGb === 1.5 && rr.every((x) => !x.stale) && !Object.values(measured).some((x) => x.peakGb === 99), J({ measured, stale: rr.map((x) => x.stale) })]);
+    await guard('2.95 (b2) a config that still sets rules.peak runs as before and reads nothing from the peak file its command wrote (out/**/peak.txt, 2.25 GB for Cat=Fees, 1.5 for the others, 99 GB committed): the part stats keep seconds only, no peak (fails before this fix: the 2.25 GB and 1.5 GB were read from the file and kept per shard)', () => [
+      measured['Cat=Fees']?.seconds >= 0 && Object.keys(measured).length === 6 && !Object.values(measured).some((x) => x.peakGb || x.gb || x.peakAt), J({ measured })]);
   }
 
   // ================= (c) kept shards: the exact tree (default), after a stop =================
@@ -284,31 +284,32 @@ console.log(JSON.stringify({ isObj: !Array.isArray(a.auto), names: autoSystems({
   // ================= (g) the peak changes the split and the check-ahead decision =================
   {
     const r = probe(`import { splitPlan, runParts } from ${u('harness/rules-parts.mjs')};
-const plan = splitPlan({}, { root: process.cwd(), engine: 'unity', peakGb: 1.5 });
-const set = splitPlan({ splitGb: 6 }, { root: process.cwd(), engine: 'unity', peakGb: 1.5 });
+const memory = { gb: 1.5, line: 'measured: a 1.5 GB', list: [] };
+const plan = splitPlan({}, { memory });
+const set = splitPlan({ splitGb: 6 }, { memory });
 const start = () => new Promise((res) => { setTimeout(() => res({ status: 'pass' }), 60); });
 const guess = await runParts({ parts: [{ filter: 'a' }, { filter: 'b' }], start, max: 2, gb: 4, floorGb: 0, freeGb: () => 3, pollMs: 10 });
 const known = await runParts({ parts: [{ filter: 'a', gb: 1.4 }, { filter: 'b', gb: 1.4 }], start, max: 2, gb: 4, floorGb: 0, freeGb: () => 3, pollMs: 10 });
 console.log(JSON.stringify({ gb: plan.gb, why: plan.why, setGb: set.gb, guess: guess.atOnce, known: known.atOnce }));`);
-    await guard('2.95 (g1) a measured peak replaces the guess: splitPlan takes 1.5 GB from rules.peak when rules.focus.splitGb is unset (6 GB when set), and two parts measured at 1.4 GB run together in 3 GB free where the 4 GB guess ran one at a time (fails before this fix: every part was planned at 4 GB or the land run\'s peak)', () => [
-      r.gb === 1.5 && /rules\.peak/.test(r.why || '') && r.setGb === 6 && r.guess === 1 && r.known === 2, J(r)]);
+    await guard('2.95 (g1) a measured peak replaces the guess: splitPlan takes the measured 1.5 GB when rules.focus.splitGb is unset (6 GB when set), and two parts measured at 1.4 GB run together in 3 GB free where the 4 GB guess ran one at a time (fails before this fix: every part was planned at 4 GB or the land run\'s peak)', () => [
+      r.gb === 1.5 && /measured: a 1\.5 GB/.test(r.why || '') && r.setGb === 6 && r.guess === 1 && r.known === 2, J(r)]);
     const aheadCase = async (peak) => {
       resetState();
       const E = engineRepo({ 'feat/a': { 'Sim/Move/Move.cs': 'class Move { int a; }\n' }, 'feat/b': { 'notes.txt': 'n2\n' } });
       const ctl = ctlOf(`ahead-fit-${peak ? 'peak' : 'guess'}`);
-      const rules = { test: `node "${fwd(rulesStub)}" "${fwd(ctl)}" ALL`, ahead: true, ...(peak ? { peak: 'out/**/peak.txt' } : {}) };
+      const rules = { test: `node "${fwd(rulesStub)}" "${fwd(ctl)}" ALL`, ahead: true };
       setEngines({ unity: cfgFor(E, ctl, rules) });
       queue(E, [['T-231', 'feat/a'], ['T-232', 'feat/b']]);
-      if (peak) fs.writeFileSync(`${ctl}-wait`, '1');
-      const r1 = probe(TRAIN, { STUDIO_TEST_FREEMEM_MB: '3000', PEAK_DEFAULT: '2.5' });
+      if (peak) { fs.writeFileSync(`${ctl}-wait`, '1'); seedKinds({ '': 2.5 }); }
+      const r1 = probe(TRAIN, { STUDIO_TEST_FREEMEM_MB: '3000' });
       for (let i = 0; i < 150 && !outcomes().length; i++) await new Promise((res) => { setTimeout(res, 200); });
-      return { r1, ev: outcomes(), full: cache().partStats?.['(full run)']?.peakGb || null };
+      return { r1, ev: outcomes() };
     };
     const withPeak = await aheadCase(true);
     const guess = await aheadCase(false);
-    await guard('2.95 (g2) the check ahead\'s "does one run fit" uses the measured peak: with rules.peak the full run measured 2.5 GB, so with 2.9 GB free beside the land run the check ahead starts; without rules.peak the same machine guesses 4 GB and it does not start, said by a not-started event with the reason (fails before this fix: always the 4 GB guess, and no event)', () => [
-      withPeak.full === 2.5 && withPeak.ev[0] === 'started' && guess.ev.join() === 'not-started' && guess.full === null
-        && evs(/^task\.train\.unity\.rules_ahead$/).some((e) => e.meta?.outcome === 'not-started' && /under the 4 GB one rules run takes/.test(e.meta?.why || '')), J({ withPeak: { ev: withPeak.ev, full: withPeak.full }, guess: { ev: guess.ev, logs: guess.r1.logs } })]);
+    await guard('2.95 (g2) the check ahead\'s "does one run fit" uses the measured peak: with a sampled passed run of the whole command at 2.5 GB, with 2.9 GB free beside the land run the check ahead starts; with none the same machine guesses 4 GB and it does not start, said by a not-started event with the reason (fails before this fix: always the 4 GB guess, and no event)', () => [
+      withPeak.ev[0] === 'started' && guess.ev.join() === 'not-started'
+        && evs(/^task\.train\.unity\.rules_ahead$/).some((e) => e.meta?.outcome === 'not-started' && /under the 4 GB one rules run takes/.test(e.meta?.why || '')), J({ withPeak: { ev: withPeak.ev }, guess: { ev: guess.ev, logs: guess.r1.logs } })]);
   }
 
   // ================= (h) the check ahead by shard =================
@@ -319,14 +320,15 @@ console.log(JSON.stringify({ gb: plan.gb, why: plan.why, setGb: set.gb, guess: g
     setEngines({ unity: cfgFor(E, ctl, rulesOf(ctl, { ahead: true })) });
     queue(E, [['T-241', 'feat/a'], ['T-242', 'feat/b']]);
     fs.writeFileSync(`${ctl}-wait`, '2');
-    const env = { STUDIO_TEST_FREEMEM_MB: '3000', PEAK_DEFAULT: '1', AHEAD_STUB_MS: '1500' };
+    seedKinds(Object.fromEntries(ALL6.map((f) => [f, 1])));
+    const env = { STUDIO_TEST_FREEMEM_MB: '3000', AHEAD_STUB_MS: '1500' };
     const r1 = probe(TRAIN, env);
     const n1 = rulesRuns(ctl).length;
     const r2 = probe(TRAIN, env);
     const rr = rulesRuns(ctl);
     const ahead = rr.filter((x) => x.ahead).map((x) => x.filter);
     const next = rr.slice(n1).filter((x) => !x.ahead).map((x) => x.filter);
-    await guard('2.95 (h) the check ahead goes shard by shard: each shard measured at 1 GB starts in 2.9 GB free beside the land run (the 4 GB guess would not start one); it stops once the land run answered, its finished shards are kept (kept-partial), and the next train runs only the shards still missing: together they ran each of the six shards exactly once and T-242 lands told full (fails before this fix: the check ahead was one whole run that did not fit, so it never started)', () => [
+    await guard('2.95 (h) the check ahead goes shard by shard: each shard with a sampled passed run at 1 GB starts in 2.9 GB free beside the land run (the 4 GB guess would not start one); it stops once the land run answered, its finished shards are kept (kept-partial), and the next train runs only the shards still missing: together they ran each of the six shards exactly once and T-242 lands told full (fails before this fix: the check ahead was one whole run that did not fit, so it never started)', () => [
       r1.landed?.join() === 'T-241' && r2.landed?.join() === 'T-242' && ahead.length >= 2 && ahead.length < 6 && next.length === 6 - ahead.length
         && [...ahead, ...next].sort().join() === [...ALL6].sort().join() && outcomes().join() === 'started,kept-partial' && landRuns(ctl).pop()?.mode === 'full'
         && r2.logs?.some((l) => /finished some shards, this train ran the rest/.test(l)), J({ ahead, next, ev: outcomes(), r2l: r2.landed, logs: r2.logs })]);
@@ -340,10 +342,11 @@ console.log(JSON.stringify({ gb: plan.gb, why: plan.why, setGb: set.gb, guess: g
     setEngines({ unity: cfgFor(E, ctl, rulesOf(ctl, { ahead: true })) });
     queue(E, [['T-251', 'feat/a'], ['T-252', 'feat/b']]);
     fs.writeFileSync(`${ctl}-waitline`, 'Smoke waits for memory');
-    const r1 = probe(TRAIN, { STUDIO_TEST_FREEMEM_MB: '3000', PEAK_DEFAULT: '5' });
+    seedKinds(Object.fromEntries(ALL6.map((f) => [f, 5])));
+    const r1 = probe(TRAIN, { STUDIO_TEST_FREEMEM_MB: '3000' });
     for (let i = 0; i < 150 && !outcomes().length; i++) await new Promise((res) => { setTimeout(res, 200); });
     const e = evs(/^task\.train\.unity\.rules_ahead$/).pop() || {};
-    await guard('2.95 (i) shards measured at 5 GB do not fit in 2.9 GB beside the land run: the check ahead waits, starts nothing, and once the land run answered it emits rules_ahead with outcome not-started and the memory it waited for (fails before this fix: a check ahead that did not start emitted no event)', () => [
+    await guard('2.95 (i) shards with sampled passed runs at 5 GB do not fit in 2.9 GB beside the land run: the check ahead waits, starts nothing, and once the land run answered it emits rules_ahead with outcome not-started and the memory it waited for (fails before this fix: a check ahead that did not start emitted no event)', () => [
       r1.landed?.join() === 'T-251' && outcomes().join() === 'not-started' && /waited for memory \(2\.9 GB free over the floor, 5 GB needed\)/.test(e.meta?.why || '') && !rulesRuns(ctl).some((x) => x.ahead), J({ ev: outcomes(), why: e.meta?.why })]);
   }
 
@@ -354,7 +357,7 @@ console.log(JSON.stringify({ gb: plan.gb, why: plan.why, setGb: set.gb, guess: g
     const ctl = ctlOf('plain');
     setEngines({ unity: cfgFor(E, ctl, { test: `node "${fwd(rulesStub)}" "${fwd(ctl)}" ALL`, focus: { test: `node "${fwd(rulesStub)}" "${fwd(ctl)}" "{filter}"`, smoke: 'Smoke', auto: AUTOS[0], fullEveryHours: 0 } }) });
     queue(E, [['T-261', 'feat/a']]);
-    const r1 = probe(TRAIN, { PEAK_DEFAULT: '1' });
+    const r1 = probe(TRAIN);
     const rr = rulesRuns(ctl);
     const land = landRuns(ctl).pop() || {};
     const ev = evRules().pop() || {};
@@ -363,7 +366,7 @@ const cfg = rulesConfig('unity', { root: process.cwd() });
 console.log(JSON.stringify({ keys: Object.keys(cfg).filter((k) => k === 'shards' || k === 'peak') }));`);
     await guard('2.95 (j) a studio with none of this set (no rules.shards, no rules.peak, focus.auto one object) runs as 2.94: the full check is the one rules.test command, told STUDIO_RULES_MODE=full; the land run is told full; the event has no shards; nothing is measured (a guard of unchanged behaviour: it holds before and after this change)', () => [
       r1.landed?.join() === 'T-261' && rr.length === 1 && rr[0].filter === 'ALL' && rr[0].mode === 'full' && land.mode === 'full' && ev.meta?.mode === 'full' && !ev.meta?.shards
-        && !c.keys?.length && !Object.values(cache().partStats || {}).some((x) => x.peakGb), J({ rr, land, ev: ev.meta, c })]);
+        && !c.keys?.length && !Object.values(cache().partStats || {}).some((x) => x.peakGb || x.gb), J({ rr, land, ev: ev.meta, c })]);
   }
   try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); fs.rmSync(T, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep takes it */ }
 }

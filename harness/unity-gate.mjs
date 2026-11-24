@@ -22,7 +22,7 @@ import { acquireHeavy, heavyRoot } from './heavy.mjs';
 import { oomSignature } from './heavy-budget.mjs';
 import { readTrack, logEngine } from './engine.mjs';
 import { infraAbort } from './engine-proof.mjs';
-import { landWaitMin, recordLandPeak } from './engine-ram.mjs';
+import { landWaitMin } from './engine-ram.mjs';
 import { engineTarget, engineTask, engineFloor, recordDuration, readTune, tunePath } from './engine-tracks.mjs';
 import { readJson } from './fsafe.mjs';
 import { gateConfig } from './engine-gates.mjs';
@@ -375,10 +375,7 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   } finally {
     lk.release();
   }
-  const landEnd = Date.now();
   const measured = runNumbers(sample);
-  // Keep this run's RAM peak for the next land's floor.
-  const keepPeak = (status) => { if (only) return; try { recordLandPeak(engine, { root: hroot, startMs: landStart, endMs: landEnd, status }); } catch { /* the table's floor stays */ } };
   // A run killed for memory (heavy-budget.mjs oomSignature) queues once more.
   const oom = !/^(off|0|false|no)$/i.test(String(env.STUDIO_HEAVY_OOM_RETRY || '')) ? oomSignature(r) : '';
   if (oom) {
@@ -405,7 +402,6 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   if ((m.status === 'red' || (m.status === 'error' && !r.error)) && (infra = landInfra(text, { status: r.status, signal: r.signal, timedOut }))) {
     m = { status: 'not-run', why: `not run (${infra.kind}): ${infra.text}; the land command exited ${r.status ?? r.signal ?? '?'} (${m.status} by its contract), but nothing in its output shows a failing test or a compile error: ${WORDS['not-run']}` };
   } else if (m.status === 'not-run') m = { ...m, why: `not run: ${m.why}` };
-  keepPeak(m.status);
   // 2.95 (b): a green land run's built player (gates.build.output in its result) is kept for npm run engine -- playtest.
   if (m.status === 'pass' && !only && env.STUDIO_LAND_PROBE !== '1') { try { (await import('./playtest.mjs')).recordLandBuild(engine, stageFile, { cwd, tasks: task ? String(task).split(',') : [] }); } catch { /* a record only */ } }
   const tail = text.trimEnd().split('\n').slice(-12).join('\n');

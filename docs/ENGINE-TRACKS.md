@@ -309,9 +309,8 @@ verifies are expected to finish soon (elapsed against `STUDIO_ENGINE_VERIFY_TYPI
 5) it waits for that gap; if not and free RAM is still short, the builder cap steps down one at a time every
 `STUDIO_ENGINE_SCALE_STEP_MIN` (3) minutes (none is stopped). Bounded by `STUDIO_ENGINE_HOLD_MAX_MIN` (30): then released,
 the land stays queued and `line.engine_hold_expired` says why. The land's own RAM wait is `STUDIO_ENGINE_LAND_WAIT_MIN` (20),
-or the hold's time plus 5 min while the Line is making room. The RAM a land needs is the engine table's floor until
-`STUDIO_ENGINE_RAM_RUNS` (3) green runs have recorded their peak (`.studio/engine-ram.json`, from the machine monitor's
-samples); then the highest of the last 5 green peaks plus `STUDIO_ENGINE_RAM_MARGIN_GB` (1.5), never under
+or the hold's time plus 5 min while the Line is making room. The RAM a land needs is the engine table's floor until a passed sampled run of its kind exists (`.studio/engine-ram.json`, `machine.sample`; with
+`"sample": false` it stays the table; `STUDIO_ENGINE_RAM_RUNS=0` also keeps the table); then the highest peak of that kind's last passed runs plus `STUDIO_ENGINE_RAM_MARGIN_GB` (1.5), never under
 `STUDIO_ENGINE_RAM_MIN_GB` (4). The owner's `STUDIO_UNITY_MIN_FREE_GB` and the lane's tuned `ram-floor` still win.
 
 **Engine first by default (2.81).** A studio with exactly one engine in `studio/game.json` gives that engine the push

@@ -16,11 +16,11 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readJson, writeAtomic } from './fsafe.mjs';
 import { emitEvent } from './event.mjs';
-import { rulesConfig, rulesGate, rulesKey, rulesTimeout, rulesCacheKeys, rulesCacheForget, removeCheckout, rulesPeakGb } from './engine-rules.mjs';
+import { rulesConfig, rulesGate, rulesKey, rulesTimeout, rulesCacheKeys, rulesCacheForget, removeCheckout } from './engine-rules.mjs';
 import { splitPlan, readFreeGb } from './rules-parts.mjs';
 import { heavyHolders, holderLive } from './heavy.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
-import { measuredAdmit, rulesKind } from './run-cost.mjs';
+import { measuredAdmit, rulesKind, partMemory } from './run-cost.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const fileOf = (root, engine, k) => path.join(root, '.studio', 'engine', `${engine}-rules-ahead${k}.json`);
@@ -161,8 +161,9 @@ async function child(jobFile) {
   const notStarted = (why) => { tell(root, engine, me, 'not-started', why); return save({ state: 'not-started' }, `was not started: ${why}`); };
   while (!verdict() && !heavyHolders(root, { env }).some((h) => h.label === job.landLabel) && Date.now() - t0 < limitMs) await pause(poll);
   if (verdict() === 'dropped') return notStarted('the land run ended before it could start');
-  // 2.95: a rules run's own measured peak (rules.peak) is what one run takes, when it is known.
-  const plan = splitPlan(cfg.focus || {}, { root, engine, env, peakGb: rulesPeakGb(root, engine, cfg) });
+  // What one rules run takes: rules.focus.splitGb, else its own recent sampled peak, else 4 GB.
+  const planOf = (filter) => splitPlan(cfg.focus || {}, { env, memory: partMemory(root, engine, [filter]) });
+  const plan = planOf(null);
   const roomNow = () => { const free = readFreeGb(env); return free === null ? null : Math.round((free - plan.floorGb) * 10) / 10; };
   // 2.96 (a): measured admission (studio/game.json machine.admit) beside the land run's remaining growth; undecided: as before.
   const measured = (filter) => measuredAdmit({ root, engine, kind: rulesKind(filter), label: `the rules ${filter || 'run'} ahead`, handGb: Number(cfg.focus?.splitGb) > 0 ? Number(cfg.focus.splitGb) : null, holders: heavyHolders(root, { env }), env });
@@ -184,7 +185,7 @@ async function child(jobFile) {
     const waited = new Set();
     const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
     const admit = ({ filter }) => {
-      const need = rulesPeakGb(root, engine, cfg, filter) || plan.gb;
+      const need = planOf(filter).gb;
       let lack = '';
       for (;;) {
         if (verdict()) return `the land run answered${lack ? ` while ${filter} waited for memory (${lack})` : ''}`;
