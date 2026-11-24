@@ -7,7 +7,7 @@
  * builders under these names, up to the pool's size and the pace/RAM/rig caps. With plan headroom the pool is not used.
  * A name with no key mapping would bill the plan, so it is never started from the pool. The key's spend is limited as
  * for any session (STUDIO_SPEND_GUARD_AT, .studio/credit.json, the daily token cap). `npm run agent -- start --pool api
- * [--role R] [--task T-12]` starts one pool session by hand. Key values are never read or printed.
+ * [--role R] [--task T-12]` starts one pool session by hand (poolRole). Key values are never read or printed.
  */
 import { keymapFor } from './agent-env.mjs';
 
@@ -71,4 +71,15 @@ export function pickManual({ live = [], env = process.env, busy = () => '' } = {
   const name = p.free.find((n) => !busy(n));
   if (!name) return { name: null, why: `every API-pool name is busy (${p.all.map((n) => `${n}: ${p.free.includes(n) ? 'its lane copy is in use' : 'running'}`).join(', ')})` };
   return { name, why: '' };
+}
+
+/**
+ * 2.98: the role `start --pool api` takes. --role wins; else an engine task (its board role is an engine role, or it
+ * has an engine track) starts an engine porter; else a builder. { role, why, engine }.
+ */
+export function poolRole({ role = null, task = null, boardRole = null, engine = null, engineRole = () => false } = {}) {
+  if (role) return { role, why: '--role given', engine: false };
+  if (task && boardRole && engineRole(boardRole)) return { role: boardRole, why: `${task} is an ${boardRole} task on the board`, engine: true };
+  if (task && engine) return { role: 'engine-porter', why: `${task} is on engine:${engine}`, engine: true };
+  return { role: 'builder', why: task ? `${task} is not an engine task` : 'no --task', engine: false };
 }

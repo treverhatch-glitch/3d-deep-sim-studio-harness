@@ -133,9 +133,14 @@ npm run agent -- allow agy --by <your name> --prune         # also take out harn
 - **An engine pass on agy** (2.93): agy has no `--add-dir`, and a porter was auto-denied its engine worktree. The launcher writes the
   session its own `.studio/agy-settings/<agent>.json`: the studio's file (else only the permissions of the user file, never written)
   plus `read_file(<folder>)` and `read_file(<folder>/**)` for each folder a Claude session gets with `--add-dir` (the main checkout's
-  `studio/` and `.studio/`, the engine worktree) and `git -C <worktree> status|diff|log|add|commit`. Nothing wider. A session with
-  no engine worktree launches as before. Untested on real agy: the rule format. `STUDIO_AGY_REACH_RULES` sets the templates as a JSON
-  list (`{dir}` each folder; `{engine}`, `{engineRe}`, `{verb}` the worktree's git rules; `{rest}` the argument regex), or `off`.
+  `studio/` and `.studio/`, the engine worktree) and `git -C <worktree> status|diff|log|add|commit`. 2.98: `write_file(<folder>)` and
+  `write_file(<folder>/**)` for its lane copy and engine worktree only (never `studio/` or `.studio/`), and the read-only verbs
+  `git -C <worktree> show|rev-parse|merge-base|ls-files|grep` as regex rules only, with plain words for arguments (no quote,
+  glob, comma, redirect or chain; no `-O`, `--o…` or `--no-i…`, so no pager command, `--output` file or `--no-index` read).
+  Still no push, reset, checkout, switch, clean or rebase. Nothing wider. A session with no engine worktree launches as before.
+  Untested on real agy: the rule format. `STUDIO_AGY_REACH_RULES` sets the templates as a JSON list (`{dir}` each folder read;
+  `{own}` the folders written; `{engine}`, `{engineRe}`, `{verb}`, `{readVerb}` the worktree's git rules; `{rest}`, `{readArgs}`
+  the argument regexes), or `off`. A template that names a path of its own, or writes to any folder but `{own}`, is dropped.
 - **Auto-denied** (2.93): a session agy ended with "required the … permissions that headless mode cannot prompt for" ends with
   "agy could not use its tools: … (this session's folders: …)" in its record, session end, job record and hand-back.
 - It never turns on a skip-all mode (`always-proceed`, `--dangerously-skip-permissions`); that stays for a frozen test clone
@@ -204,9 +209,10 @@ it is ignored). When the plan's budget is high (every tool with a known weekly b
 wind-down is on, `STUDIO_USAGE_WINDDOWN_PCT`, which also counts a tool out of quota) the supervisor starts builders under these names,
 up to the pool's size and the pace, RAM and Line Producer caps; with headroom the pool stays idle. During a wind-down only the pool
 starts builders. The spend guard and the daily token cap apply. `npm run agent -- start --pool api [--role R] [--task T-12]` starts one by
-hand (2.93): any role a plain start takes (builder by default), recorded as that role, with the lanes that role gets (an engine pass
-gets its engine worktree), under the first pool name with no live session; all names busy is refused in one line. A
-tool out of quota through a provider limit (a 429 mark) still holds every session on that tool.
+hand (2.93): any role a plain start takes, recorded as that role, with the lanes that role gets (an engine pass gets its engine
+worktree). With no `--role` (2.98) the role is the task's: an engine task (an `engine-porter` task on the board, or one with an
+engine track) starts an engine porter, else a builder; the start line says which and why. `--role` always wins. It starts under the first pool name with no live session; all
+names busy is refused in one line. A tool out of quota through a provider limit (a 429 mark) still holds every session on that tool.
 
 `npm run agent -- smoke [--role R] [--pool api] [--tool T] [--engine x] [--minutes 10] [--dry-run]` (2.96) proves one start path for real, and
 SPENDS REAL TOKENS (it says so in its first line). It adds a throwaway task (one line in `docs/smoke/<agent>.md`, committed in the session's own
@@ -214,7 +220,8 @@ lane), starts the session through the normal start, waits up to `--minutes`, and
 on the lane's branch), how the session ended (with its refusal or reason when it died). Then the task is dropped (never queued for a train, never
 landed) and the lane removed. Exit 0 only when the commit exists. With no `--pool` or `--tool` it runs one smoke per path the role has, in the
 owner's order (`STUDIO_BUILDER_ORDER`, else the API pool then the role's tool, then the tools in `npm run budget -- order`), one line each: run it
-after an upgrade. `--dry-run` starts nothing.
+after an upgrade. `--dry-run` starts nothing. An engine-porter smoke from the pool starts with no `--role` (2.98), so it proves the
+pool takes the role from the engine task.
 
 `STUDIO_BUILDER_ORDER` (2.80; unset: the choice above) is the owner's order for filling a builder slot, e.g. `api,vertex,plan`: `api` (a
 free pool name), `vertex` (its budget cut, prompt and failure rules and `STUDIO_VERTEX_SHARE=0` still apply; its share cap only when it

@@ -38,11 +38,11 @@ import { AGY_STREAM_FLAGS, agyStreamOn, agyStreamWanted, userLine, driveAgyStrea
 import { savePatch } from './wip.mjs';
 import { laneList, laneEntries, readHolds, laneOf } from './task-hold.mjs';
 import { regionOnlyFiles } from './lane-regions.mjs';
-import { engineLaunch, syncEngineTarget, engineWork, targetMergeCommand } from './engine-tracks.mjs';
+import { engineLaunch, syncEngineTarget, engineWork, targetMergeCommand, engineTask, isEngineRole } from './engine-tracks.mjs';
 import { mainRoot, laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport, isLaneWorktree, LANES_DIR, laneLive } from './worktree.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { ownerOnlyStep } from './owner-only.mjs';
-import { markExhausted, quotaKeyFor, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
+import { markExhausted, markText, reachedModel, quotaKeyFor, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
 import { sessionLimits, sessionProgress, heartbeatCheck, newRedCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
 import { agentEnv, nimKeyMissing, nimModel, NIM_DEFAULT_MODEL, agentLikeName } from './agent-env.mjs';
@@ -753,8 +753,10 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
     const ck = tool === 'custom' ? customKey(cmd ?? (process.env[`STUDIO_${roleKey(role)}_CMD`] || process.env.STUDIO_AGENT_CMD || '')) || 'custom' : null;
     const who = other || ck || (order.includes(`${tool}:${model}`) ? `${tool}:${model}` : quotaKeyFor(tool, model));
     const line = log.split('\n').slice(-30).reverse().find((l) => /reset|try again/i.test(l) && QUOTA_ERROR.test(l) && (toolNamed(l) || who) === who) || quota.line;
-    limitMark = { on: who, ...markExhausted(who, line) };
-    if (limit && other && ck) markExhausted(ck, line);
+    // 2.98: a session whose usage was all zero never reached the model: its line is only suspected (budget.mjs markExhausted).
+    const reached = reachedModel(usageLog ?? log);
+    limitMark = { on: who, ...markExhausted(who, line, Date.now(), { reached }) };
+    if (limit && other && ck) markExhausted(ck, line, Date.now(), { reached });
   }
   const mine = listLocks().filter((l) => l.owner === agent);
   const tasks = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
@@ -799,7 +801,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
       : capped
       ? `${agent} (${tool}, ${model}) refreshed: ${refresh?.endedBy || `it reached the ${sessionLimits().ceilingTurns}-turn ceiling`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} A fresh session continues from this hand-back${s0.now ? `; it last said: "${s0.now}"` : ''}.`
       : limit
-      ? `${agent} (${tool}, ${model}) stopped at its usage limit: the provider said "${String(limit.line || limit.text).replace(/^"|"$/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)}".${limitMark ? ` ${limitMark.on} is out until ${limitMark.until}${limitMark.resetKnown ? '' : ' (no reset time given: 1 h assumed)'}.` : ''} Not a failure: the task goes back to the queue for the next tool in the order, or for after the reset.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
+      ? `${agent} (${tool}, ${model}) stopped at its usage limit: the provider said "${String(limit.line || limit.text).replace(/^"|"$/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)}".${limitMark ? ` ${markText(limitMark.on, limitMark)}.` : ''} Not a failure: the task goes back to the queue for the next tool in the order, or for after the reset.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : bad
       ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : agyDenied ? agyDenied : reasoningOnly ? 'it replied with reasoning only (no answer, no work): a failed hand-off; the Director routes this task to another model family' : agyCut ? (agyCut === 'denied' ? 'agy ended the session mid-task: one shell command was refused in headless mode (one plain command per call; see GEMINI.md)' : 'agy ended the session mid-task: its agent went idle while a background command (a test run) was still running (run commands in the foreground)') : launchFail ? `it never got going (launch failure: ${launchFail}; exit code ${code})` : `exit code ${code}`}.${agySaid}${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${agySaid}${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work ${copyDir ? 'was in its copy and is' : 'is in the tree and'} saved to ${patch}.` : ' No uncommitted work.'}${onBranch} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
@@ -881,8 +883,8 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   const prefixHash = (readJson(sessionFile(agent)) || {}).prefixHash || null;
   const cause = exitCause({ code, exit, stop });
   const firstEnd = claimSessionEnd(agent, s0.startedAt, 'launcher');
-  const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : agyDenied ? `exit ${code}, ${agyDenied}` : cause.kind === 'prompt-cap' ? `exit ${code}, ended by the launcher (prompt-cap: ${cause.why})` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget', 'prompt-cap'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
-  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${aider?.line && !outcome?.why ? `; aider: ${aider.line}` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(aider ? { aider } : {}), ...(followUps ? { followUps, ...(nudges ? { nudges } : {}) } : {}), ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(Array.isArray(s0.keys) && s0.keys.length ? { keys: s0.keys } : {}), ...(vertexUse?.requests ? { usageFrom: 'vertex-proxy', requests: vertexUse.requests } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, ...(capped ? { refreshNoWork: refreshDidNoWork({ outcome, handed, flag: refresh }) } : {}), ...(agyDenied ? { toolDenied: agyDenied } : {}), ...(launchFail ? { launchFailure: { why: launchFail, ...(launchFolder ? { folder: launchFolder } : {}) } } : {}), usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
+  const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${markText(limitMark.on, limitMark)}` : ''}` : trouble ? `provider: ${trouble}` : agyDenied ? `exit ${code}, ${agyDenied}` : cause.kind === 'prompt-cap' ? `exit ${code}, ended by the launcher (prompt-cap: ${cause.why})` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget', 'prompt-cap'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
+  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${aider?.line && !outcome?.why ? `; aider: ${aider.line}` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(aider ? { aider } : {}), ...(followUps ? { followUps, ...(nudges ? { nudges } : {}) } : {}), ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(Array.isArray(s0.keys) && s0.keys.length ? { keys: s0.keys } : {}), ...(vertexUse?.requests ? { usageFrom: 'vertex-proxy', requests: vertexUse.requests } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, ...(capped ? { refreshNoWork: refreshDidNoWork({ outcome, handed, flag: refresh }) } : {}), ...(agyDenied ? { toolDenied: agyDenied } : {}), ...(launchFail ? { launchFailure: { why: launchFail, ...(launchFolder ? { folder: launchFolder } : {}) } } : {}), usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null, ...(limitMark?.suspected ? { suspected: true } : {}) } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
   if ((outcome?.counts || outcome?.foreignRefusal) && (outcome.noWork || outcome.stuck)) {
     // 2.85: the same task done refusal as the session before it, no new commit: held for the overseer and the Producer.
     // 2.86: a refusal for commits not the task's own too (a harness hold), so it is never relaunched in a loop.
@@ -1346,11 +1348,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   if (agyOneTurn && tool === 'agy') launchNotes.push('agy one-turn launch: the stream session before this one failed on its input format (see the line above); this session runs as one turn');
   const addDirs = laneAddDirs({ copy, engineDir: engineLane?.dir || null });
-  // 2.93: agy has no --add-dir. An engine pass on agy gets the same folders as allow-rules in its own settings file
-  // (agy-allow.mjs agyReachRules, STUDIO_AGY_REACH_RULES); a session with no engine worktree launches as before.
+  // 2.93: agy has no --add-dir. An engine pass on agy gets the same folders as read rules in its own settings file
+  // (agy-allow.mjs agyReachRules, STUDIO_AGY_REACH_RULES); 2.98: write rules for its lane copy and engine worktree only.
   let agySettings = null;
   if (!custom && tool === 'agy' && engineLane?.dir) {
-    const reach = agyReachRules({ dirs: addDirs, engineDir: engineLane.dir });
+    const reach = agyReachRules({ dirs: addDirs, engineDir: engineLane.dir, laneDir: copy?.dir || null });
     agySettings = writeAgySessionSettings({ agent, rules: reach.rules });
     if (reach.bad) launchNotes.push(reach.bad);
     launchNotes.push(agySettings ? `agy reach: ${reach.rules.length} allow-rule(s) for ${addDirs.length} folder(s) in ${path.relative(REPO_ROOT, agySettings).split(path.sep).join('/')} (${reach.from}; STUDIO_AGY_REACH_RULES changes them)` : `agy reach: no allow-rules written (${reach.from === 'off' ? 'STUDIO_AGY_REACH_RULES=off' : 'nothing to add or the file could not be written'}); agy may be denied its engine worktree`);
@@ -2608,17 +2610,28 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       if (d && !d.active) setDivision(division, true, flag('by') || 'producer');
     }
     // `--pool api` starts one session under a free STUDIO_API_POOL name (billed to its mapped API key) by hand
-    // (harness/api-pool.mjs): any role (builder by default), recorded as that role, through the normal start below.
+    // (harness/api-pool.mjs), recorded as its role, through the normal start below. 2.98: with no --role the role is
+    // the task's (api-pool.mjs poolRole): an engine task starts an engine porter, with its engine worktree.
     let poolAgent = null;
+    let poolRoleOf = null;
     if (flag('pool')) {
       if (String(flag('pool')).toLowerCase() !== 'api') { console.error('--pool takes "api" (the builders named in STUDIO_API_POOL)'); process.exit(1); }
-      const pm = (await import('./api-pool.mjs')).pickManual({ live: sessions(), busy: laneNameClash });
+      const ap = await import('./api-pool.mjs');
+      const pm = ap.pickManual({ live: sessions(), busy: laneNameClash });
       if (!pm.name) { console.error(`No API-pool builder to start: ${pm.why}`); process.exit(1); }
       poolAgent = pm.name;
+      const id = flag('task');
+      let boardRole = null;
+      try { const b = parseNextQueue(); boardRole = [...b.inProgress, ...b.backlog].find((x) => x.id === id)?.role || null; } catch { /* not on the board */ }
+      let engine = null;
+      try { engine = id ? engineTask(id)?.engine || null : null; } catch { /* no engine record */ }
+      const pr = ap.poolRole({ role: flag('role'), task: id, boardRole, engine, engineRole: (r) => isEngineRole(r) });
+      poolRoleOf = pr.role;
+      console.log(`API pool: ${poolAgent} starts as ${pr.role}${id ? ` on ${id}` : ''} (${pr.why})${pr.engine ? ': it works in its engine worktree' : ''}.`);
     }
     // 2.93: the detached launcher (--from-detach) has no terminal: a start it refuses, or a crash, goes in the job record.
     if (argv.includes('--from-detach')) launcherCrashRecord(flag('agent'), { role: flag('role'), task: flag('task') });
-    const base = { autoName: argv.includes('--auto-name'), role: flag('role') || (poolAgent ? 'builder' : null), agent: poolAgent || flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), next: argv.includes('--next'), lane: flag('lane'), oneTask: argv.includes('--one-task') || Boolean(flag('loop')), extra: Number(flag('extra')) || 0, division, note: flag('note') || '', by: flag('by') || (cmd === 'hire' ? process.env.STUDIO_LOCK_OWNER || null : null), loop: flag('loop'), approved: argv.includes('--approved'), forceModel: argv.includes('--force-model') };
+    const base = { autoName: argv.includes('--auto-name'), role: poolRoleOf || flag('role'), agent: poolAgent || flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), next: argv.includes('--next'), lane: flag('lane'), oneTask: argv.includes('--one-task') || Boolean(flag('loop')), extra: Number(flag('extra')) || 0, division, note: flag('note') || '', by: flag('by') || (cmd === 'hire' ? process.env.STUDIO_LOCK_OWNER || null : null), loop: flag('loop'), approved: argv.includes('--approved'), forceModel: argv.includes('--force-model') };
     // A hire and a `start` run in the background unless --foreground (or --attach, for a script or test that wants the session
     // in this process): tied to the starter's shell, a session died with it and its record stayed "running" with its claims held.
     const attach = argv.includes('--attach') || argv.includes('--foreground');

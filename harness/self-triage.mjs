@@ -145,12 +145,8 @@ export async function triageHalt(halted, { root = REPO_ROOT, now = Date.now(), e
     return { fixed: false, ...c, why };
   }
   const hours = Math.max(1, cfg.onceHours);
-  b.markExhausted(tool, `self-triage: ${tool} was not found on PATH (exit ${halted.code}); switched to the next tool in the budget order`, now);
-  // Hold the mark for the window, not markExhausted's default hour, so the missing tool isn't tried again at once.
-  try {
-    const q = readJson(b.QUOTA_FILE) || {};
-    if (q[tool]) { q[tool].until = new Date(now + hours * 3600000).toISOString(); q[tool].selfTriage = true; fs.writeFileSync(b.QUOTA_FILE, `${JSON.stringify(q, null, 2)}\n`); }
-  } catch {}
+  // Held for the window, so the missing tool isn't tried again at once.
+  b.markExhausted(tool, `self-triage: ${tool} was not found on PATH (exit ${halted.code}); switched to the next tool in the budget order`, now, { hours, flag: 'selfTriage' });
   const why = `${tool} not on PATH (two sessions ended with exit ${halted.code}): ${tool} marked out for ${hours} h, ${next} takes over`;
   fs.mkdirSync(path.dirname(resumeFile), { recursive: true });
   fs.writeFileSync(resumeFile, `${JSON.stringify({ by: SELF, why: `self-triage: ${why}`.slice(0, 300), via: SELF, at: new Date(now).toISOString() })}\n`);

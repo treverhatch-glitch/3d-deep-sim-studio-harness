@@ -248,6 +248,12 @@ npm run budget -- order claude,codex,agy
   weekly limit reached ∙ resets Nov 3, 9am", "usage limit reached|<unix time>"), read in the zone the message names or else this
   machine's. Such a stop hands the task back as "stopped at its usage limit": waiting for the reset, not a failure (no
   breaker, park or halt).
+- A mark needs evidence (2.98). A limit line from a session whose usage was all zero (no tokens, `duration_api_ms` 0: it
+  never reached the model) is only "suspected": shown, not obeyed. A second such stop on the same tool within 15 minutes
+  marks it; a session that reached the model, or reported no usage at all (plain stderr, agy), marks it at once. The mark
+  holds until the line's own reset time; with none, 5 hours, or a week when the line says "weekly" or names a date.
+  `npm run budget` and the brief status line (`npm run status`) name what is out, until when, from which line, and what is
+  only suspected. `npm run budget -- clear <tool>` drops either.
 - A role run by its own `STUDIO_<ROLE>_CMD` (or `STUDIO_AGENT_CMD`) is marked per program, `custom:<program>` (the command's
   program, or the script an interpreter runs: `python -m hermes …` is `custom:hermes`); every start of it waits the same way
   ("Not started: budget stop (custom:hermes is marked out until …)"); another command isn't held (2.58.0).
