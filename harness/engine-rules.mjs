@@ -5,7 +5,7 @@
  * Default for unity when "rules" is absent: `dotnet test tools/SimTests` when the target branch has that folder. "rules": false
  * or STUDIO_ENGINE_RULES=off: no check. Other keys: "inputs" (git-ignored files the tests read), "timeoutMin" (30), "env", "lfs",
  * "paths", "ignore", "focus" (changed systems only, a full run every fullEveryHours; "focus.auto", "focus.shared"), "share", "maxLanes",
- * "play.focus", "landGate", "ahead", "shards", "peak", "byName", "ratchets" (docs/NATIVE-ENGINE.md). The batch runs first; a red batch asks the
+ * "play.focus", "landGate", "ahead", "shards", "peak", "byName", "ratchets", "build", "infra" (docs/NATIVE-ENGINE.md). The batch runs first; a red batch asks the
  * target, a red target judges no lane, and a red is narrowed by its failing tests by name. Results are kept per tree, command and inputs.
  *   node harness/engine-rules.mjs [--engine unity] [--ref <branch|commit>] [--full] [--fresh] [--json] | show [--engine unity]
  *   node harness/engine-rules.mjs plan --branch <b> [--branch <c>] [--json]   (what a batch's check would run; runs nothing)
@@ -19,10 +19,11 @@ import { runLimitedSync } from './run-limited.mjs';
 import { emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
 import { engineTarget, ENGINE_NAME_RE } from './engine-tracks.mjs';
-import { failingTests } from './unity-gate.mjs';
+import { failingTests, compileErrorFiles } from './unity-gate.mjs';
+import { compilerLines, compileSearch } from './engine-compile.mjs';
 import { readJson, writeAtomic } from './fsafe.mjs';
 import { targetRedTask, targetRedClear } from './engine-target-red.mjs';
-import { splitPlan } from './rules-parts.mjs';
+import { splitPlan, judged, INFRA_DOTNET } from './rules-parts.mjs';
 import { flagOf, isOff as off, numFiniteFirst as num, pushToOf, stdoutOf as out } from './helpers.mjs';
 import { matchAny } from './merge-lane.mjs';
 import { acquireHeavy, quietHolding } from './heavy.mjs';
@@ -334,13 +335,65 @@ export function rulesConfig(engine, { root = mainRoot(), env = process.env, repo
   for (const x of ig0) if (x && !ignore.includes(x.replace(/\\/g, '/').replace(/\/+$/, ''))) focusBad.push(`rules.ignore ${JSON.stringify(x).slice(0, 80)} is not a plain repo path (no glob, no .., not absolute); it is left out`);
   // 2.93: rules.landGate, the land run's gate that runs these tests, spelled as harness/unity-gate.mjs landStages reads names.
   const landGate = typeof o.landGate === 'string' ? o.landGate.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, 24) : '';
-  const extra = { landGate, env: vars, lfs: o.lfs === true, paths: relList(o.paths), ignore, focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, first, blame: bl.blame, timeoutSet, timeoutFrom, ahead: o.ahead === true, ...(o.peak !== undefined ? { peakIgnored: true } : {}), ...(sd.shards ? { shards: sd.shards } : {}), ...(pn.pins ? { pins: pn.pins } : {}), ...(bn.byName ? { byName: bn.byName } : {}), ...(rt.ratchets.length ? { ratchets: rt.ratchets } : {}) };
+  // 2.98: rules.build (one build per checkout, then tests that do not build) and rules.infra (build faults: not a test result).
+  const raw = typeof r === 'string' ? r.trim() : typeof o.test === 'string' && o.test.trim() ? o.test.trim() : DEFAULTS[engine]?.test || '';
+  const bu = buildConfig(o, raw, withSdk);
+  const inf = infraConfig(o.infra, [raw, f?.test]);
+  focusBad.push(...bu.errors, ...inf.errors);
+  const extra = { landGate, env: vars, build: bu.build, infra: inf.infra, lfs: o.lfs === true, paths: relList(o.paths), ignore, focus: focus?.map.length || focus?.auto ? focus : null, ...(focusBad.length ? { focusBad } : {}), share: (Array.isArray(o.share) ? o.share : []).map((x) => String(x ?? '').trim()).filter(Boolean), maxLanes, first, blame: bl.blame, timeoutSet, timeoutFrom, ahead: o.ahead === true, ...(o.peak !== undefined ? { peakIgnored: true } : {}), ...(sd.shards ? { shards: sd.shards } : {}), ...(pn.pins ? { pins: pn.pins } : {}), ...(bn.byName ? { byName: bn.byName } : {}), ...(rt.ratchets.length ? { ratchets: rt.ratchets } : {}) };
   const test = typeof r === 'string' ? r.trim() : typeof o.test === 'string' ? o.test.trim() : '';
   if (test) return { command: withSdk(test), inputs, timeoutMin, source: `studio/game.json engines.${engine}.rules`, ...extra };
   const d = DEFAULTS[engine];
   if (!d || !repo || !ref) return null;
   if (git(repo, 'cat-file', '-e', `${ref}:${d.has}`).status !== 0) return null;
   return { command: withSdk(d.test), inputs, timeoutMin, source: `the ${engine} default (${ref} has ${d.has})`, ...extra };
+}
+
+const DOTNET_TEST = /^(?:"[^"]*?dotnet(?:\.exe|\.cmd)?"|\S*?dotnet(?:\.exe|\.cmd)?)\s+test\b/i;
+/** 2.98: `dotnet test` options a build does not take (with their value), dropped from the default rules.build. */
+const TEST_ONLY = /^--?(filter|logger|l|settings|s|collect|diag|d|test-adapter-path|a|results-directory|environment|e|blame-hang-timeout|blame-crash-dump-type|blame-hang-dump-type)$/;
+const TEST_FLAG = /^--(no-build|list-tests|blame|blame-crash|blame-hang|blame-crash-collect-always)$|^-t$/;
+/** 2.98: the default rules.build of a `dotnet test` command: test as build, test-only options and `-- <settings>` dropped. */
+function dotnetBuildOf(cmd) {
+  const t = String(cmd).match(/"[^"]*"|\S+/g) || [];
+  const keep = [];
+  for (let i = 0; i < t.length; i += 1) {
+    if (t[i] === '--') break;
+    const name = t[i].split('=')[0];
+    if (i === 1 && t[i] === 'test') keep.push('build');
+    else if (TEST_FLAG.test(name) || (TEST_ONLY.test(name) && t[i].includes('='))) continue;
+    else if (TEST_ONLY.test(name)) i += 1;
+    else keep.push(t[i]);
+  }
+  return keep.join(' ');
+}
+/**
+ * 2.98: rules.build: a command, or false (off). Unset with a `dotnet test` rules.test: that command as a build. A build for
+ * another tool may set rules.testAfterBuild, "<words with {command}>" (the test command after the build). { build, errors }.
+ */
+function buildConfig(o, raw, withSdk) {
+  const bad = (why) => ({ build: null, errors: [`rules.build is not usable: ${why}; it is left out (each test command builds as before)`] });
+  if (o.build === false) return { build: null, errors: [] };
+  if (o.build !== undefined && (typeof o.build !== 'string' || !o.build.trim())) return bad('it must be a command, or false');
+  const after = o.testAfterBuild;
+  if (after !== undefined && (typeof after !== 'string' || !after.includes('{command}'))) return bad('rules.testAfterBuild must hold {command} (the test command it runs after the build)');
+  if (typeof o.build === 'string') return { build: { command: withSdk(o.build.trim()), after: after ? after.trim() : '' }, errors: [] };
+  return DOTNET_TEST.test(raw) ? { build: { command: withSdk(dotnetBuildOf(raw)), after: after ? after.trim() : '' }, errors: [] } : { build: null, errors: [] };
+}
+/** 2.98: a test command as it runs after rules.build: rules.testAfterBuild around it, else `dotnet test` with --no-build. */
+function afterBuild(build, cmd) {
+  if (!build) return cmd;
+  if (build.after) return build.after.split('{command}').join(cmd);
+  return DOTNET_TEST.test(cmd) && !/\s--no-build\b/.test(cmd) ? cmd.replace(DOTNET_TEST, (m) => `${m} --no-build`) : cmd;
+}
+/** 2.98: rules.infra: a list of regexes added to the dotnet defaults (when a test command is dotnet), or false. { infra, errors }. */
+function infraConfig(v, cmds) {
+  const dn = cmds.some((c) => DOTNET_TEST.test(String(c || '').trim()));
+  if (v === false) return { infra: [], errors: [] };
+  const list = v === undefined || v === null ? [] : Array.isArray(v) ? v : [v];
+  const infra = dn ? [...INFRA_DOTNET] : []; const errors = [];
+  for (const x of list) { try { if (typeof x !== 'string' || !x.trim()) throw new Error('empty'); new RegExp(x); infra.push(x.trim()); } catch { errors.push(`rules.infra ${JSON.stringify(x).slice(0, 80)} is not a valid regex; it is left out`); } }
+  return { infra, errors };
 }
 
 /**
@@ -1215,6 +1268,7 @@ export function fullRulesRun({ engine = 'unity', repo, tip, cfg, from = [], root
   const r = cfg.shards ? shardsRun({ engine, repo, sha: tip, cfg, from, root, id: `${id}-full`, env, log, run }) : run({ engine, repo, sha: tip, cfg, from, sel: { mode: 'full', filter: '', command: cfg.command }, root, id: `${id}-full`, env, log, useCache: true });
   if (r.status === 'pass' && r.mode === 'shards') return { ...r, notFull: true };
   if (r.status === 'pass') { writeCache(root, engine, (j) => { j.lastFullAt = new Date().toISOString(); delete j.fullRed; }); targetRedClear(root, engine, 'full-rules'); return r; }
+  if (r.notJudged) return r; // 2.98: a build fault twice: no answer, nothing kept; still owed.
   const tmo = Boolean(r.timedOut);
   if (tmo && !r.notRun && !r.timeoutSet) writeCache(root, engine, (j) => { j.raise = { ...(j.raise || {}), full: { min: Math.min(Math.max(cfg.timeoutMin, TIMEOUT_CAP), min2(r.timeoutMin * 2)), from: r.timeoutMin, at: new Date().toISOString() } }; });
   let key = null;
@@ -1257,6 +1311,35 @@ const saidOf = (cfg, text) => {
   return lines.length ? { said: lines.map((l) => l.slice(0, 300)) } : {};
 };
 
+/** 2.98: the file in a checkout's own git folder that says it is built: "<tree> <build command's hash>". */
+function builtMark(dir) {
+  const dot = path.join(dir, '.git');
+  try {
+    if (fs.statSync(dot).isDirectory()) return path.join(dot, 'studio-rules-built');
+    const m = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dot, 'utf8'));
+    return m ? path.join(path.resolve(dir, m[1].trim()), 'studio-rules-built') : null;
+  } catch { return null; }
+}
+/**
+ * 2.98: rules.build, once per checkout: { status: 'pass' } (also when the mark says this tree is built), { status: 'red',
+ * build: true, why, lines, files, tail } (a compile red: the compiler's lines, as the compile search reads them),
+ * { status: 'error', why } or { notJudged }. runJudged: runRulesAt's runner (a build fault runs once more).
+ */
+function buildOnce({ cfg, dir, sha, runJudged, log, engine, root }) {
+  const mark = builtMark(dir);
+  const tree = out(git(dir, 'rev-parse', 'HEAD^{tree}'));
+  const want = `${tree} ${sha1(cfg.build.command)}`;
+  let had = ''; try { had = mark ? fs.readFileSync(mark, 'utf8').trim() : ''; } catch { /* not built */ }
+  if (tree && had === want) { log(`[engine-rules] ${engine}: this checkout is built at ${short(tree)} (rules.build): not built again`); return { status: 'pass', why: 'built' }; }
+  log(`[engine-rules] ${engine}: ${cfg.build.command} on ${short(sha)}: the build, once for this checkout (rules.build); the tests after it do not build`);
+  const { r, text, notJudged } = runJudged(cfg.build.command, 'the build', () => runSample(root, engine, 'compile', { label: `${engine} rules build` }));
+  if (notJudged) return { notJudged };
+  if (r.error) return { status: 'error', why: r.error.code === 'ETIMEDOUT' ? `the build timed out after ${cfg.timeoutMin} min (rules.build)` : `the build could not run: ${r.error.code || r.error.message}` };
+  if (r.status === 0) { try { if (mark && tree) fs.writeFileSync(mark, `${want}\n`); } catch { /* built again next time */ } return { status: 'pass', why: 'built' }; }
+  const d = dir.split(path.sep).join('/');
+  return { status: 'red', build: true, why: `the build failed (exit ${r.status ?? r.signal ?? '?'}, rules.build: ${cfg.build.command})`, lines: compilerLines(text, dir), files: compileErrorFiles(text).map((f) => (f.startsWith(`${d}/`) ? f.slice(d.length + 1) : f)), tail: text.split('\n').slice(-8).join('\n') };
+}
+
 /**
  * Run the rules check on one commit in a throwaway checkout (never the land script's worktree or a lane).
  * { status: 'pass' | 'red' | 'error', why, ms, failures?, tail?, cached?, mode }; 'error' (could not run, or timed out)
@@ -1294,13 +1377,35 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
     if (missing.length) log(`[engine-rules] ${engine}: input(s) not found in the engine's folder: ${missing.join(', ')} (engines.${engine}.rules.inputs)`);
     const runEnv = { ...env, ...(cfg.env || {}), STUDIO_ENGINE: engine, STUDIO_RULES_COMMIT: sha, STUDIO_RULES_DIR: dir, STUDIO_ENGINE_REPO: repo, STUDIO_RULES_MODE: s.shards ? 'shard' : s.mode };
     const stopped = (why, extra = {}) => ({ status: 'error', stopped: true, why: `stopped before ${why}`, ms: Date.now() - t0, mode: s.mode, ...extra });
+    const deadline = t0 + cfg.timeoutMin * 60000;
+    // 2.98: a build fault (rules.infra) is not a test result: the command runs once more, alone; twice ends "not judged".
+    const runJudged = (command, label, smpOf = () => null) => {
+      for (let a = 0; ; a += 1) {
+        const smp = smpOf();
+        const r = runLimitedSync(command, { sample: smp, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: Math.max(1, deadline - Date.now()), env: runEnv });
+        const text = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd();
+        const j = r.error ? null : judged(r.status, text, cfg.infra);
+        if (j?.status !== 'infra') return { r, text, smp };
+        if (a) return { r, text, smp, notJudged: j.line };
+        log(`[engine-rules] ${engine}: ${label} met a build fault, not a test result (${j.line}): it runs once more, alone`);
+      }
+    };
+    const notJudged = (line, extra = {}) => ({ status: 'error', notJudged: line, why: `not judged: ${line}`, ms: Date.now() - t0, mode: s.mode, ...extra });
+    // 2.98: rules.build once for this checkout (a mark in its git folder says it is built at this tree); every test after it does not build.
+    let tc = (c) => c;
+    if (cfg.build) {
+      const b = buildOnce({ cfg, dir, sha, runJudged, log, engine, root });
+      if (b.notJudged) return notJudged(b.notJudged);
+      if (b.status !== 'pass' || s.mode === 'build') return { ...b, ms: Date.now() - t0, mode: s.mode };
+      tc = (c) => afterBuild(cfg.build, c);
+    }
     // rules.focus.split: one command per group. 2.85: how many run at once is decided by free RAM (harness/rules-parts.mjs): at least
     // one, more only while free RAM - the floor holds another splitGb, never over rules.focus.splitMax (unset: 1, in sequence).
     // Red on the first red (its output kept). The time limit covers the whole.
     // 2.95: rules.shards runs here too, one shard or more (s.shards); each part needs its own recent sampled peak.
     if (Array.isArray(s.parts) && (s.parts.length > 1 || (s.shards && s.parts.length))) {
       const plan = splitPlan(cfg.focus || {}, { env, memory: partMemory(root, engine, s.parts.map((p) => p.filter)) });
-      const parts = plan.parts ? s.parts.map((p, i) => ({ ...p, gb: plan.parts[i].gb })) : s.parts;
+      const parts = s.parts.map((p, k) => ({ ...p, command: tc(p.command), ...(plan.parts ? { gb: plan.parts[k].gb } : {}) }));
       const what = s.shards ? 'shard' : 'focus, group';
       const timedOut = (n, filter) => `the rules check timed out after ${cfg.timeoutMin} min (${tmo.why}), ${filter ? `in group ${filter}` : `split: ${n} of ${s.parts.length} group(s) done`}`;
       // 2.86: each green part is kept under its own key (s.partKeys), also when a later part is red; 2.95: with the tree it ran on.
@@ -1326,7 +1431,7 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
       let ran = null;
       // admit decides before every start, so its runs go one at a time.
       if (plan.max > 1 && !admit) {
-        const job = { parts, root, engine, ...(Number(cfg.focus?.splitGb) > 0 ? { handGb: Number(cfg.focus.splitGb) } : {}), cwd: dir, env: runEnv, timeoutMs: cfg.timeoutMin * 60000, max: plan.max, gb: plan.gb, floorGb: plan.floorGb, ...(typeof freeGb === 'function' && Number.isFinite(Number(freeGb())) ? { freeGb: Number(freeGb()) } : {}) };
+        const job = { parts, root, engine, ...(Number(cfg.focus?.splitGb) > 0 ? { handGb: Number(cfg.focus.splitGb) } : {}), cwd: dir, env: runEnv, timeoutMs: Math.max(1, deadline - Date.now()), infra: cfg.infra || [], max: plan.max, gb: plan.gb, floorGb: plan.floorGb, ...(typeof freeGb === 'function' && Number.isFinite(Number(freeGb())) ? { freeGb: Number(freeGb()) } : {}) };
         log(`[engine-rules] ${engine}: split of ${s.parts.length} part(s) on ${short(sha)}: ${plan.why}`);
         const w = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'rules-parts.mjs')], { input: JSON.stringify(job), encoding: 'utf8', windowsHide: true, maxBuffer: 256 * 1024 * 1024, timeout: cfg.timeoutMin * 60000 + 30000 });
         try { ran = JSON.parse(String(w.stdout || '').trim().split('\n').pop()); } catch { ran = null; }
@@ -1338,6 +1443,7 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
           const groups = rs.map((r) => ({ filter: r.filter, seconds: r.seconds, status: r.status === 'error' ? 'error' : r.status, code: r.code, ...(r.measured ? { measured: r.measured } : {}) }));
           const bad = rs.find((r) => r.status === 'error');
           if (bad && s.shards) keepGreens(groups);
+          if (bad?.notJudged) return notJudged(bad.notJudged, { groups: groups.map(({ code, ...gr }) => gr), splitAtOnce: ran.atOnce });
           if (bad) return { status: 'error', why: bad.timedOut ? timedOut(rs.filter((r) => r.status === 'pass').length, bad.filter) : `the rules check could not run: ${bad.errorCode || bad.why || '?'}`, ms: Date.now() - t0, mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce: ran.atOnce };
           return finish(groups, ran.results.map((r) => String(r?.text || '').replace(/\r\n?/g, '\n').trimEnd()), ran.atOnce);
         }
@@ -1353,12 +1459,12 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
         if (ok !== true) { keepGreens(groups); return stopped(`${what} ${part.filter}: ${ok}`, { groups: groups.map(({ code, ...gr }) => gr), splitAtOnce: 1 }); }
         log(`[engine-rules] ${engine}: ${part.command} on ${short(sha)} (${what} ${groups.length + 1} of ${s.parts.length})${co.sparse ? ' (sparse checkout)' : ''}`);
         const g0 = Date.now();
-        const smp = runSample(root, engine, rulesKind(part.filter), { label: `${engine} rules ${part.filter}` });
-        const rp = runLimitedSync(part.command, { sample: smp, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: left, env: runEnv });
+        const { r: rp, text, smp, notJudged: nj } = runJudged(part.command, `${what} ${part.filter}`, () => runSample(root, engine, rulesKind(part.filter), { label: `${engine} rules ${part.filter}` }));
+        if (nj) { keepGreens(groups); return notJudged(nj, { groups: groups.map(({ code, ...gr }) => gr), splitAtOnce: 1 }); }
         const gs = { filter: part.filter, seconds: Math.round((Date.now() - g0) / 1000), status: rp.error ? 'error' : rp.status === 0 ? 'pass' : 'red', code: rp.status ?? rp.signal, ...(runNumbers(smp) ? { measured: runNumbers(smp) } : {}) };
         recordTimes(root, engine, { dir, train: id, command: part.filter, since: g0 });
         groups.push(gs);
-        texts.push(`${rp.stdout || ''}${rp.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd());
+        texts.push(text);
         if (rp.error) { if (s.shards) keepGreens(groups); return { status: 'error', why: rp.error.code === 'ETIMEDOUT' ? timedOut(0, part.filter) : `the rules check could not run: ${rp.error.code || rp.error.message}`, ms: Date.now() - t0, mode: s.mode, groups: groups.map(({ code, ...gr }) => gr), splitAtOnce: 1 }; }
         if (rp.status !== 0) return finish(groups, texts, 1);
       }
@@ -1367,13 +1473,12 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
     const statOf = s.mode === 'full' ? FULL_STAT : s.filter;
     const ok = admit ? admit({ filter: statOf }) : true;
     if (ok !== true) return stopped(`${s.mode === 'full' ? 'the full run' : statOf}: ${ok}`);
-    log(`[engine-rules] ${engine}: ${s.command} on ${short(sha)}${s.mode === 'focus' ? ' (focus)' : ''}${co.sparse ? ' (sparse checkout)' : ''}; up to ${tmo.min} min (${tmo.why})`);
-    const smp = runSample(root, engine, rulesKind(statOf), { label: `${engine} rules ${statOf}` });
-    const r = runLimitedSync(s.command, { sample: smp, cwd: dir, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeoutMs: cfg.timeoutMin * 60000, env: runEnv });
+    log(`[engine-rules] ${engine}: ${tc(s.command)} on ${short(sha)}${s.mode === 'focus' ? ' (focus)' : ''}${co.sparse ? ' (sparse checkout)' : ''}; up to ${tmo.min} min (${tmo.why})`);
+    const { r, text, smp, notJudged: nj } = runJudged(tc(s.command), s.mode === 'full' ? 'the full run' : statOf, () => runSample(root, engine, rulesKind(statOf), { label: `${engine} rules ${statOf}` }));
+    if (nj) return notJudged(nj);
     const ms = Date.now() - t0;
     const measured = runNumbers(smp);
     recordTimes(root, engine, { dir, train: id, command: statOf, since: t0 });
-    const text = `${r.stdout || ''}${r.stderr || ''}`.replace(/\r\n?/g, '\n').trimEnd();
     if (r.error) return { status: 'error', why: r.error.code === 'ETIMEDOUT' ? `the rules check timed out after ${cfg.timeoutMin} min (${tmo.why})` : `the rules check could not run: ${r.error.code || r.error.message}`, ms, mode: s.mode };
     // 2.96: a run of the failing tests by name that ran no test proves nothing: an error, never a green.
     if (s.mode === 'names' && r.status === 0 && NO_TESTS.test(text)) return { status: 'error', noTests: true, why: 'the filter of the failing tests ran no test (rules.byName does not fit how the test runner names them)', ms, mode: s.mode };
@@ -1400,7 +1505,19 @@ export function runRulesAt({ engine = 'unity', repo, sha, cfg, from = [], extraF
  * why, kept, dropped, runs, ms, green?, inputs, mode, filter }. The batch runs first; a red asks the target, then is bisected
  * (STUDIO_ENGINE_RULES_MAX_RUNS, 12). 2.95: a full selection runs as rules.shards; admit goes to every run (the check ahead).
  */
-export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], extraFrom = [], full = false, owe = false, useCache = true, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt, slice = null, batchOnly = false, admit = null, noSlice = false } = {}) {
+export function rulesGate(o = {}) {
+  const run0 = o.run || runRulesAt;
+  const run = (a) => { const r = run0(a); if (r?.notJudged) throw Object.assign(new Error(r.why), { notJudged: r.notJudged }); return r; };
+  try { return gateRun({ ...o, run }); } catch (e) {
+    if (!e?.notJudged) throw e;
+    const why = `not judged: ${e.notJudged} (a build fault twice, not a test result): no lane is narrowed or handed back, the batch stays queued`;
+    o.log?.(`[engine-rules] ${o.engine || 'unity'}: ${why}`);
+    return { ran: false, skipped: true, notJudged: e.notJudged, kept: (o.lanes || []).slice(), dropped: [], runs: 0, ms: 0, why, mode: 'full', filter: '', ...(o.batchOnly ? { ahead: 'not-judged' } : {}) };
+  }
+}
+
+/** rulesGate's body; its run throws on a "not judged" result (2.98). */
+function gateRun({ engine = 'unity', repo, tip, lanes, chain, cfg, from = [], extraFrom = [], full = false, owe = false, useCache = true, root = mainRoot(), id = 'rules', env = process.env, log = () => {}, run = runRulesAt, slice = null, batchOnly = false, admit = null, noSlice = false } = {}) {
   const src = [...from, ...extraFrom];
   const res = { ran: false, kept: lanes.slice(), dropped: [], runs: 0, ms: 0, why: '', inputs: inputsPrint(cfg, src), mode: 'full', filter: '' };
   if (!cfg) return { ...res, skipped: true, why: 'no rules check is configured' };
@@ -1414,6 +1531,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
       const part = lanes.slice(i * cfg.maxLanes, (i + 1) * cfg.maxLanes);
       log(`[engine-rules] ${engine}: slice ${i + 1} of ${n} (rules.maxLanes ${cfg.maxLanes}): ${part.map((l) => l.task).join(', ')}`);
       const r = rulesGate({ engine, repo, tip, lanes: part, chain, cfg, from, extraFrom, full, owe, useCache, root, id: `${id}-s${i + 1}`, env, log, run, slice: { i: i + 1, n }, batchOnly, admit });
+      if (r.notJudged) throw Object.assign(new Error(r.why), { notJudged: r.notJudged });
       if (batchOnly) all.ahead = all.ahead && all.ahead !== 'pass' ? all.ahead : r.ahead;
       all.ran = all.ran || r.ran;
       if (r.splitAtOnce) all.splitAtOnce = Math.max(all.splitAtOnce || 0, r.splitAtOnce);
@@ -1430,6 +1548,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     if (all.kept.length && (!batchOnly || all.ahead === 'pass')) {
       log(`[engine-rules] ${engine}: the ${n} slices are done; one check of the whole batch left (${all.kept.map((l) => l.task).join(', ')}) decides what the land run is told`);
       w = rulesGate({ engine, repo, tip, lanes: all.kept, chain, cfg, from, extraFrom, full, owe, useCache, root, id: `${id}-whole`, env, log, run, batchOnly, admit, noSlice: true });
+      if (w.notJudged) throw Object.assign(new Error(w.why), { notJudged: w.notJudged });
       if (batchOnly) all.ahead = w.ahead;
       all.ran = all.ran || w.ran; all.runs += w.runs; all.ms += w.ms;
       all.dropped.push(...w.dropped); all.kept = w.kept;
@@ -1587,7 +1706,7 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
       // 2.94: a check ahead runs the batch only and judges no lane.
       if (batchOnly && r.status !== 'pass') return { ...res, ahead: r.status, why: r.why, ...(r.stopped ? { stopped: true } : {}) };
       if (batchOnly) break;
-      if (r.status !== 'red') break;
+      if (r.status !== 'red' || r.build) break;
       onTip = onTip || atF(tip);
       if (onTip.status !== 'pass') { log(`[engine-rules] ${engine}: rules.first is ${onTip.status} on the target itself: it judges no lane`); break; }
       // 2.97: no blame entry names suspects: the lanes the failure's own words name are tried first (no setting).
@@ -1645,6 +1764,22 @@ export function rulesGate({ engine = 'unity', repo, tip, lanes, chain, cfg, from
     const r = at(whole.head);
     if (batchOnly) return { ...res, ahead: r.status, why: r.why, ...(r.status === 'pass' ? { green: whole.head } : {}), ...(r.stopped ? { stopped: true } : {}) };
     if (r.status === 'pass') { res.green = whole.head; break; }
+    // 2.98: a build that fails (rules.build) is a compile red: the compile search (engine-compile.mjs) finds the lanes, never the tests.
+    if (r.build) {
+      const treeOf = (x) => out(git(repo, 'rev-parse', `${x}^{tree}`));
+      const t0 = treeOf(whole.head);
+      const cs = compileSearch({ repo, tip, lanes: set, chain, maxRuns: Math.max(2, maxRuns - res.runs), at: (sha) => {
+        if (treeOf(sha) === t0) return r;
+        const b = run({ engine, repo, sha, cfg, from, extraFrom, sel: { mode: 'build', filter: '', command: cfg.build.command }, root, id: `${id}-build`, env, log, useCache: false });
+        res.runs += 1; res.ms += b.ms || 0;
+        return b;
+      } });
+      log(`[engine-rules] ${engine}: the build of the batch failed (rules.build): ${cs.why}`);
+      for (const x of cs.left) res.dropped.push({ lane: x.lane, failures: [], compile: { with: x.with, lines: x.lines, files: x.files, tail: x.tail }, why: `the build of the rules check (rules.build: ${cfg.build.command}) fails with ${x.lane.branch}${x.with.length ? ` together with ${x.with.map((l) => l.task).join(', ')}` : ''}${x.lines.length ? `\nThe compiler:\n${x.lines.map((l) => `  ${l}`).join('\n')}` : ''}` });
+      if (!cs.left.length) { res.why = cs.targetRed ? `the build (rules.build) is red on the target itself (${cs.why}): it judges no lane, the land run decides` : `the build of the batch failed and ${cs.why}`; break; }
+      set = cs.kept;
+      continue;
+    }
     // The first batch run that timed out or could not run judges no lane and is counted, as a red target is.
     const tmoBatch = rounds++ === 0 && r.status !== 'red';
     if (r.status !== 'red' && !tmoBatch) { raiseOn(r, 'the batch'); res.why = `${r.why}: the land run decides`; break; }

@@ -5546,6 +5546,14 @@ if (inShard('selftest-298d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.98 (b1): rules parts build once and test with --no-build; a failing build is a compile red; a build fault is not a red.
+if (inShard('selftest-298c')) {
+  const dir = copyRepo();
+  const { selftest298C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298c.mjs')).href);
+  await selftest298C({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
