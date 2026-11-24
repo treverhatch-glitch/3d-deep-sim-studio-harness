@@ -1,0 +1,26 @@
+name: win-debug (temporary, never merged)
+on:
+  push:
+    branches: [claude/298-windbg]
+jobs:
+  sup:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: install
+        run: npm ci
+      - name: the supervisor window unit, four times
+        shell: bash
+        run: |
+          for i in 1 2 3 4; do
+            node qa/selftest.mjs --only L1091 > out$i.log 2>&1 || true
+            echo "run $i: pass $(grep -c '\[selftest\] PASS' out$i.log) fail $(grep -c '\[selftest\] FAIL' out$i.log)"
+            grep -E "\[selftest\] FAIL" out$i.log | cut -c1-120
+            grep -E "\[dbg-sup\]" out$i.log | cut -c1-4200
+            tail -2 out$i.log | cut -c1-200
+          done
+          exit 0

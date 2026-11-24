@@ -1103,6 +1103,9 @@ if (inShard()) {
   for (const t of ['Tidy the HUD', 'Tidy the menu', 'Tidy the end screen']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
   const sup = run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(9)} --foreground`, env);
   const st = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8'));
+  { const recs = []; try { for (const f of fs.readdirSync(path.join(dir, '.studio', 'agents'))) if (f.endsWith('.json')) { const r = JSON.parse(fs.readFileSync(path.join(dir, '.studio', 'agents', f), 'utf8')); recs.push({ a: r.agent, task: r.task, s: r.startedAt, x: r.agentExited, e: r.endedAt, st: r.status }); } } catch {}
+    let evs = []; try { evs = fs.readFileSync(path.join(dir, '.studio', 'events.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => /^(agent\.|task\.(done|start|claim)|supervisor\.)/.test(e.type)).map((e) => `${e.ts.slice(17, 23)} ${e.type} ${e.agent || ''} ${e.task || ''}`); } catch {}
+    console.log('[dbg-sup]', JSON.stringify({ sessions: st.sessions, tasksDone: st.tasksDone, passes: st.passes, startedAt: st.startedAt, lastLoop: st.lastLoop, recs, evs }).slice(0, 4000)); }
   report('the supervisor starts a fresh agent per task, one after another, and stops at its time', st.status === 'stopped' && /time is up/.test(st.stopReason) && st.sessions >= 2 && st.tasksDone >= 2, sup.stdout + sup.stderr + JSON.stringify(st));
   report('npm run studio:status says what it did', /sessions started: \d+; tasks done: \d+/i.test(run(dir, 'node harness/supervisor.mjs status', env).stdout));
   // Lanes: two builders at once, each holding its own folder. The check starts from builder work that names a lane
