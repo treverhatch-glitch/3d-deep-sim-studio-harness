@@ -19,6 +19,7 @@ import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { engineRepo, engineTarget, engineTargets, samePath } from './engine-tracks.mjs';
 import { readJson } from './fsafe.mjs';
 import { sparseState } from './engine-worktree.mjs';
+import { ago, laneCopiesSize } from './lane-disk.mjs';
 import { argAfterOf, bytesUnder, foldCase as fold, realOrResolved as real } from './helpers.mjs';
 
 const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', windowsHide: true, timeout: 120000 });
@@ -282,14 +283,27 @@ const GB = 1024 ** 3;
 const gbOf = (b) => Math.round((b / GB) * 10) / 10;
 
 /**
- * The biggest disk users the harness knows, estimated cheaply and cached for an hour (.studio/engine/disk-users.json):
- * engine worktrees (one git ls-tree per engine, never a walk), lane copies (harness/lane-disk.mjs) and saved builds.
+ * The biggest disk users the harness knows: engine worktrees and saved builds (estimates, one git ls-tree per engine,
+ * cached for an hour in .studio/engine/disk-users.json) and the lane copies (measured each time, with its age).
  * { at, items: [{ what, gb, n? }], line }.
  */
 export function diskUsers({ root = REPO_ROOT, env = process.env, now = Date.now(), maxAgeMs = 3600000 } = {}) {
   const c = readJson(usersFile(root));
-  if (c && Array.isArray(c.items) && now - (Date.parse(c.at) || 0) < maxAgeMs && now >= (Date.parse(c.at) || 0)) return c;
-  const items = [];
+  const hit = c && Array.isArray(c.items) && now - (Date.parse(c.at) || 0) < maxAgeMs && now >= (Date.parse(c.at) || 0);
+  const items = hit ? [...c.items] : [];
+  if (!hit) engineItems(items, { root, env });
+  // The lane copies are measured each time, with their age (harness/lane-disk.mjs); only the engine estimates are cached.
+  const ls = laneCopiesSize({ root, now });
+  if (ls) items.push({ what: 'lane copies', gb: gbOf(ls.bytes), atLeast: ls.atLeast, age: `measured ${ago(now - ls.at)}` });
+  items.sort((a, b) => b.gb - a.gb);
+  const line = items.map((i) => `${i.what}${i.n ? ` (${i.n}${i.full !== undefined ? `: ${i.full} full, ${i.sparse} sparse` : ''})` : ''} ~${i.atLeast ? 'at least ' : ''}${i.gb} GB${i.age ? `, ${i.age}` : ''}`).join(', ');
+  const rec = { at: hit ? c.at : new Date(now).toISOString(), items: items.filter((i) => i.what !== 'lane copies'), line };
+  if (!hit) { try { fs.mkdirSync(path.dirname(usersFile(root)), { recursive: true }); fs.writeFileSync(usersFile(root), `${JSON.stringify(rec, null, 2)}\n`); } catch { /* a cache */ } }
+  return { ...rec, items, line };
+}
+
+/** The engine worktree and saved-build estimates (one git ls-tree per engine) pushed onto `items`. */
+function engineItems(items, { root, env }) {
   for (const t of engineTargets({ root })) {
     const repo = engineRepo(t.name, { root });
     const target = t.cfg?.target;
@@ -316,13 +330,6 @@ export function diskUsers({ root = REPO_ROOT, env = process.env, now = Date.now(
       if (dirs.length) { const one = capSize(path.join(b.dir, dirs[dirs.length - 1])); items.push({ what: `${t.name} saved builds`, n: dirs.length, gb: gbOf(one * dirs.length) }); }
     }
   }
-  const ld = readJson(path.join(root, '.studio', 'lanes', 'disk.json'));
-  if (Number.isFinite(ld?.totalGb)) items.push({ what: 'lane copies', n: ld.lanes ?? null, gb: ld.totalGb });
-  items.sort((a, b) => b.gb - a.gb);
-  const line = items.map((i) => `${i.what}${i.n ? ` (${i.n}${i.full !== undefined ? `: ${i.full} full, ${i.sparse} sparse` : ''})` : ''} ~${i.gb} GB`).join(', ');
-  const rec = { at: new Date(now).toISOString(), items, line };
-  try { fs.mkdirSync(path.dirname(usersFile(root)), { recursive: true }); fs.writeFileSync(usersFile(root), `${JSON.stringify(rec, null, 2)}\n`); } catch { /* a cache */ }
-  return rec;
 }
 
 /** Bytes under p, not following links, stopping after 50000 entries (an estimate). */

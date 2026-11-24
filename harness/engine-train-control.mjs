@@ -17,7 +17,8 @@ import { emitEvent, readRecentEvents } from './event.mjs';
 import { visionFixIds, visionFirst } from './vision-fix.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { pidAlive } from './proc-identity.mjs';
-import { changedPaths, playSelection, playFocusConfig } from './engine-rules.mjs';
+import { changedPaths, playSelection, playFocusConfig, removeCheckout } from './engine-rules.mjs';
+import { measureTree } from './lane-disk.mjs';
 import { engineTarget, engineFiles } from './engine-tracks.mjs';
 import { foldRealOf, isOff as offWord, realOrResolved as real, slashPath as fwd, sleepSyncClamped as sleep, stdoutOf as out } from './helpers.mjs';
 
@@ -263,6 +264,24 @@ export function trainProcessLive(pid, identity) {
   try { const st = fs.readFileSync(`/proc/${Number(pid)}/stat`, 'utf8'); const state = st.slice(st.lastIndexOf(')') + 2, st.lastIndexOf(')') + 3); if (state === 'Z' || state === 'X') return false; } catch { /* no /proc: pidAlive answers */ }
   return true;
 }
+/**
+ * Remove a train's rules checkouts (.studio/tmp/rules-<train>-[ahead…-]<sha>, made in harness/engine-rules.mjs) through
+ * removeCheckout; another train's are left. { n, bytes } of what was removed.
+ */
+export function removeTrainRules(root, repo, train) {
+  const tmp = path.join(root, '.studio', 'tmp');
+  const re = new RegExp(`^rules-${String(train).replace(/[^A-Za-z0-9._-]/g, '_').replace(/[.]/g, '\\.')}-(?:ahead[A-Za-z0-9._-]*-)?[0-9a-f]{10}$`);
+  let n = 0; let bytes = 0;
+  let names = []; try { names = fs.readdirSync(tmp).filter((d) => re.test(d)); } catch {}
+  for (const d of names) {
+    const dir = path.join(tmp, d);
+    bytes += measureTree(dir, Date.now() + 10000).bytes;
+    removeCheckout(repo, dir);
+    if (!fs.existsSync(dir)) n += 1;
+  }
+  return { n, bytes };
+}
+
 /** How long cancel waits for the killed train to go (30 s). */
 export const CANCEL_WAIT_MS = 30000;
 
@@ -355,12 +374,14 @@ export async function cancelEngineTrain(root, { engine = 'unity', by = '', why =
     const now = out(git(s.repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${s.target}`));
     if (h.targetAt && now && now !== h.targetAt) moved = ` Note: ${s.target} moved while the train ran (${h.targetAt.slice(0, 8)} -> ${now.slice(0, 8)}); a killed land may have moved it: check it before the next train.`;
   }
+  // The train's rules checkouts (about 1.3 GB each) go too.
+  const rules = s.error ? { n: 0, bytes: 0 } : removeTrainRules(root, s.repo, h.id);
   // 4. The lock (still this train's), and the "landing" markers of its lanes.
   try { if (readJson(lockF)?.id === h.id) fs.rmSync(lockF, { force: true }); } catch {}
   try { const b = await import('./busy.mjs'); for (const t of h.lanes || []) { try { await b.clearDoneRunning(t); } catch {} } } catch {}
   const lanes = (h.lanes || []).filter(Boolean);
-  const msg = `${L} train ${h.id} cancelled by ${who}${reason ? `: ${reason}` : ''}; its process tree was ended${k.killed?.length ? ` (${k.killed.length} process(es))` : ''}; ${gate.done ? `the gate worktree is back at ${s.target} (${gate.steps.join(', ')})` : `the gate worktree was not touched (${gate.why})`}${refs.length ? `; integration ref(s) ${refs.join(', ')} deleted` : ''}; the queue is as it was: nobody handed back, nobody blamed${lanes.length ? `, ${lanes.join(', ')} keep their place` : ''}.`;
-  try { emit({ type: `task.train.${engine}.cancelled`, agent: who, to: 'producer', track: `engine:${engine}`, status: 'warn', msg: msg.slice(0, 600), meta: { train: h.id, engine, by: who, why: reason || null, lanes, killed: k.killed || [], gate: gate.done ? gate.steps : null, refs } }); } catch {}
+  const msg = `${L} train ${h.id} cancelled by ${who}${reason ? `: ${reason}` : ''}; its process tree was ended${k.killed?.length ? ` (${k.killed.length} process(es))` : ''}; ${gate.done ? `the gate worktree is back at ${s.target} (${gate.steps.join(', ')})` : `the gate worktree was not touched (${gate.why})`}${refs.length ? `; integration ref(s) ${refs.join(', ')} deleted` : ''}${rules.n ? `; ${rules.n} rules checkout(s) removed, ${(rules.bytes / 1024 ** 3).toFixed(1)} GB freed` : ''}; the queue is as it was: nobody handed back, nobody blamed${lanes.length ? `, ${lanes.join(', ')} keep their place` : ''}.`;
+  try { emit({ type: `task.train.${engine}.cancelled`, agent: who, to: 'producer', track: `engine:${engine}`, status: 'warn', msg: msg.slice(0, 600), meta: { train: h.id, engine, by: who, why: reason || null, lanes, killed: k.killed || [], gate: gate.done ? gate.steps : null, refs, rulesRemoved: rules.n, freedBytes: rules.bytes } }); } catch {}
   const hint = engineAutoState(root, engine, { env }).on ? `\nThe automatic start may begin the next ${L} train at its next pass: npm run task -- train auto off --engine ${engine} --by <name> [--hours N] keeps it from starting.` : '';
   return { ok: true, id: h.id, gate, refs, message: `${msg}${moved}${hint}` };
 }

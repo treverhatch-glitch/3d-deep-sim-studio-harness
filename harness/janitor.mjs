@@ -209,7 +209,7 @@ export async function laneProposals({ root = studioRoot(), env = process.env, no
     const done = !why && (landed.agents.has(c.agent) || (task && landed.tasks.has(task)));
     const limMs = idleMs !== null ? idleMs : done ? lim.landedMs : lim.laneMs;
     if (!why && now - last < limMs) why = `used ${Math.round((now - last) / H)} h ago (under ${idleMs !== null ? `the idle limit, ${Math.round(limMs / H)} h` : done ? `STUDIO_JANITOR_LANDED_H, ${Math.round(limMs / H)} h, its work has landed` : `STUDIO_JANITOR_LANE_H, ${Math.round(limMs / H)} h`})`;
-    out.push({ agent: c.agent, dir: c.dir, path: relp, task, landed: Boolean(done), bytes: why ? 0 : sizeOf(c.dir), stale: !why, why: why || `stale: ${Math.round((now - last) / H)} h untouched${done ? ', its work has landed' : ''}, nothing unique, clean, nobody in it` });
+    out.push({ agent: c.agent, dir: c.dir, path: relp, task, last, landed: Boolean(done), bytes: why ? 0 : sizeOf(c.dir), stale: !why, why: why || `stale: ${Math.round((now - last) / H)} h untouched${done ? ', its work has landed' : ''}, nothing unique, clean, nobody in it` });
   }
   return out;
 }
@@ -245,6 +245,80 @@ export async function pruneIdleLanes({ hours = laneIdleHours(), dryRun = false, 
   const freed = removed.reduce((n, x) => n + (x.bytes || 0), 0);
   if (removed.length) emit({ type: 'lanes.pruned', agent: String(by).slice(0, 60), msg: `${dryRun ? 'Would remove' : 'Removed'} ${removed.length} idle lane copy(ies) (idle over ${hours} h, nothing unsaved or unlanded; the branches are kept), ${human(freed)}`, meta: { dryRun, hours, agents: removed.map((x) => x.agent), freedBytes: freed } });
   return { hours, removed, kept, freed, dryRun };
+}
+
+/** studio/game.json `disk`: { underGb, idleHours } when pruneUnderGb is set (above 0), else null: pruning is off. */
+export function diskPruneConfig(root) {
+  const d = readJson(path.join(root, 'studio', 'game.json'))?.disk;
+  const under = Number(d?.pruneUnderGb);
+  return under > 0 ? { underGb: under, idleHours: Number(d.idleHours) > 0 ? Number(d.idleHours) : 1 } : null;
+}
+/** Free GB on the studio's drive, null when it cannot be read. */
+export function freeDiskGb(root, statfs = (p) => fs.statfsSync(p)) {
+  try { const s = statfs(root); return (Number(s.bavail) * Number(s.bsize)) / 1024 ** 3; } catch { return null; }
+}
+
+/** The engine worktrees (.lanes/engine/<task>) as removal candidates, or kept with the test they failed. */
+async function engineCandidates(root, idleMs, now, cands, kept) {
+  const ec = await import('./engine-clean.mjs');
+  let running = new Set(); try { running = new Set((await import('./agent.mjs')).sessions().filter((x) => x.running && x.task).map((x) => x.task)); } catch {}
+  const ut = await import('./unity-train.mjs').catch(() => null);
+  for (const l of ec.engineLaneList({ root })) {
+    const rel = path.relative(root, l.dir).split(path.sep).join('/');
+    const keep = (why) => kept.push({ what: rel, why });
+    if (!l.engine) { keep(l.why); continue; }
+    const f = ec.laneFacts({ root, engine: l.engine, task: l.task, dir: l.dir });
+    const v = f.error ? { safe: false, why: f.error } : ec.laneRemoval(f);
+    if (!v.safe) { keep(v.why); continue; }
+    if (!f.onTarget) { keep(`its commit is not on ${f.target} yet`); continue; }
+    if (running.has(l.task)) { keep('a session is on its task'); continue; }
+    if ((ut?.runningUnityTrain?.(root, l.engine)?.lanes || []).includes(l.task)) { keep('a train that is running holds its task'); continue; }
+    const last = Math.max(mtime(l.dir), Number((git(l.dir, 'log', '-1', '--format=%ct').stdout || '').trim()) * 1000 || 0);
+    if (now - last < idleMs) { keep(`used ${Math.round((now - last) / H)} h ago (under the idle limit)`); continue; }
+    cands.push({ kind: 'engine', what: rel, dir: l.dir, engine: l.engine, task: l.task, last, why: v.why });
+  }
+}
+
+/**
+ * Prune when disk is short. Off unless studio/game.json disk.pruneUnderGb is set. Under it, removes a copy only when ALL
+ * hold: landed (an engine copy's commit is on the target), clean, nothing its branch lacks, unused for disk.idleHours,
+ * no live session or claim, not queued, not in a running train. Oldest first, one event each, stops once free disk is
+ * over the line; branches stay. freeGb: a function (tests inject it). { off?, short, free, removed, kept }.
+ */
+export async function pruneWhenShort({ root = studioRoot(), env = process.env, now = Date.now(), freeGb = () => freeDiskGb(root), emit = emitEvent, by = 'janitor' } = {}) {
+  const cfg = diskPruneConfig(root);
+  if (!cfg) return { off: true, short: false, removed: [], kept: [] };
+  const free = freeGb();
+  if (!Number.isFinite(free) || free >= cfg.underGb) return { short: false, free, removed: [], kept: [] };
+  const idleMs = cfg.idleHours * H;
+  const cands = []; const kept = []; const removed = [];
+  for (const l of await laneProposals({ root, env, now, idleMs })) {
+    if (!l.stale) kept.push({ what: l.path, why: l.why });
+    else if (!l.landed) kept.push({ what: l.path, why: 'its work has not landed (its task is not done, its branch not merged)' });
+    else cands.push({ kind: 'lane', what: l.path, dir: l.dir, agent: l.agent, last: l.last, why: l.why });
+  }
+  try { await engineCandidates(root, idleMs, now, cands, kept); } catch {}
+  const { removeLaneCopy } = await import('./worktree.mjs');
+  const { measureTree } = await import('./lane-disk.mjs');
+  for (const c of cands.sort((a, b) => a.last - b.last)) {
+    const now2 = freeGb();
+    if (Number.isFinite(now2) && now2 >= cfg.underGb) { kept.push({ what: c.what, why: `free disk is back over ${cfg.underGb} GB` }); continue; }
+    const size = measureTree(c.dir, Date.now() + 10000);
+    if (c.kind === 'lane') {
+      const again = (await laneProposals({ root, env, now: Date.now(), idleMs })).find((x) => x.agent === c.agent);
+      if (!again?.stale || !again.landed) { kept.push({ what: c.what, why: again?.why || 'gone' }); continue; }
+      removeLaneCopy(c.agent, { keepBranch: true });
+    } else {
+      const r = (await import('./engine-clean.mjs')).removeLandedLane({ root, engine: c.engine, task: c.task });
+      if (!r.removed) { kept.push({ what: c.what, why: r.why }); continue; }
+    }
+    if (fs.existsSync(c.dir)) { kept.push({ what: c.what, why: 'could not remove it' }); continue; }
+    const msg = `Disk is short (${Math.round(free)} GB free, under ${cfg.underGb} GB): removed ${c.what} (${size.atLeast ? 'at least ' : ''}${human(size.bytes)}). Safe because ${c.why}; unused over ${cfg.idleHours} h; the branch is kept.`;
+    removed.push({ what: c.what, bytes: size.bytes, why: c.why });
+    try { emit({ type: 'disk.pruned', agent: String(by).slice(0, 60), msg: msg.slice(0, 500), meta: { what: c.what, kind: c.kind, bytes: size.bytes, why: c.why, freeGb: Math.round(free * 10) / 10, underGb: cfg.underGb } }); } catch {}
+  }
+  if (kept.length || removed.length) try { emit({ type: 'disk.short', agent: String(by).slice(0, 60), to: 'producer', status: removed.length ? 'ok' : 'warn', msg: `Disk is short (${Math.round(free)} GB free, under ${cfg.underGb} GB): removed ${removed.length} copy(ies), kept ${kept.length}${kept.length ? `: ${kept.slice(0, 6).map((k) => `${k.what} (${k.why})`).join('; ')}` : ''}`.slice(0, 600), meta: { free, underGb: cfg.underGb, removed: removed.length, kept: kept.length } }); } catch {}
+  return { short: true, free, removed, kept };
 }
 
 /** The tasks an engine train has landed: task.train.<engine>.landed events name them in meta.lanes. */
