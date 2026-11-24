@@ -403,6 +403,7 @@ scorecard's Play stage line counts skipped runs.
 | `STUDIO_RULES_GREEN` | `1`: the rules check passed on exactly this batch and target; the script may skip its own copy of those tests. 2.96: also any group whose tree as it would land has a kept whole rules pass (same command and inputs), for example after a land search dropped a lane. |
 | `STUDIO_RULES_MODE` | `focus` or `full`: how that green was reached; after a `focus` green the script may still run the full rules tests. 2.95: shards without `rules.shards.rest` are `focus`. |
 | `STUDIO_LAND_FULL` | `1`: the daily full run; skip nothing, ignore every shortcut. |
+| `STUDIO_LAND_PART` | (2.98, only with `STUDIO_LAND_FULL=1` and `engines.<x>.fullLand.parts`) the name of the part of the full run to run now, for example `edit` or `play-a`. The script decides what a name runs; together the parts must run every test. Unset: run everything. |
 | `STUDIO_UNITY_EDITMODE_ARGS` | Edit Mode arguments to add after the .NET tests passed (`SKIP`: no Edit Mode run needed). Unset on a full run. |
 | `STUDIO_PLAY_MODE` | `full`, `focus` or `skip`: run every Play Mode test, only the filter, or none. |
 | `STUDIO_PLAY_FILTER` | With `focus`: the Play Mode test filter (`;`-joined). |
@@ -502,23 +503,29 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
 - **Handed back means out.** A lane the train hands back leaves the train's record at once, so `task start` on its
   fix works while the train is still landing the rest.
 - **A full land run once a day.** Every `engines.<x>.fullLandHours` hours (default 24, `STUDIO_ENGINE_FULL_LAND_HOURS`,
-  `off` for never) one land run gets `STUDIO_LAND_FULL=1` and none of the shortcuts: no `STUDIO_RULES_GREEN`, no
-  `STUDIO_UNITY_EDITMODE_ARGS`. A land script that skips work on those variables should run everything when it sees
-  `STUDIO_LAND_FULL=1`. The time of the last full run that passed is kept in `.studio/engine/<engine>-full-land.json`;
-  with no record the clock starts at the first train, so the first full run comes that many hours later.
-  2.85 (B-137): the full run is said wherever one looks. The train's `now` line and `train status --engine <x>` read
-  "land run, the daily full run: every test runs, expect about N min" (N: the last full run's minutes, kept in that
-  file); one `task.train.<x>.full_land` event (meta `why`, `tasks`) at its start; `engine.land` has `meta.full: true`.
-- **2.86: the full run is its own run, on the target alone.** It never carries a branch and is never a retry, bisect or
-  confirm step. It runs when it is due and the train has no lane (the Line Producer starts a train for it when the
-  queue is empty), or, when it is overdue by `engines.<x>.fullLandMaxHours` (default twice `fullLandHours`; counted from
-  the last full run that passed), 2.91: at the end of the next train, after the batch's rounds, on the target as it is
-  then. It never goes ahead of a waiting batch; `full_land` says when it runs or what it waits for. When the full rules
-  run is owed too, it goes first (it is shorter). The land command gets a
-  ref at the target's tip as its branch and `STUDIO_LAND_FULL=1` with `STUDIO_LAND_PROBE=1`. A script that cannot run
-  that (an error or conflict) is told in `task.train.<x>.full_land` (warn) and the full run is tried again at the next
-  train. Every failing test of a full run is the target's own (below); 2.85's search for a branch tied to it, and the
-  batch's second, ordinary run, are gone with the batch.
+  `off` for never), counted from the last full pass, the target is run alone with `STUDIO_LAND_FULL=1` and none of the
+  shortcuts: no `STUDIO_RULES_GREEN`, no `STUDIO_UNITY_EDITMODE_ARGS`. A land script that skips work on those variables
+  should run everything when it sees `STUDIO_LAND_FULL=1`. It never carries a branch and is never a retry, bisect or
+  confirm step: the land command gets a ref at the target's tip as its branch and `STUDIO_LAND_PROBE=1` (land nothing).
+  The state is `.studio/engine/<engine>-full-land.json`; with no record the clock starts at the first train. The
+  train's `now` line, `train status` and one `task.train.<x>.full_land` event say when it runs ("the daily full run,
+  part edit: ... expect about N min"); `engine.land` has `meta.full: true` (and `meta.part`).
+- **2.98: in parts, each a fresh process.** `engines.<x>.fullLand`: `{ "parts": ["edit", "play-a"], "partTimeoutMin":
+  60, "backoffHours": 12 }`. With `parts` the full run is one land run per part, in order, each told
+  `STUDIO_LAND_PART=<name>`, each with its own time limit (`partTimeoutMin`, default 60) and sampled under its own kind
+  (`land ... part-<name>`, so the memory floor of each part is its own). Without `parts` it is one run of everything
+  (the engine's `timeoutMin`, or `partTimeoutMin` when set). A part that passed on the target's tree is not run again;
+  a full pass is every part green on one tree. A run cut short goes on with the missing parts while the target has not
+  moved. A red part ends the run as a red full run does (below).
+- **2.98: it backs off, never loops.** A part that hits its time limit, or ends with no test result (an error, not
+  run, killed), is a try: the next try is not before `backoffHours` (default 12). The record keeps every try (time,
+  part, minutes, outcome); `train status` and `engine rules show` print "Daily full land run: the next try is not
+  before ... (why)" and the parts green so far. A train with nothing to do says why the full run did not start.
+- **When it runs.** With lanes waiting it does not run while only due. Past `engines.<x>.fullLandMaxHours` (default
+  twice `fullLandHours`) it runs at the end of a train, after the batch's rounds, on the target as it is then, but one
+  part a train. With an empty queue (the Line Producer starts a train for it) it runs every missing part. Never while it
+  backs off. When the full rules run is owed too, it goes first (it is shorter). `fullLandNow` in
+  `harness/unity-train.mjs` answers "would a full run start now, and why not".
 - **The target's own red in the full run (2.85).** A full run is the one run that sees every test, so it also sees
   what the target already fails. From 2.86 it runs on the target alone, so every failing test it names is the
   target's own: the names go to `.studio/train/<x>-full-baseline.json` (`{ at, target, failing, source }`) and the

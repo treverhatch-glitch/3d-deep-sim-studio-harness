@@ -1871,6 +1871,8 @@ async function cli(argv) {
     if (cfg.peak) console.log(`[engine-rules] peak: read from ${cfg.peak.file} in the test checkout after each test command${cfg.peak.match ? ` (match ${cfg.peak.match})` : ''}; a full run's measured peak: ${partStats(root, engine)[FULL_STAT]?.peakGb ? `${partStats(root, engine)[FULL_STAT].peakGb} GB` : 'none yet'}${cfg.focus?.splitGb ? ' (rules.focus.splitGb is set: that number is used)' : ''}`);
     // 2.96 (a): measured cost per kind (rules commands and land runs: the number a land script's own wait can use).
     for (const l of costLines(root, engine)) console.log(`[engine-rules] ${l}`);
+    // 2.98: the daily full land run's back-off and the parts green so far.
+    { const fl = (await import('./unity-train.mjs')).fullLandLine(root, engine); if (fl) console.log(`[engine-rules] ${fl}`); }
     // 2.97: the check ahead: on or off, and its last outcome (started, kept, dropped, or why it did not start).
     const al = (await import('./rules-ahead.mjs')).aheadLast(root, engine);
     console.log(`[engine-rules] check ahead (rules.ahead): ${cfg.ahead ? 'on' : 'off'}; last: ${al ? `${al.outcome === 'not-started' ? `did not start: ${al.why}` : `${al.outcome}${al.why ? ` (${al.why})` : ''}`}, train ${al.train || '?'}, ${String(al.at).slice(0, 16)}` : 'none yet'}`);

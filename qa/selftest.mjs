@@ -5522,6 +5522,14 @@ if (inShard('selftest-298b')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.98 (a): the daily full land run in parts, a result per part kept by target tree, a back-off after a try with no result.
+if (inShard('selftest-298a')) {
+  const dir = copyRepo();
+  const { selftest298A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298a.mjs')).href);
+  await selftest298A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

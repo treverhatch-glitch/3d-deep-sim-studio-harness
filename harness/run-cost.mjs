@@ -40,10 +40,11 @@ export function machineCfg(root) {
   return { measured: c.admit === 'measured', sample: c.sample !== false, everyMs: n(c.sampleSec, 10, 0.2, 600) * 1000, cpuCapPct: n(c.cpuCapPct, 85, 1, 100), slowerPct: n(c.slowerPct, 10, 0, 1000) };
 }
 
-/** The kind of a land run from what the train told it: rules stage skipped or run, Play Mode or none. */
+/** The kind of a land run from what the train told it: rules stage skipped or run, Play Mode or none; 2.98: the full run's part. */
 export function landKind(env = process.env) {
   const play = String(env.STUDIO_PLAY_MODE || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
-  return `land${env.STUDIO_RULES_GREEN === '1' ? ' no-rules' : ' with-rules'}${play && play !== 'off' ? ` play-${play}` : ''}`;
+  const part = env.STUDIO_LAND_FULL === '1' ? String(env.STUDIO_LAND_PART || '').replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 40) : '';
+  return `land${env.STUDIO_RULES_GREEN === '1' ? ' no-rules' : ' with-rules'}${play && play !== 'off' ? ` play-${play}` : ''}${part ? ` part-${part}` : ''}`;
 }
 /** The kind of a rules command: 'rules' for the whole command, 'rules <filter>' for a part or shard. */
 export const rulesKind = (filter) => (filter && filter !== '(full run)' ? `rules ${String(filter).slice(0, 80)}` : 'rules');

@@ -1106,9 +1106,6 @@ export function engineBatchWait(f) {
   return { ...base, wait: true, left, why: `waiting up to ${rules.waitMin} min for more ${L} branches: ${counted} of ${rules.min} queued, the oldest for ${Math.round(waitedMin)} min, ${working.length} session${working.length === 1 ? '' : 's'} still working on ${L} tasks (${working.slice(0, 4).join(', ')}); ${left} min left` };
 }
 
-/** 2.98 (b): stand-in for part A1's "would a full land run start now?"; A1's function takes its place at the merge. */
-const fullLandStartsNow = (ut, root, t, env, now) => { try { return ut.fullLandDue(root, t.name, t.cfg || {}, env, now, { start: false }).why || ''; } catch { return ''; } };
-
 /** One look at every engine train: [{ engine, queued, running, expectedMin, floorGb, start, why, started? }]. Starts those whose window is open (unless dryRun or report mode). deps: rig, rigBudget, machine, root, startTrain(engine, { tag }) -> { pid }. */
 export async function enginePass({ now = Date.now(), env = process.env, dryRun = false, rig = null, deps = {} } = {}) {
   const et = await import('./engine-tracks.mjs');
@@ -1180,8 +1177,8 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     // 2.86: the daily full run runs on the target alone when the queue is empty: a due one starts a train with no lane.
     // 2.91: so does the full rules run rules.focus.fullEveryHours owes (not while it is red on a target the rules tests see unchanged).
     if (!q.length) {
-      const fd = fullLandStartsNow(ut, root, t, env, now);
-      if (fd) f.fullDue = fd;
+      // 2.98: fullLandNow says whether a full run would start now (due, not backing off) and which parts.
+      try { const fn = ut.fullLandNow(root, t.name, t.cfg || {}, { lanes: 0, env, now }); if (fn.run) f.fullDue = fn.why; } catch { /* not due */ }
       try { const ow = ut.fullRulesOwedNow(root, t.name, env, now); if (ow.why) f.fullDue = f.fullDue ? `${f.fullDue}; the full rules run: ${ow.why}` : `the full rules run: ${ow.why}`; } catch { /* not owed */ }
     }
     const w = engineWindow(f, env);

@@ -812,10 +812,9 @@ export function cancelledTrain(root, engine, id) {
 }
 
 /**
- * Is a full land run due? Every STUDIO_ENGINE_FULL_LAND_HOURS (engines.<x>.fullLandHours, 24; 0 or off: never),
- * counted from the last full run that passed ({ at, id } in .studio/engine/<engine>-full-land.json). No record: the
- * clock starts now. Returns { why, overdue, hours, maxHours }. Past engines.<x>.fullLandMaxHours (default 2 x the
- * hours) it is overdue: 2.91, it runs at the end of the next train, after the batch's rounds. It runs on the target alone.
+ * Is a full land run due? Every STUDIO_ENGINE_FULL_LAND_HOURS (engines.<x>.fullLandHours, 24; 0 or off: never), counted
+ * from the last full pass (at in .studio/engine/<engine>-full-land.json; no record: the clock starts now). Overdue past
+ * engines.<x>.fullLandMaxHours (default 2 x). 2.98: not due while it backs off (next): { why, overdue, hours, maxHours, wait }.
  */
 const fullLandFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-full-land.json`);
 export function fullLandDue(root, engine, cfg = {}, env = process.env, now = Date.now(), { start = true } = {}) {
@@ -826,15 +825,84 @@ export function fullLandDue(root, engine, cfg = {}, env = process.env, now = Dat
   if (!Number.isFinite(h) || h <= 0) return no;
   const mx = Number(cfg.fullLandMaxHours);
   const maxHours = Number.isFinite(mx) && mx >= h ? mx : 2 * h;
-  const at = Date.parse(readJson(fullLandFile(root, engine))?.at || '');
+  const rec = readJson(fullLandFile(root, engine)) || {};
+  const at = Date.parse(rec.at || '');
   if (!Number.isFinite(at)) {
-    if (start) { try { fs.mkdirSync(path.dirname(fullLandFile(root, engine)), { recursive: true }); writeJson(fullLandFile(root, engine), { at: new Date(now).toISOString(), id: null, clock: 'started' }); } catch { /* asked again next time */ } }
+    if (start) { try { writeJson(fullLandFile(root, engine), { at: new Date(now).toISOString(), id: null, clock: 'started' }); } catch { /* asked again next time */ } }
     return { ...no, hours: h, maxHours };
   }
   const age = now - at;
   if (age < h * 3600000) return { ...no, hours: h, maxHours };
+  if (now < Date.parse(rec.next || '')) return { ...no, hours: h, maxHours, wait: { until: rec.next, why: rec.nextWhy || 'the last try gave no result' } };
   const overdue = age >= maxHours * 3600000;
   return { why: overdue ? `the last full land run that passed is older than ${maxHours} h (engines.${engine}.fullLandMaxHours): overdue` : `the last full land run that passed is older than ${h} h`, overdue, hours: h, maxHours };
+}
+
+/**
+ * 2.98: engines.<x>.fullLand { parts, partTimeoutMin, backoffHours }. With parts the full run is one land run per part, in
+ * order (STUDIO_LAND_PART=<name>), each with its own time limit (default 60 min); without, one part: the whole run (the
+ * engine's timeoutMin unless partTimeoutMin is set). A try with no result (a time limit, an error) backs off backoffHours (12).
+ */
+const PART_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
+const partKey = (p) => p || 'whole';
+function fullLandCfg(cfg = {}) {
+  const f = cfg.fullLand && typeof cfg.fullLand === 'object' ? cfg.fullLand : {};
+  const parts = [...new Set((Array.isArray(f.parts) ? f.parts : []).map(String).filter((p) => PART_RE.test(p)))];
+  const t = Number(f.partTimeoutMin);
+  const b = Number(f.backoffHours);
+  return { parts: parts.length ? parts : [null], timeoutMin: t > 0 ? t : parts.length ? 60 : null, backoffHours: Number.isFinite(b) && b >= 0 ? b : 12 };
+}
+/** The parts still missing on this target tree (a part that passed on it is not run again). */
+function fullLandTodo(root, engine, cfg, tree) {
+  const rec = readJson(fullLandFile(root, engine)) || {};
+  const done = tree && rec.tree === tree && rec.parts && typeof rec.parts === 'object' ? rec.parts : {};
+  const parts = fullLandCfg(cfg).parts;
+  const todo = parts.filter((p) => !done[partKey(p)]);
+  return todo.length ? todo : parts;
+}
+/**
+ * 2.98: would a full land run start now, and why not? { run, when ('idle' | 'end'), parts, why, due }. With lanes waiting it
+ * runs only when overdue, at the end of the train, one part; with none, every missing part. Never while it backs off.
+ */
+export function fullLandNow(root, engine, cfg = {}, { lanes = 0, tree = null, env = process.env, now = Date.now(), start = false } = {}) {
+  const due = fullLandDue(root, engine, cfg, env, now, { start });
+  if (!due.why) return { run: false, due, why: due.wait ? `it backs off until ${due.wait.until.slice(0, 16)} UTC: ${due.wait.why}` : 'it is not due' };
+  if (lanes && !due.overdue) return { run: false, due, why: `${lanes} lane(s) wait, so it waits for an empty queue (past engines.${engine}.fullLandMaxHours it runs one part at the end of a train)` };
+  const todo = fullLandTodo(root, engine, cfg, tree);
+  return { run: true, due, when: lanes ? 'end' : 'idle', parts: lanes ? todo.slice(0, 1) : todo, why: due.why };
+}
+/**
+ * 2.98: one part's outcome into the record: every try (time, part, minutes, outcome) and the parts green on the tree. All
+ * green on one tree: a full pass. A try with no result (not pass, red or cancelled) sets the next try. { complete, next }.
+ */
+function fullPartDone(root, engine, cfg, { part, tree, after = null, status, timedOut = false, names = 0, minutes = null, train, now = Date.now() }) {
+  if (status === 'cancelled') return { complete: false };
+  const fc = fullLandCfg(cfg);
+  const rec = readJson(fullLandFile(root, engine)) || {};
+  const at = new Date(now).toISOString();
+  const outcome = timedOut ? 'timeout' : status;
+  const next = { ...rec, tries: [...(Array.isArray(rec.tries) ? rec.tries : []), { at, part, minutes, outcome, train }].slice(-20) };
+  if (['pass', 'red'].includes(status) && minutes) next.partMin = { ...(rec.partMin || {}), [partKey(part)]: minutes };
+  delete next.next; delete next.nextWhy;
+  let complete = false;
+  if (status === 'pass') {
+    const parts = { ...(rec.tree === tree && rec.parts ? rec.parts : {}), [partKey(part)]: { at, train, minutes } };
+    complete = fc.parts.every((p) => parts[partKey(p)]);
+    Object.assign(next, complete ? { at, id: train, tree: null, parts: null, clock: undefined, served: undefined } : { tree: after || tree, parts });
+  } else if (status === 'red') Object.assign(next, { tree: null, parts: null });
+  // A red that names its tests is a result (fullRunVerdict serves the clock); anything else is a try with no result.
+  if (status !== 'pass' && !(status === 'red' && names > 0)) Object.assign(next, { next: new Date(now + fc.backoffHours * 3600000).toISOString(), nextWhy: `${part ? `part ${part}` : 'the whole run'} ${outcome === 'timeout' ? `hit its time limit after ${minutes ?? '?'} min` : `ended ${outcome}`} at ${at.slice(0, 16)} UTC (engines.${engine}.fullLand.backoffHours ${fc.backoffHours})` });
+  try { writeJson(fullLandFile(root, engine), next); } catch { /* asked again next time */ }
+  return { complete, next: next.next || null };
+}
+/** 2.98: the full run's state in one line for train status and rules show ('' when there is nothing to say). */
+export function fullLandLine(root, engine, now = Date.now()) {
+  const rec = readJson(fullLandFile(root, engine)) || {};
+  const done = rec.parts && typeof rec.parts === 'object' ? Object.keys(rec.parts) : [];
+  const last = Array.isArray(rec.tries) ? rec.tries[rec.tries.length - 1] : null;
+  const wait = now < Date.parse(rec.next || '') ? `the next try is not before ${rec.next.slice(0, 16)} UTC: ${rec.nextWhy || 'the last try gave no result'}` : '';
+  if (!wait && !done.length) return '';
+  return `Daily full land run: ${[wait, done.length ? `passed so far on the target's tree ${short(rec.tree)}: ${done.join(', ')}` : '', last ? `last try: ${last.part || 'the whole run'} ${last.outcome}${last.minutes ? ` after ${last.minutes} min` : ''} (train ${last.train || '?'})` : ''].filter(Boolean).join('; ')}.`;
 }
 
 /** The folders the rules check copies its inputs from: the engine's folder, the land worktree, its cwd, the repo. */
@@ -1145,7 +1213,6 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   if (heldPick.size) res.held = [...heldPick].map(([task, why]) => ({ task, why }));
   // 2.91: the periodic full runs (the full rules run rules.focus.fullEveryHours owes, the daily full land run) are runs of the target
   // alone and never go ahead of a waiting batch: due, they run when this train has no lane; overdue, after the batch's rounds.
-  let fullDue = dryRun ? { why: '' } : fullLandDue(root, engine, s.cfg, env, Date.now());
   // 2.94: the set a check ahead ran for, when every one of its lanes is unchanged (rules.ahead; harness/rules-ahead.mjs).
   const pref0 = rcfg?.ahead && !only.length && !tag ? aheadSet(root, engine, queued, { repo, tip: headOf(repo, target), cfg: rcfg }) : null;
   const pref = pref0 && !pref0.lanes.some((l) => heldPick.has(l.task)) ? pref0 : null;
@@ -1156,11 +1223,14 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   }
   const fromAll = rulesFromOf(root, s);
   const owed0 = rcfg ? fullRulesOwed(root, engine, rcfg, { repo, tip: headOf(repo, target), from: fromAll }) : { why: '' };
-  const fullFirst = Boolean(fullDue.why && !lanes.length);
-  let fullLast = Boolean(fullDue.why && fullDue.overdue && lanes.length);
+  // 2.98: overdue with lanes waiting, one part of it at the end; never while it backs off (fullLandNow).
+  let fullNow = dryRun ? { run: false, due: { why: '' } } : fullLandNow(root, engine, s.cfg, { lanes: lanes.length, env, start: true });
+  const fullDue = fullNow.due;
+  const fullFirst = fullNow.run && fullNow.when === 'idle';
+  let fullLast = fullNow.run && fullNow.when === 'end';
   const rulesFirst = Boolean(owed0.why && !lanes.length);
   if (owed0.blocked) log(`[unity-train] ${id}: the full rules run is owed (${owed0.blocked.owed}) but was ${owed0.blocked.status} on ${target} at ${short(owed0.blocked.tip)} (${String(owed0.blocked.at).slice(0, 16)}) and the rules tests see no change since: not run again yet`);
-  if (!lanes.length && !fullFirst && !rulesFirst) { res.message = queued.length ? `No ${L} branch for this train (${sel.why}).` : `No ${L} branch is waiting to land (task done <ID> --train on a ${L}-track task queues one).`; return finish(); }
+  if (!lanes.length && !fullFirst && !rulesFirst) { res.message = `${queued.length ? `No ${L} branch for this train (${sel.why}).` : `No ${L} branch is waiting to land (task done <ID> --train on a ${L}-track task queues one).`}${fullDue.wait ? ` The daily full land run does not start: ${fullNow.why}.` : ''}`; return finish(); }
   // 2.96 (c2): a lane that cannot go (deferred, dropped, a conflict) is taken out and the batch picked again without it.
   const tip0 = headOf(repo, target);
   const formed = formBatch(pref ? { ...sel, lanes } : sel, { repick: pref || only.length ? null : (skip) => pickBatch(root, engine, s, queued.filter((e) => !skip.has(e.task)), { only, tag, max, env, held: heldPick }), repo, target, tip: tip0, board, holdMod, L, id, engine, union });
@@ -1171,7 +1241,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   if (sel.passedOver && !dryRun) { try { withQueue(root, (q) => { const e = q.find((x) => x.task === sel.passedOver); if (e) e.passedOver = (Number(e.passedOver) || 0) + 1; }, engine); } catch { /* it waits once more at most */ } }
   if (sel.waiting || formed.repicked) log(`[unity-train] ${id}: batch ${sel.why}`);
   if (lanes.length && fullDue.why) {
-    const m = `the daily full land run is due (${fullDue.why}) and ${lanes.length} lane(s) wait: it does not go ahead of them; ${fullLast ? `it runs at the end of this train, after the batch's rounds, on ${target} as it is then` : `it waits for an empty queue (past engines.${engine}.fullLandMaxHours it runs at the end of a train)`}`;
+    const m = `the daily full land run is due (${fullDue.why}) and ${lanes.length} lane(s) wait: it does not go ahead of them; ${fullLast ? `it runs at the end of this train, after the batch's rounds, on ${target} as it is then${fullLandCfg(s.cfg).parts.length > 1 ? ', one part (the rest wait for an empty queue or the next train)' : ''}` : `it waits for an empty queue (past engines.${engine}.fullLandMaxHours it runs one part at the end of a train)`}`;
     log(`[unity-train] ${id}: ${m}`);
     ev('full_land', id, m, { agent: by, to: 'producer', meta: { why: fullDue.why, tasks: lanes.map((l) => l.task), waits: fullLast ? 'end' : 'empty-queue', overdue: Boolean(fullDue.overdue) } });
   }
@@ -1469,12 +1539,13 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         // plan, STUDIO_LAND_FULL=1): the shortcuts rest on tests run outside the editor, and this run would see a difference between the runtimes.
         // 2.86: only ever a run of the target alone (opts.full: its why), never a batch's run or a step of a red (fullWhy above).
         // 2.85 (B-137): the daily full run is said wherever a person looks: the train's "now" line, train status, an event at its start.
-        const fullMin = fullWhy ? Number(readJson(fullLandFile(root, engine))?.minutes) || null : null;
-        const runText = fullWhy ? `${what}, the daily full run: every test runs, expect about ${fullMin ? `${fullMin} min` : 'the longest land run of the day'}` : what;
-        update({ now: `${runText}: ${group.map((l) => l.task).join(', ') || `${target} alone`}${a ? ` (try ${a + 1})` : ''}`, runs: res.runs + 1, full: fullWhy ? { why: fullWhy, minutes: fullMin } : null });
+        const fl0 = fullWhy ? readJson(fullLandFile(root, engine)) || {} : {};
+        const fullMin = fullWhy ? Number(fl0.partMin?.[partKey(opts.part)] ?? (opts.part ? null : fl0.minutes)) || null : null;
+        const runText = fullWhy ? `${what}, the daily full run${opts.part ? `, part ${opts.part}` : ''}: every test${opts.part ? ' of the part' : ''} runs, expect about ${fullMin ? `${fullMin} min` : 'the longest land run of the day'}` : what;
+        update({ now: `${runText}: ${group.map((l) => l.task).join(', ') || `${target} alone`}${a ? ` (try ${a + 1})` : ''}`, runs: res.runs + 1, full: fullWhy ? { why: fullWhy, minutes: fullMin, ...(opts.part ? { part: opts.part } : {}) } : null });
         log(`[unity-train] ${id}: ${what}: ${alone ? `the target alone, no branch (${ref} at ${short(tip)}; STUDIO_LAND_PROBE=1)` : `${noLand ? 'run' : 'land'} ${group.map((l) => `${l.task} (${l.branch})`).join(', ')}`} on ${target} at ${short(tip)}${ref && !alone ? ` through ${ref}` : ''}${noLand && opts.retry?.tests?.length ? `; by name: ${opts.retry.tests.length} test(s), does not land` : noLand ? '; does not land' : ''}`);
         if (fullWhy) log(`[unity-train] ${id}: a full land run (${fullWhy}): the land command is not told the rules are green and gets no Edit Mode plan`);
-        if (fullWhy && a === 0 && !dryRun) ev('full_land', id, `the daily full run, on ${target} alone with no branch (${fullWhy}), runs now: ${opts.when === 'end' ? 'the end of the train, after the batch\'s rounds' : 'no lane waits'}; every test runs${fullMin ? `, expect about ${fullMin} min` : ''}; its red goes to the target's own full-run failures`, { agent: by, to: 'producer', meta: { why: fullWhy, tasks: [], alone: true, when: opts.when || 'idle', ...(fullMin ? { minutes: fullMin } : {}) } });
+        if (fullWhy && a === 0 && !dryRun) ev('full_land', id, `the daily full run${opts.part ? `, part ${opts.part},` : ','} on ${target} alone with no branch (${fullWhy}), runs now: ${opts.when === 'end' ? 'the end of the train, after the batch\'s rounds' : 'no lane waits'}; every test runs${fullMin ? `, expect about ${fullMin} min` : ''}; its red goes to the target's own full-run failures`, { agent: by, to: 'producer', meta: { why: fullWhy, tasks: [], alone: true, when: opts.when || 'idle', ...(opts.part ? { part: opts.part } : {}), ...(fullMin ? { minutes: fullMin } : {}) } });
         // The Play Mode focus (engines.<x>.play.focus): a hint the land script may use. Never on a full land run; a retry of a red play stage
         // gets the selection of the run it repeats.
         const play = fullWhy ? { mode: 'full', filter: '', why: fullWhy } : opts.play || (alone ? { mode: 'full', filter: '', why: 'the target alone' } : playSelection({ changed: batchPaths(), cfg: s.cfg, full: false }));
@@ -1485,10 +1556,10 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         // 2.85: a full play stage says why, naming the paths no play.focus.map entry takes.
         else if (play.unmatched?.length) { log(`[unity-train] ${id}: play stage in full: ${play.why}`); res.playUnmatched = play.unmatched; if (!dryRun) noteUnmatched(root, engine, { train: id, paths: play.unmatchedAll }); }
         const playEnv = { STUDIO_PLAY_MODE: play.mode, ...(play.mode === 'focus' ? { STUDIO_PLAY_FILTER: play.filter, ...(engine === 'unity' ? { STUDIO_UNITY_PLAYMODE_ARGS: `-testFilter "${play.filter}"` } : {}) } : {}) };
-        const landEnv = { ...env, STUDIO_GATE_PRIORITY: 'landing', ...(fullWhy ? { STUDIO_LAND_FULL: '1' } : checked ? { STUDIO_RULES_GREEN: '1', STUDIO_RULES_MODE: kept0 ? 'full' : rulesGreen.mode } : {}), ...playEnv };
+        const landEnv = { ...env, STUDIO_GATE_PRIORITY: 'landing', ...(fullWhy ? { STUDIO_LAND_FULL: '1', ...(opts.part ? { STUDIO_LAND_PART: opts.part } : {}) } : checked ? { STUDIO_RULES_GREEN: '1', STUDIO_RULES_MODE: kept0 ? 'full' : rulesGreen.mode } : {}), ...playEnv };
         if (play.mode !== 'focus') { delete landEnv.STUDIO_PLAY_FILTER; delete landEnv.STUDIO_UNITY_PLAYMODE_ARGS; }
         // What the harness tells a land script is its own: nothing of these comes from the train's environment.
-        for (const k of ['STUDIO_LAND_ONLY', 'STUDIO_LAND_RETRY', 'STUDIO_LAND_RETRY_STAGE', 'STUDIO_LAND_RETRY_TESTS', 'STUDIO_LAND_PROBE', 'STUDIO_LAND_KNOWN_RED', 'STUDIO_EDITOR_SERVICE', 'STUDIO_EDITOR_SERVICE_CLI']) delete landEnv[k];
+        for (const k of ['STUDIO_LAND_ONLY', 'STUDIO_LAND_RETRY', 'STUDIO_LAND_RETRY_STAGE', 'STUDIO_LAND_RETRY_TESTS', 'STUDIO_LAND_PROBE', 'STUDIO_LAND_KNOWN_RED', 'STUDIO_EDITOR_SERVICE', 'STUDIO_EDITOR_SERVICE_CLI', ...(opts.part ? [] : ['STUDIO_LAND_PART'])]) delete landEnv[k];
         // 2.86: the target alone lands nothing (a probe or the full run).
         if (noLand) landEnv.STUDIO_LAND_PROBE = '1';
         // 2.86 (engines.<x>.knownRedHours, off by default): listed flaky tests a probe found red on the target alone are named to the
@@ -1565,23 +1636,14 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
           // 2.97: with rules.ahead on, every land run says whether it started and why not (rcfg is null on a dry run).
           if (rcfg?.ahead) { if (aheadTried) aheadNot('it was already tried in this train', false); else if (!greenUsed) aheadNot(`the rules green was not used: ${kept0 && rulesGreen ? 'a kept full pass told this land run instead' : lost}`); else { aheadTried = true; ahead = aheadBegin(group, label); } }
           const l0 = Date.now();
-          r = await land({ engine, ...arg, task: gkey, label, env: landEnv, log, ...(stagesBefore.length ? { stagesBefore } : {}), ...(ahead ? { onOom: () => aheadSettle(null, 'the land run died out of memory; it is ended before the land run is tried once more, and not started again in this train') } : {}) });
+          r = await land({ engine, ...arg, task: gkey, label, env: landEnv, log, ...(fullWhy && opts.timeoutMin ? { timeoutMin: opts.timeoutMin } : {}), ...(stagesBefore.length ? { stagesBefore } : {}), ...(ahead ? { onOom: () => aheadSettle(null, 'the land run died out of memory; it is ended before the land run is tried once more, and not started again in this train') } : {}) });
           res.runs += 1;
           landRuns += 1;
           // The run says how long it waited (waitMs); else the wall time not in its own ms.
           const wall = Date.now() - l0;
           spent.wait += Math.max(0, Number(r.waitMs ?? (wall - (r.ms ?? wall))));
           spent.land += Math.max(0, Number(r.ms ?? wall) - Number(r.waitMs ?? 0));
-          if (fullWhy) {
-            res.fullLand = (res.fullLand || 0) + 1;
-            // 2.85: the full run's minutes are kept for the next one's "expect about N min" (a run that ran to the end only).
-            const minutes = ['pass', 'red'].includes(r.status) ? Math.max(1, Math.round((Date.now() - l0) / 60000)) : null;
-            try {
-              const prev = readJson(fullLandFile(root, engine)) || {};
-              if (r.status === 'pass') writeJson(fullLandFile(root, engine), { at: new Date().toISOString(), id, ...(minutes ? { minutes } : prev.minutes ? { minutes: prev.minutes } : {}) });
-              else if (minutes && prev.at) writeJson(fullLandFile(root, engine), { ...prev, minutes });
-            } catch { /* it is due again next time */ }
-          }
+          if (fullWhy) res.fullLand = (res.fullLand || 0) + 1;
         }
         // 2.85: never the previous stage while the next runs: the run ended, the train decides what comes next.
         update({ now: `${runText} of ${group.map((l) => l.task).join(', ')} ended ${r.status}; deciding what runs next`, full: null });
@@ -1641,8 +1703,6 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       if (alone || !noLand) noteFlakes(root, engine, { cfg: s.cfg, r, named: opts.retry?.tests || null, train: id, target: tip, probe: alone && !r.full });
       if (noLand && r.status === 'pass' && !r.moved && merged) { const tree = out(git(repo, 'rev-parse', `${merged}^{tree}`)); if (tree) noteGreen(root, engine, { tree, target: tip, kind, train: id }); }
     }
-    // 2.85: a daily full run is judged against the target's own full-run failures (fullRunVerdict).
-    if (r.full && !dryRun) fullRunVerdict(r);
     if (r.status === 'pass' && noLand) return { ...r, noLand: true };
     if (r.status === 'pass') {
       const now = headOf(repo, target);
@@ -1656,21 +1716,20 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
    * The daily full run against the target's own full-run failures (.studio/train/<engine>-full-baseline.json). Green:
    * the baseline is cleared. Red with named tests: the names go to the baseline, a name the run no longer shows is
    * cleared, the director is told once per set of names (engine.full_red_on_target) and the full-run clock counts as
-   * served.
+   * served. 2.98: whole is false for one part of several: a green part clears nothing and a red part clears no name.
    */
-  const fullRunVerdict = (r) => {
+  const fullRunVerdict = (r, whole = true) => {
     const base = readFullBaseline(root, engine);
     const emitB = (type, status, msg, meta) => { try { emitEvent({ type, agent: by, to: 'director', status, track: `engine:${engine}`, msg: `${L} train ${id}: ${msg}`.slice(0, 600), meta: { train: id, engine, ...meta } }); } catch {} };
     const save = (failing, extra = {}) => { try { writeJson(baselineFile(root, engine), { at: new Date().toISOString(), target: headOf(repo, target), failing, source: `the full land run of ${L} train ${id}`, ...(base.told ? { told: base.told } : {}), ...extra }); } catch { /* asked again next time */ } };
     const clear = (gone) => { if (!gone.length) return; emitB('engine.full_baseline_cleared', 'ok', `the daily full run no longer fails ${gone.length} test(s) the target was red on: ${gone.slice(0, 5).join(', ')}${gone.length > 5 ? ', ...' : ''}; removed from the known-red list`, { tests: gone.slice(0, 20) }); log(`[unity-train] ${id}: full-run baseline: ${gone.length} name(s) pass again: ${gone.slice(0, 5).join(', ')}`); };
-    if (r.status === 'pass') targetRedClear(root, engine, 'full-land');
-    if (r.status === 'pass') { if (base.failing.length) { save([], { told: '' }); clear(base.failing); } return; }
+    if (r.status === 'pass') { if (!whole) return; targetRedClear(root, engine, 'full-land'); if (base.failing.length) { save([], { told: '' }); clear(base.failing); } return; }
     const names = r.status === 'red' && !r.compileOnly && Array.isArray(r.failures) ? [...new Set(r.failures)] : [];
     if (!names.length) return;
     const st = Array.isArray(r.stages) ? r.stages.map((x) => x?.name) : [];
     const red0 = firstRedStage(r);
     const ranOn = red0 && st.indexOf(red0) >= 0 && st.indexOf(red0) < st.length - 1;
-    const gone = ranOn ? base.failing.filter((n) => !names.includes(n)) : [];
+    const gone = ranOn && whole ? base.failing.filter((n) => !names.includes(n)) : [];
     const kept = base.failing.filter((n) => !gone.includes(n));
     const failing = [...new Set([...kept, ...names])].sort();
     const key = failing.join('\n');
@@ -1827,7 +1886,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         if (git(repo, 'update-ref', `refs/heads/${ref}`, c.head, '').status !== 0) return Promise.resolve(null);
         refs.push(ref);
         const e = { ...env, STUDIO_MAIN_ROOT: root, STUDIO_GATE_PRIORITY: 'landing', STUDIO_LAND_PROBE: '1', STUDIO_LAND_RETRY: '1', STUDIO_HEAVY_WAIT_MIN: String(Math.min(num(env.STUDIO_HEAVY_WAIT_MIN, 2), 2)), ...(stage ? { STUDIO_LAND_RETRY_STAGE: stage } : {}), ...(tests.length ? { STUDIO_LAND_RETRY_TESTS: tests.join(';') } : {}), ...(firstRun?.play?.mode ? { STUDIO_PLAY_MODE: firstRun.play.mode } : {}) };
-        for (const x of ['STUDIO_LAND_ONLY', 'STUDIO_LAND_KNOWN_RED', 'STUDIO_LAND_FULL', 'STUDIO_RULES_GREEN', 'STUDIO_RULES_MODE', 'STUDIO_HEAVY_HELD', 'STUDIO_EDITOR_SERVICE', 'STUDIO_EDITOR_SERVICE_CLI', 'STUDIO_PLAY_FILTER', 'STUDIO_UNITY_PLAYMODE_ARGS']) delete e[x];
+        for (const x of ['STUDIO_LAND_ONLY', 'STUDIO_LAND_KNOWN_RED', 'STUDIO_LAND_FULL', 'STUDIO_LAND_PART', 'STUDIO_RULES_GREEN', 'STUDIO_RULES_MODE', 'STUDIO_HEAVY_HELD', 'STUDIO_EDITOR_SERVICE', 'STUDIO_EDITOR_SERVICE_CLI', 'STUDIO_PLAY_FILTER', 'STUDIO_UNITY_PLAYMODE_ARGS']) delete e[x];
         if (engine === 'unity' && String(stage || '').toLowerCase() === 'play' && tests.length) e.STUDIO_UNITY_PLAYMODE_ARGS = `-testFilter "${tests.join(';')}"`;
         log(`[unity-train] ${id}: gate ${k + 1}: run ${st.group.join(', ')} on ${target} at ${short(tip)} through ${ref}; by name, does not land`);
         return runGateChild({ root, engine, gate: k + 1, args: s.many ? ['--branches', ref] : ['--branch', ref], env: e }).then((r) => ({ ...r, tree, kind }));
@@ -1857,7 +1916,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   const fullsOnTarget = async (when) => {
     // 2.98 (b): an overdue full run at the end goes only if it is still overdue with the settings as they are now.
     fresh('the full run');
-    if (when === 'end' && !dryRun) { fullDue = fullLandDue(root, engine, s.cfg, env, Date.now()); fullLast = Boolean(fullDue.why && fullDue.overdue); }
+    if (when === 'end' && !dryRun) { fullNow = fullLandNow(root, engine, s.cfg, { lanes: lanes.length || 1, env }); fullLast = fullNow.run && fullNow.when === 'end'; }
     const tipN = headOf(repo, target);
     const ow = when === 'idle' ? (rulesFirst ? owed0 : { why: '' }) : rcfg ? fullRulesOwed(root, engine, rcfg, { repo, tip: tipN, from: fromAll }) : { why: '' };
     if (ow.why && (when === 'idle' || ow.overdue)) {
@@ -1875,11 +1934,34 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       if (cancelledTrain(root, engine, id)) return true;
     }
     if (when === 'idle' ? !fullFirst : !fullLast) return false;
-    update({ now: 'the daily full run on the target alone' });
-    const fr = await landGroup([], `${target} alone`, { full: fullDue.why, when });
-    res.full = { status: fr.status, why: fullDue.why, overdue: fullDue.overdue, when };
-    if (!['pass', 'red'].includes(fr.status)) { log(`[unity-train] ${id}: the full run on the target alone ended ${fr.status} (${fr.why}); it is tried again at the next train`); ev('full_land', id, `the daily full run on ${target} alone could not run to its end (${fr.status}: ${String(fr.why || '').split('\n')[0]}); the land script must take a branch that is the target itself and land nothing (STUDIO_LAND_PROBE=1, docs/NATIVE-ENGINE.md); tried again at the next train`, { agent: by, to: 'producer', status: 'warn', meta: { status: fr.status, why: fullDue.why, alone: true, when } }); }
-    return fr.status === 'cancelled' || Boolean(cancelledTrain(root, engine, id));
+    // 2.98: the parts still missing on the target's tree, each its own land run; one part at the end of a train. A try with no
+    // result ends the run and backs off (fullPartDone); a red part ends it as a red full run does.
+    const fc = fullLandCfg(s.cfg);
+    const treeOf = (sha) => out(git(repo, 'rev-parse', `${sha}^{tree}`)) || null;
+    let tree = treeOf(headOf(repo, target));
+    const todo = fullLandTodo(root, engine, s.cfg, tree);
+    for (const part of when === 'end' ? todo.slice(0, 1) : todo) {
+      update({ now: `the daily full run on the target alone${part ? `, part ${part}` : ''}` });
+      const t0f = Date.now();
+      const fr = await landGroup([], `${target} alone`, { full: fullDue.why, when, part, timeoutMin: fc.timeoutMin });
+      const minutes = Math.max(1, Math.round((Date.now() - t0f) / 60000));
+      const after = fr.movedAlone ? treeOf(fr.movedAlone) : null;
+      const names = fr.status === 'red' && Array.isArray(fr.failures) ? fr.failures.length : 0;
+      const done = fullPartDone(root, engine, s.cfg, { part, tree, after, status: fr.status, timedOut: Boolean(fr.timedOut), names, minutes, train: id });
+      fullRunVerdict(fr, fc.parts.length === 1 || done.complete);
+      if (after) tree = after;
+      res.full = { status: fr.status, why: fullDue.why, overdue: fullDue.overdue, when, ...(part ? { part } : {}), ...(done.complete ? { complete: true } : {}) };
+      res.fullParts = [...(res.fullParts || []), { part, status: fr.status, minutes }];
+      if (done.complete && fc.parts.length > 1) log(`[unity-train] ${id}: the daily full run passed: every part (${fc.parts.join(', ')}) is green on ${target}'s tree ${short(tree)}`);
+      if (fr.status === 'pass') continue;
+      if (done.next) {
+        const m = `the daily full run${part ? `, part ${part},` : ''} on ${target} alone gave no result (${fr.status}: ${String(fr.why || '').split('\n')[0]}): it counts as a try, and the next try is not before ${done.next.slice(0, 16)} UTC (engines.${engine}.fullLand.backoffHours ${fc.backoffHours} h)${fr.timedOut ? '' : '. A land script must take a branch that is the target itself and land nothing (STUDIO_LAND_PROBE=1, docs/NATIVE-ENGINE.md)'}`;
+        log(`[unity-train] ${id}: ${m}`);
+        ev('full_land', id, m, { agent: by, to: 'producer', status: 'warn', meta: { status: fr.status, why: fullDue.why, alone: true, when, ...(part ? { part } : {}), next: done.next, ...(fr.timedOut ? { timeout: true } : {}) } });
+      }
+      return fr.status === 'cancelled' || Boolean(cancelledTrain(root, engine, id));
+    }
+    return Boolean(cancelledTrain(root, engine, id));
   };
 
   try {
@@ -2140,8 +2222,9 @@ export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'un
   if (st.running?.union?.length) lines.push(`Running ${L} train: merged as a union: ${st.running.union.join(', ')}`);
   if (st.running) lines.push(`${L} train running: ${st.running.id} by ${st.running.by || '?'} (pid ${st.running.pid}, since ${new Date(st.running.at).toISOString().slice(11, 16)} UTC)${st.running.lanes?.length ? `, ${st.running.lanes.join(', ')}` : ''}${st.running.now ? `; now: ${st.running.now}` : ''}`);
   // 2.85 (B-137): the daily full run is said plainly while it runs.
-  if (st.running?.full) lines.push(`This ${L} land run is the daily full run (${st.running.full.why}): every test runs, expect about ${st.running.full.minutes ? `${st.running.full.minutes} min` : 'the longest land run of the day'}.`);
+  if (st.running?.full) lines.push(`This ${L} land run is the daily full run${st.running.full.part ? `, part ${st.running.full.part}` : ''} (${st.running.full.why}): every test runs, expect about ${st.running.full.minutes ? `${st.running.full.minutes} min` : 'the longest land run of the day'}.`);
   // 2.85: the tests the target itself fails in the full run (not counted against any branch).
+  { const fl = fullLandLine(root, engine); if (fl) lines.push(fl); }
   { const b = readFullBaseline(root, engine); if (b.failing.length) lines.push(`Known red on the target in the full run: ${b.failing.length} test(s): ${b.failing.slice(0, 3).join(', ')}${b.failing.length > 3 ? ', ...' : ''} (not counted against any branch; a fix task is wanted)`); }
   // 2.86: listed flaky tests that keep costing runs, and lanes that wait for the target (red on it alone).
   try { for (const l of flakeLines(root, engine)) lines.push(l); } catch { /* the queue lines stand */ }
