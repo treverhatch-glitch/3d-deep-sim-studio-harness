@@ -2,11 +2,11 @@
  * harness/engine-train-control.mjs — control of an engine train: which lanes it takes, stopping it, its auto start.
  *   selectBatch        the batch from the queue: --only ids / a --tag (else untagged lanes only), then an "alone" lane
  *                      rides by itself, then engines.<x>.batchGroup "play" (head lane's Play Mode class), then the cap
- *                      (--max, engines.<x>.batchMax, STUDIO_ENGINE_BATCH_MAX)
+ *                      (--max, engines.<x>.batchMax, STUDIO_ENGINE_BATCH_MAX); a full head may wait for a skip batch
+ *   idleTag            the tag group the automatic start takes when no untagged lane waits (engines.<x>.tagsWhenIdle)
  *   cancelEngineTrain  `npm run task -- train cancel --engine <x> --by <name>`: cancel file first, the train's tree
  *                      killed, gate worktree reset to the target, integration refs deleted, lock released
- *   setEngineAuto      `npm run task -- train auto off|on --engine <x> --by <name> [--hours N]`: the Line Producer's
- *                      automatic start (.studio/train/<x>-auto.json)
+ *   setEngineAuto      `train auto off|on --engine <x> --by <name> [--hours N]`: the automatic start (<x>-auto.json)
  * Who may cancel or switch: the board-decision verdict (harness/permission.mjs mayDecide('board')): the owner,
  * stand-ins and outside agents; never a launched worker session.
  */
@@ -42,13 +42,16 @@ export const onlyList = (v) => [...new Set((Array.isArray(v) ? v : String(v ?? '
 
 /**
  * 2.84 (u): engines.<x>.batchMax (STUDIO_ENGINE_BATCH_MAX over it; 0: no cap) and engines.<x>.batchGroup ("play", else
- * off). { batchMax, group }.
+ * off). 2.98 (b): engines.<x>.batchSkipFirst (4; 0: off). { batchMax, group, skipFirst }.
  */
 export function batchLimits(cfg = {}, env = process.env) {
   let batchMax = 0;
   for (const x of [env.STUDIO_ENGINE_BATCH_MAX, cfg?.batchMax]) { const t = String(x ?? '').trim(); if (t !== '' && Number.isFinite(Number(t)) && Number(t) >= 0) { batchMax = Math.floor(Number(t)); break; } }
-  return { batchMax, group: String(cfg?.batchGroup || '').trim().toLowerCase() === 'play' ? 'play' : null };
+  const sf = Number(cfg?.batchSkipFirst ?? 4);
+  return { batchMax, group: String(cfg?.batchGroup || '').trim().toLowerCase() === 'play' ? 'play' : null, skipFirst: Number.isFinite(sf) && sf > 0 ? Math.floor(sf) : 0 };
 }
+/** 2.98 (b): how many trains in a row a full head may be passed over for a skip batch. */
+export const SKIP_FIRST_MAX = 2;
 
 /**
  * 2.84 (u): the Play Mode class of one queued lane: the `mode` playSelection gives for the paths the lane's branch
@@ -77,11 +80,11 @@ export function laneAloneWhy({ repo, target, cfg = {}, lane }) {
 
 /**
  * This train's batch from the queue (in queue order). opts: only (task ids), tag, max (--max), batchMax, group ('play'
- * | null), classOf(lane) -> class, held (2.96: Map task -> why; left out first, even with --only). Order: --only and
- * --tag (neither: untagged lanes only), held, an alone lane by itself, grouping, the cap. { lanes, why, total, waiting,
- * cls, alone, tagged, held } or { error: 'unknown', unknown, why } when an --only id is not queued.
+ * | null), classOf(lane) -> class, held (2.96: Map task -> why; left out first, even with --only), skipFirst (2.98).
+ * Order: --only and --tag (neither: untagged lanes only), held, an alone lane by itself, grouping, the cap. { lanes, why,
+ * total, waiting, cls, alone, tagged, held, passedOver } or { error: 'unknown', unknown, why } when an --only id is not queued.
  */
-export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 0, group = null, classOf = () => 'full', isVision = null, waits = null, aloneOf = null, held = null } = {}) {
+export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 0, group = null, classOf = () => 'full', isVision = null, waits = null, aloneOf = null, held = null, skipFirst = 0 } = {}) {
   const q = Array.isArray(queue) ? queue.filter((e) => e && e.task) : [];
   const ids = onlyList(only);
   const unknown = ids.filter((id) => !q.some((e) => e.task === id));
@@ -116,7 +119,15 @@ export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 
   const classes = new Map();
   const cls = (l) => { if (!classes.has(l.task)) { let c = 'full'; try { c = String(classOf(l) || 'full'); } catch { c = 'full'; } classes.set(l.task, c); } return classes.get(l.task); };
   let head = null;
-  if (group === 'play' && pool.length && !alone) { head = cls(pool[0]); pool = pool.filter((l) => cls(l) === head); parts.push(`class ${head}`); }
+  let passedOver = null;
+  if (group === 'play' && pool.length && !alone) {
+    head = cls(pool[0]);
+    // 2.98 (b): a full head with skipFirst skip lanes behind it waits for the skip batch, at most SKIP_FIRST_MAX trains in a row
+    // (lane.passedOver, kept on the queue entry by the train).
+    const nSkip = head === 'full' && skipFirst > 0 && (Number(pool[0].passedOver) || 0) < SKIP_FIRST_MAX ? pool.filter((l) => cls(l) === 'skip').length : 0;
+    if (nSkip && nSkip >= skipFirst) { passedOver = pool[0].task; head = 'skip'; parts.push(`the head ${passedOver} is class full and ${nSkip} skip lanes wait: the skip batch goes first`); }
+    pool = pool.filter((l) => cls(l) === head); parts.push(`class ${head}`);
+  }
   const caps = [Number(max) || 0, Number(batchMax) || 0].filter((n) => n > 0);
   const cap = caps.length ? Math.min(...caps) : 0;
   if (cap && pool.length > cap) pool = pool.slice(0, cap);
@@ -130,7 +141,35 @@ export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 
     byClass = ` (${Object.entries(n).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([k, v]) => `${v} ${k}`).join(', ')})`;
   }
   const why = `${pool.length} of ${q.length} queued${parts.length ? `: ${parts.join(', ')}` : ''}; ${left.length} wait${byClass}`;
-  return { lanes: pool, why, total: q.length, waiting: left.length, cls: head, alone, tagged, classes: Object.fromEntries(classes), held: heldOut };
+  return { lanes: pool, why, total: q.length, waiting: left.length, cls: head, alone, tagged, classes: Object.fromEntries(classes), held: heldOut, passedOver };
+}
+
+/** 2.98 (b): engines.<x>.tagsWhenIdle (default true): the automatic start may take a tag group when no untagged lane waits. */
+export const tagsWhenIdle = (cfg = {}) => cfg?.tagsWhenIdle !== false;
+
+/**
+ * 2.98 (b): the tag group an automatic start takes: none while an untagged lane waits; else the tag whose oldest lane was
+ * queued first. Lanes in `skip` (waiting for the target) are not counted. { tag, n, oldestAt } or null.
+ */
+export function idleTag(queue = [], skip = new Set()) {
+  const q = (Array.isArray(queue) ? queue : []).filter((e) => e?.task && !skip.has(e.task));
+  if (!q.length || q.some((e) => !e.tag)) return null;
+  const at = (e) => { const t = Date.parse(e.at || ''); return Number.isFinite(t) ? t : Infinity; };
+  const first = q.reduce((a, e) => (at(e) < at(a) ? e : a), q[0]);
+  return { tag: first.tag, n: q.filter((e) => e.tag === first.tag).length, oldestAt: first.at || null };
+}
+
+/**
+ * 2.98 (b): what changed between two reads of engines.<x>: ["rules.focus.splitMax 3 -> 1", ...] by dotted path (a list
+ * is one value), sorted; past `max` the rest is counted.
+ */
+export function configChanges(a = {}, b = {}, max = 6) {
+  const flat = (o, p, m) => { if (o && typeof o === 'object' && !Array.isArray(o)) { for (const [k, v] of Object.entries(o)) flat(v, p ? `${p}.${k}` : k, m); } else if (p) m[p] = JSON.stringify(o); return m; };
+  const x = flat(a, '', {});
+  const y = flat(b, '', {});
+  const say = (v) => (v === undefined ? 'unset' : v.length > 40 ? `${v.slice(0, 37)}...` : v);
+  const d = [...new Set([...Object.keys(x), ...Object.keys(y)])].filter((k) => x[k] !== y[k]).sort().map((k) => `${k} ${say(x[k])} -> ${say(y[k])}`);
+  return d.length > max ? [...d.slice(0, max), `and ${d.length - max} more`] : d;
 }
 
 /** Tags in a queue: { <tag>: n } (untagged lanes left out). */

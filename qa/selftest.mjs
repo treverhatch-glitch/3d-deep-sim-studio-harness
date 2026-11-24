@@ -5506,6 +5506,14 @@ if (inShard('selftest-297d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.98 (b): the train reads its config before each step, empty lanes are refused, quick lanes first, tag groups when idle.
+if (inShard('selftest-298b')) {
+  const dir = copyRepo();
+  const { selftest298B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298b.mjs')).href);
+  await selftest298B({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

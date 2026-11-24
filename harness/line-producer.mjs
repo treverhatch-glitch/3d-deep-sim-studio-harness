@@ -1106,7 +1106,10 @@ export function engineBatchWait(f) {
   return { ...base, wait: true, left, why: `waiting up to ${rules.waitMin} min for more ${L} branches: ${counted} of ${rules.min} queued, the oldest for ${Math.round(waitedMin)} min, ${working.length} session${working.length === 1 ? '' : 's'} still working on ${L} tasks (${working.slice(0, 4).join(', ')}); ${left} min left` };
 }
 
-/** One look at every engine train: [{ engine, queued, running, expectedMin, floorGb, start, why, started? }]. Starts those whose window is open (unless dryRun or report mode). deps: rig, rigBudget, machine, root, startTrain(engine) -> { pid }. */
+/** 2.98 (b): stand-in for part A1's "would a full land run start now?"; A1's function takes its place at the merge. */
+const fullLandStartsNow = (ut, root, t, env, now) => { try { return ut.fullLandDue(root, t.name, t.cfg || {}, env, now, { start: false }).why || ''; } catch { return ''; } };
+
+/** One look at every engine train: [{ engine, queued, running, expectedMin, floorGb, start, why, started? }]. Starts those whose window is open (unless dryRun or report mode). deps: rig, rigBudget, machine, root, startTrain(engine, { tag }) -> { pid }. */
 export async function enginePass({ now = Date.now(), env = process.env, dryRun = false, rig = null, deps = {} } = {}) {
   const et = await import('./engine-tracks.mjs');
   const ut = await import('./unity-train.mjs');
@@ -1144,13 +1147,16 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
   let toldChanged = false;
   const out = [];
   for (const t of targets) {
-    // The automatic start takes untagged lanes only: a tagged lane waits for train --engine <x> --tag <tag>.
+    // The automatic start takes untagged lanes; 2.98 (b): with none waiting, the tag group whose oldest lane waited longest.
     const qAll = ut.readUnityQueue(root, t.name);
     // 2.86: lanes a train left waiting for the target (red on it alone) are not counted until the target moves.
     let waitT = new Set();
     try { waitT = ut.waitingOnTarget(root, t.name, qAll); } catch { /* counted */ }
-    const q = qAll.filter((e) => !e?.tag && !waitT.has(e.task));
+    let q = qAll.filter((e) => !e?.tag && !waitT.has(e.task));
     const taggedN = qAll.length - q.length;
+    // Decided before any full run of the target alone (engines.<x>.tagsWhenIdle; false: only a person's train --tag).
+    const idle = !q.length && taggedN && ctl.tagsWhenIdle(t.cfg || {}) ? ctl.idleTag(qAll, waitT) : null;
+    if (idle) q = qAll.filter((e) => e.tag === idle.tag && !waitT.has(e.task));
     // `train auto off --engine <x>` (.studio/train/<x>-auto.json; --hours runs out by itself).
     const ea = ctl.engineAutoState(root, t.name, { env, now });
     if (ea.expired && acting) {
@@ -1174,10 +1180,12 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     // 2.86: the daily full run runs on the target alone when the queue is empty: a due one starts a train with no lane.
     // 2.91: so does the full rules run rules.focus.fullEveryHours owes (not while it is red on a target the rules tests see unchanged).
     if (!q.length) {
-      try { const fd = ut.fullLandDue(root, t.name, t.cfg || {}, env, now, { start: false }); if (fd.why) f.fullDue = fd.why; } catch { /* not due */ }
+      const fd = fullLandStartsNow(ut, root, t, env, now);
+      if (fd) f.fullDue = fd;
       try { const ow = ut.fullRulesOwedNow(root, t.name, env, now); if (ow.why) f.fullDue = f.fullDue ? `${f.fullDue}; the full rules run: ${ow.why}` : `the full rules run: ${ow.why}`; } catch { /* not owed */ }
     }
     const w = engineWindow(f, env);
+    if (idle && w.start) w.why = `no untagged ${t.label} branch waits: tag ${idle.tag} goes (${idle.n} lane(s), the oldest queued ${String(idle.oldestAt || '?').slice(0, 16)}; engines.${t.name}.tagsWhenIdle); ${w.why}`;
     if (autoOn && t.trainAuto && !ea.on && ea.source === 'file') {
       w.start = false; w.wait = false; w.why = ctl.autoOffWhy(ea, t.name);
       const last = Date.parse(told[t.name] || '');
@@ -1216,7 +1224,7 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
         }
       } else if (batchState[t.name]) { delete batchState[t.name]; batchChanged = true; }
     } else if (batchState[t.name] && !w.wait) { delete batchState[t.name]; batchChanged = true; }
-    const row = { engine: t.name, queued: q.length, ...(taggedN ? { tagged: taggedN } : {}), ...(!ea.on && ea.source === 'file' ? { autoOff: true } : {}), running: Boolean(running), expectedMin: exp.minutes, expectedFrom: exp.from, floorGb: floor.gb, start: w.start, why: w.why, ...(batchWaiting ? { batchWait: true } : {}) };
+    const row = { engine: t.name, queued: q.length, ...(taggedN ? { tagged: taggedN } : {}), ...(idle ? { tag: idle.tag } : {}), ...(!ea.on && ea.source === 'file' ? { autoOff: true } : {}), running: Boolean(running), expectedMin: exp.minutes, expectedFrom: exp.from, floorGb: floor.gb, start: w.start, why: w.why, ...(batchWaiting ? { batchWait: true } : {}) };
     // 2.90: a rules check that judged no lane on 2+ trains in a row (the time it costs each train).
     try { const idle = ut.rulesIdleLine(root, t.name); if (idle) row.rulesIdle = idle; } catch { /* the row stands without it */ }
     // 2.90: the facts for `train parallel on|off` (two land runs at once), when a second gate is configured or it is on.
@@ -1227,13 +1235,13 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     } catch { /* the row stands without it */ }
     if (w.start && acting) {
       try {
-        const r = deps.startTrain ? await deps.startTrain(t.name) : startEngineTrain(root, t.name, env);
+        const r = deps.startTrain ? await deps.startTrain(t.name, idle ? { tag: idle.tag } : {}) : startEngineTrain(root, t.name, env, idle?.tag || null);
         row.started = true;
         row.pid = r?.pid || null;
         starts[t.name] = { at: new Date(now).toISOString(), pid: row.pid };
         fs.mkdirSync(LINE_DIR(), { recursive: true });
         fs.writeFileSync(ENGINE_STARTS(), `${JSON.stringify(starts, null, 2)}\n`);
-        logAction({ kind: 'engine-train', what: `started the ${t.label} train (${q.length} branch(es): ${q.map((e) => e.task).join(', ')}): ${w.why}`, meta: { engine: t.name, tasks: q.map((e) => e.task), expectedMin: exp.minutes } });
+        logAction({ kind: 'engine-train', what: `started the ${t.label} train${idle ? ` for tag ${idle.tag}` : ''} (${q.length} branch(es): ${q.map((e) => e.task).join(', ')}): ${w.why}`, meta: { engine: t.name, tasks: q.map((e) => e.task), expectedMin: exp.minutes, ...(idle ? { tag: idle.tag } : {}) } });
       } catch (e) { row.started = false; row.why = `${w.why}; could not start it: ${e.message}`; }
     }
     out.push(row);
@@ -1336,10 +1344,10 @@ export async function autoQueuePass({ root, now = Date.now(), env = process.env,
 }
 
 /** `node harness/task.mjs train --engine <x> --by line-producer`, detached, its output in .studio/line/<x>-train.log. */
-export function startEngineTrain(root, engine, env = process.env) {
+export function startEngineTrain(root, engine, env = process.env, tag = null) {
   fs.mkdirSync(LINE_DIR(), { recursive: true });
   const fd = fs.openSync(path.join(LINE_DIR(), `${engine}-train.log`), 'a');
-  const child = spawn(process.execPath, [path.join(root, 'harness', 'task.mjs'), 'train', '--engine', engine, '--by', LINE_AGENT], { cwd: root, env: { ...env, STUDIO_LOCK_OWNER: LINE_AGENT }, detached: true, stdio: ['ignore', fd, fd], windowsHide: true });
+  const child = spawn(process.execPath, [path.join(root, 'harness', 'task.mjs'), 'train', '--engine', engine, ...(tag ? ['--tag', tag] : []), '--by', LINE_AGENT], { cwd: root, env: { ...env, STUDIO_LOCK_OWNER: LINE_AGENT }, detached: true, stdio: ['ignore', fd, fd], windowsHide: true });
   child.unref();
   try { fs.closeSync(fd); } catch {}
   return { pid: child.pid };
