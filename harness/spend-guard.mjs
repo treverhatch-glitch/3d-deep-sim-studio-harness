@@ -5,12 +5,11 @@
  * Any tool in the order (studio/budget.json `order`; quota marks in .studio/tool-quota.json) can carry a guard:
  *   STUDIO_SPEND_GUARD_TOKENS_<TOOL>=n         tokens this budget week (the launcher's own counts)
  *   .studio/credit.json { "<tool>": { "used": n, "guard": n } }   any meter's numbers (its own units)
- * At STUDIO_SPEND_GUARD_AT (0.95) of a guard the tool gets a quota mark (until its weekly reset, or
- * STUDIO_SPEND_GUARD_HOURS, 24), so pickTool() moves the next session to the next tool and a tool.takeover event goes
- * out. Other tools join the order with STUDIO_TOOL_<TOOL>_CMD (with {kickoff}, {agent}, {model}, {role}, {task}).
+ * At STUDIO_SPEND_GUARD_AT (0.95) of a guard the tool gets a quota mark for STUDIO_SPEND_GUARD_HOURS (24), so
+ * pickTool() moves the next session to the next tool and a tool.takeover event goes out. Other tools join the order
+ * with STUDIO_TOOL_<TOOL>_CMD (with {kickoff}, {agent}, {model}, {role}, {task}).
  *   node harness/spend-guard.mjs [status|pass]
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
@@ -55,10 +54,7 @@ export function spendGuardPass({ env = process.env, now = Date.now(), events } =
     const mark = quotaMark(tool);
     if (mark && Date.parse(mark.until) > now) continue;
     const hours = Number(env.STUDIO_SPEND_GUARD_HOURS ?? 24);
-    markExhausted(tool, `spend guard: ${tool} at ${Math.round(g.share * 100)}% of its ${g.by} (resets in ${hours} h)`, now);
-    // a guard is not a provider limit: hold it for the configured hours, not the 1 h default
-    const q = read(path.join(STUDIO_STATE_DIR, 'tool-quota.json'), {});
-    if (q[tool]) { q[tool].until = new Date(now + hours * 3600000).toISOString(); q[tool].guard = true; fs.writeFileSync(path.join(STUDIO_STATE_DIR, 'tool-quota.json'), `${JSON.stringify(q, null, 2)}\n`); }
+    markExhausted(tool, `spend guard: ${tool} at ${Math.round(g.share * 100)}% of its ${g.by} (resets in ${hours} h)`, now, { hours, flag: 'guard' });
     const next = pickTool(tool, now);
     const msg = `${tool} reached ${Math.round(g.share * 100)}% of its ${g.by}: ${next ? `${next} takes over new sessions` : 'no tool left in the order (npm run budget -- order ...)'}`;
     emitEvent({ type: 'tool.takeover', agent: 'watchdog', to: 'human', status: next ? 'warn' : 'blocked', msg, meta: { from: tool, to: next, by: g.by } });

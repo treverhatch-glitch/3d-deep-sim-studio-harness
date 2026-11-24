@@ -35,11 +35,9 @@ export async function selftest297C({ dir, report, tmpRoot }) {
 
   try {
     fs.mkdirSync(R, { recursive: true });
-    // Two kinds on one engine: the heavier one (rules stage run) and the lighter one (rules told green); old whole-machine
-    // peaks of the heavier runs make the old floor 18.8 GB (17.3 + 1.5).
+    // Two kinds on one engine: the heavier one (rules stage run) and the lighter one (rules told green).
     store({ unity: {
       kinds: { 'land with-rules play-full': [run('a', 0, 15), run('b', 0, 15)], 'land no-rules play-skip': [run('c', 0, 10.1), run('d', 0, 9.8)] },
-      peaks: [17.3, 17.3, 17.3].map((gb, i) => ({ gb, status: 'pass', at: `2026-01-0${i + 1}T00:00:00.000Z` })),
     } });
     const F = probe(`import { landHeavyOpts } from ${u('harness/unity-gate.mjs')};
 import { engineFloor } from ${u('harness/engine-tracks.mjs')};
@@ -49,7 +47,7 @@ const h = await landHeavyOpts('unity', { env: { ...process.env, ...env } });
 const k = (e) => engineFloor('unity', { root: process.cwd(), env: { ...process.env, ...e }, kind: 'land with-rules play-zzz' });
 const none = engineFloor('unity', { root: process.cwd(), env: process.env });
 console.log(JSON.stringify({ kind: landKind({ ...process.env, ...env }), opts: { gb: h.heavyOpts.minFreeGb, why: h.heavyOpts.floorWhy }, unknown: k({}), none }));`, { E: JSON.stringify(rulesGreen) });
-    await guard('2.97 (c1) a land run told the rules are green waits for the need of land no-rules play-skip (10.1 + 1.5 = 11.6 GB), not the 18.8 GB learned from the heavier runs, and the line names the kind (fails before this fix: the 18.8 GB of the whole machine)', () => [
+    await guard('2.97 (c1) a land run told the rules are green waits for the need of land no-rules play-skip (10.1 + 1.5 = 11.6 GB), not the heavier kind\'s 16.5 GB, and the line names the kind (fails before this fix: the 18.8 GB of the whole machine)', () => [
       F.kind === 'land no-rules play-skip' && F.opts?.gb === 11.6 && /^need of land no-rules play-skip \(peak of its last 2 passed runs plus 1\.5 GB\)$/.test(F.opts.why || ''), JSON.stringify(F)]);
 
     // The wait line itself: free RAM 1 GB, under any floor (a small machine caps the floor at 60% of its RAM), the wait ends at once.
@@ -76,8 +74,8 @@ console.log(JSON.stringify({ owner, tuned, both }));`);
     await guard('2.97 (c2) the owner\'s environment setting (14 GB) and the tuned ram-floor (12 GB) still win over the measured need, the environment first', () => [
       O.owner?.gb === 14 && /owner/.test(O.owner.from) && O.tuned?.gb === 12 && /tuned/.test(O.tuned.from) && O.both?.gb === 14, JSON.stringify(O)]);
 
-    await guard('2.97 (c3) a kind with no passed run falls back to the old numbers (18.8 GB) and says no passed sampled run of that kind; a caller with no kind gets the heaviest land kind measured (15 + 1.5 = 16.5 GB) and says so', () => [
-      F.unknown?.gb === 18.8 && /^no passed sampled run of land with-rules play-zzz yet; /.test(F.unknown.from) && F.none?.gb === 16.5 && /^no kind given, so the heaviest land kind measured: need of land with-rules play-full/.test(F.none.from), JSON.stringify({ unknown: F.unknown, none: F.none })]);
+    await guard('2.97 (c3) a kind with no passed run falls back to the engine table (12 GB) and says no passed sampled run of that kind; a caller with no kind gets the heaviest land kind measured (15 + 1.5 = 16.5 GB) and says so', () => [
+      F.unknown?.gb === 12 && /^no passed sampled run of land with-rules play-zzz yet; the engine table/.test(F.unknown.from) && F.none?.gb === 16.5 && /^no kind given, so the heaviest land kind measured: need of land with-rules play-full/.test(F.none.from), JSON.stringify({ unknown: F.unknown, none: F.none })]);
 
     // ---- unknown runs ----
     const sDir = path.join(R, '.studio', 'engine', 'unity-samples');

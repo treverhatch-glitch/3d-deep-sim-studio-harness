@@ -1,7 +1,7 @@
 /**
  * harness/engine-ram.mjs — what an engine land needs in free RAM, and how the Line Producer makes room for it.
  * No permanent reservation: the land counts only while one is queued or near, and is released at once when it starts.
- *   1. The need: the owner/tuned floor, else the passed sampled runs of the land kind (run-cost.mjs landNeed), else this file's peaks.
+ *   1. The need: the owner/tuned floor, else the passed sampled runs of the land kind (run-cost.mjs landNeed), else the table.
  *   2. The hold (engineHoldPlan, pure; engineHoldPass reads the machine): while a land is queued or near (an engine
  *      porter ran `task done --check`), new heavy starts wait (a quiet hold tagged "engine-land"; the land ignores it).
  *      If free RAM is short and running verifies aren't about to finish, the builder target steps down (never a kill).
@@ -15,9 +15,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { readJson } from './fsafe.mjs';
 import { numSplit as num } from './helpers.mjs';
-
-const r1 = (x) => Math.round(x * 10) / 10;
-const tsOf = (v) => (typeof v === 'number' ? v : Date.parse(v));
 
 export const ramFile = (root) => path.join(root, '.studio', 'engine-ram.json');
 export const holdStateFile = (root) => path.join(root, '.studio', 'line', 'engine-hold.json');
@@ -51,60 +48,7 @@ export function pushSlots(base, root, env = process.env, totalGb = os.totalmem()
 }
 export const holdMaxMin = (env = process.env) => Math.max(0, num(env.STUDIO_ENGINE_HOLD_MAX_MIN, 30));
 
-// ---- 1. the measured need ---------------------------------------------------------------------------------------
-
-/** The machine monitor's samples (.studio/machine-history.jsonl: { at, ram: [usedGb, totalGb] }) as [{ at, used }]. */
-export function readUsedHistory(root) {
-  let text = '';
-  try { text = fs.readFileSync(path.join(root, '.studio', 'machine-history.jsonl'), 'utf8'); } catch { return []; }
-  const out = [];
-  for (const l of text.replace(/\r\n/g, '\n').split('\n')) {
-    if (!l.trim()) continue;
-    try { const s = JSON.parse(l); const at = tsOf(s.at); if (Number.isFinite(at) && Number.isFinite(Number(s.ram?.[0]))) out.push({ at, used: Number(s.ram[0]) }); } catch { /* skip */ }
-  }
-  return out;
-}
-
-/**
- * The extra RAM a land run took: the highest used-RAM sample while it ran, less the sample just before it started
- * (taken at most 10 min earlier). null when the monitor has no sample on either side (nothing is guessed).
- */
-export function peakFromHistory(samples, startMs, endMs) {
-  const before = samples.filter((s) => s.at <= startMs && startMs - s.at <= 600000).sort((a, b) => b.at - a.at)[0];
-  const during = samples.filter((s) => s.at > startMs && s.at <= endMs + 60000);
-  if (!before || !during.length) return null;
-  return r1(Math.max(0, Math.max(...during.map((s) => s.used)) - before.used));
-}
-
-/** Keep one land run's measured peak (green runs teach the need; others are kept for the record). Never throws. */
-export function recordLandPeak(engine, { root, startMs, endMs, status, samples = null } = {}) {
-  try {
-    const gb = peakFromHistory(samples || readUsedHistory(root), startMs, endMs);
-    if (gb === null || !(gb > 0)) return null;
-    const all = readJson(ramFile(root), {}) || {};
-    const list = Array.isArray(all[engine]?.peaks) ? all[engine].peaks : [];
-    list.push({ gb, status: status || null, at: new Date(endMs).toISOString() });
-    all[engine] = { ...(all[engine] || {}), peaks: list.slice(-20) };
-    fs.mkdirSync(path.dirname(ramFile(root)), { recursive: true });
-    fs.writeFileSync(ramFile(root), `${JSON.stringify(all, null, 2)}\n`);
-    return gb;
-  } catch { return null; }
-}
-
-/** The measured need of an engine's land: { gb, n, peak, from } from the last green runs, or null (too few runs / off). */
-export function learnedNeed(engine, { root, env = process.env } = {}) {
-  const runs = num(env.STUDIO_ENGINE_RAM_RUNS, 3);
-  if (!(runs > 0)) return null;
-  const green = ((readJson(ramFile(root), {}) || {})[engine]?.peaks || []).filter((p) => p.status === 'pass' && Number(p.gb) > 0).slice(-5);
-  if (green.length < runs) return null;
-  const peak = Math.max(...green.map((p) => Number(p.gb)));
-  const margin = Math.max(0, num(env.STUDIO_ENGINE_RAM_MARGIN_GB, 1.5));
-  const min = Math.max(0, num(env.STUDIO_ENGINE_RAM_MIN_GB, 4));
-  const gb = Math.max(min, Math.ceil((peak + margin) * 10) / 10);
-  return { gb, n: green.length, peak, from: `measured: the peak of the last ${green.length} green land run(s) was ${peak} GB, plus ${margin} GB margin${gb === min && peak + margin < min ? `, raised to the ${min} GB minimum` : ''} (.studio/engine-ram.json)` };
-}
-
-// ---- 2. the hold --------------------------------------------------------------------------------------------------
+// ---- the hold --------------------------------------------------------------------------------------------------
 
 const isVerify = (h) => !h?.claim?.engine && /verify|gate/i.test(`${h?.claim?.kind || ''} ${h?.label || ''}`);
 

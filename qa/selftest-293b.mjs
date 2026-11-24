@@ -178,8 +178,10 @@ process.stdin.resume();
     const reach = (r?.reach || []).map(fwdp);
     const eng = engineDir('T-14');
     const extra = allow.filter((x) => !['command(node)', 'write_file'].includes(x));
-    // Every added rule names one of the session's folders, and none is wider (the whole .lanes, the studio, the disk).
-    const scoped = extra.length > 0 && extra.every((x) => reach.some((d) => x.includes(d) || x.includes(d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
+    // Every added rule names one of the session's folders (2.98: its lane copy too, for write rules), and none is wider
+    // (the whole .lanes, the studio, the disk).
+    const laneCopy = r?.copy?.dir ? fwdp(path.join(S, r.copy.dir)) : null;
+    const scoped = extra.length > 0 && extra.every((x) => [...reach, ...(laneCopy ? [laneCopy] : [])].some((d) => x.includes(d) || x.includes(d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
     const wide = extra.filter((x) => /\((?:read_file|command)?\)$/.test(x) || x.includes(`${fwdp(path.join(S, '.lanes'))})`) || x.includes(`(${fwdp(S)})`) || /^command\(git\)$|push|reset|checkout/.test(x));
     const tpl = spawnSync(process.execPath, ['-e', `import(${JSON.stringify(pathToFileURL(path.join(S, 'harness', 'agy-allow.mjs')).href)}).then((m) => console.log(JSON.stringify({ custom: m.agyReachRules({ dirs: ['/s/studio', '/s/.lanes/engine/T-1'], engineDir: '/s/.lanes/engine/T-1', env: { STUDIO_AGY_REACH_RULES: '["read({dir})","run({engine} {verb})","everything"]' } }), off: m.agyReachRules({ dirs: ['/s/studio'], env: { STUDIO_AGY_REACH_RULES: 'off' } }), bad: m.agyReachRules({ dirs: ['/s/studio'], env: { STUDIO_AGY_REACH_RULES: 'not json' } }) })))`], { windowsHide: true, encoding: 'utf8', timeout: 60000 });
     let t = null; try { t = JSON.parse(String(tpl.stdout).trim().split('\n').pop()); } catch { t = null; }

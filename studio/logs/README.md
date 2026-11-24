@@ -2,12 +2,12 @@
 
 **2-minute read for the owner: the latest summary is first. Then open problems, then proposals waiting for you.**
 
-## Latest summary — 2026-11-21 (2.97)
-- **Done:** 2.96 (every run sampled, narrowing by the failing tests, one green per tree, held lanes, union merge) is on main and ran a day in the one studio on record: 18 tasks landed in about 8 hours.
-- **In progress:** 2.97 on a branch, merged when its online checks pass: the rules green judged by what lands and never lost in silence, a union merge for a line both lanes lengthen, the memory floor of the land kind, "too short to sample" in place of 0 GB, a red first test narrowed by its own words, a drain that means no new train, a train that starts again when the harness changed under it, an upgrade that fetches first. Notes: docs/RELEASE-2.97.0.md, studio/notes/HANDOFF-2.97-2026-11-21.md.
-- **Untested:** nothing of 2.97 has run on Windows or a real engine before the online checks; the train's restart is checked for the web train only; measured admission is still off in the studio.
+## Latest summary — 2026-11-24 (2.98)
+- **Done:** 2.97 (the rules green judged by what lands, a union merge for lengthened lines, the memory floor of the land kind, a drain that means no new train) is on main and has run three days in the one studio on record: 8-lane batches land green and a train often starts with 37 to 41 of 41 shards already checked.
+- **In progress:** 2.98 on a branch, merged when its online checks pass: the daily full land run in parts with a back-off, rules parts that build once and never go red on a locked file, config read at each step, empty lanes refused, tasks with a checklist and child tasks, quick lanes before a slow head, tag groups when the queue is empty, quota marks on evidence, agy and the API pool on engine worktrees, disk pruning (off until set), a session's record written whole. Removed: the whole-machine memory learning and the `rules.peak` reader. Notes: docs/RELEASE-2.98.0.md, studio/notes/HANDOFF-2.98-2026-11-24.md.
+- **Untested:** nothing of 2.98 has run on Windows, a real engine, a real `dotnet` or a real agy before the online checks; what a full-run part runs is the studio's land script's to define.
 - **Open problems:** P-370, P-373, P-346, P-005, P-009.
-- **Waiting for your OK:** whether a count ratchet may land with a fix task filed; which unused features to retire.
+- **Waiting for your OK:** whether a count ratchet may land with a fix task filed; whether tag groups should start by themselves by default; which unused features to retire.
 
 ## The files
 | File | What | Format |

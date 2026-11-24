@@ -45,7 +45,7 @@ export const NEVER_RELEASE_RULES = ['protected', 'harness', 'test-deleted', 'gol
 const git = (root, ...args) => spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
 export const policyBody = (d) => { const { signature, ...rest } = d || {}; return rest; };
 
-function ownerPub(root) {
+export function ownerPub(root) {
   const r = git(root, 'show', `HEAD:${OWNER_PUB_REL}`);
   const pem = r.status === 0 ? r.stdout : (fs.existsSync(path.join(root, OWNER_PUB_REL)) ? fs.readFileSync(path.join(root, OWNER_PUB_REL), 'utf8') : '');
   return /BEGIN PUBLIC KEY/.test(pem || '') ? pem : null;

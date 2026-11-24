@@ -2,11 +2,11 @@
  * harness/engine-train-control.mjs — control of an engine train: which lanes it takes, stopping it, its auto start.
  *   selectBatch        the batch from the queue: --only ids / a --tag (else untagged lanes only), then an "alone" lane
  *                      rides by itself, then engines.<x>.batchGroup "play" (head lane's Play Mode class), then the cap
- *                      (--max, engines.<x>.batchMax, STUDIO_ENGINE_BATCH_MAX)
+ *                      (--max, engines.<x>.batchMax, STUDIO_ENGINE_BATCH_MAX); a full head may wait for a skip batch
+ *   idleTag            the tag group the automatic start takes when no untagged lane waits (engines.<x>.tagsWhenIdle)
  *   cancelEngineTrain  `npm run task -- train cancel --engine <x> --by <name>`: cancel file first, the train's tree
  *                      killed, gate worktree reset to the target, integration refs deleted, lock released
- *   setEngineAuto      `npm run task -- train auto off|on --engine <x> --by <name> [--hours N]`: the Line Producer's
- *                      automatic start (.studio/train/<x>-auto.json)
+ *   setEngineAuto      `train auto off|on --engine <x> --by <name> [--hours N]`: the automatic start (<x>-auto.json)
  * Who may cancel or switch: the board-decision verdict (harness/permission.mjs mayDecide('board')): the owner,
  * stand-ins and outside agents; never a launched worker session.
  */
@@ -17,7 +17,8 @@ import { emitEvent, readRecentEvents } from './event.mjs';
 import { visionFixIds, visionFirst } from './vision-fix.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { pidAlive } from './proc-identity.mjs';
-import { changedPaths, playSelection, playFocusConfig } from './engine-rules.mjs';
+import { changedPaths, playSelection, playFocusConfig, removeCheckout } from './engine-rules.mjs';
+import { measureTree } from './lane-disk.mjs';
 import { engineTarget, engineFiles } from './engine-tracks.mjs';
 import { foldRealOf, isOff as offWord, realOrResolved as real, slashPath as fwd, sleepSyncClamped as sleep, stdoutOf as out } from './helpers.mjs';
 
@@ -42,13 +43,16 @@ export const onlyList = (v) => [...new Set((Array.isArray(v) ? v : String(v ?? '
 
 /**
  * 2.84 (u): engines.<x>.batchMax (STUDIO_ENGINE_BATCH_MAX over it; 0: no cap) and engines.<x>.batchGroup ("play", else
- * off). { batchMax, group }.
+ * off). 2.98 (b): engines.<x>.batchSkipFirst (4; 0: off). { batchMax, group, skipFirst }.
  */
 export function batchLimits(cfg = {}, env = process.env) {
   let batchMax = 0;
   for (const x of [env.STUDIO_ENGINE_BATCH_MAX, cfg?.batchMax]) { const t = String(x ?? '').trim(); if (t !== '' && Number.isFinite(Number(t)) && Number(t) >= 0) { batchMax = Math.floor(Number(t)); break; } }
-  return { batchMax, group: String(cfg?.batchGroup || '').trim().toLowerCase() === 'play' ? 'play' : null };
+  const sf = Number(cfg?.batchSkipFirst ?? 4);
+  return { batchMax, group: String(cfg?.batchGroup || '').trim().toLowerCase() === 'play' ? 'play' : null, skipFirst: Number.isFinite(sf) && sf > 0 ? Math.floor(sf) : 0 };
 }
+/** 2.98 (b): how many trains in a row a full head may be passed over for a skip batch. */
+export const SKIP_FIRST_MAX = 2;
 
 /**
  * 2.84 (u): the Play Mode class of one queued lane: the `mode` playSelection gives for the paths the lane's branch
@@ -77,11 +81,11 @@ export function laneAloneWhy({ repo, target, cfg = {}, lane }) {
 
 /**
  * This train's batch from the queue (in queue order). opts: only (task ids), tag, max (--max), batchMax, group ('play'
- * | null), classOf(lane) -> class, held (2.96: Map task -> why; left out first, even with --only). Order: --only and
- * --tag (neither: untagged lanes only), held, an alone lane by itself, grouping, the cap. { lanes, why, total, waiting,
- * cls, alone, tagged, held } or { error: 'unknown', unknown, why } when an --only id is not queued.
+ * | null), classOf(lane) -> class, held (2.96: Map task -> why; left out first, even with --only), skipFirst (2.98).
+ * Order: --only and --tag (neither: untagged lanes only), held, an alone lane by itself, grouping, the cap. { lanes, why,
+ * total, waiting, cls, alone, tagged, held, passedOver } or { error: 'unknown', unknown, why } when an --only id is not queued.
  */
-export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 0, group = null, classOf = () => 'full', isVision = null, waits = null, aloneOf = null, held = null } = {}) {
+export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 0, group = null, classOf = () => 'full', isVision = null, waits = null, aloneOf = null, held = null, skipFirst = 0 } = {}) {
   const q = Array.isArray(queue) ? queue.filter((e) => e && e.task) : [];
   const ids = onlyList(only);
   const unknown = ids.filter((id) => !q.some((e) => e.task === id));
@@ -116,7 +120,15 @@ export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 
   const classes = new Map();
   const cls = (l) => { if (!classes.has(l.task)) { let c = 'full'; try { c = String(classOf(l) || 'full'); } catch { c = 'full'; } classes.set(l.task, c); } return classes.get(l.task); };
   let head = null;
-  if (group === 'play' && pool.length && !alone) { head = cls(pool[0]); pool = pool.filter((l) => cls(l) === head); parts.push(`class ${head}`); }
+  let passedOver = null;
+  if (group === 'play' && pool.length && !alone) {
+    head = cls(pool[0]);
+    // 2.98 (b): a full head with skipFirst skip lanes behind it waits for the skip batch, at most SKIP_FIRST_MAX trains in a row
+    // (lane.passedOver, kept on the queue entry by the train).
+    const nSkip = head === 'full' && skipFirst > 0 && (Number(pool[0].passedOver) || 0) < SKIP_FIRST_MAX ? pool.filter((l) => cls(l) === 'skip').length : 0;
+    if (nSkip && nSkip >= skipFirst) { passedOver = pool[0].task; head = 'skip'; parts.push(`the head ${passedOver} is class full and ${nSkip} skip lanes wait: the skip batch goes first`); }
+    pool = pool.filter((l) => cls(l) === head); parts.push(`class ${head}`);
+  }
   const caps = [Number(max) || 0, Number(batchMax) || 0].filter((n) => n > 0);
   const cap = caps.length ? Math.min(...caps) : 0;
   if (cap && pool.length > cap) pool = pool.slice(0, cap);
@@ -130,7 +142,35 @@ export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 
     byClass = ` (${Object.entries(n).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([k, v]) => `${v} ${k}`).join(', ')})`;
   }
   const why = `${pool.length} of ${q.length} queued${parts.length ? `: ${parts.join(', ')}` : ''}; ${left.length} wait${byClass}`;
-  return { lanes: pool, why, total: q.length, waiting: left.length, cls: head, alone, tagged, classes: Object.fromEntries(classes), held: heldOut };
+  return { lanes: pool, why, total: q.length, waiting: left.length, cls: head, alone, tagged, classes: Object.fromEntries(classes), held: heldOut, passedOver };
+}
+
+/** 2.98 (b): engines.<x>.tagsWhenIdle (default true): the automatic start may take a tag group when no untagged lane waits. */
+export const tagsWhenIdle = (cfg = {}) => cfg?.tagsWhenIdle !== false;
+
+/**
+ * 2.98 (b): the tag group an automatic start takes: none while an untagged lane waits; else the tag whose oldest lane was
+ * queued first. Lanes in `skip` (waiting for the target) are not counted. { tag, n, oldestAt } or null.
+ */
+export function idleTag(queue = [], skip = new Set()) {
+  const q = (Array.isArray(queue) ? queue : []).filter((e) => e?.task && !skip.has(e.task));
+  if (!q.length || q.some((e) => !e.tag)) return null;
+  const at = (e) => { const t = Date.parse(e.at || ''); return Number.isFinite(t) ? t : Infinity; };
+  const first = q.reduce((a, e) => (at(e) < at(a) ? e : a), q[0]);
+  return { tag: first.tag, n: q.filter((e) => e.tag === first.tag).length, oldestAt: first.at || null };
+}
+
+/**
+ * 2.98 (b): what changed between two reads of engines.<x>: ["rules.focus.splitMax 3 -> 1", ...] by dotted path (a list
+ * is one value), sorted; past `max` the rest is counted.
+ */
+export function configChanges(a = {}, b = {}, max = 6) {
+  const flat = (o, p, m) => { if (o && typeof o === 'object' && !Array.isArray(o)) { for (const [k, v] of Object.entries(o)) flat(v, p ? `${p}.${k}` : k, m); } else if (p) m[p] = JSON.stringify(o); return m; };
+  const x = flat(a, '', {});
+  const y = flat(b, '', {});
+  const say = (v) => (v === undefined ? 'unset' : v.length > 40 ? `${v.slice(0, 37)}...` : v);
+  const d = [...new Set([...Object.keys(x), ...Object.keys(y)])].filter((k) => x[k] !== y[k]).sort().map((k) => `${k} ${say(x[k])} -> ${say(y[k])}`);
+  return d.length > max ? [...d.slice(0, max), `and ${d.length - max} more`] : d;
 }
 
 /** Tags in a queue: { <tag>: n } (untagged lanes left out). */
@@ -232,7 +272,7 @@ export async function setEngineAuto(root, { engine, on, by = '', why = '', hours
 
 /**
  * 2.93: `train slice <ID> --engine <x> --by <name> [--off]`: the slice mark of `task done --train --slice` (the task's hold
- * "slice", read when the branch lands) put on or taken off a queued branch. Nothing else about the entry changes.
+ * "slice", read with the checklist by landingKeepsOpen when the branch lands) put on or taken off a queued branch. Nothing else about the entry changes.
  * Same actors as the other train controls (mayControl). One event: task.train.<x>.slice_marked.
  */
 export async function setQueuedSlice(root, { engine, task, on = true, by = '', env = process.env, emit = emitEvent } = {}) {
@@ -248,7 +288,9 @@ export async function setQueuedSlice(root, { engine, task, on = true, by = '', e
   setHold(task, { slice: on ? { by: who, at: new Date().toISOString() } : null });
   try { emit({ type: `task.train.${engine}.slice_marked`, agent: who, task, to: 'producer', track: `engine:${engine}`, status: 'ok', msg: `${who} ${on ? 'marked' : 'took the slice mark off'} ${task} in the ${L} queue${on ? ': its task stays open when it lands' : ': its task closes when it lands'}`, meta: { engine, slice: on, by: who } }); } catch { /* the mark stands */ }
   await noteStandIn({ by: who, env, root, msg: `${who} changed the slice mark of ${task} in beta mode`, why: '' });
-  return { ok: true, message: on ? `${task} is marked as a slice: when its ${L} branch lands, the task stays open for the next slice.` : `${task} is no longer a slice: when its ${L} branch lands, the task closes.` };
+  // 2.98 (c): the mark is one of the reasons a landing keeps the task open (harness/task-checklist.mjs); say if another stays.
+  const still = on ? null : (await import('./task-checklist.mjs')).landingKeepsOpen(task);
+  return { ok: true, message: on ? `${task} is marked as a slice: when its ${L} branch lands, the task stays open for the next slice.` : still ? `${task} is no longer marked as a slice, but its landing still keeps the task open: ${still} (task done ${task} --train --final closes it with them listed).` : `${task} is no longer a slice: when its ${L} branch lands, the task closes.` };
 }
 
 // ---- cancel -----------------------------------------------------------------------------------------------------
@@ -263,6 +305,24 @@ export function trainProcessLive(pid, identity) {
   try { const st = fs.readFileSync(`/proc/${Number(pid)}/stat`, 'utf8'); const state = st.slice(st.lastIndexOf(')') + 2, st.lastIndexOf(')') + 3); if (state === 'Z' || state === 'X') return false; } catch { /* no /proc: pidAlive answers */ }
   return true;
 }
+/**
+ * Remove a train's rules checkouts (.studio/tmp/rules-<train>-[ahead…-]<sha>, made in harness/engine-rules.mjs) through
+ * removeCheckout; another train's are left. { n, bytes } of what was removed.
+ */
+export function removeTrainRules(root, repo, train) {
+  const tmp = path.join(root, '.studio', 'tmp');
+  const re = new RegExp(`^rules-${String(train).replace(/[^A-Za-z0-9._-]/g, '_').replace(/[.]/g, '\\.')}-(?:ahead[A-Za-z0-9._-]*-)?[0-9a-f]{10}$`);
+  let n = 0; let bytes = 0;
+  let names = []; try { names = fs.readdirSync(tmp).filter((d) => re.test(d)); } catch {}
+  for (const d of names) {
+    const dir = path.join(tmp, d);
+    bytes += measureTree(dir, Date.now() + 10000).bytes;
+    removeCheckout(repo, dir);
+    if (!fs.existsSync(dir)) n += 1;
+  }
+  return { n, bytes };
+}
+
 /** How long cancel waits for the killed train to go (30 s). */
 export const CANCEL_WAIT_MS = 30000;
 
@@ -355,12 +415,14 @@ export async function cancelEngineTrain(root, { engine = 'unity', by = '', why =
     const now = out(git(s.repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${s.target}`));
     if (h.targetAt && now && now !== h.targetAt) moved = ` Note: ${s.target} moved while the train ran (${h.targetAt.slice(0, 8)} -> ${now.slice(0, 8)}); a killed land may have moved it: check it before the next train.`;
   }
+  // The train's rules checkouts (about 1.3 GB each) go too.
+  const rules = s.error ? { n: 0, bytes: 0 } : removeTrainRules(root, s.repo, h.id);
   // 4. The lock (still this train's), and the "landing" markers of its lanes.
   try { if (readJson(lockF)?.id === h.id) fs.rmSync(lockF, { force: true }); } catch {}
   try { const b = await import('./busy.mjs'); for (const t of h.lanes || []) { try { await b.clearDoneRunning(t); } catch {} } } catch {}
   const lanes = (h.lanes || []).filter(Boolean);
-  const msg = `${L} train ${h.id} cancelled by ${who}${reason ? `: ${reason}` : ''}; its process tree was ended${k.killed?.length ? ` (${k.killed.length} process(es))` : ''}; ${gate.done ? `the gate worktree is back at ${s.target} (${gate.steps.join(', ')})` : `the gate worktree was not touched (${gate.why})`}${refs.length ? `; integration ref(s) ${refs.join(', ')} deleted` : ''}; the queue is as it was: nobody handed back, nobody blamed${lanes.length ? `, ${lanes.join(', ')} keep their place` : ''}.`;
-  try { emit({ type: `task.train.${engine}.cancelled`, agent: who, to: 'producer', track: `engine:${engine}`, status: 'warn', msg: msg.slice(0, 600), meta: { train: h.id, engine, by: who, why: reason || null, lanes, killed: k.killed || [], gate: gate.done ? gate.steps : null, refs } }); } catch {}
+  const msg = `${L} train ${h.id} cancelled by ${who}${reason ? `: ${reason}` : ''}; its process tree was ended${k.killed?.length ? ` (${k.killed.length} process(es))` : ''}; ${gate.done ? `the gate worktree is back at ${s.target} (${gate.steps.join(', ')})` : `the gate worktree was not touched (${gate.why})`}${refs.length ? `; integration ref(s) ${refs.join(', ')} deleted` : ''}${rules.n ? `; ${rules.n} rules checkout(s) removed, ${(rules.bytes / 1024 ** 3).toFixed(1)} GB freed` : ''}; the queue is as it was: nobody handed back, nobody blamed${lanes.length ? `, ${lanes.join(', ')} keep their place` : ''}.`;
+  try { emit({ type: `task.train.${engine}.cancelled`, agent: who, to: 'producer', track: `engine:${engine}`, status: 'warn', msg: msg.slice(0, 600), meta: { train: h.id, engine, by: who, why: reason || null, lanes, killed: k.killed || [], gate: gate.done ? gate.steps : null, refs, rulesRemoved: rules.n, freedBytes: rules.bytes } }); } catch {}
   const hint = engineAutoState(root, engine, { env }).on ? `\nThe automatic start may begin the next ${L} train at its next pass: npm run task -- train auto off --engine ${engine} --by <name> [--hours N] keeps it from starting.` : '';
   return { ok: true, id: h.id, gate, refs, message: `${msg}${moved}${hint}` };
 }

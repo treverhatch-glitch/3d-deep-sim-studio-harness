@@ -37,15 +37,11 @@ import { regressionHowTo } from './regression-howto.mjs';
 import { visionCard, visionSection } from './vision-card.mjs';
 import { taskType } from './done-check.mjs';
 import { readHolds, laneList } from './task-hold.mjs';
+import { itemsOf, progress, itemLines } from './task-checklist.mjs';
 import { toFollow, followLines, followQuoted } from './ask.mjs';
+import { readTextLf } from './helpers.mjs';
 
-const read = (rel) => {
-  try {
-    return fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
-  } catch {
-    return null;
-  }
-};
+const read = (rel) => readTextLf(path.join(REPO_ROOT, rel));
 const part = (text, label) => (text?.match(new RegExp(`\\*\\*${label}\\.?\\*\\*\\s*([\\s\\S]*?)(?=\\n\\*\\*[A-Z][^*]*\\*\\*|$)`)) || [, ''])[1].trim();
 const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'into', 'that', 'this', 'when', 'then', 'task', 'tasks', 'add', 'fix', 'bug', 'study', 'docs', 'review', 'balance', 'playtest', 'our', 'your', 'run', 'one', 'new']);
 
@@ -183,7 +179,7 @@ export function buildFocus(taskId, agent = null) {
   const lane = (() => { try { return readHolds()[taskId]?.lane || ''; } catch { return ''; } })();
   const follow = safe(() => toFollow({ role: task.role, task: taskId })) || [];
   const ranges = namedRanges([task.title, added?.meta?.scope, (added?.meta?.paths || []).join(','), added?.meta?.lane, lane]);
-  return { follow, ranges, vision, task, check, skill, size, causedBy, anchors, handoff: readTaskHandoff(taskId), tricks: readAttached(taskId)?.tricks || [], tricksBy: readAttached(taskId)?.preapproved?.approvedBy || null, mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice, verdictNotes: safe(() => notesForBrief({ id: task.id, title: task.title, role: task.role })), godotFailures: safe(() => godotFailuresForBrief()), inbox: safe(() => inboxForBrief(task.id)) || null, conductor: safe(() => conductorForBrief(task.id)) || null };
+  return { items: safe(() => itemsOf(taskId)) || [], follow, ranges, vision, task, check, skill, size, causedBy, anchors, handoff: readTaskHandoff(taskId), tricks: readAttached(taskId)?.tricks || [], tricksBy: readAttached(taskId)?.preapproved?.approvedBy || null, mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice, verdictNotes: safe(() => notesForBrief({ id: task.id, title: task.title, role: task.role })), godotFailures: safe(() => godotFailuresForBrief()), inbox: safe(() => inboxForBrief(task.id)) || null, conductor: safe(() => conductorForBrief(task.id)) || null };
 }
 
 export function renderVoice(v) {
@@ -202,6 +198,7 @@ export function renderFocus(f) {
   const told = untrustedBlock([
     { label: `Hand-back facts from the newest hand-back${facts?.heading ? ` (${facts.heading})` : ''}, written by the harness from git and the gate logs`, text: facts ? facts.block.split('\n').slice(1, -1).join('\n') : '' },
     { label: `Task title (${f.task.id})`, text: f.task.title },
+    { label: `Checklist (${progress(f.items || [])}): [x] done, [ ] open, [-] skipped, [>] moved to another task`, text: itemLines(f.items || []).join('\n') },
     { label: 'Answered asks whose follow-up is not filed yet (studio/asks/)', text: f.follow?.length ? followQuoted(f.follow) : '' },
     // 2.29.2: the carry-forward is the newest notes, at most 3k characters (test #4: hand-offs had a median of 21k).
     { label: `Notes from whoever worked on this before, newest last (${handoff.length > HANDOFF_MAX ? `the newest ${Math.round(HANDOFF_MAX / 1000)}k characters. Older notes in studio/handoffs/${f.task.id}.md` : `studio/handoffs/${f.task.id}.md`})`, text: handoff.length > HANDOFF_MAX ? `…${handoff.slice(-HANDOFF_MAX)}` : handoff },
@@ -227,6 +224,8 @@ export function renderFocus(f) {
   if (f.vision?.card) L.push('', ...visionSection(f.vision.card, f.task.id, { reviewed: f.vision.reviewed }));
   if (f.inbox) L.push('', '## Inbox', `${f.inbox.total} follow-up(s) routed to this task (${f.inbox.unread} unread), quoted in the marked block above. Read them before you start: \`npm run thread -- inbox ${f.task.id}\`. New ones arrive while you work; a Claude Code session is told at its next tool call.`);
   if (f.identity) L.push('', `## Who you are (studio/roles/${f.task.role}.md)`, f.identity);
+  // 2.98 (c): a task with a checklist lands in slices: every landing with an item open sends it back to ready.
+  if (f.items?.length) L.push('', `## Checklist: ${progress(f.items)}`, `The items are in the marked block above. Close each as you finish it: \`npm run task -- checklist ${f.task.id} done "<item>"\` (or \`skip "<item>" --why "<reason>"\`). While an item is open, task done queues your work as a slice and the task comes back for the next session; it closes when the list is empty.`);
   L.push('', '## Done means', `${f.check.means}.${f.check.ok ? ' (Already true; confirm before you finish.)' : ''}`);
   // 2.81 (b2): the anchors the task cites (task add --anchors): the reference's behaviours, numbers and acceptance
   // lines, and how the deliverable proves them (harness/anchors.mjs). Unknown evidence is said, never assumed.

@@ -5,7 +5,7 @@
  *   STUDIO_LINE_HOLD_MAX_MIN.
  * engine  a queued or near engine land holds new verifies (not running ones, not the land), steps the builder target
  *   down one at a time, is released when the land holds its slot, is bounded by STUDIO_ENGINE_HOLD_MAX_MIN and
- *   reports why when it runs out; nothing is held without a land; the land's floor is learned from its green runs'
+ *   reports why when it runs out; nothing is held without a land; the land's floor is taken from its passed sampled runs'
  *   peaks.
  * boost  MAX SPEED says so when it expires; `--until <time>` and `--until off`. A temp copy of the studio per check.
  */
@@ -247,22 +247,20 @@ console.log(JSON.stringify({ none: none.hold, stale: stale.hold, hit: hit.hold, 
   {
     const { S, env } = studio('learn');
     const p = probe(S, env, 'learn', `import fs from 'node:fs';
-import { recordLandPeak, learnedNeed, landWaitMin, holdStateFile, peakFromHistory } from ${u(S, 'harness/engine-ram.mjs')};
+import { landWaitMin, holdStateFile } from ${u(S, 'harness/engine-ram.mjs')};
 import { engineFloor } from ${u(S, 'harness/engine-tracks.mjs')};
 const root = process.cwd();
-const mk = (peak) => [{ at: 1000, used: 20 }, { at: 1000 + 5 * 60000, used: 20 + peak * 0.6 }, { at: 1000 + 10 * 60000, used: 20 + peak }, { at: 1000 + 12 * 60000, used: 21 }];
+const kinds = (runs) => { fs.mkdirSync('.studio', { recursive: true }); fs.writeFileSync('.studio/engine-ram.json', JSON.stringify({ unity: { kinds: { 'land with-rules': runs.map(([gb, code], i) => ({ id: 'r' + i, at: 1000 + i, gb, cpu: 10, minutes: 5, when: 'middle', code })) } } })); };
 const r = {};
-r.noSamples = recordLandPeak('unity', { root, startMs: 5000000, endMs: 6000000, status: 'pass', samples: [] });
 r.floor0 = engineFloor('unity', { root, env: {} });
-r.p1 = recordLandPeak('unity', { root, startMs: 2000, endMs: 11 * 60000, status: 'pass', samples: mk(6) });
-r.p2 = recordLandPeak('unity', { root, startMs: 2000, endMs: 11 * 60000, status: 'pass', samples: mk(7.5) });
-r.red = recordLandPeak('unity', { root, startMs: 2000, endMs: 11 * 60000, status: 'red', samples: mk(20) });
-r.two = engineFloor('unity', { root, env: {} });
-r.p3 = recordLandPeak('unity', { root, startMs: 2000, endMs: 11 * 60000, status: 'pass', samples: mk(7) });
+kinds([[20, 1]]);
+r.redOnly = engineFloor('unity', { root, env: {} });
+kinds([[6, 0], [7.5, 0], [20, 1], [7, 0]]);
 r.three = engineFloor('unity', { root, env: {} });
 r.owner = engineFloor('unity', { root, env: { STUDIO_UNITY_MIN_FREE_GB: '15' } });
 r.off = engineFloor('unity', { root, env: { STUDIO_ENGINE_RAM_RUNS: '0' } });
-r.small = (() => { const rr = JSON.parse(fs.readFileSync('.studio/engine-ram.json', 'utf8')); rr.unity.peaks = rr.unity.peaks.map((x) => ({ ...x, gb: 0.5 })); fs.writeFileSync('.studio/engine-ram.json', JSON.stringify(rr)); return learnedNeed('unity', { root, env: {} }).gb; })();
+kinds([[0.5, 0]]);
+r.small = engineFloor('unity', { root, env: {} }).gb;
 r.wait = landWaitMin(root, {}, Date.now());
 fs.mkdirSync('.studio/line', { recursive: true });
 fs.writeFileSync(holdStateFile(root), JSON.stringify({ active: true, seenAt: Date.now() }));
@@ -270,8 +268,8 @@ r.waitHold = landWaitMin(root, {}, Date.now());
 fs.writeFileSync(holdStateFile(root), JSON.stringify({ active: true, seenAt: Date.now() - 20 * 60000 }));
 r.waitStale = landWaitMin(root, {}, Date.now());
 console.log(JSON.stringify(r));`);
-    await guard('2.79.1 (3.2): the land\'s floor is learned from the peaks of its recent GREEN runs plus a margin (6, 7.5, 7 GB peaks +1.5 = 9 GB, a red run\'s 20 GB ignored), only once 3 green runs exist (2 runs: the table\'s 12 GB), the owner\'s environment floor still wins (15), never under STUDIO_ENGINE_RAM_MIN_GB (4), no sample means no record; and the land waits STUDIO_ENGINE_LAND_WAIT_MIN (20) alone, 35 with a Line hold in force (fails on 2.79.0: the floor was the table\'s 12 GB, never learned, and the land waited 60 min)', () => [
-      p.noSamples === null && p.floor0?.gb === 12 && p.p1 === 6 && p.p2 === 7.5 && p.two?.gb === 12 && p.three?.gb === 9 && /measured/.test(p.three?.from || '') && p.owner?.gb === 15 && p.off?.gb === 12 && p.small === 4 && p.wait === 20 && p.waitHold === 35 && p.waitStale === 20,
+    await guard('2.79.1 (3.2): the land\'s floor comes from the sampled peaks of its passed land runs plus a margin (6, 7.5, 7 GB peaks +1.5 = 9 GB, a red run\'s 20 GB ignored), with no passed run the table\'s 12 GB, the owner\'s environment floor still wins (15), never under STUDIO_ENGINE_RAM_MIN_GB (4); and the land waits STUDIO_ENGINE_LAND_WAIT_MIN (20) alone, 35 with a Line hold in force (fails on 2.79.0: the floor was the table\'s 12 GB, never learned, and the land waited 60 min)', () => [
+      p.floor0?.gb === 12 && p.redOnly?.gb === 12 && p.three?.gb === 9 && /need of land with-rules/.test(p.three?.from || '') && p.owner?.gb === 15 && p.off?.gb === 12 && p.small === 4 && p.wait === 20 && p.waitHold === 35 && p.waitStale === 20,
       JSON.stringify({ ...p, _err: p._err.slice(-400) })]);
   }
 

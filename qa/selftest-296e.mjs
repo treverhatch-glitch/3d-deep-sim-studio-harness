@@ -143,8 +143,8 @@ process.stdin.resume();
   const s5 = smoke(['--role', 'engine-porter', '--pool', 'api', '--engine', 'unity', '--dry-run']);
   {
     const o = out(s5);
-    await guard('2.96 (e4) smoke: --dry-run says it spends real tokens when run for real, prints the task and the start it would make, exits 0, and adds no task, runs no program and makes no lane (fails before this fix: there was no smoke command)', () => [
-      s5.status === 0 && /spends real tokens/.test(o) && /would add a smoke task "Smoke test builder-api2: add one line to docs\/smoke\/builder-api2\.md/.test(o) && /start --attach --role engine-porter --pool api --task/.test(o)
+    await guard('2.96 (e4) smoke: --dry-run says it spends real tokens when run for real, prints the task and the start it would make (2.98: from the pool with no --role, the pool taking engine-porter from the task), exits 0, and adds no task, runs no program and makes no lane (fails before this fix: there was no smoke command)', () => [
+      s5.status === 0 && /spends real tokens/.test(o) && /would add a smoke task "Smoke test builder-api2: add one line to docs\/smoke\/builder-api2\.md/.test(o) && /start --attach --pool api --task <its id>.*no --role: the pool takes engine-porter from the engine task/.test(o)
         && board() === before.board && standIns() === before.n && events().length === before.events && branches(R) === engineBranches0,
       JSON.stringify({ status: s5.status, out: o.slice(-500) })]);
   }

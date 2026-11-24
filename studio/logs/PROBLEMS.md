@@ -18,41 +18,13 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-346 — timing checks fail under load in the online runs · open
 - **Evidence:** 16 November, four runs queued at once: "task lane gives each builder its own folder", "the supervisor starts a fresh agent per task", "2.77.0 (p, P9.6)" and "2.69.0 (q, 1)" each failed once and passed on the re-run of the failed job. Each re-run costs about 40 minutes.
 - **Workaround:** re-run the failed job and note it on the pull request. Do not queue four runs at once.
+- **2.98:** `290b` "two runs admitted ... their times overlap" failed on Windows in three online runs in a row: the stand-in land run lasted 0.4 s and each step's start-up had grown past it, so two runs started together no longer overlapped. The stand-in now lasts 2.5 s. `277p` "someone moves main" failed once on Linux and passed on a re-run. `284u` "train cancel" got two `cancelled` events once on Windows (the train announced its own cancel before it was ended): a race in the product, open.
 - **2.97:** `290b` "the second gate's script moves the target" failed once among 11 units run together on a 2-core machine with other tests running, and passed three times out of three alone.
 - **2.96:** the two supervisor-window checks ("two builders without lanes never run at once", "agent names never repeat across supervisor restarts") failed on Windows in the first online run of 2.95 and passed on the re-run; they now wait until one agent is live and then watch a window.
 - **2.95:** "with --lanes auto, each lane gets its own agent holding that folder" failed in two of the three online runs of 2.94 (Windows) and passed on the re-run each time.
 - **2.94:** seen once more, on main's run after the 2.93 merge, on Windows: "a ping starts STUDIO_DIRECTOR_CMD once, then waits out the cooldown" (starts=0). It passed on the same tree in the pull request's run an hour earlier.
 - **2.92:** "task lane gives each builder its own folder" now waits for the thing itself. The same change to "the supervisor starts a fresh agent per task" was withdrawn (the next check, "--lanes auto", then failed 2 runs in 8: only one lane got its agent, even with a 90 s wait; cause not found). Left: that check, `2771a`, the tester drive, `290b` second gate, `277p` "someone moves main", "two builders without lanes", "--lanes auto".
 - **2.91:** three were given a hand-shake in place of a clock (`269q`, `2601m`, `277p` B-before-A). Left: the two supervisor-window checks, `2771a`, the tester drive, and two seen under load on 17 November (`290b` second gate, `277p` "someone moves main").
-
-### P-360 — a compile command that outlives its time limit keeps running on Windows · fixed 2.93 (engine commands)
-- **Evidence:** the same run: `292a` crashed on Windows (EPERM removing `.studio/tmp`) right after the check whose compile stand-in runs past the queue door's time limit. The time-out ends the shell, not the command below it, which keeps its checkout folder open until it ends.
-- **Workaround:** the test waits for the folder. In a studio the command ends by itself and the janitor removes the checkout later. A real fix ends the command's whole process tree; not built.
-- **Fix:** `harness/run-limited.mjs` runs the engine commands (compile, rules, pre-queue, pre-land, quick check, land) and ends the whole tree at the limit. The web game's timed commands are unchanged.
-
-### P-361 — every engine train ran its rules check twice · fixed 2.93
-- **Evidence:** a studio's trains on 2.92: the rules check ran on the target, then on the batch, 90 to 150 minutes of a train of 4 to 6 branches; once two full runs (62 and 107 minutes). The target had just landed through a train.
-- **Fix:** the batch runs first; green ends the check. The target is asked only after a red, and a landed tree keeps its green (`rules.landGate`). `qa/selftest-293a.mjs`.
-
-### P-362 — a rules run started outside the train took the memory a land run needed · fixed 2.93
-- **Evidence:** 18 November, twice: a full rules run from a done-time check (hours due) held 6.7 GB, then 14 GB; a train with green branches waited 30 to 60 minutes for its land run.
-- **Fix:** such a run takes a machine:heavy slot as a verify does and waits behind a queued engine land; it never turns full because hours are due. `qa/selftest-293a.mjs`.
-
-### P-363 — the API pool and agy could not do engine work · fixed 2.93 (untested on the real tools)
-- **Evidence:** `--pool api --role <engine role>` started a plain builder with no lane, gone in 30 seconds with no output, and two starts took one name; an engine pass on agy was refused `git -C <its worktree>` by agy's own permission check and handed back with nothing.
-- **Fix:** the pool takes the role, makes its lanes and uses the first free name; a start that dies leaves a record; agy gets allow-rules for the engine pass's folders (`STUDIO_AGY_REACH_RULES`); the refusal is a harness cause (`tool-permission`), not a mark against the task. `qa/selftest-293b.mjs`, `qa/selftest-293e.mjs`. Why the pool start died was not found.
-
-### P-364 — a queued branch could not be held, marked a slice or closed as a duplicate · fixed 2.93
-- **Evidence:** the overseer took one held unit out of the queue five times; slices queued before an upgrade closed their units; a repeat of a finished task was closed as `impossible`; two wire tasks closed on partial work.
-- **Fix:** `task after` keeps a queued branch out of a train; `train slice`; `task duplicate`; `preQueue` entries by task title, for a studio's own completeness check. `qa/selftest-293c.mjs`.
-
-### P-365 — a cleanup removed a folder that other checkouts linked to · process
-- **Evidence:** 18 November: the maintainer removed an old checkout that held the `node_modules` the agents' checkouts linked to; three agents' test runs failed on a missing module until the link was pointed at the main checkout.
-- **Rule:** before removing a checkout, search the other checkouts for links into it (`find -lname`). With P-353: remove by name, never by pattern, and never while other builds run.
-
-### P-366 — the new time-limit wrapper started two processes without the hidden-window option · fixed 2.93 (before the merge)
-- **Evidence:** pull request 95, first online run: the 2.73.1 rule "every child_process call passes windowsHide: true" red on all three systems, naming `harness/run-limited.mjs` lines 17 and 19. On Windows each engine command could have flashed a console window.
-- **Fix:** both calls pass it. Like the 2.35 path rule (P-359), this rule runs in the self-test only: the maintainer's list before a push now has units `235` and `2731c`.
 
 ### P-367 — the next batch waited unchecked through the whole train before it · fixed 2.94 (`rules.ahead`, off by default, untested on a real engine)
 - **Evidence:** a studio's trains: one rules check (about an hour), then one land run (one to two hours); the lanes queued for the next train were checked only after both.
@@ -127,6 +99,46 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 ### P-384 — a lane-live window of 0 still called a lane "in use" for a few milliseconds · fixed 2.97 (cause not proven)
 - **Evidence:** pull request 99: on Windows `293b` "record" failed in both full online runs and passed in eight runs alone or after `290b`. The start after a session's end did not get the free pool name. `laneLive` read the clock, asked git, then compared the folder's time: with `STUDIO_LANE_LIVE_MIN=0` a write in between gave a time later than the clock, and "live". No run caught the state itself.
 - **Fix:** a window of 0 means none (`harness/worktree.mjs`); the check prints the lane folder's age when it fails, so a repeat shows the evidence.
+
+### P-385 — the daily full land run could not finish, and ran again at once · fixed 2.98 (the parts are the studio's to define)
+- **Evidence:** a live studio, 23 and 24 November: the full run on the target alone hit its 240-minute limit five times in a row. One editor process grew to 14 GB, free memory fell to 2.5 GB, the machine paged. A timeout was not counted as a run, so past `fullLandMaxHours` it ran at the end of every train and, with an empty queue, again at once. The overseer set both hours to 240 to stop it.
+- **Fix:** `engines.<x>.fullLand` (`parts`, `partTimeoutMin`, `backoffHours`): one land run per part (`STUDIO_LAND_PART`), a result per part kept by the target's tree, a try with no result backs off, and with lanes waiting an overdue run takes one part at the end of a train. `qa/selftest-298a.mjs`. What a part runs is the land script's.
+
+### P-386 — rules parts started together built the same output and went red on a locked file · fixed 2.98
+- **Evidence:** with `rules.focus.splitMax: 3`, two `dotnet test` parts built one project in one checkout at the same moment: `error CS2012 ... locked by 'VBCSCompiler'`. Two trains went red; the narrowing handed a task back for nothing.
+- **Fix:** one build per checkout, then every part with `--no-build` (`rules.build`, `rules.testAfterBuild`); a build fault is run again alone, and twice is "not judged": nothing is narrowed or handed back (`rules.infra`). `qa/selftest-298c.mjs`. Not run with a real `dotnet`.
+
+### P-387 — a train went on with the config it read at its start · fixed 2.98
+- **Evidence:** `splitMax` and `fullLandMaxHours` were changed while a train ran; it started a 4-hour full run and a split known to fail. Two trains were cancelled.
+- **Fix:** `engines.<x>` is read again before each step and a change is logged in one line. `qa/selftest-298b.mjs`.
+
+### P-388 — lanes that change nothing landed, and the first landing closed tasks with work left · fixed 2.98
+- **Evidence:** two lanes holding only a merge commit "landed" (the target gained only the land record). Unit tasks queued without `--slice` were closed by their first landing more than ten times; the overseer reopened each after an audit.
+- **Fix:** an empty lane is refused at the door and in the chain, and its task stays open. A task can carry a checklist: every landing is a slice until no item is open (`task checklist`, `--final`). `qa/selftest-298b.mjs`, `qa/selftest-298e.mjs`.
+
+### P-389 — one task, one lane: porters sat idle while a slice waited · fixed 2.98 (as `task split`, not a second lane)
+- **Evidence:** a unit's task counted as in progress for the hour or two its slice waited for a train. The overseer filed a second task per unit by hand and the landed work per train doubled.
+- **Fix:** `task split <ID> --every <n>` makes child tasks from the open checklist items; the parent closes when they do. A second lane under one task id was not built: about 150 places key engine work by the task. `qa/selftest-298e.mjs`.
+
+### P-390 — one slow lane at the head held fourteen quick ones; tagged lanes waited three days · fixed 2.98
+- **Evidence:** "class full, cap 8; 19 wait (14 skip, 5 full)": the quick lanes waited about two hours behind one. Two tag groups waited since 21 November while the queue sat empty overnight.
+- **Fix:** `batchSkipFirst` (4): the skip batch goes first, a full head is passed over twice at most. `tagsWhenIdle` (on): with no untagged lane waiting, the oldest tag group gets its own train, before any full run. `qa/selftest-298b.mjs`.
+
+### P-391 — the main tool was marked out for four days from a session that never reached the model · fixed 2.98
+- **Evidence:** one output line with all-zero usage marked the tool out until 28 November while other sessions on it ran fine.
+- **Fix:** a mark needs a session that reached the model, or a second stop within 15 minutes; the window is the text's own, else 5 hours, a week only when the text says so; the status says what is marked and what is only suspected. `qa/selftest-298f.mjs`. A real limit now costs one extra failed start.
+
+### P-392 — agy could not write in its own engine worktree; the pool started engine tasks as builders · fixed 2.98 (untested on the real tools)
+- **Evidence:** an engine porter on agy ended "denied the command, write_file"; `--pool api --task <engine task>` took role `builder` and ended in 30 seconds.
+- **Fix:** write rules for a session's lane copy and engine worktree only; five read-only git verbs on the worktree with plain-word arguments; the pool takes the task's role. `qa/selftest-298f.mjs`. The older `log`/`diff` rules still let `--output` through: open.
+
+### P-393 — disk filled with landed lane copies; the size shown was hours old · fixed 2.98 (pruning off until set)
+- **Evidence:** free disk fell to 48 GB twice; "lane copies 41.9 GB" stood for ten hours while the folder held 133 GB (a capped walk, cached). A cancelled train left its rules checkouts, 1.3 GB each.
+- **Fix:** `disk.pruneUnderGb`: landed, clean, idle copies go, oldest first, each with its reason; the size is measured when shown and carries its age; `train cancel` removes its checkouts. `qa/selftest-298g.mjs`. A train that is killed still leaves them to the 24-hour pass.
+
+### P-394 — a session's record could be read half-written, and its name looked free · fixed 2.98
+- **Evidence:** the online run of 2.97 on main, Windows: `293b` "pool" handed a third start the name of a running session. Nine writers rewrote the record in place.
+- **Fix:** one atomic writer and one patch helper; a record that exists but cannot be read counts as busy. `qa/selftest-298h.mjs`. Six other modules still read a record with a plain read.
 
 ## Older problems (one line each; the full entries are in git history: git log -p -- studio/logs/PROBLEMS.md)
 
@@ -486,3 +498,10 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **P-357** (fixed 2.92): a target red by itself was nobody's task
 - **P-358** (process): the maintainer planned a tool the harness already had, and gave a wrong setting in a note
 - **P-359** (fixed 2.92): a path taken from a URL broke the red-target task on Windows
+- **P-360** (fixed 2.93): a compile command that outlived its time limit kept running on Windows
+- **P-361** (fixed 2.93): every engine train ran its rules check twice
+- **P-362** (fixed 2.93): a rules run started outside the train took the memory a land run needed
+- **P-363** (fixed 2.93, 2.98): the API pool and agy could not do engine work (see P-392)
+- **P-364** (fixed 2.93): a queued branch could not be held, marked a slice or closed as a duplicate
+- **P-365** (process): a cleanup removed a folder that other checkouts linked to
+- **P-366** (fixed 2.93): the time-limit wrapper started two processes without the hidden-window option

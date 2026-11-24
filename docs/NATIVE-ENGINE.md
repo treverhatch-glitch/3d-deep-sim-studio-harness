@@ -94,7 +94,7 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   used and why, no lane waits, already tried, a second gate). `npm run engine -- rules show` prints `ahead` on or off
   and the last outcome (started, kept, dropped, or "did not start: <why>") with its train and time.
   With `rules.shards` it goes command by command instead of deciding once: each shard starts when its measured peak
-  (`rules.peak`, else the plan's number) fits beside the land run, waits when it does not (within its time limit), and
+  (its own recent sampled peak, else the plan's number) fits beside the land run, waits when it does not (within its time limit), and
   none starts once the land run answered. Stopped between shards it is `kept-partial`: under the same rule (kept only
   when the land run landed the batch unchanged) its finished shards are kept and the next train runs only the rest.
 - A green batch goes to the land run with `STUDIO_RULES_GREEN=1`, as long as the land run lands exactly the checked
@@ -240,10 +240,29 @@ half as much machine time as the land runs. Five settings, all optional, in the 
   red on the first red (its output kept); the result and the `engine.rules` event carry each group's seconds.
 - `focus.splitMax` and `focus.splitGb` (2.85): how many split parts run at once is a decision about free RAM
   (`harness/rules-parts.mjs`). A part starts only while free RAM minus the floor (`STUDIO_RAM_FLOOR_GB`, 3) holds
-  `splitGb` (the GB one test process is expected to take; default 4, or the largest peak `.studio/engine-ram.json`
-  has measured); at least one part always runs, the check is made again before every start, and `splitMax` is the
+  `splitGb` (the GB one test process is expected to take; unset: each part's own recent sampled peak, see
+  "A part's memory" below, 4 GB when no part has one); at least one part always runs, the check is made again before every start, and `splitMax` is the
   most at once. `splitMax` unset means 1: in sequence, as 2.84 ran. Each decision is one log line, and the
   `engine.rules` event carries `splitAtOnce`. The result is the same either way; only the time and the memory differ.
+- `build`, `testAfterBuild` and `infra` (2.98): build once, then test without building. Each `dotnet test` builds
+  first, so parts that ran at once in one checkout wrote the same output together ("error CS2012: Cannot open
+  ...dll for writing ... locked by 'VBCSCompiler'"), and the train took that for a red of a lane. Now the rules check
+  runs `build` once per checkout, before its first part, and every part, shard, `first` and by-name run in that
+  checkout gets `--no-build`. Unset, `build` is the `dotnet test` command of `test` with `test` made `build` and the
+  test-only options (`--filter`, `--logger`, `--settings`, `--blame`, `-- <settings>`, ...) left out. A `build` for
+  another tool can set `testAfterBuild`, the test command after the build with `{command}` for the usual one (for
+  example `"{command} --no-compile"`). `"build": false` keeps the old way (each test command builds). A checkout's
+  git folder holds a mark (`studio-rules-built`: the tree and the build command), so a kept checkout is not built twice.
+  - A build that fails is a compile red of the batch: the compile search (`harness/engine-compile.mjs`) finds the lane
+    that does not build, by builds alone, and hands it back as cause `compile` with the compiler's lines. No test runs
+    to narrow it. A build red on the target itself judges no lane.
+  - A build fault is not a red. A command (the build, a part, a shard, the whole run, a by-name or `first` run) whose
+    output has an `infra` line is run once more, alone. A second time, the check ends "not judged: <the line>": no lane
+    is narrowed, blamed or handed back, the batch stays queued (each lane `deferred`), and the train writes
+    `task.train.<x>.rules_not_judged` to the producer. The check ahead ends without an answer the same way. The
+    `dotnet` patterns are `error CS2012`, `MSB3021`, `MSB3026`, `MSB3027`, `being used by another process` and
+    `locked by`; `infra` (a list of regexes) adds to them, `"infra": false` turns it off.
+  - Not this round: starting a check ahead beside a rules check that still runs (it waits for the land run, as before).
 - What the rules check cost and why (2.85): the `engine.rules` event's `meta` has `mode` (`focus` or `full`), `why`
   (a full run because of unmapped paths names up to 5 of them, so you can extend `focus.map`), `parts`, `ms` and
   `splitAtOnce`; `train status` prints the last check's mode, why, runs, seconds and parts. A green full check on
@@ -316,17 +335,22 @@ half as much machine time as the land runs. Five settings, all optional, in the 
     harness cannot check that `rest` really is the rest: write it as the negation of the other filters.
   - Each shard command gets `STUDIO_RULES_MODE=shard`. `rules show` and `rules-plan` list the shards, which have a kept
     green (on this tree or from another tree) and each one's measured peak.
-- `peak` (2.95): the file the test command writes its own peak memory to, a path or glob relative to the test checkout
-  (`"peak": "tools/SimTests/bin/**/peak.txt"`), or `{ "file": "...", "match": "<regex>" }` whose first group is the GB
-  (default: the first number followed by `GB`, as in `working set 6.71 GB`). The file is removed before every test
-  command (so a stale one is never read) and read after it; the number is kept per shard, part or filter (`(full run)`
-  for the whole command) beside each part's seconds in `.studio/engine/<x>-rules.json` (`partStats`). With `splitGb`
-  unset, a measured number replaces the guess: a part or shard starts when its own peak fits in free RAM, `splitPlan`
-  and the check ahead use the full run's peak, and `rules-plan` and `rules show` print it. With no file configured or
-  none readable, memory is guessed as before. Parts that ran at the same time share the file, so none of them is read.
+- **A part's memory (2.98).** Every part, shard and whole command is sampled as its own kind (`rules <filter>`, see the
+  samples below), so `rules.peak` (2.95: a file the test command wrote) is gone: a config that still sets it runs, and
+  `rules show` says `rules.peak is no longer read: every run is sampled`. With `splitGb` unset, a part or shard takes
+  the largest peak of its own passed runs of the last `machine.peakDays` days (default 7). A part with no such run
+  takes the largest of its sibling parts, and the plan line says which parts were measured and which were not; with no
+  measured part at all it is 4 GB. The split plan, the shard plan, `rules-plan` and the check ahead use these numbers.
+  A studio with `"machine": { "sample": false }` has no samples: it gets the engine table, the hand-set floors and 4 GB
+  per part only.
+- `pins` (2.98): `{ "file": "<JSON file in the tree>", "key": "fingerprint", "folder": "<inputs folder with {pin}>" }`.
+  Rule packs a lane adds under `folder` (one sub-folder per pin) change the inputs' fingerprint even when this tree never
+  loads them. With `pins`, a file of `inputs` under `folder` whose `{pin}` is not the value any checked tree pins in
+  `file` (read from each folder, or from the commit of a `{ dir, sha }` source) is left out of the fingerprint. No pin
+  readable: nothing is left out. Only the fingerprint changes; what is copied into the checkout does not.
 
 ```json
-"rules": { "test": "dotnet test tools/SimTests", "peak": "tools/SimTests/bin/**/peak.txt", "ahead": true,
+"rules": { "test": "dotnet test tools/SimTests", "ahead": true,
   "shards": { "filters": ["FullyQualifiedName~Tests.Pins"], "rest": "FullyQualifiedName!~Tests.Sim&FullyQualifiedName!~Tests.Core&FullyQualifiedName!~Tests.Pins", "keep": "tree" },
   "focus": { "test": "dotnet test tools/SimTests --filter \"{filter}\"", "smoke": "Category=Smoke",
     "auto": [ { "root": "Game/Sim", "paths": ["Game/Sim/{name}/"], "filter": "FullyQualifiedName~Tests.Sim.{name}" },
@@ -403,6 +427,7 @@ scorecard's Play stage line counts skipped runs.
 | `STUDIO_RULES_GREEN` | `1`: the rules check passed on exactly this batch and target; the script may skip its own copy of those tests. 2.96: also any group whose tree as it would land has a kept whole rules pass (same command and inputs), for example after a land search dropped a lane. |
 | `STUDIO_RULES_MODE` | `focus` or `full`: how that green was reached; after a `focus` green the script may still run the full rules tests. 2.95: shards without `rules.shards.rest` are `focus`. |
 | `STUDIO_LAND_FULL` | `1`: the daily full run; skip nothing, ignore every shortcut. |
+| `STUDIO_LAND_PART` | (2.98, only with `STUDIO_LAND_FULL=1` and `engines.<x>.fullLand.parts`) the name of the part of the full run to run now, for example `edit` or `play-a`. The script decides what a name runs; together the parts must run every test. Unset: run everything. |
 | `STUDIO_UNITY_EDITMODE_ARGS` | Edit Mode arguments to add after the .NET tests passed (`SKIP`: no Edit Mode run needed). Unset on a full run. |
 | `STUDIO_PLAY_MODE` | `full`, `focus` or `skip`: run every Play Mode test, only the filter, or none. |
 | `STUDIO_PLAY_FILTER` | With `focus`: the Play Mode test filter (`;`-joined). |
@@ -502,23 +527,29 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
 - **Handed back means out.** A lane the train hands back leaves the train's record at once, so `task start` on its
   fix works while the train is still landing the rest.
 - **A full land run once a day.** Every `engines.<x>.fullLandHours` hours (default 24, `STUDIO_ENGINE_FULL_LAND_HOURS`,
-  `off` for never) one land run gets `STUDIO_LAND_FULL=1` and none of the shortcuts: no `STUDIO_RULES_GREEN`, no
-  `STUDIO_UNITY_EDITMODE_ARGS`. A land script that skips work on those variables should run everything when it sees
-  `STUDIO_LAND_FULL=1`. The time of the last full run that passed is kept in `.studio/engine/<engine>-full-land.json`;
-  with no record the clock starts at the first train, so the first full run comes that many hours later.
-  2.85 (B-137): the full run is said wherever one looks. The train's `now` line and `train status --engine <x>` read
-  "land run, the daily full run: every test runs, expect about N min" (N: the last full run's minutes, kept in that
-  file); one `task.train.<x>.full_land` event (meta `why`, `tasks`) at its start; `engine.land` has `meta.full: true`.
-- **2.86: the full run is its own run, on the target alone.** It never carries a branch and is never a retry, bisect or
-  confirm step. It runs when it is due and the train has no lane (the Line Producer starts a train for it when the
-  queue is empty), or, when it is overdue by `engines.<x>.fullLandMaxHours` (default twice `fullLandHours`; counted from
-  the last full run that passed), 2.91: at the end of the next train, after the batch's rounds, on the target as it is
-  then. It never goes ahead of a waiting batch; `full_land` says when it runs or what it waits for. When the full rules
-  run is owed too, it goes first (it is shorter). The land command gets a
-  ref at the target's tip as its branch and `STUDIO_LAND_FULL=1` with `STUDIO_LAND_PROBE=1`. A script that cannot run
-  that (an error or conflict) is told in `task.train.<x>.full_land` (warn) and the full run is tried again at the next
-  train. Every failing test of a full run is the target's own (below); 2.85's search for a branch tied to it, and the
-  batch's second, ordinary run, are gone with the batch.
+  `off` for never), counted from the last full pass, the target is run alone with `STUDIO_LAND_FULL=1` and none of the
+  shortcuts: no `STUDIO_RULES_GREEN`, no `STUDIO_UNITY_EDITMODE_ARGS`. A land script that skips work on those variables
+  should run everything when it sees `STUDIO_LAND_FULL=1`. It never carries a branch and is never a retry, bisect or
+  confirm step: the land command gets a ref at the target's tip as its branch and `STUDIO_LAND_PROBE=1` (land nothing).
+  The state is `.studio/engine/<engine>-full-land.json`; with no record the clock starts at the first train. The
+  train's `now` line, `train status` and one `task.train.<x>.full_land` event say when it runs ("the daily full run,
+  part edit: ... expect about N min"); `engine.land` has `meta.full: true` (and `meta.part`).
+- **2.98: in parts, each a fresh process.** `engines.<x>.fullLand`: `{ "parts": ["edit", "play-a"], "partTimeoutMin":
+  60, "backoffHours": 12 }`. With `parts` the full run is one land run per part, in order, each told
+  `STUDIO_LAND_PART=<name>`, each with its own time limit (`partTimeoutMin`, default 60) and sampled under its own kind
+  (`land ... part-<name>`, so the memory floor of each part is its own). Without `parts` it is one run of everything
+  (the engine's `timeoutMin`, or `partTimeoutMin` when set). A part that passed on the target's tree is not run again;
+  a full pass is every part green on one tree. A run cut short goes on with the missing parts while the target has not
+  moved. A red part ends the run as a red full run does (below).
+- **2.98: it backs off, never loops.** A part that hits its time limit, or ends with no test result (an error, not
+  run, killed), is a try: the next try is not before `backoffHours` (default 12). The record keeps every try (time,
+  part, minutes, outcome); `train status` and `engine rules show` print "Daily full land run: the next try is not
+  before ... (why)" and the parts green so far. A train with nothing to do says why the full run did not start.
+- **When it runs.** With lanes waiting it does not run while only due. Past `engines.<x>.fullLandMaxHours` (default
+  twice `fullLandHours`) it runs at the end of a train, after the batch's rounds, on the target as it is then, but one
+  part a train. With an empty queue (the Line Producer starts a train for it) it runs every missing part. Never while it
+  backs off. When the full rules run is owed too, it goes first (it is shorter). `fullLandNow` in
+  `harness/unity-train.mjs` answers "would a full run start now, and why not".
 - **The target's own red in the full run (2.85).** A full run is the one run that sees every test, so it also sees
   what the target already fails. From 2.86 it runs on the target alone, so every failing test it names is the
   target's own: the names go to `.studio/train/<x>-full-baseline.json` (`{ at, target, failing, source }`) and the
@@ -783,7 +814,7 @@ samples are in `.studio/engine/<x>-samples/<run>.csv` (newest 60 per engine, non
 than one sample interval; it prints one line per sample and ends with the run (or by itself when the run's wrapper is
 gone); `"machine": { "sample": false }` in `studio/game.json` turns sampling off. A sampler that fails never changes the run.
 
-Each ended run is folded into `.studio/engine-ram.json` (`<x>.kinds`, beside the land peaks): its peak GB, mean CPU %,
+Each ended run is folded into `.studio/engine-ram.json` (`<x>.kinds`): its peak GB, mean CPU %,
 minutes, when the peak came (start, middle, end, throughout) and which kinds ran beside it. Kinds: `land with-rules` or
 `land no-rules` (`STUDIO_RULES_GREEN`), plus ` play-<mode>` with `STUDIO_PLAY_MODE`; `rules` (the whole command) and
 `rules <filter>` (a part or shard); `compile`; `quick`. A kind's need is the peak of its last 5 runs plus
@@ -792,14 +823,16 @@ max(0.5 GB, 10%), once at least one of them passed.
 `studio/game.json` (the owner's file):
 
 ```json
-"machine": { "admit": "measured", "cpuCapPct": 85, "slowerPct": 10, "sampleSec": 10, "sample": true }
+"machine": { "admit": "measured", "cpuCapPct": 85, "slowerPct": 10, "sampleSec": 10, "sample": true, "peakDays": 7 }
 ```
 
+- `peakDays` (2.98, default 7): runs older than this do not count for a part's memory (see "A part's memory"). `sample`
+  false: no samples, so the table and the hand-set floors only.
 - `admit` (default unset: off). Off, every decision is 2.95's. `"measured"`: a land run (the machine:heavy wait), a
   part of a split rules check, the check ahead and a quick test start when free RAM minus the floor
   (`STUDIO_RAM_FLOOR_GB`) minus what the running jobs still have to grow (their need minus what they use now; a heavy
   job with no samples counts its whole claim) holds the job's own need, and CPU now plus the job's measured share stays
-  under `cpuCapPct`. The measured need replaces the claim's RAM and CPU, the land floor and `rules.peak`;
+  under `cpuCapPct`. The measured need replaces the claim's RAM and CPU and the land floor;
   `rules.focus.splitGb` set by hand still wins. Slots, per-kind caps, the queue and holds stay. A job that waits says it
   in numbers: `waits for memory: needs 12.7 GB, 17 GB free above the floor; land no-rules still has 5.1 GB to grow`.
 - When a number is missing (a kind never measured or never passed), stale (a running job's last sample is old) or looks
@@ -912,7 +945,8 @@ turn on `service.check` and run one `check` end to end, and only then `warm`.
 - **`npm run task -- train slice <ID> --engine <x> --by <name> [--off]`** marks a queued branch as a slice (what
   `task done --train --slice` does): its task stays open when it lands. `--off` removes the mark. Nothing else about the
   entry changes. It refuses when the task is not in that queue or its train is running with it. Same actors as `train auto`.
-  Event `task.train.<x>.slice_marked`.
+  Event `task.train.<x>.slice_marked`. 2.98: `--off` on a task whose checklist still has open items says the landing
+  still keeps it open (the checklist rule, docs/ENGINE-TRACKS.md); `task done --train --final` closes it.
 
 
 ## 2.96 (d): landings posted, what the tests cost, Play Mode gaps, a busy line
@@ -927,9 +961,12 @@ turn on `service.check` and run one `check` end to end, and only then `warm`.
   read. The slowest 200 tests of each command are kept for 48 hours in `.studio/engine/<x>-times.json`. The daily digest
   gets up to two short lines. `npm run engine -- test-cost [--engine <x>]` prints the long form: the 10 slowest tests
   with their share of the test time, tests that ran in two commands of one train, the rules runs with the most memory
-  (sampled peaks where runs were sampled, else the test command's own `rules.peak`), the most memory per test group when
+  (sampled peaks), the most memory per test group when
   `rules.memory` names the table the test run writes (`{ "file": "<glob>", "name": "<column>", "mb": "<column>" }`, or `gb`;
-  tab or comma separated with a header line) and the hand-backs of kind `ratchet` in the last 24 hours.
+  tab or comma separated with a header line) and the hand-backs of kind `ratchet` in the last 24 hours. 2.98: `rules show` and
+  `test-cost` also name a part whose last passed run took over twice the median of its earlier runs (at least 3) and 5+ minutes
+  more, with both times and its slowest tests; with `rules.times` set, a part none of whose tests the times file names says
+  `no test times for this part (the times file names none of its tests)`.
 - **Play Mode map gaps.** A land run whose Play Mode stage ran in full because paths match no `play.focus.map` entry
   keeps all of those paths (`.studio/engine/<x>-play-gaps.jsonl`). The digest says how often that happened in 24 hours
   and for which folders. `npm run engine -- play-plan --propose [--engine <x>] [--branch <b> | --paths a,b] [--json]`

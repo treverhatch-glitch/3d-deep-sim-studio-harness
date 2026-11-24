@@ -4,6 +4,25 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.98.0] — 2026-11-24
+Keep the line full and stop losing hours: the overseer's 17 items after three days on 2.97, with the owner's order to
+take out what is replaced. Details: docs/RELEASE-2.98.0.md.
+- **The daily full land run goes in parts** (`engines.<x>.fullLand`), each a fresh process with its own limit and its
+  own measured memory; a part that passed on a tree is not run again; a try with no result backs off 12 hours.
+- **Rules parts build once** per checkout and then test with `--no-build`; a build fault (`CS2012`, a locked file) is
+  run again alone and is never a red of a lane (`rules.build`, `rules.infra`).
+- **The train reads its config before each step,** refuses an empty lane, takes the quick lanes before a full-class
+  head (`batchSkipFirst`), and runs tag groups by itself when the queue is empty (`tagsWhenIdle`).
+- **A task can carry a checklist:** every landing is a slice until the list is empty or `--final`; `task split` makes
+  child tasks from the open items.
+- **A tool is marked out only on evidence;** agy can write inside its own two folders and read the engine worktree
+  with git; `--pool api` takes the role the task needs.
+- **Disk:** idle, landed, clean copies are pruned when space is short (`disk.pruneUnderGb`, off until set); sizes are
+  measured, with their age; a cancelled train removes its checkouts.
+- **A session's record is written whole** (one writer, one reader that knows busy from gone).
+- **Removed:** the whole-machine memory learning and the `rules.peak` reader (every run is sampled since 2.96: each
+  part takes its own recent peak), the cached lane-copy size, the second slice path, two hand-written quota marks.
+
 ## [2.97.0] — 2026-11-21
 What a day on the real machine showed (the overseer's 7 items after 2.96 ran for a day: 18 tasks landed in 8 hours).
 A green rules check was thrown away because a session edited a lane copy, and the land run ran the suite again.
@@ -24,7 +43,7 @@ Details: docs/RELEASE-2.97.0.md.
 ## [2.96.0] — 2026-11-20
 Measured memory and CPU, and each test once per tree (the overseer's 16 items; the owner: use 32 GB well first).
 Red rules checks had taken up to 413 minutes because every narrowing step re-ran the whole suite.
-Details: docs/RELEASE-2.96.0.md.
+Details: the 2.96.0 release notes, in git history.
 - **Every run is sampled** (its own process tree and the machine); a cost per job kind; `machine.admit: "measured"`
   admits by reservation against measured RAM and a CPU cap, and stops pairs that are slower together. Off by default.
 - **A red rules check narrows with the failing tests only;** one whole check decides. One green per tree is used by
@@ -49,20 +68,9 @@ Details: the 2.95.0 release notes, in git history.
 - **No new session on a task whose queued branch waits for another task.** `agent list` shows why a start died.
 - **Size:** harness code is 866 lines larger than 2.94; nothing was removed this round.
 
-## [2.94.0] — 2026-11-18
-The next batch is checked while the current one lands (the owner's three answers of 2026-11-18). An engine train was
-one rules check, then one land run, with the next batch's lanes waiting unchecked through both.
-Details: the 2.94.0 release notes, in git history.
-- **`rules.ahead` (off by default):** while a green batch's land run runs, the next batch's rules check runs beside
-  it, when free memory allows. Landed unchanged, the next train finds the result and goes to its land run; otherwise
-  the check ahead is ended with its process tree and nothing of it is kept. A red ahead hands nobody back.
-- **"Landed" on the scorecards is work that went through a train.** Tasks closed with no landing have their own count.
-- **Removed:** the old status snapshot and the role loader (`harness/status.mjs`, `harness/agents.mjs`, `npm run
-  agents`). `npm run status` now prints the brief that `npm run status -- --brief` printed.
-- **Size:** harness code is 229 lines smaller than 2.93 with the new check in it.
-
 ## Earlier releases (one line each; the full text is in git history: git log -p -- CHANGELOG.md)
 
+- **2.94.0** (2026-11-18): The next batch is checked while the land run runs (`rules.ahead`); scorecards tell landed from closed; one count for "engine tasks that can start".
 - **2.93.0** (2026-11-18): One rules check per train. The check runs the batch first and a landed tree keeps its green; any agent can port for the engine; `task after`, `train slice`, `task duplicate`; a command past its time limit is ended with everything it started.
 - **2.92.0** (2026-11-17): Bad news at the queue door, not hours later. The compile search runs when a branch is queued; the check before queueing judges the branch merged with the target; a land run red on a compiler error hands back the branch that changed that file.
 - **2.91.0** (2026-11-17): No full run ahead of a waiting batch. A due full run waits for an empty queue; `rules.ignore` lets a rules pass survive a record commit; release branches merge with a merge commit.

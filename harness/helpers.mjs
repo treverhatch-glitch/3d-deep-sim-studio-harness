@@ -233,3 +233,6 @@ export const writeJsonPretty = (f, j) => { fs.mkdirSync(path.dirname(f), { recur
 
 // Local names it replaced: writeJson.
 export const writeJsonTmp = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = `${f}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(v, null, 2)}\n`); fs.renameSync(tmp, f); };
+
+// Local names it replaced: read (repo-relative text, CRLF as LF).
+export const readTextLf = (f) => readTextOrNull(f)?.replace(/\r\n/g, '\n') ?? null;

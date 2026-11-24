@@ -22,7 +22,6 @@ const DAY = 86400000;
 const KEEP_TESTS = 200;
 const MAX_FILE = 64 * 1024 * 1024;
 const timesFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-times.json`);
-const rulesFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-rules.json`);
 const relOk = (s) => Boolean(s) && !s.startsWith('/') && !/^[A-Za-z]:/.test(s) && !s.split('/').includes('..');
 const unxml = (s) => String(s).replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 const attr = (tag, name) => { const m = new RegExp(`\\s${name}="([^"]*)"`).exec(tag); return m ? unxml(m[1]) : ''; };
@@ -132,12 +131,10 @@ export async function costReport(root, engine, { now = Date.now(), events = null
   const seen = new Map();
   for (const r of runs) if (r.train) for (const [name] of r.tests || []) { const k = `${r.train}\n${name}`; seen.set(k, [...(seen.get(k) || []), r.command]); }
   const twice = [...seen].filter(([, c]) => c.length > 1).map(([k, c]) => ({ train: k.split('\n')[0], name: k.split('\n').slice(1).join('\n'), commands: c })).slice(0, 20);
-  // Sampled peaks (2.96, run-cost.mjs) where a rules kind has them; else the test command's own report (rules.peak).
+  // Sampled peaks (run-cost.mjs) of the rules kinds.
   const ram = readJson(ramFile(root), null)?.[engine];
-  const sampled = Object.keys(ram?.kinds || {}).filter((k) => k === 'rules' || k.startsWith('rules ')).map((k) => ({ filter: k === 'rules' ? '(the whole command)' : k.slice(6), peakGb: kindCost(ram, k)?.peakGb || 0, minutes: kindCost(ram, k)?.minutes, unknown: Boolean(kindCost(ram, k)?.unknown), sampled: true }));
-  const stats = readJson(rulesFile(root, engine), null)?.partStats || {};
-  const own = Object.entries(stats).filter(([, v]) => Number(v?.peakGb) > 0).map(([filter, v]) => ({ filter, peakGb: Number(v.peakGb) }));
-  const heavy = (sampled.some((x) => x.peakGb > 0) ? sampled : own).filter((x) => x.peakGb > 0).sort((a, b) => b.peakGb - a.peakGb).slice(0, 5);
+  const sampled = Object.keys(ram?.kinds || {}).filter((k) => k === 'rules' || k.startsWith('rules ')).map((k) => ({ filter: k === 'rules' ? '(the whole command)' : k.slice(6), peakGb: kindCost(ram, k)?.peakGb || 0, minutes: kindCost(ram, k)?.minutes, unknown: Boolean(kindCost(ram, k)?.unknown) }));
+  const heavy = sampled.filter((x) => x.peakGb > 0).sort((a, b) => b.peakGb - a.peakGb).slice(0, 5);
   let ratchets = 0;
   try {
     const ev = events || (await import('./event.mjs')).readRecentEvents(20000);
@@ -150,13 +147,38 @@ export async function costReport(root, engine, { now = Date.now(), events = null
   return { engine, runs: runs.length, total, slowest, twice, heavy, short: sampled.filter((x) => x.unknown).slice(0, 5), memory, ratchets };
 }
 
+const median = (xs) => { const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+
+/**
+ * 2.98: lines about each rules part that has sampled runs. A part whose last passed run took over twice the median of
+ * its earlier passed runs (at least 3) and 5+ minutes more says so, with its slowest tests when rules.times has them.
+ * With rules.times set, a part none of whose tests the times file names says that.
+ */
+export function partLines(root, engine) {
+  const kinds = readJson(ramFile(root), null)?.[engine]?.kinds || {};
+  const set = Boolean(timesConfig(root, engine));
+  const runs = set ? readJson(timesFile(root, engine), null)?.runs || [] : [];
+  const L = [];
+  for (const kind of Object.keys(kinds).filter((k) => k.startsWith('rules ')).sort()) {
+    const part = kind.slice(6);
+    const mine = runs.filter((r) => r.tests?.length && String(r.command).split('+').includes(part));
+    if (set && !mine.length) L.push(`${part}: no test times for this part (the times file names none of its tests).`);
+    const passed = kinds[kind].filter((r) => r.code === 0 && Number.isFinite(r.minutes)).map((r) => r.minutes);
+    const last = passed[passed.length - 1];
+    const med = passed.length > 3 ? median(passed.slice(0, -1)) : 0;
+    if (!(last > 2 * med && last - med >= 5)) continue;
+    const slow = mine.length ? mine[mine.length - 1].tests.slice(0, 3).map(([n, sec]) => `${n} ${mins(sec)}`).join(', ') : '';
+    L.push(`${part} slowed down: its last passed run took ${last} min, the median of its ${passed.length - 1} earlier runs is ${med} min.${slow ? ` Slowest tests: ${slow}.` : ''}`);
+  }
+  return L;
+}
 const mins = (s) => (s >= 90 ? `${Math.round(s / 6) / 10} min` : `${s} s`);
 export function costText(r) {
   const L = [`Test cost for ${r.engine}, last 24 hours: ${r.runs} test run(s), ${mins(r.total)} of test time.`, 'Slowest tests:'];
   for (const x of r.slowest) L.push(`  ${mins(x.seconds)} (${x.share}%) ${x.name}`);
   L.push(r.twice.length ? `Ran more than once in one train (${r.twice.length}):` : 'No test ran more than once in one train.');
   for (const x of r.twice.slice(0, 10)) L.push(`  ${x.name} (train ${x.train}: ${x.commands.join(' and ')})`);
-  L.push(r.heavy.length ? `Heaviest rules runs by ${r.heavy[0].sampled ? 'sampled memory' : "the test command's own peak file (rules.peak)"}:` : 'No rules run has a measured peak yet.');
+  L.push(r.heavy.length ? 'Heaviest rules runs by sampled memory:' : 'No rules run has a measured peak yet.');
   for (const x of r.heavy) L.push(`  ${x.peakGb} GB ${x.filter}`);
   for (const x of r.short || []) L.push(`  ${shortText(x.minutes)}: ${x.filter}`);
   if (r.memory?.length) { L.push("Most memory in the test run's own table (rules.memory):"); for (const x of r.memory) L.push(`  ${x.gb} GB ${x.name}`); }
@@ -180,6 +202,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const want = flagOf(argv)('engine');
   const names = Object.keys(enginesConfig(REPO_ROOT)).filter((n) => !want || n === want);
   const reps = [];
-  for (const n of names) { const r = await costReport(REPO_ROOT, n); if (r) reps.push(r); }
-  console.log(reps.length ? reps.map(costText).join('\n\n') : `No test times kept${want ? ` for ${want}` : ''}: set engines.<x>.rules.times to the result file the test command writes (.trx, NUnit or JUnit XML).`);
+  for (const n of names) { const r = await costReport(REPO_ROOT, n); const pl = partLines(REPO_ROOT, n); if (r || pl.length) reps.push(`${r ? costText(r) : `Test cost for ${n}:`}${pl.length ? `\n${pl.join('\n')}` : ''}`); }
+  console.log(reps.length ? reps.join('\n\n') : `No test times kept${want ? ` for ${want}` : ''}: set engines.<x>.rules.times to the result file the test command writes (.trx, NUnit or JUnit XML).`);
 }

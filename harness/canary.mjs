@@ -24,8 +24,6 @@ export function readCanaries() {
 }
 const save = (c) => writeAtomic(CANARY_FILE(), `${JSON.stringify(c, null, 2)}\n`);
 
-export const isCanary = (id) => Boolean(readCanaries().tasks[id]);
-
 export function recordCanary(id, why, by = 'producer') {
   const c = readCanaries();
   c.tasks[id] = { why: String(why).slice(0, 400), by, at: new Date().toISOString(), outcomes: [] };

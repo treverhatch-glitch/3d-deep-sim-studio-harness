@@ -4,7 +4,7 @@
  * A fixed format built by code from the event log and state files (no model, no tokens). Lines: Workers (launched
  * sessions); Landed and bugs fixed; Unity (.studio/gates/unity-last.json); Blockers (halted supervisor,
  * .studio/STOP.json, lanes held for the owner, open asks, tasks waiting on `task yes`, paused roles, usage wind-down,
- * assets awaiting review); PC (free memory, machine:heavy holder; harness/machine.mjs); a running train's step and
+ * quota marks, assets awaiting review); PC (free memory, machine:heavy holder; harness/machine.mjs); a running train's step and
  * ETA.
  * npm run status -- --brief [--since <iso>] [--now <iso>] [--peek] [--json]
  * "Since": --since, else the last brief (.studio/brief-status.json; --peek doesn't move it), else
@@ -85,6 +85,8 @@ export async function briefFacts({ root = REPO_ROOT, since = null, now = Date.no
   if (crew.length) blockers.push({ kind: 'crew', ids: crew, text: 'crew paused (sessions, nothing landed)' });
   // 2.70.0 (v): assets waiting for a review of their previews (.studio/asset-reviews/), oldest first.
   try { const rv = (await import('./asset-review.mjs')).pendingReviews(root); if (rv.length) blockers.push({ kind: 'asset-review', ids: rv.map((r) => r.asset), text: 'asset reviews (oldest first)' }); } catch {}
+  // 2.98: tools marked out of quota (until when) and lines only suspected (harness/budget.mjs quotaSummary).
+  try { const b = await import('./budget.mjs'); const q = b.quotaSummary(now); if (q.out.length || q.suspected.length) blockers.push({ kind: 'quota', text: b.quotaLine(q, { short: true }) }); } catch {}
   const wd = readJson(path.join(root, '.studio', 'winddown.json'));
   if (wd?.at && !(await import('./winddown.mjs')).winddownOver(wd, { env, now })) blockers.push({ kind: 'winddown', text: `winding down${wd.pct !== null && wd.pct !== undefined ? ` (usage ${Math.round(wd.pct)}%)` : ''}` });
   // PC.

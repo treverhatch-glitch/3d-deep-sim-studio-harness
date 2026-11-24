@@ -134,11 +134,28 @@ npm run task -- add "Pass 11: realism pass on the hangar" --role engine-porter -
   2.90: a big unit lands per slice. `task done <ID> --train --slice` queues the committed slice; when it lands the task
   goes back to ready (not done, a `task.slice_landed` event) and the next session continues on the landed target. A red
   slice comes back as any red branch does. `task done <ID> --train` without `--slice` queues the last slice and closes
-  the task when it lands. A hand-back that left commits on the task is progress: the watchdog's park
+  the task when it lands (unless its checklist still has open items: below). A hand-back that left commits on the task is progress: the watchdog's park
   (`STUDIO_LOOP_HANDBACKS`), the circuit breaker, the task budget's session count and the crew breaker don't count it.
   Parallel units of one system start from `studio/templates/port-plan.md`: one chore declares the members several units
   share, first, and every unit waits for it (`--after`); a unit never declares a shared member itself (two branches
   declaring the same member pass each lane's check and break the train).
+  2.98: a unit carries its list as a checklist, and the list decides when it closes:
+  - `npm run task -- add "<title>" --checklist-file <file>` (one item a line), or
+    `npm run task -- checklist <ID> add "<item>" ...`; `... done "<item>"` (a porter does this from its lane; an item is
+    named by its words or its number in `list`), `... skip "<item>" --why "<reason>"` (a reason is required), `... list`.
+  - While an item is open, every landing is a slice: plain `task done <ID> --train` queues it and says "N checklist
+    item(s) are still open: queued as a slice". The landing that finds the list empty (done or skipped) closes the task.
+    `task done <ID> --train --final` closes it now; the open items go on its done line. A task with open items is not
+    closed by a direct `task done` (no train) without `--final`.
+  - `task show`, `task list` and the session brief say "7 of 12 done". The board lines in `studio/NEXT.md` do not (other
+    readers parse the title).
+  - `npm run task -- split <ID> --every <n> --by <name>` makes child tasks from the open items, n a child: each a normal
+    task on the same engine track with its own lane and branch, its items as its own checklist. Use it when a second
+    porter should work while the unit's slice waits for a train. The parent starts no new session, its queued slice still
+    lands, and it closes by itself when its last part closes (event `task.split`; the parent's done line says "its parts
+    landed"). Parts that change the same files clash at the queue door like any two lanes.
+  - One rule decides whether a landing closes a task (`harness/task-checklist.mjs` landingKeepsOpen): `--final` closes;
+    open items, open parts of a split, or the slice mark keep it open. The `--slice` mark stays for a task with no list.
 
 ## The train as the landing path (P5.2, P9.7)
 
@@ -226,6 +243,10 @@ The land run itself still takes `machine:heavy` as that engine's job kind, with 
   entry; a `task.tag` event). `npm run task -- train --engine <x> --tag <word>` takes only lanes with that tag. A train
   with neither `--only` nor `--tag` (the automatic start, a plain `train --engine <x>`) takes only untagged lanes: a
   tagged lane (an art batch) is never swept into a general train.
+  2.98: when no untagged lane waits and tagged lanes do, the automatic start runs a train for the tag whose oldest lane
+  was queued first, as `train --tag` does. It decides this before any full land run of the target alone. Set
+  `"tagsWhenIdle": false` in the engine's config to leave tagged lanes to a person. `train status --engine <x>` says
+  which rule applies on its tagged-lanes line.
 - A batch cap: `"batchMax": 6` in the engine's config (`STUDIO_ENGINE_BATCH_MAX` overrides it; 0, the default, is no
   cap): a train takes at most that many lanes, the rest wait for the next train.
 - Grouping by risk: `"batchGroup": "play"` groups lanes by the Play Mode class of what each lane changes (the
@@ -234,6 +255,17 @@ The land run itself still takes `machine:heavy` as that engine's job kind, with 
   `play.focus` every lane is class `full` and nothing changes. A lane marked alone still lands alone. Order: `--only` and
   `--tag`, then alone, then grouping, then the cap. The train's start event and `train status --engine <x>` say why the
   batch is what it is ("6 of 14 queued: class focus, cap 6; 8 wait (5 full, 3 focus)").
+- 2.98: quick lanes first. With `batchGroup` "play", when the head of the queue is class `full` and at least
+  `"batchSkipFirst"` lanes of class `skip` wait (default 4; 0 turns it off), the train takes the skip batch first and
+  says so ("the head T-1 is class full and 14 skip lanes wait: the skip batch goes first"). A full head is passed over
+  at most twice in a row (the count is kept on its queue entry), then it goes.
+- 2.98: an empty lane is refused. A branch whose commits change no file (only a merge of the target, say) is refused at
+  the queue door, and a train hands such a lane back with "empty lane: nothing to land (its tree adds nothing over
+  <target>)". Its task stays open.
+- 2.98: the train reads `engines.<x>` again before each step: the batch, the compile search, the rules check, each round,
+  each land run and the full run. A change is one log line and a `task.train.<x>.config_changed` event ("config changed
+  while this train ran: rules.focus.splitMax 3 -> 1"). A step already running keeps its values; the repo and target do
+  not change during a train.
 - 2.96: a held lane is left out before the batch is picked. A queued lane whose task waits for another task
   (`task after`) is not a candidate, even with `--only`: it sets no class, takes no seat and is not deferred. It stays
   queued. `train status --engine <x>` lists it once ("T-12 held: waits for T-9 (task after)"), and a
@@ -252,7 +284,8 @@ The land run itself still takes `machine:heavy` as that engine's job kind, with 
 - `npm run task -- train cancel --engine <x> --by <name> [--why "…"]`: writes `.studio/train/<x>-cancel.json` (the train
   id from its lock) first, kills the train's process tree (its land run with it; `taskkill /T /F` on Windows) and waits
   up to 30 s, puts the gate worktree back (`git merge --abort`, `git reset --hard <target>`, `git clean -fd`; only a
-  linked worktree of the engine repo, never its main checkout or a lane), deletes the train's integration refs and
+  linked worktree of the engine repo, never its main checkout or a lane), deletes the train's integration refs, removes its rules
+  checkouts (`.studio/tmp/rules-<train>-*`, about 1.3 GB each; the message says how much it freed) and
   releases its lock. The queue is left as it was: nobody is handed back or blamed (`task.train.<x>.cancelled`). It does
   not turn the automatic start off; it prints the command that does.
 - `npm run task -- train auto off|on --engine <x> --by <name> [--why "…"] [--hours N]`: the Line Producer's automatic
@@ -293,9 +326,8 @@ verifies are expected to finish soon (elapsed against `STUDIO_ENGINE_VERIFY_TYPI
 5) it waits for that gap; if not and free RAM is still short, the builder cap steps down one at a time every
 `STUDIO_ENGINE_SCALE_STEP_MIN` (3) minutes (none is stopped). Bounded by `STUDIO_ENGINE_HOLD_MAX_MIN` (30): then released,
 the land stays queued and `line.engine_hold_expired` says why. The land's own RAM wait is `STUDIO_ENGINE_LAND_WAIT_MIN` (20),
-or the hold's time plus 5 min while the Line is making room. The RAM a land needs is the engine table's floor until
-`STUDIO_ENGINE_RAM_RUNS` (3) green runs have recorded their peak (`.studio/engine-ram.json`, from the machine monitor's
-samples); then the highest of the last 5 green peaks plus `STUDIO_ENGINE_RAM_MARGIN_GB` (1.5), never under
+or the hold's time plus 5 min while the Line is making room. The RAM a land needs is the engine table's floor until a passed sampled run of its kind exists (`.studio/engine-ram.json`, `machine.sample`; with
+`"sample": false` it stays the table; `STUDIO_ENGINE_RAM_RUNS=0` also keeps the table); then the highest peak of that kind's last passed runs plus `STUDIO_ENGINE_RAM_MARGIN_GB` (1.5), never under
 `STUDIO_ENGINE_RAM_MIN_GB` (4). The owner's `STUDIO_UNITY_MIN_FREE_GB` and the lane's tuned `ram-floor` still win.
 
 **Engine first by default (2.81).** A studio with exactly one engine in `studio/game.json` gives that engine the push

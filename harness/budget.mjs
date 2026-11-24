@@ -198,11 +198,49 @@ export function limitLine(stderr = '', stdout = '', code = 1) {
   const lines = `${stderr || ''}`.trim() ? String(stderr).split('\n') : String(stdout || '').split('\n').slice(-5);
   return lines.reverse().find((l) => QUOTA_ERROR.test(l) && !/"type"\s*:\s*"(?:user|assistant|system|stream_event)"/.test(l)) || null;
 }
-/** Marks a tool as out of quota until its reset (1 h if the provider didn't say), keeping the provider's own line word for word. */
-export function markExhausted(tool, text = '', now = Date.now()) {
-  const q = readJson(QUOTA_FILE, {});
+/**
+ * 2.98: did the session reach the model? true: some usage or API time above zero; false: the tool reported usage and it
+ * was all zero (a session that never got a model answer); null: the log reports no usage (plain stderr, agy).
+ */
+export function reachedModel(log = '') {
+  const pos = (u) => Object.values(u).some((v) => (v && typeof v === 'object' ? pos(v) : Number(v) > 0));
+  let seen = false;
+  for (const l of String(log).split(/\r?\n/)) {
+    if (!l.trim().startsWith('{')) continue;
+    let o;
+    try { o = JSON.parse(l); } catch { continue; }
+    if (o?.duration_api_ms !== undefined) { seen = true; if (Number(o.duration_api_ms) > 0) return true; }
+    for (const u of [o?.usage, o?.message?.usage]) if (u && typeof u === 'object') { seen = true; if (pos(u)) return true; }
+  }
+  return seen ? false : null;
+}
+export const SHORT_WINDOW_MS = 5 * 3600000;
+export const LONG_WINDOW_MS = 7 * 86400000;
+export const CONFIRM_MS = 15 * 60000;
+/** How long a limit line holds: its own reset time; else the short window, or the weekly one when the text says weekly or names a date. */
+export function limitWindow(text = '', now = Date.now()) {
   const at = parseReset(text, now);
-  const until = at || now + 3600000;
+  if (at) return { until: at, resetKnown: true, window: 'its own reset time' };
+  const long = /\bweek(?:ly)?\b|\b\d{4}-\d{2}-\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(String(text));
+  return { until: now + (long ? LONG_WINDOW_MS : SHORT_WINDOW_MS), resetKnown: false, window: long ? 'the weekly window (no reset time given)' : 'the 5-hour window (no reset time given)' };
+}
+/**
+ * Marks a tool out until its window (limitWindow), keeping the provider's line word for word. opts.reached false (the
+ * session's usage was all zero) keeps the line as "suspected", not obeyed, unless the same key was suspected within
+ * CONFIRM_MS: then it is marked. opts.hours holds a mark that is not a provider limit (a spend guard); opts.flag tags it.
+ */
+export function markExhausted(tool, text = '', now = Date.now(), { reached = null, hours = null, flag = null } = {}) {
+  const q = readJson(QUOTA_FILE, {});
+  const prev = q[tool];
+  const line = String(text).replace(/\s+/g, ' ').trim().slice(0, 240);
+  const w = hours ? { until: now + hours * 3600000, resetKnown: true, window: `${hours} h` } : limitWindow(text, now);
+  const save = () => { fs.mkdirSync(path.dirname(QUOTA_FILE), { recursive: true }); fs.writeFileSync(QUOTA_FILE, `${JSON.stringify(q, null, 2)}\n`); return q[tool]; };
+  const confirmed = reached === false && prev?.suspected && now - Date.parse(prev.at) <= CONFIRM_MS;
+  if (reached === false && !confirmed) {
+    if (prev && Date.parse(prev.until) > now) return prev;
+    q[tool] = { suspected: true, at: new Date(now).toISOString(), why: String(text).slice(0, 160), line, window: w.window, version: harnessVersion() };
+    return save();
+  }
   // A stop records the tokens counted in the last 5 h, by model.
   let used = null;
   try {
@@ -210,10 +248,29 @@ export function markExhausted(tool, text = '', now = Date.now()) {
     const c = cacheSince(tool, now - 5 * 3600000, ev);
     used = { last5h: usedSince(tool, now - 5 * 3600000, ev), models: c.models };
   } catch {}
-  q[tool] = { until: new Date(until).toISOString(), why: String(text).slice(0, 160), line: String(text).replace(/\s+/g, ' ').trim().slice(0, 240), resetKnown: Boolean(at), at: new Date(now).toISOString(), version: harnessVersion(), ...(used ? { used } : {}) };
-  fs.mkdirSync(path.dirname(QUOTA_FILE), { recursive: true });
-  fs.writeFileSync(QUOTA_FILE, `${JSON.stringify(q, null, 2)}\n`);
-  return q[tool];
+  q[tool] = { until: new Date(w.until).toISOString(), why: String(text).slice(0, 160), line, resetKnown: w.resetKnown, window: w.window, at: new Date(now).toISOString(), version: harnessVersion(), ...(confirmed ? { confirmed: `a second start failed the same way within ${CONFIRM_MS / 60000} minutes (first at ${prev.at})` } : {}), ...(flag ? { [flag]: true } : {}), ...(used ? { used } : {}) };
+  return save();
+}
+/** A mark in words, for a hand-back or a session's end. */
+export const markText = (key, m) => (m?.suspected
+  ? `${key} is not marked out: the session never reached the model (all usage zero), so its line is only suspected; a second such stop within ${CONFIRM_MS / 60000} minutes marks it`
+  : `${key} is out until ${m?.until} (${m?.window || 'its own reset time'})`);
+/** The marks that stand ({ key, until, line, confirmed }) and the suspected ones ({ key, at, line }), for the status lines. */
+export function quotaSummary(now = Date.now()) {
+  const q = readJson(QUOTA_FILE, {});
+  const out = [];
+  const suspected = [];
+  for (const [key, m] of Object.entries(q)) {
+    if (m?.suspected) { if (now - Date.parse(m.at) <= CONFIRM_MS) suspected.push({ key, at: m.at, line: m.line || m.why || '' }); }
+    else if (m && Date.parse(m.until) > now) out.push({ key, until: m.until, line: m.line || m.why || '', confirmed: m.confirmed || null });
+  }
+  return { out, suspected };
+}
+/** One line: what is marked out, until when, from which line (unless short), and what is only suspected. '' when nothing. */
+export function quotaLine(s = quotaSummary(), { short = false } = {}) {
+  const q = (l) => (short ? '' : ` from "${String(l).slice(0, 100)}"`);
+  const parts = [...s.out.map((o) => `${o.key} out until ${o.until.slice(5, 16).replace('T', ' ')} UTC${q(o.line)}`), ...s.suspected.map((o) => `${o.key} suspected, not obeyed${q(o.line)}`)];
+  return parts.length ? `Quota: ${parts.join('; ')}` : '';
 }
 /**
  * The key a usage-limit stop is saved under: `tool:model` for a tool that keeps a quota per model (agy runs Gemini
@@ -256,6 +313,10 @@ export function cleanQuotaMarks(now = Date.now()) {
   const dropped = [];
   const kept = [];
   for (const [tool, m] of Object.entries(q)) {
+    if (m?.suspected) {
+      if (!(now - Date.parse(m.at) <= CONFIRM_MS)) { delete q[tool]; dropped.push({ tool, why: 'it was only suspected and no second start confirmed it' }); }
+      continue;
+    }
     const other = toolNamed(m.line || m.why);
     // A tool:model mark is its tool's mark.
     const base = tool.startsWith('custom:') ? tool : tool.split(':')[0];
@@ -405,7 +466,7 @@ export function budgetStatus(now = Date.now(), events = readRecentEvents(50000))
     const cache = cacheSince(tool, start, events);
     const w = cacheReadWeight();
     const when = out ? (Date.parse(out) - now > 20 * 3600000 ? `${out.slice(5, 10)} ${out.slice(11, 16)} UTC` : `${out.slice(11, 16)} UTC`) : '';
-    return { tool, used, recent, weekly, pct, targetPct, verdict, cacheRead: cache.cacheRead, cacheWeight: w, models: cache.models, exhaustedUntil: out, quotaLine: mark?.line || mark?.why || null, resets: new Date(start + 7 * 86400000).toISOString(), text: `${tool}${cache.models.length ? ` (${cache.models.join(', ')})` : ''}: ${recent.toLocaleString()} tokens in the last 5 h, ${used.toLocaleString()} this week, cache reads counted at ${w}x (${cache.cacheRead.toLocaleString()} read)${weekly ? ` (${Math.round(pct * 100)}% of ${weekly.toLocaleString()}; target ${Math.round(targetPct * 100)}% by now: ${verdict === 'under' ? 'under, start more lanes' : verdict === 'over' ? 'over, slow down' : 'on track'})` : ' (set --weekly to pace)'}${out ? `; out of quota until ${when}${mark?.used ? ` (it stopped at ${mark.used.last5h.toLocaleString()} counted tokens in the last 5 h${mark.used.models?.length ? `, ${mark.used.models.join(', ')}` : ''})` : ''}${mark?.resetKnown === false ? ' (the provider gave no reset time; 1 h assumed)' : ''}. The provider said: "${(mark?.line || mark?.why || '').slice(0, 160)}". Wrong? npm run budget -- probe ${tool}` : ''}` };
+    return { tool, used, recent, weekly, pct, targetPct, verdict, cacheRead: cache.cacheRead, cacheWeight: w, models: cache.models, exhaustedUntil: out, quotaLine: mark?.line || mark?.why || null, resets: new Date(start + 7 * 86400000).toISOString(), text: `${tool}${cache.models.length ? ` (${cache.models.join(', ')})` : ''}: ${recent.toLocaleString()} tokens in the last 5 h, ${used.toLocaleString()} this week, cache reads counted at ${w}x (${cache.cacheRead.toLocaleString()} read)${weekly ? ` (${Math.round(pct * 100)}% of ${weekly.toLocaleString()}; target ${Math.round(targetPct * 100)}% by now: ${verdict === 'under' ? 'under, start more lanes' : verdict === 'over' ? 'over, slow down' : 'on track'})` : ' (set --weekly to pace)'}${out ? `; out of quota until ${when}${mark?.used ? ` (it stopped at ${mark.used.last5h.toLocaleString()} counted tokens in the last 5 h${mark.used.models?.length ? `, ${mark.used.models.join(', ')}` : ''})` : ''}${mark?.resetKnown === false ? ` (the provider gave no reset time: ${mark.window || 'the 5-hour window'})` : ''}. The provider said: "${(mark?.line || mark?.why || '').slice(0, 160)}". Wrong? npm run budget -- probe ${tool}` : ''}` };
   });
 }
 
@@ -485,6 +546,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const cap = dailyCap();
   console.log(cap ? `Daily cap: ${cap.toLocaleString()} tokens (input + output + cache reads at ${cacheReadWeight()}x); STUDIO_DAILY_TOKEN_CAP changes it, off turns it off.` : 'Daily cap: off (STUDIO_DAILY_TOKEN_CAP=off).');
   console.log(st.length ? st.map((s) => s.text).join('\n') : 'No tool has reported usage yet. Agents started with npm run agent or npm run studio:start report it.');
+  console.log(quotaLine() || 'Quota: no tool is marked out and none is suspected.');
   console.log(`Order when a tool runs out: ${(readBudget().order || []).join(' → ')}`);
   // Spend in dollars per tool and key (Vertex's live usage log too), and each spend budget (none by default).
   try { const sb = await import('./spend-budget.mjs'); await sb.spendPass(); for (const l of await sb.spendLines()) console.log(l); } catch (e) { console.log(`Spend: couldn't be read (${e.message})`); }

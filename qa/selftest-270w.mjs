@@ -120,7 +120,7 @@ export async function selftest270W({ dir, run, report, tmpRoot }) {
   const txt = run(dir, 'node harness/lanes.mjs disk --top 2', env);
   await guard('270w disk: `lanes disk` lists each lane copy\'s size, the total and what laneExclude would save in the lanes that still carry it; over STUDIO_LANES_MAX_GB a lanes.disk_over warning; the machine scan\'s disk line names the lanes\' total (fails on 2.69.0: no disk report)', () => [
     dk.status === 0 && dj.lanes?.length >= 5 && dj.totalBytes > 0 && dj.lanes.every((l) => l.bytes > 0) && dj.saveBytes > 0 && dj.lanes.find((l) => l.name === 'builder-a')?.sparse === true && dj.lanes.find((l) => l.name === 'builder-b')?.sparse === false
-      && over?.status === 'warn' && /STUDIO_LANES_MAX_GB/.test(over.msg) && /lane copies [\d.]+ GB/.test(ml.line || '') && /Lane copies: \d+/.test(out(txt)) && /more/.test(out(txt)),
+      && over?.status === 'warn' && /STUDIO_LANES_MAX_GB/.test(over.msg) && /lane copies [\d.]+ (GB|MB|KB), measured just now/.test(ml.line || '') && /Lane copies: \d+/.test(out(txt)) && /more/.test(out(txt)),
     `${out(dk).slice(-1500)}\n${JSON.stringify({ over, ml })}\n${out(txt)}`]);
 
   // ---- stale-lane proposals surfaced, landed lanes sooner ----

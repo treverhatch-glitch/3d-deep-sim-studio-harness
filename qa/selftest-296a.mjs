@@ -185,14 +185,14 @@ console.log(JSON.stringify(measuredAdmit({ root: process.cwd(), engine: 'unity',
     await guard('2.96 (a17) a land run that holds its slot but has no sample yet counts its measured need (10.6 GB), not its 8 GB claim, so a rules check (12.7 GB) waits on 17 GB above the floor (fails before this fix: only static claims counted)', () => [
       held.decided && !held.ok && /unity land is counted at 10\.6 GB \(no sample of it yet\)/.test(held.line), JSON.stringify(held)]);
 
-    // runParts: the measured number beats rules.peak (20 GB would wait; the measured decision admits).
+    // runParts: the measured number beats the part's planned number (20 GB would wait; the measured decision admits).
     const R12 = probe(`import { runParts } from ${u('harness/rules-parts.mjs')};
 const start = () => new Promise((r) => setTimeout(() => r({ status: 'pass' }), 300));
 const parts = [{ filter: 'a', gb: 20 }, { filter: 'b', gb: 20 }];
 const old = await runParts({ parts, start, max: 2, gb: 4, floorGb: 3, freeGb: () => 16, pollMs: 50 });
 const now = await runParts({ parts, start, max: 2, gb: 4, floorGb: 3, freeGb: () => 16, pollMs: 50, admitPart: () => ({ decided: true, ok: true, line: 'measured: needs 1.6 GB, 13 GB free above the floor: it fits' }) });
 console.log(JSON.stringify({ old: old.atOnce, now: now.atOnce, said: now.decisions }));`);
-    await guard('2.96 (a12) the measured number beats rules.peak: a part whose rules.peak says 20 GB waits on 16 GB free, the same part admitted by its measured need runs beside the first (fails before this fix: rules.peak always decided)', () => [
+    await guard('2.96 (a12) the measured number beats the planned number: a part planned at 20 GB waits on 16 GB free, the same part admitted by its measured need runs beside the first (fails before this fix: the planned number always decided)', () => [
       R12.old === 1 && R12.now === 2 && R12.said.some((l) => /measured: needs 1\.6 GB/.test(l)), JSON.stringify(R12)]);
 
     // acquireHeavy: off is 2.95 (the land floor holds it back on 4.5 GB free); on, its measured 1 GB starts it.

@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { REPO_ROOT, emitEvent } from './event.mjs';
+import { emitEvent } from './event.mjs';
 
 import { ACCEPTED_FILE, causeOf, readAccepted, forcedGroups } from './cause-store.mjs';
 import { parseNextQueue, completeTask } from './task.mjs';

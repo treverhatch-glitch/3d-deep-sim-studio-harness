@@ -27,6 +27,7 @@ import { visionFixIds, visionFirst, mayFileVisionFix, parentIsVisionFix } from '
 import { PLAYER_TYPES } from './vision-card.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
 import { inferLaneAtAdd, laneRequired, holdReason, queuedHeldWhy, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal, laneEntries, proposalState } from './task-hold.mjs';
+import { itemsOf, openItems, progress, itemLines, readItemsFile, changeChecklist, landingKeepsOpen, finalNote, splitGroups } from './task-checklist.mjs';
 import { stopIfOverBudget, overBudget as overBudgetOf } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
@@ -38,7 +39,7 @@ import { nativeEngine, webCodeNamed } from './native.mjs';
 const NON_CHANGE_TYPES = new Set(['chore', 'study', 'research', 'review', 'docs', 'idea', 'playtest']);
 import { misplacedTrailers, misplacedTrailerText, ownCommitOf } from './trailers.mjs';
 import { inferLaneFromText } from './lane-infer.mjs';
-import { inLaneCopy, catchUp, carryTaskBranch, carryTaskBranchEx, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf, taskOnBoard } from './worktree.mjs';
+import { inLaneCopy, catchUp, carryTaskBranchEx, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf, taskOnBoard } from './worktree.mjs';
 import { laneConfigBefore } from './config-proposal.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
 import { recordTrust } from './gate-trust.mjs';
@@ -46,11 +47,11 @@ import { isEngineChurn, engineGates, relatedTestsOn } from './game-gates.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
 import { checkBreaker, isFailureNote, reasonKey, unblockTask } from './breaker.mjs';
 import { parkIfOwnerOnly, ownerStepOfChecks, ownerStepForHandBack } from './owner-only.mjs';
-import { canaryEnd, isCanary, recordCanary, modelFor } from './canary.mjs';
+import { canaryEnd, recordCanary, modelFor } from './canary.mjs';
 import { claimActive, claimOwner } from './busy.mjs';
 import { restartSelf as restartTrain, drainLine } from './train-gate.mjs';
 import { startSummary, carryForward } from './carry.mjs';
-import { openPending, readPending } from './pending-review.mjs';
+import { openPending } from './pending-review.mjs';
 import { isDecider, propose, SIZE_CAP } from './proposed.mjs';
 import { attachTricks } from './cheatsheet.mjs';
 import { readBaseline, recordBaseline, setTrunk, trunkState, judgeRed } from './baseline.mjs';
@@ -429,6 +430,8 @@ export function showTask(taskId, q = parseNextQueue()) {
     handoff: fs.existsSync(handoff) ? fs.readFileSync(handoff, 'utf8') : null,
     brief: fs.existsSync(path.join(STUDIO_STATE_DIR, 'briefs', `${taskId}.md`)) ? `.studio/briefs/${taskId}.md` : null,
     checklist: check ? check.checks.map((c) => `[${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`) : null,
+    // 2.98 (c): the task's own list (task checklist): "7 of 12 done" and one line an item.
+    ...(itemsOf(taskId).length ? { items: { progress: progress(itemsOf(taskId)), lines: itemLines(itemsOf(taskId)) } } : {}),
     // 2.85 (f): the vision card its brief carries (kind, words, the pillar or layer), and whether it is a vision fix.
     vision: (() => { try { const v = visionFor(task); return v.card ? { kind: v.card.kind, words: v.card.words, ...(v.card.pillar ? { pillar: v.card.pillar } : {}), ...(v.card.layer ? { layer: v.card.layer } : {}), ...(v.reviewed ? { reviewed: v.reviewed } : {}) } : null; } catch { return null; } })(),
     visionFix: (() => { try { return visionFixIds(readRecentEvents(50000)).has(taskId); } catch { return Boolean(meta.visionFix); } })(),
@@ -619,6 +622,10 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     if (idx !== -1) [target] = q.backlog.splice(idx, 1);
   }
   if (!target) return null;
+  // 2.98 (c): a sliced task closes here only with --final (a train landing makes it a slice instead: closeTrainTask).
+  const keep = !checkOnly && !trainCheck && !unityTrainCheck && landingKeepsOpen(target.id, { done: new Set(q.done.map((t) => t.id)) });
+  if (keep) return { error: 'checklist', message: `${target.id} is not done: ${keep}. Check items off (npm run task -- checklist ${target.id} done "<item>"), skip one with --why, queue this work as a slice (task done ${target.id} --train), or close it now with --final. Nothing was closed.` };
+  if (!checkOnly && !trainCheck && !unityTrainCheck) note = [note, finalNote(target.id)].filter(Boolean).join('; ');
   // A "Golden-Reason:" line git doesn't read as a trailer (right under the subject, mid-body) is refused here, before
   // the train would hand the lane back (harness/trailers.mjs).
   if (!force) {
@@ -984,18 +991,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
 
   // The board is re-read right before it is written (under the land lock); only this task's move to DONE is applied.
   let landed = false;
-  const writeBoard = () => withBoard(() => {
-    const fresh = parseNextQueue();
-    fresh.inProgress = fresh.inProgress.filter((t) => t.id !== target.id);
-    fresh.backlog = fresh.backlog.filter((t) => t.id !== target.id);
-    fresh.done = fresh.done.filter((t) => t.id !== target.id);
-    target.status = 'done';
-    if (note) target.title = `${target.title} _(✓ ${note})_`;
-    fresh.done.unshift(target);
-    writeNextQueue(fresh);
-    q = fresh;
-    landed = true;
-  });
+  const writeBoard = () => { q = boardToDone(target.id, note, target).q; landed = true; };
 
   // In a lane copy, done is when the work reaches the studio's branch: committed, rebased, re-checked if main moved,
   // then added. Forced or not, uncommitted work is refused here.
@@ -1031,13 +1027,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
 
   const nextActive = q.inProgress[0] || null;
   syncCurrentTaskCheckpoint(nextActive, `Completed ${target.id}${note ? `: ${note}` : ''}`);
-  clearAttempts(target.id); // 2.81 (b1): a finished task has nothing to hold back (harness/attempts.mjs)
-  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title}`, ...(check.anchors || check.claims || check.noTestReason || check.noTest ? { meta: { ...(check.anchors ? { anchors: check.anchors } : {}), ...(check.claims ? { claims: check.claims } : {}), ...(check.noTestReason ? { noTestReason: check.noTestReason } : {}), ...(check.noTest ? { noTest: true } : {}) } } : {}) });
-  try { canaryEnd(target.id, 'cheated', { agent: agent || target.role }); } catch { /* a record, never a blocker */ }
-  assetHandoffAfterLanding(target.id, agent); // 2.67.1 (j)
-  if (taskType(target) === 'rescue') { try { applyRescue(target, { by: agent || 'rescue' }); } catch { /* the rescue's own record stays */ } }
-  else { try { closeRescuesFor(target.id, { by: agent || target.role || 'harness', why: 'has landed', board: { parseNextQueue, dropTask } }); } catch { /* 2.60.1 (B-39): the watchdog's pass sweeps it */ } }
-  joinWaveIfGameplay(target, agent || target.role);
+  afterClose(target, agent, { msg: `Completed ${target.id}: ${target.title}`, meta: { ...(check.anchors ? { anchors: check.anchors } : {}), ...(check.claims ? { claims: check.claims } : {}), ...(check.noTestReason ? { noTestReason: check.noTestReason } : {}), ...(check.noTest ? { noTest: true } : {}) } });
 
   if (!check.ok) {
     // A forced done is "done (pending)": the lane moves on; an approval card waits for a person or a reviewer from
@@ -1132,7 +1122,7 @@ function trainNoTestReason(target) {
 }
 
 /** 2.90 (f): a landed slice: the task back to the backlog (ready), its claim freed, the slice mark cleared. */
-function sliceLanded(taskId, agent, { train, lock }) {
+function sliceLanded(taskId, agent, { train, lock, why }) {
   let target = null;
   withBoard(() => {
     const fresh = parseNextQueue();
@@ -1146,7 +1136,8 @@ function sliceLanded(taskId, agent, { train, lock }) {
   if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
   setHold(taskId, { slice: null });
   clearAttempts(taskId);
-  emitEvent({ type: 'task.slice_landed', agent: agent || 'train', task: taskId, to: 'producer', msg: `${taskId}: a slice landed (merge train ${train}); the task stays open and the next session continues on the landed target (task done ${taskId} --train without --slice closes it with the last slice)`, meta: { train } });
+  const left = progress(itemsOf(taskId));
+  emitEvent({ type: 'task.slice_landed', agent: agent || 'train', task: taskId, to: 'producer', msg: `${taskId}: a slice landed (merge train ${train}); the task stays open (${why}${left ? `; checklist ${left}` : ''}) and the next session continues on the landed target`, meta: { train, why } });
   return { id: taskId, sliceLanded: true };
 }
 
@@ -1174,37 +1165,64 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
   const mainTip = spawnSync('git', ['rev-parse', landTarget ? `refs/heads/${landTarget}` : 'HEAD'], { windowsHide: true, cwd: gitRoot, encoding: 'utf8' }).stdout.trim();
   if (!head || !laneHead || !anc(laneHead, head) || !anc(head, mainTip)) return { error: 'not-landed', message: `${taskId}'s lane (${String(laneHead).slice(0, 8)}) is not in the studio's branch through train ${train}` };
   if (record && (record.dirty !== false || record.partial || judgeRed((record.rows || []).map((r) => ({ ...r, required: r.required !== false })), readBaseline(taskId) || { red: [] }).fresh.length)) return { error: 'not-verified', message: `train ${train}'s verify record is not a clean, green full verify` };
-  // 2.90 (f): a slice (task done --train --slice) landed: the task goes back to ready, for a session on the landed target.
-  if (readHolds()[taskId]?.slice) return sliceLanded(taskId, agent, { train, lock });
-  let target = null;
-  let q = null;
-  const writeBoard = () => withBoard(() => {
-    const fresh = parseNextQueue();
-    target = fresh.inProgress.find((t) => t.id === taskId) || fresh.backlog.find((t) => t.id === taskId) || null;
-    if (!target) return;
-    fresh.inProgress = fresh.inProgress.filter((t) => t.id !== taskId);
-    fresh.backlog = fresh.backlog.filter((t) => t.id !== taskId);
-    fresh.done = fresh.done.filter((t) => t.id !== taskId);
-    target.status = 'done';
-    if (note) target.title = `${target.title} _(✓ ${note})_`;
-    fresh.done.unshift(target);
-    writeNextQueue(fresh);
-    q = fresh;
-  });
+  // 2.98 (c): the one answer to "does this landing close the task?" (harness/task-checklist.mjs): open checklist items,
+  // open parts of a split or the slice mark make it a slice; --final closes it with the open items in the note.
+  const keep = landingKeepsOpen(taskId, { done: new Set(parseNextQueue().done.map((t) => t.id)) });
+  if (keep) return sliceLanded(taskId, agent, { train, lock, why: keep });
+  note = [note, finalNote(taskId)].filter(Boolean).join('; ');
+  let r = {};
+  const writeBoard = () => { r = boardToDone(taskId, note); };
   try { withLandLock(root, writeBoard); } catch (err) { if (err.code !== 'LAND_BUSY') throw err; writeBoard(); }
+  const { target, q } = r;
   if (!target) return null;
   clearPass(root, taskId);
   if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Completed ${target.id}${note ? `: ${note}` : ''}`);
-  clearAttempts(target.id);
-  const ntr = trainNoTestReason(target);
-  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title} (merge train ${train})`, meta: { train, ...(ntr || {}) } });
+  afterClose(target, agent, { msg: `Completed ${target.id}: ${target.title} (merge train ${train})`, meta: { train, ...(trainNoTestReason(target) || {}) } });
+  return target;
+}
+
+/** Move an open task to done (the note on its title) under the board lock. { target, q }; target null when not open. */
+function boardToDone(taskId, note, given = null) {
+  let target = null;
+  let q = null;
+  withBoard(() => {
+    q = parseNextQueue();
+    // A caller that holds the task (task done) gets that same object moved and marked: it prints it afterwards.
+    target = given || q.inProgress.find((t) => t.id === taskId) || q.backlog.find((t) => t.id === taskId) || null;
+    if (!target) return;
+    for (const k of ['inProgress', 'backlog', 'done']) q[k] = q[k].filter((t) => t.id !== taskId);
+    target.status = 'done';
+    if (note) target.title = `${target.title} _(✓ ${note})_`;
+    q.done.unshift(target);
+    writeNextQueue(q);
+  });
+  return { target, q };
+}
+
+/** What every close does after the board move: the task.done event, records, rescues, the wave, a split parent. */
+function afterClose(target, agent, { msg, meta }) {
+  clearAttempts(target.id); // 2.81 (b1): a finished task has nothing to hold back (harness/attempts.mjs)
+  if (['slice', 'final', 'split'].some((k) => readHolds()[target.id]?.[k])) setHold(target.id, { slice: null, final: null, split: null });
+  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg, ...(Object.keys(meta).length ? { meta } : {}) });
   try { canaryEnd(target.id, 'cheated', { agent: agent || target.role }); } catch { /* a record, never a blocker */ }
   assetHandoffAfterLanding(target.id, agent); // 2.67.1 (j)
   if (taskType(target) === 'rescue') { try { applyRescue(target, { by: agent || 'rescue' }); } catch { /* the rescue's own record stays */ } }
   else { try { closeRescuesFor(target.id, { by: agent || target.role || 'harness', why: 'has landed', board: { parseNextQueue, dropTask } }); } catch { /* 2.60.1 (B-39): the watchdog's pass sweeps it */ } }
   joinWaveIfGameplay(target, agent || target.role);
-  return target;
+  closeSplitParent(target.id, agent);
+}
+
+/** 2.98 (c): the last part of a split closed: its parent, waiting in the backlog with nothing left open, closes too. */
+function closeSplitParent(childId, agent) {
+  const holds = readHolds();
+  const parent = Object.keys(holds).find((id) => (holds[id].split?.children || []).includes(childId));
+  if (!parent || lockStatus(`task:${parent}`).locked) return;
+  const q = parseNextQueue();
+  if (!q.backlog.some((t) => t.id === parent) || landingKeepsOpen(parent, { holds, done: new Set(q.done.map((t) => t.id)) })) return;
+  const note = `its parts landed: ${holds[parent].split.children.join(', ')}`;
+  const { target } = boardToDone(parent, note);
+  if (target) afterClose(target, agent, { msg: `Completed ${parent}: ${target.title}`, meta: { parts: holds[parent].split.children } });
 }
 
 /**
@@ -1930,14 +1948,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
 
   if (cmd === 'list') {
     // In a launched session (STUDIO_COMPACT_OUTPUT=on) or with --mine: only this agent's tasks; --all prints the whole board.
+    const holds = readHolds();
     if (!flags.all && (flags.mine || /^(on|1|true|yes)$/i.test(process.env.STUDIO_COMPACT_OUTPUT || ''))) {
       const role = typeof flags.role === 'string' ? flags.role : process.env.STUDIO_ROLE || null;
       const n = Number(flags.limit || 8);
-      const slim = (t) => ({ id: t.id, title: t.title, role: t.role, priority: t.priority });
+      const slim = (t) => ({ id: t.id, title: t.title, role: t.role, priority: t.priority, ...(progress(itemsOf(t.id, holds)) ? { checklist: progress(itemsOf(t.id, holds)) } : {}) });
       console.log(JSON.stringify({ inProgress: q.inProgress.map(slim), backlog: q.backlog.filter((t) => !role || t.role === role || !t.role).slice(0, n).map(slim), backlogTotal: q.backlog.length, doneTotal: q.done.length, note: 'trimmed: --all for the whole board, task show <ID> for one task' }, null, 2));
       process.exit(0);
     }
-    console.log(JSON.stringify(q, null, 2));
+    const withList = (t) => (progress(itemsOf(t.id, holds)) ? { ...t, checklist: progress(itemsOf(t.id, holds)) } : t);
+    console.log(JSON.stringify({ ...q, inProgress: q.inProgress.map(withList), backlog: q.backlog.map(withList) }, null, 2));
     process.exit(0);
   }
 
@@ -2179,9 +2199,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.log(JSON.stringify({ train: 'check', ...res }));
       process.exit(res.ok ? 0 : 1);
     }
-    // 2.90 (f): --slice queues one committed slice of a big unit; the task stays open when it lands. Any other done clears it.
+    // 2.90 (f): --slice queues one committed slice of a big unit; the task stays open when it lands. 2.98 (c): --final closes
+    // a task with open checklist items (they go in the note); open items alone make the landing a slice. Any other done clears both marks.
     if (flags.slice && !flags.train) { console.error(`--slice goes with --train: npm run task -- done ${targetId} --train --slice queues this slice and keeps the task open.`); process.exit(1); }
-    if (flags.slice || readHolds()[targetId]?.slice) setHold(targetId, { slice: flags.slice ? { by: whoAmI(flags) || 'agent', at: new Date().toISOString() } : null });
+    if (flags.slice && flags.final) { console.error('--slice keeps the task open and --final closes it: give one of them. Nothing was queued.'); process.exit(1); }
+    const h0 = readHolds()[targetId] || {};
+    const mark = { by: whoAmI(flags) || 'agent', at: new Date().toISOString() };
+    if (flags.slice || flags.final || h0.slice || h0.final) setHold(targetId, { slice: flags.slice ? mark : null, final: flags.final ? mark : null });
+    const nOpen = flags.final ? 0 : openItems(itemsOf(targetId)).length;
+    const sliceSay = nOpen ? `${nOpen} checklist item(s) are still open: queued as a slice; the task closes when the list is empty (or \`--final\` to close it now with the open items listed in the note).` : '';
+    const saySlice = (code) => { if (!code && sliceSay) console.log(sliceSay); return code; };
     if (flags.train) {
       // --force --train with a force approval on file queues the lane forced (the train still runs its full verify and
       // the safety checks; a tier-C lane still waits for a release). Without one: refused.
@@ -2212,11 +2239,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { engine: trainEngine, task: pre.id, agent: whoAmI(flags), alone: flags.alone ? true : null, branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '', tag: doneTag === null ? null : doneTag, again: Boolean(flags.again), waits: (await import('./task-hold.mjs')).afterWaits(pre.id, parseNextQueue()), title: (() => { try { const q1 = parseNextQueue(); return [...q1.inProgress, ...q1.backlog].find((t) => t.id === pre.id)?.title || ''; } catch { return ''; } })() });
         // 2.85: --again queues a branch the engine train handed back unchanged (logged as task.train.<x>.requeued_unchanged).
         (r.ok ? console.log : console.error)(r.message);
+        saySlice(r.ok ? 0 : 1);
         const wait = r.ok ? (await import('./task-hold.mjs')).afterWaits(pre.id, parseNextQueue()) : [];
         if (wait.length) console.log(`It waits for ${wait.join(', ')} (task after): a train leaves it out until then.`);
         process.exit(r.ok ? 0 : 1);
       }
-      process.exit(await queueLaneForTrain(targetId, flags, noopFlag, { forced: flags.force ? forceApproval : null }));
+      process.exit(saySlice(await queueLaneForTrain(targetId, flags, noopFlag, { forced: flags.force ? forceApproval : null })));
     }
     // In a lane copy with commits to land, task done queues the lane and a train lands it outside this shell.
     // STUDIO_DONE_QUEUE=0/off: the train runs here.
@@ -2224,7 +2252,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const { trainOn } = await import('./train.mjs');
       let lb = '';
       try { lb = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim(); } catch {}
-      if (trainOn() && lb && unmerged(lb) > 0) process.exit(await queueLaneForTrain(targetId, flags, noopFlag, { kick: true }));
+      if (trainOn() && lb && unmerged(lb) > 0) process.exit(saySlice(await queueLaneForTrain(targetId, flags, noopFlag, { kick: true })));
     }
     const busyMod = await import('./busy.mjs');
     // In a lane copy with commits to land, task done is a one-lane merge train (harness/train.mjs): main moves only
@@ -2522,6 +2550,46 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     try { const ut = await import('./unity-train.mjs'); const q = ut.readUnityQueue(mainRoot(), rec.engine).find((e) => e.task === arg1); if (q) ut.queueUnityTask(mainRoot(), { engine: rec.engine, task: arg1, agent: q.agent, branch: q.branch, note: q.note || '', alone: on }); } catch { /* the record is what counts */ }
     emitEvent({ type: 'task.alone', agent: actor(), task: arg1, msg: `${arg1} ${on ? 'lands alone: the engine train gives its branch a land run of its own' : 'may land in a batch again'}`, meta: { alone: on } });
     console.log(`${arg1} ${on ? `lands alone on the ${rec.engine} train (a land run of its own).` : 'may land in a batch again.'}`);
+    process.exit(0);
+  }
+  // 2.98 (c): `task checklist <ID> add|done|skip|list` (a porter may close items from its lane); `task split <ID> --every <n>`.
+  if (cmd === 'checklist') {
+    const verb = flags._[2] || 'list';
+    const t = [...q.inProgress, ...q.backlog, ...q.done].find((x) => x.id === arg1);
+    if (!t || !['add', 'done', 'skip', 'list'].includes(verb)) { console.error(`${t || !arg1 ? '' : `No task ${arg1}. `}Usage: npm run task -- checklist <TASK_ID> add "<item>" ... | done "<item>" | skip "<item>" --why "<reason>" | list`); process.exit(2); }
+    if (verb === 'list') { const items = itemsOf(arg1); console.log(items.length ? [`${arg1}: checklist ${progress(items)}`, ...itemLines(items).map((l, i) => `${i + 1}. ${l}`)].join('\n') : `${arg1} has no checklist (npm run task -- checklist ${arg1} add "<item>").`); process.exit(0); }
+    const by = whoAmI(flags) || actor();
+    const r = changeChecklist(arg1, verb, flags._.slice(3), { why: typeof flags.why === 'string' ? flags.why : '', by });
+    if (!r.ok) { console.error(r.message); process.exit(1); }
+    emitEvent({ type: 'task.checklist', agent: by, task: arg1, msg: r.message.slice(0, 600), meta: { verb, progress: progress(r.items) } });
+    console.log(r.message);
+    process.exit(0);
+  }
+  if (cmd === 'split') {
+    const by = typeof flags.by === 'string' ? flags.by.trim() : '';
+    const every = Number(flags.every);
+    const t = [...q.inProgress, ...q.backlog].find((x) => x.id === arg1);
+    if (!t || !by || !Number.isInteger(every) || every < 1) { console.error(`${arg1 && !t ? `${arg1} is not an open task. ` : ''}Usage: npm run task -- split <TASK_ID> --every <n> --by <name>   (a child task for every n open checklist items)`); process.exit(2); }
+    const groups = splitGroups(itemsOf(arg1), every);
+    if (!groups.length) { console.error(`${arg1} has no open checklist items to split (npm run task -- checklist ${arg1} add "<item>" first). Nothing was changed.`); process.exit(1); }
+    const rec = (() => { try { return engineTaskOf(arg1); } catch { return null; } })();
+    const lane = readHolds()[arg1]?.lane;
+    const made = [];
+    for (const [k, g] of groups.entries()) {
+      const c = addTask({ title: `${arg1} part ${k + 1} of ${groups.length}: ${g.map((i) => i.text).join('; ')}`.slice(0, 200), role: t.role, priority: t.priority, agent: by, meta: { promoted: true, splitOf: arg1, ...(rec?.track ? { track: rec.track } : {}), ...(rec?.scope ? { scope: rec.scope } : {}), ...(lane ? { lane } : {}) } });
+      if (!c?.id || c.error || c.proposed) { console.error(`Part ${k + 1} was not added: ${c?.message || 'no task id'}.`); break; }
+      changeChecklist(c.id, 'add', g.map((i) => i.text), { by });
+      made.push({ id: c.id, texts: g.map((i) => i.text) });
+    }
+    if (!made.length) process.exit(1);
+    updateHolds((all) => {
+      const to = new Map(made.flatMap((m) => m.texts.map((x) => [x, m.id])));
+      const h = all[arg1] || {};
+      all[arg1] = { ...h, checklist: itemsOf(arg1, all).map((i) => (i.state === 'open' && to.has(i.text) ? { ...i, state: 'split', to: to.get(i.text), by } : i)), split: { children: [...(h.split?.children || []), ...made.map((m) => m.id)], by, at: new Date().toISOString() } };
+    });
+    const ids = made.map((m) => m.id).join(', ');
+    emitEvent({ type: 'task.split', agent: by, task: arg1, to: 'producer', msg: `${by} split ${arg1}'s open checklist into ${made.length} task(s): ${ids}; ${arg1} closes when they are done`, meta: { children: made.map((m) => m.id), every } });
+    console.log(`${arg1} is split into ${ids} (${every} item(s) each; each is a normal task with its own lane). ${arg1} starts no new session now; its queued work still lands, and it closes by itself when ${made.length === 1 ? 'that task is' : 'they are all'} done.`);
     process.exit(0);
   }
   if (cmd === 'after') {
@@ -2866,6 +2934,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const bad = unknownAfter(flags.after.split(/[,\s]+/).filter(Boolean));
       if (bad) { console.error(`Not queued. ${bad}`); process.exit(1); }
     }
+    // 2.98 (c): --checklist-file <file>: the task's checklist, one item a line (read before anything is queued).
+    let listItems = [];
+    if (flags['checklist-file'] !== undefined) {
+      try { listItems = readItemsFile(String(flags['checklist-file'])); } catch (err) { console.error(`Not queued. --checklist-file: ${err.code === 'ENOENT' ? 'no such file' : err.message} (${flags['checklist-file']}).`); process.exit(1); }
+      if (!listItems.length) { console.error(`Not queued. --checklist-file ${flags['checklist-file']} has no items (one a line).`); process.exit(1); }
+    }
     const created = addTask({
       title: `${prefix}${title}`,
       role: roleFlag,
@@ -2911,6 +2985,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(`Not queued. ${created.message}`);
       process.exit(1);
     }
+    if (listItems.length && created.id && !created.duplicate) console.error(changeChecklist(created.id, 'add', listItems, { by: typeof flags.agent === 'string' ? flags.agent : actor() }).message);
     if (canaryWhy && created.id && !created.duplicate) recordCanary(created.id, canaryWhy, typeof flags.agent === 'string' ? flags.agent : actor());
     for (const w of created.warnings || []) console.error(`note: ${w}`);
     if (startFor && created.started) console.error(`Started ${created.id} for ${startFor}${created.brief ? `. Your brief: ${created.brief}` : ''}`);
@@ -2921,7 +2996,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
-  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | impossible <ID> --why "..." | duplicate <ID> --of <T-x> --by <name> | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | track <ID> engine:<name>|web | after <ID> <T-x>|--remove|--set|--clear | holds | note <ID> "<ruling>" --by <name> | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
+  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | impossible <ID> --why "..." | duplicate <ID> --of <T-x> --by <name> | done <ID> [--train] [--final] | add "<Title>" [--after T-x] [--checklist-file <file>] | checklist <ID> add|done|skip|list "<item>" | split <ID> --every <n> --by <name> | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | track <ID> engine:<name>|web | after <ID> <T-x>|--remove|--set|--clear | holds | note <ID> "<ruling>" --by <name> | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
 }
 
 /**

@@ -528,6 +528,7 @@ export async function supervise(opts, state, now = Date.now()) {
     // (360) minutes, in a detached child (harness/lane-disk.mjs).
   if (!opts.watcher) {
     try { await (await import('./lane-disk.mjs')).lanesPass({ now, inline: Boolean(opts.deps?.lanesInline) }); } catch { /* a report, never a crash */ }
+    try { await (await import('./lane-disk.mjs')).shortPass({ now }); } catch { /* off unless disk.pruneUnderGb is set */ }
     // 2.86 (f): engine worktrees whose branch landed or whose task is done or dropped go (harness/engine-clean.mjs laneRemoval),
     // every 30 minutes in a detached child.
     try { (await import('./engine-clean.mjs')).engineLanesPass({ now }); } catch { /* a cleanup, never a crash */ }

@@ -5506,6 +5506,70 @@ if (inShard('selftest-297d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.98 (h): a session's record is written whole (temp file renamed over it) and read as busy, never absent, while it is being written.
+if (inShard('selftest-298h')) {
+  const dir = copyRepo();
+  const { selftest298H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298h.mjs')).href);
+  await selftest298H({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.98 (b): the train reads its config before each step, empty lanes are refused, quick lanes first, tag groups when idle.
+if (inShard('selftest-298b')) {
+  const dir = copyRepo();
+  const { selftest298B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298b.mjs')).href);
+  await selftest298B({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.98 (a): the daily full land run in parts, a result per part kept by target tree, a back-off after a try with no result.
+if (inShard('selftest-298a')) {
+  const dir = copyRepo();
+  const { selftest298A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298a.mjs')).href);
+  await selftest298A({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.98 (e): idle lane copies pruned when disk is short, the lane copies' size measured with its age, a cancelled train cleans up.
+if (inShard('selftest-298g')) {
+  const dir = copyRepo();
+  const { selftest298G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298g.mjs')).href);
+  await selftest298G({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.98 (d): each rules part's own recent sampled peak, a part that slowed down, rules.pins, rules.peak no longer read.
+if (inShard('selftest-298d')) {
+  const dir = copyRepo();
+  const { selftest298D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298d.mjs')).href);
+  await selftest298D({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.98 (b1): rules parts build once and test with --no-build; a failing build is a compile red; a build fault is not a red.
+if (inShard('selftest-298c')) {
+  const dir = copyRepo();
+  const { selftest298C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298c.mjs')).href);
+  await selftest298C({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.98 (d): a quota mark needs evidence; agy writes in its own folders and reads with git; the API pool takes the task's role.
+if (inShard('selftest-298f')) {
+  const dir = copyRepo();
+  const { selftest298F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298f.mjs')).href);
+  await selftest298F({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.98 (c): a task with a checklist lands in slices until its list is empty; task split makes child tasks of its items.
+if (inShard('selftest-298e')) {
+  const dir = copyRepo();
+  const { selftest298E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-298e.mjs')).href);
+  await selftest298E({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { verifyCause } from './handback-facts.mjs';
 import { limitsFor } from './model-limits.mjs';
 import { flagOf, jsonFileOf } from './helpers.mjs';

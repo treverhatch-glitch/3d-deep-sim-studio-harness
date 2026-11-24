@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { STUDIO_STATE_DIR, REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
+import { STUDIO_STATE_DIR, REPO_ROOT, readRecentEvents } from './event.mjs';
 import { readJsonOr as read } from './helpers.mjs';
 import { landedMeasure, landedTasks } from './landings.mjs';
 

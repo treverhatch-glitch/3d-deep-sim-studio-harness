@@ -2,7 +2,7 @@
 
 The overseer's brief of 2026-11-20 (7 items), written after the studio on record had run 2.96.0 for a day, with the
 owner's standing order: keep the code base, add to it, trim where the records back it. Built on 2.96.0. Only this page
-and the one for 2.96.0 are kept; older release notes are in git history.
+and the one for 2.98.0 are kept; older release notes are in git history.
 
 ## What the records said
 
