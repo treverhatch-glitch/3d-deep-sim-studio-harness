@@ -71,6 +71,11 @@ line carries a unit and its age), `293b` b (a write rule names the lane copy), `
 - **Disk pruning is off until `disk.pruneUnderGb` is set.** A killed train's checkouts wait for the 24-hour pass.
 - **`tagsWhenIdle` is on by default**: a tag that means "not yet" needs a hold (`task hold`) or `tagsWhenIdle: false`.
 - Six modules still read a session's record with a plain read; the atomic writer is what protects them.
+- **Caught in the online runs:** `task done` printed the task as in progress after closing it (the shared closing
+  helper marked a fresh copy); the machine scan wrote the lane-size cache, which the upgrade preflight must not;
+  a new check expected `dotnet build` where Windows runs `dotnet.cmd`. All three fixed before the merge.
+- **A cancelled train can be announced twice** (the cancel command's event and the train's own), seen once on
+  Windows. Open (P-346).
 
 ## For a studio taking it
 

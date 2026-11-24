@@ -337,7 +337,9 @@ console.log(JSON.stringify({ first: c.first, bad: c.focusBad || [] }));`);
   const gate2Of = (E) => { const GW2 = `${E.GW}-two`; g(E.R, 'worktree', 'add', '-q', '--detach', GW2, 'port/main'); return GW2; };
   const twoGates = (E, ctl, extra = {}) => { const GW2 = gate2Of(E); return cfgFor(E, ctl, { landProbe: true, gates: [{ land: `node "${fwd(landStub)}" "${fwd(GW2)}" "${fwd(ctl)}-two" {branch}`, cwd: fwd(E.R), gateWorktree: fwd(GW2) }], ...extra }); };
   const D4 = () => engineRepo({ 'feat/p': { 'p.txt': 'p\n' }, 'feat/q': { 'q.txt': 'q\n' }, 'feat/r': { 'r.txt': 'r\n' }, 'feat/pin': { 'pins/web.json': '{ "commit": "beef002" }\n' } });
-  const PAR = { STUDIO_HEAVY_SLOTS: '2', STUDIO_ENGINE_SLOTS: '2', STUDIO_HEAVY_MAX_UNITY: '2', STUDIO_HEAVY_WAIT_MIN: '1', LAND_STUB_MS: '400' };
+  // 2.98: the stand-in land run lasts 2.5 s, not 0.4: on Windows each step's own start-up (git, the config read before
+  // each land run) came to more than the run, so two runs started at once no longer overlapped in time (P-346).
+  const PAR = { STUDIO_HEAVY_SLOTS: '2', STUDIO_ENGINE_SLOTS: '2', STUDIO_HEAVY_MAX_UNITY: '2', STUDIO_HEAVY_WAIT_MIN: '1', LAND_STUB_MS: '2500' };
   const parallelCmd = (args, env = {}) => spawnSync(process.execPath, [path.join(S, 'harness', 'task.mjs'), 'train', ...args], { windowsHide: true, cwd: S, env: envOf(env), encoding: 'utf8', timeout: 120000 });
   const statusOf = (env = {}) => out(spawnSync(process.execPath, [path.join(S, 'harness', 'task.mjs'), 'train', 'status', '--engine', 'unity'], { windowsHide: true, cwd: S, env: envOf(env), encoding: 'utf8', timeout: 120000 }));
   let oneGate = null;
