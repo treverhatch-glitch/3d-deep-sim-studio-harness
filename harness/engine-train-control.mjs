@@ -3,7 +3,7 @@
  *   selectBatch        the batch from the queue: --only ids / a --tag (else untagged lanes only), then an "alone" lane
  *                      rides by itself, then engines.<x>.batchGroup "play" (head lane's Play Mode class), then the cap
  *                      (--max, engines.<x>.batchMax, STUDIO_ENGINE_BATCH_MAX); a full head may wait for a skip batch
- *   idleTag            the tag group the automatic start takes when no untagged lane waits (engines.<x>.tagsWhenIdle)
+ *   nextTag            the tag group the automatic start takes: when no untagged lane waits, or past tagMaxWaitHours
  *   cancelEngineTrain  `npm run task -- train cancel --engine <x> --by <name>`: cancel file first, the train's tree
  *                      killed, gate worktree reset to the target, integration refs deleted, lock released
  *   setEngineAuto      `train auto off|on --engine <x> --by <name> [--hours N]`: the automatic start (<x>-auto.json)
@@ -145,19 +145,32 @@ export function selectBatch(queue, { only = [], tag = null, max = 0, batchMax = 
   return { lanes: pool, why, total: q.length, waiting: left.length, cls: head, alone, tagged, classes: Object.fromEntries(classes), held: heldOut, passedOver };
 }
 
-/** 2.98 (b): engines.<x>.tagsWhenIdle (default true): the automatic start may take a tag group when no untagged lane waits. */
+/** 2.98 (b): engines.<x>.tagsWhenIdle (default true): the automatic start may take a tag group; false: only a person's train --tag. */
 export const tagsWhenIdle = (cfg = {}) => cfg?.tagsWhenIdle !== false;
+/** 2.99 (e): engines.<x>.tagMaxWaitHours (24; 0: off): past it, a tag group runs next although untagged lanes wait. */
+export function tagMaxWaitHours(cfg = {}) { const h = Number(cfg?.tagMaxWaitHours ?? 24); return Number.isFinite(h) && h > 0 ? h : 0; }
+/** 2.99 (e): when a lane joined its tag group: tagAt (set when the tag was set), else when it was queued. */
+const tagSince = (e) => { const t = Date.parse(e.tagAt || e.at || ''); return Number.isFinite(t) ? t : Infinity; };
 
 /**
- * 2.98 (b): the tag group an automatic start takes: none while an untagged lane waits; else the tag whose oldest lane was
- * queued first. Lanes in `skip` (waiting for the target) are not counted. { tag, n, oldestAt } or null.
+ * The one choice of which tag group the automatic start takes (null: none). Lanes in `skip` (waiting for the target) are
+ * not counted. No untagged lane waits: the group whose oldest lane joined first (road 'idle'). Else 2.99 (e): that group
+ * when it has waited over tagMaxWaitHours (road 'overdue'); `go` is false right after a tag train (`lastTag`), so one
+ * untagged train runs between two overdue groups. { tag, n, oldestAt, road, go, waitedH?, limitH?, why? }.
  */
-export function idleTag(queue = [], skip = new Set()) {
+export function nextTag(queue = [], { skip = new Set(), cfg = {}, now = Date.now(), lastTag = null } = {}) {
+  if (!tagsWhenIdle(cfg)) return null;
   const q = (Array.isArray(queue) ? queue : []).filter((e) => e?.task && !skip.has(e.task));
-  if (!q.length || q.some((e) => !e.tag)) return null;
-  const at = (e) => { const t = Date.parse(e.at || ''); return Number.isFinite(t) ? t : Infinity; };
-  const first = q.reduce((a, e) => (at(e) < at(a) ? e : a), q[0]);
-  return { tag: first.tag, n: q.filter((e) => e.tag === first.tag).length, oldestAt: first.at || null };
+  const tagged = q.filter((e) => e.tag);
+  if (!tagged.length) return null;
+  const first = tagged.reduce((a, e) => (tagSince(e) < tagSince(a) ? e : a), tagged[0]);
+  const pick = { tag: first.tag, n: tagged.filter((e) => e.tag === first.tag).length, oldestAt: first.tagAt || first.at || null };
+  if (tagged.length === q.length) return { ...pick, road: 'idle', go: true };
+  const limitH = tagMaxWaitHours(cfg);
+  const waitedH = Math.floor((now - tagSince(first)) / 3600000);
+  if (!limitH || !(now - tagSince(first) > limitH * 3600000)) return null;
+  const go = !lastTag;
+  return { ...pick, road: 'overdue', go, waitedH, limitH, why: `tag ${first.tag} has waited ${waitedH} h (limit ${limitH}): it runs next${go ? '' : ` after one untagged train (the last train was tag ${lastTag})`}` };
 }
 
 /**

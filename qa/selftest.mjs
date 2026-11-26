@@ -5594,6 +5594,14 @@ if (inShard('selftest-299a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.99 (e): a tag group gets its turn (tagMaxWaitHours), waiting lanes tested against a moved target, merge.newer.
+if (inShard('selftest-299e')) {
+  const dir = copyRepo();
+  const { selftest299E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-299e.mjs')).href);
+  await selftest299E({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);

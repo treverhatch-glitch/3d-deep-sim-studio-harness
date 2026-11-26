@@ -185,6 +185,27 @@ and the tests decide. What it cannot know: two lanes that add the same key with 
 line both add on purpose twice is kept once. When it refuses, the lane's reason (`deferred` or `conflicts with the target`) ends "merge.union did not apply: <file> line <n> was rewritten, not only lengthened" (or names a file not listed). With no `merge.union` every merge is as before. A `landMany` command
 merges the branches itself, so the train does not use `merge.union` with one.
 
+2.99: files where the newer side wins. `merge.union` helps only when both sides ADD lines. A small generated JSON file
+that both sides rewrite (a "pin" holding a commit id, its date and a fingerprint) needs another rule:
+`"merge": { "newer": [{ "file": "tools/SimTests/pin.json", "field": "date" }] }`. When two sides conflict only in files
+that `merge.union` and/or `merge.newer` name, each `newer` file is taken whole from the side whose top-level `field` holds
+the later date (an ISO date such as `2026-11-21T08:00:00Z`), and the merge goes on. A missing field, one that is not a
+date, a file that is not JSON or two equal dates leave it a conflict, as does any conflicted file no rule names. The log,
+the `task.train.<x>.union` event, `train status` and the summary say "tools/SimTests/pin.json taken from T-12: its date
+is later" (or "from the target"); the commit says `Newer-Merge:`. It works where the union does: the queue door, the
+batch's conflict test, the land merge and the queue check below. As with a union merge, the result is still compiled and
+tested before it lands, so a wrong pick is caught as a red, not landed. List only files a test checks.
+
+2.99: waiting lanes are tested against the target while they wait. A lane was tested when it was queued and again when a
+train took it; a tagged or held lane could wait for days while the target moved, then be handed back in the train's
+first minute. Now the Line Producer, at most every `"queueRetestHours": 6` (0 turns it off) and only when the target has
+moved since a lane's last test, merges each waiting lane (tagged and held ones too) with the target alone, the way the
+train does (refs only, `merge.union` and `merge.newer` included; no checkout, no editor, no heavy lock). A lane that no
+longer merges is handed back now, with the train's words and a `task.train.<x>.dropped` event (meta `check: "queue"`),
+so its owner brings the target in while the work is fresh; a lane that became empty is handed back as the train would.
+It does not run while a train runs (the train does its own test). A pass costs one `git merge-tree` per lane whose
+target moved (a few more for a lane that conflicts); the record is `.studio/engine/<x>-queue-check.json`.
+
 2.78.2 (item 18): `task done --train` on an engine pass it can't queue says why and exits 1 (a
 `task.train.not_queued` event), never going on as a studio lane in silence. The reasons
 (`harness/engine-tracks.mjs engineTrainVerdict`) are: an engine-porter task whose track names no engine (or with
@@ -252,6 +273,13 @@ The land run itself still takes `machine:heavy` as that engine's job kind, with 
   was queued first, as `train --tag` does. It decides this before any full land run of the target alone. Set
   `"tagsWhenIdle": false` in the engine's config to leave tagged lanes to a person. `train status --engine <x>` says
   which rule applies on its tagged-lanes line.
+  2.99: on a busy line the untagged queue is never empty, so a tag group could wait for days. `"tagMaxWaitHours": 24`
+  (the default; 0 turns it off) runs a group whose oldest lane has waited longer than that as the next train, ahead of
+  untagged lanes. The wait counts from when the lane joined the group: the time its tag was set (`task tag`, or
+  `task done --train --tag`), else when it was queued. A re-queue or the same tag again keeps that time; a new tag starts
+  it again, because until then the lane rode untagged trains. One group at a time, the oldest first, and after a tag
+  train one untagged train runs before the next overdue group. `train status` and the Line Producer's log say "tag art
+  has waited 26 h (limit 24): it runs next". `"tagsWhenIdle": false` turns both roads off.
 - A batch cap: `"batchMax": 6` in the engine's config (`STUDIO_ENGINE_BATCH_MAX` overrides it; 0, the default, is no
   cap): a train takes at most that many lanes, the rest wait for the next train.
 - Grouping by risk: `"batchGroup": "play"` groups lanes by the Play Mode class of what each lane changes (the
