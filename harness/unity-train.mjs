@@ -26,7 +26,8 @@ import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts,
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { rulesConfig, rulesGate, inputsPrint, inputIndex, inputsChanged, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey, rulesLanded, keptFull, allRatchets } from './engine-rules.mjs';
-import { noteUnmatched, proposeGaps } from './play-gaps.mjs';
+import { noteUnmatched, playCostLines, proposeGaps } from './play-gaps.mjs';
+import { playFixtures, recordPlayTimes } from './rules-times.mjs';
 import { compileSearchOf, compileSearch, compileAt, compilerLines } from './engine-compile.mjs';
 import { parallelState, parallelUse, parallelLine, runGateChild } from './engine-gates.mjs';
 import { engineSlotsAt, heavySlotsAt, floorFree } from './heavy.mjs';
@@ -1551,7 +1552,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         if (fullWhy && a === 0 && !dryRun) ev('full_land', id, `the daily full run${opts.part ? `, part ${opts.part},` : ','} on ${target} alone with no branch (${fullWhy}), runs now: ${opts.when === 'end' ? 'the end of the train, after the batch\'s rounds' : 'no lane waits'}; every test runs${fullMin ? `, expect about ${fullMin} min` : ''}; its red goes to the target's own full-run failures`, { agent: by, to: 'producer', meta: { why: fullWhy, tasks: [], alone: true, when: opts.when || 'idle', ...(opts.part ? { part: opts.part } : {}), ...(fullMin ? { minutes: fullMin } : {}) } });
         // The Play Mode focus (engines.<x>.play.focus): a hint the land script may use. Never on a full land run; a retry of a red play stage
         // gets the selection of the run it repeats.
-        const play = fullWhy ? { mode: 'full', filter: '', why: fullWhy } : opts.play || (alone ? { mode: 'full', filter: '', why: 'the target alone' } : playSelection({ changed: batchPaths(), cfg: s.cfg, full: false }));
+        const play = fullWhy ? { mode: 'full', filter: '', why: fullWhy } : opts.play || (alone ? { mode: 'full', filter: '', why: 'the target alone' } : playSelection({ changed: batchPaths(), cfg: s.cfg, full: false, fixtures: playFixtures(root, engine) }));
         for (const b of play.ignoreBad || []) log(`[unity-train] ${id}: play.focus.ignore pattern ${JSON.stringify(b).slice(0, 120)} is not a valid regex; skipped`);
         if (play.refused) log(`[unity-train] ${id}: play focus: ${play.why}; the play stage runs in full`);
         else if (play.mode === 'focus') log(`[unity-train] ${id}: play focus: ${play.why} (${play.filter})`);
@@ -1654,6 +1655,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         res.playMode = play.mode;
         res.playFilter = play.filter;
         if (play.mode === 'skip') res.playSkipped = (res.playSkipped || 0) + 1;
+        // The Play Mode times of a land run whose play stage passed (engines.<x>.play.times); a retry of a red stage ran only some tests.
+        else if (!dryRun && !opts.retry && (r.stages || []).some((x) => /play/i.test(x?.name) && /^pass/i.test(x?.status || ''))) recordPlayTimes(root, engine, { dir: s.folder, since: Date.now() - Number(r.ms || 0) });
         // A person cancelled this train (the cancel file names it): nobody is blamed, nothing is retried.
         if (r.status !== 'pass') {
           const cx = cancelledTrain(root, engine, id);
@@ -2182,13 +2185,13 @@ export function playPlan(root, { engine = 'unity', branch = null, paths = null }
   } else return { error: 'usage', message: 'Which batch? Pass --branch <name> or --paths a,b.' };
   return { engine, source, changed, selection: playSelection({ changed, cfg, full: false }) };
 }
-export function playPlanText(r) {
+export function playPlanText(r, extra = []) {
   const sel = r.selection;
   const lines = [`Play Mode plan for ${r.source}: ${sel.mode}${sel.mode === 'focus' ? ` with the filter ${sel.filter}` : ''}`, `  why: ${sel.why}`];
   if (sel.unmatched?.length) lines.push(`  paths no play.focus.map entry takes (${sel.unmatchedCount || sel.unmatched.length}): ${sel.unmatched.join(', ')}; add an entry for them (studio/game.json engines.${r.engine}.play.focus.map), or list them in play.focus.ignore`);
   if (sel.ignored?.length) lines.push(`  left out by play.focus.ignore: ${sel.ignored.slice(0, 5).join(', ')}${sel.ignored.length > 5 ? ', ...' : ''}`);
   if (sel.ignoreBad?.length) lines.push(`  not a valid regex (skipped): ${sel.ignoreBad.join(', ')}`);
-  lines.push('  (a daily full land run always runs the whole Play Mode stage)');
+  lines.push(...extra, '  (a daily full land run always runs the whole Play Mode stage)');
   return lines.join('\n');
 }
 
@@ -2281,13 +2284,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (argv.includes('--propose')) {
       const eng = fl('engine') || 'unity';
       const pl = fl('branch') || fl('paths') ? playPlan(mainRoot(), { engine: eng, branch: fl('branch'), paths: fl('paths') }) : null;
-      const pr = proposeGaps(mainRoot(), { engine: eng, plan: pl, cfg: unityConfig(mainRoot(), eng) || {}, json: argv.includes('--json') });
+      const pr = proposeGaps(mainRoot(), { engine: eng, plan: pl, json: argv.includes('--json') });
       console.log(pr.text);
       process.exit(pr.code);
     }
     const r = playPlan(mainRoot(), { engine: fl('engine') || 'unity', branch: fl('branch'), paths: fl('paths') });
     if (argv.includes('--json')) console.log(JSON.stringify(r));
-    else console.log(r.error ? r.message : playPlanText(r));
+    else console.log(r.error ? r.message : playPlanText(r, playCostLines(mainRoot(), { engine: r.engine, cfg: unityConfig(mainRoot(), r.engine) || {}, plan: r })));
     process.exit(r.error ? 1 : 0);
   }
   // 2.86: `bisect-plan --lanes A,B,C [--red B] [--flaky] [--target-red] [--pass-on-retry N] [--tied A,B] [--complete] [--no-names]

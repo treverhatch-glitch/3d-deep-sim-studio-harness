@@ -5570,6 +5570,14 @@ if (inShard('selftest-298e')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.99 (c): Play Mode focus for a mixed batch (skip + mapped paths), and the Play Mode time of each fixture.
+if (inShard('selftest-299c')) {
+  const dir = copyRepo();
+  const { selftest299C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-299c.mjs')).href);
+  await selftest299C({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
