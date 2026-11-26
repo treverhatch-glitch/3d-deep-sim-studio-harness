@@ -94,7 +94,9 @@ const rows = await lp.enginePass({ now: Date.now(), deps: { root: process.cwd(),
 console.log(JSON.stringify({ start: rows[0]?.start, started, why: rows[0]?.why, tag: rows[0]?.tag || null }));`;
   const status = () => out(spawnSync(process.execPath, ['harness/task.mjs', 'train', 'status', '--engine', 'unity'], { windowsHide: true, cwd: S, env: envOf(), encoding: 'utf8', timeout: 120000 }));
   const J = (x) => JSON.stringify(x).slice(0, 2800);
-  const { nextTag } = await import(pathToFileURL(path.join(dir, 'harness', 'engine-train-control.mjs')).href);
+  const ctl = await import(pathToFileURL(path.join(dir, 'harness', 'engine-train-control.mjs')).href);
+  // A missing function (older code) is a failed check, not a crash of the unit.
+  const nextTag = (...a) => { try { return ctl.nextTag(...a); } catch (e) { return { error: String(e?.message || e) }; } };
 
   try {
     // ================= (e1) a tag group over the limit runs next =================
