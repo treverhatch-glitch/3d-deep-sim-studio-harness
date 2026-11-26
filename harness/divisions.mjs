@@ -1,6 +1,6 @@
 /**
  * harness/divisions.mjs — the studio's departments: which exist, which are on, which roles they hire.
- * studio/divisions.json (written by npm run division or the War Room) overrides the defaults below.
+ * studio/divisions.json (written by the War Room) overrides the defaults below.
  * Kept apart from the HUD so the launcher can open a division without an import cycle.
  */
 import fs from 'node:fs';
