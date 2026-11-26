@@ -1151,8 +1151,10 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     try { waitT = ut.waitingOnTarget(root, t.name, qAll); } catch { /* counted */ }
     let q = qAll.filter((e) => !e?.tag && !waitT.has(e.task));
     const taggedN = qAll.length - q.length;
-    // Decided before any full run of the target alone (engines.<x>.tagsWhenIdle; false: only a person's train --tag).
-    const idle = !q.length && taggedN && ctl.tagsWhenIdle(t.cfg || {}) ? ctl.idleTag(qAll, waitT) : null;
+    // Decided before any full run of the target alone (ctl.nextTag: no untagged lane waits, or 2.99 (e) a group past
+    // engines.<x>.tagMaxWaitHours; engines.<x>.tagsWhenIdle false: only a person's train --tag). lastTag: the last train's.
+    const turn = taggedN ? ctl.nextTag(qAll, { skip: waitT, cfg: t.cfg || {}, now, lastTag: ut.unityTrainStatus(root, t.name).last?.tag || null }) : null;
+    const idle = turn?.go ? turn : null;
     if (idle) q = qAll.filter((e) => e.tag === idle.tag && !waitT.has(e.task));
     // `train auto off --engine <x>` (.studio/train/<x>-auto.json; --hours runs out by itself).
     const ea = ctl.engineAutoState(root, t.name, { env, now });
@@ -1182,7 +1184,8 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
       try { const ow = ut.fullRulesOwedNow(root, t.name, env, now); if (ow.why) f.fullDue = f.fullDue ? `${f.fullDue}; the full rules run: ${ow.why}` : `the full rules run: ${ow.why}`; } catch { /* not owed */ }
     }
     const w = engineWindow(f, env);
-    if (idle && w.start) w.why = `no untagged ${t.label} branch waits: tag ${idle.tag} goes (${idle.n} lane(s), the oldest queued ${String(idle.oldestAt || '?').slice(0, 16)}; engines.${t.name}.tagsWhenIdle); ${w.why}`;
+    if (idle?.road === 'idle' && w.start) w.why = `no untagged ${t.label} branch waits: tag ${idle.tag} goes (${idle.n} lane(s), the oldest queued ${String(idle.oldestAt || '?').slice(0, 16)}; engines.${t.name}.tagsWhenIdle); ${w.why}`;
+    else if (turn?.road === 'overdue') w.why = `${turn.why} (engines.${t.name}.tagMaxWaitHours); ${w.why}`;
     if (autoOn && t.trainAuto && !ea.on && ea.source === 'file') {
       w.start = false; w.wait = false; w.why = ctl.autoOffWhy(ea, t.name);
       const last = Date.parse(told[t.name] || '');

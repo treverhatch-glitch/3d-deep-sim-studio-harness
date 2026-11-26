@@ -247,6 +247,13 @@ The land run itself still takes `machine:heavy` as that engine's job kind, with 
   was queued first, as `train --tag` does. It decides this before any full land run of the target alone. Set
   `"tagsWhenIdle": false` in the engine's config to leave tagged lanes to a person. `train status --engine <x>` says
   which rule applies on its tagged-lanes line.
+  2.99: on a busy line the untagged queue is never empty, so a tag group could wait for days. `"tagMaxWaitHours": 24`
+  (the default; 0 turns it off) runs a group whose oldest lane has waited longer than that as the next train, ahead of
+  untagged lanes. The wait counts from when the lane joined the group: the time its tag was set (`task tag`, or
+  `task done --train --tag`), else when it was queued. A re-queue or the same tag again keeps that time; a new tag starts
+  it again, because until then the lane rode untagged trains. One group at a time, the oldest first, and after a tag
+  train one untagged train runs before the next overdue group. `train status` and the Line Producer's log say "tag art
+  has waited 26 h (limit 24): it runs next". `"tagsWhenIdle": false` turns both roads off.
 - A batch cap: `"batchMax": 6` in the engine's config (`STUDIO_ENGINE_BATCH_MAX` overrides it; 0, the default, is no
   cap): a train takes at most that many lanes, the rest wait for the next train.
 - Grouping by risk: `"batchGroup": "play"` groups lanes by the Play Mode class of what each lane changes (the

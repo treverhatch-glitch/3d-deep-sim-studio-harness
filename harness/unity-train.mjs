@@ -22,7 +22,7 @@ import { withLandLock, matchAny } from './merge-lane.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
 import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, taskBranch } from './unity-gate.mjs';
 import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeCommand, engineFloor } from './engine-tracks.mjs';
-import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine, configChanges, tagsWhenIdle } from './engine-train-control.mjs';
+import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine, configChanges, tagsWhenIdle, tagMaxWaitHours, nextTag } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { rulesConfig, rulesGate, inputsPrint, inputIndex, inputsChanged, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey, rulesLanded, keptFull, allRatchets } from './engine-rules.mjs';
@@ -175,7 +175,8 @@ export function readUnityQueue(root = mainRoot(), engine = 'unity') {
 const withQueue = (root, fn, engine = 'unity') => withLandLock(root, () => { const q = readUnityQueue(root, engine); const r = fn(q); writeJson(queueFile(root, engine), q); return r; }, { name: `${engine}-train-queue`, waitMs: 30000 });
 export const dequeueUnity = (root, task, engine = 'unity') => withQueue(root, (q) => { const i = q.findIndex((e) => e.task === task); if (i >= 0) q.splice(i, 1); return i >= 0; }, engine);
 /** Set (a word) or clear (null) a queued lane's tag in place. The entry, or null when the task is not queued. */
-export const setQueueTag = (root, task, tag, engine = 'unity') => withQueue(root, (q) => { const e = q.find((x) => x.task === task); if (!e) return null; if (tag) e.tag = tag; else delete e.tag; return { ...e }; }, engine);
+/** 2.99 (e): tagAt is when the lane joined its tag group (a tag's wait counts from it); the same tag again keeps it. */
+export const setQueueTag = (root, task, tag, engine = 'unity') => withQueue(root, (q) => { const e = q.find((x) => x.task === task); if (!e) return null; if (tag && e.tag !== tag) { e.tag = tag; e.tagAt = new Date().toISOString(); } else if (!tag) { delete e.tag; delete e.tagAt; } return { ...e }; }, engine);
 
 /**
  * Queue a Unity-track task's branch (task done <ID> --train, after its checks). { ok, entry, message } or { ok: false, error,
@@ -250,7 +251,8 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
     // A lane tag (task done --train --tag <word>, task tag <ID> <word>): only a train for that tag takes it.
     // tag null: the task's record, else the entry's own; '' clears it.
     const tg = tag === null || tag === undefined ? (() => { try { return engineTask(task, { root })?.tag || null; } catch { return null; } })() || (i >= 0 ? q[i].tag || null : null) : tag || null;
-    const rec = { task, agent, branch: br, head, note: note || '', at: new Date().toISOString(), ...(solo ? { alone: true } : {}), ...(tg ? { tag: tg } : {}), ...kept };
+    const now = new Date().toISOString();
+    const rec = { task, agent, branch: br, head, note: note || '', at: now, ...(solo ? { alone: true } : {}), ...(tg ? { tag: tg, tagAt: i >= 0 && q[i].tag === tg ? q[i].tagAt || q[i].at : now } : {}), ...kept };
     if (i >= 0) q.splice(i, 1, { ...rec, at: q[i].at });
     else q.push(rec);
     return rec;
@@ -260,7 +262,7 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
   // The lane's new shared input files (engines.<x>.rules.share: content-addressed files a lane adds, git-ignored) go to the
   // engine's input folder now, so the rules check and the land run find them. Never overwrites.
   try { shareLaneInputs(root, engine, s, task, (m) => console.error(m)); } catch { /* the train tries again */ }
-  return { ok: true, entry, message: `${task} is checked and its ${L} branch ${br} (at ${short(head)}, ${ahead} commit(s) ahead of ${s.target}) is queued for the next ${L} train${entry.tag ? `, tagged ${entry.tag}: npm run task -- train --engine ${engine} --tag ${entry.tag} takes it${tagsWhenIdle(s.cfg) ? ', and the automatic start once no untagged lane waits' : ' (the automatic start never does)'}` : ''}. npm run task -- train --engine ${engine} lands every queued branch on ONE land run (the Line Producer starts it in a quiet window); until then the task stays in progress.${say}` };
+  return { ok: true, entry, message: `${task} is checked and its ${L} branch ${br} (at ${short(head)}, ${ahead} commit(s) ahead of ${s.target}) is queued for the next ${L} train${entry.tag ? `, tagged ${entry.tag}: npm run task -- train --engine ${engine} --tag ${entry.tag} takes it${tagsWhenIdle(s.cfg) ? `, and the automatic start once no untagged lane waits${tagMaxWaitHours(s.cfg) ? ` or the group has waited ${tagMaxWaitHours(s.cfg)} h` : ''}` : ' (the automatic start never does)'}` : ''}. npm run task -- train --engine ${engine} lands every queued branch on ONE land run (the Line Producer starts it in a quiet window); until then the task stays in progress.${say}` };
 }
 
 /** The 2.90 compile hand-back words: x { lane, with: [lane], lines, tail }, where: what the lanes in `with` are doing. */
@@ -1176,7 +1178,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   const t0 = Date.now();
   const spent = { compile: 0, rules: 0, wait: 0, land: 0 };
   let landRuns = 0;
-  const res = { ok: true, id, engine, landed: [], dropped: [], deferred: [], runs: 0, message: '' };
+  // 2.99 (e): the tag is kept in the last train's record: after a tag train, an untagged one goes before the next overdue group.
+  const res = { ok: true, id, engine, landed: [], dropped: [], deferred: [], runs: 0, message: '', ...(tag ? { tag } : {}) };
   const L = labelOf(engine);
   const UNITY_REF_PREFIX = refPrefix(engine);
   const ev = (type, idd, msg, extra = {}) => evTop(type, idd, msg, { engine, ...extra });
@@ -2234,9 +2237,12 @@ export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'un
   try { const w = waitingOnTarget(root, engine, st.queue); if (w.size) { const e0 = st.queue.find((e) => w.has(e.task)); lines.push(`${w.size} ${L} lane(s) wait for the target to move: it is red on ${(e0?.waitTarget?.tests || []).slice(0, 3).join(', ') || 'a test'} by itself (train ${e0?.waitTarget?.train || '?'}); nobody was handed back: ${[...w].join(', ')}`); } } catch { /* the queue lines stand */ }
   // Tags (how many wait per tag), why the running train's batch is what it is, and the automatic start.
   const tc = tagCounts(waiting);
-  // 2.98 (b): which rule the automatic start follows for them (engines.<x>.tagsWhenIdle).
-  const idleRule = tagsWhenIdle(unityConfig(root, engine) || {}) ? `the automatic start takes the tag whose oldest lane waited longest once no untagged lane waits (engines.${engine}.tagsWhenIdle)` : `the automatic start never does (engines.${engine}.tagsWhenIdle is false)`;
+  // 2.98 (b), 2.99 (e): which rule the automatic start follows for them, and a group past engines.<x>.tagMaxWaitHours (nextTag).
+  const tcfg = unityConfig(root, engine) || {};
+  const maxH = tagMaxWaitHours(tcfg);
+  const idleRule = tagsWhenIdle(tcfg) ? `the automatic start takes the tag whose oldest lane waited longest once no untagged lane waits (engines.${engine}.tagsWhenIdle)${maxH ? `, or a group that has waited over ${maxH} h (engines.${engine}.tagMaxWaitHours)` : ''}` : `the automatic start never does (engines.${engine}.tagsWhenIdle is false)`;
   if (Object.keys(tc).length) lines.push(`Tagged ${L} lanes (train --engine ${engine} --tag <tag> takes them; ${idleRule}): ${Object.entries(tc).map(([k, v]) => `${k} ${v} waiting`).join(', ')}; untagged ${waiting.filter((e) => !e.tag).length} waiting`);
+  try { const nt = Object.keys(tc).length ? nextTag(waiting, { skip: waitingOnTarget(root, engine, st.queue), cfg: tcfg, lastTag: st.last?.tag || null }) : null; if (nt?.why) lines.push(`${nt.why}.`); } catch { /* the queue lines stand */ }
   if (st.running?.batch) lines.push(`Running ${L} train's batch: ${st.running.batch}`);
   // 2.85: the last rules check: its mode and why (a full run names the unmapped paths), what it cost and how many parts ran at once.
   if (st.last?.rules?.ran && !st.running) lines.push(`Last ${L} rules check: ${st.last.rules.mode || 'full'}${st.last.rules.why ? `: ${st.last.rules.why}` : ''}; ${st.last.rules.runs ?? 0} run(s), ${Math.round((st.last.rules.ms || 0) / 1000)} s${st.last.rules.parts > 1 ? `, ${st.last.rules.parts} parts, ${st.last.rules.splitAtOnce || 1} at once` : ''}${rulesMore(st.last.rules)}`);
