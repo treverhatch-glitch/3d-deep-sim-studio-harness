@@ -370,13 +370,44 @@ export function heavyRecords(root, { env = process.env } = {}) {
   return names.filter((n) => SLOT_RE.test(n)).sort().map((n) => ({ h: readJson(path.join(dir, n)), n })).filter((x) => x.h?.pid).map(({ h, n }) => ({ ...h, file: n, live: holderLive(h, { staleMs: staleOf(env) }) }));
 }
 
-/** A worker session may not stop heavy work: why not, or '' (harness/permission.mjs's worker test). */
-export function stopRefusal(env = process.env) {
+/** The worker session this is (a launched session of a role that does not decide, or a worker's name), else '' (harness/permission.mjs). */
+export function workerSession(env = process.env) {
   const role = String(env.STUDIO_ROLE || '').trim();
   const owner = String(env.STUDIO_LOCK_OWNER || '').trim();
-  if (role && !DECIDER_ROLES.test(role)) return `a launched ${role} session can't stop heavy work; a person, a Producer or Director session, or an agent outside the harness can`;
-  if (owner && WORKER_NAME.test(owner)) return `${owner} is a worker agent; a person, a Producer or Director session, or an agent outside the harness can stop heavy work`;
-  return '';
+  if (role && !DECIDER_ROLES.test(role)) return `a launched ${role} session${owner ? ` (${owner})` : ''}`;
+  return owner && WORKER_NAME.test(owner) ? `${owner} (a worker agent)` : '';
+}
+
+/** A worker session may not stop heavy work: why not, or ''. */
+export function stopRefusal(env = process.env) {
+  const w = workerSession(env);
+  return w ? `${w} can't stop heavy work; a person, a Producer or Director session, or an agent outside the harness can` : '';
+}
+
+/**
+ * 2.99 (b): an agent's own engine run: a worker session's, not the train's (the engine train's lock is held by this
+ * process or its parent). The worker session, else '' (a person, a Producer or Director, an agent outside the harness).
+ */
+export function agentEngineRun(root, engine, env = process.env) {
+  const who = engine ? workerSession(env) : '';
+  const t = who ? readJson(path.join(heavyDir(root), `${engine}-train.lock`)) : null;
+  return t?.pid && [process.pid, process.ppid].includes(Number(t.pid)) ? '' : who;
+}
+
+/**
+ * 2.99 (b): the train goes first. An agent's engine run does not start while the engine's train runs or lanes wait for
+ * it: why (with what to do instead), or ''. A person's run is never held back.
+ */
+export function trainFirst(root, engine, { env = process.env, task = '' } = {}) {
+  const who = agentEngineRun(root, engine, env);
+  if (!who) return '';
+  const t = readJson(path.join(heavyDir(root), `${engine}-train.lock`));
+  const running = Boolean(t?.pid) && pidAlive(t.pid, t.identity);
+  const q = running ? null : readJson(path.join(root, '.studio', 'train', `${engine}-queue.json`));
+  const n = Array.isArray(q) ? q.length : 0;
+  if (!running && !n) return '';
+  const id = task || '<ID>';
+  return `${who} does not start an engine run while ${running ? `the ${engine} train ${t.id || ''} runs` : `${n} lane(s) wait for the ${engine} train`}: the train goes first. The train is the real verify: run npm run engine -- check --task ${id}, then npm run task -- done ${id} --train. Not a failure of your work (a person's own run is never held back)`;
 }
 
 /**
@@ -517,8 +548,12 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   let floorTold = 0;
   let md = null;
   let mdTold = '';
+  // 2.99 (b): an agent's engine run (a land run names its engine; a Unity editor run is Unity's) waits for no train.
+  const trainEngine = engine || (isUnityKind(kind) ? 'unity' : null);
   try {
     while (!mine) {
+      const first = trainFirst(root, trainEngine, { env });
+      if (first) throw Object.assign(new Error(`[heavy] ${label} did not start: ${first}`), { code: 'HEAVY_BUSY', trainFirst: true, holders: [] });
       profile = profileNow();
       n = heavySlotsAt(root, env, profile);
       holders = collectHolders(dir, { staleMs, log, env });

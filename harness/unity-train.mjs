@@ -20,7 +20,7 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
 import { withLandLock, matchAny } from './merge-lane.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
-import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, taskBranch } from './unity-gate.mjs';
+import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, taskBranch, emptyWhy } from './unity-gate.mjs';
 import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeCommand, engineFloor } from './engine-tracks.mjs';
 import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine, configChanges, tagsWhenIdle } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
@@ -1128,9 +1128,6 @@ function formBatch(sel0, { repick, repo, target, tip, board, holdMod, L, id, eng
   }
 }
 
-/** 2.98 (b): the words for a lane whose tree adds nothing over the target (a train hands it back; the queue door refuses it). */
-const emptyWhy = (target) => `empty lane: nothing to land (its tree adds nothing over ${target})`;
-
 /** 2.94: a kept check ahead's lanes, all queued and unchanged, when the target is the tree it was built on: { train, lanes } or null. */
 function aheadSet(root, engine, queued, { repo, tip, cfg }) {
   const m = readJson(path.join(root, '.studio', 'engine', `${engine}-rules-ahead.json`));
@@ -1217,10 +1214,19 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   // 2.94: the set a check ahead ran for, when every one of its lanes is unchanged (rules.ahead; harness/rules-ahead.mjs).
   const pref0 = rcfg?.ahead && !only.length && !tag ? aheadSet(root, engine, queued, { repo, tip: headOf(repo, target), cfg: rcfg }) : null;
   const pref = pref0 && !pref0.lanes.some((l) => heldPick.has(l.task)) ? pref0 : null;
-  if (pref && pref.lanes.map((l) => l.task).join() !== lanes.map((l) => l.task).join()) {
-    log(`[unity-train] ${id}: takes the set the check ahead of train ${pref.train} ran for: ${pref.lanes.map((l) => l.task).join(', ')}${queued.length > pref.lanes.length ? `; the ${queued.length - pref.lanes.length} other queued lane(s) ride the train after` : ''}`);
-    lanes = pref.lanes;
-    res.batch = `${sel.why}; the set checked ahead`;
+  // 2.99 (b): the checked set only where it is the better deal: without rules.shards.keep "reads" (its result answers only
+  // the tree it checked) and when the normal pick is not larger. With "reads" the normal pick goes and its rules check
+  // reuses the shard greens the check ahead kept by what they read (rules-ahead.mjs aheadFor); only the others run.
+  let fixed = null;
+  const names = (ls) => ls.map((l) => l.task).join(', ');
+  if (pref && names(pref.lanes) !== names(lanes)) {
+    const reads = rcfg.shards?.keep === 'reads';
+    fixed = !reads && lanes.length <= pref.lanes.length ? pref : null;
+    const road = reads ? `the normal pick (${names(lanes)}) goes: with rules.shards.keep "reads" the check ahead's shard greens are reused where these lanes leave those files unchanged`
+      : fixed ? `this train takes that set: the normal pick (${lanes.length} lane(s)) is not larger, and without rules.shards.keep "reads" the check ahead answers only the tree it checked${queued.length > pref.lanes.length ? `; the ${queued.length - pref.lanes.length} other queued lane(s) ride the train after` : ''}`
+        : `the normal pick (${names(lanes)}) is larger, so it goes; without rules.shards.keep "reads" the check ahead answers only the tree it checked, so its result is not used`;
+    log(`[unity-train] ${id}: the check ahead of train ${pref.train} ran for ${names(pref.lanes)}; ${road}`);
+    if (fixed) { lanes = fixed.lanes; res.batch = `${sel.why}; the set checked ahead`; }
   }
   const fromAll = rulesFromOf(root, s);
   const owed0 = rcfg ? fullRulesOwed(root, engine, rcfg, { repo, tip: headOf(repo, target), from: fromAll }) : { why: '' };
@@ -1234,7 +1240,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   if (!lanes.length && !fullFirst && !rulesFirst) { res.message = `${queued.length ? `No ${L} branch for this train (${sel.why}).` : `No ${L} branch is waiting to land (task done <ID> --train on a ${L}-track task queues one).`}${fullDue.wait ? ` The daily full land run does not start: ${fullNow.why}.` : ''}`; return finish(); }
   // 2.96 (c2): a lane that cannot go (deferred, dropped, a conflict) is taken out and the batch picked again without it.
   const tip0 = headOf(repo, target);
-  const formed = formBatch(pref ? { ...sel, lanes } : sel, { repick: pref || only.length ? null : (skip) => pickBatch(root, engine, s, queued.filter((e) => !skip.has(e.task)), { only, tag, max, env, held: heldPick }), repo, target, tip: tip0, board, holdMod, L, id, engine, union });
+  const formed = formBatch(fixed ? { ...sel, lanes } : sel, { repick: fixed || only.length ? null : (skip) => pickBatch(root, engine, s, queued.filter((e) => !skip.has(e.task)), { only, tag, max, env, held: heldPick }), repo, target, tip: tip0, board, holdMod, L, id, engine, union });
   if (formed.error) { res.ok = false; res.message = `The ${L} train could not check the branches: ${formed.error}. Nothing ran; the queue is kept.`; return finish(); }
   if (formed.repicked) { sel = formed.sel; lanes = formed.lanes; res.batch = sel.why; }
   if (sel.alone) res.alone = sel.alone;

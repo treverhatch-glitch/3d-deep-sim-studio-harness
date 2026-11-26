@@ -86,8 +86,13 @@ seconds once the rules are compiled code. So the engine train runs them first, o
   RAM minus the floor holds what one rules run takes (`focus.splitGb`, else the largest measured peak, else 4 GB);
   never with a second gate in use. Unless the land run lands the batch unchanged, it is ended with its process tree and
   nothing of it is kept (also on `train cancel`, or a land run that dies out of memory, which is then retried without
-  it). Landed, the next train takes that same set when its lanes are unchanged, finds the kept result (its rules log
-  line says so) or waits for the run still going. A red ahead is only a red for that tree: it hands nobody back.
+  it). Landed, the next train finds the kept result for the same tree (its rules log line says so) or waits for the run
+  still going. 2.99: the next train picks its batch the normal way, lanes queued since included. With
+  `rules.shards.keep` "reads" it waits for the check ahead and keeps its shard greens: only the shards whose files the
+  new lanes change run. Without "reads", the check ahead answers only the tree it checked, so the train takes the checked
+  set only when the normal pick is not larger (its log says which road and why). A green from the check ahead never
+  answers a tree it did not check. `rules show` names the last outcome: `used` (same tree) or `lent` (how many shard
+  greens went to the next train). A red ahead is only a red for that tree: it hands nobody back.
   Event `task.train.<x>.rules_ahead` (`started`, `kept-green`, `kept-red`, `dropped`); `train status` shows it running.
   2.95: when it does not start (memory, the land run ended first, no rules check) the event says `not-started` and why.
   2.97: with `ahead` on, every land run logs that it started or one line saying why not (the rules green was not

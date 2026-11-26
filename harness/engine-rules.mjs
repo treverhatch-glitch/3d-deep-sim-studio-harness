@@ -2009,7 +2009,7 @@ async function cli(argv) {
     for (const l of partLines(root, engine)) console.log(`[engine-rules] ${l}`);
     // 2.97: the check ahead: on or off, and its last outcome (started, kept, dropped, or why it did not start).
     const al = (await import('./rules-ahead.mjs')).aheadLast(root, engine);
-    console.log(`[engine-rules] check ahead (rules.ahead): ${cfg.ahead ? 'on' : 'off'}; last: ${al ? `${al.outcome === 'not-started' ? `did not start: ${al.why}` : `${al.outcome}${al.why ? ` (${al.why})` : ''}`}, train ${al.train || '?'}, ${String(al.at).slice(0, 16)}` : 'none yet'}`);
+    console.log(`[engine-rules] check ahead (rules.ahead): ${cfg.ahead ? 'on' : 'off'}; last: ${al ? `${al.outcome === 'not-started' ? `did not start: ${al.why}` : `${al.outcome}${al.why ? ` (${al.why})` : ''}`}, train ${al.train || '?'}, ${String(al.at).slice(0, 16)}${al.lent ? `; last lent ${al.lent.shards} shard green(s) to train ${al.lent.to}, which checked another tree` : ''}` : 'none yet'}`);
     if (cfg.shards) {
       const fresh = shardsFreshDue(root, engine, cfg);
       console.log(`[engine-rules] shards: a full run is one command per shard (${cfg.shards.test}); ${cfg.shards.rest ? `rest ${cfg.shards.rest}: a sharded run is a full run` : 'no rest: a sharded run is NOT a full run (a test no shard filter matches never runs), so it never tells the land run STUDIO_RULES_MODE=full and never counts as the owed full run; set rules.shards.rest'}; keep "${cfg.shards.keep}"${cfg.shards.keep === 'reads' ? ` (a run that reuses nothing from another tree at least every ${cfg.shards.freshEveryHours} h; ${fresh ? `due: ${fresh}` : `last ${readCache(root, engine).shardsFreshAt}`})` : ' (a green is kept for the exact tree it ran on)'}`);

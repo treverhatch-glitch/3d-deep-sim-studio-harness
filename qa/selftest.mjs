@@ -5569,6 +5569,14 @@ if (inShard('selftest-299d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.99 (b): an agent's own engine run gives way to the train; the check ahead no longer fixes the next batch.
+if (inShard('selftest-299b')) {
+  const dir = copyRepo();
+  const { selftest299B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-299b.mjs')).href);
+  await selftest299B({ dir, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 endUnit();
 if (TIMING_FILE && !LIST_SHARDS) {
   const t = await flushTiming(true);
