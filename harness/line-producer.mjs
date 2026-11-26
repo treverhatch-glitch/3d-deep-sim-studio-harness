@@ -1161,7 +1161,15 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
     const taggedN = qAll.length - q.length;
     // Decided before any full run of the target alone (ctl.nextTag: no untagged lane waits, or 2.99 (e) a group past
     // engines.<x>.tagMaxWaitHours; engines.<x>.tagsWhenIdle false: only a person's train --tag). lastTag: the last train's.
-    const turn = taggedN ? ctl.nextTag(qAll, { skip: waitT, cfg: t.cfg || {}, now, lastTag: ut.unityTrainStatus(root, t.name).last?.tag || null }) : null;
+    // Held lanes (task after) are the ones the train's own pick leaves out (ut.heldNow); a group with none that can go does not run.
+    let heldT = null;
+    if (taggedN) { try { heldT = await ut.heldNow(root, t.name, deps.queue || (await import('./task.mjs')).parseNextQueue()); } catch { /* none counted */ } }
+    const turn = taggedN ? ctl.nextTag(qAll, { skip: waitT, cfg: t.cfg || {}, now, lastTag: ut.unityTrainStatus(root, t.name).last?.tag || null, held: heldT }) : null;
+    if (acting && told[`${t.name}-blocked`] !== (turn?.blocked ? turn.why : undefined)) {
+      if (turn?.blocked) told[`${t.name}-blocked`] = turn.why; else delete told[`${t.name}-blocked`];
+      toldChanged = true;
+      if (turn?.blocked) logAction({ kind: 'engine-train', what: `${turn.why} (engines.${t.name}.tagMaxWaitHours)`, meta: { engine: t.name, tag: turn.tag } }, { emit: false });
+    }
     const idle = turn?.go ? turn : null;
     if (idle) q = qAll.filter((e) => e.tag === idle.tag && !waitT.has(e.task));
     // `train auto off --engine <x>` (.studio/train/<x>-auto.json; --hours runs out by itself).

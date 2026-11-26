@@ -263,6 +263,20 @@ console.log(JSON.stringify({ q: q.ok, qm: q.message.slice(0, 300), landed: r.lan
         tr.q === true && tr.landed?.join() === 'T-55' && !tr.handed?.length && show(E.R, 'port/main', PIN) === pin('l1', '2026-11-22T00:00:00Z', 'fl')
           && uev.length === 1 && /pin\.json taken from T-55: its date is later/.test(uev[0].msg) && /taken whole from the newer side: tools\/SimTests\/pin\.json taken from T-55: its date is later/.test(tr.message || ''), J({ tr, uev: uev.map((e) => e.msg) })]);
     }
+
+    // ================= (e8) a tag group whose lanes are all held starts nothing =================
+    {
+      const old = (task, tag, h) => ({ task, tag, at: iso(Date.now() - h * H) });
+      const held = new Map([['T-81', 'waits for T-80 (task after)'], ['T-82', 'waits for T-80 (task after)']]);
+      const allHeld = nextTag([old('T-81', 'art', 30), old('T-82', 'art', 29), old('T-83', null, 0.1)], { held });
+      const oneFree = nextTag([old('T-81', 'art', 30), old('T-84', 'art', 29), old('T-83', null, 0.1)], { held });
+      const young = nextTag([old('T-81', 'art', 5), old('T-83', null, 0.1)], { held });
+      const idleHeld = nextTag([old('T-81', 'art', 1), old('T-82', 'sound', 2)], { held: new Map([['T-81', 'waits for T-80 (task after)']]) });
+      await guard('2.99 (e8) an overdue tag group whose lanes are all held does not go and says why once; one lane that can go keeps it going; a young group and the idle road count only lanes that can go (fails before this fix: held lanes started tag trains that carried nothing)', () => [
+        allHeld?.go === false && allHeld.blocked === true && allHeld.why === 'tag art is past its limit but every lane in it is held: T-81 (waits for T-80), T-82 (waits for T-80)'
+          && oneFree?.go === true && oneFree.road === 'overdue' && oneFree.n === 1 && young === null
+          && idleHeld?.go === true && idleHeld.tag === 'sound', J({ allHeld, oneFree, young, idleHeld })]);
+    }
   } finally {
     try { fs.rmSync(T, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep */ }
     try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep */ }

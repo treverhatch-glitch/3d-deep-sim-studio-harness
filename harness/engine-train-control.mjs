@@ -156,13 +156,23 @@ const tagSince = (e) => { const t = Date.parse(e.tagAt || e.at || ''); return Nu
  * The one choice of which tag group the automatic start takes (null: none). Lanes in `skip` (waiting for the target) are
  * not counted. No untagged lane waits: the group whose oldest lane joined first (road 'idle'). Else 2.99 (e): that group
  * when it has waited over tagMaxWaitHours (road 'overdue'); `go` is false right after a tag train (`lastTag`), so one
- * untagged train runs between two overdue groups. { tag, n, oldestAt, road, go, waitedH?, limitH?, why? }.
+ * untagged train runs between two overdue groups. `held` (Map task -> why, as selectBatch takes it): a held lane does not
+ * count; an overdue group whose lanes are all held gives { go: false, blocked: true, why } and starts nothing.
+ * { tag, n, oldestAt, road, go, waitedH?, limitH?, why? }.
  */
-export function nextTag(queue = [], { skip = new Set(), cfg = {}, now = Date.now(), lastTag = null } = {}) {
+export function nextTag(queue = [], { skip = new Set(), cfg = {}, now = Date.now(), lastTag = null, held = null } = {}) {
   if (!tagsWhenIdle(cfg)) return null;
-  const q = (Array.isArray(queue) ? queue : []).filter((e) => e?.task && !skip.has(e.task));
+  const all = (Array.isArray(queue) ? queue : []).filter((e) => e?.task && !skip.has(e.task));
+  const q = held?.size ? all.filter((e) => !held.has(e.task)) : all;
   const tagged = q.filter((e) => e.tag);
-  if (!tagged.length) return null;
+  if (!tagged.length) {
+    const hs = all.filter((e) => e.tag && held?.has(e.task));
+    const old = hs.length ? hs.reduce((a, e) => (tagSince(e) < tagSince(a) ? e : a), hs[0]) : null;
+    const limit = tagMaxWaitHours(cfg);
+    if (!old || !limit || !(now - tagSince(old) > limit * 3600000)) return null;
+    const lanes = hs.filter((e) => e.tag === old.tag).map((e) => `${e.task} (${String(held.get(e.task)).replace(/ \(task after\)$/, '')})`);
+    return { tag: old.tag, n: 0, road: 'overdue', go: false, blocked: true, why: `tag ${old.tag} is past its limit but every lane in it is held: ${lanes.join(', ')}` };
+  }
   const first = tagged.reduce((a, e) => (tagSince(e) < tagSince(a) ? e : a), tagged[0]);
   const pick = { tag: first.tag, n: tagged.filter((e) => e.tag === first.tag).length, oldestAt: first.tagAt || first.at || null };
   if (tagged.length === q.length) return { ...pick, road: 'idle', go: true };
