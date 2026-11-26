@@ -235,8 +235,8 @@ console.log(JSON.stringify({ line: d.text.split('\\n').filter((l) => /^Play Mode
     const propJson = node(['harness/engine.mjs', 'play-plan', '--propose', '--json', '--paths', propPaths.join(',')]);
     let groups = []; try { groups = JSON.parse(String(propJson.stdout).trim().split('\n').pop()); } catch { /* checked below */ }
     const grp = (f) => groups.find((x) => x.folder === f) || {};
-    await guard('2.96 (d13) play-plan --propose groups the unmapped paths by folder with counts and proposes skip (rules map, rules auto folder, play.focus.skip) or a map entry with the filter left to fill in; a mapped folder is not listed (fails before this fix: the command had no --propose)', () => [
-      prop.status === 0 && groups.length === 5 && grp('Sim/Fees/').kind === 'skip' && grp('Sim/Fees/').count === 2 && grp('Sim/Core/Bank/').kind === 'skip' && grp('Sim/Rules/').kind === 'skip'
+    await guard('2.96 (d13) play-plan --propose groups the unmapped paths by folder with counts and proposes skip (rules map, rules auto folder; 2.99: a path play.focus.skip takes is no gap and is not listed) or a map entry with the filter left to fill in; a mapped folder is not listed (fails before this fix: the command had no --propose)', () => [
+      prop.status === 0 && groups.length === 4 && grp('Sim/Fees/').kind === 'skip' && grp('Sim/Fees/').count === 2 && grp('Sim/Core/Bank/').kind === 'skip' && !groups.some((x) => x.folder === 'Sim/Rules/')
         && grp('Game/Net/').kind === 'map' && grp('Game/Net/').count === 3 && grp('Game/Net/').entry?.match === '^Game/Net/' && grp('Game/Net/').entry?.filter === '<the Play Mode tests for this folder>' && grp('Docs2/').kind === 'map' && !groups.some((x) => x.folder === 'Game/Ui/')
         && /Game\/Net\/ \(3 paths; /.test(out(prop)) && /add to engines\.unity\.play\.focus\.map: \{"match":"\^Game\/Net\/","filter":"<the Play Mode tests for this folder>"\}/.test(out(prop)) && /add to engines\.unity\.play\.focus\.skip: "\^Sim\/Fees\/"/.test(out(prop)), JSON.stringify({ out: out(prop).slice(0, 1500), groups })]);
     const propRec = node(['harness/engine.mjs', 'play-plan', '--propose']);

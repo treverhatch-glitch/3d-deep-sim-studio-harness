@@ -975,8 +975,14 @@ turn on `service.check` and run one `check` end to end, and only then `warm`.
   keeps all of those paths (`.studio/engine/<x>-play-gaps.jsonl`). The digest says how often that happened in 24 hours
   and for which folders. `npm run engine -- play-plan --propose [--engine <x>] [--branch <b> | --paths a,b] [--json]`
   groups the paths by folder (without `--branch` or `--paths`, the paths of the last 7 days) and proposes an entry for
-  each: `skip` when the rules tests already judge the folder (a `rules.focus` map entry or auto folder) or
-  `play.focus.skip` takes every path, else a `map` entry whose filter you fill in. Nothing is written to `studio/game.json`.
+  each: `skip` when the rules tests already judge the folder (a `rules.focus` map entry or auto folder), else a `map` entry whose filter you fill in. Nothing is written to `studio/game.json`.
+- **Play Mode time per fixture (2.99).** `engines.<x>.play.times` is a glob (inside the engine's working folder) for
+  the engine's own test result files (`.trx`, NUnit or JUnit XML), as `rules.times`. After a land run whose play stage
+  passed, the minutes of each fixture (class) are kept, the last 5 per fixture, under `play` in
+  `.studio/engine/<x>-times.json`. A focused land run says "about N min expected" when its filter names kept fixtures.
+  `play-plan` prints under the plan the 10 slowest fixtures with the total, and the minutes each `map` entry's filter
+  costs (`?` when the filter is a pattern or a `$1` template); `play-plan --propose` says what it knows about each
+  entry's cost. With `play.times` unset nothing is read and nothing changes.
 - **A busy line.** The refill counts the open builder tasks that can start now (not held, parked, over budget, waiting
   for another task or queued for a train). When fewer than `STUDIO_REFILL_MIN` can start, it wakes the Producer with
   the cause ("nothing can start: n open tasks wait for the engine train or for another task. Propose the next ready work

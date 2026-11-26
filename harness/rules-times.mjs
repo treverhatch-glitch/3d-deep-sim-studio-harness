@@ -6,6 +6,7 @@
  *   npm run engine -- test-cost [--engine <x>]   the long form: the 10 slowest tests and their share of the test time,
  *   tests that ran more than once in one train, the shards that took most memory, hand-backs of kind ratchet today
  * Only files written since the command started are read, so a file left by an earlier run is never counted.
+ * engines.<x>.play.times does the same for the Play Mode stage: minutes per fixture, kept in the same file (`play`).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,6 +21,7 @@ import { flagOf } from './helpers.mjs';
 
 const DAY = 86400000;
 const KEEP_TESTS = 200;
+const median = (xs) => { const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 const MAX_FILE = 64 * 1024 * 1024;
 const timesFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-times.json`);
 const relOk = (s) => Boolean(s) && !s.startsWith('/') && !/^[A-Za-z]:/.test(s) && !s.split('/').includes('..');
@@ -27,21 +29,24 @@ const unxml = (s) => String(s).replace(/&quot;/g, '"').replace(/&apos;/g, "'").r
 const attr = (tag, name) => { const m = new RegExp(`\\s${name}="([^"]*)"`).exec(tag); return m ? unxml(m[1]) : ''; };
 const secs = (v) => { const m = /^(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$/.exec(v); return m ? Number(m[1] || 0) * 3600 + Number(m[2]) * 60 + Number(m[3]) : Number(v); };
 
-/** engines.<x>.rules.times: a path or glob inside the test checkout, or ''. */
-export function timesConfig(root, engine) {
-  const v = enginesConfig(root)[engine]?.rules?.times;
+/** engines.<x>.rules.times (part 'rules') or engines.<x>.play.times (part 'play'): a path or glob inside the test checkout, or ''. */
+export function timesConfig(root, engine, part = 'rules') {
+  const v = enginesConfig(root)[engine]?.[part]?.times;
   const f = typeof v === 'string' ? v.trim().replace(/\\/g, '/') : '';
   return relOk(f) ? f : '';
 }
 
-/** [{ name, seconds }] from .trx, NUnit or JUnit text. Small regexes, no XML library. */
+/** [{ name, seconds, cls? }] from .trx, NUnit or JUnit text (cls: the class the file names). Small regexes, no XML library. */
 export function parseTimes(text) {
   const t = String(text || '').replace(/\r\n?/g, '\n');
   const out = [];
-  const add = (name, v) => { const s = secs(v); if (name && Number.isFinite(s) && s >= 0) out.push({ name, seconds: Math.round(s * 1000) / 1000 }); };
-  for (const m of t.matchAll(/<UnitTestResult\b[^>]*>/g)) add(attr(m[0], 'testName'), attr(m[0], 'duration'));
-  for (const m of t.matchAll(/<test-case\b[^>]*>/g)) add(attr(m[0], 'fullname') || attr(m[0], 'name'), attr(m[0], 'duration') || attr(m[0], 'time'));
-  for (const m of t.matchAll(/<testcase\b[^>]*>/g)) { const c = attr(m[0], 'classname'); const n = attr(m[0], 'name'); add(c && n ? `${c}.${n}` : n, attr(m[0], 'time')); }
+  const add = (name, v, cls = '') => { const s = secs(v); if (name && Number.isFinite(s) && s >= 0) out.push({ name, seconds: Math.round(s * 1000) / 1000, ...(cls ? { cls } : {}) }); };
+  // A .trx names a test's class in its UnitTest (className="Ns.Class, Assembly"), linked by id.
+  const classOf = new Map();
+  for (const m of t.matchAll(/<UnitTest\b[^>]*?\sid="([^"]+)"[^>]*>[\s\S]*?<TestMethod\b[^>]*>/g)) classOf.set(m[1], attr(m[0].slice(m[0].lastIndexOf('<TestMethod')), 'className').split(',')[0].trim());
+  for (const m of t.matchAll(/<UnitTestResult\b[^>]*>/g)) add(attr(m[0], 'testName'), attr(m[0], 'duration'), classOf.get(attr(m[0], 'testId')));
+  for (const m of t.matchAll(/<test-case\b[^>]*>/g)) add(attr(m[0], 'fullname') || attr(m[0], 'name'), attr(m[0], 'duration') || attr(m[0], 'time'), attr(m[0], 'classname'));
+  for (const m of t.matchAll(/<testcase\b[^>]*>/g)) { const c = attr(m[0], 'classname'); const n = attr(m[0], 'name'); add(c && n ? `${c}.${n}` : n, attr(m[0], 'time'), c); }
   return out;
 }
 
@@ -71,10 +76,10 @@ export function timesRead(dir, glob, { since = 0 } = {}) {
     try {
       const st = fs.statSync(f);
       if (st.mtimeMs < since || st.size > MAX_FILE) continue;
-      for (const x of parseTimes(fs.readFileSync(f, 'utf8'))) all.set(x.name, Math.max(all.get(x.name) || 0, x.seconds));
+      for (const x of parseTimes(fs.readFileSync(f, 'utf8'))) all.set(x.name, { seconds: Math.max(all.get(x.name)?.seconds || 0, x.seconds), cls: x.cls || all.get(x.name)?.cls });
     } catch { /* an unreadable file is skipped */ }
   }
-  return [...all].map(([name, seconds]) => ({ name, seconds })).sort((a, b) => b.seconds - a.seconds || a.name.localeCompare(b.name));
+  return [...all].map(([name, v]) => ({ name, seconds: v.seconds, ...(v.cls ? { cls: v.cls } : {}) })).sort((a, b) => b.seconds - a.seconds || a.name.localeCompare(b.name));
 }
 
 /** engines.<x>.rules.memory: { file (glob), name (column), mb | gb (column) } of a table the test run writes, or null. */
@@ -114,9 +119,51 @@ export function recordTimes(root, engine, { dir, train = '', command = '', since
     const runs = (Array.isArray(j?.runs) ? j.runs : []).filter((r) => now - (Date.parse(r.at) || 0) < 2 * DAY);
     const run = { at: new Date(now).toISOString(), train: String(train || ''), command: String(command || '(full run)'), count: tests.length, seconds: Math.round(tests.reduce((a, x) => a + x.seconds, 0)), tests: tests.slice(0, KEEP_TESTS).map((x) => [x.name, x.seconds]), ...(mem.length ? { mem: mem.slice(0, 20).map((x) => [x.name, x.gb]) } : {}) };
     fs.mkdirSync(path.dirname(f), { recursive: true });
-    writeAtomic(f, `${JSON.stringify({ runs: [...runs, run].slice(-60) }, null, 1)}\n`);
+    writeAtomic(f, `${JSON.stringify({ ...j, runs: [...runs, run].slice(-60) }, null, 1)}\n`);
     return run;
   } catch { return null; }
+}
+
+// ---- the Play Mode stage: minutes per fixture (engines.<x>.play.times), kept in the same file as `play` ----
+
+const KEEP_FIXTURES = 500;
+const fixtureOf = (x) => x.cls || String(x.name).replace(/\(.*$/s, '').replace(/\.[^.]*$/, '') || x.name;
+
+/** Keep the minutes each fixture took in a land run that ran the play stage. Never throws; reads nothing when play.times is not set. */
+export function recordPlayTimes(root, engine, { dir, since = 0, now = Date.now() } = {}) {
+  try {
+    const glob = timesConfig(root, engine, 'play');
+    if (!glob) return null;
+    const mins = new Map();
+    for (const x of timesRead(dir, glob, { since: since - 2000 })) mins.set(fixtureOf(x), (mins.get(fixtureOf(x)) || 0) + x.seconds / 60);
+    if (!mins.size) return null;
+    const f = timesFile(root, engine);
+    const j = readJson(f, null) || {};
+    const fx = { ...(j.play?.fixtures || {}) };
+    for (const [c, m] of mins) { delete fx[c]; fx[c] = [...(j.play?.fixtures?.[c] || []), Math.round(m * 100) / 100].slice(-5); }
+    const kept = Object.fromEntries(Object.entries(fx).slice(-KEEP_FIXTURES));
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    writeAtomic(f, `${JSON.stringify({ ...j, play: { at: new Date(now).toISOString(), fixtures: kept } }, null, 1)}\n`);
+    return kept;
+  } catch { return null; }
+}
+
+/** [{ name, minutes }] kept for the play stage (the median of each fixture's recent runs), longest first; [] and no read when play.times is not set. */
+export function playFixtures(root, engine) {
+  if (!timesConfig(root, engine, 'play')) return [];
+  const fx = readJson(timesFile(root, engine), null)?.play?.fixtures || {};
+  return Object.entries(fx).filter(([, v]) => Array.isArray(v) && v.length).map(([name, v]) => ({ name, minutes: Math.round(median(v) * 100) / 100 })).sort((a, b) => b.minutes - a.minutes || a.name.localeCompare(b.name));
+}
+
+/**
+ * The minutes a Play Mode filter costs: the fixtures whose name a term equals or starts (term + "."), or null when a term
+ * is more than names (a pattern, a $1 template) or no kept fixture matches.
+ */
+export function filterMinutes(filter, fixtures) {
+  const terms = String(filter || '').split(/[;|]/).map((t) => t.trim()).filter(Boolean);
+  if (!terms.length || !fixtures?.length || terms.some((t) => !/^[A-Za-z0-9_.-]+$/.test(t))) return null;
+  const hit = fixtures.filter((f) => terms.some((t) => f.name === t || f.name.startsWith(`${t}.`)));
+  return hit.length ? Math.round(hit.reduce((n, f) => n + f.minutes, 0) * 10) / 10 : null;
 }
 
 /** The report of the last 24 hours for one engine: { runs, total, slowest, twice, heavy, ratchets } or null when nothing was kept. */
@@ -146,8 +193,6 @@ export async function costReport(root, engine, { now = Date.now(), events = null
   const memory = [...mm].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 10).map(([name, gb]) => ({ name, gb }));
   return { engine, runs: runs.length, total, slowest, twice, heavy, short: sampled.filter((x) => x.unknown).slice(0, 5), memory, ratchets };
 }
-
-const median = (xs) => { const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 
 /**
  * 2.98: lines about each rules part that has sampled runs. A part whose last passed run took over twice the median of

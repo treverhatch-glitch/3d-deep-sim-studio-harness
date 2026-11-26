@@ -6,7 +6,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { focusFilters, ignoreSplit, playFocusConfig, rulesConfig } from './engine-rules.mjs';
+import { focusFilters, playFocusConfig, rulesConfig } from './engine-rules.mjs';
+import { filterMinutes, playFixtures, timesConfig } from './rules-times.mjs';
 
 const DAY = 86400000;
 const KEEP_LINES = 200;
@@ -53,23 +54,31 @@ function autoStarts(auto) {
   return (Array.isArray(auto) ? auto : auto ? [auto] : []).flatMap((a) => [a.root ? `${a.root}/` : '', a.from ? a.from.split('{name}')[0] : '', ...(a.paths || []).map((t) => t.split('{name}')[0])]).filter(Boolean).map((x) => x.toLowerCase());
 }
 
+/** What the kept fixture times say about one proposed entry (fixtures: null when play.times is not set). */
+function costOf(kind, folder, fixtures) {
+  if (kind === 'skip') return 'no Play Mode time: it is skipped';
+  if (!fixtures) return 'cost unknown: engines.<x>.play.times is not set';
+  if (!fixtures.length) return 'cost unknown: no Play Mode times are kept yet';
+  const seg = folder.replace(/\/$/, '').split('/').pop();
+  const hit = fixtures.filter((f) => f.name.toLowerCase().includes(seg.toLowerCase()));
+  return hit.length ? `fixtures with "${seg}" in the name take ${Math.round(hit.reduce((n, f) => n + f.minutes, 0) * 10) / 10} min (${hit.length})` : `no kept fixture has "${seg}" in its name`;
+}
+
 /**
  * Groups by folder with a proposed entry each: [{ folder, count, paths, kind: 'skip' | 'map', entry, why }]. skip: every path
- * is judged by the rules tests (a rules.focus map entry or auto folder) or is already taken by play.focus.skip.
+ * is judged by the rules tests (a rules.focus map entry or auto folder).
  */
-export function proposeGroups(paths, { play = null, rules = null } = {}) {
+export function proposeGroups(paths, { rules = null, fixtures = null } = {}) {
   const groups = new Map();
   for (const p of new Set((paths || []).map(norm).filter(Boolean))) groups.set(folderOf(p), [...(groups.get(folderOf(p)) || []), p]);
   const starts = autoStarts(rules?.focus?.auto);
   const judged = (p) => (rules?.focus?.map?.length && focusFilters({ changed: [p], map: rules.focus.map }).ok) || starts.some((s) => p.toLowerCase().startsWith(s));
-  const skipRe = play?.skip || [];
   return [...groups].map(([folder, list]) => {
-    const taken = ignoreSplit(list, skipRe).ignored.length === list.length;
     const rule = list.every(judged);
     const match = folder === '(top folder)' ? `^[^/]+$` : `^${esc(folder)}`;
-    const kind = rule || taken ? 'skip' : 'map';
-    const why = taken ? 'play.focus.skip already takes every path' : rule ? 'the rules tests already judge these paths' : 'no rules test or Play Mode filter covers these paths yet';
-    return { folder, count: list.length, paths: list.slice(0, 5), kind, entry: kind === 'skip' ? match : { match, filter: '<the Play Mode tests for this folder>' }, why };
+    const kind = rule ? 'skip' : 'map';
+    const why = rule ? 'the rules tests already judge these paths' : 'no rules test or Play Mode filter covers these paths yet';
+    return { folder, count: list.length, paths: list.slice(0, 5), kind, entry: kind === 'skip' ? match : { match, filter: '<the Play Mode tests for this folder>' }, why, cost: costOf(kind, folder, fixtures) };
   }).sort((a, b) => b.count - a.count || a.folder.localeCompare(b.folder));
 }
 
@@ -77,7 +86,7 @@ export function proposeText(engine, groups, from) {
   if (!groups.length) return `No unmatched paths for ${engine} ${from}: every path is taken by a play.focus.map entry.`;
   const L = [`Play Mode map gaps for ${engine} (${from}): ${groups.reduce((n, g) => n + g.count, 0)} path(s) in ${groups.length} folder(s).`];
   for (const g of groups.slice(0, 30)) {
-    L.push(`${g.folder} (${g.count} path${g.count === 1 ? '' : 's'}; ${g.why})`);
+    L.push(`${g.folder} (${g.count} path${g.count === 1 ? '' : 's'}; ${g.why}; ${g.cost})`);
     L.push(g.kind === 'skip' ? `  add to engines.${engine}.play.focus.skip: ${JSON.stringify(g.entry)}` : `  add to engines.${engine}.play.focus.map: ${JSON.stringify(g.entry)}   (fill in the filter)`);
   }
   if (groups.length > 30) L.push(`and ${groups.length - 30} more folder(s)`);
@@ -85,12 +94,26 @@ export function proposeText(engine, groups, from) {
 }
 
 /** `play-plan --propose`: { text, code, groups }. plan: playPlan's result for --branch or --paths, else the recorded paths of the last 7 days. */
-export function proposeGaps(root, { engine = 'unity', plan = null, cfg = {}, json = false } = {}) {
+export function proposeGaps(root, { engine = 'unity', plan = null, json = false } = {}) {
   if (plan?.error) return { text: plan.message, code: 1, groups: [] };
   const rules = rulesConfig(engine, { root });
-  const play = playFocusConfig(cfg);
   const from = plan ? plan.source : 'the Play Mode stages of the last 7 days';
   const paths = plan ? (plan.selection?.unmatchedAll || []) : readUnmatched(root, engine, { since: Date.now() - 7 * DAY }).flatMap((r) => r.paths);
-  const groups = proposeGroups(paths, { play, rules });
+  const groups = proposeGroups(paths, { rules, fixtures: timesConfig(root, engine, 'play') ? playFixtures(root, engine) : null });
   return { text: json ? JSON.stringify(groups) : proposeText(engine, groups, from), code: 0, groups };
+}
+
+/** Lines for `play-plan` about Play Mode time: the plan's expected minutes, the 10 slowest fixtures and the total, the minutes of each map entry's filter ("?": not a plain name). */
+export function playCostLines(root, { engine = 'unity', cfg = {}, plan = null } = {}) {
+  if (!timesConfig(root, engine, 'play')) return [];
+  const fx = playFixtures(root, engine);
+  if (!fx.length) return [`  Play Mode time: none kept yet (engines.${engine}.play.times is set; a land run that runs the play stage keeps it).`];
+  const total = Math.round(fx.reduce((n, f) => n + f.minutes, 0) * 10) / 10;
+  const sel = plan?.selection;
+  const exp = sel?.mode === 'focus' ? filterMinutes(sel.filter, fx) : null;
+  const L = exp == null ? [] : [`  expected Play Mode time for this plan: about ${exp} min`];
+  L.push(`  Play Mode time per fixture: ${fx.length} fixtures, ${total} min in all. Slowest:`, ...fx.slice(0, 10).map((f) => `    ${f.minutes} min  ${f.name}`));
+  const map = playFocusConfig(cfg)?.map || [];
+  if (map.length) L.push('  Minutes by play.focus.map entry:', ...map.map((m) => { const c = filterMinutes(m.filter, fx); return `    ${c == null ? '?' : `${c} min`}  ${m.match} -> ${m.filter}`; }));
+  return L;
 }

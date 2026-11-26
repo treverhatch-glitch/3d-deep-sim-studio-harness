@@ -27,7 +27,7 @@ import { splitPlan, judged, INFRA_DOTNET } from './rules-parts.mjs';
 import { flagOf, isOff as off, numFiniteFirst as num, pushToOf, stdoutOf as out } from './helpers.mjs';
 import { matchAny } from './merge-lane.mjs';
 import { acquireHeavy, quietHolding } from './heavy.mjs';
-import { recordTimes, partLines } from './rules-times.mjs';
+import { recordTimes, partLines, filterMinutes } from './rules-times.mjs';
 import { rulesKind, runSample, runNumbers, costLines, partMemory } from './run-cost.mjs';
 
 const on = (v) => /^(1|true|yes|on)$/i.test(String(v ?? '').trim());
@@ -790,8 +790,9 @@ export const PLAY_FILTER_SAFE = /^[A-Za-z0-9_.;|~=!()* -]+$/;
  * What the land's Play Mode stage is told (a hint the land script may use; focus is weaker than full). changed: repo
  * paths (null: unknown); full: a full land run. { mode: 'focus' | 'skip' | 'full', filter, why, refused? }. Focus only
  * when every changed path that play.focus.skip does not take matches a map entry and the filter is PLAY_FILTER_SAFE.
+ * fixtures (playFixtures): a focus gives `expectMin` and says it in the why line when the filter's fixtures are known.
  */
-export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = '' } = {}) {
+export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = '', fixtures = null } = {}) {
   const pf = playFocusConfig(cfg);
   const fullSel = (why, extra = {}) => ({ mode: 'full', filter: '', why, ...extra });
   if (!pf) return fullSel('no play.focus');
@@ -826,7 +827,8 @@ export function playSelection({ changed = [], cfg = {}, full = false, fullWhy = 
   }
   if (!ff.filter) return fullSel('the filter is empty', bad);
   if (!PLAY_FILTER_SAFE.test(ff.filter)) return fullSel(`refused the filter "${ff.filter.slice(0, 120)}": only letters, digits, space and _ . ; | ~ = ! ( ) * - may reach the land command`, { refused: true, ...bad });
-  return { mode: 'focus', filter: ff.filter, why: `${rest.length} changed path(s) ${skipped ? 'mapped by play.focus, ' + skipped + ' more need no Play Mode (play.focus.skip)' : 'all mapped by play.focus'}${ig.ignored.length ? ` (${ig.ignored.length} more left out by play.focus.ignore)` : ''}`, ...bad };
+  const expectMin = filterMinutes(ff.filter, fixtures);
+  return { mode: 'focus', filter: ff.filter, why: `${rest.length} changed path(s) ${skipped ? `mapped by play.focus, ${skipped} more need no Play Mode (play.focus.skip)` : 'all mapped by play.focus'}${ig.ignored.length ? ` (${ig.ignored.length} more left out by play.focus.ignore)` : ''}${expectMin == null ? '' : `; about ${expectMin} min expected`}`, ...(expectMin == null ? {} : { expectMin }), ...bad };
 }
 
 /**
