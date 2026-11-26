@@ -156,6 +156,44 @@ console.log(JSON.stringify({ ok: [q1.ok, q2.ok], a, b, c, d, f, g }));`);
         r.ok?.join() === 'true,true' && r.a?.tagAt === r.a?.at && r.b?.tagAt === r.a.tagAt && r.c?.tagAt === r.a.tagAt && r.c?.at === r.a.at && r.d?.tag === 'sound' && r.d.tagAt > r.a.tagAt
           && r.f && !('tagAt' in r.f) && !r.f.tag && r.g?.tagAt > r.g?.at && late === null && old?.road === 'overdue' && old.waitedH === 30, J({ r, late, old })]);
     }
+
+    // ================= (e4) waiting lanes tested against a moved target =================
+    {
+      const F = 'Game/Sim/Fees.cs';
+      const E = engineRepo({ [F]: 'fee 1\n', 'b.txt': 'b\n' }, { 'port/x': { [F]: 'fee x\n' }, 'port/t': { [F]: 'fee t\n' }, 'port/y': { 'Y.cs': 'y\n' } });
+      resetState();
+      setEngines({ unity: cfgFor(E) });
+      const qd = probe(`import { queueUnityTask } from ${u('harness/unity-train.mjs')};
+const root = process.cwd();
+const r = [queueUnityTask(root, { engine: 'unity', task: 'T-41', agent: 'p1', branch: 'port/x' }), queueUnityTask(root, { engine: 'unity', task: 'T-42', agent: 'p2', branch: 'port/t', tag: 'art' }), queueUnityTask(root, { engine: 'unity', task: 'T-43', agent: 'p3', branch: 'port/y' })];
+console.log(JSON.stringify({ ok: r.map((x) => x.ok) }));`);
+      const RPASS = PASS.replace('sessions: async () => [],', 'sessions: async () => [], handBack: (l, note, o) => { handed.push({ task: l.task, note, cause: o?.cause || null }); },').replace('const started = [];', 'const started = []; const handed = [];').replace('tag: rows[0]?.tag || null }', 'tag: rows[0]?.tag || null, handed }');
+      const drops = () => evs(/^task\.train\.unity\.dropped$/);
+      const still = probe(RPASS);
+      const rec0 = readJson(path.join(S, '.studio', 'engine', 'unity-queue-check.json'));
+      moveTarget(E, { [F]: 'fee 2\n' });
+      const lock = path.join(S, '.studio', 'locks', 'unity-train.lock');
+      fs.mkdirSync(path.dirname(lock), { recursive: true });
+      fs.writeFileSync(lock, JSON.stringify({ id: 'a-train', pid: process.pid, lanes: [] }));
+      const during = probe(RPASS);
+      const dropsDuring = drops().length;
+      fs.rmSync(lock, { force: true });
+      const moved = probe(RPASS);
+      const q1 = qNow().map((e) => e.task);
+      const hb = readJson(path.join(S, '.studio', 'train', 'unity-handbacks.json'));
+      const again = probe(RPASS);
+      setEngines({ unity: cfgFor(E, { queueRetestHours: 0.0001 }) });
+      moveTarget(E, { 'b.txt': 'b2\n' });
+      await new Promise((r) => setTimeout(r, 500));
+      const third = probe(RPASS);
+      const d = drops();
+      await guard('2.99 (e4) after the target moved, the Line Producer\'s pass hands back the waiting lanes that no longer merge with it (an untagged and a tagged one) with the train\'s words ("it conflicts with the target in Game/Sim/Fees.cs ...") and one dropped event each, once; a lane that still merges stays queued; nothing is tested while the target has not moved or while a train runs (fails before this fix: the lanes waited until a train took them, then were handed back)', () => [
+        qd.ok?.join() === 'true,true,true' && !still.handed?.length && rec0 === null && !during.handed?.length && dropsDuring === 0
+          && moved.handed?.map((h) => h.task).sort().join() === 'T-41,T-42' && moved.handed.every((h) => /it conflicts with the target in Game\/Sim\/Fees\.cs: bring the target into it/.test(h.note)) && q1.join() === 'T-43'
+          && d.length === 2 && d.every((e) => /handed back: it conflicts with the target in Game\/Sim\/Fees\.cs/.test(e.msg) && e.meta?.check === 'queue') && d.map((e) => e.to).sort().join() === 'p1,p2'
+          && hb?.['T-41']?.train === 'queue-check' && hb['T-42']?.files?.includes('Game/Sim/Fees.cs') && !again.handed?.length && !third.handed?.length && qNow().map((e) => e.task).join() === 'T-43'
+          && readJson(path.join(S, '.studio', 'engine', 'unity-queue-check.json'))?.lanes?.['T-43']?.target === g(E.R, 'rev-parse', 'port/main').stdout.trim(), J({ qd, still, during, moved, again, third, q1, d: d.map((e) => e.msg) })]);
+    }
   } finally {
     try { fs.rmSync(T, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep */ }
     try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep */ }

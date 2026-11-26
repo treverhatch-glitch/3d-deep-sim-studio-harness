@@ -180,6 +180,16 @@ and the tests decide. What it cannot know: two lanes that add the same key with 
 line both add on purpose twice is kept once. When it refuses, the lane's reason (`deferred` or `conflicts with the target`) ends "merge.union did not apply: <file> line <n> was rewritten, not only lengthened" (or names a file not listed). With no `merge.union` every merge is as before. A `landMany` command
 merges the branches itself, so the train does not use `merge.union` with one.
 
+2.99: waiting lanes are tested against the target while they wait. A lane was tested when it was queued and again when a
+train took it; a tagged or held lane could wait for days while the target moved, then be handed back in the train's
+first minute. Now the Line Producer, at most every `"queueRetestHours": 6` (0 turns it off) and only when the target has
+moved since a lane's last test, merges each waiting lane (tagged and held ones too) with the target alone, the way the
+train does (refs only, `merge.union` and `merge.newer` included; no checkout, no editor, no heavy lock). A lane that no
+longer merges is handed back now, with the train's words and a `task.train.<x>.dropped` event (meta `check: "queue"`),
+so its owner brings the target in while the work is fresh; a lane that became empty is handed back as the train would.
+It does not run while a train runs (the train does its own test). A pass costs one `git merge-tree` per lane whose
+target moved (a few more for a lane that conflicts); the record is `.studio/engine/<x>-queue-check.json`.
+
 2.78.2 (item 18): `task done --train` on an engine pass it can't queue says why and exits 1 (a
 `task.train.not_queued` event), never going on as a studio lane in silence. The reasons
 (`harness/engine-tracks.mjs engineTrainVerdict`) are: an engine-porter task whose track names no engine (or with

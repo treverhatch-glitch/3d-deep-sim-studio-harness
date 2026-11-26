@@ -201,7 +201,8 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
   const ahead = Number(out(git(s.repo, 'rev-list', '--count', `refs/heads/${s.target}..${head}`))) || 0;
   if (!ahead) return { ok: false, error: 'nothing', message: `${task} was not queued: ${br} has no commits that ${s.target} doesn't have.` };
   // 2.98 (b): commits that change nothing (only a merge of the target, say) are refused here, not landed by a train.
-  const ec = chainOnTarget(s.repo, headOf(s.repo, s.target), [{ task, branch: br, head }], 'queue', engine, { union: unionOf(s.cfg) });
+  const tipAt = headOf(s.repo, s.target);
+  const ec = chainOnTarget(s.repo, tipAt, [{ task, branch: br, head }], 'queue', engine, { union: unionOf(s.cfg) });
   if (ec.empty?.length) return { ok: false, error: 'empty', message: `${task} was not queued: ${emptyWhy(s.target)}. Its ${ahead} commit(s) change no file. Put the work on ${br}, then task done ${task} --train again.` };
   // 2.85: a branch the train handed back is not queued again unchanged (only merges of the target since that red, and the target
   // changed nothing the red's evidence names): the same red would repeat. --again (the overseer or a planner) queues it anyway, logged.
@@ -252,7 +253,7 @@ export function queueUnityTask(root, { engine = 'unity', task, agent = null, bra
     // tag null: the task's record, else the entry's own; '' clears it.
     const tg = tag === null || tag === undefined ? (() => { try { return engineTask(task, { root })?.tag || null; } catch { return null; } })() || (i >= 0 ? q[i].tag || null : null) : tag || null;
     const now = new Date().toISOString();
-    const rec = { task, agent, branch: br, head, note: note || '', at: now, ...(solo ? { alone: true } : {}), ...(tg ? { tag: tg, tagAt: i >= 0 && q[i].tag === tg ? q[i].tagAt || q[i].at : now } : {}), ...kept };
+    const rec = { task, agent, branch: br, head, note: note || '', at: now, ...(solo ? { alone: true } : {}), ...(tg ? { tag: tg, tagAt: i >= 0 && q[i].tag === tg ? q[i].tagAt || q[i].at : now } : {}), ...(tipAt ? { targetAt: tipAt } : {}), ...kept };
     if (i >= 0) q.splice(i, 1, { ...rec, at: q[i].at });
     else q.push(rec);
     return rec;
@@ -1039,6 +1040,51 @@ export function chainOnTarget(repo, base, lanes, id, engine = 'unity', { union =
     else res.conflictTarget.push({ ...lane, files: conflictFiles(alone.stdout), why: `it conflicts with the target${conflictFiles(alone.stdout).length ? ` in ${conflictFiles(alone.stdout).slice(0, 5).join(', ')}` : ''}${noUnion(base)}: bring the target into it with ${targetMergeCommand(lane.task)} (it leaves the conflicts in the task's worktree to resolve; small conflicts in project files usually want both sides kept), then task done --train again` });
   }
   return { ...res, head: tip };
+}
+
+/** 2.99 (e): engines.<x>.queueRetestHours (6; 0: off): how often at most the waiting lanes are tested against a moved target. */
+export function queueRetestHours(cfg = {}) { const h = Number(cfg?.queueRetestHours ?? 6); return Number.isFinite(h) && h > 0 ? h : 0; }
+const retestFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-queue-check.json`);
+
+/**
+ * 2.99 (e): the hand-back loop, done early. Each queued lane (tagged and held ones too) last tested against another target
+ * tip (the queue door's targetAt, then this check's record) is merged with the target alone, as a train does
+ * (chainOnTarget: refs only, merge.union and merge.newer included). One that conflicts or adds nothing is handed back now,
+ * with the train's words and event. Never while a train runs; at most every queueRetestHours. { tested, handed, why }.
+ */
+export async function retestQueue(root, engine = 'unity', { now = Date.now(), by = `${engine}-train`, handBack = null } = {}) {
+  const s = unityTrainSettings(root, engine);
+  const L = labelOf(engine);
+  const res = { tested: 0, handed: [], why: '' };
+  if (s.error) return { ...res, why: s.message };
+  const hours = queueRetestHours(s.cfg);
+  const rec = readJson(retestFile(root, engine)) || {};
+  if (!hours) return { ...res, why: `engines.${engine}.queueRetestHours is 0` };
+  if (now - (Date.parse(rec.at || '') || 0) < hours * 3600000) return { ...res, why: `tested at ${String(rec.at).slice(0, 16)}, under ${hours} h ago` };
+  const tip = headOf(s.repo, s.target);
+  const lanes = {};
+  for (const e of readUnityQueue(root, engine)) {
+    if (runningUnityTrain(root, engine)) return { ...res, why: 'a train runs: it tests its own lanes' };
+    const head = headOf(s.repo, e.branch);
+    if (!head || !tip) continue;
+    const was = rec.lanes?.[e.task]?.head === head ? rec.lanes[e.task].target : e.head === head ? e.targetAt : null;
+    lanes[e.task] = { head, target: tip };
+    if (was === tip) continue;
+    res.tested += 1;
+    const c = chainOnTarget(s.repo, tip, [{ ...e, head }], 'queue-check', engine, { union: unionOf(s.cfg) });
+    if (c.error) { delete lanes[e.task]; continue; }
+    const bad = c.conflictTarget[0] || (c.empty[0] && { why: `${emptyWhy(s.target)}; the task stays open: put the work on ${e.branch}, then task done ${e.task} --train again`, cause: 'empty' });
+    if (!bad) continue;
+    delete lanes[e.task];
+    const lane = { ...e, head };
+    editHandbacks(root, engine, (h) => { h[e.task] = { train: 'queue-check', branch: e.branch, head, reason: `${bad.cause ? `${bad.cause}: ` : ''}${bad.why.split('\n')[0]}`.slice(0, 240), cause: bad.cause || 'red', files: (bad.files || []).slice(0, 20), tests: [], targetAt: tip, at: new Date(now).toISOString() }; });
+    dequeueUnity(root, e.task, engine);
+    evTop('dropped', 'queue-check', `${e.task} handed back: ${bad.why.split('\n')[0]}`, { engine, task: e.task, agent: by, to: e.agent, status: 'blocked', meta: { check: 'queue', target: tip, ...(bad.cause ? { cause: bad.cause } : {}) } });
+    try { await handBack?.(lane, `Not landed: the ${L} queue check tested it against ${s.target} at ${short(tip)} while it waited: ${bad.why}`, bad.cause ? { cause: bad.cause } : undefined); } catch { /* the event and the record stand */ }
+    res.handed.push({ task: e.task, why: bad.why });
+  }
+  if (res.tested) writeJson(retestFile(root, engine), { at: new Date(now).toISOString(), target: tip, lanes });
+  return { ...res, why: res.tested ? `${res.tested} lane(s) tested against ${s.target} at ${short(tip)}` : `${s.target} has not moved since each lane was tested` };
 }
 
 // ---- the train ----

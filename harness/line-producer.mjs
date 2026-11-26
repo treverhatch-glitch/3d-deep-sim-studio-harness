@@ -1144,6 +1144,14 @@ export async function enginePass({ now = Date.now(), env = process.env, dryRun =
   let toldChanged = false;
   const out = [];
   for (const t of targets) {
+    // 2.99 (e): waiting lanes tested against a moved target; one that no longer merges is handed back now (ut.retestQueue).
+    if (acting) {
+      try {
+        const handBack = deps.handBack || (async (lane, note, o) => (await import('./task.mjs')).pauseTask(lane.task, lane.agent, note, { force: true, handBackCause: o?.cause }));
+        const rt = await ut.retestQueue(root, t.name, { now, by: LINE_AGENT, handBack });
+        if (rt.handed.length) logAction({ kind: 'engine-train', what: `the ${t.label} queue check handed back ${rt.handed.map((h) => `${h.task} (${h.why.split('\n')[0]})`).join('; ')}: ${rt.why}`, meta: { engine: t.name, tasks: rt.handed.map((h) => h.task), tested: rt.tested } }, { emit: false });
+      } catch { /* the train tests them at its start */ }
+    }
     // The automatic start takes untagged lanes; 2.98 (b): with none waiting, the tag group whose oldest lane waited longest.
     const qAll = ut.readUnityQueue(root, t.name);
     // 2.86: lanes a train left waiting for the target (red on it alone) are not counted until the target moves.
