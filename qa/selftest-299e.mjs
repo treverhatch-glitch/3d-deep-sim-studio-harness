@@ -194,6 +194,73 @@ console.log(JSON.stringify({ ok: r.map((x) => x.ok) }));`);
           && hb?.['T-41']?.train === 'queue-check' && hb['T-42']?.files?.includes('Game/Sim/Fees.cs') && !again.handed?.length && !third.handed?.length && qNow().map((e) => e.task).join() === 'T-43'
           && readJson(path.join(S, '.studio', 'engine', 'unity-queue-check.json'))?.lanes?.['T-43']?.target === g(E.R, 'rev-parse', 'port/main').stdout.trim(), J({ qd, still, during, moved, again, third, q1, d: d.map((e) => e.msg) })]);
     }
+
+    // ================= (e5, e6) merge.newer =================
+    {
+      const { chainOnTarget } = await import(pathToFileURL(path.join(dir, 'harness', 'unity-train.mjs')).href);
+      const PIN = 'tools/SimTests/pin.json';
+      const LST = 'tools/SimTests/list.txt';
+      const pin = (commit, date, fp = 'f') => `${JSON.stringify({ commit, date, fingerprint: fp }, null, 2)}\n`;
+      const list = (...x) => `tests:\n${x.map((y) => `  ${y}\n`).join('')}end\n`;
+      // port/main moves with `target` after the lanes left it; returns the lanes and the target tip.
+      const make = (files, target, lanes) => {
+        const R = path.join(T, `nr-${++rn}`);
+        fs.mkdirSync(R, { recursive: true });
+        g(R, 'init', '-q', '-b', 'port/main');
+        for (const [f, t] of Object.entries(files)) write(R, f, t);
+        g(R, 'add', '-A'); g(R, 'commit', '-qm', 'start');
+        const ls = [];
+        for (const [name, edits] of Object.entries(lanes)) {
+          g(R, 'checkout', '-q', '-b', name, 'port/main');
+          for (const [f, t] of Object.entries(edits)) write(R, f, t);
+          g(R, 'add', '-A'); g(R, 'commit', '-qm', name);
+          ls.push({ task: name, branch: name, head: g(R, 'rev-parse', name).stdout.trim() });
+        }
+        g(R, 'checkout', '-q', 'port/main');
+        for (const [f, t] of Object.entries(target)) write(R, f, t);
+        g(R, 'add', '-A'); g(R, 'commit', '-qm', 'target moves');
+        return { R, lanes: ls, tip: g(R, 'rev-parse', 'port/main').stdout.trim() };
+      };
+      const show = (R, ref, f) => g(R, 'show', `${ref}:${f}`).stdout;
+      const NEWER = [{ file: 'tools/SimTests/*.json', field: 'date' }];
+      const B = { [PIN]: pin('c0', '2026-11-20T00:00:00Z'), [LST]: list('a', 'b'), 'Other.cs': 'one\n' };
+      const chain = (target, lane, rules = [LST, ...NEWER]) => { const E = make(B, target, { 'T-51': lane }); return { E, c: chainOnTarget(E.R, E.tip, E.lanes, 't', 'unity', { union: rules }) }; };
+      const laneNewer = chain({ [PIN]: pin('t1', '2026-11-21T00:00:00Z', 'ft') }, { [PIN]: pin('l1', '2026-11-22T09:00:00Z', 'fl') });
+      const tgtNewer = chain({ [PIN]: pin('t1', '2026-11-23T00:00:00Z', 'ft') }, { [PIN]: pin('l1', '2026-11-22T09:00:00Z', 'fl') });
+      const equal = chain({ [PIN]: pin('t1', '2026-11-22T00:00:00Z', 'ft') }, { [PIN]: pin('l1', '2026-11-22T00:00:00Z', 'fl') });
+      const junk = chain({ [PIN]: pin('t1', '2026-11-21T00:00:00Z', 'ft') }, { [PIN]: '{ "commit": "l1", "date": \n' });
+      const other = chain({ [PIN]: pin('t1', '2026-11-21T00:00:00Z'), 'Other.cs': 'two\n' }, { [PIN]: pin('l1', '2026-11-22T00:00:00Z'), 'Other.cs': 'three\n' });
+      const both = chain({ [PIN]: pin('t1', '2026-11-21T00:00:00Z', 'ft'), [LST]: list('a', 't', 'b') }, { [PIN]: pin('l1', '2026-11-22T00:00:00Z', 'fl'), [LST]: list('a', 'l', 'b') });
+      const ok1 = (x) => x.c.included?.length === 1 && !x.c.conflictTarget?.length;
+      await guard('2.99 (e5) merge.newer: the lane\'s newer pin is taken whole (from T-51), the target\'s newer pin is kept (from the target); equal dates or a file that is not JSON stay a conflict as today; a conflict in a file no rule names stays a conflict; with a union file in the same merge both rules apply (fails before this fix: every pin conflict handed the lane back)', () => [
+        ok1(laneNewer) && show(laneNewer.E.R, laneNewer.c.head, PIN) === pin('l1', '2026-11-22T09:00:00Z', 'fl') && laneNewer.c.union[0]?.newer?.[0]?.from === 'T-51' && !laneNewer.c.union[0].files.length
+          && ok1(tgtNewer) && show(tgtNewer.E.R, tgtNewer.c.head, PIN) === pin('t1', '2026-11-23T00:00:00Z', 'ft') && tgtNewer.c.union[0]?.newer?.[0]?.from === 'the target'
+          && equal.c.conflictTarget?.length === 1 && /same date on both sides/.test(equal.c.conflictTarget[0].why)
+          && junk.c.conflictTarget?.length === 1 && /no date in its date/.test(junk.c.conflictTarget[0].why)
+          && other.c.conflictTarget?.length === 1 && /Other\.cs conflicts and is not listed in merge\.union or merge\.newer/.test(other.c.conflictTarget[0].why)
+          && ok1(both) && show(both.E.R, both.c.head, PIN) === pin('l1', '2026-11-22T00:00:00Z', 'fl') && show(both.E.R, both.c.head, LST) === list('a', 't', 'l', 'b') && both.c.union[0]?.files.join() === LST
+          && /^Newer-Merge: tools\/SimTests\/pin\.json taken from T-51: its date is later/m.test(g(both.E.R, 'log', '-1', '--format=%B', both.c.head).stdout), J({ laneNewer: laneNewer.c, tgtNewer: tgtNewer.c.union, equal: equal.c.conflictTarget, junk: junk.c.conflictTarget, other: other.c.conflictTarget, both: both.c.union })]);
+      const unlisted = chain({ [PIN]: pin('t1', '2026-11-21T00:00:00Z') }, { [PIN]: pin('l1', '2026-11-22T00:00:00Z') }, [LST]);
+      const notDate = chain({ [PIN]: pin('t1', '2026-11-21T00:00:00Z') }, { [PIN]: pin('l1', '2026-11-22T00:00:00Z') }, [{ file: PIN, field: 'commit' }]);
+      const none = chain({ [PIN]: pin('t1', '2026-11-21T00:00:00Z') }, { [PIN]: pin('l1', '2026-11-22T00:00:00Z') }, []);
+      await guard('2.99 (e6) what must not happen: a pin no rule names is never taken from either side (merge.union lists another file, or no rule at all); a listed file whose field holds no date ("commit") is not either (fails if newer resolved more than it is told to)', () => [
+        unlisted.c.conflictTarget?.length === 1 && notDate.c.conflictTarget?.length === 1 && /no date in its commit/.test(notDate.c.conflictTarget[0].why) && none.c.conflictTarget?.length === 1 && !none.c.union?.length, J({ unlisted: unlisted.c.conflictTarget, notDate: notDate.c.conflictTarget })]);
+
+      // The queue door, the batch and the land merge: a lane whose pin is newer is queued, lands, and the union event says so.
+      const E = engineRepo(B, { 'port/p': { [PIN]: pin('l1', '2026-11-22T00:00:00Z', 'fl'), 'Game/Sim/Fees/P.cs': 'p\n' } });
+      moveTarget(E, { [PIN]: pin('t1', '2026-11-21T00:00:00Z', 'ft') });
+      resetState();
+      setEngines({ unity: cfgFor(E, { merge: { newer: [{ file: PIN, field: 'date' }] } }) });
+      const tr = probe(`import { queueUnityTask, runUnityTrain } from ${u('harness/unity-train.mjs')};
+const root = process.cwd(); const handed = [];
+const q = queueUnityTask(root, { engine: 'unity', task: 'T-55', agent: 'p', branch: 'port/p' });
+const r = await runUnityTrain({ root, log: () => {}, deps: { handBack: (l) => handed.push(l.task), close: () => ({ ok: true }) } });
+console.log(JSON.stringify({ q: q.ok, qm: q.message.slice(0, 300), landed: r.landed, handed, message: r.message }));`);
+      const uev = evs(/^task\.train\.unity\.union$/);
+      await guard('2.99 (e7) a lane whose only conflict with the target is a newer pin is queued at the door, lands, and the target holds its pin; the union event and the summary say "tools/SimTests/pin.json taken from T-55: its date is later" (fails before this fix: refused at the queue door as a conflict)', () => [
+        tr.q === true && tr.landed?.join() === 'T-55' && !tr.handed?.length && show(E.R, 'port/main', PIN) === pin('l1', '2026-11-22T00:00:00Z', 'fl')
+          && uev.length === 1 && /pin\.json taken from T-55: its date is later/.test(uev[0].msg) && /taken whole from the newer side: tools\/SimTests\/pin\.json taken from T-55: its date is later/.test(tr.message || ''), J({ tr, uev: uev.map((e) => e.msg) })]);
+    }
   } finally {
     try { fs.rmSync(T, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep */ }
     try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep */ }

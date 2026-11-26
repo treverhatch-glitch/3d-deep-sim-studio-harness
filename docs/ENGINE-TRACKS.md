@@ -180,6 +180,17 @@ and the tests decide. What it cannot know: two lanes that add the same key with 
 line both add on purpose twice is kept once. When it refuses, the lane's reason (`deferred` or `conflicts with the target`) ends "merge.union did not apply: <file> line <n> was rewritten, not only lengthened" (or names a file not listed). With no `merge.union` every merge is as before. A `landMany` command
 merges the branches itself, so the train does not use `merge.union` with one.
 
+2.99: files where the newer side wins. `merge.union` helps only when both sides ADD lines. A small generated JSON file
+that both sides rewrite (a "pin" holding a commit id, its date and a fingerprint) needs another rule:
+`"merge": { "newer": [{ "file": "tools/SimTests/pin.json", "field": "date" }] }`. When two sides conflict only in files
+that `merge.union` and/or `merge.newer` name, each `newer` file is taken whole from the side whose top-level `field` holds
+the later date (an ISO date such as `2026-11-21T08:00:00Z`), and the merge goes on. A missing field, one that is not a
+date, a file that is not JSON or two equal dates leave it a conflict, as does any conflicted file no rule names. The log,
+the `task.train.<x>.union` event, `train status` and the summary say "tools/SimTests/pin.json taken from T-12: its date
+is later" (or "from the target"); the commit says `Newer-Merge:`. It works where the union does: the queue door, the
+batch's conflict test, the land merge and the queue check below. As with a union merge, the result is still compiled and
+tested before it lands, so a wrong pick is caught as a red, not landed. List only files a test checks.
+
 2.99: waiting lanes are tested against the target while they wait. A lane was tested when it was queued and again when a
 train took it; a tagged or held lane could wait for days while the target moved, then be handed back in the train's
 first minute. Now the Line Producer, at most every `"queueRetestHours": 6` (0 turns it off) and only when the target has

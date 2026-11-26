@@ -35,7 +35,7 @@ import { removeLandedLane, pruneBuilds, buildsConfig } from './engine-clean.mjs'
 import { flagOf, foldRealOf, gitMax64 as git, numBlankDefault as num, realOrResolved as real, short8 as short, sleepSyncClamped as sleep, stdoutOf as out } from './helpers.mjs';
 import { targetRedTask, targetRedClear, targetRedLine } from './engine-target-red.mjs';
 import { aheadStart, aheadVerdict, aheadFor, aheadLine, aheadNotStarted } from './rules-ahead.mjs';
-import { unionGlobs, unionMerge, unionWhy } from './merge-union.mjs';
+import { mergeRules, unionMerge, unionWhy, mergeSay, newerSay } from './merge-union.mjs';
 import { runningLines } from './run-cost.mjs';
 import { processHarness } from './harness-version.mjs';
 import { trainGate, gateResult } from './train-gate.mjs';
@@ -998,14 +998,14 @@ const BOT = { GIT_AUTHOR_NAME: 'launcher', GIT_AUTHOR_EMAIL: 'launcher@studio.lo
 /** The files a `git merge-tree --write-tree` conflict names (its "<mode> <oid> <stage>\t<path>" lines). */
 const conflictFiles = (text) => [...new Set(String(text || '').split('\n').filter((l) => /^\d{6} [0-9a-f]+ [123]\t/.test(l)).map((l) => l.split('\t')[1]))];
 
-/** 2.96 (c4): the merge.union globs a train uses: none when a landMany command merges the branches itself. */
-export const unionOf = (cfg) => (cfg && !landManyCommand(cfg) ? unionGlobs(cfg) : []);
+/** 2.96 (c4), 2.99 (e): the merge rules (merge.union, merge.newer) a train uses: none when a landMany command merges the branches itself. */
+export const unionOf = (cfg) => (cfg && !landManyCommand(cfg) ? mergeRules(cfg) : []);
 
 /**
- * target + each lane, in order, as commit objects only (no worktree, index or ref moved). In the chain already: `already`;
- * a conflict: `conflictTarget` (with the target alone) or `deferred` (with lanes before it); 2.96 (c4) a conflict only in
- * merge.union files both sides only grow is a union (`union`: [{ task, files }]); 2.98 (b) a merge that leaves the tree as
- * it was, on the chain and the target alone: `empty`. { head, included, deferred, conflictTarget, already, empty, union } | { error }.
+ * target + each lane, in order, as commit objects only (no worktree, index or ref moved). Already in the chain: `already`;
+ * a conflict: `conflictTarget` (with the target alone) or `deferred` (with lanes before it); a conflict the merge rules
+ * resolve: `union` ([{ task, files, with, newer? }]: 2.96 union files, 2.99 (e) merge.newer files { file, field, from });
+ * 2.98 (b) a merge that leaves the tree as it was: `empty`. { head, included, deferred, conflictTarget, already, empty, union } | { error }.
  */
 export function chainOnTarget(repo, base, lanes, id, engine = 'unity', { union = unionOf(unityConfig(REPO_ROOT, engine)) } = {}) {
   let tip = base;
@@ -1024,12 +1024,14 @@ export function chainOnTarget(repo, base, lanes, id, engine = 'unity', { union =
     if (mt.status === 0 || un) {
       const tree = un ? un.tree : String(mt.stdout).split('\n')[0].trim();
       if (!un && emptyOn(tree, lane)) { res.empty.push({ ...lane }); continue; }
-      const msg = `${engine} train ${id}: land ${lane.task} (${lane.branch})\n\n${un ? `Union-Merge: ${un.files.join(', ')} (engines.${engine}.merge.union: both sides only added lines)\n` : ''}Studio-Train: ${id} ${lane.task}`;
+      const ours = tip === base ? 'the target' : res.included.map((l) => l.task).join(', ') || 'the target';
+      const newer = (un?.newer || []).map((n) => ({ ...n, from: n.from === 'theirs' ? lane.task : ours }));
+      const msg = `${engine} train ${id}: land ${lane.task} (${lane.branch})\n\n${un?.files.length ? `Union-Merge: ${un.files.join(', ')} (engines.${engine}.merge.union: both sides only added lines)\n` : ''}${newer.length ? `Newer-Merge: ${newer.map(newerSay).join('; ')} (engines.${engine}.merge.newer)\n` : ''}Studio-Train: ${id} ${lane.task}`;
       const c = spawnSync('git', ['commit-tree', tree, '-p', tip, '-p', lane.head, '-m', msg], { windowsHide: true, cwd: repo, encoding: 'utf8', env: { ...process.env, ...BOT } });
       if (c.status !== 0) return { error: `git commit-tree failed: ${String(c.stderr || '').trim().split('\n').pop()}` };
-      if (un) res.union.push({ task: lane.task, files: un.files, with: tip === base ? 'the target' : res.included.map((l) => l.task).join(', ') || 'the target' });
+      if (un) res.union.push({ task: lane.task, files: un.files, with: ours, ...(newer.length ? { newer } : {}) });
       tip = c.stdout.trim();
-      res.included.push({ ...lane, ...(un ? { union: un.files } : {}) });
+      res.included.push({ ...lane, ...(un ? { union: [...un.files, ...newer.map((n) => n.file)] } : {}) });
       continue;
     }
     if (mt.status !== 1) return { error: `git merge-tree --write-tree failed (git 2.38 or newer is needed): ${String(mt.stderr || '').trim().split('\n').pop()}` };
@@ -1354,10 +1356,10 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
   // 2.96 (c4): files merged as a union, in the log, one event and the summary.
   if (pre.union.length) {
     res.union = pre.union;
-    const m = `merged as a union (engines.${engine}.merge.union; both sides only added lines): ${pre.union.map((u) => `${u.files.join(', ')} (${u.task} with ${u.with})`).join('; ')}; the compile check and the tests decide`;
+    const m = `${mergeSay(pre.union, engine)}; the compile check and the tests decide`;
     log(`[unity-train] ${id}: ${m}`);
     if (!dryRun) ev('union', id, m, { agent: by, meta: { union: pre.union } });
-    update({ union: [...new Set(pre.union.flatMap((u) => u.files))] });
+    update({ union: [...new Set(pre.union.flatMap((u) => u.files))], newer: pre.union.flatMap((u) => (u.newer || []).map(newerSay)) });
   }
   let set = pre.included;
   if (dryRun) { res.message = `Dry run: ${set.length} branch(es) would land on ONE ${L} land run (${set.map((l) => l.task).join(', ') || 'none'}) on ${target} at ${short(tip0)}${s.many ? ' (the land command takes the list)' : set.length > 1 ? ` (through one integration branch, ${UNITY_REF_PREFIX}${id})` : ''}; ${summary(res)}`; return finish(); }
@@ -1557,7 +1559,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     else {
       const c = chainOnTarget(repo, tip, group, id, engine, { union });
       if (c.error) return { status: 'error', why: c.error };
-      if (c.union.length) log(`[unity-train] ${id}: ${what}: merged as a union: ${c.union.map((u) => `${u.files.join(', ')} (${u.task})`).join('; ')}`);
+      if (c.union.length) log(`[unity-train] ${id}: ${what}: ${mergeSay(c.union, engine)}`);
       const bad = [...c.conflictTarget, ...c.deferred][0];
       if (bad) return { status: 'conflict', why: bad.why, lane: bad };
       ref = `${UNITY_REF_PREFIX}${id}`;
@@ -2204,7 +2206,8 @@ function summary(res) {
   if (res.deferred.length) parts.push(`waiting for the next ${labelOf(res.engine || 'unity')} train: ${res.deferred.map((d) => `${d.task} (${d.why.split('\n')[0]})`).join('; ')}`);
   // 2.96 (c1, c3, c4): lanes left out as held, and files merged as a union.
   if (res.held?.length) parts.push(`left out, held (still queued): ${res.held.map((h) => `${h.task} (${h.why})`).join('; ')}`);
-  if (res.union?.length) parts.push(`merged as a union: ${[...new Set(res.union.flatMap((u) => u.files))].join(', ')}`);
+  { const f = [...new Set((res.union || []).flatMap((u) => u.files))]; if (f.length) parts.push(`merged as a union: ${f.join(', ')}`); }
+  { const n = (res.union || []).flatMap((u) => u.newer || []); if (n.length) parts.push(`taken whole from the newer side: ${n.map(newerSay).join('; ')}`); }
   return parts.join('. ') || 'nothing to land';
 }
 
@@ -2272,6 +2275,7 @@ export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'un
   lines.push(waiting.length ? `${waiting.length} ${L} branch(es) wait in the queue for the next ${L} train (npm run task -- train --engine ${engine}):\n${waiting.map(row).join('\n')}` : `No ${L} branch waits for a ${L} train (task done <ID> --train on a ${L}-track task queues one).`);
   for (const e of heldQ) lines.push(`${e.task} held: ${hd.get(e.task)}; its branch stays queued and takes no seat in a batch`);
   if (st.running?.union?.length) lines.push(`Running ${L} train: merged as a union: ${st.running.union.join(', ')}`);
+  if (st.running?.newer?.length) lines.push(`Running ${L} train: taken whole from the newer side: ${st.running.newer.join('; ')}`);
   if (st.running) lines.push(`${L} train running: ${st.running.id} by ${st.running.by || '?'} (pid ${st.running.pid}, since ${new Date(st.running.at).toISOString().slice(11, 16)} UTC)${st.running.lanes?.length ? `, ${st.running.lanes.join(', ')}` : ''}${st.running.now ? `; now: ${st.running.now}` : ''}`);
   // 2.85 (B-137): the daily full run is said plainly while it runs.
   if (st.running?.full) lines.push(`This ${L} land run is the daily full run${st.running.full.part ? `, part ${st.running.full.part}` : ''} (${st.running.full.why}): every test runs, expect about ${st.running.full.minutes ? `${st.running.full.minutes} min` : 'the longest land run of the day'}.`);
