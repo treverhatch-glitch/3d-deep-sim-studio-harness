@@ -22,7 +22,7 @@ import { withLandLock, matchAny } from './merge-lane.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
 import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, taskBranch, emptyWhy } from './unity-gate.mjs';
 import { engineTarget, engineFiles, engineTask, setEngineTask, targetMergeCommand, engineFloor } from './engine-tracks.mjs';
-import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine, configChanges, tagsWhenIdle, tagMaxWaitHours, nextTag } from './engine-train-control.mjs';
+import { selectBatch, batchLimits, laneClass, laneAloneWhy, onlyList, tagCounts, autoLine, configChanges, tagsWhenIdle, tagMaxWaitHours, hoursSetting, nextTag } from './engine-train-control.mjs';
 import { recordEngineShots } from './engine-shots.mjs';
 import { writeAtomic, readJson } from './fsafe.mjs';
 import { rulesConfig, rulesGate, inputsPrint, inputIndex, inputsChanged, shareInputs, changedPaths, playSelection, PLAY_FILTER_SAFE, blameList, blameSuspect, rulesCheckout, removeCheckout, rulesNoJudge, fullRulesOwed, fullRulesRun, rulesFullRed, rulesKey, rulesLanded, keptFull, allRatchets, perPartOn, rulesPlan } from './engine-rules.mjs';
@@ -1048,8 +1048,13 @@ export function chainOnTarget(repo, base, lanes, id, engine = 'unity', { union =
   return { ...res, head: tip };
 }
 
+/** What a lane was handed back for (.studio/engine handbacks): an unchanged branch is not queued again (queueUnityTask). */
+function recordHandBack(root, engine, lane, { train, why, cause = null, files = [], tests = [], targetAt = null, at = new Date().toISOString() }) {
+  editHandbacks(root, engine, (h) => { h[lane.task] = { train, branch: lane.branch, head: lane.head, reason: `${cause ? `${cause}: ` : ''}${why.split('\n')[0]}`.slice(0, 240), cause: cause || 'red', files, tests, targetAt, at }; });
+}
+
 /** 2.99 (e): engines.<x>.queueRetestHours (6; 0: off): how often at most the waiting lanes are tested against a moved target. */
-export function queueRetestHours(cfg = {}) { const h = Number(cfg?.queueRetestHours ?? 6); return Number.isFinite(h) && h > 0 ? h : 0; }
+export const queueRetestHours = (cfg = {}) => hoursSetting(cfg?.queueRetestHours, 6);
 const retestFile = (root, engine) => path.join(root, '.studio', 'engine', `${engine}-queue-check.json`);
 
 /**
@@ -1083,7 +1088,7 @@ export async function retestQueue(root, engine = 'unity', { now = Date.now(), by
     if (!bad) continue;
     delete lanes[e.task];
     const lane = { ...e, head };
-    editHandbacks(root, engine, (h) => { h[e.task] = { train: 'queue-check', branch: e.branch, head, reason: `${bad.cause ? `${bad.cause}: ` : ''}${bad.why.split('\n')[0]}`.slice(0, 240), cause: bad.cause || 'red', files: (bad.files || []).slice(0, 20), tests: [], targetAt: tip, at: new Date(now).toISOString() }; });
+    recordHandBack(root, engine, lane, { train: 'queue-check', why: bad.why, cause: bad.cause, files: (bad.files || []).slice(0, 20), targetAt: tip, at: new Date(now).toISOString() });
     dequeueUnity(root, e.task, engine);
     evTop('dropped', 'queue-check', `${e.task} handed back: ${bad.why.split('\n')[0]}`, { engine, task: e.task, agent: by, to: e.agent, status: 'blocked', meta: { check: 'queue', target: tip, ...(bad.cause ? { cause: bad.cause } : {}) } });
     try { await handBack?.(lane, `Not landed: the ${L} queue check tested it against ${s.target} at ${short(tip)} while it waited: ${bad.why}`, bad.cause ? { cause: bad.cause } : undefined); } catch { /* the event and the record stand */ }
@@ -1329,7 +1334,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       try {
         const tests = (evidence?.tests || []).slice(0, 10);
         const files = [...new Set([...(evidence?.files || []), ...tests.flatMap((t) => testFilesAt(repo, lane.head, testParts(t).cls))])].slice(0, 20);
-        editHandbacks(root, engine, (h) => { h[lane.task] = { train: id, branch: lane.branch, head: lane.head, reason: `${cause ? `${cause}: ` : ''}${why.split('\n')[0]}`.slice(0, 240), cause: cause || 'red', files, tests, targetAt: headOf(repo, target) || null, at: new Date().toISOString() }; });
+        recordHandBack(root, engine, lane, { train: id, why, cause, files, tests, targetAt: headOf(repo, target) || null });
       } catch { /* a record only */ }
     }
     try { dequeueUnity(root, lane.task, engine); } catch {}
@@ -2397,7 +2402,7 @@ export function unityStatusText(root = mainRoot(), { quiet = false, engine = 'un
   const maxH = tagMaxWaitHours(tcfg);
   const idleRule = tagsWhenIdle(tcfg) ? `the automatic start takes the tag whose oldest lane waited longest once no untagged lane waits (engines.${engine}.tagsWhenIdle)${maxH ? `, or a group that has waited over ${maxH} h (engines.${engine}.tagMaxWaitHours)` : ''}` : `the automatic start never does (engines.${engine}.tagsWhenIdle is false)`;
   if (Object.keys(tc).length) lines.push(`Tagged ${L} lanes (train --engine ${engine} --tag <tag> takes them; ${idleRule}): ${Object.entries(tc).map(([k, v]) => `${k} ${v} waiting`).join(', ')}; untagged ${waiting.filter((e) => !e.tag).length} waiting`);
-  try { const nt = Object.keys(tc).length ? nextTag(waiting, { skip: waitingOnTarget(root, engine, st.queue), cfg: tcfg, lastTag: st.last?.tag || null }) : null; if (nt?.why) lines.push(`${nt.why}.`); } catch { /* the queue lines stand */ }
+  try { const nt = st.queue.some((e) => e.tag) ? nextTag(st.queue.filter((e) => !inTrain.has(e.task)), { skip: waitingOnTarget(root, engine, st.queue), cfg: tcfg, lastTag: st.last?.tag || null, held: hd }) : null; if (nt?.why) lines.push(`${nt.why}.`); } catch { /* the queue lines stand */ }
   if (st.running?.batch) lines.push(`Running ${L} train's batch: ${st.running.batch}`);
   // 2.85: the last rules check: its mode and why (a full run names the unmapped paths), what it cost and how many parts ran at once.
   if (st.last?.rules?.ran && !st.running) lines.push(`Last ${L} rules check: ${st.last.rules.mode || 'full'}${st.last.rules.why ? `: ${st.last.rules.why}` : ''}; ${st.last.rules.runs ?? 0} run(s), ${Math.round((st.last.rules.ms || 0) / 1000)} s${st.last.rules.parts > 1 ? `, ${st.last.rules.parts} parts, ${st.last.rules.splitAtOnce || 1} at once` : ''}${rulesMore(st.last.rules)}`);
