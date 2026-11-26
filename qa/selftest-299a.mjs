@@ -87,7 +87,7 @@ const [gw, ctl, ...srcs] = process.argv.slice(2);
 const E = process.env;
 const git = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8', windowsHide: true });
 const pick = (k) => E[k] ?? null;
-fs.appendFileSync(ctl + '-runs.jsonl', JSON.stringify({ srcs, green: pick('STUDIO_RULES_GREEN'), mode: pick('STUDIO_RULES_MODE'), probe: pick('STUDIO_LAND_PROBE'), play: pick('STUDIO_PLAY_MODE'), playFilter: pick('STUDIO_PLAY_FILTER'), stage: pick('STUDIO_LAND_RETRY_STAGE'), tests: pick('STUDIO_LAND_RETRY_TESTS') }) + '\\n');
+fs.appendFileSync(ctl + '-runs.jsonl', JSON.stringify({ srcs, green: pick('STUDIO_RULES_GREEN'), mode: pick('STUDIO_RULES_MODE'), probe: pick('STUDIO_LAND_PROBE'), play: pick('STUDIO_PLAY_MODE'), playFilter: pick('STUDIO_PLAY_FILTER'), stage: pick('STUDIO_LAND_RETRY_STAGE'), tests: pick('STUDIO_LAND_RETRY_TESTS'), edit: pick('STUDIO_LAND_RETRY_TESTS_EDIT'), playTests: pick('STUDIO_LAND_RETRY_TESTS_PLAY') }) + '\\n');
 if (E.STUDIO_LAND_PROBE === '1' && fs.existsSync(ctl + '-slow')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 120000);
 const before = git(gw, 'rev-parse', 'HEAD').stdout.trim();
 for (const s of srcs) { const m = git(gw, 'merge', '--no-ff', '-m', 'land ' + s, 'refs/heads/' + s); if (m.status !== 0) { git(gw, 'merge', '--abort'); git(gw, 'reset', '-q', '--hard', before); process.exit(2); } }
@@ -215,10 +215,54 @@ export default () => { fs.writeFileSync(path.join(${JSON.stringify(path.join(S, 
       await guard('2.99 (a3) the dropped lane brought its own rules input (Data/v.txt in its lane copy, then edited): the land run without it is checked on the inputs it lands with, told green, and no log line says an input changed (fails before this fix: the green was lost as "the batch changed")', () => [
         r1.landed?.join() === 'T-1' && runs[1]?.green === '1' && !r1.logs?.some((l) => /an input changed/.test(l)), J({ r1, runs })]);
     }
+    // ================= (d) the failing tests exist only in the red lane: no by-name run =================
+    {
+      resetState();
+      const E = engineRepo({ 'port/a': RULES_LANE, 'port/v': RED_VIEW });
+      const ctl = path.join(T, 'ctl-d');
+      setEngines({ unity: cfgFor(E, ctl, rulesOf(ctl), { landProbe: true }) });
+      queue(E, [['T-1', 'port/a'], ['T-2', 'port/v']]);
+      const r1 = probe(TRAIN(ctl));
+      const runs = lines(`${ctl}-runs.jsonl`);
+      const bl = events(/\.blame$/).find((e) => e.meta?.ownTests);
+      await guard('2.99 (d) the land run is red only on a test class the red lane adds (ViewTests): no by-name run without it (none told STUDIO_LAND_PROBE=1), the land run without it lands T-1 at once, and the log and the blame event say "the failing tests are the lane\'s own new tests" (fails before this fix: a by-name run looked for tests that are not there, and the studio\'s script ran all of Edit Mode)', () => [
+        r1.landed?.join() === 'T-1' && r1.handed?.map((h) => h.task).join() === 'T-2' && runs.length === 2 && runs.every((x) => x.probe === null) && /the failing tests are the lane's own new tests/.test(bl?.msg || '') && r1.logs?.some((l) => /own new tests/.test(l)), J({ r1, runs, bl })]);
+    }
+    // ================= (e, g) a by-name run after an Edit Mode red: one stage, no rules stage; the whole red path =================
+    const CORE_RED = { 'Game/Tests/CoreTests.cs': 'class CoreTests { } // LANDRED edit Game.Core.Tests.CoreTests.Works\n' };
+    {
+      resetState();
+      const E = engineRepo({ 'port/a': RULES_LANE, 'port/v': { ...RED_VIEW, ...CORE_RED, 'Art/View/ViewTests.cs': 'class ViewTests { }\n' } });
+      const ctl = path.join(T, 'ctl-e');
+      setEngines({ unity: cfgFor(E, ctl, rulesOf(ctl), { landProbe: true }) });
+      queue(E, [['T-1', 'port/a'], ['T-2', 'port/v']]);
+      const r1 = probe(TRAIN(ctl));
+      const runs = lines(`${ctl}-runs.jsonl`);
+      const pr = runs.find((x) => x.probe === '1') || {};
+      await guard('2.99 (e) the by-name run after a red Edit Mode stage gets STUDIO_PLAY_MODE=skip and no play filter, STUDIO_LAND_RETRY_TESTS_EDIT with the names, no STUDIO_LAND_RETRY_TESTS_PLAY, and STUDIO_RULES_GREEN=1 (no rules stage asked for) (fails before this fix: it got the red run\'s play selection and no rules green, so the studio\'s script ran Play Mode and its dotnet stage)', () => [
+        pr.play === 'skip' && pr.playFilter === null && pr.stage === 'edit' && pr.edit === 'Game.Core.Tests.CoreTests.Works' && pr.playTests === null && pr.green === '1' && pr.srcs?.length === 1, J({ runs })]);
+      await guard('2.99 (g) the whole path of one red lane: the red land run, one short by-name run, one land run without it (told green); T-1 lands and T-2 is handed back (fails before this fix: the land run without it ran its own rules stage)', () => [
+        runs.length === 3 && runs[0].probe === null && runs[1].probe === '1' && runs[2].probe === null && runs[2].srcs.join() === 'port/a' && runs[2].green === '1' && r1.landed?.join() === 'T-1' && r1.handed?.map((h) => h.task).join() === 'T-2', J({ r1, runs })]);
+    }
+    // ================= (f) a by-name run that runs past engines.<x>.byNameMin is cut =================
+    {
+      resetState();
+      const E = engineRepo({ 'port/a': RULES_LANE, 'port/v': { ...RED_VIEW, ...CORE_RED, 'Art/View/ViewTests.cs': 'class ViewTests { }\n' } });
+      const ctl = path.join(T, 'ctl-f');
+      setEngines({ unity: cfgFor(E, ctl, rulesOf(ctl), { landProbe: true, byNameMin: 0.05 }) });
+      fs.writeFileSync(`${ctl}-slow`, '1');
+      queue(E, [['T-1', 'port/a'], ['T-2', 'port/v']]);
+      const t0 = Date.now();
+      const r1 = probe(TRAIN(ctl));
+      const secs = (Date.now() - t0) / 1000;
+      const runs = lines(`${ctl}-runs.jsonl`);
+      const cut = events(/\.by_name_cut$/)[0];
+      await guard('2.99 (f) a by-name run that does not end within engines.unity.byNameMin is cut; the event says "the by-name run was cut after 0.05 min: the land script seems to run more than the named tests", and the land run without the suspect follows (T-1 lands, T-2 handed back), with no halving search (fails before this fix: the run went on for as long as the land script took, then counted as an error that held every lane)', () => [
+        /the by-name run was cut after 0\.05 min .*the land script seems to run more than the named tests \(see docs\/NATIVE-ENGINE\.md, by-name runs\)/.test(cut?.msg || '') && runs.length === 3 && runs[2].srcs.join() === 'port/a' && runs[2].probe === null && r1.landed?.join() === 'T-1' && r1.handed?.map((h) => h.task).join() === 'T-2' && !r1.logs?.some((l) => /bisect/.test(l)) && secs < 110, J({ r1, runs, secs, cut })]);
+    }
   } finally {
     for (const r of fs.readdirSync(T).filter((n) => /^repo-/.test(n))) g(path.join(T, r), 'worktree', 'prune');
     try { fs.rmSync(T, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep */ }
     try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch { /* the sweep */ }
   }
-  void events;
 }

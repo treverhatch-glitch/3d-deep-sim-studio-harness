@@ -332,7 +332,8 @@ export function shareLaneInputs(root, engine, s, task, log = () => {}) {
 }
 
 /** The stage a red land run failed in first (from its stage report), or null when it reported none. */
-export const firstRedStage = (r) => (Array.isArray(r?.stages) ? (r.stages.find((x) => x && x.name && !/^(pass|passed|ok|skip|skipped)$/i.test(String(x.status || ''))) || {}).name || null : null);
+const redStagesOf = (r) => (Array.isArray(r?.stages) ? r.stages.filter((x) => x && x.name && !/^(pass|passed|ok|skip|skipped)$/i.test(String(x.status || ''))).map((x) => x.name) : []);
+export const firstRedStage = (r) => redStagesOf(r)[0] || null;
 
 /**
  * The stages a red land run is tried once more for before anyone is blamed: engines.<x>.retryStages (a list), or
@@ -1498,6 +1499,12 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     // of the same tree, target and kind of run is not run again.
     const alone = !group.length;
     const noLand = alone || Boolean(opts.noLand);
+    // 2.99 (a): a by-name run on lanes runs only the stage(s) its names came from: no play stage for edit names, no rules stage.
+    const redSt = (opts.retry?.stages?.length ? opts.retry.stages : [opts.retry?.stage]).filter(Boolean).map((x) => String(x).toLowerCase());
+    const nameRun = noLand && !alone && Boolean(opts.retry?.tests?.length);
+    const namedPlay = redSt.some((x) => x.startsWith('play'));
+    const testStages = redSt.length > 0 && redSt.every((x) => /^(edit|play)/.test(x));
+    const nameMin = Math.max(0.05, num(s.cfg.byNameMin, 20));
     const named = [...(opts.retry?.tests || [])].sort().join(';');
     const kind = alone ? (opts.full ? 'full' : `probe:${named}`) : noLand ? `name:${named}` : null;
     // 2.96: a group whose tree as it would land has a kept full rules pass (same command and inputs) is told green too.
@@ -1581,7 +1588,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         if (fullWhy && a === 0 && !dryRun) ev('full_land', id, `the daily full run${opts.part ? `, part ${opts.part},` : ','} on ${target} alone with no branch (${fullWhy}), runs now: ${opts.when === 'end' ? 'the end of the train, after the batch\'s rounds' : 'no lane waits'}; every test runs${fullMin ? `, expect about ${fullMin} min` : ''}; its red goes to the target's own full-run failures`, { agent: by, to: 'producer', meta: { why: fullWhy, tasks: [], alone: true, when: opts.when || 'idle', ...(opts.part ? { part: opts.part } : {}), ...(fullMin ? { minutes: fullMin } : {}) } });
         // The Play Mode focus (engines.<x>.play.focus): a hint the land script may use. Never on a full land run; a retry of a red play stage
         // gets the selection of the run it repeats.
-        const play = fullWhy ? { mode: 'full', filter: '', why: fullWhy } : opts.play || (alone ? { mode: 'full', filter: '', why: 'the target alone' } : playSelection({ changed: batchPaths(), cfg: s.cfg, full: false }));
+        const play = fullWhy ? { mode: 'full', filter: '', why: fullWhy } : nameRun && redSt.length && !namedPlay ? { mode: 'skip', filter: '', why: `a by-name run of the ${redSt.join(' and ') || 'red'} stage's tests` } : opts.play || (alone ? { mode: 'full', filter: '', why: 'the target alone' } : playSelection({ changed: batchPaths(), cfg: s.cfg, full: false }));
         for (const b of play.ignoreBad || []) log(`[unity-train] ${id}: play.focus.ignore pattern ${JSON.stringify(b).slice(0, 120)} is not a valid regex; skipped`);
         if (play.refused) log(`[unity-train] ${id}: play focus: ${play.why}; the play stage runs in full`);
         else if (play.mode === 'focus') log(`[unity-train] ${id}: play focus: ${play.why} (${play.filter})`);
@@ -1592,9 +1599,11 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         const landEnv = { ...env, STUDIO_GATE_PRIORITY: 'landing', ...(fullWhy ? { STUDIO_LAND_FULL: '1', ...(opts.part ? { STUDIO_LAND_PART: opts.part } : {}) } : checked ? { STUDIO_RULES_GREEN: '1', STUDIO_RULES_MODE: kept0 ? 'full' : greenUsed ? rulesGreen.mode : again.mode } : {}), ...playEnv };
         if (play.mode !== 'focus') { delete landEnv.STUDIO_PLAY_FILTER; delete landEnv.STUDIO_UNITY_PLAYMODE_ARGS; }
         // What the harness tells a land script is its own: nothing of these comes from the train's environment.
-        for (const k of ['STUDIO_LAND_ONLY', 'STUDIO_LAND_RETRY', 'STUDIO_LAND_RETRY_STAGE', 'STUDIO_LAND_RETRY_TESTS', 'STUDIO_LAND_PROBE', 'STUDIO_LAND_KNOWN_RED', 'STUDIO_EDITOR_SERVICE', 'STUDIO_EDITOR_SERVICE_CLI', ...(opts.part ? [] : ['STUDIO_LAND_PART'])]) delete landEnv[k];
+        for (const k of ['STUDIO_LAND_ONLY', 'STUDIO_LAND_RETRY', 'STUDIO_LAND_RETRY_STAGE', 'STUDIO_LAND_RETRY_TESTS', 'STUDIO_LAND_RETRY_TESTS_EDIT', 'STUDIO_LAND_RETRY_TESTS_PLAY', 'STUDIO_LAND_PROBE', 'STUDIO_LAND_KNOWN_RED', 'STUDIO_EDITOR_SERVICE', 'STUDIO_EDITOR_SERVICE_CLI', ...(opts.part ? [] : ['STUDIO_LAND_PART'])]) delete landEnv[k];
         // 2.86: the target alone lands nothing (a probe or the full run).
         if (noLand) landEnv.STUDIO_LAND_PROBE = '1';
+        // Names from the Edit or Play Mode stage only: the rules tests need no run in a run that lands nothing.
+        if (nameRun && testStages) Object.assign(landEnv, { STUDIO_RULES_GREEN: '1', STUDIO_RULES_MODE: 'full' });
         // 2.86 (engines.<x>.knownRedHours, off by default): listed flaky tests a probe found red on the target alone are named to the
         // land script, which may leave them out of its verdict. Never on the target alone; each use is an event naming the probe.
         if (!noLand && a === 0) {
@@ -1617,6 +1626,9 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
           if (rt.stage) landEnv.STUDIO_LAND_RETRY_STAGE = rt.stage;
           if (rt.tests?.length) {
             landEnv.STUDIO_LAND_RETRY_TESTS = rt.tests.join(';');
+            // 2.99 (a): the names per stage; names from two red stages go to both (the result does not say which failed where).
+            if (redSt.some((x) => x.startsWith('edit'))) landEnv.STUDIO_LAND_RETRY_TESTS_EDIT = rt.tests.join(';');
+            if (namedPlay) landEnv.STUDIO_LAND_RETRY_TESTS_PLAY = rt.tests.join(';');
             // Only for a red play stage: a filter of other tests would make the Play Mode stage run none of its own.
             if (engine === 'unity' && String(rt.stage || '').toLowerCase() === 'play') landEnv.STUDIO_UNITY_PLAYMODE_ARGS = `-testFilter "${rt.tests.join(';')}"`;
           }
@@ -1669,7 +1681,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
           // 2.97: with rules.ahead on, every land run says whether it started and why not (rcfg is null on a dry run).
           if (rcfg?.ahead) { if (aheadTried) aheadNot('it was already tried in this train', false); else if (!greenUsed) aheadNot(`the rules green was not used: ${kept0 && rulesGreen ? 'a kept full pass told this land run instead' : lost}`); else { aheadTried = true; ahead = aheadBegin(group, label); } }
           const l0 = Date.now();
-          r = await land({ engine, ...arg, task: gkey, label, env: landEnv, log, ...(fullWhy && opts.timeoutMin ? { timeoutMin: opts.timeoutMin } : {}), ...(stagesBefore.length ? { stagesBefore } : {}), ...(ahead ? { onOom: () => aheadSettle(null, 'the land run died out of memory; it is ended before the land run is tried once more, and not started again in this train') } : {}) });
+          r = await land({ engine, ...arg, task: gkey, label, env: landEnv, log, ...(fullWhy && opts.timeoutMin ? { timeoutMin: opts.timeoutMin } : nameRun ? { timeoutMin: nameMin } : {}), ...(stagesBefore.length ? { stagesBefore } : {}), ...(ahead ? { onOom: () => aheadSettle(null, 'the land run died out of memory; it is ended before the land run is tried once more, and not started again in this train') } : {}) });
           res.runs += 1;
           landRuns += 1;
           // The run says how long it waited (waitMs); else the wall time not in its own ms.
@@ -1730,6 +1742,7 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       } else if (r.probeAck) noteProbe(root, engine, { honoured: true, train: id });
     }
     if (knownRedUsed) r = { ...r, knownRed: knownRedUsed };
+    if (nameRun && r.timedOut) r = { ...r, cut: nameMin };
     // 2.86: the flake record (named: the tests a retry or a probe ran by name) and the green record of runs that land nothing.
     if (!dryRun) {
       // A by-name step of a search judges branches, not the test: it is not counted.
@@ -1878,6 +1891,14 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     if (apart) return { suspect: null, tied: plan.tied, untied: plan.next };
     return null;
   };
+  /** 2.99 (a): every failing test's class is declared at the suspect's head and nowhere in the tree of `group` merged on the target. */
+  const ownNewTests = (group, suspect, tests = []) => {
+    try {
+      const c = chainOnTarget(repo, headOf(repo, target), group, id, engine, { union });
+      if (!suspect || c.error || !c.head || !tests.length) return false;
+      return tests.every((t) => { const cls = testParts(t).cls; return Boolean(cls) && !testFilesAt(repo, c.head, cls).length && testFilesAt(repo, suspect.head, cls).length > 0; });
+    } catch { return false; }
+  };
   const redEvidenceOf = (x) => { const baseNames = new Set(readFullBaseline(root, engine).failing); return { tests: (Array.isArray(x?.failures) ? x.failures : []).filter((n) => !baseNames.has(n)).slice(0, 10), files: (Array.isArray(x?.errorFiles) ? x.errorFiles : []).slice(0, 10) }; };
   /** 2.86: a round ended "waiting for the target": its lanes stay queued (marked, in place), nobody is handed back or counted. */
   const waitForTarget = (st, lanesNow, proof) => {
@@ -2011,6 +2032,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
     const byTask = new Map(set.map((l) => [l.task, l]));
     const lanesOf = (ids) => (ids || []).map((t) => byTask.get(t)).filter(Boolean);
     const baseNames = new Set(readFullBaseline(root, engine).failing);
+    // 2.99 (a): a by-name run that hit engines.<x>.byNameMin: the steps after it are complete land runs.
+    let nameCut = 0;
     while (pending.length && !stop && rounds++ <= 2 * set.length + 4) {
       const round = pending.shift().filter((l) => live.has(l.task) && !res.landed.includes(l.task));
       if (!round.length) continue;
@@ -2022,7 +2045,8 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
       for (let n = 0; n < 4 * set.length + 12; n += 1) {
         const first = results[0];
         const stage0 = first?.status === 'red' ? firstRedStage(first.r) : null;
-        const st = nextStep({ lanes: round.map((l) => l.task), results, ties, flaky: isFlaky, flakyRetries: fRetries, stageRetry: !stageRetried && Boolean(stage0 && again.includes(String(stage0).toLowerCase())), targetRed: targetRedAt(root, engine, headOf(repo, target)), knownRed: krOn, bisectMax, byNameOk: probeHonoured(root, engine, s.cfg), pair: par.ok && probeHonoured(root, engine, s.cfg) });
+        const namesOn = !nameCut && probeHonoured(root, engine, s.cfg);
+        let st = nextStep({ lanes: round.map((l) => l.task), results, ties, flaky: isFlaky, flakyRetries: fRetries, stageRetry: !stageRetried && Boolean(stage0 && again.includes(String(stage0).toLowerCase())), targetRed: targetRedAt(root, engine, headOf(repo, target)), knownRed: krOn, bisectMax, byNameOk: namesOn, pair: par.ok && namesOn });
         if (st.step === 'done') break;
         if (st.step === 'ties') { ties = tiesFor(lanesOf(round.map((l) => l.task).filter((t) => live.has(t))), st.red.r); continue; }
         if (st.step === 'next-round') {
@@ -2061,7 +2085,14 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         else if (st.step === 'bisect') what = `bisect ${st.prefix.join('+')}`;
         else if (st.step === 'confirm') what = `confirm ${st.group[0]}`;
         // 2.86: a narrowing step by name runs only the red's tests on its merged tree and lands nothing (STUDIO_LAND_PROBE=1).
-        if (st.byName) { const nt = retryNames(st.tests); what = `${what}, by name`; o = { play: firstRun?.play || null, noLand: true, retry: { stage: firstRedStage(firstRun), tests: nt } }; }
+        // 2.99 (a): failing tests that only the suspect's own files declare cannot run without it: the land run without it goes now.
+        if (st.byName && st.step === 'without' && ownNewTests(group, byTask.get(st.suspect), st.tests)) {
+          const m = `the failing tests are the lane's own new tests (${st.tests.slice(0, 3).join(', ')}: only ${st.suspect} declares them): no by-name run without it; the land run without it goes now`;
+          log(`[unity-train] ${id}: ${m}`);
+          ev('blame', id, m, { agent: by, meta: { plan: 'without', suspect: st.suspect, ownTests: true, tests: st.tests.slice(0, 10), next: st.group } });
+          st = { ...st, byName: false, run: 'complete', lands: true };
+        }
+        if (st.byName) { const nt = retryNames(st.tests); what = `${what}, by name`; o = { play: firstRun?.play || null, noLand: true, retry: { stage: firstRedStage(firstRun), stages: redStagesOf(firstRun), tests: nt } }; }
         // 2.90: two steps by name at once, one per gate (nextStep's pair); a step with no answer runs again below on one gate.
         if (st.also && st.byName) {
           res.rounds += 1;
@@ -2088,6 +2119,14 @@ async function unityTrainBody({ engine = 'unity', root, log, deps, id, by, s, up
         await aheadSettle(r);
         // 2.99 (a): the check of this group's own tree handed a lane back: the round starts again with the lanes left.
         if (r.status === 'rules-dropped') { const rest = round.filter((l) => live.has(l.task) && !res.landed.includes(l.task)); if (rest.length) pending.unshift(rest); break; }
+        // 2.99 (a): a by-name run cut at its limit is no answer: never a halving search for it; the step runs again complete.
+        if (r.cut) {
+          nameCut = r.cut;
+          const m = `the by-name run was cut after ${r.cut} min (engines.${engine}.byNameMin): the land script seems to run more than the named tests (see docs/NATIVE-ENGINE.md, by-name runs); ${st.step === 'without' ? `the land run without ${st.suspect} goes now` : 'the next steps are complete land runs'}`;
+          log(`[unity-train] ${id}: ${m}`);
+          ev('by_name_cut', id, m, { agent: by, to: 'producer', status: 'warn', meta: { minutes: r.cut, step: st.step, lanes: st.group } });
+          continue;
+        }
         // A run that should have landed nothing moved the target: stop, nobody is blamed (landGroup said why).
         if (r.moved) { hold(lanesOf(round.map((l) => l.task).filter((t) => live.has(t) && !res.landed.includes(t))), r); stop = true; break; }
         // The target's own full-run failures are never counted against a lane (2.85), nor narrowed on.

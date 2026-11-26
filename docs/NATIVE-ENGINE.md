@@ -447,6 +447,8 @@ scorecard's Play stage line counts skipped runs.
 | `STUDIO_LAND_RETRY` | `1`: this run repeats a red one; the branches are the same. |
 | `STUDIO_LAND_RETRY_STAGE` | The stage that was red (`play`, `edit`, ...). |
 | `STUDIO_LAND_RETRY_TESTS` | The failed tests' full names joined by `;`: re-run just those on the merged tree; land if they pass. |
+| `STUDIO_LAND_RETRY_TESTS_EDIT` | 2.99: the same names when they came from the Edit Mode stage (unset when none did). |
+| `STUDIO_LAND_RETRY_TESTS_PLAY` | 2.99: the same names when they came from the Play Mode stage (unset when none did). |
 | `STUDIO_LAND_RESULT` | A file to write the stage report to (`stages`/`gates`, and a `failures` list of test full names). |
 | `STUDIO_LAND_PROBE` | `1` (2.86): land nothing. Merge the branch(es) given (for the target alone: a ref at the target's own tip), run the tests (with `STUDIO_LAND_RETRY_TESTS`: only those; with `STUDIO_LAND_FULL=1`: all), put the worktree back; exit 0 green, 1 red. Print `[land-probe] honoured` so the train may run its by-name steps on lanes. |
 | `STUDIO_LAND_KNOWN_RED` | (2.86, only with `engines.<x>.knownRedHours`) listed flaky tests a probe found red on the target alone, joined by `;`: a script may leave them out of its verdict and land when nothing else is red. |
@@ -612,6 +614,20 @@ Eight changes, each from a crew's 26 hours on the train (`harness/unity-train.mj
   `STUDIO_LAND_PROBE=1` (a probe or the full run; kept in `.studio/train/<x>-probe.json`), or the owner sets
   `engines.<x>.landProbe: true`. A by-name step on lanes gives the script the lanes' branches (or an integration
   branch): a script that ignored the variable could land them, which is why it must have said so first.
+- **By-name runs (2.99): the contract.** A by-name run gets `STUDIO_LAND_PROBE=1`, `STUDIO_LAND_RETRY=1`,
+  `STUDIO_LAND_RETRY_STAGE` (the first red stage), `STUDIO_LAND_RETRY_TESTS` and, per stage,
+  `STUDIO_LAND_RETRY_TESTS_EDIT` / `STUDIO_LAND_RETRY_TESTS_PLAY`. It runs only that stage. When the names came from the
+  Edit Mode stage it gets `STUDIO_PLAY_MODE=skip` and no play filter; when they came from Edit or Play Mode it gets
+  `STUDIO_RULES_GREEN=1` (`STUDIO_RULES_MODE=full`): the rules tests need no run in a run that lands nothing. The run
+  report does not say which test failed in which stage, so names from two red stages go to both variables and the play
+  stage runs with them. A filter that matches no test is an answer (nothing ran: exit 0, or 1 when the script counts
+  "no test ran" as red), never a reason to run the whole stage. The harness cannot make a script honour the filter,
+  so it refuses to pay for one that does not: a by-name run is ended after `engines.<x>.byNameMin` minutes (default
+  20), the event `task.train.<x>.by_name_cut` says "the by-name run was cut after N min", and the train goes on with
+  complete land runs (the land run without the suspect first). A cut run never starts a halving search.
+  When every failing test is declared only in the suspect lane's own files (its class is not in the tree of the batch
+  without it), no by-name run is tried: it could find none of them. The land run without the lane goes at once and
+  the blame event says "the failing tests are the lane's own new tests".
 - **When a run that must land nothing moves the target (2.86, 2.86.1).** After every run told `STUDIO_LAND_PROBE=1`
   the train compares the target's tip with the one before.
   - *A run of the target alone* (the daily full run, the probe of a flaky test) carries no branch, so a moved tip
