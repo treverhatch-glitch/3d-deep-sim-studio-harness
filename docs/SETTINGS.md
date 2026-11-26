@@ -15,7 +15,7 @@ Read this list first: the names a real crew sets in its `.env`, and the main sch
 - `STUDIO_AGENT_CMD` · default `'the custom command'` · harness/agent.mjs, harness/budget.mjs, harness/launch.mjs (+32 more) · [AGENT-TOOLS.md:49](AGENT-TOOLS.md)
 - `STUDIO_AGENT_MODEL` · default `'unknown'` · harness/agent.mjs, harness/budget.mjs, harness/event.mjs (+28 more) · [AGENT-TOOLS.md:10](AGENT-TOOLS.md)
 - `STUDIO_AGENT_TOOL` · default `'claude'` · harness/agent-smoke.mjs, harness/agent.mjs, harness/director.mjs (+30 more) · [PACE-AND-AGENTS.md:67](PACE-AND-AGENTS.md)
-- `STUDIO_AGENT_ENV_PASS` · no simple default · harness/agent-env.mjs, qa/selftest-2585r.mjs, qa/selftest-2791a.mjs · [AGENT-TOOLS.md:250](AGENT-TOOLS.md)
+- `STUDIO_AGENT_ENV_PASS` · no simple default · harness/agent-env.mjs, qa/selftest-2585r.mjs, qa/selftest-2791a.mjs · [AGENT-TOOLS.md:274](AGENT-TOOLS.md)
 - `STUDIO_PRODUCER_NAME` · default `'producer'` (also `'producer-1'`) · harness/agent-smoke.mjs, harness/art.mjs, harness/ask.mjs (+39 more) · [STRESS-TEST.md:37](STRESS-TEST.md)
 - `STUDIO_PRODUCER_PRESET` · default `'auto'` · harness/models.config.mjs · undocumented
 - `STUDIO_PRODUCER_MODEL` · set per role or built at run time (see the full list below)
@@ -31,9 +31,9 @@ Read this list first: the names a real crew sets in its `.env`, and the main sch
 - `STUDIO_TIER_CHEAP_MODEL` · no simple default · qa/selftest-273e.mjs, qa/selftest-276k.mjs, qa/selftest-277n.mjs (+2 more) · [AUTONOMY.md:289](AUTONOMY.md)
 - `STUDIO_MODEL_ROUTING` · no simple default · harness/model-pools.mjs, qa/selftest-277n.mjs, qa/selftest-2781a.mjs (+1 more) · [LINE-PRODUCER.md:146](LINE-PRODUCER.md)
 - `STUDIO_REVIEW_TOOLS` · no simple default · harness/model-tool.mjs, harness/review-family.mjs, harness/review.mjs (+5 more) · [AGENT-TOOLS.md:92](AGENT-TOOLS.md)
-- `STUDIO_KEYMAP_*` · no simple default · harness/agent-env.mjs, harness/agent.mjs, qa/selftest-259e.mjs · [AGENT-TOOLS.md:188](AGENT-TOOLS.md)
+- `STUDIO_KEYMAP_*` · no simple default · harness/agent-env.mjs, harness/agent.mjs, qa/selftest-259e.mjs · [AGENT-TOOLS.md:212](AGENT-TOOLS.md)
 - `STUDIO_NIM_FALLBACK` · no simple default · harness/agent.mjs, qa/selftest-230i.mjs, qa/selftest-2601n.mjs · undocumented
-- `STUDIO_NIM_MAX_SESSIONS` · default `1` · harness/families.mjs, qa/selftest-230i.mjs · [AGENT-TOOLS.md:167](AGENT-TOOLS.md)
+- `STUDIO_NIM_MAX_SESSIONS` · default `1` · harness/families.mjs, qa/selftest-230i.mjs · [AGENT-TOOLS.md:191](AGENT-TOOLS.md)
 - `STUDIO_CODEX_BYPASS` · no simple default · harness/agent.mjs · [PACE-AND-AGENTS.md:77](PACE-AND-AGENTS.md)
 - `STUDIO_GATE_SLOTS` · default `2` · harness/merge-lane.mjs, harness/overseer-repro.mjs, harness/upgrade-smoke.mjs (+203 more) · [WORK-ORGANIZATION.md:342](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_SLOTS` · no simple default · harness/engine-gates.mjs, harness/heavy-budget.mjs, harness/heavy.mjs (+93 more) · [ENGINE-TRACKS.md:304](ENGINE-TRACKS.md)
@@ -52,9 +52,9 @@ Read this list first: the names a real crew sets in its `.env`, and the main sch
 - `STUDIO_TASK_BUDGET` · no simple default · harness/line-producer.mjs, harness/overseer-repro.mjs, harness/task-budget.mjs (+221 more) · undocumented
 - `STUDIO_CHECK_TOKENS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:90](SESSIONS.md)
 - `STUDIO_CHECK_TURNS` · no simple default · harness/session-cap.mjs · [SESSIONS.md:90](SESSIONS.md)
-- `STUDIO_DAILY_TOKEN_CAP` · no simple default · harness/budget.mjs, harness/retro.mjs, harness/route.mjs (+8 more) · [AGENT-TOOLS.md:347](AGENT-TOOLS.md)
+- `STUDIO_DAILY_TOKEN_CAP` · no simple default · harness/budget.mjs, harness/retro.mjs, harness/route.mjs (+8 more) · [AGENT-TOOLS.md:371](AGENT-TOOLS.md)
 - `STUDIO_CACHE_READ_WEIGHT` · no simple default · harness/budget.mjs, harness/task-budget.mjs, harness/token-weight.mjs (+8 more) · [SESSIONS.md:126](SESSIONS.md)
-- `STUDIO_WATCHDOG` · no simple default · harness/overseer-repro.mjs, harness/upgrade-smoke.mjs, harness/watchdog.mjs (+218 more) · undocumented
+- `STUDIO_WATCHDOG` · no simple default · harness/overseer-repro.mjs, harness/upgrade-smoke.mjs, harness/watchdog.mjs (+219 more) · undocumented
 - `STUDIO_WATCHDOG_IDLE_HOURS` · no simple default · harness/watchdog.mjs, qa/selftest-230q.mjs, qa/selftest-2583n.mjs · [STEERING.md:44](STEERING.md)
 - `STUDIO_WATCH_INTERVAL` · default `300` · harness/studio-passes.mjs, qa/selftest-2731b.mjs, qa/selftest-276k.mjs (+7 more) · [PACE-AND-AGENTS.md:163](PACE-AND-AGENTS.md)
 - `STUDIO_TRAIN` · no simple default · harness/done-check.mjs, harness/heavy-budget.mjs, harness/task.mjs (+35 more) · [RELEASE.md:270](RELEASE.md)
@@ -73,7 +73,7 @@ Read this list first: the names a real crew sets in its `.env`, and the main sch
 - `STUDIO_RESULTS_DIR` · no simple default · harness/health.mjs, harness/kickoff.mjs, harness/run-report.mjs (+4 more) · [TEST-RUN.md:30](TEST-RUN.md)
 - `STUDIO_GAME` · no simple default · harness/cartridge.mjs, harness/cheatsheet.mjs, harness/game-gates.mjs (+94 more) · undocumented
 - `STUDIO_LOCK_OWNER` · default `'producer'` (also `'art-adapter'`, `'art'`, `'qa'`, `'canaries'`, `'director'`, `'unknown'`, `'gates'`, `'harness'`, `'heavy'`, `'an agent'`, `'default'`, `'conductor'`, `'builder'`, `'game-dev'`, `'slow-tier'`, `'human'`, `'a person'`, `'unity-gate'`, `'unity'`, `'upgrade'`, `'outside-agent'`, `'vfx'`, `'launcher'`, `'fuzz'`, `'vision-check'`) · harness/agent-env.mjs, harness/agent.mjs, harness/aider-protocol.mjs (+278 more) · [AGENT-TOOLS.md:10](AGENT-TOOLS.md)
-- `STUDIO_MAIN_ROOT` · default `'.'` · harness/agent-env.mjs, harness/agent.mjs, harness/aider-launch.mjs (+227 more) · [AGENT-TOOLS.md:50](AGENT-TOOLS.md)
+- `STUDIO_MAIN_ROOT` · default `'.'` · harness/agent-env.mjs, harness/agent.mjs, harness/aider-launch.mjs (+228 more) · [AGENT-TOOLS.md:50](AGENT-TOOLS.md)
 
 ## Passed to your commands (5; not settings)
 
@@ -91,8 +91,8 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 - `STUDIO_AGENT` · default `'producer'` · harness/asset-review.mjs, harness/boot.mjs, harness/decisions-log.mjs (+79 more) · [AUTONOMY.md:162](AUTONOMY.md)
 - `STUDIO_AGENT_CMD` · default `'the custom command'` · harness/agent.mjs, harness/budget.mjs, harness/launch.mjs (+32 more) · [AGENT-TOOLS.md:49](AGENT-TOOLS.md)
-- `STUDIO_AGENT_ENV` · no simple default · harness/agent-env.mjs, qa/selftest-233.mjs, qa/selftest-2583m.mjs (+2 more) · [AGENT-TOOLS.md:250](AGENT-TOOLS.md)
-- `STUDIO_AGENT_ENV_PASS` · no simple default · harness/agent-env.mjs, qa/selftest-2585r.mjs, qa/selftest-2791a.mjs · [AGENT-TOOLS.md:250](AGENT-TOOLS.md)
+- `STUDIO_AGENT_ENV` · no simple default · harness/agent-env.mjs, qa/selftest-233.mjs, qa/selftest-2583m.mjs (+2 more) · [AGENT-TOOLS.md:274](AGENT-TOOLS.md)
+- `STUDIO_AGENT_ENV_PASS` · no simple default · harness/agent-env.mjs, qa/selftest-2585r.mjs, qa/selftest-2791a.mjs · [AGENT-TOOLS.md:274](AGENT-TOOLS.md)
 - `STUDIO_AGENT_MODEL` · default `'unknown'` · harness/agent.mjs, harness/budget.mjs, harness/event.mjs (+28 more) · [AGENT-TOOLS.md:10](AGENT-TOOLS.md)
 - `STUDIO_AGENT_ROLE` · default `'producer'` · harness/event.mjs · undocumented
 - `STUDIO_AGENT_TOOL` · default `'claude'` · harness/agent-smoke.mjs, harness/agent.mjs, harness/director.mjs (+30 more) · [PACE-AND-AGENTS.md:67](PACE-AND-AGENTS.md)
@@ -100,7 +100,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## AGY_* (15)
 
 - `STUDIO_AGY_ANY_MODEL` · no simple default · harness/agent.mjs, harness/model-tool.mjs, qa/selftest-277n.mjs (+1 more) · [AGENT-TOOLS.md:66](AGENT-TOOLS.md)
-- `STUDIO_AGY_BYPASS` · no simple default · harness/agent.mjs, harness/agy-allow.mjs, harness/kickoff.mjs (+4 more) · [AGENT-TOOLS.md:147](AGENT-TOOLS.md)
+- `STUDIO_AGY_BYPASS` · no simple default · harness/agent.mjs, harness/agy-allow.mjs, harness/kickoff.mjs (+4 more) · [AGENT-TOOLS.md:171](AGENT-TOOLS.md)
 - `STUDIO_AGY_CONTINUE_MAX` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, qa/selftest-2773c.mjs (+1 more) · [AGENT-TOOLS.md:80](AGENT-TOOLS.md)
 - `STUDIO_AGY_CONTINUE_WAIT_SEC` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, qa/selftest-2773c.mjs (+1 more) · [AGENT-TOOLS.md:78](AGENT-TOOLS.md)
 - `STUDIO_AGY_MODE` · no simple default · harness/agent.mjs, harness/review-ask.mjs, harness/review.mjs (+4 more) · [AGENT-TOOLS.md:61](AGENT-TOOLS.md)
@@ -110,19 +110,19 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_AGY_PROMPT` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, harness/budget.mjs (+6 more) · [AGENT-TOOLS.md:59](AGENT-TOOLS.md)
 - `STUDIO_AGY_QUOTA_CMD` · no simple default · harness/model-pools.mjs, qa/selftest-277n.mjs · [LINE-PRODUCER.md:140](LINE-PRODUCER.md)
 - `STUDIO_AGY_QUOTA_SEC` · no simple default · harness/model-pools.mjs, qa/selftest-277n.mjs · [LINE-PRODUCER.md:141](LINE-PRODUCER.md)
-- `STUDIO_AGY_REACH_RULES` · no simple default · harness/agent.mjs, harness/agy-allow.mjs, qa/selftest-293b.mjs (+1 more) · [AGENT-TOOLS.md:141](AGENT-TOOLS.md)
+- `STUDIO_AGY_REACH_RULES` · no simple default · harness/agent.mjs, harness/agy-allow.mjs, qa/selftest-293b.mjs (+1 more) · [AGENT-TOOLS.md:165](AGENT-TOOLS.md)
 - `STUDIO_AGY_STREAM` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, qa/selftest-2773c.mjs (+5 more) · [AGENT-TOOLS.md:82](AGENT-TOOLS.md)
 - `STUDIO_AGY_STREAM_FIRST_SEC` · no simple default · harness/agy-stream.mjs, qa/selftest-2773c.mjs, qa/selftest-2781b.mjs · [AGENT-TOOLS.md:82](AGENT-TOOLS.md)
 - `STUDIO_AGY_STREAM_IDLE_SEC` · no simple default · harness/agy-stream.mjs, qa/selftest-2773c.mjs, qa/selftest-2781b.mjs · [AGENT-TOOLS.md:81](AGENT-TOOLS.md)
 
 ## AIDER_* (6)
 
-- `STUDIO_AIDER_CLAIM_TIMEOUT_MS` · default `480000` · harness/aider-protocol.mjs, qa/selftest-280a.mjs · [AGENT-TOOLS.md:180](AGENT-TOOLS.md)
-- `STUDIO_AIDER_CMD` · no simple default · harness/agent.mjs, harness/aider-launch.mjs, harness/kickoff.mjs (+7 more) · [AGENT-TOOLS.md:169](AGENT-TOOLS.md)
+- `STUDIO_AIDER_CLAIM_TIMEOUT_MS` · default `480000` · harness/aider-protocol.mjs, qa/selftest-280a.mjs · [AGENT-TOOLS.md:204](AGENT-TOOLS.md)
+- `STUDIO_AIDER_CMD` · no simple default · harness/agent.mjs, harness/aider-launch.mjs, harness/kickoff.mjs (+7 more) · [AGENT-TOOLS.md:193](AGENT-TOOLS.md)
 - `STUDIO_AIDER_MAP_REFRESH` · no simple default · harness/agent.mjs, harness/models.config.mjs, qa/selftest-2601n.mjs · undocumented
-- `STUDIO_AIDER_MAP_TOKENS` · no simple default · harness/agent.mjs, harness/models.config.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:174](AGENT-TOOLS.md)
-- `STUDIO_AIDER_MAX_FILE_KB` · no simple default · harness/agent.mjs, harness/aider-protocol.mjs, qa/selftest-2792a.mjs · [AGENT-TOOLS.md:182](AGENT-TOOLS.md)
-- `STUDIO_AIDER_PROTOCOL` · no simple default · harness/aider-protocol.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:186](AGENT-TOOLS.md)
+- `STUDIO_AIDER_MAP_TOKENS` · no simple default · harness/agent.mjs, harness/models.config.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:198](AGENT-TOOLS.md)
+- `STUDIO_AIDER_MAX_FILE_KB` · no simple default · harness/agent.mjs, harness/aider-protocol.mjs, qa/selftest-2792a.mjs · [AGENT-TOOLS.md:206](AGENT-TOOLS.md)
+- `STUDIO_AIDER_PROTOCOL` · no simple default · harness/aider-protocol.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:210](AGENT-TOOLS.md)
 
 ## ASK_* (3)
 
@@ -147,8 +147,8 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_BUILDER_CMD` · no simple default · qa/selftest-230q.mjs, qa/selftest-2583m.mjs, qa/selftest-2583n.mjs (+30 more) · [DISCORD-CREW.md:194](DISCORD-CREW.md)
 - `STUDIO_BUILDER_ENV` · no simple default · qa/selftest-233.mjs · undocumented
 - `STUDIO_BUILDER_MODEL` · no simple default · harness/agent-env.mjs, qa/selftest-2585r.mjs, qa/selftest-2601n.mjs (+6 more) · [DISCORD-CREW.md:193](DISCORD-CREW.md)
-- `STUDIO_BUILDER_ORDER` · no simple default · harness/agent-smoke.mjs, harness/api-pool.mjs, harness/supervisor.mjs (+4 more) · [AGENT-TOOLS.md:222](AGENT-TOOLS.md)
-- `STUDIO_BUILDER_ORDER_ROLES` · no simple default · harness/api-pool.mjs, qa/selftest-296e.mjs · [AGENT-TOOLS.md:231](AGENT-TOOLS.md)
+- `STUDIO_BUILDER_ORDER` · no simple default · harness/agent-smoke.mjs, harness/api-pool.mjs, harness/supervisor.mjs (+4 more) · [AGENT-TOOLS.md:246](AGENT-TOOLS.md)
+- `STUDIO_BUILDER_ORDER_ROLES` · no simple default · harness/api-pool.mjs, qa/selftest-296e.mjs · [AGENT-TOOLS.md:255](AGENT-TOOLS.md)
 - `STUDIO_BUILDER_PROFILE` · no simple default · qa/selftest-2583p.mjs · undocumented
 - `STUDIO_BUILDER_PROFILES` · no simple default · harness/profile-guard.mjs · undocumented
 - `STUDIO_BUILDER_TOOL` · no simple default · harness/tester.mjs, scripts/preflight.mjs, qa/selftest-2583n.mjs (+12 more) · [DISCORD-CREW.md:193](DISCORD-CREW.md)
@@ -300,8 +300,8 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## EDITOR_* (2)
 
-- `STUDIO_EDITOR_SERVICE` · no simple default · harness/editor-service.mjs, harness/unity-train.mjs, qa/selftest-284s.mjs · [NATIVE-ENGINE.md:906](NATIVE-ENGINE.md)
-- `STUDIO_EDITOR_SERVICE_CLI` · no simple default · harness/editor-service.mjs, harness/unity-train.mjs, qa/selftest-284s.mjs · [NATIVE-ENGINE.md:906](NATIVE-ENGINE.md)
+- `STUDIO_EDITOR_SERVICE` · no simple default · harness/editor-service.mjs, harness/unity-train.mjs, qa/selftest-284s.mjs · [NATIVE-ENGINE.md:910](NATIVE-ENGINE.md)
+- `STUDIO_EDITOR_SERVICE_CLI` · no simple default · harness/editor-service.mjs, harness/unity-train.mjs, qa/selftest-284s.mjs · [NATIVE-ENGINE.md:910](NATIVE-ENGINE.md)
 
 ## ENGINE_* (46)
 
@@ -311,27 +311,27 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_ENGINE_BATCH_MIN` · no simple default · harness/line-producer.mjs, qa/selftest-284h.mjs · [ENGINE-TRACKS.md:227](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_BATCH_WAIT_MIN` · no simple default · harness/line-producer.mjs, qa/selftest-284h.mjs · [ENGINE-TRACKS.md:228](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_BISECT_MAX` · no simple default · harness/unity-train.mjs, qa/selftest-279e.mjs, qa/selftest-286h.mjs · [ENGINE-TRACKS.md:462](ENGINE-TRACKS.md)
-- `STUDIO_ENGINE_BLAME_EVIDENCE` · no simple default · harness/unity-train.mjs · [NATIVE-ENGINE.md:467](NATIVE-ENGINE.md)
+- `STUDIO_ENGINE_BLAME_EVIDENCE` · no simple default · harness/unity-train.mjs · [NATIVE-ENGINE.md:471](NATIVE-ENGINE.md)
 - `STUDIO_ENGINE_CHECK_STALE_MIN` · no simple default · harness/engine-check.mjs · [ENGINE-TRACKS.md:456](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_CHECK_WAIT_MIN` · no simple default · harness/engine-check.mjs · [ENGINE-TRACKS.md:456](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_FLAGS` · no simple default · harness/engine-tracks.mjs, harness/engine-tune.mjs, harness/unity-gate.mjs · [ENGINE-TRACKS.md:391](ENGINE-TRACKS.md)
-- `STUDIO_ENGINE_FULL_LAND_HOURS` · no simple default · harness/unity-train.mjs, qa/selftest-283b.mjs, qa/selftest-284h.mjs (+24 more) · [NATIVE-ENGINE.md:529](NATIVE-ENGINE.md)
+- `STUDIO_ENGINE_FULL_LAND_HOURS` · no simple default · harness/unity-train.mjs, qa/selftest-283b.mjs, qa/selftest-284h.mjs (+24 more) · [NATIVE-ENGINE.md:533](NATIVE-ENGINE.md)
 - `STUDIO_ENGINE_HOLD_MAX_MIN` · no simple default · harness/engine-ram.mjs, qa/selftest-2791b.mjs · [ENGINE-TRACKS.md:327](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_KEEP_BUILDS` · no simple default · harness/engine-clean.mjs, qa/selftest-283h.mjs · [ENGINE-TRACKS.md:466](ENGINE-TRACKS.md)
-- `STUDIO_ENGINE_KILLED_RETRY_SEC` · no simple default · harness/unity-train.mjs, qa/selftest-284s.mjs, qa/selftest-284t.mjs (+20 more) · [NATIVE-ENGINE.md:506](NATIVE-ENGINE.md)
+- `STUDIO_ENGINE_KILLED_RETRY_SEC` · no simple default · harness/unity-train.mjs, qa/selftest-284s.mjs, qa/selftest-284t.mjs (+20 more) · [NATIVE-ENGINE.md:510](NATIVE-ENGINE.md)
 - `STUDIO_ENGINE_LAND_WAIT_MIN` · no simple default · harness/engine-ram.mjs, harness/unity-gate.mjs, qa/selftest-2791b.mjs · [ENGINE-TRACKS.md:328](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_LANES` · no simple default · harness/agent.mjs, qa/selftest-2782e.mjs · [ENGINE-TRACKS.md:75](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_LANE_CLEAN` · no simple default · harness/engine-clean.mjs, harness/unity-train.mjs · [ENGINE-TRACKS.md:124](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_LANE_REQUIRED` · no simple default · harness/agent.mjs, qa/selftest-293b.mjs, qa/selftest-295c.mjs (+2 more) · [ENGINE-TRACKS.md:81](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_LINE_ROOM` · no simple default · harness/heavy-budget.mjs, qa/selftest-2781h.mjs · [ENGINE-TRACKS.md:318](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_NEAR_MIN` · no simple default · harness/engine-ram.mjs, harness/line-producer.mjs, qa/selftest-2791b.mjs · [ENGINE-TRACKS.md:322](ENGINE-TRACKS.md)
-- `STUDIO_ENGINE_PORTER_TOOL` · no simple default · qa/selftest-296e.mjs · [AGENT-TOOLS.md:234](AGENT-TOOLS.md)
+- `STUDIO_ENGINE_PORTER_TOOL` · no simple default · qa/selftest-296e.mjs · [AGENT-TOOLS.md:258](AGENT-TOOLS.md)
 - `STUDIO_ENGINE_PUSH_MIN_TOTAL_GB` · no simple default · harness/engine-ram.mjs, qa/selftest-2791b.mjs · [ENGINE-TRACKS.md:342](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_QUIET_CPU_PCT` · no simple default · harness/line-producer.mjs · [ENGINE-TRACKS.md:210](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_RAM_MARGIN_GB` · no simple default · harness/engine-ram.mjs, harness/run-cost.mjs, qa/selftest-2791b.mjs · [ENGINE-TRACKS.md:330](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_RAM_MIN_GB` · no simple default · harness/engine-ram.mjs, harness/run-cost.mjs, qa/selftest-2791b.mjs · [ENGINE-TRACKS.md:331](ENGINE-TRACKS.md)
 - `STUDIO_ENGINE_RAM_RUNS` · no simple default · harness/engine-ram.mjs, harness/run-cost.mjs, qa/selftest-2791b.mjs · [ENGINE-TRACKS.md:330](ENGINE-TRACKS.md)
-- `STUDIO_ENGINE_RETRY_STAGES` · no simple default · harness/unity-train.mjs · [NATIVE-ENGINE.md:460](NATIVE-ENGINE.md)
+- `STUDIO_ENGINE_RETRY_STAGES` · no simple default · harness/unity-train.mjs · [NATIVE-ENGINE.md:464](NATIVE-ENGINE.md)
 - `STUDIO_ENGINE_RULES` · no simple default · harness/engine-rules.mjs, qa/selftest-282a.mjs · [NATIVE-ENGINE.md:73](NATIVE-ENGINE.md)
 - `STUDIO_ENGINE_RULES_DEFAULT_MIN` · no simple default · harness/engine-rules.mjs, qa/selftest-290b.mjs, qa/selftest-293a.mjs · [NATIVE-ENGINE.md:139](NATIVE-ENGINE.md)
 - `STUDIO_ENGINE_RULES_FULL` · no simple default · harness/engine-rules.mjs, qa/selftest-283c.mjs, qa/selftest-295a.mjs · [NATIVE-ENGINE.md:206](NATIVE-ENGINE.md)
@@ -479,10 +479,10 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## HEAVY_* (19)
 
 - `STUDIO_HEAVY_HELD` · default `'1'` · harness/asset-gate.mjs, harness/engine-gates.mjs, harness/flake-quiet.mjs (+28 more) · undocumented
-- `STUDIO_HEAVY_IGNORE_ARGS` · no simple default · harness/heavy.mjs, qa/selftest-2653a.mjs, qa/selftest-284s.mjs · [NATIVE-ENGINE.md:911](NATIVE-ENGINE.md)
+- `STUDIO_HEAVY_IGNORE_ARGS` · no simple default · harness/heavy.mjs, qa/selftest-2653a.mjs, qa/selftest-284s.mjs · [NATIVE-ENGINE.md:915](NATIVE-ENGINE.md)
 - `STUDIO_HEAVY_MAX_*` · no simple default · harness/heavy-budget.mjs · [WORK-ORGANIZATION.md:340](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_MAX_BLENDER` · no simple default · harness/blender-job.mjs, qa/selftest-270t.mjs · [WORK-ORGANIZATION.md:341](WORK-ORGANIZATION.md)
-- `STUDIO_HEAVY_MAX_UNITY` · no simple default · harness/engine-gates.mjs, qa/selftest-268n.mjs, qa/selftest-2781f.mjs (+2 more) · [NATIVE-ENGINE.md:792](NATIVE-ENGINE.md)
+- `STUDIO_HEAVY_MAX_UNITY` · no simple default · harness/engine-gates.mjs, qa/selftest-268n.mjs, qa/selftest-2781f.mjs (+2 more) · [NATIVE-ENGINE.md:796](NATIVE-ENGINE.md)
 - `STUDIO_HEAVY_OOM_RETRY` · no simple default · harness/asset-gate.mjs, harness/game-gates.mjs, harness/heavy.mjs (+3 more) · [WORK-ORGANIZATION.md:350](WORK-ORGANIZATION.md)
 - `STUDIO_HEAVY_OWN_GROUP` · no simple default · harness/heavy.mjs, qa/selftest-2601m.mjs, qa/selftest-260d.mjs (+2 more) · undocumented
 - `STUDIO_HEAVY_POLL_MS` · default `1000` · harness/engine-check.mjs, harness/heavy.mjs, harness/rules-ahead.mjs (+51 more) · undocumented
@@ -531,31 +531,31 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## KEEP_* (2)
 
 - `STUDIO_KEEP_DAYS` · no simple default · harness/autonomy.mjs, qa/selftest-266a.mjs · [AUTONOMY.md:80](AUTONOMY.md)
-- `STUDIO_KEEP_FAILED_LANE` · no simple default · harness/agent.mjs, qa/selftest-2601n.mjs, qa/selftest-2781b.mjs · [AGENT-TOOLS.md:176](AGENT-TOOLS.md)
+- `STUDIO_KEEP_FAILED_LANE` · no simple default · harness/agent.mjs, qa/selftest-2601n.mjs, qa/selftest-2781b.mjs · [AGENT-TOOLS.md:200](AGENT-TOOLS.md)
 
 ## KEYMAP_* (7)
 
-- `STUDIO_KEYMAP_*` · no simple default · harness/agent-env.mjs, harness/agent.mjs, qa/selftest-259e.mjs · [AGENT-TOOLS.md:188](AGENT-TOOLS.md)
-- `STUDIO_KEYMAP_AGENT_*` · no simple default · harness/agent-env.mjs, harness/agent.mjs, harness/api-pool.mjs (+1 more) · [AGENT-TOOLS.md:324](AGENT-TOOLS.md)
-- `STUDIO_KEYMAP_AGENT_BUILDER_API2` · no simple default · qa/selftest-2791a.mjs, qa/selftest-279f.mjs, qa/selftest-293b.mjs (+3 more) · [AGENT-TOOLS.md:207](AGENT-TOOLS.md)
-- `STUDIO_KEYMAP_AGENT_BUILDER_API3` · no simple default · qa/selftest-279f.mjs, qa/selftest-293b.mjs, qa/selftest-295c.mjs (+1 more) · [AGENT-TOOLS.md:207](AGENT-TOOLS.md)
+- `STUDIO_KEYMAP_*` · no simple default · harness/agent-env.mjs, harness/agent.mjs, qa/selftest-259e.mjs · [AGENT-TOOLS.md:212](AGENT-TOOLS.md)
+- `STUDIO_KEYMAP_AGENT_*` · no simple default · harness/agent-env.mjs, harness/agent.mjs, harness/api-pool.mjs (+1 more) · [AGENT-TOOLS.md:348](AGENT-TOOLS.md)
+- `STUDIO_KEYMAP_AGENT_BUILDER_API2` · no simple default · qa/selftest-2791a.mjs, qa/selftest-279f.mjs, qa/selftest-293b.mjs (+3 more) · [AGENT-TOOLS.md:231](AGENT-TOOLS.md)
+- `STUDIO_KEYMAP_AGENT_BUILDER_API3` · no simple default · qa/selftest-279f.mjs, qa/selftest-293b.mjs, qa/selftest-295c.mjs (+1 more) · [AGENT-TOOLS.md:231](AGENT-TOOLS.md)
 - `STUDIO_KEYMAP_AGENT_KM_1` · no simple default · qa/selftest-259e.mjs · undocumented
 - `STUDIO_KEYMAP_AGENT_KM_7` · no simple default · qa/selftest-259e.mjs · undocumented
-- `STUDIO_KEYMAP_BUILDER` · no simple default · qa/selftest-259e.mjs, qa/selftest-281a.mjs · [AGENT-TOOLS.md:193](AGENT-TOOLS.md)
+- `STUDIO_KEYMAP_BUILDER` · no simple default · qa/selftest-259e.mjs, qa/selftest-281a.mjs · [AGENT-TOOLS.md:217](AGENT-TOOLS.md)
 
 ## LAND_* (14)
 
 - `STUDIO_LAND_FULL` · no simple default · harness/run-cost.mjs, harness/unity-gate.mjs, harness/unity-train.mjs (+7 more) · [NATIVE-ENGINE.md:381](NATIVE-ENGINE.md)
-- `STUDIO_LAND_KNOWN_RED` · no simple default · harness/unity-train.mjs, qa/selftest-286b.mjs · [NATIVE-ENGINE.md:441](NATIVE-ENGINE.md)
+- `STUDIO_LAND_KNOWN_RED` · no simple default · harness/unity-train.mjs, qa/selftest-286b.mjs · [NATIVE-ENGINE.md:445](NATIVE-ENGINE.md)
 - `STUDIO_LAND_LOCK_STALE_MS` · default `120000` · harness/merge-lane.mjs · undocumented
 - `STUDIO_LAND_LOCK_WAIT_MS` · default `180000` · harness/merge-lane.mjs · undocumented
-- `STUDIO_LAND_ONLY` · no simple default · harness/unity-gate.mjs, harness/unity-train.mjs, qa/selftest-284s.mjs (+6 more) · [NATIVE-ENGINE.md:435](NATIVE-ENGINE.md)
-- `STUDIO_LAND_PART` · default `'whole'` · harness/run-cost.mjs, harness/unity-gate.mjs, harness/unity-train.mjs (+1 more) · [NATIVE-ENGINE.md:430](NATIVE-ENGINE.md)
-- `STUDIO_LAND_PROBE` · no simple default · harness/engine-gates.mjs, harness/unity-gate.mjs, harness/unity-train.mjs (+8 more) · [NATIVE-ENGINE.md:440](NATIVE-ENGINE.md)
+- `STUDIO_LAND_ONLY` · no simple default · harness/unity-gate.mjs, harness/unity-train.mjs, qa/selftest-284s.mjs (+6 more) · [NATIVE-ENGINE.md:439](NATIVE-ENGINE.md)
+- `STUDIO_LAND_PART` · default `'whole'` · harness/run-cost.mjs, harness/unity-gate.mjs, harness/unity-train.mjs (+1 more) · [NATIVE-ENGINE.md:434](NATIVE-ENGINE.md)
+- `STUDIO_LAND_PROBE` · no simple default · harness/engine-gates.mjs, harness/unity-gate.mjs, harness/unity-train.mjs (+8 more) · [NATIVE-ENGINE.md:444](NATIVE-ENGINE.md)
 - `STUDIO_LAND_RESULT` · no simple default · harness/engine-rules.mjs, harness/playtest.mjs, harness/score.mjs (+13 more) · [ENGINE-TRACKS.md:436](ENGINE-TRACKS.md)
-- `STUDIO_LAND_RETRY` · no simple default · harness/unity-train.mjs, qa/selftest-284t.mjs, qa/selftest-285a.mjs (+3 more) · [NATIVE-ENGINE.md:436](NATIVE-ENGINE.md)
-- `STUDIO_LAND_RETRY_STAGE` · no simple default · harness/unity-train.mjs, qa/selftest-284t.mjs, qa/selftest-285b.mjs (+1 more) · [NATIVE-ENGINE.md:437](NATIVE-ENGINE.md)
-- `STUDIO_LAND_RETRY_TESTS` · no simple default · harness/unity-train.mjs, qa/selftest-284t.mjs, qa/selftest-285a.mjs (+3 more) · [NATIVE-ENGINE.md:438](NATIVE-ENGINE.md)
+- `STUDIO_LAND_RETRY` · no simple default · harness/unity-train.mjs, qa/selftest-284t.mjs, qa/selftest-285a.mjs (+3 more) · [NATIVE-ENGINE.md:440](NATIVE-ENGINE.md)
+- `STUDIO_LAND_RETRY_STAGE` · no simple default · harness/unity-train.mjs, qa/selftest-284t.mjs, qa/selftest-285b.mjs (+1 more) · [NATIVE-ENGINE.md:441](NATIVE-ENGINE.md)
+- `STUDIO_LAND_RETRY_TESTS` · no simple default · harness/unity-train.mjs, qa/selftest-284t.mjs, qa/selftest-285a.mjs (+3 more) · [NATIVE-ENGINE.md:442](NATIVE-ENGINE.md)
 - `STUDIO_LAND_STASH` · no simple default · harness/worktree.mjs, qa/selftest-230q.mjs · undocumented
 - `STUDIO_LAND_SYNC_TRIES` · default `20` · harness/worktree.mjs · undocumented
 - `STUDIO_LAND_TRIES` · default `6` · harness/worktree.mjs · undocumented
@@ -621,17 +621,17 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 - `STUDIO_MAIN_CHECKOUT_ENFORCE` · no simple default · harness/approve.mjs, harness/test-weakening.mjs, qa/selftest-2782e.mjs (+2 more) · [SECURITY.md:107](SECURITY.md)
 - `STUDIO_MAIN_COMMIT` · no simple default · harness/adopt.mjs, harness/overseer.mjs, scripts/hooks/pre-commit (+9 more) · [RELEASE.md:175](RELEASE.md)
-- `STUDIO_MAIN_ROOT` · default `'.'` · harness/agent-env.mjs, harness/agent.mjs, harness/aider-launch.mjs (+227 more) · [AGENT-TOOLS.md:50](AGENT-TOOLS.md)
+- `STUDIO_MAIN_ROOT` · default `'.'` · harness/agent-env.mjs, harness/agent.mjs, harness/aider-launch.mjs (+228 more) · [AGENT-TOOLS.md:50](AGENT-TOOLS.md)
 
 ## NIM_* (7)
 
-- `STUDIO_NIM_CHECK` · no simple default · harness/models.config.mjs, harness/nim-check.mjs, qa/selftest-2583m.mjs (+14 more) · [AGENT-TOOLS.md:163](AGENT-TOOLS.md)
-- `STUDIO_NIM_CHECK_HOURS` · no simple default · harness/models.config.mjs, harness/nim-check.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:162](AGENT-TOOLS.md)
+- `STUDIO_NIM_CHECK` · no simple default · harness/models.config.mjs, harness/nim-check.mjs, qa/selftest-2583m.mjs (+14 more) · [AGENT-TOOLS.md:187](AGENT-TOOLS.md)
+- `STUDIO_NIM_CHECK_HOURS` · no simple default · harness/models.config.mjs, harness/nim-check.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:186](AGENT-TOOLS.md)
 - `STUDIO_NIM_CHECK_STUB` · no simple default · harness/agent.mjs, qa/selftest-2601n.mjs · undocumented
 - `STUDIO_NIM_FALLBACK` · no simple default · harness/agent.mjs, qa/selftest-230i.mjs, qa/selftest-2601n.mjs · undocumented
-- `STUDIO_NIM_MAX_SESSIONS` · default `1` · harness/families.mjs, qa/selftest-230i.mjs · [AGENT-TOOLS.md:167](AGENT-TOOLS.md)
-- `STUDIO_NIM_MODEL` · no simple default · harness/agent-env.mjs, harness/agent.mjs, harness/kickoff.mjs (+5 more) · [AGENT-TOOLS.md:158](AGENT-TOOLS.md)
-- `STUDIO_NIM_MODELS` · no simple default · harness/agent.mjs, harness/models-check.mjs, harness/models.config.mjs (+3 more) · [AGENT-TOOLS.md:161](AGENT-TOOLS.md)
+- `STUDIO_NIM_MAX_SESSIONS` · default `1` · harness/families.mjs, qa/selftest-230i.mjs · [AGENT-TOOLS.md:191](AGENT-TOOLS.md)
+- `STUDIO_NIM_MODEL` · no simple default · harness/agent-env.mjs, harness/agent.mjs, harness/kickoff.mjs (+5 more) · [AGENT-TOOLS.md:182](AGENT-TOOLS.md)
+- `STUDIO_NIM_MODELS` · no simple default · harness/agent.mjs, harness/models-check.mjs, harness/models.config.mjs (+3 more) · [AGENT-TOOLS.md:185](AGENT-TOOLS.md)
 
 ## NO_* (2)
 
@@ -661,7 +661,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## PLAYTEST_* (2)
 
-- `STUDIO_PLAYTEST_COMMIT` · no simple default · harness/playtest.mjs, qa/selftest-295b.mjs · [NATIVE-ENGINE.md:659](NATIVE-ENGINE.md)
+- `STUDIO_PLAYTEST_COMMIT` · no simple default · harness/playtest.mjs, qa/selftest-295b.mjs · [NATIVE-ENGINE.md:663](NATIVE-ENGINE.md)
 - `STUDIO_PLAYTEST_GAME_CHECK` · no simple default · harness/done-check.mjs, qa/playtest.mjs, qa/selftest-2781f.mjs · [ONBOARDING-A-GAME.md:371](ONBOARDING-A-GAME.md)
 
 ## PREFLIGHT_* (2)
@@ -686,7 +686,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## PRODUCER_* (8)
 
-- `STUDIO_PRODUCER_APPROVES` · no simple default · harness/beta-mode.mjs, harness/config-proposal.mjs, harness/line-producer.mjs (+10 more) · [AGENT-TOOLS.md:300](AGENT-TOOLS.md)
+- `STUDIO_PRODUCER_APPROVES` · no simple default · harness/beta-mode.mjs, harness/config-proposal.mjs, harness/line-producer.mjs (+10 more) · [AGENT-TOOLS.md:324](AGENT-TOOLS.md)
 - `STUDIO_PRODUCER_BLOCKED_WAKE_MIN` · no simple default · harness/line-producer.mjs, harness/queue-depth.mjs, harness/watch.mjs (+1 more) · [LINE-PRODUCER.md:68](LINE-PRODUCER.md)
 - `STUDIO_PRODUCER_CMD` · no simple default · harness/watch.mjs, qa/selftest-230q.mjs, qa/selftest-2583m.mjs (+13 more) · [PACE-AND-AGENTS.md:46](PACE-AND-AGENTS.md)
 - `STUDIO_PRODUCER_MIN_MIN` · default `15` · harness/producer-wake.mjs · [RELEASE.md:314](RELEASE.md)
@@ -707,8 +707,8 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## QUEUE_* (4)
 
-- `STUDIO_QUEUE_COMPILE_MIN` · no simple default · harness/unity-train.mjs, qa/selftest-292a.mjs · [NATIVE-ENGINE.md:714](NATIVE-ENGINE.md)
-- `STUDIO_QUEUE_COMPILE_RUNS` · no simple default · harness/unity-train.mjs, qa/selftest-292a.mjs · [NATIVE-ENGINE.md:713](NATIVE-ENGINE.md)
+- `STUDIO_QUEUE_COMPILE_MIN` · no simple default · harness/unity-train.mjs, qa/selftest-292a.mjs · [NATIVE-ENGINE.md:718](NATIVE-ENGINE.md)
+- `STUDIO_QUEUE_COMPILE_RUNS` · no simple default · harness/unity-train.mjs, qa/selftest-292a.mjs · [NATIVE-ENGINE.md:717](NATIVE-ENGINE.md)
 - `STUDIO_QUEUE_DEPTH` · no simple default · harness/queue-depth.mjs, harness/supervisor.mjs, qa/selftest-269s.mjs · [CONDUCTOR.md:166](CONDUCTOR.md)
 - `STUDIO_QUEUE_DEPTH_ASK_MIN` · default `30` · harness/queue-depth.mjs, harness/wake-gate.mjs, qa/selftest-269s.mjs (+2 more) · [CONDUCTOR.md:170](CONDUCTOR.md)
 
@@ -731,7 +731,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 ## REFILL_* (3)
 
 - `STUDIO_REFILL_AHEAD` · default `1` · harness/producer-refill.mjs · undocumented
-- `STUDIO_REFILL_MIN` · default `4` · harness/dev-cycle.mjs, harness/producer-refill.mjs, qa/selftest-284a.mjs · [NATIVE-ENGINE.md:977](NATIVE-ENGINE.md)
+- `STUDIO_REFILL_MIN` · default `4` · harness/dev-cycle.mjs, harness/producer-refill.mjs, qa/selftest-284a.mjs · [NATIVE-ENGINE.md:987](NATIVE-ENGINE.md)
 - `STUDIO_REFILL_WAKE` · no simple default · harness/agent-smoke.mjs, harness/overseer-repro.mjs, harness/producer-refill.mjs (+230 more) · [CONDUCTOR.md:169](CONDUCTOR.md)
 
 ## REFRESH_* (8)
@@ -859,12 +859,12 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 - `STUDIO_TASK_BASE` · no simple default · harness/hook-stamp.mjs, harness/task.mjs, harness/train.mjs (+16 more) · undocumented
 - `STUDIO_TASK_BUDGET` · no simple default · harness/line-producer.mjs, harness/overseer-repro.mjs, harness/task-budget.mjs (+221 more) · undocumented
-- `STUDIO_TASK_ID` · no simple default · harness/unity-train.mjs, qa/selftest-293c.mjs · [NATIVE-ENGINE.md:750](NATIVE-ENGINE.md)
+- `STUDIO_TASK_ID` · no simple default · harness/unity-train.mjs, qa/selftest-293c.mjs · [NATIVE-ENGINE.md:754](NATIVE-ENGINE.md)
 - `STUDIO_TASK_MAX_MIN` · no simple default · harness/task-budget.mjs, qa/selftest-231.mjs, qa/selftest-283g.mjs · [WORK-ORGANIZATION.md:42](WORK-ORGANIZATION.md)
 - `STUDIO_TASK_MAX_SESSIONS` · no simple default · harness/task-budget.mjs, qa/selftest-231.mjs, qa/selftest-281b1.mjs · [WORK-ORGANIZATION.md:42](WORK-ORGANIZATION.md)
 - `STUDIO_TASK_MAX_TOKENS` · no simple default · harness/task-budget.mjs, qa/selftest-231.mjs · [WORK-ORGANIZATION.md:42](WORK-ORGANIZATION.md)
 - `STUDIO_TASK_PIN` · no simple default · harness/agent.mjs, harness/beta-mode.mjs, harness/engine-tracks.mjs (+10 more) · [OVERSEER.md:103](OVERSEER.md)
-- `STUDIO_TASK_TITLE` · no simple default · harness/unity-train.mjs, qa/selftest-293c.mjs · [NATIVE-ENGINE.md:750](NATIVE-ENGINE.md)
+- `STUDIO_TASK_TITLE` · no simple default · harness/unity-train.mjs, qa/selftest-293c.mjs · [NATIVE-ENGINE.md:754](NATIVE-ENGINE.md)
 
 ## TELEMETRY_* (2)
 
@@ -925,8 +925,8 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_TOOL_AIDER_CMD` · no simple default · qa/selftest-2601n.mjs · undocumented
 - `STUDIO_TOOL_CLAUDE_CMD` · no simple default · qa/selftest-2585r.mjs, qa/selftest-259e.mjs, qa/selftest-276i.mjs (+7 more) · undocumented
 - `STUDIO_TOOL_HERMES_CMD` · no simple default · qa/selftest-230o.mjs · undocumented
-- `STUDIO_TOOL_NIM_CMD` · no simple default · harness/agent.mjs, qa/selftest-2585r.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:167](AGENT-TOOLS.md)
-- `STUDIO_TOOL_VERTEX_CMD` · no simple default · harness/agent.mjs, harness/spend-guard.mjs · [AGENT-TOOLS.md:334](AGENT-TOOLS.md)
+- `STUDIO_TOOL_NIM_CMD` · no simple default · harness/agent.mjs, qa/selftest-2585r.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:191](AGENT-TOOLS.md)
+- `STUDIO_TOOL_VERTEX_CMD` · no simple default · harness/agent.mjs, harness/spend-guard.mjs · [AGENT-TOOLS.md:358](AGENT-TOOLS.md)
 - `STUDIO_TOOL_ZZALPHA_CMD` · no simple default · qa/selftest-230o.mjs · undocumented
 - `STUDIO_TOOL_ZZBETA_CMD` · no simple default · qa/selftest-230o.mjs · undocumented
 
@@ -983,8 +983,8 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_UNITY_CACHE_COPY_JOBS` · no simple default · harness/unity-cache.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:286](UNITY-TRACK.md)
 - `STUDIO_UNITY_CODE_ONLY` · no simple default · harness/unity.mjs, qa/selftest-2671k.mjs, qa/selftest-270u.mjs (+2 more) · [UNITY-TRACK.md:218](UNITY-TRACK.md)
 - `STUDIO_UNITY_CODE_OPT` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs · [UNITY-TRACK.md:280](UNITY-TRACK.md)
-- `STUDIO_UNITY_EDITMODE_ARGS` · no simple default · harness/unity-gate.mjs, qa/selftest-282a.mjs, qa/selftest-283b.mjs (+2 more) · [NATIVE-ENGINE.md:431](NATIVE-ENGINE.md)
-- `STUDIO_UNITY_EDITMODE_PLAN` · no simple default · harness/unity-gate.mjs, qa/selftest-284s.mjs, qa/selftest-284t.mjs (+23 more) · [NATIVE-ENGINE.md:868](NATIVE-ENGINE.md)
+- `STUDIO_UNITY_EDITMODE_ARGS` · no simple default · harness/unity-gate.mjs, qa/selftest-282a.mjs, qa/selftest-283b.mjs (+2 more) · [NATIVE-ENGINE.md:435](NATIVE-ENGINE.md)
+- `STUDIO_UNITY_EDITMODE_PLAN` · no simple default · harness/unity-gate.mjs, qa/selftest-284s.mjs, qa/selftest-284t.mjs (+23 more) · [NATIVE-ENGINE.md:872](NATIVE-ENGINE.md)
 - `STUDIO_UNITY_EDITMODE_REUSE` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs, qa/selftest-272c.mjs (+1 more) · [UNITY-TRACK.md:253](UNITY-TRACK.md)
 - `STUDIO_UNITY_GATE_TIMEOUT_MIN` · default `120` · harness/playtest.mjs, harness/unity-gate.mjs, qa/selftest-2732e.mjs · [UNITY-TRACK.md:146](UNITY-TRACK.md)
 - `STUDIO_UNITY_GRAPHICS_SPLIT` · no simple default · harness/unity.mjs, qa/selftest-270u.mjs, qa/selftest-272c.mjs (+1 more) · [UNITY-TRACK.md:268](UNITY-TRACK.md)
@@ -1032,13 +1032,13 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## VERTEX_* (7)
 
-- `STUDIO_VERTEX_BASE_URL` · no simple default · harness/models.config.mjs, harness/vertex-proxy.mjs, harness/vertex.mjs (+4 more) · [AGENT-TOOLS.md:268](AGENT-TOOLS.md)
-- `STUDIO_VERTEX_ENGINE` · no simple default · harness/vertex.mjs, qa/selftest-283e.mjs · [AGENT-TOOLS.md:260](AGENT-TOOLS.md)
-- `STUDIO_VERTEX_HARD_MODEL` · no simple default · harness/model-tool.mjs, harness/vertex.mjs, qa/selftest-2791a.mjs (+1 more) · [AGENT-TOOLS.md:255](AGENT-TOOLS.md)
-- `STUDIO_VERTEX_MAX_PROMPT_TOKENS` · no simple default · harness/agent.mjs, harness/vertex-proxy.mjs, harness/vertex.mjs (+3 more) · [AGENT-TOOLS.md:261](AGENT-TOOLS.md)
-- `STUDIO_VERTEX_MODEL` · no simple default · harness/model-tool.mjs, harness/vertex.mjs · [AGENT-TOOLS.md:253](AGENT-TOOLS.md)
-- `STUDIO_VERTEX_PROXY_PORT` · no simple default · harness/vertex-proxy.mjs, harness/vertex.mjs, qa/selftest-2791a.mjs (+1 more) · [AGENT-TOOLS.md:244](AGENT-TOOLS.md)
-- `STUDIO_VERTEX_SHARE` · no simple default · harness/supervisor.mjs, harness/vertex.mjs, qa/selftest-2791a.mjs (+2 more) · [AGENT-TOOLS.md:227](AGENT-TOOLS.md)
+- `STUDIO_VERTEX_BASE_URL` · no simple default · harness/models.config.mjs, harness/vertex-proxy.mjs, harness/vertex.mjs (+4 more) · [AGENT-TOOLS.md:292](AGENT-TOOLS.md)
+- `STUDIO_VERTEX_ENGINE` · no simple default · harness/vertex.mjs, qa/selftest-283e.mjs · [AGENT-TOOLS.md:284](AGENT-TOOLS.md)
+- `STUDIO_VERTEX_HARD_MODEL` · no simple default · harness/model-tool.mjs, harness/vertex.mjs, qa/selftest-2791a.mjs (+1 more) · [AGENT-TOOLS.md:279](AGENT-TOOLS.md)
+- `STUDIO_VERTEX_MAX_PROMPT_TOKENS` · no simple default · harness/agent.mjs, harness/vertex-proxy.mjs, harness/vertex.mjs (+3 more) · [AGENT-TOOLS.md:285](AGENT-TOOLS.md)
+- `STUDIO_VERTEX_MODEL` · no simple default · harness/model-tool.mjs, harness/vertex.mjs · [AGENT-TOOLS.md:277](AGENT-TOOLS.md)
+- `STUDIO_VERTEX_PROXY_PORT` · no simple default · harness/vertex-proxy.mjs, harness/vertex.mjs, qa/selftest-2791a.mjs (+1 more) · [AGENT-TOOLS.md:268](AGENT-TOOLS.md)
+- `STUDIO_VERTEX_SHARE` · no simple default · harness/supervisor.mjs, harness/vertex.mjs, qa/selftest-2791a.mjs (+2 more) · [AGENT-TOOLS.md:251](AGENT-TOOLS.md)
 
 ## VISION_* (7)
 
@@ -1064,7 +1064,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 
 ## WATCHDOG_* (6)
 
-- `STUDIO_WATCHDOG` · no simple default · harness/overseer-repro.mjs, harness/upgrade-smoke.mjs, harness/watchdog.mjs (+218 more) · undocumented
+- `STUDIO_WATCHDOG` · no simple default · harness/overseer-repro.mjs, harness/upgrade-smoke.mjs, harness/watchdog.mjs (+219 more) · undocumented
 - `STUDIO_WATCHDOG_CHECK_MIN` · no simple default · harness/watchdog.mjs · [STEERING.md:43](STEERING.md)
 - `STUDIO_WATCHDOG_HANDBACKS` · no simple default · harness/watchdog.mjs · [STEERING.md:44](STEERING.md)
 - `STUDIO_WATCHDOG_IDLE_HOURS` · no simple default · harness/watchdog.mjs, qa/selftest-230q.mjs, qa/selftest-2583n.mjs · [STEERING.md:44](STEERING.md)
@@ -1097,7 +1097,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_5XX_RUNOUT` · default `3` · harness/agent.mjs · undocumented
 - `STUDIO_ALERT_JOBS` · no simple default · harness/alerts.mjs, qa/selftest-265p.mjs · [CONDUCTOR.md:152](CONDUCTOR.md)
 - `STUDIO_ANCHORS` · no simple default · harness/anchors.mjs, harness/done-check.mjs, qa/selftest-281b2.mjs · [ANCHORS.md:30](ANCHORS.md)
-- `STUDIO_API_POOL` · no simple default · harness/agent-smoke.mjs, harness/agent.mjs, harness/api-pool.mjs (+7 more) · [AGENT-TOOLS.md:204](AGENT-TOOLS.md)
+- `STUDIO_API_POOL` · no simple default · harness/agent-smoke.mjs, harness/agent.mjs, harness/api-pool.mjs (+7 more) · [AGENT-TOOLS.md:228](AGENT-TOOLS.md)
 - `STUDIO_ARGV_OUT` · no simple default · qa/selftest-259h.mjs · undocumented
 - `STUDIO_ATOMIC_RETRIES` · no simple default · harness/fsafe.mjs · undocumented
 - `STUDIO_ATTEMPTS` · no simple default · harness/agent.mjs, harness/attempts.mjs, harness/supervisor.mjs (+2 more) · [RUN-UNATTENDED.md:225](RUN-UNATTENDED.md)
@@ -1118,13 +1118,13 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_CONTRACT_TIMEOUT_S` · no simple default · harness/contracts.mjs · [CONTRACTS.md:92](CONTRACTS.md)
 - `STUDIO_CURRENT_TASK_FILE` · default `'auto'` · harness/task.mjs, qa/selftest-2781e.mjs · [SESSIONS.md:115](SESSIONS.md)
 - `STUDIO_CYCLE_QUIET_MAX_H` · no simple default · harness/dev-cycle.mjs, harness/wake-gate.mjs, qa/selftest-284a.mjs · [LINE-PRODUCER.md:70](LINE-PRODUCER.md)
-- `STUDIO_DAILY_TOKEN_CAP` · no simple default · harness/budget.mjs, harness/retro.mjs, harness/route.mjs (+8 more) · [AGENT-TOOLS.md:347](AGENT-TOOLS.md)
+- `STUDIO_DAILY_TOKEN_CAP` · no simple default · harness/budget.mjs, harness/retro.mjs, harness/route.mjs (+8 more) · [AGENT-TOOLS.md:371](AGENT-TOOLS.md)
 - `STUDIO_DEAD_CLAIM_MIN` · no simple default · harness/busy.mjs, qa/selftest-283g.mjs · [DIRECTOR-FLOW.md:63](DIRECTOR-FLOW.md)
 - `STUDIO_DECISION_MIN_N` · no simple default · harness/decisions-log.mjs, qa/selftest-271x.mjs · [AUTONOMY.md:294](AUTONOMY.md)
 - `STUDIO_DOTNET` · default `'dotnet'` · harness/engine-rules.mjs, harness/unity.mjs, scripts/check-unity-template.mjs (+6 more) · [NATIVE-ENGINE.md:72](NATIVE-ENGINE.md)
 - `STUDIO_ENV_FROM_FILE` · no simple default · harness/dotenv.mjs, harness/env-reload.mjs, harness/event.mjs (+8 more) · [RUN-UNATTENDED.md:69](RUN-UNATTENDED.md)
 - `STUDIO_EVENT_REPEAT_MIN` · no simple default · harness/telemetry.mjs, harness/watch.mjs, qa/selftest-285h.mjs · [METRICS.md:90](METRICS.md)
-- `STUDIO_FAILED_TAIL_LINES` · default `200` · harness/agent.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:175](AGENT-TOOLS.md)
+- `STUDIO_FAILED_TAIL_LINES` · default `200` · harness/agent.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:199](AGENT-TOOLS.md)
 - `STUDIO_FAILS_BEFORE_TIMEOUT_MS` · default `120000` · qa/fails-before.mjs, qa/selftest-2584a.mjs · undocumented
 - `STUDIO_FIDELITY_TIMEOUT_MS` · default `60000` · harness/fidelity.mjs · undocumented
 - `STUDIO_FLOW_IDLE_MIN` · default `10` · harness/director-flow.mjs, qa/selftest-230h.mjs, qa/selftest-2583n.mjs (+1 more) · [DIRECTOR-FLOW.md:82](DIRECTOR-FLOW.md)
@@ -1192,7 +1192,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_SOUND_DESIGNER_CMD` · no simple default · qa/selftest.mjs · undocumented
 - `STUDIO_START_BACKOFF_MAX_MIN` · no simple default · harness/supervisor.mjs, qa/selftest-278g.mjs · [RUN-UNATTENDED.md:90](RUN-UNATTENDED.md)
 - `STUDIO_TAKEOVER` · no simple default · harness/agent.mjs, qa/selftest-258d.mjs, qa/selftest-2601n.mjs (+3 more) · undocumented
-- `STUDIO_TARGET_COMMIT` · no simple default · harness/unity-train.mjs, qa/selftest-292a.mjs · [NATIVE-ENGINE.md:754](NATIVE-ENGINE.md)
+- `STUDIO_TARGET_COMMIT` · no simple default · harness/unity-train.mjs, qa/selftest-292a.mjs · [NATIVE-ENGINE.md:758](NATIVE-ENGINE.md)
 - `STUDIO_TELEGRAM_BOT_TOKEN` · no simple default · harness/alerts.mjs, qa/selftest.mjs · [AWAY-AND-ALERTS.md:50](AWAY-AND-ALERTS.md)
 - `STUDIO_TEMP_SWEEP_MIN` · default `5` · harness/watch.mjs, qa/selftest-279a.mjs · [WORK-ORGANIZATION.md:74](WORK-ORGANIZATION.md)
 - `STUDIO_TIMEOUT_RERUN` · no simple default · harness/game-gates.mjs, harness/timeout-rerun.mjs, harness/train.mjs (+3 more) · [WORK-ORGANIZATION.md:92](WORK-ORGANIZATION.md)
@@ -1200,7 +1200,7 @@ The harness sets these in the environment of a command it runs for you (a game s
 - `STUDIO_TWO_GREENS` · no simple default · harness/done-check.mjs, qa/selftest-241.mjs · undocumented
 - `STUDIO_TZ` · no simple default · harness/autonomy.mjs, qa/selftest-267i.mjs, qa/selftest-2731a.mjs (+3 more) · [AUTONOMY.md:62](AUTONOMY.md)
 - `STUDIO_UNSCOPED_PARALLEL` · no simple default · harness/lane-plan.mjs, harness/supervisor.mjs, qa/selftest-2781a.mjs (+1 more) · [LINE-PRODUCER.md:57](LINE-PRODUCER.md)
-- `STUDIO_USAGE_WINDDOWN_PCT` · no simple default · harness/api-pool.mjs, harness/supervisor.mjs, harness/winddown.mjs (+4 more) · [AGENT-TOOLS.md:209](AGENT-TOOLS.md)
+- `STUDIO_USAGE_WINDDOWN_PCT` · no simple default · harness/api-pool.mjs, harness/supervisor.mjs, harness/winddown.mjs (+4 more) · [AGENT-TOOLS.md:233](AGENT-TOOLS.md)
 - `STUDIO_WAKE_SAME_MAX_H` · no simple default · harness/queue-depth.mjs, harness/wake-gate.mjs, qa/selftest-284a.mjs · [LINE-PRODUCER.md:69](LINE-PRODUCER.md)
 - `STUDIO_WATCH_INTERVAL` · default `300` · harness/studio-passes.mjs, qa/selftest-2731b.mjs, qa/selftest-276k.mjs (+7 more) · [PACE-AND-AGENTS.md:163](PACE-AND-AGENTS.md)
 - `STUDIO_WEAKENED_TESTS` · no simple default · harness/gate-trust.mjs, harness/task.mjs, harness/test-weakening.mjs (+15 more) · [CONTRACTS.md:66](CONTRACTS.md)
