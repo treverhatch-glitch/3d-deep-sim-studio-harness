@@ -33,7 +33,7 @@ delete process.env.STUDIO_TASK_PIN;
 // The self-test never reads the live studio: every copy starts from the template's board and an
 // empty pre-production state (qa/fixtures/studio/), whatever game this checkout is building.
 const FIXTURE = path.join(root, 'qa', 'fixtures', 'studio');
-const LIVE_STATE = ['studio/bible/bible.json', 'studio/bible/BIBLE.md', 'studio/bible/NOT-DOING.md', 'studio/bible/REFERENCES.md', 'studio/bible/STORYBOARD.md', 'studio/bible/ideas', 'studio/bible/systems', 'studio/signed', 'studio/data-consent.json', 'studio/mode.json', 'studio/game.json', 'studio/asks', 'studio/art', 'studio/divisions.json', 'studio/task-holds.json', 'studio/budget.json', 'studio/playtest', 'studio/proof', 'studio/assets', 'studio/decisions/divisions.md', 'studio/intake-answers.json', 'studio/PITFALLS.md', 'studio/PITFALLS-ARCHIVE.md'];
+const LIVE_STATE = ['studio/bible/bible.json', 'studio/bible/BIBLE.md', 'studio/bible/NOT-DOING.md', 'studio/bible/REFERENCES.md', 'studio/bible/STORYBOARD.md', 'studio/bible/ideas', 'studio/bible/systems', 'studio/signed', 'studio/data-consent.json', 'studio/mode.json', 'studio/game.json', 'studio/asks', 'studio/art', 'studio/divisions.json', 'studio/task-holds.json', 'studio/budget.json', 'studio/playtest', 'studio/proof', 'studio/assets', 'studio/intake-answers.json', 'studio/PITFALLS.md', 'studio/PITFALLS-ARCHIVE.md'];
 // A game's own folders. In a studio building a game, the copy takes these from the harness release this
 // clone last merged (git merge-base HEAD origin/main), never from the live game: run #1's selftest
 // failed on a real studio because its divisions, references, assets, goldens and logs leaked in.
@@ -137,7 +137,7 @@ const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readF
 // (Windows), the open Unity editor count and the disk budget (no new lane copy or engine worktree) switched off, so a
 // busy test machine doesn't change results (qa/selftest-259d.mjs, -2601m.mjs, -286f.mjs test them with their own
 // settings). No playable build + clip worker after a test train's landing (qa/selftest-270t.mjs turns it on).
-const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_DISK_MIN_FREE_GB: '0', STUDIO_USAGE_FUNCTIONS: 'off', STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
+const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_DISK_MIN_FREE_GB: '0', STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
   // 2.73.0 (g): the copies' verify keys (harness/verify-key.mjs) live in the self-test's temp folder, never in the user's home.
   STUDIO_VERIFY_KEY_DIR: path.join(tmpRoot, 'verify-keys') };
 // Per-unit counters for --timing (harness/selftest-timing.mjs): subprocesses started and checks reported.
@@ -1133,13 +1133,11 @@ if (inShard()) {
   report('npm run budget shows tokens used against the week\'s target', /codex: [\d,]+ tokens in the last 5 h, [\d,]+ this week, cache reads counted at [\d.]+x \([\d,]+ read\) \(\d+% of 1,000; target \d+% by now/.test(run(dir, 'node harness/budget.mjs', env).stdout), run(dir, 'node harness/budget.mjs', env).stdout);
 }
 
-// Hiring into departments: role cards for the department roles, a division that opens with a reason.
+// Hiring into departments: role cards for the department roles, an agent hired into a division opens it.
 if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1' };
   report('the missing department roles have role cards', ['sound-designer', 'composer', 'artist', 'art-director'].every((r) => fs.existsSync(path.join(dir, `studio/roles/${r}.md`))));
-  const op = run(dir, 'node harness/division.mjs open devlog --reason "the game needs a devlog" --by hatch', env);
-  report('a division opens with a reason, logged', op.status === 0 && /Devlog is open/.test(op.stdout) && /opened Devlog: the game needs a devlog/.test(fs.readFileSync(path.join(dir, 'studio/decisions/divisions.md'), 'utf8')), op.stdout + op.stderr);
   // Hiring: into a division, seated there whatever its name; paused hands the task back.
   const tid = JSON.parse(run(dir, 'node harness/task.mjs add "Footstep sounds for floor one" --role sound-designer', env).stdout).id;
   const henv = { ...env, STUDIO_SOUND_DESIGNER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' };
@@ -3279,14 +3277,6 @@ if (inShard('selftest-248')) {
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
-// 2.49.0 (U-004): npm run logs (qa/selftest-249.mjs).
-if (inShard('selftest-249')) {
-  const dir = copyRepo();
-  const { selftest249 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-249.mjs')).href);
-  await selftest249({ dir, run, report, tmpRoot });
-  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
-}
-
 // 2.50.0 (U-006): parity seeds for a Vite game's test runner (qa/selftest-250.mjs).
 if (inShard('selftest-250')) {
   const dir = copyRepo();
@@ -5270,14 +5260,6 @@ if (inShard('selftest-288a')) {
   const dir = copyRepo();
   const { selftest288A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-288a.mjs')).href);
   await selftest288A({ dir, run, report, tmpRoot, root });
-  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
-}
-
-// 2.89 (a): which functions a studio runs (harness/usage-functions.mjs) and its page.
-if (inShard('selftest-289a')) {
-  const dir = copyRepo();
-  const { selftest289A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-289a.mjs')).href);
-  await selftest289A({ dir, report, tmpRoot, root, copyRepo });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

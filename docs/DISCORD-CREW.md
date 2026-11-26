@@ -39,8 +39,7 @@ the proposed list. Four planners would mean four plans.
    does. So a hand-off from one bot to another goes through a person (or the task queue), never bot-to-bot.
 2. Every bot reacts 👀 the moment it sees a task meant for it, and ✅ on the same message when it is finished, then
    posts its result (what changed, the link, the proof, anything UNTESTED).
-3. Status goes out once an hour, from Ops only: `npm run harness-health -- --brief` (five lines), plus
-   `npm run logs -- --brief` (three lines: tasks logged, open problems, proposals waiting for the owner).
+3. Status goes out once an hour, from Ops only: `npm run harness-health -- --brief` (five lines).
 4. No logs or diffs in the chat: a task id, a file path or a link.
 5. "Needs you" items go to the owner once, as one message each, with the command that settles it.
 6. A bot that is asked something outside its role passes it to the bot that owns it, by mention.

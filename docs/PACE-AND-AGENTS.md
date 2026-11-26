@@ -106,9 +106,6 @@ can do the same with the same commands. The Director doesn't hire: it files corr
 acts on them.
 
 ```bash
-npm run division                                    # every department, on or off, and its roles
-npm run division -- open sound --reason "floor one needs footsteps" --by producer-1
-npm run division -- close sound --reason "done for phase 1" --by producer-1
 npm run agent -- hire --role sound-designer --division sound --next --by producer-1 \
   [--open] [--note "keep it subtle"] [--loop until-empty|3] [--lane public/audio]
 npm run agent -- pause audio-1 --note "wrong floor"  # stops it and hands its task back with the note
@@ -120,7 +117,6 @@ npm run agent -- logs audio-1                        # its output so far
   - `--division` puts the agent in that department whatever its name, and `--open` opens it if it's closed.
   - `--note` goes into its prompt as "Note from producer-1: …".
   - `--loop` keeps it taking tasks until the queue is empty, or for N tasks.
-- Opening or closing a department needs a reason. Reasons are logged in `studio/decisions/divisions.md`.
 - **The Producer's limit:** it hires on its own up to `producerMayHireUpTo` running agents (in `studio/budget.json`;
   the default is 4). Past that, the hire becomes a "Needs you" question. Saying yes starts the agent.
 - **Refused:**

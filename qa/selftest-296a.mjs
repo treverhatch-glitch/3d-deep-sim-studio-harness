@@ -24,7 +24,7 @@ export async function selftest296A({ dir, report, tmpRoot }) {
   const base = {
     ...clean, ...ident, STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VERIFY_DETACH: 'off', STUDIO_HOOKS_CHECK: 'off',
     STUDIO_MACHINE_SCAN: 'off', STUDIO_RAM_FLOOR_GB: '3', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_CPU_PROBE: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_REACHABILITY: 'off',
-    STUDIO_HEAVY_POLL_MS: '100', STUDIO_UNITY_EDITMODE_PLAN: 'off', STUDIO_USAGE_FUNCTIONS: 'off',
+    STUDIO_HEAVY_POLL_MS: '100', STUDIO_UNITY_EDITMODE_PLAN: 'off',
     STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-296a-${process.pid}.pem`), CI: '', GITHUB_ACTIONS: '', NODE_OPTIONS: '', npm_lifecycle_event: '',
   };
   const S = path.join(tmpRoot, `296a-studio-${process.pid}`);

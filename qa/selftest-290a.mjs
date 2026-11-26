@@ -31,7 +31,7 @@ export async function selftest290A({ dir, report, tmpRoot }) {
   fs.writeFileSync(evFile, '');
   const env = {
     ...clean, ...ident, AGENT_EVENTS_FILE: evFile, STUDIO_MAIN_ROOT: S, STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_WATCHDOG: 'off',
-    STUDIO_HOOKS_CHECK: 'off', STUDIO_USAGE_FUNCTIONS: 'off', STUDIO_DISK_MIN_FREE_GB: '0', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-290a-${process.pid}.pem`), CI: '', GITHUB_ACTIONS: '', NODE_OPTIONS: '',
+    STUDIO_HOOKS_CHECK: 'off', STUDIO_DISK_MIN_FREE_GB: '0', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-290a-${process.pid}.pem`), CI: '', GITHUB_ACTIONS: '', NODE_OPTIONS: '',
   };
   const node = (args) => spawnSync(process.execPath, args, { windowsHide: true, cwd: S, env, encoding: 'utf8', timeout: 180000 });
   const task = (...a) => node(['harness/task.mjs', ...a]);
